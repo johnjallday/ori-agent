@@ -86,6 +86,7 @@
     launcherRefreshBtn: document.getElementById('launcherRefreshBtn'),
     launcherSelectModeBtn: document.getElementById('launcherSelectModeBtn'),
     launcherGroupSelectedBtn: document.getElementById('launcherGroupSelectedBtn'),
+    launcherDeleteSelectedBtn: document.getElementById('launcherDeleteSelectedBtn'),
     launcherCancelSelectionBtn: document.getElementById('launcherCancelSelectionBtn'),
     launcherSelectionCount: document.getElementById('launcherSelectionCount'),
     launcherGroupModal: document.getElementById('launcherGroupModal'),
@@ -237,7 +238,7 @@
       ` : '';
 
       return `
-        <button class="launcher-card-item" data-workspace-id="${escapeHtml(row.id)}" data-select-mode="${selectionMode ? '1' : '0'}" ${accentStyle}>
+        <button class="launcher-card-item" draggable="true" data-workspace-id="${escapeHtml(row.id)}" data-select-mode="${selectionMode ? '1' : '0'}" ${accentStyle}>
           ${checkbox}
           <div class="launcher-card-title">${escapeHtml(row.name || 'Untitled Workspace')}</div>
           <div class="launcher-card-path">${pathText}</div>
@@ -264,7 +265,7 @@
       `;
 
       const groupHeader = `
-        <button class="launcher-card-item launcher-group-header" data-workspace-id="${escapeHtml(row.id)}" data-select-mode="${selectionMode ? '1' : '0'}">
+        <button class="launcher-card-item launcher-group-header" draggable="true" data-workspace-id="${escapeHtml(row.id)}" data-select-mode="${selectionMode ? '1' : '0'}">
           ${selectionMode ? `
             <label class="launcher-card-checkbox" aria-label="Select workspace ${escapeHtml(row.name || row.id)}">
               <input type="checkbox" data-workspace-checkbox="${escapeHtml(row.id)}" ${selectedSet.has(row.id) ? 'checked' : ''} />
@@ -339,6 +340,80 @@
     });
 
     updateLauncherSelectionUI();
+    bindLauncherDragEvents();
+  }
+
+  function bindLauncherDragEvents() {
+    const items = elements.launcherGrid.querySelectorAll('.launcher-card-item');
+    items.forEach(item => {
+      item.addEventListener('dragstart', (e) => {
+        // Only allow dragging if NOT in selection mode
+        const state = window.WorkspaceHubState.getState();
+        if (state.launcherSelectionMode) {
+          e.preventDefault();
+          return;
+        }
+        e.dataTransfer.setData('text/plain', e.currentTarget.dataset.workspaceId);
+        e.currentTarget.classList.add('is-dragging');
+        e.dataTransfer.effectAllowed = 'move';
+      });
+
+      item.addEventListener('dragend', (e) => {
+        e.currentTarget.classList.remove('is-dragging');
+        // Clean up any remaining drag-over classes
+        items.forEach(i => i.classList.remove('is-drag-over'));
+      });
+
+      item.addEventListener('dragover', (e) => {
+        e.preventDefault(); // Allow drop
+        const draggedId = document.querySelector('.launcher-card-item.is-dragging')?.dataset.workspaceId;
+        const targetId = e.currentTarget.dataset.workspaceId;
+        
+        // Don't highlight if dragging over itself
+        if (draggedId === targetId) return;
+        
+        e.dataTransfer.dropEffect = 'move';
+        e.currentTarget.classList.add('is-drag-over');
+      });
+
+      item.addEventListener('dragleave', (e) => {
+        e.currentTarget.classList.remove('is-drag-over');
+      });
+
+      item.addEventListener('drop', (e) => {
+        e.preventDefault();
+        e.currentTarget.classList.remove('is-drag-over');
+        
+        const draggedId = e.dataTransfer.getData('text/plain');
+        const targetId = e.currentTarget.dataset.workspaceId;
+
+        if (draggedId && targetId && draggedId !== targetId) {
+          moveWorkspace(draggedId, targetId);
+        }
+      });
+    });
+  }
+
+  async function moveWorkspace(workspaceId, parentId) {
+    // Optimistic UI update could go here, but for now we'll just wait for reload
+    try {
+      const response = await fetch(`/api/workspaces/${encodeURIComponent(workspaceId)}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ parent_id: parentId })
+      });
+
+      if (!response.ok) {
+        const text = await response.text();
+        throw new Error(text || 'Failed to move workspace');
+      }
+
+      if (window.Toast) window.Toast.success('Workspace moved');
+      await loadWorkspaces();
+    } catch (err) {
+      console.error('Failed to move workspace:', err);
+      if (window.Toast) window.Toast.error('Failed to move workspace: ' + err.message);
+    }
   }
 
   function toggleGroupCollapsed(workspaceId) {
@@ -385,6 +460,16 @@
     else next.delete(workspaceId);
 
     state.selectedWorkspaces = next;
+
+    // Visual update
+    const card = elements.launcherGrid.querySelector(`.launcher-card-item[data-workspace-id="${workspaceId}"]`);
+    if (card) {
+      const checkbox = card.querySelector('input[type="checkbox"]');
+      if (checkbox) {
+        checkbox.checked = shouldSelect;
+      }
+    }
+
     updateLauncherSelectionUI();
   }
 
@@ -398,6 +483,40 @@
 
     if (elements.launcherGroupSelectedBtn) {
       elements.launcherGroupSelectedBtn.disabled = selectedCount === 0;
+    }
+    if (elements.launcherDeleteSelectedBtn) {
+      elements.launcherDeleteSelectedBtn.disabled = selectedCount === 0;
+    }
+  }
+
+  async function deleteSelectedWorkspaces() {
+    const state = window.WorkspaceHubState.getState();
+    const selected = Array.from(state.selectedWorkspaces || []);
+    if (selected.length === 0) return;
+
+    if (!confirm(`Are you sure you want to delete ${selected.length} workspace(s)? This action cannot be undone.`)) {
+      return;
+    }
+
+    try {
+      const deletePromises = selected.map((id) =>
+        fetch(`/api/workspaces/${encodeURIComponent(id)}`, { method: 'DELETE' })
+      );
+
+      const results = await Promise.all(deletePromises);
+      const failed = results.find((r) => !r.ok);
+
+      if (failed) {
+        throw new Error('Failed to delete one or more workspaces');
+      }
+
+      if (window.Toast) window.Toast.success('Workspaces deleted');
+
+      setLauncherSelectionMode(false);
+      await loadWorkspaces();
+    } catch (err) {
+      console.error('Failed to delete workspaces:', err);
+      if (window.Toast) window.Toast.error('Failed to delete workspaces');
     }
   }
 
@@ -1006,6 +1125,10 @@
 
     if (elements.launcherCreateGroupBtn) {
       elements.launcherCreateGroupBtn.addEventListener('click', () => createGroupFromSelection());
+    }
+
+    if (elements.launcherDeleteSelectedBtn) {
+      elements.launcherDeleteSelectedBtn.addEventListener('click', () => deleteSelectedWorkspaces());
     }
 
     if (elements.newSessionBtn) {
