@@ -382,6 +382,14 @@ func (s *Server) servePlugins(w http.ResponseWriter, r *http.Request) {
 	s.renderAndWritePage(w, "plugins", data)
 }
 
+func (s *Server) serveSkills(w http.ResponseWriter, r *http.Request) {
+	data := s.prepareBasePageData("skills")
+	data.Title = "Skills - Ori Agent"
+	data.BrandText = "Ori Agent"
+	data.ShowSidebarToggle = true
+	s.renderAndWritePage(w, "skills", data)
+}
+
 func (s *Server) serveModels(w http.ResponseWriter, r *http.Request) {
 	data := s.prepareBasePageData("models")
 	data.ShowSidebarToggle = true

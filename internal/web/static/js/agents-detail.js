@@ -371,6 +371,9 @@ function renderAgentDetails() {
   // MCP Servers
   renderMCPServers();
 
+  // Skills
+  renderSkills();
+
   // Show content
   const header = document.getElementById('agentHeader');
   if (header) header.style.display = 'flex';
@@ -857,6 +860,59 @@ function renderTags() {
     tagEl.textContent = tag;
     container.appendChild(tagEl);
   });
+}
+
+// Render skills list
+async function renderSkills() {
+  const section = document.getElementById('skillsSection');
+  const container = document.getElementById('skillsList');
+  if (!section || !container) return;
+
+  const name = currentAgent?.name || agentName;
+  if (!name) {
+    section.style.display = 'none';
+    return;
+  }
+
+  section.style.display = 'block';
+  container.innerHTML = '<div class="text-center py-3" style="color: var(--text-secondary);">Loading skills...</div>';
+
+  try {
+    const response = await fetch(`/api/skills?agent=${encodeURIComponent(name)}`);
+    if (!response.ok) {
+      throw new Error('Failed to load skills');
+    }
+    const data = await response.json();
+    const skills = Array.isArray(data.skills) ? data.skills : [];
+
+    if (skills.length === 0) {
+      container.innerHTML = '<div class="text-center py-3" style="color: var(--text-secondary);">No skills available for this agent.</div>';
+      return;
+    }
+
+    skills.sort((a, b) => (a.name || '').localeCompare(b.name || '', undefined, { sensitivity: 'base' }));
+
+    container.innerHTML = '';
+    skills.forEach(skill => {
+      const skillName = skill?.name || '(unnamed skill)';
+      const source = skill?.source || 'local';
+      const description = skill?.description || 'No description';
+
+      const item = document.createElement('div');
+      item.style.cssText = 'padding: 12px; border: 1px solid var(--border-color); border-radius: 8px; background: var(--bg-secondary);';
+      item.innerHTML = `
+        <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
+          <div style="font-weight: 600; color: var(--text-primary);">${escapeHtml(skillName)}</div>
+          <span style="font-size: 10px; padding: 2px 6px; border-radius: 4px; background: var(--bg-tertiary); color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.3px;">${escapeHtml(source)}</span>
+        </div>
+        <div style="font-size: 12px; color: var(--text-secondary); margin-top: 6px;">${escapeHtml(description)}</div>
+      `;
+      container.appendChild(item);
+    });
+  } catch (error) {
+    console.error('Failed to load skills:', error);
+    container.innerHTML = '<div class="text-center py-3" style="color: var(--danger-color);">Failed to load skills.</div>';
+  }
 }
 
 function openUploadPluginModal() {

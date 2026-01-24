@@ -1,0 +1,79 @@
+{{define "skills"}}
+<!DOCTYPE html>
+<html data-bs-theme="light">
+{{template "head.tmpl" .}}
+
+<body class="bg-light">
+  <!-- Navigation -->
+  {{template "navbar.tmpl" .}}
+
+  <div class="main-content-wrapper" id="skillsPage" data-current-agent="{{.CurrentAgent}}">
+    {{template "sidebar.tmpl" .}}
+
+    <!-- Main Content -->
+    <div class="main-content">
+      <div class="container-fluid py-4">
+        <div class="modern-card p-4 mb-4">
+          <div class="d-flex justify-content-between align-items-start flex-wrap gap-3">
+            <div>
+              <h2 class="mb-2" style="color: var(--text-primary);">
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor" class="me-2" style="vertical-align: text-bottom;">
+                  <path d="M7,2V13H10V22L17,10H13L17,2H7Z"/>
+                </svg>
+                Skills
+              </h2>
+              <p class="mb-0" style="color: var(--text-secondary);">Browse skills available to your agents</p>
+            </div>
+            <div class="d-flex align-items-center gap-2 flex-wrap">
+              <select id="skillsAgentSelect" class="form-select form-select-sm" style="min-width: 200px; background: var(--bg-secondary); border: 1px solid var(--border-color); color: var(--text-primary);">
+                <option value="">Current Agent</option>
+              </select>
+              <input id="skillsSearch" type="text" class="form-control form-control-sm" placeholder="Search skills..." style="min-width: 200px; background: var(--bg-secondary); border: 1px solid var(--border-color); color: var(--text-primary);">
+              <button id="skillsRefreshBtn" class="modern-btn modern-btn-secondary btn-sm">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" class="me-1">
+                  <path d="M17.65,6.35C16.2,4.9 14.21,4 12,4A8,8 0 0,0 4,12A8,8 0 0,0 12,20C15.73,20 18.84,17.45 19.73,14H17.65C16.83,16.33 14.61,18 12,18A6,6 0 0,1 6,12A6,6 0 0,1 12,6C13.66,6 15.14,6.69 16.22,7.78L13,11H20V4L17.65,6.35Z"/>
+                </svg>
+                Refresh
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <div class="modern-card p-4">
+          <div class="d-flex justify-content-between align-items-center mb-3">
+            <h5 class="mb-0" style="color: var(--text-primary);">Available Skills</h5>
+            <span id="skillsCount" class="badge bg-secondary" style="font-size: 12px;">0</span>
+          </div>
+          <div id="skillsList" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px;">
+            <div class="text-center py-3" style="color: var(--text-secondary);">Loading skills...</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Shared Modals (Add Agent, Marketplace, etc.) -->
+  {{template "modals.tmpl" .}}
+
+  <!-- Scripts -->
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+  <!-- Theme Manager - must load before other modules -->
+  <script src="/js/modules/themeManager.js"></script>
+  <!-- DX Utilities - must load before modules that use them -->
+  <script src="/js/utils/logger.js"></script>
+  <script src="/js/utils/event-bus.js"></script>
+  <script src="/js/utils/api-client.js"></script>
+  <script src="/js/utils/dom-utils.js"></script>
+  <script src="/js/modules/toast.js"></script>
+  <script src="/js/modules/resizer.js"></script>
+  <script src="/js/modules/agents.js"></script>
+  <script src="/js/modules/sidebar.js"></script>
+  <script src="/js/skills.js"></script>
+  <script>
+    document.addEventListener('DOMContentLoaded', function() {
+      themeManager.initialize();
+    });
+  </script>
+</body>
+</html>
+{{end}}

@@ -36,6 +36,7 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 	mux.HandleFunc("/settings", s.serveSettings)
 	mux.HandleFunc("/marketplace", s.serveMarketplace)
 	mux.HandleFunc("/plugins", s.servePlugins)
+	mux.HandleFunc("/skills", s.serveSkills)
 	mux.HandleFunc("/workflows", s.serveWorkflows)
 	mux.HandleFunc("/mcp", s.serveMCP)
 	mux.HandleFunc("/models", s.serveModels)
