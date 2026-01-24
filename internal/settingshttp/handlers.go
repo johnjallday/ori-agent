@@ -550,3 +550,35 @@ func (h *Handler) SystemPathsHandler(w http.ResponseWriter, r *http.Request) {
 		HomeDir:          homeDir,
 	})
 }
+
+// ExternalAgentsSettingsHandler handles external agents enabled setting
+func (h *Handler) ExternalAgentsSettingsHandler(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodGet:
+		orihttp.WriteJSON(w, map[string]bool{
+			"enabled": h.configManager.GetExternalAgentsEnabled(),
+		})
+
+	case http.MethodPost:
+		var req struct {
+			Enabled bool `json:"enabled"`
+		}
+		if !orihttp.ParseJSONBody(w, r, &req) {
+			return
+		}
+
+		h.configManager.SetExternalAgentsEnabled(req.Enabled)
+
+		if err := h.configManager.Save(); err != nil {
+			orihttp.InternalError(w, err.Error())
+			return
+		}
+
+		orihttp.WriteJSON(w, map[string]bool{
+			"enabled": req.Enabled,
+		})
+
+	default:
+		w.WriteHeader(http.StatusMethodNotAllowed)
+	}
+}

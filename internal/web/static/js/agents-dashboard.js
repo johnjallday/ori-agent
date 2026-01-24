@@ -22,9 +22,36 @@ async function loadExternalAgents() {
     if (typeof ExternalAgents !== 'undefined') {
       externalAgentsData = await ExternalAgents.fetchExternalAgents();
       updateExternalAgentsCounts();
+      updateExternalAgentsUI();
     }
   } catch (error) {
     console.error('Error loading external agents:', error);
+  }
+}
+
+// Update UI based on whether external agents are enabled
+function updateExternalAgentsUI() {
+  const isEnabled = typeof ExternalAgents !== 'undefined' && ExternalAgents.isExternalAgentsEnabled();
+  const claudeTab = document.querySelector('[data-filter="claude"]');
+  const codexTab = document.querySelector('[data-filter="codex"]');
+  const refreshBtn = document.getElementById('refreshExternalBtn');
+  const disabledBanner = document.getElementById('externalAgentsDisabledBanner');
+
+  if (claudeTab) {
+    claudeTab.style.opacity = isEnabled ? '1' : '0.5';
+    claudeTab.title = isEnabled ? '' : 'Enable in Settings to view external agents';
+  }
+  if (codexTab) {
+    codexTab.style.opacity = isEnabled ? '1' : '0.5';
+    codexTab.title = isEnabled ? '' : 'Enable in Settings to view external agents';
+  }
+  if (refreshBtn) {
+    refreshBtn.style.display = isEnabled ? '' : 'none';
+  }
+
+  // Show/hide disabled banner
+  if (disabledBanner) {
+    disabledBanner.style.display = isEnabled ? 'none' : '';
   }
 }
 

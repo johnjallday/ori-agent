@@ -8,10 +8,11 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/johnjallday/ori-agent/internal/config"
 	"github.com/johnjallday/ori-agent/internal/externalagents"
 )
 
-func setupTestCache(t *testing.T) (*externalagents.Cache, string) {
+func setupTestCache(t *testing.T) (*externalagents.Cache, *config.Manager, string) {
 	tmpDir := t.TempDir()
 
 	// Create Claude test data
@@ -54,12 +55,17 @@ model_reasoning_effort = "high"
 		t.Fatal(err)
 	}
 
-	return cache, tmpDir
+	// Create config manager with external agents enabled
+	configManager := config.NewManager(filepath.Join(tmpDir, "settings.json"))
+	configManager.Load()
+	configManager.SetExternalAgentsEnabled(true)
+
+	return cache, configManager, tmpDir
 }
 
 func TestGetAll(t *testing.T) {
-	cache, _ := setupTestCache(t)
-	handler := New(cache)
+	cache, configManager, _ := setupTestCache(t)
+	handler := New(cache, configManager)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/external-agents", nil)
 	w := httptest.NewRecorder()
@@ -70,11 +76,18 @@ func TestGetAll(t *testing.T) {
 		t.Errorf("expected status 200, got %d", w.Code)
 	}
 
-	var data externalagents.ExternalAgentsData
+	var data struct {
+		Enabled bool                       `json:"enabled"`
+		Claude  *externalagents.ClaudeData `json:"claude"`
+		Codex   *externalagents.CodexData  `json:"codex"`
+	}
 	if err := json.NewDecoder(w.Body).Decode(&data); err != nil {
 		t.Fatalf("failed to decode response: %v", err)
 	}
 
+	if !data.Enabled {
+		t.Error("enabled should be true")
+	}
 	if data.Claude == nil {
 		t.Error("Claude data should not be nil")
 	}
@@ -90,8 +103,8 @@ func TestGetAll(t *testing.T) {
 }
 
 func TestGetAll_MethodNotAllowed(t *testing.T) {
-	cache, _ := setupTestCache(t)
-	handler := New(cache)
+	cache, configManager, _ := setupTestCache(t)
+	handler := New(cache, configManager)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/external-agents", nil)
 	w := httptest.NewRecorder()
@@ -104,8 +117,8 @@ func TestGetAll_MethodNotAllowed(t *testing.T) {
 }
 
 func TestGetClaude(t *testing.T) {
-	cache, _ := setupTestCache(t)
-	handler := New(cache)
+	cache, configManager, _ := setupTestCache(t)
+	handler := New(cache, configManager)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/external-agents/claude", nil)
 	w := httptest.NewRecorder()
@@ -130,8 +143,8 @@ func TestGetClaude(t *testing.T) {
 }
 
 func TestGetCodex(t *testing.T) {
-	cache, _ := setupTestCache(t)
-	handler := New(cache)
+	cache, configManager, _ := setupTestCache(t)
+	handler := New(cache, configManager)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/external-agents/codex", nil)
 	w := httptest.NewRecorder()
@@ -156,8 +169,8 @@ func TestGetCodex(t *testing.T) {
 }
 
 func TestRefresh(t *testing.T) {
-	cache, tmpDir := setupTestCache(t)
-	handler := New(cache)
+	cache, configManager, tmpDir := setupTestCache(t)
+	handler := New(cache, configManager)
 
 	// Verify initial state
 	agents := cache.GetClaudeAgents()
@@ -198,8 +211,8 @@ New agent prompt.
 }
 
 func TestRefresh_MethodNotAllowed(t *testing.T) {
-	cache, _ := setupTestCache(t)
-	handler := New(cache)
+	cache, configManager, _ := setupTestCache(t)
+	handler := New(cache, configManager)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/external-agents/refresh", nil)
 	w := httptest.NewRecorder()
@@ -208,5 +221,35 @@ func TestRefresh_MethodNotAllowed(t *testing.T) {
 
 	if w.Code != http.StatusMethodNotAllowed {
 		t.Errorf("expected status 405, got %d", w.Code)
+	}
+}
+
+func TestGetAll_Disabled(t *testing.T) {
+	cache, configManager, _ := setupTestCache(t)
+	configManager.SetExternalAgentsEnabled(false)
+	handler := New(cache, configManager)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/external-agents", nil)
+	w := httptest.NewRecorder()
+
+	handler.GetAll(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("expected status 200, got %d", w.Code)
+	}
+
+	var data struct {
+		Enabled bool   `json:"enabled"`
+		Message string `json:"message"`
+	}
+	if err := json.NewDecoder(w.Body).Decode(&data); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+
+	if data.Enabled {
+		t.Error("enabled should be false")
+	}
+	if data.Message == "" {
+		t.Error("message should not be empty when disabled")
 	}
 }

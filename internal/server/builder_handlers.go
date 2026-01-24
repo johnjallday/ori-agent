@@ -178,7 +178,7 @@ func (b *ServerBuilder) initializeHandlers() error {
 		logger.Warn("Failed to load external agents cache", logger.Fields{"error": err})
 		// Non-fatal: continue without external agents
 	}
-	s.externalAgentsHandler = externalagentshttp.New(s.externalAgentsCache)
+	s.externalAgentsHandler = externalagentshttp.New(s.externalAgentsCache, s.configManager)
 	logger.Info("External agents support initialized", logger.Fields{})
 
 	return nil

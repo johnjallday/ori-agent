@@ -485,6 +485,39 @@
         background: var(--bg-tertiary);
     }
 
+    /* External Agents Disabled Banner */
+    .external-agents-banner {
+        background: var(--bg-secondary);
+        border: 1px solid var(--border-color);
+        border-radius: 8px;
+        padding: 12px 16px;
+        margin-bottom: 20px;
+    }
+
+    .external-agents-banner .banner-content {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        color: var(--text-secondary);
+        font-size: 14px;
+    }
+
+    .external-agents-banner svg {
+        color: var(--text-secondary);
+        flex-shrink: 0;
+    }
+
+    .external-agents-banner .banner-link {
+        color: var(--accent-color, #007bff);
+        text-decoration: none;
+        font-weight: 500;
+        margin-left: auto;
+    }
+
+    .external-agents-banner .banner-link:hover {
+        text-decoration: underline;
+    }
+
     /* Source Badges */
     .badge {
         display: inline-flex;
@@ -876,6 +909,17 @@
             <button class="source-filter-btn" data-filter="claude">Claude <span class="filter-count" id="claudeAgentCount" style="display:none">0</span></button>
             <button class="source-filter-btn" data-filter="codex">Codex <span class="filter-count" id="codexAgentCount" style="display:none">0</span></button>
             <button class="btn btn-sm btn-outline-secondary ms-auto" id="refreshExternalBtn" onclick="refreshExternalAgents()">Refresh External</button>
+        </div>
+
+        <!-- External Agents Disabled Banner -->
+        <div id="externalAgentsDisabledBanner" class="external-agents-banner" style="display: none;">
+            <div class="banner-content">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+                    <path d="M12,2A10,10 0 0,1 22,12A10,10 0 0,1 12,22A10,10 0 0,1 2,12A10,10 0 0,1 12,2M12,4A8,8 0 0,0 4,12A8,8 0 0,0 12,20A8,8 0 0,0 20,12A8,8 0 0,0 12,4M11,16.5L6.5,12L7.91,10.59L11,13.67L16.59,8.09L18,9.5L11,16.5Z"/>
+                </svg>
+                <span>External agents (Claude Code &amp; Codex) are disabled.</span>
+                <a href="/settings" class="banner-link">Enable in Settings</a>
+            </div>
         </div>
 
         <!-- Controls -->

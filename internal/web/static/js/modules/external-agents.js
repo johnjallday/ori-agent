@@ -3,6 +3,8 @@
 
 const ExternalAgents = (function() {
     let externalData = null;
+    let isEnabled = false;
+    let disabledMessage = '';
     let currentFilter = 'all'; // 'all', 'ori', 'claude', 'codex'
 
     // Fetch all external agents data
@@ -12,13 +14,39 @@ const ExternalAgents = (function() {
             if (!response.ok) {
                 throw new Error('Failed to fetch external agents');
             }
-            externalData = await response.json();
+            const data = await response.json();
+
+            // Check if feature is enabled
+            if (data.enabled === false) {
+                isEnabled = false;
+                disabledMessage = data.message || 'External agents feature is disabled.';
+                externalData = { claude: null, codex: null };
+                return externalData;
+            }
+
+            isEnabled = true;
+            disabledMessage = '';
+            externalData = {
+                claude: data.claude,
+                codex: data.codex
+            };
             return externalData;
         } catch (error) {
             console.error('Error fetching external agents:', error);
+            isEnabled = false;
             externalData = { claude: null, codex: null };
             return externalData;
         }
+    }
+
+    // Check if external agents feature is enabled
+    function isExternalAgentsEnabled() {
+        return isEnabled;
+    }
+
+    // Get disabled message
+    function getDisabledMessage() {
+        return disabledMessage;
     }
 
     // Fetch Claude-specific data
@@ -576,7 +604,9 @@ const ExternalAgents = (function() {
         getClaudeAgents,
         getCodexAgents,
         getClaudeData,
-        getCodexData
+        getCodexData,
+        isExternalAgentsEnabled,
+        getDisabledMessage
     };
 })();
 
