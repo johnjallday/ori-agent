@@ -294,6 +294,17 @@ a:focus-visible {
     font-size: 12px;
 }
 
+.modern-btn-icon {
+    padding: 0.4rem;
+    min-width: unset;
+}
+
+.modern-btn-icon.is-active {
+    background: rgba(59, 130, 246, 0.15);
+    border-color: rgba(59, 130, 246, 0.4);
+    color: #3b82f6;
+}
+
 .modern-btn-lg {
     padding: 0.75rem 1.5rem;
     font-size: 15px;

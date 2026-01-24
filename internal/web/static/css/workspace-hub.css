@@ -24,25 +24,26 @@
 }
 
 .workspace-hub-header .hub-title-text {
-  margin: 0.15rem 0 0.2rem;
+  margin: 0.15rem 0 0;
   font-size: 1.2rem;
   color: var(--text-primary);
 }
 
-.workspace-hub-header .hub-title-subtext {
-  margin: 0;
+.workspace-hub-header .hub-workspace-description {
+  margin-top: 0.35rem;
+  font-size: 0.85rem;
   color: var(--text-secondary);
-  max-width: 480px;
-  font-size: 0.8rem;
-  display: none;
+  font-style: italic;
+  max-width: 360px;
+  line-height: 1.4;
 }
 
 .hub-header-main {
   display: flex;
   justify-content: space-between;
-  gap: 1rem;
+  gap: 1.5rem;
   flex-wrap: wrap;
-  align-items: center;
+  align-items: flex-start;
 }
 
 .hub-header-controls {
@@ -677,27 +678,55 @@
   flex: 1;
 }
 
+/* Select dropdown removed from header; keep layout stable */
+.hub-workspace-select-row {
+  align-items: center;
+}
+
+/* Back button - compact style for returning to launcher */
+.hub-back-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.45rem 0.85rem;
+  border-radius: var(--radius-md, 8px);
+  font-size: 0.8rem;
+  font-weight: 500;
+  white-space: nowrap;
+  transition: all 0.2s ease;
+}
+
+.hub-back-btn:hover {
+  background: rgba(59, 130, 246, 0.15);
+  border-color: rgba(59, 130, 246, 0.4);
+}
+
+.hub-back-btn svg {
+  flex-shrink: 0;
+  transition: transform 0.15s ease;
+}
+
+.hub-back-btn:hover svg {
+  transform: translateX(-2px);
+}
+
+.hub-back-btn-label {
+  display: none;
+}
+
+@media (min-width: 768px) {
+  .hub-back-btn-label {
+    display: inline;
+  }
+}
+
 .hub-workspace-select-row .modern-btn {
   border-radius: var(--radius-md, 8px);
   padding: 0.5rem 1rem;
   white-space: nowrap;
 }
 
-.hub-workspace-meta {
-  margin-top: 0.25rem;
-  font-size: 0.8rem;
-  color: var(--text-secondary);
-  display: none;
-}
-
-.hub-workspace-description {
-  margin-top: 0.35rem;
-  font-size: 0.85rem;
-  color: var(--text-primary);
-  font-style: italic;
-  max-width: 400px;
-  line-height: 1.4;
-}
+/* hub-workspace-description is styled in header scope */
 
 .hub-action-row {
   display: flex;
@@ -1446,13 +1475,147 @@
 .launcher-actions {
   display: flex;
   gap: 0.5rem;
-  flex-wrap: wrap;
+  align-items: center;
+}
+
+.launcher-selection-bar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.5rem 0.75rem;
+  margin-bottom: 0.75rem;
+  background: rgba(59, 130, 246, 0.08);
+  border: 1px solid rgba(59, 130, 246, 0.25);
+  border-radius: var(--radius-md);
+}
+
+.launcher-selection-bar[hidden] {
+  display: none;
+}
+
+.launcher-selection-count {
+  font-size: 0.8rem;
+  font-weight: 500;
+  color: var(--text-primary);
+}
+
+.launcher-selection-actions {
+  display: flex;
+  gap: 0.5rem;
 }
 
 .launcher-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
   gap: 0.75rem;
+  align-items: stretch;
+}
+
+/* Grouped launcher sections */
+.launcher-group {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  grid-column: 1 / -1;
+  background: linear-gradient(180deg, rgba(59, 130, 246, 0.08), rgba(59, 130, 246, 0.02));
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  box-shadow: var(--shadow-sm);
+}
+
+.launcher-group-header {
+  border: none;
+  border-radius: 0;
+  background: rgba(59, 130, 246, 0.08);
+  border-bottom: 1px dashed var(--border-color);
+  padding-right: 3rem;
+}
+
+.launcher-group-header:hover {
+  transform: none;
+  background: rgba(59, 130, 246, 0.14);
+}
+
+.launcher-group-header .launcher-card-title::before {
+  content: '';
+  display: inline-block;
+  width: 14px;
+  height: 14px;
+  margin-right: 6px;
+  background: currentColor;
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M10,4H4C2.89,4 2,4.89 2,6V18A2,2 0 0,0 4,20H20A2,2 0 0,0 22,18V8C22,6.89 21.1,6 20,6H12L10,4Z'/%3E%3C/svg%3E") no-repeat center;
+  mask-size: contain;
+  vertical-align: -2px;
+}
+
+.launcher-group-header .launcher-card-path {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.15rem 0.5rem;
+  border-radius: 999px;
+  background: rgba(59, 130, 246, 0.12);
+  color: var(--text-secondary);
+  font-size: 0.65rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  width: fit-content;
+}
+
+.launcher-group-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 0.65rem;
+  padding: 0.85rem 1rem 1rem;
+  background: transparent;
+  margin: 0 0.75rem 0.75rem;
+  border-left: 2px dashed var(--border-color);
+}
+
+.launcher-group-grid .launcher-card-item {
+  background: var(--bg-primary);
+  box-shadow: var(--shadow-sm);
+}
+
+.launcher-group-toggle {
+  position: absolute;
+  top: 0.75rem;
+  right: 0.75rem;
+  transform: none;
+  width: 26px;
+  height: 26px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px;
+  border: 1px solid var(--border-color);
+  background: var(--bg-secondary);
+  color: var(--text-muted);
+  box-shadow: var(--shadow-sm);
+  transition: all 0.15s ease;
+}
+
+.launcher-group-toggle:hover {
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  border-color: rgba(59, 130, 246, 0.5);
+}
+
+.launcher-group-toggle-icon {
+  transition: transform 0.15s ease;
+}
+
+.launcher-group-toggle.is-collapsed .launcher-group-toggle-icon {
+  transform: rotate(-90deg);
+}
+
+.launcher-group-grid[hidden] {
+  display: none;
+}
+
+.launcher-group.is-collapsed .launcher-group-header {
+  border-bottom: none;
 }
 
 .launcher-card-item {
@@ -1464,12 +1627,72 @@
   display: flex;
   flex-direction: column;
   gap: 0.4rem;
-  transition: border-color 0.2s ease, transform 0.2s ease;
+  box-shadow: var(--shadow-sm);
+  transition: border-color 0.2s ease, transform 0.2s ease, box-shadow 0.2s ease;
+  position: relative;
+}
+
+.launcher-card-item[data-select-mode="1"] {
+  padding-left: 2.4rem;
+}
+
+.launcher-card-checkbox {
+  position: absolute;
+  top: 0.65rem;
+  left: 0.65rem;
+  width: 18px;
+  height: 18px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 2;
+}
+
+.launcher-card-checkbox input {
+  position: absolute;
+  opacity: 0;
+  width: 1px;
+  height: 1px;
+}
+
+.launcher-card-checkmark {
+  width: 18px;
+  height: 18px;
+  border-radius: 5px;
+  border: 1px solid var(--border-color);
+  background: rgba(255, 255, 255, 0.04);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.18);
+  display: inline-block;
+  position: relative;
+}
+
+.launcher-card-checkbox input:focus + .launcher-card-checkmark {
+  outline: none;
+  border-color: var(--accent-primary, #3b82f6);
+  box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.25);
+}
+
+.launcher-card-checkbox input:checked + .launcher-card-checkmark {
+  background: rgba(59, 130, 246, 0.18);
+  border-color: rgba(59, 130, 246, 0.6);
+}
+
+.launcher-card-checkbox input:checked + .launcher-card-checkmark::after {
+  content: '';
+  position: absolute;
+  left: 5px;
+  top: 2px;
+  width: 5px;
+  height: 10px;
+  border: solid #3b82f6;
+  border-width: 0 2px 2px 0;
+  transform: rotate(45deg);
 }
 
 .launcher-card-item:hover {
   border-color: var(--accent-primary, #3b82f6);
   transform: translateY(-2px);
+  box-shadow: var(--shadow-md);
 }
 
 .launcher-card-title {
@@ -1790,6 +2013,30 @@ body.chat-panel-open .chat-panel-backdrop {
 @media (max-width: 768px) {
   .workspace-hub-header {
     padding: 1.25rem;
+  }
+
+  .hub-header-main {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 1rem;
+  }
+
+  .workspace-hub-header .hub-workspace-description {
+    max-width: none;
+  }
+
+  .hub-header-controls {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0.5rem;
+  }
+
+  .hub-workspace-select-row {
+    flex-direction: column;
+  }
+
+  .hub-workspace-select-row select {
+    min-width: 100%;
   }
 
   .hub-smart-input-main {

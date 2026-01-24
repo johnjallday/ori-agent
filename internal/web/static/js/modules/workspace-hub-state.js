@@ -21,6 +21,9 @@
     workspaces: [],
     workspaceMap: new Map(),
     selectedId: null,
+    launcherSelectionMode: false,
+    selectedWorkspaces: new Set(),
+    launcherCollapsedGroups: new Set(),
     tasks: [],
     board: {
       workspaceId: null,
