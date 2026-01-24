@@ -35,7 +35,8 @@ type Settings struct {
 	Web3ConnectedAt   string `json:"web3_connected_at,omitempty"`   // ISO timestamp of when wallet was connected
 
 	// External agents settings
-	ExternalAgentsEnabled bool `json:"external_agents_enabled"` // Enable reading agents from Claude Code and Codex CLI (default: false)
+	ExternalAgentsClaudeEnabled bool `json:"external_agents_claude_enabled"` // Enable reading agents from Claude Code ~/.claude (default: false)
+	ExternalAgentsCodexEnabled  bool `json:"external_agents_codex_enabled"`  // Enable reading agents from Codex CLI ~/.codex (default: false)
 }
 
 // Manager handles configuration loading and saving
@@ -510,18 +511,32 @@ func MaskWeb3Address(address string) string {
 	return address[:6] + "..." + address[len(address)-4:]
 }
 
-// GetExternalAgentsEnabled returns whether external agents reading is enabled
-func (m *Manager) GetExternalAgentsEnabled() bool {
+// GetExternalAgentsClaudeEnabled returns whether Claude Code agents reading is enabled
+func (m *Manager) GetExternalAgentsClaudeEnabled() bool {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	return m.settings.ExternalAgentsEnabled
+	return m.settings.ExternalAgentsClaudeEnabled
 }
 
-// SetExternalAgentsEnabled updates the external agents enabled setting
-func (m *Manager) SetExternalAgentsEnabled(enabled bool) {
+// SetExternalAgentsClaudeEnabled updates the Claude Code agents enabled setting
+func (m *Manager) SetExternalAgentsClaudeEnabled(enabled bool) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.settings.ExternalAgentsEnabled = enabled
+	m.settings.ExternalAgentsClaudeEnabled = enabled
+}
+
+// GetExternalAgentsCodexEnabled returns whether Codex CLI agents reading is enabled
+func (m *Manager) GetExternalAgentsCodexEnabled() bool {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.settings.ExternalAgentsCodexEnabled
+}
+
+// SetExternalAgentsCodexEnabled updates the Codex CLI agents enabled setting
+func (m *Manager) SetExternalAgentsCodexEnabled(enabled bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.settings.ExternalAgentsCodexEnabled = enabled
 }
 
 // validateWeb3Address validates an Ethereum address format

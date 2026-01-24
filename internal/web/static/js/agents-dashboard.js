@@ -31,27 +31,51 @@ async function loadExternalAgents() {
 
 // Update UI based on whether external agents are enabled
 function updateExternalAgentsUI() {
-  const isEnabled = typeof ExternalAgents !== 'undefined' && ExternalAgents.isExternalAgentsEnabled();
+  const claudeEnabled = typeof ExternalAgents !== 'undefined' && ExternalAgents.isClaudeEnabled();
+  const codexEnabled = typeof ExternalAgents !== 'undefined' && ExternalAgents.isCodexEnabled();
+  const anyEnabled = claudeEnabled || codexEnabled;
+
   const claudeTab = document.querySelector('[data-filter="claude"]');
   const codexTab = document.querySelector('[data-filter="codex"]');
   const refreshBtn = document.getElementById('refreshExternalBtn');
   const disabledBanner = document.getElementById('externalAgentsDisabledBanner');
 
+  // Update Claude tab
   if (claudeTab) {
-    claudeTab.style.opacity = isEnabled ? '1' : '0.5';
-    claudeTab.title = isEnabled ? '' : 'Enable in Settings to view external agents';
-  }
-  if (codexTab) {
-    codexTab.style.opacity = isEnabled ? '1' : '0.5';
-    codexTab.title = isEnabled ? '' : 'Enable in Settings to view external agents';
-  }
-  if (refreshBtn) {
-    refreshBtn.style.display = isEnabled ? '' : 'none';
+    claudeTab.style.opacity = claudeEnabled ? '1' : '0.5';
+    claudeTab.title = claudeEnabled ? '' : 'Enable Claude Code agents in Settings';
   }
 
-  // Show/hide disabled banner
+  // Update Codex tab
+  if (codexTab) {
+    codexTab.style.opacity = codexEnabled ? '1' : '0.5';
+    codexTab.title = codexEnabled ? '' : 'Enable Codex CLI agents in Settings';
+  }
+
+  // Show refresh button if any source is enabled
+  if (refreshBtn) {
+    refreshBtn.style.display = anyEnabled ? '' : 'none';
+  }
+
+  // Update disabled banner message
   if (disabledBanner) {
-    disabledBanner.style.display = isEnabled ? 'none' : '';
+    if (!anyEnabled) {
+      disabledBanner.style.display = '';
+      const bannerMessage = disabledBanner.querySelector('.banner-message');
+      if (bannerMessage) {
+        bannerMessage.textContent = 'External agents are disabled. Enable Claude Code or Codex CLI in Settings to view agents.';
+      }
+    } else if (!claudeEnabled || !codexEnabled) {
+      // Show partial banner if only one is disabled
+      disabledBanner.style.display = '';
+      const bannerMessage = disabledBanner.querySelector('.banner-message');
+      if (bannerMessage) {
+        const disabled = !claudeEnabled ? 'Claude Code' : 'Codex CLI';
+        bannerMessage.textContent = `${disabled} agents are disabled. Enable in Settings to view.`;
+      }
+    } else {
+      disabledBanner.style.display = 'none';
+    }
   }
 }
 

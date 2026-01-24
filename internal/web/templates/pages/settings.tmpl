@@ -510,18 +510,43 @@
 
           <div class="mb-3">
             <p style="color: var(--text-secondary); font-size: 0.9rem;">
-              Enable this to view agents from Claude Code (~/.claude) and Codex CLI (~/.codex) in the Agents dashboard. This feature reads configuration files from these directories in read-only mode.
+              View agents from external AI CLI tools in the Agents dashboard. These features read configuration files in read-only mode.
             </p>
           </div>
 
-          <!-- Toggle Switch -->
-          <div class="d-flex align-items-center justify-content-between p-3 mb-3" style="background: var(--bg-secondary); border-radius: var(--radius-md);">
-            <div>
-              <div class="fw-semibold" style="color: var(--text-primary);">Enable External Agents</div>
-              <div style="color: var(--text-secondary); font-size: 0.85rem;">View agents from Claude Code and Codex CLI</div>
+          <!-- Claude Code Toggle -->
+          <div class="d-flex align-items-center justify-content-between p-3 mb-2" style="background: var(--bg-secondary); border-radius: var(--radius-md);">
+            <div class="d-flex align-items-center gap-3">
+              <div style="width: 36px; height: 36px; background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%); border-radius: 8px; display: flex; align-items: center; justify-content: center;">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="white">
+                  <path d="M12,2A10,10 0 0,1 22,12A10,10 0 0,1 12,22A10,10 0 0,1 2,12A10,10 0 0,1 12,2M12,4A8,8 0 0,0 4,12A8,8 0 0,0 12,20A8,8 0 0,0 20,12A8,8 0 0,0 12,4M11,16.5L6.5,12L7.91,10.59L11,13.67L16.59,8.09L18,9.5L11,16.5Z"/>
+                </svg>
+              </div>
+              <div>
+                <div class="fw-semibold" style="color: var(--text-primary);">Claude Code</div>
+                <div style="color: var(--text-secondary); font-size: 0.85rem;">Read agents from ~/.claude/agents/</div>
+              </div>
             </div>
             <div class="form-check form-switch">
-              <input class="form-check-input" type="checkbox" role="switch" id="externalAgentsToggle" style="width: 3rem; height: 1.5rem;">
+              <input class="form-check-input" type="checkbox" role="switch" id="claudeAgentsToggle" style="width: 3rem; height: 1.5rem;">
+            </div>
+          </div>
+
+          <!-- Codex CLI Toggle -->
+          <div class="d-flex align-items-center justify-content-between p-3 mb-3" style="background: var(--bg-secondary); border-radius: var(--radius-md);">
+            <div class="d-flex align-items-center gap-3">
+              <div style="width: 36px; height: 36px; background: #10a37f; border-radius: 8px; display: flex; align-items: center; justify-content: center;">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="white">
+                  <path d="M22.2819 9.8211a5.9847 5.9847 0 0 0-.5157-4.9108 6.0462 6.0462 0 0 0-6.5098-2.9A6.0651 6.0651 0 0 0 4.9807 4.1818a5.9847 5.9847 0 0 0-3.9977 2.9 6.0462 6.0462 0 0 0 .7427 7.0966 5.98 5.98 0 0 0 .511 4.9107 6.051 6.051 0 0 0 6.5146 2.9001A5.9847 5.9847 0 0 0 13.2599 24a6.0557 6.0557 0 0 0 5.7718-4.2058 5.9894 5.9894 0 0 0 3.9977-2.9001 6.0557 6.0557 0 0 0-.7475-7.0729z"/>
+                </svg>
+              </div>
+              <div>
+                <div class="fw-semibold" style="color: var(--text-primary);">Codex CLI</div>
+                <div style="color: var(--text-secondary); font-size: 0.85rem;">Read skills from ~/.codex/skills/</div>
+              </div>
+            </div>
+            <div class="form-check form-switch">
+              <input class="form-check-input" type="checkbox" role="switch" id="codexAgentsToggle" style="width: 3rem; height: 1.5rem;">
             </div>
           </div>
 
@@ -1006,45 +1031,72 @@
   <script>
     // External Agents Settings
     (function() {
-      const toggle = document.getElementById('externalAgentsToggle');
+      const claudeToggle = document.getElementById('claudeAgentsToggle');
+      const codexToggle = document.getElementById('codexAgentsToggle');
       const status = document.getElementById('externalAgentsStatus');
 
-      // Load current setting
-      async function loadExternalAgentsSetting() {
+      function updateStatusVisibility() {
+        const anyEnabled = claudeToggle.checked || codexToggle.checked;
+        status.classList.toggle('d-none', !anyEnabled);
+      }
+
+      // Load current settings
+      async function loadExternalAgentsSettings() {
         try {
           const response = await fetch('/api/settings/external-agents');
           if (response.ok) {
             const data = await response.json();
-            toggle.checked = data.enabled;
-            status.classList.toggle('d-none', !data.enabled);
+            claudeToggle.checked = data.claude_enabled;
+            codexToggle.checked = data.codex_enabled;
+            updateStatusVisibility();
           }
         } catch (error) {
-          console.error('Failed to load external agents setting:', error);
+          console.error('Failed to load external agents settings:', error);
         }
       }
 
-      // Save setting on toggle change
-      toggle.addEventListener('change', async function() {
+      // Save Claude setting on toggle change
+      claudeToggle.addEventListener('change', async function() {
         try {
           const response = await fetch('/api/settings/external-agents', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ enabled: toggle.checked })
+            body: JSON.stringify({ claude_enabled: claudeToggle.checked })
           });
           if (response.ok) {
-            status.classList.toggle('d-none', !toggle.checked);
+            updateStatusVisibility();
           } else {
-            toggle.checked = !toggle.checked; // Revert on error
+            claudeToggle.checked = !claudeToggle.checked;
             alert('Failed to save setting');
           }
         } catch (error) {
-          console.error('Failed to save external agents setting:', error);
-          toggle.checked = !toggle.checked; // Revert on error
+          console.error('Failed to save Claude setting:', error);
+          claudeToggle.checked = !claudeToggle.checked;
+        }
+      });
+
+      // Save Codex setting on toggle change
+      codexToggle.addEventListener('change', async function() {
+        try {
+          const response = await fetch('/api/settings/external-agents', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ codex_enabled: codexToggle.checked })
+          });
+          if (response.ok) {
+            updateStatusVisibility();
+          } else {
+            codexToggle.checked = !codexToggle.checked;
+            alert('Failed to save setting');
+          }
+        } catch (error) {
+          console.error('Failed to save Codex setting:', error);
+          codexToggle.checked = !codexToggle.checked;
         }
       });
 
       // Initialize on page load
-      document.addEventListener('DOMContentLoaded', loadExternalAgentsSetting);
+      document.addEventListener('DOMContentLoaded', loadExternalAgentsSettings);
     })();
   </script>
   <script src="/js/modules/settings-page.js"></script>

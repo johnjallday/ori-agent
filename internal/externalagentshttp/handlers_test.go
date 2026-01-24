@@ -58,7 +58,8 @@ model_reasoning_effort = "high"
 	// Create config manager with external agents enabled
 	configManager := config.NewManager(filepath.Join(tmpDir, "settings.json"))
 	configManager.Load()
-	configManager.SetExternalAgentsEnabled(true)
+	configManager.SetExternalAgentsClaudeEnabled(true)
+	configManager.SetExternalAgentsCodexEnabled(true)
 
 	return cache, configManager, tmpDir
 }
@@ -77,16 +78,20 @@ func TestGetAll(t *testing.T) {
 	}
 
 	var data struct {
-		Enabled bool                       `json:"enabled"`
-		Claude  *externalagents.ClaudeData `json:"claude"`
-		Codex   *externalagents.CodexData  `json:"codex"`
+		ClaudeEnabled bool                       `json:"claude_enabled"`
+		CodexEnabled  bool                       `json:"codex_enabled"`
+		Claude        *externalagents.ClaudeData `json:"claude"`
+		Codex         *externalagents.CodexData  `json:"codex"`
 	}
 	if err := json.NewDecoder(w.Body).Decode(&data); err != nil {
 		t.Fatalf("failed to decode response: %v", err)
 	}
 
-	if !data.Enabled {
-		t.Error("enabled should be true")
+	if !data.ClaudeEnabled {
+		t.Error("claude_enabled should be true")
+	}
+	if !data.CodexEnabled {
+		t.Error("codex_enabled should be true")
 	}
 	if data.Claude == nil {
 		t.Error("Claude data should not be nil")
@@ -226,7 +231,8 @@ func TestRefresh_MethodNotAllowed(t *testing.T) {
 
 func TestGetAll_Disabled(t *testing.T) {
 	cache, configManager, _ := setupTestCache(t)
-	configManager.SetExternalAgentsEnabled(false)
+	configManager.SetExternalAgentsClaudeEnabled(false)
+	configManager.SetExternalAgentsCodexEnabled(false)
 	handler := New(cache, configManager)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/external-agents", nil)
@@ -239,17 +245,64 @@ func TestGetAll_Disabled(t *testing.T) {
 	}
 
 	var data struct {
-		Enabled bool   `json:"enabled"`
-		Message string `json:"message"`
+		ClaudeEnabled bool                       `json:"claude_enabled"`
+		CodexEnabled  bool                       `json:"codex_enabled"`
+		Claude        *externalagents.ClaudeData `json:"claude"`
+		Codex         *externalagents.CodexData  `json:"codex"`
 	}
 	if err := json.NewDecoder(w.Body).Decode(&data); err != nil {
 		t.Fatalf("failed to decode response: %v", err)
 	}
 
-	if data.Enabled {
-		t.Error("enabled should be false")
+	if data.ClaudeEnabled {
+		t.Error("claude_enabled should be false")
 	}
-	if data.Message == "" {
-		t.Error("message should not be empty when disabled")
+	if data.CodexEnabled {
+		t.Error("codex_enabled should be false")
+	}
+	if data.Claude != nil {
+		t.Error("Claude data should be nil when disabled")
+	}
+	if data.Codex != nil {
+		t.Error("Codex data should be nil when disabled")
+	}
+}
+
+func TestGetAll_PartialEnabled(t *testing.T) {
+	cache, configManager, _ := setupTestCache(t)
+	configManager.SetExternalAgentsClaudeEnabled(true)
+	configManager.SetExternalAgentsCodexEnabled(false)
+	handler := New(cache, configManager)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/external-agents", nil)
+	w := httptest.NewRecorder()
+
+	handler.GetAll(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("expected status 200, got %d", w.Code)
+	}
+
+	var data struct {
+		ClaudeEnabled bool                       `json:"claude_enabled"`
+		CodexEnabled  bool                       `json:"codex_enabled"`
+		Claude        *externalagents.ClaudeData `json:"claude"`
+		Codex         *externalagents.CodexData  `json:"codex"`
+	}
+	if err := json.NewDecoder(w.Body).Decode(&data); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+
+	if !data.ClaudeEnabled {
+		t.Error("claude_enabled should be true")
+	}
+	if data.CodexEnabled {
+		t.Error("codex_enabled should be false")
+	}
+	if data.Claude == nil {
+		t.Error("Claude data should not be nil when enabled")
+	}
+	if data.Codex != nil {
+		t.Error("Codex data should be nil when disabled")
 	}
 }

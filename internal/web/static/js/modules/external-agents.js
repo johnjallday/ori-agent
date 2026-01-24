@@ -3,8 +3,8 @@
 
 const ExternalAgents = (function() {
     let externalData = null;
-    let isEnabled = false;
-    let disabledMessage = '';
+    let claudeEnabled = false;
+    let codexEnabled = false;
     let currentFilter = 'all'; // 'all', 'ori', 'claude', 'codex'
 
     // Fetch all external agents data
@@ -16,37 +16,45 @@ const ExternalAgents = (function() {
             }
             const data = await response.json();
 
-            // Check if feature is enabled
-            if (data.enabled === false) {
-                isEnabled = false;
-                disabledMessage = data.message || 'External agents feature is disabled.';
-                externalData = { claude: null, codex: null };
-                return externalData;
-            }
+            // Check individual source enabled states
+            claudeEnabled = data.claude_enabled === true;
+            codexEnabled = data.codex_enabled === true;
 
-            isEnabled = true;
-            disabledMessage = '';
             externalData = {
-                claude: data.claude,
-                codex: data.codex
+                claude: claudeEnabled ? data.claude : null,
+                codex: codexEnabled ? data.codex : null
             };
             return externalData;
         } catch (error) {
             console.error('Error fetching external agents:', error);
-            isEnabled = false;
+            claudeEnabled = false;
+            codexEnabled = false;
             externalData = { claude: null, codex: null };
             return externalData;
         }
     }
 
-    // Check if external agents feature is enabled
+    // Check if any external agents feature is enabled
     function isExternalAgentsEnabled() {
-        return isEnabled;
+        return claudeEnabled || codexEnabled;
     }
 
-    // Get disabled message
+    // Check if Claude is enabled
+    function isClaudeEnabled() {
+        return claudeEnabled;
+    }
+
+    // Check if Codex is enabled
+    function isCodexEnabled() {
+        return codexEnabled;
+    }
+
+    // Get disabled message (for backwards compatibility)
     function getDisabledMessage() {
-        return disabledMessage;
+        if (!claudeEnabled && !codexEnabled) {
+            return 'External agents are disabled. Enable in Settings.';
+        }
+        return '';
     }
 
     // Fetch Claude-specific data
@@ -606,6 +614,8 @@ const ExternalAgents = (function() {
         getClaudeData,
         getCodexData,
         isExternalAgentsEnabled,
+        isClaudeEnabled,
+        isCodexEnabled,
         getDisabledMessage
     };
 })();
