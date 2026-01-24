@@ -2110,6 +2110,8 @@ const sessionManager = {
           { value: 'gpt-4o-mini', label: 'gpt-4o-mini', type: 'tool-calling' },
           { value: 'claude-3-5-sonnet-20241022', label: 'claude-3-5-sonnet', type: 'general' },
           { value: 'claude-3-haiku-20240307', label: 'claude-3-haiku', type: 'tool-calling' },
+          { value: 'gemini-2.5-flash', label: 'gemini-2.5-flash', type: 'tool-calling' },
+          { value: 'gemini-2.5-pro', label: 'gemini-2.5-pro', type: 'research' },
           { value: 'llama3.2', label: 'llama3.2', type: 'tool-calling' },
           { value: 'mistral', label: 'mistral', type: 'tool-calling' },
           { value: 'codellama', label: 'codellama', type: 'general' }

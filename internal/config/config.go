@@ -13,10 +13,11 @@ type Settings struct {
 	CurrentAgent    string   `json:"current_agent"`
 	OpenAIAPIKey    string   `json:"openai_api_key"`
 	AnthropicAPIKey string   `json:"anthropic_api_key"`
+	GeminiAPIKey    string   `json:"gemini_api_key"`
 	AllowedOrigins  []string `json:"allowed_origins,omitempty"` // CORS allowed origins (defaults to localhost)
 
 	// System model settings - used for internal AI tasks (auto-config, suggestions, etc.)
-	SystemProvider string `json:"system_provider,omitempty"` // Provider for system tasks (e.g., "openai", "claude", "ollama")
+	SystemProvider string `json:"system_provider,omitempty"` // Provider for system tasks (e.g., "openai", "claude", "gemini", "ollama")
 	SystemModel    string `json:"system_model,omitempty"`    // Model for system tasks (e.g., "gpt-4o-mini", "claude-3-haiku-20240307")
 
 	// Multi-agent orchestration defaults
@@ -89,6 +90,7 @@ func defaultSettings() Settings {
 	return Settings{
 		CurrentAgent:          "default",
 		OpenAIAPIKey:          "",
+		GeminiAPIKey:          "",
 		SessionCleanupEnabled: true,
 		SessionCleanupDays:    30,
 		SessionMaxCount:       1000,
@@ -165,6 +167,21 @@ func (m *Manager) GetAnthropicAPIKey() string {
 	return os.Getenv("ANTHROPIC_API_KEY")
 }
 
+// GetGeminiAPIKey returns the Gemini API key, checking settings first, then environment variable
+func (m *Manager) GetGeminiAPIKey() string {
+	m.mu.RLock()
+	apiKey := m.settings.GeminiAPIKey
+	m.mu.RUnlock()
+
+	// Check settings first
+	if apiKey != "" {
+		return apiKey
+	}
+
+	// Fallback to environment variable
+	return os.Getenv("GEMINI_API_KEY")
+}
+
 // SetAPIKey updates the API key in settings
 func (m *Manager) SetAPIKey(apiKey string) error {
 	apiKey = strings.TrimSpace(apiKey)
@@ -173,6 +190,15 @@ func (m *Manager) SetAPIKey(apiKey string) error {
 	}
 	m.mu.Lock()
 	m.settings.OpenAIAPIKey = apiKey
+	m.mu.Unlock()
+	return nil
+}
+
+// SetGeminiAPIKey updates the Gemini API key in settings
+func (m *Manager) SetGeminiAPIKey(apiKey string) error {
+	apiKey = strings.TrimSpace(apiKey)
+	m.mu.Lock()
+	m.settings.GeminiAPIKey = apiKey
 	m.mu.Unlock()
 	return nil
 }
@@ -381,7 +407,7 @@ func (m *Manager) IsSystemModelConfigured() bool {
 
 // ValidProviders returns the list of valid provider names for system model
 func ValidProviders() []string {
-	return []string{"openai", "claude", "ollama"}
+	return []string{"openai", "claude", "gemini", "ollama"}
 }
 
 // validateSystemModel validates the system model configuration

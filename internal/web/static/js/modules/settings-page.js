@@ -11,6 +11,11 @@ document.getElementById('toggleAnthropicKey')?.addEventListener('click', functio
   input.type = input.type === 'password' ? 'text' : 'password';
 });
 
+document.getElementById('toggleGeminiKey')?.addEventListener('click', function() {
+  const input = document.getElementById('geminiApiKeyInput');
+  input.type = input.type === 'password' ? 'text' : 'password';
+});
+
 // Save OpenAI API Key
 document.getElementById('saveOpenaiKey')?.addEventListener('click', async function() {
   const apiKey = document.getElementById('openaiApiKeyInput').value.trim();
@@ -31,7 +36,7 @@ document.getElementById('saveOpenaiKey')?.addEventListener('click', async functi
       headers: {
         'Content-Type': 'application/json'
       },
-      body: JSON.stringify({ api_key: apiKey })
+      body: JSON.stringify({ openai_api_key: apiKey })
     });
 
     if (response.ok) {
@@ -62,9 +67,7 @@ document.getElementById('saveAnthropicKey')?.addEventListener('click', async fun
   }
 
   try {
-    // Note: You'll need to add an endpoint for Anthropic API key
-    // For now, we can use the same endpoint with a different structure
-    const response = await fetch('/api/settings', {
+    const response = await fetch('/api/api-key', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json'
@@ -75,8 +78,39 @@ document.getElementById('saveAnthropicKey')?.addEventListener('click', async fun
     });
 
     if (response.ok) {
-      alert('Anthropic API key saved successfully! Please restart the server for changes to take effect.');
+      alert('Anthropic API key saved successfully!');
       document.getElementById('anthropicApiKeyInput').value = '';
+    } else {
+      const error = await response.text();
+      alert('Failed to save API key: ' + error);
+    }
+  } catch (error) {
+    console.error('Error saving API key:', error);
+    alert('Error saving API key: ' + error.message);
+  }
+});
+
+// Save Gemini API Key
+document.getElementById('saveGeminiKey')?.addEventListener('click', async function() {
+  const apiKey = document.getElementById('geminiApiKeyInput').value.trim();
+
+  if (!apiKey) {
+    alert('Please enter an API key');
+    return;
+  }
+
+  try {
+    const response = await fetch('/api/api-key', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({ gemini_api_key: apiKey })
+    });
+
+    if (response.ok) {
+      alert('Gemini API key saved successfully!');
+      document.getElementById('geminiApiKeyInput').value = '';
     } else {
       const error = await response.text();
       alert('Failed to save API key: ' + error);

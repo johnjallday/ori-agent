@@ -830,6 +830,12 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Check if this is a Gemini model or provider
+	if strings.HasPrefix(strings.ToLower(ag.Settings.Model), "gemini-") || strings.EqualFold(ag.Settings.Provider, "gemini") {
+		h.handleGeminiChat(w, r, ag, q, tools, current, base, fileAttachments, llmImages, plannerDecision)
+		return
+	}
+
 	// OpenAI models require an API key; return a clear error if none is configured.
 	if h.clientFactory != nil && !h.clientFactory.HasKeyForAgent(ag) {
 		writeJSONResponse(w, map[string]any{

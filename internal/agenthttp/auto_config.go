@@ -89,7 +89,7 @@ func (h *AutoConfigHandler) CheckLLMAvailabilityHandler(w http.ResponseWriter, r
 
 	if !available {
 		if len(availableProviders) == 0 {
-			response.Message = "No LLM provider configured. Please set up an API key (OpenAI or Anthropic) or install Ollama."
+			response.Message = "No LLM provider configured. Please set up an API key (OpenAI, Anthropic, or Gemini) or install Ollama."
 		} else if !systemModelConfigured {
 			response.Message = "System model not configured. Please configure a system model in Settings to use auto-config."
 		}
@@ -150,8 +150,8 @@ IMPORTANT: All string values must be on a single line. Do not use literal newlin
 Required JSON fields:
 - agent_name: A short, descriptive name for the agent (e.g., "Weather Assistant", "Code Reviewer")
 - agent_type: One of "tool-calling" (for tool/plugin tasks), "general" (balanced), or "research" (complex reasoning)
-- model: "gpt-4.1-nano" for tool-calling, "gpt-5" for general/research, or "claude-sonnet-4-20250514"
-- provider: "openai" or "claude" based on model
+- model: "gpt-4.1-nano" for tool-calling, "gpt-5" for general/research, "claude-sonnet-4-20250514", or "gemini-2.5-flash"/"gemini-2.5-pro"
+- provider: "openai", "claude", or "gemini" based on model
 - temperature: 0.0-0.3 for precise tasks, 0.4-0.7 for balanced, 0.7-1.0 for creative
 - system_prompt: A concise system prompt for this agent (single line, use \n for breaks)
 - recommended_plugins: Array of plugin keywords that would be useful (e.g., ["weather", "math", "file", "web", "calendar"])
@@ -226,7 +226,7 @@ func (h *AutoConfigHandler) validateAndSanitizeConfig(config AutoConfigResponse)
 	}
 
 	// Validate provider
-	validProviders := map[string]bool{"openai": true, "claude": true, "ollama": true}
+	validProviders := map[string]bool{"openai": true, "claude": true, "gemini": true, "ollama": true}
 	if !validProviders[config.Provider] {
 		config.Provider = "openai"
 	}

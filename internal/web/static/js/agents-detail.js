@@ -58,7 +58,8 @@ function populateEditModelOptions() {
   const providerNameMap = {
     'OpenAI': 'openai',
     'Anthropic': 'claude',
-    'Ollama': 'ollama'
+    'Ollama': 'ollama',
+    'Google Gemini': 'gemini'
   };
 
   // Find models from the API data

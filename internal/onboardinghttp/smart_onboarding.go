@@ -409,7 +409,7 @@ func (h *SmartOnboardingHandler) getSystemProviderAndModel() (llm.Provider, stri
 	}
 
 	// Fallback: try providers in order
-	providers := []string{"openai", "claude", "ollama"}
+	providers := []string{"openai", "claude", "gemini", "ollama"}
 	for _, name := range providers {
 		provider, err := h.llmFactory.GetProvider(name)
 		if err == nil {
@@ -468,6 +468,8 @@ func preferredModelsForProvider(providerName string) []string {
 		return []string{"claude-3-haiku-20240307", "claude-3-5-sonnet-20241022", "claude-3-sonnet-20240229"}
 	case "ollama":
 		return []string{"llama3", "llama3:latest", "llama2", "mistral"}
+	case "gemini":
+		return []string{"gemini-2.5-flash", "gemini-2.5-pro"}
 	default:
 		return nil
 	}

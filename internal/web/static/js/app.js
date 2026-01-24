@@ -219,9 +219,14 @@ async function refreshSystemModelDisplay() {
             providerEl.style.background = 'rgba(16, 163, 127, 0.2)';
             providerEl.style.color = '#10a37f';
             break;
+          case 'claude':
           case 'anthropic':
             providerEl.style.background = 'rgba(204, 147, 102, 0.2)';
             providerEl.style.color = '#cc9366';
+            break;
+          case 'gemini':
+            providerEl.style.background = 'rgba(66, 133, 244, 0.2)';
+            providerEl.style.color = '#4285f4';
             break;
           case 'ollama':
             providerEl.style.background = 'rgba(59, 130, 246, 0.2)';
