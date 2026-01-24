@@ -32,6 +32,39 @@
     workspaceAgents: document.getElementById('hubWorkspaceAgents'),
     workspaceDescription: document.getElementById('hubWorkspaceDescription'),
     workspaceCanvasBtn: document.getElementById('hubOpenCanvasBtn'),
+    viewListBtn: document.getElementById('hubViewList'),
+    viewBoardBtn: document.getElementById('hubViewBoard'),
+    boardContainer: document.getElementById('hubBoardContainer'),
+    boardColumns: document.getElementById('hubBoardColumns'),
+    boardScroll: document.getElementById('hubBoardScroll'),
+    boardEmpty: document.getElementById('hubBoardEmpty'),
+    boardLoading: document.getElementById('hubBoardLoading'),
+    boardTaskCount: document.getElementById('hubBoardTaskCount'),
+    boardEditColumnsBtn: document.getElementById('hubBoardEditColumnsBtn'),
+    boardRefreshBtn: document.getElementById('hubBoardRefreshBtn'),
+    boardSetupBtn: document.getElementById('hubBoardSetupBtn'),
+    boardColumnsModal: document.getElementById('hubBoardColumnsModal'),
+    boardColumnsList: document.getElementById('hubColumnsList'),
+    boardAddColumnBtn: document.getElementById('hubAddColumnBtn'),
+    boardSaveColumnsBtn: document.getElementById('hubSaveColumnsBtn'),
+
+    taskDetailsModal: document.getElementById('hubTaskDetailsModal'),
+    taskDetailsTitle: document.getElementById('hubTaskDetailsTitle'),
+    taskDetailsDescription: document.getElementById('hubTaskDetailsDescription'),
+    taskDetailsId: document.getElementById('hubTaskDetailsId'),
+    taskDetailsStatus: document.getElementById('hubTaskDetailsStatus'),
+    taskDetailsAssignedTo: document.getElementById('hubTaskDetailsAssignedTo'),
+    taskDetailsCreated: document.getElementById('hubTaskDetailsCreated'),
+    taskDetailsUpdated: document.getElementById('hubTaskDetailsUpdated'),
+    taskDetailsText: document.getElementById('hubTaskDetailsText'),
+    taskDetailsResultSection: document.getElementById('hubTaskDetailsResultSection'),
+    taskDetailsResult: document.getElementById('hubTaskDetailsResult'),
+    taskDetailsResultBadge: document.getElementById('hubTaskDetailsResultBadge'),
+    taskDetailsErrorSection: document.getElementById('hubTaskDetailsErrorSection'),
+    taskDetailsError: document.getElementById('hubTaskDetailsError'),
+    taskDetailsCopyIdBtn: document.getElementById('hubTaskDetailsCopyIdBtn'),
+    taskDetailsRunBtn: document.getElementById('hubTaskDetailsRunBtn'),
+    taskDetailsEditBtn: document.getElementById('hubTaskDetailsEditBtn'),
     addTaskBtn: document.getElementById('hubAddTaskBtn'),
     importWorkflowBtn: document.getElementById('hubImportWorkflowBtn'),
     refreshTasksBtn: document.getElementById('hubRefreshTasksBtn'),
@@ -285,6 +318,12 @@
     window.WorkspaceHubSessions.loadSessions(workspaceId);
     window.WorkspaceHubNotes.loadNotes(workspaceId);
     window.WorkspaceHubFiles.loadFiles(workspaceId);
+
+    if (elements.viewBoardBtn && elements.viewBoardBtn.classList.contains('is-active')) {
+      if (window.WorkspaceHubBoard && typeof window.WorkspaceHubBoard.loadBoard === 'function') {
+        window.WorkspaceHubBoard.loadBoard(workspaceId);
+      }
+    }
 
     if (window.workspaceRealtime && typeof window.workspaceRealtime.subscribeToWorkspace === 'function') {
       const unsub = window.workspaceRealtime.subscribeToWorkspace(workspaceId, (event) => {

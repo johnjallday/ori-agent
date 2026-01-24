@@ -306,9 +306,19 @@ func TestSQLiteStore_Workspaces(t *testing.T) {
 
 	// Create workspaces
 	root := &Workspace{
-		ID:        "root-workspace",
-		Name:      "Root",
-		Color:     "#ff0000",
+		ID:    "root-workspace",
+		Name:  "Root",
+		Color: "#ff0000",
+		SharedData: map[string]interface{}{
+			"kanban_board": KanbanBoardConfig{
+				Version: 1,
+				Columns: []KanbanBoardColumn{
+					{ID: "todo", Name: "Todo", Order: 1},
+					{ID: "doing", Name: "Doing", Order: 2},
+					{ID: "done", Name: "Done", Order: 3},
+				},
+			},
+		},
 		CreatedAt: time.Now(),
 		UpdatedAt: time.Now(),
 	}
@@ -337,6 +347,16 @@ func TestSQLiteStore_Workspaces(t *testing.T) {
 	}
 	if got.Name != "Root" {
 		t.Errorf("Expected name 'Root', got %s", got.Name)
+	}
+	board, ok := GetWorkspaceKanbanBoardConfig(got)
+	if !ok {
+		t.Fatalf("Expected kanban board config to persist")
+	}
+	if len(board.Columns) != 3 {
+		t.Fatalf("Expected 3 columns, got %d", len(board.Columns))
+	}
+	if board.Columns[0].ID != "todo" {
+		t.Fatalf("Expected first column id 'todo', got %s", board.Columns[0].ID)
 	}
 
 	// List workspaces

@@ -176,6 +176,90 @@
     return null;
   }
 
+  /**
+   * Get kanban column id from a task (UI-only)
+   * @param {Object} task - Task object
+   * @param {string} fallback - Fallback column id
+   * @returns {string} Column id
+   */
+  function getTaskKanbanColumnId(task, fallback = 'backlog') {
+    if (!task) return fallback;
+    const ctx = task.context;
+    if (!ctx || typeof ctx !== 'object') return fallback;
+    const value = ctx.kanban_column_id;
+    if (typeof value !== 'string') return fallback;
+    const trimmed = value.trim();
+    return trimmed || fallback;
+  }
+
+  /**
+   * Group tasks by kanban column id
+   * @param {Array} tasks - Tasks list
+   * @param {Array} columns - Board columns
+   * @param {string} fallback - Fallback column id
+   * @returns {Map<string, Array>} Map of columnId -> tasks
+   */
+  function groupTasksByKanbanColumn(tasks, columns, fallback = 'backlog') {
+    const groups = new Map();
+    const known = new Set();
+    (columns || []).forEach((col) => {
+      if (col && col.id) {
+        groups.set(col.id, []);
+        known.add(col.id);
+      }
+    });
+
+    (tasks || []).forEach((task) => {
+      let columnId = getTaskKanbanColumnId(task, fallback);
+      if (known.size > 0 && !known.has(columnId)) {
+        columnId = fallback;
+      }
+      if (!groups.has(columnId)) {
+        groups.set(columnId, []);
+      }
+      groups.get(columnId).push(task);
+    });
+
+    return groups;
+  }
+
+  /**
+   * Collect all descendant workspace ids from a workspace tree
+   * @param {Array} workspaces - Workspace tree
+   * @param {string} rootId - Root workspace id
+   * @param {Object} options - Options
+   * @param {boolean} options.includeRoot - Whether to include root id
+   * @returns {Array<string>} Descendant ids (optionally includes root)
+   */
+  function collectWorkspaceDescendantIds(workspaces, rootId, { includeRoot = false } = {}) {
+    const ids = [];
+    if (!rootId) return ids;
+
+    function walk(nodes, inSubtree) {
+      (nodes || []).forEach((node) => {
+        if (!node || !node.id) return;
+
+        const isRoot = node.id === rootId;
+        const nextInSubtree = inSubtree || isRoot;
+
+        if (nextInSubtree) {
+          if (isRoot) {
+            if (includeRoot) ids.push(node.id);
+          } else {
+            ids.push(node.id);
+          }
+        }
+
+        if (node.children && node.children.length > 0) {
+          walk(node.children, nextInSubtree);
+        }
+      });
+    }
+
+    walk(workspaces, false);
+    return ids;
+  }
+
   // Expose utilities globally
   window.WorkspaceHubUtils = {
     formatDate,
@@ -185,6 +269,9 @@
     computeTaskStats,
     buildTaskHierarchy,
     getDisplayStatus,
-    getDisplayResult
+    getDisplayResult,
+    getTaskKanbanColumnId,
+    groupTasksByKanbanColumn,
+    collectWorkspaceDescendantIds
   };
 })();

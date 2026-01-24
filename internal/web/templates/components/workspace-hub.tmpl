@@ -45,6 +45,21 @@
             </svg>
             Canvas
           </a>
+
+          <div class="hub-view-toggle" role="tablist" aria-label="View mode">
+            <button id="hubViewList" class="modern-btn modern-btn-secondary hub-view-btn is-active" type="button" role="tab" aria-selected="true" aria-controls="workspaceHubBody" title="List View">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M3,4H21V8H3V4M3,10H21V14H3V10M3,16H21V20H3V16Z"/>
+              </svg>
+              <span class="hub-view-btn-label">List</span>
+            </button>
+            <button id="hubViewBoard" class="modern-btn modern-btn-secondary hub-view-btn" type="button" role="tab" aria-selected="false" aria-controls="hubBoardContainer" title="Board View">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M4,3H10V5H4V3M14,3H20V5H14V3M4,7H10V9H4V7M14,7H20V9H14V7M4,11H10V13H4V11M14,11H20V13H14V11M4,15H10V17H4V15M14,15H20V17H14V15M4,19H10V21H4V19M14,19H20V21H14V19Z"/>
+              </svg>
+              <span class="hub-view-btn-label">Board</span>
+            </button>
+          </div>
         </div>
       </div>
     </div>
@@ -290,6 +305,49 @@
         </div>
       </div>
     </div>
+
+    <!-- Kanban Board View (hidden by default) -->
+    <div class="hub-board-container modern-card" id="hubBoardContainer" role="tabpanel" aria-labelledby="hubViewBoard" hidden>
+      <div class="hub-board-header">
+        <div class="hub-board-title-row">
+          <h2 class="hub-panel-title">Task Board</h2>
+          <span class="hub-board-task-count" id="hubBoardTaskCount">0 tasks</span>
+        </div>
+        <div class="hub-board-actions">
+          <button id="hubBoardEditColumnsBtn" class="modern-btn modern-btn-secondary hub-panel-btn" type="button" title="Edit columns">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
+              <path d="M3,17V19H9V17H3M3,5V7H13V5H3M13,21V19H21V17H13V15H11V21H13M7,9V11H3V13H7V15H9V9H7M21,13V11H11V13H21M15,9H17V7H21V5H17V3H15V9Z"/>
+            </svg>
+            <span>Columns</span>
+          </button>
+          <button id="hubBoardRefreshBtn" class="modern-btn modern-btn-secondary hub-panel-btn" type="button" title="Refresh board">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
+              <path d="M17.65,6.35C16.2,4.9 14.21,4 12,4A8,8 0 0,0 4,12A8,8 0 0,0 12,20C15.73,20 18.84,17.45 19.73,14H17.65C16.83,16.33 14.61,18 12,18A6,6 0 0,1 6,12A6,6 0 0,1 12,6C13.66,6 15.14,6.69 16.22,7.78L13,11H20V4L17.65,6.35Z"/>
+            </svg>
+          </button>
+        </div>
+      </div>
+      <div class="hub-board-scroll" id="hubBoardScroll">
+        <div class="hub-board-columns" id="hubBoardColumns">
+          <div class="hub-board-empty" id="hubBoardEmpty">
+            <svg width="48" height="48" viewBox="0 0 24 24" fill="currentColor" style="opacity: 0.3;">
+              <path d="M4,3H10V5H4V3M14,3H20V5H14V3M4,7H10V9H4V7M14,7H20V9H14V7M4,11H10V13H4V11M14,11H20V13H14V11M4,15H10V17H4V15M14,15H20V17H14V15M4,19H10V21H4V19M14,19H20V21H14V19Z"/>
+            </svg>
+            <p>No board configured yet.</p>
+            <button id="hubBoardSetupBtn" class="modern-btn modern-btn-primary" type="button">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" class="me-1">
+                <path d="M19,13H13V19H11V13H5V11H11V5H13V11H19V13Z"/>
+              </svg>
+              Set Up Board
+            </button>
+          </div>
+        </div>
+      </div>
+      <div class="hub-board-loading" id="hubBoardLoading" hidden>
+        <div class="hub-loading-spinner"></div>
+        <span>Loading board...</span>
+      </div>
+    </div>
   </div>
 
   <div class="workspace-hub-loading" id="workspaceHubLoading">
@@ -431,6 +489,146 @@
             </svg>
             Upload
           </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Edit Board Columns Modal -->
+  <div class="modal fade" id="hubBoardColumnsModal" tabindex="-1" aria-labelledby="hubBoardColumnsModalTitle" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered modal-lg">
+      <div class="modal-content" style="background: var(--bg-primary); border: 1px solid var(--border-color);">
+        <div class="modal-header" style="border-bottom: 1px solid var(--border-color);">
+          <h5 class="modal-title" id="hubBoardColumnsModalTitle" style="color: var(--text-primary);">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" class="me-2">
+              <path d="M3,17V19H9V17H3M3,5V7H13V5H3M13,21V19H21V17H13V15H11V21H13M7,9V11H3V13H7V15H9V9H7M21,13V11H11V13H21M15,9H17V7H21V5H17V3H15V9Z"/>
+            </svg>
+            Edit Board Columns
+          </h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close" style="filter: var(--close-btn-filter, none);"></button>
+        </div>
+        <div class="modal-body">
+          <p style="color: var(--text-secondary); font-size: 0.875rem; margin-bottom: 1rem;">
+            Drag to reorder columns. Each column represents a task status or workflow stage.
+          </p>
+          <div class="hub-columns-editor" id="hubColumnsEditor">
+            <div class="hub-columns-list" id="hubColumnsList"></div>
+            <button id="hubAddColumnBtn" class="modern-btn modern-btn-secondary hub-add-column-btn" type="button">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" class="me-1">
+                <path d="M19,13H13V19H11V13H5V11H11V5H13V11H19V13Z"/>
+              </svg>
+              Add Column
+            </button>
+          </div>
+        </div>
+        <div class="modal-footer" style="border-top: 1px solid var(--border-color);">
+          <button type="button" class="modern-btn modern-btn-secondary" data-bs-dismiss="modal">Cancel</button>
+          <button type="button" id="hubSaveColumnsBtn" class="modern-btn modern-btn-primary">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" class="me-1">
+              <path d="M21,7L9,19L3.5,13.5L4.91,12.09L9,16.17L19.59,5.59L21,7Z"/>
+            </svg>
+            Save Columns
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Task Details Modal (Read-Only) -->
+  <div class="modal fade" id="hubTaskDetailsModal" tabindex="-1" aria-labelledby="hubTaskDetailsModalTitle" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered modal-lg">
+      <div class="modal-content" style="background: var(--bg-primary); border: 1px solid var(--border-color);">
+        <div class="modal-header" style="border-bottom: 1px solid var(--border-color);">
+          <div class="d-flex align-items-center gap-2">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" style="color: var(--text-secondary);">
+              <path d="M14,2H6A2,2 0 0,0 4,4V20A2,2 0 0,0 6,22H18A2,2 0 0,0 20,20V8L14,2M18,20H6V4H13V9H18V20M9,13V19H7V13H9M15,15V19H13V15H15M11,11V19H9V11H11M13,13V19H11V13H13"/>
+            </svg>
+            <h5 class="modal-title" id="hubTaskDetailsModalTitle" style="color: var(--text-primary); margin: 0;">Task Details</h5>
+          </div>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+        </div>
+        <div class="modal-body" style="padding: 0;">
+          <div class="task-details-header">
+            <div class="task-details-title-row">
+              <h4 id="hubTaskDetailsTitle" class="task-details-title">--</h4>
+              <span id="hubTaskDetailsStatus" class="hub-task-status">pending</span>
+            </div>
+            <p id="hubTaskDetailsDescription" class="task-details-description">--</p>
+          </div>
+
+          <div class="task-details-meta-grid">
+            <div class="task-details-meta-item">
+              <span class="task-details-meta-label">Task ID</span>
+              <code id="hubTaskDetailsId" class="task-details-meta-value task-details-id">--</code>
+            </div>
+            <div class="task-details-meta-item">
+              <span class="task-details-meta-label">Assigned To</span>
+              <span id="hubTaskDetailsAssignedTo" class="task-details-meta-value">--</span>
+            </div>
+            <div class="task-details-meta-item">
+              <span class="task-details-meta-label">Created</span>
+              <span id="hubTaskDetailsCreated" class="task-details-meta-value">--</span>
+            </div>
+            <div class="task-details-meta-item">
+              <span class="task-details-meta-label">Updated</span>
+              <span id="hubTaskDetailsUpdated" class="task-details-meta-value">--</span>
+            </div>
+          </div>
+
+          <div class="task-details-section">
+            <h6 class="task-details-section-title">Details</h6>
+            <div id="hubTaskDetailsText" class="task-details-content">--</div>
+          </div>
+
+          <div id="hubTaskDetailsResultSection" class="task-details-section" style="display: none;">
+            <details class="task-details-collapsible" id="hubTaskDetailsResultCollapsible">
+              <summary class="task-details-collapsible-summary">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" class="task-details-chevron">
+                  <path d="M7,10L12,15L17,10H7Z"/>
+                </svg>
+                <span>Result</span>
+                <span id="hubTaskDetailsResultBadge" class="task-details-result-badge">Success</span>
+              </summary>
+              <pre id="hubTaskDetailsResult" class="task-details-result-content">--</pre>
+            </details>
+          </div>
+
+          <div id="hubTaskDetailsErrorSection" class="task-details-section" style="display: none;">
+            <details class="task-details-collapsible task-details-collapsible-error" id="hubTaskDetailsErrorCollapsible">
+              <summary class="task-details-collapsible-summary task-details-collapsible-summary-error">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" class="task-details-chevron">
+                  <path d="M7,10L12,15L17,10H7Z"/>
+                </svg>
+                <span>Error</span>
+              </summary>
+              <pre id="hubTaskDetailsError" class="task-details-error-content">--</pre>
+            </details>
+          </div>
+        </div>
+        <div class="modal-footer" style="border-top: 1px solid var(--border-color); justify-content: space-between;">
+          <div>
+            <button type="button" class="modern-btn modern-btn-secondary" id="hubTaskDetailsCopyIdBtn" title="Copy task ID to clipboard">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" class="me-1">
+                <path d="M19,21H8V7H19M19,5H8A2,2 0 0,0 6,7V21A2,2 0 0,0 8,23H19A2,2 0 0,0 21,21V7A2,2 0 0,0 19,5M16,1H4A2,2 0 0,0 2,3V17H4V3H16V1Z"/>
+              </svg>
+              Copy ID
+            </button>
+          </div>
+          <div class="d-flex gap-2">
+            <button type="button" class="modern-btn modern-btn-secondary" data-bs-dismiss="modal">Close</button>
+            <button type="button" class="modern-btn modern-btn-primary" id="hubTaskDetailsRunBtn">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" class="me-1">
+                <path d="M8,5.14V19.14L19,12.14L8,5.14Z"/>
+              </svg>
+              Run
+            </button>
+            <button type="button" class="modern-btn modern-btn-primary" id="hubTaskDetailsEditBtn">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" class="me-1">
+                <path d="M20.71,7.04C21.1,6.65 21.1,6 20.71,5.63L18.37,3.29C18,2.9 17.35,2.9 16.96,3.29L15.12,5.12L18.87,8.87M3,17.25V21H6.75L17.81,9.93L14.06,6.18L3,17.25Z"/>
+              </svg>
+              Edit
+            </button>
+          </div>
         </div>
       </div>
     </div>

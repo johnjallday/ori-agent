@@ -35,6 +35,9 @@ func (h *Handler) HandleWorkspaces(w http.ResponseWriter, r *http.Request) {
 		case "layout":
 			h.handleWorkspaceLayout(w, r, id)
 			return
+		case "board":
+			h.handleWorkspaceBoard(w, r, id)
+			return
 		}
 	}
 

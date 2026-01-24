@@ -2,6 +2,8 @@ package orchestrationhttp
 
 import (
 	"testing"
+
+	"github.com/johnjallday/ori-agent/internal/workspace"
 )
 
 func TestSubstituteInputPlaceholders(t *testing.T) {
@@ -138,4 +140,30 @@ func TestSubstituteInputPlaceholders_EdgeCases(t *testing.T) {
 			t.Errorf("Long text substitution failed")
 		}
 	})
+}
+
+func TestApplyBasicFieldUpdates_KanbanColumnID(t *testing.T) {
+	h := &TaskHandler{}
+
+	task := workspace.Task{ID: "task-1"}
+
+	col := "in_progress"
+	h.applyBasicFieldUpdates(&task, &taskUpdateRequest{TaskID: task.ID, KanbanColumnID: &col})
+
+	if task.Context == nil {
+		t.Fatalf("expected context to be initialized")
+	}
+	got, ok := task.Context["kanban_column_id"]
+	if !ok {
+		t.Fatalf("expected kanban_column_id to be set")
+	}
+	if got != "in_progress" {
+		t.Fatalf("expected kanban_column_id to be 'in_progress', got %v", got)
+	}
+
+	clear := ""
+	h.applyBasicFieldUpdates(&task, &taskUpdateRequest{TaskID: task.ID, KanbanColumnID: &clear})
+	if _, ok := task.Context["kanban_column_id"]; ok {
+		t.Fatalf("expected kanban_column_id to be cleared")
+	}
 }

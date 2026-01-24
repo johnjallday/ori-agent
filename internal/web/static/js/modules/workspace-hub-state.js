@@ -22,6 +22,14 @@
     workspaceMap: new Map(),
     selectedId: null,
     tasks: [],
+    board: {
+      workspaceId: null,
+      config: null,
+      columns: [],
+      tasks: [],
+      scope: 'workspace',
+      isLoading: false
+    },
     stats: null,
     taskHierarchy: null,
     sessions: [],
