@@ -165,6 +165,20 @@ func (h *Handler) updateWorkspace(w http.ResponseWriter, r *http.Request, id str
 			_ = orihttp.RespondBadRequest(w, "Workspace cannot be its own parent")
 			return
 		}
+		if *req.ParentID != "" {
+			descendants, err := h.store.GetSubworkspaceIDs(r.Context(), workspace.ID)
+			if err != nil {
+				logger.Error("Failed to load workspace descendants", logger.Fields{"id": id, "error": err})
+				_ = orihttp.RespondInternalError(w, "Failed to update workspace")
+				return
+			}
+			for _, descendantID := range descendants {
+				if descendantID == *req.ParentID {
+					_ = orihttp.RespondBadRequest(w, "Workspace cannot be moved under its descendant")
+					return
+				}
+			}
+		}
 		workspace.ParentID = *req.ParentID
 	}
 	if req.Color != nil {

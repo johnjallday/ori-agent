@@ -2548,19 +2548,21 @@ const sessionManager = {
   async createFolder() {
     const nameInput = document.getElementById('folderNameInput');
     const descriptionInput = document.getElementById('folderDescriptionInput');
+    const parentSelect = document.getElementById('folderParentSelect');
     const colorBtn = document.querySelector('.folder-color-btn.active');
 
     const name = nameInput?.value.trim();
     if (!name) return;
 
     const description = descriptionInput?.value.trim() || '';
+    const parentId = parentSelect?.value?.trim() || '';
     const color = colorBtn?.dataset.color || '';
 
     try {
       const response = await fetch('/api/workspaces', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name, description, color })
+        body: JSON.stringify({ name, description, parent_id: parentId, color })
       });
 
       if (!response.ok) throw new Error('Failed to create workspace');
@@ -2572,9 +2574,13 @@ const sessionManager = {
       // Clear inputs
       if (nameInput) nameInput.value = '';
       if (descriptionInput) descriptionInput.value = '';
+      if (parentSelect) parentSelect.value = '';
 
       // Refresh folders
       await this.loadFolders();
+      if (window.WorkspaceHub && typeof window.WorkspaceHub.loadWorkspaces === 'function') {
+        await window.WorkspaceHub.loadWorkspaces();
+      }
     } catch (error) {
       console.error('Failed to create folder:', error);
     }

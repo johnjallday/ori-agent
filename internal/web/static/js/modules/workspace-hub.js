@@ -94,6 +94,11 @@
     launcherGroupDescriptionInput: document.getElementById('launcherGroupDescriptionInput'),
     launcherCreateGroupBtn: document.getElementById('launcherCreateGroupBtn'),
     launcherSelectionBar: document.getElementById('launcherSelectionBar'),
+    launcherDeleteGroupModal: document.getElementById('launcherDeleteGroupModal'),
+    launcherDeleteGroupName: document.getElementById('launcherDeleteGroupName'),
+    launcherDeleteGroupCount: document.getElementById('launcherDeleteGroupCount'),
+    launcherDeleteGroupOnlyBtn: document.getElementById('launcherDeleteGroupOnlyBtn'),
+    launcherDeleteGroupAllBtn: document.getElementById('launcherDeleteGroupAllBtn'),
     loadingOverlay: document.getElementById('workspaceHubLoading'),
     sessionsList: document.getElementById('hubSessionsList'),
     newSessionBtn: document.getElementById('hubNewSessionBtn'),
@@ -160,6 +165,8 @@
   window.WorkspaceHubState.initElements(elements);
 
   const { formatDate, flattenWorkspaces, collectWorkspaceDescendantIds } = window.WorkspaceHubUtils;
+
+  let pendingDeleteGroupId = null;
 
   /**
    * Schedule a workspace tasks refresh (debounced)
@@ -228,6 +235,8 @@
       const statusLabel = escapeHtml(String(status).replace('_', ' '));
       const accentStyle = row.color ? `style="border-color: ${escapeHtml(row.color)}"` : '';
       const pathText = row.path ? escapeHtml(row.path) : escapeHtml(row.name || row.id);
+      const hasChildren = Array.isArray(row.children) && row.children.length > 0;
+      const deleteTitle = hasChildren ? 'Delete group' : 'Delete workspace';
 
       const checked = selectedSet.has(row.id);
       const checkbox = selectionMode ? `
@@ -237,9 +246,18 @@
           </label>
       ` : '';
 
+      const deleteButton = `
+        <button class="launcher-card-delete" type="button" draggable="false" data-workspace-delete="${escapeHtml(row.id)}" title="${deleteTitle}" aria-label="${deleteTitle}">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+            <path d="M19,4H15.5L14.5,3H9.5L8.5,4H5V6H19M6,19A2,2 0 0,0 8,21H16A2,2 0 0,0 18,19V7H6V19Z"/>
+          </svg>
+        </button>
+      `;
+
       return `
-        <button class="launcher-card-item" draggable="true" data-workspace-id="${escapeHtml(row.id)}" data-select-mode="${selectionMode ? '1' : '0'}" ${accentStyle}>
+        <div class="launcher-card-item" role="button" tabindex="0" draggable="true" data-workspace-id="${escapeHtml(row.id)}" data-select-mode="${selectionMode ? '1' : '0'}" ${accentStyle} aria-label="Open workspace ${escapeHtml(row.name || 'Untitled Workspace')}">
           ${checkbox}
+          ${deleteButton}
           <div class="launcher-card-title">${escapeHtml(row.name || 'Untitled Workspace')}</div>
           <div class="launcher-card-path">${pathText}</div>
           <div class="launcher-card-description">${escapeHtml(description)}</div>
@@ -247,7 +265,7 @@
             <span class="launcher-card-status status-${escapeHtml(status)}">${statusLabel}</span>
             <span>${row.session_count || 0} sessions</span>
           </div>
-        </button>
+        </div>
       `;
     }
 
@@ -265,18 +283,23 @@
       `;
 
       const groupHeader = `
-        <button class="launcher-card-item launcher-group-header" draggable="true" data-workspace-id="${escapeHtml(row.id)}" data-select-mode="${selectionMode ? '1' : '0'}">
+        <div class="launcher-card-item launcher-group-header" role="button" tabindex="0" draggable="true" data-workspace-id="${escapeHtml(row.id)}" data-select-mode="${selectionMode ? '1' : '0'}" aria-label="Open group ${escapeHtml(row.name || 'Group')}">
           ${selectionMode ? `
             <label class="launcher-card-checkbox" aria-label="Select workspace ${escapeHtml(row.name || row.id)}">
               <input type="checkbox" data-workspace-checkbox="${escapeHtml(row.id)}" ${selectedSet.has(row.id) ? 'checked' : ''} />
               <span class="launcher-card-checkmark" aria-hidden="true"></span>
             </label>
           ` : ''}
+          <button class="launcher-card-delete" type="button" draggable="false" data-workspace-delete="${escapeHtml(row.id)}" title="Delete group" aria-label="Delete group">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+              <path d="M19,4H15.5L14.5,3H9.5L8.5,4H5V6H19M6,19A2,2 0 0,0 8,21H16A2,2 0 0,0 18,19V7H6V19Z"/>
+            </svg>
+          </button>
           ${toggleBtn}
           <div class="launcher-card-title">${escapeHtml(row.name || 'Group')}</div>
           <div class="launcher-card-path">Group · ${childCount} workspace${childCount === 1 ? '' : 's'}</div>
           <div class="launcher-card-description">${escapeHtml(row.description || 'Group workspace')}</div>
-        </button>
+        </div>
       `;
 
       const childrenHtml = (workspace.children || []).map((child) => {
@@ -320,6 +343,13 @@
 
         selectWorkspace(workspaceId, { focus: true });
       });
+
+      card.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          card.click();
+        }
+      });
     });
 
     elements.launcherGrid.querySelectorAll('[data-workspace-checkbox]').forEach((cb) => {
@@ -339,8 +369,40 @@
       });
     });
 
+    elements.launcherGrid.querySelectorAll('[data-workspace-delete]').forEach((btn) => {
+      btn.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        const id = btn.getAttribute('data-workspace-delete');
+        confirmDeleteWorkspace(id);
+      });
+    });
+
     updateLauncherSelectionUI();
     bindLauncherDragEvents();
+    animateLauncherGroupReveal();
+  }
+
+  function animateLauncherGroupReveal() {
+    const state = window.WorkspaceHubState.getState();
+    const revealIds = state.launcherJustExpandedGroups;
+    if (!revealIds || revealIds.size === 0) return;
+
+    const ids = Array.from(revealIds);
+    state.launcherJustExpandedGroups = new Set();
+
+    ids.forEach((id) => {
+      const safeId = (window.CSS && CSS.escape) ? CSS.escape(id) : id;
+      const header = elements.launcherGrid.querySelector(`.launcher-group-header[data-workspace-id="${safeId}"]`);
+      const grid = elements.launcherGrid.querySelector(`[data-group-children="${safeId}"]`);
+      if (header) header.classList.add('is-revealed');
+      if (grid) grid.classList.add('is-revealed');
+
+      window.setTimeout(() => {
+        if (header) header.classList.remove('is-revealed');
+        if (grid) grid.classList.remove('is-revealed');
+      }, 520);
+    });
   }
 
   function bindLauncherDragEvents() {
@@ -395,6 +457,26 @@
   }
 
   async function moveWorkspace(workspaceId, parentId) {
+    const state = window.WorkspaceHubState.getState();
+    if (!workspaceId || !parentId || workspaceId === parentId) return;
+
+    const descendants = collectWorkspaceDescendantIds(state.workspaces || [], workspaceId, { includeRoot: false });
+    if (descendants.includes(parentId)) {
+      if (window.Toast) window.Toast.error('Cannot move a workspace into its own descendant.');
+      return;
+    }
+
+    // Keep the target group expanded so the moved workspace stays visible after reload.
+    if (parentId && state.launcherCollapsedGroups) {
+      const next = new Set(state.launcherCollapsedGroups);
+      next.delete(parentId);
+      state.launcherCollapsedGroups = next;
+    }
+    if (parentId) {
+      if (!state.launcherJustExpandedGroups) state.launcherJustExpandedGroups = new Set();
+      state.launcherJustExpandedGroups.add(parentId);
+    }
+
     // Optimistic UI update could go here, but for now we'll just wait for reload
     try {
       const response = await fetch(`/api/workspaces/${encodeURIComponent(workspaceId)}`, {
@@ -408,7 +490,10 @@
         throw new Error(text || 'Failed to move workspace');
       }
 
-      if (window.Toast) window.Toast.success('Workspace moved');
+      if (window.Toast) {
+        const parentLabel = getWorkspaceLabel(parentId);
+        window.Toast.success(`Workspace moved to "${parentLabel}"`);
+      }
       await loadWorkspaces();
     } catch (err) {
       console.error('Failed to move workspace:', err);
@@ -489,6 +574,108 @@
     }
   }
 
+  function getWorkspaceLabel(workspaceId) {
+    const state = window.WorkspaceHubState.getState();
+    const workspace = state.workspaceMap.get(workspaceId);
+    return workspace?.name || 'workspace';
+  }
+
+  function workspaceHasChildren(workspaceId) {
+    const state = window.WorkspaceHubState.getState();
+    const workspace = state.workspaceMap.get(workspaceId);
+    return Array.isArray(workspace?.children) && workspace.children.length > 0;
+  }
+
+  async function deleteWorkspacesByIds(ids) {
+    const state = window.WorkspaceHubState.getState();
+    if (!ids || ids.length === 0) return;
+
+    try {
+      for (const id of ids) {
+        const response = await fetch(`/api/workspaces/${encodeURIComponent(id)}`, { method: 'DELETE' });
+        if (!response.ok && response.status !== 404) {
+          const text = await response.text();
+          throw new Error(text || 'Failed to delete workspace');
+        }
+      }
+
+      if (window.Toast) window.Toast.success(ids.length > 1 ? 'Workspaces deleted' : 'Workspace deleted');
+
+      state.selectedWorkspaces = new Set();
+      setLauncherSelectionMode(false);
+      await loadWorkspaces();
+    } catch (err) {
+      console.error('Failed to delete workspaces:', err);
+      if (window.Toast) window.Toast.error('Failed to delete workspaces');
+    }
+  }
+
+  function openDeleteGroupModal(workspaceId) {
+    const state = window.WorkspaceHubState.getState();
+    const workspace = state.workspaceMap.get(workspaceId);
+    const descendants = collectWorkspaceDescendantIds(state.workspaces || [], workspaceId, { includeRoot: false });
+    const childCount = descendants.length;
+
+    if (!elements.launcherDeleteGroupModal || typeof bootstrap === 'undefined' || !bootstrap.Modal) {
+      const deleteAll = confirm(`"${workspace?.name || 'Group'}" has ${childCount} workspace(s). Click OK to delete the group and all contents, or Cancel to delete only the group.`);
+      if (deleteAll) {
+        void deleteGroupAndContents(workspaceId);
+      } else {
+        void deleteWorkspacesByIds([workspaceId]);
+      }
+      return;
+    }
+
+    pendingDeleteGroupId = workspaceId;
+    if (elements.launcherDeleteGroupName) {
+      elements.launcherDeleteGroupName.textContent = workspace?.name || 'Group';
+    }
+    if (elements.launcherDeleteGroupCount) {
+      elements.launcherDeleteGroupCount.textContent = String(childCount);
+    }
+
+    const modal = bootstrap.Modal.getInstance(elements.launcherDeleteGroupModal) || new bootstrap.Modal(elements.launcherDeleteGroupModal);
+    modal.show();
+  }
+
+  async function deleteGroupAndContents(workspaceId) {
+    const state = window.WorkspaceHubState.getState();
+    const ids = collectWorkspaceDescendantIds(state.workspaces || [], workspaceId, { includeRoot: true });
+    const ordered = ids.slice().reverse();
+    await deleteWorkspacesByIds(ordered);
+  }
+
+  function handleDeleteGroupChoice(includeChildren) {
+    const workspaceId = pendingDeleteGroupId;
+    pendingDeleteGroupId = null;
+    if (!workspaceId) return;
+
+    if (elements.launcherDeleteGroupModal && typeof bootstrap !== 'undefined' && bootstrap.Modal) {
+      const modal = bootstrap.Modal.getInstance(elements.launcherDeleteGroupModal);
+      if (modal) modal.hide();
+    }
+
+    if (includeChildren) {
+      void deleteGroupAndContents(workspaceId);
+    } else {
+      void deleteWorkspacesByIds([workspaceId]);
+    }
+  }
+
+  function confirmDeleteWorkspace(workspaceId) {
+    if (!workspaceId) return;
+
+    if (workspaceHasChildren(workspaceId)) {
+      openDeleteGroupModal(workspaceId);
+      return;
+    }
+
+    const label = getWorkspaceLabel(workspaceId);
+    if (!confirm(`Delete "${label}"? This action cannot be undone.`)) return;
+
+    void deleteWorkspacesByIds([workspaceId]);
+  }
+
   async function deleteSelectedWorkspaces() {
     const state = window.WorkspaceHubState.getState();
     const selected = Array.from(state.selectedWorkspaces || []);
@@ -498,26 +685,7 @@
       return;
     }
 
-    try {
-      const deletePromises = selected.map((id) =>
-        fetch(`/api/workspaces/${encodeURIComponent(id)}`, { method: 'DELETE' })
-      );
-
-      const results = await Promise.all(deletePromises);
-      const failed = results.find((r) => !r.ok);
-
-      if (failed) {
-        throw new Error('Failed to delete one or more workspaces');
-      }
-
-      if (window.Toast) window.Toast.success('Workspaces deleted');
-
-      setLauncherSelectionMode(false);
-      await loadWorkspaces();
-    } catch (err) {
-      console.error('Failed to delete workspaces:', err);
-      if (window.Toast) window.Toast.error('Failed to delete workspaces');
-    }
+    await deleteWorkspacesByIds(selected);
   }
 
   async function createGroupFromSelection() {
@@ -1131,6 +1299,14 @@
       elements.launcherDeleteSelectedBtn.addEventListener('click', () => deleteSelectedWorkspaces());
     }
 
+    if (elements.launcherDeleteGroupOnlyBtn) {
+      elements.launcherDeleteGroupOnlyBtn.addEventListener('click', () => handleDeleteGroupChoice(false));
+    }
+
+    if (elements.launcherDeleteGroupAllBtn) {
+      elements.launcherDeleteGroupAllBtn.addEventListener('click', () => handleDeleteGroupChoice(true));
+    }
+
     if (elements.newSessionBtn) {
       elements.newSessionBtn.addEventListener('click', () => {
         if (!state.selectedId) return;
@@ -1206,6 +1382,9 @@
 
   // Initialize
   bindEvents();
+
+  window.WorkspaceHub = window.WorkspaceHub || {};
+  window.WorkspaceHub.loadWorkspaces = loadWorkspaces;
 
   if (!hubEl.dataset.launcherSelect) {
     hubEl.dataset.launcherSelect = 'false';

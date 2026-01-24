@@ -1529,7 +1529,7 @@
   border-radius: 0;
   background: rgba(59, 130, 246, 0.08);
   border-bottom: 1px dashed var(--border-color);
-  padding-right: 3rem;
+  padding-right: 5.5rem;
 }
 
 .launcher-group-header:hover {
@@ -1581,7 +1581,7 @@
 .launcher-group-toggle {
   position: absolute;
   top: 0.75rem;
-  right: 0.75rem;
+  right: 2.85rem;
   transform: none;
   width: 26px;
   height: 26px;
@@ -1618,11 +1618,20 @@
   border-bottom: none;
 }
 
+.launcher-group-grid.is-revealed {
+  animation: launcher-group-reveal 0.35s ease;
+}
+
+.launcher-group-header.is-revealed {
+  box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.35);
+}
+
 .launcher-card-item {
   text-align: left;
   border-radius: var(--radius-lg);
   border: 1px solid var(--border-color);
   padding: 1rem;
+  padding-right: 2.9rem;
   background: var(--bg-secondary);
   display: flex;
   flex-direction: column;
@@ -1630,6 +1639,12 @@
   box-shadow: var(--shadow-sm);
   transition: border-color 0.2s ease, transform 0.2s ease, box-shadow 0.2s ease;
   position: relative;
+  cursor: pointer;
+}
+
+.launcher-card-item:focus-visible {
+  outline: 2px solid var(--accent-primary, #3b82f6);
+  outline-offset: 2px;
 }
 
 .launcher-card-item[data-select-mode="1"] {
@@ -1689,10 +1704,50 @@
   transform: rotate(45deg);
 }
 
+.launcher-card-delete {
+  position: absolute;
+  top: 0.65rem;
+  right: 0.65rem;
+  width: 26px;
+  height: 26px;
+  border-radius: 8px;
+  border: 1px solid transparent;
+  background: rgba(239, 68, 68, 0.08);
+  color: var(--danger-color);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0.75;
+  z-index: 3;
+  transition: all 0.15s ease;
+}
+
+.launcher-card-item:hover .launcher-card-delete {
+  opacity: 1;
+  border-color: rgba(239, 68, 68, 0.35);
+  background: rgba(239, 68, 68, 0.15);
+}
+
+.launcher-card-delete:hover {
+  opacity: 1;
+  transform: translateY(-1px);
+}
+
 .launcher-card-item:hover {
   border-color: var(--accent-primary, #3b82f6);
   transform: translateY(-2px);
   box-shadow: var(--shadow-md);
+}
+
+@keyframes launcher-group-reveal {
+  from {
+    opacity: 0;
+    transform: translateY(-6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 .launcher-card-title {

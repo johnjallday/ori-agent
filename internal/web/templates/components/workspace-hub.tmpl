@@ -72,6 +72,34 @@
     </div>
   </div>
 
+  <!-- Delete Group Modal (Launcher) -->
+  <div class="modal fade" id="launcherDeleteGroupModal" tabindex="-1" aria-labelledby="launcherDeleteGroupModalTitle" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered modal-sm">
+      <div class="modal-content" style="background: var(--bg-primary); border: 1px solid var(--border-color);">
+        <div class="modal-header" style="border-bottom: 1px solid var(--border-color);">
+          <h6 class="modal-title" id="launcherDeleteGroupModalTitle" style="color: var(--text-primary);">Delete Group</h6>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+        </div>
+        <div class="modal-body">
+          <p style="margin-bottom: 0.5rem; color: var(--text-primary);">
+            Delete "<span id="launcherDeleteGroupName">Group</span>"?
+          </p>
+          <p style="margin-bottom: 0.5rem; font-size: 12px; color: var(--text-secondary);">
+            This group contains <span id="launcherDeleteGroupCount">0</span> workspace(s).
+          </p>
+          <p style="font-size: 12px; color: var(--text-secondary);">
+            Choose whether to delete just the group (children move to root) or delete everything inside.
+          </p>
+        </div>
+        <div class="modal-footer" style="border-top: 1px solid var(--border-color);">
+          <button type="button" class="modern-btn modern-btn-secondary" data-bs-dismiss="modal">Cancel</button>
+          <button type="button" id="launcherDeleteGroupOnlyBtn" class="modern-btn modern-btn-secondary">Delete Group Only</button>
+          <button type="button" id="launcherDeleteGroupAllBtn" class="modern-btn modern-btn-danger">Delete Group + Contents</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <header class="workspace-hub-header modern-card">
     <div class="hub-header-main">
       <div class="hub-title">

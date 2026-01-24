@@ -339,28 +339,52 @@ func (s *SQLiteStore) GetWorkspaceTree(ctx context.Context) ([]Workspace, error)
 		return nil, err
 	}
 
-	// Build lookup map
-	workspaceMap := make(map[string]*Workspace)
+	// Build lookup map and parent -> children map.
+	workspaceMap := make(map[string]*Workspace, len(workspaces))
+	childrenMap := make(map[string][]*Workspace, len(workspaces))
+	roots := make([]*Workspace, 0)
+
 	for i := range workspaces {
-		workspaces[i].Children = []Workspace{} // Initialize children slice
-		workspaceMap[workspaces[i].ID] = &workspaces[i]
+		ws := &workspaces[i]
+		ws.Children = nil
+		workspaceMap[ws.ID] = ws
 	}
 
-	// Build tree
-	roots := make([]Workspace, 0)
 	for i := range workspaces {
-		workspace := &workspaces[i]
-		if workspace.ParentID == "" {
-			roots = append(roots, *workspace)
-		} else if parent, ok := workspaceMap[workspace.ParentID]; ok {
-			parent.Children = append(parent.Children, *workspace)
-		} else {
-			// Orphaned workspace - treat as root
-			roots = append(roots, *workspace)
+		ws := &workspaces[i]
+		if ws.ParentID == "" {
+			roots = append(roots, ws)
+			continue
 		}
+		if _, ok := workspaceMap[ws.ParentID]; ok {
+			childrenMap[ws.ParentID] = append(childrenMap[ws.ParentID], ws)
+			continue
+		}
+		// Orphaned workspace - treat as root
+		roots = append(roots, ws)
 	}
 
-	return roots, nil
+	var buildNode func(*Workspace) Workspace
+	buildNode = func(ws *Workspace) Workspace {
+		node := *ws
+		children := childrenMap[ws.ID]
+		if len(children) > 0 {
+			node.Children = make([]Workspace, 0, len(children))
+			for _, child := range children {
+				node.Children = append(node.Children, buildNode(child))
+			}
+		} else {
+			node.Children = []Workspace{}
+		}
+		return node
+	}
+
+	result := make([]Workspace, 0, len(roots))
+	for _, root := range roots {
+		result = append(result, buildNode(root))
+	}
+
+	return result, nil
 }
 
 // GetSubworkspaceIDs returns all descendant workspace IDs.

@@ -168,8 +168,10 @@ async function createWorkspace() {
     window.selectedAgents.clear();
 
     // Refresh workspaces list if function exists
-    if (typeof loadWorkspaces === 'function') {
-      await loadWorkspaces();
+    const refreshFn = (window.WorkspaceHub && window.WorkspaceHub.loadWorkspaces)
+      || window.loadWorkspaces;
+    if (typeof refreshFn === 'function') {
+      await refreshFn();
     }
   } catch (error) {
     console.error('Error creating workspace:', error);
