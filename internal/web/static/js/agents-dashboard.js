@@ -6,10 +6,92 @@ let dashboardCurrentView = 'table';
 const dashboardCurrentSort = 'name';
 const dashboardSortOrder = 'asc';
 let dashboardRefreshInterval = null;
+let dashboardCurrentSourceFilter = 'all'; // 'all', 'ori', 'claude', 'codex'
+let externalAgentsData = null;
 
 function initializeDashboard() {
   loadAgents();
+  loadExternalAgents();
   setupAutoRefresh();
+  setupFilterTabs();
+}
+
+// Load external agents (Claude, Codex)
+async function loadExternalAgents() {
+  try {
+    if (typeof ExternalAgents !== 'undefined') {
+      externalAgentsData = await ExternalAgents.fetchExternalAgents();
+      updateExternalAgentsCounts();
+    }
+  } catch (error) {
+    console.error('Error loading external agents:', error);
+  }
+}
+
+// Update badge counts on filter tabs
+function updateExternalAgentsCounts() {
+  const claudeCount = ExternalAgents.getClaudeAgents().length;
+  const codexAgents = ExternalAgents.getCodexAgents();
+  const codexCount = codexAgents.length;
+
+  const claudeCountEl = document.getElementById('claudeAgentCount');
+  const codexCountEl = document.getElementById('codexAgentCount');
+
+  if (claudeCountEl) {
+    claudeCountEl.textContent = claudeCount;
+    claudeCountEl.style.display = claudeCount > 0 ? 'inline' : 'none';
+  }
+  if (codexCountEl) {
+    codexCountEl.textContent = codexCount;
+    codexCountEl.style.display = codexCount > 0 ? 'inline' : 'none';
+  }
+}
+
+// Setup filter tab click handlers
+function setupFilterTabs() {
+  document.querySelectorAll('.source-filter-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const filter = btn.dataset.filter;
+      setSourceFilter(filter);
+    });
+  });
+}
+
+// Set source filter and re-render
+function setSourceFilter(filter) {
+  dashboardCurrentSourceFilter = filter;
+
+  // Update button states
+  document.querySelectorAll('.source-filter-btn').forEach(btn => {
+    btn.classList.toggle('active', btn.dataset.filter === filter);
+  });
+
+  // Re-render based on filter
+  renderDashboardAgents();
+}
+
+// Refresh external agents
+async function refreshExternalAgents() {
+  const btn = document.getElementById('refreshExternalBtn');
+  if (btn) {
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner-border spinner-border-sm" role="status"></span> Refreshing...';
+  }
+
+  try {
+    if (typeof ExternalAgents !== 'undefined') {
+      externalAgentsData = await ExternalAgents.refreshExternalAgents();
+      updateExternalAgentsCounts();
+      renderDashboardAgents();
+    }
+  } catch (error) {
+    console.error('Error refreshing external agents:', error);
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.innerHTML = 'Refresh External';
+    }
+  }
 }
 
 // Run initialization when DOM is ready
@@ -122,7 +204,18 @@ function calculateStatistics(agents) {
 
 // Render agents in current view
 function renderDashboardAgents() {
-  if (dashboardFilteredAgents.length === 0) {
+  const showOri = dashboardCurrentSourceFilter === 'all' || dashboardCurrentSourceFilter === 'ori';
+  const showClaude = dashboardCurrentSourceFilter === 'all' || dashboardCurrentSourceFilter === 'claude';
+  const showCodex = dashboardCurrentSourceFilter === 'all' || dashboardCurrentSourceFilter === 'codex';
+
+  const hasOriAgents = showOri && dashboardFilteredAgents.length > 0;
+  const claudeAgents = showClaude && typeof ExternalAgents !== 'undefined' ? ExternalAgents.getClaudeAgents() : [];
+  const codexAgents = showCodex && typeof ExternalAgents !== 'undefined' ? ExternalAgents.getCodexAgents() : [];
+  const codexData = showCodex && typeof ExternalAgents !== 'undefined' ? ExternalAgents.getCodexData() : null;
+
+  const hasAnyContent = hasOriAgents || claudeAgents.length > 0 || codexAgents.length > 0;
+
+  if (!hasAnyContent) {
     showEmptyState();
     return;
   }
@@ -130,91 +223,131 @@ function renderDashboardAgents() {
   hideEmptyState();
 
   if (dashboardCurrentView === 'table') {
-    renderTableView();
+    renderTableView(showOri, claudeAgents, codexAgents, codexData);
   } else {
-    renderCardView();
+    renderCardView(showOri, claudeAgents, codexAgents, codexData);
   }
 }
 
 // Render table view
-function renderTableView() {
+function renderTableView(showOri, claudeAgents, codexAgents, codexData) {
   const tbody = document.getElementById('agentsTableBody');
   tbody.innerHTML = '';
 
-  dashboardFilteredAgents.forEach(agent => {
-    const row = document.createElement('tr');
-    row.onclick = () => viewAgent(agent.name);
+  // Render Ori agents
+  if (showOri) {
+    dashboardFilteredAgents.forEach(agent => {
+      const row = document.createElement('tr');
+      row.onclick = () => viewAgent(agent.name);
 
-    const avatarHtml = getAvatarHtml(agent, 'agent-avatar');
+      const avatarHtml = getAvatarHtml(agent, 'agent-avatar');
 
-    row.innerHTML = `
-            <td>
-                <div class="agent-name-cell">
-                    ${avatarHtml}
-                    <div class="agent-info">
-                        <div class="agent-name">${escapeHtml(agent.name)}</div>
-                    </div>
-                </div>
-            </td>
-            <td class="description-cell">${agent.metadata?.description ? escapeHtml(agent.metadata.description) : '<span class="text-muted">-</span>'}</td>
-            <td>${capitalize(agent.type || 'tool-calling')}</td>
-            <td>$${(agent.statistics?.total_cost || 0).toFixed(4)}</td>
-            <td>
-                <div class="actions-cell" onclick="event.stopPropagation()">
-                    <button class="action-btn" onclick="viewAgent('${escapeHtml(agent.name)}')">View</button>
-                    <button class="action-btn" onclick="confirmDelete('${escapeHtml(agent.name)}')">Delete</button>
-                </div>
-            </td>
-        `;
+      row.innerHTML = `
+              <td>
+                  <div class="agent-name-cell">
+                      ${avatarHtml}
+                      <div class="agent-info">
+                          <div class="agent-name">
+                              ${escapeHtml(agent.name)}
+                              <span class="badge badge-ori">Ori</span>
+                          </div>
+                      </div>
+                  </div>
+              </td>
+              <td class="description-cell">${agent.metadata?.description ? escapeHtml(agent.metadata.description) : '<span class="text-muted">-</span>'}</td>
+              <td>${capitalize(agent.type || 'tool-calling')}</td>
+              <td>$${(agent.statistics?.total_cost || 0).toFixed(4)}</td>
+              <td>
+                  <div class="actions-cell" onclick="event.stopPropagation()">
+                      <button class="action-btn" onclick="viewAgent('${escapeHtml(agent.name)}')">View</button>
+                      <button class="action-btn" onclick="confirmDelete('${escapeHtml(agent.name)}')">Delete</button>
+                  </div>
+              </td>
+          `;
 
-    tbody.appendChild(row);
-  });
+      tbody.appendChild(row);
+    });
+  }
+
+  // Render Claude agents
+  if (claudeAgents.length > 0 && typeof ExternalAgents !== 'undefined') {
+    ExternalAgents.renderClaudeAgentsTable(claudeAgents, tbody);
+  }
+
+  // Render Codex agents (skills)
+  if (codexAgents.length > 0 && typeof ExternalAgents !== 'undefined') {
+    ExternalAgents.renderCodexAgentsTable(codexAgents, tbody);
+  }
 }
 
 // Render card view
-function renderCardView() {
+function renderCardView(showOri, claudeAgents, codexAgents, codexData) {
   const grid = document.getElementById('cardView');
   grid.innerHTML = '';
 
-  dashboardFilteredAgents.forEach(agent => {
-    const card = document.createElement('div');
-    card.className = 'agent-card';
-    card.onclick = () => viewAgent(agent.name);
+  // Render Ori agents
+  if (showOri) {
+    dashboardFilteredAgents.forEach(agent => {
+      const card = document.createElement('div');
+      card.className = 'agent-card';
+      card.onclick = () => viewAgent(agent.name);
 
-    const avatarHtml = getAvatarHtml(agent, 'agent-card-avatar');
+      const avatarHtml = getAvatarHtml(agent, 'agent-card-avatar');
 
-    card.innerHTML = `
-            <div class="agent-card-header">
-                ${avatarHtml}
-                <div class="agent-card-info">
-                    <div class="agent-card-name">${escapeHtml(agent.name)}</div>
-                </div>
-            </div>
-            ${agent.metadata?.description ?
-    `<div class="agent-description">${escapeHtml(agent.metadata.description)}</div>` :
-    '<div class="agent-description" style="opacity: 0.5">No description</div>'}
-            <div class="agent-card-meta">
-                <span>📦 ${capitalize(agent.type || 'tool-calling')}</span>
-                <span>🔧 ${agent.enabled_plugins?.length || 0} plugins</span>
-            </div>
-            <div class="agent-card-stats">
-                <div class="card-stat">
-                    <div class="card-stat-value">${formatNumber(agent.statistics?.token_usage || 0)}</div>
-                    <div class="card-stat-label">Tokens</div>
-                </div>
-                <div class="card-stat">
-                    <div class="card-stat-value">$${(agent.statistics?.total_cost || 0).toFixed(2)}</div>
-                    <div class="card-stat-label">Cost</div>
-                </div>
-            </div>
-            <div class="agent-card-actions" onclick="event.stopPropagation()">
-                <button class="action-btn" onclick="viewAgent('${escapeHtml(agent.name)}')">View</button>
-                <button class="action-btn" onclick="confirmDelete('${escapeHtml(agent.name)}')">Delete</button>
-            </div>
-        `;
+      card.innerHTML = `
+              <div class="agent-card-header">
+                  ${avatarHtml}
+                  <div class="agent-card-info">
+                      <div class="agent-card-name">
+                          ${escapeHtml(agent.name)}
+                          <span class="badge badge-ori">Ori</span>
+                      </div>
+                  </div>
+              </div>
+              ${agent.metadata?.description ?
+      `<div class="agent-description">${escapeHtml(agent.metadata.description)}</div>` :
+      '<div class="agent-description" style="opacity: 0.5">No description</div>'}
+              <div class="agent-card-meta">
+                  <span>📦 ${capitalize(agent.type || 'tool-calling')}</span>
+                  <span>🔧 ${agent.enabled_plugins?.length || 0} plugins</span>
+              </div>
+              <div class="agent-card-stats">
+                  <div class="card-stat">
+                      <div class="card-stat-value">${formatNumber(agent.statistics?.token_usage || 0)}</div>
+                      <div class="card-stat-label">Tokens</div>
+                  </div>
+                  <div class="card-stat">
+                      <div class="card-stat-value">$${(agent.statistics?.total_cost || 0).toFixed(2)}</div>
+                      <div class="card-stat-label">Cost</div>
+                  </div>
+              </div>
+              <div class="agent-card-actions" onclick="event.stopPropagation()">
+                  <button class="action-btn" onclick="viewAgent('${escapeHtml(agent.name)}')">View</button>
+                  <button class="action-btn" onclick="confirmDelete('${escapeHtml(agent.name)}')">Delete</button>
+              </div>
+          `;
 
-    grid.appendChild(card);
-  });
+      grid.appendChild(card);
+    });
+  }
+
+  // Render Claude agents
+  if (claudeAgents.length > 0 && typeof ExternalAgents !== 'undefined') {
+    ExternalAgents.renderClaudeAgentsCards(claudeAgents, grid);
+  }
+
+  // Render Claude settings/plugins card if showing Claude
+  if ((dashboardCurrentSourceFilter === 'all' || dashboardCurrentSourceFilter === 'claude') && typeof ExternalAgents !== 'undefined') {
+    const claudeData = ExternalAgents.getClaudeData();
+    if (claudeData && (claudeData.settings || (claudeData.plugins && claudeData.plugins.length > 0))) {
+      ExternalAgents.renderClaudeSettingsCard(claudeData, grid);
+    }
+  }
+
+  // Render Codex agents (skills)
+  if (codexAgents.length > 0 && typeof ExternalAgents !== 'undefined') {
+    ExternalAgents.renderCodexAgentsCards(codexAgents, grid);
+  }
 }
 
 // Filter agents based on search and filters

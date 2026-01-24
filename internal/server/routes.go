@@ -629,6 +629,16 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 	}
 
 	// =============================================================================
+	// External Agents (Claude Code, Codex) Endpoints
+	// =============================================================================
+	if s.externalAgentsHandler != nil {
+		mux.HandleFunc("/api/external-agents", s.externalAgentsHandler.GetAll)
+		mux.HandleFunc("/api/external-agents/claude", s.externalAgentsHandler.GetClaude)
+		mux.HandleFunc("/api/external-agents/codex", s.externalAgentsHandler.GetCodex)
+		mux.HandleFunc("/api/external-agents/refresh", s.externalAgentsHandler.Refresh)
+	}
+
+	// =============================================================================
 	// Folder Picker Launcher
 	// =============================================================================
 	mux.HandleFunc("/api/launch-folder-picker", s.studioHandler.LaunchFolderPicker)
