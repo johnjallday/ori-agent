@@ -99,7 +99,7 @@ func defaultSettings() Settings {
 		SessionCleanupEnabled: true,
 		SessionCleanupDays:    30,
 		SessionMaxCount:       1000,
-		MultiAgentMode:        "auto",
+		MultiAgentMode:        "off",
 		MultiAgentThreshold:   6.0,
 		SpeechProvider:        "auto",
 		SpeechLanguage:        "auto",
@@ -255,12 +255,12 @@ func (m *Manager) validate() error {
 		m.settings.CurrentAgent = "default"
 	}
 	if m.settings.MultiAgentMode == "" {
-		m.settings.MultiAgentMode = "auto"
+		m.settings.MultiAgentMode = "off"
 	}
 	switch m.settings.MultiAgentMode {
 	case "auto", "force", "off":
 	default:
-		m.settings.MultiAgentMode = "auto"
+		m.settings.MultiAgentMode = "off"
 	}
 	if m.settings.MultiAgentThreshold <= 0 {
 		m.settings.MultiAgentThreshold = 6.0
