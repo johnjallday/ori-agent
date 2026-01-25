@@ -105,6 +105,7 @@ export class OnboardingManager {
     // API Keys password toggle buttons
     const toggleOpenaiBtn = document.getElementById('toggleOpenaiKey');
     const toggleAnthropicBtn = document.getElementById('toggleAnthropicKey');
+    const toggleGeminiBtn = document.getElementById('toggleGeminiKey');
 
     if (toggleOpenaiBtn) {
       toggleOpenaiBtn.addEventListener('click', () => {
@@ -116,6 +117,13 @@ export class OnboardingManager {
     if (toggleAnthropicBtn) {
       toggleAnthropicBtn.addEventListener('click', () => {
         const input = document.getElementById('anthropicApiKey');
+        input.type = input.type === 'password' ? 'text' : 'password';
+      });
+    }
+
+    if (toggleGeminiBtn) {
+      toggleGeminiBtn.addEventListener('click', () => {
+        const input = document.getElementById('geminiApiKey');
         input.type = input.type === 'password' ? 'text' : 'password';
       });
     }
@@ -256,10 +264,11 @@ export class OnboardingManager {
         const data = await response.json();
 
         // Show info message if env vars are set
-        if (data.has_openai || data.has_anthropic) {
+        if (data.has_openai || data.has_anthropic || data.has_gemini) {
           const providers = [];
           if (data.has_openai) providers.push('OpenAI');
           if (data.has_anthropic) providers.push('Anthropic');
+          if (data.has_gemini) providers.push('Gemini');
 
           const envInfo = document.getElementById('apiKeysEnvInfo');
           if (envInfo) {
@@ -447,6 +456,7 @@ export class OnboardingManager {
   async saveApiKeys() {
     const openaiKey = document.getElementById('openaiApiKey').value.trim();
     const anthropicKey = document.getElementById('anthropicApiKey').value.trim();
+    const geminiKey = document.getElementById('geminiApiKey').value.trim();
 
     // Hide previous messages
     document.getElementById('apiKeysSuccess').classList.add('d-none');
@@ -458,7 +468,7 @@ export class OnboardingManager {
       const statusResponse = await fetch('/api/api-key');
       if (statusResponse.ok) {
         const data = await statusResponse.json();
-        hasExistingKeys = data.has_openai || data.has_anthropic;
+        hasExistingKeys = data.has_openai || data.has_anthropic || data.has_gemini;
       }
     } catch (error) {
       console.error('Error checking API key status:', error);
@@ -466,12 +476,12 @@ export class OnboardingManager {
 
     // If both are empty and no existing keys, just allow continuing
     // User can add keys later in Settings
-    if (!openaiKey && !anthropicKey && !hasExistingKeys) {
+    if (!openaiKey && !anthropicKey && !geminiKey && !hasExistingKeys) {
       return true;
     }
 
     // If both are empty but keys exist, skip saving (user chose to use env vars)
-    if (!openaiKey && !anthropicKey) {
+    if (!openaiKey && !anthropicKey && !geminiKey) {
       return true;
     }
 
@@ -483,7 +493,8 @@ export class OnboardingManager {
         },
         body: JSON.stringify({
           openai_api_key: openaiKey || undefined,
-          anthropic_api_key: anthropicKey || undefined
+          anthropic_api_key: anthropicKey || undefined,
+          gemini_api_key: geminiKey || undefined
         })
       });
 
@@ -1094,7 +1105,8 @@ export class OnboardingManager {
     if (apiKeysEl) {
       const providers = [];
       if (this.availableProviders.some(p => p.available && p.name === 'openai')) providers.push('OpenAI');
-      if (this.availableProviders.some(p => p.available && p.name === 'anthropic')) providers.push('Claude');
+      if (this.availableProviders.some(p => p.available && p.name === 'claude')) providers.push('Claude');
+      if (this.availableProviders.some(p => p.available && p.name === 'gemini')) providers.push('Gemini');
       if (this.availableProviders.some(p => p.available && p.name === 'ollama')) providers.push('Ollama');
       apiKeysEl.textContent = providers.length > 0 ? providers.join(', ') : 'Configure in Settings';
     }

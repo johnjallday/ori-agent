@@ -92,13 +92,19 @@ func (h *Handler) APIKeyHandler(w http.ResponseWriter, r *http.Request) {
 		response := struct {
 			OpenAIMasked    string `json:"openai_masked"`
 			AnthropicMasked string `json:"anthropic_masked"`
+			GeminiMasked    string `json:"gemini_masked"`
 			HasOpenAI       bool   `json:"has_openai"`
 			HasAnthropic    bool   `json:"has_anthropic"`
+			HasGemini       bool   `json:"has_gemini"`
+			Masked          string `json:"masked,omitempty"`
 		}{
 			OpenAIMasked:    h.configManager.MaskAPIKey(),
 			AnthropicMasked: maskAnthropicAPIKey(h.configManager.GetAnthropicAPIKey()),
+			GeminiMasked:    maskGeminiAPIKey(h.configManager.GetGeminiAPIKey()),
 			HasOpenAI:       h.configManager.GetAPIKey() != "",
 			HasAnthropic:    h.configManager.GetAnthropicAPIKey() != "",
+			HasGemini:       h.configManager.GetGeminiAPIKey() != "",
+			Masked:          h.configManager.MaskAPIKey(),
 		}
 		orihttp.WriteJSON(w, response)
 
@@ -106,9 +112,16 @@ func (h *Handler) APIKeyHandler(w http.ResponseWriter, r *http.Request) {
 		var req struct {
 			OpenAIAPIKey    string `json:"openai_api_key,omitempty"`
 			AnthropicAPIKey string `json:"anthropic_api_key,omitempty"`
+			GeminiAPIKey    string `json:"gemini_api_key,omitempty"`
+			APIKey          string `json:"api_key,omitempty"`
 		}
 		if !orihttp.ParseJSONBody(w, r, &req) {
 			return
+		}
+
+		// Backwards compatibility: accept api_key as OpenAI API key
+		if req.OpenAIAPIKey == "" && req.APIKey != "" {
+			req.OpenAIAPIKey = req.APIKey
 		}
 
 		// Get current settings
@@ -120,6 +133,7 @@ func (h *Handler) APIKeyHandler(w http.ResponseWriter, r *http.Request) {
 				orihttp.RespondErrorWithErr(w, http.StatusBadRequest, "Invalid OpenAI API key", err)
 				return
 			}
+			cfg.OpenAIAPIKey = req.OpenAIAPIKey
 			// Update global client with new API key
 			h.clientFactory.UpdateDefaultClient(req.OpenAIAPIKey)
 
@@ -133,10 +147,6 @@ func (h *Handler) APIKeyHandler(w http.ResponseWriter, r *http.Request) {
 		// Update Anthropic API key if provided
 		if req.AnthropicAPIKey != "" {
 			cfg.AnthropicAPIKey = req.AnthropicAPIKey
-			if err := h.configManager.Update(cfg); err != nil {
-				orihttp.RespondErrorWithErr(w, http.StatusBadRequest, "Invalid Anthropic API key", err)
-				return
-			}
 
 			// Register/update Claude provider in LLM factory
 			claudeProvider := llm.NewClaudeProvider(llm.ProviderConfig{
@@ -145,7 +155,72 @@ func (h *Handler) APIKeyHandler(w http.ResponseWriter, r *http.Request) {
 			h.llmFactory.Register("claude", claudeProvider)
 		}
 
+		// Update Gemini API key if provided
+		if req.GeminiAPIKey != "" {
+			cfg.GeminiAPIKey = req.GeminiAPIKey
+
+			// Register/update Gemini provider in LLM factory
+			geminiProvider := llm.NewGeminiProvider(llm.ProviderConfig{
+				APIKey: req.GeminiAPIKey,
+			})
+			h.llmFactory.Register("gemini", geminiProvider)
+		}
+
+		if req.AnthropicAPIKey != "" || req.GeminiAPIKey != "" {
+			if err := h.configManager.Update(cfg); err != nil {
+				orihttp.RespondErrorWithErr(w, http.StatusBadRequest, "Invalid API key", err)
+				return
+			}
+		}
+
 		// Save configuration
+		if err := h.configManager.Save(); err != nil {
+			orihttp.InternalError(w, err.Error())
+			return
+		}
+
+		w.WriteHeader(http.StatusOK)
+
+	default:
+		w.WriteHeader(http.StatusMethodNotAllowed)
+	}
+}
+
+// SpeechSettingsHandler handles speech settings persistence
+func (h *Handler) SpeechSettingsHandler(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodGet:
+		cfg := h.configManager.Get()
+		response := struct {
+			SpeechProvider string `json:"speech_provider"`
+			SpeechModel    string `json:"speech_model,omitempty"`
+			SpeechLanguage string `json:"speech_language"`
+		}{
+			SpeechProvider: cfg.SpeechProvider,
+			SpeechModel:    cfg.SpeechModel,
+			SpeechLanguage: cfg.SpeechLanguage,
+		}
+		orihttp.WriteJSON(w, response)
+
+	case http.MethodPost:
+		var req struct {
+			SpeechProvider string `json:"speech_provider"`
+			SpeechModel    string `json:"speech_model"`
+			SpeechLanguage string `json:"speech_language"`
+		}
+		if !orihttp.ParseJSONBody(w, r, &req) {
+			return
+		}
+
+		cfg := h.configManager.Get()
+		cfg.SpeechProvider = strings.TrimSpace(req.SpeechProvider)
+		cfg.SpeechModel = strings.TrimSpace(req.SpeechModel)
+		cfg.SpeechLanguage = strings.TrimSpace(req.SpeechLanguage)
+
+		if err := h.configManager.Update(cfg); err != nil {
+			orihttp.RespondErrorWithErr(w, http.StatusBadRequest, "Invalid speech settings", err)
+			return
+		}
 		if err := h.configManager.Save(); err != nil {
 			orihttp.InternalError(w, err.Error())
 			return
@@ -168,6 +243,16 @@ func maskAnthropicAPIKey(apiKey string) string {
 		return "***"
 	}
 	return apiKey[:8] + "***..." + apiKey[len(apiKey)-4:]
+}
+
+func maskGeminiAPIKey(apiKey string) string {
+	if apiKey == "" {
+		return ""
+	}
+	if len(apiKey) < 12 {
+		return "***"
+	}
+	return apiKey[:6] + "***..." + apiKey[len(apiKey)-4:]
 }
 
 // ProviderModel represents a model for a specific provider
@@ -202,7 +287,7 @@ func (h *Handler) ProvidersHandler(w http.ResponseWriter, r *http.Request) {
 	providers := []ProviderInfo{}
 
 	// Get all registered providers from the factory
-	providerNames := []string{"openai", "claude", "ollama"}
+	providerNames := []string{"openai", "claude", "gemini", "ollama"}
 
 	for _, name := range providerNames {
 		provider, err := h.llmFactory.GetProvider(name)
@@ -236,7 +321,12 @@ func (h *Handler) ProvidersHandler(w http.ResponseWriter, r *http.Request) {
 				categories := getModelCategories(name, modelName)
 				goodFor := modelinfo.GetGoodFor(modelName)
 				pricingInfo := modelinfo.GetPricing(modelName)
-				pricing := modelinfo.FormatPricing(pricingInfo)
+				pricing := ""
+				if pricingInfo != nil {
+					pricing = modelinfo.FormatPricing(pricingInfo)
+				} else if provider.Type() == llm.ProviderTypeLocal {
+					pricing = modelinfo.FormatPricing(nil)
+				}
 				var deprecationDate string
 				var isLegacy bool
 				if pricingInfo != nil {
@@ -314,6 +404,15 @@ func getModelCategories(provider, modelName string) []string {
 
 		// Other models get their single category
 		return []string{categorizeModel(provider, modelName)}
+	case "gemini":
+		lowerName := strings.ToLower(modelName)
+		if strings.Contains(lowerName, "pro") {
+			return []string{"research", "orchestration"}
+		}
+		if strings.Contains(lowerName, "flash") {
+			return []string{"tool-calling", "general"}
+		}
+		return []string{categorizeModel(provider, modelName)}
 
 	default:
 		// Non-Ollama providers use single category
@@ -383,6 +482,15 @@ func categorizeModel(provider, modelName string) string {
 
 		// Default to tool-calling for unknown Ollama models (they're local, so cost is not a concern)
 		return "tool-calling"
+	case "gemini":
+		lowerName := strings.ToLower(modelName)
+		if strings.Contains(lowerName, "flash") {
+			return "tool-calling"
+		}
+		if strings.Contains(lowerName, "pro") {
+			return "research"
+		}
+		return "general"
 	}
 	return "general" // default
 }
@@ -396,6 +504,8 @@ func getProviderDisplayName(name string) string {
 		return "Anthropic Claude"
 	case "ollama":
 		return "Ollama (Local)"
+	case "gemini":
+		return "Google Gemini"
 	default:
 		return name
 	}
@@ -549,4 +659,45 @@ func (h *Handler) SystemPathsHandler(w http.ResponseWriter, r *http.Request) {
 		DefaultOutputDir: defaultOutputDir,
 		HomeDir:          homeDir,
 	})
+}
+
+// ExternalAgentsSettingsHandler handles external agents enabled settings
+func (h *Handler) ExternalAgentsSettingsHandler(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodGet:
+		orihttp.WriteJSON(w, map[string]bool{
+			"claude_enabled": h.configManager.GetExternalAgentsClaudeEnabled(),
+			"codex_enabled":  h.configManager.GetExternalAgentsCodexEnabled(),
+		})
+
+	case http.MethodPost:
+		var req struct {
+			ClaudeEnabled *bool `json:"claude_enabled,omitempty"`
+			CodexEnabled  *bool `json:"codex_enabled,omitempty"`
+		}
+		if !orihttp.ParseJSONBody(w, r, &req) {
+			return
+		}
+
+		// Update only the settings that were provided
+		if req.ClaudeEnabled != nil {
+			h.configManager.SetExternalAgentsClaudeEnabled(*req.ClaudeEnabled)
+		}
+		if req.CodexEnabled != nil {
+			h.configManager.SetExternalAgentsCodexEnabled(*req.CodexEnabled)
+		}
+
+		if err := h.configManager.Save(); err != nil {
+			orihttp.InternalError(w, err.Error())
+			return
+		}
+
+		orihttp.WriteJSON(w, map[string]bool{
+			"claude_enabled": h.configManager.GetExternalAgentsClaudeEnabled(),
+			"codex_enabled":  h.configManager.GetExternalAgentsCodexEnabled(),
+		})
+
+	default:
+		w.WriteHeader(http.StatusMethodNotAllowed)
+	}
 }

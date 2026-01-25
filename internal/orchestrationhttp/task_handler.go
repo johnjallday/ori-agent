@@ -397,13 +397,14 @@ type taskUpdateRequest struct {
 	ScheduleEnabled        *bool                          `json:"schedule_enabled"`
 	ScheduleName           *string                        `json:"schedule_name"`
 	ResultStorage          *workspace.ResultStorageConfig `json:"result_storage"`
+	KanbanColumnID         *string                        `json:"kanban_column_id"`
 }
 
 // hasFieldUpdates returns true if the request contains any field updates
 func (r *taskUpdateRequest) hasFieldUpdates() bool {
 	return r.Description != nil || r.Details != nil || r.InputTaskIDs != nil ||
 		r.To != nil || r.ParentTaskID != nil || r.SubtaskIndex != nil ||
-		r.ResultCombinationMode != nil || r.ResultStorage != nil
+		r.ResultCombinationMode != nil || r.ResultStorage != nil || r.KanbanColumnID != nil
 }
 
 // hasScheduleUpdates returns true if the request contains schedule-related updates
@@ -439,6 +440,18 @@ func (th *TaskHandler) applyBasicFieldUpdates(task *workspace.Task, req *taskUpd
 	if req.ResultStorage != nil {
 		task.ResultStorage = req.ResultStorage
 		logger.Debug("Updated task result storage", logger.Fields{"task_id": req.TaskID, "enabled": req.ResultStorage.Enabled})
+	}
+	if req.KanbanColumnID != nil {
+		val := strings.TrimSpace(*req.KanbanColumnID)
+		if task.Context == nil {
+			task.Context = map[string]interface{}{}
+		}
+		if val == "" {
+			delete(task.Context, "kanban_column_id")
+		} else {
+			task.Context["kanban_column_id"] = val
+		}
+		logger.Debug("Updated task kanban column", logger.Fields{"task_id": req.TaskID, "kanban_column_id": val})
 	}
 }
 

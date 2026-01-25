@@ -73,6 +73,22 @@
     ]
   },
   {
+    "match": "gemini.*flash",
+    "good_for": [
+      "fast general-purpose chat",
+      "tool calling and function execution",
+      "summarization and extraction"
+    ]
+  },
+  {
+    "match": "gemini.*pro",
+    "good_for": [
+      "complex reasoning and analysis",
+      "research and long-form writing",
+      "code review and architecture"
+    ]
+  },
+  {
     "match": "llama.*70b|llama3.*70",
     "good_for": [
       "high-quality local inference",

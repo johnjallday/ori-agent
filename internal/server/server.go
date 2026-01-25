@@ -13,6 +13,8 @@ import (
 	"github.com/johnjallday/ori-agent/internal/client"
 	"github.com/johnjallday/ori-agent/internal/config"
 	"github.com/johnjallday/ori-agent/internal/devicehttp"
+	"github.com/johnjallday/ori-agent/internal/externalagents"
+	"github.com/johnjallday/ori-agent/internal/externalagentshttp"
 	"github.com/johnjallday/ori-agent/internal/fileshttp"
 	"github.com/johnjallday/ori-agent/internal/filewatcher"
 	"github.com/johnjallday/ori-agent/internal/healthhttp"
@@ -44,6 +46,9 @@ import (
 	"github.com/johnjallday/ori-agent/internal/sessionfiles"
 	"github.com/johnjallday/ori-agent/internal/sessionhttp"
 	"github.com/johnjallday/ori-agent/internal/settingshttp"
+	"github.com/johnjallday/ori-agent/internal/skills"
+	"github.com/johnjallday/ori-agent/internal/skillshttp"
+	"github.com/johnjallday/ori-agent/internal/speechhttp"
 	"github.com/johnjallday/ori-agent/internal/store"
 	"github.com/johnjallday/ori-agent/internal/types"
 	"github.com/johnjallday/ori-agent/internal/updatemanager"
@@ -128,6 +133,7 @@ type Server struct {
 	resetHandler           *settingshttp.ResetHandler
 	autoConfigHandler      *agenthttp.AutoConfigHandler
 	smartOnboardingHandler *onboardinghttp.SmartOnboardingHandler
+	speechHandler          *speechhttp.Handler
 
 	// Session management
 	sessionStore        session.HybridStore
@@ -145,6 +151,14 @@ type Server struct {
 
 	// Review system
 	reviewHandler *reviewhttp.Handler
+
+	// External agents (Claude Code, Codex)
+	externalAgentsCache   *externalagents.Cache
+	externalAgentsHandler *externalagentshttp.Handler
+
+	// Skills (local + external)
+	skillsManager *skills.Manager
+	skillsHandler *skillshttp.Handler
 }
 
 // New creates and initializes a new Server with all dependencies using the ServerBuilder.
@@ -370,6 +384,14 @@ func (s *Server) servePlugins(w http.ResponseWriter, r *http.Request) {
 	s.renderAndWritePage(w, "plugins", data)
 }
 
+func (s *Server) serveSkills(w http.ResponseWriter, r *http.Request) {
+	data := s.prepareBasePageData("skills")
+	data.Title = "Skills - Ori Agent"
+	data.BrandText = "Ori Agent"
+	data.ShowSidebarToggle = true
+	s.renderAndWritePage(w, "skills", data)
+}
+
 func (s *Server) serveModels(w http.ResponseWriter, r *http.Request) {
 	data := s.prepareBasePageData("models")
 	data.ShowSidebarToggle = true
@@ -408,14 +430,25 @@ func (s *Server) handleWorkspacesRoutes(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	// If just /workspaces/{id}, redirect to home (workspace hub is on home page)
+	// If just /workspaces/{id}, serve the workspace detail page
 	if len(parts) == 1 {
-		http.Redirect(w, r, "/", http.StatusSeeOther)
+		s.serveWorkspaceDetail(w, r, workspaceID)
 		return
 	}
 
 	// Otherwise, redirect to home page
 	http.Redirect(w, r, "/", http.StatusSeeOther)
+}
+
+func (s *Server) serveWorkspaceDetail(w http.ResponseWriter, r *http.Request, workspaceID string) {
+	data := s.prepareBasePageData("workspaces")
+	data.Title = "Workspace - Ori Agent"
+	data.BrandText = "Ori Agent"
+	data.ShowSidebarToggle = true
+	data.Extra = map[string]interface{}{
+		"WorkspaceID": workspaceID,
+	}
+	s.renderAndWritePage(w, "workspace-detail", data)
 }
 
 func (s *Server) serveWorkspaceCanvas(w http.ResponseWriter, r *http.Request, workspaceID string) {

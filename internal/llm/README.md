@@ -1,6 +1,6 @@
 # LLM Provider Abstraction Layer
 
-This package provides a unified interface for interacting with multiple Large Language Model (LLM) providers including OpenAI, Claude, Ollama, and more.
+This package provides a unified interface for interacting with multiple Large Language Model (LLM) providers including OpenAI, Claude, Gemini, Ollama, and more.
 
 ## Overview
 

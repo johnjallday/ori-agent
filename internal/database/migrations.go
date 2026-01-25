@@ -9,7 +9,7 @@ import (
 
 // schemaVersion is the current database schema version.
 // Increment this when adding new migrations.
-const schemaVersion = 11
+const schemaVersion = 12
 
 // migrate runs all pending migrations to bring the database up to the current schema.
 func (db *DB) migrate(ctx context.Context) error {
@@ -82,6 +82,8 @@ func (db *DB) runMigration(ctx context.Context, version int) error {
 		return db.migration010SmartInputOverrides(ctx)
 	case 11:
 		return db.migration011DirectoryReferences(ctx)
+	case 12:
+		return db.migration012WorkspaceOrderIndex(ctx)
 	default:
 		return fmt.Errorf("unknown migration version: %d", version)
 	}
@@ -989,6 +991,23 @@ func (db *DB) migration011DirectoryReferences(ctx context.Context) error {
 		ALTER TABLE workspaces ADD COLUMN directory_references_json TEXT DEFAULT '[]'
 	`); err != nil {
 		return fmt.Errorf("failed to add directory_references_json column: %w", err)
+	}
+
+	return nil
+}
+
+// migration012WorkspaceOrderIndex adds manual ordering support for workspaces.
+func (db *DB) migration012WorkspaceOrderIndex(ctx context.Context) error {
+	if _, err := db.ExecContext(ctx, `
+		ALTER TABLE workspaces ADD COLUMN order_index INTEGER DEFAULT 0
+	`); err != nil {
+		return fmt.Errorf("failed to add order_index column: %w", err)
+	}
+
+	if _, err := db.ExecContext(ctx, `
+		CREATE INDEX IF NOT EXISTS idx_workspaces_parent_order ON workspaces(parent_id, order_index)
+	`); err != nil {
+		return fmt.Errorf("failed to create parent/order index on workspaces: %w", err)
 	}
 
 	return nil

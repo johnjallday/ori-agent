@@ -2965,10 +2965,13 @@ async function submitDirectory() {
  * Launch the folder picker helper app
  */
 async function launchFolderPicker() {
+  const workspaceId = window.currentStudioId || window.agentCanvas?.workspaceId || window.canvasWorkspaceId;
+  
   try {
     const response = await fetch('/api/launch-folder-picker', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' }
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ workspace_id: workspaceId })
     });
 
     const result = await response.json();

@@ -11,6 +11,9 @@
  * @description Displays the modal for creating a new workspace with agent selection
  */
 function openCreateWorkspaceModal() {
+  // Populate parent/group selection
+  void populateWorkspaceParentSelect();
+
   // Populate agent selection
   const container = document.getElementById('agents-selection');
 
@@ -47,6 +50,42 @@ function openCreateWorkspaceModal() {
   modal.show();
 }
 
+async function populateWorkspaceParentSelect() {
+  const select = document.getElementById('folderParentSelect');
+  if (!select) return;
+
+  try {
+    const response = await fetch('/api/workspaces?tree=true');
+    if (!response.ok) throw new Error('Failed to load workspaces');
+    const data = await response.json();
+    const tree = data.folders || [];
+
+    const flattened = [];
+    (function walk(nodes, depth) {
+      (nodes || []).forEach((node) => {
+        if (!node || !node.id) return;
+        flattened.push({ id: node.id, name: node.name || node.id, depth });
+        if (node.children && node.children.length > 0) {
+          walk(node.children, depth + 1);
+        }
+      });
+    })(tree, 0);
+
+    const options = ['<option value="">No group</option>'];
+    flattened.forEach((ws) => {
+      const indent = ws.depth > 0 ? `${'--'.repeat(ws.depth)} ` : '';
+      options.push(`<option value="${escapeHtml(ws.id)}">${escapeHtml(indent + ws.name)}</option>`);
+    });
+
+    select.innerHTML = options.join('');
+    select.value = '';
+  } catch (err) {
+    console.error('Failed to populate parent select:', err);
+    select.innerHTML = '<option value="">No group</option>';
+    select.value = '';
+  }
+}
+
 /**
  * Toggles agent selection for workspace creation
  * @param {string} agentName - Name of the agent to toggle
@@ -68,10 +107,12 @@ function toggleAgent(agentName) {
 async function createWorkspace() {
   const nameInput = document.getElementById('folderNameInput');
   const descriptionInput = document.getElementById('folderDescriptionInput');
+  const parentSelect = document.getElementById('folderParentSelect');
   const colorBtn = document.querySelector('#addFolderModal .folder-color-btn.active');
 
   const name = nameInput?.value.trim();
   const description = descriptionInput?.value.trim() || '';
+  const parentId = parentSelect?.value?.trim() || '';
   const color = colorBtn?.dataset.color || '';
 
   if (!name) {
@@ -89,6 +130,7 @@ async function createWorkspace() {
       body: JSON.stringify({
         name: name,
         description: description,
+        parent_id: parentId,
         color: color
       })
     });
@@ -122,11 +164,14 @@ async function createWorkspace() {
     // Clear form
     if (nameInput) nameInput.value = '';
     if (descriptionInput) descriptionInput.value = '';
+    if (parentSelect) parentSelect.value = '';
     window.selectedAgents.clear();
 
     // Refresh workspaces list if function exists
-    if (typeof loadWorkspaces === 'function') {
-      await loadWorkspaces();
+    const refreshFn = (window.WorkspaceHub && window.WorkspaceHub.loadWorkspaces)
+      || window.loadWorkspaces;
+    if (typeof refreshFn === 'function') {
+      await refreshFn();
     }
   } catch (error) {
     console.error('Error creating workspace:', error);

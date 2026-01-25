@@ -10,6 +10,10 @@ export function CheckServerConnection() {
   return window['go']['main']['App']['CheckServerConnection']();
 }
 
+export function GetPreSelectedWorkspace() {
+  return window['go']['main']['App']['GetPreSelectedWorkspace']();
+}
+
 export function GetWorkspaces() {
   return window['go']['main']['App']['GetWorkspaces']();
 }

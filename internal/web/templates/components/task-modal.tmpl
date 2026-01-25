@@ -34,6 +34,7 @@
       </button>
     </div>
     <div class="task-modal-body">
+      <div class="voice-status voice-status--compact" data-voice-status="task" aria-live="polite"></div>
       <!-- Config Mode Toggle -->
       <div class="task-modal-field" style="margin-bottom: 16px;">
         <div style="display: flex; align-items: center; gap: 12px;">
@@ -76,7 +77,23 @@
             </div>
           </div>
           <div class="task-modal-field">
-            <label for="taskAutoDescription" class="task-modal-label">Describe your task</label>
+            <div class="task-modal-label-row">
+              <label for="taskAutoDescription" class="task-modal-label">Describe your task</label>
+              <button
+                type="button"
+                class="btn btn-sm voice-input-btn voice-input-btn--icon"
+                data-voice-target="taskAutoDescription"
+                data-voice-context="task"
+                title="Hold to talk"
+                aria-label="Hold to talk"
+                aria-pressed="false"
+              >
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                  <path d="M12,14A3,3 0 0,0 15,11V5A3,3 0 0,0 9,5V11A3,3 0 0,0 12,14M17,11A1,1 0 0,0 15,11A3,3 0 0,1 9,11A1,1 0 0,0 7,11A5,5 0 0,0 11,15.9V19H9A1,1 0 0,0 9,21H15A1,1 0 0,0 15,19H13V15.9A5,5 0 0,0 17,11Z"/>
+                </svg>
+                <span class="visually-hidden">Hold to talk</span>
+              </button>
+            </div>
             <textarea id="taskAutoDescription" class="task-modal-textarea" rows="4" placeholder="Example: Research 3 things to do in NYC scheduled at 6pm tomorrow&#10;&#10;Or: Send a daily summary report every morning at 9am&#10;&#10;Or: Check server status every 30 minutes"></textarea>
           </div>
         </div>
@@ -100,7 +117,23 @@
             </div>
           </div>
           <div class="task-modal-field">
-            <label for="taskAutoEditDescription" class="task-modal-label">How would you like to modify it?</label>
+            <div class="task-modal-label-row">
+              <label for="taskAutoEditDescription" class="task-modal-label">How would you like to modify it?</label>
+              <button
+                type="button"
+                class="btn btn-sm voice-input-btn voice-input-btn--icon"
+                data-voice-target="taskAutoEditDescription"
+                data-voice-context="task"
+                title="Hold to talk"
+                aria-label="Hold to talk"
+                aria-pressed="false"
+              >
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                  <path d="M12,14A3,3 0 0,0 15,11V5A3,3 0 0,0 9,5V11A3,3 0 0,0 12,14M17,11A1,1 0 0,0 15,11A3,3 0 0,1 9,11A1,1 0 0,0 7,11A5,5 0 0,0 11,15.9V19H9A1,1 0 0,0 9,21H15A1,1 0 0,0 15,19H13V15.9A5,5 0 0,0 17,11Z"/>
+                </svg>
+                <span class="visually-hidden">Hold to talk</span>
+              </button>
+            </div>
             <textarea id="taskAutoEditDescription" class="task-modal-textarea" rows="3" placeholder="Example: Change the schedule to every weekday at 9am&#10;&#10;Or: Add more details about the expected output format&#10;&#10;Or: Assign this to a different agent"></textarea>
           </div>
         </div>
@@ -109,11 +142,43 @@
       <!-- Manual Mode Section -->
       <div id="taskManualSection">
         <div class="task-modal-field">
-          <label for="taskModalDescription" class="task-modal-label">Title</label>
+          <div class="task-modal-label-row">
+            <label for="taskModalDescription" class="task-modal-label">Title</label>
+            <button
+              type="button"
+              class="btn btn-sm voice-input-btn voice-input-btn--icon"
+              data-voice-target="taskModalDescription"
+              data-voice-context="task"
+              title="Hold to talk"
+              aria-label="Hold to talk"
+              aria-pressed="false"
+            >
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                <path d="M12,14A3,3 0 0,0 15,11V5A3,3 0 0,0 9,5V11A3,3 0 0,0 12,14M17,11A1,1 0 0,0 15,11A3,3 0 0,1 9,11A1,1 0 0,0 7,11A5,5 0 0,0 11,15.9V19H9A1,1 0 0,0 9,21H15A1,1 0 0,0 15,19H13V15.9A5,5 0 0,0 17,11Z"/>
+              </svg>
+              <span class="visually-hidden">Hold to talk</span>
+            </button>
+          </div>
           <input type="text" id="taskModalDescription" class="task-modal-input" placeholder="What needs to be done?" autocomplete="off">
         </div>
       <div class="task-modal-field">
-        <label for="taskModalDetails" class="task-modal-label">Details <span class="task-modal-optional">(optional)</span></label>
+        <div class="task-modal-label-row">
+          <label for="taskModalDetails" class="task-modal-label">Details <span class="task-modal-optional">(optional)</span></label>
+          <button
+            type="button"
+            class="btn btn-sm voice-input-btn voice-input-btn--icon"
+            data-voice-target="taskModalDetails"
+            data-voice-context="task"
+            title="Hold to talk"
+            aria-label="Hold to talk"
+            aria-pressed="false"
+          >
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+              <path d="M12,14A3,3 0 0,0 15,11V5A3,3 0 0,0 9,5V11A3,3 0 0,0 12,14M17,11A1,1 0 0,0 15,11A3,3 0 0,1 9,11A1,1 0 0,0 7,11A5,5 0 0,0 11,15.9V19H9A1,1 0 0,0 9,21H15A1,1 0 0,0 15,19H13V15.9A5,5 0 0,0 17,11Z"/>
+            </svg>
+            <span class="visually-hidden">Hold to talk</span>
+          </button>
+        </div>
         <textarea id="taskModalDetails" class="task-modal-textarea" placeholder="Add additional context, notes, or instructions..." rows="3"></textarea>
       </div>
       <div style="display: flex; gap: 12px;">

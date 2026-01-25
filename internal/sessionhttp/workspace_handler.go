@@ -35,6 +35,9 @@ func (h *Handler) HandleWorkspaces(w http.ResponseWriter, r *http.Request) {
 		case "layout":
 			h.handleWorkspaceLayout(w, r, id)
 			return
+		case "board":
+			h.handleWorkspaceBoard(w, r, id)
+			return
 		}
 	}
 
@@ -77,6 +80,7 @@ func (h *Handler) createWorkspace(w http.ResponseWriter, r *http.Request) {
 		Name        string `json:"name"`
 		Description string `json:"description,omitempty"`
 		ParentID    string `json:"parent_id,omitempty"`
+		OrderIndex  *int   `json:"order_index,omitempty"`
 		Color       string `json:"color,omitempty"`
 	}
 
@@ -94,6 +98,9 @@ func (h *Handler) createWorkspace(w http.ResponseWriter, r *http.Request) {
 		Description: req.Description,
 		ParentID:    req.ParentID,
 		Color:       req.Color,
+	}
+	if req.OrderIndex != nil {
+		workspace.OrderIndex = *req.OrderIndex
 	}
 
 	if err := h.store.CreateWorkspace(r.Context(), workspace); err != nil {
@@ -142,6 +149,7 @@ func (h *Handler) updateWorkspace(w http.ResponseWriter, r *http.Request, id str
 		Name        *string `json:"name,omitempty"`
 		Description *string `json:"description,omitempty"`
 		ParentID    *string `json:"parent_id,omitempty"`
+		OrderIndex  *int    `json:"order_index,omitempty"`
 		Color       *string `json:"color,omitempty"`
 	}
 
@@ -162,7 +170,24 @@ func (h *Handler) updateWorkspace(w http.ResponseWriter, r *http.Request, id str
 			_ = orihttp.RespondBadRequest(w, "Workspace cannot be its own parent")
 			return
 		}
+		if *req.ParentID != "" {
+			descendants, err := h.store.GetSubworkspaceIDs(r.Context(), workspace.ID)
+			if err != nil {
+				logger.Error("Failed to load workspace descendants", logger.Fields{"id": id, "error": err})
+				_ = orihttp.RespondInternalError(w, "Failed to update workspace")
+				return
+			}
+			for _, descendantID := range descendants {
+				if descendantID == *req.ParentID {
+					_ = orihttp.RespondBadRequest(w, "Workspace cannot be moved under its descendant")
+					return
+				}
+			}
+		}
 		workspace.ParentID = *req.ParentID
+	}
+	if req.OrderIndex != nil {
+		workspace.OrderIndex = *req.OrderIndex
 	}
 	if req.Color != nil {
 		workspace.Color = *req.Color

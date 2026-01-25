@@ -33,6 +33,12 @@ func TestValidateSystemModel(t *testing.T) {
 			wantErr:  false,
 		},
 		{
+			name:     "valid gemini provider",
+			provider: "gemini",
+			model:    "gemini-2.5-flash",
+			wantErr:  false,
+		},
+		{
 			name:     "both empty is valid",
 			provider: "",
 			model:    "",
@@ -107,7 +113,7 @@ func TestValidProviders(t *testing.T) {
 	providers := ValidProviders()
 
 	// Check expected providers exist
-	expected := []string{"openai", "claude", "ollama"}
+	expected := []string{"openai", "claude", "gemini", "ollama"}
 	if len(providers) != len(expected) {
 		t.Errorf("ValidProviders() returned %d providers, want %d", len(providers), len(expected))
 	}

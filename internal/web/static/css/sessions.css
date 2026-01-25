@@ -2876,6 +2876,18 @@ body:has(.chat-info-bar) #currentAgentDisplay {
   color: var(--text-secondary);
 }
 
+.task-modal-label-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.task-modal-label-row .task-modal-label {
+  margin-bottom: 0;
+}
+
 .task-modal-optional {
   font-weight: 400;
   color: var(--text-tertiary);

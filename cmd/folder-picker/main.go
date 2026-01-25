@@ -2,6 +2,7 @@ package main
 
 import (
 	"embed"
+	"flag"
 
 	"github.com/wailsapp/wails/v2"
 	"github.com/wailsapp/wails/v2/pkg/options"
@@ -14,8 +15,12 @@ import (
 var assets embed.FS
 
 func main() {
+	// Parse flags
+	workspaceID := flag.String("workspace", "", "Pre-selected workspace ID")
+	flag.Parse()
+
 	// Create an instance of the app structure
-	app := NewApp()
+	app := NewApp(*workspaceID)
 
 	// Create application with options
 	err := wails.Run(&options.App{

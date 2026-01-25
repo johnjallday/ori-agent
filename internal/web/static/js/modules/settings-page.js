@@ -11,6 +11,11 @@ document.getElementById('toggleAnthropicKey')?.addEventListener('click', functio
   input.type = input.type === 'password' ? 'text' : 'password';
 });
 
+document.getElementById('toggleGeminiKey')?.addEventListener('click', function() {
+  const input = document.getElementById('geminiApiKeyInput');
+  input.type = input.type === 'password' ? 'text' : 'password';
+});
+
 // Save OpenAI API Key
 document.getElementById('saveOpenaiKey')?.addEventListener('click', async function() {
   const apiKey = document.getElementById('openaiApiKeyInput').value.trim();
@@ -31,7 +36,7 @@ document.getElementById('saveOpenaiKey')?.addEventListener('click', async functi
       headers: {
         'Content-Type': 'application/json'
       },
-      body: JSON.stringify({ api_key: apiKey })
+      body: JSON.stringify({ openai_api_key: apiKey })
     });
 
     if (response.ok) {
@@ -62,9 +67,7 @@ document.getElementById('saveAnthropicKey')?.addEventListener('click', async fun
   }
 
   try {
-    // Note: You'll need to add an endpoint for Anthropic API key
-    // For now, we can use the same endpoint with a different structure
-    const response = await fetch('/api/settings', {
+    const response = await fetch('/api/api-key', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json'
@@ -75,8 +78,39 @@ document.getElementById('saveAnthropicKey')?.addEventListener('click', async fun
     });
 
     if (response.ok) {
-      alert('Anthropic API key saved successfully! Please restart the server for changes to take effect.');
+      alert('Anthropic API key saved successfully!');
       document.getElementById('anthropicApiKeyInput').value = '';
+    } else {
+      const error = await response.text();
+      alert('Failed to save API key: ' + error);
+    }
+  } catch (error) {
+    console.error('Error saving API key:', error);
+    alert('Error saving API key: ' + error.message);
+  }
+});
+
+// Save Gemini API Key
+document.getElementById('saveGeminiKey')?.addEventListener('click', async function() {
+  const apiKey = document.getElementById('geminiApiKeyInput').value.trim();
+
+  if (!apiKey) {
+    alert('Please enter an API key');
+    return;
+  }
+
+  try {
+    const response = await fetch('/api/api-key', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({ gemini_api_key: apiKey })
+    });
+
+    if (response.ok) {
+      alert('Gemini API key saved successfully!');
+      document.getElementById('geminiApiKeyInput').value = '';
     } else {
       const error = await response.text();
       alert('Failed to save API key: ' + error);
@@ -714,4 +748,147 @@ Status: Online
   if (document.getElementById('systemModelProvider')) {
     loadProviders().then(() => loadSystemModel());
   }
+})();
+
+// Voice Settings (local storage for now)
+(function() {
+  const providerSelect = document.getElementById('speechProviderSelect');
+  const languageSelect = document.getElementById('speechLanguageSelect');
+  const saveBtn = document.getElementById('saveSpeechSettingsBtn');
+  const diagnosticsBtn = document.getElementById('voiceDiagnosticsBtn');
+  const diagnosticsResult = document.getElementById('voiceDiagnosticsResult');
+  const storageKey = 'voiceSettings';
+
+  if (!providerSelect || !languageSelect || !saveBtn) {
+    return;
+  }
+
+  function notify(message, type = 'success') {
+    if (window.Toast && typeof Toast[type] === 'function') {
+      Toast[type](message);
+      return;
+    }
+    alert(message);
+  }
+
+  function applySettings(settings) {
+    if (!settings) return;
+    if (settings.speech_provider || settings.provider) {
+      providerSelect.value = settings.speech_provider || settings.provider;
+    }
+    if (settings.speech_language || settings.language) {
+      languageSelect.value = settings.speech_language || settings.language;
+    }
+  }
+
+  function cacheSettings(settings) {
+    if (!window.localStorage) return;
+    try {
+      localStorage.setItem(storageKey, JSON.stringify({
+        provider: settings.speech_provider || settings.provider,
+        language: settings.speech_language || settings.language
+      }));
+    } catch (error) {
+      console.error('Failed to cache voice settings:', error);
+    }
+  }
+
+  async function loadSettings() {
+    let loaded = false;
+    try {
+      const response = await fetch('/api/settings/speech');
+      if (response.ok) {
+        const data = await response.json();
+        applySettings(data);
+        cacheSettings(data);
+        loaded = true;
+      }
+    } catch (error) {
+      console.error('Failed to load speech settings from server:', error);
+    }
+
+    if (!loaded && window.localStorage) {
+      try {
+        const raw = localStorage.getItem(storageKey);
+        if (!raw) return;
+        const parsed = JSON.parse(raw);
+        applySettings(parsed);
+      } catch (error) {
+        console.error('Failed to load cached voice settings:', error);
+      }
+    }
+  }
+
+  async function saveSettings() {
+    const payload = {
+      speech_provider: providerSelect.value,
+      speech_language: languageSelect.value,
+      speech_model: ''
+    };
+
+    try {
+      const response = await fetch('/api/settings/speech', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(errorText || 'Failed to save settings');
+      }
+
+      cacheSettings(payload);
+      notify('Voice settings saved.', 'success');
+      window.dispatchEvent(new CustomEvent('voice-settings:updated', { detail: payload }));
+    } catch (error) {
+      console.error('Failed to save voice settings:', error);
+      notify('Failed to save voice settings.', 'error');
+    }
+  }
+
+  saveBtn.addEventListener('click', () => {
+    saveSettings();
+  });
+
+  async function runDiagnostics() {
+    if (!diagnosticsResult) return;
+    diagnosticsResult.style.display = 'block';
+    diagnosticsResult.textContent = 'Running voice diagnostics...';
+
+    const speechSupported = Boolean(window.SpeechRecognition || window.webkitSpeechRecognition);
+    const mediaSupported = Boolean(window.MediaRecorder);
+    const deviceSupported = Boolean(navigator.mediaDevices && navigator.mediaDevices.getUserMedia);
+
+    let micStatus = 'unknown';
+    if (deviceSupported) {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        micStatus = 'granted';
+        stream.getTracks().forEach((track) => track.stop());
+      } catch (error) {
+        if (error && error.name === 'NotAllowedError') {
+          micStatus = 'denied';
+        } else {
+          micStatus = `error (${error.name || 'unknown'})`;
+        }
+      }
+    } else {
+      micStatus = 'unavailable';
+    }
+
+    const lines = [
+      `Web Speech API: ${speechSupported ? 'supported' : 'not supported'}`,
+      `MediaRecorder: ${mediaSupported ? 'supported' : 'not supported'}`,
+      `Microphone access: ${micStatus}`
+    ];
+
+    diagnosticsResult.textContent = lines.join('\n');
+  }
+
+  diagnosticsBtn?.addEventListener('click', () => {
+    runDiagnostics();
+  });
+
+  loadSettings();
 })();

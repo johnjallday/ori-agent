@@ -54,15 +54,28 @@ func (h *HTTPHandler) LaunchFolderPicker(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	// Launch the app
+	// Launch the app with workspace_id if provided
 	var cmd *exec.Cmd
+	args := []string{}
+	if reqBody.WorkspaceID != "" {
+		args = append(args, "-workspace", reqBody.WorkspaceID)
+	}
+
 	switch runtime.GOOS {
 	case "darwin":
-		cmd = exec.Command("open", appPath)
+		// On macOS, 'open' doesn't pass arguments to the app easily unless using --args
+		if reqBody.WorkspaceID != "" {
+			cmd = exec.Command("open", appPath, "--args", "-workspace", reqBody.WorkspaceID)
+		} else {
+			cmd = exec.Command("open", appPath)
+		}
 	case "windows":
 		cmd = exec.Command("cmd", "/c", "start", "", appPath)
+		if reqBody.WorkspaceID != "" {
+			cmd.Args = append(cmd.Args, "-workspace", reqBody.WorkspaceID)
+		}
 	default: // linux and others
-		cmd = exec.Command(appPath)
+		cmd = exec.Command(appPath, args...)
 	}
 
 	if err := cmd.Start(); err != nil {

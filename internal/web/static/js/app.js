@@ -219,9 +219,14 @@ async function refreshSystemModelDisplay() {
             providerEl.style.background = 'rgba(16, 163, 127, 0.2)';
             providerEl.style.color = '#10a37f';
             break;
+          case 'claude':
           case 'anthropic':
             providerEl.style.background = 'rgba(204, 147, 102, 0.2)';
             providerEl.style.color = '#cc9366';
+            break;
+          case 'gemini':
+            providerEl.style.background = 'rgba(66, 133, 244, 0.2)';
+            providerEl.style.color = '#4285f4';
             break;
           case 'ollama':
             providerEl.style.background = 'rgba(59, 130, 246, 0.2)';
@@ -1555,7 +1560,84 @@ function setupSidebarToggle() {
 window.appendMessageToUI = appendMessageToUI;
 window.clearChatHistory = clearChatHistory;
 
-// Initialize application
+function setupSkillsDropdown() {
+  const btn = document.getElementById('skillsDropdownBtn');
+  const dropdown = document.getElementById('skillsDropdown');
+  const content = document.getElementById('skillsDropdownContent');
+  if (!btn || !dropdown || !content) return;
+
+  let skillsCache = null;
+  let cacheTime = 0;
+  const CACHE_TTL = 30000;
+
+  async function fetchSkills() {
+    const now = Date.now();
+    if (skillsCache && (now - cacheTime) < CACHE_TTL) {
+      return skillsCache;
+    }
+    try {
+      const res = await fetch('/api/skills');
+      if (!res.ok) throw new Error('Failed to fetch skills');
+      const data = await res.json();
+      skillsCache = data.skills || [];
+      cacheTime = now;
+      return skillsCache;
+    } catch (err) {
+      appLog.error('Skills fetch error:', err);
+      return null;
+    }
+  }
+
+  function renderSkills(skills) {
+    if (!skills) {
+      content.innerHTML = '<div style="padding: 12px; text-align: center; color: var(--text-muted); font-size: 12px;">Failed to load skills</div>';
+      return;
+    }
+    if (skills.length === 0) {
+      content.innerHTML = '<div style="padding: 12px; text-align: center; color: var(--text-muted); font-size: 12px;">No skills available</div>';
+      return;
+    }
+    content.innerHTML = skills.map(skill => {
+      const desc = skill.description || 'Run /' + skill.name;
+      const src = skill.source || 'local';
+      return `<button class="skill-item" data-skill="${skill.name}" style="display: block; width: 100%; text-align: left; padding: 8px 12px; border: none; background: none; cursor: pointer; font-size: 12px; color: var(--text-primary); transition: background 0.15s;">
+        <div style="font-weight: 500;">${skill.name} <span style="font-size: 10px; padding: 2px 6px; border-radius: 4px; background: var(--bg-secondary); color: var(--text-muted);">${src}</span></div>
+        <div style="font-size: 11px; color: var(--text-muted); margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${desc}</div>
+      </button>`;
+    }).join('');
+
+    content.querySelectorAll('.skill-item').forEach(item => {
+      item.addEventListener('mouseenter', () => item.style.background = 'var(--bg-secondary)');
+      item.addEventListener('mouseleave', () => item.style.background = 'none');
+      item.addEventListener('click', () => {
+        const name = item.dataset.skill;
+        dropdown.style.display = 'none';
+        if (window.sendMessageToChat) {
+          window.sendMessageToChat('/' + name);
+        }
+      });
+    });
+  }
+
+  btn.addEventListener('click', async () => {
+    const isVisible = dropdown.style.display !== 'none';
+    if (isVisible) {
+      dropdown.style.display = 'none';
+      return;
+    }
+    dropdown.style.display = 'block';
+    content.innerHTML = '<div style="padding: 12px; text-align: center; color: var(--text-muted); font-size: 12px;">Loading...</div>';
+    const skills = await fetchSkills();
+    renderSkills(skills);
+  });
+
+  document.addEventListener('click', (e) => {
+    if (!btn.contains(e.target) && !dropdown.contains(e.target)) {
+      dropdown.style.display = 'none';
+    }
+  });
+}
+
 async function initializeApp() {
   // Initialize chat state machine
   try {
@@ -1606,6 +1688,9 @@ async function initializeApp() {
   // Set up chat functionality
   setupChat();
   setupChatPanel();
+
+  // Set up skills dropdown
+  setupSkillsDropdown();
 
   // Set up sidebar toggle functionality
   setupSidebarToggle();

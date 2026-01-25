@@ -23,6 +23,7 @@ func (ch *CommandHandler) HandleHelp(w http.ResponseWriter, r *http.Request) {
 - **/agents** - List all available agents
 - **/switch <agent-name>** - Switch to a different agent
 - **/tools** - List all available plugin tools and operations
+- **/skills** - List all available skills
 - **/tool <name> <args>** - Execute a tool directly without LLM decision-making
 
 **Workspace Commands:**
@@ -42,6 +43,10 @@ func (ch *CommandHandler) HandleHelp(w http.ResponseWriter, r *http.Request) {
 - Each tool shows available options and parameters
 - Tools are specific to your current agent configuration
 - Use **/tool** to execute tools directly (faster, no LLM overhead)
+
+**Skills:**
+- Use **/skills** to list available skills
+- Use **/skill <name> <args>** or **/<name>** to run a skill
 
 **Direct Tool Execution:**
 The **/tool** command allows you to call tools directly without LLM decision-making:

@@ -514,10 +514,6 @@ export class RendererPanels {
     if (this.state.expandedAgentPanelWidth === this.state.expandedAgentPanelTargetWidth && !this.state._panelDrawnLogged) {
       this.state._panelDrawnLogged = true;
     }
-        canvasHeight: this.canvas.height
-      });
-      this.state._panelDrawnLogged = true;
-    }
 
     // Draw panel background with shadow
     this.ctx.save();

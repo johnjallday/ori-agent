@@ -51,6 +51,7 @@ This script:
 ```bash
 # 1. Build DMG
 goreleaser release --snapshot --clean --skip=publish
+./scripts/build-folder-picker.sh
 VERSION=$(cat VERSION)-next
 ARCH=$(uname -m)
 ./build/macos/create-dmg.sh "$VERSION" darwin "$ARCH" dist

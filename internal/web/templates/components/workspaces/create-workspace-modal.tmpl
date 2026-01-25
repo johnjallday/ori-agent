@@ -10,6 +10,15 @@
       <div class="modal-body">
         <input type="text" id="folderNameInput" class="modern-input w-100 mb-2" placeholder="Workspace name">
         <textarea id="folderDescriptionInput" class="modern-input w-100 mb-2" placeholder="Description (optional)" rows="2" style="resize: vertical;"></textarea>
+
+        <label for="folderParentSelect" style="font-size: 12px; color: var(--text-secondary);">Group (optional)</label>
+        <select id="folderParentSelect" class="modern-input w-100 mb-2" aria-label="Select parent workspace">
+          <option value="">No group</option>
+        </select>
+        <div style="margin-top: -6px; margin-bottom: 10px; font-size: 12px; color: var(--text-secondary);">
+          Optional. Choose a group (parent workspace).
+        </div>
+
         <div class="folder-color-picker">
           <label style="font-size: 12px; color: var(--text-secondary);">Color:</label>
           <div id="folderColorOptions" class="folder-color-options mt-1">

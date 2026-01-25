@@ -6,10 +6,10 @@ on:
       - 'v*.*.*'
 
 jobs:
-  # Main release job - builds binaries, DMG, .deb, .rpm
+  # Main release job - builds Linux/Windows binaries and Linux packages
   release:
-    name: Create Release (macOS/Linux)
-    runs-on: macos-latest  # macOS runner needed for DMG creation
+    name: Create Release (Linux/Windows)
+    runs-on: ubuntu-latest
     permissions:
       contents: write
     outputs:
@@ -33,6 +33,14 @@ jobs:
       - name: Run tests
         run: go test -v -short ./...
 
+      - name: Install folder picker build deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.0-dev build-essential pkg-config
+
+      - name: Build folder picker app
+        run: ./scripts/build-folder-picker.sh
+
       - name: Run GoReleaser
         uses: goreleaser/goreleaser-action@v6
         with:
@@ -42,9 +50,44 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+  # macOS DMG build job
+  build-dmg:
+    name: Build macOS DMG
+    runs-on: macos-latest
+    needs: release
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: '1.25'
+
+      - name: Build folder picker app
+        run: ./scripts/build-folder-picker.sh
+
+      - name: Install GoReleaser
+        uses: goreleaser/goreleaser-action@v6
+        with:
+          distribution: goreleaser
+          version: '~> v2'
+          install-only: true
+
+      - name: Build macOS server binary
+        run: goreleaser build --clean --skip=before --id=server-macos
+
+      - name: Build macOS menubar binary
+        run: goreleaser build --skip=before --id=menubar
+
       - name: Create macOS DMG installers
         run: |
-          VERSION="${{ steps.get_version.outputs.VERSION }}"
+          VERSION="${{ needs.release.outputs.version }}"
           SHORT_VERSION="${VERSION#v}"
 
           echo "Creating DMGs for version $SHORT_VERSION..."
@@ -77,7 +120,7 @@ jobs:
   build-msi:
     name: Build Windows MSI
     runs-on: windows-latest
-    needs: release  # Wait for main release to create the GitHub release
+    needs: release  # Wait for release job to create the GitHub release
     permissions:
       contents: write
 
@@ -91,6 +134,10 @@ jobs:
         uses: actions/setup-go@v6
         with:
           go-version: '1.25'
+
+      - name: Build folder picker app
+        shell: bash
+        run: ./scripts/build-folder-picker.sh
 
       - name: Install WiX Toolset
         run: |

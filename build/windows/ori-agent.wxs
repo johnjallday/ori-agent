@@ -4,7 +4,7 @@
   WiX Toolset v3 Template for GoReleaser
 
   This file is processed by GoReleaser's template engine.
-  Available variables: {{.ProjectName}}, {{.Version}}, {{.Binary}}, {{.Arch}}, {{.MsiArch}}
+  Available variables: {{.ProjectName}}, {{.Version}}, {{.Binary}}, {{.FolderPickerBinary}}, {{.Arch}}, {{.MsiArch}}
 -->
 <Wix xmlns="http://schemas.microsoft.com/wix/2006/wi">
 
@@ -88,6 +88,13 @@
                      System="yes" />
         -->
       </Component>
+      <Component Id="OriFolderPickerExecutable" Guid="*" Win64="$(var.Win64)">
+        <File Id="OriFolderPickerEXE"
+              Name="ori-folder-picker.exe"
+              Source="{{.FolderPickerBinary}}"
+              KeyPath="yes"
+              Checksum="yes" />
+      </Component>
     </DirectoryRef>
 
     <!-- Start Menu Shortcut Component -->
@@ -153,6 +160,7 @@
              Absent="disallow">
 
       <ComponentRef Id="OriAgentExecutable" />
+      <ComponentRef Id="OriFolderPickerExecutable" />
       <ComponentRef Id="StartMenuShortcut" />
       <!-- Desktop shortcut included in main feature to satisfy WiX ICE69 -->
       <!-- (shortcut must be in same feature as target file) -->

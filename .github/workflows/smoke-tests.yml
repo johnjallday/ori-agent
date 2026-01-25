@@ -44,6 +44,9 @@ jobs:
           # macOS can run all builds including CGO menubar
           goreleaser release --snapshot --clean --skip=publish
 
+      - name: Build folder picker app
+        run: ./scripts/build-folder-picker.sh
+
       - name: Create DMG
         run: |
           VERSION=$(cat VERSION)-next
@@ -137,6 +140,14 @@ jobs:
           install-only: true
           version: latest  # Use latest for 'ids' field support in archives
 
+      - name: Install folder picker build deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.0-dev build-essential pkg-config
+
+      - name: Build folder picker app
+        run: ./scripts/build-folder-picker.sh
+
       - name: Build packages
         run: |
           # Build server binaries and create Linux packages
@@ -218,6 +229,13 @@ jobs:
           # Install latest goreleaser (for 'ids' field support in archives)
           curl -Lo goreleaser.tar.gz https://github.com/goreleaser/goreleaser/releases/latest/download/goreleaser_Linux_x86_64.tar.gz
           tar xzf goreleaser.tar.gz -C /usr/local/bin goreleaser
+
+      - name: Install folder picker build deps
+        run: |
+          dnf install -y gtk3-devel webkit2gtk4.0-devel gcc gcc-c++ make pkgconf-pkg-config
+
+      - name: Build folder picker app
+        run: ./scripts/build-folder-picker.sh
 
       - name: Build packages
         run: |
@@ -302,7 +320,11 @@ jobs:
         shell: pwsh
         run: |
           # Build server binary only, skip before hooks (bash scripts don't work on Windows)
-          goreleaser build --id=server --snapshot --clean --skip=before
+          goreleaser build --id=server-windows --snapshot --clean --skip=before
+
+      - name: Build folder picker app
+        shell: bash
+        run: ./scripts/build-folder-picker.sh
 
       - name: Create MSI
         shell: pwsh

@@ -2,6 +2,7 @@ package chathttp
 
 import (
 	"github.com/johnjallday/ori-agent/internal/pluginhttp"
+	"github.com/johnjallday/ori-agent/internal/skills"
 	"github.com/johnjallday/ori-agent/internal/store"
 	"github.com/johnjallday/ori-agent/internal/workspace"
 )
@@ -12,6 +13,10 @@ type CommandHandler struct {
 	workspaceStore workspace.Store
 	enumExtractor  *pluginhttp.EnumExtractor
 	shutdownFunc   func()
+	skillsManager  interface {
+		GetSkill(string, string) (*skills.Skill, bool, error)
+		ListSkills(string) ([]skills.Skill, error)
+	}
 }
 
 // NewCommandHandler creates a new command handler
@@ -30,6 +35,14 @@ func (ch *CommandHandler) SetWorkspaceStore(ws workspace.Store) {
 // SetShutdownFunc sets the shutdown function to be called on exit
 func (ch *CommandHandler) SetShutdownFunc(fn func()) {
 	ch.shutdownFunc = fn
+}
+
+// SetSkillsManager sets the skills manager for /skills command
+func (ch *CommandHandler) SetSkillsManager(manager interface {
+	GetSkill(string, string) (*skills.Skill, bool, error)
+	ListSkills(string) ([]skills.Skill, error)
+}) {
+	ch.skillsManager = manager
 }
 
 // interfaceSliceToStrings converts an interface slice to a string slice

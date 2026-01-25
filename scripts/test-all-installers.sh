@@ -17,7 +17,19 @@ echo "╚═══════════════════════�
 echo ""
 
 echo "🚀 Building all installers..."
-goreleaser release --snapshot --clean --skip=publish
+# Skip nfpm (Linux packages) when running on non-Linux systems
+# The Linux build is skipped on macOS, so nfpm will fail
+if [ "$(uname -s)" = "Linux" ]; then
+  goreleaser release --snapshot --clean --skip=publish
+else
+  goreleaser release --snapshot --clean --skip=publish,nfpm
+fi
+
+# Build folder picker for DMG packaging
+echo ""
+echo "🔨 Building folder picker..."
+./scripts/build-folder-picker.sh > /dev/null 2>&1
+echo "✅ Folder picker built"
 
 # Create DMGs manually (publishers are skipped in snapshot mode)
 echo ""
@@ -135,8 +147,11 @@ echo "==================================="
 echo "2. Testing Linux .deb (Ubuntu)"
 echo "==================================="
 
-# Check if Docker is available
-if ! command -v docker &> /dev/null; then
+# Skip if packages weren't built on this platform
+if ! ls dist/ori-agent_*_linux_amd64.deb > /dev/null 2>&1; then
+  echo "⚠️  No Linux .deb packages found, skipping Linux .deb test"
+  DEB_SKIPPED=true
+elif ! command -v docker &> /dev/null; then
   echo "⚠️  Docker not installed, skipping Linux .deb test"
   echo "   Install Docker to run: https://docs.docker.com/get-docker/"
   DEB_SKIPPED=true
@@ -196,8 +211,11 @@ echo "==================================="
 echo "3. Testing Linux .rpm (Fedora)"
 echo "==================================="
 
-# Check if Docker is available
-if ! command -v docker &> /dev/null; then
+# Skip if packages weren't built on this platform
+if ! ls dist/ori-agent-*-linux-amd64.rpm > /dev/null 2>&1; then
+  echo "⚠️  No Linux .rpm packages found, skipping Linux .rpm test"
+  RPM_SKIPPED=true
+elif ! command -v docker &> /dev/null; then
   echo "⚠️  Docker not installed, skipping Linux .rpm test"
   echo "   Install Docker to run: https://docs.docker.com/get-docker/"
   RPM_SKIPPED=true

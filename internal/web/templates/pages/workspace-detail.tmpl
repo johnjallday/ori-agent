@@ -1,0 +1,968 @@
+{{define "workspace-detail"}}
+<!DOCTYPE html>
+<html data-bs-theme="light">
+{{template "head.tmpl" .}}
+
+<body class="bg-light">
+  {{template "navbar.tmpl" .}}
+
+  <div class="main-content-wrapper">
+    {{template "sidebar.tmpl" .}}
+
+    <div class="main-content">
+      <div class="container-fluid py-4">
+        <!-- Workspace Detail View -->
+        <div id="workspace-detail-view">
+          <!-- Header Card -->
+          <div class="modern-card p-3 mb-3">
+            <div class="d-flex justify-content-between align-items-center">
+              <div class="d-flex align-items-center gap-3">
+                <!-- Back to Hub -->
+                <a href="/" class="modern-btn modern-btn-secondary">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" class="me-1">
+                    <path d="M20,11V13H8L13.5,18.5L12.08,19.92L4.16,12L12.08,4.08L13.5,5.5L8,11H20Z"/>
+                  </svg>
+                  Hub
+                </a>
+
+                <!-- Breadcrumb -->
+                <nav aria-label="breadcrumb">
+                  <ol class="breadcrumb mb-0" style="font-size: 0.875rem;">
+                    <li class="breadcrumb-item"><a href="/" style="color: var(--text-secondary); text-decoration: none;">Home</a></li>
+                    <li class="breadcrumb-item active" aria-current="page" id="workspace-breadcrumb-name">Loading...</li>
+                  </ol>
+                </nav>
+              </div>
+
+              <div class="d-flex align-items-center gap-2">
+                <!-- Open Canvas Button -->
+                <a id="open-canvas-btn" href="#" class="modern-btn modern-btn-primary">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" class="me-1">
+                    <path d="M12,2A10,10 0 0,0 2,12A10,10 0 0,0 12,22A10,10 0 0,0 22,12A10,10 0 0,0 12,2M12,4A8,8 0 0,1 20,12A8,8 0 0,1 12,20A8,8 0 0,1 4,12A8,8 0 0,1 12,4M12,6A6,6 0 0,0 6,12A6,6 0 0,0 12,18A6,6 0 0,0 18,12A6,6 0 0,0 12,6M12,8A4,4 0 0,1 16,12A4,4 0 0,1 12,16A4,4 0 0,1 8,12A4,4 0 0,1 12,8Z"/>
+                  </svg>
+                  Open Canvas
+                </a>
+
+                <!-- Live Updates Indicator -->
+                <span class="d-inline-flex align-items-center gap-1 px-2 py-1" style="background: rgba(40,167,69,0.1); border-radius: 4px; font-size: 0.75rem;">
+                  <span class="status-indicator status-online"></span>
+                  <span style="color: var(--success-color); font-weight: 500;">Live Updates</span>
+                </span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Workspace Info Card -->
+          <div class="modern-card p-4 mb-4">
+            <div class="d-flex justify-content-between align-items-start">
+              <div>
+                <h1 id="workspace-name" class="mb-2" style="font-size: 1.5rem; font-weight: 600; color: var(--text-primary);">Loading...</h1>
+                <p id="workspace-description" class="mb-0" style="color: var(--text-secondary); font-size: 0.875rem;">Loading workspace details...</p>
+              </div>
+              <div class="d-flex align-items-center gap-3">
+                <div class="text-center">
+                  <div id="workspace-agent-count" class="fw-bold" style="font-size: 1.25rem; color: var(--primary-color);">0</div>
+                  <div style="font-size: 0.75rem; color: var(--text-secondary);">Agents</div>
+                </div>
+                <div class="text-center">
+                  <div id="workspace-task-count" class="fw-bold" style="font-size: 1.25rem; color: var(--primary-color);">0</div>
+                  <div style="font-size: 0.75rem; color: var(--text-secondary);">Tasks</div>
+                </div>
+                <div class="text-center">
+                  <div id="workspace-session-count" class="fw-bold" style="font-size: 1.25rem; color: var(--primary-color);">0</div>
+                  <div style="font-size: 0.75rem; color: var(--text-secondary);">Sessions</div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Children Workspaces (inside info card, only shown if has children) -->
+            <div id="workspace-detail-children-panel" style="display: none; margin-top: 1rem; padding-top: 1rem; border-top: 1px solid var(--border-color);">
+              <div class="d-flex align-items-center gap-2 mb-2">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" style="color: var(--text-secondary);">
+                  <path d="M10,4H4C2.89,4 2,4.89 2,6V18A2,2 0 0,0 4,20H20A2,2 0 0,0 22,18V8C22,6.89 21.1,6 20,6H12L10,4Z"/>
+                </svg>
+                <span style="font-size: 0.875rem; font-weight: 500; color: var(--text-secondary);">Child Workspaces</span>
+                <span id="workspace-detail-children-count" class="badge bg-secondary" style="font-size: 0.7rem;">0</span>
+              </div>
+              <div id="workspace-detail-children-list" class="workspace-detail-children-grid">
+                <!-- Children will be rendered here -->
+              </div>
+            </div>
+          </div>
+
+          <!-- Quick Add Input -->
+          <div class="modern-card p-3 mb-4" id="workspace-detail-smart-input">
+            <div class="d-flex align-items-center gap-2">
+              <input id="workspace-detail-input" class="modern-input flex-grow-1" type="text" placeholder="Type a task or message... (use /task, /chat, /note)" autocomplete="off">
+              <button id="workspace-detail-submit" class="modern-btn modern-btn-primary" type="button">Send</button>
+            </div>
+          </div>
+
+          <!-- Bento Grid Panels -->
+          <div class="workspace-detail-bento">
+            <!-- Tasks Panel - Left column (rows 1-4) -->
+            <div class="modern-card workspace-detail-panel workspace-detail-panel-tasks" id="workspace-detail-tasks-panel">
+              <div class="workspace-detail-panel-header">
+                <h2 class="workspace-detail-panel-title">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+                    <path d="M19,3H5A2,2 0 0,0 3,5V19A2,2 0 0,0 5,21H19A2,2 0 0,0 21,19V5A2,2 0 0,0 19,3M19,19H5V5H19V19M17,8.4L15.6,7L10,12.6L7.4,10L6,11.4L10,15.4L17,8.4Z"/>
+                  </svg>
+                  Tasks
+                </h2>
+                <div class="workspace-detail-panel-actions">
+                  <div class="workspace-detail-view-toggle" role="tablist">
+                    <button id="workspace-detail-view-list" class="workspace-detail-view-btn is-active" type="button" role="tab" aria-selected="true" title="List View">
+                      <svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor">
+                        <path d="M3,4H21V8H3V4M3,10H21V14H3V10M3,16H21V20H3V16Z"/>
+                      </svg>
+                    </button>
+                    <button id="workspace-detail-view-board" class="workspace-detail-view-btn" type="button" role="tab" aria-selected="false" title="Board View">
+                      <svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor">
+                        <path d="M4,3H10V5H4V3M14,3H20V5H14V3M4,7H10V9H4V7M14,7H20V9H14V7M4,11H10V13H4V11M14,11H20V13H14V11M4,15H10V17H4V15M14,15H20V17H14V15M4,19H10V21H4V19M14,19H20V21H14V19Z"/>
+                      </svg>
+                    </button>
+                  </div>
+                  <button id="workspace-detail-refresh-tasks" class="workspace-detail-panel-btn" type="button" title="Refresh">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
+                      <path d="M17.65,6.35C16.2,4.9 14.21,4 12,4A8,8 0 0,0 4,12A8,8 0 0,0 12,20C15.73,20 18.84,17.45 19.73,14H17.65C16.83,16.33 14.61,18 12,18A6,6 0 0,1 6,12A6,6 0 0,1 12,6C13.66,6 15.14,6.69 16.22,7.78L13,11H20V4L17.65,6.35Z"/>
+                    </svg>
+                  </button>
+                  <button id="workspace-detail-add-task" class="workspace-detail-panel-btn workspace-detail-panel-btn-primary" type="button" title="Add task">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
+                      <path d="M19,13H13V19H11V13H5V11H11V5H13V11H19V13Z"/>
+                    </svg>
+                  </button>
+                </div>
+              </div>
+              <div class="workspace-detail-panel-body">
+                <div id="workspace-detail-tasks-list" class="workspace-detail-list">
+                  <div class="workspace-detail-loading">Loading tasks...</div>
+                </div>
+                <div id="workspace-detail-tasks-board" class="workspace-detail-board" style="display: none;">
+                  <div class="workspace-detail-board-columns" id="workspace-detail-board-columns"></div>
+                  <div class="workspace-detail-board-empty" id="workspace-detail-board-empty">
+                    <svg width="32" height="32" viewBox="0 0 24 24" fill="currentColor" style="opacity: 0.3;">
+                      <path d="M4,3H10V5H4V3M14,3H20V5H14V3M4,7H10V9H4V7M14,7H20V9H14V7M4,11H10V13H4V11M14,11H20V13H14V11M4,15H10V17H4V15M14,15H20V17H14V15M4,19H10V21H4V19M14,19H20V21H14V19Z"/>
+                    </svg>
+                    <p>No board configured.</p>
+                    <button id="workspace-detail-board-setup" class="modern-btn modern-btn-primary modern-btn-sm" type="button">Set Up Board</button>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Sessions Panel - Middle column (rows 1-4) -->
+            <div class="modern-card workspace-detail-panel workspace-detail-panel-sessions" id="workspace-detail-sessions-panel">
+              <div class="workspace-detail-panel-header">
+                <h2 class="workspace-detail-panel-title">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+                    <path d="M20,2H4A2,2 0 0,0 2,4V22L6,18H20A2,2 0 0,0 22,16V4A2,2 0 0,0 20,2M20,16H6L4,18V4H20"/>
+                  </svg>
+                  Sessions
+                </h2>
+                <div class="workspace-detail-panel-actions">
+                  <button id="workspace-detail-new-session" class="workspace-detail-panel-btn workspace-detail-panel-btn-primary" type="button" title="New chat">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
+                      <path d="M19,13H13V19H11V13H5V11H11V5H13V11H19V13Z"/>
+                    </svg>
+                  </button>
+                </div>
+              </div>
+              <div class="workspace-detail-panel-body">
+                <div id="workspace-detail-sessions-list" class="workspace-detail-list">
+                  <div class="workspace-detail-empty">No sessions yet.</div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Notes Panel - Right column row 1 -->
+            <div class="modern-card workspace-detail-panel workspace-detail-panel-notes" id="workspace-detail-notes-panel">
+              <div class="workspace-detail-panel-header">
+                <h2 class="workspace-detail-panel-title">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+                    <path d="M19,3H5A2,2 0 0,0 3,5V19A2,2 0 0,0 5,21H19A2,2 0 0,0 21,19V5A2,2 0 0,0 19,3M5,19V5H19V19H5M7,7H17V9H7V7M7,11H17V13H7V11M7,15H14V17H7V15Z"/>
+                  </svg>
+                  Notes
+                </h2>
+                <div class="workspace-detail-panel-actions">
+                  <button id="workspace-detail-add-note" class="workspace-detail-panel-btn workspace-detail-panel-btn-primary" type="button" title="Add note">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
+                      <path d="M19,13H13V19H11V13H5V11H11V5H13V11H19V13Z"/>
+                    </svg>
+                  </button>
+                </div>
+              </div>
+              <div class="workspace-detail-panel-body">
+                <div id="workspace-detail-notes-list" class="workspace-detail-list">
+                  <div class="workspace-detail-empty">No notes yet.</div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Files Panel - Right column row 2 -->
+            <div class="modern-card workspace-detail-panel workspace-detail-panel-files" id="workspace-detail-files-panel">
+              <div class="workspace-detail-panel-header">
+                <h2 class="workspace-detail-panel-title">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+                    <path d="M14,2H6A2,2 0 0,0 4,4V20A2,2 0 0,0 6,22H18A2,2 0 0,0 20,20V8L14,2M18,20H6V4H13V9H18V20Z"/>
+                  </svg>
+                  Files
+                </h2>
+                <div class="workspace-detail-panel-actions">
+                  <button id="workspace-detail-add-file" class="workspace-detail-panel-btn workspace-detail-panel-btn-primary" type="button" title="Upload file">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
+                      <path d="M9,16V10H5L12,3L19,10H15V16H9M5,20V18H19V20H5Z"/>
+                    </svg>
+                  </button>
+                </div>
+              </div>
+              <div class="workspace-detail-panel-body">
+                <div id="workspace-detail-files-list" class="workspace-detail-list">
+                  <div class="workspace-detail-empty">No files yet.</div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Directories Panel - Right column row 3 -->
+            <div class="modern-card workspace-detail-panel workspace-detail-panel-directories" id="workspace-detail-directories-panel">
+              <div class="workspace-detail-panel-header">
+                <h2 class="workspace-detail-panel-title">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+                    <path d="M10,4H4C2.89,4 2,4.89 2,6V18A2,2 0 0,0 4,20H20A2,2 0 0,0 22,18V8C22,6.89 21.1,6 20,6H12L10,4Z"/>
+                  </svg>
+                  Directories
+                </h2>
+                <div class="workspace-detail-panel-actions">
+                  <button id="workspace-detail-add-directory" class="workspace-detail-panel-btn workspace-detail-panel-btn-primary" type="button" title="Add directory">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
+                      <path d="M19,13H13V19H11V13H5V11H11V5H13V11H19V13Z"/>
+                    </svg>
+                  </button>
+                </div>
+              </div>
+              <div class="workspace-detail-panel-body">
+                <div id="workspace-detail-directories-list" class="workspace-detail-list">
+                  <div class="workspace-detail-empty">No directories yet.</div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Schedules Panel - Right column row 4 -->
+            <div class="modern-card workspace-detail-panel workspace-detail-panel-schedules" id="workspace-detail-schedules-panel">
+              <div class="workspace-detail-panel-header">
+                <h2 class="workspace-detail-panel-title">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+                    <path d="M12,20A8,8 0 0,0 20,12A8,8 0 0,0 12,4A8,8 0 0,0 4,12A8,8 0 0,0 12,20M12,2A10,10 0 0,1 22,12A10,10 0 0,1 12,22C6.47,22 2,17.5 2,12A10,10 0 0,1 12,2M12.5,7V12.25L17,14.92L16.25,16.15L11,13V7H12.5Z"/>
+                  </svg>
+                  Schedules
+                </h2>
+                <div class="workspace-detail-panel-actions">
+                  <button id="workspace-detail-view-schedules" class="workspace-detail-panel-btn" type="button" title="View schedules">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
+                      <path d="M12,9A3,3 0 0,0 9,12A3,3 0 0,0 12,15A3,3 0 0,0 15,12A3,3 0 0,0 12,9M12,17A5,5 0 0,1 7,12A5,5 0 0,1 12,7A5,5 0 0,1 17,12A5,5 0 0,1 12,17M12,4.5C7,4.5 2.73,7.61 1,12C2.73,16.39 7,19.5 12,19.5C17,19.5 21.27,16.39 23,12C21.27,7.61 17,4.5 12,4.5Z"/>
+                    </svg>
+                  </button>
+                </div>
+              </div>
+              <div class="workspace-detail-panel-body">
+                <div id="workspace-detail-schedules-list" class="workspace-detail-list">
+                  <div class="workspace-detail-empty">No schedules yet.</div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Include session sidebar for modals (noteEditorModal, createChatModal, etc.) -->
+  {{template "session-sidebar.tmpl" .}}
+
+  <!-- Include chat area for additional modals (scheduledTasksModal, etc.) -->
+  {{template "chat-area.tmpl" .}}
+
+  <!-- Add File Modal (from workspace-hub) -->
+  <div class="modal fade" id="hubAddFileModal" tabindex="-1" aria-labelledby="hubAddFileModalTitle" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h5 class="modal-title" id="hubAddFileModalTitle">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" class="me-2">
+              <path d="M14,2H6A2,2 0 0,0 4,4V20A2,2 0 0,0 6,22H18A2,2 0 0,0 20,20V8L14,2M18,20H6V4H13V9H18V20Z"/>
+            </svg>
+            Add File
+          </h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+        </div>
+        <div class="modal-body">
+          <form id="hubAddFileForm">
+            <div id="hubFileDropZone" class="hub-file-drop-zone mb-3">
+              <div class="hub-file-drop-zone-content">
+                <svg width="48" height="48" viewBox="0 0 24 24" fill="currentColor" class="mb-2" style="color: var(--text-secondary); opacity: 0.6;">
+                  <path d="M14,2H6A2,2 0 0,0 4,4V20A2,2 0 0,0 6,22H18A2,2 0 0,0 20,20V8L14,2M13.5,16V19H10.5V16H8L12,12L16,16H13.5M13,9V3.5L18.5,9H13Z"/>
+                </svg>
+                <p style="color: var(--text-primary); margin-bottom: 4px;">Drag & drop files here</p>
+                <p style="color: var(--text-secondary); font-size: 0.875rem; margin-bottom: 12px;">or click to browse</p>
+                <input type="file" id="hubFileInput" multiple style="display: none;">
+              </div>
+            </div>
+            <div id="hubSelectedFilesPreview" class="hub-selected-files-preview" style="display: none;">
+              <label class="form-label" style="color: var(--text-primary); font-weight: 500;">Selected Files</label>
+              <div id="hubSelectedFilesList" class="hub-selected-files-list"></div>
+            </div>
+            <div class="mb-3">
+              <label for="hubFileTitle" class="form-label" style="color: var(--text-primary); font-weight: 500;">Title (optional)</label>
+              <input type="text" class="form-control" id="hubFileTitle" placeholder="Enter a title for the file(s)...">
+              <small class="text-muted">If left blank, the filename will be used</small>
+            </div>
+            <div class="mb-3">
+              <label for="hubFileNotes" class="form-label" style="color: var(--text-primary); font-weight: 500;">Notes (optional)</label>
+              <textarea class="form-control" id="hubFileNotes" rows="2" placeholder="Add notes or description..."></textarea>
+            </div>
+          </form>
+          <div id="hubFileUploadProgress" class="hub-file-upload-progress" style="display: none;">
+            <div class="d-flex justify-content-between align-items-center mb-2">
+              <span style="color: var(--text-primary);">Uploading...</span>
+              <span id="hubFileUploadPercent" style="color: var(--text-secondary);">0%</span>
+            </div>
+            <div class="progress">
+              <div id="hubFileUploadProgressBar" class="progress-bar" role="progressbar" style="width: 0%"></div>
+            </div>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+          <button type="button" class="btn btn-primary" id="hubAddFileSubmitBtn" disabled>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" class="me-1">
+              <path d="M9,16V10H5L12,3L19,10H15V16H9M5,20V18H19V20H5Z"/>
+            </svg>
+            Upload
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Styles for workspace detail page -->
+  <style>
+    /* Bento Grid Layout */
+    .workspace-detail-bento {
+      display: grid;
+      grid-template-columns: 2fr 1fr 1fr;
+      grid-template-rows: repeat(4, 1fr);
+      gap: 0.5rem;
+      height: calc(100vh - 280px);
+      min-height: 400px;
+      max-height: calc(100vh - 240px);
+      transition: grid-template-columns 0.4s cubic-bezier(0.4, 0, 0.2, 1),
+                  grid-template-rows 0.4s cubic-bezier(0.4, 0, 0.2, 1),
+                  height 0.4s cubic-bezier(0.4, 0, 0.2, 1),
+                  min-height 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+
+    /* Panel positioning */
+    .workspace-detail-panel-tasks {
+      grid-column: 1;
+      grid-row: 1 / -1;
+    }
+
+    .workspace-detail-panel-sessions {
+      grid-column: 2;
+      grid-row: 1 / -1;
+    }
+
+    .workspace-detail-panel-notes {
+      grid-column: 3;
+      grid-row: 1;
+    }
+
+    .workspace-detail-panel-files {
+      grid-column: 3;
+      grid-row: 2;
+    }
+
+    .workspace-detail-panel-directories {
+      grid-column: 3;
+      grid-row: 3;
+    }
+
+    .workspace-detail-panel-schedules {
+      grid-column: 3;
+      grid-row: 4;
+    }
+
+    /* Responsive layout */
+    @media (max-width: 1200px) {
+      .workspace-detail-bento {
+        grid-template-columns: 1fr 1fr;
+        grid-template-rows: auto auto auto auto auto;
+        height: auto;
+        min-height: auto;
+        max-height: none;
+      }
+
+      .workspace-detail-panel-tasks {
+        grid-column: 1 / -1;
+        grid-row: 1;
+      }
+
+      .workspace-detail-panel-sessions {
+        grid-column: 1 / -1;
+        grid-row: 2;
+      }
+
+      .workspace-detail-panel-notes,
+      .workspace-detail-panel-files {
+        grid-column: span 1;
+        grid-row: 3;
+      }
+
+      .workspace-detail-panel-directories {
+        grid-column: 1 / -1;
+        grid-row: 4;
+      }
+
+      .workspace-detail-panel-schedules {
+        grid-column: 1 / -1;
+        grid-row: 5;
+      }
+
+      .workspace-detail-bento .workspace-detail-panel-body {
+        max-height: 200px;
+      }
+    }
+
+    /* Base Panel Styles */
+    .workspace-detail-panel {
+      display: flex;
+      flex-direction: column;
+      height: 100%;
+      min-height: 0;
+      min-width: 0;
+      overflow: hidden;
+      padding: 0;
+      transition: transform 0.4s cubic-bezier(0.4, 0, 0.2, 1),
+                  opacity 0.3s ease,
+                  max-height 0.4s cubic-bezier(0.4, 0, 0.2, 1),
+                  min-height 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+
+    .workspace-detail-panel-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 0.5rem 0.75rem;
+      flex-shrink: 0;
+      border-bottom: 1px solid var(--border-color);
+    }
+
+    .workspace-detail-panel-title {
+      margin: 0;
+      font-size: 0.8rem;
+      font-weight: 600;
+      color: var(--text-primary);
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+
+    .workspace-detail-panel-actions {
+      display: flex;
+      gap: 0.35rem;
+    }
+
+    .workspace-detail-panel-btn {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      width: 26px;
+      height: 26px;
+      padding: 0;
+      border: none;
+      background: var(--bg-secondary);
+      color: var(--text-secondary);
+      border-radius: 6px;
+      cursor: pointer;
+      transition: all 0.15s ease;
+    }
+
+    .workspace-detail-panel-btn:hover {
+      background: var(--bg-tertiary);
+      color: var(--text-primary);
+    }
+
+    .workspace-detail-panel-btn-primary {
+      background: var(--primary-color);
+      color: white;
+    }
+
+    .workspace-detail-panel-btn-primary:hover {
+      background: var(--primary-hover);
+      color: white;
+    }
+
+    .workspace-detail-panel-body {
+      flex: 1;
+      min-height: 0;
+      overflow-y: auto;
+      padding: 0 0.75rem 0.5rem;
+      scroll-behavior: smooth;
+    }
+
+    /* Custom scrollbar */
+    .workspace-detail-panel-body::-webkit-scrollbar {
+      width: 6px;
+    }
+
+    .workspace-detail-panel-body::-webkit-scrollbar-track {
+      background: transparent;
+    }
+
+    .workspace-detail-panel-body::-webkit-scrollbar-thumb {
+      background: var(--border-color);
+      border-radius: 3px;
+    }
+
+    .workspace-detail-panel-body::-webkit-scrollbar-thumb:hover {
+      background: var(--text-muted);
+    }
+
+    .workspace-detail-list {
+      display: flex;
+      flex-direction: column;
+      gap: 0.35rem;
+      padding-top: 0.5rem;
+    }
+
+    .workspace-detail-loading,
+    .workspace-detail-empty {
+      text-align: center;
+      color: var(--text-secondary);
+      padding: 1.5rem 1rem;
+      font-size: 0.75rem;
+    }
+
+    .workspace-detail-item {
+      padding: 0.5rem 0.65rem;
+      border-radius: 6px;
+      background: var(--bg-secondary);
+      border: 1px solid transparent;
+      cursor: pointer;
+      transition: all 0.15s ease;
+    }
+
+    .workspace-detail-item:hover {
+      background: var(--bg-tertiary);
+      border-color: var(--border-color);
+    }
+
+    .workspace-detail-item-title {
+      font-weight: 500;
+      font-size: 0.8rem;
+      color: var(--text-primary);
+      margin-bottom: 0.15rem;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .workspace-detail-item-meta {
+      font-size: 0.7rem;
+      color: var(--text-secondary);
+    }
+
+    .workspace-detail-task-status {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.25rem;
+      padding: 0.1rem 0.4rem;
+      border-radius: 4px;
+      font-size: 0.65rem;
+      font-weight: 500;
+    }
+
+    .workspace-detail-task-status.pending {
+      background: rgba(108, 117, 125, 0.1);
+      color: #6c757d;
+    }
+
+    .workspace-detail-task-status.in_progress {
+      background: rgba(0, 123, 255, 0.1);
+      color: #007bff;
+    }
+
+    .workspace-detail-task-status.completed {
+      background: rgba(40, 167, 69, 0.1);
+      color: #28a745;
+    }
+
+    .workspace-detail-task-status.failed {
+      background: rgba(220, 53, 69, 0.1);
+      color: #dc3545;
+    }
+
+    /* View Toggle */
+    .workspace-detail-view-toggle {
+      display: flex;
+      gap: 1px;
+      background: var(--bg-tertiary);
+      border-radius: 5px;
+      padding: 2px;
+    }
+
+    .workspace-detail-view-btn {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      width: 22px;
+      height: 20px;
+      border: none;
+      background: transparent;
+      color: var(--text-secondary);
+      border-radius: 3px;
+      cursor: pointer;
+      transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+      transform: scale(1);
+    }
+
+    .workspace-detail-view-btn:hover {
+      color: var(--text-primary);
+      transform: scale(1.1);
+    }
+
+    .workspace-detail-view-btn:active {
+      transform: scale(0.95);
+    }
+
+    .workspace-detail-view-btn.is-active {
+      background: var(--primary-color);
+      color: white;
+      box-shadow: 0 2px 8px rgba(var(--primary-color-rgb, 99, 102, 241), 0.3);
+    }
+
+    /* Board View */
+    .workspace-detail-board {
+      height: 100%;
+      overflow-x: auto;
+      padding-top: 0.5rem;
+    }
+
+    .workspace-detail-board-columns {
+      display: flex;
+      gap: 0.5rem;
+      min-height: 150px;
+      padding-bottom: 0.5rem;
+    }
+
+    .workspace-detail-board-column {
+      flex: 0 0 180px;
+      background: var(--bg-secondary);
+      border-radius: 6px;
+      display: flex;
+      flex-direction: column;
+      max-height: 100%;
+      animation: columnSlideIn 0.4s cubic-bezier(0.4, 0, 0.2, 1) forwards;
+      opacity: 0;
+    }
+
+    .workspace-detail-board-column:nth-child(1) { animation-delay: 0.1s; }
+    .workspace-detail-board-column:nth-child(2) { animation-delay: 0.15s; }
+    .workspace-detail-board-column:nth-child(3) { animation-delay: 0.2s; }
+    .workspace-detail-board-column:nth-child(4) { animation-delay: 0.25s; }
+    .workspace-detail-board-column:nth-child(5) { animation-delay: 0.3s; }
+    .workspace-detail-board-column:nth-child(6) { animation-delay: 0.35s; }
+
+    @keyframes columnSlideIn {
+      0% {
+        opacity: 0;
+        transform: translateY(20px) scale(0.95);
+      }
+      100% {
+        opacity: 1;
+        transform: translateY(0) scale(1);
+      }
+    }
+
+    .workspace-detail-board-column-header {
+      padding: 0.5rem;
+      border-bottom: 1px solid var(--border-color);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .workspace-detail-board-column-title {
+      font-size: 0.75rem;
+      font-weight: 600;
+      color: var(--text-primary);
+    }
+
+    .workspace-detail-board-column-count {
+      font-size: 0.65rem;
+      color: var(--text-secondary);
+      background: var(--bg-tertiary);
+      padding: 0.1rem 0.3rem;
+      border-radius: 3px;
+    }
+
+    .workspace-detail-board-column-body {
+      flex: 1;
+      overflow-y: auto;
+      padding: 0.35rem;
+      display: flex;
+      flex-direction: column;
+      gap: 0.35rem;
+    }
+
+    .workspace-detail-board-card {
+      padding: 0.4rem 0.5rem;
+      background: var(--bg-primary);
+      border: 1px solid var(--border-color);
+      border-radius: 4px;
+      cursor: pointer;
+      transition: all 0.15s ease;
+    }
+
+    .workspace-detail-board-card:hover {
+      border-color: var(--primary-color);
+    }
+
+    .workspace-detail-board-card-title {
+      font-size: 0.7rem;
+      font-weight: 500;
+      color: var(--text-primary);
+      margin-bottom: 0.15rem;
+    }
+
+    .workspace-detail-board-card-meta {
+      font-size: 0.6rem;
+      color: var(--text-secondary);
+    }
+
+    .workspace-detail-board-empty {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 1.5rem;
+      color: var(--text-secondary);
+      text-align: center;
+    }
+
+    .workspace-detail-board-empty p {
+      margin: 0.5rem 0;
+      font-size: 0.8rem;
+    }
+
+    /* Board view reorganizes the grid */
+    .workspace-detail-bento:has(.board-view) {
+      grid-template-columns: repeat(5, 1fr);
+      grid-template-rows: 1fr auto;
+      height: auto;
+      min-height: 500px;
+    }
+
+    .workspace-detail-panel-tasks.board-view {
+      grid-column: 1 / -1;
+      grid-row: 1;
+      min-height: 350px;
+      max-height: 400px;
+    }
+
+    /* Rearrange other panels to bottom row when board view is active */
+    .workspace-detail-bento:has(.board-view) .workspace-detail-panel-sessions {
+      grid-column: 1;
+      grid-row: 2;
+    }
+
+    .workspace-detail-bento:has(.board-view) .workspace-detail-panel-notes {
+      grid-column: 2;
+      grid-row: 2;
+    }
+
+    .workspace-detail-bento:has(.board-view) .workspace-detail-panel-files {
+      grid-column: 3;
+      grid-row: 2;
+    }
+
+    .workspace-detail-bento:has(.board-view) .workspace-detail-panel-directories {
+      grid-column: 4;
+      grid-row: 2;
+    }
+
+    .workspace-detail-bento:has(.board-view) .workspace-detail-panel-schedules {
+      grid-column: 5;
+      grid-row: 2;
+    }
+
+    .workspace-detail-bento:has(.board-view) .workspace-detail-panel:not(.board-view) {
+      max-height: 200px;
+      animation: slideInUp 0.4s cubic-bezier(0.4, 0, 0.2, 1) forwards;
+    }
+
+    .workspace-detail-panel-tasks.board-view {
+      animation: expandBoard 0.4s cubic-bezier(0.4, 0, 0.2, 1) forwards;
+    }
+
+    @keyframes expandBoard {
+      0% {
+        opacity: 0.8;
+        transform: scale(0.98);
+      }
+      100% {
+        opacity: 1;
+        transform: scale(1);
+      }
+    }
+
+    @keyframes slideInUp {
+      0% {
+        opacity: 0;
+        transform: translateY(20px);
+      }
+      100% {
+        opacity: 1;
+        transform: translateY(0);
+      }
+    }
+
+    /* Stagger animation for bottom panels */
+    .workspace-detail-bento:has(.board-view) .workspace-detail-panel-sessions {
+      animation-delay: 0.05s;
+    }
+
+    .workspace-detail-bento:has(.board-view) .workspace-detail-panel-notes {
+      animation-delay: 0.1s;
+    }
+
+    .workspace-detail-bento:has(.board-view) .workspace-detail-panel-files {
+      animation-delay: 0.15s;
+    }
+
+    .workspace-detail-bento:has(.board-view) .workspace-detail-panel-directories {
+      animation-delay: 0.2s;
+    }
+
+    .workspace-detail-bento:has(.board-view) .workspace-detail-panel-schedules {
+      animation-delay: 0.25s;
+    }
+
+    /* Children workspaces grid */
+    .workspace-detail-children-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+      gap: 0.75rem;
+    }
+
+    .workspace-detail-child-card {
+      padding: 0.75rem 1rem;
+      border-radius: 8px;
+      background: var(--bg-secondary);
+      border: 1px solid var(--border-color);
+      cursor: pointer;
+      transition: all 0.15s ease;
+    }
+
+    .workspace-detail-child-card:hover {
+      background: var(--bg-tertiary);
+      border-color: var(--primary-color);
+      transform: translateY(-1px);
+    }
+
+    .workspace-detail-child-card .child-name {
+      font-weight: 500;
+      color: var(--text-primary);
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+
+    .workspace-detail-child-card .child-desc {
+      font-size: 0.75rem;
+      color: var(--text-secondary);
+      margin-top: 0.25rem;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .workspace-detail-child-card .child-meta {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      margin-top: 0.5rem;
+      font-size: 0.7rem;
+      color: var(--text-secondary);
+    }
+  </style>
+
+  <!-- Core Libraries -->
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+
+  <!-- Theme Manager (load early) -->
+  <script src="/js/modules/themeManager.js"></script>
+
+  <!-- Utils -->
+  <script src="/js/utils/logger.js"></script>
+  <script src="/js/utils/event-bus.js"></script>
+  <script src="/js/utils/api-client.js"></script>
+  <script src="/js/utils/dom-utils.js"></script>
+
+  <!-- Core Modules -->
+  <script src="/js/modules/resizer.js"></script>
+  <script src="/js/modules/settings.js"></script>
+  <script src="/js/modules/agents.js"></script>
+  <script src="/js/modules/plugins.js"></script>
+  <script src="/js/modules/plugin-config.js"></script>
+  <script src="/js/modules/plugin-store.js"></script>
+  <script src="/js/modules/apikey.js"></script>
+  <script src="/js/modules/sidebar.js"></script>
+  <script src="/js/modules/plugin-health.js"></script>
+  <script src="/js/modules/file-upload.js"></script>
+  <script src="/js/modules/location.js"></script>
+  <script src="/js/modules/task-modal-controller.js"></script>
+  <script src="/js/modules/sessions.js"></script>
+  <script src="/js/modules/toast.js"></script>
+  <script src="/js/modules/voice-input.js"></script>
+  <script src="/js/modules/form-validation.js"></script>
+  <script src="/js/file-manager.js"></script>
+  <script src="/js/app.js"></script>
+  <script src="/js/modules/studio-realtime.js"></script>
+
+  <!-- Workspace Hub Modules (for task/session/file/note management) -->
+  <script src="/js/modules/workspace-hub-utils.js"></script>
+  <script src="/js/modules/workspace-hub-state.js"></script>
+  <script src="/js/modules/workspace-hub-modals.js"></script>
+  <script src="/js/modules/workspace-hub-selection.js"></script>
+  <script src="/js/modules/workspace-hub-tasks.js"></script>
+  <script src="/js/modules/workspace-hub-sessions.js"></script>
+  <script src="/js/modules/workspace-hub-notes.js"></script>
+  <script src="/js/modules/workspace-hub-files.js"></script>
+
+  <!-- Workspace Detail Page -->
+  <script type="module">
+    import { WorkspaceDetailPage } from '/js/modules/workspace-detail.js';
+
+    document.addEventListener('DOMContentLoaded', () => {
+      // Extract workspace ID from URL
+      const pathParts = window.location.pathname.split('/');
+      const workspaceId = pathParts[2]; // /workspaces/{id}
+
+      if (workspaceId) {
+        // Make workspace ID available globally for hub modules
+        window.currentWorkspaceId = workspaceId;
+
+        const detailPage = new WorkspaceDetailPage(workspaceId);
+        window.workspaceDetail = detailPage;
+        detailPage.init();
+      } else {
+        console.error('No workspace ID found in URL');
+        window.location.href = '/';
+      }
+    });
+  </script>
+</body>
+</html>
+{{end}}

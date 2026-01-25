@@ -10,6 +10,8 @@ import (
 	agenthttp "github.com/johnjallday/ori-agent/internal/agenthttp"
 	"github.com/johnjallday/ori-agent/internal/chathttp"
 	"github.com/johnjallday/ori-agent/internal/devicehttp"
+	"github.com/johnjallday/ori-agent/internal/externalagents"
+	"github.com/johnjallday/ori-agent/internal/externalagentshttp"
 	"github.com/johnjallday/ori-agent/internal/fileshttp"
 	"github.com/johnjallday/ori-agent/internal/filewatcher"
 	"github.com/johnjallday/ori-agent/internal/healthhttp"
@@ -28,6 +30,9 @@ import (
 	"github.com/johnjallday/ori-agent/internal/sessionfiles"
 	"github.com/johnjallday/ori-agent/internal/sessionhttp"
 	"github.com/johnjallday/ori-agent/internal/settingshttp"
+	"github.com/johnjallday/ori-agent/internal/skills"
+	"github.com/johnjallday/ori-agent/internal/skillshttp"
+	"github.com/johnjallday/ori-agent/internal/speechhttp"
 	"github.com/johnjallday/ori-agent/internal/store"
 	"github.com/johnjallday/ori-agent/internal/usagehttp"
 )
@@ -40,6 +45,7 @@ func (b *ServerBuilder) initializeHandlers() error {
 	s.usageHandler = usagehttp.NewHandler(s.costTracker)
 	s.mcpHandler = mcphttp.NewHandler(s.mcpRegistry, s.mcpConfigManager, s.st)
 	s.settingsHandler = settingshttp.NewHandler(s.st, s.configManager, s.clientFactory, s.llmFactory)
+	s.speechHandler = speechhttp.NewHandler(s.configManager)
 
 	s.chatHandler = chathttp.NewHandler(s.st, s.clientFactory)
 	s.chatHandler.SetLLMFactory(s.llmFactory)
@@ -167,6 +173,26 @@ func (b *ServerBuilder) initializeHandlers() error {
 		s.reviewHandler = reviewhttp.NewHandler(reviewRunner, reviewStore)
 		logger.Info("Review system initialized", logger.Fields{})
 	}
+
+	// Initialize external agents (Claude Code, Codex)
+	claudeReader := externalagents.NewClaudeReader("")
+	codexReader := externalagents.NewCodexReader("")
+	s.externalAgentsCache = externalagents.NewCache(claudeReader, codexReader)
+	if err := s.externalAgentsCache.Load(); err != nil {
+		logger.Warn("Failed to load external agents cache", logger.Fields{"error": err})
+		// Non-fatal: continue without external agents
+	}
+	s.externalAgentsHandler = externalagentshttp.New(s.externalAgentsCache, s.configManager)
+	logger.Info("External agents support initialized", logger.Fields{})
+
+	// Initialize skills manager and handler (local + external)
+	s.skillsManager = skills.NewManager(skills.ManagerConfig{
+		AgentStorePath: s.agentStorePath,
+		ExternalAgents: s.externalAgentsCache,
+		ConfigManager:  s.configManager,
+	})
+	s.skillsHandler = skillshttp.New(s.skillsManager, s.st)
+	s.chatHandler.SetSkillsManager(s.skillsManager)
 
 	return nil
 }

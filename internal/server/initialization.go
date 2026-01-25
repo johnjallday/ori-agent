@@ -125,7 +125,7 @@ func createLLMFactory() *llm.Factory {
 	return llm.NewFactory()
 }
 
-// registerLLMProviders registers all available LLM providers (OpenAI, Claude, Ollama).
+// registerLLMProviders registers all available LLM providers (OpenAI, Claude, Gemini, Ollama).
 func registerLLMProviders(factory *llm.Factory, configMgr *config.Manager) error {
 	verbose := os.Getenv("ORI_VERBOSE") == "true"
 
@@ -153,6 +153,18 @@ func registerLLMProviders(factory *llm.Factory, configMgr *config.Manager) error
 		factory.Register("claude", claudeProvider)
 		if verbose {
 			logger.Debug("Claude provider registered", logger.Fields{})
+		}
+	}
+
+	// Register Gemini provider if API key is available
+	geminiAPIKey := configMgr.GetGeminiAPIKey()
+	if geminiAPIKey != "" {
+		geminiProvider := llm.NewGeminiProvider(llm.ProviderConfig{
+			APIKey: geminiAPIKey,
+		})
+		factory.Register("gemini", geminiProvider)
+		if verbose {
+			logger.Debug("Gemini provider registered", logger.Fields{})
 		}
 	}
 

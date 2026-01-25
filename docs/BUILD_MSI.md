@@ -46,6 +46,10 @@ goreleaser release --snapshot --clean --skip=publish
 
 # OR build manually
 go build -o dist/server_windows_amd64_v1/ori-agent.exe ./cmd/server
+
+# Build the folder picker (required for file browse feature)
+# Run from Git Bash or WSL if you're using PowerShell
+./scripts/build-folder-picker.sh
 ```
 
 ### Step 2: Run MSI Build Script
@@ -88,6 +92,7 @@ Check the output for:
 
 **Contents**:
 - `ori-agent.exe` (server binary)
+- `ori-folder-picker.exe` (folder picker helper)
 - Start menu shortcuts
 - Desktop shortcut (optional)
 - Uninstaller

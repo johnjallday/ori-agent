@@ -101,6 +101,7 @@
             ></textarea>
             <div id="dropZoneIndicator" class="drop-zone-indicator"></div>
           </div>
+          <div class="voice-status" data-voice-status="chat" aria-live="polite"></div>
           <div class="d-flex justify-content-between align-items-center mt-2">
             <div class="d-flex gap-2 align-items-center">
               <div class="form-check form-switch">
@@ -114,9 +115,9 @@
                   Multi-agent
                 </label>
                 <select id="multiAgentMode" class="form-select form-select-sm" style="font-size: 12px; width: auto;">
-                  <option value="auto" selected>Auto</option>
+                  <option value="auto">Auto</option>
                   <option value="force">Force</option>
-                  <option value="off">Off</option>
+                  <option value="off" selected>Off</option>
                 </select>
               </div>
               <label for="fileUpload" class="btn btn-sm attach-files-btn" style="margin: 0; padding: 4px 10px; background: var(--bg-secondary); color: var(--text-primary); border: 1px solid var(--border-color); cursor: pointer; font-size: 12px; border-radius: 6px; transition: all 0.2s ease;" aria-label="Attach files to message">
@@ -132,12 +133,41 @@
                 </svg>
                 Directory
               </button>
+              <button
+                type="button"
+                id="chatVoiceBtn"
+                class="btn btn-sm voice-input-btn"
+                data-voice-target="input"
+                data-voice-context="chat"
+                title="Hold to talk"
+                aria-label="Hold to talk"
+                aria-pressed="false"
+              >
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor" class="me-1" style="vertical-align: middle;" aria-hidden="true">
+                  <path d="M12,14A3,3 0 0,0 15,11V5A3,3 0 0,0 9,5V11A3,3 0 0,0 12,14M17,11A1,1 0 0,0 15,11A3,3 0 0,1 9,11A1,1 0 0,0 7,11A5,5 0 0,0 11,15.9V19H9A1,1 0 0,0 9,21H15A1,1 0 0,0 15,19H13V15.9A5,5 0 0,0 17,11Z"/>
+                </svg>
+                Voice
+              </button>
               <button id="clearChatBtn" class="btn btn-sm clear-chat-btn" style="padding: 4px 10px; font-size: 12px; border-radius: 6px; transition: all 0.2s ease;" title="Clear chat history" aria-label="Clear chat history">
                 <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor" class="me-1" style="vertical-align: middle;" aria-hidden="true">
                   <path d="M19,4H15.5L14.5,3H9.5L8.5,4H5V6H19M6,19A2,2 0 0,0 8,21H16A2,2 0 0,0 18,19V7H6V19Z"/>
                 </svg>
                 Clear
               </button>
+              <!-- Skills dropdown -->
+              <div class="position-relative d-inline-block">
+                <button id="skillsDropdownBtn" class="btn btn-sm" style="padding: 4px 10px; font-size: 12px; border-radius: 6px; background: var(--bg-secondary); color: var(--text-primary); border: 1px solid var(--border-color); transition: all 0.2s ease;" title="Run a skill" aria-label="Skills">
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor" class="me-1" style="vertical-align: middle;" aria-hidden="true">
+                    <path d="M7,2V13H10V22L17,10H13L17,2H7Z"/>
+                  </svg>
+                  Skills
+                </button>
+                <div id="skillsDropdown" class="position-absolute" style="display: none; bottom: 100%; left: 0; margin-bottom: 4px; min-width: 220px; max-height: 280px; overflow-y: auto; background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.15); z-index: 1000;">
+                  <div id="skillsDropdownContent" style="padding: 8px 0;">
+                    <div style="padding: 12px; text-align: center; color: var(--text-muted); font-size: 12px;">Loading...</div>
+                  </div>
+                </div>
+              </div>
             </div>
           </div>
         </div>
