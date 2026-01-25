@@ -311,7 +311,23 @@ jobs:
           go-version: '1.25'
 
       - name: Install WiX Toolset
-        run: choco install wixtoolset -y
+        run: |
+          choco install wixtoolset -y
+          # Refresh environment variables for this session
+          $env:WIX = (Get-ItemProperty -Path 'HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager\Environment' -Name 'WIX' -ErrorAction SilentlyContinue).WIX
+          if ($env:WIX) {
+            Write-Host "WIX environment variable set to: $env:WIX"
+            echo "WIX=$env:WIX" >> $env:GITHUB_ENV
+          } else {
+            # Fallback: find WiX installation
+            $wixDir = Get-ChildItem "C:\Program Files (x86)" -Filter "WiX Toolset*" -Directory | Select-Object -First 1
+            if ($wixDir) {
+              $env:WIX = $wixDir.FullName + "\"
+              Write-Host "WIX found at: $env:WIX"
+              echo "WIX=$env:WIX" >> $env:GITHUB_ENV
+            }
+          }
+        shell: pwsh
 
       - name: Install GoReleaser
         run: choco install goreleaser -y
