@@ -79,12 +79,16 @@ Write-Host ""
 Write-Host "📦 Locating binary..." -ForegroundColor Yellow
 
 $binaryPath = Get-ChildItem -Path $DistDir -Recurse -Filter "ori-agent.exe" |
-              Where-Object { $_.FullName -match "server(\\-windows)?_windows_$Arch" } |
+              Where-Object { $_.FullName -match "server(-windows)?_windows_$Arch" } |
               Select-Object -First 1 -ExpandProperty FullName
 
 if (-not $binaryPath) {
     Write-Host "❌ Error: ori-agent.exe not found for architecture $Arch" -ForegroundColor Red
-    Write-Host "  Searched in: $DistDir/server_windows_$Arch*/" -ForegroundColor Red
+    Write-Host "  Searched pattern: server(-windows)?_windows_$Arch" -ForegroundColor Red
+    Write-Host ""
+    Write-Host "  Debug: Contents of $DistDir :" -ForegroundColor Yellow
+    Get-ChildItem -Path $DistDir -Directory -ErrorAction SilentlyContinue | ForEach-Object { Write-Host "    [dir] $($_.Name)" -ForegroundColor Yellow }
+    Get-ChildItem -Path $DistDir -Recurse -Filter "ori-agent.exe" -ErrorAction SilentlyContinue | ForEach-Object { Write-Host "    [exe] $($_.FullName)" -ForegroundColor Yellow }
     exit 1
 }
 
