@@ -24,8 +24,9 @@ before:
 
 # Build configuration
 builds:
-  # Server binary (main application) - Linux/Windows only to avoid macOS tarballs
-  - id: server
+  # Server binary (Linux) - used for Linux archives and packages
+  - id: server-linux
+    skip: '{{ ne .Runtime.Goos "linux" }}'
     main: ./cmd/server
     binary: ori-agent
     env:
@@ -37,6 +38,23 @@ builds:
       - -X 'github.com/johnjallday/ori-agent/internal/version.BuildDate={{.Date}}'
     goos:
       - linux
+    goarch:
+      - amd64
+      - arm64
+
+  # Server binary (Windows) - used for Windows archives
+  - id: server-windows
+    skip: '{{ eq .Runtime.Goos "darwin" }}'
+    main: ./cmd/server
+    binary: ori-agent
+    env:
+      - CGO_ENABLED=0
+    ldflags:
+      - -s -w
+      - -X 'github.com/johnjallday/ori-agent/internal/version.Version={{.Version}}'
+      - -X 'github.com/johnjallday/ori-agent/internal/version.GitCommit={{.ShortCommit}}'
+      - -X 'github.com/johnjallday/ori-agent/internal/version.BuildDate={{.Date}}'
+    goos:
       - windows
     goarch:
       - amd64
@@ -48,6 +66,7 @@ builds:
 
   # Server binary for macOS (not archived; used for DMG creation)
   - id: server-macos
+    skip: '{{ ne .Runtime.Goos "darwin" }}'
     main: ./cmd/server
     binary: ori-agent
     env:
@@ -87,9 +106,25 @@ builds:
 # macOS archives excluded - users should download DMG installers instead
 # Linux and Windows get .tar.gz/.zip archives
 archives:
-  - id: default
+  - id: linux
     ids:
-      - server
+      - server-linux
+    name_template: >-
+      {{ .ProjectName }}_
+      {{- .Version }}_
+      {{- .Os }}_
+      {{- if eq .Arch "amd64" }}x86_64
+      {{- else }}{{ .Arch }}{{ end }}
+    wrap_in_directory: true
+    files:
+      - LICENSE
+      - README.md
+      - src: bin/ori-folder-picker
+        dst: ori-folder-picker
+
+  - id: windows
+    ids:
+      - server-windows
     name_template: >-
       {{ .ProjectName }}_
       {{- .Version }}_
@@ -111,6 +146,8 @@ archives:
 # Linux packages - .deb and .rpm via nfpm
 nfpms:
   - id: linux-packages
+    builds:
+      - server-linux
     package_name: ori-agent
     vendor: Ori
     homepage: https://github.com/johnjallday/ori-agent
@@ -154,6 +191,12 @@ nfpms:
         dst: /usr/share/doc/ori-agent/LICENSE
         file_info:
           mode: 0644
+
+      # Folder picker helper (required for file browse feature)
+      - src: bin/ori-folder-picker
+        dst: /usr/bin/ori-folder-picker
+        file_info:
+          mode: 0755
 
       # Create empty directories
       - dst: /var/lib/ori-agent

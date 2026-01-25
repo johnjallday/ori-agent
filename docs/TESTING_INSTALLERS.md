@@ -22,6 +22,7 @@ This guide shows how to test all Ori Agent installers (macOS, Windows, Linux) on
 # Build the DMG
 cd /Users/jjdev/Projects/ori/ori-agent
 goreleaser release --snapshot --clean --skip=publish
+./scripts/build-folder-picker.sh
 
 # Test amd64 (Intel) DMG
 open dist/OriAgent-0.0.11-next-amd64.dmg

@@ -65,7 +65,7 @@ Write-Host ""
 Write-Host "📦 Locating binary..." -ForegroundColor Yellow
 
 $binaryPath = Get-ChildItem -Path $DistDir -Recurse -Filter "ori-agent.exe" |
-              Where-Object { $_.FullName -match "server_windows_$Arch" } |
+              Where-Object { $_.FullName -match "server(\\-windows)?_windows_$Arch" } |
               Select-Object -First 1 -ExpandProperty FullName
 
 if (-not $binaryPath) {
@@ -75,6 +75,30 @@ if (-not $binaryPath) {
 }
 
 Write-Host "  ✓ Found binary: $binaryPath" -ForegroundColor Green
+
+# Find the folder picker binary
+Write-Host ""
+Write-Host "📦 Locating folder picker..." -ForegroundColor Yellow
+
+$folderPickerCandidates = @(
+    (Join-Path $DistDir "ori-folder-picker.exe"),
+    "bin\\ori-folder-picker.exe",
+    "cmd\\folder-picker\\build\\bin\\ori-folder-picker.exe"
+)
+
+$folderPickerPath = $folderPickerCandidates |
+    Where-Object { Test-Path $_ } |
+    Select-Object -First 1
+
+if (-not $folderPickerPath) {
+    Write-Host "❌ Error: ori-folder-picker.exe not found" -ForegroundColor Red
+    Write-Host "  Expected one of:" -ForegroundColor Red
+    $folderPickerCandidates | ForEach-Object { Write-Host "    - $_" -ForegroundColor Red }
+    exit 1
+}
+
+$folderPickerPath = (Resolve-Path $folderPickerPath).Path
+Write-Host "  ✓ Found folder picker: $folderPickerPath" -ForegroundColor Green
 
 # Copy WXS template to build directory
 Write-Host ""
@@ -87,6 +111,7 @@ Write-Host "  Replacing template variables..." -ForegroundColor Yellow
 $wxsContent = Get-Content -Path $wxsBuildFile -Raw
 $wxsContent = $wxsContent -replace '\{\{\.Version\}\}', $Version
 $wxsContent = $wxsContent -replace '\{\{\.Binary\}\}', $binaryPath
+$wxsContent = $wxsContent -replace '\{\{\.FolderPickerBinary\}\}', $folderPickerPath
 $wxsContent = $wxsContent -replace '\{\{\.MsiArch\}\}', $(if ($Arch -eq "amd64") { "x64" } else { $Arch })
 Set-Content -Path $wxsBuildFile -Value $wxsContent
 

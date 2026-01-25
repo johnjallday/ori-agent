@@ -156,6 +156,26 @@ else
     exit 1
 fi
 
+# Find the folder picker app (built via scripts/build-folder-picker.sh)
+FOLDER_PICKER_PATH=""
+if [ -d "bin/ori-folder-picker.app" ]; then
+    FOLDER_PICKER_PATH="bin/ori-folder-picker.app"
+elif [ -d "cmd/folder-picker/build/bin/ori-folder-picker.app" ]; then
+    FOLDER_PICKER_PATH="cmd/folder-picker/build/bin/ori-folder-picker.app"
+fi
+
+if [ -n "$FOLDER_PICKER_PATH" ]; then
+    if ditto "$FOLDER_PICKER_PATH" "${APP_PATH}/Contents/Resources/ori-folder-picker.app"; then
+        echo "  ✓ Copied folder picker from: $FOLDER_PICKER_PATH"
+    else
+        echo "❌ Error: Failed to copy ori-folder-picker.app"
+        exit 1
+    fi
+else
+    echo "❌ Error: ori-folder-picker.app not found (build it with ./scripts/build-folder-picker.sh)"
+    exit 1
+fi
+
 echo "✅ .app bundle created"
 
 # Verify binaries exist in .app bundle before proceeding
@@ -168,6 +188,11 @@ if [ ! -f "${APP_PATH}/Contents/MacOS/OriAgent" ]; then
 fi
 if [ ! -f "${APP_PATH}/Contents/Resources/ori-agent" ]; then
     echo "❌ Error: ori-agent not found in .app bundle"
+    ls -la "${APP_PATH}/Contents/Resources/" || true
+    exit 1
+fi
+if [ ! -d "${APP_PATH}/Contents/Resources/ori-folder-picker.app" ]; then
+    echo "❌ Error: ori-folder-picker.app not found in .app bundle"
     ls -la "${APP_PATH}/Contents/Resources/" || true
     exit 1
 fi

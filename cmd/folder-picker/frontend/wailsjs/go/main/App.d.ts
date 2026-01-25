@@ -6,6 +6,8 @@ export function AddDirectory(arg1:string,arg2:string,arg3:string):Promise<main.D
 
 export function CheckServerConnection():Promise<boolean>;
 
+export function GetPreSelectedWorkspace():Promise<string>;
+
 export function GetWorkspaces():Promise<Array<main.Workspace>>;
 
 export function HideWindow():Promise<void>;

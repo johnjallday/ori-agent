@@ -223,11 +223,18 @@
 
     <div id="status" class="status"></div>
 
-    <div class="form-group">
+    <div class="form-group" id="workspace-group">
         <label for="workspace">Workspace</label>
         <select id="workspace" disabled>
             <option value="">Loading workspaces...</option>
         </select>
+    </div>
+
+    <div id="active-workspace-info" style="display: none; margin-bottom: 16px;">
+        <label>Adding to Workspace</label>
+        <div style="padding: 10px 12px; background: rgba(245, 158, 11, 0.1); border: 1px solid #f59e0b; border-radius: 6px; color: #fcd34d; font-weight: 600; font-size: 0.9rem;" id="active-workspace-name">
+            -
+        </div>
     </div>
 
     <div class="form-group">
@@ -258,7 +265,26 @@
             await checkServer();
             await loadWorkspaces();
             setupDropZone();
+
+            // Listen for workspace updates when app is already running
+            if (window.runtime) {
+                window.runtime.EventsOn('workspace-selected', (workspaceId) => {
+                    handleWorkspaceSelection(workspaceId);
+                });
+            }
         });
+
+        function handleWorkspaceSelection(workspaceId) {
+            const select = document.getElementById('workspace');
+            const ws = workspaces.find(w => w.id === workspaceId);
+            if (ws) {
+                select.value = workspaceId;
+                document.getElementById('workspace-group').style.display = 'none';
+                document.getElementById('active-workspace-info').style.display = 'block';
+                document.getElementById('active-workspace-name').textContent = ws.name || ws.id;
+                updateSubmitButton();
+            }
+        }
 
         async function checkServer() {
             try {
@@ -295,9 +321,8 @@
 
                 // Check for pre-selected workspace
                 const preSelected = await window.go.main.App.GetPreSelectedWorkspace();
-                if (preSelected && workspaces.some(ws => ws.id === preSelected)) {
-                    select.value = preSelected;
-                    updateSubmitButton();
+                if (preSelected) {
+                    handleWorkspaceSelection(preSelected);
                 }
             } catch (e) {
                 select.innerHTML = '<option value="">Error loading workspaces</option>';
@@ -425,7 +450,10 @@
 
         function resetForm() {
             selectedPath = '';
-            document.getElementById('workspace').selectedIndex = 0;
+            // Only reset workspace if it's visible (selectable)
+            if (document.getElementById('workspace-group').style.display !== 'none') {
+                document.getElementById('workspace').selectedIndex = 0;
+            }
             document.getElementById('name').value = '';
             document.getElementById('name').placeholder = 'Uses folder name if empty';
 

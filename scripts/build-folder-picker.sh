@@ -23,7 +23,20 @@ cd "$FOLDER_PICKER_DIR"
 
 # Build for current platform
 echo "Building for current platform..."
-wails build -clean
+WAILS_PLATFORM_FLAG=""
+if [[ "$OSTYPE" == "darwin"* ]]; then
+    # Build a universal binary for macOS so DMGs work on Intel + Apple Silicon
+    WAILS_PLATFORM_FLAG="--platform darwin/universal"
+elif [[ "$OSTYPE" == "msys"* ]] || [[ "$OSTYPE" == "cygwin"* ]]; then
+    # Default to amd64 on Windows unless overridden
+    WAILS_PLATFORM_FLAG="--platform windows/amd64"
+fi
+
+if [ -n "${WAILS_PLATFORM:-}" ]; then
+    WAILS_PLATFORM_FLAG="--platform ${WAILS_PLATFORM}"
+fi
+
+wails build -clean $WAILS_PLATFORM_FLAG
 
 echo ""
 echo "Build complete!"

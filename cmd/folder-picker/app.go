@@ -25,9 +25,10 @@ type App struct {
 }
 
 // NewApp creates a new App application struct
-func NewApp() *App {
+func NewApp(workspaceID string) *App {
 	return &App{
-		baseURL: "http://localhost:8765",
+		baseURL:              "http://localhost:8765",
+		preSelectedWorkspace: workspaceID,
 	}
 }
 
@@ -55,6 +56,7 @@ func (a *App) startLocalServer() {
 		}
 		if workspaceID != "" {
 			a.preSelectedWorkspace = workspaceID
+			runtime.EventsEmit(a.ctx, "workspace-selected", workspaceID)
 		}
 		a.ShowWindow()
 		w.Header().Set("Content-Type", "application/json")
