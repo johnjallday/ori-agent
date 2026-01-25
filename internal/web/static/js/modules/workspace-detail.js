@@ -645,7 +645,7 @@ export class WorkspaceDetailPage {
    */
   async setupBoard() {
     const defaultColumns = [
-      { id: 'todo', name: 'To Do' },
+      { id: 'backlog', name: 'Backlog' },
       { id: 'in-progress', name: 'In Progress' },
       { id: 'done', name: 'Done' }
     ];
