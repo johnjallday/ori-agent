@@ -206,7 +206,7 @@ export class WorkspaceDetailPage {
     }
 
     try {
-      const response = await fetch(`/api/orchestration/tasks?workspace_id=${encodeURIComponent(this.workspaceId)}`);
+      const response = await fetch(`/api/orchestration/tasks?studio_id=${encodeURIComponent(this.workspaceId)}`);
       if (!response.ok) throw new Error('Failed to load tasks');
 
       const data = await response.json();
@@ -242,7 +242,7 @@ export class WorkspaceDetailPage {
     this.elements.tasksList.innerHTML = topLevelTasks.map(task => `
       <div class="workspace-detail-item" data-task-id="${task.id}" onclick="window.workspaceDetail?.openTask('${task.id}')">
         <div class="d-flex justify-content-between align-items-start">
-          <div class="workspace-detail-item-title">${this.escapeHtml(task.name || 'Untitled Task')}</div>
+          <div class="workspace-detail-item-title">${this.escapeHtml(task.description || task.name || 'Untitled Task')}</div>
           <span class="workspace-detail-task-status ${getStatusClass(task.status)}">${getDisplayStatus(task.status)}</span>
         </div>
         <div class="workspace-detail-item-meta">
@@ -262,7 +262,7 @@ export class WorkspaceDetailPage {
     }
 
     try {
-      const response = await fetch(`/api/sessions?workspace_id=${encodeURIComponent(this.workspaceId)}`);
+      const response = await fetch(`/api/sessions?folder_id=${encodeURIComponent(this.workspaceId)}`);
       if (!response.ok) throw new Error('Failed to load sessions');
 
       const data = await response.json();
@@ -312,16 +312,16 @@ export class WorkspaceDetailPage {
     }
 
     try {
-      const response = await fetch(`/api/workspaces/${encodeURIComponent(this.workspaceId)}/files`);
+      const response = await fetch(`/api/studios/${encodeURIComponent(this.workspaceId)}`);
       if (!response.ok) {
-        // Files endpoint might not exist yet
         this.files = [];
         this.renderFiles();
         return;
       }
 
-      const data = await response.json();
-      this.files = data.files || data || [];
+      const workspace = await response.json();
+      // Filter attachments to only include files (not text content)
+      this.files = (workspace.attachments || []).filter(a => a.file_meta || a.type === 'image' || a.type === 'other');
       this.renderFiles();
     } catch (error) {
       console.error('Failed to load files:', error);
@@ -336,20 +336,24 @@ export class WorkspaceDetailPage {
   renderFiles() {
     if (!this.elements.filesList) return;
 
-    if (this.files.length === 0) {
+    if (!this.files || this.files.length === 0) {
       this.elements.filesList.innerHTML = '<div class="workspace-detail-empty">No files yet.</div>';
       return;
     }
 
-    this.elements.filesList.innerHTML = this.files.map(file => `
-      <div class="workspace-detail-item" data-file-id="${file.id}">
-        <div class="workspace-detail-item-title">${this.escapeHtml(file.name || file.filename || 'Untitled File')}</div>
-        <div class="workspace-detail-item-meta">
-          ${file.size ? this.formatFileSize(file.size) + ' · ' : ''}
-          ${formatDate(file.created_at)}
+    this.elements.filesList.innerHTML = this.files.map(file => {
+      const title = file.title || (file.file_meta && file.file_meta.name) || 'Untitled File';
+      const size = file.file_meta ? file.file_meta.size : null;
+      return `
+        <div class="workspace-detail-item" data-file-id="${file.id}">
+          <div class="workspace-detail-item-title">${this.escapeHtml(title)}</div>
+          <div class="workspace-detail-item-meta">
+            ${size ? this.formatFileSize(size) + ' · ' : ''}
+            ${formatDate(file.created_at)}
+          </div>
         </div>
-      </div>
-    `).join('');
+      `;
+    }).join('');
   }
 
   /**
@@ -473,9 +477,9 @@ export class WorkspaceDetailPage {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          workspace_id: this.workspaceId,
-          name: name,
-          description: description,
+          studio_id: this.workspaceId,
+          description: name, // Task API uses description as the main field
+          details: description,
           status: 'pending'
         })
       });
