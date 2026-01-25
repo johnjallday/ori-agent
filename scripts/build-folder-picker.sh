@@ -24,9 +24,22 @@ cd "$FOLDER_PICKER_DIR"
 # Build for current platform
 echo "Building for current platform..."
 WAILS_PLATFORM_FLAG=""
+WAILS_TAGS_FLAG=""
+
 if [[ "$OSTYPE" == "darwin"* ]]; then
     # Build a universal binary for macOS so DMGs work on Intel + Apple Silicon
     WAILS_PLATFORM_FLAG="--platform darwin/universal"
+elif [[ "$OSTYPE" == "linux-gnu"* ]]; then
+    # Check if webkit2gtk-4.1 is installed (Ubuntu 22.04+, Fedora 38+)
+    # If so, we need to use the webkit2_41 build tag
+    if pkg-config --exists webkit2gtk-4.1 2>/dev/null; then
+        echo "Detected webkit2gtk-4.1, using webkit2_41 build tag..."
+        WAILS_TAGS_FLAG="-tags webkit2_41"
+    elif pkg-config --exists webkit2gtk-4.0 2>/dev/null; then
+        echo "Detected webkit2gtk-4.0"
+    else
+        echo "Warning: No webkit2gtk package found, build may fail"
+    fi
 elif [[ "$OSTYPE" == "msys"* ]] || [[ "$OSTYPE" == "cygwin"* ]]; then
     # Default to amd64 on Windows unless overridden
     WAILS_PLATFORM_FLAG="--platform windows/amd64"
@@ -36,7 +49,7 @@ if [ -n "${WAILS_PLATFORM:-}" ]; then
     WAILS_PLATFORM_FLAG="--platform ${WAILS_PLATFORM}"
 fi
 
-wails build -clean $WAILS_PLATFORM_FLAG
+wails build -clean $WAILS_PLATFORM_FLAG $WAILS_TAGS_FLAG
 
 echo ""
 echo "Build complete!"
