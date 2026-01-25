@@ -41,5 +41,5 @@ function wt {
 
 # If executed directly (not sourced), run the function with passed arguments
 if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
-    wt "$@"
+  wt "$@"
 fi
