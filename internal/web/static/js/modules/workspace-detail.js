@@ -64,6 +64,9 @@ export class WorkspaceDetailPage {
     this.sessions = [];
     this.files = [];
     this.notes = [];
+    this.directories = [];
+    this.schedules = [];
+    this.children = [];
 
     // DOM elements
     this.elements = {};
@@ -75,14 +78,142 @@ export class WorkspaceDetailPage {
   async init() {
     this.cacheElements();
     this.bindEvents();
+    this.setupFileModal();
     await this.loadWorkspace();
     await Promise.all([
       this.loadTasks(),
       this.loadSessions(),
       this.loadFiles(),
-      this.loadNotes()
+      this.loadNotes(),
+      this.loadDirectories(),
+      this.loadSchedules()
     ]);
     this.setupRealtime();
+  }
+
+  /**
+   * Setup file modal handlers
+   */
+  setupFileModal() {
+    const dropZone = document.getElementById('hubFileDropZone');
+    const fileInput = document.getElementById('hubFileInput');
+    const submitBtn = document.getElementById('hubAddFileSubmitBtn');
+    const selectedFilesPreview = document.getElementById('hubSelectedFilesPreview');
+    const selectedFilesList = document.getElementById('hubSelectedFilesList');
+
+    if (!dropZone || !fileInput) return;
+
+    let selectedFiles = [];
+
+    // Click to select files
+    dropZone.addEventListener('click', () => fileInput.click());
+
+    // Drag and drop handlers
+    dropZone.addEventListener('dragover', (e) => {
+      e.preventDefault();
+      dropZone.classList.add('drag-active');
+    });
+
+    dropZone.addEventListener('dragleave', () => {
+      dropZone.classList.remove('drag-active');
+    });
+
+    dropZone.addEventListener('drop', (e) => {
+      e.preventDefault();
+      dropZone.classList.remove('drag-active');
+      if (e.dataTransfer.files.length > 0) {
+        selectedFiles = Array.from(e.dataTransfer.files);
+        updateFilesPreview();
+      }
+    });
+
+    // File input change
+    fileInput.addEventListener('change', () => {
+      if (fileInput.files.length > 0) {
+        selectedFiles = Array.from(fileInput.files);
+        updateFilesPreview();
+      }
+    });
+
+    // Update files preview
+    const updateFilesPreview = () => {
+      if (selectedFiles.length === 0) {
+        selectedFilesPreview.style.display = 'none';
+        submitBtn.disabled = true;
+        return;
+      }
+
+      selectedFilesPreview.style.display = 'block';
+      submitBtn.disabled = false;
+
+      selectedFilesList.innerHTML = selectedFiles.map((file, i) => `
+        <div class="d-flex justify-content-between align-items-center p-2" style="background: var(--bg-secondary); border-radius: 4px;">
+          <span style="color: var(--text-primary);">${this.escapeHtml(file.name)}</span>
+          <button type="button" class="btn-close btn-sm" onclick="window.workspaceDetail?.removeFile(${i})"></button>
+        </div>
+      `).join('');
+    };
+
+    // Remove file from selection
+    this.removeFile = (index) => {
+      selectedFiles.splice(index, 1);
+      updateFilesPreview();
+    };
+
+    // Submit upload
+    submitBtn?.addEventListener('click', async () => {
+      if (selectedFiles.length === 0) return;
+
+      const title = document.getElementById('hubFileTitle')?.value || '';
+      const notes = document.getElementById('hubFileNotes')?.value || '';
+
+      submitBtn.disabled = true;
+      submitBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span> Uploading...';
+
+      try {
+        for (const file of selectedFiles) {
+          const formData = new FormData();
+          formData.append('file', file);
+          formData.append('workspace_id', this.workspaceId);
+          if (title) formData.append('title', title);
+          if (notes) formData.append('notes', notes);
+
+          const response = await fetch(`/api/workspaces/${encodeURIComponent(this.workspaceId)}/files`, {
+            method: 'POST',
+            body: formData
+          });
+
+          if (!response.ok) throw new Error(`Failed to upload ${file.name}`);
+        }
+
+        if (window.Toast) window.Toast.success('File(s) uploaded successfully');
+        await this.loadFiles();
+
+        // Close modal and reset
+        const modal = bootstrap.Modal.getInstance(document.getElementById('hubAddFileModal'));
+        modal?.hide();
+        selectedFiles = [];
+        updateFilesPreview();
+        document.getElementById('hubFileTitle').value = '';
+        document.getElementById('hubFileNotes').value = '';
+        fileInput.value = '';
+      } catch (error) {
+        console.error('Upload failed:', error);
+        if (window.Toast) window.Toast.error(error.message || 'Upload failed');
+      } finally {
+        submitBtn.disabled = false;
+        submitBtn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" class="me-1"><path d="M9,16V10H5L12,3L19,10H15V16H9M5,20V18H19V20H5Z"/></svg> Upload';
+      }
+    });
+
+    // Reset on modal close
+    document.getElementById('hubAddFileModal')?.addEventListener('hidden.bs.modal', () => {
+      selectedFiles = [];
+      updateFilesPreview();
+      document.getElementById('hubFileTitle').value = '';
+      document.getElementById('hubFileNotes').value = '';
+      fileInput.value = '';
+    });
   }
 
   /**
@@ -110,6 +241,13 @@ export class WorkspaceDetailPage {
       sessionsList: document.getElementById('workspace-detail-sessions-list'),
       filesList: document.getElementById('workspace-detail-files-list'),
       notesList: document.getElementById('workspace-detail-notes-list'),
+      directoriesList: document.getElementById('workspace-detail-directories-list'),
+      schedulesList: document.getElementById('workspace-detail-schedules-list'),
+      childrenList: document.getElementById('workspace-detail-children-list'),
+
+      // Panels
+      childrenPanel: document.getElementById('workspace-detail-children-panel'),
+      childrenCount: document.getElementById('workspace-detail-children-count'),
 
       // Buttons
       addTaskBtn: document.getElementById('workspace-detail-add-task'),
@@ -117,15 +255,8 @@ export class WorkspaceDetailPage {
       newSessionBtn: document.getElementById('workspace-detail-new-session'),
       addFileBtn: document.getElementById('workspace-detail-add-file'),
       addNoteBtn: document.getElementById('workspace-detail-add-note'),
-
-      // Modals
-      fileModal: document.getElementById('workspace-detail-file-modal'),
-      noteModal: document.getElementById('workspace-detail-note-modal'),
-      fileInput: document.getElementById('workspace-detail-file-input'),
-      fileUploadBtn: document.getElementById('workspace-detail-file-upload-btn'),
-      noteTitle: document.getElementById('workspace-detail-note-title'),
-      noteContent: document.getElementById('workspace-detail-note-content'),
-      noteSaveBtn: document.getElementById('workspace-detail-note-save-btn')
+      addDirectoryBtn: document.getElementById('workspace-detail-add-directory'),
+      viewSchedulesBtn: document.getElementById('workspace-detail-view-schedules')
     };
   }
 
@@ -148,11 +279,15 @@ export class WorkspaceDetailPage {
 
     // File buttons
     this.elements.addFileBtn?.addEventListener('click', () => this.showFileModal());
-    this.elements.fileUploadBtn?.addEventListener('click', () => this.uploadFile());
 
     // Note buttons
     this.elements.addNoteBtn?.addEventListener('click', () => this.showNoteModal());
-    this.elements.noteSaveBtn?.addEventListener('click', () => this.saveNote());
+
+    // Directory buttons
+    this.elements.addDirectoryBtn?.addEventListener('click', () => this.showAddDirectoryModal());
+
+    // Schedule buttons
+    this.elements.viewSchedulesBtn?.addEventListener('click', () => this.showSchedulesModal());
   }
 
   /**
@@ -164,7 +299,7 @@ export class WorkspaceDetailPage {
       if (!response.ok) throw new Error('Failed to load workspace');
 
       this.workspace = await response.json();
-      this.renderWorkspaceInfo();
+      await this.renderWorkspaceInfo();
     } catch (error) {
       console.error('Failed to load workspace:', error);
       if (window.Toast) window.Toast.error('Failed to load workspace');
@@ -174,7 +309,7 @@ export class WorkspaceDetailPage {
   /**
    * Render workspace information in header
    */
-  renderWorkspaceInfo() {
+  async renderWorkspaceInfo() {
     if (!this.workspace) return;
 
     if (this.elements.workspaceName) {
@@ -195,6 +330,100 @@ export class WorkspaceDetailPage {
     if (this.elements.agentCount) {
       this.elements.agentCount.textContent = agents.length;
     }
+
+    // Load children workspaces from tree API
+    await this.loadChildren();
+  }
+
+  /**
+   * Load children workspaces from the tree API
+   */
+  async loadChildren() {
+    try {
+      // Fetch the full workspace tree to find children
+      const response = await fetch('/api/workspaces?tree=true');
+      if (!response.ok) {
+        this.children = [];
+        this.renderChildren();
+        return;
+      }
+
+      const data = await response.json();
+      const folders = data.folders || [];
+
+      // Find this workspace in the tree and get its children
+      const findWorkspace = (workspaces, targetId) => {
+        for (const ws of workspaces) {
+          if (ws.id === targetId) {
+            return ws;
+          }
+          if (ws.children && ws.children.length > 0) {
+            const found = findWorkspace(ws.children, targetId);
+            if (found) return found;
+          }
+        }
+        return null;
+      };
+
+      const currentWorkspace = findWorkspace(folders, this.workspaceId);
+      this.children = currentWorkspace?.children || [];
+      this.renderChildren();
+    } catch (error) {
+      console.error('Failed to load children workspaces:', error);
+      this.children = [];
+      this.renderChildren();
+    }
+  }
+
+  /**
+   * Render children workspaces
+   */
+  renderChildren() {
+    // Show/hide the children panel based on whether there are children
+    if (this.elements.childrenPanel) {
+      if (this.children.length > 0) {
+        this.elements.childrenPanel.style.display = '';
+      } else {
+        this.elements.childrenPanel.style.display = 'none';
+        return;
+      }
+    }
+
+    // Update count badge
+    if (this.elements.childrenCount) {
+      this.elements.childrenCount.textContent = this.children.length;
+    }
+
+    if (!this.elements.childrenList) return;
+
+    this.elements.childrenList.innerHTML = this.children.map(child => {
+      const name = child.name || 'Unnamed Workspace';
+      const description = child.description || '';
+      const colorAccent = child.color ? `border-left: 3px solid ${child.color};` : '';
+      const childCount = (child.children || []).length;
+      const hasChildren = childCount > 0;
+
+      return `
+        <div class="workspace-detail-child-card"
+             data-workspace-id="${child.id}"
+             onclick="window.location.href='/workspaces/${child.id}'"
+             style="${colorAccent}">
+          <div class="child-name">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" style="color: ${child.color || 'var(--text-secondary)'}; flex-shrink: 0;">
+              ${hasChildren
+                ? '<path d="M12,3L2,12H5V20H19V12H22L12,3M12,8.75A2.25,2.25 0 0,1 14.25,11A2.25,2.25 0 0,1 12,13.25A2.25,2.25 0 0,1 9.75,11A2.25,2.25 0 0,1 12,8.75M12,15C13.5,15 16.5,15.75 16.5,17.25V18H7.5V17.25C7.5,15.75 10.5,15 12,15Z"/>'
+                : '<path d="M10,4H4C2.89,4 2,4.89 2,6V18A2,2 0 0,0 4,20H20A2,2 0 0,0 22,18V8C22,6.89 21.1,6 20,6H12L10,4Z"/>'}
+            </svg>
+            <span>${this.escapeHtml(name)}</span>
+          </div>
+          ${description ? `<div class="child-desc" title="${this.escapeHtml(description)}">${this.escapeHtml(description)}</div>` : ''}
+          <div class="child-meta">
+            ${hasChildren ? `<span class="badge bg-secondary" style="font-size: 0.65rem;">${childCount} sub</span>` : ''}
+            <span>Click to open</span>
+          </div>
+        </div>
+      `;
+    }).join('');
   }
 
   /**
@@ -405,6 +634,223 @@ export class WorkspaceDetailPage {
   }
 
   /**
+   * Load directories for the workspace
+   */
+  async loadDirectories() {
+    if (this.elements.directoriesList) {
+      this.elements.directoriesList.innerHTML = '<div class="workspace-detail-loading">Loading directories...</div>';
+    }
+
+    try {
+      // Directories are stored as attachments with type 'directory'
+      const response = await fetch(`/api/studios/${encodeURIComponent(this.workspaceId)}`);
+      if (!response.ok) {
+        this.directories = [];
+        this.renderDirectories();
+        return;
+      }
+
+      const workspace = await response.json();
+      this.directories = (workspace.attachments || []).filter(a => a.type === 'directory');
+      this.renderDirectories();
+    } catch (error) {
+      console.error('Failed to load directories:', error);
+      this.directories = [];
+      this.renderDirectories();
+    }
+  }
+
+  /**
+   * Render directories list
+   */
+  renderDirectories() {
+    if (!this.elements.directoriesList) return;
+
+    if (!this.directories || this.directories.length === 0) {
+      this.elements.directoriesList.innerHTML = '<div class="workspace-detail-empty">No directories yet.</div>';
+      return;
+    }
+
+    this.elements.directoriesList.innerHTML = this.directories.map(dir => {
+      const name = dir.title || dir.name || dir.path || 'Unnamed Directory';
+      const path = dir.path || '';
+      return `
+        <div class="workspace-detail-item" data-directory-id="${dir.id}">
+          <div class="workspace-detail-item-title">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" class="me-2" style="color: var(--text-secondary);">
+              <path d="M10,4H4C2.89,4 2,4.89 2,6V18A2,2 0 0,0 4,20H20A2,2 0 0,0 22,18V8C22,6.89 21.1,6 20,6H12L10,4Z"/>
+            </svg>
+            ${this.escapeHtml(name)}
+          </div>
+          <div class="workspace-detail-item-meta">${this.escapeHtml(path)}</div>
+        </div>
+      `;
+    }).join('');
+  }
+
+  /**
+   * Show add directory modal - launches the folder picker
+   */
+  async showAddDirectoryModal() {
+    const button = this.elements.addDirectoryBtn;
+    if (!button) return;
+
+    // Show loading state on button
+    const originalHTML = button.innerHTML;
+    button.disabled = true;
+    button.innerHTML = '<span class="spinner-border spinner-border-sm"></span>';
+
+    try {
+      const response = await fetch('/api/launch-folder-picker', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          workspace_id: this.workspaceId
+        })
+      });
+
+      const result = await response.json();
+
+      if (result.success) {
+        if (window.Toast) window.Toast.info('Folder picker opened. Select a folder to add it.');
+        // The folder picker will add the directory and trigger a reload via realtime events
+        // Schedule a reload in case realtime doesn't trigger
+        setTimeout(() => this.loadDirectories(), 2000);
+      } else {
+        throw new Error(result.error || 'Failed to open folder picker');
+      }
+    } catch (error) {
+      console.error('Failed to launch folder picker:', error);
+      if (window.Toast) window.Toast.error('Failed to open folder picker');
+    } finally {
+      button.disabled = false;
+      button.innerHTML = originalHTML;
+    }
+  }
+
+  /**
+   * Add a directory reference
+   */
+  async addDirectory(path) {
+    try {
+      const response = await fetch(`/api/studios/${encodeURIComponent(this.workspaceId)}/attachments`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          type: 'directory',
+          path: path,
+          title: path.split('/').pop() || path
+        })
+      });
+
+      if (!response.ok) throw new Error('Failed to add directory');
+
+      if (window.Toast) window.Toast.success('Directory added');
+      await this.loadDirectories();
+    } catch (error) {
+      console.error('Failed to add directory:', error);
+      if (window.Toast) window.Toast.error('Failed to add directory');
+    }
+  }
+
+  /**
+   * Load scheduled tasks for the workspace
+   * Schedules are tasks that have a schedule field set
+   */
+  async loadSchedules() {
+    if (this.elements.schedulesList) {
+      this.elements.schedulesList.innerHTML = '<div class="workspace-detail-loading">Loading schedules...</div>';
+    }
+
+    try {
+      // Schedules are stored as tasks with schedule field
+      const response = await fetch(`/api/orchestration/tasks?studio_id=${encodeURIComponent(this.workspaceId)}`);
+      if (!response.ok) {
+        this.schedules = [];
+        this.renderSchedules();
+        return;
+      }
+
+      const data = await response.json();
+      const allTasks = data.tasks || [];
+
+      // Filter tasks that have schedules
+      this.schedules = allTasks
+        .filter(task => task.schedule != null)
+        .map(task => ({
+          id: task.id,
+          name: task.schedule_name || task.description,
+          description: task.description,
+          enabled: task.schedule_enabled,
+          schedule: task.schedule,
+          next_run: task.next_run,
+          last_run: task.last_run,
+          schedule_type: task.schedule ? 'cron' : 'interval'
+        }));
+
+      this.renderSchedules();
+    } catch (error) {
+      console.error('Failed to load schedules:', error);
+      this.schedules = [];
+      this.renderSchedules();
+    }
+  }
+
+  /**
+   * Render schedules list
+   */
+  renderSchedules() {
+    if (!this.elements.schedulesList) return;
+
+    if (!this.schedules || this.schedules.length === 0) {
+      this.elements.schedulesList.innerHTML = '<div class="workspace-detail-empty">No scheduled tasks yet.</div>';
+      return;
+    }
+
+    this.elements.schedulesList.innerHTML = this.schedules.map(schedule => {
+      const name = schedule.name || schedule.task_description || 'Unnamed Schedule';
+      const status = schedule.enabled ? 'Active' : 'Paused';
+      const statusClass = schedule.enabled ? 'completed' : 'pending';
+      return `
+        <div class="workspace-detail-item" data-schedule-id="${schedule.id}" onclick="window.workspaceDetail?.openSchedule('${schedule.id}')">
+          <div class="d-flex justify-content-between align-items-start">
+            <div class="workspace-detail-item-title">${this.escapeHtml(name)}</div>
+            <span class="workspace-detail-task-status ${statusClass}">${status}</span>
+          </div>
+          <div class="workspace-detail-item-meta">
+            ${schedule.schedule_type || 'interval'} · Next: ${schedule.next_run ? formatDate(schedule.next_run) : 'N/A'}
+          </div>
+        </div>
+      `;
+    }).join('');
+  }
+
+  /**
+   * Show schedules modal
+   */
+  showSchedulesModal() {
+    // Use the session manager's scheduled tasks panel if available
+    if (window.sessionManager && typeof window.sessionManager.openScheduledTasksPanel === 'function') {
+      window.sessionManager.openScheduledTasksPanel(this.workspaceId);
+    } else {
+      // Just reload the schedules list
+      this.loadSchedules();
+    }
+  }
+
+  /**
+   * Open a schedule for viewing/editing
+   */
+  openSchedule(scheduleId) {
+    if (window.sessionManager && typeof window.sessionManager.showScheduledTaskDetails === 'function') {
+      const schedule = this.schedules.find(s => s.id === scheduleId);
+      if (schedule) {
+        window.sessionManager.showScheduledTaskDetails(schedule);
+      }
+    }
+  }
+
+  /**
    * Setup real-time updates
    */
   setupRealtime() {
@@ -436,7 +882,21 @@ export class WorkspaceDetailPage {
         this.loadFiles();
         break;
       case 'note_updated':
+      case 'note_created':
+      case 'note_deleted':
         this.loadNotes();
+        break;
+      case 'directory_added':
+      case 'directory_removed':
+      case 'attachment_created':
+      case 'attachment_deleted':
+        this.loadDirectories();
+        this.loadFiles();
+        break;
+      case 'schedule_created':
+      case 'schedule_updated':
+      case 'schedule_deleted':
+        this.loadSchedules();
         break;
     }
   }
@@ -498,12 +958,9 @@ export class WorkspaceDetailPage {
    * Show add task modal
    */
   showAddTaskModal() {
-    // Use existing task modal if available
-    if (window.taskModal && typeof window.taskModal.show === 'function') {
-      window.taskModal.show({
-        workspaceId: this.workspaceId,
-        onSave: () => this.loadTasks()
-      });
+    // Use existing task modal controller
+    if (window.taskModalController && typeof window.taskModalController.openForCreate === 'function') {
+      window.taskModalController.openForCreate(this.workspaceId, '', () => this.loadTasks());
     } else {
       // Fallback to prompt
       const name = prompt('Enter task name:');
@@ -512,28 +969,43 @@ export class WorkspaceDetailPage {
   }
 
   /**
-   * Open a task
+   * Open a task for editing
    */
   openTask(taskId) {
-    // Use existing task modal if available
-    if (window.taskModal && typeof window.taskModal.showEdit === 'function') {
+    // Use existing task modal controller
+    if (window.taskModalController && typeof window.taskModalController.openForEdit === 'function') {
       const task = this.tasks.find(t => t.id === taskId);
       if (task) {
-        window.taskModal.showEdit(task, () => this.loadTasks());
+        window.taskModalController.openForEdit(task, () => this.loadTasks());
       }
     }
   }
 
   /**
-   * Create a new session
+   * Create a new session using the existing chat modal
    */
-  async createNewSession() {
+  createNewSession() {
+    // Use the existing create chat modal from sessionManager
+    if (window.sessionManager && typeof window.sessionManager.showCreateChatModalForWorkspace === 'function') {
+      window.sessionManager.showCreateChatModalForWorkspace(this.workspaceId);
+    } else if (window.sessionManager && typeof window.sessionManager.showCreateChatModal === 'function') {
+      window.sessionManager.showCreateChatModal();
+    } else {
+      // Fallback to simple API call
+      this.createSimpleSession();
+    }
+  }
+
+  /**
+   * Fallback simple session creation
+   */
+  async createSimpleSession() {
     try {
       const response = await fetch('/api/sessions', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          workspace_id: this.workspaceId,
+          folder_id: this.workspaceId,
           title: 'New Chat'
         })
       });
@@ -561,7 +1033,7 @@ export class WorkspaceDetailPage {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          workspace_id: this.workspaceId,
+          folder_id: this.workspaceId,
           title: message.substring(0, 50)
         })
       });
@@ -591,72 +1063,69 @@ export class WorkspaceDetailPage {
   }
 
   /**
-   * Show file upload modal
+   * Show file upload modal using hub's file modal
    */
   showFileModal() {
-    if (this.elements.fileModal) {
-      const modal = new bootstrap.Modal(this.elements.fileModal);
+    // Use the hub file modal if available
+    const hubFileModal = document.getElementById('hubAddFileModal');
+    if (hubFileModal && typeof bootstrap !== 'undefined') {
+      // Set up the workspace ID for the file upload
+      window.currentWorkspaceId = this.workspaceId;
+      const modal = new bootstrap.Modal(hubFileModal);
       modal.show();
+    } else {
+      // Fallback to file input click
+      const fileInput = document.createElement('input');
+      fileInput.type = 'file';
+      fileInput.multiple = true;
+      fileInput.onchange = () => this.uploadFiles(fileInput.files);
+      fileInput.click();
     }
   }
 
   /**
-   * Upload a file
+   * Upload files
    */
-  async uploadFile() {
-    const fileInput = this.elements.fileInput;
-    if (!fileInput?.files?.length) {
-      if (window.Toast) window.Toast.error('Please select a file');
-      return;
+  async uploadFiles(files) {
+    if (!files || files.length === 0) return;
+
+    for (const file of files) {
+      const formData = new FormData();
+      formData.append('file', file);
+      formData.append('workspace_id', this.workspaceId);
+
+      try {
+        const response = await fetch(`/api/workspaces/${encodeURIComponent(this.workspaceId)}/files`, {
+          method: 'POST',
+          body: formData
+        });
+
+        if (!response.ok) throw new Error('Failed to upload file');
+      } catch (error) {
+        console.error('Failed to upload file:', error);
+        if (window.Toast) window.Toast.error(`Failed to upload ${file.name}`);
+        return;
+      }
     }
 
-    const file = fileInput.files[0];
-    const formData = new FormData();
-    formData.append('file', file);
-    formData.append('workspace_id', this.workspaceId);
-
-    try {
-      const response = await fetch(`/api/workspaces/${encodeURIComponent(this.workspaceId)}/files`, {
-        method: 'POST',
-        body: formData
-      });
-
-      if (!response.ok) throw new Error('Failed to upload file');
-
-      if (window.Toast) window.Toast.success('File uploaded');
-      await this.loadFiles();
-
-      // Close modal
-      const modal = bootstrap.Modal.getInstance(this.elements.fileModal);
-      modal?.hide();
-      fileInput.value = '';
-    } catch (error) {
-      console.error('Failed to upload file:', error);
-      if (window.Toast) window.Toast.error('Failed to upload file');
-    }
+    if (window.Toast) window.Toast.success('File(s) uploaded');
+    await this.loadFiles();
   }
 
   /**
-   * Show note modal
+   * Show note modal using sessionManager
    */
   showNoteModal(note = null) {
-    if (this.elements.noteTitle) {
-      this.elements.noteTitle.value = note?.title || '';
-    }
-    if (this.elements.noteContent) {
-      this.elements.noteContent.value = note?.content || '';
-    }
-
-    this.editingNoteId = note?.id || null;
-
-    const modalTitle = document.getElementById('workspace-detail-note-modal-title');
-    if (modalTitle) {
-      modalTitle.textContent = note ? 'Edit Note' : 'Add Note';
-    }
-
-    if (this.elements.noteModal) {
-      const modal = new bootstrap.Modal(this.elements.noteModal);
-      modal.show();
+    if (note) {
+      // Edit existing note
+      if (window.sessionManager && typeof window.sessionManager.openNoteEditorModal === 'function') {
+        window.sessionManager.openNoteEditorModal(note);
+      }
+    } else {
+      // Create new note
+      if (window.sessionManager && typeof window.sessionManager.openNoteCreateModal === 'function') {
+        window.sessionManager.openNoteCreateModal(this.workspaceId);
+      }
     }
   }
 
@@ -671,21 +1140,7 @@ export class WorkspaceDetailPage {
   }
 
   /**
-   * Save a note
-   */
-  async saveNote() {
-    const title = this.elements.noteTitle?.value?.trim() || 'Untitled Note';
-    const content = this.elements.noteContent?.value?.trim() || '';
-
-    await this.createNote(title, content, this.editingNoteId);
-
-    // Close modal
-    const modal = bootstrap.Modal.getInstance(this.elements.noteModal);
-    modal?.hide();
-  }
-
-  /**
-   * Create or update a note
+   * Create a quick note from content (for quick input)
    */
   async createNote(title, content, noteId = null) {
     try {
@@ -696,7 +1151,7 @@ export class WorkspaceDetailPage {
       const response = await fetch(url, {
         method: noteId ? 'PUT' : 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ title, content })
+        body: JSON.stringify({ name: title, content })
       });
 
       if (!response.ok) throw new Error('Failed to save note');
