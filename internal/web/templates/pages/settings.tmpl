@@ -202,6 +202,65 @@
           </div>
         </div>
 
+        <!-- Voice & Language Section -->
+        <div class="modern-card p-4 mb-4" id="voiceSettingsCard">
+          <h4 class="mb-4" style="color: var(--text-primary);">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor" class="me-2">
+              <path d="M12,14A3,3 0 0,0 15,11V5A3,3 0 0,0 9,5V11A3,3 0 0,0 12,14M17,11A1,1 0 0,0 15,11A3,3 0 0,1 9,11A1,1 0 0,0 7,11A5,5 0 0,0 11,15.9V19H9A1,1 0 0,0 9,21H15A1,1 0 0,0 15,19H13V15.9A5,5 0 0,0 17,11Z"/>
+            </svg>
+            Voice & Language
+          </h4>
+
+          <div class="row g-3">
+            <div class="col-md-6">
+              <label class="form-label fw-semibold" style="color: var(--text-primary);">Speech Provider</label>
+              <select id="speechProviderSelect" class="form-select" style="background: var(--bg-tertiary); border: 1px solid var(--border-color); color: var(--text-primary);">
+                <option value="auto" selected>Auto (Browser)</option>
+                <option value="browser">Browser (Web Speech)</option>
+                <option value="openai">OpenAI (Server)</option>
+                <option value="off">Off</option>
+              </select>
+              <div class="form-text" style="color: var(--text-secondary);">
+                Auto uses your browser for recognition. Server providers can be enabled later.
+              </div>
+            </div>
+            <div class="col-md-6">
+              <label class="form-label fw-semibold" style="color: var(--text-primary);">Language</label>
+              <select id="speechLanguageSelect" class="form-select" style="background: var(--bg-tertiary); border: 1px solid var(--border-color); color: var(--text-primary);">
+                <option value="auto" selected>Auto-detect</option>
+                <option value="en-US">English (US)</option>
+                <option value="en-GB">English (UK)</option>
+                <option value="es-ES">Spanish (ES)</option>
+                <option value="es-MX">Spanish (MX)</option>
+                <option value="fr-FR">French</option>
+                <option value="de-DE">German</option>
+                <option value="it-IT">Italian</option>
+                <option value="pt-BR">Portuguese (BR)</option>
+                <option value="nl-NL">Dutch</option>
+                <option value="sv-SE">Swedish</option>
+                <option value="ja-JP">Japanese</option>
+                <option value="ko-KR">Korean</option>
+                <option value="zh-CN">Chinese (Simplified)</option>
+                <option value="zh-TW">Chinese (Traditional)</option>
+                <option value="hi-IN">Hindi</option>
+              </select>
+              <div class="form-text" style="color: var(--text-secondary);">
+                Choose a language for higher accuracy or leave Auto to detect.
+              </div>
+            </div>
+          </div>
+
+          <div class="d-flex flex-wrap gap-2 mt-3">
+            <button class="btn btn-primary" type="button" id="saveSpeechSettingsBtn" style="background: var(--accent-color); border-color: var(--accent-color);">
+              Save Voice Settings
+            </button>
+            <button class="btn btn-outline-secondary" type="button" id="voiceDiagnosticsBtn">
+              Run Voice Diagnostics
+            </button>
+          </div>
+          <div id="voiceDiagnosticsResult" class="voice-diagnostics-result mt-3" style="display: none;"></div>
+        </div>
+
         <!-- Device Capabilities Section -->
         <div class="modern-card p-4 mb-4">
           <h4 class="mb-4" style="color: var(--text-primary);">

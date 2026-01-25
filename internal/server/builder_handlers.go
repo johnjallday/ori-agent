@@ -32,6 +32,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/settingshttp"
 	"github.com/johnjallday/ori-agent/internal/skills"
 	"github.com/johnjallday/ori-agent/internal/skillshttp"
+	"github.com/johnjallday/ori-agent/internal/speechhttp"
 	"github.com/johnjallday/ori-agent/internal/store"
 	"github.com/johnjallday/ori-agent/internal/usagehttp"
 )
@@ -44,6 +45,7 @@ func (b *ServerBuilder) initializeHandlers() error {
 	s.usageHandler = usagehttp.NewHandler(s.costTracker)
 	s.mcpHandler = mcphttp.NewHandler(s.mcpRegistry, s.mcpConfigManager, s.st)
 	s.settingsHandler = settingshttp.NewHandler(s.st, s.configManager, s.clientFactory, s.llmFactory)
+	s.speechHandler = speechhttp.NewHandler(s.configManager)
 
 	s.chatHandler = chathttp.NewHandler(s.st, s.clientFactory)
 	s.chatHandler.SetLLMFactory(s.llmFactory)

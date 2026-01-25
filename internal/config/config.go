@@ -38,6 +38,11 @@ type Settings struct {
 	// External agents settings
 	ExternalAgentsClaudeEnabled bool `json:"external_agents_claude_enabled"` // Enable reading agents from Claude Code ~/.claude (default: false)
 	ExternalAgentsCodexEnabled  bool `json:"external_agents_codex_enabled"`  // Enable reading agents from Codex CLI ~/.codex (default: false)
+
+	// Speech settings
+	SpeechProvider string `json:"speech_provider,omitempty"` // auto, browser, openai, off
+	SpeechModel    string `json:"speech_model,omitempty"`    // Provider-specific model override
+	SpeechLanguage string `json:"speech_language,omitempty"` // BCP-47 tag or "auto"
 }
 
 // Manager handles configuration loading and saving
@@ -96,6 +101,8 @@ func defaultSettings() Settings {
 		SessionMaxCount:       1000,
 		MultiAgentMode:        "auto",
 		MultiAgentThreshold:   6.0,
+		SpeechProvider:        "auto",
+		SpeechLanguage:        "auto",
 	}
 }
 
@@ -260,6 +267,18 @@ func (m *Manager) validate() error {
 	}
 	if m.settings.MultiAgentThreshold > 10 {
 		m.settings.MultiAgentThreshold = 10
+	}
+
+	if m.settings.SpeechProvider == "" {
+		m.settings.SpeechProvider = "auto"
+	}
+	switch m.settings.SpeechProvider {
+	case "auto", "browser", "openai", "off":
+	default:
+		m.settings.SpeechProvider = "auto"
+	}
+	if m.settings.SpeechLanguage == "" {
+		m.settings.SpeechLanguage = "auto"
 	}
 
 	return m.validateAPIKey(m.settings.OpenAIAPIKey)

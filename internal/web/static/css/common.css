@@ -1206,6 +1206,85 @@ h3, .h3 {
     transform: translateY(-1px);
 }
 
+/* Voice Input Button */
+.voice-input-btn {
+    margin: 0;
+    padding: 4px 10px;
+    background: var(--bg-secondary);
+    color: var(--text-primary);
+    border: 1px solid var(--border-color);
+    font-size: 12px;
+    border-radius: 6px;
+    transition: all 0.2s ease;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.voice-input-btn:hover {
+    background: var(--bg-tertiary);
+    border-color: var(--border-color);
+    transform: translateY(-1px);
+}
+
+.voice-input-btn--icon {
+    padding: 2px 6px;
+    min-width: 28px;
+    justify-content: center;
+}
+
+.voice-input-btn.is-recording {
+    background: rgba(239, 68, 68, 0.12);
+    border-color: rgba(239, 68, 68, 0.35);
+    color: #dc2626;
+}
+
+[data-bs-theme="dark"] .voice-input-btn.is-recording {
+    background: rgba(239, 68, 68, 0.2);
+    border-color: rgba(239, 68, 68, 0.5);
+    color: #fca5a5;
+}
+
+.voice-input-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+    transform: none;
+}
+
+.voice-status {
+    min-height: 16px;
+    margin-top: 6px;
+    font-size: 12px;
+    color: var(--text-secondary);
+}
+
+.voice-status.is-active {
+    color: var(--text-primary);
+}
+
+.voice-status.is-error {
+    color: #dc2626;
+}
+
+[data-bs-theme="dark"] .voice-status.is-error {
+    color: #fca5a5;
+}
+
+.voice-status--compact {
+    margin-top: 0;
+    margin-bottom: 8px;
+}
+
+.voice-diagnostics-result {
+    white-space: pre-line;
+    font-size: 12px;
+    color: var(--text-secondary);
+    background: var(--bg-secondary);
+    border: 1px dashed var(--border-color);
+    border-radius: 6px;
+    padding: 8px 10px;
+}
+
 /* Input wrapper for drop zone */
 .input-wrapper {
     position: relative;

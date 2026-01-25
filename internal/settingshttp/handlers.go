@@ -186,6 +186,53 @@ func (h *Handler) APIKeyHandler(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// SpeechSettingsHandler handles speech settings persistence
+func (h *Handler) SpeechSettingsHandler(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodGet:
+		cfg := h.configManager.Get()
+		response := struct {
+			SpeechProvider string `json:"speech_provider"`
+			SpeechModel    string `json:"speech_model,omitempty"`
+			SpeechLanguage string `json:"speech_language"`
+		}{
+			SpeechProvider: cfg.SpeechProvider,
+			SpeechModel:    cfg.SpeechModel,
+			SpeechLanguage: cfg.SpeechLanguage,
+		}
+		orihttp.WriteJSON(w, response)
+
+	case http.MethodPost:
+		var req struct {
+			SpeechProvider string `json:"speech_provider"`
+			SpeechModel    string `json:"speech_model"`
+			SpeechLanguage string `json:"speech_language"`
+		}
+		if !orihttp.ParseJSONBody(w, r, &req) {
+			return
+		}
+
+		cfg := h.configManager.Get()
+		cfg.SpeechProvider = strings.TrimSpace(req.SpeechProvider)
+		cfg.SpeechModel = strings.TrimSpace(req.SpeechModel)
+		cfg.SpeechLanguage = strings.TrimSpace(req.SpeechLanguage)
+
+		if err := h.configManager.Update(cfg); err != nil {
+			orihttp.RespondErrorWithErr(w, http.StatusBadRequest, "Invalid speech settings", err)
+			return
+		}
+		if err := h.configManager.Save(); err != nil {
+			orihttp.InternalError(w, err.Error())
+			return
+		}
+
+		w.WriteHeader(http.StatusOK)
+
+	default:
+		w.WriteHeader(http.StatusMethodNotAllowed)
+	}
+}
+
 // maskAnthropicAPIKey returns a masked version of the Anthropic API key
 func maskAnthropicAPIKey(apiKey string) string {
 	if apiKey == "" {

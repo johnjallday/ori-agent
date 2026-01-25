@@ -48,6 +48,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/settingshttp"
 	"github.com/johnjallday/ori-agent/internal/skills"
 	"github.com/johnjallday/ori-agent/internal/skillshttp"
+	"github.com/johnjallday/ori-agent/internal/speechhttp"
 	"github.com/johnjallday/ori-agent/internal/store"
 	"github.com/johnjallday/ori-agent/internal/types"
 	"github.com/johnjallday/ori-agent/internal/updatemanager"
@@ -132,6 +133,7 @@ type Server struct {
 	resetHandler           *settingshttp.ResetHandler
 	autoConfigHandler      *agenthttp.AutoConfigHandler
 	smartOnboardingHandler *onboardinghttp.SmartOnboardingHandler
+	speechHandler          *speechhttp.Handler
 
 	// Session management
 	sessionStore        session.HybridStore

@@ -199,6 +199,8 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 	mux.HandleFunc("/api/settings/available-models", s.settingsHandler.AvailableModelsHandler)
 	mux.HandleFunc("/api/settings/system-paths", s.settingsHandler.SystemPathsHandler)
 	mux.HandleFunc("/api/settings/external-agents", s.settingsHandler.ExternalAgentsSettingsHandler)
+	mux.HandleFunc("/api/settings/speech", s.settingsHandler.SpeechSettingsHandler)
+	mux.HandleFunc("/api/transcribe", s.speechHandler.Transcribe)
 
 	// Web3 Wallet endpoints
 	if caps.Web3Wallet {
