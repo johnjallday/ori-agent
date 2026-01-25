@@ -17,7 +17,13 @@ echo "╚═══════════════════════�
 echo ""
 
 echo "🚀 Building all installers..."
-goreleaser release --snapshot --clean --skip=publish
+# Skip nfpm (Linux packages) when running on non-Linux systems
+# The Linux build is skipped on macOS, so nfpm will fail
+if [ "$(uname -s)" = "Linux" ]; then
+  goreleaser release --snapshot --clean --skip=publish
+else
+  goreleaser release --snapshot --clean --skip=publish,nfpm
+fi
 
 # Build folder picker for DMG packaging
 echo ""
