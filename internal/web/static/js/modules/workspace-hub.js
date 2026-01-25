@@ -344,7 +344,8 @@
           return;
         }
 
-        selectWorkspace(workspaceId, { focus: true });
+        // Navigate to workspace detail page
+        window.location.href = `/workspaces/${workspaceId}`;
       });
 
       card.addEventListener('keydown', (e) => {
@@ -1171,12 +1172,7 @@
       populateWorkspaceSelect(flattened);
       renderLauncher(flattened);
 
-      const saved = sessionStorage.getItem(window.WorkspaceHubState.getStorageKey());
-      if (saved && state.workspaceMap.has(saved)) {
-        selectWorkspace(saved);
-        return;
-      }
-
+      // Always show the launcher - workspace details are now on separate pages
       showLauncher();
     } catch (error) {
       console.error('Workspace hub failed to load workspaces:', error);

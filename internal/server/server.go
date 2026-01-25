@@ -428,14 +428,25 @@ func (s *Server) handleWorkspacesRoutes(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	// If just /workspaces/{id}, redirect to home (workspace hub is on home page)
+	// If just /workspaces/{id}, serve the workspace detail page
 	if len(parts) == 1 {
-		http.Redirect(w, r, "/", http.StatusSeeOther)
+		s.serveWorkspaceDetail(w, r, workspaceID)
 		return
 	}
 
 	// Otherwise, redirect to home page
 	http.Redirect(w, r, "/", http.StatusSeeOther)
+}
+
+func (s *Server) serveWorkspaceDetail(w http.ResponseWriter, r *http.Request, workspaceID string) {
+	data := s.prepareBasePageData("workspaces")
+	data.Title = "Workspace - Ori Agent"
+	data.BrandText = "Ori Agent"
+	data.ShowSidebarToggle = true
+	data.Extra = map[string]interface{}{
+		"WorkspaceID": workspaceID,
+	}
+	s.renderAndWritePage(w, "workspace-detail", data)
 }
 
 func (s *Server) serveWorkspaceCanvas(w http.ResponseWriter, r *http.Request, workspaceID string) {
