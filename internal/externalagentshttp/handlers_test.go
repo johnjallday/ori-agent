@@ -57,7 +57,7 @@ model_reasoning_effort = "high"
 
 	// Create config manager with external agents enabled
 	configManager := config.NewManager(filepath.Join(tmpDir, "settings.json"))
-	configManager.Load()
+	_ = configManager.Load() // Ignore error in tests - may not exist yet
 	configManager.SetExternalAgentsClaudeEnabled(true)
 	configManager.SetExternalAgentsCodexEnabled(true)
 

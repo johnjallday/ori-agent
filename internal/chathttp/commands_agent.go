@@ -7,6 +7,9 @@ import (
 	"sort"
 	"strings"
 
+	"golang.org/x/text/cases"
+	"golang.org/x/text/language"
+
 	orihttp "github.com/johnjallday/ori-agent/internal/http"
 	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/store"
@@ -285,7 +288,7 @@ func (ch *CommandHandler) HandleSkillsList(w http.ResponseWriter, r *http.Reques
 		skillsResponse.WriteString("No skills are currently loaded.")
 	} else {
 		for _, skill := range skillsList {
-			sourceLabel := strings.Title(skill.Source)
+			sourceLabel := cases.Title(language.English).String(skill.Source)
 			description := skill.Description
 			if description == "" {
 				description = "(No description)"

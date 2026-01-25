@@ -53,7 +53,7 @@ func (p *GeminiProvider) Capabilities() ProviderCapabilities {
 // ValidateConfig validates the Gemini configuration.
 func (p *GeminiProvider) ValidateConfig(config ProviderConfig) error {
 	if strings.TrimSpace(config.APIKey) == "" {
-		return fmt.Errorf("Gemini API key is required")
+		return fmt.Errorf("gemini API key is required")
 	}
 	return nil
 }
@@ -69,7 +69,7 @@ func (p *GeminiProvider) DefaultModels() []string {
 // Chat sends a chat request to Gemini.
 func (p *GeminiProvider) Chat(ctx context.Context, req ChatRequest) (*ChatResponse, error) {
 	if strings.TrimSpace(p.apiKey) == "" {
-		return nil, fmt.Errorf("Gemini API key is required (set GEMINI_API_KEY or configure it in settings)")
+		return nil, fmt.Errorf("gemini API key is required (set GEMINI_API_KEY or configure it in settings)")
 	}
 
 	requestBody, err := p.buildRequest(req)
@@ -93,7 +93,7 @@ func (p *GeminiProvider) Chat(ctx context.Context, req ChatRequest) (*ChatRespon
 // StreamChat streams a chat response from Gemini.
 func (p *GeminiProvider) StreamChat(ctx context.Context, req ChatRequest) (StreamReader, error) {
 	if strings.TrimSpace(p.apiKey) == "" {
-		return nil, fmt.Errorf("Gemini API key is required (set GEMINI_API_KEY or configure it in settings)")
+		return nil, fmt.Errorf("gemini API key is required (set GEMINI_API_KEY or configure it in settings)")
 	}
 
 	requestBody, err := p.buildRequest(req)
@@ -211,11 +211,7 @@ func (p *GeminiProvider) buildRequest(req ChatRequest) (*geminiGenerateContentRe
 	if len(req.Tools) > 0 {
 		funcDecls := make([]geminiFunctionDeclaration, 0, len(req.Tools))
 		for _, tool := range req.Tools {
-			funcDecls = append(funcDecls, geminiFunctionDeclaration{
-				Name:        tool.Name,
-				Description: tool.Description,
-				Parameters:  tool.Parameters,
-			})
+			funcDecls = append(funcDecls, geminiFunctionDeclaration(tool))
 		}
 		tools = []geminiTool{{FunctionDeclarations: funcDecls}}
 	}
