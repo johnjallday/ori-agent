@@ -42,7 +42,8 @@ jobs:
       - name: Build binaries
         run: |
           # macOS can run all builds including CGO menubar
-          goreleaser release --snapshot --clean --skip=publish
+          # Skip nfpm (Linux packages) since we're only building macOS binaries
+          goreleaser release --snapshot --clean --skip=publish,nfpm
 
       - name: Build folder picker app
         run: ./scripts/build-folder-picker.sh
