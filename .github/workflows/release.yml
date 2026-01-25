@@ -36,7 +36,7 @@ jobs:
       - name: Install folder picker build deps
         run: |
           sudo apt-get update
-          sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.0-dev build-essential pkg-config
+          sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.1-dev build-essential pkg-config
 
       - name: Build folder picker app
         run: ./scripts/build-folder-picker.sh
@@ -140,9 +140,20 @@ jobs:
         run: ./scripts/build-folder-picker.sh
 
       - name: Install WiX Toolset
+        shell: pwsh
         run: |
           choco install wixtoolset -y
-          echo "C:\Program Files (x86)\WiX Toolset v3.11\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+          # Find and set WIX path dynamically (version may vary)
+          $wixDir = Get-ChildItem "C:\Program Files (x86)" -Filter "WiX Toolset*" -Directory | Select-Object -First 1
+          if ($wixDir) {
+            $wixBin = Join-Path $wixDir.FullName "bin"
+            Write-Host "Found WiX at: $wixBin"
+            echo $wixBin | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+            echo "WIX=$($wixDir.FullName)\" >> $env:GITHUB_ENV
+          } else {
+            Write-Host "WiX Toolset not found in Program Files (x86)"
+            exit 1
+          }
 
       - name: Build Windows binaries
         run: |

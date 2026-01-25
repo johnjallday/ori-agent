@@ -30,10 +30,14 @@ Write-Host "🔍 Checking for WiX Toolset..." -ForegroundColor Yellow
 $wixPath = $null
 $possiblePaths = @(
     "${env:WIX}bin",
+    # Standard installation paths
     "${env:ProgramFiles(x86)}\WiX Toolset v3.14\bin",
     "${env:ProgramFiles(x86)}\WiX Toolset v3.11\bin",
     "${env:ProgramFiles}\WiX Toolset v3.14\bin",
-    "${env:ProgramFiles}\WiX Toolset v3.11\bin"
+    "${env:ProgramFiles}\WiX Toolset v3.11\bin",
+    # Chocolatey installation paths
+    "C:\Program Files (x86)\WiX Toolset v3.14\bin",
+    "C:\Program Files (x86)\WiX Toolset v3.11\bin"
 )
 
 foreach ($path in $possiblePaths) {
@@ -47,6 +51,16 @@ if (-not $wixPath) {
     Write-Host "❌ Error: WiX Toolset not found!" -ForegroundColor Red
     Write-Host "  Please install WiX Toolset from: https://wixtoolset.org/releases/" -ForegroundColor Red
     Write-Host "  Or install via Chocolatey: choco install wixtoolset" -ForegroundColor Red
+    Write-Host ""
+    Write-Host "  Debug info:" -ForegroundColor Yellow
+    Write-Host "  - WIX env var: '$env:WIX'" -ForegroundColor Yellow
+    Write-Host "  - Searched paths:" -ForegroundColor Yellow
+    foreach ($p in $possiblePaths) {
+        $exists = if (Test-Path "$p\candle.exe") { "✓" } else { "✗" }
+        Write-Host "    $exists $p" -ForegroundColor Yellow
+    }
+    Write-Host "  - Program Files (x86) contents:" -ForegroundColor Yellow
+    Get-ChildItem "C:\Program Files (x86)" -Filter "WiX*" -Directory -ErrorAction SilentlyContinue | ForEach-Object { Write-Host "    $_" -ForegroundColor Yellow }
     exit 1
 }
 

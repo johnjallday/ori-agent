@@ -42,7 +42,8 @@ jobs:
       - name: Build binaries
         run: |
           # macOS can run all builds including CGO menubar
-          goreleaser release --snapshot --clean --skip=publish
+          # Skip nfpm (Linux packages) since we're only building macOS binaries
+          goreleaser release --snapshot --clean --skip=publish,nfpm
 
       - name: Build folder picker app
         run: ./scripts/build-folder-picker.sh
@@ -143,7 +144,7 @@ jobs:
       - name: Install folder picker build deps
         run: |
           sudo apt-get update
-          sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.0-dev build-essential pkg-config
+          sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.1-dev build-essential pkg-config
 
       - name: Build folder picker app
         run: ./scripts/build-folder-picker.sh
@@ -232,7 +233,7 @@ jobs:
 
       - name: Install folder picker build deps
         run: |
-          dnf install -y gtk3-devel webkit2gtk4.0-devel gcc gcc-c++ make pkgconf-pkg-config
+          dnf install -y gtk3-devel webkit2gtk4.1-devel gcc gcc-c++ make pkgconf-pkg-config
 
       - name: Build folder picker app
         run: ./scripts/build-folder-picker.sh
@@ -311,7 +312,23 @@ jobs:
           go-version: '1.25'
 
       - name: Install WiX Toolset
-        run: choco install wixtoolset -y
+        run: |
+          choco install wixtoolset -y
+          # Refresh environment variables for this session
+          $env:WIX = (Get-ItemProperty -Path 'HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager\Environment' -Name 'WIX' -ErrorAction SilentlyContinue).WIX
+          if ($env:WIX) {
+            Write-Host "WIX environment variable set to: $env:WIX"
+            echo "WIX=$env:WIX" >> $env:GITHUB_ENV
+          } else {
+            # Fallback: find WiX installation
+            $wixDir = Get-ChildItem "C:\Program Files (x86)" -Filter "WiX Toolset*" -Directory | Select-Object -First 1
+            if ($wixDir) {
+              $env:WIX = $wixDir.FullName + "\"
+              Write-Host "WIX found at: $env:WIX"
+              echo "WIX=$env:WIX" >> $env:GITHUB_ENV
+            }
+          }
+        shell: pwsh
 
       - name: Install GoReleaser
         run: choco install goreleaser -y
