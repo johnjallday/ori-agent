@@ -68,6 +68,10 @@ export class WorkspaceDetailPage {
     this.schedules = [];
     this.children = [];
 
+    // Board state
+    this.currentView = 'list'; // 'list' or 'board'
+    this.boardConfig = null;
+
     // DOM elements
     this.elements = {};
   }
@@ -256,7 +260,18 @@ export class WorkspaceDetailPage {
       addFileBtn: document.getElementById('workspace-detail-add-file'),
       addNoteBtn: document.getElementById('workspace-detail-add-note'),
       addDirectoryBtn: document.getElementById('workspace-detail-add-directory'),
-      viewSchedulesBtn: document.getElementById('workspace-detail-view-schedules')
+      viewSchedulesBtn: document.getElementById('workspace-detail-view-schedules'),
+
+      // View toggle
+      viewListBtn: document.getElementById('workspace-detail-view-list'),
+      viewBoardBtn: document.getElementById('workspace-detail-view-board'),
+
+      // Board elements
+      tasksPanel: document.getElementById('workspace-detail-tasks-panel'),
+      tasksBoard: document.getElementById('workspace-detail-tasks-board'),
+      boardColumns: document.getElementById('workspace-detail-board-columns'),
+      boardEmpty: document.getElementById('workspace-detail-board-empty'),
+      boardSetupBtn: document.getElementById('workspace-detail-board-setup')
     };
   }
 
@@ -273,6 +288,13 @@ export class WorkspaceDetailPage {
     // Task buttons
     this.elements.addTaskBtn?.addEventListener('click', () => this.showAddTaskModal());
     this.elements.refreshTasksBtn?.addEventListener('click', () => this.loadTasks());
+
+    // View toggle
+    this.elements.viewListBtn?.addEventListener('click', () => this.setView('list'));
+    this.elements.viewBoardBtn?.addEventListener('click', () => this.setView('board'));
+
+    // Board setup
+    this.elements.boardSetupBtn?.addEventListener('click', () => this.setupBoard());
 
     // Session buttons
     this.elements.newSessionBtn?.addEventListener('click', () => this.createNewSession());
@@ -442,6 +464,11 @@ export class WorkspaceDetailPage {
       this.tasks = data.tasks || [];
       this.renderTasks();
 
+      // Also refresh board if in board view
+      if (this.currentView === 'board' && this.boardConfig) {
+        this.renderBoard();
+      }
+
       // Update task count
       if (this.elements.taskCount) {
         this.elements.taskCount.textContent = this.tasks.length;
@@ -480,6 +507,167 @@ export class WorkspaceDetailPage {
         </div>
       </div>
     `).join('');
+  }
+
+  /**
+   * Set the current view (list or board)
+   */
+  setView(view) {
+    this.currentView = view;
+
+    // Update toggle buttons
+    if (this.elements.viewListBtn) {
+      this.elements.viewListBtn.classList.toggle('is-active', view === 'list');
+      this.elements.viewListBtn.setAttribute('aria-selected', (view === 'list').toString());
+    }
+    if (this.elements.viewBoardBtn) {
+      this.elements.viewBoardBtn.classList.toggle('is-active', view === 'board');
+      this.elements.viewBoardBtn.setAttribute('aria-selected', (view === 'board').toString());
+    }
+
+    // Toggle panel class for expanded board view
+    if (this.elements.tasksPanel) {
+      this.elements.tasksPanel.classList.toggle('board-view', view === 'board');
+    }
+
+    // Show/hide views
+    if (this.elements.tasksList) {
+      this.elements.tasksList.style.display = view === 'list' ? '' : 'none';
+    }
+    if (this.elements.tasksBoard) {
+      this.elements.tasksBoard.style.display = view === 'board' ? '' : 'none';
+    }
+
+    // Load board if switching to board view
+    if (view === 'board') {
+      this.loadBoard();
+    }
+  }
+
+  /**
+   * Load board configuration and render
+   */
+  async loadBoard() {
+    try {
+      const response = await fetch(`/api/workspaces/${encodeURIComponent(this.workspaceId)}/board`);
+      if (!response.ok) {
+        this.boardConfig = null;
+        this.renderBoard();
+        return;
+      }
+
+      const data = await response.json();
+      this.boardConfig = data.board || null;
+      this.renderBoard();
+    } catch (error) {
+      console.error('Failed to load board:', error);
+      this.boardConfig = null;
+      this.renderBoard();
+    }
+  }
+
+  /**
+   * Render the kanban board
+   */
+  renderBoard() {
+    if (!this.elements.boardColumns || !this.elements.boardEmpty) return;
+
+    const columns = this.boardConfig?.columns || [];
+
+    if (columns.length === 0) {
+      this.elements.boardColumns.innerHTML = '';
+      this.elements.boardEmpty.style.display = '';
+      return;
+    }
+
+    this.elements.boardEmpty.style.display = 'none';
+
+    // Group tasks by column
+    const tasksByColumn = this.groupTasksByColumn(columns);
+
+    this.elements.boardColumns.innerHTML = columns.map(col => {
+      const columnTasks = tasksByColumn[col.id] || [];
+      return `
+        <div class="workspace-detail-board-column" data-column-id="${col.id}">
+          <div class="workspace-detail-board-column-header">
+            <span class="workspace-detail-board-column-title">${this.escapeHtml(col.name)}</span>
+            <span class="workspace-detail-board-column-count">${columnTasks.length}</span>
+          </div>
+          <div class="workspace-detail-board-column-body">
+            ${columnTasks.map(task => this.renderBoardCard(task)).join('')}
+          </div>
+        </div>
+      `;
+    }).join('');
+  }
+
+  /**
+   * Render a single board card
+   */
+  renderBoardCard(task) {
+    return `
+      <div class="workspace-detail-board-card" data-task-id="${task.id}" onclick="window.workspaceDetail?.openTask('${task.id}')">
+        <div class="workspace-detail-board-card-title">${this.escapeHtml(task.description || task.name || 'Untitled')}</div>
+        <div class="workspace-detail-board-card-meta">
+          ${task.to && task.to !== 'unassigned' ? this.escapeHtml(task.to) : ''}
+          ${task.to && task.to !== 'unassigned' ? ' · ' : ''}
+          ${getDisplayStatus(task.status)}
+        </div>
+      </div>
+    `;
+  }
+
+  /**
+   * Group tasks by their kanban column
+   */
+  groupTasksByColumn(columns) {
+    const groups = {};
+    columns.forEach(col => { groups[col.id] = []; });
+
+    // Only include top-level tasks
+    const topLevelTasks = this.tasks.filter(t => !t.parent_task_id);
+
+    topLevelTasks.forEach(task => {
+      const colId = task.context?.kanban_column_id || columns[0]?.id;
+      if (groups[colId]) {
+        groups[colId].push(task);
+      } else if (columns.length > 0) {
+        // Fallback to first column
+        groups[columns[0].id].push(task);
+      }
+    });
+
+    return groups;
+  }
+
+  /**
+   * Setup a new board with default columns
+   */
+  async setupBoard() {
+    const defaultColumns = [
+      { id: 'todo', name: 'To Do' },
+      { id: 'in-progress', name: 'In Progress' },
+      { id: 'done', name: 'Done' }
+    ];
+
+    try {
+      const response = await fetch(`/api/workspaces/${encodeURIComponent(this.workspaceId)}/board`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ columns: defaultColumns })
+      });
+
+      if (!response.ok) throw new Error('Failed to setup board');
+
+      const data = await response.json();
+      this.boardConfig = data.board || { columns: defaultColumns };
+      this.renderBoard();
+
+      if (window.Toast) window.Toast.success('Board created');
+    } catch (error) {
+      console.error('Failed to setup board:', error);
+      if (window.Toast) window.Toast.error('Failed to create board');
+    }
   }
 
   /**

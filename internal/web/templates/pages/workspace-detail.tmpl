@@ -101,7 +101,7 @@
           <!-- Panels Grid -->
           <div class="workspace-detail-grid">
             <!-- Tasks Panel -->
-            <div class="modern-card workspace-detail-panel" id="workspace-detail-tasks-panel">
+            <div class="modern-card workspace-detail-panel workspace-detail-tasks-panel" id="workspace-detail-tasks-panel">
               <div class="workspace-detail-panel-header">
                 <h2 class="workspace-detail-panel-title">
                   <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" class="me-2">
@@ -110,6 +110,19 @@
                   Tasks
                 </h2>
                 <div class="workspace-detail-panel-actions">
+                  <!-- View Toggle -->
+                  <div class="workspace-detail-view-toggle" role="tablist">
+                    <button id="workspace-detail-view-list" class="workspace-detail-view-btn is-active" type="button" role="tab" aria-selected="true" title="List View">
+                      <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
+                        <path d="M3,4H21V8H3V4M3,10H21V14H3V10M3,16H21V20H3V16Z"/>
+                      </svg>
+                    </button>
+                    <button id="workspace-detail-view-board" class="workspace-detail-view-btn" type="button" role="tab" aria-selected="false" title="Board View">
+                      <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
+                        <path d="M4,3H10V5H4V3M14,3H20V5H14V3M4,7H10V9H4V7M14,7H20V9H14V7M4,11H10V13H4V11M14,11H20V13H14V11M4,15H10V17H4V15M14,15H20V17H14V15M4,19H10V21H4V19M14,19H20V21H14V19Z"/>
+                      </svg>
+                    </button>
+                  </div>
                   <button id="workspace-detail-refresh-tasks" class="modern-btn modern-btn-secondary modern-btn-sm" type="button" title="Refresh">
                     <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
                       <path d="M17.65,6.35C16.2,4.9 14.21,4 12,4A8,8 0 0,0 4,12A8,8 0 0,0 12,20C15.73,20 18.84,17.45 19.73,14H17.65C16.83,16.33 14.61,18 12,18A6,6 0 0,1 6,12A6,6 0 0,1 12,6C13.66,6 15.14,6.69 16.22,7.78L13,11H20V4L17.65,6.35Z"/>
@@ -124,8 +137,24 @@
                 </div>
               </div>
               <div class="workspace-detail-panel-body">
+                <!-- List View -->
                 <div id="workspace-detail-tasks-list" class="workspace-detail-list">
                   <div class="workspace-detail-loading">Loading tasks...</div>
+                </div>
+                <!-- Board View (hidden by default) -->
+                <div id="workspace-detail-tasks-board" class="workspace-detail-board" style="display: none;">
+                  <div class="workspace-detail-board-columns" id="workspace-detail-board-columns">
+                    <!-- Columns will be rendered here -->
+                  </div>
+                  <div class="workspace-detail-board-empty" id="workspace-detail-board-empty">
+                    <svg width="32" height="32" viewBox="0 0 24 24" fill="currentColor" style="opacity: 0.3;">
+                      <path d="M4,3H10V5H4V3M14,3H20V5H14V3M4,7H10V9H4V7M14,7H20V9H14V7M4,11H10V13H4V11M14,11H20V13H14V11M4,15H10V17H4V15M14,15H20V17H14V15M4,19H10V21H4V19M14,19H20V21H14V19Z"/>
+                    </svg>
+                    <p>No board configured.</p>
+                    <button id="workspace-detail-board-setup" class="modern-btn modern-btn-primary modern-btn-sm" type="button">
+                      Set Up Board
+                    </button>
+                  </div>
                 </div>
               </div>
             </div>
@@ -444,6 +473,139 @@
     .workspace-detail-task-status.failed {
       background: rgba(220, 53, 69, 0.1);
       color: #dc3545;
+    }
+
+    /* View Toggle */
+    .workspace-detail-view-toggle {
+      display: flex;
+      gap: 2px;
+      background: var(--bg-secondary);
+      border-radius: 6px;
+      padding: 2px;
+    }
+
+    .workspace-detail-view-btn {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      width: 28px;
+      height: 24px;
+      border: none;
+      background: transparent;
+      color: var(--text-secondary);
+      border-radius: 4px;
+      cursor: pointer;
+      transition: all 0.15s ease;
+    }
+
+    .workspace-detail-view-btn:hover {
+      color: var(--text-primary);
+      background: var(--bg-tertiary);
+    }
+
+    .workspace-detail-view-btn.is-active {
+      background: var(--primary-color);
+      color: white;
+    }
+
+    /* Board View */
+    .workspace-detail-board {
+      height: 100%;
+      overflow-x: auto;
+    }
+
+    .workspace-detail-board-columns {
+      display: flex;
+      gap: 0.75rem;
+      min-height: 200px;
+      padding-bottom: 0.5rem;
+    }
+
+    .workspace-detail-board-column {
+      flex: 0 0 220px;
+      background: var(--bg-secondary);
+      border-radius: 8px;
+      display: flex;
+      flex-direction: column;
+      max-height: 100%;
+    }
+
+    .workspace-detail-board-column-header {
+      padding: 0.75rem;
+      border-bottom: 1px solid var(--border-color);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .workspace-detail-board-column-title {
+      font-size: 0.8rem;
+      font-weight: 600;
+      color: var(--text-primary);
+    }
+
+    .workspace-detail-board-column-count {
+      font-size: 0.7rem;
+      color: var(--text-secondary);
+      background: var(--bg-tertiary);
+      padding: 0.125rem 0.375rem;
+      border-radius: 4px;
+    }
+
+    .workspace-detail-board-column-body {
+      flex: 1;
+      overflow-y: auto;
+      padding: 0.5rem;
+      display: flex;
+      flex-direction: column;
+      gap: 0.5rem;
+    }
+
+    .workspace-detail-board-card {
+      padding: 0.5rem 0.75rem;
+      background: var(--bg-primary);
+      border: 1px solid var(--border-color);
+      border-radius: 6px;
+      cursor: pointer;
+      transition: all 0.15s ease;
+    }
+
+    .workspace-detail-board-card:hover {
+      border-color: var(--primary-color);
+      box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    }
+
+    .workspace-detail-board-card-title {
+      font-size: 0.8rem;
+      font-weight: 500;
+      color: var(--text-primary);
+      margin-bottom: 0.25rem;
+    }
+
+    .workspace-detail-board-card-meta {
+      font-size: 0.7rem;
+      color: var(--text-secondary);
+    }
+
+    .workspace-detail-board-empty {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 2rem;
+      color: var(--text-secondary);
+      text-align: center;
+    }
+
+    .workspace-detail-board-empty p {
+      margin: 0.5rem 0;
+      font-size: 0.875rem;
+    }
+
+    /* Make tasks panel wider when in board view */
+    .workspace-detail-tasks-panel.board-view {
+      grid-column: 1 / -1;
+      max-height: 500px;
     }
 
     /* Children workspaces grid */
