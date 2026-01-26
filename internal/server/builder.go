@@ -7,12 +7,50 @@ import (
 	"fmt"
 	"os"
 
+	agenthttp "github.com/johnjallday/ori-agent/internal/agenthttp"
+	"github.com/johnjallday/ori-agent/internal/chathttp"
+	"github.com/johnjallday/ori-agent/internal/client"
 	"github.com/johnjallday/ori-agent/internal/config"
+	"github.com/johnjallday/ori-agent/internal/devicehttp"
+	"github.com/johnjallday/ori-agent/internal/externalagents"
+	"github.com/johnjallday/ori-agent/internal/externalagentshttp"
+	"github.com/johnjallday/ori-agent/internal/fileshttp"
+	"github.com/johnjallday/ori-agent/internal/filewatcher"
+	"github.com/johnjallday/ori-agent/internal/healthhttp"
 	"github.com/johnjallday/ori-agent/internal/llm"
+	"github.com/johnjallday/ori-agent/internal/location"
+	"github.com/johnjallday/ori-agent/internal/locationhttp"
 	"github.com/johnjallday/ori-agent/internal/logger"
+	"github.com/johnjallday/ori-agent/internal/marketplace"
+	"github.com/johnjallday/ori-agent/internal/marketplacehttp"
+	"github.com/johnjallday/ori-agent/internal/mcp"
+	"github.com/johnjallday/ori-agent/internal/mcphttp"
+	"github.com/johnjallday/ori-agent/internal/modelcategoryhttp"
+	"github.com/johnjallday/ori-agent/internal/notehttp"
+	"github.com/johnjallday/ori-agent/internal/onboarding"
+	"github.com/johnjallday/ori-agent/internal/onboardinghttp"
+	"github.com/johnjallday/ori-agent/internal/orchestrationhttp"
+	"github.com/johnjallday/ori-agent/internal/plugindownloader"
+	pluginhttp "github.com/johnjallday/ori-agent/internal/pluginhttp"
+	"github.com/johnjallday/ori-agent/internal/pluginmanager"
+	"github.com/johnjallday/ori-agent/internal/pluginupdate"
 	"github.com/johnjallday/ori-agent/internal/pluginupdateservice"
+	"github.com/johnjallday/ori-agent/internal/privateservices"
 	"github.com/johnjallday/ori-agent/internal/registry"
+	"github.com/johnjallday/ori-agent/internal/reviewhttp"
+	"github.com/johnjallday/ori-agent/internal/session"
+	"github.com/johnjallday/ori-agent/internal/sessionfiles"
+	"github.com/johnjallday/ori-agent/internal/sessionhttp"
+	"github.com/johnjallday/ori-agent/internal/settingshttp"
+	"github.com/johnjallday/ori-agent/internal/skills"
+	"github.com/johnjallday/ori-agent/internal/skillshttp"
+	"github.com/johnjallday/ori-agent/internal/speechhttp"
 	"github.com/johnjallday/ori-agent/internal/store"
+	"github.com/johnjallday/ori-agent/internal/types"
+	"github.com/johnjallday/ori-agent/internal/updatemanager"
+	"github.com/johnjallday/ori-agent/internal/usagehttp"
+	web "github.com/johnjallday/ori-agent/internal/web"
+	"github.com/johnjallday/ori-agent/internal/workflowhttp"
 	"github.com/johnjallday/ori-agent/internal/workspace"
 )
 
@@ -44,7 +82,7 @@ import (
 //	  - Depends on: Handlers, Services
 //
 //	GROUP 6: FINALIZATION (Phases 24-25)
-//	  - Domain Facades, Plugin Update Service
+//	  - Plugin Update Service, Domain Facades
 //	  - Depends on: All previous phases
 //
 // # Usage
@@ -62,6 +100,96 @@ import (
 //	builder.WithStore(mockStore).WithLLMFactory(mockFactory)
 type ServerBuilder struct {
 	server *Server
+
+	// Internal fields populated during initialization
+	clientFactory         *client.Factory
+	llmFactory            *llm.Factory
+	registryManager       *registry.Manager
+	st                    store.Store
+	pluginReg             types.PluginRegistry
+	agentStorePath        string
+	configManager         *config.Manager
+	privateServicesClient privateservices.Client
+	templateRenderer      *web.TemplateRenderer
+	pluginDownloader      *plugindownloader.PluginDownloader
+	updateMgr             *updatemanager.Manager
+	workspaceStore        workspace.Store
+	taskExecutor          *workspace.TaskExecutor
+	stepExecutor          *workspace.StepExecutor
+	taskScheduler         *workspace.TaskScheduler
+	eventBus              *workspace.EventBus
+	notificationService   *workspace.NotificationService
+	studioOrchestrator    *workspace.Orchestrator
+	costTracker           *llm.CostTracker
+	mcpRegistry           *mcp.Registry
+	mcpConfigManager      *mcp.ConfigManager
+	locationManager       *location.Manager
+	onboardingMgr         *onboarding.Manager
+	categoryManager       *pluginmanager.CategoryManager
+	permissionManager     *pluginmanager.PermissionManager
+	notificationManager   *pluginmanager.NotificationManager
+	backupManager         *pluginmanager.BackupManager
+	pluginUpdateService   *pluginupdateservice.Service
+
+	// Handlers
+	healthManager          *healthhttp.Manager
+	activityLogger         *agenthttp.ActivityLogger
+	settingsHandler        *settingshttp.Handler
+	chatHandler            *chathttp.Handler
+	pluginHandler          *pluginhttp.Handler
+	pluginRegistryHandler  *pluginhttp.RegistryHandler
+	pluginInitHandler      *pluginhttp.InitHandler
+	healthHandler          *healthhttp.Handler
+	pluginUpdateHandler    *pluginupdate.Handler
+	onboardingHandler      *onboardinghttp.Handler
+	deviceHandler          *devicehttp.Handler
+	webPageHandler         *pluginhttp.WebPageHandler
+	orchestrationHandler   *orchestrationhttp.Handler
+	autoTaskHandler        *orchestrationhttp.AutoTaskHandler
+	studioHandler          *workspace.HTTPHandler
+	usageHandler           *usagehttp.Handler
+	mcpHandler             *mcphttp.Handler
+	agentMCPHandler        *agenthttp.MCPHandler
+	locationHandler        *locationhttp.Handler
+	pluginsPageHandler     *pluginhttp.PluginsPageHandler
+	permissionsHandler     *pluginhttp.PermissionsHandler
+	backupHandler          *pluginhttp.BackupHandler
+	notificationsHandler   *pluginhttp.NotificationsHandler
+	workflowHandler        *workflowhttp.Handler
+	marketplaceStore       *marketplace.Store
+	marketplaceHandler     *marketplacehttp.Handler
+	modelCategoryStore     store.ModelCategoryStore
+	modelCategoryHandler   *modelcategoryhttp.Handler
+	autoCategorizeHandler  *modelcategoryhttp.AutoCategorizeHandler
+	resetHandler           *settingshttp.ResetHandler
+	autoConfigHandler      *agenthttp.AutoConfigHandler
+	smartOnboardingHandler *onboardinghttp.SmartOnboardingHandler
+	speechHandler          *speechhttp.Handler
+
+	// Session management
+	sessionStore        session.HybridStore
+	sessionHandler      *sessionhttp.Handler
+	autoClassifyHandler *sessionhttp.AutoClassifyHandler
+	smartInputHandler   *sessionhttp.SmartInputHandler
+
+	// Note generation
+	noteHandler *notehttp.Handler
+
+	// Session files management
+	sessionFilesStore   *sessionfiles.Store
+	sessionFilesWatcher *filewatcher.Watcher
+	sessionFilesHandler *fileshttp.Handler
+
+	// Review system
+	reviewHandler *reviewhttp.Handler
+
+	// External agents (Claude Code, Codex)
+	externalAgentsCache   *externalagents.Cache
+	externalAgentsHandler *externalagentshttp.Handler
+
+	// Skills (local + external)
+	skillsManager *skills.Manager
+	skillsHandler *skillshttp.Handler
 }
 
 // NewServerBuilder creates a new ServerBuilder instance with an empty Server.
@@ -174,11 +302,11 @@ func (b *ServerBuilder) Build() (*Server, error) {
 	// GROUP 6: FINALIZATION - Wire everything together (depends on: All)
 	// ═══════════════════════════════════════════════════════════════════════════
 
-	if err := b.createDomainFacades(); err != nil { // Phase 24
-		return nil, fmt.Errorf("facade creation phase failed: %w", err)
-	}
-	if err := b.startPluginUpdateService(); err != nil { // Phase 25
+	if err := b.startPluginUpdateService(); err != nil { // Phase 24
 		return nil, fmt.Errorf("plugin update service phase failed: %w", err)
+	}
+	if err := b.createDomainFacades(); err != nil { // Phase 25
+		return nil, fmt.Errorf("facade creation phase failed: %w", err)
 	}
 
 	// Log success
@@ -193,53 +321,97 @@ func (b *ServerBuilder) Build() (*Server, error) {
 func (b *ServerBuilder) createDomainFacades() error {
 	// Core System Facade
 	b.server.Core = NewCoreSystemFacade(
-		b.server.clientFactory,
-		b.server.llmFactory,
-		b.server.configManager,
-		b.server.costTracker,
+		b.clientFactory,
+		b.llmFactory,
+		b.configManager,
+		b.costTracker,
 	)
 
 	// Plugin System Facade
 	b.server.Plugin = NewPluginSystemFacade(
-		b.server.registryManager,
-		b.server.pluginReg,
-		b.server.pluginDownloader,
-		b.server.categoryManager,
-		b.server.permissionManager,
-		b.server.notificationManager,
-		b.server.backupManager,
+		b.registryManager,
+		b.pluginReg,
+		b.pluginDownloader,
+		b.categoryManager,
+		b.permissionManager,
+		b.notificationManager,
+		b.backupManager,
+		b.pluginUpdateService,
 	)
 
 	// Storage System Facade
 	b.server.Storage = NewStorageSystemFacade(
-		b.server.st,
-		b.server.agentStorePath,
-		b.server.workspaceStore,
-		b.server.onboardingMgr,
-		b.server.locationManager,
+		b.st,
+		b.agentStorePath,
+		b.workspaceStore,
+		b.onboardingMgr,
+		b.locationManager,
 	)
 
 	// Workflow System Facade
 	b.server.Workflow = NewWorkflowSystemFacade(
-		b.server.taskExecutor,
-		b.server.stepExecutor,
-		b.server.taskScheduler,
-		b.server.eventBus,
-		b.server.notificationService,
-		b.server.studioOrchestrator,
+		b.taskExecutor,
+		b.stepExecutor,
+		b.taskScheduler,
+		b.eventBus,
+		b.notificationService,
+		b.studioOrchestrator,
 	)
 
 	// Integration System Facade
 	b.server.Integration = NewIntegrationSystemFacade(
-		b.server.mcpRegistry,
-		b.server.mcpConfigManager,
-		b.server.updateMgr,
-		b.server.privateServicesClient,
+		b.mcpRegistry,
+		b.mcpConfigManager,
+		b.updateMgr,
+		b.privateServicesClient,
 	)
 
 	// UI System Facade
 	b.server.UI = NewUISystemFacade(
-		b.server.templateRenderer,
+		b.templateRenderer,
+	)
+
+	// Handler Facade
+	b.server.Handlers = NewHandlerFacade(
+		b.healthManager,
+		b.activityLogger,
+		b.settingsHandler,
+		b.chatHandler,
+		b.pluginHandler,
+		b.pluginRegistryHandler,
+		b.pluginInitHandler,
+		b.healthHandler,
+		b.pluginUpdateHandler,
+		b.onboardingHandler,
+		b.deviceHandler,
+		b.webPageHandler,
+		b.orchestrationHandler,
+		b.autoTaskHandler,
+		b.studioHandler,
+		b.usageHandler,
+		b.mcpHandler,
+		b.agentMCPHandler,
+		b.locationHandler,
+		b.pluginsPageHandler,
+		b.permissionsHandler,
+		b.backupHandler,
+		b.notificationsHandler,
+		b.workflowHandler,
+		b.marketplaceHandler,
+		b.modelCategoryHandler,
+		b.autoCategorizeHandler,
+		b.resetHandler,
+		b.autoConfigHandler,
+		b.smartOnboardingHandler,
+		b.speechHandler,
+		b.sessionHandler,
+		b.autoClassifyHandler,
+		b.smartInputHandler,
+		b.noteHandler,
+		b.sessionFilesHandler,
+		b.reviewHandler,
+		b.externalAgentsHandler,
+		b.skillsHandler,
 	)
 
 	return nil
@@ -247,18 +419,18 @@ func (b *ServerBuilder) createDomainFacades() error {
 
 // startPluginUpdateService initializes and starts the plugin update service.
 func (b *ServerBuilder) startPluginUpdateService() error {
-	if b.server.st == nil {
+	if b.st == nil {
 		return fmt.Errorf("store not initialized for plugin update service")
 	}
 
-	b.server.pluginUpdateService = pluginupdateservice.NewService(b.server.st, &b.server.pluginReg)
-	b.server.pluginUpdateService.Start()
+	b.pluginUpdateService = pluginupdateservice.NewService(b.st, &b.pluginReg)
+	b.pluginUpdateService.Start()
 
-	if b.server.pluginUpdateHandler != nil {
-		b.server.pluginUpdateHandler.SetUpdateService(b.server.pluginUpdateService)
+	if b.pluginUpdateHandler != nil {
+		b.pluginUpdateHandler.SetUpdateService(b.pluginUpdateService)
 	}
-	if b.server.pluginsPageHandler != nil {
-		b.server.pluginsPageHandler.SetUpdateService(b.server.pluginUpdateService)
+	if b.pluginsPageHandler != nil {
+		b.pluginsPageHandler.SetUpdateService(b.pluginUpdateService)
 	}
 
 	return nil
@@ -266,30 +438,30 @@ func (b *ServerBuilder) startPluginUpdateService() error {
 
 // WithLLMFactory injects a custom LLM factory (for testing).
 func (b *ServerBuilder) WithLLMFactory(f *llm.Factory) *ServerBuilder {
-	b.server.llmFactory = f
+	b.llmFactory = f
 	return b
 }
 
 // WithConfigManager injects a custom config manager (for testing).
 func (b *ServerBuilder) WithConfigManager(c *config.Manager) *ServerBuilder {
-	b.server.configManager = c
+	b.configManager = c
 	return b
 }
 
 // WithRegistryManager injects a custom registry manager (for testing).
 func (b *ServerBuilder) WithRegistryManager(r *registry.Manager) *ServerBuilder {
-	b.server.registryManager = r
+	b.registryManager = r
 	return b
 }
 
 // WithStore injects a custom store (for testing).
 func (b *ServerBuilder) WithStore(s store.Store) *ServerBuilder {
-	b.server.st = s
+	b.st = s
 	return b
 }
 
 // WithWorkspaceStore injects a custom workspace store (for testing).
 func (b *ServerBuilder) WithWorkspaceStore(ws workspace.Store) *ServerBuilder {
-	b.server.workspaceStore = ws
+	b.workspaceStore = ws
 	return b
 }

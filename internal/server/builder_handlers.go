@@ -39,68 +39,66 @@ import (
 
 // initializeHandlers creates all HTTP handlers and wires up dependencies.
 func (b *ServerBuilder) initializeHandlers() error {
-	s := b.server
+	b.locationHandler = locationhttp.NewHandler(b.locationManager)
+	b.usageHandler = usagehttp.NewHandler(b.costTracker)
+	b.mcpHandler = mcphttp.NewHandler(b.mcpRegistry, b.mcpConfigManager, b.st)
+	b.settingsHandler = settingshttp.NewHandler(b.st, b.configManager, b.clientFactory, b.llmFactory)
+	b.speechHandler = speechhttp.NewHandler(b.configManager)
 
-	s.locationHandler = locationhttp.NewHandler(s.locationManager)
-	s.usageHandler = usagehttp.NewHandler(s.costTracker)
-	s.mcpHandler = mcphttp.NewHandler(s.mcpRegistry, s.mcpConfigManager, s.st)
-	s.settingsHandler = settingshttp.NewHandler(s.st, s.configManager, s.clientFactory, s.llmFactory)
-	s.speechHandler = speechhttp.NewHandler(s.configManager)
-
-	s.chatHandler = chathttp.NewHandler(s.st, s.clientFactory)
-	s.chatHandler.SetLLMFactory(s.llmFactory)
-	s.chatHandler.SetHealthManager(s.healthManager)
-	s.chatHandler.SetCostTracker(s.costTracker)
-	s.chatHandler.SetMCPRegistry(s.mcpRegistry)
-	s.chatHandler.SetWorkspaceStore(s.workspaceStore) // Will be set later
-	s.chatHandler.SetShutdownFunc(func() {
+	b.chatHandler = chathttp.NewHandler(b.st, b.clientFactory)
+	b.chatHandler.SetLLMFactory(b.llmFactory)
+	b.chatHandler.SetHealthManager(b.healthManager)
+	b.chatHandler.SetCostTracker(b.costTracker)
+	b.chatHandler.SetMCPRegistry(b.mcpRegistry)
+	b.chatHandler.SetWorkspaceStore(b.workspaceStore) // Will be set later
+	b.chatHandler.SetShutdownFunc(func() {
 		logger.Info("Shutting down ori-agent server", logger.Fields{})
-		s.Shutdown()
+		b.server.Shutdown()
 		logger.Info("Server shut down complete, exiting", logger.Fields{})
 		os.Exit(0)
 	})
 
-	s.pluginRegistryHandler = pluginhttp.NewRegistryHandler(s.st, s.registryManager, s.pluginDownloader, s.agentStorePath)
-	s.pluginHandler = pluginhttp.New(s.st, pluginhttp.NativeLoader{})
-	s.pluginHandler.HealthManager = s.healthManager
-	s.pluginInitHandler = pluginhttp.NewInitHandler(s.st, s.registryManager, s.pluginHandler)
-	s.healthHandler = healthhttp.NewHandler(s.healthManager, s.st)
-	s.pluginUpdateHandler = pluginupdate.NewHandler(s.st, s.healthManager.GetChecker())
-	s.pluginUpdateHandler.SetPluginRegistry(&s.pluginReg)
-	s.pluginUpdateHandler.SetRegistryManager(s.registryManager)
-	s.onboardingHandler = onboardinghttp.NewHandler(s.onboardingMgr)
-	s.deviceHandler = devicehttp.NewHandler(s.onboardingMgr)
-	s.resetHandler = settingshttp.NewResetHandler(s.onboardingMgr, ".")
-	s.webPageHandler = pluginhttp.NewWebPageHandler(s.st, s.templateRenderer)
-	s.webPageHandler.SetLoader(pluginhttp.NativeLoader{})
+	b.pluginRegistryHandler = pluginhttp.NewRegistryHandler(b.st, b.registryManager, b.pluginDownloader, b.agentStorePath)
+	b.pluginHandler = pluginhttp.New(b.st, pluginhttp.NativeLoader{})
+	b.pluginHandler.HealthManager = b.healthManager
+	b.pluginInitHandler = pluginhttp.NewInitHandler(b.st, b.registryManager, b.pluginHandler)
+	b.healthHandler = healthhttp.NewHandler(b.healthManager, b.st)
+	b.pluginUpdateHandler = pluginupdate.NewHandler(b.st, b.healthManager.GetChecker())
+	b.pluginUpdateHandler.SetPluginRegistry(&b.pluginReg)
+	b.pluginUpdateHandler.SetRegistryManager(b.registryManager)
+	b.onboardingHandler = onboardinghttp.NewHandler(b.onboardingMgr)
+	b.deviceHandler = devicehttp.NewHandler(b.onboardingMgr)
+	b.resetHandler = settingshttp.NewResetHandler(b.onboardingMgr, ".")
+	b.webPageHandler = pluginhttp.NewWebPageHandler(b.st, b.templateRenderer)
+	b.webPageHandler.SetLoader(pluginhttp.NativeLoader{})
 
 	// Initialize auto-config handler for agent creation
-	s.autoConfigHandler = agenthttp.NewAutoConfigHandler(s.llmFactory, s.configManager)
+	b.autoConfigHandler = agenthttp.NewAutoConfigHandler(b.llmFactory, b.configManager)
 
 	// Initialize smart onboarding handler
-	systemProvider, systemModel := s.configManager.GetSystemModel()
-	s.smartOnboardingHandler = onboardinghttp.NewSmartOnboardingHandler(s.st, s.llmFactory, s.onboardingMgr, systemProvider, systemModel)
+	systemProvider, systemModel := b.configManager.GetSystemModel()
+	b.smartOnboardingHandler = onboardinghttp.NewSmartOnboardingHandler(b.st, b.llmFactory, b.onboardingMgr, systemProvider, systemModel)
 
 	// Initialize plugin management components
-	s.categoryManager = pluginmanager.NewCategoryManager()
-	s.permissionManager = pluginmanager.NewPermissionManager("plugin_permissions.json")
-	s.notificationManager = pluginmanager.NewNotificationManager("plugin_notifications.json")
-	s.backupManager = pluginmanager.NewBackupManager("plugin_backups")
+	b.categoryManager = pluginmanager.NewCategoryManager()
+	b.permissionManager = pluginmanager.NewPermissionManager("plugin_permissions.json")
+	b.notificationManager = pluginmanager.NewNotificationManager("plugin_notifications.json")
+	b.backupManager = pluginmanager.NewBackupManager("plugin_backups")
 
 	// Initialize plugin management handlers
-	s.pluginsPageHandler = pluginhttp.NewPluginsPageHandler(
-		s.st,
-		s.registryManager,
-		s.categoryManager,
-		s.permissionManager,
+	b.pluginsPageHandler = pluginhttp.NewPluginsPageHandler(
+		b.st,
+		b.registryManager,
+		b.categoryManager,
+		b.permissionManager,
 		pluginhttp.NativeLoader{},
 	)
-	s.permissionsHandler = pluginhttp.NewPermissionsHandler(
-		s.permissionManager,
-		s.registryManager,
+	b.permissionsHandler = pluginhttp.NewPermissionsHandler(
+		b.permissionManager,
+		b.registryManager,
 	)
-	s.backupHandler = pluginhttp.NewBackupHandler(s.backupManager)
-	s.notificationsHandler = pluginhttp.NewNotificationsHandler(s.notificationManager)
+	b.backupHandler = pluginhttp.NewBackupHandler(b.backupManager)
+	b.notificationsHandler = pluginhttp.NewNotificationsHandler(b.notificationManager)
 
 	// Initialize model category store and handler
 	modelCategoryStore, err := store.NewFileModelCategoryStore("model_categories.json")
@@ -108,9 +106,9 @@ func (b *ServerBuilder) initializeHandlers() error {
 		logger.Error("Failed to create model category store", logger.Fields{"error": err})
 		// Non-fatal: continue without model categories
 	} else {
-		s.modelCategoryStore = modelCategoryStore
-		s.modelCategoryHandler = modelcategoryhttp.NewHandler(modelCategoryStore)
-		s.autoCategorizeHandler = modelcategoryhttp.NewAutoCategorizeHandler(modelCategoryStore, s.llmFactory, s.configManager)
+		b.modelCategoryStore = modelCategoryStore
+		b.modelCategoryHandler = modelcategoryhttp.NewHandler(modelCategoryStore)
+		b.autoCategorizeHandler = modelcategoryhttp.NewAutoCategorizeHandler(modelCategoryStore, b.llmFactory, b.configManager)
 	}
 
 	// Initialize session store and handler
@@ -120,18 +118,18 @@ func (b *ServerBuilder) initializeHandlers() error {
 		logger.Error("Failed to create session store", logger.Fields{"error": err})
 		// Non-fatal: continue without session management
 	} else {
-		s.sessionStore = sessionStore
-		s.sessionHandler = sessionhttp.New(sessionStore)
+		b.sessionStore = sessionStore
+		b.sessionHandler = sessionhttp.New(sessionStore)
 		// Initialize auto-classify handler for session classification
-		s.autoClassifyHandler = sessionhttp.NewAutoClassifyHandler(sessionStore, s.st, s.llmFactory, s.configManager)
+		b.autoClassifyHandler = sessionhttp.NewAutoClassifyHandler(sessionStore, b.st, b.llmFactory, b.configManager)
 		// Initialize smart input handler for Workspace Hub classification
-		s.smartInputHandler = sessionhttp.NewSmartInputHandler(sessionStore, s.llmFactory, s.configManager)
+		b.smartInputHandler = sessionhttp.NewSmartInputHandler(sessionStore, b.llmFactory, b.configManager)
 		// Initialize note generation handler
-		s.noteHandler = notehttp.NewHandler(s.llmFactory, s.configManager, s.st)
+		b.noteHandler = notehttp.NewHandler(b.llmFactory, b.configManager, b.st)
 		// Wire session store to chat handler for multi-tab support
-		s.chatHandler.SetSessionStore(sessionStore)
+		b.chatHandler.SetSessionStore(sessionStore)
 		// Wire tool call store for conversation review
-		s.chatHandler.SetToolCallStore(sessionStore.ToolCallStore())
+		b.chatHandler.SetToolCallStore(sessionStore.ToolCallStore())
 	}
 
 	// Initialize session files store and handler
@@ -141,58 +139,58 @@ func (b *ServerBuilder) initializeHandlers() error {
 		logger.Error("Failed to create session files store", logger.Fields{"error": err})
 		// Non-fatal: continue without session files management
 	} else {
-		s.sessionFilesStore = sessionFilesStore
+		b.sessionFilesStore = sessionFilesStore
 
 		// Create file watcher
 		watcher, err := filewatcher.NewWatcher(filewatcher.DefaultWatcherConfig())
 		if err != nil {
 			logger.Error("Failed to create file watcher", logger.Fields{"error": err})
 		} else {
-			s.sessionFilesWatcher = watcher
+			b.sessionFilesWatcher = watcher
 			watcher.Start()
 		}
 
 		// Create files HTTP handler
-		s.sessionFilesHandler = fileshttp.NewHandler(sessionFilesStore, s.sessionFilesWatcher)
+		b.sessionFilesHandler = fileshttp.NewHandler(sessionFilesStore, b.sessionFilesWatcher)
 		logger.Info("Session files management initialized", logger.Fields{"path": sessionFilesPath})
 	}
 
 	// Initialize review system
-	if s.sessionStore != nil {
-		reviewStore := review.NewSQLiteStore(s.sessionStore.DB())
+	if b.sessionStore != nil {
+		reviewStore := review.NewSQLiteStore(b.sessionStore.DB())
 		reviewRunner := review.NewRunner(
 			reviewStore,
-			s.sessionStore,
-			s.sessionStore.ToolCallStore(),
+			b.sessionStore,
+			b.sessionStore.ToolCallStore(),
 			review.DefaultDetectionConfig(),
 		)
 		// Wire up agent store for per-agent review settings
-		if s.st != nil {
-			reviewRunner.SetAgentStore(s.st)
+		if b.st != nil {
+			reviewRunner.SetAgentStore(b.st)
 		}
-		s.reviewHandler = reviewhttp.NewHandler(reviewRunner, reviewStore)
+		b.reviewHandler = reviewhttp.NewHandler(reviewRunner, reviewStore)
 		logger.Info("Review system initialized", logger.Fields{})
 	}
 
 	// Initialize external agents (Claude Code, Codex)
 	claudeReader := externalagents.NewClaudeReader("")
 	codexReader := externalagents.NewCodexReader("")
-	s.externalAgentsCache = externalagents.NewCache(claudeReader, codexReader)
-	if err := s.externalAgentsCache.Load(); err != nil {
+	b.externalAgentsCache = externalagents.NewCache(claudeReader, codexReader)
+	if err := b.externalAgentsCache.Load(); err != nil {
 		logger.Warn("Failed to load external agents cache", logger.Fields{"error": err})
 		// Non-fatal: continue without external agents
 	}
-	s.externalAgentsHandler = externalagentshttp.New(s.externalAgentsCache, s.configManager)
+	b.externalAgentsHandler = externalagentshttp.New(b.externalAgentsCache, b.configManager)
 	logger.Info("External agents support initialized", logger.Fields{})
 
 	// Initialize skills manager and handler (local + external)
-	s.skillsManager = skills.NewManager(skills.ManagerConfig{
-		AgentStorePath: s.agentStorePath,
-		ExternalAgents: s.externalAgentsCache,
-		ConfigManager:  s.configManager,
+	b.skillsManager = skills.NewManager(skills.ManagerConfig{
+		AgentStorePath: b.agentStorePath,
+		ExternalAgents: b.externalAgentsCache,
+		ConfigManager:  b.configManager,
 	})
-	s.skillsHandler = skillshttp.New(s.skillsManager, s.st)
-	s.chatHandler.SetSkillsManager(s.skillsManager)
+	b.skillsHandler = skillshttp.New(b.skillsManager, b.st)
+	b.chatHandler.SetSkillsManager(b.skillsManager)
 
 	return nil
 }

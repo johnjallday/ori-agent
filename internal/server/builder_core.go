@@ -24,8 +24,8 @@ func (b *ServerBuilder) initializeConfiguration() error {
 	if err != nil {
 		return err
 	}
-	b.server.configManager = configMgr
-	b.server.privateServicesClient = privateservices.NewEnvClient()
+	b.configManager = configMgr
+	b.privateServicesClient = privateservices.NewEnvClient()
 	return nil
 }
 
@@ -35,12 +35,12 @@ func (b *ServerBuilder) initializeRegistry() error {
 	if err != nil {
 		return err
 	}
-	b.server.registryManager = mgr
-	b.server.marketplaceStore = mpStore
+	b.registryManager = mgr
+	b.marketplaceStore = mpStore
 
 	// Create marketplace HTTP handler
 	if mpStore != nil {
-		b.server.marketplaceHandler = marketplacehttp.NewHandler(mpStore, mgr)
+		b.marketplaceHandler = marketplacehttp.NewHandler(mpStore, mgr)
 	}
 
 	return nil
@@ -48,7 +48,7 @@ func (b *ServerBuilder) initializeRegistry() error {
 
 // initializeClientFactory creates the OpenAI client factory (deprecated).
 func (b *ServerBuilder) initializeClientFactory() error {
-	apiKey := b.server.configManager.GetAPIKey()
+	apiKey := b.configManager.GetAPIKey()
 	if apiKey == "" {
 		logger.Warn("OPENAI_API_KEY not set - OpenAI provider will be unavailable", logger.Fields{})
 		logger.Debug("You can configure it later in the Settings page", logger.Fields{})
@@ -59,17 +59,17 @@ func (b *ServerBuilder) initializeClientFactory() error {
 			logger.Info("OpenAI API key configured", logger.Fields{"key_length": len(apiKey)})
 		}
 	}
-	b.server.clientFactory = client.NewFactory(apiKey)
+	b.clientFactory = client.NewFactory(apiKey)
 	return nil
 }
 
 // initializeLLMFactory creates the LLM factory and registers all providers.
 func (b *ServerBuilder) initializeLLMFactory() error {
 	factory := createLLMFactory()
-	if err := registerLLMProviders(factory, b.server.configManager); err != nil {
+	if err := registerLLMProviders(factory, b.configManager); err != nil {
 		return err
 	}
-	b.server.llmFactory = factory
+	b.llmFactory = factory
 	return nil
 }
 
@@ -81,13 +81,13 @@ func (b *ServerBuilder) initializeStorage() error {
 	if err != nil {
 		return err
 	}
-	b.server.agentStorePath = agentStorePath
+	b.agentStorePath = agentStorePath
 
 	st, err := createFileStore(agentStorePath, defaultConf)
 	if err != nil {
 		return err
 	}
-	b.server.st = st
+	b.st = st
 
 	return nil
 }
@@ -100,20 +100,20 @@ func (b *ServerBuilder) initializeActivityLogger() error {
 	activityLogger, err := agenthttp.NewActivityLogger(activityLogDir)
 	if err != nil {
 		logger.Error("Failed to initialize activity logger", logger.Fields{"err": err})
-		b.server.activityLogger = nil
+		b.activityLogger = nil
 		return nil // Continue without activity logging
 	}
 
 	if verbose {
 		logger.Info("Activity logger initialized", logger.Fields{"activityLogDir": activityLogDir})
 	}
-	b.server.activityLogger = activityLogger
+	b.activityLogger = activityLogger
 	return nil
 }
 
 // initializeHealthManager creates the health manager.
 func (b *ServerBuilder) initializeHealthManager() error {
-	b.server.healthManager = healthhttp.NewManager()
+	b.healthManager = healthhttp.NewManager()
 	return nil
 }
 
@@ -132,7 +132,7 @@ func (b *ServerBuilder) initializeLocationManager() error {
 	ctx := context.Background()
 	mgr.Start(ctx, 60*time.Second)
 
-	b.server.locationManager = mgr
+	b.locationManager = mgr
 	return nil
 }
 
@@ -142,13 +142,13 @@ func (b *ServerBuilder) initializeTemplateRenderer() error {
 	if err := renderer.LoadTemplates(); err != nil {
 		return err
 	}
-	b.server.templateRenderer = renderer
+	b.templateRenderer = renderer
 	return nil
 }
 
 // initializeOnboardingManager creates the onboarding manager.
 func (b *ServerBuilder) initializeOnboardingManager() error {
-	b.server.onboardingMgr = onboarding.NewManager("app_state.json")
+	b.onboardingMgr = onboarding.NewManager("app_state.json")
 	return nil
 }
 
@@ -156,7 +156,7 @@ func (b *ServerBuilder) initializeOnboardingManager() error {
 func (b *ServerBuilder) initializeCostTracker() error {
 	verbose := os.Getenv("ORI_VERBOSE") == "true"
 	usageDataDir := resolveCostTrackerDir()
-	b.server.costTracker = llm.NewCostTracker(usageDataDir)
+	b.costTracker = llm.NewCostTracker(usageDataDir)
 	if verbose {
 		logger.Debug("Cost tracker initialized", logger.Fields{"dir": usageDataDir})
 	}

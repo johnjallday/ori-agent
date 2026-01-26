@@ -14,10 +14,10 @@ import (
 // initializePluginInfrastructure sets up plugin downloader and refreshes local registry.
 func (b *ServerBuilder) initializePluginInfrastructure() error {
 	pluginCacheDir := resolvePluginCacheDir()
-	b.server.pluginDownloader = createPluginDownloader(pluginCacheDir)
+	b.pluginDownloader = createPluginDownloader(pluginCacheDir)
 
 	// Refresh local plugin registry
-	if err := refreshLocalPluginRegistry(b.server.registryManager); err != nil {
+	if err := refreshLocalPluginRegistry(b.registryManager); err != nil {
 		// Log but don't fail - this is non-critical
 		return nil
 	}
@@ -28,7 +28,7 @@ func (b *ServerBuilder) initializePluginInfrastructure() error {
 // initializeUpdateManager creates the update manager.
 func (b *ServerBuilder) initializeUpdateManager() error {
 	currentVersion := version.GetVersion()
-	b.server.updateMgr = updatemanager.NewManager(currentVersion, "johnjallday", "ori-agent")
+	b.updateMgr = updatemanager.NewManager(currentVersion, "johnjallday", "ori-agent")
 	return nil
 }
 
@@ -36,10 +36,10 @@ func (b *ServerBuilder) initializeUpdateManager() error {
 // Plugins are loaded lazily on first use to improve startup time.
 func (b *ServerBuilder) validatePluginPaths() error {
 	verbose := os.Getenv("ORI_VERBOSE") == "true"
-	names, _ := b.server.st.ListAgents()
+	names, _ := b.st.ListAgents()
 
 	for _, agName := range names {
-		ag, ok := b.server.st.GetAgent(agName)
+		ag, ok := b.st.GetAgent(agName)
 		if !ok {
 			continue
 		}
@@ -77,7 +77,7 @@ func (b *ServerBuilder) validatePluginPaths() error {
 		}
 
 		if len(invalidPlugins) > 0 {
-			if err := b.server.st.SetAgent(agName, ag); err != nil {
+			if err := b.st.SetAgent(agName, ag); err != nil {
 				logger.Error("Failed to save agent after removing invalid plugins", logger.Fields{
 					"agent": agName,
 					"err":   err,
@@ -88,7 +88,7 @@ func (b *ServerBuilder) validatePluginPaths() error {
 
 	pluginCount := 0
 	for _, agName := range names {
-		if ag, ok := b.server.st.GetAgent(agName); ok {
+		if ag, ok := b.st.GetAgent(agName); ok {
 			pluginCount += len(ag.Plugins)
 		}
 	}
@@ -101,16 +101,16 @@ func (b *ServerBuilder) validatePluginPaths() error {
 
 // loadPluginRegistry loads the plugin registry and sets it for the health manager.
 func (b *ServerBuilder) loadPluginRegistry() error {
-	reg, _, err := b.server.registryManager.Load()
+	reg, _, err := b.registryManager.Load()
 	if err != nil {
 		logger.Error("failed to load plugin registry", logger.Fields{"plugin": err})
 		return nil // Non-critical, continue
 	}
 
-	b.server.pluginReg = reg
+	b.pluginReg = reg
 
 	// Set registry for health manager
-	b.server.healthManager.SetRegistry(func() []healthhttp.PluginRegistryEntry {
+	b.healthManager.SetRegistry(func() []healthhttp.PluginRegistryEntry {
 		entries := make([]healthhttp.PluginRegistryEntry, len(reg.Plugins))
 		for i, p := range reg.Plugins {
 			entries[i] = healthhttp.PluginRegistryEntry{

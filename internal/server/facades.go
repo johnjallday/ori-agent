@@ -2,20 +2,43 @@ package server
 
 import (
 	"github.com/johnjallday/ori-agent/internal/agent"
+	agenthttp "github.com/johnjallday/ori-agent/internal/agenthttp"
+	"github.com/johnjallday/ori-agent/internal/chathttp"
 	"github.com/johnjallday/ori-agent/internal/client"
 	"github.com/johnjallday/ori-agent/internal/config"
+	"github.com/johnjallday/ori-agent/internal/devicehttp"
+	"github.com/johnjallday/ori-agent/internal/externalagentshttp"
+	"github.com/johnjallday/ori-agent/internal/fileshttp"
+	"github.com/johnjallday/ori-agent/internal/healthhttp"
 	"github.com/johnjallday/ori-agent/internal/llm"
 	"github.com/johnjallday/ori-agent/internal/location"
+	"github.com/johnjallday/ori-agent/internal/locationhttp"
+	"github.com/johnjallday/ori-agent/internal/marketplacehttp"
 	"github.com/johnjallday/ori-agent/internal/mcp"
+	"github.com/johnjallday/ori-agent/internal/mcphttp"
+	"github.com/johnjallday/ori-agent/internal/modelcategoryhttp"
+	"github.com/johnjallday/ori-agent/internal/notehttp"
 	"github.com/johnjallday/ori-agent/internal/onboarding"
+	"github.com/johnjallday/ori-agent/internal/onboardinghttp"
+	"github.com/johnjallday/ori-agent/internal/orchestrationhttp"
 	"github.com/johnjallday/ori-agent/internal/plugindownloader"
+	pluginhttp "github.com/johnjallday/ori-agent/internal/pluginhttp"
 	"github.com/johnjallday/ori-agent/internal/pluginmanager"
+	"github.com/johnjallday/ori-agent/internal/pluginupdate"
+	"github.com/johnjallday/ori-agent/internal/pluginupdateservice"
 	"github.com/johnjallday/ori-agent/internal/privateservices"
 	"github.com/johnjallday/ori-agent/internal/registry"
+	"github.com/johnjallday/ori-agent/internal/reviewhttp"
+	"github.com/johnjallday/ori-agent/internal/sessionhttp"
+	"github.com/johnjallday/ori-agent/internal/settingshttp"
+	"github.com/johnjallday/ori-agent/internal/skillshttp"
+	"github.com/johnjallday/ori-agent/internal/speechhttp"
 	"github.com/johnjallday/ori-agent/internal/store"
 	"github.com/johnjallday/ori-agent/internal/types"
 	"github.com/johnjallday/ori-agent/internal/updatemanager"
+	"github.com/johnjallday/ori-agent/internal/usagehttp"
 	web "github.com/johnjallday/ori-agent/internal/web"
+	"github.com/johnjallday/ori-agent/internal/workflowhttp"
 	"github.com/johnjallday/ori-agent/internal/workspace"
 )
 
@@ -36,6 +59,7 @@ type PluginSystemFacade struct {
 	PermissionManager   *pluginmanager.PermissionManager
 	NotificationManager *pluginmanager.NotificationManager
 	BackupManager       *pluginmanager.BackupManager
+	PluginUpdateService *pluginupdateservice.Service
 }
 
 // StorageSystemFacade manages all storage and state dependencies
@@ -70,6 +94,49 @@ type UISystemFacade struct {
 	TemplateRenderer *web.TemplateRenderer
 }
 
+// HandlerFacade manages all HTTP handlers (API endpoints)
+type HandlerFacade struct {
+	HealthManager   *healthhttp.Manager
+	ActivityLogger  *agenthttp.ActivityLogger
+	Settings        *settingshttp.Handler
+	Chat            *chathttp.Handler
+	Plugin          *pluginhttp.Handler
+	PluginRegistry  *pluginhttp.RegistryHandler
+	PluginInit      *pluginhttp.InitHandler
+	Health          *healthhttp.Handler
+	PluginUpdate    *pluginupdate.Handler
+	Onboarding      *onboardinghttp.Handler
+	Device          *devicehttp.Handler
+	WebPage         *pluginhttp.WebPageHandler
+	Orchestration   *orchestrationhttp.Handler
+	AutoTask        *orchestrationhttp.AutoTaskHandler
+	Studio          *workspace.HTTPHandler
+	Usage           *usagehttp.Handler
+	MCP             *mcphttp.Handler
+	AgentMCP        *agenthttp.MCPHandler
+	Location        *locationhttp.Handler
+	PluginsPage     *pluginhttp.PluginsPageHandler
+	Permissions     *pluginhttp.PermissionsHandler
+	Backup          *pluginhttp.BackupHandler
+	Notifications   *pluginhttp.NotificationsHandler
+	Workflow        *workflowhttp.Handler
+	Marketplace     *marketplacehttp.Handler
+	ModelCategory   *modelcategoryhttp.Handler
+	AutoCategorize  *modelcategoryhttp.AutoCategorizeHandler
+	Reset           *settingshttp.ResetHandler
+	AutoConfig      *agenthttp.AutoConfigHandler
+	SmartOnboarding *onboardinghttp.SmartOnboardingHandler
+	Speech          *speechhttp.Handler
+	Session         *sessionhttp.Handler
+	AutoClassify    *sessionhttp.AutoClassifyHandler
+	SmartInput      *sessionhttp.SmartInputHandler
+	Note            *notehttp.Handler
+	SessionFiles    *fileshttp.Handler
+	Review          *reviewhttp.Handler
+	ExternalAgents  *externalagentshttp.Handler
+	Skills          *skillshttp.Handler
+}
+
 // NewCoreSystemFacade creates a new core system facade
 func NewCoreSystemFacade(
 	clientFactory *client.Factory,
@@ -94,6 +161,7 @@ func NewPluginSystemFacade(
 	permissionManager *pluginmanager.PermissionManager,
 	notificationManager *pluginmanager.NotificationManager,
 	backupManager *pluginmanager.BackupManager,
+	pluginUpdateService *pluginupdateservice.Service,
 ) *PluginSystemFacade {
 	return &PluginSystemFacade{
 		RegistryManager:     registryManager,
@@ -103,6 +171,7 @@ func NewPluginSystemFacade(
 		PermissionManager:   permissionManager,
 		NotificationManager: notificationManager,
 		BackupManager:       backupManager,
+		PluginUpdateService: pluginUpdateService,
 	}
 }
 
@@ -161,6 +230,91 @@ func NewIntegrationSystemFacade(
 func NewUISystemFacade(templateRenderer *web.TemplateRenderer) *UISystemFacade {
 	return &UISystemFacade{
 		TemplateRenderer: templateRenderer,
+	}
+}
+
+// NewHandlerFacade creates a new handler facade
+func NewHandlerFacade(
+	healthManager *healthhttp.Manager,
+	activityLogger *agenthttp.ActivityLogger,
+	settings *settingshttp.Handler,
+	chat *chathttp.Handler,
+	plugin *pluginhttp.Handler,
+	pluginRegistry *pluginhttp.RegistryHandler,
+	pluginInit *pluginhttp.InitHandler,
+	health *healthhttp.Handler,
+	pluginUpdate *pluginupdate.Handler,
+	onboarding *onboardinghttp.Handler,
+	device *devicehttp.Handler,
+	webPage *pluginhttp.WebPageHandler,
+	orchestration *orchestrationhttp.Handler,
+	autoTask *orchestrationhttp.AutoTaskHandler,
+	studio *workspace.HTTPHandler,
+	usage *usagehttp.Handler,
+	mcp *mcphttp.Handler,
+	agentMCP *agenthttp.MCPHandler,
+	location *locationhttp.Handler,
+	pluginsPage *pluginhttp.PluginsPageHandler,
+	permissions *pluginhttp.PermissionsHandler,
+	backup *pluginhttp.BackupHandler,
+	notifications *pluginhttp.NotificationsHandler,
+	workflow *workflowhttp.Handler,
+	marketplace *marketplacehttp.Handler,
+	modelCategory *modelcategoryhttp.Handler,
+	autoCategorize *modelcategoryhttp.AutoCategorizeHandler,
+	reset *settingshttp.ResetHandler,
+	autoConfig *agenthttp.AutoConfigHandler,
+	smartOnboarding *onboardinghttp.SmartOnboardingHandler,
+	speech *speechhttp.Handler,
+	session *sessionhttp.Handler,
+	autoClassify *sessionhttp.AutoClassifyHandler,
+	smartInput *sessionhttp.SmartInputHandler,
+	note *notehttp.Handler,
+	sessionFiles *fileshttp.Handler,
+	review *reviewhttp.Handler,
+	externalAgents *externalagentshttp.Handler,
+	skills *skillshttp.Handler,
+) *HandlerFacade {
+	return &HandlerFacade{
+		HealthManager:   healthManager,
+		ActivityLogger:  activityLogger,
+		Settings:        settings,
+		Chat:            chat,
+		Plugin:          plugin,
+		PluginRegistry:  pluginRegistry,
+		PluginInit:      pluginInit,
+		Health:          health,
+		PluginUpdate:    pluginUpdate,
+		Onboarding:      onboarding,
+		Device:          device,
+		WebPage:         webPage,
+		Orchestration:   orchestration,
+		AutoTask:        autoTask,
+		Studio:          studio,
+		Usage:           usage,
+		MCP:             mcp,
+		AgentMCP:        agentMCP,
+		Location:        location,
+		PluginsPage:     pluginsPage,
+		Permissions:     permissions,
+		Backup:          backup,
+		Notifications:   notifications,
+		Workflow:        workflow,
+		Marketplace:     marketplace,
+		ModelCategory:   modelCategory,
+		AutoCategorize:  autoCategorize,
+		Reset:           reset,
+		AutoConfig:      autoConfig,
+		SmartOnboarding: smartOnboarding,
+		Speech:          speech,
+		Session:         session,
+		AutoClassify:    autoClassify,
+		SmartInput:      smartInput,
+		Note:            note,
+		SessionFiles:    sessionFiles,
+		Review:          review,
+		ExternalAgents:  externalAgents,
+		Skills:          skills,
 	}
 }
 

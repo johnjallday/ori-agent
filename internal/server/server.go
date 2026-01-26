@@ -8,53 +8,12 @@ import (
 	"strings"
 	"time"
 
-	agenthttp "github.com/johnjallday/ori-agent/internal/agenthttp"
-	"github.com/johnjallday/ori-agent/internal/chathttp"
-	"github.com/johnjallday/ori-agent/internal/client"
-	"github.com/johnjallday/ori-agent/internal/config"
-	"github.com/johnjallday/ori-agent/internal/devicehttp"
-	"github.com/johnjallday/ori-agent/internal/externalagents"
-	"github.com/johnjallday/ori-agent/internal/externalagentshttp"
-	"github.com/johnjallday/ori-agent/internal/fileshttp"
-	"github.com/johnjallday/ori-agent/internal/filewatcher"
-	"github.com/johnjallday/ori-agent/internal/healthhttp"
 	orihttp "github.com/johnjallday/ori-agent/internal/http"
-	"github.com/johnjallday/ori-agent/internal/llm"
-	"github.com/johnjallday/ori-agent/internal/location"
-	"github.com/johnjallday/ori-agent/internal/locationhttp"
 	"github.com/johnjallday/ori-agent/internal/logger"
-	"github.com/johnjallday/ori-agent/internal/marketplace"
-	"github.com/johnjallday/ori-agent/internal/marketplacehttp"
-	"github.com/johnjallday/ori-agent/internal/mcp"
-	"github.com/johnjallday/ori-agent/internal/mcphttp"
-	"github.com/johnjallday/ori-agent/internal/modelcategoryhttp"
-	"github.com/johnjallday/ori-agent/internal/notehttp"
-	"github.com/johnjallday/ori-agent/internal/onboarding"
-	"github.com/johnjallday/ori-agent/internal/onboardinghttp"
-	"github.com/johnjallday/ori-agent/internal/orchestrationhttp"
 	"github.com/johnjallday/ori-agent/internal/platform"
-	"github.com/johnjallday/ori-agent/internal/plugindownloader"
-	pluginhttp "github.com/johnjallday/ori-agent/internal/pluginhttp"
 	"github.com/johnjallday/ori-agent/internal/pluginloader"
-	"github.com/johnjallday/ori-agent/internal/pluginmanager"
-	"github.com/johnjallday/ori-agent/internal/pluginupdate"
-	"github.com/johnjallday/ori-agent/internal/pluginupdateservice"
 	"github.com/johnjallday/ori-agent/internal/privateservices"
-	"github.com/johnjallday/ori-agent/internal/registry"
-	"github.com/johnjallday/ori-agent/internal/reviewhttp"
-	"github.com/johnjallday/ori-agent/internal/session"
-	"github.com/johnjallday/ori-agent/internal/sessionfiles"
-	"github.com/johnjallday/ori-agent/internal/sessionhttp"
-	"github.com/johnjallday/ori-agent/internal/settingshttp"
-	"github.com/johnjallday/ori-agent/internal/skills"
-	"github.com/johnjallday/ori-agent/internal/skillshttp"
-	"github.com/johnjallday/ori-agent/internal/speechhttp"
-	"github.com/johnjallday/ori-agent/internal/store"
-	"github.com/johnjallday/ori-agent/internal/types"
-	"github.com/johnjallday/ori-agent/internal/updatemanager"
-	"github.com/johnjallday/ori-agent/internal/usagehttp"
 	web "github.com/johnjallday/ori-agent/internal/web"
-	"github.com/johnjallday/ori-agent/internal/workflowhttp"
 	"github.com/johnjallday/ori-agent/internal/workspace"
 )
 
@@ -68,97 +27,7 @@ type Server struct {
 	Workflow    *WorkflowSystemFacade
 	Integration *IntegrationSystemFacade
 	UI          *UISystemFacade
-
-	// Internal fields (used by builder, kept for backward compatibility)
-	// These are populated during initialization and wrapped in facades
-	clientFactory         *client.Factory
-	llmFactory            *llm.Factory
-	registryManager       *registry.Manager
-	st                    store.Store
-	pluginReg             types.PluginRegistry
-	agentStorePath        string
-	configManager         *config.Manager
-	privateServicesClient privateservices.Client
-	templateRenderer      *web.TemplateRenderer
-	pluginDownloader      *plugindownloader.PluginDownloader
-	updateMgr             *updatemanager.Manager
-	workspaceStore        workspace.Store
-	taskExecutor          *workspace.TaskExecutor
-	stepExecutor          *workspace.StepExecutor
-	taskScheduler         *workspace.TaskScheduler
-	eventBus              *workspace.EventBus
-	notificationService   *workspace.NotificationService
-	studioOrchestrator    *workspace.Orchestrator
-	costTracker           *llm.CostTracker
-	mcpRegistry           *mcp.Registry
-	mcpConfigManager      *mcp.ConfigManager
-	locationManager       *location.Manager
-	onboardingMgr         *onboarding.Manager
-	categoryManager       *pluginmanager.CategoryManager
-	permissionManager     *pluginmanager.PermissionManager
-	notificationManager   *pluginmanager.NotificationManager
-	backupManager         *pluginmanager.BackupManager
-	pluginUpdateService   *pluginupdateservice.Service
-
-	// HTTP Handlers (kept separate as they're endpoints, not core logic)
-	healthManager          *healthhttp.Manager
-	activityLogger         *agenthttp.ActivityLogger
-	settingsHandler        *settingshttp.Handler
-	chatHandler            *chathttp.Handler
-	pluginHandler          *pluginhttp.Handler
-	pluginRegistryHandler  *pluginhttp.RegistryHandler
-	pluginInitHandler      *pluginhttp.InitHandler
-	healthHandler          *healthhttp.Handler
-	pluginUpdateHandler    *pluginupdate.Handler
-	onboardingHandler      *onboardinghttp.Handler
-	deviceHandler          *devicehttp.Handler
-	webPageHandler         *pluginhttp.WebPageHandler
-	orchestrationHandler   *orchestrationhttp.Handler
-	autoTaskHandler        *orchestrationhttp.AutoTaskHandler
-	studioHandler          *workspace.HTTPHandler
-	usageHandler           *usagehttp.Handler
-	mcpHandler             *mcphttp.Handler
-	agentMCPHandler        *agenthttp.MCPHandler
-	locationHandler        *locationhttp.Handler
-	pluginsPageHandler     *pluginhttp.PluginsPageHandler
-	permissionsHandler     *pluginhttp.PermissionsHandler
-	backupHandler          *pluginhttp.BackupHandler
-	notificationsHandler   *pluginhttp.NotificationsHandler
-	workflowHandler        *workflowhttp.Handler
-	marketplaceStore       *marketplace.Store
-	marketplaceHandler     *marketplacehttp.Handler
-	modelCategoryStore     store.ModelCategoryStore
-	modelCategoryHandler   *modelcategoryhttp.Handler
-	autoCategorizeHandler  *modelcategoryhttp.AutoCategorizeHandler
-	resetHandler           *settingshttp.ResetHandler
-	autoConfigHandler      *agenthttp.AutoConfigHandler
-	smartOnboardingHandler *onboardinghttp.SmartOnboardingHandler
-	speechHandler          *speechhttp.Handler
-
-	// Session management
-	sessionStore        session.HybridStore
-	sessionHandler      *sessionhttp.Handler
-	autoClassifyHandler *sessionhttp.AutoClassifyHandler
-	smartInputHandler   *sessionhttp.SmartInputHandler
-
-	// Note generation
-	noteHandler *notehttp.Handler
-
-	// Session files management
-	sessionFilesStore   *sessionfiles.Store
-	sessionFilesWatcher *filewatcher.Watcher
-	sessionFilesHandler *fileshttp.Handler
-
-	// Review system
-	reviewHandler *reviewhttp.Handler
-
-	// External agents (Claude Code, Codex)
-	externalAgentsCache   *externalagents.Cache
-	externalAgentsHandler *externalagentshttp.Handler
-
-	// Skills (local + external)
-	skillsManager *skills.Manager
-	skillsHandler *skillshttp.Handler
+	Handlers    *HandlerFacade
 }
 
 // New creates and initializes a new Server with all dependencies using the ServerBuilder.
@@ -197,11 +66,13 @@ func (s *Server) Shutdown() {
 	if s.Workflow != nil {
 		s.Workflow.Shutdown()
 	}
-	if s.pluginUpdateService != nil {
-		s.pluginUpdateService.Stop()
+	if s.Plugin != nil && s.Plugin.PluginUpdateService != nil {
+		s.Plugin.PluginUpdateService.Stop()
 	}
-	if s.sessionFilesWatcher != nil {
-		_ = s.sessionFilesWatcher.Close()
+	if s.Handlers != nil && s.Handlers.SessionFiles != nil {
+		if watcher := s.Handlers.SessionFiles.Watcher(); watcher != nil {
+			_ = watcher.Close()
+		}
 	}
 
 	// Shutdown folder picker if running
@@ -267,10 +138,10 @@ func (s *Server) HTTPServer(addr string) *http.Server {
 }
 
 func (s *Server) privateCapabilitiesSnapshot() privateservices.Capabilities {
-	if s.privateServicesClient == nil {
+	if s == nil || s.Integration == nil || s.Integration.PrivateServices == nil {
 		return privateservices.NoopClient{}.Capabilities()
 	}
-	return s.privateServicesClient.Capabilities()
+	return s.Integration.PrivateServices.Capabilities()
 }
 
 // prepareBasePageData prepares common page data with theme and current agent

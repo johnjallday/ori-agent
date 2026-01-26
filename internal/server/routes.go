@@ -87,19 +87,19 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 	// =============================================================================
 	// Agent API Endpoints
 	// =============================================================================
-	agentHandler := agenthttp.New(s.st)
-	agentHandler.ActivityLogger = s.activityLogger
-	avatarHandler := agenthttp.NewAvatarHandler(s.st)
+	agentHandler := agenthttp.New(s.Storage.AgentStore)
+	agentHandler.ActivityLogger = s.Handlers.ActivityLogger
+	avatarHandler := agenthttp.NewAvatarHandler(s.Storage.AgentStore)
 	mux.Handle("/api/agents", agentHandler)
 
 	// Dashboard handlers
-	dashboardHandler := agenthttp.NewDashboardHandler(s.st)
-	dashboardHandler.ActivityLogger = s.activityLogger
+	dashboardHandler := agenthttp.NewDashboardHandler(s.Storage.AgentStore)
+	dashboardHandler.ActivityLogger = s.Handlers.ActivityLogger
 	mux.HandleFunc("/api/agents/dashboard/list", dashboardHandler.ListAgentsWithStats)
 	mux.HandleFunc("/api/agents/dashboard/stats", dashboardHandler.GetDashboardStats)
 
 	// Agent MCP handlers
-	s.agentMCPHandler = agenthttp.NewMCPHandler(s.mcpRegistry, s.mcpConfigManager, agentHandler)
+	s.Handlers.AgentMCP = agenthttp.NewMCPHandler(s.Integration.MCPRegistry, s.Integration.MCPConfigManager, agentHandler)
 	mux.HandleFunc("/api/agents/", func(w http.ResponseWriter, r *http.Request) {
 		// Route dashboard detail requests first
 		if strings.Contains(r.URL.Path, "/detail") {
@@ -124,12 +124,12 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 		// Route agent MCP-specific requests
 		if strings.Contains(r.URL.Path, "/mcp-servers") {
 			if strings.HasSuffix(r.URL.Path, "/enable") {
-				s.agentMCPHandler.EnableAgentMCPServerHandler(w, r)
+				s.Handlers.AgentMCP.EnableAgentMCPServerHandler(w, r)
 			} else if strings.HasSuffix(r.URL.Path, "/disable") {
-				s.agentMCPHandler.DisableAgentMCPServerHandler(w, r)
+				s.Handlers.AgentMCP.DisableAgentMCPServerHandler(w, r)
 			} else {
 				// List MCP servers for agent
-				s.agentMCPHandler.ListAgentMCPServersHandler(w, r)
+				s.Handlers.AgentMCP.ListAgentMCPServersHandler(w, r)
 			}
 		} else {
 			// Regular agent requests - delegate to agentHandler
@@ -138,107 +138,107 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 	})
 
 	// Agent capabilities endpoint
-	mux.HandleFunc("/api/agents/capabilities", s.orchestrationHandler.AgentCapabilitiesHandler)
+	mux.HandleFunc("/api/agents/capabilities", s.Handlers.Orchestration.AgentCapabilitiesHandler)
 
 	// Agent auto-config endpoints
-	mux.HandleFunc("/api/agents/auto-config", s.autoConfigHandler.AutoConfigHandler)
-	mux.HandleFunc("/api/agents/auto-config/availability", s.autoConfigHandler.CheckLLMAvailabilityHandler)
+	mux.HandleFunc("/api/agents/auto-config", s.Handlers.AutoConfig.AutoConfigHandler)
+	mux.HandleFunc("/api/agents/auto-config/availability", s.Handlers.AutoConfig.CheckLLMAvailabilityHandler)
 
 	// =============================================================================
 	// Plugin API Endpoints
 	// =============================================================================
-	mux.HandleFunc("/api/plugin-registry", s.pluginRegistryHandler.PluginRegistryHandler)
-	mux.HandleFunc("/api/plugin-updates", s.pluginRegistryHandler.PluginUpdatesHandler)
-	mux.HandleFunc("/api/plugins/download", s.pluginRegistryHandler.PluginDownloadHandler)
-	mux.HandleFunc("/api/plugins/updates/check", s.pluginRegistryHandler.PluginUpdatesCheckHandler)
-	mux.HandleFunc("/api/plugins/execute", s.pluginInitHandler.PluginExecuteHandler)
-	mux.HandleFunc("/api/plugins/init-status", s.pluginInitHandler.PluginInitStatusHandler)
+	mux.HandleFunc("/api/plugin-registry", s.Handlers.PluginRegistry.PluginRegistryHandler)
+	mux.HandleFunc("/api/plugin-updates", s.Handlers.PluginRegistry.PluginUpdatesHandler)
+	mux.HandleFunc("/api/plugins/download", s.Handlers.PluginRegistry.PluginDownloadHandler)
+	mux.HandleFunc("/api/plugins/updates/check", s.Handlers.PluginRegistry.PluginUpdatesCheckHandler)
+	mux.HandleFunc("/api/plugins/execute", s.Handlers.PluginInit.PluginExecuteHandler)
+	mux.HandleFunc("/api/plugins/init-status", s.Handlers.PluginInit.PluginInitStatusHandler)
 
 	// Plugin health check endpoints (must be before catch-all /api/plugins/ pattern)
-	mux.HandleFunc("/api/plugins/health", s.healthHandler.HandleAllPluginsHealth)
-	mux.HandleFunc("/api/plugins/check-updates", s.pluginUpdateHandler.HandleCheckUpdates)
-	mux.HandleFunc("/api/plugins/updates/status", s.pluginUpdateHandler.HandleGetUpdateStatus)
-	mux.HandleFunc("/api/plugins/backups", s.pluginUpdateHandler.HandleListBackups)
-	mux.HandleFunc("/api/plugins/backups/clean", s.pluginUpdateHandler.HandleCleanBackups)
+	mux.HandleFunc("/api/plugins/health", s.Handlers.Health.HandleAllPluginsHealth)
+	mux.HandleFunc("/api/plugins/check-updates", s.Handlers.PluginUpdate.HandleCheckUpdates)
+	mux.HandleFunc("/api/plugins/updates/status", s.Handlers.PluginUpdate.HandleGetUpdateStatus)
+	mux.HandleFunc("/api/plugins/backups", s.Handlers.PluginUpdate.HandleListBackups)
+	mux.HandleFunc("/api/plugins/backups/clean", s.Handlers.PluginUpdate.HandleCleanBackups)
 
 	// Plugin upload endpoint (must be before catch-all /api/plugins/ pattern)
-	mux.HandleFunc("/api/plugins/upload", s.pluginHandler.ServeHTTP)
+	mux.HandleFunc("/api/plugins/upload", s.Handlers.Plugin.ServeHTTP)
 
 	// Dedicated plugins page endpoints (must be before catch-all /api/plugins/ pattern)
-	mux.HandleFunc("/api/plugins/notifications", s.notificationsHandler.HandleGetNotifications)
+	mux.HandleFunc("/api/plugins/notifications", s.Handlers.Notifications.HandleGetNotifications)
 
 	// Plugin-specific routes with pattern matching
 	mux.HandleFunc("/api/plugins/", s.routePluginRequest)
 
 	// Reuse the plugin handler instance
-	mux.HandleFunc("/api/plugins/save-settings", s.pluginHandler.ServeHTTP)
-	mux.HandleFunc("/api/plugins/tool-call", s.pluginHandler.DirectToolCallHandler)
+	mux.HandleFunc("/api/plugins/save-settings", s.Handlers.Plugin.ServeHTTP)
+	mux.HandleFunc("/api/plugins/tool-call", s.Handlers.Plugin.DirectToolCallHandler)
 
 	// Tags endpoints for the plugins management UI
-	mux.HandleFunc("/api/plugins/tags", s.pluginsPageHandler.HandleListPluginTags)
-	mux.HandleFunc("/api/plugins/tags/", s.pluginsPageHandler.HandleListPluginsByTag)
+	mux.HandleFunc("/api/plugins/tags", s.Handlers.PluginsPage.HandleListPluginTags)
+	mux.HandleFunc("/api/plugins/tags/", s.Handlers.PluginsPage.HandleListPluginsByTag)
 
 	// Main plugins list endpoint - route based on query parameters
 	mux.HandleFunc("/api/plugins", func(w http.ResponseWriter, r *http.Request) {
 		// If there's a 'management' query parameter, use the new handler
 		if r.URL.Query().Get("management") == "true" {
-			s.pluginsPageHandler.HandleListPlugins(w, r)
+			s.Handlers.PluginsPage.HandleListPlugins(w, r)
 			return
 		}
 		// Otherwise use the original handler for backward compatibility
-		s.pluginHandler.ServeHTTP(w, r)
+		s.Handlers.Plugin.ServeHTTP(w, r)
 	})
 
 	// =============================================================================
 	// Settings and Configuration Endpoints
 	// =============================================================================
-	mux.HandleFunc("/api/settings", s.settingsHandler.SettingsHandler)
-	mux.HandleFunc("/api/api-key", s.settingsHandler.APIKeyHandler)
-	mux.HandleFunc("/api/providers", s.settingsHandler.ProvidersHandler)
-	mux.HandleFunc("/api/settings/system-model", s.settingsHandler.SystemModelHandler)
-	mux.HandleFunc("/api/settings/available-models", s.settingsHandler.AvailableModelsHandler)
-	mux.HandleFunc("/api/settings/system-paths", s.settingsHandler.SystemPathsHandler)
-	mux.HandleFunc("/api/settings/external-agents", s.settingsHandler.ExternalAgentsSettingsHandler)
-	mux.HandleFunc("/api/settings/speech", s.settingsHandler.SpeechSettingsHandler)
-	mux.HandleFunc("/api/transcribe", s.speechHandler.Transcribe)
+	mux.HandleFunc("/api/settings", s.Handlers.Settings.SettingsHandler)
+	mux.HandleFunc("/api/api-key", s.Handlers.Settings.APIKeyHandler)
+	mux.HandleFunc("/api/providers", s.Handlers.Settings.ProvidersHandler)
+	mux.HandleFunc("/api/settings/system-model", s.Handlers.Settings.SystemModelHandler)
+	mux.HandleFunc("/api/settings/available-models", s.Handlers.Settings.AvailableModelsHandler)
+	mux.HandleFunc("/api/settings/system-paths", s.Handlers.Settings.SystemPathsHandler)
+	mux.HandleFunc("/api/settings/external-agents", s.Handlers.Settings.ExternalAgentsSettingsHandler)
+	mux.HandleFunc("/api/settings/speech", s.Handlers.Settings.SpeechSettingsHandler)
+	mux.HandleFunc("/api/transcribe", s.Handlers.Speech.Transcribe)
 
 	// Web3 Wallet endpoints
 	if caps.Web3Wallet {
-		mux.HandleFunc("/api/web3-wallet", s.settingsHandler.Web3WalletHandler)
-		mux.HandleFunc("/api/web3-chains", s.settingsHandler.Web3ChainsHandler)
+		mux.HandleFunc("/api/web3-wallet", s.Handlers.Settings.Web3WalletHandler)
+		mux.HandleFunc("/api/web3-chains", s.Handlers.Settings.Web3ChainsHandler)
 	}
 
 	// Reset endpoints
-	mux.HandleFunc("/api/reset", s.resetHandler.HandleReset)
-	mux.HandleFunc("/api/reset/preview", s.resetHandler.GetResetPreview)
+	mux.HandleFunc("/api/reset", s.Handlers.Reset.HandleReset)
+	mux.HandleFunc("/api/reset/preview", s.Handlers.Reset.GetResetPreview)
 
 	// =============================================================================
 	// Marketplace Management Endpoints
 	// =============================================================================
-	if s.marketplaceHandler != nil {
+	if s.Handlers.Marketplace != nil {
 		mux.HandleFunc("/api/marketplaces", func(w http.ResponseWriter, r *http.Request) {
 			switch r.Method {
 			case http.MethodGet:
-				s.marketplaceHandler.ListMarketplaces(w, r)
+				s.Handlers.Marketplace.ListMarketplaces(w, r)
 			case http.MethodPost:
-				s.marketplaceHandler.AddMarketplace(w, r)
+				s.Handlers.Marketplace.AddMarketplace(w, r)
 			default:
 				orihttp.MethodNotAllowed(w)
 			}
 		})
-		mux.HandleFunc("/api/marketplaces/reorder", s.marketplaceHandler.ReorderMarketplaces)
-		mux.HandleFunc("/api/marketplaces/test", s.marketplaceHandler.TestMarketplace)
+		mux.HandleFunc("/api/marketplaces/reorder", s.Handlers.Marketplace.ReorderMarketplaces)
+		mux.HandleFunc("/api/marketplaces/test", s.Handlers.Marketplace.TestMarketplace)
 		mux.HandleFunc("/api/marketplaces/", func(w http.ResponseWriter, r *http.Request) {
 			// Handle /api/marketplaces/{id} and /api/marketplaces/{id}/refresh
 			if strings.HasSuffix(r.URL.Path, "/refresh") {
-				s.marketplaceHandler.RefreshMarketplace(w, r)
+				s.Handlers.Marketplace.RefreshMarketplace(w, r)
 				return
 			}
 			switch r.Method {
 			case http.MethodPut:
-				s.marketplaceHandler.UpdateMarketplace(w, r)
+				s.Handlers.Marketplace.UpdateMarketplace(w, r)
 			case http.MethodDelete:
-				s.marketplaceHandler.DeleteMarketplace(w, r)
+				s.Handlers.Marketplace.DeleteMarketplace(w, r)
 			default:
 				orihttp.MethodNotAllowed(w)
 				// =============================================================================
@@ -248,12 +248,12 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 		})
 	}
 
-	mux.HandleFunc("/api/chat", s.chatHandler.ChatHandler)
+	mux.HandleFunc("/api/chat", s.Handlers.Chat.ChatHandler)
 
 	// =============================================================================
 	// Update Management Endpoints
 	// =============================================================================
-	updateHandler := updatehttp.NewHandler(s.updateMgr)
+	updateHandler := updatehttp.NewHandler(s.Integration.UpdateManager)
 	mux.HandleFunc("/api/updates/check", updateHandler.CheckUpdatesHandler)
 	mux.HandleFunc("/api/updates/releases", updateHandler.ListReleasesHandler)
 	mux.HandleFunc("/api/updates/download", updateHandler.DownloadUpdateHandler)
@@ -270,30 +270,30 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 	// =============================================================================
 	// Onboarding Endpoints
 	// =============================================================================
-	mux.HandleFunc("/api/onboarding/status", s.onboardingHandler.GetStatus)
-	mux.HandleFunc("/api/onboarding/step", s.onboardingHandler.CompleteStep)
-	mux.HandleFunc("/api/onboarding/skip-step", s.onboardingHandler.SkipStep)
-	mux.HandleFunc("/api/onboarding/skip", s.onboardingHandler.Skip)
-	mux.HandleFunc("/api/onboarding/complete", s.onboardingHandler.Complete)
-	mux.HandleFunc("/api/onboarding/reset", s.onboardingHandler.Reset)
+	mux.HandleFunc("/api/onboarding/status", s.Handlers.Onboarding.GetStatus)
+	mux.HandleFunc("/api/onboarding/step", s.Handlers.Onboarding.CompleteStep)
+	mux.HandleFunc("/api/onboarding/skip-step", s.Handlers.Onboarding.SkipStep)
+	mux.HandleFunc("/api/onboarding/skip", s.Handlers.Onboarding.Skip)
+	mux.HandleFunc("/api/onboarding/complete", s.Handlers.Onboarding.Complete)
+	mux.HandleFunc("/api/onboarding/reset", s.Handlers.Onboarding.Reset)
 
 	// Smart onboarding endpoints (AI-powered profile inference)
-	mux.HandleFunc("/api/onboarding/detect", s.smartOnboardingHandler.Detect)
-	mux.HandleFunc("/api/onboarding/profile", s.smartOnboardingHandler.InferProfile)
-	mux.HandleFunc("/api/onboarding/describe", s.smartOnboardingHandler.Describe)
-	mux.HandleFunc("/api/onboarding/config", s.smartOnboardingHandler.GenerateConfig)
-	mux.HandleFunc("/api/onboarding/apply-config", s.smartOnboardingHandler.Apply)
-	mux.HandleFunc("/api/onboarding/update-profile", s.smartOnboardingHandler.UpdateProfile)
-	mux.HandleFunc("/api/onboarding/user-profile", s.smartOnboardingHandler.GetStoredProfile)
-	mux.HandleFunc("/api/onboarding/recommend-plugins", s.smartOnboardingHandler.RecommendPlugins)
+	mux.HandleFunc("/api/onboarding/detect", s.Handlers.SmartOnboarding.Detect)
+	mux.HandleFunc("/api/onboarding/profile", s.Handlers.SmartOnboarding.InferProfile)
+	mux.HandleFunc("/api/onboarding/describe", s.Handlers.SmartOnboarding.Describe)
+	mux.HandleFunc("/api/onboarding/config", s.Handlers.SmartOnboarding.GenerateConfig)
+	mux.HandleFunc("/api/onboarding/apply-config", s.Handlers.SmartOnboarding.Apply)
+	mux.HandleFunc("/api/onboarding/update-profile", s.Handlers.SmartOnboarding.UpdateProfile)
+	mux.HandleFunc("/api/onboarding/user-profile", s.Handlers.SmartOnboarding.GetStoredProfile)
+	mux.HandleFunc("/api/onboarding/recommend-plugins", s.Handlers.SmartOnboarding.RecommendPlugins)
 
 	// Theme endpoints
 	mux.HandleFunc("/api/theme", func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
 		case http.MethodGet:
-			s.onboardingHandler.GetTheme(w, r)
+			s.Handlers.Onboarding.GetTheme(w, r)
 		case http.MethodPost:
-			s.onboardingHandler.SetTheme(w, r)
+			s.Handlers.Onboarding.SetTheme(w, r)
 		default:
 			orihttp.MethodNotAllowed(w)
 			// =============================================================================
@@ -302,35 +302,35 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 		}
 	})
 
-	mux.HandleFunc("/api/device/info", s.deviceHandler.GetDeviceInfo)
-	mux.HandleFunc("/api/device/type", s.deviceHandler.SetDeviceType)
-	mux.HandleFunc("/api/device/wifi/current", s.deviceHandler.GetCurrentWiFi)
-	mux.HandleFunc("/api/device/ollama", s.deviceHandler.GetOllamaStatus)
-	mux.HandleFunc("/api/device/capabilities", s.deviceHandler.GetCapabilities)
-	mux.HandleFunc("/api/device/detect-hardware", s.deviceHandler.DetectHardware)
+	mux.HandleFunc("/api/device/info", s.Handlers.Device.GetDeviceInfo)
+	mux.HandleFunc("/api/device/type", s.Handlers.Device.SetDeviceType)
+	mux.HandleFunc("/api/device/wifi/current", s.Handlers.Device.GetCurrentWiFi)
+	mux.HandleFunc("/api/device/ollama", s.Handlers.Device.GetOllamaStatus)
+	mux.HandleFunc("/api/device/capabilities", s.Handlers.Device.GetCapabilities)
+	mux.HandleFunc("/api/device/detect-hardware", s.Handlers.Device.DetectHardware)
 
 	// =============================================================================
 	// Usage and Cost Tracking Endpoints
 	// =============================================================================
-	mux.HandleFunc("/api/usage/stats/all", s.usageHandler.GetAllTimeStats)
-	mux.HandleFunc("/api/usage/stats/today", s.usageHandler.GetTodayStats)
-	mux.HandleFunc("/api/usage/stats/month", s.usageHandler.GetThisMonthStats)
-	mux.HandleFunc("/api/usage/stats/range", s.usageHandler.GetCustomRangeStats)
-	mux.HandleFunc("/api/usage/summary", s.usageHandler.GetSummary)
-	mux.HandleFunc("/api/usage/pricing", s.usageHandler.GetPricingModels)
+	mux.HandleFunc("/api/usage/stats/all", s.Handlers.Usage.GetAllTimeStats)
+	mux.HandleFunc("/api/usage/stats/today", s.Handlers.Usage.GetTodayStats)
+	mux.HandleFunc("/api/usage/stats/month", s.Handlers.Usage.GetThisMonthStats)
+	mux.HandleFunc("/api/usage/stats/range", s.Handlers.Usage.GetCustomRangeStats)
+	mux.HandleFunc("/api/usage/summary", s.Handlers.Usage.GetSummary)
+	mux.HandleFunc("/api/usage/pricing", s.Handlers.Usage.GetPricingModels)
 
 	// =============================================================================
 	// Model Category Endpoints
 	// =============================================================================
-	if s.modelCategoryHandler != nil {
-		mux.HandleFunc("/api/model-categories", s.modelCategoryHandler.CategoriesHandler)
-		mux.HandleFunc("/api/model-categories/reorder", s.modelCategoryHandler.ReorderCategoriesHandler)
-		mux.HandleFunc("/api/model-categories/view-preference", s.modelCategoryHandler.SetViewPreferenceHandler)
-		mux.HandleFunc("/api/model-categories/", s.modelCategoryHandler.CategoryHandler)
+	if s.Handlers.ModelCategory != nil {
+		mux.HandleFunc("/api/model-categories", s.Handlers.ModelCategory.CategoriesHandler)
+		mux.HandleFunc("/api/model-categories/reorder", s.Handlers.ModelCategory.ReorderCategoriesHandler)
+		mux.HandleFunc("/api/model-categories/view-preference", s.Handlers.ModelCategory.SetViewPreferenceHandler)
+		mux.HandleFunc("/api/model-categories/", s.Handlers.ModelCategory.CategoryHandler)
 		mux.HandleFunc("/api/models/", func(w http.ResponseWriter, r *http.Request) {
 			// Handle model category assignments
 			if strings.HasSuffix(r.URL.Path, "/categories") {
-				s.modelCategoryHandler.SetModelAssignmentsHandler(w, r)
+				s.Handlers.ModelCategory.SetModelAssignmentsHandler(w, r)
 				return
 			}
 			// Otherwise, 404
@@ -339,21 +339,21 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 	}
 
 	// Auto-categorize endpoints (requires both category store and LLM)
-	if s.autoCategorizeHandler != nil {
-		mux.HandleFunc("/api/models/auto-categorize/availability", s.autoCategorizeHandler.CheckAvailabilityHandler)
-		mux.HandleFunc("/api/models/auto-categorize", s.autoCategorizeHandler.AutoCategorizeHandler)
+	if s.Handlers.AutoCategorize != nil {
+		mux.HandleFunc("/api/models/auto-categorize/availability", s.Handlers.AutoCategorize.CheckAvailabilityHandler)
+		mux.HandleFunc("/api/models/auto-categorize", s.Handlers.AutoCategorize.AutoCategorizeHandler)
 	}
 
 	// =============================================================================
 	// Location Management Endpoints
 	// =============================================================================
-	mux.HandleFunc("/api/location/current", s.locationHandler.GetCurrentLocation)
+	mux.HandleFunc("/api/location/current", s.Handlers.Location.GetCurrentLocation)
 	mux.HandleFunc("/api/location/zones", func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
 		case http.MethodGet:
-			s.locationHandler.GetZones(w, r)
+			s.Handlers.Location.GetZones(w, r)
 		case http.MethodPost:
-			s.locationHandler.CreateZone(w, r)
+			s.Handlers.Location.CreateZone(w, r)
 		default:
 			orihttp.MethodNotAllowed(w)
 		}
@@ -361,14 +361,14 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 	mux.HandleFunc("/api/location/zones/", func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
 		case http.MethodPut:
-			s.locationHandler.UpdateZone(w, r)
+			s.Handlers.Location.UpdateZone(w, r)
 		case http.MethodDelete:
-			s.locationHandler.DeleteZone(w, r)
+			s.Handlers.Location.DeleteZone(w, r)
 		default:
 			orihttp.MethodNotAllowed(w)
 		}
 	})
-	mux.HandleFunc("/api/location/override", s.locationHandler.SetManualLocation)
+	mux.HandleFunc("/api/location/override", s.Handlers.Location.SetManualLocation)
 
 	// =============================================================================
 	// MCP (Model Context Protocol) Endpoints
@@ -376,9 +376,9 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 	mux.HandleFunc("/api/mcp/servers", func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
 		case http.MethodGet:
-			s.mcpHandler.ListServersHandler(w, r)
+			s.Handlers.MCP.ListServersHandler(w, r)
 		case http.MethodPost:
-			s.mcpHandler.AddServerHandler(w, r)
+			s.Handlers.MCP.AddServerHandler(w, r)
 		default:
 			orihttp.MethodNotAllowed(w)
 		}
@@ -386,69 +386,69 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 	mux.HandleFunc("/api/mcp/servers/", func(w http.ResponseWriter, r *http.Request) {
 		// Check for specific actions in the path
 		if strings.HasSuffix(r.URL.Path, "/enable") {
-			s.mcpHandler.EnableServerHandler(w, r)
+			s.Handlers.MCP.EnableServerHandler(w, r)
 		} else if strings.HasSuffix(r.URL.Path, "/disable") {
-			s.mcpHandler.DisableServerHandler(w, r)
+			s.Handlers.MCP.DisableServerHandler(w, r)
 		} else if strings.HasSuffix(r.URL.Path, "/tools") {
-			s.mcpHandler.GetServerToolsHandler(w, r)
+			s.Handlers.MCP.GetServerToolsHandler(w, r)
 		} else if strings.HasSuffix(r.URL.Path, "/status") {
-			s.mcpHandler.GetServerStatusHandler(w, r)
+			s.Handlers.MCP.GetServerStatusHandler(w, r)
 		} else if strings.HasSuffix(r.URL.Path, "/test") {
-			s.mcpHandler.TestConnectionHandler(w, r)
+			s.Handlers.MCP.TestConnectionHandler(w, r)
 		} else if strings.HasSuffix(r.URL.Path, "/retry") {
-			s.mcpHandler.RetryConnectionHandler(w, r)
+			s.Handlers.MCP.RetryConnectionHandler(w, r)
 		} else if r.Method == http.MethodDelete {
-			s.mcpHandler.RemoveServerHandler(w, r)
+			s.Handlers.MCP.RemoveServerHandler(w, r)
 		} else {
 			orihttp.NotFound(w, "Not found")
 		}
 	})
-	mux.HandleFunc("/api/mcp/import", s.mcpHandler.ImportServersHandler)
-	mux.HandleFunc("/api/mcp/marketplace", s.mcpHandler.GetMarketplaceServersHandler)
+	mux.HandleFunc("/api/mcp/import", s.Handlers.MCP.ImportServersHandler)
+	mux.HandleFunc("/api/mcp/marketplace", s.Handlers.MCP.GetMarketplaceServersHandler)
 
 	// =============================================================================
 	// Orchestration Endpoints
 	// =============================================================================
-	mux.HandleFunc("/api/orchestration/workspace", s.orchestrationHandler.WorkspaceHandler)
-	mux.HandleFunc("/api/orchestration/workspace/agents", s.orchestrationHandler.WorkspaceAgentsHandler)
-	mux.HandleFunc("/api/orchestration/workspace/layout", s.orchestrationHandler.SaveLayoutHandler)
-	mux.HandleFunc("/api/orchestration/messages", s.orchestrationHandler.MessagesHandler)
-	mux.HandleFunc("/api/orchestration/delegate", s.orchestrationHandler.DelegateHandler)
-	mux.HandleFunc("/api/orchestration/dynamic-agents/approve", s.orchestrationHandler.DynamicAgentApprovalHandler)
-	mux.HandleFunc("/api/orchestration/tasks", s.orchestrationHandler.TasksHandler)
-	mux.HandleFunc("/api/orchestration/tasks/bulk", s.orchestrationHandler.BulkDeleteTasksHandler)
-	mux.HandleFunc("/api/orchestration/tasks/execute", s.orchestrationHandler.ExecuteTaskHandler)
-	if s.autoTaskHandler != nil {
-		mux.HandleFunc("/api/orchestration/tasks/auto-parse", s.autoTaskHandler.HandleAutoTask)
+	mux.HandleFunc("/api/orchestration/workspace", s.Handlers.Orchestration.WorkspaceHandler)
+	mux.HandleFunc("/api/orchestration/workspace/agents", s.Handlers.Orchestration.WorkspaceAgentsHandler)
+	mux.HandleFunc("/api/orchestration/workspace/layout", s.Handlers.Orchestration.SaveLayoutHandler)
+	mux.HandleFunc("/api/orchestration/messages", s.Handlers.Orchestration.MessagesHandler)
+	mux.HandleFunc("/api/orchestration/delegate", s.Handlers.Orchestration.DelegateHandler)
+	mux.HandleFunc("/api/orchestration/dynamic-agents/approve", s.Handlers.Orchestration.DynamicAgentApprovalHandler)
+	mux.HandleFunc("/api/orchestration/tasks", s.Handlers.Orchestration.TasksHandler)
+	mux.HandleFunc("/api/orchestration/tasks/bulk", s.Handlers.Orchestration.BulkDeleteTasksHandler)
+	mux.HandleFunc("/api/orchestration/tasks/execute", s.Handlers.Orchestration.ExecuteTaskHandler)
+	if s.Handlers.AutoTask != nil {
+		mux.HandleFunc("/api/orchestration/tasks/auto-parse", s.Handlers.AutoTask.HandleAutoTask)
 	}
-	mux.HandleFunc("/api/orchestration/tasks/", s.orchestrationHandler.TasksPathHandler) // Handles /api/orchestration/tasks/{id} and /api/orchestration/tasks/{id}/complete
-	mux.HandleFunc("/api/orchestration/task-results", s.orchestrationHandler.TaskResultsHandler)
-	mux.HandleFunc("/api/orchestration/workflow/status", s.orchestrationHandler.WorkflowStatusHandler)
-	mux.HandleFunc("/api/orchestration/workflow/stream", s.orchestrationHandler.WorkflowStatusStreamHandler)
-	mux.HandleFunc("/api/orchestration/progress/stream", s.orchestrationHandler.ProgressStreamHandler)
+	mux.HandleFunc("/api/orchestration/tasks/", s.Handlers.Orchestration.TasksPathHandler) // Handles /api/orchestration/tasks/{id} and /api/orchestration/tasks/{id}/complete
+	mux.HandleFunc("/api/orchestration/task-results", s.Handlers.Orchestration.TaskResultsHandler)
+	mux.HandleFunc("/api/orchestration/workflow/status", s.Handlers.Orchestration.WorkflowStatusHandler)
+	mux.HandleFunc("/api/orchestration/workflow/stream", s.Handlers.Orchestration.WorkflowStatusStreamHandler)
+	mux.HandleFunc("/api/orchestration/progress/stream", s.Handlers.Orchestration.ProgressStreamHandler)
 
 	// Workflow template endpoints
-	mux.HandleFunc("/api/orchestration/templates", s.orchestrationHandler.TemplatesHandler)
-	mux.HandleFunc("/api/orchestration/templates/instantiate", s.orchestrationHandler.InstantiateTemplateHandler)
+	mux.HandleFunc("/api/orchestration/templates", s.Handlers.Orchestration.TemplatesHandler)
+	mux.HandleFunc("/api/orchestration/templates/instantiate", s.Handlers.Orchestration.InstantiateTemplateHandler)
 
 	// =============================================================================
 	// Custom Workflow API Endpoints
 	// =============================================================================
 	// List workflows or create new workflow
-	mux.HandleFunc("/api/workflows", s.workflowHandler.WorkflowsHandler)
+	mux.HandleFunc("/api/workflows", s.Handlers.Workflow.WorkflowsHandler)
 	// Get, delete specific workflow, or check agents
-	mux.HandleFunc("/api/workflows/", s.workflowHandler.WorkflowHandler)
+	mux.HandleFunc("/api/workflows/", s.Handlers.Workflow.WorkflowHandler)
 
 	// Notification endpoints
-	mux.HandleFunc("/api/orchestration/notifications", s.orchestrationHandler.NotificationsHandler)
-	mux.HandleFunc("/api/orchestration/notifications/stream", s.orchestrationHandler.NotificationStreamHandler)
+	mux.HandleFunc("/api/orchestration/notifications", s.Handlers.Orchestration.NotificationsHandler)
+	mux.HandleFunc("/api/orchestration/notifications/stream", s.Handlers.Orchestration.NotificationStreamHandler)
 
 	// Event history endpoint
-	mux.HandleFunc("/api/orchestration/events", s.orchestrationHandler.EventHistoryHandler)
+	mux.HandleFunc("/api/orchestration/events", s.Handlers.Orchestration.EventHistoryHandler)
 
 	// Scheduled task endpoints
-	mux.HandleFunc("/api/orchestration/scheduled-tasks", s.orchestrationHandler.ScheduledTasksHandler)
-	mux.HandleFunc("/api/orchestration/scheduled-tasks/", s.orchestrationHandler.ScheduledTaskHandler)
+	mux.HandleFunc("/api/orchestration/scheduled-tasks", s.Handlers.Orchestration.ScheduledTasksHandler)
+	mux.HandleFunc("/api/orchestration/scheduled-tasks/", s.Handlers.Orchestration.ScheduledTaskHandler)
 
 	// Scheduler node endpoints (canvas-based scheduled tasks)
 	mux.HandleFunc("/api/orchestration/workspaces/", func(w http.ResponseWriter, r *http.Request) {
@@ -468,15 +468,15 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 				// Has node ID: /workspaces/{id}/scheduler-nodes/{node_id}
 				// Check for /trigger action
 				if len(parts) > schedulerNodesIndex+2 && parts[schedulerNodesIndex+2] == "trigger" {
-					s.orchestrationHandler.SchedulerNodeTriggerHandler(w, r)
+					s.Handlers.Orchestration.SchedulerNodeTriggerHandler(w, r)
 					return
 				}
 
 				// Regular node operations (GET/PUT/DELETE)
-				s.orchestrationHandler.SchedulerNodeHandler(w, r)
+				s.Handlers.Orchestration.SchedulerNodeHandler(w, r)
 			} else {
 				// No node ID: /workspaces/{id}/scheduler-nodes (list/create)
-				s.orchestrationHandler.SchedulerNodesHandler(w, r)
+				s.Handlers.Orchestration.SchedulerNodesHandler(w, r)
 			}
 			return
 		}
@@ -488,172 +488,172 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 	// =============================================================================
 	// Session Management Endpoints (including Session Files)
 	// =============================================================================
-	if s.sessionHandler != nil {
+	if s.Handlers.Session != nil {
 		// Cleanup, stats, and bulk operations routes (must be registered before the wildcard routes)
-		mux.HandleFunc("/api/sessions/cleanup", s.sessionHandler.HandleCleanup)
-		mux.HandleFunc("/api/sessions/stats", s.sessionHandler.HandleStorageStats)
-		mux.HandleFunc("/api/sessions/bulk", s.sessionHandler.HandleBulkDeleteSessions)
+		mux.HandleFunc("/api/sessions/cleanup", s.Handlers.Session.HandleCleanup)
+		mux.HandleFunc("/api/sessions/stats", s.Handlers.Session.HandleStorageStats)
+		mux.HandleFunc("/api/sessions/bulk", s.Handlers.Session.HandleBulkDeleteSessions)
 
 		// Auto-classify route (must be registered before the wildcard routes)
-		if s.autoClassifyHandler != nil {
-			mux.HandleFunc("/api/sessions/auto-classify", s.autoClassifyHandler.HandleAutoClassify)
+		if s.Handlers.AutoClassify != nil {
+			mux.HandleFunc("/api/sessions/auto-classify", s.Handlers.AutoClassify.HandleAutoClassify)
 		}
 
-		if s.smartInputHandler != nil {
-			mux.HandleFunc("/api/smart-input/classify", s.smartInputHandler.HandleClassify)
-			mux.HandleFunc("/api/smart-input/override", s.smartInputHandler.HandleOverride)
+		if s.Handlers.SmartInput != nil {
+			mux.HandleFunc("/api/smart-input/classify", s.Handlers.SmartInput.HandleClassify)
+			mux.HandleFunc("/api/smart-input/override", s.Handlers.SmartInput.HandleOverride)
 		}
 
 		mux.HandleFunc("/api/sessions/", func(w http.ResponseWriter, r *http.Request) {
 			path := r.URL.Path
 
 			// Session files routes (check if files handler is available)
-			if s.sessionFilesHandler != nil {
+			if s.Handlers.SessionFiles != nil {
 				if strings.Contains(path, "/files/upload") && r.Method == http.MethodPost {
-					s.sessionFilesHandler.UploadFile(w, r)
+					s.Handlers.SessionFiles.UploadFile(w, r)
 					return
 				}
 				if strings.Contains(path, "/files/link") && r.Method == http.MethodPost {
-					s.sessionFilesHandler.LinkFile(w, r)
+					s.Handlers.SessionFiles.LinkFile(w, r)
 					return
 				}
 				if strings.Contains(path, "/files/validate") && r.Method == http.MethodPost {
-					s.sessionFilesHandler.ValidateLinks(w, r)
+					s.Handlers.SessionFiles.ValidateLinks(w, r)
 					return
 				}
 				if strings.Contains(path, "/files/events") && r.Method == http.MethodGet {
-					s.sessionFilesHandler.FileEvents(w, r)
+					s.Handlers.SessionFiles.FileEvents(w, r)
 					return
 				}
 				if strings.Contains(path, "/files/watch") {
 					switch r.Method {
 					case http.MethodPost:
-						s.sessionFilesHandler.StartWatching(w, r)
+						s.Handlers.SessionFiles.StartWatching(w, r)
 					case http.MethodDelete:
-						s.sessionFilesHandler.StopWatching(w, r)
+						s.Handlers.SessionFiles.StopWatching(w, r)
 					}
 					return
 				}
 				if strings.Contains(path, "/folder/open") && r.Method == http.MethodPost {
-					s.sessionFilesHandler.OpenFolder(w, r)
+					s.Handlers.SessionFiles.OpenFolder(w, r)
 					return
 				}
 
 				// File-specific routes (with file ID)
 				if strings.Contains(path, "/files/") {
 					if strings.HasSuffix(path, "/download") {
-						s.sessionFilesHandler.DownloadFile(w, r)
+						s.Handlers.SessionFiles.DownloadFile(w, r)
 						return
 					}
 					if strings.HasSuffix(path, "/relink") && r.Method == http.MethodPost {
-						s.sessionFilesHandler.RelinkFile(w, r)
+						s.Handlers.SessionFiles.RelinkFile(w, r)
 						return
 					}
 					if r.Method == http.MethodDelete {
-						s.sessionFilesHandler.DeleteFile(w, r)
+						s.Handlers.SessionFiles.DeleteFile(w, r)
 						return
 					}
 					if r.Method == http.MethodGet {
-						s.sessionFilesHandler.GetFile(w, r)
+						s.Handlers.SessionFiles.GetFile(w, r)
 						return
 					}
 				}
 
 				// List files route
 				if strings.HasSuffix(path, "/files") && r.Method == http.MethodGet {
-					s.sessionFilesHandler.ListFiles(w, r)
+					s.Handlers.SessionFiles.ListFiles(w, r)
 					return
 				}
 			}
 
 			// Fall through to session handler
-			s.sessionHandler.HandleSessions(w, r)
+			s.Handlers.Session.HandleSessions(w, r)
 		})
-		mux.HandleFunc("/api/sessions", s.sessionHandler.HandleSessions)
+		mux.HandleFunc("/api/sessions", s.Handlers.Session.HandleSessions)
 
 		// Notes search and bulk operations must be before the wildcard /api/notes/
-		mux.HandleFunc("/api/notes/search", s.sessionHandler.HandleNotes)
-		mux.HandleFunc("/api/notes/bulk", s.sessionHandler.HandleBulkDeleteNotes)
+		mux.HandleFunc("/api/notes/search", s.Handlers.Session.HandleNotes)
+		mux.HandleFunc("/api/notes/bulk", s.Handlers.Session.HandleBulkDeleteNotes)
 		// Note AI generation endpoint
-		if s.noteHandler != nil {
-			mux.HandleFunc("/api/notes/generate", s.noteHandler.GenerateHandler)
+		if s.Handlers.Note != nil {
+			mux.HandleFunc("/api/notes/generate", s.Handlers.Note.GenerateHandler)
 		}
-		mux.HandleFunc("/api/notes/", s.sessionHandler.HandleNotes)
-		mux.HandleFunc("/api/notes", s.sessionHandler.HandleNotes)
+		mux.HandleFunc("/api/notes/", s.Handlers.Session.HandleNotes)
+		mux.HandleFunc("/api/notes", s.Handlers.Session.HandleNotes)
 
 		// Legacy folder routes (redirect to workspace routes)
 		mux.HandleFunc("/api/folders/", func(w http.ResponseWriter, r *http.Request) {
 			path := r.URL.Path
 			// Check if this is a workspace notes request
 			if strings.Contains(path, "/notes") {
-				s.sessionHandler.HandleWorkspaceNotes(w, r)
+				s.Handlers.Session.HandleWorkspaceNotes(w, r)
 				return
 			}
 			// Otherwise, handle as regular workspace request
-			s.sessionHandler.HandleWorkspaces(w, r)
+			s.Handlers.Session.HandleWorkspaces(w, r)
 		})
-		mux.HandleFunc("/api/folders", s.sessionHandler.HandleWorkspaces)
+		mux.HandleFunc("/api/folders", s.Handlers.Session.HandleWorkspaces)
 
 		// Workspace routes (unified workspace API)
 		mux.HandleFunc("/api/workspaces/", func(w http.ResponseWriter, r *http.Request) {
 			path := r.URL.Path
 			// Check if this is a workspace notes request
 			if strings.Contains(path, "/notes") {
-				s.sessionHandler.HandleWorkspaceNotes(w, r)
+				s.Handlers.Session.HandleWorkspaceNotes(w, r)
 				return
 			}
 			// Handle agent management (POST /api/workspaces/{id}/agents, DELETE /api/workspaces/{id}/agents/{name})
 			if strings.Contains(path, "/agents") {
-				s.sessionHandler.HandleWorkspaces(w, r)
+				s.Handlers.Session.HandleWorkspaces(w, r)
 				return
 			}
 			// Handle layout management (GET/PUT /api/workspaces/{id}/layout)
 			if strings.Contains(path, "/layout") {
-				s.sessionHandler.HandleWorkspaces(w, r)
+				s.Handlers.Session.HandleWorkspaces(w, r)
 				return
 			}
 			// Otherwise, handle as regular workspace request
-			s.sessionHandler.HandleWorkspaces(w, r)
+			s.Handlers.Session.HandleWorkspaces(w, r)
 		})
-		mux.HandleFunc("/api/workspaces", s.sessionHandler.HandleWorkspaces)
+		mux.HandleFunc("/api/workspaces", s.Handlers.Session.HandleWorkspaces)
 
-		mux.HandleFunc("/api/tags", s.sessionHandler.HandleTags)
-		mux.HandleFunc("/api/session-cache/stats", s.sessionHandler.HandleCacheStats)
+		mux.HandleFunc("/api/tags", s.Handlers.Session.HandleTags)
+		mux.HandleFunc("/api/session-cache/stats", s.Handlers.Session.HandleCacheStats)
 	}
 
 	// =============================================================================
 	// Review System API Endpoints
 	// =============================================================================
-	if s.reviewHandler != nil {
-		mux.HandleFunc("/api/review/trigger", s.reviewHandler.HandleTrigger)
-		mux.HandleFunc("/api/review/status/", s.reviewHandler.HandleStatus)
-		mux.HandleFunc("/api/review/issues", s.reviewHandler.HandleIssues)
-		mux.HandleFunc("/api/review/export", s.reviewHandler.HandleExport)
-		mux.HandleFunc("/api/review/runs", s.reviewHandler.HandleRuns)
+	if s.Handlers.Review != nil {
+		mux.HandleFunc("/api/review/trigger", s.Handlers.Review.HandleTrigger)
+		mux.HandleFunc("/api/review/status/", s.Handlers.Review.HandleStatus)
+		mux.HandleFunc("/api/review/issues", s.Handlers.Review.HandleIssues)
+		mux.HandleFunc("/api/review/export", s.Handlers.Review.HandleExport)
+		mux.HandleFunc("/api/review/runs", s.Handlers.Review.HandleRuns)
 	}
 
 	// =============================================================================
 	// External Agents (Claude Code, Codex) Endpoints
 	// =============================================================================
-	if s.externalAgentsHandler != nil {
-		mux.HandleFunc("/api/external-agents", s.externalAgentsHandler.GetAll)
-		mux.HandleFunc("/api/external-agents/claude", s.externalAgentsHandler.GetClaude)
-		mux.HandleFunc("/api/external-agents/codex", s.externalAgentsHandler.GetCodex)
-		mux.HandleFunc("/api/external-agents/refresh", s.externalAgentsHandler.Refresh)
+	if s.Handlers.ExternalAgents != nil {
+		mux.HandleFunc("/api/external-agents", s.Handlers.ExternalAgents.GetAll)
+		mux.HandleFunc("/api/external-agents/claude", s.Handlers.ExternalAgents.GetClaude)
+		mux.HandleFunc("/api/external-agents/codex", s.Handlers.ExternalAgents.GetCodex)
+		mux.HandleFunc("/api/external-agents/refresh", s.Handlers.ExternalAgents.Refresh)
 	}
 
 	// =============================================================================
 	// Skills Endpoints
 	// =============================================================================
-	if s.skillsHandler != nil {
-		mux.HandleFunc("/api/skills", s.skillsHandler.List)
-		mux.HandleFunc("/api/skills/", s.skillsHandler.Get)
+	if s.Handlers.Skills != nil {
+		mux.HandleFunc("/api/skills", s.Handlers.Skills.List)
+		mux.HandleFunc("/api/skills/", s.Handlers.Skills.Get)
 	}
 
 	// =============================================================================
 	// Folder Picker Launcher
 	// =============================================================================
-	mux.HandleFunc("/api/launch-folder-picker", s.studioHandler.LaunchFolderPicker)
+	mux.HandleFunc("/api/launch-folder-picker", s.Handlers.Studio.LaunchFolderPicker)
 
 	// =============================================================================
 	// Agent Studio API Endpoints
@@ -661,9 +661,9 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 	mux.HandleFunc("/api/studios", func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
 		case http.MethodPost:
-			s.studioHandler.CreateStudio(w, r)
+			s.Handlers.Studio.CreateStudio(w, r)
 		case http.MethodGet:
-			s.studioHandler.ListStudios(w, r)
+			s.Handlers.Studio.ListStudios(w, r)
 		default:
 			orihttp.MethodNotAllowed(w)
 			// Handle routes with studio ID
@@ -673,45 +673,45 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 	mux.HandleFunc("/api/studios/", func(w http.ResponseWriter, r *http.Request) {
 		// Parse the path to determine which handler to use
 		if strings.HasSuffix(r.URL.Path, "/events") {
-			s.studioHandler.GetStudioEvents(w, r)
+			s.Handlers.Studio.GetStudioEvents(w, r)
 		} else if strings.Contains(r.URL.Path, "/tasks") {
 			// Handle task operations
 			if strings.HasSuffix(r.URL.Path, "/execute") && r.Method == http.MethodPost {
-				s.studioHandler.ExecuteTaskManually(w, r)
+				s.Handlers.Studio.ExecuteTaskManually(w, r)
 			} else if r.Method == http.MethodPost {
-				s.studioHandler.CreateTask(w, r)
+				s.Handlers.Studio.CreateTask(w, r)
 			} else if r.Method == http.MethodPatch {
-				s.studioHandler.UpdateTask(w, r)
+				s.Handlers.Studio.UpdateTask(w, r)
 			} else if r.Method == http.MethodDelete {
-				s.studioHandler.DeleteTask(w, r)
+				s.Handlers.Studio.DeleteTask(w, r)
 			} else {
 				orihttp.MethodNotAllowed(w)
 			}
 		} else if strings.Contains(r.URL.Path, "/trash") {
 			// Handle trash operations
 			if strings.HasSuffix(r.URL.Path, "/trash") && r.Method == http.MethodGet {
-				s.studioHandler.ListTrash(w, r)
+				s.Handlers.Studio.ListTrash(w, r)
 			} else if r.Method == http.MethodDelete {
-				s.studioHandler.EmptyTrash(w, r)
+				s.Handlers.Studio.EmptyTrash(w, r)
 			} else {
 				orihttp.MethodNotAllowed(w)
 			}
 		} else if strings.Contains(r.URL.Path, "/attachments") {
 			// Handle attachment trash operations
 			if strings.HasSuffix(r.URL.Path, "/trash") && r.Method == http.MethodPatch {
-				s.studioHandler.MoveToTrash(w, r)
+				s.Handlers.Studio.MoveToTrash(w, r)
 			} else if strings.HasSuffix(r.URL.Path, "/restore") && r.Method == http.MethodPatch {
-				s.studioHandler.RestoreFromTrash(w, r)
+				s.Handlers.Studio.RestoreFromTrash(w, r)
 			} else if strings.HasSuffix(r.URL.Path, "/bulk-trash") && r.Method == http.MethodPost {
-				s.studioHandler.BulkMoveToTrash(w, r)
+				s.Handlers.Studio.BulkMoveToTrash(w, r)
 			} else {
 				switch r.Method {
 				case http.MethodPost:
-					s.studioHandler.CreateAttachment(w, r)
+					s.Handlers.Studio.CreateAttachment(w, r)
 				case http.MethodPatch:
-					s.studioHandler.UpdateAttachment(w, r)
+					s.Handlers.Studio.UpdateAttachment(w, r)
 				case http.MethodDelete:
-					s.studioHandler.DeleteAttachment(w, r)
+					s.Handlers.Studio.DeleteAttachment(w, r)
 				default:
 					orihttp.MethodNotAllowed(w)
 				}
@@ -720,30 +720,30 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 		} else if strings.Contains(r.URL.Path, "/canvas/store-nodes") {
 
 			if strings.HasSuffix(r.URL.Path, "/status") && r.Method == http.MethodGet {
-				s.studioHandler.GetStoreNodeStatus(w, r)
+				s.Handlers.Studio.GetStoreNodeStatus(w, r)
 			} else if r.Method == http.MethodPost {
-				s.studioHandler.CreateStoreNode(w, r)
+				s.Handlers.Studio.CreateStoreNode(w, r)
 			} else if r.Method == http.MethodGet {
-				s.studioHandler.GetStoreNodes(w, r)
+				s.Handlers.Studio.GetStoreNodes(w, r)
 			} else if r.Method == http.MethodPatch {
-				s.studioHandler.UpdateStoreNode(w, r)
+				s.Handlers.Studio.UpdateStoreNode(w, r)
 			} else if r.Method == http.MethodDelete {
-				s.studioHandler.DeleteStoreNode(w, r)
+				s.Handlers.Studio.DeleteStoreNode(w, r)
 			} else {
 				orihttp.MethodNotAllowed(w)
 			}
 		} else if strings.Contains(r.URL.Path, "/store-nodes") {
 
 			if strings.HasSuffix(r.URL.Path, "/status") && r.Method == http.MethodGet {
-				s.studioHandler.GetStoreNodeStatus(w, r)
+				s.Handlers.Studio.GetStoreNodeStatus(w, r)
 			} else if r.Method == http.MethodPost {
-				s.studioHandler.CreateStoreNode(w, r)
+				s.Handlers.Studio.CreateStoreNode(w, r)
 			} else if r.Method == http.MethodGet {
-				s.studioHandler.GetStoreNodes(w, r)
+				s.Handlers.Studio.GetStoreNodes(w, r)
 			} else if r.Method == http.MethodPut || r.Method == http.MethodPatch {
-				s.studioHandler.UpdateStoreNode(w, r)
+				s.Handlers.Studio.UpdateStoreNode(w, r)
 			} else if r.Method == http.MethodDelete {
-				s.studioHandler.DeleteStoreNode(w, r)
+				s.Handlers.Studio.DeleteStoreNode(w, r)
 			} else {
 				orihttp.MethodNotAllowed(w)
 			}
@@ -751,16 +751,16 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 		} else if strings.Contains(r.URL.Path, "/directories") {
 			// Check for /files/ path to read file content
 			if strings.Contains(r.URL.Path, "/files/") {
-				s.studioHandler.ReadDirectoryFile(w, r)
+				s.Handlers.Studio.ReadDirectoryFile(w, r)
 			} else if strings.HasSuffix(r.URL.Path, "/files") && r.Method == http.MethodGet {
-				s.studioHandler.ListDirectoryFiles(w, r)
+				s.Handlers.Studio.ListDirectoryFiles(w, r)
 			} else if strings.HasSuffix(r.URL.Path, "/directories") {
 				// /api/studios/:id/directories
 				switch r.Method {
 				case http.MethodPost:
-					s.studioHandler.CreateDirectory(w, r)
+					s.Handlers.Studio.CreateDirectory(w, r)
 				case http.MethodGet:
-					s.studioHandler.ListDirectories(w, r)
+					s.Handlers.Studio.ListDirectories(w, r)
 				default:
 					orihttp.MethodNotAllowed(w)
 				}
@@ -768,11 +768,11 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 				// /api/studios/:id/directories/:dir_id
 				switch r.Method {
 				case http.MethodGet:
-					s.studioHandler.GetDirectory(w, r)
+					s.Handlers.Studio.GetDirectory(w, r)
 				case http.MethodPut, http.MethodPatch:
-					s.studioHandler.UpdateDirectory(w, r)
+					s.Handlers.Studio.UpdateDirectory(w, r)
 				case http.MethodDelete:
-					s.studioHandler.DeleteDirectory(w, r)
+					s.Handlers.Studio.DeleteDirectory(w, r)
 				default:
 					orihttp.MethodNotAllowed(w)
 				}
@@ -782,14 +782,14 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 
 			switch r.Method {
 			case http.MethodPost:
-				s.studioHandler.AddAgent(w, r)
+				s.Handlers.Studio.AddAgent(w, r)
 			case http.MethodDelete:
-				s.studioHandler.RemoveAgent(w, r)
+				s.Handlers.Studio.RemoveAgent(w, r)
 			default:
 				orihttp.MethodNotAllowed(w)
 			}
 		} else {
-			s.studioHandler.GetStudio(w, r)
+			s.Handlers.Studio.GetStudio(w, r)
 		}
 	})
 }
@@ -800,28 +800,28 @@ func (s *Server) routePluginRequest(w http.ResponseWriter, r *http.Request) {
 
 	// Exact path matches
 	if path == "/api/plugins/all-pages" {
-		s.webPageHandler.ListAllPages(w, r)
+		s.Handlers.WebPage.ListAllPages(w, r)
 		return
 	}
 
 	// Notification dismiss has special pattern: /notifications/{id}/dismiss
 	if strings.Contains(path, "/notifications/") && strings.HasSuffix(path, "/dismiss") {
-		s.notificationsHandler.HandleDismissNotification(w, r)
+		s.Handlers.Notifications.HandleDismissNotification(w, r)
 		return
 	}
 
 	// Suffix-based routing for plugin-specific endpoints
 	suffixHandlers := map[string]http.HandlerFunc{
-		"/pages":            s.webPageHandler.ListPages,
-		"/health":           s.healthHandler.HandlePluginHealth,
-		"/enable":           s.pluginsPageHandler.HandleEnablePlugin,
-		"/disable":          s.pluginsPageHandler.HandleDisablePlugin,
-		"/update":           s.pluginUpdateHandler.HandleUpdatePlugin,
-		"/default-settings": s.pluginInitHandler.PluginInitHandler,
-		"/test":             s.pluginsPageHandler.HandleTestPlugin,
-		"/logs":             s.pluginsPageHandler.HandleGetPluginLogs,
-		"/reload":           s.pluginsPageHandler.HandleReloadPlugin,
-		"/agents":           s.pluginsPageHandler.HandleGetPluginAgents,
+		"/pages":            s.Handlers.WebPage.ListPages,
+		"/health":           s.Handlers.Health.HandlePluginHealth,
+		"/enable":           s.Handlers.PluginsPage.HandleEnablePlugin,
+		"/disable":          s.Handlers.PluginsPage.HandleDisablePlugin,
+		"/update":           s.Handlers.PluginUpdate.HandleUpdatePlugin,
+		"/default-settings": s.Handlers.PluginInit.PluginInitHandler,
+		"/test":             s.Handlers.PluginsPage.HandleTestPlugin,
+		"/logs":             s.Handlers.PluginsPage.HandleGetPluginLogs,
+		"/reload":           s.Handlers.PluginsPage.HandleReloadPlugin,
+		"/agents":           s.Handlers.PluginsPage.HandleGetPluginAgents,
 	}
 
 	for suffix, handler := range suffixHandlers {
@@ -834,9 +834,9 @@ func (s *Server) routePluginRequest(w http.ResponseWriter, r *http.Request) {
 	// Config endpoint has method-specific handling
 	if strings.HasSuffix(path, "/config") {
 		if r.Method == http.MethodPut {
-			s.pluginsPageHandler.HandleUpdatePluginConfig(w, r)
+			s.Handlers.PluginsPage.HandleUpdatePluginConfig(w, r)
 		} else {
-			s.pluginInitHandler.PluginInitHandler(w, r)
+			s.Handlers.PluginInit.PluginInitHandler(w, r)
 		}
 		return
 	}
@@ -844,16 +844,16 @@ func (s *Server) routePluginRequest(w http.ResponseWriter, r *http.Request) {
 	// Permissions endpoint has sub-route
 	if strings.Contains(path, "/permissions") {
 		if strings.HasSuffix(path, "/approve") {
-			s.permissionsHandler.HandleApprovePermissions(w, r)
+			s.Handlers.Permissions.HandleApprovePermissions(w, r)
 		} else {
-			s.permissionsHandler.HandleGetPermissions(w, r)
+			s.Handlers.Permissions.HandleGetPermissions(w, r)
 		}
 		return
 	}
 
 	// DELETE method routes to delete handler
 	if r.Method == http.MethodDelete {
-		s.pluginsPageHandler.HandleDeletePlugin(w, r)
+		s.Handlers.PluginsPage.HandleDeletePlugin(w, r)
 		return
 	}
 
@@ -862,14 +862,14 @@ func (s *Server) routePluginRequest(w http.ResponseWriter, r *http.Request) {
 		pathAfterPlugins := strings.TrimPrefix(path, "/api/plugins/")
 		if strings.Contains(pathAfterPlugins, "/") {
 			// Has sub-path, try serving as web page
-			s.webPageHandler.ServeHTTP(w, r)
+			s.Handlers.WebPage.ServeHTTP(w, r)
 			return
 		}
 		// No sub-path, serve plugin details
-		s.pluginsPageHandler.HandleGetPluginDetails(w, r)
+		s.Handlers.PluginsPage.HandleGetPluginDetails(w, r)
 		return
 	}
 
 	// Default: delegate to init handler
-	s.pluginInitHandler.PluginInitHandler(w, r)
+	s.Handlers.PluginInit.PluginInitHandler(w, r)
 }
