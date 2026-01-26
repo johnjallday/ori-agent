@@ -81,9 +81,8 @@ jobs:
 
       - name: Build macOS binaries
         run: |
-          # Build both server and menubar binaries in the same dist directory
-          goreleaser build --clean --skip=before --id=server-macos
-          goreleaser build --skip=before --id=menubar
+          # Build both server and menubar binaries in a single goreleaser run
+          goreleaser build --clean --skip=before --id=server-macos --id=menubar
 
       - name: Create macOS DMG installers
         run: |
