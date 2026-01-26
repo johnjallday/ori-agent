@@ -338,6 +338,17 @@
         const workspaceId = card.dataset.workspaceId;
         const isSelectMode = card.dataset.selectMode === '1';
 
+        // Cmd/Ctrl+click for quick multi-select (even outside selection mode)
+        if (e.metaKey || e.ctrlKey) {
+          e.preventDefault();
+          // Auto-enable selection mode if not already enabled
+          if (!window.WorkspaceHubState.getState().launcherSelectionMode) {
+            setLauncherSelectionMode(true);
+          }
+          toggleLauncherWorkspaceSelection(workspaceId);
+          return;
+        }
+
         if (isSelectMode) {
           e.preventDefault();
           toggleLauncherWorkspaceSelection(workspaceId);
@@ -1544,6 +1555,33 @@
 
   // Initialize
   bindEvents();
+
+  // Keyboard shortcuts for workspace selection
+  document.addEventListener('keydown', (e) => {
+    // Cmd/Ctrl+G to group selected workspaces
+    if ((e.metaKey || e.ctrlKey) && e.key === 'g') {
+      const state = window.WorkspaceHubState.getState();
+      if (state.launcherSelectionMode && state.selectedWorkspaces && state.selectedWorkspaces.size > 0) {
+        e.preventDefault();
+        // Open group modal
+        if (elements.launcherGroupModal && typeof bootstrap !== 'undefined' && bootstrap.Modal) {
+          const modal = bootstrap.Modal.getInstance(elements.launcherGroupModal) || new bootstrap.Modal(elements.launcherGroupModal);
+          if (elements.launcherGroupNameInput) elements.launcherGroupNameInput.value = '';
+          if (elements.launcherGroupDescriptionInput) elements.launcherGroupDescriptionInput.value = '';
+          modal.show();
+        }
+      }
+    }
+
+    // Escape to exit selection mode
+    if (e.key === 'Escape') {
+      const state = window.WorkspaceHubState.getState();
+      if (state.launcherSelectionMode) {
+        e.preventDefault();
+        setLauncherSelectionMode(false);
+      }
+    }
+  });
 
   window.WorkspaceHub = window.WorkspaceHub || {};
   window.WorkspaceHub.loadWorkspaces = loadWorkspaces;
