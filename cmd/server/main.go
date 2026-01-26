@@ -37,6 +37,7 @@ func main() {
 	versionOverride := flag.String("version", "", "Override version for testing (e.g., v0.0.24)")
 	multiAgentMode := flag.String("multi-agent-mode", "", "Multi-agent default mode: auto, force, off")
 	multiAgentThreshold := flag.Float64("multi-agent-threshold", 0, "Multi-agent complexity threshold (0-10)")
+	shutdownTimeout := flag.Duration("shutdown-timeout", 30*time.Second, "Graceful shutdown timeout (e.g., 30s, 1m)")
 	flag.Parse()
 
 	// Check for version as positional argument (e.g., go run ./cmd/server v0.0.24)
@@ -137,7 +138,7 @@ func main() {
 	srv.Shutdown()
 
 	// Graceful HTTP shutdown with timeout
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), *shutdownTimeout)
 	defer cancel()
 	if err := httpServer.Shutdown(ctx); err != nil {
 		logger.Error("HTTP server shutdown error", logger.Fields{"error": err.Error()})
