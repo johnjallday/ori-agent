@@ -141,7 +141,13 @@ func main() {
 	ctx, cancel := context.WithTimeout(context.Background(), *shutdownTimeout)
 	defer cancel()
 	if err := httpServer.Shutdown(ctx); err != nil {
-		logger.Error("HTTP server shutdown error", logger.Fields{"error": err.Error()})
+		// Context deadline exceeded is expected when SSE/streaming connections are active
+		// The server still stops, connections are just closed forcefully
+		if err == context.DeadlineExceeded {
+			logger.Warn("HTTP server shutdown timeout (active streaming connections were closed forcefully)", nil)
+		} else {
+			logger.Error("HTTP server shutdown error", logger.Fields{"error": err.Error()})
+		}
 	}
 
 	logger.Info("Server stopped", nil)
