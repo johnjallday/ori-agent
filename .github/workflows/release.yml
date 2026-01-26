@@ -79,14 +79,11 @@ jobs:
           version: '~> v2'
           install-only: true
 
-      - name: Build macOS server binary
-        run: goreleaser build --clean --skip=before --id=server-macos
-
-      - name: Clean GoReleaser dist
-        run: rm -rf dist
-
-      - name: Build macOS menubar binary
-        run: goreleaser build --skip=before --id=menubar
+      - name: Build macOS binaries
+        run: |
+          # Build both server and menubar binaries in the same dist directory
+          goreleaser build --clean --skip=before --id=server-macos
+          goreleaser build --skip=before --id=menubar
 
       - name: Create macOS DMG installers
         run: |
