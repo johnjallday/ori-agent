@@ -182,8 +182,8 @@
       return `
         <div class="hub-board-column" data-column-id="${escapeHtml(col.id)}">
           <div class="hub-column-header">
-            <div class="hub-column-title">
-              <span>${escapeHtml(col.name || col.id)}</span>
+            <div class="hub-column-title" data-column-id="${escapeHtml(col.id)}" title="Double-click to rename">
+              <span class="hub-column-title-text">${escapeHtml(col.name || col.id)}</span>
             </div>
             <span class="hub-column-count">${tasks.length}</span>
           </div>
@@ -196,6 +196,7 @@
 
     elements.boardColumns.innerHTML = html;
     wireDragAndDrop();
+    wireColumnRename();
   }
 
   function renderCard(task, columnId) {
@@ -273,6 +274,84 @@
         if (!taskId || !columnId) return;
 
         await updateTaskKanbanColumn(taskId, columnId);
+      });
+    });
+  }
+
+  function wireColumnRename() {
+    const elements = getElements();
+    if (!elements.boardColumns) return;
+
+    elements.boardColumns.querySelectorAll('.hub-column-title').forEach((titleEl) => {
+      titleEl.addEventListener('dblclick', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+
+        const columnId = titleEl.dataset.columnId;
+        if (!columnId) return;
+
+        const textEl = titleEl.querySelector('.hub-column-title-text');
+        if (!textEl) return;
+
+        const currentName = textEl.textContent;
+
+        // Create input field
+        const input = document.createElement('input');
+        input.type = 'text';
+        input.className = 'hub-column-rename-input';
+        input.value = currentName;
+
+        // Replace text with input
+        textEl.style.display = 'none';
+        titleEl.appendChild(input);
+        input.focus();
+        input.select();
+
+        const finishRename = async () => {
+          const newName = input.value.trim();
+          input.remove();
+          textEl.style.display = '';
+
+          if (!newName || newName === currentName) return;
+
+          // Update the column name
+          const state = getState();
+          const workspaceId = state.selectedId;
+          if (!workspaceId) return;
+
+          const columns = (state.board.columns || []).map((col) => {
+            if (col.id === columnId) {
+              return { ...col, name: newName };
+            }
+            return col;
+          });
+
+          try {
+            const saved = await saveBoardConfig(workspaceId, {
+              version: state.board.config?.version || 1,
+              columns
+            });
+            state.board.config = saved;
+            state.board.columns = saved.columns;
+            textEl.textContent = newName;
+            if (window.Toast) window.Toast.success('Column renamed');
+          } catch (err) {
+            console.error('Failed to rename column:', err);
+            if (window.Toast) window.Toast.error('Failed to rename column');
+          }
+        };
+
+        input.addEventListener('blur', finishRename);
+        input.addEventListener('keydown', (evt) => {
+          if (evt.key === 'Enter') {
+            evt.preventDefault();
+            input.blur();
+          } else if (evt.key === 'Escape') {
+            evt.preventDefault();
+            input.value = currentName; // Reset to original
+            input.blur();
+          }
+        });
       });
     });
   }
