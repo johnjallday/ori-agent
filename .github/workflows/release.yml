@@ -82,6 +82,9 @@ jobs:
       - name: Build macOS server binary
         run: goreleaser build --clean --skip=before --id=server-macos
 
+      - name: Clean GoReleaser dist
+        run: rm -rf dist
+
       - name: Build macOS menubar binary
         run: goreleaser build --skip=before --id=menubar
 
