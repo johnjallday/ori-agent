@@ -922,6 +922,124 @@
   }
 
   /**
+   * Update workspace via API
+   * @param {string} workspaceId - Workspace ID
+   * @param {Object} updates - Fields to update (name, description, etc.)
+   */
+  async function updateWorkspace(workspaceId, updates) {
+    const response = await fetch(`/api/workspaces/${encodeURIComponent(workspaceId)}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(updates)
+    });
+    if (!response.ok) {
+      const text = await response.text();
+      throw new Error(text || 'Failed to update workspace');
+    }
+    return response.json();
+  }
+
+  /**
+   * Create inline editable element
+   * @param {HTMLElement} element - The element to make editable
+   * @param {string} field - Field name ('name' or 'description')
+   * @param {boolean} isMultiline - Whether to use textarea
+   */
+  function makeEditable(element, field, isMultiline = false) {
+    if (!element) return;
+
+    element.classList.add('is-editable');
+    element.title = 'Double-click to edit';
+
+    element.addEventListener('dblclick', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+
+      const state = window.WorkspaceHubState.getState();
+      if (!state.selectedId) return;
+
+      // Get actual value from workspace, not display text (which may be placeholder)
+      const workspace = state.workspaceMap.get(state.selectedId);
+      const currentValue = workspace ? (workspace[field] || '') : '';
+
+      // Create input/textarea
+      const input = document.createElement(isMultiline ? 'textarea' : 'input');
+      input.className = 'hub-inline-edit-input';
+      input.value = currentValue;
+      if (!isMultiline) {
+        input.type = 'text';
+      } else {
+        input.rows = 2;
+      }
+
+      // Store original display
+      const originalDisplay = element.style.display;
+
+      // Hide text, show input
+      element.style.display = 'none';
+      element.parentNode.insertBefore(input, element.nextSibling);
+      input.focus();
+      input.select();
+
+      const finishEdit = async (save) => {
+        const newValue = input.value.trim();
+        input.remove();
+        element.style.display = originalDisplay || '';
+
+        if (!save || newValue === currentValue) return;
+
+        // For name, don't allow empty
+        if (field === 'name' && !newValue) {
+          if (window.Toast) window.Toast.error('Name cannot be empty');
+          return;
+        }
+
+        try {
+          await updateWorkspace(state.selectedId, { [field]: newValue });
+
+          // Update state
+          const workspace = state.workspaceMap.get(state.selectedId);
+          if (workspace) {
+            workspace[field] = newValue;
+          }
+
+          // Update element text and opacity
+          if (field === 'description' && elements.workspaceDescription) {
+            if (newValue) {
+              element.textContent = newValue;
+              elements.workspaceDescription.style.opacity = '1';
+            } else {
+              element.textContent = 'No description - double-click to add';
+              elements.workspaceDescription.style.opacity = '0.6';
+            }
+          } else {
+            element.textContent = newValue || 'Workspace';
+          }
+
+          if (window.Toast) window.Toast.success(`${field === 'name' ? 'Name' : 'Description'} updated`);
+        } catch (err) {
+          console.error(`Failed to update ${field}:`, err);
+          if (window.Toast) window.Toast.error(`Failed to update ${field}`);
+        }
+      };
+
+      input.addEventListener('blur', () => finishEdit(true));
+      input.addEventListener('keydown', (evt) => {
+        if (evt.key === 'Enter' && !isMultiline) {
+          evt.preventDefault();
+          input.blur();
+        } else if (evt.key === 'Enter' && isMultiline && evt.ctrlKey) {
+          evt.preventDefault();
+          input.blur();
+        } else if (evt.key === 'Escape') {
+          evt.preventDefault();
+          finishEdit(false);
+        }
+      });
+    });
+  }
+
+  /**
    * Render workspace summary header
    * @param {Object} workspace - Workspace object
    */
@@ -936,8 +1054,11 @@
       if (workspace.description) {
         elements.workspaceDescription.textContent = workspace.description;
         elements.workspaceDescription.style.display = 'block';
+        elements.workspaceDescription.style.opacity = '1';
       } else {
-        elements.workspaceDescription.style.display = 'none';
+        elements.workspaceDescription.textContent = 'No description - double-click to add';
+        elements.workspaceDescription.style.display = 'block';
+        elements.workspaceDescription.style.opacity = '0.6';
       }
     }
 
@@ -1542,6 +1663,10 @@
     window.WorkspaceHubModals.bindModalEvents();
     window.WorkspaceHubSmartInput.bindEvents();
     window.WorkspaceHubFiles.bindFileUploadEvents();
+
+    // Make workspace title and description editable
+    makeEditable(elements.headerTitle, 'name', false);
+    makeEditable(elements.workspaceDescription, 'description', true);
   }
 
   // Subscribe to global events

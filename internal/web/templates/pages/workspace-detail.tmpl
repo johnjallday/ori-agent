@@ -895,6 +895,50 @@
       font-size: 0.7rem;
       color: var(--text-secondary);
     }
+
+    /* Inline editable elements */
+    #workspace-name.is-editable,
+    #workspace-description.is-editable {
+      cursor: pointer;
+      border-radius: var(--radius-sm, 4px);
+      padding: 0.15rem 0.35rem;
+      margin-left: -0.35rem;
+      transition: background-color 0.15s ease;
+    }
+
+    #workspace-name.is-editable:hover,
+    #workspace-description.is-editable:hover {
+      background-color: rgba(255, 255, 255, 0.08);
+    }
+
+    .workspace-detail-inline-edit {
+      font-family: inherit;
+      color: var(--text-primary);
+      background: var(--bg-primary, #fff);
+      border: 1px solid var(--primary-color, #3b82f6);
+      border-radius: var(--radius-sm, 4px);
+      padding: 0.15rem 0.35rem;
+      outline: none;
+      width: 100%;
+      box-sizing: border-box;
+    }
+
+    .workspace-detail-inline-edit:focus {
+      box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.2);
+    }
+
+    /* Name input - match header title style */
+    input.workspace-detail-inline-edit {
+      font-size: 1.5rem;
+      font-weight: 600;
+    }
+
+    /* Description input - match description style */
+    textarea.workspace-detail-inline-edit {
+      font-size: 0.875rem;
+      resize: vertical;
+      min-height: 2.5em;
+    }
   </style>
 
   <!-- Core Libraries -->

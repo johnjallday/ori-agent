@@ -38,6 +38,54 @@
   line-height: 1.4;
 }
 
+/* Inline editable elements */
+.workspace-hub-header .hub-title-text.is-editable,
+.workspace-hub-header .hub-workspace-description.is-editable {
+  cursor: pointer;
+  border-radius: var(--radius-sm, 4px);
+  padding: 0.15rem 0.35rem;
+  margin-left: -0.35rem;
+  transition: background-color 0.15s ease;
+}
+
+.workspace-hub-header .hub-title-text.is-editable:hover,
+.workspace-hub-header .hub-workspace-description.is-editable:hover {
+  background-color: rgba(255, 255, 255, 0.08);
+}
+
+.hub-inline-edit-input {
+  font-family: inherit;
+  color: var(--text-primary);
+  background: var(--bg-primary, #fff);
+  border: 1px solid var(--primary-color, #3b82f6);
+  border-radius: var(--radius-sm, 4px);
+  padding: 0.15rem 0.35rem;
+  outline: none;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.hub-inline-edit-input:focus {
+  box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.2);
+}
+
+/* Title input - match header title style */
+.workspace-hub-header .hub-inline-edit-input[type="text"] {
+  font-size: 1.2rem;
+  font-weight: inherit;
+  margin: 0.15rem 0 0;
+}
+
+/* Description input - match description style */
+.workspace-hub-header textarea.hub-inline-edit-input {
+  font-size: 0.85rem;
+  font-style: italic;
+  max-width: 360px;
+  line-height: 1.4;
+  resize: vertical;
+  min-height: 2.5em;
+}
+
 .hub-header-main {
   display: flex;
   justify-content: space-between;

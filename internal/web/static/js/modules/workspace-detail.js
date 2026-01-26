@@ -310,6 +310,114 @@ export class WorkspaceDetailPage {
 
     // Schedule buttons
     this.elements.viewSchedulesBtn?.addEventListener('click', () => this.showSchedulesModal());
+
+    // Make workspace name and description editable
+    this.makeEditable(this.elements.workspaceName, 'name', false);
+    this.makeEditable(this.elements.workspaceDescription, 'description', true);
+  }
+
+  /**
+   * Update workspace via API
+   * @param {Object} updates - Fields to update (name, description, etc.)
+   */
+  async updateWorkspace(updates) {
+    const response = await fetch(`/api/workspaces/${encodeURIComponent(this.workspaceId)}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(updates)
+    });
+    if (!response.ok) {
+      const text = await response.text();
+      throw new Error(text || 'Failed to update workspace');
+    }
+    return response.json();
+  }
+
+  /**
+   * Create inline editable element
+   * @param {HTMLElement} element - The element to make editable
+   * @param {string} field - Field name ('name' or 'description')
+   * @param {boolean} isMultiline - Whether to use textarea
+   */
+  makeEditable(element, field, isMultiline = false) {
+    if (!element) return;
+
+    element.classList.add('is-editable');
+    element.title = 'Double-click to edit';
+
+    element.addEventListener('dblclick', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+
+      const currentValue = element.textContent || '';
+
+      // Create input/textarea
+      const input = document.createElement(isMultiline ? 'textarea' : 'input');
+      input.className = 'workspace-detail-inline-edit';
+      input.value = currentValue === 'No description' ? '' : currentValue;
+      if (!isMultiline) {
+        input.type = 'text';
+      } else {
+        input.rows = 2;
+      }
+
+      // Store original display
+      const originalDisplay = element.style.display;
+
+      // Hide text, show input
+      element.style.display = 'none';
+      element.parentNode.insertBefore(input, element.nextSibling);
+      input.focus();
+      input.select();
+
+      const finishEdit = async (save) => {
+        const newValue = input.value.trim();
+        input.remove();
+        element.style.display = originalDisplay || '';
+
+        if (!save || newValue === currentValue) return;
+
+        // For name, don't allow empty
+        if (field === 'name' && !newValue) {
+          if (window.Toast) window.Toast.error('Name cannot be empty');
+          return;
+        }
+
+        try {
+          await this.updateWorkspace({ [field]: newValue });
+          element.textContent = newValue || (field === 'description' ? 'No description' : 'Workspace');
+
+          // Update local workspace object
+          if (this.workspace) {
+            this.workspace[field] = newValue;
+          }
+
+          // Update breadcrumb if name changed
+          if (field === 'name' && this.elements.workspaceBreadcrumb) {
+            this.elements.workspaceBreadcrumb.textContent = newValue || 'Workspace';
+          }
+
+          if (window.Toast) window.Toast.success(`${field === 'name' ? 'Name' : 'Description'} updated`);
+        } catch (err) {
+          console.error(`Failed to update ${field}:`, err);
+          if (window.Toast) window.Toast.error(`Failed to update ${field}`);
+        }
+      };
+
+      input.addEventListener('blur', () => finishEdit(true));
+      input.addEventListener('keydown', (evt) => {
+        if (evt.key === 'Enter' && !isMultiline) {
+          evt.preventDefault();
+          input.blur();
+        } else if (evt.key === 'Enter' && isMultiline && evt.ctrlKey) {
+          evt.preventDefault();
+          input.blur();
+        } else if (evt.key === 'Escape') {
+          evt.preventDefault();
+          finishEdit(false);
+        }
+      });
+    });
   }
 
   /**
@@ -338,7 +446,13 @@ export class WorkspaceDetailPage {
       this.elements.workspaceName.textContent = this.workspace.name || 'Unnamed Workspace';
     }
     if (this.elements.workspaceDescription) {
-      this.elements.workspaceDescription.textContent = this.workspace.description || 'No description';
+      if (this.workspace.description) {
+        this.elements.workspaceDescription.textContent = this.workspace.description;
+        this.elements.workspaceDescription.style.opacity = '1';
+      } else {
+        this.elements.workspaceDescription.textContent = 'No description';
+        this.elements.workspaceDescription.style.opacity = '0.6';
+      }
     }
     if (this.elements.workspaceBreadcrumb) {
       this.elements.workspaceBreadcrumb.textContent = this.workspace.name || 'Workspace';
