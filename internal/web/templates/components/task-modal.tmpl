@@ -352,16 +352,30 @@
               <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" style="color: var(--text-secondary); opacity: 0.6;">
                 <path d="M14,2H6A2,2 0 0,0 4,4V20A2,2 0 0,0 6,22H18A2,2 0 0,0 20,20V8L14,2M13.5,16V19H10.5V16H8L12,12L16,16H13.5M13,9V3.5L18.5,9H13Z"/>
               </svg>
-              <span style="color: var(--text-secondary); font-size: 0.8rem;">Drop files or click to attach</span>
+              <span style="color: var(--text-secondary); font-size: 0.8rem;">Drop files or click to attach (max 100MB)</span>
             </div>
             <input type="file" id="taskModalFileInput" multiple style="display: none;">
           </div>
+          <button type="button" id="taskModalAddFilePathBtn" class="task-modal-btn task-modal-btn-directory" title="Add file path reference (no upload)">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
+              <path d="M13,9H18.5L13,3.5V9M6,2H14L20,8V20A2,2 0 0,1 18,22H6C4.89,22 4,21.1 4,20V4C4,2.89 4.89,2 6,2M6,20H15L18,20V13L13,8H6V20Z"/>
+            </svg>
+            <span>Path</span>
+          </button>
           <button type="button" id="taskModalAddDirectoryBtn" class="task-modal-btn task-modal-btn-directory" title="Add directory reference">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
               <path d="M10,4H4C2.89,4 2,4.89 2,6V18A2,2 0 0,0 4,20H20A2,2 0 0,0 22,18V8C22,6.89 21.1,6 20,6H12L10,4Z"/>
             </svg>
             <span>Directory</span>
           </button>
+        </div>
+        <!-- File path input (hidden by default) -->
+        <div id="taskModalFilePathInput" style="display: none; margin-top: 8px;">
+          <div style="display: flex; gap: 8px;">
+            <input type="text" id="taskModalFilePathText" class="task-modal-input" placeholder="/path/to/file.wav" style="flex: 1;">
+            <button type="button" id="taskModalAddFilePathConfirm" class="task-modal-btn task-modal-btn-save" style="padding: 6px 12px;">Add</button>
+            <button type="button" id="taskModalAddFilePathCancel" class="task-modal-btn task-modal-btn-cancel" style="padding: 6px 12px;">Cancel</button>
+          </div>
         </div>
         <div id="taskModalSelectedFiles" class="task-selected-files" style="display: none;"></div>
       </div>

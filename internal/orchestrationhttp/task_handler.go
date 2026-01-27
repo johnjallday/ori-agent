@@ -855,6 +855,12 @@ func (th *TaskHandler) TasksPathHandler(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
+	// Check if this is a /file-paths endpoint
+	if strings.HasSuffix(path, "/file-paths") {
+		th.handleFilePaths(w, r)
+		return
+	}
+
 	// Route based on method
 	switch r.Method {
 	case http.MethodGet:
@@ -1175,4 +1181,126 @@ func (th *TaskHandler) BulkDeleteTasksHandler(w http.ResponseWriter, r *http.Req
 		"failed_count":  failedCount,
 		"errors":        errors,
 	})
+}
+
+// FilePathsRequest represents a request to add/update file path references on a task
+type FilePathsRequest struct {
+	FilePaths []string `json:"file_paths"`
+}
+
+// handleFilePaths handles POST /api/orchestration/tasks/{id}/file-paths
+// Adds file path references to a task (paths to local files, no upload)
+func (th *TaskHandler) handleFilePaths(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	if r.Method != http.MethodPost {
+		orihttp.MethodNotAllowed(w)
+		return
+	}
+
+	// Extract task ID from URL path
+	pathParts := strings.Split(strings.TrimPrefix(r.URL.Path, "/api/orchestration/tasks/"), "/")
+	if len(pathParts) < 2 || pathParts[0] == "" {
+		orihttp.BadRequest(w, "task_id is required in URL path")
+		return
+	}
+	taskID := pathParts[0]
+
+	var req FilePathsRequest
+	if !orihttp.ParseJSONBody(w, r, &req) {
+		return
+	}
+
+	// Validate file paths exist
+	var validPaths []string
+	var invalidPaths []string
+	for _, p := range req.FilePaths {
+		// Clean and validate path
+		cleanPath := filepath.Clean(p)
+		if _, err := os.Stat(cleanPath); err != nil {
+			invalidPaths = append(invalidPaths, p)
+		} else {
+			validPaths = append(validPaths, cleanPath)
+		}
+	}
+
+	// Get task and workspace
+	task, ws, err := th.getTaskWithWorkspace(taskID)
+	if err != nil {
+		orihttp.RespondErrorWithErr(w, http.StatusNotFound, "Task not found", err)
+		return
+	}
+
+	// Find and update task
+	for i := range ws.Tasks {
+		if ws.Tasks[i].ID == taskID {
+			if ws.Tasks[i].Context == nil {
+				ws.Tasks[i].Context = map[string]interface{}{}
+			}
+
+			// Get existing file paths and merge with new ones
+			var existingPaths []string
+			if existing, ok := ws.Tasks[i].Context["file_paths"].([]interface{}); ok {
+				for _, ep := range existing {
+					if s, ok := ep.(string); ok {
+						existingPaths = append(existingPaths, s)
+					}
+				}
+			}
+
+			// Add new valid paths (avoid duplicates)
+			pathSet := make(map[string]bool)
+			for _, p := range existingPaths {
+				pathSet[p] = true
+			}
+			for _, p := range validPaths {
+				if !pathSet[p] {
+					existingPaths = append(existingPaths, p)
+					pathSet[p] = true
+				}
+			}
+
+			ws.Tasks[i].Context["file_paths"] = existingPaths
+			break
+		}
+	}
+
+	// Save workspace
+	if err := th.workspaceStore.Save(ws); err != nil {
+		logger.Error("Failed to save workspace", logger.Fields{"error": err})
+		orihttp.RespondErrorWithErr(w, http.StatusInternalServerError, "Failed to save file paths", err)
+		return
+	}
+
+	logger.Info("Added file paths to task", logger.Fields{
+		"task_id":       taskID,
+		"valid_count":   len(validPaths),
+		"invalid_count": len(invalidPaths),
+	})
+
+	// Publish event
+	if th.eventBus != nil {
+		th.eventBus.Publish(workspace.Event{
+			Type:        workspace.EventWorkspaceUpdated,
+			WorkspaceID: task.WorkspaceID,
+			Data: map[string]interface{}{
+				"task_id":    taskID,
+				"file_paths": validPaths,
+			},
+		})
+	}
+
+	response := map[string]interface{}{
+		"success":     true,
+		"task_id":     taskID,
+		"valid_paths": validPaths,
+	}
+
+	if len(invalidPaths) > 0 {
+		response["invalid_paths"] = invalidPaths
+		response["warning"] = fmt.Sprintf("%d path(s) could not be verified", len(invalidPaths))
+	}
+
+	w.WriteHeader(http.StatusOK)
+	orihttp.WriteJSON(w, response)
 }
