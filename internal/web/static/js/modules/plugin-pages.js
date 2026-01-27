@@ -50,7 +50,8 @@
         // Add plugin header
         if (pluginNames.length > 1) {
           const header = document.createElement('li');
-          header.innerHTML = `<h6 class="dropdown-header" style="color: var(--text-muted); font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.5px;">${formatPluginName(pluginName)}</h6>`;
+          const cleanName = stripVersionSuffix(pluginName);
+          header.innerHTML = `<h6 class="dropdown-header" style="color: var(--text-muted); font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.5px;">${formatPluginName(cleanName)}</h6>`;
           menu.appendChild(header);
         }
 
@@ -93,7 +94,7 @@
 
   // Format plugin name for display (e.g., "ori-music-project-manager" -> "Music Project Manager")
   function formatPluginName(name) {
-    return stripVersionSuffix(name)
+    return name
       .replace(/^ori-/, '')  // Remove ori- prefix
       .replace(/-/g, ' ')     // Replace hyphens with spaces
       .replace(/\b\w/g, c => c.toUpperCase());  // Capitalize first letter of each word

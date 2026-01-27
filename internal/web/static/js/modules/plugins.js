@@ -27,13 +27,13 @@ async function checkPluginConfigurationStatus(activePlugins) {
       // Use rawName for API call to match backend lookup
       const data = await API.get(`/api/plugins/${rawName}/config`);
 
-      // Plugin has config only if it supports initialization AND has required config variables
-      if (data.supports_initialization && data.required_config && data.required_config.length > 0) {
+      // Use the supports_initialization flag from the backend
+      if (data.supports_initialization) {
         hasConfig = true;
-        configVars = data.required_config;
+        configVars = data.required_config || [];
         // Needs init if not already initialized
         needsInit = !data.is_initialized;
-        pluginsLog.debug(`Plugin ${rawName} has ${configVars.length} config variable(s), initialized: ${data.is_initialized}`);
+        pluginsLog.debug(`Plugin ${rawName} supports initialization, initialized: ${data.is_initialized}`);
       } else {
         pluginsLog.debug(`Plugin ${rawName} does not require configuration`);
       }
