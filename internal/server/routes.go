@@ -595,6 +595,7 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 		mux.HandleFunc("/api/folders", s.Handlers.Session.HandleWorkspaces)
 
 		// Workspace routes (unified workspace API)
+		mux.HandleFunc("/api/workspaces", s.Handlers.Session.HandleWorkspaces)
 		mux.HandleFunc("/api/workspaces/", func(w http.ResponseWriter, r *http.Request) {
 			path := r.URL.Path
 			// Check if this is a workspace notes request
@@ -615,7 +616,6 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 			// Otherwise, handle as regular workspace request
 			s.Handlers.Session.HandleWorkspaces(w, r)
 		})
-		mux.HandleFunc("/api/workspaces", s.Handlers.Session.HandleWorkspaces)
 
 		mux.HandleFunc("/api/tags", s.Handlers.Session.HandleTags)
 		mux.HandleFunc("/api/session-cache/stats", s.Handlers.Session.HandleCacheStats)
