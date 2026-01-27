@@ -184,7 +184,7 @@ export class WorkspaceDetailPage {
           if (title) formData.append('title', title);
           if (notes) formData.append('notes', notes);
 
-          const response = await fetch(`/api/workspaces/${encodeURIComponent(this.workspaceId)}/files`, {
+          const response = await fetch(`/api/studios/${encodeURIComponent(this.workspaceId)}/files`, {
             method: 'POST',
             body: formData
           });
@@ -2254,7 +2254,7 @@ export class WorkspaceDetailPage {
       formData.append('workspace_id', this.workspaceId);
 
       try {
-        const response = await fetch(`/api/workspaces/${encodeURIComponent(this.workspaceId)}/files`, {
+        const response = await fetch(`/api/studios/${encodeURIComponent(this.workspaceId)}/files`, {
           method: 'POST',
           body: formData
         });

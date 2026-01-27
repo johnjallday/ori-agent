@@ -25,6 +25,9 @@ type Store interface {
 
 	// ListActive returns all active workspaces
 	ListActive() ([]*Workspace, error)
+
+	// GetFilesPath returns the path for storing files for a workspace
+	GetFilesPath(workspaceID string) string
 }
 
 // FileStore implements Store using file-based persistence
@@ -212,6 +215,11 @@ func (s *FileStore) getFilePath(id string) string {
 	return filepath.Join(s.basePath, id+".json")
 }
 
+// GetFilesPath returns the path for storing files for a workspace
+func (s *FileStore) GetFilesPath(workspaceID string) string {
+	return filepath.Join(s.basePath, workspaceID, "files")
+}
+
 // loadCache loads all workspaces into memory cache
 func (s *FileStore) loadCache() error {
 	entries, err := os.ReadDir(s.basePath)
@@ -345,4 +353,9 @@ func (s *InMemoryStore) ListActive() ([]*Workspace, error) {
 	}
 
 	return active, nil
+}
+
+// GetFilesPath returns the path for storing files for a workspace (in-memory uses temp dir)
+func (s *InMemoryStore) GetFilesPath(workspaceID string) string {
+	return filepath.Join(os.TempDir(), "ori-workspace-files", workspaceID, "files")
 }
