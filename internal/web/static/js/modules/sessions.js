@@ -6202,8 +6202,8 @@ window.sessionManager = sessionManager;
 
 // Initialize when DOM is ready
 document.addEventListener('DOMContentLoaded', () => {
-  // Only initialize if session sidebar exists
-  if (document.getElementById('sessionSidebar')) {
+  // Initialize if session sidebar OR the extracted modals exist
+  if (document.getElementById('sessionSidebar') || document.getElementById('createChatModal')) {
     sessionManager.init();
   }
 });

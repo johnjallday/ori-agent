@@ -12,15 +12,13 @@
   <div class="main-content-wrapper">
     {{template "sidebar.tmpl" .}}
 
-    <!-- Session Sidebar -->
-    {{template "session-sidebar.tmpl" .}}
-
     <!-- Main Content -->
     <main class="main-content" role="main" aria-label="Workspace hub">
       {{template "workspace-hub.tmpl" .}}
     </main>
   </div>
 
+  {{template "session-modals.tmpl" .}}
   {{template "chat-area.tmpl" .}}
 
   <!-- Add Agent Modal -->
