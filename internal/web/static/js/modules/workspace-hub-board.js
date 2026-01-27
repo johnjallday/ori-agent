@@ -70,6 +70,83 @@
       .replace(/'/g, '&#39;');
   }
 
+  function getTaskTitle(task) {
+    return task?.description || task?.name || task?.id || 'Untitled';
+  }
+
+  function normalizeKanbanLabels(raw) {
+    if (Array.isArray(raw)) {
+      return raw.map((label) => String(label || '').trim()).filter(Boolean);
+    }
+    if (typeof raw === 'string') {
+      return raw.split(',').map((label) => label.trim()).filter(Boolean);
+    }
+    return [];
+  }
+
+  function getTaskKanbanLabels(task) {
+    const ctx = task?.context;
+    if (!ctx || typeof ctx !== 'object') return [];
+    return normalizeKanbanLabels(ctx.kanban_labels);
+  }
+
+  function formatLabelsInput(labels) {
+    return (labels || []).join(', ');
+  }
+
+  function parseLabelsInput(value) {
+    return normalizeKanbanLabels(value || '');
+  }
+
+  function getTaskDueDate(task) {
+    const ctx = task?.context;
+    if (!ctx || typeof ctx !== 'object') return '';
+    const raw = ctx.kanban_due_date;
+    return typeof raw === 'string' ? raw.trim() : '';
+  }
+
+  function normalizeDueInput(value) {
+    if (!value) return '';
+    if (/^\d{4}-\d{2}-\d{2}$/.test(value)) return value;
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return '';
+    return date.toISOString().slice(0, 10);
+  }
+
+  function formatDueDate(value) {
+    if (!value) return '';
+    const date = /^\d{4}-\d{2}-\d{2}$/.test(value) ? new Date(`${value}T00:00:00`) : new Date(value);
+    if (Number.isNaN(date.getTime())) return value;
+    return date.toLocaleDateString();
+  }
+
+  function getAssignmentValue(task) {
+    if (task?.assigned_node_id) return `node:${task.assigned_node_id}`;
+    if (task?.to && task.to !== 'unassigned') return `node:${task.to}-node-1`;
+    return '';
+  }
+
+  function getAssignmentLabel(task) {
+    if (task?.assigned_node_id) {
+      const match = String(task.assigned_node_id).match(/^(.+)-node-\d+$/);
+      return match ? match[1] : task.assigned_node_id;
+    }
+    if (task?.to && task.to !== 'unassigned') return task.to;
+    return 'Unassigned';
+  }
+
+  function buildAssignmentOptions(selectedValue, selectedLabel) {
+    const state = getState();
+    const base = Array.isArray(state.board.agentOptions) ? state.board.agentOptions.slice() : [];
+    if (!base.some((opt) => opt.value === '')) {
+      base.unshift({ label: 'Unassigned', value: '' });
+    }
+    if (selectedValue && !base.some((opt) => opt.value === selectedValue)) {
+      base.push({ label: selectedLabel || selectedValue, value: selectedValue });
+    }
+    return base;
+  }
+
   async function fetchBoardConfig(workspaceId) {
     const response = await fetch(`/api/workspaces/${encodeURIComponent(workspaceId)}/board`);
     if (!response.ok) {
@@ -106,6 +183,34 @@
     return Array.isArray(data.tasks) ? data.tasks : [];
   }
 
+  async function fetchAgentOptions() {
+    const options = [{ label: 'Unassigned', value: '' }];
+    try {
+      const response = await fetch('/api/agents/dashboard/list');
+      if (!response.ok) return options;
+      const data = await response.json();
+      const agents = data.agents || [];
+      agents.forEach((agent) => {
+        if (!agent || !agent.name) return;
+        const nodeId = `${agent.name}-node-1`;
+        options.push({ label: agent.name, value: `node:${nodeId}` });
+      });
+    } catch (err) {
+      console.error('Failed to load agents:', err);
+    }
+    return options;
+  }
+
+  async function ensureAgentOptions() {
+    const state = getState();
+    if (Array.isArray(state.board.agentOptions) && state.board.agentOptions.length > 0) {
+      return state.board.agentOptions;
+    }
+    const options = await fetchAgentOptions();
+    state.board.agentOptions = options;
+    return options;
+  }
+
   function getWorkspaceDescendantIds(workspaceId) {
     const state = getState();
     return collectWorkspaceDescendantIds(state.workspaces || [], workspaceId, { includeRoot: false });
@@ -121,7 +226,10 @@
     setBoardLoading(true);
 
     try {
-      const boardConfig = await fetchBoardConfig(workspaceId);
+      const [boardConfig] = await Promise.all([
+        fetchBoardConfig(workspaceId),
+        ensureAgentOptions()
+      ]);
       state.board.config = boardConfig;
       state.board.columns = boardConfig.columns || [];
 
@@ -194,24 +302,85 @@
       `;
     }).join('');
 
+    elements.boardColumns.querySelectorAll('.hub-board-card').forEach((card) => {
+      if (card._editOutsideHandler) {
+        document.removeEventListener('click', card._editOutsideHandler);
+        card._editOutsideHandler = null;
+      }
+    });
     elements.boardColumns.innerHTML = html;
     wireDragAndDrop();
+    wireCardEditing();
     wireColumnRename();
   }
 
   function renderCard(task, columnId) {
-    const title = task.name || task.description || task.id;
+    const title = getTaskTitle(task);
     const created = task.created_at ? formatDate(task.created_at) : '--';
     const status = task.status || 'pending';
     const priority = Number.isFinite(task.priority) ? task.priority : 5;
+    const labels = getTaskKanbanLabels(task);
+    const dueDate = getTaskDueDate(task);
+    const assignmentValue = getAssignmentValue(task);
+    const assignmentLabel = getAssignmentLabel(task);
+    const assignmentOptions = buildAssignmentOptions(assignmentValue, assignmentLabel);
+    const labelMarkup = labels.length > 0
+      ? `<div class="hub-card-labels">${labels.map((label) => `<span class="hub-card-label">${escapeHtml(label)}</span>`).join('')}</div>`
+      : '';
+    const dueMarkup = dueDate ? `<span class="hub-card-due">Due ${escapeHtml(formatDueDate(dueDate))}</span>` : '';
+    const assignedMarkup = assignmentLabel && assignmentLabel !== 'Unassigned'
+      ? `<span class="hub-card-assignee">${escapeHtml(assignmentLabel)}</span>`
+      : '<span class="hub-card-assignee is-muted">Unassigned</span>';
+    const editTitleValue = escapeHtml(getTaskTitle(task));
+    const editDetailsValue = escapeHtml(task.details || '');
+    const editLabelsValue = escapeHtml(formatLabelsInput(labels));
+    const editDueValue = escapeHtml(normalizeDueInput(dueDate));
+    const assignmentOptionsHtml = assignmentOptions
+      .map((opt) => {
+        const selected = opt.value === assignmentValue ? ' selected' : '';
+        return `<option value="${escapeHtml(opt.value)}"${selected}>${escapeHtml(opt.label)}</option>`;
+      })
+      .join('');
 
     return `
       <div class="hub-board-card" draggable="true" data-task-id="${escapeHtml(task.id)}" data-column-id="${escapeHtml(columnId)}" data-workspace-id="${escapeHtml(task.__workspace_id || task.studio_id || task.workspace_id || '')}">
         <span class="hub-card-priority priority-${escapeHtml(priority)}"></span>
-        <div class="hub-card-title">${escapeHtml(title)}</div>
-        <div class="hub-card-meta">
-          <span>${escapeHtml(status)}</span>
-          <span>${escapeHtml(created)}</span>
+        <div class="hub-card-view">
+          <div class="hub-card-header">
+            <div class="hub-card-title">${escapeHtml(title)}</div>
+            <button class="hub-card-edit-btn" type="button" title="Edit card" aria-label="Edit card">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M5,18.08V19H5.92L14.81,10.11L13.89,9.19L5,18.08M17.71,7.04C18.1,6.65 18.1,6 17.71,5.63L16.37,4.29C16,3.9 15.35,3.9 14.96,4.29L13.13,6.12L14.88,7.87L17.71,7.04Z"/>
+              </svg>
+            </button>
+          </div>
+          ${labelMarkup}
+          <div class="hub-card-meta">
+            ${assignedMarkup}
+            ${dueMarkup}
+          </div>
+          <div class="hub-card-meta hub-card-meta-secondary">
+            <span>${escapeHtml(status)}</span>
+            <span>${escapeHtml(created)}</span>
+          </div>
+        </div>
+        <div class="hub-card-edit" hidden>
+          <label class="hub-card-edit-label">Title</label>
+          <input class="hub-card-edit-input hub-card-edit-title" type="text" value="${editTitleValue}" />
+          <label class="hub-card-edit-label">Description</label>
+          <textarea class="hub-card-edit-input hub-card-edit-details" rows="3">${editDetailsValue}</textarea>
+          <label class="hub-card-edit-label">Assignee</label>
+          <select class="hub-card-edit-input hub-card-edit-assignee">
+            ${assignmentOptionsHtml}
+          </select>
+          <label class="hub-card-edit-label">Labels</label>
+          <input class="hub-card-edit-input hub-card-edit-labels" type="text" value="${editLabelsValue}" placeholder="design, frontend" />
+          <label class="hub-card-edit-label">Due date</label>
+          <input class="hub-card-edit-input hub-card-edit-due" type="date" value="${editDueValue}" />
+          <div class="hub-card-edit-actions">
+            <button class="modern-btn modern-btn-secondary hub-card-edit-cancel" type="button">Cancel</button>
+            <button class="modern-btn modern-btn-primary hub-card-edit-save" type="button">Done</button>
+          </div>
         </div>
       </div>
     `;
@@ -226,6 +395,10 @@
 
     elements.boardColumns.querySelectorAll('.hub-board-card').forEach((card) => {
       card.addEventListener('dragstart', (e) => {
+        if (card.classList.contains('is-editing') || e.target.closest('.hub-card-edit')) {
+          e.preventDefault();
+          return;
+        }
         dragged = card;
         didDrag = true;
         card.classList.add('is-dragging');
@@ -243,7 +416,8 @@
 
       card.addEventListener('click', (e) => {
         if (didDrag) return;
-        if (e.target.closest('button') || e.target.closest('a') || e.target.closest('input')) return;
+        if (e.target.closest('.hub-card-edit') || e.target.closest('.hub-card-edit-btn')) return;
+        if (e.target.closest('button') || e.target.closest('a') || e.target.closest('input') || e.target.closest('textarea') || e.target.closest('select')) return;
 
         const state = getState();
         const taskId = card.dataset.taskId;
@@ -274,6 +448,239 @@
         if (!taskId || !columnId) return;
 
         await updateTaskKanbanColumn(taskId, columnId);
+      });
+    });
+  }
+
+  function parseAssignmentValue(value) {
+    let to = '';
+    let assignedNodeId = '';
+    if (value && value.startsWith('node:')) {
+      assignedNodeId = value.slice('node:'.length);
+      const match = assignedNodeId.match(/^(.+)-node-\d+$/);
+      to = match ? match[1] : assignedNodeId;
+    }
+    return { to, assignedNodeId };
+  }
+
+  function getCardEditValues(card) {
+    const titleEl = card.querySelector('.hub-card-edit-title');
+    const detailsEl = card.querySelector('.hub-card-edit-details');
+    const assigneeEl = card.querySelector('.hub-card-edit-assignee');
+    const labelsEl = card.querySelector('.hub-card-edit-labels');
+    const dueEl = card.querySelector('.hub-card-edit-due');
+
+    const title = titleEl ? titleEl.value.trim() : '';
+    const details = detailsEl ? detailsEl.value.trim() : '';
+    const assigneeValue = assigneeEl ? assigneeEl.value : '';
+    const labels = parseLabelsInput(labelsEl ? labelsEl.value : '');
+    const dueDate = dueEl ? dueEl.value : '';
+    const assignment = parseAssignmentValue(assigneeValue);
+
+    return {
+      title,
+      details,
+      assigneeValue,
+      labels,
+      dueDate,
+      to: assignment.to,
+      assignedNodeId: assignment.assignedNodeId
+    };
+  }
+
+  function hasCardChanges(current, original) {
+    if (!original) return true;
+    if (current.title !== original.title) return true;
+    if (current.details !== original.details) return true;
+    if (current.assigneeValue !== original.assigneeValue) return true;
+    if (current.dueDate !== original.dueDate) return true;
+    const currentLabels = (current.labels || []).join('|');
+    const originalLabels = (original.labels || []).join('|');
+    return currentLabels !== originalLabels;
+  }
+
+  function enterCardEdit(card) {
+    if (!card || card.classList.contains('is-editing')) return;
+    const editEl = card.querySelector('.hub-card-edit');
+    const viewEl = card.querySelector('.hub-card-view');
+    if (!editEl) return;
+
+    card.classList.add('is-editing');
+    card.setAttribute('draggable', 'false');
+    if (viewEl) viewEl.setAttribute('hidden', '');
+    editEl.removeAttribute('hidden');
+
+    card._editOriginal = getCardEditValues(card);
+
+    const focusEl = editEl.querySelector('input, textarea, select');
+    if (focusEl) {
+      focusEl.focus();
+      if (focusEl.select) focusEl.select();
+    }
+
+    setTimeout(() => {
+      const handler = (evt) => {
+        if (card.contains(evt.target)) return;
+        saveCardEdits(card);
+      };
+      card._editOutsideHandler = handler;
+      document.addEventListener('click', handler);
+    }, 0);
+  }
+
+  function exitCardEdit(card, { reset = false } = {}) {
+    if (!card || !card.classList.contains('is-editing')) return;
+    const editEl = card.querySelector('.hub-card-edit');
+    const viewEl = card.querySelector('.hub-card-view');
+
+    if (reset && card._editOriginal) {
+      const titleEl = card.querySelector('.hub-card-edit-title');
+      const detailsEl = card.querySelector('.hub-card-edit-details');
+      const assigneeEl = card.querySelector('.hub-card-edit-assignee');
+      const labelsEl = card.querySelector('.hub-card-edit-labels');
+      const dueEl = card.querySelector('.hub-card-edit-due');
+      if (titleEl) titleEl.value = card._editOriginal.title || '';
+      if (detailsEl) detailsEl.value = card._editOriginal.details || '';
+      if (assigneeEl) assigneeEl.value = card._editOriginal.assigneeValue || '';
+      if (labelsEl) labelsEl.value = formatLabelsInput(card._editOriginal.labels || []);
+      if (dueEl) dueEl.value = card._editOriginal.dueDate || '';
+    }
+
+    card.classList.remove('is-editing');
+    card.setAttribute('draggable', 'true');
+    if (editEl) editEl.setAttribute('hidden', '');
+    if (viewEl) viewEl.removeAttribute('hidden');
+
+    if (card._editOutsideHandler) {
+      document.removeEventListener('click', card._editOutsideHandler);
+      card._editOutsideHandler = null;
+    }
+    card._editOriginal = null;
+  }
+
+  async function updateTaskDetails(taskId, updates) {
+    const state = getState();
+    const payload = {
+      description: updates.title,
+      details: updates.details,
+      to: updates.to,
+      assigned_node_id: updates.assignedNodeId,
+      kanban_labels: updates.labels,
+      kanban_due_date: updates.dueDate
+    };
+
+    const response = await fetch(`/api/orchestration/tasks/${encodeURIComponent(taskId)}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    if (!response.ok) {
+      const text = await response.text();
+      throw new Error(text || 'Failed to update task');
+    }
+
+    const updated = await response.json();
+    const boardIdx = (state.board.tasks || []).findIndex((t) => t && t.id === taskId);
+    if (boardIdx >= 0) {
+      const existing = state.board.tasks[boardIdx];
+      state.board.tasks.splice(boardIdx, 1, { ...existing, ...updated, __workspace_id: existing.__workspace_id });
+    }
+
+    const listIdx = (state.tasks || []).findIndex((t) => t && t.id === taskId);
+    if (listIdx >= 0) {
+      const existing = state.tasks[listIdx];
+      state.tasks.splice(listIdx, 1, { ...existing, ...updated });
+      if (window.WorkspaceHubTasks && typeof window.WorkspaceHubTasks.renderTasksList === 'function') {
+        window.WorkspaceHubTasks.renderTasksList(state.tasks);
+      }
+    }
+
+    renderBoard();
+  }
+
+  async function saveCardEdits(card) {
+    if (!card || !card.classList.contains('is-editing')) return;
+    if (card.dataset.saving === '1') return;
+
+    const taskId = card.dataset.taskId;
+    if (!taskId) return;
+
+    const current = getCardEditValues(card);
+    const original = card._editOriginal;
+    if (!hasCardChanges(current, original)) {
+      exitCardEdit(card);
+      return;
+    }
+
+    if (!current.title) {
+      if (window.Toast) window.Toast.error('Title is required');
+      const titleEl = card.querySelector('.hub-card-edit-title');
+      if (titleEl) titleEl.focus();
+      return;
+    }
+
+    card.dataset.saving = '1';
+    card.classList.add('is-saving');
+
+    try {
+      await updateTaskDetails(taskId, current);
+      exitCardEdit(card);
+    } catch (err) {
+      console.error('Failed to update task:', err);
+      if (window.Toast) window.Toast.error('Failed to update task');
+    } finally {
+      card.dataset.saving = '';
+      card.classList.remove('is-saving');
+    }
+  }
+
+  function wireCardEditing() {
+    const elements = getElements();
+    if (!elements.boardColumns) return;
+
+    elements.boardColumns.querySelectorAll('.hub-board-card').forEach((card) => {
+      const editBtn = card.querySelector('.hub-card-edit-btn');
+      if (editBtn) {
+        editBtn.addEventListener('click', (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          enterCardEdit(card);
+        });
+      }
+
+      const cancelBtn = card.querySelector('.hub-card-edit-cancel');
+      if (cancelBtn) {
+        cancelBtn.addEventListener('click', (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          exitCardEdit(card, { reset: true });
+        });
+      }
+
+      const saveBtn = card.querySelector('.hub-card-edit-save');
+      if (saveBtn) {
+        saveBtn.addEventListener('click', (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          saveCardEdits(card);
+        });
+      }
+
+      const inputs = card.querySelectorAll('.hub-card-edit input, .hub-card-edit textarea, .hub-card-edit select');
+      inputs.forEach((input) => {
+        input.addEventListener('keydown', (e) => {
+          if (e.key === 'Escape') {
+            e.preventDefault();
+            exitCardEdit(card, { reset: true });
+            return;
+          }
+
+          if (e.key === 'Enter') {
+            if (input.tagName === 'TEXTAREA' && !(e.metaKey || e.ctrlKey)) return;
+            e.preventDefault();
+            saveCardEdits(card);
+          }
+        });
       });
     });
   }

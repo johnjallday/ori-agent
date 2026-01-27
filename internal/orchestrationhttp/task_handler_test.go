@@ -167,3 +167,43 @@ func TestApplyBasicFieldUpdates_KanbanColumnID(t *testing.T) {
 		t.Fatalf("expected kanban_column_id to be cleared")
 	}
 }
+
+func TestApplyBasicFieldUpdates_KanbanMetadata(t *testing.T) {
+	h := &TaskHandler{}
+
+	task := workspace.Task{ID: "task-1"}
+
+	labels := []string{"frontend", "ux"}
+	due := "2025-01-01"
+	h.applyBasicFieldUpdates(&task, &taskUpdateRequest{TaskID: task.ID, KanbanLabels: labels, KanbanDueDate: &due})
+
+	if task.Context == nil {
+		t.Fatalf("expected context to be initialized")
+	}
+	if got, ok := task.Context["kanban_labels"]; !ok {
+		t.Fatalf("expected kanban_labels to be set")
+	} else {
+		gotSlice, ok := got.([]string)
+		if !ok {
+			t.Fatalf("expected kanban_labels to be []string, got %T", got)
+		}
+		if len(gotSlice) != 2 {
+			t.Fatalf("expected 2 labels, got %d", len(gotSlice))
+		}
+	}
+	if got, ok := task.Context["kanban_due_date"]; !ok {
+		t.Fatalf("expected kanban_due_date to be set")
+	} else if got != "2025-01-01" {
+		t.Fatalf("expected kanban_due_date to be '2025-01-01', got %v", got)
+	}
+
+	clearLabels := []string{}
+	clearDue := ""
+	h.applyBasicFieldUpdates(&task, &taskUpdateRequest{TaskID: task.ID, KanbanLabels: clearLabels, KanbanDueDate: &clearDue})
+	if _, ok := task.Context["kanban_labels"]; ok {
+		t.Fatalf("expected kanban_labels to be cleared")
+	}
+	if _, ok := task.Context["kanban_due_date"]; ok {
+		t.Fatalf("expected kanban_due_date to be cleared")
+	}
+}

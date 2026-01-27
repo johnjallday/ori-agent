@@ -357,6 +357,51 @@
   overflow: hidden;
 }
 
+.hub-card-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.hub-card-edit-btn {
+  border: none;
+  background: var(--bg-tertiary, rgba(0, 0, 0, 0.04));
+  color: var(--text-muted);
+  border-radius: 6px;
+  padding: 0.2rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  transition: opacity 0.15s ease, background-color 0.15s ease, color 0.15s ease;
+}
+
+.hub-board-card:hover .hub-card-edit-btn,
+.hub-board-card.is-editing .hub-card-edit-btn {
+  opacity: 1;
+}
+
+.hub-card-edit-btn:hover {
+  background: var(--accent-primary, #3b82f6);
+  color: #fff;
+}
+
+.hub-card-labels {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+  margin-bottom: 0.3rem;
+}
+
+.hub-card-label {
+  font-size: 0.6rem;
+  color: var(--text-muted);
+  background: var(--bg-tertiary, rgba(0, 0, 0, 0.06));
+  padding: 0.1rem 0.35rem;
+  border-radius: 999px;
+}
+
 .hub-card-meta {
   display: flex;
   justify-content: space-between;
@@ -364,6 +409,77 @@
   gap: 0.5rem;
   font-size: 0.7rem;
   color: var(--text-muted);
+}
+
+.hub-card-meta-secondary {
+  font-size: 0.65rem;
+  margin-top: 0.2rem;
+  color: var(--text-muted);
+}
+
+.hub-card-assignee.is-muted {
+  color: var(--text-muted);
+}
+
+.hub-card-due {
+  color: var(--text-secondary);
+}
+
+.hub-card-edit {
+  display: none;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.hub-card-edit-label {
+  font-size: 0.65rem;
+  color: var(--text-muted);
+  margin-bottom: -0.15rem;
+}
+
+.hub-card-edit-input {
+  width: 100%;
+  border: 1px solid var(--border-color);
+  background: var(--bg-tertiary);
+  border-radius: 6px;
+  padding: 0.35rem 0.5rem;
+  color: var(--text-primary);
+  font-size: 0.75rem;
+}
+
+.hub-card-edit-input:focus {
+  outline: none;
+  border-color: var(--accent-primary, #3b82f6);
+  box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.15);
+}
+
+.hub-card-edit-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.4rem;
+  margin-top: 0.2rem;
+}
+
+.hub-card-edit-actions .modern-btn {
+  font-size: 0.65rem;
+  padding: 0.2rem 0.45rem;
+}
+
+.hub-board-card.is-editing {
+  cursor: default;
+}
+
+.hub-board-card.is-editing .hub-card-view {
+  display: none;
+}
+
+.hub-board-card.is-editing .hub-card-edit {
+  display: flex;
+}
+
+.hub-board-card.is-saving {
+  opacity: 0.75;
+  pointer-events: none;
 }
 
 .hub-card-priority {

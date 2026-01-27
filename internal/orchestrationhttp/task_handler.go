@@ -398,13 +398,16 @@ type taskUpdateRequest struct {
 	ScheduleName           *string                        `json:"schedule_name"`
 	ResultStorage          *workspace.ResultStorageConfig `json:"result_storage"`
 	KanbanColumnID         *string                        `json:"kanban_column_id"`
+	KanbanLabels           []string                       `json:"kanban_labels"`
+	KanbanDueDate          *string                        `json:"kanban_due_date"`
 }
 
 // hasFieldUpdates returns true if the request contains any field updates
 func (r *taskUpdateRequest) hasFieldUpdates() bool {
 	return r.Description != nil || r.Details != nil || r.InputTaskIDs != nil ||
 		r.To != nil || r.ParentTaskID != nil || r.SubtaskIndex != nil ||
-		r.ResultCombinationMode != nil || r.ResultStorage != nil || r.KanbanColumnID != nil
+		r.ResultCombinationMode != nil || r.ResultStorage != nil || r.KanbanColumnID != nil ||
+		r.KanbanLabels != nil || r.KanbanDueDate != nil
 }
 
 // hasScheduleUpdates returns true if the request contains schedule-related updates
@@ -452,6 +455,29 @@ func (th *TaskHandler) applyBasicFieldUpdates(task *workspace.Task, req *taskUpd
 			task.Context["kanban_column_id"] = val
 		}
 		logger.Debug("Updated task kanban column", logger.Fields{"task_id": req.TaskID, "kanban_column_id": val})
+	}
+	if req.KanbanLabels != nil {
+		if task.Context == nil {
+			task.Context = map[string]interface{}{}
+		}
+		if len(req.KanbanLabels) == 0 {
+			delete(task.Context, "kanban_labels")
+		} else {
+			task.Context["kanban_labels"] = req.KanbanLabels
+		}
+		logger.Debug("Updated task kanban labels", logger.Fields{"task_id": req.TaskID, "labels": req.KanbanLabels})
+	}
+	if req.KanbanDueDate != nil {
+		val := strings.TrimSpace(*req.KanbanDueDate)
+		if task.Context == nil {
+			task.Context = map[string]interface{}{}
+		}
+		if val == "" {
+			delete(task.Context, "kanban_due_date")
+		} else {
+			task.Context["kanban_due_date"] = val
+		}
+		logger.Debug("Updated task kanban due date", logger.Fields{"task_id": req.TaskID, "kanban_due_date": val})
 	}
 }
 
@@ -536,6 +562,12 @@ func (th *TaskHandler) buildTaskUpdateEventData(req *taskUpdateRequest, schedule
 	}
 	if req.ScheduleName != nil {
 		eventData["schedule_name"] = *req.ScheduleName
+	}
+	if req.KanbanLabels != nil {
+		eventData["kanban_labels"] = req.KanbanLabels
+	}
+	if req.KanbanDueDate != nil {
+		eventData["kanban_due_date"] = *req.KanbanDueDate
 	}
 	return eventData
 }
