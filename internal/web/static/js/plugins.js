@@ -342,7 +342,6 @@ function renderPluginsTable() {
             </td>
             <td>${escapeHtml(plugin.version || 'N/A')}</td>
             <td>${renderStatusBadge(plugin)}</td>
-            <td style="text-align: center;">${renderConfigStatus(plugin)}</td>
             <td><span class="category-badge">${escapeHtml(plugin.category || 'Uncategorized')}</span></td>
             <td>
                 <div class="action-buttons">
@@ -386,7 +385,6 @@ function renderMobileCards() {
             </div>
             <div class="plugin-card-meta">
                 ${renderStatusBadge(plugin)}
-                ${renderConfigStatus(plugin)}
                 <span class="category-badge">${escapeHtml(plugin.category || 'Uncategorized')}</span>
                 <span style="font-size: 0.8rem; color: var(--text-muted);">v${escapeHtml(plugin.version || 'N/A')}</span>
             </div>
@@ -437,7 +435,7 @@ function renderStatusBadge(plugin) {
                 Needs Update
             </span>
         `;
-  } else if (plugin.is_configured === false || plugin.is_configured === 'false') {
+  } else if (plugin.supports_initialization && !(plugin.is_configured === true || plugin.is_configured === 'true')) {
     return `
             <span class="status-badge status-not-configured">
                 <span class="status-dot"></span>
@@ -453,15 +451,6 @@ function renderStatusBadge(plugin) {
             Healthy
         </span>
     `;
-}
-
-function renderConfigStatus(plugin) {
-  if (plugin.is_configured === true || plugin.is_configured === 'true') {
-    return `<span style="color: var(--success-color);" title="Configured">✓</span>`;
-  } else if (plugin.supports_initialization) {
-    return `<span style="color: var(--warning-color); font-weight: bold;" title="Configuration Required">!</span>`;
-  }
-  return `<span style="color: var(--text-muted);">-</span>`;
 }
 
 function renderNotifications() {
