@@ -316,6 +316,39 @@ export class WorkspaceDetailPage {
     // Make workspace name and description editable
     this.makeEditable(this.elements.workspaceName, 'name', false);
     this.makeEditable(this.elements.workspaceDescription, 'description', true);
+
+    // Subscribe to EventBus events for auto-refresh
+    if (window.EventBus) {
+      EventBus.on('task:created', (data) => {
+        if (!data?.workspaceId || data.workspaceId === this.workspaceId) {
+          this.loadTasks();
+        }
+      }, 'workspaceDetail');
+
+      EventBus.on('task:updated', (data) => {
+        if (!data?.workspaceId || data.workspaceId === this.workspaceId) {
+          this.loadTasks();
+        }
+      }, 'workspaceDetail');
+
+      EventBus.on('session:created', (data) => {
+        if (!data?.folderId || data.folderId === this.workspaceId) {
+          this.loadSessions();
+        }
+      }, 'workspaceDetail');
+
+      EventBus.on('note:created', (data) => {
+        if (!data?.workspaceId || data.workspaceId === this.workspaceId) {
+          this.loadNotes();
+        }
+      }, 'workspaceDetail');
+
+      EventBus.on('workspace:files:updated', (data) => {
+        if (!data?.workspaceId || data.workspaceId === this.workspaceId) {
+          this.loadFiles();
+        }
+      }, 'workspaceDetail');
+    }
   }
 
   /**
