@@ -308,7 +308,7 @@ document.getElementById('systemDiagnosticsBtn')?.addEventListener('click', async
   const itemDescriptions = {
     settings: 'Settings & API Keys',
     agents: 'All Agents',
-    sessions: 'Chat Sessions',
+    sessions: 'Database (Sessions & Workspaces)',
     plugins: 'Plugins',
     onboarding: 'Onboarding State'
   };
