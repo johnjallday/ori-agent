@@ -1,4 +1,16 @@
 // Settings Page JavaScript Module
+// Uses SettingsController for notifications and state management
+
+// Helper function to get notification handler
+function notify(message, type = 'info') {
+  if (typeof SettingsController !== 'undefined') {
+    SettingsController.notify(message, type);
+  } else if (typeof Toast !== 'undefined') {
+    Toast[type] ? Toast[type](message) : Toast.info(message);
+  } else {
+    alert(type === 'error' ? 'Error: ' + message : message);
+  }
+}
 
 // Toggle password visibility for API keys
 document.getElementById('toggleOpenaiKey')?.addEventListener('click', function() {
@@ -21,12 +33,12 @@ document.getElementById('saveOpenaiKey')?.addEventListener('click', async functi
   const apiKey = document.getElementById('openaiApiKeyInput').value.trim();
 
   if (!apiKey) {
-    alert('Please enter an API key');
+    notify('Please enter an API key', 'warning');
     return;
   }
 
   if (!apiKey.startsWith('sk-')) {
-    alert('Invalid API key format. OpenAI keys start with "sk-"');
+    notify('Invalid API key format. OpenAI keys start with "sk-"', 'warning');
     return;
   }
 
@@ -40,15 +52,15 @@ document.getElementById('saveOpenaiKey')?.addEventListener('click', async functi
     });
 
     if (response.ok) {
-      alert('OpenAI API key saved successfully!');
+      notify('OpenAI API key saved successfully!', 'success');
       document.getElementById('openaiApiKeyInput').value = '';
     } else {
       const error = await response.text();
-      alert('Failed to save API key: ' + error);
+      notify('Failed to save API key: ' + error, 'error');
     }
   } catch (error) {
     console.error('Error saving API key:', error);
-    alert('Error saving API key: ' + error.message);
+    notify('Error saving API key: ' + error.message, 'error');
   }
 });
 
@@ -57,12 +69,12 @@ document.getElementById('saveAnthropicKey')?.addEventListener('click', async fun
   const apiKey = document.getElementById('anthropicApiKeyInput').value.trim();
 
   if (!apiKey) {
-    alert('Please enter an API key');
+    notify('Please enter an API key', 'warning');
     return;
   }
 
   if (!apiKey.startsWith('sk-ant-')) {
-    alert('Invalid API key format. Anthropic keys start with "sk-ant-"');
+    notify('Invalid API key format. Anthropic keys start with "sk-ant-"', 'warning');
     return;
   }
 
@@ -78,15 +90,15 @@ document.getElementById('saveAnthropicKey')?.addEventListener('click', async fun
     });
 
     if (response.ok) {
-      alert('Anthropic API key saved successfully!');
+      notify('Anthropic API key saved successfully!', 'success');
       document.getElementById('anthropicApiKeyInput').value = '';
     } else {
       const error = await response.text();
-      alert('Failed to save API key: ' + error);
+      notify('Failed to save API key: ' + error, 'error');
     }
   } catch (error) {
     console.error('Error saving API key:', error);
-    alert('Error saving API key: ' + error.message);
+    notify('Error saving API key: ' + error.message, 'error');
   }
 });
 
@@ -95,7 +107,7 @@ document.getElementById('saveGeminiKey')?.addEventListener('click', async functi
   const apiKey = document.getElementById('geminiApiKeyInput').value.trim();
 
   if (!apiKey) {
-    alert('Please enter an API key');
+    notify('Please enter an API key', 'warning');
     return;
   }
 
@@ -109,15 +121,15 @@ document.getElementById('saveGeminiKey')?.addEventListener('click', async functi
     });
 
     if (response.ok) {
-      alert('Gemini API key saved successfully!');
+      notify('Gemini API key saved successfully!', 'success');
       document.getElementById('geminiApiKeyInput').value = '';
     } else {
       const error = await response.text();
-      alert('Failed to save API key: ' + error);
+      notify('Failed to save API key: ' + error, 'error');
     }
   } catch (error) {
     console.error('Error saving API key:', error);
-    alert('Error saving API key: ' + error.message);
+    notify('Error saving API key: ' + error.message, 'error');
   }
 });
 
@@ -127,17 +139,10 @@ document.getElementById('systemDiagnosticsBtn')?.addEventListener('click', async
     const response = await fetch('/api/updates/version');
     const data = await response.json();
 
-    const diagnosticsInfo = `
-System Diagnostics
-==================
-Version: ${data.version || 'Unknown'}
-Status: Online
-    `;
-
-    alert(diagnosticsInfo);
+    notify(`System Diagnostics - Version: ${data.version || 'Unknown'}, Status: Online`, 'info');
   } catch (error) {
     console.error('Error fetching diagnostics:', error);
-    alert('Error fetching system diagnostics');
+    notify('Error fetching system diagnostics', 'error');
   }
 });
 
@@ -271,12 +276,8 @@ Status: Online
   });
 
   function showToast(message, type = 'info') {
-    // Use alert as fallback if no toast system exists
-    if (type === 'error') {
-      alert('Error: ' + message);
-    } else {
-      alert(message);
-    }
+    // Use the module-level notify function
+    notify(message, type);
   }
 
   // Load settings on page load
@@ -449,20 +450,20 @@ Status: Online
 
         // Check if onboarding was reset - redirect to root to trigger onboarding
         if (selected.onboarding) {
-          alert(`Successfully reset: ${resetItems}\n\nThe application will now redirect to the setup wizard.`);
-          window.location.href = '/';
+          notify(`Successfully reset: ${resetItems}. Redirecting to setup wizard...`, 'success');
+          setTimeout(() => { window.location.href = '/'; }, 1500);
         } else {
-          alert(`Successfully reset: ${resetItems}\n\nPlease restart the application for changes to take full effect.`);
-          window.location.reload();
+          notify(`Successfully reset: ${resetItems}. Reloading...`, 'success');
+          setTimeout(() => { window.location.reload(); }, 1500);
         }
       } else {
         // Show error
-        const errors = result.errors ? result.errors.join('\n') : 'Unknown error occurred';
-        alert(`Reset failed:\n${errors}`);
+        const errors = result.errors ? result.errors.join(', ') : 'Unknown error occurred';
+        notify(`Reset failed: ${errors}`, 'error');
       }
     } catch (error) {
       console.error('Error during reset:', error);
-      alert('Error during reset: ' + error.message);
+      notify('Error during reset: ' + error.message, 'error');
     } finally {
       this.disabled = false;
       this.innerHTML = originalHTML;
