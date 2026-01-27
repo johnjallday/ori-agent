@@ -5560,13 +5560,18 @@ const sessionManager = {
       }
     });
 
-    // Escape key handlers
-    document.getElementById('scheduledTasksModal')?.addEventListener('keydown', (e) => {
-      if (e.key === 'Escape') this.closeScheduledTasksModal();
-    });
-
-    document.getElementById('scheduledTaskDetailModal')?.addEventListener('keydown', (e) => {
-      if (e.key === 'Escape') this.closeScheduledTaskDetailModal();
+    // Escape key handlers (document-level for reliable closing)
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') {
+        const detailModal = document.getElementById('scheduledTaskDetailModal');
+        const listModal = document.getElementById('scheduledTasksModal');
+        // Close detail modal first if visible, then list modal
+        if (detailModal && detailModal.style.display !== 'none' && detailModal.style.display !== '') {
+          this.closeScheduledTaskDetailModal();
+        } else if (listModal && listModal.style.display !== 'none' && listModal.style.display !== '') {
+          this.closeScheduledTasksModal();
+        }
+      }
     });
   },
 

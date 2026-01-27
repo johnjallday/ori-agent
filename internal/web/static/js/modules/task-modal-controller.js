@@ -72,10 +72,13 @@ class TaskModalController {
       this.updateAutoSaveTargetFields();
     });
 
-    // Escape key handler
-    document.getElementById('taskModal')?.addEventListener('keydown', (e) => {
+    // Escape key handler (document-level for reliable closing)
+    document.addEventListener('keydown', (e) => {
       if (e.key === 'Escape') {
-        this.close();
+        const modal = document.getElementById('taskModal');
+        if (modal && modal.style.display !== 'none' && modal.style.display !== '') {
+          this.close();
+        }
       }
     });
 
