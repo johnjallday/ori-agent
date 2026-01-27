@@ -336,8 +336,8 @@ function renderPluginsTable() {
                     <div>
                         <div class="plugin-name">
                             ${escapeHtml(getDisplayName(plugin))}
-                            ${plugin.enabled && plugin.supports_initialization && !(plugin.is_configured === true || plugin.is_configured === 'true') ? 
-                                '<span class="badge status-update ms-2" style="font-size: 0.7em;">Setup Required</span>' : ''}
+                            ${plugin.supports_initialization ? 
+                                '<span class="badge bg-info-subtle text-info ms-2" style="font-size: 0.7em;">Configurable</span>' : ''}
                         </div>
                         <div class="plugin-description">${escapeHtml(plugin.description || 'No description')}</div>
                         ${renderTagBadges(plugin.tags)}
@@ -385,8 +385,8 @@ function renderMobileCards() {
                 <div class="plugin-card-info">
                     <div class="plugin-card-name">
                         ${escapeHtml(getDisplayName(plugin))}
-                        ${plugin.enabled && plugin.supports_initialization && !(plugin.is_configured === true || plugin.is_configured === 'true') ? 
-                            '<span class="badge status-update ms-2" style="font-size: 0.7em;">Setup Required</span>' : ''}
+                        ${plugin.supports_initialization ? 
+                            '<span class="badge bg-info-subtle text-info ms-2" style="font-size: 0.7em;">Configurable</span>' : ''}
                     </div>
                     <div class="plugin-card-description">${escapeHtml(plugin.description || 'No description')}</div>
                 </div>

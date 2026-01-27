@@ -231,7 +231,8 @@ func (h *PluginsPageHandler) HandleListPlugins(w http.ResponseWriter, r *http.Re
 	}
 
 	response := map[string]interface{}{
-		"plugins": plugins,
+		"plugins":       plugins,
+		"current_agent": currentAgent,
 	}
 
 	w.Header().Set("Content-Type", "application/json")
