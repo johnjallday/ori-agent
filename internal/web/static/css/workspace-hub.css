@@ -281,20 +281,22 @@
 
 .hub-column-edit-btn {
   border: none;
-  background: var(--bg-tertiary, rgba(0, 0, 0, 0.05));
-  color: var(--text-muted);
+  background: var(--accent-primary, #3b82f6);
+  color: #fff;
   border-radius: 4px;
-  padding: 0.2rem;
+  padding: 0.25rem;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  opacity: 0.6;
-  transition: opacity 0.15s ease, color 0.15s ease;
+  opacity: 1;
+  box-shadow: 0 2px 6px rgba(59, 130, 246, 0.35);
+  transition: transform 0.15s ease, box-shadow 0.15s ease, filter 0.15s ease;
 }
 
 .hub-column-edit-btn:hover {
-  opacity: 1;
-  color: var(--text-primary);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 10px rgba(59, 130, 246, 0.35);
+  filter: brightness(0.95);
 }
 
 .hub-column-rename-input {
