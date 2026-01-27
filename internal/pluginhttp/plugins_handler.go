@@ -19,6 +19,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/store"
 	internaltags "github.com/johnjallday/ori-agent/internal/tags"
 	"github.com/johnjallday/ori-agent/internal/types"
+	"github.com/oriagent/ori-pluginapi"
 )
 
 // PluginsPageHandler handles endpoints for the dedicated plugins management page
@@ -80,7 +81,7 @@ func (h *PluginsPageHandler) HandleListPlugins(w http.ResponseWriter, r *http.Re
 	}
 
 	// Get current agent to check enabled plugins
-	agent, _, agentExists := store.GetCurrentAgent(h.Store)
+	agent, currentAgent, agentExists := store.GetCurrentAgent(h.Store)
 
 	// Build response with extended plugin information
 	plugins := make([]map[string]interface{}, 0, len(localReg.Plugins))
@@ -101,41 +102,53 @@ func (h *PluginsPageHandler) HandleListPlugins(w http.ResponseWriter, r *http.Re
 			}
 		}
 
-		// Determine plugin status
-		status := h.getPluginStatus(&plugin, isEnabled)
-
-		// Get plugin agents (plugins that provide agents)
-		agents := h.getPluginAgents(&plugin, loadedPlugin)
-
 		// Check if plugin supports initialization and get config variables
+
 		var supportsInit bool
+
 		var requiredConfig []pluginapi.ConfigVariable
 
 		// Try to check initialization support
+
 		if loadedPlugin != nil && loadedPlugin.Tool != nil {
+
 			if initProvider, ok := loadedPlugin.Tool.(pluginapi.InitializationProvider); ok {
+
 				requiredConfig = initProvider.GetRequiredConfig()
+
 				supportsInit = true
+
 			}
+
 		} else if plugin.Path != "" {
+
 			// Temporarily load to check if it supports initialization
+
 			if tool, err := h.Loader.Load(plugin.Path); err == nil {
+
 				// Ensure plugin RPC client is cleaned up
+
 				defer pluginloader.CloseRPCPlugin(tool)
+
 				if initProvider, ok := tool.(pluginapi.InitializationProvider); ok {
+
 					requiredConfig = initProvider.GetRequiredConfig()
+
 					supportsInit = true
+
 				}
+
 			}
+
 		}
 
 		// Check if settings file exists for this plugin
 
 		isConfigured := false
 
-		if current != "" {
+		if currentAgent != "" {
 
-			settingsFilePath := fmt.Sprintf("agents/%s/%s_settings.json", current, plugin.Name)
+			settingsFilePath := fmt.Sprintf("agents/%s/%s_settings.json", currentAgent, plugin.Name)
 
 			normalizedName := registry.NormalizePluginName(plugin.Name)
 
@@ -143,13 +156,21 @@ func (h *PluginsPageHandler) HandleListPlugins(w http.ResponseWriter, r *http.Re
 
 				isConfigured = true
 
-			} else if _, err := os.Stat(fmt.Sprintf("agents/%s/%s_settings.json", current, normalizedName)); err == nil {
+			} else if _, err := os.Stat(fmt.Sprintf("agents/%s/%s_settings.json", currentAgent, normalizedName)); err == nil {
 
 				isConfigured = true
 
 			}
 
 		}
+
+		// Get plugin agents (plugins that provide agents)
+
+		agents := h.getPluginAgents(&plugin, loadedPlugin)
+
+		// Determine plugin status with all flags
+
+		status := h.getPluginStatus(&plugin, isEnabled, supportsInit, isConfigured)
 
 		pluginInfo := map[string]interface{}{
 
@@ -288,14 +309,16 @@ func (h *PluginsPageHandler) HandleGetPluginDetails(w http.ResponseWriter, r *ht
 	}
 
 	// Get current agent to check if plugin is loaded
-	agent, _, agentExists := store.GetCurrentAgent(h.Store)
+	agent, currentAgent, agentExists := store.GetCurrentAgent(h.Store)
 
 	var loadedPlugin *types.LoadedPlugin
 	var definition interface{}
+	lpExists := false
 	if agentExists {
 		if lp, exists := agent.Plugins[pluginName]; exists {
 			loadedPlugin = &lp
 			definition = lp.Definition
+			lpExists = true
 		}
 	}
 
@@ -327,12 +350,12 @@ func (h *PluginsPageHandler) HandleGetPluginDetails(w http.ResponseWriter, r *ht
 
 	// Check if settings file exists
 	isConfigured := false
-	if current != "" {
-		settingsFilePath := fmt.Sprintf("agents/%s/%s_settings.json", current, plugin.Name)
+	if currentAgent != "" {
+		settingsFilePath := fmt.Sprintf("agents/%s/%s_settings.json", currentAgent, plugin.Name)
 		normalizedName := registry.NormalizePluginName(plugin.Name)
 		if _, err := os.Stat(settingsFilePath); err == nil {
 			isConfigured = true
-		} else if _, err := os.Stat(fmt.Sprintf("agents/%s/%s_settings.json", current, normalizedName)); err == nil {
+		} else if _, err := os.Stat(fmt.Sprintf("agents/%s/%s_settings.json", currentAgent, normalizedName)); err == nil {
 			isConfigured = true
 		}
 	}
@@ -349,6 +372,7 @@ func (h *PluginsPageHandler) HandleGetPluginDetails(w http.ResponseWriter, r *ht
 		"permissions":             permissions,
 		"permissions_approved":    plugin.PermissionsApproved,
 		"health_status":           plugin.HealthStatus,
+		"status":                  h.getPluginStatus(plugin, lpExists, supportsInit, isConfigured),
 		"last_used":               plugin.LastUsed,
 		"version_history":         plugin.VersionHistory,
 		"metadata":                plugin.Metadata,
@@ -871,9 +895,12 @@ func (h *PluginsPageHandler) extractPluginName(path string) string {
 	return ""
 }
 
-func (h *PluginsPageHandler) getPluginStatus(plugin *types.PluginRegistryEntry, isEnabled bool) string {
+func (h *PluginsPageHandler) getPluginStatus(plugin *types.PluginRegistryEntry, isEnabled, supportsInit, isConfigured bool) string {
 	if !isEnabled {
 		return "inactive"
+	}
+	if supportsInit && !isConfigured {
+		return "not_configured"
 	}
 	if !plugin.PermissionsApproved {
 		return "pending_approval"
