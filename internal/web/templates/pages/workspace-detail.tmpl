@@ -693,18 +693,44 @@
       align-items: center;
     }
 
+    .workspace-detail-board-column-title-wrap {
+      display: flex;
+      align-items: center;
+      gap: 0.3rem;
+      min-width: 0;
+    }
+
     .workspace-detail-board-column-title {
       font-size: 0.75rem;
       font-weight: 600;
       color: var(--text-primary);
-      cursor: pointer;
       border-radius: 4px;
       padding: 2px 4px;
       margin: -2px -4px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
     }
 
     .workspace-detail-board-column-title:hover {
       background: var(--bg-tertiary);
+    }
+
+    .workspace-detail-board-column-edit-btn {
+      border: none;
+      background: var(--bg-tertiary);
+      color: var(--text-secondary);
+      border-radius: 4px;
+      padding: 0.15rem;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      opacity: 0.6;
+    }
+
+    .workspace-detail-board-column-edit-btn:hover {
+      opacity: 1;
+      color: var(--text-primary);
     }
 
     .workspace-detail-board-column-rename-input {
@@ -729,6 +755,69 @@
       background: var(--bg-tertiary);
       padding: 0.1rem 0.3rem;
       border-radius: 3px;
+    }
+
+    .workspace-detail-board-add-column {
+      flex: 0 0 180px;
+      border: 1px dashed var(--border-color);
+      border-radius: 6px;
+      padding: 0.5rem;
+      display: flex;
+      flex-direction: column;
+      gap: 0.4rem;
+      color: var(--text-secondary);
+      align-self: flex-start;
+    }
+
+    .workspace-detail-board-add-column-btn {
+      border: none;
+      background: transparent;
+      color: var(--text-secondary);
+      font-size: 0.7rem;
+      text-align: left;
+      cursor: pointer;
+      padding: 0;
+    }
+
+    .workspace-detail-board-add-column-btn:hover {
+      color: var(--text-primary);
+    }
+
+    .workspace-detail-board-add-column-form {
+      display: flex;
+      flex-direction: column;
+      gap: 0.35rem;
+    }
+
+    .workspace-detail-board-add-column-form[hidden] {
+      display: none;
+    }
+
+    .workspace-detail-board-add-column-input {
+      width: 100%;
+      border: 1px solid var(--border-color);
+      background: var(--bg-tertiary);
+      border-radius: 4px;
+      padding: 0.3rem 0.4rem;
+      font-size: 0.65rem;
+      color: var(--text-primary);
+    }
+
+    .workspace-detail-board-add-column-input:focus {
+      outline: none;
+      border-color: var(--primary-color);
+      box-shadow: 0 0 0 2px rgba(var(--primary-color-rgb, 99, 102, 241), 0.15);
+    }
+
+    .workspace-detail-board-add-column-actions {
+      display: flex;
+      justify-content: flex-end;
+      gap: 0.35rem;
+    }
+
+    .workspace-detail-board-add-column-actions .modern-btn {
+      font-size: 0.55rem;
+      padding: 0.2rem 0.35rem;
     }
 
     .workspace-detail-board-column-body {

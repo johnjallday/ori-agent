@@ -796,6 +796,29 @@ export class WorkspaceDetailPage {
     return options;
   }
 
+  getNextColumnOrder(columns) {
+    const maxOrder = (columns || []).reduce((max, col) => {
+      const value = Number.isFinite(col?.order) ? col.order : 0;
+      return value > max ? value : max;
+    }, 0);
+    return maxOrder + 1;
+  }
+
+  makeColumnId(name, columns) {
+    const existing = new Set((columns || []).map((col) => String(col?.id || '').trim()).filter(Boolean));
+    const base = String(name || '')
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/(^-|-$)/g, '') || 'column';
+    let id = base;
+    let idx = 1;
+    while (existing.has(id)) {
+      idx += 1;
+      id = `${base}-${idx}`;
+    }
+    return id;
+  }
+
   /**
    * Render the kanban board
    */
@@ -812,6 +835,12 @@ export class WorkspaceDetailPage {
         }
       });
       this.elements.boardColumns.querySelectorAll('.workspace-detail-board-add').forEach((addEl) => {
+        if (addEl._addOutsideHandler) {
+          document.removeEventListener('click', addEl._addOutsideHandler);
+          addEl._addOutsideHandler = null;
+        }
+      });
+      this.elements.boardColumns.querySelectorAll('.workspace-detail-board-add-column').forEach((addEl) => {
         if (addEl._addOutsideHandler) {
           document.removeEventListener('click', addEl._addOutsideHandler);
           addEl._addOutsideHandler = null;
@@ -839,13 +868,26 @@ export class WorkspaceDetailPage {
         addEl._addOutsideHandler = null;
       }
     });
+    this.elements.boardColumns.querySelectorAll('.workspace-detail-board-add-column').forEach((addEl) => {
+      if (addEl._addOutsideHandler) {
+        document.removeEventListener('click', addEl._addOutsideHandler);
+        addEl._addOutsideHandler = null;
+      }
+    });
 
-    this.elements.boardColumns.innerHTML = columns.map(col => {
+    const columnsHtml = columns.map(col => {
       const columnTasks = tasksByColumn[col.id] || [];
       return `
         <div class="workspace-detail-board-column" data-column-id="${col.id}">
           <div class="workspace-detail-board-column-header">
-            <span class="workspace-detail-board-column-title" data-column-id="${this.escapeHtml(col.id)}" title="Double-click to rename">${this.escapeHtml(col.name)}</span>
+            <div class="workspace-detail-board-column-title-wrap">
+              <span class="workspace-detail-board-column-title" data-column-id="${this.escapeHtml(col.id)}">${this.escapeHtml(col.name)}</span>
+              <button class="workspace-detail-board-column-edit-btn" type="button" title="Edit column name" aria-label="Edit column name">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
+                  <path d="M5,18.08V19H5.92L14.81,10.11L13.89,9.19L5,18.08M17.71,7.04C18.1,6.65 18.1,6 17.71,5.63L16.37,4.29C16,3.9 15.35,3.9 14.96,4.29L13.13,6.12L14.88,7.87L17.71,7.04Z"/>
+                </svg>
+              </button>
+            </div>
             <span class="workspace-detail-board-column-count">${columnTasks.length}</span>
           </div>
           <div class="workspace-detail-board-column-body" data-column-id="${this.escapeHtml(col.id)}">
@@ -865,9 +907,25 @@ export class WorkspaceDetailPage {
       `;
     }).join('');
 
+    const addColumnHtml = `
+      <div class="workspace-detail-board-add-column">
+        <button class="workspace-detail-board-add-column-btn" type="button">+ Add column</button>
+        <div class="workspace-detail-board-add-column-form" hidden>
+          <input class="workspace-detail-board-add-column-input" type="text" placeholder="Column name" />
+          <div class="workspace-detail-board-add-column-actions">
+            <button class="modern-btn modern-btn-secondary workspace-detail-board-add-column-cancel" type="button">Cancel</button>
+            <button class="modern-btn modern-btn-primary workspace-detail-board-add-column-submit" type="button">Add</button>
+          </div>
+        </div>
+      </div>
+    `;
+
+    this.elements.boardColumns.innerHTML = columnsHtml + addColumnHtml;
+
     this.wireBoardDragAndDrop();
     this.wireBoardCardEditing();
     this.wireBoardCardAdd();
+    this.wireBoardColumnAdd();
     this.wireBoardColumnRename();
   }
 
@@ -1314,11 +1372,109 @@ export class WorkspaceDetailPage {
     });
   }
 
+  wireBoardColumnAdd() {
+    if (!this.elements.boardColumns) return;
+
+    const container = this.elements.boardColumns.querySelector('.workspace-detail-board-add-column');
+    if (!container) return;
+
+    const button = container.querySelector('.workspace-detail-board-add-column-btn');
+    const form = container.querySelector('.workspace-detail-board-add-column-form');
+    const input = container.querySelector('.workspace-detail-board-add-column-input');
+    const cancelBtn = container.querySelector('.workspace-detail-board-add-column-cancel');
+    const submitBtn = container.querySelector('.workspace-detail-board-add-column-submit');
+
+    if (!button || !form || !input || !cancelBtn || !submitBtn) return;
+
+    const closeForm = () => {
+      form.setAttribute('hidden', '');
+      button.removeAttribute('hidden');
+      input.value = '';
+      if (container._addOutsideHandler) {
+        document.removeEventListener('click', container._addOutsideHandler);
+        container._addOutsideHandler = null;
+      }
+    };
+
+    const openForm = () => {
+      button.setAttribute('hidden', '');
+      form.removeAttribute('hidden');
+      input.focus();
+      input.select();
+      setTimeout(() => {
+        const handler = (evt) => {
+          if (container.contains(evt.target)) return;
+          closeForm();
+        };
+        container._addOutsideHandler = handler;
+        document.addEventListener('click', handler);
+      }, 0);
+    };
+
+    const submitForm = async () => {
+      const name = input.value.trim();
+      if (!name) {
+        input.focus();
+        return;
+      }
+      submitBtn.disabled = true;
+      try {
+        const columns = Array.isArray(this.boardConfig?.columns) ? this.boardConfig.columns.slice() : [];
+        const id = this.makeColumnId(name, columns);
+        const order = this.getNextColumnOrder(columns);
+        const next = columns.concat({ id, name, order });
+        this.boardConfig = await this.saveBoardConfig(next);
+        this.renderBoard();
+        if (window.Toast) window.Toast.success('Column added');
+      } catch (error) {
+        console.error('Failed to add column:', error);
+        if (window.Toast) window.Toast.error('Failed to add column');
+      } finally {
+        submitBtn.disabled = false;
+      }
+    };
+
+    button.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      openForm();
+    });
+
+    cancelBtn.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      closeForm();
+    });
+
+    submitBtn.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      submitForm();
+    });
+
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        closeForm();
+        return;
+      }
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        submitForm();
+      }
+    });
+  }
+
   wireBoardColumnRename() {
     if (!this.elements.boardColumns) return;
 
-    this.elements.boardColumns.querySelectorAll('.workspace-detail-board-column-title').forEach((titleEl) => {
-      titleEl.addEventListener('dblclick', (e) => {
+    this.elements.boardColumns.querySelectorAll('.workspace-detail-board-column-header').forEach((headerEl) => {
+      const titleEl = headerEl.querySelector('.workspace-detail-board-column-title');
+      const editBtn = headerEl.querySelector('.workspace-detail-board-column-edit-btn');
+      const titleWrap = headerEl.querySelector('.workspace-detail-board-column-title-wrap');
+      if (!titleEl || !editBtn) return;
+
+      editBtn.addEventListener('click', (e) => {
         e.preventDefault();
         e.stopPropagation();
 
@@ -1333,12 +1489,16 @@ export class WorkspaceDetailPage {
         input.value = currentName;
 
         titleEl.style.display = 'none';
-        const headerEl = titleEl.parentElement;
-        const countEl = headerEl?.querySelector('.workspace-detail-board-column-count');
-        if (headerEl && countEl) {
-          headerEl.insertBefore(input, countEl);
+        editBtn.style.display = 'none';
+        if (titleWrap && titleWrap.contains(editBtn)) {
+          titleWrap.insertBefore(input, editBtn);
         } else {
-          headerEl?.appendChild(input);
+          const countEl = headerEl.querySelector('.workspace-detail-board-column-count');
+          if (countEl) {
+            headerEl.insertBefore(input, countEl);
+          } else {
+            headerEl.appendChild(input);
+          }
         }
         input.focus();
         input.select();
@@ -1347,6 +1507,7 @@ export class WorkspaceDetailPage {
           const newName = input.value.trim();
           input.remove();
           titleEl.style.display = '';
+          editBtn.style.display = '';
 
           if (!newName || newName === currentName) return;
 
