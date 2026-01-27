@@ -725,12 +725,23 @@
       display: inline-flex;
       align-items: center;
       justify-content: center;
-      opacity: 0.6;
+      opacity: 0;
+      pointer-events: none;
+    }
+
+    .workspace-detail-board-column:hover .workspace-detail-board-column-edit-btn,
+    .workspace-detail-board-column-edit-btn:focus-visible {
+      opacity: 1;
+      pointer-events: auto;
     }
 
     .workspace-detail-board-column-edit-btn:hover {
-      opacity: 1;
       color: var(--text-primary);
+    }
+
+    .workspace-detail-board-column-edit-btn:focus-visible {
+      outline: 2px solid rgba(var(--primary-color-rgb, 99, 102, 241), 0.25);
+      outline-offset: 2px;
     }
 
     .workspace-detail-board-column-rename-input {
