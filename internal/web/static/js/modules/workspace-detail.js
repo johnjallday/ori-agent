@@ -345,12 +345,12 @@ export class WorkspaceDetailPage {
     if (!element) return;
 
     element.classList.add('is-editable');
-    element.title = 'Double-click to edit';
 
-    element.addEventListener('dblclick', (e) => {
-      e.preventDefault();
-      e.stopPropagation();
+    // Find the edit button in the container
+    const container = element.closest('.workspace-editable-field');
+    const editBtn = container?.querySelector('.workspace-edit-btn');
 
+    const startEdit = () => {
       const currentValue = element.textContent || '';
 
       // Create input/textarea
@@ -366,8 +366,9 @@ export class WorkspaceDetailPage {
       // Store original display
       const originalDisplay = element.style.display;
 
-      // Hide text, show input
+      // Hide text and edit button, show input
       element.style.display = 'none';
+      if (editBtn) editBtn.style.display = 'none';
       element.parentNode.insertBefore(input, element.nextSibling);
       input.focus();
       input.select();
@@ -376,6 +377,7 @@ export class WorkspaceDetailPage {
         const newValue = input.value.trim();
         input.remove();
         element.style.display = originalDisplay || '';
+        if (editBtn) editBtn.style.display = '';
 
         if (!save || newValue === currentValue) return;
 
@@ -419,7 +421,16 @@ export class WorkspaceDetailPage {
           finishEdit(false);
         }
       });
-    });
+    };
+
+    // Add click handler to edit button
+    if (editBtn) {
+      editBtn.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        startEdit();
+      });
+    }
   }
 
   /**

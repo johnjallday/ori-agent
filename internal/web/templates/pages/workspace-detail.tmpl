@@ -56,8 +56,22 @@
           <div class="modern-card p-4 mb-4">
             <div class="d-flex justify-content-between align-items-start">
               <div>
-                <h1 id="workspace-name" class="mb-2" style="font-size: 1.5rem; font-weight: 600; color: var(--text-primary);">Loading...</h1>
-                <p id="workspace-description" class="mb-0" style="color: var(--text-secondary); font-size: 0.875rem;">Loading workspace details...</p>
+                <div class="workspace-editable-field" id="workspace-name-container">
+                  <h1 id="workspace-name" class="mb-2" style="font-size: 1.5rem; font-weight: 600; color: var(--text-primary);">Loading...</h1>
+                  <button class="workspace-edit-btn" data-field="name" type="button" title="Edit name">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
+                      <path d="M20.71,7.04C21.1,6.65 21.1,6 20.71,5.63L18.37,3.29C18,2.9 17.35,2.9 16.96,3.29L15.12,5.12L18.87,8.87M3,17.25V21H6.75L17.81,9.93L14.06,6.18L3,17.25Z"/>
+                    </svg>
+                  </button>
+                </div>
+                <div class="workspace-editable-field" id="workspace-description-container">
+                  <p id="workspace-description" class="mb-0" style="color: var(--text-secondary); font-size: 0.875rem;">Loading workspace details...</p>
+                  <button class="workspace-edit-btn" data-field="description" type="button" title="Edit description">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
+                      <path d="M20.71,7.04C21.1,6.65 21.1,6 20.71,5.63L18.37,3.29C18,2.9 17.35,2.9 16.96,3.29L15.12,5.12L18.87,8.87M3,17.25V21H6.75L17.81,9.93L14.06,6.18L3,17.25Z"/>
+                    </svg>
+                  </button>
+                </div>
               </div>
               <div class="d-flex align-items-center gap-3">
                 <div class="text-center">
@@ -1207,19 +1221,59 @@
       color: var(--text-secondary);
     }
 
+    /* Editable field container with hover edit button */
+    .workspace-editable-field {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      position: relative;
+    }
+
+    .workspace-editable-field h1,
+    .workspace-editable-field p {
+      flex: 1;
+      min-width: 0;
+    }
+
+    .workspace-edit-btn {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      width: 24px;
+      height: 24px;
+      padding: 0;
+      border: none;
+      background: transparent;
+      color: var(--text-secondary);
+      border-radius: var(--radius-sm, 4px);
+      cursor: pointer;
+      opacity: 0;
+      transition: opacity 0.15s ease, background-color 0.15s ease, color 0.15s ease;
+      flex-shrink: 0;
+    }
+
+    .workspace-editable-field:hover .workspace-edit-btn {
+      opacity: 1;
+    }
+
+    .workspace-edit-btn:hover {
+      background-color: rgba(255, 255, 255, 0.1);
+      color: var(--primary-color);
+    }
+
+    .workspace-edit-btn:focus {
+      opacity: 1;
+      outline: none;
+      box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.3);
+    }
+
     /* Inline editable elements */
     #workspace-name.is-editable,
     #workspace-description.is-editable {
-      cursor: pointer;
       border-radius: var(--radius-sm, 4px);
       padding: 0.15rem 0.35rem;
       margin-left: -0.35rem;
       transition: background-color 0.15s ease;
-    }
-
-    #workspace-name.is-editable:hover,
-    #workspace-description.is-editable:hover {
-      background-color: rgba(255, 255, 255, 0.08);
     }
 
     .workspace-detail-inline-edit {
