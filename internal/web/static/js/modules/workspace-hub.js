@@ -1676,6 +1676,41 @@
       if (!data?.workspaceId || data.workspaceId !== state.selectedId) return;
       window.WorkspaceHubFiles.loadFiles(state.selectedId);
     }, 'workspaceHub');
+
+    // Refresh tasks when a task is created or updated
+    EventBus.on('task:created', (data) => {
+      const state = window.WorkspaceHubState.getState();
+      if (!state.selectedId) return;
+      if (!data?.workspaceId || data.workspaceId === state.selectedId) {
+        window.WorkspaceHubTasks.loadTasks(state.selectedId);
+      }
+    }, 'workspaceHub');
+
+    EventBus.on('task:updated', (data) => {
+      const state = window.WorkspaceHubState.getState();
+      if (!state.selectedId) return;
+      if (!data?.workspaceId || data.workspaceId === state.selectedId) {
+        window.WorkspaceHubTasks.loadTasks(state.selectedId);
+      }
+    }, 'workspaceHub');
+
+    // Refresh sessions when a session is created
+    EventBus.on('session:created', (data) => {
+      const state = window.WorkspaceHubState.getState();
+      if (!state.selectedId) return;
+      if (!data?.folderId || data.folderId === state.selectedId) {
+        window.WorkspaceHubSessions.loadSessions(state.selectedId);
+      }
+    }, 'workspaceHub');
+
+    // Refresh notes when a note is created
+    EventBus.on('note:created', (data) => {
+      const state = window.WorkspaceHubState.getState();
+      if (!state.selectedId) return;
+      if (!data?.workspaceId || data.workspaceId === state.selectedId) {
+        window.WorkspaceHubNotes.loadNotes(state.selectedId);
+      }
+    }, 'workspaceHub');
   }
 
   // Initialize

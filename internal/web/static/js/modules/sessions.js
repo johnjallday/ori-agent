@@ -1577,6 +1577,11 @@ const sessionManager = {
 
         this.openChatPanelIfAvailable();
 
+        // Emit event for workspace hub to refresh
+        if (window.EventBus) {
+          EventBus.emit('session:created', { session: data.session, folderId: null });
+        }
+
         return data.session;
       }
       return null;
@@ -1693,6 +1698,11 @@ const sessionManager = {
         }
 
         this.openChatPanelIfAvailable();
+
+        // Emit event for workspace hub to refresh
+        if (window.EventBus) {
+          EventBus.emit('session:created', { session: data.session, folderId });
+        }
       }
     } catch (error) {
       console.error('Failed to create session in folder:', error);
@@ -4010,6 +4020,11 @@ const sessionManager = {
 
       // Refresh folder tree to show new note
       this.renderFolderTree();
+
+      // Emit event for workspace hub to refresh
+      if (window.EventBus) {
+        EventBus.emit('note:created', { note: data.note, workspaceId: folderId });
+      }
 
       return data.note;
     } catch (error) {

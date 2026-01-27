@@ -1027,6 +1027,11 @@ class TaskModalController {
 
       this.close();
 
+      // Emit event for workspace hub to refresh
+      if (window.EventBus) {
+        EventBus.emit('task:created', { task: result.task, workspaceId: this.workspaceId });
+      }
+
       // Call the callback if provided
       if (this.onSaveCallback) {
         this.onSaveCallback();
@@ -1230,6 +1235,11 @@ class TaskModalController {
         this.showToast(workflowSteps.length > 1 ? 'Workflow created' : 'Task created', 'success');
         this.close();
 
+        // Emit event for workspace hub to refresh
+        if (window.EventBus) {
+          EventBus.emit('task:created', { workspaceId: this.workspaceId });
+        }
+
         if (this.onSaveCallback) {
           this.onSaveCallback();
         }
@@ -1285,6 +1295,11 @@ class TaskModalController {
 
       this.showToast('Task created', 'success');
       this.close();
+
+      // Emit event for workspace hub to refresh
+      if (window.EventBus) {
+        EventBus.emit('task:created', { task: createdTask, workspaceId: this.workspaceId });
+      }
 
       // Call the callback if provided
       if (this.onSaveCallback) {
@@ -1441,6 +1456,11 @@ class TaskModalController {
 
       this.showToast('Task updated', 'success');
       this.close();
+
+      // Emit event for workspace hub to refresh
+      if (window.EventBus) {
+        EventBus.emit('task:updated', { taskId: this.editingTaskId, workspaceId: this.workspaceId });
+      }
 
       // Call the callback if provided
       if (this.onSaveCallback) {
