@@ -782,36 +782,37 @@ async function renderPlugins() {
   container.innerHTML = '<div class="text-center py-4" style="color: var(--text-secondary);">Loading plugins...</div>';
 
   // Check configuration status for all plugins in parallel
-  const pluginNames = plugins.map(plugin =>
-    typeof plugin === 'string' ? plugin : (plugin?.name || plugin?.id || plugin?.plugin || '')
-  );
-
   const configChecks = await Promise.all(
-    pluginNames.map(name => checkPluginHasConfig(name))
+    plugins.map(async (plugin) => {
+      const name = typeof plugin === 'string' ? plugin : (plugin?.name || plugin?.id || plugin?.plugin || '');
+      const hasConfig = await checkPluginHasConfig(name);
+      return { name, hasConfig };
+    })
   );
 
   const configStatus = new Map();
-  pluginNames.forEach((name, index) => {
-    configStatus.set(name, configChecks[index]);
+  configChecks.forEach(result => {
+    configStatus.set(result.name, result.hasConfig);
   });
 
   container.innerHTML = '';
   plugins.forEach(plugin => {
-    const name = typeof plugin === 'string' ? plugin : (plugin?.name || plugin?.id || plugin?.plugin || '');
+    const rawName = typeof plugin === 'string' ? plugin : (plugin?.name || plugin?.id || plugin?.plugin || '');
+    const displayName = typeof plugin === 'object' && plugin?.metadata?.name ? plugin.metadata.name : stripVersionSuffix(rawName);
     const version = typeof plugin === 'object' && plugin ? (plugin.version || plugin?.meta?.version || '') : '';
-    const hasConfig = configStatus.get(name) || false;
+    const hasConfig = configStatus.get(rawName) || false;
 
     const item = document.createElement('div');
     item.className = 'plugin-item';
     item.style.cssText = 'display: flex; justify-content: space-between; align-items: center;';
     item.innerHTML = `
             <div>
-                <div class="plugin-name">${escapeHtml(name || '(unknown plugin)')}</div>
+                <div class="plugin-name">${escapeHtml(displayName || '(unknown plugin)')}</div>
                 ${version ? `<div class="plugin-version">v${escapeHtml(version)}</div>` : ''}
             </div>
             ${hasConfig ? `
                 <button class="modern-btn modern-btn-secondary plugin-config-btn"
-                        data-plugin-name="${escapeHtml(name)}"
+                        data-plugin-name="${escapeHtml(rawName)}"
                         title="Configure plugin"
                         style="padding: 0.4rem 0.8rem; font-size: 12px;">
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
@@ -1013,6 +1014,7 @@ function renderAvailablePlugins() {
   container.innerHTML = '';
   allAvailablePlugins.forEach(plugin => {
     const pluginName = plugin.name || plugin;
+    const displayName = plugin.metadata?.name || stripVersionSuffix(pluginName);
     const isEnabled = enabledSet.has(pluginName);
 
     const item = document.createElement('div');
@@ -1020,7 +1022,7 @@ function renderAvailablePlugins() {
     item.style.cssText = 'display: flex; justify-content: space-between; align-items: center; padding: 12px; background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 8px;';
     item.innerHTML = `
             <div style="flex: 1;">
-                <div style="font-weight: 500; color: var(--text-primary);">${escapeHtml(pluginName)}</div>
+                <div style="font-weight: 500; color: var(--text-primary);">${escapeHtml(displayName)}</div>
                 ${plugin.description ? `<div style="font-size: 12px; color: var(--text-secondary); margin-top: 4px;">${escapeHtml(plugin.description)}</div>` : ''}
             </div>
             <label class="toggle-switch" style="margin-left: 12px;">

@@ -88,7 +88,7 @@
       <div class="plugin-update-item mb-3 p-3" style="border: 1px solid var(--border-color); border-radius: 8px; background: var(--bg-secondary);">
         <div class="d-flex justify-content-between align-items-start">
           <div class="flex-grow-1">
-            <h6 class="mb-2" style="color: var(--text-primary);">${update.name}</h6>
+            <h6 class="mb-2" style="color: var(--text-primary);">${stripVersionSuffix(update.name)}</h6>
             <p class="text-muted small mb-2">${update.description || ''}</p>
             <div class="d-flex align-items-center gap-3">
               <div>

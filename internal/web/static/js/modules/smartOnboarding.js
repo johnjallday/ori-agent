@@ -756,6 +756,7 @@ export class SmartOnboardingManager {
   // Render a single plugin item
   renderPluginItem(plugin, index, isRecommended) {
     const aiRec = this.getAIRecommendation(plugin.name);
+    const displayName = plugin.metadata?.name || stripVersionSuffix(plugin.name || '');
     const relevanceBadgeColor = aiRec?.relevance === 'high' ? 'bg-success' :
       aiRec?.relevance === 'medium' ? 'bg-info' : 'bg-secondary';
 
@@ -775,7 +776,7 @@ export class SmartOnboardingManager {
           <label class="form-check-label w-100" for="plugin-${index}">
             <div class="d-flex justify-content-between align-items-start">
               <div style="flex: 1;">
-                <strong>${this.escapeHtml(plugin.name)}</strong>
+                <strong>${this.escapeHtml(displayName)}</strong>
                 ${isRecommended && aiRec ? `<span class="badge ${relevanceBadgeColor} ms-1" style="font-size: 0.65rem;">${aiRec.relevance === 'high' ? 'Highly Recommended' : 'Recommended'}</span>` : ''}
                 <small class="text-muted d-block">${this.escapeHtml(plugin.description || 'No description')}</small>
                 ${reasonHtml}
