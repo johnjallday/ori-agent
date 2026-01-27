@@ -6,10 +6,6 @@ const pluginsLog = Logger.withContext('Plugins');
 // Plugin upload state management
 let uploadListenersSetup = false;
 
-function stripVersionSuffix(name = '') {
-  return name.replace(/-\d+\.\d+\.\d+(?:[-+][\w\.]+)?$/, '');
-}
-
 function normalizePluginName(name = '') {
   return stripVersionSuffix(name.toLowerCase().replace(/_/g, '-').trim());
 }

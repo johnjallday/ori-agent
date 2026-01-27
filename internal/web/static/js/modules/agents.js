@@ -1242,7 +1242,7 @@ async function loadAgentPlugins(agentName, accordionId) {
       .filter(plugin => plugin.path && plugin.path.includes('uploaded_plugins'))
       .map(plugin => ({
         ...plugin,
-        displayName: plugin.metadata?.name || plugin.name.replace(/-\d+\.\d+\.\d+(?:[-+][\w\.]+)?$/, '')
+        displayName: plugin.metadata?.name || stripVersionSuffix(plugin.name || '')
       }));
 
     if (localPlugins.length === 0) {
@@ -1253,7 +1253,7 @@ async function loadAgentPlugins(agentName, accordionId) {
     // Render plugins list
     let html = '';
     localPlugins.forEach(plugin => {
-      const normalizedName = plugin.name.toLowerCase().replace(/_/g, '-').replace(/-\d+\.\d+\.\d+(?:[-+][\w\.]+)?$/, '').trim();
+      const normalizedName = stripVersionSuffix(plugin.name.toLowerCase().replace(/_/g, '-')).trim();
       const isActive = activePluginNames.has(normalizedName);
 
       html += `
@@ -1284,7 +1284,7 @@ async function loadAgentPlugins(agentName, accordionId) {
 
 // Toggle plugin for an agent
 async function toggleAgentPlugin(agentName, pluginName, pluginPath, enabled, accordionId) {
-  const normalizedName = pluginName.toLowerCase().replace(/_/g, '-').replace(/-\d+\.\d+\.\d+(?:[-+][\w\.]+)?$/, '').trim();
+  const normalizedName = stripVersionSuffix(pluginName.toLowerCase().replace(/_/g, '-')).trim();
   const checkbox = document.getElementById(`plugin-${normalizedName}-${accordionId}`);
   const originalState = !enabled;
 

@@ -421,6 +421,10 @@ class PluginMarketplace {
     return this.marketplaces.get(marketplaceId) || null;
   }
 
+  getDisplayName(plugin) {
+    return plugin.metadata?.name || stripVersionSuffix(plugin.name || '');
+  }
+
   // Get source marketplace badges for a plugin (supports multiple marketplaces)
   getSourceBadge(plugin) {
     // Use backend-provided source_marketplaces array, fall back to single source_marketplace
@@ -516,7 +520,7 @@ class PluginMarketplace {
     const isInstalled = this.isPluginInstalled(plugin);
     const hasUpdate = this.updates.find(u => u.plugin_name === plugin.name);
 
-    document.getElementById('pluginDetailsTitle').textContent = plugin.name;
+    document.getElementById('pluginDetailsTitle').textContent = this.getDisplayName(plugin);
     document.getElementById('pluginDetailsBody').innerHTML = `
             <div class="mb-3">
                 <h6>Description</h6>
@@ -822,7 +826,7 @@ class PluginMarketplace {
         continue;
       }
       addVariant(normalized);
-      const base = this.stripVersionSuffix(normalized);
+      const base = stripVersionSuffix(normalized);
       if (base) {
         addVariant(base);
       }
@@ -846,7 +850,7 @@ class PluginMarketplace {
       score += 3;
     }
     const normalizedName = this.normalizeName(plugin.name);
-    const baseName = this.stripVersionSuffix(normalizedName);
+    const baseName = stripVersionSuffix(normalizedName);
     if (plugin.metadata?.name && baseName && plugin.metadata.name.toLowerCase() === baseName) {
       score += 2;
     } else if (normalizedName && normalizedName === baseName) {
@@ -871,7 +875,7 @@ class PluginMarketplace {
       }
       variants.add(normalized);
 
-      const versionStripped = this.stripVersionSuffix(normalized);
+      const versionStripped = stripVersionSuffix(normalized);
       if (versionStripped && versionStripped !== normalized) {
         variants.add(versionStripped);
       }
@@ -893,14 +897,6 @@ class PluginMarketplace {
       return '';
     }
     return name.trim().toLowerCase().replace(/_/g, '-');
-  }
-
-  stripVersionSuffix(name) {
-    if (!name) {
-      return '';
-    }
-    const stripped = name.replace(/-\d+\.\d+\.\d+(?:[-+][\w\.]+)?$/, '');
-    return stripped;
   }
 
   extractRepoSlug(repoUrl) {
@@ -926,7 +922,7 @@ class PluginMarketplace {
                 <div class="card h-100 plugin-card ${compatibility.cssClass}" style="cursor: pointer; ${!compatibility.compatible ? 'opacity: 0.7;' : ''}" onclick="marketplace.showPluginDetails('${plugin.name}')">
                     <div class="card-body">
                         <div class="d-flex justify-content-between align-items-start mb-2">
-                            <h5 class="card-title mb-0">${plugin.name}</h5>
+                            <h5 class="card-title mb-0">${escapeHtml(this.getDisplayName(plugin))}</h5>
                             <div class="d-flex flex-column align-items-end gap-1">
                                 ${isInstalled ? `<span class="badge bg-success-subtle text-success">Installed</span>` : ''}
                                 ${updateInfo ? `<span class="badge bg-warning-subtle text-warning">Update</span>` : ''}
@@ -977,7 +973,7 @@ class PluginMarketplace {
                         <div class="plugin-info">
                             <div class="d-flex justify-content-between align-items-start mb-1">
                                 <div>
-                                    <h5 class="card-title mb-1">${plugin.name}</h5>
+                                    <h5 class="card-title mb-1">${escapeHtml(this.getDisplayName(plugin))}</h5>
                                     <p class="text-muted mb-2 small">${plugin.description || 'No description available'}</p>
                                 </div>
                                 <div class="d-flex flex-column align-items-end gap-1">

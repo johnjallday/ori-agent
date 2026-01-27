@@ -66,11 +66,22 @@ const DOMUtils = (function() {
       .replace(/\r/g, '\\r');
   }
 
+  /**
+   * Strip version suffix from plugin names (e.g., "name-0.0.1" -> "name")
+   * @param {string} name - The plugin name
+   * @returns {string} The name without version suffix
+   */
+  function stripVersionSuffix(name = '') {
+    if (!name) return '';
+    return name.replace(/-\d+\.\d+\.\d+(?:[-+][\w\.]+)?$/, '');
+  }
+
   // Public API
   return {
     escapeHtml,
     escapeAttr,
-    escapeJs
+    escapeJs,
+    stripVersionSuffix
   };
 })();
 
@@ -79,6 +90,7 @@ const DOMUtils = (function() {
 const escapeHtml = DOMUtils.escapeHtml;
 const escapeAttr = DOMUtils.escapeAttr;
 const escapeJs = DOMUtils.escapeJs;
+const stripVersionSuffix = DOMUtils.stripVersionSuffix;
 
 // Export for ES modules (if supported)
 if (typeof module !== 'undefined' && module.exports) {

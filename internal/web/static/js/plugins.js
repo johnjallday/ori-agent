@@ -16,6 +16,10 @@ let totalPages = 1;
 let sortColumn = 'name';
 let sortDirection = 'asc';
 
+function getDisplayName(plugin) {
+  return plugin.metadata?.name || stripVersionSuffix(plugin.name || '');
+}
+
 // Initialize page
 document.addEventListener('DOMContentLoaded', () => {
   initializeEventListeners();
@@ -113,6 +117,30 @@ async function testPlugin(pluginName) {
   const modal = createTestModal(pluginName);
   document.body.appendChild(modal);
   showModal(modal);
+}
+
+async function showPluginTools(pluginName) {
+  try {
+    const response = await fetch(`/api/plugins/${pluginName}`);
+    const plugin = await response.json();
+
+    if (!plugin.enabled) {
+         showToast('Plugin must be enabled to view tools', 'warning');
+         return;
+    }
+    
+    if (!plugin.definition) {
+        showToast('No tool definition available for this plugin', 'warning');
+        return;
+    }
+
+    const modal = createToolsModal(plugin);
+    document.body.appendChild(modal);
+    showModal(modal);
+  } catch (error) {
+    console.error('Failed to load plugin tools:', error);
+    showToast('Failed to load plugin tools', 'error');
+  }
 }
 
 async function showPluginDetails(pluginName) {
@@ -306,7 +334,7 @@ function renderPluginsTable() {
             <td>
                 <div class="plugin-name-cell">
                     <div>
-                        <div class="plugin-name">${escapeHtml(plugin.name)}</div>
+                        <div class="plugin-name">${escapeHtml(getDisplayName(plugin))}</div>
                         <div class="plugin-description">${escapeHtml(plugin.description || 'No description')}</div>
                         ${renderTagBadges(plugin.tags)}
                     </div>
@@ -318,6 +346,7 @@ function renderPluginsTable() {
             <td>
                 <div class="action-buttons">
                     <button class="btn-action" onclick="showPluginDetails('${escapeHtml(plugin.name)}')">Details</button>
+                    <button class="btn-action" onclick="showPluginTools('${escapeHtml(plugin.name)}')" ${plugin.enabled ? '' : 'disabled style="opacity: 0.5; cursor: not-allowed;" title="Enable plugin to view tools"'}>Tools</button>
                     <button class="btn-action" onclick="testPlugin('${escapeHtml(plugin.name)}')">Test</button>
                     <button class="btn-action btn-danger" onclick="deletePlugin('${escapeHtml(plugin.name)}')">Remove</button>
                 </div>
@@ -349,7 +378,7 @@ function renderMobileCards() {
             <div class="plugin-card-header">
                 <input type="checkbox" class="plugin-checkbox plugin-card-checkbox" data-plugin="${plugin.name}" ${selectedPlugins.has(plugin.name) ? 'checked' : ''} aria-label="Select ${plugin.name}">
                 <div class="plugin-card-info">
-                    <div class="plugin-card-name">${escapeHtml(plugin.name)}</div>
+                    <div class="plugin-card-name">${escapeHtml(getDisplayName(plugin))}</div>
                     <div class="plugin-card-description">${escapeHtml(plugin.description || 'No description')}</div>
                 </div>
             </div>
@@ -361,6 +390,7 @@ function renderMobileCards() {
             ${renderTagBadges(plugin.tags)}
             <div class="plugin-card-actions">
                 <button class="btn-action" onclick="showPluginDetails('${escapeHtml(plugin.name)}')">Details</button>
+                <button class="btn-action" onclick="showPluginTools('${escapeHtml(plugin.name)}')" ${plugin.enabled ? '' : 'disabled style="opacity: 0.5; cursor: not-allowed;" title="Enable plugin to view tools"'}>Tools</button>
                 <button class="btn-action" onclick="testPlugin('${escapeHtml(plugin.name)}')">Test</button>
                 <button class="btn-action btn-danger" onclick="deletePlugin('${escapeHtml(plugin.name)}')">Remove</button>
             </div>
@@ -444,15 +474,102 @@ function renderNotifications() {
 }
 
 // Modal creation functions
+function createToolsModal(plugin) {
+  const definition = plugin.definition;
+  const modal = document.createElement('div');
+  modal.className = 'modal-overlay';
+  
+  let toolsHtml = '';
+  
+  if (definition.operations) {
+      toolsHtml += `
+        <div style="margin-bottom: 1.5rem;">
+            <h3 style="font-size: 1rem; margin-bottom: 0.5rem; color: var(--text-secondary);">Operations</h3>
+            <div class="table-container">
+                <table style="width: 100%; border-collapse: collapse;">
+                    <thead>
+                        <tr>
+                            <th style="text-align: left; padding: 0.5rem; border-bottom: 1px solid var(--border-color);">Name</th>
+                            <th style="text-align: left; padding: 0.5rem; border-bottom: 1px solid var(--border-color);">Description</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${Object.entries(definition.operations).map(([name, op]) => `
+                            <tr>
+                                <td style="padding: 0.5rem; border-bottom: 1px solid var(--border-color); font-family: monospace;">${escapeHtml(name)}</td>
+                                <td style="padding: 0.5rem; border-bottom: 1px solid var(--border-color);">${escapeHtml(op.description || '')}</td>
+                            </tr>
+                        `).join('')}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+      `;
+  }
+  
+  if (definition.parameters && definition.parameters.length > 0) {
+       toolsHtml += `
+        <div style="margin-bottom: 1.5rem;">
+            <h3 style="font-size: 1rem; margin-bottom: 0.5rem; color: var(--text-secondary);">Parameters</h3>
+             <div class="table-container">
+                <table style="width: 100%; border-collapse: collapse;">
+                    <thead>
+                        <tr>
+                            <th style="text-align: left; padding: 0.5rem; border-bottom: 1px solid var(--border-color);">Name</th>
+                            <th style="text-align: left; padding: 0.5rem; border-bottom: 1px solid var(--border-color);">Type</th>
+                            <th style="text-align: left; padding: 0.5rem; border-bottom: 1px solid var(--border-color);">Description</th>
+                            <th style="text-align: left; padding: 0.5rem; border-bottom: 1px solid var(--border-color);">Required</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${definition.parameters.map(param => `
+                            <tr>
+                                <td style="padding: 0.5rem; border-bottom: 1px solid var(--border-color); font-family: monospace;">${escapeHtml(param.name)}</td>
+                                <td style="padding: 0.5rem; border-bottom: 1px solid var(--border-color); font-family: monospace;">${escapeHtml(param.type)}</td>
+                                <td style="padding: 0.5rem; border-bottom: 1px solid var(--border-color);">${escapeHtml(param.description || '')}</td>
+                                <td style="padding: 0.5rem; border-bottom: 1px solid var(--border-color); text-align: center;">
+                                    ${param.required ? '<span style="color: var(--danger-color);">●</span>' : '<span style="color: var(--text-muted);">○</span>'}
+                                </td>
+                            </tr>
+                        `).join('')}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+       `;
+  }
+
+  modal.innerHTML = `
+      <div class="modal-content" style="max-width: 800px;">
+          <div class="modal-header">
+              <h2 class="modal-title">Tools: ${escapeHtml(getDisplayName(plugin))}</h2>
+              <button class="modal-close" onclick="closeModal(this)">&times;</button>
+          </div>
+          <div class="modal-body">
+            <div style="margin-bottom: 1.5rem;">
+                <h3 style="font-size: 1rem; margin-bottom: 0.5rem; color: var(--text-secondary);">Definition</h3>
+                <p style="color: var(--text-primary);">${escapeHtml(definition.description || 'No description')}</p>
+            </div>
+            ${toolsHtml}
+          </div>
+          <div class="modal-footer">
+              <button class="btn-modern btn-secondary" onclick="closeModal(this)">Close</button>
+          </div>
+      </div>
+  `;
+  return modal;
+}
+
 function createDetailsModal(plugin) {
   const modal = document.createElement('div');
   modal.className = 'modal-overlay';
-  modal.innerHTML = `
-        <div class="modal-content">
-            <div class="modal-header">
-                <h2 class="modal-title">${plugin.name}</h2>
-                <button class="modal-close" onclick="closeModal(this)">&times;</button>
-            </div>
+      modal.innerHTML = `
+          <div class="modal-content">
+              <div class="modal-header">
+                  <h2 class="modal-title">${escapeHtml(getDisplayName(plugin))}</h2>
+                  <button class="modal-close" onclick="closeModal(this)">&times;</button>
+              </div>
+  
             <div class="modal-body">
                 <div style="margin-bottom: 1.5rem;">
                     <h3 style="font-size: 1rem; margin-bottom: 0.5rem; color: var(--text-secondary);">Description</h3>
@@ -497,7 +614,7 @@ function createTestModal(pluginName) {
   modal.innerHTML = `
         <div class="modal-content">
             <div class="modal-header">
-                <h2 class="modal-title">Test Plugin: ${pluginName}</h2>
+                <h2 class="modal-title">Test Plugin: ${escapeHtml(stripVersionSuffix(pluginName))}</h2>
                 <button class="modal-close" onclick="closeModal(this)">&times;</button>
             </div>
             <div class="modal-body">

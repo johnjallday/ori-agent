@@ -93,7 +93,7 @@
 
   // Format plugin name for display (e.g., "ori-music-project-manager" -> "Music Project Manager")
   function formatPluginName(name) {
-    return name
+    return stripVersionSuffix(name)
       .replace(/^ori-/, '')  // Remove ori- prefix
       .replace(/-/g, ' ')     // Replace hyphens with spaces
       .replace(/\b\w/g, c => c.toUpperCase());  // Capitalize first letter of each word

@@ -114,7 +114,12 @@ function updateBannerContent(plugins) {
   const actionsDiv = bannerElement.querySelector('.banner-actions');
 
   // Show plugin names
-  const pluginNames = plugins.map(p => p.name || p.plugin_name || p).join(', ');
+  const pluginNames = plugins.map(p => {
+    if (typeof p === 'object') {
+      return p.metadata?.name || stripVersionSuffix(p.name || p.plugin_name || '');
+    }
+    return stripVersionSuffix(p);
+  }).join(', ');
   pluginsSpan.textContent = pluginNames;
 
   // Clear existing buttons
@@ -124,10 +129,11 @@ function updateBannerContent(plugins) {
   if (plugins.length <= 2) {
     plugins.forEach(plugin => {
       const pluginName = plugin.name || plugin.plugin_name || plugin;
+      const displayName = typeof plugin === 'object' ? (plugin.metadata?.name || stripVersionSuffix(pluginName)) : stripVersionSuffix(pluginName);
       const btn = document.createElement('button');
       btn.type = 'button';
       btn.className = 'banner-configure-btn';
-      btn.textContent = `Configure ${pluginName}`;
+      btn.textContent = `Configure ${displayName}`;
       btn.addEventListener('click', () => {
         if (window.showPluginConfigModal) {
           window.showPluginConfigModal(pluginName);
@@ -142,12 +148,14 @@ function updateBannerContent(plugins) {
     btn.className = 'banner-configure-btn';
     btn.textContent = `Configure ${plugins.length} Plugins`;
     btn.addEventListener('click', () => {
-      // Configure first plugin, user can configure others after
-      const firstPlugin = plugins[0];
-      const pluginName = firstPlugin.name || firstPlugin.plugin_name || firstPlugin;
-      if (window.showPluginConfigModal) {
-        window.showPluginConfigModal(pluginName);
-      }
+          // Configure first plugin, user can configure others after
+          const firstPlugin = plugins[0];
+          const pluginName = firstPlugin.name || firstPlugin.plugin_name || firstPlugin;
+          const displayName = typeof firstPlugin === 'object' ? (firstPlugin.metadata?.name || stripVersionSuffix(pluginName)) : stripVersionSuffix(pluginName);
+          if (window.showPluginConfigModal) {
+            window.showPluginConfigModal(pluginName);
+          }
+      
     });
     actionsDiv.appendChild(btn);
   }

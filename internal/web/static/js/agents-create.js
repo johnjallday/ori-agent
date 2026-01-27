@@ -137,10 +137,11 @@ function renderPlugins() {
   availablePlugins.forEach((plugin, index) => {
     const item = document.createElement('div');
     item.className = 'plugin-item';
+    const displayName = plugin.metadata?.name || stripVersionSuffix(plugin.name || '');
     item.innerHTML = `
             <input type="checkbox" id="plugin-${index}" class="plugin-checkbox" value="${escapeHtml(plugin.name)}">
             <label for="plugin-${index}" class="plugin-info" style="cursor: pointer;">
-                <div class="plugin-name">${escapeHtml(plugin.name)}</div>
+                <div class="plugin-name">${escapeHtml(displayName)}</div>
                 ${plugin.description ? `<div class="plugin-description">${escapeHtml(plugin.description)}</div>` : ''}
             </label>
         `;

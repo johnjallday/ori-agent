@@ -62,6 +62,7 @@ function displayOnlinePlugins(onlinePlugins, installedPluginNames = new Set()) {
 
   onlinePluginsList.innerHTML = onlinePlugins.map(plugin => {
     const isInstalled = installedPluginNames.has(plugin.name);
+    const displayName = plugin.metadata?.name || stripVersionSuffix(plugin.name || '');
     const githubUrl = plugin.github_repo;
     const version = plugin.version || 'Unknown';
 
@@ -70,7 +71,7 @@ function displayOnlinePlugins(onlinePlugins, installedPluginNames = new Set()) {
         <div class="d-flex justify-content-between align-items-start">
           <div class="flex-grow-1">
             <div class="d-flex align-items-center mb-2">
-              <h6 class="mb-0 me-2" style="color: var(--text-primary);">${plugin.name}</h6>
+              <h6 class="mb-0 me-2" style="color: var(--text-primary);">${escapeHtml(displayName)}</h6>
               <span class="badge" style="background: var(--accent-color); color: white;">v${version}</span>
               ${isInstalled ? '<span class="badge bg-success ms-2">Installed</span>' : ''}
             </div>
