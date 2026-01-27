@@ -198,7 +198,9 @@
     const items = notes.slice(0, 5).map((note) => {
       const title = note.name || 'Untitled Note';
       const updated = formatDate(note.updated_at || note.created_at);
-      const preview = note.content ? note.content.substring(0, 80).replace(/\n/g, ' ') : '';
+      // API returns 'preview' for list items, 'content' for full note
+      const notePreview = note.preview || note.content || '';
+      const preview = notePreview.substring(0, 80).replace(/\n/g, ' ');
       const isSelected = selectedSet.has(note.id);
 
       return `
@@ -208,7 +210,7 @@
           </div>
           <div class="hub-note-info">
             <div class="hub-note-title">${escapeHtml(title)}</div>
-            <div class="hub-note-preview">${escapeHtml(preview)}${note.content && note.content.length > 80 ? '...' : ''}</div>
+            <div class="hub-note-preview">${preview ? escapeHtml(preview) + (notePreview.length > 80 ? '...' : '') : '<span class="text-muted">Empty note</span>'}</div>
             <div class="hub-note-meta">${escapeHtml(updated)}</div>
           </div>
           <button class="modern-btn modern-btn-secondary hub-note-open" data-action="open">Open</button>
