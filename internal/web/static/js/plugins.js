@@ -456,9 +456,9 @@ function renderStatusBadge(plugin) {
 }
 
 function renderConfigStatus(plugin) {
-  if (plugin.is_configured) {
+  if (plugin.is_configured === true || plugin.is_configured === 'true') {
     return `<span style="color: var(--success-color);" title="Configured">✓</span>`;
-  } else if (plugin.is_configured === false) {
+  } else if (plugin.supports_initialization) {
     return `<span style="color: var(--warning-color); font-weight: bold;" title="Configuration Required">!</span>`;
   }
   return `<span style="color: var(--text-muted);">-</span>`;
@@ -716,7 +716,8 @@ function applyFilters() {
 function getPluginStatus(plugin) {
   if (plugin.health_status === 'error') return 'error';
   if (plugin.needs_update) return 'update';
-  if (plugin.supports_initialization && (plugin.is_configured === false || plugin.is_configured === 'false')) return 'not-configured';
+  const isConfigured = plugin.is_configured === true || plugin.is_configured === 'true';
+  if (plugin.supports_initialization && !isConfigured) return 'not-configured';
   return 'healthy';
 }
 
