@@ -4564,6 +4564,15 @@ const sessionManager = {
   async saveCurrentNote() {
     const nameInput = document.getElementById('noteNameInput');
     const contentInput = document.getElementById('noteContentInput');
+
+    // Debug logging to help identify the issue
+    console.log('[Note Save Debug]', {
+      nameInputExists: !!nameInput,
+      contentInputExists: !!contentInput,
+      nameValue: nameInput?.value,
+      contentValue: contentInput?.value?.substring(0, 50)
+    });
+
     const noteName = nameInput?.value?.trim() || 'Untitled Note';
     const noteContent = contentInput?.value || '';
 
