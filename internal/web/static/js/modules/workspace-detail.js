@@ -811,6 +811,12 @@ export class WorkspaceDetailPage {
           card._editOutsideHandler = null;
         }
       });
+      this.elements.boardColumns.querySelectorAll('.workspace-detail-board-add').forEach((addEl) => {
+        if (addEl._addOutsideHandler) {
+          document.removeEventListener('click', addEl._addOutsideHandler);
+          addEl._addOutsideHandler = null;
+        }
+      });
       this.elements.boardColumns.innerHTML = '';
       this.elements.boardEmpty.style.display = '';
       return;
@@ -827,6 +833,12 @@ export class WorkspaceDetailPage {
         card._editOutsideHandler = null;
       }
     });
+    this.elements.boardColumns.querySelectorAll('.workspace-detail-board-add').forEach((addEl) => {
+      if (addEl._addOutsideHandler) {
+        document.removeEventListener('click', addEl._addOutsideHandler);
+        addEl._addOutsideHandler = null;
+      }
+    });
 
     this.elements.boardColumns.innerHTML = columns.map(col => {
       const columnTasks = tasksByColumn[col.id] || [];
@@ -838,6 +850,16 @@ export class WorkspaceDetailPage {
           </div>
           <div class="workspace-detail-board-column-body" data-column-id="${this.escapeHtml(col.id)}">
             ${columnTasks.map(task => this.renderBoardCard(task)).join('')}
+            <div class="workspace-detail-board-add" data-column-id="${this.escapeHtml(col.id)}">
+              <button class="workspace-detail-board-add-btn" type="button">+ Add card</button>
+              <div class="workspace-detail-board-add-form" hidden>
+                <input class="workspace-detail-board-add-input" type="text" placeholder="Task title" />
+                <div class="workspace-detail-board-add-actions">
+                  <button class="modern-btn modern-btn-secondary workspace-detail-board-add-cancel" type="button">Cancel</button>
+                  <button class="modern-btn modern-btn-primary workspace-detail-board-add-submit" type="button">Add</button>
+                </div>
+              </div>
+            </div>
           </div>
         </div>
       `;
@@ -845,6 +867,7 @@ export class WorkspaceDetailPage {
 
     this.wireBoardDragAndDrop();
     this.wireBoardCardEditing();
+    this.wireBoardCardAdd();
     this.wireBoardColumnRename();
   }
 
@@ -1199,6 +1222,94 @@ export class WorkspaceDetailPage {
             this.saveBoardCardEdits(card);
           }
         });
+      });
+    });
+  }
+
+  wireBoardCardAdd() {
+    if (!this.elements.boardColumns) return;
+
+    this.elements.boardColumns.querySelectorAll('.workspace-detail-board-add').forEach((container) => {
+      const columnId = container.dataset.columnId || '';
+      const button = container.querySelector('.workspace-detail-board-add-btn');
+      const form = container.querySelector('.workspace-detail-board-add-form');
+      const input = container.querySelector('.workspace-detail-board-add-input');
+      const cancelBtn = container.querySelector('.workspace-detail-board-add-cancel');
+      const submitBtn = container.querySelector('.workspace-detail-board-add-submit');
+
+      if (!button || !form || !input || !cancelBtn || !submitBtn) return;
+
+      const closeForm = () => {
+        form.setAttribute('hidden', '');
+        button.removeAttribute('hidden');
+        input.value = '';
+        if (container._addOutsideHandler) {
+          document.removeEventListener('click', container._addOutsideHandler);
+          container._addOutsideHandler = null;
+        }
+      };
+
+      const openForm = () => {
+        button.setAttribute('hidden', '');
+        form.removeAttribute('hidden');
+        input.focus();
+        input.select();
+        setTimeout(() => {
+          const handler = (evt) => {
+            if (container.contains(evt.target)) return;
+            closeForm();
+          };
+          container._addOutsideHandler = handler;
+          document.addEventListener('click', handler);
+        }, 0);
+      };
+
+      const submitForm = async () => {
+        const title = input.value.trim();
+        if (!title) {
+          input.focus();
+          return;
+        }
+        submitBtn.disabled = true;
+        try {
+          await this.createTask(title, '', columnId);
+          closeForm();
+        } catch (error) {
+          console.error('Failed to create task:', error);
+          if (window.Toast) window.Toast.error('Failed to create task');
+        } finally {
+          submitBtn.disabled = false;
+        }
+      };
+
+      button.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        openForm();
+      });
+
+      cancelBtn.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        closeForm();
+      });
+
+      submitBtn.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        submitForm();
+      });
+
+      input.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') {
+          e.preventDefault();
+          closeForm();
+          return;
+        }
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          submitForm();
+        }
       });
     });
   }
@@ -1798,7 +1909,7 @@ export class WorkspaceDetailPage {
   /**
    * Create a new task
    */
-  async createTask(name, description = '') {
+  async createTask(name, description = '', columnId = '') {
     try {
       const response = await fetch('/api/orchestration/tasks', {
         method: 'POST',
@@ -1813,8 +1924,17 @@ export class WorkspaceDetailPage {
 
       if (!response.ok) throw new Error('Failed to create task');
 
+      const data = await response.json();
+      const createdTask = data.task || data;
+
+      if (columnId && createdTask?.id) {
+        await this.updateTaskKanbanColumn(createdTask.id, columnId);
+        await this.loadTasks();
+      } else {
+        await this.loadTasks();
+      }
+
       if (window.Toast) window.Toast.success('Task created');
-      await this.loadTasks();
     } catch (error) {
       console.error('Failed to create task:', error);
       if (window.Toast) window.Toast.error('Failed to create task');

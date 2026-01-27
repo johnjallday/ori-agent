@@ -823,6 +823,64 @@
       gap: 0.4rem;
     }
 
+    .workspace-detail-board-add {
+      margin-top: 0.4rem;
+    }
+
+    .workspace-detail-board-add-btn {
+      width: 100%;
+      border: 1px dashed var(--border-color);
+      background: transparent;
+      color: var(--text-secondary);
+      border-radius: 4px;
+      padding: 0.3rem 0.4rem;
+      font-size: 0.65rem;
+      text-align: left;
+      cursor: pointer;
+    }
+
+    .workspace-detail-board-add-btn:hover {
+      border-color: var(--primary-color);
+      color: var(--text-primary);
+    }
+
+    .workspace-detail-board-add-form {
+      display: flex;
+      flex-direction: column;
+      gap: 0.35rem;
+    }
+
+    .workspace-detail-board-add-form[hidden] {
+      display: none;
+    }
+
+    .workspace-detail-board-add-input {
+      width: 100%;
+      border: 1px solid var(--border-color);
+      background: var(--bg-tertiary);
+      border-radius: 4px;
+      padding: 0.3rem 0.4rem;
+      font-size: 0.65rem;
+      color: var(--text-primary);
+    }
+
+    .workspace-detail-board-add-input:focus {
+      outline: none;
+      border-color: var(--primary-color);
+      box-shadow: 0 0 0 2px rgba(var(--primary-color-rgb, 99, 102, 241), 0.15);
+    }
+
+    .workspace-detail-board-add-actions {
+      display: flex;
+      justify-content: flex-end;
+      gap: 0.35rem;
+    }
+
+    .workspace-detail-board-add-actions .modern-btn {
+      font-size: 0.55rem;
+      padding: 0.2rem 0.35rem;
+    }
+
     .workspace-detail-board-card-meta-secondary {
       margin-top: 0.2rem;
       font-size: 0.55rem;
