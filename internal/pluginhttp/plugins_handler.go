@@ -92,14 +92,30 @@ func (h *PluginsPageHandler) HandleListPlugins(w http.ResponseWriter, r *http.Re
 			continue
 		}
 
-		// Check if plugin is enabled
+		// Check if plugin is enabled using lookup normalization
+
 		isEnabled := false
+
 		var loadedPlugin *types.LoadedPlugin
+
 		if agentExists {
-			if lp, exists := agent.Plugins[plugin.Name]; exists {
-				isEnabled = true
-				loadedPlugin = &lp
+
+			normalized := registry.NormalizePluginNameForLookup(plugin.Name)
+
+			for name, lp := range agent.Plugins {
+
+				if registry.NormalizePluginNameForLookup(name) == normalized {
+
+					isEnabled = true
+
+					loadedPlugin = &lp
+
+					break
+
+				}
+
 			}
+
 		}
 
 		// Check if plugin supports initialization and get config variables
@@ -148,15 +164,13 @@ func (h *PluginsPageHandler) HandleListPlugins(w http.ResponseWriter, r *http.Re
 
 		if currentAgent != "" {
 
-			settingsFilePath := fmt.Sprintf("agents/%s/%s_settings.json", currentAgent, plugin.Name)
+			lookupName := registry.NormalizePluginNameForLookup(plugin.Name)
 
-			normalizedName := registry.NormalizePluginName(plugin.Name)
+			// Settings files are named after the lookup name (without version)
+
+			settingsFilePath := fmt.Sprintf("agents/%s/%s_settings.json", currentAgent, lookupName)
 
 			if _, err := os.Stat(settingsFilePath); err == nil {
-
-				isConfigured = true
-
-			} else if _, err := os.Stat(fmt.Sprintf("agents/%s/%s_settings.json", currentAgent, normalizedName)); err == nil {
 
 				isConfigured = true
 
@@ -168,9 +182,9 @@ func (h *PluginsPageHandler) HandleListPlugins(w http.ResponseWriter, r *http.Re
 
 		agents := h.getPluginAgents(&plugin, loadedPlugin)
 
-		// Determine plugin status with all flags
+		// Determine plugin status (now focused on health)
 
-		status := h.getPluginStatus(&plugin, isEnabled, supportsInit, isConfigured)
+		status := h.getPluginStatus(&plugin, isEnabled)
 
 		pluginInfo := map[string]interface{}{
 
@@ -315,10 +329,14 @@ func (h *PluginsPageHandler) HandleGetPluginDetails(w http.ResponseWriter, r *ht
 	var definition interface{}
 	lpExists := false
 	if agentExists {
-		if lp, exists := agent.Plugins[pluginName]; exists {
-			loadedPlugin = &lp
-			definition = lp.Definition
-			lpExists = true
+		normalized := registry.NormalizePluginNameForLookup(pluginName)
+		for name, lp := range agent.Plugins {
+			if registry.NormalizePluginNameForLookup(name) == normalized {
+				loadedPlugin = &lp
+				definition = lp.Definition
+				lpExists = true
+				break
+			}
 		}
 	}
 
@@ -351,11 +369,9 @@ func (h *PluginsPageHandler) HandleGetPluginDetails(w http.ResponseWriter, r *ht
 	// Check if settings file exists
 	isConfigured := false
 	if currentAgent != "" {
-		settingsFilePath := fmt.Sprintf("agents/%s/%s_settings.json", currentAgent, plugin.Name)
-		normalizedName := registry.NormalizePluginName(plugin.Name)
+		lookupName := registry.NormalizePluginNameForLookup(plugin.Name)
+		settingsFilePath := fmt.Sprintf("agents/%s/%s_settings.json", currentAgent, lookupName)
 		if _, err := os.Stat(settingsFilePath); err == nil {
-			isConfigured = true
-		} else if _, err := os.Stat(fmt.Sprintf("agents/%s/%s_settings.json", currentAgent, normalizedName)); err == nil {
 			isConfigured = true
 		}
 	}
@@ -372,7 +388,7 @@ func (h *PluginsPageHandler) HandleGetPluginDetails(w http.ResponseWriter, r *ht
 		"permissions":             permissions,
 		"permissions_approved":    plugin.PermissionsApproved,
 		"health_status":           plugin.HealthStatus,
-		"status":                  h.getPluginStatus(plugin, lpExists, supportsInit, isConfigured),
+		"status":                  h.getPluginStatus(plugin, lpExists),
 		"last_used":               plugin.LastUsed,
 		"version_history":         plugin.VersionHistory,
 		"metadata":                plugin.Metadata,
@@ -895,12 +911,9 @@ func (h *PluginsPageHandler) extractPluginName(path string) string {
 	return ""
 }
 
-func (h *PluginsPageHandler) getPluginStatus(plugin *types.PluginRegistryEntry, isEnabled, supportsInit, isConfigured bool) string {
+func (h *PluginsPageHandler) getPluginStatus(plugin *types.PluginRegistryEntry, isEnabled bool) string {
 	if !isEnabled {
 		return "inactive"
-	}
-	if supportsInit && !isConfigured {
-		return "not_configured"
 	}
 	if !plugin.PermissionsApproved {
 		return "pending_approval"

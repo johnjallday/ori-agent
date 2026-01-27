@@ -334,7 +334,11 @@ function renderPluginsTable() {
             <td>
                 <div class="plugin-name-cell">
                     <div>
-                        <div class="plugin-name">${escapeHtml(getDisplayName(plugin))}</div>
+                        <div class="plugin-name">
+                            ${escapeHtml(getDisplayName(plugin))}
+                            ${plugin.enabled && plugin.supports_initialization && !(plugin.is_configured === true || plugin.is_configured === 'true') ? 
+                                '<span class="badge status-update ms-2" style="font-size: 0.7em;">Setup Required</span>' : ''}
+                        </div>
                         <div class="plugin-description">${escapeHtml(plugin.description || 'No description')}</div>
                         ${renderTagBadges(plugin.tags)}
                     </div>
@@ -379,7 +383,11 @@ function renderMobileCards() {
             <div class="plugin-card-header">
                 <input type="checkbox" class="plugin-checkbox plugin-card-checkbox" data-plugin="${plugin.name}" ${selectedPlugins.has(plugin.name) ? 'checked' : ''} aria-label="Select ${plugin.name}">
                 <div class="plugin-card-info">
-                    <div class="plugin-card-name">${escapeHtml(getDisplayName(plugin))}</div>
+                    <div class="plugin-card-name">
+                        ${escapeHtml(getDisplayName(plugin))}
+                        ${plugin.enabled && plugin.supports_initialization && !(plugin.is_configured === true || plugin.is_configured === 'true') ? 
+                            '<span class="badge status-update ms-2" style="font-size: 0.7em;">Setup Required</span>' : ''}
+                    </div>
                     <div class="plugin-card-description">${escapeHtml(plugin.description || 'No description')}</div>
                 </div>
             </div>
@@ -435,11 +443,13 @@ function renderStatusBadge(plugin) {
                 Needs Update
             </span>
         `;
-  } else if (plugin.supports_initialization && !(plugin.is_configured === true || plugin.is_configured === 'true')) {
+  }
+
+  if (!plugin.enabled) {
     return `
-            <span class="status-badge status-not-configured">
+            <span class="status-badge status-inactive">
                 <span class="status-dot"></span>
-                Not Configured
+                Inactive
             </span>
         `;
   }
