@@ -782,17 +782,17 @@ async function renderPlugins() {
   container.innerHTML = '<div class="text-center py-4" style="color: var(--text-secondary);">Loading plugins...</div>';
 
   // Check configuration status for all plugins in parallel
-  const pluginNames = plugins.map(plugin =>
-    typeof plugin === 'string' ? plugin : (plugin?.name || plugin?.id || plugin?.plugin || '')
-  );
-
   const configChecks = await Promise.all(
-    pluginNames.map(name => checkPluginHasConfig(name))
+    plugins.map(async (plugin) => {
+      const name = typeof plugin === 'string' ? plugin : (plugin?.name || plugin?.id || plugin?.plugin || '');
+      const hasConfig = await checkPluginHasConfig(name);
+      return { name, hasConfig };
+    })
   );
 
   const configStatus = new Map();
-  pluginNames.forEach((name, index) => {
-    configStatus.set(name, configChecks[index]);
+  configChecks.forEach(result => {
+    configStatus.set(result.name, result.hasConfig);
   });
 
   container.innerHTML = '';

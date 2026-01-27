@@ -435,7 +435,7 @@ function renderStatusBadge(plugin) {
                 Needs Update
             </span>
         `;
-  } else if (plugin.is_configured === false) {
+  } else if (plugin.is_configured === false || plugin.is_configured === 'false') {
     return `
             <span class="status-badge status-not-configured">
                 <span class="status-dot"></span>
@@ -714,7 +714,7 @@ function applyFilters() {
 function getPluginStatus(plugin) {
   if (plugin.health_status === 'error') return 'error';
   if (plugin.needs_update) return 'update';
-  if (plugin.is_configured === false) return 'not-configured';
+  if (plugin.is_configured === false || plugin.is_configured === 'false') return 'not-configured';
   return 'healthy';
 }
 

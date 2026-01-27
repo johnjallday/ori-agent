@@ -11,18 +11,21 @@ function normalizePluginName(name = '') {
 }
 
 // Check plugin configuration status - only show config button if plugin has required config variables
-async function checkPluginConfigurationStatus(activePluginNames) {
+async function checkPluginConfigurationStatus(activePlugins) {
   const configStatus = new Map();
 
   // Check each active plugin to see if it actually needs configuration
-  for (const pluginName of activePluginNames) {
+  for (const plugin of activePlugins) {
+    const rawName = plugin.name;
+    const normalizedName = normalizePluginName(rawName);
     let hasConfig = false;
     let needsInit = false;
     let configVars = [];
 
     try {
       // Check the /config endpoint to see if plugin supports initialization with required config
-      const data = await API.get(`/api/plugins/${pluginName}/config`);
+      // Use rawName for API call to match backend lookup
+      const data = await API.get(`/api/plugins/${rawName}/config`);
 
       // Plugin has config only if it supports initialization AND has required config variables
       if (data.supports_initialization && data.required_config && data.required_config.length > 0) {
@@ -30,16 +33,16 @@ async function checkPluginConfigurationStatus(activePluginNames) {
         configVars = data.required_config;
         // Needs init if not already initialized
         needsInit = !data.is_initialized;
-        pluginsLog.debug(`Plugin ${pluginName} has ${configVars.length} config variable(s), initialized: ${data.is_initialized}`);
+        pluginsLog.debug(`Plugin ${rawName} has ${configVars.length} config variable(s), initialized: ${data.is_initialized}`);
       } else {
-        pluginsLog.debug(`Plugin ${pluginName} does not require configuration`);
+        pluginsLog.debug(`Plugin ${rawName} does not require configuration`);
       }
     } catch (error) {
-      pluginsLog.debug(`Plugin ${pluginName} configuration check failed:`, error);
+      pluginsLog.debug(`Plugin ${rawName} configuration check failed:`, error);
       hasConfig = false;
     }
 
-    configStatus.set(pluginName, {
+    configStatus.set(normalizedName, {
       needsInit: needsInit,
       hasConfig: hasConfig,
       configVars: configVars,
@@ -61,11 +64,12 @@ async function loadPluginsForSidebar() {
     const registry = await API.get('/api/plugin-registry');
 
     // Fetch currently loaded plugins for this agent
-    const activePlugins = await API.get('/api/plugins');
+    const activePluginsResponse = await API.get('/api/plugins');
+    const activePlugins = activePluginsResponse.plugins || [];
 
     // Create a set of active plugin names for quick lookup (only enabled ones)
     const activePluginNames = new Set(
-      activePlugins.plugins
+      activePlugins
         .filter(p => p.enabled === true)
         .map(p => normalizePluginName(p.name))
     );
@@ -79,10 +83,11 @@ async function loadPluginsForSidebar() {
       }));
 
     // Fetch plugin configuration status for active plugins
-    pluginsLog.debug('About to call checkPluginConfigurationStatus with:', activePluginNames);
+    pluginsLog.debug('About to call checkPluginConfigurationStatus with:', activePlugins.length, 'active plugins');
     let pluginConfigStatus;
     try {
-      pluginConfigStatus = await checkPluginConfigurationStatus(activePluginNames);
+      // Pass the full plugin objects to checkPluginConfigurationStatus
+      pluginConfigStatus = await checkPluginConfigurationStatus(activePlugins.filter(p => p.enabled === true));
       pluginsLog.debug('checkPluginConfigurationStatus returned:', pluginConfigStatus);
     } catch (error) {
       pluginsLog.error('Error in checkPluginConfigurationStatus:', error);
