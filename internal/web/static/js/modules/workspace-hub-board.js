@@ -290,8 +290,15 @@
       return `
         <div class="hub-board-column" data-column-id="${escapeHtml(col.id)}">
           <div class="hub-column-header">
-            <div class="hub-column-title" data-column-id="${escapeHtml(col.id)}" title="Double-click to rename">
-              <span class="hub-column-title-text">${escapeHtml(col.name || col.id)}</span>
+            <div class="hub-column-title-wrap">
+              <div class="hub-column-title" data-column-id="${escapeHtml(col.id)}">
+                <span class="hub-column-title-text">${escapeHtml(col.name || col.id)}</span>
+              </div>
+              <button class="hub-column-edit-btn" type="button" title="Edit column name" aria-label="Edit column name">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
+                  <path d="M5,18.08V19H5.92L14.81,10.11L13.89,9.19L5,18.08M17.71,7.04C18.1,6.65 18.1,6 17.71,5.63L16.37,4.29C16,3.9 15.35,3.9 14.96,4.29L13.13,6.12L14.88,7.87L17.71,7.04Z"/>
+                </svg>
+              </button>
             </div>
             <span class="hub-column-count">${tasks.length}</span>
           </div>
@@ -689,16 +696,18 @@
     const elements = getElements();
     if (!elements.boardColumns) return;
 
-    elements.boardColumns.querySelectorAll('.hub-column-title').forEach((titleEl) => {
-      titleEl.addEventListener('dblclick', (e) => {
+    elements.boardColumns.querySelectorAll('.hub-column-header').forEach((headerEl) => {
+      const titleEl = headerEl.querySelector('.hub-column-title');
+      const textEl = titleEl ? titleEl.querySelector('.hub-column-title-text') : null;
+      const editBtn = headerEl.querySelector('.hub-column-edit-btn');
+      if (!titleEl || !textEl || !editBtn) return;
+
+      editBtn.addEventListener('click', (e) => {
         e.preventDefault();
         e.stopPropagation();
 
         const columnId = titleEl.dataset.columnId;
         if (!columnId) return;
-
-        const textEl = titleEl.querySelector('.hub-column-title-text');
-        if (!textEl) return;
 
         const currentName = textEl.textContent;
 
@@ -710,6 +719,7 @@
 
         // Replace text with input
         textEl.style.display = 'none';
+        editBtn.style.display = 'none';
         titleEl.appendChild(input);
         input.focus();
         input.select();
@@ -718,6 +728,7 @@
           const newName = input.value.trim();
           input.remove();
           textEl.style.display = '';
+          editBtn.style.display = '';
 
           if (!newName || newName === currentName) return;
 

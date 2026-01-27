@@ -248,6 +248,13 @@
   background: rgba(255, 255, 255, 0.02);
 }
 
+.hub-column-title-wrap {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  min-width: 0;
+}
+
 .hub-column-title {
   font-weight: 600;
   font-size: 0.85rem;
@@ -255,15 +262,39 @@
   display: flex;
   align-items: center;
   gap: 0.5rem;
-  cursor: pointer;
   border-radius: 4px;
   padding: 2px 4px;
   margin: -2px -4px;
   transition: background-color 0.15s ease;
+  min-width: 0;
 }
 
 .hub-column-title:hover {
   background-color: var(--bg-tertiary, rgba(0, 0, 0, 0.05));
+}
+
+.hub-column-title-text {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.hub-column-edit-btn {
+  border: none;
+  background: var(--bg-tertiary, rgba(0, 0, 0, 0.05));
+  color: var(--text-muted);
+  border-radius: 4px;
+  padding: 0.2rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0.6;
+  transition: opacity 0.15s ease, color 0.15s ease;
+}
+
+.hub-column-edit-btn:hover {
+  opacity: 1;
+  color: var(--text-primary);
 }
 
 .hub-column-rename-input {
