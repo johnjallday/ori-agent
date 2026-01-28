@@ -190,7 +190,12 @@
             </div>
 
             <!-- Notes Panel - Right column row 1 -->
-            <div class="modern-card workspace-detail-panel workspace-detail-panel-notes" id="workspace-detail-notes-panel">
+            <div class="modern-card workspace-detail-panel workspace-detail-panel-notes is-expandable" id="workspace-detail-notes-panel">
+              <button class="workspace-detail-panel-close" type="button" title="Close" aria-label="Close expanded panel">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+                  <path d="M19,6.41L17.59,5L12,10.59L6.41,5L5,6.41L10.59,12L5,17.59L6.41,19L12,13.41L17.59,19L19,17.59L13.41,12L19,6.41Z"/>
+                </svg>
+              </button>
               <div class="workspace-detail-panel-header">
                 <h2 class="workspace-detail-panel-title">
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
@@ -214,7 +219,12 @@
             </div>
 
             <!-- Files Panel - Right column row 2 -->
-            <div class="modern-card workspace-detail-panel workspace-detail-panel-files" id="workspace-detail-files-panel">
+            <div class="modern-card workspace-detail-panel workspace-detail-panel-files is-expandable" id="workspace-detail-files-panel">
+              <button class="workspace-detail-panel-close" type="button" title="Close" aria-label="Close expanded panel">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+                  <path d="M19,6.41L17.59,5L12,10.59L6.41,5L5,6.41L10.59,12L5,17.59L6.41,19L12,13.41L17.59,19L19,17.59L13.41,12L19,6.41Z"/>
+                </svg>
+              </button>
               <div class="workspace-detail-panel-header">
                 <h2 class="workspace-detail-panel-title">
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
@@ -238,7 +248,12 @@
             </div>
 
             <!-- Directories Panel - Right column row 3 -->
-            <div class="modern-card workspace-detail-panel workspace-detail-panel-directories" id="workspace-detail-directories-panel">
+            <div class="modern-card workspace-detail-panel workspace-detail-panel-directories is-expandable" id="workspace-detail-directories-panel">
+              <button class="workspace-detail-panel-close" type="button" title="Close" aria-label="Close expanded panel">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+                  <path d="M19,6.41L17.59,5L12,10.59L6.41,5L5,6.41L10.59,12L5,17.59L6.41,19L12,13.41L17.59,19L19,17.59L13.41,12L19,6.41Z"/>
+                </svg>
+              </button>
               <div class="workspace-detail-panel-header">
                 <h2 class="workspace-detail-panel-title">
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
@@ -262,7 +277,12 @@
             </div>
 
             <!-- Schedules Panel - Right column row 4 -->
-            <div class="modern-card workspace-detail-panel workspace-detail-panel-schedules" id="workspace-detail-schedules-panel">
+            <div class="modern-card workspace-detail-panel workspace-detail-panel-schedules is-expandable" id="workspace-detail-schedules-panel">
+              <button class="workspace-detail-panel-close" type="button" title="Close" aria-label="Close expanded panel">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+                  <path d="M19,6.41L17.59,5L12,10.59L6.41,5L5,6.41L10.59,12L5,17.59L6.41,19L12,13.41L17.59,19L19,17.59L13.41,12L19,6.41Z"/>
+                </svg>
+              </button>
               <div class="workspace-detail-panel-header">
                 <h2 class="workspace-detail-panel-title">
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
@@ -285,6 +305,9 @@
               </div>
             </div>
           </div>
+
+          <!-- Panel expansion backdrop -->
+          <div class="workspace-detail-panel-backdrop" id="workspaceDetailPanelBackdrop"></div>
         </div>
       </div>
     </div>
@@ -1080,6 +1103,157 @@
       font-size: 0.8rem;
     }
 
+    /* =============================================================================
+       Panel Pop-out Styles
+       ============================================================================= */
+
+    /* Backdrop for expanded panels */
+    .workspace-detail-panel-backdrop {
+      position: fixed;
+      inset: 0;
+      background: rgba(15, 23, 42, 0.6);
+      backdrop-filter: blur(0px);
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.35s cubic-bezier(0.4, 0, 0.2, 1),
+                  backdrop-filter 0.35s cubic-bezier(0.4, 0, 0.2, 1);
+      z-index: 10000;
+    }
+
+    .workspace-detail-panel-backdrop.is-active {
+      opacity: 1;
+      backdrop-filter: blur(4px);
+      pointer-events: auto;
+    }
+
+    /* Expandable panel styling - NO transitions here to avoid conflicts */
+    .workspace-detail-panel.is-expandable {
+      cursor: pointer;
+    }
+
+    .workspace-detail-panel.is-expandable:hover:not(.is-expanded):not(.is-expanding):not(.is-collapsing) {
+      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.25);
+      border-color: var(--primary-color);
+    }
+
+    /* Animation states - position/size controlled entirely by JS inline styles */
+    .workspace-detail-panel.is-expanding,
+    .workspace-detail-panel.is-expanded,
+    .workspace-detail-panel.is-collapsing {
+      z-index: 10001;
+      cursor: default;
+    }
+
+    /* Expanded/expanding panel body gets more space */
+    .workspace-detail-panel.is-expanded .workspace-detail-panel-body,
+    .workspace-detail-panel.is-expanding .workspace-detail-panel-body {
+      max-height: none;
+      flex: 1;
+      overflow-y: auto;
+    }
+
+    /* Adjust header for expanding state too */
+    .workspace-detail-panel.is-expanding .workspace-detail-panel-header {
+      padding-right: 2.5rem;
+    }
+
+    /* Close button for expanded panels */
+    .workspace-detail-panel-close {
+      display: none;
+      position: absolute;
+      top: 0.5rem;
+      right: 0.5rem;
+      padding: 0.35rem;
+      border: none;
+      background: rgba(255, 255, 255, 0.1);
+      color: var(--text-secondary);
+      border-radius: var(--radius-sm, 4px);
+      cursor: pointer;
+      transition: background-color 0.2s ease,
+                  color 0.2s ease,
+                  transform 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+      z-index: 10;
+    }
+
+    .workspace-detail-panel-close:hover {
+      background: rgba(239, 68, 68, 0.2);
+      color: #ef4444;
+      transform: scale(1.1);
+    }
+
+    .workspace-detail-panel.is-expanding .workspace-detail-panel-close {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      animation: closeButtonFadeIn 0.3s ease 0.3s forwards;
+      opacity: 0;
+    }
+
+    .workspace-detail-panel.is-expanded .workspace-detail-panel-close {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      opacity: 1;
+    }
+
+    @keyframes closeButtonFadeIn {
+      from {
+        opacity: 0;
+        transform: scale(0.8);
+      }
+      to {
+        opacity: 1;
+        transform: scale(1);
+      }
+    }
+
+    .workspace-detail-panel.is-collapsing .workspace-detail-panel-close {
+      display: flex;
+      opacity: 0;
+      transition: opacity 0.15s ease;
+    }
+
+    /* Adjust header for expanded state */
+    .workspace-detail-panel.is-expanded .workspace-detail-panel-header {
+      padding-right: 2.5rem;
+    }
+
+    /* Expanded panel title enlargement with transition */
+    .workspace-detail-panel .workspace-detail-panel-title {
+      transition: font-size 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+
+    .workspace-detail-panel.is-expanded .workspace-detail-panel-title {
+      font-size: 1rem;
+    }
+
+    /* Smooth content fade in when expanding */
+    .workspace-detail-panel.is-expanding .workspace-detail-panel-body {
+      animation: contentFadeIn 0.35s ease 0.25s forwards;
+      opacity: 0;
+    }
+
+    /* Already expanded - no animation, just show */
+    .workspace-detail-panel.is-expanded .workspace-detail-panel-body {
+      opacity: 1;
+    }
+
+    .workspace-detail-panel.is-collapsing .workspace-detail-panel-body {
+      opacity: 1;
+      animation: none;
+    }
+
+    @keyframes contentFadeIn {
+      from {
+        opacity: 0;
+        transform: translateY(8px);
+      }
+      to {
+        opacity: 1;
+        transform: translateY(0);
+      }
+    }
+
     /* Board view reorganizes the grid */
     .workspace-detail-bento:has(.board-view) {
       grid-template-columns: repeat(5, 1fr);
@@ -1370,7 +1544,198 @@
         console.error('No workspace ID found in URL');
         window.location.href = '/';
       }
+
+      // Initialize panel expansion functionality
+      initPanelExpansion();
     });
+
+    /**
+     * Initialize panel expansion functionality for bento panels
+     */
+    function initPanelExpansion() {
+      let expandedPanel = null;
+      const backdrop = document.getElementById('workspaceDetailPanelBackdrop');
+      if (!backdrop) return;
+
+      const expandablePanels = document.querySelectorAll('.workspace-detail-panel.is-expandable');
+
+      expandablePanels.forEach((panel) => {
+        // Click on panel to expand
+        panel.addEventListener('click', (event) => {
+          // Don't expand if clicking on interactive elements
+          if (event.target.closest('button, a, input, select, textarea, .workspace-detail-item')) {
+            return;
+          }
+
+          // Don't expand if already expanded
+          if (panel.classList.contains('is-expanded')) {
+            return;
+          }
+
+          expandPanel(panel);
+        });
+
+        // Close button
+        const closeBtn = panel.querySelector('.workspace-detail-panel-close');
+        if (closeBtn) {
+          closeBtn.addEventListener('click', (event) => {
+            event.stopPropagation();
+            collapsePanel();
+          });
+        }
+      });
+
+      // Click backdrop to close
+      backdrop.addEventListener('click', collapsePanel);
+
+      // Escape key to close
+      document.addEventListener('keydown', (event) => {
+        if (event.key === 'Escape' && expandedPanel) {
+          collapsePanel();
+        }
+      });
+
+      // Store original positions for collapse animation
+      const panelOriginalRects = new Map();
+      let isAnimating = false;
+      const EXPAND_DURATION = 450; // ms - match CSS transition
+      const COLLAPSE_DURATION = 350; // ms - match CSS transition
+
+      function expandPanel(panel) {
+        if (isAnimating) return;
+
+        if (expandedPanel) {
+          collapsePanel(true); // immediate collapse if switching panels
+        }
+
+        isAnimating = true;
+
+        // Capture original position before any changes
+        const rect = panel.getBoundingClientRect();
+        panelOriginalRects.set(panel, {
+          top: rect.top,
+          left: rect.left,
+          width: rect.width,
+          height: rect.height
+        });
+
+        expandedPanel = panel;
+        backdrop.classList.add('is-active');
+        document.body.style.overflow = 'hidden';
+
+        // Calculate final center position
+        const finalWidth = Math.min(window.innerWidth * 0.9, 600);
+        const finalHeight = Math.min(window.innerHeight * 0.8, 600);
+        const finalTop = (window.innerHeight - finalHeight) / 2;
+        const finalLeft = (window.innerWidth - finalWidth) / 2;
+
+        // Set initial position (where the panel currently is) WITHOUT transition
+        panel.style.transition = 'none';
+        panel.style.position = 'fixed';
+        panel.style.top = rect.top + 'px';
+        panel.style.left = rect.left + 'px';
+        panel.style.width = rect.width + 'px';
+        panel.style.height = rect.height + 'px';
+        panel.style.transform = 'none';
+        panel.style.zIndex = '10001';
+
+        // Force reflow
+        panel.offsetHeight;
+
+        // Now enable transition and animate to center
+        panel.style.transition = 'top 0.45s cubic-bezier(0.4, 0, 0.2, 1), left 0.45s cubic-bezier(0.4, 0, 0.2, 1), width 0.45s cubic-bezier(0.4, 0, 0.2, 1), height 0.45s cubic-bezier(0.4, 0, 0.2, 1), box-shadow 0.45s cubic-bezier(0.4, 0, 0.2, 1)';
+        panel.classList.add('is-expanding');
+
+        // Use requestAnimationFrame to ensure styles are applied before animating
+        requestAnimationFrame(() => {
+          requestAnimationFrame(() => {
+            panel.style.top = finalTop + 'px';
+            panel.style.left = finalLeft + 'px';
+            panel.style.width = finalWidth + 'px';
+            panel.style.height = finalHeight + 'px';
+            panel.style.boxShadow = '0 25px 50px -12px rgba(0, 0, 0, 0.4)';
+          });
+        });
+
+        // Use setTimeout for reliable completion
+        setTimeout(() => {
+          panel.classList.remove('is-expanding');
+          panel.classList.add('is-expanded');
+          // Keep final position - don't clear styles!
+          panel.style.transition = 'none';
+          isAnimating = false;
+        }, EXPAND_DURATION);
+      }
+
+      function collapsePanel(immediate = false) {
+        if (!expandedPanel) return;
+        if (isAnimating && !immediate) return;
+
+        const panel = expandedPanel;
+        const originalRect = panelOriginalRects.get(panel);
+
+        backdrop.classList.remove('is-active');
+
+        if (immediate || !originalRect) {
+          // Immediate collapse (no animation)
+          panel.classList.remove('is-expanded', 'is-expanding', 'is-collapsing');
+          panel.style.cssText = '';
+          document.body.style.overflow = '';
+          expandedPanel = null;
+          isAnimating = false;
+        } else {
+          isAnimating = true;
+
+          // Get current expanded position
+          const currentRect = panel.getBoundingClientRect();
+
+          // Set current position WITHOUT transition
+          panel.classList.remove('is-expanded');
+          panel.style.transition = 'none';
+          panel.style.position = 'fixed';
+          panel.style.top = currentRect.top + 'px';
+          panel.style.left = currentRect.left + 'px';
+          panel.style.width = currentRect.width + 'px';
+          panel.style.height = currentRect.height + 'px';
+          panel.style.transform = 'none';
+          panel.style.zIndex = '10001';
+
+          // Force reflow
+          panel.offsetHeight;
+
+          // Enable transition and animate back
+          panel.style.transition = 'top 0.35s cubic-bezier(0.4, 0, 0.2, 1), left 0.35s cubic-bezier(0.4, 0, 0.2, 1), width 0.35s cubic-bezier(0.4, 0, 0.2, 1), height 0.35s cubic-bezier(0.4, 0, 0.2, 1), box-shadow 0.35s cubic-bezier(0.4, 0, 0.2, 1)';
+          panel.classList.add('is-collapsing');
+
+          requestAnimationFrame(() => {
+            requestAnimationFrame(() => {
+              panel.style.top = originalRect.top + 'px';
+              panel.style.left = originalRect.left + 'px';
+              panel.style.width = originalRect.width + 'px';
+              panel.style.height = originalRect.height + 'px';
+              panel.style.boxShadow = 'none';
+            });
+          });
+
+          // Use setTimeout for reliable completion
+          setTimeout(() => {
+            panel.classList.remove('is-collapsing');
+            panel.style.cssText = '';
+            document.body.style.overflow = '';
+            expandedPanel = null;
+            isAnimating = false;
+          }, COLLAPSE_DURATION);
+        }
+      }
+
+      // Expose globally for other scripts
+      window.WorkspaceDetailPanels = {
+        expandPanel,
+        collapsePanel,
+        isExpanded: () => expandedPanel !== null,
+        getExpandedPanel: () => expandedPanel
+      };
+    }
   </script>
 </body>
 </html>
