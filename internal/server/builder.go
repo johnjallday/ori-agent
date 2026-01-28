@@ -195,7 +195,15 @@ type ServerBuilder struct {
 // NewServerBuilder creates a new ServerBuilder instance with an empty Server.
 func NewServerBuilder() (*ServerBuilder, error) {
 	return &ServerBuilder{
-		server: &Server{},
+		server: &Server{
+			Core:        &CoreSystemFacade{},
+			Plugin:      &PluginSystemFacade{},
+			Storage:     &StorageSystemFacade{},
+			Workflow:    &WorkflowSystemFacade{},
+			Integration: &IntegrationSystemFacade{},
+			UI:          &UISystemFacade{},
+			Handlers:    &HandlerFacade{},
+		},
 	}, nil
 }
 
@@ -439,29 +447,49 @@ func (b *ServerBuilder) startPluginUpdateService() error {
 // WithLLMFactory injects a custom LLM factory (for testing).
 func (b *ServerBuilder) WithLLMFactory(f *llm.Factory) *ServerBuilder {
 	b.llmFactory = f
+	if b.server.Core == nil {
+		b.server.Core = &CoreSystemFacade{}
+	}
+	b.server.Core.LLMFactory = f
 	return b
 }
 
 // WithConfigManager injects a custom config manager (for testing).
 func (b *ServerBuilder) WithConfigManager(c *config.Manager) *ServerBuilder {
 	b.configManager = c
+	if b.server.Core == nil {
+		b.server.Core = &CoreSystemFacade{}
+	}
+	b.server.Core.ConfigManager = c
 	return b
 }
 
 // WithRegistryManager injects a custom registry manager (for testing).
 func (b *ServerBuilder) WithRegistryManager(r *registry.Manager) *ServerBuilder {
 	b.registryManager = r
+	if b.server.Plugin == nil {
+		b.server.Plugin = &PluginSystemFacade{}
+	}
+	b.server.Plugin.RegistryManager = r
 	return b
 }
 
 // WithStore injects a custom store (for testing).
 func (b *ServerBuilder) WithStore(s store.Store) *ServerBuilder {
 	b.st = s
+	if b.server.Storage == nil {
+		b.server.Storage = &StorageSystemFacade{}
+	}
+	b.server.Storage.AgentStore = s
 	return b
 }
 
 // WithWorkspaceStore injects a custom workspace store (for testing).
 func (b *ServerBuilder) WithWorkspaceStore(ws workspace.Store) *ServerBuilder {
 	b.workspaceStore = ws
+	if b.server.Storage == nil {
+		b.server.Storage = &StorageSystemFacade{}
+	}
+	b.server.Storage.WorkspaceStore = ws
 	return b
 }

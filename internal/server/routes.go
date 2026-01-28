@@ -750,11 +750,12 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 			// Handle workspace file upload/serving (must be before /directories which has its own /files)
 		} else if strings.Contains(r.URL.Path, "/files") && !strings.Contains(r.URL.Path, "/directories") {
 			// /api/studios/:id/files - file upload or /api/studios/:id/files/:filename - file serving
-			if r.Method == http.MethodPost {
+			switch r.Method {
+			case http.MethodPost:
 				s.Handlers.Studio.UploadFile(w, r)
-			} else if r.Method == http.MethodGet {
+			case http.MethodGet:
 				s.Handlers.Studio.ServeFile(w, r)
-			} else {
+			default:
 				orihttp.MethodNotAllowed(w)
 			}
 			// Handle directory reference operations
