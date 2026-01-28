@@ -1,877 +1,591 @@
 #!/bin/bash
 # Pre-release checklist automation
 # Runs all quality checks, tests, and builds before release
-# Usage: ./scripts/pre-release-check.sh [version]
+#
+# Usage:
+#   ./scripts/pre-release-check.sh [version]
+#   ./scripts/pre-release-check.sh v0.0.47
+#   ./scripts/pre-release-check.sh              # No version bump, just checks
+#
+# Options:
+#   --fix         Auto-fix lint errors (up to 5 iterations)
+#   --no-smoke    Skip smoke tests (faster)
+#   --ci          CI mode: no interactive prompts, fail fast
+#   --verbose     Show full output for all commands
+#
+# Exit codes:
+#   0 - All checks passed
+#   1 - One or more checks failed
 
 set -e
 set -o pipefail
 
-VERSION=${1:-""}
-FAILED_CHECKS=()
-FAILED_OUTPUTS_DIR=$(mktemp -d)  # Directory to store error output for each failed check
+# ════════════════════════════════════════════════════════════════════════════
+# CONFIGURATION
+# ════════════════════════════════════════════════════════════════════════════
+
+VERSION=""
+AUTO_FIX=false
+SKIP_SMOKE=false
+CI_MODE=false
+VERBOSE=false
+
+# Parse arguments
+for arg in "$@"; do
+  case $arg in
+    --fix)
+      AUTO_FIX=true
+      ;;
+    --no-smoke)
+      SKIP_SMOKE=true
+      ;;
+    --ci)
+      CI_MODE=true
+      ;;
+    --verbose)
+      VERBOSE=true
+      ;;
+    --help|-h)
+      echo "Usage: ./scripts/pre-release-check.sh [version] [options]"
+      echo ""
+      echo "Options:"
+      echo "  --fix         Auto-fix lint errors (up to 5 iterations)"
+      echo "  --no-smoke    Skip smoke tests (faster)"
+      echo "  --ci          CI mode: no interactive prompts, fail fast"
+      echo "  --verbose     Show full output for all commands"
+      echo ""
+      echo "Examples:"
+      echo "  ./scripts/pre-release-check.sh v0.0.47"
+      echo "  ./scripts/pre-release-check.sh --fix"
+      echo "  ./scripts/pre-release-check.sh v0.0.47 --fix --no-smoke"
+      exit 0
+      ;;
+    -*)
+      echo "Unknown option: $arg"
+      echo "Use --help for usage information"
+      exit 1
+      ;;
+    *)
+      if [ -z "$VERSION" ]; then
+        VERSION="$arg"
+      fi
+      ;;
+  esac
+done
 
 cd "$(dirname "$0")/.."
 
-# Cleanup temp directory on exit
+# ════════════════════════════════════════════════════════════════════════════
+# OUTPUT HELPERS
+# ════════════════════════════════════════════════════════════════════════════
+
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+CYAN='\033[0;36m'
+BOLD='\033[1m'
+NC='\033[0m'
+
+FAILED_CHECKS=()
+SKIPPED_CHECKS=()
+PASSED_CHECKS=()
+FAILED_OUTPUTS_DIR=$(mktemp -d)
+
 cleanup() {
   rm -rf "$FAILED_OUTPUTS_DIR"
 }
 trap cleanup EXIT
 
-# Colors for output
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-BLUE='\033[0;34m'
-NC='\033[0m' # No Color
-
-echo ""
-echo "╔════════════════════════════════════════════╗"
-echo "║     Ori Agent Pre-Release Checker         ║"
-echo "╚════════════════════════════════════════════╝"
-echo ""
-
-if [ -n "$VERSION" ]; then
-  echo "Target version: $VERSION"
+print_header() {
   echo ""
+  echo -e "${CYAN}════════════════════════════════════════════${NC}"
+  echo -e "${CYAN}$1${NC}"
+  echo -e "${CYAN}════════════════════════════════════════════${NC}"
+  echo ""
+}
 
-  # Update VERSION file if a version was specified
-  if [ -f "VERSION" ]; then
-    CURRENT_VERSION=$(cat VERSION | tr -d '[:space:]')
-    if [ "$CURRENT_VERSION" != "$VERSION" ]; then
-      echo -e "${BLUE}[INFO]${NC} Updating VERSION file: $CURRENT_VERSION → $VERSION"
-      echo "$VERSION" > VERSION
-      echo -e "${GREEN}✅${NC} VERSION file updated"
-      echo ""
-    else
-      echo -e "${BLUE}[INFO]${NC} VERSION file already set to $VERSION"
-      echo ""
-    fi
-  else
-    echo -e "${BLUE}[INFO]${NC} Creating VERSION file with $VERSION"
-    echo "$VERSION" > VERSION
-    echo -e "${GREEN}✅${NC} VERSION file created"
-    echo ""
-  fi
-fi
+print_section() {
+  echo ""
+  echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+  echo -e "${BLUE}$1${NC}"
+  echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+}
 
-# Function to run check and track failures
+# Run a check and track results
+# Usage: run_check "Check Name" "command to run" [allow_failure]
 run_check() {
   local name=$1
   local command=$2
+  local allow_failure=${3:-false}
   local output_file
   output_file=$(mktemp)
 
-  echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-  echo -e "${BLUE}Running: $name${NC}"
-  echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+  print_section "Running: $name"
 
-  # Run command and capture output (both stdout and stderr)
-  if eval "$command" 2>&1 | tee "$output_file"; then
-    echo -e "${GREEN}✅ $name: PASSED${NC}"
-    echo ""
+  local start_time=$(date +%s)
+
+  if [ "$VERBOSE" = true ]; then
+    if eval "$command" 2>&1 | tee "$output_file"; then
+      local end_time=$(date +%s)
+      local duration=$((end_time - start_time))
+      echo -e "${GREEN}✅ $name: PASSED${NC} (${duration}s)"
+      PASSED_CHECKS+=("$name")
+      rm -f "$output_file"
+      return 0
+    fi
+  else
+    if eval "$command" > "$output_file" 2>&1; then
+      local end_time=$(date +%s)
+      local duration=$((end_time - start_time))
+      echo -e "${GREEN}✅ $name: PASSED${NC} (${duration}s)"
+      PASSED_CHECKS+=("$name")
+      rm -f "$output_file"
+      return 0
+    fi
+  fi
+
+  # Command failed
+  local end_time=$(date +%s)
+  local duration=$((end_time - start_time))
+
+  if [ "$allow_failure" = true ]; then
+    echo -e "${YELLOW}⚠️  $name: FAILED (non-blocking)${NC} (${duration}s)"
+    tail -20 "$output_file"
     rm -f "$output_file"
     return 0
   else
-    echo -e "${RED}❌ $name: FAILED${NC}"
+    echo -e "${RED}❌ $name: FAILED${NC} (${duration}s)"
     echo ""
+    tail -30 "$output_file"
     FAILED_CHECKS+=("$name")
-    # Store last 30 lines of output for the summary (use sanitized filename)
     local safe_name
     safe_name=$(echo "$name" | tr ' /' '__')
-    tail -30 "$output_file" > "$FAILED_OUTPUTS_DIR/$safe_name"
+    tail -50 "$output_file" > "$FAILED_OUTPUTS_DIR/$safe_name"
     rm -f "$output_file"
     return 1
   fi
 }
 
-# 1. DEPENDABOT PR MERGE (first to get latest dependencies)
+skip_check() {
+  local name=$1
+  local reason=$2
+  echo -e "${YELLOW}⏭️  $name: SKIPPED${NC} ($reason)"
+  SKIPPED_CHECKS+=("$name: $reason")
+}
+
+# ════════════════════════════════════════════════════════════════════════════
+# MAIN SCRIPT
+# ════════════════════════════════════════════════════════════════════════════
+
 echo ""
-echo "════════════════════════════════════════════"
-echo "1. DEPENDABOT PR MERGE"
-echo "════════════════════════════════════════════"
+echo "╔════════════════════════════════════════════╗"
+echo "║     Ori Agent Pre-Release Checker          ║"
+echo "╚════════════════════════════════════════════╝"
 echo ""
+
+# Show configuration
+echo -e "Configuration:"
+echo -e "  Version:    ${VERSION:-"(no version bump)"}"
+echo -e "  Auto-fix:   ${AUTO_FIX}"
+echo -e "  Skip smoke: ${SKIP_SMOKE}"
+echo -e "  CI mode:    ${CI_MODE}"
+echo ""
+
+# ════════════════════════════════════════════════════════════════════════════
+# STEP 0: PREREQUISITES
+# ════════════════════════════════════════════════════════════════════════════
+
+print_header "0. PREREQUISITES"
+
+# Check git status first
+CURRENT_BRANCH=$(git branch --show-current)
+echo -e "Current branch: ${BOLD}$CURRENT_BRANCH${NC}"
+
+if [ "$CURRENT_BRANCH" != "dev" ] && [ "$CURRENT_BRANCH" != "main" ] && [[ ! "$CURRENT_BRANCH" =~ ^release/ ]]; then
+  echo -e "${RED}❌ Must be on 'dev', 'main', or 'release/*' branch${NC}"
+  FAILED_CHECKS+=("Branch check")
+fi
+
+# Show uncommitted changes (warning only)
+if ! git diff --quiet || ! git diff --cached --quiet; then
+  echo -e "${YELLOW}⚠️  Uncommitted changes detected${NC}"
+  git status --short
+  echo ""
+else
+  echo -e "${GREEN}✅ Working directory clean${NC}"
+fi
+
+# Update VERSION file if specified
+if [ -n "$VERSION" ]; then
+  # Ensure version starts with 'v'
+  if [[ ! "$VERSION" =~ ^v ]]; then
+    VERSION="v$VERSION"
+  fi
+
+  # Validate format
+  if [[ ! "$VERSION" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+    echo -e "${RED}❌ Version must be in format vX.Y.Z (e.g., v1.0.1)${NC}"
+    exit 1
+  fi
+
+  # Check if tag already exists
+  if git tag -l | grep -q "^$VERSION$"; then
+    echo -e "${RED}❌ Tag $VERSION already exists${NC}"
+    exit 1
+  fi
+
+  # Update VERSION file
+  if [ -f "VERSION" ]; then
+    CURRENT_VERSION=$(cat VERSION | tr -d '[:space:]')
+    if [ "$CURRENT_VERSION" != "$VERSION" ]; then
+      echo -e "${BLUE}Updating VERSION file: $CURRENT_VERSION → $VERSION${NC}"
+      echo "$VERSION" > VERSION
+    else
+      echo -e "VERSION file already set to $VERSION"
+    fi
+  else
+    echo -e "${BLUE}Creating VERSION file with $VERSION${NC}"
+    echo "$VERSION" > VERSION
+  fi
+fi
+
+# ════════════════════════════════════════════════════════════════════════════
+# STEP 1: DEPENDABOT PR MERGE
+# ════════════════════════════════════════════════════════════════════════════
+
+print_header "1. DEPENDABOT PR MERGE"
 
 if [ -f "./scripts/merge-dependabot.sh" ]; then
-  run_check "Merge Dependabot PRs" "./scripts/merge-dependabot.sh" || true
+  run_check "Merge Dependabot PRs" "./scripts/merge-dependabot.sh" true
 else
-  echo -e "${YELLOW}⚠️  Dependabot Merge: SKIPPED (merge-dependabot.sh not found)${NC}"
-  echo ""
+  skip_check "Merge Dependabot PRs" "script not found"
 fi
 
-# 2. CODE QUALITY CHECKS
-echo ""
-echo "════════════════════════════════════════════"
-echo "2. CODE QUALITY CHECKS"
-echo "════════════════════════════════════════════"
-echo ""
+# ════════════════════════════════════════════════════════════════════════════
+# STEP 2: CODE QUALITY CHECKS
+# ════════════════════════════════════════════════════════════════════════════
 
-run_check "Format Check" "make fmt" || {
-  # Format check failed - offer to auto-fix syntax errors
-  echo -e "${YELLOW}💡 Tip: Automated syntax error fixing is available${NC}"
+print_header "2. CODE QUALITY CHECKS"
+
+# Format check
+run_check "Format Check (gofmt)" "test -z \"\$(gofmt -l . 2>&1 | grep -v '^vendor/' | head -20)\"" || {
   echo ""
-  read -p "Run automated syntax fixer? [y/N]: " -n 1 -r
+  echo "Files needing formatting:"
+  gofmt -l . 2>&1 | grep -v '^vendor/' | head -10
   echo ""
-  if [[ $REPLY =~ ^[Yy]$ ]]; then
-    echo ""
-    if [ -f "./scripts/auto-fix-syntax.sh" ]; then
-      ./scripts/auto-fix-syntax.sh
-      echo ""
-      echo -e "${BLUE}Re-running format check after fixes...${NC}"
-      echo ""
-      # Re-run format check after fixes
-      if run_check "Format Check (after fixes)" "make fmt"; then
-        # Remove the original failure from FAILED_CHECKS
-        FAILED_CHECKS=("${FAILED_CHECKS[@]/Format Check/}")
-      fi
-    else
-      echo -e "${RED}❌ auto-fix-syntax.sh not found in ./scripts/${NC}"
-    fi
-  fi
-}
-run_check "Go Vet" "make vet" || {
-  # Go vet failed - offer to auto-fix
-  echo -e "${YELLOW}💡 Tip: Automated go vet fixing is available${NC}"
-  echo ""
-  read -p "Run automated go vet fixer? [y/N]: " -n 1 -r
-  echo ""
-  if [[ $REPLY =~ ^[Yy]$ ]]; then
-    echo ""
-    if [ -f "./scripts/auto-fix-syntax.sh" ]; then
-      ./scripts/auto-fix-syntax.sh
-      echo ""
-      echo -e "${BLUE}Re-running go vet after fixes...${NC}"
-      echo ""
-      # Re-run go vet after fixes
-      if run_check "Go Vet (after fixes)" "make vet"; then
-        # Remove the original failure from FAILED_CHECKS
-        FAILED_CHECKS=("${FAILED_CHECKS[@]/Go Vet/}")
-      fi
-    else
-      echo -e "${RED}❌ auto-fix-syntax.sh not found in ./scripts/${NC}"
-    fi
+  if [ "$AUTO_FIX" = true ]; then
+    echo "Auto-fixing with gofmt..."
+    gofmt -w .
+    echo -e "${GREEN}✅ Format issues fixed${NC}"
+    FAILED_CHECKS=("${FAILED_CHECKS[@]/Format Check (gofmt)/}")
+    PASSED_CHECKS+=("Format Check (gofmt) [fixed]")
   fi
 }
 
-# Check if golangci-lint is installed (check PATH and ~/go/bin)
+# Go vet
+run_check "Go Vet" "go vet ./..." || true
+
+# Lint check (golangci-lint)
 if command -v golangci-lint &> /dev/null; then
-  LINT_CMD="make lint"
-  LINT_AVAILABLE=true
+  LINT_CMD="golangci-lint run ./..."
 elif [ -x "$HOME/go/bin/golangci-lint" ]; then
   LINT_CMD="$HOME/go/bin/golangci-lint run ./..."
-  LINT_AVAILABLE=true
 else
-  LINT_AVAILABLE=false
+  LINT_CMD=""
 fi
 
-if [ "$LINT_AVAILABLE" = true ]; then
-  run_check "Lint Check" "$LINT_CMD" || {
-    # Lint check failed - auto-fix with feedback loop
-    echo -e "${YELLOW}💡 Automated lint fixing is enabled${NC}"
-    echo ""
-    if [ -f "./scripts/fix-all-lint.sh" ]; then
-      # Feedback loop: keep fixing until no errors or max iterations
+if [ -n "$LINT_CMD" ]; then
+  if ! run_check "Lint Check" "$LINT_CMD"; then
+    if [ "$AUTO_FIX" = true ] && [ -f "./scripts/fix-all-lint.sh" ]; then
+      echo ""
+      echo "Auto-fixing lint errors..."
       MAX_ITERATIONS=5
       ITERATION=1
       LINT_PASSED=false
 
       while [ $ITERATION -le $MAX_ITERATIONS ] && [ "$LINT_PASSED" = false ]; do
-        echo ""
-        echo -e "${BLUE}╔════════════════════════════════════════════╗${NC}"
-        echo -e "${BLUE}║         FIX ITERATION $ITERATION/$MAX_ITERATIONS                ║${NC}"
-        echo -e "${BLUE}╚════════════════════════════════════════════╝${NC}"
-        echo ""
+        echo -e "${BLUE}Fix iteration $ITERATION/$MAX_ITERATIONS${NC}"
+        ./scripts/fix-all-lint.sh > /dev/null 2>&1 || true
 
-        ./scripts/fix-all-lint.sh
-
-        echo ""
-        echo -e "${BLUE}Re-running lint check after fixes...${NC}"
-        echo ""
-        echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-        echo -e "${BLUE}Running: Lint Check (iteration $ITERATION)${NC}"
-        echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-
-        if eval "$LINT_CMD"; then
-          echo -e "${GREEN}✅ Lint Check (iteration $ITERATION): PASSED${NC}"
-          echo ""
+        if eval "$LINT_CMD" > /dev/null 2>&1; then
           LINT_PASSED=true
-          # Remove the original failure from FAILED_CHECKS
+          echo -e "${GREEN}✅ Lint errors fixed after $ITERATION iteration(s)${NC}"
           FAILED_CHECKS=("${FAILED_CHECKS[@]/Lint Check/}")
-        else
-          echo -e "${RED}❌ Lint Check (iteration $ITERATION): FAILED${NC}"
-          echo ""
-
-          if [ $ITERATION -lt $MAX_ITERATIONS ]; then
-            echo -e "${YELLOW}⚠️  Still have lint errors. Attempting fix again...${NC}"
-            echo ""
-          else
-            echo -e "${RED}❌ Maximum iterations reached. Manual intervention required.${NC}"
-            echo ""
-          fi
+          PASSED_CHECKS+=("Lint Check [fixed]")
         fi
-
         ITERATION=$((ITERATION + 1))
       done
 
-      if [ "$LINT_PASSED" = true ]; then
-        echo ""
-        echo -e "${GREEN}╔════════════════════════════════════════════╗${NC}"
-        echo -e "${GREEN}║              COMPLETE                      ║${NC}"
-        echo -e "${GREEN}╚════════════════════════════════════════════╝${NC}"
-        echo ""
-        echo -e "${GREEN}✅ All lint errors fixed successfully!${NC}"
-        echo ""
-      else
-        echo ""
-        echo -e "${RED}╔════════════════════════════════════════════╗${NC}"
-        echo -e "${RED}║         MANUAL FIXES REQUIRED              ║${NC}"
-        echo -e "${RED}╚════════════════════════════════════════════╝${NC}"
-        echo ""
-        echo -e "${RED}❌ Automated fixes could not resolve all errors.${NC}"
-        echo -e "${YELLOW}   Please review the errors above and fix manually.${NC}"
-        echo ""
+      if [ "$LINT_PASSED" = false ]; then
+        echo -e "${RED}❌ Could not auto-fix all lint errors${NC}"
       fi
-    else
-      echo -e "${RED}❌ fix-all-lint.sh not found in ./scripts/${NC}"
     fi
-  }
+  fi
 else
-  echo -e "${YELLOW}⚠️  Lint Check: SKIPPED (golangci-lint not installed)${NC}"
-  echo -e "${YELLOW}   Install with: make install-tools${NC}"
-  echo ""
+  skip_check "Lint Check" "golangci-lint not installed"
 fi
 
-# Check Go version first (some vulnerabilities require Go upgrades)
+# Go version check
 if [ -f "./scripts/check-go-version.sh" ]; then
-  run_check "Go Version Check" "./scripts/check-go-version.sh" || {
-    echo -e "${YELLOW}💡 Tip: Upgrade Go to fix standard library vulnerabilities${NC}"
-    echo ""
-    read -p "Skip security scan (will fail due to Go version)? [y/N]: " -n 1 -r
-    echo ""
-    if [[ $REPLY =~ ^[Yy]$ ]]; then
-      echo -e "${YELLOW}⚠️  Security Scan: SKIPPED (outdated Go version)${NC}"
-      echo ""
-      # Remove Go Version Check from failures since user acknowledged
-      FAILED_CHECKS=("${FAILED_CHECKS[@]/Go Version Check/}")
-      SKIP_SECURITY_SCAN=true
-    fi
-  }
+  run_check "Go Version Check" "./scripts/check-go-version.sh" true
 fi
 
-# Check if govulncheck is installed (check PATH and ~/go/bin)
-if [ "${SKIP_SECURITY_SCAN}" != "true" ]; then
-  if command -v govulncheck &> /dev/null; then
-    run_check "Security Scan" "make security" || {
-      echo -e "${YELLOW}💡 Tip: If failure is due to Go version, upgrade Go${NC}"
-      echo -e "${YELLOW}   See instructions above or run: ./scripts/check-go-version.sh${NC}"
-      echo ""
-    }
-  elif [ -x "$HOME/go/bin/govulncheck" ]; then
-    run_check "Security Scan" "$HOME/go/bin/govulncheck ./..." || {
-      echo -e "${YELLOW}💡 Tip: If failure is due to Go version, upgrade Go${NC}"
-      echo -e "${YELLOW}   See instructions above or run: ./scripts/check-go-version.sh${NC}"
-      echo ""
-    }
-  else
-    echo -e "${YELLOW}⚠️  Security Scan: SKIPPED (govulncheck not installed)${NC}"
-    echo -e "${YELLOW}   Install with: make install-tools${NC}"
-    echo ""
-  fi
-fi
-
-# JavaScript Linting (if package.json exists)
-if [ -f "package.json" ]; then
-  # Check if lint:js script exists
-  if grep -q '"lint:js"' package.json 2>/dev/null; then
-    run_check "JS Lint Check" "npm run lint:js" || {
-      # JS lint check failed - offer to auto-fix
-      if grep -q '"lint:js:fix"' package.json 2>/dev/null; then
-        echo -e "${YELLOW}💡 Tip: Automated JS lint fixing is available${NC}"
-        echo ""
-        read -p "Run automated JS lint fixer? [y/N]: " -n 1 -r
-        echo ""
-        if [[ $REPLY =~ ^[Yy]$ ]]; then
-          echo ""
-          echo -e "${BLUE}Running npm run lint:js:fix...${NC}"
-          echo ""
-          npm run lint:js:fix
-          echo ""
-          echo -e "${BLUE}Re-running JS lint check after fixes...${NC}"
-          echo ""
-          # Re-run JS lint check after fixes
-          if run_check "JS Lint Check (after fixes)" "npm run lint:js"; then
-            # Remove the original failure from FAILED_CHECKS
-            FAILED_CHECKS=("${FAILED_CHECKS[@]/JS Lint Check/}")
-          fi
-        fi
-      else
-        echo -e "${YELLOW}💡 Tip: Add a 'lint:js:fix' script to package.json for auto-fixing${NC}"
-        echo ""
-      fi
-    }
-  else
-    echo -e "${YELLOW}⚠️  JS Lint Check: SKIPPED (no 'lint:js' script in package.json)${NC}"
-    echo ""
-  fi
+# Security scan (govulncheck)
+if command -v govulncheck &> /dev/null; then
+  run_check "Security Scan" "govulncheck ./..." || true
+elif [ -x "$HOME/go/bin/govulncheck" ]; then
+  run_check "Security Scan" "$HOME/go/bin/govulncheck ./..." || true
 else
-  echo -e "${YELLOW}⚠️  JS Lint Check: SKIPPED (no package.json found)${NC}"
-  echo ""
+  skip_check "Security Scan" "govulncheck not installed"
 fi
 
-# 3. TESTS (ALL)
-echo ""
-echo "════════════════════════════════════════════"
-echo "3. TESTS (Unit + Integration + E2E + User)"
-echo "════════════════════════════════════════════"
-echo ""
-
-# Run tests and capture output for potential Claude fix
-TEST_OUTPUT_FILE=$(mktemp)
-echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-echo -e "${BLUE}Running: All Tests${NC}"
-echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-
-if go test -p 1 -race ./... 2>&1 | tee "$TEST_OUTPUT_FILE"; then
-  echo -e "${GREEN}✅ All Tests: PASSED${NC}"
-  echo ""
-  rm -f "$TEST_OUTPUT_FILE"
-else
-  echo -e "${RED}❌ All Tests: FAILED${NC}"
-  echo ""
-  FAILED_CHECKS+=("All Tests")
-  # Store last 50 lines of test output for the summary (more lines for test errors)
-  tail -50 "$TEST_OUTPUT_FILE" > "$FAILED_OUTPUTS_DIR/All_Tests"
-
-  : <<'CLAUDE_AUTOFIX_DISABLED'
-  # Tests failed - automatically invoke Claude to fix
-  # Check if claude CLI is available
-  if command -v claude &> /dev/null; then
-    echo -e "${BLUE}Automatically invoking Claude to fix test errors...${NC}"
-    echo ""
-
-    # Feedback loop: keep fixing until tests pass or max iterations
-    MAX_ITERATIONS=3
-    ITERATION=1
-    TESTS_PASSED=false
-
-    while [ $ITERATION -le $MAX_ITERATIONS ] && [ "$TESTS_PASSED" = false ]; do
-      echo ""
-      echo -e "${BLUE}╔════════════════════════════════════════════╗${NC}"
-      echo -e "${BLUE}║     CLAUDE FIX ITERATION $ITERATION/$MAX_ITERATIONS              ║${NC}"
-      echo -e "${BLUE}╚════════════════════════════════════════════╝${NC}"
-      echo ""
-
-      # Extract the failing test output (more lines for race conditions which are verbose)
-      TEST_ERRORS=$(cat "$TEST_OUTPUT_FILE" | tail -300)
-
-      echo -e "${BLUE}Invoking Claude to fix test errors...${NC}"
-      echo ""
-
-      # Call Claude with the test errors
-      # -p runs non-interactively, --permission-mode acceptEdits allows file edits without prompting
-      claude -p "The following Go tests are failing. Please analyze the errors and fix them.
-
-IMPORTANT: If you see 'DATA RACE' or 'race detected' errors, this means concurrent goroutines are accessing shared data without synchronization. Look at the file paths and line numbers in the race output - you'll need to add mutex locking (sync.Mutex or sync.RWMutex) around the shared data access.
-
-Test output:
-
-$TEST_ERRORS
-
-Please fix these test failures by modifying the source files (not test files, unless the test itself is wrong)." --permission-mode acceptEdits
-
-      echo ""
-      echo -e "${BLUE}Re-running tests after Claude fixes...${NC}"
-      echo ""
-      echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-      echo -e "${BLUE}Running: All Tests (iteration $ITERATION)${NC}"
-      echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-
-      if go test -p 1 -race ./... 2>&1 | tee "$TEST_OUTPUT_FILE"; then
-        echo -e "${GREEN}✅ All Tests (iteration $ITERATION): PASSED${NC}"
-        echo ""
-        TESTS_PASSED=true
-        # Remove the original failure from FAILED_CHECKS
-        FAILED_CHECKS=("${FAILED_CHECKS[@]/All Tests/}")
-      else
-        echo -e "${RED}❌ All Tests (iteration $ITERATION): FAILED${NC}"
-        echo ""
-
-        if [ $ITERATION -lt $MAX_ITERATIONS ]; then
-          echo -e "${YELLOW}⚠️  Still have test failures. Attempting fix again...${NC}"
-          echo ""
-        else
-          echo -e "${RED}❌ Maximum iterations reached. Manual intervention required.${NC}"
-          echo ""
-        fi
-      fi
-
-      ITERATION=$((ITERATION + 1))
-    done
-
-    if [ "$TESTS_PASSED" = true ]; then
-      echo ""
-      echo -e "${GREEN}╔════════════════════════════════════════════╗${NC}"
-      echo -e "${GREEN}║         TESTS FIXED BY CLAUDE              ║${NC}"
-      echo -e "${GREEN}╚════════════════════════════════════════════╝${NC}"
-      echo ""
-      echo -e "${GREEN}✅ All test errors fixed successfully!${NC}"
-      echo ""
-    else
-      echo ""
-      echo -e "${RED}╔════════════════════════════════════════════╗${NC}"
-      echo -e "${RED}║         MANUAL FIXES REQUIRED              ║${NC}"
-      echo -e "${RED}╚════════════════════════════════════════════╝${NC}"
-      echo ""
-      echo -e "${RED}❌ Claude could not resolve all test errors.${NC}"
-      echo -e "${YELLOW}   Please review the errors above and fix manually.${NC}"
-      echo ""
-    fi
-  else
-    echo -e "${RED}❌ Claude CLI not found. Install from: https://claude.ai/code${NC}"
-    echo ""
-    echo -e "${YELLOW}Falling back to diagnostic tool...${NC}"
-    echo ""
-    if [ -f "./scripts/diagnose-test-failures.sh" ]; then
-      ./scripts/diagnose-test-failures.sh
-      echo ""
-      echo -e "${BLUE}Re-running tests after diagnostics...${NC}"
-      echo ""
-      # Re-run tests after diagnostics
-      if go test -p 1 -race ./... 2>&1 | tee "$TEST_OUTPUT_FILE"; then
-        echo -e "${GREEN}✅ All Tests (after diagnostics): PASSED${NC}"
-        # Remove the original failure from FAILED_CHECKS
-        FAILED_CHECKS=("${FAILED_CHECKS[@]/All Tests/}")
-      fi
-    fi
-  fi
-CLAUDE_AUTOFIX_DISABLED
-
-  # Tests failed - automatically invoke OpenCode to fix
-  # Check if opencode CLI is available
-  if command -v opencode &> /dev/null; then
-    echo -e "${BLUE}Automatically invoking OpenCode to fix test errors...${NC}"
-    echo ""
-
-    # Feedback loop: keep fixing until tests pass or max iterations
-    MAX_ITERATIONS=3
-    ITERATION=1
-    TESTS_PASSED=false
-
-    while [ $ITERATION -le $MAX_ITERATIONS ] && [ "$TESTS_PASSED" = false ]; do
-      echo ""
-      echo -e "${BLUE}╔════════════════════════════════════════════╗${NC}"
-      echo -e "${BLUE}║     OPENCODE FIX ITERATION $ITERATION/$MAX_ITERATIONS            ║${NC}"
-      echo -e "${BLUE}╚════════════════════════════════════════════╝${NC}"
-      echo ""
-
-      # Extract the failing test output (more lines for race conditions which are verbose)
-      TEST_ERRORS=$(cat "$TEST_OUTPUT_FILE" | tail -300)
-
-      echo -e "${BLUE}Invoking OpenCode to fix test errors...${NC}"
-      echo ""
-
-      # Create prompt for OpenCode
-      PROMPT="The following Go tests are failing. Please analyze the errors and fix them.
-
-IMPORTANT: If you see 'DATA RACE' or 'race detected' errors, this means concurrent goroutines are accessing shared data without synchronization. Look at the file paths and line numbers in the race output - you'll need to add mutex locking (sync.Mutex or sync.RWMutex) around the shared data access.
-
-Test output:
-
-$TEST_ERRORS
-
-Please fix these test failures by modifying the source files (not test files, unless the test itself is wrong)."
-
-      # Call OpenCode with the test errors
-      if opencode run "$PROMPT"; then
-        echo ""
-        echo -e "${GREEN}✓ OpenCode finished processing${NC}"
-      else
-        echo ""
-        echo -e "${YELLOW}⚠️  OpenCode encountered an issue${NC}"
-      fi
-
-      echo ""
-      echo -e "${BLUE}Re-running tests after OpenCode fixes...${NC}"
-      echo ""
-      echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-      echo -e "${BLUE}Running: All Tests (iteration $ITERATION)${NC}"
-      echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-
-      if go test -p 1 -race ./... 2>&1 | tee "$TEST_OUTPUT_FILE"; then
-        echo -e "${GREEN}✅ All Tests (iteration $ITERATION): PASSED${NC}"
-        echo ""
-        TESTS_PASSED=true
-        # Remove the original failure from FAILED_CHECKS
-        FAILED_CHECKS=("${FAILED_CHECKS[@]/All Tests/}")
-      else
-        echo -e "${RED}❌ All Tests (iteration $ITERATION): FAILED${NC}"
-        echo ""
-
-        if [ $ITERATION -lt $MAX_ITERATIONS ]; then
-          echo -e "${YELLOW}⚠️  Still have test failures. Attempting fix again...${NC}"
-          echo ""
-        else
-          echo -e "${RED}❌ Maximum iterations reached. Manual intervention required.${NC}"
-          echo ""
-        fi
-      fi
-
-      ITERATION=$((ITERATION + 1))
-    done
-
-    if [ "$TESTS_PASSED" = true ]; then
-      echo ""
-      echo -e "${GREEN}╔════════════════════════════════════════════╗${NC}"
-      echo -e "${GREEN}║         TESTS FIXED BY OPENCODE            ║${NC}"
-      echo -e "${GREEN}╚════════════════════════════════════════════╝${NC}"
-      echo ""
-      echo -e "${GREEN}✅ All test errors fixed successfully!${NC}"
-      echo ""
-    else
-      echo ""
-      echo -e "${RED}╔════════════════════════════════════════════╗${NC}"
-      echo -e "${RED}║         MANUAL FIXES REQUIRED              ║${NC}"
-      echo -e "${RED}╚════════════════════════════════════════════╝${NC}"
-      echo ""
-      echo -e "${RED}❌ OpenCode could not resolve all test errors.${NC}"
-      echo -e "${YELLOW}   Please review the errors above and fix manually.${NC}"
-      echo ""
-    fi
-  else
-    echo -e "${RED}❌ OpenCode CLI not found. Install from: https://opencode.ai${NC}"
-    echo ""
-    echo -e "${YELLOW}Falling back to diagnostic tool...${NC}"
-    echo ""
-    if [ -f "./scripts/diagnose-test-failures.sh" ]; then
-      ./scripts/diagnose-test-failures.sh
-      echo ""
-      echo -e "${BLUE}Re-running tests after diagnostics...${NC}"
-      echo ""
-      # Re-run tests after diagnostics
-      if go test -p 1 -race ./... 2>&1 | tee "$TEST_OUTPUT_FILE"; then
-        echo -e "${GREEN}✅ All Tests (after diagnostics): PASSED${NC}"
-        # Remove the original failure from FAILED_CHECKS
-        FAILED_CHECKS=("${FAILED_CHECKS[@]/All Tests/}")
-      fi
-    fi
-  fi
-  rm -f "$TEST_OUTPUT_FILE"
+# JavaScript linting (if applicable)
+if [ -f "package.json" ] && grep -q '"lint:js"' package.json 2>/dev/null; then
+  run_check "JS Lint Check" "npm run lint:js" true
 fi
 
-# 4. BUILD VERIFICATION
-echo ""
-echo "════════════════════════════════════════════"
-echo "4. BUILD VERIFICATION"
-echo "════════════════════════════════════════════"
-echo ""
+# ════════════════════════════════════════════════════════════════════════════
+# STEP 3: TESTS
+# ════════════════════════════════════════════════════════════════════════════
 
+print_header "3. TESTS"
+
+# Run all tests with race detector
+# Note: -p 1 runs packages sequentially to avoid race conditions in shared state
+TEST_CMD="go test -p 1 -race -timeout 5m ./..."
+
+if ! run_check "All Tests (unit + integration)" "$TEST_CMD"; then
+  echo ""
+  echo -e "${YELLOW}💡 Test failures must be fixed manually before release.${NC}"
+  echo ""
+  echo "Useful commands:"
+  echo "  go test -v ./internal/path/to/failing/package/..."
+  echo "  go test -v -run TestSpecificTest ./..."
+  echo ""
+
+  if [ -f "./scripts/diagnose-test-failures.sh" ]; then
+    echo "Run diagnostics:"
+    echo "  ./scripts/diagnose-test-failures.sh"
+    echo ""
+  fi
+fi
+
+# ════════════════════════════════════════════════════════════════════════════
+# STEP 4: BUILD VERIFICATION
+# ════════════════════════════════════════════════════════════════════════════
+
+print_header "4. BUILD VERIFICATION"
+
+# Build server
 run_check "Build Server" "go build -o bin/ori-agent ./cmd/server" || true
-run_check "Build Menubar (macOS)" "go build -o bin/ori-menubar ./cmd/menubar 2>/dev/null || echo 'Skipping menubar (not on macOS)'" || true
 
-# Cross-platform builds - catches issues that only appear on Linux/Windows CI
-run_check "Cross-Platform Builds" "./scripts/check-cross-platform.sh" || true
-
-# Sync plugin dependencies before building plugins
-run_check "Sync Plugin Dependencies" "./scripts/sync-plugin-deps.sh" || true
-run_check "Build Plugins" "./scripts/build-plugins.sh" || true
-
-# External plugins live outside this repo (../plugins/*) and are not required for releasing ori-agent itself.
-# Enable with: BUILD_EXTERNAL_PLUGINS=1 ./scripts/pre-release-check.sh vX.Y.Z
-if [ "${BUILD_EXTERNAL_PLUGINS:-}" = "1" ] || [ "${BUILD_EXTERNAL_PLUGINS:-}" = "true" ]; then
-  run_check "Build External Plugins" "./scripts/build-external-plugins.sh" || true
+# Build menubar (macOS only)
+if [ "$(uname)" = "Darwin" ]; then
+  run_check "Build Menubar (macOS)" "go build -o bin/ori-menubar ./cmd/menubar" || true
 else
-  echo -e "${YELLOW}⚠️  Build External Plugins: SKIPPED (set BUILD_EXTERNAL_PLUGINS=1 to enable)${NC}"
-  echo ""
+  skip_check "Build Menubar" "not on macOS"
 fi
 
-# 5. DEPENDENCY CHECK
-echo ""
-echo "════════════════════════════════════════════"
-echo "5. DEPENDENCY CHECK"
-echo "════════════════════════════════════════════"
-echo ""
+# Cross-platform builds
+if [ -f "./scripts/check-cross-platform.sh" ]; then
+  run_check "Cross-Platform Builds" "./scripts/check-cross-platform.sh" || true
+else
+  skip_check "Cross-Platform Builds" "script not found"
+fi
+
+# Sync plugin dependencies
+if [ -f "./scripts/sync-plugin-deps.sh" ]; then
+  run_check "Sync Plugin Dependencies" "./scripts/sync-plugin-deps.sh" || true
+fi
+
+# Build plugins
+if [ -f "./scripts/build-plugins.sh" ]; then
+  run_check "Build Plugins" "./scripts/build-plugins.sh" || true
+fi
+
+# ════════════════════════════════════════════════════════════════════════════
+# STEP 5: DEPENDENCY CHECK
+# ════════════════════════════════════════════════════════════════════════════
+
+print_header "5. DEPENDENCY CHECK"
 
 run_check "Go Mod Verify" "go mod verify" || true
-run_check "Go Mod Tidy" "go mod tidy && git diff --exit-code go.mod go.sum" || {
-  # Go mod tidy failed - offer to auto-fix
-  echo -e "${YELLOW}💡 Tip: Automated go.mod fix is available${NC}"
-  echo ""
-  read -p "Run automated go.mod fixer? [y/N]: " -n 1 -r
-  echo ""
-  if [[ $REPLY =~ ^[Yy]$ ]]; then
-    echo ""
-    if [ -f "./scripts/fix-go-mod.sh" ]; then
-      ./scripts/fix-go-mod.sh
-      echo ""
-      echo -e "${BLUE}Re-running Go Mod Tidy check after fixes...${NC}"
-      echo ""
-      # Go mod tidy already ran in fix-go-mod.sh; only re-run to confirm success.
-      if go mod tidy; then
-        if git diff --exit-code go.mod go.sum; then
-          echo -e "${GREEN}✅ Go Mod Tidy (after fixes): PASSED${NC}"
-        else
-          echo -e "${YELLOW}⚠️  Go Mod Tidy (after fixes): CHANGES APPLIED${NC}"
-          echo -e "${YELLOW}   go.mod/go.sum updated; commit the changes.${NC}"
-        fi
-        echo ""
-        # Remove the original failure from FAILED_CHECKS
-        FAILED_CHECKS=("${FAILED_CHECKS[@]/Go Mod Tidy/}")
-      else
-        echo -e "${RED}❌ Go Mod Tidy (after fixes): FAILED${NC}"
-        echo ""
-      fi
-    else
-      echo -e "${RED}❌ fix-go-mod.sh not found in ./scripts/${NC}"
-    fi
-  fi
-}
 
-# 6. UPDATE README
-echo ""
-echo "════════════════════════════════════════════"
-echo "6. UPDATE README"
-echo "════════════════════════════════════════════"
-echo ""
+# Check if go.mod/go.sum need tidying
+GO_MOD_CHECK="go mod tidy && git diff --exit-code go.mod go.sum"
+if ! run_check "Go Mod Tidy" "$GO_MOD_CHECK"; then
+  echo ""
+  echo "go.mod/go.sum were modified by 'go mod tidy'."
+  echo "Changes will be committed automatically if all checks pass."
+  echo ""
+  # Don't treat this as a failure - we'll commit the changes
+  FAILED_CHECKS=("${FAILED_CHECKS[@]/Go Mod Tidy/}")
+fi
+
+# ════════════════════════════════════════════════════════════════════════════
+# STEP 6: README UPDATE
+# ════════════════════════════════════════════════════════════════════════════
+
+print_header "6. README UPDATE"
 
 if [ -f "./scripts/update-readme.sh" ]; then
-  run_check "Update README badges" "./scripts/update-readme.sh" || true
+  run_check "Update README badges" "./scripts/update-readme.sh" true
 else
-  echo -e "${YELLOW}⚠️  Update README: SKIPPED (update-readme.sh not found)${NC}"
-  echo ""
+  skip_check "Update README badges" "script not found"
 fi
 
-# 7. GIT STATUS CHECK
-echo ""
-echo "════════════════════════════════════════════"
-echo "7. GIT STATUS CHECK"
-echo "════════════════════════════════════════════"
-echo ""
+# ════════════════════════════════════════════════════════════════════════════
+# STEP 7: GIT STATUS CHECK
+# ════════════════════════════════════════════════════════════════════════════
 
-# Check for uncommitted changes
-if git diff --quiet && git diff --cached --quiet; then
-  echo -e "${GREEN}✅ Git Status: Clean${NC}"
-  echo ""
-else
-  echo -e "${YELLOW}⚠️  Git Status: Uncommitted changes${NC}"
-  echo ""
-  echo "Modified files:"
-  git status --short
-  echo ""
-  echo -e "${BLUE}💡 Note: Changes will be auto-committed after all checks pass.${NC}"
-  echo ""
-fi
+print_header "7. GIT STATUS CHECK"
 
-# Check current branch
-CURRENT_BRANCH=$(git branch --show-current)
+# Final branch check
 if [ "$CURRENT_BRANCH" = "dev" ]; then
-  echo -e "${GREEN}✅ Git Branch: $CURRENT_BRANCH (testing before release branch)${NC}"
-  echo ""
-  echo -e "${BLUE}ℹ️  Running pre-release checks on dev branch${NC}"
-  echo -e "${BLUE}   This ensures code is stable before creating release branch${NC}"
-  echo ""
+  echo -e "${GREEN}✅ Branch: $CURRENT_BRANCH (pre-release testing)${NC}"
 elif [[ "$CURRENT_BRANCH" =~ ^release/ ]]; then
-  echo -e "${GREEN}✅ Git Branch: $CURRENT_BRANCH (release stabilization)${NC}"
-  echo ""
-  echo -e "${BLUE}ℹ️  Running pre-release checks on release branch${NC}"
-  echo -e "${BLUE}   This validates the release before merging to main${NC}"
-  echo ""
+  echo -e "${GREEN}✅ Branch: $CURRENT_BRANCH (release stabilization)${NC}"
 elif [ "$CURRENT_BRANCH" = "main" ]; then
-  echo -e "${GREEN}✅ Git Branch: $CURRENT_BRANCH${NC}"
-  echo ""
-
-  echo -e "${YELLOW}⚠️  You're running checks on main (after merge)${NC}"
-  echo -e "${YELLOW}   Best practice: Run checks on release branch first${NC}"
-  echo ""
-
-  # Check if dev is merged into main
-  if git show-ref --verify --quiet refs/heads/dev; then
-    DEV_COMMITS=$(git rev-list main..dev --count 2>/dev/null || echo "0")
-    if [ "$DEV_COMMITS" -gt 0 ]; then
-      echo -e "${RED}❌ Warning: dev branch has $DEV_COMMITS commit(s) not in main${NC}"
-      echo -e "${YELLOW}   Create release branch: ./scripts/create-release.sh vX.Y.Z${NC}"
-      echo ""
-      FAILED_CHECKS+=("dev branch not merged to main")
-    else
-      echo -e "${GREEN}✅ dev branch is fully merged into main${NC}"
-      echo ""
-    fi
-  else
-    echo -e "${YELLOW}⚠️  dev branch does not exist${NC}"
-    echo ""
-  fi
+  echo -e "${GREEN}✅ Branch: $CURRENT_BRANCH${NC}"
 else
-  echo -e "${RED}❌ Git Branch: $CURRENT_BRANCH (must be on 'dev', 'release/*', or 'main')${NC}"
-  echo ""
-  FAILED_CHECKS+=("Not on dev, release, or main branch")
+  echo -e "${RED}❌ Branch: $CURRENT_BRANCH (expected dev, main, or release/*)${NC}"
 fi
 
-# 8. SMOKE TESTS
-echo ""
-echo "════════════════════════════════════════════"
-echo "8. SMOKE TESTS"
-echo "════════════════════════════════════════════"
-echo ""
+# Show modified files
+if [ -n "$(git status --porcelain)" ]; then
+  echo ""
+  echo "Modified files (will be auto-committed if checks pass):"
+  git status --short
+fi
 
-run_check "Smoke Tests" "./scripts/test-all-installers.sh" || true
+# ════════════════════════════════════════════════════════════════════════════
+# STEP 8: SMOKE TESTS
+# ════════════════════════════════════════════════════════════════════════════
 
-# 9. SUMMARY
+print_header "8. SMOKE TESTS"
+
+if [ "$SKIP_SMOKE" = true ]; then
+  skip_check "Smoke Tests" "--no-smoke flag"
+elif [ -f "./scripts/test-all-installers.sh" ]; then
+  run_check "Smoke Tests" "./scripts/test-all-installers.sh" true
+else
+  skip_check "Smoke Tests" "script not found"
+fi
+
+# ════════════════════════════════════════════════════════════════════════════
+# SUMMARY
+# ════════════════════════════════════════════════════════════════════════════
+
 echo ""
 echo "╔════════════════════════════════════════════╗"
-echo "║           SUMMARY                          ║"
+echo "║              SUMMARY                       ║"
 echo "╚════════════════════════════════════════════╝"
 echo ""
 
+# Show results
+echo -e "${GREEN}Passed: ${#PASSED_CHECKS[@]}${NC}"
+for check in "${PASSED_CHECKS[@]}"; do
+  echo -e "  ${GREEN}✅${NC} $check"
+done
+
+if [ ${#SKIPPED_CHECKS[@]} -gt 0 ]; then
+  echo ""
+  echo -e "${YELLOW}Skipped: ${#SKIPPED_CHECKS[@]}${NC}"
+  for check in "${SKIPPED_CHECKS[@]}"; do
+    echo -e "  ${YELLOW}⏭️${NC}  $check"
+  done
+fi
+
+if [ ${#FAILED_CHECKS[@]} -gt 0 ]; then
+  echo ""
+  echo -e "${RED}Failed: ${#FAILED_CHECKS[@]}${NC}"
+  for check in "${FAILED_CHECKS[@]}"; do
+    echo -e "  ${RED}❌${NC} $check"
+  done
+fi
+
+echo ""
+
+# Handle success/failure
 if [ ${#FAILED_CHECKS[@]} -eq 0 ]; then
-  echo -e "${GREEN}✅ All checks passed!${NC}"
+  echo -e "${GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+  echo -e "${GREEN}  ✅ ALL CHECKS PASSED${NC}"
+  echo -e "${GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
   echo ""
 
-  # Commit go.mod/go.sum changes if they were modified during checks
+  # Auto-commit changes
+  COMMITTED=false
+
+  # Commit go.mod/go.sum if changed
   if ! git diff --quiet go.mod go.sum 2>/dev/null; then
-    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-    echo -e "${BLUE}[AUTO-COMMIT]${NC} Committing go.mod/go.sum changes..."
-    echo ""
+    echo "Committing go.mod/go.sum changes..."
     git add go.mod go.sum 2>/dev/null || true
-    if git commit -m "chore: tidy go module dependencies" --no-verify; then
-      echo ""
-      echo -e "${GREEN}✅ Go module files committed successfully${NC}"
-      echo -e "${GREEN}   Files: go.mod, go.sum${NC}"
-      echo ""
-    else
-      echo ""
-      echo -e "${YELLOW}⚠️  No go.mod changes to commit (already clean)${NC}"
-      echo ""
-    fi
-    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-    echo ""
+    git commit -m "chore: tidy go module dependencies" --no-verify 2>/dev/null && COMMITTED=true
   fi
 
-  # Commit VERSION and README changes if a version was specified and all checks passed
-  if [ -n "$VERSION" ]; then
-    if ! git diff --quiet VERSION README.md 2>/dev/null; then
-      echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-      echo -e "${BLUE}[AUTO-COMMIT]${NC} All checks passed! Committing version bump..."
-      echo ""
-      git add VERSION README.md 2>/dev/null || true
-      if git commit -m "chore: bump version to $VERSION" --no-verify; then
-        echo ""
-        echo -e "${GREEN}✅ Version files committed successfully${NC}"
-        echo -e "${GREEN}   Commit: chore: bump version to $VERSION${NC}"
-        echo -e "${GREEN}   Files: VERSION, README.md${NC}"
-        echo ""
-      else
-        echo ""
-        echo -e "${RED}❌ Failed to commit version bump${NC}"
-        echo ""
-      fi
-      echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-      echo ""
-    fi
+  # Commit VERSION and README if changed
+  if [ -n "$VERSION" ] && ! git diff --quiet VERSION README.md 2>/dev/null; then
+    echo "Committing version bump..."
+    git add VERSION README.md 2>/dev/null || true
+    git commit -m "chore: bump version to $VERSION" --no-verify 2>/dev/null && COMMITTED=true
   fi
 
-  # Commit any remaining changes (lint fixes, test fixes, README updates, etc.)
+  # Commit any remaining changes (lint fixes, etc.)
   if [ -n "$(git status --porcelain)" ]; then
-    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-    echo -e "${BLUE}[AUTO-COMMIT]${NC} Committing remaining fixes..."
-    echo ""
+    echo "Committing remaining fixes..."
     git add -A 2>/dev/null || true
-    if git commit -m "chore: apply pre-release fixes" --no-verify; then
-      echo ""
-      echo -e "${GREEN}✅ Remaining fixes committed successfully${NC}"
-      echo -e "${GREEN}   Commit: chore: apply pre-release fixes${NC}"
-      echo ""
-    else
-      echo ""
-      echo -e "${YELLOW}⚠️  No remaining changes to commit (already clean)${NC}"
-      echo ""
-    fi
-    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    git commit -m "chore: apply pre-release fixes" --no-verify 2>/dev/null && COMMITTED=true
+  fi
+
+  if [ "$COMMITTED" = true ]; then
+    echo -e "${GREEN}✅ Changes committed${NC}"
     echo ""
   fi
 
-  # Get current branch to show appropriate next steps
-  CURRENT_BRANCH=$(git branch --show-current)
-
+  # Show next steps
+  echo "Next steps:"
   if [ "$CURRENT_BRANCH" = "dev" ]; then
-    # Checks passed on dev - ready to create release branch
-    if [ -n "$VERSION" ]; then
-      echo -e "${GREEN}dev branch is ready to release $VERSION${NC}"
-    else
-      echo -e "${GREEN}dev branch is ready to release!${NC}"
-    fi
+    echo "  1. Push dev branch:     git push origin dev"
+    echo "  2. Merge to main:       ./scripts/release.sh ${VERSION:-vX.Y.Z}"
     echo ""
-    echo "Next steps:"
-    if [ -n "$VERSION" ]; then
-      echo "  ./scripts/create-release.sh $VERSION"
-      echo "     (Creates release/vX.Y.Z branch for stabilization)"
-    else
-      echo "  ./scripts/create-release.sh vX.Y.Z"
-      echo "     (Creates release branch for stabilization)"
-    fi
-    echo ""
-    echo -e "${BLUE}💡 Tip: All checks passed on dev, safe to create release branch!${NC}"
-    echo ""
-  elif [[ "$CURRENT_BRANCH" =~ ^release/ ]]; then
-    # Checks passed on release branch - ready to trigger release
-    RELEASE_VERSION="${CURRENT_BRANCH#release/}"
-    echo -e "${GREEN}Release branch is ready: $CURRENT_BRANCH${NC}"
-    echo ""
-    echo "Next steps:"
-    echo "  1. Wait for scheduled release (Tuesday 10:00 UTC)"
-    echo "     OR trigger manually:"
-    echo ""
-    echo "  gh workflow run scheduled-release.yml -f release_branch=$CURRENT_BRANCH"
-    echo ""
-    echo "  Optional dry run first:"
-    echo "  gh workflow run scheduled-release.yml -f release_branch=$CURRENT_BRANCH -f dry_run=true"
-    echo ""
-    echo -e "${BLUE}💡 Tip: All checks passed, release branch is ready!${NC}"
-    echo ""
+    echo "Or run full release:"
+    echo "  ./scripts/release.sh ${VERSION:-vX.Y.Z}"
   elif [ "$CURRENT_BRANCH" = "main" ]; then
-    # Checks passed on main - unusual but ok
-    if [ -n "$VERSION" ]; then
-      echo "Ready to release $VERSION"
-      echo ""
-      echo "Next steps:"
-      echo "  ./scripts/create-release.sh $VERSION --immediate"
-      echo ""
-    else
-      echo "Ready to release!"
-      echo ""
-      echo "Next steps:"
-      echo "  ./scripts/create-release.sh vX.Y.Z --immediate"
-      echo ""
-    fi
-  else
-    # Unknown branch
-    echo "Ready to proceed!"
-    echo ""
+    echo "  1. Create tag:          git tag ${VERSION:-vX.Y.Z}"
+    echo "  2. Push tag:            git push origin ${VERSION:-vX.Y.Z}"
   fi
+  echo ""
 
   exit 0
 else
-  echo -e "${RED}❌ ${#FAILED_CHECKS[@]} check(s) failed:${NC}"
+  echo -e "${RED}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+  echo -e "${RED}  ❌ ${#FAILED_CHECKS[@]} CHECK(S) FAILED${NC}"
+  echo -e "${RED}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
   echo ""
-  for check in "${FAILED_CHECKS[@]}"; do
-    echo -e "${RED}  • $check${NC}"
-  done
-  echo ""
-
-  # Show error details for each failed check
-  echo "════════════════════════════════════════════"
-  echo -e "${RED}ERROR DETAILS${NC}"
-  echo "════════════════════════════════════════════"
-  echo ""
-  for check in "${FAILED_CHECKS[@]}"; do
-    safe_name=$(echo "$check" | tr ' /' '__')
-    if [ -f "$FAILED_OUTPUTS_DIR/$safe_name" ]; then
-      echo -e "${RED}━━━ $check ━━━${NC}"
-      echo ""
-      cat "$FAILED_OUTPUTS_DIR/$safe_name"
-      echo ""
-    fi
-  done
 
   echo "Please fix the issues above before releasing."
   echo ""
+
+  # Show detailed error output
+  if [ "$(ls -A "$FAILED_OUTPUTS_DIR" 2>/dev/null)" ]; then
+    echo "Error details:"
+    echo ""
+    for check in "${FAILED_CHECKS[@]}"; do
+      safe_name=$(echo "$check" | tr ' /' '__')
+      if [ -f "$FAILED_OUTPUTS_DIR/$safe_name" ]; then
+        echo -e "${RED}━━━ $check ━━━${NC}"
+        cat "$FAILED_OUTPUTS_DIR/$safe_name"
+        echo ""
+      fi
+    done
+  fi
+
+  echo "Tips:"
+  echo "  - Run with --fix to auto-fix lint errors"
+  echo "  - Run with --verbose to see full command output"
+  echo "  - Run with --no-smoke to skip slow smoke tests"
+  echo ""
+
   exit 1
 fi
