@@ -666,14 +666,21 @@ export class WorkspaceDetailPage {
     const topLevelTasks = this.tasks.filter(t => !t.parent_task_id);
 
     this.elements.tasksList.innerHTML = topLevelTasks.map(task => `
-      <div class="workspace-detail-item" data-task-id="${task.id}" onclick="window.workspaceDetail?.openTask('${task.id}')">
-        <div class="d-flex justify-content-between align-items-start">
-          <div class="workspace-detail-item-title">${this.escapeHtml(task.description || task.name || 'Untitled Task')}</div>
-          <span class="workspace-detail-task-status ${getStatusClass(task.status)}">${getDisplayStatus(task.status)}</span>
-        </div>
-        <div class="workspace-detail-item-meta">
-          ${task.to && task.to !== 'unassigned' ? `<span>Assigned to: ${this.escapeHtml(task.to)}</span> · ` : ''}
-          ${formatDate(task.created_at)}
+      <div class="workspace-detail-item" data-task-id="${task.id}">
+        <button class="workspace-detail-item-delete" onclick="event.stopPropagation(); window.workspaceDetail?.deleteTask('${task.id}')" title="Delete task">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+            <path d="M19,4H15.5L14.5,3H9.5L8.5,4H5V6H19M6,19A2,2 0 0,0 8,21H16A2,2 0 0,0 18,19V7H6V19Z"/>
+          </svg>
+        </button>
+        <div class="workspace-detail-item-content" onclick="window.workspaceDetail?.openTask('${task.id}')">
+          <div class="d-flex justify-content-between align-items-start">
+            <div class="workspace-detail-item-title">${this.escapeHtml(task.description || task.name || 'Untitled Task')}</div>
+            <span class="workspace-detail-task-status ${getStatusClass(task.status)}">${getDisplayStatus(task.status)}</span>
+          </div>
+          <div class="workspace-detail-item-meta">
+            ${task.to && task.to !== 'unassigned' ? `<span>Assigned to: ${this.escapeHtml(task.to)}</span> · ` : ''}
+            ${formatDate(task.created_at)}
+          </div>
         </div>
       </div>
     `).join('');
@@ -1715,11 +1722,18 @@ export class WorkspaceDetailPage {
     }
 
     this.elements.sessionsList.innerHTML = this.sessions.map(session => `
-      <div class="workspace-detail-item" data-session-id="${session.id}" onclick="window.workspaceDetail?.openSession('${session.id}')">
-        <div class="workspace-detail-item-title">${this.escapeHtml(session.title || session.name || 'Untitled Session')}</div>
-        <div class="workspace-detail-item-meta">
-          ${session.agent_name ? `${this.escapeHtml(session.agent_name)} · ` : ''}
-          ${formatDate(session.updated_at || session.created_at)}
+      <div class="workspace-detail-item" data-session-id="${session.id}">
+        <button class="workspace-detail-item-delete" onclick="event.stopPropagation(); window.workspaceDetail?.deleteSession('${session.id}')" title="Delete session">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+            <path d="M19,4H15.5L14.5,3H9.5L8.5,4H5V6H19M6,19A2,2 0 0,0 8,21H16A2,2 0 0,0 18,19V7H6V19Z"/>
+          </svg>
+        </button>
+        <div class="workspace-detail-item-content" onclick="window.workspaceDetail?.openSession('${session.id}')">
+          <div class="workspace-detail-item-title">${this.escapeHtml(session.title || session.name || 'Untitled Session')}</div>
+          <div class="workspace-detail-item-meta">
+            ${session.agent_name ? `${this.escapeHtml(session.agent_name)} · ` : ''}
+            ${formatDate(session.updated_at || session.created_at)}
+          </div>
         </div>
       </div>
     `).join('');
@@ -1820,10 +1834,17 @@ export class WorkspaceDetailPage {
       const title = note.name || note.title || 'Untitled Note';
       const preview = note.preview || note.content || '';
       return `
-      <div class="workspace-detail-item" data-note-id="${note.id}" onclick="window.workspaceDetail?.editNote('${note.id}')">
-        <div class="workspace-detail-item-title">${this.escapeHtml(title)}</div>
-        <div class="workspace-detail-item-meta">
-          ${preview ? this.escapeHtml(preview.substring(0, 50)) + (preview.length > 50 ? '...' : '') : 'Empty note'}
+      <div class="workspace-detail-item" data-note-id="${note.id}">
+        <button class="workspace-detail-item-delete" onclick="event.stopPropagation(); window.workspaceDetail?.deleteNote('${note.id}')" title="Delete note">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+            <path d="M19,4H15.5L14.5,3H9.5L8.5,4H5V6H19M6,19A2,2 0 0,0 8,21H16A2,2 0 0,0 18,19V7H6V19Z"/>
+          </svg>
+        </button>
+        <div class="workspace-detail-item-content" onclick="window.workspaceDetail?.editNote('${note.id}')">
+          <div class="workspace-detail-item-title">${this.escapeHtml(title)}</div>
+          <div class="workspace-detail-item-meta">
+            ${preview ? this.escapeHtml(preview.substring(0, 50)) + (preview.length > 50 ? '...' : '') : 'Empty note'}
+          </div>
         </div>
       </div>
     `;
@@ -2184,6 +2205,69 @@ export class WorkspaceDetailPage {
       if (task) {
         window.taskModalController.openForEdit(task, () => this.loadTasks());
       }
+    }
+  }
+
+  /**
+   * Delete a task
+   */
+  async deleteTask(taskId) {
+    if (!confirm('Are you sure you want to delete this task?')) return;
+
+    try {
+      const response = await fetch(`/api/orchestration/tasks/${encodeURIComponent(taskId)}`, {
+        method: 'DELETE'
+      });
+
+      if (!response.ok) throw new Error('Failed to delete task');
+
+      if (window.Toast) window.Toast.success('Task deleted');
+      await this.loadTasks();
+    } catch (error) {
+      console.error('Failed to delete task:', error);
+      if (window.Toast) window.Toast.error('Failed to delete task');
+    }
+  }
+
+  /**
+   * Delete a session
+   */
+  async deleteSession(sessionId) {
+    if (!confirm('Are you sure you want to delete this session?')) return;
+
+    try {
+      const response = await fetch(`/api/sessions/${encodeURIComponent(sessionId)}`, {
+        method: 'DELETE'
+      });
+
+      if (!response.ok) throw new Error('Failed to delete session');
+
+      if (window.Toast) window.Toast.success('Session deleted');
+      await this.loadSessions();
+    } catch (error) {
+      console.error('Failed to delete session:', error);
+      if (window.Toast) window.Toast.error('Failed to delete session');
+    }
+  }
+
+  /**
+   * Delete a note
+   */
+  async deleteNote(noteId) {
+    if (!confirm('Are you sure you want to delete this note?')) return;
+
+    try {
+      const response = await fetch(`/api/notes/${encodeURIComponent(noteId)}`, {
+        method: 'DELETE'
+      });
+
+      if (!response.ok) throw new Error('Failed to delete note');
+
+      if (window.Toast) window.Toast.success('Note deleted');
+      await this.loadNotes();
+    } catch (error) {
+      console.error('Failed to delete note:', error);
+      if (window.Toast) window.Toast.error('Failed to delete note');
     }
   }
 

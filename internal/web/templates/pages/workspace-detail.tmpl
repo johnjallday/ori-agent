@@ -582,16 +582,50 @@
 
     .workspace-detail-item {
       padding: 0.5rem 0.65rem;
+      padding-right: 2.2rem;
       border-radius: 6px;
       background: var(--bg-secondary);
       border: 1px solid transparent;
-      cursor: pointer;
       transition: all 0.15s ease;
+      position: relative;
     }
 
     .workspace-detail-item:hover {
       background: var(--bg-tertiary);
       border-color: var(--border-color);
+    }
+
+    .workspace-detail-item-content {
+      cursor: pointer;
+    }
+
+    .workspace-detail-item-delete {
+      position: absolute;
+      top: 50%;
+      right: 0.4rem;
+      transform: translateY(-50%);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      width: 24px;
+      height: 24px;
+      padding: 0;
+      border: none;
+      background: transparent;
+      color: var(--text-muted);
+      border-radius: 4px;
+      cursor: pointer;
+      opacity: 0;
+      transition: opacity 0.15s ease, background-color 0.15s ease, color 0.15s ease;
+    }
+
+    .workspace-detail-item:hover .workspace-detail-item-delete {
+      opacity: 1;
+    }
+
+    .workspace-detail-item-delete:hover {
+      background: rgba(239, 68, 68, 0.15);
+      color: #ef4444;
     }
 
     .workspace-detail-item-title {
