@@ -123,90 +123,8 @@ function filterEditModelOptions() {
   populateEditModelOptions();
 }
 
-// Set up sidebar toggle functionality
-function setupSidebarToggle() {
-  const sidebarToggle = document.getElementById('sidebarToggle');
-  const sidebar = document.getElementById('sidebar');
-
-  if (!sidebarToggle || !sidebar) return;
-
-  // Show sidebar on large screens by default
-  function handleSidebarResponsive() {
-    if (window.innerWidth >= 992) {
-      // Show sidebar on large screens
-      sidebar.classList.remove('d-none');
-      sidebar.classList.add('d-lg-block');
-      sidebarToggle.setAttribute('aria-expanded', 'true');
-      // Restore sidebar width
-      const savedWidth = localStorage.getItem('sidebarWidth') || '300';
-      document.documentElement.style.setProperty('--sidebar-width', `${savedWidth}px`);
-    } else {
-      // Hide sidebar on small screens by default
-      sidebar.classList.add('d-none');
-      sidebar.classList.remove('d-lg-block');
-      sidebar.classList.remove('sidebar-mobile-show');
-      sidebarToggle.setAttribute('aria-expanded', 'false');
-      document.documentElement.style.setProperty('--sidebar-width', '0px');
-    }
-  }
-
-  // Toggle button click handler
-  sidebarToggle.addEventListener('click', function(event) {
-    event.preventDefault();
-
-    const isHidden = sidebar.classList.toggle('d-none');
-
-    if (isHidden) {
-      sidebar.classList.remove('d-lg-block');
-      sidebar.classList.remove('sidebar-mobile-show');
-      sidebarToggle.setAttribute('aria-expanded', 'false');
-      document.documentElement.style.setProperty('--sidebar-width', '0px');
-    } else {
-      if (window.innerWidth >= 992) {
-        sidebar.classList.add('d-lg-block');
-        sidebar.classList.remove('sidebar-mobile-show');
-      } else {
-        sidebar.classList.remove('d-lg-block');
-        sidebar.classList.add('sidebar-mobile-show');
-      }
-      sidebarToggle.setAttribute('aria-expanded', 'true');
-      const savedWidth = localStorage.getItem('sidebarWidth') || '300';
-      document.documentElement.style.setProperty('--sidebar-width', `${savedWidth}px`);
-    }
-
-    if (window.EventBus) {
-      EventBus.emit('sidebar:toggled', { hidden: isHidden });
-    }
-  });
-
-  // Close sidebar when clicking outside on mobile
-  document.addEventListener('click', function(event) {
-    const isClickInSidebar = sidebar.contains(event.target);
-    const isClickOnToggle = sidebarToggle.contains(event.target);
-    const isClickInModal = event.target.closest('.modal') || event.target.classList.contains('modal-backdrop');
-
-    if (!isClickInSidebar && !isClickOnToggle && !isClickInModal &&
-        !sidebar.classList.contains('d-none') &&
-        window.innerWidth < 992) {
-      sidebar.classList.add('d-none');
-      sidebar.classList.remove('sidebar-mobile-show');
-      sidebar.classList.remove('d-lg-block');
-      document.documentElement.style.setProperty('--sidebar-width', '0px');
-    }
-  });
-
-  // Handle window resize
-  window.addEventListener('resize', handleSidebarResponsive);
-
-  // Run initial check on page load
-  handleSidebarResponsive();
-}
-
 // Initialize page
 document.addEventListener('DOMContentLoaded', async () => {
-  // Set up sidebar toggle functionality
-  setupSidebarToggle();
-
   // Get agent name from URL
   agentName = getAgentNameFromURL();
 
@@ -782,36 +700,37 @@ async function renderPlugins() {
   container.innerHTML = '<div class="text-center py-4" style="color: var(--text-secondary);">Loading plugins...</div>';
 
   // Check configuration status for all plugins in parallel
-  const pluginNames = plugins.map(plugin =>
-    typeof plugin === 'string' ? plugin : (plugin?.name || plugin?.id || plugin?.plugin || '')
-  );
-
   const configChecks = await Promise.all(
-    pluginNames.map(name => checkPluginHasConfig(name))
+    plugins.map(async (plugin) => {
+      const name = typeof plugin === 'string' ? plugin : (plugin?.name || plugin?.id || plugin?.plugin || '');
+      const hasConfig = await checkPluginHasConfig(name);
+      return { name, hasConfig };
+    })
   );
 
   const configStatus = new Map();
-  pluginNames.forEach((name, index) => {
-    configStatus.set(name, configChecks[index]);
+  configChecks.forEach(result => {
+    configStatus.set(result.name, result.hasConfig);
   });
 
   container.innerHTML = '';
   plugins.forEach(plugin => {
-    const name = typeof plugin === 'string' ? plugin : (plugin?.name || plugin?.id || plugin?.plugin || '');
+    const rawName = typeof plugin === 'string' ? plugin : (plugin?.name || plugin?.id || plugin?.plugin || '');
+    const displayName = typeof plugin === 'object' && plugin?.metadata?.name ? plugin.metadata.name : stripVersionSuffix(rawName);
     const version = typeof plugin === 'object' && plugin ? (plugin.version || plugin?.meta?.version || '') : '';
-    const hasConfig = configStatus.get(name) || false;
+    const hasConfig = configStatus.get(rawName) || false;
 
     const item = document.createElement('div');
     item.className = 'plugin-item';
     item.style.cssText = 'display: flex; justify-content: space-between; align-items: center;';
     item.innerHTML = `
             <div>
-                <div class="plugin-name">${escapeHtml(name || '(unknown plugin)')}</div>
+                <div class="plugin-name">${escapeHtml(displayName || '(unknown plugin)')}</div>
                 ${version ? `<div class="plugin-version">v${escapeHtml(version)}</div>` : ''}
             </div>
             ${hasConfig ? `
                 <button class="modern-btn modern-btn-secondary plugin-config-btn"
-                        data-plugin-name="${escapeHtml(name)}"
+                        data-plugin-name="${escapeHtml(rawName)}"
                         title="Configure plugin"
                         style="padding: 0.4rem 0.8rem; font-size: 12px;">
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
@@ -1013,6 +932,7 @@ function renderAvailablePlugins() {
   container.innerHTML = '';
   allAvailablePlugins.forEach(plugin => {
     const pluginName = plugin.name || plugin;
+    const displayName = plugin.metadata?.name || stripVersionSuffix(pluginName);
     const isEnabled = enabledSet.has(pluginName);
 
     const item = document.createElement('div');
@@ -1020,7 +940,7 @@ function renderAvailablePlugins() {
     item.style.cssText = 'display: flex; justify-content: space-between; align-items: center; padding: 12px; background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 8px;';
     item.innerHTML = `
             <div style="flex: 1;">
-                <div style="font-weight: 500; color: var(--text-primary);">${escapeHtml(pluginName)}</div>
+                <div style="font-weight: 500; color: var(--text-primary);">${escapeHtml(displayName)}</div>
                 ${plugin.description ? `<div style="font-size: 12px; color: var(--text-secondary); margin-top: 4px;">${escapeHtml(plugin.description)}</div>` : ''}
             </div>
             <label class="toggle-switch" style="margin-left: 12px;">

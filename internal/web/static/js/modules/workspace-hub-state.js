@@ -31,6 +31,7 @@
       config: null,
       columns: [],
       tasks: [],
+      agentOptions: [],
       scope: 'workspace',
       isLoading: false
     },

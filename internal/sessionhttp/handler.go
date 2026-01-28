@@ -2,6 +2,8 @@
 package sessionhttp
 
 import (
+	"context"
+	"errors"
 	"net/http"
 	"strconv"
 	"strings"
@@ -297,7 +299,10 @@ func (h *Handler) listSessions(w http.ResponseWriter, r *http.Request) {
 	// Normal list
 	result, err := h.store.ListSessions(r.Context(), filter, opts)
 	if err != nil {
-		logger.Error("Failed to list sessions", logger.Fields{"error": err})
+		// Don't log context canceled errors - these are normal when requests are aborted
+		if !errors.Is(err, context.Canceled) {
+			logger.Error("Failed to list sessions", logger.Fields{"error": err})
+		}
 		_ = orihttp.RespondInternalError(w, "Failed to list sessions")
 		return
 	}
@@ -378,7 +383,10 @@ func (h *Handler) HandleTags(w http.ResponseWriter, r *http.Request) {
 
 	tags, err := h.store.GetAllTags(r.Context())
 	if err != nil {
-		logger.Error("Failed to get tags", logger.Fields{"error": err})
+		// Don't log context canceled errors - these are normal when requests are aborted
+		if !errors.Is(err, context.Canceled) {
+			logger.Error("Failed to get tags", logger.Fields{"error": err})
+		}
 		_ = orihttp.RespondInternalError(w, "Failed to get tags")
 		return
 	}

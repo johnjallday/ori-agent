@@ -25,8 +25,8 @@ func (b *ServerBuilder) initializeWorkspaceStore() error {
 	verbose := os.Getenv("ORI_VERBOSE") == "true"
 
 	// Use the session store adapter if available (preferred for unified workspace data)
-	if b.server.sessionStore != nil {
-		adapter := session.NewWorkspaceStoreAdapter(b.server.sessionStore)
+	if b.sessionStore != nil {
+		adapter := session.NewWorkspaceStoreAdapter(b.sessionStore)
 		ws = adapter
 		if verbose {
 			logger.Info("Workspace store initialized using session store adapter (SQLite)", logger.Fields{})
@@ -44,10 +44,10 @@ func (b *ServerBuilder) initializeWorkspaceStore() error {
 		}
 	}
 
-	b.server.workspaceStore = ws
+	b.workspaceStore = ws
 
 	// Now update chat handler with workspace store
-	b.server.chatHandler.SetWorkspaceStore(ws)
+	b.chatHandler.SetWorkspaceStore(ws)
 
 	return nil
 }
@@ -56,12 +56,12 @@ func (b *ServerBuilder) initializeWorkspaceStore() error {
 func (b *ServerBuilder) initializeEventSystem() error {
 	verbose := os.Getenv("ORI_VERBOSE") == "true"
 
-	b.server.eventBus = workspace.DefaultEventBus()
+	b.eventBus = workspace.DefaultEventBus()
 	if verbose {
 		logger.Info("Event bus initialized", logger.Fields{})
 	}
 
-	b.server.notificationService = workspace.NewNotificationService(b.server.eventBus, 500)
+	b.notificationService = workspace.NewNotificationService(b.eventBus, 500)
 	if verbose {
 		logger.Info("Notification service initialized", logger.Fields{})
 	}
@@ -71,51 +71,47 @@ func (b *ServerBuilder) initializeEventSystem() error {
 
 // initializeTaskExecution creates task handler, executor, step executor, and scheduler.
 func (b *ServerBuilder) initializeTaskExecution() error {
-	s := b.server
+	taskHandler := workspace.NewLLMTaskHandler(b.st, b.llmFactory, b.workspaceStore)
+	taskHandler.SetEventBus(b.eventBus)
 
-	taskHandler := workspace.NewLLMTaskHandler(s.st, s.llmFactory, s.workspaceStore)
-	taskHandler.SetEventBus(s.eventBus)
-
-	s.taskExecutor = workspace.NewTaskExecutor(s.workspaceStore, taskHandler, workspace.ExecutorConfig{
+	b.taskExecutor = workspace.NewTaskExecutor(b.workspaceStore, taskHandler, workspace.ExecutorConfig{
 		PollInterval:  10 * time.Second,
 		MaxConcurrent: 5,
 	})
-	s.taskExecutor.SetEventBus(s.eventBus)
+	b.taskExecutor.SetEventBus(b.eventBus)
 
-	s.stepExecutor = workspace.NewStepExecutor(s.workspaceStore, taskHandler, workspace.StepExecutorConfig{
+	b.stepExecutor = workspace.NewStepExecutor(b.workspaceStore, taskHandler, workspace.StepExecutorConfig{
 		PollInterval: 5 * time.Second,
 	})
 
-	s.taskScheduler = workspace.NewTaskScheduler(s.workspaceStore, workspace.SchedulerConfig{
+	b.taskScheduler = workspace.NewTaskScheduler(b.workspaceStore, workspace.SchedulerConfig{
 		PollInterval: 1 * time.Minute,
 	})
-	s.taskScheduler.SetEventBus(s.eventBus)
+	b.taskScheduler.SetEventBus(b.eventBus)
 
 	return nil
 }
 
 // initializeOrchestration creates orchestrators and handlers.
 func (b *ServerBuilder) initializeOrchestration() error {
-	s := b.server
-
-	communicator := agentcomm.NewCommunicator(s.workspaceStore)
-	orch := orchestration.NewOrchestrator(s.st, s.workspaceStore, communicator, s.llmFactory, s.configManager, s.eventBus)
-	taskHandler := workspace.NewLLMTaskHandler(s.st, s.llmFactory, s.workspaceStore)
+	communicator := agentcomm.NewCommunicator(b.workspaceStore)
+	orch := orchestration.NewOrchestrator(b.st, b.workspaceStore, communicator, b.llmFactory, b.configManager, b.eventBus)
+	taskHandler := workspace.NewLLMTaskHandler(b.st, b.llmFactory, b.workspaceStore)
 
 	// Create session store adapter for orchestration handler
 	var sessionStoreAdapter orchestrationhttp.SessionStore
-	if s.sessionStore != nil {
-		sessionStoreAdapter = session.NewOrchestrationSessionStore(s.sessionStore)
+	if b.sessionStore != nil {
+		sessionStoreAdapter = session.NewOrchestrationSessionStore(b.sessionStore)
 	}
 
 	// Create orchestration handler with all available dependencies
 	// Note: TemplateManager is added later via SetTemplateManager in initializeTemplateManager
 	handler, err := orchestrationhttp.NewHandler(orchestrationhttp.HandlerConfig{
-		AgentStore:          s.st,
-		WorkspaceStore:      s.workspaceStore,
-		EventBus:            s.eventBus,
+		AgentStore:          b.st,
+		WorkspaceStore:      b.workspaceStore,
+		EventBus:            b.eventBus,
 		Orchestrator:        orch,
-		NotificationService: s.notificationService,
+		NotificationService: b.notificationService,
 		TaskHandler:         taskHandler,
 		SessionStore:        sessionStoreAdapter,
 		// TemplateManager: nil - loaded later in initializeTemplateManager
@@ -123,13 +119,13 @@ func (b *ServerBuilder) initializeOrchestration() error {
 	if err != nil {
 		return err
 	}
-	s.orchestrationHandler = handler
+	b.orchestrationHandler = handler
 
 	// Initialize auto-task handler for natural language task creation
-	s.autoTaskHandler = orchestrationhttp.NewAutoTaskHandler(s.st, s.workspaceStore, s.llmFactory, s.configManager)
+	b.autoTaskHandler = orchestrationhttp.NewAutoTaskHandler(b.st, b.workspaceStore, b.llmFactory, b.configManager)
 
 	// Store orchestrator for chat handler injection
-	b.server.chatHandler.SetOrchestrator(orch)
+	b.chatHandler.SetOrchestrator(orch)
 
 	return nil
 }
@@ -138,13 +134,13 @@ func (b *ServerBuilder) initializeOrchestration() error {
 func (b *ServerBuilder) initializeStudioOrchestrator() error {
 	verbose := os.Getenv("ORI_VERBOSE") == "true"
 
-	llmAdapter := workspace.NewLLMFactoryAdapter(b.server.llmFactory, "openai")
-	b.server.studioOrchestrator = workspace.NewOrchestrator(b.server.workspaceStore, b.server.st, llmAdapter, b.server.eventBus)
+	llmAdapter := workspace.NewLLMFactoryAdapter(b.llmFactory, "openai")
+	b.studioOrchestrator = workspace.NewOrchestrator(b.workspaceStore, b.st, llmAdapter, b.eventBus)
 	if verbose {
 		logger.Info("Agent Studio orchestrator initialized", logger.Fields{})
 	}
 
-	b.server.studioHandler = workspace.NewHTTPHandler(b.server.workspaceStore, b.server.studioOrchestrator, b.server.eventBus)
+	b.studioHandler = workspace.NewHTTPHandler(b.workspaceStore, b.studioOrchestrator, b.eventBus)
 	if verbose {
 		logger.Info("Agent Studio HTTP handler initialized", logger.Fields{})
 	}
@@ -169,7 +165,7 @@ func (b *ServerBuilder) initializeTemplateManager() error {
 		logger.Info("Loaded workflow templates", logger.Fields{"listtemplates())": len(templateManager.ListTemplates())})
 	}
 
-	b.server.orchestrationHandler.SetTemplateManager(templateManager)
+	b.orchestrationHandler.SetTemplateManager(templateManager)
 
 	// Initialize custom workflow manager
 	customWorkflowsDir := filepath.Join(templatesDir, "custom")
@@ -183,7 +179,7 @@ func (b *ServerBuilder) initializeTemplateManager() error {
 	}
 
 	// Initialize workflow HTTP handler
-	b.server.workflowHandler = workflowhttp.NewHandler(customWorkflowManager, b.server.workspaceStore)
+	b.workflowHandler = workflowhttp.NewHandler(customWorkflowManager, b.workspaceStore)
 
 	return nil
 }

@@ -20,6 +20,7 @@ class TaskModalController {
     this.progressSteps = ['parse', 'prepare', 'apply'];
     // File attachment state
     this.pendingFiles = [];
+    this.pendingFilePaths = []; // File path references (no upload, backend reads directly)
     this.pendingDirectories = [];
     // Subtask state
     this.subtaskCounter = 0;
@@ -71,10 +72,13 @@ class TaskModalController {
       this.updateAutoSaveTargetFields();
     });
 
-    // Escape key handler
-    document.getElementById('taskModal')?.addEventListener('keydown', (e) => {
+    // Escape key handler (document-level for reliable closing)
+    document.addEventListener('keydown', (e) => {
       if (e.key === 'Escape') {
-        this.close();
+        const modal = document.getElementById('taskModal');
+        if (modal && modal.style.display !== 'none' && modal.style.display !== '') {
+          this.close();
+        }
       }
     });
 
@@ -854,6 +858,9 @@ class TaskModalController {
           if (this.pendingFiles.length > 0) {
             await this.uploadFilesToTask(this.editingTaskId);
           }
+          if (this.pendingFilePaths.length > 0) {
+            await this.saveFilePathsToTask(this.editingTaskId);
+          }
 
           this.showToast('Task updated', 'success');
         } else if (isWorkflow) {
@@ -919,6 +926,9 @@ class TaskModalController {
           if (this.pendingFiles.length > 0 && attachmentTarget) {
             await this.uploadFilesToTask(attachmentTarget);
           }
+          if (this.pendingFilePaths.length > 0 && attachmentTarget) {
+            await this.saveFilePathsToTask(attachmentTarget);
+          }
 
           this.showToast('Workflow updated', 'success');
         } else {
@@ -935,6 +945,9 @@ class TaskModalController {
           // Upload files to existing task
           if (this.pendingFiles.length > 0) {
             await this.uploadFilesToTask(this.editingTaskId);
+          }
+          if (this.pendingFilePaths.length > 0) {
+            await this.saveFilePathsToTask(this.editingTaskId);
           }
 
           this.showToast('Task updated', 'success');
@@ -980,6 +993,9 @@ class TaskModalController {
         if (lastSubtaskId && this.pendingFiles.length > 0) {
           await this.uploadFilesToTask(lastSubtaskId);
         }
+        if (lastSubtaskId && this.pendingFilePaths.length > 0) {
+          await this.saveFilePathsToTask(lastSubtaskId);
+        }
 
         this.showToast('Workflow created', 'success');
       } else {
@@ -998,14 +1014,23 @@ class TaskModalController {
         if (createdTask?.id && this.pendingFiles.length > 0) {
           await this.uploadFilesToTask(createdTask.id);
         }
+        if (createdTask?.id && this.pendingFilePaths.length > 0) {
+          await this.saveFilePathsToTask(createdTask.id);
+        }
 
         this.showToast('Task created', 'success');
       }
 
       // Clear pending files
       this.pendingFiles = [];
+      this.pendingFilePaths = [];
 
       this.close();
+
+      // Emit event for workspace hub to refresh
+      if (window.EventBus) {
+        EventBus.emit('task:created', { task: result.task, workspaceId: this.workspaceId });
+      }
 
       // Call the callback if provided
       if (this.onSaveCallback) {
@@ -1199,12 +1224,21 @@ class TaskModalController {
         if (lastCreatedTaskId && this.pendingFiles.length > 0) {
           await this.uploadFilesToTask(lastCreatedTaskId);
         }
+        if (lastCreatedTaskId && this.pendingFilePaths.length > 0) {
+          await this.saveFilePathsToTask(lastCreatedTaskId);
+        }
 
         // Clear pending files
         this.pendingFiles = [];
+        this.pendingFilePaths = [];
 
         this.showToast(workflowSteps.length > 1 ? 'Workflow created' : 'Task created', 'success');
         this.close();
+
+        // Emit event for workspace hub to refresh
+        if (window.EventBus) {
+          EventBus.emit('task:created', { workspaceId: this.workspaceId });
+        }
 
         if (this.onSaveCallback) {
           this.onSaveCallback();
@@ -1251,12 +1285,21 @@ class TaskModalController {
       if (createdTask?.id && this.pendingFiles.length > 0) {
         await this.uploadFilesToTask(createdTask.id);
       }
+      if (createdTask?.id && this.pendingFilePaths.length > 0) {
+        await this.saveFilePathsToTask(createdTask.id);
+      }
 
       // Clear pending files
       this.pendingFiles = [];
+      this.pendingFilePaths = [];
 
       this.showToast('Task created', 'success');
       this.close();
+
+      // Emit event for workspace hub to refresh
+      if (window.EventBus) {
+        EventBus.emit('task:created', { task: createdTask, workspaceId: this.workspaceId });
+      }
 
       // Call the callback if provided
       if (this.onSaveCallback) {
@@ -1403,12 +1446,21 @@ class TaskModalController {
       if (this.pendingFiles.length > 0) {
         await this.uploadFilesToTask(this.editingTaskId);
       }
+      if (this.pendingFilePaths.length > 0) {
+        await this.saveFilePathsToTask(this.editingTaskId);
+      }
 
       // Clear pending files
       this.pendingFiles = [];
+      this.pendingFilePaths = [];
 
       this.showToast('Task updated', 'success');
       this.close();
+
+      // Emit event for workspace hub to refresh
+      if (window.EventBus) {
+        EventBus.emit('task:updated', { taskId: this.editingTaskId, workspaceId: this.workspaceId });
+      }
 
       // Call the callback if provided
       if (this.onSaveCallback) {
@@ -2579,6 +2631,50 @@ class TaskModalController {
     if (directoryBtn) {
       directoryBtn.addEventListener('click', () => this.openFolderPicker());
     }
+
+    // File path button and input
+    const filePathBtn = document.getElementById('taskModalAddFilePathBtn');
+    const filePathInput = document.getElementById('taskModalFilePathInput');
+    const filePathText = document.getElementById('taskModalFilePathText');
+    const filePathConfirm = document.getElementById('taskModalAddFilePathConfirm');
+    const filePathCancel = document.getElementById('taskModalAddFilePathCancel');
+
+    if (filePathBtn && filePathInput) {
+      filePathBtn.addEventListener('click', () => {
+        filePathInput.style.display = 'block';
+        filePathText?.focus();
+      });
+    }
+
+    if (filePathConfirm && filePathText) {
+      filePathConfirm.addEventListener('click', () => {
+        this.addFilePath(filePathText.value);
+        filePathText.value = '';
+        filePathInput.style.display = 'none';
+      });
+    }
+
+    if (filePathCancel && filePathInput) {
+      filePathCancel.addEventListener('click', () => {
+        filePathText.value = '';
+        filePathInput.style.display = 'none';
+      });
+    }
+
+    // Allow Enter key to confirm file path
+    if (filePathText) {
+      filePathText.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          this.addFilePath(filePathText.value);
+          filePathText.value = '';
+          filePathInput.style.display = 'none';
+        } else if (e.key === 'Escape') {
+          filePathText.value = '';
+          filePathInput.style.display = 'none';
+        }
+      });
+    }
   }
 
   /**
@@ -2625,11 +2721,11 @@ class TaskModalController {
    * Add files to pending list
    */
   addFiles(files) {
-    const maxSize = 10 * 1024 * 1024; // 10MB
+    const maxSize = 100 * 1024 * 1024; // 100MB
 
     files.forEach((file) => {
       if (file.size > maxSize) {
-        this.showToast(`${file.name} exceeds 10MB limit`, 'warning');
+        this.showToast(`${file.name} exceeds 100MB limit`, 'warning');
         return;
       }
       // Avoid duplicates
@@ -2642,13 +2738,34 @@ class TaskModalController {
   }
 
   /**
+   * Add a file path reference (no upload, backend reads directly)
+   */
+  addFilePath(path) {
+    if (!path || !path.trim()) return;
+
+    const trimmedPath = path.trim();
+
+    // Avoid duplicates
+    if (this.pendingFilePaths.includes(trimmedPath)) {
+      this.showToast('File path already added', 'warning');
+      return;
+    }
+
+    this.pendingFilePaths.push(trimmedPath);
+    this.updateFilesPreview();
+  }
+
+  /**
    * Update file preview display
    */
   updateFilesPreview() {
     const container = document.getElementById('taskModalSelectedFiles');
     if (!container) return;
 
-    if (this.pendingFiles.length === 0) {
+    const hasFiles = this.pendingFiles.length > 0;
+    const hasFilePaths = this.pendingFilePaths.length > 0;
+
+    if (!hasFiles && !hasFilePaths) {
       container.style.display = 'none';
       container.innerHTML = '';
       return;
@@ -2669,11 +2786,12 @@ class TaskModalController {
       return div.innerHTML;
     };
 
-    const items = this.pendingFiles.map((file, index) => `
-      <div class="task-selected-file-item" data-index="${index}">
+    // Uploaded files
+    const fileItems = this.pendingFiles.map((file, index) => `
+      <div class="task-selected-file-item" data-index="${index}" data-type="file">
         <span class="task-file-name">${escapeHtml(file.name)}</span>
         <span class="task-file-size">${formatSize(file.size)}</span>
-        <button type="button" class="task-file-remove" data-index="${index}" title="Remove">
+        <button type="button" class="task-file-remove" data-index="${index}" data-type="file" title="Remove">
           <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
             <path d="M19,6.41L17.59,5L12,10.59L6.41,5L5,6.41L10.59,12L5,17.59L6.41,19L12,13.41L17.59,19L19,17.59L13.41,12L19,6.41Z"/>
           </svg>
@@ -2681,14 +2799,40 @@ class TaskModalController {
       </div>
     `);
 
-    container.innerHTML = items.join('');
+    // File path references
+    const pathItems = this.pendingFilePaths.map((path, index) => {
+      const fileName = path.split('/').pop() || path;
+      return `
+        <div class="task-selected-file-item task-file-path-item" data-index="${index}" data-type="path">
+          <span class="task-file-name" title="${escapeHtml(path)}">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" style="margin-right: 4px; opacity: 0.6;">
+              <path d="M16,9V7H12V5H10V7H6V9H10V17H6V19H10V21H12V19H16V17H12V9H16Z"/>
+            </svg>
+            ${escapeHtml(fileName)}
+          </span>
+          <span class="task-file-size" style="color: var(--text-tertiary); font-style: italic;">path ref</span>
+          <button type="button" class="task-file-remove" data-index="${index}" data-type="path" title="Remove">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
+              <path d="M19,6.41L17.59,5L12,10.59L6.41,5L5,6.41L10.59,12L5,17.59L6.41,19L12,13.41L17.59,19L19,17.59L13.41,12L19,6.41Z"/>
+            </svg>
+          </button>
+        </div>
+      `;
+    });
+
+    container.innerHTML = [...fileItems, ...pathItems].join('');
 
     // Bind remove buttons
     container.querySelectorAll('.task-file-remove').forEach((btn) => {
       btn.addEventListener('click', (e) => {
         e.stopPropagation();
         const index = parseInt(btn.dataset.index, 10);
-        this.pendingFiles.splice(index, 1);
+        const type = btn.dataset.type;
+        if (type === 'path') {
+          this.pendingFilePaths.splice(index, 1);
+        } else {
+          this.pendingFiles.splice(index, 1);
+        }
         this.updateFilesPreview();
       });
     });
@@ -2709,8 +2853,12 @@ class TaskModalController {
    */
   resetFiles() {
     this.pendingFiles = [];
+    this.pendingFilePaths = [];
     this.pendingDirectories = [];
     this.updateFilesPreview();
+    // Hide file path input if visible
+    const filePathInput = document.getElementById('taskModalFilePathInput');
+    if (filePathInput) filePathInput.style.display = 'none';
   }
 
   /**
@@ -2736,6 +2884,28 @@ class TaskModalController {
         console.error('Failed to upload file:', file.name, error);
         this.showToast(`Failed to upload ${file.name}`, 'error');
       }
+    }
+  }
+
+  /**
+   * Save file path references to a task
+   */
+  async saveFilePathsToTask(taskId) {
+    if (!taskId || this.pendingFilePaths.length === 0) return;
+
+    try {
+      const response = await fetch(`/api/orchestration/tasks/${taskId}/file-paths`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ file_paths: this.pendingFilePaths })
+      });
+
+      if (!response.ok) {
+        throw new Error(`Failed to save file paths: ${response.status}`);
+      }
+    } catch (error) {
+      console.error('Failed to save file paths:', error);
+      this.showToast('Failed to save file path references', 'error');
     }
   }
 }

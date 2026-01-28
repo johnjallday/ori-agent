@@ -416,3 +416,8 @@ const EventBus = (function() {
 if (typeof module !== 'undefined' && module.exports) {
   module.exports = EventBus;
 }
+
+// Attach to window for global access
+if (typeof window !== 'undefined') {
+  window.EventBus = EventBus;
+}

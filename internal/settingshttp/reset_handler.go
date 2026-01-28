@@ -21,7 +21,7 @@ const (
 type ResetRequest struct {
 	Settings     bool   `json:"settings"`     // Reset settings.json
 	Agents       bool   `json:"agents"`       // Reset agents.json and agents/ directory
-	Sessions     bool   `json:"sessions"`     // Reset sessions.db
+	Sessions     bool   `json:"sessions"`     // Reset sessions.db, workspaces/, and session_files/
 	Plugins      bool   `json:"plugins"`      // Reset local_plugin_registry.json and uploaded_plugins/
 	Onboarding   bool   `json:"onboarding"`   // Reset app_state.json (onboarding)
 	Confirmation string `json:"confirmation"` // Must be "RESET" to confirm
@@ -206,7 +206,7 @@ func (h *ResetHandler) resetAgents() error {
 	return nil
 }
 
-// resetSessions removes sessions.db, related SQLite files, and session_files/.
+// resetSessions removes sessions.db, related SQLite files, session_files/, and workspaces/.
 // NOTE: The database file may be in use by the running server. The reset will
 // mark files for deletion, but full cleanup requires a server restart.
 // On Windows, this may fail if the database is locked.
@@ -238,6 +238,15 @@ func (h *ResetHandler) resetSessions() error {
 	}
 	if err := os.RemoveAll(sessionFilesDir); err != nil && !os.IsNotExist(err) {
 		logger.Debug("session_files directory may be in use", logger.Fields{"path": sessionFilesDir, "error": err})
+	}
+
+	// Remove workspaces/ directory (workspace JSON files and uploaded workspace files)
+	workspacesDir := filepath.Join(h.dataDir, "workspaces")
+	if err := h.validatePath(workspacesDir); err != nil {
+		return err
+	}
+	if err := os.RemoveAll(workspacesDir); err != nil && !os.IsNotExist(err) {
+		logger.Debug("workspaces directory may be in use", logger.Fields{"path": workspacesDir, "error": err})
 	}
 
 	return nil
@@ -292,8 +301,8 @@ func (h *ResetHandler) GetResetPreview(w http.ResponseWriter, r *http.Request) {
 			"files":       []string{"agents.json", "agents/"},
 		},
 		"sessions": map[string]interface{}{
-			"description": "All chat sessions, message history, and uploaded files",
-			"files":       []string{"sessions.db", "session_files/"},
+			"description": "All chat sessions, message history, workspaces, and uploaded files",
+			"files":       []string{"sessions.db", "session_files/", "workspaces/"},
 		},
 		"plugins": map[string]interface{}{
 			"description": "Uploaded plugins and plugin registry",

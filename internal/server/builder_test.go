@@ -32,7 +32,7 @@ func TestServerBuilder_WithMethods(t *testing.T) {
 	if result != builder {
 		t.Error("WithLLMFactory should return builder for chaining")
 	}
-	if builder.server.llmFactory != factory {
+	if builder.server.Core.LLMFactory != factory {
 		t.Error("LLM factory not set correctly")
 	}
 
@@ -42,7 +42,7 @@ func TestServerBuilder_WithMethods(t *testing.T) {
 	if result != builder {
 		t.Error("WithConfigManager should return builder for chaining")
 	}
-	if builder.server.configManager != cfg {
+	if builder.server.Core.ConfigManager != cfg {
 		t.Error("Config manager not set correctly")
 	}
 
@@ -52,7 +52,7 @@ func TestServerBuilder_WithMethods(t *testing.T) {
 	if result != builder {
 		t.Error("WithRegistryManager should return builder for chaining")
 	}
-	if builder.server.registryManager != reg {
+	if builder.server.Plugin.RegistryManager != reg {
 		t.Error("Registry manager not set correctly")
 	}
 }
@@ -93,16 +93,16 @@ func TestServerBuilder_Build_Integration(t *testing.T) {
 	}
 
 	// Verify key dependencies were initialized
-	if server.configManager == nil {
+	if server.Core.ConfigManager == nil {
 		t.Error("configManager not initialized")
 	}
-	if server.llmFactory == nil {
+	if server.Core.LLMFactory == nil {
 		t.Error("llmFactory not initialized")
 	}
-	if server.registryManager == nil {
+	if server.Plugin.RegistryManager == nil {
 		t.Error("registryManager not initialized")
 	}
-	if server.st == nil {
+	if server.Storage.AgentStore == nil {
 		t.Error("store not initialized")
 	}
 }
@@ -123,10 +123,10 @@ func TestNew_UsesBuilder(t *testing.T) {
 	}
 
 	// Verify key components initialized
-	if server.configManager == nil {
+	if server.Core.ConfigManager == nil {
 		t.Error("configManager not initialized via New()")
 	}
-	if server.llmFactory == nil {
+	if server.Core.LLMFactory == nil {
 		t.Error("llmFactory not initialized via New()")
 	}
 }
@@ -145,7 +145,7 @@ func TestServerBuilder_WithStore(t *testing.T) {
 	if result != builder {
 		t.Error("WithStore should return builder for chaining")
 	}
-	if builder.server.st != mockStore {
+	if builder.server.Storage.AgentStore != mockStore {
 		t.Error("Store not set correctly")
 	}
 }
@@ -164,7 +164,7 @@ func TestServerBuilder_WithWorkspaceStore(t *testing.T) {
 	if result != builder {
 		t.Error("WithWorkspaceStore should return builder for chaining")
 	}
-	if builder.server.workspaceStore != mockWorkspaceStore {
+	if builder.server.Storage.WorkspaceStore != mockWorkspaceStore {
 		t.Error("Workspace store not set correctly")
 	}
 }

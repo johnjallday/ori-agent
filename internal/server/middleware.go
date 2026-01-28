@@ -10,7 +10,7 @@ import "net/http"
 func (s *Server) CORSMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Get allowed origins from configuration
-		allowedOrigins := s.configManager.GetAllowedOrigins()
+		allowedOrigins := s.Core.ConfigManager.GetAllowedOrigins()
 		origin := r.Header.Get("Origin")
 
 		// Check if origin is allowed

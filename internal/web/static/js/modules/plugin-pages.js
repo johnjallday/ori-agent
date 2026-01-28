@@ -50,7 +50,8 @@
         // Add plugin header
         if (pluginNames.length > 1) {
           const header = document.createElement('li');
-          header.innerHTML = `<h6 class="dropdown-header" style="color: var(--text-muted); font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.5px;">${formatPluginName(pluginName)}</h6>`;
+          const cleanName = stripVersionSuffix(pluginName);
+          header.innerHTML = `<h6 class="dropdown-header" style="color: var(--text-muted); font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.5px;">${formatPluginName(cleanName)}</h6>`;
           menu.appendChild(header);
         }
 

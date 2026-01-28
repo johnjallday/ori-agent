@@ -398,13 +398,16 @@ type taskUpdateRequest struct {
 	ScheduleName           *string                        `json:"schedule_name"`
 	ResultStorage          *workspace.ResultStorageConfig `json:"result_storage"`
 	KanbanColumnID         *string                        `json:"kanban_column_id"`
+	KanbanLabels           []string                       `json:"kanban_labels"`
+	KanbanDueDate          *string                        `json:"kanban_due_date"`
 }
 
 // hasFieldUpdates returns true if the request contains any field updates
 func (r *taskUpdateRequest) hasFieldUpdates() bool {
 	return r.Description != nil || r.Details != nil || r.InputTaskIDs != nil ||
 		r.To != nil || r.ParentTaskID != nil || r.SubtaskIndex != nil ||
-		r.ResultCombinationMode != nil || r.ResultStorage != nil || r.KanbanColumnID != nil
+		r.ResultCombinationMode != nil || r.ResultStorage != nil || r.KanbanColumnID != nil ||
+		r.KanbanLabels != nil || r.KanbanDueDate != nil
 }
 
 // hasScheduleUpdates returns true if the request contains schedule-related updates
@@ -452,6 +455,29 @@ func (th *TaskHandler) applyBasicFieldUpdates(task *workspace.Task, req *taskUpd
 			task.Context["kanban_column_id"] = val
 		}
 		logger.Debug("Updated task kanban column", logger.Fields{"task_id": req.TaskID, "kanban_column_id": val})
+	}
+	if req.KanbanLabels != nil {
+		if task.Context == nil {
+			task.Context = map[string]interface{}{}
+		}
+		if len(req.KanbanLabels) == 0 {
+			delete(task.Context, "kanban_labels")
+		} else {
+			task.Context["kanban_labels"] = req.KanbanLabels
+		}
+		logger.Debug("Updated task kanban labels", logger.Fields{"task_id": req.TaskID, "labels": req.KanbanLabels})
+	}
+	if req.KanbanDueDate != nil {
+		val := strings.TrimSpace(*req.KanbanDueDate)
+		if task.Context == nil {
+			task.Context = map[string]interface{}{}
+		}
+		if val == "" {
+			delete(task.Context, "kanban_due_date")
+		} else {
+			task.Context["kanban_due_date"] = val
+		}
+		logger.Debug("Updated task kanban due date", logger.Fields{"task_id": req.TaskID, "kanban_due_date": val})
 	}
 }
 
@@ -536,6 +562,12 @@ func (th *TaskHandler) buildTaskUpdateEventData(req *taskUpdateRequest, schedule
 	}
 	if req.ScheduleName != nil {
 		eventData["schedule_name"] = *req.ScheduleName
+	}
+	if req.KanbanLabels != nil {
+		eventData["kanban_labels"] = req.KanbanLabels
+	}
+	if req.KanbanDueDate != nil {
+		eventData["kanban_due_date"] = *req.KanbanDueDate
 	}
 	return eventData
 }
@@ -820,6 +852,12 @@ func (th *TaskHandler) TasksPathHandler(w http.ResponseWriter, r *http.Request) 
 	// Check if this is a /save-result endpoint
 	if strings.HasSuffix(path, "/save-result") {
 		th.handleSaveTaskResult(w, r)
+		return
+	}
+
+	// Check if this is a /file-paths endpoint
+	if strings.HasSuffix(path, "/file-paths") {
+		th.handleFilePaths(w, r)
 		return
 	}
 
@@ -1143,4 +1181,126 @@ func (th *TaskHandler) BulkDeleteTasksHandler(w http.ResponseWriter, r *http.Req
 		"failed_count":  failedCount,
 		"errors":        errors,
 	})
+}
+
+// FilePathsRequest represents a request to add/update file path references on a task
+type FilePathsRequest struct {
+	FilePaths []string `json:"file_paths"`
+}
+
+// handleFilePaths handles POST /api/orchestration/tasks/{id}/file-paths
+// Adds file path references to a task (paths to local files, no upload)
+func (th *TaskHandler) handleFilePaths(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	if r.Method != http.MethodPost {
+		orihttp.MethodNotAllowed(w)
+		return
+	}
+
+	// Extract task ID from URL path
+	pathParts := strings.Split(strings.TrimPrefix(r.URL.Path, "/api/orchestration/tasks/"), "/")
+	if len(pathParts) < 2 || pathParts[0] == "" {
+		orihttp.BadRequest(w, "task_id is required in URL path")
+		return
+	}
+	taskID := pathParts[0]
+
+	var req FilePathsRequest
+	if !orihttp.ParseJSONBody(w, r, &req) {
+		return
+	}
+
+	// Validate file paths exist
+	var validPaths []string
+	var invalidPaths []string
+	for _, p := range req.FilePaths {
+		// Clean and validate path
+		cleanPath := filepath.Clean(p)
+		if _, err := os.Stat(cleanPath); err != nil {
+			invalidPaths = append(invalidPaths, p)
+		} else {
+			validPaths = append(validPaths, cleanPath)
+		}
+	}
+
+	// Get task and workspace
+	task, ws, err := th.getTaskWithWorkspace(taskID)
+	if err != nil {
+		orihttp.RespondErrorWithErr(w, http.StatusNotFound, "Task not found", err)
+		return
+	}
+
+	// Find and update task
+	for i := range ws.Tasks {
+		if ws.Tasks[i].ID == taskID {
+			if ws.Tasks[i].Context == nil {
+				ws.Tasks[i].Context = map[string]interface{}{}
+			}
+
+			// Get existing file paths and merge with new ones
+			var existingPaths []string
+			if existing, ok := ws.Tasks[i].Context["file_paths"].([]interface{}); ok {
+				for _, ep := range existing {
+					if s, ok := ep.(string); ok {
+						existingPaths = append(existingPaths, s)
+					}
+				}
+			}
+
+			// Add new valid paths (avoid duplicates)
+			pathSet := make(map[string]bool)
+			for _, p := range existingPaths {
+				pathSet[p] = true
+			}
+			for _, p := range validPaths {
+				if !pathSet[p] {
+					existingPaths = append(existingPaths, p)
+					pathSet[p] = true
+				}
+			}
+
+			ws.Tasks[i].Context["file_paths"] = existingPaths
+			break
+		}
+	}
+
+	// Save workspace
+	if err := th.workspaceStore.Save(ws); err != nil {
+		logger.Error("Failed to save workspace", logger.Fields{"error": err})
+		orihttp.RespondErrorWithErr(w, http.StatusInternalServerError, "Failed to save file paths", err)
+		return
+	}
+
+	logger.Info("Added file paths to task", logger.Fields{
+		"task_id":       taskID,
+		"valid_count":   len(validPaths),
+		"invalid_count": len(invalidPaths),
+	})
+
+	// Publish event
+	if th.eventBus != nil {
+		th.eventBus.Publish(workspace.Event{
+			Type:        workspace.EventWorkspaceUpdated,
+			WorkspaceID: task.WorkspaceID,
+			Data: map[string]interface{}{
+				"task_id":    taskID,
+				"file_paths": validPaths,
+			},
+		})
+	}
+
+	response := map[string]interface{}{
+		"success":     true,
+		"task_id":     taskID,
+		"valid_paths": validPaths,
+	}
+
+	if len(invalidPaths) > 0 {
+		response["invalid_paths"] = invalidPaths
+		response["warning"] = fmt.Sprintf("%d path(s) could not be verified", len(invalidPaths))
+	}
+
+	w.WriteHeader(http.StatusOK)
+	orihttp.WriteJSON(w, response)
 }

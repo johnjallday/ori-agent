@@ -1435,127 +1435,6 @@ function setupChatPanel() {
 // - js/modules/settings.js - Settings management
 // - js/modules/sidebar.js - Main sidebar controller
 
-// ---- Sidebar Toggle Functionality ----
-function setupSidebarToggle() {
-  const sidebarToggle = document.getElementById('sidebarToggle');
-  const sidebar = document.getElementById('sidebar');
-
-  if (sidebarToggle && sidebar) {
-    const isEditableTarget = (target) => {
-      if (!target) return false;
-      const tagName = target.tagName;
-      return target.isContentEditable || tagName === 'INPUT' || tagName === 'TEXTAREA' || tagName === 'SELECT';
-    };
-
-    sidebarToggle.addEventListener('click', function(event) {
-      appLog.debug('[SIDEBAR TOGGLE] Click detected');
-      appLog.debug('[SIDEBAR TOGGLE] Current sidebar classes:', sidebar.className);
-
-      // Prevent event propagation to avoid interference with other handlers
-      event.stopPropagation();
-
-      // Toggle sidebar visibility
-      const isHidden = sidebar.classList.toggle('d-none');
-
-      if (isHidden) {
-        // Hiding sidebar
-        sidebar.classList.remove('d-lg-block');
-        sidebar.classList.remove('sidebar-mobile-show');
-        sidebarToggle.setAttribute('aria-expanded', 'false');
-      } else {
-        // Showing sidebar
-        if (window.innerWidth >= 992) {
-          sidebar.classList.add('d-lg-block');
-          sidebar.classList.remove('sidebar-mobile-show');
-        } else {
-          // On mobile, add sidebar-mobile-show to override transform: translateX(-100%)
-          sidebar.classList.remove('d-lg-block');
-          sidebar.classList.add('sidebar-mobile-show');
-        }
-        sidebarToggle.setAttribute('aria-expanded', 'true');
-      }
-
-      appLog.debug('[SIDEBAR TOGGLE] New sidebar classes:', sidebar.className);
-
-      // Handle sidebar width
-      if (isHidden) {
-        // Set sidebar width to 0 to remove the empty space
-        document.documentElement.style.setProperty('--sidebar-width', '0px');
-      } else {
-        // Restore sidebar width (get from resizer or use default)
-        const savedWidth = localStorage.getItem('sidebarWidth') || '300';
-        document.documentElement.style.setProperty('--sidebar-width', `${savedWidth}px`);
-      }
-
-      EventBus.emit('sidebar:toggled', { hidden: isHidden });
-    });
-
-    document.addEventListener('keydown', (event) => {
-      if (event.metaKey && event.code === 'Backquote' && !event.shiftKey && !event.ctrlKey && !event.altKey) {
-        if (isEditableTarget(event.target)) {
-          return;
-        }
-        event.preventDefault();
-        sidebarToggle.click();
-      }
-    });
-
-    // Close sidebar when clicking outside on mobile
-    document.addEventListener('click', function(event) {
-      const isClickInSidebar = sidebar.contains(event.target);
-      const isClickOnToggle = sidebarToggle.contains(event.target);
-      // Don't close sidebar when clicking on modals or their backdrops
-      const isClickInModal = event.target.closest('.modal') || event.target.classList.contains('modal-backdrop');
-
-      // Only close if sidebar is visible and click is outside (excluding modals)
-      if (!isClickInSidebar && !isClickOnToggle && !isClickInModal &&
-          !sidebar.classList.contains('d-none') &&
-          window.innerWidth < 992) { // lg breakpoint
-        sidebar.classList.add('d-none');
-        sidebar.classList.remove('sidebar-mobile-show');
-        sidebar.classList.remove('d-lg-block');
-        // Set sidebar width to 0 to remove the empty space
-        document.documentElement.style.setProperty('--sidebar-width', '0px');
-      }
-    });
-
-    // Handle window resize
-    function handleSidebarResponsive() {
-      if (window.innerWidth >= 992) { // lg breakpoint
-        if (sidebar.classList.contains('d-none')) {
-          sidebar.classList.remove('d-lg-block');
-          sidebar.classList.remove('sidebar-mobile-show');
-          sidebarToggle.setAttribute('aria-expanded', 'false');
-          // Set sidebar width to 0 when hidden
-          document.documentElement.style.setProperty('--sidebar-width', '0px');
-          return;
-        }
-
-        // Keep sidebar visible on large screens when explicitly opened
-        sidebar.classList.remove('sidebar-mobile-show');
-        sidebar.classList.add('d-lg-block');
-        sidebarToggle.setAttribute('aria-expanded', 'true');
-        // Restore sidebar width
-        const savedWidth = localStorage.getItem('sidebarWidth') || '300';
-        document.documentElement.style.setProperty('--sidebar-width', `${savedWidth}px`);
-      } else {
-        // Hide sidebar on small screens by default
-        sidebar.classList.add('d-none');
-        sidebar.classList.remove('d-lg-block');
-        sidebar.classList.remove('sidebar-mobile-show');
-        sidebarToggle.setAttribute('aria-expanded', 'false');
-        // Set sidebar width to 0
-        document.documentElement.style.setProperty('--sidebar-width', '0px');
-      }
-    }
-
-    window.addEventListener('resize', handleSidebarResponsive);
-
-    // Run initial check on page load
-    handleSidebarResponsive();
-  }
-}
-
 // Export functions for use by session manager
 window.appendMessageToUI = appendMessageToUI;
 window.clearChatHistory = clearChatHistory;
@@ -1691,9 +1570,6 @@ async function initializeApp() {
 
   // Set up skills dropdown
   setupSkillsDropdown();
-
-  // Set up sidebar toggle functionality
-  setupSidebarToggle();
 
   // Set up agent display click handler (navigate to agent details)
   setupAgentDisplayClick();

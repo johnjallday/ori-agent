@@ -19,6 +19,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/store"
 	internaltags "github.com/johnjallday/ori-agent/internal/tags"
 	"github.com/johnjallday/ori-agent/internal/types"
+	"github.com/oriagent/ori-pluginapi"
 )
 
 // PluginsPageHandler handles endpoints for the dedicated plugins management page
@@ -80,7 +81,7 @@ func (h *PluginsPageHandler) HandleListPlugins(w http.ResponseWriter, r *http.Re
 	}
 
 	// Get current agent to check enabled plugins
-	agent, _, agentExists := store.GetCurrentAgent(h.Store)
+	agent, currentAgent, agentExists := store.GetCurrentAgent(h.Store)
 
 	// Build response with extended plugin information
 	plugins := make([]map[string]interface{}, 0, len(localReg.Plugins))
@@ -91,37 +92,135 @@ func (h *PluginsPageHandler) HandleListPlugins(w http.ResponseWriter, r *http.Re
 			continue
 		}
 
-		// Check if plugin is enabled
+		// Check if plugin is enabled using lookup normalization
+
 		isEnabled := false
+
 		var loadedPlugin *types.LoadedPlugin
+
 		if agentExists {
-			if lp, exists := agent.Plugins[plugin.Name]; exists {
-				isEnabled = true
-				loadedPlugin = &lp
+
+			normalized := registry.NormalizePluginNameForLookup(plugin.Name)
+
+			for name, lp := range agent.Plugins {
+
+				if registry.NormalizePluginNameForLookup(name) == normalized {
+
+					isEnabled = true
+
+					loadedPlugin = &lp
+
+					break
+
+				}
+
 			}
+
 		}
 
-		// Determine plugin status
-		status := h.getPluginStatus(&plugin, isEnabled)
+		// Check if plugin supports initialization and get config variables
+
+		var supportsInit bool
+
+		var requiredConfig []pluginapi.ConfigVariable
+
+		// Try to check initialization support
+
+		if loadedPlugin != nil && loadedPlugin.Tool != nil {
+
+			if initProvider, ok := loadedPlugin.Tool.(pluginapi.InitializationProvider); ok {
+
+				requiredConfig = initProvider.GetRequiredConfig()
+
+				supportsInit = true
+
+			}
+
+		} else if plugin.Path != "" {
+
+			// Temporarily load to check if it supports initialization
+
+			if tool, err := h.Loader.Load(plugin.Path); err == nil {
+
+				// Ensure plugin RPC client is cleaned up
+
+				defer pluginloader.CloseRPCPlugin(tool)
+
+				if initProvider, ok := tool.(pluginapi.InitializationProvider); ok {
+
+					requiredConfig = initProvider.GetRequiredConfig()
+
+					supportsInit = true
+
+				}
+
+			}
+
+		}
+
+		// Check if settings file exists for this plugin
+
+		isConfigured := false
+
+		if currentAgent != "" {
+
+			lookupName := registry.NormalizePluginNameForLookup(plugin.Name)
+
+			// Settings files are named after the lookup name (without version)
+
+			settingsFilePath := fmt.Sprintf("agents/%s/%s_settings.json", currentAgent, lookupName)
+
+			if _, err := os.Stat(settingsFilePath); err == nil {
+
+				isConfigured = true
+
+			}
+
+		}
 
 		// Get plugin agents (plugins that provide agents)
+
 		agents := h.getPluginAgents(&plugin, loadedPlugin)
 
+		// Determine plugin status (now focused on health)
+
+		status := h.getPluginStatus(&plugin, isEnabled)
+
 		pluginInfo := map[string]interface{}{
-			"name":                 plugin.Name,
-			"description":          plugin.Description,
-			"version":              plugin.Version,
-			"tags":                 tags,
-			"category":             plugin.Category,
-			"status":               status,
-			"enabled":              plugin.Enabled,
-			"permissions":          plugin.Permissions,
+
+			"name": plugin.Name,
+
+			"description": plugin.Description,
+
+			"version": plugin.Version,
+
+			"tags": tags,
+
+			"category": plugin.Category,
+
+			"status": status,
+
+			"enabled": plugin.Enabled,
+
+			"permissions": plugin.Permissions,
+
 			"permissions_approved": plugin.PermissionsApproved,
-			"health_status":        plugin.HealthStatus,
-			"last_used":            plugin.LastUsed,
-			"agents":               agents,
-			"metadata":             plugin.Metadata,
+
+			"health_status": plugin.HealthStatus,
+
+			"last_used": plugin.LastUsed,
+
+			"agents": agents,
+
+			"metadata": plugin.Metadata,
+
+			"supports_initialization": supportsInit,
+
+			"required_config": requiredConfig,
+
+			"is_configured": isConfigured,
 		}
+
 		if h.UpdateService != nil {
 			pluginInfo["needs_update"] = h.UpdateService.HasUpdateForPlugin(plugin.Name)
 		} else {
@@ -132,7 +231,8 @@ func (h *PluginsPageHandler) HandleListPlugins(w http.ResponseWriter, r *http.Re
 	}
 
 	response := map[string]interface{}{
-		"plugins": plugins,
+		"plugins":       plugins,
+		"current_agent": currentAgent,
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -224,14 +324,20 @@ func (h *PluginsPageHandler) HandleGetPluginDetails(w http.ResponseWriter, r *ht
 	}
 
 	// Get current agent to check if plugin is loaded
-	agent, _, agentExists := store.GetCurrentAgent(h.Store)
+	agent, currentAgent, agentExists := store.GetCurrentAgent(h.Store)
 
 	var loadedPlugin *types.LoadedPlugin
 	var definition interface{}
+	lpExists := false
 	if agentExists {
-		if lp, exists := agent.Plugins[pluginName]; exists {
-			loadedPlugin = &lp
-			definition = lp.Definition
+		normalized := registry.NormalizePluginNameForLookup(pluginName)
+		for name, lp := range agent.Plugins {
+			if registry.NormalizePluginNameForLookup(name) == normalized {
+				loadedPlugin = &lp
+				definition = lp.Definition
+				lpExists = true
+				break
+			}
 		}
 	}
 
@@ -242,23 +348,56 @@ func (h *PluginsPageHandler) HandleGetPluginDetails(w http.ResponseWriter, r *ht
 		permissions = permissionEntry
 	}
 
+	// Check if plugin supports initialization and get config variables
+	var supportsInit bool
+	var requiredConfig []pluginapi.ConfigVariable
+
+	if loadedPlugin != nil && loadedPlugin.Tool != nil {
+		if initProvider, ok := loadedPlugin.Tool.(pluginapi.InitializationProvider); ok {
+			requiredConfig = initProvider.GetRequiredConfig()
+			supportsInit = true
+		}
+	} else if plugin.Path != "" {
+		if tool, err := h.Loader.Load(plugin.Path); err == nil {
+			defer pluginloader.CloseRPCPlugin(tool)
+			if initProvider, ok := tool.(pluginapi.InitializationProvider); ok {
+				requiredConfig = initProvider.GetRequiredConfig()
+				supportsInit = true
+			}
+		}
+	}
+
+	// Check if settings file exists
+	isConfigured := false
+	if currentAgent != "" {
+		lookupName := registry.NormalizePluginNameForLookup(plugin.Name)
+		settingsFilePath := fmt.Sprintf("agents/%s/%s_settings.json", currentAgent, lookupName)
+		if _, err := os.Stat(settingsFilePath); err == nil {
+			isConfigured = true
+		}
+	}
+
 	// Build detailed response
 	details := map[string]interface{}{
-		"name":                 plugin.Name,
-		"description":          plugin.Description,
-		"version":              plugin.Version,
-		"tags":                 pluginAllTags(plugin),
-		"category":             plugin.Category,
-		"path":                 plugin.Path,
-		"enabled":              plugin.Enabled,
-		"permissions":          permissions,
-		"permissions_approved": plugin.PermissionsApproved,
-		"health_status":        plugin.HealthStatus,
-		"last_used":            plugin.LastUsed,
-		"version_history":      plugin.VersionHistory,
-		"metadata":             plugin.Metadata,
-		"definition":           definition,
-		"agents":               h.getPluginAgents(plugin, loadedPlugin),
+		"name":                    plugin.Name,
+		"description":             plugin.Description,
+		"version":                 plugin.Version,
+		"tags":                    pluginAllTags(plugin),
+		"category":                plugin.Category,
+		"path":                    plugin.Path,
+		"enabled":                 plugin.Enabled,
+		"permissions":             permissions,
+		"permissions_approved":    plugin.PermissionsApproved,
+		"health_status":           plugin.HealthStatus,
+		"status":                  h.getPluginStatus(plugin, lpExists),
+		"last_used":               plugin.LastUsed,
+		"version_history":         plugin.VersionHistory,
+		"metadata":                plugin.Metadata,
+		"definition":              definition,
+		"agents":                  h.getPluginAgents(plugin, loadedPlugin),
+		"supports_initialization": supportsInit,
+		"required_config":         requiredConfig,
+		"is_configured":           isConfigured,
 	}
 
 	w.Header().Set("Content-Type", "application/json")

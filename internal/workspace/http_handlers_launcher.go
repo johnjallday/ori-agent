@@ -149,6 +149,8 @@ func findFolderPickerApp() (string, error) {
 		searchPaths = []string{
 			filepath.Join(execDir, "ori-folder-picker.app"),
 			filepath.Join(execDir, "..", "ori-folder-picker.app"),
+			// macOS app bundle: executable is in Contents/MacOS/, resources in Contents/Resources/
+			filepath.Join(execDir, "..", "Resources", "ori-folder-picker.app"),
 			"./bin/ori-folder-picker.app",
 			"./cmd/folder-picker/build/bin/ori-folder-picker.app",
 			"/Applications/ori-folder-picker.app",

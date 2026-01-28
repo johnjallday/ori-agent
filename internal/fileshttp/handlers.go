@@ -27,6 +27,11 @@ type Handler struct {
 	watcher *filewatcher.Watcher
 }
 
+// Watcher returns the file watcher
+func (h *Handler) Watcher() *filewatcher.Watcher {
+	return h.watcher
+}
+
 // NewHandler creates a new file handler
 func NewHandler(store *sessionfiles.Store, watcher *filewatcher.Watcher) *Handler {
 	return &Handler{

@@ -7,6 +7,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/google/uuid"
@@ -442,6 +444,17 @@ func (a *WorkspaceStoreAdapter) CreateWorkspaceViaAdapter(name, description stri
 	}
 
 	return ws, nil
+}
+
+// GetFilesPath returns the path for storing files for a workspace.
+// Uses a workspaces directory under the current working directory.
+func (a *WorkspaceStoreAdapter) GetFilesPath(workspaceID string) string {
+	// Default to "workspaces" directory, similar to FileStore
+	baseDir := "workspaces"
+	if p := os.Getenv("WORKSPACE_DIR"); p != "" {
+		baseDir = p
+	}
+	return filepath.Join(baseDir, workspaceID, "files")
 }
 
 // generateID creates a new UUID for workspaces.

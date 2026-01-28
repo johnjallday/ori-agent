@@ -13,16 +13,16 @@ import (
 func (b *ServerBuilder) initializeMCP() error {
 	verbose := os.Getenv("ORI_VERBOSE") == "true"
 
-	b.server.mcpRegistry = mcp.NewRegistry()
-	b.server.mcpConfigManager = mcp.NewConfigManager(".")
+	b.mcpRegistry = mcp.NewRegistry()
+	b.mcpConfigManager = mcp.NewConfigManager(".")
 
-	if err := b.server.mcpConfigManager.InitializeDefaultServers(); err != nil {
+	if err := b.mcpConfigManager.InitializeDefaultServers(); err != nil {
 		if verbose {
 			logger.Error("failed to initialize default MCP servers", logger.Fields{"server": err})
 		}
 	}
 
-	mcpGlobalConfig, err := b.server.mcpConfigManager.LoadGlobalConfig()
+	mcpGlobalConfig, err := b.mcpConfigManager.LoadGlobalConfig()
 	if err != nil {
 		if verbose {
 			logger.Error("failed to load MCP global config", logger.Fields{"err": err})
@@ -31,7 +31,7 @@ func (b *ServerBuilder) initializeMCP() error {
 	}
 
 	for _, serverConfig := range mcpGlobalConfig.Servers {
-		if err := b.server.mcpRegistry.AddServer(serverConfig); err != nil {
+		if err := b.mcpRegistry.AddServer(serverConfig); err != nil {
 			if verbose {
 				logger.Error("failed to add MCP server to registry", logger.Fields{"server": serverConfig.Name, "err": err})
 			}

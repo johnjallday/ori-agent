@@ -1577,6 +1577,11 @@ const sessionManager = {
 
         this.openChatPanelIfAvailable();
 
+        // Emit event for workspace hub to refresh
+        if (window.EventBus) {
+          EventBus.emit('session:created', { session: data.session, folderId: null });
+        }
+
         return data.session;
       }
       return null;
@@ -1693,6 +1698,11 @@ const sessionManager = {
         }
 
         this.openChatPanelIfAvailable();
+
+        // Emit event for workspace hub to refresh
+        if (window.EventBus) {
+          EventBus.emit('session:created', { session: data.session, folderId });
+        }
       }
     } catch (error) {
       console.error('Failed to create session in folder:', error);
@@ -4011,6 +4021,11 @@ const sessionManager = {
       // Refresh folder tree to show new note
       this.renderFolderTree();
 
+      // Emit event for workspace hub to refresh
+      if (window.EventBus) {
+        EventBus.emit('note:created', { note: data.note, workspaceId: folderId });
+      }
+
       return data.note;
     } catch (error) {
       console.error('Failed to create note:', error);
@@ -4037,6 +4052,12 @@ const sessionManager = {
           notes[index] = { ...notes[index], ...data.note };
           break;
         }
+      }
+
+      // Emit event for workspace hub to refresh
+      if (window.EventBus) {
+        const workspaceId = data.note?.workspace_id || data.note?.folder_id;
+        EventBus.emit('note:updated', { note: data.note, workspaceId });
       }
 
       return data.note;
@@ -4497,10 +4518,31 @@ const sessionManager = {
     select.innerHTML = options;
   },
 
-  // Open note editor modal
+  // Open note editor modal with a note object
+  // If note doesn't have full content, fetches it first
+  async openNoteEditorModal(note) {
+    if (!note || !note.id) return;
+
+    // If note only has preview, fetch full content
+    let fullNote = note;
+    if (note.preview !== undefined && note.content === undefined) {
+      fullNote = await this.getNote(note.id);
+      if (!fullNote) return;
+    }
+
+    return this._openNoteEditorWithNote(fullNote);
+  },
+
+  // Open note editor modal by ID
   async openNoteEditor(noteId) {
     const note = await this.getNote(noteId);
     if (!note) return;
+
+    return this._openNoteEditorWithNote(note);
+  },
+
+  // Internal: Open note editor with a full note object
+  _openNoteEditorWithNote(note) {
 
     this.currentNote = note;
     this.noteModalWorkspaceId = note.workspace_id || note.folder_id || null;
@@ -5560,13 +5602,18 @@ const sessionManager = {
       }
     });
 
-    // Escape key handlers
-    document.getElementById('scheduledTasksModal')?.addEventListener('keydown', (e) => {
-      if (e.key === 'Escape') this.closeScheduledTasksModal();
-    });
-
-    document.getElementById('scheduledTaskDetailModal')?.addEventListener('keydown', (e) => {
-      if (e.key === 'Escape') this.closeScheduledTaskDetailModal();
+    // Escape key handlers (document-level for reliable closing)
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') {
+        const detailModal = document.getElementById('scheduledTaskDetailModal');
+        const listModal = document.getElementById('scheduledTasksModal');
+        // Close detail modal first if visible, then list modal
+        if (detailModal && detailModal.style.display !== 'none' && detailModal.style.display !== '') {
+          this.closeScheduledTaskDetailModal();
+        } else if (listModal && listModal.style.display !== 'none' && listModal.style.display !== '') {
+          this.closeScheduledTasksModal();
+        }
+      }
     });
   },
 
@@ -6202,8 +6249,8 @@ window.sessionManager = sessionManager;
 
 // Initialize when DOM is ready
 document.addEventListener('DOMContentLoaded', () => {
-  // Only initialize if session sidebar exists
-  if (document.getElementById('sessionSidebar')) {
+  // Initialize if session sidebar OR the extracted modals exist
+  if (document.getElementById('sessionSidebar') || document.getElementById('createChatModal')) {
     sessionManager.init();
   }
 });
