@@ -1545,15 +1545,12 @@
   border: 1px solid var(--border-color);
   border-radius: var(--radius-md);
   padding: 0.4rem 0.6rem;
-  padding-right: 2.2rem;
   background: var(--bg-secondary);
   display: flex;
-  justify-content: space-between;
   align-items: center;
   gap: 0.5rem;
   cursor: pointer;
   transition: border-color 0.2s ease, background-color 0.2s ease;
-  position: relative;
 }
 
 .hub-note-item:hover {
@@ -1576,7 +1573,37 @@
 }
 
 .hub-note-preview {
-  display: none;
+  font-size: 0.7rem;
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.hub-note-actions {
+  display: flex;
+  gap: 0.25rem;
+  flex-shrink: 0;
+  margin-left: auto;
+}
+
+.hub-note-delete-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.35rem;
+  border: 1px solid var(--border-color);
+  background: var(--bg-tertiary, var(--bg-secondary));
+  color: var(--text-secondary);
+  cursor: pointer;
+  border-radius: var(--radius-sm, 4px);
+  transition: color 0.15s ease, background-color 0.15s ease, border-color 0.15s ease;
+}
+
+.hub-note-delete-btn:hover {
+  color: #ef4444;
+  background: rgba(239, 68, 68, 0.15);
+  border-color: #ef4444;
 }
 
 .hub-note-meta {
@@ -2456,19 +2483,21 @@ body.chat-panel-open .chat-panel-backdrop {
   position: absolute;
   top: 0.4rem;
   right: 0.4rem;
-  padding: 0.25rem;
-  border: none;
-  background: transparent;
-  color: var(--text-muted);
+  padding: 0.35rem;
+  border: 1px solid var(--border-color);
+  background: var(--bg-secondary);
+  color: var(--text-secondary);
   cursor: pointer;
   border-radius: var(--radius-sm, 4px);
-  transition: color 0.15s ease, background-color 0.15s ease;
+  transition: color 0.15s ease, background-color 0.15s ease, border-color 0.15s ease;
   flex-shrink: 0;
+  z-index: 10;
 }
 
 .hub-item-delete-btn:hover {
   color: #ef4444;
-  background: rgba(239, 68, 68, 0.1);
+  background: rgba(239, 68, 68, 0.15);
+  border-color: #ef4444;
 }
 
 /* Hide individual delete buttons in selection mode */

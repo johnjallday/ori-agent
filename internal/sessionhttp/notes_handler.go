@@ -189,7 +189,10 @@ func (h *Handler) getNote(w http.ResponseWriter, r *http.Request, id string) {
 		return
 	}
 	if err != nil {
-		logger.Error("Failed to get note", logger.Fields{"id": id, "error": err})
+		// Don't log context canceled errors - these are normal when requests are aborted
+		if !errors.Is(err, context.Canceled) {
+			logger.Error("Failed to get note", logger.Fields{"id": id, "error": err})
+		}
 		_ = orihttp.RespondInternalError(w, "Failed to get note")
 		return
 	}

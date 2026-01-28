@@ -318,7 +318,9 @@ export class WorkspaceDetailPage {
     this.makeEditable(this.elements.workspaceDescription, 'description', true);
 
     // Subscribe to EventBus events for auto-refresh
+    console.log('[workspace-detail] EventBus available:', !!window.EventBus);
     if (window.EventBus) {
+      console.log('[workspace-detail] Registering EventBus listeners');
       EventBus.on('task:created', (data) => {
         if (!data?.workspaceId || data.workspaceId === this.workspaceId) {
           this.loadTasks();
@@ -339,6 +341,14 @@ export class WorkspaceDetailPage {
 
       EventBus.on('note:created', (data) => {
         if (!data?.workspaceId || data.workspaceId === this.workspaceId) {
+          this.loadNotes();
+        }
+      }, 'workspaceDetail');
+
+      EventBus.on('note:updated', (data) => {
+        console.log('[workspace-detail] note:updated received', data?.workspaceId, 'this.workspaceId:', this.workspaceId);
+        if (!data?.workspaceId || data.workspaceId === this.workspaceId) {
+          console.log('[workspace-detail] calling loadNotes');
           this.loadNotes();
         }
       }, 'workspaceDetail');
@@ -1806,14 +1816,18 @@ export class WorkspaceDetailPage {
       return;
     }
 
-    this.elements.notesList.innerHTML = this.notes.map(note => `
+    this.elements.notesList.innerHTML = this.notes.map(note => {
+      const title = note.name || note.title || 'Untitled Note';
+      const preview = note.preview || note.content || '';
+      return `
       <div class="workspace-detail-item" data-note-id="${note.id}" onclick="window.workspaceDetail?.editNote('${note.id}')">
-        <div class="workspace-detail-item-title">${this.escapeHtml(note.title || 'Untitled Note')}</div>
+        <div class="workspace-detail-item-title">${this.escapeHtml(title)}</div>
         <div class="workspace-detail-item-meta">
-          ${note.content ? this.escapeHtml(note.content.substring(0, 50)) + (note.content.length > 50 ? '...' : '') : 'Empty note'}
+          ${preview ? this.escapeHtml(preview.substring(0, 50)) + (preview.length > 50 ? '...' : '') : 'Empty note'}
         </div>
       </div>
-    `).join('');
+    `;
+    }).join('');
   }
 
   /**

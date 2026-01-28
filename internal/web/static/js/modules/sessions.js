@@ -4054,6 +4054,12 @@ const sessionManager = {
         }
       }
 
+      // Emit event for workspace hub to refresh
+      if (window.EventBus) {
+        const workspaceId = data.note?.workspace_id || data.note?.folder_id;
+        EventBus.emit('note:updated', { note: data.note, workspaceId });
+      }
+
       return data.note;
     } catch (error) {
       console.error('Failed to update note:', error);
@@ -4512,10 +4518,31 @@ const sessionManager = {
     select.innerHTML = options;
   },
 
-  // Open note editor modal
+  // Open note editor modal with a note object
+  // If note doesn't have full content, fetches it first
+  async openNoteEditorModal(note) {
+    if (!note || !note.id) return;
+
+    // If note only has preview, fetch full content
+    let fullNote = note;
+    if (note.preview !== undefined && note.content === undefined) {
+      fullNote = await this.getNote(note.id);
+      if (!fullNote) return;
+    }
+
+    return this._openNoteEditorWithNote(fullNote);
+  },
+
+  // Open note editor modal by ID
   async openNoteEditor(noteId) {
     const note = await this.getNote(noteId);
     if (!note) return;
+
+    return this._openNoteEditorWithNote(note);
+  },
+
+  // Internal: Open note editor with a full note object
+  _openNoteEditorWithNote(note) {
 
     this.currentNote = note;
     this.noteModalWorkspaceId = note.workspace_id || note.folder_id || null;

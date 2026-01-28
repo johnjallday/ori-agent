@@ -1,3 +1,4 @@
+console.log('[workspace-hub.js] FILE LOADED');
 /**
  * Workspace Hub - Main Coordinator
  * Orchestrates workspace hub sub-modules for task, session, note, and file management.
@@ -20,6 +21,7 @@
   'use strict';
 
   const hubEl = document.getElementById('workspaceHub');
+  console.log('[workspace-hub] hubEl exists:', !!hubEl);
   if (!hubEl) return;
 
   // Initialize DOM element references
@@ -1670,7 +1672,9 @@
   }
 
   // Subscribe to global events
+  console.log('[workspace-hub] EventBus available:', !!window.EventBus);
   if (window.EventBus) {
+    console.log('[workspace-hub] Registering EventBus listeners');
     EventBus.on('workspace:files:updated', (data) => {
       const state = window.WorkspaceHubState.getState();
       if (!data?.workspaceId || data.workspaceId !== state.selectedId) return;
@@ -1708,6 +1712,17 @@
       const state = window.WorkspaceHubState.getState();
       if (!state.selectedId) return;
       if (!data?.workspaceId || data.workspaceId === state.selectedId) {
+        window.WorkspaceHubNotes.loadNotes(state.selectedId);
+      }
+    }, 'workspaceHub');
+
+    // Refresh notes when a note is updated
+    EventBus.on('note:updated', (data) => {
+      const state = window.WorkspaceHubState.getState();
+      console.log('[note:updated] received, selectedId:', state.selectedId, 'eventWorkspaceId:', data?.workspaceId);
+      if (!state.selectedId) return;
+      if (!data?.workspaceId || data.workspaceId === state.selectedId) {
+        console.log('[note:updated] calling loadNotes');
         window.WorkspaceHubNotes.loadNotes(state.selectedId);
       }
     }, 'workspaceHub');

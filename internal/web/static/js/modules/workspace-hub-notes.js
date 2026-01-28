@@ -76,13 +76,9 @@
    * @param {string} noteId - Note ID to open
    */
   function openNote(noteId) {
-    const state = window.WorkspaceHubState.getState();
-
-    if (window.sessionManager && typeof window.sessionManager.openNoteEditorModal === 'function') {
-      const note = state.notes.find(n => n.id === noteId);
-      if (note) {
-        window.sessionManager.openNoteEditorModal(note);
-      }
+    // Use the existing openNoteEditor which takes an ID and fetches the note
+    if (window.sessionManager && typeof window.sessionManager.openNoteEditor === 'function') {
+      window.sessionManager.openNoteEditor(noteId);
     }
   }
 
@@ -153,6 +149,7 @@
    * @param {string} workspaceId - Workspace ID
    */
   async function loadNotes(workspaceId) {
+    console.log('[loadNotes] called with workspaceId:', workspaceId);
     if (!workspaceId) return;
 
     const state = window.WorkspaceHubState.getState();
@@ -167,6 +164,7 @@
       if (!response.ok) throw new Error('Failed to load notes');
 
       const data = await response.json();
+      console.log('[loadNotes] API returned:', data.notes);
       state.notes = data.notes || [];
       renderNotes(state.notes);
     } catch (error) {
@@ -185,6 +183,7 @@
     const elements = window.WorkspaceHubState.getElements();
     const state = window.WorkspaceHubState.getState();
 
+    console.log('[DEBUG renderNotes] called with', notes?.length, 'notes, element:', elements.notesList);
     if (!elements.notesList) return;
 
     if (!notes || notes.length === 0) {
@@ -213,8 +212,7 @@
             <div class="hub-note-preview">${preview ? escapeHtml(preview) + (notePreview.length > 80 ? '...' : '') : '<span class="text-muted">Empty note</span>'}</div>
             <div class="hub-note-meta">${escapeHtml(updated)}</div>
           </div>
-          <button class="modern-btn modern-btn-secondary hub-note-open" data-action="open">Open</button>
-          <button class="hub-item-delete-btn" data-action="delete" title="Delete note">
+          <button class="hub-note-delete-btn" data-action="delete" title="Delete note" style="display:inline-flex;padding:6px;border:1px solid #666;background:#333;color:#fff;border-radius:4px;cursor:pointer;margin-left:auto;">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
               <path d="M19,4H15.5L14.5,3H9.5L8.5,4H5V6H19M6,19A2,2 0 0,0 8,21H16A2,2 0 0,0 18,19V7H6V19Z"/>
             </svg>
@@ -223,7 +221,9 @@
       `;
     });
 
+    console.log('[DEBUG renderNotes] HTML:', items.join(''));
     elements.notesList.innerHTML = items.join('');
+    console.log('[DEBUG renderNotes] innerHTML set, element now:', elements.notesList.innerHTML);
     bindNoteEvents();
   }
 
@@ -256,6 +256,8 @@
       });
 
       item.addEventListener('click', (event) => {
+        console.log('[DEBUG click] note item clicked, noteId:', noteId, 'inSelectionMode:', inSelectionMode);
+        console.log('[DEBUG click] event.target:', event.target);
         if (inSelectionMode && !event.target.closest('button') && !event.target.closest('input')) {
           window.WorkspaceHubSelection.toggleItemSelection('notes', noteId);
         } else if (!inSelectionMode && !event.target.closest('button')) {
