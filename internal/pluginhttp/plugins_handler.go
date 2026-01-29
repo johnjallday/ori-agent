@@ -83,6 +83,18 @@ func (h *PluginsPageHandler) HandleListPlugins(w http.ResponseWriter, r *http.Re
 	// Get current agent to check enabled plugins
 	agent, currentAgent, agentExists := store.GetCurrentAgent(h.Store)
 
+	// Get all agents to see which plugins they are using
+	allAgentNames, _ := h.Store.ListAgents()
+	agentPluginMap := make(map[string][]string) // plugin lookup name -> list of agent names
+	for _, name := range allAgentNames {
+		if ag, ok := h.Store.GetAgent(name); ok {
+			for pName := range ag.Plugins {
+				normPName := registry.NormalizePluginNameForLookup(pName)
+				agentPluginMap[normPName] = append(agentPluginMap[normPName], name)
+			}
+		}
+	}
+
 	// Build response with extended plugin information
 	plugins := make([]map[string]interface{}, 0, len(localReg.Plugins))
 
@@ -93,132 +105,89 @@ func (h *PluginsPageHandler) HandleListPlugins(w http.ResponseWriter, r *http.Re
 		}
 
 		// Check if plugin is enabled using lookup normalization
-
 		isEnabled := false
-
 		var loadedPlugin *types.LoadedPlugin
-
 		if agentExists {
-
 			normalized := registry.NormalizePluginNameForLookup(plugin.Name)
-
 			for name, lp := range agent.Plugins {
-
 				if registry.NormalizePluginNameForLookup(name) == normalized {
-
 					isEnabled = true
-
 					loadedPlugin = &lp
-
 					break
-
 				}
-
 			}
+		}
 
+		// Check if plugin is installed (binary exists on disk)
+		isInstalled := false
+		if plugin.Path != "" {
+			if _, err := os.Stat(plugin.Path); err == nil {
+				isInstalled = true
+			}
+		}
+
+		// Get agents using this plugin
+		normName := registry.NormalizePluginNameForLookup(plugin.Name)
+		usingAgents := agentPluginMap[normName]
+		if usingAgents == nil {
+			usingAgents = []string{}
 		}
 
 		// Check if plugin supports initialization and get config variables
-
 		var supportsInit bool
-
 		var requiredConfig []pluginapi.ConfigVariable
 
 		// Try to check initialization support
-
 		if loadedPlugin != nil && loadedPlugin.Tool != nil {
-
 			if initProvider, ok := loadedPlugin.Tool.(pluginapi.InitializationProvider); ok {
-
 				requiredConfig = initProvider.GetRequiredConfig()
-
 				supportsInit = true
-
 			}
-
-		} else if plugin.Path != "" {
-
+		} else if isInstalled {
 			// Temporarily load to check if it supports initialization
-
 			if tool, err := h.Loader.Load(plugin.Path); err == nil {
-
 				// Ensure plugin RPC client is cleaned up
-
 				defer pluginloader.CloseRPCPlugin(tool)
-
 				if initProvider, ok := tool.(pluginapi.InitializationProvider); ok {
-
 					requiredConfig = initProvider.GetRequiredConfig()
-
 					supportsInit = true
-
 				}
-
 			}
-
 		}
 
 		// Check if settings file exists for this plugin
-
 		isConfigured := false
-
 		if currentAgent != "" {
-
 			lookupName := registry.NormalizePluginNameForLookup(plugin.Name)
-
 			// Settings files are named after the lookup name (without version)
-
 			settingsFilePath := fmt.Sprintf("agents/%s/%s_settings.json", currentAgent, lookupName)
-
 			if _, err := os.Stat(settingsFilePath); err == nil {
-
 				isConfigured = true
-
 			}
-
 		}
 
-		// Get plugin agents (plugins that provide agents)
-
-		agents := h.getPluginAgents(&plugin, loadedPlugin)
-
 		// Determine plugin status (now focused on health)
-
 		status := h.getPluginStatus(&plugin, isEnabled)
 
 		pluginInfo := map[string]interface{}{
-
-			"name": plugin.Name,
-
-			"description": plugin.Description,
-
-			"version": plugin.Version,
-
-			"tags": tags,
-
-			"category": plugin.Category,
-
-			"status": status,
-
-			"enabled": plugin.Enabled,
-
-			"permissions": plugin.Permissions,
-
-			"permissions_approved": plugin.PermissionsApproved,
-
-			"health_status": plugin.HealthStatus,
-
-			"last_used": plugin.LastUsed,
-
-			"agents": agents,
-
-			"metadata": plugin.Metadata,
-
+			"name":                    plugin.Name,
+			"description":             plugin.Description,
+			"version":                 plugin.Version,
+			"path":                    plugin.Path,
+			"tags":                    tags,
+			"category":                plugin.Category,
+			"status":                  status,
+			"enabled":                 isEnabled,
+			"installed":               isInstalled,
+			"agents":                  usingAgents, // List of agent names using this plugin
+			"permissions":             plugin.Permissions,
+			"permissions_approved":    plugin.PermissionsApproved,
+			"health_status":           plugin.HealthStatus,
+			"last_used":               plugin.LastUsed,
+			"metadata":                plugin.Metadata,
 			"supports_initialization": supportsInit,
-
-			"required_config": requiredConfig,
-
-			"is_configured": isConfigured,
+			"required_config":         requiredConfig,
+			"is_configured":           isConfigured,
 		}
 
 		if h.UpdateService != nil {
@@ -328,6 +297,7 @@ func (h *PluginsPageHandler) HandleGetPluginDetails(w http.ResponseWriter, r *ht
 
 	var loadedPlugin *types.LoadedPlugin
 	var definition interface{}
+	var operations []pluginapi.OperationInfo
 	lpExists := false
 	if agentExists {
 		normalized := registry.NormalizePluginNameForLookup(pluginName)
@@ -336,8 +306,38 @@ func (h *PluginsPageHandler) HandleGetPluginDetails(w http.ResponseWriter, r *ht
 				loadedPlugin = &lp
 				definition = lp.Definition
 				lpExists = true
+
+				// Extract operations if tool is loaded
+				if lp.Tool != nil {
+					if opsProvider, ok := lp.Tool.(pluginapi.OperationsProvider); ok {
+						operations = opsProvider.GetOperations()
+					}
+				}
 				break
 			}
+		}
+	}
+
+	// If definition is not found in loaded plugins, try loading it from the binary
+	if (definition == nil || len(operations) == 0) && plugin.Path != "" {
+		if tool, err := h.Loader.Load(plugin.Path); err == nil {
+			defer pluginloader.CloseRPCPlugin(tool)
+			if definition == nil {
+				definition = tool.Definition()
+			}
+			// Also check for operations
+			if opsProvider, ok := tool.(pluginapi.OperationsProvider); ok {
+				operations = opsProvider.GetOperations()
+			}
+		}
+	}
+
+	// Fallback: If no operations were found via interface, try extracting from schema
+	if len(operations) == 0 && definition != nil {
+		// Attempt to extract operations from the tool definition's JSON schema
+		extractedOps := h.extractOperationsFromSchema(definition)
+		if len(extractedOps) > 0 {
+			operations = extractedOps
 		}
 	}
 
@@ -377,6 +377,14 @@ func (h *PluginsPageHandler) HandleGetPluginDetails(w http.ResponseWriter, r *ht
 		}
 	}
 
+	// Check if plugin is installed (binary exists on disk)
+	isInstalled := false
+	if plugin.Path != "" {
+		if _, err := os.Stat(plugin.Path); err == nil {
+			isInstalled = true
+		}
+	}
+
 	// Build detailed response
 	details := map[string]interface{}{
 		"name":                    plugin.Name,
@@ -385,7 +393,8 @@ func (h *PluginsPageHandler) HandleGetPluginDetails(w http.ResponseWriter, r *ht
 		"tags":                    pluginAllTags(plugin),
 		"category":                plugin.Category,
 		"path":                    plugin.Path,
-		"enabled":                 plugin.Enabled,
+		"enabled":                 lpExists,
+		"installed":               isInstalled,
 		"permissions":             permissions,
 		"permissions_approved":    plugin.PermissionsApproved,
 		"health_status":           plugin.HealthStatus,
@@ -394,6 +403,7 @@ func (h *PluginsPageHandler) HandleGetPluginDetails(w http.ResponseWriter, r *ht
 		"version_history":         plugin.VersionHistory,
 		"metadata":                plugin.Metadata,
 		"definition":              definition,
+		"operations":              operations,
 		"agents":                  h.getPluginAgents(plugin, loadedPlugin),
 		"supports_initialization": supportsInit,
 		"required_config":         requiredConfig,
@@ -933,4 +943,135 @@ func (h *PluginsPageHandler) getPluginStatus(plugin *types.PluginRegistryEntry, 
 // and checking their Plugins map for a matching plugin name.
 func (h *PluginsPageHandler) getPluginAgents(plugin *types.PluginRegistryEntry, loadedPlugin *types.LoadedPlugin) []string {
 	return []string{}
+}
+
+// extractOperationsFromSchema attempts to parse operations and their parameters from a tool definition
+func (h *PluginsPageHandler) extractOperationsFromSchema(toolDef interface{}) []pluginapi.OperationInfo {
+	// Convert to map if possible
+	defMap, ok := toolDef.(map[string]interface{})
+	if !ok {
+		// Try to see if it's a pluginapi.Tool
+		if t, ok := toolDef.(pluginapi.Tool); ok {
+			defMap = map[string]interface{}{
+				"name":        t.Name,
+				"description": t.Description,
+				"parameters":  t.Parameters,
+			}
+		} else {
+			return nil
+		}
+	}
+
+	params, ok := defMap["parameters"].(map[string]interface{})
+	if !ok || params == nil {
+		return nil
+	}
+
+	var result []pluginapi.OperationInfo
+
+	// Pattern 1: oneOf (multiple sub-schemas)
+	if oneOf, ok := params["oneOf"].([]interface{}); ok {
+		for _, opt := range oneOf {
+			optSchema, ok := opt.(map[string]interface{})
+			if !ok {
+				continue
+			}
+
+			props, ok := optSchema["properties"].(map[string]interface{})
+			if !ok {
+				continue
+			}
+
+			// Find the operation name from the enum value of the "operation" property
+			opName := ""
+			if opProp, ok := props["operation"].(map[string]interface{}); ok {
+				if enum, ok := opProp["enum"].([]interface{}); ok && len(enum) > 0 {
+					if str, ok := enum[0].(string); ok {
+						opName = str
+					}
+				} else if enum, ok := opProp["enum"].([]string); ok && len(enum) > 0 {
+					opName = enum[0]
+				}
+			}
+
+			if opName == "" {
+				continue
+			}
+
+			// Get required parameters
+			var req []string
+			if r, ok := optSchema["required"].([]interface{}); ok {
+				for _, val := range r {
+					if s, ok := val.(string); ok && s != "operation" {
+						req = append(req, s)
+					}
+				}
+			}
+
+			// Get all parameters (excluding "operation")
+			var pList []string
+			for p := range props {
+				if p != "operation" {
+					pList = append(pList, p)
+				}
+			}
+			sort.Strings(pList)
+
+			result = append(result, pluginapi.OperationInfo{
+				Name:               opName,
+				Parameters:         pList,
+				RequiredParameters: req,
+			})
+		}
+	}
+
+	// Pattern 2: simple enum on "operation" property in flat schema
+	if len(result) == 0 {
+		props, ok := params["properties"].(map[string]interface{})
+		if ok {
+			if opProp, ok := props["operation"].(map[string]interface{}); ok {
+				var enumValues []string
+				if enum, ok := opProp["enum"].([]interface{}); ok {
+					for _, val := range enum {
+						if s, ok := val.(string); ok {
+							enumValues = append(enumValues, s)
+						}
+					}
+				} else if enum, ok := opProp["enum"].([]string); ok {
+					enumValues = enum
+				}
+
+				if len(enumValues) > 0 {
+					// Get required fields for the whole tool
+					var globalReq []string
+					if r, ok := params["required"].([]interface{}); ok {
+						for _, val := range r {
+							if s, ok := val.(string); ok && s != "operation" {
+								globalReq = append(globalReq, s)
+							}
+						}
+					}
+
+					// Get all parameters (excluding "operation")
+					var allParams []string
+					for p := range props {
+						if p != "operation" {
+							allParams = append(allParams, p)
+						}
+					}
+					sort.Strings(allParams)
+
+					for _, opName := range enumValues {
+						result = append(result, pluginapi.OperationInfo{
+							Name:               opName,
+							Parameters:         allParams,
+							RequiredParameters: globalReq,
+						})
+					}
+				}
+			}
+		}
+	}
+
+	return result
 }

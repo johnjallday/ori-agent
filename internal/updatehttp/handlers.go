@@ -1,7 +1,6 @@
 package updatehttp
 
 import (
-	"encoding/json"
 	"net/http"
 	"strconv"
 	"time"
@@ -40,13 +39,7 @@ func (h *Handler) CheckUpdatesHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	if encErr := json.NewEncoder(w).Encode(updateInfo); encErr != nil {
-		logger.Error("Error encoding update info", logger.Fields{"error": encErr})
-		orihttp.InternalError(w, "Failed to encode response")
-		// ListReleasesHandler handles GET /api/updates/releases
-		return
-	}
+	orihttp.WriteJSON(w, updateInfo)
 }
 
 func (h *Handler) ListReleasesHandler(w http.ResponseWriter, r *http.Request) {
@@ -78,13 +71,7 @@ func (h *Handler) ListReleasesHandler(w http.ResponseWriter, r *http.Request) {
 		"count":    len(releases),
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	if encErr := json.NewEncoder(w).Encode(response); encErr != nil {
-		logger.Error("Error encoding releases", logger.Fields{"error": encErr})
-		orihttp.InternalError(w, "Failed to encode response")
-		// DownloadUpdateHandler handles POST /api/updates/download
-		return
-	}
+	orihttp.WriteJSON(w, response)
 }
 
 func (h *Handler) DownloadUpdateHandler(w http.ResponseWriter, r *http.Request) {
@@ -127,13 +114,7 @@ func (h *Handler) DownloadUpdateHandler(w http.ResponseWriter, r *http.Request) 
 		"autoRestart": request.AutoRestart,
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	if encErr := json.NewEncoder(w).Encode(response); encErr != nil {
-		logger.Error("Error encoding download response", logger.Fields{"error": encErr})
-		orihttp.InternalError(w, "Failed to encode response")
-		// If auto-restart is requested, trigger restart after response is sent
-		return
-	}
+	orihttp.WriteJSON(w, response)
 
 	if request.AutoRestart {
 		go func() {
@@ -153,10 +134,5 @@ func (h *Handler) GetVersionHandler(w http.ResponseWriter, r *http.Request) {
 
 	versionInfo := h.updateManager.GetCurrentVersion()
 
-	w.Header().Set("Content-Type", "application/json")
-	if encErr := json.NewEncoder(w).Encode(versionInfo); encErr != nil {
-		logger.Error("Error encoding version info", logger.Fields{"error": encErr})
-		orihttp.InternalError(w, "Failed to encode response")
-		return
-	}
+	orihttp.WriteJSON(w, versionInfo)
 }

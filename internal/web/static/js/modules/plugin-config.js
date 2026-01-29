@@ -76,13 +76,28 @@ async function showPluginConfigModal(pluginName) {
     // Normalize type names (API uses 'bool'/'int', JS typically uses 'boolean'/'number')
     const normalizedType = configVar.type === 'bool' ? 'boolean' :
       configVar.type === 'int' ? 'number' : configVar.type;
+
+    // Check for choices/options to render a select dropdown
+    const choices = configVar.choices || configVar.options || configVar.enum;
+    const hasChoices = Array.isArray(choices) && choices.length > 0;
+
     return `
                   <div class="mb-3">
                     <label for="config_${fieldKey}" class="form-label" style="color: var(--text-primary);">
                       ${fieldLabel}
                       ${configVar.required ? '<span style="color: var(--danger-color);">*</span>' : ''}
                     </label>
-                    ${normalizedType === 'password' ? `
+                    ${hasChoices ? `
+                      <select class="form-select" id="config_${fieldKey}" name="${fieldKey}"
+                              ${configVar.required ? 'required' : ''}
+                              style="background: var(--bg-tertiary); border: 1px solid var(--border-color); color: var(--text-primary);">
+                        ${choices.map(choice => {
+                          const value = typeof choice === 'object' ? choice.value : choice;
+                          const label = typeof choice === 'object' ? choice.label : choice;
+                          return `<option value="${value}" ${currentValue === value ? 'selected' : ''}>${label}</option>`;
+                        }).join('')}
+                      </select>
+                    ` : normalizedType === 'password' ? `
                       <input type="password" class="form-control" id="config_${fieldKey}" name="${fieldKey}"
                              placeholder="${placeholder}"
                              value="${currentValue}"

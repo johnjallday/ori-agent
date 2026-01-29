@@ -1,7 +1,6 @@
 package healthhttp
 
 import (
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"strings"
@@ -480,12 +479,7 @@ func (h *Handler) HandleAllPluginsHealth(w http.ResponseWriter, r *http.Request)
 		Plugins:         pluginHealthList,
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	if encErr := json.NewEncoder(w).Encode(response); encErr != nil {
-		logger.Error("Error encoding health response", logger.Fields{"error": encErr})
-		orihttp.InternalError(w, "Internal server error")
-		return
-	}
+	orihttp.WriteJSON(w, response)
 }
 
 // HandlePluginHealth returns detailed health info for a specific plugin
@@ -512,10 +506,5 @@ func (h *Handler) HandlePluginHealth(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	if encErr := json.NewEncoder(w).Encode(result); encErr != nil {
-		logger.Error("Error encoding health response", logger.Fields{"error": encErr})
-		orihttp.InternalError(w, "Internal server error")
-		return
-	}
+	orihttp.WriteJSON(w, result)
 }
