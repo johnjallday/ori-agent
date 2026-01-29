@@ -710,15 +710,17 @@ func (th *TaskHandler) handleUpdateTask(w http.ResponseWriter, r *http.Request) 
 
 		logger.Info("Reassigned task to", logger.Fields{"task_id": req.TaskID, "to": *req.To})
 
-		// Publish event
-		th.eventBus.Publish(workspace.Event{
-			Type:        workspace.EventTaskAssigned,
-			WorkspaceID: task.WorkspaceID,
-			Data: map[string]interface{}{
-				"task_id": req.TaskID,
-				"to":      *req.To,
-			},
-		})
+		// Publish event (if eventBus is available)
+		if th.eventBus != nil {
+			th.eventBus.Publish(workspace.Event{
+				Type:        workspace.EventTaskAssigned,
+				WorkspaceID: task.WorkspaceID,
+				Data: map[string]interface{}{
+					"task_id": req.TaskID,
+					"to":      *req.To,
+				},
+			})
+		}
 
 		// Return updated task
 		updatedTask, err := th.communicator.GetTask(req.TaskID)
@@ -979,6 +981,14 @@ func (th *TaskHandler) handleSaveTaskResult(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
+	// Security: Validate file path to prevent path traversal attacks
+	cleanFilePath := filepath.Clean(req.FilePath)
+	if strings.Contains(cleanFilePath, "..") {
+		orihttp.BadRequest(w, "Invalid file path: path traversal not allowed")
+		return
+	}
+	req.FilePath = cleanFilePath
+
 	// Set default format
 	if req.Format == "" {
 		req.Format = "text"
@@ -1217,6 +1227,13 @@ func (th *TaskHandler) handleFilePaths(w http.ResponseWriter, r *http.Request) {
 	for _, p := range req.FilePaths {
 		// Clean and validate path
 		cleanPath := filepath.Clean(p)
+
+		// Security: Reject paths with traversal sequences
+		if strings.Contains(cleanPath, "..") {
+			invalidPaths = append(invalidPaths, p)
+			continue
+		}
+
 		if _, err := os.Stat(cleanPath); err != nil {
 			invalidPaths = append(invalidPaths, p)
 		} else {

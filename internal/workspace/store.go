@@ -235,12 +235,20 @@ func (s *FileStore) loadCache() error {
 			filePath := filepath.Join(s.basePath, entry.Name())
 			data, err := os.ReadFile(filePath)
 			if err != nil {
-				continue // Skip files that can't be read
+				logger.Warn("Failed to read workspace file, skipping", logger.Fields{
+					"file":  filePath,
+					"error": err.Error(),
+				})
+				continue
 			}
 
 			ws, err := FromJSON(data)
 			if err != nil {
-				continue // Skip files that can't be deserialized
+				logger.Warn("Failed to deserialize workspace file, skipping", logger.Fields{
+					"file":  filePath,
+					"error": err.Error(),
+				})
+				continue
 			}
 
 			// Check if any migration happened and needs to be persisted

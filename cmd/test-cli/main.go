@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"fmt"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -258,8 +259,23 @@ func (r *TestRunner) runQuickTest() {
 		return
 	}
 
-	// TODO: Implement health check
-	fmt.Println(colorGreen + "✓ Quick test passed (health check OK)" + colorReset)
+	// Perform health check against the server
+	healthURL := fmt.Sprintf("http://localhost:%s/health", r.serverPort)
+	fmt.Printf("  Checking %s...\n", healthURL)
+
+	client := &http.Client{Timeout: 5 * time.Second}
+	resp, err := client.Get(healthURL)
+	if err != nil {
+		fmt.Printf(colorRed+"✗ Health check failed: %v\n"+colorReset, err)
+		return
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == http.StatusOK {
+		fmt.Println(colorGreen + "✓ Quick test passed (health check OK)" + colorReset)
+	} else {
+		fmt.Printf(colorRed+"✗ Health check failed: HTTP %d\n"+colorReset, resp.StatusCode)
+	}
 }
 
 func (r *TestRunner) testPlugin() {

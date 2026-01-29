@@ -58,8 +58,8 @@ func (h *HTTPHandler) CreateTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	logger.Debug("[DEBUG] CreateTask - Studio: , Agents", logger.Fields{"agent": studioID, "agents": studio.Agents})
-	logger.Debug("[DEBUG] CreateTask - Request: From=, To=", logger.Fields{"task_id": req.From, "to": req.To})
+	logger.Debug("CreateTask - Studio and agents", logger.Fields{"studio_id": studioID, "agents": studio.Agents})
+	logger.Debug("CreateTask - Request routing", logger.Fields{"from": req.From, "to": req.To})
 
 	// Create task
 	task := Task{

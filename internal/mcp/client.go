@@ -94,9 +94,14 @@ func (c *Client) Call(ctx context.Context, method string, params interface{}) (j
 
 	defer func() {
 		c.pendingMu.Lock()
+		_, stillPending := c.pending[reqID]
 		delete(c.pending, reqID)
 		c.pendingMu.Unlock()
-		close(respChan)
+		// Only close if we were the one to remove it from the map
+		// (prevents double-close if closeAllPending already closed it)
+		if stillPending {
+			close(respChan)
+		}
 	}()
 
 	if err := c.transport.Send(req); err != nil {

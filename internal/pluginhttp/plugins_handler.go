@@ -1,6 +1,7 @@
 package pluginhttp
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -21,6 +22,9 @@ import (
 	"github.com/johnjallday/ori-agent/internal/types"
 	"github.com/oriagent/ori-pluginapi"
 )
+
+// PluginTestTimeout is the maximum duration allowed for plugin test execution
+const PluginTestTimeout = 30 * time.Second
 
 // PluginsPageHandler handles endpoints for the dedicated plugins management page
 
@@ -682,9 +686,11 @@ func (h *PluginsPageHandler) HandleTestPlugin(w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	// Execute test call
+	// Execute test call with timeout to prevent plugins from blocking indefinitely
+	ctx, cancel := context.WithTimeout(r.Context(), PluginTestTimeout)
+	defer cancel()
 
-	result, err := plugin.Tool.Call(r.Context(), testReq.Args)
+	result, err := plugin.Tool.Call(ctx, testReq.Args)
 
 	response := map[string]interface{}{
 		"success": err == nil,
