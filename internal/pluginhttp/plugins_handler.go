@@ -393,6 +393,7 @@ func (h *PluginsPageHandler) HandleGetPluginDetails(w http.ResponseWriter, r *ht
 		"tags":                    pluginAllTags(plugin),
 		"category":                plugin.Category,
 		"path":                    plugin.Path,
+		"github_repo":             plugin.GitHubRepo,
 		"enabled":                 lpExists,
 		"installed":               isInstalled,
 		"permissions":             permissions,

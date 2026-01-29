@@ -660,6 +660,14 @@ function createToolsModal(plugin) {
 function createDetailsModal(plugin) {
   const modal = document.createElement('div');
   modal.className = 'modal-overlay';
+  
+  // Extract repository URL from metadata or github_repo field
+  let repoUrl = plugin.metadata?.repository || plugin.github_repo || '';
+  if (repoUrl && !repoUrl.startsWith('http') && repoUrl.includes('/')) {
+      // Convert user/repo to full github URL
+      repoUrl = `https://github.com/${repoUrl}`;
+  }
+
       modal.innerHTML = `
           <div class="modal-content">
               <div class="modal-header">
@@ -682,6 +690,17 @@ function createDetailsModal(plugin) {
                         <span style="color: var(--text-primary);">${plugin.category || 'Uncategorized'}</span>
                         <span style="color: var(--text-muted);">Status:</span>
                         <span>${renderStatusBadge(plugin)}</span>
+                        ${repoUrl ? `
+                            <span style="color: var(--text-muted);">Repository:</span>
+                            <a href="${escapeAttr(repoUrl)}" target="_blank" style="color: var(--primary-color); text-decoration: none; word-break: break-all;">
+                                ${escapeHtml(repoUrl)}
+                                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-left: 4px; vertical-align: middle;">
+                                    <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path>
+                                    <polyline points="15 3 21 3 21 8"></polyline>
+                                    <line x1="10" y1="14" x2="21" y2="3"></line>
+                                </svg>
+                            </a>
+                        ` : ''}
                         <span style="color: var(--text-muted);">Tags:</span>
                         <div>${renderTagBadges(plugin.tags) || '<span style="color: var(--text-muted);">None</span>'}</div>
                         <span style="color: var(--text-muted);">Path:</span>
