@@ -62,6 +62,11 @@ async function loadPlugins() {
 
     if (data.plugins) {
       allPlugins = data.plugins;
+      const currentAgent = data.current_agent || 'Default';
+      const agentDisplay = document.getElementById('currentAgentNameDisplay');
+      if (agentDisplay) {
+        agentDisplay.textContent = currentAgent;
+      }
       filteredPlugins = sortPlugins([...allPlugins]);
       updatePagination();
       renderPluginsTable();
@@ -120,22 +125,28 @@ async function testPlugin(pluginName) {
 }
 
 async function showPluginTools(pluginName) {
+  console.log('showPluginTools called for', pluginName);
   try {
     const response = await fetch(`/api/plugins/${pluginName}`);
     const plugin = await response.json();
+    console.log('Fetched plugin for tools modal:', plugin);
 
-    if (!plugin.enabled) {
-         showToast('Plugin must be enabled to view tools', 'warning');
+    if (!plugin.installed) {
+         console.log('Returning early: plugin not installed');
+         showToast('Plugin must be installed to view tools', 'warning');
          return;
     }
     
     if (!plugin.definition) {
+        console.log('Returning early: no definition');
         showToast('No tool definition available for this plugin', 'warning');
         return;
     }
 
     const modal = createToolsModal(plugin);
+    console.log('Modal created, appending to body...');
     document.body.appendChild(modal);
+    console.log('Modal appended, body length:', document.body.children.length);
     showModal(modal);
   } catch (error) {
     console.error('Failed to load plugin tools:', error);
@@ -306,6 +317,7 @@ function changePageSize(size) {
 
 // Rendering functions
 function renderPluginsTable() {
+  console.log('Rendering plugins table with', paginatedPlugins.length, 'plugins');
   const tbody = document.getElementById('pluginsTableBody');
   const emptyState = document.getElementById('emptyState');
   const tableContainer = document.querySelector('.plugins-table-container');
@@ -326,7 +338,9 @@ function renderPluginsTable() {
     paginationContainer.style.display = filteredPlugins.length > 10 ? 'flex' : 'none';
   }
 
-  tbody.innerHTML = paginatedPlugins.map(plugin => `
+  tbody.innerHTML = paginatedPlugins.map(plugin => {
+    console.log(`Plugin ${plugin.name}: installed=${plugin.installed}, enabled=${plugin.enabled}`);
+    return `
         <tr data-plugin="${plugin.name}">
             <td>
                 <input type="checkbox" class="plugin-checkbox" data-plugin="${plugin.name}" ${selectedPlugins.has(plugin.name) ? 'checked' : ''} aria-label="Select ${plugin.name}">
@@ -345,19 +359,26 @@ function renderPluginsTable() {
                 </div>
             </td>
             <td>${escapeHtml(plugin.version || 'N/A')}</td>
+            <td>
+                <div class="agent-list">
+                    ${plugin.agents && plugin.agents.length > 0 ? 
+                        plugin.agents.map(a => `<span class="agent-tag">${escapeHtml(a)}</span>`).join('') : 
+                        '<span style="color: var(--text-muted); font-size: 0.8rem;">None</span>'}
+                </div>
+            </td>
             <td>${renderStatusBadge(plugin)}</td>
             <td><span class="category-badge">${escapeHtml(plugin.category || 'Uncategorized')}</span></td>
             <td>
                 <div class="action-buttons">
                     <button class="btn-action" onclick="showPluginDetails('${escapeHtml(plugin.name)}')">Details</button>
+                    <button class="btn-action" onclick="showPluginTools('${escapeHtml(plugin.name)}')" ${!!plugin.installed ? '' : 'disabled style="opacity: 0.5; cursor: not-allowed;" title="Install plugin to view tools"'}>Tools</button>
                     ${plugin.supports_initialization ? `<button class="btn-action" onclick="showPluginConfigModal('${escapeHtml(plugin.name)}')">Configure</button>` : ''}
-                    <button class="btn-action" onclick="showPluginTools('${escapeHtml(plugin.name)}')" ${plugin.enabled ? '' : 'disabled style="opacity: 0.5; cursor: not-allowed;" title="Enable plugin to view tools"'}>Tools</button>
-                    <button class="btn-action" onclick="testPlugin('${escapeHtml(plugin.name)}')">Test</button>
                     <button class="btn-action btn-danger" onclick="deletePlugin('${escapeHtml(plugin.name)}')">Remove</button>
                 </div>
             </td>
         </tr>
-    `).join('');
+    `;
+  }).join('');
 
   // Add checkbox event listeners
   document.querySelectorAll('.plugin-checkbox').forEach(checkbox => {
@@ -396,12 +417,18 @@ function renderMobileCards() {
                 <span class="category-badge">${escapeHtml(plugin.category || 'Uncategorized')}</span>
                 <span style="font-size: 0.8rem; color: var(--text-muted);">v${escapeHtml(plugin.version || 'N/A')}</span>
             </div>
+            <div class="mb-2">
+                <div class="agent-list">
+                    ${plugin.agents && plugin.agents.length > 0 ? 
+                        plugin.agents.map(a => `<span class="agent-tag">${escapeHtml(a)}</span>`).join('') : 
+                        '<span style="color: var(--text-muted); font-size: 0.8rem;">No agents using this plugin</span>'}
+                </div>
+            </div>
             ${renderTagBadges(plugin.tags)}
             <div class="plugin-card-actions">
                 <button class="btn-action" onclick="showPluginDetails('${escapeHtml(plugin.name)}')">Details</button>
+                <button class="btn-action" onclick="showPluginTools('${escapeHtml(plugin.name)}')" ${!!plugin.installed ? '' : 'disabled style="opacity: 0.5; cursor: not-allowed;" title="Install plugin to view tools"'}>Tools</button>
                 ${plugin.supports_initialization ? `<button class="btn-action" onclick="showPluginConfigModal('${escapeHtml(plugin.name)}')">Configure</button>` : ''}
-                <button class="btn-action" onclick="showPluginTools('${escapeHtml(plugin.name)}')" ${plugin.enabled ? '' : 'disabled style="opacity: 0.5; cursor: not-allowed;" title="Enable plugin to view tools"'}>Tools</button>
-                <button class="btn-action" onclick="testPlugin('${escapeHtml(plugin.name)}')">Test</button>
                 <button class="btn-action btn-danger" onclick="deletePlugin('${escapeHtml(plugin.name)}')">Remove</button>
             </div>
         </div>
@@ -428,7 +455,7 @@ function renderTagBadges(tags) {
 }
 
 function renderStatusBadge(plugin) {
-  // Show status badge based on plugin health
+  // Show status badge based on plugin health and installation
   if (plugin.health_status === 'error') {
     return `
             <span class="status-badge status-error">
@@ -436,29 +463,21 @@ function renderStatusBadge(plugin) {
                 Error
             </span>
         `;
-  } else if (plugin.needs_update) {
-    return `
-            <span class="status-badge status-update">
-                <span class="status-dot"></span>
-                Needs Update
-            </span>
-        `;
   }
 
-  if (!plugin.enabled) {
+  if (plugin.installed) {
     return `
-            <span class="status-badge status-inactive">
-                <span class="status-dot"></span>
-                Inactive
-            </span>
-        `;
-  }
-
-  // Show "Healthy" for plugins with no issues
-  return `
         <span class="status-badge status-active">
             <span class="status-dot"></span>
-            Healthy
+            Installed
+        </span>
+    `;
+  }
+
+  return `
+        <span class="status-badge status-inactive">
+            <span class="status-dot"></span>
+            Available
         </span>
     `;
 }
@@ -487,80 +506,146 @@ function renderNotifications() {
 
 // Modal creation functions
 function createToolsModal(plugin) {
+  console.log('createToolsModal starting for', plugin.name);
   const definition = plugin.definition;
+  const operations = plugin.operations;
   const modal = document.createElement('div');
   modal.className = 'modal-overlay';
   
   let toolsHtml = '';
   
-  if (definition.operations) {
+  // 1. Check for modern explicit operations list (OperationInfo format)
+  if (Array.isArray(operations) && operations.length > 0) {
       toolsHtml += `
-        <div style="margin-bottom: 1.5rem;">
-            <h3 style="font-size: 1rem; margin-bottom: 0.5rem; color: var(--text-secondary);">Operations</h3>
-            <div class="table-container">
-                <table style="width: 100%; border-collapse: collapse;">
-                    <thead>
-                        <tr>
-                            <th style="text-align: left; padding: 0.5rem; border-bottom: 1px solid var(--border-color);">Name</th>
-                            <th style="text-align: left; padding: 0.5rem; border-bottom: 1px solid var(--border-color);">Description</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        ${Object.entries(definition.operations).map(([name, op]) => `
-                            <tr>
-                                <td style="padding: 0.5rem; border-bottom: 1px solid var(--border-color); font-family: monospace;">${escapeHtml(name)}</td>
-                                <td style="padding: 0.5rem; border-bottom: 1px solid var(--border-color);">${escapeHtml(op.description || '')}</td>
-                            </tr>
-                        `).join('')}
-                    </tbody>
-                </table>
+        <div style="margin-bottom: 2rem;">
+            <h3 style="font-size: 1.1rem; margin-bottom: 1rem; color: var(--primary-color); display: flex; align-items: center; gap: 8px;">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M12,15.5A3.5,3.5 0 0,1 8.5,12A3.5,3.5 0 0,1 12,8.5A3.5,3.5 0 0,1 15.5,12A3.5,3.5 0 0,1 12,15.5M19.43,12.97C19.47,12.65 19.5,12.33 19.5,12C19.5,11.67 19.47,11.34 19.43,11L21.54,9.37C21.73,9.22 21.78,8.95 21.66,8.73L19.66,5.27C19.54,5.05 19.27,4.96 19.05,5.05L16.56,6.05C16.04,5.66 15.5,5.32 14.87,5.07L14.5,2.42C14.46,2.18 14.25,2 14,2H10C9.75,2 9.54,2.18 9.5,2.42L9.13,5.07C8.5,5.32 7.96,5.66 7.44,6.05L4.95,5.05C4.73,4.96 4.46,5.05 4.34,5.27L2.34,8.73C2.22,8.95 2.27,9.22 2.46,9.37L4.57,11C4.53,11.34 4.5,11.67 4.5,12C4.5,12.33 4.53,12.65 4.57,12.97L2.46,14.63C2.27,14.78 2.22,15.05 2.34,15.27L4.34,18.73C4.46,18.95 4.73,19.03 4.95,18.95L7.44,17.94C7.96,18.34 8.5,18.68 9.13,18.93L9.5,21.58C9.54,21.82 9.75,22 10,22H14C14.25,22 14.46,21.82 14.5,21.58L14.87,18.93C15.5,18.68 16.04,18.34 16.56,17.94L19.05,18.95C19.27,19.03 19.54,18.95 19.66,18.73L21.66,15.27C21.78,15.05 21.73,14.78 21.54,14.63L19.43,12.97Z"/></svg>
+                Available Operations
+            </h3>
+            <div style="display: flex; flex-direction: column; gap: 12px;">
+                ${operations.map(op => {
+                    const opName = op.name || op.Name || 'Unknown';
+                    const opDesc = op.description || op.Description || 'Operation: ' + opName;
+                    const params = op.parameters || op.Parameters || [];
+                    const requiredParams = op.required_parameters || op.RequiredParameters || [];
+                    return `
+                    <div style="background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: var(--radius-md); padding: 1rem;">
+                        <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 0.5rem;">
+                            <code style="font-weight: 600; color: var(--primary-color); font-size: 1rem;">${escapeHtml(opName)}</code>
+                        </div>
+                        <p style="color: var(--text-primary); margin-bottom: 0.75rem; font-size: 0.9rem;">${escapeHtml(opDesc)}</p>
+                        
+                        ${params.length > 0 ? `
+                            <div style="margin-top: 1rem;">
+                                <span style="font-size: 0.75rem; font-weight: 600; text-transform: uppercase; color: var(--text-muted); letter-spacing: 0.05em;">Parameters</span>
+                                <div style="display: grid; grid-template-columns: 1fr; gap: 8px; margin-top: 0.5rem;">
+                                    ${params.map(paramName => {
+                                        const isRequired = requiredParams.includes(paramName);
+                                        // Look up parameter details in the main properties map
+                                        const props = definition.parameters?.properties || {};
+                                        const detail = props[paramName] || {};
+                                        return `
+                                        <div style="display: flex; align-items: baseline; gap: 12px; font-size: 0.85rem; padding: 4px 8px; background: var(--bg-primary); border-radius: 4px; border-left: 3px solid ${isRequired ? 'var(--danger-color)' : 'var(--border-color)'};">
+                                            <code style="color: var(--text-primary); font-weight: 600;">${escapeHtml(paramName)}</code>
+                                            <span style="color: var(--text-muted); font-style: italic;">(${escapeHtml(detail.type || 'string')})</span>
+                                            <span style="color: var(--text-secondary); flex: 1;">${escapeHtml(detail.description || '')}</span>
+                                            ${isRequired ? '<span class="badge bg-danger-subtle text-danger" style="font-size: 0.65rem;">Required</span>' : ''}
+                                        </div>
+                                        `;
+                                    }).join('')}
+                                </div>
+                            </div>
+                        ` : ''}
+                    </div>
+                    `;
+                }).join('')}
             </div>
         </div>
       `;
   }
-  
-  if (definition.parameters && definition.parameters.length > 0) {
-       toolsHtml += `
-        <div style="margin-bottom: 1.5rem;">
-            <h3 style="font-size: 1rem; margin-bottom: 0.5rem; color: var(--text-secondary);">Parameters</h3>
-             <div class="table-container">
-                <table style="width: 100%; border-collapse: collapse;">
-                    <thead>
-                        <tr>
-                            <th style="text-align: left; padding: 0.5rem; border-bottom: 1px solid var(--border-color);">Name</th>
-                            <th style="text-align: left; padding: 0.5rem; border-bottom: 1px solid var(--border-color);">Type</th>
-                            <th style="text-align: left; padding: 0.5rem; border-bottom: 1px solid var(--border-color);">Description</th>
-                            <th style="text-align: left; padding: 0.5rem; border-bottom: 1px solid var(--border-color);">Required</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        ${definition.parameters.map(param => `
-                            <tr>
-                                <td style="padding: 0.5rem; border-bottom: 1px solid var(--border-color); font-family: monospace;">${escapeHtml(param.name)}</td>
-                                <td style="padding: 0.5rem; border-bottom: 1px solid var(--border-color); font-family: monospace;">${escapeHtml(param.type)}</td>
-                                <td style="padding: 0.5rem; border-bottom: 1px solid var(--border-color);">${escapeHtml(param.description || '')}</td>
-                                <td style="padding: 0.5rem; border-bottom: 1px solid var(--border-color); text-align: center;">
-                                    ${param.required ? '<span style="color: var(--danger-color);">●</span>' : '<span style="color: var(--text-muted);">○</span>'}
-                                </td>
-                            </tr>
-                        `).join('')}
-                    </tbody>
-                </table>
+  // 2. Check for operations map in definition (internal format)
+  else if (definition.operations && Object.keys(definition.operations).length > 0) {
+      toolsHtml += `
+        <div style="margin-bottom: 2rem;">
+            <h3 style="font-size: 1.1rem; margin-bottom: 1rem; color: var(--primary-color); display: flex; align-items: center; gap: 8px;">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M12,15.5A3.5,3.5 0 0,1 8.5,12A3.5,3.5 0 0,1 12,8.5A3.5,3.5 0 0,1 15.5,12A3.5,3.5 0 0,1 12,15.5M19.43,12.97C19.47,12.65 19.5,12.33 19.5,12C19.5,11.67 19.47,11.34 19.43,11L21.54,9.37C21.73,9.22 21.78,8.95 21.66,8.73L19.66,5.27C19.54,5.05 19.27,4.96 19.05,5.05L16.56,6.05C16.04,5.66 15.5,5.32 14.87,5.07L14.5,2.42C14.46,2.18 14.25,2 14,2H10C9.75,2 9.54,2.18 9.5,2.42L9.13,5.07C8.5,5.32 7.96,5.66 7.44,6.05L4.95,5.05C4.73,4.96 4.46,5.05 4.34,5.27L2.34,8.73C2.22,8.95 2.27,9.22 2.46,9.37L4.57,11C4.53,11.34 4.5,11.67 4.5,12C4.5,12.33 4.53,12.65 4.57,12.97L2.46,14.63C2.27,14.78 2.22,15.05 2.34,15.27L4.34,18.73C4.46,18.95 4.73,19.03 4.95,18.95L7.44,17.94C7.96,18.34 8.5,18.68 9.13,18.93L9.5,21.58C9.54,21.82 9.75,22 10,22H14C14.25,22 14.46,21.82 14.5,21.58L14.87,18.93C15.5,18.68 16.04,18.34 16.56,17.94L19.05,18.95C19.27,19.03 19.54,18.95 19.66,18.73L21.66,15.27C21.78,15.05 21.73,14.78 21.54,14.63L19.43,12.97Z"/></svg>
+                Available Operations
+            </h3>
+            <div style="display: flex; flex-direction: column; gap: 12px;">
+                ${Object.entries(definition.operations).map(([name, op]) => `
+                    <div style="background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: var(--radius-md); padding: 1rem;">
+                        <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 0.5rem;">
+                            <code style="font-weight: 600; color: var(--primary-color); font-size: 1rem;">${escapeHtml(name)}</code>
+                        </div>
+                        <p style="color: var(--text-primary); margin-bottom: 0.75rem; font-size: 0.9rem;">${escapeHtml(op.description || 'No description available')}</p>
+                        
+                        ${op.parameters && op.parameters.length > 0 ? `
+                            <div style="margin-top: 1rem;">
+                                <span style="font-size: 0.75rem; font-weight: 600; text-transform: uppercase; color: var(--text-muted); letter-spacing: 0.05em;">Parameters</span>
+                                <div style="display: grid; grid-template-columns: 1fr; gap: 8px; margin-top: 0.5rem;">
+                                    ${op.parameters.map(param => `
+                                        <div style="display: flex; align-items: baseline; gap: 12px; font-size: 0.85rem; padding: 4px 8px; background: var(--bg-primary); border-radius: 4px; border-left: 3px solid ${param.required ? 'var(--danger-color)' : 'var(--border-color)'};">
+                                            <code style="color: var(--text-primary); font-weight: 600;">${escapeHtml(param.name)}</code>
+                                            <span style="color: var(--text-muted); font-style: italic;">(${escapeHtml(param.type)})</span>
+                                            <span style="color: var(--text-secondary); flex: 1;">${escapeHtml(param.description || '')}</span>
+                                            ${param.required ? '<span class="badge bg-danger-subtle text-danger" style="font-size: 0.65rem;">Required</span>' : ''}
+                                        </div>
+                                    `).join('')}
+                                </div>
+                            </div>
+                        ` : ''}
+                    </div>
+                `).join('')}
             </div>
         </div>
-       `;
+      `;
+  }
+  // 3. Check for legacy format (definition.parameters list)
+  else if (definition.parameters && definition.parameters.length > 0) {
+      toolsHtml += `
+        <div style="margin-bottom: 2rem;">
+            <h3 style="font-size: 1.1rem; margin-bottom: 1rem; color: var(--primary-color); display: flex; align-items: center; gap: 8px;">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M12,15.5A3.5,3.5 0 0,1 8.5,12A3.5,3.5 0 0,1 12,8.5A3.5,3.5 0 0,1 15.5,12A3.5,3.5 0 0,1 12,15.5M19.43,12.97C19.47,12.65 19.5,12.33 19.5,12C19.5,11.67 19.47,11.34 19.43,11L21.54,9.37C21.73,9.22 21.78,8.95 21.66,8.73L19.66,5.27C19.54,5.05 19.27,4.96 19.05,5.05L16.56,6.05C16.04,5.66 15.5,5.32 14.87,5.07L14.5,2.42C14.46,2.18 14.25,2 14,2H10C9.75,2 9.54,2.18 9.5,2.42L9.13,5.07C8.5,5.32 7.96,5.66 7.44,6.05L4.95,5.05C4.73,4.96 4.46,5.05 4.34,5.27L2.34,8.73C2.22,8.95 2.27,9.22 2.46,9.37L4.57,11C4.53,11.34 4.5,11.67 4.5,12C4.5,12.33 4.53,12.65 4.57,12.97L2.46,14.63C2.27,14.78 2.22,15.05 2.34,15.27L4.34,18.73C4.46,18.95 4.73,19.03 4.95,18.95L7.44,17.94C7.96,18.34 8.5,18.68 9.13,18.93L9.5,21.58C9.54,21.82 9.75,22 10,22H14C14.25,22 14.46,21.82 14.5,21.58L14.87,18.93C15.5,18.68 16.04,18.34 16.56,17.94L19.05,18.95C19.27,19.03 19.54,18.95 19.66,18.73L21.66,15.27C21.78,15.05 21.73,14.78 21.54,14.63L19.43,12.97Z"/></svg>
+                Unified Tool Parameters
+            </h3>
+            <div style="background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: var(--radius-md); padding: 1rem;">
+                <p style="color: var(--text-primary); margin-bottom: 1rem; font-size: 0.9rem;">This tool uses a unified parameter set for all operations.</p>
+                <div style="display: grid; grid-template-columns: 1fr; gap: 8px;">
+                    ${definition.parameters.map(param => `
+                        <div style="display: flex; align-items: baseline; gap: 12px; font-size: 0.85rem; padding: 4px 8px; background: var(--bg-primary); border-radius: 4px; border-left: 3px solid ${param.required ? 'var(--danger-color)' : 'var(--border-color)'};">
+                            <code style="color: var(--text-primary); font-weight: 600;">${escapeHtml(param.name)}</code>
+                            <span style="color: var(--text-muted); font-style: italic;">(${escapeHtml(param.type)})</span>
+                            <span style="color: var(--text-secondary); flex: 1;">${escapeHtml(param.description || '')}</span>
+                            ${param.required ? '<span class="badge bg-danger-subtle text-danger" style="font-size: 0.65rem;">Required</span>' : ''}
+                        </div>
+                    `).join('')}
+                </div>
+            </div>
+        </div>
+      `;
+  }
+  else {
+      // Fallback for simple tools without explicit operations
+      toolsHtml += `
+        <div style="padding: 2rem; text-align: center; background: var(--bg-secondary); border-radius: var(--radius-lg); border: 1px dashed var(--border-color);">
+            <p style="color: var(--text-muted); margin: 0;">This plugin provides a single unified tool capability.</p>
+        </div>
+      `;
   }
 
   modal.innerHTML = `
-      <div class="modal-content" style="max-width: 800px;">
-          <div class="modal-header">
-              <h2 class="modal-title">Tools: ${escapeHtml(getDisplayName(plugin))}</h2>
+      <div class="modal-content" style="max-width: 850px; width: 95%;">
+          <div class="modal-header" style="background: var(--bg-secondary);">
+              <div style="display: flex; flex-direction: column;">
+                <h2 class="modal-title">Tools: ${escapeHtml(getDisplayName(plugin))}</h2>
+                <span style="font-size: 0.85rem; color: var(--text-muted);">Inspect available operations and their parameters</span>
+              </div>
               <button class="modal-close" onclick="closeModal(this)">&times;</button>
           </div>
-          <div class="modal-body">
-            <div style="margin-bottom: 1.5rem;">
-                <h3 style="font-size: 1rem; margin-bottom: 0.5rem; color: var(--text-secondary);">Definition</h3>
-                <p style="color: var(--text-primary);">${escapeHtml(definition.description || 'No description')}</p>
+          <div class="modal-body" style="padding: 2rem;">
+            <div style="margin-bottom: 2rem; padding-bottom: 1.5rem; border-bottom: 1px solid var(--border-color);">
+                <h3 style="font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-muted); margin-bottom: 0.5rem;">Plugin Description</h3>
+                <p style="color: var(--text-primary); font-size: 1rem; line-height: 1.5;">${escapeHtml(definition.description || plugin.description || 'No description available')}</p>
             </div>
             ${toolsHtml}
           </div>
@@ -575,6 +660,14 @@ function createToolsModal(plugin) {
 function createDetailsModal(plugin) {
   const modal = document.createElement('div');
   modal.className = 'modal-overlay';
+  
+  // Extract repository URL from metadata or github_repo field
+  let repoUrl = plugin.metadata?.repository || plugin.github_repo || '';
+  if (repoUrl && !repoUrl.startsWith('http') && repoUrl.includes('/')) {
+      // Convert user/repo to full github URL
+      repoUrl = `https://github.com/${repoUrl}`;
+  }
+
       modal.innerHTML = `
           <div class="modal-content">
               <div class="modal-header">
@@ -597,6 +690,17 @@ function createDetailsModal(plugin) {
                         <span style="color: var(--text-primary);">${plugin.category || 'Uncategorized'}</span>
                         <span style="color: var(--text-muted);">Status:</span>
                         <span>${renderStatusBadge(plugin)}</span>
+                        ${repoUrl ? `
+                            <span style="color: var(--text-muted);">Repository:</span>
+                            <a href="${escapeAttr(repoUrl)}" target="_blank" style="color: var(--primary-color); text-decoration: none; word-break: break-all;">
+                                ${escapeHtml(repoUrl)}
+                                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-left: 4px; vertical-align: middle;">
+                                    <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path>
+                                    <polyline points="15 3 21 3 21 8"></polyline>
+                                    <line x1="10" y1="14" x2="21" y2="3"></line>
+                                </svg>
+                            </a>
+                        ` : ''}
                         <span style="color: var(--text-muted);">Tags:</span>
                         <div>${renderTagBadges(plugin.tags) || '<span style="color: var(--text-muted);">None</span>'}</div>
                         <span style="color: var(--text-muted);">Path:</span>
@@ -896,7 +1000,11 @@ function startNotificationPolling() {
 }
 
 function showModal(modal) {
-  setTimeout(() => modal.classList.add('active'), 10);
+  console.log('showModal called for', modal);
+  setTimeout(() => {
+    modal.classList.add('active');
+    console.log('modal "active" class added, visibility should change now');
+  }, 10);
 
   const handleEsc = (e) => {
     if (e.key === 'Escape') {
