@@ -9,13 +9,12 @@ function wt {
   case "$1" in
   new)
     local name="$2"
-    local base="${3:-$BASE_BRANCH}"
     if [[ -z "$name" ]]; then
-      echo "Usage: wt new <name> [base-branch]"
+      echo "Usage: wt new <name>"
       return 1
     fi
-    git worktree add -b "feature/$name" "$WORKTREE_DIR$name" "$base"
-    echo "Created worktree: $WORKTREE_DIR$name (branch: feature/$name)"
+    git worktree add -b "feature/$name" "$WORKTREE_DIR$name" "$BASE_BRANCH"
+    echo "Created worktree: $WORKTREE_DIR$name (branch: feature/$name, based on $BASE_BRANCH)"
     ;;
   rm)
     local name="$2"
@@ -32,9 +31,9 @@ function wt {
     ;;
   *)
     echo "Usage: wt <new|rm|ls> [args]"
-    echo "  wt new <name> [base]  - Create worktree"
-    echo "  wt rm <name>          - Remove worktree and branch"
-    echo "  wt ls                 - List worktrees"
+    echo "  wt new <name>  - Create worktree (always based on dev)"
+    echo "  wt rm <name>   - Remove worktree and branch"
+    echo "  wt ls          - List worktrees"
     ;;
   esac
 }
