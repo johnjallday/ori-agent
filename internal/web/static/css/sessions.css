@@ -2197,6 +2197,35 @@ body:has(.chat-info-bar) #currentAgentDisplay {
   padding: 0 4px;
 }
 
+/* Note save status indicator */
+#noteSaveStatus {
+  display: inline-flex;
+  align-items: center;
+}
+
+#noteSaveStatus > span {
+  display: none;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+}
+
+.note-status-saved {
+  color: var(--success-color, #10b981);
+}
+
+.note-status-saving {
+  color: var(--text-secondary);
+}
+
+.note-status-unsaved {
+  color: var(--warning-color, #f59e0b);
+}
+
+.note-status-error {
+  color: var(--danger-color, #ef4444);
+}
+
 /* ============================================
    Motion Sensitivity - Reduced Motion Support
    ============================================ */

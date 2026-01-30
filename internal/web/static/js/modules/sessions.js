@@ -3921,6 +3921,11 @@ const sessionManager = {
   noteModalWorkspaceId: null,
   isNotePreviewMode: false,
 
+  // Auto-save state
+  noteAutoSaveTimeout: null,
+  noteIsDirty: false,
+  noteAutoSaveDelay: 3000, // 3 seconds
+
   // Load notes for a folder
   async loadFolderNotes(folderId) {
     try {
@@ -4244,6 +4249,15 @@ const sessionManager = {
     // Note editor save button
     document.getElementById('saveNoteBtn')?.addEventListener('click', () => this.saveCurrentNote());
 
+    // Auto-save: listen for input changes on note title and content
+    document.getElementById('noteNameInput')?.addEventListener('input', () => this.scheduleNoteAutoSave());
+    document.getElementById('noteContentInput')?.addEventListener('input', () => this.scheduleNoteAutoSave());
+
+    // Auto-save on modal close (if there are unsaved changes)
+    document.getElementById('noteEditorModal')?.addEventListener('hidden.bs.modal', () => {
+      this.handleNoteModalClose();
+    });
+
     // Note workspace selector
     document.getElementById('noteWorkspaceChange')?.addEventListener('click', (e) => {
       e.preventDefault();
@@ -4427,6 +4441,9 @@ const sessionManager = {
 
   // Open note editor modal for a new note
   openNoteCreateModal(workspaceId = null) {
+    // Reset auto-save state when opening a new note
+    this.resetNoteAutoSaveState();
+
     this.currentNote = null;
     this.noteModalWorkspaceId = workspaceId;
     this.isNotePreviewMode = false;
@@ -4543,6 +4560,8 @@ const sessionManager = {
 
   // Internal: Open note editor with a full note object
   _openNoteEditorWithNote(note) {
+    // Reset auto-save state when opening a note
+    this.resetNoteAutoSaveState();
 
     this.currentNote = note;
     this.noteModalWorkspaceId = note.workspace_id || note.folder_id || null;
@@ -4589,26 +4608,40 @@ const sessionManager = {
 
   // Save current note
   async saveCurrentNote() {
+    // Clear any pending auto-save
+    if (this.noteAutoSaveTimeout) {
+      clearTimeout(this.noteAutoSaveTimeout);
+      this.noteAutoSaveTimeout = null;
+    }
+
     const nameInput = document.getElementById('noteNameInput');
     const contentInput = document.getElementById('noteContentInput');
     const noteName = nameInput?.value?.trim() || 'Untitled Note';
     const noteContent = contentInput?.value || '';
+
+    // Show saving status
+    this.updateNoteSaveStatus('saving');
 
     if (!this.currentNote) {
       const workspaceId = this.noteModalWorkspaceId;
       if (!workspaceId) {
         this.showToast('Please select a workspace first', 'warning');
         this.showNoteWorkspaceSelector();
+        this.updateNoteSaveStatus('unsaved');
         return;
       }
 
       const created = await this.createNote(workspaceId, noteName, noteContent);
       if (created) {
         this.currentNote = created;
+        this.noteIsDirty = false;
+        this.updateNoteSaveStatus('saved');
         this.showToast('Note created', 'success');
 
         const modal = bootstrap.Modal.getInstance(document.getElementById('noteEditorModal'));
         modal?.hide();
+      } else {
+        this.updateNoteSaveStatus('error');
       }
       return;
     }
@@ -4621,6 +4654,8 @@ const sessionManager = {
     const updated = await this.updateNote(this.currentNote.id, updates);
     if (updated) {
       this.currentNote = { ...this.currentNote, ...updated };
+      this.noteIsDirty = false;
+      this.updateNoteSaveStatus('saved');
       this.showToast('Note saved', 'success');
 
       // Refresh folder tree to show updated note name
@@ -4629,7 +4664,127 @@ const sessionManager = {
       // Close the modal
       const modal = bootstrap.Modal.getInstance(document.getElementById('noteEditorModal'));
       modal?.hide();
+    } else {
+      this.updateNoteSaveStatus('error');
     }
+  },
+
+  // =============================================================================
+  // Note Auto-Save
+  // =============================================================================
+
+  // Schedule auto-save with debounce
+  scheduleNoteAutoSave() {
+    // Clear any existing timeout
+    if (this.noteAutoSaveTimeout) {
+      clearTimeout(this.noteAutoSaveTimeout);
+    }
+
+    // Mark as dirty and show unsaved status
+    this.noteIsDirty = true;
+    this.updateNoteSaveStatus('unsaved');
+
+    // Schedule auto-save after delay
+    this.noteAutoSaveTimeout = setTimeout(() => {
+      this.autoSaveNote();
+    }, this.noteAutoSaveDelay);
+  },
+
+  // Perform auto-save
+  async autoSaveNote() {
+    if (!this.noteIsDirty) return;
+
+    const nameInput = document.getElementById('noteNameInput');
+    const contentInput = document.getElementById('noteContentInput');
+    const noteName = nameInput?.value?.trim() || 'Untitled Note';
+    const noteContent = contentInput?.value || '';
+
+    // Show saving status
+    this.updateNoteSaveStatus('saving');
+
+    try {
+      if (this.currentNote?.id) {
+        // Update existing note
+        const updates = { name: noteName, content: noteContent };
+        const updated = await this.updateNote(this.currentNote.id, updates);
+        if (updated) {
+          this.currentNote = { ...this.currentNote, ...updated };
+          this.noteIsDirty = false;
+          this.updateNoteSaveStatus('saved');
+          // Refresh folder tree to show updated note name
+          this.renderFolderTree();
+        } else {
+          this.updateNoteSaveStatus('error');
+        }
+      } else {
+        // Create new note (auto-create on first auto-save)
+        const workspaceId = this.noteModalWorkspaceId;
+        if (!workspaceId) {
+          // Can't auto-create without workspace - show unsaved status
+          this.updateNoteSaveStatus('unsaved');
+          return;
+        }
+        const created = await this.createNote(workspaceId, noteName, noteContent);
+        if (created) {
+          this.currentNote = created;
+          this.noteIsDirty = false;
+          this.updateNoteSaveStatus('saved');
+          // Update save button text since we now have a note
+          const saveBtn = document.getElementById('saveNoteBtn');
+          if (saveBtn) saveBtn.textContent = 'Save';
+        } else {
+          this.updateNoteSaveStatus('error');
+        }
+      }
+    } catch (error) {
+      console.error('Auto-save failed:', error);
+      this.updateNoteSaveStatus('error');
+    }
+  },
+
+  // Update save status indicator
+  updateNoteSaveStatus(status) {
+    const statusContainer = document.getElementById('noteSaveStatus');
+    if (!statusContainer) return;
+
+    // Hide all status elements
+    statusContainer.querySelectorAll('span[class^="note-status-"]').forEach(el => {
+      el.style.display = 'none';
+    });
+
+    // Show the appropriate status
+    const statusEl = statusContainer.querySelector(`.note-status-${status}`);
+    if (statusEl) {
+      statusEl.style.display = 'inline-flex';
+    }
+  },
+
+  // Handle modal close - save any unsaved changes
+  handleNoteModalClose() {
+    // Clear any pending auto-save timeout
+    if (this.noteAutoSaveTimeout) {
+      clearTimeout(this.noteAutoSaveTimeout);
+      this.noteAutoSaveTimeout = null;
+    }
+
+    // If there are unsaved changes, save immediately (don't wait)
+    if (this.noteIsDirty) {
+      this.autoSaveNote();
+    }
+
+    // Reset dirty state
+    this.noteIsDirty = false;
+    this.updateNoteSaveStatus('saved');
+  },
+
+  // Reset auto-save state (called when opening a note)
+  resetNoteAutoSaveState() {
+    if (this.noteAutoSaveTimeout) {
+      clearTimeout(this.noteAutoSaveTimeout);
+      this.noteAutoSaveTimeout = null;
+    }
+    this.noteIsDirty = false;
+    this.updateNoteSaveStatus('saved');
   },
 
   // =============================================================================
