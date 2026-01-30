@@ -240,8 +240,7 @@ function sortPlugins(plugins) {
 function getPluginStatusPriority(plugin) {
   if (plugin.health_status === 'error') return 0;
   if (plugin.needs_update) return 1;
-  if (!plugin.is_configured) return 2;
-  return 3;
+  return 2;
 }
 
 // Pagination functions
@@ -372,7 +371,6 @@ function renderPluginsTable() {
                 <div class="action-buttons">
                     <button class="btn-action" onclick="showPluginDetails('${escapeHtml(plugin.name)}')">Details</button>
                     <button class="btn-action" onclick="showPluginTools('${escapeHtml(plugin.name)}')" ${!!plugin.installed ? '' : 'disabled style="opacity: 0.5; cursor: not-allowed;" title="Install plugin to view tools"'}>Tools</button>
-                    ${plugin.supports_initialization ? `<button class="btn-action" onclick="showPluginConfigModal('${escapeHtml(plugin.name)}')">Configure</button>` : ''}
                     <button class="btn-action btn-danger" onclick="deletePlugin('${escapeHtml(plugin.name)}')">Remove</button>
                 </div>
             </td>
@@ -428,7 +426,6 @@ function renderMobileCards() {
             <div class="plugin-card-actions">
                 <button class="btn-action" onclick="showPluginDetails('${escapeHtml(plugin.name)}')">Details</button>
                 <button class="btn-action" onclick="showPluginTools('${escapeHtml(plugin.name)}')" ${!!plugin.installed ? '' : 'disabled style="opacity: 0.5; cursor: not-allowed;" title="Install plugin to view tools"'}>Tools</button>
-                ${plugin.supports_initialization ? `<button class="btn-action" onclick="showPluginConfigModal('${escapeHtml(plugin.name)}')">Configure</button>` : ''}
                 <button class="btn-action btn-danger" onclick="deletePlugin('${escapeHtml(plugin.name)}')">Remove</button>
             </div>
         </div>
@@ -819,8 +816,6 @@ function applyFilters() {
 function getPluginStatus(plugin) {
   if (plugin.health_status === 'error') return 'error';
   if (plugin.needs_update) return 'update';
-  const isConfigured = plugin.is_configured === true || plugin.is_configured === 'true';
-  if (plugin.supports_initialization && !isConfigured) return 'not-configured';
   return 'healthy';
 }
 
