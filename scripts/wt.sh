@@ -1,11 +1,22 @@
-#!/bin/bash
+#!/bin/zsh
 # wt - worktree manager for parallel agent workflows
+#
+# Usage:
+#   source scripts/wt.sh   # Load the function (cd works directly)
+#   wt                     # Interactive mode - select worktree to navigate
+#   wt new <name>          # Create new worktree
+#   wt rm <name>           # Remove worktree
+#   wt ls                  # List worktrees
+#   wt cd <name>           # Navigate to worktree
 
-WORKTREE_DIR="../" # Parent directory for worktrees
-BASE_BRANCH="dev"  # Default base branch
+WORKTREE_DIR="../"
+BASE_BRANCH="dev"
 
 unalias wt 2>/dev/null
+
 function wt {
+  local script_dir="${0:A:h}"
+
   case "$1" in
   new)
     local name="$2"
@@ -29,16 +40,81 @@ function wt {
   ls)
     git worktree list
     ;;
+  cd)
+    local name="$2"
+    if [[ -z "$name" ]]; then
+      # No name provided, show interactive menu
+      wt go
+      return $?
+    fi
+    local target="${script_dir}/../../$name"
+    if [[ -d "$target" ]]; then
+      cd "$target"
+      echo "Changed to worktree: $target"
+    else
+      echo "Worktree not found: $target"
+      return 1
+    fi
+    ;;
+  ""|go)
+    # Interactive mode - show menu of worktrees
+    local -a worktrees
+    local -a paths
+    local i=1
+
+    while IFS= read -r line; do
+      # Parse: /path/to/worktree  abc1234 [branch-name]
+      local parts=("${(@s/ /)line}")
+      local wt_path="${parts[1]}"
+      local branch="${parts[3]}"
+      # Remove brackets from branch
+      branch="${branch#\[}"
+      branch="${branch%\]}"
+      # Get basename
+      local name="${wt_path:t}"
+      worktrees+=("$name ($branch)")
+      paths+=("$wt_path")
+    done < <(git worktree list)
+
+    if [[ ${#worktrees[@]} -eq 0 ]]; then
+      echo "No worktrees found"
+      return 1
+    fi
+
+    echo "Select worktree:"
+    for i in {1..${#worktrees[@]}}; do
+      echo "  $i) ${worktrees[$i]}"
+    done
+    echo "  q) Quit"
+    echo
+
+    read "choice?Choice: "
+
+    if [[ "$choice" == "q" || -z "$choice" ]]; then
+      return 0
+    fi
+
+    if [[ "$choice" =~ ^[0-9]+$ ]] && (( choice >= 1 && choice <= ${#paths[@]} )); then
+      local target="${paths[$choice]}"
+      cd "$target"
+      echo "Changed to: $target"
+    else
+      echo "Invalid choice"
+      return 1
+    fi
+    ;;
   *)
-    echo "Usage: wt <new|rm|ls> [args]"
-    echo "  wt new <name>  - Create worktree (always based on dev)"
-    echo "  wt rm <name>   - Remove worktree and branch"
-    echo "  wt ls          - List worktrees"
+    echo "Usage: wt [command] [args]"
+    echo "  wt              - Interactive mode (select worktree to navigate)"
+    echo "  wt new <name>   - Create worktree (always based on dev)"
+    echo "  wt rm <name>    - Remove worktree and branch"
+    echo "  wt ls           - List worktrees"
+    echo "  wt cd <name>    - Navigate to worktree"
     ;;
   esac
 }
 
-# If executed directly (not sourced), run the function with passed arguments
-if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
-  wt "$@"
+# If executed directly (not sourced), show help
+if [[ "$ZSH_EVAL_CONTEXT" == "toplevel" ]]; then
+  wt help
 fi
