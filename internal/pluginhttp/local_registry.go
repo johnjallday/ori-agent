@@ -5,6 +5,7 @@ import (
 	"os"
 
 	"github.com/johnjallday/ori-agent/internal/types"
+	"github.com/oriagent/ori-pluginapi"
 )
 
 // LocalRegistry manages the local plugin registry for uploaded plugins
@@ -16,7 +17,7 @@ func NewLocalRegistry() *LocalRegistry {
 }
 
 // AddToRegistry adds a plugin to the local registry
-func (lr *LocalRegistry) AddToRegistry(name, description, path, version string) error {
+func (lr *LocalRegistry) AddToRegistry(name, description, path, version string, supportsInit bool, requiredConfig []pluginapi.ConfigVariable) error {
 	// Read current local registry (user uploaded plugins)
 	registryPath := "local_plugin_registry.json"
 	var registry types.PluginRegistry
@@ -34,16 +35,22 @@ func (lr *LocalRegistry) AddToRegistry(name, description, path, version string) 
 			registry.Plugins[i].Path = path
 			registry.Plugins[i].Description = description
 			registry.Plugins[i].Version = version
+			registry.Plugins[i].SupportsInitialization = supportsInit
+			registry.Plugins[i].RequiredConfig = requiredConfig
+			registry.Plugins[i].InitSupportChecked = true
 			return lr.saveRegistry(registryPath, registry)
 		}
 	}
 
 	// Add new entry
 	newEntry := types.PluginRegistryEntry{
-		Name:        name,
-		Description: description,
-		Path:        path,
-		Version:     version,
+		Name:                   name,
+		Description:            description,
+		Path:                   path,
+		Version:                version,
+		SupportsInitialization: supportsInit,
+		RequiredConfig:         requiredConfig,
+		InitSupportChecked:     true,
 	}
 	registry.Plugins = append(registry.Plugins, newEntry)
 

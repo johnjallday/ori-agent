@@ -136,26 +136,10 @@ func (h *PluginsPageHandler) HandleListPlugins(w http.ResponseWriter, r *http.Re
 
 			}
 
-		} else if plugin.Path != "" {
-
-			// Temporarily load to check if it supports initialization
-
-			if tool, err := h.Loader.Load(plugin.Path); err == nil {
-
-				// Ensure plugin RPC client is cleaned up
-
-				defer pluginloader.CloseRPCPlugin(tool)
-
-				if initProvider, ok := tool.(pluginapi.InitializationProvider); ok {
-
-					requiredConfig = initProvider.GetRequiredConfig()
-
-					supportsInit = true
-
-				}
-
-			}
-
+		} else if plugin.InitSupportChecked {
+			// Use cached init support from registry to avoid spawning plugin process
+			supportsInit = plugin.SupportsInitialization
+			requiredConfig = plugin.RequiredConfig
 		}
 
 		// Check if settings file exists for this plugin
