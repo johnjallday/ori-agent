@@ -32,7 +32,7 @@ The modern approach uses **code generation** to eliminate boilerplate:
 1. Define parameters in `plugin.yaml`
 2. Run `go generate` to create type-safe structs and validation
 3. Implement business logic in an `Execute()` method
-4. Let `pluginapi.ServePlugin()` handle the rest
+4. Let `pluginapi.ServeGRPCPlugin()` handle the rest
 
 **Result**: 70-90% less code compared to manual implementation.
 
@@ -204,11 +204,11 @@ func handleDivide(m *myPluginTool, params *MyPluginParams) (string, error) {
 }
 
 func main() {
-	// Create tool instance - ServePlugin handles all initialization automatically
+	// Create tool instance - ServeGRPCPlugin handles all initialization automatically
 	tool := &myPluginTool{}
 
-	// Serve the plugin (handles RPC setup and initialization automatically)
-	pluginapi.ServePlugin(tool, configYAML)
+	// Serve the plugin (direct gRPC on ORI_PLUGIN_GRPC_PORT)
+	pluginapi.ServeGRPCPlugin(tool, configYAML)
 }
 ```
 

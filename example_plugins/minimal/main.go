@@ -77,5 +77,5 @@ Recent Activity:`, apiEndpoint, timeoutSeconds, debugMode, len(allSettings))
 }
 
 func main() {
-	pluginapi.ServePlugin(&MinimalPluginTool{}, configYAML)
+	pluginapi.ServeGRPCPlugin(&MinimalPluginTool{}, configYAML)
 }

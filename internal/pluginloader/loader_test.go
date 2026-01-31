@@ -81,10 +81,10 @@ func TestIsRPCPlugin(t *testing.T) {
 		t.Error("IsRPCPlugin() should return false for non-RPC plugins")
 	}
 
-	// RPCPluginClient is an RPC plugin
-	rpcClient := &RPCPluginClient{tool: regularTool}
-	if !IsRPCPlugin(rpcClient) {
-		t.Error("IsRPCPlugin() should return true for RPCPluginClient")
+	// DirectGRPCPluginClient is an RPC plugin
+	grpcClient := &DirectGRPCPluginClient{}
+	if !IsRPCPlugin(grpcClient) {
+		t.Error("IsRPCPlugin() should return true for DirectGRPCPluginClient")
 	}
 }
 

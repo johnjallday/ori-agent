@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-**Ori Agent** is a modular, plugin-driven framework for building tool-calling AI agents. The system provides secure plugin loading (via HashiCorp go-plugin), multi-agent orchestration, workspace collaboration, and HTTP interfaces for building autonomous AI systems.
+**Ori Agent** is a modular, plugin-driven framework for building tool-calling AI agents. The system provides secure plugin loading (via direct gRPC), multi-agent orchestration, workspace collaboration, and HTTP interfaces for building autonomous AI systems.
 
 **Key Design Philosophy**: Plugins run as separate RPC processes (not shared libraries), providing strong isolation and cross-platform compatibility.
 
@@ -100,7 +100,7 @@ make lint          # Requires golangci-lint
 ### Core Technology Stack
 
 - **Language**: Go 1.25+
-- **Plugin System**: HashiCorp go-plugin with gRPC/Protocol Buffers
+- **Plugin System**: Direct gRPC with Protocol Buffers
 - **LLM Providers**: OpenAI, Anthropic Claude, Ollama (via provider abstraction)
 - **Protocol Buffers**: `pluginapi/proto/tool.proto` defines plugin interface
 - **UI**: HTML/CSS/JavaScript (Bootstrap-based, embedded in `internal/web/`)
@@ -111,7 +111,7 @@ make lint          # Requires golangci-lint
 - Plugins are **separate executable processes**, not `.so` files
 - Communication via gRPC using Protocol Buffers (`pluginapi/proto/tool.proto`)
 - Plugin interface: `pluginapi.Tool` in `pluginapi/pluginapi.go`
-- Plugins run in isolated processes managed by HashiCorp go-plugin
+- Plugins run in isolated processes managed directly by ori-agent
 - Build plugins with: `go build -o plugin-name main.go` (NOT `-buildmode=plugin`)
 
 **2. Modular HTTP Handler Pattern**

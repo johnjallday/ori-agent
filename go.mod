@@ -9,8 +9,6 @@ require (
 	github.com/fsnotify/fsnotify v1.9.0
 	github.com/getlantern/systray v1.2.2
 	github.com/google/uuid v1.6.0
-	github.com/hashicorp/go-hclog v1.6.3
-	github.com/hashicorp/go-plugin v1.7.0
 	github.com/invopop/jsonschema v0.13.0
 	github.com/ledongthuc/pdf v0.0.0-20250511090121-5959a4027728
 	github.com/openai/openai-go/v3 v3.16.0

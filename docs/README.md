@@ -106,6 +106,6 @@ When adding documentation:
 ## External Resources
 
 - [Go Documentation](https://go.dev/doc/)
-- [HashiCorp go-plugin](https://github.com/hashicorp/go-plugin)
+- [gRPC Documentation](https://grpc.io/docs/)
 - [OpenAI API Reference](https://platform.openai.com/docs/api-reference)
 - [Anthropic Claude API](https://docs.anthropic.com/)
