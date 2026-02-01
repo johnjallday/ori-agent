@@ -17,6 +17,7 @@ require (
 	github.com/wailsapp/wails/v2 v2.11.0
 	golang.org/x/sys v0.40.0
 	golang.org/x/text v0.33.0
+	google.golang.org/grpc v1.78.0
 	gopkg.in/yaml.v3 v3.0.1
 	modernc.org/sqlite v1.44.3
 )
@@ -48,6 +49,8 @@ require (
 	github.com/godbus/dbus/v5 v5.2.2 // indirect
 	github.com/golang/protobuf v1.5.4 // indirect
 	github.com/gorilla/websocket v1.5.3 // indirect
+	github.com/hashicorp/go-hclog v1.6.3 // indirect
+	github.com/hashicorp/go-plugin v1.7.0 // indirect
 	github.com/hashicorp/yamux v0.1.2 // indirect
 	github.com/jchv/go-winloader v0.0.0-20210711035445-715c2860da7e // indirect
 	github.com/jeandeaual/go-locale v0.0.0-20250612000132-0ef82f21eade // indirect
@@ -91,7 +94,6 @@ require (
 	golang.org/x/image v0.35.0 // indirect
 	golang.org/x/net v0.49.0 // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20251111163417-95abcf5c77ba // indirect
-	google.golang.org/grpc v1.78.0 // indirect
 	google.golang.org/protobuf v1.36.11 // indirect
 	modernc.org/libc v1.67.6 // indirect
 	modernc.org/mathutil v1.7.1 // indirect

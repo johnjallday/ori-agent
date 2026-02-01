@@ -128,5 +128,5 @@ func (s *StoreTool) Execute(ctx context.Context, params *Params) (string, error)
 
 func main() {
 	tool := &StoreTool{}
-	pluginapi.ServeGRPCPlugin(tool, configYAML)
+	pluginapi.ServePlugin(tool, configYAML)
 }

@@ -26,5 +26,5 @@ func (w *GetWeatherTool) Execute(ctx context.Context, params *Params) (string, e
 }
 
 func main() {
-	pluginapi.ServeGRPCPlugin(&GetWeatherTool{}, configYAML)
+	pluginapi.ServePlugin(&GetWeatherTool{}, configYAML)
 }

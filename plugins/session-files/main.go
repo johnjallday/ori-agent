@@ -592,5 +592,5 @@ func isBinaryContent(mimeType string, content []byte) bool {
 }
 
 func main() {
-	pluginapi.ServeGRPCPlugin(&sessionFilesTool{}, configYAML)
+	pluginapi.ServePlugin(&sessionFilesTool{}, configYAML)
 }
