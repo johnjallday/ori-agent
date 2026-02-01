@@ -12,6 +12,7 @@ import (
 
 	ori_pluginapi "github.com/oriagent/ori-pluginapi"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/connectivity"
 	"google.golang.org/grpc/credentials/insecure"
 )
 
@@ -342,7 +343,7 @@ func pickFreePort() (int, error) {
 	if err != nil {
 		return 0, err
 	}
-	defer l.Close()
+	defer func() { _ = l.Close() }()
 
 	addr, ok := l.Addr().(*net.TCPAddr)
 	if !ok {
@@ -356,16 +357,21 @@ func dialPluginGRPC(addr string, timeout time.Duration) (*grpc.ClientConn, error
 	var lastErr error
 
 	for time.Now().Before(deadline) {
-		ctx, cancel := context.WithTimeout(context.Background(), 700*time.Millisecond)
-		conn, err := grpc.DialContext(
-			ctx,
+		conn, err := grpc.NewClient(
 			addr,
 			grpc.WithTransportCredentials(insecure.NewCredentials()),
-			grpc.WithBlock(),
 		)
-		cancel()
 		if err == nil {
-			return conn, nil
+			// Trigger connection attempt
+			conn.Connect()
+			// Give it a moment to establish connection
+			time.Sleep(100 * time.Millisecond)
+			// Check connection state
+			state := conn.GetState()
+			if state == connectivity.Ready || state == connectivity.Idle {
+				return conn, nil
+			}
+			_ = conn.Close()
 		}
 		lastErr = err
 		time.Sleep(100 * time.Millisecond)

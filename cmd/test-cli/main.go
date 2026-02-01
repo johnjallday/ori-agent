@@ -269,7 +269,7 @@ func (r *TestRunner) runQuickTest() {
 		fmt.Printf(colorRed+"✗ Health check failed: %v\n"+colorReset, err)
 		return
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode == http.StatusOK {
 		fmt.Println(colorGreen + "✓ Quick test passed (health check OK)" + colorReset)
