@@ -193,5 +193,5 @@ func serveDashboardPage(t *WebappPluginTool, query map[string]string) (string, s
 }
 
 func main() {
-	pluginapi.ServePlugin(&WebappPluginTool{}, configYAML)
+	pluginapi.ServeGRPCPlugin(&WebappPluginTool{}, configYAML)
 }

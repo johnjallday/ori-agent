@@ -43,5 +43,5 @@ func handleDivide(ctx context.Context, m *MathTool, params *Params) (string, err
 }
 
 func main() {
-	pluginapi.ServePlugin(&MathTool{}, configYAML)
+	pluginapi.ServeGRPCPlugin(&MathTool{}, configYAML)
 }
