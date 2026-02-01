@@ -174,5 +174,5 @@ func getFileManagerName() string {
 }
 
 func main() {
-	pluginapi.ServePlugin(&ResultHandlerTool{}, configYAML)
+	pluginapi.ServeGRPCPlugin(&ResultHandlerTool{}, configYAML)
 }

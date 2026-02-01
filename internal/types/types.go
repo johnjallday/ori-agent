@@ -142,15 +142,18 @@ type PluginRegistryEntry struct {
 	Metadata      *PluginMetadata `json:"metadata,omitempty"`       // Plugin metadata (maintainers, license, repository)
 
 	// Plugin Management Fields (added for dedicated plugins page)
-	SourceMarketplace   string                 `json:"source_marketplace,omitempty"`   // ID of the marketplace this plugin came from (first/primary)
-	SourceMarketplaces  []string               `json:"source_marketplaces,omitempty"`  // All marketplaces this plugin appears in
-	Category            string                 `json:"category,omitempty"`             // Plugin category (e.g., "System Tools", "AI/ML")
-	Permissions         map[string]interface{} `json:"permissions,omitempty"`          // Required permissions (file_access, network_access, system_commands)
-	PermissionsApproved bool                   `json:"permissions_approved,omitempty"` // Whether permissions have been approved
-	Enabled             bool                   `json:"enabled,omitempty"`              // Whether plugin is enabled
-	HealthStatus        string                 `json:"health_status,omitempty"`        // Health status (healthy, degraded, failed)
-	LastUsed            *time.Time             `json:"last_used,omitempty"`            // When plugin was last used
-	VersionHistory      []VersionHistoryEntry  `json:"version_history,omitempty"`      // Previous versions for rollback
+	SourceMarketplace      string                     `json:"source_marketplace,omitempty"`      // ID of the marketplace this plugin came from (first/primary)
+	SourceMarketplaces     []string                   `json:"source_marketplaces,omitempty"`     // All marketplaces this plugin appears in
+	Category               string                     `json:"category,omitempty"`                // Plugin category (e.g., "System Tools", "AI/ML")
+	Permissions            map[string]interface{}     `json:"permissions,omitempty"`             // Required permissions (file_access, network_access, system_commands)
+	PermissionsApproved    bool                       `json:"permissions_approved,omitempty"`    // Whether permissions have been approved
+	Enabled                bool                       `json:"enabled,omitempty"`                 // Whether plugin is enabled
+	HealthStatus           string                     `json:"health_status,omitempty"`           // Health status (healthy, degraded, failed)
+	LastUsed               *time.Time                 `json:"last_used,omitempty"`               // When plugin was last used
+	VersionHistory         []VersionHistoryEntry      `json:"version_history,omitempty"`         // Previous versions for rollback
+	SupportsInitialization bool                       `json:"supports_initialization,omitempty"` // Whether plugin implements InitializationProvider (cached)
+	RequiredConfig         []pluginapi.ConfigVariable `json:"required_config,omitempty"`         // Cached required config variables (if any)
+	InitSupportChecked     bool                       `json:"init_support_checked,omitempty"`    // Whether init support was checked and cached
 }
 
 // VersionHistoryEntry tracks information about a specific plugin version for rollback

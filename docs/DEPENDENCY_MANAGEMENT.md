@@ -176,14 +176,14 @@ For more advanced automation, consider [Renovate](https://github.com/renovatebot
 
 #### Why is a dependency needed?
 ```bash
-make deps-why DEP=github.com/hashicorp/go-plugin
+make deps-why DEP=google.golang.org/grpc
 ```
 
 Shows the dependency chain:
 ```
 github.com/johnjallday/ori-agent
 github.com/johnjallday/ori-agent/internal/pluginloader
-github.com/hashicorp/go-plugin
+google.golang.org/grpc
 ```
 
 #### Visualize dependency graph

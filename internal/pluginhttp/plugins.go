@@ -191,27 +191,12 @@ func (h *Handler) list(w http.ResponseWriter, _ *http.Request) {
 			}
 			plist = append(plist, pluginInfo)
 		} else {
-			// Plugin not enabled - temporarily load to check if it supports initialization
+			// Plugin not enabled - use cached init support from registry (avoid spawning processes)
 			var requiresSettings bool
 			var settingVariables []pluginapi.ConfigVariable
-
-			logger.Verbosef("🔄 Temporarily loading plugin '%s' from path: %s", registryPlugin.Name, registryPlugin.Path)
-			if tool, err := h.Loader.Load(registryPlugin.Path); err == nil {
-				// Ensure plugin RPC client is cleaned up after checking initialization
-				defer pluginloader.CloseRPCPlugin(tool)
-
-				logger.Verbosef("✓ Plugin loaded, type: %T", tool)
-				logger.Verbosef("✓ Checking InitializationProvider interface...")
-				if initProvider, ok := tool.(pluginapi.InitializationProvider); ok {
-					logger.Verbosef("✅ Plugin implements InitializationProvider!")
-					settingVariables = initProvider.GetRequiredConfig()
-					logger.Verbosef("✅ Got %d setting variables", len(settingVariables))
-					requiresSettings = len(settingVariables) > 0
-				} else {
-					logger.Verbosef("❌ Plugin does NOT implement InitializationProvider (type: %T)", tool)
-				}
-			} else {
-				logger.Verbosef("❌ Failed to load plugin: %v", err)
+			if registryPlugin.InitSupportChecked {
+				settingVariables = registryPlugin.RequiredConfig
+				requiresSettings = len(settingVariables) > 0
 			}
 
 			pluginInfo := map[string]any{
@@ -302,9 +287,15 @@ func (h *Handler) uploadAndRegister(w http.ResponseWriter, r *http.Request) {
 	def := tool.Definition()
 
 	version := pluginloader.GetPluginVersion(tool)
+	supportsInit := false
+	var requiredConfig []pluginapi.ConfigVariable
+	if initProvider, ok := tool.(pluginapi.InitializationProvider); ok {
+		supportsInit = true
+		requiredConfig = initProvider.GetRequiredConfig()
+	}
 
 	// Add to plugin registry
-	if err := h.LocalRegistry.AddToRegistry(def.Name, def.Description, pluginFile, version); err != nil {
+	if err := h.LocalRegistry.AddToRegistry(def.Name, def.Description, pluginFile, version, supportsInit, requiredConfig); err != nil {
 		// Clean up the file if registry update fails
 		_ = os.Remove(pluginFile)
 		orihttp.InternalError(w, "Failed to register plugin: "+err.Error())

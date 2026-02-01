@@ -10,6 +10,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/pluginloader"
 	"github.com/johnjallday/ori-agent/internal/types"
+	"github.com/oriagent/ori-pluginapi"
 )
 
 // loadLocalUnlocked loads the user's local plugin registry without locking (internal use only)
@@ -66,9 +67,9 @@ func (m *Manager) ScanUploadedPlugins() error {
 	}
 
 	// Create map of existing plugins for quick lookup
-	existingPlugins := make(map[string]bool)
-	for _, plugin := range localReg.Plugins {
-		existingPlugins[plugin.Path] = true
+	existingPlugins := make(map[string]int)
+	for i, plugin := range localReg.Plugins {
+		existingPlugins[plugin.Path] = i
 	}
 
 	// Read uploaded_plugins directory
@@ -78,6 +79,7 @@ func (m *Manager) ScanUploadedPlugins() error {
 	}
 
 	var newPluginsAdded bool
+	var updatedPlugins bool
 	for _, entry := range entries {
 		if entry.IsDir() {
 			continue
@@ -91,8 +93,23 @@ func (m *Manager) ScanUploadedPlugins() error {
 
 		pluginPath := filepath.Join(m.uploadedPluginsDir, filename)
 
-		// Skip if plugin is already in registry
-		if existingPlugins[pluginPath] {
+		// Skip if plugin is already in registry (but update cached init support if missing)
+		if idx, exists := existingPlugins[pluginPath]; exists {
+			regEntry := &localReg.Plugins[idx]
+			if !regEntry.InitSupportChecked {
+				if tool, loadErr := pluginloader.LoadPluginUnified(pluginPath); loadErr == nil {
+					if initProvider, ok := tool.(pluginapi.InitializationProvider); ok {
+						regEntry.SupportsInitialization = true
+						regEntry.RequiredConfig = initProvider.GetRequiredConfig()
+					} else {
+						regEntry.SupportsInitialization = false
+						regEntry.RequiredConfig = nil
+					}
+					regEntry.InitSupportChecked = true
+					updatedPlugins = true
+					pluginloader.CloseRPCPlugin(tool)
+				}
+			}
 			continue
 		}
 
@@ -102,10 +119,21 @@ func (m *Manager) ScanUploadedPlugins() error {
 		// Try to load the plugin to get better information (using unified loader)
 		var description, version string
 		var metadata *types.PluginMetadata
+		var supportsInit bool
+		var requiredConfig []pluginapi.ConfigVariable
+		var initChecked bool
 		if tool, loadErr := pluginloader.LoadPluginUnified(pluginPath); loadErr == nil {
 			def := tool.Definition()
 			description = def.Description
 			version = pluginloader.GetPluginVersion(tool)
+
+			if initProvider, ok := tool.(pluginapi.InitializationProvider); ok {
+				supportsInit = true
+				requiredConfig = initProvider.GetRequiredConfig()
+				initChecked = true
+			} else {
+				initChecked = true
+			}
 
 			// Extract metadata if available
 			if protoMeta, metaErr := pluginloader.GetPluginMetadata(tool); metaErr == nil && protoMeta != nil {
@@ -185,12 +213,15 @@ func (m *Manager) ScanUploadedPlugins() error {
 
 		// Add to registry
 		newPlugin := types.PluginRegistryEntry{
-			Name:        pluginName,
-			Description: description,
-			Tags:        pluginTags,
-			Path:        pluginPath,
-			Version:     version,
-			Metadata:    metadata,
+			Name:                   pluginName,
+			Description:            description,
+			Tags:                   pluginTags,
+			Path:                   pluginPath,
+			Version:                version,
+			Metadata:               metadata,
+			SupportsInitialization: supportsInit,
+			RequiredConfig:         requiredConfig,
+			InitSupportChecked:     initChecked,
 		}
 
 		localReg.Plugins = append(localReg.Plugins, newPlugin)
@@ -200,11 +231,15 @@ func (m *Manager) ScanUploadedPlugins() error {
 	}
 
 	// Save updated registry if changes were made
-	if newPluginsAdded {
+	if newPluginsAdded || updatedPlugins {
 		if err := m.SaveLocal(localReg); err != nil {
 			return fmt.Errorf("failed to save updated local registry: %w", err)
 		}
-		logger.Info("Updated local plugin registry with new plugins from uploaded_plugins/")
+		if newPluginsAdded {
+			logger.Info("Updated local plugin registry with new plugins from uploaded_plugins/")
+		} else {
+			logger.Info("Updated local plugin registry init support cache")
+		}
 	}
 
 	return nil
@@ -248,10 +283,21 @@ func (m *Manager) RefreshLocalRegistry() error {
 		// Try to load the plugin to get metadata
 		var description, version string
 		var metadata *types.PluginMetadata
+		var supportsInit bool
+		var requiredConfig []pluginapi.ConfigVariable
+		var initChecked bool
 		if tool, loadErr := pluginloader.LoadPluginUnified(pluginPath); loadErr == nil {
 			def := tool.Definition()
 			description = def.Description
 			version = pluginloader.GetPluginVersion(tool)
+
+			if initProvider, ok := tool.(pluginapi.InitializationProvider); ok {
+				supportsInit = true
+				requiredConfig = initProvider.GetRequiredConfig()
+				initChecked = true
+			} else {
+				initChecked = true
+			}
 
 			// Extract metadata if available
 			if protoMeta, metaErr := pluginloader.GetPluginMetadata(tool); metaErr == nil && protoMeta != nil {
@@ -331,12 +377,15 @@ func (m *Manager) RefreshLocalRegistry() error {
 
 		// Add to new registry
 		newPlugin := types.PluginRegistryEntry{
-			Name:        pluginName,
-			Description: description,
-			Tags:        pluginTags,
-			Path:        pluginPath,
-			Version:     version,
-			Metadata:    metadata,
+			Name:                   pluginName,
+			Description:            description,
+			Tags:                   pluginTags,
+			Path:                   pluginPath,
+			Version:                version,
+			Metadata:               metadata,
+			SupportsInitialization: supportsInit,
+			RequiredConfig:         requiredConfig,
+			InitSupportChecked:     initChecked,
 		}
 
 		newReg.Plugins = append(newReg.Plugins, newPlugin)
