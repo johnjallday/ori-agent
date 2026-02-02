@@ -49,19 +49,47 @@ func (o *Orchestrator) SetGateway(gw *gateway.Service) {
 func (o *Orchestrator) HandleGatewayMessage(ctx context.Context, msg gateway.Message) error {
 	logger.Info("orchestrator received gateway message", logger.Fields{"from": msg.Sender.Name, "content": msg.Content})
 
-	// 1. Identify which agent to use (PoC: use first available agent)
-	agents, _ := o.agentStore.ListAgents()
-	if len(agents) == 0 {
-		return fmt.Errorf("no agents found in store")
+	// 1. Analyze request using the Planner to determine the best agent
+	var agentName string
+	plan, err := o.PlanTask(ctx, msg.Content)
+	if err == nil && len(plan.Tasks) > 0 {
+		// Try to use the suggested agent from the first task
+		firstTask := plan.Tasks[0]
+		if firstTask.SuggestedAgent != "" {
+			// Verify agent exists
+			if _, ok := o.agentStore.GetAgent(firstTask.SuggestedAgent); ok {
+				agentName = firstTask.SuggestedAgent
+				logger.Debug("routing to suggested agent", logger.Fields{"agent": agentName, "rationale": plan.Rationale})
+			}
+		}
+
+		// If no valid suggested agent, try finding by role
+		if agentName == "" && firstTask.RequiredRole != "" {
+			if agents, err := o.findAgentsByRoles([]types.AgentRole{firstTask.RequiredRole}); err == nil && len(agents) > 0 {
+				agentName = agents[0]
+				logger.Debug("routing to agent by role", logger.Fields{"agent": agentName, "role": firstTask.RequiredRole})
+			}
+		}
+	} else {
+		logger.Warn("planning failed, falling back to default", logger.Fields{"error": err})
 	}
 
-	agentName := agents[0]
+	// 2. Fallback: Use first available agent if planning failed or returned no matches
+	if agentName == "" {
+		agents, _ := o.agentStore.ListAgents()
+		if len(agents) == 0 {
+			return fmt.Errorf("no agents found in store")
+		}
+		agentName = agents[0]
+		logger.Debug("routing to default agent", logger.Fields{"agent": agentName})
+	}
+
 	ag, ok := o.agentStore.GetAgent(agentName)
 	if !ok {
 		return fmt.Errorf("agent %s not found", agentName)
 	}
 
-	// 2. Execute chat completion
+	// 3. Execute chat completion
 	provider, err := o.llmFactory.GetProvider(ag.Settings.Provider)
 	if err != nil {
 		return fmt.Errorf("failed to get LLM provider: %w", err)
@@ -83,7 +111,7 @@ func (o *Orchestrator) HandleGatewayMessage(ctx context.Context, msg gateway.Mes
 
 	content := resp.Content
 
-	// 3. Send response back to the gateway
+	// 4. Send response back to the gateway
 	if o.gateway == nil {
 		logger.Warn("gateway not set in orchestrator, cannot send response")
 		return nil
