@@ -3,12 +3,13 @@ package orchestration
 import (
 	"context"
 	"fmt"
-
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/johnjallday/ori-agent/internal/agentcomm"
 	"github.com/johnjallday/ori-agent/internal/config"
+	"github.com/johnjallday/ori-agent/internal/gateway"
 	"github.com/johnjallday/ori-agent/internal/llm"
 	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/store"
@@ -24,6 +25,7 @@ type Orchestrator struct {
 	llmFactory     *llm.Factory
 	configManager  *config.Manager
 	eventBus       *workspace.EventBus
+	gateway        *gateway.Service
 }
 
 // NewOrchestrator creates a new orchestrator
@@ -36,6 +38,79 @@ func NewOrchestrator(agentStore store.Store, workspaceStore workspace.Store, com
 		configManager:  configManager,
 		eventBus:       eventBus,
 	}
+}
+
+// SetGateway sets the gateway service for the orchestrator
+func (o *Orchestrator) SetGateway(gw *gateway.Service) {
+	o.gateway = gw
+}
+
+// HandleGatewayMessage handles an incoming message from the gateway
+func (o *Orchestrator) HandleGatewayMessage(ctx context.Context, msg gateway.Message) error {
+	logger.Info("orchestrator received gateway message", logger.Fields{"from": msg.Sender.Name, "content": msg.Content})
+
+	// 1. Identify which agent to use (PoC: use first available agent)
+	agents, _ := o.agentStore.ListAgents()
+	if len(agents) == 0 {
+		return fmt.Errorf("no agents found in store")
+	}
+
+	agentName := agents[0]
+	ag, ok := o.agentStore.GetAgent(agentName)
+	if !ok {
+		return fmt.Errorf("agent %s not found", agentName)
+	}
+
+	// 2. Execute chat completion
+	provider, err := o.llmFactory.GetProvider(ag.Settings.Provider)
+	if err != nil {
+		return fmt.Errorf("failed to get LLM provider: %w", err)
+	}
+
+	// Construct simple request for PoC
+	req := llm.ChatRequest{
+		Model:        ag.Settings.Model,
+		SystemPrompt: ag.Settings.SystemPrompt,
+		Messages: []llm.Message{
+			{Role: llm.RoleUser, Content: msg.Content},
+		},
+	}
+
+	resp, err := provider.Chat(ctx, req)
+	if err != nil {
+		return fmt.Errorf("LLM completion failed: %w", err)
+	}
+
+	content := resp.Content
+
+	// 3. Send response back to the gateway
+	if o.gateway == nil {
+		logger.Warn("gateway not set in orchestrator, cannot send response")
+		return nil
+	}
+
+	reply := gateway.Message{
+		ID:      uuid.New(),
+		Content: content,
+		Sender: gateway.Sender{
+			ID:       agentName,
+			Name:     agentName,
+			Platform: "ori",
+			IsBot:    true,
+		},
+		ReplyToID: msg.ID.String(),
+		Timestamp: time.Now(),
+		Metadata: map[string]any{
+			"agent_role": ag.Role,
+			"model":      ag.Settings.Model,
+		},
+	}
+
+	// Important: We need to tell the gateway where to send this.
+	// We use the original message's platform to route back.
+	reply.Sender.Platform = msg.Sender.Platform
+
+	return o.gateway.Send(ctx, reply)
 }
 
 // CollaborativeTask represents a task requiring multiple agents

@@ -16,6 +16,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/externalagentshttp"
 	"github.com/johnjallday/ori-agent/internal/fileshttp"
 	"github.com/johnjallday/ori-agent/internal/filewatcher"
+	"github.com/johnjallday/ori-agent/internal/gateway"
 	"github.com/johnjallday/ori-agent/internal/healthhttp"
 	"github.com/johnjallday/ori-agent/internal/llm"
 	"github.com/johnjallday/ori-agent/internal/location"
@@ -130,6 +131,7 @@ type ServerBuilder struct {
 	notificationManager   *pluginmanager.NotificationManager
 	backupManager         *pluginmanager.BackupManager
 	pluginUpdateService   *pluginupdateservice.Service
+	gateway               *gateway.Service
 
 	// Handlers
 	healthManager          *healthhttp.Manager
@@ -227,6 +229,9 @@ func (b *ServerBuilder) Build() (*Server, error) {
 	}
 	if err := b.initializeLLMFactory(); err != nil { // Phase 4
 		return nil, fmt.Errorf("LLM factory phase failed: %w", err)
+	}
+	if err := b.initializeGateway(); err != nil { // Phase 4.1
+		return nil, fmt.Errorf("gateway phase failed: %w", err)
 	}
 
 	// ═══════════════════════════════════════════════════════════════════════════
@@ -333,6 +338,7 @@ func (b *ServerBuilder) createDomainFacades() error {
 		b.llmFactory,
 		b.configManager,
 		b.costTracker,
+		b.gateway,
 	)
 
 	// Plugin System Facade

@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/johnjallday/ori-agent/internal/environ"
+	"github.com/johnjallday/ori-agent/internal/gateway/channels/console"
 	"github.com/johnjallday/ori-agent/internal/logger"
 	portutil "github.com/johnjallday/ori-agent/internal/port"
 	"github.com/johnjallday/ori-agent/internal/server"
@@ -34,6 +35,7 @@ func main() {
 	verbose := flag.Bool("verbose", false, "Enable verbose logging")
 	noBrowser := flag.Bool("no-browser", false, "Don't open browser on startup")
 	allowNetwork := flag.Bool("allow-network", false, "Allow connections from network (default: localhost only)")
+	consoleEnabled := flag.Bool("console", false, "Enable console interaction channel")
 	versionOverride := flag.String("version", "", "Override version for testing (e.g., v0.0.24)")
 	multiAgentMode := flag.String("multi-agent-mode", "", "Multi-agent default mode: auto, force, off")
 	multiAgentThreshold := flag.Float64("multi-agent-threshold", 0, "Multi-agent complexity threshold (0-10)")
@@ -82,6 +84,16 @@ func main() {
 	if err != nil {
 		log.Fatalf("Failed to initialize server: %v", err)
 	}
+
+	if *consoleEnabled {
+		// Register console channel
+		ctx := context.Background()
+		c := console.NewConsoleChannel("console-prod", logger.New("console-channel"))
+		if err := srv.Core.Gateway.RegisterChannel(ctx, c); err != nil {
+			logger.Error("Failed to register console channel", logger.Fields{"error": err})
+		}
+	}
+
 	if srv.Core != nil && srv.Core.ConfigManager != nil {
 		if *multiAgentMode != "" || *multiAgentThreshold > 0 {
 			srv.Core.ConfigManager.SetMultiAgentDefaults(*multiAgentMode, *multiAgentThreshold)

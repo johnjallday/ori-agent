@@ -96,6 +96,13 @@ func (b *ServerBuilder) initializeTaskExecution() error {
 func (b *ServerBuilder) initializeOrchestration() error {
 	communicator := agentcomm.NewCommunicator(b.workspaceStore)
 	orch := orchestration.NewOrchestrator(b.st, b.workspaceStore, communicator, b.llmFactory, b.configManager, b.eventBus)
+
+	// Wire gateway to orchestrator if initialized
+	if b.gateway != nil {
+		orch.SetGateway(b.gateway)
+		b.gateway.SetRouter(orch.HandleGatewayMessage)
+	}
+
 	taskHandler := workspace.NewLLMTaskHandler(b.st, b.llmFactory, b.workspaceStore)
 
 	// Create session store adapter for orchestration handler

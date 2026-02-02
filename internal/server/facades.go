@@ -9,6 +9,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/devicehttp"
 	"github.com/johnjallday/ori-agent/internal/externalagentshttp"
 	"github.com/johnjallday/ori-agent/internal/fileshttp"
+	"github.com/johnjallday/ori-agent/internal/gateway"
 	"github.com/johnjallday/ori-agent/internal/healthhttp"
 	"github.com/johnjallday/ori-agent/internal/llm"
 	"github.com/johnjallday/ori-agent/internal/location"
@@ -48,6 +49,7 @@ type CoreSystemFacade struct {
 	LLMFactory    *llm.Factory
 	ConfigManager *config.Manager
 	CostTracker   *llm.CostTracker
+	Gateway       *gateway.Service
 }
 
 // PluginSystemFacade manages all plugin-related dependencies
@@ -143,12 +145,14 @@ func NewCoreSystemFacade(
 	llmFactory *llm.Factory,
 	configManager *config.Manager,
 	costTracker *llm.CostTracker,
+	gw *gateway.Service,
 ) *CoreSystemFacade {
 	return &CoreSystemFacade{
 		ClientFactory: clientFactory,
 		LLMFactory:    llmFactory,
 		ConfigManager: configManager,
 		CostTracker:   costTracker,
+		Gateway:       gw,
 	}
 }
 
