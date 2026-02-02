@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/johnjallday/ori-agent/internal/agentcomm"
+	"github.com/johnjallday/ori-agent/internal/gateway"
 	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/orchestration"
 	"github.com/johnjallday/ori-agent/internal/orchestration/templates"
@@ -95,7 +96,13 @@ func (b *ServerBuilder) initializeTaskExecution() error {
 // initializeOrchestration creates orchestrators and handlers.
 func (b *ServerBuilder) initializeOrchestration() error {
 	communicator := agentcomm.NewCommunicator(b.workspaceStore)
-	orch := orchestration.NewOrchestrator(b.st, b.workspaceStore, communicator, b.llmFactory, b.configManager, b.eventBus)
+
+	var history gateway.ConversationStore
+	if b.sessionStore != nil {
+		history = session.NewGatewaySessionStore(b.sessionStore)
+	}
+
+	orch := orchestration.NewOrchestrator(b.st, b.workspaceStore, history, communicator, b.llmFactory, b.configManager, b.eventBus)
 
 	// Wire gateway to orchestrator if initialized
 	if b.gateway != nil {

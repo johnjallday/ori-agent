@@ -21,6 +21,7 @@ import (
 type Orchestrator struct {
 	agentStore     store.Store
 	workspaceStore workspace.Store
+	history        gateway.ConversationStore
 	communicator   *agentcomm.Communicator
 	llmFactory     *llm.Factory
 	configManager  *config.Manager
@@ -29,10 +30,11 @@ type Orchestrator struct {
 }
 
 // NewOrchestrator creates a new orchestrator
-func NewOrchestrator(agentStore store.Store, workspaceStore workspace.Store, communicator *agentcomm.Communicator, llmFactory *llm.Factory, configManager *config.Manager, eventBus *workspace.EventBus) *Orchestrator {
+func NewOrchestrator(agentStore store.Store, workspaceStore workspace.Store, history gateway.ConversationStore, communicator *agentcomm.Communicator, llmFactory *llm.Factory, configManager *config.Manager, eventBus *workspace.EventBus) *Orchestrator {
 	return &Orchestrator{
 		agentStore:     agentStore,
 		workspaceStore: workspaceStore,
+		history:        history,
 		communicator:   communicator,
 		llmFactory:     llmFactory,
 		configManager:  configManager,
@@ -49,7 +51,7 @@ func (o *Orchestrator) SetGateway(gw *gateway.Service) {
 func (o *Orchestrator) HandleGatewayMessage(ctx context.Context, msg gateway.Message) error {
 	logger.Info("orchestrator received gateway message", logger.Fields{"from": msg.Sender.Name, "content": msg.Content})
 
-	// 1. Analyze request using the Planner to determine the best agent
+	// 1. Identify which agent to use (PoC: use first available agent)
 	var agentName string
 	plan, err := o.PlanTask(ctx, msg.Content)
 	if err == nil && len(plan.Tasks) > 0 {
@@ -74,7 +76,7 @@ func (o *Orchestrator) HandleGatewayMessage(ctx context.Context, msg gateway.Mes
 		logger.Warn("planning failed, falling back to default", logger.Fields{"error": err})
 	}
 
-	// 2. Fallback: Use first available agent if planning failed or returned no matches
+	// Fallback: Use first available agent if planning failed or returned no matches
 	if agentName == "" {
 		agents, _ := o.agentStore.ListAgents()
 		if len(agents) == 0 {
@@ -89,19 +91,60 @@ func (o *Orchestrator) HandleGatewayMessage(ctx context.Context, msg gateway.Mes
 		return fmt.Errorf("agent %s not found", agentName)
 	}
 
-	// 3. Execute chat completion
+	// 2. Manage conversation session
+	sessionID := msg.Sender.Platform // Simple mapping: one session per platform for now
+	if msg.Metadata != nil {
+		if sid, ok := msg.Metadata["session_id"].(string); ok && sid != "" {
+			sessionID = sid
+		}
+	}
+
+	// Save user message
+	if o.history != nil {
+		if err := o.history.SaveMessage(ctx, sessionID, msg); err != nil {
+			logger.Error("failed to save user message", logger.Fields{"session_id": sessionID, "error": err})
+		}
+	}
+
+	// 3. Prepare LLM request with history
+	var messages []llm.Message
+	if o.history != nil {
+		history, err := o.history.GetHistory(ctx, sessionID)
+		if err == nil {
+			for _, m := range history {
+				role := llm.RoleUser
+				if m.Sender.IsBot {
+					role = llm.RoleAssistant
+				}
+				messages = append(messages, llm.Message{
+					Role:    role,
+					Content: m.Content,
+				})
+			}
+		}
+	}
+
+	// If history lookup failed or history not available, use current message
+	// Note: SaveMessage might have just saved it, so GetHistory might return it.
+	// We need to ensure we don't duplicate it or miss it.
+	// Usually GetHistory returns what's stored.
+	// If messages is empty, append current.
+	if len(messages) == 0 {
+		messages = append(messages, llm.Message{
+			Role:    llm.RoleUser,
+			Content: msg.Content,
+		})
+	}
+
 	provider, err := o.llmFactory.GetProvider(ag.Settings.Provider)
 	if err != nil {
 		return fmt.Errorf("failed to get LLM provider: %w", err)
 	}
 
-	// Construct simple request for PoC
 	req := llm.ChatRequest{
 		Model:        ag.Settings.Model,
 		SystemPrompt: ag.Settings.SystemPrompt,
-		Messages: []llm.Message{
-			{Role: llm.RoleUser, Content: msg.Content},
-		},
+		Messages:     messages,
 	}
 
 	resp, err := provider.Chat(ctx, req)
@@ -111,12 +154,7 @@ func (o *Orchestrator) HandleGatewayMessage(ctx context.Context, msg gateway.Mes
 
 	content := resp.Content
 
-	// 4. Send response back to the gateway
-	if o.gateway == nil {
-		logger.Warn("gateway not set in orchestrator, cannot send response")
-		return nil
-	}
-
+	// 4. Store assistant response
 	reply := gateway.Message{
 		ID:      uuid.New(),
 		Content: content,
@@ -131,7 +169,20 @@ func (o *Orchestrator) HandleGatewayMessage(ctx context.Context, msg gateway.Mes
 		Metadata: map[string]any{
 			"agent_role": ag.Role,
 			"model":      ag.Settings.Model,
+			"session_id": sessionID,
 		},
+	}
+
+	if o.history != nil {
+		if err := o.history.SaveMessage(ctx, sessionID, reply); err != nil {
+			logger.Error("failed to save assistant message", logger.Fields{"session_id": sessionID, "error": err})
+		}
+	}
+
+	// 5. Send response back to the gateway
+	if o.gateway == nil {
+		logger.Warn("gateway not set in orchestrator, cannot send response")
+		return nil
 	}
 
 	// Important: We need to tell the gateway where to send this.
