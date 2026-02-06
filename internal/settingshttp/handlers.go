@@ -525,6 +525,9 @@ func categorizeModel(provider, modelName string) string {
 		if modelName == "claude-sonnet-4-5" || modelName == "claude-sonnet-4" {
 			return "general"
 		}
+		if modelName == "sonnet" {
+			return "general"
+		}
 		// Claude 3 Sonnet is general
 		if modelName == "claude-3-sonnet-20240229" {
 			return "general"

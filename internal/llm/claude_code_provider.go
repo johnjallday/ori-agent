@@ -7,8 +7,6 @@ import (
 	"fmt"
 	"os/exec"
 	"strings"
-
-	"github.com/johnjallday/ori-agent/internal/modelinfo"
 )
 
 // ClaudeCodeProvider implements the Provider interface using the Claude CLI.
@@ -61,7 +59,7 @@ func (p *ClaudeCodeProvider) ValidateConfig(_ ProviderConfig) error {
 
 // DefaultModels returns available Claude models from the curated pricing data.
 func (p *ClaudeCodeProvider) DefaultModels() []string {
-	return modelinfo.GetClaudeModels()
+	return []string{"opus", "sonnet", "haiku"}
 }
 
 // Chat sends a chat request via the Claude CLI.

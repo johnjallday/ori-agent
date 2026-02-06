@@ -467,7 +467,7 @@ func preferredModelsForProvider(providerName string) []string {
 	case "codex":
 		return []string{"gpt-5.1-codex-mini", "gpt-5.1-codex", "gpt-5.1-codex-max"}
 	case "claude_code":
-		return []string{"claude-3-haiku-20240307", "claude-3-5-sonnet-20241022", "claude-3-sonnet-20240229"}
+		return []string{"opus", "sonnet", "haiku"}
 	case "claude":
 		return []string{"claude-3-haiku-20240307", "claude-3-5-sonnet-20241022", "claude-3-sonnet-20240229"}
 	case "ollama":

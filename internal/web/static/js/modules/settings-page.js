@@ -675,10 +675,21 @@ document.getElementById('systemDiagnosticsBtn')?.addEventListener('click', async
 
       modelSelect.innerHTML = '<option value="">Select a model...</option>';
       const models = data.models || [];
+      const claudeCodeDescriptions = {
+        opus: 'Opus 4.6 · Most capable for complex work',
+        sonnet: 'Sonnet 4.5 · Best for everyday tasks',
+        haiku: 'Haiku 4.5 · Fastest for quick answers'
+      };
+      const claudeCodeRecommended = 'haiku';
       models.forEach(model => {
         const option = document.createElement('option');
         option.value = model;
-        option.textContent = model;
+        if (providerName === 'claude_code' && claudeCodeDescriptions[model]) {
+          const recommended = model === claudeCodeRecommended ? ' (recommended)' : '';
+          option.textContent = `${model}${recommended} — ${claudeCodeDescriptions[model]}`;
+        } else {
+          option.textContent = model;
+        }
         modelSelect.appendChild(option);
       });
 
