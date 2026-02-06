@@ -616,6 +616,25 @@
               </div>
             </div>
 
+            <!-- Claude Setup Token -->
+            <div class="settings-field">
+              <label class="settings-label" for="claudeSetupTokenInput">Claude Setup Token</label>
+              <div class="input-group">
+                <input type="password"
+                       id="claudeSetupTokenInput"
+                       class="form-control settings-input"
+                       placeholder="sk-ant-oat01-..."
+                       aria-describedby="claudeSetupTokenHelp">
+                <button class="btn btn-outline-secondary" type="button" id="toggleClaudeSetupToken" aria-label="Toggle password visibility">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+                    <path d="M12,9A3,3 0 0,0 9,12A3,3 0 0,0 12,15A3,3 0 0,0 15,12A3,3 0 0,0 12,9M12,17A5,5 0 0,1 7,12A5,5 0 0,1 12,7A5,5 0 0,1 17,12A5,5 0 0,1 12,17M12,4.5C7,4.5 2.73,7.61 1,12C2.73,16.39 7,19.5 12,19.5C17,19.5 21.27,16.39 23,12C21.27,7.61 17,4.5 12,4.5Z"/>
+                  </svg>
+                </button>
+                <button class="btn btn-primary modern-btn-primary" type="button" id="saveClaudeSetupToken">Save</button>
+              </div>
+              <span id="claudeSetupTokenHelp" class="settings-help">Run <code>claude setup-token</code> in your terminal and paste the token here. It will be exchanged for a permanent API key automatically.</span>
+            </div>
+
             <!-- Codex CLI Toggle -->
             <div class="settings-toggle-row">
               <div class="settings-toggle-info">
@@ -1266,9 +1285,19 @@
             body: JSON.stringify({ codex_enabled: codexToggle.checked })
           });
           if (response.ok) {
+            const data = await response.json();
             updateStatusVisibility();
             if (window.Toast) {
-              Toast.success('Codex CLI integration ' + (codexToggle.checked ? 'enabled' : 'disabled'));
+              if (!codexToggle.checked) {
+                Toast.success('Codex CLI integration disabled');
+              } else if (data.codex_exchange_status === 'success') {
+                Toast.success('Codex CLI connected — using subscription credits');
+              } else if (data.codex_exchange_status) {
+                Toast.error('Codex setup failed: ' + data.codex_exchange_status);
+                codexToggle.checked = false;
+              } else {
+                Toast.success('Codex CLI integration enabled');
+              }
             }
           } else {
             codexToggle.checked = !codexToggle.checked;

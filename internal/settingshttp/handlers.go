@@ -1,18 +1,26 @@
 package settingshttp
 
 import (
+	"encoding/json"
+	"fmt"
+	"io"
 	"net/http"
 	"strings"
+	"time"
 
+	"github.com/johnjallday/ori-agent/internal/authdiscovery"
 	"github.com/johnjallday/ori-agent/internal/client"
 	"github.com/johnjallday/ori-agent/internal/config"
 	orihttp "github.com/johnjallday/ori-agent/internal/http"
 	"github.com/johnjallday/ori-agent/internal/llm"
+	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/modelinfo"
 	"github.com/johnjallday/ori-agent/internal/platform"
 	"github.com/johnjallday/ori-agent/internal/store"
 	"github.com/johnjallday/ori-agent/internal/types"
 )
+
+var settingsLog = logger.New("settings")
 
 type Handler struct {
 	store         store.Store
@@ -142,10 +150,29 @@ func (h *Handler) APIKeyHandler(w http.ResponseWriter, r *http.Request) {
 				APIKey: req.OpenAIAPIKey,
 			})
 			h.llmFactory.Register("openai", openaiProvider)
+			settingsLog.Info("OpenAI API key updated")
 		}
 
 		// Update Anthropic API key if provided
+		var setupTokenExchanged bool
 		if req.AnthropicAPIKey != "" {
+			req.AnthropicAPIKey = strings.TrimSpace(req.AnthropicAPIKey)
+
+			// Setup tokens (sk-ant-oat01-) are scoped to Claude Code only.
+			// Exchange for a permanent API key before saving.
+			if strings.HasPrefix(req.AnthropicAPIKey, "sk-ant-oat01-") {
+				settingsLog.Info("Exchanging Claude setup token for permanent API key")
+				permanentKey, err := exchangeSetupTokenForAPIKey(req.AnthropicAPIKey)
+				if err != nil {
+					settingsLog.Error("Setup token exchange failed", logger.Fields{"error": err})
+					orihttp.RespondErrorWithErr(w, http.StatusBadRequest, "Failed to exchange setup token: "+err.Error(), err)
+					return
+				}
+				req.AnthropicAPIKey = permanentKey
+				setupTokenExchanged = true
+				settingsLog.Info("Setup token exchanged for permanent API key")
+			}
+
 			cfg.AnthropicAPIKey = req.AnthropicAPIKey
 
 			// Register/update Claude provider in LLM factory
@@ -153,6 +180,9 @@ func (h *Handler) APIKeyHandler(w http.ResponseWriter, r *http.Request) {
 				APIKey: req.AnthropicAPIKey,
 			})
 			h.llmFactory.Register("claude", claudeProvider)
+			settingsLog.Info("Anthropic API key updated", logger.Fields{
+				"setup_token_exchanged": setupTokenExchanged,
+			})
 		}
 
 		// Update Gemini API key if provided
@@ -164,6 +194,7 @@ func (h *Handler) APIKeyHandler(w http.ResponseWriter, r *http.Request) {
 				APIKey: req.GeminiAPIKey,
 			})
 			h.llmFactory.Register("gemini", geminiProvider)
+			settingsLog.Info("Gemini API key updated")
 		}
 
 		if req.AnthropicAPIKey != "" || req.GeminiAPIKey != "" {
@@ -179,11 +210,55 @@ func (h *Handler) APIKeyHandler(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		w.WriteHeader(http.StatusOK)
+		orihttp.WriteJSON(w, map[string]any{
+			"success":               true,
+			"setup_token_exchanged": setupTokenExchanged,
+		})
 
 	default:
 		w.WriteHeader(http.StatusMethodNotAllowed)
 	}
+}
+
+// exchangeSetupTokenForAPIKey exchanges a Claude Code setup token for a permanent API key.
+// Setup tokens (sk-ant-oat01-) are scoped to Claude Code only; they must be exchanged
+// via Anthropic's create_api_key endpoint to obtain a standard key for the Messages API.
+func exchangeSetupTokenForAPIKey(setupToken string) (string, error) {
+	httpClient := &http.Client{Timeout: 30 * time.Second}
+
+	req, err := http.NewRequest(http.MethodPost, "https://api.anthropic.com/api/oauth/claude_cli/create_api_key", strings.NewReader("{}"))
+	if err != nil {
+		return "", fmt.Errorf("failed to create exchange request: %w", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+setupToken)
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := httpClient.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("token exchange request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", fmt.Errorf("failed to read exchange response: %w", err)
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("token exchange failed (HTTP %d): %s", resp.StatusCode, string(body))
+	}
+
+	var result struct {
+		RawKey string `json:"raw_key"`
+	}
+	if err := json.Unmarshal(body, &result); err != nil {
+		return "", fmt.Errorf("failed to parse exchange response: %w", err)
+	}
+	if result.RawKey == "" {
+		return "", fmt.Errorf("empty API key in exchange response")
+	}
+
+	return result.RawKey, nil
 }
 
 // SpeechSettingsHandler handles speech settings persistence
@@ -287,7 +362,7 @@ func (h *Handler) ProvidersHandler(w http.ResponseWriter, r *http.Request) {
 	providers := []ProviderInfo{}
 
 	// Get all registered providers from the factory
-	providerNames := []string{"openai", "claude", "gemini", "ollama"}
+	providerNames := []string{"openai", "codex", "claude", "gemini", "ollama"}
 
 	for _, name := range providerNames {
 		provider, err := h.llmFactory.GetProvider(name)
@@ -299,12 +374,12 @@ func (h *Handler) ProvidersHandler(w http.ResponseWriter, r *http.Request) {
 		var available bool
 
 		if err != nil {
-			// Provider not registered (likely missing API key)
+			// Provider not registered (likely missing credentials or CLI)
 			// Mark as unavailable and return empty models list
 			available = false
 			displayName = getProviderDisplayName(name)
 			providerType = "cloud"
-			requiresKey = true
+			requiresKey = providerRequiresKey(name)
 			providerModels = []ProviderModel{} // Empty list - no models shown without API key
 		} else {
 			// Provider is registered
@@ -438,6 +513,9 @@ func categorizeModel(provider, modelName string) string {
 		}
 		// All other OpenAI models default to research tier (expensive)
 		return "research"
+	case "codex":
+		// Codex models are premium reasoning/coding models
+		return "research"
 	case "claude":
 		// Haiku is the lightweight model for tool calling
 		if strings.Contains(modelName, "haiku") {
@@ -500,6 +578,8 @@ func getProviderDisplayName(name string) string {
 	switch name {
 	case "openai":
 		return "OpenAI"
+	case "codex":
+		return "OpenAI Codex (CLI)"
 	case "claude":
 		return "Anthropic Claude"
 	case "ollama":
@@ -508,6 +588,15 @@ func getProviderDisplayName(name string) string {
 		return "Google Gemini"
 	default:
 		return name
+	}
+}
+
+func providerRequiresKey(name string) bool {
+	switch name {
+	case "openai", "claude", "gemini":
+		return true
+	default:
+		return false
 	}
 }
 
@@ -616,7 +705,7 @@ func (h *Handler) AvailableModelsHandler(w http.ResponseWriter, r *http.Request)
 			"provider":  providerName,
 			"available": false,
 			"models":    []string{},
-			"message":   "Provider not configured. Please add the API key first.",
+			"message":   "Provider not configured. Please add credentials first.",
 		})
 		return
 	}
@@ -682,9 +771,63 @@ func (h *Handler) ExternalAgentsSettingsHandler(w http.ResponseWriter, r *http.R
 		// Update only the settings that were provided
 		if req.ClaudeEnabled != nil {
 			h.configManager.SetExternalAgentsClaudeEnabled(*req.ClaudeEnabled)
+			if *req.ClaudeEnabled {
+				// Register Claude provider if discovery works
+				apiKey := h.configManager.GetAnthropicAPIKey()
+				if apiKey != "" {
+					claudeProvider := llm.NewClaudeProvider(llm.ProviderConfig{
+						APIKey: apiKey,
+					})
+					h.llmFactory.Register("claude", claudeProvider)
+				}
+			}
 		}
+		var codexExchangeStatus string // "", "success", or an error message
 		if req.CodexEnabled != nil {
-			h.configManager.SetExternalAgentsCodexEnabled(*req.CodexEnabled)
+			if *req.CodexEnabled {
+				// Attempt Codex token refresh/validation before persisting the toggle — if it
+				// fails we roll back so the setting doesn't silently stay on.
+				h.llmFactory.Unregister("codex")
+				creds, source, err := authdiscovery.DiscoverCodexCredentialsWithSource()
+				if err != nil {
+					codexExchangeStatus = "No Codex credentials found: " + err.Error()
+					settingsLog.Warn("Codex discovery failed", logger.Fields{"error": err})
+					h.configManager.SetExternalAgentsCodexEnabled(false)
+				} else {
+					refreshed, refreshErr := creds.RefreshIfNeeded()
+					if refreshErr != nil {
+						codexExchangeStatus = "Token refresh failed: " + refreshErr.Error()
+						settingsLog.Warn("Codex token refresh failed", logger.Fields{"error": refreshErr})
+						h.configManager.SetExternalAgentsCodexEnabled(false)
+					} else {
+						if refreshed {
+							if err := authdiscovery.PersistCodexCredentials(source, creds); err != nil {
+								settingsLog.Warn("Codex token refresh persisted failed", logger.Fields{"error": err})
+							}
+						}
+						if creds.AccessToken == "" {
+							codexExchangeStatus = "Codex access token missing"
+							settingsLog.Warn("Codex access token missing", logger.Fields{})
+							h.configManager.SetExternalAgentsCodexEnabled(false)
+						} else {
+							codexProvider, err := llm.NewCodexProvider()
+							if err != nil {
+								codexExchangeStatus = "Codex CLI unavailable: " + err.Error()
+								settingsLog.Warn("Codex provider unavailable", logger.Fields{"error": err})
+								h.configManager.SetExternalAgentsCodexEnabled(false)
+							} else {
+								h.llmFactory.Register("codex", codexProvider)
+								codexExchangeStatus = "success"
+								h.configManager.SetExternalAgentsCodexEnabled(true)
+								settingsLog.Info("Codex provider registered via Codex CLI")
+							}
+						}
+					}
+				}
+			} else {
+				h.configManager.SetExternalAgentsCodexEnabled(false)
+				h.llmFactory.Unregister("codex")
+			}
 		}
 
 		if err := h.configManager.Save(); err != nil {
@@ -692,9 +835,10 @@ func (h *Handler) ExternalAgentsSettingsHandler(w http.ResponseWriter, r *http.R
 			return
 		}
 
-		orihttp.WriteJSON(w, map[string]bool{
-			"claude_enabled": h.configManager.GetExternalAgentsClaudeEnabled(),
-			"codex_enabled":  h.configManager.GetExternalAgentsCodexEnabled(),
+		orihttp.WriteJSON(w, map[string]interface{}{
+			"claude_enabled":        h.configManager.GetExternalAgentsClaudeEnabled(),
+			"codex_enabled":         h.configManager.GetExternalAgentsCodexEnabled(),
+			"codex_exchange_status": codexExchangeStatus,
 		})
 
 	default:

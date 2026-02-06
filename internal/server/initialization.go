@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/johnjallday/ori-agent/internal/authdiscovery"
 	"github.com/johnjallday/ori-agent/internal/config"
 	"github.com/johnjallday/ori-agent/internal/llm"
 	"github.com/johnjallday/ori-agent/internal/location"
@@ -129,7 +130,7 @@ func createLLMFactory() *llm.Factory {
 func registerLLMProviders(factory *llm.Factory, configMgr *config.Manager) error {
 	verbose := os.Getenv("ORI_VERBOSE") == "true"
 
-	// Register OpenAI provider if API key is available
+	// Register OpenAI provider.
 	apiKey := configMgr.GetAPIKey()
 	if apiKey != "" {
 		openaiProvider := llm.NewOpenAIProvider(llm.ProviderConfig{
@@ -144,8 +145,40 @@ func registerLLMProviders(factory *llm.Factory, configMgr *config.Manager) error
 		logger.Debug("You can configure it later in the Settings page", logger.Fields{})
 	}
 
+	// Register Codex provider if Codex CLI is enabled and credentials are available
+	if configMgr.GetExternalAgentsCodexEnabled() {
+		creds, source, err := authdiscovery.DiscoverCodexCredentialsWithSource()
+		if err != nil {
+			if verbose {
+				logger.Debug("Codex enabled but no credentials found", logger.Fields{"error": err})
+			}
+		} else {
+			refreshed, refreshErr := creds.RefreshIfNeeded()
+			if refreshErr != nil {
+				logger.Warn("Codex token refresh failed", logger.Fields{"error": refreshErr})
+			} else if refreshed {
+				if err := authdiscovery.PersistCodexCredentials(source, creds); err != nil {
+					logger.Warn("Codex token refresh persisted failed", logger.Fields{"error": err})
+				}
+			}
+
+			codexProvider, err := llm.NewCodexProvider()
+			if err != nil {
+				logger.Warn("Codex provider unavailable", logger.Fields{"error": err})
+			} else {
+				factory.Register("codex", codexProvider)
+				if verbose {
+					logger.Info("Codex provider registered", logger.Fields{})
+				}
+			}
+		}
+	}
+
 	// Register Claude provider if API key is available
 	claudeAPIKey := configMgr.GetAnthropicAPIKey()
+	if verbose {
+		logger.Debug("Checking for Claude API key", logger.Fields{"hasKey": claudeAPIKey != "", "keyLength": len(claudeAPIKey)})
+	}
 	if claudeAPIKey != "" {
 		claudeProvider := llm.NewClaudeProvider(llm.ProviderConfig{
 			APIKey: claudeAPIKey,
@@ -154,6 +187,8 @@ func registerLLMProviders(factory *llm.Factory, configMgr *config.Manager) error
 		if verbose {
 			logger.Debug("Claude provider registered", logger.Fields{})
 		}
+	} else if verbose {
+		logger.Debug("Claude provider NOT registered (no key)", logger.Fields{})
 	}
 
 	// Register Gemini provider if API key is available

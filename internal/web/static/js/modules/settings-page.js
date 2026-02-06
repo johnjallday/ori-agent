@@ -52,6 +52,7 @@ document.getElementById('saveOpenaiKey')?.addEventListener('click', async functi
     });
 
     if (response.ok) {
+      console.log('[settings] OpenAI API key updated');
       notify('OpenAI API key saved successfully!', 'success');
       document.getElementById('openaiApiKeyInput').value = '';
     } else {
@@ -90,6 +91,7 @@ document.getElementById('saveAnthropicKey')?.addEventListener('click', async fun
     });
 
     if (response.ok) {
+      console.log('[settings] Anthropic API key updated');
       notify('Anthropic API key saved successfully!', 'success');
       document.getElementById('anthropicApiKeyInput').value = '';
     } else {
@@ -99,6 +101,50 @@ document.getElementById('saveAnthropicKey')?.addEventListener('click', async fun
   } catch (error) {
     console.error('Error saving API key:', error);
     notify('Error saving API key: ' + error.message, 'error');
+  }
+});
+
+// Toggle Claude setup token visibility
+document.getElementById('toggleClaudeSetupToken')?.addEventListener('click', function() {
+  const input = document.getElementById('claudeSetupTokenInput');
+  input.type = input.type === 'password' ? 'text' : 'password';
+});
+
+// Save Claude Setup Token
+document.getElementById('saveClaudeSetupToken')?.addEventListener('click', async function() {
+  const token = document.getElementById('claudeSetupTokenInput').value.trim();
+
+  if (!token) {
+    notify('Please enter a setup token', 'warning');
+    return;
+  }
+
+  if (!token.startsWith('sk-ant-oat01-') || token.length < 80) {
+    notify('Invalid setup token. Must start with "sk-ant-oat01-" and be at least 80 characters.', 'warning');
+    return;
+  }
+
+  try {
+    const response = await fetch('/api/api-key', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({ anthropic_api_key: token })
+    });
+
+    if (response.ok) {
+      const data = await response.json();
+      console.log('[settings] Claude setup token exchanged for API key', data);
+      notify('Setup token exchanged — Claude API key saved successfully!', 'success');
+      document.getElementById('claudeSetupTokenInput').value = '';
+    } else {
+      const error = await response.text();
+      notify('Failed to exchange setup token: ' + error, 'error');
+    }
+  } catch (error) {
+    console.error('Error saving setup token:', error);
+    notify('Error saving setup token: ' + error.message, 'error');
   }
 });
 
@@ -121,6 +167,7 @@ document.getElementById('saveGeminiKey')?.addEventListener('click', async functi
     });
 
     if (response.ok) {
+      console.log('[settings] Gemini API key updated');
       notify('Gemini API key saved successfully!', 'success');
       document.getElementById('geminiApiKeyInput').value = '';
     } else {
@@ -555,15 +602,16 @@ document.getElementById('systemDiagnosticsBtn')?.addEventListener('click', async
           });
 
         // Add unavailable providers as disabled options
-        availableProviders
-          .filter(p => !p.available)
-          .forEach(provider => {
-            const option = document.createElement('option');
-            option.value = provider.name;
-            option.textContent = `${provider.display_name} (API key required)`;
-            option.disabled = true;
-            providerSelect.appendChild(option);
-          });
+      availableProviders
+        .filter(p => !p.available)
+        .forEach(provider => {
+          const option = document.createElement('option');
+          option.value = provider.name;
+          const unavailableReason = provider.requires_key ? 'API key required' : 'Codex CLI required';
+          option.textContent = `${provider.display_name} (${unavailableReason})`;
+          option.disabled = true;
+          providerSelect.appendChild(option);
+        });
       }
     } catch (error) {
       console.error('Error loading providers:', error);

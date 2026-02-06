@@ -76,7 +76,7 @@ type AutoTaskResponse struct {
 	Details         string               `json:"details" jsonschema_description:"Additional details or context, can be empty"`
 	AgentName       string               `json:"agent_name" jsonschema_description:"Name of the agent to assign from the available list, or empty string"`
 	Priority        int                  `json:"priority" jsonschema:"minimum=1,maximum=5" jsonschema_description:"Priority level 1-5, where 1 is highest"`
-	Tasks           []AutoTaskStep       `json:"tasks,omitempty" jsonschema_description:"Optional multi-step workflow tasks. When provided, create tasks in order and honor depends_on relationships."`
+	Tasks           []AutoTaskStep       `json:"tasks" jsonschema_description:"Multi-step workflow tasks. Empty array if the request is a single task. When provided, create tasks in order and honor depends_on relationships."`
 	Schedule        *ScheduleConfig      `json:"schedule" jsonschema_description:"Schedule configuration, null if no schedule"`
 	ScheduleEnabled bool                 `json:"schedule_enabled" jsonschema_description:"True if a schedule was specified"`
 	ScheduleName    string               `json:"schedule_name" jsonschema_description:"Descriptive name for the schedule like 'Daily at 9am'"`
@@ -91,7 +91,7 @@ type AutoTaskStep struct {
 	Details   string   `json:"details" jsonschema_description:"Additional context for this step, can be empty"`
 	AgentName string   `json:"agent_name" jsonschema_description:"Name of the agent to assign from the available list, or empty string"`
 	Priority  int      `json:"priority" jsonschema:"minimum=1,maximum=5" jsonschema_description:"Priority level 1-5, where 1 is highest"`
-	DependsOn []string `json:"depends_on,omitempty" jsonschema_description:"List of step IDs this step depends on"`
+	DependsOn []string `json:"depends_on" jsonschema_description:"List of step IDs this step depends on. Empty array if this step has no dependencies."`
 }
 
 // ScheduleConfig for auto task with jsonschema tags
@@ -249,21 +249,19 @@ IMPORTANT: Always return the exact JSON structure shown above. Never return erro
 		"description": description,
 	})
 
-	// Try structured output for OpenAI provider
-	if providerName == "openai" {
-		if openaiProvider, ok := provider.(*llm.OpenAIProvider); ok {
-			return h.parseWithStructuredOutput(ctx, openaiProvider, model, systemPrompt, userMessage, agents)
-		}
+	// Try structured output for providers that support it
+	if structuredProvider, ok := provider.(llm.StructuredOutputProvider); ok {
+		return h.parseWithStructuredOutput(ctx, structuredProvider, model, systemPrompt, userMessage, agents)
 	}
 
 	// Fallback to regular chat for non-OpenAI providers
 	return h.parseWithRegularChat(ctx, provider, model, systemPrompt, userMessage, agents)
 }
 
-// parseWithStructuredOutput uses OpenAI's structured output feature
+// parseWithStructuredOutput uses a provider's structured output feature
 func (h *AutoTaskHandler) parseWithStructuredOutput(
 	ctx context.Context,
-	provider *llm.OpenAIProvider,
+	provider llm.StructuredOutputProvider,
 	model string,
 	systemPrompt string,
 	userMessage string,
