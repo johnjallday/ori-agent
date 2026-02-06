@@ -362,7 +362,7 @@ func (h *Handler) ProvidersHandler(w http.ResponseWriter, r *http.Request) {
 	providers := []ProviderInfo{}
 
 	// Get all registered providers from the factory
-	providerNames := []string{"openai", "codex", "claude", "gemini", "ollama"}
+	providerNames := []string{"openai", "codex", "claude_code", "claude", "gemini", "ollama"}
 
 	for _, name := range providerNames {
 		provider, err := h.llmFactory.GetProvider(name)
@@ -457,7 +457,7 @@ func getModelCategories(provider, modelName string) []string {
 		}
 		return []string{categorizeModel(provider, modelName)}
 
-	case "claude":
+	case "claude", "claude_code":
 		// Sonnet and Opus are great for orchestration
 		if strings.Contains(modelName, "sonnet") || strings.Contains(modelName, "opus") {
 			return []string{categorizeModel(provider, modelName), "orchestration"}
@@ -516,7 +516,7 @@ func categorizeModel(provider, modelName string) string {
 	case "codex":
 		// Codex models are premium reasoning/coding models
 		return "research"
-	case "claude":
+	case "claude", "claude_code":
 		// Haiku is the lightweight model for tool calling
 		if strings.Contains(modelName, "haiku") {
 			return "tool-calling"
@@ -580,6 +580,8 @@ func getProviderDisplayName(name string) string {
 		return "OpenAI"
 	case "codex":
 		return "OpenAI Codex (CLI)"
+	case "claude_code":
+		return "Claude Code (CLI)"
 	case "claude":
 		return "Anthropic Claude"
 	case "ollama":

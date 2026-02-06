@@ -294,14 +294,38 @@ func (h *AutoTaskHandler) parseWithStructuredOutput(
 		return nil, fmt.Errorf("LLM returned empty response")
 	}
 
+	payload := strings.TrimSpace(resp.Content)
+	if strings.HasPrefix(payload, "```") {
+		payload = extractJSONFromCodeFence(payload)
+	}
+
 	var taskConfig AutoTaskResponse
-	if err := json.Unmarshal([]byte(resp.Content), &taskConfig); err != nil {
+	if err := json.Unmarshal([]byte(payload), &taskConfig); err != nil {
 		return nil, fmt.Errorf("failed to parse response: %w (content: %s)", err, resp.Content)
 	}
 
 	// Validate and sanitize
 	taskConfig = h.validateTaskConfig(taskConfig, agents)
 	return &taskConfig, nil
+}
+
+func extractJSONFromCodeFence(content string) string {
+	lines := strings.Split(content, "\n")
+	var jsonLines []string
+	inJSON := false
+	for _, line := range lines {
+		if strings.HasPrefix(strings.TrimSpace(line), "```") {
+			inJSON = !inJSON
+			continue
+		}
+		if inJSON {
+			jsonLines = append(jsonLines, line)
+		}
+	}
+	if len(jsonLines) == 0 {
+		return strings.TrimSpace(content)
+	}
+	return strings.TrimSpace(strings.Join(jsonLines, "\n"))
 }
 
 // parseWithRegularChat uses standard chat completion (fallback for non-OpenAI)

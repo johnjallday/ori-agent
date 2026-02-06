@@ -174,6 +174,23 @@ func registerLLMProviders(factory *llm.Factory, configMgr *config.Manager) error
 		}
 	}
 
+	// Register Claude Code provider if Claude CLI credentials are available
+	if token, err := authdiscovery.DiscoverClaudeToken(); err != nil {
+		if verbose {
+			logger.Debug("Claude Code credentials not found", logger.Fields{"error": err})
+		}
+	} else if token != "" {
+		claudeCodeProvider, err := llm.NewClaudeCodeProvider()
+		if err != nil {
+			logger.Warn("Claude Code provider unavailable", logger.Fields{"error": err})
+		} else {
+			factory.Register("claude_code", claudeCodeProvider)
+			if verbose {
+				logger.Info("Claude Code provider registered", logger.Fields{})
+			}
+		}
+	}
+
 	// Register Claude provider if API key is available
 	claudeAPIKey := configMgr.GetAnthropicAPIKey()
 	if verbose {

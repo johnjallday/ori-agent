@@ -10,7 +10,7 @@ type Provider interface {
 	// StreamChat sends a message and streams the response
 	StreamChat(ctx context.Context, req ChatRequest) (StreamReader, error)
 
-	// Name returns the provider name (e.g., "openai", "codex", "claude", "gemini", "ollama")
+	// Name returns the provider name (e.g., "openai", "codex", "claude_code", "claude", "gemini", "ollama")
 	Name() string
 
 	// Type returns the provider type (cloud, local, hybrid)

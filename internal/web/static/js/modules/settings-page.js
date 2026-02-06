@@ -607,7 +607,14 @@ document.getElementById('systemDiagnosticsBtn')?.addEventListener('click', async
         .forEach(provider => {
           const option = document.createElement('option');
           option.value = provider.name;
-          const unavailableReason = provider.requires_key ? 'API key required' : 'Codex CLI required';
+          let unavailableReason = 'CLI required';
+          if (provider.requires_key) {
+            unavailableReason = 'API key required';
+          } else if (provider.name === 'codex') {
+            unavailableReason = 'Codex CLI required';
+          } else if (provider.name === 'claude_code') {
+            unavailableReason = 'Claude CLI required';
+          }
           option.textContent = `${provider.display_name} (${unavailableReason})`;
           option.disabled = true;
           providerSelect.appendChild(option);
