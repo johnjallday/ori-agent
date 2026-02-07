@@ -360,10 +360,42 @@ export class OnboardingManager {
     this.showPhase(0);
     this.modalInstance.show();
 
-    // Focus name input
-    setTimeout(() => {
+    // Run the egg hatch animation sequence
+    this.playEggHatchAnimation().then(() => {
       if (nameInput) nameInput.focus();
-    }, 400);
+    });
+  }
+
+  async playEggHatchAnimation() {
+    const container = document.getElementById('oriEggContainer');
+    if (!container) return;
+
+    const wait = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+
+    // Step 1: Wobble (600ms)
+    await wait(400); // brief pause after modal appears
+    container.classList.add('egg-animating');
+    await wait(700);
+
+    // Step 2: Show crack (300ms)
+    container.classList.add('egg-cracked');
+    await wait(500);
+
+    // Step 3: Second wobble
+    container.classList.remove('egg-animating');
+    void container.offsetHeight; // force reflow to re-trigger
+    container.classList.add('egg-animating');
+    await wait(600);
+
+    // Step 4: Hatch - shells fly apart, Ori pops up
+    container.classList.remove('egg-animating');
+    container.classList.remove('egg-cracked');
+    container.classList.add('egg-hatching');
+    await wait(600);
+
+    // Step 5: Reveal speech bubble and input
+    const phase0 = document.getElementById('onboarding-phase-0');
+    if (phase0) phase0.classList.add('egg-hatched');
   }
 
   showPhase(index) {
