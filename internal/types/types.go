@@ -69,14 +69,60 @@ type UserProfile struct {
 	InferredAt          time.Time `json:"inferred_at,omitempty"`          // When the profile was created
 }
 
+// AssistantProgress tracks global assistant progression across all agents.
+type AssistantProgress struct {
+	Level      int       `json:"level"`
+	Experience int64     `json:"experience"`
+	Rank       string    `json:"rank,omitempty"`
+	Unlocks    []string  `json:"unlocks,omitempty"`
+	UpdatedAt  time.Time `json:"updated_at"`
+}
+
+// NewAssistantProgress creates a default AssistantProgress object.
+func NewAssistantProgress() *AssistantProgress {
+	now := time.Now()
+	return &AssistantProgress{
+		Level:      0,
+		Experience: 0,
+		Rank:       "novice",
+		Unlocks:    []string{},
+		UpdatedAt:  now,
+	}
+}
+
+// EnsureDefaults applies migration-safe defaults for assistant progress.
+func (p *AssistantProgress) EnsureDefaults() {
+	if p == nil {
+		return
+	}
+	if p.Level < 0 {
+		p.Level = 0
+	}
+	if p.Experience < 0 {
+		p.Experience = 0
+	}
+	if p.Rank == "" {
+		p.Rank = "novice"
+	}
+	if p.Unlocks == nil {
+		p.Unlocks = []string{}
+	}
+	if p.UpdatedAt.IsZero() {
+		p.UpdatedAt = time.Now()
+	}
+}
+
 // AppState tracks application-level state (persisted separately from agent data)
 type AppState struct {
-	Onboarding  OnboardingState  `json:"onboarding"`
-	Device      DeviceInfo       `json:"device"`
-	UserProfile *UserProfile     `json:"user_profile,omitempty"` // User's inferred profile from onboarding
-	Version     string           `json:"version"`
-	Theme       string           `json:"theme,omitempty"`   // "light" or "dark", defaults to "light"
-	MenuBar     *MenuBarSettings `json:"menubar,omitempty"` // Menu bar app settings
+	Onboarding        OnboardingState    `json:"onboarding"`
+	Device            DeviceInfo         `json:"device"`
+	UserProfile       *UserProfile       `json:"user_profile,omitempty"`       // User's inferred profile from onboarding
+	AssistantProgress *AssistantProgress `json:"assistant_progress,omitempty"` // Global progression state for evolution features
+	UserName          string             `json:"user_name,omitempty"`          // Optional user-provided display name
+	AssistantName     string             `json:"assistant_name,omitempty"`     // Optional assistant name chosen during onboarding
+	Version           string             `json:"version"`
+	Theme             string             `json:"theme,omitempty"`   // "light" or "dark", defaults to "light"
+	MenuBar           *MenuBarSettings   `json:"menubar,omitempty"` // Menu bar app settings
 }
 
 // LoadedPlugin represents a plugin that has been loaded and is ready to use

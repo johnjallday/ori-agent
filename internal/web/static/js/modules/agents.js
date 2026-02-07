@@ -349,10 +349,8 @@ function renderAgents() {
 
   // Add each visible agent
   agentsToShow.forEach(agent => {
-    // Handle both old format (string) and new format (object with name and type)
     const agentName = typeof agent === 'string' ? agent : agent.name;
-    const agentType = typeof agent === 'string' ? 'tool-calling' : (agent.type || 'tool-calling');
-    const agentItem = createAgentElement(agentName, agentType, currentAgentName);
+    const agentItem = createAgentElement(agent, currentAgentName);
     agentsList.appendChild(agentItem);
   });
 
@@ -392,13 +390,12 @@ function renderAgents() {
   // Load settings for the current agent accordion when it's expanded
   agentsToShow.forEach(agent => {
     const agentName = typeof agent === 'string' ? agent : agent.name;
-    const agentType = typeof agent === 'string' ? 'tool-calling' : (agent.type || 'tool-calling');
     const accordionId = `agent-${agentName.replace(/\s+/g, '-')}`;
     const collapseElement = document.getElementById(`collapse-${accordionId}`);
 
     if (collapseElement) {
       collapseElement.addEventListener('shown.bs.collapse', async function () {
-        await loadAgentSettings(agentName, agentType, accordionId);
+        await loadAgentSettings(agentName, getAgentType(agent), accordionId);
       });
     }
   });
@@ -414,8 +411,67 @@ function hideAgents() {
   renderAgents();
 }
 
+function getAgentName(agent) {
+  return typeof agent === 'string' ? agent : agent?.name;
+}
+
+function getAgentType(agent) {
+  return typeof agent === 'string' ? 'tool-calling' : (agent?.type || 'tool-calling');
+}
+
+function normalizeAgentEvolution(agent) {
+  const evolution = typeof agent === 'string' ? null : agent?.evolution;
+  if (!evolution || typeof evolution !== 'object') {
+    return null;
+  }
+
+  const level = Number.isFinite(Number(evolution.level)) ? Math.max(0, Number(evolution.level)) : 0;
+  const experience = Number.isFinite(Number(evolution.experience)) ? Math.max(0, Number(evolution.experience)) : 0;
+  const stage = typeof evolution.stage === 'string' && evolution.stage.trim() ? evolution.stage.trim() : 'spark';
+  const path = typeof evolution.path === 'string' ? evolution.path.trim() : '';
+
+  return { level, experience, stage, path };
+}
+
+function toTitleCaseLabel(value) {
+  return String(value || '')
+    .split(/[\s_-]+/)
+    .filter(Boolean)
+    .map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
+    .join(' ');
+}
+
+function renderAgentEvolutionSummary(evolution) {
+  if (!evolution || !window.oriFeatures?.evolutionEnabled) {
+    return '';
+  }
+
+  const stageLabel = escapeHtml(toTitleCaseLabel(evolution.stage));
+  const pathLabel = evolution.path ? escapeHtml(toTitleCaseLabel(evolution.path)) : '';
+  const level = Math.max(0, Math.floor(evolution.level));
+  const experience = Math.max(0, Math.floor(evolution.experience));
+  const progress = experience % 100;
+  const progressPercent = Math.min(100, Math.max(0, Math.round(progress)));
+
+  return `
+    <div class="mt-1">
+      <div class="d-flex align-items-center gap-1 flex-wrap">
+        <span class="badge" style="background: var(--primary-color-light); color: var(--primary-color); font-size: 0.62rem;">${stageLabel}</span>
+        ${pathLabel ? `<span class="badge" style="background: var(--bg-tertiary); color: var(--text-secondary); font-size: 0.62rem;">${pathLabel}</span>` : ''}
+        <span style="color: var(--text-secondary); font-size: 0.66rem;">Lv ${level}</span>
+      </div>
+      <div class="progress mt-1" style="height: 4px; background: var(--bg-tertiary);">
+        <div class="progress-bar" role="progressbar" style="width: ${progressPercent}%; background: var(--primary-color);" aria-valuenow="${progressPercent}" aria-valuemin="0" aria-valuemax="100"></div>
+      </div>
+    </div>
+  `;
+}
+
 // Create agent element with accordion
-function createAgentElement(agentName, agentType, currentAgent) {
+function createAgentElement(agent, currentAgent) {
+  const agentName = getAgentName(agent);
+  const agentType = getAgentType(agent);
+  const evolution = normalizeAgentEvolution(agent);
   const isCurrentAgent = agentName === currentAgent;
   const accordionId = `agent-${agentName.replace(/\s+/g, '-')}`;
 
@@ -438,6 +494,7 @@ function createAgentElement(agentName, agentType, currentAgent) {
   const safeAgentNameJs = escapeJs(agentName);
   const safeAgentNameAttr = escapeAttr(agentName);
   const safeTypeLabel = escapeHtml(typeLabel);
+  const evolutionSummary = renderAgentEvolutionSummary(evolution);
 
   agentDiv.innerHTML = `
     <div class="accordion-header" id="heading-${accordionId}">
@@ -452,6 +509,7 @@ function createAgentElement(agentName, agentType, currentAgent) {
           <div class="d-flex flex-column">
             <span style="color: var(--text-primary); font-weight: 500;">${safeAgentName}</span>
             <span style="color: var(--text-secondary); font-size: 0.7rem;">${safeTypeLabel}</span>
+            ${evolutionSummary}
           </div>
         </div>
         <div class="agent-actions d-flex align-items-center gap-2">

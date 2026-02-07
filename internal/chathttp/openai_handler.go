@@ -79,7 +79,7 @@ func (h *Handler) handleOpenAIChat(
 		if err := h.costTracker.TrackUsage("openai", string(ag.Settings.Model), agentName, usage, ""); err != nil {
 			logger.Warn("Failed to track usage", logger.Fields{"error": err})
 		}
-		h.trackAgentStatistics(ag, usage.TotalTokens, "openai", string(ag.Settings.Model))
+		h.trackAgentStatistics(ag, agentName, usage.TotalTokens, "openai", string(ag.Settings.Model), userMessage)
 	}
 
 	choice := resp.Choices[0].Message
@@ -108,7 +108,7 @@ func (h *Handler) handleOpenAIChat(
 				if err := h.costTracker.TrackUsage("openai", string(ag.Settings.Model), agentName, usage, ""); err != nil {
 					logger.Warn("Failed to track fallback usage", logger.Fields{"error": err})
 				}
-				h.trackAgentStatistics(ag, usage.TotalTokens, "openai", string(ag.Settings.Model))
+				h.trackAgentStatistics(ag, agentName, usage.TotalTokens, "openai", string(ag.Settings.Model), userMessage)
 			}
 		}
 	}

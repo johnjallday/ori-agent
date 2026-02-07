@@ -36,10 +36,10 @@ func (h *Handler) handleGeminiChat(w http.ResponseWriter, r *http.Request, ag *a
 
 	// Build message list
 	var messages []llm.Message
-	systemPrompt := ag.Settings.SystemPrompt
-	if systemPrompt == "" {
-		systemPrompt = "You are a helpful assistant with access to tools. When you use a tool and receive results, report those results directly to the user. Be concise and accurate."
-	}
+	systemPrompt := resolveSystemPromptForAgent(
+		ag,
+		"You are a helpful assistant with access to tools. When you use a tool and receive results, report those results directly to the user. Be concise and accurate.",
+	)
 	messages = append(messages, llm.NewSystemMessage(systemPrompt))
 
 	if len(images) > 0 {
@@ -63,7 +63,7 @@ func (h *Handler) handleGeminiChat(w http.ResponseWriter, r *http.Request, ag *a
 	}
 
 	logger.Debug("Gemini response received", logger.Fields{"duration": time.Since(start)})
-	h.trackUsageCommon("gemini", ag.Settings.Model, agentName, resp.Usage, ag)
+	h.trackUsageCommon("gemini", ag.Settings.Model, agentName, resp.Usage, ag, userMessage)
 
 	if len(resp.ToolCalls) > 0 {
 		h.handleGeminiToolCalls(w, ctx, ag, agentName, messages, resp, tools, files, provider, baseCtx, sessionID, plannerDecision)

@@ -6,6 +6,7 @@ import (
 	"regexp"
 	"time"
 
+	"github.com/johnjallday/ori-agent/internal/agent"
 	orihttp "github.com/johnjallday/ori-agent/internal/http"
 	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/store"
@@ -33,6 +34,15 @@ func validateAgentName(name string) error {
 		return fmt.Errorf("agent name contains invalid characters (only alphanumeric, spaces, underscores, and hyphens allowed)")
 	}
 	return nil
+}
+
+func cloneAgentEvolution(ag *agent.Agent) *types.AgentEvolution {
+	if ag == nil || ag.Evolution == nil {
+		return nil
+	}
+	copy := *ag.Evolution
+	copy.EnsureDefaults()
+	return &copy
 }
 
 type Handler struct {
@@ -78,6 +88,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				"max_output_tokens": agent.Settings.MaxOutputTokens,
 				"system_prompt":     agent.Settings.SystemPrompt,
 				"enabled_plugins":   enabledPlugins,
+				"evolution":         cloneAgentEvolution(agent),
 			})
 			return
 		}
@@ -87,16 +98,18 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 		// Build agent details list with name and type
 		type AgentInfo struct {
-			Name string `json:"name"`
-			Type string `json:"type"`
+			Name      string                `json:"name"`
+			Type      string                `json:"type"`
+			Evolution *types.AgentEvolution `json:"evolution,omitempty"`
 		}
 		agentInfos := make([]AgentInfo, 0, len(names))
 		for _, name := range names {
 			agent, ok := h.State.GetAgent(name)
 			if ok && agent != nil {
 				agentInfos = append(agentInfos, AgentInfo{
-					Name: name,
-					Type: agent.Type,
+					Name:      name,
+					Type:      agent.Type,
+					Evolution: cloneAgentEvolution(agent),
 				})
 			} else {
 				// Fallback for agents that couldn't be loaded

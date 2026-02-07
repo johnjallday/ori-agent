@@ -134,6 +134,8 @@ func (s *fileStore) CreateAgent(name string, config *CreateAgentConfig) error {
 		}
 		// Initialize statistics for the new agent
 		newAgent.InitializeStatistics()
+		// Initialize evolution defaults for the new agent
+		newAgent.InitializeEvolution()
 		s.agents[name] = newAgent
 	}
 	return s.saveUnlocked()
@@ -344,11 +346,9 @@ func (s *fileStore) load() error {
 			s.agents = in.Agents
 		}
 		s.current = in.Current
-		// ensure maps
+		// Normalize migrated agents from legacy schema.
 		for _, ag := range s.agents {
-			if ag.Plugins == nil {
-				ag.Plugins = make(map[string]types.LoadedPlugin)
-			}
+			s.normalizeLoadedAgent(ag)
 		}
 		return nil
 	}
@@ -394,28 +394,15 @@ func (s *fileStore) load() error {
 
 					var ag agent.Agent
 
-					// Load agent_settings.json (Type + Settings + Plugins)
+					// Load full agent settings so nested persistence remains forward-compatible.
 					if settingsData, err := os.ReadFile(settingsPath); err == nil {
-						var settings struct {
-							Type     string                        `json:"type"`
-							Settings types.Settings                `json:"Settings"`
-							Plugins  map[string]types.LoadedPlugin `json:"Plugins"`
-						}
-						if err := json.Unmarshal(settingsData, &settings); err == nil {
-							ag.Type = settings.Type
-							ag.Settings = settings.Settings
-							ag.Plugins = settings.Plugins
-							logger.Verbosef("✅ Loaded agent '%s' with %d plugins from %s", agentName, len(settings.Plugins), settingsPath)
+						if err := json.Unmarshal(settingsData, &ag); err == nil {
+							logger.Verbosef("✅ Loaded agent '%s' with %d plugins from %s", agentName, len(ag.Plugins), settingsPath)
 						} else {
 							logger.Verbosef("❌ Failed to unmarshal agent_settings.json for '%s': %v", agentName, err)
 						}
 					} else {
 						logger.Verbosef("⚠️ Could not read agent_settings.json for '%s': %v", agentName, err)
-					}
-
-					// Ensure maps are initialized
-					if ag.Plugins == nil {
-						ag.Plugins = make(map[string]types.LoadedPlugin)
 					}
 
 					// Load MCP servers from mcp_servers.json
@@ -430,6 +417,7 @@ func (s *fileStore) load() error {
 						}
 					}
 
+					s.normalizeLoadedAgent(&ag)
 					s.agents[agentName] = &ag
 				} else if filepath.Ext(entry.Name()) == ".json" {
 					// Legacy flat structure: agents/agent.json
@@ -446,11 +434,6 @@ func (s *fileStore) load() error {
 						continue
 					}
 
-					// ensure maps
-					if ag.Plugins == nil {
-						ag.Plugins = make(map[string]types.LoadedPlugin)
-					}
-
 					// Load MCP servers from mcp_servers.json (legacy structure)
 					mcpServersPath := filepath.Join(agentsDir, agentName, "mcp_servers.json")
 					if mcpData, err := os.ReadFile(mcpServersPath); err == nil {
@@ -463,6 +446,7 @@ func (s *fileStore) load() error {
 						}
 					}
 
+					s.normalizeLoadedAgent(&ag)
 					s.agents[agentName] = &ag
 				}
 			}
@@ -470,6 +454,32 @@ func (s *fileStore) load() error {
 	}
 
 	return nil
+}
+
+// normalizeLoadedAgent applies defaults for backward compatibility while preserving
+// explicit values from disk.
+func (s *fileStore) normalizeLoadedAgent(ag *agent.Agent) {
+	if ag == nil {
+		return
+	}
+
+	if ag.Plugins == nil {
+		ag.Plugins = make(map[string]types.LoadedPlugin)
+	}
+	if ag.Capabilities == nil {
+		ag.Capabilities = []string{}
+	}
+	if ag.Status == "" {
+		ag.Status = types.AgentStatusIdle
+	}
+	if ag.Statistics == nil {
+		ag.InitializeStatistics()
+	}
+	if ag.Evolution == nil {
+		ag.InitializeEvolution()
+	} else {
+		ag.Evolution.EnsureDefaults()
+	}
 }
 
 // migrateAgentTypesUnlocked migrates existing agents to have types based on their current model

@@ -68,7 +68,10 @@ type Handler struct {
 	costTracker    *llm.CostTracker
 	sessionStore   session.HybridStore
 	toolCallStore  session.ToolCallStore
-	skillsManager  interface {
+	evolutionSvc   interface {
+		AwardMessageXP(agentName string, tokenCount int, userMessage string) error
+	}
+	skillsManager interface {
 		GetSkill(string, string) (*skills.Skill, bool, error)
 		ListSkills(string) ([]skills.Skill, error)
 	}
@@ -173,6 +176,13 @@ func (h *Handler) SetSessionStore(store session.HybridStore) {
 // SetToolCallStore sets the tool call store for storing tool execution data
 func (h *Handler) SetToolCallStore(store session.ToolCallStore) {
 	h.toolCallStore = store
+}
+
+// SetEvolutionService configures agent/assistant XP tracking.
+func (h *Handler) SetEvolutionService(service interface {
+	AwardMessageXP(agentName string, tokenCount int, userMessage string) error
+}) {
+	h.evolutionSvc = service
 }
 
 // SetSkillsManager sets the skills manager for chat commands and skill execution
@@ -792,20 +802,17 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 	if invokedSkill != nil {
 		tools = filterToolsForSkill(tools, invokedSkill.Skill)
 	}
+	tools = prioritizeToolsForPath(ag, tools)
 
 	// Get appropriate client for this agent
 	agentClient := h.getClientForAgent(ag)
 
 	// Add system message for better tool usage guidance
 	if len(ag.Messages) == 0 {
-		var systemPrompt string
-
-		// Use custom system prompt if set, otherwise use default
-		if ag.Settings.SystemPrompt != "" {
-			systemPrompt = ag.Settings.SystemPrompt
-		} else {
-			systemPrompt = "You are a helpful assistant with access to various tools. When a user request can be fulfilled by using an available tool, use the tool instead of providing general information. Be concise and direct in your responses."
-		}
+		systemPrompt := resolveSystemPromptForAgent(
+			ag,
+			"You are a helpful assistant with access to various tools. When a user request can be fulfilled by using an available tool, use the tool instead of providing general information. Be concise and direct in your responses.",
+		)
 
 		// Append available tools list if there are any
 		if len(tools) > 0 {

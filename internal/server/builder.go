@@ -12,6 +12,8 @@ import (
 	"github.com/johnjallday/ori-agent/internal/client"
 	"github.com/johnjallday/ori-agent/internal/config"
 	"github.com/johnjallday/ori-agent/internal/devicehttp"
+	"github.com/johnjallday/ori-agent/internal/evolution"
+	"github.com/johnjallday/ori-agent/internal/evolutionhttp"
 	"github.com/johnjallday/ori-agent/internal/externalagents"
 	"github.com/johnjallday/ori-agent/internal/externalagentshttp"
 	"github.com/johnjallday/ori-agent/internal/fileshttp"
@@ -132,6 +134,7 @@ type ServerBuilder struct {
 	backupManager         *pluginmanager.BackupManager
 	pluginUpdateService   *pluginupdateservice.Service
 	gateway               *gateway.Service
+	evolutionService      *evolution.Service
 
 	// Handlers
 	healthManager          *healthhttp.Manager
@@ -183,7 +186,8 @@ type ServerBuilder struct {
 	sessionFilesHandler *fileshttp.Handler
 
 	// Review system
-	reviewHandler *reviewhttp.Handler
+	reviewHandler    *reviewhttp.Handler
+	evolutionHandler *evolutionhttp.Handler
 
 	// External agents (Claude Code, Codex)
 	externalAgentsCache   *externalagents.Cache
@@ -424,6 +428,7 @@ func (b *ServerBuilder) createDomainFacades() error {
 		b.noteHandler,
 		b.sessionFilesHandler,
 		b.reviewHandler,
+		b.evolutionHandler,
 		b.externalAgentsHandler,
 		b.skillsHandler,
 	)

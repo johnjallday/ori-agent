@@ -10,8 +10,11 @@ import (
 	agenthttp "github.com/johnjallday/ori-agent/internal/agenthttp"
 	"github.com/johnjallday/ori-agent/internal/chathttp"
 	"github.com/johnjallday/ori-agent/internal/devicehttp"
+	"github.com/johnjallday/ori-agent/internal/evolution"
+	"github.com/johnjallday/ori-agent/internal/evolutionhttp"
 	"github.com/johnjallday/ori-agent/internal/externalagents"
 	"github.com/johnjallday/ori-agent/internal/externalagentshttp"
+	"github.com/johnjallday/ori-agent/internal/featureflags"
 	"github.com/johnjallday/ori-agent/internal/fileshttp"
 	"github.com/johnjallday/ori-agent/internal/filewatcher"
 	"github.com/johnjallday/ori-agent/internal/healthhttp"
@@ -51,6 +54,16 @@ func (b *ServerBuilder) initializeHandlers() error {
 	b.chatHandler.SetCostTracker(b.costTracker)
 	b.chatHandler.SetMCPRegistry(b.mcpRegistry)
 	b.chatHandler.SetWorkspaceStore(b.workspaceStore) // Will be set later
+	if featureflags.EvolutionEnabled() {
+		b.evolutionService = evolution.NewService(b.st, b.onboardingMgr, nil)
+		b.evolutionService.SetActivityLogger(b.activityLogger)
+		b.chatHandler.SetEvolutionService(b.evolutionService)
+		logger.Info("Evolution feature enabled", logger.Fields{})
+	} else {
+		b.evolutionService = nil
+		b.chatHandler.SetEvolutionService(nil)
+		logger.Info("Evolution feature disabled via ORI_EVOLUTION_ENABLED", logger.Fields{})
+	}
 	b.chatHandler.SetShutdownFunc(func() {
 		logger.Info("Shutting down ori-agent server", logger.Fields{})
 		b.server.Shutdown()
@@ -63,6 +76,11 @@ func (b *ServerBuilder) initializeHandlers() error {
 	b.pluginHandler.HealthManager = b.healthManager
 	b.pluginInitHandler = pluginhttp.NewInitHandler(b.st, b.registryManager, b.pluginHandler)
 	b.healthHandler = healthhttp.NewHandler(b.healthManager, b.st)
+	if b.evolutionService != nil {
+		b.evolutionHandler = evolutionhttp.NewHandler(b.st, b.onboardingMgr, b.evolutionService)
+	} else {
+		b.evolutionHandler = nil
+	}
 	b.pluginUpdateHandler = pluginupdate.NewHandler(b.st, b.healthManager.GetChecker())
 	b.pluginUpdateHandler.SetPluginRegistry(&b.pluginReg)
 	b.pluginUpdateHandler.SetRegistryManager(b.registryManager)

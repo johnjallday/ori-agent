@@ -310,6 +310,87 @@ func TestAgentStatus_Constants(t *testing.T) {
 	}
 }
 
+func TestNewAgentEvolution(t *testing.T) {
+	evolution := NewAgentEvolution()
+
+	if evolution == nil {
+		t.Fatal("NewAgentEvolution returned nil")
+	}
+	if evolution.Level != 0 {
+		t.Errorf("expected level 0, got %d", evolution.Level)
+	}
+	if evolution.Experience != 0 {
+		t.Errorf("expected experience 0, got %d", evolution.Experience)
+	}
+	if evolution.Stage != AgentStageSpark {
+		t.Errorf("expected stage %q, got %q", AgentStageSpark, evolution.Stage)
+	}
+	if evolution.UpdatedAt.IsZero() {
+		t.Error("expected UpdatedAt to be set")
+	}
+}
+
+func TestAgentEvolution_EnsureDefaults(t *testing.T) {
+	evolution := &AgentEvolution{
+		Level:      -1,
+		Experience: -10,
+		FeedCount:  -2,
+	}
+
+	evolution.EnsureDefaults()
+
+	if evolution.Level != 0 {
+		t.Errorf("expected level to be normalized to 0, got %d", evolution.Level)
+	}
+	if evolution.Experience != 0 {
+		t.Errorf("expected experience to be normalized to 0, got %d", evolution.Experience)
+	}
+	if evolution.FeedCount != 0 {
+		t.Errorf("expected feed_count to be normalized to 0, got %d", evolution.FeedCount)
+	}
+	if evolution.Stage != AgentStageSpark {
+		t.Errorf("expected stage to default to %q, got %q", AgentStageSpark, evolution.Stage)
+	}
+	if evolution.UpdatedAt.IsZero() {
+		t.Error("expected UpdatedAt to be set")
+	}
+}
+
+func TestAgentEvolution_JSONSerialization(t *testing.T) {
+	evolution := &AgentEvolution{
+		Level:      7,
+		Experience: 980,
+		Stage:      AgentStageLearner,
+		Path:       AgentPathCoder,
+		ParentID:   "commander-1",
+		FeedCount:  3,
+		UpdatedAt:  time.Now().UTC().Truncate(time.Second),
+	}
+
+	data, err := json.Marshal(evolution)
+	if err != nil {
+		t.Fatalf("failed to marshal evolution: %v", err)
+	}
+
+	var decoded AgentEvolution
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		t.Fatalf("failed to unmarshal evolution: %v", err)
+	}
+
+	if decoded.Level != evolution.Level {
+		t.Errorf("expected level %d, got %d", evolution.Level, decoded.Level)
+	}
+	if decoded.Experience != evolution.Experience {
+		t.Errorf("expected experience %d, got %d", evolution.Experience, decoded.Experience)
+	}
+	if decoded.Stage != evolution.Stage {
+		t.Errorf("expected stage %q, got %q", evolution.Stage, decoded.Stage)
+	}
+	if decoded.Path != evolution.Path {
+		t.Errorf("expected path %q, got %q", evolution.Path, decoded.Path)
+	}
+}
+
 func TestDashboardStats_Struct(t *testing.T) {
 	stats := &DashboardStats{
 		TotalAgents:             10,

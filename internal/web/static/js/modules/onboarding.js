@@ -16,6 +16,8 @@ export class OnboardingManager {
     this.web3Address = null;
     this.web3ChainId = null;
     this.web3Enabled = true;
+    this.userName = '';
+    this.assistantName = 'Ori';
 
     // Supported chains for Web3
     this.CHAINS = {
@@ -28,10 +30,10 @@ export class OnboardingManager {
 
     // Step names for dynamic title updates
     this.stepTitles = [
-      'Welcome to Ori Agent',
+      'Meet Ori',
       'Device Detection',
       'Configure API Keys',
-      'Configure System Model',
+      'Choose Main Model',
       'Connect Web3 Wallet',
       'Personalize Your Experience',
       'Setup Complete'
@@ -62,6 +64,9 @@ export class OnboardingManager {
 
     // Check if onboarding is needed
     const status = await this.checkOnboardingStatus();
+    this.userName = status.user_name || '';
+    this.assistantName = status.assistant_name || 'Ori';
+    this.applyNamesToUI();
     if (status.needs_onboarding) {
       // Show modal after a short delay to let the page load
       setTimeout(() => {
@@ -138,6 +143,21 @@ export class OnboardingManager {
 
     if (web3DisconnectBtn) {
       web3DisconnectBtn.addEventListener('click', () => this.disconnectWeb3Wallet());
+    }
+
+    const userNameInput = document.getElementById('onboardingUserName');
+    const assistantNameInput = document.getElementById('onboardingAssistantName');
+    if (userNameInput) {
+      userNameInput.addEventListener('input', () => {
+        this.userName = userNameInput.value;
+        this.applyNamesToUI();
+      });
+    }
+    if (assistantNameInput) {
+      assistantNameInput.addEventListener('input', () => {
+        this.assistantName = assistantNameInput.value;
+        this.applyNamesToUI();
+      });
     }
 
     // Keyboard navigation
@@ -240,10 +260,83 @@ export class OnboardingManager {
     }
   }
 
+  getUserDisplayName() {
+    const trimmed = (this.userName || '').trim();
+    return trimmed || 'User';
+  }
+
+  getAssistantDisplayName() {
+    const trimmed = (this.assistantName || '').trim();
+    return trimmed || 'Ori';
+  }
+
+  applyNamesToUI() {
+    const userInput = document.getElementById('onboardingUserName');
+    const assistantInput = document.getElementById('onboardingAssistantName');
+    const greeting = document.getElementById('onboardingWelcomeGreeting');
+
+    if (userInput) {
+      const nextValue = this.userName || '';
+      if (userInput.value !== nextValue) {
+        userInput.value = nextValue;
+      }
+    }
+    if (assistantInput) {
+      const nextValue = this.assistantName || 'Ori';
+      if (assistantInput.value !== nextValue) {
+        assistantInput.value = nextValue;
+      }
+    }
+    if (greeting) {
+      greeting.textContent = `Hello ${this.getUserDisplayName()}. I am ${this.getAssistantDisplayName()}, ready to serve.`;
+    }
+  }
+
+  async saveNames() {
+    const userInput = document.getElementById('onboardingUserName');
+    const assistantInput = document.getElementById('onboardingAssistantName');
+    const errorEl = document.getElementById('onboardingNamesError');
+    if (errorEl) {
+      errorEl.classList.add('d-none');
+      errorEl.textContent = '';
+    }
+
+    const userName = userInput?.value?.trim() || '';
+    const assistantName = assistantInput?.value?.trim() || 'Ori';
+
+    try {
+      const response = await fetch('/api/onboarding/names', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          user_name: userName,
+          assistant_name: assistantName
+        })
+      });
+      if (!response.ok) {
+        throw new Error('Failed to save names');
+      }
+
+      const data = await response.json();
+      this.userName = data.user_name || '';
+      this.assistantName = data.assistant_name || 'Ori';
+      this.applyNamesToUI();
+      return true;
+    } catch (error) {
+      console.error('Error saving onboarding names:', error);
+      if (errorEl) {
+        errorEl.textContent = 'Failed to save names. Please try again.';
+        errorEl.classList.remove('d-none');
+      }
+      return false;
+    }
+  }
+
   // Show the onboarding modal
   showOnboarding() {
     if (this.modalInstance) {
       this.currentStep = 0;
+      this.applyNamesToUI();
       this.updateStepDisplay();
       this.modalInstance.show();
 
@@ -668,6 +761,13 @@ export class OnboardingManager {
       }
 
       if (successAlert) {
+        const providerLabel = this.availableProviders.find(p => p.name === provider)?.display_name || provider;
+        successAlert.innerHTML = `
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" class="me-2">
+            <path d="M12,2C6.48,2 2,6.48 2,12C2,17.52 6.48,22 12,22C17.52,22 22,17.52 22,12C22,6.48 17.52,2 12,2M12,20C7.59,20 4,16.41 4,12C4,7.59 7.59,4 12,4C16.41,4 20,7.59 20,12C20,16.41 16.41,20 12,20M16.59,7.58L10,14.17L7.41,11.59L6,13L10,17L18,9L16.59,7.58Z"/>
+          </svg>
+          ${this.getAssistantDisplayName()} will use ${providerLabel} (${model}) as the primary system model.
+        `;
         successAlert.classList.remove('d-none');
       }
       return true;
@@ -950,6 +1050,14 @@ export class OnboardingManager {
   // Move to next step
   async nextStep() {
     if (this.currentStep < this.totalSteps - 1) {
+      // Step 0: Save user/assistant names
+      if (this.currentStep === 0) {
+        const saved = await this.saveNames();
+        if (!saved) {
+          return;
+        }
+      }
+
       // Step 1: Device Detection - fetch device info if not already done
       if (this.currentStep === 1 && !this.deviceInfo) {
         await this.fetchDeviceInfo();
@@ -1094,6 +1202,24 @@ export class OnboardingManager {
 
   // Populate completion summary with gathered info
   populateCompletionSummary() {
+    const assistant = this.getAssistantDisplayName();
+    const user = this.getUserDisplayName();
+
+    const completionStatusText = document.getElementById('completionStatusText');
+    if (completionStatusText) {
+      completionStatusText.textContent = `${assistant} is ready!`;
+    }
+
+    const completionNameSummary = document.getElementById('completionNameSummary');
+    if (completionNameSummary) {
+      completionNameSummary.textContent = `${assistant} + ${user}`;
+    }
+
+    const missionText = document.getElementById('completionMissionText');
+    if (missionText) {
+      missionText.textContent = `${assistant}: "Give me one quick mission to learn this interface."`;
+    }
+
     // Device info
     const deviceEl = document.getElementById('completionDeviceInfo');
     if (deviceEl && this.deviceInfo) {

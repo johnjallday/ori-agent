@@ -15,6 +15,26 @@ const (
 	AgentStatusDisabled AgentStatus = "disabled" // Agent has been manually disabled
 )
 
+// AgentStage represents a progression milestone for an agent.
+type AgentStage string
+
+const (
+	AgentStageSpark    AgentStage = "spark"
+	AgentStageInfant   AgentStage = "infant"
+	AgentStageLearner  AgentStage = "learner"
+	AgentStageExpert   AgentStage = "expert"
+	AgentStageSentient AgentStage = "sentient"
+)
+
+// AgentPath represents the specialization path for an agent.
+type AgentPath string
+
+const (
+	AgentPathCoder      AgentPath = "coder"
+	AgentPathResearcher AgentPath = "researcher"
+	AgentPathWriter     AgentPath = "writer"
+)
+
 // AgentStatistics tracks usage and performance metrics for an agent
 type AgentStatistics struct {
 	MessageCount  int64     `json:"message_count"`            // Total number of messages processed
@@ -39,6 +59,18 @@ type AgentMetadata struct {
 	Favorite          bool     `json:"favorite,omitempty"`           // Whether this agent is marked as favorite
 	ReviewEnabled     *bool    `json:"review_enabled,omitempty"`     // Whether conversation review is enabled for this agent
 	ReviewSensitivity string   `json:"review_sensitivity,omitempty"` // Review sensitivity level: "low", "medium", "high" (default: "medium")
+}
+
+// AgentEvolution tracks progression state for an agent.
+type AgentEvolution struct {
+	Level         int        `json:"level"`
+	Experience    int64      `json:"experience"`
+	Stage         AgentStage `json:"stage"`
+	Path          AgentPath  `json:"path,omitempty"`
+	ParentID      string     `json:"parent_id,omitempty"`
+	FeedCount     int64      `json:"feed_count,omitempty"`
+	LastEvolvedAt time.Time  `json:"last_evolved_at,omitempty"`
+	UpdatedAt     time.Time  `json:"updated_at"`
 }
 
 // DashboardStats contains aggregate statistics across all agents
@@ -68,6 +100,39 @@ func NewAgentStatistics() *AgentStatistics {
 		LastActive:   now,
 		CreatedAt:    now,
 		UpdatedAt:    now,
+	}
+}
+
+// NewAgentEvolution creates a new AgentEvolution with safe defaults.
+func NewAgentEvolution() *AgentEvolution {
+	now := time.Now()
+	return &AgentEvolution{
+		Level:      0,
+		Experience: 0,
+		Stage:      AgentStageSpark,
+		UpdatedAt:  now,
+	}
+}
+
+// EnsureDefaults fills missing values for backward-compatible migrations.
+func (e *AgentEvolution) EnsureDefaults() {
+	if e == nil {
+		return
+	}
+	if e.Level < 0 {
+		e.Level = 0
+	}
+	if e.Experience < 0 {
+		e.Experience = 0
+	}
+	if e.FeedCount < 0 {
+		e.FeedCount = 0
+	}
+	if e.Stage == "" {
+		e.Stage = AgentStageSpark
+	}
+	if e.UpdatedAt.IsZero() {
+		e.UpdatedAt = time.Now()
 	}
 }
 
@@ -164,6 +229,9 @@ const (
 	ActivityEventPluginEnabled  ActivityEventType = "plugin_enabled"  // Plugin was enabled for the agent
 	ActivityEventPluginDisabled ActivityEventType = "plugin_disabled" // Plugin was disabled for the agent
 	ActivityEventStatusChanged  ActivityEventType = "status_changed"  // Agent status changed
+	ActivityEventEvolutionFeed  ActivityEventType = "evolution_feed"  // Feed action granted evolution XP
+	ActivityEventEvolutionStage ActivityEventType = "evolution_stage" // Evolution stage changed
+	ActivityEventEvolutionPath  ActivityEventType = "evolution_path"  // Evolution path selected/changed
 )
 
 // ActivityLog represents a single activity log entry for an agent

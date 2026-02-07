@@ -3,6 +3,7 @@ package onboardinghttp
 import (
 	"encoding/json"
 	"net/http"
+	"strings"
 
 	orihttp "github.com/johnjallday/ori-agent/internal/http"
 	"github.com/johnjallday/ori-agent/internal/logger"
@@ -29,6 +30,8 @@ type StatusResponse struct {
 	Skipped         bool     `json:"skipped"`
 	StepsCompleted  []string `json:"steps_completed"`
 	StepsSkipped    []string `json:"steps_skipped,omitempty"`
+	UserName        string   `json:"user_name,omitempty"`
+	AssistantName   string   `json:"assistant_name,omitempty"`
 }
 
 // SkipStepRequest represents a request to skip a step
@@ -41,6 +44,12 @@ type CompleteStepRequest struct {
 	StepName string `json:"step_name"`
 }
 
+// NamesRequest represents a request to save onboarding names.
+type NamesRequest struct {
+	UserName      string `json:"user_name"`
+	AssistantName string `json:"assistant_name"`
+}
+
 // GetStatus checks if onboarding is needed and returns current state
 // GET /api/onboarding/status
 func (h *Handler) GetStatus(w http.ResponseWriter, r *http.Request) {
@@ -51,6 +60,7 @@ func (h *Handler) GetStatus(w http.ResponseWriter, r *http.Request) {
 
 	state := h.onboardingMgr.GetState()
 	isComplete := h.onboardingMgr.IsOnboardingComplete()
+	userName, assistantName := h.onboardingMgr.GetNames()
 
 	response := StatusResponse{
 		NeedsOnboarding: !isComplete,
@@ -59,6 +69,8 @@ func (h *Handler) GetStatus(w http.ResponseWriter, r *http.Request) {
 		Skipped:         !state.SkippedAt.IsZero(),
 		StepsCompleted:  state.StepsCompleted,
 		StepsSkipped:    state.StepsSkipped,
+		UserName:        userName,
+		AssistantName:   assistantName,
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -94,6 +106,7 @@ func (h *Handler) CompleteStep(w http.ResponseWriter, r *http.Request) {
 
 	state := h.onboardingMgr.GetState()
 	isComplete := h.onboardingMgr.IsOnboardingComplete()
+	userName, assistantName := h.onboardingMgr.GetNames()
 
 	response := StatusResponse{
 		NeedsOnboarding: !isComplete,
@@ -102,6 +115,8 @@ func (h *Handler) CompleteStep(w http.ResponseWriter, r *http.Request) {
 		Skipped:         !state.SkippedAt.IsZero(),
 		StepsCompleted:  state.StepsCompleted,
 		StepsSkipped:    state.StepsSkipped,
+		UserName:        userName,
+		AssistantName:   assistantName,
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -136,6 +151,7 @@ func (h *Handler) SkipStep(w http.ResponseWriter, r *http.Request) {
 	// Return updated status
 	state := h.onboardingMgr.GetState()
 	isComplete := h.onboardingMgr.IsOnboardingComplete()
+	userName, assistantName := h.onboardingMgr.GetNames()
 
 	response := StatusResponse{
 		NeedsOnboarding: !isComplete,
@@ -144,6 +160,8 @@ func (h *Handler) SkipStep(w http.ResponseWriter, r *http.Request) {
 		Skipped:         !state.SkippedAt.IsZero(),
 		StepsCompleted:  state.StepsCompleted,
 		StepsSkipped:    state.StepsSkipped,
+		UserName:        userName,
+		AssistantName:   assistantName,
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -205,6 +223,49 @@ func (h *Handler) Reset(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	if encErr := json.NewEncoder(w).Encode(map[string]bool{"success": true}); encErr != nil {
+		logger.Error("Failed to encode response", logger.Fields{"error": encErr})
+	}
+}
+
+// SaveNames persists onboarding user/assistant names.
+// POST /api/onboarding/names
+func (h *Handler) SaveNames(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		orihttp.MethodNotAllowed(w)
+		return
+	}
+
+	var req NamesRequest
+	if !orihttp.ParseJSONBody(w, r, &req) {
+		return
+	}
+
+	assistantName := strings.TrimSpace(req.AssistantName)
+	if assistantName == "" {
+		assistantName = "Ori"
+	}
+	if len(assistantName) > 60 {
+		orihttp.BadRequest(w, "assistant_name must be 60 characters or fewer")
+		return
+	}
+
+	if len(strings.TrimSpace(req.UserName)) > 60 {
+		orihttp.BadRequest(w, "user_name must be 60 characters or fewer")
+		return
+	}
+
+	if err := h.onboardingMgr.SetNames(strings.TrimSpace(req.UserName), assistantName); err != nil {
+		orihttp.InternalError(w, "Failed to save onboarding names: "+err.Error())
+		return
+	}
+
+	userName, persistedAssistantName := h.onboardingMgr.GetNames()
+	w.Header().Set("Content-Type", "application/json")
+	if encErr := json.NewEncoder(w).Encode(map[string]any{
+		"success":        true,
+		"user_name":      userName,
+		"assistant_name": persistedAssistantName,
+	}); encErr != nil {
 		logger.Error("Failed to encode response", logger.Fields{"error": encErr})
 	}
 }

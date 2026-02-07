@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/johnjallday/ori-agent/internal/featureflags"
 	orihttp "github.com/johnjallday/ori-agent/internal/http"
 	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/platform"
@@ -159,6 +160,7 @@ func (s *Server) prepareBasePageData(pageName string) web.TemplateData {
 	data.Extra["Web3Enabled"] = caps.Web3Wallet
 	data.Extra["MarketplacePaymentsEnabled"] = caps.MarketplacePayments
 	data.Extra["TokenPayoutsEnabled"] = caps.TokenPayouts
+	data.Extra["EvolutionEnabled"] = featureflags.EvolutionEnabled()
 
 	if agents, current := s.Storage.ListAgents(); len(agents) > 0 {
 		currentAgentName := current
@@ -226,10 +228,8 @@ func (s *Server) serveSettings(w http.ResponseWriter, r *http.Request) {
 	// Add platform information for system info display
 	currentPlatform := platform.DetectPlatform()
 	currentPlatformDisplay := platform.GetPlatformDisplayName(currentPlatform)
-	data.Extra = map[string]interface{}{
-		"CurrentPlatform":        currentPlatform,
-		"CurrentPlatformDisplay": currentPlatformDisplay,
-	}
+	data.Extra["CurrentPlatform"] = currentPlatform
+	data.Extra["CurrentPlatformDisplay"] = currentPlatformDisplay
 
 	s.renderAndWritePage(w, "settings", data)
 }
@@ -246,10 +246,8 @@ func (s *Server) serveMarketplace(w http.ResponseWriter, r *http.Request) {
 	// Add platform information for compatibility checking
 	currentPlatform := platform.DetectPlatform()
 	currentPlatformDisplay := platform.GetPlatformDisplayName(currentPlatform)
-	data.Extra = map[string]interface{}{
-		"CurrentPlatform":        currentPlatform,
-		"CurrentPlatformDisplay": currentPlatformDisplay,
-	}
+	data.Extra["CurrentPlatform"] = currentPlatform
+	data.Extra["CurrentPlatformDisplay"] = currentPlatformDisplay
 
 	s.renderAndWritePage(w, "marketplace", data)
 }
@@ -321,9 +319,7 @@ func (s *Server) serveWorkspaceDetail(w http.ResponseWriter, r *http.Request, wo
 	data.Title = "Workspace - Ori Agent"
 	data.BrandText = "Ori Agent"
 	data.ShowSidebarToggle = true
-	data.Extra = map[string]interface{}{
-		"WorkspaceID": workspaceID,
-	}
+	data.Extra["WorkspaceID"] = workspaceID
 	s.renderAndWritePage(w, "workspace-detail", data)
 }
 
@@ -332,9 +328,7 @@ func (s *Server) serveWorkspaceCanvas(w http.ResponseWriter, r *http.Request, wo
 	data.Title = "Workspace Canvas - Ori Agent"
 	data.BrandText = "Ori Agent"
 	data.ShowSidebarToggle = true
-	data.Extra = map[string]interface{}{
-		"WorkspaceID": workspaceID,
-	}
+	data.Extra["WorkspaceID"] = workspaceID
 	s.renderAndWritePage(w, "workspace-canvas", data)
 }
 

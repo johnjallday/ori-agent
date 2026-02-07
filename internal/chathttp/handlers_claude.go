@@ -31,9 +31,11 @@ func (h *Handler) handleClaudeChat(w http.ResponseWriter, r *http.Request, ag *a
 
 	// Build message list
 	var messages []llm.Message
-	if ag.Settings.SystemPrompt != "" {
-		messages = append(messages, llm.NewSystemMessage(ag.Settings.SystemPrompt))
-	}
+	systemPrompt := resolveSystemPromptForAgent(
+		ag,
+		"You are a helpful assistant with access to tools. Use tools when they provide a more accurate answer.",
+	)
+	messages = append(messages, llm.NewSystemMessage(systemPrompt))
 
 	// Use message with images if images are present
 	if len(images) > 0 {
@@ -58,11 +60,11 @@ func (h *Handler) handleClaudeChat(w http.ResponseWriter, r *http.Request, ag *a
 	}
 
 	// Track usage and cost
-	h.trackUsageCommon("claude", ag.Settings.Model, agentName, resp.Usage, ag)
+	h.trackUsageCommon("claude", ag.Settings.Model, agentName, resp.Usage, ag, userMessage)
 
 	// Tool-call branch
 	if len(resp.ToolCalls) > 0 {
-		h.handleClaudeToolCalls(w, ctx, ag, agentName, messages, resp, tools, files, provider, baseCtx, start, sessionID, plannerDecision)
+		h.handleClaudeToolCalls(w, ctx, ag, agentName, messages, resp, tools, files, provider, baseCtx, start, sessionID, userMessage, plannerDecision)
 		return
 	}
 
@@ -93,6 +95,7 @@ func (h *Handler) handleClaudeToolCalls(
 	baseCtx context.Context,
 	start time.Time,
 	sessionID string,
+	userMessage string,
 	plannerDecision *types.PlannerDecision,
 ) {
 	logger.Info("Claude requested tool calls", logger.Fields{"count": len(resp.ToolCalls)})
@@ -146,7 +149,7 @@ func (h *Handler) handleClaudeToolCalls(
 	}
 
 	// Track usage for second call
-	h.trackUsageCommon("claude", ag.Settings.Model, agentName, resp2.Usage, ag)
+	h.trackUsageCommon("claude", ag.Settings.Model, agentName, resp2.Usage, ag, userMessage)
 
 	// Store final response
 	ag.Messages = append(ag.Messages, openai.AssistantMessage(resp2.Content))

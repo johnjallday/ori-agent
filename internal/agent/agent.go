@@ -82,6 +82,7 @@ type Agent struct {
 	Status     types.AgentStatus      `json:"status,omitempty"`     // Operational status (active, idle, error, disabled)
 	Statistics *types.AgentStatistics `json:"statistics,omitempty"` // Usage and performance metrics
 	Metadata   *types.AgentMetadata   `json:"metadata,omitempty"`   // Descriptive information and tags
+	Evolution  *types.AgentEvolution  `json:"evolution,omitempty"`  // Agent progression state
 }
 
 // InitializeStatistics safely initializes the statistics if nil
@@ -90,6 +91,16 @@ func (a *Agent) InitializeStatistics() {
 	if a.Statistics == nil {
 		a.Statistics = types.NewAgentStatistics()
 	}
+}
+
+// InitializeEvolution safely initializes evolution data if nil.
+// This method is idempotent and can be called multiple times.
+func (a *Agent) InitializeEvolution() {
+	if a.Evolution == nil {
+		a.Evolution = types.NewAgentEvolution()
+		return
+	}
+	a.Evolution.EnsureDefaults()
 }
 
 // UpdateLastActive updates the last activity timestamp for the agent

@@ -3,6 +3,8 @@ package agent
 import (
 	"testing"
 	"time"
+
+	"github.com/johnjallday/ori-agent/internal/types"
 )
 
 func TestGetTypeForModel(t *testing.T) {
@@ -114,6 +116,45 @@ func TestAgent_UpdateLastActive(t *testing.T) {
 
 		if !agent.Statistics.LastActive.After(beforeUpdate) {
 			t.Error("LastActive should be updated to a later time")
+		}
+	})
+}
+
+func TestAgent_InitializeEvolution(t *testing.T) {
+	t.Run("initializes nil evolution", func(t *testing.T) {
+		agent := &Agent{}
+		if agent.Evolution != nil {
+			t.Fatal("Evolution should be nil initially")
+		}
+
+		agent.InitializeEvolution()
+
+		if agent.Evolution == nil {
+			t.Error("Evolution should not be nil after InitializeEvolution()")
+		}
+		if agent.Evolution.Stage != types.AgentStageSpark {
+			t.Errorf("expected default stage %q, got %q", types.AgentStageSpark, agent.Evolution.Stage)
+		}
+	})
+
+	t.Run("normalizes existing evolution defaults", func(t *testing.T) {
+		agent := &Agent{
+			Evolution: &types.AgentEvolution{
+				Level:      -1,
+				Experience: -5,
+			},
+		}
+
+		agent.InitializeEvolution()
+
+		if agent.Evolution.Level != 0 {
+			t.Errorf("expected normalized level 0, got %d", agent.Evolution.Level)
+		}
+		if agent.Evolution.Experience != 0 {
+			t.Errorf("expected normalized experience 0, got %d", agent.Evolution.Experience)
+		}
+		if agent.Evolution.Stage != types.AgentStageSpark {
+			t.Errorf("expected default stage %q, got %q", types.AgentStageSpark, agent.Evolution.Stage)
 		}
 	})
 }
