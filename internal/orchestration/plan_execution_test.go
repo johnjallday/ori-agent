@@ -29,7 +29,7 @@ func TestExecutePlannedTask_PendingDynamicAgents(t *testing.T) {
 	}
 
 	communicator := agentcomm.NewCommunicator(workspaceStore)
-	orch := NewOrchestrator(agentStore, workspaceStore, communicator, nil, nil, nil)
+	orch := NewOrchestrator(agentStore, workspaceStore, nil, communicator, nil, nil, nil)
 
 	plan := &types.PlannerOutput{
 		ComplexityScore: 8,

@@ -197,7 +197,7 @@ func (p *ClaudeCodeProvider) runClaudeExec(ctx context.Context, model, prompt st
 		if msg == "" {
 			msg = "claude CLI error"
 		}
-		return "", fmt.Errorf(msg)
+		return "", fmt.Errorf("%s", msg)
 	}
 
 	if schema != nil {
