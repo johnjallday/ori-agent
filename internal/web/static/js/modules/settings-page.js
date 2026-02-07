@@ -535,6 +535,8 @@ document.getElementById('systemDiagnosticsBtn')?.addEventListener('click', async
 (function() {
   const providerSelect = document.getElementById('systemModelProvider');
   const modelSelect = document.getElementById('systemModelModel');
+  const reasoningField = document.getElementById('systemModelReasoningField');
+  const reasoningSelect = document.getElementById('systemModelReasoning');
   const saveBtn = document.getElementById('saveSystemModelBtn');
   const clearBtn = document.getElementById('clearSystemModelBtn');
   const alertsContainer = document.getElementById('systemModelAlerts');
@@ -557,7 +559,7 @@ document.getElementById('systemDiagnosticsBtn')?.addEventListener('click', async
   }
 
   // Update status indicator
-  function updateStatusIndicator(configured, provider, model) {
+  function updateStatusIndicator(configured, provider, model, reasoningEffort = '') {
     if (!statusIndicator || !statusText || !statusDetails) return;
 
     if (configured) {
@@ -567,7 +569,11 @@ document.getElementById('systemDiagnosticsBtn')?.addEventListener('click', async
         </svg>
       `;
       statusText.textContent = 'System Model Configured';
-      statusDetails.textContent = `Using ${provider}/${model}`;
+      if (provider === 'codex' && reasoningEffort) {
+        statusDetails.textContent = `Using ${provider}/${model} (reasoning: ${reasoningEffort})`;
+      } else {
+        statusDetails.textContent = `Using ${provider}/${model}`;
+      }
     } else {
       statusIndicator.innerHTML = `
         <svg width="24" height="24" viewBox="0 0 24 24" fill="#ffc107">
@@ -577,6 +583,20 @@ document.getElementById('systemDiagnosticsBtn')?.addEventListener('click', async
       statusText.textContent = 'System Model Not Configured';
       statusDetails.textContent = 'Auto-config and other AI features require a system model.';
     }
+  }
+
+  function updateReasoningVisibility(providerName, selectedEffort = '') {
+    if (!reasoningField || !reasoningSelect) return;
+
+    if (providerName === 'codex') {
+      reasoningField.style.display = '';
+      reasoningSelect.disabled = false;
+      reasoningSelect.value = selectedEffort || reasoningSelect.value || 'medium';
+      return;
+    }
+
+    reasoningField.style.display = 'none';
+    reasoningSelect.disabled = true;
   }
 
   // Load available providers
@@ -635,17 +655,21 @@ document.getElementById('systemDiagnosticsBtn')?.addEventListener('click', async
       }
       const data = await response.json();
 
-      updateStatusIndicator(data.configured, data.provider, data.model);
+      updateStatusIndicator(data.configured, data.provider, data.model, data.reasoning_effort || '');
 
       if (data.configured && providerSelect && modelSelect) {
         providerSelect.value = data.provider;
+        updateReasoningVisibility(data.provider, data.reasoning_effort || '');
         await loadModelsForProvider(data.provider);
         modelSelect.value = data.model;
         updateSaveButtonState();
+      } else {
+        updateReasoningVisibility('');
       }
     } catch (error) {
       console.error('Error loading system model:', error);
       updateStatusIndicator(false);
+      updateReasoningVisibility('');
     }
   }
 
@@ -711,6 +735,7 @@ document.getElementById('systemDiagnosticsBtn')?.addEventListener('click', async
   // Provider selection change
   providerSelect?.addEventListener('change', async function() {
     const provider = this.value;
+    updateReasoningVisibility(provider);
     await loadModelsForProvider(provider);
     updateSaveButtonState();
   });
@@ -724,6 +749,9 @@ document.getElementById('systemDiagnosticsBtn')?.addEventListener('click', async
   saveBtn?.addEventListener('click', async function() {
     const provider = providerSelect?.value;
     const model = modelSelect?.value;
+    const reasoning_effort = provider === 'codex'
+      ? (reasoningSelect?.value || 'medium')
+      : '';
 
     if (!provider || !model) {
       showSystemModelAlert('Please select both a provider and a model.', 'warning');
@@ -737,7 +765,7 @@ document.getElementById('systemDiagnosticsBtn')?.addEventListener('click', async
       const response = await fetch('/api/settings/system-model', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ provider, model })
+        body: JSON.stringify({ provider, model, reasoning_effort })
       });
 
       if (!response.ok) {
@@ -746,7 +774,8 @@ document.getElementById('systemDiagnosticsBtn')?.addEventListener('click', async
       }
 
       const data = await response.json();
-      updateStatusIndicator(data.configured, data.provider, data.model);
+      updateStatusIndicator(data.configured, data.provider, data.model, data.reasoning_effort || '');
+      updateReasoningVisibility(data.provider, data.reasoning_effort || '');
       showSystemModelAlert('System model saved successfully!', 'success');
 
       // Notify navbar to update system model display
@@ -794,6 +823,10 @@ document.getElementById('systemDiagnosticsBtn')?.addEventListener('click', async
         modelSelect.innerHTML = '<option value="">Select provider first...</option>';
         modelSelect.disabled = true;
       }
+      if (reasoningSelect) {
+        reasoningSelect.value = 'medium';
+      }
+      updateReasoningVisibility('');
 
       updateStatusIndicator(false);
       updateSaveButtonState();

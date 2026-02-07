@@ -502,6 +502,18 @@
               <span id="modelHelp" class="settings-help">Choose a fast, cost-effective model for system tasks. Claude Haiku or GPT-4o-mini are recommended.</span>
             </div>
 
+            <!-- Codex Reasoning Effort -->
+            <div class="settings-field" id="systemModelReasoningField" style="display: none;">
+              <label class="settings-label" for="systemModelReasoning">Reasoning Level</label>
+              <select id="systemModelReasoning" class="form-select settings-input settings-select" aria-describedby="reasoningHelp">
+                <option value="medium" selected>Medium (Recommended)</option>
+                <option value="high">High</option>
+                <option value="low">Low</option>
+                <option value="xhigh">XHigh (Deepest)</option>
+              </select>
+              <span id="reasoningHelp" class="settings-help">Used by Codex only. Higher levels improve difficult reasoning at the cost of speed.</span>
+            </div>
+
             <!-- Save Button -->
             <div class="settings-actions">
               <button id="saveSystemModelBtn" class="modern-btn modern-btn-primary" disabled>

@@ -154,6 +154,7 @@ func (h *AutoCategorizeHandler) AutoCategorizeHandler(w http.ResponseWriter, r *
 
 	// Get the configured system model
 	systemProvider, systemModel := h.configManager.GetSystemModel()
+	systemReasoningEffort := h.configManager.GetSystemReasoningEffort()
 	result, err := h.llmFactory.GetSystemModelProvider(systemProvider, systemModel)
 	if err != nil {
 		if errors.Is(err, llm.ErrSystemModelNotConfigured) {
@@ -182,7 +183,7 @@ func (h *AutoCategorizeHandler) AutoCategorizeHandler(w http.ResponseWriter, r *
 	}
 
 	// Generate suggestions using LLM
-	suggestions, err := h.generateSuggestions(r.Context(), result.Provider, result.Model, req.ModelIDs, visibleCategories, currentAssignments)
+	suggestions, err := h.generateSuggestions(r.Context(), result.Provider, result.Model, systemReasoningEffort, req.ModelIDs, visibleCategories, currentAssignments)
 	if err != nil {
 		logger.Error("Auto-categorize generation failed", logger.Fields{"error": err})
 		_ = orihttp.RespondInternalError(w, "Failed to generate suggestions: "+err.Error())
@@ -237,6 +238,7 @@ func (h *AutoCategorizeHandler) generateSuggestions(
 	ctx context.Context,
 	provider llm.Provider,
 	model string,
+	reasoningEffort string,
 	modelIDs []string,
 	categories []categoryInfo,
 	currentAssignments map[string]string,
@@ -273,7 +275,8 @@ Use "" for category_id if unsure.`, categoryList.String())
 	defer cancel()
 
 	resp, err := provider.Chat(ctx, llm.ChatRequest{
-		Model: model,
+		Model:           model,
+		ReasoningEffort: reasoningEffort,
 		Messages: []llm.Message{
 			{Role: "user", Content: userMessage},
 		},

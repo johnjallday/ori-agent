@@ -289,6 +289,75 @@ func TestManagerSettingsJSON(t *testing.T) {
 	}
 }
 
+func TestSystemReasoningEffort_DefaultAndValidation(t *testing.T) {
+	tmpDir := t.TempDir()
+	tmpFile := filepath.Join(tmpDir, "settings.json")
+
+	manager := NewManager(tmpFile)
+	if err := manager.Load(); err != nil {
+		t.Fatalf("Failed to load manager: %v", err)
+	}
+
+	// Default should be medium when unset.
+	if got := manager.GetSystemReasoningEffort(); got != "medium" {
+		t.Fatalf("GetSystemReasoningEffort() = %q, want %q", got, "medium")
+	}
+
+	if err := manager.SetSystemReasoningEffort("medium"); err != nil {
+		t.Fatalf("SetSystemReasoningEffort(medium) error = %v", err)
+	}
+	if got := manager.GetSystemReasoningEffort(); got != "medium" {
+		t.Fatalf("GetSystemReasoningEffort() = %q, want %q", got, "medium")
+	}
+
+	if err := manager.SetSystemReasoningEffort("invalid-level"); err == nil {
+		t.Fatal("SetSystemReasoningEffort(invalid-level) expected error, got nil")
+	}
+
+	if err := manager.SetSystemReasoningEffort(""); err != nil {
+		t.Fatalf("SetSystemReasoningEffort(\"\") error = %v", err)
+	}
+	if got := manager.GetSystemReasoningEffort(); got != "medium" {
+		t.Fatalf("GetSystemReasoningEffort() after clear = %q, want %q", got, "medium")
+	}
+}
+
+func TestSystemReasoningEffort_PersistenceAndClearWithSystemModel(t *testing.T) {
+	tmpDir := t.TempDir()
+	tmpFile := filepath.Join(tmpDir, "settings.json")
+
+	manager := NewManager(tmpFile)
+	if err := manager.Load(); err != nil {
+		t.Fatalf("Failed to load manager: %v", err)
+	}
+
+	if err := manager.SetSystemModel("codex", "gpt-5.3-codex"); err != nil {
+		t.Fatalf("SetSystemModel() error = %v", err)
+	}
+	if err := manager.SetSystemReasoningEffort("xhigh"); err != nil {
+		t.Fatalf("SetSystemReasoningEffort() error = %v", err)
+	}
+	if err := manager.Save(); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+
+	manager2 := NewManager(tmpFile)
+	if err := manager2.Load(); err != nil {
+		t.Fatalf("Failed to load manager2: %v", err)
+	}
+	if got := manager2.GetSystemReasoningEffort(); got != "xhigh" {
+		t.Fatalf("GetSystemReasoningEffort() after reload = %q, want %q", got, "xhigh")
+	}
+
+	// Clearing system model should clear persisted reasoning override.
+	if err := manager2.SetSystemModel("", ""); err != nil {
+		t.Fatalf("SetSystemModel clear error = %v", err)
+	}
+	if got := manager2.GetSystemReasoningEffort(); got != "medium" {
+		t.Fatalf("GetSystemReasoningEffort() after system model clear = %q, want %q", got, "medium")
+	}
+}
+
 // contains checks if s contains substr
 func contains(s, substr string) bool {
 	return len(s) >= len(substr) && (s == substr || len(s) > 0 && containsHelper(s, substr))

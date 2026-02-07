@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 
 	"github.com/johnjallday/ori-agent/internal/modelinfo"
@@ -60,15 +61,17 @@ func (p *CodexProvider) ValidateConfig(_ ProviderConfig) error {
 	return nil
 }
 
-// DefaultModels returns available Codex models from the curated pricing data.
+// DefaultModels returns Codex models from local Codex cache with curated fallback.
 func (p *CodexProvider) DefaultModels() []string {
-	return modelinfo.GetCodexModels()
+	cached := loadCodexCachedModels()
+	curated := modelinfo.GetCodexModels()
+	return mergeUniqueModels(cached, curated)
 }
 
 // Chat sends a chat request via the Codex CLI.
 func (p *CodexProvider) Chat(ctx context.Context, req ChatRequest) (*ChatResponse, error) {
 	prompt := buildCodexPrompt(req.SystemPrompt, req.Messages)
-	content, err := p.runCodexExec(ctx, req.Model, prompt, nil)
+	content, err := p.runCodexExec(ctx, req.Model, prompt, req.ReasoningEffort, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -87,7 +90,7 @@ func (p *CodexProvider) StreamChat(ctx context.Context, req ChatRequest) (Stream
 // ChatWithStructuredOutput sends a chat request with a JSON schema using Codex CLI.
 func (p *CodexProvider) ChatWithStructuredOutput(ctx context.Context, req StructuredOutputRequest) (*ChatResponse, error) {
 	prompt := buildCodexPrompt(req.SystemPrompt, req.Messages)
-	content, err := p.runCodexExec(ctx, req.Model, prompt, req.Schema)
+	content, err := p.runCodexExec(ctx, req.Model, prompt, req.ReasoningEffort, req.Schema)
 	if err != nil {
 		return nil, err
 	}
@@ -132,7 +135,7 @@ func buildCodexPrompt(systemPrompt string, messages []Message) string {
 	return strings.TrimSpace(b.String())
 }
 
-func (p *CodexProvider) runCodexExec(ctx context.Context, model, prompt string, schema interface{}) (string, error) {
+func (p *CodexProvider) runCodexExec(ctx context.Context, model, prompt, reasoningEffort string, schema interface{}) (string, error) {
 	var schemaPath string
 	if schema != nil {
 		tmpSchema, err := os.CreateTemp("", "codex-schema-*.json")
@@ -167,7 +170,7 @@ func (p *CodexProvider) runCodexExec(ctx context.Context, model, prompt string, 
 	args := []string{
 		"exec",
 		"-c",
-		`model_reasoning_effort="high"`,
+		fmt.Sprintf(`model_reasoning_effort="%s"`, normalizeCodexReasoningEffort(reasoningEffort)),
 		"--color",
 		"never",
 		"--sandbox",
@@ -215,4 +218,89 @@ func (p *CodexProvider) runCodexExec(ctx context.Context, model, prompt string, 
 	}
 
 	return content, nil
+}
+
+func normalizeCodexReasoningEffort(effort string) string {
+	switch strings.ToLower(strings.TrimSpace(effort)) {
+	case "low":
+		return "low"
+	case "medium":
+		return "medium"
+	case "high":
+		return "high"
+	case "xhigh":
+		return "xhigh"
+	default:
+		return "medium"
+	}
+}
+
+func loadCodexCachedModels() []string {
+	cachePath := filepath.Join(codexHomeDir(), "models_cache.json")
+	data, err := os.ReadFile(cachePath)
+	if err != nil {
+		return nil
+	}
+
+	var payload struct {
+		Models []struct {
+			Slug       string `json:"slug"`
+			Visibility string `json:"visibility"`
+		} `json:"models"`
+	}
+	if err := json.Unmarshal(data, &payload); err != nil {
+		return nil
+	}
+
+	models := make([]string, 0, len(payload.Models))
+	for _, model := range payload.Models {
+		slug := strings.TrimSpace(model.Slug)
+		if slug == "" {
+			continue
+		}
+		// Codex provider should only expose codex-family models.
+		if !strings.Contains(strings.ToLower(slug), "codex") {
+			continue
+		}
+		if strings.EqualFold(strings.TrimSpace(model.Visibility), "hidden") {
+			continue
+		}
+		models = append(models, slug)
+	}
+	return models
+}
+
+func codexHomeDir() string {
+	if home := strings.TrimSpace(os.Getenv("CODEX_HOME")); home != "" {
+		return home
+	}
+	userHome, err := os.UserHomeDir()
+	if err != nil {
+		return ".codex"
+	}
+	return filepath.Join(userHome, ".codex")
+}
+
+func mergeUniqueModels(primary, secondary []string) []string {
+	seen := make(map[string]struct{}, len(primary)+len(secondary))
+	merged := make([]string, 0, len(primary)+len(secondary))
+
+	addModels := func(models []string) {
+		for _, model := range models {
+			clean := strings.TrimSpace(model)
+			if clean == "" {
+				continue
+			}
+			key := strings.ToLower(clean)
+			if _, exists := seen[key]; exists {
+				continue
+			}
+			seen[key] = struct{}{}
+			merged = append(merged, clean)
+		}
+	}
+
+	addModels(primary)
+	addModels(secondary)
+	return merged
 }

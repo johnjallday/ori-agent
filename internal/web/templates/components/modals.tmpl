@@ -670,6 +670,17 @@
             <div class="form-text">Recommended: Gemini 2.5 Flash, Claude Haiku, or GPT-4o-mini for fast, cost-effective system tasks.</div>
           </div>
 
+          <div class="mb-3 d-none" id="onboardingSystemReasoningField">
+            <label for="onboardingSystemReasoning" class="form-label">Reasoning Level</label>
+            <select class="form-select" id="onboardingSystemReasoning" aria-label="Select Codex reasoning level">
+              <option value="medium" selected>Medium (Recommended)</option>
+              <option value="high">High</option>
+              <option value="low">Low</option>
+              <option value="xhigh">XHigh (Deepest)</option>
+            </select>
+            <div class="form-text">Used by Codex only. Higher levels improve difficult reasoning but may run slower.</div>
+          </div>
+
           <div class="alert alert-success d-none" id="onboardingSystemModelSuccess">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" class="me-2">
               <path d="M12,2C6.48,2 2,6.48 2,12C2,17.52 6.48,22 12,22C17.52,22 22,17.52 22,12C22,6.48 17.52,2 12,2M12,20C7.59,20 4,16.41 4,12C4,7.59 7.59,4 12,4C16.41,4 20,7.59 20,12C20,16.41 16.41,20 12,20M16.59,7.58L10,14.17L7.41,11.59L6,13L10,17L18,9L16.59,7.58Z"/>

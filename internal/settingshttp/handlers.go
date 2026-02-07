@@ -8,7 +8,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/johnjallday/ori-agent/internal/authdiscovery"
 	"github.com/johnjallday/ori-agent/internal/client"
 	"github.com/johnjallday/ori-agent/internal/config"
 	orihttp "github.com/johnjallday/ori-agent/internal/http"
@@ -607,15 +606,17 @@ func providerRequiresKey(name string) bool {
 
 // SystemModelRequest represents a request to update the system model
 type SystemModelRequest struct {
-	Provider string `json:"provider"`
-	Model    string `json:"model"`
+	Provider        string `json:"provider"`
+	Model           string `json:"model"`
+	ReasoningEffort string `json:"reasoning_effort,omitempty"`
 }
 
 // SystemModelResponse represents the system model configuration
 type SystemModelResponse struct {
-	Provider   string `json:"provider"`
-	Model      string `json:"model"`
-	Configured bool   `json:"configured"`
+	Provider        string `json:"provider"`
+	Model           string `json:"model"`
+	ReasoningEffort string `json:"reasoning_effort,omitempty"`
+	Configured      bool   `json:"configured"`
 }
 
 // SystemModelHandler handles system model configuration
@@ -623,10 +624,15 @@ func (h *Handler) SystemModelHandler(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodGet:
 		provider, model := h.configManager.GetSystemModel()
+		reasoningEffort := ""
+		if strings.EqualFold(provider, "codex") && model != "" {
+			reasoningEffort = h.configManager.GetSystemReasoningEffort()
+		}
 		response := SystemModelResponse{
-			Provider:   provider,
-			Model:      model,
-			Configured: h.configManager.IsSystemModelConfigured(),
+			Provider:        provider,
+			Model:           model,
+			ReasoningEffort: reasoningEffort,
+			Configured:      h.configManager.IsSystemModelConfigured(),
 		}
 		orihttp.WriteJSON(w, response)
 
@@ -639,11 +645,16 @@ func (h *Handler) SystemModelHandler(w http.ResponseWriter, r *http.Request) {
 		// Normalize provider name to lowercase
 		provider := strings.ToLower(strings.TrimSpace(req.Provider))
 		model := strings.TrimSpace(req.Model)
+		reasoningEffort := strings.ToLower(strings.TrimSpace(req.ReasoningEffort))
 
 		// If clearing the system model (both empty), allow it
 		if provider == "" && model == "" {
 			if err := h.configManager.SetSystemModel("", ""); err != nil {
 				orihttp.RespondErrorWithErr(w, http.StatusBadRequest, "Failed to clear system model", err)
+				return
+			}
+			if err := h.configManager.SetSystemReasoningEffort(""); err != nil {
+				orihttp.RespondErrorWithErr(w, http.StatusBadRequest, "Failed to clear system reasoning", err)
 				return
 			}
 			if err := h.configManager.Save(); err != nil {
@@ -671,16 +682,37 @@ func (h *Handler) SystemModelHandler(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
+		// Persist reasoning effort for Codex only.
+		if provider == "codex" {
+			if reasoningEffort == "" {
+				reasoningEffort = "medium"
+			}
+			if err := h.configManager.SetSystemReasoningEffort(reasoningEffort); err != nil {
+				orihttp.RespondErrorWithErr(w, http.StatusBadRequest, "Invalid system reasoning configuration", err)
+				return
+			}
+		} else {
+			if err := h.configManager.SetSystemReasoningEffort(""); err != nil {
+				orihttp.RespondErrorWithErr(w, http.StatusBadRequest, "Invalid system reasoning configuration", err)
+				return
+			}
+		}
+
 		// Save configuration
 		if err := h.configManager.Save(); err != nil {
 			orihttp.InternalError(w, err.Error())
 			return
 		}
 
+		savedReasoning := ""
+		if provider == "codex" {
+			savedReasoning = h.configManager.GetSystemReasoningEffort()
+		}
 		orihttp.WriteJSON(w, SystemModelResponse{
-			Provider:   provider,
-			Model:      model,
-			Configured: true,
+			Provider:        provider,
+			Model:           model,
+			ReasoningEffort: savedReasoning,
+			Configured:      true,
 		})
 
 	default:
@@ -787,52 +819,11 @@ func (h *Handler) ExternalAgentsSettingsHandler(w http.ResponseWriter, r *http.R
 				}
 			}
 		}
-		var codexExchangeStatus string // "", "success", or an error message
+		var codexExchangeStatus string // legacy response field used by the settings UI
 		if req.CodexEnabled != nil {
-			if *req.CodexEnabled {
-				// Attempt Codex token refresh/validation before persisting the toggle — if it
-				// fails we roll back so the setting doesn't silently stay on.
-				h.llmFactory.Unregister("codex")
-				creds, source, err := authdiscovery.DiscoverCodexCredentialsWithSource()
-				if err != nil {
-					codexExchangeStatus = "No Codex credentials found: " + err.Error()
-					settingsLog.Warn("Codex discovery failed", logger.Fields{"error": err})
-					h.configManager.SetExternalAgentsCodexEnabled(false)
-				} else {
-					refreshed, refreshErr := creds.RefreshIfNeeded()
-					if refreshErr != nil {
-						codexExchangeStatus = "Token refresh failed: " + refreshErr.Error()
-						settingsLog.Warn("Codex token refresh failed", logger.Fields{"error": refreshErr})
-						h.configManager.SetExternalAgentsCodexEnabled(false)
-					} else {
-						if refreshed {
-							if err := authdiscovery.PersistCodexCredentials(source, creds); err != nil {
-								settingsLog.Warn("Codex token refresh persisted failed", logger.Fields{"error": err})
-							}
-						}
-						if creds.AccessToken == "" {
-							codexExchangeStatus = "Codex access token missing"
-							settingsLog.Warn("Codex access token missing", logger.Fields{})
-							h.configManager.SetExternalAgentsCodexEnabled(false)
-						} else {
-							codexProvider, err := llm.NewCodexProvider()
-							if err != nil {
-								codexExchangeStatus = "Codex CLI unavailable: " + err.Error()
-								settingsLog.Warn("Codex provider unavailable", logger.Fields{"error": err})
-								h.configManager.SetExternalAgentsCodexEnabled(false)
-							} else {
-								h.llmFactory.Register("codex", codexProvider)
-								codexExchangeStatus = "success"
-								h.configManager.SetExternalAgentsCodexEnabled(true)
-								settingsLog.Info("Codex provider registered via Codex CLI")
-							}
-						}
-					}
-				}
-			} else {
-				h.configManager.SetExternalAgentsCodexEnabled(false)
-				h.llmFactory.Unregister("codex")
-			}
+			// This toggle controls external Codex agent/skills visibility only.
+			// Codex model-provider availability is handled independently at startup.
+			h.configManager.SetExternalAgentsCodexEnabled(*req.CodexEnabled)
 		}
 
 		if err := h.configManager.Save(); err != nil {

@@ -645,6 +645,7 @@ export class OnboardingManager {
       // Auto-select Ollama if available (local = no API costs)
       if (ollamaProvider) {
         providerSelect.value = 'ollama';
+        this.updateSystemReasoningVisibility('ollama');
         // Trigger model loading for Ollama
         await this.loadSystemModelModels('ollama');
       }
@@ -671,6 +672,7 @@ export class OnboardingManager {
       // Setup provider change handler
       providerSelect.addEventListener('change', async (e) => {
         const provider = e.target.value;
+        this.updateSystemReasoningVisibility(provider);
         await this.loadSystemModelModels(provider);
       });
     } catch (error) {
@@ -690,6 +692,7 @@ export class OnboardingManager {
     const modelSelect = document.getElementById('onboardingSystemModel');
     if (!modelSelect) return;
 
+    this.updateSystemReasoningVisibility(providerName);
     modelSelect.innerHTML = '<option value="">Loading models...</option>';
     modelSelect.disabled = true;
 
@@ -730,14 +733,35 @@ export class OnboardingManager {
     }
   }
 
+  updateSystemReasoningVisibility(providerName, selectedEffort = '') {
+    const reasoningField = document.getElementById('onboardingSystemReasoningField');
+    const reasoningSelect = document.getElementById('onboardingSystemReasoning');
+    if (!reasoningField || !reasoningSelect) return;
+
+    if (providerName === 'codex') {
+      reasoningField.classList.remove('d-none');
+      reasoningSelect.disabled = false;
+      reasoningSelect.value = selectedEffort || reasoningSelect.value || 'medium';
+      return;
+    }
+
+    reasoningField.classList.add('d-none');
+    reasoningSelect.disabled = true;
+    reasoningSelect.value = 'medium';
+  }
+
   // Save system model configuration
   async saveSystemModel() {
     const providerSelect = document.getElementById('onboardingSystemProvider');
     const modelSelect = document.getElementById('onboardingSystemModel');
+    const reasoningSelect = document.getElementById('onboardingSystemReasoning');
     const successAlert = document.getElementById('onboardingSystemModelSuccess');
 
     const provider = providerSelect?.value;
     const model = modelSelect?.value;
+    const reasoning_effort = provider === 'codex'
+      ? (reasoningSelect?.value || 'medium')
+      : '';
 
     // If both are empty, user is skipping - that's fine
     if (!provider && !model) {
@@ -753,7 +777,7 @@ export class OnboardingManager {
       const response = await fetch('/api/settings/system-model', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ provider, model })
+        body: JSON.stringify({ provider, model, reasoning_effort })
       });
 
       if (!response.ok) {
@@ -762,11 +786,14 @@ export class OnboardingManager {
 
       if (successAlert) {
         const providerLabel = this.availableProviders.find(p => p.name === provider)?.display_name || provider;
+        const reasoningLabel = provider === 'codex'
+          ? `, reasoning: ${reasoning_effort}`
+          : '';
         successAlert.innerHTML = `
           <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" class="me-2">
             <path d="M12,2C6.48,2 2,6.48 2,12C2,17.52 6.48,22 12,22C17.52,22 22,17.52 22,12C22,6.48 17.52,2 12,2M12,20C7.59,20 4,16.41 4,12C4,7.59 7.59,4 12,4C16.41,4 20,7.59 20,12C20,16.41 16.41,20 12,20M16.59,7.58L10,14.17L7.41,11.59L6,13L10,17L18,9L16.59,7.58Z"/>
           </svg>
-          ${this.getAssistantDisplayName()} will use ${providerLabel} (${model}) as the primary system model.
+          ${this.getAssistantDisplayName()} will use ${providerLabel} (${model}${reasoningLabel}) as the primary system model.
         `;
         successAlert.classList.remove('d-none');
       }

@@ -72,6 +72,7 @@ func (h *Handler) GenerateHandler(w http.ResponseWriter, r *http.Request) {
 	// Get provider - use specified agent's settings or fall back to system model
 	var provider llm.Provider
 	var model string
+	reasoningEffort := ""
 	maxTokens := DefaultOutputTokens
 
 	if req.AgentID != "" {
@@ -119,6 +120,7 @@ func (h *Handler) GenerateHandler(w http.ResponseWriter, r *http.Request) {
 		}
 		provider = result.Provider
 		model = result.Model
+		reasoningEffort = h.configManager.GetSystemReasoningEffort()
 		logger.Info("Using system model for note generation", logger.Fields{
 			"provider":   systemProvider,
 			"model":      model,
@@ -130,7 +132,7 @@ func (h *Handler) GenerateHandler(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), GenerateTimeout)
 	defer cancel()
 
-	generated, err := h.generateNoteContent(ctx, provider, model, req.Prompt, maxTokens)
+	generated, err := h.generateNoteContent(ctx, provider, model, reasoningEffort, req.Prompt, maxTokens)
 	if err != nil {
 		logger.Error("Note generation failed", logger.Fields{"error": err})
 		orihttp.RespondErrorWithErr(w, http.StatusInternalServerError,
@@ -142,7 +144,7 @@ func (h *Handler) GenerateHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 // generateNoteContent uses the LLM to generate note title and content
-func (h *Handler) generateNoteContent(ctx context.Context, provider llm.Provider, model, prompt string, maxTokens int) (*GenerateResponse, error) {
+func (h *Handler) generateNoteContent(ctx context.Context, provider llm.Provider, model, reasoningEffort, prompt string, maxTokens int) (*GenerateResponse, error) {
 	systemPrompt := `You are a note generation assistant. Based on the user's prompt, generate a note with a title and content.
 
 You must respond with a valid JSON object (and nothing else) with these fields:
@@ -162,8 +164,9 @@ Example response:
 }`
 
 	chatReq := llm.ChatRequest{
-		Model:        model,
-		SystemPrompt: systemPrompt,
+		Model:           model,
+		ReasoningEffort: reasoningEffort,
+		SystemPrompt:    systemPrompt,
 		Messages: []llm.Message{
 			{
 				Role:    llm.RoleUser,
