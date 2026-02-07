@@ -185,6 +185,23 @@ Open the DMG and drag `OriAgent.app` to Applications.
 
 5. **Access the interface** at `http://localhost:8765`
 
+## 🧩 Skills
+
+Ori Agent supports per-agent Skills compatible with the Claude/OpenAI skill format.
+
+### Skill Locations
+
+- `agents/<agent_id>/skills` (agent-scoped)
+- `agents/skills` (repo-scoped)
+- `.agents/skills` (compatibility; lowest priority)
+
+Each Skill is a directory containing `SKILL.md` with YAML frontmatter (`name`, `description`) and a prompt body. Optional `agents/openai.yaml` provides UI metadata and dependency hints.
+
+### Naming Rules
+
+- `name`: lowercase letters, numbers, hyphens only; max 64 chars; must not include `anthropic` or `claude`; no XML tags.
+- `description`: required; max 1024 chars; no XML tags.
+
 ## 💬 Session Management
 
 Ori Agent includes a comprehensive session management system for organizing and managing your chat conversations.

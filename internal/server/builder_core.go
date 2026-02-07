@@ -7,8 +7,9 @@ import (
 	"os"
 	"time"
 
-	agenthttp "github.com/johnjallday/ori-agent/internal/agenthttp"
+	"github.com/johnjallday/ori-agent/internal/agenthttp"
 	"github.com/johnjallday/ori-agent/internal/client"
+	"github.com/johnjallday/ori-agent/internal/gateway"
 	"github.com/johnjallday/ori-agent/internal/healthhttp"
 	"github.com/johnjallday/ori-agent/internal/llm"
 	"github.com/johnjallday/ori-agent/internal/logger"
@@ -70,6 +71,12 @@ func (b *ServerBuilder) initializeLLMFactory() error {
 		return err
 	}
 	b.llmFactory = factory
+	return nil
+}
+
+// initializeGateway creates the gateway service.
+func (b *ServerBuilder) initializeGateway() error {
+	b.gateway = gateway.NewService(logger.New("gateway"))
 	return nil
 }
 

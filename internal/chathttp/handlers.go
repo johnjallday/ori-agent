@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"path/filepath"
@@ -507,12 +508,38 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 		agentName := resolveAgentName()
 		skill, found, err := h.skillsManager.GetSkill(agentName, name)
 		if err != nil {
+			var conflicts *skills.SkillConflictError
+			if errors.As(err, &conflicts) {
+				orihttp.WriteJSON(w, map[string]any{
+					"response":  "❌ Duplicate skill names detected. Resolve conflicts in your skills folders before running skills.",
+					"conflicts": conflicts.Conflicts,
+				})
+				return
+			}
 			orihttp.InternalError(w, err.Error())
 			return
 		}
 		if !found {
 			orihttp.WriteJSON(w, map[string]any{
 				"response": fmt.Sprintf("❌ Skill '%s' not found. Use /skills to list available skills.", name),
+			})
+			return
+		}
+		if len(skill.ValidationErrors) > 0 {
+			orihttp.WriteJSON(w, map[string]any{
+				"response": fmt.Sprintf("❌ Skill '%s' has validation errors: %s", skill.Name, strings.Join(skill.ValidationErrors, "; ")),
+			})
+			return
+		}
+		if !skill.Enabled {
+			orihttp.WriteJSON(w, map[string]any{
+				"response": fmt.Sprintf("❌ Skill '%s' is disabled.", skill.Name),
+			})
+			return
+		}
+		if skill.HasScripts && !skill.Trusted {
+			orihttp.WriteJSON(w, map[string]any{
+				"response": fmt.Sprintf("❌ Skill '%s' requires trust before it can run.", skill.Name),
 			})
 			return
 		}
@@ -524,10 +551,36 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 			agentName := resolveAgentName()
 			skill, found, err := h.skillsManager.GetSkill(agentName, name)
 			if err != nil {
+				var conflicts *skills.SkillConflictError
+				if errors.As(err, &conflicts) {
+					orihttp.WriteJSON(w, map[string]any{
+						"response":  "❌ Duplicate skill names detected. Resolve conflicts in your skills folders before running skills.",
+						"conflicts": conflicts.Conflicts,
+					})
+					return
+				}
 				orihttp.InternalError(w, err.Error())
 				return
 			}
 			if found {
+				if len(skill.ValidationErrors) > 0 {
+					orihttp.WriteJSON(w, map[string]any{
+						"response": fmt.Sprintf("❌ Skill '%s' has validation errors: %s", skill.Name, strings.Join(skill.ValidationErrors, "; ")),
+					})
+					return
+				}
+				if !skill.Enabled {
+					orihttp.WriteJSON(w, map[string]any{
+						"response": fmt.Sprintf("❌ Skill '%s' is disabled.", skill.Name),
+					})
+					return
+				}
+				if skill.HasScripts && !skill.Trusted {
+					orihttp.WriteJSON(w, map[string]any{
+						"response": fmt.Sprintf("❌ Skill '%s' requires trust before it can run.", skill.Name),
+					})
+					return
+				}
 				invokedSkill = &skillInvocation{Skill: skill, Args: args, Explicit: false}
 			}
 		}

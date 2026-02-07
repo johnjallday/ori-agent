@@ -6,6 +6,8 @@ import (
 	"os"
 	"strings"
 	"sync"
+
+	"github.com/johnjallday/ori-agent/internal/authdiscovery"
 )
 
 // Settings holds application-wide configuration
@@ -17,7 +19,7 @@ type Settings struct {
 	AllowedOrigins  []string `json:"allowed_origins,omitempty"` // CORS allowed origins (defaults to localhost)
 
 	// System model settings - used for internal AI tasks (auto-config, suggestions, etc.)
-	SystemProvider string `json:"system_provider,omitempty"` // Provider for system tasks (e.g., "openai", "claude", "gemini", "ollama")
+	SystemProvider string `json:"system_provider,omitempty"` // Provider for system tasks (e.g., "openai", "codex", "claude_code", "claude", "gemini", "ollama")
 	SystemModel    string `json:"system_model,omitempty"`    // Model for system tasks (e.g., "gpt-4o-mini", "claude-3-haiku-20240307")
 
 	// Multi-agent orchestration defaults
@@ -144,10 +146,11 @@ func (m *Manager) Update(settings Settings) error {
 	return m.validate()
 }
 
-// GetAPIKey returns the OpenAI API key, checking settings first, then environment variable
+// GetAPIKey returns the OpenAI API key, checking settings first, then environment variable, then discovery
 func (m *Manager) GetAPIKey() string {
 	m.mu.RLock()
 	apiKey := m.settings.OpenAIAPIKey
+	codexEnabled := m.settings.ExternalAgentsCodexEnabled
 	m.mu.RUnlock()
 
 	// Check settings first
@@ -156,10 +159,29 @@ func (m *Manager) GetAPIKey() string {
 	}
 
 	// Fallback to environment variable
-	return os.Getenv("OPENAI_API_KEY")
+	if envKey := os.Getenv("OPENAI_API_KEY"); envKey != "" {
+		return envKey
+	}
+
+	// Fallback to discovery if enabled
+	if codexEnabled {
+		if token := authdiscovery.DiscoverOpenAIToken(); token != "" && isLikelyOpenAIAPIKey(token) {
+			return token
+		}
+	}
+
+	return ""
 }
 
-// GetAnthropicAPIKey returns the Anthropic API key, checking settings first, then environment variable
+func isLikelyOpenAIAPIKey(token string) bool {
+	return strings.HasPrefix(strings.TrimSpace(token), "sk-")
+}
+
+func isLikelyAnthropicAPIKey(token string) bool {
+	return strings.HasPrefix(strings.TrimSpace(token), "sk-ant-")
+}
+
+// GetAnthropicAPIKey returns the Anthropic API key, checking settings first, then environment variable, then discovery
 func (m *Manager) GetAnthropicAPIKey() string {
 	m.mu.RLock()
 	apiKey := m.settings.AnthropicAPIKey
@@ -171,7 +193,16 @@ func (m *Manager) GetAnthropicAPIKey() string {
 	}
 
 	// Fallback to environment variable
-	return os.Getenv("ANTHROPIC_API_KEY")
+	if envKey := os.Getenv("ANTHROPIC_API_KEY"); envKey != "" {
+		return envKey
+	}
+
+	// Fallback to discovery for API keys only
+	if token := authdiscovery.DiscoverAnthropicToken(); token != "" && isLikelyAnthropicAPIKey(token) {
+		return token
+	}
+
+	return ""
 }
 
 // GetGeminiAPIKey returns the Gemini API key, checking settings first, then environment variable
@@ -426,7 +457,7 @@ func (m *Manager) IsSystemModelConfigured() bool {
 
 // ValidProviders returns the list of valid provider names for system model
 func ValidProviders() []string {
-	return []string{"openai", "claude", "gemini", "ollama"}
+	return []string{"openai", "codex", "claude_code", "claude", "gemini", "ollama"}
 }
 
 // validateSystemModel validates the system model configuration

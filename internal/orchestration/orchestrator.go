@@ -3,12 +3,13 @@ package orchestration
 import (
 	"context"
 	"fmt"
-
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/johnjallday/ori-agent/internal/agentcomm"
 	"github.com/johnjallday/ori-agent/internal/config"
+	"github.com/johnjallday/ori-agent/internal/gateway"
 	"github.com/johnjallday/ori-agent/internal/llm"
 	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/store"
@@ -20,22 +21,175 @@ import (
 type Orchestrator struct {
 	agentStore     store.Store
 	workspaceStore workspace.Store
+	history        gateway.ConversationStore
 	communicator   *agentcomm.Communicator
 	llmFactory     *llm.Factory
 	configManager  *config.Manager
 	eventBus       *workspace.EventBus
+	gateway        *gateway.Service
 }
 
 // NewOrchestrator creates a new orchestrator
-func NewOrchestrator(agentStore store.Store, workspaceStore workspace.Store, communicator *agentcomm.Communicator, llmFactory *llm.Factory, configManager *config.Manager, eventBus *workspace.EventBus) *Orchestrator {
+func NewOrchestrator(agentStore store.Store, workspaceStore workspace.Store, history gateway.ConversationStore, communicator *agentcomm.Communicator, llmFactory *llm.Factory, configManager *config.Manager, eventBus *workspace.EventBus) *Orchestrator {
 	return &Orchestrator{
 		agentStore:     agentStore,
 		workspaceStore: workspaceStore,
+		history:        history,
 		communicator:   communicator,
 		llmFactory:     llmFactory,
 		configManager:  configManager,
 		eventBus:       eventBus,
 	}
+}
+
+// SetGateway sets the gateway service for the orchestrator
+func (o *Orchestrator) SetGateway(gw *gateway.Service) {
+	o.gateway = gw
+}
+
+// HandleGatewayMessage handles an incoming message from the gateway
+func (o *Orchestrator) HandleGatewayMessage(ctx context.Context, msg gateway.Message) error {
+	logger.Info("orchestrator received gateway message", logger.Fields{"from": msg.Sender.Name, "content": msg.Content})
+
+	// 1. Identify which agent to use (PoC: use first available agent)
+	var agentName string
+	plan, err := o.PlanTask(ctx, msg.Content)
+	if err == nil && len(plan.Tasks) > 0 {
+		// Try to use the suggested agent from the first task
+		firstTask := plan.Tasks[0]
+		if firstTask.SuggestedAgent != "" {
+			// Verify agent exists
+			if _, ok := o.agentStore.GetAgent(firstTask.SuggestedAgent); ok {
+				agentName = firstTask.SuggestedAgent
+				logger.Debug("routing to suggested agent", logger.Fields{"agent": agentName, "rationale": plan.Rationale})
+			}
+		}
+
+		// If no valid suggested agent, try finding by role
+		if agentName == "" && firstTask.RequiredRole != "" {
+			if agents, err := o.findAgentsByRoles([]types.AgentRole{firstTask.RequiredRole}); err == nil && len(agents) > 0 {
+				agentName = agents[0]
+				logger.Debug("routing to agent by role", logger.Fields{"agent": agentName, "role": firstTask.RequiredRole})
+			}
+		}
+	} else {
+		logger.Warn("planning failed, falling back to default", logger.Fields{"error": err})
+	}
+
+	// Fallback: Use first available agent if planning failed or returned no matches
+	if agentName == "" {
+		agents, _ := o.agentStore.ListAgents()
+		if len(agents) == 0 {
+			return fmt.Errorf("no agents found in store")
+		}
+		agentName = agents[0]
+		logger.Debug("routing to default agent", logger.Fields{"agent": agentName})
+	}
+
+	ag, ok := o.agentStore.GetAgent(agentName)
+	if !ok {
+		return fmt.Errorf("agent %s not found", agentName)
+	}
+
+	// 2. Manage conversation session
+	sessionID := msg.Sender.Platform // Simple mapping: one session per platform for now
+	if msg.Metadata != nil {
+		if sid, ok := msg.Metadata["session_id"].(string); ok && sid != "" {
+			sessionID = sid
+		}
+	}
+
+	// Save user message
+	if o.history != nil {
+		if err := o.history.SaveMessage(ctx, sessionID, msg); err != nil {
+			logger.Error("failed to save user message", logger.Fields{"session_id": sessionID, "error": err})
+		}
+	}
+
+	// 3. Prepare LLM request with history
+	var messages []llm.Message
+	if o.history != nil {
+		history, err := o.history.GetHistory(ctx, sessionID)
+		if err == nil {
+			for _, m := range history {
+				role := llm.RoleUser
+				if m.Sender.IsBot {
+					role = llm.RoleAssistant
+				}
+				messages = append(messages, llm.Message{
+					Role:    role,
+					Content: m.Content,
+				})
+			}
+		}
+	}
+
+	// If history lookup failed or history not available, use current message
+	// Note: SaveMessage might have just saved it, so GetHistory might return it.
+	// We need to ensure we don't duplicate it or miss it.
+	// Usually GetHistory returns what's stored.
+	// If messages is empty, append current.
+	if len(messages) == 0 {
+		messages = append(messages, llm.Message{
+			Role:    llm.RoleUser,
+			Content: msg.Content,
+		})
+	}
+
+	provider, err := o.llmFactory.GetProvider(ag.Settings.Provider)
+	if err != nil {
+		return fmt.Errorf("failed to get LLM provider: %w", err)
+	}
+
+	req := llm.ChatRequest{
+		Model:        ag.Settings.Model,
+		SystemPrompt: ag.Settings.SystemPrompt,
+		Messages:     messages,
+	}
+
+	resp, err := provider.Chat(ctx, req)
+	if err != nil {
+		return fmt.Errorf("LLM completion failed: %w", err)
+	}
+
+	content := resp.Content
+
+	// 4. Store assistant response
+	reply := gateway.Message{
+		ID:      uuid.New(),
+		Content: content,
+		Sender: gateway.Sender{
+			ID:       agentName,
+			Name:     agentName,
+			Platform: "ori",
+			IsBot:    true,
+		},
+		ReplyToID: msg.ID.String(),
+		Timestamp: time.Now(),
+		Metadata: map[string]any{
+			"agent_role": ag.Role,
+			"model":      ag.Settings.Model,
+			"session_id": sessionID,
+		},
+	}
+
+	if o.history != nil {
+		if err := o.history.SaveMessage(ctx, sessionID, reply); err != nil {
+			logger.Error("failed to save assistant message", logger.Fields{"session_id": sessionID, "error": err})
+		}
+	}
+
+	// 5. Send response back to the gateway
+	if o.gateway == nil {
+		logger.Warn("gateway not set in orchestrator, cannot send response")
+		return nil
+	}
+
+	// Important: We need to tell the gateway where to send this.
+	// We use the original message's platform to route back.
+	reply.Sender.Platform = msg.Sender.Platform
+
+	return o.gateway.Send(ctx, reply)
 }
 
 // CollaborativeTask represents a task requiring multiple agents

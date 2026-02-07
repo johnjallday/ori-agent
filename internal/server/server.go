@@ -78,6 +78,11 @@ func (s *Server) Shutdown() {
 	// Shutdown folder picker if running
 	workspace.ShutdownFolderPicker()
 
+	// Shutdown gateway
+	if s.Core != nil && s.Core.Gateway != nil {
+		_ = s.Core.Gateway.Shutdown(context.Background())
+	}
+
 	// Clean up all loaded plugins
 	s.cleanupPlugins()
 }

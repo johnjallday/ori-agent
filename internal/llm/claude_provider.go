@@ -38,8 +38,8 @@ func NewClaudeProvider(config ProviderConfig) *ClaudeProvider {
 	var client anthropic.Client
 	if config.APIKey != "" {
 		client = anthropic.NewClient(
-			option.WithAPIKey(config.APIKey),
 			option.WithHTTPClient(httpClient),
+			option.WithAPIKey(config.APIKey),
 		)
 	}
 
@@ -280,9 +280,10 @@ func (p *ClaudeProvider) convertResponse(message *anthropic.Message) *ChatRespon
 func (p *ClaudeProvider) UpdateClient(apiKey string) {
 	if apiKey != "" {
 		p.apiKey = apiKey
+		p.httpClient = NewHTTPClient(DefaultCloudTimeout)
 		p.client = anthropic.NewClient(
-			option.WithAPIKey(apiKey),
 			option.WithHTTPClient(p.httpClient),
+			option.WithAPIKey(apiKey),
 		)
 	}
 }

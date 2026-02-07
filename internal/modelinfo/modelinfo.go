@@ -250,6 +250,19 @@ func GetOpenAIModels() []string {
 	return models
 }
 
+// GetCodexModels returns a list of Codex model IDs from the OpenAI pricing data.
+// This provides a curated list of Codex chat models without requiring an API call.
+func GetCodexModels() []string {
+	openaiModels := GetOpenAIModels()
+	codexModels := make([]string, 0, len(openaiModels))
+	for _, name := range openaiModels {
+		if strings.Contains(strings.ToLower(name), "codex") {
+			codexModels = append(codexModels, name)
+		}
+	}
+	return codexModels
+}
+
 // GetClaudeModels returns a list of Claude model IDs from the pricing data.
 // This provides a curated list of models without requiring an API call.
 func GetClaudeModels() []string {

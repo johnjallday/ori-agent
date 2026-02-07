@@ -52,6 +52,7 @@ document.getElementById('saveOpenaiKey')?.addEventListener('click', async functi
     });
 
     if (response.ok) {
+      console.log('[settings] OpenAI API key updated');
       notify('OpenAI API key saved successfully!', 'success');
       document.getElementById('openaiApiKeyInput').value = '';
     } else {
@@ -90,6 +91,7 @@ document.getElementById('saveAnthropicKey')?.addEventListener('click', async fun
     });
 
     if (response.ok) {
+      console.log('[settings] Anthropic API key updated');
       notify('Anthropic API key saved successfully!', 'success');
       document.getElementById('anthropicApiKeyInput').value = '';
     } else {
@@ -99,6 +101,50 @@ document.getElementById('saveAnthropicKey')?.addEventListener('click', async fun
   } catch (error) {
     console.error('Error saving API key:', error);
     notify('Error saving API key: ' + error.message, 'error');
+  }
+});
+
+// Toggle Claude setup token visibility
+document.getElementById('toggleClaudeSetupToken')?.addEventListener('click', function() {
+  const input = document.getElementById('claudeSetupTokenInput');
+  input.type = input.type === 'password' ? 'text' : 'password';
+});
+
+// Save Claude Setup Token
+document.getElementById('saveClaudeSetupToken')?.addEventListener('click', async function() {
+  const token = document.getElementById('claudeSetupTokenInput').value.trim();
+
+  if (!token) {
+    notify('Please enter a setup token', 'warning');
+    return;
+  }
+
+  if (!token.startsWith('sk-ant-oat01-') || token.length < 80) {
+    notify('Invalid setup token. Must start with "sk-ant-oat01-" and be at least 80 characters.', 'warning');
+    return;
+  }
+
+  try {
+    const response = await fetch('/api/api-key', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({ anthropic_api_key: token })
+    });
+
+    if (response.ok) {
+      const data = await response.json();
+      console.log('[settings] Claude setup token exchanged for API key', data);
+      notify('Setup token exchanged — Claude API key saved successfully!', 'success');
+      document.getElementById('claudeSetupTokenInput').value = '';
+    } else {
+      const error = await response.text();
+      notify('Failed to exchange setup token: ' + error, 'error');
+    }
+  } catch (error) {
+    console.error('Error saving setup token:', error);
+    notify('Error saving setup token: ' + error.message, 'error');
   }
 });
 
@@ -121,6 +167,7 @@ document.getElementById('saveGeminiKey')?.addEventListener('click', async functi
     });
 
     if (response.ok) {
+      console.log('[settings] Gemini API key updated');
       notify('Gemini API key saved successfully!', 'success');
       document.getElementById('geminiApiKeyInput').value = '';
     } else {
@@ -555,15 +602,23 @@ document.getElementById('systemDiagnosticsBtn')?.addEventListener('click', async
           });
 
         // Add unavailable providers as disabled options
-        availableProviders
-          .filter(p => !p.available)
-          .forEach(provider => {
-            const option = document.createElement('option');
-            option.value = provider.name;
-            option.textContent = `${provider.display_name} (API key required)`;
-            option.disabled = true;
-            providerSelect.appendChild(option);
-          });
+      availableProviders
+        .filter(p => !p.available)
+        .forEach(provider => {
+          const option = document.createElement('option');
+          option.value = provider.name;
+          let unavailableReason = 'CLI required';
+          if (provider.requires_key) {
+            unavailableReason = 'API key required';
+          } else if (provider.name === 'codex') {
+            unavailableReason = 'Codex CLI required';
+          } else if (provider.name === 'claude_code') {
+            unavailableReason = 'Claude CLI required';
+          }
+          option.textContent = `${provider.display_name} (${unavailableReason})`;
+          option.disabled = true;
+          providerSelect.appendChild(option);
+        });
       }
     } catch (error) {
       console.error('Error loading providers:', error);
@@ -620,10 +675,21 @@ document.getElementById('systemDiagnosticsBtn')?.addEventListener('click', async
 
       modelSelect.innerHTML = '<option value="">Select a model...</option>';
       const models = data.models || [];
+      const claudeCodeDescriptions = {
+        opus: 'Opus 4.6 · Most capable for complex work',
+        sonnet: 'Sonnet 4.5 · Best for everyday tasks',
+        haiku: 'Haiku 4.5 · Fastest for quick answers'
+      };
+      const claudeCodeRecommended = 'haiku';
       models.forEach(model => {
         const option = document.createElement('option');
         option.value = model;
-        option.textContent = model;
+        if (providerName === 'claude_code' && claudeCodeDescriptions[model]) {
+          const recommended = model === claudeCodeRecommended ? ' (recommended)' : '';
+          option.textContent = `${model}${recommended} — ${claudeCodeDescriptions[model]}`;
+        } else {
+          option.textContent = model;
+        }
         modelSelect.appendChild(option);
       });
 

@@ -113,7 +113,7 @@ func TestValidProviders(t *testing.T) {
 	providers := ValidProviders()
 
 	// Check expected providers exist
-	expected := []string{"openai", "claude", "gemini", "ollama"}
+	expected := []string{"openai", "codex", "claude_code", "claude", "gemini", "ollama"}
 	if len(providers) != len(expected) {
 		t.Errorf("ValidProviders() returned %d providers, want %d", len(providers), len(expected))
 	}
