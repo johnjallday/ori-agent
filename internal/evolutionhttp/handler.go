@@ -80,8 +80,14 @@ func (h *Handler) GetAgentEvolution(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	needsSave := ag.Evolution == nil
 	ag.InitializeEvolution()
-	_ = h.agentStore.SetAgent(agentName, ag)
+	if needsSave {
+		if err := h.agentStore.SetAgent(agentName, ag); err != nil {
+			orihttp.RespondErrorWithErr(w, http.StatusInternalServerError, "failed to persist evolution defaults", err)
+			return
+		}
+	}
 
 	orihttp.WriteJSON(w, map[string]any{
 		"agent":     agentName,

@@ -263,6 +263,7 @@ func (s *fileStore) saveUnlocked() error {
 		Status       types.AgentStatus             `json:"status,omitempty"`
 		Statistics   *types.AgentStatistics        `json:"statistics,omitempty"`
 		Metadata     *types.AgentMetadata          `json:"metadata,omitempty"`
+		Evolution    *types.AgentEvolution         `json:"evolution,omitempty"`
 	}
 
 	for agentName, agent := range s.agents {
@@ -284,6 +285,7 @@ func (s *fileStore) saveUnlocked() error {
 			Status:       agent.Status,
 			Statistics:   agent.Statistics,
 			Metadata:     agent.Metadata,
+			Evolution:    agent.Evolution,
 		}
 
 		settingsData, err := json.MarshalIndent(agentSettings, "", "  ")
