@@ -1472,11 +1472,17 @@ function setupSkillsDropdown() {
       content.innerHTML = '<div style="padding: 12px; text-align: center; color: var(--text-muted); font-size: 12px;">Failed to load skills</div>';
       return;
     }
-    if (skills.length === 0) {
+    const runnableSkills = skills.filter(skill => {
+      const enabled = skill?.enabled !== false;
+      const valid = !Array.isArray(skill?.validation_errors) || skill.validation_errors.length === 0;
+      const trusted = !skill?.has_scripts || Boolean(skill?.trusted);
+      return enabled && valid && trusted;
+    });
+    if (runnableSkills.length === 0) {
       content.innerHTML = '<div style="padding: 12px; text-align: center; color: var(--text-muted); font-size: 12px;">No skills available</div>';
       return;
     }
-    content.innerHTML = skills.map(skill => {
+    content.innerHTML = runnableSkills.map(skill => {
       const desc = skill.description || 'Run /' + skill.name;
       const src = skill.source || 'local';
       return `<button class="skill-item" data-skill="${skill.name}" style="display: block; width: 100%; text-align: left; padding: 8px 12px; border: none; background: none; cursor: pointer; font-size: 12px; color: var(--text-primary); transition: background 0.15s;">

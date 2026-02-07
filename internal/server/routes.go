@@ -647,7 +647,7 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 	// =============================================================================
 	if s.Handlers.Skills != nil {
 		mux.HandleFunc("/api/skills", s.Handlers.Skills.List)
-		mux.HandleFunc("/api/skills/", s.Handlers.Skills.Get)
+		mux.HandleFunc("/api/skills/", s.Handlers.Skills.Handle)
 	}
 
 	// =============================================================================

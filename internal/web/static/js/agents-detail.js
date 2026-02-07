@@ -799,6 +799,16 @@ async function renderSkills() {
 
   try {
     const response = await fetch(`/api/skills?agent=${encodeURIComponent(name)}`);
+    if (response.status === 409) {
+      const data = await response.json();
+      const conflicts = Array.isArray(data.conflicts) ? data.conflicts : [];
+      const conflictList = conflicts.map(conflict => {
+        const paths = (conflict.paths || []).map(path => `<li>${escapeHtml(path)}</li>`).join('');
+        return `<li><strong>${escapeHtml(conflict.name || '')}</strong><ul>${paths}</ul></li>`;
+      }).join('');
+      container.innerHTML = `<div class=\"text-center py-3\" style=\"color: var(--danger-color);\">Resolve duplicate skill names to view skills.<ul style=\"text-align: left; margin-top: 8px;\">${conflictList}</ul></div>`;
+      return;
+    }
     if (!response.ok) {
       throw new Error('Failed to load skills');
     }
@@ -815,8 +825,12 @@ async function renderSkills() {
     container.innerHTML = '';
     skills.forEach(skill => {
       const skillName = skill?.name || '(unnamed skill)';
-      const source = skill?.source || 'local';
+      const rawSource = skill?.source || 'agent';
+      const source = rawSource === 'local' ? 'agent' : rawSource;
       const description = skill?.description || 'No description';
+      const isEnabled = skill?.enabled !== false;
+      const hasScripts = Boolean(skill?.has_scripts);
+      const isTrusted = Boolean(skill?.trusted);
 
       const item = document.createElement('div');
       item.style.cssText = 'padding: 12px; border: 1px solid var(--border-color); border-radius: 8px; background: var(--bg-secondary);';
@@ -824,6 +838,8 @@ async function renderSkills() {
         <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
           <div style="font-weight: 600; color: var(--text-primary);">${escapeHtml(skillName)}</div>
           <span style="font-size: 10px; padding: 2px 6px; border-radius: 4px; background: var(--bg-tertiary); color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.3px;">${escapeHtml(source)}</span>
+          ${!isEnabled ? '<span style="font-size: 10px; padding: 2px 6px; border-radius: 4px; background: var(--warning-color); color: var(--text-primary); text-transform: uppercase; letter-spacing: 0.3px;">disabled</span>' : ''}
+          ${hasScripts ? `<span style=\"font-size: 10px; padding: 2px 6px; border-radius: 4px; background: ${isTrusted ? 'var(--success-color)' : 'var(--danger-color)'}; color: var(--text-primary); text-transform: uppercase; letter-spacing: 0.3px;\">${isTrusted ? 'trusted' : 'untrusted'}</span>` : ''}
         </div>
         <div style="font-size: 12px; color: var(--text-secondary); margin-top: 6px;">${escapeHtml(description)}</div>
       `;

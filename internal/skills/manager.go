@@ -12,9 +12,11 @@ import (
 )
 
 const (
-	SourceLocal  = "local"
-	SourceClaude = "claude"
-	SourceCodex  = "codex"
+	SourceAgent        = "agent"
+	SourceRepo         = "repo"
+	SourceAgentsCompat = ".agents"
+	SourceClaude       = "claude"
+	SourceCodex        = "codex"
 )
 
 type ManagerConfig struct {
@@ -38,13 +40,20 @@ func NewManager(cfg ManagerConfig) *Manager {
 }
 
 func (m *Manager) GetSkill(agentName, skillName string) (*Skill, bool, error) {
-	skills, err := m.ListSkills(agentName)
+	skills, err := m.listSkills(agentName, false)
 	if err != nil {
 		return nil, false, err
 	}
 
 	for _, skill := range skills {
 		if strings.EqualFold(skill.Name, skillName) {
+			if skill.Prompt == "" && skill.Path != "" {
+				full, err := m.loadSkillWithPrompt(skill, agentName)
+				if err != nil {
+					return nil, false, err
+				}
+				return full, true, nil
+			}
 			return &skill, true, nil
 		}
 	}
@@ -53,15 +62,57 @@ func (m *Manager) GetSkill(agentName, skillName string) (*Skill, bool, error) {
 }
 
 func (m *Manager) ListSkills(agentName string) ([]Skill, error) {
-	localSkills, err := m.loadLocalSkills(agentName)
+	return m.listSkills(agentName, false)
+}
+
+func (m *Manager) listSkills(agentName string, includePrompt bool) ([]Skill, error) {
+	agentSkills, err := m.loadAgentSkills(agentName, includePrompt)
+	if err != nil {
+		return nil, err
+	}
+	repoSkills, err := m.loadRepoSkills(includePrompt)
+	if err != nil {
+		return nil, err
+	}
+	compatSkills, err := m.loadCompatSkills(includePrompt)
 	if err != nil {
 		return nil, err
 	}
 
-	skillMap := make(map[string]Skill, len(localSkills))
-	for _, skill := range localSkills {
-		key := strings.ToLower(skill.Name)
-		skillMap[key] = skill
+	skillMap := make(map[string]Skill)
+	conflictMap := make(map[string]*SkillConflict)
+
+	localSources := [][]Skill{agentSkills, repoSkills, compatSkills}
+	for _, sourceList := range localSources {
+		for _, skill := range sourceList {
+			key := strings.ToLower(skill.Name)
+			if key == "" {
+				continue
+			}
+			if existing, exists := skillMap[key]; exists {
+				conflict := conflictMap[key]
+				if conflict == nil {
+					conflict = &SkillConflict{
+						Name:    skill.Name,
+						Paths:   []string{existing.Path},
+						Sources: []string{existing.Source},
+					}
+				}
+				conflict.Paths = append(conflict.Paths, skill.Path)
+				conflict.Sources = append(conflict.Sources, skill.Source)
+				conflictMap[key] = conflict
+				continue
+			}
+			skillMap[key] = skill
+		}
+	}
+
+	if len(conflictMap) > 0 {
+		conflicts := make([]SkillConflict, 0, len(conflictMap))
+		for _, conflict := range conflictMap {
+			conflicts = append(conflicts, *conflict)
+		}
+		return nil, &SkillConflictError{Conflicts: conflicts}
 	}
 
 	if m.externalAgents != nil && m.configManager != nil {
@@ -78,6 +129,8 @@ func (m *Manager) ListSkills(agentName string) ([]Skill, error) {
 					Source:      SourceClaude,
 					Model:       ext.Model,
 					Color:       ext.Color,
+					Enabled:     true,
+					Trusted:     true,
 				}
 			}
 		}
@@ -93,6 +146,8 @@ func (m *Manager) ListSkills(agentName string) ([]Skill, error) {
 					Description: ext.Description,
 					Prompt:      ext.SystemPrompt,
 					Source:      SourceCodex,
+					Enabled:     true,
+					Trusted:     true,
 				}
 			}
 		}
@@ -103,10 +158,14 @@ func (m *Manager) ListSkills(agentName string) ([]Skill, error) {
 		skills = append(skills, skill)
 	}
 
+	if err := m.applySkillState(agentName, skills); err != nil {
+		return nil, err
+	}
+
 	return skills, nil
 }
 
-func (m *Manager) loadLocalSkills(agentName string) ([]Skill, error) {
+func (m *Manager) loadAgentSkills(agentName string, includePrompt bool) ([]Skill, error) {
 	if agentName == "" {
 		return []Skill{}, nil
 	}
@@ -117,6 +176,30 @@ func (m *Manager) loadLocalSkills(agentName string) ([]Skill, error) {
 	}
 
 	skillsDir := filepath.Join(agentsDir, agentName, "skills")
+	return m.loadSkillsFromDir(skillsDir, SourceAgent, includePrompt, true, false)
+}
+
+func (m *Manager) loadRepoSkills(includePrompt bool) ([]Skill, error) {
+	agentsDir, err := resolveAgentsDir(m.agentStorePath)
+	if err != nil {
+		return nil, err
+	}
+
+	skillsDir := filepath.Join(agentsDir, "skills")
+	return m.loadSkillsFromDir(skillsDir, SourceRepo, includePrompt, false, true)
+}
+
+func (m *Manager) loadCompatSkills(includePrompt bool) ([]Skill, error) {
+	if m.agentStorePath == "" {
+		return []Skill{}, nil
+	}
+
+	repoRoot := filepath.Dir(m.agentStorePath)
+	skillsDir := filepath.Join(repoRoot, ".agents", "skills")
+	return m.loadSkillsFromDir(skillsDir, SourceAgentsCompat, includePrompt, false, true)
+}
+
+func (m *Manager) loadSkillsFromDir(skillsDir, source string, includePrompt bool, allowSingleFile bool, allowCategories bool) ([]Skill, error) {
 	entries, err := os.ReadDir(skillsDir)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -128,27 +211,137 @@ func (m *Manager) loadLocalSkills(agentName string) ([]Skill, error) {
 	var skills []Skill
 	for _, entry := range entries {
 		if entry.IsDir() {
-			skillPath := filepath.Join(skillsDir, entry.Name(), "SKILL.md")
-			skill, err := parseSkillFile(skillPath, entry.Name())
-			if err != nil {
+			skillDir := filepath.Join(skillsDir, entry.Name())
+			skillPath := filepath.Join(skillDir, "SKILL.md")
+			if _, err := os.Stat(skillPath); err == nil {
+				skill, err := m.loadSkillEntry(skillPath, entry.Name(), source, skillDir, includePrompt)
+				if err == nil {
+					skills = append(skills, skill)
+				}
 				continue
 			}
-			skills = append(skills, skill)
+
+			if allowCategories {
+				subEntries, err := os.ReadDir(skillDir)
+				if err != nil {
+					continue
+				}
+				for _, sub := range subEntries {
+					if !sub.IsDir() {
+						continue
+					}
+					subDir := filepath.Join(skillDir, sub.Name())
+					subPath := filepath.Join(subDir, "SKILL.md")
+					if _, err := os.Stat(subPath); err != nil {
+						continue
+					}
+					skill, err := m.loadSkillEntry(subPath, sub.Name(), source, subDir, includePrompt)
+					if err == nil {
+						skills = append(skills, skill)
+					}
+				}
+			}
 			continue
 		}
 
-		if strings.HasSuffix(entry.Name(), ".md") {
+		if allowSingleFile && strings.HasSuffix(entry.Name(), ".md") {
 			skillPath := filepath.Join(skillsDir, entry.Name())
 			baseName := strings.TrimSuffix(entry.Name(), filepath.Ext(entry.Name()))
-			skill, err := parseSkillFile(skillPath, baseName)
-			if err != nil {
-				continue
+			skill, err := m.loadSkillEntry(skillPath, baseName, source, filepath.Dir(skillPath), includePrompt)
+			if err == nil {
+				skills = append(skills, skill)
 			}
-			skills = append(skills, skill)
 		}
 	}
 
 	return skills, nil
+}
+
+func (m *Manager) loadSkillEntry(skillPath, defaultName, source, skillDir string, includePrompt bool) (Skill, error) {
+	skill, err := parseSkillFile(skillPath, defaultName, includePrompt)
+	if err != nil {
+		return Skill{}, err
+	}
+
+	skill.Source = source
+	skill.Path = skillPath
+
+	if skillDir != "" {
+		skill.HasScripts = hasScripts(skillDir)
+		meta, err := loadOpenAIMetadata(skillDir)
+		if err != nil {
+			skill.ValidationErrors = append(skill.ValidationErrors, fmt.Sprintf("openai.yaml: %v", err))
+		} else if meta != nil {
+			skill.OpenAIMetadata = meta
+			if len(skill.AllowedTools) == 0 && len(meta.Tools) > 0 {
+				skill.AllowedTools = meta.Tools
+			}
+			if len(skill.RequiredMCPServers) == 0 && len(meta.MCPServers) > 0 {
+				skill.RequiredMCPServers = meta.MCPServers
+			}
+		}
+	}
+
+	return skill, nil
+}
+
+func (m *Manager) loadSkillWithPrompt(skill Skill, agentName string) (*Skill, error) {
+	if skill.Path == "" {
+		return &skill, nil
+	}
+
+	skillDir := filepath.Dir(skill.Path)
+	full, err := m.loadSkillEntry(skill.Path, skill.Name, skill.Source, skillDir, true)
+	if err != nil {
+		return nil, err
+	}
+
+	full.Enabled = skill.Enabled
+	full.Trusted = skill.Trusted
+
+	return &full, nil
+}
+
+func (m *Manager) applySkillState(agentName string, skills []Skill) error {
+	if agentName == "" {
+		for i := range skills {
+			if !skills[i].Enabled {
+				skills[i].Enabled = true
+			}
+		}
+		return nil
+	}
+
+	registry, _, err := m.getSkillRegistry(agentName)
+	if err != nil {
+		return err
+	}
+
+	for i := range skills {
+		key := normalizeSkillKey(skills[i].Name)
+		if state, ok := registry.Skills[key]; ok {
+			skills[i].Enabled = state.Enabled
+			skills[i].Trusted = state.Trusted
+			continue
+		}
+		if !skills[i].Enabled {
+			skills[i].Enabled = true
+		}
+	}
+
+	return nil
+}
+
+func hasScripts(skillDir string) bool {
+	if skillDir == "" {
+		return false
+	}
+	scriptsDir := filepath.Join(skillDir, "scripts")
+	entries, err := os.ReadDir(scriptsDir)
+	if err != nil {
+		return false
+	}
+	return len(entries) > 0
 }
 
 type skillFrontmatter struct {
@@ -159,7 +352,7 @@ type skillFrontmatter struct {
 	RequiredMCPServers []string
 }
 
-func parseSkillFile(path string, defaultName string) (Skill, error) {
+func parseSkillFile(path string, defaultName string, includePrompt bool) (Skill, error) {
 	content, err := os.ReadFile(path)
 	if err != nil {
 		return Skill{}, err
@@ -170,32 +363,39 @@ func parseSkillFile(path string, defaultName string) (Skill, error) {
 		return Skill{}, err
 	}
 
-	fm := parseSkillFrontmatter(frontmatter)
+	fm, fmErr := parseSkillFrontmatter(frontmatter)
 	name := fm.Name
 	if name == "" {
 		name = defaultName
 	}
 
-	return Skill{
+	skill := Skill{
 		Name:               name,
 		Description:        fm.Description,
-		Prompt:             strings.TrimSpace(body),
-		Source:             SourceLocal,
-		Path:               path,
 		AllowedTools:       fm.AllowedTools,
 		DisallowedTools:    fm.DisallowedTools,
 		RequiredMCPServers: fm.RequiredMCPServers,
-	}, nil
+	}
+	if includePrompt {
+		skill.Prompt = strings.TrimSpace(body)
+	}
+
+	skill.ValidationErrors = validateSkillMetadata(name, fm.Description)
+	if fmErr != nil {
+		skill.ValidationErrors = append(skill.ValidationErrors, fmt.Sprintf("invalid frontmatter: %v", fmErr))
+	}
+
+	return skill, nil
 }
 
-func parseSkillFrontmatter(frontmatter string) skillFrontmatter {
+func parseSkillFrontmatter(frontmatter string) (skillFrontmatter, error) {
 	if strings.TrimSpace(frontmatter) == "" {
-		return skillFrontmatter{}
+		return skillFrontmatter{}, nil
 	}
 
 	raw := make(map[string]interface{})
 	if err := yaml.Unmarshal([]byte(frontmatter), &raw); err != nil {
-		return skillFrontmatter{}
+		return skillFrontmatter{}, err
 	}
 
 	fm := skillFrontmatter{
@@ -206,7 +406,7 @@ func parseSkillFrontmatter(frontmatter string) skillFrontmatter {
 		RequiredMCPServers: getStringSliceField(raw, "required_mcp_servers", "required-mcp-servers"),
 	}
 
-	return fm
+	return fm, nil
 }
 
 func parseFrontmatter(content string) (frontmatter, body string, err error) {
