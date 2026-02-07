@@ -1,6 +1,7 @@
 package evolutionhttp
 
 import (
+	"errors"
 	"net/http"
 	"strings"
 	"time"
@@ -183,19 +184,16 @@ func (h *Handler) SetAgentPath(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := h.evolutionService.SelectPath(agentName, path); err != nil {
-		if strings.Contains(strings.ToLower(err.Error()), "learner") {
+		switch {
+		case errors.Is(err, evolution.ErrNotLearnerStage):
 			orihttp.BadRequest(w, err.Error())
-			return
-		}
-		if strings.Contains(strings.ToLower(err.Error()), "invalid path") {
+		case errors.Is(err, evolution.ErrInvalidPath):
 			orihttp.BadRequest(w, err.Error())
-			return
-		}
-		if strings.Contains(strings.ToLower(err.Error()), "not found") {
+		case errors.Is(err, evolution.ErrAgentNotFound):
 			orihttp.NotFound(w, "agent not found")
-			return
+		default:
+			orihttp.RespondErrorWithErr(w, http.StatusInternalServerError, "failed to select path", err)
 		}
-		orihttp.RespondErrorWithErr(w, http.StatusInternalServerError, "failed to select path", err)
 		return
 	}
 

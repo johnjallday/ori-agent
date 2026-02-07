@@ -1,6 +1,7 @@
 package evolution
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
@@ -8,6 +9,12 @@ import (
 
 	"github.com/johnjallday/ori-agent/internal/agent"
 	"github.com/johnjallday/ori-agent/internal/types"
+)
+
+var (
+	ErrNotLearnerStage = errors.New("agent must reach learner stage before selecting a path")
+	ErrInvalidPath     = errors.New("invalid path")
+	ErrAgentNotFound   = errors.New("agent not found")
 )
 
 const (
@@ -126,6 +133,19 @@ func (s *Service) SetActivityLogger(activityLogger ActivityLogger) {
 	s.activityLogger = activityLogger
 }
 
+// CleanupAgent removes all in-memory tracking state for a deleted agent,
+// preventing unbounded map growth.
+func (s *Service) CleanupAgent(agentName string) {
+	if s == nil || agentName == "" {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	delete(s.recentByAgent, agentName)
+	delete(s.hourlyByAgent, agentName)
+	delete(s.intentByAgent, agentName)
+}
+
 // AwardMessageXP grants XP based on a successful message exchange.
 func (s *Service) AwardMessageXP(agentName string, tokenCount int, userMessage string) error {
 	if tokenCount < 0 {
@@ -159,19 +179,19 @@ func (s *Service) SelectPath(agentName string, requestedPath types.AgentPath) er
 
 	path, ok := normalizePath(requestedPath)
 	if !ok {
-		return fmt.Errorf("invalid path: %q", requestedPath)
+		return fmt.Errorf("%w: %q", ErrInvalidPath, requestedPath)
 	}
 
 	ag, found := s.agentStore.GetAgent(agentName)
 	if !found || ag == nil {
-		return fmt.Errorf("agent %q not found", agentName)
+		return fmt.Errorf("%w: %q", ErrAgentNotFound, agentName)
 	}
 
 	ag.InitializeEvolution()
 	ag.Evolution.EnsureDefaults()
 	ag.Evolution.Stage = stageForLevel(ag.Evolution.Level)
 	if ag.Evolution.Level < 10 {
-		return fmt.Errorf("agent must reach learner stage before selecting a path")
+		return ErrNotLearnerStage
 	}
 
 	previousPath := ag.Evolution.Path
@@ -270,21 +290,23 @@ func (s *Service) awardXP(agentName string, requestedXP int64, userMessage strin
 
 	now := s.now()
 
+	// Hold the lock only for in-memory anti-gaming checks.
 	s.mu.Lock()
-	defer s.mu.Unlock()
-
 	if enableDuplicateCheck && s.isDuplicateMessageLocked(agentName, userMessage, now) {
+		s.mu.Unlock()
 		return nil
 	}
 	if enableDuplicateCheck {
 		s.recordIntentLocked(agentName, userMessage)
 	}
-
 	awardXP := s.applyHourlyCapLocked(agentName, requestedXP, now)
+	s.mu.Unlock()
+
 	if awardXP <= 0 {
 		return nil
 	}
 
+	// Agent store operations use the store's own mutex; no need to hold s.mu.
 	ag, ok := s.agentStore.GetAgent(agentName)
 	if !ok || ag == nil {
 		return fmt.Errorf("agent %q not found", agentName)
@@ -501,9 +523,13 @@ func classifyIntent(message string) string {
 }
 
 func keywordScore(text string, keywords []string) int64 {
+	words := make(map[string]struct{})
+	for _, w := range strings.Fields(text) {
+		words[w] = struct{}{}
+	}
 	var score int64
 	for _, keyword := range keywords {
-		if strings.Contains(text, keyword) {
+		if _, ok := words[keyword]; ok {
 			score++
 		}
 	}

@@ -67,16 +67,16 @@ func (f *fakeEvolutionService) AwardFeedXP(agentName string, _ string) error {
 func (f *fakeEvolutionService) SelectPath(agentName string, requestedPath types.AgentPath) error {
 	ag, ok := f.store.GetAgent(agentName)
 	if !ok || ag == nil {
-		return fmt.Errorf("agent not found")
+		return fmt.Errorf("%w: %q", evolution.ErrAgentNotFound, agentName)
 	}
 	ag.InitializeEvolution()
 	if ag.Evolution.Level < 10 {
-		return fmt.Errorf("agent must reach learner stage before selecting a path")
+		return evolution.ErrNotLearnerStage
 	}
 	switch requestedPath {
 	case types.AgentPathCoder, types.AgentPathResearcher, types.AgentPathWriter:
 	default:
-		return fmt.Errorf("invalid path")
+		return fmt.Errorf("%w: %q", evolution.ErrInvalidPath, requestedPath)
 	}
 	ag.Evolution.Path = requestedPath
 	return f.store.SetAgent(agentName, ag)

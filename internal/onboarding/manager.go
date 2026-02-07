@@ -209,7 +209,7 @@ func (m *Manager) saveUnlocked() error {
 		return err
 	}
 
-	return os.WriteFile(m.statePath, data, 0o644)
+	return os.WriteFile(m.statePath, data, 0o600)
 }
 
 // Save writes the current state to disk (with locking)

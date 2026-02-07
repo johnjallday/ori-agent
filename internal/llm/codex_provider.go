@@ -170,7 +170,7 @@ func (p *CodexProvider) runCodexExec(ctx context.Context, model, prompt, reasoni
 	args := []string{
 		"exec",
 		"-c",
-		fmt.Sprintf(`model_reasoning_effort="%s"`, normalizeCodexReasoningEffort(reasoningEffort)),
+		`model_reasoning_effort="` + normalizeCodexReasoningEffort(reasoningEffort) + `"`,
 		"--color",
 		"never",
 		"--sandbox",
