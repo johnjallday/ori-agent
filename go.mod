@@ -1,6 +1,6 @@
 module github.com/johnjallday/ori-agent
 
-go 1.25.5
+go 1.25.7
 
 require (
 	fyne.io/fyne/v2 v2.7.2
