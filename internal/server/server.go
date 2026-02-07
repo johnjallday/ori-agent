@@ -280,8 +280,10 @@ func (s *Server) serveWorkflows(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) serveWorkspaces(w http.ResponseWriter, r *http.Request) {
-	// Redirect to home page - workspace hub is now on the home page
-	http.Redirect(w, r, "/", http.StatusSeeOther)
+	data := s.prepareBasePageData("workspaces")
+	data.Title = "Workspaces - Ori Agent"
+	data.BrandText = "Ori Agent"
+	s.renderAndWritePage(w, "workspaces", data)
 }
 
 // handleWorkspacesRoutes handles all /workspaces/* routes
@@ -289,8 +291,8 @@ func (s *Server) handleWorkspacesRoutes(w http.ResponseWriter, r *http.Request) 
 	// Extract path after /workspaces/
 	path := strings.TrimPrefix(r.URL.Path, "/workspaces/")
 	if path == "" || path == r.URL.Path {
-		// No ID provided, redirect to home page
-		http.Redirect(w, r, "/", http.StatusSeeOther)
+		// No ID provided, redirect to workspaces page
+		http.Redirect(w, r, "/workspaces", http.StatusSeeOther)
 		return
 	}
 
