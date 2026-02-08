@@ -67,6 +67,10 @@ type UserProfile struct {
 	DetectedApps        []string  `json:"detected_apps,omitempty"`        // Apps that influenced this profile
 	Description         string    `json:"description,omitempty"`          // User's self-description (if provided)
 	InferredAt          time.Time `json:"inferred_at,omitempty"`          // When the profile was created
+	Interests           []string  `json:"interests,omitempty"`            // e.g., "coding", "data-science", "devops"
+	PreferredTools      []string  `json:"preferred_tools,omitempty"`      // e.g., "Go", "Docker", "PostgreSQL"
+	WorkStyle           string    `json:"work_style,omitempty"`           // "detailed", "concise", "formal", "casual"
+	PersonalizedAt      time.Time `json:"personalized_at,omitempty"`      // Non-zero = personalization completed
 }
 
 // AssistantProgress tracks global assistant progression across all agents.

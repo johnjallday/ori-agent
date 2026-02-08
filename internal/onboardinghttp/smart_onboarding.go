@@ -479,6 +479,101 @@ func preferredModelsForProvider(providerName string) []string {
 	}
 }
 
+// PersonalizeRequest represents a personalization save request.
+type PersonalizeRequest struct {
+	Interests      []string `json:"interests"`
+	PreferredTools []string `json:"preferred_tools"`
+	WorkStyle      string   `json:"work_style"`
+	Description    string   `json:"description"`
+}
+
+// PersonalizeResponse represents the personalization save response.
+type PersonalizeResponse struct {
+	Success   bool               `json:"success"`
+	Profile   *types.UserProfile `json:"profile"`
+	XPAwarded int64              `json:"xp_awarded"`
+	Message   string             `json:"message,omitempty"`
+}
+
+// SavePersonalization saves user personalization data and awards XP on first completion.
+// POST /api/onboarding/personalize
+func (h *SmartOnboardingHandler) SavePersonalization(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		orihttp.MethodNotAllowed(w)
+		return
+	}
+
+	var req PersonalizeRequest
+	if !orihttp.ParseJSONBody(w, r, &req) {
+		return
+	}
+
+	if h.onboardingMgr == nil {
+		orihttp.InternalError(w, "Onboarding manager not available")
+		return
+	}
+
+	// Get existing profile or create a new one
+	profile := h.onboardingMgr.GetUserProfile()
+	if profile == nil {
+		profile = &types.UserProfile{}
+	}
+
+	// Merge personalization fields (preserve detection-derived fields)
+	profile.Interests = req.Interests
+	profile.PreferredTools = req.PreferredTools
+	profile.WorkStyle = req.WorkStyle
+	if req.Description != "" {
+		profile.Description = req.Description
+	}
+
+	// Check if this is first-time personalization
+	isFirstTime := profile.PersonalizedAt.IsZero()
+	profile.PersonalizedAt = time.Now()
+
+	// Save updated profile
+	if err := h.onboardingMgr.SetUserProfile(profile); err != nil {
+		logger.Error("Failed to save personalization", logger.Fields{"error": err})
+		orihttp.InternalError(w, "Failed to save personalization")
+		return
+	}
+
+	// Award XP on first-time personalization
+	var xpAwarded int64
+	if isFirstTime {
+		xpAwarded = 25
+		progress := h.onboardingMgr.GetAssistantProgress()
+		progress.Experience += xpAwarded
+		progress.Level = int(progress.Experience / 100)
+
+		// Update rank based on level
+		switch {
+		case progress.Level >= 10:
+			progress.Rank = "master"
+		case progress.Level >= 5:
+			progress.Rank = "expert"
+		case progress.Level >= 2:
+			progress.Rank = "intermediate"
+		case progress.Level >= 1:
+			progress.Rank = "beginner"
+		default:
+			progress.Rank = "novice"
+		}
+		progress.UpdatedAt = time.Now()
+
+		if err := h.onboardingMgr.SetAssistantProgress(&progress); err != nil {
+			logger.Error("Failed to award personalization XP", logger.Fields{"error": err})
+			// Non-fatal: continue with success
+		}
+	}
+
+	h.sendJSON(w, PersonalizeResponse{
+		Success:   true,
+		Profile:   profile,
+		XPAwarded: xpAwarded,
+	})
+}
+
 // GetStoredProfile returns the user's stored profile.
 // GET /api/onboarding/user-profile
 func (h *SmartOnboardingHandler) GetStoredProfile(w http.ResponseWriter, r *http.Request) {

@@ -334,6 +334,13 @@ func (s *Server) serveWorkspaceCanvas(w http.ResponseWriter, r *http.Request, wo
 	s.renderAndWritePage(w, "workspace-canvas", data)
 }
 
+func (s *Server) servePersonalize(w http.ResponseWriter, r *http.Request) {
+	data := s.prepareBasePageData("personalize")
+	data.Title = "Personalize - Ori Agent"
+	data.BrandText = "Ori Agent"
+	s.renderAndWritePage(w, "personalize", data)
+}
+
 func (s *Server) serveUsage(w http.ResponseWriter, r *http.Request) {
 	data := s.prepareBasePageData("usage")
 	data.Title = "Usage & Cost Tracking - Ori Agent"

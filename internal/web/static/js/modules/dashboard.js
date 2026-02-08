@@ -133,6 +133,21 @@
     container.innerHTML = html;
   }
 
+  function renderPersonalizeBanner(data) {
+    var banner = document.getElementById('dashboardPersonalizeBanner');
+    if (!banner) return;
+
+    var profile = data && data.profile;
+    // Show banner if no profile or personalized_at is zero/missing
+    var isPersonalized = profile && profile.personalized_at && profile.personalized_at !== '0001-01-01T00:00:00Z';
+
+    if (isPersonalized) {
+      banner.classList.add('d-none');
+    } else {
+      banner.classList.remove('d-none');
+    }
+  }
+
   function initDashboard() {
     setGreeting();
 
@@ -151,6 +166,10 @@
       API.get('/api/agents/dashboard/list').catch(function (err) {
         dashLog.debug('Failed to load agent list', { error: err && err.message || err });
         return null;
+      }),
+      API.get('/api/onboarding/user-profile').catch(function (err) {
+        dashLog.debug('Failed to load user profile', { error: err && err.message || err });
+        return null;
       })
     ];
 
@@ -166,12 +185,14 @@
     Promise.allSettled(promises).then(function (results) {
       var statsData = results[0].status === 'fulfilled' ? results[0].value : null;
       var agentData = results[1].status === 'fulfilled' ? results[1].value : null;
+      var profileData = results[2].status === 'fulfilled' ? results[2].value : null;
 
       if (statsData) renderStats(statsData);
       if (agentData) renderAgentList(agentData);
+      renderPersonalizeBanner(profileData);
 
-      if (evolutionEnabled && results.length > 2) {
-        var evoData = results[2].status === 'fulfilled' ? results[2].value : null;
+      if (evolutionEnabled && results.length > 3) {
+        var evoData = results[3].status === 'fulfilled' ? results[3].value : null;
         if (evoData) renderAssistantProgress(evoData);
       }
     });

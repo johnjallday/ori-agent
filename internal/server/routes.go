@@ -62,6 +62,7 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 	})
 	mux.HandleFunc("/usage", s.serveUsage)
 	mux.HandleFunc("/review", s.serveReview)
+	mux.HandleFunc("/personalize", s.servePersonalize)
 
 	// =============================================================================
 	// Static File Server (CSS, JS, Icons, Assets)
@@ -303,6 +304,7 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 	mux.HandleFunc("/api/onboarding/apply-config", s.Handlers.SmartOnboarding.Apply)
 	mux.HandleFunc("/api/onboarding/update-profile", s.Handlers.SmartOnboarding.UpdateProfile)
 	mux.HandleFunc("/api/onboarding/user-profile", s.Handlers.SmartOnboarding.GetStoredProfile)
+	mux.HandleFunc("/api/onboarding/personalize", s.Handlers.SmartOnboarding.SavePersonalization)
 	mux.HandleFunc("/api/onboarding/recommend-plugins", s.Handlers.SmartOnboarding.RecommendPlugins)
 
 	// Theme endpoints
