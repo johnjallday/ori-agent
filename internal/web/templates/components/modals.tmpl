@@ -531,12 +531,17 @@
 
             <!-- Speech bubble (revealed after hatch) -->
             <div class="ori-speech ori-hatch-reveal" id="welcomeSpeech">
-              Hi! I'm Ori, your AI assistant. What's your name?
+              Hi there! I'm your new AI assistant. What should we call each other?
             </div>
           </div>
 
-          <div class="mb-4 ori-hatch-reveal" id="welcomeInputReveal">
+          <div class="mb-3 ori-hatch-reveal" id="welcomeInputReveal">
+            <label for="onboardingUserName" class="form-label" style="font-size: 0.85rem; font-weight: 500; color: var(--text-secondary);">Your name</label>
             <input type="text" class="form-control" id="onboardingUserName" placeholder="Your name" style="font-size: 1rem; padding: 10px 14px;">
+          </div>
+          <div class="mb-4 ori-hatch-reveal" id="welcomeAssistantReveal">
+            <label for="onboardingAssistantName" class="form-label" style="font-size: 0.85rem; font-weight: 500; color: var(--text-secondary);">Assistant name</label>
+            <input type="text" class="form-control" id="onboardingAssistantName" placeholder="Ori" value="Ori" style="font-size: 1rem; padding: 10px 14px;">
           </div>
 
           <div class="d-flex justify-content-end ori-hatch-reveal" id="welcomeBtnReveal">

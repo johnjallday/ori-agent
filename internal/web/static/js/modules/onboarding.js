@@ -8,6 +8,7 @@ export class OnboardingManager {
     this.modalInstance = null;
     this.availableProviders = [];
     this.userName = '';
+    this.assistantName = 'Ori';
   }
 
   async init() {
@@ -25,6 +26,7 @@ export class OnboardingManager {
 
     const status = await this.checkOnboardingStatus();
     this.userName = status.user_name || '';
+    this.assistantName = status.assistant_name || 'Ori';
     if (status.needs_onboarding) {
       setTimeout(() => this.showOnboarding(), 500);
     }
@@ -78,10 +80,21 @@ export class OnboardingManager {
       });
     }
 
-    // Enter key on name input advances
+    // Enter key on name inputs advances
     const nameInput = document.getElementById('onboardingUserName');
     if (nameInput) {
       nameInput.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          const assistantInput = document.getElementById('onboardingAssistantName');
+          if (assistantInput) assistantInput.focus();
+        }
+      });
+    }
+
+    const assistantNameInput = document.getElementById('onboardingAssistantName');
+    if (assistantNameInput) {
+      assistantNameInput.addEventListener('keydown', (e) => {
         if (e.key === 'Enter') {
           e.preventDefault();
           this.advanceFromWelcome();
@@ -115,18 +128,21 @@ export class OnboardingManager {
 
   async saveNames() {
     const nameInput = document.getElementById('onboardingUserName');
+    const assistantInput = document.getElementById('onboardingAssistantName');
     const userName = nameInput?.value?.trim() || '';
+    const assistantName = assistantInput?.value?.trim() || 'Ori';
 
     try {
       const response = await fetch('/api/onboarding/names', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ user_name: userName, assistant_name: 'Ori' })
+        body: JSON.stringify({ user_name: userName, assistant_name: assistantName })
       });
       if (!response.ok) throw new Error('Failed to save names');
 
       const data = await response.json();
       this.userName = data.user_name || '';
+      this.assistantName = data.assistant_name || 'Ori';
       return true;
     } catch (error) {
       console.error('Error saving names:', error);
@@ -273,7 +289,8 @@ export class OnboardingManager {
       const successAlert = document.getElementById('onboardingSystemModelSuccess');
       if (successAlert) {
         const label = this.availableProviders.find(p => p.name === provider)?.display_name || provider;
-        successAlert.textContent = `Ori will use ${label} (${model}).`;
+        const aName = this.assistantName || 'Ori';
+        successAlert.textContent = `${aName} will use ${label} (${model}).`;
         successAlert.classList.remove('d-none');
       }
       return true;
@@ -351,10 +368,14 @@ export class OnboardingManager {
 
     this.currentPhase = 0;
 
-    // Pre-fill name if returning
+    // Pre-fill names if returning
     const nameInput = document.getElementById('onboardingUserName');
     if (nameInput && this.userName) {
       nameInput.value = this.userName;
+    }
+    const assistantInput = document.getElementById('onboardingAssistantName');
+    if (assistantInput && this.assistantName) {
+      assistantInput.value = this.assistantName;
     }
 
     this.showPhase(0);
@@ -420,11 +441,12 @@ export class OnboardingManager {
     await this.saveNames();
     await this.completeStep('step-welcome');
 
-    // Update speech bubble on model phase with user's name
+    // Update speech bubble on model phase with user's name and assistant's name
     const name = this.userName || 'friend';
+    const aName = this.assistantName || 'Ori';
     const speechBubble = document.getElementById('modelSpeech');
     if (speechBubble) {
-      speechBubble.textContent = `Great to meet you, ${name}! Let's pick the AI model I'll use.`;
+      speechBubble.textContent = `Great to meet you, ${name}! I'm ${aName}. Let's pick the AI model I'll use.`;
     }
 
     this.currentPhase = 1;
