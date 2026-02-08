@@ -3,6 +3,7 @@ package chathttp
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -16,6 +17,11 @@ import (
 	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/types"
 	"github.com/oriagent/ori-pluginapi"
+)
+
+const (
+	openAITransportRetryAttempts = 1
+	openAITransportRetryDelay    = 300 * time.Millisecond
 )
 
 // handleOpenAIChat handles chat requests for OpenAI models
@@ -54,7 +60,7 @@ func (h *Handler) handleOpenAIChat(
 	}
 
 	start := time.Now()
-	resp, err := agentClient.Chat.Completions.New(ctx, params)
+	resp, err := requestOpenAICompletionWithRetry(ctx, agentClient, params)
 	if err != nil {
 		errorResponse := attachPlannerDecision(map[string]any{
 			"response": fmt.Sprintf("❌ **Error**: %v", err),
@@ -305,4 +311,68 @@ func (h *Handler) processToolResults(toolResults []map[string]string) (combinedR
 		combinedResult += result
 	}
 	return
+}
+
+func requestOpenAICompletionWithRetry(
+	ctx context.Context,
+	agentClient openai.Client,
+	params openai.ChatCompletionNewParams,
+) (*openai.ChatCompletion, error) {
+	resp, err := agentClient.Chat.Completions.New(ctx, params)
+	if err == nil {
+		return resp, nil
+	}
+
+	if !isRetryableOpenAITransportError(ctx, err) {
+		return nil, err
+	}
+
+	for attempt := 1; attempt <= openAITransportRetryAttempts; attempt++ {
+		logger.Warn("OpenAI transport error, retrying completion request", logger.Fields{
+			"attempt": attempt,
+			"error":   err.Error(),
+		})
+
+		timer := time.NewTimer(openAITransportRetryDelay)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return nil, ctx.Err()
+		case <-timer.C:
+		}
+
+		resp, err = agentClient.Chat.Completions.New(ctx, params)
+		if err == nil {
+			return resp, nil
+		}
+		if !isRetryableOpenAITransportError(ctx, err) {
+			return nil, err
+		}
+	}
+
+	return nil, err
+}
+
+func isRetryableOpenAITransportError(ctx context.Context, err error) bool {
+	if err == nil {
+		return false
+	}
+	if ctx != nil && ctx.Err() != nil {
+		return false
+	}
+	if errors.Is(err, context.Canceled) {
+		return false
+	}
+
+	var timeoutErr interface{ Timeout() bool }
+	if errors.As(err, &timeoutErr) && timeoutErr.Timeout() {
+		return true
+	}
+
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "context deadline exceeded") ||
+		strings.Contains(msg, "client.timeout exceeded") ||
+		strings.Contains(msg, "timeout while awaiting headers") ||
+		strings.Contains(msg, "tls handshake timeout") ||
+		strings.Contains(msg, "connection reset by peer")
 }

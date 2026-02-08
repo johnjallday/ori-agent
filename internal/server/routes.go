@@ -162,6 +162,10 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 	mux.HandleFunc("/api/agents/auto-config", s.Handlers.AutoConfig.AutoConfigHandler)
 	mux.HandleFunc("/api/agents/auto-config/availability", s.Handlers.AutoConfig.CheckLLMAvailabilityHandler)
 
+	// Home assistant task routing endpoint
+	homeAssistantRouteHandler := agenthttp.NewHomeAssistantRouteHandler(s.Storage.AgentStore)
+	mux.HandleFunc("/api/home-assistant/route", homeAssistantRouteHandler.RouteHandler)
+
 	// =============================================================================
 	// Plugin API Endpoints
 	// =============================================================================

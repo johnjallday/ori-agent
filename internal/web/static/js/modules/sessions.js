@@ -2442,7 +2442,7 @@ const sessionManager = {
 
   // Delete session
   async deleteSession(sessionId) {
-    if (!confirm('Are you sure you want to delete this session?')) return;
+    if (!confirm('Are you sure you want to delete this session?')) return false;
 
     try {
       const response = await fetch(`/api/sessions/${sessionId}`, {
@@ -2450,6 +2450,8 @@ const sessionManager = {
       });
 
       if (!response.ok) throw new Error('Failed to delete session');
+
+      const deletedSession = this.sessions.find(s => s.id === sessionId) || null;
 
       // Remove from local state
       this.sessions = this.sessions.filter(s => s.id !== sessionId);
@@ -2470,8 +2472,13 @@ const sessionManager = {
       }
 
       this.renderSessions();
+      if (window.EventBus) {
+        EventBus.emit('session:deleted', { sessionId, session: deletedSession });
+      }
+      return true;
     } catch (error) {
       console.error('Failed to delete session:', error);
+      return false;
     }
   },
 
