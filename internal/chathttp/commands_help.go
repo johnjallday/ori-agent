@@ -24,6 +24,7 @@ func (ch *CommandHandler) HandleHelp(w http.ResponseWriter, r *http.Request) {
 - **/switch <agent-name>** - Switch to a different agent
 - **/tools** - List all available plugin tools and operations
 - **/skills** - List all available skills
+- **/openapp <application-name>** - Open a desktop app directly (e.g., Obsidian)
 - **/tool <name> <args>** - Execute a tool directly without LLM decision-making
 
 **Workspace Commands:**

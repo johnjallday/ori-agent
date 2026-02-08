@@ -73,6 +73,16 @@ var (
 		SuggestedName:    "Email Assistant",
 		MinScore:         4,
 	}
+	homeAssistantAppLaunchIntent = homeAssistantIntent{
+		Key:              "app_launch",
+		Label:            "app launch",
+		Keywords:         []string{"open", "launch", "start", "run", "application", "app", "obsidian", "reaper", "finder"},
+		PreferredPlugins: []string{"shell", "executor", "desktop", "automation", "os-shell", "command"},
+		PreferredTypes:   []string{"tool-calling", "general"},
+		DefaultType:      "tool-calling",
+		SuggestedName:    "Desktop Launcher",
+		MinScore:         4,
+	}
 	homeAssistantDefaultIntent = homeAssistantIntent{
 		Key:              "general_task",
 		Label:            "general task",
@@ -135,9 +145,9 @@ func (h *HomeAssistantRouteHandler) RouteHandler(w http.ResponseWriter, r *http.
 }
 
 func detectHomeAssistantIntent(prompt string) homeAssistantIntent {
-	text := normalizeRouteToken(prompt)
 	selectedIntent := homeAssistantDefaultIntent
 	selectedScore := 0
+	text := normalizeRouteToken(prompt)
 
 	for _, intent := range homeAssistantSpecificIntents {
 		score := 0
@@ -150,6 +160,14 @@ func detectHomeAssistantIntent(prompt string) homeAssistantIntent {
 			selectedIntent = intent
 			selectedScore = score
 		}
+	}
+
+	if selectedScore > 0 {
+		return selectedIntent
+	}
+
+	if _, ok := parseHomeAssistantAppLaunchPrompt(prompt); ok {
+		return homeAssistantAppLaunchIntent
 	}
 
 	return selectedIntent
@@ -379,4 +397,46 @@ func tokenizePrompt(prompt string) []string {
 	}
 
 	return tokens
+}
+
+func parseHomeAssistantAppLaunchPrompt(prompt string) (string, bool) {
+	normalized := normalizeRouteToken(prompt)
+	if normalized == "" {
+		return "", false
+	}
+
+	for _, politePrefix := range []string{"please ", "can you ", "could you ", "would you ", "hey "} {
+		if strings.HasPrefix(normalized, politePrefix) {
+			normalized = strings.TrimSpace(strings.TrimPrefix(normalized, politePrefix))
+			break
+		}
+	}
+
+	prefixes := []string{"open up ", "open ", "launch ", "start ", "run "}
+	target := ""
+	for _, prefix := range prefixes {
+		if strings.HasPrefix(normalized, prefix) {
+			target = strings.TrimSpace(strings.TrimPrefix(normalized, prefix))
+			break
+		}
+	}
+	if target == "" {
+		return "", false
+	}
+
+	target = strings.Trim(target, " .,!?:;\"'")
+	target = strings.TrimPrefix(target, "the ")
+	target = strings.TrimSuffix(target, " app")
+	target = strings.TrimSuffix(target, " application")
+	target = strings.TrimSpace(target)
+	if target == "" {
+		return "", false
+	}
+
+	// Skip obvious URL/path-like targets that are more likely file or web intents.
+	if strings.Contains(target, "://") || strings.Contains(target, "/") || strings.Contains(target, "\\") {
+		return "", false
+	}
+
+	return target, true
 }

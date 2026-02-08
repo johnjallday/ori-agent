@@ -197,6 +197,28 @@ func TestHomeAssistantRouteHandler_EmailMatch(t *testing.T) {
 	}
 }
 
+func TestHomeAssistantRouteHandler_EmailIntentPreferredOverAppLaunch(t *testing.T) {
+	st := newHomeRouteTestStore(t)
+	handler := NewHomeAssistantRouteHandler(st)
+
+	addHomeRouteTestAgent(t, st, "Inbox Triage", &store.CreateAgentConfig{Type: "tool-calling"}, types.AgentStatusActive,
+		"Summarizes unread emails and drafts replies", []string{"email", "inbox"}, []string{"gmail-reader"})
+
+	rr := postRouteRequest(t, handler, map[string]string{"prompt": "open my email inbox"})
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d: %s", http.StatusOK, rr.Code, rr.Body.String())
+	}
+
+	var resp HomeAssistantRouteResponse
+	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+
+	if resp.Intent != "email_check" {
+		t.Fatalf("expected intent email_check, got %q", resp.Intent)
+	}
+}
+
 func TestHomeAssistantRouteHandler_GeneralPrompt_NoLowSignalReuse(t *testing.T) {
 	st := newHomeRouteTestStore(t)
 	handler := NewHomeAssistantRouteHandler(st)
@@ -214,14 +236,20 @@ func TestHomeAssistantRouteHandler_GeneralPrompt_NoLowSignalReuse(t *testing.T) 
 		t.Fatalf("failed to decode response: %v", err)
 	}
 
-	if resp.Intent != "general_task" {
-		t.Fatalf("expected intent general_task, got %q", resp.Intent)
+	if resp.Intent != "app_launch" {
+		t.Fatalf("expected intent app_launch, got %q", resp.Intent)
 	}
 	if !resp.RequiresCreation {
-		t.Fatalf("expected requires_creation true for low-signal general prompt")
+		t.Fatalf("expected requires_creation true for app launch without suitable agent")
 	}
 	if resp.MatchedAgent != "" {
 		t.Fatalf("expected no matched agent, got %q", resp.MatchedAgent)
+	}
+	if resp.SuggestedAgentName != "Desktop Launcher" {
+		t.Fatalf("expected suggested name Desktop Launcher, got %q", resp.SuggestedAgentName)
+	}
+	if resp.SuggestedAgentType != "tool-calling" {
+		t.Fatalf("expected suggested type tool-calling, got %q", resp.SuggestedAgentType)
 	}
 }
 
@@ -244,16 +272,16 @@ func TestHomeAssistantRouteHandler_GeneralPrompt_ContextualMatch(t *testing.T) {
 		t.Fatalf("failed to decode response: %v", err)
 	}
 
-	if resp.Intent != "general_task" {
-		t.Fatalf("expected intent general_task, got %q", resp.Intent)
+	if resp.Intent != "app_launch" {
+		t.Fatalf("expected intent app_launch, got %q", resp.Intent)
 	}
 	if resp.RequiresCreation {
-		t.Fatalf("expected contextual general match, got requires_creation=true")
+		t.Fatalf("expected contextual app launch match, got requires_creation=true")
 	}
 	if resp.MatchedAgent != "Desktop Launcher" {
 		t.Fatalf("expected matched agent Desktop Launcher, got %q", resp.MatchedAgent)
 	}
-	if resp.Score < 3 {
-		t.Fatalf("expected score >= 3, got %d", resp.Score)
+	if resp.Score < 4 {
+		t.Fatalf("expected score >= 4, got %d", resp.Score)
 	}
 }

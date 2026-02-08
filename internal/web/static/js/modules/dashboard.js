@@ -31,6 +31,16 @@
       suggestedName: 'Email Assistant',
       tags: ['email', 'inbox', 'communication']
     },
+    app_launch: {
+      key: 'app_launch',
+      label: 'app launch',
+      keywords: ['open', 'launch', 'start', 'run', 'application', 'app', 'obsidian', 'reaper', 'finder'],
+      preferredPlugins: ['shell', 'executor', 'desktop', 'automation', 'os-shell', 'command'],
+      preferredTypes: ['tool-calling', 'general'],
+      defaultType: 'tool-calling',
+      suggestedName: 'Desktop Launcher',
+      tags: ['desktop', 'automation', 'apps']
+    },
     general_task: {
       key: 'general_task',
       label: 'general task',
@@ -49,6 +59,7 @@
     pendingAgentName: '',
     pendingSuggestedName: '',
     pendingSuggestedType: '',
+    pendingAppLaunch: null,
     awaitingCreateConfirmation: false,
     busy: false,
     recentSessions: []
@@ -158,6 +169,52 @@
     var normalized = normalizeToken(token);
     if (normalized.length < 4) return false;
     return HOME_ASSISTANT_COMMON_TOKENS[normalized] !== true;
+  }
+
+  function parseAppLaunchRequest(prompt) {
+    var text = String(prompt || '').trim();
+    if (!text) return null;
+
+    var normalized = normalizeToken(text);
+    var politePrefixes = ['please ', 'can you ', 'could you ', 'would you ', 'hey '];
+    for (var i = 0; i < politePrefixes.length; i++) {
+      if (normalized.indexOf(politePrefixes[i]) === 0) {
+        normalized = normalized.slice(politePrefixes[i].length).trim();
+        break;
+      }
+    }
+
+    var commandPrefixes = ['open up ', 'open ', 'launch ', 'start ', 'run '];
+    var target = '';
+    for (var p = 0; p < commandPrefixes.length; p++) {
+      if (normalized.indexOf(commandPrefixes[p]) === 0) {
+        target = normalized.slice(commandPrefixes[p].length).trim();
+        break;
+      }
+    }
+    if (!target) return null;
+
+    target = target.replace(/^[\s"'`]+|[\s"'`.,!?;:]+$/g, '');
+    target = target.replace(/^the\s+/, '');
+    target = target.replace(/\s+(app|application)\s*$/, '');
+    target = target.trim();
+    if (!target) return null;
+
+    if (target.indexOf('://') >= 0 || target.indexOf('/') >= 0 || target.indexOf('\\') >= 0) {
+      return null;
+    }
+
+    return {
+      appName: toTitleCase(target),
+      rawTarget: target
+    };
+  }
+
+  function buildAskOriDispatchMessage(prompt, appLaunchRequest) {
+    if (!appLaunchRequest || !appLaunchRequest.appName) {
+      return String(prompt || '').trim();
+    }
+    return '/openapp ' + appLaunchRequest.appName;
   }
 
   function isAffirmativeConfirmation(value) {
@@ -444,6 +501,12 @@
         selectedScore = score;
       }
     }
+    if (selectedScore > 0) return selected;
+
+    if (parseAppLaunchRequest(prompt)) {
+      return HOME_INTENTS.app_launch;
+    }
+
     return selected;
   }
 
@@ -566,6 +629,8 @@
       base = 'Create an agent that plans multi-day travel itineraries with day-by-day plans, transportation ideas, budget ranges, and local recommendations.';
     } else if (intent.key === 'email_check') {
       base = 'Create an email triage agent that summarizes unread mail, categorizes urgency, and drafts replies. It must default to read-only behavior and never send without explicit user confirmation.';
+    } else if (intent.key === 'app_launch') {
+      base = 'Create a desktop launcher agent that can interpret app-launch requests, execute safe local launch commands, and confirm completion clearly.';
     } else {
       base = 'Create a practical task execution assistant that can route and complete user requests from the home dashboard.';
     }
@@ -578,6 +643,9 @@
     }
     if (intent.key === 'email_check') {
       return 'You are an email assistant. Summarize inbox content and draft responses. Never send or delete email without explicit user approval. Start in read-only mode.';
+    }
+    if (intent.key === 'app_launch') {
+      return 'You are a desktop app launcher assistant. For requests like "open obsidian", launch the requested app immediately and confirm success or report the exact failure reason.';
     }
     return 'You are a helpful assistant focused on completing practical user tasks with clear, concise outputs.';
   }
@@ -900,6 +968,7 @@
     if (!homeAssistantState.pendingPrompt) return;
     var prompt = homeAssistantState.pendingPrompt;
     var intent = homeAssistantState.pendingIntent || HOME_INTENTS.general_task;
+    var appLaunchRequest = homeAssistantState.pendingAppLaunch;
     homeAssistantState.awaitingCreateConfirmation = false;
 
     setHomeAssistantBusy(true, 'Creating...');
@@ -969,7 +1038,7 @@
           'Email idea: connect Gmail/Outlook via OAuth, start with read-only scopes, summarize unread first, and require explicit approval before sending replies.');
       }
 
-      await runPendingTaskWithAgent(prompt, agentName);
+      await runPendingTaskWithAgent(prompt, agentName, { appLaunchRequest: appLaunchRequest });
 
       API.get('/api/agents/dashboard/list').then(function (agentData) {
         if (agentData) renderAgentList(agentData);
@@ -1044,18 +1113,29 @@
     return session;
   }
 
-  async function runPendingTaskWithAgent(prompt, agentName) {
+  async function runPendingTaskWithAgent(prompt, agentName, options) {
     if (!prompt || !agentName) return;
+    var appLaunchRequest = options && options.appLaunchRequest ? options.appLaunchRequest : null;
+    var dispatchMessage = buildAskOriDispatchMessage(prompt, appLaunchRequest);
+
     setHomeAssistantBusy(true, 'Opening Chat...');
     renderHomeAssistantActions([]);
     appendHomeAssistantMessage('assistant', 'Opening a chat session with "' + agentName + '"...');
+    if (appLaunchRequest && appLaunchRequest.appName) {
+      appendHomeAssistantMessage('assistant',
+        'Routing steps: 1) Start a new session. 2) Execute /openapp ' + appLaunchRequest.appName + ' to launch the app.');
+    }
 
     try {
-      var session = await dispatchPromptToChatSession(prompt, agentName);
+      var session = await dispatchPromptToChatSession(dispatchMessage, agentName);
       if (!session) throw new Error('Failed to launch chat session');
       trackHomeAssistantSession(session, prompt, agentName);
       appendHomeAssistantMessage('assistant', 'Started session "' + (session.title || 'New Session') + '" with "' + agentName + '".');
-      appendHomeAssistantMessage('assistant', 'Your task was queued in chat. Continue in chat.');
+      if (appLaunchRequest && appLaunchRequest.appName) {
+        appendHomeAssistantMessage('assistant', 'Launch command queued for "' + appLaunchRequest.appName + '". Continue in chat.');
+      } else {
+        appendHomeAssistantMessage('assistant', 'Your task was queued in chat. Continue in chat.');
+      }
 
       renderHomeAssistantActions([
         {
@@ -1076,7 +1156,7 @@
         {
           label: 'Retry',
           variant: 'primary',
-          onClick: function () { runPendingTaskWithAgent(prompt, agentName); }
+          onClick: function () { runPendingTaskWithAgent(prompt, agentName, options); }
         },
         {
           label: 'Open Agent Settings',
@@ -1092,6 +1172,7 @@
   async function handleHomeAssistantPrompt(prompt) {
     var text = String(prompt || '').trim();
     if (!text) return;
+    var appLaunchRequest = parseAppLaunchRequest(text);
 
     if (homeAssistantState.awaitingCreateConfirmation && isAffirmativeConfirmation(text)) {
       appendHomeAssistantMessage('user', text);
@@ -1118,6 +1199,7 @@
     homeAssistantState.pendingAgentName = '';
     homeAssistantState.pendingSuggestedName = '';
     homeAssistantState.pendingSuggestedType = '';
+    homeAssistantState.pendingAppLaunch = appLaunchRequest;
     homeAssistantState.awaitingCreateConfirmation = false;
 
     appendHomeAssistantMessage('user', text);
@@ -1131,11 +1213,22 @@
 
       if (routeData) {
         homeAssistantState.pendingIntent = HOME_INTENTS[routeData.intent] || detectHomeIntent(text);
+        if (appLaunchRequest && homeAssistantState.pendingIntent.key === 'general_task') {
+          homeAssistantState.pendingIntent = HOME_INTENTS.app_launch;
+        }
         if (typeof routeData.suggested_agent_name === 'string') {
           homeAssistantState.pendingSuggestedName = routeData.suggested_agent_name.trim();
         }
         if (typeof routeData.suggested_agent_type === 'string') {
           homeAssistantState.pendingSuggestedType = routeData.suggested_agent_type.trim();
+        }
+        if (appLaunchRequest) {
+          if (!homeAssistantState.pendingSuggestedName) {
+            homeAssistantState.pendingSuggestedName = HOME_INTENTS.app_launch.suggestedName;
+          }
+          if (!homeAssistantState.pendingSuggestedType) {
+            homeAssistantState.pendingSuggestedType = HOME_INTENTS.app_launch.defaultType;
+          }
         }
 
         if (shouldAcceptBackendRouteMatch(routeData)) {
@@ -1167,7 +1260,7 @@
           appendHomeAssistantMessage('assistant',
             'Idea for email handling: add OAuth (Gmail/Outlook), start read-only, summarize unread, and require explicit confirmation before any send action.');
         }
-        await runPendingTaskWithAgent(text, match.agent.name);
+        await runPendingTaskWithAgent(text, match.agent.name, { appLaunchRequest: appLaunchRequest });
       } else {
         homeAssistantState.awaitingCreateConfirmation = true;
         appendHomeAssistantMessage('assistant',

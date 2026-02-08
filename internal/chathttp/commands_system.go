@@ -4,10 +4,14 @@ import (
 	"encoding/json"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/johnjallday/ori-agent/internal/logger"
+	"github.com/johnjallday/ori-agent/internal/platform"
 )
+
+var openApplicationFn = platform.OpenApplication
 
 // HandleExit handles the /exit command to shut down the server
 func (ch *CommandHandler) HandleExit(w http.ResponseWriter, r *http.Request) {
@@ -39,4 +43,29 @@ func (ch *CommandHandler) HandleExit(w http.ResponseWriter, r *http.Request) {
 			os.Exit(0)
 		}
 	}()
+}
+
+// HandleOpenApp handles /openapp <application-name> and launches the app locally.
+func (ch *CommandHandler) HandleOpenApp(w http.ResponseWriter, r *http.Request, appName string) {
+	w.Header().Set("Content-Type", "application/json")
+
+	appName = strings.TrimSpace(appName)
+	appName = strings.Trim(appName, `"'`)
+	if appName == "" {
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"response": "❌ Usage: `/openapp <application-name>`\nExample: `/openapp Obsidian`",
+		})
+		return
+	}
+
+	if err := openApplicationFn(appName); err != nil {
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"response": "❌ Failed to open application: " + err.Error(),
+		})
+		return
+	}
+
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"response": "✅ Opening " + appName + " now.",
+	})
 }

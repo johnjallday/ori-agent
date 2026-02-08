@@ -374,6 +374,18 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	originalQuery := q
 
+	// Natural language app launch shortcut:
+	// "open safari" -> "/openapp safari"
+	if len(req.Files) == 0 {
+		if rewritten, ok := inferOpenAppCommandFromChat(q); ok {
+			logger.Debug("Auto-routed chat prompt to /openapp", logger.Fields{
+				"original":  q,
+				"rewritten": rewritten,
+			})
+			q = rewritten
+		}
+	}
+
 	// Debug: Log received files
 
 	// Get session ID from header for multi-tab support
@@ -481,6 +493,11 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 		// Parse args after "/workspace"
 		args := strings.TrimPrefix(q, "/workspace")
 		h.commandHandler.HandleWorkspace(w, r, args)
+		return
+	}
+	if strings.HasPrefix(q, "/openapp") {
+		appName := strings.TrimSpace(strings.TrimPrefix(q, "/openapp"))
+		h.commandHandler.HandleOpenApp(w, r, appName)
 		return
 	}
 
@@ -613,10 +630,15 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 			cmd.Files = ConvertUploadedFilesToAttachments(req.Files)
 		}
 
-		// Load agent
-		ag, current, ok := store.GetCurrentAgent(h.store)
-		if !ok {
-			orihttp.InternalError(w, "current agent not found")
+		// Load agent - use session-bound agent if available
+		current := resolveAgentName()
+		if current == "" {
+			orihttp.InternalError(w, "no agent available for direct tool execution")
+			return
+		}
+		ag, ok := h.store.GetAgent(current)
+		if !ok || ag == nil {
+			orihttp.InternalError(w, fmt.Sprintf("agent '%s' not found", current))
 			return
 		}
 

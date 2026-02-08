@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os/exec"
 	"runtime"
+	"strings"
 )
 
 // OpenFolder opens the specified folder in the native file manager.
@@ -115,6 +116,45 @@ func OpenURL(url string) error {
 		_ = cmd.Wait()
 	}()
 
+	return nil
+}
+
+// OpenApplication launches a desktop application by name.
+// It does not use shell interpolation, so appName is passed as a raw argument.
+//
+// Platform support:
+//   - macOS: Uses "open -a <AppName>"
+//   - Windows: Uses "start" via cmd.exe
+//   - Linux: Tries "gtk-launch", then falls back to "xdg-open"
+func OpenApplication(appName string) error {
+	appName = strings.TrimSpace(appName)
+	if appName == "" {
+		return fmt.Errorf("application name cannot be empty")
+	}
+
+	var cmd *exec.Cmd
+
+	switch runtime.GOOS {
+	case "darwin":
+		cmd = exec.Command("open", "-a", appName)
+	case "windows":
+		cmd = exec.Command("cmd", "/c", "start", "", appName)
+	case "linux":
+		gtkCmd := exec.Command("gtk-launch", appName)
+		if err := gtkCmd.Start(); err == nil {
+			go func() { _ = gtkCmd.Wait() }()
+			return nil
+		}
+		cmd = exec.Command("xdg-open", appName)
+	default:
+		return fmt.Errorf("unsupported operating system: %s", runtime.GOOS)
+	}
+
+	if err := cmd.Start(); err != nil {
+		return fmt.Errorf("failed to open application %q: %w", appName, err)
+	}
+
+	go func() { _ = cmd.Wait() }()
 	return nil
 }
 
