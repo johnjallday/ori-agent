@@ -104,8 +104,9 @@ const sessionManager = {
 
     // Try to restore active session, or prompt to create workspace
     const restored = await this.restoreActiveSession();
-    if (!restored && this.sessions.length === 0 && this.folders.length === 0) {
-      // Show create workspace modal when no workspaces exist
+    const isWorkspacePage = document.body.classList.contains('home-hub');
+    if (!restored && this.sessions.length === 0 && this.folders.length === 0 && isWorkspacePage) {
+      // Show create workspace modal when no workspaces exist (only on workspaces page)
       this.showAddWorkspaceModal();
     } else if (!restored && this.sessions.length > 0) {
       // No saved session but sessions exist - use the first one
