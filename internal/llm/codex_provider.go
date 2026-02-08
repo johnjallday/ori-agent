@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/johnjallday/ori-agent/internal/modelinfo"
@@ -65,7 +66,8 @@ func (p *CodexProvider) ValidateConfig(_ ProviderConfig) error {
 func (p *CodexProvider) DefaultModels() []string {
 	cached := loadCodexCachedModels()
 	curated := modelinfo.GetCodexModels()
-	return mergeUniqueModels(cached, curated)
+	merged := mergeUniqueModels(cached, curated)
+	return prioritizeCodexModels(merged)
 }
 
 // Chat sends a chat request via the Codex CLI.
@@ -303,4 +305,29 @@ func mergeUniqueModels(primary, secondary []string) []string {
 	addModels(primary)
 	addModels(secondary)
 	return merged
+}
+
+func prioritizeCodexModels(models []string) []string {
+	if len(models) == 0 {
+		return models
+	}
+
+	prioritized := append([]string(nil), models...)
+	sort.SliceStable(prioritized, func(i, j int) bool {
+		iPreferred := isPreferredCodexModel(prioritized[i])
+		jPreferred := isPreferredCodexModel(prioritized[j])
+		if iPreferred != jPreferred {
+			return iPreferred
+		}
+		return false
+	})
+	return prioritized
+}
+
+func isPreferredCodexModel(model string) bool {
+	normalized := strings.ToLower(strings.TrimSpace(model))
+	return normalized == "gpt-5.3-codex" ||
+		strings.HasPrefix(normalized, "gpt-5.3-codex-") ||
+		normalized == "gpt-5-3-codex" ||
+		strings.HasPrefix(normalized, "gpt-5-3-codex-")
 }

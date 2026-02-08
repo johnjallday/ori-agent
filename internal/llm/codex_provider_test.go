@@ -67,6 +67,34 @@ func TestCodexProviderDefaultModels_FallsBackToCurated(t *testing.T) {
 	}
 }
 
+func TestCodexProviderDefaultModels_PrioritizesGPT53(t *testing.T) {
+	codexHome := t.TempDir()
+	t.Setenv("CODEX_HOME", codexHome)
+
+	cache := `{
+  "models": [
+    {"slug": "gpt-5.2-codex", "visibility": "list"},
+    {"slug": "gpt-5-codex", "visibility": "list"},
+    {"slug": "gpt-5.3-codex", "visibility": "list"},
+    {"slug": "gpt-5.1-codex", "visibility": "list"}
+  ]
+}`
+	cachePath := filepath.Join(codexHome, "models_cache.json")
+	if err := os.WriteFile(cachePath, []byte(cache), 0600); err != nil {
+		t.Fatalf("write cache: %v", err)
+	}
+
+	provider := &CodexProvider{cliPath: "codex"}
+	models := provider.DefaultModels()
+
+	if len(models) == 0 {
+		t.Fatal("expected codex models, got none")
+	}
+	if models[0] != "gpt-5.3-codex" {
+		t.Fatalf("expected gpt-5.3-codex to be first, got %q (full list: %v)", models[0], models)
+	}
+}
+
 func containsModel(models []string, target string) bool {
 	for _, model := range models {
 		if model == target {
