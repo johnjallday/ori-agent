@@ -44,9 +44,8 @@ func (m *mockStore) SetAgent(name string, ag *agent.Agent) error {
 	return nil
 }
 
-func (m *mockStore) Save() error {
-	return nil
-}
+func (m *mockStore) Save() error        { return nil }
+func (m *mockStore) ClearAgents() error { return nil }
 
 // setupTestRegistry creates a registry.Manager with test data by writing to temporary files
 func setupTestRegistry(t *testing.T, plugins []types.PluginRegistryEntry) *registry.Manager {

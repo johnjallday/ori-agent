@@ -10,6 +10,7 @@ import (
 	orihttp "github.com/johnjallday/ori-agent/internal/http"
 	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/onboarding"
+	"github.com/johnjallday/ori-agent/internal/store"
 )
 
 const (
@@ -38,13 +39,15 @@ type ResetResponse struct {
 // ResetHandler handles application reset operations
 type ResetHandler struct {
 	onboardingMgr *onboarding.Manager
+	store         store.Store
 	dataDir       string
 }
 
 // NewResetHandler creates a new ResetHandler
-func NewResetHandler(onboardingMgr *onboarding.Manager, dataDir string) *ResetHandler {
+func NewResetHandler(onboardingMgr *onboarding.Manager, st store.Store, dataDir string) *ResetHandler {
 	return &ResetHandler{
 		onboardingMgr: onboardingMgr,
+		store:         st,
 		dataDir:       dataDir,
 	}
 }
@@ -183,8 +186,15 @@ func (h *ResetHandler) resetSettings() error {
 	return nil
 }
 
-// resetAgents removes agents.json and the agents/ directory
+// resetAgents removes agents.json, the agents/ directory, and clears in-memory state
 func (h *ResetHandler) resetAgents() error {
+	// Clear in-memory agent state so it won't be re-written on next save
+	if h.store != nil {
+		if err := h.store.ClearAgents(); err != nil {
+			logger.Warn("Failed to clear in-memory agents", logger.Fields{"error": err})
+		}
+	}
+
 	// Remove agents.json
 	agentsJsonPath := filepath.Join(h.dataDir, "agents.json")
 	if err := h.validatePath(agentsJsonPath); err != nil {

@@ -32,19 +32,8 @@ func NewFileStore(path string, defaultSettings types.Settings) (Store, error) {
 		logger.Verbosef("Warning: failed to load store from %s: %v", path, err)
 	}
 
-	// ensure at least one agent exists
 	fs.mu.Lock()
 	defer fs.mu.Unlock()
-	if fs.current == "" {
-		fs.current = "default"
-	}
-	if _, ok := fs.agents[fs.current]; !ok {
-		fs.agents[fs.current] = &agent.Agent{
-			Type:     agent.TypeToolCalling, // Default to cheapest tier
-			Settings: defaultSettings,
-			Plugins:  make(map[string]types.LoadedPlugin),
-		}
-	}
 
 	// Migrate existing agents to have types
 	fs.migrateAgentTypesUnlocked()
@@ -182,6 +171,14 @@ func (s *fileStore) DeleteAgent(name string) error {
 		logger.Verbosef("Warning: failed to remove agent folder %s: %v", agentFolder, err)
 	}
 
+	return s.saveUnlocked()
+}
+
+func (s *fileStore) ClearAgents() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.agents = make(map[string]*agent.Agent)
+	s.current = ""
 	return s.saveUnlocked()
 }
 

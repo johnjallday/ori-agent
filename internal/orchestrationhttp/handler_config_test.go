@@ -127,6 +127,7 @@ func (m *mockStore) DeleteAgent(name string) error                              
 func (m *mockStore) GetAgent(name string) (*agent.Agent, bool)                   { return nil, false }
 func (m *mockStore) SetAgent(name string, ag *agent.Agent) error                 { return nil }
 func (m *mockStore) Save() error                                                 { return nil }
+func (m *mockStore) ClearAgents() error                                          { return nil }
 
 // mockWorkspaceStore implements workspace.Store interface
 type mockWorkspaceStore struct{}
