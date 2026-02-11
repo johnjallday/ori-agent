@@ -245,7 +245,7 @@ func (h *Handler) handleOpenAIToolCalls(
 		Model:       openai.ChatModel(ag.Settings.Model),
 		Temperature: openai.Float(ag.Settings.Temperature),
 		Messages: append(ag.Messages,
-			openai.SystemMessage("The tool was executed successfully. Simply acknowledge the result without suggesting follow-up actions or next steps. If the tool returned configuration data, settings, or structured information, display that data clearly. For action tools (like opening projects, launching applications), provide only a brief confirmation."),
+			openai.SystemMessage(getFollowUpSystemPrompt()),
 		),
 	})
 	if err != nil || resp2 == nil || len(resp2.Choices) == 0 {

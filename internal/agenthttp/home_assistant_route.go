@@ -231,6 +231,7 @@ func isBetterMatch(candidate, best *routedAgentMatch, current string) bool {
 func scoreAgentForIntent(name, current string, ag *agent.Agent, intent homeAssistantIntent, prompt string) *routedAgentMatch {
 	summary := buildAgentSummary(name, ag)
 	plugins := extractNormalizedPluginNames(ag)
+	mcpServers := extractNormalizedMCPServerNames(ag)
 	lowerName := normalizeRouteToken(name)
 	promptTokens := tokenizePrompt(prompt)
 	score := 0
@@ -254,6 +255,13 @@ func scoreAgentForIntent(name, current string, ag *agent.Agent, intent homeAssis
 			if strings.Contains(plugin, preferredPlugin) {
 				score += 3
 				reasons = appendReason(reasons, "has plugin support for "+preferredPlugin)
+				break
+			}
+		}
+		for _, server := range mcpServers {
+			if strings.Contains(server, preferredPlugin) {
+				score += 3
+				reasons = appendReason(reasons, "has MCP support for "+preferredPlugin)
 				break
 			}
 		}
@@ -333,6 +341,10 @@ func buildAgentSummary(name string, ag *agent.Agent) string {
 	if len(pluginNames) > 0 {
 		parts = append(parts, strings.Join(pluginNames, " "))
 	}
+	mcpServerNames := extractNormalizedMCPServerNames(ag)
+	if len(mcpServerNames) > 0 {
+		parts = append(parts, strings.Join(mcpServerNames, " "))
+	}
 
 	return strings.Join(parts, " ")
 }
@@ -351,6 +363,22 @@ func extractNormalizedPluginNames(ag *agent.Agent) []string {
 		plugins = append(plugins, normalized)
 	}
 	return plugins
+}
+
+func extractNormalizedMCPServerNames(ag *agent.Agent) []string {
+	if ag == nil || len(ag.MCPServers) == 0 {
+		return []string{}
+	}
+
+	servers := make([]string, 0, len(ag.MCPServers))
+	for _, name := range ag.MCPServers {
+		normalized := normalizeRouteToken(strings.ReplaceAll(name, "_", "-"))
+		if normalized == "" {
+			continue
+		}
+		servers = append(servers, normalized)
+	}
+	return servers
 }
 
 func appendReason(reasons []string, reason string) []string {

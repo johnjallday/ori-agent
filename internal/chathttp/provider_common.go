@@ -174,7 +174,7 @@ func writeErrorResponse(w http.ResponseWriter, message string) {
 
 // getFollowUpSystemPrompt returns the system prompt for follow-up requests after tool execution
 func getFollowUpSystemPrompt() string {
-	return "The tool was executed successfully. Simply acknowledge the result without suggesting follow-up actions or next steps. If the tool returned configuration data, settings, or structured information, display that data clearly. For action tools (like opening projects, launching applications), provide only a brief confirmation."
+	return "Use tool output as the source of truth. Do not invent data and do not hide requested details behind high-level summaries. If the user asks for names/items/files/paths, include the exact identifiers from the tool output. For file metadata responses, include filename or path with each metadata block. Keep the response concise and avoid unnecessary follow-up suggestions. For pure action tools (opening apps/projects), provide a brief confirmation."
 }
 
 // emptyResponseText is the default text when the model returns an empty response

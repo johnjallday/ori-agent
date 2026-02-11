@@ -53,6 +53,37 @@
     }
   };
 
+  const HOME_MCP_REQUIREMENTS = [
+    {
+      key: 'github_ops',
+      label: 'GitHub operations',
+      phrases: ['github', 'repository', 'repo', 'pull request', 'pull-request', 'issue', 'commit', 'branch', 'release'],
+      preferredServerNames: ['github'],
+      preferredCategories: ['development']
+    },
+    {
+      key: 'web_research',
+      label: 'web research',
+      phrases: ['search the web', 'web search', 'search online', 'look up', 'lookup', 'internet search', 'latest news'],
+      preferredServerNames: ['brave-search'],
+      preferredCategories: ['search']
+    },
+    {
+      key: 'database_query',
+      label: 'database query',
+      phrases: ['postgres', 'postgresql', 'database', 'sql query', 'run sql', 'db query', 'schema'],
+      preferredServerNames: ['postgres'],
+      preferredCategories: ['database']
+    },
+    {
+      key: 'filesystem_ops',
+      label: 'filesystem access',
+      phrases: ['filesystem', 'file system', 'local files', 'read file', 'write file', 'directory', 'folder on my computer'],
+      preferredServerNames: ['filesystem'],
+      preferredCategories: ['file-system']
+    }
+  ];
+
   const homeAssistantState = {
     pendingPrompt: '',
     pendingIntent: HOME_INTENTS.general_task,
@@ -510,6 +541,244 @@
     return selected;
   }
 
+  function normalizeMCPServerName(name) {
+    return normalizeToken(name).replace(/_/g, '-');
+  }
+
+  function scoreMCPRequirement(promptText, requirement) {
+    if (!promptText || !requirement || !Array.isArray(requirement.phrases)) return 0;
+    var score = 0;
+    for (var i = 0; i < requirement.phrases.length; i++) {
+      var phrase = normalizeToken(requirement.phrases[i]);
+      if (!phrase) continue;
+      if (promptText.indexOf(phrase) >= 0) {
+        score += phrase.length >= 8 ? 2 : 1;
+      }
+    }
+    return score;
+  }
+
+  function detectMCPRequirement(prompt) {
+    var promptText = normalizeToken(prompt);
+    if (!promptText) return null;
+
+    var best = null;
+    var bestScore = 0;
+    for (var i = 0; i < HOME_MCP_REQUIREMENTS.length; i++) {
+      var requirement = HOME_MCP_REQUIREMENTS[i];
+      var score = scoreMCPRequirement(promptText, requirement);
+      if (score > bestScore) {
+        best = requirement;
+        bestScore = score;
+      }
+    }
+    if (bestScore <= 0) return null;
+    return best;
+  }
+
+  function selectExistingMCPServer(requirement, servers) {
+    if (!requirement || !Array.isArray(servers) || servers.length === 0) return null;
+    var preferredNames = (requirement.preferredServerNames || []).map(normalizeMCPServerName);
+    for (var i = 0; i < servers.length; i++) {
+      var server = servers[i];
+      var serverName = normalizeMCPServerName(server && server.name);
+      if (!serverName) continue;
+      if (preferredNames.indexOf(serverName) >= 0) return server;
+    }
+    return null;
+  }
+
+  function scoreMarketplaceMCPServer(requirement, server, promptText) {
+    if (!requirement || !server) return 0;
+    var score = 0;
+    var serverName = normalizeMCPServerName(server.name);
+    var category = normalizeToken(server.category);
+    var description = normalizeToken(server.description);
+    var preferredNames = (requirement.preferredServerNames || []).map(normalizeMCPServerName);
+    var preferredCategories = (requirement.preferredCategories || []).map(normalizeToken);
+
+    if (preferredNames.indexOf(serverName) >= 0) score += 100;
+    if (preferredCategories.indexOf(category) >= 0) score += 40;
+    if (description && scoreMCPRequirement(description, requirement) > 0) score += 20;
+    if (promptText && serverName && promptText.indexOf(serverName) >= 0) score += 10;
+
+    return score;
+  }
+
+  function chooseMarketplaceMCPServer(requirement, prompt, marketplaceServers) {
+    if (!requirement || !Array.isArray(marketplaceServers)) return null;
+    var promptText = normalizeToken(prompt);
+    var best = null;
+    var bestScore = 0;
+    for (var i = 0; i < marketplaceServers.length; i++) {
+      var server = marketplaceServers[i];
+      var score = scoreMarketplaceMCPServer(requirement, server, promptText);
+      if (score > bestScore) {
+        best = server;
+        bestScore = score;
+      }
+    }
+    if (bestScore <= 0) return null;
+    return best;
+  }
+
+  function getMCPManualConfigReason(server) {
+    if (!server) return '';
+    var envRequired = server.env_required && typeof server.env_required === 'object'
+      ? Object.keys(server.env_required)
+      : [];
+    if (envRequired.length > 0) {
+      return 'requires environment variables: ' + envRequired.join(', ');
+    }
+
+    var args = Array.isArray(server.args) ? server.args : [];
+    for (var i = 0; i < args.length; i++) {
+      var arg = String(args[i] || '');
+      if (arg.indexOf('/path/to/allowed/directory') >= 0) {
+        return 'needs a filesystem path before it can run';
+      }
+    }
+    return '';
+  }
+
+  function buildMCPServerInstallPayload(server) {
+    var args = Array.isArray(server && server.args) ? server.args.slice() : [];
+    return {
+      name: String(server && server.name || '').trim(),
+      command: String(server && server.command || '').trim(),
+      args: args,
+      env: {},
+      transport: String(server && server.transport || 'stdio').trim() || 'stdio',
+      enabled: true
+    };
+  }
+
+  async function fetchAgentMCPServers(agentName) {
+    if (!agentName || typeof API === 'undefined' || typeof API.get !== 'function') return [];
+    try {
+      var data = await API.get('/api/agents/' + encodeURIComponent(agentName) + '/mcp-servers');
+      return Array.isArray(data && data.servers) ? data.servers : [];
+    } catch (error) {
+      dashLog.debug('Failed to fetch agent MCP servers', { agent: agentName, error: error && error.message || error });
+      return [];
+    }
+  }
+
+  async function fetchMarketplaceMCPServers() {
+    if (typeof API === 'undefined' || typeof API.get !== 'function') return [];
+    try {
+      var data = await API.get('/api/mcp/marketplace');
+      return Array.isArray(data && data.servers) ? data.servers : [];
+    } catch (error) {
+      dashLog.debug('Failed to fetch MCP marketplace', { error: error && error.message || error });
+      return [];
+    }
+  }
+
+  async function ensureMCPForTask(agentName, prompt) {
+    var requirement = detectMCPRequirement(prompt);
+    if (!requirement || !agentName) return null;
+
+    var currentServers = await fetchAgentMCPServers(agentName);
+    var existing = selectExistingMCPServer(requirement, currentServers);
+
+    if (existing && existing.enabled) {
+      var currentStatus = normalizeToken(existing.status);
+      if (currentStatus && currentStatus !== 'running') {
+        return {
+          status: 'enabled_not_running',
+          serverName: existing.name,
+          message: 'MCP server "' + existing.name + '" is enabled for this task, but currently "' + (existing.status || 'unknown') + '".'
+        };
+      }
+      return {
+        status: 'already_enabled',
+        serverName: existing.name
+      };
+    }
+
+    var targetServerName = existing && existing.name ? existing.name : '';
+    var installCandidate = null;
+
+    if (!targetServerName) {
+      var marketplaceServers = await fetchMarketplaceMCPServers();
+      installCandidate = chooseMarketplaceMCPServer(requirement, prompt, marketplaceServers);
+      if (!installCandidate) {
+        return {
+          status: 'not_found',
+          message: 'This task may need MCP (' + requirement.label + '), but I could not find a suitable MCP server to auto-install.'
+        };
+      }
+      targetServerName = installCandidate.name;
+
+      var manualReason = getMCPManualConfigReason(installCandidate);
+      if (manualReason) {
+        return {
+          status: 'needs_manual_config',
+          serverName: targetServerName,
+          message: 'Found MCP server "' + targetServerName + '" for ' + requirement.label + ', but it ' + manualReason + '. Configure it in MCP settings first.'
+        };
+      }
+
+      var payload = buildMCPServerInstallPayload(installCandidate);
+      if (!payload.name || !payload.command) {
+        return {
+          status: 'invalid_candidate',
+          message: 'Found an MCP candidate for ' + requirement.label + ', but its install configuration is incomplete.'
+        };
+      }
+
+      try {
+        await API.post('/api/mcp/servers', payload);
+      } catch (error) {
+        var installError = String(error && error.message || error || '');
+        if (installError.toLowerCase().indexOf('already exists') < 0) {
+          return {
+            status: 'install_failed',
+            serverName: payload.name,
+            message: 'I found MCP server "' + payload.name + '" for ' + requirement.label + ' but failed to install it: ' + installError
+          };
+        }
+      }
+    }
+
+    try {
+      await API.post('/api/agents/' + encodeURIComponent(agentName) + '/mcp-servers/' + encodeURIComponent(targetServerName) + '/enable', {});
+    } catch (error) {
+      var enableError = String(error && error.message || error || '');
+      return {
+        status: 'enable_failed',
+        serverName: targetServerName,
+        message: 'I found MCP server "' + targetServerName + '" for ' + requirement.label + ' but failed to enable it: ' + enableError
+      };
+    }
+
+    var refreshedServers = await fetchAgentMCPServers(agentName);
+    var refreshed = selectExistingMCPServer(requirement, refreshedServers);
+    var refreshedStatus = normalizeToken(refreshed && refreshed.status);
+    if (refreshedStatus && refreshedStatus !== 'running') {
+      return {
+        status: 'enabled_not_running',
+        serverName: targetServerName,
+        message: 'Enabled MCP server "' + targetServerName + '" for this task, but it is currently "' + (refreshed && refreshed.status || 'unknown') + '".'
+      };
+    }
+
+    if (installCandidate) {
+      return {
+        status: 'installed_and_enabled',
+        serverName: targetServerName,
+        message: 'Installed and enabled MCP server "' + targetServerName + '" for this task.'
+      };
+    }
+
+    return {
+      status: 'enabled_existing',
+      serverName: targetServerName,
+      message: 'Enabled MCP server "' + targetServerName + '" for this task.'
+    };
+  }
+
   function normalizePluginNames(plugins) {
     if (!Array.isArray(plugins)) return [];
     return plugins.map(function (name) {
@@ -533,6 +802,10 @@
     var plugins = normalizePluginNames(agent && agent.enabled_plugins);
     if (plugins.length > 0) {
       parts.push(plugins.join(' '));
+    }
+    var mcpServers = normalizePluginNames(agent && agent.mcp_servers);
+    if (mcpServers.length > 0) {
+      parts.push(mcpServers.join(' '));
     }
 
     return parts.join(' ').trim();
@@ -1038,6 +1311,11 @@
           'Email idea: connect Gmail/Outlook via OAuth, start with read-only scopes, summarize unread first, and require explicit approval before sending replies.');
       }
 
+      var createdAgentMCP = await ensureMCPForTask(agentName, prompt);
+      if (createdAgentMCP && createdAgentMCP.message) {
+        appendHomeAssistantMessage('assistant', createdAgentMCP.message);
+      }
+
       await runPendingTaskWithAgent(prompt, agentName, { appLaunchRequest: appLaunchRequest });
 
       API.get('/api/agents/dashboard/list').then(function (agentData) {
@@ -1259,6 +1537,11 @@
         if (homeAssistantState.pendingIntent.key === 'email_check') {
           appendHomeAssistantMessage('assistant',
             'Idea for email handling: add OAuth (Gmail/Outlook), start read-only, summarize unread, and require explicit confirmation before any send action.');
+        }
+
+        var matchedAgentMCP = await ensureMCPForTask(match.agent.name, text);
+        if (matchedAgentMCP && matchedAgentMCP.message) {
+          appendHomeAssistantMessage('assistant', matchedAgentMCP.message);
         }
         await runPendingTaskWithAgent(text, match.agent.name, { appLaunchRequest: appLaunchRequest });
       } else {

@@ -2,12 +2,14 @@ package transport
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"os"
 	"os/exec"
+	"strings"
 	"sync"
 )
 
@@ -81,7 +83,9 @@ func (t *StdioTransport) Send(message interface{}) error {
 		return fmt.Errorf("failed to marshal message: %w", err)
 	}
 
-	fmt.Fprintf(os.Stderr, "[MCP send] %s\n", string(data))
+	if shouldLogMCPWireMessage(data) {
+		fmt.Fprintf(os.Stderr, "[MCP send] %s\n", string(data))
+	}
 
 	// MCP uses newline-delimited JSON
 	_, err = t.stdin.Write(append(data, '\n'))
@@ -113,7 +117,9 @@ func (t *StdioTransport) Receive() (json.RawMessage, error) {
 		return nil, fmt.Errorf("empty line received")
 	}
 
-	fmt.Fprintf(os.Stderr, "[MCP recv] %s\n", string(line))
+	if shouldLogMCPWireMessage(line) {
+		fmt.Fprintf(os.Stderr, "[MCP recv] %s\n", string(line))
+	}
 
 	// Return raw JSON message
 	return json.RawMessage(line), nil
@@ -178,4 +184,63 @@ func (t *StdioTransport) IsAlive() bool {
 	// Check if process is still running
 	// Process.Signal(0) is a way to check without sending a real signal
 	return t.cmd.ProcessState == nil || !t.cmd.ProcessState.Exited()
+}
+
+func shouldLogMCPWireMessage(data []byte) bool {
+	if !isMCPPingMessage(data) {
+		return true
+	}
+	return shouldLogMCPPingTraffic()
+}
+
+func shouldLogMCPPingTraffic() bool {
+	return isTruthyEnv("ORI_MCP_LOG_PINGS") || isTruthyEnv("ORI_VERBOSE")
+}
+
+func isTruthyEnv(key string) bool {
+	raw := strings.TrimSpace(strings.ToLower(os.Getenv(key)))
+	switch raw {
+	case "1", "true", "yes", "on":
+		return true
+	default:
+		return false
+	}
+}
+
+func isMCPPingMessage(data []byte) bool {
+	return isMCPPingRequest(data) || isMCPPingResponse(data)
+}
+
+func isMCPPingRequest(data []byte) bool {
+	var envelope struct {
+		Method string `json:"method"`
+	}
+	if err := json.Unmarshal(data, &envelope); err != nil {
+		return false
+	}
+	return strings.EqualFold(strings.TrimSpace(envelope.Method), "ping")
+}
+
+func isMCPPingResponse(data []byte) bool {
+	var envelope struct {
+		ID     json.RawMessage `json:"id"`
+		Method string          `json:"method"`
+		Result json.RawMessage `json:"result"`
+		Error  json.RawMessage `json:"error"`
+	}
+	if err := json.Unmarshal(data, &envelope); err != nil {
+		return false
+	}
+
+	if strings.TrimSpace(envelope.Method) != "" {
+		return false
+	}
+	if len(bytes.TrimSpace(envelope.ID)) == 0 {
+		return false
+	}
+	if errField := bytes.TrimSpace(envelope.Error); len(errField) > 0 && !bytes.Equal(errField, []byte("null")) {
+		return false
+	}
+
+	return bytes.Equal(bytes.TrimSpace(envelope.Result), []byte("{}"))
 }

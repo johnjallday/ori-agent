@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -41,6 +43,11 @@ const (
 	StatusRunning    ServerStatus = "running"
 	StatusError      ServerStatus = "error"
 	StatusRestarting ServerStatus = "restarting"
+)
+
+const (
+	defaultMCPHealthCheckInterval = 300 * time.Second
+	mcpHealthCheckIntervalEnvVar  = "ORI_MCP_HEALTHCHECK_INTERVAL"
 )
 
 // NewServer creates a new MCP server instance
@@ -225,7 +232,8 @@ func (s *Server) discoverTools() error {
 
 // healthCheckLoop periodically checks if the server is still alive
 func (s *Server) healthCheckLoop() {
-	ticker := time.NewTicker(30 * time.Second)
+	interval := resolveMCPHealthCheckInterval()
+	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 
 	for {
@@ -258,4 +266,29 @@ func (s *Server) healthCheckLoop() {
 			}
 		}
 	}
+}
+
+func resolveMCPHealthCheckInterval() time.Duration {
+	raw := strings.TrimSpace(os.Getenv(mcpHealthCheckIntervalEnvVar))
+	if raw == "" {
+		return defaultMCPHealthCheckInterval
+	}
+
+	// Prefer duration syntax: "300s", "5m", etc.
+	if parsed, err := time.ParseDuration(raw); err == nil {
+		if parsed > 0 {
+			return parsed
+		}
+		return defaultMCPHealthCheckInterval
+	}
+
+	// Backward-compatible plain seconds, e.g. "300".
+	if seconds, err := strconv.Atoi(raw); err == nil {
+		if seconds > 0 {
+			return time.Duration(seconds) * time.Second
+		}
+		return defaultMCPHealthCheckInterval
+	}
+
+	return defaultMCPHealthCheckInterval
 }

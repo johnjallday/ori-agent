@@ -61,6 +61,20 @@ func addHomeRouteTestAgent(t *testing.T, st store.Store, name string, cfg *store
 	}
 }
 
+func setHomeRouteAgentMCPServers(t *testing.T, st store.Store, name string, servers []string) {
+	t.Helper()
+
+	ag, ok := st.GetAgent(name)
+	if !ok || ag == nil {
+		t.Fatalf("agent %q not found", name)
+	}
+
+	ag.MCPServers = append([]string{}, servers...)
+	if err := st.SetAgent(name, ag); err != nil {
+		t.Fatalf("failed to persist MCP servers for %q: %v", name, err)
+	}
+}
+
 func postRouteRequest(t *testing.T, handler *HomeAssistantRouteHandler, payload map[string]string) *httptest.ResponseRecorder {
 	t.Helper()
 
@@ -216,6 +230,46 @@ func TestHomeAssistantRouteHandler_EmailIntentPreferredOverAppLaunch(t *testing.
 
 	if resp.Intent != "email_check" {
 		t.Fatalf("expected intent email_check, got %q", resp.Intent)
+	}
+}
+
+func TestHomeAssistantRouteHandler_EmailMatch_UsesMCPServers(t *testing.T) {
+	st := newHomeRouteTestStore(t)
+	handler := NewHomeAssistantRouteHandler(st)
+
+	addHomeRouteTestAgent(t, st, "Task Runner", &store.CreateAgentConfig{Type: "tool-calling"}, types.AgentStatusActive,
+		"General assistant for home tasks", []string{"automation"}, []string{})
+	setHomeRouteAgentMCPServers(t, st, "Task Runner", []string{"gmail"})
+
+	rr := postRouteRequest(t, handler, map[string]string{"prompt": "check my email and summarize unread messages"})
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d: %s", http.StatusOK, rr.Code, rr.Body.String())
+	}
+
+	var resp HomeAssistantRouteResponse
+	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+
+	if resp.Intent != "email_check" {
+		t.Fatalf("expected intent email_check, got %q", resp.Intent)
+	}
+	if resp.RequiresCreation {
+		t.Fatalf("expected requires_creation false")
+	}
+	if resp.MatchedAgent != "Task Runner" {
+		t.Fatalf("expected matched agent Task Runner, got %q", resp.MatchedAgent)
+	}
+
+	reasonContainsMCP := false
+	for _, reason := range resp.Reasons {
+		if reason == "has MCP support for gmail" {
+			reasonContainsMCP = true
+			break
+		}
+	}
+	if !reasonContainsMCP {
+		t.Fatalf("expected MCP-based reason in response, got %v", resp.Reasons)
 	}
 }
 

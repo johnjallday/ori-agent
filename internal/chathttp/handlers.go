@@ -78,6 +78,7 @@ type Handler struct {
 	mcpRegistry interface {
 		GetToolsForServer(string) ([]pluginapi.PluginTool, error)
 		GetAllTools() []pluginapi.PluginTool
+		StartServer(string) error
 	}
 }
 
@@ -154,6 +155,7 @@ func (h *Handler) SetCostTracker(tracker *llm.CostTracker) {
 func (h *Handler) SetMCPRegistry(registry interface {
 	GetToolsForServer(string) ([]pluginapi.PluginTool, error)
 	GetAllTools() []pluginapi.PluginTool
+	StartServer(string) error
 }) {
 	h.mcpRegistry = registry
 }
@@ -271,7 +273,7 @@ func (h *Handler) findTool(ag *agent.Agent, agentName, toolName string) (plugina
 	// Then check MCP tools
 	if h.mcpRegistry != nil && len(ag.MCPServers) > 0 {
 		for _, serverName := range ag.MCPServers {
-			mcpTools, err := h.mcpRegistry.GetToolsForServer(serverName)
+			mcpTools, err := h.getMCPToolsForServer(serverName)
 			if err != nil {
 				continue
 			}
@@ -804,7 +806,7 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 		logger.Debug("Loading MCP tools for agent", logger.Fields{"agent": current})
 		for _, serverName := range ag.MCPServers {
 			logger.Debug("Attempting to get tools for MCP server", logger.Fields{"server": serverName})
-			mcpTools, err := h.mcpRegistry.GetToolsForServer(serverName)
+			mcpTools, err := h.getMCPToolsForServer(serverName)
 			if err != nil {
 				logger.Warn("Failed to get MCP tools for server", logger.Fields{"server": serverName, "error": err})
 				continue

@@ -35,6 +35,7 @@ type AgentListItem struct {
 	Metadata       *types.AgentMetadata   `json:"metadata,omitempty"`
 	Evolution      *types.AgentEvolution  `json:"evolution,omitempty"`
 	EnabledPlugins []string               `json:"enabled_plugins"`
+	MCPServers     []string               `json:"mcp_servers,omitempty"`
 	Model          string                 `json:"model"`
 }
 
@@ -125,6 +126,7 @@ func (h *DashboardHandler) ListAgentsWithStats(w http.ResponseWriter, r *http.Re
 			Metadata:       ag.Metadata,
 			Evolution:      cloneAgentEvolution(ag),
 			EnabledPlugins: enabledPlugins,
+			MCPServers:     append([]string{}, ag.MCPServers...),
 			Model:          ag.Settings.Model,
 		})
 	}
