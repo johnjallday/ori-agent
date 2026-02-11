@@ -8,6 +8,8 @@
   const XP_PER_LEVEL = 100;
   const HOME_ASSISTANT_MESSAGE_LIMIT = 60;
   const HOME_ASSISTANT_RECENT_SESSION_LIMIT = 8;
+  const HOME_ASSISTANT_RECENT_SESSION_RENDER_LIMIT = 5;
+  const HOME_ASSISTANT_BACKEND_LOOKUP_LIMIT = 50;
   const HOME_ASSISTANT_SESSION_STORAGE_KEY = 'ori.homeAssistant.recentSessions';
 
   const HOME_INTENTS = {
@@ -93,7 +95,9 @@
     pendingAppLaunch: null,
     awaitingCreateConfirmation: false,
     busy: false,
-    recentSessions: []
+    recentSessions: [],
+    mode: 'new_task',
+    routingSummary: null
   };
 
   var providersCache = null;
@@ -158,26 +162,79 @@
     return text.slice(0, Math.max(0, maxLength - 3)) + '...';
   }
 
+  function formatRelativeTime(timestamp) {
+    var ts = normalizeTimestamp(timestamp);
+    var diffMs = Date.now() - ts;
+    if (diffMs < 0) return 'just now';
+
+    var minute = 60 * 1000;
+    var hour = 60 * minute;
+    var day = 24 * hour;
+
+    if (diffMs < minute) return 'just now';
+    if (diffMs < hour) return Math.floor(diffMs / minute) + 'm ago';
+    if (diffMs < day) return Math.floor(diffMs / hour) + 'h ago';
+    if (diffMs < 7 * day) return Math.floor(diffMs / day) + 'd ago';
+
+    var dt = new Date(ts);
+    var month = dt.getMonth() + 1;
+    var dayOfMonth = dt.getDate();
+    return month + '/' + dayOfMonth;
+  }
+
+  function getPersistentStorage() {
+    if (window.localStorage) return window.localStorage;
+    if (window.sessionStorage) return window.sessionStorage;
+    return null;
+  }
+
+  function normalizeTimestamp(value) {
+    if (typeof value === 'number' && isFinite(value)) return value;
+    if (typeof value === 'string') {
+      var parsedDate = Date.parse(value);
+      if (!Number.isNaN(parsedDate)) return parsedDate;
+      var parsedNumber = Number(value);
+      if (isFinite(parsedNumber)) return parsedNumber;
+    }
+    return Date.now();
+  }
+
+  function normalizeRecentSessionItem(item) {
+    var current = item || {};
+    if (!current.id || !current.agent_name) return null;
+    return {
+      id: String(current.id),
+      agent_name: String(current.agent_name),
+      title: String(current.title || 'New Session'),
+      prompt: String(current.prompt || ''),
+      created_at: normalizeTimestamp(current.created_at)
+    };
+  }
+
+  function normalizeRecentSessionList(items) {
+    if (!Array.isArray(items)) return [];
+    var result = [];
+    for (var i = 0; i < items.length; i++) {
+      var normalized = normalizeRecentSessionItem(items[i]);
+      if (!normalized) continue;
+      result.push(normalized);
+      if (result.length >= HOME_ASSISTANT_RECENT_SESSION_LIMIT) break;
+    }
+    return result;
+  }
+
   function loadHomeAssistantRecentSessions() {
-    if (!window.sessionStorage) return [];
     try {
-      var raw = window.sessionStorage.getItem(HOME_ASSISTANT_SESSION_STORAGE_KEY);
+      var storage = getPersistentStorage();
+      if (!storage) return [];
+      var raw = storage.getItem(HOME_ASSISTANT_SESSION_STORAGE_KEY);
+      if (!raw && window.sessionStorage && storage !== window.sessionStorage) {
+        // Backward compatibility with older tab-scoped storage key.
+        raw = window.sessionStorage.getItem(HOME_ASSISTANT_SESSION_STORAGE_KEY);
+      }
       if (!raw) return [];
       var parsed = JSON.parse(raw);
-      if (!Array.isArray(parsed)) return [];
-      var result = [];
-      for (var i = 0; i < parsed.length; i++) {
-        var item = parsed[i] || {};
-        if (!item.id || !item.agent_name) continue;
-        result.push({
-          id: String(item.id),
-          agent_name: String(item.agent_name),
-          title: String(item.title || 'New Session'),
-          prompt: String(item.prompt || ''),
-          created_at: Number(item.created_at || Date.now())
-        });
-      }
-      return result.slice(0, HOME_ASSISTANT_RECENT_SESSION_LIMIT);
+      return normalizeRecentSessionList(parsed);
     } catch (error) {
       dashLog.debug('Failed to load Ask Ori recent sessions', { error: error && error.message || error });
       return [];
@@ -185,15 +242,87 @@
   }
 
   function saveHomeAssistantRecentSessions() {
-    if (!window.sessionStorage) return;
     try {
-      window.sessionStorage.setItem(
+      var storage = getPersistentStorage();
+      if (!storage) return;
+      storage.setItem(
         HOME_ASSISTANT_SESSION_STORAGE_KEY,
-        JSON.stringify(homeAssistantState.recentSessions.slice(0, HOME_ASSISTANT_RECENT_SESSION_LIMIT))
+        JSON.stringify(normalizeRecentSessionList(homeAssistantState.recentSessions))
       );
+      // Keep sessionStorage in sync for existing tabs.
+      if (window.sessionStorage && storage !== window.sessionStorage) {
+        window.sessionStorage.setItem(
+          HOME_ASSISTANT_SESSION_STORAGE_KEY,
+          JSON.stringify(normalizeRecentSessionList(homeAssistantState.recentSessions))
+        );
+      }
     } catch (error) {
       dashLog.debug('Failed to persist Ask Ori recent sessions', { error: error && error.message || error });
     }
+  }
+
+  async function fetchRecentSessionsFromBackend() {
+    try {
+      var data = await API.get('/api/sessions?limit=' + HOME_ASSISTANT_BACKEND_LOOKUP_LIMIT + '&sort=updated_desc');
+      var sessions = Array.isArray(data && data.sessions) ? data.sessions : [];
+      var recent = [];
+      for (var i = 0; i < sessions.length; i++) {
+        var normalized = normalizeRecentSessionItem({
+          id: sessions[i].id,
+          agent_name: sessions[i].agent_name,
+          title: sessions[i].title,
+          created_at: sessions[i].updated_at
+        });
+        if (!normalized) continue;
+        recent.push(normalized);
+        if (recent.length >= HOME_ASSISTANT_RECENT_SESSION_LIMIT) break;
+      }
+      return recent;
+    } catch (error) {
+      dashLog.debug('Failed to fetch Ask Ori recent sessions from backend', { error: error && error.message || error });
+      return [];
+    }
+  }
+
+  async function hydrateHomeAssistantRecentSessions() {
+    var backendRecent = await fetchRecentSessionsFromBackend();
+    if (!Array.isArray(backendRecent) || backendRecent.length === 0) return;
+
+    var byId = Object.create(null);
+    var merged = [];
+    for (var i = 0; i < backendRecent.length; i++) {
+      byId[String(backendRecent[i].id)] = backendRecent[i];
+    }
+
+    for (var j = 0; j < homeAssistantState.recentSessions.length; j++) {
+      var localItem = homeAssistantState.recentSessions[j];
+      if (!localItem || !localItem.id) continue;
+      var backendItem = byId[String(localItem.id)];
+      if (!backendItem) continue;
+      merged.push({
+        id: String(localItem.id),
+        agent_name: String(backendItem.agent_name || localItem.agent_name || ''),
+        title: String(backendItem.title || localItem.title || 'New Session'),
+        prompt: String(localItem.prompt || ''),
+        created_at: normalizeTimestamp(localItem.created_at || backendItem.created_at)
+      });
+      delete byId[String(localItem.id)];
+      if (merged.length >= HOME_ASSISTANT_RECENT_SESSION_LIMIT) break;
+    }
+
+    if (merged.length < HOME_ASSISTANT_RECENT_SESSION_LIMIT) {
+      for (var k = 0; k < backendRecent.length; k++) {
+        var candidate = backendRecent[k];
+        if (!candidate || !candidate.id) continue;
+        if (!byId[String(candidate.id)]) continue;
+        merged.push(candidate);
+        if (merged.length >= HOME_ASSISTANT_RECENT_SESSION_LIMIT) break;
+      }
+    }
+
+    homeAssistantState.recentSessions = normalizeRecentSessionList(merged);
+    saveHomeAssistantRecentSessions();
+    renderHomeAssistantRecentSessions();
   }
 
   function isSignalPromptToken(token) {
@@ -291,15 +420,93 @@
       input: document.getElementById('homeAssistantInput'),
       sendBtn: document.getElementById('homeAssistantSendBtn'),
       conversation: document.getElementById('homeAssistantConversation'),
+      routingSummary: document.getElementById('homeAssistantRoutingSummary'),
+      quickPrompts: document.getElementById('homeAssistantQuickPrompts'),
       actions: document.getElementById('homeAssistantActions'),
+      recentSection: document.getElementById('homeAssistantRecentSection'),
       recentSessions: document.getElementById('homeAssistantRecentSessions'),
+      modeNewBtn: document.getElementById('homeAssistantModeNewBtn'),
+      modeContinueBtn: document.getElementById('homeAssistantModeContinueBtn'),
+      viewAllBtn: document.getElementById('homeAssistantViewAllBtn'),
+      clearRecentBtn: document.getElementById('homeAssistantClearRecentBtn'),
       quickButtons: document.querySelectorAll('.home-assistant-quick-btn'),
       avatarBtn: document.getElementById('dashboardAssistantAvatarBtn'),
       bubbleBtn: document.getElementById('dashboardAssistantBubbleBtn')
     };
   }
 
+  function renderHomeAssistantRoutingSummary() {
+    var els = getHomeAssistantElements();
+    var container = els.routingSummary;
+    if (!container) return;
+
+    var summary = homeAssistantState.routingSummary;
+    if (!summary || !summary.text) {
+      container.innerHTML = '';
+      container.classList.add('d-none');
+      return;
+    }
+
+    container.innerHTML = '';
+    var title = document.createElement('span');
+    title.className = 'home-assistant-routing-title';
+    title.textContent = summary.title || 'Routing';
+
+    var text = document.createElement('span');
+    text.className = 'home-assistant-routing-text';
+    text.textContent = summary.text;
+
+    container.appendChild(title);
+    container.appendChild(text);
+    container.classList.remove('d-none');
+  }
+
+  function setHomeAssistantRoutingSummary(title, text) {
+    if (!title || !text) {
+      homeAssistantState.routingSummary = null;
+      renderHomeAssistantRoutingSummary();
+      return;
+    }
+    homeAssistantState.routingSummary = {
+      title: String(title),
+      text: String(text)
+    };
+    renderHomeAssistantRoutingSummary();
+  }
+
+  function setHomeAssistantMode(mode) {
+    var nextMode = mode === 'continue_session' ? 'continue_session' : 'new_task';
+    homeAssistantState.mode = nextMode;
+    var els = getHomeAssistantElements();
+
+    if (els.modeNewBtn) {
+      var isNew = nextMode === 'new_task';
+      els.modeNewBtn.classList.toggle('is-active', isNew);
+      els.modeNewBtn.setAttribute('aria-selected', isNew ? 'true' : 'false');
+    }
+    if (els.modeContinueBtn) {
+      var isContinue = nextMode === 'continue_session';
+      els.modeContinueBtn.classList.toggle('is-active', isContinue);
+      els.modeContinueBtn.setAttribute('aria-selected', isContinue ? 'true' : 'false');
+    }
+
+    if (els.quickPrompts) {
+      els.quickPrompts.classList.toggle('d-none', nextMode === 'continue_session');
+    }
+    if (els.conversation) {
+      els.conversation.classList.toggle('d-none', nextMode === 'continue_session');
+    }
+    if (els.input) {
+      els.input.placeholder = nextMode === 'continue_session'
+        ? 'Type a new task or open one of your recent sessions...'
+        : 'Ask Ori to do something...';
+    }
+
+    renderHomeAssistantRecentSessions();
+  }
+
   function focusHomeAssistantInput() {
+    setHomeAssistantMode('new_task');
     var els = getHomeAssistantElements();
     if (!els.input) return;
     if (els.card && typeof els.card.scrollIntoView === 'function') {
@@ -323,6 +530,10 @@
     for (var i = 0; i < els.quickButtons.length; i++) {
       els.quickButtons[i].disabled = homeAssistantState.busy;
     }
+    if (els.modeNewBtn) els.modeNewBtn.disabled = homeAssistantState.busy;
+    if (els.modeContinueBtn) els.modeContinueBtn.disabled = homeAssistantState.busy;
+    if (els.viewAllBtn) els.viewAllBtn.disabled = homeAssistantState.busy;
+    if (els.clearRecentBtn) els.clearRecentBtn.disabled = homeAssistantState.busy;
   }
 
   function appendHomeAssistantMessage(role, text) {
@@ -437,6 +648,7 @@
     if (!manager || typeof manager.switchToSession !== 'function') return;
     try {
       await manager.switchToSession(sessionId, true);
+      setHomeAssistantRoutingSummary('Session Opened', 'Opened selected session in chat.');
       openChatPanel();
     } catch (error) {
       dashLog.debug('Failed to open tracked session', { error: error && error.message || error, sessionId: sessionId });
@@ -449,50 +661,93 @@
     if (!container) return;
 
     container.innerHTML = '';
+    var section = els.recentSection;
     if (!homeAssistantState.recentSessions || homeAssistantState.recentSessions.length === 0) {
-      container.classList.add('d-none');
+      if (section && homeAssistantState.mode === 'continue_session') {
+        var empty = document.createElement('div');
+        empty.className = 'home-assistant-empty-note';
+        empty.textContent = 'No recent sessions yet. Ask a task to create one.';
+        container.appendChild(empty);
+        section.classList.remove('d-none');
+      } else if (section) {
+        section.classList.add('d-none');
+      }
       return;
     }
 
-    for (var i = 0; i < homeAssistantState.recentSessions.length; i++) {
+    for (var i = 0; i < homeAssistantState.recentSessions.length && i < HOME_ASSISTANT_RECENT_SESSION_RENDER_LIMIT; i++) {
       (function (item) {
+        var titleText = String(item.prompt || item.title || 'Session');
         var row = document.createElement('div');
-        row.className = 'd-inline-flex align-items-center';
-        row.style.gap = '0.25rem';
+        row.className = 'home-assistant-session-row';
+
+        var main = document.createElement('div');
+        main.className = 'home-assistant-session-main';
+
+        var title = document.createElement('div');
+        title.className = 'home-assistant-session-title';
+        title.textContent = truncateText(titleText, 52);
+
+        var meta = document.createElement('div');
+        meta.className = 'home-assistant-session-meta';
+        meta.textContent = String(item.agent_name || 'Agent') + ' • ' + formatRelativeTime(item.created_at);
+
+        main.appendChild(title);
+        main.appendChild(meta);
+
+        var actions = document.createElement('div');
+        actions.className = 'home-assistant-session-actions';
 
         var openButton = document.createElement('button');
         openButton.type = 'button';
         openButton.className = 'modern-btn modern-btn-secondary';
-        openButton.style.fontSize = '0.76rem';
-        openButton.style.padding = '0.28rem 0.5rem';
-        var promptLabel = truncateText(item.prompt, 24);
-        var title = item.agent_name + ' - ' + (promptLabel || 'Task');
-        openButton.textContent = title;
-        openButton.title = item.title || 'Open session';
+        openButton.textContent = 'Open';
+        openButton.title = 'Open session';
         openButton.addEventListener('click', function () {
           if (homeAssistantState.busy) return;
+          setHomeAssistantMode('continue_session');
           openTrackedSession(item.id);
         });
 
         var deleteButton = document.createElement('button');
         deleteButton.type = 'button';
         deleteButton.className = 'modern-btn modern-btn-secondary';
-        deleteButton.style.fontSize = '0.72rem';
-        deleteButton.style.padding = '0.28rem 0.45rem';
         deleteButton.textContent = 'Delete';
         deleteButton.title = 'Delete session';
         deleteButton.addEventListener('click', function () {
           if (homeAssistantState.busy) return;
-          deleteTrackedSession(item.id, item.title || title);
+          deleteTrackedSession(item.id, item.title || titleText);
         });
 
-        row.appendChild(openButton);
-        row.appendChild(deleteButton);
+        actions.appendChild(openButton);
+        actions.appendChild(deleteButton);
+        row.appendChild(main);
+        row.appendChild(actions);
         container.appendChild(row);
       })(homeAssistantState.recentSessions[i]);
     }
 
-    container.classList.remove('d-none');
+    if (homeAssistantState.recentSessions.length > HOME_ASSISTANT_RECENT_SESSION_RENDER_LIMIT) {
+      var more = document.createElement('div');
+      more.className = 'home-assistant-empty-note';
+      more.textContent = (homeAssistantState.recentSessions.length - HOME_ASSISTANT_RECENT_SESSION_RENDER_LIMIT) + ' more session(s) available in chat history.';
+      container.appendChild(more);
+    }
+
+    if (section) {
+      if (homeAssistantState.mode === 'continue_session') {
+        section.classList.remove('d-none');
+      } else {
+        section.classList.add('d-none');
+      }
+    }
+  }
+
+  function clearHomeAssistantRecentSessionList() {
+    homeAssistantState.recentSessions = [];
+    saveHomeAssistantRecentSessions();
+    renderHomeAssistantRecentSessions();
+    appendHomeAssistantMessage('assistant', 'Cleared the recent session list from this panel.');
   }
 
   function trackHomeAssistantSession(session, prompt, agentName) {
@@ -1247,6 +1502,7 @@
     setHomeAssistantBusy(true, 'Creating...');
     renderHomeAssistantActions([]);
     appendHomeAssistantMessage('assistant', 'Creating a new agent for this task...');
+    setHomeAssistantRoutingSummary('Agent Creation', 'Creating a new agent for this task...');
 
     try {
       var listData = await API.get('/api/agents');
@@ -1280,9 +1536,11 @@
       if (!payload.model) {
         appendHomeAssistantMessage('assistant',
           'I could not auto-select a model. Please review and confirm in the Create Agent modal.');
+        setHomeAssistantRoutingSummary('Agent Creation', 'Model selection needs your confirmation.');
         var confirmedAgentName = await confirmAgentCreationWithModal(payload);
         if (!confirmedAgentName) {
           appendHomeAssistantMessage('assistant', 'Agent creation canceled. Ask again when you want to continue.');
+          setHomeAssistantRoutingSummary('Agent Creation', 'Canceled by user.');
           renderHomeAssistantActions([
             {
               label: 'Create Agent',
@@ -1305,6 +1563,7 @@
 
       homeAssistantState.pendingAgentName = agentName;
       appendHomeAssistantMessage('assistant', 'Created "' + agentName + '".');
+      setHomeAssistantRoutingSummary('Agent Ready', '"' + agentName + '" is ready. Handing off to chat.');
 
       if (intent.key === 'email_check') {
         appendHomeAssistantMessage('assistant',
@@ -1324,6 +1583,7 @@
     } catch (error) {
       dashLog.debug('Failed to create agent', { error: error && error.message || error });
       appendHomeAssistantMessage('assistant', 'I could not create an agent right now. Please check model/provider settings and try again.');
+      setHomeAssistantRoutingSummary('Agent Creation Failed', 'Could not create an agent right now.');
       renderHomeAssistantActions([
         {
           label: 'Retry Create Agent',
@@ -1399,6 +1659,7 @@
     setHomeAssistantBusy(true, 'Opening Chat...');
     renderHomeAssistantActions([]);
     appendHomeAssistantMessage('assistant', 'Opening a chat session with "' + agentName + '"...');
+    setHomeAssistantRoutingSummary('Handoff', 'Routing task to "' + agentName + '"...');
     if (appLaunchRequest && appLaunchRequest.appName) {
       appendHomeAssistantMessage('assistant',
         'Routing steps: 1) Start a new session. 2) Execute /openapp ' + appLaunchRequest.appName + ' to launch the app.');
@@ -1408,7 +1669,9 @@
       var session = await dispatchPromptToChatSession(dispatchMessage, agentName);
       if (!session) throw new Error('Failed to launch chat session');
       trackHomeAssistantSession(session, prompt, agentName);
+      setHomeAssistantMode('continue_session');
       appendHomeAssistantMessage('assistant', 'Started session "' + (session.title || 'New Session') + '" with "' + agentName + '".');
+      setHomeAssistantRoutingSummary('Session Started', 'Session "' + (session.title || 'New Session') + '" is ready in chat.');
       if (appLaunchRequest && appLaunchRequest.appName) {
         appendHomeAssistantMessage('assistant', 'Launch command queued for "' + appLaunchRequest.appName + '". Continue in chat.');
       } else {
@@ -1430,6 +1693,7 @@
     } catch (error) {
       dashLog.debug('Task session launch failed', { error: error && error.message || error });
       appendHomeAssistantMessage('assistant', 'I could not open chat for this task. You can retry or open agent settings.');
+      setHomeAssistantRoutingSummary('Handoff Failed', 'Could not open a chat session. Retry to continue.');
       renderHomeAssistantActions([
         {
           label: 'Retry',
@@ -1450,10 +1714,12 @@
   async function handleHomeAssistantPrompt(prompt) {
     var text = String(prompt || '').trim();
     if (!text) return;
+    setHomeAssistantMode('new_task');
     var appLaunchRequest = parseAppLaunchRequest(text);
 
     if (homeAssistantState.awaitingCreateConfirmation && isAffirmativeConfirmation(text)) {
       appendHomeAssistantMessage('user', text);
+      setHomeAssistantRoutingSummary('Agent Creation', 'Confirmed. Creating a new agent...');
       await createAgentForPendingTask();
       return;
     }
@@ -1462,6 +1728,7 @@
       appendHomeAssistantMessage('user', text);
       homeAssistantState.awaitingCreateConfirmation = false;
       appendHomeAssistantMessage('assistant', 'No problem. Ask another task when you are ready.');
+      setHomeAssistantRoutingSummary('Agent Creation', 'Canceled. Ready for another task.');
       renderHomeAssistantActions([
         {
           label: 'Ask Another Task',
@@ -1483,6 +1750,7 @@
     appendHomeAssistantMessage('user', text);
     setHomeAssistantBusy(true, 'Routing...');
     renderHomeAssistantActions([]);
+    setHomeAssistantRoutingSummary('Routing', 'Analyzing task and selecting the best agent...');
 
     try {
       var routeData = await routePromptWithBackend(text);
@@ -1533,6 +1801,7 @@
           summary += ' Reason: ' + match.reasons.join(', ') + '.';
         }
         appendHomeAssistantMessage('assistant', summary);
+        setHomeAssistantRoutingSummary('Match Found', '"' + match.agent.name + '" is best for this task.');
 
         if (homeAssistantState.pendingIntent.key === 'email_check') {
           appendHomeAssistantMessage('assistant',
@@ -1548,6 +1817,7 @@
         homeAssistantState.awaitingCreateConfirmation = true;
         appendHomeAssistantMessage('assistant',
           'No suitable agent found for this task. Would you like me to create one?');
+        setHomeAssistantRoutingSummary('No Match', 'No suitable agent was found. Create a new agent to continue.');
 
         if (homeAssistantState.pendingIntent.key === 'email_check') {
           appendHomeAssistantMessage('assistant',
@@ -1566,6 +1836,7 @@
       dashLog.debug('Task routing failed', { error: error && error.message || error });
       homeAssistantState.awaitingCreateConfirmation = false;
       appendHomeAssistantMessage('assistant', 'I could not evaluate agent suitability right now. Please retry.');
+      setHomeAssistantRoutingSummary('Routing Failed', 'Could not evaluate agent suitability right now.');
     } finally {
       setHomeAssistantBusy(false);
     }
@@ -1586,7 +1857,10 @@
     var els = getHomeAssistantElements();
     if (!els.form || !els.input) return;
     homeAssistantState.recentSessions = loadHomeAssistantRecentSessions();
+    setHomeAssistantRoutingSummary('', '');
     renderHomeAssistantRecentSessions();
+    hydrateHomeAssistantRecentSessions();
+    setHomeAssistantMode(homeAssistantState.mode);
 
     if (window.EventBus && typeof EventBus.on === 'function') {
       EventBus.on('session:deleted', function (payload) {
@@ -1596,6 +1870,31 @@
     }
 
     els.form.addEventListener('submit', handleHomeAssistantSubmit);
+    if (els.modeNewBtn) {
+      els.modeNewBtn.addEventListener('click', function () {
+        if (homeAssistantState.busy) return;
+        setHomeAssistantMode('new_task');
+      });
+    }
+    if (els.modeContinueBtn) {
+      els.modeContinueBtn.addEventListener('click', function () {
+        if (homeAssistantState.busy) return;
+        setHomeAssistantMode('continue_session');
+      });
+    }
+    if (els.viewAllBtn) {
+      els.viewAllBtn.addEventListener('click', function () {
+        if (homeAssistantState.busy) return;
+        openChatPanel();
+      });
+    }
+    if (els.clearRecentBtn) {
+      els.clearRecentBtn.addEventListener('click', function () {
+        if (homeAssistantState.busy) return;
+        clearHomeAssistantRecentSessionList();
+      });
+    }
+
     for (var i = 0; i < els.quickButtons.length; i++) {
       els.quickButtons[i].addEventListener('click', function (event) {
         if (homeAssistantState.busy) return;

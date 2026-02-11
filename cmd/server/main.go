@@ -206,11 +206,22 @@ func ensureDataDirectory() error {
 
 	// Create ori-data directory and change into it
 	dataDir := filepath.Join(cwd, "ori-data")
-	if err := os.MkdirAll(dataDir, 0755); err != nil {
-		return err
+	createdDataDir := false
+	if _, err := os.Stat(dataDir); err != nil {
+		if !os.IsNotExist(err) {
+			return err
+		}
+		if mkErr := os.MkdirAll(dataDir, 0755); mkErr != nil {
+			return mkErr
+		}
+		createdDataDir = true
 	}
 
-	logger.Info("Created data directory", logger.Fields{"dataDir": dataDir})
+	if createdDataDir {
+		logger.Info("Created data directory", logger.Fields{"dataDir": dataDir})
+	} else {
+		logger.Info("Using existing data directory", logger.Fields{"dataDir": dataDir})
+	}
 
 	// Change working directory to the data directory
 	if err := os.Chdir(dataDir); err != nil {

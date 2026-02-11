@@ -2,12 +2,12 @@
 <div class="container-fluid py-4">
 
   <!-- Ori Greeting Row -->
-  <div class="modern-card p-4 mb-4">
-    <div class="d-flex align-items-center gap-4">
+  <div class="modern-card dashboard-greeting-card p-3 mb-4">
+    <div class="d-flex align-items-center gap-3">
       <!-- Ori Avatar -->
       <button id="dashboardAssistantAvatarBtn" type="button" aria-label="Ask Ori assistant"
-              style="width: 96px; height: 96px; border-radius: 50%; background: var(--bg-secondary); border: 2px solid var(--primary-color); display: flex; align-items: center; justify-content: center; flex-shrink: 0; cursor: pointer;">
-        <svg width="64" height="64" viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg" style="color: var(--primary-color);">
+              class="dashboard-greeting-avatar">
+        <svg width="52" height="52" viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg" style="color: var(--primary-color);">
           <path d="M 724 410 L 714 405 L 686 404 L 663 397 L 651 386 L 632 352 L 618 339 L 600 329 L 582 324 L 561 324 L 542 329 L 518 344
                L 503 362 L 493 386 L 491 412 L 494 428 L 503 448 L 541 493 L 554 520 L 526 508 L 501 503 L 464 504 L 414 514 L 383 513
                L 349 498 L 330 480 L 321 467 L 308 498 L 303 523 L 304 562 L 316 601 L 338 635 L 362 658 L 386 674 L 432 693 L 467 700
@@ -18,47 +18,65 @@
       </button>
       <!-- Greeting Speech Bubble -->
       <button id="dashboardAssistantBubbleBtn" type="button" aria-label="Open assistant quick tasks"
-              style="position: relative; background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: var(--radius-lg); padding: 1rem 1.5rem; flex: 1; text-align: left; cursor: pointer;">
-        <div style="position: absolute; left: -8px; top: 50%; transform: translateY(-50%); width: 0; height: 0; border-top: 8px solid transparent; border-bottom: 8px solid transparent; border-right: 8px solid var(--border-color);"></div>
-        <h4 id="dashboardGreeting" class="mb-1" style="color: var(--text-primary);">Hello!</h4>
-        <p class="mb-0" style="color: var(--text-secondary);">Welcome to Ori Agent. Here's an overview of your workspace.</p>
+              class="dashboard-greeting-bubble">
+        <div class="dashboard-greeting-bubble-tail"></div>
+        <h4 id="dashboardGreeting" class="mb-1">Hello!</h4>
+        <p class="mb-0">Welcome to Ori Agent. Here's an overview of your workspace.</p>
       </button>
     </div>
   </div>
 
   <!-- Home Assistant Task Router -->
   <div id="homeAssistantCard" class="modern-card p-4 mb-4">
-    <div class="d-flex justify-content-between align-items-center mb-3">
-      <h5 class="mb-0" style="color: var(--text-primary);">
+    <div class="d-flex justify-content-between align-items-center mb-2">
+      <h5 class="mb-0 home-assistant-title">
         <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" class="me-2" style="color: var(--primary-color);">
           <path d="M12,2A4,4 0 0,1 16,6C16,7.11 15.55,8.11 14.83,8.83L18,12H20A2,2 0 0,1 22,14V20A2,2 0 0,1 20,22H4A2,2 0 0,1 2,20V14A2,2 0 0,1 4,12H6L9.17,8.83A3.95,3.95 0 0,1 8,6A4,4 0 0,1 12,2M12,4A2,2 0 0,0 10,6A2,2 0 0,0 12,8A2,2 0 0,0 14,6A2,2 0 0,0 12,4M8.83,10L6.83,12H17.17L15.17,10H8.83Z"/>
         </svg>
         Ask Ori
       </h5>
-      <span class="badge" style="background: var(--bg-tertiary); color: var(--text-secondary); font-size: 0.72rem;">Task Routing</span>
+      <span class="badge home-assistant-badge">Task Routing</span>
     </div>
-    <p class="mb-3" style="color: var(--text-secondary); font-size: 0.88rem;">
+    <p class="mb-3 home-assistant-subtitle">
       Ask for something to do. Ori will find a suitable agent (or offer to create one), then continue in chat.
     </p>
-    <div id="homeAssistantQuickPrompts" class="d-flex flex-wrap gap-2 mb-3">
+    <div class="home-assistant-mode-switch mb-3" role="tablist" aria-label="Ask Ori mode">
+      <button id="homeAssistantModeNewBtn" type="button" class="modern-btn modern-btn-secondary home-assistant-mode-btn is-active" data-home-mode="new_task" role="tab" aria-selected="true">
+        New Task
+      </button>
+      <button id="homeAssistantModeContinueBtn" type="button" class="modern-btn modern-btn-secondary home-assistant-mode-btn" data-home-mode="continue_session" role="tab" aria-selected="false">
+        Continue Session
+      </button>
+    </div>
+    <div id="homeAssistantQuickPrompts" class="d-flex flex-wrap gap-2 mb-3 align-items-center">
+      <span class="home-assistant-quick-label">Try:</span>
       <button type="button" class="modern-btn modern-btn-secondary home-assistant-quick-btn" data-home-prompt="Plan my 3 day trip in LA" style="font-size: 0.8rem;">Plan my 3 day trip in LA</button>
       <button type="button" class="modern-btn modern-btn-secondary home-assistant-quick-btn" data-home-prompt="Check my email" style="font-size: 0.8rem;">Check my email</button>
       <button type="button" class="modern-btn modern-btn-secondary home-assistant-quick-btn" data-home-prompt="Plan my week" style="font-size: 0.8rem;">Plan my week</button>
     </div>
-    <div id="homeAssistantConversation" class="p-3 mb-3"
-         style="background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: var(--radius-md); max-height: 320px; overflow-y: auto;">
+    <div id="homeAssistantRoutingSummary" class="home-assistant-routing-summary d-none"></div>
+    <div id="homeAssistantConversation" class="home-assistant-conversation p-3 mb-3">
       <div style="color: var(--text-secondary); font-size: 0.85rem;">
         Click the assistant and ask for a task. Example: "Plan my 3 day trip in LA." Ori will route it into chat.
       </div>
     </div>
-    <form id="homeAssistantForm" class="d-flex gap-2">
+    <form id="homeAssistantForm" class="d-flex gap-2 home-assistant-form">
       <input id="homeAssistantInput" type="text" class="modern-input flex-grow-1" maxlength="800"
              placeholder="Ask Ori to do something..."
              style="min-height: 42px;">
-      <button id="homeAssistantSendBtn" type="submit" class="modern-btn modern-btn-primary" style="min-width: 96px;">Ask</button>
+      <button id="homeAssistantSendBtn" type="submit" class="modern-btn modern-btn-primary home-assistant-send-btn">Ask</button>
     </form>
     <div id="homeAssistantActions" class="d-flex flex-wrap gap-2 mt-3 d-none"></div>
-    <div id="homeAssistantRecentSessions" class="d-flex flex-wrap gap-2 mt-2 d-none"></div>
+    <section id="homeAssistantRecentSection" class="home-assistant-recent-section mt-3 d-none" aria-label="Recent sessions">
+      <div class="home-assistant-recent-header">
+        <div class="home-assistant-recent-title">Recent Sessions</div>
+        <div class="home-assistant-recent-controls">
+          <button id="homeAssistantViewAllBtn" type="button" class="modern-btn modern-btn-secondary">View all</button>
+          <button id="homeAssistantClearRecentBtn" type="button" class="modern-btn modern-btn-secondary">Clear list</button>
+        </div>
+      </div>
+      <div id="homeAssistantRecentSessions" class="home-assistant-recent-list"></div>
+    </section>
   </div>
 
   <!-- Personalization Banner (shown when profile not yet personalized) -->

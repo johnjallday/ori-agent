@@ -1721,3 +1721,268 @@ h3, .h3 {
         transition: none;
     }
 }
+
+/* ============================================
+   Dashboard - Ask Ori (Home Hub)
+   ============================================ */
+
+.dashboard-greeting-card {
+    background: linear-gradient(145deg, color-mix(in srgb, var(--bg-secondary) 86%, transparent) 0%, var(--bg-secondary) 100%);
+}
+
+.dashboard-greeting-avatar {
+    width: 84px;
+    height: 84px;
+    border-radius: 999px;
+    background: var(--bg-secondary);
+    border: 2px solid var(--primary-color);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    cursor: pointer;
+}
+
+.dashboard-greeting-bubble {
+    position: relative;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-lg);
+    padding: 0.8rem 1.2rem;
+    flex: 1;
+    text-align: left;
+    cursor: pointer;
+}
+
+.dashboard-greeting-bubble-tail {
+    position: absolute;
+    left: -8px;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 0;
+    height: 0;
+    border-top: 8px solid transparent;
+    border-bottom: 8px solid transparent;
+    border-right: 8px solid var(--border-color);
+}
+
+.dashboard-greeting-bubble h4 {
+    color: var(--text-primary);
+    font-size: 2rem;
+    line-height: 1.1;
+}
+
+.dashboard-greeting-bubble p {
+    color: var(--text-secondary);
+    font-size: 0.95rem;
+}
+
+.home-assistant-title {
+    color: var(--text-primary);
+}
+
+.home-assistant-badge {
+    background: var(--bg-tertiary);
+    color: var(--text-secondary);
+    font-size: 0.72rem;
+    letter-spacing: 0.02em;
+}
+
+.home-assistant-subtitle {
+    color: var(--text-secondary);
+    font-size: 0.92rem;
+    margin-bottom: 0.75rem;
+}
+
+.home-assistant-mode-switch {
+    display: inline-flex;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: 999px;
+    padding: 0.2rem;
+    gap: 0.2rem;
+}
+
+.home-assistant-mode-btn {
+    min-width: 128px;
+    border-radius: 999px;
+    font-size: 0.79rem;
+    line-height: 1;
+    padding: 0.45rem 0.8rem;
+}
+
+.home-assistant-mode-btn.is-active {
+    background: color-mix(in srgb, var(--primary-color) 84%, white 16%);
+    border-color: color-mix(in srgb, var(--primary-color) 85%, black 15%);
+    color: #fff;
+}
+
+.home-assistant-mode-btn.is-active:hover {
+    color: #fff;
+}
+
+#homeAssistantQuickPrompts {
+    margin-top: 0.25rem;
+}
+
+#homeAssistantQuickPrompts .home-assistant-quick-btn {
+    font-size: 0.8rem;
+    border-radius: var(--radius-md);
+}
+
+.home-assistant-quick-label {
+    color: var(--text-muted);
+    font-size: 0.78rem;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+}
+
+.home-assistant-routing-summary {
+    background: linear-gradient(145deg, color-mix(in srgb, var(--bg-secondary) 92%, transparent) 0%, var(--bg-secondary) 100%);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    margin-bottom: 0.75rem;
+    padding: 0.65rem 0.8rem;
+}
+
+.home-assistant-routing-title {
+    display: block;
+    font-size: 0.78rem;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+    margin-bottom: 0.25rem;
+}
+
+.home-assistant-routing-text {
+    display: block;
+    font-size: 0.88rem;
+    color: var(--text-primary);
+}
+
+.home-assistant-conversation {
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    max-height: 260px;
+    overflow-y: auto;
+}
+
+.home-assistant-send-btn {
+    min-width: 96px;
+}
+
+.home-assistant-recent-section {
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    background: color-mix(in srgb, var(--bg-secondary) 86%, transparent);
+    padding: 0.65rem;
+}
+
+.home-assistant-recent-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 0.45rem;
+    gap: 0.6rem;
+}
+
+.home-assistant-recent-title {
+    font-size: 0.85rem;
+    color: var(--text-secondary);
+    font-weight: 600;
+}
+
+.home-assistant-recent-controls {
+    display: inline-flex;
+    gap: 0.35rem;
+}
+
+.home-assistant-recent-controls .modern-btn {
+    font-size: 0.74rem;
+    padding: 0.26rem 0.45rem;
+    min-height: 30px;
+}
+
+.home-assistant-recent-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+}
+
+.home-assistant-session-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.65rem;
+    background: var(--bg-primary);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    padding: 0.45rem 0.55rem;
+}
+
+.home-assistant-session-main {
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+}
+
+.home-assistant-session-title {
+    color: var(--text-primary);
+    font-size: 0.84rem;
+    line-height: 1.25;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.home-assistant-session-meta {
+    color: var(--text-muted);
+    font-size: 0.74rem;
+    line-height: 1.2;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.home-assistant-session-actions {
+    display: inline-flex;
+    gap: 0.32rem;
+    flex-shrink: 0;
+}
+
+.home-assistant-session-actions .modern-btn {
+    font-size: 0.74rem;
+    padding: 0.26rem 0.42rem;
+    min-height: 30px;
+}
+
+.home-assistant-empty-note {
+    color: var(--text-muted);
+    font-size: 0.78rem;
+    padding: 0.25rem;
+}
+
+@media (max-width: 900px) {
+    .dashboard-greeting-avatar {
+        width: 68px;
+        height: 68px;
+    }
+
+    .dashboard-greeting-bubble h4 {
+        font-size: 1.6rem;
+    }
+
+    .home-assistant-mode-btn {
+        min-width: 112px;
+    }
+
+    .home-assistant-session-row {
+        flex-direction: column;
+        align-items: stretch;
+    }
+
+    .home-assistant-session-actions {
+        justify-content: flex-end;
+    }
+}
