@@ -11,6 +11,7 @@
   const HOME_ASSISTANT_RECENT_SESSION_RENDER_LIMIT = 5;
   const HOME_ASSISTANT_BACKEND_LOOKUP_LIMIT = 50;
   const HOME_ASSISTANT_SESSION_STORAGE_KEY = 'ori.homeAssistant.recentSessions';
+  const HOME_ASSISTANT_AUTOMATION_MODE_KEY = 'ori.homeAssistant.automationMode';
 
   const HOME_INTENTS = {
     travel_planning: {
@@ -97,7 +98,8 @@
     busy: false,
     recentSessions: [],
     mode: 'new_task',
-    routingSummary: null
+    routingSummary: null,
+    automationMode: 'semi_auto'
   };
 
   var providersCache = null;
@@ -258,6 +260,33 @@
       }
     } catch (error) {
       dashLog.debug('Failed to persist Ask Ori recent sessions', { error: error && error.message || error });
+    }
+  }
+
+  function loadHomeAssistantAutomationMode() {
+    try {
+      var storage = getPersistentStorage();
+      if (!storage) return 'semi_auto';
+      var raw = String(storage.getItem(HOME_ASSISTANT_AUTOMATION_MODE_KEY) || '').trim();
+      if (raw === 'full_auto') return 'full_auto';
+      if (raw === 'semi_auto') return 'semi_auto';
+      return 'semi_auto';
+    } catch (error) {
+      dashLog.debug('Failed to load Ask Ori automation mode', { error: error && error.message || error });
+      return 'semi_auto';
+    }
+  }
+
+  function saveHomeAssistantAutomationMode() {
+    try {
+      var storage = getPersistentStorage();
+      if (!storage) return;
+      storage.setItem(HOME_ASSISTANT_AUTOMATION_MODE_KEY, homeAssistantState.automationMode || 'semi_auto');
+      if (window.sessionStorage && storage !== window.sessionStorage) {
+        window.sessionStorage.setItem(HOME_ASSISTANT_AUTOMATION_MODE_KEY, homeAssistantState.automationMode || 'semi_auto');
+      }
+    } catch (error) {
+      dashLog.debug('Failed to persist Ask Ori automation mode', { error: error && error.message || error });
     }
   }
 
@@ -427,6 +456,8 @@
       recentSessions: document.getElementById('homeAssistantRecentSessions'),
       modeNewBtn: document.getElementById('homeAssistantModeNewBtn'),
       modeContinueBtn: document.getElementById('homeAssistantModeContinueBtn'),
+      autoFullBtn: document.getElementById('homeAssistantAutoFullBtn'),
+      autoSemiBtn: document.getElementById('homeAssistantAutoSemiBtn'),
       viewAllBtn: document.getElementById('homeAssistantViewAllBtn'),
       clearRecentBtn: document.getElementById('homeAssistantClearRecentBtn'),
       quickButtons: document.querySelectorAll('.home-assistant-quick-btn'),
@@ -505,6 +536,36 @@
     renderHomeAssistantRecentSessions();
   }
 
+  function isSemiAutoMode() {
+    return homeAssistantState.automationMode === 'semi_auto';
+  }
+
+  function setHomeAssistantAutomationMode(mode) {
+    var nextMode = mode === 'semi_auto' ? 'semi_auto' : 'full_auto';
+    homeAssistantState.automationMode = nextMode;
+    saveHomeAssistantAutomationMode();
+
+    var els = getHomeAssistantElements();
+    if (els.autoFullBtn) {
+      var isFull = nextMode === 'full_auto';
+      els.autoFullBtn.classList.toggle('is-active', isFull);
+      els.autoFullBtn.setAttribute('aria-selected', isFull ? 'true' : 'false');
+    }
+    if (els.autoSemiBtn) {
+      var isSemi = nextMode === 'semi_auto';
+      els.autoSemiBtn.classList.toggle('is-active', isSemi);
+      els.autoSemiBtn.setAttribute('aria-selected', isSemi ? 'true' : 'false');
+    }
+
+    if (nextMode === 'semi_auto') {
+      setHomeAssistantRoutingSummary('Semi-auto', 'Step-by-step confirmations are enabled.');
+    } else if (homeAssistantState.routingSummary &&
+      homeAssistantState.routingSummary.title === 'Semi-auto' &&
+      homeAssistantState.routingSummary.text === 'Step-by-step confirmations are enabled.') {
+      setHomeAssistantRoutingSummary('', '');
+    }
+  }
+
   function focusHomeAssistantInput() {
     setHomeAssistantMode('new_task');
     var els = getHomeAssistantElements();
@@ -532,6 +593,8 @@
     }
     if (els.modeNewBtn) els.modeNewBtn.disabled = homeAssistantState.busy;
     if (els.modeContinueBtn) els.modeContinueBtn.disabled = homeAssistantState.busy;
+    if (els.autoFullBtn) els.autoFullBtn.disabled = homeAssistantState.busy;
+    if (els.autoSemiBtn) els.autoSemiBtn.disabled = homeAssistantState.busy;
     if (els.viewAllBtn) els.viewAllBtn.disabled = homeAssistantState.busy;
     if (els.clearRecentBtn) els.clearRecentBtn.disabled = homeAssistantState.busy;
   }
@@ -1533,7 +1596,35 @@
       if (selectedModel) payload.model = selectedModel;
       if (autoConfig && typeof autoConfig.temperature === 'number') payload.temperature = autoConfig.temperature;
 
-      if (!payload.model) {
+      if (isSemiAutoMode()) {
+        if (payload.model) {
+          appendHomeAssistantMessage('assistant',
+            'Drafted "' + agentName + '" with model "' + payload.model + '". Please confirm in the Create Agent modal.');
+        } else {
+          appendHomeAssistantMessage('assistant',
+            'I need your input to finalize model selection. Please confirm in the Create Agent modal.');
+        }
+        setHomeAssistantRoutingSummary('Semi-auto', 'Review and confirm agent details in the modal.');
+        var confirmedSemiAutoAgentName = await confirmAgentCreationWithModal(payload);
+        if (!confirmedSemiAutoAgentName) {
+          appendHomeAssistantMessage('assistant', 'Agent creation canceled. Ask again when you want to continue.');
+          setHomeAssistantRoutingSummary('Agent Creation', 'Canceled by user.');
+          renderHomeAssistantActions([
+            {
+              label: 'Create Agent',
+              variant: 'primary',
+              onClick: function () { createAgentForPendingTask(); }
+            },
+            {
+              label: 'Ask Another Task',
+              variant: 'secondary',
+              onClick: function () { focusHomeAssistantInput(); }
+            }
+          ]);
+          return;
+        }
+        agentName = confirmedSemiAutoAgentName;
+      } else if (!payload.model) {
         appendHomeAssistantMessage('assistant',
           'I could not auto-select a model. Please review and confirm in the Create Agent modal.');
         setHomeAssistantRoutingSummary('Agent Creation', 'Model selection needs your confirmation.');
@@ -1575,7 +1666,24 @@
         appendHomeAssistantMessage('assistant', createdAgentMCP.message);
       }
 
-      await runPendingTaskWithAgent(prompt, agentName, { appLaunchRequest: appLaunchRequest });
+      if (isSemiAutoMode()) {
+        appendHomeAssistantMessage('assistant', 'Agent is ready. Confirm when you want to hand off this task to chat.');
+        setHomeAssistantRoutingSummary('Semi-auto', '"' + agentName + '" is ready. Confirm handoff to continue.');
+        renderHomeAssistantActions([
+          {
+            label: 'Continue to Chat',
+            variant: 'primary',
+            onClick: function () { runPendingTaskWithAgent(prompt, agentName, { appLaunchRequest: appLaunchRequest }); }
+          },
+          {
+            label: 'Ask Another Task',
+            variant: 'secondary',
+            onClick: function () { focusHomeAssistantInput(); }
+          }
+        ]);
+      } else {
+        await runPendingTaskWithAgent(prompt, agentName, { appLaunchRequest: appLaunchRequest });
+      }
 
       API.get('/api/agents/dashboard/list').then(function (agentData) {
         if (agentData) renderAgentList(agentData);
@@ -1812,25 +1920,49 @@
         if (matchedAgentMCP && matchedAgentMCP.message) {
           appendHomeAssistantMessage('assistant', matchedAgentMCP.message);
         }
-        await runPendingTaskWithAgent(text, match.agent.name, { appLaunchRequest: appLaunchRequest });
-      } else {
-        homeAssistantState.awaitingCreateConfirmation = true;
-        appendHomeAssistantMessage('assistant',
-          'No suitable agent found for this task. Would you like me to create one?');
-        setHomeAssistantRoutingSummary('No Match', 'No suitable agent was found. Create a new agent to continue.');
-
-        if (homeAssistantState.pendingIntent.key === 'email_check') {
-          appendHomeAssistantMessage('assistant',
-            'Email setup idea: connect mailbox via OAuth, request read-only scope first, then add a separate confirmed send step.');
+        if (isSemiAutoMode()) {
+          appendHomeAssistantMessage('assistant', 'Confirm to continue with "' + match.agent.name + '" or create a new agent.');
+          setHomeAssistantRoutingSummary('Semi-auto', 'Review match and confirm next step.');
+          renderHomeAssistantActions([
+            {
+              label: 'Continue with ' + match.agent.name,
+              variant: 'primary',
+              onClick: function () { runPendingTaskWithAgent(text, match.agent.name, { appLaunchRequest: appLaunchRequest }); }
+            },
+            {
+              label: 'Create New Agent',
+              variant: 'secondary',
+              onClick: function () { createAgentForPendingTask(); }
+            }
+          ]);
+        } else {
+          await runPendingTaskWithAgent(text, match.agent.name, { appLaunchRequest: appLaunchRequest });
         }
+      } else {
+        if (isSemiAutoMode()) {
+          appendHomeAssistantMessage('assistant',
+            'No suitable agent found for this task. I will open the Create Agent modal so you can review details.');
+          setHomeAssistantRoutingSummary('Semi-auto', 'No match found. Review and confirm agent creation.');
+          await createAgentForPendingTask();
+        } else {
+          homeAssistantState.awaitingCreateConfirmation = true;
+          appendHomeAssistantMessage('assistant',
+            'No suitable agent found for this task. Would you like me to create one?');
+          setHomeAssistantRoutingSummary('No Match', 'No suitable agent was found. Create a new agent to continue.');
 
-        renderHomeAssistantActions([
-          {
-            label: 'Create Agent',
-            variant: 'primary',
-            onClick: function () { createAgentForPendingTask(); }
+          if (homeAssistantState.pendingIntent.key === 'email_check') {
+            appendHomeAssistantMessage('assistant',
+              'Email setup idea: connect mailbox via OAuth, request read-only scope first, then add a separate confirmed send step.');
           }
-        ]);
+
+          renderHomeAssistantActions([
+            {
+              label: 'Create Agent',
+              variant: 'primary',
+              onClick: function () { createAgentForPendingTask(); }
+            }
+          ]);
+        }
       }
     } catch (error) {
       dashLog.debug('Task routing failed', { error: error && error.message || error });
@@ -1856,11 +1988,13 @@
   function initHomeAssistant() {
     var els = getHomeAssistantElements();
     if (!els.form || !els.input) return;
+    homeAssistantState.automationMode = loadHomeAssistantAutomationMode();
     homeAssistantState.recentSessions = loadHomeAssistantRecentSessions();
     setHomeAssistantRoutingSummary('', '');
     renderHomeAssistantRecentSessions();
     hydrateHomeAssistantRecentSessions();
     setHomeAssistantMode(homeAssistantState.mode);
+    setHomeAssistantAutomationMode(homeAssistantState.automationMode);
 
     if (window.EventBus && typeof EventBus.on === 'function') {
       EventBus.on('session:deleted', function (payload) {
@@ -1880,6 +2014,18 @@
       els.modeContinueBtn.addEventListener('click', function () {
         if (homeAssistantState.busy) return;
         setHomeAssistantMode('continue_session');
+      });
+    }
+    if (els.autoFullBtn) {
+      els.autoFullBtn.addEventListener('click', function () {
+        if (homeAssistantState.busy) return;
+        setHomeAssistantAutomationMode('full_auto');
+      });
+    }
+    if (els.autoSemiBtn) {
+      els.autoSemiBtn.addEventListener('click', function () {
+        if (homeAssistantState.busy) return;
+        setHomeAssistantAutomationMode('semi_auto');
       });
     }
     if (els.viewAllBtn) {

@@ -38,15 +38,28 @@
       <span class="badge home-assistant-badge">Task Routing</span>
     </div>
     <p class="mb-3 home-assistant-subtitle">
-      Ask for something to do. Ori will find a suitable agent (or offer to create one), then continue in chat.
+      Ask for something to do. Full-auto routes immediately. Semi-auto asks you to confirm each key step.
     </p>
-    <div class="home-assistant-mode-switch mb-3" role="tablist" aria-label="Ask Ori mode">
-      <button id="homeAssistantModeNewBtn" type="button" class="modern-btn modern-btn-secondary home-assistant-mode-btn is-active" data-home-mode="new_task" role="tab" aria-selected="true">
-        New Task
-      </button>
-      <button id="homeAssistantModeContinueBtn" type="button" class="modern-btn modern-btn-secondary home-assistant-mode-btn" data-home-mode="continue_session" role="tab" aria-selected="false">
-        Continue Session
-      </button>
+    <div class="home-assistant-control-row mb-3">
+      <div class="home-assistant-mode-switch" role="tablist" aria-label="Ask Ori mode">
+        <button id="homeAssistantModeNewBtn" type="button" class="modern-btn modern-btn-secondary home-assistant-mode-btn is-active" data-home-mode="new_task" role="tab" aria-selected="true">
+          New Task
+        </button>
+        <button id="homeAssistantModeContinueBtn" type="button" class="modern-btn modern-btn-secondary home-assistant-mode-btn" data-home-mode="continue_session" role="tab" aria-selected="false">
+          Continue Session
+        </button>
+      </div>
+      <div class="home-assistant-auto-switch-wrap">
+        <span class="home-assistant-auto-label">Automation</span>
+        <div class="home-assistant-auto-switch" role="tablist" aria-label="Automation mode">
+          <button id="homeAssistantAutoFullBtn" type="button" class="modern-btn modern-btn-secondary home-assistant-auto-btn" data-home-automation="full_auto" role="tab" aria-selected="false">
+            Full-auto
+          </button>
+          <button id="homeAssistantAutoSemiBtn" type="button" class="modern-btn modern-btn-secondary home-assistant-auto-btn is-active" data-home-automation="semi_auto" role="tab" aria-selected="true">
+            Semi-auto
+          </button>
+        </div>
+      </div>
     </div>
     <div id="homeAssistantQuickPrompts" class="d-flex flex-wrap gap-2 mb-3 align-items-center">
       <span class="home-assistant-quick-label">Try:</span>
