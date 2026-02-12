@@ -487,6 +487,18 @@ func getModelCategories(provider, modelName string) []string {
 			return []string{"tool-calling", "general"}
 		}
 		return []string{categorizeModel(provider, modelName)}
+	case "codex":
+		tier := categorizeModel(provider, modelName)
+		switch tier {
+		case "tool-calling":
+			return []string{"tool-calling", "general"}
+		case "general":
+			// Treat Codex mini as both tool-calling and general so it can be used
+			// for lightweight agents while remaining available in general flows.
+			return []string{"tool-calling", "general", "orchestration"}
+		default:
+			return []string{"research", "orchestration"}
+		}
 
 	default:
 		// Non-Ollama providers use single category
@@ -513,7 +525,14 @@ func categorizeModel(provider, modelName string) string {
 		// All other OpenAI models default to research tier (expensive)
 		return "research"
 	case "codex":
-		// Codex models are premium reasoning/coding models
+		lowerName := strings.ToLower(modelName)
+		if strings.Contains(lowerName, "nano") {
+			return "tool-calling"
+		}
+		if strings.Contains(lowerName, "mini") {
+			return "general"
+		}
+		// Standard and max Codex variants are best treated as research-tier.
 		return "research"
 	case "claude", "claude_code":
 		// Haiku is the lightweight model for tool calling

@@ -221,7 +221,10 @@ function updateModelOptions() {
     // Map provider display names to our provider select values
     const providerNameMap = {
       'OpenAI': 'openai',
+      'OpenAI Codex (CLI)': 'codex',
       'Anthropic': 'claude',
+      'Anthropic Claude': 'claude',
+      'Claude Code (CLI)': 'claude_code',
       'Ollama': 'ollama',
       'Google Gemini': 'gemini'
     };
