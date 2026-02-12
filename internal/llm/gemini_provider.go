@@ -8,16 +8,34 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"sort"
 	"strings"
+	"sync"
+	"time"
 )
 
 const geminiDefaultBaseURL = "https://generativelanguage.googleapis.com/v1beta"
+const geminiModelCacheTTL = 10 * time.Minute
+
+var geminiFallbackModels = []string{
+	"gemini-2.5-pro",
+	"gemini-2.5-flash",
+	"gemini-2.5-flash-lite",
+	"gemini-2.0-flash",
+	"gemini-2.0-flash-lite",
+	"gemini-1.5-pro",
+	"gemini-1.5-flash",
+}
 
 // GeminiProvider implements the Provider interface for Google Gemini (AI Studio).
 type GeminiProvider struct {
 	apiKey     string
 	httpClient *http.Client
 	baseURL    string
+
+	mu                 sync.RWMutex
+	cachedModels       []string
+	cachedModelsLoaded time.Time
 }
 
 // NewGeminiProvider creates a new Gemini provider.
@@ -60,10 +78,20 @@ func (p *GeminiProvider) ValidateConfig(config ProviderConfig) error {
 
 // DefaultModels returns the default Gemini models.
 func (p *GeminiProvider) DefaultModels() []string {
-	return []string{
-		"gemini-2.5-flash",
-		"gemini-2.5-pro",
+	if models := p.getFreshCachedModels(); len(models) > 0 {
+		return models
 	}
+
+	if models, err := p.fetchAvailableModels(); err == nil && len(models) > 0 {
+		p.setCachedModels(models)
+		return models
+	}
+
+	if models := p.getAnyCachedModels(); len(models) > 0 {
+		return models
+	}
+
+	return append([]string(nil), geminiFallbackModels...)
 }
 
 // Chat sends a chat request to Gemini.
@@ -403,6 +431,153 @@ func buildGeminiFunctionResponse(content string) interface{} {
 	return map[string]interface{}{
 		"output": parsed,
 	}
+}
+
+func (p *GeminiProvider) fetchAvailableModels() ([]string, error) {
+	if strings.TrimSpace(p.apiKey) == "" {
+		return nil, fmt.Errorf("gemini API key is required")
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), DefaultModelFetchTimeout)
+	defer cancel()
+
+	endpoint := fmt.Sprintf("%s/models", strings.TrimRight(p.baseURL, "/"))
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create models request: %w", err)
+	}
+	req.Header.Set("x-goog-api-key", p.apiKey)
+
+	resp, err := p.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch Gemini models: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != http.StatusOK {
+		body, readErr := io.ReadAll(resp.Body)
+		if readErr != nil {
+			return nil, fmt.Errorf("gemini models API error (status %d): failed to read error body: %w", resp.StatusCode, readErr)
+		}
+		return nil, fmt.Errorf("gemini models API error (status %d): %s", resp.StatusCode, strings.TrimSpace(string(body)))
+	}
+
+	var payload struct {
+		Models []struct {
+			Name                       string   `json:"name"`
+			SupportedGenerationMethods []string `json:"supportedGenerationMethods"`
+		} `json:"models"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		return nil, fmt.Errorf("failed to decode Gemini models response: %w", err)
+	}
+
+	seen := make(map[string]struct{}, len(payload.Models))
+	models := make([]string, 0, len(payload.Models))
+	for _, model := range payload.Models {
+		if !supportsGeminiGenerateContent(model.SupportedGenerationMethods) {
+			continue
+		}
+
+		name := normalizeGeminiModelName(model.Name)
+		if name == "" {
+			continue
+		}
+
+		lower := strings.ToLower(name)
+		if !strings.Contains(lower, "gemini") {
+			continue
+		}
+		if strings.Contains(lower, "embedding") {
+			continue
+		}
+
+		key := lower
+		if _, exists := seen[key]; exists {
+			continue
+		}
+		seen[key] = struct{}{}
+		models = append(models, name)
+	}
+
+	if len(models) == 0 {
+		return nil, fmt.Errorf("no Gemini text-generation models available")
+	}
+
+	sortGeminiModels(models)
+	return models, nil
+}
+
+func supportsGeminiGenerateContent(methods []string) bool {
+	for _, method := range methods {
+		switch strings.TrimSpace(method) {
+		case "generateContent", "streamGenerateContent":
+			return true
+		}
+	}
+	return false
+}
+
+func normalizeGeminiModelName(name string) string {
+	clean := strings.TrimSpace(name)
+	clean = strings.TrimPrefix(clean, "models/")
+	return strings.TrimSpace(clean)
+}
+
+func sortGeminiModels(models []string) {
+	priority := map[string]int{
+		"gemini-2.5-pro":        0,
+		"gemini-2.5-flash":      1,
+		"gemini-2.5-flash-lite": 2,
+		"gemini-2.0-flash":      3,
+		"gemini-2.0-flash-lite": 4,
+		"gemini-1.5-pro":        5,
+		"gemini-1.5-flash":      6,
+	}
+
+	sort.SliceStable(models, func(i, j int) bool {
+		left := strings.ToLower(models[i])
+		right := strings.ToLower(models[j])
+
+		leftRank, leftKnown := priority[left]
+		rightRank, rightKnown := priority[right]
+		if leftKnown && rightKnown {
+			return leftRank < rightRank
+		}
+		if leftKnown != rightKnown {
+			return leftKnown
+		}
+		return left < right
+	})
+}
+
+func (p *GeminiProvider) getFreshCachedModels() []string {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+
+	if len(p.cachedModels) == 0 {
+		return nil
+	}
+	if time.Since(p.cachedModelsLoaded) > geminiModelCacheTTL {
+		return nil
+	}
+	return append([]string(nil), p.cachedModels...)
+}
+
+func (p *GeminiProvider) getAnyCachedModels() []string {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	if len(p.cachedModels) == 0 {
+		return nil
+	}
+	return append([]string(nil), p.cachedModels...)
+}
+
+func (p *GeminiProvider) setCachedModels(models []string) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.cachedModels = append([]string(nil), models...)
+	p.cachedModelsLoaded = time.Now()
 }
 
 // Gemini request/response structures.

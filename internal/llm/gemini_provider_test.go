@@ -2,6 +2,8 @@ package llm
 
 import (
 	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 )
 
@@ -40,27 +42,68 @@ func TestGeminiProviderMetadata(t *testing.T) {
 	}
 }
 
-func TestGeminiProviderDefaultModels(t *testing.T) {
-	provider := NewGeminiProvider(ProviderConfig{APIKey: "test-key"})
+func TestGeminiProviderDefaultModels_UsesLiveModelEndpoint(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/models" {
+			http.NotFound(w, r)
+			return
+		}
+		if got := r.Header.Get("x-goog-api-key"); got != "test-key" {
+			http.Error(w, "missing api key header", http.StatusUnauthorized)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+		  "models": [
+		    {"name": "models/gemini-2.5-pro", "supportedGenerationMethods": ["generateContent"]},
+		    {"name": "models/gemini-2.5-flash", "supportedGenerationMethods": ["generateContent", "streamGenerateContent"]},
+		    {"name": "models/gemini-2.0-flash", "supportedGenerationMethods": ["generateContent"]},
+		    {"name": "models/gemini-embedding-001", "supportedGenerationMethods": ["embedContent"]},
+		    {"name": "models/text-embedding-004", "supportedGenerationMethods": ["embedContent"]},
+		    {"name": "models/imagen-3.0-generate-002", "supportedGenerationMethods": ["generateContent"]}
+		  ]
+		}`))
+	}))
+	defer server.Close()
+
+	provider := NewGeminiProvider(ProviderConfig{
+		APIKey:  "test-key",
+		BaseURL: server.URL,
+	})
 	models := provider.DefaultModels()
 
-	if len(models) == 0 {
-		t.Error("Expected at least one Gemini model, got none")
+	if len(models) < 3 {
+		t.Fatalf("expected at least 3 Gemini models from API, got %v", models)
 	}
-
-	foundFlash := false
-	foundPro := false
-	for _, model := range models {
-		if model == "gemini-2.5-flash" {
-			foundFlash = true
-		}
-		if model == "gemini-2.5-pro" {
-			foundPro = true
-		}
+	if models[0] != "gemini-2.5-pro" {
+		t.Fatalf("expected gemini-2.5-pro first, got %q (all: %v)", models[0], models)
 	}
+	if !containsGeminiModel(models, "gemini-2.5-flash") {
+		t.Fatalf("expected gemini-2.5-flash in models, got %v", models)
+	}
+	if !containsGeminiModel(models, "gemini-2.0-flash") {
+		t.Fatalf("expected gemini-2.0-flash in models, got %v", models)
+	}
+	if containsGeminiModel(models, "gemini-embedding-001") {
+		t.Fatalf("embedding model should not be included, got %v", models)
+	}
+	if containsGeminiModel(models, "imagen-3.0-generate-002") {
+		t.Fatalf("non-gemini model should not be included, got %v", models)
+	}
+}
 
-	if !foundFlash || !foundPro {
-		t.Errorf("Expected gemini-2.5-flash and gemini-2.5-pro, got %v", models)
+func TestGeminiProviderDefaultModels_FallsBackWhenEndpointUnavailable(t *testing.T) {
+	provider := NewGeminiProvider(ProviderConfig{
+		APIKey:  "test-key",
+		BaseURL: "http://127.0.0.1:1",
+	})
+
+	models := provider.DefaultModels()
+	if len(models) < 4 {
+		t.Fatalf("expected fallback Gemini model list, got %v", models)
+	}
+	if !containsGeminiModel(models, "gemini-2.5-pro") || !containsGeminiModel(models, "gemini-2.5-flash") {
+		t.Fatalf("expected fallback to include gemini-2.5 models, got %v", models)
 	}
 }
 
@@ -176,4 +219,13 @@ func TestGeminiProviderBuildRequest(t *testing.T) {
 	if len(responseBytes) == 0 {
 		t.Error("Expected function response payload to be non-empty")
 	}
+}
+
+func containsGeminiModel(items []string, target string) bool {
+	for _, item := range items {
+		if item == target {
+			return true
+		}
+	}
+	return false
 }
