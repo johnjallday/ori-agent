@@ -376,6 +376,54 @@ func TestExternalAgentsSettingsHandler_CodexToggleDoesNotUnregisterProvider(t *t
 	}
 }
 
+func TestCategorizeModel_Codex(t *testing.T) {
+	tests := []struct {
+		name     string
+		model    string
+		expected string
+	}{
+		{name: "codex nano is tool-calling", model: "gpt-5-codex-nano", expected: "tool-calling"},
+		{name: "codex mini is general", model: "gpt-5.1-codex-mini", expected: "general"},
+		{name: "codex standard is research", model: "gpt-5.3-codex", expected: "research"},
+		{name: "codex max is research", model: "gpt-5.1-codex-max", expected: "research"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := categorizeModel("codex", tt.model)
+			if got != tt.expected {
+				t.Fatalf("categorizeModel(\"codex\", %q) = %q, want %q", tt.model, got, tt.expected)
+			}
+		})
+	}
+}
+
+func TestGetModelCategories_Codex(t *testing.T) {
+	tests := []struct {
+		name     string
+		model    string
+		expected []string
+	}{
+		{name: "codex nano has tool-calling and general", model: "gpt-5-codex-nano", expected: []string{"tool-calling", "general"}},
+		{name: "codex mini has tool-calling, general, and orchestration", model: "gpt-5.1-codex-mini", expected: []string{"tool-calling", "general", "orchestration"}},
+		{name: "codex standard has research and orchestration", model: "gpt-5.3-codex", expected: []string{"research", "orchestration"}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := getModelCategories("codex", tt.model)
+			if len(got) != len(tt.expected) {
+				t.Fatalf("getModelCategories(\"codex\", %q) = %v, want %v", tt.model, got, tt.expected)
+			}
+			for i := range tt.expected {
+				if got[i] != tt.expected[i] {
+					t.Fatalf("getModelCategories(\"codex\", %q) = %v, want %v", tt.model, got, tt.expected)
+				}
+			}
+		})
+	}
+}
+
 // Ensure temp directory cleanup
 func TestMain(m *testing.M) {
 	os.Exit(m.Run())

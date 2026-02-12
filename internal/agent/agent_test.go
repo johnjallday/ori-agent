@@ -21,6 +21,11 @@ func TestGetTypeForModel(t *testing.T) {
 		// Research models
 		{"gpt-5", TypeResearch},
 		{"claude-opus-4-1", TypeResearch},
+		{"gpt-5.3-codex", TypeResearch},
+		{"gpt-5.1-codex-max", TypeResearch},
+		// Codex general-tier models
+		{"gpt-5.1-codex-mini", TypeGeneral},
+		{"codex-mini-latest", TypeGeneral},
 		// Unknown model defaults to tool-calling
 		{"unknown-model", TypeToolCalling},
 		{"", TypeToolCalling},
@@ -48,6 +53,10 @@ func TestIsModelAllowedForType(t *testing.T) {
 		{"research model for research type", "gpt-5", TypeResearch, true},
 		{"tool-calling model for general type", "gpt-4o-mini", TypeGeneral, true}, // gpt-4o-mini is also in general
 		{"research model for tool-calling type", "gpt-5", TypeToolCalling, false},
+		{"codex research model for research type", "gpt-5.3-codex", TypeResearch, true},
+		{"codex research model for general type", "gpt-5.3-codex", TypeGeneral, false},
+		{"codex mini model for general type", "gpt-5.1-codex-mini", TypeGeneral, true},
+		{"codex mini model for tool-calling type", "gpt-5.1-codex-mini", TypeToolCalling, true},
 		{"unknown model for any type", "unknown-model", TypeToolCalling, false},
 		{"valid model for unknown type", "gpt-4o", "unknown-type", false},
 		{"empty model", "", TypeToolCalling, false},
