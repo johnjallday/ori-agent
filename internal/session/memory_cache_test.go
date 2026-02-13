@@ -19,6 +19,7 @@ func TestMemoryCache_BasicOperations(t *testing.T) {
 	got := cache.Get("s1")
 	if got == nil {
 		t.Fatal("Expected to get session s1")
+		return
 	}
 	if got.Title != "Session 1" {
 		t.Errorf("Expected title 'Session 1', got %s", got.Title)
@@ -58,6 +59,7 @@ func TestMemoryCache_LRUEviction(t *testing.T) {
 
 	if evicted == nil {
 		t.Fatal("Expected eviction")
+		return
 	}
 	if evicted.ID != "s2" {
 		t.Errorf("Expected s2 to be evicted, got %s", evicted.ID)
@@ -276,6 +278,7 @@ func TestMemoryCache_EvictOldest(t *testing.T) {
 	evicted := cache.EvictOldest()
 	if evicted == nil {
 		t.Fatal("Expected to evict oldest")
+		return
 	}
 	if evicted.ID != "s1" {
 		t.Errorf("Expected s1 to be evicted, got %s", evicted.ID)
@@ -301,6 +304,7 @@ func TestMemoryCache_GetOldest(t *testing.T) {
 	oldest = cache.GetOldest()
 	if oldest == nil {
 		t.Fatal("Expected oldest session")
+		return
 	}
 	if oldest.ID != "s1" {
 		t.Errorf("Expected oldest to be s1, got %s", oldest.ID)

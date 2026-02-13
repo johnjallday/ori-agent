@@ -48,7 +48,7 @@ func (h *Handler) GetAssistantProgress(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if h.assistantProgressStore == nil {
-		orihttp.RespondError(w, http.StatusServiceUnavailable, "assistant progression unavailable")
+		_ = orihttp.RespondError(w, http.StatusServiceUnavailable, "assistant progression unavailable")
 		return
 	}
 
@@ -65,7 +65,7 @@ func (h *Handler) GetAgentEvolution(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if h.agentStore == nil {
-		orihttp.RespondError(w, http.StatusServiceUnavailable, "agent store unavailable")
+		_ = orihttp.RespondError(w, http.StatusServiceUnavailable, "agent store unavailable")
 		return
 	}
 
@@ -102,7 +102,7 @@ func (h *Handler) FeedAgent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if h.agentStore == nil || h.evolutionService == nil {
-		orihttp.RespondError(w, http.StatusServiceUnavailable, "evolution feed unavailable")
+		_ = orihttp.RespondError(w, http.StatusServiceUnavailable, "evolution feed unavailable")
 		return
 	}
 
@@ -161,7 +161,7 @@ func (h *Handler) SetAgentPath(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if h.agentStore == nil || h.evolutionService == nil {
-		orihttp.RespondError(w, http.StatusServiceUnavailable, "path selection unavailable")
+		_ = orihttp.RespondError(w, http.StatusServiceUnavailable, "path selection unavailable")
 		return
 	}
 

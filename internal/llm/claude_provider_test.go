@@ -287,6 +287,7 @@ func TestClaudeProviderIntegration(t *testing.T) {
 
 	if resp == nil {
 		t.Fatal("Response is nil")
+		return
 	}
 
 	if resp.Content == "" {

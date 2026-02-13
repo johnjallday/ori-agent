@@ -79,6 +79,7 @@ func TestNewHandler(t *testing.T) {
 		}
 		if h == nil {
 			t.Fatal("NewHandler() returned nil handler")
+			return
 		}
 		// Core sub-handlers should be initialized
 		if h.workspaceHandler == nil {

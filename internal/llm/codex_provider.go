@@ -113,7 +113,7 @@ func buildCodexPrompt(systemPrompt string, messages []Message) string {
 	}
 
 	for _, msg := range messages {
-		role := "Message"
+		var role string
 		switch strings.ToLower(msg.Role) {
 		case RoleSystem:
 			role = "System"
@@ -144,16 +144,16 @@ func (p *CodexProvider) runCodexExec(ctx context.Context, model, prompt, reasoni
 		if err != nil {
 			return "", fmt.Errorf("codex schema temp file: %w", err)
 		}
-		defer os.Remove(tmpSchema.Name())
+		defer func() { _ = os.Remove(tmpSchema.Name()) }()
 		schemaPath = tmpSchema.Name()
 
 		payload, err := json.Marshal(schema)
 		if err != nil {
-			tmpSchema.Close()
+			_ = tmpSchema.Close()
 			return "", fmt.Errorf("codex schema marshal: %w", err)
 		}
 		if _, err := tmpSchema.Write(payload); err != nil {
-			tmpSchema.Close()
+			_ = tmpSchema.Close()
 			return "", fmt.Errorf("codex schema write: %w", err)
 		}
 		if err := tmpSchema.Close(); err != nil {
@@ -166,8 +166,8 @@ func (p *CodexProvider) runCodexExec(ctx context.Context, model, prompt, reasoni
 		return "", fmt.Errorf("codex output temp file: %w", err)
 	}
 	tmpOutPath := tmpOut.Name()
-	tmpOut.Close()
-	defer os.Remove(tmpOutPath)
+	_ = tmpOut.Close()
+	defer func() { _ = os.Remove(tmpOutPath) }()
 
 	args := []string{
 		"exec",

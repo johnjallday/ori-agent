@@ -17,6 +17,7 @@ func TestNewServerBuilder(t *testing.T) {
 	}
 	if builder == nil {
 		t.Fatal("Expected builder to be non-nil")
+		return
 	}
 	if builder.server == nil {
 		t.Fatal("Expected builder.server to be non-nil")
@@ -90,6 +91,7 @@ func TestServerBuilder_Build_Integration(t *testing.T) {
 
 	if server == nil {
 		t.Fatal("Expected server to be non-nil")
+		return
 	}
 
 	// Verify key dependencies were initialized
@@ -120,6 +122,7 @@ func TestNew_UsesBuilder(t *testing.T) {
 
 	if server == nil {
 		t.Fatal("Expected server to be non-nil")
+		return
 	}
 
 	// Verify key components initialized
