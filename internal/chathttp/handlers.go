@@ -68,13 +68,17 @@ type Handler struct {
 	costTracker    *llm.CostTracker
 	sessionStore   session.HybridStore
 	toolCallStore  session.ToolCallStore
-	skillsManager  interface {
+	evolutionSvc   interface {
+		AwardMessageXP(agentName string, tokenCount int, userMessage string) error
+	}
+	skillsManager interface {
 		GetSkill(string, string) (*skills.Skill, bool, error)
 		ListSkills(string) ([]skills.Skill, error)
 	}
 	mcpRegistry interface {
 		GetToolsForServer(string) ([]pluginapi.PluginTool, error)
 		GetAllTools() []pluginapi.PluginTool
+		StartServer(string) error
 	}
 }
 
@@ -151,6 +155,7 @@ func (h *Handler) SetCostTracker(tracker *llm.CostTracker) {
 func (h *Handler) SetMCPRegistry(registry interface {
 	GetToolsForServer(string) ([]pluginapi.PluginTool, error)
 	GetAllTools() []pluginapi.PluginTool
+	StartServer(string) error
 }) {
 	h.mcpRegistry = registry
 }
@@ -173,6 +178,13 @@ func (h *Handler) SetSessionStore(store session.HybridStore) {
 // SetToolCallStore sets the tool call store for storing tool execution data
 func (h *Handler) SetToolCallStore(store session.ToolCallStore) {
 	h.toolCallStore = store
+}
+
+// SetEvolutionService configures agent/assistant XP tracking.
+func (h *Handler) SetEvolutionService(service interface {
+	AwardMessageXP(agentName string, tokenCount int, userMessage string) error
+}) {
+	h.evolutionSvc = service
 }
 
 // SetSkillsManager sets the skills manager for chat commands and skill execution
@@ -261,7 +273,7 @@ func (h *Handler) findTool(ag *agent.Agent, agentName, toolName string) (plugina
 	// Then check MCP tools
 	if h.mcpRegistry != nil && len(ag.MCPServers) > 0 {
 		for _, serverName := range ag.MCPServers {
-			mcpTools, err := h.mcpRegistry.GetToolsForServer(serverName)
+			mcpTools, err := h.getMCPToolsForServer(serverName)
 			if err != nil {
 				continue
 			}
@@ -363,6 +375,18 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	originalQuery := q
+
+	// Natural language app launch shortcut:
+	// "open safari" -> "/openapp safari"
+	if len(req.Files) == 0 {
+		if rewritten, ok := inferOpenAppCommandFromChat(q); ok {
+			logger.Debug("Auto-routed chat prompt to /openapp", logger.Fields{
+				"original":  q,
+				"rewritten": rewritten,
+			})
+			q = rewritten
+		}
+	}
 
 	// Debug: Log received files
 
@@ -471,6 +495,11 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 		// Parse args after "/workspace"
 		args := strings.TrimPrefix(q, "/workspace")
 		h.commandHandler.HandleWorkspace(w, r, args)
+		return
+	}
+	if strings.HasPrefix(q, "/openapp") {
+		appName := strings.TrimSpace(strings.TrimPrefix(q, "/openapp"))
+		h.commandHandler.HandleOpenApp(w, r, appName)
 		return
 	}
 
@@ -603,10 +632,15 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 			cmd.Files = ConvertUploadedFilesToAttachments(req.Files)
 		}
 
-		// Load agent
-		ag, current, ok := store.GetCurrentAgent(h.store)
-		if !ok {
-			orihttp.InternalError(w, "current agent not found")
+		// Load agent - use session-bound agent if available
+		current := resolveAgentName()
+		if current == "" {
+			orihttp.InternalError(w, "no agent available for direct tool execution")
+			return
+		}
+		ag, ok := h.store.GetAgent(current)
+		if !ok || ag == nil {
+			orihttp.InternalError(w, fmt.Sprintf("agent '%s' not found", current))
 			return
 		}
 
@@ -772,7 +806,7 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 		logger.Debug("Loading MCP tools for agent", logger.Fields{"agent": current})
 		for _, serverName := range ag.MCPServers {
 			logger.Debug("Attempting to get tools for MCP server", logger.Fields{"server": serverName})
-			mcpTools, err := h.mcpRegistry.GetToolsForServer(serverName)
+			mcpTools, err := h.getMCPToolsForServer(serverName)
 			if err != nil {
 				logger.Warn("Failed to get MCP tools for server", logger.Fields{"server": serverName, "error": err})
 				continue
@@ -792,20 +826,17 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 	if invokedSkill != nil {
 		tools = filterToolsForSkill(tools, invokedSkill.Skill)
 	}
+	tools = prioritizeToolsForPath(ag, tools)
 
 	// Get appropriate client for this agent
 	agentClient := h.getClientForAgent(ag)
 
 	// Add system message for better tool usage guidance
 	if len(ag.Messages) == 0 {
-		var systemPrompt string
-
-		// Use custom system prompt if set, otherwise use default
-		if ag.Settings.SystemPrompt != "" {
-			systemPrompt = ag.Settings.SystemPrompt
-		} else {
-			systemPrompt = "You are a helpful assistant with access to various tools. When a user request can be fulfilled by using an available tool, use the tool instead of providing general information. Be concise and direct in your responses."
-		}
+		systemPrompt := resolveSystemPromptForAgent(
+			ag,
+			"You are a helpful assistant with access to various tools. When a user request can be fulfilled by using an available tool, use the tool instead of providing general information. Be concise and direct in your responses.",
+		)
 
 		// Append available tools list if there are any
 		if len(tools) > 0 {

@@ -304,7 +304,7 @@ func refreshCodexTokens(refreshToken string) (*CodexTokens, error) {
 	if err != nil {
 		return nil, fmt.Errorf("codex refresh request: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
@@ -348,7 +348,7 @@ func exchangeIDTokenForAPIKey(idToken string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("codex exchange request: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {

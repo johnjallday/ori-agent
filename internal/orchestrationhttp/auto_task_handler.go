@@ -144,6 +144,7 @@ func (h *AutoTaskHandler) HandleAutoTask(w http.ResponseWriter, r *http.Request)
 
 	// Get the configured system model
 	systemProvider, systemModel := h.configManager.GetSystemModel()
+	systemReasoningEffort := h.configManager.GetSystemReasoningEffort()
 	logger.Info("Auto-task using system model", logger.Fields{
 		"provider": systemProvider,
 		"model":    systemModel,
@@ -157,7 +158,7 @@ func (h *AutoTaskHandler) HandleAutoTask(w http.ResponseWriter, r *http.Request)
 	}
 
 	// Parse the task description using LLM
-	taskConfig, err := h.parseTaskDescription(r.Context(), result.Provider, systemProvider, result.Model, req.Description, agents, agentDescriptions)
+	taskConfig, err := h.parseTaskDescription(r.Context(), result.Provider, systemProvider, result.Model, systemReasoningEffort, req.Description, agents, agentDescriptions)
 	if err != nil {
 		logger.Error("Auto-task parsing failed", logger.Fields{"error": err})
 		_ = orihttp.RespondInternalError(w, "Failed to parse task description: "+err.Error())
@@ -173,6 +174,7 @@ func (h *AutoTaskHandler) parseTaskDescription(
 	provider llm.Provider,
 	providerName string,
 	model string,
+	reasoningEffort string,
 	description string,
 	agents []string,
 	agentDescriptions map[string]string,
@@ -251,11 +253,11 @@ IMPORTANT: Always return the exact JSON structure shown above. Never return erro
 
 	// Try structured output for providers that support it
 	if structuredProvider, ok := provider.(llm.StructuredOutputProvider); ok {
-		return h.parseWithStructuredOutput(ctx, structuredProvider, model, systemPrompt, userMessage, agents)
+		return h.parseWithStructuredOutput(ctx, structuredProvider, model, reasoningEffort, systemPrompt, userMessage, agents)
 	}
 
 	// Fallback to regular chat for non-OpenAI providers
-	return h.parseWithRegularChat(ctx, provider, model, systemPrompt, userMessage, agents)
+	return h.parseWithRegularChat(ctx, provider, model, reasoningEffort, systemPrompt, userMessage, agents)
 }
 
 // parseWithStructuredOutput uses a provider's structured output feature
@@ -263,6 +265,7 @@ func (h *AutoTaskHandler) parseWithStructuredOutput(
 	ctx context.Context,
 	provider llm.StructuredOutputProvider,
 	model string,
+	reasoningEffort string,
 	systemPrompt string,
 	userMessage string,
 	agents []string,
@@ -270,7 +273,8 @@ func (h *AutoTaskHandler) parseWithStructuredOutput(
 	logger.Info("Using structured output for auto-task parsing", logger.Fields{})
 
 	resp, err := provider.ChatWithStructuredOutput(ctx, llm.StructuredOutputRequest{
-		Model: model,
+		Model:           model,
+		ReasoningEffort: reasoningEffort,
 		Messages: []llm.Message{
 			{Role: "user", Content: userMessage},
 		},
@@ -333,6 +337,7 @@ func (h *AutoTaskHandler) parseWithRegularChat(
 	ctx context.Context,
 	provider llm.Provider,
 	model string,
+	reasoningEffort string,
 	systemPrompt string,
 	userMessage string,
 	agents []string,
@@ -340,7 +345,8 @@ func (h *AutoTaskHandler) parseWithRegularChat(
 	logger.Info("Using regular chat for auto-task parsing", logger.Fields{})
 
 	resp, err := provider.Chat(ctx, llm.ChatRequest{
-		Model: model,
+		Model:           model,
+		ReasoningEffort: reasoningEffort,
 		Messages: []llm.Message{
 			{Role: "user", Content: userMessage},
 		},

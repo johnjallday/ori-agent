@@ -117,6 +117,7 @@ func (h *AutoConfigHandler) AutoConfigHandler(w http.ResponseWriter, r *http.Req
 
 	// Get the configured system model
 	systemProvider, systemModel := h.configManager.GetSystemModel()
+	systemReasoningEffort := h.configManager.GetSystemReasoningEffort()
 	result, err := h.llmFactory.GetSystemModelProvider(systemProvider, systemModel)
 	if err != nil {
 		if errors.Is(err, llm.ErrSystemModelNotConfigured) {
@@ -130,7 +131,7 @@ func (h *AutoConfigHandler) AutoConfigHandler(w http.ResponseWriter, r *http.Req
 	}
 
 	// Generate auto-config using the configured system model
-	config, err := h.generateAutoConfig(r.Context(), result.Provider, result.Model, req.Description)
+	config, err := h.generateAutoConfig(r.Context(), result.Provider, result.Model, systemReasoningEffort, req.Description)
 	if err != nil {
 		logger.Error("Auto-config generation failed", logger.Fields{"error": err})
 		// Return defaults on failure
@@ -142,7 +143,7 @@ func (h *AutoConfigHandler) AutoConfigHandler(w http.ResponseWriter, r *http.Req
 }
 
 // generateAutoConfig uses LLM to analyze the description and generate configuration
-func (h *AutoConfigHandler) generateAutoConfig(ctx context.Context, provider llm.Provider, model, description string) (*AutoConfigResponse, error) {
+func (h *AutoConfigHandler) generateAutoConfig(ctx context.Context, provider llm.Provider, model, reasoningEffort, description string) (*AutoConfigResponse, error) {
 	systemPrompt := `You are an AI agent configuration assistant. Based on the user's description, generate optimal configuration as a JSON object.
 
 IMPORTANT: All string values must be on a single line. Do not use literal newlines in strings - use \n for line breaks if needed.
@@ -169,7 +170,8 @@ Example:
 	defer cancel()
 
 	resp, err := provider.Chat(ctx, llm.ChatRequest{
-		Model: model,
+		Model:           model,
+		ReasoningEffort: reasoningEffort,
 		Messages: []llm.Message{
 			{Role: "user", Content: userMessage},
 		},

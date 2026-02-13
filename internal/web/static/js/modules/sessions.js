@@ -104,8 +104,9 @@ const sessionManager = {
 
     // Try to restore active session, or prompt to create workspace
     const restored = await this.restoreActiveSession();
-    if (!restored && this.sessions.length === 0 && this.folders.length === 0) {
-      // Show create workspace modal when no workspaces exist
+    const isWorkspacePage = document.body.classList.contains('home-hub');
+    if (!restored && this.sessions.length === 0 && this.folders.length === 0 && isWorkspacePage) {
+      // Show create workspace modal when no workspaces exist (only on workspaces page)
       this.showAddWorkspaceModal();
     } else if (!restored && this.sessions.length > 0) {
       // No saved session but sessions exist - use the first one
@@ -2441,7 +2442,7 @@ const sessionManager = {
 
   // Delete session
   async deleteSession(sessionId) {
-    if (!confirm('Are you sure you want to delete this session?')) return;
+    if (!confirm('Are you sure you want to delete this session?')) return false;
 
     try {
       const response = await fetch(`/api/sessions/${sessionId}`, {
@@ -2449,6 +2450,8 @@ const sessionManager = {
       });
 
       if (!response.ok) throw new Error('Failed to delete session');
+
+      const deletedSession = this.sessions.find(s => s.id === sessionId) || null;
 
       // Remove from local state
       this.sessions = this.sessions.filter(s => s.id !== sessionId);
@@ -2469,8 +2472,13 @@ const sessionManager = {
       }
 
       this.renderSessions();
+      if (window.EventBus) {
+        EventBus.emit('session:deleted', { sessionId, session: deletedSession });
+      }
+      return true;
     } catch (error) {
       console.error('Failed to delete session:', error);
+      return false;
     }
   },
 

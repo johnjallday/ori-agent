@@ -4,6 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
 
 	"github.com/oriagent/ori-pluginapi"
 )
@@ -53,6 +56,7 @@ func (a *MCPAdapter) Call(ctx context.Context, args string) (string, error) {
 			return "", fmt.Errorf("failed to parse arguments: %w", err)
 		}
 	}
+	arguments = normalizeFilesystemArguments(a.tool.Name, arguments, a.server.GetConfig())
 
 	// Call the MCP tool
 	result, err := a.server.CallTool(ctx, a.tool.Name, arguments)
@@ -70,7 +74,11 @@ func (a *MCPAdapter) Call(ctx context.Context, args string) (string, error) {
 	}
 
 	// Convert content to string result
-	return a.formatResult(result)
+	formatted, err := a.formatResult(result)
+	if err != nil {
+		return "", err
+	}
+	return annotateGetFileInfoResult(a.tool.Name, formatted, arguments), nil
 }
 
 // formatResult converts MCP tool result content to a string
@@ -125,3 +133,119 @@ func (a *MCPAdapter) Version() string {
 var _ pluginapi.PluginTool = (*MCPAdapter)(nil)
 var _ pluginapi.AgentAwareTool = (*MCPAdapter)(nil)
 var _ pluginapi.VersionedTool = (*MCPAdapter)(nil)
+
+func normalizeFilesystemArguments(toolName string, arguments map[string]interface{}, serverConfig ServerConfig) map[string]interface{} {
+	if len(arguments) == 0 || !isFilesystemTool(toolName) {
+		return arguments
+	}
+
+	basePath := resolveFilesystemBasePath(serverConfig)
+	if basePath == "" {
+		if homeDir, err := os.UserHomeDir(); err == nil {
+			basePath = homeDir
+		}
+	}
+	if basePath == "" {
+		return arguments
+	}
+
+	normalized := make(map[string]interface{}, len(arguments))
+	for key, value := range arguments {
+		textValue, ok := value.(string)
+		if !ok || !isFilesystemPathArgumentKey(key) {
+			normalized[key] = value
+			continue
+		}
+		normalized[key] = normalizeFilesystemPathValue(textValue, basePath)
+	}
+
+	return normalized
+}
+
+func isFilesystemTool(toolName string) bool {
+	switch strings.ToLower(strings.TrimSpace(toolName)) {
+	case "list_directory",
+		"list_directory_with_sizes",
+		"search_files",
+		"get_file_info",
+		"read_file",
+		"write_file",
+		"move_file",
+		"copy_file",
+		"delete_file",
+		"create_directory":
+		return true
+	default:
+		return false
+	}
+}
+
+func isFilesystemPathArgumentKey(key string) bool {
+	switch strings.ToLower(strings.TrimSpace(key)) {
+	case "path", "source", "destination":
+		return true
+	default:
+		return false
+	}
+}
+
+func resolveFilesystemBasePath(serverConfig ServerConfig) string {
+	// Server-filesystem accepts one or more allowed directories as args after package name.
+	for i := len(serverConfig.Args) - 1; i >= 0; i-- {
+		candidate := strings.TrimSpace(serverConfig.Args[i])
+		if candidate == "" {
+			continue
+		}
+		if strings.HasPrefix(candidate, "@") || strings.HasPrefix(candidate, "-") {
+			continue
+		}
+		if filepath.IsAbs(candidate) {
+			return filepath.Clean(candidate)
+		}
+	}
+	return ""
+}
+
+func normalizeFilesystemPathValue(pathValue, basePath string) string {
+	trimmed := strings.TrimSpace(pathValue)
+	if trimmed == "" {
+		return pathValue
+	}
+	// Keep URLs and opaque non-path values as-is.
+	if strings.Contains(trimmed, "://") {
+		return pathValue
+	}
+
+	if strings.HasPrefix(trimmed, "~") {
+		if homeDir, err := os.UserHomeDir(); err == nil {
+			if trimmed == "~" {
+				return homeDir
+			}
+			if strings.HasPrefix(trimmed, "~/") || strings.HasPrefix(trimmed, "~\\") {
+				return filepath.Join(homeDir, strings.TrimLeft(trimmed[1:], `/\`))
+			}
+		}
+	}
+	if filepath.IsAbs(trimmed) {
+		return filepath.Clean(trimmed)
+	}
+
+	return filepath.Join(basePath, trimmed)
+}
+
+func annotateGetFileInfoResult(toolName, result string, arguments map[string]interface{}) string {
+	if !strings.EqualFold(strings.TrimSpace(toolName), "get_file_info") {
+		return result
+	}
+	if strings.Contains(strings.ToLower(result), "name:") || strings.Contains(strings.ToLower(result), "path:") {
+		return result
+	}
+
+	pathArg, ok := arguments["path"].(string)
+	if !ok || strings.TrimSpace(pathArg) == "" {
+		return result
+	}
+
+	base := filepath.Base(pathArg)
+	return fmt.Sprintf("path: %s\nname: %s\n%s", pathArg, base, result)
+}

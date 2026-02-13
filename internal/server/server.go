@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/johnjallday/ori-agent/internal/featureflags"
 	orihttp "github.com/johnjallday/ori-agent/internal/http"
 	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/platform"
@@ -159,6 +160,7 @@ func (s *Server) prepareBasePageData(pageName string) web.TemplateData {
 	data.Extra["Web3Enabled"] = caps.Web3Wallet
 	data.Extra["MarketplacePaymentsEnabled"] = caps.MarketplacePayments
 	data.Extra["TokenPayoutsEnabled"] = caps.TokenPayouts
+	data.Extra["EvolutionEnabled"] = featureflags.EvolutionEnabled()
 
 	if agents, current := s.Storage.ListAgents(); len(agents) > 0 {
 		currentAgentName := current
@@ -226,10 +228,8 @@ func (s *Server) serveSettings(w http.ResponseWriter, r *http.Request) {
 	// Add platform information for system info display
 	currentPlatform := platform.DetectPlatform()
 	currentPlatformDisplay := platform.GetPlatformDisplayName(currentPlatform)
-	data.Extra = map[string]interface{}{
-		"CurrentPlatform":        currentPlatform,
-		"CurrentPlatformDisplay": currentPlatformDisplay,
-	}
+	data.Extra["CurrentPlatform"] = currentPlatform
+	data.Extra["CurrentPlatformDisplay"] = currentPlatformDisplay
 
 	s.renderAndWritePage(w, "settings", data)
 }
@@ -246,10 +246,8 @@ func (s *Server) serveMarketplace(w http.ResponseWriter, r *http.Request) {
 	// Add platform information for compatibility checking
 	currentPlatform := platform.DetectPlatform()
 	currentPlatformDisplay := platform.GetPlatformDisplayName(currentPlatform)
-	data.Extra = map[string]interface{}{
-		"CurrentPlatform":        currentPlatform,
-		"CurrentPlatformDisplay": currentPlatformDisplay,
-	}
+	data.Extra["CurrentPlatform"] = currentPlatform
+	data.Extra["CurrentPlatformDisplay"] = currentPlatformDisplay
 
 	s.renderAndWritePage(w, "marketplace", data)
 }
@@ -282,8 +280,10 @@ func (s *Server) serveWorkflows(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) serveWorkspaces(w http.ResponseWriter, r *http.Request) {
-	// Redirect to home page - workspace hub is now on the home page
-	http.Redirect(w, r, "/", http.StatusSeeOther)
+	data := s.prepareBasePageData("workspaces")
+	data.Title = "Workspaces - Ori Agent"
+	data.BrandText = "Ori Agent"
+	s.renderAndWritePage(w, "workspaces", data)
 }
 
 // handleWorkspacesRoutes handles all /workspaces/* routes
@@ -291,8 +291,8 @@ func (s *Server) handleWorkspacesRoutes(w http.ResponseWriter, r *http.Request) 
 	// Extract path after /workspaces/
 	path := strings.TrimPrefix(r.URL.Path, "/workspaces/")
 	if path == "" || path == r.URL.Path {
-		// No ID provided, redirect to home page
-		http.Redirect(w, r, "/", http.StatusSeeOther)
+		// No ID provided, redirect to workspaces page
+		http.Redirect(w, r, "/workspaces", http.StatusSeeOther)
 		return
 	}
 
@@ -321,9 +321,7 @@ func (s *Server) serveWorkspaceDetail(w http.ResponseWriter, r *http.Request, wo
 	data.Title = "Workspace - Ori Agent"
 	data.BrandText = "Ori Agent"
 	data.ShowSidebarToggle = true
-	data.Extra = map[string]interface{}{
-		"WorkspaceID": workspaceID,
-	}
+	data.Extra["WorkspaceID"] = workspaceID
 	s.renderAndWritePage(w, "workspace-detail", data)
 }
 
@@ -332,10 +330,15 @@ func (s *Server) serveWorkspaceCanvas(w http.ResponseWriter, r *http.Request, wo
 	data.Title = "Workspace Canvas - Ori Agent"
 	data.BrandText = "Ori Agent"
 	data.ShowSidebarToggle = true
-	data.Extra = map[string]interface{}{
-		"WorkspaceID": workspaceID,
-	}
+	data.Extra["WorkspaceID"] = workspaceID
 	s.renderAndWritePage(w, "workspace-canvas", data)
+}
+
+func (s *Server) servePersonalize(w http.ResponseWriter, r *http.Request) {
+	data := s.prepareBasePageData("personalize")
+	data.Title = "Personalize - Ori Agent"
+	data.BrandText = "Ori Agent"
+	s.renderAndWritePage(w, "personalize", data)
 }
 
 func (s *Server) serveUsage(w http.ResponseWriter, r *http.Request) {

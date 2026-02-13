@@ -35,6 +35,7 @@ dependencies:
 	}
 	if meta == nil {
 		t.Fatalf("expected metadata")
+		return
 	}
 	if meta.DisplayName != "Friendly" {
 		t.Fatalf("display name = %q", meta.DisplayName)

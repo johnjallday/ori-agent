@@ -33,7 +33,9 @@ type AgentListItem struct {
 	Status         types.AgentStatus      `json:"status"`
 	Statistics     *types.AgentStatistics `json:"statistics,omitempty"`
 	Metadata       *types.AgentMetadata   `json:"metadata,omitempty"`
+	Evolution      *types.AgentEvolution  `json:"evolution,omitempty"`
 	EnabledPlugins []string               `json:"enabled_plugins"`
+	MCPServers     []string               `json:"mcp_servers,omitempty"`
 	Model          string                 `json:"model"`
 }
 
@@ -46,6 +48,7 @@ type AgentDetailResponse struct {
 	Status          types.AgentStatus      `json:"status"`
 	Statistics      *types.AgentStatistics `json:"statistics,omitempty"`
 	Metadata        *types.AgentMetadata   `json:"metadata,omitempty"`
+	Evolution       *types.AgentEvolution  `json:"evolution,omitempty"`
 	Model           string                 `json:"model"`
 	Temperature     float64                `json:"temperature"`
 	Provider        string                 `json:"provider,omitempty"`
@@ -121,7 +124,9 @@ func (h *DashboardHandler) ListAgentsWithStats(w http.ResponseWriter, r *http.Re
 			Status:         ag.Status,
 			Statistics:     ag.Statistics,
 			Metadata:       ag.Metadata,
+			Evolution:      cloneAgentEvolution(ag),
 			EnabledPlugins: enabledPlugins,
+			MCPServers:     append([]string{}, ag.MCPServers...),
 			Model:          ag.Settings.Model,
 		})
 	}
@@ -197,6 +202,7 @@ func (h *DashboardHandler) GetAgentDetail(w http.ResponseWriter, r *http.Request
 		Status:          ag.Status,
 		Statistics:      ag.Statistics,
 		Metadata:        ag.Metadata,
+		Evolution:       cloneAgentEvolution(ag),
 		Model:           ag.Settings.Model,
 		Temperature:     ag.Settings.Temperature,
 		Provider:        ag.Settings.Provider,

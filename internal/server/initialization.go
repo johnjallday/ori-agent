@@ -145,31 +145,31 @@ func registerLLMProviders(factory *llm.Factory, configMgr *config.Manager) error
 		logger.Debug("You can configure it later in the Settings page", logger.Fields{})
 	}
 
-	// Register Codex provider if Codex CLI is enabled and credentials are available
-	if configMgr.GetExternalAgentsCodexEnabled() {
-		creds, source, err := authdiscovery.DiscoverCodexCredentialsWithSource()
-		if err != nil {
-			if verbose {
-				logger.Debug("Codex enabled but no credentials found", logger.Fields{"error": err})
+	// Register Codex provider whenever Codex credentials are available.
+	// This is independent of the "External Agents > Codex" toggle, which only
+	// controls reading external Codex agents/skills into Ori.
+	creds, source, err := authdiscovery.DiscoverCodexCredentialsWithSource()
+	if err != nil {
+		if verbose {
+			logger.Debug("Codex credentials not found", logger.Fields{"error": err})
+		}
+	} else {
+		refreshed, refreshErr := creds.RefreshIfNeeded()
+		if refreshErr != nil {
+			logger.Warn("Codex token refresh failed", logger.Fields{"error": refreshErr})
+		} else if refreshed {
+			if err := authdiscovery.PersistCodexCredentials(source, creds); err != nil {
+				logger.Warn("Codex token refresh persisted failed", logger.Fields{"error": err})
 			}
-		} else {
-			refreshed, refreshErr := creds.RefreshIfNeeded()
-			if refreshErr != nil {
-				logger.Warn("Codex token refresh failed", logger.Fields{"error": refreshErr})
-			} else if refreshed {
-				if err := authdiscovery.PersistCodexCredentials(source, creds); err != nil {
-					logger.Warn("Codex token refresh persisted failed", logger.Fields{"error": err})
-				}
-			}
+		}
 
-			codexProvider, err := llm.NewCodexProvider()
-			if err != nil {
-				logger.Warn("Codex provider unavailable", logger.Fields{"error": err})
-			} else {
-				factory.Register("codex", codexProvider)
-				if verbose {
-					logger.Info("Codex provider registered", logger.Fields{})
-				}
+		codexProvider, err := llm.NewCodexProvider()
+		if err != nil {
+			logger.Warn("Codex provider unavailable", logger.Fields{"error": err})
+		} else {
+			factory.Register("codex", codexProvider)
+			if verbose {
+				logger.Info("Codex provider registered", logger.Fields{})
 			}
 		}
 	}

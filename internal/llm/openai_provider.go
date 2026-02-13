@@ -137,11 +137,12 @@ func (p *OpenAIProvider) StreamChat(ctx context.Context, req ChatRequest) (Strea
 
 // StructuredOutputRequest contains parameters for structured output requests
 type StructuredOutputRequest struct {
-	Model        string
-	Messages     []Message
-	SystemPrompt string
-	SchemaName   string
-	Schema       interface{}
+	Model           string
+	Messages        []Message
+	SystemPrompt    string
+	ReasoningEffort string
+	SchemaName      string
+	Schema          interface{}
 }
 
 // GenerateSchema creates a JSON schema from a Go struct type for use with structured outputs

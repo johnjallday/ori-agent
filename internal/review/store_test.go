@@ -110,6 +110,7 @@ func TestGetIssueByHash(t *testing.T) {
 	}
 	if found == nil {
 		t.Fatal("expected to find issue, got nil")
+		return
 	}
 	if found.ID != issue.ID {
 		t.Errorf("ID = %q, want %q", found.ID, issue.ID)
@@ -299,6 +300,7 @@ func TestSessionReviewStatus(t *testing.T) {
 	}
 	if fetched == nil {
 		t.Fatal("expected status, got nil")
+		return
 	}
 	if fetched.LastMessageID != "msg-5" {
 		t.Errorf("LastMessageID = %q, want %q", fetched.LastMessageID, "msg-5")

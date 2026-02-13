@@ -2,6 +2,80 @@
 // Main sidebar functionality coordinator that orchestrates all sidebar modules
 
 const sidebarLog = Logger.withContext('Sidebar');
+const ASSISTANT_XP_PER_LEVEL = 100;
+
+function isEvolutionEnabled() {
+  return Boolean(window.oriFeatures?.evolutionEnabled);
+}
+
+function normalizeAssistantProgress(progress) {
+  const safe = progress || {};
+  const experience = Number.isFinite(Number(safe.experience)) ? Math.max(0, Number(safe.experience)) : 0;
+  const level = Number.isFinite(Number(safe.level)) ? Math.max(0, Number(safe.level)) : 0;
+  const rank = typeof safe.rank === 'string' && safe.rank.trim() ? safe.rank.trim() : 'novice';
+  return { level, experience, rank };
+}
+
+function toTitleCase(value) {
+  return String(value || '')
+    .split(/[\s_-]+/)
+    .filter(Boolean)
+    .map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
+    .join(' ');
+}
+
+function formatNumber(value) {
+  return new Intl.NumberFormat().format(Number(value || 0));
+}
+
+function renderAssistantProgress(progress) {
+  const widget = document.getElementById('assistantProgressWidget');
+  const rankBadge = document.getElementById('assistantRankBadge');
+  const levelValue = document.getElementById('assistantLevelValue');
+  const xpValue = document.getElementById('assistantXpValue');
+  const progressBar = document.getElementById('assistantXpProgressBar');
+  if (!widget || !rankBadge || !levelValue || !xpValue || !progressBar) {
+    return;
+  }
+
+  const normalized = normalizeAssistantProgress(progress);
+  const progressWithinLevel = normalized.experience % ASSISTANT_XP_PER_LEVEL;
+  const progressPercent = Math.min(100, Math.max(0, Math.round((progressWithinLevel / ASSISTANT_XP_PER_LEVEL) * 100)));
+
+  rankBadge.textContent = toTitleCase(normalized.rank);
+  levelValue.textContent = `Assistant Level ${normalized.level}`;
+  xpValue.textContent = `${formatNumber(normalized.experience)} XP`;
+  progressBar.style.width = `${progressPercent}%`;
+  progressBar.setAttribute('aria-valuenow', String(progressPercent));
+
+  widget.classList.remove('d-none');
+}
+
+async function loadAssistantProgressForSidebar() {
+  const widget = document.getElementById('assistantProgressWidget');
+  if (!widget) {
+    return;
+  }
+  if (!isEvolutionEnabled()) {
+    widget.classList.add('d-none');
+    return;
+  }
+  if (typeof API === 'undefined' || typeof API.get !== 'function') {
+    return;
+  }
+
+  try {
+    const data = await API.get('/api/evolution/assistant');
+    if (!data?.assistant) {
+      widget.classList.add('d-none');
+      return;
+    }
+    renderAssistantProgress(data.assistant);
+  } catch (error) {
+    sidebarLog.debug('Assistant progression unavailable', { error: error?.message || error });
+    widget.classList.add('d-none');
+  }
+}
 
 // Main sidebar setup function that coordinates all modules
 function setupSidebar() {
@@ -156,9 +230,16 @@ async function initializeSidebar() {
       await loadAgentsForSidebar();
     }
 
+    await loadAssistantProgressForSidebar();
 
     sidebarLog.info('All sidebar modules initialized successfully');
     EventBus.emit('sidebar:initialized');
+
+    if (isEvolutionEnabled()) {
+      window.setInterval(() => {
+        loadAssistantProgressForSidebar();
+      }, 60000);
+    }
   } catch (error) {
     sidebarLog.error('Error initializing sidebar modules:', error);
     EventBus.emit('sidebar:error', { error: error.message });

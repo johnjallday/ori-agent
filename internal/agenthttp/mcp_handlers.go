@@ -148,6 +148,12 @@ func (h *MCPHandler) EnableAgentMCPServerHandler(w http.ResponseWriter, r *http.
 		return
 	}
 
+	if err := h.syncAgentMCPServer(agentName, serverName, true); err != nil {
+		logger.Error("Failed to sync enabled MCP server into agent state", logger.Fields{"agentName": agentName, "server": serverName, "err": err})
+		orihttp.InternalError(w, err.Error())
+		return
+	}
+
 	status, _ := h.registry.GetServerStatus(serverName)
 	if status == mcp.StatusStopped || status == mcp.StatusError {
 		if err := h.registry.StartServer(serverName); err != nil {
@@ -200,6 +206,12 @@ func (h *MCPHandler) DisableAgentMCPServerHandler(w http.ResponseWriter, r *http
 		return
 	}
 
+	if err := h.syncAgentMCPServer(agentName, serverName, false); err != nil {
+		logger.Error("Failed to sync disabled MCP server into agent state", logger.Fields{"agentName": agentName, "server": serverName, "err": err})
+		orihttp.InternalError(w, err.Error())
+		return
+	}
+
 	logger.Info("Disabled MCP server '' for agent ''", logger.Fields{"agent": serverName, "agentName": agentName})
 
 	w.Header().Set("Content-Type", "application/json")
@@ -224,4 +236,31 @@ func getServerDescription(serverName string) string {
 		return desc
 	}
 	return "" // No description available
+}
+
+func (h *MCPHandler) syncAgentMCPServer(agentName, serverName string, enabled bool) error {
+	ag, ok := h.agentHandler.State.GetAgent(agentName)
+	if !ok || ag == nil {
+		return fmt.Errorf("agent not found")
+	}
+
+	if enabled {
+		for _, existing := range ag.MCPServers {
+			if existing == serverName {
+				return nil
+			}
+		}
+		ag.MCPServers = append(ag.MCPServers, serverName)
+	} else {
+		filtered := make([]string, 0, len(ag.MCPServers))
+		for _, existing := range ag.MCPServers {
+			if existing == serverName {
+				continue
+			}
+			filtered = append(filtered, existing)
+		}
+		ag.MCPServers = filtered
+	}
+
+	return h.agentHandler.State.SetAgent(agentName, ag)
 }

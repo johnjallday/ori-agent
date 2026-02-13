@@ -323,6 +323,42 @@ func FormatLogEntry(log types.ActivityLog) types.ActivityLogEntry {
 			}
 		}
 
+	case types.ActivityEventEvolutionFeed:
+		entry.EventTitle = "Agent Fed"
+		entry.Icon = "🧠"
+		entry.Color = "#17a2b8" // Cyan
+		entry.Description = fmt.Sprintf("Feed input improved '%s'", log.AgentName)
+		if log.Details != nil {
+			if source, ok := log.Details["source"].(string); ok && source != "" {
+				entry.Description = fmt.Sprintf("Feed input (%s) improved '%s'", source, log.AgentName)
+			}
+		}
+
+	case types.ActivityEventEvolutionStage:
+		entry.EventTitle = "Stage Evolved"
+		entry.Icon = "🌱"
+		entry.Color = "#28a745" // Green
+		entry.Description = fmt.Sprintf("'%s' progressed to a new stage", log.AgentName)
+		if log.Details != nil {
+			oldStage, hasOld := log.Details["old_stage"].(string)
+			newStage, hasNew := log.Details["new_stage"].(string)
+			if hasOld && hasNew && oldStage != "" && newStage != "" {
+				entry.Description = fmt.Sprintf("Stage changed from '%s' to '%s'", oldStage, newStage)
+			}
+		}
+
+	case types.ActivityEventEvolutionPath:
+		entry.EventTitle = "Path Selected"
+		entry.Icon = "🧭"
+		entry.Color = "#007bff" // Blue
+		entry.Description = fmt.Sprintf("'%s' selected an evolution path", log.AgentName)
+		if log.Details != nil {
+			path, ok := log.Details["path"].(string)
+			if ok && path != "" {
+				entry.Description = fmt.Sprintf("Evolution path set to '%s'", path)
+			}
+		}
+
 	default:
 		entry.EventTitle = string(log.EventType)
 		entry.Description = fmt.Sprintf("Activity on agent '%s'", log.AgentName)

@@ -198,6 +198,69 @@ func TestSystemModelHandler_Post_Clear(t *testing.T) {
 	}
 }
 
+func TestSystemModelHandler_Post_CodexReasoning(t *testing.T) {
+	tmpDir := t.TempDir()
+	tmpFile := filepath.Join(tmpDir, "settings.json")
+	configManager := config.NewManager(tmpFile)
+	_ = configManager.Load()
+
+	llmFactory := llm.NewFactory()
+	llmFactory.Register("codex", &mockProvider{})
+
+	handler := NewHandler(nil, configManager, nil, llmFactory)
+
+	reqBody := SystemModelRequest{
+		Provider:        "codex",
+		Model:           "gpt-5.3-codex",
+		ReasoningEffort: "xhigh",
+	}
+	body, _ := json.Marshal(reqBody)
+	req := httptest.NewRequest(http.MethodPost, "/api/settings/system-model", bytes.NewReader(body))
+	rec := httptest.NewRecorder()
+	handler.SystemModelHandler(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("Expected status 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	var resp SystemModelResponse
+	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+		t.Fatalf("Failed to decode response: %v", err)
+	}
+	if resp.ReasoningEffort != "xhigh" {
+		t.Fatalf("Expected reasoning_effort=xhigh, got %q", resp.ReasoningEffort)
+	}
+	if got := configManager.GetSystemReasoningEffort(); got != "xhigh" {
+		t.Fatalf("Expected config reasoning=xhigh, got %q", got)
+	}
+}
+
+func TestSystemModelHandler_Post_InvalidCodexReasoning(t *testing.T) {
+	tmpDir := t.TempDir()
+	tmpFile := filepath.Join(tmpDir, "settings.json")
+	configManager := config.NewManager(tmpFile)
+	_ = configManager.Load()
+
+	llmFactory := llm.NewFactory()
+	llmFactory.Register("codex", &mockProvider{})
+
+	handler := NewHandler(nil, configManager, nil, llmFactory)
+
+	reqBody := SystemModelRequest{
+		Provider:        "codex",
+		Model:           "gpt-5.3-codex",
+		ReasoningEffort: "ultra",
+	}
+	body, _ := json.Marshal(reqBody)
+	req := httptest.NewRequest(http.MethodPost, "/api/settings/system-model", bytes.NewReader(body))
+	rec := httptest.NewRecorder()
+	handler.SystemModelHandler(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("Expected status 400, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
 func TestAvailableModelsHandler(t *testing.T) {
 	// Setup
 	tmpDir := t.TempDir()
@@ -282,6 +345,82 @@ func TestAvailableModelsHandler_MissingProvider(t *testing.T) {
 
 	if rec.Code != http.StatusBadRequest {
 		t.Errorf("Expected status 400, got %d", rec.Code)
+	}
+}
+
+func TestExternalAgentsSettingsHandler_CodexToggleDoesNotUnregisterProvider(t *testing.T) {
+	tmpDir := t.TempDir()
+	tmpFile := filepath.Join(tmpDir, "settings.json")
+	configManager := config.NewManager(tmpFile)
+	_ = configManager.Load()
+
+	llmFactory := llm.NewFactory()
+	llmFactory.Register("codex", &mockProvider{})
+
+	handler := NewHandler(nil, configManager, nil, llmFactory)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/settings/external-agents", bytes.NewReader([]byte(`{"codex_enabled":false}`)))
+	rec := httptest.NewRecorder()
+	handler.ExternalAgentsSettingsHandler(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("Expected status 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	if configManager.GetExternalAgentsCodexEnabled() {
+		t.Error("Expected external Codex agents setting to be false")
+	}
+
+	if _, err := llmFactory.GetProvider("codex"); err != nil {
+		t.Fatalf("Expected codex provider to remain registered, got error: %v", err)
+	}
+}
+
+func TestCategorizeModel_Codex(t *testing.T) {
+	tests := []struct {
+		name     string
+		model    string
+		expected string
+	}{
+		{name: "codex nano is tool-calling", model: "gpt-5-codex-nano", expected: "tool-calling"},
+		{name: "codex mini is general", model: "gpt-5.1-codex-mini", expected: "general"},
+		{name: "codex standard is research", model: "gpt-5.3-codex", expected: "research"},
+		{name: "codex max is research", model: "gpt-5.1-codex-max", expected: "research"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := categorizeModel("codex", tt.model)
+			if got != tt.expected {
+				t.Fatalf("categorizeModel(\"codex\", %q) = %q, want %q", tt.model, got, tt.expected)
+			}
+		})
+	}
+}
+
+func TestGetModelCategories_Codex(t *testing.T) {
+	tests := []struct {
+		name     string
+		model    string
+		expected []string
+	}{
+		{name: "codex nano has tool-calling and general", model: "gpt-5-codex-nano", expected: []string{"tool-calling", "general"}},
+		{name: "codex mini has tool-calling, general, and orchestration", model: "gpt-5.1-codex-mini", expected: []string{"tool-calling", "general", "orchestration"}},
+		{name: "codex standard has research and orchestration", model: "gpt-5.3-codex", expected: []string{"research", "orchestration"}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := getModelCategories("codex", tt.model)
+			if len(got) != len(tt.expected) {
+				t.Fatalf("getModelCategories(\"codex\", %q) = %v, want %v", tt.model, got, tt.expected)
+			}
+			for i := range tt.expected {
+				if got[i] != tt.expected[i] {
+					t.Fatalf("getModelCategories(\"codex\", %q) = %v, want %v", tt.model, got, tt.expected)
+				}
+			}
+		})
 	}
 }
 

@@ -62,6 +62,7 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 	})
 	mux.HandleFunc("/usage", s.serveUsage)
 	mux.HandleFunc("/review", s.serveReview)
+	mux.HandleFunc("/personalize", s.servePersonalize)
 
 	// =============================================================================
 	// Static File Server (CSS, JS, Icons, Assets)
@@ -91,6 +92,10 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 	agentHandler.ActivityLogger = s.Handlers.ActivityLogger
 	avatarHandler := agenthttp.NewAvatarHandler(s.Storage.AgentStore)
 	mux.Handle("/api/agents", agentHandler)
+	if s.Handlers.Evolution != nil {
+		mux.HandleFunc("/api/evolution/assistant", s.Handlers.Evolution.GetAssistantProgress)
+		mux.HandleFunc("/api/evolution/suggestions", s.Handlers.Evolution.GetSuggestions)
+	}
 
 	// Dashboard handlers
 	dashboardHandler := agenthttp.NewDashboardHandler(s.Storage.AgentStore)
@@ -101,6 +106,19 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 	// Agent MCP handlers
 	s.Handlers.AgentMCP = agenthttp.NewMCPHandler(s.Integration.MCPRegistry, s.Integration.MCPConfigManager, agentHandler)
 	mux.HandleFunc("/api/agents/", func(w http.ResponseWriter, r *http.Request) {
+		// Route evolution API requests first
+		if s.Handlers.Evolution != nil && strings.HasSuffix(r.URL.Path, "/evolution/path") && r.Method == http.MethodPost {
+			s.Handlers.Evolution.SetAgentPath(w, r)
+			return
+		}
+		if s.Handlers.Evolution != nil && strings.HasSuffix(r.URL.Path, "/evolution") && r.Method == http.MethodGet {
+			s.Handlers.Evolution.GetAgentEvolution(w, r)
+			return
+		}
+		if s.Handlers.Evolution != nil && strings.HasSuffix(r.URL.Path, "/feed") && r.Method == http.MethodPost {
+			s.Handlers.Evolution.FeedAgent(w, r)
+			return
+		}
 		// Route dashboard detail requests first
 		if strings.Contains(r.URL.Path, "/detail") {
 			dashboardHandler.GetAgentDetail(w, r)
@@ -143,6 +161,10 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 	// Agent auto-config endpoints
 	mux.HandleFunc("/api/agents/auto-config", s.Handlers.AutoConfig.AutoConfigHandler)
 	mux.HandleFunc("/api/agents/auto-config/availability", s.Handlers.AutoConfig.CheckLLMAvailabilityHandler)
+
+	// Home assistant task routing endpoint
+	homeAssistantRouteHandler := agenthttp.NewHomeAssistantRouteHandler(s.Storage.AgentStore)
+	mux.HandleFunc("/api/home-assistant/route", homeAssistantRouteHandler.RouteHandler)
 
 	// =============================================================================
 	// Plugin API Endpoints
@@ -271,6 +293,7 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 	// Onboarding Endpoints
 	// =============================================================================
 	mux.HandleFunc("/api/onboarding/status", s.Handlers.Onboarding.GetStatus)
+	mux.HandleFunc("/api/onboarding/names", s.Handlers.Onboarding.SaveNames)
 	mux.HandleFunc("/api/onboarding/step", s.Handlers.Onboarding.CompleteStep)
 	mux.HandleFunc("/api/onboarding/skip-step", s.Handlers.Onboarding.SkipStep)
 	mux.HandleFunc("/api/onboarding/skip", s.Handlers.Onboarding.Skip)
@@ -285,6 +308,7 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 	mux.HandleFunc("/api/onboarding/apply-config", s.Handlers.SmartOnboarding.Apply)
 	mux.HandleFunc("/api/onboarding/update-profile", s.Handlers.SmartOnboarding.UpdateProfile)
 	mux.HandleFunc("/api/onboarding/user-profile", s.Handlers.SmartOnboarding.GetStoredProfile)
+	mux.HandleFunc("/api/onboarding/personalize", s.Handlers.SmartOnboarding.SavePersonalization)
 	mux.HandleFunc("/api/onboarding/recommend-plugins", s.Handlers.SmartOnboarding.RecommendPlugins)
 
 	// Theme endpoints

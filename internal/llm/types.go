@@ -22,6 +22,10 @@ type ChatRequest struct {
 
 	// Stream indicates whether to stream the response
 	Stream bool
+
+	// ReasoningEffort controls reasoning depth for providers that support it
+	// (e.g., Codex: low, medium, high, xhigh).
+	ReasoningEffort string
 }
 
 // ChatResponse represents a unified response format from all providers

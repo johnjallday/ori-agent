@@ -15,6 +15,7 @@ http://localhost:8765/api
 - [Response Formats](#response-formats)
 - [Error Handling](#error-handling)
 - [Agents API](#agents-api)
+- [Home Assistant Routing API](#home-assistant-routing-api)
 - [Plugins API](#plugins-api)
 - [Plugin Registry API](#plugin-registry-api)
 - [Settings API](#settings-api)
@@ -137,6 +138,63 @@ Delete an existing agent and all its configuration.
 {
   "success": true,
   "message": "Agent 'my-agent' deleted successfully"
+}
+```
+
+## Home Assistant Routing API
+
+### Route Home Assistant Task
+
+Classify a home page assistant prompt and find the best matching existing agent.
+
+**Endpoint:** `POST /api/home-assistant/route`
+
+**Request Body:**
+```json
+{
+  "prompt": "Plan my 3 day trip in LA"
+}
+```
+
+**Parameters:**
+- `prompt` (required): Natural language task prompt from the home page assistant.
+
+**Response:**
+```json
+{
+  "intent": "travel_planning",
+  "intent_label": "travel planning",
+  "matched_agent": "Travel Planner",
+  "score": 8,
+  "requires_creation": false,
+  "reasons": [
+    "matches \"trip\"",
+    "has plugin support for weather"
+  ],
+  "suggested_agent_name": "Travel Planner",
+  "suggested_agent_type": "research"
+}
+```
+
+**Response fields:**
+- `intent`: Detected intent key (`travel_planning`, `email_check`, `general_task`).
+- `intent_label`: Human-readable label for the detected intent.
+- `matched_agent`: Name of the best existing agent (present when a match is found).
+- `score`: Match score for the selected agent.
+- `requires_creation`: `true` when no suitable existing agent is found.
+- `reasons`: Short explanation list for why the agent was matched.
+- `suggested_agent_name`: Suggested name when creating a new agent.
+- `suggested_agent_type`: Suggested type when creating a new agent.
+
+**No-match example:**
+```json
+{
+  "intent": "email_check",
+  "intent_label": "email triage",
+  "score": 0,
+  "requires_creation": true,
+  "suggested_agent_name": "Email Assistant",
+  "suggested_agent_type": "tool-calling"
 }
 ```
 

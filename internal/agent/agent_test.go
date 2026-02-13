@@ -3,6 +3,8 @@ package agent
 import (
 	"testing"
 	"time"
+
+	"github.com/johnjallday/ori-agent/internal/types"
 )
 
 func TestGetTypeForModel(t *testing.T) {
@@ -19,6 +21,11 @@ func TestGetTypeForModel(t *testing.T) {
 		// Research models
 		{"gpt-5", TypeResearch},
 		{"claude-opus-4-1", TypeResearch},
+		{"gpt-5.3-codex", TypeResearch},
+		{"gpt-5.1-codex-max", TypeResearch},
+		// Codex general-tier models
+		{"gpt-5.1-codex-mini", TypeGeneral},
+		{"codex-mini-latest", TypeGeneral},
 		// Unknown model defaults to tool-calling
 		{"unknown-model", TypeToolCalling},
 		{"", TypeToolCalling},
@@ -46,6 +53,10 @@ func TestIsModelAllowedForType(t *testing.T) {
 		{"research model for research type", "gpt-5", TypeResearch, true},
 		{"tool-calling model for general type", "gpt-4o-mini", TypeGeneral, true}, // gpt-4o-mini is also in general
 		{"research model for tool-calling type", "gpt-5", TypeToolCalling, false},
+		{"codex research model for research type", "gpt-5.3-codex", TypeResearch, true},
+		{"codex research model for general type", "gpt-5.3-codex", TypeGeneral, false},
+		{"codex mini model for general type", "gpt-5.1-codex-mini", TypeGeneral, true},
+		{"codex mini model for tool-calling type", "gpt-5.1-codex-mini", TypeToolCalling, true},
 		{"unknown model for any type", "unknown-model", TypeToolCalling, false},
 		{"valid model for unknown type", "gpt-4o", "unknown-type", false},
 		{"empty model", "", TypeToolCalling, false},
@@ -114,6 +125,45 @@ func TestAgent_UpdateLastActive(t *testing.T) {
 
 		if !agent.Statistics.LastActive.After(beforeUpdate) {
 			t.Error("LastActive should be updated to a later time")
+		}
+	})
+}
+
+func TestAgent_InitializeEvolution(t *testing.T) {
+	t.Run("initializes nil evolution", func(t *testing.T) {
+		agent := &Agent{}
+		if agent.Evolution != nil {
+			t.Fatal("Evolution should be nil initially")
+		}
+
+		agent.InitializeEvolution()
+
+		if agent.Evolution == nil {
+			t.Error("Evolution should not be nil after InitializeEvolution()")
+		}
+		if agent.Evolution.Stage != types.AgentStageSpark {
+			t.Errorf("expected default stage %q, got %q", types.AgentStageSpark, agent.Evolution.Stage)
+		}
+	})
+
+	t.Run("normalizes existing evolution defaults", func(t *testing.T) {
+		agent := &Agent{
+			Evolution: &types.AgentEvolution{
+				Level:      -1,
+				Experience: -5,
+			},
+		}
+
+		agent.InitializeEvolution()
+
+		if agent.Evolution.Level != 0 {
+			t.Errorf("expected normalized level 0, got %d", agent.Evolution.Level)
+		}
+		if agent.Evolution.Experience != 0 {
+			t.Errorf("expected normalized experience 0, got %d", agent.Evolution.Experience)
+		}
+		if agent.Evolution.Stage != types.AgentStageSpark {
+			t.Errorf("expected default stage %q, got %q", types.AgentStageSpark, agent.Evolution.Stage)
 		}
 	})
 }

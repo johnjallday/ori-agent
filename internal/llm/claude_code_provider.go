@@ -105,7 +105,7 @@ func buildClaudeCodePrompt(systemPrompt string, messages []Message) string {
 	}
 
 	for _, msg := range messages {
-		role := "Message"
+		var role string
 		switch strings.ToLower(msg.Role) {
 		case RoleSystem:
 			role = "System"

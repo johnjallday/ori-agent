@@ -1,0 +1,195 @@
+<!-- Ori Dashboard - Main landing page showing assistant status, stats, and agents -->
+<div class="container-fluid py-4">
+
+  <!-- Ori Greeting Row -->
+  <div class="modern-card dashboard-greeting-card p-3 mb-4">
+    <div class="d-flex align-items-center gap-3">
+      <!-- Ori Avatar -->
+      <button id="dashboardAssistantAvatarBtn" type="button" aria-label="Ask Ori assistant"
+              class="dashboard-greeting-avatar">
+        <svg width="52" height="52" viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg" style="color: var(--primary-color);">
+          <path d="M 724 410 L 714 405 L 686 404 L 663 397 L 651 386 L 632 352 L 618 339 L 600 329 L 582 324 L 561 324 L 542 329 L 518 344
+               L 503 362 L 493 386 L 491 412 L 494 428 L 503 448 L 541 493 L 554 520 L 526 508 L 501 503 L 464 504 L 414 514 L 383 513
+               L 349 498 L 330 480 L 321 467 L 308 498 L 303 523 L 304 562 L 316 601 L 338 635 L 362 658 L 386 674 L 432 693 L 467 700
+               L 527 701 L 570 695 L 607 683 L 638 665 L 659 645 L 675 619 L 682 591 L 680 562 L 674 544 L 658 518 L 626 486 L 621 474
+               L 623 459 L 626 453 L 638 444 L 672 442 L 702 434 L 723 418 Z"
+            fill="currentColor"/>
+        </svg>
+      </button>
+      <!-- Greeting Speech Bubble -->
+      <button id="dashboardAssistantBubbleBtn" type="button" aria-label="Open assistant quick tasks"
+              class="dashboard-greeting-bubble">
+        <div class="dashboard-greeting-bubble-tail"></div>
+        <h4 id="dashboardGreeting" class="mb-1">Hello!</h4>
+        <p class="mb-0">Welcome to Ori Agent. Here's an overview of your workspace.</p>
+      </button>
+    </div>
+  </div>
+
+  <!-- Home Assistant Task Router -->
+  <div id="homeAssistantCard" class="modern-card p-4 mb-4">
+    <div class="d-flex justify-content-between align-items-center mb-2">
+      <h5 class="mb-0 home-assistant-title">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" class="me-2" style="color: var(--primary-color);">
+          <path d="M12,2A4,4 0 0,1 16,6C16,7.11 15.55,8.11 14.83,8.83L18,12H20A2,2 0 0,1 22,14V20A2,2 0 0,1 20,22H4A2,2 0 0,1 2,20V14A2,2 0 0,1 4,12H6L9.17,8.83A3.95,3.95 0 0,1 8,6A4,4 0 0,1 12,2M12,4A2,2 0 0,0 10,6A2,2 0 0,0 12,8A2,2 0 0,0 14,6A2,2 0 0,0 12,4M8.83,10L6.83,12H17.17L15.17,10H8.83Z"/>
+        </svg>
+        Ask Ori
+      </h5>
+      <span class="badge home-assistant-badge">Task Routing</span>
+    </div>
+    <p class="mb-3 home-assistant-subtitle">
+      Ask for something to do. Full-auto routes immediately. Semi-auto asks you to confirm each key step.
+    </p>
+    <div class="home-assistant-control-row mb-3">
+      <div class="home-assistant-mode-switch" role="tablist" aria-label="Ask Ori mode">
+        <button id="homeAssistantModeNewBtn" type="button" class="modern-btn modern-btn-secondary home-assistant-mode-btn is-active" data-home-mode="new_task" role="tab" aria-selected="true">
+          New Task
+        </button>
+        <button id="homeAssistantModeContinueBtn" type="button" class="modern-btn modern-btn-secondary home-assistant-mode-btn" data-home-mode="continue_session" role="tab" aria-selected="false">
+          Continue Session
+        </button>
+      </div>
+      <div class="home-assistant-auto-switch-wrap">
+        <span class="home-assistant-auto-label">Automation</span>
+        <div class="home-assistant-auto-switch" role="tablist" aria-label="Automation mode">
+          <button id="homeAssistantAutoFullBtn" type="button" class="modern-btn modern-btn-secondary home-assistant-auto-btn" data-home-automation="full_auto" role="tab" aria-selected="false">
+            Full-auto
+          </button>
+          <button id="homeAssistantAutoSemiBtn" type="button" class="modern-btn modern-btn-secondary home-assistant-auto-btn is-active" data-home-automation="semi_auto" role="tab" aria-selected="true">
+            Semi-auto
+          </button>
+        </div>
+      </div>
+    </div>
+    <div id="homeAssistantQuickPrompts" class="d-flex flex-wrap gap-2 mb-3 align-items-center">
+      <span class="home-assistant-quick-label">Try:</span>
+      <button type="button" class="modern-btn modern-btn-secondary home-assistant-quick-btn" data-home-prompt="Plan my 3 day trip in LA" style="font-size: 0.8rem;">Plan my 3 day trip in LA</button>
+      <button type="button" class="modern-btn modern-btn-secondary home-assistant-quick-btn" data-home-prompt="Check my email" style="font-size: 0.8rem;">Check my email</button>
+      <button type="button" class="modern-btn modern-btn-secondary home-assistant-quick-btn" data-home-prompt="Plan my week" style="font-size: 0.8rem;">Plan my week</button>
+    </div>
+    <div id="homeAssistantRoutingSummary" class="home-assistant-routing-summary d-none"></div>
+    <div id="homeAssistantConversation" class="home-assistant-conversation p-3 mb-3">
+      <div style="color: var(--text-secondary); font-size: 0.85rem;">
+        Click the assistant and ask for a task. Example: "Plan my 3 day trip in LA." Ori will route it into chat.
+      </div>
+    </div>
+    <form id="homeAssistantForm" class="d-flex gap-2 home-assistant-form">
+      <input id="homeAssistantInput" type="text" class="modern-input flex-grow-1" maxlength="800"
+             placeholder="Ask Ori to do something..."
+             style="min-height: 42px;">
+      <button id="homeAssistantSendBtn" type="submit" class="modern-btn modern-btn-primary home-assistant-send-btn">Ask</button>
+    </form>
+    <div id="homeAssistantActions" class="d-flex flex-wrap gap-2 mt-3 d-none"></div>
+    <section id="homeAssistantRecentSection" class="home-assistant-recent-section mt-3 d-none" aria-label="Recent sessions">
+      <div class="home-assistant-recent-header">
+        <div class="home-assistant-recent-title">Recent Sessions</div>
+        <div class="home-assistant-recent-controls">
+          <button id="homeAssistantViewAllBtn" type="button" class="modern-btn modern-btn-secondary">View all</button>
+          <button id="homeAssistantClearRecentBtn" type="button" class="modern-btn modern-btn-secondary">Clear list</button>
+        </div>
+      </div>
+      <div id="homeAssistantRecentSessions" class="home-assistant-recent-list"></div>
+    </section>
+  </div>
+
+  <!-- Personalization Banner (shown when profile not yet personalized) -->
+  <div id="dashboardPersonalizeBanner" class="modern-card p-3 mb-4 d-none" style="border-left: 4px solid var(--primary-color);">
+    <div class="d-flex align-items-center justify-content-between">
+      <div class="d-flex align-items-center gap-3">
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor" style="color: var(--primary-color); flex-shrink: 0;">
+          <path d="M12,17.27L18.18,21L16.54,13.97L22,9.24L14.81,8.62L12,2L9.19,8.62L2,9.24L7.45,13.97L5.82,21L12,17.27Z"/>
+        </svg>
+        <div>
+          <div style="color: var(--text-primary); font-weight: 500;">Complete your profile</div>
+          <div style="color: var(--text-secondary); font-size: 0.85rem;">Personalize your experience and earn 25 XP</div>
+        </div>
+      </div>
+      <a href="/personalize" class="modern-btn modern-btn-primary" style="font-size: 0.85rem; white-space: nowrap;">
+        Personalize
+      </a>
+    </div>
+  </div>
+
+  <!-- Assistant Progress Card (hidden when evolution disabled) -->
+  <div id="dashboardProgressCard" class="modern-card p-4 mb-4 d-none">
+    <div class="d-flex justify-content-between align-items-center mb-3">
+      <h5 class="mb-0" style="color: var(--text-primary);">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" class="me-2" style="color: var(--primary-color);">
+          <path d="M12,17.27L18.18,21L16.54,13.97L22,9.24L14.81,8.62L12,2L9.19,8.62L2,9.24L7.45,13.97L5.82,21L12,17.27Z"/>
+        </svg>
+        Assistant Progress
+      </h5>
+      <span id="dashboardRankBadge" class="badge" style="background: var(--primary-color); color: white; font-size: 0.8rem; padding: 0.35rem 0.75rem;">Novice</span>
+    </div>
+    <div class="d-flex justify-content-between align-items-center mb-2">
+      <span id="dashboardLevelText" style="color: var(--text-primary); font-weight: 500;">Level 0</span>
+      <span id="dashboardXpText" style="color: var(--text-muted); font-size: 0.85rem;">0 XP</span>
+    </div>
+    <div class="progress" style="height: 8px; background: var(--bg-tertiary); border-radius: 4px;">
+      <div id="dashboardXpBar" class="progress-bar" role="progressbar" style="width: 0%; background: var(--primary-color); border-radius: 4px;" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100"></div>
+    </div>
+  </div>
+
+  <!-- Quick Stats Row -->
+  <div class="row g-3 mb-4">
+    <div class="col-6 col-md-3">
+      <div class="modern-card p-3 text-center">
+        <div style="color: var(--text-muted); font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 0.5rem;">Total Agents</div>
+        <div id="dashboardStatAgents" style="color: var(--text-primary); font-size: 1.5rem; font-weight: 600;">-</div>
+      </div>
+    </div>
+    <div class="col-6 col-md-3">
+      <div class="modern-card p-3 text-center">
+        <div style="color: var(--text-muted); font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 0.5rem;">Active Agents</div>
+        <div id="dashboardStatActive" style="color: var(--text-primary); font-size: 1.5rem; font-weight: 600;">-</div>
+      </div>
+    </div>
+    <div class="col-6 col-md-3">
+      <div class="modern-card p-3 text-center">
+        <div style="color: var(--text-muted); font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 0.5rem;">Total Messages</div>
+        <div id="dashboardStatMessages" style="color: var(--text-primary); font-size: 1.5rem; font-weight: 600;">-</div>
+      </div>
+    </div>
+    <div class="col-6 col-md-3">
+      <div class="modern-card p-3 text-center">
+        <div style="color: var(--text-muted); font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 0.5rem;">Total Cost</div>
+        <div id="dashboardStatCost" style="color: var(--text-primary); font-size: 1.5rem; font-weight: 600;">-</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Agent Overview -->
+  <div class="modern-card p-4">
+    <div class="d-flex justify-content-between align-items-center mb-3">
+      <h5 class="mb-0" style="color: var(--text-primary);">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" class="me-2" style="color: var(--primary-color);">
+          <path d="M12,2C13.1,2 14,2.9 14,4C14,5.1 13.1,6 12,6C10.9,6 10,5.1 10,4C10,2.9 10.9,2 12,2M21,9V7L15,1L13.5,2.5L16.17,5.17L11.83,9.51C11.25,9.19 10.61,9 10,9C8.61,9 7.22,9.39 6,10.17L3,7.17L1.59,8.59L4.17,11.17C3.39,12.39 3,13.78 3,15.17C3,16.56 3.39,17.94 4.17,19.17L1.59,21.75L3,23.16L6,20.16C7.22,20.94 8.61,21.33 10,21.33C10.61,21.33 11.25,21.13 11.83,20.82L16.17,16.48L13.5,19.15L15,20.65L21,14.65V12.65L17.83,15.82L12.41,10.41C12.61,10.25 12.8,10.08 13,9.83L17.83,5L21,8.17V9Z"/>
+        </svg>
+        Your Agents
+      </h5>
+      <div class="d-flex gap-2">
+        <a href="/workspaces" class="modern-btn modern-btn-secondary" style="font-size: 0.85rem;">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" class="me-1">
+            <path d="M21,16V4H3V16H21M21,2A2,2 0 0,1 23,4V16A2,2 0 0,1 21,18H14V20H16V22H8V20H10V18H3C1.89,18 1,17.1 1,16V4C1,2.89 1.89,2 3,2H21Z"/>
+          </svg>
+          Workspaces
+        </a>
+        <a href="/agents" class="modern-btn modern-btn-primary" style="font-size: 0.85rem;">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" class="me-1">
+            <path d="M3,4H7V8H3V4M9,5V7H21V5H9M3,10H7V14H3V10M9,11V13H21V11H9M3,16H7V20H3V16M9,17V19H21V17H9"/>
+          </svg>
+          Manage Agents
+        </a>
+      </div>
+    </div>
+    <div id="dashboardAgentList">
+      <div class="text-center py-4">
+        <div class="spinner-border spinner-border-sm text-primary" role="status">
+          <span class="visually-hidden">Loading...</span>
+        </div>
+        <p class="mt-2 mb-0" style="color: var(--text-muted); font-size: 0.85rem;">Loading agents...</p>
+      </div>
+    </div>
+  </div>
+
+</div>

@@ -196,7 +196,7 @@ func (h *Handler) getAvailableToolNames(ag *agent.Agent) []string {
 	// Add MCP tools
 	if h.mcpRegistry != nil && len(ag.MCPServers) > 0 {
 		for _, serverName := range ag.MCPServers {
-			mcpTools, err := h.mcpRegistry.GetToolsForServer(serverName)
+			mcpTools, err := h.getMCPToolsForServer(serverName)
 			if err != nil {
 				continue
 			}

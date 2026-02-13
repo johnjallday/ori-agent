@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"os"
+	"strings"
 	"sync"
 	"time"
 
@@ -37,6 +38,8 @@ func NewManager(statePath string) *Manager {
 				CurrentStep:    0,
 				StepsCompleted: []string{},
 			},
+			AssistantProgress: types.NewAssistantProgress(),
+			AssistantName:     "Ori",
 		},
 	}
 
@@ -44,6 +47,10 @@ func NewManager(statePath string) *Manager {
 	if err := m.load(); err != nil {
 		logger.Verbosef("Warning: failed to load onboarding state from %s: %v", statePath, err)
 	}
+
+	m.mu.Lock()
+	m.ensureStateDefaultsUnlocked()
+	m.mu.Unlock()
 
 	return m
 }
@@ -186,24 +193,74 @@ func (m *Manager) load() error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	return json.Unmarshal(data, m.state)
+	if err := json.Unmarshal(data, m.state); err != nil {
+		return err
+	}
+	m.ensureStateDefaultsUnlocked()
+	return nil
 }
 
 // saveUnlocked writes the state to disk (caller must hold lock)
 func (m *Manager) saveUnlocked() error {
+	m.ensureStateDefaultsUnlocked()
+
 	data, err := json.MarshalIndent(m.state, "", "  ")
 	if err != nil {
 		return err
 	}
 
-	return os.WriteFile(m.statePath, data, 0o644)
+	return os.WriteFile(m.statePath, data, 0o600)
 }
 
 // Save writes the current state to disk (with locking)
 func (m *Manager) Save() error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.saveUnlocked()
+}
+
+// GetAssistantProgress returns a copy of assistant progression data.
+func (m *Manager) GetAssistantProgress() types.AssistantProgress {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
+
+	if m.state.AssistantProgress == nil {
+		return *types.NewAssistantProgress()
+	}
+
+	progress := *m.state.AssistantProgress
+	progress.EnsureDefaults()
+	return progress
+}
+
+// SetAssistantProgress stores assistant progression data.
+func (m *Manager) SetAssistantProgress(progress *types.AssistantProgress) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if progress == nil {
+		m.state.AssistantProgress = types.NewAssistantProgress()
+		return m.saveUnlocked()
+	}
+
+	cp := *progress
+	cp.EnsureDefaults()
+	m.state.AssistantProgress = &cp
 	return m.saveUnlocked()
+}
+
+func (m *Manager) ensureStateDefaultsUnlocked() {
+	if m.state == nil {
+		m.state = &types.AppState{}
+	}
+	if m.state.AssistantProgress == nil {
+		m.state.AssistantProgress = types.NewAssistantProgress()
+	} else {
+		m.state.AssistantProgress.EnsureDefaults()
+	}
+	if m.state.AssistantName == "" {
+		m.state.AssistantName = "Ori"
+	}
 }
 
 // DetectAndStoreDevice automatically detects device information and stores it
@@ -364,4 +421,33 @@ func (m *Manager) SetUserProfile(profile *types.UserProfile) error {
 	}
 	m.state.UserProfile = profile
 	return m.saveUnlocked()
+}
+
+// GetNames returns persisted display names for onboarding.
+func (m *Manager) GetNames() (userName string, assistantName string) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	return m.state.UserName, m.getAssistantNameLocked()
+}
+
+// SetNames stores display names for the user and assistant.
+func (m *Manager) SetNames(userName, assistantName string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	m.state.UserName = userName
+	m.state.AssistantName = strings.TrimSpace(assistantName)
+	if m.state.AssistantName == "" {
+		m.state.AssistantName = "Ori"
+	}
+	return m.saveUnlocked()
+}
+
+func (m *Manager) getAssistantNameLocked() string {
+	name := strings.TrimSpace(m.state.AssistantName)
+	if name == "" {
+		return "Ori"
+	}
+	return name
 }

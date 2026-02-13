@@ -2,7 +2,7 @@
 <html data-bs-theme="light">
 {{template "head.tmpl" .}}
 
-<body class="bg-light home-hub">
+<body class="bg-light">
   <!-- Toast Notification Container -->
   <div id="toastContainer" class="toast-container" aria-live="polite" aria-atomic="true"></div>
 
@@ -13,8 +13,8 @@
     {{template "sidebar.tmpl" .}}
 
     <!-- Main Content -->
-    <main class="main-content" role="main" aria-label="Workspace hub">
-      {{template "workspace-hub.tmpl" .}}
+    <main class="main-content" role="main" aria-label="Dashboard">
+      {{template "dashboard.tmpl" .}}
     </main>
   </div>
 
@@ -436,18 +436,6 @@
   <script src="/js/file-manager.js"></script>
   <script src="/js/app.js?v=1694538177"></script>
   <script src="/js/modules/studio-realtime.js"></script>
-  <!-- Workspace Hub modules (order matters: utils > state > modals > selection > tasks > sessions > notes > files > smart-input > coordinator) -->
-  <script src="/js/modules/workspace-hub-utils.js"></script>
-  <script src="/js/modules/workspace-hub-state.js"></script>
-  <script src="/js/modules/workspace-hub-modals.js"></script>
-  <script src="/js/modules/workspace-hub-selection.js"></script>
-  <script src="/js/modules/workspace-hub-tasks.js"></script>
-  <script src="/js/modules/workspace-hub-sessions.js"></script>
-  <script src="/js/modules/workspace-hub-notes.js"></script>
-  <script src="/js/modules/workspace-hub-files.js"></script>
-  <script src="/js/modules/workspace-hub-smart-input.js"></script>
-  <script src="/js/modules/workspace-hub-panels.js"></script>
-  <script src="/js/modules/workspace-hub.js"></script>
-  <script src="/js/modules/workspace-hub-board.js"></script>
+  <script src="/js/modules/dashboard.js"></script>
 </body>
 </html>

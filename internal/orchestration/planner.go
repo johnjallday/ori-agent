@@ -27,6 +27,7 @@ func (o *Orchestrator) PlanTask(ctx context.Context, request string) (*types.Pla
 	}
 
 	providerName, model := o.configManager.GetSystemModel()
+	reasoningEffort := o.configManager.GetSystemReasoningEffort()
 	systemModel, err := o.llmFactory.GetSystemModelProvider(providerName, model)
 	if err != nil {
 		logger.Warn("Planner system model unavailable, using fallback", logger.Fields{"error": err})
@@ -37,7 +38,8 @@ func (o *Orchestrator) PlanTask(ctx context.Context, request string) (*types.Pla
 	systemPrompt := o.buildPlannerPrompt(agentProfiles)
 
 	req := llm.ChatRequest{
-		Model: systemModel.Model,
+		Model:           systemModel.Model,
+		ReasoningEffort: reasoningEffort,
 		Messages: []llm.Message{
 			{Role: llm.RoleSystem, Content: systemPrompt},
 			{Role: llm.RoleUser, Content: fmt.Sprintf("Request: %s", request)},

@@ -6,10 +6,12 @@
 export class DashboardAgents {
   constructor(parent) {
     this.parent = parent;
+    this.evolutionByAgent = {};
+    this.evolutionLoading = new Set();
   }
 
   renderAgentList() {
-    const agents = this.data.agents || [];
+    const agents = this.parent?.data?.agents || [];
 
     if (agents.length === 0) {
       return '<p class="text-muted">No participating agents configured</p>';
@@ -26,6 +28,7 @@ export class DashboardAgents {
                   ${this.escapeHtml(agent)}
                 </div>
                 <div class="text-muted small">Active</div>
+                ${this.renderEvolution(agent)}
               </div>
             </div>
             <button class="btn btn-sm btn-outline-danger" onclick="workspaceDashboard.removeAgent('${this.escapeHtml(agent)}')" title="Remove agent from workspace">
@@ -72,7 +75,7 @@ export class DashboardAgents {
       select.innerHTML = '<option value="">-- Select an agent --</option>';
 
       // Get current workspace agents
-      const currentAgents = this.data.agents || [];
+      const currentAgents = this.parent?.data?.agents || [];
 
       // Add agents that are not already in the workspace
       agents.forEach(agent => {
@@ -85,7 +88,7 @@ export class DashboardAgents {
       });
     } catch (error) {
       console.error('Error fetching agents:', error);
-      this.showToast('Error', '❌ Failed to fetch available agents', 'error');
+      this.parent.showToast('Error', '❌ Failed to fetch available agents', 'error');
     }
   }
 
@@ -104,7 +107,7 @@ export class DashboardAgents {
           'Content-Type': 'application/json'
         },
         body: JSON.stringify({
-          workspace_id: this.workspaceId,
+          workspace_id: this.parent.workspaceId,
           agent_name: agentName
         })
       });
@@ -118,7 +121,7 @@ export class DashboardAgents {
 
       // Hide form and reload workspace data
       this.hideAddAgentForm();
-      await this.loadWorkspaceData();
+      await this.parent.loadWorkspaceData();
 
       // Update agent list
       const agentListContainer = document.getElementById('agent-list-container');
@@ -127,10 +130,10 @@ export class DashboardAgents {
       }
 
       // Show success notification
-      this.showToast('Agent Added', `✅ ${agentName} added to workspace`, 'success');
+      this.parent.showToast('Agent Added', `✅ ${agentName} added to workspace`, 'success');
     } catch (error) {
       console.error('Error adding agent:', error);
-      this.showToast('Add Failed', '❌ Failed to add agent: ' + error.message, 'error');
+      this.parent.showToast('Add Failed', '❌ Failed to add agent: ' + error.message, 'error');
     }
   }
 
@@ -140,7 +143,7 @@ export class DashboardAgents {
     }
 
     try {
-      const response = await fetch(`/api/orchestration/workspace/agents?workspace_id=${this.workspaceId}&agent_name=${encodeURIComponent(agentName)}`, {
+      const response = await fetch(`/api/orchestration/workspace/agents?workspace_id=${this.parent.workspaceId}&agent_name=${encodeURIComponent(agentName)}`, {
         method: 'DELETE'
       });
 
@@ -150,7 +153,7 @@ export class DashboardAgents {
       }
 
       // Reload workspace data
-      await this.loadWorkspaceData();
+      await this.parent.loadWorkspaceData();
 
       // Update agent list
       const agentListContainer = document.getElementById('agent-list-container');
@@ -159,11 +162,82 @@ export class DashboardAgents {
       }
 
       // Show success notification
-      this.showToast('Agent Removed', `✅ ${agentName} removed from workspace`, 'success');
+      this.parent.showToast('Agent Removed', `✅ ${agentName} removed from workspace`, 'success');
     } catch (error) {
       console.error('Error removing agent:', error);
-      this.showToast('Remove Failed', '❌ Failed to remove agent: ' + error.message, 'error');
+      this.parent.showToast('Remove Failed', '❌ Failed to remove agent: ' + error.message, 'error');
     }
   }
 
+  renderEvolution(agentName) {
+    if (!window.oriFeatures?.evolutionEnabled) {
+      return '';
+    }
+
+    const evolution = this.evolutionByAgent[agentName];
+    if (!evolution && !this.evolutionLoading.has(agentName)) {
+      this.fetchEvolution(agentName);
+      return '<div class="text-muted small mt-1">Loading progression...</div>';
+    }
+    if (!evolution) {
+      return '';
+    }
+
+    const stage = this.escapeHtml(this.toTitleCase(evolution.stage || 'spark'));
+    const path = evolution.path ? this.escapeHtml(this.toTitleCase(evolution.path)) : '';
+    const level = Number.isFinite(Number(evolution.level)) ? Math.max(0, Math.floor(Number(evolution.level))) : 0;
+    const experience = Number.isFinite(Number(evolution.experience)) ? Math.max(0, Math.floor(Number(evolution.experience))) : 0;
+    const progressPercent = Math.min(100, Math.max(0, Math.round(experience % 100)));
+
+    return `
+      <div class="mt-1">
+        <div class="d-flex align-items-center gap-1 flex-wrap">
+          <span class="badge" style="background: var(--primary-color-light); color: var(--primary-color); font-size: 0.62rem;">${stage}</span>
+          ${path ? `<span class="badge" style="background: var(--bg-tertiary); color: var(--text-secondary); font-size: 0.62rem;">${path}</span>` : ''}
+          <span style="color: var(--text-secondary); font-size: 0.68rem;">Lv ${level}</span>
+        </div>
+        <div class="progress mt-1" style="height: 4px; background: var(--bg-tertiary);">
+          <div class="progress-bar" role="progressbar" style="width: ${progressPercent}%; background: var(--primary-color);" aria-valuenow="${progressPercent}" aria-valuemin="0" aria-valuemax="100"></div>
+        </div>
+      </div>
+    `;
+  }
+
+  async fetchEvolution(agentName) {
+    if (!window.oriFeatures?.evolutionEnabled || this.evolutionLoading.has(agentName)) {
+      return;
+    }
+
+    this.evolutionLoading.add(agentName);
+    try {
+      const response = await fetch(`/api/agents/${encodeURIComponent(agentName)}/evolution`);
+      if (!response.ok) {
+        return;
+      }
+      const data = await response.json();
+      if (data?.evolution) {
+        this.evolutionByAgent[agentName] = data.evolution;
+        const container = document.getElementById('agent-list-container');
+        if (container) {
+          container.innerHTML = this.renderAgentList();
+        }
+      }
+    } catch (error) {
+      console.debug('Failed to load agent evolution', { agent: agentName, error });
+    } finally {
+      this.evolutionLoading.delete(agentName);
+    }
+  }
+
+  toTitleCase(value) {
+    return String(value || '')
+      .split(/[\s_-]+/)
+      .filter(Boolean)
+      .map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
+      .join(' ');
+  }
+
+  escapeHtml(text) {
+    return this.parent.escapeHtml(text);
+  }
 }

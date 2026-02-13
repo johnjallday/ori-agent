@@ -68,10 +68,9 @@ func (s *GatewaySessionStore) GetHistory(ctx context.Context, sessionID string) 
 // SaveMessage persists a message.
 func (s *GatewaySessionStore) SaveMessage(ctx context.Context, sessionID string, msg gateway.Message) error {
 	// Ensure session exists
-	sess, err := s.store.GetSession(ctx, sessionID)
-	if err == ErrSessionNotFound {
+	if _, err := s.store.GetSession(ctx, sessionID); err == ErrSessionNotFound {
 		// Create new session
-		sess = &Session{
+		sess := &Session{
 			ID:        sessionID,
 			Title:     fmt.Sprintf("Gateway Chat (%s)", sessionID),
 			AgentName: "default", // We might want to pass this down
@@ -83,11 +82,6 @@ func (s *GatewaySessionStore) SaveMessage(ctx context.Context, sessionID string,
 		}
 	} else if err != nil {
 		return err
-	}
-
-	// Update agent name if needed (e.g. if we switched agents)
-	if msg.Sender.IsBot && msg.Sender.Name != "" && sess.AgentName != msg.Sender.Name {
-		// We could update the session agent name here, but let's keep it simple for now
 	}
 
 	role := RoleUser

@@ -113,6 +113,7 @@ func (h *AutoClassifyHandler) HandleAutoClassify(w http.ResponseWriter, r *http.
 
 	// Get the configured system model
 	systemProvider, systemModel := h.configManager.GetSystemModel()
+	systemReasoningEffort := h.configManager.GetSystemReasoningEffort()
 	result, err := h.llmFactory.GetSystemModelProvider(systemProvider, systemModel)
 	if err != nil {
 		logger.Error("System model not available for auto-classify", logger.Fields{"error": err})
@@ -121,7 +122,7 @@ func (h *AutoClassifyHandler) HandleAutoClassify(w http.ResponseWriter, r *http.
 	}
 
 	// Generate classification using LLM
-	classification, err := h.classifySession(r.Context(), result.Provider, result.Model, sess, messages, workspaces, agents)
+	classification, err := h.classifySession(r.Context(), result.Provider, result.Model, systemReasoningEffort, sess, messages, workspaces, agents)
 	if err != nil {
 		logger.Error("Auto-classify failed", logger.Fields{"error": err})
 		orihttp.WriteJSON(w, AutoClassifyResponse{
@@ -166,6 +167,7 @@ func (h *AutoClassifyHandler) classifySession(
 	ctx context.Context,
 	provider llm.Provider,
 	model string,
+	reasoningEffort string,
 	sess *session.Session,
 	messages []session.Message,
 	workspaces []*session.Workspace,
@@ -263,7 +265,8 @@ Please analyze this conversation and suggest the best workspace and agent.`,
 	defer cancel()
 
 	resp, err := provider.Chat(ctx, llm.ChatRequest{
-		Model: model,
+		Model:           model,
+		ReasoningEffort: reasoningEffort,
 		Messages: []llm.Message{
 			{Role: "user", Content: userMessage},
 		},

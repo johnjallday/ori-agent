@@ -5,12 +5,14 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"sort"
 	"strings"
 	"time"
 
 	"github.com/johnjallday/ori-agent/internal/agent"
 	"github.com/johnjallday/ori-agent/internal/llm"
 	"github.com/johnjallday/ori-agent/internal/logger"
+	"github.com/johnjallday/ori-agent/internal/types"
 	"github.com/oriagent/ori-pluginapi"
 )
 
@@ -151,7 +153,7 @@ func (h *Handler) recordToolCallStats(toolName string, duration time.Duration, e
 }
 
 // trackUsageCommon tracks LLM usage and cost
-func (h *Handler) trackUsageCommon(provider, model, agentName string, usage llm.Usage, ag *agent.Agent) {
+func (h *Handler) trackUsageCommon(provider, model, agentName string, usage llm.Usage, ag *agent.Agent, userMessage string) {
 	if h.costTracker != nil && usage.TotalTokens > 0 {
 		if err := h.costTracker.TrackUsage(provider, model, agentName, usage, ""); err != nil {
 			logger.Warn("Failed to track usage", logger.Fields{"error": err})
@@ -159,7 +161,7 @@ func (h *Handler) trackUsageCommon(provider, model, agentName string, usage llm.
 	}
 
 	if usage.TotalTokens > 0 {
-		h.trackAgentStatistics(ag, usage.TotalTokens, provider, model)
+		h.trackAgentStatistics(ag, agentName, usage.TotalTokens, provider, model, userMessage)
 	}
 }
 
@@ -172,7 +174,7 @@ func writeErrorResponse(w http.ResponseWriter, message string) {
 
 // getFollowUpSystemPrompt returns the system prompt for follow-up requests after tool execution
 func getFollowUpSystemPrompt() string {
-	return "The tool was executed successfully. Simply acknowledge the result without suggesting follow-up actions or next steps. If the tool returned configuration data, settings, or structured information, display that data clearly. For action tools (like opening projects, launching applications), provide only a brief confirmation."
+	return "Use tool output as the source of truth. Do not invent data and do not hide requested details behind high-level summaries. If the user asks for names/items/files/paths, include the exact identifiers from the tool output. For file metadata responses, include filename or path with each metadata block. Keep the response concise and avoid unnecessary follow-up suggestions. For pure action tools (opening apps/projects), provide a brief confirmation."
 }
 
 // emptyResponseText is the default text when the model returns an empty response
@@ -185,4 +187,90 @@ func getResponseText(content string) string {
 		return emptyResponseText
 	}
 	return text
+}
+
+func resolveSystemPromptForAgent(ag *agent.Agent, defaultPrompt string) string {
+	if ag == nil {
+		return defaultPrompt
+	}
+	if strings.TrimSpace(ag.Settings.SystemPrompt) != "" {
+		// Respect explicit user override.
+		return ag.Settings.SystemPrompt
+	}
+
+	if ag.Evolution == nil {
+		return defaultPrompt
+	}
+
+	switch ag.Evolution.Path {
+	case types.AgentPathCoder:
+		return defaultPrompt + " You are on the Coder path: prioritize implementation accuracy, tests, and concrete code-level fixes."
+	case types.AgentPathResearcher:
+		return defaultPrompt + " You are on the Researcher path: prioritize evidence quality, comparisons, and clear assumptions."
+	case types.AgentPathWriter:
+		return defaultPrompt + " You are on the Writer path: prioritize clarity, structure, tone, and concise polish."
+	default:
+		return defaultPrompt
+	}
+}
+
+func prioritizeToolsForPath(ag *agent.Agent, tools []llm.Tool) []llm.Tool {
+	if ag == nil || len(tools) <= 1 || ag.Evolution == nil || ag.Evolution.Path == "" {
+		return tools
+	}
+
+	scored := make([]struct {
+		tool  llm.Tool
+		score int
+		idx   int
+	}, 0, len(tools))
+
+	for idx, tool := range tools {
+		scored = append(scored, struct {
+			tool  llm.Tool
+			score int
+			idx   int
+		}{
+			tool:  tool,
+			score: scoreToolForPath(ag.Evolution.Path, tool.Name, tool.Description),
+			idx:   idx,
+		})
+	}
+
+	sort.SliceStable(scored, func(i, j int) bool {
+		if scored[i].score == scored[j].score {
+			return scored[i].idx < scored[j].idx
+		}
+		return scored[i].score > scored[j].score
+	})
+
+	reordered := make([]llm.Tool, 0, len(tools))
+	for _, item := range scored {
+		reordered = append(reordered, item.tool)
+	}
+	return reordered
+}
+
+func scoreToolForPath(path types.AgentPath, name, description string) int {
+	text := strings.ToLower(name + " " + description)
+	score := 0
+
+	addIfContains := func(words []string, points int) {
+		for _, word := range words {
+			if strings.Contains(text, word) {
+				score += points
+			}
+		}
+	}
+
+	switch path {
+	case types.AgentPathCoder:
+		addIfContains([]string{"code", "git", "file", "shell", "build", "test", "repo"}, 3)
+	case types.AgentPathResearcher:
+		addIfContains([]string{"search", "web", "crawl", "query", "research", "docs", "fetch"}, 3)
+	case types.AgentPathWriter:
+		addIfContains([]string{"write", "summary", "format", "note", "draft", "document"}, 3)
+	}
+
+	return score
 }

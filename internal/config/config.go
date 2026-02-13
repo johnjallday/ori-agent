@@ -19,8 +19,9 @@ type Settings struct {
 	AllowedOrigins  []string `json:"allowed_origins,omitempty"` // CORS allowed origins (defaults to localhost)
 
 	// System model settings - used for internal AI tasks (auto-config, suggestions, etc.)
-	SystemProvider string `json:"system_provider,omitempty"` // Provider for system tasks (e.g., "openai", "codex", "claude_code", "claude", "gemini", "ollama")
-	SystemModel    string `json:"system_model,omitempty"`    // Model for system tasks (e.g., "gpt-4o-mini", "claude-3-haiku-20240307")
+	SystemProvider        string `json:"system_provider,omitempty"`         // Provider for system tasks (e.g., "openai", "codex", "claude_code", "claude", "gemini", "ollama")
+	SystemModel           string `json:"system_model,omitempty"`            // Model for system tasks (e.g., "gpt-4o-mini", "claude-3-haiku-20240307")
+	SystemReasoningEffort string `json:"system_reasoning_effort,omitempty"` // Optional reasoning effort for system tasks (currently used by Codex: low, medium, high, xhigh)
 
 	// Multi-agent orchestration defaults
 	MultiAgentMode      string  `json:"multi_agent_mode,omitempty"`      // auto, force, off
@@ -312,6 +313,16 @@ func (m *Manager) validate() error {
 		m.settings.SpeechLanguage = "auto"
 	}
 
+	if m.settings.SystemReasoningEffort != "" {
+		effort := strings.ToLower(strings.TrimSpace(m.settings.SystemReasoningEffort))
+		switch effort {
+		case "low", "medium", "high", "xhigh":
+			m.settings.SystemReasoningEffort = effort
+		default:
+			m.settings.SystemReasoningEffort = ""
+		}
+	}
+
 	return m.validateAPIKey(m.settings.OpenAIAPIKey)
 }
 
@@ -444,8 +455,48 @@ func (m *Manager) SetSystemModel(provider, model string) error {
 	m.mu.Lock()
 	m.settings.SystemProvider = provider
 	m.settings.SystemModel = model
+	if provider == "" || model == "" || !strings.EqualFold(provider, "codex") {
+		m.settings.SystemReasoningEffort = ""
+	}
 	m.mu.Unlock()
 	return nil
+}
+
+// GetSystemReasoningEffort returns the configured reasoning effort for system tasks.
+// Defaults to "medium" when unset or invalid.
+func (m *Manager) GetSystemReasoningEffort() string {
+	m.mu.RLock()
+	effort := strings.TrimSpace(strings.ToLower(m.settings.SystemReasoningEffort))
+	m.mu.RUnlock()
+
+	switch effort {
+	case "low", "medium", "high", "xhigh":
+		return effort
+	default:
+		return "medium"
+	}
+}
+
+// SetSystemReasoningEffort updates the system reasoning effort.
+// Empty string clears the override and falls back to defaults.
+func (m *Manager) SetSystemReasoningEffort(effort string) error {
+	effort = strings.TrimSpace(strings.ToLower(effort))
+	if effort == "" {
+		m.mu.Lock()
+		m.settings.SystemReasoningEffort = ""
+		m.mu.Unlock()
+		return nil
+	}
+
+	switch effort {
+	case "low", "medium", "high", "xhigh":
+		m.mu.Lock()
+		m.settings.SystemReasoningEffort = effort
+		m.mu.Unlock()
+		return nil
+	default:
+		return fmt.Errorf("invalid system reasoning effort %q: must be one of [low medium high xhigh]", effort)
+	}
 }
 
 // IsSystemModelConfigured returns true if both system provider and model are set

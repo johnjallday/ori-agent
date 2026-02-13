@@ -49,7 +49,7 @@ func TestClassifySmartInputLLM_ParsesJSON(t *testing.T) {
 		content: `{"decision":"chat","confidence":0.42,"reasoning":"question"}`,
 	}
 
-	result, err := classifySmartInputLLM(context.Background(), provider, "stub", "What is the plan?")
+	result, err := classifySmartInputLLM(context.Background(), provider, "stub", "high", "What is the plan?")
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)
 	}
@@ -66,7 +66,7 @@ func TestClassifySmartInputLLM_ParsesCodeBlock(t *testing.T) {
 		content: "```json\n{\"decision\":\"task\",\"confidence\":0.9}\n```",
 	}
 
-	result, err := classifySmartInputLLM(context.Background(), provider, "stub", "todo: update docs")
+	result, err := classifySmartInputLLM(context.Background(), provider, "stub", "high", "todo: update docs")
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)
 	}
@@ -83,7 +83,7 @@ func TestClassifySmartInputLLM_InvalidDecision(t *testing.T) {
 		content: `{"decision":"other","confidence":0.5}`,
 	}
 
-	_, err := classifySmartInputLLM(context.Background(), provider, "stub", "something")
+	_, err := classifySmartInputLLM(context.Background(), provider, "stub", "high", "something")
 	if err == nil {
 		t.Fatal("expected error for invalid decision")
 	}

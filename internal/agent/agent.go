@@ -1,6 +1,8 @@
 package agent
 
 import (
+	"strings"
+
 	"github.com/johnjallday/ori-agent/internal/types"
 	"github.com/openai/openai-go/v3"
 )
@@ -24,12 +26,20 @@ var TypeModels = map[string][]string{
 		"gpt-5-mini",
 		"gpt-4o-mini",
 		"gpt-4o",
+		"gpt-5-codex-mini",
+		"gpt-5.1-codex-mini",
+		"codex-mini-latest",
 		"claude-3-5-sonnet-20241022",
 		"claude-3-sonnet-20240229",
 	},
 	TypeResearch: {
 		"gpt-5",
 		"gpt-4o",
+		"gpt-5-codex",
+		"gpt-5.1-codex",
+		"gpt-5.2-codex",
+		"gpt-5.3-codex",
+		"gpt-5.1-codex-max",
 		"claude-3-5-sonnet-20241022",
 		"claude-sonnet-4-5",
 		"claude-opus-4-1",
@@ -40,6 +50,10 @@ var TypeModels = map[string][]string{
 // When a model appears in multiple types, priority is: tool-calling > general > research
 // (returns the most cost-efficient type that supports the model)
 func GetTypeForModel(model string) string {
+	if inferredType, ok := inferCodexModelType(model); ok {
+		return inferredType
+	}
+
 	// Check in priority order: tool-calling (cheapest) → general → research (most capable)
 	typePriority := []string{TypeToolCalling, TypeGeneral, TypeResearch}
 	for _, agentType := range typePriority {
@@ -56,6 +70,10 @@ func GetTypeForModel(model string) string {
 
 // IsModelAllowedForType checks if a model is allowed for the given agent type
 func IsModelAllowedForType(model, agentType string) bool {
+	if allowed, handled := codexModelAllowedForType(model, agentType); handled {
+		return allowed
+	}
+
 	models, exists := TypeModels[agentType]
 	if !exists {
 		return false
@@ -66,6 +84,37 @@ func IsModelAllowedForType(model, agentType string) bool {
 		}
 	}
 	return false
+}
+
+func codexModelAllowedForType(model, agentType string) (allowed bool, handled bool) {
+	normalized := strings.ToLower(strings.TrimSpace(model))
+	if normalized == "" || !strings.Contains(normalized, "codex") {
+		return false, false
+	}
+
+	switch {
+	case strings.Contains(normalized, "nano"):
+		return agentType == TypeToolCalling, true
+	case strings.Contains(normalized, "mini"):
+		return agentType == TypeToolCalling || agentType == TypeGeneral, true
+	default:
+		return agentType == TypeResearch, true
+	}
+}
+
+func inferCodexModelType(model string) (string, bool) {
+	normalized := strings.ToLower(strings.TrimSpace(model))
+	if normalized == "" || !strings.Contains(normalized, "codex") {
+		return "", false
+	}
+
+	if strings.Contains(normalized, "nano") {
+		return TypeToolCalling, true
+	}
+	if strings.Contains(normalized, "mini") {
+		return TypeGeneral, true
+	}
+	return TypeResearch, true
 }
 
 // Agent represents a configured AI agent with its settings and state
@@ -82,6 +131,7 @@ type Agent struct {
 	Status     types.AgentStatus      `json:"status,omitempty"`     // Operational status (active, idle, error, disabled)
 	Statistics *types.AgentStatistics `json:"statistics,omitempty"` // Usage and performance metrics
 	Metadata   *types.AgentMetadata   `json:"metadata,omitempty"`   // Descriptive information and tags
+	Evolution  *types.AgentEvolution  `json:"evolution,omitempty"`  // Agent progression state
 }
 
 // InitializeStatistics safely initializes the statistics if nil
@@ -90,6 +140,16 @@ func (a *Agent) InitializeStatistics() {
 	if a.Statistics == nil {
 		a.Statistics = types.NewAgentStatistics()
 	}
+}
+
+// InitializeEvolution safely initializes evolution data if nil.
+// This method is idempotent and can be called multiple times.
+func (a *Agent) InitializeEvolution() {
+	if a.Evolution == nil {
+		a.Evolution = types.NewAgentEvolution()
+		return
+	}
+	a.Evolution.EnsureDefaults()
 }
 
 // UpdateLastActive updates the last activity timestamp for the agent

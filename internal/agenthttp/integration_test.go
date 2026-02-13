@@ -10,6 +10,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/johnjallday/ori-agent/internal/evolution"
+	"github.com/johnjallday/ori-agent/internal/evolutionhttp"
+	"github.com/johnjallday/ori-agent/internal/onboarding"
 	"github.com/johnjallday/ori-agent/internal/store"
 	"github.com/johnjallday/ori-agent/internal/types"
 )
@@ -19,6 +22,7 @@ type TestServer struct {
 	store            store.Store
 	handler          *Handler
 	dashboardHandler *DashboardHandler
+	evolutionHandler *evolutionhttp.Handler
 	cleanup          func()
 }
 
@@ -50,6 +54,9 @@ func setupTestServer(t *testing.T) *TestServer {
 	// Create handlers
 	handler := New(st)
 	dashboardHandler := NewDashboardHandler(st)
+	onboardingMgr := onboarding.NewManager(tmpDir + "/app_state.json")
+	evolutionSvc := evolution.NewService(st, onboardingMgr, nil)
+	evolutionHandler := evolutionhttp.NewHandler(st, onboardingMgr, evolutionSvc)
 
 	// Create cleanup function
 	cleanup := func() {
@@ -60,6 +67,7 @@ func setupTestServer(t *testing.T) *TestServer {
 		store:            st,
 		handler:          handler,
 		dashboardHandler: dashboardHandler,
+		evolutionHandler: evolutionHandler,
 		cleanup:          cleanup,
 	}
 }
@@ -90,6 +98,16 @@ func (ts *TestServer) doRequest(t *testing.T, method, path string, body interfac
 
 	if pathWithoutQuery == "/api/agents/dashboard/list" || pathWithoutQuery == "/api/agents/dashboard/stats" {
 		ts.dashboardHandler.ListAgentsWithStats(rr, req)
+	} else if strings.HasSuffix(pathWithoutQuery, "/evolution/path") && method == http.MethodPost {
+		ts.evolutionHandler.SetAgentPath(rr, req)
+	} else if strings.HasSuffix(pathWithoutQuery, "/evolution") && method == http.MethodGet {
+		ts.evolutionHandler.GetAgentEvolution(rr, req)
+	} else if strings.HasSuffix(pathWithoutQuery, "/feed") && method == http.MethodPost {
+		ts.evolutionHandler.FeedAgent(rr, req)
+	} else if pathWithoutQuery == "/api/evolution/assistant" {
+		ts.evolutionHandler.GetAssistantProgress(rr, req)
+	} else if pathWithoutQuery == "/api/evolution/suggestions" {
+		ts.evolutionHandler.GetSuggestions(rr, req)
 	} else if len(pathWithoutQuery) > 12 && pathWithoutQuery[:12] == "/api/agents/" && len(pathWithoutQuery) > 7 && pathWithoutQuery[len(pathWithoutQuery)-7:] == "/detail" {
 		ts.dashboardHandler.GetAgentDetail(rr, req)
 	} else {
@@ -597,4 +615,141 @@ func TestStatisticsAccuracy(t *testing.T) {
 	if time.Since(ag.Statistics.LastActive) > time.Minute {
 		t.Errorf("LastActive should be recent, got %v", ag.Statistics.LastActive)
 	}
+}
+
+// Test 7.7: Evolution and feeding API endpoints
+func TestEvolutionAndFeedEndpoints(t *testing.T) {
+	ts := setupTestServer(t)
+	defer ts.cleanup()
+
+	createTestAgent(t, ts, "evo-agent", "tool-calling")
+
+	t.Run("GetAgentEvolutionSuccess", func(t *testing.T) {
+		rr := ts.doRequest(t, http.MethodGet, "/api/agents/evo-agent/evolution", nil)
+		assertStatus(t, rr, http.StatusOK)
+
+		var response struct {
+			Agent     string                 `json:"agent"`
+			Evolution map[string]interface{} `json:"evolution"`
+		}
+		decodeResponse(t, rr, &response)
+
+		if response.Agent != "evo-agent" {
+			t.Errorf("expected agent evo-agent, got %q", response.Agent)
+		}
+		if response.Evolution == nil {
+			t.Fatal("expected evolution payload")
+		}
+		if response.Evolution["stage"] != "spark" {
+			t.Errorf("expected default stage spark, got %v", response.Evolution["stage"])
+		}
+	})
+
+	t.Run("FeedSuccess", func(t *testing.T) {
+		rr := ts.doRequest(t, http.MethodPost, "/api/agents/evo-agent/feed", map[string]interface{}{
+			"content": "project-specific context",
+			"source":  "manual",
+		})
+		assertStatus(t, rr, http.StatusOK)
+
+		var response struct {
+			Success   bool                   `json:"success"`
+			Evolution map[string]interface{} `json:"evolution"`
+		}
+		decodeResponse(t, rr, &response)
+
+		if !response.Success {
+			t.Fatal("expected success true")
+		}
+		feedCount, ok := response.Evolution["feed_count"].(float64)
+		if !ok || feedCount < 1 {
+			t.Errorf("expected feed_count >= 1, got %v", response.Evolution["feed_count"])
+		}
+	})
+
+	t.Run("FeedValidationFailure", func(t *testing.T) {
+		rr := ts.doRequest(t, http.MethodPost, "/api/agents/evo-agent/feed", map[string]interface{}{
+			"content": "   ",
+		})
+		assertStatus(t, rr, http.StatusBadRequest)
+	})
+
+	t.Run("FeedMissingAgent", func(t *testing.T) {
+		rr := ts.doRequest(t, http.MethodPost, "/api/agents/missing-agent/feed", map[string]interface{}{
+			"content": "context",
+		})
+		assertStatus(t, rr, http.StatusNotFound)
+	})
+
+	t.Run("SetPathGatedBeforeLearner", func(t *testing.T) {
+		rr := ts.doRequest(t, http.MethodPost, "/api/agents/evo-agent/evolution/path", map[string]interface{}{
+			"path": "coder",
+		})
+		assertStatus(t, rr, http.StatusBadRequest)
+	})
+
+	t.Run("SetPathAtLearnerStage", func(t *testing.T) {
+		ag, ok := ts.store.GetAgent("evo-agent")
+		if !ok || ag == nil {
+			t.Fatal("expected evo-agent to exist")
+		}
+		ag.InitializeEvolution()
+		ag.Evolution.Level = 10
+		ag.Evolution.Stage = types.AgentStageLearner
+		if err := ts.store.SetAgent("evo-agent", ag); err != nil {
+			t.Fatalf("failed to persist learner stage for test: %v", err)
+		}
+
+		rr := ts.doRequest(t, http.MethodPost, "/api/agents/evo-agent/evolution/path", map[string]interface{}{
+			"path": "coder",
+		})
+		assertStatus(t, rr, http.StatusOK)
+
+		var response struct {
+			Evolution map[string]interface{} `json:"evolution"`
+		}
+		decodeResponse(t, rr, &response)
+		if response.Evolution["path"] != "coder" {
+			t.Errorf("expected path coder, got %v", response.Evolution["path"])
+		}
+	})
+
+	t.Run("SuggestionsIncludeReasonAndApproval", func(t *testing.T) {
+		ag, ok := ts.store.GetAgent("evo-agent")
+		if !ok || ag == nil {
+			t.Fatal("expected evo-agent to exist")
+		}
+		ag.InitializeEvolution()
+		ag.InitializeStatistics()
+		ag.Evolution.Level = 12
+		ag.Evolution.Stage = types.AgentStageLearner
+		ag.Evolution.Path = ""
+		ag.Statistics.MessageCount = 35
+		if err := ts.store.SetAgent("evo-agent", ag); err != nil {
+			t.Fatalf("failed to seed suggestion test state: %v", err)
+		}
+
+		rr := ts.doRequest(t, http.MethodGet, "/api/evolution/suggestions", nil)
+		assertStatus(t, rr, http.StatusOK)
+
+		var payload struct {
+			Suggestions []map[string]interface{} `json:"suggestions"`
+		}
+		decodeResponse(t, rr, &payload)
+
+		if len(payload.Suggestions) == 0 {
+			t.Fatal("expected at least one suggestion")
+		}
+
+		first := payload.Suggestions[0]
+		if first["reason"] == nil {
+			t.Fatal("expected reason in suggestion")
+		}
+		if first["confidence"] == nil {
+			t.Fatal("expected confidence in suggestion")
+		}
+		if first["requires_approval"] != true {
+			t.Fatalf("expected requires_approval=true, got %v", first["requires_approval"])
+		}
+	})
 }

@@ -133,8 +133,8 @@ func (h *Handler) generateInitializationPrompt(uninitializedPlugins []map[string
 	return prompt.String()
 }
 
-// trackAgentStatistics records message and token usage in agent statistics
-func (h *Handler) trackAgentStatistics(ag *agent.Agent, tokenCount int, provider string, model string) {
+// trackAgentStatistics records message usage metrics and awards evolution XP.
+func (h *Handler) trackAgentStatistics(ag *agent.Agent, agentName string, tokenCount int, provider string, model string, userMessage string) {
 	// Initialize statistics if needed
 	ag.InitializeStatistics()
 
@@ -160,6 +160,15 @@ func (h *Handler) trackAgentStatistics(ag *agent.Agent, tokenCount int, provider
 
 	// Record the message with tokens and cost
 	ag.Statistics.RecordMessage(tokenCount, estimatedCost)
+
+	if h.evolutionSvc != nil && agentName != "" {
+		if err := h.evolutionSvc.AwardMessageXP(agentName, tokenCount, userMessage); err != nil {
+			logger.Warn("Failed to award evolution XP", logger.Fields{
+				"agent": agentName,
+				"error": err,
+			})
+		}
+	}
 
 	logger.Debug("Statistics updated", logger.Fields{
 		"messages":   ag.Statistics.MessageCount,

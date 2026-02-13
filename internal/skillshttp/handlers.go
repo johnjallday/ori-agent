@@ -98,7 +98,7 @@ func (h *Handler) listSkills(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		var conflicts *skills.SkillConflictError
 		if errors.As(err, &conflicts) {
-			orihttp.RespondJSON(w, http.StatusConflict, map[string]any{
+			_ = orihttp.RespondJSON(w, http.StatusConflict, map[string]any{
 				"error":     err.Error(),
 				"conflicts": conflicts.Conflicts,
 				"agent":     agentName,

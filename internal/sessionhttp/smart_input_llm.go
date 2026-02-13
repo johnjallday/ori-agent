@@ -17,7 +17,7 @@ type smartInputLLMResponse struct {
 	Reasoning  string             `json:"reasoning,omitempty"`
 }
 
-func classifySmartInputLLM(ctx context.Context, provider llm.Provider, model string, input string) (smartInputHeuristicResult, error) {
+func classifySmartInputLLM(ctx context.Context, provider llm.Provider, model, reasoningEffort string, input string) (smartInputHeuristicResult, error) {
 	systemPrompt := `You classify a user's input into exactly one intent: "task" or "chat".
 
 Return ONLY a JSON object with:
@@ -36,7 +36,8 @@ Guidance:
 	defer cancel()
 
 	resp, err := provider.Chat(ctx, llm.ChatRequest{
-		Model: model,
+		Model:           model,
+		ReasoningEffort: reasoningEffort,
 		Messages: []llm.Message{
 			{Role: "user", Content: userMessage},
 		},
@@ -91,10 +92,11 @@ Guidance:
 
 func classifySmartInputWithSystemModel(ctx context.Context, llmFactory *llm.Factory, configManager *config.Manager, input string) (smartInputHeuristicResult, error) {
 	systemProvider, systemModel := configManager.GetSystemModel()
+	systemReasoningEffort := configManager.GetSystemReasoningEffort()
 	result, err := llmFactory.GetSystemModelProvider(systemProvider, systemModel)
 	if err != nil {
 		return smartInputHeuristicResult{}, err
 	}
 
-	return classifySmartInputLLM(ctx, result.Provider, result.Model, input)
+	return classifySmartInputLLM(ctx, result.Provider, result.Model, systemReasoningEffort, input)
 }

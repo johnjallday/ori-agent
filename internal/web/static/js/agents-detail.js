@@ -57,7 +57,10 @@ function populateEditModelOptions() {
   // Map provider display names to our filter values
   const providerNameMap = {
     'OpenAI': 'openai',
+    'OpenAI Codex (CLI)': 'codex',
     'Anthropic': 'claude',
+    'Anthropic Claude': 'claude',
+    'Claude Code (CLI)': 'claude_code',
     'Ollama': 'ollama',
     'Google Gemini': 'gemini'
   };

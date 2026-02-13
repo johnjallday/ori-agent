@@ -64,9 +64,8 @@ func (ts *testStore) SetAgent(name string, ag *agent.Agent) error {
 	return nil
 }
 
-func (ts *testStore) Save() error {
-	return nil
-}
+func (ts *testStore) Save() error        { return nil }
+func (ts *testStore) ClearAgents() error { return nil }
 
 type mockLoader struct{}
 

@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/johnjallday/ori-agent/internal/modelinfo"
@@ -60,15 +62,18 @@ func (p *CodexProvider) ValidateConfig(_ ProviderConfig) error {
 	return nil
 }
 
-// DefaultModels returns available Codex models from the curated pricing data.
+// DefaultModels returns Codex models from local Codex cache with curated fallback.
 func (p *CodexProvider) DefaultModels() []string {
-	return modelinfo.GetCodexModels()
+	cached := loadCodexCachedModels()
+	curated := modelinfo.GetCodexModels()
+	merged := mergeUniqueModels(cached, curated)
+	return prioritizeCodexModels(merged)
 }
 
 // Chat sends a chat request via the Codex CLI.
 func (p *CodexProvider) Chat(ctx context.Context, req ChatRequest) (*ChatResponse, error) {
 	prompt := buildCodexPrompt(req.SystemPrompt, req.Messages)
-	content, err := p.runCodexExec(ctx, req.Model, prompt, nil)
+	content, err := p.runCodexExec(ctx, req.Model, prompt, req.ReasoningEffort, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -87,7 +92,7 @@ func (p *CodexProvider) StreamChat(ctx context.Context, req ChatRequest) (Stream
 // ChatWithStructuredOutput sends a chat request with a JSON schema using Codex CLI.
 func (p *CodexProvider) ChatWithStructuredOutput(ctx context.Context, req StructuredOutputRequest) (*ChatResponse, error) {
 	prompt := buildCodexPrompt(req.SystemPrompt, req.Messages)
-	content, err := p.runCodexExec(ctx, req.Model, prompt, req.Schema)
+	content, err := p.runCodexExec(ctx, req.Model, prompt, req.ReasoningEffort, req.Schema)
 	if err != nil {
 		return nil, err
 	}
@@ -108,7 +113,7 @@ func buildCodexPrompt(systemPrompt string, messages []Message) string {
 	}
 
 	for _, msg := range messages {
-		role := "Message"
+		var role string
 		switch strings.ToLower(msg.Role) {
 		case RoleSystem:
 			role = "System"
@@ -132,23 +137,23 @@ func buildCodexPrompt(systemPrompt string, messages []Message) string {
 	return strings.TrimSpace(b.String())
 }
 
-func (p *CodexProvider) runCodexExec(ctx context.Context, model, prompt string, schema interface{}) (string, error) {
+func (p *CodexProvider) runCodexExec(ctx context.Context, model, prompt, reasoningEffort string, schema interface{}) (string, error) {
 	var schemaPath string
 	if schema != nil {
 		tmpSchema, err := os.CreateTemp("", "codex-schema-*.json")
 		if err != nil {
 			return "", fmt.Errorf("codex schema temp file: %w", err)
 		}
-		defer os.Remove(tmpSchema.Name())
+		defer func() { _ = os.Remove(tmpSchema.Name()) }()
 		schemaPath = tmpSchema.Name()
 
 		payload, err := json.Marshal(schema)
 		if err != nil {
-			tmpSchema.Close()
+			_ = tmpSchema.Close()
 			return "", fmt.Errorf("codex schema marshal: %w", err)
 		}
 		if _, err := tmpSchema.Write(payload); err != nil {
-			tmpSchema.Close()
+			_ = tmpSchema.Close()
 			return "", fmt.Errorf("codex schema write: %w", err)
 		}
 		if err := tmpSchema.Close(); err != nil {
@@ -161,13 +166,13 @@ func (p *CodexProvider) runCodexExec(ctx context.Context, model, prompt string, 
 		return "", fmt.Errorf("codex output temp file: %w", err)
 	}
 	tmpOutPath := tmpOut.Name()
-	tmpOut.Close()
-	defer os.Remove(tmpOutPath)
+	_ = tmpOut.Close()
+	defer func() { _ = os.Remove(tmpOutPath) }()
 
 	args := []string{
 		"exec",
 		"-c",
-		`model_reasoning_effort="high"`,
+		`model_reasoning_effort="` + normalizeCodexReasoningEffort(reasoningEffort) + `"`,
 		"--color",
 		"never",
 		"--sandbox",
@@ -215,4 +220,114 @@ func (p *CodexProvider) runCodexExec(ctx context.Context, model, prompt string, 
 	}
 
 	return content, nil
+}
+
+func normalizeCodexReasoningEffort(effort string) string {
+	switch strings.ToLower(strings.TrimSpace(effort)) {
+	case "low":
+		return "low"
+	case "medium":
+		return "medium"
+	case "high":
+		return "high"
+	case "xhigh":
+		return "xhigh"
+	default:
+		return "medium"
+	}
+}
+
+func loadCodexCachedModels() []string {
+	cachePath := filepath.Join(codexHomeDir(), "models_cache.json")
+	data, err := os.ReadFile(cachePath)
+	if err != nil {
+		return nil
+	}
+
+	var payload struct {
+		Models []struct {
+			Slug       string `json:"slug"`
+			Visibility string `json:"visibility"`
+		} `json:"models"`
+	}
+	if err := json.Unmarshal(data, &payload); err != nil {
+		return nil
+	}
+
+	models := make([]string, 0, len(payload.Models))
+	for _, model := range payload.Models {
+		slug := strings.TrimSpace(model.Slug)
+		if slug == "" {
+			continue
+		}
+		// Codex provider should only expose codex-family models.
+		if !strings.Contains(strings.ToLower(slug), "codex") {
+			continue
+		}
+		if strings.EqualFold(strings.TrimSpace(model.Visibility), "hidden") {
+			continue
+		}
+		models = append(models, slug)
+	}
+	return models
+}
+
+func codexHomeDir() string {
+	if home := strings.TrimSpace(os.Getenv("CODEX_HOME")); home != "" {
+		return home
+	}
+	userHome, err := os.UserHomeDir()
+	if err != nil {
+		return ".codex"
+	}
+	return filepath.Join(userHome, ".codex")
+}
+
+func mergeUniqueModels(primary, secondary []string) []string {
+	seen := make(map[string]struct{}, len(primary)+len(secondary))
+	merged := make([]string, 0, len(primary)+len(secondary))
+
+	addModels := func(models []string) {
+		for _, model := range models {
+			clean := strings.TrimSpace(model)
+			if clean == "" {
+				continue
+			}
+			key := strings.ToLower(clean)
+			if _, exists := seen[key]; exists {
+				continue
+			}
+			seen[key] = struct{}{}
+			merged = append(merged, clean)
+		}
+	}
+
+	addModels(primary)
+	addModels(secondary)
+	return merged
+}
+
+func prioritizeCodexModels(models []string) []string {
+	if len(models) == 0 {
+		return models
+	}
+
+	prioritized := append([]string(nil), models...)
+	sort.SliceStable(prioritized, func(i, j int) bool {
+		iPreferred := isPreferredCodexModel(prioritized[i])
+		jPreferred := isPreferredCodexModel(prioritized[j])
+		if iPreferred != jPreferred {
+			return iPreferred
+		}
+		return false
+	})
+	return prioritized
+}
+
+func isPreferredCodexModel(model string) bool {
+	normalized := strings.ToLower(strings.TrimSpace(model))
+	return normalized == "gpt-5.3-codex" ||
+		strings.HasPrefix(normalized, "gpt-5.3-codex-") ||
+		normalized == "gpt-5-3-codex" ||
+		strings.HasPrefix(normalized, "gpt-5-3-codex-")
 }

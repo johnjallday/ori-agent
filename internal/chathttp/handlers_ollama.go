@@ -33,11 +33,10 @@ func (h *Handler) handleOllamaChat(w http.ResponseWriter, r *http.Request, ag *a
 	// Build message list
 	var messages []llm.Message
 
-	// Add system message - use custom if set, otherwise use default
-	systemPrompt := ag.Settings.SystemPrompt
-	if systemPrompt == "" {
-		systemPrompt = "You are a helpful assistant with access to tools. When you use a tool and receive results, report those results directly to the user. Be concise and accurate."
-	}
+	systemPrompt := resolveSystemPromptForAgent(
+		ag,
+		"You are a helpful assistant with access to tools. When you use a tool and receive results, report those results directly to the user. Be concise and accurate.",
+	)
 	messages = append(messages, llm.NewSystemMessage(systemPrompt))
 
 	// Use message with images if images are present (for vision models like llava)
@@ -65,7 +64,7 @@ func (h *Handler) handleOllamaChat(w http.ResponseWriter, r *http.Request, ag *a
 	logger.Debug("Ollama response received", logger.Fields{"duration": time.Since(start)})
 
 	// Track statistics (Ollama is free/local, no cost tracking)
-	h.trackUsageCommon("ollama", ag.Settings.Model, agentName, resp.Usage, ag)
+	h.trackUsageCommon("ollama", ag.Settings.Model, agentName, resp.Usage, ag, userMessage)
 
 	// Tool-call branch
 	if len(resp.ToolCalls) > 0 {

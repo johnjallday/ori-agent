@@ -23,6 +23,9 @@ type Store interface {
 	GetAgent(name string) (*agent.Agent, bool)
 	SetAgent(name string, ag *agent.Agent) error
 
+	// Management
+	ClearAgents() error
+
 	// Persistence
 	Save() error
 }

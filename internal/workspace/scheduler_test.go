@@ -356,6 +356,7 @@ func TestCalculateNextRun_ExistingScheduleTypes(t *testing.T) {
 		next := ts.calculateNextRun(config, refTime)
 		if next == nil {
 			t.Fatal("ScheduleInterval returned nil")
+			return
 		}
 		expected := refTime.Add(10 * time.Minute)
 		if !next.Equal(expected) {
@@ -372,6 +373,7 @@ func TestCalculateNextRun_ExistingScheduleTypes(t *testing.T) {
 		next := ts.calculateNextRun(config, refTime)
 		if next == nil {
 			t.Fatal("ScheduleDaily returned nil")
+			return
 		}
 		// Should be next day at 14:00
 		if next.Hour() != 14 || next.Minute() != 0 {
@@ -389,6 +391,7 @@ func TestCalculateNextRun_ExistingScheduleTypes(t *testing.T) {
 		next := ts.calculateNextRun(config, refTime)
 		if next == nil {
 			t.Fatal("ScheduleWeekly returned nil")
+			return
 		}
 		// Should be next Monday at 09:00
 		if next.Weekday() != time.Monday {
