@@ -992,3 +992,99 @@ document.getElementById('systemDiagnosticsBtn')?.addEventListener('click', async
 
   loadSettings();
 })();
+
+// Display Density Settings (local storage)
+(function() {
+  const storageKey = 'ori-ui-density';
+  const previewEl = document.getElementById('uiDensityPreview');
+  const radioInputs = Array.from(document.querySelectorAll('input[name="uiDensityMode"]'));
+
+  if (!radioInputs.length) {
+    return;
+  }
+
+  const validModes = new Set(['auto', 'compact', 'roomy']);
+
+  function readStoredMode() {
+    try {
+      const stored = localStorage.getItem(storageKey);
+      if (stored === 'compact' || stored === 'roomy') {
+        return stored;
+      }
+    } catch (error) {
+      console.error('Failed to read UI density setting:', error);
+    }
+    return 'auto';
+  }
+
+  function writeStoredMode(mode) {
+    try {
+      if (mode === 'compact' || mode === 'roomy') {
+        localStorage.setItem(storageKey, mode);
+      } else {
+        localStorage.removeItem(storageKey);
+      }
+    } catch (error) {
+      console.error('Failed to persist UI density setting:', error);
+    }
+  }
+
+  function updatePreview(mode) {
+    if (!previewEl) return;
+
+    const labels = {
+      auto: 'Auto: Responsive spacing and typography.',
+      compact: 'Compact: Tighter layout with reduced spacing.',
+      roomy: 'Roomy: Expanded spacing with larger typography.'
+    };
+    previewEl.textContent = labels[mode] || labels.auto;
+  }
+
+  function refreshOptionState() {
+    document.querySelectorAll('.ui-density-option').forEach((optionEl) => {
+      const input = optionEl.querySelector('input[name="uiDensityMode"]');
+      optionEl.classList.toggle('is-selected', Boolean(input && input.checked));
+    });
+  }
+
+  function applyDensity(mode) {
+    const root = document.documentElement;
+    const body = document.body;
+
+    if (mode === 'compact' || mode === 'roomy') {
+      root.setAttribute('data-ui-density', mode);
+      if (body) body.setAttribute('data-ui-density', mode);
+    } else {
+      root.removeAttribute('data-ui-density');
+      if (body) body.removeAttribute('data-ui-density');
+    }
+
+    updatePreview(mode);
+    refreshOptionState();
+  }
+
+  function setMode(mode, showNotice = false) {
+    const normalized = validModes.has(mode) ? mode : 'auto';
+    radioInputs.forEach((input) => {
+      input.checked = input.value === normalized;
+    });
+
+    writeStoredMode(normalized);
+    applyDensity(normalized);
+
+    if (showNotice) {
+      const modeLabel = normalized.charAt(0).toUpperCase() + normalized.slice(1);
+      notify(`Display density set to ${modeLabel}.`, 'success');
+    }
+  }
+
+  radioInputs.forEach((input) => {
+    input.addEventListener('change', () => {
+      if (input.checked) {
+        setMode(input.value, true);
+      }
+    });
+  });
+
+  setMode(readStoredMode(), false);
+})();
