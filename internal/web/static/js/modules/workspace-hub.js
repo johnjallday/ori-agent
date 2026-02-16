@@ -184,6 +184,7 @@ console.log('[workspace-hub.js] FILE LOADED');
   let pendingDeleteGroupId = null;
   let launcherOverviewRequestSeq = 0;
   let launcherOverviewRefreshTimer = null;
+  let launcherTaskBadgeByWorkspace = new Map();
 
   /**
    * Schedule a workspace tasks refresh (debounced)
@@ -251,6 +252,22 @@ console.log('[workspace-hub.js] FILE LOADED');
     if (elements.launcherOverviewInProgress) elements.launcherOverviewInProgress.textContent = String(metrics.inProgress || 0);
     if (elements.launcherOverviewAttention) elements.launcherOverviewAttention.textContent = String(metrics.needsAttention || 0);
     if (elements.launcherOverviewScheduled) elements.launcherOverviewScheduled.textContent = String(metrics.scheduled || 0);
+  }
+
+  function renderLauncherTaskBadge(workspaceID) {
+    if (!workspaceID) return '';
+    const counts = launcherTaskBadgeByWorkspace.get(workspaceID);
+    if (!counts || counts.open <= 0) return '';
+
+    const titleParts = [`${counts.open} open task${counts.open === 1 ? '' : 's'}`];
+    if (counts.inProgress > 0) titleParts.push(`${counts.inProgress} in progress`);
+    if (counts.needsAttention > 0) titleParts.push(`${counts.needsAttention} need attention`);
+    const title = titleParts.join(' | ');
+    const badgeClass = counts.needsAttention > 0
+      ? 'launcher-task-badge is-attention'
+      : 'launcher-task-badge';
+
+    return `<span class="${badgeClass}" title="${escapeHtml(title)}" aria-label="${escapeHtml(title)}">${escapeHtml(String(counts.open))}</span>`;
   }
 
   function setLauncherOverviewExpanded(expanded) {
@@ -340,6 +357,7 @@ console.log('[workspace-hub.js] FILE LOADED');
 
     const workspaces = (flattened || []).filter((workspace) => workspace && workspace.id);
     if (workspaces.length === 0) {
+      launcherTaskBadgeByWorkspace = new Map();
       updateLauncherOverviewMetrics({
         open: 0,
         pending: 0,
@@ -355,6 +373,10 @@ console.log('[workspace-hub.js] FILE LOADED');
       }
       if (elements.launcherOverviewTopTasks) {
         elements.launcherOverviewTopTasks.innerHTML = '<div class="launcher-overview-empty">No aggregate tasks yet.</div>';
+      }
+      if (hubEl.dataset.state === 'launcher') {
+        const state = window.WorkspaceHubState.getState();
+        renderLauncher(flattenWorkspaces(state.workspaces || []));
       }
       return;
     }
@@ -464,6 +486,16 @@ console.log('[workspace-hub.js] FILE LOADED');
       return a.name.localeCompare(b.name);
     });
 
+    launcherTaskBadgeByWorkspace = new Map(
+      workspaceSummaries.map((summary) => [summary.id, {
+        open: summary.open,
+        pending: summary.pending,
+        inProgress: summary.inProgress,
+        needsAttention: summary.needsAttention,
+        scheduled: summary.scheduled
+      }])
+    );
+
     aggregateTasks.sort((a, b) => {
       const statusDiff = statusPriorityForOverview(a.status) - statusPriorityForOverview(b.status);
       if (statusDiff !== 0) return statusDiff;
@@ -513,6 +545,11 @@ console.log('[workspace-hub.js] FILE LOADED');
           </div>
         `).join('');
       }
+    }
+
+    if (hubEl.dataset.state === 'launcher') {
+      const state = window.WorkspaceHubState.getState();
+      renderLauncher(flattenWorkspaces(state.workspaces || []));
     }
 
     bindLauncherOverviewLinks();
@@ -578,6 +615,7 @@ console.log('[workspace-hub.js] FILE LOADED');
       const pathText = row.path ? escapeHtml(row.path) : escapeHtml(row.name || row.id);
       const hasChildren = Array.isArray(row.children) && row.children.length > 0;
       const deleteTitle = hasChildren ? 'Delete group' : 'Delete workspace';
+      const taskBadge = renderLauncherTaskBadge(row.id);
 
       const checked = selectedSet.has(row.id);
       const checkbox = selectionMode ? `
@@ -599,7 +637,10 @@ console.log('[workspace-hub.js] FILE LOADED');
         <div class="launcher-card-item" role="button" tabindex="0" draggable="true" data-workspace-id="${escapeHtml(row.id)}" data-select-mode="${selectionMode ? '1' : '0'}" ${accentStyle} aria-label="Open workspace ${escapeHtml(row.name || 'Untitled Workspace')}">
           ${checkbox}
           ${deleteButton}
-          <div class="launcher-card-title">${escapeHtml(row.name || 'Untitled Workspace')}</div>
+          <div class="launcher-card-title-row">
+            <div class="launcher-card-title">${escapeHtml(row.name || 'Untitled Workspace')}</div>
+            ${taskBadge}
+          </div>
           <div class="launcher-card-path">${pathText}</div>
           <div class="launcher-card-description">${escapeHtml(description)}</div>
           <div class="launcher-card-meta">
@@ -615,6 +656,7 @@ console.log('[workspace-hub.js] FILE LOADED');
       const childCount = Array.isArray(workspace.children) ? workspace.children.length : 0;
       const isCollapsed = state.launcherCollapsedGroups && state.launcherCollapsedGroups.has(row.id);
       const hasChildren = Array.isArray(workspace.children) && workspace.children.length > 0;
+      const taskBadge = renderLauncherTaskBadge(row.id);
 
       const toggleBtn = `
         <button class="launcher-group-toggle ${isCollapsed ? 'is-collapsed' : ''}" type="button" data-group-toggle="${escapeHtml(row.id)}" aria-label="${isCollapsed ? 'Expand' : 'Collapse'} group" aria-expanded="${isCollapsed ? 'false' : 'true'}" title="${isCollapsed ? 'Expand' : 'Collapse'}">
@@ -638,7 +680,10 @@ console.log('[workspace-hub.js] FILE LOADED');
             </svg>
           </button>
           ${toggleBtn}
-          <div class="launcher-card-title">${escapeHtml(row.name || 'Group')}</div>
+          <div class="launcher-card-title-row">
+            <div class="launcher-card-title">${escapeHtml(row.name || 'Group')}</div>
+            ${taskBadge}
+          </div>
           <div class="launcher-card-path">Group · ${childCount} workspace${childCount === 1 ? '' : 's'}</div>
           <div class="launcher-card-description">${escapeHtml(row.description || 'Group workspace')}</div>
         </div>

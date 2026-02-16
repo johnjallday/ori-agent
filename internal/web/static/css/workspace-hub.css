@@ -2298,6 +2298,37 @@
 .launcher-card-title {
   font-weight: 600;
   color: var(--text-primary);
+  min-width: 0;
+}
+
+.launcher-card-title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.launcher-task-badge {
+  min-width: 1.4rem;
+  height: 1.4rem;
+  padding: 0 0.38rem;
+  border-radius: 999px;
+  border: 1px solid rgba(59, 130, 246, 0.35);
+  background: rgba(59, 130, 246, 0.16);
+  color: #c7dcff;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.72rem;
+  font-weight: 700;
+  line-height: 1;
+  flex-shrink: 0;
+}
+
+.launcher-task-badge.is-attention {
+  border-color: rgba(239, 68, 68, 0.38);
+  background: rgba(239, 68, 68, 0.2);
+  color: #fca5a5;
 }
 
 .launcher-card-path {
