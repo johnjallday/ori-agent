@@ -88,6 +88,68 @@ func TestListSkills_Conflict(t *testing.T) {
 	}
 }
 
+func TestListSkills_PersonalSkillsIncluded(t *testing.T) {
+	tmpDir := t.TempDir()
+	agentStorePath := filepath.Join(tmpDir, "agents.json")
+	if err := os.WriteFile(agentStorePath, []byte(`{}`), 0o644); err != nil {
+		t.Fatalf("write agents.json: %v", err)
+	}
+
+	personalSkillsDir := filepath.Join(tmpDir, "personal-skills")
+	personalSkillDir := filepath.Join(personalSkillsDir, "frontend-design")
+	writeTestSkill(t, personalSkillDir, "frontend-design", "Frontend helper", "Prompt")
+
+	manager := NewManager(ManagerConfig{
+		AgentStorePath:    agentStorePath,
+		PersonalSkillsDir: personalSkillsDir,
+	})
+
+	skills, err := manager.ListSkills("default")
+	if err != nil {
+		t.Fatalf("ListSkills error: %v", err)
+	}
+	if len(skills) != 1 {
+		t.Fatalf("expected 1 skill, got %d", len(skills))
+	}
+	if skills[0].Name != "frontend-design" {
+		t.Fatalf("expected skill name frontend-design, got %q", skills[0].Name)
+	}
+	if skills[0].Source != SourcePersonal {
+		t.Fatalf("expected personal source, got %q", skills[0].Source)
+	}
+}
+
+func TestListSkills_PersonalSkillDuplicateDoesNotOverrideLocal(t *testing.T) {
+	tmpDir := t.TempDir()
+	agentStorePath := filepath.Join(tmpDir, "agents.json")
+	if err := os.WriteFile(agentStorePath, []byte(`{}`), 0o644); err != nil {
+		t.Fatalf("write agents.json: %v", err)
+	}
+
+	agentSkillDir := filepath.Join(tmpDir, "agents", "default", "skills", "shared-skill")
+	writeTestSkill(t, agentSkillDir, "shared-skill", "Agent skill", "Agent prompt")
+
+	personalSkillsDir := filepath.Join(tmpDir, "personal-skills")
+	personalSkillDir := filepath.Join(personalSkillsDir, "shared-skill")
+	writeTestSkill(t, personalSkillDir, "shared-skill", "Personal skill", "Personal prompt")
+
+	manager := NewManager(ManagerConfig{
+		AgentStorePath:    agentStorePath,
+		PersonalSkillsDir: personalSkillsDir,
+	})
+
+	skills, err := manager.ListSkills("default")
+	if err != nil {
+		t.Fatalf("ListSkills error: %v", err)
+	}
+	if len(skills) != 1 {
+		t.Fatalf("expected 1 merged skill, got %d", len(skills))
+	}
+	if skills[0].Source != SourceAgent {
+		t.Fatalf("expected local agent source precedence, got %q", skills[0].Source)
+	}
+}
+
 func writeTestSkill(t *testing.T, dir, name, description, prompt string) {
 	t.Helper()
 	if err := os.MkdirAll(dir, 0o755); err != nil {

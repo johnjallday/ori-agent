@@ -15,27 +15,31 @@ const (
 	SourceAgent        = "agent"
 	SourceRepo         = "repo"
 	SourceAgentsCompat = ".agents"
+	SourcePersonal     = "personal"
 	SourceClaude       = "claude"
 	SourceCodex        = "codex"
 )
 
 type ManagerConfig struct {
-	AgentStorePath string
-	ExternalAgents *externalagents.Cache
-	ConfigManager  *config.Manager
+	AgentStorePath    string
+	PersonalSkillsDir string
+	ExternalAgents    *externalagents.Cache
+	ConfigManager     *config.Manager
 }
 
 type Manager struct {
-	agentStorePath string
-	externalAgents *externalagents.Cache
-	configManager  *config.Manager
+	agentStorePath    string
+	personalSkillsDir string
+	externalAgents    *externalagents.Cache
+	configManager     *config.Manager
 }
 
 func NewManager(cfg ManagerConfig) *Manager {
 	return &Manager{
-		agentStorePath: cfg.AgentStorePath,
-		externalAgents: cfg.ExternalAgents,
-		configManager:  cfg.ConfigManager,
+		agentStorePath:    cfg.AgentStorePath,
+		personalSkillsDir: cfg.PersonalSkillsDir,
+		externalAgents:    cfg.ExternalAgents,
+		configManager:     cfg.ConfigManager,
 	}
 }
 
@@ -78,6 +82,10 @@ func (m *Manager) listSkills(agentName string, includePrompt bool) ([]Skill, err
 	if err != nil {
 		return nil, err
 	}
+	personalSkills, err := m.loadPersonalSkills(includePrompt)
+	if err != nil {
+		return nil, err
+	}
 
 	skillMap := make(map[string]Skill)
 	conflictMap := make(map[string]*SkillConflict)
@@ -113,6 +121,17 @@ func (m *Manager) listSkills(agentName string, includePrompt bool) ([]Skill, err
 			conflicts = append(conflicts, *conflict)
 		}
 		return nil, &SkillConflictError{Conflicts: conflicts}
+	}
+
+	for _, skill := range personalSkills {
+		key := strings.ToLower(skill.Name)
+		if key == "" {
+			continue
+		}
+		if _, exists := skillMap[key]; exists {
+			continue
+		}
+		skillMap[key] = skill
 	}
 
 	if m.externalAgents != nil && m.configManager != nil {
@@ -197,6 +216,14 @@ func (m *Manager) loadCompatSkills(includePrompt bool) ([]Skill, error) {
 	repoRoot := filepath.Dir(m.agentStorePath)
 	skillsDir := filepath.Join(repoRoot, ".agents", "skills")
 	return m.loadSkillsFromDir(skillsDir, SourceAgentsCompat, includePrompt, false, true)
+}
+
+func (m *Manager) loadPersonalSkills(includePrompt bool) ([]Skill, error) {
+	skillsDir := strings.TrimSpace(m.personalSkillsDir)
+	if skillsDir == "" {
+		return []Skill{}, nil
+	}
+	return m.loadSkillsFromDir(skillsDir, SourcePersonal, includePrompt, false, true)
 }
 
 func (m *Manager) loadSkillsFromDir(skillsDir, source string, includePrompt bool, allowSingleFile bool, allowCategories bool) ([]Skill, error) {

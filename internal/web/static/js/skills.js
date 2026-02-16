@@ -92,6 +92,9 @@ function renderSkills(skills) {
     const card = document.createElement('div');
     card.className = 'plugin-item';
     card.style.cursor = 'default';
+    card.style.display = 'flex';
+    card.style.flexDirection = 'column';
+    card.style.height = '100%';
 
     const badges = [];
     badges.push(`<span class="badge bg-secondary" style="font-size: 10px; text-transform: uppercase; letter-spacing: 0.3px;">${safeText(source)}</span>`);
@@ -110,7 +113,7 @@ function renderSkills(skills) {
       : '';
 
     card.innerHTML = `
-      <div style="display: flex; align-items: flex-start; justify-content: space-between; gap: 8px;">
+      <div style="display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; flex: 1 1 auto;">
         <div style="min-width: 0;">
           <div style="font-weight: 600; color: var(--text-primary);">${safeText(name)}</div>
           <div style="font-size: 12px; color: var(--text-secondary); margin-top: 4px;">${safeText(description)}</div>
@@ -118,7 +121,7 @@ function renderSkills(skills) {
         </div>
         <div style="display: flex; flex-wrap: wrap; gap: 4px; justify-content: flex-end;">${badges.join('')}</div>
       </div>
-      <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 12px;">
+      <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: auto; padding-top: 12px;">
         <button class="modern-btn modern-btn-secondary btn-sm" data-action="run" ${(!isEnabled || requiresTrust || hasErrors) ? 'disabled' : ''}>Run</button>
         <button class="modern-btn modern-btn-secondary btn-sm" data-action="edit" ${isEditable ? '' : 'disabled'}>Edit</button>
         <button class="modern-btn modern-btn-secondary btn-sm" data-action="delete" ${isEditable ? '' : 'disabled'}>Delete</button>
