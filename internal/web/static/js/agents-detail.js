@@ -139,6 +139,11 @@ document.addEventListener('DOMContentLoaded', async () => {
     return;
   }
 
+  const skillsPageLink = document.getElementById('openSkillsPageLink');
+  if (skillsPageLink) {
+    skillsPageLink.href = `/skills?agent=${encodeURIComponent(agentName)}`;
+  }
+
   // Load providers in parallel with agent details
   await Promise.all([
     loadAvailableProviders(),
@@ -834,23 +839,70 @@ async function renderSkills() {
       const isEnabled = skill?.enabled !== false;
       const hasScripts = Boolean(skill?.has_scripts);
       const isTrusted = Boolean(skill?.trusted);
+      const validationErrors = Array.isArray(skill?.validation_errors) ? skill.validation_errors : [];
+      const hasErrors = validationErrors.length > 0;
 
       const item = document.createElement('div');
-      item.style.cssText = 'padding: 12px; border: 1px solid var(--border-color); border-radius: 8px; background: var(--bg-secondary);';
+      item.style.cssText = 'padding: 12px; border: 1px solid var(--border-color); border-radius: 8px; background: var(--bg-secondary); display: flex; flex-direction: column; gap: 8px;';
       item.innerHTML = `
         <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
           <div style="font-weight: 600; color: var(--text-primary);">${escapeHtml(skillName)}</div>
           <span style="font-size: 10px; padding: 2px 6px; border-radius: 4px; background: var(--bg-tertiary); color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.3px;">${escapeHtml(source)}</span>
           ${!isEnabled ? '<span style="font-size: 10px; padding: 2px 6px; border-radius: 4px; background: var(--warning-color); color: var(--text-primary); text-transform: uppercase; letter-spacing: 0.3px;">disabled</span>' : ''}
+          ${hasErrors ? '<span style="font-size: 10px; padding: 2px 6px; border-radius: 4px; background: var(--danger-color); color: var(--text-primary); text-transform: uppercase; letter-spacing: 0.3px;">invalid</span>' : ''}
           ${hasScripts ? `<span style=\"font-size: 10px; padding: 2px 6px; border-radius: 4px; background: ${isTrusted ? 'var(--success-color)' : 'var(--danger-color)'}; color: var(--text-primary); text-transform: uppercase; letter-spacing: 0.3px;\">${isTrusted ? 'trusted' : 'untrusted'}</span>` : ''}
         </div>
         <div style="font-size: 12px; color: var(--text-secondary); margin-top: 6px;">${escapeHtml(description)}</div>
+        ${hasErrors ? `<div style="font-size: 11px; color: var(--danger-color);">${escapeHtml(validationErrors.join('; '))}</div>` : ''}
+        <div style="display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: auto; padding-top: 4px;">
+          <span style="font-size: 12px; color: var(--text-secondary);">Enabled</span>
+          <div class="form-check form-switch m-0">
+            <input class="form-check-input" type="checkbox" data-action="toggle-skill-enabled" ${isEnabled ? 'checked' : ''}>
+          </div>
+        </div>
       `;
+
+      const toggle = item.querySelector('[data-action="toggle-skill-enabled"]');
+      if (toggle) {
+        toggle.addEventListener('change', async () => {
+          const desiredState = toggle.checked;
+          toggle.disabled = true;
+          const success = await setSkillEnabled(name, skillName, desiredState);
+          if (!success) {
+            toggle.checked = !desiredState;
+          }
+          toggle.disabled = false;
+        });
+      }
+
       container.appendChild(item);
     });
   } catch (error) {
     console.error('Failed to load skills:', error);
     container.innerHTML = '<div class="text-center py-3" style="color: var(--danger-color);">Failed to load skills.</div>';
+  }
+}
+
+async function setSkillEnabled(agent, skillName, enabled) {
+  try {
+    const response = await fetch(`/api/skills/${encodeURIComponent(skillName)}/enable`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ agent, enabled })
+    });
+
+    if (!response.ok) {
+      const data = await response.json().catch(() => ({}));
+      const message = data?.error || 'Failed to update skill state';
+      console.error('Failed to update skill state:', message);
+      return false;
+    }
+
+    await renderSkills();
+    return true;
+  } catch (error) {
+    console.error('Failed to update skill state:', error);
+    return false;
   }
 }
 
