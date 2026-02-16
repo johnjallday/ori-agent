@@ -21,6 +21,7 @@ console.log('[workspace-hub.js] FILE LOADED');
   'use strict';
 
   const hubEl = document.getElementById('workspaceHub');
+  const OVERVIEW_EXPANDED_STORAGE_KEY = 'oriWorkspaceHubOverviewExpanded';
   console.log('[workspace-hub] hubEl exists:', !!hubEl);
   if (!hubEl) return;
 
@@ -102,6 +103,17 @@ console.log('[workspace-hub.js] FILE LOADED');
     launcherDeleteGroupCount: document.getElementById('launcherDeleteGroupCount'),
     launcherDeleteGroupOnlyBtn: document.getElementById('launcherDeleteGroupOnlyBtn'),
     launcherDeleteGroupAllBtn: document.getElementById('launcherDeleteGroupAllBtn'),
+    launcherTaskOverview: document.getElementById('launcherTaskOverview'),
+    launcherOverviewUpdatedAt: document.getElementById('launcherOverviewUpdatedAt'),
+    launcherOverviewOpen: document.getElementById('launcherOverviewOpen'),
+    launcherOverviewPending: document.getElementById('launcherOverviewPending'),
+    launcherOverviewInProgress: document.getElementById('launcherOverviewInProgress'),
+    launcherOverviewAttention: document.getElementById('launcherOverviewAttention'),
+    launcherOverviewScheduled: document.getElementById('launcherOverviewScheduled'),
+    launcherOverviewByWorkspace: document.getElementById('launcherOverviewByWorkspace'),
+    launcherOverviewTopTasks: document.getElementById('launcherOverviewTopTasks'),
+    launcherOverviewDetails: document.getElementById('launcherOverviewDetails'),
+    launcherOverviewToggleBtn: document.getElementById('launcherOverviewToggleBtn'),
     loadingOverlay: document.getElementById('workspaceHubLoading'),
     sessionsList: document.getElementById('hubSessionsList'),
     newSessionBtn: document.getElementById('hubNewSessionBtn'),
@@ -170,6 +182,8 @@ console.log('[workspace-hub.js] FILE LOADED');
   const { formatDate, flattenWorkspaces, collectWorkspaceDescendantIds } = window.WorkspaceHubUtils;
 
   let pendingDeleteGroupId = null;
+  let launcherOverviewRequestSeq = 0;
+  let launcherOverviewRefreshTimer = null;
 
   /**
    * Schedule a workspace tasks refresh (debounced)
@@ -190,6 +204,330 @@ console.log('[workspace-hub.js] FILE LOADED');
       }
     }, delayMs);
     window.WorkspaceHubState.setRealtimeTimer(timer);
+  }
+
+  function normalizeOverviewStatus(status) {
+    const value = String(status || 'pending').trim().toLowerCase();
+    if (value === 'assigned') return 'pending';
+    return value;
+  }
+
+  function statusPriorityForOverview(status) {
+    switch (status) {
+      case 'failed':
+      case 'timeout':
+        return 0;
+      case 'in_progress':
+        return 1;
+      case 'pending':
+        return 2;
+      default:
+        return 3;
+    }
+  }
+
+  function formatOverviewStatus(status) {
+    return String(status || 'pending').replace(/_/g, ' ');
+  }
+
+  function truncateText(value, limit = 90) {
+    const text = String(value || '').trim();
+    if (!text) return '';
+    if (text.length <= limit) return text;
+    return `${text.slice(0, Math.max(0, limit - 1)).trim()}...`;
+  }
+
+  function formatOverviewTimestamp(date = new Date()) {
+    try {
+      return date.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+    } catch (err) {
+      return '--';
+    }
+  }
+
+  function updateLauncherOverviewMetrics(metrics) {
+    if (elements.launcherOverviewOpen) elements.launcherOverviewOpen.textContent = String(metrics.open || 0);
+    if (elements.launcherOverviewPending) elements.launcherOverviewPending.textContent = String(metrics.pending || 0);
+    if (elements.launcherOverviewInProgress) elements.launcherOverviewInProgress.textContent = String(metrics.inProgress || 0);
+    if (elements.launcherOverviewAttention) elements.launcherOverviewAttention.textContent = String(metrics.needsAttention || 0);
+    if (elements.launcherOverviewScheduled) elements.launcherOverviewScheduled.textContent = String(metrics.scheduled || 0);
+  }
+
+  function setLauncherOverviewExpanded(expanded) {
+    if (!elements.launcherOverviewDetails || !elements.launcherOverviewToggleBtn) return;
+
+    const isExpanded = !!expanded;
+    elements.launcherOverviewDetails.hidden = !isExpanded;
+    elements.launcherOverviewToggleBtn.setAttribute('aria-expanded', isExpanded ? 'true' : 'false');
+    elements.launcherOverviewToggleBtn.textContent = isExpanded ? 'Hide Details' : 'Show Details';
+
+    try {
+      sessionStorage.setItem(OVERVIEW_EXPANDED_STORAGE_KEY, isExpanded ? '1' : '0');
+    } catch (err) {
+      // no-op: storage may be unavailable in some contexts
+    }
+  }
+
+  function initLauncherOverviewExpandedState() {
+    let expanded = false;
+    try {
+      expanded = sessionStorage.getItem(OVERVIEW_EXPANDED_STORAGE_KEY) === '1';
+    } catch (err) {
+      expanded = false;
+    }
+    setLauncherOverviewExpanded(expanded);
+  }
+
+  function navigateToWorkspace(workspaceId) {
+    if (!workspaceId) return;
+    window.location.href = `/workspaces/${encodeURIComponent(workspaceId)}`;
+  }
+
+  function bindLauncherOverviewLinks() {
+    if (elements.launcherOverviewByWorkspace) {
+      elements.launcherOverviewByWorkspace.querySelectorAll('[data-overview-workspace]').forEach((btn) => {
+        btn.addEventListener('click', (event) => {
+          event.preventDefault();
+          navigateToWorkspace(btn.getAttribute('data-overview-workspace'));
+        });
+      });
+    }
+
+    if (elements.launcherOverviewTopTasks) {
+      elements.launcherOverviewTopTasks.querySelectorAll('[data-overview-workspace]').forEach((btn) => {
+        btn.addEventListener('click', (event) => {
+          event.preventDefault();
+          navigateToWorkspace(btn.getAttribute('data-overview-workspace'));
+        });
+      });
+    }
+  }
+
+  function renderLauncherOverviewLoading() {
+    if (elements.launcherOverviewUpdatedAt) {
+      elements.launcherOverviewUpdatedAt.textContent = 'Refreshing...';
+    }
+    if (elements.launcherOverviewByWorkspace) {
+      elements.launcherOverviewByWorkspace.innerHTML = '<div class="hub-loading">Refreshing workspace overview...</div>';
+    }
+    if (elements.launcherOverviewTopTasks) {
+      elements.launcherOverviewTopTasks.innerHTML = '<div class="hub-loading">Refreshing aggregate tasks...</div>';
+    }
+  }
+
+  async function mapWithConcurrency(items, concurrency, mapper) {
+    const list = Array.isArray(items) ? items : [];
+    if (list.length === 0) return [];
+
+    const results = new Array(list.length);
+    const workerCount = Math.max(1, Math.min(concurrency || 1, list.length));
+    let nextIndex = 0;
+
+    async function worker() {
+      while (nextIndex < list.length) {
+        const current = nextIndex;
+        nextIndex += 1;
+        results[current] = await mapper(list[current], current);
+      }
+    }
+
+    await Promise.all(Array.from({ length: workerCount }, () => worker()));
+    return results;
+  }
+
+  async function refreshLauncherTaskOverview(flattened) {
+    if (!elements.launcherTaskOverview) return;
+
+    const workspaces = (flattened || []).filter((workspace) => workspace && workspace.id);
+    if (workspaces.length === 0) {
+      updateLauncherOverviewMetrics({
+        open: 0,
+        pending: 0,
+        inProgress: 0,
+        needsAttention: 0,
+        scheduled: 0
+      });
+      if (elements.launcherOverviewUpdatedAt) {
+        elements.launcherOverviewUpdatedAt.textContent = 'No workspaces';
+      }
+      if (elements.launcherOverviewByWorkspace) {
+        elements.launcherOverviewByWorkspace.innerHTML = '<div class="launcher-overview-empty">Create a workspace to track tasks.</div>';
+      }
+      if (elements.launcherOverviewTopTasks) {
+        elements.launcherOverviewTopTasks.innerHTML = '<div class="launcher-overview-empty">No aggregate tasks yet.</div>';
+      }
+      return;
+    }
+
+    const requestSeq = ++launcherOverviewRequestSeq;
+    renderLauncherOverviewLoading();
+
+    const taskResults = await mapWithConcurrency(workspaces, 6, async (workspace) => {
+      try {
+        const response = await fetch(`/api/orchestration/tasks?studio_id=${encodeURIComponent(workspace.id)}`);
+        if (!response.ok) {
+          throw new Error(`Request failed (${response.status})`);
+        }
+        const data = await response.json();
+        return {
+          workspace,
+          tasks: Array.isArray(data.tasks) ? data.tasks : [],
+          error: null
+        };
+      } catch (err) {
+        console.error('Failed to load workspace tasks for overview:', workspace.id, err);
+        return {
+          workspace,
+          tasks: [],
+          error: err
+        };
+      }
+    });
+
+    if (requestSeq !== launcherOverviewRequestSeq) {
+      return;
+    }
+
+    const totals = {
+      open: 0,
+      pending: 0,
+      inProgress: 0,
+      needsAttention: 0,
+      scheduled: 0
+    };
+    const workspaceSummaries = [];
+    const aggregateTasks = [];
+    let failedFetches = 0;
+
+    taskResults.forEach((result) => {
+      const workspace = result.workspace;
+      const tasks = Array.isArray(result.tasks) ? result.tasks : [];
+      if (result.error) failedFetches += 1;
+
+      const summary = {
+        id: workspace.id,
+        name: workspace.name || 'Untitled Workspace',
+        path: workspace.path || workspace.name || workspace.id,
+        open: 0,
+        pending: 0,
+        inProgress: 0,
+        needsAttention: 0,
+        scheduled: 0
+      };
+
+      tasks.forEach((task) => {
+        const status = normalizeOverviewStatus(task.status);
+        if (task.schedule_enabled) {
+          summary.scheduled += 1;
+          totals.scheduled += 1;
+        }
+
+        if (status === 'completed' || status === 'cancelled') {
+          return;
+        }
+
+        if (status === 'in_progress') {
+          summary.inProgress += 1;
+          summary.open += 1;
+          totals.inProgress += 1;
+          totals.open += 1;
+        } else if (status === 'failed' || status === 'timeout') {
+          summary.needsAttention += 1;
+          summary.open += 1;
+          totals.needsAttention += 1;
+          totals.open += 1;
+        } else {
+          summary.pending += 1;
+          summary.open += 1;
+          totals.pending += 1;
+          totals.open += 1;
+        }
+
+        aggregateTasks.push({
+          id: task.id || '',
+          description: task.description || task.name || task.id || 'Untitled task',
+          status,
+          priority: Number(task.priority) || 0,
+          createdAt: task.created_at,
+          workspaceId: workspace.id,
+          workspaceName: workspace.name || 'Untitled Workspace'
+        });
+      });
+
+      workspaceSummaries.push(summary);
+    });
+
+    workspaceSummaries.sort((a, b) => {
+      if (b.open !== a.open) return b.open - a.open;
+      if (b.needsAttention !== a.needsAttention) return b.needsAttention - a.needsAttention;
+      if (b.inProgress !== a.inProgress) return b.inProgress - a.inProgress;
+      return a.name.localeCompare(b.name);
+    });
+
+    aggregateTasks.sort((a, b) => {
+      const statusDiff = statusPriorityForOverview(a.status) - statusPriorityForOverview(b.status);
+      if (statusDiff !== 0) return statusDiff;
+      if (b.priority !== a.priority) return b.priority - a.priority;
+      const aTime = a.createdAt ? new Date(a.createdAt).getTime() : Number.MAX_SAFE_INTEGER;
+      const bTime = b.createdAt ? new Date(b.createdAt).getTime() : Number.MAX_SAFE_INTEGER;
+      if (aTime !== bTime) return aTime - bTime;
+      return String(a.description).localeCompare(String(b.description));
+    });
+
+    updateLauncherOverviewMetrics(totals);
+    if (elements.launcherOverviewUpdatedAt) {
+      const suffix = failedFetches > 0 ? ` | ${failedFetches} unavailable` : '';
+      elements.launcherOverviewUpdatedAt.textContent = `Updated ${formatOverviewTimestamp()}${suffix}`;
+    }
+
+    if (elements.launcherOverviewByWorkspace) {
+      const rows = workspaceSummaries.filter((item) => item.open > 0);
+      if (rows.length === 0) {
+        elements.launcherOverviewByWorkspace.innerHTML = '<div class="launcher-overview-empty">No open tasks across workspaces.</div>';
+      } else {
+        elements.launcherOverviewByWorkspace.innerHTML = rows.map((item) => {
+          const metaParts = [];
+          metaParts.push(`${item.open} open`);
+          if (item.inProgress > 0) metaParts.push(`${item.inProgress} active`);
+          if (item.needsAttention > 0) metaParts.push(`${item.needsAttention} attention`);
+          return `
+            <button type="button" class="launcher-overview-workspace" data-overview-workspace="${escapeHtml(item.id)}" title="${escapeHtml(item.path)}">
+              <span class="launcher-overview-workspace-name">${escapeHtml(item.name)}</span>
+              <span class="launcher-overview-workspace-meta">${escapeHtml(metaParts.join(' | '))}</span>
+            </button>
+          `;
+        }).join('');
+      }
+    }
+
+    if (elements.launcherOverviewTopTasks) {
+      const topTasks = aggregateTasks.slice(0, 12);
+      if (topTasks.length === 0) {
+        elements.launcherOverviewTopTasks.innerHTML = '<div class="launcher-overview-empty">No aggregate tasks to show.</div>';
+      } else {
+        elements.launcherOverviewTopTasks.innerHTML = topTasks.map((task) => `
+          <div class="launcher-overview-task">
+            <div class="launcher-overview-task-title">${escapeHtml(truncateText(task.description, 96) || 'Untitled task')}</div>
+            <div class="launcher-overview-task-meta">${escapeHtml(task.workspaceName)} | ${escapeHtml(formatOverviewStatus(task.status))}</div>
+            <button type="button" class="launcher-overview-task-link" data-overview-workspace="${escapeHtml(task.workspaceId)}">Open workspace</button>
+          </div>
+        `).join('');
+      }
+    }
+
+    bindLauncherOverviewLinks();
+  }
+
+  function scheduleLauncherOverviewRefresh(delayMs = 700) {
+    if (launcherOverviewRefreshTimer) {
+      clearTimeout(launcherOverviewRefreshTimer);
+    }
+    launcherOverviewRefreshTimer = setTimeout(() => {
+      launcherOverviewRefreshTimer = null;
+      const state = window.WorkspaceHubState.getState();
+      const flattened = flattenWorkspaces(state.workspaces || []);
+      void refreshLauncherTaskOverview(flattened);
+    }, delayMs);
   }
 
   /**
@@ -1283,6 +1621,9 @@ console.log('[workspace-hub.js] FILE LOADED');
     if (elements.directoriesList) {
       elements.directoriesList.innerHTML = '<div class="hub-empty">Select a workspace to view directories.</div>';
     }
+
+    const flattened = flattenWorkspaces(state.workspaces || []);
+    void refreshLauncherTaskOverview(flattened);
   }
 
   /**
@@ -1566,6 +1907,12 @@ console.log('[workspace-hub.js] FILE LOADED');
       elements.launcherRefreshBtn.addEventListener('click', () => loadWorkspaces());
     }
 
+    if (elements.launcherOverviewToggleBtn && elements.launcherOverviewDetails) {
+      elements.launcherOverviewToggleBtn.addEventListener('click', () => {
+        setLauncherOverviewExpanded(elements.launcherOverviewDetails.hidden);
+      });
+    }
+
     if (elements.launcherSelectModeBtn) {
       elements.launcherSelectModeBtn.addEventListener('click', () => {
         const state = window.WorkspaceHubState.getState();
@@ -1684,6 +2031,9 @@ console.log('[workspace-hub.js] FILE LOADED');
     // Refresh tasks when a task is created or updated
     EventBus.on('task:created', (data) => {
       const state = window.WorkspaceHubState.getState();
+      if (hubEl.dataset.state === 'launcher') {
+        scheduleLauncherOverviewRefresh();
+      }
       if (!state.selectedId) return;
       if (!data?.workspaceId || data.workspaceId === state.selectedId) {
         window.WorkspaceHubTasks.loadTasks(state.selectedId);
@@ -1692,6 +2042,9 @@ console.log('[workspace-hub.js] FILE LOADED');
 
     EventBus.on('task:updated', (data) => {
       const state = window.WorkspaceHubState.getState();
+      if (hubEl.dataset.state === 'launcher') {
+        scheduleLauncherOverviewRefresh();
+      }
       if (!state.selectedId) return;
       if (!data?.workspaceId || data.workspaceId === state.selectedId) {
         window.WorkspaceHubTasks.loadTasks(state.selectedId);
@@ -1730,6 +2083,7 @@ console.log('[workspace-hub.js] FILE LOADED');
 
   // Initialize
   bindEvents();
+  initLauncherOverviewExpandedState();
 
   // Keyboard shortcuts for workspace selection
   document.addEventListener('keydown', (e) => {
