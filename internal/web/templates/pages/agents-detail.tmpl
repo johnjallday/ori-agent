@@ -491,6 +491,42 @@
     </div>
   </div>
 
+  <!-- MCP Tool Details Modal -->
+  <div class="modal fade" id="mcpToolDetailModal" tabindex="-1" aria-labelledby="mcpToolDetailTitle" aria-hidden="true">
+    <div class="modal-dialog modal-xl modal-dialog-scrollable">
+      <div class="modal-content" style="background: var(--bg-primary); border: 1px solid var(--border-color);">
+        <div class="modal-header" style="border-bottom: 1px solid var(--border-color);">
+          <div>
+            <h5 class="modal-title" id="mcpToolDetailTitle" style="color: var(--text-primary); margin: 0;">MCP Tool</h5>
+            <div id="mcpToolDetailServer" style="font-size: 12px; color: var(--text-secondary); margin-top: 2px;"></div>
+          </div>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+        </div>
+        <div class="modal-body">
+          <div id="mcpToolDetailDescription" style="font-size: 14px; color: var(--text-secondary); line-height: 1.5; margin-bottom: 16px;"></div>
+
+          <div style="margin-bottom: 18px;">
+            <div style="font-size: 12px; text-transform: uppercase; letter-spacing: 0.5px; color: var(--text-secondary); margin-bottom: 8px;">Required Fields</div>
+            <div id="mcpToolDetailRequired" style="display: flex; flex-wrap: wrap; gap: 8px;"></div>
+          </div>
+
+          <div style="margin-bottom: 18px;">
+            <div style="font-size: 12px; text-transform: uppercase; letter-spacing: 0.5px; color: var(--text-secondary); margin-bottom: 8px;">Input Properties</div>
+            <div id="mcpToolDetailProperties" style="display: flex; flex-direction: column; gap: 10px;"></div>
+          </div>
+
+          <div>
+            <div style="font-size: 12px; text-transform: uppercase; letter-spacing: 0.5px; color: var(--text-secondary); margin-bottom: 8px;">Raw Input Schema</div>
+            <pre id="mcpToolDetailRawSchema" style="max-height: 280px; overflow: auto; margin: 0; padding: 12px; border-radius: 8px; background: var(--bg-secondary); border: 1px solid var(--border-color); color: var(--text-primary); font-size: 12px; line-height: 1.4;"></pre>
+          </div>
+        </div>
+        <div class="modal-footer" style="border-top: 1px solid var(--border-color);">
+          <button type="button" class="modern-btn modern-btn-secondary" data-bs-dismiss="modal">Close</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <!-- Shared Modals (Add Agent, Marketplace, etc.) -->
   {{template "modals.tmpl" .}}
 

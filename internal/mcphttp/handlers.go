@@ -1,8 +1,10 @@
 package mcphttp
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"strings"
 
@@ -11,6 +13,10 @@ import (
 	"github.com/johnjallday/ori-agent/internal/mcp"
 	"github.com/johnjallday/ori-agent/internal/store"
 )
+
+type agentNameRequest struct {
+	AgentName string `json:"agent_name"`
+}
 
 // Handler handles MCP-related HTTP requests
 type Handler struct {
@@ -123,7 +129,7 @@ func (h *Handler) RemoveServerHandler(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// EnableServerHandler enables an MCP server for the current agent
+// EnableServerHandler enables an MCP server for a target agent
 // POST /api/mcp/servers/:name/enable
 func (h *Handler) EnableServerHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
@@ -139,15 +145,19 @@ func (h *Handler) EnableServerHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	serverName := parts[4]
 
-	// Get current agent
-	_, currentAgentName := h.store.ListAgents()
-	if currentAgentName == "" {
-		orihttp.BadRequest(w, "No current agent")
+	// Resolve target agent: explicit agent_name (body/query) > current agent > first available agent
+	targetAgentName, found, err := h.resolveTargetAgentName(r)
+	if err != nil {
+		orihttp.BadRequest(w, err.Error())
+		return
+	}
+	if !found {
+		orihttp.NotFound(w, "Agent not found")
 		return
 	}
 
 	// Enable server for agent in config
-	if err := h.configManager.EnableServerForAgent(currentAgentName, serverName); err != nil {
+	if err := h.configManager.EnableServerForAgent(targetAgentName, serverName); err != nil {
 		logger.Error("Failed to enable MCP server", logger.Fields{"server": err})
 		orihttp.InternalError(w, err.Error())
 		return
@@ -190,7 +200,7 @@ func (h *Handler) EnableServerHandler(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// DisableServerHandler disables an MCP server for the current agent
+// DisableServerHandler disables an MCP server for a target agent
 // POST /api/mcp/servers/:name/disable
 func (h *Handler) DisableServerHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
@@ -206,16 +216,20 @@ func (h *Handler) DisableServerHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	serverName := parts[4]
 
-	// Get current agent
-	_, currentAgentName := h.store.ListAgents()
-	if currentAgentName == "" {
-		orihttp.BadRequest(w, "No current agent")
+	// Resolve target agent: explicit agent_name (body/query) > current agent > first available agent
+	targetAgentName, found, err := h.resolveTargetAgentName(r)
+	if err != nil {
+		orihttp.BadRequest(w, err.Error())
+		return
+	}
+	if !found {
+		orihttp.NotFound(w, "Agent not found")
 		return
 	}
 
 	// Disable server for agent in config
 
-	if err := h.configManager.DisableServerForAgent(currentAgentName, serverName); err != nil {
+	if err := h.configManager.DisableServerForAgent(targetAgentName, serverName); err != nil {
 		logger.Error("Failed to disable MCP server", logger.Fields{"server": err})
 		orihttp.InternalError(w, err.Error())
 		return
@@ -225,6 +239,52 @@ func (h *Handler) DisableServerHandler(w http.ResponseWriter, r *http.Request) {
 	if encErr := json.NewEncoder(w).Encode(map[string]string{"status": "success"}); encErr != nil {
 		logger.Error("Failed to encode response", logger.Fields{"error": encErr})
 	}
+}
+
+func (h *Handler) resolveTargetAgentName(r *http.Request) (string, bool, error) {
+	requestedName, err := parseAgentNameFromRequest(r)
+	if err != nil {
+		return "", false, err
+	}
+	if requestedName != "" {
+		_, found := h.store.GetAgent(requestedName)
+		return requestedName, found, nil
+	}
+
+	_, currentAgentName, ok := store.GetCurrentAgent(h.store)
+	if !ok || currentAgentName == "" {
+		return "", false, fmt.Errorf("No current agent")
+	}
+
+	_, found := h.store.GetAgent(currentAgentName)
+	return currentAgentName, found, nil
+}
+
+func parseAgentNameFromRequest(r *http.Request) (string, error) {
+	if requestAgent := strings.TrimSpace(r.URL.Query().Get("agent_name")); requestAgent != "" {
+		return requestAgent, nil
+	}
+	if r.Body == nil {
+		return "", nil
+	}
+
+	body, err := io.ReadAll(io.LimitReader(r.Body, orihttp.MaxJSONBodySize+1))
+	if err != nil {
+		return "", fmt.Errorf("Failed to read request body")
+	}
+	if len(body) == 0 || len(bytes.TrimSpace(body)) == 0 {
+		return "", nil
+	}
+	if len(body) > orihttp.MaxJSONBodySize {
+		return "", fmt.Errorf("Request body too large")
+	}
+
+	var req agentNameRequest
+	if err := json.Unmarshal(body, &req); err != nil {
+		return "", fmt.Errorf("Invalid JSON: %v", err)
+	}
+
+	return strings.TrimSpace(req.AgentName), nil
 }
 
 // GetServerToolsHandler lists tools available from a specific server
@@ -250,12 +310,31 @@ func (h *Handler) GetServerToolsHandler(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
+	status := server.GetStatus()
+	var startErr string
+	if status == mcp.StatusStopped || status == mcp.StatusError {
+		if status == mcp.StatusError {
+			_ = h.registry.StopServer(serverName)
+		}
+
+		if err := h.registry.StartServer(serverName); err != nil {
+			startErr = err.Error()
+			logger.Warn("Failed to start MCP server while loading tools", logger.Fields{
+				"server": serverName,
+				"error":  err,
+			})
+		}
+	}
+
 	tools := server.GetTools()
+	status = server.GetStatus()
 
 	w.Header().Set("Content-Type", "application/json")
 	if encErr := json.NewEncoder(w).Encode(map[string]interface{}{
-		"server": serverName,
-		"tools":  tools,
+		"server":      serverName,
+		"status":      status,
+		"start_error": startErr,
+		"tools":       tools,
 	}); encErr != nil {
 		logger.Error("Failed to encode response", logger.Fields{"error": encErr})
 	}

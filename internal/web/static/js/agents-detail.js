@@ -6,6 +6,7 @@ let isEditingConfig = false;
 let isEditingPrompt = false;
 let isEditingDescription = false;
 let availableProviders = []; // Cache for available providers and models from API
+let mcpToolsByServer = {}; // Cache of MCP tools by server name for detail modal rendering
 
 // Get agent name from URL - supports both /agents/{name} and ?name={name}
 function getAgentNameFromURL() {
@@ -1110,6 +1111,7 @@ async function loadMCPConfigPanel() {
     const data = await response.json();
     const allServers = data.servers || [];
     const enabledServers = currentAgent.mcp_servers || [];
+    mcpToolsByServer = {};
 
     panel.innerHTML = `
             <h3 style="font-size: 16px; margin-bottom: 16px; color: var(--text-primary);">Available MCP Servers</h3>
@@ -1129,12 +1131,15 @@ async function loadMCPConfigPanel() {
                             </div>
                         </div>
                         <div id="mcpConfig_${server.name}" style="display: ${enabledServers.includes(server.name) ? 'block' : 'none'}; margin-top: 12px; padding-left: 24px;">
-                            ${getMCPServerConfigUI(server)}
+                            ${getMCPServerConfigUI(server, enabledServers.includes(server.name))}
                         </div>
                     </div>
                 `).join('')}
             </div>
         `;
+
+    // Load tool metadata so users can see exactly what each MCP server exposes.
+    await Promise.all(allServers.map(server => loadMCPServerTools(server.name, enabledServers.includes(server.name))));
   } catch (error) {
     console.error('Failed to load MCP config:', error);
     panel.innerHTML = '<p style="color: var(--text-secondary);">Failed to load MCP configuration</p>';
@@ -1142,7 +1147,7 @@ async function loadMCPConfigPanel() {
 }
 
 // Get configuration UI for specific MCP server
-function getMCPServerConfigUI(server) {
+function getMCPServerConfigUI(server, isEnabled) {
   // Special handling for filesystem server
   if (server.name === 'filesystem') {
     const currentPath = server.args && server.args.length > 2 ? server.args[2] : '/path/to/directory';
@@ -1153,22 +1158,233 @@ function getMCPServerConfigUI(server) {
                 </label>
                 <input type="text"
                     id="filesystem_path"
-                    value="${currentPath}"
+                    value="${escapeHtml(currentPath)}"
                     placeholder="/path/to/directory"
                     style="width: 100%; padding: 8px; background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 4px; color: var(--text-primary); font-size: 14px;"
                     onchange="updateMCPServerConfig('filesystem', 'path', this.value)">
                 <small style="color: var(--text-secondary); font-size: 12px;">The directory this agent can access via the filesystem MCP server</small>
             </div>
+            ${getMCPToolsPlaceholder(server.name, isEnabled)}
         `;
   }
+
+  const argsDisplay = Array.isArray(server.args) && server.args.length > 0
+    ? server.args.join(' ')
+    : 'none';
 
   // Default: show command and args
   return `
         <div style="font-size: 13px; color: var(--text-secondary);">
-            <div><strong>Command:</strong> ${server.command}</div>
-            <div><strong>Args:</strong> ${server.args ? server.args.join(' ') : 'none'}</div>
+            <div><strong>Command:</strong> ${escapeHtml(server.command || 'none')}</div>
+            <div><strong>Args:</strong> ${escapeHtml(argsDisplay)}</div>
+            ${getMCPToolsPlaceholder(server.name, isEnabled)}
         </div>
     `;
+}
+
+function getMCPToolsPlaceholder(serverName, isEnabled) {
+  const loadingText = isEnabled
+    ? 'Loading tools...'
+    : 'Enable this server to load tools.';
+
+  return `
+        <div id="mcpTools_${serverName}" style="margin-top: 10px; font-size: 12px; color: var(--text-secondary);">
+            ${loadingText}
+        </div>
+    `;
+}
+
+async function loadMCPServerTools(serverName, isEnabled) {
+  const container = document.getElementById(`mcpTools_${serverName}`);
+  if (!container) return;
+
+  if (!isEnabled) {
+    container.innerHTML = 'Enable this server to load tools.';
+    return;
+  }
+
+  try {
+    const response = await fetch(`/api/mcp/servers/${encodeURIComponent(serverName)}/tools`);
+    if (!response.ok) {
+      container.innerHTML = 'Tools unavailable right now.';
+      return;
+    }
+
+    const data = await response.json();
+    const status = typeof data.status === 'string' ? data.status : 'unknown';
+    const startError = typeof data.start_error === 'string' ? data.start_error.trim() : '';
+    const tools = Array.isArray(data.tools) ? data.tools : [];
+    mcpToolsByServer[serverName] = tools;
+
+    if (startError) {
+      container.innerHTML = `Unable to start server (${escapeHtml(status)}): ${escapeHtml(startError)}`;
+      return;
+    }
+
+    if (tools.length === 0) {
+      if (status === 'starting' || status === 'restarting') {
+        container.innerHTML = 'Server is still starting. Waiting for tools...';
+      } else if (status !== 'running') {
+        container.innerHTML = `Server status: ${escapeHtml(status)}. No tools available yet.`;
+      } else {
+        container.innerHTML = 'No tools discovered yet.';
+      }
+      return;
+    }
+
+    container.innerHTML = `
+            <div style="margin-top: 2px;">
+                <div style="font-size: 12px; font-weight: 600; color: var(--text-secondary); margin-bottom: 6px;">Tools (${tools.length})</div>
+                <div style="display: flex; flex-direction: column; gap: 6px;">
+                    ${tools.map((tool, index) => `
+                        <div style="padding: 8px 10px; background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 6px;">
+                            <div style="display: flex; justify-content: space-between; align-items: center; gap: 10px;">
+                                <div style="font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; font-size: 12px; font-weight: 600; color: var(--text-primary);">${escapeHtml(tool.name || '(unnamed tool)')}</div>
+                                <button type="button" class="modern-btn modern-btn-secondary btn-sm" style="padding: 4px 10px; font-size: 11px;" onclick='openMCPToolDetails(${JSON.stringify(serverName)}, ${index})'>View details</button>
+                            </div>
+                            ${tool.description ? `<div style="margin-top: 4px; font-size: 12px; color: var(--text-secondary); line-height: 1.35;">${escapeHtml(tool.description)}</div>` : ''}
+                            ${renderToolOperationsSummary(tool)}
+                        </div>
+                    `).join('')}
+                </div>
+            </div>
+        `;
+  } catch (error) {
+    console.error(`Failed to load tools for ${serverName}:`, error);
+    container.innerHTML = 'Failed to load tools.';
+  }
+}
+
+function renderToolOperationsSummary(tool) {
+  const operations = getToolOperations(tool);
+  if (operations.length === 0) {
+    return '';
+  }
+
+  return `
+        <div style="margin-top: 6px; font-size: 11px; color: var(--text-secondary);">
+            <strong>Operations:</strong> ${operations.map(op => `<code style="font-size: 10px; background: var(--bg-tertiary); padding: 2px 5px; border-radius: 4px; margin-right: 4px;">${escapeHtml(String(op))}</code>`).join('')}
+        </div>
+    `;
+}
+
+function getToolOperations(tool) {
+  const operationSchema = tool?.inputSchema?.properties?.operation;
+  if (!operationSchema || !Array.isArray(operationSchema.enum)) {
+    return [];
+  }
+  return operationSchema.enum;
+}
+
+function getSchemaType(schema) {
+  if (!schema || typeof schema !== 'object') {
+    return 'any';
+  }
+
+  if (Array.isArray(schema.type)) {
+    return schema.type.join(' | ');
+  }
+  if (typeof schema.type === 'string' && schema.type.trim() !== '') {
+    return schema.type;
+  }
+  if (schema.enum) {
+    return 'enum';
+  }
+  if (schema.properties) {
+    return 'object';
+  }
+
+  return 'any';
+}
+
+function formatSchemaJSON(schema) {
+  try {
+    return JSON.stringify(schema || {}, null, 2);
+  } catch (error) {
+    console.error('Failed to stringify schema:', error);
+    return '{}';
+  }
+}
+
+function openMCPToolDetails(serverName, toolIndex) {
+  const tools = mcpToolsByServer[serverName] || [];
+  const tool = tools[toolIndex];
+  if (!tool) {
+    showToast('Tool details unavailable', 'error');
+    return;
+  }
+
+  const schema = tool.inputSchema || {};
+  const properties = (schema && typeof schema.properties === 'object' && schema.properties) ? schema.properties : {};
+  const required = Array.isArray(schema.required) ? schema.required : [];
+
+  const titleEl = document.getElementById('mcpToolDetailTitle');
+  const serverEl = document.getElementById('mcpToolDetailServer');
+  const descEl = document.getElementById('mcpToolDetailDescription');
+  const requiredEl = document.getElementById('mcpToolDetailRequired');
+  const propertiesEl = document.getElementById('mcpToolDetailProperties');
+  const rawSchemaEl = document.getElementById('mcpToolDetailRawSchema');
+  const modalEl = document.getElementById('mcpToolDetailModal');
+
+  if (!titleEl || !serverEl || !descEl || !requiredEl || !propertiesEl || !rawSchemaEl || !modalEl) {
+    return;
+  }
+
+  titleEl.textContent = tool.name || 'MCP Tool';
+  serverEl.textContent = `Server: ${serverName}`;
+  descEl.textContent = tool.description || 'No description provided.';
+
+  if (required.length === 0) {
+    requiredEl.innerHTML = '<span style="font-size: 12px; color: var(--text-secondary);">None</span>';
+  } else {
+    requiredEl.innerHTML = required.map(field => `
+            <span style="font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; font-size: 11px; color: var(--text-primary); padding: 3px 8px; border-radius: 999px; background: var(--bg-secondary); border: 1px solid var(--border-color);">${escapeHtml(field)}</span>
+        `).join('');
+  }
+
+  const propertyEntries = Object.entries(properties).sort(([a], [b]) => {
+    if (a === 'operation') return -1;
+    if (b === 'operation') return 1;
+    return a.localeCompare(b);
+  });
+
+  if (propertyEntries.length === 0) {
+    propertiesEl.innerHTML = '<div style="font-size: 12px; color: var(--text-secondary);">No properties defined.</div>';
+  } else {
+    propertiesEl.innerHTML = propertyEntries.map(([name, propSchema]) => {
+      const fieldSchema = (propSchema && typeof propSchema === 'object') ? propSchema : {};
+      const isRequired = required.includes(name);
+      const schemaType = getSchemaType(fieldSchema);
+      const enumValues = Array.isArray(fieldSchema.enum) ? fieldSchema.enum : [];
+      const description = fieldSchema.description ? String(fieldSchema.description) : '';
+
+      return `
+                <div style="padding: 10px 12px; border-radius: 8px; background: var(--bg-secondary); border: 1px solid var(--border-color);">
+                    <div style="display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 4px;">
+                        <div style="font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; font-size: 12px; font-weight: 600; color: var(--text-primary);">${escapeHtml(name)}</div>
+                        <div style="display: flex; align-items: center; gap: 6px;">
+                            <span style="font-size: 10px; text-transform: uppercase; letter-spacing: 0.3px; color: var(--text-secondary); padding: 2px 6px; border: 1px solid var(--border-color); border-radius: 999px;">${escapeHtml(schemaType)}</span>
+                            ${isRequired ? '<span style="font-size: 10px; color: #fff; background: var(--danger-color); padding: 2px 6px; border-radius: 999px;">required</span>' : ''}
+                        </div>
+                    </div>
+                    ${description ? `<div style="font-size: 12px; color: var(--text-secondary); line-height: 1.4; margin-bottom: ${enumValues.length ? '6px' : '0'};">${escapeHtml(description)}</div>` : ''}
+                    ${enumValues.length ? `
+                        <div style="font-size: 11px; color: var(--text-secondary);">
+                            <strong>Allowed values:</strong>
+                            <div style="display: flex; flex-wrap: wrap; gap: 5px; margin-top: 5px;">
+                                ${enumValues.map(value => `<code style="font-size: 10px; background: var(--bg-tertiary); color: var(--text-primary); padding: 2px 6px; border-radius: 4px;">${escapeHtml(String(value))}</code>`).join('')}
+                            </div>
+                        </div>
+                    ` : ''}
+                </div>
+            `;
+    }).join('');
+  }
+
+  rawSchemaEl.textContent = formatSchemaJSON(schema);
+
+  const modal = bootstrap.Modal.getOrCreateInstance(modalEl);
+  modal.show();
 }
 
 // Toggle MCP server for this agent
@@ -1179,18 +1395,21 @@ async function toggleMCPServer(serverName, enabled) {
   }
 
   try {
-    const endpoint = enabled ? `/api/mcp/servers/${serverName}/enable` : `/api/mcp/servers/${serverName}/disable`;
+    const endpoint = `/api/agents/${encodeURIComponent(agentName)}/mcp-servers/${encodeURIComponent(serverName)}/${enabled ? 'enable' : 'disable'}`;
     const response = await fetch(endpoint, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({ agent_name: agentName })
+      }
     });
 
     if (response.ok) {
       showToast(`${serverName} ${enabled ? 'enabled' : 'disabled'}`, 'success');
-      await loadAgent();
+      await refreshAgentDetails();
+      const panel = document.getElementById('mcpConfigPanel');
+      if (panel && panel.style.display !== 'none') {
+        await loadMCPConfigPanel();
+      }
     } else {
       const error = await response.text();
       showToast(`Failed: ${error}`, 'error');

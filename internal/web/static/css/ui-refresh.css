@@ -573,6 +573,42 @@ textarea.form-control:focus {
   border-color: rgba(143, 63, 37, 0.46);
 }
 
+.home-assistant-form {
+  align-items: stretch;
+  gap: 0.6rem !important;
+}
+
+.home-assistant-form .modern-input {
+  min-height: 44px !important;
+  height: 44px;
+  border-radius: 0.95rem !important;
+  padding-inline: 0.95rem;
+}
+
+.home-assistant-send-btn {
+  flex: 0 0 auto;
+  min-width: 88px;
+  height: 44px;
+  padding: 0 1rem;
+  border-radius: 0.95rem;
+  font-size: 0.82rem;
+  font-weight: 700;
+  text-transform: none;
+  letter-spacing: 0.02em;
+  line-height: 1;
+  justify-content: center;
+  box-shadow: 0 6px 14px rgba(145, 61, 36, 0.22);
+}
+
+.home-assistant-send-btn:hover {
+  box-shadow: 0 10px 22px rgba(145, 61, 36, 0.3);
+}
+
+[data-bs-theme="dark"] .home-assistant-send-btn {
+  border-color: rgba(234, 176, 137, 0.24);
+  box-shadow: 0 8px 18px rgba(0, 0, 0, 0.42);
+}
+
 #homeAssistantQuickPrompts .home-assistant-quick-btn {
   background: rgba(255, 248, 236, 0.8);
   border: 1px solid rgba(177, 138, 98, 0.3);

@@ -222,6 +222,14 @@ func (s *Server) serveAgentsEdit(w http.ResponseWriter, r *http.Request) {
 	s.renderAndWritePage(w, "agents-edit", data)
 }
 
+func (s *Server) serveAgentsCreate(w http.ResponseWriter, r *http.Request) {
+	data := s.prepareBasePageData("agents")
+	data.Title = "Create Agent - Ori Agent"
+	data.BrandText = "Ori Agent"
+	data.ShowSidebarToggle = true
+	s.renderAndWritePage(w, "agents-create", data)
+}
+
 func (s *Server) serveSettings(w http.ResponseWriter, r *http.Request) {
 	data := s.prepareBasePageData("settings")
 

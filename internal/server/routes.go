@@ -43,7 +43,7 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 	mux.HandleFunc("/agents", s.serveAgents)      // Clean URL
 	mux.HandleFunc("/agents.html", s.serveAgents) // Legacy support
 	mux.HandleFunc("/agents-detail.html", s.serveAgentsDetail)
-	mux.HandleFunc("/agents-create.html", s.serveStaticFile)
+	mux.HandleFunc("/agents-create.html", s.serveAgentsCreate)
 	mux.HandleFunc("/agents-edit.html", s.serveAgentsEdit)
 	mux.HandleFunc("/agents-dashboard", func(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/agents", http.StatusFound)
