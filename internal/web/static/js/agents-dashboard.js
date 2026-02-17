@@ -281,7 +281,7 @@ function renderDashboardAgents() {
 }
 
 // Render table view
-function renderTableView(showOri, claudeAgents, codexAgents, codexData) {
+function renderTableView(showOri, claudeAgents, codexAgents) {
   const tbody = document.getElementById('agentsTableBody');
   tbody.innerHTML = '';
 
@@ -332,7 +332,7 @@ function renderTableView(showOri, claudeAgents, codexAgents, codexData) {
 }
 
 // Render card view
-function renderCardView(showOri, claudeAgents, codexAgents, codexData) {
+function renderCardView(showOri, claudeAgents, codexAgents) {
   const grid = document.getElementById('cardView');
   grid.innerHTML = '';
 

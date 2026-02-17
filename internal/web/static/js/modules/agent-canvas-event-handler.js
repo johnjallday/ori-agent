@@ -94,7 +94,7 @@ export class AgentCanvasEventHandler {
   /**
    * Process workspace progress payloads from SSE or initial fetch.
    */
-  processWorkspacePayload(data, { setTasks = false, source = 'workspace.progress' } = {}) {
+  processWorkspacePayload(data, { setTasks = false } = {}) {
     if (!data) return;
 
     if (data.workspace_progress) {

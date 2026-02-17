@@ -1029,7 +1029,7 @@ class TaskModalController {
 
       // Emit event for workspace hub to refresh
       if (window.EventBus) {
-        EventBus.emit('task:created', { task: result.task, workspaceId: this.workspaceId });
+        EventBus.emit('task:created', { workspaceId: this.workspaceId });
       }
 
       // Call the callback if provided
@@ -1616,7 +1616,7 @@ class TaskModalController {
         schedule.time = document.getElementById('taskModalScheduleTime')?.value || '09:00';
         schedule.day_of_week = document.getElementById('taskModalScheduleDay')?.value || 'monday';
         break;
-      case 'interval':
+      case 'interval': {
         const intervalValue = parseInt(document.getElementById('taskModalScheduleIntervalValue')?.value || '1', 10);
         const intervalUnit = document.getElementById('taskModalScheduleIntervalUnit')?.value || 'hours';
         let intervalMinutes = intervalValue;
@@ -1627,12 +1627,14 @@ class TaskModalController {
         }
         schedule.interval_minutes = intervalMinutes;
         break;
-      case 'once':
+      }
+      case 'once': {
         const datetime = document.getElementById('taskModalScheduleDatetime')?.value;
         if (datetime) {
           schedule.run_at = new Date(datetime).toISOString();
         }
         break;
+      }
     }
 
     return {
@@ -1751,18 +1753,20 @@ class TaskModalController {
     };
 
     switch (target) {
-      case 'store':
+      case 'store': {
         const storeNodeId = document.getElementById('taskModalAutoSaveStoreNode')?.value;
         if (storeNodeId) {
           resultStorage.store_node_id = storeNodeId;
         }
         break;
-      case 'custom':
+      }
+      case 'custom': {
         const filePath = document.getElementById('taskModalAutoSavePath')?.value?.trim();
         if (filePath) {
           resultStorage.file_path = filePath;
         }
         break;
+      }
       // 'default' uses workspace output folder (no additional config needed)
     }
 

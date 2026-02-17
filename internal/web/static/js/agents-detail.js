@@ -83,7 +83,7 @@ async function refreshSystemModelDisplay() {
 // Get agent name from URL - supports both /agents/{name} and ?name={name}
 function getAgentNameFromURL() {
   // First try path-based URL: /agents/{agent-name}
-  const pathMatch = window.location.pathname.match(/^\/agents\/([^\/]+)$/);
+  const pathMatch = window.location.pathname.match(/^\/agents\/([^/]+)$/);
   if (pathMatch) {
     return decodeURIComponent(pathMatch[1]);
   }
@@ -1386,7 +1386,7 @@ async function renderSkills() {
         return `<li><strong>${escapeHtml(conflict.name || '')}</strong><ul>${paths}</ul></li>`;
       }).join('');
       currentAgentSkills = [];
-      container.innerHTML = `<div class=\"text-center py-3\" style=\"color: var(--danger-color);\">Resolve duplicate skill names to view skills.<ul style=\"text-align: left; margin-top: 8px;\">${conflictList}</ul></div>`;
+      container.innerHTML = `<div class="text-center py-3" style="color: var(--danger-color);">Resolve duplicate skill names to view skills.<ul style="text-align: left; margin-top: 8px;">${conflictList}</ul></div>`;
       renderSetupHealthBanner();
       renderCapabilitiesCard();
       return;
@@ -1427,7 +1427,7 @@ async function renderSkills() {
           <span style="font-size: 10px; padding: 2px 6px; border-radius: 4px; background: var(--bg-tertiary); color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.3px;">${escapeHtml(source)}</span>
           ${!isEnabled ? '<span style="font-size: 10px; padding: 2px 6px; border-radius: 4px; background: var(--warning-color); color: var(--text-primary); text-transform: uppercase; letter-spacing: 0.3px;">disabled</span>' : ''}
           ${hasErrors ? '<span style="font-size: 10px; padding: 2px 6px; border-radius: 4px; background: var(--danger-color); color: var(--text-primary); text-transform: uppercase; letter-spacing: 0.3px;">invalid</span>' : ''}
-          ${hasScripts ? `<span style=\"font-size: 10px; padding: 2px 6px; border-radius: 4px; background: ${isTrusted ? 'var(--success-color)' : 'var(--danger-color)'}; color: var(--text-primary); text-transform: uppercase; letter-spacing: 0.3px;\">${isTrusted ? 'trusted' : 'untrusted'}</span>` : ''}
+          ${hasScripts ? `<span style="font-size: 10px; padding: 2px 6px; border-radius: 4px; background: ${isTrusted ? 'var(--success-color)' : 'var(--danger-color)'}; color: var(--text-primary); text-transform: uppercase; letter-spacing: 0.3px;">${isTrusted ? 'trusted' : 'untrusted'}</span>` : ''}
         </div>
         <div style="font-size: 12px; color: var(--text-secondary); margin-top: 6px;">${escapeHtml(description)}</div>
         ${hasErrors ? `<div style="font-size: 11px; color: var(--danger-color);">${escapeHtml(validationErrors.join('; '))}</div>` : ''}

@@ -1,125 +1,148 @@
 import js from '@eslint/js';
 import globals from 'globals';
+import json from '@eslint/json';
+import markdown from '@eslint/markdown';
+import css from '@eslint/css';
+import { defineConfig } from 'eslint/config';
 
-export default [
-  js.configs.recommended,
+const appGlobals = {
+  API: 'readonly',
+  Logger: 'readonly',
+  EventBus: 'readonly',
+  DOMUtils: 'readonly',
+  escapeHtml: 'readonly',
+  escapeAttr: 'readonly',
+  escapeJs: 'readonly',
+  stripVersionSuffix: 'readonly',
+  Toast: 'readonly',
+  FormValidation: 'writable',
+  ExternalAgents: 'readonly',
+  showNotification: 'readonly',
+  showPluginConfigModal: 'readonly',
+  showPluginStoreModal: 'readonly',
+  showPluginUploadModal: 'readonly',
+  loadAgents: 'readonly',
+  loadAgentsForSidebar: 'readonly',
+  loadPlugins: 'readonly',
+  loadPluginsForSidebar: 'readonly',
+  loadSettings: 'readonly',
+  loadAgent: 'readonly',
+  refreshPluginList: 'readonly',
+  currentAgent: 'writable',
+  showToast: 'readonly',
+  themeManager: 'readonly',
+  addMessageToChat: 'readonly',
+  appendMessageToUI: 'readonly',
+  clearChatHistory: 'readonly',
+  FileManager: 'readonly',
+  loadAvailableProviders: 'readonly',
+  studiosSystemAgents: 'writable',
+  loadWorkspaceAgents: 'readonly',
+  loadWorkspaces: 'readonly',
+  AgentCanvas: 'readonly',
+  selectedAgents: 'writable',
+  availableAgents: 'writable',
+  loadCanvasStudio: 'readonly',
+  tasksAssignToCombiner: 'readonly',
+  combinerExecute: 'readonly',
+  combinerCreateTask: 'readonly',
+  combinerEnsureTask: 'readonly',
+  MessageTimeline: 'readonly',
+  SettingsNavigation: 'readonly',
+  SettingsController: 'readonly',
+  showAddTaskModal: 'readonly',
+  resetBaseAutoConfigState: 'readonly',
+  bootstrap: 'readonly',
+  marked: 'readonly',
+  hljs: 'readonly',
+  mermaid: 'readonly',
+  ethers: 'readonly',
+  web3SettingsManager: 'readonly',
+  module: 'readonly',
+  require: 'readonly',
+  exports: 'readonly'
+};
+
+export default defineConfig([
   {
+    files: ['**/*.{js,mjs,cjs}'],
+    plugins: { js },
+    extends: ['js/recommended'],
     languageOptions: {
       ecmaVersion: 'latest',
       sourceType: 'script',
       globals: {
         ...globals.browser,
-        // Custom globals from DX utilities
-        API: 'readonly',
-        Logger: 'readonly',
-        EventBus: 'readonly',
-        DOMUtils: 'readonly',
-        escapeHtml: 'readonly',
-        escapeAttr: 'readonly',
-        escapeJs: 'readonly',
-        // Application globals
-        Toast: 'readonly',
-        FormValidation: 'writable',
-        // Cross-module functions (defined in other script files)
-        showNotification: 'readonly',
-        showPluginConfigModal: 'readonly',
-        showPluginStoreModal: 'readonly',
-        showPluginUploadModal: 'readonly',
-        loadAgents: 'readonly',
-        loadAgentsForSidebar: 'readonly',
-        loadPlugins: 'readonly',
-        loadPluginsForSidebar: 'readonly',
-        loadSettings: 'readonly',
-        loadAgent: 'readonly',
-        refreshPluginList: 'readonly',
-        currentAgent: 'writable',
-        showToast: 'readonly',
-        themeManager: 'readonly',
-        addMessageToChat: 'readonly',
-        appendMessageToUI: 'readonly',
-        clearChatHistory: 'readonly',
-        FileManager: 'readonly',
-        loadAvailableProviders: 'readonly',
-        studiosSystemAgents: 'writable',
-        loadWorkspaceAgents: 'readonly',
-        loadWorkspaces: 'readonly',
-        AgentCanvas: 'readonly',
-        selectedAgents: 'writable',
-        availableAgents: 'writable',
-        loadCanvasStudio: 'readonly',
-        // Combiner/orchestration functions
-        tasksAssignToCombiner: 'readonly',
-        combinerExecute: 'readonly',
-        combinerCreateTask: 'readonly',
-        combinerEnsureTask: 'readonly',
-        MessageTimeline: 'readonly',
-        // External libraries
-        bootstrap: 'readonly',
-        marked: 'readonly',
-        hljs: 'readonly',
-        mermaid: 'readonly',
-        ethers: 'readonly',
-        // Web3 settings manager
-        web3SettingsManager: 'readonly',
-        // Node.js (for CommonJS modules)
-        module: 'readonly',
-        require: 'readonly',
-        exports: 'readonly'
+        ...appGlobals
       }
     },
     rules: {
-      'no-unused-vars': ['warn', {
-        argsIgnorePattern: '^_',
-        varsIgnorePattern: '^_'
-      }],
-      'no-console': 'off',
-      'no-debugger': 'warn',
-      'eqeqeq': ['warn', 'always', { null: 'ignore' }],
-      'curly': ['warn', 'multi-line'],
-      'no-var': 'warn',
-      'prefer-const': 'warn',
-      'no-multiple-empty-lines': ['warn', { max: 2 }],
-      'no-trailing-spaces': 'warn',
-      'semi': ['warn', 'always'],
-      'quotes': ['warn', 'single', { avoidEscape: true, allowTemplateLiterals: true }],
-      'indent': ['warn', 2, { SwitchCase: 1 }],
-      'comma-dangle': ['warn', 'never'],
-      'no-prototype-builtins': 'off',
-      'no-async-promise-executor': 'warn',
-      'no-return-await': 'warn',
-      'require-await': 'warn',
-      'no-useless-escape': 'warn',
-      'no-useless-catch': 'warn',
-      'no-redeclare': 'warn',
-      'no-case-declarations': 'warn',
-      'no-dupe-keys': 'warn'
+      'no-redeclare': ['error', { builtinGlobals: false }],
+      'no-unused-vars': [
+        'error',
+        {
+          vars: 'local',
+          varsIgnorePattern: '^_',
+          argsIgnorePattern: '^(_|e|err|error|event|index|idx|x|y)$',
+          caughtErrors: 'none'
+        }
+      ]
     }
   },
-  // ES Module files (use import/export) - match all files that use ES modules
   {
     files: [
-      'internal/web/static/js/modules/*.js',
-      'internal/web/static/js/file-manager.js',
-      'internal/web/static/js/pages/*.js'
+      'internal/web/static/js/modules/agent-canvas-animation.js',
+      'internal/web/static/js/modules/agent-canvas-api.js',
+      'internal/web/static/js/modules/agent-canvas-context-menu.js',
+      'internal/web/static/js/modules/agent-canvas-event-handler.js',
+      'internal/web/static/js/modules/agent-canvas-events.js',
+      'internal/web/static/js/modules/agent-canvas-forms.js',
+      'internal/web/static/js/modules/agent-canvas-helpers.js',
+      'internal/web/static/js/modules/agent-canvas-init.js',
+      'internal/web/static/js/modules/agent-canvas-interactions.js',
+      'internal/web/static/js/modules/agent-canvas-layout.js',
+      'internal/web/static/js/modules/agent-canvas-notifications.js',
+      'internal/web/static/js/modules/agent-canvas-panels.js',
+      'internal/web/static/js/modules/agent-canvas-renderer.js',
+      'internal/web/static/js/modules/agent-canvas-state.js',
+      'internal/web/static/js/modules/agent-canvas-tasks.js',
+      'internal/web/static/js/modules/agent-canvas-timeline.js',
+      'internal/web/static/js/modules/agent-canvas-workflow-selector.js',
+      'internal/web/static/js/modules/agent-canvas.js',
+      'internal/web/static/js/modules/chat-auto-scroll.js',
+      'internal/web/static/js/modules/chat-state-ui.js',
+      'internal/web/static/js/modules/chat-state.js',
+      'internal/web/static/js/modules/dashboard-agents.js',
+      'internal/web/static/js/modules/dashboard-renderer.js',
+      'internal/web/static/js/modules/dashboard-state.js',
+      'internal/web/static/js/modules/dashboard-tasks.js',
+      'internal/web/static/js/modules/dashboard-ui.js',
+      'internal/web/static/js/modules/onboarding.js',
+      'internal/web/static/js/modules/plugin-init-banner.js',
+      'internal/web/static/js/modules/renderer-connections.js',
+      'internal/web/static/js/modules/renderer-nodes.js',
+      'internal/web/static/js/modules/renderer-panels.js',
+      'internal/web/static/js/modules/renderer-primitives.js',
+      'internal/web/static/js/modules/renderer-ui.js',
+      'internal/web/static/js/modules/smartOnboarding.js',
+      'internal/web/static/js/modules/studio-dashboard.js',
+      'internal/web/static/js/modules/studio.js',
+      'internal/web/static/js/modules/workspace-detail.js'
     ],
     languageOptions: {
       sourceType: 'module'
     }
   },
-  // Utility files - allow unused vars (they export globals)
   {
     files: ['internal/web/static/js/utils/*.js'],
     rules: {
       'no-unused-vars': 'off'
     }
   },
+  { files: ['**/*.json'], plugins: { json }, language: 'json/json', extends: ['json/recommended'] },
+  { files: ['**/*.md'], plugins: { markdown }, language: 'markdown/gfm', extends: ['markdown/recommended'] },
+  { files: ['**/*.css'], plugins: { css }, language: 'css/css', extends: ['css/recommended'] },
   {
-    ignores: [
-      'node_modules/',
-      'vendor/',
-      '*.min.js',
-      'dist/',
-      'example_plugins/'
-    ]
+    ignores: ['node_modules/', 'vendor/', '*.min.js', 'dist/', 'example_plugins/']
   }
-];
+]);

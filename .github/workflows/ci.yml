@@ -39,6 +39,26 @@ jobs:
         run: golangci-lint run ./...
         continue-on-error: true  # Don't fail build on linter warnings initially
 
+  frontend-lint:
+    name: Frontend Lint
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22.13.0'
+          cache: 'npm'
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Run frontend lint
+        run: npm run lint
+
   test-unit:
     name: Unit Tests
     runs-on: ${{ matrix.os }}

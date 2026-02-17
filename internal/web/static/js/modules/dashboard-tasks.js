@@ -248,7 +248,7 @@ export class DashboardTasks {
           schedule.time_of_day = document.getElementById('task-schedule-time')?.value || '09:00';
           schedule.day_of_week = parseInt(document.getElementById('task-schedule-day')?.value) || 0;
           break;
-        case 'interval':
+        case 'interval': {
           const intervalValue = parseInt(document.getElementById('task-schedule-interval-value')?.value) || 1;
           const intervalUnit = document.getElementById('task-schedule-interval-unit')?.value || 'h';
           // Convert to nanoseconds (Go time.Duration)
@@ -258,12 +258,14 @@ export class DashboardTasks {
             schedule.interval = intervalValue * 60 * 60 * 1000000000; // hours to nanoseconds
           }
           break;
-        case 'once':
+        }
+        case 'once': {
           const datetime = document.getElementById('task-schedule-datetime')?.value;
           if (datetime) {
             schedule.execute_at = new Date(datetime).toISOString();
           }
           break;
+        }
       }
 
       requestBody.schedule = schedule;
@@ -303,7 +305,7 @@ export class DashboardTasks {
         throw new Error(error || 'Failed to create task');
       }
 
-      const result = await response.json();
+      await response.json();
 
       // Hide form and reload tasks
       this.hideCreateTaskForm();
@@ -339,7 +341,7 @@ export class DashboardTasks {
         throw new Error(error || 'Failed to execute task');
       }
 
-      const result = await response.json();
+      await response.json();
 
       // Reload tasks to show updated status
       await this.loadTasks();
@@ -837,7 +839,7 @@ export class DashboardTasks {
           schedule.time_of_day = document.getElementById('edit-schedule-time')?.value || '09:00';
           schedule.day_of_week = parseInt(document.getElementById('edit-schedule-day')?.value) || 0;
           break;
-        case 'interval':
+        case 'interval': {
           const intervalValue = parseInt(document.getElementById('edit-schedule-interval-value')?.value) || 1;
           const intervalUnit = document.getElementById('edit-schedule-interval-unit')?.value || 'h';
           if (intervalUnit === 'm') {
@@ -846,12 +848,14 @@ export class DashboardTasks {
             schedule.interval = intervalValue * 60 * 60 * 1000000000;
           }
           break;
-        case 'once':
+        }
+        case 'once': {
           const datetime = document.getElementById('edit-schedule-datetime')?.value;
           if (datetime) {
             schedule.execute_at = new Date(datetime).toISOString();
           }
           break;
+        }
       }
 
       updateData.schedule = schedule;

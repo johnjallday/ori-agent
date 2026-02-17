@@ -97,8 +97,8 @@ export class AgentCanvasLayoutManager {
     const levels = this.calculateTaskLevels();
 
     // Get canvas dimensions
-    const canvasWidth = this.parent.width / this.state.scale;
-    const canvasHeight = this.parent.height / this.state.scale;
+    
+    
 
     // Vertical flow layout: tasks on the left, agents on the right
     const taskColumnX = 300; // X position for tasks (left side)
@@ -365,6 +365,7 @@ export class AgentCanvasLayoutManager {
         offset_y: this.state.offsetY
       });
     } catch {
+      // Layout persistence is best-effort; keep UI responsive if save fails.
     }
   }
 
@@ -382,10 +383,10 @@ export class AgentCanvasLayoutManager {
 
     const layout = this.state.studio.layout;
 
-    let tasksRestored = 0;
-    let agentsRestored = 0;
-    let combinersRestored = 0;
-    let connectionsRestored = 0;
+    let _tasksRestored = 0;
+    let _agentsRestored = 0;
+    let _combinersRestored = 0;
+    let _connectionsRestored = 0;
 
     // Restore task positions
     if (layout.task_positions) {
@@ -397,7 +398,7 @@ export class AgentCanvasLayoutManager {
         if (savedPos) {
           task.x = savedPos.x;
           task.y = savedPos.y;
-          tasksRestored++;
+          _tasksRestored++;
           tasksWithPositions.push(task);
         } else {
           tasksWithoutPositions.push(task);
@@ -450,7 +451,7 @@ export class AgentCanvasLayoutManager {
         if (savedPos) {
           agent.x = savedPos.x;
           agent.y = savedPos.y;
-          agentsRestored++;
+          _agentsRestored++;
           agentsWithPositions.push(agent);
         } else {
           agentsWithoutPositions.push(agent);
@@ -552,7 +553,7 @@ export class AgentCanvasLayoutManager {
         inputPorts: node.inputPorts || [],
         outputPort: node.outputPort || { id: 'output', x: 0, y: 40 }
       }));
-      combinersRestored = this.state.combinerNodes.length;
+      _combinersRestored = this.state.combinerNodes.length;
     }
 
     // Restore workflow connections
@@ -565,7 +566,7 @@ export class AgentCanvasLayoutManager {
           this.parent.ensureCombinerInputPort(targetNode.node, conn.toPort);
         }
       });
-      connectionsRestored = this.state.connections.length;
+      _connectionsRestored = this.state.connections.length;
     }
 
     // Remove stale combiner input ports so only active connections are shown

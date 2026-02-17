@@ -86,7 +86,7 @@ class PluginHealthManager {
     };
 
     plugins.forEach(plugin => {
-      if (statusCounts.hasOwnProperty(plugin.status)) {
+      if (Object.prototype.hasOwnProperty.call(statusCounts, plugin.status)) {
         statusCounts[plugin.status]++;
       }
     });

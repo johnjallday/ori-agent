@@ -1089,12 +1089,8 @@ function showStoreDetails(storeNode) {
   // Find assigned agent if any
   const canvas = window.agentCanvas;
   const agents = canvas?.state?.agents || [];
-  const assignedAgent = storeNode.agent_node_id
-    ? agents.find(a => a.nodeId === storeNode.agent_node_id || a.id === storeNode.agent_node_id)
-    : null;
-  const assignedAgentLabel = assignedAgent
-    ? `${assignedAgent.name} #${assignedAgent.instanceNumber || 1}`
-    : null;
+  
+  
 
   // Build agent options for dropdown
   const agentOptions = agents.map(a => {
@@ -2523,7 +2519,7 @@ window.switchView = switchView;
 /**
  * Edit agent settings
  */
-function editAgentSettings(agentName, currentType, currentModel, currentTemp) {
+function editAgentSettings() {
   const displayDiv = document.getElementById('agent-config-display');
   const editDiv = document.getElementById('agent-config-edit');
 
@@ -3112,7 +3108,7 @@ function collectWorkflowSelectionData() {
 
   // Convert selected nodes to workflow format
   const nodes = [];
-  const selectedIds = new Set(selectedNodes.map(n => n.id));
+  
 
   // Calculate center of selection for relative positioning
   let sumX = 0, sumY = 0;

@@ -1,6 +1,6 @@
 import { AgentCanvasForms } from './agent-canvas-forms.js';
-import { apiGet, apiPost, apiPut, apiPatch, apiDelete } from './agent-canvas-api.js';
-import { connectProgressStream } from './agent-canvas-events.js';
+import {  apiPost, apiPut, apiPatch, apiDelete } from './agent-canvas-api.js';
+
 import { executeTask as tasksExecuteTask, rerunTask as tasksRerunTask, linkTaskResult as tasksLinkTaskResult } from './agent-canvas-tasks.js';
 import { AgentCanvasState, EVENT_TYPES } from './agent-canvas-state.js';
 import { AgentCanvasRenderer } from './agent-canvas-renderer.js';

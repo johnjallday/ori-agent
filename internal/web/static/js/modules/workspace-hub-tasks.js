@@ -412,7 +412,7 @@
         : `${tasks.length} task${tasks.length === 1 ? '' : 's'} queued for this workspace.`;
     }
 
-    const inSelectionMode = window.WorkspaceHubSelection.isSelectionModeEnabled('tasks');
+    const _inSelectionMode = window.WorkspaceHubSelection.isSelectionModeEnabled('tasks');
     const selectedSet = state.selectedItems.tasks;
 
     const renderTaskCard = (task, { isParent = false, isSubtask = false, subtasks = [], stepNumber = null, parentId = '' } = {}) => {

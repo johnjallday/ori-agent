@@ -211,7 +211,7 @@ function displayUpdateInfo(updateInfo, pluginUpdates = []) {
     const assetName = asset ? asset.name || asset.Name || '' : '';
     const assetSize = asset ? asset.size ?? asset.Size ?? 0 : 0;
     const assetURL = asset ? asset.url || asset.URL || '' : '';
-    const githubReleaseUrl = `https://github.com/${updateInfo.repository}/releases/tag/${updateInfo.latestVersion}`;
+    
 
     // Format release date
     const releaseDate = new Date(updateInfo.releaseDate).toLocaleDateString('en-US', {
@@ -704,7 +704,7 @@ function describeAsset(assetName, platform) {
 }
 
 // Show toast notification for available update
-function showUpdateToast(updateInfo) {
+function showUpdateToast() {
   // Only show if browser supports notifications and user hasn't dismissed
   if (!('Notification' in window)) {
     return;

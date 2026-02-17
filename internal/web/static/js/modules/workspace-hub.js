@@ -1562,7 +1562,7 @@ console.log('[workspace-hub.js] FILE LOADED');
    * @param {Object} options - Options
    * @param {boolean} options.focus - Whether to blur select after selection
    */
-  function selectWorkspace(workspaceId, { focus = false } = {}) {
+  function _selectWorkspace(workspaceId, { focus = false } = {}) {
     const state = window.WorkspaceHubState.getState();
     const workspace = state.workspaceMap.get(workspaceId);
     if (!workspace) return;

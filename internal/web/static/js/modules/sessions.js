@@ -741,7 +741,7 @@ const sessionManager = {
       const children = folder.children || [];
       const folderSessions = this.sessionsByFolder?.get(folder.id) || [];
       const isCollapsed = this.collapsedFolderIds.has(folder.id);
-      const hasNestedSessions = folderSessions.length > 0;
+      
       const hasAccent = Boolean(folder.color);
       const accentStyles = hasAccent
         ? `data-has-accent="true" style="--folder-accent-bg: ${this.hexToRgba(folder.color, 0.12)}; --folder-accent-bg-hover: ${this.hexToRgba(folder.color, 0.18)}; --folder-accent-border: ${this.hexToRgba(folder.color, 0.35)};"`
@@ -4059,7 +4059,7 @@ const sessionManager = {
       const data = await response.json();
 
       // Update local cache
-      for (const [folderId, notes] of this.notesByFolder) {
+      for (const [, notes] of this.notesByFolder) {
         const index = notes.findIndex(n => n.id === noteId);
         if (index !== -1) {
           notes[index] = { ...notes[index], ...data.note };
@@ -4090,7 +4090,7 @@ const sessionManager = {
       if (!response.ok) throw new Error('Failed to delete note');
 
       // Remove from local cache
-      for (const [folderId, notes] of this.notesByFolder) {
+      for (const [, notes] of this.notesByFolder) {
         const index = notes.findIndex(n => n.id === noteId);
         if (index !== -1) {
           notes.splice(index, 1);
@@ -5049,7 +5049,7 @@ const sessionManager = {
   async promptRenameNote(noteId) {
     // Find the note
     let note = null;
-    for (const [folderId, notes] of this.notesByFolder) {
+    for (const [, notes] of this.notesByFolder) {
       note = notes.find(n => n.id === noteId);
       if (note) break;
     }
@@ -5553,16 +5553,18 @@ const sessionManager = {
     switch (schedule.type) {
       case 'daily':
         return `Daily at ${schedule.time_of_day || '00:00'}`;
-      case 'weekly':
+      case 'weekly': {
         const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
         return `Weekly on ${days[schedule.day_of_week || 0]} at ${schedule.time_of_day || '00:00'}`;
-      case 'interval':
+      }
+      case 'interval': {
         // Interval is in nanoseconds
         const totalSeconds = Math.floor((schedule.interval || 0) / 1000000000);
         const hours = Math.floor(totalSeconds / 3600);
         const minutes = Math.floor((totalSeconds % 3600) / 60);
         if (hours > 0) return `Every ${hours} hour${hours > 1 ? 's' : ''}`;
         return `Every ${minutes} minute${minutes > 1 ? 's' : ''}`;
+      }
       case 'once':
         return schedule.execute_at ? `Once at ${new Date(schedule.execute_at).toLocaleString()}` : 'Once';
       case 'cron':
@@ -5778,18 +5780,6 @@ const sessionManager = {
         }
       }
     });
-  },
-
-  // Helper to find folder by ID recursively
-  findFolderById(folderId, folders) {
-    for (const folder of folders) {
-      if (folder.id === folderId) return folder;
-      if (folder.children && folder.children.length > 0) {
-        const found = this.findFolderById(folderId, folder.children);
-        if (found) return found;
-      }
-    }
-    return null;
   },
 
   // Submit task from main panel using orchestration API
@@ -6236,7 +6226,7 @@ const sessionManager = {
         schedule.time = document.getElementById('taskModalScheduleTime')?.value || '09:00';
         schedule.day_of_week = document.getElementById('taskModalScheduleDay')?.value || 'monday';
         break;
-      case 'interval':
+      case 'interval': {
         // Combine value and unit into interval_minutes
         const intervalValue = parseInt(document.getElementById('taskModalScheduleIntervalValue')?.value || '1', 10);
         const intervalUnit = document.getElementById('taskModalScheduleIntervalUnit')?.value || 'hours';
@@ -6248,12 +6238,14 @@ const sessionManager = {
         }
         schedule.interval_minutes = intervalMinutes;
         break;
-      case 'once':
+      }
+      case 'once': {
         const datetime = document.getElementById('taskModalScheduleDatetime')?.value;
         if (datetime) {
           schedule.run_at = new Date(datetime).toISOString();
         }
         break;
+      }
     }
 
     return {

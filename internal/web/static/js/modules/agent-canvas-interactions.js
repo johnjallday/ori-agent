@@ -833,7 +833,7 @@ export class AgentCanvasInteractionHandler {
       const isHovering = mouseX >= bounds.x && mouseX <= bounds.x + bounds.width &&
                         mouseY >= bounds.y && mouseY <= bounds.y + bounds.height;
 
-      const prevState = this.state.copyButtonState;
+      
       if (isHovering && this.state.copyButtonState === 'idle') {
         this.state.copyButtonState = 'hover';
         this.canvas.style.cursor = 'pointer';

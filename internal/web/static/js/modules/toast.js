@@ -3,7 +3,7 @@
 
 const Toast = (function() {
   let container = null;
-  const toastQueue = [];
+  
   const maxToasts = 5;
 
   // Initialize toast container

@@ -130,7 +130,7 @@ export class RendererUI {
 
     // Calculate center of canvas in world coordinates
     const centerX = this.state.width / 2;
-    const centerY = this.state.height / 2;
+    
 
     // Draw mission background box
     this.ctx.save();

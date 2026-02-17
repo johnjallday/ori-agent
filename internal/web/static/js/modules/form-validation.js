@@ -28,7 +28,7 @@ const FormValidation = (function() {
     // Update function
     function updateCounter() {
       const currentLength = input.value.length;
-      const remaining = maxLength - currentLength;
+      
       const percentage = (currentLength / maxLength) * 100;
 
       counter.textContent = `${currentLength} / ${maxLength}`;

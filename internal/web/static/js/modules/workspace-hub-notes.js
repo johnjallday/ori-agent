@@ -191,7 +191,7 @@
       return;
     }
 
-    const inSelectionMode = window.WorkspaceHubSelection.isSelectionModeEnabled('notes');
+    const _inSelectionMode = window.WorkspaceHubSelection.isSelectionModeEnabled('notes');
     const selectedSet = state.selectedItems.notes;
 
     const items = notes.slice(0, 5).map((note) => {

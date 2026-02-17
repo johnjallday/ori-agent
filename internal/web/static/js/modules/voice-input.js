@@ -88,7 +88,7 @@
   }
 
   function setStatus(context, message, state) {
-    const targets = document.querySelectorAll(`[data-voice-status=\"${context}\"]`);
+    const targets = document.querySelectorAll(`[data-voice-status="${context}"]`);
     targets.forEach((el) => {
       el.textContent = message || '';
       el.classList.toggle('is-active', Boolean(message) && state !== 'error');

@@ -9,7 +9,7 @@
   if (!hubEl) return;
 
   const {
-    getTaskKanbanColumnId,
+    
     groupTasksByKanbanColumn,
     collectWorkspaceDescendantIds,
     formatDate
@@ -1143,10 +1143,7 @@
     }
   }
 
-  function isBoardActive() {
-    const elements = getElements();
-    return !!elements.viewBoardBtn && elements.viewBoardBtn.classList.contains('is-active');
-  }
+  
 
   function wireEvents() {
     const elements = getElements();

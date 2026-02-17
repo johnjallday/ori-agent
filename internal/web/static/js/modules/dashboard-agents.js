@@ -117,7 +117,7 @@ export class DashboardAgents {
         throw new Error(error || 'Failed to add agent');
       }
 
-      const result = await response.json();
+      await response.json();
 
       // Hide form and reload workspace data
       this.hideAddAgentForm();

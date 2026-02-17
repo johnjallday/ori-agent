@@ -226,7 +226,7 @@ function renderMCPServers() {
 // Setup tags input
 function setupTagsInput() {
   const input = document.getElementById('tagsInput');
-  const container = document.getElementById('tagsContainer');
+  
 
   input.addEventListener('keydown', (e) => {
     if (e.key === 'Enter' && input.value.trim()) {

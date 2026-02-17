@@ -605,7 +605,7 @@ export class RendererPanels {
       const resultText = this.state.expandedAgent.lastResult.toString();
 
       // Wrap text for long results
-      const maxLineLength = 40;
+      
       const resultLines = this.primitives.wrapText(resultText, resultBoxWidth - 20);
       const resultBoxHeight = Math.max(60, resultLines.length * 18 + 20);
 

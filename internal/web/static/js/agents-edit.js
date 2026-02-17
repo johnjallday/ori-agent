@@ -34,7 +34,7 @@ function getAgentNameFromURL() {
   const queryName = params.get('name');
   if (queryName) return queryName;
   // Fall back to path-based URL if ever needed
-  const pathMatch = window.location.pathname.match(/\/agents\/([^\/]+)\/edit/);
+  const pathMatch = window.location.pathname.match(/\/agents\/([^/]+)\/edit/);
   if (pathMatch) return decodeURIComponent(pathMatch[1]);
   return null;
 }

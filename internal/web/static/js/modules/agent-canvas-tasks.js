@@ -31,7 +31,7 @@ export async function executeTask(canvas, task) {
     task.to = selectedAgent.name;
   }
 
-  const result = await apiPost('/api/orchestration/tasks/execute', { task_id: task.id });
+  await apiPost('/api/orchestration/tasks/execute', { task_id: task.id });
   task.status = 'in_progress';
   canvas.draw();
   setTimeout(() => canvas.init(), 1000);
@@ -83,7 +83,7 @@ export async function assignTaskToCombiner(canvas, combiner) {
 
   try {
     // Update the combiner task to include the new input
-    const response = await apiPut(`/api/orchestration/tasks`, {
+    await apiPut('/api/orchestration/tasks', {
       task_id: combiner.id,
       description: combiner.description,
       to: combiner.to || '',
