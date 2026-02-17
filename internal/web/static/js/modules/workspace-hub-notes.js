@@ -9,6 +9,99 @@
 
   const { formatDate } = window.WorkspaceHubUtils;
 
+  function setCopyAllButtonState(noteCount, busy) {
+    const elements = window.WorkspaceHubState.getElements();
+    const button = elements.copyNotesBtn;
+    if (!button) return;
+
+    const hasNotes = Number(noteCount) > 0;
+    button.disabled = Boolean(busy) || !hasNotes;
+    if (busy) {
+      button.title = 'Copying notes...';
+      return;
+    }
+    button.title = hasNotes ? 'Copy all note contents' : 'No notes to copy';
+  }
+
+  async function writeClipboardText(text) {
+    if (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
+      await navigator.clipboard.writeText(text);
+      return;
+    }
+
+    const textarea = document.createElement('textarea');
+    textarea.value = text;
+    textarea.setAttribute('readonly', '');
+    textarea.style.position = 'fixed';
+    textarea.style.top = '-9999px';
+    textarea.style.left = '-9999px';
+    document.body.appendChild(textarea);
+    textarea.focus();
+    textarea.select();
+
+    const copied = document.execCommand('copy');
+    document.body.removeChild(textarea);
+    if (!copied) throw new Error('Copy command failed');
+  }
+
+  async function copyAllNotesToClipboard() {
+    const state = window.WorkspaceHubState.getState();
+    const notes = Array.isArray(state.notes) ? state.notes : [];
+
+    if (notes.length === 0) {
+      setCopyAllButtonState(0, false);
+      if (typeof window.notifyToast === 'function') {
+        window.notifyToast('No notes to copy', 'error');
+      } else if (window.Toast) {
+        window.Toast.error('No notes to copy');
+      }
+      return;
+    }
+
+    setCopyAllButtonState(notes.length, true);
+    try {
+      const sections = await Promise.all(notes.map(async (note, index) => {
+        const noteId = String(note?.id || '').trim();
+        const title = String(note?.name || note?.title || `Note ${index + 1}`).trim() || `Note ${index + 1}`;
+        let content = '';
+
+        if (noteId) {
+          try {
+            const response = await fetch(`/api/notes/${encodeURIComponent(noteId)}`);
+            if (response.ok) {
+              const detail = await response.json();
+              content = String(detail?.content || detail?.preview || '').trim();
+            }
+          } catch (error) {
+            console.error('Failed to load note content for copy:', error);
+          }
+        }
+
+        if (!content) {
+          content = String(note?.content || note?.preview || '').trim();
+        }
+
+        return `# ${title}\n${content || '(empty note)'}`;
+      }));
+
+      await writeClipboardText(sections.join('\n\n---\n\n'));
+      if (typeof window.notifyToast === 'function') {
+        window.notifyToast(`Copied ${notes.length} note${notes.length === 1 ? '' : 's'} to clipboard`, 'success');
+      } else if (window.Toast) {
+        window.Toast.success(`Copied ${notes.length} note${notes.length === 1 ? '' : 's'} to clipboard`);
+      }
+    } catch (error) {
+      console.error('Failed to copy notes to clipboard:', error);
+      if (typeof window.notifyToast === 'function') {
+        window.notifyToast('Failed to copy notes', 'error');
+      } else if (window.Toast) {
+        window.Toast.error('Failed to copy notes');
+      }
+    } finally {
+      setCopyAllButtonState(notes.length, false);
+    }
+  }
+
   /**
    * Delete a note
    * @param {string} noteId - Note ID to delete
@@ -150,10 +243,15 @@
    */
   async function loadNotes(workspaceId) {
     console.log('[loadNotes] called with workspaceId:', workspaceId);
-    if (!workspaceId) return;
+    if (!workspaceId) {
+      setCopyAllButtonState(0, false);
+      return;
+    }
 
     const state = window.WorkspaceHubState.getState();
     const elements = window.WorkspaceHubState.getElements();
+    const noteCount = Array.isArray(state.notes) ? state.notes.length : 0;
+    setCopyAllButtonState(noteCount, true);
 
     if (elements.notesList) {
       elements.notesList.innerHTML = '<div class="hub-loading">Loading notes...</div>';
@@ -169,6 +267,8 @@
       renderNotes(state.notes);
     } catch (error) {
       console.error('Workspace hub failed to load notes:', error);
+      state.notes = [];
+      setCopyAllButtonState(0, false);
       if (elements.notesList) {
         elements.notesList.innerHTML = '<div class="hub-empty">Unable to load notes.</div>';
       }
@@ -188,6 +288,7 @@
 
     if (!notes || notes.length === 0) {
       elements.notesList.innerHTML = '<div class="hub-empty">No notes yet.</div>';
+      setCopyAllButtonState(0, false);
       return;
     }
 
@@ -224,6 +325,7 @@
     console.log('[DEBUG renderNotes] HTML:', items.join(''));
     elements.notesList.innerHTML = items.join('');
     console.log('[DEBUG renderNotes] innerHTML set, element now:', elements.notesList.innerHTML);
+    setCopyAllButtonState(notes.length, false);
     bindNoteEvents();
   }
 
@@ -274,6 +376,7 @@
     openNote,
     createNewNote,
     createQuickNote,
+    copyAllNotesToClipboard,
     loadNotes,
     renderNotes
   };

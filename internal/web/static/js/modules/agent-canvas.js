@@ -538,6 +538,11 @@ class AgentCanvas {
     try {
       // Use the Clipboard API to copy text
       await navigator.clipboard.writeText(this.expandedTask.result);
+      if (typeof window.notifyToast === 'function') {
+        window.notifyToast('Result copied to clipboard', 'success');
+      } else if (window.Toast && typeof window.Toast.success === 'function') {
+        window.Toast.success('Result copied to clipboard');
+      }
 
       // Update button state to show success
       this.copyButtonState = 'copied';
@@ -552,8 +557,13 @@ class AgentCanvas {
       }, 2000);
     } catch (error) {
       console.error('Failed to copy to clipboard:', error);
-      // Fallback: show error notification
-      alert('Failed to copy to clipboard. Please try selecting and copying the text manually.');
+      if (typeof window.notifyToast === 'function') {
+        window.notifyToast('Failed to copy to clipboard', 'error');
+      } else if (window.Toast && typeof window.Toast.error === 'function') {
+        window.Toast.error('Failed to copy to clipboard');
+      } else {
+        alert('Failed to copy to clipboard. Please try selecting and copying the text manually.');
+      }
     }
   }
 

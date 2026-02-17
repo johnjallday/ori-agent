@@ -19,6 +19,11 @@ const Toast = (function() {
       container.setAttribute('aria-atomic', 'true');
       document.body.appendChild(container);
     }
+    // Ensure toast stack is always above modal stacks.
+    container.style.zIndex = '2147483647';
+    container.style.position = 'fixed';
+    container.style.right = '20px';
+    container.style.bottom = '20px';
   }
 
   // Get icon SVG based on type
@@ -43,7 +48,8 @@ const Toast = (function() {
   // Create toast element
   function createToast(message, type, options = {}) {
     const toast = document.createElement('div');
-    toast.className = `toast toast-${type}`;
+    // Keep Bootstrap from auto-hiding `.toast:not(.show)` while using custom styles.
+    toast.className = `toast show toast-${type}`;
     toast.setAttribute('role', 'alert');
     toast.setAttribute('aria-live', 'assertive');
     toast.setAttribute('aria-atomic', 'true');
@@ -180,4 +186,41 @@ document.addEventListener('DOMContentLoaded', () => Toast.init());
 // Export for use in other modules
 if (typeof window !== 'undefined') {
   window.Toast = Toast;
+  window.notifyToast = function notifyToast(message, type = 'info', options = {}) {
+    const normalizedType = String(type || 'info').toLowerCase();
+    const toastType = normalizedType === 'danger' ? 'error' : normalizedType === 'warn' ? 'warning' : normalizedType;
+
+    if (window.Toast) {
+      const toastFn = window.Toast[toastType];
+      if (typeof toastFn === 'function') {
+        toastFn(message, options);
+        return;
+      }
+      if (typeof window.Toast.show === 'function') {
+        window.Toast.show(message, toastType, options);
+        return;
+      }
+    }
+
+    // Fallback if toast module is unavailable for any reason.
+    const fallback = document.createElement('div');
+    fallback.textContent = String(message || '');
+    fallback.style.cssText = [
+      'position:fixed',
+      'top:16px',
+      'right:16px',
+      'z-index:2147483647',
+      'background:#111827',
+      'color:#f9fafb',
+      'padding:10px 12px',
+      'border-radius:8px',
+      'font-size:13px',
+      'box-shadow:0 8px 20px rgba(0,0,0,0.35)',
+      'max-width:360px'
+    ].join(';');
+    document.body.appendChild(fallback);
+    setTimeout(() => {
+      fallback.remove();
+    }, 2200);
+  };
 }

@@ -118,6 +118,7 @@ console.log('[workspace-hub.js] FILE LOADED');
     sessionsList: document.getElementById('hubSessionsList'),
     newSessionBtn: document.getElementById('hubNewSessionBtn'),
     notesList: document.getElementById('hubNotesList'),
+    copyNotesBtn: document.getElementById('hubCopyNotesBtn'),
     newNoteBtn: document.getElementById('hubNewNoteBtn'),
     filesList: document.getElementById('hubFilesList'),
     addFileBtn: document.getElementById('hubAddFileBtn'),
@@ -1660,6 +1661,10 @@ console.log('[workspace-hub.js] FILE LOADED');
     if (elements.notesList) {
       elements.notesList.innerHTML = '<div class="hub-empty">Select a workspace to view notes.</div>';
     }
+    if (elements.copyNotesBtn) {
+      elements.copyNotesBtn.disabled = true;
+      elements.copyNotesBtn.title = 'No notes to copy';
+    }
     if (elements.filesList) {
       elements.filesList.innerHTML = '<div class="hub-empty">Select a workspace to view files.</div>';
     }
@@ -2006,6 +2011,9 @@ console.log('[workspace-hub.js] FILE LOADED');
 
     if (elements.newNoteBtn) {
       elements.newNoteBtn.addEventListener('click', window.WorkspaceHubNotes.createNewNote);
+    }
+    if (elements.copyNotesBtn) {
+      elements.copyNotesBtn.addEventListener('click', window.WorkspaceHubNotes.copyAllNotesToClipboard);
     }
 
     if (elements.addFileBtn) {

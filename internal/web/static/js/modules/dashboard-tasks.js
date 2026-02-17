@@ -587,7 +587,7 @@ export class DashboardTasks {
                 <div class="alert alert-success">
                   <div class="d-flex justify-content-between align-items-center mb-2">
                     <strong>Task Output:</strong>
-                    <button class="btn btn-sm btn-outline-success" onclick="navigator.clipboard.writeText(\`${this.escapeHtml(task.result).replace(/`/g, '\\`')}\`).then(() => alert('Result copied to clipboard!'))">
+                    <button class="btn btn-sm btn-outline-success" onclick="navigator.clipboard.writeText(\`${this.escapeHtml(task.result).replace(/`/g, '\\`')}\`).then(() => { if (typeof window.notifyToast === 'function') { window.notifyToast('Result copied to clipboard', 'success'); } else if (window.Toast && typeof window.Toast.success === 'function') { window.Toast.success('Result copied to clipboard'); } else { alert('Result copied to clipboard!'); } }).catch(() => { if (typeof window.notifyToast === 'function') { window.notifyToast('Failed to copy result', 'error'); } else if (window.Toast && typeof window.Toast.error === 'function') { window.Toast.error('Failed to copy result'); } else { alert('Failed to copy result'); } })">
                       📋 Copy
                     </button>
                   </div>

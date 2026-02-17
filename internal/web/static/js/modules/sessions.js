@@ -3901,6 +3901,11 @@ const sessionManager = {
     const normalizedType = (type || 'info').toLowerCase();
     const toastType = normalizedType === 'danger' ? 'error' : normalizedType === 'warn' ? 'warning' : normalizedType;
 
+    if (typeof window.notifyToast === 'function') {
+      window.notifyToast(message, toastType);
+      return;
+    }
+
     if (window.Toast) {
       const toastFn = window.Toast[toastType];
       if (typeof toastFn === 'function') {
@@ -4256,6 +4261,7 @@ const sessionManager = {
 
     // Note editor save button
     document.getElementById('saveNoteBtn')?.addEventListener('click', () => this.saveCurrentNote());
+    document.getElementById('noteCopyBtn')?.addEventListener('click', () => this.copyCurrentNoteContent());
 
     // Auto-save: listen for input changes on note title and content
     document.getElementById('noteNameInput')?.addEventListener('input', () => this.scheduleNoteAutoSave());
@@ -4612,6 +4618,44 @@ const sessionManager = {
   // Create new note for folder (called from folder context menu)
   createNewNoteForFolder(folderId) {
     this.openNoteCreateModal(folderId);
+  },
+
+  async writeTextToClipboard(text) {
+    if (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
+      await navigator.clipboard.writeText(text);
+      return;
+    }
+
+    const textarea = document.createElement('textarea');
+    textarea.value = text;
+    textarea.setAttribute('readonly', '');
+    textarea.style.position = 'fixed';
+    textarea.style.top = '-9999px';
+    textarea.style.left = '-9999px';
+    document.body.appendChild(textarea);
+    textarea.focus();
+    textarea.select();
+
+    const copied = document.execCommand('copy');
+    document.body.removeChild(textarea);
+    if (!copied) throw new Error('Copy command failed');
+  },
+
+  async copyCurrentNoteContent() {
+    const contentInput = document.getElementById('noteContentInput');
+    const noteContent = String(contentInput?.value || '');
+    if (!noteContent.trim()) {
+      this.showToast('Note is empty', 'info');
+      return;
+    }
+
+    try {
+      await this.writeTextToClipboard(noteContent);
+      this.showToast('Note content copied', 'success');
+    } catch (error) {
+      console.error('Failed to copy note content:', error);
+      this.showToast('Failed to copy note', 'error');
+    }
   },
 
   // Save current note
