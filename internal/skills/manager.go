@@ -344,11 +344,18 @@ func (m *Manager) applySkillState(agentName string, skills []Skill) error {
 		return err
 	}
 
+	defaultState, hasDefaultState := registry.Skills["*"]
+
 	for i := range skills {
 		key := normalizeSkillKey(skills[i].Name)
 		if state, ok := registry.Skills[key]; ok {
 			skills[i].Enabled = state.Enabled
 			skills[i].Trusted = state.Trusted
+			continue
+		}
+		if hasDefaultState {
+			skills[i].Enabled = defaultState.Enabled
+			skills[i].Trusted = defaultState.Trusted
 			continue
 		}
 		if !skills[i].Enabled {

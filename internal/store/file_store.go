@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/johnjallday/ori-agent/internal/agent"
 	"github.com/johnjallday/ori-agent/internal/logger"
@@ -75,6 +76,7 @@ func (s *fileStore) SetCurrentAgent(name string) error {
 func (s *fileStore) CreateAgent(name string, config *CreateAgentConfig) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	created := false
 	if _, exists := s.agents[name]; !exists {
 		// Get default settings - either from current agent or use hardcoded defaults
 		var defaultSettings types.Settings
@@ -126,8 +128,75 @@ func (s *fileStore) CreateAgent(name string, config *CreateAgentConfig) error {
 		// Initialize evolution defaults for the new agent
 		newAgent.InitializeEvolution()
 		s.agents[name] = newAgent
+		created = true
 	}
+
+	if created {
+		if err := s.initializeNewAgentSkillsStateUnlocked(name); err != nil {
+			return fmt.Errorf("initialize skill defaults: %w", err)
+		}
+	}
+
 	return s.saveUnlocked()
+}
+
+func (s *fileStore) initializeNewAgentSkillsStateUnlocked(agentName string) error {
+	if strings.TrimSpace(agentName) == "" {
+		return fmt.Errorf("agent name is required")
+	}
+
+	baseDir := filepath.Dir(s.path)
+	var agentsDir string
+	if strings.Contains(s.path, "/agents/") || strings.Contains(s.path, "\\agents\\") {
+		agentsDirIndex := strings.LastIndex(s.path, "/agents/")
+		if agentsDirIndex == -1 {
+			agentsDirIndex = strings.LastIndex(s.path, "\\agents\\")
+		}
+		if agentsDirIndex != -1 {
+			agentsDir = s.path[:agentsDirIndex+7]
+		} else {
+			agentsDir = filepath.Join(baseDir, "agents")
+		}
+	} else {
+		agentsDir = filepath.Join(baseDir, "agents")
+	}
+
+	skillsStatePath := filepath.Join(agentsDir, agentName, "skills_state.json")
+	if _, err := os.Stat(skillsStatePath); err == nil {
+		return nil
+	} else if !os.IsNotExist(err) {
+		return err
+	}
+
+	type persistedSkillState struct {
+		Enabled   bool      `json:"enabled"`
+		Trusted   bool      `json:"trusted"`
+		UpdatedAt time.Time `json:"updated_at,omitempty"`
+	}
+	type persistedSkillRegistry struct {
+		Skills map[string]persistedSkillState `json:"skills"`
+	}
+
+	registry := persistedSkillRegistry{
+		Skills: map[string]persistedSkillState{
+			"*": {
+				Enabled:   false,
+				Trusted:   false,
+				UpdatedAt: time.Now().UTC(),
+			},
+		},
+	}
+
+	payload, err := json.MarshalIndent(registry, "", "  ")
+	if err != nil {
+		return err
+	}
+
+	if err := os.MkdirAll(filepath.Dir(skillsStatePath), 0o755); err != nil {
+		return err
+	}
+
+	return os.WriteFile(skillsStatePath, payload, 0o644)
 }
 
 func (s *fileStore) DeleteAgent(name string) error {

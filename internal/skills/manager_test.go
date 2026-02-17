@@ -1,6 +1,7 @@
 package skills
 
 import (
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -147,6 +148,122 @@ func TestListSkills_PersonalSkillDuplicateDoesNotOverrideLocal(t *testing.T) {
 	}
 	if skills[0].Source != SourceAgent {
 		t.Fatalf("expected local agent source precedence, got %q", skills[0].Source)
+	}
+}
+
+func TestListSkills_DefaultEnabledWithoutRegistry(t *testing.T) {
+	tmpDir := t.TempDir()
+	agentStorePath := filepath.Join(tmpDir, "agents.json")
+	if err := os.WriteFile(agentStorePath, []byte(`{}`), 0o644); err != nil {
+		t.Fatalf("write agents.json: %v", err)
+	}
+
+	repoSkillDir := filepath.Join(tmpDir, "agents", "skills", "repo-skill")
+	writeTestSkill(t, repoSkillDir, "repo-skill", "Repo skill", "Repo prompt")
+
+	manager := NewManager(ManagerConfig{AgentStorePath: agentStorePath})
+	skills, err := manager.ListSkills("default")
+	if err != nil {
+		t.Fatalf("ListSkills error: %v", err)
+	}
+	if len(skills) != 1 {
+		t.Fatalf("expected 1 skill, got %d", len(skills))
+	}
+	if !skills[0].Enabled {
+		t.Fatalf("expected skill to default enabled when no registry is present")
+	}
+}
+
+func TestListSkills_WildcardDefaultState(t *testing.T) {
+	tmpDir := t.TempDir()
+	agentStorePath := filepath.Join(tmpDir, "agents.json")
+	if err := os.WriteFile(agentStorePath, []byte(`{}`), 0o644); err != nil {
+		t.Fatalf("write agents.json: %v", err)
+	}
+
+	repoSkillDir := filepath.Join(tmpDir, "agents", "skills", "repo-skill")
+	writeTestSkill(t, repoSkillDir, "repo-skill", "Repo skill", "Repo prompt")
+
+	registryPath := filepath.Join(tmpDir, "agents", "default", "skills_state.json")
+	registry := map[string]any{
+		"skills": map[string]any{
+			"*": map[string]any{
+				"enabled": false,
+				"trusted": false,
+			},
+		},
+	}
+	registryBytes, err := json.Marshal(registry)
+	if err != nil {
+		t.Fatalf("marshal registry: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Dir(registryPath), 0o755); err != nil {
+		t.Fatalf("mkdir registry dir: %v", err)
+	}
+	if err := os.WriteFile(registryPath, registryBytes, 0o644); err != nil {
+		t.Fatalf("write registry: %v", err)
+	}
+
+	manager := NewManager(ManagerConfig{AgentStorePath: agentStorePath})
+	skills, err := manager.ListSkills("default")
+	if err != nil {
+		t.Fatalf("ListSkills error: %v", err)
+	}
+	if len(skills) != 1 {
+		t.Fatalf("expected 1 skill, got %d", len(skills))
+	}
+	if skills[0].Enabled {
+		t.Fatalf("expected wildcard default to disable skill")
+	}
+}
+
+func TestListSkills_ExplicitStateOverridesWildcard(t *testing.T) {
+	tmpDir := t.TempDir()
+	agentStorePath := filepath.Join(tmpDir, "agents.json")
+	if err := os.WriteFile(agentStorePath, []byte(`{}`), 0o644); err != nil {
+		t.Fatalf("write agents.json: %v", err)
+	}
+
+	repoSkillDir := filepath.Join(tmpDir, "agents", "skills", "repo-skill")
+	writeTestSkill(t, repoSkillDir, "repo-skill", "Repo skill", "Repo prompt")
+
+	registryPath := filepath.Join(tmpDir, "agents", "default", "skills_state.json")
+	registry := map[string]any{
+		"skills": map[string]any{
+			"*": map[string]any{
+				"enabled": false,
+				"trusted": false,
+			},
+			"repo-skill": map[string]any{
+				"enabled": true,
+				"trusted": true,
+			},
+		},
+	}
+	registryBytes, err := json.Marshal(registry)
+	if err != nil {
+		t.Fatalf("marshal registry: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Dir(registryPath), 0o755); err != nil {
+		t.Fatalf("mkdir registry dir: %v", err)
+	}
+	if err := os.WriteFile(registryPath, registryBytes, 0o644); err != nil {
+		t.Fatalf("write registry: %v", err)
+	}
+
+	manager := NewManager(ManagerConfig{AgentStorePath: agentStorePath})
+	skills, err := manager.ListSkills("default")
+	if err != nil {
+		t.Fatalf("ListSkills error: %v", err)
+	}
+	if len(skills) != 1 {
+		t.Fatalf("expected 1 skill, got %d", len(skills))
+	}
+	if !skills[0].Enabled {
+		t.Fatalf("expected explicit state to override wildcard default")
+	}
+	if !skills[0].Trusted {
+		t.Fatalf("expected explicit trusted state to override wildcard default")
 	}
 }
 

@@ -1,605 +1,810 @@
-// Agents Dashboard JavaScript
+// Operations-first Agents Dashboard
 
-let dashboardAllAgents = [];
+let dashboardAgents = [];
 let dashboardFilteredAgents = [];
-let dashboardCurrentView = 'table';
-const dashboardCurrentSort = 'name';
-const dashboardSortOrder = 'asc';
-let dashboardRefreshInterval = null;
-let dashboardCurrentSourceFilter = 'all'; // 'all', 'ori', 'claude', 'codex'
-let externalAgentsData = null;
+let dashboardMode = 'operations';
+let selectedAgentName = '';
+let selectedAgentDetail = null;
+let selectedAgentSkills = null;
+
+const safeEscapeHtml = typeof escapeHtml === 'function'
+  ? escapeHtml
+  : (value) => {
+    const div = document.createElement('div');
+    div.textContent = String(value ?? '');
+    return div.innerHTML;
+  };
+
+function notifyError(message) {
+  if (window.Toast && typeof Toast.error === 'function') {
+    Toast.error(message);
+    return;
+  }
+  alert(message);
+}
+
+function notifySuccess(message) {
+  if (window.Toast && typeof Toast.success === 'function') {
+    Toast.success(message);
+    return;
+  }
+  alert(message);
+}
 
 function initializeDashboard() {
+  setupEventListeners();
+  setMode('operations');
   loadAgents();
-  loadExternalAgents();
-  setupAutoRefresh();
-  setupFilterTabs();
 }
 
-// Load external agents (Claude, Codex)
-async function loadExternalAgents() {
-  try {
-    if (typeof ExternalAgents !== 'undefined') {
-      externalAgentsData = await ExternalAgents.fetchExternalAgents();
-      updateExternalAgentsCounts();
-      updateExternalAgentsUI();
-    }
-  } catch (error) {
-    console.error('Error loading external agents:', error);
-  }
-}
+function setupEventListeners() {
+  const searchInput = document.getElementById('searchInput');
+  const modeOperationsBtn = document.getElementById('modeOperationsBtn');
+  const modeConfigBtn = document.getElementById('modeConfigBtn');
+  const closeDrawerBtn = document.getElementById('closeDrawerBtn');
+  const drawerBackdrop = document.getElementById('agentDrawerBackdrop');
+  const drawerOpenFullBtn = document.getElementById('drawerOpenFullBtn');
 
-// Update UI based on whether external agents are enabled
-function updateExternalAgentsUI() {
-  const claudeEnabled = typeof ExternalAgents !== 'undefined' && ExternalAgents.isClaudeEnabled();
-  const codexEnabled = typeof ExternalAgents !== 'undefined' && ExternalAgents.isCodexEnabled();
-  const anyEnabled = claudeEnabled || codexEnabled;
-
-  const claudeTab = document.querySelector('[data-filter="claude"]');
-  const codexTab = document.querySelector('[data-filter="codex"]');
-  const refreshBtn = document.getElementById('refreshExternalBtn');
-  const disabledBanner = document.getElementById('externalAgentsDisabledBanner');
-
-  // Update Claude tab
-  if (claudeTab) {
-    claudeTab.style.opacity = claudeEnabled ? '1' : '0.5';
-    claudeTab.title = claudeEnabled ? '' : 'Enable Claude Code agents in Settings';
+  if (searchInput) {
+    searchInput.addEventListener('input', () => {
+      applyFiltersAndRender();
+    });
   }
 
-  // Update Codex tab
-  if (codexTab) {
-    codexTab.style.opacity = codexEnabled ? '1' : '0.5';
-    codexTab.title = codexEnabled ? '' : 'Enable Codex CLI agents in Settings';
+  if (modeOperationsBtn) {
+    modeOperationsBtn.addEventListener('click', () => setMode('operations'));
   }
 
-  // Show refresh button if any source is enabled
-  if (refreshBtn) {
-    refreshBtn.style.display = anyEnabled ? '' : 'none';
+  if (modeConfigBtn) {
+    modeConfigBtn.addEventListener('click', () => setMode('config'));
   }
 
-  // Update disabled banner message
-  if (disabledBanner) {
-    if (!anyEnabled) {
-      disabledBanner.style.display = '';
-      const bannerMessage = disabledBanner.querySelector('.banner-message');
-      if (bannerMessage) {
-        bannerMessage.textContent = 'External agents are disabled. Enable Claude Code or Codex CLI in Settings to view agents.';
+  if (closeDrawerBtn) {
+    closeDrawerBtn.addEventListener('click', closeAgentDrawer);
+  }
+
+  if (drawerBackdrop) {
+    drawerBackdrop.addEventListener('click', closeAgentDrawer);
+  }
+
+  if (drawerOpenFullBtn) {
+    drawerOpenFullBtn.addEventListener('click', () => {
+      if (!selectedAgentName) {
+        return;
       }
-    } else if (!claudeEnabled || !codexEnabled) {
-      // Show partial banner if only one is disabled
-      disabledBanner.style.display = '';
-      const bannerMessage = disabledBanner.querySelector('.banner-message');
-      if (bannerMessage) {
-        const disabled = !claudeEnabled ? 'Claude Code' : 'Codex CLI';
-        bannerMessage.textContent = `${disabled} agents are disabled. Enable in Settings to view.`;
-      }
-    } else {
-      disabledBanner.style.display = 'none';
-    }
+      window.location.href = `/agents/${encodeURIComponent(selectedAgentName)}`;
+    });
   }
-}
 
-// Update badge counts on filter tabs
-function updateExternalAgentsCounts() {
-  const claudeCount = ExternalAgents.getClaudeAgents().length;
-  const codexAgents = ExternalAgents.getCodexAgents();
-  const codexCount = codexAgents.length;
-
-  const claudeCountEl = document.getElementById('claudeAgentCount');
-  const codexCountEl = document.getElementById('codexAgentCount');
-
-  if (claudeCountEl) {
-    claudeCountEl.textContent = claudeCount;
-    claudeCountEl.style.display = claudeCount > 0 ? 'inline' : 'none';
-  }
-  if (codexCountEl) {
-    codexCountEl.textContent = codexCount;
-    codexCountEl.style.display = codexCount > 0 ? 'inline' : 'none';
-  }
-}
-
-// Setup filter tab click handlers
-function setupFilterTabs() {
-  document.querySelectorAll('.source-filter-btn').forEach(btn => {
-    btn.addEventListener('click', () => {
-      const filter = btn.dataset.filter;
-      setSourceFilter(filter);
+  document.querySelectorAll('.ops-drawer-tab').forEach((button) => {
+    button.addEventListener('click', () => {
+      const tab = button.dataset.tab || 'overview';
+      setDrawerTab(tab);
     });
   });
-}
 
-// Set source filter and re-render
-function setSourceFilter(filter) {
-  dashboardCurrentSourceFilter = filter;
-
-  // Update button states
-  document.querySelectorAll('.source-filter-btn').forEach(btn => {
-    btn.classList.toggle('active', btn.dataset.filter === filter);
+  document.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape') {
+      closeAgentDrawer();
+    }
   });
-
-  // Re-render based on filter
-  renderDashboardAgents();
 }
 
-// Refresh external agents
-async function refreshExternalAgents() {
-  const btn = document.getElementById('refreshExternalBtn');
-  if (btn) {
-    btn.disabled = true;
-    btn.innerHTML = '<span class="spinner-border spinner-border-sm" role="status"></span> Refreshing...';
+function setMode(mode) {
+  dashboardMode = mode === 'config' ? 'config' : 'operations';
+
+  const shell = document.querySelector('.ops-shell');
+  if (shell) {
+    shell.classList.toggle('config-mode', dashboardMode === 'config');
   }
 
-  try {
-    if (typeof ExternalAgents !== 'undefined') {
-      externalAgentsData = await ExternalAgents.refreshExternalAgents();
-      updateExternalAgentsCounts();
-      renderDashboardAgents();
-    }
-  } catch (error) {
-    console.error('Error refreshing external agents:', error);
-  } finally {
-    if (btn) {
-      btn.disabled = false;
-      btn.innerHTML = 'Refresh External';
-    }
+  const modeOperationsBtn = document.getElementById('modeOperationsBtn');
+  const modeConfigBtn = document.getElementById('modeConfigBtn');
+
+  if (modeOperationsBtn) {
+    modeOperationsBtn.classList.toggle('active', dashboardMode === 'operations');
   }
-}
 
-// Run initialization when DOM is ready
-if (document.readyState === 'loading') {
-  document.addEventListener('DOMContentLoaded', initializeDashboard);
-} else {
-  // DOM already loaded, run immediately
-  initializeDashboard();
-}
-
-// Setup auto-refresh for statistics
-function setupAutoRefresh() {
-  // Refresh stats every 60 seconds
-  dashboardRefreshInterval = setInterval(() => {
-    // Only refresh if page is visible
-    if (!document.hidden) {
-      updateStatistics();
-    }
-  }, 60000); // 60 seconds
-
-  // Stop refreshing when page is hidden
-  document.addEventListener('visibilitychange', () => {
-    if (document.hidden && dashboardRefreshInterval) {
-      clearInterval(dashboardRefreshInterval);
-      dashboardRefreshInterval = null;
-    } else if (!document.hidden && !dashboardRefreshInterval) {
-      // Restart when page becomes visible
-      updateStatistics(); // Immediate refresh
-      dashboardRefreshInterval = setInterval(() => {
-        if (!document.hidden) {
-          updateStatistics();
-        }
-      }, 60000);
-    }
-  });
-
-  // Cleanup on page unload
-  window.addEventListener('beforeunload', () => {
-    if (dashboardRefreshInterval) {
-      clearInterval(dashboardRefreshInterval);
-    }
-  });
+  if (modeConfigBtn) {
+    modeConfigBtn.classList.toggle('active', dashboardMode === 'config');
+  }
 }
 
 async function loadAgents() {
+  showLoading(true);
+
   try {
-    showLoading(true);
-    const response = await fetch('/api/agents');
+    const response = await fetch('/api/agents/dashboard/list?sort_by=name&order=asc');
 
     if (!response.ok) {
       throw new Error('Failed to load agents');
     }
 
     const data = await response.json();
-    dashboardAllAgents = data.agents || [];
-    dashboardFilteredAgents = [...dashboardAllAgents];
-
-    updateStatistics();
-    renderDashboardAgents();
-    showLoading(false);
-
+    dashboardAgents = Array.isArray(data.agents) ? data.agents : [];
+    applyFiltersAndRender();
   } catch (error) {
-    console.error('Error loading agents:', error);
+    console.error('Failed to load dashboard agents:', error);
+    notifyError(error.message || 'Failed to load agents');
+    dashboardAgents = [];
+    dashboardFilteredAgents = [];
+    showEmptyState();
+  } finally {
     showLoading(false);
-    showError('Failed to load agents');
   }
 }
 
-// Update dashboard statistics from API
-async function updateStatistics() {
-  try {
-    const response = await fetch('/api/agents/dashboard/stats');
+function applyFiltersAndRender() {
+  const searchTerm = String(document.getElementById('searchInput')?.value || '').trim().toLowerCase();
 
-    if (!response.ok) {
-      // Fallback to client-side calculation
-      const stats = calculateStatistics(dashboardAllAgents);
-      displayStatistics(stats.total, stats.cost);
-      return;
-    }
-
-    const stats = await response.json();
-    displayStatistics(stats.total_agents, stats.total_cost);
-  } catch (error) {
-    console.error('Error loading statistics:', error);
-    // Fallback to client-side calculation
-    const stats = calculateStatistics(dashboardAllAgents);
-    displayStatistics(stats.total, stats.cost);
-  }
-}
-
-// Display statistics in the UI
-function displayStatistics(total, cost) {
-  document.getElementById('totalAgents').textContent = total;
-  document.getElementById('totalCost').textContent = '$' + cost.toFixed(2);
-}
-
-// Calculate statistics from agents (fallback)
-function calculateStatistics(agents) {
-  const total = agents.length;
-  let cost = 0;
-
-  agents.forEach(agent => {
-    if (agent.statistics) {
-      cost += agent.statistics.total_cost || 0;
-    }
+  dashboardFilteredAgents = dashboardAgents.filter((agent) => {
+    const name = String(agent?.name || '').toLowerCase();
+    const description = String(agent?.metadata?.description || '').toLowerCase();
+    return name.includes(searchTerm) || description.includes(searchTerm);
   });
 
-  return { total, cost };
-}
-
-// Render agents in current view
-function renderDashboardAgents() {
-  const showOri = dashboardCurrentSourceFilter === 'all' || dashboardCurrentSourceFilter === 'ori';
-  const showClaude = dashboardCurrentSourceFilter === 'all' || dashboardCurrentSourceFilter === 'claude';
-  const showCodex = dashboardCurrentSourceFilter === 'all' || dashboardCurrentSourceFilter === 'codex';
-
-  const hasOriAgents = showOri && dashboardFilteredAgents.length > 0;
-  const claudeAgents = showClaude && typeof ExternalAgents !== 'undefined' ? ExternalAgents.getClaudeAgents() : [];
-  const codexAgents = showCodex && typeof ExternalAgents !== 'undefined' ? ExternalAgents.getCodexAgents() : [];
-  const codexData = showCodex && typeof ExternalAgents !== 'undefined' ? ExternalAgents.getCodexData() : null;
-
-  const hasAnyContent = hasOriAgents || claudeAgents.length > 0 || codexAgents.length > 0;
-
-  if (!hasAnyContent) {
+  if (dashboardFilteredAgents.length === 0) {
+    renderSummary({ needsAttention: 0, ready: 0, paused: 0, total: 0 });
+    renderHealthMessage(0, 0);
     showEmptyState();
     return;
   }
 
-  hideEmptyState();
+  const buckets = createBuckets(dashboardFilteredAgents);
+  renderSummary({
+    needsAttention: buckets.needsAttention.length,
+    ready: buckets.ready.length,
+    paused: buckets.paused.length,
+    total: dashboardFilteredAgents.length
+  });
 
-  if (dashboardCurrentView === 'table') {
-    renderTableView(showOri, claudeAgents, codexAgents, codexData);
-  } else {
-    renderCardView(showOri, claudeAgents, codexAgents, codexData);
-  }
+  renderHealthMessage(buckets.needsAttention.length, dashboardFilteredAgents.length);
+  renderBucket('bucketNeedsAttention', buckets.needsAttention, 'No issues detected');
+  renderBucket('bucketReady', buckets.ready, 'No ready agents');
+  renderBucket('bucketPaused', buckets.paused, 'No paused agents');
+  updateBucketCounters(buckets);
+  showBoard();
 }
 
-// Render table view
-function renderTableView(showOri, claudeAgents, codexAgents) {
-  const tbody = document.getElementById('agentsTableBody');
-  tbody.innerHTML = '';
+function createBuckets(agents) {
+  const buckets = {
+    needsAttention: [],
+    ready: [],
+    paused: []
+  };
 
-  // Render Ori agents
-  if (showOri) {
-    dashboardFilteredAgents.forEach(agent => {
-      const row = document.createElement('tr');
-      row.onclick = () => viewAgent(agent.name);
+  const sortedAgents = [...agents].sort((a, b) => {
+    const aName = String(a?.name || '').toLowerCase();
+    const bName = String(b?.name || '').toLowerCase();
+    return aName.localeCompare(bName);
+  });
 
-      const avatarHtml = getAvatarHtml(agent, 'agent-avatar');
+  sortedAgents.forEach((agent) => {
+    const health = getHealthState(agent);
 
-      row.innerHTML = `
-              <td>
-                  <div class="agent-name-cell">
-                      ${avatarHtml}
-                      <div class="agent-info">
-                          <div class="agent-name">
-                              ${escapeHtml(agent.name)}
-                              <span class="badge badge-ori">Ori</span>
-                          </div>
-                      </div>
-                  </div>
-              </td>
-              <td class="description-cell">${agent.metadata?.description ? escapeHtml(agent.metadata.description) : '<span class="text-muted">-</span>'}</td>
-              <td>${capitalize(agent.type || 'tool-calling')}</td>
-              <td>$${(agent.statistics?.total_cost || 0).toFixed(4)}</td>
-              <td>
-                  <div class="actions-cell" onclick="event.stopPropagation()">
-                      <button class="action-btn" onclick="viewAgent('${escapeHtml(agent.name)}')">View</button>
-                      <button class="action-btn" onclick="confirmDelete('${escapeHtml(agent.name)}')">Delete</button>
-                  </div>
-              </td>
-          `;
-
-      tbody.appendChild(row);
-    });
-  }
-
-  // Render Claude agents
-  if (claudeAgents.length > 0 && typeof ExternalAgents !== 'undefined') {
-    ExternalAgents.renderClaudeAgentsTable(claudeAgents, tbody);
-  }
-
-  // Render Codex agents (skills)
-  if (codexAgents.length > 0 && typeof ExternalAgents !== 'undefined') {
-    ExternalAgents.renderCodexAgentsTable(codexAgents, tbody);
-  }
-}
-
-// Render card view
-function renderCardView(showOri, claudeAgents, codexAgents) {
-  const grid = document.getElementById('cardView');
-  grid.innerHTML = '';
-
-  // Render Ori agents
-  if (showOri) {
-    dashboardFilteredAgents.forEach(agent => {
-      const card = document.createElement('div');
-      card.className = 'agent-card';
-      card.onclick = () => viewAgent(agent.name);
-
-      const avatarHtml = getAvatarHtml(agent, 'agent-card-avatar');
-
-      card.innerHTML = `
-              <div class="agent-card-header">
-                  ${avatarHtml}
-                  <div class="agent-card-info">
-                      <div class="agent-card-name">
-                          ${escapeHtml(agent.name)}
-                          <span class="badge badge-ori">Ori</span>
-                      </div>
-                  </div>
-              </div>
-              ${agent.metadata?.description ?
-      `<div class="agent-description">${escapeHtml(agent.metadata.description)}</div>` :
-      '<div class="agent-description" style="opacity: 0.5">No description</div>'}
-              <div class="agent-card-meta">
-                  <span>📦 ${capitalize(agent.type || 'tool-calling')}</span>
-                  <span>🔧 ${agent.enabled_plugins?.length || 0} plugins</span>
-              </div>
-              <div class="agent-card-stats">
-                  <div class="card-stat">
-                      <div class="card-stat-value">${formatNumber(agent.statistics?.token_usage || 0)}</div>
-                      <div class="card-stat-label">Tokens</div>
-                  </div>
-                  <div class="card-stat">
-                      <div class="card-stat-value">$${(agent.statistics?.total_cost || 0).toFixed(2)}</div>
-                      <div class="card-stat-label">Cost</div>
-                  </div>
-              </div>
-              <div class="agent-card-actions" onclick="event.stopPropagation()">
-                  <button class="action-btn" onclick="viewAgent('${escapeHtml(agent.name)}')">View</button>
-                  <button class="action-btn" onclick="confirmDelete('${escapeHtml(agent.name)}')">Delete</button>
-              </div>
-          `;
-
-      grid.appendChild(card);
-    });
-  }
-
-  // Render Claude agents
-  if (claudeAgents.length > 0 && typeof ExternalAgents !== 'undefined') {
-    ExternalAgents.renderClaudeAgentsCards(claudeAgents, grid);
-  }
-
-  // Render Claude settings/plugins card if showing Claude
-  if ((dashboardCurrentSourceFilter === 'all' || dashboardCurrentSourceFilter === 'claude') && typeof ExternalAgents !== 'undefined') {
-    const claudeData = ExternalAgents.getClaudeData();
-    if (claudeData && (claudeData.settings || (claudeData.plugins && claudeData.plugins.length > 0))) {
-      ExternalAgents.renderClaudeSettingsCard(claudeData, grid);
+    if (health.kind === 'error' || health.kind === 'needs-setup') {
+      buckets.needsAttention.push(agent);
+      return;
     }
-  }
 
-  // Render Codex agents (skills)
-  if (codexAgents.length > 0 && typeof ExternalAgents !== 'undefined') {
-    ExternalAgents.renderCodexAgentsCards(codexAgents, grid);
-  }
-}
-
-// Filter agents based on search and filters
-function filterAgents() {
-  const searchTerm = document.getElementById('searchInput').value.toLowerCase();
-
-  dashboardFilteredAgents = dashboardAllAgents.filter(agent => {
-    // Search filter
-    const matchesSearch = !searchTerm ||
-            agent.name.toLowerCase().includes(searchTerm) ||
-            (agent.metadata?.description || '').toLowerCase().includes(searchTerm);
-    return matchesSearch;
-  });
-
-  sortAgents();
-  renderDashboardAgents();
-}
-
-// Sort agents
-function sortAgents() {
-  const sortBy = document.getElementById('sortSelect').value;
-
-  dashboardFilteredAgents.sort((a, b) => {
-    let aVal, bVal;
-
-    switch (sortBy) {
-      case 'name':
-        aVal = a.name.toLowerCase();
-        bVal = b.name.toLowerCase();
-        return aVal.localeCompare(bVal);
-
-      case 'created_at':
-        aVal = new Date(a.statistics?.created_at || 0);
-        bVal = new Date(b.statistics?.created_at || 0);
-        return bVal - aVal; // Newest first
-
-      case 'cost':
-        aVal = a.statistics?.total_cost || 0;
-        bVal = b.statistics?.total_cost || 0;
-        return bVal - aVal; // Highest first
-
-      default:
-        return 0;
+    if (health.kind === 'paused') {
+      buckets.paused.push(agent);
+      return;
     }
+
+    buckets.ready.push(agent);
   });
 
-  renderDashboardAgents();
+  return buckets;
 }
 
-// Switch between table and card view
-function switchView(view) {
-  dashboardCurrentView = view;
+function renderSummary(summary) {
+  const countNeedsAttention = document.getElementById('countNeedsAttention');
+  const countReady = document.getElementById('countReady');
+  const countPaused = document.getElementById('countPaused');
+  const countTotal = document.getElementById('countTotal');
 
-  // Update button states
-  document.querySelectorAll('.view-btn').forEach(btn => {
-    btn.classList.toggle('active', btn.dataset.view === view);
-  });
-
-  // Show/hide views
-  const tableView = document.getElementById('tableView');
-  const cardView = document.getElementById('cardView');
-
-  if (view === 'table') {
-    tableView.classList.remove('hidden');
-    cardView.classList.add('hidden');
-  } else {
-    tableView.classList.add('hidden');
-    cardView.classList.remove('hidden');
+  if (countNeedsAttention) {
+    countNeedsAttention.textContent = String(summary.needsAttention);
   }
 
-  renderDashboardAgents();
+  if (countReady) {
+    countReady.textContent = String(summary.ready);
+  }
+
+  if (countPaused) {
+    countPaused.textContent = String(summary.paused);
+  }
+
+  if (countTotal) {
+    countTotal.textContent = String(summary.total);
+  }
 }
 
-// Create new agent
-function createAgent() {
-  window.location.href = '/agents/create';
-}
-
-// View agent details
-function viewAgent(name) {
-  window.location.href = `/agents/${encodeURIComponent(name)}`;
-}
-
-// Delete agent with confirmation
-async function confirmDelete(name) {
-  if (!confirm(`Are you sure you want to delete agent "${name}"? This action cannot be undone.`)) {
+function renderHealthMessage(needsAttentionCount, totalCount) {
+  const healthMessage = document.getElementById('healthMessage');
+  if (!healthMessage) {
     return;
   }
 
-  try {
-    const response = await fetch(`/api/agents?name=${encodeURIComponent(name)}`, {
-      method: 'DELETE'
-    });
+  if (totalCount === 0) {
+    healthMessage.classList.add('hidden');
+    healthMessage.classList.remove('warn');
+    healthMessage.textContent = '';
+    return;
+  }
 
-    if (!response.ok) {
-      throw new Error('Failed to delete agent');
+  healthMessage.classList.remove('hidden');
+
+  if (needsAttentionCount > 0) {
+    healthMessage.classList.add('warn');
+    healthMessage.textContent = `${needsAttentionCount} agent${needsAttentionCount === 1 ? '' : 's'} need attention before reliable chats.`;
+    return;
+  }
+
+  healthMessage.classList.remove('warn');
+  healthMessage.textContent = 'All agents look healthy and ready to chat.';
+}
+
+function updateBucketCounters(buckets) {
+  const map = [
+    ['bucketNeedsAttentionCount', buckets.needsAttention.length],
+    ['bucketReadyCount', buckets.ready.length],
+    ['bucketPausedCount', buckets.paused.length]
+  ];
+
+  map.forEach(([id, value]) => {
+    const element = document.getElementById(id);
+    if (element) {
+      element.textContent = String(value);
+    }
+  });
+}
+
+function renderBucket(containerId, agents, emptyMessage) {
+  const container = document.getElementById(containerId);
+  if (!container) {
+    return;
+  }
+
+  container.innerHTML = '';
+
+  if (!Array.isArray(agents) || agents.length === 0) {
+    container.innerHTML = `<div class="ops-empty-column">${safeEscapeHtml(emptyMessage)}</div>`;
+    return;
+  }
+
+  agents.forEach((agent) => {
+    const card = createAgentCard(agent);
+    container.appendChild(card);
+  });
+}
+
+function createAgentCard(agent) {
+  const card = document.createElement('article');
+  card.className = 'ops-agent-card';
+
+  const name = String(agent?.name || 'Untitled Agent');
+  const description = String(agent?.metadata?.description || 'No purpose written yet.');
+  const model = String(agent?.model || '-');
+  const pluginsCount = Array.isArray(agent?.enabled_plugins) ? agent.enabled_plugins.length : 0;
+  const mcpCount = Array.isArray(agent?.mcp_servers) ? agent.mcp_servers.length : 0;
+  const typeLabel = toTitleCase(String(agent?.type || 'tool-calling'));
+  const health = getHealthState(agent);
+  const chatDisabled = health.kind === 'needs-setup';
+  const pauseLabel = health.kind === 'paused' ? 'Resume' : 'Pause';
+
+  card.innerHTML = `
+    <div class="ops-card-top">
+      ${getAvatarHtml(agent, 'ops-agent-avatar')}
+      <div class="ops-agent-main">
+        <div class="ops-agent-name-row">
+          <h4 class="ops-agent-name" title="${safeEscapeHtml(name)}">${safeEscapeHtml(name)}</h4>
+          <span class="ops-health-pill ${safeEscapeHtml(health.kind)}">${safeEscapeHtml(health.label)}</span>
+        </div>
+        <p class="ops-agent-purpose" title="${safeEscapeHtml(description)}">${safeEscapeHtml(description)}</p>
+        <div class="ops-agent-time">Last active: ${safeEscapeHtml(formatDate(agent?.statistics?.last_active || ''))}</div>
+      </div>
+    </div>
+    <div class="ops-card-actions">
+      <button class="ops-action-btn primary" data-action="chat" ${chatDisabled ? 'disabled' : ''}>Chat</button>
+      <button class="ops-action-btn" data-action="pause">${safeEscapeHtml(pauseLabel)}</button>
+      <button class="ops-action-btn" data-action="open">Open</button>
+    </div>
+    <div class="config-only">
+      <div>Type: ${safeEscapeHtml(typeLabel)}</div>
+      <div>Model: ${safeEscapeHtml(model)}</div>
+      <div>Tools: ${pluginsCount} plugins, ${mcpCount} MCP</div>
+      <div>Total cost: $${Number(agent?.statistics?.total_cost || 0).toFixed(2)}</div>
+    </div>
+  `;
+
+  const chatButton = card.querySelector('[data-action="chat"]');
+  const pauseButton = card.querySelector('[data-action="pause"]');
+  const openButton = card.querySelector('[data-action="open"]');
+
+  if (chatButton) {
+    chatButton.addEventListener('click', async (event) => {
+      event.stopPropagation();
+      if (chatDisabled) {
+        return;
+      }
+      await openChatWithAgent(name, chatButton);
+    });
+  }
+
+  if (pauseButton) {
+    pauseButton.addEventListener('click', async (event) => {
+      event.stopPropagation();
+      await togglePauseAgent(name, pauseButton);
+    });
+  }
+
+  if (openButton) {
+    openButton.addEventListener('click', (event) => {
+      event.stopPropagation();
+      openAgentDrawer(name);
+    });
+  }
+
+  card.addEventListener('click', () => {
+    openAgentDrawer(name);
+  });
+
+  return card;
+}
+
+async function openChatWithAgent(agentName, button) {
+  const originalText = button.textContent;
+  button.disabled = true;
+  button.textContent = 'Opening...';
+
+  try {
+    const agent = dashboardAgents.find((item) => String(item?.name || '') === agentName);
+    if (String(agent?.status || '') === 'disabled') {
+      await updateAgentStatus(agentName, 'active');
     }
 
-    // Reload agents
-    await loadAgents();
-    showSuccess(`Agent "${name}" deleted successfully`);
+    if (window.sessionManager && typeof window.sessionManager.createSessionWithAgent === 'function') {
+      const session = await window.sessionManager.createSessionWithAgent(agentName);
+      if (!session || !session.id) {
+        throw new Error(`Failed to open chat with ${agentName}`);
+      }
+      await loadAgents();
+      return;
+    }
 
+    await setCurrentAgent(agentName);
+    window.location.href = '/';
   } catch (error) {
-    console.error('Error deleting agent:', error);
-    showError('Failed to delete agent');
+    console.error('Failed to open chat with agent:', error);
+    notifyError(error.message || `Failed to open chat with ${agentName}`);
+    button.disabled = false;
+    button.textContent = originalText;
   }
 }
 
-// Helper functions
+async function togglePauseAgent(agentName, button) {
+  const agent = dashboardAgents.find((item) => String(item?.name || '') === agentName);
+  if (!agent) {
+    return;
+  }
+
+  const currentlyPaused = String(agent?.status || '') === 'disabled';
+  const nextStatus = currentlyPaused ? 'active' : 'disabled';
+  const originalText = button.textContent;
+
+  button.disabled = true;
+  button.textContent = currentlyPaused ? 'Resuming...' : 'Pausing...';
+
+  try {
+    await updateAgentStatus(agentName, nextStatus);
+    notifySuccess(`Agent "${agentName}" ${currentlyPaused ? 'resumed' : 'paused'}.`);
+    await loadAgents();
+
+    if (selectedAgentName === agentName) {
+      await openAgentDrawer(agentName);
+    }
+  } catch (error) {
+    console.error('Failed to toggle pause status:', error);
+    notifyError(error.message || `Failed to update ${agentName}`);
+    button.disabled = false;
+    button.textContent = originalText;
+  }
+}
+
+async function updateAgentStatus(agentName, status) {
+  const endpoint = `/api/agents/${encodeURIComponent(agentName)}/status`;
+  const response = await fetch(endpoint, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ status })
+  });
+
+  if (response.ok) {
+    return;
+  }
+
+  const errorBody = await response.json().catch(() => null);
+  throw new Error(errorBody?.error || `Status update failed (${response.status})`);
+}
+
+async function setCurrentAgent(agentName) {
+  const endpoint = `/api/agents?name=${encodeURIComponent(agentName)}`;
+  const response = await fetch(endpoint, { method: 'PUT' });
+
+  if (response.ok) {
+    return;
+  }
+
+  const errorBody = await response.json().catch(() => null);
+  throw new Error(errorBody?.error || `Failed to activate ${agentName}`);
+}
+
+async function openAgentDrawer(agentName) {
+  selectedAgentName = agentName;
+  selectedAgentDetail = null;
+  selectedAgentSkills = null;
+
+  const drawer = document.getElementById('agentDrawer');
+  const backdrop = document.getElementById('agentDrawerBackdrop');
+  const drawerAgentName = document.getElementById('drawerAgentName');
+
+  if (drawerAgentName) {
+    drawerAgentName.textContent = agentName;
+  }
+
+  if (drawer) {
+    drawer.classList.add('open');
+    drawer.setAttribute('aria-hidden', 'false');
+  }
+
+  if (backdrop) {
+    backdrop.classList.remove('hidden');
+  }
+
+  setDrawerTab('overview');
+  setDrawerLoadingState();
+
+  const [detailResult, skillsResult] = await Promise.allSettled([
+    fetchAgentDetail(agentName),
+    fetchAgentSkills(agentName)
+  ]);
+
+  if (selectedAgentName !== agentName) {
+    return;
+  }
+
+  if (detailResult.status === 'fulfilled') {
+    selectedAgentDetail = detailResult.value;
+  } else {
+    console.error('Failed to fetch agent detail:', detailResult.reason);
+  }
+
+  if (skillsResult.status === 'fulfilled') {
+    selectedAgentSkills = skillsResult.value;
+  } else {
+    console.error('Failed to fetch agent skills:', skillsResult.reason);
+  }
+
+  renderDrawerContent();
+}
+
+function closeAgentDrawer() {
+  const drawer = document.getElementById('agentDrawer');
+  const backdrop = document.getElementById('agentDrawerBackdrop');
+
+  if (drawer) {
+    drawer.classList.remove('open');
+    drawer.setAttribute('aria-hidden', 'true');
+  }
+
+  if (backdrop) {
+    backdrop.classList.add('hidden');
+  }
+}
+
+function setDrawerTab(tabName) {
+  const normalized = tabName === 'tools' || tabName === 'advanced' ? tabName : 'overview';
+
+  document.querySelectorAll('.ops-drawer-tab').forEach((button) => {
+    button.classList.toggle('active', button.dataset.tab === normalized);
+  });
+
+  document.querySelectorAll('.ops-drawer-panel').forEach((panel) => {
+    panel.classList.remove('active');
+  });
+
+  const panel = document.getElementById(`drawer${toTitleCase(normalized)}Tab`);
+  if (panel) {
+    panel.classList.add('active');
+  }
+}
+
+function setDrawerLoadingState() {
+  const loadingHtml = '<div class="ops-data-card"><span class="ops-data-label">Loading</span><div class="ops-data-value">Fetching latest agent details...</div></div>';
+
+  const overview = document.getElementById('drawerOverviewContent');
+  const tools = document.getElementById('drawerToolsContent');
+  const advanced = document.getElementById('drawerAdvancedContent');
+
+  if (overview) {
+    overview.innerHTML = loadingHtml;
+  }
+
+  if (tools) {
+    tools.innerHTML = loadingHtml;
+  }
+
+  if (advanced) {
+    advanced.innerHTML = loadingHtml;
+  }
+}
+
+function renderDrawerContent() {
+  const fallbackAgent = dashboardAgents.find((agent) => String(agent?.name || '') === selectedAgentName) || null;
+  const detail = selectedAgentDetail || fallbackAgent || {};
+  const health = getHealthState(detail);
+
+  const overview = document.getElementById('drawerOverviewContent');
+  const tools = document.getElementById('drawerToolsContent');
+  const advanced = document.getElementById('drawerAdvancedContent');
+
+  if (overview) {
+    overview.innerHTML = `
+      <div class="ops-data-card">
+        <span class="ops-data-label">Status</span>
+        <div class="ops-data-value">${safeEscapeHtml(health.label)}</div>
+      </div>
+      <div class="ops-data-card">
+        <span class="ops-data-label">Purpose</span>
+        <div class="ops-data-value">${safeEscapeHtml(detail?.metadata?.description || 'No purpose description yet.')}</div>
+      </div>
+      <div class="ops-data-card">
+        <span class="ops-data-label">Type</span>
+        <div class="ops-data-value">${safeEscapeHtml(toTitleCase(detail?.type || 'tool-calling'))}</div>
+      </div>
+      <div class="ops-data-card">
+        <span class="ops-data-label">Model</span>
+        <div class="ops-data-value">${safeEscapeHtml(detail?.model || 'Not configured')}</div>
+      </div>
+      <div class="ops-data-card">
+        <span class="ops-data-label">Last Active</span>
+        <div class="ops-data-value">${safeEscapeHtml(formatDate(detail?.statistics?.last_active || ''))}</div>
+      </div>
+    `;
+  }
+
+  const enabledPlugins = Array.isArray(detail?.enabled_plugins)
+    ? detail.enabled_plugins
+        .map((plugin) => (typeof plugin === 'string' ? plugin : plugin?.name))
+        .filter(Boolean)
+    : [];
+  const mcpServers = Array.isArray(detail?.mcp_servers) ? detail.mcp_servers : [];
+  const skillCount = Number(selectedAgentSkills?.total || 0);
+  const enabledSkillCount = Number(selectedAgentSkills?.enabled || 0);
+
+  if (tools) {
+    tools.innerHTML = `
+      <div class="ops-data-card">
+        <span class="ops-data-label">Plugins (${enabledPlugins.length})</span>
+        <div class="ops-data-value">${enabledPlugins.length > 0 ? safeEscapeHtml(enabledPlugins.join(', ')) : 'No plugins enabled.'}</div>
+      </div>
+      <div class="ops-data-card">
+        <span class="ops-data-label">MCP Servers (${mcpServers.length})</span>
+        <div class="ops-data-value">${mcpServers.length > 0 ? safeEscapeHtml(mcpServers.join(', ')) : 'No MCP servers enabled.'}</div>
+      </div>
+      <div class="ops-data-card">
+        <span class="ops-data-label">Skills</span>
+        <div class="ops-data-value">${safeEscapeHtml(`${enabledSkillCount}/${skillCount} enabled`)}</div>
+      </div>
+    `;
+  }
+
+  const systemPrompt = String(detail?.system_prompt || '').trim();
+
+  if (advanced) {
+    advanced.innerHTML = `
+      <div class="ops-data-card">
+        <span class="ops-data-label">Provider</span>
+        <div class="ops-data-value">${safeEscapeHtml(detail?.provider || '-')}</div>
+      </div>
+      <div class="ops-data-card">
+        <span class="ops-data-label">Temperature</span>
+        <div class="ops-data-value">${safeEscapeHtml(Number(detail?.temperature || 0).toFixed(2))}</div>
+      </div>
+      <div class="ops-data-card">
+        <span class="ops-data-label">Max Output Tokens</span>
+        <div class="ops-data-value">${safeEscapeHtml(detail?.max_output_tokens || '-')}</div>
+      </div>
+      <div class="ops-data-card">
+        <span class="ops-data-label">System Prompt</span>
+        <div class="ops-data-value">${safeEscapeHtml(systemPrompt || 'No custom system prompt.')}</div>
+      </div>
+    `;
+  }
+}
+
+async function fetchAgentDetail(agentName) {
+  const endpoint = `/api/agents/${encodeURIComponent(agentName)}/detail`;
+  const response = await fetch(endpoint);
+
+  if (!response.ok) {
+    throw new Error(`Failed to fetch detail (${response.status})`);
+  }
+
+  return response.json();
+}
+
+async function fetchAgentSkills(agentName) {
+  const endpoint = `/api/skills?agent=${encodeURIComponent(agentName)}`;
+  const response = await fetch(endpoint);
+
+  if (response.status === 409) {
+    return { total: 0, enabled: 0, conflict: true };
+  }
+
+  if (!response.ok) {
+    return { total: 0, enabled: 0, error: true };
+  }
+
+  const data = await response.json();
+  const skills = Array.isArray(data?.skills) ? data.skills : [];
+  const enabled = skills.filter((skill) => skill?.enabled !== false).length;
+
+  return {
+    total: skills.length,
+    enabled,
+    conflict: false,
+    error: false
+  };
+}
+
+function getHealthState(agent) {
+  const status = String(agent?.status || 'idle');
+
+  if (status === 'error') {
+    return { kind: 'error', label: 'Error' };
+  }
+
+  if (!String(agent?.model || '').trim()) {
+    return { kind: 'needs-setup', label: 'Needs Setup' };
+  }
+
+  if (status === 'disabled') {
+    return { kind: 'paused', label: 'Paused' };
+  }
+
+  if (status === 'active') {
+    return { kind: 'healthy', label: 'Healthy' };
+  }
+
+  return { kind: 'idle', label: 'Idle' };
+}
+
 function getAgentColor(agent) {
-  if (agent.metadata?.avatar_color) {
-    return agent.metadata.avatar_color;
+  const avatarColor = String(agent?.metadata?.avatar_color || '').trim();
+  if (avatarColor) {
+    return avatarColor;
   }
-  // Generate color from name
-  const hash = agent.name.split('').reduce((acc, char) => {
-    return char.charCodeAt(0) + ((acc << 5) - acc);
-  }, 0);
-  const hue = hash % 360;
-  return `hsl(${hue}, 60%, 50%)`;
-}
 
-// Returns HTML for agent avatar (image if available, fallback to color/initials)
-function getAvatarHtml(agent, className = 'agent-avatar') {
-  if (agent.metadata?.avatar_image) {
-    return `<div class="${className}" style="padding: 0; overflow: hidden;">
-              <img src="/avatars/${escapeHtml(agent.metadata.avatar_image)}" alt="${escapeHtml(agent.name)}" style="width: 100%; height: 100%; object-fit: cover;">
-            </div>`;
-  }
-  return `<div class="${className}" style="background: ${getAgentColor(agent)}">
-            ${getAgentInitials(agent.name)}
-          </div>`;
+  const name = String(agent?.name || 'A');
+  const hash = name.split('').reduce((acc, char) => char.charCodeAt(0) + ((acc << 5) - acc), 0);
+  return `hsl(${Math.abs(hash) % 360}, 62%, 46%)`;
 }
 
 function getAgentInitials(name) {
-  const words = name.split(/[\s_-]+/);
-  if (words.length >= 2) {
-    return (words[0][0] + words[1][0]).toUpperCase();
+  const parts = String(name || '').trim().split(/[\s_-]+/).filter(Boolean);
+  if (parts.length >= 2) {
+    return `${parts[0][0]}${parts[1][0]}`.toUpperCase();
   }
-  return name.substring(0, 2).toUpperCase();
+
+  return String(name || 'A').slice(0, 2).toUpperCase();
 }
 
-function capitalize(str) {
-  return str.charAt(0).toUpperCase() + str.slice(1);
-}
+function getAvatarHtml(agent, className) {
+  const image = String(agent?.metadata?.avatar_image || '').trim();
+  const name = String(agent?.name || 'Agent');
 
-function formatNumber(num) {
-  if (num >= 1000000) {
-    return (num / 1000000).toFixed(1) + 'M';
-  } else if (num >= 1000) {
-    return (num / 1000).toFixed(1) + 'K';
+  if (image) {
+    return `<div class="${safeEscapeHtml(className)}" style="padding:0;overflow:hidden;"><img src="/avatars/${safeEscapeHtml(image)}" alt="${safeEscapeHtml(name)}" style="width:100%;height:100%;object-fit:cover;"></div>`;
   }
-  return num.toString();
+
+  return `<div class="${safeEscapeHtml(className)}" style="background:${safeEscapeHtml(getAgentColor(agent))};">${safeEscapeHtml(getAgentInitials(name))}</div>`;
 }
 
-function formatDate(dateString) {
-  if (!dateString) return 'Never';
-  const date = new Date(dateString);
-  const now = new Date();
-  const diff = now - date;
+function toTitleCase(value) {
+  return String(value || '')
+    .split(/[\s_-]+/)
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1).toLowerCase())
+    .join(' ');
+}
 
-  const minutes = Math.floor(diff / 60000);
-  const hours = Math.floor(diff / 3600000);
-  const days = Math.floor(diff / 86400000);
+function formatDate(value) {
+  if (!value) {
+    return 'Never';
+  }
 
-  if (minutes < 1) return 'Just now';
-  if (minutes < 60) return `${minutes}m ago`;
-  if (hours < 24) return `${hours}h ago`;
-  if (days < 7) return `${days}d ago`;
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return 'Never';
+  }
+
+  const now = Date.now();
+  const diff = now - date.getTime();
+
+  const minute = 60 * 1000;
+  const hour = 60 * minute;
+  const day = 24 * hour;
+
+  if (diff < minute) {
+    return 'Just now';
+  }
+
+  if (diff < hour) {
+    return `${Math.floor(diff / minute)}m ago`;
+  }
+
+  if (diff < day) {
+    return `${Math.floor(diff / hour)}h ago`;
+  }
+
+  if (diff < 7 * day) {
+    return `${Math.floor(diff / day)}d ago`;
+  }
 
   return date.toLocaleDateString();
 }
 
-// escapeHtml is provided by dom-utils.js
-
 function showLoading(show) {
-  document.getElementById('loadingState').style.display = show ? 'block' : 'none';
-  document.getElementById('tableView').style.display = show ? 'none' : '';
-  document.getElementById('cardView').style.display = show ? 'none' : '';
-}
+  const loadingState = document.getElementById('loadingState');
+  const board = document.getElementById('opsBoard');
 
-function showEmptyState() {
-  document.getElementById('emptyState').classList.remove('hidden');
-  document.getElementById('tableView').classList.add('hidden');
-  document.getElementById('cardView').classList.add('hidden');
-}
+  if (loadingState) {
+    loadingState.classList.toggle('hidden', !show);
+  }
 
-function hideEmptyState() {
-  document.getElementById('emptyState').classList.add('hidden');
-  if (dashboardCurrentView === 'table') {
-    document.getElementById('tableView').classList.remove('hidden');
-  } else {
-    document.getElementById('cardView').classList.remove('hidden');
+  if (board) {
+    board.classList.toggle('hidden', show);
   }
 }
 
-function showError(message) {
-  // Simple alert for now - could be replaced with toast notification
-  alert('Error: ' + message);
+function showBoard() {
+  const board = document.getElementById('opsBoard');
+  const emptyState = document.getElementById('emptyState');
+
+  if (board) {
+    board.classList.remove('hidden');
+  }
+
+  if (emptyState) {
+    emptyState.classList.add('hidden');
+  }
 }
 
-function showSuccess(message) {
-  // Simple alert for now - could be replaced with toast notification
-  alert(message);
+function showEmptyState() {
+  const board = document.getElementById('opsBoard');
+  const emptyState = document.getElementById('emptyState');
+
+  if (board) {
+    board.classList.add('hidden');
+  }
+
+  if (emptyState) {
+    emptyState.classList.remove('hidden');
+  }
+}
+
+function createAgent() {
+  window.location.href = '/agents/create';
+}
+
+window.createAgent = createAgent;
+window.closeAgentDrawer = closeAgentDrawer;
+
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', initializeDashboard);
+} else {
+  initializeDashboard();
 }

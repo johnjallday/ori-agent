@@ -867,6 +867,513 @@
         white-space: pre-wrap;
         word-wrap: break-word;
     }
+
+    .ops-shell {
+        display: flex;
+        flex-direction: column;
+        gap: 16px;
+    }
+
+    .ops-toolbar {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        padding: 14px;
+        border: 1px solid var(--border-color);
+        border-radius: 12px;
+        background: linear-gradient(120deg,
+            color-mix(in srgb, var(--bg-primary) 88%, #facc15 12%),
+            color-mix(in srgb, var(--bg-primary) 92%, #f97316 8%));
+    }
+
+    .ops-search-wrap {
+        flex: 1;
+    }
+
+    .ops-search {
+        width: 100%;
+        border-radius: 10px;
+        border: 1px solid color-mix(in srgb, var(--border-color) 84%, #f97316 16%);
+        background: color-mix(in srgb, var(--bg-primary) 88%, transparent);
+        color: var(--text-primary);
+        padding: 10px 14px;
+        font-size: 14px;
+    }
+
+    .ops-search:focus {
+        outline: none;
+        border-color: #f97316;
+        box-shadow: 0 0 0 3px color-mix(in srgb, #f97316 20%, transparent);
+    }
+
+    .ops-mode {
+        display: inline-flex;
+        border: 1px solid var(--border-color);
+        border-radius: 10px;
+        overflow: hidden;
+        background: var(--bg-primary);
+    }
+
+    .ops-mode-btn {
+        border: none;
+        background: transparent;
+        color: var(--text-secondary);
+        padding: 8px 14px;
+        font-size: 13px;
+        font-weight: 600;
+        cursor: pointer;
+        transition: all 0.2s ease;
+    }
+
+    .ops-mode-btn.active {
+        background: #f97316;
+        color: #fff;
+    }
+
+    .ops-summary {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 10px;
+    }
+
+    .ops-summary-chip {
+        border-radius: 10px;
+        border: 1px solid var(--border-color);
+        background: var(--bg-primary);
+        padding: 10px 12px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+    }
+
+    .ops-summary-label {
+        font-size: 12px;
+        color: var(--text-secondary);
+        text-transform: uppercase;
+        letter-spacing: 0.4px;
+        font-weight: 600;
+    }
+
+    .ops-summary-value {
+        font-size: 20px;
+        font-weight: 700;
+        color: var(--text-primary);
+    }
+
+    .ops-health-message {
+        border-radius: 10px;
+        border: 1px solid color-mix(in srgb, #16a34a 32%, transparent);
+        background: color-mix(in srgb, #16a34a 12%, var(--bg-primary));
+        color: color-mix(in srgb, #16a34a 72%, var(--text-primary));
+        padding: 10px 14px;
+        font-size: 13px;
+        font-weight: 600;
+    }
+
+    .ops-health-message.warn {
+        border-color: color-mix(in srgb, #f97316 40%, transparent);
+        background: color-mix(in srgb, #f97316 14%, var(--bg-primary));
+        color: color-mix(in srgb, #f97316 76%, var(--text-primary));
+    }
+
+    .ops-board {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 14px;
+    }
+
+    .ops-column {
+        border: 1px solid var(--border-color);
+        border-radius: 14px;
+        background: var(--bg-primary);
+        min-height: 320px;
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+    }
+
+    .ops-column-header {
+        padding: 12px 14px;
+        border-bottom: 1px solid var(--border-color);
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+    }
+
+    .ops-column-header h3 {
+        margin: 0;
+        font-size: 14px;
+        font-weight: 700;
+        letter-spacing: 0.2px;
+        text-transform: uppercase;
+    }
+
+    .ops-column-count {
+        min-width: 24px;
+        height: 24px;
+        border-radius: 999px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 12px;
+        font-weight: 700;
+        background: var(--bg-tertiary);
+        color: var(--text-secondary);
+    }
+
+    .ops-column-alert .ops-column-header {
+        background: color-mix(in srgb, #ef4444 10%, var(--bg-primary));
+    }
+
+    .ops-column-ready .ops-column-header {
+        background: color-mix(in srgb, #16a34a 10%, var(--bg-primary));
+    }
+
+    .ops-column-paused .ops-column-header {
+        background: color-mix(in srgb, #64748b 14%, var(--bg-primary));
+    }
+
+    .ops-list {
+        padding: 10px;
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+        flex: 1;
+        overflow-y: auto;
+    }
+
+    .ops-empty-column {
+        border: 1px dashed var(--border-color);
+        border-radius: 10px;
+        color: var(--text-muted);
+        font-size: 12px;
+        text-align: center;
+        padding: 14px 12px;
+    }
+
+    .ops-agent-card {
+        border: 1px solid var(--border-color);
+        border-radius: 12px;
+        background: var(--bg-secondary);
+        padding: 12px;
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+        transition: border-color 0.2s ease, transform 0.2s ease;
+    }
+
+    .ops-agent-card:hover {
+        border-color: color-mix(in srgb, #f97316 45%, var(--border-color));
+        transform: translateY(-1px);
+    }
+
+    .ops-card-top {
+        display: flex;
+        gap: 10px;
+        align-items: flex-start;
+    }
+
+    .ops-agent-avatar {
+        width: 36px;
+        height: 36px;
+        border-radius: 10px;
+        flex-shrink: 0;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        color: #fff;
+        font-size: 13px;
+        font-weight: 700;
+    }
+
+    .ops-agent-main {
+        min-width: 0;
+        flex: 1;
+    }
+
+    .ops-agent-name-row {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+    }
+
+    .ops-agent-name {
+        margin: 0;
+        font-size: 14px;
+        font-weight: 700;
+        color: var(--text-primary);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+
+    .ops-health-pill {
+        padding: 2px 8px;
+        border-radius: 999px;
+        font-size: 11px;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 0.3px;
+    }
+
+    .ops-health-pill.healthy {
+        color: #166534;
+        background: #dcfce7;
+    }
+
+    .ops-health-pill.idle {
+        color: #1e3a8a;
+        background: #dbeafe;
+    }
+
+    .ops-health-pill.paused {
+        color: #334155;
+        background: #e2e8f0;
+    }
+
+    .ops-health-pill.needs-setup {
+        color: #92400e;
+        background: #fef3c7;
+    }
+
+    .ops-health-pill.error {
+        color: #991b1b;
+        background: #fee2e2;
+    }
+
+    [data-bs-theme="dark"] .ops-health-pill.healthy {
+        color: #86efac;
+        background: rgba(34, 197, 94, 0.2);
+    }
+
+    [data-bs-theme="dark"] .ops-health-pill.idle {
+        color: #93c5fd;
+        background: rgba(59, 130, 246, 0.2);
+    }
+
+    [data-bs-theme="dark"] .ops-health-pill.paused {
+        color: #cbd5e1;
+        background: rgba(148, 163, 184, 0.25);
+    }
+
+    [data-bs-theme="dark"] .ops-health-pill.needs-setup {
+        color: #fcd34d;
+        background: rgba(245, 158, 11, 0.2);
+    }
+
+    [data-bs-theme="dark"] .ops-health-pill.error {
+        color: #fca5a5;
+        background: rgba(239, 68, 68, 0.2);
+    }
+
+    .ops-agent-purpose {
+        margin: 4px 0 0;
+        color: var(--text-secondary);
+        font-size: 12px;
+        line-height: 1.4;
+        display: -webkit-box;
+        -webkit-line-clamp: 2;
+        -webkit-box-orient: vertical;
+        overflow: hidden;
+    }
+
+    .ops-agent-time {
+        font-size: 11px;
+        color: var(--text-muted);
+    }
+
+    .ops-card-actions {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 8px;
+    }
+
+    .ops-action-btn {
+        border-radius: 8px;
+        border: 1px solid var(--border-color);
+        background: var(--bg-primary);
+        color: var(--text-primary);
+        padding: 6px 8px;
+        font-size: 12px;
+        font-weight: 600;
+        cursor: pointer;
+    }
+
+    .ops-action-btn.primary {
+        background: color-mix(in srgb, #f97316 18%, var(--bg-primary));
+        border-color: color-mix(in srgb, #f97316 35%, var(--border-color));
+    }
+
+    .ops-action-btn:hover {
+        background: var(--bg-tertiary);
+    }
+
+    .config-only {
+        display: none;
+        margin-top: 2px;
+        padding-top: 8px;
+        border-top: 1px dashed var(--border-color);
+        font-size: 11px;
+        color: var(--text-muted);
+        line-height: 1.5;
+    }
+
+    .ops-shell.config-mode .config-only {
+        display: block;
+    }
+
+    .ops-drawer-backdrop {
+        position: fixed;
+        inset: 0;
+        background: rgba(2, 6, 23, 0.48);
+        z-index: 1070;
+    }
+
+    .ops-drawer {
+        position: fixed;
+        right: 0;
+        top: 0;
+        height: 100vh;
+        width: min(440px, 94vw);
+        background: var(--bg-primary);
+        border-left: 1px solid var(--border-color);
+        z-index: 1080;
+        display: flex;
+        flex-direction: column;
+        transform: translateX(100%);
+        transition: transform 0.25s ease;
+    }
+
+    .ops-drawer.open {
+        transform: translateX(0);
+    }
+
+    .ops-drawer-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: flex-start;
+        gap: 10px;
+        padding: 16px;
+        border-bottom: 1px solid var(--border-color);
+    }
+
+    .ops-drawer-kicker {
+        margin: 0;
+        font-size: 11px;
+        letter-spacing: 0.5px;
+        text-transform: uppercase;
+        color: var(--text-muted);
+        font-weight: 700;
+    }
+
+    .ops-drawer-header h2 {
+        margin: 4px 0 0;
+        font-size: 20px;
+        line-height: 1.2;
+        color: var(--text-primary);
+    }
+
+    .ops-drawer-close {
+        border: none;
+        background: transparent;
+        color: var(--text-secondary);
+        font-size: 26px;
+        line-height: 1;
+        cursor: pointer;
+        padding: 0 4px;
+    }
+
+    .ops-drawer-tabs {
+        display: flex;
+        gap: 6px;
+        padding: 10px 16px;
+        border-bottom: 1px solid var(--border-color);
+    }
+
+    .ops-drawer-tab {
+        border: 1px solid var(--border-color);
+        background: var(--bg-secondary);
+        color: var(--text-secondary);
+        border-radius: 999px;
+        padding: 6px 10px;
+        font-size: 12px;
+        font-weight: 700;
+        cursor: pointer;
+    }
+
+    .ops-drawer-tab.active {
+        background: #f97316;
+        border-color: #f97316;
+        color: #fff;
+    }
+
+    .ops-drawer-body {
+        flex: 1;
+        overflow-y: auto;
+        padding: 16px;
+    }
+
+    .ops-drawer-panel {
+        display: none;
+    }
+
+    .ops-drawer-panel.active {
+        display: block;
+    }
+
+    .ops-drawer-content {
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+    }
+
+    .ops-data-card {
+        border: 1px solid var(--border-color);
+        border-radius: 10px;
+        background: var(--bg-secondary);
+        padding: 12px;
+    }
+
+    .ops-data-label {
+        display: block;
+        font-size: 11px;
+        text-transform: uppercase;
+        letter-spacing: 0.4px;
+        color: var(--text-muted);
+        margin-bottom: 4px;
+        font-weight: 700;
+    }
+
+    .ops-data-value {
+        color: var(--text-primary);
+        font-size: 13px;
+        white-space: pre-wrap;
+        word-break: break-word;
+    }
+
+    .ops-drawer-footer {
+        border-top: 1px solid var(--border-color);
+        padding: 12px 16px;
+        display: flex;
+        justify-content: flex-end;
+    }
+
+    @media (max-width: 1100px) {
+        .ops-board {
+            grid-template-columns: 1fr;
+        }
+    }
+
+    @media (max-width: 768px) {
+        .ops-toolbar {
+            flex-direction: column;
+            align-items: stretch;
+        }
+
+        .ops-summary {
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+    }
 </style>
 
 <body class="bg-light agents-page">
@@ -890,94 +1397,107 @@
             </div>
         </div>
 
-        <!-- Statistics -->
-        <div class="stats-grid" id="statsGrid">
-        <div class="stat-card">
-            <div class="stat-label">Total Agents</div>
-            <div class="stat-value" id="totalAgents">-</div>
-        </div>
-        <div class="stat-card">
-            <div class="stat-label">Total Cost</div>
-            <div class="stat-value" id="totalCost">$0.00</div>
-        </div>
-    </div>
-
-        <!-- Source Filter Tabs -->
-        <div class="source-filter-tabs">
-            <button class="source-filter-btn active" data-filter="all">All</button>
-            <button class="source-filter-btn" data-filter="ori">Ori</button>
-            <button class="source-filter-btn" data-filter="claude">Claude <span class="filter-count" id="claudeAgentCount" style="display:none">0</span></button>
-            <button class="source-filter-btn" data-filter="codex">Codex <span class="filter-count" id="codexAgentCount" style="display:none">0</span></button>
-            <button class="btn btn-sm btn-outline-secondary ms-auto" id="refreshExternalBtn" onclick="refreshExternalAgents()">Refresh External</button>
-        </div>
-
-        <!-- External Agents Disabled Banner -->
-        <div id="externalAgentsDisabledBanner" class="external-agents-banner" style="display: none;">
-            <div class="banner-content">
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
-                    <path d="M12,2A10,10 0 0,1 22,12A10,10 0 0,1 12,22A10,10 0 0,1 2,12A10,10 0 0,1 12,2M12,4A8,8 0 0,0 4,12A8,8 0 0,0 12,20A8,8 0 0,0 20,12A8,8 0 0,0 12,4M11,16.5L6.5,12L7.91,10.59L11,13.67L16.59,8.09L18,9.5L11,16.5Z"/>
-                </svg>
-                <span class="banner-message">External agents (Claude Code &amp; Codex) are disabled.</span>
-                <a href="/settings" class="banner-link">Enable in Settings</a>
+        <div class="ops-shell">
+            <div class="ops-toolbar modern-card">
+                <div class="ops-search-wrap">
+                    <input type="text" id="searchInput" class="ops-search" placeholder="Search by name or purpose">
+                </div>
+                <div class="ops-mode" role="group" aria-label="View mode">
+                    <button id="modeOperationsBtn" class="ops-mode-btn active" type="button">Operations</button>
+                    <button id="modeConfigBtn" class="ops-mode-btn" type="button">Config</button>
+                </div>
             </div>
-        </div>
 
-        <!-- Controls -->
-        <div class="controls-bar">
-            <div class="search-box">
-                <input type="text" id="searchInput" placeholder="Search agents..." onkeyup="filterAgents()">
-                <span class="search-icon">🔍</span>
+            <div class="ops-summary">
+                <div class="ops-summary-chip">
+                    <span class="ops-summary-label">Needs Attention</span>
+                    <span id="countNeedsAttention" class="ops-summary-value">0</span>
+                </div>
+                <div class="ops-summary-chip">
+                    <span class="ops-summary-label">Ready</span>
+                    <span id="countReady" class="ops-summary-value">0</span>
+                </div>
+                <div class="ops-summary-chip">
+                    <span class="ops-summary-label">Paused</span>
+                    <span id="countPaused" class="ops-summary-value">0</span>
+                </div>
+                <div class="ops-summary-chip">
+                    <span class="ops-summary-label">Total</span>
+                    <span id="countTotal" class="ops-summary-value">0</span>
+                </div>
             </div>
-            <div class="filters">
-                <select class="filter-select" id="sortSelect" onchange="sortAgents()">
-                    <option value="name">Sort by Name</option>
-                    <option value="created_at">Sort by Created</option>
-                    <option value="cost">Sort by Cost</option>
-                </select>
+
+            <div id="healthMessage" class="ops-health-message hidden"></div>
+
+            <div id="loadingState" class="loading">
+                <p>Loading agents...</p>
             </div>
-            <div class="view-toggle">
-                <button class="view-btn active" data-view="table" onclick="switchView('table')">📋 Table</button>
-                <button class="view-btn" data-view="cards" onclick="switchView('cards')">📱 Cards</button>
+
+            <div id="opsBoard" class="ops-board hidden">
+                <section class="ops-column ops-column-alert">
+                    <header class="ops-column-header">
+                        <h3>Needs Attention</h3>
+                        <span id="bucketNeedsAttentionCount" class="ops-column-count">0</span>
+                    </header>
+                    <div id="bucketNeedsAttention" class="ops-list"></div>
+                </section>
+
+                <section class="ops-column ops-column-ready">
+                    <header class="ops-column-header">
+                        <h3>Ready</h3>
+                        <span id="bucketReadyCount" class="ops-column-count">0</span>
+                    </header>
+                    <div id="bucketReady" class="ops-list"></div>
+                </section>
+
+                <section class="ops-column ops-column-paused">
+                    <header class="ops-column-header">
+                        <h3>Paused</h3>
+                        <span id="bucketPausedCount" class="ops-column-count">0</span>
+                    </header>
+                    <div id="bucketPaused" class="ops-list"></div>
+                </section>
             </div>
-        </div>
 
-        <!-- Loading State -->
-        <div id="loadingState" class="loading">
-            <p>Loading agents...</p>
-        </div>
-
-        <!-- Table View -->
-        <div id="tableView" class="agents-table-container">
-            <table class="agents-table">
-                <thead>
-                    <tr>
-                        <th onclick="sortTable('name')">Agent <span class="sort-icon">▼</span></th>
-                        <th>Description</th>
-                        <th onclick="sortTable('type')">Type</th>
-                        <th onclick="sortTable('cost')">Cost</th>
-                        <th>Actions</th>
-                    </tr>
-                </thead>
-                <tbody id="agentsTableBody">
-                    <!-- Populated by JavaScript -->
-                </tbody>
-            </table>
-        </div>
-
-        <!-- Card View -->
-        <div id="cardView" class="agents-grid hidden">
-            <!-- Populated by JavaScript -->
-        </div>
-
-        <!-- Empty State -->
-        <div id="emptyState" class="empty-state hidden">
-            <h3>No agents found</h3>
-            <p>Create your first agent to get started</p>
-            <button class="btn btn-primary" onclick="createAgent()">Create Agent</button>
+            <div id="emptyState" class="empty-state hidden">
+                <h3>No agents found</h3>
+                <p>Create your first agent to get started</p>
+                <button class="btn btn-primary" onclick="createAgent()">Create Agent</button>
+            </div>
         </div>
     </div>
         </div>
     </div>
+
+    <div id="agentDrawerBackdrop" class="ops-drawer-backdrop hidden"></div>
+    <aside id="agentDrawer" class="ops-drawer" aria-hidden="true">
+        <div class="ops-drawer-header">
+            <div>
+                <p class="ops-drawer-kicker">Agent Details</p>
+                <h2 id="drawerAgentName">Select an agent</h2>
+            </div>
+            <button id="closeDrawerBtn" class="ops-drawer-close" type="button" aria-label="Close drawer">×</button>
+        </div>
+        <div class="ops-drawer-tabs">
+            <button class="ops-drawer-tab active" type="button" data-tab="overview">Overview</button>
+            <button class="ops-drawer-tab" type="button" data-tab="tools">Tools</button>
+            <button class="ops-drawer-tab" type="button" data-tab="advanced">Advanced</button>
+        </div>
+        <div class="ops-drawer-body">
+            <section id="drawerOverviewTab" class="ops-drawer-panel active">
+                <div id="drawerOverviewContent" class="ops-drawer-content"></div>
+            </section>
+            <section id="drawerToolsTab" class="ops-drawer-panel">
+                <div id="drawerToolsContent" class="ops-drawer-content"></div>
+            </section>
+            <section id="drawerAdvancedTab" class="ops-drawer-panel">
+                <div id="drawerAdvancedContent" class="ops-drawer-content"></div>
+            </section>
+        </div>
+        <div class="ops-drawer-footer">
+            <button id="drawerOpenFullBtn" type="button" class="modern-btn modern-btn-secondary">Open Full Page</button>
+        </div>
+    </aside>
 
     <!-- Shared Modals (Add Agent, Marketplace, etc.) -->
     {{template "modals.tmpl" .}}

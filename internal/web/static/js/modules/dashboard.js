@@ -1667,23 +1667,10 @@
       }
 
       if (isSemiAutoMode()) {
-        appendHomeAssistantMessage('assistant', 'Agent is ready. Confirm when you want to hand off this task to chat.');
-        setHomeAssistantRoutingSummary('Semi-auto', '"' + agentName + '" is ready. Confirm handoff to continue.');
-        renderHomeAssistantActions([
-          {
-            label: 'Continue to Chat',
-            variant: 'primary',
-            onClick: function () { runPendingTaskWithAgent(prompt, agentName, { appLaunchRequest: appLaunchRequest }); }
-          },
-          {
-            label: 'Ask Another Task',
-            variant: 'secondary',
-            onClick: function () { focusHomeAssistantInput(); }
-          }
-        ]);
-      } else {
-        await runPendingTaskWithAgent(prompt, agentName, { appLaunchRequest: appLaunchRequest });
+        appendHomeAssistantMessage('assistant', 'Agent is ready. Handing off this task to chat now.');
+        setHomeAssistantRoutingSummary('Semi-auto', '"' + agentName + '" is ready. Handing off to chat.');
       }
+      await runPendingTaskWithAgent(prompt, agentName, { appLaunchRequest: appLaunchRequest });
 
       API.get('/api/agents/dashboard/list').then(function (agentData) {
         if (agentData) renderAgentList(agentData);
@@ -1921,23 +1908,10 @@
           appendHomeAssistantMessage('assistant', matchedAgentMCP.message);
         }
         if (isSemiAutoMode()) {
-          appendHomeAssistantMessage('assistant', 'Confirm to continue with "' + match.agent.name + '" or create a new agent.');
-          setHomeAssistantRoutingSummary('Semi-auto', 'Review match and confirm next step.');
-          renderHomeAssistantActions([
-            {
-              label: 'Continue with ' + match.agent.name,
-              variant: 'primary',
-              onClick: function () { runPendingTaskWithAgent(text, match.agent.name, { appLaunchRequest: appLaunchRequest }); }
-            },
-            {
-              label: 'Create New Agent',
-              variant: 'secondary',
-              onClick: function () { createAgentForPendingTask(); }
-            }
-          ]);
-        } else {
-          await runPendingTaskWithAgent(text, match.agent.name, { appLaunchRequest: appLaunchRequest });
+          appendHomeAssistantMessage('assistant', 'Match found. Handing off to "' + match.agent.name + '" now.');
+          setHomeAssistantRoutingSummary('Semi-auto', 'Match found. Handing off to "' + match.agent.name + '".');
         }
+        await runPendingTaskWithAgent(text, match.agent.name, { appLaunchRequest: appLaunchRequest });
       } else {
         if (isSemiAutoMode()) {
           appendHomeAssistantMessage('assistant',

@@ -296,3 +296,47 @@ func TestFileStore_Load_LegacyFlatAgentFile_MCPOverrideAndDefaults(t *testing.T)
 		t.Fatalf("expected 2 MCP servers from legacy override, got %d", len(got.MCPServers))
 	}
 }
+
+func TestFileStore_CreateAgent_InitializesSkillsStateWithDisabledDefault(t *testing.T) {
+	tempDir := t.TempDir()
+	indexPath := filepath.Join(tempDir, "agents_index.json")
+
+	fs, err := NewFileStore(indexPath, types.Settings{
+		Model:       "gpt-4o-mini",
+		Temperature: 1.0,
+	})
+	if err != nil {
+		t.Fatalf("NewFileStore() failed: %v", err)
+	}
+
+	if err := fs.CreateAgent("new-agent", &CreateAgentConfig{Type: agent.TypeGeneral}); err != nil {
+		t.Fatalf("CreateAgent() failed: %v", err)
+	}
+
+	skillsStatePath := filepath.Join(tempDir, "agents", "new-agent", "skills_state.json")
+	data, err := os.ReadFile(skillsStatePath)
+	if err != nil {
+		t.Fatalf("failed reading skills state: %v", err)
+	}
+
+	var registry struct {
+		Skills map[string]struct {
+			Enabled bool `json:"enabled"`
+			Trusted bool `json:"trusted"`
+		} `json:"skills"`
+	}
+	if err := json.Unmarshal(data, &registry); err != nil {
+		t.Fatalf("failed decoding skills state: %v", err)
+	}
+
+	defaultState, ok := registry.Skills["*"]
+	if !ok {
+		t.Fatalf("expected wildcard default state entry to exist")
+	}
+	if defaultState.Enabled {
+		t.Fatalf("expected wildcard default state to start disabled")
+	}
+	if defaultState.Trusted {
+		t.Fatalf("expected wildcard default trusted to start false")
+	}
+}
