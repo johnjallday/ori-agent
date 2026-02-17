@@ -1,5 +1,5 @@
 <!-- Top Navbar - Flexible component for all pages -->
-<nav class="navbar {{if .NavbarClass}}{{.NavbarClass}}{{else}}modern-card glassmorphism{{end}} {{if .NavbarFixed}}navbar-expand-lg position-fixed w-100 top-0{{end}}" style="position: relative; z-index: 10002; {{if .NavbarFixed}}backdrop-filter: blur(10px);{{else}}border-radius: 0; border: none; border-bottom: 1px solid var(--border-color); backdrop-filter: blur(20px);{{end}}">
+<nav class="navbar {{if .NavbarClass}}{{.NavbarClass}}{{else}}modern-card glassmorphism{{end}} {{if .NavbarFixed}}navbar-expand-lg position-fixed w-100 top-0{{end}}" style="position: {{if .NavbarFixed}}fixed{{else}}sticky{{end}}; top: 0; z-index: 10002; {{if .NavbarFixed}}backdrop-filter: blur(10px);{{else}}border-radius: 0; border: none; border-bottom: 1px solid var(--border-color); backdrop-filter: blur(20px);{{end}}">
   <div class="container-fluid {{if .NavbarPadding}}{{.NavbarPadding}}{{else}}{{if .NavbarFixed}}px-4{{end}}{{end}}">
     <div class="d-flex align-items-center w-100">
       <!-- Left: Back button OR Sidebar toggle -->

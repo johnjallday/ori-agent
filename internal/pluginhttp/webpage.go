@@ -220,18 +220,18 @@ func (h *WebPageHandler) ListPages(w http.ResponseWriter, r *http.Request) {
 // ListAllPages returns all available web pages from all loaded plugins
 // URL format: /api/plugins/all-pages
 func (h *WebPageHandler) ListAllPages(w http.ResponseWriter, r *http.Request) {
-	// Get current agent
-	_, current := h.State.ListAgents()
-	ag, ok := h.State.GetAgent(current)
-	if !ok {
-		orihttp.InternalError(w, "Current agent not found")
-		return
-	}
-
 	type PluginPage struct {
 		Plugin string `json:"plugin"`
 		Page   string `json:"page"`
 		URL    string `json:"url"`
+	}
+
+	// Get current agent (fallback to first available if current is unset)
+	ag, current, ok := store.GetCurrentAgent(h.State)
+	if !ok || ag == nil {
+		// Keep this endpoint non-fatal for global navbar rendering.
+		orihttp.WriteJSON(w, map[string][]PluginPage{"pages": {}})
+		return
 	}
 
 	var allPages []PluginPage
