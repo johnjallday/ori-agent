@@ -326,6 +326,11 @@ body::after {
   transform: translateY(-3px);
 }
 
+/* Prevent sidebar cards from clipping against the sidebar top edge on hover */
+.sidebar .modern-card:hover {
+  transform: none;
+}
+
 [data-bs-theme="dark"] .modern-card {
   background: var(--surface-card);
   border-color: rgba(191, 161, 126, 0.17);

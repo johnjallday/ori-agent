@@ -13,6 +13,73 @@ let globalMCPServers = [];
 let mcpAutoRecoveryAttempted = false;
 let mcpAutoRecoveryInFlight = false;
 
+// Fetch and display system model in navbar
+async function refreshSystemModelDisplay() {
+  const modelNameEl = document.getElementById('systemModelName');
+  const providerEl = document.getElementById('navSystemModelProvider');
+  const indicatorEl = document.getElementById('systemModelIndicator');
+
+  if (!modelNameEl || !providerEl) return;
+
+  try {
+    const response = await fetch('/api/settings/system-model');
+    if (!response.ok) {
+      throw new Error('Failed to fetch system model');
+    }
+    const data = await response.json();
+
+    if (data.configured && data.model) {
+      const modelName = data.model.length > 20 ? data.model.substring(0, 18) + '...' : data.model;
+      modelNameEl.textContent = modelName;
+      modelNameEl.title = data.model;
+
+      if (data.provider) {
+        providerEl.textContent = data.provider;
+        providerEl.style.display = 'inline';
+
+        switch (data.provider.toLowerCase()) {
+          case 'openai':
+            providerEl.style.background = 'rgba(16, 163, 127, 0.2)';
+            providerEl.style.color = '#10a37f';
+            break;
+          case 'claude':
+          case 'anthropic':
+            providerEl.style.background = 'rgba(204, 147, 102, 0.2)';
+            providerEl.style.color = '#cc9366';
+            break;
+          case 'gemini':
+            providerEl.style.background = 'rgba(66, 133, 244, 0.2)';
+            providerEl.style.color = '#4285f4';
+            break;
+          case 'ollama':
+            providerEl.style.background = 'rgba(59, 130, 246, 0.2)';
+            providerEl.style.color = '#3b82f6';
+            break;
+          default:
+            providerEl.style.background = 'var(--bg-tertiary)';
+            providerEl.style.color = 'var(--text-muted)';
+        }
+      } else {
+        providerEl.style.display = 'none';
+      }
+
+      if (indicatorEl) {
+        indicatorEl.title = `System Model: ${data.model} (${data.provider}) - Click to configure`;
+      }
+    } else {
+      modelNameEl.textContent = 'Not configured';
+      providerEl.style.display = 'none';
+      if (indicatorEl) {
+        indicatorEl.title = 'System Model not configured - Click to set up';
+      }
+    }
+  } catch (error) {
+    console.error('Failed to load system model:', error);
+    modelNameEl.textContent = 'Error';
+    providerEl.style.display = 'none';
+  }
+}
+
 // Get agent name from URL - supports both /agents/{name} and ?name={name}
 function getAgentNameFromURL() {
   // First try path-based URL: /agents/{agent-name}
@@ -151,6 +218,8 @@ function filterEditModelOptions() {
 
 // Initialize page
 document.addEventListener('DOMContentLoaded', async () => {
+  refreshSystemModelDisplay();
+
   // Get agent name from URL
   agentName = getAgentNameFromURL();
 
