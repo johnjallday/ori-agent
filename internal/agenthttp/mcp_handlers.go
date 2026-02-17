@@ -19,6 +19,10 @@ type MCPHandler struct {
 	agentHandler  *Handler
 }
 
+type updateServerConfigRequest struct {
+	Path string `json:"path"`
+}
+
 // NewMCPHandler creates a new MCP handler for agents
 func NewMCPHandler(registry *mcp.Registry, configManager *mcp.ConfigManager, agentHandler *Handler) *MCPHandler {
 	return &MCPHandler{
@@ -223,6 +227,68 @@ func (h *MCPHandler) DisableAgentMCPServerHandler(w http.ResponseWriter, r *http
 	}
 }
 
+// UpdateAgentMCPServerConfigHandler updates MCP server configuration for a specific agent.
+// PUT /api/agents/{name}/mcp-servers/{serverName}/config
+func (h *MCPHandler) UpdateAgentMCPServerConfigHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPut {
+		orihttp.MethodNotAllowed(w)
+		return
+	}
+
+	path := r.URL.Path
+	parts := strings.Split(strings.Trim(path, "/"), "/")
+	if len(parts) < 6 {
+		orihttp.BadRequest(w, "Agent name and server name required in path")
+		return
+	}
+	agentName := parts[2]
+	serverName := parts[4]
+
+	// Verify agent exists
+	_, ok := h.agentHandler.State.GetAgent(agentName)
+	if !ok {
+		orihttp.NotFound(w, "Agent not found")
+		return
+	}
+
+	if serverName != "filesystem" {
+		orihttp.BadRequest(w, "Config updates are currently only supported for the filesystem MCP server")
+		return
+	}
+
+	var req updateServerConfigRequest
+	if !orihttp.ParseJSONBody(w, r, &req) {
+		return
+	}
+
+	newPath := strings.TrimSpace(req.Path)
+	if newPath == "" {
+		orihttp.BadRequest(w, "Path is required")
+		return
+	}
+
+	updatedConfig, err := h.updateFilesystemServerPath(newPath)
+	if err != nil {
+		logger.Error("Failed to update filesystem MCP server path", logger.Fields{
+			"agentName": agentName,
+			"server":    serverName,
+			"path":      newPath,
+			"err":       err,
+		})
+		orihttp.InternalError(w, err.Error())
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	if encErr := json.NewEncoder(w).Encode(map[string]interface{}{
+		"success": true,
+		"server":  updatedConfig.Name,
+		"path":    newPath,
+	}); encErr != nil {
+		logger.Error("Failed to encode response", logger.Fields{"error": encErr})
+	}
+}
+
 // getServerDescription returns a human-readable description for known MCP servers
 func getServerDescription(serverName string) string {
 	descriptions := map[string]string{
@@ -263,4 +329,52 @@ func (h *MCPHandler) syncAgentMCPServer(agentName, serverName string, enabled bo
 	}
 
 	return h.agentHandler.State.SetAgent(agentName, ag)
+}
+
+func (h *MCPHandler) updateFilesystemServerPath(newPath string) (*mcp.ServerConfig, error) {
+	serverConfig, err := h.configManager.GetServer("filesystem")
+	if err != nil {
+		return nil, err
+	}
+
+	updated := *serverConfig
+	switch {
+	case len(updated.Args) >= 3:
+		updated.Args[2] = newPath
+	case len(updated.Args) == 2:
+		updated.Args = append(updated.Args, newPath)
+	default:
+		updated.Args = []string{"-y", "@modelcontextprotocol/server-filesystem", newPath}
+	}
+
+	if err := h.configManager.UpdateServer(updated); err != nil {
+		return nil, err
+	}
+
+	previousStatus := mcp.StatusStopped
+	if status, statusErr := h.registry.GetServerStatus(updated.Name); statusErr == nil {
+		previousStatus = status
+	}
+
+	if _, getErr := h.registry.GetServer(updated.Name); getErr == nil {
+		if err := h.registry.RemoveServer(updated.Name); err != nil {
+			return nil, err
+		}
+	}
+
+	if err := h.registry.AddServer(updated); err != nil {
+		return nil, err
+	}
+
+	if previousStatus == mcp.StatusRunning || previousStatus == mcp.StatusStarting || previousStatus == mcp.StatusRestarting || previousStatus == mcp.StatusError {
+		if err := h.registry.StartServer(updated.Name); err != nil {
+			// Keep saved config even if restart fails; frontend will display tools status.
+			logger.Warn("Updated filesystem MCP path but failed to restart server", logger.Fields{
+				"server": updated.Name,
+				"err":    err,
+			})
+		}
+	}
+
+	return &updated, nil
 }

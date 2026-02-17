@@ -291,6 +291,54 @@
       color: var(--text-secondary);
     }
 
+    .mcp-meta {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-top: 5px;
+      flex-wrap: wrap;
+    }
+
+    .mcp-status-badge {
+      display: inline-flex;
+      align-items: center;
+      padding: 2px 8px;
+      border-radius: 999px;
+      font-size: 11px;
+      font-weight: 600;
+      border: 1px solid transparent;
+      text-transform: uppercase;
+      letter-spacing: 0.2px;
+    }
+
+    .mcp-status-badge.ready {
+      color: var(--success-color);
+      background: color-mix(in srgb, var(--success-color) 16%, transparent);
+      border-color: color-mix(in srgb, var(--success-color) 30%, transparent);
+    }
+
+    .mcp-status-badge.warming {
+      color: var(--warning-color);
+      background: color-mix(in srgb, var(--warning-color) 16%, transparent);
+      border-color: color-mix(in srgb, var(--warning-color) 30%, transparent);
+    }
+
+    .mcp-status-badge.stopped {
+      color: var(--danger-color);
+      background: color-mix(in srgb, var(--danger-color) 16%, transparent);
+      border-color: color-mix(in srgb, var(--danger-color) 30%, transparent);
+    }
+
+    .mcp-command {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      font-size: 11px;
+      color: var(--text-secondary);
+      background: color-mix(in srgb, var(--bg-tertiary) 85%, var(--primary-color) 15%);
+      border: 1px solid color-mix(in srgb, var(--border-color) 82%, var(--primary-color) 18%);
+      border-radius: 6px;
+      padding: 3px 6px;
+    }
+
     .form-actions {
       display: flex;
       gap: 12px;
@@ -565,6 +613,15 @@
 
           <div id="pluginsList" class="plugin-list">
             <!-- Populated by JavaScript -->
+          </div>
+        </div>
+
+        <div class="form-card modern-card">
+          <h2 class="form-section-title">MCP Servers</h2>
+          <div class="form-help" style="margin-bottom: 12px;">Select MCP servers to enable for this agent during creation.</div>
+
+          <div id="mcpServersList" class="plugin-list">
+            <div style="text-align: center; padding: 20px; color: var(--text-muted, #666);">Loading MCP servers...</div>
           </div>
         </div>
 

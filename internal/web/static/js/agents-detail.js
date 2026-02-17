@@ -1693,7 +1693,7 @@ function getMCPServerConfigUI(server, isEnabled) {
                     placeholder="/path/to/directory"
                     style="width: 100%; padding: 8px; background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 4px; color: var(--text-primary); font-size: 14px;"
                     onchange="updateMCPServerConfig('filesystem', 'path', this.value)">
-                <small style="color: var(--text-secondary); font-size: 12px;">The directory this agent can access via the filesystem MCP server</small>
+                <small style="color: var(--text-secondary); font-size: 12px;">The filesystem MCP server can access this directory (shared across agents using this server).</small>
             </div>
             ${getMCPToolsPlaceholder(server.name, isEnabled)}
         `;
@@ -1955,10 +1955,49 @@ async function toggleMCPServer(serverName, enabled) {
 
 // Update MCP server configuration
 async function updateMCPServerConfig(serverName, configKey, value) {
-  // For now, just store the value - you can expand this to save to backend
-  showToast(`${serverName} path updated`, 'info');
+  const trimmedValue = typeof value === 'string' ? value.trim() : value;
 
-  // TODO: Add API call to save per-agent MCP server config
+  if (configKey === 'path' && !trimmedValue) {
+    showToast('Allowed directory path cannot be empty', 'error');
+    return;
+  }
+
+  try {
+    const endpoint = `/api/agents/${encodeURIComponent(agentName)}/mcp-servers/${encodeURIComponent(serverName)}/config`;
+    const payload = {};
+
+    if (configKey === 'path') {
+      payload.path = trimmedValue;
+    } else {
+      showToast(`Unsupported config key: ${configKey}`, 'error');
+      return;
+    }
+
+    const response = await fetch(endpoint, {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(payload)
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      showToast(`Failed to save ${serverName} config: ${errorText}`, 'error');
+      return;
+    }
+
+    showToast(`${serverName} path updated`, 'success');
+
+    // Refresh panel so command/args and tools status reflect the saved config.
+    const panel = document.getElementById('mcpConfigPanel');
+    if (panel && panel.style.display !== 'none') {
+      await loadMCPConfigPanel();
+    }
+  } catch (error) {
+    console.error('Update MCP server config error:', error);
+    showToast(`Failed to update ${serverName} config`, 'error');
+  }
 }
 
 // Show toast notification

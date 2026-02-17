@@ -474,7 +474,7 @@ function switchView(view) {
 
 // Create new agent
 function createAgent() {
-  window.location.href = '/agents-create.html';
+  window.location.href = '/agents/create';
 }
 
 // View agent details
