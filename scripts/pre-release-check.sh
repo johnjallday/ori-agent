@@ -340,9 +340,36 @@ else
   skip_check "Security Scan" "govulncheck not installed"
 fi
 
-# JavaScript linting (if applicable)
-if [ -f "package.json" ] && grep -q '"lint:js"' package.json 2>/dev/null; then
-  run_check "JS Lint Check" "npm run lint:js" true
+# ESLint check (frontend)
+if [ -f "package.json" ]; then
+  ESLINT_SCRIPT=""
+  if grep -q '"lint"[[:space:]]*:' package.json 2>/dev/null; then
+    ESLINT_SCRIPT="lint"
+  elif grep -q '"lint:js"[[:space:]]*:' package.json 2>/dev/null; then
+    ESLINT_SCRIPT="lint:js"
+  fi
+
+  if [ -z "$ESLINT_SCRIPT" ]; then
+    skip_check "ESLint Check" "no lint script in package.json"
+  elif ! command -v npm &> /dev/null; then
+    echo -e "${RED}❌ ESLint Check: FAILED${NC} (npm not installed)"
+    FAILED_CHECKS+=("ESLint Check")
+  else
+    NODE_DEPS_READY=true
+    if [ ! -d "node_modules" ]; then
+      if ! run_check "Install Node Dependencies" "npm ci --no-audit --no-fund"; then
+        NODE_DEPS_READY=false
+      fi
+    fi
+
+    if [ "$NODE_DEPS_READY" = true ]; then
+      run_check "ESLint Check" "npm run $ESLINT_SCRIPT" || true
+    else
+      skip_check "ESLint Check" "node dependencies failed to install"
+    fi
+  fi
+else
+  skip_check "ESLint Check" "package.json not found"
 fi
 
 # ════════════════════════════════════════════════════════════════════════════
