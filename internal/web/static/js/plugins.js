@@ -647,7 +647,7 @@ function createToolsModal(plugin) {
             ${toolsHtml}
           </div>
           <div class="modal-footer">
-              <button class="btn-modern btn-secondary" onclick="closeModal(this)">Close</button>
+              <button class="modern-btn modern-btn-secondary" onclick="closeModal(this)">Close</button>
           </div>
       </div>
   `;
@@ -714,7 +714,7 @@ function createDetailsModal(plugin) {
                 ` : ''}
             </div>
             <div class="modal-footer">
-                <button class="btn-modern btn-secondary" onclick="closeModal(this)">Close</button>
+                <button class="modern-btn modern-btn-secondary" onclick="closeModal(this)">Close</button>
             </div>
         </div>
     `;
@@ -741,8 +741,8 @@ function createTestModal(pluginName) {
                 </div>
             </div>
             <div class="modal-footer">
-                <button class="btn-modern btn-secondary" onclick="closeModal(this)">Close</button>
-                <button class="btn-modern btn-primary" onclick="executeTest('${pluginName}')">Run Test</button>
+                <button class="modern-btn modern-btn-secondary" onclick="closeModal(this)">Close</button>
+                <button class="modern-btn modern-btn-primary" onclick="executeTest('${pluginName}')">Run Test</button>
             </div>
         </div>
     `;

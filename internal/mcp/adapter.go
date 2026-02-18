@@ -2,12 +2,14 @@ package mcp
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 
+	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/oriagent/ori-pluginapi"
 )
 
@@ -32,7 +34,20 @@ func NewMCPAdapter(server *Server, tool Tool) *MCPAdapter {
 // This is the bridge that makes MCP tools compatible with any LLM provider
 func (a *MCPAdapter) Definition() pluginapi.Tool {
 	// Convert MCP inputSchema to generic parameters format
-	parameters := a.tool.InputSchema
+	parameters := map[string]interface{}(nil)
+	switch schema := a.tool.InputSchema.(type) {
+	case map[string]interface{}:
+		parameters = schema
+	case json.RawMessage:
+		_ = json.Unmarshal(schema, &parameters)
+	default:
+		if schema != nil {
+			data, err := json.Marshal(schema)
+			if err == nil {
+				_ = json.Unmarshal(data, &parameters)
+			}
+		}
+	}
 	if parameters == nil {
 		parameters = map[string]interface{}{
 			"type":       "object",
@@ -67,8 +82,10 @@ func (a *MCPAdapter) Call(ctx context.Context, args string) (string, error) {
 	if result.IsError {
 		// Extract error message from content
 		errorMsg := "tool returned error"
-		if len(result.Content) > 0 && result.Content[0].Type == "text" {
-			errorMsg = result.Content[0].Text
+		if len(result.Content) > 0 {
+			if text, ok := result.Content[0].(*sdkmcp.TextContent); ok && strings.TrimSpace(text.Text) != "" {
+				errorMsg = text.Text
+			}
 		}
 		return "", fmt.Errorf("%s", errorMsg)
 	}
@@ -88,24 +105,58 @@ func (a *MCPAdapter) formatResult(result *ToolCallResult) (string, error) {
 	}
 
 	// If single text item, return it directly
-	if len(result.Content) == 1 && result.Content[0].Type == "text" {
-		return result.Content[0].Text, nil
+	if len(result.Content) == 1 {
+		if text, ok := result.Content[0].(*sdkmcp.TextContent); ok {
+			return text.Text, nil
+		}
 	}
 
 	// Multiple items or complex content - return as JSON
 	formatted := make([]map[string]interface{}, 0, len(result.Content))
 	for _, item := range result.Content {
-		formattedItem := map[string]interface{}{
-			"type": item.Type,
-		}
-		switch item.Type {
-		case "text":
-			formattedItem["text"] = item.Text
-		case "image":
-			formattedItem["data"] = item.Data
-			formattedItem["mimeType"] = item.MimeType
-		case "resource":
-			formattedItem["uri"] = item.URI
+		formattedItem := map[string]interface{}{}
+		switch c := item.(type) {
+		case *sdkmcp.TextContent:
+			formattedItem["type"] = "text"
+			formattedItem["text"] = c.Text
+		case *sdkmcp.ImageContent:
+			formattedItem["type"] = "image"
+			formattedItem["mimeType"] = c.MIMEType
+			formattedItem["data"] = base64.StdEncoding.EncodeToString(c.Data)
+		case *sdkmcp.EmbeddedResource:
+			formattedItem["type"] = "resource"
+			if c.Resource != nil {
+				formattedItem["uri"] = c.Resource.URI
+				if c.Resource.MIMEType != "" {
+					formattedItem["mimeType"] = c.Resource.MIMEType
+				}
+				if c.Resource.Text != "" {
+					formattedItem["text"] = c.Resource.Text
+				}
+				if len(c.Resource.Blob) > 0 {
+					formattedItem["blob"] = base64.StdEncoding.EncodeToString(c.Resource.Blob)
+				}
+			}
+		case *sdkmcp.ResourceLink:
+			formattedItem["type"] = "resource_link"
+			formattedItem["uri"] = c.URI
+			if c.Name != "" {
+				formattedItem["name"] = c.Name
+			}
+			if c.MIMEType != "" {
+				formattedItem["mimeType"] = c.MIMEType
+			}
+		default:
+			raw, err := json.Marshal(c)
+			if err != nil {
+				return "", fmt.Errorf("failed to marshal unsupported content item: %w", err)
+			}
+			if err := json.Unmarshal(raw, &formattedItem); err != nil {
+				return "", fmt.Errorf("failed to decode unsupported content item: %w", err)
+			}
+			if _, ok := formattedItem["type"]; !ok {
+				formattedItem["type"] = fmt.Sprintf("%T", c)
+			}
 		}
 		formatted = append(formatted, formattedItem)
 	}

@@ -355,32 +355,65 @@ function createAgentCard(agent) {
 }
 
 async function openChatWithAgent(agentName, button) {
-  const originalText = button.textContent;
-  button.disabled = true;
-  button.textContent = 'Opening...';
+  const originalText = button?.textContent || 'Chat';
+  if (button) {
+    button.disabled = true;
+    button.textContent = 'Opening...';
+  }
 
   try {
     const agent = dashboardAgents.find((item) => String(item?.name || '') === agentName);
+    let resumedAgent = false;
     if (String(agent?.status || '') === 'disabled') {
       await updateAgentStatus(agentName, 'active');
+      resumedAgent = true;
     }
 
-    if (window.sessionManager && typeof window.sessionManager.createSessionWithAgent === 'function') {
-      const session = await window.sessionManager.createSessionWithAgent(agentName);
-      if (!session || !session.id) {
-        throw new Error(`Failed to open chat with ${agentName}`);
-      }
+    await showChatSessionModalForAgent(agentName);
+
+    if (resumedAgent) {
       await loadAgents();
-      return;
     }
-
-    await setCurrentAgent(agentName);
-    window.location.href = '/';
   } catch (error) {
     console.error('Failed to open chat with agent:', error);
     notifyError(error.message || `Failed to open chat with ${agentName}`);
-    button.disabled = false;
-    button.textContent = originalText;
+  } finally {
+    if (button && button.isConnected) {
+      button.disabled = false;
+      button.textContent = originalText;
+    }
+  }
+}
+
+async function showChatSessionModalForAgent(agentName) {
+  const manager = window.sessionManager;
+  if (!manager || typeof manager.showCreateChatModal !== 'function') {
+    throw new Error('Chat session modal is unavailable on this page.');
+  }
+
+  await manager.showCreateChatModal();
+
+  const agentSelect = document.getElementById('chatAgentSelect');
+  if (agentSelect) {
+    const matchedOption = Array.from(agentSelect.options || []).find(
+      (option) => String(option.value || '') === agentName
+    );
+    if (!matchedOption) {
+      throw new Error(`Agent "${agentName}" is unavailable for new chat sessions.`);
+    }
+    agentSelect.value = matchedOption.value;
+    agentSelect.dispatchEvent(new Event('change', { bubbles: true }));
+  }
+
+  const targetInput = manager.chatAutoMode
+    ? document.getElementById('chatAutoMessage')
+    : document.getElementById('chatManualMessage');
+  if (targetInput) {
+    requestAnimationFrame(() => {
+      targetInput.focus();
+      const valueLength = targetInput.value.length;
+      targetInput.setSelectionRange(valueLength, valueLength);
+    });
   }
 }
 

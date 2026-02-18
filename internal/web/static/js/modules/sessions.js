@@ -1071,9 +1071,11 @@ const sessionManager = {
         this.handleChatModeChange('manual');
       }
 
-      // Clear auto message textarea
+      // Clear initial message textareas
       const autoMessageInput = document.getElementById('chatAutoMessage');
       if (autoMessageInput) autoMessageInput.value = '';
+      const manualMessageInput = document.getElementById('chatManualMessage');
+      if (manualMessageInput) manualMessageInput.value = '';
 
       // Reset file attachments
       this.chatPendingFiles = [];
@@ -1149,9 +1151,11 @@ const sessionManager = {
         this.handleChatModeChange('manual');
       }
 
-      // Clear auto message textarea
+      // Clear initial message textareas
       const autoMessageInput = document.getElementById('chatAutoMessage');
       if (autoMessageInput) autoMessageInput.value = '';
+      const manualMessageInput = document.getElementById('chatManualMessage');
+      if (manualMessageInput) manualMessageInput.value = '';
 
       // Reset file attachments
       this.chatPendingFiles = [];
@@ -1220,12 +1224,14 @@ const sessionManager = {
       return;
     }
 
-    // Get the initial message for auto mode before closing modal
+    // Get initial messages before closing modal
     const autoMessageInput = document.getElementById('chatAutoMessage');
-    const initialMessage = this.chatAutoMode ? (autoMessageInput?.value?.trim() || '') : '';
+    const autoInitialMessage = this.chatAutoMode ? (autoMessageInput?.value?.trim() || '') : '';
+    const manualMessageInput = document.getElementById('chatManualMessage');
+    const manualInitialMessage = !this.chatAutoMode ? (manualMessageInput?.value?.trim() || '') : '';
 
     // Validate message in auto mode
-    if (this.chatAutoMode && this.chatLlmAvailable && !initialMessage) {
+    if (this.chatAutoMode && this.chatLlmAvailable && !autoInitialMessage) {
       if (window.Toast) {
         Toast.warning('Please enter a message to start the chat');
       }
@@ -1276,9 +1282,9 @@ const sessionManager = {
         }
 
         // Send the initial message after a brief delay to ensure UI is ready
-        if (initialMessage && window.sendMessageToChat) {
+        if (autoInitialMessage && window.sendMessageToChat) {
           setTimeout(() => {
-            window.sendMessageToChat(initialMessage);
+            window.sendMessageToChat(autoInitialMessage);
           }, 100);
         }
       }
@@ -1306,6 +1312,13 @@ const sessionManager = {
       // Upload pending files
       if (session && session.id && this.chatPendingFiles.length > 0) {
         await this.uploadChatPendingFiles(session.id);
+      }
+
+      // Send optional initial message for manual mode
+      if (session && session.id && manualInitialMessage && window.sendMessageToChat) {
+        setTimeout(() => {
+          window.sendMessageToChat(manualInitialMessage);
+        }, 100);
       }
     }
 
