@@ -253,7 +253,7 @@ func (h *Handler) resolveTargetAgentName(r *http.Request) (string, bool, error) 
 
 	_, currentAgentName, ok := store.GetCurrentAgent(h.store)
 	if !ok || currentAgentName == "" {
-		return "", false, fmt.Errorf("No current agent")
+		return "", false, fmt.Errorf("no current agent")
 	}
 
 	_, found := h.store.GetAgent(currentAgentName)
@@ -270,18 +270,18 @@ func parseAgentNameFromRequest(r *http.Request) (string, error) {
 
 	body, err := io.ReadAll(io.LimitReader(r.Body, orihttp.MaxJSONBodySize+1))
 	if err != nil {
-		return "", fmt.Errorf("Failed to read request body")
+		return "", fmt.Errorf("failed to read request body")
 	}
 	if len(body) == 0 || len(bytes.TrimSpace(body)) == 0 {
 		return "", nil
 	}
 	if len(body) > orihttp.MaxJSONBodySize {
-		return "", fmt.Errorf("Request body too large")
+		return "", fmt.Errorf("request body too large")
 	}
 
 	var req agentNameRequest
 	if err := json.Unmarshal(body, &req); err != nil {
-		return "", fmt.Errorf("Invalid JSON: %v", err)
+		return "", fmt.Errorf("invalid JSON: %v", err)
 	}
 
 	return strings.TrimSpace(req.AgentName), nil
