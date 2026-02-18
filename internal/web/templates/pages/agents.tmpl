@@ -1224,7 +1224,10 @@
 
     .ops-drawer-backdrop {
         position: fixed;
-        inset: 0;
+        top: var(--ops-navbar-offset, 76px);
+        right: 0;
+        bottom: 0;
+        left: 0;
         background: rgba(2, 6, 23, 0.48);
         z-index: 1070;
     }
@@ -1232,8 +1235,8 @@
     .ops-drawer {
         position: fixed;
         right: 0;
-        top: 0;
-        height: 100vh;
+        top: var(--ops-navbar-offset, 76px);
+        height: calc(100vh - var(--ops-navbar-offset, 76px));
         width: min(440px, 94vw);
         background: var(--bg-primary);
         border-left: 1px solid var(--border-color);

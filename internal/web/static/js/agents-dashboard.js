@@ -32,9 +32,19 @@ function notifySuccess(message) {
 }
 
 function initializeDashboard() {
+  syncDrawerOffsetWithNavbar();
+  window.addEventListener('resize', syncDrawerOffsetWithNavbar);
   setupEventListeners();
   setMode('operations');
   loadAgents();
+}
+
+function syncDrawerOffsetWithNavbar() {
+  const navbar = document.querySelector('nav.navbar');
+  const fallbackOffset = 76;
+  const navbarHeight = navbar ? Math.ceil(navbar.getBoundingClientRect().height) : fallbackOffset;
+  const offset = Number.isFinite(navbarHeight) ? Math.max(fallbackOffset, navbarHeight) : fallbackOffset;
+  document.documentElement.style.setProperty('--ops-navbar-offset', `${offset}px`);
 }
 
 function setupEventListeners() {
