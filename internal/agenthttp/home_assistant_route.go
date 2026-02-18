@@ -12,11 +12,20 @@ import (
 )
 
 type HomeAssistantRouteHandler struct {
-	State store.Store
+	State             store.Store
+	SystemModelReader interface {
+		GetSystemModel() (provider, model string)
+	}
 }
 
 func NewHomeAssistantRouteHandler(state store.Store) *HomeAssistantRouteHandler {
 	return &HomeAssistantRouteHandler{State: state}
+}
+
+func (h *HomeAssistantRouteHandler) SetSystemModelReader(reader interface {
+	GetSystemModel() (provider, model string)
+}) {
+	h.SystemModelReader = reader
 }
 
 type HomeAssistantRouteRequest struct {
@@ -53,6 +62,16 @@ type routedAgentMatch struct {
 }
 
 var (
+	homeAssistantUtilityIntent = homeAssistantIntent{
+		Key:              "utility_direct",
+		Label:            "daily utility",
+		Keywords:         []string{"time", "timezone", "clock", "date", "weather", "forecast", "temperature", "convert", "conversion", "calculate", "calculator", "quick fact", "fact", "capital", "define", "definition"},
+		PreferredPlugins: []string{"time", "weather", "calculator", "math", "search", "web"},
+		PreferredTypes:   []string{"general", "tool-calling", "research"},
+		DefaultType:      "general",
+		SuggestedName:    "Utility Assistant",
+		MinScore:         4,
+	}
 	homeAssistantTravelIntent = homeAssistantIntent{
 		Key:              "travel_planning",
 		Label:            "travel planning",
@@ -94,6 +113,7 @@ var (
 		MinScore:         3,
 	}
 	homeAssistantSpecificIntents = []homeAssistantIntent{
+		homeAssistantUtilityIntent,
 		homeAssistantTravelIntent,
 		homeAssistantEmailIntent,
 	}
@@ -123,8 +143,18 @@ func (h *HomeAssistantRouteHandler) RouteHandler(w http.ResponseWriter, r *http.
 		return
 	}
 
+	// Keep a reserved orchestrator agent available for generic fallback routing.
+	systemProvider, systemModel := "", ""
+	if h.SystemModelReader != nil {
+		systemProvider, systemModel = h.SystemModelReader.GetSystemModel()
+	}
+	_ = ensureSystemAssistantAgentWithSystemModel(h.State, systemProvider, systemModel)
+
 	intent := detectHomeAssistantIntent(prompt)
 	match := h.findBestMatch(prompt, intent)
+	if match == nil {
+		match = h.systemAssistantFallback(intent)
+	}
 
 	resp := HomeAssistantRouteResponse{
 		Intent:             intent.Key,
@@ -142,6 +172,25 @@ func (h *HomeAssistantRouteHandler) RouteHandler(w http.ResponseWriter, r *http.
 	}
 
 	orihttp.WriteJSON(w, resp)
+}
+
+func (h *HomeAssistantRouteHandler) systemAssistantFallback(intent homeAssistantIntent) *routedAgentMatch {
+	// Keep specialist intent behavior unchanged; fallback only for utility/general asks.
+	if intent.Key != homeAssistantDefaultIntent.Key && intent.Key != homeAssistantUtilityIntent.Key {
+		return nil
+	}
+
+	ag, ok := h.State.GetAgent(systemAssistantAgentName)
+	if !ok || ag == nil {
+		return nil
+	}
+
+	return &routedAgentMatch{
+		Name:    systemAssistantAgentName,
+		Agent:   ag,
+		Score:   intent.MinScore,
+		Reasons: []string{"fallback to system assistant"},
+	}
 }
 
 func detectHomeAssistantIntent(prompt string) homeAssistantIntent {

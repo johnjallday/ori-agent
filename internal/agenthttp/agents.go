@@ -145,6 +145,11 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			"name": req.Name, "type": req.Type, "model": req.Model, "temperature": req.Temperature,
 		})
 
+		if isSystemAssistantAgent(req.Name) {
+			orihttp.BadRequest(w, "reserved agent name")
+			return
+		}
+
 		// Validate agent name
 		if err := validateAgentName(req.Name); err != nil {
 			logger.Error("CreateAgent error: invalid agent name", logger.Fields{"error": err})
@@ -312,6 +317,11 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 		// Save updated agent (handle rename if needed)
 		if req.Name != nil && *req.Name != "" && *req.Name != agentName {
+			if isSystemAssistantAgent(agentName) || isSystemAssistantAgent(*req.Name) {
+				orihttp.BadRequest(w, "system assistant cannot be renamed")
+				return
+			}
+
 			// Validate the new agent name
 			if err := validateAgentName(*req.Name); err != nil {
 				orihttp.BadRequest(w, err.Error())
@@ -400,6 +410,10 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		name := r.URL.Query().Get("name")
 		if name == "" {
 			orihttp.BadRequest(w, "name required")
+			return
+		}
+		if isSystemAssistantAgent(name) {
+			orihttp.BadRequest(w, "system assistant cannot be deleted")
 			return
 		}
 		if err := h.State.DeleteAgent(name); err != nil {

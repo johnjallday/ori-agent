@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"testing"
 
@@ -338,4 +339,159 @@ func TestHomeAssistantRouteHandler_GeneralPrompt_ContextualMatch(t *testing.T) {
 	if resp.Score < 4 {
 		t.Fatalf("expected score >= 4, got %d", resp.Score)
 	}
+}
+
+func TestHomeAssistantRouteHandler_GeneralPrompt_FallsBackToSystemAssistant(t *testing.T) {
+	st := newHomeRouteTestStore(t)
+	handler := NewHomeAssistantRouteHandler(st)
+
+	rr := postRouteRequest(t, handler, map[string]string{"prompt": "Help me organize my thoughts for tomorrow"})
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d: %s", http.StatusOK, rr.Code, rr.Body.String())
+	}
+
+	var resp HomeAssistantRouteResponse
+	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+
+	if resp.Intent != "general_task" {
+		t.Fatalf("expected intent general_task, got %q", resp.Intent)
+	}
+	if resp.RequiresCreation {
+		t.Fatalf("expected requires_creation false for system assistant fallback")
+	}
+	if resp.MatchedAgent != systemAssistantAgentName {
+		t.Fatalf("expected matched agent %q, got %q", systemAssistantAgentName, resp.MatchedAgent)
+	}
+	if resp.Score < 3 {
+		t.Fatalf("expected score >= 3, got %d", resp.Score)
+	}
+	if len(resp.Reasons) == 0 || resp.Reasons[0] != "fallback to system assistant" {
+		t.Fatalf("expected fallback reason, got %v", resp.Reasons)
+	}
+
+	ag, ok := st.GetAgent(systemAssistantAgentName)
+	if !ok || ag == nil {
+		t.Fatalf("expected system assistant to be created in store")
+	}
+	if ag.Metadata == nil {
+		t.Fatalf("expected metadata for system assistant")
+	}
+	if !containsTag(ag.Metadata.Tags, "system") || !containsTag(ag.Metadata.Tags, "orchestrator") {
+		t.Fatalf("expected system/orchestrator tags, got %v", ag.Metadata.Tags)
+	}
+}
+
+func TestHomeAssistantRouteHandler_UtilityPrompt_FallsBackToSystemAssistant(t *testing.T) {
+	st := newHomeRouteTestStore(t)
+	handler := NewHomeAssistantRouteHandler(st)
+
+	rr := postRouteRequest(t, handler, map[string]string{"prompt": "What time is it in Tokyo?"})
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d: %s", http.StatusOK, rr.Code, rr.Body.String())
+	}
+
+	var resp HomeAssistantRouteResponse
+	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+
+	if resp.Intent != "utility_direct" {
+		t.Fatalf("expected intent utility_direct, got %q", resp.Intent)
+	}
+	if resp.RequiresCreation {
+		t.Fatalf("expected requires_creation false for utility fallback")
+	}
+	if resp.MatchedAgent != systemAssistantAgentName {
+		t.Fatalf("expected matched agent %q, got %q", systemAssistantAgentName, resp.MatchedAgent)
+	}
+	if resp.Score < 4 {
+		t.Fatalf("expected score >= 4, got %d", resp.Score)
+	}
+	if len(resp.Reasons) == 0 {
+		t.Fatalf("expected non-empty reasons for utility match")
+	}
+}
+
+func TestHomeAssistantRouteHandler_CreatesSystemAssistantFiles(t *testing.T) {
+	tmpDir := t.TempDir()
+	storePath := filepath.Join(tmpDir, "agents_index.json")
+	st, err := store.NewFileStore(storePath, types.Settings{
+		Model:       "gpt-5-nano",
+		Temperature: 1.0,
+	})
+	if err != nil {
+		t.Fatalf("failed to create test store: %v", err)
+	}
+
+	handler := NewHomeAssistantRouteHandler(st)
+
+	rr := postRouteRequest(t, handler, map[string]string{"prompt": "quick fact: capital of japan"})
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d: %s", http.StatusOK, rr.Code, rr.Body.String())
+	}
+
+	agentSettingsPath := filepath.Join(tmpDir, "agents", systemAssistantAgentName, "agent_settings.json")
+	if _, err := os.Stat(agentSettingsPath); err != nil {
+		t.Fatalf("expected persisted assistant file at %s: %v", agentSettingsPath, err)
+	}
+}
+
+func TestHomeAssistantRouteHandler_SystemAssistantUsesConfiguredSystemModel(t *testing.T) {
+	st := newHomeRouteTestStore(t)
+	handler := NewHomeAssistantRouteHandler(st)
+	handler.SetSystemModelReader(systemModelReaderStub{
+		provider: "openai",
+		model:    "gpt-4o-mini",
+	})
+
+	rr := postRouteRequest(t, handler, map[string]string{"prompt": "What time is it in Tokyo?"})
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d: %s", http.StatusOK, rr.Code, rr.Body.String())
+	}
+
+	ag, ok := st.GetAgent(systemAssistantAgentName)
+	if !ok || ag == nil {
+		t.Fatalf("expected system assistant to exist")
+	}
+	if ag.Settings.Provider != "openai" {
+		t.Fatalf("expected provider openai, got %q", ag.Settings.Provider)
+	}
+	if ag.Settings.Model != "gpt-4o-mini" {
+		t.Fatalf("expected model gpt-4o-mini, got %q", ag.Settings.Model)
+	}
+}
+
+func TestHomeAssistantRouteHandler_MigratesLegacyAssistantName(t *testing.T) {
+	st := newHomeRouteTestStore(t)
+	if err := st.CreateAgent(systemAssistantAgentLegacyName, &store.CreateAgentConfig{
+		Type:        "general",
+		Model:       "gpt-5-nano",
+		LLMProvider: "openai",
+	}); err != nil {
+		t.Fatalf("failed to create legacy assistant: %v", err)
+	}
+
+	handler := NewHomeAssistantRouteHandler(st)
+	rr := postRouteRequest(t, handler, map[string]string{"prompt": "quick fact: capital of japan"})
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d: %s", http.StatusOK, rr.Code, rr.Body.String())
+	}
+
+	if _, ok := st.GetAgent(systemAssistantAgentName); !ok {
+		t.Fatalf("expected migrated assistant %q to exist", systemAssistantAgentName)
+	}
+	if _, ok := st.GetAgent(systemAssistantAgentLegacyName); ok {
+		t.Fatalf("expected legacy assistant %q to be removed", systemAssistantAgentLegacyName)
+	}
+}
+
+type systemModelReaderStub struct {
+	provider string
+	model    string
+}
+
+func (s systemModelReaderStub) GetSystemModel() (string, string) {
+	return s.provider, s.model
 }

@@ -753,3 +753,32 @@ func TestEvolutionAndFeedEndpoints(t *testing.T) {
 		}
 	})
 }
+
+func TestReservedSystemAssistantProtection(t *testing.T) {
+	ts := setupTestServer(t)
+	defer ts.cleanup()
+
+	if err := ensureSystemAssistantAgent(ts.store); err != nil {
+		t.Fatalf("failed to ensure system assistant: %v", err)
+	}
+
+	t.Run("DeleteReservedAssistantBlocked", func(t *testing.T) {
+		rr := ts.doRequest(t, http.MethodDelete, "/api/agents?name="+systemAssistantAgentName, nil)
+		assertStatus(t, rr, http.StatusBadRequest)
+	})
+
+	t.Run("RenameReservedAssistantBlocked", func(t *testing.T) {
+		rr := ts.doRequest(t, http.MethodPatch, "/api/agents?name="+systemAssistantAgentName, map[string]interface{}{
+			"name": "Assistant Renamed",
+		})
+		assertStatus(t, rr, http.StatusBadRequest)
+	})
+
+	t.Run("RenameIntoReservedAssistantBlocked", func(t *testing.T) {
+		createTestAgent(t, ts, "rename-source-agent", "general")
+		rr := ts.doRequest(t, http.MethodPatch, "/api/agents?name=rename-source-agent", map[string]interface{}{
+			"name": systemAssistantAgentName,
+		})
+		assertStatus(t, rr, http.StatusBadRequest)
+	})
+}

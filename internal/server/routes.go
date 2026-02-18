@@ -169,6 +169,7 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 
 	// Home assistant task routing endpoint
 	homeAssistantRouteHandler := agenthttp.NewHomeAssistantRouteHandler(s.Storage.AgentStore)
+	homeAssistantRouteHandler.SetSystemModelReader(s.Core.ConfigManager)
 	mux.HandleFunc("/api/home-assistant/route", homeAssistantRouteHandler.RouteHandler)
 
 	// =============================================================================

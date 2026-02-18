@@ -14,6 +14,16 @@
   const HOME_ASSISTANT_AUTOMATION_MODE_KEY = 'ori.homeAssistant.automationMode';
 
   const HOME_INTENTS = {
+    utility_direct: {
+      key: 'utility_direct',
+      label: 'daily utility',
+      keywords: ['time', 'timezone', 'clock', 'date', 'weather', 'forecast', 'temperature', 'convert', 'conversion', 'calculate', 'calculator', 'quick fact', 'fact', 'capital', 'define', 'definition'],
+      preferredPlugins: ['time', 'weather', 'calculator', 'math', 'search', 'web'],
+      preferredTypes: ['general', 'tool-calling', 'research'],
+      defaultType: 'general',
+      suggestedName: 'Utility Assistant',
+      tags: ['utility', 'time', 'weather', 'facts']
+    },
     travel_planning: {
       key: 'travel_planning',
       label: 'travel planning',
@@ -882,7 +892,7 @@
     var text = normalizeToken(prompt);
     var selected = HOME_INTENTS.general_task;
     var selectedScore = 0;
-    var keys = ['travel_planning', 'email_check'];
+    var keys = ['utility_direct', 'travel_planning', 'email_check'];
     for (var i = 0; i < keys.length; i++) {
       var intent = HOME_INTENTS[keys[i]];
       var score = 0;
@@ -1260,7 +1270,9 @@
 
   function buildAutoConfigDescription(prompt, intent) {
     var base = '';
-    if (intent.key === 'travel_planning') {
+    if (intent.key === 'utility_direct') {
+      base = 'Create a utility assistant for quick everyday requests such as time lookups, weather checks, simple conversions, and short factual questions.';
+    } else if (intent.key === 'travel_planning') {
       base = 'Create an agent that plans multi-day travel itineraries with day-by-day plans, transportation ideas, budget ranges, and local recommendations.';
     } else if (intent.key === 'email_check') {
       base = 'Create an email triage agent that summarizes unread mail, categorizes urgency, and drafts replies. It must default to read-only behavior and never send without explicit user confirmation.';
@@ -1273,6 +1285,9 @@
   }
 
   function buildDefaultSystemPrompt(intent) {
+    if (intent.key === 'utility_direct') {
+      return 'You are a utility assistant for quick requests. Handle time, weather, simple conversions, and short factual lookups with concise direct answers.';
+    }
     if (intent.key === 'travel_planning') {
       return 'You are a travel planning assistant. Build realistic day-by-day itineraries with concise options, practical transit notes, and budget-aware recommendations.';
     }
