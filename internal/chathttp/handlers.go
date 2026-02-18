@@ -21,6 +21,7 @@ import (
 	orihttp "github.com/johnjallday/ori-agent/internal/http"
 	"github.com/johnjallday/ori-agent/internal/llm"
 	"github.com/johnjallday/ori-agent/internal/logger"
+	"github.com/johnjallday/ori-agent/internal/mcp"
 	"github.com/johnjallday/ori-agent/internal/orchestration"
 	"github.com/johnjallday/ori-agent/internal/pluginloader"
 	"github.com/johnjallday/ori-agent/internal/session"
@@ -79,6 +80,10 @@ type Handler struct {
 		GetToolsForServer(string) ([]pluginapi.PluginTool, error)
 		GetAllTools() []pluginapi.PluginTool
 		StartServer(string) error
+	}
+	mcpConfigManager interface {
+		EnableServerForAgent(agentName, serverName string) error
+		GetServer(name string) (*mcp.ServerConfig, error)
 	}
 }
 
@@ -158,6 +163,14 @@ func (h *Handler) SetMCPRegistry(registry interface {
 	StartServer(string) error
 }) {
 	h.mcpRegistry = registry
+}
+
+// SetMCPConfigManager sets the MCP config manager used for per-agent enablement.
+func (h *Handler) SetMCPConfigManager(manager interface {
+	EnableServerForAgent(agentName, serverName string) error
+	GetServer(name string) (*mcp.ServerConfig, error)
+}) {
+	h.mcpConfigManager = manager
 }
 
 // SetWorkspaceStore sets the workspace store for workspace commands
@@ -669,6 +682,14 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 	ag, ok := h.store.GetAgent(current)
 	if !ok {
 		orihttp.InternalError(w, fmt.Sprintf("agent '%s' not found", current))
+		return
+	}
+
+	preflight := h.maybeAutoEnableMCPForPrompt(current, ag, originalQuery)
+	if preflight != nil && strings.TrimSpace(preflight.userMessage) != "" {
+		writeJSONResponse(w, map[string]any{
+			"response": preflight.userMessage,
+		})
 		return
 	}
 

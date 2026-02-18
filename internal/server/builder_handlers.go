@@ -53,6 +53,7 @@ func (b *ServerBuilder) initializeHandlers() error {
 	b.chatHandler.SetHealthManager(b.healthManager)
 	b.chatHandler.SetCostTracker(b.costTracker)
 	b.chatHandler.SetMCPRegistry(b.mcpRegistry)
+	b.chatHandler.SetMCPConfigManager(b.mcpConfigManager)
 	b.chatHandler.SetWorkspaceStore(b.workspaceStore) // Will be set later
 	if featureflags.EvolutionEnabled() {
 		b.evolutionService = evolution.NewService(b.st, b.onboardingMgr, nil)
