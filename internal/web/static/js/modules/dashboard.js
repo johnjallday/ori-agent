@@ -102,6 +102,7 @@
     automationMode: 'semi_auto'
   };
 
+  var homeAssistantThinkingModalInstance = null;
   var providersCache = null;
   var HOME_ASSISTANT_COMMON_TOKENS = {
     a: true, an: true, and: true, are: true, can: true, do: true, for: true, help: true,
@@ -125,17 +126,6 @@
   function formatCost(value) {
     var num = Number(value || 0);
     return '$' + num.toFixed(4);
-  }
-
-  function setGreeting() {
-    var el = document.getElementById('dashboardGreeting');
-    if (!el) return;
-    var hour = new Date().getHours();
-    var greeting;
-    if (hour < 12) greeting = 'Good morning!';
-    else if (hour < 17) greeting = 'Good afternoon!';
-    else greeting = 'Good evening!';
-    el.textContent = greeting;
   }
 
   function normalizeToken(value) {
@@ -450,6 +440,9 @@
       sendBtn: document.getElementById('homeAssistantSendBtn'),
       conversation: document.getElementById('homeAssistantConversation'),
       routingSummary: document.getElementById('homeAssistantRoutingSummary'),
+      thinkingModal: document.getElementById('homeAssistantThinkingModal'),
+      thinkingStatus: document.getElementById('homeAssistantThinkingStatus'),
+      thinkingSpinner: document.getElementById('homeAssistantThinkingSpinner'),
       quickPrompts: document.getElementById('homeAssistantQuickPrompts'),
       actions: document.getElementById('homeAssistantActions'),
       recentSection: document.getElementById('homeAssistantRecentSection'),
@@ -464,6 +457,45 @@
       avatarBtn: document.getElementById('dashboardAssistantAvatarBtn'),
       bubbleBtn: document.getElementById('dashboardAssistantBubbleBtn')
     };
+  }
+
+  function isElementInsideModal(element) {
+    if (!element || typeof element.closest !== 'function') return false;
+    return Boolean(element.closest('.modal'));
+  }
+
+  function getHomeAssistantThinkingModalInstance() {
+    var els = getHomeAssistantElements();
+    if (!els.thinkingModal || typeof bootstrap === 'undefined' || !bootstrap.Modal) return null;
+    if (homeAssistantThinkingModalInstance) return homeAssistantThinkingModalInstance;
+    homeAssistantThinkingModalInstance = bootstrap.Modal.getOrCreateInstance(els.thinkingModal);
+    return homeAssistantThinkingModalInstance;
+  }
+
+  function openHomeAssistantThinkingModal() {
+    var modal = getHomeAssistantThinkingModalInstance();
+    if (!modal) return;
+    modal.show();
+  }
+
+  function syncHomeAssistantThinkingStatus() {
+    var els = getHomeAssistantElements();
+    if (!els.thinkingStatus) return;
+
+    var statusText = '';
+    if (homeAssistantState.routingSummary && homeAssistantState.routingSummary.text) {
+      statusText = homeAssistantState.routingSummary.text;
+    } else if (homeAssistantState.busy) {
+      statusText = 'Working...';
+    } else {
+      statusText = 'Ready for your next task.';
+    }
+
+    var textNode = els.thinkingStatus.querySelector('span:last-child');
+    if (textNode) textNode.textContent = statusText;
+    if (els.thinkingSpinner) {
+      els.thinkingSpinner.classList.toggle('d-none', !homeAssistantState.busy);
+    }
   }
 
   function renderHomeAssistantRoutingSummary() {
@@ -490,12 +522,14 @@
     container.appendChild(title);
     container.appendChild(text);
     container.classList.remove('d-none');
+    syncHomeAssistantThinkingStatus();
   }
 
   function setHomeAssistantRoutingSummary(title, text) {
     if (!title || !text) {
       homeAssistantState.routingSummary = null;
       renderHomeAssistantRoutingSummary();
+      syncHomeAssistantThinkingStatus();
       return;
     }
     homeAssistantState.routingSummary = {
@@ -503,6 +537,9 @@
       text: String(text)
     };
     renderHomeAssistantRoutingSummary();
+    if (homeAssistantState.busy) {
+      openHomeAssistantThinkingModal();
+    }
   }
 
   function setHomeAssistantMode(mode) {
@@ -524,13 +561,11 @@
     if (els.quickPrompts) {
       els.quickPrompts.classList.toggle('d-none', nextMode === 'continue_session');
     }
-    if (els.conversation) {
+    if (els.conversation && !isElementInsideModal(els.conversation)) {
       els.conversation.classList.toggle('d-none', nextMode === 'continue_session');
     }
     if (els.input) {
-      els.input.placeholder = nextMode === 'continue_session'
-        ? 'Type a new task or open one of your recent sessions...'
-        : 'Ask Ori to do something...';
+      els.input.placeholder = 'Ask Ori to do something...';
     }
 
     renderHomeAssistantRecentSessions();
@@ -546,6 +581,7 @@
     saveHomeAssistantAutomationMode();
 
     var els = getHomeAssistantElements();
+    var hasAutomationControls = Boolean(els.autoFullBtn || els.autoSemiBtn);
     if (els.autoFullBtn) {
       var isFull = nextMode === 'full_auto';
       els.autoFullBtn.classList.toggle('is-active', isFull);
@@ -556,6 +592,8 @@
       els.autoSemiBtn.classList.toggle('is-active', isSemi);
       els.autoSemiBtn.setAttribute('aria-selected', isSemi ? 'true' : 'false');
     }
+
+    if (!hasAutomationControls) return;
 
     if (nextMode === 'semi_auto') {
       setHomeAssistantRoutingSummary('Semi-auto', 'Step-by-step confirmations are enabled.');
@@ -597,6 +635,10 @@
     if (els.autoSemiBtn) els.autoSemiBtn.disabled = homeAssistantState.busy;
     if (els.viewAllBtn) els.viewAllBtn.disabled = homeAssistantState.busy;
     if (els.clearRecentBtn) els.clearRecentBtn.disabled = homeAssistantState.busy;
+    if (homeAssistantState.busy) {
+      openHomeAssistantThinkingModal();
+    }
+    syncHomeAssistantThinkingStatus();
   }
 
   function appendHomeAssistantMessage(role, text) {
@@ -633,6 +675,7 @@
       conversation.removeChild(conversation.firstChild);
     }
     conversation.scrollTop = conversation.scrollHeight;
+    openHomeAssistantThinkingModal();
   }
 
   function renderHomeAssistantActions(actions) {
@@ -663,6 +706,7 @@
     }
 
     container.classList.remove('d-none');
+    openHomeAssistantThinkingModal();
   }
 
   function removeTrackedSession(sessionId) {
@@ -1555,12 +1599,60 @@
     }
   }
 
+  async function checkHomeAssistantLLMAvailability() {
+    if (typeof API === 'undefined' || typeof API.get !== 'function') {
+      return { available: false, system_model_configured: false };
+    }
+    try {
+      var data = await API.get('/api/agents/auto-config/availability');
+      return {
+        available: Boolean(data && data.available),
+        system_model_configured: Boolean(data && data.system_model_configured),
+        message: String(data && data.message || '')
+      };
+    } catch (error) {
+      dashLog.debug('Failed to check Ask Ori model availability', { error: error && error.message || error });
+      return { available: false, system_model_configured: false };
+    }
+  }
+
+  function getHomeAssistantLLMRequirementMessage(availability) {
+    var systemModelConfigured = Boolean(availability && availability.system_model_configured);
+    if (!systemModelConfigured) {
+      return 'No suitable agent is configured for this task, and a System Model must be configured before I can create one. Open Settings to configure it.';
+    }
+    return 'No suitable agent is configured for this task, and no LLM provider is available right now. Open Settings to configure a provider or model.';
+  }
+
   async function createAgentForPendingTask() {
     if (!homeAssistantState.pendingPrompt) return;
     var prompt = homeAssistantState.pendingPrompt;
     var intent = homeAssistantState.pendingIntent || HOME_INTENTS.general_task;
     var appLaunchRequest = homeAssistantState.pendingAppLaunch;
     homeAssistantState.awaitingCreateConfirmation = false;
+
+    var llmAvailability = await checkHomeAssistantLLMAvailability();
+    if (!llmAvailability.available) {
+      var llmRequiredMessage = getHomeAssistantLLMRequirementMessage(llmAvailability);
+      appendHomeAssistantMessage('assistant', llmRequiredMessage);
+      setHomeAssistantRoutingSummary('Model Configuration Required', llmRequiredMessage);
+      renderHomeAssistantActions([
+        {
+          label: 'Go to Settings',
+          variant: 'primary',
+          onClick: function () { window.location.href = '/settings'; }
+        },
+        {
+          label: 'Ask Another Task',
+          variant: 'secondary',
+          onClick: function () { focusHomeAssistantInput(); }
+        }
+      ]);
+      if (window.Toast) {
+        Toast.warning('System Model setup is required before creating a new agent.');
+      }
+      return;
+    }
 
     setHomeAssistantBusy(true, 'Creating...');
     renderHomeAssistantActions([]);
@@ -1913,6 +2005,30 @@
         }
         await runPendingTaskWithAgent(text, match.agent.name, { appLaunchRequest: appLaunchRequest });
       } else {
+        var llmAvailabilityForCreate = await checkHomeAssistantLLMAvailability();
+        if (!llmAvailabilityForCreate.available) {
+          homeAssistantState.awaitingCreateConfirmation = false;
+          var llmRequiredMessage = getHomeAssistantLLMRequirementMessage(llmAvailabilityForCreate);
+          appendHomeAssistantMessage('assistant', llmRequiredMessage);
+          setHomeAssistantRoutingSummary('Model Configuration Required', llmRequiredMessage);
+          renderHomeAssistantActions([
+            {
+              label: 'Go to Settings',
+              variant: 'primary',
+              onClick: function () { window.location.href = '/settings'; }
+            },
+            {
+              label: 'Ask Another Task',
+              variant: 'secondary',
+              onClick: function () { focusHomeAssistantInput(); }
+            }
+          ]);
+          if (window.Toast) {
+            Toast.warning('System Model setup is required before creating a new agent.');
+          }
+          return;
+        }
+
         if (isSemiAutoMode()) {
           appendHomeAssistantMessage('assistant',
             'No suitable agent found for this task. I will open the Create Agent modal so you can review details.');
@@ -1956,19 +2072,25 @@
     var prompt = els.input.value.trim();
     if (!prompt) return;
     els.input.value = '';
+    openHomeAssistantThinkingModal();
     handleHomeAssistantPrompt(prompt);
   }
 
   function initHomeAssistant() {
     var els = getHomeAssistantElements();
     if (!els.form || !els.input) return;
+    var supportsRecentSessions = Boolean(els.recentSection || els.recentSessions || els.viewAllBtn || els.clearRecentBtn);
+
     homeAssistantState.automationMode = loadHomeAssistantAutomationMode();
-    homeAssistantState.recentSessions = loadHomeAssistantRecentSessions();
+    homeAssistantState.recentSessions = supportsRecentSessions ? loadHomeAssistantRecentSessions() : [];
     setHomeAssistantRoutingSummary('', '');
     renderHomeAssistantRecentSessions();
-    hydrateHomeAssistantRecentSessions();
+    if (supportsRecentSessions) {
+      hydrateHomeAssistantRecentSessions();
+    }
     setHomeAssistantMode(homeAssistantState.mode);
     setHomeAssistantAutomationMode(homeAssistantState.automationMode);
+    syncHomeAssistantThinkingStatus();
 
     if (window.EventBus && typeof EventBus.on === 'function') {
       EventBus.on('session:deleted', function (payload) {
@@ -2151,7 +2273,6 @@
   }
 
   function initDashboard() {
-    setGreeting();
     initHomeAssistant();
 
     if (typeof API === 'undefined' || typeof API.get !== 'function') {
@@ -2160,43 +2281,69 @@
     }
 
     var evolutionEnabled = Boolean(window.oriFeatures && window.oriFeatures.evolutionEnabled);
+    var needsStats = Boolean(
+      document.getElementById('dashboardStatAgents') ||
+      document.getElementById('dashboardStatActive') ||
+      document.getElementById('dashboardStatMessages') ||
+      document.getElementById('dashboardStatCost')
+    );
+    var needsAgentList = Boolean(document.getElementById('dashboardAgentList'));
+    var needsProfile = Boolean(document.getElementById('dashboardPersonalizeBanner'));
+    var needsProgress = Boolean(evolutionEnabled && document.getElementById('dashboardProgressCard'));
 
-    var promises = [
-      API.get('/api/agents/dashboard/stats').catch(function (err) {
-        dashLog.debug('Failed to load dashboard stats', { error: err && err.message || err });
-        return null;
-      }),
-      API.get('/api/agents/dashboard/list').catch(function (err) {
-        dashLog.debug('Failed to load agent list', { error: err && err.message || err });
-        return null;
-      }),
-      API.get('/api/onboarding/user-profile').catch(function (err) {
-        dashLog.debug('Failed to load user profile', { error: err && err.message || err });
-        return null;
-      })
-    ];
+    var tasks = [];
 
-    if (evolutionEnabled) {
-      promises.push(
-        API.get('/api/evolution/assistant').catch(function (err) {
+    if (needsStats) {
+      tasks.push({
+        key: 'stats',
+        promise: API.get('/api/agents/dashboard/stats').catch(function (err) {
+          dashLog.debug('Failed to load dashboard stats', { error: err && err.message || err });
+          return null;
+        })
+      });
+    }
+
+    if (needsAgentList) {
+      tasks.push({
+        key: 'agents',
+        promise: API.get('/api/agents/dashboard/list').catch(function (err) {
+          dashLog.debug('Failed to load agent list', { error: err && err.message || err });
+          return null;
+        })
+      });
+    }
+
+    if (needsProfile) {
+      tasks.push({
+        key: 'profile',
+        promise: API.get('/api/onboarding/user-profile').catch(function (err) {
+          dashLog.debug('Failed to load user profile', { error: err && err.message || err });
+          return null;
+        })
+      });
+    }
+
+    if (needsProgress) {
+      tasks.push({
+        key: 'progress',
+        promise: API.get('/api/evolution/assistant').catch(function (err) {
           dashLog.debug('Failed to load assistant progress', { error: err && err.message || err });
           return null;
         })
-      );
+      });
     }
 
-    Promise.allSettled(promises).then(function (results) {
-      var statsData = results[0].status === 'fulfilled' ? results[0].value : null;
-      var agentData = results[1].status === 'fulfilled' ? results[1].value : null;
-      var profileData = results[2].status === 'fulfilled' ? results[2].value : null;
+    if (tasks.length === 0) return;
 
-      if (statsData) renderStats(statsData);
-      if (agentData) renderAgentList(agentData);
-      renderPersonalizeBanner(profileData);
-
-      if (evolutionEnabled && results.length > 3) {
-        var evoData = results[3].status === 'fulfilled' ? results[3].value : null;
-        if (evoData) renderAssistantProgress(evoData);
+    Promise.allSettled(tasks.map(function (task) { return task.promise; })).then(function (results) {
+      for (var i = 0; i < tasks.length; i++) {
+        var key = tasks[i].key;
+        var value = results[i].status === 'fulfilled' ? results[i].value : null;
+        if (!value) continue;
+        if (key === 'stats') renderStats(value);
+        if (key === 'agents') renderAgentList(value);
+        if (key === 'profile') renderPersonalizeBanner(value);
+        if (key === 'progress') renderAssistantProgress(value);
       }
     });
   }
