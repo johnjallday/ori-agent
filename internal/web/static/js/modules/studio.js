@@ -240,7 +240,7 @@ export class WorkspaceManager {
       return '<p class="text-muted">No tasks</p>';
     }
 
-    return Object.entries(tasks).map(([taskId, task]) => `
+    return Object.entries(tasks).map(([, task]) => `
             <div class="task-item">
                 <div class="d-flex justify-content-between align-items-center">
                     <span class="task-agent">${this.escapeHtml(task.agent)}</span>

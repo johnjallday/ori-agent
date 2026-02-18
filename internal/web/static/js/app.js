@@ -450,7 +450,7 @@ function renderModal(data, metadata) {
         downloadBtn.innerHTML = `<span class="spinner-border spinner-border-sm me-2"></span>Downloading ${filenames.length} script(s)...`;
 
         let successCount = 0;
-        let errorCount = 0;
+        let _errorCount = 0;
 
         try {
           // Download each script sequentially using direct API call
@@ -468,12 +468,12 @@ function renderModal(data, metadata) {
                 successCount++;
                 addMessageToChat(result.result, false);
               } else {
-                errorCount++;
+                _errorCount++;
                 addMessageToChat(`Error downloading ${filename}: ${result.error}`, false, true);
               }
             } catch (error) {
               appLog.error(`Error downloading ${filename}:`, error);
-              errorCount++;
+              _errorCount++;
               addMessageToChat(`Error downloading ${filename}: ${error.message}`, false, true);
               if (window.Toast) {
                 Toast.error(`Failed to download ${filename}`);

@@ -1426,25 +1426,28 @@ export class RendererNodes {
       case 'interval':
         return `Every ${config.interval_minutes || 60} minutes`;
 
-      case 'daily':
+      case 'daily': {
         const dailyHour = (config.hour || 9).toString().padStart(2, '0');
         const dailyMinute = (config.minute || 0).toString().padStart(2, '0');
         return `Daily at ${dailyHour}:${dailyMinute}`;
+      }
 
-      case 'weekly':
+      case 'weekly': {
         const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
         const day = days[config.day_of_week || 1];
         const weeklyHour = (config.hour || 9).toString().padStart(2, '0');
         const weeklyMinute = (config.minute || 0).toString().padStart(2, '0');
         return `${day} at ${weeklyHour}:${weeklyMinute}`;
+      }
 
       case 'cron':
         return `Cron: ${config.cron_expr || '0 9 * * *'}`;
 
-      case 'relative_delay':
+      case 'relative_delay': {
         const delay = config.delay_duration || 5;
         const once = config.trigger_once ? ' (once)' : '';
         return `${delay}m delay${once}`;
+      }
 
       default:
         return config.schedule_type || 'Unknown';

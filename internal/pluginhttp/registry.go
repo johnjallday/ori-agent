@@ -639,25 +639,40 @@ func (h *RegistryHandler) PluginUpdatesCheckHandler(w http.ResponseWriter, r *ht
 		return
 	}
 
+	writeEmptySuccess := func(message string) {
+		w.Header().Set("Content-Type", "application/json")
+		payload := map[string]any{
+			"success":      true,
+			"updatesCount": 0,
+			"updates":      []map[string]any{},
+		}
+		if strings.TrimSpace(message) != "" {
+			payload["message"] = message
+		}
+		if encErr := json.NewEncoder(w).Encode(payload); encErr != nil {
+			logger.Error("Failed to encode response", logger.Fields{"error": encErr})
+		}
+	}
+
+	if h.registryManager == nil {
+		logger.Warn("Plugin updates check skipped: registry manager not configured", logger.Fields{})
+		writeEmptySuccess("registry unavailable")
+		return
+	}
+
 	// Load registry to get latest versions
 	reg, _, err := h.registryManager.Load()
 	if err != nil {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusInternalServerError)
-		if encErr := json.NewEncoder(w).Encode(map[string]any{
-			"success": false,
-			"message": err.Error(),
-		}); err != nil {
-			logger.Error("Failed to encode response", logger.Fields{"error": encErr})
-		}
+		// Registry/cache/network issues should not break navbar update checks.
+		logger.Warn("Plugin updates check skipped: failed to load registry", logger.Fields{"error": err.Error()})
+		writeEmptySuccess("registry unavailable")
 		return
 	}
 
 	// Get currently installed plugins
-	_, currentAgent := h.store.ListAgents()
-	ag, ok := h.store.GetAgent(currentAgent)
-	if !ok {
-		orihttp.InternalError(w, "current agent not found")
+	ag, _, ok := store.GetCurrentAgent(h.store)
+	if !ok || ag == nil {
+		writeEmptySuccess("no active agent")
 		return
 	}
 

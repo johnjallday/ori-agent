@@ -129,7 +129,7 @@
       return;
     }
 
-    const inSelectionMode = window.WorkspaceHubSelection.isSelectionModeEnabled('sessions');
+    const _inSelectionMode = window.WorkspaceHubSelection.isSelectionModeEnabled('sessions');
     const selectedSet = state.selectedItems.sessions;
 
     const items = sessions.map((session) => {

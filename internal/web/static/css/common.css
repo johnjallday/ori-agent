@@ -1446,7 +1446,7 @@ h3, .h3 {
     position: fixed;
     bottom: 20px;
     right: 20px;
-    z-index: 9999;
+    z-index: 11050;
     display: flex;
     flex-direction: column-reverse;
     gap: 10px;
@@ -1469,6 +1469,10 @@ h3, .h3 {
     position: relative;
     overflow: hidden;
     min-width: 300px;
+}
+
+.toast.show {
+    display: flex;
 }
 
 .toast.toast-enter {

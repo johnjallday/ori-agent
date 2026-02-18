@@ -107,7 +107,7 @@ function displayOnlinePlugins(onlinePlugins, installedPluginNames = new Set()) {
   }).join('');
 }
 
-async function installOnlinePlugin(pluginName, downloadUrl) {
+async function installOnlinePlugin(pluginName) {
   const button = event.target;
   const originalText = button.innerHTML;
 

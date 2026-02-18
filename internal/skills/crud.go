@@ -15,7 +15,6 @@ type SkillInput struct {
 	Description string  `json:"description"`
 	Prompt      string  `json:"prompt"`
 	OpenAIYAML  *string `json:"openai_yaml,omitempty"`
-	Enabled     *bool   `json:"enabled,omitempty"`
 }
 
 func (m *Manager) CreateSkill(agentName string, input SkillInput) (Skill, error) {
@@ -61,21 +60,11 @@ func (m *Manager) CreateSkill(agentName string, input SkillInput) (Skill, error)
 		}
 	}
 
-	if input.Enabled != nil {
-		if err := m.SetSkillEnabled(agentName, input.Name, *input.Enabled); err != nil {
-			return Skill{}, err
-		}
-	}
-
 	skill, err := m.loadSkillEntry(filepath.Join(skillDir, "SKILL.md"), input.Name, SourceAgent, skillDir, true)
 	if err != nil {
 		return Skill{}, err
 	}
-	if input.Enabled != nil {
-		skill.Enabled = *input.Enabled
-	} else {
-		skill.Enabled = true
-	}
+	skill.Enabled = true
 	return skill, nil
 }
 
@@ -119,21 +108,11 @@ func (m *Manager) UpdateSkill(agentName, skillName string, input SkillInput) (Sk
 		}
 	}
 
-	if input.Enabled != nil {
-		if err := m.SetSkillEnabled(agentName, skillName, *input.Enabled); err != nil {
-			return Skill{}, err
-		}
-	}
-
 	skill, err := m.loadSkillEntry(skillPath, skillName, SourceAgent, skillDir, true)
 	if err != nil {
 		return Skill{}, err
 	}
-	if input.Enabled != nil {
-		skill.Enabled = *input.Enabled
-	} else {
-		skill.Enabled = true
-	}
+	skill.Enabled = true
 	return skill, nil
 }
 

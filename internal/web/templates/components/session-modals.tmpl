@@ -299,6 +299,7 @@
             </span>
           </span>
         </span>
+        <button type="button" id="noteCopyBtn" class="modern-btn modern-btn-secondary">Copy</button>
         <button type="button" class="modern-btn modern-btn-secondary" data-bs-dismiss="modal">Cancel</button>
         <button type="button" id="saveNoteBtn" class="modern-btn modern-btn-primary">Save</button>
       </div>
@@ -351,11 +352,17 @@
               <!-- Workspaces will be populated dynamically -->
             </select>
           </div>
-          <div>
+          <div class="mb-3">
             <label class="form-label" style="font-size: 12px; color: var(--text-secondary);">Agent</label>
             <select id="chatAgentSelect" class="modern-input w-100">
               <!-- Agents will be populated dynamically -->
             </select>
+          </div>
+          <div>
+            <label class="form-label" style="font-size: 12px; color: var(--text-secondary);">Initial message (optional)</label>
+            <textarea id="chatManualMessage" class="modern-input w-100" rows="3"
+                      style="resize: vertical; min-height: 80px;"
+                      placeholder="Type your message here..."></textarea>
           </div>
         </div>
 

@@ -99,7 +99,16 @@ func (m *Manager) updateSkillState(agentName, skillName string, updateFn func(*S
 		return err
 	}
 
-	state := registry.Skills[key]
+	state, exists := registry.Skills[key]
+	if !exists {
+		// Skills are enabled by default unless an agent-level default is defined.
+		if defaultState, ok := registry.Skills["*"]; ok {
+			state.Enabled = defaultState.Enabled
+			state.Trusted = defaultState.Trusted
+		} else {
+			state.Enabled = true
+		}
+	}
 	updateFn(&state)
 	state.UpdatedAt = time.Now().UTC()
 	registry.Skills[key] = state
@@ -107,15 +116,15 @@ func (m *Manager) updateSkillState(agentName, skillName string, updateFn func(*S
 	return saveSkillRegistry(path, registry)
 }
 
-func (m *Manager) SetSkillEnabled(agentName, skillName string, enabled bool) error {
-	return m.updateSkillState(agentName, skillName, func(state *SkillState) {
-		state.Enabled = enabled
-	})
-}
-
 func (m *Manager) SetSkillTrusted(agentName, skillName string, trusted bool) error {
 	return m.updateSkillState(agentName, skillName, func(state *SkillState) {
 		state.Trusted = trusted
+	})
+}
+
+func (m *Manager) SetSkillEnabled(agentName, skillName string, enabled bool) error {
+	return m.updateSkillState(agentName, skillName, func(state *SkillState) {
+		state.Enabled = enabled
 	})
 }
 

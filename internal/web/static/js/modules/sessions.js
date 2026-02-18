@@ -741,7 +741,7 @@ const sessionManager = {
       const children = folder.children || [];
       const folderSessions = this.sessionsByFolder?.get(folder.id) || [];
       const isCollapsed = this.collapsedFolderIds.has(folder.id);
-      const hasNestedSessions = folderSessions.length > 0;
+      
       const hasAccent = Boolean(folder.color);
       const accentStyles = hasAccent
         ? `data-has-accent="true" style="--folder-accent-bg: ${this.hexToRgba(folder.color, 0.12)}; --folder-accent-bg-hover: ${this.hexToRgba(folder.color, 0.18)}; --folder-accent-border: ${this.hexToRgba(folder.color, 0.35)};"`
@@ -1071,9 +1071,11 @@ const sessionManager = {
         this.handleChatModeChange('manual');
       }
 
-      // Clear auto message textarea
+      // Clear initial message textareas
       const autoMessageInput = document.getElementById('chatAutoMessage');
       if (autoMessageInput) autoMessageInput.value = '';
+      const manualMessageInput = document.getElementById('chatManualMessage');
+      if (manualMessageInput) manualMessageInput.value = '';
 
       // Reset file attachments
       this.chatPendingFiles = [];
@@ -1149,9 +1151,11 @@ const sessionManager = {
         this.handleChatModeChange('manual');
       }
 
-      // Clear auto message textarea
+      // Clear initial message textareas
       const autoMessageInput = document.getElementById('chatAutoMessage');
       if (autoMessageInput) autoMessageInput.value = '';
+      const manualMessageInput = document.getElementById('chatManualMessage');
+      if (manualMessageInput) manualMessageInput.value = '';
 
       // Reset file attachments
       this.chatPendingFiles = [];
@@ -1220,12 +1224,14 @@ const sessionManager = {
       return;
     }
 
-    // Get the initial message for auto mode before closing modal
+    // Get initial messages before closing modal
     const autoMessageInput = document.getElementById('chatAutoMessage');
-    const initialMessage = this.chatAutoMode ? (autoMessageInput?.value?.trim() || '') : '';
+    const autoInitialMessage = this.chatAutoMode ? (autoMessageInput?.value?.trim() || '') : '';
+    const manualMessageInput = document.getElementById('chatManualMessage');
+    const manualInitialMessage = !this.chatAutoMode ? (manualMessageInput?.value?.trim() || '') : '';
 
     // Validate message in auto mode
-    if (this.chatAutoMode && this.chatLlmAvailable && !initialMessage) {
+    if (this.chatAutoMode && this.chatLlmAvailable && !autoInitialMessage) {
       if (window.Toast) {
         Toast.warning('Please enter a message to start the chat');
       }
@@ -1276,9 +1282,9 @@ const sessionManager = {
         }
 
         // Send the initial message after a brief delay to ensure UI is ready
-        if (initialMessage && window.sendMessageToChat) {
+        if (autoInitialMessage && window.sendMessageToChat) {
           setTimeout(() => {
-            window.sendMessageToChat(initialMessage);
+            window.sendMessageToChat(autoInitialMessage);
           }, 100);
         }
       }
@@ -1306,6 +1312,13 @@ const sessionManager = {
       // Upload pending files
       if (session && session.id && this.chatPendingFiles.length > 0) {
         await this.uploadChatPendingFiles(session.id);
+      }
+
+      // Send optional initial message for manual mode
+      if (session && session.id && manualInitialMessage && window.sendMessageToChat) {
+        setTimeout(() => {
+          window.sendMessageToChat(manualInitialMessage);
+        }, 100);
       }
     }
 
@@ -3901,6 +3914,11 @@ const sessionManager = {
     const normalizedType = (type || 'info').toLowerCase();
     const toastType = normalizedType === 'danger' ? 'error' : normalizedType === 'warn' ? 'warning' : normalizedType;
 
+    if (typeof window.notifyToast === 'function') {
+      window.notifyToast(message, toastType);
+      return;
+    }
+
     if (window.Toast) {
       const toastFn = window.Toast[toastType];
       if (typeof toastFn === 'function') {
@@ -4059,7 +4077,7 @@ const sessionManager = {
       const data = await response.json();
 
       // Update local cache
-      for (const [folderId, notes] of this.notesByFolder) {
+      for (const [, notes] of this.notesByFolder) {
         const index = notes.findIndex(n => n.id === noteId);
         if (index !== -1) {
           notes[index] = { ...notes[index], ...data.note };
@@ -4090,7 +4108,7 @@ const sessionManager = {
       if (!response.ok) throw new Error('Failed to delete note');
 
       // Remove from local cache
-      for (const [folderId, notes] of this.notesByFolder) {
+      for (const [, notes] of this.notesByFolder) {
         const index = notes.findIndex(n => n.id === noteId);
         if (index !== -1) {
           notes.splice(index, 1);
@@ -4256,6 +4274,7 @@ const sessionManager = {
 
     // Note editor save button
     document.getElementById('saveNoteBtn')?.addEventListener('click', () => this.saveCurrentNote());
+    document.getElementById('noteCopyBtn')?.addEventListener('click', () => this.copyCurrentNoteContent());
 
     // Auto-save: listen for input changes on note title and content
     document.getElementById('noteNameInput')?.addEventListener('input', () => this.scheduleNoteAutoSave());
@@ -4612,6 +4631,44 @@ const sessionManager = {
   // Create new note for folder (called from folder context menu)
   createNewNoteForFolder(folderId) {
     this.openNoteCreateModal(folderId);
+  },
+
+  async writeTextToClipboard(text) {
+    if (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
+      await navigator.clipboard.writeText(text);
+      return;
+    }
+
+    const textarea = document.createElement('textarea');
+    textarea.value = text;
+    textarea.setAttribute('readonly', '');
+    textarea.style.position = 'fixed';
+    textarea.style.top = '-9999px';
+    textarea.style.left = '-9999px';
+    document.body.appendChild(textarea);
+    textarea.focus();
+    textarea.select();
+
+    const copied = document.execCommand('copy');
+    document.body.removeChild(textarea);
+    if (!copied) throw new Error('Copy command failed');
+  },
+
+  async copyCurrentNoteContent() {
+    const contentInput = document.getElementById('noteContentInput');
+    const noteContent = String(contentInput?.value || '');
+    if (!noteContent.trim()) {
+      this.showToast('Note is empty', 'info');
+      return;
+    }
+
+    try {
+      await this.writeTextToClipboard(noteContent);
+      this.showToast('Note content copied', 'success');
+    } catch (error) {
+      console.error('Failed to copy note content:', error);
+      this.showToast('Failed to copy note', 'error');
+    }
   },
 
   // Save current note
@@ -5049,7 +5106,7 @@ const sessionManager = {
   async promptRenameNote(noteId) {
     // Find the note
     let note = null;
-    for (const [folderId, notes] of this.notesByFolder) {
+    for (const [, notes] of this.notesByFolder) {
       note = notes.find(n => n.id === noteId);
       if (note) break;
     }
@@ -5553,16 +5610,18 @@ const sessionManager = {
     switch (schedule.type) {
       case 'daily':
         return `Daily at ${schedule.time_of_day || '00:00'}`;
-      case 'weekly':
+      case 'weekly': {
         const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
         return `Weekly on ${days[schedule.day_of_week || 0]} at ${schedule.time_of_day || '00:00'}`;
-      case 'interval':
+      }
+      case 'interval': {
         // Interval is in nanoseconds
         const totalSeconds = Math.floor((schedule.interval || 0) / 1000000000);
         const hours = Math.floor(totalSeconds / 3600);
         const minutes = Math.floor((totalSeconds % 3600) / 60);
         if (hours > 0) return `Every ${hours} hour${hours > 1 ? 's' : ''}`;
         return `Every ${minutes} minute${minutes > 1 ? 's' : ''}`;
+      }
       case 'once':
         return schedule.execute_at ? `Once at ${new Date(schedule.execute_at).toLocaleString()}` : 'Once';
       case 'cron':
@@ -5778,18 +5837,6 @@ const sessionManager = {
         }
       }
     });
-  },
-
-  // Helper to find folder by ID recursively
-  findFolderById(folderId, folders) {
-    for (const folder of folders) {
-      if (folder.id === folderId) return folder;
-      if (folder.children && folder.children.length > 0) {
-        const found = this.findFolderById(folderId, folder.children);
-        if (found) return found;
-      }
-    }
-    return null;
   },
 
   // Submit task from main panel using orchestration API
@@ -6236,7 +6283,7 @@ const sessionManager = {
         schedule.time = document.getElementById('taskModalScheduleTime')?.value || '09:00';
         schedule.day_of_week = document.getElementById('taskModalScheduleDay')?.value || 'monday';
         break;
-      case 'interval':
+      case 'interval': {
         // Combine value and unit into interval_minutes
         const intervalValue = parseInt(document.getElementById('taskModalScheduleIntervalValue')?.value || '1', 10);
         const intervalUnit = document.getElementById('taskModalScheduleIntervalUnit')?.value || 'hours';
@@ -6248,12 +6295,14 @@ const sessionManager = {
         }
         schedule.interval_minutes = intervalMinutes;
         break;
-      case 'once':
+      }
+      case 'once': {
         const datetime = document.getElementById('taskModalScheduleDatetime')?.value;
         if (datetime) {
           schedule.run_at = new Date(datetime).toISOString();
         }
         break;
+      }
     }
 
     return {

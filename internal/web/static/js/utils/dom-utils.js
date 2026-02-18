@@ -73,7 +73,7 @@ const DOMUtils = (function() {
    */
   function stripVersionSuffix(name = '') {
     if (!name) return '';
-    return name.replace(/-\d+\.\d+\.\d+(?:[-+][\w\.]+)?$/, '');
+    return name.replace(/-\d+\.\d+\.\d+(?:[-+][\w.]+)?$/, '');
   }
 
   // Public API

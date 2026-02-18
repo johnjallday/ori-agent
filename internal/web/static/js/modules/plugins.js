@@ -335,54 +335,50 @@ async function togglePlugin(pluginName, pluginPath, enable) {
     // Try to enable the plugin first
     let enableResponseData = null;
 
-    try {
-      const enableResponse = await fetch('/api/plugins', {
-        method: 'POST',
-        body: formData
-      });
+    const enableResponse = await fetch('/api/plugins', {
+      method: 'POST',
+      body: formData
+    });
 
-      if (!enableResponse.ok) {
-        const errorText = await enableResponse.text();
-        // If it failed because the file doesn't exist, try to restore from .disabled
-        if (errorText.includes('realpath failed') || errorText.includes('no such file')) {
-          pluginsLog.info('Plugin file not found, attempting to restore from .disabled version');
-          // Call a new API endpoint to restore the plugin file
-          await API.post('/api/plugins/restore', { name: pluginName, path: pluginPath });
+    if (!enableResponse.ok) {
+      const errorText = await enableResponse.text();
+      // If it failed because the file doesn't exist, try to restore from .disabled
+      if (errorText.includes('realpath failed') || errorText.includes('no such file')) {
+        pluginsLog.info('Plugin file not found, attempting to restore from .disabled version');
+        // Call a new API endpoint to restore the plugin file
+        await API.post('/api/plugins/restore', { name: pluginName, path: pluginPath });
 
-          // Now try to enable again
-          const retryFormData = new FormData();
-          retryFormData.append('name', pluginName);
-          retryFormData.append('path', pluginPath);
+        // Now try to enable again
+        const retryFormData = new FormData();
+        retryFormData.append('name', pluginName);
+        retryFormData.append('path', pluginPath);
 
-          const retryResponse = await fetch('/api/plugins', {
-            method: 'POST',
-            body: retryFormData
-          });
+        const retryResponse = await fetch('/api/plugins', {
+          method: 'POST',
+          body: retryFormData
+        });
 
-          if (!retryResponse.ok) {
-            const retryError = await retryResponse.text();
-            throw new Error(`Failed to enable plugin after restore: ${retryError}`);
-          }
+        if (!retryResponse.ok) {
+          const retryError = await retryResponse.text();
+          throw new Error(`Failed to enable plugin after restore: ${retryError}`);
+        }
 
-          // Get response data from retry
-          try {
-            enableResponseData = await retryResponse.json();
-          } catch (e) {
-            pluginsLog.debug('Failed to parse retry response as JSON');
-          }
-        } else {
-          throw new Error(errorText || 'Failed to enable plugin');
+        // Get response data from retry
+        try {
+          enableResponseData = await retryResponse.json();
+        } catch (e) {
+          pluginsLog.debug('Failed to parse retry response as JSON');
         }
       } else {
-        // Get response data from successful enable
-        try {
-          enableResponseData = await enableResponse.json();
-        } catch (e) {
-          pluginsLog.debug('Failed to parse enable response as JSON');
-        }
+        throw new Error(errorText || 'Failed to enable plugin');
       }
-    } catch (error) {
-      throw error;
+    } else {
+      // Get response data from successful enable
+      try {
+        enableResponseData = await enableResponse.json();
+      } catch (e) {
+        pluginsLog.debug('Failed to parse enable response as JSON');
+      }
     }
 
     pluginsLog.info(`Plugin ${pluginName} enabled successfully`);
@@ -412,7 +408,7 @@ async function togglePlugin(pluginName, pluginPath, enable) {
 }
 
 // Remove uploaded plugin
-async function removePlugin(pluginName, pluginPath) {
+async function removePlugin(pluginName) {
   await API.delete(`/api/plugin-registry?name=${encodeURIComponent(pluginName)}`);
   pluginsLog.info(`Plugin ${pluginName} removed successfully from registry and filesystem`);
 }

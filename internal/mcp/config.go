@@ -5,6 +5,11 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
+	"strconv"
+	"strings"
+
+	"github.com/BurntSushi/toml"
 )
 
 // ConfigManager handles loading and saving MCP server configurations
@@ -29,6 +34,18 @@ type GlobalConfig struct {
 // AgentMCPConfig represents per-agent MCP server enablement
 type AgentMCPConfig struct {
 	EnabledServers []string `json:"enabled_servers"`
+}
+
+type externalServerConfig struct {
+	Command   string                 `toml:"command"`
+	Args      []string               `toml:"args"`
+	Env       map[string]interface{} `toml:"env"`
+	Transport string                 `toml:"transport"`
+	URL       string                 `toml:"url"`
+}
+
+type codexConfig struct {
+	MCPServers map[string]externalServerConfig `toml:"mcp_servers"`
 }
 
 // LoadGlobalConfig loads the global MCP server registry
@@ -301,4 +318,272 @@ func (cm *ConfigManager) InitializeDefaultServers() error {
 
 	config.Servers = defaultServers
 	return cm.SaveGlobalConfig(config)
+}
+
+// ImportExternalGlobalServers imports MCP server definitions from external/global
+// tool configs (e.g. Codex, Claude Desktop) into Ori's global MCP registry.
+func (cm *ConfigManager) ImportExternalGlobalServers() (int, error) {
+	externalServers, loadErr := loadExternalGlobalServers()
+	if len(externalServers) == 0 {
+		return 0, loadErr
+	}
+
+	config, err := cm.LoadGlobalConfig()
+	if err != nil {
+		return 0, err
+	}
+
+	existing := make(map[string]struct{}, len(config.Servers))
+	for _, server := range config.Servers {
+		existing[server.Name] = struct{}{}
+	}
+
+	added := 0
+	for _, server := range externalServers {
+		if _, ok := existing[server.Name]; ok {
+			continue
+		}
+		config.Servers = append(config.Servers, server)
+		existing[server.Name] = struct{}{}
+		added++
+	}
+
+	if added == 0 {
+		return 0, loadErr
+	}
+
+	if err := cm.SaveGlobalConfig(config); err != nil {
+		return 0, err
+	}
+
+	return added, loadErr
+}
+
+func loadExternalGlobalServers() ([]ServerConfig, error) {
+	sources := []func() ([]ServerConfig, error){
+		loadCodexServers,
+		loadClaudeDesktopServers,
+	}
+
+	servers := make([]ServerConfig, 0)
+	seen := make(map[string]struct{})
+	var warnings []string
+
+	for _, source := range sources {
+		discovered, err := source()
+		if err != nil {
+			warnings = append(warnings, err.Error())
+			continue
+		}
+
+		for _, server := range discovered {
+			if _, ok := seen[server.Name]; ok {
+				continue
+			}
+			seen[server.Name] = struct{}{}
+			servers = append(servers, server)
+		}
+	}
+
+	if len(warnings) > 0 {
+		return servers, fmt.Errorf("some external MCP sources failed: %s", strings.Join(warnings, "; "))
+	}
+
+	return servers, nil
+}
+
+func loadCodexServers() ([]ServerConfig, error) {
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return nil, fmt.Errorf("resolve home dir for codex MCP import: %w", err)
+	}
+
+	configPath := filepath.Join(homeDir, ".codex", "config.toml")
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return []ServerConfig{}, nil
+		}
+		return nil, fmt.Errorf("read codex config: %w", err)
+	}
+
+	var cfg codexConfig
+	if _, err := toml.Decode(string(data), &cfg); err != nil {
+		return nil, fmt.Errorf("parse codex config: %w", err)
+	}
+
+	servers := make([]ServerConfig, 0, len(cfg.MCPServers))
+	for name, raw := range cfg.MCPServers {
+		server, ok := convertExternalServer(name, raw)
+		if !ok {
+			continue
+		}
+		servers = append(servers, server)
+	}
+
+	return servers, nil
+}
+
+func loadClaudeDesktopServers() ([]ServerConfig, error) {
+	configPath, err := claudeDesktopConfigPath()
+	if err != nil {
+		return nil, fmt.Errorf("resolve claude desktop config path: %w", err)
+	}
+
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return []ServerConfig{}, nil
+		}
+		return nil, fmt.Errorf("read claude desktop config: %w", err)
+	}
+
+	var raw struct {
+		MCPServers map[string]map[string]interface{} `json:"mcpServers"`
+	}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return nil, fmt.Errorf("parse claude desktop config: %w", err)
+	}
+
+	servers := make([]ServerConfig, 0, len(raw.MCPServers))
+	for name, value := range raw.MCPServers {
+		server, ok := convertExternalServer(name, externalServerConfig{
+			Command:   mapString(value, "command"),
+			Args:      mapStringSlice(value, "args"),
+			Env:       mapObject(value, "env"),
+			Transport: mapString(value, "transport"),
+			URL:       mapString(value, "url"),
+		})
+		if !ok {
+			continue
+		}
+		servers = append(servers, server)
+	}
+
+	return servers, nil
+}
+
+func claudeDesktopConfigPath() (string, error) {
+	if appData := strings.TrimSpace(os.Getenv("APPDATA")); appData != "" {
+		return filepath.Join(appData, "Claude", "claude_desktop_config.json"), nil
+	}
+
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return "", err
+	}
+
+	switch runtime.GOOS {
+	case "darwin":
+		return filepath.Join(homeDir, "Library", "Application Support", "Claude", "claude_desktop_config.json"), nil
+	case "windows":
+		return filepath.Join(homeDir, "AppData", "Roaming", "Claude", "claude_desktop_config.json"), nil
+	default:
+		return filepath.Join(homeDir, ".config", "Claude", "claude_desktop_config.json"), nil
+	}
+}
+
+func convertExternalServer(name string, raw externalServerConfig) (ServerConfig, bool) {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return ServerConfig{}, false
+	}
+
+	command := strings.TrimSpace(raw.Command)
+	transport := normalizeTransport(raw.Transport, raw.URL)
+	if command == "" || transport != "stdio" {
+		return ServerConfig{}, false
+	}
+
+	args := make([]string, 0, len(raw.Args))
+	for _, arg := range raw.Args {
+		trimmed := strings.TrimSpace(arg)
+		if trimmed == "" {
+			continue
+		}
+		args = append(args, trimmed)
+	}
+
+	env := make(map[string]string)
+	for key, value := range raw.Env {
+		trimmedKey := strings.TrimSpace(key)
+		if trimmedKey == "" || value == nil {
+			continue
+		}
+		env[trimmedKey] = fmt.Sprint(value)
+	}
+
+	return ServerConfig{
+		Name:      name,
+		Command:   command,
+		Args:      args,
+		Env:       env,
+		Transport: "stdio",
+		Enabled:   false,
+	}, true
+}
+
+func normalizeTransport(rawTransport, rawURL string) string {
+	transport := strings.ToLower(strings.TrimSpace(rawTransport))
+	if transport == "" {
+		transport = "stdio"
+	}
+	if transport == "stdio" && strings.TrimSpace(rawURL) != "" {
+		// URL-backed servers are typically SSE/HTTP; stdio server startup cannot run them.
+		transport = "sse"
+	}
+	return transport
+}
+
+func mapString(data map[string]interface{}, key string) string {
+	raw, ok := data[key]
+	if !ok || raw == nil {
+		return ""
+	}
+	switch value := raw.(type) {
+	case string:
+		return value
+	case json.Number:
+		return value.String()
+	case float64:
+		return strconv.FormatFloat(value, 'f', -1, 64)
+	case bool:
+		return strconv.FormatBool(value)
+	default:
+		return fmt.Sprint(value)
+	}
+}
+
+func mapStringSlice(data map[string]interface{}, key string) []string {
+	raw, ok := data[key]
+	if !ok || raw == nil {
+		return nil
+	}
+
+	values, ok := raw.([]interface{})
+	if !ok {
+		return nil
+	}
+
+	out := make([]string, 0, len(values))
+	for _, value := range values {
+		if value == nil {
+			continue
+		}
+		out = append(out, fmt.Sprint(value))
+	}
+
+	return out
+}
+
+func mapObject(data map[string]interface{}, key string) map[string]interface{} {
+	raw, ok := data[key]
+	if !ok || raw == nil {
+		return nil
+	}
+	value, ok := raw.(map[string]interface{})
+	if !ok {
+		return nil
+	}
+	return value
 }

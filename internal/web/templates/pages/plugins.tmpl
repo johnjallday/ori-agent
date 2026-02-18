@@ -4,544 +4,840 @@
 {{template "head.tmpl" .}}
 
 <style>
-/* Plugin Management Page Styles */
-.plugins-container {
-    padding: 2rem;
-    max-width: 1400px;
+.plugins-page .plugins-container {
+    max-width: 1560px;
     margin: 0 auto;
 }
 
-.page-header {
+.plugins-page .page-header {
+    margin-bottom: 1rem;
+    padding: 1.4rem;
     display: flex;
     justify-content: space-between;
-    align-items: center;
-    margin-bottom: 2rem;
-    padding-bottom: 1rem;
-    border-bottom: 2px solid var(--border-color);
+    align-items: flex-start;
+    gap: 1.25rem;
 }
 
-.page-title {
+.plugins-page .page-header.modern-card:hover {
+    transform: none;
+}
+
+.plugins-page .page-title-block {
+    min-width: 260px;
+}
+
+.plugins-page .page-title {
+    margin: 0;
     display: flex;
     align-items: center;
-    gap: 0.75rem;
-    font-size: 1.75rem;
-    font-weight: 600;
+    gap: 0.65rem;
     color: var(--text-primary);
+    font-size: 1.65rem;
+    letter-spacing: 0.01em;
 }
 
-.notification-badge {
+.plugins-page .page-subtitle {
+    margin: 0.45rem 0 0.7rem;
+    color: var(--text-secondary);
+    font-size: 0.93rem;
+}
+
+.plugins-page .current-agent-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    padding: 0.32rem 0.6rem;
+    border-radius: 999px;
+    border: 1px solid rgba(180, 126, 87, 0.35);
+    background: rgba(255, 249, 239, 0.72);
+    color: var(--text-secondary);
+    font-size: 0.76rem;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+}
+
+[data-bs-theme="dark"] .plugins-page .current-agent-chip {
+    background: rgba(36, 45, 62, 0.72);
+    border-color: rgba(221, 162, 121, 0.3);
+}
+
+.plugins-page .current-agent-chip strong {
+    color: var(--text-primary);
+    font-weight: 700;
+}
+
+.plugins-page .header-actions {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+}
+
+.plugins-page .notification-badge {
     position: relative;
-    cursor: pointer;
-    padding: 0.5rem;
-    border-radius: var(--radius-md);
-    transition: background 0.2s;
+    padding-right: 1.9rem;
 }
 
-.notification-badge:hover {
-    background: var(--bg-tertiary);
-}
-
-.notification-count {
+.plugins-page .notification-count {
     position: absolute;
-    top: 0;
-    right: 0;
-    background: var(--danger-color);
-    color: white;
-    font-size: 0.7rem;
-    font-weight: 600;
-    padding: 0.15rem 0.4rem;
-    border-radius: 10px;
+    top: -6px;
+    right: -4px;
     min-width: 18px;
-    text-align: center;
-}
-
-.header-actions {
-    display: flex;
-    gap: 0.75rem;
-}
-
-.btn-modern {
-    padding: 0.6rem 1.2rem;
-    border: none;
-    border-radius: var(--radius-md);
-    font-size: 0.9rem;
-    font-weight: 500;
-    cursor: pointer;
-    transition: all 0.2s;
-    display: flex;
+    height: 18px;
+    padding: 0 0.3rem;
+    border-radius: 999px;
+    background: var(--danger-color);
+    color: #fff;
+    display: inline-flex;
     align-items: center;
-    gap: 0.5rem;
+    justify-content: center;
+    font-size: 0.68rem;
+    font-weight: 700;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.24);
 }
 
-.btn-primary {
-    background: var(--primary-color);
-    color: white;
-}
-
-.btn-primary:hover {
-    background: var(--primary-dark);
-    transform: translateY(-1px);
-    box-shadow: var(--shadow-md);
-}
-
-.btn-secondary {
-    background: var(--bg-tertiary);
+/* Override legacy ui-refresh plugin styles that force light controls in dark mode */
+[data-bs-theme="dark"] body.plugins-page .notification-badge,
+.dark-mode body.plugins-page .notification-badge {
+    background: rgba(32, 39, 55, 0.86);
+    border-color: rgba(209, 171, 130, 0.3);
     color: var(--text-primary);
-    border: 1px solid var(--border-color);
 }
 
-.btn-secondary:hover {
-    background: var(--bg-secondary);
+[data-bs-theme="dark"] body.plugins-page .notification-badge:hover,
+.dark-mode body.plugins-page .notification-badge:hover {
+    background: rgba(40, 50, 70, 0.92);
+    border-color: rgba(221, 181, 138, 0.4);
 }
 
-/* Filter Bar */
-.filter-bar {
-    background: var(--bg-primary);
+[data-bs-theme="dark"] body.plugins-page .search-input,
+[data-bs-theme="dark"] body.plugins-page .filter-select,
+[data-bs-theme="dark"] body.plugins-page .page-size-select,
+[data-bs-theme="dark"] body.plugins-page .pagination-btn,
+[data-bs-theme="dark"] body.plugins-page .btn-action,
+.dark-mode body.plugins-page .search-input,
+.dark-mode body.plugins-page .filter-select,
+.dark-mode body.plugins-page .page-size-select,
+.dark-mode body.plugins-page .pagination-btn,
+.dark-mode body.plugins-page .btn-action {
+    background: rgba(27, 35, 49, 0.88);
+    border-color: rgba(203, 166, 124, 0.28);
+    color: var(--text-primary);
+}
+
+[data-bs-theme="dark"] body.plugins-page .search-input::placeholder,
+.dark-mode body.plugins-page .search-input::placeholder {
+    color: rgba(213, 199, 176, 0.72);
+}
+
+[data-bs-theme="dark"] body.plugins-page .filter-label,
+.dark-mode body.plugins-page .filter-label {
+    color: var(--text-secondary);
+}
+
+[data-bs-theme="dark"] body.plugins-page .filter-select option,
+[data-bs-theme="dark"] body.plugins-page .page-size-select option,
+.dark-mode body.plugins-page .filter-select option,
+.dark-mode body.plugins-page .page-size-select option {
+    background: #1f2738;
+    color: #f5ede0;
+}
+
+.plugins-page .filter-bar {
+    margin-bottom: 1rem;
+    padding: 1rem 1.1rem;
     border: 1px solid var(--border-color);
     border-radius: var(--radius-lg);
-    padding: 1.5rem;
-    margin-bottom: 1.5rem;
+    background: var(--surface-solid);
     box-shadow: var(--shadow-sm);
 }
 
-.filter-row {
+.plugins-page .filter-row {
     display: flex;
-    gap: 1rem;
-    flex-wrap: wrap;
     align-items: center;
+    flex-wrap: wrap;
+    gap: 0.9rem;
 }
 
-.search-box {
-    flex: 1;
-    min-width: 250px;
+.plugins-page .search-box {
+    position: relative;
+    flex: 1 1 280px;
+    min-width: 240px;
 }
 
-.search-input {
+.plugins-page .search-input {
     width: 100%;
-    padding: 0.6rem 1rem 0.6rem 2.5rem;
     border: 1px solid var(--border-color);
     border-radius: var(--radius-md);
-    background: var(--bg-secondary);
+    background: var(--bg-primary);
     color: var(--text-primary);
+    padding: 0.6rem 0.9rem 0.6rem 2.35rem;
     font-size: 0.9rem;
 }
 
-.search-input:focus {
+.plugins-page .search-input:focus {
     outline: none;
     border-color: var(--primary-color);
-    box-shadow: 0 0 0 3px rgba(29, 78, 216, 0.1);
+    box-shadow: 0 0 0 3px var(--primary-color-light);
 }
 
-.search-icon {
+.plugins-page .search-icon {
     position: absolute;
     left: 0.75rem;
     top: 50%;
     transform: translateY(-50%);
     color: var(--text-muted);
+    pointer-events: none;
 }
 
-.filter-group {
+.plugins-page .filter-group {
     display: flex;
-    gap: 0.5rem;
     align-items: center;
+    gap: 0.45rem;
 }
 
-.filter-select {
-    padding: 0.6rem 1rem;
+.plugins-page .filter-label {
+    color: var(--text-secondary);
+    font-size: 0.84rem;
+    font-weight: 600;
+    margin: 0;
+}
+
+.plugins-page .filter-select {
+    min-width: 140px;
     border: 1px solid var(--border-color);
     border-radius: var(--radius-md);
-    background: var(--bg-secondary);
+    background: var(--bg-primary);
     color: var(--text-primary);
-    font-size: 0.9rem;
-    cursor: pointer;
+    padding: 0.52rem 0.78rem;
+    font-size: 0.85rem;
 }
 
-.filter-select:focus {
+.plugins-page .filter-select:focus {
     outline: none;
     border-color: var(--primary-color);
+    box-shadow: 0 0 0 3px var(--primary-color-light);
 }
 
-/* Plugin Table */
-.plugins-table-container {
-    background: var(--bg-primary);
+.plugins-page .bulk-actions-bar {
+    display: none;
+    align-items: center;
+    gap: 0.8rem;
+    margin-bottom: 1rem;
+    padding: 0.7rem 0.95rem;
+    border: 1px solid rgba(199, 90, 52, 0.35);
+    border-radius: var(--radius-md);
+    background: rgba(255, 244, 230, 0.75);
+}
+
+[data-bs-theme="dark"] .plugins-page .bulk-actions-bar {
+    background: rgba(36, 45, 62, 0.74);
+}
+
+.plugins-page .bulk-actions-bar.active {
+    display: flex;
+}
+
+.plugins-page .bulk-actions-count {
+    border-right: 1px solid var(--border-color);
+    padding-right: 0.8rem;
+    color: var(--text-primary);
+    font-weight: 600;
+    font-size: 0.9rem;
+}
+
+.plugins-page .bulk-actions-buttons {
+    display: flex;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+}
+
+.plugins-page .plugins-table-container {
+    overflow: hidden;
     border: 1px solid var(--border-color);
     border-radius: var(--radius-lg);
-    overflow: hidden;
-    box-shadow: var(--shadow-sm);
+    background: var(--surface-solid);
+    box-shadow: var(--shadow-md);
 }
 
-.plugins-table {
+.plugins-page .plugins-table {
     width: 100%;
     border-collapse: collapse;
 }
 
-.plugins-table thead {
+.plugins-page .plugins-table thead {
     background: var(--bg-secondary);
-    border-bottom: 2px solid var(--border-color);
+    border-bottom: 1px solid var(--border-color);
 }
 
-.plugins-table th {
-    padding: 1rem;
+.plugins-page .plugins-table th {
+    padding: 0.92rem 0.85rem;
     text-align: left;
-    font-size: 0.85rem;
-    font-weight: 600;
     color: var(--text-secondary);
+    font-size: 0.74rem;
     text-transform: uppercase;
-    letter-spacing: 0.05em;
+    letter-spacing: 0.08em;
+    font-weight: 700;
 }
 
-.plugins-table tbody tr {
+.plugins-page .plugins-table td {
+    padding: 0.95rem 0.85rem;
+    color: var(--text-primary);
     border-bottom: 1px solid var(--border-light);
-    transition: background 0.2s;
+    vertical-align: top;
 }
 
-.plugins-table tbody tr:hover {
-    background: var(--bg-secondary);
+.plugins-page .plugins-table tbody tr:last-child td {
+    border-bottom: none;
 }
 
-.plugins-table td {
-    padding: 1rem;
+.plugins-page .plugins-table tbody tr:hover {
+    background: rgba(226, 200, 166, 0.18);
+}
+
+[data-bs-theme="dark"] .plugins-page .plugins-table tbody tr:hover {
+    background: rgba(62, 76, 102, 0.22);
+}
+
+.plugins-page .sortable {
+    cursor: pointer;
+    user-select: none;
+}
+
+.plugins-page .sortable:hover,
+.plugins-page .sortable.active {
+    color: var(--primary-color);
+}
+
+.plugins-page .sort-indicator {
+    display: inline-block;
+    margin-left: 0.35rem;
+    opacity: 0.45;
+    transition: opacity 0.2s ease, transform 0.2s ease;
+}
+
+.plugins-page .sortable.active .sort-indicator {
+    opacity: 1;
+}
+
+.plugins-page .sortable.desc .sort-indicator {
+    transform: rotate(180deg);
+}
+
+.plugins-page .plugin-name {
     color: var(--text-primary);
+    font-size: 0.95rem;
+    font-weight: 700;
 }
 
-.plugin-icon {
-    width: 32px;
-    height: 32px;
-    border-radius: var(--radius-sm);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    background: var(--bg-tertiary);
-    color: var(--text-primary);
-}
-
-.plugin-name-cell {
-    display: flex;
-    align-items: center;
-    gap: 0.75rem;
-}
-
-.plugin-name {
-    font-weight: 500;
-    color: var(--text-primary);
-}
-
-.plugin-description {
-    font-size: 0.85rem;
+.plugins-page .plugin-description {
+    margin-top: 0.15rem;
     color: var(--text-muted);
-    margin-top: 0.2rem;
+    font-size: 0.82rem;
 }
 
-.plugin-tags {
+.plugins-page .plugin-tags {
+    margin-top: 0.45rem;
     display: flex;
     flex-wrap: wrap;
-    gap: 0.35rem;
-    margin-top: 0.4rem;
+    gap: 0.32rem;
 }
 
-.tag-badge {
-    padding: 0.2rem 0.55rem;
-    border-radius: 999px;
-    font-size: 0.72rem;
-    font-weight: 500;
-    background: var(--bg-secondary);
-    border: 1px solid var(--border-color);
-    color: var(--text-secondary);
-}
-
-/* Status Badges */
-.status-badge {
+.plugins-page .tag-badge {
     display: inline-flex;
     align-items: center;
-    gap: 0.4rem;
-    padding: 0.35rem 0.75rem;
-    border-radius: var(--radius-sm);
-    font-size: 0.8rem;
-    font-weight: 500;
+    padding: 0.18rem 0.5rem;
+    border: 1px solid var(--border-color);
+    border-radius: 999px;
+    color: var(--text-secondary);
+    background: var(--bg-secondary);
+    font-size: 0.7rem;
+    font-weight: 600;
 }
 
-.status-dot {
+.plugins-page .status-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.36rem;
+    padding: 0.26rem 0.62rem;
+    border-radius: 999px;
+    font-size: 0.73rem;
+    font-weight: 700;
+    letter-spacing: 0.02em;
+}
+
+.plugins-page .status-dot {
     width: 6px;
     height: 6px;
     border-radius: 50%;
 }
 
-.status-active {
-    background: rgba(52, 211, 153, 0.1);
+.plugins-page .status-active {
+    background: rgba(47, 153, 105, 0.16);
     color: var(--success-color);
 }
 
-.status-active .status-dot {
+.plugins-page .status-active .status-dot {
     background: var(--success-color);
 }
 
-.status-inactive {
-    background: rgba(148, 163, 184, 0.1);
-    color: var(--secondary-color);
+.plugins-page .status-inactive {
+    background: rgba(96, 111, 133, 0.18);
+    color: var(--text-secondary);
 }
 
-.status-inactive .status-dot {
-    background: var(--secondary-color);
+.plugins-page .status-inactive .status-dot {
+    background: var(--text-secondary);
 }
 
-.status-error {
-    background: rgba(239, 68, 68, 0.1);
+.plugins-page .status-error {
+    background: rgba(204, 78, 63, 0.16);
     color: var(--danger-color);
 }
 
-.status-error .status-dot {
+.plugins-page .status-error .status-dot {
     background: var(--danger-color);
 }
 
-.status-update {
-    background: rgba(245, 158, 11, 0.1);
+.plugins-page .status-update {
+    background: rgba(204, 138, 44, 0.16);
     color: var(--warning-color);
 }
 
-.status-update .status-dot {
+.plugins-page .status-update .status-dot {
     background: var(--warning-color);
 }
 
-/* Category Badge */
-.category-badge {
-    padding: 0.3rem 0.7rem;
-    border-radius: var(--radius-sm);
-    font-size: 0.75rem;
-    font-weight: 500;
-    background: var(--bg-tertiary);
+.plugins-page .category-badge {
+    display: inline-flex;
+    align-items: center;
+    border-radius: 999px;
+    padding: 0.24rem 0.56rem;
+    background: rgba(82, 101, 136, 0.16);
     color: var(--text-secondary);
+    font-size: 0.72rem;
+    font-weight: 600;
 }
 
-/* Agent List */
-.agent-list {
+.plugins-page .agent-list {
     display: flex;
     flex-wrap: wrap;
-    gap: 0.4rem;
+    gap: 0.33rem;
 }
 
-.agent-tag {
-    padding: 0.25rem 0.6rem;
-    background: var(--bg-tertiary);
-    border-radius: var(--radius-sm);
-    font-size: 0.75rem;
+.plugins-page .agent-tag {
+    display: inline-flex;
+    align-items: center;
+    border-radius: 999px;
+    padding: 0.2rem 0.52rem;
+    background: rgba(196, 170, 138, 0.25);
     color: var(--text-secondary);
+    font-size: 0.72rem;
+    font-weight: 600;
 }
 
-/* Action Buttons */
-.action-buttons {
+.plugins-page .action-buttons {
     display: flex;
-    gap: 0.5rem;
+    flex-direction: column;
+    gap: 0.34rem;
+}
+
+.plugins-page .btn-action {
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    background: rgba(255, 255, 255, 0.45);
+    color: var(--text-secondary);
+    padding: 0.34rem 0.55rem;
+    font-size: 0.75rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.18s ease;
+}
+
+[data-bs-theme="dark"] .plugins-page .btn-action {
+    background: rgba(20, 25, 36, 0.6);
+}
+
+.plugins-page .btn-action:hover {
+    color: var(--text-primary);
+    border-color: rgba(180, 126, 87, 0.5);
+    background: rgba(255, 249, 239, 0.84);
+}
+
+.plugins-page .btn-action:disabled {
+    opacity: 0.55;
+    cursor: not-allowed;
+}
+
+.plugins-page .btn-action.btn-danger:hover {
+    background: var(--danger-color);
+    border-color: var(--danger-color);
+    color: #fff;
+}
+
+.plugins-page .pagination-container {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 0.9rem;
+    padding: 0.85rem 0.95rem;
+    border-top: 1px solid var(--border-color);
+    background: rgba(231, 216, 194, 0.3);
+}
+
+[data-bs-theme="dark"] .plugins-page .pagination-container {
+    background: rgba(38, 47, 66, 0.34);
+}
+
+.plugins-page .pagination-info {
+    color: var(--text-secondary);
+    font-size: 0.84rem;
+}
+
+.plugins-page .pagination-controls {
+    display: flex;
+    align-items: center;
+    gap: 0.45rem;
     flex-wrap: wrap;
 }
 
-.btn-action {
-    padding: 0.4rem 0.8rem;
+.plugins-page .pagination-btn {
     border: 1px solid var(--border-color);
     border-radius: var(--radius-sm);
     background: var(--bg-primary);
     color: var(--text-secondary);
-    font-size: 0.8rem;
-    cursor: pointer;
-    transition: all 0.2s;
-    white-space: nowrap;
+    padding: 0.34rem 0.6rem;
+    font-size: 0.78rem;
+    font-weight: 600;
 }
 
-.btn-action:hover {
-    background: var(--bg-tertiary);
+.plugins-page .pagination-btn:hover:not(:disabled),
+.plugins-page .pagination-btn.active {
+    border-color: rgba(180, 126, 87, 0.55);
+    color: var(--primary-color);
+    background: rgba(255, 249, 239, 0.88);
+}
+
+.plugins-page .pagination-btn:disabled {
+    opacity: 0.45;
+}
+
+.plugins-page .page-size-select {
+    margin-left: 0.45rem;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    background: var(--bg-primary);
     color: var(--text-primary);
-    border-color: var(--primary-color);
+    padding: 0.32rem 0.5rem;
+    font-size: 0.78rem;
 }
 
-.btn-action.btn-danger:hover {
-    background: var(--danger-color);
-    color: white;
-    border-color: var(--danger-color);
+.plugins-page .empty-state {
+    display: none;
+    margin-top: 0.7rem;
+    border: 1px dashed rgba(180, 126, 87, 0.4);
+    border-radius: var(--radius-lg);
+    background: rgba(255, 249, 239, 0.64);
+    text-align: center;
+    padding: 3.2rem 1.5rem;
+    color: var(--text-secondary);
 }
 
-/* Modal Styles */
-.modal-overlay {
-    position: fixed;
-    top: 0;
-    left: 0;
-    width: 100%;
-    height: 100%;
-    background: rgba(0, 0, 0, 0.5);
-    backdrop-filter: blur(4px);
+[data-bs-theme="dark"] .plugins-page .empty-state {
+    background: rgba(32, 40, 56, 0.66);
+}
+
+.plugins-page .empty-state-icon {
+    opacity: 0.55;
+    margin-bottom: 0.65rem;
+}
+
+.plugins-page .empty-state-text {
+    color: var(--text-primary);
+    font-size: 1.18rem;
+    font-weight: 700;
+}
+
+.plugins-page .empty-state-subtext {
+    margin-top: 0.45rem;
+    margin-bottom: 1.2rem;
+    font-size: 0.9rem;
+}
+
+.plugins-page .empty-state-actions {
+    display: flex;
+    justify-content: center;
+    gap: 0.65rem;
+    flex-wrap: wrap;
+}
+
+.plugins-page .loading {
+    display: none;
+    justify-content: center;
+    align-items: center;
+    padding: 2.2rem;
+}
+
+.plugins-page .spinner {
+    width: 34px;
+    height: 34px;
+    border-radius: 50%;
+    border: 3px solid var(--border-color);
+    border-top-color: var(--primary-color);
+    animation: pluginsSpin 0.9s linear infinite;
+}
+
+@keyframes pluginsSpin {
+    to { transform: rotate(360deg); }
+}
+
+.plugins-page .plugins-cards-container {
+    display: none;
+}
+
+.plugins-page .plugin-card {
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-lg);
+    background: var(--surface-solid);
+    box-shadow: var(--shadow-sm);
+    padding: 1rem;
+}
+
+.plugins-page .plugin-card + .plugin-card {
+    margin-top: 0.75rem;
+}
+
+.plugins-page .plugin-card-header {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.65rem;
+    margin-bottom: 0.65rem;
+}
+
+.plugins-page .plugin-card-name {
+    color: var(--text-primary);
+    font-size: 0.95rem;
+    font-weight: 700;
+}
+
+.plugins-page .plugin-card-description {
+    color: var(--text-muted);
+    margin-top: 0.15rem;
+    font-size: 0.82rem;
+}
+
+.plugins-page .plugin-card-meta {
     display: flex;
     align-items: center;
-    justify-content: center;
-    z-index: 1000;
-    opacity: 0;
-    visibility: hidden;
-    transition: all 0.3s;
+    flex-wrap: wrap;
+    gap: 0.4rem;
+    margin-bottom: 0.6rem;
 }
 
-.modal-overlay.active {
+.plugins-page .plugin-card-actions {
+    margin-top: 0.65rem;
+    padding-top: 0.65rem;
+    border-top: 1px solid var(--border-light);
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 0.4rem;
+}
+
+.plugins-page .notification-drawer {
+    position: fixed;
+    top: 0;
+    right: -420px;
+    width: min(420px, 100vw);
+    height: 100vh;
+    z-index: 1040;
+    border-left: 1px solid var(--border-color);
+    background: var(--surface-solid);
+    backdrop-filter: blur(16px);
+    box-shadow: var(--shadow-xl);
+    transition: right 0.24s ease;
+    overflow-y: auto;
+}
+
+.plugins-page .notification-drawer.active {
+    right: 0;
+}
+
+.plugins-page .drawer-header {
+    position: sticky;
+    top: 0;
+    z-index: 2;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 0.7rem;
+    padding: 1rem 1.15rem;
+    border-bottom: 1px solid var(--border-color);
+    background: inherit;
+}
+
+.plugins-page .drawer-title {
+    color: var(--text-primary);
+    font-size: 1.05rem;
+    font-weight: 700;
+}
+
+.plugins-page .notification-item {
+    padding: 0.9rem 1.15rem;
+    border-bottom: 1px solid var(--border-light);
+}
+
+.plugins-page .notification-item.unread {
+    background: rgba(199, 90, 52, 0.08);
+}
+
+.plugins-page .notification-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 0.6rem;
+    margin-bottom: 0.4rem;
+}
+
+.plugins-page .notification-type {
+    color: var(--text-primary);
+    font-size: 0.86rem;
+    font-weight: 700;
+}
+
+.plugins-page .notification-time {
+    color: var(--text-muted);
+    font-size: 0.76rem;
+}
+
+.plugins-page .notification-message {
+    color: var(--text-secondary);
+    font-size: 0.84rem;
+}
+
+.plugins-page .notification-actions {
+    margin-top: 0.55rem;
+}
+
+.plugins-page .modal-overlay {
+    position: fixed;
+    inset: 0;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    padding: 1rem;
+    background: rgba(13, 16, 23, 0.58);
+    backdrop-filter: blur(8px);
+    opacity: 0;
+    visibility: hidden;
+    transition: opacity 0.24s ease;
+    z-index: 1060;
+}
+
+.plugins-page .modal-overlay.active {
     opacity: 1;
     visibility: visible;
 }
 
-.modal-content {
-    background: var(--bg-primary);
-    border-radius: var(--radius-lg);
-    box-shadow: var(--shadow-xl);
-    max-width: 600px;
-    width: 90%;
+.plugins-page .modal-overlay .modal-content {
+    width: min(92vw, 640px);
     max-height: 90vh;
     overflow-y: auto;
-    transform: scale(0.9);
-    transition: transform 0.3s;
+    border-radius: var(--radius-lg);
+    border: 1px solid var(--border-color);
+    background: var(--surface-solid);
+    box-shadow: var(--shadow-xl);
+    transform: translateY(8px) scale(0.98);
+    transition: transform 0.24s ease;
 }
 
-.modal-overlay.active .modal-content {
-    transform: scale(1);
+.plugins-page .modal-overlay.active .modal-content {
+    transform: translateY(0) scale(1);
 }
 
-.modal-header {
-    padding: 1.5rem;
+.plugins-page .modal-overlay .modal-header,
+.plugins-page .modal-overlay .modal-footer {
+    padding: 1rem 1.15rem;
+    border-color: var(--border-color);
+}
+
+.plugins-page .modal-overlay .modal-header {
     border-bottom: 1px solid var(--border-color);
     display: flex;
     justify-content: space-between;
     align-items: center;
+    gap: 0.8rem;
 }
 
-.modal-title {
-    font-size: 1.25rem;
-    font-weight: 600;
+.plugins-page .modal-overlay .modal-title {
+    margin: 0;
     color: var(--text-primary);
+    font-size: 1.08rem;
+    font-weight: 700;
 }
 
-.modal-close {
-    background: none;
-    border: none;
-    font-size: 1.5rem;
-    color: var(--text-muted);
-    cursor: pointer;
-    padding: 0;
-    width: 30px;
-    height: 30px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    border-radius: var(--radius-sm);
-    transition: all 0.2s;
+.plugins-page .modal-overlay .modal-body {
+    padding: 1.15rem;
 }
 
-.modal-close:hover {
-    background: var(--bg-tertiary);
-    color: var(--text-primary);
-}
-
-.modal-body {
-    padding: 1.5rem;
-}
-
-.modal-footer {
-    padding: 1rem 1.5rem;
+.plugins-page .modal-overlay .modal-footer {
     border-top: 1px solid var(--border-color);
     display: flex;
     justify-content: flex-end;
-    gap: 0.75rem;
+    gap: 0.55rem;
 }
 
-/* Notification Drawer */
-.notification-drawer {
-    position: fixed;
-    top: 0;
-    right: -400px;
-    width: 400px;
-    height: 100%;
-    background: var(--bg-primary);
-    box-shadow: var(--shadow-xl);
-    z-index: 1001;
-    transition: right 0.3s;
-    overflow-y: auto;
-}
-
-.notification-drawer.active {
-    right: 0;
-}
-
-.drawer-header {
-    padding: 1.5rem;
-    border-bottom: 1px solid var(--border-color);
-    display: flex;
-    justify-content: space-between;
+.plugins-page .modal-close {
+    border: none;
+    background: transparent;
+    color: var(--text-secondary);
+    width: 28px;
+    height: 28px;
+    border-radius: var(--radius-sm);
+    display: inline-flex;
     align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    font-size: 1.3rem;
 }
 
-.drawer-title {
-    font-size: 1.25rem;
-    font-weight: 600;
+.plugins-page .modal-close:hover {
+    background: rgba(199, 90, 52, 0.14);
     color: var(--text-primary);
 }
 
-.notification-item {
-    padding: 1rem 1.5rem;
-    border-bottom: 1px solid var(--border-light);
-    transition: background 0.2s;
-}
-
-.notification-item:hover {
-    background: var(--bg-secondary);
-}
-
-.notification-item.unread {
-    background: rgba(29, 78, 216, 0.05);
-}
-
-.notification-header {
-    display: flex;
-    justify-content: space-between;
-    margin-bottom: 0.5rem;
-}
-
-.notification-type {
-    font-weight: 500;
-    font-size: 0.9rem;
-}
-
-.notification-time {
-    font-size: 0.8rem;
-    color: var(--text-muted);
-}
-
-.notification-message {
-    font-size: 0.9rem;
-    color: var(--text-secondary);
-}
-
-.notification-actions {
-    margin-top: 0.75rem;
-    display: flex;
-    gap: 0.5rem;
-}
-
-/* Toast Notifications */
-.toast-container {
+.plugins-page #toastContainer {
     position: fixed;
-    top: 20px;
-    right: 20px;
-    z-index: 2000;
+    top: 84px;
+    right: 16px;
+    z-index: 1080;
 }
 
-.toast {
-    background: var(--bg-primary);
+.plugins-page #toastContainer .toast {
+    min-width: 260px;
+    max-width: 360px;
+    margin-bottom: 0.45rem;
+    padding: 0.75rem 0.9rem;
     border: 1px solid var(--border-color);
+    border-left-width: 4px;
     border-radius: var(--radius-md);
-    padding: 1rem 1.5rem;
-    margin-bottom: 0.5rem;
-    box-shadow: var(--shadow-lg);
+    background: var(--surface-solid);
+    color: var(--text-primary);
+    box-shadow: var(--shadow-md);
     display: flex;
     align-items: center;
-    gap: 0.75rem;
-    min-width: 300px;
-    animation: slideIn 0.3s ease;
+    gap: 0.55rem;
+    animation: pluginsToastIn 0.18s ease;
 }
 
-@keyframes slideIn {
+.plugins-page #toastContainer .toast.success { border-left-color: var(--success-color); }
+.plugins-page #toastContainer .toast.error { border-left-color: var(--danger-color); }
+.plugins-page #toastContainer .toast.warning { border-left-color: var(--warning-color); }
+.plugins-page #toastContainer .toast.info { border-left-color: var(--info-color); }
+
+@keyframes pluginsToastIn {
     from {
-        transform: translateX(400px);
+        transform: translateX(10px);
         opacity: 0;
     }
     to {
@@ -550,464 +846,162 @@
     }
 }
 
-.toast.success {
-    border-left: 4px solid var(--success-color);
-}
-
-.toast.error {
-    border-left: 4px solid var(--danger-color);
-}
-
-.toast.warning {
-    border-left: 4px solid var(--warning-color);
-}
-
-.toast.info {
-    border-left: 4px solid var(--info-color);
-}
-
-/* Responsive */
-@media (max-width: 768px) {
-    .plugins-container {
-        padding: 1rem;
-    }
-
-    .page-header {
-        flex-direction: column;
-        align-items: flex-start;
-        gap: 1rem;
-    }
-
-    .filter-row {
+@media (max-width: 992px) {
+    .plugins-page .page-header {
+        padding: 1.15rem;
         flex-direction: column;
     }
 
-    .search-box {
-        min-width: 100%;
-    }
-
-    .plugins-table {
-        font-size: 0.85rem;
-    }
-
-    .plugins-table th,
-    .plugins-table td {
-        padding: 0.75rem 0.5rem;
-    }
-
-    .action-buttons {
-        flex-direction: column;
-    }
-
-    .notification-drawer {
+    .plugins-page .header-actions {
         width: 100%;
-        right: -100%;
-    }
-}
-
-/* Loading State */
-.loading {
-    display: flex;
-    justify-content: center;
-    align-items: center;
-    padding: 3rem;
-    color: var(--text-muted);
-}
-
-.spinner {
-    border: 3px solid var(--border-color);
-    border-top: 3px solid var(--primary-color);
-    border-radius: 50%;
-    width: 40px;
-    height: 40px;
-    animation: spin 1s linear infinite;
-}
-
-@keyframes spin {
-    0% { transform: rotate(0deg); }
-    100% { transform: rotate(360deg); }
-}
-
-/* Empty State */
-.empty-state {
-    text-align: center;
-    padding: 4rem 2rem;
-    color: var(--text-muted);
-}
-
-.empty-state-icon {
-    font-size: 4rem;
-    margin-bottom: 1rem;
-    opacity: 0.5;
-}
-
-.empty-state-text {
-    font-size: 1.25rem;
-    margin-bottom: 0.5rem;
-    color: var(--text-primary);
-    font-weight: 500;
-}
-
-.empty-state-subtext {
-    font-size: 0.95rem;
-    color: var(--text-muted);
-    margin-bottom: 1.5rem;
-}
-
-.empty-state-actions {
-    display: flex;
-    gap: 1rem;
-    justify-content: center;
-    flex-wrap: wrap;
-}
-
-/* Bulk Actions Toolbar */
-.bulk-actions-bar {
-    display: none;
-    align-items: center;
-    gap: 1rem;
-    padding: 0.75rem 1rem;
-    background: var(--bg-secondary);
-    border: 1px solid var(--primary-color);
-    border-radius: var(--radius-md);
-    margin-bottom: 1rem;
-    animation: slideDown 0.2s ease;
-}
-
-.bulk-actions-bar.active {
-    display: flex;
-}
-
-@keyframes slideDown {
-    from {
-        opacity: 0;
-        transform: translateY(-10px);
-    }
-    to {
-        opacity: 1;
-        transform: translateY(0);
-    }
-}
-
-.bulk-actions-count {
-    font-weight: 500;
-    color: var(--text-primary);
-    padding-right: 1rem;
-    border-right: 1px solid var(--border-color);
-}
-
-.bulk-actions-buttons {
-    display: flex;
-    gap: 0.5rem;
-}
-
-/* Sortable Headers */
-.sortable {
-    cursor: pointer;
-    user-select: none;
-    transition: color 0.2s;
-}
-
-.sortable:hover {
-    color: var(--primary-color);
-}
-
-.sort-indicator {
-    display: inline-block;
-    margin-left: 0.5rem;
-    opacity: 0.5;
-    transition: opacity 0.2s, transform 0.2s;
-}
-
-.sortable.active .sort-indicator {
-    opacity: 1;
-    color: var(--primary-color);
-}
-
-.sortable.desc .sort-indicator {
-    transform: rotate(180deg);
-}
-
-/* Pagination */
-.pagination-container {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    padding: 1rem;
-    border-top: 1px solid var(--border-color);
-    background: var(--bg-secondary);
-}
-
-.pagination-info {
-    font-size: 0.9rem;
-    color: var(--text-secondary);
-}
-
-.pagination-controls {
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
-}
-
-.pagination-btn {
-    padding: 0.4rem 0.75rem;
-    border: 1px solid var(--border-color);
-    border-radius: var(--radius-sm);
-    background: var(--bg-primary);
-    color: var(--text-secondary);
-    font-size: 0.85rem;
-    cursor: pointer;
-    transition: all 0.2s;
-}
-
-.pagination-btn:hover:not(:disabled) {
-    background: var(--bg-tertiary);
-    border-color: var(--primary-color);
-    color: var(--primary-color);
-}
-
-.pagination-btn:disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
-}
-
-.pagination-btn.active {
-    background: var(--primary-color);
-    border-color: var(--primary-color);
-    color: white;
-}
-
-.page-size-select {
-    padding: 0.4rem 0.6rem;
-    border: 1px solid var(--border-color);
-    border-radius: var(--radius-sm);
-    background: var(--bg-primary);
-    color: var(--text-primary);
-    font-size: 0.85rem;
-    margin-left: 1rem;
-}
-
-/* Plugin Icon */
-.plugin-icon {
-    width: 36px;
-    height: 36px;
-    border-radius: var(--radius-sm);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    background: var(--bg-tertiary);
-    color: var(--text-primary);
-    font-size: 1.1rem;
-    flex-shrink: 0;
-}
-
-.plugin-icon img {
-    width: 100%;
-    height: 100%;
-    object-fit: contain;
-    border-radius: var(--radius-sm);
-}
-
-.plugin-icon.category-system {
-    background: rgba(29, 78, 216, 0.1);
-    color: var(--primary-color);
-}
-
-.plugin-icon.category-ai {
-    background: rgba(139, 92, 246, 0.1);
-    color: #8b5cf6;
-}
-
-.plugin-icon.category-data {
-    background: rgba(16, 185, 129, 0.1);
-    color: #10b981;
-}
-
-.plugin-icon.category-automation {
-    background: rgba(245, 158, 11, 0.1);
-    color: #f59e0b;
-}
-
-.plugin-icon.category-security {
-    background: rgba(239, 68, 68, 0.1);
-    color: #ef4444;
-}
-
-/* Mobile Card Layout */
-@media (max-width: 768px) {
-    .plugins-table-container {
-        display: none;
+        justify-content: flex-start;
     }
 
-    .plugins-cards-container {
-        display: block;
+    .plugins-page .filter-group {
+        flex: 1 1 210px;
     }
 
-    .plugin-card {
-        background: var(--bg-primary);
-        border: 1px solid var(--border-color);
-        border-radius: var(--radius-lg);
-        padding: 1rem;
-        margin-bottom: 1rem;
-        box-shadow: var(--shadow-sm);
+    .plugins-page .filter-select {
+        width: 100%;
     }
 
-    .plugin-card-header {
-        display: flex;
-        align-items: flex-start;
-        gap: 0.75rem;
-        margin-bottom: 0.75rem;
-    }
-
-    .plugin-card-checkbox {
-        margin-top: 0.25rem;
-    }
-
-    .plugin-card-info {
-        flex: 1;
-    }
-
-    .plugin-card-name {
-        font-weight: 600;
-        color: var(--text-primary);
-        margin-bottom: 0.25rem;
-    }
-
-    .plugin-card-description {
-        font-size: 0.85rem;
-        color: var(--text-muted);
-        margin-bottom: 0.5rem;
-    }
-
-    .plugin-card-meta {
-        display: flex;
-        flex-wrap: wrap;
-        gap: 0.5rem;
-        margin-bottom: 0.75rem;
-    }
-
-    .plugin-card-actions {
-        display: flex;
-        flex-wrap: wrap;
-        gap: 0.5rem;
-        padding-top: 0.75rem;
-        border-top: 1px solid var(--border-light);
-    }
-
-    .plugin-card-actions .btn-action {
-        flex: 1;
-        min-width: 70px;
-        text-align: center;
-    }
-
-    .bulk-actions-bar {
+    .plugins-page .bulk-actions-bar {
         flex-direction: column;
         align-items: stretch;
     }
 
-    .bulk-actions-count {
+    .plugins-page .bulk-actions-count {
         border-right: none;
         border-bottom: 1px solid var(--border-color);
         padding-right: 0;
-        padding-bottom: 0.75rem;
-        margin-bottom: 0.75rem;
+        padding-bottom: 0.5rem;
     }
 
-    .pagination-container {
+    .plugins-page .plugins-table-container {
+        display: none;
+    }
+
+    .plugins-page .plugins-cards-container {
+        display: block;
+    }
+
+    .plugins-page .pagination-container {
         flex-direction: column;
-        gap: 1rem;
+        align-items: flex-start;
     }
 }
 
-@media (min-width: 769px) {
-    .plugins-cards-container {
-        display: none;
+@media (max-width: 576px) {
+    .plugins-page #toastContainer {
+        right: 8px;
+        left: 8px;
+    }
+
+    .plugins-page #toastContainer .toast {
+        max-width: none;
+        width: 100%;
+    }
+
+    .plugins-page .plugin-card-actions {
+        grid-template-columns: 1fr;
     }
 }
 </style>
 
-<body>
+<body class="bg-light plugins-page">
     {{template "navbar.tmpl" .}}
 
     <div class="main-content-wrapper">
         {{template "sidebar.tmpl" .}}
 
         <div class="main-content">
-            <div class="plugins-container">
-                <!-- Page Header -->
-                <div class="page-header">
-                    <div class="page-title">
-                        <span>Plugin Management</span>
-                        <div class="notification-badge" id="notificationBadge">
-                            <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
-                                <path d="M21,19V20H3V19L5,17V11C5,7.9 7.03,5.17 10,4.29C10,4.19 10,4.1 10,4A2,2 0 0,1 12,2A2,2 0 0,1 14,4C14,4.1 14,4.19 14,4.29C16.97,5.17 19,7.9 19,11V17L21,19M14,21A2,2 0 0,1 12,23A2,2 0 0,1 10,21"/>
-                            </svg>
-                            <span class="notification-count" id="notificationCount" style="display: none;">0</span>
+            <div class="container-fluid py-4">
+                <div class="plugins-container">
+                    <!-- Page Header -->
+                    <div class="page-header modern-card">
+                        <div class="page-title-block">
+                            <h2 class="page-title">
+                                <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                                    <path d="M16,6V4H8V6H3V8L5,12V20H19V12L21,8V6H16M11,18H7V12H11V18M17,18H13V12H17V18M5.67,8H18.33L17.33,10H6.67L5.67,8Z"/>
+                                </svg>
+                                Plugin Management
+                            </h2>
+                            <p class="page-subtitle">Manage installed plugins, health, and updates from one place.</p>
+                            <div class="current-agent-chip">
+                                Current Agent:
+                                <strong id="currentAgentNameDisplay">Default</strong>
+                            </div>
+                        </div>
+                        <div class="header-actions">
+                            <button class="modern-btn modern-btn-secondary notification-badge" id="notificationBadge" type="button" aria-label="Open plugin notifications">
+                                <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                                    <path d="M21,19V20H3V19L5,17V11C5,7.9 7.03,5.17 10,4.29C10,4.19 10,4.1 10,4A2,2 0 0,1 12,2A2,2 0 0,1 14,4C14,4.1 14,4.19 14,4.29C16.97,5.17 19,7.9 19,11V17L21,19M14,21A2,2 0 0,1 12,23A2,2 0 0,1 10,21"/>
+                                </svg>
+                                Notifications
+                                <span class="notification-count" id="notificationCount" style="display: none;">0</span>
+                            </button>
+                            <a class="modern-btn modern-btn-secondary" href="/marketplace" style="text-decoration: none;">
+                                <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                                    <path d="M16 6V4H8V6H3V8L5 12V20H19V12L21 8V6H16M11 18H7V12H11V18M17 18H13V12H17V18M5.67 8H18.33L17.33 10H6.67L5.67 8Z"/>
+                                </svg>
+                                Plugin Marketplace
+                            </a>
+                            <button class="modern-btn modern-btn-primary" id="uploadBtn" type="button">
+                                <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                                    <path d="M9,16V10H5L12,3L19,10H15V16H9M5,20V18H19V20H5Z"/>
+                                </svg>
+                                Upload Plugin
+                            </button>
                         </div>
                     </div>
-                    <div class="header-actions">
-                        <a class="btn-modern btn-secondary" href="/marketplace" style="text-decoration: none;">
-                            <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
-                                <path d="M16 6V4H8V6H3V8L5 12V20H19V12L21 8V6H16M11 18H7V12H11V18M17 18H13V12H17V18M5.67 8H18.33L17.33 10H6.67L5.67 8Z"/>
-                            </svg>
-                            Plugin Marketplace
-                        </a>
-                        <button class="btn-modern btn-primary" id="uploadBtn">
-                            <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
-                                <path d="M9,16V10H5L12,3L19,10H15V16H9M5,20V18H19V20H5Z"/>
-                            </svg>
-                            Upload Plugin
-                        </button>
-                    </div>
-                </div>
 
-                <!-- Filter Bar -->
-                <div class="filter-bar">
-                    <div class="filter-row">
-                        <div class="search-box" style="position: relative;">
-                            <svg class="search-icon" width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
-                                <path d="M9.5,3A6.5,6.5 0 0,1 16,9.5C16,11.11 15.41,12.59 14.44,13.73L14.71,14H15.5L20.5,19L19,20.5L14,15.5V14.71L13.73,14.44C12.59,15.41 11.11,16 9.5,16A6.5,6.5 0 0,1 3,9.5A6.5,6.5 0 0,1 9.5,3M9.5,5C7,5 5,7 5,9.5C5,12 7,14 9.5,14C12,14 14,12 14,9.5C14,7 12,5 9.5,5Z"/>
-                            </svg>
-                            <input type="text" class="search-input" id="searchInput" placeholder="Search plugins...">
-                        </div>
-                        <div class="filter-group">
-                            <label style="color: var(--text-secondary); font-size: 0.9rem;">Status:</label>
-                            <select class="filter-select" id="statusFilter">
-                                <option value="">All</option>
-                                <option value="healthy">Healthy</option>
-                                <option value="error">Error</option>
-                                <option value="update">Needs Update</option>
-                            </select>
-                        </div>
-                        <div class="filter-group">
-                            <label style="color: var(--text-secondary); font-size: 0.9rem;">Category:</label>
-                            <select class="filter-select" id="categoryFilter">
-                                <option value="">All Categories</option>
-                                <option value="System Tools">System Tools</option>
-                                <option value="AI/ML">AI/ML</option>
-                                <option value="Data Processing">Data Processing</option>
-                                <option value="Utilities">Utilities</option>
-                                <option value="Automation">Automation</option>
-                                <option value="Communication">Communication</option>
-                                <option value="Development">Development</option>
-                                <option value="Security">Security</option>
-                                <option value="Custom">Custom</option>
-                            </select>
+                    <!-- Filter Bar -->
+                    <div class="filter-bar">
+                        <div class="filter-row">
+                            <div class="search-box">
+                                <svg class="search-icon" width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+                                    <path d="M9.5,3A6.5,6.5 0 0,1 16,9.5C16,11.11 15.41,12.59 14.44,13.73L14.71,14H15.5L20.5,19L19,20.5L14,15.5V14.71L13.73,14.44C12.59,15.41 11.11,16 9.5,16A6.5,6.5 0 0,1 3,9.5A6.5,6.5 0 0,1 9.5,3M9.5,5C7,5 5,7 5,9.5C5,12 7,14 9.5,14C12,14 14,12 14,9.5C14,7 12,5 9.5,5Z"/>
+                                </svg>
+                                <input type="text" class="search-input" id="searchInput" placeholder="Search plugins...">
+                            </div>
+                            <div class="filter-group">
+                                <label class="filter-label" for="statusFilter">Status</label>
+                                <select class="filter-select" id="statusFilter">
+                                    <option value="">All</option>
+                                    <option value="healthy">Healthy</option>
+                                    <option value="error">Error</option>
+                                    <option value="update">Needs Update</option>
+                                </select>
+                            </div>
+                            <div class="filter-group">
+                                <label class="filter-label" for="categoryFilter">Category</label>
+                                <select class="filter-select" id="categoryFilter">
+                                    <option value="">All Categories</option>
+                                    <option value="System Tools">System Tools</option>
+                                    <option value="AI/ML">AI/ML</option>
+                                    <option value="Data Processing">Data Processing</option>
+                                    <option value="Utilities">Utilities</option>
+                                    <option value="Automation">Automation</option>
+                                    <option value="Communication">Communication</option>
+                                    <option value="Development">Development</option>
+                                    <option value="Security">Security</option>
+                                    <option value="Custom">Custom</option>
+                                </select>
+                            </div>
                         </div>
                     </div>
-                </div>
 
                 <!-- Bulk Actions Bar -->
                 <div class="bulk-actions-bar" id="bulkActionsBar">
                     <span class="bulk-actions-count"><span id="selectedCount">0</span> selected</span>
                     <div class="bulk-actions-buttons">
-                        <button class="btn-action" onclick="bulkUpdatePlugins()">
+                        <button class="btn-action" type="button" onclick="bulkUpdatePlugins()">
                             <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" style="vertical-align: middle; margin-right: 4px;">
                                 <path d="M21,10.12H14.22L16.96,7.3C14.23,4.6 9.81,4.5 7.08,7.2C4.35,9.91 4.35,14.28 7.08,17C9.81,19.7 14.23,19.7 16.96,17C18.32,15.65 19,14.08 19,12.1H21C21,14.08 20.12,16.65 18.36,18.39C14.85,21.87 9.15,21.87 5.64,18.39C2.14,14.92 2.11,9.28 5.62,5.81C9.13,2.34 14.76,2.34 18.27,5.81L21,3V10.12Z"/>
                             </svg>
                             Update Selected
                         </button>
-                        <button class="btn-action btn-danger" onclick="bulkDeletePlugins()">
+                        <button class="btn-action btn-danger" type="button" onclick="bulkDeletePlugins()">
                             <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" style="vertical-align: middle; margin-right: 4px;">
                                 <path d="M19,4H15.5L14.5,3H9.5L8.5,4H5V6H19M6,19A2,2 0 0,0 8,21H16A2,2 0 0,0 18,19V7H6V19Z"/>
                             </svg>
@@ -1082,13 +1076,13 @@
                     <div class="empty-state-text">No plugins installed yet</div>
                     <div class="empty-state-subtext">Extend your agent's capabilities by adding plugins from the marketplace or uploading your own.</div>
                     <div class="empty-state-actions">
-                        <a href="/marketplace" class="btn-modern btn-primary" style="text-decoration: none;">
+                        <a href="/marketplace" class="modern-btn modern-btn-primary" style="text-decoration: none;">
                             <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
                                 <path d="M16 6V4H8V6H3V8L5 12V20H19V12L21 8V6H16M11 18H7V12H11V18M17 18H13V12H17V18M5.67 8H18.33L17.33 10H6.67L5.67 8Z"/>
                             </svg>
                             Browse Marketplace
                         </a>
-                        <button class="btn-modern btn-secondary" onclick="document.getElementById('uploadBtn').click()">
+                        <button class="modern-btn modern-btn-secondary" type="button" onclick="document.getElementById('uploadBtn').click()">
                             <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
                                 <path d="M9,16V10H5L12,3L19,10H15V16H9M5,20V18H19V20H5Z"/>
                             </svg>
@@ -1105,11 +1099,13 @@
         </div>
     </div>
 
+    </div>
+
     <!-- Notification Drawer -->
     <div class="notification-drawer" id="notificationDrawer">
         <div class="drawer-header">
             <div class="drawer-title">Notifications</div>
-            <button class="modal-close" id="closeDrawer">&times;</button>
+            <button class="modal-close" id="closeDrawer" type="button" aria-label="Close notifications panel">&times;</button>
         </div>
         <div id="notificationsList">
             <!-- Populated dynamically -->
@@ -1176,7 +1172,7 @@
     </div>
 
     <!-- Toast Container -->
-    <div class="toast-container" id="toastContainer"></div>
+    <div id="toastContainer"></div>
 
     <!-- Shared Modals (Add Agent, Marketplace, etc.) -->
     {{template "modals.tmpl" .}}

@@ -307,8 +307,8 @@ async function showPluginConfigModal(pluginName) {
 // Save plugin configuration
 async function savePluginConfig(pluginName, configVars) {
   try {
-    const form = document.getElementById('pluginConfigForm');
-    const formData = new FormData(form);
+    
+    
     const configData = {};
 
     // Convert form data to config object
@@ -373,8 +373,8 @@ async function constructPathFromDirHandle(dirHandle) {
     // Try to get the full path if available (newer browsers)
     if (dirHandle.getDirectoryHandle) {
       // Try to resolve the full path by traversing up to get context
-      const pathParts = [dirHandle.name];
-      const current = dirHandle;
+      
+      
 
       // This is a simplified approach - in practice, getting full paths
       // from directory handles is limited for security reasons
@@ -408,7 +408,7 @@ function constructPathFromFileHandle(fileHandle, fieldName) {
 }
 
 // Fallback for Firefox, Safari, and other browsers
-async function selectDirectoryFallback(fieldName) {
+async function selectDirectoryFallback() {
   return new Promise((resolve) => {
     const input = document.createElement('input');
     input.type = 'file';
@@ -532,9 +532,7 @@ async function selectFileFallback(fieldName) {
 
 // Prompt user for directory/file path
 async function promptWithVisualPicker(fieldName, isDirectory, selectedName) {
-  const displayName = fieldName.split('_').map(word =>
-    word.charAt(0).toUpperCase() + word.slice(1)
-  ).join(' ');
+  
 
   const pathType = isDirectory ? 'directory' : 'file';
   let suggestedPath = '';

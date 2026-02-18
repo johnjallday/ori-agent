@@ -10,7 +10,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/johnjallday/ori-agent/internal/mcp/transport"
+	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 // ServerConfig contains configuration for an MCP server
@@ -19,14 +19,16 @@ type ServerConfig struct {
 	Command   string            `json:"command"`
 	Args      []string          `json:"args"`
 	Env       map[string]string `json:"env"`
-	Transport string            `json:"transport"` // "stdio" or "sse"
+	Transport string            `json:"transport"` // currently only "stdio" is supported at runtime
 	Enabled   bool              `json:"enabled"`
 }
 
 // Server manages an MCP server process and client
 type Server struct {
 	config ServerConfig
-	client *Client
+	client *sdkmcp.Client
+	cmd    *exec.Cmd
+	conn   *sdkmcp.ClientSession
 	tools  []Tool
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -88,37 +90,43 @@ func (s *Server) Start() error {
 		return fmt.Errorf("command %q not found in PATH: %w. Please ensure the required runtime (e.g., Node.js/npm for npx commands) is installed and available in your PATH", s.config.Command, err)
 	}
 
-	// Create transport
-	t, err := transport.NewStdioTransport(s.ctx, s.config.Command, s.config.Args, env)
-	if err != nil {
+	if !strings.EqualFold(strings.TrimSpace(s.config.Transport), "stdio") {
 		s.setStatus(StatusError)
-		return fmt.Errorf("failed to create transport: %w", err)
+		return fmt.Errorf("unsupported transport %q; only stdio is supported", s.config.Transport)
 	}
 
-	// Create client
-	s.client = NewClient(t)
+	cmd := exec.CommandContext(s.ctx, s.config.Command, s.config.Args...)
+	cmd.Env = env
+	cmd.Stderr = os.Stderr
 
-	// Initialize
+	client := sdkmcp.NewClient(&sdkmcp.Implementation{
+		Name:    "ori-agent",
+		Version: "0.1.0",
+	}, nil)
+
 	initCtx, cancel := context.WithTimeout(s.ctx, 10*time.Second)
 	defer cancel()
 
-	clientInfo := Implementation{
-		Name:    "ori-agent",
-		Version: "0.1.0",
-	}
-
-	_, err = s.client.Initialize(initCtx, clientInfo)
+	session, err := client.Connect(initCtx, &sdkmcp.CommandTransport{Command: cmd}, nil)
 	if err != nil {
-		_ = s.client.Close()
-		s.client = nil
 		s.setStatus(StatusError)
 		return fmt.Errorf("failed to initialize: %w", err)
 	}
 
+	s.mu.Lock()
+	s.client = client
+	s.conn = session
+	s.cmd = cmd
+	s.mu.Unlock()
+
 	// Discover tools
 	if err := s.discoverTools(); err != nil {
-		_ = s.client.Close()
+		_ = session.Close()
+		s.mu.Lock()
 		s.client = nil
+		s.conn = nil
+		s.cmd = nil
+		s.mu.Unlock()
 		s.setStatus(StatusError)
 		return fmt.Errorf("failed to discover tools: %w", err)
 	}
@@ -134,22 +142,35 @@ func (s *Server) Start() error {
 // Stop stops the MCP server process
 func (s *Server) Stop() error {
 	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	if s.status == StatusStopped {
+	if s.status == StatusStopped || s.status == StatusError {
+		conn := s.conn
+		s.conn = nil
+		s.client = nil
+		s.cmd = nil
+		cancel := s.cancel
+		s.mu.Unlock()
+		if conn != nil {
+			_ = conn.Close()
+		}
+		cancel()
 		return nil
 	}
 
 	s.status = StatusStopped
+	conn := s.conn
+	s.conn = nil
+	s.client = nil
+	s.cmd = nil
+	cancel := s.cancel
+	s.mu.Unlock()
 
-	if s.client != nil {
-		if err := s.client.Close(); err != nil {
-			return fmt.Errorf("failed to close client: %w", err)
+	if conn != nil {
+		if err := conn.Close(); err != nil {
+			cancel()
+			return fmt.Errorf("failed to close client session: %w", err)
 		}
-		s.client = nil
 	}
-
-	s.cancel()
+	cancel()
 
 	return nil
 }
@@ -182,14 +203,22 @@ func (s *Server) GetTools() []Tool {
 // CallTool calls a tool on the MCP server
 func (s *Server) CallTool(ctx context.Context, name string, arguments map[string]interface{}) (*ToolCallResult, error) {
 	s.mu.RLock()
-	client := s.client
+	conn := s.conn
 	s.mu.RUnlock()
 
-	if client == nil {
+	if conn == nil {
 		return nil, fmt.Errorf("server not running")
 	}
 
-	return client.CallTool(ctx, name, arguments)
+	params := &sdkmcp.CallToolParams{
+		Name:      name,
+		Arguments: arguments,
+	}
+	if params.Arguments == nil {
+		params.Arguments = map[string]any{}
+	}
+
+	return conn.CallTool(ctx, params)
 }
 
 // GetStatus returns the current server status
@@ -218,9 +247,24 @@ func (s *Server) discoverTools() error {
 	ctx, cancel := context.WithTimeout(s.ctx, 10*time.Second)
 	defer cancel()
 
-	tools, err := s.client.ListTools(ctx)
+	s.mu.RLock()
+	conn := s.conn
+	s.mu.RUnlock()
+	if conn == nil {
+		return fmt.Errorf("connection not established")
+	}
+
+	toolsResult, err := conn.ListTools(ctx, &sdkmcp.ListToolsParams{})
 	if err != nil {
 		return fmt.Errorf("failed to list tools: %w", err)
+	}
+
+	tools := make([]Tool, 0, len(toolsResult.Tools))
+	for _, tool := range toolsResult.Tools {
+		if tool == nil {
+			continue
+		}
+		tools = append(tools, *tool)
 	}
 
 	s.mu.Lock()
@@ -242,7 +286,8 @@ func (s *Server) healthCheckLoop() {
 			return
 		case <-ticker.C:
 			s.mu.RLock()
-			client := s.client
+			conn := s.conn
+			cmd := s.cmd
 			status := s.status
 			s.mu.RUnlock()
 
@@ -250,14 +295,20 @@ func (s *Server) healthCheckLoop() {
 				continue
 			}
 
-			if client == nil || !client.IsAlive() {
+			if conn == nil {
+				s.setStatus(StatusError)
+				continue
+			}
+			if cmd == nil {
 				// Server died, try to restart
 				s.setStatus(StatusError)
-				// Could implement auto-restart here if desired
+				continue
+			}
+			if cmd.ProcessState != nil && cmd.ProcessState.Exited() {
+				s.setStatus(StatusError)
 			} else {
-				// Optionally ping the server
 				ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-				err := client.Ping(ctx)
+				err := conn.Ping(ctx, nil)
 				cancel()
 
 				if err != nil {

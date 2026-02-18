@@ -83,7 +83,6 @@ type skillWriteRequest struct {
 	Description string  `json:"description"`
 	Prompt      string  `json:"prompt"`
 	OpenAIYAML  *string `json:"openai_yaml,omitempty"`
-	Enabled     *bool   `json:"enabled,omitempty"`
 }
 
 type skillStateRequest struct {
@@ -135,7 +134,6 @@ func (h *Handler) createSkill(w http.ResponseWriter, r *http.Request) {
 		Description: strings.TrimSpace(req.Description),
 		Prompt:      req.Prompt,
 		OpenAIYAML:  req.OpenAIYAML,
-		Enabled:     req.Enabled,
 	})
 	if err != nil {
 		switch {
@@ -183,7 +181,6 @@ func (h *Handler) updateSkill(w http.ResponseWriter, r *http.Request, name strin
 		Description: strings.TrimSpace(req.Description),
 		Prompt:      req.Prompt,
 		OpenAIYAML:  req.OpenAIYAML,
-		Enabled:     req.Enabled,
 	})
 	if err != nil {
 		switch {

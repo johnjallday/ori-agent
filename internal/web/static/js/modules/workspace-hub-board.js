@@ -9,7 +9,7 @@
   if (!hubEl) return;
 
   const {
-    getTaskKanbanColumnId,
+    
     groupTasksByKanbanColumn,
     collectWorkspaceDescendantIds,
     formatDate
@@ -933,10 +933,18 @@
         if (!taskId) return;
         try {
           await navigator.clipboard.writeText(taskId);
-          if (window.Toast) window.Toast.success('Task ID copied');
+          if (typeof window.notifyToast === 'function') {
+            window.notifyToast('Task ID copied', 'success');
+          } else if (window.Toast) {
+            window.Toast.success('Task ID copied');
+          }
         } catch (err) {
           console.error('Failed to copy task id:', err);
-          if (window.Toast) window.Toast.error('Failed to copy');
+          if (typeof window.notifyToast === 'function') {
+            window.notifyToast('Failed to copy', 'error');
+          } else if (window.Toast) {
+            window.Toast.error('Failed to copy');
+          }
         }
       });
     }
@@ -1143,10 +1151,7 @@
     }
   }
 
-  function isBoardActive() {
-    const elements = getElements();
-    return !!elements.viewBoardBtn && elements.viewBoardBtn.classList.contains('is-active');
-  }
+  
 
   function wireEvents() {
     const elements = getElements();

@@ -1,5 +1,5 @@
 <!-- Ori Dashboard - Main landing page showing assistant status, stats, and agents -->
-<div class="container-fluid py-4">
+<div class="container-fluid py-4 dashboard-shell">
 
   <!-- Ori Greeting Row -->
   <div class="modern-card dashboard-greeting-card p-3 mb-4">
@@ -27,7 +27,7 @@
   </div>
 
   <!-- Home Assistant Task Router -->
-  <div id="homeAssistantCard" class="modern-card p-4 mb-4">
+  <div id="homeAssistantCard" class="modern-card p-4 mb-4 dashboard-home-card">
     <div class="d-flex justify-content-between align-items-center mb-2">
       <h5 class="mb-0 home-assistant-title">
         <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" class="me-2" style="color: var(--primary-color);">
@@ -111,7 +111,7 @@
   </div>
 
   <!-- Assistant Progress Card (hidden when evolution disabled) -->
-  <div id="dashboardProgressCard" class="modern-card p-4 mb-4 d-none">
+  <div id="dashboardProgressCard" class="modern-card p-4 mb-4 d-none dashboard-progress-card">
     <div class="d-flex justify-content-between align-items-center mb-3">
       <h5 class="mb-0" style="color: var(--text-primary);">
         <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" class="me-2" style="color: var(--primary-color);">
@@ -131,35 +131,35 @@
   </div>
 
   <!-- Quick Stats Row -->
-  <div class="row g-3 mb-4">
+  <div class="row g-3 mb-4 dashboard-stats-grid">
     <div class="col-6 col-md-3">
-      <div class="modern-card p-3 text-center">
-        <div style="color: var(--text-muted); font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 0.5rem;">Total Agents</div>
-        <div id="dashboardStatAgents" style="color: var(--text-primary); font-size: 1.5rem; font-weight: 600;">-</div>
+      <div class="modern-card p-3 text-center dashboard-stat-card">
+        <div class="dashboard-stat-label">Total Agents</div>
+        <div id="dashboardStatAgents" class="dashboard-stat-value">-</div>
       </div>
     </div>
     <div class="col-6 col-md-3">
-      <div class="modern-card p-3 text-center">
-        <div style="color: var(--text-muted); font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 0.5rem;">Active Agents</div>
-        <div id="dashboardStatActive" style="color: var(--text-primary); font-size: 1.5rem; font-weight: 600;">-</div>
+      <div class="modern-card p-3 text-center dashboard-stat-card">
+        <div class="dashboard-stat-label">Active Agents</div>
+        <div id="dashboardStatActive" class="dashboard-stat-value">-</div>
       </div>
     </div>
     <div class="col-6 col-md-3">
-      <div class="modern-card p-3 text-center">
-        <div style="color: var(--text-muted); font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 0.5rem;">Total Messages</div>
-        <div id="dashboardStatMessages" style="color: var(--text-primary); font-size: 1.5rem; font-weight: 600;">-</div>
+      <div class="modern-card p-3 text-center dashboard-stat-card">
+        <div class="dashboard-stat-label">Total Messages</div>
+        <div id="dashboardStatMessages" class="dashboard-stat-value">-</div>
       </div>
     </div>
     <div class="col-6 col-md-3">
-      <div class="modern-card p-3 text-center">
-        <div style="color: var(--text-muted); font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 0.5rem;">Total Cost</div>
-        <div id="dashboardStatCost" style="color: var(--text-primary); font-size: 1.5rem; font-weight: 600;">-</div>
+      <div class="modern-card p-3 text-center dashboard-stat-card">
+        <div class="dashboard-stat-label">Total Cost</div>
+        <div id="dashboardStatCost" class="dashboard-stat-value">-</div>
       </div>
     </div>
   </div>
 
   <!-- Agent Overview -->
-  <div class="modern-card p-4">
+  <div class="modern-card p-4 dashboard-agent-overview">
     <div class="d-flex justify-content-between align-items-center mb-3">
       <h5 class="mb-0" style="color: var(--text-primary);">
         <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" class="me-2" style="color: var(--primary-color);">

@@ -77,7 +77,7 @@
    * Open a file (navigate to canvas)
    * @param {string} fileId - File ID
    */
-  function openFile(fileId) {
+  function openFile() {
     const state = window.WorkspaceHubState.getState();
     if (state.selectedId) {
       window.location.href = `/workspaces/${encodeURIComponent(state.selectedId)}/canvas`;
@@ -136,7 +136,7 @@
       return;
     }
 
-    const inSelectionMode = window.WorkspaceHubSelection.isSelectionModeEnabled('files');
+    const _inSelectionMode = window.WorkspaceHubSelection.isSelectionModeEnabled('files');
     const selectedSet = state.selectedItems.files;
 
     const items = files.slice(0, 5).map((file) => {

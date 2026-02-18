@@ -1,6 +1,7 @@
 package skills
 
 import (
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -85,6 +86,184 @@ func TestListSkills_Conflict(t *testing.T) {
 	}
 	if len(conflictErr.Conflicts) != 1 || conflictErr.Conflicts[0].Name != "dup" {
 		t.Fatalf("unexpected conflict details: %+v", conflictErr.Conflicts)
+	}
+}
+
+func TestListSkills_PersonalSkillsIncluded(t *testing.T) {
+	tmpDir := t.TempDir()
+	agentStorePath := filepath.Join(tmpDir, "agents.json")
+	if err := os.WriteFile(agentStorePath, []byte(`{}`), 0o644); err != nil {
+		t.Fatalf("write agents.json: %v", err)
+	}
+
+	personalSkillsDir := filepath.Join(tmpDir, "personal-skills")
+	personalSkillDir := filepath.Join(personalSkillsDir, "frontend-design")
+	writeTestSkill(t, personalSkillDir, "frontend-design", "Frontend helper", "Prompt")
+
+	manager := NewManager(ManagerConfig{
+		AgentStorePath:    agentStorePath,
+		PersonalSkillsDir: personalSkillsDir,
+	})
+
+	skills, err := manager.ListSkills("default")
+	if err != nil {
+		t.Fatalf("ListSkills error: %v", err)
+	}
+	if len(skills) != 1 {
+		t.Fatalf("expected 1 skill, got %d", len(skills))
+	}
+	if skills[0].Name != "frontend-design" {
+		t.Fatalf("expected skill name frontend-design, got %q", skills[0].Name)
+	}
+	if skills[0].Source != SourcePersonal {
+		t.Fatalf("expected personal source, got %q", skills[0].Source)
+	}
+}
+
+func TestListSkills_PersonalSkillDuplicateDoesNotOverrideLocal(t *testing.T) {
+	tmpDir := t.TempDir()
+	agentStorePath := filepath.Join(tmpDir, "agents.json")
+	if err := os.WriteFile(agentStorePath, []byte(`{}`), 0o644); err != nil {
+		t.Fatalf("write agents.json: %v", err)
+	}
+
+	agentSkillDir := filepath.Join(tmpDir, "agents", "default", "skills", "shared-skill")
+	writeTestSkill(t, agentSkillDir, "shared-skill", "Agent skill", "Agent prompt")
+
+	personalSkillsDir := filepath.Join(tmpDir, "personal-skills")
+	personalSkillDir := filepath.Join(personalSkillsDir, "shared-skill")
+	writeTestSkill(t, personalSkillDir, "shared-skill", "Personal skill", "Personal prompt")
+
+	manager := NewManager(ManagerConfig{
+		AgentStorePath:    agentStorePath,
+		PersonalSkillsDir: personalSkillsDir,
+	})
+
+	skills, err := manager.ListSkills("default")
+	if err != nil {
+		t.Fatalf("ListSkills error: %v", err)
+	}
+	if len(skills) != 1 {
+		t.Fatalf("expected 1 merged skill, got %d", len(skills))
+	}
+	if skills[0].Source != SourceAgent {
+		t.Fatalf("expected local agent source precedence, got %q", skills[0].Source)
+	}
+}
+
+func TestListSkills_DefaultEnabledWithoutRegistry(t *testing.T) {
+	tmpDir := t.TempDir()
+	agentStorePath := filepath.Join(tmpDir, "agents.json")
+	if err := os.WriteFile(agentStorePath, []byte(`{}`), 0o644); err != nil {
+		t.Fatalf("write agents.json: %v", err)
+	}
+
+	repoSkillDir := filepath.Join(tmpDir, "agents", "skills", "repo-skill")
+	writeTestSkill(t, repoSkillDir, "repo-skill", "Repo skill", "Repo prompt")
+
+	manager := NewManager(ManagerConfig{AgentStorePath: agentStorePath})
+	skills, err := manager.ListSkills("default")
+	if err != nil {
+		t.Fatalf("ListSkills error: %v", err)
+	}
+	if len(skills) != 1 {
+		t.Fatalf("expected 1 skill, got %d", len(skills))
+	}
+	if !skills[0].Enabled {
+		t.Fatalf("expected skill to default enabled when no registry is present")
+	}
+}
+
+func TestListSkills_WildcardDefaultState(t *testing.T) {
+	tmpDir := t.TempDir()
+	agentStorePath := filepath.Join(tmpDir, "agents.json")
+	if err := os.WriteFile(agentStorePath, []byte(`{}`), 0o644); err != nil {
+		t.Fatalf("write agents.json: %v", err)
+	}
+
+	repoSkillDir := filepath.Join(tmpDir, "agents", "skills", "repo-skill")
+	writeTestSkill(t, repoSkillDir, "repo-skill", "Repo skill", "Repo prompt")
+
+	registryPath := filepath.Join(tmpDir, "agents", "default", "skills_state.json")
+	registry := map[string]any{
+		"skills": map[string]any{
+			"*": map[string]any{
+				"enabled": false,
+				"trusted": false,
+			},
+		},
+	}
+	registryBytes, err := json.Marshal(registry)
+	if err != nil {
+		t.Fatalf("marshal registry: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Dir(registryPath), 0o755); err != nil {
+		t.Fatalf("mkdir registry dir: %v", err)
+	}
+	if err := os.WriteFile(registryPath, registryBytes, 0o644); err != nil {
+		t.Fatalf("write registry: %v", err)
+	}
+
+	manager := NewManager(ManagerConfig{AgentStorePath: agentStorePath})
+	skills, err := manager.ListSkills("default")
+	if err != nil {
+		t.Fatalf("ListSkills error: %v", err)
+	}
+	if len(skills) != 1 {
+		t.Fatalf("expected 1 skill, got %d", len(skills))
+	}
+	if skills[0].Enabled {
+		t.Fatalf("expected wildcard default to disable skill")
+	}
+}
+
+func TestListSkills_ExplicitStateOverridesWildcard(t *testing.T) {
+	tmpDir := t.TempDir()
+	agentStorePath := filepath.Join(tmpDir, "agents.json")
+	if err := os.WriteFile(agentStorePath, []byte(`{}`), 0o644); err != nil {
+		t.Fatalf("write agents.json: %v", err)
+	}
+
+	repoSkillDir := filepath.Join(tmpDir, "agents", "skills", "repo-skill")
+	writeTestSkill(t, repoSkillDir, "repo-skill", "Repo skill", "Repo prompt")
+
+	registryPath := filepath.Join(tmpDir, "agents", "default", "skills_state.json")
+	registry := map[string]any{
+		"skills": map[string]any{
+			"*": map[string]any{
+				"enabled": false,
+				"trusted": false,
+			},
+			"repo-skill": map[string]any{
+				"enabled": true,
+				"trusted": true,
+			},
+		},
+	}
+	registryBytes, err := json.Marshal(registry)
+	if err != nil {
+		t.Fatalf("marshal registry: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Dir(registryPath), 0o755); err != nil {
+		t.Fatalf("mkdir registry dir: %v", err)
+	}
+	if err := os.WriteFile(registryPath, registryBytes, 0o644); err != nil {
+		t.Fatalf("write registry: %v", err)
+	}
+
+	manager := NewManager(ManagerConfig{AgentStorePath: agentStorePath})
+	skills, err := manager.ListSkills("default")
+	if err != nil {
+		t.Fatalf("ListSkills error: %v", err)
+	}
+	if len(skills) != 1 {
+		t.Fatalf("expected 1 skill, got %d", len(skills))
+	}
+	if !skills[0].Enabled {
+		t.Fatalf("expected explicit state to override wildcard default")
+	}
+	if !skills[0].Trusted {
+		t.Fatalf("expected explicit trusted state to override wildcard default")
 	}
 }
 

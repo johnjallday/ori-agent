@@ -151,7 +151,7 @@ function updateBannerContent(plugins) {
           // Configure first plugin, user can configure others after
           const firstPlugin = plugins[0];
           const pluginName = firstPlugin.name || firstPlugin.plugin_name || firstPlugin;
-          const displayName = typeof firstPlugin === 'object' ? (firstPlugin.metadata?.name || stripVersionSuffix(pluginName)) : stripVersionSuffix(pluginName);
+          
           if (window.showPluginConfigModal) {
             window.showPluginConfigModal(pluginName);
           }

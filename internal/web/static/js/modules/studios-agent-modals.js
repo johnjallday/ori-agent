@@ -240,7 +240,7 @@ async function addAgentToSelectedWorkspace(agentName) {
       throw new Error(error || 'Failed to add agent to workspace');
     }
 
-    const result = await response.json();
+    await response.json();
     alert(`Agent "${agentName}" added to workspace successfully!`);
 
     // Refresh workspaces if the function exists

@@ -261,6 +261,7 @@ export class WorkspaceDetailPage {
       newSessionBtn: document.getElementById('workspace-detail-new-session'),
       addFileBtn: document.getElementById('workspace-detail-add-file'),
       addNoteBtn: document.getElementById('workspace-detail-add-note'),
+      copyNotesBtn: document.getElementById('workspace-detail-copy-notes'),
       addDirectoryBtn: document.getElementById('workspace-detail-add-directory'),
       viewSchedulesBtn: document.getElementById('workspace-detail-view-schedules'),
 
@@ -306,6 +307,7 @@ export class WorkspaceDetailPage {
 
     // Note buttons
     this.elements.addNoteBtn?.addEventListener('click', () => this.showNoteModal());
+    this.elements.copyNotesBtn?.addEventListener('click', () => this.copyAllNotesToClipboard());
 
     // Directory buttons
     this.elements.addDirectoryBtn?.addEventListener('click', () => this.showAddDirectoryModal());
@@ -1796,6 +1798,7 @@ export class WorkspaceDetailPage {
    * Load notes for the workspace
    */
   async loadNotes() {
+    this.updateCopyNotesButtonState(true);
     if (this.elements.notesList) {
       this.elements.notesList.innerHTML = '<div class="workspace-detail-loading">Loading notes...</div>';
     }
@@ -1827,6 +1830,7 @@ export class WorkspaceDetailPage {
 
     if (this.notes.length === 0) {
       this.elements.notesList.innerHTML = '<div class="workspace-detail-empty">No notes yet.</div>';
+      this.updateCopyNotesButtonState(false);
       return;
     }
 
@@ -1849,6 +1853,7 @@ export class WorkspaceDetailPage {
       </div>
     `;
     }).join('');
+    this.updateCopyNotesButtonState(false);
   }
 
   /**
@@ -2451,6 +2456,95 @@ export class WorkspaceDetailPage {
     } catch (error) {
       console.error('Failed to save note:', error);
       if (window.Toast) window.Toast.error('Failed to save note');
+    }
+  }
+
+  updateCopyNotesButtonState(isBusy = false) {
+    const button = this.elements.copyNotesBtn;
+    if (!button) return;
+
+    const hasNotes = Array.isArray(this.notes) && this.notes.length > 0;
+    button.disabled = Boolean(isBusy) || !hasNotes;
+    if (isBusy) {
+      button.title = 'Copying notes...';
+      return;
+    }
+    button.title = hasNotes ? 'Copy all note contents' : 'No notes to copy';
+  }
+
+  async writeClipboardText(text) {
+    if (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
+      await navigator.clipboard.writeText(text);
+      return;
+    }
+
+    const textarea = document.createElement('textarea');
+    textarea.value = text;
+    textarea.setAttribute('readonly', '');
+    textarea.style.position = 'fixed';
+    textarea.style.top = '-9999px';
+    textarea.style.left = '-9999px';
+    document.body.appendChild(textarea);
+    textarea.focus();
+    textarea.select();
+
+    const copied = document.execCommand('copy');
+    document.body.removeChild(textarea);
+    if (!copied) throw new Error('Copy command failed');
+  }
+
+  async copyAllNotesToClipboard() {
+    if (!this.notes || this.notes.length === 0) {
+      this.updateCopyNotesButtonState(false);
+      if (typeof window.notifyToast === 'function') {
+        window.notifyToast('No notes to copy', 'error');
+      } else if (window.Toast) {
+        window.Toast.error('No notes to copy');
+      }
+      return;
+    }
+
+    this.updateCopyNotesButtonState(true);
+    try {
+      const sections = await Promise.all(this.notes.map(async (note, index) => {
+        const noteId = String(note?.id || '').trim();
+        const title = String(note?.name || note?.title || `Note ${index + 1}`).trim() || `Note ${index + 1}`;
+        let content = '';
+
+        if (noteId) {
+          try {
+            const response = await fetch(`/api/notes/${encodeURIComponent(noteId)}`);
+            if (response.ok) {
+              const detail = await response.json();
+              content = String(detail?.content || detail?.preview || '').trim();
+            }
+          } catch (error) {
+            console.error('Failed to load note content for copy:', error);
+          }
+        }
+
+        if (!content) {
+          content = String(note?.content || note?.preview || '').trim();
+        }
+
+        return `# ${title}\n${content || '(empty note)'}`;
+      }));
+
+      await this.writeClipboardText(sections.join('\n\n---\n\n'));
+      if (typeof window.notifyToast === 'function') {
+        window.notifyToast(`Copied ${this.notes.length} note${this.notes.length === 1 ? '' : 's'} to clipboard`, 'success');
+      } else if (window.Toast) {
+        window.Toast.success(`Copied ${this.notes.length} note${this.notes.length === 1 ? '' : 's'} to clipboard`);
+      }
+    } catch (error) {
+      console.error('Failed to copy notes:', error);
+      if (typeof window.notifyToast === 'function') {
+        window.notifyToast('Failed to copy notes', 'error');
+      } else if (window.Toast) {
+        window.Toast.error('Failed to copy notes');
+      }
+    } finally {
+      this.updateCopyNotesButtonState(false);
     }
   }
 

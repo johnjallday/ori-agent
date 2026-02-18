@@ -1,12 +1,14 @@
 // Agent Creation Form JavaScript
 
 let availablePlugins = [];
+let availableMCPServers = [];
 let selectedTags = [];
 let availableProviders = []; // Cache for available providers and models from API
 
 // Initialize page
 document.addEventListener('DOMContentLoaded', () => {
   loadPlugins();
+  loadMCPServers();
   setupTagsInput();
   loadAvailableProviders();
   setupAutoConfigListeners();
@@ -124,6 +126,27 @@ async function loadPlugins() {
   }
 }
 
+// Load available MCP servers
+async function loadMCPServers() {
+  try {
+    const response = await fetch('/api/mcp/servers');
+
+    if (!response.ok) {
+      throw new Error('Failed to load MCP servers');
+    }
+
+    const data = await response.json();
+    availableMCPServers = Array.isArray(data.servers) ? data.servers : [];
+    renderMCPServers();
+  } catch (error) {
+    console.error('Error loading MCP servers:', error);
+    const container = document.getElementById('mcpServersList');
+    if (container) {
+      container.innerHTML = '<div style="text-align: center; padding: 20px; color: var(--text-muted, #666);">Failed to load MCP servers</div>';
+    }
+  }
+}
+
 // Render plugins list
 function renderPlugins() {
   const container = document.getElementById('pluginsList');
@@ -149,10 +172,61 @@ function renderPlugins() {
   });
 }
 
+// Render MCP servers list
+function renderMCPServers() {
+  const container = document.getElementById('mcpServersList');
+  if (!container) return;
+
+  if (availableMCPServers.length === 0) {
+    container.innerHTML = `
+      <div style="text-align: center; padding: 20px; color: var(--text-muted, #666);">
+        No MCP servers configured yet.
+        <div style="margin-top: 8px;">
+          <a href="/mcp" style="color: var(--primary-color); text-decoration: none;">Open MCP settings</a>
+        </div>
+      </div>
+    `;
+    return;
+  }
+
+  container.innerHTML = '';
+  availableMCPServers
+    .slice()
+    .sort((a, b) => String(a?.name || '').localeCompare(String(b?.name || ''), undefined, { sensitivity: 'base' }))
+    .forEach((server, index) => {
+      const serverName = String(server?.name || '').trim();
+      if (!serverName) return;
+
+      const status = String(server?.status || 'unknown').toLowerCase();
+      const statusClass = status === 'running'
+        ? 'ready'
+        : (status === 'starting' || status === 'restarting' ? 'warming' : 'stopped');
+      const args = Array.isArray(server?.args) && server.args.length > 0
+        ? server.args.join(' ')
+        : '';
+      const commandSummary = [server?.command, args].filter(Boolean).join(' ');
+
+      const item = document.createElement('div');
+      item.className = 'plugin-item';
+      item.innerHTML = `
+            <input type="checkbox" id="mcp-${index}" class="plugin-checkbox mcp-checkbox" value="${escapeHtml(serverName)}">
+            <label for="mcp-${index}" class="plugin-info" style="cursor: pointer;">
+                <div class="plugin-name">${escapeHtml(serverName)}</div>
+                <div class="plugin-description">Enable this MCP server for the new agent.</div>
+                <div class="mcp-meta">
+                  <span class="mcp-status-badge ${statusClass}">${escapeHtml(status)}</span>
+                  ${commandSummary ? `<span class="mcp-command">${escapeHtml(commandSummary)}</span>` : ''}
+                </div>
+            </label>
+        `;
+      container.appendChild(item);
+    });
+}
+
 // Setup tags input
 function setupTagsInput() {
   const input = document.getElementById('tagsInput');
-  const container = document.getElementById('tagsContainer');
+  
 
   input.addEventListener('keydown', (e) => {
     if (e.key === 'Enter' && input.value.trim()) {
@@ -302,8 +376,10 @@ async function createAgent() {
   const avatarColor = document.getElementById('avatarColor').value;
 
   // Get selected plugins
-  const pluginCheckboxes = document.querySelectorAll('.plugin-checkbox:checked');
+  const pluginCheckboxes = document.querySelectorAll('#pluginsList .plugin-checkbox:checked');
   const enabledPlugins = Array.from(pluginCheckboxes).map(cb => cb.value);
+  const mcpCheckboxes = document.querySelectorAll('#mcpServersList .mcp-checkbox:checked');
+  const enabledMCPServers = Array.from(mcpCheckboxes).map(cb => cb.value);
 
   // Build request
   const requestData = {
@@ -325,6 +401,7 @@ async function createAgent() {
   if (avatarColor) requestData.avatar_color = avatarColor;
   if (selectedTags.length > 0) requestData.tags = selectedTags;
   if (enabledPlugins.length > 0) requestData.enabled_plugins = enabledPlugins;
+  if (enabledMCPServers.length > 0) requestData.mcp_servers = enabledMCPServers;
 
   // Show loading
   showLoading(true);
@@ -344,6 +421,17 @@ async function createAgent() {
       throw new Error(error.error || 'Failed to create agent');
     }
 
+    const mcpResult = await enableMCPServersForAgent(name, enabledMCPServers);
+    if (mcpResult.failures.length > 0) {
+      console.warn('Some MCP servers failed to enable for new agent:', mcpResult.failures);
+      if (window.Toast && typeof Toast.warning === 'function') {
+        Toast.warning(`Agent created, but ${mcpResult.failures.length} MCP server(s) could not be enabled.`);
+      }
+      // Redirect to detail page so user can immediately resolve MCP setup issues.
+      window.location.href = `/agents/${encodeURIComponent(name)}`;
+      return;
+    }
+
     // Success - redirect to agents page
     window.location.href = '/agents';
 
@@ -353,6 +441,41 @@ async function createAgent() {
     showLoading(false);
     document.getElementById('createBtn').disabled = false;
   }
+}
+
+async function enableMCPServersForAgent(agentName, serverNames) {
+  const targets = Array.from(new Set((serverNames || [])
+    .map((name) => String(name || '').trim())
+    .filter(Boolean)));
+  if (targets.length === 0) {
+    return { successCount: 0, failures: [] };
+  }
+
+  let successCount = 0;
+  const failures = [];
+
+  await Promise.all(targets.map(async (serverName) => {
+    try {
+      const endpoint = `/api/agents/${encodeURIComponent(agentName)}/mcp-servers/${encodeURIComponent(serverName)}/enable`;
+      const response = await fetch(endpoint, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        }
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(errorText || 'Enable failed');
+      }
+
+      successCount += 1;
+    } catch (error) {
+      failures.push(`${serverName}: ${error.message || 'unknown error'}`);
+    }
+  }));
+
+  return { successCount, failures };
 }
 
 // Helper functions

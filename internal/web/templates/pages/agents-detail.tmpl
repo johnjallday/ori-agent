@@ -49,6 +49,153 @@
     .toggle-switch input:focus + .toggle-slider {
       box-shadow: 0 0 0 2px rgba(124, 58, 237, 0.2);
     }
+
+    .setup-health-banner {
+      border-left: 4px solid var(--warning-color);
+      background: linear-gradient(145deg, color-mix(in srgb, var(--bg-secondary) 84%, transparent), var(--bg-primary));
+    }
+
+    .setup-health-banner.is-ready {
+      border-left-color: var(--success-color);
+    }
+
+    .setup-health-title {
+      font-size: 16px;
+      font-weight: 700;
+      color: var(--text-primary);
+      margin: 0 0 6px 0;
+    }
+
+    .setup-health-subtitle {
+      color: var(--text-secondary);
+      font-size: 13px;
+      margin: 0 0 12px 0;
+    }
+
+    .setup-health-list {
+      display: grid;
+      gap: 8px;
+    }
+
+    .setup-health-item {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 10px;
+      padding: 10px 12px;
+      border-radius: 10px;
+      border: 1px solid var(--border-color);
+      background: var(--bg-secondary);
+    }
+
+    .setup-health-item-title {
+      color: var(--text-primary);
+      font-size: 13px;
+      font-weight: 600;
+      margin: 0;
+    }
+
+    .setup-health-item-detail {
+      color: var(--text-secondary);
+      font-size: 12px;
+      margin: 2px 0 0 0;
+    }
+
+    .capability-summary-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      gap: 10px;
+      margin-bottom: 12px;
+    }
+
+    .capability-summary-item {
+      border: 1px solid var(--border-color);
+      border-radius: 10px;
+      background: var(--bg-secondary);
+      padding: 10px 12px;
+    }
+
+    .capability-summary-label {
+      color: var(--text-secondary);
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      margin-bottom: 4px;
+    }
+
+    .capability-summary-value {
+      color: var(--text-primary);
+      font-size: 18px;
+      font-weight: 700;
+      line-height: 1.1;
+      margin-bottom: 6px;
+    }
+
+    .capability-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      font-size: 11px;
+      font-weight: 600;
+      border-radius: 999px;
+      padding: 3px 8px;
+      border: 1px solid transparent;
+    }
+
+    .capability-pill.ready {
+      background: rgba(34, 197, 94, 0.12);
+      border-color: rgba(34, 197, 94, 0.25);
+      color: var(--success-color);
+    }
+
+    .capability-pill.warning {
+      background: rgba(245, 158, 11, 0.13);
+      border-color: rgba(245, 158, 11, 0.3);
+      color: var(--warning-color);
+    }
+
+    .capability-pill.error {
+      background: rgba(239, 68, 68, 0.12);
+      border-color: rgba(239, 68, 68, 0.25);
+      color: var(--danger-color);
+    }
+
+    .capability-dependency-list {
+      display: grid;
+      gap: 8px;
+    }
+
+    .capability-dependency-item {
+      border: 1px solid var(--border-color);
+      border-radius: 10px;
+      background: var(--bg-secondary);
+      padding: 10px 12px;
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      align-items: center;
+    }
+
+    .capability-dependency-name {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      font-size: 12px;
+      font-weight: 700;
+      color: var(--text-primary);
+      margin: 0;
+    }
+
+    .capability-dependency-meta {
+      color: var(--text-secondary);
+      font-size: 12px;
+      margin: 4px 0 0 0;
+    }
+
+    .capability-dependency-status {
+      display: inline-flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      justify-content: flex-end;
+    }
   </style>
 
   <!-- Navigation -->
@@ -111,6 +258,9 @@
             </div>
           </div>
 
+          <!-- Setup Health -->
+          <div id="setupHealthBanner" class="section-card modern-card p-3 mb-4 setup-health-banner" style="display: none;"></div>
+
           <!-- Quick Stats -->
           <div class="row g-3 mb-4">
             <div class="col-md-3">
@@ -137,6 +287,22 @@
                 <div id="statAvgTokens" style="font-size: 22px; font-weight: 700; color: var(--text-primary);">0</div>
               </div>
             </div>
+          </div>
+
+          <!-- Capabilities -->
+          <div id="capabilitiesSection" class="section-card modern-card p-4 mb-4" style="display: none;">
+            <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-2">
+              <h3 class="section-title" style="font-size: 18px; font-weight: 600; margin: 0; color: var(--text-primary);">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" class="me-2" style="vertical-align: text-bottom;">
+                  <path d="M4,2H14A2,2 0 0,1 16,4V8H20A2,2 0 0,1 22,10V20A2,2 0 0,1 20,22H10A2,2 0 0,1 8,20V16H4A2,2 0 0,1 2,14V4A2,2 0 0,1 4,2M4,4V14H8V10A2,2 0 0,1 10,8H14V4H4M10,10V20H20V10H10M12,12H18V14H12V12M12,16H16V18H12V16Z"/>
+                </svg>
+                Capabilities
+              </h3>
+              <span id="capabilitiesReadinessBadge" class="capability-pill warning">Checking...</span>
+            </div>
+            <p id="capabilitiesSummaryText" class="setup-health-subtitle" style="margin-bottom: 12px;">Loading capabilities...</p>
+            <div id="capabilitiesSummaryGrid" class="capability-summary-grid"></div>
+            <div id="capabilitiesDependencies" class="capability-dependency-list"></div>
           </div>
 
           <!-- Details Grid -->
@@ -385,12 +551,17 @@
             <!-- Skills Section -->
             <div class="col-12" id="skillsSection">
               <div class="section-card modern-card p-4">
-                <h3 class="section-title" style="font-size: 18px; font-weight: 600; margin-bottom: 16px; color: var(--text-primary);">
-                  <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" class="me-2" style="vertical-align: text-bottom;">
-                    <path d="M7,2V13H10V22L17,10H13L17,2H7Z"/>
-                  </svg>
-                  Skills
-                </h3>
+                <div class="d-flex justify-content-between align-items-center mb-3">
+                  <h3 class="section-title" style="font-size: 18px; font-weight: 600; margin: 0; color: var(--text-primary);">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" class="me-2" style="vertical-align: text-bottom;">
+                      <path d="M7,2V13H10V22L17,10H13L17,2H7Z"/>
+                    </svg>
+                    Skills
+                  </h3>
+                  <a id="openSkillsPageLink" href="/skills" class="modern-btn modern-btn-secondary btn-sm">
+                    Open Skills Page
+                  </a>
+                </div>
                 <div id="skillsList" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px;">
                   <div class="text-center py-3" style="color: var(--text-secondary);">Loading skills...</div>
                 </div>
@@ -481,6 +652,42 @@
         <div class="modal-footer" style="border-top: 1px solid var(--border-color);">
           <button type="button" class="modern-btn modern-btn-secondary" data-bs-dismiss="modal">Cancel</button>
           <button type="button" id="confirmDeleteBtn" class="modern-btn" style="background: var(--danger-color); color: white;">Delete Agent</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- MCP Tool Details Modal -->
+  <div class="modal fade" id="mcpToolDetailModal" tabindex="-1" aria-labelledby="mcpToolDetailTitle" aria-hidden="true">
+    <div class="modal-dialog modal-xl modal-dialog-scrollable">
+      <div class="modal-content" style="background: var(--bg-primary); border: 1px solid var(--border-color);">
+        <div class="modal-header" style="border-bottom: 1px solid var(--border-color);">
+          <div>
+            <h5 class="modal-title" id="mcpToolDetailTitle" style="color: var(--text-primary); margin: 0;">MCP Tool</h5>
+            <div id="mcpToolDetailServer" style="font-size: 12px; color: var(--text-secondary); margin-top: 2px;"></div>
+          </div>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+        </div>
+        <div class="modal-body">
+          <div id="mcpToolDetailDescription" style="font-size: 14px; color: var(--text-secondary); line-height: 1.5; margin-bottom: 16px;"></div>
+
+          <div style="margin-bottom: 18px;">
+            <div style="font-size: 12px; text-transform: uppercase; letter-spacing: 0.5px; color: var(--text-secondary); margin-bottom: 8px;">Required Fields</div>
+            <div id="mcpToolDetailRequired" style="display: flex; flex-wrap: wrap; gap: 8px;"></div>
+          </div>
+
+          <div style="margin-bottom: 18px;">
+            <div style="font-size: 12px; text-transform: uppercase; letter-spacing: 0.5px; color: var(--text-secondary); margin-bottom: 8px;">Input Properties</div>
+            <div id="mcpToolDetailProperties" style="display: flex; flex-direction: column; gap: 10px;"></div>
+          </div>
+
+          <div>
+            <div style="font-size: 12px; text-transform: uppercase; letter-spacing: 0.5px; color: var(--text-secondary); margin-bottom: 8px;">Raw Input Schema</div>
+            <pre id="mcpToolDetailRawSchema" style="max-height: 280px; overflow: auto; margin: 0; padding: 12px; border-radius: 8px; background: var(--bg-secondary); border: 1px solid var(--border-color); color: var(--text-primary); font-size: 12px; line-height: 1.4;"></pre>
+          </div>
+        </div>
+        <div class="modal-footer" style="border-top: 1px solid var(--border-color);">
+          <button type="button" class="modern-btn modern-btn-secondary" data-bs-dismiss="modal">Close</button>
         </div>
       </div>
     </div>

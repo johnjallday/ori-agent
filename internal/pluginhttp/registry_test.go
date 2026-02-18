@@ -265,3 +265,39 @@ func TestPluginDownloadHandler_ErrorResponse(t *testing.T) {
 		t.Errorf("Expected user_platform=%s, got %v", currentPlatform, resp["user_platform"])
 	}
 }
+
+func TestPluginUpdatesCheckHandler_NoCurrentAgent_ReturnsEmptySuccess(t *testing.T) {
+	testReg := setupTestRegistry(t, []types.PluginRegistryEntry{})
+
+	handler := NewRegistryHandler(
+		&mockStore{},
+		testReg,
+		plugindownloader.NewDownloader(filepath.Join(t.TempDir(), "cache")),
+		filepath.Join(t.TempDir(), "agents"),
+	)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/plugins/updates/check", nil)
+	w := httptest.NewRecorder()
+	handler.PluginUpdatesCheckHandler(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("Expected status 200, got %d", w.Code)
+	}
+
+	var resp map[string]any
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("Failed to decode response: %v", err)
+	}
+
+	if success, ok := resp["success"].(bool); !ok || !success {
+		t.Fatalf("Expected success=true, got %#v", resp["success"])
+	}
+
+	count, ok := resp["updatesCount"].(float64)
+	if !ok {
+		t.Fatalf("Expected updatesCount number, got %#v", resp["updatesCount"])
+	}
+	if count != 0 {
+		t.Fatalf("Expected updatesCount=0, got %v", count)
+	}
+}

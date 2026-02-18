@@ -84,7 +84,6 @@ function renderSkills(skills) {
     const isEditable = source === 'agent';
     const validationErrors = Array.isArray(skill?.validation_errors) ? skill.validation_errors : [];
     const hasErrors = validationErrors.length > 0;
-    const isEnabled = skill?.enabled !== false;
     const hasScripts = Boolean(skill?.has_scripts);
     const isTrusted = Boolean(skill?.trusted);
     const requiresTrust = hasScripts && !isTrusted;
@@ -92,12 +91,12 @@ function renderSkills(skills) {
     const card = document.createElement('div');
     card.className = 'plugin-item';
     card.style.cursor = 'default';
+    card.style.display = 'flex';
+    card.style.flexDirection = 'column';
+    card.style.height = '100%';
 
     const badges = [];
     badges.push(`<span class="badge bg-secondary" style="font-size: 10px; text-transform: uppercase; letter-spacing: 0.3px;">${safeText(source)}</span>`);
-    if (!isEnabled) {
-      badges.push('<span class="badge bg-warning" style="font-size: 10px; text-transform: uppercase; letter-spacing: 0.3px;">disabled</span>');
-    }
     if (hasErrors) {
       badges.push('<span class="badge bg-danger" style="font-size: 10px; text-transform: uppercase; letter-spacing: 0.3px;">invalid</span>');
     }
@@ -110,7 +109,7 @@ function renderSkills(skills) {
       : '';
 
     card.innerHTML = `
-      <div style="display: flex; align-items: flex-start; justify-content: space-between; gap: 8px;">
+      <div style="display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; flex: 1 1 auto;">
         <div style="min-width: 0;">
           <div style="font-weight: 600; color: var(--text-primary);">${safeText(name)}</div>
           <div style="font-size: 12px; color: var(--text-secondary); margin-top: 4px;">${safeText(description)}</div>
@@ -118,15 +117,11 @@ function renderSkills(skills) {
         </div>
         <div style="display: flex; flex-wrap: wrap; gap: 4px; justify-content: flex-end;">${badges.join('')}</div>
       </div>
-      <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 12px;">
-        <button class="modern-btn modern-btn-secondary btn-sm" data-action="run" ${(!isEnabled || requiresTrust || hasErrors) ? 'disabled' : ''}>Run</button>
+      <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: auto; padding-top: 12px;">
+        <button class="modern-btn modern-btn-secondary btn-sm" data-action="run" ${(requiresTrust || hasErrors) ? 'disabled' : ''}>Run</button>
         <button class="modern-btn modern-btn-secondary btn-sm" data-action="edit" ${isEditable ? '' : 'disabled'}>Edit</button>
         <button class="modern-btn modern-btn-secondary btn-sm" data-action="delete" ${isEditable ? '' : 'disabled'}>Delete</button>
         ${hasScripts ? `<button class="modern-btn modern-btn-secondary btn-sm" data-action="trust">${isTrusted ? 'Untrust' : 'Trust'}</button>` : ''}
-        <div class="form-check form-switch" style="margin-left: auto;">
-          <input class="form-check-input" type="checkbox" ${isEnabled ? 'checked' : ''} data-action="toggle" />
-          <label class="form-check-label" style="font-size: 12px; color: var(--text-secondary);">Enabled</label>
-        </div>
       </div>
     `;
 
@@ -148,11 +143,6 @@ function renderSkills(skills) {
     const trustBtn = card.querySelector('[data-action="trust"]');
     if (trustBtn) {
       trustBtn.addEventListener('click', () => toggleSkillTrust(skill));
-    }
-
-    const toggle = card.querySelector('[data-action="toggle"]');
-    if (toggle) {
-      toggle.addEventListener('change', () => setSkillEnabled(skill, toggle.checked));
     }
 
     container.appendChild(card);
@@ -333,7 +323,6 @@ function openSkillEditor(skill) {
   const nameInput = document.getElementById('skillNameInput');
   const descriptionInput = document.getElementById('skillDescriptionInput');
   const promptInput = document.getElementById('skillPromptInput');
-  const enabledInput = document.getElementById('skillEnabledInput');
   const errorBox = document.getElementById('skillsEditorError');
 
   if (errorBox) {
@@ -349,7 +338,6 @@ function openSkillEditor(skill) {
   }
   if (descriptionInput) descriptionInput.value = skill?.description || '';
   if (promptInput) promptInput.value = skill ? 'Loading...' : '';
-  if (enabledInput) enabledInput.checked = skill ? (skill.enabled !== false) : true;
 
   const modal = getEditorModal();
   if (modal) modal.show();
@@ -374,7 +362,6 @@ async function saveSkillEditor() {
   const nameInput = document.getElementById('skillNameInput');
   const descriptionInput = document.getElementById('skillDescriptionInput');
   const promptInput = document.getElementById('skillPromptInput');
-  const enabledInput = document.getElementById('skillEnabledInput');
   const errorBox = document.getElementById('skillsEditorError');
 
   const payload = {
@@ -382,7 +369,6 @@ async function saveSkillEditor() {
     name: nameInput ? nameInput.value.trim() : '',
     description: descriptionInput ? descriptionInput.value.trim() : '',
     prompt: promptInput ? promptInput.value : '',
-    enabled: enabledInput ? enabledInput.checked : true,
   };
 
   if (payload.prompt.trim() === 'Loading...') {
@@ -456,24 +442,6 @@ async function deleteSkill(skill) {
   } catch (error) {
     console.error('Failed to delete skill:', error);
     showToast('Failed to delete skill.', 'error');
-  }
-}
-
-async function setSkillEnabled(skill, enabled) {
-  if (!skill?.name || !selectedAgentName) return;
-  try {
-    const response = await fetch(`/api/skills/${encodeURIComponent(skill.name)}/enable`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ agent: selectedAgentName, enabled }),
-    });
-    if (!response.ok) {
-      throw new Error('Failed to update skill state');
-    }
-    await loadSkills(selectedAgentName);
-  } catch (error) {
-    console.error('Failed to update skill state:', error);
-    showToast('Failed to update skill state.', 'error');
   }
 }
 

@@ -26,72 +26,108 @@
             margin: 0;
             padding: 0;
             min-height: 100vh;
+            background:
+                radial-gradient(circle at 15% -10%, rgba(29, 78, 216, 0.15), transparent 42%),
+                radial-gradient(circle at 100% 20%, rgba(56, 189, 248, 0.12), transparent 36%),
+                var(--bg-primary);
         }
 
         .create-container {
-            max-width: 900px;
+            max-width: 980px;
             margin: 0 auto;
-            padding: 20px;
+            padding: 24px 20px 36px;
         }
 
         .page-header {
-            margin-bottom: 30px;
+            margin-bottom: 18px;
+            padding: 22px 24px;
+            border-radius: var(--radius-lg);
+            background: linear-gradient(145deg, color-mix(in srgb, var(--bg-primary) 86%, var(--primary-color) 14%), var(--bg-primary));
+            border: 1px solid color-mix(in srgb, var(--border-color) 78%, var(--primary-color) 22%);
+            box-shadow: 0 14px 30px rgba(0, 0, 0, 0.12);
+            position: relative;
+            overflow: hidden;
+        }
+
+        .page-header::after {
+            content: "";
+            position: absolute;
+            width: 220px;
+            height: 220px;
+            border-radius: 50%;
+            right: -80px;
+            top: -120px;
+            background: radial-gradient(circle, color-mix(in srgb, var(--primary-color) 34%, transparent) 0%, transparent 72%);
+            pointer-events: none;
         }
 
         .page-header h1 {
-            font-size: 28px;
-            margin-bottom: 8px;
+            font-size: clamp(26px, 4vw, 32px);
+            margin-bottom: 6px;
+            color: var(--text-primary);
+            position: relative;
+            z-index: 1;
         }
 
         .page-header p {
-            color: var(--text-muted);
+            color: var(--text-secondary);
             font-size: 14px;
+            margin: 0;
+            position: relative;
+            z-index: 1;
         }
 
         .form-card {
-            background: var(--bg-primary);
-            border: 1px solid var(--border-color);
-            border-radius: 12px;
-            padding: 30px;
-            margin-bottom: 24px;
+            border: 1px solid color-mix(in srgb, var(--border-color) 86%, var(--primary-color) 14%);
+            border-radius: 16px;
+            padding: 22px 24px;
+            margin-bottom: 16px;
+            box-shadow: 0 8px 26px rgba(0, 0, 0, 0.08);
+        }
+
+        .form-card.modern-card:hover {
+            transform: none;
+            box-shadow: 0 10px 28px rgba(0, 0, 0, 0.1);
         }
 
         .form-section-title {
             font-size: 18px;
-            font-weight: 600;
-            margin-bottom: 20px;
-            padding-bottom: 12px;
-            border-bottom: 1px solid var(--border-color);
+            font-weight: 650;
+            margin-bottom: 16px;
+            padding-bottom: 11px;
+            border-bottom: 1px solid color-mix(in srgb, var(--border-color) 84%, var(--primary-color) 16%);
+            color: var(--text-primary);
         }
 
         .form-group {
-            margin-bottom: 20px;
+            margin-bottom: 18px;
         }
 
         .form-label {
             display: block;
-            font-weight: 500;
-            margin-bottom: 8px;
+            font-weight: 520;
+            margin-bottom: 7px;
             color: var(--text-primary);
+            letter-spacing: 0.1px;
         }
 
         .form-label.required::after {
             content: " *";
-            color: #dc3545;
+            color: var(--danger-color);
         }
 
         .form-input,
         .form-select,
         .form-textarea {
             width: 100%;
-            padding: 10px 14px;
-            border: 1px solid var(--border-color);
-            border-radius: 6px;
+            padding: 10px 13px;
+            border: 1px solid color-mix(in srgb, var(--border-color) 86%, var(--primary-color) 14%);
+            border-radius: 10px;
             font-size: 14px;
             font-family: inherit;
-            background: var(--bg-primary);
+            background: var(--bg-secondary);
             color: var(--text-primary);
-            transition: border-color 0.2s;
+            transition: border-color 0.2s ease, box-shadow 0.2s ease, background 0.2s ease;
         }
 
         .form-input:focus,
@@ -99,40 +135,77 @@
         .form-textarea:focus {
             outline: none;
             border-color: var(--primary-color);
+            box-shadow: 0 0 0 3px color-mix(in srgb, var(--primary-color) 20%, transparent);
+            background: var(--bg-primary);
         }
 
         .form-textarea {
             resize: vertical;
-            min-height: 100px;
+            min-height: 110px;
+            line-height: 1.45;
+        }
+
+        input[type="range"].form-input {
+            padding: 0;
+            height: 6px;
+            border: none;
+            border-radius: 999px;
+            background: color-mix(in srgb, var(--bg-tertiary) 75%, var(--primary-color) 25%);
+            appearance: none;
+            -webkit-appearance: none;
+        }
+
+        input[type="range"].form-input::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            width: 16px;
+            height: 16px;
+            border-radius: 50%;
+            background: var(--primary-color);
+            border: 2px solid var(--bg-primary);
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
+            cursor: pointer;
+        }
+
+        input[type="range"].form-input::-moz-range-thumb {
+            width: 16px;
+            height: 16px;
+            border-radius: 50%;
+            background: var(--primary-color);
+            border: 2px solid var(--bg-primary);
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
+            cursor: pointer;
         }
 
         .form-help {
             font-size: 12px;
-            color: var(--text-muted);
-            margin-top: 4px;
+            color: var(--text-secondary);
+            margin-top: 5px;
+            line-height: 1.4;
         }
 
         .form-row {
             display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 20px;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 16px;
         }
 
         .color-picker-group {
             display: flex;
             gap: 12px;
             align-items: center;
+            flex-wrap: wrap;
         }
 
         .color-preview {
             width: 40px;
             height: 40px;
-            border-radius: 8px;
-            border: 2px solid var(--border-color);
+            border-radius: 10px;
+            border: 2px solid color-mix(in srgb, var(--border-color) 78%, var(--primary-color) 22%);
+            box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.22);
         }
 
         .color-input {
-            width: 120px;
+            width: 130px;
         }
 
         .tags-input-container {
@@ -140,27 +213,37 @@
             flex-wrap: wrap;
             gap: 8px;
             padding: 8px;
-            border: 1px solid var(--border-color);
-            border-radius: 6px;
-            min-height: 44px;
+            border: 1px solid color-mix(in srgb, var(--border-color) 86%, var(--primary-color) 14%);
+            border-radius: 10px;
+            min-height: 46px;
             cursor: text;
+            background: var(--bg-secondary);
+            transition: border-color 0.2s ease, box-shadow 0.2s ease;
+        }
+
+        .tags-input-container:focus-within {
+            border-color: var(--primary-color);
+            box-shadow: 0 0 0 3px color-mix(in srgb, var(--primary-color) 20%, transparent);
+            background: var(--bg-primary);
         }
 
         .tag-item {
             display: inline-flex;
             align-items: center;
             gap: 6px;
-            padding: 4px 12px;
-            background: var(--primary-color);
+            padding: 4px 10px;
+            background: linear-gradient(135deg, var(--primary-color), var(--primary-light));
             color: white;
-            border-radius: 12px;
-            font-size: 13px;
+            border-radius: 999px;
+            font-size: 12px;
+            box-shadow: 0 3px 10px rgba(0, 0, 0, 0.14);
         }
 
         .tag-remove {
             cursor: pointer;
-            font-weight: bold;
-            opacity: 0.8;
+            font-weight: 700;
+            opacity: 0.85;
+            line-height: 1;
         }
 
         .tag-remove:hover {
@@ -174,34 +257,40 @@
             flex: 1;
             min-width: 120px;
             font-size: 14px;
+            background: transparent;
+            color: var(--text-primary);
         }
 
         .plugin-list {
-            max-height: 300px;
+            max-height: 320px;
             overflow-y: auto;
-            border: 1px solid var(--border-color);
-            border-radius: 6px;
+            border: 1px solid color-mix(in srgb, var(--border-color) 86%, var(--primary-color) 14%);
+            border-radius: 10px;
             padding: 8px;
+            background: var(--bg-secondary);
         }
 
         .plugin-item {
             display: flex;
             align-items: center;
             gap: 12px;
-            padding: 12px;
-            border-radius: 6px;
-            margin-bottom: 4px;
-            transition: background 0.2s;
+            padding: 11px 10px;
+            border-radius: 8px;
+            margin-bottom: 5px;
+            transition: background 0.2s ease, border-color 0.2s ease;
+            border: 1px solid transparent;
         }
 
         .plugin-item:hover {
-            background: var(--bg-secondary);
+            background: color-mix(in srgb, var(--bg-tertiary) 80%, var(--primary-color) 20%);
+            border-color: color-mix(in srgb, var(--border-color) 72%, var(--primary-color) 28%);
         }
 
         .plugin-checkbox {
             width: 18px;
             height: 18px;
             cursor: pointer;
+            accent-color: var(--primary-color);
         }
 
         .plugin-info {
@@ -209,81 +298,73 @@
         }
 
         .plugin-name {
-            font-weight: 500;
+            font-weight: 600;
             margin-bottom: 2px;
+            color: var(--text-primary);
         }
 
         .plugin-description {
             font-size: 12px;
-            color: var(--text-muted);
+            color: var(--text-secondary);
         }
 
         .form-actions {
             display: flex;
             gap: 12px;
             justify-content: flex-end;
-            padding-top: 20px;
-            border-top: 1px solid var(--border-color);
+            align-items: center;
         }
 
-        .btn {
-            padding: 10px 24px;
-            border: none;
-            border-radius: 6px;
-            font-size: 14px;
-            font-weight: 500;
-            cursor: pointer;
-            transition: all 0.2s;
-        }
-
-        .btn-primary {
-            background: var(--primary-color);
-            color: white;
-        }
-
-        .btn-primary:hover {
-            opacity: 0.9;
-        }
-
-        .btn-primary:disabled {
+        .modern-btn:disabled,
+        .btn:disabled {
             opacity: 0.5;
             cursor: not-allowed;
+            transform: none !important;
         }
 
-        .btn-secondary {
-            background: var(--bg-secondary);
+        #createGenerateAutoConfigBtn {
+            margin-top: 2px;
+        }
+
+        .btn-group .btn {
+            border-radius: 10px;
+            border: 1px solid color-mix(in srgb, var(--border-color) 78%, var(--primary-color) 22%);
             color: var(--text-primary);
-            border: 1px solid var(--border-color);
+            background: var(--bg-secondary);
+            font-size: 13px;
+            font-weight: 550;
+            padding: 7px 13px;
         }
 
-        .btn-secondary:hover {
-            background: var(--bg-tertiary);
+        .btn-check:checked + .btn {
+            background: color-mix(in srgb, var(--primary-color) 20%, var(--bg-secondary));
+            border-color: var(--primary-color);
+            color: var(--text-primary);
+            box-shadow: 0 0 0 2px color-mix(in srgb, var(--primary-color) 18%, transparent);
         }
 
         .error-message {
-            padding: 12px;
-            background: rgba(239, 68, 68, 0.1);
+            padding: 12px 14px;
+            background: rgba(239, 68, 68, 0.12);
             color: #dc2626;
-            border: 1px solid rgba(239, 68, 68, 0.2);
-            border-radius: 6px;
-            margin-bottom: 20px;
+            border: 1px solid rgba(239, 68, 68, 0.25);
+            border-radius: 10px;
+            margin-bottom: 16px;
             display: none;
+            font-size: 13px;
         }
 
-        .dark-mode .error-message,
         [data-bs-theme="dark"] .error-message {
-            background: rgba(239, 68, 68, 0.15);
+            background: rgba(239, 68, 68, 0.17);
             color: #fca5a5;
-            border-color: rgba(239, 68, 68, 0.3);
+            border-color: rgba(239, 68, 68, 0.35);
         }
 
         .loading-overlay {
             position: fixed;
-            top: 0;
-            left: 0;
-            right: 0;
-            bottom: 0;
-            background: rgba(0, 0, 0, 0.5);
+            inset: 0;
+            background: rgba(2, 6, 23, 0.5);
+            backdrop-filter: blur(6px);
             display: none;
             align-items: center;
             justify-content: center;
@@ -291,15 +372,48 @@
         }
 
         .loading-spinner {
-            background: white;
-            padding: 30px;
-            border-radius: 12px;
+            background: var(--bg-primary);
+            padding: 24px 30px;
+            border-radius: 14px;
             text-align: center;
+            border: 1px solid var(--border-color);
+            color: var(--text-primary);
+            box-shadow: 0 16px 40px rgba(0, 0, 0, 0.25);
+        }
+
+        @media (max-width: 900px) {
+            .create-container {
+                padding: 18px 14px 28px;
+            }
+        }
+
+        @media (max-width: 1080px) {
+            .create-nav-links {
+                display: none !important;
+            }
         }
 
         @media (max-width: 768px) {
             .form-row {
                 grid-template-columns: 1fr;
+            }
+
+            .form-card {
+                padding: 18px 16px;
+            }
+
+            .form-actions {
+                justify-content: stretch;
+                flex-wrap: wrap;
+            }
+
+            .form-actions .modern-btn {
+                flex: 1 1 100%;
+                justify-content: center;
+            }
+
+            .create-model-indicator {
+                display: none !important;
             }
         }
     </style>
@@ -330,7 +444,7 @@
                 </a>
 
                 <!-- Center: Navigation Links -->
-                <div class="d-flex align-items-center gap-2 ms-4">
+                <div class="create-nav-links d-flex align-items-center gap-2 ms-4">
                     <a href="/agents" class="nav-link-item" style="color: var(--text-primary); text-decoration: none; padding: 0.5rem 1rem; border-radius: var(--radius-md); transition: background 0.2s; background: var(--bg-tertiary);">Agents</a>
                     <span style="color: var(--text-muted);">|</span>
                     <a href="/plugins" class="nav-link-item" style="color: var(--text-primary); text-decoration: none; padding: 0.5rem 1rem; border-radius: var(--radius-md); transition: background 0.2s;">Plugins</a>
@@ -347,7 +461,7 @@
                 </div>
 
                 <!-- Center-Right: System Model Indicator -->
-                <div class="d-flex align-items-center ms-auto me-3">
+                <div class="create-model-indicator d-flex align-items-center ms-auto me-3">
                     <a href="/settings" id="systemModelIndicator" class="d-flex align-items-center gap-2 text-decoration-none" style="padding: 0.4rem 0.8rem; border-radius: var(--radius-md); background: var(--bg-secondary); border: 1px solid var(--border-color); transition: all 0.2s;" title="System Model - Click to configure">
                         <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" style="color: var(--text-muted);">
                             <path d="M12,2A2,2 0 0,1 14,4C14,4.74 13.6,5.39 13,5.73V7H14A7,7 0 0,1 21,14H22A1,1 0 0,1 23,15V18A1,1 0 0,1 22,19H21V20A2,2 0 0,1 19,22H5A2,2 0 0,1 3,20V19H2A1,1 0 0,1 1,18V15A1,1 0 0,1 2,14H3A7,7 0 0,1 10,7H11V5.73C10.4,5.39 10,4.74 10,4A2,2 0 0,1 12,2M7.5,13A2.5,2.5 0 0,0 5,15.5A2.5,2.5 0 0,0 7.5,18A2.5,2.5 0 0,0 10,15.5A2.5,2.5 0 0,0 7.5,13M16.5,13A2.5,2.5 0 0,0 14,15.5A2.5,2.5 0 0,0 16.5,18A2.5,2.5 0 0,0 19,15.5A2.5,2.5 0 0,0 16.5,13Z"/>
@@ -381,7 +495,7 @@
         <div id="errorMessage" class="error-message"></div>
 
         <!-- Configuration Mode -->
-        <div class="form-card">
+        <div class="form-card modern-card">
             <h2 class="form-section-title">Configuration Mode</h2>
             <div class="form-group">
                 <div class="d-flex align-items-center gap-3 mb-2">
@@ -409,7 +523,7 @@
                               placeholder="Example: An agent that helps with code reviews, understands multiple programming languages, and can suggest improvements..."></textarea>
                     <div class="form-help">Be specific about what tasks this agent should handle and what tools it needs.</div>
                 </div>
-                <button type="button" id="createGenerateAutoConfigBtn" class="btn btn-primary mb-3">
+                <button type="button" id="createGenerateAutoConfigBtn" class="modern-btn modern-btn-primary mb-3">
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" class="me-1">
                         <path d="M12,3L2,12H5V20H19V12H22L12,3M12,8.75A2.25,2.25 0 0,1 14.25,11A2.25,2.25 0 0,1 12,13.25A2.25,2.25 0 0,1 9.75,11A2.25,2.25 0 0,1 12,8.75Z"/>
                     </svg>
@@ -436,7 +550,7 @@
         </div>
 
         <!-- Basic Information -->
-        <div class="form-card">
+        <div class="form-card modern-card">
             <h2 class="form-section-title">Basic Information</h2>
 
             <div class="form-group">
@@ -478,7 +592,7 @@
         </div>
 
         <!-- LLM Configuration -->
-        <div class="form-card">
+        <div class="form-card modern-card">
             <h2 class="form-section-title">LLM Configuration</h2>
 
             <div class="form-row">
@@ -519,7 +633,7 @@
         </div>
 
         <!-- Appearance -->
-        <div class="form-card">
+        <div class="form-card modern-card">
             <h2 class="form-section-title">Appearance</h2>
 
             <div class="form-group">
@@ -542,7 +656,7 @@
         </div>
 
         <!-- Plugins -->
-        <div class="form-card">
+        <div class="form-card modern-card">
             <h2 class="form-section-title">Plugins</h2>
             <div class="form-help" style="margin-bottom: 12px;">Select which plugins this agent can use</div>
 
@@ -552,10 +666,10 @@
         </div>
 
         <!-- Actions -->
-        <div class="form-card">
+        <div class="form-card modern-card">
             <div class="form-actions">
-                <button type="button" class="btn btn-secondary" onclick="window.location.href='/agents'">Cancel</button>
-                <button type="button" class="btn btn-primary" onclick="createAgent()" id="createBtn">Create Agent</button>
+                <button type="button" class="modern-btn modern-btn-secondary" onclick="window.location.href='/agents'">Cancel</button>
+                <button type="button" class="modern-btn modern-btn-primary" onclick="createAgent()" id="createBtn">Create Agent</button>
             </div>
         </div>
     </div>

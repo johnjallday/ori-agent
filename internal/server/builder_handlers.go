@@ -202,10 +202,15 @@ func (b *ServerBuilder) initializeHandlers() error {
 	logger.Info("External agents support initialized", logger.Fields{})
 
 	// Initialize skills manager and handler (local + external)
+	personalSkillsDir := ""
+	if homeDir, err := os.UserHomeDir(); err == nil {
+		personalSkillsDir = filepath.Join(homeDir, ".agents", "skills")
+	}
 	b.skillsManager = skills.NewManager(skills.ManagerConfig{
-		AgentStorePath: b.agentStorePath,
-		ExternalAgents: b.externalAgentsCache,
-		ConfigManager:  b.configManager,
+		AgentStorePath:    b.agentStorePath,
+		PersonalSkillsDir: personalSkillsDir,
+		ExternalAgents:    b.externalAgentsCache,
+		ConfigManager:     b.configManager,
 	})
 	b.skillsHandler = skillshttp.New(b.skillsManager, b.st)
 	b.chatHandler.SetSkillsManager(b.skillsManager)

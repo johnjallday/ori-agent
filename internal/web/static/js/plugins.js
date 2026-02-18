@@ -370,7 +370,7 @@ function renderPluginsTable() {
             <td>
                 <div class="action-buttons">
                     <button class="btn-action" onclick="showPluginDetails('${escapeHtml(plugin.name)}')">Details</button>
-                    <button class="btn-action" onclick="showPluginTools('${escapeHtml(plugin.name)}')" ${!!plugin.installed ? '' : 'disabled style="opacity: 0.5; cursor: not-allowed;" title="Install plugin to view tools"'}>Tools</button>
+                    <button class="btn-action" onclick="showPluginTools('${escapeHtml(plugin.name)}')" ${plugin.installed ? '' : 'disabled style="opacity: 0.5; cursor: not-allowed;" title="Install plugin to view tools"'}>Tools</button>
                     <button class="btn-action btn-danger" onclick="deletePlugin('${escapeHtml(plugin.name)}')">Remove</button>
                 </div>
             </td>
@@ -425,7 +425,7 @@ function renderMobileCards() {
             ${renderTagBadges(plugin.tags)}
             <div class="plugin-card-actions">
                 <button class="btn-action" onclick="showPluginDetails('${escapeHtml(plugin.name)}')">Details</button>
-                <button class="btn-action" onclick="showPluginTools('${escapeHtml(plugin.name)}')" ${!!plugin.installed ? '' : 'disabled style="opacity: 0.5; cursor: not-allowed;" title="Install plugin to view tools"'}>Tools</button>
+                <button class="btn-action" onclick="showPluginTools('${escapeHtml(plugin.name)}')" ${plugin.installed ? '' : 'disabled style="opacity: 0.5; cursor: not-allowed;" title="Install plugin to view tools"'}>Tools</button>
                 <button class="btn-action btn-danger" onclick="deletePlugin('${escapeHtml(plugin.name)}')">Remove</button>
             </div>
         </div>
@@ -647,7 +647,7 @@ function createToolsModal(plugin) {
             ${toolsHtml}
           </div>
           <div class="modal-footer">
-              <button class="btn-modern btn-secondary" onclick="closeModal(this)">Close</button>
+              <button class="modern-btn modern-btn-secondary" onclick="closeModal(this)">Close</button>
           </div>
       </div>
   `;
@@ -714,7 +714,7 @@ function createDetailsModal(plugin) {
                 ` : ''}
             </div>
             <div class="modal-footer">
-                <button class="btn-modern btn-secondary" onclick="closeModal(this)">Close</button>
+                <button class="modern-btn modern-btn-secondary" onclick="closeModal(this)">Close</button>
             </div>
         </div>
     `;
@@ -741,8 +741,8 @@ function createTestModal(pluginName) {
                 </div>
             </div>
             <div class="modal-footer">
-                <button class="btn-modern btn-secondary" onclick="closeModal(this)">Close</button>
-                <button class="btn-modern btn-primary" onclick="executeTest('${pluginName}')">Run Test</button>
+                <button class="modern-btn modern-btn-secondary" onclick="closeModal(this)">Close</button>
+                <button class="modern-btn modern-btn-primary" onclick="executeTest('${pluginName}')">Run Test</button>
             </div>
         </div>
     `;

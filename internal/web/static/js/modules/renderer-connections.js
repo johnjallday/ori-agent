@@ -290,11 +290,11 @@ export class RendererConnections {
 
   drawWorkflowConnections() {
     // Get mouse position in canvas coordinates for hover detection
-    const rect = this.canvas.getBoundingClientRect();
+    
     const mouseCanvasX = this.state.lastMouseX ? (this.state.lastMouseX - this.state.offsetX) / this.state.scale : -9999;
     const mouseCanvasY = this.state.lastMouseY ? (this.state.lastMouseY - this.state.offsetY) / this.state.scale : -9999;
 
-    let hasMissingPositions = false;
+    let _hasMissingPositions = false;
 
     this.state.connections.forEach((conn, idx) => {
       // Skip task-to-combiner connections (already shown as purple dotted result lines)
@@ -314,7 +314,7 @@ export class RendererConnections {
       const toPos = this.parent.getPortPosition(conn.to, conn.toPort);
 
       if (!fromPos || !toPos) {
-        hasMissingPositions = true;
+        _hasMissingPositions = true;
         return;
       }
 
@@ -431,7 +431,7 @@ export class RendererConnections {
     const fromY = (fromPos.y - this.state.offsetY) / this.state.scale;
 
     // Mouse position in canvas coordinates
-    const rect = this.canvas.getBoundingClientRect();
+    
     const mouseX = (this.state.lastMouseX - this.state.offsetX) / this.state.scale;
     const mouseY = (this.state.lastMouseY - this.state.offsetY) / this.state.scale;
 
@@ -488,10 +488,11 @@ export class RendererConnections {
     switch (type) {
       case 'task':
         return { x: (node.x || 0) - 80, y: (node.y || 0) - 50, width: 160, height: 100 };
-      case 'agent':
+      case 'agent': {
         const halfW = (node.width || 120) / 2;
         const halfH = (node.height || 70) / 2;
         return { x: node.x - halfW, y: node.y - halfH, width: halfW * 2, height: halfH * 2 };
+      }
       default:
         return null;
     }

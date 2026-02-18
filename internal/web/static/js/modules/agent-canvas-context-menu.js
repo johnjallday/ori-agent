@@ -52,7 +52,7 @@ export class AgentCanvasContextMenu {
         this.parent.draw();
         break;
 
-      case 'remove':
+      case 'remove': {
         // Remove agent (with confirmation)
         const displayName = agent.instanceNumber ? `${agent.name} #${agent.instanceNumber}` : agent.name;
         if (confirm(`Remove agent "${displayName}"?`)) {
@@ -90,6 +90,7 @@ export class AgentCanvasContextMenu {
             });
         }
         break;
+      }
 
       default:
         console.warn(`Unknown context menu action: ${action}`);
@@ -274,7 +275,7 @@ export class AgentCanvasContextMenu {
 
     // Delete agents
     if (nodesByType.agent && nodesByType.agent.length > 0) {
-      for (const { id, node } of nodesByType.agent) {
+      for (const {  node } of nodesByType.agent) {
         try {
           const agentId = node.instanceNumber ? `${node.name}:${node.instanceNumber}` : node.name;
           await apiDelete(`/api/studios/${encodeURIComponent(this.parent.studioId)}/agents/${encodeURIComponent(agentId)}`);
@@ -302,7 +303,7 @@ export class AgentCanvasContextMenu {
 
     // Delete tasks
     if (nodesByType.task && nodesByType.task.length > 0) {
-      for (const { id, node } of nodesByType.task) {
+      for (const { id } of nodesByType.task) {
         try {
           await apiDelete(`/api/studios/${encodeURIComponent(this.parent.studioId)}/tasks/${encodeURIComponent(id)}`);
 
@@ -320,7 +321,7 @@ export class AgentCanvasContextMenu {
 
     // Delete store nodes
     if (nodesByType.store && nodesByType.store.length > 0) {
-      for (const { id, node } of nodesByType.store) {
+      for (const { id } of nodesByType.store) {
         try {
           await apiDelete(`/api/studios/${encodeURIComponent(this.parent.studioId)}/stores/${encodeURIComponent(id)}`);
 
@@ -338,7 +339,7 @@ export class AgentCanvasContextMenu {
 
     // Delete attachments
     if (nodesByType.attachment && nodesByType.attachment.length > 0) {
-      for (const { id, node } of nodesByType.attachment) {
+      for (const { id } of nodesByType.attachment) {
         try {
           await apiDelete(`/api/studios/${encodeURIComponent(this.parent.studioId)}/attachments/${encodeURIComponent(id)}`);
 

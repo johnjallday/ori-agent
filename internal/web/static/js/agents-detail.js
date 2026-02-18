@@ -6,11 +6,84 @@ let isEditingConfig = false;
 let isEditingPrompt = false;
 let isEditingDescription = false;
 let availableProviders = []; // Cache for available providers and models from API
+let mcpToolsByServer = {}; // Cache of MCP tools by server name for detail modal rendering
+let currentAgentSkills = [];
+let currentAgentMCPServers = [];
+let globalMCPServers = [];
+let mcpAutoRecoveryAttempted = false;
+let mcpAutoRecoveryInFlight = false;
+
+// Fetch and display system model in navbar
+async function refreshSystemModelDisplay() {
+  const modelNameEl = document.getElementById('systemModelName');
+  const providerEl = document.getElementById('navSystemModelProvider');
+  const indicatorEl = document.getElementById('systemModelIndicator');
+
+  if (!modelNameEl || !providerEl) return;
+
+  try {
+    const response = await fetch('/api/settings/system-model');
+    if (!response.ok) {
+      throw new Error('Failed to fetch system model');
+    }
+    const data = await response.json();
+
+    if (data.configured && data.model) {
+      const modelName = data.model.length > 20 ? data.model.substring(0, 18) + '...' : data.model;
+      modelNameEl.textContent = modelName;
+      modelNameEl.title = data.model;
+
+      if (data.provider) {
+        providerEl.textContent = data.provider;
+        providerEl.style.display = 'inline';
+
+        switch (data.provider.toLowerCase()) {
+          case 'openai':
+            providerEl.style.background = 'rgba(16, 163, 127, 0.2)';
+            providerEl.style.color = '#10a37f';
+            break;
+          case 'claude':
+          case 'anthropic':
+            providerEl.style.background = 'rgba(204, 147, 102, 0.2)';
+            providerEl.style.color = '#cc9366';
+            break;
+          case 'gemini':
+            providerEl.style.background = 'rgba(66, 133, 244, 0.2)';
+            providerEl.style.color = '#4285f4';
+            break;
+          case 'ollama':
+            providerEl.style.background = 'rgba(59, 130, 246, 0.2)';
+            providerEl.style.color = '#3b82f6';
+            break;
+          default:
+            providerEl.style.background = 'var(--bg-tertiary)';
+            providerEl.style.color = 'var(--text-muted)';
+        }
+      } else {
+        providerEl.style.display = 'none';
+      }
+
+      if (indicatorEl) {
+        indicatorEl.title = `System Model: ${data.model} (${data.provider}) - Click to configure`;
+      }
+    } else {
+      modelNameEl.textContent = 'Not configured';
+      providerEl.style.display = 'none';
+      if (indicatorEl) {
+        indicatorEl.title = 'System Model not configured - Click to set up';
+      }
+    }
+  } catch (error) {
+    console.error('Failed to load system model:', error);
+    modelNameEl.textContent = 'Error';
+    providerEl.style.display = 'none';
+  }
+}
 
 // Get agent name from URL - supports both /agents/{name} and ?name={name}
 function getAgentNameFromURL() {
   // First try path-based URL: /agents/{agent-name}
-  const pathMatch = window.location.pathname.match(/^\/agents\/([^\/]+)$/);
+  const pathMatch = window.location.pathname.match(/^\/agents\/([^/]+)$/);
   if (pathMatch) {
     return decodeURIComponent(pathMatch[1]);
   }
@@ -32,6 +105,23 @@ async function loadAvailableProviders() {
   } catch (error) {
     console.error('Failed to load providers:', error);
     return [];
+  }
+}
+
+async function loadGlobalMCPServers() {
+  try {
+    const response = await fetch('/api/mcp/servers');
+    if (!response.ok) {
+      throw new Error('Failed to load MCP servers');
+    }
+    const data = await response.json();
+    globalMCPServers = Array.isArray(data.servers) ? data.servers : [];
+  } catch (error) {
+    console.error('Failed to load global MCP servers:', error);
+    globalMCPServers = [];
+  } finally {
+    renderSetupHealthBanner();
+    renderCapabilitiesCard();
   }
 }
 
@@ -128,6 +218,8 @@ function filterEditModelOptions() {
 
 // Initialize page
 document.addEventListener('DOMContentLoaded', async () => {
+  refreshSystemModelDisplay();
+
   // Get agent name from URL
   agentName = getAgentNameFromURL();
 
@@ -139,9 +231,15 @@ document.addEventListener('DOMContentLoaded', async () => {
     return;
   }
 
+  const skillsPageLink = document.getElementById('openSkillsPageLink');
+  if (skillsPageLink) {
+    skillsPageLink.href = `/skills?agent=${encodeURIComponent(agentName)}`;
+  }
+
   // Load providers in parallel with agent details
   await Promise.all([
     loadAvailableProviders(),
+    loadGlobalMCPServers(),
     loadAgentDetails()
   ]);
 
@@ -290,15 +388,24 @@ function renderAgentDetails() {
   // Tags
   renderTags();
 
-  // MCP Servers
+  // MCP servers (sync render first, then refresh status/details async)
   renderMCPServers();
+  loadAgentMCPServersInfo();
 
-  // Skills
+  // Skills (async render)
   renderSkills();
+
+  // Setup health + capabilities
+  renderSetupHealthBanner();
+  renderCapabilitiesCard();
 
   // Show content
   const header = document.getElementById('agentHeader');
   if (header) header.style.display = 'flex';
+  const setupHealthBanner = document.getElementById('setupHealthBanner');
+  if (setupHealthBanner) setupHealthBanner.style.display = 'block';
+  const capabilitiesSection = document.getElementById('capabilitiesSection');
+  if (capabilitiesSection) capabilitiesSection.style.display = 'block';
   const grid = document.getElementById('contentGrid');
   if (grid) grid.style.display = 'grid';
 
@@ -676,6 +783,475 @@ function formatMaxTokens(value) {
   return value.toLocaleString();
 }
 
+function getEnabledPluginsArray() {
+  const pluginsRaw = currentAgent?.enabled_plugins;
+  if (!Array.isArray(pluginsRaw)) {
+    return pluginsRaw ? [pluginsRaw] : [];
+  }
+  return pluginsRaw;
+}
+
+function normalizeMCPServerList(values) {
+  if (!Array.isArray(values)) {
+    return [];
+  }
+  return values
+    .map((value) => String(value || '').trim())
+    .filter((value, index, array) => value && array.indexOf(value) === index);
+}
+
+function getEnabledMCPServerNames() {
+  if (Array.isArray(currentAgentMCPServers) && currentAgentMCPServers.length > 0) {
+    return currentAgentMCPServers
+      .filter((server) => server && server.enabled)
+      .map((server) => server.name)
+      .filter(Boolean);
+  }
+  return normalizeMCPServerList(currentAgent?.mcp_servers || []);
+}
+
+function getMCPServerInfoMap() {
+  const map = new Map();
+  if (!Array.isArray(currentAgentMCPServers)) {
+    return map;
+  }
+  currentAgentMCPServers.forEach((server) => {
+    if (!server || !server.name) return;
+    map.set(server.name, server);
+  });
+  return map;
+}
+
+function isMCPServerRunningStatus(status) {
+  return String(status || '').toLowerCase() === 'running';
+}
+
+function isMCPServerStartingStatus(status) {
+  const normalized = String(status || '').toLowerCase();
+  return normalized === 'starting' || normalized === 'restarting';
+}
+
+function collectCapabilityState() {
+  if (!currentAgent) {
+    return null;
+  }
+
+  const enabledPlugins = getEnabledPluginsArray();
+  const enabledMCPNames = getEnabledMCPServerNames();
+  const mcpInfoMap = getMCPServerInfoMap();
+  const globalMCPNames = new Set((globalMCPServers || []).map((server) => server?.name).filter(Boolean));
+  const skills = Array.isArray(currentAgentSkills) ? currentAgentSkills : [];
+  const enabledSkills = skills.filter((skill) => skill?.enabled !== false);
+
+  const dependencyMap = new Map();
+  enabledSkills.forEach((skill) => {
+    const required = normalizeMCPServerList(skill?.required_mcp_servers || []);
+    required.forEach((serverName) => {
+      const existing = dependencyMap.get(serverName) || {
+        name: serverName,
+        requiredBy: [],
+      };
+      existing.requiredBy.push(skill?.name || '(Unnamed skill)');
+      dependencyMap.set(serverName, existing);
+    });
+  });
+
+  const dependencies = Array.from(dependencyMap.values()).map((dependency) => {
+    const serverInfo = mcpInfoMap.get(dependency.name);
+    const enabledForAgent = Boolean(serverInfo?.enabled) || enabledMCPNames.includes(dependency.name);
+    const status = serverInfo?.status || (enabledForAgent ? 'unknown' : 'stopped');
+    const existsGlobal = globalMCPNames.has(dependency.name) || Boolean(serverInfo);
+
+    return {
+      ...dependency,
+      requiredBy: normalizeMCPServerList(dependency.requiredBy),
+      existsGlobal,
+      enabledForAgent,
+      status,
+      running: isMCPServerRunningStatus(status),
+      starting: isMCPServerStartingStatus(status),
+    };
+  });
+
+  const missingModel = !String(currentAgent.model || '').trim();
+  const missingRequiredMCP = dependencies.filter((dependency) => dependency.existsGlobal && !dependency.enabledForAgent);
+  const unavailableRequiredMCP = dependencies.filter((dependency) => !dependency.existsGlobal);
+  const stoppedRequiredMCP = dependencies.filter((dependency) => dependency.enabledForAgent && !dependency.running && !dependency.starting);
+  const startingRequiredMCP = dependencies.filter((dependency) => dependency.enabledForAgent && dependency.starting);
+  const nonRunningEnabledMCP = (currentAgentMCPServers || [])
+    .filter((server) => server?.enabled && !isMCPServerRunningStatus(server.status) && !isMCPServerStartingStatus(server.status))
+    .map((server) => server.name);
+
+  const issues = [];
+  if (missingModel) {
+    issues.push({
+      key: 'missing-model',
+      title: 'Model not configured',
+      detail: 'Set a model so this agent can process requests.',
+      action: 'edit-config',
+      actionLabel: 'Edit Config',
+    });
+  }
+  if (unavailableRequiredMCP.length > 0) {
+    issues.push({
+      key: 'missing-global-mcp',
+      title: `${unavailableRequiredMCP.length} required MCP server${unavailableRequiredMCP.length > 1 ? 's are' : ' is'} missing globally`,
+      detail: unavailableRequiredMCP.map((dependency) => dependency.name).join(', '),
+      action: 'open-mcp-page',
+      actionLabel: 'Open MCP Page',
+    });
+  }
+  if (missingRequiredMCP.length > 0) {
+    issues.push({
+      key: 'missing-agent-mcp',
+      title: `${missingRequiredMCP.length} required MCP server${missingRequiredMCP.length > 1 ? 's are' : ' is'} disabled`,
+      detail: missingRequiredMCP.map((dependency) => dependency.name).join(', '),
+      action: 'enable-required-mcp',
+      actionLabel: 'Enable Required MCP',
+    });
+  }
+  if (stoppedRequiredMCP.length > 0 || nonRunningEnabledMCP.length > 0) {
+    const uniqueStopped = normalizeMCPServerList(stoppedRequiredMCP.map((dependency) => dependency.name).concat(nonRunningEnabledMCP));
+    issues.push({
+      key: 'stopped-mcp',
+      title: `${uniqueStopped.length} enabled MCP server${uniqueStopped.length > 1 ? 's are' : ' is'} not running`,
+      detail: uniqueStopped.join(', '),
+      action: 'start-enabled-mcp',
+      actionLabel: 'Start Servers',
+    });
+  }
+  if (startingRequiredMCP.length > 0) {
+    issues.push({
+      key: 'starting-mcp',
+      title: `${startingRequiredMCP.length} MCP server${startingRequiredMCP.length > 1 ? 's are' : ' is'} still starting`,
+      detail: startingRequiredMCP.map((dependency) => dependency.name).join(', '),
+      action: '',
+      actionLabel: '',
+    });
+  }
+
+  return {
+    enabledPlugins,
+    enabledMCPNames,
+    skills,
+    enabledSkills,
+    dependencies,
+    missingModel,
+    issues,
+  };
+}
+
+function renderSetupHealthBanner() {
+  const banner = document.getElementById('setupHealthBanner');
+  if (!banner) return;
+
+  const capabilityState = collectCapabilityState();
+  if (!capabilityState) {
+    banner.style.display = 'none';
+    return;
+  }
+
+  const { issues } = capabilityState;
+  banner.style.display = 'block';
+  banner.classList.toggle('is-ready', issues.length === 0);
+
+  if (issues.length === 0) {
+    banner.innerHTML = `
+      <div class="setup-health-title">Setup Health: Ready</div>
+      <p class="setup-health-subtitle">This agent has model configuration and all required capabilities available.</p>
+    `;
+    return;
+  }
+
+  banner.innerHTML = `
+    <div class="setup-health-title">Setup Health: Needs Attention</div>
+    <p class="setup-health-subtitle">Fix the items below to make sure this agent is fully ready for task execution.</p>
+    <div class="setup-health-list">
+      ${issues.map((issue) => `
+        <div class="setup-health-item">
+          <div>
+            <p class="setup-health-item-title">${escapeHtml(issue.title || 'Issue')}</p>
+            <p class="setup-health-item-detail">${escapeHtml(issue.detail || '')}</p>
+          </div>
+          ${issue.action ? `
+            <button
+              type="button"
+              class="modern-btn modern-btn-secondary"
+              style="padding: 6px 10px; font-size: 12px;"
+              data-health-action="${escapeHtml(issue.action)}"
+            >
+              ${escapeHtml(issue.actionLabel || 'Fix')}
+            </button>
+          ` : ''}
+        </div>
+      `).join('')}
+    </div>
+  `;
+
+  banner.querySelectorAll('[data-health-action]').forEach((button) => {
+    button.addEventListener('click', async () => {
+      const action = button.getAttribute('data-health-action');
+      await handleHealthAction(action);
+    });
+  });
+}
+
+function renderCapabilitiesCard() {
+  const section = document.getElementById('capabilitiesSection');
+  const badge = document.getElementById('capabilitiesReadinessBadge');
+  const summaryText = document.getElementById('capabilitiesSummaryText');
+  const summaryGrid = document.getElementById('capabilitiesSummaryGrid');
+  const dependenciesContainer = document.getElementById('capabilitiesDependencies');
+  if (!section || !badge || !summaryText || !summaryGrid || !dependenciesContainer) {
+    return;
+  }
+
+  const capabilityState = collectCapabilityState();
+  if (!capabilityState) {
+    section.style.display = 'none';
+    return;
+  }
+
+  section.style.display = 'block';
+  const readinessClass = capabilityState.issues.length === 0 ? 'ready' : 'warning';
+  badge.className = `capability-pill ${readinessClass}`;
+  badge.textContent = capabilityState.issues.length === 0 ? 'Ready' : 'Needs Setup';
+
+  summaryText.textContent = capabilityState.issues.length === 0
+    ? 'All connected capabilities are available for this agent.'
+    : `Resolve ${capabilityState.issues.length} setup issue${capabilityState.issues.length > 1 ? 's' : ''} to reach full readiness.`;
+
+  const mcpEnabled = capabilityState.enabledMCPNames.length;
+  const mcpRunning = (currentAgentMCPServers || []).filter((server) => server?.enabled && isMCPServerRunningStatus(server.status)).length;
+  summaryGrid.innerHTML = `
+    <div class="capability-summary-item">
+      <div class="capability-summary-label">Skills</div>
+      <div class="capability-summary-value">${capabilityState.enabledSkills.length} / ${capabilityState.skills.length}</div>
+      <span class="capability-pill ${capabilityState.enabledSkills.length > 0 ? 'ready' : 'warning'}">${capabilityState.enabledSkills.length > 0 ? 'Enabled' : 'None enabled'}</span>
+    </div>
+    <div class="capability-summary-item">
+      <div class="capability-summary-label">MCP</div>
+      <div class="capability-summary-value">${mcpRunning} / ${mcpEnabled}</div>
+      <span class="capability-pill ${mcpEnabled === 0 || mcpRunning === mcpEnabled ? 'ready' : 'warning'}">${mcpEnabled === 0 ? 'Not required' : 'Running / Enabled'}</span>
+    </div>
+    <div class="capability-summary-item">
+      <div class="capability-summary-label">Plugins</div>
+      <div class="capability-summary-value">${capabilityState.enabledPlugins.length}</div>
+      <span class="capability-pill ${capabilityState.enabledPlugins.length > 0 ? 'ready' : 'warning'}">${capabilityState.enabledPlugins.length > 0 ? 'Connected' : 'None connected'}</span>
+    </div>
+  `;
+
+  if (capabilityState.dependencies.length === 0) {
+    dependenciesContainer.innerHTML = `
+      <div class="capability-summary-item">
+        <div class="capability-summary-label">Dependencies</div>
+        <div style="font-size: 13px; color: var(--text-secondary);">No skill-level MCP dependencies declared.</div>
+      </div>
+    `;
+    return;
+  }
+
+  dependenciesContainer.innerHTML = capabilityState.dependencies.map((dependency) => {
+    let actionButton = '';
+    if (!dependency.existsGlobal) {
+      actionButton = `
+        <a class="modern-btn modern-btn-secondary" style="padding: 6px 10px; font-size: 12px;" href="/mcp">Add Server</a>
+      `;
+    } else if (!dependency.enabledForAgent) {
+      actionButton = `
+        <button
+          type="button"
+          class="modern-btn modern-btn-secondary"
+          style="padding: 6px 10px; font-size: 12px;"
+          data-capability-action="enable-server"
+          data-server-name="${escapeHtml(dependency.name)}"
+        >
+          Enable
+        </button>
+      `;
+    } else if (!dependency.running && !dependency.starting) {
+      actionButton = `
+        <button
+          type="button"
+          class="modern-btn modern-btn-secondary"
+          style="padding: 6px 10px; font-size: 12px;"
+          data-capability-action="start-server"
+          data-server-name="${escapeHtml(dependency.name)}"
+        >
+          Start
+        </button>
+      `;
+    }
+
+    return `
+      <div class="capability-dependency-item">
+        <div>
+          <p class="capability-dependency-name">${escapeHtml(dependency.name)}</p>
+          <p class="capability-dependency-meta">Required by: ${escapeHtml(dependency.requiredBy.join(', '))}</p>
+        </div>
+        <div class="capability-dependency-status">
+          <span class="capability-pill ${dependency.existsGlobal ? 'ready' : 'error'}">${dependency.existsGlobal ? 'Installed' : 'Missing'}</span>
+          <span class="capability-pill ${dependency.enabledForAgent ? 'ready' : 'warning'}">${dependency.enabledForAgent ? 'Enabled' : 'Disabled'}</span>
+          <span class="capability-pill ${dependency.running ? 'ready' : (dependency.starting ? 'warning' : 'error')}">${dependency.running ? 'Running' : (dependency.starting ? 'Starting' : `Status: ${dependency.status}`)}</span>
+          ${actionButton}
+        </div>
+      </div>
+    `;
+  }).join('');
+
+  dependenciesContainer.querySelectorAll('[data-capability-action]').forEach((button) => {
+    button.addEventListener('click', async () => {
+      const action = button.getAttribute('data-capability-action');
+      const serverName = button.getAttribute('data-server-name') || '';
+      await handleCapabilityDependencyAction(action, serverName);
+    });
+  });
+}
+
+async function handleHealthAction(action) {
+  switch (action) {
+    case 'edit-config':
+      toggleConfigEditMode();
+      break;
+    case 'open-mcp-page':
+      window.location.href = '/mcp';
+      break;
+    case 'enable-required-mcp':
+      await enableMCPServersForAgent(getMissingRequiredMCPServers());
+      break;
+    case 'start-enabled-mcp':
+      await enableMCPServersForAgent(getNonRunningEnabledMCPServers());
+      break;
+    default:
+      break;
+  }
+}
+
+async function handleCapabilityDependencyAction(action, serverName) {
+  if (!serverName) return;
+  if (action === 'enable-server' || action === 'start-server') {
+    await enableMCPServersForAgent([serverName]);
+  }
+}
+
+function getMissingRequiredMCPServers() {
+  const capabilityState = collectCapabilityState();
+  if (!capabilityState) return [];
+  return capabilityState.dependencies
+    .filter((dependency) => dependency.existsGlobal && !dependency.enabledForAgent)
+    .map((dependency) => dependency.name);
+}
+
+function getNonRunningEnabledMCPServers() {
+  return (currentAgentMCPServers || [])
+    .filter((server) => server?.enabled && !isMCPServerRunningStatus(server.status) && !isMCPServerStartingStatus(server.status))
+    .map((server) => server.name);
+}
+
+async function maybeRecoverEnabledMCPServers() {
+  if (mcpAutoRecoveryAttempted || mcpAutoRecoveryInFlight) {
+    return;
+  }
+
+  const recoverableServers = getNonRunningEnabledMCPServers();
+  if (recoverableServers.length === 0) {
+    return;
+  }
+
+  mcpAutoRecoveryAttempted = true;
+  mcpAutoRecoveryInFlight = true;
+  try {
+    await enableMCPServersForAgent(recoverableServers, {
+      silent: true,
+      reloadConfigPanel: false,
+    });
+  } finally {
+    mcpAutoRecoveryInFlight = false;
+  }
+}
+
+async function enableMCPServersForAgent(serverNames, options = {}) {
+  const { silent = false, reloadConfigPanel = true } = options;
+  const targets = normalizeMCPServerList(serverNames);
+  if (targets.length === 0) {
+    if (!silent) {
+      showToast('No MCP servers to update.', 'info');
+    }
+    return;
+  }
+
+  let successCount = 0;
+  const failures = [];
+
+  await Promise.all(targets.map(async (serverName) => {
+    try {
+      const endpoint = `/api/agents/${encodeURIComponent(agentName)}/mcp-servers/${encodeURIComponent(serverName)}/enable`;
+      const response = await fetch(endpoint, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        }
+      });
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(errorText || 'Enable failed');
+      }
+      successCount += 1;
+    } catch (error) {
+      failures.push(`${serverName}: ${error.message || 'unknown error'}`);
+    }
+  }));
+
+  if (!silent) {
+    if (failures.length === 0) {
+      showToast(`Updated ${successCount} MCP server${successCount > 1 ? 's' : ''}.`, 'success');
+    } else {
+      showToast(`Updated ${successCount} server(s). Failed: ${failures.join('; ')}`, 'error');
+    }
+  }
+
+  await loadAgentMCPServersInfo();
+  if (currentAgent) {
+    renderMCPServers();
+  }
+
+  const panel = document.getElementById('mcpConfigPanel');
+  if (reloadConfigPanel && panel && panel.style.display !== 'none') {
+    await loadMCPConfigPanel();
+  }
+}
+
+async function loadAgentMCPServersInfo() {
+  if (!agentName) {
+    return [];
+  }
+
+  try {
+    const response = await fetch(`/api/agents/${encodeURIComponent(agentName)}/mcp-servers`);
+    if (!response.ok) {
+      throw new Error('Failed to load agent MCP servers');
+    }
+    const data = await response.json();
+    currentAgentMCPServers = Array.isArray(data.servers) ? data.servers : [];
+    if (currentAgent) {
+      currentAgent.mcp_servers = currentAgentMCPServers
+        .filter((server) => server && server.enabled)
+        .map((server) => server.name)
+        .filter(Boolean);
+    }
+    await maybeRecoverEnabledMCPServers();
+  } catch (error) {
+    console.error('Failed to load agent MCP servers:', error);
+    currentAgentMCPServers = [];
+  } finally {
+    renderMCPServers();
+    renderSetupHealthBanner();
+    renderCapabilitiesCard();
+  }
+
+  return currentAgentMCPServers;
+}
+
 // Check if a plugin has configuration by checking the default-settings endpoint
 async function checkPluginHasConfig(pluginName) {
   try {
@@ -809,7 +1385,10 @@ async function renderSkills() {
         const paths = (conflict.paths || []).map(path => `<li>${escapeHtml(path)}</li>`).join('');
         return `<li><strong>${escapeHtml(conflict.name || '')}</strong><ul>${paths}</ul></li>`;
       }).join('');
-      container.innerHTML = `<div class=\"text-center py-3\" style=\"color: var(--danger-color);\">Resolve duplicate skill names to view skills.<ul style=\"text-align: left; margin-top: 8px;\">${conflictList}</ul></div>`;
+      currentAgentSkills = [];
+      container.innerHTML = `<div class="text-center py-3" style="color: var(--danger-color);">Resolve duplicate skill names to view skills.<ul style="text-align: left; margin-top: 8px;">${conflictList}</ul></div>`;
+      renderSetupHealthBanner();
+      renderCapabilitiesCard();
       return;
     }
     if (!response.ok) {
@@ -817,9 +1396,12 @@ async function renderSkills() {
     }
     const data = await response.json();
     const skills = Array.isArray(data.skills) ? data.skills : [];
+    currentAgentSkills = skills;
 
     if (skills.length === 0) {
       container.innerHTML = '<div class="text-center py-3" style="color: var(--text-secondary);">No skills available for this agent.</div>';
+      renderSetupHealthBanner();
+      renderCapabilitiesCard();
       return;
     }
 
@@ -834,23 +1416,76 @@ async function renderSkills() {
       const isEnabled = skill?.enabled !== false;
       const hasScripts = Boolean(skill?.has_scripts);
       const isTrusted = Boolean(skill?.trusted);
+      const validationErrors = Array.isArray(skill?.validation_errors) ? skill.validation_errors : [];
+      const hasErrors = validationErrors.length > 0;
 
       const item = document.createElement('div');
-      item.style.cssText = 'padding: 12px; border: 1px solid var(--border-color); border-radius: 8px; background: var(--bg-secondary);';
+      item.style.cssText = 'padding: 12px; border: 1px solid var(--border-color); border-radius: 8px; background: var(--bg-secondary); display: flex; flex-direction: column; gap: 8px;';
       item.innerHTML = `
         <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
           <div style="font-weight: 600; color: var(--text-primary);">${escapeHtml(skillName)}</div>
           <span style="font-size: 10px; padding: 2px 6px; border-radius: 4px; background: var(--bg-tertiary); color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.3px;">${escapeHtml(source)}</span>
           ${!isEnabled ? '<span style="font-size: 10px; padding: 2px 6px; border-radius: 4px; background: var(--warning-color); color: var(--text-primary); text-transform: uppercase; letter-spacing: 0.3px;">disabled</span>' : ''}
-          ${hasScripts ? `<span style=\"font-size: 10px; padding: 2px 6px; border-radius: 4px; background: ${isTrusted ? 'var(--success-color)' : 'var(--danger-color)'}; color: var(--text-primary); text-transform: uppercase; letter-spacing: 0.3px;\">${isTrusted ? 'trusted' : 'untrusted'}</span>` : ''}
+          ${hasErrors ? '<span style="font-size: 10px; padding: 2px 6px; border-radius: 4px; background: var(--danger-color); color: var(--text-primary); text-transform: uppercase; letter-spacing: 0.3px;">invalid</span>' : ''}
+          ${hasScripts ? `<span style="font-size: 10px; padding: 2px 6px; border-radius: 4px; background: ${isTrusted ? 'var(--success-color)' : 'var(--danger-color)'}; color: var(--text-primary); text-transform: uppercase; letter-spacing: 0.3px;">${isTrusted ? 'trusted' : 'untrusted'}</span>` : ''}
         </div>
         <div style="font-size: 12px; color: var(--text-secondary); margin-top: 6px;">${escapeHtml(description)}</div>
+        ${hasErrors ? `<div style="font-size: 11px; color: var(--danger-color);">${escapeHtml(validationErrors.join('; '))}</div>` : ''}
+        <div style="display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: auto; padding-top: 4px;">
+          <span style="font-size: 12px; color: var(--text-secondary);">Enabled</span>
+          <div class="form-check form-switch m-0">
+            <input class="form-check-input" type="checkbox" data-action="toggle-skill-enabled" ${isEnabled ? 'checked' : ''}>
+          </div>
+        </div>
       `;
+
+      const toggle = item.querySelector('[data-action="toggle-skill-enabled"]');
+      if (toggle) {
+        toggle.addEventListener('change', async () => {
+          const desiredState = toggle.checked;
+          toggle.disabled = true;
+          const success = await setSkillEnabled(name, skillName, desiredState);
+          if (!success) {
+            toggle.checked = !desiredState;
+          }
+          toggle.disabled = false;
+        });
+      }
+
       container.appendChild(item);
     });
+
+    renderSetupHealthBanner();
+    renderCapabilitiesCard();
   } catch (error) {
     console.error('Failed to load skills:', error);
+    currentAgentSkills = [];
     container.innerHTML = '<div class="text-center py-3" style="color: var(--danger-color);">Failed to load skills.</div>';
+    renderSetupHealthBanner();
+    renderCapabilitiesCard();
+  }
+}
+
+async function setSkillEnabled(agent, skillName, enabled) {
+  try {
+    const response = await fetch(`/api/skills/${encodeURIComponent(skillName)}/enable`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ agent, enabled })
+    });
+
+    if (!response.ok) {
+      const data = await response.json().catch(() => ({}));
+      const message = data?.error || 'Failed to update skill state';
+      console.error('Failed to update skill state:', message);
+      return false;
+    }
+
+    await renderSkills();
+    return true;
+  } catch (error) {
+    console.error('Failed to update skill state:', error);
+    return false;
   }
 }
 
@@ -1017,21 +1652,36 @@ async function togglePlugin(pluginName, enabled) {
 // Render MCP servers
 function renderMCPServers() {
   const container = document.getElementById('mcpList');
-  const servers = currentAgent.mcp_servers || [];
+  if (!container) return;
+
+  const enabledServerNames = getEnabledMCPServerNames();
+  const serverInfoMap = getMCPServerInfoMap();
 
   document.getElementById('mcpSection').style.display = 'block';
 
-  if (servers.length === 0) {
+  if (enabledServerNames.length === 0) {
     container.innerHTML = '<p style="color: var(--text-secondary); font-size: 14px;">No MCP servers enabled for this agent. Click "Configure" to enable MCP servers.</p>';
     return;
   }
 
   container.innerHTML = '';
-  servers.forEach(server => {
+  enabledServerNames.forEach((serverName) => {
+    const serverInfo = serverInfoMap.get(serverName);
+    const status = String(serverInfo?.status || 'unknown').toLowerCase();
+    const statusClass = isMCPServerRunningStatus(status)
+      ? 'ready'
+      : (isMCPServerStartingStatus(status) ? 'warning' : 'error');
+    const statusLabel = isMCPServerRunningStatus(status)
+      ? 'running'
+      : (isMCPServerStartingStatus(status) ? status : `status: ${status}`);
+
     const item = document.createElement('div');
     item.className = 'plugin-item';
     item.innerHTML = `
-            <div class="plugin-name">${escapeHtml(server)}</div>
+            <div style="display: flex; justify-content: space-between; align-items: center; width: 100%; gap: 10px;">
+              <div class="plugin-name">${escapeHtml(serverName)}</div>
+              <span class="capability-pill ${statusClass}">${escapeHtml(statusLabel)}</span>
+            </div>
         `;
     container.appendChild(item);
   });
@@ -1057,7 +1707,9 @@ async function loadMCPConfigPanel() {
     const response = await fetch('/api/mcp/servers');
     const data = await response.json();
     const allServers = data.servers || [];
-    const enabledServers = currentAgent.mcp_servers || [];
+    globalMCPServers = allServers;
+    const enabledServers = getEnabledMCPServerNames();
+    mcpToolsByServer = {};
 
     panel.innerHTML = `
             <h3 style="font-size: 16px; margin-bottom: 16px; color: var(--text-primary);">Available MCP Servers</h3>
@@ -1077,12 +1729,17 @@ async function loadMCPConfigPanel() {
                             </div>
                         </div>
                         <div id="mcpConfig_${server.name}" style="display: ${enabledServers.includes(server.name) ? 'block' : 'none'}; margin-top: 12px; padding-left: 24px;">
-                            ${getMCPServerConfigUI(server)}
+                            ${getMCPServerConfigUI(server, enabledServers.includes(server.name))}
                         </div>
                     </div>
                 `).join('')}
             </div>
         `;
+
+    // Load tool metadata so users can see exactly what each MCP server exposes.
+    await Promise.all(allServers.map(server => loadMCPServerTools(server.name, enabledServers.includes(server.name))));
+    renderSetupHealthBanner();
+    renderCapabilitiesCard();
   } catch (error) {
     console.error('Failed to load MCP config:', error);
     panel.innerHTML = '<p style="color: var(--text-secondary);">Failed to load MCP configuration</p>';
@@ -1090,7 +1747,7 @@ async function loadMCPConfigPanel() {
 }
 
 // Get configuration UI for specific MCP server
-function getMCPServerConfigUI(server) {
+function getMCPServerConfigUI(server, isEnabled) {
   // Special handling for filesystem server
   if (server.name === 'filesystem') {
     const currentPath = server.args && server.args.length > 2 ? server.args[2] : '/path/to/directory';
@@ -1101,22 +1758,233 @@ function getMCPServerConfigUI(server) {
                 </label>
                 <input type="text"
                     id="filesystem_path"
-                    value="${currentPath}"
+                    value="${escapeHtml(currentPath)}"
                     placeholder="/path/to/directory"
                     style="width: 100%; padding: 8px; background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 4px; color: var(--text-primary); font-size: 14px;"
                     onchange="updateMCPServerConfig('filesystem', 'path', this.value)">
-                <small style="color: var(--text-secondary); font-size: 12px;">The directory this agent can access via the filesystem MCP server</small>
+                <small style="color: var(--text-secondary); font-size: 12px;">The filesystem MCP server can access this directory (shared across agents using this server).</small>
             </div>
+            ${getMCPToolsPlaceholder(server.name, isEnabled)}
         `;
   }
+
+  const argsDisplay = Array.isArray(server.args) && server.args.length > 0
+    ? server.args.join(' ')
+    : 'none';
 
   // Default: show command and args
   return `
         <div style="font-size: 13px; color: var(--text-secondary);">
-            <div><strong>Command:</strong> ${server.command}</div>
-            <div><strong>Args:</strong> ${server.args ? server.args.join(' ') : 'none'}</div>
+            <div><strong>Command:</strong> ${escapeHtml(server.command || 'none')}</div>
+            <div><strong>Args:</strong> ${escapeHtml(argsDisplay)}</div>
+            ${getMCPToolsPlaceholder(server.name, isEnabled)}
         </div>
     `;
+}
+
+function getMCPToolsPlaceholder(serverName, isEnabled) {
+  const loadingText = isEnabled
+    ? 'Loading tools...'
+    : 'Enable this server to load tools.';
+
+  return `
+        <div id="mcpTools_${serverName}" style="margin-top: 10px; font-size: 12px; color: var(--text-secondary);">
+            ${loadingText}
+        </div>
+    `;
+}
+
+async function loadMCPServerTools(serverName, isEnabled) {
+  const container = document.getElementById(`mcpTools_${serverName}`);
+  if (!container) return;
+
+  if (!isEnabled) {
+    container.innerHTML = 'Enable this server to load tools.';
+    return;
+  }
+
+  try {
+    const response = await fetch(`/api/mcp/servers/${encodeURIComponent(serverName)}/tools`);
+    if (!response.ok) {
+      container.innerHTML = 'Tools unavailable right now.';
+      return;
+    }
+
+    const data = await response.json();
+    const status = typeof data.status === 'string' ? data.status : 'unknown';
+    const startError = typeof data.start_error === 'string' ? data.start_error.trim() : '';
+    const tools = Array.isArray(data.tools) ? data.tools : [];
+    mcpToolsByServer[serverName] = tools;
+
+    if (startError) {
+      container.innerHTML = `Unable to start server (${escapeHtml(status)}): ${escapeHtml(startError)}`;
+      return;
+    }
+
+    if (tools.length === 0) {
+      if (status === 'starting' || status === 'restarting') {
+        container.innerHTML = 'Server is still starting. Waiting for tools...';
+      } else if (status !== 'running') {
+        container.innerHTML = `Server status: ${escapeHtml(status)}. No tools available yet.`;
+      } else {
+        container.innerHTML = 'No tools discovered yet.';
+      }
+      return;
+    }
+
+    container.innerHTML = `
+            <div style="margin-top: 2px;">
+                <div style="font-size: 12px; font-weight: 600; color: var(--text-secondary); margin-bottom: 6px;">Tools (${tools.length})</div>
+                <div style="display: flex; flex-direction: column; gap: 6px;">
+                    ${tools.map((tool, index) => `
+                        <div style="padding: 8px 10px; background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 6px;">
+                            <div style="display: flex; justify-content: space-between; align-items: center; gap: 10px;">
+                                <div style="font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; font-size: 12px; font-weight: 600; color: var(--text-primary);">${escapeHtml(tool.name || '(unnamed tool)')}</div>
+                                <button type="button" class="modern-btn modern-btn-secondary btn-sm" style="padding: 4px 10px; font-size: 11px;" onclick='openMCPToolDetails(${JSON.stringify(serverName)}, ${index})'>View details</button>
+                            </div>
+                            ${tool.description ? `<div style="margin-top: 4px; font-size: 12px; color: var(--text-secondary); line-height: 1.35;">${escapeHtml(tool.description)}</div>` : ''}
+                            ${renderToolOperationsSummary(tool)}
+                        </div>
+                    `).join('')}
+                </div>
+            </div>
+        `;
+  } catch (error) {
+    console.error(`Failed to load tools for ${serverName}:`, error);
+    container.innerHTML = 'Failed to load tools.';
+  }
+}
+
+function renderToolOperationsSummary(tool) {
+  const operations = getToolOperations(tool);
+  if (operations.length === 0) {
+    return '';
+  }
+
+  return `
+        <div style="margin-top: 6px; font-size: 11px; color: var(--text-secondary);">
+            <strong>Operations:</strong> ${operations.map(op => `<code style="font-size: 10px; background: var(--bg-tertiary); padding: 2px 5px; border-radius: 4px; margin-right: 4px;">${escapeHtml(String(op))}</code>`).join('')}
+        </div>
+    `;
+}
+
+function getToolOperations(tool) {
+  const operationSchema = tool?.inputSchema?.properties?.operation;
+  if (!operationSchema || !Array.isArray(operationSchema.enum)) {
+    return [];
+  }
+  return operationSchema.enum;
+}
+
+function getSchemaType(schema) {
+  if (!schema || typeof schema !== 'object') {
+    return 'any';
+  }
+
+  if (Array.isArray(schema.type)) {
+    return schema.type.join(' | ');
+  }
+  if (typeof schema.type === 'string' && schema.type.trim() !== '') {
+    return schema.type;
+  }
+  if (schema.enum) {
+    return 'enum';
+  }
+  if (schema.properties) {
+    return 'object';
+  }
+
+  return 'any';
+}
+
+function formatSchemaJSON(schema) {
+  try {
+    return JSON.stringify(schema || {}, null, 2);
+  } catch (error) {
+    console.error('Failed to stringify schema:', error);
+    return '{}';
+  }
+}
+
+function openMCPToolDetails(serverName, toolIndex) {
+  const tools = mcpToolsByServer[serverName] || [];
+  const tool = tools[toolIndex];
+  if (!tool) {
+    showToast('Tool details unavailable', 'error');
+    return;
+  }
+
+  const schema = tool.inputSchema || {};
+  const properties = (schema && typeof schema.properties === 'object' && schema.properties) ? schema.properties : {};
+  const required = Array.isArray(schema.required) ? schema.required : [];
+
+  const titleEl = document.getElementById('mcpToolDetailTitle');
+  const serverEl = document.getElementById('mcpToolDetailServer');
+  const descEl = document.getElementById('mcpToolDetailDescription');
+  const requiredEl = document.getElementById('mcpToolDetailRequired');
+  const propertiesEl = document.getElementById('mcpToolDetailProperties');
+  const rawSchemaEl = document.getElementById('mcpToolDetailRawSchema');
+  const modalEl = document.getElementById('mcpToolDetailModal');
+
+  if (!titleEl || !serverEl || !descEl || !requiredEl || !propertiesEl || !rawSchemaEl || !modalEl) {
+    return;
+  }
+
+  titleEl.textContent = tool.name || 'MCP Tool';
+  serverEl.textContent = `Server: ${serverName}`;
+  descEl.textContent = tool.description || 'No description provided.';
+
+  if (required.length === 0) {
+    requiredEl.innerHTML = '<span style="font-size: 12px; color: var(--text-secondary);">None</span>';
+  } else {
+    requiredEl.innerHTML = required.map(field => `
+            <span style="font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; font-size: 11px; color: var(--text-primary); padding: 3px 8px; border-radius: 999px; background: var(--bg-secondary); border: 1px solid var(--border-color);">${escapeHtml(field)}</span>
+        `).join('');
+  }
+
+  const propertyEntries = Object.entries(properties).sort(([a], [b]) => {
+    if (a === 'operation') return -1;
+    if (b === 'operation') return 1;
+    return a.localeCompare(b);
+  });
+
+  if (propertyEntries.length === 0) {
+    propertiesEl.innerHTML = '<div style="font-size: 12px; color: var(--text-secondary);">No properties defined.</div>';
+  } else {
+    propertiesEl.innerHTML = propertyEntries.map(([name, propSchema]) => {
+      const fieldSchema = (propSchema && typeof propSchema === 'object') ? propSchema : {};
+      const isRequired = required.includes(name);
+      const schemaType = getSchemaType(fieldSchema);
+      const enumValues = Array.isArray(fieldSchema.enum) ? fieldSchema.enum : [];
+      const description = fieldSchema.description ? String(fieldSchema.description) : '';
+
+      return `
+                <div style="padding: 10px 12px; border-radius: 8px; background: var(--bg-secondary); border: 1px solid var(--border-color);">
+                    <div style="display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 4px;">
+                        <div style="font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; font-size: 12px; font-weight: 600; color: var(--text-primary);">${escapeHtml(name)}</div>
+                        <div style="display: flex; align-items: center; gap: 6px;">
+                            <span style="font-size: 10px; text-transform: uppercase; letter-spacing: 0.3px; color: var(--text-secondary); padding: 2px 6px; border: 1px solid var(--border-color); border-radius: 999px;">${escapeHtml(schemaType)}</span>
+                            ${isRequired ? '<span style="font-size: 10px; color: #fff; background: var(--danger-color); padding: 2px 6px; border-radius: 999px;">required</span>' : ''}
+                        </div>
+                    </div>
+                    ${description ? `<div style="font-size: 12px; color: var(--text-secondary); line-height: 1.4; margin-bottom: ${enumValues.length ? '6px' : '0'};">${escapeHtml(description)}</div>` : ''}
+                    ${enumValues.length ? `
+                        <div style="font-size: 11px; color: var(--text-secondary);">
+                            <strong>Allowed values:</strong>
+                            <div style="display: flex; flex-wrap: wrap; gap: 5px; margin-top: 5px;">
+                                ${enumValues.map(value => `<code style="font-size: 10px; background: var(--bg-tertiary); color: var(--text-primary); padding: 2px 6px; border-radius: 4px;">${escapeHtml(String(value))}</code>`).join('')}
+                            </div>
+                        </div>
+                    ` : ''}
+                </div>
+            `;
+    }).join('');
+  }
+
+  rawSchemaEl.textContent = formatSchemaJSON(schema);
+
+  const modal = bootstrap.Modal.getOrCreateInstance(modalEl);
+  modal.show();
 }
 
 // Toggle MCP server for this agent
@@ -1127,18 +1995,21 @@ async function toggleMCPServer(serverName, enabled) {
   }
 
   try {
-    const endpoint = enabled ? `/api/mcp/servers/${serverName}/enable` : `/api/mcp/servers/${serverName}/disable`;
+    const endpoint = `/api/agents/${encodeURIComponent(agentName)}/mcp-servers/${encodeURIComponent(serverName)}/${enabled ? 'enable' : 'disable'}`;
     const response = await fetch(endpoint, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({ agent_name: agentName })
+      }
     });
 
     if (response.ok) {
       showToast(`${serverName} ${enabled ? 'enabled' : 'disabled'}`, 'success');
-      await loadAgent();
+      await refreshAgentDetails();
+      const panel = document.getElementById('mcpConfigPanel');
+      if (panel && panel.style.display !== 'none') {
+        await loadMCPConfigPanel();
+      }
     } else {
       const error = await response.text();
       showToast(`Failed: ${error}`, 'error');
@@ -1153,16 +2024,73 @@ async function toggleMCPServer(serverName, enabled) {
 
 // Update MCP server configuration
 async function updateMCPServerConfig(serverName, configKey, value) {
-  // For now, just store the value - you can expand this to save to backend
-  showToast(`${serverName} path updated`, 'info');
+  const trimmedValue = typeof value === 'string' ? value.trim() : value;
 
-  // TODO: Add API call to save per-agent MCP server config
+  if (configKey === 'path' && !trimmedValue) {
+    showToast('Allowed directory path cannot be empty', 'error');
+    return;
+  }
+
+  try {
+    const endpoint = `/api/agents/${encodeURIComponent(agentName)}/mcp-servers/${encodeURIComponent(serverName)}/config`;
+    const payload = {};
+
+    if (configKey === 'path') {
+      payload.path = trimmedValue;
+    } else {
+      showToast(`Unsupported config key: ${configKey}`, 'error');
+      return;
+    }
+
+    const response = await fetch(endpoint, {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(payload)
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      showToast(`Failed to save ${serverName} config: ${errorText}`, 'error');
+      return;
+    }
+
+    showToast(`${serverName} path updated`, 'success');
+
+    // Refresh panel so command/args and tools status reflect the saved config.
+    const panel = document.getElementById('mcpConfigPanel');
+    if (panel && panel.style.display !== 'none') {
+      await loadMCPConfigPanel();
+    }
+  } catch (error) {
+    console.error('Update MCP server config error:', error);
+    showToast(`Failed to update ${serverName} config`, 'error');
+  }
 }
 
-  // Show toast notification
-  function showToast(message, type = 'info') {
-    // Simple toast implementation - you can enhance this
+// Show toast notification
+function showToast(message, type = 'info') {
+  if (window.Toast) {
+    if (type === 'success' && typeof window.Toast.success === 'function') {
+      window.Toast.success(message);
+      return;
+    }
+    if (type === 'error' && typeof window.Toast.error === 'function') {
+      window.Toast.error(message);
+      return;
+    }
+    if ((type === 'warning' || type === 'warn') && typeof window.Toast.warning === 'function') {
+      window.Toast.warning(message);
+      return;
+    }
+    if (typeof window.Toast.info === 'function') {
+      window.Toast.info(message);
+      return;
+    }
   }
+  console.log(`[${type}] ${message}`);
+}
 
 // Actions
 function chatWithAgent() {

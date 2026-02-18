@@ -6,7 +6,7 @@
   if (window._pluginUpdateCheckerInitialized) return;
   window._pluginUpdateCheckerInitialized = true;
 
-  let pluginUpdateInterval = null;
+  let _pluginUpdateInterval = null;
   let cachedPluginUpdates = null;
 
   // Initialize plugin update checker
@@ -15,7 +15,7 @@
     checkForPluginUpdates();
 
     // Check every 30 minutes
-    pluginUpdateInterval = setInterval(checkForPluginUpdates, 30 * 60 * 1000);
+    _pluginUpdateInterval = setInterval(checkForPluginUpdates, 30 * 60 * 1000);
   }
 
   // Check for available plugin updates
@@ -141,7 +141,7 @@
   }
 
   // Update a specific plugin
-  async function updatePlugin(pluginName, downloadURL) {
+  async function updatePlugin(pluginName) {
     const statusDiv = document.getElementById(`update-status-${pluginName.replace(/[^a-zA-Z0-9]/g, '_')}`);
 
     try {

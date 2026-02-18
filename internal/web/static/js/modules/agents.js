@@ -349,7 +349,7 @@ function renderAgents() {
 
   // Add each visible agent
   agentsToShow.forEach(agent => {
-    const agentName = typeof agent === 'string' ? agent : agent.name;
+    
     const agentItem = createAgentElement(agent, currentAgentName);
     agentsList.appendChild(agentItem);
   });
@@ -1292,7 +1292,7 @@ async function loadAgentPlugins(agentName, accordionId) {
     const activePluginNames = new Set(
       activePlugins.plugins
         .filter(p => p.enabled === true)
-        .map(p => p.name.toLowerCase().replace(/_/g, '-').replace(/-\d+\.\d+\.\d+(?:[-+][\w\.]+)?$/, '').trim())
+        .map(p => p.name.toLowerCase().replace(/_/g, '-').replace(/-\d+\.\d+\.\d+(?:[-+][\w.]+)?$/, '').trim())
     );
 
     // Filter to only show installed plugins (those with a local path in uploaded_plugins)
