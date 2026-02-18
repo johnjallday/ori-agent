@@ -45,7 +45,7 @@ func (h *Handler) ListServersHandler(w http.ResponseWriter, r *http.Request) {
 	servers := h.registry.ListServers()
 	stats := h.registry.GetServerStats()
 
-	response := map[string]interface{}{
+	response := map[string]any{
 		"servers": servers,
 		"stats":   stats,
 	}
@@ -330,7 +330,7 @@ func (h *Handler) GetServerToolsHandler(w http.ResponseWriter, r *http.Request) 
 	status = server.GetStatus()
 
 	w.Header().Set("Content-Type", "application/json")
-	if encErr := json.NewEncoder(w).Encode(map[string]interface{}{
+	if encErr := json.NewEncoder(w).Encode(map[string]any{
 		"server":      serverName,
 		"status":      status,
 		"start_error": startErr,
@@ -364,7 +364,7 @@ func (h *Handler) GetServerStatusHandler(w http.ResponseWriter, r *http.Request)
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	if encErr := json.NewEncoder(w).Encode(map[string]interface{}{
+	if encErr := json.NewEncoder(w).Encode(map[string]any{
 		"server": serverName,
 		"status": status,
 	}); encErr != nil {
@@ -404,7 +404,7 @@ func (h *Handler) TestConnectionHandler(w http.ResponseWriter, r *http.Request) 
 	if status == mcp.StatusStopped {
 		if err := server.Start(); err != nil {
 			w.Header().Set("Content-Type", "application/json")
-			if encErr := json.NewEncoder(w).Encode(map[string]interface{}{
+			if encErr := json.NewEncoder(w).Encode(map[string]any{
 				"success": false,
 				"error":   fmt.Sprintf("Failed to start server: %v", err),
 			}); encErr != nil {
@@ -424,7 +424,7 @@ func (h *Handler) TestConnectionHandler(w http.ResponseWriter, r *http.Request) 
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	if encErr := json.NewEncoder(w).Encode(map[string]interface{}{
+	if encErr := json.NewEncoder(w).Encode(map[string]any{
 		"success":    true,
 		"tool_count": len(tools),
 		"message":    "Connection successful",
@@ -528,7 +528,7 @@ func (h *Handler) ImportServersHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	if encErr := json.NewEncoder(w).Encode(map[string]interface{}{
+	if encErr := json.NewEncoder(w).Encode(map[string]any{
 		"added":  added,
 		"errors": errors,
 	}); encErr != nil {
@@ -549,7 +549,7 @@ func (h *Handler) GetMarketplaceServersHandler(w http.ResponseWriter, r *http.Re
 	// - Define a registry API endpoint (e.g., GitHub raw JSON or custom API)
 	// - Add caching with TTL to avoid excessive fetches
 	// - Handle network errors gracefully with fallback to this static list
-	marketplaceServers := []map[string]interface{}{
+	marketplaceServers := []map[string]any{
 		{
 			"name":        "filesystem",
 			"description": "Provides read/write access to files and directories",
@@ -607,7 +607,7 @@ func (h *Handler) GetMarketplaceServersHandler(w http.ResponseWriter, r *http.Re
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	if encErr := json.NewEncoder(w).Encode(map[string]interface{}{
+	if encErr := json.NewEncoder(w).Encode(map[string]any{
 		"servers": marketplaceServers,
 	}); encErr != nil {
 		logger.Error("Failed to encode response", logger.Fields{"error": encErr})
