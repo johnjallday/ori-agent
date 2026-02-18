@@ -427,7 +427,13 @@ function renderWorkspaceCard(workspace) {
 
   return `
         <div class="col-12 col-sm-6 col-lg-4">
-            <div class="modern-card p-4 h-100 d-flex flex-column workspace-card ${statusMeta.isActive ? 'active-workspace' : ''}" onclick="viewWorkspace('${workspace.id}')" style="cursor: pointer; transition: all 0.2s ease;">
+            <div class="modern-card p-4 h-100 d-flex flex-column workspace-card ${statusMeta.isActive ? 'active-workspace' : ''}"
+                 role="button"
+                 tabindex="0"
+                 aria-label="Open workspace ${escapeHtml(workspace.name || workspace.id)}"
+                 onclick="viewWorkspace('${workspace.id}')"
+                 onkeydown="if ((event.key === 'Enter' || event.key === ' ') && !event.target.closest('button, a, input, select, textarea')) { event.preventDefault(); viewWorkspace('${workspace.id}'); }"
+                 style="cursor: pointer; transition: background-color 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease, transform 0.2s ease;">
                 <div class="workspace-card-header">
                     <div class="workspace-card-title">
                         <span class="workspace-card-dot" ${safeColor ? `style="background: ${safeColor}; border-color: ${safeColor};"` : ''}></span>
@@ -469,13 +475,13 @@ function renderWorkspaceCard(workspace) {
                 </div>
 
                 <div class="workspace-card-actions mt-auto">
-                    <button class="modern-btn modern-btn-secondary flex-grow-1" onclick="event.stopPropagation(); viewWorkspace('${workspace.id}')">
+                    <button type="button" class="modern-btn modern-btn-secondary flex-grow-1" onclick="event.stopPropagation(); viewWorkspace('${workspace.id}')">
                         Dashboard
                     </button>
-                    <button class="modern-btn modern-btn-primary flex-grow-1" onclick="event.stopPropagation(); openWorkspaceCanvas('${workspace.id}')">
+                    <button type="button" class="modern-btn modern-btn-primary flex-grow-1" onclick="event.stopPropagation(); openWorkspaceCanvas('${workspace.id}')">
                         Canvas
                     </button>
-                    <button class="modern-btn modern-btn-danger" onclick="event.stopPropagation(); deleteWorkspace('${workspace.id}')" title="Delete Workspace">
+                    <button type="button" class="modern-btn modern-btn-danger" onclick="event.stopPropagation(); deleteWorkspace('${workspace.id}')" title="Delete Workspace" aria-label="Delete workspace ${escapeHtml(workspace.name || workspace.id)}">
                         <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
                             <path d="M19,4H15.5L14.5,3H9.5L8.5,4H5V6H19M6,19A2,2 0 0,0 8,21H16A2,2 0 0,0 18,19V7H6V19Z"/>
                         </svg>

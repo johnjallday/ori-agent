@@ -591,7 +591,7 @@
       border-radius: 6px;
       background: var(--bg-secondary);
       border: 1px solid transparent;
-      transition: all 0.15s ease;
+      transition: background-color 0.15s ease, border-color 0.15s ease;
       position: relative;
     }
 
@@ -602,6 +602,22 @@
 
     .workspace-detail-item-content {
       cursor: pointer;
+      border-radius: 4px;
+    }
+
+    .workspace-detail-item-content[role="button"]:focus-visible {
+      outline: 2px solid var(--primary-color);
+      outline-offset: 2px;
+    }
+
+    .workspace-detail-item:focus-within {
+      background: var(--bg-tertiary);
+      border-color: var(--border-color);
+    }
+
+    .workspace-detail-item[role="button"]:focus-visible {
+      outline: 2px solid var(--primary-color);
+      outline-offset: 2px;
     }
 
     .workspace-detail-item-delete {
@@ -625,6 +641,10 @@
     }
 
     .workspace-detail-item:hover .workspace-detail-item-delete {
+      opacity: 1;
+    }
+
+    .workspace-detail-item:focus-within .workspace-detail-item-delete {
       opacity: 1;
     }
 
@@ -1399,13 +1419,18 @@
       background: var(--bg-secondary);
       border: 1px solid var(--border-color);
       cursor: pointer;
-      transition: all 0.15s ease;
+      transition: background-color 0.15s ease, border-color 0.15s ease, transform 0.15s ease;
     }
 
     .workspace-detail-child-card:hover {
       background: var(--bg-tertiary);
       border-color: var(--primary-color);
       transform: translateY(-1px);
+    }
+
+    .workspace-detail-child-card[role="button"]:focus-visible {
+      outline: 2px solid var(--primary-color);
+      outline-offset: 2px;
     }
 
     .workspace-detail-child-card .child-name {

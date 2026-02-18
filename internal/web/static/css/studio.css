@@ -116,6 +116,11 @@
     padding: 10px 12px;
 }
 
+.task-item[role="button"]:focus-visible {
+    outline: 2px solid var(--primary-color);
+    outline-offset: 2px;
+}
+
 .task-agent {
     font-weight: 500;
     font-size: 13px;
@@ -270,6 +275,11 @@
 .workspace-card {
     position: relative;
     overflow: hidden;
+}
+
+.workspace-card[role="button"]:focus-visible {
+    outline: 2px solid var(--primary-color);
+    outline-offset: 3px;
 }
 
 .workspace-card-header {
@@ -525,7 +535,7 @@
 
 /* Button hover improvements */
 .workspace-card .modern-btn {
-    transition: all 0.2s ease;
+    transition: transform 0.2s ease, box-shadow 0.2s ease;
 }
 
 .workspace-card .modern-btn:hover {

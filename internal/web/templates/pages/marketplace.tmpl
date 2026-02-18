@@ -20,6 +20,11 @@
     transition: background 0.2s, box-shadow 0.2s;
 }
 
+.plugin-card[role="button"]:focus-visible {
+    outline: 2px solid var(--primary-color);
+    outline-offset: 2px;
+}
+
 .list-view-card .card-body {
     display: flex;
     flex-wrap: wrap;

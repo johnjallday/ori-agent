@@ -394,7 +394,7 @@ function updateFilesList() {
       <span>${fileIcon}</span>
       <span>${fileName}</span>
       <span style="color: var(--text-muted); font-size: 10px;">(${fileSize})</span>
-      <button class="btn-remove-file" data-index="${index}" style="background: none; border: none; color: var(--text-muted); cursor: pointer; padding: 0; margin-left: 4px; font-size: 14px;">×</button>
+      <button type="button" class="btn-remove-file" data-index="${index}" aria-label="Remove file" style="background: none; border: none; color: var(--text-muted); cursor: pointer; padding: 0; margin-left: 4px; font-size: 14px;">×</button>
     `;
 
     filesList.appendChild(fileChip);

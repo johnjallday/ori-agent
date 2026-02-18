@@ -13,7 +13,7 @@
               <path d="M10,4H4C2.89,4 2,4.89 2,6V18A2,2 0 0,0 4,20H20A2,2 0 0,0 22,18V8C22,6.89 21.1,6 20,6H12L10,4Z"/>
             </svg>
             <span id="taskModalWorkspaceName"></span>
-            <button type="button" id="taskModalChangeWorkspace" style="background: none; border: none; padding: 0 4px; cursor: pointer; color: var(--text-secondary); font-size: 0.7rem;" title="Change workspace">
+            <button type="button" id="taskModalChangeWorkspace" style="background: none; border: none; padding: 0 4px; cursor: pointer; color: var(--text-secondary); font-size: 0.7rem;" title="Change workspace" aria-label="Change workspace">
               <svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor">
                 <path d="M20.71,7.04C21.1,6.65 21.1,6 20.71,5.63L18.37,3.29C18,2.9 17.35,2.9 16.96,3.29L15.12,5.12L18.87,8.87M3,17.25V21H6.75L17.81,9.93L14.06,6.18L3,17.25Z"/>
               </svg>
@@ -320,7 +320,7 @@
           <label for="taskModalAutoSavePath" class="task-modal-label" style="font-size: 0.8rem;">File Path <span class="task-modal-optional">(directory or file)</span></label>
           <div style="display: flex; gap: 8px;">
             <input type="text" id="taskModalAutoSavePath" class="task-modal-input" placeholder="outputs/my-results/" style="flex: 1;">
-            <button type="button" id="taskModalBrowseBtn" class="task-modal-btn task-modal-btn-browse" title="Browse folder">
+            <button type="button" id="taskModalBrowseBtn" class="task-modal-btn task-modal-btn-browse" title="Browse folder" aria-label="Browse folder">
               <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
                 <path d="M10,4H4C2.89,4 2,4.89 2,6V18A2,2 0 0,0 4,20H20A2,2 0 0,0 22,18V8C22,6.89 21.1,6 20,6H12L10,4Z"/>
               </svg>

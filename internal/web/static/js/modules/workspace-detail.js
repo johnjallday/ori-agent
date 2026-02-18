@@ -600,7 +600,11 @@ export class WorkspaceDetailPage {
       return `
         <div class="workspace-detail-child-card"
              data-workspace-id="${child.id}"
+             role="button"
+             tabindex="0"
+             aria-label="Open workspace ${this.escapeHtml(name)}"
              onclick="window.location.href='/workspaces/${child.id}'"
+             onkeydown="if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); window.location.href='/workspaces/${child.id}'; }"
              style="${colorAccent}">
           <div class="child-name">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" style="color: ${child.color || 'var(--text-secondary)'}; flex-shrink: 0;">
@@ -669,12 +673,17 @@ export class WorkspaceDetailPage {
 
     this.elements.tasksList.innerHTML = topLevelTasks.map(task => `
       <div class="workspace-detail-item" data-task-id="${task.id}">
-        <button class="workspace-detail-item-delete" onclick="event.stopPropagation(); window.workspaceDetail?.deleteTask('${task.id}')" title="Delete task">
+        <button type="button" class="workspace-detail-item-delete" onclick="event.stopPropagation(); window.workspaceDetail?.deleteTask('${task.id}')" title="Delete task" aria-label="Delete task ${this.escapeHtml(task.description || task.name || 'Untitled Task')}">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
             <path d="M19,4H15.5L14.5,3H9.5L8.5,4H5V6H19M6,19A2,2 0 0,0 8,21H16A2,2 0 0,0 18,19V7H6V19Z"/>
           </svg>
         </button>
-        <div class="workspace-detail-item-content" onclick="window.workspaceDetail?.openTask('${task.id}')">
+        <div class="workspace-detail-item-content"
+             role="button"
+             tabindex="0"
+             aria-label="Open task ${this.escapeHtml(task.description || task.name || 'Untitled Task')}"
+             onclick="window.workspaceDetail?.openTask('${task.id}')"
+             onkeydown="if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); window.workspaceDetail?.openTask('${task.id}'); }">
           <div class="d-flex justify-content-between align-items-start">
             <div class="workspace-detail-item-title">${this.escapeHtml(task.description || task.name || 'Untitled Task')}</div>
             <span class="workspace-detail-task-status ${getStatusClass(task.status)}">${getDisplayStatus(task.status)}</span>
@@ -1725,12 +1734,17 @@ export class WorkspaceDetailPage {
 
     this.elements.sessionsList.innerHTML = this.sessions.map(session => `
       <div class="workspace-detail-item" data-session-id="${session.id}">
-        <button class="workspace-detail-item-delete" onclick="event.stopPropagation(); window.workspaceDetail?.deleteSession('${session.id}')" title="Delete session">
+        <button type="button" class="workspace-detail-item-delete" onclick="event.stopPropagation(); window.workspaceDetail?.deleteSession('${session.id}')" title="Delete session" aria-label="Delete session ${this.escapeHtml(session.title || session.name || 'Untitled Session')}">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
             <path d="M19,4H15.5L14.5,3H9.5L8.5,4H5V6H19M6,19A2,2 0 0,0 8,21H16A2,2 0 0,0 18,19V7H6V19Z"/>
           </svg>
         </button>
-        <div class="workspace-detail-item-content" onclick="window.workspaceDetail?.openSession('${session.id}')">
+        <div class="workspace-detail-item-content"
+             role="button"
+             tabindex="0"
+             aria-label="Open session ${this.escapeHtml(session.title || session.name || 'Untitled Session')}"
+             onclick="window.workspaceDetail?.openSession('${session.id}')"
+             onkeydown="if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); window.workspaceDetail?.openSession('${session.id}'); }">
           <div class="workspace-detail-item-title">${this.escapeHtml(session.title || session.name || 'Untitled Session')}</div>
           <div class="workspace-detail-item-meta">
             ${session.agent_name ? `${this.escapeHtml(session.agent_name)} · ` : ''}
@@ -1839,12 +1853,17 @@ export class WorkspaceDetailPage {
       const preview = note.preview || note.content || '';
       return `
       <div class="workspace-detail-item" data-note-id="${note.id}">
-        <button class="workspace-detail-item-delete" onclick="event.stopPropagation(); window.workspaceDetail?.deleteNote('${note.id}')" title="Delete note">
+        <button type="button" class="workspace-detail-item-delete" onclick="event.stopPropagation(); window.workspaceDetail?.deleteNote('${note.id}')" title="Delete note" aria-label="Delete note ${this.escapeHtml(title)}">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
             <path d="M19,4H15.5L14.5,3H9.5L8.5,4H5V6H19M6,19A2,2 0 0,0 8,21H16A2,2 0 0,0 18,19V7H6V19Z"/>
           </svg>
         </button>
-        <div class="workspace-detail-item-content" onclick="window.workspaceDetail?.editNote('${note.id}')">
+        <div class="workspace-detail-item-content"
+             role="button"
+             tabindex="0"
+             aria-label="Open note ${this.escapeHtml(title)}"
+             onclick="window.workspaceDetail?.editNote('${note.id}')"
+             onkeydown="if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); window.workspaceDetail?.editNote('${note.id}'); }">
           <div class="workspace-detail-item-title">${this.escapeHtml(title)}</div>
           <div class="workspace-detail-item-meta">
             ${preview ? this.escapeHtml(preview.substring(0, 50)) + (preview.length > 50 ? '...' : '') : 'Empty note'}
@@ -2035,7 +2054,13 @@ export class WorkspaceDetailPage {
       const status = schedule.enabled ? 'Active' : 'Paused';
       const statusClass = schedule.enabled ? 'completed' : 'pending';
       return `
-        <div class="workspace-detail-item" data-schedule-id="${schedule.id}" onclick="window.workspaceDetail?.openSchedule('${schedule.id}')">
+        <div class="workspace-detail-item"
+             data-schedule-id="${schedule.id}"
+             role="button"
+             tabindex="0"
+             aria-label="Open schedule ${this.escapeHtml(name)}"
+             onclick="window.workspaceDetail?.openSchedule('${schedule.id}')"
+             onkeydown="if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); window.workspaceDetail?.openSchedule('${schedule.id}'); }">
           <div class="d-flex justify-content-between align-items-start">
             <div class="workspace-detail-item-title">${this.escapeHtml(name)}</div>
             <span class="workspace-detail-task-status ${statusClass}">${status}</span>
