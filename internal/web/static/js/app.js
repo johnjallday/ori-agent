@@ -12,6 +12,7 @@ let historyIndex = -1;
 
 // Chat messages storage
 let chatMessages = [];
+let chatWebSearchToggleRequestId = 0;
 
 // Remove stored slash-command exchanges and system announcements from history
 function sanitizeHistory(messages) {
@@ -137,6 +138,156 @@ function clearChatHistory() {
   }
 }
 
+function resolveChatWebSearchAgentName(explicitAgentName = '') {
+  const direct = String(explicitAgentName || '').trim();
+  if (direct) return direct;
+
+  const sessionAgent = window.sessionManager?.getActiveSession?.()?.agent_name;
+  if (sessionAgent) return String(sessionAgent).trim();
+
+  return String(currentAgent || '').trim();
+}
+
+function setChatWebSearchToggleVisualState({ enabled, loading, agentName, available }) {
+  const btn = document.getElementById('chatWebSearchToggleBtn');
+  const label = document.getElementById('chatWebSearchToggleLabel');
+  if (!btn || !label) return;
+
+  const hasAgent = Boolean(agentName && String(agentName).trim());
+  const isAvailable = available !== false;
+  const allow = enabled !== false;
+
+  btn.classList.remove('btn-outline-secondary', 'btn-outline-success', 'btn-outline-danger');
+  if (!isAvailable || !hasAgent) {
+    btn.classList.add('btn-outline-secondary');
+  } else if (allow) {
+    btn.classList.add('btn-outline-success');
+  } else {
+    btn.classList.add('btn-outline-danger');
+  }
+
+  if (!isAvailable || !hasAgent) {
+    label.textContent = 'Web: --';
+  } else if (loading) {
+    label.textContent = 'Web: ...';
+  } else {
+    label.textContent = allow ? 'Web: On' : 'Web: Off';
+  }
+
+  btn.dataset.agentName = hasAgent ? String(agentName).trim() : '';
+  if (isAvailable && hasAgent) {
+    btn.dataset.enabled = allow ? 'true' : 'false';
+  } else {
+    btn.dataset.enabled = '';
+  }
+  btn.disabled = loading || !isAvailable || !hasAgent;
+}
+
+async function refreshChatWebSearchToggle(explicitAgentName = '') {
+  const btn = document.getElementById('chatWebSearchToggleBtn');
+  if (!btn) return;
+
+  const agentName = resolveChatWebSearchAgentName(explicitAgentName);
+  if (!agentName) {
+    setChatWebSearchToggleVisualState({ enabled: true, loading: false, agentName: '', available: false });
+    return;
+  }
+
+  const requestId = ++chatWebSearchToggleRequestId;
+  setChatWebSearchToggleVisualState({ enabled: true, loading: true, agentName, available: true });
+
+  try {
+    const response = await fetch(`/api/agents?name=${encodeURIComponent(agentName)}`);
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}`);
+    }
+    const data = await response.json();
+    if (requestId !== chatWebSearchToggleRequestId) return;
+
+    const allowWebSearch = typeof data.allow_web_search === 'boolean' ? data.allow_web_search : true;
+    setChatWebSearchToggleVisualState({
+      enabled: allowWebSearch,
+      loading: false,
+      agentName,
+      available: true
+    });
+  } catch (error) {
+    appLog.warn('Failed to load chat web search toggle state', error);
+    if (requestId !== chatWebSearchToggleRequestId) return;
+    setChatWebSearchToggleVisualState({ enabled: true, loading: false, agentName, available: false });
+  }
+}
+
+async function toggleChatWebSearchForActiveAgent() {
+  const btn = document.getElementById('chatWebSearchToggleBtn');
+  if (!btn) return;
+
+  const agentName = resolveChatWebSearchAgentName(btn.dataset.agentName || '');
+  if (!agentName) {
+    if (window.Toast) {
+      Toast.warning('No active agent selected.');
+    }
+    return;
+  }
+
+  const currentEnabled = btn.dataset.enabled !== 'false';
+  const nextEnabled = !currentEnabled;
+  setChatWebSearchToggleVisualState({
+    enabled: currentEnabled,
+    loading: true,
+    agentName,
+    available: true
+  });
+
+  try {
+    const response = await fetch(`/api/agents?name=${encodeURIComponent(agentName)}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        allow_web_search: nextEnabled
+      })
+    });
+    if (!response.ok) {
+      let errorMessage = `Failed to update web toggle (HTTP ${response.status})`;
+      try {
+        const errorData = await response.json();
+        if (errorData?.error) errorMessage = errorData.error;
+      } catch {
+        // Ignore response parse errors.
+      }
+      throw new Error(errorMessage);
+    }
+
+    await refreshChatWebSearchToggle(agentName);
+
+    if (window.Toast) {
+      Toast.success(nextEnabled ? 'Web tools enabled.' : 'Web tools disabled.');
+    }
+  } catch (error) {
+    appLog.error('Failed to toggle chat web search', error);
+    if (window.Toast) {
+      Toast.error(error.message || 'Failed to update web tool setting');
+    }
+    await refreshChatWebSearchToggle(agentName);
+  }
+}
+
+function setupChatWebSearchToggle() {
+  const btn = document.getElementById('chatWebSearchToggleBtn');
+  if (!btn) return;
+  if (btn.dataset.bound === 'true') return;
+  btn.dataset.bound = 'true';
+
+  btn.addEventListener('click', async (event) => {
+    event.preventDefault();
+    await toggleChatWebSearchForActiveAgent();
+  });
+
+  refreshChatWebSearchToggle();
+}
+
+window.refreshChatWebSearchToggle = refreshChatWebSearchToggle;
+
 // ---- Agent Display Functionality ----
 
 // Setup click handler for agent display in navbar
@@ -176,6 +327,8 @@ async function refreshAgentDisplay() {
         loadChatFromLocalStorage();
         EventBus.emit('agent:display:changed', { from: previousAgent, to: currentAgent });
       }
+
+      refreshChatWebSearchToggle(data.current);
     }
   } catch (error) {
     appLog.error('Failed to refresh agent display:', error);
@@ -1395,6 +1548,8 @@ function setupChat() {
       }
     });
   }
+
+  setupChatWebSearchToggle();
 
   appLog.debug('Chat functionality initialized');
 }

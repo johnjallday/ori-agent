@@ -414,6 +414,31 @@ func TestHomeAssistantRouteHandler_UtilityPrompt_FallsBackToSystemAssistant(t *t
 	}
 }
 
+func TestHomeAssistantRouteHandler_AirQualityPrompt_UsesUtilityIntent(t *testing.T) {
+	st := newHomeRouteTestStore(t)
+	handler := NewHomeAssistantRouteHandler(st)
+
+	rr := postRouteRequest(t, handler, map[string]string{"prompt": "air quality in seoul today"})
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d: %s", http.StatusOK, rr.Code, rr.Body.String())
+	}
+
+	var resp HomeAssistantRouteResponse
+	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+
+	if resp.Intent != "utility_direct" {
+		t.Fatalf("expected intent utility_direct, got %q", resp.Intent)
+	}
+	if resp.RequiresCreation {
+		t.Fatalf("expected requires_creation false for utility fallback")
+	}
+	if resp.MatchedAgent != systemAssistantAgentName {
+		t.Fatalf("expected matched agent %q, got %q", systemAssistantAgentName, resp.MatchedAgent)
+	}
+}
+
 func TestHomeAssistantRouteHandler_CreatesSystemAssistantFiles(t *testing.T) {
 	tmpDir := t.TempDir()
 	storePath := filepath.Join(tmpDir, "agents_index.json")

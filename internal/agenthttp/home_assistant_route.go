@@ -65,7 +65,7 @@ var (
 	homeAssistantUtilityIntent = homeAssistantIntent{
 		Key:              "utility_direct",
 		Label:            "daily utility",
-		Keywords:         []string{"time", "timezone", "clock", "date", "weather", "forecast", "temperature", "convert", "conversion", "calculate", "calculator", "quick fact", "fact", "capital", "define", "definition"},
+		Keywords:         []string{"time", "timezone", "clock", "date", "weather", "forecast", "temperature", "air quality", "aqi", "pollution", "pm2.5", "pm10", "convert", "conversion", "calculate", "calculator", "quick fact", "fact", "capital", "define", "definition"},
 		PreferredPlugins: []string{"time", "weather", "calculator", "math", "search", "web"},
 		PreferredTypes:   []string{"general", "tool-calling", "research"},
 		DefaultType:      "general",

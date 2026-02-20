@@ -1847,6 +1847,9 @@ const sessionManager = {
     if (agentNameEl && agentName) {
       agentNameEl.textContent = agentName;
     }
+    if (typeof window.refreshChatWebSearchToggle === 'function') {
+      window.refreshChatWebSearchToggle(agentName || '');
+    }
 
     if (editAgentBtn) {
       if (agentName) {

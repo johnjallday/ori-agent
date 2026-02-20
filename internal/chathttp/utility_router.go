@@ -70,6 +70,9 @@ func classifyUtilityRoute(prompt string) UtilityRouteDecision {
 	if decision, ok := classifyWeatherRoute(text, lower); ok {
 		return decision
 	}
+	if decision, ok := classifyAirQualityRoute(text, lower); ok {
+		return decision
+	}
 
 	if looksLikeScratchTask(lower) {
 		return UtilityRouteDecision{
@@ -126,6 +129,28 @@ func classifyWeatherRoute(original, lower string) (UtilityRouteDecision, bool) {
 		ToolName: "weather",
 		ToolArgs: string(args),
 		Reason:   "matched weather utility intent",
+	}, true
+}
+
+func classifyAirQualityRoute(original, lower string) (UtilityRouteDecision, bool) {
+	if !looksLikeAirQualityPrompt(lower) {
+		return UtilityRouteDecision{}, false
+	}
+
+	location := inferLocationForAirQuality(original)
+	if strings.TrimSpace(location) == "" {
+		return UtilityRouteDecision{}, false
+	}
+
+	args, _ := json.Marshal(AirQualityRequest{
+		Location: location,
+		Standard: inferAirQualityStandard(lower),
+	})
+	return UtilityRouteDecision{
+		Mode:     UtilityRouteDirect,
+		ToolName: "air_quality",
+		ToolArgs: string(args),
+		Reason:   "matched air quality utility intent",
 	}, true
 }
 
@@ -239,7 +264,7 @@ func inferLocationForWeather(prompt string) string {
 	for _, marker := range markers {
 		if idx := strings.Index(lower, marker); idx >= 0 {
 			loc := strings.TrimSpace(prompt[idx+len(marker):])
-			loc = strings.Trim(loc, " .?!,")
+			loc = normalizeInferredLocation(loc)
 			if loc != "" {
 				return loc
 			}
@@ -248,7 +273,38 @@ func inferLocationForWeather(prompt string) string {
 	// Handle "<location> weather"
 	if idx := strings.Index(lower, " weather"); idx > 0 {
 		loc := strings.TrimSpace(prompt[:idx])
-		loc = strings.Trim(loc, " .?!,")
+		loc = normalizeInferredLocation(loc)
+		if loc != "" {
+			return loc
+		}
+	}
+	return ""
+}
+
+func inferLocationForAirQuality(prompt string) string {
+	lower := strings.ToLower(prompt)
+	markers := []string{
+		"air quality in ", "air quality for ", "aqi in ", "aqi for ", "pollution in ", "pollution for ", "pm2.5 in ", "pm10 in ",
+	}
+	for _, marker := range markers {
+		if idx := strings.Index(lower, marker); idx >= 0 {
+			loc := strings.TrimSpace(prompt[idx+len(marker):])
+			loc = normalizeInferredLocation(loc)
+			if loc != "" {
+				return loc
+			}
+		}
+	}
+	if idx := strings.Index(lower, " air quality"); idx > 0 {
+		loc := strings.TrimSpace(prompt[:idx])
+		loc = normalizeInferredLocation(loc)
+		if loc != "" {
+			return loc
+		}
+	}
+	if idx := strings.Index(lower, " aqi"); idx > 0 {
+		loc := strings.TrimSpace(prompt[:idx])
+		loc = normalizeInferredLocation(loc)
 		if loc != "" {
 			return loc
 		}
@@ -261,6 +317,13 @@ func inferWeatherUnits(lower string) string {
 		return "fahrenheit"
 	}
 	return "celsius"
+}
+
+func inferAirQualityStandard(lower string) string {
+	if containsAny(lower, []string{"eu aqi", "european aqi", "european scale", "eu scale"}) {
+		return "eu"
+	}
+	return "us"
 }
 
 func inferSearchQuery(prompt string) string {
@@ -295,6 +358,41 @@ func looksLikeWebSearchPrompt(lower string) bool {
 		return true
 	}
 	return false
+}
+
+func looksLikeAirQualityPrompt(lower string) bool {
+	return containsAny(lower, []string{
+		"air quality", "aqi", "pm2.5", "pm2_5", "pm10", "pollution level", "pollution",
+	})
+}
+
+func normalizeInferredLocation(raw string) string {
+	loc := strings.TrimSpace(raw)
+	loc = strings.Trim(loc, " .?!,")
+	if loc == "" {
+		return ""
+	}
+
+	lower := strings.ToLower(loc)
+	suffixes := []string{
+		" right now",
+		" currently",
+		" today",
+		" now",
+		" tonight",
+		" tomorrow",
+		" this morning",
+		" this afternoon",
+		" this evening",
+	}
+	for _, suffix := range suffixes {
+		if strings.HasSuffix(lower, suffix) {
+			loc = strings.TrimSpace(loc[:len(loc)-len(suffix)])
+			lower = strings.ToLower(loc)
+			loc = strings.Trim(loc, " .?!,")
+		}
+	}
+	return strings.Trim(loc, " .?!,")
 }
 
 func looksLikeWorkspaceTask(lower string) bool {
@@ -339,6 +437,26 @@ func formatUtilityDirectResponse(toolName, rawResult string) string {
 				unitSymbol = "F"
 			}
 			return fmt.Sprintf("Current weather in %s: %.1f deg%s, %s (source: %s).", payload.Location, payload.Temperature, unitSymbol, payload.Condition, payload.Source)
+		}
+	case "air_quality":
+		var payload AirQualityResponse
+		if json.Unmarshal([]byte(rawResult), &payload) == nil && payload.Location != "" {
+			scale := strings.ToUpper(strings.TrimSpace(payload.Scale))
+			if scale == "" {
+				scale = "AQI"
+			} else {
+				scale += " AQI"
+			}
+			return fmt.Sprintf(
+				"Current air quality in %s: %s %.0f (%s), PM2.5 %.1f ug/m3, PM10 %.1f ug/m3 (source: %s).",
+				payload.Location,
+				scale,
+				payload.AQI,
+				strings.TrimSpace(payload.Category),
+				payload.PM25,
+				payload.PM10,
+				payload.Source,
+			)
 		}
 	case "web_search":
 		var payload WebSearchResponse

@@ -1489,6 +1489,7 @@
     var tempInput = document.getElementById('agentTemperature');
     var tempValue = document.getElementById('temperatureValue');
     var promptInput = document.getElementById('agentSystemPrompt');
+    var allowWebSearchInput = document.getElementById('agentAllowWebSearch');
     if (!nameInput || !typeInput || !modelInput || !tempInput || !promptInput) {
       return null;
     }
@@ -1504,6 +1505,9 @@
       : String(tempInput.value || '1.0');
     if (tempValue) tempValue.textContent = tempInput.value;
     promptInput.value = seedPayload.system_prompt || '';
+    if (allowWebSearchInput) {
+      allowWebSearchInput.checked = typeof seedPayload.allow_web_search === 'boolean' ? seedPayload.allow_web_search : true;
+    }
 
     var providers = await fetchProvidersCatalog();
     if (providers.length > 0) {
@@ -1561,6 +1565,7 @@
             type: typeInput.value || seedPayload.type || 'tool-calling',
             model: model,
             system_prompt: promptInput.value || seedPayload.system_prompt || '',
+            allow_web_search: allowWebSearchInput ? Boolean(allowWebSearchInput.checked) : true,
             description: seedPayload.description || '',
             tags: Array.isArray(seedPayload.tags) ? seedPayload.tags : []
           };

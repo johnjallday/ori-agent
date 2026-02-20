@@ -16,16 +16,17 @@ func TestNewUtilityToolRegistry_RegistersExpectedTools(t *testing.T) {
 	)
 
 	defs := registry.ListToolDefinitions()
-	if len(defs) != 5 {
-		t.Fatalf("expected 5 utility tools, got %d", len(defs))
+	if len(defs) != 6 {
+		t.Fatalf("expected 6 utility tools, got %d", len(defs))
 	}
 
 	expected := map[string]bool{
-		"time":       true,
-		"weather":    true,
-		"web_search": true,
-		"web_fetch":  true,
-		"browser":    true,
+		"time":        true,
+		"weather":     true,
+		"air_quality": true,
+		"web_search":  true,
+		"web_fetch":   true,
+		"browser":     true,
 	}
 	for _, def := range defs {
 		delete(expected, def.Name)
@@ -95,6 +96,22 @@ func TestUtilityWeatherTool_ProviderUnavailable(t *testing.T) {
 	}
 
 	_, err := tool.Call(context.Background(), `{"location":"San Francisco, CA"}`)
+	if err == nil {
+		t.Fatalf("expected provider unavailable error")
+	}
+	if !errors.Is(err, ErrUtilityProviderUnavailable) {
+		t.Fatalf("expected ErrUtilityProviderUnavailable, got %v", err)
+	}
+}
+
+func TestUtilityAirQualityTool_ProviderUnavailable(t *testing.T) {
+	registry := NewUtilityToolRegistry(UtilityAdapters{}, DefaultUtilityCallPolicy())
+	tool, ok := registry.GetTool("air_quality")
+	if !ok {
+		t.Fatalf("expected air_quality tool to exist")
+	}
+
+	_, err := tool.Call(context.Background(), `{"location":"Seoul"}`)
 	if err == nil {
 		t.Fatalf("expected provider unavailable error")
 	}

@@ -54,6 +54,7 @@ type AgentDetailResponse struct {
 	Provider        string                 `json:"provider,omitempty"`
 	MaxOutputTokens int                    `json:"max_output_tokens,omitempty"`
 	SystemPrompt    string                 `json:"system_prompt"`
+	AllowWebSearch  bool                   `json:"allow_web_search"`
 	EnabledPlugins  []PluginInfo           `json:"enabled_plugins"`
 	MCPServers      []string               `json:"mcp_servers,omitempty"`
 }
@@ -208,6 +209,7 @@ func (h *DashboardHandler) GetAgentDetail(w http.ResponseWriter, r *http.Request
 		Provider:        ag.Settings.Provider,
 		MaxOutputTokens: ag.Settings.MaxOutputTokens,
 		SystemPrompt:    ag.Settings.SystemPrompt,
+		AllowWebSearch:  ag.Settings.IsWebSearchAllowed(),
 		EnabledPlugins:  pluginInfos,
 		MCPServers:      ag.MCPServers,
 	}

@@ -38,11 +38,12 @@ func DefaultUtilityCallPolicy() UtilityCallPolicy {
 
 // UtilityAdapters groups all native utility provider adapters.
 type UtilityAdapters struct {
-	Time      TimeAdapter
-	Weather   WeatherAdapter
-	WebSearch WebSearchAdapter
-	WebFetch  WebFetchAdapter
-	Browser   BrowserAdapter
+	Time       TimeAdapter
+	Weather    WeatherAdapter
+	AirQuality AirQualityAdapter
+	WebSearch  WebSearchAdapter
+	WebFetch   WebFetchAdapter
+	Browser    BrowserAdapter
 }
 
 // TimeRequest is the normalized request contract for time lookups.
@@ -73,6 +74,24 @@ type WeatherResponse struct {
 	Condition   string  `json:"condition"`
 	Source      string  `json:"source"`
 	ObservedAt  string  `json:"observed_at,omitempty"`
+}
+
+// AirQualityRequest is the normalized request contract for air quality lookups.
+type AirQualityRequest struct {
+	Location string `json:"location"`
+	Standard string `json:"standard,omitempty"` // us or eu
+}
+
+// AirQualityResponse is the normalized response contract for air quality lookups.
+type AirQualityResponse struct {
+	Location   string  `json:"location"`
+	AQI        float64 `json:"aqi"`
+	Scale      string  `json:"scale"` // us or eu
+	Category   string  `json:"category"`
+	PM25       float64 `json:"pm2_5,omitempty"`
+	PM10       float64 `json:"pm10,omitempty"`
+	Source     string  `json:"source"`
+	ObservedAt string  `json:"observed_at,omitempty"`
 }
 
 // WebSearchRequest is the normalized request contract for web search.
@@ -134,6 +153,11 @@ type WeatherAdapter interface {
 	GetWeather(ctx context.Context, req WeatherRequest) (WeatherResponse, error)
 }
 
+// AirQualityAdapter provides air quality lookups.
+type AirQualityAdapter interface {
+	GetAirQuality(ctx context.Context, req AirQualityRequest) (AirQualityResponse, error)
+}
+
 // WebSearchAdapter provides web search lookups.
 type WebSearchAdapter interface {
 	WebSearch(ctx context.Context, req WebSearchRequest) (WebSearchResponse, error)
@@ -191,6 +215,7 @@ func NewUtilityToolRegistry(adapters UtilityAdapters, policy UtilityCallPolicy) 
 
 	r.registerTimeTool(adapters.Time)
 	r.registerWeatherTool(adapters.Weather)
+	r.registerAirQualityTool(adapters.AirQuality)
 	r.registerWebSearchTool(adapters.WebSearch)
 	r.registerWebFetchTool(adapters.WebFetch)
 	r.registerBrowserTool(adapters.Browser)
@@ -200,13 +225,15 @@ func NewUtilityToolRegistry(adapters UtilityAdapters, policy UtilityCallPolicy) 
 
 // NewDefaultUtilityToolRegistry configures the registry with built-in defaults.
 func NewDefaultUtilityToolRegistry() *UtilityToolRegistry {
+	weatherAdapter := NewOpenMeteoWeatherAdapter(nil)
 	return NewUtilityToolRegistry(
 		UtilityAdapters{
-			Time:      SystemTimeAdapter{},
-			Weather:   NewOpenMeteoWeatherAdapter(nil),
-			WebSearch: NewDefaultWebSearchAdapter(nil),
-			WebFetch:  NewHTTPWebFetchAdapter(nil, DefaultWebFetchAdapterConfig()),
-			Browser:   NewSimpleBrowserAutomationAdapter(nil, DefaultBrowserAutomationPolicy()),
+			Time:       SystemTimeAdapter{},
+			Weather:    weatherAdapter,
+			AirQuality: weatherAdapter,
+			WebSearch:  NewDefaultWebSearchAdapter(nil),
+			WebFetch:   NewHTTPWebFetchAdapter(nil, DefaultWebFetchAdapterConfig()),
+			Browser:    NewSimpleBrowserAutomationAdapter(nil, DefaultBrowserAutomationPolicy()),
 		},
 		DefaultUtilityCallPolicy(),
 	)
@@ -349,6 +376,55 @@ func (r *UtilityToolRegistry) registerWeatherTool(adapter WeatherAdapter) {
 		},
 	}
 	r.register("weather", tool)
+}
+
+func (r *UtilityToolRegistry) registerAirQualityTool(adapter AirQualityAdapter) {
+	tool := &nativeUtilityTool{
+		definition: pluginapi.Tool{
+			Name:        "air_quality",
+			Description: "Get current air quality (AQI, PM2.5, PM10) for a city or location.",
+			Parameters: map[string]interface{}{
+				"type": "object",
+				"properties": map[string]interface{}{
+					"location": map[string]interface{}{
+						"type":        "string",
+						"description": "City or place name (for example: Seoul, KR).",
+					},
+					"standard": map[string]interface{}{
+						"type":        "string",
+						"description": "AQI standard: us or eu. Defaults to us.",
+						"enum":        []string{"us", "eu"},
+					},
+				},
+				"required": []string{"location"},
+			},
+		},
+		call: func(ctx context.Context, args string) (string, error) {
+			if adapter == nil {
+				return "", fmt.Errorf("%w: air_quality", ErrUtilityProviderUnavailable)
+			}
+			var req AirQualityRequest
+			if err := json.Unmarshal([]byte(args), &req); err != nil {
+				return "", fmt.Errorf("%w: %v", ErrUtilityInvalidInput, err)
+			}
+			if strings.TrimSpace(req.Location) == "" {
+				return "", fmt.Errorf("%w: location is required", ErrUtilityInvalidInput)
+			}
+
+			resp, err := executeUtilityCall(ctx, r.getPolicy(), func(callCtx context.Context) (AirQualityResponse, error) {
+				return adapter.GetAirQuality(callCtx, req)
+			})
+			if err != nil {
+				return "", normalizeUtilityError(err)
+			}
+			raw, marshalErr := json.Marshal(resp)
+			if marshalErr != nil {
+				return "", normalizeUtilityError(marshalErr)
+			}
+			return string(raw), nil
+		},
+	}
+	r.register("air_quality", tool)
 }
 
 func (r *UtilityToolRegistry) registerWebSearchTool(adapter WebSearchAdapter) {

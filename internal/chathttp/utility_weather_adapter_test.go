@@ -107,3 +107,81 @@ func TestOpenMeteoWeatherAdapter_ProviderError(t *testing.T) {
 		t.Fatalf("expected provider error")
 	}
 }
+
+func TestOpenMeteoWeatherAdapter_AirQualitySuccess(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/geo":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{
+				"results": [{
+					"name":"Seoul",
+					"latitude":37.5665,
+					"longitude":126.9780,
+					"country":"South Korea"
+				}]
+			}`))
+		case "/air":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{
+				"current": {
+					"time":"2026-02-20T08:00",
+					"us_aqi":67,
+					"pm2_5":15.4,
+					"pm10":24.1
+				}
+			}`))
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer server.Close()
+
+	adapter := NewOpenMeteoWeatherAdapter(server.Client())
+	adapter.GeocodingURL = server.URL + "/geo"
+	adapter.AirQualityURL = server.URL + "/air"
+
+	resp, err := adapter.GetAirQuality(context.Background(), AirQualityRequest{
+		Location: "Seoul",
+		Standard: "us",
+	})
+	if err != nil {
+		t.Fatalf("expected success, got error: %v", err)
+	}
+	if resp.Location == "" || resp.Source != "open-meteo.com" {
+		t.Fatalf("unexpected response: %+v", resp)
+	}
+	if resp.Scale != "us" {
+		t.Fatalf("expected us scale, got %q", resp.Scale)
+	}
+	if resp.AQI != 67 {
+		t.Fatalf("expected AQI 67, got %.1f", resp.AQI)
+	}
+	if resp.Category != "Moderate" {
+		t.Fatalf("expected category Moderate, got %q", resp.Category)
+	}
+}
+
+func TestOpenMeteoWeatherAdapter_AirQualityLocationNotFound(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/geo" {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"results":[]}`))
+	}))
+	defer server.Close()
+
+	adapter := NewOpenMeteoWeatherAdapter(server.Client())
+	adapter.GeocodingURL = server.URL + "/geo"
+	adapter.AirQualityURL = server.URL + "/air"
+
+	_, err := adapter.GetAirQuality(context.Background(), AirQualityRequest{Location: "Nowhere"})
+	if err == nil {
+		t.Fatalf("expected error")
+	}
+	if !errors.Is(err, ErrUtilityInvalidInput) {
+		t.Fatalf("expected ErrUtilityInvalidInput, got %v", err)
+	}
+}

@@ -118,6 +118,14 @@ func (h *Handler) executeDirectTool(ctx context.Context, ag *agent.Agent, agentN
 		ToolArgs: cmd.Args,
 	}
 
+	if !isUtilityToolAllowedForAgent(ag, cmd.ToolName) {
+		result.Success = false
+		result.Error = "tool disabled by agent policy"
+		result.Result = fmt.Sprintf("❌ %s", disallowedUtilityToolMessage(cmd.ToolName))
+		result.ExecutionTimeMs = time.Since(startTime).Milliseconds()
+		return result
+	}
+
 	// Find the tool (with lazy loading support)
 	tool, found := h.findTool(ag, agentName, cmd.ToolName)
 	if !found {
@@ -187,6 +195,9 @@ func (h *Handler) getAvailableToolNames(ag *agent.Agent) []string {
 	// Add native utility tools first
 	if h.utilityRegistry != nil {
 		for _, def := range h.utilityRegistry.ListToolDefinitions() {
+			if !isUtilityToolAllowedForAgent(ag, def.Name) {
+				continue
+			}
 			toolNames = append(toolNames, def.Name)
 		}
 	}

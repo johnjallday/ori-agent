@@ -519,6 +519,7 @@ function initializeAgentModalListeners() {
       const model = document.getElementById('studios-new-agent-model').value.trim();
       const temperature = document.getElementById('studios-new-agent-temperature').value;
       const systemPrompt = document.getElementById('studios-new-agent-prompt').value.trim();
+      const allowWebSearchInput = document.getElementById('studios-new-agent-allow-web-search');
 
       if (!name) {
         alert('Please enter an agent name');
@@ -533,6 +534,7 @@ function initializeAgentModalListeners() {
 
       try {
         const requestBody = { name, type };
+        requestBody.allow_web_search = allowWebSearchInput ? Boolean(allowWebSearchInput.checked) : true;
 
         if (model) requestBody.model = model;
         if (temperature) requestBody.temperature = parseFloat(temperature);
@@ -587,6 +589,7 @@ function resetAutoConfigState() {
   const autoSelectedIndicator = document.getElementById('autoSelectedIndicator');
   const autoConfigStatus = document.getElementById('autoConfigStatus');
   const descriptionTextarea = document.getElementById('studios-auto-config-description');
+  const allowWebSearchInput = document.getElementById('studios-new-agent-allow-web-search');
 
   if (autoConfigSection) autoConfigSection.classList.add('d-none');
   if (llmWarning) llmWarning.classList.add('d-none');
@@ -594,6 +597,7 @@ function resetAutoConfigState() {
   if (autoSelectedIndicator) autoSelectedIndicator.classList.add('d-none');
   if (autoConfigStatus) autoConfigStatus.classList.add('d-none');
   if (descriptionTextarea) descriptionTextarea.value = '';
+  if (allowWebSearchInput) allowWebSearchInput.checked = true;
 }
 
 // Export functions for global access

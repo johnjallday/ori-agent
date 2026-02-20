@@ -10,6 +10,7 @@ type CreateAgentConfig struct {
 	SystemPrompt    string  // Custom system prompt
 	LLMProvider     string  // Provider backing the model (openai, anthropic, ollama, etc.)
 	MaxOutputTokens int     // Optional max tokens for responses
+	AllowWebSearch  *bool   // Optional web utility permission (nil defaults to allowed)
 }
 
 type Store interface {

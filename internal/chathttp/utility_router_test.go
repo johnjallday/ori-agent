@@ -1,6 +1,7 @@
 package chathttp
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 )
@@ -28,6 +29,24 @@ func TestClassifyUtilityRoute_Weather(t *testing.T) {
 	}
 	if !strings.Contains(strings.ToLower(decision.ToolArgs), "san francisco") {
 		t.Fatalf("expected location in args, got %q", decision.ToolArgs)
+	}
+}
+
+func TestClassifyUtilityRoute_AirQuality(t *testing.T) {
+	decision := classifyUtilityRoute("air quality in Seoul today")
+	if decision.Mode != UtilityRouteDirect {
+		t.Fatalf("expected utility_direct, got %q", decision.Mode)
+	}
+	if decision.ToolName != "air_quality" {
+		t.Fatalf("expected air_quality tool, got %q", decision.ToolName)
+	}
+
+	var req AirQualityRequest
+	if err := json.Unmarshal([]byte(decision.ToolArgs), &req); err != nil {
+		t.Fatalf("failed to parse tool args: %v", err)
+	}
+	if req.Location != "Seoul" {
+		t.Fatalf("expected location Seoul, got %q", req.Location)
 	}
 }
 

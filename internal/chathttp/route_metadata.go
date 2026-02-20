@@ -73,6 +73,8 @@ func inferUtilityProvider(toolName, rawResult string) string {
 	switch name {
 	case "weather":
 		return "open-meteo.com"
+	case "air_quality":
+		return "open-meteo.com"
 	case "web_search":
 		return "duckduckgo.com"
 	case "web_fetch":
@@ -84,7 +86,7 @@ func inferUtilityProvider(toolName, rawResult string) string {
 
 func isNativeUtilityToolName(toolName string) bool {
 	switch strings.TrimSpace(strings.ToLower(toolName)) {
-	case "time", "weather", "web_search", "web_fetch", "browser":
+	case "time", "weather", "air_quality", "web_search", "web_fetch", "browser":
 		return true
 	default:
 		return false

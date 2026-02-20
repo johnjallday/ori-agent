@@ -111,6 +111,11 @@
                         style="background: var(--bg-tertiary); border: 1px solid var(--border-color); color: var(--text-primary); font-size: 0.9em; resize: vertical;"
                         placeholder="You are a helpful assistant with access to various tools. When a user request can be fulfilled by using an available tool, use the tool instead of providing general information. Be concise and direct in your responses."></textarea>
             </div>
+            <div class="mb-3 form-check">
+              <input class="form-check-input" type="checkbox" id="studios-new-agent-allow-web-search" checked>
+              <label class="form-check-label" for="studios-new-agent-allow-web-search" style="color: var(--text-primary);">Allow Web Tools</label>
+              <div class="form-helper mt-1">If enabled, this agent can use <code>web_search</code>, <code>web_fetch</code>, and <code>browser</code>.</div>
+            </div>
             <button type="submit" class="modern-btn modern-btn-primary">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" class="me-1">
                 <path d="M19,13H13V19H11V13H5V11H11V5H13V11H19V13Z"/>

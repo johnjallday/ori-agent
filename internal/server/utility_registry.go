@@ -63,11 +63,12 @@ func buildUtilityToolRegistry(settings config.UtilitySettings) *chathttp.Utility
 	browserAdapter := chathttp.NewSimpleBrowserAutomationAdapter(&http.Client{Timeout: clientTimeout}, browserPolicy)
 
 	return chathttp.NewUtilityToolRegistry(chathttp.UtilityAdapters{
-		Time:      chathttp.SystemTimeAdapter{},
-		Weather:   weatherAdapter,
-		WebSearch: searchAdapter,
-		WebFetch:  webFetchAdapter,
-		Browser:   browserAdapter,
+		Time:       chathttp.SystemTimeAdapter{},
+		Weather:    weatherAdapter,
+		AirQuality: weatherAdapter,
+		WebSearch:  searchAdapter,
+		WebFetch:   webFetchAdapter,
+		Browser:    browserAdapter,
 	}, policy)
 }
 

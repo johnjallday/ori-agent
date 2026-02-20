@@ -302,6 +302,26 @@ func (h *Handler) tryHandleUtilityDirect(
 	if decision.Mode != UtilityRouteDirect || strings.TrimSpace(decision.ToolName) == "" {
 		return false
 	}
+	if !isUtilityToolAllowedForAgent(ag, decision.ToolName) {
+		responseText := disallowedUtilityToolMessage(decision.ToolName)
+		ag.Messages = append(ag.Messages, openai.UserMessage(query))
+		ag.Messages = append(ag.Messages, openai.AssistantMessage(responseText))
+		_ = h.store.SetAgent(agentName, ag)
+
+		h.storeMessageInSession(baseCtx, sessionID, "user", query)
+		h.storeMessageInSession(baseCtx, sessionID, "assistant", responseText)
+
+		writeJSONResponse(w, attachPlannerDecision(attachRouteMetadata(map[string]any{
+			"response": responseText,
+			"success":  false,
+			"error":    "tool disabled by agent policy",
+		}, chatRouteMetadata{
+			Mode:     string(decision.Mode),
+			ToolName: decision.ToolName,
+			Reason:   "utility tool disabled by agent policy",
+		}), plannerDecision))
+		return true
+	}
 
 	if h.utilityTelemetry != nil {
 		h.utilityTelemetry.RecordRouteDecision(string(decision.Mode), decision.Reason)
@@ -380,6 +400,10 @@ func (h *Handler) tryHandleUtilityDirect(
 // findTool searches for a tool by name in both plugins and MCP servers.
 // If the plugin is not yet loaded, it will be loaded lazily on first use.
 func (h *Handler) findTool(ag *agent.Agent, agentName, toolName string) (pluginapi.PluginTool, bool) {
+	if !isUtilityToolAllowedForAgent(ag, toolName) {
+		return nil, false
+	}
+
 	// Native utility tools are checked first to prioritize accurate daily utility behavior.
 	if h.utilityRegistry != nil {
 		if tool, ok := h.utilityRegistry.GetTool(toolName); ok {
@@ -966,6 +990,9 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 	// Add native utility tools first
 	if h.utilityRegistry != nil {
 		for _, def := range h.utilityRegistry.ListToolDefinitions() {
+			if !isUtilityToolAllowedForAgent(ag, def.Name) {
+				continue
+			}
 			appendTool(llm.Tool{
 				Name:        def.Name,
 				Description: def.Description,

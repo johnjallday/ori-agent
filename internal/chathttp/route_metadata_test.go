@@ -39,6 +39,9 @@ func TestInferUtilityProvider(t *testing.T) {
 	if got := inferUtilityProvider("weather", `{"source":"open-meteo.com"}`); got != "open-meteo.com" {
 		t.Fatalf("expected open-meteo.com from payload source, got %q", got)
 	}
+	if got := inferUtilityProvider("air_quality", `{}`); got != "open-meteo.com" {
+		t.Fatalf("expected open-meteo.com fallback for air_quality, got %q", got)
+	}
 	if got := inferUtilityProvider("web_search", `{}`); got == "" {
 		t.Fatalf("expected non-empty fallback provider for web_search")
 	}
@@ -47,6 +50,9 @@ func TestInferUtilityProvider(t *testing.T) {
 func TestIsNativeUtilityToolName(t *testing.T) {
 	if !isNativeUtilityToolName("weather") {
 		t.Fatalf("expected weather to be recognized as native utility tool")
+	}
+	if !isNativeUtilityToolName("air_quality") {
+		t.Fatalf("expected air_quality to be recognized as native utility tool")
 	}
 	if isNativeUtilityToolName("git") {
 		t.Fatalf("expected git to not be recognized as native utility tool")
