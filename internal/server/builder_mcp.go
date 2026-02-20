@@ -7,7 +7,16 @@ import (
 
 	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/mcp"
+	"github.com/johnjallday/ori-agent/internal/mcp/mcpregistry"
 )
+
+// initializeMCPRegistry initializes the MCP server browser registry store.
+func (b *ServerBuilder) initializeMCPRegistry() {
+	store := mcpregistry.NewStore()
+	if b.mcpHandler != nil {
+		b.mcpHandler.SetRegistryStore(store)
+	}
+}
 
 // initializeMCP initializes the MCP system (registry, config manager, servers).
 func (b *ServerBuilder) initializeMCP() error {

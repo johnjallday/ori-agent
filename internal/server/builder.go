@@ -291,6 +291,7 @@ func (b *ServerBuilder) Build() (*Server, error) {
 	if err := b.initializeHandlers(); err != nil { // Phase 17
 		return nil, fmt.Errorf("handlers phase failed: %w", err)
 	}
+	b.initializeMCPRegistry() // Phase 17.1 — wire MCP browser registry store
 
 	// ═══════════════════════════════════════════════════════════════════════════
 	// GROUP 5: ORCHESTRATION - Multi-agent coordination (depends on: Handlers)

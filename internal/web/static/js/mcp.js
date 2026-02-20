@@ -473,3 +473,329 @@ window.addEventListener('beforeunload', function() {
     clearInterval(statusPollInterval);
   }
 });
+
+// ============================================================
+// BROWSE TAB — Registry browser
+// ============================================================
+
+let allRegistryEntries = [];   // full cached result from /api/mcp/search
+let registrySources = [];      // from /api/mcp/registry-sources
+let browseLoaded = false;      // avoid duplicate fetches on tab re-click
+let activeCategoryFilter = 'all';
+let sourcesPanelOpen = false;
+
+/**
+ * Called when the Browse tab is first clicked.
+ * Defers the initial fetch to avoid blocking page load.
+ */
+function onBrowseTabActivated() {
+  if (browseLoaded) return;
+  browseLoaded = true;
+  loadRegistrySources();
+  loadSearchResults();
+}
+
+/** Fetch all registry sources and populate the source filter dropdown. */
+async function loadRegistrySources() {
+  try {
+    const res = await fetch('/api/mcp/registry-sources');
+    registrySources = await res.json();
+    populateSourceFilter(registrySources);
+    if (sourcesPanelOpen) {
+      renderSourcesList(registrySources);
+    }
+  } catch (err) {
+    console.error('Failed to load registry sources:', err);
+  }
+}
+
+function populateSourceFilter(sources) {
+  const select = document.getElementById('browseSource');
+  if (!select) return;
+
+  // Keep the "All Sources" option, remove dynamic ones
+  while (select.options.length > 1) select.remove(1);
+
+  sources.forEach(src => {
+    const opt = document.createElement('option');
+    opt.value = src.name.toLowerCase();
+    opt.textContent = src.name;
+    select.appendChild(opt);
+  });
+}
+
+/** Fetch entries from the backend search endpoint (applies server-side cache). */
+async function loadSearchResults() {
+  const container = document.getElementById('browseResults');
+  if (!container) return;
+
+  container.innerHTML = '<div class="text-center py-5"><div class="spinner-border text-primary" role="status"></div></div>';
+
+  try {
+    const res = await fetch('/api/mcp/search');
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    allRegistryEntries = await res.json();
+    filterSearch(); // apply current UI filters to the freshly loaded data
+  } catch (err) {
+    console.error('Failed to load registry entries:', err);
+    container.innerHTML = '<div class="alert alert-danger m-3">Failed to load registry. Check your connection and try refreshing.</div>';
+  }
+}
+
+/**
+ * Applies the current search text, category, and source filters
+ * client-side against allRegistryEntries and re-renders cards.
+ */
+function filterSearch() {
+  const q = (document.getElementById('browseSearch')?.value || '').toLowerCase().trim();
+  const source = (document.getElementById('browseSource')?.value || 'all').toLowerCase();
+  const category = activeCategoryFilter;
+
+  const filtered = allRegistryEntries.filter(entry => {
+    if (q) {
+      const haystack = [entry.name, entry.description, entry.category, ...(entry.tags || [])].join(' ').toLowerCase();
+      if (!haystack.includes(q)) return false;
+    }
+    if (category && category !== 'all' && (entry.category || '').toLowerCase() !== category) return false;
+    if (source && source !== 'all' && (entry.source || '').toLowerCase() !== source) return false;
+    return true;
+  });
+
+  renderSearchResults(filtered);
+}
+
+/** Render a grid of server cards. */
+function renderSearchResults(entries) {
+  const container = document.getElementById('browseResults');
+  if (!container) return;
+
+  if (entries.length === 0) {
+    container.innerHTML = `
+      <div class="text-center py-5" style="color: var(--text-secondary);">
+        <svg width="48" height="48" viewBox="0 0 24 24" fill="currentColor" style="opacity:0.3;" class="mb-3">
+          <path d="M15.5,14H14.71L14.43,13.73C15.41,12.59 16,11.11 16,9.5A6.5,6.5 0 0,0 9.5,3A6.5,6.5 0 0,0 3,9.5A6.5,6.5 0 0,0 9.5,16C11.11,16 12.59,15.41 13.73,14.43L14,14.71V15.5L19,20.5L20.5,19L15.5,14M9.5,14C7,14 5,12 5,9.5C5,7 7,5 9.5,5C12,5 14,7 14,9.5C14,12 12,14 9.5,14Z"/>
+        </svg>
+        <p>No servers found. Try a different search or category.</p>
+      </div>`;
+    return;
+  }
+
+  // Build a set of currently installed server names
+  const installed = new Set(mcpServers.map(s => s.name));
+
+  container.innerHTML = '';
+  const grid = document.createElement('div');
+  grid.className = 'row g-3';
+
+  entries.forEach(entry => {
+    const isInstalled = installed.has(entry.name);
+    const envWarning = entry.env_required && Object.keys(entry.env_required).length > 0
+      ? `<span class="badge bg-warning text-dark me-1" title="Requires environment variables">Needs env</span>`
+      : '';
+
+    const col = document.createElement('div');
+    col.className = 'col-12 col-md-6 col-xl-4';
+    col.innerHTML = `
+      <div class="browse-server-card h-100 d-flex flex-column">
+        <div class="d-flex justify-content-between align-items-start mb-2">
+          <h6 class="mb-0 fw-semibold" style="color: var(--text-primary);">${mcpEscapeHtml(entry.name)}</h6>
+          <div class="d-flex gap-1 flex-shrink-0 ms-2">
+            <span class="badge bg-secondary">${mcpEscapeHtml(entry.category || 'other')}</span>
+            ${entry.source ? `<span class="badge" style="background: var(--bg-tertiary); color: var(--text-secondary); border: 1px solid var(--border-color);">${mcpEscapeHtml(entry.source)}</span>` : ''}
+          </div>
+        </div>
+        <p class="small mb-2 flex-grow-1" style="color: var(--text-secondary);">${mcpEscapeHtml(entry.description || '')}</p>
+        <div class="d-flex align-items-center justify-content-between mt-auto pt-2" style="border-top: 1px solid var(--border-color);">
+          <div>${envWarning}${entry.maintainer ? `<small style="color: var(--text-secondary);">${mcpEscapeHtml(entry.maintainer)}</small>` : ''}</div>
+          ${isInstalled
+            ? `<button class="modern-btn modern-btn-secondary modern-btn-sm" disabled>Added</button>`
+            : `<button class="modern-btn modern-btn-primary modern-btn-sm" onclick='addFromRegistry(${JSON.stringify(entry)})'>Add</button>`
+          }
+        </div>
+      </div>`;
+    grid.appendChild(col);
+  });
+
+  container.appendChild(grid);
+}
+
+/** Add a server from the registry to "My Servers". */
+async function addFromRegistry(entry) {
+  const serverConfig = {
+    name: entry.name,
+    command: entry.command,
+    args: entry.args || [],
+    env: {},
+    transport: entry.transport || 'stdio',
+    enabled: false
+  };
+
+  try {
+    const res = await fetch('/api/mcp/servers', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(serverConfig)
+    });
+
+    if (res.ok) {
+      showToast(`${entry.name} added to My Servers`, 'success');
+      await loadServers(); // refresh My Servers list
+      filterSearch();      // re-render cards to show "Added" state
+    } else {
+      const err = await res.text();
+      showToast(`Failed to add: ${err}`, 'error');
+    }
+  } catch (err) {
+    console.error('addFromRegistry error:', err);
+    showToast('Failed to add server', 'error');
+  }
+}
+
+/** Update the active category filter pill and re-filter. */
+function setCategoryFilter(btn) {
+  document.querySelectorAll('.category-pill').forEach(p => p.classList.remove('active'));
+  btn.classList.add('active');
+  activeCategoryFilter = btn.dataset.category || 'all';
+  filterSearch();
+}
+
+/** Force-refresh all registry sources and reload results. */
+async function refreshRegistry() {
+  const btn = document.getElementById('refreshBtn');
+  if (btn) btn.disabled = true;
+
+  try {
+    const res = await fetch('/api/mcp/registry/refresh', { method: 'POST' });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    showToast(`Registry refreshed — ${data.count || 0} servers loaded`, 'success');
+    browseLoaded = false; // allow re-fetch
+    await loadSearchResults();
+    await loadRegistrySources();
+  } catch (err) {
+    console.error('refreshRegistry error:', err);
+    showToast('Failed to refresh registry', 'error');
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+}
+
+/** Show the "Add Registry Source" modal. */
+function showAddSourceModal() {
+  document.getElementById('sourceNameInput').value = '';
+  document.getElementById('sourceUrlInput').value = '';
+  const modal = new bootstrap.Modal(document.getElementById('addSourceModal'));
+  modal.show();
+}
+
+/** Submit the Add Registry Source form. */
+async function submitAddSource() {
+  const name = document.getElementById('sourceNameInput').value.trim();
+  const url = document.getElementById('sourceUrlInput').value.trim();
+
+  if (!name || !url) {
+    showToast('Name and URL are required', 'error');
+    return;
+  }
+
+  try {
+    const res = await fetch('/api/mcp/registry-sources', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, url })
+    });
+
+    if (res.ok) {
+      bootstrap.Modal.getInstance(document.getElementById('addSourceModal')).hide();
+      showToast(`Source "${name}" added`, 'success');
+      await loadRegistrySources();
+      browseLoaded = false;
+      await loadSearchResults();
+    } else {
+      const err = await res.text();
+      showToast(`Failed to add source: ${err}`, 'error');
+    }
+  } catch (err) {
+    console.error('submitAddSource error:', err);
+    showToast('Failed to add source', 'error');
+  }
+}
+
+/** Delete a registry source by ID. */
+async function deleteRegistrySource(id) {
+  try {
+    const res = await fetch(`/api/mcp/registry-sources/${id}`, { method: 'DELETE' });
+    if (res.ok) {
+      showToast('Source removed', 'success');
+      await loadRegistrySources();
+      browseLoaded = false;
+      await loadSearchResults();
+    } else {
+      const err = await res.text();
+      showToast(`Failed to remove: ${err}`, 'error');
+    }
+  } catch (err) {
+    console.error('deleteRegistrySource error:', err);
+    showToast('Failed to remove source', 'error');
+  }
+}
+
+/** Toggle the registry sources collapsible panel. */
+function toggleSourcesPanel() {
+  sourcesPanelOpen = !sourcesPanelOpen;
+  const panel = document.getElementById('sourcesPanel');
+  const chevron = document.getElementById('sourcesChevron');
+  if (!panel) return;
+
+  panel.style.display = sourcesPanelOpen ? 'block' : 'none';
+  if (chevron) chevron.style.transform = sourcesPanelOpen ? 'rotate(180deg)' : '';
+
+  if (sourcesPanelOpen) {
+    if (registrySources.length === 0) {
+      loadRegistrySources().then(() => renderSourcesList(registrySources));
+    } else {
+      renderSourcesList(registrySources);
+    }
+  }
+}
+
+/** Render the sources list inside the collapsible panel. */
+function renderSourcesList(sources) {
+  const container = document.getElementById('sourcesList');
+  if (!container) return;
+  container.innerHTML = '';
+
+  if (!sources || sources.length === 0) {
+    container.innerHTML = '<p class="text-muted small">No sources configured.</p>';
+    return;
+  }
+
+  sources.forEach(src => {
+    const row = document.createElement('div');
+    row.className = 'd-flex align-items-center justify-content-between py-2';
+    row.style = 'border-bottom: 1px solid var(--border-color);';
+    row.innerHTML = `
+      <div>
+        <span class="fw-semibold small" style="color: var(--text-primary);">${mcpEscapeHtml(src.name)}</span>
+        ${src.is_builtin ? '<span class="badge bg-secondary ms-2" style="font-size:0.7rem;">built-in</span>' : ''}
+        ${src.url ? `<br><small style="color: var(--text-secondary);">${mcpEscapeHtml(src.url)}</small>` : ''}
+      </div>
+      <div>
+        ${!src.is_builtin
+          ? `<button class="modern-btn modern-btn-danger modern-btn-sm" onclick="deleteRegistrySource('${mcpEscapeHtml(src.id)}')">Remove</button>`
+          : ''
+        }
+      </div>`;
+    container.appendChild(row);
+  });
+}
+
+/** Safely escape HTML to prevent XSS when building innerHTML. */
+function mcpEscapeHtml(str) {
+  if (typeof str !== 'string') return '';
+  return str.replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#039;');
+}

@@ -437,6 +437,19 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 	})
 	mux.HandleFunc("/api/mcp/import", s.Handlers.MCP.ImportServersHandler)
 	mux.HandleFunc("/api/mcp/marketplace", s.Handlers.MCP.GetMarketplaceServersHandler)
+	mux.HandleFunc("/api/mcp/search", s.Handlers.MCP.SearchServersHandler)
+	mux.HandleFunc("/api/mcp/registry-sources", func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodGet:
+			s.Handlers.MCP.ListRegistrySourcesHandler(w, r)
+		case http.MethodPost:
+			s.Handlers.MCP.AddRegistrySourceHandler(w, r)
+		default:
+			orihttp.MethodNotAllowed(w)
+		}
+	})
+	mux.HandleFunc("/api/mcp/registry-sources/", s.Handlers.MCP.RegistrySourcesItemHandler)
+	mux.HandleFunc("/api/mcp/registry/refresh", s.Handlers.MCP.RefreshRegistryHandler)
 
 	// =============================================================================
 	// Orchestration Endpoints

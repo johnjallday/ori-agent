@@ -11,7 +11,10 @@ import (
 	orihttp "github.com/johnjallday/ori-agent/internal/http"
 	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/mcp"
+	"github.com/johnjallday/ori-agent/internal/mcp/mcpregistry"
 	"github.com/johnjallday/ori-agent/internal/store"
+
+	"github.com/google/uuid"
 )
 
 type agentNameRequest struct {
@@ -23,6 +26,8 @@ type Handler struct {
 	registry      *mcp.Registry
 	configManager *mcp.ConfigManager
 	store         store.Store
+	regStore      *mcpregistry.Store
+	regFetcher    *mcpregistry.Fetcher
 }
 
 // NewHandler creates a new MCP HTTP handler
@@ -32,6 +37,12 @@ func NewHandler(registry *mcp.Registry, configManager *mcp.ConfigManager, store 
 		configManager: configManager,
 		store:         store,
 	}
+}
+
+// SetRegistryStore wires the MCP registry browser store into the handler.
+func (h *Handler) SetRegistryStore(s *mcpregistry.Store) {
+	h.regStore = s
+	h.regFetcher = mcpregistry.NewFetcher()
 }
 
 // ListServersHandler lists all MCP servers
@@ -531,6 +542,205 @@ func (h *Handler) ImportServersHandler(w http.ResponseWriter, r *http.Request) {
 	if encErr := json.NewEncoder(w).Encode(map[string]any{
 		"added":  added,
 		"errors": errors,
+	}); encErr != nil {
+		logger.Error("Failed to encode response", logger.Fields{"error": encErr})
+	}
+}
+
+// SearchServersHandler returns filtered registry entries from the cache.
+// GET /api/mcp/search?q=&category=&source=
+func (h *Handler) SearchServersHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		orihttp.MethodNotAllowed(w)
+		return
+	}
+
+	if h.regStore == nil {
+		w.Header().Set("Content-Type", "application/json")
+		if encErr := json.NewEncoder(w).Encode([]mcpregistry.RegistryEntry{}); encErr != nil {
+			logger.Error("Failed to encode response", logger.Fields{"error": encErr})
+		}
+		return
+	}
+
+	// Refresh cache if stale.
+	if !h.regStore.IsCacheValid() {
+		sources := h.regStore.GetSources()
+		entries := h.regFetcher.FetchAll(sources)
+		if setErr := h.regStore.SetCache(entries); setErr != nil {
+			logger.Warn("Failed to persist MCP registry cache", logger.Fields{"error": setErr})
+		}
+	}
+
+	entries := h.regStore.GetCachedEntries()
+
+	q := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("q")))
+	category := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("category")))
+	source := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("source")))
+
+	filtered := make([]mcpregistry.RegistryEntry, 0, len(entries))
+	for _, e := range entries {
+		if q != "" {
+			haystack := strings.ToLower(e.Name + " " + e.Description + " " + e.Category + " " + strings.Join(e.Tags, " "))
+			if !strings.Contains(haystack, q) {
+				continue
+			}
+		}
+		if category != "" && category != "all" && strings.ToLower(e.Category) != category {
+			continue
+		}
+		if source != "" && source != "all" && strings.ToLower(e.Source) != source {
+			continue
+		}
+		filtered = append(filtered, e)
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	if encErr := json.NewEncoder(w).Encode(filtered); encErr != nil {
+		logger.Error("Failed to encode response", logger.Fields{"error": encErr})
+	}
+}
+
+// ListRegistrySourcesHandler returns all configured registry sources.
+// GET /api/mcp/registry-sources
+func (h *Handler) ListRegistrySourcesHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		orihttp.MethodNotAllowed(w)
+		return
+	}
+
+	var sources []mcpregistry.RegistrySource
+	if h.regStore != nil {
+		sources = h.regStore.GetSources()
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	if encErr := json.NewEncoder(w).Encode(sources); encErr != nil {
+		logger.Error("Failed to encode response", logger.Fields{"error": encErr})
+	}
+}
+
+// AddRegistrySourceHandler adds a new registry source.
+// POST /api/mcp/registry-sources  body: {"name": "...", "url": "..."}
+func (h *Handler) AddRegistrySourceHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		orihttp.MethodNotAllowed(w)
+		return
+	}
+
+	if h.regStore == nil {
+		orihttp.InternalError(w, "Registry store not initialized")
+		return
+	}
+
+	var req struct {
+		Name string `json:"name"`
+		URL  string `json:"url"`
+	}
+	if !orihttp.ParseJSONBody(w, r, &req) {
+		return
+	}
+
+	if req.Name == "" || req.URL == "" {
+		orihttp.BadRequest(w, "name and url are required")
+		return
+	}
+
+	// Determine source type.
+	sourceType := "url"
+	if !strings.Contains(req.URL, "://") {
+		// GitHub shorthand "user/repo"
+		sourceType = "github"
+	}
+
+	src := mcpregistry.RegistrySource{
+		ID:         uuid.New().String(),
+		Name:       req.Name,
+		URL:        req.URL,
+		SourceType: sourceType,
+		Enabled:    true,
+		IsBuiltin:  false,
+	}
+
+	if err := h.regStore.AddSource(src); err != nil {
+		orihttp.InternalError(w, err.Error())
+		return
+	}
+
+	// Invalidate cache so next search re-fetches with the new source.
+	h.regStore.InvalidateCache()
+
+	w.Header().Set("Content-Type", "application/json")
+	if encErr := json.NewEncoder(w).Encode(src); encErr != nil {
+		logger.Error("Failed to encode response", logger.Fields{"error": encErr})
+	}
+}
+
+// RegistrySourcesItemHandler handles DELETE /api/mcp/registry-sources/:id
+func (h *Handler) RegistrySourcesItemHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodDelete {
+		orihttp.MethodNotAllowed(w)
+		return
+	}
+
+	if h.regStore == nil {
+		orihttp.InternalError(w, "Registry store not initialized")
+		return
+	}
+
+	// Extract ID from path: /api/mcp/registry-sources/ID
+	parts := strings.Split(strings.TrimSuffix(r.URL.Path, "/"), "/")
+	if len(parts) < 5 {
+		orihttp.BadRequest(w, "Source ID required")
+		return
+	}
+	id := parts[len(parts)-1]
+
+	// Prevent deleting builtin sources.
+	for _, src := range h.regStore.GetSources() {
+		if src.ID == id && src.IsBuiltin {
+			orihttp.BadRequest(w, "Cannot delete built-in registry sources")
+			return
+		}
+	}
+
+	if err := h.regStore.RemoveSource(id); err != nil {
+		orihttp.InternalError(w, err.Error())
+		return
+	}
+
+	h.regStore.InvalidateCache()
+
+	w.Header().Set("Content-Type", "application/json")
+	if encErr := json.NewEncoder(w).Encode(map[string]string{"status": "success"}); encErr != nil {
+		logger.Error("Failed to encode response", logger.Fields{"error": encErr})
+	}
+}
+
+// RefreshRegistryHandler force-refreshes all registry sources, clearing the cache.
+// POST /api/mcp/registry/refresh
+func (h *Handler) RefreshRegistryHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		orihttp.MethodNotAllowed(w)
+		return
+	}
+
+	if h.regStore == nil {
+		orihttp.InternalError(w, "Registry store not initialized")
+		return
+	}
+
+	h.regStore.InvalidateCache()
+	sources := h.regStore.GetSources()
+	entries := h.regFetcher.FetchAll(sources)
+	if err := h.regStore.SetCache(entries); err != nil {
+		logger.Warn("Failed to persist refreshed MCP registry cache", logger.Fields{"error": err})
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	if encErr := json.NewEncoder(w).Encode(map[string]any{
+		"status": "success",
+		"count":  len(entries),
 	}); encErr != nil {
 		logger.Error("Failed to encode response", logger.Fields{"error": encErr})
 	}
