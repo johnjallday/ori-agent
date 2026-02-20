@@ -55,6 +55,15 @@ func (b *ServerBuilder) initializeHandlers() error {
 	b.chatHandler.SetMCPRegistry(b.mcpRegistry)
 	b.chatHandler.SetMCPConfigManager(b.mcpConfigManager)
 	b.chatHandler.SetWorkspaceStore(b.workspaceStore) // Will be set later
+
+	applyUtilitySettings := func() {
+		cfg := b.configManager.Get()
+		b.chatHandler.SetUtilityToolRegistry(buildUtilityToolRegistry(cfg.Utility))
+	}
+	applyUtilitySettings()
+	b.settingsHandler.SetUtilitySettingsReloader(applyUtilitySettings)
+
+	b.usageHandler.SetUtilityTelemetry(b.chatHandler.UtilityTelemetry())
 	if featureflags.EvolutionEnabled() {
 		b.evolutionService = evolution.NewService(b.st, b.onboardingMgr, nil)
 		b.evolutionService.SetActivityLogger(b.activityLogger)

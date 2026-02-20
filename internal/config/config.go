@@ -10,6 +10,24 @@ import (
 	"github.com/johnjallday/ori-agent/internal/authdiscovery"
 )
 
+// UtilitySettings controls native utility tool providers and runtime safeguards.
+type UtilitySettings struct {
+	Enabled                 bool     `json:"enabled"`
+	TimeoutMs               int      `json:"timeout_ms,omitempty"`
+	RetryAttempts           int      `json:"retry_attempts,omitempty"`
+	RetryDelayMs            int      `json:"retry_delay_ms,omitempty"`
+	SearchProvider          string   `json:"search_provider,omitempty"` // auto, duckduckgo, brave
+	BraveAPIKey             string   `json:"brave_api_key,omitempty"`
+	WeatherProvider         string   `json:"weather_provider,omitempty"` // open-meteo
+	WeatherGeocodingURL     string   `json:"weather_geocoding_url,omitempty"`
+	WeatherForecastURL      string   `json:"weather_forecast_url,omitempty"`
+	WebFetchMaxResponseSize int64    `json:"web_fetch_max_response_size,omitempty"`
+	BrowserMaxResponseSize  int64    `json:"browser_max_response_size,omitempty"`
+	BrowserAllowedDomains   []string `json:"browser_allowed_domains,omitempty"`
+	BlockPrivateHosts       bool     `json:"block_private_hosts"`
+	UserAgent               string   `json:"user_agent,omitempty"`
+}
+
 // Settings holds application-wide configuration
 type Settings struct {
 	CurrentAgent    string   `json:"current_agent"`
@@ -46,6 +64,9 @@ type Settings struct {
 	SpeechProvider string `json:"speech_provider,omitempty"` // auto, browser, openai, off
 	SpeechModel    string `json:"speech_model,omitempty"`    // Provider-specific model override
 	SpeechLanguage string `json:"speech_language,omitempty"` // BCP-47 tag or "auto"
+
+	// Native utility settings
+	Utility UtilitySettings `json:"utility,omitempty"`
 }
 
 // Manager handles configuration loading and saving
@@ -106,6 +127,22 @@ func defaultSettings() Settings {
 		MultiAgentThreshold:   6.0,
 		SpeechProvider:        "auto",
 		SpeechLanguage:        "auto",
+		Utility:               defaultUtilitySettings(),
+	}
+}
+
+func defaultUtilitySettings() UtilitySettings {
+	return UtilitySettings{
+		Enabled:                 true,
+		TimeoutMs:               5000,
+		RetryAttempts:           1,
+		RetryDelayMs:            150,
+		SearchProvider:          "auto",
+		WeatherProvider:         "open-meteo",
+		WebFetchMaxResponseSize: 1 << 20,
+		BrowserMaxResponseSize:  1 << 20,
+		BlockPrivateHosts:       true,
+		UserAgent:               "ori-agent/utility-tools",
 	}
 }
 
@@ -313,6 +350,8 @@ func (m *Manager) validate() error {
 		m.settings.SpeechLanguage = "auto"
 	}
 
+	validateUtilitySettings(&m.settings.Utility)
+
 	if m.settings.SystemReasoningEffort != "" {
 		effort := strings.ToLower(strings.TrimSpace(m.settings.SystemReasoningEffort))
 		switch effort {
@@ -324,6 +363,84 @@ func (m *Manager) validate() error {
 	}
 
 	return m.validateAPIKey(m.settings.OpenAIAPIKey)
+}
+
+func validateUtilitySettings(settings *UtilitySettings) {
+	if settings == nil {
+		return
+	}
+
+	defaults := defaultUtilitySettings()
+	if settings.TimeoutMs <= 0 {
+		settings.TimeoutMs = defaults.TimeoutMs
+	}
+	if settings.TimeoutMs > 60000 {
+		settings.TimeoutMs = 60000
+	}
+	if settings.RetryAttempts < 0 {
+		settings.RetryAttempts = defaults.RetryAttempts
+	}
+	if settings.RetryAttempts > 5 {
+		settings.RetryAttempts = 5
+	}
+	if settings.RetryDelayMs <= 0 {
+		settings.RetryDelayMs = defaults.RetryDelayMs
+	}
+	if settings.RetryDelayMs > 5000 {
+		settings.RetryDelayMs = 5000
+	}
+
+	searchProvider := strings.ToLower(strings.TrimSpace(settings.SearchProvider))
+	switch searchProvider {
+	case "", "auto", "duckduckgo", "brave":
+		if searchProvider == "" {
+			searchProvider = defaults.SearchProvider
+		}
+		settings.SearchProvider = searchProvider
+	default:
+		settings.SearchProvider = defaults.SearchProvider
+	}
+
+	weatherProvider := strings.ToLower(strings.TrimSpace(settings.WeatherProvider))
+	if weatherProvider == "" {
+		weatherProvider = defaults.WeatherProvider
+	}
+	if weatherProvider != "open-meteo" {
+		weatherProvider = defaults.WeatherProvider
+	}
+	settings.WeatherProvider = weatherProvider
+
+	settings.BraveAPIKey = strings.TrimSpace(settings.BraveAPIKey)
+	settings.WeatherGeocodingURL = strings.TrimSpace(settings.WeatherGeocodingURL)
+	settings.WeatherForecastURL = strings.TrimSpace(settings.WeatherForecastURL)
+
+	if settings.WebFetchMaxResponseSize <= 0 {
+		settings.WebFetchMaxResponseSize = defaults.WebFetchMaxResponseSize
+	}
+	if settings.WebFetchMaxResponseSize > 8*(1<<20) {
+		settings.WebFetchMaxResponseSize = 8 * (1 << 20)
+	}
+
+	if settings.BrowserMaxResponseSize <= 0 {
+		settings.BrowserMaxResponseSize = defaults.BrowserMaxResponseSize
+	}
+	if settings.BrowserMaxResponseSize > 8*(1<<20) {
+		settings.BrowserMaxResponseSize = 8 * (1 << 20)
+	}
+
+	if strings.TrimSpace(settings.UserAgent) == "" {
+		settings.UserAgent = defaults.UserAgent
+	}
+
+	cleanDomains := make([]string, 0, len(settings.BrowserAllowedDomains))
+	for _, raw := range settings.BrowserAllowedDomains {
+		domain := strings.ToLower(strings.TrimSpace(raw))
+		if domain == "" {
+			continue
+		}
+		cleanDomains = append(cleanDomains, domain)
+	}
+	settings.BrowserAllowedDomains = cleanDomains
 }
 
 // validateAPIKey validates API key format if provided

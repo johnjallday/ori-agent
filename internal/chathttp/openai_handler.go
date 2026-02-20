@@ -62,16 +62,20 @@ func (h *Handler) handleOpenAIChat(
 	start := time.Now()
 	resp, err := requestOpenAICompletionWithRetry(ctx, agentClient, params)
 	if err != nil {
-		errorResponse := attachPlannerDecision(map[string]any{
+		errorResponse := attachPlannerDecision(attachRouteMetadata(map[string]any{
 			"response": fmt.Sprintf("❌ **Error**: %v", err),
-		}, plannerDecision)
+		}, chatRouteMetadata{
+			Mode: routeModeAssistantChat,
+		}), plannerDecision)
 		writeJSONResponse(w, errorResponse)
 		return
 	}
 	if resp == nil || len(resp.Choices) == 0 {
-		orihttp.WriteJSON(w, attachPlannerDecision(map[string]any{
+		orihttp.WriteJSON(w, attachPlannerDecision(attachRouteMetadata(map[string]any{
 			"response": "I couldn't generate a reply just now. Please try again.",
-		}, plannerDecision))
+		}, chatRouteMetadata{
+			Mode: routeModeAssistantChat,
+		}), plannerDecision))
 		return
 	}
 
@@ -138,7 +142,11 @@ func (h *Handler) handleOpenAIChat(
 	// Store assistant response in session
 	h.storeMessageInSession(baseCtx, sessionID, "assistant", text)
 
-	writeJSONResponse(w, attachPlannerDecision(map[string]any{"response": text}, plannerDecision))
+	writeJSONResponse(w, attachPlannerDecision(attachRouteMetadata(map[string]any{
+		"response": text,
+	}, chatRouteMetadata{
+		Mode: routeModeAssistantChat,
+	}), plannerDecision))
 }
 
 // handleOpenAIToolCalls handles the tool execution loop for OpenAI models
@@ -224,10 +232,13 @@ func (h *Handler) handleOpenAIToolCalls(
 		// Store assistant response in session
 		h.storeMessageInSession(baseCtx, sessionID, "assistant", combinedResult)
 
-		response := map[string]any{
+		response := attachRouteMetadata(map[string]any{
 			"response":  combinedResult,
 			"toolCalls": toolResults,
-		}
+		}, chatRouteMetadata{
+			Mode:      routeModeAssistantChat,
+			ToolCount: len(toolResults),
+		})
 
 		if structuredResultData != nil {
 			response["structured"] = true
@@ -249,10 +260,13 @@ func (h *Handler) handleOpenAIToolCalls(
 		),
 	})
 	if err != nil || resp2 == nil || len(resp2.Choices) == 0 {
-		orihttp.WriteJSON(w, attachPlannerDecision(map[string]any{
+		orihttp.WriteJSON(w, attachPlannerDecision(attachRouteMetadata(map[string]any{
 			"response":  combinedResult,
 			"toolCalls": toolResults,
-		}, plannerDecision))
+		}, chatRouteMetadata{
+			Mode:      routeModeAssistantChat,
+			ToolCount: len(toolResults),
+		}), plannerDecision))
 		return
 	}
 
@@ -276,10 +290,13 @@ func (h *Handler) handleOpenAIToolCalls(
 	// Store assistant response in session
 	h.storeMessageInSession(baseCtx, sessionID, "assistant", final.Content)
 
-	orihttp.WriteJSON(w, map[string]any{
+	orihttp.WriteJSON(w, attachPlannerDecision(attachRouteMetadata(map[string]any{
 		"response":  final.Content,
 		"toolCalls": toolResults,
-	})
+	}, chatRouteMetadata{
+		Mode:      routeModeAssistantChat,
+		ToolCount: len(toolResults),
+	}), plannerDecision))
 }
 
 // processToolResults checks tool results for structured data and returns combined result

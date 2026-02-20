@@ -78,7 +78,11 @@ func (h *Handler) handleClaudeChat(w http.ResponseWriter, r *http.Request, ag *a
 	// Store assistant response in session
 	h.storeMessageInSession(baseCtx, sessionID, "assistant", text)
 
-	writeJSONResponse(w, attachPlannerDecision(map[string]any{"response": text}, plannerDecision))
+	writeJSONResponse(w, attachPlannerDecision(attachRouteMetadata(map[string]any{
+		"response": text,
+	}, chatRouteMetadata{
+		Mode: routeModeAssistantChat,
+	}), plannerDecision))
 }
 
 // handleClaudeToolCalls handles tool execution for Claude
@@ -122,10 +126,13 @@ func (h *Handler) handleClaudeToolCalls(
 		// Store assistant response in session
 		h.storeMessageInSession(baseCtx, sessionID, "assistant", execResult.CombinedResult)
 
-		response := map[string]any{
+		response := attachRouteMetadata(map[string]any{
 			"response":  execResult.CombinedResult,
 			"toolCalls": execResult.Results,
-		}
+		}, chatRouteMetadata{
+			Mode:      routeModeAssistantChat,
+			ToolCount: len(execResult.Results),
+		})
 		writeJSONResponse(w, attachPlannerDecision(response, plannerDecision))
 		return
 	}
@@ -141,10 +148,13 @@ func (h *Handler) handleClaudeToolCalls(
 
 	if err != nil || resp2 == nil {
 		// If second turn fails, return the tool results as best-effort reply
-		orihttp.WriteJSON(w, attachPlannerDecision(map[string]any{
+		orihttp.WriteJSON(w, attachPlannerDecision(attachRouteMetadata(map[string]any{
 			"response":  execResult.CombinedResult,
 			"toolCalls": execResult.Results,
-		}, plannerDecision))
+		}, chatRouteMetadata{
+			Mode:      routeModeAssistantChat,
+			ToolCount: len(execResult.Results),
+		}), plannerDecision))
 		return
 	}
 
@@ -160,8 +170,11 @@ func (h *Handler) handleClaudeToolCalls(
 	// Store assistant response in session
 	h.storeMessageInSession(baseCtx, sessionID, "assistant", resp2.Content)
 
-	orihttp.WriteJSON(w, attachPlannerDecision(map[string]any{
+	orihttp.WriteJSON(w, attachPlannerDecision(attachRouteMetadata(map[string]any{
 		"response":  resp2.Content,
 		"toolCalls": execResult.Results,
-	}, plannerDecision))
+	}, chatRouteMetadata{
+		Mode:      routeModeAssistantChat,
+		ToolCount: len(execResult.Results),
+	}), plannerDecision))
 }

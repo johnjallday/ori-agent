@@ -6,11 +6,13 @@ import (
 
 	orihttp "github.com/johnjallday/ori-agent/internal/http"
 	"github.com/johnjallday/ori-agent/internal/llm"
+	"github.com/johnjallday/ori-agent/internal/utilitytelemetry"
 )
 
 // Handler handles usage and cost tracking HTTP requests
 type Handler struct {
-	costTracker *llm.CostTracker
+	costTracker      *llm.CostTracker
+	utilityTelemetry *utilitytelemetry.Tracker
 }
 
 // NewHandler creates a new usage HTTP handler
@@ -18,6 +20,11 @@ func NewHandler(costTracker *llm.CostTracker) *Handler {
 	return &Handler{
 		costTracker: costTracker,
 	}
+}
+
+// SetUtilityTelemetry sets the optional utility telemetry tracker.
+func (h *Handler) SetUtilityTelemetry(tracker *utilitytelemetry.Tracker) {
+	h.utilityTelemetry = tracker
 }
 
 // GetAllTimeStats returns all-time usage statistics
@@ -126,5 +133,33 @@ func (h *Handler) GetSummary(w http.ResponseWriter, r *http.Request) {
 		},
 	}
 
+	if h.utilityTelemetry != nil {
+		utilitySnapshot := h.utilityTelemetry.Snapshot()
+		summary["utility"] = map[string]interface{}{
+			"generated_at": utilitySnapshot.GeneratedAt,
+			"totals":       utilitySnapshot.Totals,
+			"route_counts": utilitySnapshot.RouteCounts,
+			"event_counts": utilitySnapshot.EventCounts,
+		}
+	}
+
 	orihttp.WriteJSON(w, summary)
+}
+
+// GetUtilityMetrics returns aggregate utility routing + tool telemetry.
+// GET /api/usage/utility
+func (h *Handler) GetUtilityMetrics(w http.ResponseWriter, r *http.Request) {
+	if h.utilityTelemetry == nil {
+		orihttp.WriteJSON(w, map[string]any{
+			"enabled": false,
+			"message": "utility telemetry is not enabled",
+		})
+		return
+	}
+
+	snapshot := h.utilityTelemetry.Snapshot()
+	orihttp.WriteJSON(w, map[string]any{
+		"enabled": true,
+		"metrics": snapshot,
+	})
 }

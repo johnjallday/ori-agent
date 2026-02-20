@@ -84,6 +84,14 @@
           <!-- Integrations Category -->
           <div class="settings-nav-group" data-category="integrations">
             <h3 class="settings-nav-group-title">Integrations</h3>
+            <a href="#web-search" class="settings-nav-item" data-section="web-search">
+              <span class="settings-nav-item-icon">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
+                  <path d="M9.5,3A6.5,6.5 0 0,1 16,9.5C16,11.11 15.41,12.59 14.43,13.73L14.7,14H15.5L20.5,19L19,20.5L14,15.5V14.7L13.73,14.43C12.59,15.41 11.11,16 9.5,16A6.5,6.5 0 0,1 3,9.5A6.5,6.5 0 0,1 9.5,3M9.5,5A4.5,4.5 0 0,0 5,9.5A4.5,4.5 0 0,0 9.5,14A4.5,4.5 0 0,0 14,9.5A4.5,4.5 0 0,0 9.5,5Z"/>
+                </svg>
+              </span>
+              <span class="settings-nav-item-text">Web Search</span>
+            </a>
             <a href="#external-agents" class="settings-nav-item" data-section="external-agents">
               <span class="settings-nav-item-icon">
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
@@ -611,6 +619,77 @@
           </section>
 
           <!-- ==================== INTEGRATIONS SECTION ==================== -->
+
+          <!-- Web Search Section -->
+          <section id="web-search" class="settings-section modern-card p-4">
+            <div class="settings-section-header">
+              <span class="settings-section-icon">
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor">
+                  <path d="M9.5,3A6.5,6.5 0 0,1 16,9.5C16,11.11 15.41,12.59 14.43,13.73L14.7,14H15.5L20.5,19L19,20.5L14,15.5V14.7L13.73,14.43C12.59,15.41 11.11,16 9.5,16A6.5,6.5 0 0,1 3,9.5A6.5,6.5 0 0,1 9.5,3M9.5,5A4.5,4.5 0 0,0 5,9.5A4.5,4.5 0 0,0 9.5,14A4.5,4.5 0 0,0 14,9.5A4.5,4.5 0 0,0 9.5,5Z"/>
+                </svg>
+              </span>
+              <h2 class="settings-section-title">Web Search</h2>
+              <span class="settings-section-subtitle">(Utility Tools)</span>
+            </div>
+
+            <p class="settings-section-description">
+              Choose the provider used by web search utilities. Use DuckDuckGo with no key, or configure Brave Search for stronger results.
+            </p>
+
+            <div id="utilitySearchStatus" class="settings-status">
+              <div id="utilitySearchStatusIndicator">
+                <span class="spinner-border spinner-border-sm" role="status" aria-label="Loading"></span>
+              </div>
+              <div class="settings-status-content">
+                <div id="utilitySearchStatusText" class="settings-status-text">Loading web search settings...</div>
+                <div id="utilitySearchStatusDetails" class="settings-status-details"></div>
+              </div>
+            </div>
+
+            <div class="settings-grid">
+              <div class="settings-field">
+                <label class="settings-label" for="utilitySearchProvider">Search Provider</label>
+                <select id="utilitySearchProvider" class="form-select settings-input settings-select" aria-describedby="utilitySearchProviderHelp">
+                  <option value="auto">Auto (Brave with key, else DuckDuckGo)</option>
+                  <option value="duckduckgo">DuckDuckGo (No API key)</option>
+                  <option value="brave">Brave Search (Requires API key)</option>
+                </select>
+                <span id="utilitySearchProviderHelp" class="settings-help">Auto uses Brave Search when a key exists and falls back to DuckDuckGo otherwise.</span>
+              </div>
+
+              <div class="settings-field">
+                <label class="settings-label">Brave API Key</label>
+                <div class="settings-info-box utility-search-key-box mb-0">
+                  <div class="settings-info-row">
+                    <span class="settings-info-label">Status</span>
+                    <span id="utilityBraveApiKeyStatus" class="settings-info-value">Checking...</span>
+                  </div>
+                  <div class="settings-info-row">
+                    <span class="settings-info-label">Stored key</span>
+                    <span id="utilityBraveApiKeyMasked" class="settings-info-value">Not configured</span>
+                  </div>
+                </div>
+                <span class="settings-help">Key is stored in your settings and masked in UI.</span>
+              </div>
+            </div>
+
+            <div class="settings-actions">
+              <button id="saveUtilitySearchSettingsBtn" class="modern-btn modern-btn-primary">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" class="me-2">
+                  <path d="M15,9H5V5H15M12,19A3,3 0 0,1 9,16A3,3 0 0,1 12,13A3,3 0 0,1 15,16A3,3 0 0,1 12,19M17,3H5C3.89,3 3,3.9 3,5V19A2,2 0 0,0 5,21H19A2,2 0 0,0 21,19V7L17,3Z"/>
+                </svg>
+                Save Search Settings
+              </button>
+              <button id="openSearchApiModalBtn" class="modern-btn modern-btn-secondary">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" class="me-2">
+                  <path d="M12,1A5,5 0 0,1 17,6V8H18A2,2 0 0,1 20,10V20A2,2 0 0,1 18,22H6A2,2 0 0,1 4,20V10A2,2 0 0,1 6,8H7V6A5,5 0 0,1 12,1M9,8H15V6A3,3 0 0,0 12,3A3,3 0 0,0 9,6V8M12,12A2,2 0 0,0 10,14A2,2 0 0,0 12,16A2,2 0 0,0 14,14A2,2 0 0,0 12,12Z"/>
+                </svg>
+                Manage API Key
+              </button>
+            </div>
+
+            <div id="utilitySearchAlerts" class="mt-3"></div>
+          </section>
 
           <!-- External Agents Section -->
           <section id="external-agents" class="settings-section modern-card p-4">
@@ -1182,6 +1261,51 @@
             </svg>
             Reset Now
           </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Web Search API Modal -->
+  <div class="modal fade" id="searchApiModal" tabindex="-1" aria-labelledby="searchApiModalLabel" aria-hidden="true">
+    <div class="modal-dialog">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h5 class="modal-title" id="searchApiModalLabel">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" class="me-2">
+              <path d="M9.5,3A6.5,6.5 0 0,1 16,9.5C16,11.11 15.41,12.59 14.43,13.73L14.7,14H15.5L20.5,19L19,20.5L14,15.5V14.7L13.73,14.43C12.59,15.41 11.11,16 9.5,16A6.5,6.5 0 0,1 3,9.5A6.5,6.5 0 0,1 9.5,3M9.5,5A4.5,4.5 0 0,0 5,9.5A4.5,4.5 0 0,0 9.5,14A4.5,4.5 0 0,0 14,9.5A4.5,4.5 0 0,0 9.5,5Z"/>
+            </svg>
+            Brave Search API Key
+          </h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+        </div>
+        <div class="modal-body">
+          <p class="settings-help mb-3">
+            Add a Brave Search API key to improve search quality. You can keep using DuckDuckGo without a key.
+          </p>
+          <div class="settings-field mb-2">
+            <label class="settings-label" for="searchApiBraveKeyInput">API Key</label>
+            <div class="input-group">
+              <input type="password"
+                     id="searchApiBraveKeyInput"
+                     class="form-control settings-input"
+                     placeholder="BSA..."
+                     autocomplete="off"
+                     aria-describedby="searchApiKeyHelp">
+              <button class="btn btn-outline-secondary" type="button" id="toggleSearchApiKey" aria-label="Toggle password visibility">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+                  <path d="M12,9A3,3 0 0,0 9,12A3,3 0 0,0 12,15A3,3 0 0,0 15,12A3,3 0 0,0 12,9M12,17A5,5 0 0,1 7,12A5,5 0 0,1 12,7A5,5 0 0,1 17,12A5,5 0 0,1 12,17M12,4.5C7,4.5 2.73,7.61 1,12C2.73,16.39 7,19.5 12,19.5C17,19.5 21.27,16.39 23,12C21.27,7.61 17,4.5 12,4.5Z"/>
+                </svg>
+              </button>
+            </div>
+            <span id="searchApiKeyHelp" class="settings-help">Leave blank to keep the existing key unchanged.</span>
+          </div>
+          <div id="searchApiCurrentKeyText" class="settings-help"></div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" id="removeSearchApiKeyBtn" class="btn btn-outline-danger">Remove Key</button>
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+          <button type="button" id="saveSearchApiKeyBtn" class="btn btn-primary">Save Key</button>
         </div>
       </div>
     </div>

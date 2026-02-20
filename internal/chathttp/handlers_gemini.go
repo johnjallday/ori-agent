@@ -75,7 +75,11 @@ func (h *Handler) handleGeminiChat(w http.ResponseWriter, r *http.Request, ag *a
 	_ = h.store.SetAgent(agentName, ag)
 
 	h.storeMessageInSession(baseCtx, sessionID, "assistant", text)
-	writeJSONResponse(w, attachPlannerDecision(map[string]any{"response": text}, plannerDecision))
+	writeJSONResponse(w, attachPlannerDecision(attachRouteMetadata(map[string]any{
+		"response": text,
+	}, chatRouteMetadata{
+		Mode: routeModeAssistantChat,
+	}), plannerDecision))
 }
 
 // handleGeminiToolCalls handles tool execution for Gemini.
@@ -137,8 +141,11 @@ func (h *Handler) handleGeminiToolCalls(
 
 	h.storeMessageInSession(baseCtx, sessionID, "assistant", finalText)
 
-	orihttp.WriteJSON(w, attachPlannerDecision(map[string]any{
+	orihttp.WriteJSON(w, attachPlannerDecision(attachRouteMetadata(map[string]any{
 		"response":  finalText,
 		"toolCalls": execResult.Results,
-	}, plannerDecision))
+	}, chatRouteMetadata{
+		Mode:      routeModeAssistantChat,
+		ToolCount: len(execResult.Results),
+	}), plannerDecision))
 }

@@ -1853,6 +1853,84 @@
     return session;
   }
 
+  function extractRouteMetadataFromChatPayload(payload) {
+    if (!payload || typeof payload !== 'object') return null;
+    var route = payload.route && typeof payload.route === 'object' ? payload.route : {};
+    var mode = normalizeToken(route.mode || payload.route_mode);
+    if (!mode) return null;
+    return {
+      mode: mode,
+      toolName: String(route.tool_name || payload.tool_name || '').trim(),
+      provider: String(route.provider || payload.provider || '').trim()
+    };
+  }
+
+  function formatUtilityRouteSummary(routeMeta) {
+    if (!routeMeta || routeMeta.mode !== 'utility_direct') {
+      return 'Completed in the current assistant session.';
+    }
+    var text = routeMeta.toolName ? ('Executed "' + routeMeta.toolName + '" directly') : 'Executed utility tool directly';
+    if (routeMeta.provider) {
+      text += ' using ' + routeMeta.provider;
+    }
+    return text + '.';
+  }
+
+  async function runUtilityTaskDirect(prompt, agentName) {
+    if (!prompt || !agentName) return;
+
+    setHomeAssistantBusy(true, 'Running Utility...');
+    renderHomeAssistantActions([]);
+    appendHomeAssistantMessage('assistant', 'Running this as a direct utility request in the current assistant session.');
+    setHomeAssistantRoutingSummary('Utility Direct', 'Executing directly without creating or handing off to another agent.');
+
+    try {
+      var data = await API.post('/api/chat', {
+        question: prompt,
+        agent_name: agentName
+      });
+      var responseText = String(data && data.response || '').trim();
+      if (!responseText) {
+        responseText = 'Completed utility request, but no text response was returned.';
+      }
+
+      var routeMeta = extractRouteMetadataFromChatPayload(data);
+      appendHomeAssistantMessage('assistant', responseText);
+      setHomeAssistantRoutingSummary('Utility Direct', formatUtilityRouteSummary(routeMeta));
+
+      renderHomeAssistantActions([
+        {
+          label: 'Open Chat',
+          variant: 'primary',
+          onClick: function () { openChatPanel(); }
+        },
+        {
+          label: 'Ask Another Task',
+          variant: 'secondary',
+          onClick: function () { focusHomeAssistantInput(); }
+        }
+      ]);
+    } catch (error) {
+      dashLog.debug('Direct utility execution failed', { error: error && error.message || error });
+      appendHomeAssistantMessage('assistant', 'I could not execute that utility request directly right now.');
+      setHomeAssistantRoutingSummary('Utility Direct Failed', 'Could not execute utility request directly.');
+      renderHomeAssistantActions([
+        {
+          label: 'Retry',
+          variant: 'primary',
+          onClick: function () { runUtilityTaskDirect(prompt, agentName); }
+        },
+        {
+          label: 'Ask Another Task',
+          variant: 'secondary',
+          onClick: function () { focusHomeAssistantInput(); }
+        }
+      ]);
+    } finally {
+      setHomeAssistantBusy(false);
+    }
+  }
+
   async function runPendingTaskWithAgent(prompt, agentName, options) {
     if (!prompt || !agentName) return;
     var appLaunchRequest = options && options.appLaunchRequest ? options.appLaunchRequest : null;
@@ -2010,6 +2088,10 @@
             'Idea for email handling: add OAuth (Gmail/Outlook), start read-only, summarize unread, and require explicit confirmation before any send action.');
         }
 
+        if (homeAssistantState.pendingIntent && homeAssistantState.pendingIntent.key === 'utility_direct') {
+          await runUtilityTaskDirect(text, match.agent.name);
+          return;
+        }
         var matchedAgentMCP = await ensureMCPForTask(match.agent.name, text);
         if (matchedAgentMCP && matchedAgentMCP.message) {
           appendHomeAssistantMessage('assistant', matchedAgentMCP.message);

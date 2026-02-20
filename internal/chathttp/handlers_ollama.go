@@ -80,7 +80,11 @@ func (h *Handler) handleOllamaChat(w http.ResponseWriter, r *http.Request, ag *a
 	// Store assistant response in session
 	h.storeMessageInSession(baseCtx, sessionID, "assistant", text)
 
-	writeJSONResponse(w, attachPlannerDecision(map[string]any{"response": text}, plannerDecision))
+	writeJSONResponse(w, attachPlannerDecision(attachRouteMetadata(map[string]any{
+		"response": text,
+	}, chatRouteMetadata{
+		Mode: routeModeAssistantChat,
+	}), plannerDecision))
 }
 
 // handleOllamaToolCalls handles tool execution for Ollama
@@ -152,8 +156,11 @@ func (h *Handler) handleOllamaToolCalls(
 	// Store assistant response in session
 	h.storeMessageInSession(baseCtx, sessionID, "assistant", finalText)
 
-	orihttp.WriteJSON(w, attachPlannerDecision(map[string]any{
+	orihttp.WriteJSON(w, attachPlannerDecision(attachRouteMetadata(map[string]any{
 		"response":  finalText,
 		"toolCalls": execResult.Results,
-	}, plannerDecision))
+	}, chatRouteMetadata{
+		Mode:      routeModeAssistantChat,
+		ToolCount: len(execResult.Results),
+	}), plannerDecision))
 }

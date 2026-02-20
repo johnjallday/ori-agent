@@ -2,6 +2,7 @@ package chathttp
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -105,6 +106,22 @@ type preflightConfigManager struct {
 	servers   map[string]struct{}
 	enabled   []string
 	enableErr error
+}
+
+type preflightWebSearchAdapter struct{}
+
+func (preflightWebSearchAdapter) WebSearch(_ context.Context, req WebSearchRequest) (WebSearchResponse, error) {
+	return WebSearchResponse{
+		Query: req.Query,
+		Results: []WebSearchResult{
+			{
+				Title:   "Mock Result",
+				URL:     "https://example.com",
+				Snippet: "mock snippet",
+			},
+		},
+		Source: "test",
+	}, nil
 }
 
 func (m *preflightConfigManager) EnableServerForAgent(agentName, serverName string) error {
@@ -276,12 +293,15 @@ func TestMaybeAutoEnableMCPForPrompt_ReturnsMessageWhenNoWebServerConfigured(t *
 	}
 }
 
-func TestChatHandler_ReturnsHelpfulMessageWhenWebMCPMissing(t *testing.T) {
+func TestChatHandler_UsesNativeWebSearchWithoutMCP(t *testing.T) {
 	st := newPreflightStore("Ori", &agent.Agent{
 		Plugins: map[string]types.LoadedPlugin{},
 	})
 
 	h := NewHandler(st, nil)
+	h.SetUtilityToolRegistry(NewUtilityToolRegistry(UtilityAdapters{
+		WebSearch: preflightWebSearchAdapter{},
+	}, DefaultUtilityCallPolicy()))
 	h.SetMCPRegistry(&preflightRegistry{})
 	h.SetMCPConfigManager(&preflightConfigManager{
 		servers: map[string]struct{}{},
@@ -307,7 +327,10 @@ func TestChatHandler_ReturnsHelpfulMessageWhenWebMCPMissing(t *testing.T) {
 	if text == "" {
 		t.Fatalf("expected response message, got empty payload: %v", resp)
 	}
-	if !containsAnyPhrase(strings.ToLower(text), []string{"no web mcp server", "cannot run a real web search"}) {
+	if !containsAnyPhrase(strings.ToLower(text), []string{"top web results", "mock result"}) {
 		t.Fatalf("unexpected response: %q", text)
+	}
+	if mode, _ := resp["route_mode"].(string); mode != string(UtilityRouteDirect) {
+		t.Fatalf("expected route_mode %q, got %v", UtilityRouteDirect, resp["route_mode"])
 	}
 }

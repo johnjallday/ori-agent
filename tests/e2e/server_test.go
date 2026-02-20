@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"testing"
 	"time"
 
@@ -54,6 +55,7 @@ func TestHealthCheck(t *testing.T) {
 	}
 
 	skipIfNoAPIKey(t)
+	ensureServerBuilt(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
@@ -98,6 +100,7 @@ func TestAgentLifecycle(t *testing.T) {
 	}
 
 	skipIfNoAPIKey(t)
+	ensureServerBuilt(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
@@ -196,6 +199,7 @@ func TestPluginRegistry(t *testing.T) {
 	}
 
 	skipIfNoAPIKey(t)
+	ensureServerBuilt(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
@@ -322,12 +326,60 @@ func TestConcurrentRequests(t *testing.T) {
 	t.Logf("✓ All %d concurrent requests succeeded", numRequests)
 }
 
+func TestHomeAssistantRoute_UtilityPromptUsesExistingAssistant(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping E2E test in short mode")
+	}
+
+	skipIfNoAPIKey(t)
+	ensureServerBuilt(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	cmd := startServer(t, ctx)
+	defer stopServer(cmd)
+
+	if err := waitForServer(baseURL, startTimeout); err != nil {
+		t.Fatalf("Server failed to start: %v", err)
+	}
+
+	payload, _ := json.Marshal(map[string]string{
+		"prompt": "what time is it in tokyo",
+	})
+
+	resp, err := http.Post(baseURL+"/api/home-assistant/route", "application/json", bytes.NewBuffer(payload))
+	if err != nil {
+		t.Fatalf("Failed to route prompt: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("Expected status 200, got %d: %s", resp.StatusCode, body)
+	}
+
+	var routeResp map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&routeResp); err != nil {
+		t.Fatalf("Failed to decode route response: %v", err)
+	}
+
+	if intent, _ := routeResp["intent"].(string); intent != "utility_direct" {
+		t.Fatalf("Expected intent utility_direct, got %q", intent)
+	}
+	if requiresCreation, _ := routeResp["requires_creation"].(bool); requiresCreation {
+		t.Fatalf("Expected requires_creation=false, got true")
+	}
+	if matched, _ := routeResp["matched_agent"].(string); matched == "" {
+		t.Fatalf("Expected matched_agent to be set, got empty")
+	}
+}
+
 // Helper functions
 
 func startServer(t *testing.T, ctx context.Context) *exec.Cmd {
 	t.Helper()
 
-	cmd := exec.CommandContext(ctx, serverBinary)
+	cmd := exec.CommandContext(ctx, resolveBuiltBinaryPath())
 	cmd.Env = append(os.Environ(),
 		"PORT="+defaultPort,
 		fmt.Sprintf("OPENAI_API_KEY=%s", os.Getenv("OPENAI_API_KEY")),
@@ -380,13 +432,16 @@ func waitForServer(url string, timeout time.Duration) error {
 func ensureServerBuilt(t *testing.T) {
 	t.Helper()
 
-	if _, err := os.Stat(serverBinary); os.IsNotExist(err) {
+	binaryPath := resolveBuiltBinaryPath()
+	if _, err := os.Stat(binaryPath); os.IsNotExist(err) {
 		t.Log("Server binary not found, building...")
 
-		// Get the project root (go up from tests/e2e to project root)
-		projectRoot := filepath.Join("..", "..")
+		projectRoot := resolveProjectRoot()
+		if projectRoot == "" {
+			projectRoot = filepath.Join("..", "..")
+		}
 
-		cmd := exec.Command("go", "build", "-o", "bin/ori-agent", "./cmd/server")
+		cmd := exec.Command("go", "build", "-o", binaryPath, "./cmd/server")
 		cmd.Dir = projectRoot
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
@@ -397,6 +452,29 @@ func ensureServerBuilt(t *testing.T) {
 
 		t.Log("✓ Server built successfully")
 	}
+}
+
+func resolveServerBinaryPath() string {
+	builtPath := resolveBuiltBinaryPath()
+	if _, err := os.Stat(builtPath); err == nil {
+		return builtPath
+	}
+	return serverBinary
+}
+
+func resolveProjectRoot() string {
+	_, file, _, ok := runtime.Caller(0)
+	if !ok {
+		return ""
+	}
+	return filepath.Clean(filepath.Join(filepath.Dir(file), "..", ".."))
+}
+
+func resolveBuiltBinaryPath() string {
+	if root := resolveProjectRoot(); root != "" {
+		return filepath.Join(root, "bin", "ori-agent")
+	}
+	return filepath.Join("bin", "ori-agent")
 }
 
 func skipIfNoAPIKey(t *testing.T) {

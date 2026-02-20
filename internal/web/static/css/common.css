@@ -318,6 +318,58 @@ a:focus-visible {
     pointer-events: none;
 }
 
+/* Chat route provenance badge */
+.chat-route-badge {
+    display: inline-flex;
+    align-items: center;
+    margin-bottom: 0.4rem;
+    padding: 0.15rem 0.5rem;
+    border-radius: 999px;
+    border: 1px solid var(--border-color);
+    font-size: 0.68rem;
+    letter-spacing: 0.02em;
+    text-transform: uppercase;
+    color: var(--text-secondary);
+    background: var(--bg-primary);
+}
+
+.chat-route-badge.mode-utility_direct {
+    border-color: rgba(16, 185, 129, 0.45);
+    background: rgba(16, 185, 129, 0.12);
+    color: #047857;
+}
+
+.chat-route-badge.mode-direct_tool {
+    border-color: rgba(37, 99, 235, 0.45);
+    background: rgba(37, 99, 235, 0.12);
+    color: #1d4ed8;
+}
+
+.chat-route-badge.mode-specialist_handoff {
+    border-color: rgba(202, 138, 4, 0.45);
+    background: rgba(234, 179, 8, 0.14);
+    color: #a16207;
+}
+
+[data-bs-theme="dark"] .chat-route-badge.mode-utility_direct {
+    color: #34d399;
+}
+
+[data-bs-theme="dark"] .chat-route-badge.mode-direct_tool {
+    color: #93c5fd;
+}
+
+[data-bs-theme="dark"] .chat-route-badge.mode-specialist_handoff {
+    color: #facc15;
+}
+
+@media (max-width: 768px) {
+    .chat-route-badge {
+        font-size: 0.62rem;
+        padding: 0.12rem 0.45rem;
+    }
+}
+
 /* ============================================
    Standardized Form Input Styles
    ============================================ */

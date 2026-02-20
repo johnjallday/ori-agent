@@ -112,6 +112,35 @@ If you have other plugins loaded (weather, custom plugins, etc.):
 /tool your_plugin_name {"param1": "value1", "param2": "value2"}
 ```
 
+#### 7. Utility-Direct Chat Routing (no agent creation/handoff)
+```bash
+# Ask for time through normal chat path (no /tool prefix)
+curl -X POST http://localhost:8765/api/chat \
+  -H "Content-Type: application/json" \
+  -d '{"question": "what time is it in tokyo"}'
+```
+
+Expected response fields include:
+- `route_mode: "utility_direct"`
+- `route.mode: "utility_direct"`
+- `route.tool_name: "time"`
+- `route.provider: "system-clock"`
+- `toolCalls` with the executed utility tool payload
+
+#### 8. Utility Settings + Telemetry Endpoints
+```bash
+# Read utility settings
+curl http://localhost:8765/api/settings/utility
+
+# Update utility settings (example: force DuckDuckGo + 8s timeout)
+curl -X POST http://localhost:8765/api/settings/utility \
+  -H "Content-Type: application/json" \
+  -d '{"search_provider":"duckduckgo","timeout_ms":8000}'
+
+# Read utility metrics
+curl http://localhost:8765/api/usage/utility
+```
+
 ### Expected Behavior
 
 #### Success Case

@@ -184,6 +184,13 @@ func (h *Handler) executeDirectTool(ctx context.Context, ag *agent.Agent, agentN
 func (h *Handler) getAvailableToolNames(ag *agent.Agent) []string {
 	var toolNames []string
 
+	// Add native utility tools first
+	if h.utilityRegistry != nil {
+		for _, def := range h.utilityRegistry.ListToolDefinitions() {
+			toolNames = append(toolNames, def.Name)
+		}
+	}
+
 	// Add native plugin tools
 	for _, plugin := range ag.Plugins {
 		if plugin.Tool != nil {
@@ -211,13 +218,17 @@ func (h *Handler) getAvailableToolNames(ag *agent.Agent) []string {
 
 // formatDirectToolResponse formats a direct tool result into a chat response
 func formatDirectToolResponse(result *DirectToolResult) map[string]any {
-	response := map[string]any{
+	response := attachRouteMetadata(map[string]any{
 		"response":          result.Result,
 		"direct_tool_call":  true,
 		"tool_name":         result.ToolName,
 		"execution_time_ms": result.ExecutionTimeMs,
 		"success":           result.Success,
-	}
+	}, chatRouteMetadata{
+		Mode:      routeModeDirectTool,
+		ToolName:  result.ToolName,
+		ToolCount: 1,
+	})
 
 	// Add structured result metadata if available
 	if result.Structured {

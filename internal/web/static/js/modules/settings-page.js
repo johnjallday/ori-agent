@@ -193,6 +193,274 @@ document.getElementById('systemDiagnosticsBtn')?.addEventListener('click', async
   }
 });
 
+// Utility Web Search Settings
+(function() {
+  const providerSelect = document.getElementById('utilitySearchProvider');
+  const saveProviderBtn = document.getElementById('saveUtilitySearchSettingsBtn');
+  const openApiModalBtn = document.getElementById('openSearchApiModalBtn');
+  const keyStatusEl = document.getElementById('utilityBraveApiKeyStatus');
+  const keyMaskedEl = document.getElementById('utilityBraveApiKeyMasked');
+  const statusIndicator = document.getElementById('utilitySearchStatusIndicator');
+  const statusText = document.getElementById('utilitySearchStatusText');
+  const statusDetails = document.getElementById('utilitySearchStatusDetails');
+
+  const searchApiModalEl = document.getElementById('searchApiModal');
+  const searchApiInput = document.getElementById('searchApiBraveKeyInput');
+  const currentKeyText = document.getElementById('searchApiCurrentKeyText');
+  const saveApiKeyBtn = document.getElementById('saveSearchApiKeyBtn');
+  const removeApiKeyBtn = document.getElementById('removeSearchApiKeyBtn');
+  const toggleApiKeyBtn = document.getElementById('toggleSearchApiKey');
+
+  if (!providerSelect) {
+    return;
+  }
+
+  let utility = null;
+  let searchApiModal = null;
+
+  function normalizeProvider(provider) {
+    const normalized = String(provider || '').toLowerCase();
+    switch (normalized) {
+      case 'brave':
+      case 'duckduckgo':
+      case 'auto':
+        return normalized;
+      default:
+        return 'auto';
+    }
+  }
+
+  function setButtonLoading(btn, loading, loadingLabel) {
+    if (!btn) return;
+    if (loading) {
+      btn.dataset.originalLabel = btn.innerHTML;
+      btn.disabled = true;
+      btn.innerHTML = `<span class="spinner-border spinner-border-sm me-2"></span>${loadingLabel}`;
+      return;
+    }
+
+    btn.disabled = false;
+    if (btn.dataset.originalLabel) {
+      btn.innerHTML = btn.dataset.originalLabel;
+    }
+  }
+
+  function updateStatus(provider, hasBraveKey) {
+    if (!statusIndicator || !statusText || !statusDetails) return;
+
+    const icon = {
+      success: `
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="#28a745">
+          <path d="M12,2A10,10 0 0,1 22,12A10,10 0 0,1 12,22A10,10 0 0,1 2,12A10,10 0 0,1 12,2M12,4A8,8 0 0,0 4,12A8,8 0 0,0 12,20A8,8 0 0,0 20,12A8,8 0 0,0 12,4M11,16.5L6.5,12L7.91,10.59L11,13.67L16.59,8.09L18,9.5L11,16.5Z"/>
+        </svg>
+      `,
+      warn: `
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="#f59e0b">
+          <path d="M13,14H11V10H13M13,18H11V16H13M1,21H23L12,2L1,21Z"/>
+        </svg>
+      `,
+      info: `
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="#3b82f6">
+          <path d="M12,2A10,10 0 0,1 22,12A10,10 0 0,1 12,22A10,10 0 0,1 2,12A10,10 0 0,1 12,2M13,17H11V11H13V17M13,9H11V7H13V9Z"/>
+        </svg>
+      `
+    };
+
+    if (provider === 'brave' && !hasBraveKey) {
+      statusIndicator.innerHTML = icon.warn;
+      statusText.textContent = 'Brave Search selected, API key missing';
+      statusDetails.textContent = 'Web search will fall back to DuckDuckGo until a Brave key is added.';
+      return;
+    }
+
+    if (provider === 'duckduckgo') {
+      statusIndicator.innerHTML = icon.info;
+      statusText.textContent = 'DuckDuckGo search active';
+      statusDetails.textContent = 'No API key required.';
+      return;
+    }
+
+    if (provider === 'auto' && hasBraveKey) {
+      statusIndicator.innerHTML = icon.success;
+      statusText.textContent = 'Auto mode with Brave Search available';
+      statusDetails.textContent = 'Brave is used by default, with safe fallback behavior.';
+      return;
+    }
+
+    statusIndicator.innerHTML = icon.info;
+    statusText.textContent = 'Auto mode using DuckDuckGo';
+    statusDetails.textContent = 'Add a Brave key to upgrade search quality in auto mode.';
+  }
+
+  function updateKeySummary(hasBraveKey, maskedKey) {
+    if (keyStatusEl) {
+      keyStatusEl.textContent = hasBraveKey ? 'Configured' : 'Not configured';
+    }
+    if (keyMaskedEl) {
+      keyMaskedEl.textContent = hasBraveKey ? (maskedKey || '***') : 'Not configured';
+    }
+    if (currentKeyText) {
+      currentKeyText.textContent = hasBraveKey
+        ? `Current key: ${maskedKey || '***'}`
+        : 'No Brave API key is currently stored.';
+    }
+  }
+
+  function applyUtilitySettings(utilitySettings) {
+    utility = utilitySettings || {};
+    const provider = normalizeProvider(utility.search_provider);
+    const hasBraveKey = Boolean(utility.has_brave_api_key);
+    const masked = utility.brave_api_key_masked || '';
+
+    providerSelect.value = provider;
+    updateKeySummary(hasBraveKey, masked);
+    updateStatus(provider, hasBraveKey);
+  }
+
+  async function loadUtilitySettings() {
+    try {
+      const response = await fetch('/api/settings/utility');
+      if (!response.ok) {
+        throw new Error(await response.text() || 'Failed to load utility settings');
+      }
+      const data = await response.json();
+      applyUtilitySettings(data.utility || {});
+    } catch (error) {
+      console.error('Failed to load utility settings:', error);
+      if (statusIndicator) {
+        statusIndicator.innerHTML = `
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="#ef4444">
+            <path d="M13,13H11V7H13M13,17H11V15H13M12,2A10,10 0 0,0 2,12A10,10 0 0,0 12,22A10,10 0 0,0 22,12A10,10 0 0,0 12,2Z"/>
+          </svg>
+        `;
+      }
+      if (statusText) {
+        statusText.textContent = 'Failed to load web search settings';
+      }
+      if (statusDetails) {
+        statusDetails.textContent = error.message || '';
+      }
+    }
+  }
+
+  async function saveUtilitySettings(payload) {
+    const response = await fetch('/api/settings/utility', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(payload)
+    });
+
+    if (!response.ok) {
+      let message = await response.text();
+      if (!message) {
+        message = 'Failed to save utility settings';
+      }
+      throw new Error(message);
+    }
+
+    const data = await response.json();
+    applyUtilitySettings(data.utility || {});
+    return data.utility || {};
+  }
+
+  saveProviderBtn?.addEventListener('click', async function() {
+    const provider = normalizeProvider(providerSelect.value);
+    setButtonLoading(saveProviderBtn, true, 'Saving...');
+    try {
+      await saveUtilitySettings({ search_provider: provider });
+      notify('Web search settings saved.', 'success');
+      if (provider === 'brave' && !utility?.has_brave_api_key) {
+        notify('Brave Search requires an API key. Add one in "Manage API Key".', 'warning');
+      }
+    } catch (error) {
+      console.error('Failed to save web search settings:', error);
+      notify('Failed to save web search settings: ' + error.message, 'error');
+    } finally {
+      setButtonLoading(saveProviderBtn, false);
+    }
+  });
+
+  openApiModalBtn?.addEventListener('click', function() {
+    if (!searchApiModalEl) return;
+    if (!searchApiModal) {
+      searchApiModal = new bootstrap.Modal(searchApiModalEl);
+    }
+    if (searchApiInput) {
+      searchApiInput.value = '';
+      searchApiInput.type = 'password';
+    }
+    updateKeySummary(Boolean(utility?.has_brave_api_key), utility?.brave_api_key_masked || '');
+    searchApiModal.show();
+  });
+
+  toggleApiKeyBtn?.addEventListener('click', function() {
+    if (!searchApiInput) return;
+    searchApiInput.type = searchApiInput.type === 'password' ? 'text' : 'password';
+  });
+
+  saveApiKeyBtn?.addEventListener('click', async function() {
+    const braveKey = searchApiInput?.value.trim() || '';
+    if (!braveKey) {
+      notify('Enter a Brave API key, or use "Remove Key".', 'warning');
+      return;
+    }
+
+    setButtonLoading(saveApiKeyBtn, true, 'Saving...');
+    try {
+      await saveUtilitySettings({ brave_api_key: braveKey });
+      notify('Brave API key saved.', 'success');
+      if (searchApiInput) {
+        searchApiInput.value = '';
+        searchApiInput.type = 'password';
+      }
+      if (searchApiModal) {
+        searchApiModal.hide();
+      }
+    } catch (error) {
+      console.error('Failed to save Brave API key:', error);
+      notify('Failed to save Brave API key: ' + error.message, 'error');
+    } finally {
+      setButtonLoading(saveApiKeyBtn, false);
+    }
+  });
+
+  removeApiKeyBtn?.addEventListener('click', async function() {
+    if (!utility?.has_brave_api_key) {
+      notify('No Brave API key is stored.', 'info');
+      return;
+    }
+
+    if (!confirm('Remove the stored Brave API key?')) {
+      return;
+    }
+
+    setButtonLoading(removeApiKeyBtn, true, 'Removing...');
+    try {
+      await saveUtilitySettings({ brave_api_key: '' });
+      notify('Brave API key removed.', 'success');
+      if (searchApiInput) {
+        searchApiInput.value = '';
+        searchApiInput.type = 'password';
+      }
+    } catch (error) {
+      console.error('Failed to remove Brave API key:', error);
+      notify('Failed to remove Brave API key: ' + error.message, 'error');
+    } finally {
+      setButtonLoading(removeApiKeyBtn, false);
+    }
+  });
+
+  searchApiModalEl?.addEventListener('hidden.bs.modal', function() {
+    if (!searchApiInput) return;
+    searchApiInput.value = '';
+    searchApiInput.type = 'password';
+  });
+
+  loadUtilitySettings();
+})();
+
 // Session Management Settings
 (function() {
   const sessionCleanupEnabled = document.getElementById('sessionCleanupEnabled');

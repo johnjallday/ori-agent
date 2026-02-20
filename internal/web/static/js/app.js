@@ -105,7 +105,7 @@ function restoreChatMessages() {
 
   // Re-render all stored messages
   chatMessages.forEach(msg => {
-    appendMessageToUI(msg.content, msg.isUser);
+    appendMessageToUI(msg.content, msg.isUser, false, msg.routeMeta || null);
   });
 }
 
@@ -615,7 +615,52 @@ function tryRenderJsonTable(message) {
 }
 
 // Internal function: Add message to UI only (used by restore function)
-function appendMessageToUI(message, isUser = false, isError = false) {
+function normalizeRouteMetadata(payload) {
+  if (!payload || typeof payload !== 'object') return null;
+
+  const route = payload.route && typeof payload.route === 'object' ? payload.route : {};
+  const mode = String(route.mode || payload.route_mode || '').trim().toLowerCase();
+  if (!mode) return null;
+
+  const toolName = String(route.tool_name || payload.tool_name || '').trim();
+  const provider = String(route.provider || payload.provider || '').trim();
+  const parsedToolCount = Number(route.tool_count || payload.tool_count || 0);
+  const toolCount = Number.isFinite(parsedToolCount) && parsedToolCount > 0
+    ? Math.floor(parsedToolCount)
+    : 0;
+
+  return {
+    mode,
+    toolName,
+    provider,
+    toolCount
+  };
+}
+
+function shouldRenderRouteBadge(routeMeta) {
+  if (!routeMeta || !routeMeta.mode) return false;
+  return routeMeta.mode === 'utility_direct' ||
+    routeMeta.mode === 'direct_tool' ||
+    routeMeta.mode === 'specialist_handoff';
+}
+
+function formatRouteBadgeText(routeMeta) {
+  if (!routeMeta) return '';
+  if (routeMeta.mode === 'utility_direct') {
+    const toolPart = routeMeta.toolName ? `Tool ${routeMeta.toolName}` : 'Utility direct';
+    const providerPart = routeMeta.provider ? ` · ${routeMeta.provider}` : '';
+    return `${toolPart}${providerPart}`;
+  }
+  if (routeMeta.mode === 'direct_tool') {
+    return routeMeta.toolName ? `Direct tool · ${routeMeta.toolName}` : 'Direct tool';
+  }
+  if (routeMeta.mode === 'specialist_handoff') {
+    return 'Delegated to specialist workflow';
+  }
+  return routeMeta.mode;
+}
+
+function appendMessageToUI(message, isUser = false, isError = false, routeMeta = null) {
   const chatArea = document.getElementById('chatArea');
   if (!chatArea) return;
 
@@ -637,21 +682,32 @@ function appendMessageToUI(message, isUser = false, isError = false) {
     messageContent.style.color = 'var(--text-primary)';
   }
 
+  const badgeMeta = shouldRenderRouteBadge(routeMeta) ? routeMeta : null;
+  if (badgeMeta) {
+    const badge = document.createElement('div');
+    badge.className = `chat-route-badge mode-${badgeMeta.mode.replace(/[^a-z0-9_-]/g, '-')}`;
+    badge.textContent = formatRouteBadgeText(badgeMeta);
+    messageContent.appendChild(badge);
+  }
+
+  const messageBody = document.createElement('div');
+
   // Process message content (support markdown and JSON tables)
   if (!isUser) {
     // Try to detect and render JSON tables
     const tableContent = tryRenderJsonTable(message);
     if (tableContent) {
-      messageContent.innerHTML = tableContent;
+      messageBody.innerHTML = tableContent;
     } else if (typeof marked !== 'undefined') {
-      messageContent.innerHTML = marked.parse(message);
+      messageBody.innerHTML = marked.parse(message);
     } else {
-      messageContent.textContent = message;
+      messageBody.textContent = message;
     }
   } else {
-    messageContent.textContent = message;
+    messageBody.textContent = message;
   }
 
+  messageContent.appendChild(messageBody);
   messageDiv.appendChild(messageContent);
   chatArea.appendChild(messageDiv);
 
@@ -665,9 +721,9 @@ function appendMessageToUI(message, isUser = false, isError = false) {
 }
 
 // Public function: Add message and optionally persist to localStorage
-function addMessageToChat(message, isUser = false, isError = false, isSystemNotification = false, skipHistory = false) {
+function addMessageToChat(message, isUser = false, isError = false, isSystemNotification = false, skipHistory = false, routeMeta = null) {
   // Add to UI
-  appendMessageToUI(message, isUser, isError);
+  appendMessageToUI(message, isUser, isError, routeMeta);
 
   // Skip storing system notifications or intentionally non-persisted messages (e.g., slash commands)
   // Only store actual user queries and assistant responses that should be remembered
@@ -679,7 +735,8 @@ function addMessageToChat(message, isUser = false, isError = false, isSystemNoti
   chatMessages.push({
     content: message,
     isUser: isUser,
-    timestamp: new Date().toISOString()
+    timestamp: new Date().toISOString(),
+    routeMeta: routeMeta || undefined
   });
 
   // Persist to localStorage
@@ -1149,16 +1206,17 @@ async function sendMessage(message) {
 
     const hasResponseField = Object.prototype.hasOwnProperty.call(data, 'response');
     const responseText = typeof data.response === 'string' ? data.response : null;
+    const routeMeta = normalizeRouteMetadata(data);
     const toolCallsText = formatToolCallsForChat(data.toolCalls);
 
     if (hasResponseField && responseText !== null) {
       // Skip persisting assistant replies for slash commands
       if (responseText.trim().length > 0) {
-        addMessageToChat(responseText, false, false, false, isSlashCommand);
+        addMessageToChat(responseText, false, false, false, isSlashCommand, routeMeta);
       } else if (toolCallsText) {
-        addMessageToChat(toolCallsText, false, false, false, isSlashCommand);
+        addMessageToChat(toolCallsText, false, false, false, isSlashCommand, routeMeta);
       } else {
-        addMessageToChat('(no text response)', false, false, false, isSlashCommand);
+        addMessageToChat('(no text response)', false, false, false, isSlashCommand, routeMeta);
       }
 
       // Check if this was a successful /switch command and refresh agent display and sidebar

@@ -28,6 +28,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/skills"
 	"github.com/johnjallday/ori-agent/internal/store"
 	"github.com/johnjallday/ori-agent/internal/types"
+	"github.com/johnjallday/ori-agent/internal/utilitytelemetry"
 	"github.com/johnjallday/ori-agent/internal/workspace"
 	"github.com/oriagent/ori-pluginapi"
 )
@@ -57,19 +58,21 @@ type pluginDefinitionCache struct {
 }
 
 type Handler struct {
-	defCache       map[string]*pluginDefinitionCache
-	defMu          sync.RWMutex
-	pluginLoadMu   sync.Mutex // Mutex for lazy loading plugins
-	store          store.Store
-	clientFactory  *client.Factory
-	llmFactory     *llm.Factory
-	healthManager  *healthhttp.Manager
-	commandHandler *CommandHandler
-	orchestrator   *orchestration.Orchestrator
-	costTracker    *llm.CostTracker
-	sessionStore   session.HybridStore
-	toolCallStore  session.ToolCallStore
-	evolutionSvc   interface {
+	defCache         map[string]*pluginDefinitionCache
+	defMu            sync.RWMutex
+	pluginLoadMu     sync.Mutex // Mutex for lazy loading plugins
+	utilityRegistry  *UtilityToolRegistry
+	utilityTelemetry *utilitytelemetry.Tracker
+	store            store.Store
+	clientFactory    *client.Factory
+	llmFactory       *llm.Factory
+	healthManager    *healthhttp.Manager
+	commandHandler   *CommandHandler
+	orchestrator     *orchestration.Orchestrator
+	costTracker      *llm.CostTracker
+	sessionStore     session.HybridStore
+	toolCallStore    session.ToolCallStore
+	evolutionSvc     interface {
 		AwardMessageXP(agentName string, tokenCount int, userMessage string) error
 	}
 	skillsManager interface {
@@ -89,11 +92,13 @@ type Handler struct {
 
 func NewHandler(store store.Store, clientFactory *client.Factory) *Handler {
 	return &Handler{
-		store:          store,
-		clientFactory:  clientFactory,
-		llmFactory:     nil,
-		commandHandler: NewCommandHandler(store),
-		defCache:       make(map[string]*pluginDefinitionCache),
+		store:            store,
+		clientFactory:    clientFactory,
+		llmFactory:       nil,
+		commandHandler:   NewCommandHandler(store),
+		defCache:         make(map[string]*pluginDefinitionCache),
+		utilityRegistry:  NewDefaultUtilityToolRegistry(),
+		utilityTelemetry: utilitytelemetry.NewTracker(200),
 	}
 }
 
@@ -209,6 +214,21 @@ func (h *Handler) SetSkillsManager(manager interface {
 	h.commandHandler.SetSkillsManager(manager)
 }
 
+// SetUtilityToolRegistry sets the native utility tool registry used by chat routing.
+func (h *Handler) SetUtilityToolRegistry(registry *UtilityToolRegistry) {
+	h.utilityRegistry = registry
+}
+
+// SetUtilityTelemetry sets the utility telemetry tracker.
+func (h *Handler) SetUtilityTelemetry(tracker *utilitytelemetry.Tracker) {
+	h.utilityTelemetry = tracker
+}
+
+// UtilityTelemetry returns the utility telemetry tracker.
+func (h *Handler) UtilityTelemetry() *utilitytelemetry.Tracker {
+	return h.utilityTelemetry
+}
+
 // storeToolCall stores a tool call record for analysis
 func (h *Handler) storeToolCall(ctx context.Context, sessionID, messageID, toolName, arguments, result, errorMsg string, durationMs int) {
 	if h.toolCallStore == nil || sessionID == "" {
@@ -259,9 +279,114 @@ func (h *Handler) getSessionID(r *http.Request) string {
 	return r.Header.Get("X-Session-ID")
 }
 
+func (h *Handler) tryHandleUtilityDirect(
+	w http.ResponseWriter,
+	baseCtx context.Context,
+	ag *agent.Agent,
+	agentName string,
+	query string,
+	sessionID string,
+	decisionInput *UtilityRouteDecision,
+	plannerDecision *types.PlannerDecision,
+) bool {
+	if h == nil || ag == nil || strings.TrimSpace(query) == "" {
+		return false
+	}
+
+	decision := UtilityRouteDecision{}
+	if decisionInput != nil {
+		decision = *decisionInput
+	} else {
+		decision = classifyUtilityRoute(query)
+	}
+	if decision.Mode != UtilityRouteDirect || strings.TrimSpace(decision.ToolName) == "" {
+		return false
+	}
+
+	if h.utilityTelemetry != nil {
+		h.utilityTelemetry.RecordRouteDecision(string(decision.Mode), decision.Reason)
+	}
+
+	tool, found := h.findTool(ag, agentName, decision.ToolName)
+	if !found || tool == nil {
+		if h.utilityTelemetry != nil {
+			h.utilityTelemetry.RecordDelegationEvent(routeModeAssistantChat, "utility tool missing; fallback to chat", agentName)
+		}
+		return false
+	}
+
+	start := time.Now()
+	if h.utilityTelemetry != nil {
+		h.utilityTelemetry.RecordToolInvocation(decision.ToolName, "")
+	}
+	toolCtx, toolCancel := context.WithTimeout(baseCtx, ToolExecutionTimeout)
+	rawResult, err := ExecuteToolWithFiles(toolCtx, tool, decision.ToolName, decision.ToolArgs, nil)
+	toolCancel()
+
+	duration := time.Since(start)
+	h.recordToolCallStats(decision.ToolName, duration, err)
+	providerName := inferUtilityProvider(decision.ToolName, rawResult)
+	if h.utilityTelemetry != nil {
+		errText := ""
+		if err != nil {
+			errText = err.Error()
+		}
+		h.utilityTelemetry.RecordToolResult(decision.ToolName, providerName, err == nil, duration, errText)
+	}
+
+	responseText := ""
+	success := err == nil
+	if err != nil {
+		responseText = formatUtilityDirectError(decision.ToolName, err)
+	} else {
+		responseText = formatUtilityDirectResponse(decision.ToolName, rawResult)
+	}
+	if strings.TrimSpace(responseText) == "" {
+		responseText = "I completed the utility request."
+	}
+
+	ag.Messages = append(ag.Messages, openai.UserMessage(query))
+	ag.Messages = append(ag.Messages, openai.AssistantMessage(responseText))
+	_ = h.store.SetAgent(agentName, ag)
+
+	h.storeMessageInSession(baseCtx, sessionID, "user", query)
+	h.storeMessageInSession(baseCtx, sessionID, "assistant", responseText)
+
+	payload := attachRouteMetadata(map[string]any{
+		"response":  responseText,
+		"tool_args": decision.ToolArgs,
+		"success":   success,
+		"toolCalls": []map[string]string{
+			{
+				"function": decision.ToolName,
+				"args":     decision.ToolArgs,
+				"result":   rawResult,
+			},
+		},
+	}, chatRouteMetadata{
+		Mode:      string(decision.Mode),
+		ToolName:  decision.ToolName,
+		Provider:  providerName,
+		Reason:    decision.Reason,
+		ToolCount: 1,
+	})
+	if err != nil {
+		payload["error"] = err.Error()
+	}
+	writeJSONResponse(w, attachPlannerDecision(payload, plannerDecision))
+	return true
+}
+
 // findTool searches for a tool by name in both plugins and MCP servers.
 // If the plugin is not yet loaded, it will be loaded lazily on first use.
 func (h *Handler) findTool(ag *agent.Agent, agentName, toolName string) (pluginapi.PluginTool, bool) {
+	// Native utility tools are checked first to prioritize accurate daily utility behavior.
+	if h.utilityRegistry != nil {
+		if tool, ok := h.utilityRegistry.GetTool(toolName); ok {
+			return tool, true
+		}
+	}
+
 	// First check native plugins
 	for pluginName, plugin := range ag.Plugins {
 		if plugin.Definition.Name == toolName {
@@ -632,11 +757,13 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 		cmd, err := parseDirectToolCommand(q)
 		if err != nil {
 			// Return parsing error as response
-			orihttp.WriteJSON(w, map[string]any{
+			orihttp.WriteJSON(w, attachRouteMetadata(map[string]any{
 				"response":         fmt.Sprintf("❌ **Invalid command**: %v\n\nFormat: `/tool <tool_name> {\"key\": \"value\"}`\nExample: `/tool math {\"operation\": \"add\", \"a\": 5, \"b\": 3}`", err),
 				"direct_tool_call": true,
 				"success":          false,
-			})
+			}, chatRouteMetadata{
+				Mode: routeModeDirectTool,
+			}))
 			return
 		}
 
@@ -685,11 +812,33 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	routeDecision := classifyUtilityRoute(originalQuery)
+
+	// Utility-direct requests bypass planner/delegation and execute native tools immediately.
+	if invokedSkill == nil {
+		if routeDecision.Mode != "" && routeDecision.Mode != UtilityRouteDirect && h.utilityTelemetry != nil {
+			h.utilityTelemetry.RecordRouteDecision(string(routeDecision.Mode), routeDecision.Reason)
+		}
+		if h.tryHandleUtilityDirect(w, base, ag, current, originalQuery, sessionID, &routeDecision, nil) {
+			return
+		}
+		if h.utilityTelemetry != nil {
+			if routeDecision.Mode != "" {
+				h.utilityTelemetry.RecordDelegationEvent(string(routeDecision.Mode), routeDecision.Reason, current)
+			} else {
+				h.utilityTelemetry.RecordDelegationEvent(routeModeAssistantChat, "standard assistant chat flow", current)
+			}
+		}
+	}
+
 	preflight := h.maybeAutoEnableMCPForPrompt(current, ag, originalQuery)
 	if preflight != nil && strings.TrimSpace(preflight.userMessage) != "" {
-		writeJSONResponse(w, map[string]any{
+		writeJSONResponse(w, attachRouteMetadata(map[string]any{
 			"response": preflight.userMessage,
-		})
+		}, chatRouteMetadata{
+			Mode:   routeModeAssistantChat,
+			Reason: "mcp preflight notice",
+		}))
 		return
 	}
 
@@ -766,7 +915,10 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 						if responseText == "" && result.Status == "pending_approval" {
 							responseText = "Dynamic agent approval required to continue."
 						}
-						orihttp.WriteJSON(w, map[string]any{
+						if h.utilityTelemetry != nil {
+							h.utilityTelemetry.RecordDelegationEvent(routeModeSpecialistFlow, "planner selected multi-agent execution", current)
+						}
+						orihttp.WriteJSON(w, attachRouteMetadata(map[string]any{
 							"response":               responseText,
 							"orchestrated":           true,
 							"studio_id":              result.WorkspaceID,
@@ -775,7 +927,10 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 							"planner_decision":       result.PlannerDecision,
 							"planner_plan":           plan,
 							"dynamic_agent_requests": result.DynamicAgentRequests,
-						})
+						}, chatRouteMetadata{
+							Mode:   routeModeSpecialistFlow,
+							Reason: "planner selected multi-agent execution",
+						}))
 						return
 					}
 				}
@@ -795,6 +950,29 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 
 	// Build tools - refresh definitions to get latest dynamic enums (e.g., script lists)
 	tools := []llm.Tool{}
+	toolSeen := make(map[string]struct{})
+	appendTool := func(def llm.Tool) {
+		name := strings.TrimSpace(def.Name)
+		if name == "" {
+			return
+		}
+		if _, exists := toolSeen[name]; exists {
+			return
+		}
+		toolSeen[name] = struct{}{}
+		tools = append(tools, def)
+	}
+
+	// Add native utility tools first
+	if h.utilityRegistry != nil {
+		for _, def := range h.utilityRegistry.ListToolDefinitions() {
+			appendTool(llm.Tool{
+				Name:        def.Name,
+				Description: def.Description,
+				Parameters:  def.Parameters,
+			})
+		}
+	}
 
 	// Add native plugin tools
 	for pluginName, pl := range ag.Plugins {
@@ -814,7 +992,7 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 		}
 
 		// Convert pluginapi.Tool to llm.Tool
-		tools = append(tools, llm.Tool{
+		appendTool(llm.Tool{
 			Name:        def.Name,
 			Description: def.Description,
 			Parameters:  def.Parameters,
@@ -834,7 +1012,7 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 			}
 			for _, mcpTool := range mcpTools {
 				mcpDef := mcpTool.Definition()
-				tools = append(tools, llm.Tool{
+				appendTool(llm.Tool{
 					Name:        mcpDef.Name,
 					Description: mcpDef.Description,
 					Parameters:  mcpDef.Parameters,

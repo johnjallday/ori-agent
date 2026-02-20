@@ -224,6 +224,40 @@ func TestChatEndpointWithoutAPIKey(t *testing.T) {
 	}
 }
 
+func TestHomeAssistantRouteUtilityPrompt(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping integration test in short mode")
+	}
+
+	server := startTestServer(t)
+	defer server.Cleanup()
+
+	body, _ := json.Marshal(map[string]string{
+		"prompt": "what time is it in tokyo",
+	})
+	resp := testutil.MakeRequest(t, server.Client, server.Server.URL, testutil.HTTPRequest{
+		Method: "POST",
+		Path:   "/api/home-assistant/route",
+		Body:   bytes.NewBuffer(body),
+		Headers: map[string]string{
+			"Content-Type": "application/json",
+		},
+	})
+	defer func() { _ = resp.Body.Close() }()
+
+	testutil.AssertStatusCode(t, http.StatusOK, resp.StatusCode)
+
+	var route map[string]any
+	testutil.ReadJSONResponse(t, resp, &route)
+
+	if intent, _ := route["intent"].(string); intent != "utility_direct" {
+		t.Fatalf("expected intent utility_direct, got %q", intent)
+	}
+	if requiresCreation, _ := route["requires_creation"].(bool); requiresCreation {
+		t.Fatalf("expected requires_creation=false")
+	}
+}
+
 // Helper to start test server
 func startTestServer(t *testing.T) *testutil.TestServer {
 	// Import would be needed here, but to avoid circular dependencies,
@@ -264,6 +298,21 @@ func startTestServer(t *testing.T) *testutil.TestServer {
 			_ = json.NewEncoder(w).Encode(map[string]interface{}{
 				"theme": "light",
 			})
+		case "/api/home-assistant/route":
+			if r.Method == "POST" {
+				w.Header().Set("Content-Type", "application/json")
+				_ = json.NewEncoder(w).Encode(map[string]interface{}{
+					"intent":               "utility_direct",
+					"intent_label":         "daily utility",
+					"matched_agent":        "Ori",
+					"score":                6,
+					"requires_creation":    false,
+					"suggested_agent_name": "Utility Assistant",
+					"suggested_agent_type": "general",
+				})
+				return
+			}
+			http.NotFound(w, r)
 		default:
 			http.NotFound(w, r)
 		}

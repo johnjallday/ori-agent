@@ -50,6 +50,11 @@ func (h *Handler) executeToolCallsCommonWithSession(
 
 		logger.Debug("Executing tool", logger.Fields{"name": name})
 
+		trackUtilityTool := h.utilityTelemetry != nil && isNativeUtilityToolName(name)
+		if trackUtilityTool {
+			h.utilityTelemetry.RecordToolInvocation(name, "")
+		}
+
 		// Find tool by name (searches both plugins and MCP tools, with lazy loading)
 		tool, found := h.findTool(ag, agentName, name)
 
@@ -83,6 +88,14 @@ func (h *Handler) executeToolCallsCommonWithSession(
 			} else {
 				logger.Info("Tool execution completed", logger.Fields{"tool": name})
 			}
+		}
+
+		if trackUtilityTool {
+			errText := ""
+			if err != nil {
+				errText = err.Error()
+			}
+			h.utilityTelemetry.RecordToolResult(name, inferUtilityProvider(name, result), err == nil, duration, errText)
 		}
 
 		durationMs := int(duration.Milliseconds())
@@ -167,9 +180,11 @@ func (h *Handler) trackUsageCommon(provider, model, agentName string, usage llm.
 
 // writeErrorResponse writes a standardized error response
 func writeErrorResponse(w http.ResponseWriter, message string) {
-	writeJSONResponse(w, map[string]any{
+	writeJSONResponse(w, attachRouteMetadata(map[string]any{
 		"response": fmt.Sprintf("❌ **Error**: %v", message),
-	})
+	}, chatRouteMetadata{
+		Mode: routeModeAssistantChat,
+	}))
 }
 
 // getFollowUpSystemPrompt returns the system prompt for follow-up requests after tool execution
