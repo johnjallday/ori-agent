@@ -196,6 +196,9 @@ document.getElementById('systemDiagnosticsBtn')?.addEventListener('click', async
 // Utility Web Search Settings
 (function() {
   const providerSelect = document.getElementById('utilitySearchProvider');
+  const browserControlProviderSelect = document.getElementById('utilityBrowserControlProvider');
+  const playwrightBrowserSelect = document.getElementById('utilityPlaywrightBrowser');
+  const playwrightExecutablePathInput = document.getElementById('utilityPlaywrightExecutablePath');
   const saveProviderBtn = document.getElementById('saveUtilitySearchSettingsBtn');
   const openApiModalBtn = document.getElementById('openSearchApiModalBtn');
   const keyStatusEl = document.getElementById('utilityBraveApiKeyStatus');
@@ -223,6 +226,34 @@ document.getElementById('systemDiagnosticsBtn')?.addEventListener('click', async
     switch (normalized) {
       case 'brave':
       case 'duckduckgo':
+      case 'auto':
+        return normalized;
+      default:
+        return 'auto';
+    }
+  }
+
+  function normalizeBrowserControlProvider(provider) {
+    const normalized = String(provider || '').toLowerCase();
+    switch (normalized) {
+      case 'playwright':
+      case 'browserbase':
+      case 'puppeteer':
+      case 'auto':
+        return normalized;
+      default:
+        return 'auto';
+    }
+  }
+
+  function normalizePlaywrightBrowser(browser) {
+    const normalized = String(browser || '').toLowerCase();
+    switch (normalized) {
+      case 'chrome':
+      case 'firefox':
+      case 'webkit':
+      case 'msedge':
+      case 'brave':
       case 'auto':
         return normalized;
       default:
@@ -309,10 +340,22 @@ document.getElementById('systemDiagnosticsBtn')?.addEventListener('click', async
   function applyUtilitySettings(utilitySettings) {
     utility = utilitySettings || {};
     const provider = normalizeProvider(utility.search_provider);
+    const browserControlProvider = normalizeBrowserControlProvider(utility.browser_control_provider);
+    const playwrightBrowser = normalizePlaywrightBrowser(utility.playwright_browser);
+    const playwrightExecutablePath = String(utility.playwright_executable_path || '').trim();
     const hasBraveKey = Boolean(utility.has_brave_api_key);
     const masked = utility.brave_api_key_masked || '';
 
     providerSelect.value = provider;
+    if (browserControlProviderSelect) {
+      browserControlProviderSelect.value = browserControlProvider;
+    }
+    if (playwrightBrowserSelect) {
+      playwrightBrowserSelect.value = playwrightBrowser;
+    }
+    if (playwrightExecutablePathInput) {
+      playwrightExecutablePathInput.value = playwrightExecutablePath;
+    }
     updateKeySummary(hasBraveKey, masked);
     updateStatus(provider, hasBraveKey);
   }
@@ -367,16 +410,24 @@ document.getElementById('systemDiagnosticsBtn')?.addEventListener('click', async
 
   saveProviderBtn?.addEventListener('click', async function() {
     const provider = normalizeProvider(providerSelect.value);
+    const browserControlProvider = normalizeBrowserControlProvider(browserControlProviderSelect?.value);
+    const playwrightBrowser = normalizePlaywrightBrowser(playwrightBrowserSelect?.value);
+    const playwrightExecutablePath = (playwrightExecutablePathInput?.value || '').trim();
     setButtonLoading(saveProviderBtn, true, 'Saving...');
     try {
-      await saveUtilitySettings({ search_provider: provider });
-      notify('Web search settings saved.', 'success');
+      await saveUtilitySettings({
+        search_provider: provider,
+        browser_control_provider: browserControlProvider,
+        playwright_browser: playwrightBrowser,
+        playwright_executable_path: playwrightExecutablePath
+      });
+      notify('Web tool settings saved.', 'success');
       if (provider === 'brave' && !utility?.has_brave_api_key) {
         notify('Brave Search requires an API key. Add one in "Manage API Key".', 'warning');
       }
     } catch (error) {
-      console.error('Failed to save web search settings:', error);
-      notify('Failed to save web search settings: ' + error.message, 'error');
+      console.error('Failed to save web tool settings:', error);
+      notify('Failed to save web tool settings: ' + error.message, 'error');
     } finally {
       setButtonLoading(saveProviderBtn, false);
     }

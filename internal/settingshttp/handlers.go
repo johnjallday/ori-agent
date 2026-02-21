@@ -319,6 +319,9 @@ type utilitySettingsResponse struct {
 	RetryAttempts           int      `json:"retry_attempts"`
 	RetryDelayMs            int      `json:"retry_delay_ms"`
 	SearchProvider          string   `json:"search_provider"`
+	BrowserControlProvider  string   `json:"browser_control_provider"`
+	PlaywrightBrowser       string   `json:"playwright_browser"`
+	PlaywrightExecutable    string   `json:"playwright_executable_path"`
 	WeatherProvider         string   `json:"weather_provider"`
 	WeatherGeocodingURL     string   `json:"weather_geocoding_url,omitempty"`
 	WeatherForecastURL      string   `json:"weather_forecast_url,omitempty"`
@@ -337,6 +340,9 @@ type utilitySettingsUpdateRequest struct {
 	RetryAttempts           *int      `json:"retry_attempts,omitempty"`
 	RetryDelayMs            *int      `json:"retry_delay_ms,omitempty"`
 	SearchProvider          *string   `json:"search_provider,omitempty"`
+	BrowserControlProvider  *string   `json:"browser_control_provider,omitempty"`
+	PlaywrightBrowser       *string   `json:"playwright_browser,omitempty"`
+	PlaywrightExecutable    *string   `json:"playwright_executable_path,omitempty"`
 	BraveAPIKey             *string   `json:"brave_api_key,omitempty"`
 	WeatherProvider         *string   `json:"weather_provider,omitempty"`
 	WeatherGeocodingURL     *string   `json:"weather_geocoding_url,omitempty"`
@@ -379,6 +385,15 @@ func (h *Handler) UtilitySettingsHandler(w http.ResponseWriter, r *http.Request)
 		}
 		if req.SearchProvider != nil {
 			next.SearchProvider = strings.TrimSpace(*req.SearchProvider)
+		}
+		if req.BrowserControlProvider != nil {
+			next.BrowserControlProvider = strings.TrimSpace(*req.BrowserControlProvider)
+		}
+		if req.PlaywrightBrowser != nil {
+			next.PlaywrightBrowser = strings.TrimSpace(*req.PlaywrightBrowser)
+		}
+		if req.PlaywrightExecutable != nil {
+			next.PlaywrightExecutable = strings.TrimSpace(*req.PlaywrightExecutable)
 		}
 		if req.BraveAPIKey != nil {
 			next.BraveAPIKey = strings.TrimSpace(*req.BraveAPIKey)
@@ -440,6 +455,9 @@ func toUtilitySettingsResponse(settings config.UtilitySettings) utilitySettingsR
 		RetryAttempts:           settings.RetryAttempts,
 		RetryDelayMs:            settings.RetryDelayMs,
 		SearchProvider:          settings.SearchProvider,
+		BrowserControlProvider:  settings.BrowserControlProvider,
+		PlaywrightBrowser:       settings.PlaywrightBrowser,
+		PlaywrightExecutable:    settings.PlaywrightExecutable,
 		WeatherProvider:         settings.WeatherProvider,
 		WeatherGeocodingURL:     settings.WeatherGeocodingURL,
 		WeatherForecastURL:      settings.WeatherForecastURL,

@@ -658,6 +658,40 @@
               </div>
 
               <div class="settings-field">
+                <label class="settings-label" for="utilityBrowserControlProvider">Browser Control Provider</label>
+                <select id="utilityBrowserControlProvider" class="form-select settings-input settings-select" aria-describedby="utilityBrowserControlProviderHelp">
+                  <option value="auto">Auto (Prefer Playwright)</option>
+                  <option value="playwright">Playwright</option>
+                  <option value="browserbase">Browserbase</option>
+                  <option value="puppeteer">Puppeteer</option>
+                </select>
+                <span id="utilityBrowserControlProviderHelp" class="settings-help">Sets which MCP browser connector Ori tries first for browser actions.</span>
+              </div>
+
+              <div class="settings-field">
+                <label class="settings-label" for="utilityPlaywrightBrowser">Playwright Browser</label>
+                <select id="utilityPlaywrightBrowser" class="form-select settings-input settings-select" aria-describedby="utilityPlaywrightBrowserHelp">
+                  <option value="auto">Auto (Playwright default)</option>
+                  <option value="chrome">Chrome</option>
+                  <option value="webkit">Safari (WebKit)</option>
+                  <option value="firefox">Firefox</option>
+                  <option value="msedge">Microsoft Edge</option>
+                  <option value="brave">Brave</option>
+                </select>
+                <span id="utilityPlaywrightBrowserHelp" class="settings-help">Controls Playwright MCP browser selection. Brave uses Chrome mode with a Brave executable path.</span>
+              </div>
+
+              <div class="settings-field">
+                <label class="settings-label" for="utilityPlaywrightExecutablePath">Playwright Executable Path (Optional)</label>
+                <input id="utilityPlaywrightExecutablePath"
+                       type="text"
+                       class="form-control settings-input"
+                       placeholder="/Applications/Brave Browser.app/Contents/MacOS/Brave Browser"
+                       aria-describedby="utilityPlaywrightExecutablePathHelp">
+                <span id="utilityPlaywrightExecutablePathHelp" class="settings-help">Optional path to an installed browser binary (Brave/custom). Leave empty to use Playwright defaults.</span>
+              </div>
+
+              <div class="settings-field">
                 <label class="settings-label">Brave API Key</label>
                 <div class="settings-info-box utility-search-key-box mb-0">
                   <div class="settings-info-row">
@@ -678,7 +712,7 @@
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" class="me-2">
                   <path d="M15,9H5V5H15M12,19A3,3 0 0,1 9,16A3,3 0 0,1 12,13A3,3 0 0,1 15,16A3,3 0 0,1 12,19M17,3H5C3.89,3 3,3.9 3,5V19A2,2 0 0,0 5,21H19A2,2 0 0,0 21,19V7L17,3Z"/>
                 </svg>
-                Save Search Settings
+                Save Web Tool Settings
               </button>
               <button id="openSearchApiModalBtn" class="modern-btn modern-btn-secondary">
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" class="me-2">

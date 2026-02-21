@@ -6,9 +6,12 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"runtime"
+	"strings"
 
 	agenthttp "github.com/johnjallday/ori-agent/internal/agenthttp"
 	"github.com/johnjallday/ori-agent/internal/chathttp"
+	"github.com/johnjallday/ori-agent/internal/config"
 	"github.com/johnjallday/ori-agent/internal/devicehttp"
 	"github.com/johnjallday/ori-agent/internal/evolution"
 	"github.com/johnjallday/ori-agent/internal/evolutionhttp"
@@ -20,6 +23,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/healthhttp"
 	"github.com/johnjallday/ori-agent/internal/locationhttp"
 	"github.com/johnjallday/ori-agent/internal/logger"
+	"github.com/johnjallday/ori-agent/internal/mcp"
 	"github.com/johnjallday/ori-agent/internal/mcphttp"
 	"github.com/johnjallday/ori-agent/internal/modelcategoryhttp"
 	"github.com/johnjallday/ori-agent/internal/notehttp"
@@ -59,6 +63,8 @@ func (b *ServerBuilder) initializeHandlers() error {
 	applyUtilitySettings := func() {
 		cfg := b.configManager.Get()
 		b.chatHandler.SetUtilityToolRegistry(buildUtilityToolRegistry(cfg.Utility))
+		b.chatHandler.SetBrowserMCPPreference(cfg.Utility.BrowserControlProvider)
+		b.syncPlaywrightBrowserSettings(cfg.Utility)
 	}
 	applyUtilitySettings()
 	b.settingsHandler.SetUtilitySettingsReloader(applyUtilitySettings)
@@ -226,4 +232,137 @@ func (b *ServerBuilder) initializeHandlers() error {
 	b.chatHandler.SetSkillsManager(b.skillsManager)
 
 	return nil
+}
+
+func (b *ServerBuilder) syncPlaywrightBrowserSettings(utility config.UtilitySettings) {
+	if b == nil || b.mcpConfigManager == nil || b.mcpRegistry == nil {
+		return
+	}
+
+	current, err := b.mcpConfigManager.GetServer("playwright")
+	if err != nil || current == nil {
+		return // Playwright MCP is not configured.
+	}
+
+	desired := *current
+	desired.Env = resolvePlaywrightEnv(desired.Env, utility)
+	if stringMapEqual(current.Env, desired.Env) {
+		return
+	}
+
+	if err := b.mcpConfigManager.UpdateServer(desired); err != nil {
+		logger.Warn("failed to persist Playwright MCP browser settings", logger.Fields{"error": err})
+		return
+	}
+
+	wasRunning := false
+	status, statusErr := b.mcpRegistry.GetServerStatus("playwright")
+	if statusErr == nil {
+		wasRunning = status == mcp.StatusRunning || status == mcp.StatusStarting || status == mcp.StatusRestarting
+	}
+
+	if err := b.mcpRegistry.RemoveServer("playwright"); err != nil && !strings.Contains(strings.ToLower(err.Error()), "not found") {
+		logger.Warn("failed to reload Playwright MCP server after settings update", logger.Fields{"error": err})
+		return
+	}
+
+	if err := b.mcpRegistry.AddServer(desired); err != nil {
+		logger.Warn("failed to re-register Playwright MCP server after settings update", logger.Fields{"error": err})
+		return
+	}
+
+	if wasRunning {
+		if err := b.mcpRegistry.StartServer("playwright"); err != nil {
+			logger.Warn("failed to restart Playwright MCP server after settings update", logger.Fields{"error": err})
+		}
+	}
+}
+
+func resolvePlaywrightEnv(existing map[string]string, utility config.UtilitySettings) map[string]string {
+	next := make(map[string]string, len(existing))
+	for k, v := range existing {
+		next[k] = v
+	}
+
+	browserChoice := normalizePlaywrightBrowserChoice(utility.PlaywrightBrowser)
+	executablePath := strings.TrimSpace(utility.PlaywrightExecutable)
+	if browserChoice == "auto" && executablePath == "" {
+		// No explicit override requested; preserve existing server-level configuration.
+		return next
+	}
+
+	if browserChoice == "brave" {
+		if executablePath == "" {
+			executablePath = detectDefaultBraveExecutablePath()
+		}
+		browserChoice = "chrome"
+	}
+
+	delete(next, "PLAYWRIGHT_MCP_BROWSER")
+	delete(next, "PLAYWRIGHT_MCP_EXECUTABLE_PATH")
+
+	if browserChoice != "auto" {
+		next["PLAYWRIGHT_MCP_BROWSER"] = browserChoice
+	}
+	if executablePath != "" {
+		next["PLAYWRIGHT_MCP_EXECUTABLE_PATH"] = executablePath
+	}
+
+	return next
+}
+
+func normalizePlaywrightBrowserChoice(raw string) string {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "chrome", "firefox", "webkit", "msedge", "brave":
+		return strings.ToLower(strings.TrimSpace(raw))
+	default:
+		return "auto"
+	}
+}
+
+func detectDefaultBraveExecutablePath() string {
+	candidates := []string{}
+
+	switch runtime.GOOS {
+	case "darwin":
+		candidates = append(candidates, "/Applications/Brave Browser.app/Contents/MacOS/Brave Browser")
+	case "linux":
+		candidates = append(candidates,
+			"/usr/bin/brave-browser",
+			"/usr/bin/brave-browser-stable",
+			"/snap/bin/brave",
+		)
+	case "windows":
+		programFiles := strings.TrimSpace(os.Getenv("ProgramFiles"))
+		programFilesX86 := strings.TrimSpace(os.Getenv("ProgramFiles(x86)"))
+		if programFiles != "" {
+			candidates = append(candidates, filepath.Join(programFiles, "BraveSoftware", "Brave-Browser", "Application", "brave.exe"))
+		}
+		if programFilesX86 != "" {
+			candidates = append(candidates, filepath.Join(programFilesX86, "BraveSoftware", "Brave-Browser", "Application", "brave.exe"))
+		}
+	}
+
+	for _, candidate := range candidates {
+		if candidate == "" {
+			continue
+		}
+		if _, err := os.Stat(candidate); err == nil {
+			return candidate
+		}
+	}
+
+	return ""
+}
+
+func stringMapEqual(a, b map[string]string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for key, value := range a {
+		if b[key] != value {
+			return false
+		}
+	}
+	return true
 }

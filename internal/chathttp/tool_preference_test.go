@@ -111,6 +111,48 @@ func TestFindTool_BrowserPrefersPlaywrightServer(t *testing.T) {
 	}
 }
 
+func TestFindTool_BrowserHonorsBrowserbasePreference(t *testing.T) {
+	registry := &mockMCPRegistry{
+		getFn: func(server string) ([]pluginapi.PluginTool, error) {
+			switch server {
+			case "playwright":
+				return []pluginapi.PluginTool{
+					mockNamedTool{name: "browser", result: "playwright"},
+				}, nil
+			case "browserbase":
+				return []pluginapi.PluginTool{
+					mockNamedTool{name: "browser", result: "browserbase"},
+				}, nil
+			default:
+				return nil, nil
+			}
+		},
+	}
+
+	h := &Handler{
+		utilityRegistry: NewDefaultUtilityToolRegistry(),
+		mcpRegistry:     registry,
+	}
+	h.SetBrowserMCPPreference("browserbase")
+
+	ag := &agent.Agent{
+		MCPServers: []string{"playwright", "browserbase"},
+	}
+
+	tool, found := h.findTool(ag, "Email Triage Assistant", "browser")
+	if !found {
+		t.Fatal("expected browser tool to be found")
+	}
+
+	result, err := tool.Call(context.Background(), `{"action":"open_url","url":"https://instagram.com"}`)
+	if err != nil {
+		t.Fatalf("unexpected error from preferred MCP browser tool: %v", err)
+	}
+	if result != "browserbase" {
+		t.Fatalf("expected browserbase browser tool to be preferred, got %q", result)
+	}
+}
+
 func TestFindTool_BrowserSuppressedWhenBrowserMCPConfiguredButNoMatchingTool(t *testing.T) {
 	registry := &mockMCPRegistry{
 		getFn: func(server string) ([]pluginapi.PluginTool, error) {

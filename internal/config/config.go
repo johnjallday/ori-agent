@@ -16,7 +16,10 @@ type UtilitySettings struct {
 	TimeoutMs               int      `json:"timeout_ms,omitempty"`
 	RetryAttempts           int      `json:"retry_attempts,omitempty"`
 	RetryDelayMs            int      `json:"retry_delay_ms,omitempty"`
-	SearchProvider          string   `json:"search_provider,omitempty"` // auto, duckduckgo, brave
+	SearchProvider          string   `json:"search_provider,omitempty"`          // auto, duckduckgo, brave
+	BrowserControlProvider  string   `json:"browser_control_provider,omitempty"` // auto, playwright, browserbase, puppeteer
+	PlaywrightBrowser       string   `json:"playwright_browser,omitempty"`       // auto, chrome, firefox, webkit, msedge, brave
+	PlaywrightExecutable    string   `json:"playwright_executable_path,omitempty"`
 	BraveAPIKey             string   `json:"brave_api_key,omitempty"`
 	WeatherProvider         string   `json:"weather_provider,omitempty"` // open-meteo
 	WeatherGeocodingURL     string   `json:"weather_geocoding_url,omitempty"`
@@ -138,6 +141,8 @@ func defaultUtilitySettings() UtilitySettings {
 		RetryAttempts:           1,
 		RetryDelayMs:            150,
 		SearchProvider:          "auto",
+		BrowserControlProvider:  "auto",
+		PlaywrightBrowser:       "auto",
 		WeatherProvider:         "open-meteo",
 		WebFetchMaxResponseSize: 1 << 20,
 		BrowserMaxResponseSize:  1 << 20,
@@ -400,6 +405,29 @@ func validateUtilitySettings(settings *UtilitySettings) {
 	default:
 		settings.SearchProvider = defaults.SearchProvider
 	}
+
+	browserControlProvider := strings.ToLower(strings.TrimSpace(settings.BrowserControlProvider))
+	switch browserControlProvider {
+	case "", "auto", "playwright", "browserbase", "puppeteer":
+		if browserControlProvider == "" {
+			browserControlProvider = defaults.BrowserControlProvider
+		}
+		settings.BrowserControlProvider = browserControlProvider
+	default:
+		settings.BrowserControlProvider = defaults.BrowserControlProvider
+	}
+
+	playwrightBrowser := strings.ToLower(strings.TrimSpace(settings.PlaywrightBrowser))
+	switch playwrightBrowser {
+	case "", "auto", "chrome", "firefox", "webkit", "msedge", "brave":
+		if playwrightBrowser == "" {
+			playwrightBrowser = defaults.PlaywrightBrowser
+		}
+		settings.PlaywrightBrowser = playwrightBrowser
+	default:
+		settings.PlaywrightBrowser = defaults.PlaywrightBrowser
+	}
+	settings.PlaywrightExecutable = strings.TrimSpace(settings.PlaywrightExecutable)
 
 	weatherProvider := strings.ToLower(strings.TrimSpace(settings.WeatherProvider))
 	if weatherProvider == "" {

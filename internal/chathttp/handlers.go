@@ -63,6 +63,8 @@ type Handler struct {
 	pluginLoadMu     sync.Mutex // Mutex for lazy loading plugins
 	utilityRegistry  *UtilityToolRegistry
 	utilityTelemetry *utilitytelemetry.Tracker
+	settingsMu       sync.RWMutex
+	browserMCPPref   string
 	store            store.Store
 	clientFactory    *client.Factory
 	llmFactory       *llm.Factory
@@ -99,6 +101,7 @@ func NewHandler(store store.Store, clientFactory *client.Factory) *Handler {
 		defCache:         make(map[string]*pluginDefinitionCache),
 		utilityRegistry:  NewDefaultUtilityToolRegistry(),
 		utilityTelemetry: utilitytelemetry.NewTracker(200),
+		browserMCPPref:   "auto",
 	}
 }
 
@@ -217,6 +220,26 @@ func (h *Handler) SetSkillsManager(manager interface {
 // SetUtilityToolRegistry sets the native utility tool registry used by chat routing.
 func (h *Handler) SetUtilityToolRegistry(registry *UtilityToolRegistry) {
 	h.utilityRegistry = registry
+}
+
+// SetBrowserMCPPreference configures preferred MCP browser connector ordering.
+func (h *Handler) SetBrowserMCPPreference(preference string) {
+	if h == nil {
+		return
+	}
+	pref := normalizeBrowserMCPPreference(preference)
+	h.settingsMu.Lock()
+	h.browserMCPPref = pref
+	h.settingsMu.Unlock()
+}
+
+func (h *Handler) getBrowserMCPPreference() string {
+	if h == nil {
+		return "auto"
+	}
+	h.settingsMu.RLock()
+	defer h.settingsMu.RUnlock()
+	return normalizeBrowserMCPPreference(h.browserMCPPref)
 }
 
 // SetUtilityTelemetry sets the utility telemetry tracker.
@@ -483,7 +506,7 @@ func (h *Handler) findMCPToolByName(ag *agent.Agent, toolName string) (pluginapi
 	if target == "" {
 		return nil, false
 	}
-	serverNames := prioritizeMCPServersForTool(ag.MCPServers, target)
+	serverNames := prioritizeMCPServersForTool(ag.MCPServers, target, h.getBrowserMCPPreference())
 	for _, serverName := range serverNames {
 		mcpTools, err := h.getMCPToolsForServer(serverName)
 		if err != nil {
@@ -498,7 +521,7 @@ func (h *Handler) findMCPToolByName(ag *agent.Agent, toolName string) (pluginapi
 	return nil, false
 }
 
-func prioritizeMCPServersForTool(serverNames []string, toolName string) []string {
+func prioritizeMCPServersForTool(serverNames []string, toolName, browserPreference string) []string {
 	if len(serverNames) == 0 {
 		return []string{}
 	}
@@ -536,10 +559,9 @@ func prioritizeMCPServersForTool(serverNames []string, toolName string) []string
 		}
 	}
 
-	// Prefer Playwright for browser automation when available.
-	appendByName("playwright")
-	appendByName("browserbase")
-	appendByName("puppeteer")
+	for _, preferredServer := range browserMCPPriorityOrder(browserPreference) {
+		appendByName(preferredServer)
+	}
 
 	for _, serverName := range serverNames {
 		name := strings.TrimSpace(serverName)
@@ -555,6 +577,27 @@ func prioritizeMCPServersForTool(serverNames []string, toolName string) []string
 	}
 
 	return out
+}
+
+func browserMCPPriorityOrder(preference string) []string {
+	switch normalizeBrowserMCPPreference(preference) {
+	case "browserbase":
+		return []string{"browserbase", "playwright", "puppeteer"}
+	case "puppeteer":
+		return []string{"puppeteer", "playwright", "browserbase"}
+	default:
+		// Auto and explicit Playwright both prioritize Playwright first.
+		return []string{"playwright", "browserbase", "puppeteer"}
+	}
+}
+
+func normalizeBrowserMCPPreference(preference string) string {
+	switch strings.ToLower(strings.TrimSpace(preference)) {
+	case "playwright", "browserbase", "puppeteer":
+		return strings.ToLower(strings.TrimSpace(preference))
+	default:
+		return "auto"
+	}
 }
 
 func shouldPreferMCPToolOverUtility(toolName string) bool {
