@@ -170,11 +170,11 @@ func looksLikeBrowserAutomationPrompt(text string) bool {
 	if text == "" {
 		return false
 	}
-	hasBrowserContext := containsAnyPhrase(text, []string{"browser", "website", "web page", "webpage", "site"})
+	hasBrowserContext := containsAnyPhrase(text, []string{"browser", "website", "web page", "webpage", "site"}) || containsLikelyWebTarget(text)
 	if !hasBrowserContext {
 		return false
 	}
-	return containsAnyPhrase(text, []string{"open", "click", "fill", "type", "submit", "navigate", "scroll"})
+	return containsAnyPhrase(text, []string{"open", "click", "fill", "type", "submit", "navigate", "scroll", "visit", "go to"})
 }
 
 func containsAnyPhrase(text string, phrases []string) bool {
@@ -187,6 +187,57 @@ func containsAnyPhrase(text string, phrases []string) bool {
 			return true
 		}
 	}
+	return false
+}
+
+func containsLikelyWebTarget(text string) bool {
+	if text == "" {
+		return false
+	}
+
+	if strings.Contains(text, "http://") || strings.Contains(text, "https://") || strings.Contains(text, "www.") {
+		return true
+	}
+
+	tokens := strings.Fields(text)
+	for _, token := range tokens {
+		candidate := strings.TrimSpace(strings.Trim(token, " \t\r\n.,!?;:\"'()[]{}"))
+		if candidate == "" {
+			continue
+		}
+		if !strings.Contains(candidate, ".") {
+			continue
+		}
+		// Skip obvious email-like targets.
+		if strings.Contains(candidate, "@") {
+			continue
+		}
+		labels := strings.Split(candidate, ".")
+		if len(labels) < 2 {
+			continue
+		}
+		valid := true
+		for _, label := range labels {
+			label = strings.TrimSpace(label)
+			if label == "" {
+				valid = false
+				break
+			}
+			for _, r := range label {
+				if !(r >= 'a' && r <= 'z') && !(r >= '0' && r <= '9') && r != '-' {
+					valid = false
+					break
+				}
+			}
+			if !valid {
+				break
+			}
+		}
+		if valid && len(labels[len(labels)-1]) >= 2 {
+			return true
+		}
+	}
+
 	return false
 }
 

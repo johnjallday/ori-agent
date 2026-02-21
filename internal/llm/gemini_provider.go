@@ -239,7 +239,11 @@ func (p *GeminiProvider) buildRequest(req ChatRequest) (*geminiGenerateContentRe
 	if len(req.Tools) > 0 {
 		funcDecls := make([]geminiFunctionDeclaration, 0, len(req.Tools))
 		for _, tool := range req.Tools {
-			funcDecls = append(funcDecls, geminiFunctionDeclaration(tool))
+			funcDecls = append(funcDecls, geminiFunctionDeclaration{
+				Name:        tool.Name,
+				Description: tool.Description,
+				Parameters:  sanitizeGeminiToolParameters(tool.Parameters),
+			})
 		}
 		tools = []geminiTool{{FunctionDeclarations: funcDecls}}
 	}
@@ -377,6 +381,46 @@ func geminiToolCallID(name string, index int) string {
 		return fmt.Sprintf("call_%d", index)
 	}
 	return fmt.Sprintf("%s:%d", name, index)
+}
+
+var geminiUnsupportedSchemaKeys = map[string]struct{}{
+	"$schema":              {},
+	"additionalProperties": {},
+}
+
+func sanitizeGeminiToolParameters(parameters map[string]interface{}) map[string]interface{} {
+	if len(parameters) == 0 {
+		return map[string]interface{}{}
+	}
+
+	sanitized := sanitizeGeminiSchemaValue(parameters)
+	if schema, ok := sanitized.(map[string]interface{}); ok && schema != nil {
+		return schema
+	}
+
+	return map[string]interface{}{}
+}
+
+func sanitizeGeminiSchemaValue(value interface{}) interface{} {
+	switch typed := value.(type) {
+	case map[string]interface{}:
+		out := make(map[string]interface{}, len(typed))
+		for key, fieldValue := range typed {
+			if _, blocked := geminiUnsupportedSchemaKeys[key]; blocked {
+				continue
+			}
+			out[key] = sanitizeGeminiSchemaValue(fieldValue)
+		}
+		return out
+	case []interface{}:
+		out := make([]interface{}, len(typed))
+		for i, item := range typed {
+			out[i] = sanitizeGeminiSchemaValue(item)
+		}
+		return out
+	default:
+		return value
+	}
 }
 
 func toolCallNameFromMessage(msg Message) string {

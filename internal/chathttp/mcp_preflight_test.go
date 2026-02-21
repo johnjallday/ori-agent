@@ -260,6 +260,16 @@ func TestDetectMCPAutoRequirement_MatchesSearchOnWebPhrase(t *testing.T) {
 	}
 }
 
+func TestDetectMCPAutoRequirement_MatchesOpenDomainAsBrowserAutomation(t *testing.T) {
+	req := detectMCPAutoRequirement("open instagram.com")
+	if req == nil {
+		t.Fatalf("expected browser automation requirement match, got nil")
+	}
+	if req.label != "browser automation" {
+		t.Fatalf("expected browser automation label, got %q", req.label)
+	}
+}
+
 func TestMaybeAutoEnableMCPForPrompt_ReturnsMessageWhenNoWebServerConfigured(t *testing.T) {
 	st := newPreflightStore("Ori", &agent.Agent{})
 	ag, _ := st.GetAgent("Ori")
