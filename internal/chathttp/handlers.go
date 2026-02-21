@@ -1363,8 +1363,14 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 
+	// Check if this is a Claude Code provider - route to Claude Code handler
+	if strings.EqualFold(ag.Settings.Provider, "claude_code") && h.llmFactory != nil {
+		h.handleClaudeCodeChat(w, r, ag, q, current, base, llmImages, plannerDecision)
+		return
+	}
+
 	// Check if this is a Claude model - if so, use provider system
-	if strings.HasPrefix(ag.Settings.Model, "claude-") && h.llmFactory != nil {
+	if (strings.HasPrefix(ag.Settings.Model, "claude-") || strings.EqualFold(ag.Settings.Provider, "claude") || strings.EqualFold(ag.Settings.Provider, "anthropic")) && h.llmFactory != nil {
 		// Use Claude provider
 		h.handleClaudeChat(w, r, ag, q, tools, current, base, fileAttachments, llmImages, plannerDecision)
 		return
