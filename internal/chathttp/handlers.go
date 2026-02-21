@@ -363,6 +363,37 @@ func (h *Handler) tryHandleUtilityDirect(
 
 	tool, found := h.findTool(ag, agentName, decision.ToolName)
 	if !found || tool == nil {
+		if strings.EqualFold(strings.TrimSpace(decision.ToolName), "browser") {
+			responseText := "I couldn't find an available browser tool for this agent. Attach/configure Playwright (or another browser MCP) and try again."
+			ag.Messages = append(ag.Messages, openai.UserMessage(query))
+			ag.Messages = append(ag.Messages, openai.AssistantMessage(responseText))
+			_ = h.store.SetAgent(agentName, ag)
+
+			h.storeMessageInSession(baseCtx, sessionID, "user", query)
+			h.storeMessageInSession(baseCtx, sessionID, "assistant", responseText)
+
+			receipt := buildActionReceipt(
+				"utility_direct",
+				"Browser tool unavailable",
+				"no compatible browser tool was available",
+				decision.ToolName,
+				decision.ToolArgs,
+				responseText,
+				0,
+				false,
+				"browser tool unavailable",
+			)
+			writeJSONResponse(w, attachPlannerDecision(attachActionReceipts(attachRouteMetadata(map[string]any{
+				"response": responseText,
+				"success":  false,
+				"error":    "browser tool unavailable",
+			}, chatRouteMetadata{
+				Mode:     string(decision.Mode),
+				ToolName: decision.ToolName,
+				Reason:   "no compatible browser tool was available",
+			}), []ActionReceipt{receipt}), plannerDecision))
+			return true
+		}
 		if h.utilityTelemetry != nil {
 			h.utilityTelemetry.RecordDelegationEvent(routeModeAssistantChat, "utility tool missing; fallback to chat", agentName)
 		}
@@ -373,9 +404,21 @@ func (h *Handler) tryHandleUtilityDirect(
 	if h.utilityTelemetry != nil {
 		h.utilityTelemetry.RecordToolInvocation(decision.ToolName, "")
 	}
-	toolCtx, toolCancel := context.WithTimeout(baseCtx, ToolExecutionTimeout)
-	rawResult, err := ExecuteToolWithFiles(toolCtx, tool, decision.ToolName, decision.ToolArgs, nil)
-	toolCancel()
+	toolArgs := decision.ToolArgs
+	var rawResult string
+	var err error
+	if strings.EqualFold(strings.TrimSpace(decision.ToolName), "browser") {
+		if adapted, adaptErr := adaptBrowserToolArgsForDefinition(tool.Definition().Name, decision.ToolArgs); adaptErr != nil {
+			err = adaptErr
+		} else {
+			toolArgs = adapted
+		}
+	}
+	if err == nil {
+		toolCtx, toolCancel := context.WithTimeout(baseCtx, ToolExecutionTimeout)
+		rawResult, err = ExecuteToolWithFiles(toolCtx, tool, decision.ToolName, toolArgs, nil)
+		toolCancel()
+	}
 
 	duration := time.Since(start)
 	h.recordToolCallStats(decision.ToolName, duration, err)
@@ -415,7 +458,7 @@ func (h *Handler) tryHandleUtilityDirect(
 		"Executed utility tool",
 		decision.Reason,
 		decision.ToolName,
-		decision.ToolArgs,
+		toolArgs,
 		rawResult,
 		duration.Milliseconds(),
 		success,
@@ -423,12 +466,12 @@ func (h *Handler) tryHandleUtilityDirect(
 	)
 	payload := attachActionReceipts(attachRouteMetadata(map[string]any{
 		"response":  responseText,
-		"tool_args": decision.ToolArgs,
+		"tool_args": toolArgs,
 		"success":   success,
 		"toolCalls": []map[string]string{
 			{
 				"function": decision.ToolName,
-				"args":     decision.ToolArgs,
+				"args":     toolArgs,
 				"result":   rawResult,
 			},
 		},
@@ -506,6 +549,7 @@ func (h *Handler) findMCPToolByName(ag *agent.Agent, toolName string) (pluginapi
 	if target == "" {
 		return nil, false
 	}
+	candidateNames := mcpToolNameCandidates(target)
 	serverNames := prioritizeMCPServersForTool(ag.MCPServers, target, h.getBrowserMCPPreference())
 	for _, serverName := range serverNames {
 		mcpTools, err := h.getMCPToolsForServer(serverName)
@@ -513,12 +557,23 @@ func (h *Handler) findMCPToolByName(ag *agent.Agent, toolName string) (pluginapi
 			continue
 		}
 		for _, mcpTool := range mcpTools {
-			if strings.TrimSpace(mcpTool.Definition().Name) == target {
-				return mcpTool, true
+			defName := strings.TrimSpace(mcpTool.Definition().Name)
+			for _, candidate := range candidateNames {
+				if defName == candidate {
+					return mcpTool, true
+				}
 			}
 		}
 	}
 	return nil, false
+}
+
+func mcpToolNameCandidates(target string) []string {
+	trimmed := strings.TrimSpace(target)
+	if strings.EqualFold(trimmed, "browser") {
+		return []string{"browser", "browser_navigate"}
+	}
+	return []string{trimmed}
 }
 
 func prioritizeMCPServersForTool(serverNames []string, toolName, browserPreference string) []string {
@@ -598,6 +653,42 @@ func normalizeBrowserMCPPreference(preference string) string {
 	default:
 		return "auto"
 	}
+}
+
+func adaptBrowserToolArgsForDefinition(definitionName, rawArgs string) (string, error) {
+	name := strings.ToLower(strings.TrimSpace(definitionName))
+	if name == "" || name == "browser" {
+		return rawArgs, nil
+	}
+	if name != "browser_navigate" {
+		return rawArgs, nil
+	}
+
+	req := BrowserRequest{}
+	if err := json.Unmarshal([]byte(rawArgs), &req); err != nil {
+		var direct map[string]interface{}
+		if err2 := json.Unmarshal([]byte(rawArgs), &direct); err2 == nil {
+			if url, ok := direct["url"].(string); ok && strings.TrimSpace(url) != "" {
+				payload, _ := json.Marshal(map[string]string{"url": normalizeBrowserOpenTargetURL(url)})
+				return string(payload), nil
+			}
+		}
+		return "", fmt.Errorf("%w: invalid browser arguments", ErrUtilityInvalidInput)
+	}
+
+	action := strings.ToLower(strings.TrimSpace(req.Action))
+	if action == "" {
+		action = "open_url"
+	}
+	if action != "open_url" {
+		return "", fmt.Errorf("%w: this browser connector supports open_url for direct open commands", ErrUtilityInvalidInput)
+	}
+	if strings.TrimSpace(req.URL) == "" {
+		return "", fmt.Errorf("%w: url is required", ErrUtilityInvalidInput)
+	}
+
+	payload, _ := json.Marshal(map[string]string{"url": normalizeBrowserOpenTargetURL(req.URL)})
+	return string(payload), nil
 }
 
 func shouldPreferMCPToolOverUtility(toolName string) bool {

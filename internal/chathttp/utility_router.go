@@ -196,7 +196,7 @@ func classifyBrowserRoute(original, lower string) (UtilityRouteDecision, bool) {
 		if strings.TrimSpace(url) == "" {
 			return UtilityRouteDecision{}, false
 		}
-		args, _ := json.Marshal(BrowserRequest{Action: "open_url", URL: url})
+		args, _ := json.Marshal(BrowserRequest{Action: "open_url", URL: normalizeBrowserOpenTargetURL(url)})
 		return UtilityRouteDecision{
 			Mode:     UtilityRouteDirect,
 			ToolName: "browser",
@@ -232,7 +232,7 @@ func classifyBrowserRoute(original, lower string) (UtilityRouteDecision, bool) {
 	// Convenience: "open https://..." routes to browser open_url.
 	if strings.HasPrefix(lower, "open http://") || strings.HasPrefix(lower, "open https://") {
 		raw := strings.TrimSpace(strings.TrimPrefix(original, "open "))
-		args, _ := json.Marshal(BrowserRequest{Action: "open_url", URL: raw})
+		args, _ := json.Marshal(BrowserRequest{Action: "open_url", URL: normalizeBrowserOpenTargetURL(raw)})
 		return UtilityRouteDecision{
 			Mode:     UtilityRouteDirect,
 			ToolName: "browser",
@@ -240,7 +240,70 @@ func classifyBrowserRoute(original, lower string) (UtilityRouteDecision, bool) {
 			Reason:   "matched open-url browser intent",
 		}, true
 	}
+
+	// Convenience: "open youtube.com" routes to browser open_url.
+	if strings.HasPrefix(lower, "open ") {
+		raw := strings.TrimSpace(strings.TrimPrefix(original, "open "))
+		if looksLikeWebHostTarget(raw) {
+			args, _ := json.Marshal(BrowserRequest{Action: "open_url", URL: normalizeBrowserOpenTargetURL(raw)})
+			return UtilityRouteDecision{
+				Mode:     UtilityRouteDirect,
+				ToolName: "browser",
+				ToolArgs: string(args),
+				Reason:   "matched open-domain browser intent",
+			}, true
+		}
+	}
 	return UtilityRouteDecision{}, false
+}
+
+func looksLikeWebHostTarget(raw string) bool {
+	candidate := strings.TrimSpace(strings.Trim(raw, " \t\r\n\"'`.,!?;:()[]{}"))
+	if candidate == "" {
+		return false
+	}
+	if strings.Contains(candidate, " ") || strings.Contains(candidate, "@") {
+		return false
+	}
+	if strings.Contains(candidate, "://") || strings.HasPrefix(strings.ToLower(candidate), "www.") {
+		return true
+	}
+
+	host := candidate
+	if idx := strings.IndexAny(host, "/?#"); idx >= 0 {
+		host = host[:idx]
+	}
+	if host == "" || !strings.Contains(host, ".") {
+		return false
+	}
+	labels := strings.Split(host, ".")
+	if len(labels) < 2 {
+		return false
+	}
+	for _, label := range labels {
+		label = strings.TrimSpace(label)
+		if label == "" {
+			return false
+		}
+		for _, r := range label {
+			if !(r >= 'a' && r <= 'z') && !(r >= 'A' && r <= 'Z') && !(r >= '0' && r <= '9') && r != '-' {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+func normalizeBrowserOpenTargetURL(raw string) string {
+	candidate := strings.TrimSpace(strings.Trim(raw, " \t\r\n\"'`"))
+	if candidate == "" {
+		return ""
+	}
+	lower := strings.ToLower(candidate)
+	if strings.HasPrefix(lower, "http://") || strings.HasPrefix(lower, "https://") || strings.HasPrefix(lower, "file://") {
+		return candidate
+	}
+	return "https://" + candidate
 }
 
 func inferTimezoneFromPrompt(prompt string) string {

@@ -86,6 +86,19 @@ func TestClassifyUtilityRoute_BrowserOpen(t *testing.T) {
 	}
 }
 
+func TestClassifyUtilityRoute_BrowserOpenDomain(t *testing.T) {
+	decision := classifyUtilityRoute("open youtube.com")
+	if decision.Mode != UtilityRouteDirect {
+		t.Fatalf("expected utility_direct, got %q", decision.Mode)
+	}
+	if decision.ToolName != "browser" {
+		t.Fatalf("expected browser tool, got %q", decision.ToolName)
+	}
+	if !strings.Contains(decision.ToolArgs, "https://youtube.com") {
+		t.Fatalf("expected https URL in args, got %q", decision.ToolArgs)
+	}
+}
+
 func TestClassifyUtilityRoute_WorkspaceFallback(t *testing.T) {
 	decision := classifyUtilityRoute("run tests in this repository")
 	if decision.Mode != UtilityRouteWorkspace {

@@ -2,6 +2,7 @@ package chathttp
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"strings"
 	"testing"
@@ -150,6 +151,50 @@ func TestFindTool_BrowserHonorsBrowserbasePreference(t *testing.T) {
 	}
 	if result != "browserbase" {
 		t.Fatalf("expected browserbase browser tool to be preferred, got %q", result)
+	}
+}
+
+func TestFindTool_BrowserFallsBackToBrowserNavigateAlias(t *testing.T) {
+	registry := &mockMCPRegistry{
+		getFn: func(server string) ([]pluginapi.PluginTool, error) {
+			if server != "playwright" {
+				return nil, nil
+			}
+			return []pluginapi.PluginTool{
+				mockNamedTool{name: "browser_navigate", result: "playwright_navigate"},
+			}, nil
+		},
+	}
+
+	h := &Handler{
+		utilityRegistry: NewDefaultUtilityToolRegistry(),
+		mcpRegistry:     registry,
+	}
+
+	ag := &agent.Agent{
+		MCPServers: []string{"playwright"},
+	}
+
+	tool, found := h.findTool(ag, "Email Triage Assistant", "browser")
+	if !found {
+		t.Fatal("expected browser alias tool to be found")
+	}
+	if got := strings.ToLower(strings.TrimSpace(tool.Definition().Name)); got != "browser_navigate" {
+		t.Fatalf("expected browser_navigate alias tool, got %q", got)
+	}
+}
+
+func TestAdaptBrowserToolArgsForDefinition_BrowserNavigate(t *testing.T) {
+	adapted, err := adaptBrowserToolArgsForDefinition("browser_navigate", `{"action":"open_url","url":"youtube.com"}`)
+	if err != nil {
+		t.Fatalf("unexpected adaptation error: %v", err)
+	}
+	var payload map[string]string
+	if err := json.Unmarshal([]byte(adapted), &payload); err != nil {
+		t.Fatalf("failed to parse adapted args: %v", err)
+	}
+	if payload["url"] != "https://youtube.com" {
+		t.Fatalf("expected normalized https url, got %q", payload["url"])
 	}
 }
 
