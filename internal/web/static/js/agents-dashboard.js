@@ -303,6 +303,10 @@ function createAgentCard(agent) {
   const health = getHealthState(agent);
   const chatDisabled = health.kind === 'needs-setup';
   const pauseLabel = health.kind === 'paused' ? 'Resume' : 'Pause';
+  const isSystemAgent = isSystemAssistantAgentName(name);
+  const deleteDisabledAttr = isSystemAgent
+    ? 'disabled title="System assistant cannot be deleted."'
+    : '';
 
   card.innerHTML = `
     <div class="ops-card-top">
@@ -320,6 +324,7 @@ function createAgentCard(agent) {
       <button class="ops-action-btn primary" data-action="chat" ${chatDisabled ? 'disabled' : ''}>Chat</button>
       <button class="ops-action-btn" data-action="pause">${safeEscapeHtml(pauseLabel)}</button>
       <button class="ops-action-btn" data-action="open">Open</button>
+      <button class="ops-action-btn danger" data-action="delete" ${deleteDisabledAttr}>Delete</button>
     </div>
     <div class="config-only">
       <div>Type: ${safeEscapeHtml(typeLabel)}</div>
@@ -332,6 +337,7 @@ function createAgentCard(agent) {
   const chatButton = card.querySelector('[data-action="chat"]');
   const pauseButton = card.querySelector('[data-action="pause"]');
   const openButton = card.querySelector('[data-action="open"]');
+  const deleteButton = card.querySelector('[data-action="delete"]');
 
   if (chatButton) {
     chatButton.addEventListener('click', async (event) => {
@@ -354,6 +360,17 @@ function createAgentCard(agent) {
     openButton.addEventListener('click', (event) => {
       event.stopPropagation();
       openAgentDrawer(name);
+    });
+  }
+
+  if (deleteButton) {
+    deleteButton.addEventListener('click', async (event) => {
+      event.stopPropagation();
+      if (isSystemAgent) {
+        notifyError('System assistant cannot be deleted.');
+        return;
+      }
+      await deleteAgentFromDashboard(name, deleteButton);
     });
   }
 
@@ -482,6 +499,50 @@ async function setCurrentAgent(agentName) {
 
   const errorBody = await response.json().catch(() => null);
   throw new Error(errorBody?.error || `Failed to activate ${agentName}`);
+}
+
+async function deleteAgentFromDashboard(agentName, button) {
+  const normalizedName = String(agentName || '').trim();
+  if (!normalizedName) {
+    return;
+  }
+
+  if (!confirm(`Are you sure you want to delete agent "${normalizedName}"? This action cannot be undone.`)) {
+    return;
+  }
+
+  const originalText = button?.textContent || 'Delete';
+  if (button) {
+    button.disabled = true;
+    button.textContent = 'Deleting...';
+  }
+
+  try {
+    const endpoint = `/api/agents?name=${encodeURIComponent(normalizedName)}`;
+    const response = await fetch(endpoint, { method: 'DELETE' });
+    if (!response.ok) {
+      const errorBody = await response.json().catch(() => null);
+      throw new Error(errorBody?.error || `Failed to delete agent (${response.status})`);
+    }
+
+    if (selectedAgentName === normalizedName) {
+      selectedAgentName = '';
+      selectedAgentDetail = null;
+      selectedAgentSkills = null;
+      closeAgentDrawer();
+    }
+
+    notifySuccess(`Agent "${normalizedName}" deleted.`);
+    await loadAgents();
+  } catch (error) {
+    console.error('Failed to delete agent:', error);
+    notifyError(error?.message || `Failed to delete "${normalizedName}"`);
+  } finally {
+    if (button && button.isConnected) {
+      button.disabled = false;
+      button.textContent = originalText;
+    }
+  }
 }
 
 async function openAgentDrawer(agentName) {
@@ -723,6 +784,10 @@ function getHealthState(agent) {
   }
 
   return { kind: 'idle', label: 'Idle' };
+}
+
+function isSystemAssistantAgentName(name) {
+  return String(name || '').trim().toLowerCase() === 'ori';
 }
 
 function getAgentColor(agent) {
