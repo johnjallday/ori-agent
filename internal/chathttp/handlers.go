@@ -430,6 +430,12 @@ func (h *Handler) findTool(ag *agent.Agent, agentName, toolName string) (plugina
 		return nil, false
 	}
 
+	if shouldPreferMCPToolOverUtility(toolName) {
+		if mcpTool, ok := h.findMCPToolByName(ag, toolName); ok {
+			return mcpTool, true
+		}
+	}
+
 	// Native utility tools are checked first to prioritize accurate daily utility behavior.
 	if h.utilityRegistry != nil {
 		if tool, ok := h.utilityRegistry.GetTool(toolName); ok {
@@ -458,22 +464,43 @@ func (h *Handler) findTool(ag *agent.Agent, agentName, toolName string) (plugina
 		}
 	}
 
-	// Then check MCP tools
-	if h.mcpRegistry != nil && len(ag.MCPServers) > 0 {
-		for _, serverName := range ag.MCPServers {
-			mcpTools, err := h.getMCPToolsForServer(serverName)
-			if err != nil {
-				continue
-			}
-			for _, mcpTool := range mcpTools {
-				if mcpTool.Definition().Name == toolName {
-					return mcpTool, true
-				}
-			}
-		}
+	// Then check MCP tools.
+	if mcpTool, ok := h.findMCPToolByName(ag, toolName); ok {
+		return mcpTool, true
 	}
 
 	return nil, false
+}
+
+func (h *Handler) findMCPToolByName(ag *agent.Agent, toolName string) (pluginapi.PluginTool, bool) {
+	if h == nil || h.mcpRegistry == nil || ag == nil || len(ag.MCPServers) == 0 {
+		return nil, false
+	}
+	target := strings.TrimSpace(toolName)
+	if target == "" {
+		return nil, false
+	}
+	for _, serverName := range ag.MCPServers {
+		mcpTools, err := h.getMCPToolsForServer(serverName)
+		if err != nil {
+			continue
+		}
+		for _, mcpTool := range mcpTools {
+			if strings.TrimSpace(mcpTool.Definition().Name) == target {
+				return mcpTool, true
+			}
+		}
+	}
+	return nil, false
+}
+
+func shouldPreferMCPToolOverUtility(toolName string) bool {
+	switch strings.ToLower(strings.TrimSpace(toolName)) {
+	case "browser", "web_search", "web_fetch":
+		return true
+	default:
+		return false
+	}
 }
 
 // loadPluginLazily loads a plugin on first use and updates the agent's plugin map.
@@ -1061,16 +1088,22 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 
 	// Build tools - refresh definitions to get latest dynamic enums (e.g., script lists)
 	tools := []llm.Tool{}
-	toolSeen := make(map[string]struct{})
-	appendTool := func(def llm.Tool) {
+	toolIndex := make(map[string]int)
+	toolSource := make(map[string]string)
+	appendTool := func(def llm.Tool, source string) {
 		name := strings.TrimSpace(def.Name)
 		if name == "" {
 			return
 		}
-		if _, exists := toolSeen[name]; exists {
+		if idx, exists := toolIndex[name]; exists {
+			if source == "mcp" && toolSource[name] == "utility" && shouldPreferMCPToolOverUtility(name) {
+				tools[idx] = def
+				toolSource[name] = source
+			}
 			return
 		}
-		toolSeen[name] = struct{}{}
+		toolIndex[name] = len(tools)
+		toolSource[name] = source
 		tools = append(tools, def)
 	}
 
@@ -1084,7 +1117,7 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 				Name:        def.Name,
 				Description: def.Description,
 				Parameters:  def.Parameters,
-			})
+			}, "utility")
 		}
 	}
 
@@ -1110,7 +1143,7 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 			Name:        def.Name,
 			Description: def.Description,
 			Parameters:  def.Parameters,
-		})
+		}, "plugin")
 	}
 
 	// Add MCP tools for enabled servers
@@ -1130,7 +1163,7 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 					Name:        mcpDef.Name,
 					Description: mcpDef.Description,
 					Parameters:  mcpDef.Parameters,
-				})
+				}, "mcp")
 			}
 			logger.Debug("Added MCP tools from server", logger.Fields{"count": len(mcpTools), "server": serverName})
 		}
