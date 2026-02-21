@@ -126,13 +126,13 @@ func (h *Handler) handleClaudeToolCalls(
 		// Store assistant response in session
 		h.storeMessageInSession(baseCtx, sessionID, "assistant", execResult.CombinedResult)
 
-		response := attachRouteMetadata(map[string]any{
+		response := attachActionReceipts(attachRouteMetadata(map[string]any{
 			"response":  execResult.CombinedResult,
 			"toolCalls": execResult.Results,
 		}, chatRouteMetadata{
 			Mode:      routeModeAssistantChat,
 			ToolCount: len(execResult.Results),
-		})
+		}), execResult.Receipts)
 		writeJSONResponse(w, attachPlannerDecision(response, plannerDecision))
 		return
 	}
@@ -148,13 +148,13 @@ func (h *Handler) handleClaudeToolCalls(
 
 	if err != nil || resp2 == nil {
 		// If second turn fails, return the tool results as best-effort reply
-		orihttp.WriteJSON(w, attachPlannerDecision(attachRouteMetadata(map[string]any{
+		orihttp.WriteJSON(w, attachPlannerDecision(attachActionReceipts(attachRouteMetadata(map[string]any{
 			"response":  execResult.CombinedResult,
 			"toolCalls": execResult.Results,
 		}, chatRouteMetadata{
 			Mode:      routeModeAssistantChat,
 			ToolCount: len(execResult.Results),
-		}), plannerDecision))
+		}), execResult.Receipts), plannerDecision))
 		return
 	}
 
@@ -170,11 +170,11 @@ func (h *Handler) handleClaudeToolCalls(
 	// Store assistant response in session
 	h.storeMessageInSession(baseCtx, sessionID, "assistant", resp2.Content)
 
-	orihttp.WriteJSON(w, attachPlannerDecision(attachRouteMetadata(map[string]any{
+	orihttp.WriteJSON(w, attachPlannerDecision(attachActionReceipts(attachRouteMetadata(map[string]any{
 		"response":  resp2.Content,
 		"toolCalls": execResult.Results,
 	}, chatRouteMetadata{
 		Mode:      routeModeAssistantChat,
 		ToolCount: len(execResult.Results),
-	}), plannerDecision))
+	}), execResult.Receipts), plannerDecision))
 }

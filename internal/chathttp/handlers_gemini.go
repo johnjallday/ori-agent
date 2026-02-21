@@ -141,11 +141,11 @@ func (h *Handler) handleGeminiToolCalls(
 
 	h.storeMessageInSession(baseCtx, sessionID, "assistant", finalText)
 
-	orihttp.WriteJSON(w, attachPlannerDecision(attachRouteMetadata(map[string]any{
+	orihttp.WriteJSON(w, attachPlannerDecision(attachActionReceipts(attachRouteMetadata(map[string]any{
 		"response":  finalText,
 		"toolCalls": execResult.Results,
 	}, chatRouteMetadata{
 		Mode:      routeModeAssistantChat,
 		ToolCount: len(execResult.Results),
-	}), plannerDecision))
+	}), execResult.Receipts), plannerDecision))
 }

@@ -50,6 +50,8 @@ const (
 const (
 	defaultMCPHealthCheckInterval = 300 * time.Second
 	mcpHealthCheckIntervalEnvVar  = "ORI_MCP_HEALTHCHECK_INTERVAL"
+	defaultMCPInitTimeout         = 45 * time.Second
+	mcpInitTimeoutEnvVar          = "ORI_MCP_INIT_TIMEOUT"
 )
 
 // NewServer creates a new MCP server instance
@@ -104,7 +106,7 @@ func (s *Server) Start() error {
 		Version: "0.1.0",
 	}, nil)
 
-	initCtx, cancel := context.WithTimeout(s.ctx, 10*time.Second)
+	initCtx, cancel := context.WithTimeout(s.ctx, resolveMCPInitTimeout())
 	defer cancel()
 
 	session, err := client.Connect(initCtx, &sdkmcp.CommandTransport{Command: cmd}, nil)
@@ -244,7 +246,7 @@ func (s *Server) setStatus(status ServerStatus) {
 
 // discoverTools discovers available tools from the server
 func (s *Server) discoverTools() error {
-	ctx, cancel := context.WithTimeout(s.ctx, 10*time.Second)
+	ctx, cancel := context.WithTimeout(s.ctx, resolveMCPInitTimeout())
 	defer cancel()
 
 	s.mu.RLock()
@@ -342,4 +344,29 @@ func resolveMCPHealthCheckInterval() time.Duration {
 	}
 
 	return defaultMCPHealthCheckInterval
+}
+
+func resolveMCPInitTimeout() time.Duration {
+	raw := strings.TrimSpace(os.Getenv(mcpInitTimeoutEnvVar))
+	if raw == "" {
+		return defaultMCPInitTimeout
+	}
+
+	// Prefer duration syntax: "45s", "2m", etc.
+	if parsed, err := time.ParseDuration(raw); err == nil {
+		if parsed > 0 {
+			return parsed
+		}
+		return defaultMCPInitTimeout
+	}
+
+	// Backward-compatible plain seconds, e.g. "45".
+	if seconds, err := strconv.Atoi(raw); err == nil {
+		if seconds > 0 {
+			return time.Duration(seconds) * time.Second
+		}
+		return defaultMCPInitTimeout
+	}
+
+	return defaultMCPInitTimeout
 }

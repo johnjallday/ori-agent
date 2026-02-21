@@ -146,7 +146,7 @@ func (h *MCPHandler) EnableAgentMCPServerHandler(w http.ResponseWriter, r *http.
 	}
 
 	if err := h.configManager.EnableServerForAgent(agentName, serverName); err != nil {
-		logger.Error("Failed to enable MCP server for agent", logger.Fields{"agentName": agentName, "err": err, "agent": serverName})
+		logger.Error("Failed to enable MCP server for agent", logger.Fields{"agentName": agentName, "server": serverName, "err": err})
 		orihttp.InternalError(w, err.Error())
 		// Try to start the server if not already running (best effort, don't fail if it doesn't start)
 		return
@@ -161,12 +161,12 @@ func (h *MCPHandler) EnableAgentMCPServerHandler(w http.ResponseWriter, r *http.
 	status, _ := h.registry.GetServerStatus(serverName)
 	if status == mcp.StatusStopped || status == mcp.StatusError {
 		if err := h.registry.StartServer(serverName); err != nil {
-			logger.Error("Failed to start MCP server : (will remain enabled for agent)", logger.Fields{"server": serverName, "err": err})
+			logger.Error("Failed to start MCP server; it remains enabled for agent", logger.Fields{"agentName": agentName, "server": serverName, "err": err})
 			// Don't return error - server is enabled for agent even if not currently running
 		}
 	}
 
-	logger.Info("Enabled MCP server '' for agent ''", logger.Fields{"agentName": agentName, "server": serverName})
+	logger.Info("Enabled MCP server for agent", logger.Fields{"agentName": agentName, "server": serverName})
 
 	w.Header().Set("Content-Type", "application/json")
 	if encErr := json.NewEncoder(w).Encode(map[string]interface{}{
@@ -216,7 +216,7 @@ func (h *MCPHandler) DisableAgentMCPServerHandler(w http.ResponseWriter, r *http
 		return
 	}
 
-	logger.Info("Disabled MCP server '' for agent ''", logger.Fields{"agent": serverName, "agentName": agentName})
+	logger.Info("Disabled MCP server for agent", logger.Fields{"agentName": agentName, "server": serverName})
 
 	w.Header().Set("Content-Type", "application/json")
 	if encErr := json.NewEncoder(w).Encode(map[string]interface{}{

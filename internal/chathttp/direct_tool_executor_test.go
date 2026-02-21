@@ -298,7 +298,7 @@ func TestFormatDirectToolResponse(t *testing.T) {
 				Result:          "42",
 				ExecutionTimeMs: 10,
 			},
-			wantFields: []string{"response", "direct_tool_call", "tool_name", "execution_time_ms", "success"},
+			wantFields: []string{"response", "direct_tool_call", "tool_name", "execution_time_ms", "success", "action_receipts", "action_count"},
 		},
 		{
 			name: "failed result with error",
@@ -310,7 +310,7 @@ func TestFormatDirectToolResponse(t *testing.T) {
 				Error:           "division by zero",
 				ExecutionTimeMs: 5,
 			},
-			wantFields: []string{"response", "direct_tool_call", "tool_name", "execution_time_ms", "success", "error"},
+			wantFields: []string{"response", "direct_tool_call", "tool_name", "execution_time_ms", "success", "error", "action_receipts", "action_count"},
 		},
 		{
 			name: "structured result",
@@ -324,7 +324,7 @@ func TestFormatDirectToolResponse(t *testing.T) {
 				DisplayType:     "table",
 				Title:           "Test Table",
 			},
-			wantFields: []string{"response", "direct_tool_call", "tool_name", "execution_time_ms", "success", "structured", "displayType", "title"},
+			wantFields: []string{"response", "direct_tool_call", "tool_name", "execution_time_ms", "success", "structured", "displayType", "title", "action_receipts", "action_count"},
 		},
 	}
 

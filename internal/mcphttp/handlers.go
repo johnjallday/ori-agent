@@ -814,6 +814,15 @@ func (h *Handler) GetMarketplaceServersHandler(w http.ResponseWriter, r *http.Re
 			"category":    "storage",
 			"transport":   "stdio",
 		},
+		{
+			"name":        "playwright",
+			"description": "Browser automation and interactive control using Playwright MCP",
+			"command":     "npx",
+			"args":        []string{"-y", "@playwright/mcp"},
+			"maintainer":  "Microsoft",
+			"category":    "automation",
+			"transport":   "stdio",
+		},
 	}
 
 	w.Header().Set("Content-Type", "application/json")

@@ -13,6 +13,8 @@ let historyIndex = -1;
 // Chat messages storage
 let chatMessages = [];
 let chatWebSearchToggleRequestId = 0;
+const PLAN_BEFORE_ACTION_STORAGE_KEY = 'planBeforeAction';
+const pendingActionPlanContexts = new Map();
 
 // Remove stored slash-command exchanges and system announcements from history
 function sanitizeHistory(messages) {
@@ -920,6 +922,270 @@ function formatToolCallsForChat(toolCalls) {
     .join('\n\n');
 }
 
+function formatActionReceiptsForChat(receipts) {
+  if (!Array.isArray(receipts) || receipts.length === 0) return '';
+
+  return receipts
+    .map((receipt, idx) => {
+      const action = receipt.action || `Action ${idx + 1}`;
+      const tool = receipt.tool_name ? `Tool: ${receipt.tool_name}` : '';
+      const reason = receipt.reason || '';
+      const status = receipt.success === false ? 'Failed' : 'Success';
+      const duration = typeof receipt.duration_ms === 'number' ? `Duration: ${receipt.duration_ms}ms` : '';
+      const targets = Array.isArray(receipt.targets) && receipt.targets.length > 0
+        ? `Targets: ${receipt.targets.join(', ')}`
+        : '';
+      const locations = Array.isArray(receipt.locations) && receipt.locations.length > 0
+        ? `Locations: ${receipt.locations.join(', ')}`
+        : '';
+      const preview = receipt.result_preview || '';
+
+      const summaryParts = [action, status];
+      if (tool) summaryParts.push(tool);
+
+      return [
+        '<details>',
+        `<summary>${escapeHtml(summaryParts.join(' • '))}</summary>`,
+        '<div style="margin-top:8px">',
+        reason ? `<div><strong>Why:</strong> ${escapeHtml(reason)}</div>` : '',
+        duration ? `<div><strong>${escapeHtml(duration)}</strong></div>` : '',
+        targets ? `<div><strong>${escapeHtml(targets)}</strong></div>` : '',
+        locations ? `<div><strong>${escapeHtml(locations)}</strong></div>` : '',
+        preview ? `<div><strong>What changed</strong><pre style="white-space:pre-wrap; margin:8px 0;">${escapeHtml(preview)}</pre></div>` : '',
+        '</div>',
+        '</details>'
+      ].filter(Boolean).join('\n');
+    })
+    .join('\n\n');
+}
+
+function formatActionPlanForChat(data) {
+  const plan = data?.action_plan;
+  const fallback = typeof data?.response === 'string' ? data.response : 'Action plan is ready for approval.';
+  if (!plan || !Array.isArray(plan.steps) || plan.steps.length === 0) {
+    return fallback;
+  }
+
+  const lines = plan.steps.map((step, idx) => {
+    const title = step?.title ? String(step.title) : `Step ${idx + 1}`;
+    const details = step?.details ? `\n   ${String(step.details)}` : '';
+    return `${idx + 1}. ${title}${details}`;
+  });
+
+  return `**Planned Next Actions**\n${lines.join('\n')}\n\n${plan.summary || 'Approve to execute, or edit/cancel.'}`;
+}
+
+function renderActionPlanControls(planId, originalMessage) {
+  if (!planId) return;
+  const chatArea = document.getElementById('chatArea');
+  if (!chatArea) return;
+
+  const wrapper = document.createElement('div');
+  wrapper.className = 'message-container mb-3 assistant-message';
+  wrapper.dataset.planId = planId;
+
+  const content = document.createElement('div');
+  content.className = 'modern-card p-3 me-auto';
+  content.style.maxWidth = '85%';
+  content.style.background = 'var(--bg-secondary)';
+
+  const title = document.createElement('div');
+  title.style.fontSize = '12px';
+  title.style.color = 'var(--text-muted)';
+  title.style.marginBottom = '8px';
+  title.textContent = 'Approval required';
+  content.appendChild(title);
+
+  const controls = document.createElement('div');
+  controls.style.display = 'flex';
+  controls.style.gap = '8px';
+  controls.style.flexWrap = 'wrap';
+
+  const approveBtn = document.createElement('button');
+  approveBtn.type = 'button';
+  approveBtn.className = 'btn btn-sm btn-success';
+  approveBtn.textContent = 'Approve';
+
+  const editBtn = document.createElement('button');
+  editBtn.type = 'button';
+  editBtn.className = 'btn btn-sm btn-outline-primary';
+  editBtn.textContent = 'Edit';
+
+  const cancelBtn = document.createElement('button');
+  cancelBtn.type = 'button';
+  cancelBtn.className = 'btn btn-sm btn-outline-secondary';
+  cancelBtn.textContent = 'Cancel';
+
+  controls.appendChild(approveBtn);
+  controls.appendChild(editBtn);
+  controls.appendChild(cancelBtn);
+  content.appendChild(controls);
+  wrapper.appendChild(content);
+  chatArea.appendChild(wrapper);
+  if (window.scrollChatToBottomIfNeeded) {
+    window.scrollChatToBottomIfNeeded();
+  }
+
+  const setDisabled = (disabled) => {
+    approveBtn.disabled = disabled;
+    editBtn.disabled = disabled;
+    cancelBtn.disabled = disabled;
+  };
+
+  approveBtn.addEventListener('click', async () => {
+    setDisabled(true);
+    await executeApprovedActionPlan(planId);
+  });
+
+  editBtn.addEventListener('click', () => {
+    const input = document.getElementById('input');
+    if (input) {
+      input.value = originalMessage || '';
+      input.focus();
+      input.style.height = 'auto';
+      input.style.height = input.scrollHeight + 'px';
+    }
+    pendingActionPlanContexts.delete(planId);
+    wrapper.remove();
+  });
+
+  cancelBtn.addEventListener('click', () => {
+    pendingActionPlanContexts.delete(planId);
+    wrapper.remove();
+    addMessageToChat('Cancelled action plan.', false, false, true, true);
+  });
+}
+
+async function executeApprovedActionPlan(planId) {
+  const context = pendingActionPlanContexts.get(planId);
+  if (!context) {
+    if (window.Toast) {
+      Toast.warning('Action plan context expired. Please resubmit your request.');
+    }
+    return;
+  }
+  if (chatStateMachine && chatStateMachine.isActive()) {
+    return;
+  }
+
+  if (chatStateMachine) {
+    chatStateMachine.send();
+  }
+  updateSendButton();
+
+  try {
+    const requestBody = {
+      ...context.requestBody,
+      plan_before_action: true,
+      approved_action_plan_id: planId
+    };
+    const response = await fetch('/api/chat', {
+      method: 'POST',
+      headers: context.headers,
+      body: JSON.stringify(requestBody),
+      signal: chatStateMachine ? chatStateMachine.getSignal() : undefined
+    });
+
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+    }
+
+    const data = await response.json();
+    data._requestBody = { ...requestBody };
+    data._requestHeaders = { ...context.headers };
+    updatePlannerIndicator(data?.planner_decision);
+    await handleChatResponsePayload(data, context.originalMessage, context.isSlashCommand);
+    pendingActionPlanContexts.delete(planId);
+  } catch (error) {
+    if (error.name === 'AbortError') {
+      return;
+    }
+    addMessageToChat(`Error: ${error.message}`, false, true, false, context.isSlashCommand);
+    if (window.Toast) {
+      Toast.error('Failed to execute approved action plan');
+    }
+  } finally {
+    if (chatStateMachine) {
+      chatStateMachine.complete();
+    }
+    updateSendButton();
+  }
+}
+
+async function handleChatResponsePayload(data, trimmedMessage, isSlashCommand) {
+  const routeMeta = normalizeRouteMetadata(data);
+
+  if (data?.requires_approval && data?.approval_type === 'action_plan' && data?.action_plan_id) {
+    const planMessage = formatActionPlanForChat(data);
+    addMessageToChat(planMessage, false, false, true, true, routeMeta);
+    pendingActionPlanContexts.set(data.action_plan_id, {
+      requestBody: data._requestBody || { question: trimmedMessage },
+      headers: data._requestHeaders || { 'Content-Type': 'application/json' },
+      originalMessage: trimmedMessage,
+      isSlashCommand
+    });
+    renderActionPlanControls(data.action_plan_id, trimmedMessage);
+    if (window.sessionManager && window.sessionManager.onMessageSent) {
+      window.sessionManager.onMessageSent();
+    }
+    EventBus.emit('chat:message:sent', { message: trimmedMessage, isSlashCommand });
+    return;
+  }
+
+  const hasResponseField = Object.prototype.hasOwnProperty.call(data, 'response');
+  const responseText = typeof data.response === 'string' ? data.response : null;
+  const toolCallsText = formatToolCallsForChat(data.toolCalls);
+  const receiptsText = formatActionReceiptsForChat(data.action_receipts);
+
+  if (hasResponseField && responseText !== null) {
+    if (responseText.trim().length > 0) {
+      addMessageToChat(responseText, false, false, false, isSlashCommand, routeMeta);
+    } else if (toolCallsText) {
+      addMessageToChat(toolCallsText, false, false, false, isSlashCommand, routeMeta);
+    } else {
+      addMessageToChat('(no text response)', false, false, false, isSlashCommand, routeMeta);
+    }
+
+    if (receiptsText) {
+      addMessageToChat(receiptsText, false, false, true, true, routeMeta);
+    }
+
+    appLog.debug('Checking for switch command:', {
+      message: trimmedMessage,
+      startsWithSwitch: trimmedMessage.startsWith('/switch'),
+      hasCheckmark: responseText.includes('✅'),
+      hasSwitched: responseText.includes('Switched to agent'),
+      response: responseText
+    });
+
+    if (trimmedMessage.startsWith('/switch') && responseText.includes('✅') && responseText.includes('Switched to agent')) {
+      appLog.debug('Successful agent switch detected, refreshing agent display and sidebar');
+      setTimeout(() => {
+        refreshAgentDisplay();
+        if (typeof loadAgents === 'function') {
+          loadAgents();
+        }
+      }, 100);
+    }
+
+    if (window.sessionManager && window.sessionManager.onMessageSent) {
+      window.sessionManager.onMessageSent();
+    }
+
+    EventBus.emit('chat:message:sent', { message: trimmedMessage, isSlashCommand });
+    renderPlannerPlanSummary(data);
+    await handleDynamicAgentApprovals(data);
+    return;
+  }
+
+  appLog.error('No response field found. Available fields:', Object.keys(data));
+  const details = escapeHtml(JSON.stringify(data, null, 2));
+  addMessageToChat(`Sorry, I received an unexpected response format.\n\n<details><summary>Raw response</summary><pre style="white-space:pre-wrap; margin:8px 0;">${details}</pre></details>`, false, true);
+  if (window.Toast) {
+    Toast.warning('Received unexpected response format');
+  }
+}
+
 function updatePlannerIndicator(decision) {
   const indicator = document.getElementById('chatPlannerIndicator');
   const badge = document.getElementById('chatPlannerBadge');
@@ -1309,6 +1575,10 @@ async function sendMessage(message) {
     if (multiAgentModeSelect && multiAgentModeSelect.value) {
       requestBody.multi_agent_mode = multiAgentModeSelect.value;
     }
+    const planBeforeActionToggle = document.getElementById('planBeforeActionToggle');
+    if (planBeforeActionToggle?.checked) {
+      requestBody.plan_before_action = true;
+    }
 
     // Build headers with session ID for multi-tab support
     const chatHeaders = {
@@ -1346,6 +1616,9 @@ async function sendMessage(message) {
     appLog.debug('Received chat response:', data);
     updatePlannerIndicator(data?.planner_decision);
 
+    data._requestBody = { ...requestBody };
+    data._requestHeaders = { ...chatHeaders };
+
     // Clear uploaded files after successful send
     if (window.clearFilesAfterSend) {
       window.clearFilesAfterSend();
@@ -1356,59 +1629,7 @@ async function sendMessage(message) {
     if (chatStateMachine && chatStateMachine.isActive()) {
       chatStateMachine.process();
     }
-
-    const hasResponseField = Object.prototype.hasOwnProperty.call(data, 'response');
-    const responseText = typeof data.response === 'string' ? data.response : null;
-    const routeMeta = normalizeRouteMetadata(data);
-    const toolCallsText = formatToolCallsForChat(data.toolCalls);
-
-    if (hasResponseField && responseText !== null) {
-      // Skip persisting assistant replies for slash commands
-      if (responseText.trim().length > 0) {
-        addMessageToChat(responseText, false, false, false, isSlashCommand, routeMeta);
-      } else if (toolCallsText) {
-        addMessageToChat(toolCallsText, false, false, false, isSlashCommand, routeMeta);
-      } else {
-        addMessageToChat('(no text response)', false, false, false, isSlashCommand, routeMeta);
-      }
-
-      // Check if this was a successful /switch command and refresh agent display and sidebar
-      appLog.debug('Checking for switch command:', {
-        message: trimmedMessage,
-        startsWithSwitch: trimmedMessage.startsWith('/switch'),
-        hasCheckmark: responseText.includes('✅'),
-        hasSwitched: responseText.includes('Switched to agent'),
-        response: responseText
-      });
-
-      if (trimmedMessage.startsWith('/switch') && responseText.includes('✅') && responseText.includes('Switched to agent')) {
-        appLog.debug('Successful agent switch detected, refreshing agent display and sidebar');
-        setTimeout(() => {
-          refreshAgentDisplay();
-          // Refresh sidebar agents list if the function exists
-          if (typeof loadAgents === 'function') {
-            loadAgents();
-          }
-        }, 100); // Small delay to ensure backend has updated
-      }
-
-      // Notify session manager about the new message
-      if (window.sessionManager && window.sessionManager.onMessageSent) {
-        window.sessionManager.onMessageSent();
-      }
-
-      EventBus.emit('chat:message:sent', { message: trimmedMessage, isSlashCommand });
-
-      renderPlannerPlanSummary(data);
-      await handleDynamicAgentApprovals(data);
-    } else {
-      appLog.error('No response field found. Available fields:', Object.keys(data));
-      const details = escapeHtml(JSON.stringify(data, null, 2));
-      addMessageToChat(`Sorry, I received an unexpected response format.\n\n<details><summary>Raw response</summary><pre style="white-space:pre-wrap; margin:8px 0;">${details}</pre></details>`, false, true);
-      if (window.Toast) {
-        Toast.warning('Received unexpected response format');
-      }
-    }
+    await handleChatResponsePayload(data, trimmedMessage, isSlashCommand);
 
   } catch (error) {
     // Handle user cancellation gracefully
@@ -1457,6 +1678,7 @@ function setupChat() {
   const input = document.getElementById('input');
   const sendBtn = document.getElementById('sendBtn');
   const enterToSend = document.getElementById('enterToSend');
+  const planBeforeActionToggle = document.getElementById('planBeforeActionToggle');
 
   if (!input || !sendBtn) {
     appLog.warn('Chat elements not found');
@@ -1537,6 +1759,16 @@ function setupChat() {
     if (savedEnterToSend !== null) {
       enterToSend.checked = savedEnterToSend === 'true';
     }
+  }
+
+  if (planBeforeActionToggle) {
+    const savedPlanBeforeAction = localStorage.getItem(PLAN_BEFORE_ACTION_STORAGE_KEY);
+    if (savedPlanBeforeAction !== null) {
+      planBeforeActionToggle.checked = savedPlanBeforeAction === 'true';
+    }
+    planBeforeActionToggle.addEventListener('change', () => {
+      localStorage.setItem(PLAN_BEFORE_ACTION_STORAGE_KEY, planBeforeActionToggle.checked ? 'true' : 'false');
+    });
   }
 
   // Clear chat button

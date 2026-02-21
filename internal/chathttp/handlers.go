@@ -311,7 +311,18 @@ func (h *Handler) tryHandleUtilityDirect(
 		h.storeMessageInSession(baseCtx, sessionID, "user", query)
 		h.storeMessageInSession(baseCtx, sessionID, "assistant", responseText)
 
-		writeJSONResponse(w, attachPlannerDecision(attachRouteMetadata(map[string]any{
+		receipt := buildActionReceipt(
+			"utility_direct",
+			"Blocked utility tool call",
+			"utility tool disabled by agent policy",
+			decision.ToolName,
+			decision.ToolArgs,
+			responseText,
+			0,
+			false,
+			"tool disabled by agent policy",
+		)
+		writeJSONResponse(w, attachPlannerDecision(attachActionReceipts(attachRouteMetadata(map[string]any{
 			"response": responseText,
 			"success":  false,
 			"error":    "tool disabled by agent policy",
@@ -319,7 +330,7 @@ func (h *Handler) tryHandleUtilityDirect(
 			Mode:     string(decision.Mode),
 			ToolName: decision.ToolName,
 			Reason:   "utility tool disabled by agent policy",
-		}), plannerDecision))
+		}), []ActionReceipt{receipt}), plannerDecision))
 		return true
 	}
 
@@ -372,7 +383,22 @@ func (h *Handler) tryHandleUtilityDirect(
 	h.storeMessageInSession(baseCtx, sessionID, "user", query)
 	h.storeMessageInSession(baseCtx, sessionID, "assistant", responseText)
 
-	payload := attachRouteMetadata(map[string]any{
+	errorText := ""
+	if err != nil {
+		errorText = err.Error()
+	}
+	receipt := buildActionReceipt(
+		"utility_direct",
+		"Executed utility tool",
+		decision.Reason,
+		decision.ToolName,
+		decision.ToolArgs,
+		rawResult,
+		duration.Milliseconds(),
+		success,
+		errorText,
+	)
+	payload := attachActionReceipts(attachRouteMetadata(map[string]any{
 		"response":  responseText,
 		"tool_args": decision.ToolArgs,
 		"success":   success,
@@ -389,7 +415,7 @@ func (h *Handler) tryHandleUtilityDirect(
 		Provider:  providerName,
 		Reason:    decision.Reason,
 		ToolCount: 1,
-	})
+	}), []ActionReceipt{receipt})
 	if err != nil {
 		payload["error"] = err.Error()
 	}
@@ -522,11 +548,13 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 
 	var req struct {
-		Question            string         `json:"question"`
-		AgentName           string         `json:"agent_name,omitempty"` // Allow specifying target agent
-		Files               []UploadedFile `json:"files,omitempty"`
-		MultiAgentMode      string         `json:"multi_agent_mode,omitempty"`
-		MultiAgentThreshold float64        `json:"multi_agent_threshold,omitempty"`
+		Question             string         `json:"question"`
+		AgentName            string         `json:"agent_name,omitempty"` // Allow specifying target agent
+		Files                []UploadedFile `json:"files,omitempty"`
+		MultiAgentMode       string         `json:"multi_agent_mode,omitempty"`
+		MultiAgentThreshold  float64        `json:"multi_agent_threshold,omitempty"`
+		PlanBeforeAction     bool           `json:"plan_before_action,omitempty"`
+		ApprovedActionPlanID string         `json:"approved_action_plan_id,omitempty"`
 	}
 	if !orihttp.ParseJSONBody(w, r, &req) {
 		return
@@ -537,6 +565,7 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	originalQuery := q
+	approvedActionPlanID := strings.TrimSpace(req.ApprovedActionPlanID)
 
 	// Natural language app launch shortcut:
 	// "open safari" -> "/openapp safari"
@@ -808,6 +837,23 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
+		if req.PlanBeforeAction && approvedActionPlanID == "" {
+			plan := buildDirectToolActionPlan(q, cmd)
+			response := attachRouteMetadata(map[string]any{
+				"response":           formatActionPlanMessage(plan),
+				"requires_approval":  true,
+				"approval_type":      "action_plan",
+				"action_plan_id":     plan.ID,
+				"action_plan":        plan,
+				"plan_before_action": true,
+			}, chatRouteMetadata{
+				Mode:   routeModeDirectTool,
+				Reason: "awaiting action plan approval",
+			})
+			writeJSONResponse(w, response)
+			return
+		}
+
 		result := h.executeDirectTool(r.Context(), ag, current, cmd)
 
 		// Add to conversation history for context
@@ -837,6 +883,36 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	routeDecision := classifyUtilityRoute(originalQuery)
+
+	if req.PlanBeforeAction && approvedActionPlanID == "" {
+		actionPlan, planDecision := h.buildChatActionPlan(ctx, q, routeDecision, req.MultiAgentMode, req.MultiAgentThreshold)
+		response := attachPlannerDecision(attachRouteMetadata(map[string]any{
+			"response":           formatActionPlanMessage(actionPlan),
+			"requires_approval":  true,
+			"approval_type":      "action_plan",
+			"action_plan_id":     actionPlan.ID,
+			"action_plan":        actionPlan,
+			"plan_before_action": true,
+		}, chatRouteMetadata{
+			Mode:   actionPlan.RouteMode,
+			Reason: "awaiting action plan approval",
+		}), planDecision)
+		writeJSONResponse(w, response)
+		return
+	}
+
+	if invokedSkill == nil && routeNeedsWorkspace(routeDecision.Mode) {
+		autoWorkspace, created, wsErr := h.ensureWorkspaceForRoute(current, originalQuery, routeDecision)
+		if wsErr != nil {
+			logger.Warn("Failed to ensure workspace for routed chat request", logger.Fields{
+				"agent":      current,
+				"route_mode": routeDecision.Mode,
+				"error":      wsErr,
+			})
+		} else if autoWorkspace != nil {
+			q = enrichPromptWithWorkspaceContext(q, autoWorkspace, routeDecision.Mode, created)
+		}
+	}
 
 	// Utility-direct requests bypass planner/delegation and execute native tools immediately.
 	if invokedSkill == nil {
@@ -942,7 +1018,18 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 						if h.utilityTelemetry != nil {
 							h.utilityTelemetry.RecordDelegationEvent(routeModeSpecialistFlow, "planner selected multi-agent execution", current)
 						}
-						orihttp.WriteJSON(w, attachRouteMetadata(map[string]any{
+						receipt := buildActionReceipt(
+							"orchestration",
+							"Executed multi-agent workflow",
+							"planner selected multi-agent execution",
+							"",
+							"",
+							responseText,
+							0,
+							result.Error == "",
+							result.Error,
+						)
+						orihttp.WriteJSON(w, attachActionReceipts(attachRouteMetadata(map[string]any{
 							"response":               responseText,
 							"orchestrated":           true,
 							"studio_id":              result.WorkspaceID,
@@ -954,7 +1041,7 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 						}, chatRouteMetadata{
 							Mode:   routeModeSpecialistFlow,
 							Reason: "planner selected multi-agent execution",
-						}))
+						}), []ActionReceipt{receipt}))
 						return
 					}
 				}

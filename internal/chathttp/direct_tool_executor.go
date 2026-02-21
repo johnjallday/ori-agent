@@ -229,7 +229,19 @@ func (h *Handler) getAvailableToolNames(ag *agent.Agent) []string {
 
 // formatDirectToolResponse formats a direct tool result into a chat response
 func formatDirectToolResponse(result *DirectToolResult) map[string]any {
-	response := attachRouteMetadata(map[string]any{
+	receipt := buildActionReceipt(
+		"direct_tool",
+		"Executed direct tool command",
+		"explicit /tool command",
+		result.ToolName,
+		result.ToolArgs,
+		result.Result,
+		result.ExecutionTimeMs,
+		result.Success,
+		result.Error,
+	)
+
+	response := attachActionReceipts(attachRouteMetadata(map[string]any{
 		"response":          result.Result,
 		"direct_tool_call":  true,
 		"tool_name":         result.ToolName,
@@ -239,7 +251,7 @@ func formatDirectToolResponse(result *DirectToolResult) map[string]any {
 		Mode:      routeModeDirectTool,
 		ToolName:  result.ToolName,
 		ToolCount: 1,
-	})
+	}), []ActionReceipt{receipt})
 
 	// Add structured result metadata if available
 	if result.Structured {

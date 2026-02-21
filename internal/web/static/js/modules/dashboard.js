@@ -82,6 +82,20 @@
       preferredCategories: ['search']
     },
     {
+      key: 'email_inbox',
+      label: 'email inbox access',
+      phrases: ['check my email', 'check email', 'email', 'inbox', 'mailbox', 'gmail', 'outlook', 'unread', 'reply to email', 'triage'],
+      preferredServerNames: ['gmail', 'outlook', 'imap', 'microsoft-graph'],
+      preferredCategories: ['communication', 'email', 'productivity']
+    },
+    {
+      key: 'browser_automation',
+      label: 'browser automation',
+      phrases: ['browser automation', 'control browser', 'use browser', 'website automation', 'automate website', 'playwright', 'browserbase', 'puppeteer'],
+      preferredServerNames: ['playwright', 'browserbase', 'puppeteer'],
+      preferredCategories: ['automation', 'development', 'productivity']
+    },
+    {
       key: 'database_query',
       label: 'database query',
       phrases: ['postgres', 'postgresql', 'database', 'sql query', 'run sql', 'db query', 'schema'],
@@ -399,7 +413,24 @@
     };
   }
 
-  function buildAskOriDispatchMessage(prompt, appLaunchRequest) {
+  function buildEmailDispatchMessage(prompt) {
+    var userPrompt = String(prompt || '').trim();
+    return [
+      'Email task:',
+      userPrompt,
+      '',
+      'Execution requirements:',
+      '- Use configured MCP connectors/tools first (email connector or browser-control connector).',
+      '- If authentication is required, guide the user through login and continue.',
+      '- Do not claim lack of access before attempting available MCP tools.',
+      '- Keep operations read-only unless the user explicitly approves send/delete actions.'
+    ].join('\n');
+  }
+
+  function buildAskOriDispatchMessage(prompt, appLaunchRequest, intent) {
+    if (intent && intent.key === 'email_check') {
+      return buildEmailDispatchMessage(prompt);
+    }
     if (!appLaunchRequest || !appLaunchRequest.appName) {
       return String(prompt || '').trim();
     }
@@ -917,6 +948,19 @@
     return normalizeToken(name).replace(/_/g, '-');
   }
 
+  function isLegacyMCPServerName(name) {
+    var normalized = normalizeMCPServerName(name);
+    return normalized === 'puppeteer';
+  }
+
+  function findPreferredServerIndex(preferredNames, serverName) {
+    if (!Array.isArray(preferredNames) || !serverName) return -1;
+    for (var i = 0; i < preferredNames.length; i++) {
+      if (preferredNames[i] === serverName) return i;
+    }
+    return -1;
+  }
+
   function scoreMCPRequirement(promptText, requirement) {
     if (!promptText || !requirement || !Array.isArray(requirement.phrases)) return 0;
     var score = 0;
@@ -948,6 +992,15 @@
     return best;
   }
 
+  function findMCPRequirementByKey(requirementKey) {
+    if (!requirementKey) return null;
+    for (var i = 0; i < HOME_MCP_REQUIREMENTS.length; i++) {
+      var requirement = HOME_MCP_REQUIREMENTS[i];
+      if (requirement && requirement.key === requirementKey) return requirement;
+    }
+    return null;
+  }
+
   function selectExistingMCPServer(requirement, servers) {
     if (!requirement || !Array.isArray(servers) || servers.length === 0) return null;
     var preferredNames = (requirement.preferredServerNames || []).map(normalizeMCPServerName);
@@ -956,6 +1009,18 @@
       var serverName = normalizeMCPServerName(server && server.name);
       if (!serverName) continue;
       if (preferredNames.indexOf(serverName) >= 0) return server;
+    }
+    return null;
+  }
+
+  function findMCPServerByName(servers, serverName) {
+    if (!Array.isArray(servers) || !serverName) return null;
+    var targetName = normalizeMCPServerName(serverName);
+    for (var i = 0; i < servers.length; i++) {
+      var current = servers[i];
+      if (normalizeMCPServerName(current && current.name) === targetName) {
+        return current;
+      }
     }
     return null;
   }
@@ -969,7 +1034,12 @@
     var preferredNames = (requirement.preferredServerNames || []).map(normalizeMCPServerName);
     var preferredCategories = (requirement.preferredCategories || []).map(normalizeToken);
 
-    if (preferredNames.indexOf(serverName) >= 0) score += 100;
+    var preferredNameIndex = findPreferredServerIndex(preferredNames, serverName);
+    if (preferredNameIndex >= 0) {
+      score += 100;
+      score += (preferredNames.length - preferredNameIndex) * 8;
+    }
+    if (serverName && scoreMCPRequirement(serverName.replace(/-/g, ' '), requirement) > 0) score += 35;
     if (preferredCategories.indexOf(category) >= 0) score += 40;
     if (description && scoreMCPRequirement(description, requirement) > 0) score += 20;
     if (promptText && serverName && promptText.indexOf(serverName) >= 0) score += 10;
@@ -1047,9 +1117,898 @@
     }
   }
 
-  async function ensureMCPForTask(agentName, prompt) {
+  async function fetchConfiguredMCPServerSnapshot() {
+    if (typeof API === 'undefined' || typeof API.get !== 'function') {
+      return { servers: [], stats: {} };
+    }
+    try {
+      var data = await API.get('/api/mcp/servers');
+      return {
+        servers: Array.isArray(data && data.servers) ? data.servers : [],
+        stats: data && data.stats && typeof data.stats === 'object' ? data.stats : {}
+      };
+    } catch (error) {
+      dashLog.debug('Failed to fetch configured MCP servers', { error: error && error.message || error });
+      return { servers: [], stats: {} };
+    }
+  }
+
+  async function fetchConfiguredMCPServers() {
+    var snapshot = await fetchConfiguredMCPServerSnapshot();
+    return snapshot.servers;
+  }
+
+  async function fetchMCPRegistryServers() {
+    if (typeof API === 'undefined' || typeof API.get !== 'function') return [];
+    try {
+      var data = await API.get('/api/mcp/search');
+      if (Array.isArray(data)) return data;
+      if (Array.isArray(data && data.servers)) return data.servers;
+      return [];
+    } catch (error) {
+      dashLog.debug('Failed to fetch MCP browse registry', { error: error && error.message || error });
+      return [];
+    }
+  }
+
+  function lookupMCPServerStats(statsMap, serverName) {
+    if (!statsMap || typeof statsMap !== 'object' || !serverName) return null;
+    if (statsMap[serverName]) return statsMap[serverName];
+    var targetName = normalizeMCPServerName(serverName);
+    var keys = Object.keys(statsMap);
+    for (var i = 0; i < keys.length; i++) {
+      var key = keys[i];
+      if (normalizeMCPServerName(key) === targetName) {
+        return statsMap[key];
+      }
+    }
+    return null;
+  }
+
+  function scoreConfiguredMCPServer(requirement, server, promptText) {
+    if (!requirement || !server) return 0;
+    var score = 0;
+    var serverName = normalizeMCPServerName(server.name);
+    var category = normalizeToken(server.category);
+    var description = normalizeToken(server.description);
+    var preferredNames = (requirement.preferredServerNames || []).map(normalizeMCPServerName);
+    var preferredCategories = (requirement.preferredCategories || []).map(normalizeToken);
+
+    var preferredNameIndex = findPreferredServerIndex(preferredNames, serverName);
+    if (preferredNameIndex >= 0) {
+      score += 100;
+      score += (preferredNames.length - preferredNameIndex) * 8;
+    }
+    if (serverName && scoreMCPRequirement(serverName.replace(/-/g, ' '), requirement) > 0) score += 35;
+    if (preferredCategories.indexOf(category) >= 0) score += 30;
+    if (description && scoreMCPRequirement(description, requirement) > 0) score += 20;
+    if (promptText && serverName && promptText.indexOf(serverName) >= 0) score += 10;
+
+    return score;
+  }
+
+  function scoreRegistryMCPServer(requirement, server, promptText) {
+    if (!requirement || !server) return 0;
+    var score = 0;
+    var serverName = normalizeMCPServerName(server.name);
+    var category = normalizeToken(server.category);
+    var description = normalizeToken(server.description);
+    var tags = Array.isArray(server.tags) ? normalizeToken(server.tags.join(' ')) : '';
+    var preferredNames = (requirement.preferredServerNames || []).map(normalizeMCPServerName);
+    var preferredCategories = (requirement.preferredCategories || []).map(normalizeToken);
+
+    var preferredNameIndex = findPreferredServerIndex(preferredNames, serverName);
+    if (preferredNameIndex >= 0) {
+      score += 100;
+      score += (preferredNames.length - preferredNameIndex) * 8;
+    }
+    if (serverName && scoreMCPRequirement(serverName.replace(/-/g, ' '), requirement) > 0) score += 35;
+    if (preferredCategories.indexOf(category) >= 0) score += 30;
+    if (description && scoreMCPRequirement(description, requirement) > 0) score += 20;
+    if (tags && scoreMCPRequirement(tags, requirement) > 0) score += 15;
+    if (promptText && serverName && promptText.indexOf(serverName) >= 0) score += 10;
+
+    return score;
+  }
+
+  function chooseConfiguredMCPServers(requirement, prompt, configuredServers, limit) {
+    if (!requirement || !Array.isArray(configuredServers) || configuredServers.length === 0) return [];
+    var promptText = normalizeToken(prompt);
+    var ranked = [];
+    for (var i = 0; i < configuredServers.length; i++) {
+      var server = configuredServers[i];
+      var score = scoreConfiguredMCPServer(requirement, server, promptText);
+      if (score <= 0) continue;
+      ranked.push({ server: server, score: score });
+    }
+    if (ranked.length === 0) return [];
+
+    ranked.sort(function (a, b) {
+      return b.score - a.score;
+    });
+
+    var max = typeof limit === 'number' && limit > 0 ? Math.floor(limit) : 1;
+    var selected = [];
+    for (var j = 0; j < ranked.length && j < max; j++) {
+      selected.push(ranked[j].server);
+    }
+    return selected;
+  }
+
+  function chooseRegistryMCPServers(requirement, prompt, registryServers, limit) {
+    if (!requirement || !Array.isArray(registryServers) || registryServers.length === 0) return [];
+    var promptText = normalizeToken(prompt);
+    var ranked = [];
+    for (var i = 0; i < registryServers.length; i++) {
+      var server = registryServers[i];
+      var score = scoreRegistryMCPServer(requirement, server, promptText);
+      if (score <= 0) continue;
+      ranked.push({ server: server, score: score });
+    }
+    if (ranked.length === 0) return [];
+
+    ranked.sort(function (a, b) {
+      return b.score - a.score;
+    });
+
+    var max = typeof limit === 'number' && limit > 0 ? Math.floor(limit) : 1;
+    var selected = [];
+    for (var j = 0; j < ranked.length && j < max; j++) {
+      selected.push(ranked[j].server);
+    }
+    return selected;
+  }
+
+  function buildEmailMCPCandidateFromConfigured(server, stat) {
+    var runtimeLabel = String(stat && stat.status || server && server.status || '').trim();
+    var runtimeStatus = normalizeToken(runtimeLabel);
+    var legacy = isLegacyMCPServerName(server && server.name);
+    return {
+      name: String(server && server.name || '').trim(),
+      description: String(server && server.description || '').trim(),
+      category: String(server && server.category || '').trim(),
+      source: 'configured',
+      isInstalled: true,
+      selectable: true,
+      enabled: Boolean(stat && stat.enabled || server && server.enabled),
+      runtimeLabel: runtimeLabel,
+      runtimeStatus: runtimeStatus,
+      manualReason: '',
+      legacy: legacy,
+      legacyReason: legacy ? 'Puppeteer MCP is deprecated upstream. Playwright is recommended.' : '',
+      rawServer: server
+    };
+  }
+
+  function buildEmailMCPCandidateFromRegistry(server) {
+    var manualReason = getMCPManualConfigReason(server);
+    var legacy = isLegacyMCPServerName(server && server.name);
+    return {
+      name: String(server && server.name || '').trim(),
+      description: String(server && server.description || '').trim(),
+      category: String(server && server.category || '').trim(),
+      source: String(server && server.source || 'registry').trim() || 'registry',
+      isInstalled: false,
+      selectable: !manualReason,
+      enabled: false,
+      runtimeLabel: '',
+      runtimeStatus: '',
+      manualReason: manualReason,
+      legacy: legacy,
+      legacyReason: legacy ? 'Puppeteer MCP is deprecated upstream. Playwright is recommended.' : '',
+      rawServer: server
+    };
+  }
+
+  function filterEmailMCPCandidates(candidates, query) {
+    if (!Array.isArray(candidates) || candidates.length === 0) return [];
+    var normalizedQuery = normalizeToken(query);
+    if (!normalizedQuery) return candidates.slice();
+    var filtered = [];
+    for (var i = 0; i < candidates.length; i++) {
+      var candidate = candidates[i];
+      var haystack = [
+        candidate.name,
+        candidate.description,
+        candidate.category,
+        candidate.source
+      ].join(' ');
+      if (normalizeToken(haystack).indexOf(normalizedQuery) >= 0) {
+        filtered.push(candidate);
+      }
+    }
+    return filtered;
+  }
+
+  async function buildScopedMCPBrowseCandidates(requirement, prompt) {
+    if (!requirement) return { requirement: null, candidates: [] };
+    var snapshot = { servers: [], stats: {} };
+    var registryServers = [];
+    var marketplaceServers = [];
+    try {
+      var loaded = await Promise.all([
+        fetchConfiguredMCPServerSnapshot(),
+        fetchMCPRegistryServers(),
+        fetchMarketplaceMCPServers()
+      ]);
+      snapshot = loaded[0] || snapshot;
+      registryServers = Array.isArray(loaded[1]) ? loaded[1] : [];
+      marketplaceServers = Array.isArray(loaded[2]) ? loaded[2] : [];
+    } catch (error) {
+      dashLog.debug('Failed to build MCP browse candidates', { error: error && error.message || error });
+    }
+
+    var configuredMatches = chooseConfiguredMCPServers(requirement, prompt, snapshot.servers, 6);
+    var registryMatches = chooseRegistryMCPServers(requirement, prompt, registryServers, 12);
+    if (registryMatches.length === 0) {
+      var marketplaceCandidate = chooseMarketplaceMCPServer(requirement, prompt, marketplaceServers);
+      if (marketplaceCandidate) {
+        registryMatches = [marketplaceCandidate];
+      }
+    }
+
+    var candidates = [];
+    var seen = Object.create(null);
+
+    for (var i = 0; i < configuredMatches.length; i++) {
+      var configuredServer = configuredMatches[i];
+      var configuredName = normalizeMCPServerName(configuredServer && configuredServer.name);
+      if (!configuredName || seen[configuredName]) continue;
+      seen[configuredName] = true;
+      candidates.push(buildEmailMCPCandidateFromConfigured(
+        configuredServer,
+        lookupMCPServerStats(snapshot.stats, configuredServer.name)
+      ));
+    }
+
+    for (var j = 0; j < registryMatches.length; j++) {
+      var registryServer = registryMatches[j];
+      var registryName = normalizeMCPServerName(registryServer && registryServer.name);
+      if (!registryName || seen[registryName]) continue;
+      seen[registryName] = true;
+      candidates.push(buildEmailMCPCandidateFromRegistry(registryServer));
+    }
+
+    return { requirement: requirement, candidates: candidates };
+  }
+
+  function resolveEmailMCPRequirement(prompt) {
+    var requirement = detectMCPRequirement(prompt);
+    if (!requirement || requirement.key !== 'email_inbox') {
+      requirement = findMCPRequirementByKey('email_inbox');
+    }
+    return requirement;
+  }
+
+  function resolveBrowserMCPRequirement() {
+    return findMCPRequirementByKey('browser_automation') || {
+      key: 'browser_automation',
+      label: 'browser automation',
+      phrases: ['browser automation', 'control browser', 'use browser', 'website automation', 'playwright', 'browserbase', 'puppeteer'],
+      preferredServerNames: ['playwright', 'browserbase', 'puppeteer'],
+      preferredCategories: ['automation', 'development', 'productivity']
+    };
+  }
+
+  async function buildEmailMCPBrowseCandidates(prompt) {
+    return buildScopedMCPBrowseCandidates(resolveEmailMCPRequirement(prompt), prompt);
+  }
+
+  async function buildBrowserMCPBrowseCandidates(prompt) {
+    return buildScopedMCPBrowseCandidates(resolveBrowserMCPRequirement(), prompt);
+  }
+
+  async function installMCPServerCandidate(candidate) {
+    if (!candidate || !candidate.name) {
+      return { status: 'invalid_selection', message: 'Select an MCP server first.' };
+    }
+    if (candidate.isInstalled) {
+      return { status: 'already_installed', serverName: candidate.name };
+    }
+    if (candidate.manualReason) {
+      return {
+        status: 'manual_config_required',
+        serverName: candidate.name,
+        message: 'The selected server "' + candidate.name + '" cannot be auto-installed because it ' + candidate.manualReason + '.'
+      };
+    }
+
+    var payload = buildMCPServerInstallPayload(candidate.rawServer || candidate);
+    if (!payload.name || !payload.command) {
+      return {
+        status: 'invalid_candidate',
+        message: 'The selected MCP server has incomplete install details. Open MCP settings to configure it manually.'
+      };
+    }
+
+    try {
+      await API.post('/api/mcp/servers', payload);
+      return {
+        status: 'installed',
+        serverName: payload.name
+      };
+    } catch (error) {
+      var installError = String(error && error.message || error || '');
+      if (installError.toLowerCase().indexOf('already exists') >= 0) {
+        return {
+          status: 'already_installed',
+          serverName: payload.name
+        };
+      }
+      return {
+        status: 'install_failed',
+        serverName: payload.name,
+        message: 'Failed to install MCP server "' + payload.name + '": ' + installError
+      };
+    }
+  }
+
+  async function enableMCPServerForAgent(agentName, serverName) {
+    if (!agentName || !serverName) {
+      return { status: 'enable_failed', message: 'Agent name and MCP server are required.' };
+    }
+    try {
+      await API.post('/api/agents/' + encodeURIComponent(agentName) + '/mcp-servers/' + encodeURIComponent(serverName) + '/enable', {});
+    } catch (error) {
+      var enableError = String(error && error.message || error || '');
+      return {
+        status: 'enable_failed',
+        serverName: serverName,
+        message: 'Failed to attach MCP server "' + serverName + '" to "' + agentName + '": ' + enableError
+      };
+    }
+
+    var agentServers = await fetchAgentMCPServers(agentName);
+    var attached = findMCPServerByName(agentServers, serverName);
+    var runtimeStatus = normalizeToken(attached && attached.status);
+    if (runtimeStatus && runtimeStatus !== 'running') {
+      return {
+        status: 'attached_not_running',
+        serverName: serverName,
+        runtimeStatus: String(attached && attached.status || 'unknown'),
+        message: 'Attached MCP server "' + serverName + '" to "' + agentName + '", but it is currently "' + (attached && attached.status || 'unknown') + '".'
+      };
+    }
+
+    return {
+      status: 'attached_running',
+      serverName: serverName,
+      message: 'Attached MCP server "' + serverName + '" to "' + agentName + '".'
+    };
+  }
+
+  async function applyEmailMCPCandidate(agentName, candidate) {
+    var installOutcome = await installMCPServerCandidate(candidate);
+    var status = normalizeToken(installOutcome && installOutcome.status);
+    if (!status || ['installed', 'already_installed'].indexOf(status) < 0) {
+      return installOutcome;
+    }
+
+    if (!agentName) {
+      return {
+        status: status === 'installed' ? 'installed_only' : 'already_installed',
+        serverName: installOutcome.serverName || candidate && candidate.name,
+        message: status === 'installed'
+          ? 'Installed MCP server "' + (installOutcome.serverName || candidate && candidate.name || 'selected server') + '".'
+          : 'MCP server "' + (installOutcome.serverName || candidate && candidate.name || 'selected server') + '" is already installed.'
+      };
+    }
+
+    return enableMCPServerForAgent(agentName, installOutcome.serverName || candidate && candidate.name);
+  }
+
+  async function openScopedMCPBrowseModal(agentName, prompt, options) {
+    var modalOptions = options || {};
+    var buildCandidates = typeof modalOptions.buildCandidates === 'function'
+      ? modalOptions.buildCandidates
+      : null;
+    if (!buildCandidates) return { status: 'invalid_config' };
+
+    var bundle = await buildCandidates(prompt);
+    var candidates = Array.isArray(bundle && bundle.candidates) ? bundle.candidates : [];
+    var modalPrefix = String(modalOptions.modalPrefix || 'homeMCPBrowseModal').trim() || 'homeMCPBrowseModal';
+    var modalId = modalPrefix + '-' + Date.now();
+    var searchId = modalId + '-search';
+    var countId = modalId + '-count';
+    var listId = modalId + '-list';
+    var noteId = modalId + '-note';
+    var confirmId = modalId + '-confirm';
+    var skipId = modalId + '-skip';
+    var openPageId = modalId + '-open';
+    var switchId = modalId + '-switch';
+    var radioGroupName = modalId + '-choice';
+
+    var switchLabel = String(modalOptions.switchLabel || '').trim();
+    var switchTarget = String(modalOptions.switchTarget || '').trim();
+
+    var modalElement = document.createElement('div');
+    modalElement.className = 'modal fade';
+    modalElement.id = modalId;
+    modalElement.tabIndex = -1;
+    modalElement.setAttribute('aria-hidden', 'true');
+    modalElement.innerHTML = ''
+      + '<div class="modal-dialog modal-lg modal-dialog-scrollable">'
+      + '  <div class="modal-content" style="background: var(--bg-secondary); border: 1px solid var(--border-color);">'
+      + '    <div class="modal-header" style="border-bottom: 1px solid var(--border-color);">'
+      + '      <h5 class="modal-title" style="color: var(--text-primary);">' + String(modalOptions.title || 'Browse MCP Connectors') + '</h5>'
+      + '      <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>'
+      + '    </div>'
+      + '    <div class="modal-body">'
+      + '      <p class="small mb-3" style="color: var(--text-secondary);">' + String(modalOptions.description || 'Select an MCP connector and apply it with explicit approval.') + '</p>'
+      + '      <div class="input-group mb-2">'
+      + '        <span class="input-group-text" style="background: var(--bg-tertiary); border-color: var(--border-color); color: var(--text-secondary);">Search</span>'
+      + '        <input id="' + searchId + '" type="text" class="form-control" placeholder="' + String(modalOptions.searchPlaceholder || 'Search connectors...') + '" style="background: var(--bg-tertiary); border-color: var(--border-color); color: var(--text-primary);">'
+      + '      </div>'
+      + '      <div id="' + countId + '" class="small mb-2" style="color: var(--text-secondary);"></div>'
+      + '      <div id="' + listId + '" class="list-group" style="max-height: 360px; overflow-y: auto;"></div>'
+      + '      <div id="' + noteId + '" class="small mt-3" style="color: var(--text-secondary);"></div>'
+      + '    </div>'
+      + '    <div class="modal-footer" style="border-top: 1px solid var(--border-color);">'
+      + '      <button id="' + openPageId + '" type="button" class="modern-btn modern-btn-secondary">Open MCP Page</button>'
+      + (switchLabel
+        ? ('      <button id="' + switchId + '" type="button" class="modern-btn modern-btn-secondary">' + switchLabel + '</button>')
+        : '')
+      + '      <button id="' + skipId + '" type="button" class="modern-btn modern-btn-secondary">'
+      + (agentName ? String(modalOptions.skipWithAgentLabel || 'Continue Without MCP') : String(modalOptions.skipWithoutAgentLabel || 'Close'))
+      + '      </button>'
+      + '      <button id="' + confirmId + '" type="button" class="modern-btn modern-btn-primary" disabled>'
+      + (agentName ? String(modalOptions.confirmWithAgentLabel || 'Use Selected & Continue') : String(modalOptions.confirmWithoutAgentLabel || 'Install Selected'))
+      + '      </button>'
+      + '    </div>'
+      + '  </div>'
+      + '</div>';
+
+    document.body.appendChild(modalElement);
+
+    var searchInput = modalElement.querySelector('#' + searchId);
+    var countElement = modalElement.querySelector('#' + countId);
+    var listElement = modalElement.querySelector('#' + listId);
+    var noteElement = modalElement.querySelector('#' + noteId);
+    var confirmButton = modalElement.querySelector('#' + confirmId);
+    var skipButton = modalElement.querySelector('#' + skipId);
+    var openPageButton = modalElement.querySelector('#' + openPageId);
+    var switchButton = modalElement.querySelector('#' + switchId);
+
+    var selectedName = '';
+    var finalResult = null;
+
+    function setNote(text, isError) {
+      if (!noteElement) return;
+      noteElement.style.color = isError ? 'var(--danger-color, #dc3545)' : 'var(--text-secondary)';
+      noteElement.textContent = String(text || '');
+    }
+
+    function updateConfirmState() {
+      if (!confirmButton) return;
+      confirmButton.disabled = !selectedName;
+    }
+
+    function renderCandidateList() {
+      if (!listElement) return;
+      listElement.innerHTML = '';
+
+      var filtered = filterEmailMCPCandidates(candidates, searchInput && searchInput.value || '');
+      if (countElement) {
+        countElement.textContent = filtered.length + ' connector(s) found';
+      }
+
+      if (filtered.length === 0) {
+        var empty = document.createElement('div');
+        empty.className = 'text-center py-4';
+        empty.style.color = 'var(--text-secondary)';
+        empty.textContent = String(modalOptions.emptyStateText || 'No matching MCP connectors found.');
+        listElement.appendChild(empty);
+        selectedName = '';
+        updateConfirmState();
+        return;
+      }
+
+      for (var i = 0; i < filtered.length; i++) {
+        (function (candidate) {
+          var row = document.createElement('label');
+          row.className = 'list-group-item';
+          row.style.background = 'var(--bg-tertiary)';
+          row.style.borderColor = 'var(--border-color)';
+          row.style.cursor = candidate.selectable ? 'pointer' : 'not-allowed';
+
+          var wrapper = document.createElement('div');
+          wrapper.className = 'd-flex align-items-start';
+          wrapper.style.gap = '0.6rem';
+
+          var radio = document.createElement('input');
+          radio.type = 'radio';
+          radio.className = 'form-check-input mt-1';
+          radio.name = radioGroupName;
+          radio.value = candidate.name;
+          radio.disabled = !candidate.selectable;
+          radio.checked = selectedName === candidate.name;
+          radio.addEventListener('change', function () {
+            selectedName = candidate.name;
+            updateConfirmState();
+            setNote(candidate.manualReason ? ('Note: ' + candidate.manualReason + '.') : '', false);
+          });
+
+          var content = document.createElement('div');
+          content.style.flex = '1';
+
+          var top = document.createElement('div');
+          top.className = 'd-flex align-items-center justify-content-between flex-wrap';
+          top.style.gap = '0.4rem';
+
+          var name = document.createElement('strong');
+          name.style.color = 'var(--text-primary)';
+          name.textContent = candidate.name;
+
+          var badges = document.createElement('div');
+          badges.className = 'd-flex align-items-center flex-wrap';
+          badges.style.gap = '0.35rem';
+
+          function addBadge(text, className) {
+            var badge = document.createElement('span');
+            badge.className = 'badge ' + className;
+            badge.textContent = text;
+            badges.appendChild(badge);
+          }
+
+          if (candidate.category) addBadge(candidate.category, 'bg-secondary');
+          if (candidate.source) addBadge(candidate.source, 'bg-dark');
+          if (candidate.isInstalled) addBadge('installed', 'bg-primary');
+          if (candidate.runtimeLabel) addBadge(candidate.runtimeLabel, candidate.runtimeStatus === 'running' ? 'bg-success' : 'bg-warning text-dark');
+          if (candidate.legacy) addBadge('legacy', 'bg-warning text-dark');
+          if (!candidate.selectable && candidate.manualReason) addBadge('manual setup', 'bg-warning text-dark');
+
+          top.appendChild(name);
+          top.appendChild(badges);
+
+          var description = document.createElement('div');
+          description.className = 'small mt-1';
+          description.style.color = 'var(--text-secondary)';
+          description.textContent = candidate.description || 'No description provided.';
+
+          var note = document.createElement('div');
+          note.className = 'small mt-1';
+          note.style.color = candidate.manualReason ? 'var(--warning-color, #ffc107)' : 'var(--text-secondary)';
+          if (candidate.manualReason) {
+            note.textContent = 'Requires manual setup: ' + candidate.manualReason + '.';
+          } else if (candidate.legacy && candidate.legacyReason) {
+            note.textContent = candidate.legacyReason;
+          } else if (candidate.isInstalled && candidate.enabled) {
+            note.textContent = 'Already enabled globally.';
+          } else if (candidate.isInstalled) {
+            note.textContent = 'Installed. Selecting this will attach it to the agent.';
+          } else {
+            note.textContent = String(modalOptions.pendingInstallText || 'Will be installed and then attached.');
+          }
+
+          content.appendChild(top);
+          content.appendChild(description);
+          content.appendChild(note);
+
+          wrapper.appendChild(radio);
+          wrapper.appendChild(content);
+          row.appendChild(wrapper);
+
+          if (candidate.selectable) {
+            row.addEventListener('click', function () {
+              selectedName = candidate.name;
+              radio.checked = true;
+              updateConfirmState();
+              setNote('', false);
+            });
+          }
+
+          listElement.appendChild(row);
+        })(filtered[i]);
+      }
+    }
+
+    return new Promise(function (resolve) {
+      var bsModal = new bootstrap.Modal(modalElement, { backdrop: 'static', keyboard: false });
+      var done = false;
+
+      function closeWith(result) {
+        finalResult = result;
+        bsModal.hide();
+      }
+
+      modalElement.addEventListener('hidden.bs.modal', function () {
+        if (done) return;
+        done = true;
+        modalElement.remove();
+        resolve(finalResult || { status: 'cancelled' });
+      }, { once: true });
+
+      if (searchInput) {
+        searchInput.addEventListener('input', function () {
+          renderCandidateList();
+          setNote('', false);
+        });
+      }
+
+      if (openPageButton) {
+        openPageButton.addEventListener('click', function () {
+          closeWith({ status: 'opened_mcp_page' });
+          window.location.href = '/mcp';
+        });
+      }
+
+      if (switchButton) {
+        switchButton.addEventListener('click', function () {
+          closeWith({ status: 'switch_browse', target: switchTarget });
+        });
+      }
+
+      if (skipButton) {
+        skipButton.addEventListener('click', function () {
+          if (agentName) {
+            closeWith({ status: 'continue_without_mcp' });
+          } else {
+            closeWith({ status: 'cancelled' });
+          }
+        });
+      }
+
+      if (confirmButton) {
+        confirmButton.addEventListener('click', async function () {
+          if (!selectedName) return;
+          var selectedCandidate = null;
+          for (var i = 0; i < candidates.length; i++) {
+            if (candidates[i].name === selectedName) {
+              selectedCandidate = candidates[i];
+              break;
+            }
+          }
+          if (!selectedCandidate) return;
+
+          confirmButton.disabled = true;
+          skipButton.disabled = true;
+          openPageButton.disabled = true;
+          if (switchButton) switchButton.disabled = true;
+          var originalLabel = confirmButton.textContent;
+          confirmButton.textContent = agentName
+            ? String(modalOptions.progressWithAgentLabel || 'Applying...')
+            : String(modalOptions.progressWithoutAgentLabel || 'Installing...');
+
+          try {
+            var outcome = await applyEmailMCPCandidate(agentName, selectedCandidate);
+            var outcomeStatus = normalizeToken(outcome && outcome.status);
+            if (['attached_running', 'installed_only', 'already_installed'].indexOf(outcomeStatus) >= 0) {
+              closeWith(outcome);
+              return;
+            }
+            setNote(outcome && outcome.message ? outcome.message : 'Could not apply the selected MCP connector.', true);
+          } catch (error) {
+            setNote(String(error && error.message || error || 'Unexpected MCP setup failure'), true);
+          } finally {
+            if (confirmButton) {
+              confirmButton.textContent = originalLabel;
+              confirmButton.disabled = !selectedName;
+            }
+            if (skipButton) skipButton.disabled = false;
+            if (openPageButton) openPageButton.disabled = false;
+            if (switchButton) switchButton.disabled = false;
+          }
+        });
+      }
+
+      renderCandidateList();
+      updateConfirmState();
+      bsModal.show();
+    });
+  }
+
+  async function openEmailMCPBrowseModal(agentName, prompt) {
+    return openScopedMCPBrowseModal(agentName, prompt, {
+      modalPrefix: 'homeEmailMCPBrowseModal',
+      title: 'Browse Email MCP Connectors',
+      description: 'Select an email connector for Gmail, Outlook, or IMAP. You can search, select, and apply without leaving this flow.',
+      searchPlaceholder: 'gmail, outlook, imap...',
+      emptyStateText: 'No matching email MCP connectors found.',
+      pendingInstallText: 'Will be installed and then attached.',
+      switchLabel: 'Use Browser Control',
+      switchTarget: 'browser_control',
+      buildCandidates: buildEmailMCPBrowseCandidates
+    });
+  }
+
+  async function openBrowserControlMCPBrowseModal(agentName, prompt) {
+    return openScopedMCPBrowseModal(agentName, prompt, {
+      modalPrefix: 'homeBrowserMCPBrowseModal',
+      title: 'Browse Browser Control MCP',
+      description: 'Select a browser-control connector (Playwright, Browserbase, or Puppeteer). Use this when email APIs are unavailable and you want guided browser-based access.',
+      searchPlaceholder: 'playwright, browserbase, puppeteer...',
+      emptyStateText: 'No matching browser-control MCP connectors found.',
+      pendingInstallText: 'Will be installed and then attached for browser-control tasks.',
+      switchLabel: 'Use Email Connector',
+      switchTarget: 'email_connector',
+      buildCandidates: buildBrowserMCPBrowseCandidates
+    });
+  }
+
+  async function runEmailAccessMCPSelection(agentName, prompt, startingMode) {
+    var mode = normalizeToken(startingMode) === 'browser' ? 'browser' : 'email';
+    for (var i = 0; i < 4; i++) {
+      var result = mode === 'browser'
+        ? await openBrowserControlMCPBrowseModal(agentName, prompt)
+        : await openEmailMCPBrowseModal(agentName, prompt);
+      var status = normalizeToken(result && result.status);
+      if (status === 'switch_browse') {
+        var target = normalizeToken(result && result.target);
+        mode = target === 'browser_control' ? 'browser' : 'email';
+        continue;
+      }
+      return result || { status: 'cancelled' };
+    }
+    return { status: 'cancelled' };
+  }
+
+  function formatEmailMCPOptionSummary(emailAdvice) {
+    if (!emailAdvice) return '';
+    var lines = [];
+    var configured = Array.isArray(emailAdvice.configuredMatches) ? emailAdvice.configuredMatches : [];
+    var marketplace = emailAdvice.marketplaceMatch;
+
+    lines.push('Email setup options:');
+    lines.push('1) Browse and select an email MCP connector (recommended).');
+    if (configured.length > 0) {
+      var configuredNames = [];
+      for (var i = 0; i < configured.length; i++) {
+        configuredNames.push(String(configured[i].name || '').trim());
+      }
+      lines.push('   Available now: ' + configuredNames.filter(Boolean).join(', ') + '.');
+    } else if (marketplace && marketplace.name) {
+      lines.push('   Suggested MCP from marketplace: "' + marketplace.name + '".');
+    } else {
+      lines.push('   If no connector is installed yet, browse and add Gmail, Outlook, or IMAP.');
+    }
+    lines.push('2) Use Browser Control MCP (Playwright/Browserbase/Puppeteer) when mailbox APIs are unavailable.');
+    lines.push('3) Create a dedicated Email Assistant and attach MCP after setup.');
+    lines.push('Safety defaults: start read-only and require explicit approval before sending or deleting.');
+
+    return lines.join('\n');
+  }
+
+  async function buildEmailSolutionAdvice(prompt) {
+    var requirement = detectMCPRequirement(prompt);
+    if (!requirement || requirement.key !== 'email_inbox') {
+      requirement = findMCPRequirementByKey('email_inbox');
+    }
+    if (!requirement) return null;
+
+    var configuredServers = [];
+    var marketplaceServers = [];
+    try {
+      var loaded = await Promise.all([
+        fetchConfiguredMCPServers(),
+        fetchMarketplaceMCPServers()
+      ]);
+      configuredServers = Array.isArray(loaded[0]) ? loaded[0] : [];
+      marketplaceServers = Array.isArray(loaded[1]) ? loaded[1] : [];
+    } catch (error) {
+      dashLog.debug('Failed to prepare email MCP advice', { error: error && error.message || error });
+    }
+
+    return {
+      requirement: requirement,
+      configuredMatches: chooseConfiguredMCPServers(requirement, prompt, configuredServers, 2),
+      marketplaceMatch: chooseMarketplaceMCPServer(requirement, prompt, marketplaceServers)
+    };
+  }
+
+  async function renderEmailSolutionActions(prompt) {
+    var advice = await buildEmailSolutionAdvice(prompt);
+    var summary = formatEmailMCPOptionSummary(advice);
+    if (summary) {
+      appendHomeAssistantMessage('assistant', summary);
+    }
+
+    homeAssistantState.awaitingCreateConfirmation = true;
+    setHomeAssistantRoutingSummary('Email Setup Options', 'Choose email MCP, browser control MCP, or create a dedicated email agent.');
+
+    function openSelection(mode) {
+      runEmailAccessMCPSelection('', prompt, mode).then(function (result) {
+        var resultStatus = normalizeToken(result && result.status);
+        if (resultStatus === 'installed_only' || resultStatus === 'already_installed') {
+          appendHomeAssistantMessage('assistant', result.message || 'Selected MCP connector is ready.');
+        } else if (resultStatus === 'opened_mcp_page') {
+          appendHomeAssistantMessage('assistant', 'Opened MCP settings so you can review connector details.');
+        }
+      }).catch(function (error) {
+        dashLog.debug('Email MCP browse modal failed', { error: error && error.message || error });
+      });
+    }
+
+    renderHomeAssistantActions([
+      {
+        label: 'Browse Email MCP',
+        variant: 'primary',
+        onClick: function () { openSelection('email'); }
+      },
+      {
+        label: 'Use Browser Control',
+        variant: 'secondary',
+        onClick: function () { openSelection('browser'); }
+      },
+      {
+        label: 'Create Email Agent',
+        variant: 'secondary',
+        onClick: function () { createAgentForPendingTask(); }
+      },
+      {
+        label: 'Ask Another Task',
+        variant: 'secondary',
+        onClick: function () { focusHomeAssistantInput(); }
+      }
+    ]);
+  }
+
+  function shouldPauseForEmailMCPSelection(mcpOutcome) {
+    var status = normalizeToken(mcpOutcome && mcpOutcome.status);
+    if (!status) return true;
+    if (['already_enabled', 'enabled_existing', 'installed_and_enabled'].indexOf(status) >= 0) {
+      return false;
+    }
+    return true;
+  }
+
+  async function maybeResolveEmailMCPBeforeHandoff(agentName, prompt, mcpOutcome) {
+    if (!agentName) {
+      return { continueHandoff: false };
+    }
+    if (!shouldPauseForEmailMCPSelection(mcpOutcome)) {
+      return { continueHandoff: true };
+    }
+
+    appendHomeAssistantMessage('assistant', 'Before handoff, select an email connector or browser-control connector so this task can access your inbox.');
+    setHomeAssistantRoutingSummary('Email MCP Required', 'Select an email or browser-control connector before continuing.');
+
+    var selection = await runEmailAccessMCPSelection(agentName, prompt, 'email');
+    var selectionStatus = normalizeToken(selection && selection.status);
+
+    if (selectionStatus === 'attached_running') {
+      appendHomeAssistantMessage('assistant', selection.message || ('Attached MCP server "' + (selection.serverName || 'selected server') + '".'));
+      if (isLegacyMCPServerName(selection && selection.serverName)) {
+        appendHomeAssistantMessage('assistant', 'Note: Puppeteer MCP is legacy/deprecated. Playwright is recommended for browser control.');
+      }
+      return { continueHandoff: true };
+    }
+
+    if (selectionStatus === 'continue_without_mcp') {
+      appendHomeAssistantMessage('assistant', 'Continuing without an MCP connector. Email access may be unavailable.');
+      return { continueHandoff: true };
+    }
+
+    if (selectionStatus === 'attached_not_running') {
+      appendHomeAssistantMessage('assistant', selection.message || 'Selected MCP connector is not running yet. Configure it before handoff.');
+      setHomeAssistantRoutingSummary('MCP Needs Configuration', 'Selected email connector is attached but not running yet.');
+      renderHomeAssistantActions([
+        {
+          label: 'Open MCP Settings',
+          variant: 'primary',
+          onClick: function () { window.location.href = '/mcp'; }
+        },
+        {
+          label: 'Ask Another Task',
+          variant: 'secondary',
+          onClick: function () { focusHomeAssistantInput(); }
+        }
+      ]);
+      return { continueHandoff: false };
+    }
+
+    if (selection && selection.message) {
+      appendHomeAssistantMessage('assistant', selection.message);
+    } else {
+      appendHomeAssistantMessage('assistant', 'Email handoff paused. Select an MCP connector when you are ready.');
+    }
+    setHomeAssistantRoutingSummary('Waiting for MCP Selection', 'Email task is paused until MCP setup is completed.');
+    return { continueHandoff: false };
+  }
+
+  async function ensureMCPForTask(agentName, prompt, options) {
     var requirement = detectMCPRequirement(prompt);
     if (!requirement || !agentName) return null;
+    var allowMutations = !(options && options.allowMutations === false);
 
     var currentServers = await fetchAgentMCPServers(agentName);
     var existing = selectExistingMCPServer(requirement, currentServers);
@@ -1069,6 +2028,14 @@
       };
     }
 
+    if (existing && !allowMutations) {
+      return {
+        status: 'existing_disabled',
+        serverName: existing.name,
+        message: 'MCP server "' + existing.name + '" matches this task but is not enabled for "' + agentName + '".'
+      };
+    }
+
     var targetServerName = existing && existing.name ? existing.name : '';
     var installCandidate = null;
 
@@ -1078,10 +2045,18 @@
       if (!installCandidate) {
         return {
           status: 'not_found',
-          message: 'This task may need MCP (' + requirement.label + '), but I could not find a suitable MCP server to auto-install.'
+          message: 'This task may need MCP (' + requirement.label + '), but no matching connector is currently configured.'
         };
       }
       targetServerName = installCandidate.name;
+
+      if (!allowMutations) {
+        return {
+          status: 'candidate_available',
+          serverName: targetServerName,
+          message: 'Found MCP connector "' + targetServerName + '" for ' + requirement.label + '. Select it to install and attach.'
+        };
+      }
 
       var manualReason = getMCPManualConfigReason(installCandidate);
       if (manualReason) {
@@ -1112,6 +2087,14 @@
           };
         }
       }
+    }
+
+    if (!allowMutations) {
+      return {
+        status: 'needs_enable',
+        serverName: targetServerName,
+        message: 'MCP connector "' + targetServerName + '" is available. Select it to attach before continuing.'
+      };
     }
 
     try {
@@ -1773,9 +2756,19 @@
           'Email idea: connect Gmail/Outlook via OAuth, start with read-only scopes, summarize unread first, and require explicit approval before sending replies.');
       }
 
-      var createdAgentMCP = await ensureMCPForTask(agentName, prompt);
+      var createdAgentMCP = await ensureMCPForTask(
+        agentName,
+        prompt,
+        intent.key === 'email_check' ? { allowMutations: false } : null
+      );
       if (createdAgentMCP && createdAgentMCP.message) {
         appendHomeAssistantMessage('assistant', createdAgentMCP.message);
+      }
+      if (intent.key === 'email_check') {
+        var createdEmailMCPResolution = await maybeResolveEmailMCPBeforeHandoff(agentName, prompt, createdAgentMCP);
+        if (!createdEmailMCPResolution || !createdEmailMCPResolution.continueHandoff) {
+          return;
+        }
       }
 
       if (isSemiAutoMode()) {
@@ -1939,7 +2932,8 @@
   async function runPendingTaskWithAgent(prompt, agentName, options) {
     if (!prompt || !agentName) return;
     var appLaunchRequest = options && options.appLaunchRequest ? options.appLaunchRequest : null;
-    var dispatchMessage = buildAskOriDispatchMessage(prompt, appLaunchRequest);
+    var dispatchIntent = options && options.intent ? options.intent : homeAssistantState.pendingIntent;
+    var dispatchMessage = buildAskOriDispatchMessage(prompt, appLaunchRequest, dispatchIntent);
 
     setHomeAssistantBusy(true, 'Opening Chat...');
     renderHomeAssistantActions([]);
@@ -2097,9 +3091,19 @@
           await runUtilityTaskDirect(text, match.agent.name);
           return;
         }
-        var matchedAgentMCP = await ensureMCPForTask(match.agent.name, text);
+        var matchedAgentMCP = await ensureMCPForTask(
+          match.agent.name,
+          text,
+          homeAssistantState.pendingIntent.key === 'email_check' ? { allowMutations: false } : null
+        );
         if (matchedAgentMCP && matchedAgentMCP.message) {
           appendHomeAssistantMessage('assistant', matchedAgentMCP.message);
+        }
+        if (homeAssistantState.pendingIntent.key === 'email_check') {
+          var matchedEmailMCPResolution = await maybeResolveEmailMCPBeforeHandoff(match.agent.name, text, matchedAgentMCP);
+          if (!matchedEmailMCPResolution || !matchedEmailMCPResolution.continueHandoff) {
+            return;
+          }
         }
         if (isSemiAutoMode()) {
           appendHomeAssistantMessage('assistant', 'Match found. Handing off to "' + match.agent.name + '" now.');
@@ -2132,6 +3136,12 @@
         }
 
         if (isSemiAutoMode()) {
+          if (homeAssistantState.pendingIntent.key === 'email_check') {
+            appendHomeAssistantMessage('assistant',
+              'No suitable email agent found yet. Choose a setup path and I can continue.');
+            await renderEmailSolutionActions(text);
+            return;
+          }
           appendHomeAssistantMessage('assistant',
             'No suitable agent found for this task. I will open the Create Agent modal so you can review details.');
           setHomeAssistantRoutingSummary('Semi-auto', 'No match found. Review and confirm agent creation.');
@@ -2143,8 +3153,8 @@
           setHomeAssistantRoutingSummary('No Match', 'No suitable agent was found. Create a new agent to continue.');
 
           if (homeAssistantState.pendingIntent.key === 'email_check') {
-            appendHomeAssistantMessage('assistant',
-              'Email setup idea: connect mailbox via OAuth, request read-only scope first, then add a separate confirmed send step.');
+            await renderEmailSolutionActions(text);
+            return;
           }
 
           renderHomeAssistantActions([

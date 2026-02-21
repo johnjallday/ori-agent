@@ -2,7 +2,6 @@ package chathttp
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -166,85 +165,45 @@ func (h *Handler) handleOpenAIToolCalls(
 	// Append the assistant message with tool calls first
 	ag.Messages = append(ag.Messages, choice.ToParam())
 
-	// Process ALL tool calls
-	var toolResults []map[string]string
+	llmToolCalls := make([]llm.ToolCall, 0, len(choice.ToolCalls))
 	for _, tc := range choice.ToolCalls {
-		name := tc.Function.Name
-		args := tc.Function.Arguments
-
-		tool, found := h.findTool(ag, agentName, name)
-		if !found {
-			orihttp.InternalError(w, fmt.Sprintf("tool %q not found", name))
-			return
-		}
-
-		toolCtx, toolCancel := context.WithTimeout(baseCtx, ToolExecutionTimeout)
-
-		startTime := time.Now()
-
-		logger.Info("OpenAI tool execution starting", logger.Fields{
-			"tool":            name,
-			"files_available": len(files),
-		})
-
-		result, err := ExecuteToolWithFiles(toolCtx, tool, name, args, files)
-		toolCancel() // Cancel context immediately after use to avoid leak
-
-		duration := time.Since(startTime)
-		durationMs := int(duration.Milliseconds())
-
-		if h.healthManager != nil {
-			if err != nil {
-				h.healthManager.RecordCallFailure(name, duration, err)
-			} else {
-				h.healthManager.RecordCallSuccess(name, duration)
-			}
-		}
-
-		var errorMsg string
-		if err != nil {
-			errorMsg = err.Error()
-			result = fmt.Sprintf("❌ Error executing %s: %v", name, err)
-			logger.Error("Tool failed", logger.Fields{"tool": name, "error": err})
-		} else {
-			logger.Info("Tool execution completed", logger.Fields{"tool": name})
-		}
-
-		// Store tool call for review analysis
-		h.storeToolCall(baseCtx, sessionID, tc.ID, name, args, result, errorMsg, durationMs)
-
-		ag.Messages = append(ag.Messages, openai.ToolMessage(result, tc.ID))
-		toolResults = append(toolResults, map[string]string{
-			"function": name,
-			"args":     args,
-			"result":   result,
+		llmToolCalls = append(llmToolCalls, llm.ToolCall{
+			ID:        tc.ID,
+			Name:      tc.Function.Name,
+			Arguments: tc.Function.Arguments,
 		})
 	}
 
-	// Check for structured results
-	combinedResult, hasStructuredResult, structuredResultData := h.processToolResults(toolResults)
+	execResult := h.executeToolCallsCommonWithSession(baseCtx, ag, agentName, llmToolCalls, files, sessionID)
 
-	if hasStructuredResult {
-		ag.Messages = append(ag.Messages, openai.AssistantMessage(combinedResult))
+	for i, tc := range llmToolCalls {
+		if i >= len(execResult.Results) {
+			break
+		}
+		ag.Messages = append(ag.Messages, openai.ToolMessage(execResult.Results[i].Result, tc.ID))
+	}
+
+	if execResult.HasStructuredResult {
+		ag.Messages = append(ag.Messages, openai.AssistantMessage(execResult.CombinedResult))
 		logger.Debug("Chat with structured tool result completed", logger.Fields{"duration": time.Since(start)})
 		_ = h.store.SetAgent(agentName, ag)
 
 		// Store assistant response in session
-		h.storeMessageInSession(baseCtx, sessionID, "assistant", combinedResult)
+		h.storeMessageInSession(baseCtx, sessionID, "assistant", execResult.CombinedResult)
 
-		response := attachRouteMetadata(map[string]any{
-			"response":  combinedResult,
-			"toolCalls": toolResults,
+		response := attachActionReceipts(attachRouteMetadata(map[string]any{
+			"response":  execResult.CombinedResult,
+			"toolCalls": execResult.Results,
 		}, chatRouteMetadata{
 			Mode:      routeModeAssistantChat,
-			ToolCount: len(toolResults),
-		})
+			ToolCount: len(execResult.Results),
+		}), execResult.Receipts)
 
-		if structuredResultData != nil {
+		if execResult.StructuredData != nil {
 			response["structured"] = true
-			response["displayType"] = string(structuredResultData.DisplayType)
-			response["title"] = structuredResultData.Title
-			response["description"] = structuredResultData.Description
+			response["displayType"] = string(execResult.StructuredData.DisplayType)
+			response["title"] = execResult.StructuredData.Title
+			response["description"] = execResult.StructuredData.Description
 		}
 
 		writeJSONResponse(w, attachPlannerDecision(response, plannerDecision))
@@ -260,13 +219,13 @@ func (h *Handler) handleOpenAIToolCalls(
 		),
 	})
 	if err != nil || resp2 == nil || len(resp2.Choices) == 0 {
-		orihttp.WriteJSON(w, attachPlannerDecision(attachRouteMetadata(map[string]any{
-			"response":  combinedResult,
-			"toolCalls": toolResults,
+		orihttp.WriteJSON(w, attachPlannerDecision(attachActionReceipts(attachRouteMetadata(map[string]any{
+			"response":  execResult.CombinedResult,
+			"toolCalls": execResult.Results,
 		}, chatRouteMetadata{
 			Mode:      routeModeAssistantChat,
-			ToolCount: len(toolResults),
-		}), plannerDecision))
+			ToolCount: len(execResult.Results),
+		}), execResult.Receipts), plannerDecision))
 		return
 	}
 
@@ -290,44 +249,13 @@ func (h *Handler) handleOpenAIToolCalls(
 	// Store assistant response in session
 	h.storeMessageInSession(baseCtx, sessionID, "assistant", final.Content)
 
-	orihttp.WriteJSON(w, attachPlannerDecision(attachRouteMetadata(map[string]any{
+	orihttp.WriteJSON(w, attachPlannerDecision(attachActionReceipts(attachRouteMetadata(map[string]any{
 		"response":  final.Content,
-		"toolCalls": toolResults,
+		"toolCalls": execResult.Results,
 	}, chatRouteMetadata{
 		Mode:      routeModeAssistantChat,
-		ToolCount: len(toolResults),
-	}), plannerDecision))
-}
-
-// processToolResults checks tool results for structured data and returns combined result
-func (h *Handler) processToolResults(toolResults []map[string]string) (combinedResult string, hasStructuredResult bool, structuredResultData *pluginapi.StructuredResult) {
-	for i, tr := range toolResults {
-		result := tr["result"]
-
-		// Check if this is a structured result
-		if sr, err := pluginapi.ParseStructuredResult(result); err == nil {
-			hasStructuredResult = true
-			structuredResultData = sr
-			if i > 0 {
-				combinedResult += "\n\n"
-			}
-			combinedResult += result
-			continue
-		}
-
-		// Legacy: Check if result is valid JSON array
-		if strings.HasPrefix(strings.TrimSpace(result), "[") && strings.HasSuffix(strings.TrimSpace(result), "]") {
-			var testJSON []interface{}
-			if json.Unmarshal([]byte(result), &testJSON) == nil && len(testJSON) > 0 {
-				hasStructuredResult = true
-			}
-		}
-		if i > 0 {
-			combinedResult += "\n\n"
-		}
-		combinedResult += result
-	}
-	return
+		ToolCount: len(execResult.Results),
+	}), execResult.Receipts), plannerDecision))
 }
 
 func requestOpenAICompletionWithRetry(

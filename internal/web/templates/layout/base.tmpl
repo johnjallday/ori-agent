@@ -239,6 +239,16 @@
                 </div>
                 <small class="text-muted">Press Enter to add tags.</small>
               </div>
+              <div class="mb-2">
+                <div class="d-flex justify-content-between align-items-center mb-2">
+                  <label class="form-label mb-0" style="color: var(--text-primary);">MCP Servers</label>
+                  <a href="/mcp" style="color: var(--primary-color); text-decoration: none; font-size: 12px;">Manage MCP</a>
+                </div>
+                <div id="editAgentMCPList" class="agent-edit-mcp-list" aria-live="polite">
+                  <span class="agent-edit-mcp-empty">No MCP servers enabled for this agent.</span>
+                </div>
+                <small class="text-muted">Read-only view of MCP connectors currently enabled for this agent.</small>
+              </div>
             </form>
           </div>
         </div>

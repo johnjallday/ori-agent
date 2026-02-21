@@ -31,6 +31,7 @@ type ExecuteToolCallsResult struct {
 	CombinedResult      string
 	HasStructuredResult bool
 	StructuredData      *pluginapi.StructuredResult
+	Receipts            []ActionReceipt
 }
 
 // executeToolCallsCommonWithSession executes tool calls and stores them for the given session
@@ -43,6 +44,7 @@ func (h *Handler) executeToolCallsCommonWithSession(
 	sessionID string,
 ) ExecuteToolCallsResult {
 	var results []ToolCallResult
+	var receipts []ActionReceipt
 
 	for _, tc := range toolCalls {
 		name := tc.Name
@@ -107,6 +109,18 @@ func (h *Handler) executeToolCallsCommonWithSession(
 		}
 		h.storeToolCall(baseCtx, sessionID, tc.ID, name, args, result, errorMsg, durationMs)
 
+		receipts = append(receipts, buildActionReceipt(
+			"tool_call",
+			"Executed tool call",
+			"model requested tool execution",
+			name,
+			args,
+			result,
+			duration.Milliseconds(),
+			err == nil,
+			errorMsg,
+		))
+
 		results = append(results, ToolCallResult{
 			Function:   name,
 			Args:       args,
@@ -124,6 +138,7 @@ func (h *Handler) executeToolCallsCommonWithSession(
 		CombinedResult:      combined,
 		HasStructuredResult: hasStructured,
 		StructuredData:      structuredData,
+		Receipts:            receipts,
 	}
 }
 
