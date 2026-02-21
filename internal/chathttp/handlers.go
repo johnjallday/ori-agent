@@ -434,6 +434,9 @@ func (h *Handler) findTool(ag *agent.Agent, agentName, toolName string) (plugina
 		if mcpTool, ok := h.findMCPToolByName(ag, toolName); ok {
 			return mcpTool, true
 		}
+		if shouldSuppressUtilityToolForAgent(ag, toolName) {
+			return nil, false
+		}
 	}
 
 	// Native utility tools are checked first to prioritize accurate daily utility behavior.
@@ -480,7 +483,8 @@ func (h *Handler) findMCPToolByName(ag *agent.Agent, toolName string) (pluginapi
 	if target == "" {
 		return nil, false
 	}
-	for _, serverName := range ag.MCPServers {
+	serverNames := prioritizeMCPServersForTool(ag.MCPServers, target)
+	for _, serverName := range serverNames {
 		mcpTools, err := h.getMCPToolsForServer(serverName)
 		if err != nil {
 			continue
@@ -494,10 +498,83 @@ func (h *Handler) findMCPToolByName(ag *agent.Agent, toolName string) (pluginapi
 	return nil, false
 }
 
+func prioritizeMCPServersForTool(serverNames []string, toolName string) []string {
+	if len(serverNames) == 0 {
+		return []string{}
+	}
+
+	normalizedTool := strings.ToLower(strings.TrimSpace(toolName))
+	if normalizedTool != "browser" {
+		out := make([]string, 0, len(serverNames))
+		for _, serverName := range serverNames {
+			name := strings.TrimSpace(serverName)
+			if name == "" {
+				continue
+			}
+			out = append(out, name)
+		}
+		return out
+	}
+
+	out := make([]string, 0, len(serverNames))
+	seen := make(map[string]bool)
+
+	appendByName := func(target string) {
+		for _, serverName := range serverNames {
+			name := strings.TrimSpace(serverName)
+			if name == "" {
+				continue
+			}
+			key := strings.ToLower(name)
+			if seen[key] {
+				continue
+			}
+			if key == target {
+				seen[key] = true
+				out = append(out, name)
+			}
+		}
+	}
+
+	// Prefer Playwright for browser automation when available.
+	appendByName("playwright")
+	appendByName("browserbase")
+	appendByName("puppeteer")
+
+	for _, serverName := range serverNames {
+		name := strings.TrimSpace(serverName)
+		if name == "" {
+			continue
+		}
+		key := strings.ToLower(name)
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		out = append(out, name)
+	}
+
+	return out
+}
+
 func shouldPreferMCPToolOverUtility(toolName string) bool {
 	switch strings.ToLower(strings.TrimSpace(toolName)) {
 	case "browser", "web_search", "web_fetch":
 		return true
+	default:
+		return false
+	}
+}
+
+func shouldSuppressUtilityToolForAgent(ag *agent.Agent, toolName string) bool {
+	if ag == nil {
+		return false
+	}
+	switch strings.ToLower(strings.TrimSpace(toolName)) {
+	case "browser":
+		// If a browser-control MCP is attached, avoid silently falling back to
+		// the lightweight native browser utility for auth-heavy flows (e.g. Gmail).
+		return hasAnyMCPServer(ag.MCPServers, []string{"playwright", "browserbase", "puppeteer"})
 	default:
 		return false
 	}
@@ -1111,6 +1188,9 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 	if h.utilityRegistry != nil {
 		for _, def := range h.utilityRegistry.ListToolDefinitions() {
 			if !isUtilityToolAllowedForAgent(ag, def.Name) {
+				continue
+			}
+			if shouldSuppressUtilityToolForAgent(ag, def.Name) {
 				continue
 			}
 			appendTool(llm.Tool{

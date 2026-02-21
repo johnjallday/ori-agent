@@ -341,6 +341,28 @@ func TestHomeAssistantRouteHandler_GeneralPrompt_ContextualMatch(t *testing.T) {
 	}
 }
 
+func TestHomeAssistantRouteHandler_OpenDomain_NotClassifiedAsAppLaunch(t *testing.T) {
+	st := newHomeRouteTestStore(t)
+	handler := NewHomeAssistantRouteHandler(st)
+
+	addHomeRouteTestAgent(t, st, "Desktop Launcher", &store.CreateAgentConfig{Type: "tool-calling"}, types.AgentStatusActive,
+		"Opens desktop applications like reaper and finder", []string{"desktop", "automation"}, []string{"os-shell"})
+
+	rr := postRouteRequest(t, handler, map[string]string{"prompt": "open instagram.com"})
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d: %s", http.StatusOK, rr.Code, rr.Body.String())
+	}
+
+	var resp HomeAssistantRouteResponse
+	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+
+	if resp.Intent == "app_launch" {
+		t.Fatalf("expected non-app-launch intent for domain target, got %q", resp.Intent)
+	}
+}
+
 func TestHomeAssistantRouteHandler_GeneralPrompt_FallsBackToSystemAssistant(t *testing.T) {
 	st := newHomeRouteTestStore(t)
 	handler := NewHomeAssistantRouteHandler(st)

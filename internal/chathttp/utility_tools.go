@@ -672,5 +672,9 @@ func normalizeUtilityError(err error) error {
 		return fmt.Errorf("utility request canceled")
 	}
 	logger.Debug("Normalizing utility tool error", logger.Fields{"error": err.Error()})
-	return fmt.Errorf("utility request failed")
+	detail := strings.TrimSpace(err.Error())
+	if detail == "" {
+		return fmt.Errorf("utility request failed")
+	}
+	return fmt.Errorf("utility request failed: %s", detail)
 }

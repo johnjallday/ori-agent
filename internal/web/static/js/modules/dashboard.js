@@ -403,7 +403,7 @@
     target = target.trim();
     if (!target) return null;
 
-    if (target.indexOf('://') >= 0 || target.indexOf('/') >= 0 || target.indexOf('\\') >= 0) {
+    if (target.indexOf('://') >= 0 || target.indexOf('/') >= 0 || target.indexOf('\\') >= 0 || looksLikeWebHostTarget(target)) {
       return null;
     }
 
@@ -411,6 +411,24 @@
       appName: toTitleCase(target),
       rawTarget: target
     };
+  }
+
+  function looksLikeWebHostTarget(target) {
+    var candidate = normalizeToken(target);
+    if (!candidate || candidate.indexOf('.') < 0) return false;
+    if (/\s/.test(candidate)) return false;
+    if (!/^[a-z0-9.-]+$/.test(candidate)) return false;
+
+    var labels = candidate.split('.');
+    if (!labels || labels.length < 2) return false;
+    for (var i = 0; i < labels.length; i++) {
+      var label = labels[i];
+      if (!label) return false;
+      if (label.charAt(0) === '-' || label.charAt(label.length - 1) === '-') return false;
+      if (!/^[a-z0-9-]+$/.test(label)) return false;
+    }
+
+    return labels[labels.length - 1].length >= 2;
   }
 
   function buildEmailDispatchMessage(prompt) {

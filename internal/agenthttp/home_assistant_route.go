@@ -511,9 +511,41 @@ func parseHomeAssistantAppLaunchPrompt(prompt string) (string, bool) {
 	}
 
 	// Skip obvious URL/path-like targets that are more likely file or web intents.
-	if strings.Contains(target, "://") || strings.Contains(target, "/") || strings.Contains(target, "\\") {
+	if strings.Contains(target, "://") || strings.Contains(target, "/") || strings.Contains(target, "\\") || looksLikeWebHostTarget(target) {
 		return "", false
 	}
 
 	return target, true
+}
+
+func looksLikeWebHostTarget(target string) bool {
+	candidate := strings.TrimSpace(strings.ToLower(target))
+	if candidate == "" {
+		return false
+	}
+	// Host-like targets should not be treated as desktop app names.
+	if strings.ContainsAny(candidate, " \t\n\r") || !strings.Contains(candidate, ".") {
+		return false
+	}
+
+	labels := strings.Split(candidate, ".")
+	if len(labels) < 2 {
+		return false
+	}
+
+	for _, label := range labels {
+		if label == "" {
+			return false
+		}
+		for _, r := range label {
+			if !(unicode.IsLetter(r) || unicode.IsDigit(r) || r == '-') {
+				return false
+			}
+		}
+		if strings.HasPrefix(label, "-") || strings.HasSuffix(label, "-") {
+			return false
+		}
+	}
+
+	return len(labels[len(labels)-1]) >= 2
 }
