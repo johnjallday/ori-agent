@@ -31,8 +31,8 @@ func (h *Handler) handleClaudeChat(w http.ResponseWriter, r *http.Request, ag *a
 
 	// Build message list
 	var messages []llm.Message
-	systemPrompt := resolveSystemPromptForAgent(
-		ag,
+	systemPrompt := h.buildSystemPromptWithSkills(
+		ag, agentName,
 		"You are a helpful assistant with access to tools. Use tools when they provide a more accurate answer.",
 	)
 	messages = append(messages, llm.NewSystemMessage(systemPrompt))

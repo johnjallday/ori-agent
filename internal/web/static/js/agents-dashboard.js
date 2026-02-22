@@ -430,6 +430,12 @@ async function showChatSessionModalForAgent(agentName) {
     }
     agentSelect.value = matchedOption.value;
     agentSelect.dispatchEvent(new Event('change', { bubbles: true }));
+
+    // Update auto mode info text to show the pre-selected agent
+    const autoModeText = document.getElementById('chatAutoModeText');
+    if (autoModeText) {
+      autoModeText.textContent = `Chatting with ${agentName}. The AI will automatically select the best workspace after a few messages.`;
+    }
   }
 
   const targetInput = manager.chatAutoMode

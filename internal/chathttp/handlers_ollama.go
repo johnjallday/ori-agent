@@ -33,8 +33,8 @@ func (h *Handler) handleOllamaChat(w http.ResponseWriter, r *http.Request, ag *a
 	// Build message list
 	var messages []llm.Message
 
-	systemPrompt := resolveSystemPromptForAgent(
-		ag,
+	systemPrompt := h.buildSystemPromptWithSkills(
+		ag, agentName,
 		"You are a helpful assistant with access to tools. When you use a tool and receive results, report those results directly to the user. Be concise and accurate.",
 	)
 	messages = append(messages, llm.NewSystemMessage(systemPrompt))

@@ -1260,8 +1260,9 @@ const sessionManager = {
       const workspaceSelect = document.getElementById('chatWorkspaceSelect');
       const preSelectedWorkspace = workspaceSelect?.value || '';
 
-      // Use first agent as default
-      const defaultAgent = agents[0].name;
+      // Use pre-selected agent from dropdown (set when clicking Chat on an agent card), or first agent as fallback
+      const agentSelect = document.getElementById('chatAgentSelect');
+      const defaultAgent = agentSelect?.value || agents[0].name;
 
       let session;
       if (preSelectedWorkspace) {

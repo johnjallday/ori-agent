@@ -244,6 +244,31 @@ func resolveSystemPromptForAgent(ag *agent.Agent, defaultPrompt string) string {
 	}
 }
 
+// buildSystemPromptWithSkills resolves the agent system prompt and appends
+// the prompt text of all enabled skills so the agent benefits from skill
+// knowledge during normal chat (not only via explicit /skill invocation).
+func (h *Handler) buildSystemPromptWithSkills(ag *agent.Agent, agentName, defaultPrompt string) string {
+	base := resolveSystemPromptForAgent(ag, defaultPrompt)
+	if h.skillsManager == nil || agentName == "" {
+		return base
+	}
+	enabledSkills, err := h.skillsManager.ListEnabledSkillsWithPrompts(agentName)
+	if err != nil || len(enabledSkills) == 0 {
+		return base
+	}
+	var sb strings.Builder
+	sb.WriteString(base)
+	sb.WriteString("\n\n---\n# Active Skills\n")
+	for _, s := range enabledSkills {
+		sb.WriteString("\n## ")
+		sb.WriteString(s.Name)
+		sb.WriteString("\n")
+		sb.WriteString(strings.TrimSpace(s.Prompt))
+		sb.WriteString("\n")
+	}
+	return sb.String()
+}
+
 func prioritizeToolsForPath(ag *agent.Agent, tools []llm.Tool) []llm.Tool {
 	if ag == nil || len(tools) <= 1 || ag.Evolution == nil || ag.Evolution.Path == "" {
 		return tools

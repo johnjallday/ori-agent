@@ -28,8 +28,8 @@ func (h *Handler) handleClaudeCodeChat(w http.ResponseWriter, r *http.Request, a
 	}
 
 	var messages []llm.Message
-	systemPrompt := resolveSystemPromptForAgent(
-		ag,
+	systemPrompt := h.buildSystemPromptWithSkills(
+		ag, agentName,
 		"You are a helpful assistant. Be concise and direct in your responses.",
 	)
 

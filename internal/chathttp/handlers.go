@@ -80,6 +80,7 @@ type Handler struct {
 	skillsManager interface {
 		GetSkill(string, string) (*skills.Skill, bool, error)
 		ListSkills(string) ([]skills.Skill, error)
+		ListEnabledSkillsWithPrompts(string) ([]skills.Skill, error)
 	}
 	mcpRegistry interface {
 		GetToolsForServer(string) ([]pluginapi.PluginTool, error)
@@ -212,6 +213,7 @@ func (h *Handler) SetEvolutionService(service interface {
 func (h *Handler) SetSkillsManager(manager interface {
 	GetSkill(string, string) (*skills.Skill, bool, error)
 	ListSkills(string) ([]skills.Skill, error)
+	ListEnabledSkillsWithPrompts(string) ([]skills.Skill, error)
 }) {
 	h.skillsManager = manager
 	h.commandHandler.SetSkillsManager(manager)
@@ -1393,8 +1395,8 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 
 	// Add system message for better tool usage guidance
 	if len(ag.Messages) == 0 {
-		systemPrompt := resolveSystemPromptForAgent(
-			ag,
+		systemPrompt := h.buildSystemPromptWithSkills(
+			ag, current,
 			"You are a helpful assistant with access to various tools. When a user request can be fulfilled by using an available tool, use the tool instead of providing general information. Be concise and direct in your responses.",
 		)
 
