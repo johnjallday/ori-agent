@@ -1,10 +1,12 @@
 package chathttp
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
 	"github.com/johnjallday/ori-agent/internal/agent"
+	"github.com/johnjallday/ori-agent/internal/llm"
 	"github.com/johnjallday/ori-agent/internal/skills"
 )
 
@@ -82,5 +84,98 @@ func TestBuildSystemPromptWithSkills_EmptyAgentName(t *testing.T) {
 	result := h.buildSystemPromptWithSkills(ag, "", "default prompt")
 	if result != "default prompt" {
 		t.Fatalf("expected default prompt when agentName is empty, got %q", result)
+	}
+}
+
+func TestCanonicalizeToolArguments_EquivalentJSON(t *testing.T) {
+	first := canonicalizeToolArguments(`{"b":2,"a":1}`)
+	second := canonicalizeToolArguments(`{"a":1, "b":2}`)
+
+	if first != second {
+		t.Fatalf("expected canonical args to match, got %q vs %q", first, second)
+	}
+}
+
+func TestRunBoundedToolLoop_MaxTurnsFallback(t *testing.T) {
+	h := &Handler{}
+	executions := 0
+
+	result := h.runBoundedToolLoop(
+		"",
+		[]llm.ToolCall{{ID: "tc-1", Name: "echo", Arguments: `{"value":1}`}},
+		boundedToolLoopConfig{
+			MaxTurns:                2,
+			MaxRepeatedFingerprints: 10,
+		},
+		boundedToolLoopCallbacks{
+			ExecuteToolCalls: func(toolCalls []llm.ToolCall) ExecuteToolCallsResult {
+				executions++
+				return ExecuteToolCallsResult{
+					Results: []ToolCallResult{
+						{
+							Function: toolCalls[0].Name,
+							Args:     toolCalls[0].Arguments,
+							Result:   fmt.Sprintf("result-%d", executions),
+							Success:  true,
+						},
+					},
+				}
+			},
+			RequestNextResponse: func() (string, []llm.ToolCall, error) {
+				return "", []llm.ToolCall{{ID: "tc-next", Name: "echo", Arguments: `{"value":1}`}}, nil
+			},
+		},
+	)
+
+	if executions != 2 {
+		t.Fatalf("expected 2 executions before max-turn stop, got %d", executions)
+	}
+	if result.StopReason != "max_turns" {
+		t.Fatalf("expected stop reason max_turns, got %q", result.StopReason)
+	}
+	if !result.UsedToolFallback {
+		t.Fatalf("expected fallback content when max turns reached")
+	}
+	if len(result.ToolCalls) != 2 {
+		t.Fatalf("expected 2 tool results, got %d", len(result.ToolCalls))
+	}
+}
+
+func TestRunBoundedToolLoop_RepeatedFingerprintStop(t *testing.T) {
+	h := &Handler{}
+	executions := 0
+
+	result := h.runBoundedToolLoop(
+		"",
+		[]llm.ToolCall{{ID: "tc-1", Name: "echo", Arguments: `{"value":1}`}},
+		boundedToolLoopConfig{
+			MaxTurns:                5,
+			MaxRepeatedFingerprints: 1,
+		},
+		boundedToolLoopCallbacks{
+			ExecuteToolCalls: func(toolCalls []llm.ToolCall) ExecuteToolCallsResult {
+				executions++
+				return ExecuteToolCallsResult{
+					Results: []ToolCallResult{
+						{
+							Function: toolCalls[0].Name,
+							Args:     toolCalls[0].Arguments,
+							Result:   "ok",
+							Success:  true,
+						},
+					},
+				}
+			},
+			RequestNextResponse: func() (string, []llm.ToolCall, error) {
+				return "", []llm.ToolCall{{ID: "tc-2", Name: "echo", Arguments: `{"value":1}`}}, nil
+			},
+		},
+	)
+
+	if executions != 1 {
+		t.Fatalf("expected repeated-fingerprint guard to stop before second execution, got %d", executions)
+	}
+	if result.StopReason != "repeated_tool_call" {
+		t.Fatalf("expected stop reason repeated_tool_call, got %q", result.StopReason)
 	}
 }

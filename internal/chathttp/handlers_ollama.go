@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"net/http"
-	"strings"
 	"time"
 
 	"github.com/openai/openai-go/v3"
@@ -68,7 +67,7 @@ func (h *Handler) handleOllamaChat(w http.ResponseWriter, r *http.Request, ag *a
 
 	// Tool-call branch
 	if len(resp.ToolCalls) > 0 {
-		h.handleOllamaToolCalls(w, ctx, ag, agentName, messages, resp, tools, files, provider, baseCtx, sessionID, plannerDecision)
+		h.handleOllamaToolCalls(w, ctx, ag, agentName, messages, resp, tools, files, provider, baseCtx, sessionID, userMessage, plannerDecision)
 		return
 	}
 
@@ -100,52 +99,58 @@ func (h *Handler) handleOllamaToolCalls(
 	provider llm.Provider,
 	baseCtx context.Context,
 	sessionID string,
+	userMessage string,
 	plannerDecision *types.PlannerDecision,
 ) {
 	logger.Info("Ollama requested tool calls", logger.Fields{"count": len(resp.ToolCalls)})
 
-	// Add assistant message with tool calls
-	assistantMsg := llm.NewAssistantMessage(resp.Content)
-	assistantMsg.ToolCalls = resp.ToolCalls
-	messages = append(messages, assistantMsg)
-	ag.Messages = append(ag.Messages, openai.AssistantMessage(resp.Content))
+	loopResult := h.runBoundedToolLoop(
+		resp.Content,
+		resp.ToolCalls,
+		boundedToolLoopConfig{},
+		boundedToolLoopCallbacks{
+			AppendAssistantTurn: func(content string, toolCalls []llm.ToolCall) {
+				assistantMsg := llm.NewAssistantMessage(content)
+				assistantMsg.ToolCalls = toolCalls
+				messages = append(messages, assistantMsg)
+				ag.Messages = append(ag.Messages, openai.AssistantMessage(content))
+			},
+			ExecuteToolCalls: func(toolCalls []llm.ToolCall) ExecuteToolCallsResult {
+				return h.executeToolCallsCommonWithSession(baseCtx, ag, agentName, toolCalls, files, sessionID)
+			},
+			AppendToolResults: func(toolCalls []llm.ToolCall, execResult ExecuteToolCallsResult) {
+				for i, tc := range toolCalls {
+					if i >= len(execResult.Results) {
+						break
+					}
+					messages = append(messages, llm.NewToolMessage(tc.ID, execResult.Results[i].Result))
+					ag.Messages = append(ag.Messages, openai.ToolMessage(execResult.Results[i].Result, tc.ID))
+				}
+			},
+			RequestNextResponse: func() (string, []llm.ToolCall, error) {
+				logger.Debug("Sending tool results back to LLM", logger.Fields{"message_count": len(messages)})
+				finalResp, err := provider.Chat(ctx, llm.ChatRequest{
+					Model:       ag.Settings.Model,
+					Messages:    messages,
+					Tools:       tools,
+					Temperature: ag.Settings.Temperature,
+					MaxTokens:   4000,
+				})
+				if err != nil {
+					return "", nil, err
+				}
+				if finalResp == nil {
+					return "", nil, fmt.Errorf("ollama follow-up returned no response")
+				}
+				h.trackUsageCommon("ollama", ag.Settings.Model, agentName, finalResp.Usage, ag, userMessage)
+				return finalResp.Content, finalResp.ToolCalls, nil
+			},
+		},
+	)
 
-	// Execute tool calls using common helper with session tracking
-	execResult := h.executeToolCallsCommonWithSession(baseCtx, ag, agentName, resp.ToolCalls, files, sessionID)
-
-	// Add tool results to messages
-	for i, tc := range resp.ToolCalls {
-		messages = append(messages, llm.NewToolMessage(tc.ID, execResult.Results[i].Result))
-		ag.Messages = append(ag.Messages, openai.ToolMessage(execResult.Results[i].Result, tc.ID))
-	}
-
-	logger.Debug("Sending tool results back to LLM", logger.Fields{"message_count": len(messages)})
-
-	// Get final response - include Tools for Ollama protocol
-	finalResp, err := provider.Chat(ctx, llm.ChatRequest{
-		Model:       ag.Settings.Model,
-		Messages:    messages,
-		Tools:       tools,
-		Temperature: ag.Settings.Temperature,
-		MaxTokens:   4000,
-	})
-	if err != nil {
-		logger.Error("Error getting final response from LLM", logger.Fields{"error": err})
-		writeErrorResponse(w, err.Error())
-		return
-	}
-
-	finalText := strings.TrimSpace(finalResp.Content)
-	if finalText == "" && len(execResult.Results) > 0 {
-		// Build fallback response from tool results
-		var b strings.Builder
-		for i, tr := range execResult.Results {
-			if i > 0 {
-				b.WriteString("\n\n")
-			}
-			b.WriteString(fmt.Sprintf("**%s**\n\n%s", tr.Function, tr.Result))
-		}
-		finalText = b.String()
+	finalText := getResponseText(loopResult.FinalContent)
+	if loopResult.HasStructuredResult {
+		finalText = loopResult.FinalContent
 	}
 
 	logger.Debug("Final response from LLM", logger.Fields{"content": finalText})
@@ -158,9 +163,9 @@ func (h *Handler) handleOllamaToolCalls(
 
 	orihttp.WriteJSON(w, attachPlannerDecision(attachActionReceipts(attachRouteMetadata(map[string]any{
 		"response":  finalText,
-		"toolCalls": execResult.Results,
+		"toolCalls": loopResult.ToolCalls,
 	}, chatRouteMetadata{
 		Mode:      routeModeAssistantChat,
-		ToolCount: len(execResult.Results),
-	}), execResult.Receipts), plannerDecision))
+		ToolCount: len(loopResult.ToolCalls),
+	}), loopResult.Receipts), plannerDecision))
 }

@@ -405,6 +405,28 @@ func TestHomeAssistantRouteHandler_GeneralPrompt_FallsBackToSystemAssistant(t *t
 	}
 }
 
+func TestHomeAssistantRouteHandler_GeneralPrompt_ComplexProjectSetsWorkspaceRecommendation(t *testing.T) {
+	st := newHomeRouteTestStore(t)
+	handler := NewHomeAssistantRouteHandler(st)
+
+	rr := postRouteRequest(t, handler, map[string]string{"prompt": "Let's create a website from scratch with authentication and a database"})
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d: %s", http.StatusOK, rr.Code, rr.Body.String())
+	}
+
+	var resp HomeAssistantRouteResponse
+	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+
+	if resp.Intent != "general_task" {
+		t.Fatalf("expected intent general_task, got %q", resp.Intent)
+	}
+	if !resp.WorkspaceRecommended {
+		t.Fatalf("expected workspace recommendation for complex project prompt")
+	}
+}
+
 func TestHomeAssistantRouteHandler_UtilityPrompt_FallsBackToSystemAssistant(t *testing.T) {
 	st := newHomeRouteTestStore(t)
 	handler := NewHomeAssistantRouteHandler(st)
@@ -433,6 +455,9 @@ func TestHomeAssistantRouteHandler_UtilityPrompt_FallsBackToSystemAssistant(t *t
 	}
 	if len(resp.Reasons) == 0 {
 		t.Fatalf("expected non-empty reasons for utility match")
+	}
+	if resp.WorkspaceRecommended {
+		t.Fatalf("expected workspace recommendation to be false for utility prompt")
 	}
 }
 

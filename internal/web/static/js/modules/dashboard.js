@@ -413,6 +413,51 @@
     };
   }
 
+  function promptContainsAnyPhrase(normalizedPrompt, phrases) {
+    if (!normalizedPrompt || !Array.isArray(phrases) || phrases.length === 0) return false;
+    for (var i = 0; i < phrases.length; i++) {
+      var phrase = normalizeToken(phrases[i]);
+      if (!phrase) continue;
+      if (normalizedPrompt.indexOf(phrase) >= 0) return true;
+    }
+    return false;
+  }
+
+  function countPromptPhraseMatches(normalizedPrompt, phrases) {
+    if (!normalizedPrompt || !Array.isArray(phrases) || phrases.length === 0) return 0;
+    var count = 0;
+    for (var i = 0; i < phrases.length; i++) {
+      var phrase = normalizeToken(phrases[i]);
+      if (!phrase) continue;
+      if (normalizedPrompt.indexOf(phrase) >= 0) count += 1;
+    }
+    return count;
+  }
+
+  function isComplexProjectPrompt(prompt, intent) {
+    if (!intent || intent.key !== 'general_task') return false;
+    if (parseAppLaunchRequest(prompt)) return false;
+
+    var normalizedPrompt = normalizeToken(prompt);
+    if (!normalizedPrompt) return false;
+
+    var buildVerbs = ['build', 'create', 'develop', 'design', 'implement', 'make', 'ship', 'start', 'set up', 'setup'];
+    var projectTargets = ['website', 'web site', 'web app', 'app', 'application', 'landing page', 'dashboard', 'product', 'project', 'platform', 'system'];
+    var complexitySignals = ['from scratch', 'full stack', 'frontend', 'backend', 'database', 'authentication', 'auth', 'api', 'deploy', 'deployment', 'production', 'mvp', 'architecture', 'roadmap', 'requirements'];
+
+    var hasBuildVerb = promptContainsAnyPhrase(normalizedPrompt, buildVerbs);
+    var hasProjectTarget = promptContainsAnyPhrase(normalizedPrompt, projectTargets);
+    if (hasBuildVerb && hasProjectTarget) return true;
+
+    var complexitySignalCount = countPromptPhraseMatches(normalizedPrompt, complexitySignals);
+    if (hasProjectTarget && complexitySignalCount >= 1) return true;
+
+    var tokenCount = uniqueValues(normalizedPrompt.split(/[^a-z0-9]+/g)).filter(Boolean).length;
+    if (hasBuildVerb && complexitySignalCount >= 1 && tokenCount >= 8) return true;
+
+    return false;
+  }
+
   function looksLikeWebHostTarget(target) {
     var candidate = normalizeToken(target);
     if (!candidate || candidate.indexOf('.') < 0) return false;
@@ -3053,6 +3098,7 @@
       var routeData = await routePromptWithBackend(text);
       var match = null;
       var useFallbackRouting = !routeData;
+      var workspaceRecommended = false;
 
       if (routeData) {
         homeAssistantState.pendingIntent = HOME_INTENTS[routeData.intent] || detectHomeIntent(text);
@@ -3073,6 +3119,9 @@
             homeAssistantState.pendingSuggestedType = HOME_INTENTS.app_launch.defaultType;
           }
         }
+        if (typeof routeData.workspace_recommended === 'boolean') {
+          workspaceRecommended = routeData.workspace_recommended;
+        }
 
         if (shouldAcceptBackendRouteMatch(routeData)) {
           match = {
@@ -3088,6 +3137,9 @@
       if (useFallbackRouting) {
         var agents = await fetchAgentsForMatching();
         match = findSuitableAgent(agents, homeAssistantState.pendingIntent, text);
+      }
+      if (!routeData || typeof routeData.workspace_recommended !== 'boolean') {
+        workspaceRecommended = isComplexProjectPrompt(text, homeAssistantState.pendingIntent);
       }
 
       if (match && match.agent) {
@@ -3107,6 +3159,29 @@
 
         if (homeAssistantState.pendingIntent && homeAssistantState.pendingIntent.key === 'utility_direct') {
           await runUtilityTaskDirect(text, match.agent.name);
+          return;
+        }
+        if (workspaceRecommended) {
+          appendHomeAssistantMessage('assistant',
+            'This looks like a complex project. I recommend starting in a Workspace so files, tasks, and context stay organized. Do you want to open Workspaces first?');
+          setHomeAssistantRoutingSummary('Workspace Recommended', 'Complex project detected. Choose Workspace-first or continue in chat.');
+          renderHomeAssistantActions([
+            {
+              label: 'Create/Open Workspace',
+              variant: 'primary',
+              onClick: function () { window.location.href = '/workspaces'; }
+            },
+            {
+              label: 'Continue in Chat',
+              variant: 'secondary',
+              onClick: function () { runPendingTaskWithAgent(text, match.agent.name, { appLaunchRequest: appLaunchRequest }); }
+            },
+            {
+              label: 'Ask Another Task',
+              variant: 'secondary',
+              onClick: function () { focusHomeAssistantInput(); }
+            }
+          ]);
           return;
         }
         var matchedAgentMCP = await ensureMCPForTask(

@@ -9,7 +9,6 @@ import (
 	"github.com/openai/openai-go/v3"
 
 	"github.com/johnjallday/ori-agent/internal/agent"
-	orihttp "github.com/johnjallday/ori-agent/internal/http"
 	"github.com/johnjallday/ori-agent/internal/llm"
 	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/types"
@@ -104,77 +103,66 @@ func (h *Handler) handleClaudeToolCalls(
 ) {
 	logger.Info("Claude requested tool calls", logger.Fields{"count": len(resp.ToolCalls)})
 
-	// Add assistant message to history
-	messages = append(messages, llm.NewAssistantMessage(resp.Content))
-	ag.Messages = append(ag.Messages, openai.AssistantMessage(resp.Content))
+	loopResult := h.runBoundedToolLoop(
+		resp.Content,
+		resp.ToolCalls,
+		boundedToolLoopConfig{},
+		boundedToolLoopCallbacks{
+			AppendAssistantTurn: func(content string, toolCalls []llm.ToolCall) {
+				assistantMsg := llm.NewAssistantMessage(content)
+				assistantMsg.ToolCalls = toolCalls
+				messages = append(messages, assistantMsg)
+				ag.Messages = append(ag.Messages, openai.AssistantMessage(content))
+			},
+			ExecuteToolCalls: func(toolCalls []llm.ToolCall) ExecuteToolCallsResult {
+				return h.executeToolCallsCommonWithSession(baseCtx, ag, agentName, toolCalls, files, sessionID)
+			},
+			AppendToolResults: func(toolCalls []llm.ToolCall, execResult ExecuteToolCallsResult) {
+				for i, tc := range toolCalls {
+					if i >= len(execResult.Results) {
+						break
+					}
+					messages = append(messages, llm.NewToolMessage(tc.ID, execResult.Results[i].Result))
+					ag.Messages = append(ag.Messages, openai.ToolMessage(execResult.Results[i].Result, tc.ID))
+				}
+			},
+			RequestNextResponse: func() (string, []llm.ToolCall, error) {
+				resp2, err := provider.Chat(ctx, llm.ChatRequest{
+					Model:       ag.Settings.Model,
+					Messages:    append(messages, llm.NewSystemMessage(getFollowUpSystemPrompt())),
+					Tools:       tools,
+					Temperature: ag.Settings.Temperature,
+					MaxTokens:   4000,
+				})
+				if err != nil {
+					return "", nil, err
+				}
+				if resp2 == nil {
+					return "", nil, fmt.Errorf("claude follow-up returned no response")
+				}
+				h.trackUsageCommon("claude", ag.Settings.Model, agentName, resp2.Usage, ag, userMessage)
+				return resp2.Content, resp2.ToolCalls, nil
+			},
+		},
+	)
 
-	// Execute tool calls using common helper with session tracking
-	execResult := h.executeToolCallsCommonWithSession(baseCtx, ag, agentName, resp.ToolCalls, files, sessionID)
-
-	// Add tool results to messages
-	for i, tc := range resp.ToolCalls {
-		messages = append(messages, llm.NewToolMessage(tc.ID, execResult.Results[i].Result))
-		ag.Messages = append(ag.Messages, openai.ToolMessage(execResult.Results[i].Result, tc.ID))
+	finalText := getResponseText(loopResult.FinalContent)
+	if loopResult.HasStructuredResult {
+		finalText = loopResult.FinalContent
 	}
-
-	// If we have structured results, return them directly
-	if execResult.HasStructuredResult {
-		ag.Messages = append(ag.Messages, openai.AssistantMessage(execResult.CombinedResult))
-		logger.Debug("Claude chat with structured tool result completed", logger.Fields{"duration": time.Since(start)})
-		_ = h.store.SetAgent(agentName, ag)
-
-		// Store assistant response in session
-		h.storeMessageInSession(baseCtx, sessionID, "assistant", execResult.CombinedResult)
-
-		response := attachActionReceipts(attachRouteMetadata(map[string]any{
-			"response":  execResult.CombinedResult,
-			"toolCalls": execResult.Results,
-		}, chatRouteMetadata{
-			Mode:      routeModeAssistantChat,
-			ToolCount: len(execResult.Results),
-		}), execResult.Receipts)
-		writeJSONResponse(w, attachPlannerDecision(response, plannerDecision))
-		return
-	}
-
-	// Ask Claude again with tool results
-	resp2, err := provider.Chat(ctx, llm.ChatRequest{
-		Model:       ag.Settings.Model,
-		Messages:    append(messages, llm.NewSystemMessage(getFollowUpSystemPrompt())),
-		Tools:       tools,
-		Temperature: ag.Settings.Temperature,
-		MaxTokens:   4000,
-	})
-
-	if err != nil || resp2 == nil {
-		// If second turn fails, return the tool results as best-effort reply
-		orihttp.WriteJSON(w, attachPlannerDecision(attachActionReceipts(attachRouteMetadata(map[string]any{
-			"response":  execResult.CombinedResult,
-			"toolCalls": execResult.Results,
-		}, chatRouteMetadata{
-			Mode:      routeModeAssistantChat,
-			ToolCount: len(execResult.Results),
-		}), execResult.Receipts), plannerDecision))
-		return
-	}
-
-	// Track usage for second call
-	h.trackUsageCommon("claude", ag.Settings.Model, agentName, resp2.Usage, ag, userMessage)
-
-	// Store final response
-	ag.Messages = append(ag.Messages, openai.AssistantMessage(resp2.Content))
+	ag.Messages = append(ag.Messages, openai.AssistantMessage(finalText))
 
 	logger.Debug("Claude chat with tool completed", logger.Fields{"duration": time.Since(start)})
 	_ = h.store.SetAgent(agentName, ag)
 
 	// Store assistant response in session
-	h.storeMessageInSession(baseCtx, sessionID, "assistant", resp2.Content)
+	h.storeMessageInSession(baseCtx, sessionID, "assistant", finalText)
 
-	orihttp.WriteJSON(w, attachPlannerDecision(attachActionReceipts(attachRouteMetadata(map[string]any{
-		"response":  resp2.Content,
-		"toolCalls": execResult.Results,
+	writeJSONResponse(w, attachPlannerDecision(attachActionReceipts(attachRouteMetadata(map[string]any{
+		"response":  finalText,
+		"toolCalls": loopResult.ToolCalls,
 	}, chatRouteMetadata{
 		Mode:      routeModeAssistantChat,
-		ToolCount: len(execResult.Results),
-	}), execResult.Receipts), plannerDecision))
+		ToolCount: len(loopResult.ToolCalls),
+	}), loopResult.Receipts), plannerDecision))
 }

@@ -124,7 +124,7 @@ func (h *Handler) handleOpenAIChat(
 
 	// Tool-call branch
 	if len(choice.ToolCalls) > 0 {
-		h.handleOpenAIToolCalls(w, ag, agentName, baseCtx, ctx, files, agentClient, choice, start, sessionID, plannerDecision)
+		h.handleOpenAIToolCalls(w, ag, agentName, baseCtx, ctx, files, agentClient, choice, openaiTools, start, sessionID, plannerDecision)
 		return
 	}
 
@@ -158,104 +158,135 @@ func (h *Handler) handleOpenAIToolCalls(
 	files []pluginapi.FileAttachment,
 	agentClient openai.Client,
 	choice openai.ChatCompletionMessage,
+	openaiTools []openai.ChatCompletionToolUnionParam,
 	start time.Time,
 	sessionID string,
 	plannerDecision *types.PlannerDecision,
 ) {
-	// Append the assistant message with tool calls first
-	ag.Messages = append(ag.Messages, choice.ToParam())
+	loopResult := h.runBoundedToolLoop(
+		choice.Content,
+		convertOpenAIToolCallsToLLM(choice.ToolCalls),
+		boundedToolLoopConfig{},
+		boundedToolLoopCallbacks{
+			AppendAssistantTurn: func(content string, toolCalls []llm.ToolCall) {
+				ag.Messages = append(ag.Messages, buildOpenAIAssistantToolCallMessage(content, toolCalls))
+			},
+			ExecuteToolCalls: func(toolCalls []llm.ToolCall) ExecuteToolCallsResult {
+				return h.executeToolCallsCommonWithSession(baseCtx, ag, agentName, toolCalls, files, sessionID)
+			},
+			AppendToolResults: func(toolCalls []llm.ToolCall, execResult ExecuteToolCallsResult) {
+				for i, tc := range toolCalls {
+					if i >= len(execResult.Results) {
+						break
+					}
+					ag.Messages = append(ag.Messages, openai.ToolMessage(execResult.Results[i].Result, tc.ID))
+				}
+			},
+			RequestNextResponse: func() (string, []llm.ToolCall, error) {
+				resp2, err := requestOpenAICompletionWithRetry(ctx, agentClient, openai.ChatCompletionNewParams{
+					Model:       openai.ChatModel(ag.Settings.Model),
+					Temperature: openai.Float(ag.Settings.Temperature),
+					Messages: append(ag.Messages,
+						openai.SystemMessage(getFollowUpSystemPrompt()),
+					),
+					Tools: openaiTools,
+				})
+				if err != nil {
+					return "", nil, err
+				}
+				if resp2 == nil || len(resp2.Choices) == 0 {
+					return "", nil, fmt.Errorf("openai follow-up returned no choices")
+				}
 
-	llmToolCalls := make([]llm.ToolCall, 0, len(choice.ToolCalls))
-	for _, tc := range choice.ToolCalls {
-		llmToolCalls = append(llmToolCalls, llm.ToolCall{
-			ID:        tc.ID,
-			Name:      tc.Function.Name,
-			Arguments: tc.Function.Arguments,
-		})
+				if h.costTracker != nil && resp2.Usage.TotalTokens > 0 {
+					usage := llm.Usage{
+						PromptTokens:     int(resp2.Usage.PromptTokens),
+						CompletionTokens: int(resp2.Usage.CompletionTokens),
+						TotalTokens:      int(resp2.Usage.TotalTokens),
+					}
+					if err := h.costTracker.TrackUsage("openai", string(ag.Settings.Model), agentName, usage, ""); err != nil {
+						logger.Warn("Failed to track usage for tool response", logger.Fields{"error": err})
+					}
+				}
+
+				next := resp2.Choices[0].Message
+				return next.Content, convertOpenAIToolCallsToLLM(next.ToolCalls), nil
+			},
+		},
+	)
+
+	finalText := getResponseText(loopResult.FinalContent)
+	if loopResult.HasStructuredResult {
+		finalText = loopResult.FinalContent
 	}
 
-	execResult := h.executeToolCallsCommonWithSession(baseCtx, ag, agentName, llmToolCalls, files, sessionID)
-
-	for i, tc := range llmToolCalls {
-		if i >= len(execResult.Results) {
-			break
-		}
-		ag.Messages = append(ag.Messages, openai.ToolMessage(execResult.Results[i].Result, tc.ID))
-	}
-
-	if execResult.HasStructuredResult {
-		ag.Messages = append(ag.Messages, openai.AssistantMessage(execResult.CombinedResult))
-		logger.Debug("Chat with structured tool result completed", logger.Fields{"duration": time.Since(start)})
-		_ = h.store.SetAgent(agentName, ag)
-
-		// Store assistant response in session
-		h.storeMessageInSession(baseCtx, sessionID, "assistant", execResult.CombinedResult)
-
-		response := attachActionReceipts(attachRouteMetadata(map[string]any{
-			"response":  execResult.CombinedResult,
-			"toolCalls": execResult.Results,
-		}, chatRouteMetadata{
-			Mode:      routeModeAssistantChat,
-			ToolCount: len(execResult.Results),
-		}), execResult.Receipts)
-
-		if execResult.StructuredData != nil {
-			response["structured"] = true
-			response["displayType"] = string(execResult.StructuredData.DisplayType)
-			response["title"] = execResult.StructuredData.Title
-			response["description"] = execResult.StructuredData.Description
-		}
-
-		writeJSONResponse(w, attachPlannerDecision(response, plannerDecision))
-		return
-	}
-
-	// Ask model again with tool output
-	resp2, err := agentClient.Chat.Completions.New(ctx, openai.ChatCompletionNewParams{
-		Model:       openai.ChatModel(ag.Settings.Model),
-		Temperature: openai.Float(ag.Settings.Temperature),
-		Messages: append(ag.Messages,
-			openai.SystemMessage(getFollowUpSystemPrompt()),
-		),
-	})
-	if err != nil || resp2 == nil || len(resp2.Choices) == 0 {
-		orihttp.WriteJSON(w, attachPlannerDecision(attachActionReceipts(attachRouteMetadata(map[string]any{
-			"response":  execResult.CombinedResult,
-			"toolCalls": execResult.Results,
-		}, chatRouteMetadata{
-			Mode:      routeModeAssistantChat,
-			ToolCount: len(execResult.Results),
-		}), execResult.Receipts), plannerDecision))
-		return
-	}
-
-	if h.costTracker != nil && resp2.Usage.TotalTokens > 0 {
-		usage := llm.Usage{
-			PromptTokens:     int(resp2.Usage.PromptTokens),
-			CompletionTokens: int(resp2.Usage.CompletionTokens),
-			TotalTokens:      int(resp2.Usage.TotalTokens),
-		}
-		if err := h.costTracker.TrackUsage("openai", string(ag.Settings.Model), agentName, usage, ""); err != nil {
-			logger.Warn("Failed to track usage for tool response", logger.Fields{"error": err})
-		}
-	}
-
-	final := resp2.Choices[0].Message
-	ag.Messages = append(ag.Messages, final.ToParam())
+	ag.Messages = append(ag.Messages, openai.AssistantMessage(finalText))
 
 	logger.Debug("Chat with tool completed", logger.Fields{"duration": time.Since(start)})
 	_ = h.store.SetAgent(agentName, ag)
 
 	// Store assistant response in session
-	h.storeMessageInSession(baseCtx, sessionID, "assistant", final.Content)
+	h.storeMessageInSession(baseCtx, sessionID, "assistant", finalText)
 
-	orihttp.WriteJSON(w, attachPlannerDecision(attachActionReceipts(attachRouteMetadata(map[string]any{
-		"response":  final.Content,
-		"toolCalls": execResult.Results,
+	response := attachActionReceipts(attachRouteMetadata(map[string]any{
+		"response":  finalText,
+		"toolCalls": loopResult.ToolCalls,
 	}, chatRouteMetadata{
 		Mode:      routeModeAssistantChat,
-		ToolCount: len(execResult.Results),
-	}), execResult.Receipts), plannerDecision))
+		ToolCount: len(loopResult.ToolCalls),
+	}), loopResult.Receipts)
+
+	if loopResult.HasStructuredResult && loopResult.StructuredData != nil {
+		response["structured"] = true
+		response["displayType"] = string(loopResult.StructuredData.DisplayType)
+		response["title"] = loopResult.StructuredData.Title
+		response["description"] = loopResult.StructuredData.Description
+	}
+
+	orihttp.WriteJSON(w, attachPlannerDecision(response, plannerDecision))
+}
+
+func convertOpenAIToolCallsToLLM(toolCalls []openai.ChatCompletionMessageToolCallUnion) []llm.ToolCall {
+	result := make([]llm.ToolCall, 0, len(toolCalls))
+	for _, tc := range toolCalls {
+		result = append(result, llm.ToolCall{
+			ID:        tc.ID,
+			Name:      tc.Function.Name,
+			Arguments: tc.Function.Arguments,
+		})
+	}
+	return result
+}
+
+func buildOpenAIAssistantToolCallMessage(content string, toolCalls []llm.ToolCall) openai.ChatCompletionMessageParamUnion {
+	trimmed := strings.TrimSpace(content)
+	msg := openai.ChatCompletionMessageParamUnion{
+		OfAssistant: &openai.ChatCompletionAssistantMessageParam{},
+	}
+	if trimmed != "" {
+		msg = openai.AssistantMessage(content)
+		if msg.OfAssistant == nil {
+			msg.OfAssistant = &openai.ChatCompletionAssistantMessageParam{}
+		}
+	}
+	msg.OfAssistant.ToolCalls = convertLLMToolCallsToOpenAI(toolCalls)
+	return msg
+}
+
+func convertLLMToolCallsToOpenAI(toolCalls []llm.ToolCall) []openai.ChatCompletionMessageToolCallUnionParam {
+	result := make([]openai.ChatCompletionMessageToolCallUnionParam, 0, len(toolCalls))
+	for _, tc := range toolCalls {
+		result = append(result, openai.ChatCompletionMessageToolCallUnionParam{
+			OfFunction: &openai.ChatCompletionMessageFunctionToolCallParam{
+				ID: tc.ID,
+				Function: openai.ChatCompletionMessageFunctionToolCallFunctionParam{
+					Name:      tc.Name,
+					Arguments: tc.Arguments,
+				},
+			},
+		})
+	}
+	return result
 }
 
 func requestOpenAICompletionWithRetry(

@@ -33,14 +33,15 @@ type HomeAssistantRouteRequest struct {
 }
 
 type HomeAssistantRouteResponse struct {
-	Intent             string   `json:"intent"`
-	IntentLabel        string   `json:"intent_label"`
-	MatchedAgent       string   `json:"matched_agent,omitempty"`
-	Score              int      `json:"score"`
-	RequiresCreation   bool     `json:"requires_creation"`
-	Reasons            []string `json:"reasons,omitempty"`
-	SuggestedAgentName string   `json:"suggested_agent_name"`
-	SuggestedAgentType string   `json:"suggested_agent_type"`
+	Intent               string   `json:"intent"`
+	IntentLabel          string   `json:"intent_label"`
+	MatchedAgent         string   `json:"matched_agent,omitempty"`
+	Score                int      `json:"score"`
+	RequiresCreation     bool     `json:"requires_creation"`
+	WorkspaceRecommended bool     `json:"workspace_recommended"`
+	Reasons              []string `json:"reasons,omitempty"`
+	SuggestedAgentName   string   `json:"suggested_agent_name"`
+	SuggestedAgentType   string   `json:"suggested_agent_type"`
 }
 
 type homeAssistantIntent struct {
@@ -123,6 +124,15 @@ var (
 		"or": true, "please": true, "task": true, "that": true, "the": true, "this": true, "to": true,
 		"want": true, "with": true, "you": true,
 	}
+	homeAssistantComplexProjectBuildVerbs = []string{
+		"build", "create", "develop", "design", "implement", "make", "ship", "start", "set up", "setup",
+	}
+	homeAssistantComplexProjectTargets = []string{
+		"website", "web site", "web app", "app", "application", "landing page", "dashboard", "product", "project", "platform", "system",
+	}
+	homeAssistantComplexProjectSignals = []string{
+		"from scratch", "full stack", "frontend", "backend", "database", "authentication", "auth", "api", "deploy", "deployment", "production", "mvp", "architecture", "roadmap", "requirements",
+	}
 )
 
 // RouteHandler classifies a home assistant prompt and finds the best existing agent.
@@ -157,11 +167,12 @@ func (h *HomeAssistantRouteHandler) RouteHandler(w http.ResponseWriter, r *http.
 	}
 
 	resp := HomeAssistantRouteResponse{
-		Intent:             intent.Key,
-		IntentLabel:        intent.Label,
-		RequiresCreation:   true,
-		SuggestedAgentName: intent.SuggestedName,
-		SuggestedAgentType: intent.DefaultType,
+		Intent:               intent.Key,
+		IntentLabel:          intent.Label,
+		RequiresCreation:     true,
+		WorkspaceRecommended: shouldRecommendWorkspace(prompt, intent),
+		SuggestedAgentName:   intent.SuggestedName,
+		SuggestedAgentType:   intent.DefaultType,
 	}
 
 	if match != nil {
@@ -474,6 +485,69 @@ func tokenizePrompt(prompt string) []string {
 	}
 
 	return tokens
+}
+
+func shouldRecommendWorkspace(prompt string, intent homeAssistantIntent) bool {
+	if intent.Key != homeAssistantDefaultIntent.Key {
+		return false
+	}
+	if _, ok := parseHomeAssistantAppLaunchPrompt(prompt); ok {
+		return false
+	}
+
+	normalized := normalizeRouteToken(prompt)
+	if normalized == "" {
+		return false
+	}
+
+	hasBuildVerb := promptContainsAnyRoutePhrase(normalized, homeAssistantComplexProjectBuildVerbs)
+	hasProjectTarget := promptContainsAnyRoutePhrase(normalized, homeAssistantComplexProjectTargets)
+	if hasBuildVerb && hasProjectTarget {
+		return true
+	}
+
+	complexitySignalCount := countRoutePhraseMatches(normalized, homeAssistantComplexProjectSignals)
+	if hasProjectTarget && complexitySignalCount >= 1 {
+		return true
+	}
+
+	tokenCount := len(tokenizePrompt(normalized))
+	if hasBuildVerb && complexitySignalCount >= 1 && tokenCount >= 8 {
+		return true
+	}
+
+	return false
+}
+
+func promptContainsAnyRoutePhrase(normalizedPrompt string, phrases []string) bool {
+	if normalizedPrompt == "" || len(phrases) == 0 {
+		return false
+	}
+	for _, phrase := range phrases {
+		if phrase == "" {
+			continue
+		}
+		if strings.Contains(normalizedPrompt, normalizeRouteToken(phrase)) {
+			return true
+		}
+	}
+	return false
+}
+
+func countRoutePhraseMatches(normalizedPrompt string, phrases []string) int {
+	if normalizedPrompt == "" || len(phrases) == 0 {
+		return 0
+	}
+	count := 0
+	for _, phrase := range phrases {
+		if phrase == "" {
+			continue
+		}
+		if strings.Contains(normalizedPrompt, normalizeRouteToken(phrase)) {
+			count++
+		}
+	}
+	return count
 }
 
 func parseHomeAssistantAppLaunchPrompt(prompt string) (string, bool) {
