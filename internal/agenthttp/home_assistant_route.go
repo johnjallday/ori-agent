@@ -112,6 +112,16 @@ var (
 		SuggestedName:    "Email Assistant",
 		MinScore:         4,
 	}
+	homeAssistantWorkspaceCreateIntent = homeAssistantIntent{
+		Key:              "workspace_create",
+		Label:            "workspace creation",
+		Keywords:         []string{"create workspace", "new workspace", "workspace called", "workspace named"},
+		PreferredPlugins: []string{},
+		PreferredTypes:   []string{"general", "tool-calling"},
+		DefaultType:      "general",
+		SuggestedName:    "Workspace Assistant",
+		MinScore:         4,
+	}
 	homeAssistantAppLaunchIntent = homeAssistantIntent{
 		Key:              "app_launch",
 		Label:            "app launch",
@@ -136,6 +146,7 @@ var (
 		homeAssistantUtilityIntent,
 		homeAssistantTravelIntent,
 		homeAssistantEmailIntent,
+		homeAssistantWorkspaceCreateIntent,
 	}
 	homeAssistantCommonTokens = map[string]bool{
 		"a": true, "an": true, "and": true, "are": true, "can": true, "do": true, "for": true, "help": true,
@@ -229,6 +240,10 @@ func (h *HomeAssistantRouteHandler) systemAssistantFallback(intent homeAssistant
 }
 
 func detectHomeAssistantIntent(prompt string) homeAssistantIntent {
+	if shouldClassifyWorkspaceCreate(prompt) {
+		return homeAssistantWorkspaceCreateIntent
+	}
+
 	selectedIntent := homeAssistantDefaultIntent
 	selectedScore := 0
 	text := normalizeRouteToken(prompt)
@@ -538,6 +553,9 @@ func determineRouteModeAndTargetSurface(intent homeAssistantIntent, context norm
 	if intent.Key == homeAssistantUtilityIntent.Key {
 		return "utility_direct", "current"
 	}
+	if intent.Key == homeAssistantWorkspaceCreateIntent.Key {
+		return "workspace_task", "workspace"
+	}
 	if intent.Key == homeAssistantAppLaunchIntent.Key {
 		return "specialist_handoff", "chat"
 	}
@@ -580,6 +598,20 @@ func shouldRecommendWorkspace(prompt string, intent homeAssistantIntent) bool {
 	}
 
 	return false
+}
+
+func shouldClassifyWorkspaceCreate(prompt string) bool {
+	normalized := normalizeRouteToken(prompt)
+	if normalized == "" {
+		return false
+	}
+	if _, ok := parseHomeAssistantAppLaunchPrompt(prompt); ok {
+		return false
+	}
+	return strings.HasPrefix(normalized, "create workspace") ||
+		strings.HasPrefix(normalized, "create a workspace") ||
+		strings.HasPrefix(normalized, "create an workspace") ||
+		strings.HasPrefix(normalized, "new workspace")
 }
 
 func promptContainsAnyRoutePhrase(normalizedPrompt string, phrases []string) bool {

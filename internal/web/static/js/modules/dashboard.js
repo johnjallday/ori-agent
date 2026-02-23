@@ -374,6 +374,48 @@
     return HOME_ASSISTANT_COMMON_TOKENS[normalized] !== true;
   }
 
+  function parseCreateWorkspaceCommand(prompt) {
+    var raw = String(prompt || '').trim();
+    if (!raw) return null;
+
+    var normalized = normalizeToken(raw).replace(/\s+/g, ' ').trim();
+    if (!normalized) return null;
+
+    // Supported patterns:
+    // - "create workspace"
+    // - "create workspace called test2"
+    // - "create a workspace named test2"
+    // - "new workspace test2"
+    var patterns = [
+      /^create\s+(?:a\s+|an\s+)?workspace(?:\s+(?:called|named)\s+(.+))?$/,
+      /^new\s+workspace(?:\s+(?:called|named)\s+(.+)|\s+(.+))?$/
+    ];
+    var name = '';
+    for (var i = 0; i < patterns.length; i++) {
+      var match = normalized.match(patterns[i]);
+      if (!match) continue;
+      name = String((match[1] || match[2] || '')).trim();
+      break;
+    }
+
+    if (!name && normalized !== 'create workspace' && normalized !== 'create a workspace' && normalized !== 'create an workspace' && normalized !== 'new workspace') {
+      return null;
+    }
+
+    name = name.replace(/^[`"']+|[`"']+$/g, '').trim();
+    if (!name) {
+      name = 'New Workspace';
+    } else {
+      name = toTitleCase(name);
+    }
+
+    if (name.length > 56) name = name.slice(0, 56).trim();
+    if (!name) name = 'New Workspace';
+    return {
+      name: name
+    };
+  }
+
   function parseAppLaunchRequest(prompt) {
     var text = String(prompt || '').trim();
     if (!text) return null;
@@ -3156,6 +3198,62 @@
     return 'Created from Ask Ori task: "' + text + '"';
   }
 
+  async function createWorkspaceByName(workspaceName, prompt, routeContext) {
+    var name = String(workspaceName || '').trim() || 'New Workspace';
+    var sourcePrompt = String(prompt || '').trim();
+    var payload = {
+      name: name,
+      description: buildWorkspaceDescriptionFromPrompt(sourcePrompt || ('Create workspace: ' + name))
+    };
+
+    setHomeAssistantBusy(true, 'Creating Workspace...');
+    renderHomeAssistantActions([]);
+    appendHomeAssistantMessage('assistant', 'Creating workspace "' + name + '"...');
+    setHomeAssistantRoutingSummary('Workspace', 'Creating workspace "' + name + '".');
+
+    try {
+      var result = null;
+      if (typeof API !== 'undefined' && typeof API.post === 'function') {
+        result = await API.post('/api/workspaces', payload);
+      } else {
+        var response = await fetch('/api/workspaces', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+        if (!response.ok) throw new Error('Workspace create request failed');
+        result = await response.json();
+      }
+
+      var folder = result && result.folder ? result.folder : null;
+      var workspaceId = folder && folder.id ? String(folder.id) : '';
+      var createdName = folder && folder.name ? String(folder.name) : name;
+      if (!workspaceId) throw new Error('Workspace create response missing id');
+
+      appendHomeAssistantMessage('assistant', 'Created workspace "' + createdName + '". Opening canvas...');
+      setHomeAssistantRoutingSummary('Workspace Created', '"' + createdName + '" is ready.');
+      window.location.href = '/workspaces/' + encodeURIComponent(workspaceId) + '/canvas';
+    } catch (error) {
+      dashLog.debug('Direct workspace creation from Ask Ori failed', { error: error && error.message || error });
+      appendHomeAssistantMessage('assistant', 'I could not create that workspace right now. You can open Workspaces and create it there.');
+      setHomeAssistantRoutingSummary('Workspace Create Failed', 'Could not create workspace automatically.');
+      renderHomeAssistantActions([
+        {
+          label: 'Open Workspaces',
+          variant: 'primary',
+          onClick: function () { window.location.href = '/workspaces'; }
+        },
+        {
+          label: 'Ask Another Task',
+          variant: 'secondary',
+          onClick: function () { focusHomeAssistantInput(); }
+        }
+      ]);
+    } finally {
+      setHomeAssistantBusy(false);
+    }
+  }
+
   async function createWorkspaceFromPrompt(prompt, options) {
     var text = String(prompt || '').trim();
     if (!text) return;
@@ -3325,6 +3423,7 @@
     var appLaunchRequest = parseAppLaunchRequest(text);
     var routeContext = buildHomeRouteContext();
     var inWorkspaceContext = hasWorkspaceRouteContext(routeContext);
+    var directWorkspaceCommand = parseCreateWorkspaceCommand(text);
 
     if (homeAssistantState.awaitingCreateConfirmation && isAffirmativeConfirmation(text)) {
       appendHomeAssistantMessage('user', text);
@@ -3357,6 +3456,12 @@
     homeAssistantState.awaitingCreateConfirmation = false;
 
     appendHomeAssistantMessage('user', text);
+
+    if (directWorkspaceCommand && directWorkspaceCommand.name) {
+      await createWorkspaceByName(directWorkspaceCommand.name, text, routeContext);
+      return;
+    }
+
     setHomeAssistantBusy(true, 'Routing...');
     renderHomeAssistantActions([]);
     setHomeAssistantRoutingSummary('Routing', 'Analyzing task and selecting the best agent...');

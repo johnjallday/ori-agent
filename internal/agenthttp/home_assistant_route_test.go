@@ -497,6 +497,33 @@ func TestHomeAssistantRouteHandler_UtilityPrompt_WorkspaceContextStaysUtilityDir
 	}
 }
 
+func TestHomeAssistantRouteHandler_WorkspaceCreatePrompt_UsesWorkspaceIntentAndMode(t *testing.T) {
+	st := newHomeRouteTestStore(t)
+	handler := NewHomeAssistantRouteHandler(st)
+
+	rr := postRouteRequest(t, handler, map[string]interface{}{
+		"prompt": "create workspace called test2",
+	})
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d: %s", http.StatusOK, rr.Code, rr.Body.String())
+	}
+
+	var resp HomeAssistantRouteResponse
+	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+
+	if resp.Intent != "workspace_create" {
+		t.Fatalf("expected intent workspace_create, got %q", resp.Intent)
+	}
+	if resp.RouteMode != "workspace_task" {
+		t.Fatalf("expected route_mode workspace_task, got %q", resp.RouteMode)
+	}
+	if resp.TargetSurface != "workspace" {
+		t.Fatalf("expected target_surface workspace, got %q", resp.TargetSurface)
+	}
+}
+
 func TestHomeAssistantRouteHandler_UtilityPrompt_FallsBackToSystemAssistant(t *testing.T) {
 	st := newHomeRouteTestStore(t)
 	handler := NewHomeAssistantRouteHandler(st)
