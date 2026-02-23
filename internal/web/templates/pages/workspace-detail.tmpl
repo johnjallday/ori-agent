@@ -52,6 +52,25 @@
             </div>
           </div>
 
+          <!-- Ask Ori (Workspace Context) -->
+          <div id="homeAssistantCard" class="modern-card p-3 mb-3">
+            <div class="d-flex flex-column flex-lg-row align-items-lg-center justify-content-between gap-3">
+              <div>
+                <div class="home-assistant-minimal-label">Ask Ori</div>
+                <div style="color: var(--text-primary); font-weight: 600; font-size: 1rem;">Workspace Context Enabled</div>
+                <div style="color: var(--text-secondary); font-size: 0.85rem;">
+                  Prompts from this page route with the current workspace context.
+                </div>
+              </div>
+              <form id="homeAssistantForm" class="home-assistant-form home-assistant-form-minimal w-100" style="max-width: 760px;">
+                <input id="homeAssistantInput" type="text" class="modern-input flex-grow-1" maxlength="800"
+                       placeholder="Ask Ori to do something in this workspace..."
+                       style="min-height: 46px;">
+                <button id="homeAssistantSendBtn" type="submit" class="modern-btn modern-btn-primary home-assistant-send-btn">Ask</button>
+              </form>
+            </div>
+          </div>
+
           <!-- Workspace Info Card -->
           <div class="modern-card p-4 mb-4">
             <div class="d-flex justify-content-between align-items-start">
@@ -323,6 +342,34 @@
 
   <!-- Include chat area for additional modals (scheduledTasksModal, etc.) -->
   {{template "chat-area.tmpl" .}}
+
+  <!-- Ask Ori Thinking Modal -->
+  <div class="modal fade" id="homeAssistantThinkingModal" tabindex="-1"
+       aria-labelledby="homeAssistantThinkingModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-lg modal-dialog-centered modal-dialog-scrollable">
+      <div class="modal-content home-thinking-modal-content">
+        <div class="modal-header home-thinking-modal-header">
+          <div>
+            <h5 id="homeAssistantThinkingModalLabel" class="modal-title">Ori is working</h5>
+            <div id="homeAssistantThinkingStatus" class="home-thinking-modal-status" role="status" aria-live="polite">
+              <span id="homeAssistantThinkingSpinner" class="spinner-border spinner-border-sm me-2" aria-hidden="true"></span>
+              <span>Analyzing your request...</span>
+            </div>
+          </div>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+        </div>
+        <div class="modal-body">
+          <div id="homeAssistantRoutingSummary" class="home-assistant-routing-summary d-none"></div>
+          <div id="homeAssistantConversation" class="home-assistant-conversation home-assistant-conversation-modal p-3">
+            <div class="home-assistant-thinking-placeholder">
+              Progress updates will appear here after you send a task.
+            </div>
+          </div>
+          <div id="homeAssistantActions" class="d-flex flex-wrap gap-2 mt-3 d-none"></div>
+        </div>
+      </div>
+    </div>
+  </div>
 
   <!-- Add File Modal (from workspace-hub) -->
   <div class="modal fade" id="hubAddFileModal" tabindex="-1" aria-labelledby="hubAddFileModalTitle" aria-hidden="true">
@@ -1571,6 +1618,7 @@
   <script src="/js/modules/location.js"></script>
   <script src="/js/modules/task-modal-controller.js"></script>
   <script src="/js/modules/sessions.js"></script>
+  <script src="/js/modules/dashboard.js"></script>
   <script src="/js/modules/toast.js"></script>
   <script src="/js/modules/voice-input.js"></script>
   <script src="/js/modules/form-validation.js"></script>

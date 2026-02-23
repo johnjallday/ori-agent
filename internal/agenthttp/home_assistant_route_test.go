@@ -76,7 +76,7 @@ func setHomeRouteAgentMCPServers(t *testing.T, st store.Store, name string, serv
 	}
 }
 
-func postRouteRequest(t *testing.T, handler *HomeAssistantRouteHandler, payload map[string]string) *httptest.ResponseRecorder {
+func postRouteRequest(t *testing.T, handler *HomeAssistantRouteHandler, payload interface{}) *httptest.ResponseRecorder {
 	t.Helper()
 
 	body, err := json.Marshal(payload)
@@ -424,6 +424,76 @@ func TestHomeAssistantRouteHandler_GeneralPrompt_ComplexProjectSetsWorkspaceReco
 	}
 	if !resp.WorkspaceRecommended {
 		t.Fatalf("expected workspace recommendation for complex project prompt")
+	}
+	if resp.RouteMode != "workspace_task" {
+		t.Fatalf("expected route_mode workspace_task, got %q", resp.RouteMode)
+	}
+	if resp.TargetSurface != "workspace" {
+		t.Fatalf("expected target_surface workspace, got %q", resp.TargetSurface)
+	}
+}
+
+func TestHomeAssistantRouteHandler_WorkspaceContext_ForcesWorkspaceMode(t *testing.T) {
+	st := newHomeRouteTestStore(t)
+	handler := NewHomeAssistantRouteHandler(st)
+
+	addHomeRouteTestAgent(t, st, "Task Assistant", &store.CreateAgentConfig{Type: "general"}, types.AgentStatusActive,
+		"General purpose task helper", []string{"tasks"}, []string{})
+
+	rr := postRouteRequest(t, handler, map[string]interface{}{
+		"prompt": "Draft a migration checklist for our service",
+		"context": map[string]interface{}{
+			"surface":      "workspace_canvas",
+			"page_path":    "/workspaces/ws-abc/canvas",
+			"workspace_id": "ws-abc",
+		},
+	})
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d: %s", http.StatusOK, rr.Code, rr.Body.String())
+	}
+
+	var resp HomeAssistantRouteResponse
+	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+
+	if resp.RouteMode != "workspace_task" {
+		t.Fatalf("expected route_mode workspace_task, got %q", resp.RouteMode)
+	}
+	if resp.TargetSurface != "workspace" {
+		t.Fatalf("expected target_surface workspace, got %q", resp.TargetSurface)
+	}
+}
+
+func TestHomeAssistantRouteHandler_UtilityPrompt_WorkspaceContextStaysUtilityDirect(t *testing.T) {
+	st := newHomeRouteTestStore(t)
+	handler := NewHomeAssistantRouteHandler(st)
+
+	rr := postRouteRequest(t, handler, map[string]interface{}{
+		"prompt": "What time is it in Tokyo?",
+		"context": map[string]interface{}{
+			"surface":      "workspace_detail",
+			"page_path":    "/workspaces/ws-abc",
+			"workspace_id": "ws-abc",
+		},
+	})
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d: %s", http.StatusOK, rr.Code, rr.Body.String())
+	}
+
+	var resp HomeAssistantRouteResponse
+	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+
+	if resp.Intent != "utility_direct" {
+		t.Fatalf("expected intent utility_direct, got %q", resp.Intent)
+	}
+	if resp.RouteMode != "utility_direct" {
+		t.Fatalf("expected route_mode utility_direct, got %q", resp.RouteMode)
+	}
+	if resp.TargetSurface != "current" {
+		t.Fatalf("expected target_surface current, got %q", resp.TargetSurface)
 	}
 }
 

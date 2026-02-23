@@ -29,7 +29,16 @@ func (h *HomeAssistantRouteHandler) SetSystemModelReader(reader interface {
 }
 
 type HomeAssistantRouteRequest struct {
-	Prompt string `json:"prompt"`
+	Prompt  string                     `json:"prompt"`
+	Context *HomeAssistantRouteContext `json:"context,omitempty"`
+}
+
+type HomeAssistantRouteContext struct {
+	Surface     string `json:"surface,omitempty"`
+	PagePath    string `json:"page_path,omitempty"`
+	WorkspaceID string `json:"workspace_id,omitempty"`
+	SessionID   string `json:"session_id,omitempty"`
+	Origin      string `json:"origin,omitempty"`
 }
 
 type HomeAssistantRouteResponse struct {
@@ -39,6 +48,8 @@ type HomeAssistantRouteResponse struct {
 	Score                int      `json:"score"`
 	RequiresCreation     bool     `json:"requires_creation"`
 	WorkspaceRecommended bool     `json:"workspace_recommended"`
+	RouteMode            string   `json:"route_mode"`
+	TargetSurface        string   `json:"target_surface"`
 	Reasons              []string `json:"reasons,omitempty"`
 	SuggestedAgentName   string   `json:"suggested_agent_name"`
 	SuggestedAgentType   string   `json:"suggested_agent_type"`
@@ -60,6 +71,14 @@ type routedAgentMatch struct {
 	Agent   *agent.Agent
 	Score   int
 	Reasons []string
+}
+
+type normalizedHomeAssistantRouteContext struct {
+	Surface     string
+	PagePath    string
+	WorkspaceID string
+	SessionID   string
+	Origin      string
 }
 
 var (
@@ -165,12 +184,17 @@ func (h *HomeAssistantRouteHandler) RouteHandler(w http.ResponseWriter, r *http.
 	if match == nil {
 		match = h.systemAssistantFallback(intent)
 	}
+	routeContext := normalizeHomeAssistantRouteContext(req.Context)
+	workspaceRecommended := shouldRecommendWorkspace(prompt, intent)
+	routeMode, targetSurface := determineRouteModeAndTargetSurface(intent, routeContext, workspaceRecommended)
 
 	resp := HomeAssistantRouteResponse{
 		Intent:               intent.Key,
 		IntentLabel:          intent.Label,
 		RequiresCreation:     true,
-		WorkspaceRecommended: shouldRecommendWorkspace(prompt, intent),
+		WorkspaceRecommended: workspaceRecommended,
+		RouteMode:            routeMode,
+		TargetSurface:        targetSurface,
 		SuggestedAgentName:   intent.SuggestedName,
 		SuggestedAgentType:   intent.DefaultType,
 	}
@@ -485,6 +509,45 @@ func tokenizePrompt(prompt string) []string {
 	}
 
 	return tokens
+}
+
+func normalizeHomeAssistantRouteContext(context *HomeAssistantRouteContext) normalizedHomeAssistantRouteContext {
+	if context == nil {
+		return normalizedHomeAssistantRouteContext{}
+	}
+	return normalizedHomeAssistantRouteContext{
+		Surface:     normalizeRouteToken(context.Surface),
+		PagePath:    normalizeRouteToken(context.PagePath),
+		WorkspaceID: strings.TrimSpace(context.WorkspaceID),
+		SessionID:   strings.TrimSpace(context.SessionID),
+		Origin:      normalizeRouteToken(context.Origin),
+	}
+}
+
+func (c normalizedHomeAssistantRouteContext) hasWorkspaceContext() bool {
+	if strings.TrimSpace(c.WorkspaceID) != "" {
+		return true
+	}
+	if strings.HasPrefix(c.PagePath, "/workspaces/") {
+		return true
+	}
+	return c.Surface == "workspace" || c.Surface == "workspace_detail" || c.Surface == "workspace_canvas"
+}
+
+func determineRouteModeAndTargetSurface(intent homeAssistantIntent, context normalizedHomeAssistantRouteContext, workspaceRecommended bool) (string, string) {
+	if intent.Key == homeAssistantUtilityIntent.Key {
+		return "utility_direct", "current"
+	}
+	if intent.Key == homeAssistantAppLaunchIntent.Key {
+		return "specialist_handoff", "chat"
+	}
+	if context.hasWorkspaceContext() {
+		return "workspace_task", "workspace"
+	}
+	if workspaceRecommended {
+		return "workspace_task", "workspace"
+	}
+	return "specialist_handoff", "chat"
 }
 
 func shouldRecommendWorkspace(prompt string, intent homeAssistantIntent) bool {

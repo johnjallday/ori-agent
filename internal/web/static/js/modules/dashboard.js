@@ -476,9 +476,32 @@
     return labels[labels.length - 1].length >= 2;
   }
 
-  function buildEmailDispatchMessage(prompt) {
-    var userPrompt = String(prompt || '').trim();
+  function hasWorkspaceRouteContext(routeContext) {
+    if (!routeContext || typeof routeContext !== 'object') return false;
+    return Boolean(String(routeContext.workspace_id || '').trim());
+  }
+
+  function buildWorkspaceContextDispatchPrefix(routeContext) {
+    if (!hasWorkspaceRouteContext(routeContext)) return '';
+    var workspaceId = String(routeContext.workspace_id || '').trim();
+    var pagePath = String(routeContext.page_path || '').trim() || '/workspaces/' + workspaceId;
     return [
+      'Workspace context:',
+      '- workspace_id: ' + workspaceId,
+      '- page_path: ' + pagePath,
+      '- origin: ask_ori',
+      ''
+    ].join('\n');
+  }
+
+  function buildEmailDispatchMessage(prompt, routeContext) {
+    var userPrompt = String(prompt || '').trim();
+    var lines = [];
+    var workspacePrefix = buildWorkspaceContextDispatchPrefix(routeContext);
+    if (workspacePrefix) {
+      lines.push(workspacePrefix);
+    }
+    lines.push(
       'Email task:',
       userPrompt,
       '',
@@ -487,15 +510,18 @@
       '- If authentication is required, guide the user through login and continue.',
       '- Do not claim lack of access before attempting available MCP tools.',
       '- Keep operations read-only unless the user explicitly approves send/delete actions.'
-    ].join('\n');
+    );
+    return lines.join('\n');
   }
 
-  function buildAskOriDispatchMessage(prompt, appLaunchRequest, intent) {
+  function buildAskOriDispatchMessage(prompt, appLaunchRequest, intent, routeContext) {
     if (intent && intent.key === 'email_check') {
-      return buildEmailDispatchMessage(prompt);
+      return buildEmailDispatchMessage(prompt, routeContext);
     }
     if (!appLaunchRequest || !appLaunchRequest.appName) {
-      return String(prompt || '').trim();
+      var workspacePrefix = buildWorkspaceContextDispatchPrefix(routeContext);
+      if (!workspacePrefix) return String(prompt || '').trim();
+      return workspacePrefix + String(prompt || '').trim();
     }
     return '/openapp ' + appLaunchRequest.appName;
   }
@@ -2367,10 +2393,63 @@
     return (data && data.agents) || [];
   }
 
+  function extractWorkspaceIdFromPath(pathname) {
+    var path = String(pathname || '').trim();
+    var match = path.match(/^\/(?:workspaces|studios)\/([^/]+)/i);
+    if (!match || !match[1]) return '';
+    try {
+      return decodeURIComponent(match[1]);
+    } catch (error) {
+      return match[1];
+    }
+  }
+
+  function inferHomeRouteSurface(pathname) {
+    var path = normalizeToken(pathname || '');
+    if (!path) return 'dashboard';
+    if (path.indexOf('/workspaces/') === 0) {
+      if (path.indexOf('/canvas') >= 0) return 'workspace_canvas';
+      return 'workspace_detail';
+    }
+    if (path.indexOf('/workspaces') === 0) return 'workspace_hub';
+    if (path.indexOf('/chat') === 0) return 'chat';
+    if (path.indexOf('/dashboard') === 0 || path === '/') return 'dashboard';
+    return 'dashboard';
+  }
+
+  function buildHomeRouteContext() {
+    var pathname = '';
+    if (window.location && typeof window.location.pathname === 'string') {
+      pathname = window.location.pathname;
+    }
+    var workspaceId = extractWorkspaceIdFromPath(pathname);
+    var sessionId = '';
+    if (window.sessionManager && window.sessionManager.currentSessionId) {
+      sessionId = String(window.sessionManager.currentSessionId).trim();
+    }
+
+    return {
+      surface: inferHomeRouteSurface(pathname),
+      page_path: pathname || '/',
+      workspace_id: workspaceId,
+      session_id: sessionId,
+      origin: 'ask_ori'
+    };
+  }
+
+  function routeContextTargetsCurrentWorkspace(routeData, routeContext) {
+    var mode = normalizeToken(routeData && routeData.route_mode);
+    var target = normalizeToken(routeData && routeData.target_surface);
+    return mode === 'workspace_task' && target === 'workspace' && hasWorkspaceRouteContext(routeContext);
+  }
+
   async function routePromptWithBackend(prompt) {
     if (typeof API === 'undefined' || typeof API.post !== 'function') return null;
     try {
-      var data = await API.post('/api/home-assistant/route', { prompt: prompt });
+      var data = await API.post('/api/home-assistant/route', {
+        prompt: prompt,
+        context: buildHomeRouteContext()
+      });
       if (!data || typeof data.intent !== 'string') return null;
       return data;
     } catch (error) {
@@ -2884,9 +2963,30 @@
     return null;
   }
 
-  async function openOrCreateChatSession(agentName) {
+  function findSessionById(sessionId) {
+    var manager = window.sessionManager;
+    if (!manager || !Array.isArray(manager.sessions) || !sessionId) return null;
+    for (var i = 0; i < manager.sessions.length; i++) {
+      var session = manager.sessions[i];
+      if (String(session && session.id) === String(sessionId)) return session;
+    }
+    return null;
+  }
+
+  async function openOrCreateChatSession(agentName, routeContext) {
     var manager = window.sessionManager;
     if (!manager) return null;
+    var workspaceId = hasWorkspaceRouteContext(routeContext) ? String(routeContext.workspace_id).trim() : '';
+
+    if (workspaceId && typeof manager.createSessionWithAgentInFolder === 'function') {
+      await manager.createSessionWithAgentInFolder(agentName, workspaceId);
+      if (manager.activeSessionId) {
+        var workspaceSession = findSessionById(manager.activeSessionId);
+        if (workspaceSession && workspaceSession.id) return workspaceSession;
+      }
+      var matchedWorkspaceSession = findSessionForAgent(agentName);
+      if (matchedWorkspaceSession && matchedWorkspaceSession.id) return matchedWorkspaceSession;
+    }
 
     // Ask Ori should start a fresh session per task handoff.
     if (typeof manager.createSessionWithAgent === 'function') {
@@ -2903,9 +3003,9 @@
     return null;
   }
 
-  async function dispatchPromptToChatSession(prompt, agentName) {
+  async function dispatchPromptToChatSession(prompt, agentName, routeContext) {
     if (!prompt || !agentName) return null;
-    var session = await openOrCreateChatSession(agentName);
+    var session = await openOrCreateChatSession(agentName, routeContext);
     if (!session) return null;
     openChatPanel();
     if (typeof window.sendMessageToChat !== 'function') return null;
@@ -3062,6 +3162,7 @@
 
     var agentName = options && options.agentName ? String(options.agentName).trim() : '';
     var appLaunchRequest = options && options.appLaunchRequest ? options.appLaunchRequest : null;
+    var routeContext = options && options.routeContext ? options.routeContext : buildHomeRouteContext();
     var payload = {
       name: buildWorkspaceNameFromPrompt(text),
       description: buildWorkspaceDescriptionFromPrompt(text)
@@ -3095,8 +3196,38 @@
         throw new Error('Workspace create response missing id');
       }
 
-      appendHomeAssistantMessage('assistant', 'Created workspace "' + workspaceName + '". Opening canvas...');
-      setHomeAssistantRoutingSummary('Workspace Created', '"' + workspaceName + '" is ready.');
+      var agentAttached = false;
+      if (agentName) {
+        try {
+          if (typeof API !== 'undefined' && typeof API.post === 'function') {
+            await API.post('/api/workspaces/' + encodeURIComponent(workspaceId) + '/agents', { agent_name: agentName });
+          } else {
+            var addAgentResponse = await fetch('/api/workspaces/' + encodeURIComponent(workspaceId) + '/agents', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ agent_name: agentName })
+            });
+            if (!addAgentResponse.ok) {
+              throw new Error('Workspace agent attach request failed');
+            }
+          }
+          agentAttached = true;
+        } catch (attachError) {
+          dashLog.debug('Workspace created but failed to add agent', {
+            workspaceId: workspaceId,
+            agentName: agentName,
+            error: attachError && attachError.message || attachError
+          });
+        }
+      }
+
+      if (agentName && agentAttached) {
+        appendHomeAssistantMessage('assistant', 'Created workspace "' + workspaceName + '" and added "' + agentName + '". Opening canvas...');
+        setHomeAssistantRoutingSummary('Workspace Created', '"' + workspaceName + '" is ready with "' + agentName + '" attached.');
+      } else {
+        appendHomeAssistantMessage('assistant', 'Created workspace "' + workspaceName + '". Opening canvas...');
+        setHomeAssistantRoutingSummary('Workspace Created', '"' + workspaceName + '" is ready.');
+      }
       window.location.href = '/workspaces/' + encodeURIComponent(workspaceId) + '/canvas';
     } catch (error) {
       dashLog.debug('Workspace creation from Ask Ori failed', { error: error && error.message || error });
@@ -3112,7 +3243,7 @@
           label: 'Continue in Chat',
           variant: 'secondary',
           disabled: !agentName,
-          onClick: function () { runPendingTaskWithAgent(text, agentName, { appLaunchRequest: appLaunchRequest }); }
+          onClick: function () { runPendingTaskWithAgent(text, agentName, { appLaunchRequest: appLaunchRequest, routeContext: routeContext }); }
         },
         {
           label: 'Ask Another Task',
@@ -3129,7 +3260,8 @@
     if (!prompt || !agentName) return;
     var appLaunchRequest = options && options.appLaunchRequest ? options.appLaunchRequest : null;
     var dispatchIntent = options && options.intent ? options.intent : homeAssistantState.pendingIntent;
-    var dispatchMessage = buildAskOriDispatchMessage(prompt, appLaunchRequest, dispatchIntent);
+    var routeContext = options && options.routeContext ? options.routeContext : buildHomeRouteContext();
+    var dispatchMessage = buildAskOriDispatchMessage(prompt, appLaunchRequest, dispatchIntent, routeContext);
 
     setHomeAssistantBusy(true, 'Opening Chat...');
     renderHomeAssistantActions([]);
@@ -3141,7 +3273,7 @@
     }
 
     try {
-      var session = await dispatchPromptToChatSession(dispatchMessage, agentName);
+      var session = await dispatchPromptToChatSession(dispatchMessage, agentName, routeContext);
       if (!session) throw new Error('Failed to launch chat session');
       trackHomeAssistantSession(session, prompt, agentName);
       setHomeAssistantMode('continue_session');
@@ -3191,6 +3323,8 @@
     if (!text) return;
     setHomeAssistantMode('new_task');
     var appLaunchRequest = parseAppLaunchRequest(text);
+    var routeContext = buildHomeRouteContext();
+    var inWorkspaceContext = hasWorkspaceRouteContext(routeContext);
 
     if (homeAssistantState.awaitingCreateConfirmation && isAffirmativeConfirmation(text)) {
       appendHomeAssistantMessage('user', text);
@@ -3255,6 +3389,9 @@
         if (typeof routeData.workspace_recommended === 'boolean') {
           workspaceRecommended = routeData.workspace_recommended;
         }
+        if (routeContextTargetsCurrentWorkspace(routeData, routeContext)) {
+          workspaceRecommended = false;
+        }
 
         if (shouldAcceptBackendRouteMatch(routeData)) {
           match = {
@@ -3271,8 +3408,11 @@
         var agents = await fetchAgentsForMatching();
         match = findSuitableAgent(agents, homeAssistantState.pendingIntent, text);
       }
-      if (!routeData || typeof routeData.workspace_recommended !== 'boolean') {
+      if ((!routeData || typeof routeData.workspace_recommended !== 'boolean') && !inWorkspaceContext) {
         workspaceRecommended = isComplexProjectPrompt(text, homeAssistantState.pendingIntent);
+      }
+      if (inWorkspaceContext) {
+        workspaceRecommended = false;
       }
 
       if (match && match.agent) {
@@ -3305,14 +3445,15 @@
               onClick: function () {
                 createWorkspaceFromPrompt(text, {
                   agentName: match.agent.name,
-                  appLaunchRequest: appLaunchRequest
+                  appLaunchRequest: appLaunchRequest,
+                  routeContext: routeContext
                 });
               }
             },
             {
               label: 'Continue in Chat',
               variant: 'secondary',
-              onClick: function () { runPendingTaskWithAgent(text, match.agent.name, { appLaunchRequest: appLaunchRequest }); }
+              onClick: function () { runPendingTaskWithAgent(text, match.agent.name, { appLaunchRequest: appLaunchRequest, routeContext: routeContext }); }
             },
             {
               label: 'Open Workspaces',
@@ -3345,7 +3486,7 @@
           appendHomeAssistantMessage('assistant', 'Match found. Handing off to "' + match.agent.name + '" now.');
           setHomeAssistantRoutingSummary('Semi-auto', 'Match found. Handing off to "' + match.agent.name + '".');
         }
-        await runPendingTaskWithAgent(text, match.agent.name, { appLaunchRequest: appLaunchRequest });
+        await runPendingTaskWithAgent(text, match.agent.name, { appLaunchRequest: appLaunchRequest, routeContext: routeContext });
       } else {
         var llmAvailabilityForCreate = await checkHomeAssistantLLMAvailability();
         if (!llmAvailabilityForCreate.available) {
