@@ -2992,6 +2992,139 @@
     }
   }
 
+  function buildWorkspaceNameFromPrompt(prompt) {
+    var normalized = normalizeToken(prompt);
+    if (!normalized) return 'New Workspace';
+
+    var ignored = {
+      'a': true,
+      'an': true,
+      'and': true,
+      'for': true,
+      'from': true,
+      'help': true,
+      'i': true,
+      'is': true,
+      'it': true,
+      'lets': true,
+      'my': true,
+      'of': true,
+      'please': true,
+      'that': true,
+      'the': true,
+      'to': true,
+      'with': true,
+      'you': true,
+      'build': true,
+      'create': true,
+      'develop': true,
+      'design': true,
+      'implement': true,
+      'make': true,
+      'setup': true,
+      'start': true
+    };
+
+    var tokens = uniqueValues(normalized.split(/[^a-z0-9]+/g));
+    var selected = [];
+    for (var i = 0; i < tokens.length; i++) {
+      var token = tokens[i];
+      if (!token || ignored[token]) continue;
+      if (token.length <= 1) continue;
+      selected.push(token);
+      if (selected.length >= 6) break;
+    }
+
+    if (selected.length === 0) {
+      for (var j = 0; j < tokens.length; j++) {
+        var fallback = tokens[j];
+        if (!fallback || fallback.length <= 1) continue;
+        selected.push(fallback);
+        if (selected.length >= 4) break;
+      }
+    }
+
+    var candidate = toTitleCase(selected.join(' '));
+    if (!candidate) candidate = 'New Workspace';
+    if (candidate.length > 56) candidate = candidate.slice(0, 56).trim();
+    return candidate || 'New Workspace';
+  }
+
+  function buildWorkspaceDescriptionFromPrompt(prompt) {
+    var text = truncateText(String(prompt || '').trim(), 280);
+    if (!text) return 'Created from Ask Ori.';
+    return 'Created from Ask Ori task: "' + text + '"';
+  }
+
+  async function createWorkspaceFromPrompt(prompt, options) {
+    var text = String(prompt || '').trim();
+    if (!text) return;
+
+    var agentName = options && options.agentName ? String(options.agentName).trim() : '';
+    var appLaunchRequest = options && options.appLaunchRequest ? options.appLaunchRequest : null;
+    var payload = {
+      name: buildWorkspaceNameFromPrompt(text),
+      description: buildWorkspaceDescriptionFromPrompt(text)
+    };
+
+    setHomeAssistantBusy(true, 'Creating Workspace...');
+    renderHomeAssistantActions([]);
+    appendHomeAssistantMessage('assistant', 'Creating a workspace from this task and opening the canvas...');
+    setHomeAssistantRoutingSummary('Workspace', 'Creating workspace and opening canvas.');
+
+    try {
+      var result = null;
+      if (typeof API !== 'undefined' && typeof API.post === 'function') {
+        result = await API.post('/api/workspaces', payload);
+      } else {
+        var response = await fetch('/api/workspaces', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+        if (!response.ok) {
+          throw new Error('Workspace create request failed');
+        }
+        result = await response.json();
+      }
+
+      var folder = result && result.folder ? result.folder : null;
+      var workspaceId = folder && folder.id ? String(folder.id) : '';
+      var workspaceName = folder && folder.name ? String(folder.name) : payload.name;
+      if (!workspaceId) {
+        throw new Error('Workspace create response missing id');
+      }
+
+      appendHomeAssistantMessage('assistant', 'Created workspace "' + workspaceName + '". Opening canvas...');
+      setHomeAssistantRoutingSummary('Workspace Created', '"' + workspaceName + '" is ready.');
+      window.location.href = '/workspaces/' + encodeURIComponent(workspaceId) + '/canvas';
+    } catch (error) {
+      dashLog.debug('Workspace creation from Ask Ori failed', { error: error && error.message || error });
+      appendHomeAssistantMessage('assistant', 'I could not create that workspace automatically. You can open Workspaces manually or continue in chat.');
+      setHomeAssistantRoutingSummary('Workspace Create Failed', 'Could not create workspace automatically.');
+      renderHomeAssistantActions([
+        {
+          label: 'Open Workspaces',
+          variant: 'primary',
+          onClick: function () { window.location.href = '/workspaces'; }
+        },
+        {
+          label: 'Continue in Chat',
+          variant: 'secondary',
+          disabled: !agentName,
+          onClick: function () { runPendingTaskWithAgent(text, agentName, { appLaunchRequest: appLaunchRequest }); }
+        },
+        {
+          label: 'Ask Another Task',
+          variant: 'secondary',
+          onClick: function () { focusHomeAssistantInput(); }
+        }
+      ]);
+    } finally {
+      setHomeAssistantBusy(false);
+    }
+  }
+
   async function runPendingTaskWithAgent(prompt, agentName, options) {
     if (!prompt || !agentName) return;
     var appLaunchRequest = options && options.appLaunchRequest ? options.appLaunchRequest : null;
@@ -3163,18 +3296,28 @@
         }
         if (workspaceRecommended) {
           appendHomeAssistantMessage('assistant',
-            'This looks like a complex project. I recommend starting in a Workspace so files, tasks, and context stay organized. Do you want to open Workspaces first?');
-          setHomeAssistantRoutingSummary('Workspace Recommended', 'Complex project detected. Choose Workspace-first or continue in chat.');
+            'This looks like a complex project. I recommend starting in a Workspace so files, tasks, and context stay organized. Do you want me to create one now?');
+          setHomeAssistantRoutingSummary('Workspace Recommended', 'Complex project detected. Create a workspace or continue in chat.');
           renderHomeAssistantActions([
             {
-              label: 'Create/Open Workspace',
+              label: 'Create Workspace',
               variant: 'primary',
-              onClick: function () { window.location.href = '/workspaces'; }
+              onClick: function () {
+                createWorkspaceFromPrompt(text, {
+                  agentName: match.agent.name,
+                  appLaunchRequest: appLaunchRequest
+                });
+              }
             },
             {
               label: 'Continue in Chat',
               variant: 'secondary',
               onClick: function () { runPendingTaskWithAgent(text, match.agent.name, { appLaunchRequest: appLaunchRequest }); }
+            },
+            {
+              label: 'Open Workspaces',
+              variant: 'secondary',
+              onClick: function () { window.location.href = '/workspaces'; }
             },
             {
               label: 'Ask Another Task',
