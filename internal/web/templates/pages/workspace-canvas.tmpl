@@ -81,23 +81,19 @@
             </div>
           </div>
 
-          <!-- Ask Ori (Workspace Context) -->
-          <div id="homeAssistantCard" class="modern-card p-3 mb-3">
-            <div class="d-flex flex-column flex-xl-row align-items-xl-center justify-content-between gap-3">
-              <div>
-                <div class="home-assistant-minimal-label">Ask Ori</div>
-                <div style="color: var(--text-primary); font-weight: 600; font-size: 0.95rem;">Workspace Context Enabled</div>
-                <div style="color: var(--text-secondary); font-size: 0.82rem;">
-                  Prompts from this canvas include this workspace automatically.
-                </div>
+          <!-- Ask Ori Prompt Bar -->
+          <div id="homeAssistantCard" class="modern-card p-2 mb-3">
+            <form id="homeAssistantForm" class="d-flex align-items-center gap-2">
+              <div class="d-none d-md-flex align-items-center gap-2 px-2" style="color: var(--text-secondary); font-size: 0.82rem; white-space: nowrap;">
+                <span style="font-weight: 600; color: var(--text-primary);">Ask Ori</span>
+                <span style="opacity: 0.6;">Canvas</span>
               </div>
-              <form id="homeAssistantForm" class="home-assistant-form home-assistant-form-minimal w-100" style="max-width: 840px;">
-                <input id="homeAssistantInput" type="text" class="modern-input flex-grow-1" maxlength="800"
-                       placeholder="Ask Ori to do something in this workspace..."
-                       style="min-height: 44px;">
-                <button id="homeAssistantSendBtn" type="submit" class="modern-btn modern-btn-primary home-assistant-send-btn">Ask</button>
-              </form>
-            </div>
+              <input id="homeAssistantInput" type="text" class="modern-input flex-grow-1" maxlength="800"
+                     placeholder="Message Ori about this workspace canvas..."
+                     aria-label="Ask Ori prompt"
+                     style="min-height: 42px;">
+              <button id="homeAssistantSendBtn" type="submit" class="modern-btn modern-btn-primary home-assistant-send-btn">Send</button>
+            </form>
           </div>
 
           <div class="row g-3">
