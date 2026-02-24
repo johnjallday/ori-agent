@@ -387,14 +387,14 @@
     // - "create a workspace named test2"
     // - "new workspace test2"
     var patterns = [
-      /^create\s+(?:a\s+|an\s+)?workspace(?:\s+(?:called|named)\s+(.+))?$/,
+      /^create\s+(?:a\s+|an\s+)?workspace(?:\s+(?:called|named)\s+(.+)|\s+(.+))?$/,
       /^new\s+workspace(?:\s+(?:called|named)\s+(.+)|\s+(.+))?$/
     ];
     var name = '';
     for (var i = 0; i < patterns.length; i++) {
       var match = normalized.match(patterns[i]);
       if (!match) continue;
-      name = String((match[1] || match[2] || '')).trim();
+      name = String((match[1] || match[2] || match[3] || '')).trim();
       break;
     }
 
@@ -402,7 +402,7 @@
       return null;
     }
 
-    name = name.replace(/^[`"']+|[`"']+$/g, '').trim();
+    name = name.replace(/^[`"':\-\s]+|[`"':\-\s]+$/g, '').trim();
     if (!name) {
       name = 'New Workspace';
     } else {
