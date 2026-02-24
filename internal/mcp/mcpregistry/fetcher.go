@@ -315,7 +315,7 @@ func (f *Fetcher) fetchURL(url, sourceName string) ([]RegistryEntry, error) {
 	if err != nil {
 		return nil, fmt.Errorf("HTTP GET failed: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("unexpected HTTP status %d from %s", resp.StatusCode, url)

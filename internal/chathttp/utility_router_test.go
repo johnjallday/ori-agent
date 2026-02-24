@@ -105,3 +105,42 @@ func TestClassifyUtilityRoute_WorkspaceFallback(t *testing.T) {
 		t.Fatalf("expected workspace_task, got %q", decision.Mode)
 	}
 }
+
+// TestClassifyUtilityRoute_TimesNotTime ensures "times" (multiplication) does not
+// trigger the time utility tool. The word "time" must appear as a standalone word.
+func TestClassifyUtilityRoute_TimesNotTime(t *testing.T) {
+	prompts := []string{
+		"What is 12 times 8?",
+		"Use the math tool to multiply 12 times 8",
+		"sometimes I wonder",
+		"overtime pay calculation",
+	}
+	for _, p := range prompts {
+		decision := classifyUtilityRoute(p)
+		if decision.ToolName == "time" {
+			t.Errorf("prompt %q should not match time tool, but got tool=%q", p, decision.ToolName)
+		}
+	}
+}
+
+func TestContainsWholeWord(t *testing.T) {
+	tests := []struct {
+		text string
+		word string
+		want bool
+	}{
+		{"what time is it", "time", true},
+		{"What is 12 times 8", "time", false},
+		{"overtime", "time", false},
+		{"sometimes", "time", false},
+		{"time zone", "time", true},
+		{"time", "time", true},
+		{"no match here", "time", false},
+	}
+	for _, tt := range tests {
+		got := containsWholeWord(tt.text, tt.word)
+		if got != tt.want {
+			t.Errorf("containsWholeWord(%q, %q) = %v, want %v", tt.text, tt.word, got, tt.want)
+		}
+	}
+}

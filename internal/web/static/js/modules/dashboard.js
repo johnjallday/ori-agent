@@ -3198,7 +3198,7 @@
     return 'Created from Ask Ori task: "' + text + '"';
   }
 
-  async function createWorkspaceByName(workspaceName, prompt, routeContext) {
+  async function createWorkspaceByName(workspaceName, prompt, _) {
     var name = String(workspaceName || '').trim() || 'New Workspace';
     var sourcePrompt = String(prompt || '').trim();
     var payload = {

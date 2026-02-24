@@ -224,7 +224,7 @@ func containsLikelyWebTarget(text string) bool {
 				break
 			}
 			for _, r := range label {
-				if !(r >= 'a' && r <= 'z') && !(r >= '0' && r <= '9') && r != '-' {
+				if (r < 'a' || r > 'z') && (r < '0' || r > '9') && r != '-' {
 					valid = false
 					break
 				}

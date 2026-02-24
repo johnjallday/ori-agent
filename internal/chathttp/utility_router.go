@@ -96,7 +96,8 @@ func classifyUtilityRoute(prompt string) UtilityRouteDecision {
 }
 
 func classifyTimeRoute(original, lower string) (UtilityRouteDecision, bool) {
-	if !containsAny(lower, []string{"time", "timezone", "clock"}) {
+	// Use word-boundary matching for "time" to avoid false matches on "times", "sometime", etc.
+	if !containsWholeWord(lower, "time") && !containsAny(lower, []string{"timezone", "clock"}) {
 		return UtilityRouteDecision{}, false
 	}
 
@@ -286,7 +287,7 @@ func looksLikeWebHostTarget(raw string) bool {
 			return false
 		}
 		for _, r := range label {
-			if !(r >= 'a' && r <= 'z') && !(r >= 'A' && r <= 'Z') && !(r >= '0' && r <= '9') && r != '-' {
+			if (r < 'a' || r > 'z') && (r < 'A' || r > 'Z') && (r < '0' || r > '9') && r != '-' {
 				return false
 			}
 		}
@@ -483,6 +484,35 @@ func containsAny(text string, phrases []string) bool {
 		}
 	}
 	return false
+}
+
+// containsWholeWord returns true if text contains word as a standalone word
+// (not as a substring of another word). Uses simple ASCII word-boundary logic.
+func containsWholeWord(text, word string) bool {
+	idx := 0
+	for {
+		pos := strings.Index(text[idx:], word)
+		if pos < 0 {
+			return false
+		}
+		abs := idx + pos
+		// Check character before match
+		before := abs == 0 || !isWordChar(rune(text[abs-1]))
+		// Check character after match
+		end := abs + len(word)
+		after := end >= len(text) || !isWordChar(rune(text[end]))
+		if before && after {
+			return true
+		}
+		idx = abs + 1
+		if idx >= len(text) {
+			return false
+		}
+	}
+}
+
+func isWordChar(r rune) bool {
+	return (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '_'
 }
 
 func formatUtilityDirectResponse(toolName, rawResult string) string {

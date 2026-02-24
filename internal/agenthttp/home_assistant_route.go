@@ -707,7 +707,7 @@ func looksLikeWebHostTarget(target string) bool {
 			return false
 		}
 		for _, r := range label {
-			if !(unicode.IsLetter(r) || unicode.IsDigit(r) || r == '-') {
+			if !unicode.IsLetter(r) && !unicode.IsDigit(r) && r != '-' {
 				return false
 			}
 		}

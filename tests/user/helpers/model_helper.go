@@ -33,7 +33,7 @@ func GetTestModel() string {
 		if model := os.Getenv("OPENAI_MODEL"); model != "" {
 			return model
 		}
-		return "gpt-5-nano"
+		return "gpt-4.1-mini"
 	}
 
 	// If using Anthropic, default to a valid Anthropic model unless overridden.

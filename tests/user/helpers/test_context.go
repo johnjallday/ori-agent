@@ -365,6 +365,37 @@ func (tc *TestContext) AssertToolCalled(resp *ChatResponse, toolName string) {
 	tc.T.Errorf("Expected tool '%s' to be called, but it wasn't", toolName)
 }
 
+// AssertToolCalledT verifies a tool was called using a specific *testing.T (for use in subtests).
+func (tc *TestContext) AssertToolCalledT(t *testing.T, resp *ChatResponse, toolName string) {
+	t.Helper()
+
+	toolCalls, ok := resp.Response["toolCalls"].([]interface{})
+	if !ok {
+		toolCalls, ok = resp.Response["tool_calls"].([]interface{})
+	}
+
+	if !ok || len(toolCalls) == 0 {
+		t.Errorf("Expected tool call for '%s', but no tools were called", toolName)
+		return
+	}
+
+	for _, call := range toolCalls {
+		callMap := call.(map[string]interface{})
+		name := callMap["name"]
+		if name == nil {
+			name = callMap["function"]
+		}
+		if name == toolName {
+			if tc.Verbose {
+				t.Logf("✓ Tool called: %s", toolName)
+			}
+			return
+		}
+	}
+
+	t.Errorf("Expected tool '%s' to be called, but it wasn't", toolName)
+}
+
 // AssertResponseContains checks if response contains expected text
 func (tc *TestContext) AssertResponseContains(resp *ChatResponse, expected string) {
 	tc.T.Helper()
@@ -378,6 +409,22 @@ func (tc *TestContext) AssertResponseContains(resp *ChatResponse, expected strin
 		tc.T.Errorf("Expected response to contain '%s', but got: %s", expected, truncate(responseText, 100))
 	} else if tc.Verbose {
 		tc.T.Logf("✓ Response contains: '%s'", expected)
+	}
+}
+
+// AssertResponseContainsT checks if response contains expected text using a specific *testing.T.
+func (tc *TestContext) AssertResponseContainsT(t *testing.T, resp *ChatResponse, expected string) {
+	t.Helper()
+
+	responseText, ok := resp.Response["response"].(string)
+	if !ok {
+		t.Fatal("Response does not contain 'response' field")
+	}
+
+	if !strings.Contains(responseText, expected) {
+		t.Errorf("Expected response to contain '%s', but got: %s", expected, truncate(responseText, 100))
+	} else if tc.Verbose {
+		t.Logf("✓ Response contains: '%s'", expected)
 	}
 }
 

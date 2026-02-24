@@ -454,14 +454,6 @@ func ensureServerBuilt(t *testing.T) {
 	}
 }
 
-func resolveServerBinaryPath() string {
-	builtPath := resolveBuiltBinaryPath()
-	if _, err := os.Stat(builtPath); err == nil {
-		return builtPath
-	}
-	return serverBinary
-}
-
 func resolveProjectRoot() string {
 	_, file, _, ok := runtime.Caller(0)
 	if !ok {
