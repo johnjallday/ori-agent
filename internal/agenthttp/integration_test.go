@@ -158,6 +158,37 @@ func createTestAgent(t *testing.T, ts *TestServer, name, agentType string) map[s
 	return response
 }
 
+func TestCreateAgent_WithAllowWebSearchSetting(t *testing.T) {
+	ts := setupTestServer(t)
+	defer ts.cleanup()
+
+	reqBody := map[string]interface{}{
+		"name":             "restricted-web-agent",
+		"type":             "tool-calling",
+		"model":            "gpt-4o-mini",
+		"allow_web_search": false,
+	}
+
+	rr := ts.doRequest(t, http.MethodPost, "/api/agents", reqBody)
+	assertStatus(t, rr, http.StatusOK)
+
+	rr = ts.doRequest(t, http.MethodGet, "/api/agents?name=restricted-web-agent", nil)
+	assertStatus(t, rr, http.StatusOK)
+	var detail map[string]interface{}
+	decodeResponse(t, rr, &detail)
+	if got, ok := detail["allow_web_search"].(bool); !ok || got {
+		t.Fatalf("expected allow_web_search=false in agent detail response, got %#v", detail["allow_web_search"])
+	}
+
+	rr = ts.doRequest(t, http.MethodGet, "/api/agents/restricted-web-agent/detail", nil)
+	assertStatus(t, rr, http.StatusOK)
+	var dashboardDetail map[string]interface{}
+	decodeResponse(t, rr, &dashboardDetail)
+	if got, ok := dashboardDetail["allow_web_search"].(bool); !ok || got {
+		t.Fatalf("expected allow_web_search=false in dashboard detail response, got %#v", dashboardDetail["allow_web_search"])
+	}
+}
+
 // Test 7.1: Complete agent lifecycle (create → list → detail → update → delete)
 func TestCompleteAgentLifecycle(t *testing.T) {
 	ts := setupTestServer(t)
@@ -751,5 +782,34 @@ func TestEvolutionAndFeedEndpoints(t *testing.T) {
 		if first["requires_approval"] != true {
 			t.Fatalf("expected requires_approval=true, got %v", first["requires_approval"])
 		}
+	})
+}
+
+func TestReservedSystemAssistantProtection(t *testing.T) {
+	ts := setupTestServer(t)
+	defer ts.cleanup()
+
+	if err := ensureSystemAssistantAgent(ts.store); err != nil {
+		t.Fatalf("failed to ensure system assistant: %v", err)
+	}
+
+	t.Run("DeleteReservedAssistantBlocked", func(t *testing.T) {
+		rr := ts.doRequest(t, http.MethodDelete, "/api/agents?name="+systemAssistantAgentName, nil)
+		assertStatus(t, rr, http.StatusBadRequest)
+	})
+
+	t.Run("RenameReservedAssistantBlocked", func(t *testing.T) {
+		rr := ts.doRequest(t, http.MethodPatch, "/api/agents?name="+systemAssistantAgentName, map[string]interface{}{
+			"name": "Assistant Renamed",
+		})
+		assertStatus(t, rr, http.StatusBadRequest)
+	})
+
+	t.Run("RenameIntoReservedAssistantBlocked", func(t *testing.T) {
+		createTestAgent(t, ts, "rename-source-agent", "general")
+		rr := ts.doRequest(t, http.MethodPatch, "/api/agents?name=rename-source-agent", map[string]interface{}{
+			"name": systemAssistantAgentName,
+		})
+		assertStatus(t, rr, http.StatusBadRequest)
 	})
 }

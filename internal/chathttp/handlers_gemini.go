@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"net/http"
-	"strings"
 	"time"
 
 	"github.com/openai/openai-go/v3"
@@ -36,8 +35,8 @@ func (h *Handler) handleGeminiChat(w http.ResponseWriter, r *http.Request, ag *a
 
 	// Build message list
 	var messages []llm.Message
-	systemPrompt := resolveSystemPromptForAgent(
-		ag,
+	systemPrompt := h.buildSystemPromptWithSkills(
+		ag, agentName,
 		"You are a helpful assistant with access to tools. When you use a tool and receive results, report those results directly to the user. Be concise and accurate.",
 	)
 	messages = append(messages, llm.NewSystemMessage(systemPrompt))
@@ -66,7 +65,7 @@ func (h *Handler) handleGeminiChat(w http.ResponseWriter, r *http.Request, ag *a
 	h.trackUsageCommon("gemini", ag.Settings.Model, agentName, resp.Usage, ag, userMessage)
 
 	if len(resp.ToolCalls) > 0 {
-		h.handleGeminiToolCalls(w, ctx, ag, agentName, messages, resp, tools, files, provider, baseCtx, sessionID, plannerDecision)
+		h.handleGeminiToolCalls(w, ctx, ag, agentName, messages, resp, tools, files, provider, baseCtx, sessionID, userMessage, plannerDecision)
 		return
 	}
 
@@ -75,7 +74,11 @@ func (h *Handler) handleGeminiChat(w http.ResponseWriter, r *http.Request, ag *a
 	_ = h.store.SetAgent(agentName, ag)
 
 	h.storeMessageInSession(baseCtx, sessionID, "assistant", text)
-	writeJSONResponse(w, attachPlannerDecision(map[string]any{"response": text}, plannerDecision))
+	writeJSONResponse(w, attachPlannerDecision(attachRouteMetadata(map[string]any{
+		"response": text,
+	}, chatRouteMetadata{
+		Mode: routeModeAssistantChat,
+	}), plannerDecision))
 }
 
 // handleGeminiToolCalls handles tool execution for Gemini.
@@ -91,54 +94,68 @@ func (h *Handler) handleGeminiToolCalls(
 	provider llm.Provider,
 	baseCtx context.Context,
 	sessionID string,
+	userMessage string,
 	plannerDecision *types.PlannerDecision,
 ) {
 	logger.Info("Gemini requested tool calls", logger.Fields{"count": len(resp.ToolCalls)})
 
-	assistantMsg := llm.NewAssistantMessage(resp.Content)
-	assistantMsg.ToolCalls = resp.ToolCalls
-	messages = append(messages, assistantMsg)
-	ag.Messages = append(ag.Messages, openai.AssistantMessage(resp.Content))
+	loopResult := h.runBoundedToolLoop(
+		resp.Content,
+		resp.ToolCalls,
+		boundedToolLoopConfig{},
+		boundedToolLoopCallbacks{
+			AppendAssistantTurn: func(content string, toolCalls []llm.ToolCall) {
+				assistantMsg := llm.NewAssistantMessage(content)
+				assistantMsg.ToolCalls = toolCalls
+				messages = append(messages, assistantMsg)
+				ag.Messages = append(ag.Messages, openai.AssistantMessage(content))
+			},
+			ExecuteToolCalls: func(toolCalls []llm.ToolCall) ExecuteToolCallsResult {
+				return h.executeToolCallsCommonWithSession(baseCtx, ag, agentName, toolCalls, files, sessionID)
+			},
+			AppendToolResults: func(toolCalls []llm.ToolCall, execResult ExecuteToolCallsResult) {
+				for i, tc := range toolCalls {
+					if i >= len(execResult.Results) {
+						break
+					}
+					messages = append(messages, llm.NewToolMessage(tc.ID, execResult.Results[i].Result))
+					ag.Messages = append(ag.Messages, openai.ToolMessage(execResult.Results[i].Result, tc.ID))
+				}
+			},
+			RequestNextResponse: func() (string, []llm.ToolCall, error) {
+				finalResp, err := provider.Chat(ctx, llm.ChatRequest{
+					Model:       ag.Settings.Model,
+					Messages:    messages,
+					Tools:       tools,
+					Temperature: ag.Settings.Temperature,
+					MaxTokens:   4000,
+				})
+				if err != nil {
+					return "", nil, err
+				}
+				if finalResp == nil {
+					return "", nil, fmt.Errorf("gemini follow-up returned no response")
+				}
+				h.trackUsageCommon("gemini", ag.Settings.Model, agentName, finalResp.Usage, ag, userMessage)
+				return finalResp.Content, finalResp.ToolCalls, nil
+			},
+		},
+	)
 
-	execResult := h.executeToolCallsCommonWithSession(baseCtx, ag, agentName, resp.ToolCalls, files, sessionID)
-
-	for i, tc := range resp.ToolCalls {
-		messages = append(messages, llm.NewToolMessage(tc.ID, execResult.Results[i].Result))
-		ag.Messages = append(ag.Messages, openai.ToolMessage(execResult.Results[i].Result, tc.ID))
+	finalText := getResponseText(loopResult.FinalContent)
+	if loopResult.HasStructuredResult {
+		finalText = loopResult.FinalContent
 	}
-
-	finalResp, err := provider.Chat(ctx, llm.ChatRequest{
-		Model:       ag.Settings.Model,
-		Messages:    messages,
-		Tools:       tools,
-		Temperature: ag.Settings.Temperature,
-		MaxTokens:   4000,
-	})
-	if err != nil {
-		logger.Error("Error getting final response from Gemini", logger.Fields{"error": err})
-		writeErrorResponse(w, err.Error())
-		return
-	}
-
-	finalText := strings.TrimSpace(finalResp.Content)
-	if finalText == "" && len(execResult.Results) > 0 {
-		var b strings.Builder
-		for i, tr := range execResult.Results {
-			if i > 0 {
-				b.WriteString("\n\n")
-			}
-			b.WriteString(fmt.Sprintf("**%s**\n\n%s", tr.Function, tr.Result))
-		}
-		finalText = b.String()
-	}
-
 	ag.Messages = append(ag.Messages, openai.AssistantMessage(finalText))
 	_ = h.store.SetAgent(agentName, ag)
 
 	h.storeMessageInSession(baseCtx, sessionID, "assistant", finalText)
 
-	orihttp.WriteJSON(w, attachPlannerDecision(map[string]any{
+	orihttp.WriteJSON(w, attachPlannerDecision(attachActionReceipts(attachRouteMetadata(map[string]any{
 		"response":  finalText,
-		"toolCalls": execResult.Results,
-	}, plannerDecision))
+		"toolCalls": loopResult.ToolCalls,
+	}, chatRouteMetadata{
+		Mode:      routeModeAssistantChat,
+		ToolCount: len(loopResult.ToolCalls),
+	}), loopResult.Receipts), plannerDecision))
 }

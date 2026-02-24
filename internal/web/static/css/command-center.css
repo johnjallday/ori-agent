@@ -53,7 +53,6 @@
 }
 
 .command-input:focus {
-  outline: none;
   border-color: var(--primary-color);
   box-shadow: 0 0 0 3px rgba(79, 70, 229, 0.15);
 }
@@ -78,8 +77,8 @@
 }
 
 .agent-select:focus {
-  outline: none;
   border-color: var(--primary-color);
+  box-shadow: 0 0 0 3px rgba(79, 70, 229, 0.12);
 }
 
 .command-dispatch-btn {
@@ -190,7 +189,7 @@
   border-radius: var(--radius-sm);
   color: var(--text-secondary);
   cursor: pointer;
-  transition: all 0.2s;
+  transition: background-color 0.2s, color 0.2s, border-color 0.2s;
 }
 
 .panel-action-btn:hover {
@@ -219,8 +218,18 @@
   border-radius: 100px;
   color: var(--text-secondary);
   cursor: pointer;
-  transition: all 0.2s;
+  transition: background-color 0.2s, color 0.2s, border-color 0.2s;
   white-space: nowrap;
+}
+
+.command-dispatch-btn:focus-visible,
+.panel-action-btn:focus-visible,
+.filter-btn:focus-visible,
+.chat-toggle-btn:focus-visible,
+.chat-minimize-btn:focus-visible,
+.chat-send-btn:focus-visible {
+  outline: 2px solid var(--primary-color);
+  outline-offset: 2px;
 }
 
 .filter-btn:hover {
@@ -631,8 +640,8 @@
 }
 
 .chat-input:focus {
-  outline: none;
   border-color: var(--primary-color);
+  box-shadow: 0 0 0 3px rgba(79, 70, 229, 0.15);
 }
 
 .chat-send-btn {

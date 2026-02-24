@@ -8,7 +8,9 @@
         <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
       </div>
       <div class="modal-body">
+        <label for="folderNameInput" style="font-size: 12px; color: var(--text-secondary);">Workspace name</label>
         <input type="text" id="folderNameInput" class="modern-input w-100 mb-2" placeholder="Workspace name">
+        <label for="folderDescriptionInput" style="font-size: 12px; color: var(--text-secondary);">Description <span style="opacity: 0.8;">(optional)</span></label>
         <textarea id="folderDescriptionInput" class="modern-input w-100 mb-2" placeholder="Description (optional)" rows="2" style="resize: vertical;"></textarea>
 
         <label for="folderParentSelect" style="font-size: 12px; color: var(--text-secondary);">Group (optional)</label>
@@ -22,13 +24,13 @@
         <div class="folder-color-picker">
           <label style="font-size: 12px; color: var(--text-secondary);">Color:</label>
           <div id="folderColorOptions" class="folder-color-options mt-1">
-            <button class="folder-color-btn active" data-color="" title="Default"></button>
-            <button class="folder-color-btn" data-color="#ef4444" title="Red" style="background: #ef4444;"></button>
-            <button class="folder-color-btn" data-color="#f59e0b" title="Orange" style="background: #f59e0b;"></button>
-            <button class="folder-color-btn" data-color="#22c55e" title="Green" style="background: #22c55e;"></button>
-            <button class="folder-color-btn" data-color="#3b82f6" title="Blue" style="background: #3b82f6;"></button>
-            <button class="folder-color-btn" data-color="#8b5cf6" title="Purple" style="background: #8b5cf6;"></button>
-            <button class="folder-color-btn" data-color="#ec4899" title="Pink" style="background: #ec4899;"></button>
+            <button type="button" class="folder-color-btn active" data-color="" title="Default" aria-label="Default color"></button>
+            <button type="button" class="folder-color-btn" data-color="#ef4444" title="Red" aria-label="Red color" style="background: #ef4444;"></button>
+            <button type="button" class="folder-color-btn" data-color="#f59e0b" title="Orange" aria-label="Orange color" style="background: #f59e0b;"></button>
+            <button type="button" class="folder-color-btn" data-color="#22c55e" title="Green" aria-label="Green color" style="background: #22c55e;"></button>
+            <button type="button" class="folder-color-btn" data-color="#3b82f6" title="Blue" aria-label="Blue color" style="background: #3b82f6;"></button>
+            <button type="button" class="folder-color-btn" data-color="#8b5cf6" title="Purple" aria-label="Purple color" style="background: #8b5cf6;"></button>
+            <button type="button" class="folder-color-btn" data-color="#ec4899" title="Pink" aria-label="Pink color" style="background: #ec4899;"></button>
           </div>
         </div>
       </div>

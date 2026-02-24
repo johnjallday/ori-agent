@@ -15,6 +15,16 @@ type Settings struct {
 	SystemPrompt    string  `json:"system_prompt,omitempty"`     // Custom system prompt for the agent
 	Provider        string  `json:"provider,omitempty"`          // LLM provider backing the model (e.g., openai, anthropic)
 	MaxOutputTokens int     `json:"max_output_tokens,omitempty"` // Optional max tokens for responses
+	AllowWebSearch  *bool   `json:"allow_web_search,omitempty"`  // Nil defaults to true for backward compatibility
+}
+
+// IsWebSearchAllowed returns whether this agent can use native web tools.
+// Nil means legacy/default behavior (allowed).
+func (s Settings) IsWebSearchAllowed() bool {
+	if s.AllowWebSearch == nil {
+		return true
+	}
+	return *s.AllowWebSearch
 }
 
 // OnboardingState tracks user's onboarding progress

@@ -23,6 +23,7 @@ const sessionManager = {
   sessionTaskCounts: new Map(), // Cache of task counts per session: sessionId -> {total, pending, completed}
   editAgentOriginalName: '',
   editAgentSelectedTags: [],
+  editAgentMCPServers: [],
   editAgentModalInitialized: false,
   editAgentModelOptionsLoaded: false,
 
@@ -1259,8 +1260,9 @@ const sessionManager = {
       const workspaceSelect = document.getElementById('chatWorkspaceSelect');
       const preSelectedWorkspace = workspaceSelect?.value || '';
 
-      // Use first agent as default
-      const defaultAgent = agents[0].name;
+      // Use pre-selected agent from dropdown (set when clicking Chat on an agent card), or first agent as fallback
+      const agentSelect = document.getElementById('chatAgentSelect');
+      const defaultAgent = agentSelect?.value || agents[0].name;
 
       let session;
       if (preSelectedWorkspace) {
@@ -1847,6 +1849,9 @@ const sessionManager = {
     if (agentNameEl && agentName) {
       agentNameEl.textContent = agentName;
     }
+    if (typeof window.refreshChatWebSearchToggle === 'function') {
+      window.refreshChatWebSearchToggle(agentName || '');
+    }
 
     if (editAgentBtn) {
       if (agentName) {
@@ -2040,7 +2045,9 @@ const sessionManager = {
     this.initEditAgentModal();
     this.editAgentOriginalName = agentName;
     this.editAgentSelectedTags = [];
+    this.editAgentMCPServers = [];
     this.clearEditAgentMessages();
+    this.renderEditAgentMCPServers([], { loading: true });
     this.setEditAgentLoading(true, 'Loading agent...');
     this.setEditAgentFormEnabled(false);
 
@@ -2049,7 +2056,10 @@ const sessionManager = {
 
     try {
       await this.ensureEditAgentModelOptions();
-      await this.loadEditAgentDetails(agentName);
+      await Promise.all([
+        this.loadEditAgentDetails(agentName),
+        this.loadEditAgentMCPServers(agentName)
+      ]);
     } catch (error) {
       console.error('Failed to load agent details:', error);
       this.showEditAgentError(error.message || 'Failed to load agent details');
@@ -2111,6 +2121,138 @@ const sessionManager = {
 
     this.editAgentSelectedTags = agent.metadata?.tags || [];
     this.renderEditAgentTags();
+
+    const fallbackMCPServers = this.normalizeEditAgentMCPServers(agent.mcp_servers || [], true);
+    if (fallbackMCPServers.length > 0) {
+      this.editAgentMCPServers = fallbackMCPServers;
+      this.renderEditAgentMCPServers(fallbackMCPServers);
+    }
+  },
+
+  async loadEditAgentMCPServers(agentName) {
+    try {
+      const response = await fetch(`/api/agents/${encodeURIComponent(agentName)}/mcp-servers`);
+      if (!response.ok) {
+        throw new Error('Failed to load MCP servers');
+      }
+
+      const data = await response.json();
+      const enabledServers = this.normalizeEditAgentMCPServers(data?.servers || [], true);
+
+      // Agent changed while request was inflight.
+      if (this.editAgentOriginalName !== agentName) {
+        return [];
+      }
+
+      this.editAgentMCPServers = enabledServers;
+      this.renderEditAgentMCPServers(enabledServers);
+      return enabledServers;
+    } catch (error) {
+      console.error('Failed to load MCP servers for edit modal:', error);
+      if (this.editAgentOriginalName === agentName) {
+        this.editAgentMCPServers = [];
+        this.renderEditAgentMCPServers([], { error: true });
+      }
+      return [];
+    }
+  },
+
+  normalizeEditAgentMCPServers(servers, enabledOnly = false) {
+    if (!Array.isArray(servers)) return [];
+
+    const seen = new Set();
+    const normalized = [];
+
+    servers.forEach((server) => {
+      let record = null;
+
+      if (typeof server === 'string') {
+        const name = server.trim();
+        if (name) {
+          record = {
+            name,
+            status: 'configured',
+            tool_count: 0,
+            enabled: true
+          };
+        }
+      } else if (server && typeof server === 'object') {
+        const name = typeof server.name === 'string' ? server.name.trim() : '';
+        if (name) {
+          const enabled = server.enabled !== false;
+          const statusRaw = typeof server.status === 'string' ? server.status.trim().toLowerCase() : '';
+          const toolCount = Number.isFinite(server.tool_count)
+            ? server.tool_count
+            : (Number.isFinite(server.toolCount) ? server.toolCount : 0);
+
+          record = {
+            name,
+            status: statusRaw || (enabled ? 'configured' : 'stopped'),
+            tool_count: toolCount,
+            enabled
+          };
+        }
+      }
+
+      if (!record) return;
+      if (enabledOnly && !record.enabled) return;
+
+      const key = record.name.toLowerCase();
+      if (seen.has(key)) return;
+      seen.add(key);
+      normalized.push(record);
+    });
+
+    return normalized;
+  },
+
+  getEditAgentMCPStatusClass(status) {
+    const normalized = String(status || '').toLowerCase();
+    if (normalized === 'running') return 'running';
+    if (normalized === 'starting' || normalized === 'warming') return 'starting';
+    if (normalized === 'error' || normalized === 'failed') return 'error';
+    if (normalized === 'stopped' || normalized === 'disabled') return 'stopped';
+    return 'configured';
+  },
+
+  renderEditAgentMCPServers(servers, options = {}) {
+    const container = document.getElementById('editAgentMCPList');
+    if (!container) return;
+
+    if (options.loading) {
+      container.innerHTML = '<span class="agent-edit-mcp-empty">Loading MCP servers...</span>';
+      return;
+    }
+
+    if (options.error) {
+      container.innerHTML = '<span class="agent-edit-mcp-error">Could not load MCP server status.</span>';
+      return;
+    }
+
+    const enabledServers = this.normalizeEditAgentMCPServers(servers, true);
+    if (enabledServers.length === 0) {
+      container.innerHTML = '<span class="agent-edit-mcp-empty">No MCP servers enabled for this agent.</span>';
+      return;
+    }
+
+    container.innerHTML = enabledServers.map((server) => {
+      const statusClass = this.getEditAgentMCPStatusClass(server.status);
+      const statusLabel = statusClass === 'configured' ? 'configured' : (server.status || 'configured');
+      const toolCount = Number.isFinite(server.tool_count) ? server.tool_count : 0;
+      const toolText = toolCount > 0
+        ? `${toolCount} tool${toolCount === 1 ? '' : 's'}`
+        : 'tool count unknown';
+
+      return `
+        <span class="agent-edit-mcp-pill">
+          <span class="agent-edit-mcp-name">${this.escapeHtml(server.name)}</span>
+          <span class="agent-edit-mcp-meta">
+            <span class="agent-edit-mcp-status ${statusClass}">${this.escapeHtml(statusLabel)}</span>
+            <span>${this.escapeHtml(toolText)}</span>
+          </span>
+        </span>
+      `;
+    }).join('');
   },
 
   async ensureEditAgentModelOptions() {
@@ -2426,12 +2568,14 @@ const sessionManager = {
   resetEditAgentModal() {
     this.editAgentOriginalName = '';
     this.editAgentSelectedTags = [];
+    this.editAgentMCPServers = [];
     const form = document.getElementById('editAgentForm');
     if (form) {
       form.reset();
     }
     this.updateEditAgentColorPreview('#4f46e5');
     this.renderEditAgentTags();
+    this.renderEditAgentMCPServers([]);
     this.clearEditAgentMessages();
     this.setEditAgentLoading(false);
     this.setEditAgentFormEnabled(true);

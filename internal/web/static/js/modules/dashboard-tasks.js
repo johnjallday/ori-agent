@@ -76,7 +76,14 @@ export class DashboardTasks {
     `;
 
     return `
-      <div class="task-item modern-card p-3 mb-2" data-task-id="${task.id}" style="position: relative; cursor: pointer; ${isCompleted && !hasAgent ? 'opacity: 0.7;' : ''}" onclick="workspaceDashboard.showTaskDetails('${task.id}')">
+      <div class="task-item modern-card p-3 mb-2"
+           data-task-id="${task.id}"
+           role="button"
+           tabindex="0"
+           aria-label="Open task details for ${this.escapeHtml(task.description || 'Untitled Task')}"
+           style="position: relative; cursor: pointer; ${isCompleted && !hasAgent ? 'opacity: 0.7;' : ''}"
+           onclick="workspaceDashboard.showTaskDetails('${task.id}')"
+           onkeydown="if ((event.key === 'Enter' || event.key === ' ') && !event.target.closest('button, a, input, select, textarea, label')) { event.preventDefault(); workspaceDashboard.showTaskDetails('${task.id}'); }">
         ${hasResult ? `
           <span class="position-absolute top-0 end-0 m-2" title="This task has a result that can be used in other tasks" style="cursor: help;">
             📊

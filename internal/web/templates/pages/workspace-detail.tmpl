@@ -52,6 +52,21 @@
             </div>
           </div>
 
+          <!-- Ask Ori Prompt Bar -->
+          <div id="homeAssistantCard" class="modern-card p-2 mb-3">
+            <form id="homeAssistantForm" class="d-flex align-items-center gap-2">
+              <div class="d-none d-md-flex align-items-center gap-2 px-2" style="color: var(--text-secondary); font-size: 0.82rem; white-space: nowrap;">
+                <span style="font-weight: 600; color: var(--text-primary);">Ask Ori</span>
+                <span style="opacity: 0.6;">Workspace</span>
+              </div>
+              <input id="homeAssistantInput" type="text" class="modern-input flex-grow-1" maxlength="800"
+                     placeholder="Message Ori about this workspace..."
+                     aria-label="Ask Ori prompt"
+                     style="min-height: 42px;">
+              <button id="homeAssistantSendBtn" type="submit" class="modern-btn modern-btn-primary home-assistant-send-btn">Send</button>
+            </form>
+          </div>
+
           <!-- Workspace Info Card -->
           <div class="modern-card p-4 mb-4">
             <div class="d-flex justify-content-between align-items-start">
@@ -324,6 +339,34 @@
   <!-- Include chat area for additional modals (scheduledTasksModal, etc.) -->
   {{template "chat-area.tmpl" .}}
 
+  <!-- Ask Ori Thinking Modal -->
+  <div class="modal fade" id="homeAssistantThinkingModal" tabindex="-1"
+       aria-labelledby="homeAssistantThinkingModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-lg modal-dialog-centered modal-dialog-scrollable">
+      <div class="modal-content home-thinking-modal-content">
+        <div class="modal-header home-thinking-modal-header">
+          <div>
+            <h5 id="homeAssistantThinkingModalLabel" class="modal-title">Ori is working</h5>
+            <div id="homeAssistantThinkingStatus" class="home-thinking-modal-status" role="status" aria-live="polite">
+              <span id="homeAssistantThinkingSpinner" class="spinner-border spinner-border-sm me-2" aria-hidden="true"></span>
+              <span>Analyzing your request...</span>
+            </div>
+          </div>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+        </div>
+        <div class="modal-body">
+          <div id="homeAssistantRoutingSummary" class="home-assistant-routing-summary d-none"></div>
+          <div id="homeAssistantConversation" class="home-assistant-conversation home-assistant-conversation-modal p-3">
+            <div class="home-assistant-thinking-placeholder">
+              Progress updates will appear here after you send a task.
+            </div>
+          </div>
+          <div id="homeAssistantActions" class="d-flex flex-wrap gap-2 mt-3 d-none"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <!-- Add File Modal (from workspace-hub) -->
   <div class="modal fade" id="hubAddFileModal" tabindex="-1" aria-labelledby="hubAddFileModalTitle" aria-hidden="true">
     <div class="modal-dialog modal-dialog-centered">
@@ -591,7 +634,7 @@
       border-radius: 6px;
       background: var(--bg-secondary);
       border: 1px solid transparent;
-      transition: all 0.15s ease;
+      transition: background-color 0.15s ease, border-color 0.15s ease;
       position: relative;
     }
 
@@ -602,6 +645,22 @@
 
     .workspace-detail-item-content {
       cursor: pointer;
+      border-radius: 4px;
+    }
+
+    .workspace-detail-item-content[role="button"]:focus-visible {
+      outline: 2px solid var(--primary-color);
+      outline-offset: 2px;
+    }
+
+    .workspace-detail-item:focus-within {
+      background: var(--bg-tertiary);
+      border-color: var(--border-color);
+    }
+
+    .workspace-detail-item[role="button"]:focus-visible {
+      outline: 2px solid var(--primary-color);
+      outline-offset: 2px;
     }
 
     .workspace-detail-item-delete {
@@ -625,6 +684,10 @@
     }
 
     .workspace-detail-item:hover .workspace-detail-item-delete {
+      opacity: 1;
+    }
+
+    .workspace-detail-item:focus-within .workspace-detail-item-delete {
       opacity: 1;
     }
 
@@ -1399,13 +1462,18 @@
       background: var(--bg-secondary);
       border: 1px solid var(--border-color);
       cursor: pointer;
-      transition: all 0.15s ease;
+      transition: background-color 0.15s ease, border-color 0.15s ease, transform 0.15s ease;
     }
 
     .workspace-detail-child-card:hover {
       background: var(--bg-tertiary);
       border-color: var(--primary-color);
       transform: translateY(-1px);
+    }
+
+    .workspace-detail-child-card[role="button"]:focus-visible {
+      outline: 2px solid var(--primary-color);
+      outline-offset: 2px;
     }
 
     .workspace-detail-child-card .child-name {
@@ -1546,6 +1614,7 @@
   <script src="/js/modules/location.js"></script>
   <script src="/js/modules/task-modal-controller.js"></script>
   <script src="/js/modules/sessions.js"></script>
+  <script src="/js/modules/dashboard.js"></script>
   <script src="/js/modules/toast.js"></script>
   <script src="/js/modules/voice-input.js"></script>
   <script src="/js/modules/form-validation.js"></script>

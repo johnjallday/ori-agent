@@ -169,6 +169,7 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 
 	// Home assistant task routing endpoint
 	homeAssistantRouteHandler := agenthttp.NewHomeAssistantRouteHandler(s.Storage.AgentStore)
+	homeAssistantRouteHandler.SetSystemModelReader(s.Core.ConfigManager)
 	mux.HandleFunc("/api/home-assistant/route", homeAssistantRouteHandler.RouteHandler)
 
 	// =============================================================================
@@ -227,6 +228,7 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 	mux.HandleFunc("/api/settings/system-paths", s.Handlers.Settings.SystemPathsHandler)
 	mux.HandleFunc("/api/settings/external-agents", s.Handlers.Settings.ExternalAgentsSettingsHandler)
 	mux.HandleFunc("/api/settings/speech", s.Handlers.Settings.SpeechSettingsHandler)
+	mux.HandleFunc("/api/settings/utility", s.Handlers.Settings.UtilitySettingsHandler)
 	mux.HandleFunc("/api/transcribe", s.Handlers.Speech.Transcribe)
 
 	// Web3 Wallet endpoints
@@ -346,6 +348,7 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 	mux.HandleFunc("/api/usage/stats/month", s.Handlers.Usage.GetThisMonthStats)
 	mux.HandleFunc("/api/usage/stats/range", s.Handlers.Usage.GetCustomRangeStats)
 	mux.HandleFunc("/api/usage/summary", s.Handlers.Usage.GetSummary)
+	mux.HandleFunc("/api/usage/utility", s.Handlers.Usage.GetUtilityMetrics)
 	mux.HandleFunc("/api/usage/pricing", s.Handlers.Usage.GetPricingModels)
 
 	// =============================================================================
@@ -434,6 +437,19 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 	})
 	mux.HandleFunc("/api/mcp/import", s.Handlers.MCP.ImportServersHandler)
 	mux.HandleFunc("/api/mcp/marketplace", s.Handlers.MCP.GetMarketplaceServersHandler)
+	mux.HandleFunc("/api/mcp/search", s.Handlers.MCP.SearchServersHandler)
+	mux.HandleFunc("/api/mcp/registry-sources", func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodGet:
+			s.Handlers.MCP.ListRegistrySourcesHandler(w, r)
+		case http.MethodPost:
+			s.Handlers.MCP.AddRegistrySourceHandler(w, r)
+		default:
+			orihttp.MethodNotAllowed(w)
+		}
+	})
+	mux.HandleFunc("/api/mcp/registry-sources/", s.Handlers.MCP.RegistrySourcesItemHandler)
+	mux.HandleFunc("/api/mcp/registry/refresh", s.Handlers.MCP.RefreshRegistryHandler)
 
 	// =============================================================================
 	// Orchestration Endpoints

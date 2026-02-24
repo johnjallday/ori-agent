@@ -188,6 +188,7 @@ async function createNewAgent() {
   const agentSystemPromptInput = document.getElementById('agentSystemPrompt');
   const agentModelInput = document.getElementById('agentModel');
   const agentTemperatureInput = document.getElementById('agentTemperature');
+  const agentAllowWebSearchInput = document.getElementById('agentAllowWebSearch');
   const createBtn = document.getElementById('createAgentBtn');
 
   if (!agentNameInput) return;
@@ -208,6 +209,7 @@ async function createNewAgent() {
 
   try {
     const requestBody = { name: agentName };
+    requestBody.allow_web_search = agentAllowWebSearchInput ? Boolean(agentAllowWebSearchInput.checked) : true;
 
     // Add agent type if provided
     if (agentTypeInput && agentTypeInput.value) {
@@ -251,6 +253,9 @@ async function createNewAgent() {
     }
     if (agentTemperatureInput) {
       agentTemperatureInput.value = '1.0';
+    }
+    if (agentAllowWebSearchInput) {
+      agentAllowWebSearchInput.checked = true;
     }
 
     // Show success message

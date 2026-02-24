@@ -374,6 +374,8 @@ async function createAgent() {
   const temperature = parseFloat(document.getElementById('temperature').value);
   const systemPrompt = document.getElementById('systemPrompt').value.trim();
   const avatarColor = document.getElementById('avatarColor').value;
+  const allowWebSearchInput = document.getElementById('allowWebSearch');
+  const allowWebSearch = allowWebSearchInput ? Boolean(allowWebSearchInput.checked) : true;
 
   // Get selected plugins
   const pluginCheckboxes = document.querySelectorAll('#pluginsList .plugin-checkbox:checked');
@@ -387,7 +389,8 @@ async function createAgent() {
     type: type,
     role: role,
     model: model,
-    temperature: temperature
+    temperature: temperature,
+    allow_web_search: allowWebSearch
   };
 
   // Add provider if we could determine it

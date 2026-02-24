@@ -340,3 +340,35 @@ func TestFileStore_CreateAgent_InitializesSkillsStateWithDisabledDefault(t *test
 		t.Fatalf("expected wildcard default trusted to start false")
 	}
 }
+
+func TestFileStore_CreateAgent_AppliesAllowWebSearchOverride(t *testing.T) {
+	tempDir := t.TempDir()
+	indexPath := filepath.Join(tempDir, "agents_index.json")
+
+	fs, err := NewFileStore(indexPath, types.Settings{
+		Model:       "gpt-4o-mini",
+		Temperature: 1.0,
+	})
+	if err != nil {
+		t.Fatalf("NewFileStore() failed: %v", err)
+	}
+
+	allowWebSearch := false
+	if err := fs.CreateAgent("restricted-agent", &CreateAgentConfig{
+		Type:           agent.TypeGeneral,
+		AllowWebSearch: &allowWebSearch,
+	}); err != nil {
+		t.Fatalf("CreateAgent() failed: %v", err)
+	}
+
+	created, ok := fs.GetAgent("restricted-agent")
+	if !ok || created == nil {
+		t.Fatalf("expected created agent to exist")
+	}
+	if created.Settings.AllowWebSearch == nil {
+		t.Fatalf("expected allow_web_search to be persisted on agent settings")
+	}
+	if created.Settings.IsWebSearchAllowed() {
+		t.Fatalf("expected web search to be disabled")
+	}
+}

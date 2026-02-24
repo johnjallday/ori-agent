@@ -15,12 +15,55 @@
 
     <!-- Main Content -->
     <main class="main-content" role="main" aria-label="Workspace hub">
+      <div class="container-fluid py-3 pb-0">
+        <div id="homeAssistantCard" class="modern-card p-2 mb-3">
+          <form id="homeAssistantForm" class="d-flex align-items-center gap-2">
+            <div class="d-none d-md-flex align-items-center gap-2 px-2" style="color: var(--text-secondary); font-size: 0.82rem; white-space: nowrap;">
+              <span style="font-weight: 600; color: var(--text-primary);">Ask Ori</span>
+              <span style="opacity: 0.6;">Workspaces</span>
+            </div>
+            <input id="homeAssistantInput" type="text" class="modern-input flex-grow-1" maxlength="800"
+                   placeholder="Message Ori about your workspaces..."
+                   aria-label="Ask Ori prompt"
+                   style="min-height: 42px;">
+            <button id="homeAssistantSendBtn" type="submit" class="modern-btn modern-btn-primary home-assistant-send-btn">Send</button>
+          </form>
+        </div>
+      </div>
       {{template "workspace-hub.tmpl" .}}
     </main>
   </div>
 
   {{template "session-modals.tmpl" .}}
   {{template "chat-area.tmpl" .}}
+
+  <!-- Ask Ori Thinking Modal -->
+  <div class="modal fade" id="homeAssistantThinkingModal" tabindex="-1"
+       aria-labelledby="homeAssistantThinkingModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-lg modal-dialog-centered modal-dialog-scrollable">
+      <div class="modal-content home-thinking-modal-content">
+        <div class="modal-header home-thinking-modal-header">
+          <div>
+            <h5 id="homeAssistantThinkingModalLabel" class="modal-title">Ori is working</h5>
+            <div id="homeAssistantThinkingStatus" class="home-thinking-modal-status" role="status" aria-live="polite">
+              <span id="homeAssistantThinkingSpinner" class="spinner-border spinner-border-sm me-2" aria-hidden="true"></span>
+              <span>Analyzing your request...</span>
+            </div>
+          </div>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+        </div>
+        <div class="modal-body">
+          <div id="homeAssistantRoutingSummary" class="home-assistant-routing-summary d-none"></div>
+          <div id="homeAssistantConversation" class="home-assistant-conversation home-assistant-conversation-modal p-3">
+            <div class="home-assistant-thinking-placeholder">
+              Progress updates will appear here after you send a task.
+            </div>
+          </div>
+          <div id="homeAssistantActions" class="d-flex flex-wrap gap-2 mt-3 d-none"></div>
+        </div>
+      </div>
+    </div>
+  </div>
 
   <!-- Add Agent Modal -->
   <div class="modal fade" id="addAgentModal" tabindex="-1" aria-labelledby="addAgentModalLabel" aria-hidden="true">
@@ -123,6 +166,11 @@
                         data-char-counter="true"></textarea>
               <small class="form-helper">Define the agent's behavior, personality, and instructions. Max 4000 characters.</small>
             </div>
+            <div class="mb-3 form-check">
+              <input class="form-check-input" type="checkbox" id="agentAllowWebSearch" checked>
+              <label class="form-check-label" for="agentAllowWebSearch" style="color: var(--text-primary);">Allow Web Tools</label>
+              <div class="form-helper mt-1">If enabled, this agent can use <code>web_search</code>, <code>web_fetch</code>, and <code>browser</code>.</div>
+            </div>
           </form>
         </div>
         <div class="modal-footer" style="border-top: 1px solid var(--border-color);">
@@ -175,6 +223,7 @@
   <script src="/js/modules/location.js"></script>
   <script src="/js/modules/task-modal-controller.js"></script>
   <script src="/js/modules/sessions.js"></script>
+  <script src="/js/modules/dashboard.js"></script>
   <script src="/js/modules/toast.js"></script>
   <script src="/js/modules/voice-input.js"></script>
   <script src="/js/modules/form-validation.js"></script>

@@ -31,6 +31,195 @@ type ExecuteToolCallsResult struct {
 	CombinedResult      string
 	HasStructuredResult bool
 	StructuredData      *pluginapi.StructuredResult
+	Receipts            []ActionReceipt
+}
+
+const (
+	defaultToolLoopMaxTurns          = 4
+	defaultToolLoopMaxRepeatedFinger = 2
+)
+
+type boundedToolLoopConfig struct {
+	MaxTurns                int
+	MaxRepeatedFingerprints int
+}
+
+type boundedToolLoopCallbacks struct {
+	AppendAssistantTurn func(content string, toolCalls []llm.ToolCall)
+	ExecuteToolCalls    func(toolCalls []llm.ToolCall) ExecuteToolCallsResult
+	AppendToolResults   func(toolCalls []llm.ToolCall, execResult ExecuteToolCallsResult)
+	RequestNextResponse func() (content string, toolCalls []llm.ToolCall, err error)
+}
+
+type boundedToolLoopResult struct {
+	FinalContent        string
+	ToolCalls           []ToolCallResult
+	Receipts            []ActionReceipt
+	HasStructuredResult bool
+	StructuredData      *pluginapi.StructuredResult
+	UsedToolFallback    bool
+	StopReason          string
+	Err                 error
+}
+
+func (h *Handler) runBoundedToolLoop(
+	initialContent string,
+	initialToolCalls []llm.ToolCall,
+	cfg boundedToolLoopConfig,
+	callbacks boundedToolLoopCallbacks,
+) boundedToolLoopResult {
+	maxTurns := cfg.MaxTurns
+	if maxTurns <= 0 {
+		maxTurns = defaultToolLoopMaxTurns
+	}
+	maxRepeatedFingerprints := cfg.MaxRepeatedFingerprints
+	if maxRepeatedFingerprints <= 0 {
+		maxRepeatedFingerprints = defaultToolLoopMaxRepeatedFinger
+	}
+
+	appendAssistant := callbacks.AppendAssistantTurn
+	if appendAssistant == nil {
+		appendAssistant = func(string, []llm.ToolCall) {}
+	}
+	appendToolResults := callbacks.AppendToolResults
+	if appendToolResults == nil {
+		appendToolResults = func([]llm.ToolCall, ExecuteToolCallsResult) {}
+	}
+
+	currentContent := initialContent
+	currentToolCalls := initialToolCalls
+	fingerprintCounts := make(map[string]int)
+	allToolCalls := make([]ToolCallResult, 0)
+	allReceipts := make([]ActionReceipt, 0)
+
+	for turn := 1; turn <= maxTurns; turn++ {
+		if len(currentToolCalls) == 0 {
+			return boundedToolLoopResult{
+				FinalContent: currentContent,
+				ToolCalls:    allToolCalls,
+				Receipts:     allReceipts,
+			}
+		}
+
+		if repeated, fingerprint, count := detectRepeatedToolFingerprint(currentToolCalls, fingerprintCounts, maxRepeatedFingerprints); repeated {
+			logger.Warn("Stopping tool loop due to repeated tool call fingerprint", logger.Fields{
+				"fingerprint": fingerprint,
+				"count":       count,
+				"max_allowed": maxRepeatedFingerprints,
+			})
+			return boundedToolLoopResult{
+				FinalContent:     fallbackToolLoopContent(allToolCalls, "tool loop repeated the same call"),
+				ToolCalls:        allToolCalls,
+				Receipts:         allReceipts,
+				UsedToolFallback: true,
+				StopReason:       "repeated_tool_call",
+			}
+		}
+
+		appendAssistant(currentContent, currentToolCalls)
+
+		execResult := callbacks.ExecuteToolCalls(currentToolCalls)
+		allToolCalls = append(allToolCalls, execResult.Results...)
+		allReceipts = append(allReceipts, execResult.Receipts...)
+		appendToolResults(currentToolCalls, execResult)
+
+		if execResult.HasStructuredResult {
+			return boundedToolLoopResult{
+				FinalContent:        execResult.CombinedResult,
+				ToolCalls:           allToolCalls,
+				Receipts:            allReceipts,
+				HasStructuredResult: true,
+				StructuredData:      execResult.StructuredData,
+			}
+		}
+
+		if turn == maxTurns {
+			logger.Warn("Stopping tool loop after max turns reached", logger.Fields{
+				"max_turns": maxTurns,
+			})
+			return boundedToolLoopResult{
+				FinalContent:     fallbackToolLoopContent(allToolCalls, "tool loop reached max turns"),
+				ToolCalls:        allToolCalls,
+				Receipts:         allReceipts,
+				UsedToolFallback: true,
+				StopReason:       "max_turns",
+			}
+		}
+
+		nextContent, nextToolCalls, err := callbacks.RequestNextResponse()
+		if err != nil {
+			fallback := fallbackToolLoopContent(allToolCalls, "follow-up model request failed")
+			return boundedToolLoopResult{
+				FinalContent:     fallback,
+				ToolCalls:        allToolCalls,
+				Receipts:         allReceipts,
+				UsedToolFallback: strings.TrimSpace(fallback) != "",
+				StopReason:       "followup_error",
+				Err:              err,
+			}
+		}
+
+		currentContent = nextContent
+		currentToolCalls = nextToolCalls
+	}
+
+	return boundedToolLoopResult{
+		FinalContent:     fallbackToolLoopContent(allToolCalls, "tool loop stopped unexpectedly"),
+		ToolCalls:        allToolCalls,
+		Receipts:         allReceipts,
+		UsedToolFallback: true,
+		StopReason:       "unexpected_stop",
+	}
+}
+
+func detectRepeatedToolFingerprint(toolCalls []llm.ToolCall, seen map[string]int, maxAllowed int) (bool, string, int) {
+	if maxAllowed <= 0 {
+		return false, "", 0
+	}
+	for _, tc := range toolCalls {
+		fingerprint := toolCallFingerprint(tc)
+		seen[fingerprint]++
+		if seen[fingerprint] > maxAllowed {
+			return true, fingerprint, seen[fingerprint]
+		}
+	}
+	return false, "", 0
+}
+
+func toolCallFingerprint(tc llm.ToolCall) string {
+	name := strings.ToLower(strings.TrimSpace(tc.Name))
+	args := canonicalizeToolArguments(tc.Arguments)
+	return name + "|" + args
+}
+
+func canonicalizeToolArguments(arguments string) string {
+	trimmed := strings.TrimSpace(arguments)
+	if trimmed == "" {
+		return ""
+	}
+
+	var parsed interface{}
+	if err := json.Unmarshal([]byte(trimmed), &parsed); err != nil {
+		return trimmed
+	}
+
+	normalized, err := json.Marshal(parsed)
+	if err != nil {
+		return trimmed
+	}
+	return string(normalized)
+}
+
+func fallbackToolLoopContent(results []ToolCallResult, fallbackMessage string) string {
+	combined, _, _ := processToolResultsCommon(results)
+	combined = strings.TrimSpace(combined)
+	if combined != "" {
+		return combined
+	}
+	if strings.TrimSpace(fallbackMessage) != "" {
+		return fallbackMessage
+	}
+	return emptyResponseText
 }
 
 // executeToolCallsCommonWithSession executes tool calls and stores them for the given session
@@ -43,12 +232,18 @@ func (h *Handler) executeToolCallsCommonWithSession(
 	sessionID string,
 ) ExecuteToolCallsResult {
 	var results []ToolCallResult
+	var receipts []ActionReceipt
 
 	for _, tc := range toolCalls {
 		name := tc.Name
 		args := tc.Arguments
 
 		logger.Debug("Executing tool", logger.Fields{"name": name})
+
+		trackUtilityTool := h.utilityTelemetry != nil && isNativeUtilityToolName(name)
+		if trackUtilityTool {
+			h.utilityTelemetry.RecordToolInvocation(name, "")
+		}
 
 		// Find tool by name (searches both plugins and MCP tools, with lazy loading)
 		tool, found := h.findTool(ag, agentName, name)
@@ -85,6 +280,14 @@ func (h *Handler) executeToolCallsCommonWithSession(
 			}
 		}
 
+		if trackUtilityTool {
+			errText := ""
+			if err != nil {
+				errText = err.Error()
+			}
+			h.utilityTelemetry.RecordToolResult(name, inferUtilityProvider(name, result), err == nil, duration, errText)
+		}
+
 		durationMs := int(duration.Milliseconds())
 
 		// Store tool call for review analysis
@@ -93,6 +296,18 @@ func (h *Handler) executeToolCallsCommonWithSession(
 			errorMsg = err.Error()
 		}
 		h.storeToolCall(baseCtx, sessionID, tc.ID, name, args, result, errorMsg, durationMs)
+
+		receipts = append(receipts, buildActionReceipt(
+			"tool_call",
+			"Executed tool call",
+			"model requested tool execution",
+			name,
+			args,
+			result,
+			duration.Milliseconds(),
+			err == nil,
+			errorMsg,
+		))
 
 		results = append(results, ToolCallResult{
 			Function:   name,
@@ -111,6 +326,7 @@ func (h *Handler) executeToolCallsCommonWithSession(
 		CombinedResult:      combined,
 		HasStructuredResult: hasStructured,
 		StructuredData:      structuredData,
+		Receipts:            receipts,
 	}
 }
 
@@ -167,9 +383,11 @@ func (h *Handler) trackUsageCommon(provider, model, agentName string, usage llm.
 
 // writeErrorResponse writes a standardized error response
 func writeErrorResponse(w http.ResponseWriter, message string) {
-	writeJSONResponse(w, map[string]any{
+	writeJSONResponse(w, attachRouteMetadata(map[string]any{
 		"response": fmt.Sprintf("❌ **Error**: %v", message),
-	})
+	}, chatRouteMetadata{
+		Mode: routeModeAssistantChat,
+	}))
 }
 
 // getFollowUpSystemPrompt returns the system prompt for follow-up requests after tool execution
@@ -212,6 +430,31 @@ func resolveSystemPromptForAgent(ag *agent.Agent, defaultPrompt string) string {
 	default:
 		return defaultPrompt
 	}
+}
+
+// buildSystemPromptWithSkills resolves the agent system prompt and appends
+// the prompt text of all enabled skills so the agent benefits from skill
+// knowledge during normal chat (not only via explicit /skill invocation).
+func (h *Handler) buildSystemPromptWithSkills(ag *agent.Agent, agentName, defaultPrompt string) string {
+	base := resolveSystemPromptForAgent(ag, defaultPrompt)
+	if h.skillsManager == nil || agentName == "" {
+		return base
+	}
+	enabledSkills, err := h.skillsManager.ListEnabledSkillsWithPrompts(agentName)
+	if err != nil || len(enabledSkills) == 0 {
+		return base
+	}
+	var sb strings.Builder
+	sb.WriteString(base)
+	sb.WriteString("\n\n---\n# Active Skills\n")
+	for _, s := range enabledSkills {
+		sb.WriteString("\n## ")
+		sb.WriteString(s.Name)
+		sb.WriteString("\n")
+		sb.WriteString(strings.TrimSpace(s.Prompt))
+		sb.WriteString("\n")
+	}
+	return sb.String()
 }
 
 func prioritizeToolsForPath(ag *agent.Agent, tools []llm.Tool) []llm.Tool {

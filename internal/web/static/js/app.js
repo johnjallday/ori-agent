@@ -12,6 +12,9 @@ let historyIndex = -1;
 
 // Chat messages storage
 let chatMessages = [];
+let chatWebSearchToggleRequestId = 0;
+const PLAN_BEFORE_ACTION_STORAGE_KEY = 'planBeforeAction';
+const pendingActionPlanContexts = new Map();
 
 // Remove stored slash-command exchanges and system announcements from history
 function sanitizeHistory(messages) {
@@ -105,7 +108,7 @@ function restoreChatMessages() {
 
   // Re-render all stored messages
   chatMessages.forEach(msg => {
-    appendMessageToUI(msg.content, msg.isUser);
+    appendMessageToUI(msg.content, msg.isUser, false, msg.routeMeta || null);
   });
 }
 
@@ -136,6 +139,156 @@ function clearChatHistory() {
     }
   }
 }
+
+function resolveChatWebSearchAgentName(explicitAgentName = '') {
+  const direct = String(explicitAgentName || '').trim();
+  if (direct) return direct;
+
+  const sessionAgent = window.sessionManager?.getActiveSession?.()?.agent_name;
+  if (sessionAgent) return String(sessionAgent).trim();
+
+  return String(currentAgent || '').trim();
+}
+
+function setChatWebSearchToggleVisualState({ enabled, loading, agentName, available }) {
+  const btn = document.getElementById('chatWebSearchToggleBtn');
+  const label = document.getElementById('chatWebSearchToggleLabel');
+  if (!btn || !label) return;
+
+  const hasAgent = Boolean(agentName && String(agentName).trim());
+  const isAvailable = available !== false;
+  const allow = enabled !== false;
+
+  btn.classList.remove('btn-outline-secondary', 'btn-outline-success', 'btn-outline-danger');
+  if (!isAvailable || !hasAgent) {
+    btn.classList.add('btn-outline-secondary');
+  } else if (allow) {
+    btn.classList.add('btn-outline-success');
+  } else {
+    btn.classList.add('btn-outline-danger');
+  }
+
+  if (!isAvailable || !hasAgent) {
+    label.textContent = 'Web: --';
+  } else if (loading) {
+    label.textContent = 'Web: ...';
+  } else {
+    label.textContent = allow ? 'Web: On' : 'Web: Off';
+  }
+
+  btn.dataset.agentName = hasAgent ? String(agentName).trim() : '';
+  if (isAvailable && hasAgent) {
+    btn.dataset.enabled = allow ? 'true' : 'false';
+  } else {
+    btn.dataset.enabled = '';
+  }
+  btn.disabled = loading || !isAvailable || !hasAgent;
+}
+
+async function refreshChatWebSearchToggle(explicitAgentName = '') {
+  const btn = document.getElementById('chatWebSearchToggleBtn');
+  if (!btn) return;
+
+  const agentName = resolveChatWebSearchAgentName(explicitAgentName);
+  if (!agentName) {
+    setChatWebSearchToggleVisualState({ enabled: true, loading: false, agentName: '', available: false });
+    return;
+  }
+
+  const requestId = ++chatWebSearchToggleRequestId;
+  setChatWebSearchToggleVisualState({ enabled: true, loading: true, agentName, available: true });
+
+  try {
+    const response = await fetch(`/api/agents?name=${encodeURIComponent(agentName)}`);
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}`);
+    }
+    const data = await response.json();
+    if (requestId !== chatWebSearchToggleRequestId) return;
+
+    const allowWebSearch = typeof data.allow_web_search === 'boolean' ? data.allow_web_search : true;
+    setChatWebSearchToggleVisualState({
+      enabled: allowWebSearch,
+      loading: false,
+      agentName,
+      available: true
+    });
+  } catch (error) {
+    appLog.warn('Failed to load chat web search toggle state', error);
+    if (requestId !== chatWebSearchToggleRequestId) return;
+    setChatWebSearchToggleVisualState({ enabled: true, loading: false, agentName, available: false });
+  }
+}
+
+async function toggleChatWebSearchForActiveAgent() {
+  const btn = document.getElementById('chatWebSearchToggleBtn');
+  if (!btn) return;
+
+  const agentName = resolveChatWebSearchAgentName(btn.dataset.agentName || '');
+  if (!agentName) {
+    if (window.Toast) {
+      Toast.warning('No active agent selected.');
+    }
+    return;
+  }
+
+  const currentEnabled = btn.dataset.enabled !== 'false';
+  const nextEnabled = !currentEnabled;
+  setChatWebSearchToggleVisualState({
+    enabled: currentEnabled,
+    loading: true,
+    agentName,
+    available: true
+  });
+
+  try {
+    const response = await fetch(`/api/agents?name=${encodeURIComponent(agentName)}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        allow_web_search: nextEnabled
+      })
+    });
+    if (!response.ok) {
+      let errorMessage = `Failed to update web toggle (HTTP ${response.status})`;
+      try {
+        const errorData = await response.json();
+        if (errorData?.error) errorMessage = errorData.error;
+      } catch {
+        // Ignore response parse errors.
+      }
+      throw new Error(errorMessage);
+    }
+
+    await refreshChatWebSearchToggle(agentName);
+
+    if (window.Toast) {
+      Toast.success(nextEnabled ? 'Web tools enabled.' : 'Web tools disabled.');
+    }
+  } catch (error) {
+    appLog.error('Failed to toggle chat web search', error);
+    if (window.Toast) {
+      Toast.error(error.message || 'Failed to update web tool setting');
+    }
+    await refreshChatWebSearchToggle(agentName);
+  }
+}
+
+function setupChatWebSearchToggle() {
+  const btn = document.getElementById('chatWebSearchToggleBtn');
+  if (!btn) return;
+  if (btn.dataset.bound === 'true') return;
+  btn.dataset.bound = 'true';
+
+  btn.addEventListener('click', async (event) => {
+    event.preventDefault();
+    await toggleChatWebSearchForActiveAgent();
+  });
+
+  refreshChatWebSearchToggle();
+}
+
+window.refreshChatWebSearchToggle = refreshChatWebSearchToggle;
 
 // ---- Agent Display Functionality ----
 
@@ -176,6 +329,8 @@ async function refreshAgentDisplay() {
         loadChatFromLocalStorage();
         EventBus.emit('agent:display:changed', { from: previousAgent, to: currentAgent });
       }
+
+      refreshChatWebSearchToggle(data.current);
     }
   } catch (error) {
     appLog.error('Failed to refresh agent display:', error);
@@ -615,7 +770,52 @@ function tryRenderJsonTable(message) {
 }
 
 // Internal function: Add message to UI only (used by restore function)
-function appendMessageToUI(message, isUser = false, isError = false) {
+function normalizeRouteMetadata(payload) {
+  if (!payload || typeof payload !== 'object') return null;
+
+  const route = payload.route && typeof payload.route === 'object' ? payload.route : {};
+  const mode = String(route.mode || payload.route_mode || '').trim().toLowerCase();
+  if (!mode) return null;
+
+  const toolName = String(route.tool_name || payload.tool_name || '').trim();
+  const provider = String(route.provider || payload.provider || '').trim();
+  const parsedToolCount = Number(route.tool_count || payload.tool_count || 0);
+  const toolCount = Number.isFinite(parsedToolCount) && parsedToolCount > 0
+    ? Math.floor(parsedToolCount)
+    : 0;
+
+  return {
+    mode,
+    toolName,
+    provider,
+    toolCount
+  };
+}
+
+function shouldRenderRouteBadge(routeMeta) {
+  if (!routeMeta || !routeMeta.mode) return false;
+  return routeMeta.mode === 'utility_direct' ||
+    routeMeta.mode === 'direct_tool' ||
+    routeMeta.mode === 'specialist_handoff';
+}
+
+function formatRouteBadgeText(routeMeta) {
+  if (!routeMeta) return '';
+  if (routeMeta.mode === 'utility_direct') {
+    const toolPart = routeMeta.toolName ? `Tool ${routeMeta.toolName}` : 'Utility direct';
+    const providerPart = routeMeta.provider ? ` · ${routeMeta.provider}` : '';
+    return `${toolPart}${providerPart}`;
+  }
+  if (routeMeta.mode === 'direct_tool') {
+    return routeMeta.toolName ? `Direct tool · ${routeMeta.toolName}` : 'Direct tool';
+  }
+  if (routeMeta.mode === 'specialist_handoff') {
+    return 'Delegated to specialist workflow';
+  }
+  return routeMeta.mode;
+}
+
+function appendMessageToUI(message, isUser = false, isError = false, routeMeta = null) {
   const chatArea = document.getElementById('chatArea');
   if (!chatArea) return;
 
@@ -637,21 +837,32 @@ function appendMessageToUI(message, isUser = false, isError = false) {
     messageContent.style.color = 'var(--text-primary)';
   }
 
+  const badgeMeta = shouldRenderRouteBadge(routeMeta) ? routeMeta : null;
+  if (badgeMeta) {
+    const badge = document.createElement('div');
+    badge.className = `chat-route-badge mode-${badgeMeta.mode.replace(/[^a-z0-9_-]/g, '-')}`;
+    badge.textContent = formatRouteBadgeText(badgeMeta);
+    messageContent.appendChild(badge);
+  }
+
+  const messageBody = document.createElement('div');
+
   // Process message content (support markdown and JSON tables)
   if (!isUser) {
     // Try to detect and render JSON tables
     const tableContent = tryRenderJsonTable(message);
     if (tableContent) {
-      messageContent.innerHTML = tableContent;
+      messageBody.innerHTML = tableContent;
     } else if (typeof marked !== 'undefined') {
-      messageContent.innerHTML = marked.parse(message);
+      messageBody.innerHTML = marked.parse(message);
     } else {
-      messageContent.textContent = message;
+      messageBody.textContent = message;
     }
   } else {
-    messageContent.textContent = message;
+    messageBody.textContent = message;
   }
 
+  messageContent.appendChild(messageBody);
   messageDiv.appendChild(messageContent);
   chatArea.appendChild(messageDiv);
 
@@ -665,9 +876,9 @@ function appendMessageToUI(message, isUser = false, isError = false) {
 }
 
 // Public function: Add message and optionally persist to localStorage
-function addMessageToChat(message, isUser = false, isError = false, isSystemNotification = false, skipHistory = false) {
+function addMessageToChat(message, isUser = false, isError = false, isSystemNotification = false, skipHistory = false, routeMeta = null) {
   // Add to UI
-  appendMessageToUI(message, isUser, isError);
+  appendMessageToUI(message, isUser, isError, routeMeta);
 
   // Skip storing system notifications or intentionally non-persisted messages (e.g., slash commands)
   // Only store actual user queries and assistant responses that should be remembered
@@ -679,7 +890,8 @@ function addMessageToChat(message, isUser = false, isError = false, isSystemNoti
   chatMessages.push({
     content: message,
     isUser: isUser,
-    timestamp: new Date().toISOString()
+    timestamp: new Date().toISOString(),
+    routeMeta: routeMeta || undefined
   });
 
   // Persist to localStorage
@@ -708,6 +920,270 @@ function formatToolCallsForChat(toolCalls) {
       ].join('\n');
     })
     .join('\n\n');
+}
+
+function formatActionReceiptsForChat(receipts) {
+  if (!Array.isArray(receipts) || receipts.length === 0) return '';
+
+  return receipts
+    .map((receipt, idx) => {
+      const action = receipt.action || `Action ${idx + 1}`;
+      const tool = receipt.tool_name ? `Tool: ${receipt.tool_name}` : '';
+      const reason = receipt.reason || '';
+      const status = receipt.success === false ? 'Failed' : 'Success';
+      const duration = typeof receipt.duration_ms === 'number' ? `Duration: ${receipt.duration_ms}ms` : '';
+      const targets = Array.isArray(receipt.targets) && receipt.targets.length > 0
+        ? `Targets: ${receipt.targets.join(', ')}`
+        : '';
+      const locations = Array.isArray(receipt.locations) && receipt.locations.length > 0
+        ? `Locations: ${receipt.locations.join(', ')}`
+        : '';
+      const preview = receipt.result_preview || '';
+
+      const summaryParts = [action, status];
+      if (tool) summaryParts.push(tool);
+
+      return [
+        '<details>',
+        `<summary>${escapeHtml(summaryParts.join(' • '))}</summary>`,
+        '<div style="margin-top:8px">',
+        reason ? `<div><strong>Why:</strong> ${escapeHtml(reason)}</div>` : '',
+        duration ? `<div><strong>${escapeHtml(duration)}</strong></div>` : '',
+        targets ? `<div><strong>${escapeHtml(targets)}</strong></div>` : '',
+        locations ? `<div><strong>${escapeHtml(locations)}</strong></div>` : '',
+        preview ? `<div><strong>What changed</strong><pre style="white-space:pre-wrap; margin:8px 0;">${escapeHtml(preview)}</pre></div>` : '',
+        '</div>',
+        '</details>'
+      ].filter(Boolean).join('\n');
+    })
+    .join('\n\n');
+}
+
+function formatActionPlanForChat(data) {
+  const plan = data?.action_plan;
+  const fallback = typeof data?.response === 'string' ? data.response : 'Action plan is ready for approval.';
+  if (!plan || !Array.isArray(plan.steps) || plan.steps.length === 0) {
+    return fallback;
+  }
+
+  const lines = plan.steps.map((step, idx) => {
+    const title = step?.title ? String(step.title) : `Step ${idx + 1}`;
+    const details = step?.details ? `\n   ${String(step.details)}` : '';
+    return `${idx + 1}. ${title}${details}`;
+  });
+
+  return `**Planned Next Actions**\n${lines.join('\n')}\n\n${plan.summary || 'Approve to execute, or edit/cancel.'}`;
+}
+
+function renderActionPlanControls(planId, originalMessage) {
+  if (!planId) return;
+  const chatArea = document.getElementById('chatArea');
+  if (!chatArea) return;
+
+  const wrapper = document.createElement('div');
+  wrapper.className = 'message-container mb-3 assistant-message';
+  wrapper.dataset.planId = planId;
+
+  const content = document.createElement('div');
+  content.className = 'modern-card p-3 me-auto';
+  content.style.maxWidth = '85%';
+  content.style.background = 'var(--bg-secondary)';
+
+  const title = document.createElement('div');
+  title.style.fontSize = '12px';
+  title.style.color = 'var(--text-muted)';
+  title.style.marginBottom = '8px';
+  title.textContent = 'Approval required';
+  content.appendChild(title);
+
+  const controls = document.createElement('div');
+  controls.style.display = 'flex';
+  controls.style.gap = '8px';
+  controls.style.flexWrap = 'wrap';
+
+  const approveBtn = document.createElement('button');
+  approveBtn.type = 'button';
+  approveBtn.className = 'btn btn-sm btn-success';
+  approveBtn.textContent = 'Approve';
+
+  const editBtn = document.createElement('button');
+  editBtn.type = 'button';
+  editBtn.className = 'btn btn-sm btn-outline-primary';
+  editBtn.textContent = 'Edit';
+
+  const cancelBtn = document.createElement('button');
+  cancelBtn.type = 'button';
+  cancelBtn.className = 'btn btn-sm btn-outline-secondary';
+  cancelBtn.textContent = 'Cancel';
+
+  controls.appendChild(approveBtn);
+  controls.appendChild(editBtn);
+  controls.appendChild(cancelBtn);
+  content.appendChild(controls);
+  wrapper.appendChild(content);
+  chatArea.appendChild(wrapper);
+  if (window.scrollChatToBottomIfNeeded) {
+    window.scrollChatToBottomIfNeeded();
+  }
+
+  const setDisabled = (disabled) => {
+    approveBtn.disabled = disabled;
+    editBtn.disabled = disabled;
+    cancelBtn.disabled = disabled;
+  };
+
+  approveBtn.addEventListener('click', async () => {
+    setDisabled(true);
+    await executeApprovedActionPlan(planId);
+  });
+
+  editBtn.addEventListener('click', () => {
+    const input = document.getElementById('input');
+    if (input) {
+      input.value = originalMessage || '';
+      input.focus();
+      input.style.height = 'auto';
+      input.style.height = input.scrollHeight + 'px';
+    }
+    pendingActionPlanContexts.delete(planId);
+    wrapper.remove();
+  });
+
+  cancelBtn.addEventListener('click', () => {
+    pendingActionPlanContexts.delete(planId);
+    wrapper.remove();
+    addMessageToChat('Cancelled action plan.', false, false, true, true);
+  });
+}
+
+async function executeApprovedActionPlan(planId) {
+  const context = pendingActionPlanContexts.get(planId);
+  if (!context) {
+    if (window.Toast) {
+      Toast.warning('Action plan context expired. Please resubmit your request.');
+    }
+    return;
+  }
+  if (chatStateMachine && chatStateMachine.isActive()) {
+    return;
+  }
+
+  if (chatStateMachine) {
+    chatStateMachine.send();
+  }
+  updateSendButton();
+
+  try {
+    const requestBody = {
+      ...context.requestBody,
+      plan_before_action: true,
+      approved_action_plan_id: planId
+    };
+    const response = await fetch('/api/chat', {
+      method: 'POST',
+      headers: context.headers,
+      body: JSON.stringify(requestBody),
+      signal: chatStateMachine ? chatStateMachine.getSignal() : undefined
+    });
+
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+    }
+
+    const data = await response.json();
+    data._requestBody = { ...requestBody };
+    data._requestHeaders = { ...context.headers };
+    updatePlannerIndicator(data?.planner_decision);
+    await handleChatResponsePayload(data, context.originalMessage, context.isSlashCommand);
+    pendingActionPlanContexts.delete(planId);
+  } catch (error) {
+    if (error.name === 'AbortError') {
+      return;
+    }
+    addMessageToChat(`Error: ${error.message}`, false, true, false, context.isSlashCommand);
+    if (window.Toast) {
+      Toast.error('Failed to execute approved action plan');
+    }
+  } finally {
+    if (chatStateMachine) {
+      chatStateMachine.complete();
+    }
+    updateSendButton();
+  }
+}
+
+async function handleChatResponsePayload(data, trimmedMessage, isSlashCommand) {
+  const routeMeta = normalizeRouteMetadata(data);
+
+  if (data?.requires_approval && data?.approval_type === 'action_plan' && data?.action_plan_id) {
+    const planMessage = formatActionPlanForChat(data);
+    addMessageToChat(planMessage, false, false, true, true, routeMeta);
+    pendingActionPlanContexts.set(data.action_plan_id, {
+      requestBody: data._requestBody || { question: trimmedMessage },
+      headers: data._requestHeaders || { 'Content-Type': 'application/json' },
+      originalMessage: trimmedMessage,
+      isSlashCommand
+    });
+    renderActionPlanControls(data.action_plan_id, trimmedMessage);
+    if (window.sessionManager && window.sessionManager.onMessageSent) {
+      window.sessionManager.onMessageSent();
+    }
+    EventBus.emit('chat:message:sent', { message: trimmedMessage, isSlashCommand });
+    return;
+  }
+
+  const hasResponseField = Object.prototype.hasOwnProperty.call(data, 'response');
+  const responseText = typeof data.response === 'string' ? data.response : null;
+  const toolCallsText = formatToolCallsForChat(data.toolCalls);
+  const receiptsText = formatActionReceiptsForChat(data.action_receipts);
+
+  if (hasResponseField && responseText !== null) {
+    if (responseText.trim().length > 0) {
+      addMessageToChat(responseText, false, false, false, isSlashCommand, routeMeta);
+    } else if (toolCallsText) {
+      addMessageToChat(toolCallsText, false, false, false, isSlashCommand, routeMeta);
+    } else {
+      addMessageToChat('(no text response)', false, false, false, isSlashCommand, routeMeta);
+    }
+
+    if (receiptsText) {
+      addMessageToChat(receiptsText, false, false, true, true, routeMeta);
+    }
+
+    appLog.debug('Checking for switch command:', {
+      message: trimmedMessage,
+      startsWithSwitch: trimmedMessage.startsWith('/switch'),
+      hasCheckmark: responseText.includes('✅'),
+      hasSwitched: responseText.includes('Switched to agent'),
+      response: responseText
+    });
+
+    if (trimmedMessage.startsWith('/switch') && responseText.includes('✅') && responseText.includes('Switched to agent')) {
+      appLog.debug('Successful agent switch detected, refreshing agent display and sidebar');
+      setTimeout(() => {
+        refreshAgentDisplay();
+        if (typeof loadAgents === 'function') {
+          loadAgents();
+        }
+      }, 100);
+    }
+
+    if (window.sessionManager && window.sessionManager.onMessageSent) {
+      window.sessionManager.onMessageSent();
+    }
+
+    EventBus.emit('chat:message:sent', { message: trimmedMessage, isSlashCommand });
+    renderPlannerPlanSummary(data);
+    await handleDynamicAgentApprovals(data);
+    return;
+  }
+
+  appLog.error('No response field found. Available fields:', Object.keys(data));
+  const details = escapeHtml(JSON.stringify(data, null, 2));
+  addMessageToChat(`Sorry, I received an unexpected response format.\n\n<details><summary>Raw response</summary><pre style="white-space:pre-wrap; margin:8px 0;">${details}</pre></details>`, false, true);
+  if (window.Toast) {
+    Toast.warning('Received unexpected response format');
+  }
 }
 
 function updatePlannerIndicator(decision) {
@@ -1099,6 +1575,10 @@ async function sendMessage(message) {
     if (multiAgentModeSelect && multiAgentModeSelect.value) {
       requestBody.multi_agent_mode = multiAgentModeSelect.value;
     }
+    const planBeforeActionToggle = document.getElementById('planBeforeActionToggle');
+    if (planBeforeActionToggle?.checked) {
+      requestBody.plan_before_action = true;
+    }
 
     // Build headers with session ID for multi-tab support
     const chatHeaders = {
@@ -1136,6 +1616,9 @@ async function sendMessage(message) {
     appLog.debug('Received chat response:', data);
     updatePlannerIndicator(data?.planner_decision);
 
+    data._requestBody = { ...requestBody };
+    data._requestHeaders = { ...chatHeaders };
+
     // Clear uploaded files after successful send
     if (window.clearFilesAfterSend) {
       window.clearFilesAfterSend();
@@ -1146,58 +1629,7 @@ async function sendMessage(message) {
     if (chatStateMachine && chatStateMachine.isActive()) {
       chatStateMachine.process();
     }
-
-    const hasResponseField = Object.prototype.hasOwnProperty.call(data, 'response');
-    const responseText = typeof data.response === 'string' ? data.response : null;
-    const toolCallsText = formatToolCallsForChat(data.toolCalls);
-
-    if (hasResponseField && responseText !== null) {
-      // Skip persisting assistant replies for slash commands
-      if (responseText.trim().length > 0) {
-        addMessageToChat(responseText, false, false, false, isSlashCommand);
-      } else if (toolCallsText) {
-        addMessageToChat(toolCallsText, false, false, false, isSlashCommand);
-      } else {
-        addMessageToChat('(no text response)', false, false, false, isSlashCommand);
-      }
-
-      // Check if this was a successful /switch command and refresh agent display and sidebar
-      appLog.debug('Checking for switch command:', {
-        message: trimmedMessage,
-        startsWithSwitch: trimmedMessage.startsWith('/switch'),
-        hasCheckmark: responseText.includes('✅'),
-        hasSwitched: responseText.includes('Switched to agent'),
-        response: responseText
-      });
-
-      if (trimmedMessage.startsWith('/switch') && responseText.includes('✅') && responseText.includes('Switched to agent')) {
-        appLog.debug('Successful agent switch detected, refreshing agent display and sidebar');
-        setTimeout(() => {
-          refreshAgentDisplay();
-          // Refresh sidebar agents list if the function exists
-          if (typeof loadAgents === 'function') {
-            loadAgents();
-          }
-        }, 100); // Small delay to ensure backend has updated
-      }
-
-      // Notify session manager about the new message
-      if (window.sessionManager && window.sessionManager.onMessageSent) {
-        window.sessionManager.onMessageSent();
-      }
-
-      EventBus.emit('chat:message:sent', { message: trimmedMessage, isSlashCommand });
-
-      renderPlannerPlanSummary(data);
-      await handleDynamicAgentApprovals(data);
-    } else {
-      appLog.error('No response field found. Available fields:', Object.keys(data));
-      const details = escapeHtml(JSON.stringify(data, null, 2));
-      addMessageToChat(`Sorry, I received an unexpected response format.\n\n<details><summary>Raw response</summary><pre style="white-space:pre-wrap; margin:8px 0;">${details}</pre></details>`, false, true);
-      if (window.Toast) {
-        Toast.warning('Received unexpected response format');
-      }
-    }
+    await handleChatResponsePayload(data, trimmedMessage, isSlashCommand);
 
   } catch (error) {
     // Handle user cancellation gracefully
@@ -1246,6 +1678,7 @@ function setupChat() {
   const input = document.getElementById('input');
   const sendBtn = document.getElementById('sendBtn');
   const enterToSend = document.getElementById('enterToSend');
+  const planBeforeActionToggle = document.getElementById('planBeforeActionToggle');
 
   if (!input || !sendBtn) {
     appLog.warn('Chat elements not found');
@@ -1328,6 +1761,16 @@ function setupChat() {
     }
   }
 
+  if (planBeforeActionToggle) {
+    const savedPlanBeforeAction = localStorage.getItem(PLAN_BEFORE_ACTION_STORAGE_KEY);
+    if (savedPlanBeforeAction !== null) {
+      planBeforeActionToggle.checked = savedPlanBeforeAction === 'true';
+    }
+    planBeforeActionToggle.addEventListener('change', () => {
+      localStorage.setItem(PLAN_BEFORE_ACTION_STORAGE_KEY, planBeforeActionToggle.checked ? 'true' : 'false');
+    });
+  }
+
   // Clear chat button
   const clearChatBtn = document.getElementById('clearChatBtn');
   if (clearChatBtn) {
@@ -1337,6 +1780,8 @@ function setupChat() {
       }
     });
   }
+
+  setupChatWebSearchToggle();
 
   appLog.debug('Chat functionality initialized');
 }

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -218,6 +219,74 @@ func TestGeminiProviderBuildRequest(t *testing.T) {
 	}
 	if len(responseBytes) == 0 {
 		t.Error("Expected function response payload to be non-empty")
+	}
+}
+
+func TestGeminiProviderBuildRequest_SanitizesToolSchemaForGemini(t *testing.T) {
+	provider := NewGeminiProvider(ProviderConfig{APIKey: "test-key"})
+
+	originalParams := map[string]interface{}{
+		"$schema": "https://json-schema.org/draft/2020-12/schema",
+		"type":    "object",
+		"properties": map[string]interface{}{
+			"url": map[string]interface{}{
+				"type": "string",
+			},
+			"filters": map[string]interface{}{
+				"type": "array",
+				"items": map[string]interface{}{
+					"type":                 "object",
+					"additionalProperties": false,
+					"properties": map[string]interface{}{
+						"name": map[string]interface{}{"type": "string"},
+					},
+				},
+			},
+		},
+		"required":             []string{"url"},
+		"additionalProperties": false,
+	}
+
+	req := ChatRequest{
+		Model:    "gemini-2.5-flash",
+		Messages: []Message{NewUserMessage("Open this URL")},
+		Tools: []Tool{
+			{
+				Name:        "open_url",
+				Description: "Open a URL",
+				Parameters:  originalParams,
+			},
+		},
+	}
+
+	built, err := provider.buildRequest(req)
+	if err != nil {
+		t.Fatalf("buildRequest failed: %v", err)
+	}
+
+	if len(built.Tools) != 1 || len(built.Tools[0].FunctionDeclarations) != 1 {
+		t.Fatalf("expected one function declaration, got %#v", built.Tools)
+	}
+
+	sanitized := built.Tools[0].FunctionDeclarations[0].Parameters
+	raw, err := json.Marshal(sanitized)
+	if err != nil {
+		t.Fatalf("failed to marshal sanitized schema: %v", err)
+	}
+	text := string(raw)
+	if strings.Contains(text, "\"$schema\"") {
+		t.Fatalf("sanitized schema still contains $schema: %s", text)
+	}
+	if strings.Contains(text, "\"additionalProperties\"") {
+		t.Fatalf("sanitized schema still contains additionalProperties: %s", text)
+	}
+
+	// Ensure original input schema remains untouched for other providers.
+	if _, ok := originalParams["$schema"]; !ok {
+		t.Fatal("expected original schema to still include $schema")
+	}
+	if _, ok := originalParams["additionalProperties"]; !ok {
+		t.Fatal("expected original schema to still include additionalProperties")
 	}
 }
 

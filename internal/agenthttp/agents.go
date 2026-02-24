@@ -87,6 +87,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				"provider":          agent.Settings.Provider,
 				"max_output_tokens": agent.Settings.MaxOutputTokens,
 				"system_prompt":     agent.Settings.SystemPrompt,
+				"allow_web_search":  agent.Settings.IsWebSearchAllowed(),
 				"enabled_plugins":   enabledPlugins,
 				"evolution":         cloneAgentEvolution(agent),
 			})
@@ -137,6 +138,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			AvatarColor     string   `json:"avatar_color,omitempty"`
 			LLMProvider     string   `json:"llm_provider,omitempty"`
 			MaxOutputTokens int      `json:"max_output_tokens,omitempty"`
+			AllowWebSearch  *bool    `json:"allow_web_search,omitempty"`
 		}
 		if !orihttp.ParseJSONBody(w, r, &req) {
 			return
@@ -144,6 +146,11 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		logger.Debug("CreateAgent request", logger.Fields{
 			"name": req.Name, "type": req.Type, "model": req.Model, "temperature": req.Temperature,
 		})
+
+		if isSystemAssistantAgent(req.Name) {
+			orihttp.BadRequest(w, "reserved agent name")
+			return
+		}
 
 		// Validate agent name
 		if err := validateAgentName(req.Name); err != nil {
@@ -160,6 +167,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			SystemPrompt:    req.SystemPrompt,
 			LLMProvider:     req.LLMProvider,
 			MaxOutputTokens: req.MaxOutputTokens,
+			AllowWebSearch:  req.AllowWebSearch,
 		}
 
 		logger.Debug("Creating agent", logger.Fields{"agent": req.Name})
@@ -243,14 +251,15 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		// Parse update request
 		var req struct {
 			// Core fields
-			Name         *string  `json:"name,omitempty"`
-			Type         *string  `json:"type,omitempty"`
-			Role         *string  `json:"role,omitempty"`
-			Model        *string  `json:"model,omitempty"`
-			Temperature  *float64 `json:"temperature,omitempty"`
-			LLMProvider  *string  `json:"llm_provider,omitempty"`
-			MaxTokens    *int     `json:"max_output_tokens,omitempty"`
-			SystemPrompt *string  `json:"system_prompt,omitempty"`
+			Name           *string  `json:"name,omitempty"`
+			Type           *string  `json:"type,omitempty"`
+			Role           *string  `json:"role,omitempty"`
+			Model          *string  `json:"model,omitempty"`
+			Temperature    *float64 `json:"temperature,omitempty"`
+			LLMProvider    *string  `json:"llm_provider,omitempty"`
+			MaxTokens      *int     `json:"max_output_tokens,omitempty"`
+			SystemPrompt   *string  `json:"system_prompt,omitempty"`
+			AllowWebSearch *bool    `json:"allow_web_search,omitempty"`
 			// Metadata
 			Description *string   `json:"description,omitempty"`
 			Tags        *[]string `json:"tags,omitempty"`
@@ -288,6 +297,10 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if req.SystemPrompt != nil {
 			agent.Settings.SystemPrompt = *req.SystemPrompt
 		}
+		if req.AllowWebSearch != nil {
+			allow := *req.AllowWebSearch
+			agent.Settings.AllowWebSearch = &allow
+		}
 
 		// Update metadata fields if provided (partial update)
 		if req.Description != nil {
@@ -312,6 +325,11 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 		// Save updated agent (handle rename if needed)
 		if req.Name != nil && *req.Name != "" && *req.Name != agentName {
+			if isSystemAssistantAgent(agentName) || isSystemAssistantAgent(*req.Name) {
+				orihttp.BadRequest(w, "system assistant cannot be renamed")
+				return
+			}
+
 			// Validate the new agent name
 			if err := validateAgentName(*req.Name); err != nil {
 				orihttp.BadRequest(w, err.Error())
@@ -400,6 +418,10 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		name := r.URL.Query().Get("name")
 		if name == "" {
 			orihttp.BadRequest(w, "name required")
+			return
+		}
+		if isSystemAssistantAgent(name) {
+			orihttp.BadRequest(w, "system assistant cannot be deleted")
 			return
 		}
 		if err := h.State.DeleteAgent(name); err != nil {

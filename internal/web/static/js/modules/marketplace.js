@@ -919,7 +919,13 @@ class PluginMarketplace {
   renderGridCard(plugin, isInstalled, updateInfo, compatibility, platformBadges, sourceBadge) {
     return `
             <div class="col-md-6 col-lg-4 mb-4" data-compatible="${compatibility.compatible}">
-                <div class="card h-100 plugin-card ${compatibility.cssClass}" style="cursor: pointer; ${!compatibility.compatible ? 'opacity: 0.7;' : ''}" onclick="marketplace.showPluginDetails('${plugin.name}')">
+                <div class="card h-100 plugin-card ${compatibility.cssClass}"
+                     role="button"
+                     tabindex="0"
+                     aria-label="Open details for plugin ${escapeHtml(this.getDisplayName(plugin))}"
+                     style="cursor: pointer; ${!compatibility.compatible ? 'opacity: 0.7;' : ''}"
+                     onclick="marketplace.showPluginDetails('${plugin.name}')"
+                     onkeydown="if ((event.key === 'Enter' || event.key === ' ') && !event.target.closest('button, a, input, select, textarea')) { event.preventDefault(); marketplace.showPluginDetails('${plugin.name}'); }">
                     <div class="card-body">
                         <div class="d-flex justify-content-between align-items-start mb-2">
                             <h5 class="card-title mb-0">${escapeHtml(this.getDisplayName(plugin))}</h5>
@@ -968,7 +974,13 @@ class PluginMarketplace {
   renderListCard(plugin, isInstalled, updateInfo, compatibility, platformBadges, sourceBadge) {
     return `
             <div class="col-12 mb-3" data-compatible="${compatibility.compatible}">
-                <div class="card plugin-card list-view-card ${compatibility.cssClass}" style="cursor: pointer; ${!compatibility.compatible ? 'opacity:0.7;' : ''}" onclick="marketplace.showPluginDetails('${plugin.name}')">
+                <div class="card plugin-card list-view-card ${compatibility.cssClass}"
+                     role="button"
+                     tabindex="0"
+                     aria-label="Open details for plugin ${escapeHtml(this.getDisplayName(plugin))}"
+                     style="cursor: pointer; ${!compatibility.compatible ? 'opacity:0.7;' : ''}"
+                     onclick="marketplace.showPluginDetails('${plugin.name}')"
+                     onkeydown="if ((event.key === 'Enter' || event.key === ' ') && !event.target.closest('button, a, input, select, textarea')) { event.preventDefault(); marketplace.showPluginDetails('${plugin.name}'); }">
                     <div class="card-body">
                         <div class="plugin-info">
                             <div class="d-flex justify-content-between align-items-start mb-1">
@@ -1003,7 +1015,7 @@ class PluginMarketplace {
   renderActionButton(plugin, isInstalled, updateInfo, compatibility) {
     if (!isInstalled && !compatibility.compatible) {
       return `
-                <button class="btn btn-sm btn-outline-secondary w-100" disabled title="Not compatible with ${this.currentPlatformDisplay}">
+                <button type="button" class="btn btn-sm btn-outline-secondary w-100" disabled title="Not compatible with ${this.currentPlatformDisplay}">
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" class="me-1">
                         <path d="M12,2C17.53,2 22,6.47 22,12C22,17.53 17.53,22 12,22C6.47,22 2,17.53 2,12C2,6.47 6.47,2 12,2M15.59,7L12,10.59L8.41,7L7,8.41L10.59,12L7,15.59L8.41,17L12,13.41L15.59,17L17,15.59L13.41,12L17,8.41L15.59,7Z"/>
                     </svg>
@@ -1014,7 +1026,7 @@ class PluginMarketplace {
 
     if (!isInstalled) {
       return `
-                <button class="btn btn-sm btn-primary w-100" onclick="event.stopPropagation(); marketplace.installPlugin('${plugin.name}')">
+                <button type="button" class="btn btn-sm btn-primary w-100" onclick="event.stopPropagation(); marketplace.installPlugin('${plugin.name}')">
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" class="me-1">
                         <path d="M5,20H19V18H5M19,9H15V3H9V9H5L12,16L19,9Z"/>
                     </svg>
@@ -1025,7 +1037,7 @@ class PluginMarketplace {
 
     if (updateInfo) {
       return `
-                <button class="btn btn-sm btn-warning w-100" onclick="event.stopPropagation(); marketplace.updatePlugin('${plugin.name}')">
+                <button type="button" class="btn btn-sm btn-warning w-100" onclick="event.stopPropagation(); marketplace.updatePlugin('${plugin.name}')">
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" class="me-1">
                         <path d="M12,18.17L8.83,15L7.42,16.41L12,21L16.59,16.41L15.17,15M12,5.83L15.17,9L16.58,7.59L12,3L7.41,7.59L8.83,9L12,5.83Z"/>
                     </svg>
@@ -1035,7 +1047,7 @@ class PluginMarketplace {
     }
 
     return `
-            <button class="btn btn-sm btn-outline-secondary w-100" disabled>
+            <button type="button" class="btn btn-sm btn-outline-secondary w-100" disabled>
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" class="me-1">
                     <path d="M21,7L9,19L3.5,13.5L4.91,12.09L9,16.17L19.59,5.59L21,7Z"/>
                 </svg>

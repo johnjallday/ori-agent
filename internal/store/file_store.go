@@ -113,6 +113,10 @@ func (s *fileStore) CreateAgent(name string, config *CreateAgentConfig) error {
 			if config.MaxOutputTokens > 0 {
 				defaultSettings.MaxOutputTokens = config.MaxOutputTokens
 			}
+			if config.AllowWebSearch != nil {
+				allow := *config.AllowWebSearch
+				defaultSettings.AllowWebSearch = &allow
+			}
 		}
 
 		newAgent := &agent.Agent{

@@ -22,10 +22,11 @@ import (
 var settingsLog = logger.New("settings")
 
 type Handler struct {
-	store         store.Store
-	configManager *config.Manager
-	clientFactory *client.Factory
-	llmFactory    *llm.Factory
+	store                   store.Store
+	configManager           *config.Manager
+	clientFactory           *client.Factory
+	llmFactory              *llm.Factory
+	utilitySettingsReloader func()
 }
 
 func NewHandler(store store.Store, configManager *config.Manager, clientFactory *client.Factory, llmFactory *llm.Factory) *Handler {
@@ -35,6 +36,11 @@ func NewHandler(store store.Store, configManager *config.Manager, clientFactory 
 		clientFactory: clientFactory,
 		llmFactory:    llmFactory,
 	}
+}
+
+// SetUtilitySettingsReloader sets a callback invoked after utility settings are saved.
+func (h *Handler) SetUtilitySettingsReloader(fn func()) {
+	h.utilitySettingsReloader = fn
 }
 
 // SettingsHandler handles agent settings operations
@@ -305,6 +311,175 @@ func (h *Handler) SpeechSettingsHandler(w http.ResponseWriter, r *http.Request) 
 	default:
 		w.WriteHeader(http.StatusMethodNotAllowed)
 	}
+}
+
+type utilitySettingsResponse struct {
+	Enabled                 bool     `json:"enabled"`
+	TimeoutMs               int      `json:"timeout_ms"`
+	RetryAttempts           int      `json:"retry_attempts"`
+	RetryDelayMs            int      `json:"retry_delay_ms"`
+	SearchProvider          string   `json:"search_provider"`
+	BrowserControlProvider  string   `json:"browser_control_provider"`
+	PlaywrightBrowser       string   `json:"playwright_browser"`
+	PlaywrightExecutable    string   `json:"playwright_executable_path"`
+	WeatherProvider         string   `json:"weather_provider"`
+	WeatherGeocodingURL     string   `json:"weather_geocoding_url,omitempty"`
+	WeatherForecastURL      string   `json:"weather_forecast_url,omitempty"`
+	WebFetchMaxResponseSize int64    `json:"web_fetch_max_response_size"`
+	BrowserMaxResponseSize  int64    `json:"browser_max_response_size"`
+	BrowserAllowedDomains   []string `json:"browser_allowed_domains,omitempty"`
+	BlockPrivateHosts       bool     `json:"block_private_hosts"`
+	UserAgent               string   `json:"user_agent,omitempty"`
+	HasBraveAPIKey          bool     `json:"has_brave_api_key"`
+	BraveAPIKeyMasked       string   `json:"brave_api_key_masked,omitempty"`
+}
+
+type utilitySettingsUpdateRequest struct {
+	Enabled                 *bool     `json:"enabled,omitempty"`
+	TimeoutMs               *int      `json:"timeout_ms,omitempty"`
+	RetryAttempts           *int      `json:"retry_attempts,omitempty"`
+	RetryDelayMs            *int      `json:"retry_delay_ms,omitempty"`
+	SearchProvider          *string   `json:"search_provider,omitempty"`
+	BrowserControlProvider  *string   `json:"browser_control_provider,omitempty"`
+	PlaywrightBrowser       *string   `json:"playwright_browser,omitempty"`
+	PlaywrightExecutable    *string   `json:"playwright_executable_path,omitempty"`
+	BraveAPIKey             *string   `json:"brave_api_key,omitempty"`
+	WeatherProvider         *string   `json:"weather_provider,omitempty"`
+	WeatherGeocodingURL     *string   `json:"weather_geocoding_url,omitempty"`
+	WeatherForecastURL      *string   `json:"weather_forecast_url,omitempty"`
+	WebFetchMaxResponseSize *int64    `json:"web_fetch_max_response_size,omitempty"`
+	BrowserMaxResponseSize  *int64    `json:"browser_max_response_size,omitempty"`
+	BrowserAllowedDomains   *[]string `json:"browser_allowed_domains,omitempty"`
+	BlockPrivateHosts       *bool     `json:"block_private_hosts,omitempty"`
+	UserAgent               *string   `json:"user_agent,omitempty"`
+}
+
+// UtilitySettingsHandler handles utility provider/runtime settings.
+func (h *Handler) UtilitySettingsHandler(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodGet:
+		cfg := h.configManager.Get()
+		orihttp.WriteJSON(w, map[string]any{
+			"utility": toUtilitySettingsResponse(cfg.Utility),
+		})
+
+	case http.MethodPost:
+		var req utilitySettingsUpdateRequest
+		if !orihttp.ParseJSONBody(w, r, &req) {
+			return
+		}
+
+		cfg := h.configManager.Get()
+		next := cfg.Utility
+		if req.Enabled != nil {
+			next.Enabled = *req.Enabled
+		}
+		if req.TimeoutMs != nil {
+			next.TimeoutMs = *req.TimeoutMs
+		}
+		if req.RetryAttempts != nil {
+			next.RetryAttempts = *req.RetryAttempts
+		}
+		if req.RetryDelayMs != nil {
+			next.RetryDelayMs = *req.RetryDelayMs
+		}
+		if req.SearchProvider != nil {
+			next.SearchProvider = strings.TrimSpace(*req.SearchProvider)
+		}
+		if req.BrowserControlProvider != nil {
+			next.BrowserControlProvider = strings.TrimSpace(*req.BrowserControlProvider)
+		}
+		if req.PlaywrightBrowser != nil {
+			next.PlaywrightBrowser = strings.TrimSpace(*req.PlaywrightBrowser)
+		}
+		if req.PlaywrightExecutable != nil {
+			next.PlaywrightExecutable = strings.TrimSpace(*req.PlaywrightExecutable)
+		}
+		if req.BraveAPIKey != nil {
+			next.BraveAPIKey = strings.TrimSpace(*req.BraveAPIKey)
+		}
+		if req.WeatherProvider != nil {
+			next.WeatherProvider = strings.TrimSpace(*req.WeatherProvider)
+		}
+		if req.WeatherGeocodingURL != nil {
+			next.WeatherGeocodingURL = strings.TrimSpace(*req.WeatherGeocodingURL)
+		}
+		if req.WeatherForecastURL != nil {
+			next.WeatherForecastURL = strings.TrimSpace(*req.WeatherForecastURL)
+		}
+		if req.WebFetchMaxResponseSize != nil {
+			next.WebFetchMaxResponseSize = *req.WebFetchMaxResponseSize
+		}
+		if req.BrowserMaxResponseSize != nil {
+			next.BrowserMaxResponseSize = *req.BrowserMaxResponseSize
+		}
+		if req.BrowserAllowedDomains != nil {
+			next.BrowserAllowedDomains = append([]string{}, (*req.BrowserAllowedDomains)...)
+		}
+		if req.BlockPrivateHosts != nil {
+			next.BlockPrivateHosts = *req.BlockPrivateHosts
+		}
+		if req.UserAgent != nil {
+			next.UserAgent = strings.TrimSpace(*req.UserAgent)
+		}
+
+		cfg.Utility = next
+		if err := h.configManager.Update(cfg); err != nil {
+			orihttp.RespondErrorWithErr(w, http.StatusBadRequest, "Invalid utility settings", err)
+			return
+		}
+		if err := h.configManager.Save(); err != nil {
+			orihttp.InternalError(w, err.Error())
+			return
+		}
+
+		if h.utilitySettingsReloader != nil {
+			h.utilitySettingsReloader()
+		}
+
+		saved := h.configManager.Get()
+		orihttp.WriteJSON(w, map[string]any{
+			"success": true,
+			"utility": toUtilitySettingsResponse(saved.Utility),
+		})
+
+	default:
+		w.WriteHeader(http.StatusMethodNotAllowed)
+	}
+}
+
+func toUtilitySettingsResponse(settings config.UtilitySettings) utilitySettingsResponse {
+	return utilitySettingsResponse{
+		Enabled:                 settings.Enabled,
+		TimeoutMs:               settings.TimeoutMs,
+		RetryAttempts:           settings.RetryAttempts,
+		RetryDelayMs:            settings.RetryDelayMs,
+		SearchProvider:          settings.SearchProvider,
+		BrowserControlProvider:  settings.BrowserControlProvider,
+		PlaywrightBrowser:       settings.PlaywrightBrowser,
+		PlaywrightExecutable:    settings.PlaywrightExecutable,
+		WeatherProvider:         settings.WeatherProvider,
+		WeatherGeocodingURL:     settings.WeatherGeocodingURL,
+		WeatherForecastURL:      settings.WeatherForecastURL,
+		WebFetchMaxResponseSize: settings.WebFetchMaxResponseSize,
+		BrowserMaxResponseSize:  settings.BrowserMaxResponseSize,
+		BrowserAllowedDomains:   append([]string{}, settings.BrowserAllowedDomains...),
+		BlockPrivateHosts:       settings.BlockPrivateHosts,
+		UserAgent:               settings.UserAgent,
+		HasBraveAPIKey:          strings.TrimSpace(settings.BraveAPIKey) != "",
+		BraveAPIKeyMasked:       maskUtilityAPIKey(settings.BraveAPIKey),
+	}
+}
+
+func maskUtilityAPIKey(apiKey string) string {
+	apiKey = strings.TrimSpace(apiKey)
+	if apiKey == "" {
+		return ""
+	}
+	if len(apiKey) < 12 {
+		return "***"
+	}
+	return apiKey[:6] + "***..." + apiKey[len(apiKey)-4:]
 }
 
 // maskAnthropicAPIKey returns a masked version of the Anthropic API key

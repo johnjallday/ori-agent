@@ -267,6 +267,54 @@ func TestListSkills_ExplicitStateOverridesWildcard(t *testing.T) {
 	}
 }
 
+func TestListEnabledSkillsWithPrompts(t *testing.T) {
+	tmpDir := t.TempDir()
+	agentStorePath := filepath.Join(tmpDir, "agents.json")
+	if err := os.WriteFile(agentStorePath, []byte(`{}`), 0o644); err != nil {
+		t.Fatalf("write agents.json: %v", err)
+	}
+
+	// Create two repo skills
+	writeTestSkill(t, filepath.Join(tmpDir, "agents", "skills", "skill-a"), "skill-a", "Skill A", "Prompt A content")
+	writeTestSkill(t, filepath.Join(tmpDir, "agents", "skills", "skill-b"), "skill-b", "Skill B", "Prompt B content")
+
+	// Disable skill-b via registry
+	registryPath := filepath.Join(tmpDir, "agents", "default", "skills_state.json")
+	registry := map[string]any{
+		"skills": map[string]any{
+			"skill-b": map[string]any{
+				"enabled": false,
+			},
+		},
+	}
+	registryBytes, err := json.Marshal(registry)
+	if err != nil {
+		t.Fatalf("marshal registry: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Dir(registryPath), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(registryPath, registryBytes, 0o644); err != nil {
+		t.Fatalf("write registry: %v", err)
+	}
+
+	manager := NewManager(ManagerConfig{AgentStorePath: agentStorePath})
+	enabled, err := manager.ListEnabledSkillsWithPrompts("default")
+	if err != nil {
+		t.Fatalf("ListEnabledSkillsWithPrompts error: %v", err)
+	}
+
+	if len(enabled) != 1 {
+		t.Fatalf("expected 1 enabled skill, got %d", len(enabled))
+	}
+	if enabled[0].Name != "skill-a" {
+		t.Fatalf("expected skill-a, got %q", enabled[0].Name)
+	}
+	if enabled[0].Prompt == "" {
+		t.Fatalf("expected prompt to be loaded")
+	}
+}
+
 func writeTestSkill(t *testing.T, dir, name, description, prompt string) {
 	t.Helper()
 	if err := os.MkdirAll(dir, 0o755); err != nil {

@@ -69,6 +69,23 @@ func (m *Manager) ListSkills(agentName string) ([]Skill, error) {
 	return m.listSkills(agentName, false)
 }
 
+// ListEnabledSkillsWithPrompts returns only enabled skills that have non-empty
+// prompt text loaded. This is used to inject skill knowledge into agent system
+// prompts so agents benefit from their enabled skills during normal chat.
+func (m *Manager) ListEnabledSkillsWithPrompts(agentName string) ([]Skill, error) {
+	allSkills, err := m.listSkills(agentName, true)
+	if err != nil {
+		return nil, err
+	}
+	var enabled []Skill
+	for _, s := range allSkills {
+		if s.Enabled && strings.TrimSpace(s.Prompt) != "" {
+			enabled = append(enabled, s)
+		}
+	}
+	return enabled, nil
+}
+
 func (m *Manager) listSkills(agentName string, includePrompt bool) ([]Skill, error) {
 	agentSkills, err := m.loadAgentSkills(agentName, includePrompt)
 	if err != nil {

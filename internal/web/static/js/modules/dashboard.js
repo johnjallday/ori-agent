@@ -14,6 +14,16 @@
   const HOME_ASSISTANT_AUTOMATION_MODE_KEY = 'ori.homeAssistant.automationMode';
 
   const HOME_INTENTS = {
+    utility_direct: {
+      key: 'utility_direct',
+      label: 'daily utility',
+      keywords: ['time', 'timezone', 'clock', 'date', 'weather', 'forecast', 'temperature', 'convert', 'conversion', 'calculate', 'calculator', 'quick fact', 'fact', 'capital', 'define', 'definition'],
+      preferredPlugins: ['time', 'weather', 'calculator', 'math', 'search', 'web'],
+      preferredTypes: ['general', 'tool-calling', 'research'],
+      defaultType: 'general',
+      suggestedName: 'Utility Assistant',
+      tags: ['utility', 'time', 'weather', 'facts']
+    },
     travel_planning: {
       key: 'travel_planning',
       label: 'travel planning',
@@ -72,6 +82,20 @@
       preferredCategories: ['search']
     },
     {
+      key: 'email_inbox',
+      label: 'email inbox access',
+      phrases: ['check my email', 'check email', 'email', 'inbox', 'mailbox', 'gmail', 'outlook', 'unread', 'reply to email', 'triage'],
+      preferredServerNames: ['gmail', 'outlook', 'imap', 'microsoft-graph'],
+      preferredCategories: ['communication', 'email', 'productivity']
+    },
+    {
+      key: 'browser_automation',
+      label: 'browser automation',
+      phrases: ['browser automation', 'control browser', 'use browser', 'website automation', 'automate website', 'playwright', 'browserbase', 'puppeteer'],
+      preferredServerNames: ['playwright', 'browserbase', 'puppeteer'],
+      preferredCategories: ['automation', 'development', 'productivity']
+    },
+    {
       key: 'database_query',
       label: 'database query',
       phrases: ['postgres', 'postgresql', 'database', 'sql query', 'run sql', 'db query', 'schema'],
@@ -102,6 +126,7 @@
     automationMode: 'semi_auto'
   };
 
+  var homeAssistantThinkingModalInstance = null;
   var providersCache = null;
   var HOME_ASSISTANT_COMMON_TOKENS = {
     a: true, an: true, and: true, are: true, can: true, do: true, for: true, help: true,
@@ -125,17 +150,6 @@
   function formatCost(value) {
     var num = Number(value || 0);
     return '$' + num.toFixed(4);
-  }
-
-  function setGreeting() {
-    var el = document.getElementById('dashboardGreeting');
-    if (!el) return;
-    var hour = new Date().getHours();
-    var greeting;
-    if (hour < 12) greeting = 'Good morning!';
-    else if (hour < 17) greeting = 'Good afternoon!';
-    else greeting = 'Good evening!';
-    el.textContent = greeting;
   }
 
   function normalizeToken(value) {
@@ -360,6 +374,48 @@
     return HOME_ASSISTANT_COMMON_TOKENS[normalized] !== true;
   }
 
+  function parseCreateWorkspaceCommand(prompt) {
+    var raw = String(prompt || '').trim();
+    if (!raw) return null;
+
+    var normalized = normalizeToken(raw).replace(/\s+/g, ' ').trim();
+    if (!normalized) return null;
+
+    // Supported patterns:
+    // - "create workspace"
+    // - "create workspace called test2"
+    // - "create a workspace named test2"
+    // - "new workspace test2"
+    var patterns = [
+      /^create\s+(?:a\s+|an\s+)?workspace(?:\s+(?:called|named)\s+(.+)|\s+(.+))?$/,
+      /^new\s+workspace(?:\s+(?:called|named)\s+(.+)|\s+(.+))?$/
+    ];
+    var name = '';
+    for (var i = 0; i < patterns.length; i++) {
+      var match = normalized.match(patterns[i]);
+      if (!match) continue;
+      name = String((match[1] || match[2] || match[3] || '')).trim();
+      break;
+    }
+
+    if (!name && normalized !== 'create workspace' && normalized !== 'create a workspace' && normalized !== 'create an workspace' && normalized !== 'new workspace') {
+      return null;
+    }
+
+    name = name.replace(/^[`"':\-\s]+|[`"':\-\s]+$/g, '').trim();
+    if (!name) {
+      name = 'New Workspace';
+    } else {
+      name = toTitleCase(name);
+    }
+
+    if (name.length > 56) name = name.slice(0, 56).trim();
+    if (!name) name = 'New Workspace';
+    return {
+      name: name
+    };
+  }
+
   function parseAppLaunchRequest(prompt) {
     var text = String(prompt || '').trim();
     if (!text) return null;
@@ -389,7 +445,7 @@
     target = target.trim();
     if (!target) return null;
 
-    if (target.indexOf('://') >= 0 || target.indexOf('/') >= 0 || target.indexOf('\\') >= 0) {
+    if (target.indexOf('://') >= 0 || target.indexOf('/') >= 0 || target.indexOf('\\') >= 0 || looksLikeWebHostTarget(target)) {
       return null;
     }
 
@@ -399,9 +455,115 @@
     };
   }
 
-  function buildAskOriDispatchMessage(prompt, appLaunchRequest) {
+  function promptContainsAnyPhrase(normalizedPrompt, phrases) {
+    if (!normalizedPrompt || !Array.isArray(phrases) || phrases.length === 0) return false;
+    for (var i = 0; i < phrases.length; i++) {
+      var phrase = normalizeToken(phrases[i]);
+      if (!phrase) continue;
+      if (normalizedPrompt.indexOf(phrase) >= 0) return true;
+    }
+    return false;
+  }
+
+  function countPromptPhraseMatches(normalizedPrompt, phrases) {
+    if (!normalizedPrompt || !Array.isArray(phrases) || phrases.length === 0) return 0;
+    var count = 0;
+    for (var i = 0; i < phrases.length; i++) {
+      var phrase = normalizeToken(phrases[i]);
+      if (!phrase) continue;
+      if (normalizedPrompt.indexOf(phrase) >= 0) count += 1;
+    }
+    return count;
+  }
+
+  function isComplexProjectPrompt(prompt, intent) {
+    if (!intent || intent.key !== 'general_task') return false;
+    if (parseAppLaunchRequest(prompt)) return false;
+
+    var normalizedPrompt = normalizeToken(prompt);
+    if (!normalizedPrompt) return false;
+
+    var buildVerbs = ['build', 'create', 'develop', 'design', 'implement', 'make', 'ship', 'start', 'set up', 'setup'];
+    var projectTargets = ['website', 'web site', 'web app', 'app', 'application', 'landing page', 'dashboard', 'product', 'project', 'platform', 'system'];
+    var complexitySignals = ['from scratch', 'full stack', 'frontend', 'backend', 'database', 'authentication', 'auth', 'api', 'deploy', 'deployment', 'production', 'mvp', 'architecture', 'roadmap', 'requirements'];
+
+    var hasBuildVerb = promptContainsAnyPhrase(normalizedPrompt, buildVerbs);
+    var hasProjectTarget = promptContainsAnyPhrase(normalizedPrompt, projectTargets);
+    if (hasBuildVerb && hasProjectTarget) return true;
+
+    var complexitySignalCount = countPromptPhraseMatches(normalizedPrompt, complexitySignals);
+    if (hasProjectTarget && complexitySignalCount >= 1) return true;
+
+    var tokenCount = uniqueValues(normalizedPrompt.split(/[^a-z0-9]+/g)).filter(Boolean).length;
+    if (hasBuildVerb && complexitySignalCount >= 1 && tokenCount >= 8) return true;
+
+    return false;
+  }
+
+  function looksLikeWebHostTarget(target) {
+    var candidate = normalizeToken(target);
+    if (!candidate || candidate.indexOf('.') < 0) return false;
+    if (/\s/.test(candidate)) return false;
+    if (!/^[a-z0-9.-]+$/.test(candidate)) return false;
+
+    var labels = candidate.split('.');
+    if (!labels || labels.length < 2) return false;
+    for (var i = 0; i < labels.length; i++) {
+      var label = labels[i];
+      if (!label) return false;
+      if (label.charAt(0) === '-' || label.charAt(label.length - 1) === '-') return false;
+      if (!/^[a-z0-9-]+$/.test(label)) return false;
+    }
+
+    return labels[labels.length - 1].length >= 2;
+  }
+
+  function hasWorkspaceRouteContext(routeContext) {
+    if (!routeContext || typeof routeContext !== 'object') return false;
+    return Boolean(String(routeContext.workspace_id || '').trim());
+  }
+
+  function buildWorkspaceContextDispatchPrefix(routeContext) {
+    if (!hasWorkspaceRouteContext(routeContext)) return '';
+    var workspaceId = String(routeContext.workspace_id || '').trim();
+    var pagePath = String(routeContext.page_path || '').trim() || '/workspaces/' + workspaceId;
+    return [
+      'Workspace context:',
+      '- workspace_id: ' + workspaceId,
+      '- page_path: ' + pagePath,
+      '- origin: ask_ori',
+      ''
+    ].join('\n');
+  }
+
+  function buildEmailDispatchMessage(prompt, routeContext) {
+    var userPrompt = String(prompt || '').trim();
+    var lines = [];
+    var workspacePrefix = buildWorkspaceContextDispatchPrefix(routeContext);
+    if (workspacePrefix) {
+      lines.push(workspacePrefix);
+    }
+    lines.push(
+      'Email task:',
+      userPrompt,
+      '',
+      'Execution requirements:',
+      '- Use configured MCP connectors/tools first (email connector or browser-control connector).',
+      '- If authentication is required, guide the user through login and continue.',
+      '- Do not claim lack of access before attempting available MCP tools.',
+      '- Keep operations read-only unless the user explicitly approves send/delete actions.'
+    );
+    return lines.join('\n');
+  }
+
+  function buildAskOriDispatchMessage(prompt, appLaunchRequest, intent, routeContext) {
+    if (intent && intent.key === 'email_check') {
+      return buildEmailDispatchMessage(prompt, routeContext);
+    }
     if (!appLaunchRequest || !appLaunchRequest.appName) {
-      return String(prompt || '').trim();
+      var workspacePrefix = buildWorkspaceContextDispatchPrefix(routeContext);
+      if (!workspacePrefix) return String(prompt || '').trim();
+      return workspacePrefix + String(prompt || '').trim();
     }
     return '/openapp ' + appLaunchRequest.appName;
   }
@@ -450,6 +612,9 @@
       sendBtn: document.getElementById('homeAssistantSendBtn'),
       conversation: document.getElementById('homeAssistantConversation'),
       routingSummary: document.getElementById('homeAssistantRoutingSummary'),
+      thinkingModal: document.getElementById('homeAssistantThinkingModal'),
+      thinkingStatus: document.getElementById('homeAssistantThinkingStatus'),
+      thinkingSpinner: document.getElementById('homeAssistantThinkingSpinner'),
       quickPrompts: document.getElementById('homeAssistantQuickPrompts'),
       actions: document.getElementById('homeAssistantActions'),
       recentSection: document.getElementById('homeAssistantRecentSection'),
@@ -464,6 +629,45 @@
       avatarBtn: document.getElementById('dashboardAssistantAvatarBtn'),
       bubbleBtn: document.getElementById('dashboardAssistantBubbleBtn')
     };
+  }
+
+  function isElementInsideModal(element) {
+    if (!element || typeof element.closest !== 'function') return false;
+    return Boolean(element.closest('.modal'));
+  }
+
+  function getHomeAssistantThinkingModalInstance() {
+    var els = getHomeAssistantElements();
+    if (!els.thinkingModal || typeof bootstrap === 'undefined' || !bootstrap.Modal) return null;
+    if (homeAssistantThinkingModalInstance) return homeAssistantThinkingModalInstance;
+    homeAssistantThinkingModalInstance = bootstrap.Modal.getOrCreateInstance(els.thinkingModal);
+    return homeAssistantThinkingModalInstance;
+  }
+
+  function openHomeAssistantThinkingModal() {
+    var modal = getHomeAssistantThinkingModalInstance();
+    if (!modal) return;
+    modal.show();
+  }
+
+  function syncHomeAssistantThinkingStatus() {
+    var els = getHomeAssistantElements();
+    if (!els.thinkingStatus) return;
+
+    var statusText = '';
+    if (homeAssistantState.routingSummary && homeAssistantState.routingSummary.text) {
+      statusText = homeAssistantState.routingSummary.text;
+    } else if (homeAssistantState.busy) {
+      statusText = 'Working...';
+    } else {
+      statusText = 'Ready for your next task.';
+    }
+
+    var textNode = els.thinkingStatus.querySelector('span:last-child');
+    if (textNode) textNode.textContent = statusText;
+    if (els.thinkingSpinner) {
+      els.thinkingSpinner.classList.toggle('d-none', !homeAssistantState.busy);
+    }
   }
 
   function renderHomeAssistantRoutingSummary() {
@@ -490,12 +694,14 @@
     container.appendChild(title);
     container.appendChild(text);
     container.classList.remove('d-none');
+    syncHomeAssistantThinkingStatus();
   }
 
   function setHomeAssistantRoutingSummary(title, text) {
     if (!title || !text) {
       homeAssistantState.routingSummary = null;
       renderHomeAssistantRoutingSummary();
+      syncHomeAssistantThinkingStatus();
       return;
     }
     homeAssistantState.routingSummary = {
@@ -503,6 +709,9 @@
       text: String(text)
     };
     renderHomeAssistantRoutingSummary();
+    if (homeAssistantState.busy) {
+      openHomeAssistantThinkingModal();
+    }
   }
 
   function setHomeAssistantMode(mode) {
@@ -524,13 +733,11 @@
     if (els.quickPrompts) {
       els.quickPrompts.classList.toggle('d-none', nextMode === 'continue_session');
     }
-    if (els.conversation) {
+    if (els.conversation && !isElementInsideModal(els.conversation)) {
       els.conversation.classList.toggle('d-none', nextMode === 'continue_session');
     }
     if (els.input) {
-      els.input.placeholder = nextMode === 'continue_session'
-        ? 'Type a new task or open one of your recent sessions...'
-        : 'Ask Ori to do something...';
+      els.input.placeholder = 'Ask Ori to do something...';
     }
 
     renderHomeAssistantRecentSessions();
@@ -546,6 +753,7 @@
     saveHomeAssistantAutomationMode();
 
     var els = getHomeAssistantElements();
+    var hasAutomationControls = Boolean(els.autoFullBtn || els.autoSemiBtn);
     if (els.autoFullBtn) {
       var isFull = nextMode === 'full_auto';
       els.autoFullBtn.classList.toggle('is-active', isFull);
@@ -556,6 +764,8 @@
       els.autoSemiBtn.classList.toggle('is-active', isSemi);
       els.autoSemiBtn.setAttribute('aria-selected', isSemi ? 'true' : 'false');
     }
+
+    if (!hasAutomationControls) return;
 
     if (nextMode === 'semi_auto') {
       setHomeAssistantRoutingSummary('Semi-auto', 'Step-by-step confirmations are enabled.');
@@ -597,6 +807,10 @@
     if (els.autoSemiBtn) els.autoSemiBtn.disabled = homeAssistantState.busy;
     if (els.viewAllBtn) els.viewAllBtn.disabled = homeAssistantState.busy;
     if (els.clearRecentBtn) els.clearRecentBtn.disabled = homeAssistantState.busy;
+    if (homeAssistantState.busy) {
+      openHomeAssistantThinkingModal();
+    }
+    syncHomeAssistantThinkingStatus();
   }
 
   function appendHomeAssistantMessage(role, text) {
@@ -633,6 +847,7 @@
       conversation.removeChild(conversation.firstChild);
     }
     conversation.scrollTop = conversation.scrollHeight;
+    openHomeAssistantThinkingModal();
   }
 
   function renderHomeAssistantActions(actions) {
@@ -663,6 +878,7 @@
     }
 
     container.classList.remove('d-none');
+    openHomeAssistantThinkingModal();
   }
 
   function removeTrackedSession(sessionId) {
@@ -838,7 +1054,7 @@
     var text = normalizeToken(prompt);
     var selected = HOME_INTENTS.general_task;
     var selectedScore = 0;
-    var keys = ['travel_planning', 'email_check'];
+    var keys = ['utility_direct', 'travel_planning', 'email_check'];
     for (var i = 0; i < keys.length; i++) {
       var intent = HOME_INTENTS[keys[i]];
       var score = 0;
@@ -861,6 +1077,19 @@
 
   function normalizeMCPServerName(name) {
     return normalizeToken(name).replace(/_/g, '-');
+  }
+
+  function isLegacyMCPServerName(name) {
+    var normalized = normalizeMCPServerName(name);
+    return normalized === 'puppeteer';
+  }
+
+  function findPreferredServerIndex(preferredNames, serverName) {
+    if (!Array.isArray(preferredNames) || !serverName) return -1;
+    for (var i = 0; i < preferredNames.length; i++) {
+      if (preferredNames[i] === serverName) return i;
+    }
+    return -1;
   }
 
   function scoreMCPRequirement(promptText, requirement) {
@@ -894,6 +1123,15 @@
     return best;
   }
 
+  function findMCPRequirementByKey(requirementKey) {
+    if (!requirementKey) return null;
+    for (var i = 0; i < HOME_MCP_REQUIREMENTS.length; i++) {
+      var requirement = HOME_MCP_REQUIREMENTS[i];
+      if (requirement && requirement.key === requirementKey) return requirement;
+    }
+    return null;
+  }
+
   function selectExistingMCPServer(requirement, servers) {
     if (!requirement || !Array.isArray(servers) || servers.length === 0) return null;
     var preferredNames = (requirement.preferredServerNames || []).map(normalizeMCPServerName);
@@ -902,6 +1140,18 @@
       var serverName = normalizeMCPServerName(server && server.name);
       if (!serverName) continue;
       if (preferredNames.indexOf(serverName) >= 0) return server;
+    }
+    return null;
+  }
+
+  function findMCPServerByName(servers, serverName) {
+    if (!Array.isArray(servers) || !serverName) return null;
+    var targetName = normalizeMCPServerName(serverName);
+    for (var i = 0; i < servers.length; i++) {
+      var current = servers[i];
+      if (normalizeMCPServerName(current && current.name) === targetName) {
+        return current;
+      }
     }
     return null;
   }
@@ -915,7 +1165,12 @@
     var preferredNames = (requirement.preferredServerNames || []).map(normalizeMCPServerName);
     var preferredCategories = (requirement.preferredCategories || []).map(normalizeToken);
 
-    if (preferredNames.indexOf(serverName) >= 0) score += 100;
+    var preferredNameIndex = findPreferredServerIndex(preferredNames, serverName);
+    if (preferredNameIndex >= 0) {
+      score += 100;
+      score += (preferredNames.length - preferredNameIndex) * 8;
+    }
+    if (serverName && scoreMCPRequirement(serverName.replace(/-/g, ' '), requirement) > 0) score += 35;
     if (preferredCategories.indexOf(category) >= 0) score += 40;
     if (description && scoreMCPRequirement(description, requirement) > 0) score += 20;
     if (promptText && serverName && promptText.indexOf(serverName) >= 0) score += 10;
@@ -993,9 +1248,898 @@
     }
   }
 
-  async function ensureMCPForTask(agentName, prompt) {
+  async function fetchConfiguredMCPServerSnapshot() {
+    if (typeof API === 'undefined' || typeof API.get !== 'function') {
+      return { servers: [], stats: {} };
+    }
+    try {
+      var data = await API.get('/api/mcp/servers');
+      return {
+        servers: Array.isArray(data && data.servers) ? data.servers : [],
+        stats: data && data.stats && typeof data.stats === 'object' ? data.stats : {}
+      };
+    } catch (error) {
+      dashLog.debug('Failed to fetch configured MCP servers', { error: error && error.message || error });
+      return { servers: [], stats: {} };
+    }
+  }
+
+  async function fetchConfiguredMCPServers() {
+    var snapshot = await fetchConfiguredMCPServerSnapshot();
+    return snapshot.servers;
+  }
+
+  async function fetchMCPRegistryServers() {
+    if (typeof API === 'undefined' || typeof API.get !== 'function') return [];
+    try {
+      var data = await API.get('/api/mcp/search');
+      if (Array.isArray(data)) return data;
+      if (Array.isArray(data && data.servers)) return data.servers;
+      return [];
+    } catch (error) {
+      dashLog.debug('Failed to fetch MCP browse registry', { error: error && error.message || error });
+      return [];
+    }
+  }
+
+  function lookupMCPServerStats(statsMap, serverName) {
+    if (!statsMap || typeof statsMap !== 'object' || !serverName) return null;
+    if (statsMap[serverName]) return statsMap[serverName];
+    var targetName = normalizeMCPServerName(serverName);
+    var keys = Object.keys(statsMap);
+    for (var i = 0; i < keys.length; i++) {
+      var key = keys[i];
+      if (normalizeMCPServerName(key) === targetName) {
+        return statsMap[key];
+      }
+    }
+    return null;
+  }
+
+  function scoreConfiguredMCPServer(requirement, server, promptText) {
+    if (!requirement || !server) return 0;
+    var score = 0;
+    var serverName = normalizeMCPServerName(server.name);
+    var category = normalizeToken(server.category);
+    var description = normalizeToken(server.description);
+    var preferredNames = (requirement.preferredServerNames || []).map(normalizeMCPServerName);
+    var preferredCategories = (requirement.preferredCategories || []).map(normalizeToken);
+
+    var preferredNameIndex = findPreferredServerIndex(preferredNames, serverName);
+    if (preferredNameIndex >= 0) {
+      score += 100;
+      score += (preferredNames.length - preferredNameIndex) * 8;
+    }
+    if (serverName && scoreMCPRequirement(serverName.replace(/-/g, ' '), requirement) > 0) score += 35;
+    if (preferredCategories.indexOf(category) >= 0) score += 30;
+    if (description && scoreMCPRequirement(description, requirement) > 0) score += 20;
+    if (promptText && serverName && promptText.indexOf(serverName) >= 0) score += 10;
+
+    return score;
+  }
+
+  function scoreRegistryMCPServer(requirement, server, promptText) {
+    if (!requirement || !server) return 0;
+    var score = 0;
+    var serverName = normalizeMCPServerName(server.name);
+    var category = normalizeToken(server.category);
+    var description = normalizeToken(server.description);
+    var tags = Array.isArray(server.tags) ? normalizeToken(server.tags.join(' ')) : '';
+    var preferredNames = (requirement.preferredServerNames || []).map(normalizeMCPServerName);
+    var preferredCategories = (requirement.preferredCategories || []).map(normalizeToken);
+
+    var preferredNameIndex = findPreferredServerIndex(preferredNames, serverName);
+    if (preferredNameIndex >= 0) {
+      score += 100;
+      score += (preferredNames.length - preferredNameIndex) * 8;
+    }
+    if (serverName && scoreMCPRequirement(serverName.replace(/-/g, ' '), requirement) > 0) score += 35;
+    if (preferredCategories.indexOf(category) >= 0) score += 30;
+    if (description && scoreMCPRequirement(description, requirement) > 0) score += 20;
+    if (tags && scoreMCPRequirement(tags, requirement) > 0) score += 15;
+    if (promptText && serverName && promptText.indexOf(serverName) >= 0) score += 10;
+
+    return score;
+  }
+
+  function chooseConfiguredMCPServers(requirement, prompt, configuredServers, limit) {
+    if (!requirement || !Array.isArray(configuredServers) || configuredServers.length === 0) return [];
+    var promptText = normalizeToken(prompt);
+    var ranked = [];
+    for (var i = 0; i < configuredServers.length; i++) {
+      var server = configuredServers[i];
+      var score = scoreConfiguredMCPServer(requirement, server, promptText);
+      if (score <= 0) continue;
+      ranked.push({ server: server, score: score });
+    }
+    if (ranked.length === 0) return [];
+
+    ranked.sort(function (a, b) {
+      return b.score - a.score;
+    });
+
+    var max = typeof limit === 'number' && limit > 0 ? Math.floor(limit) : 1;
+    var selected = [];
+    for (var j = 0; j < ranked.length && j < max; j++) {
+      selected.push(ranked[j].server);
+    }
+    return selected;
+  }
+
+  function chooseRegistryMCPServers(requirement, prompt, registryServers, limit) {
+    if (!requirement || !Array.isArray(registryServers) || registryServers.length === 0) return [];
+    var promptText = normalizeToken(prompt);
+    var ranked = [];
+    for (var i = 0; i < registryServers.length; i++) {
+      var server = registryServers[i];
+      var score = scoreRegistryMCPServer(requirement, server, promptText);
+      if (score <= 0) continue;
+      ranked.push({ server: server, score: score });
+    }
+    if (ranked.length === 0) return [];
+
+    ranked.sort(function (a, b) {
+      return b.score - a.score;
+    });
+
+    var max = typeof limit === 'number' && limit > 0 ? Math.floor(limit) : 1;
+    var selected = [];
+    for (var j = 0; j < ranked.length && j < max; j++) {
+      selected.push(ranked[j].server);
+    }
+    return selected;
+  }
+
+  function buildEmailMCPCandidateFromConfigured(server, stat) {
+    var runtimeLabel = String(stat && stat.status || server && server.status || '').trim();
+    var runtimeStatus = normalizeToken(runtimeLabel);
+    var legacy = isLegacyMCPServerName(server && server.name);
+    return {
+      name: String(server && server.name || '').trim(),
+      description: String(server && server.description || '').trim(),
+      category: String(server && server.category || '').trim(),
+      source: 'configured',
+      isInstalled: true,
+      selectable: true,
+      enabled: Boolean(stat && stat.enabled || server && server.enabled),
+      runtimeLabel: runtimeLabel,
+      runtimeStatus: runtimeStatus,
+      manualReason: '',
+      legacy: legacy,
+      legacyReason: legacy ? 'Puppeteer MCP is deprecated upstream. Playwright is recommended.' : '',
+      rawServer: server
+    };
+  }
+
+  function buildEmailMCPCandidateFromRegistry(server) {
+    var manualReason = getMCPManualConfigReason(server);
+    var legacy = isLegacyMCPServerName(server && server.name);
+    return {
+      name: String(server && server.name || '').trim(),
+      description: String(server && server.description || '').trim(),
+      category: String(server && server.category || '').trim(),
+      source: String(server && server.source || 'registry').trim() || 'registry',
+      isInstalled: false,
+      selectable: !manualReason,
+      enabled: false,
+      runtimeLabel: '',
+      runtimeStatus: '',
+      manualReason: manualReason,
+      legacy: legacy,
+      legacyReason: legacy ? 'Puppeteer MCP is deprecated upstream. Playwright is recommended.' : '',
+      rawServer: server
+    };
+  }
+
+  function filterEmailMCPCandidates(candidates, query) {
+    if (!Array.isArray(candidates) || candidates.length === 0) return [];
+    var normalizedQuery = normalizeToken(query);
+    if (!normalizedQuery) return candidates.slice();
+    var filtered = [];
+    for (var i = 0; i < candidates.length; i++) {
+      var candidate = candidates[i];
+      var haystack = [
+        candidate.name,
+        candidate.description,
+        candidate.category,
+        candidate.source
+      ].join(' ');
+      if (normalizeToken(haystack).indexOf(normalizedQuery) >= 0) {
+        filtered.push(candidate);
+      }
+    }
+    return filtered;
+  }
+
+  async function buildScopedMCPBrowseCandidates(requirement, prompt) {
+    if (!requirement) return { requirement: null, candidates: [] };
+    var snapshot = { servers: [], stats: {} };
+    var registryServers = [];
+    var marketplaceServers = [];
+    try {
+      var loaded = await Promise.all([
+        fetchConfiguredMCPServerSnapshot(),
+        fetchMCPRegistryServers(),
+        fetchMarketplaceMCPServers()
+      ]);
+      snapshot = loaded[0] || snapshot;
+      registryServers = Array.isArray(loaded[1]) ? loaded[1] : [];
+      marketplaceServers = Array.isArray(loaded[2]) ? loaded[2] : [];
+    } catch (error) {
+      dashLog.debug('Failed to build MCP browse candidates', { error: error && error.message || error });
+    }
+
+    var configuredMatches = chooseConfiguredMCPServers(requirement, prompt, snapshot.servers, 6);
+    var registryMatches = chooseRegistryMCPServers(requirement, prompt, registryServers, 12);
+    if (registryMatches.length === 0) {
+      var marketplaceCandidate = chooseMarketplaceMCPServer(requirement, prompt, marketplaceServers);
+      if (marketplaceCandidate) {
+        registryMatches = [marketplaceCandidate];
+      }
+    }
+
+    var candidates = [];
+    var seen = Object.create(null);
+
+    for (var i = 0; i < configuredMatches.length; i++) {
+      var configuredServer = configuredMatches[i];
+      var configuredName = normalizeMCPServerName(configuredServer && configuredServer.name);
+      if (!configuredName || seen[configuredName]) continue;
+      seen[configuredName] = true;
+      candidates.push(buildEmailMCPCandidateFromConfigured(
+        configuredServer,
+        lookupMCPServerStats(snapshot.stats, configuredServer.name)
+      ));
+    }
+
+    for (var j = 0; j < registryMatches.length; j++) {
+      var registryServer = registryMatches[j];
+      var registryName = normalizeMCPServerName(registryServer && registryServer.name);
+      if (!registryName || seen[registryName]) continue;
+      seen[registryName] = true;
+      candidates.push(buildEmailMCPCandidateFromRegistry(registryServer));
+    }
+
+    return { requirement: requirement, candidates: candidates };
+  }
+
+  function resolveEmailMCPRequirement(prompt) {
+    var requirement = detectMCPRequirement(prompt);
+    if (!requirement || requirement.key !== 'email_inbox') {
+      requirement = findMCPRequirementByKey('email_inbox');
+    }
+    return requirement;
+  }
+
+  function resolveBrowserMCPRequirement() {
+    return findMCPRequirementByKey('browser_automation') || {
+      key: 'browser_automation',
+      label: 'browser automation',
+      phrases: ['browser automation', 'control browser', 'use browser', 'website automation', 'playwright', 'browserbase', 'puppeteer'],
+      preferredServerNames: ['playwright', 'browserbase', 'puppeteer'],
+      preferredCategories: ['automation', 'development', 'productivity']
+    };
+  }
+
+  async function buildEmailMCPBrowseCandidates(prompt) {
+    return buildScopedMCPBrowseCandidates(resolveEmailMCPRequirement(prompt), prompt);
+  }
+
+  async function buildBrowserMCPBrowseCandidates(prompt) {
+    return buildScopedMCPBrowseCandidates(resolveBrowserMCPRequirement(), prompt);
+  }
+
+  async function installMCPServerCandidate(candidate) {
+    if (!candidate || !candidate.name) {
+      return { status: 'invalid_selection', message: 'Select an MCP server first.' };
+    }
+    if (candidate.isInstalled) {
+      return { status: 'already_installed', serverName: candidate.name };
+    }
+    if (candidate.manualReason) {
+      return {
+        status: 'manual_config_required',
+        serverName: candidate.name,
+        message: 'The selected server "' + candidate.name + '" cannot be auto-installed because it ' + candidate.manualReason + '.'
+      };
+    }
+
+    var payload = buildMCPServerInstallPayload(candidate.rawServer || candidate);
+    if (!payload.name || !payload.command) {
+      return {
+        status: 'invalid_candidate',
+        message: 'The selected MCP server has incomplete install details. Open MCP settings to configure it manually.'
+      };
+    }
+
+    try {
+      await API.post('/api/mcp/servers', payload);
+      return {
+        status: 'installed',
+        serverName: payload.name
+      };
+    } catch (error) {
+      var installError = String(error && error.message || error || '');
+      if (installError.toLowerCase().indexOf('already exists') >= 0) {
+        return {
+          status: 'already_installed',
+          serverName: payload.name
+        };
+      }
+      return {
+        status: 'install_failed',
+        serverName: payload.name,
+        message: 'Failed to install MCP server "' + payload.name + '": ' + installError
+      };
+    }
+  }
+
+  async function enableMCPServerForAgent(agentName, serverName) {
+    if (!agentName || !serverName) {
+      return { status: 'enable_failed', message: 'Agent name and MCP server are required.' };
+    }
+    try {
+      await API.post('/api/agents/' + encodeURIComponent(agentName) + '/mcp-servers/' + encodeURIComponent(serverName) + '/enable', {});
+    } catch (error) {
+      var enableError = String(error && error.message || error || '');
+      return {
+        status: 'enable_failed',
+        serverName: serverName,
+        message: 'Failed to attach MCP server "' + serverName + '" to "' + agentName + '": ' + enableError
+      };
+    }
+
+    var agentServers = await fetchAgentMCPServers(agentName);
+    var attached = findMCPServerByName(agentServers, serverName);
+    var runtimeStatus = normalizeToken(attached && attached.status);
+    if (runtimeStatus && runtimeStatus !== 'running') {
+      return {
+        status: 'attached_not_running',
+        serverName: serverName,
+        runtimeStatus: String(attached && attached.status || 'unknown'),
+        message: 'Attached MCP server "' + serverName + '" to "' + agentName + '", but it is currently "' + (attached && attached.status || 'unknown') + '".'
+      };
+    }
+
+    return {
+      status: 'attached_running',
+      serverName: serverName,
+      message: 'Attached MCP server "' + serverName + '" to "' + agentName + '".'
+    };
+  }
+
+  async function applyEmailMCPCandidate(agentName, candidate) {
+    var installOutcome = await installMCPServerCandidate(candidate);
+    var status = normalizeToken(installOutcome && installOutcome.status);
+    if (!status || ['installed', 'already_installed'].indexOf(status) < 0) {
+      return installOutcome;
+    }
+
+    if (!agentName) {
+      return {
+        status: status === 'installed' ? 'installed_only' : 'already_installed',
+        serverName: installOutcome.serverName || candidate && candidate.name,
+        message: status === 'installed'
+          ? 'Installed MCP server "' + (installOutcome.serverName || candidate && candidate.name || 'selected server') + '".'
+          : 'MCP server "' + (installOutcome.serverName || candidate && candidate.name || 'selected server') + '" is already installed.'
+      };
+    }
+
+    return enableMCPServerForAgent(agentName, installOutcome.serverName || candidate && candidate.name);
+  }
+
+  async function openScopedMCPBrowseModal(agentName, prompt, options) {
+    var modalOptions = options || {};
+    var buildCandidates = typeof modalOptions.buildCandidates === 'function'
+      ? modalOptions.buildCandidates
+      : null;
+    if (!buildCandidates) return { status: 'invalid_config' };
+
+    var bundle = await buildCandidates(prompt);
+    var candidates = Array.isArray(bundle && bundle.candidates) ? bundle.candidates : [];
+    var modalPrefix = String(modalOptions.modalPrefix || 'homeMCPBrowseModal').trim() || 'homeMCPBrowseModal';
+    var modalId = modalPrefix + '-' + Date.now();
+    var searchId = modalId + '-search';
+    var countId = modalId + '-count';
+    var listId = modalId + '-list';
+    var noteId = modalId + '-note';
+    var confirmId = modalId + '-confirm';
+    var skipId = modalId + '-skip';
+    var openPageId = modalId + '-open';
+    var switchId = modalId + '-switch';
+    var radioGroupName = modalId + '-choice';
+
+    var switchLabel = String(modalOptions.switchLabel || '').trim();
+    var switchTarget = String(modalOptions.switchTarget || '').trim();
+
+    var modalElement = document.createElement('div');
+    modalElement.className = 'modal fade';
+    modalElement.id = modalId;
+    modalElement.tabIndex = -1;
+    modalElement.setAttribute('aria-hidden', 'true');
+    modalElement.innerHTML = ''
+      + '<div class="modal-dialog modal-lg modal-dialog-scrollable">'
+      + '  <div class="modal-content" style="background: var(--bg-secondary); border: 1px solid var(--border-color);">'
+      + '    <div class="modal-header" style="border-bottom: 1px solid var(--border-color);">'
+      + '      <h5 class="modal-title" style="color: var(--text-primary);">' + String(modalOptions.title || 'Browse MCP Connectors') + '</h5>'
+      + '      <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>'
+      + '    </div>'
+      + '    <div class="modal-body">'
+      + '      <p class="small mb-3" style="color: var(--text-secondary);">' + String(modalOptions.description || 'Select an MCP connector and apply it with explicit approval.') + '</p>'
+      + '      <div class="input-group mb-2">'
+      + '        <span class="input-group-text" style="background: var(--bg-tertiary); border-color: var(--border-color); color: var(--text-secondary);">Search</span>'
+      + '        <input id="' + searchId + '" type="text" class="form-control" placeholder="' + String(modalOptions.searchPlaceholder || 'Search connectors...') + '" style="background: var(--bg-tertiary); border-color: var(--border-color); color: var(--text-primary);">'
+      + '      </div>'
+      + '      <div id="' + countId + '" class="small mb-2" style="color: var(--text-secondary);"></div>'
+      + '      <div id="' + listId + '" class="list-group" style="max-height: 360px; overflow-y: auto;"></div>'
+      + '      <div id="' + noteId + '" class="small mt-3" style="color: var(--text-secondary);"></div>'
+      + '    </div>'
+      + '    <div class="modal-footer" style="border-top: 1px solid var(--border-color);">'
+      + '      <button id="' + openPageId + '" type="button" class="modern-btn modern-btn-secondary">Open MCP Page</button>'
+      + (switchLabel
+        ? ('      <button id="' + switchId + '" type="button" class="modern-btn modern-btn-secondary">' + switchLabel + '</button>')
+        : '')
+      + '      <button id="' + skipId + '" type="button" class="modern-btn modern-btn-secondary">'
+      + (agentName ? String(modalOptions.skipWithAgentLabel || 'Continue Without MCP') : String(modalOptions.skipWithoutAgentLabel || 'Close'))
+      + '      </button>'
+      + '      <button id="' + confirmId + '" type="button" class="modern-btn modern-btn-primary" disabled>'
+      + (agentName ? String(modalOptions.confirmWithAgentLabel || 'Use Selected & Continue') : String(modalOptions.confirmWithoutAgentLabel || 'Install Selected'))
+      + '      </button>'
+      + '    </div>'
+      + '  </div>'
+      + '</div>';
+
+    document.body.appendChild(modalElement);
+
+    var searchInput = modalElement.querySelector('#' + searchId);
+    var countElement = modalElement.querySelector('#' + countId);
+    var listElement = modalElement.querySelector('#' + listId);
+    var noteElement = modalElement.querySelector('#' + noteId);
+    var confirmButton = modalElement.querySelector('#' + confirmId);
+    var skipButton = modalElement.querySelector('#' + skipId);
+    var openPageButton = modalElement.querySelector('#' + openPageId);
+    var switchButton = modalElement.querySelector('#' + switchId);
+
+    var selectedName = '';
+    var finalResult = null;
+
+    function setNote(text, isError) {
+      if (!noteElement) return;
+      noteElement.style.color = isError ? 'var(--danger-color, #dc3545)' : 'var(--text-secondary)';
+      noteElement.textContent = String(text || '');
+    }
+
+    function updateConfirmState() {
+      if (!confirmButton) return;
+      confirmButton.disabled = !selectedName;
+    }
+
+    function renderCandidateList() {
+      if (!listElement) return;
+      listElement.innerHTML = '';
+
+      var filtered = filterEmailMCPCandidates(candidates, searchInput && searchInput.value || '');
+      if (countElement) {
+        countElement.textContent = filtered.length + ' connector(s) found';
+      }
+
+      if (filtered.length === 0) {
+        var empty = document.createElement('div');
+        empty.className = 'text-center py-4';
+        empty.style.color = 'var(--text-secondary)';
+        empty.textContent = String(modalOptions.emptyStateText || 'No matching MCP connectors found.');
+        listElement.appendChild(empty);
+        selectedName = '';
+        updateConfirmState();
+        return;
+      }
+
+      for (var i = 0; i < filtered.length; i++) {
+        (function (candidate) {
+          var row = document.createElement('label');
+          row.className = 'list-group-item';
+          row.style.background = 'var(--bg-tertiary)';
+          row.style.borderColor = 'var(--border-color)';
+          row.style.cursor = candidate.selectable ? 'pointer' : 'not-allowed';
+
+          var wrapper = document.createElement('div');
+          wrapper.className = 'd-flex align-items-start';
+          wrapper.style.gap = '0.6rem';
+
+          var radio = document.createElement('input');
+          radio.type = 'radio';
+          radio.className = 'form-check-input mt-1';
+          radio.name = radioGroupName;
+          radio.value = candidate.name;
+          radio.disabled = !candidate.selectable;
+          radio.checked = selectedName === candidate.name;
+          radio.addEventListener('change', function () {
+            selectedName = candidate.name;
+            updateConfirmState();
+            setNote(candidate.manualReason ? ('Note: ' + candidate.manualReason + '.') : '', false);
+          });
+
+          var content = document.createElement('div');
+          content.style.flex = '1';
+
+          var top = document.createElement('div');
+          top.className = 'd-flex align-items-center justify-content-between flex-wrap';
+          top.style.gap = '0.4rem';
+
+          var name = document.createElement('strong');
+          name.style.color = 'var(--text-primary)';
+          name.textContent = candidate.name;
+
+          var badges = document.createElement('div');
+          badges.className = 'd-flex align-items-center flex-wrap';
+          badges.style.gap = '0.35rem';
+
+          function addBadge(text, className) {
+            var badge = document.createElement('span');
+            badge.className = 'badge ' + className;
+            badge.textContent = text;
+            badges.appendChild(badge);
+          }
+
+          if (candidate.category) addBadge(candidate.category, 'bg-secondary');
+          if (candidate.source) addBadge(candidate.source, 'bg-dark');
+          if (candidate.isInstalled) addBadge('installed', 'bg-primary');
+          if (candidate.runtimeLabel) addBadge(candidate.runtimeLabel, candidate.runtimeStatus === 'running' ? 'bg-success' : 'bg-warning text-dark');
+          if (candidate.legacy) addBadge('legacy', 'bg-warning text-dark');
+          if (!candidate.selectable && candidate.manualReason) addBadge('manual setup', 'bg-warning text-dark');
+
+          top.appendChild(name);
+          top.appendChild(badges);
+
+          var description = document.createElement('div');
+          description.className = 'small mt-1';
+          description.style.color = 'var(--text-secondary)';
+          description.textContent = candidate.description || 'No description provided.';
+
+          var note = document.createElement('div');
+          note.className = 'small mt-1';
+          note.style.color = candidate.manualReason ? 'var(--warning-color, #ffc107)' : 'var(--text-secondary)';
+          if (candidate.manualReason) {
+            note.textContent = 'Requires manual setup: ' + candidate.manualReason + '.';
+          } else if (candidate.legacy && candidate.legacyReason) {
+            note.textContent = candidate.legacyReason;
+          } else if (candidate.isInstalled && candidate.enabled) {
+            note.textContent = 'Already enabled globally.';
+          } else if (candidate.isInstalled) {
+            note.textContent = 'Installed. Selecting this will attach it to the agent.';
+          } else {
+            note.textContent = String(modalOptions.pendingInstallText || 'Will be installed and then attached.');
+          }
+
+          content.appendChild(top);
+          content.appendChild(description);
+          content.appendChild(note);
+
+          wrapper.appendChild(radio);
+          wrapper.appendChild(content);
+          row.appendChild(wrapper);
+
+          if (candidate.selectable) {
+            row.addEventListener('click', function () {
+              selectedName = candidate.name;
+              radio.checked = true;
+              updateConfirmState();
+              setNote('', false);
+            });
+          }
+
+          listElement.appendChild(row);
+        })(filtered[i]);
+      }
+    }
+
+    return new Promise(function (resolve) {
+      var bsModal = new bootstrap.Modal(modalElement, { backdrop: 'static', keyboard: false });
+      var done = false;
+
+      function closeWith(result) {
+        finalResult = result;
+        bsModal.hide();
+      }
+
+      modalElement.addEventListener('hidden.bs.modal', function () {
+        if (done) return;
+        done = true;
+        modalElement.remove();
+        resolve(finalResult || { status: 'cancelled' });
+      }, { once: true });
+
+      if (searchInput) {
+        searchInput.addEventListener('input', function () {
+          renderCandidateList();
+          setNote('', false);
+        });
+      }
+
+      if (openPageButton) {
+        openPageButton.addEventListener('click', function () {
+          closeWith({ status: 'opened_mcp_page' });
+          window.location.href = '/mcp';
+        });
+      }
+
+      if (switchButton) {
+        switchButton.addEventListener('click', function () {
+          closeWith({ status: 'switch_browse', target: switchTarget });
+        });
+      }
+
+      if (skipButton) {
+        skipButton.addEventListener('click', function () {
+          if (agentName) {
+            closeWith({ status: 'continue_without_mcp' });
+          } else {
+            closeWith({ status: 'cancelled' });
+          }
+        });
+      }
+
+      if (confirmButton) {
+        confirmButton.addEventListener('click', async function () {
+          if (!selectedName) return;
+          var selectedCandidate = null;
+          for (var i = 0; i < candidates.length; i++) {
+            if (candidates[i].name === selectedName) {
+              selectedCandidate = candidates[i];
+              break;
+            }
+          }
+          if (!selectedCandidate) return;
+
+          confirmButton.disabled = true;
+          skipButton.disabled = true;
+          openPageButton.disabled = true;
+          if (switchButton) switchButton.disabled = true;
+          var originalLabel = confirmButton.textContent;
+          confirmButton.textContent = agentName
+            ? String(modalOptions.progressWithAgentLabel || 'Applying...')
+            : String(modalOptions.progressWithoutAgentLabel || 'Installing...');
+
+          try {
+            var outcome = await applyEmailMCPCandidate(agentName, selectedCandidate);
+            var outcomeStatus = normalizeToken(outcome && outcome.status);
+            if (['attached_running', 'installed_only', 'already_installed'].indexOf(outcomeStatus) >= 0) {
+              closeWith(outcome);
+              return;
+            }
+            setNote(outcome && outcome.message ? outcome.message : 'Could not apply the selected MCP connector.', true);
+          } catch (error) {
+            setNote(String(error && error.message || error || 'Unexpected MCP setup failure'), true);
+          } finally {
+            if (confirmButton) {
+              confirmButton.textContent = originalLabel;
+              confirmButton.disabled = !selectedName;
+            }
+            if (skipButton) skipButton.disabled = false;
+            if (openPageButton) openPageButton.disabled = false;
+            if (switchButton) switchButton.disabled = false;
+          }
+        });
+      }
+
+      renderCandidateList();
+      updateConfirmState();
+      bsModal.show();
+    });
+  }
+
+  async function openEmailMCPBrowseModal(agentName, prompt) {
+    return openScopedMCPBrowseModal(agentName, prompt, {
+      modalPrefix: 'homeEmailMCPBrowseModal',
+      title: 'Browse Email MCP Connectors',
+      description: 'Select an email connector for Gmail, Outlook, or IMAP. You can search, select, and apply without leaving this flow.',
+      searchPlaceholder: 'gmail, outlook, imap...',
+      emptyStateText: 'No matching email MCP connectors found.',
+      pendingInstallText: 'Will be installed and then attached.',
+      switchLabel: 'Use Browser Control',
+      switchTarget: 'browser_control',
+      buildCandidates: buildEmailMCPBrowseCandidates
+    });
+  }
+
+  async function openBrowserControlMCPBrowseModal(agentName, prompt) {
+    return openScopedMCPBrowseModal(agentName, prompt, {
+      modalPrefix: 'homeBrowserMCPBrowseModal',
+      title: 'Browse Browser Control MCP',
+      description: 'Select a browser-control connector (Playwright, Browserbase, or Puppeteer). Use this when email APIs are unavailable and you want guided browser-based access.',
+      searchPlaceholder: 'playwright, browserbase, puppeteer...',
+      emptyStateText: 'No matching browser-control MCP connectors found.',
+      pendingInstallText: 'Will be installed and then attached for browser-control tasks.',
+      switchLabel: 'Use Email Connector',
+      switchTarget: 'email_connector',
+      buildCandidates: buildBrowserMCPBrowseCandidates
+    });
+  }
+
+  async function runEmailAccessMCPSelection(agentName, prompt, startingMode) {
+    var mode = normalizeToken(startingMode) === 'browser' ? 'browser' : 'email';
+    for (var i = 0; i < 4; i++) {
+      var result = mode === 'browser'
+        ? await openBrowserControlMCPBrowseModal(agentName, prompt)
+        : await openEmailMCPBrowseModal(agentName, prompt);
+      var status = normalizeToken(result && result.status);
+      if (status === 'switch_browse') {
+        var target = normalizeToken(result && result.target);
+        mode = target === 'browser_control' ? 'browser' : 'email';
+        continue;
+      }
+      return result || { status: 'cancelled' };
+    }
+    return { status: 'cancelled' };
+  }
+
+  function formatEmailMCPOptionSummary(emailAdvice) {
+    if (!emailAdvice) return '';
+    var lines = [];
+    var configured = Array.isArray(emailAdvice.configuredMatches) ? emailAdvice.configuredMatches : [];
+    var marketplace = emailAdvice.marketplaceMatch;
+
+    lines.push('Email setup options:');
+    lines.push('1) Browse and select an email MCP connector (recommended).');
+    if (configured.length > 0) {
+      var configuredNames = [];
+      for (var i = 0; i < configured.length; i++) {
+        configuredNames.push(String(configured[i].name || '').trim());
+      }
+      lines.push('   Available now: ' + configuredNames.filter(Boolean).join(', ') + '.');
+    } else if (marketplace && marketplace.name) {
+      lines.push('   Suggested MCP from marketplace: "' + marketplace.name + '".');
+    } else {
+      lines.push('   If no connector is installed yet, browse and add Gmail, Outlook, or IMAP.');
+    }
+    lines.push('2) Use Browser Control MCP (Playwright/Browserbase/Puppeteer) when mailbox APIs are unavailable.');
+    lines.push('3) Create a dedicated Email Assistant and attach MCP after setup.');
+    lines.push('Safety defaults: start read-only and require explicit approval before sending or deleting.');
+
+    return lines.join('\n');
+  }
+
+  async function buildEmailSolutionAdvice(prompt) {
+    var requirement = detectMCPRequirement(prompt);
+    if (!requirement || requirement.key !== 'email_inbox') {
+      requirement = findMCPRequirementByKey('email_inbox');
+    }
+    if (!requirement) return null;
+
+    var configuredServers = [];
+    var marketplaceServers = [];
+    try {
+      var loaded = await Promise.all([
+        fetchConfiguredMCPServers(),
+        fetchMarketplaceMCPServers()
+      ]);
+      configuredServers = Array.isArray(loaded[0]) ? loaded[0] : [];
+      marketplaceServers = Array.isArray(loaded[1]) ? loaded[1] : [];
+    } catch (error) {
+      dashLog.debug('Failed to prepare email MCP advice', { error: error && error.message || error });
+    }
+
+    return {
+      requirement: requirement,
+      configuredMatches: chooseConfiguredMCPServers(requirement, prompt, configuredServers, 2),
+      marketplaceMatch: chooseMarketplaceMCPServer(requirement, prompt, marketplaceServers)
+    };
+  }
+
+  async function renderEmailSolutionActions(prompt) {
+    var advice = await buildEmailSolutionAdvice(prompt);
+    var summary = formatEmailMCPOptionSummary(advice);
+    if (summary) {
+      appendHomeAssistantMessage('assistant', summary);
+    }
+
+    homeAssistantState.awaitingCreateConfirmation = true;
+    setHomeAssistantRoutingSummary('Email Setup Options', 'Choose email MCP, browser control MCP, or create a dedicated email agent.');
+
+    function openSelection(mode) {
+      runEmailAccessMCPSelection('', prompt, mode).then(function (result) {
+        var resultStatus = normalizeToken(result && result.status);
+        if (resultStatus === 'installed_only' || resultStatus === 'already_installed') {
+          appendHomeAssistantMessage('assistant', result.message || 'Selected MCP connector is ready.');
+        } else if (resultStatus === 'opened_mcp_page') {
+          appendHomeAssistantMessage('assistant', 'Opened MCP settings so you can review connector details.');
+        }
+      }).catch(function (error) {
+        dashLog.debug('Email MCP browse modal failed', { error: error && error.message || error });
+      });
+    }
+
+    renderHomeAssistantActions([
+      {
+        label: 'Browse Email MCP',
+        variant: 'primary',
+        onClick: function () { openSelection('email'); }
+      },
+      {
+        label: 'Use Browser Control',
+        variant: 'secondary',
+        onClick: function () { openSelection('browser'); }
+      },
+      {
+        label: 'Create Email Agent',
+        variant: 'secondary',
+        onClick: function () { createAgentForPendingTask(); }
+      },
+      {
+        label: 'Ask Another Task',
+        variant: 'secondary',
+        onClick: function () { focusHomeAssistantInput(); }
+      }
+    ]);
+  }
+
+  function shouldPauseForEmailMCPSelection(mcpOutcome) {
+    var status = normalizeToken(mcpOutcome && mcpOutcome.status);
+    if (!status) return true;
+    if (['already_enabled', 'enabled_existing', 'installed_and_enabled'].indexOf(status) >= 0) {
+      return false;
+    }
+    return true;
+  }
+
+  async function maybeResolveEmailMCPBeforeHandoff(agentName, prompt, mcpOutcome) {
+    if (!agentName) {
+      return { continueHandoff: false };
+    }
+    if (!shouldPauseForEmailMCPSelection(mcpOutcome)) {
+      return { continueHandoff: true };
+    }
+
+    appendHomeAssistantMessage('assistant', 'Before handoff, select an email connector or browser-control connector so this task can access your inbox.');
+    setHomeAssistantRoutingSummary('Email MCP Required', 'Select an email or browser-control connector before continuing.');
+
+    var selection = await runEmailAccessMCPSelection(agentName, prompt, 'email');
+    var selectionStatus = normalizeToken(selection && selection.status);
+
+    if (selectionStatus === 'attached_running') {
+      appendHomeAssistantMessage('assistant', selection.message || ('Attached MCP server "' + (selection.serverName || 'selected server') + '".'));
+      if (isLegacyMCPServerName(selection && selection.serverName)) {
+        appendHomeAssistantMessage('assistant', 'Note: Puppeteer MCP is legacy/deprecated. Playwright is recommended for browser control.');
+      }
+      return { continueHandoff: true };
+    }
+
+    if (selectionStatus === 'continue_without_mcp') {
+      appendHomeAssistantMessage('assistant', 'Continuing without an MCP connector. Email access may be unavailable.');
+      return { continueHandoff: true };
+    }
+
+    if (selectionStatus === 'attached_not_running') {
+      appendHomeAssistantMessage('assistant', selection.message || 'Selected MCP connector is not running yet. Configure it before handoff.');
+      setHomeAssistantRoutingSummary('MCP Needs Configuration', 'Selected email connector is attached but not running yet.');
+      renderHomeAssistantActions([
+        {
+          label: 'Open MCP Settings',
+          variant: 'primary',
+          onClick: function () { window.location.href = '/mcp'; }
+        },
+        {
+          label: 'Ask Another Task',
+          variant: 'secondary',
+          onClick: function () { focusHomeAssistantInput(); }
+        }
+      ]);
+      return { continueHandoff: false };
+    }
+
+    if (selection && selection.message) {
+      appendHomeAssistantMessage('assistant', selection.message);
+    } else {
+      appendHomeAssistantMessage('assistant', 'Email handoff paused. Select an MCP connector when you are ready.');
+    }
+    setHomeAssistantRoutingSummary('Waiting for MCP Selection', 'Email task is paused until MCP setup is completed.');
+    return { continueHandoff: false };
+  }
+
+  async function ensureMCPForTask(agentName, prompt, options) {
     var requirement = detectMCPRequirement(prompt);
     if (!requirement || !agentName) return null;
+    var allowMutations = !(options && options.allowMutations === false);
 
     var currentServers = await fetchAgentMCPServers(agentName);
     var existing = selectExistingMCPServer(requirement, currentServers);
@@ -1015,6 +2159,14 @@
       };
     }
 
+    if (existing && !allowMutations) {
+      return {
+        status: 'existing_disabled',
+        serverName: existing.name,
+        message: 'MCP server "' + existing.name + '" matches this task but is not enabled for "' + agentName + '".'
+      };
+    }
+
     var targetServerName = existing && existing.name ? existing.name : '';
     var installCandidate = null;
 
@@ -1024,10 +2176,18 @@
       if (!installCandidate) {
         return {
           status: 'not_found',
-          message: 'This task may need MCP (' + requirement.label + '), but I could not find a suitable MCP server to auto-install.'
+          message: 'This task may need MCP (' + requirement.label + '), but no matching connector is currently configured.'
         };
       }
       targetServerName = installCandidate.name;
+
+      if (!allowMutations) {
+        return {
+          status: 'candidate_available',
+          serverName: targetServerName,
+          message: 'Found MCP connector "' + targetServerName + '" for ' + requirement.label + '. Select it to install and attach.'
+        };
+      }
 
       var manualReason = getMCPManualConfigReason(installCandidate);
       if (manualReason) {
@@ -1058,6 +2218,14 @@
           };
         }
       }
+    }
+
+    if (!allowMutations) {
+      return {
+        status: 'needs_enable',
+        serverName: targetServerName,
+        message: 'MCP connector "' + targetServerName + '" is available. Select it to attach before continuing.'
+      };
     }
 
     try {
@@ -1216,7 +2384,9 @@
 
   function buildAutoConfigDescription(prompt, intent) {
     var base = '';
-    if (intent.key === 'travel_planning') {
+    if (intent.key === 'utility_direct') {
+      base = 'Create a utility assistant for quick everyday requests such as time lookups, weather checks, simple conversions, and short factual questions.';
+    } else if (intent.key === 'travel_planning') {
       base = 'Create an agent that plans multi-day travel itineraries with day-by-day plans, transportation ideas, budget ranges, and local recommendations.';
     } else if (intent.key === 'email_check') {
       base = 'Create an email triage agent that summarizes unread mail, categorizes urgency, and drafts replies. It must default to read-only behavior and never send without explicit user confirmation.';
@@ -1229,6 +2399,9 @@
   }
 
   function buildDefaultSystemPrompt(intent) {
+    if (intent.key === 'utility_direct') {
+      return 'You are a utility assistant for quick requests. Handle time, weather, simple conversions, and short factual lookups with concise direct answers.';
+    }
     if (intent.key === 'travel_planning') {
       return 'You are a travel planning assistant. Build realistic day-by-day itineraries with concise options, practical transit notes, and budget-aware recommendations.';
     }
@@ -1262,10 +2435,63 @@
     return (data && data.agents) || [];
   }
 
+  function extractWorkspaceIdFromPath(pathname) {
+    var path = String(pathname || '').trim();
+    var match = path.match(/^\/(?:workspaces|studios)\/([^/]+)/i);
+    if (!match || !match[1]) return '';
+    try {
+      return decodeURIComponent(match[1]);
+    } catch (error) {
+      return match[1];
+    }
+  }
+
+  function inferHomeRouteSurface(pathname) {
+    var path = normalizeToken(pathname || '');
+    if (!path) return 'dashboard';
+    if (path.indexOf('/workspaces/') === 0) {
+      if (path.indexOf('/canvas') >= 0) return 'workspace_canvas';
+      return 'workspace_detail';
+    }
+    if (path.indexOf('/workspaces') === 0) return 'workspace_hub';
+    if (path.indexOf('/chat') === 0) return 'chat';
+    if (path.indexOf('/dashboard') === 0 || path === '/') return 'dashboard';
+    return 'dashboard';
+  }
+
+  function buildHomeRouteContext() {
+    var pathname = '';
+    if (window.location && typeof window.location.pathname === 'string') {
+      pathname = window.location.pathname;
+    }
+    var workspaceId = extractWorkspaceIdFromPath(pathname);
+    var sessionId = '';
+    if (window.sessionManager && window.sessionManager.currentSessionId) {
+      sessionId = String(window.sessionManager.currentSessionId).trim();
+    }
+
+    return {
+      surface: inferHomeRouteSurface(pathname),
+      page_path: pathname || '/',
+      workspace_id: workspaceId,
+      session_id: sessionId,
+      origin: 'ask_ori'
+    };
+  }
+
+  function routeContextTargetsCurrentWorkspace(routeData, routeContext) {
+    var mode = normalizeToken(routeData && routeData.route_mode);
+    var target = normalizeToken(routeData && routeData.target_surface);
+    return mode === 'workspace_task' && target === 'workspace' && hasWorkspaceRouteContext(routeContext);
+  }
+
   async function routePromptWithBackend(prompt) {
     if (typeof API === 'undefined' || typeof API.post !== 'function') return null;
     try {
-      var data = await API.post('/api/home-assistant/route', { prompt: prompt });
+      var data = await API.post('/api/home-assistant/route', {
+        prompt: prompt,
+        context: buildHomeRouteContext()
+      });
       if (!data || typeof data.intent !== 'string') return null;
       return data;
     } catch (error) {
@@ -1430,6 +2656,7 @@
     var tempInput = document.getElementById('agentTemperature');
     var tempValue = document.getElementById('temperatureValue');
     var promptInput = document.getElementById('agentSystemPrompt');
+    var allowWebSearchInput = document.getElementById('agentAllowWebSearch');
     if (!nameInput || !typeInput || !modelInput || !tempInput || !promptInput) {
       return null;
     }
@@ -1445,6 +2672,9 @@
       : String(tempInput.value || '1.0');
     if (tempValue) tempValue.textContent = tempInput.value;
     promptInput.value = seedPayload.system_prompt || '';
+    if (allowWebSearchInput) {
+      allowWebSearchInput.checked = typeof seedPayload.allow_web_search === 'boolean' ? seedPayload.allow_web_search : true;
+    }
 
     var providers = await fetchProvidersCatalog();
     if (providers.length > 0) {
@@ -1502,6 +2732,7 @@
             type: typeInput.value || seedPayload.type || 'tool-calling',
             model: model,
             system_prompt: promptInput.value || seedPayload.system_prompt || '',
+            allow_web_search: allowWebSearchInput ? Boolean(allowWebSearchInput.checked) : true,
             description: seedPayload.description || '',
             tags: Array.isArray(seedPayload.tags) ? seedPayload.tags : []
           };
@@ -1555,12 +2786,60 @@
     }
   }
 
+  async function checkHomeAssistantLLMAvailability() {
+    if (typeof API === 'undefined' || typeof API.get !== 'function') {
+      return { available: false, system_model_configured: false };
+    }
+    try {
+      var data = await API.get('/api/agents/auto-config/availability');
+      return {
+        available: Boolean(data && data.available),
+        system_model_configured: Boolean(data && data.system_model_configured),
+        message: String(data && data.message || '')
+      };
+    } catch (error) {
+      dashLog.debug('Failed to check Ask Ori model availability', { error: error && error.message || error });
+      return { available: false, system_model_configured: false };
+    }
+  }
+
+  function getHomeAssistantLLMRequirementMessage(availability) {
+    var systemModelConfigured = Boolean(availability && availability.system_model_configured);
+    if (!systemModelConfigured) {
+      return 'No suitable agent is configured for this task, and a System Model must be configured before I can create one. Open Settings to configure it.';
+    }
+    return 'No suitable agent is configured for this task, and no LLM provider is available right now. Open Settings to configure a provider or model.';
+  }
+
   async function createAgentForPendingTask() {
     if (!homeAssistantState.pendingPrompt) return;
     var prompt = homeAssistantState.pendingPrompt;
     var intent = homeAssistantState.pendingIntent || HOME_INTENTS.general_task;
     var appLaunchRequest = homeAssistantState.pendingAppLaunch;
     homeAssistantState.awaitingCreateConfirmation = false;
+
+    var llmAvailability = await checkHomeAssistantLLMAvailability();
+    if (!llmAvailability.available) {
+      var llmRequiredMessage = getHomeAssistantLLMRequirementMessage(llmAvailability);
+      appendHomeAssistantMessage('assistant', llmRequiredMessage);
+      setHomeAssistantRoutingSummary('Model Configuration Required', llmRequiredMessage);
+      renderHomeAssistantActions([
+        {
+          label: 'Go to Settings',
+          variant: 'primary',
+          onClick: function () { window.location.href = '/settings'; }
+        },
+        {
+          label: 'Ask Another Task',
+          variant: 'secondary',
+          onClick: function () { focusHomeAssistantInput(); }
+        }
+      ]);
+      if (window.Toast) {
+        Toast.warning('System Model setup is required before creating a new agent.');
+      }
+      return;
+    }
 
     setHomeAssistantBusy(true, 'Creating...');
     renderHomeAssistantActions([]);
@@ -1661,9 +2940,19 @@
           'Email idea: connect Gmail/Outlook via OAuth, start with read-only scopes, summarize unread first, and require explicit approval before sending replies.');
       }
 
-      var createdAgentMCP = await ensureMCPForTask(agentName, prompt);
+      var createdAgentMCP = await ensureMCPForTask(
+        agentName,
+        prompt,
+        intent.key === 'email_check' ? { allowMutations: false } : null
+      );
       if (createdAgentMCP && createdAgentMCP.message) {
         appendHomeAssistantMessage('assistant', createdAgentMCP.message);
+      }
+      if (intent.key === 'email_check') {
+        var createdEmailMCPResolution = await maybeResolveEmailMCPBeforeHandoff(agentName, prompt, createdAgentMCP);
+        if (!createdEmailMCPResolution || !createdEmailMCPResolution.continueHandoff) {
+          return;
+        }
       }
 
       if (isSemiAutoMode()) {
@@ -1716,9 +3005,30 @@
     return null;
   }
 
-  async function openOrCreateChatSession(agentName) {
+  function findSessionById(sessionId) {
+    var manager = window.sessionManager;
+    if (!manager || !Array.isArray(manager.sessions) || !sessionId) return null;
+    for (var i = 0; i < manager.sessions.length; i++) {
+      var session = manager.sessions[i];
+      if (String(session && session.id) === String(sessionId)) return session;
+    }
+    return null;
+  }
+
+  async function openOrCreateChatSession(agentName, routeContext) {
     var manager = window.sessionManager;
     if (!manager) return null;
+    var workspaceId = hasWorkspaceRouteContext(routeContext) ? String(routeContext.workspace_id).trim() : '';
+
+    if (workspaceId && typeof manager.createSessionWithAgentInFolder === 'function') {
+      await manager.createSessionWithAgentInFolder(agentName, workspaceId);
+      if (manager.activeSessionId) {
+        var workspaceSession = findSessionById(manager.activeSessionId);
+        if (workspaceSession && workspaceSession.id) return workspaceSession;
+      }
+      var matchedWorkspaceSession = findSessionForAgent(agentName);
+      if (matchedWorkspaceSession && matchedWorkspaceSession.id) return matchedWorkspaceSession;
+    }
 
     // Ask Ori should start a fresh session per task handoff.
     if (typeof manager.createSessionWithAgent === 'function') {
@@ -1735,9 +3045,9 @@
     return null;
   }
 
-  async function dispatchPromptToChatSession(prompt, agentName) {
+  async function dispatchPromptToChatSession(prompt, agentName, routeContext) {
     if (!prompt || !agentName) return null;
-    var session = await openOrCreateChatSession(agentName);
+    var session = await openOrCreateChatSession(agentName, routeContext);
     if (!session) return null;
     openChatPanel();
     if (typeof window.sendMessageToChat !== 'function') return null;
@@ -1746,10 +3056,310 @@
     return session;
   }
 
+  function extractRouteMetadataFromChatPayload(payload) {
+    if (!payload || typeof payload !== 'object') return null;
+    var route = payload.route && typeof payload.route === 'object' ? payload.route : {};
+    var mode = normalizeToken(route.mode || payload.route_mode);
+    if (!mode) return null;
+    return {
+      mode: mode,
+      toolName: String(route.tool_name || payload.tool_name || '').trim(),
+      provider: String(route.provider || payload.provider || '').trim()
+    };
+  }
+
+  function formatUtilityRouteSummary(routeMeta) {
+    if (!routeMeta || routeMeta.mode !== 'utility_direct') {
+      return 'Completed in the current assistant session.';
+    }
+    var text = routeMeta.toolName ? ('Executed "' + routeMeta.toolName + '" directly') : 'Executed utility tool directly';
+    if (routeMeta.provider) {
+      text += ' using ' + routeMeta.provider;
+    }
+    return text + '.';
+  }
+
+  async function runUtilityTaskDirect(prompt, agentName) {
+    if (!prompt || !agentName) return;
+
+    setHomeAssistantBusy(true, 'Running Utility...');
+    renderHomeAssistantActions([]);
+    appendHomeAssistantMessage('assistant', 'Running this as a direct utility request in the current assistant session.');
+    setHomeAssistantRoutingSummary('Utility Direct', 'Executing directly without creating or handing off to another agent.');
+
+    try {
+      var data = await API.post('/api/chat', {
+        question: prompt,
+        agent_name: agentName
+      });
+      var responseText = String(data && data.response || '').trim();
+      if (!responseText) {
+        responseText = 'Completed utility request, but no text response was returned.';
+      }
+
+      var routeMeta = extractRouteMetadataFromChatPayload(data);
+      appendHomeAssistantMessage('assistant', responseText);
+      setHomeAssistantRoutingSummary('Utility Direct', formatUtilityRouteSummary(routeMeta));
+
+      renderHomeAssistantActions([
+        {
+          label: 'Open Chat',
+          variant: 'primary',
+          onClick: function () { openChatPanel(); }
+        },
+        {
+          label: 'Ask Another Task',
+          variant: 'secondary',
+          onClick: function () { focusHomeAssistantInput(); }
+        }
+      ]);
+    } catch (error) {
+      dashLog.debug('Direct utility execution failed', { error: error && error.message || error });
+      appendHomeAssistantMessage('assistant', 'I could not execute that utility request directly right now.');
+      setHomeAssistantRoutingSummary('Utility Direct Failed', 'Could not execute utility request directly.');
+      renderHomeAssistantActions([
+        {
+          label: 'Retry',
+          variant: 'primary',
+          onClick: function () { runUtilityTaskDirect(prompt, agentName); }
+        },
+        {
+          label: 'Ask Another Task',
+          variant: 'secondary',
+          onClick: function () { focusHomeAssistantInput(); }
+        }
+      ]);
+    } finally {
+      setHomeAssistantBusy(false);
+    }
+  }
+
+  function buildWorkspaceNameFromPrompt(prompt) {
+    var normalized = normalizeToken(prompt);
+    if (!normalized) return 'New Workspace';
+
+    var ignored = {
+      'a': true,
+      'an': true,
+      'and': true,
+      'for': true,
+      'from': true,
+      'help': true,
+      'i': true,
+      'is': true,
+      'it': true,
+      'lets': true,
+      'my': true,
+      'of': true,
+      'please': true,
+      'that': true,
+      'the': true,
+      'to': true,
+      'with': true,
+      'you': true,
+      'build': true,
+      'create': true,
+      'develop': true,
+      'design': true,
+      'implement': true,
+      'make': true,
+      'setup': true,
+      'start': true
+    };
+
+    var tokens = uniqueValues(normalized.split(/[^a-z0-9]+/g));
+    var selected = [];
+    for (var i = 0; i < tokens.length; i++) {
+      var token = tokens[i];
+      if (!token || ignored[token]) continue;
+      if (token.length <= 1) continue;
+      selected.push(token);
+      if (selected.length >= 6) break;
+    }
+
+    if (selected.length === 0) {
+      for (var j = 0; j < tokens.length; j++) {
+        var fallback = tokens[j];
+        if (!fallback || fallback.length <= 1) continue;
+        selected.push(fallback);
+        if (selected.length >= 4) break;
+      }
+    }
+
+    var candidate = toTitleCase(selected.join(' '));
+    if (!candidate) candidate = 'New Workspace';
+    if (candidate.length > 56) candidate = candidate.slice(0, 56).trim();
+    return candidate || 'New Workspace';
+  }
+
+  function buildWorkspaceDescriptionFromPrompt(prompt) {
+    var text = truncateText(String(prompt || '').trim(), 280);
+    if (!text) return 'Created from Ask Ori.';
+    return 'Created from Ask Ori task: "' + text + '"';
+  }
+
+  async function createWorkspaceByName(workspaceName, prompt, _) {
+    var name = String(workspaceName || '').trim() || 'New Workspace';
+    var sourcePrompt = String(prompt || '').trim();
+    var payload = {
+      name: name,
+      description: buildWorkspaceDescriptionFromPrompt(sourcePrompt || ('Create workspace: ' + name))
+    };
+
+    setHomeAssistantBusy(true, 'Creating Workspace...');
+    renderHomeAssistantActions([]);
+    appendHomeAssistantMessage('assistant', 'Creating workspace "' + name + '"...');
+    setHomeAssistantRoutingSummary('Workspace', 'Creating workspace "' + name + '".');
+
+    try {
+      var result = null;
+      if (typeof API !== 'undefined' && typeof API.post === 'function') {
+        result = await API.post('/api/workspaces', payload);
+      } else {
+        var response = await fetch('/api/workspaces', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+        if (!response.ok) throw new Error('Workspace create request failed');
+        result = await response.json();
+      }
+
+      var folder = result && result.folder ? result.folder : null;
+      var workspaceId = folder && folder.id ? String(folder.id) : '';
+      var createdName = folder && folder.name ? String(folder.name) : name;
+      if (!workspaceId) throw new Error('Workspace create response missing id');
+
+      appendHomeAssistantMessage('assistant', 'Created workspace "' + createdName + '". Opening canvas...');
+      setHomeAssistantRoutingSummary('Workspace Created', '"' + createdName + '" is ready.');
+      window.location.href = '/workspaces/' + encodeURIComponent(workspaceId) + '/canvas';
+    } catch (error) {
+      dashLog.debug('Direct workspace creation from Ask Ori failed', { error: error && error.message || error });
+      appendHomeAssistantMessage('assistant', 'I could not create that workspace right now. You can open Workspaces and create it there.');
+      setHomeAssistantRoutingSummary('Workspace Create Failed', 'Could not create workspace automatically.');
+      renderHomeAssistantActions([
+        {
+          label: 'Open Workspaces',
+          variant: 'primary',
+          onClick: function () { window.location.href = '/workspaces'; }
+        },
+        {
+          label: 'Ask Another Task',
+          variant: 'secondary',
+          onClick: function () { focusHomeAssistantInput(); }
+        }
+      ]);
+    } finally {
+      setHomeAssistantBusy(false);
+    }
+  }
+
+  async function createWorkspaceFromPrompt(prompt, options) {
+    var text = String(prompt || '').trim();
+    if (!text) return;
+
+    var agentName = options && options.agentName ? String(options.agentName).trim() : '';
+    var appLaunchRequest = options && options.appLaunchRequest ? options.appLaunchRequest : null;
+    var routeContext = options && options.routeContext ? options.routeContext : buildHomeRouteContext();
+    var payload = {
+      name: buildWorkspaceNameFromPrompt(text),
+      description: buildWorkspaceDescriptionFromPrompt(text)
+    };
+
+    setHomeAssistantBusy(true, 'Creating Workspace...');
+    renderHomeAssistantActions([]);
+    appendHomeAssistantMessage('assistant', 'Creating a workspace from this task and opening the canvas...');
+    setHomeAssistantRoutingSummary('Workspace', 'Creating workspace and opening canvas.');
+
+    try {
+      var result = null;
+      if (typeof API !== 'undefined' && typeof API.post === 'function') {
+        result = await API.post('/api/workspaces', payload);
+      } else {
+        var response = await fetch('/api/workspaces', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+        if (!response.ok) {
+          throw new Error('Workspace create request failed');
+        }
+        result = await response.json();
+      }
+
+      var folder = result && result.folder ? result.folder : null;
+      var workspaceId = folder && folder.id ? String(folder.id) : '';
+      var workspaceName = folder && folder.name ? String(folder.name) : payload.name;
+      if (!workspaceId) {
+        throw new Error('Workspace create response missing id');
+      }
+
+      var agentAttached = false;
+      if (agentName) {
+        try {
+          if (typeof API !== 'undefined' && typeof API.post === 'function') {
+            await API.post('/api/workspaces/' + encodeURIComponent(workspaceId) + '/agents', { agent_name: agentName });
+          } else {
+            var addAgentResponse = await fetch('/api/workspaces/' + encodeURIComponent(workspaceId) + '/agents', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ agent_name: agentName })
+            });
+            if (!addAgentResponse.ok) {
+              throw new Error('Workspace agent attach request failed');
+            }
+          }
+          agentAttached = true;
+        } catch (attachError) {
+          dashLog.debug('Workspace created but failed to add agent', {
+            workspaceId: workspaceId,
+            agentName: agentName,
+            error: attachError && attachError.message || attachError
+          });
+        }
+      }
+
+      if (agentName && agentAttached) {
+        appendHomeAssistantMessage('assistant', 'Created workspace "' + workspaceName + '" and added "' + agentName + '". Opening canvas...');
+        setHomeAssistantRoutingSummary('Workspace Created', '"' + workspaceName + '" is ready with "' + agentName + '" attached.');
+      } else {
+        appendHomeAssistantMessage('assistant', 'Created workspace "' + workspaceName + '". Opening canvas...');
+        setHomeAssistantRoutingSummary('Workspace Created', '"' + workspaceName + '" is ready.');
+      }
+      window.location.href = '/workspaces/' + encodeURIComponent(workspaceId) + '/canvas';
+    } catch (error) {
+      dashLog.debug('Workspace creation from Ask Ori failed', { error: error && error.message || error });
+      appendHomeAssistantMessage('assistant', 'I could not create that workspace automatically. You can open Workspaces manually or continue in chat.');
+      setHomeAssistantRoutingSummary('Workspace Create Failed', 'Could not create workspace automatically.');
+      renderHomeAssistantActions([
+        {
+          label: 'Open Workspaces',
+          variant: 'primary',
+          onClick: function () { window.location.href = '/workspaces'; }
+        },
+        {
+          label: 'Continue in Chat',
+          variant: 'secondary',
+          disabled: !agentName,
+          onClick: function () { runPendingTaskWithAgent(text, agentName, { appLaunchRequest: appLaunchRequest, routeContext: routeContext }); }
+        },
+        {
+          label: 'Ask Another Task',
+          variant: 'secondary',
+          onClick: function () { focusHomeAssistantInput(); }
+        }
+      ]);
+    } finally {
+      setHomeAssistantBusy(false);
+    }
+  }
+
   async function runPendingTaskWithAgent(prompt, agentName, options) {
     if (!prompt || !agentName) return;
     var appLaunchRequest = options && options.appLaunchRequest ? options.appLaunchRequest : null;
-    var dispatchMessage = buildAskOriDispatchMessage(prompt, appLaunchRequest);
+    var dispatchIntent = options && options.intent ? options.intent : homeAssistantState.pendingIntent;
+    var routeContext = options && options.routeContext ? options.routeContext : buildHomeRouteContext();
+    var dispatchMessage = buildAskOriDispatchMessage(prompt, appLaunchRequest, dispatchIntent, routeContext);
 
     setHomeAssistantBusy(true, 'Opening Chat...');
     renderHomeAssistantActions([]);
@@ -1761,7 +3371,7 @@
     }
 
     try {
-      var session = await dispatchPromptToChatSession(dispatchMessage, agentName);
+      var session = await dispatchPromptToChatSession(dispatchMessage, agentName, routeContext);
       if (!session) throw new Error('Failed to launch chat session');
       trackHomeAssistantSession(session, prompt, agentName);
       setHomeAssistantMode('continue_session');
@@ -1811,6 +3421,9 @@
     if (!text) return;
     setHomeAssistantMode('new_task');
     var appLaunchRequest = parseAppLaunchRequest(text);
+    var routeContext = buildHomeRouteContext();
+    var inWorkspaceContext = hasWorkspaceRouteContext(routeContext);
+    var directWorkspaceCommand = parseCreateWorkspaceCommand(text);
 
     if (homeAssistantState.awaitingCreateConfirmation && isAffirmativeConfirmation(text)) {
       appendHomeAssistantMessage('user', text);
@@ -1843,6 +3456,12 @@
     homeAssistantState.awaitingCreateConfirmation = false;
 
     appendHomeAssistantMessage('user', text);
+
+    if (directWorkspaceCommand && directWorkspaceCommand.name) {
+      await createWorkspaceByName(directWorkspaceCommand.name, text, routeContext);
+      return;
+    }
+
     setHomeAssistantBusy(true, 'Routing...');
     renderHomeAssistantActions([]);
     setHomeAssistantRoutingSummary('Routing', 'Analyzing task and selecting the best agent...');
@@ -1851,6 +3470,7 @@
       var routeData = await routePromptWithBackend(text);
       var match = null;
       var useFallbackRouting = !routeData;
+      var workspaceRecommended = false;
 
       if (routeData) {
         homeAssistantState.pendingIntent = HOME_INTENTS[routeData.intent] || detectHomeIntent(text);
@@ -1871,6 +3491,12 @@
             homeAssistantState.pendingSuggestedType = HOME_INTENTS.app_launch.defaultType;
           }
         }
+        if (typeof routeData.workspace_recommended === 'boolean') {
+          workspaceRecommended = routeData.workspace_recommended;
+        }
+        if (routeContextTargetsCurrentWorkspace(routeData, routeContext)) {
+          workspaceRecommended = false;
+        }
 
         if (shouldAcceptBackendRouteMatch(routeData)) {
           match = {
@@ -1886,6 +3512,12 @@
       if (useFallbackRouting) {
         var agents = await fetchAgentsForMatching();
         match = findSuitableAgent(agents, homeAssistantState.pendingIntent, text);
+      }
+      if ((!routeData || typeof routeData.workspace_recommended !== 'boolean') && !inWorkspaceContext) {
+        workspaceRecommended = isComplexProjectPrompt(text, homeAssistantState.pendingIntent);
+      }
+      if (inWorkspaceContext) {
+        workspaceRecommended = false;
       }
 
       if (match && match.agent) {
@@ -1903,17 +3535,95 @@
             'Idea for email handling: add OAuth (Gmail/Outlook), start read-only, summarize unread, and require explicit confirmation before any send action.');
         }
 
-        var matchedAgentMCP = await ensureMCPForTask(match.agent.name, text);
+        if (homeAssistantState.pendingIntent && homeAssistantState.pendingIntent.key === 'utility_direct') {
+          await runUtilityTaskDirect(text, match.agent.name);
+          return;
+        }
+        if (workspaceRecommended) {
+          appendHomeAssistantMessage('assistant',
+            'This looks like a complex project. I recommend starting in a Workspace so files, tasks, and context stay organized. Do you want me to create one now?');
+          setHomeAssistantRoutingSummary('Workspace Recommended', 'Complex project detected. Create a workspace or continue in chat.');
+          renderHomeAssistantActions([
+            {
+              label: 'Create Workspace',
+              variant: 'primary',
+              onClick: function () {
+                createWorkspaceFromPrompt(text, {
+                  agentName: match.agent.name,
+                  appLaunchRequest: appLaunchRequest,
+                  routeContext: routeContext
+                });
+              }
+            },
+            {
+              label: 'Continue in Chat',
+              variant: 'secondary',
+              onClick: function () { runPendingTaskWithAgent(text, match.agent.name, { appLaunchRequest: appLaunchRequest, routeContext: routeContext }); }
+            },
+            {
+              label: 'Open Workspaces',
+              variant: 'secondary',
+              onClick: function () { window.location.href = '/workspaces'; }
+            },
+            {
+              label: 'Ask Another Task',
+              variant: 'secondary',
+              onClick: function () { focusHomeAssistantInput(); }
+            }
+          ]);
+          return;
+        }
+        var matchedAgentMCP = await ensureMCPForTask(
+          match.agent.name,
+          text,
+          homeAssistantState.pendingIntent.key === 'email_check' ? { allowMutations: false } : null
+        );
         if (matchedAgentMCP && matchedAgentMCP.message) {
           appendHomeAssistantMessage('assistant', matchedAgentMCP.message);
+        }
+        if (homeAssistantState.pendingIntent.key === 'email_check') {
+          var matchedEmailMCPResolution = await maybeResolveEmailMCPBeforeHandoff(match.agent.name, text, matchedAgentMCP);
+          if (!matchedEmailMCPResolution || !matchedEmailMCPResolution.continueHandoff) {
+            return;
+          }
         }
         if (isSemiAutoMode()) {
           appendHomeAssistantMessage('assistant', 'Match found. Handing off to "' + match.agent.name + '" now.');
           setHomeAssistantRoutingSummary('Semi-auto', 'Match found. Handing off to "' + match.agent.name + '".');
         }
-        await runPendingTaskWithAgent(text, match.agent.name, { appLaunchRequest: appLaunchRequest });
+        await runPendingTaskWithAgent(text, match.agent.name, { appLaunchRequest: appLaunchRequest, routeContext: routeContext });
       } else {
+        var llmAvailabilityForCreate = await checkHomeAssistantLLMAvailability();
+        if (!llmAvailabilityForCreate.available) {
+          homeAssistantState.awaitingCreateConfirmation = false;
+          var llmRequiredMessage = getHomeAssistantLLMRequirementMessage(llmAvailabilityForCreate);
+          appendHomeAssistantMessage('assistant', llmRequiredMessage);
+          setHomeAssistantRoutingSummary('Model Configuration Required', llmRequiredMessage);
+          renderHomeAssistantActions([
+            {
+              label: 'Go to Settings',
+              variant: 'primary',
+              onClick: function () { window.location.href = '/settings'; }
+            },
+            {
+              label: 'Ask Another Task',
+              variant: 'secondary',
+              onClick: function () { focusHomeAssistantInput(); }
+            }
+          ]);
+          if (window.Toast) {
+            Toast.warning('System Model setup is required before creating a new agent.');
+          }
+          return;
+        }
+
         if (isSemiAutoMode()) {
+          if (homeAssistantState.pendingIntent.key === 'email_check') {
+            appendHomeAssistantMessage('assistant',
+              'No suitable email agent found yet. Choose a setup path and I can continue.');
+            await renderEmailSolutionActions(text);
+            return;
+          }
           appendHomeAssistantMessage('assistant',
             'No suitable agent found for this task. I will open the Create Agent modal so you can review details.');
           setHomeAssistantRoutingSummary('Semi-auto', 'No match found. Review and confirm agent creation.');
@@ -1925,8 +3635,8 @@
           setHomeAssistantRoutingSummary('No Match', 'No suitable agent was found. Create a new agent to continue.');
 
           if (homeAssistantState.pendingIntent.key === 'email_check') {
-            appendHomeAssistantMessage('assistant',
-              'Email setup idea: connect mailbox via OAuth, request read-only scope first, then add a separate confirmed send step.');
+            await renderEmailSolutionActions(text);
+            return;
           }
 
           renderHomeAssistantActions([
@@ -1956,19 +3666,25 @@
     var prompt = els.input.value.trim();
     if (!prompt) return;
     els.input.value = '';
+    openHomeAssistantThinkingModal();
     handleHomeAssistantPrompt(prompt);
   }
 
   function initHomeAssistant() {
     var els = getHomeAssistantElements();
     if (!els.form || !els.input) return;
+    var supportsRecentSessions = Boolean(els.recentSection || els.recentSessions || els.viewAllBtn || els.clearRecentBtn);
+
     homeAssistantState.automationMode = loadHomeAssistantAutomationMode();
-    homeAssistantState.recentSessions = loadHomeAssistantRecentSessions();
+    homeAssistantState.recentSessions = supportsRecentSessions ? loadHomeAssistantRecentSessions() : [];
     setHomeAssistantRoutingSummary('', '');
     renderHomeAssistantRecentSessions();
-    hydrateHomeAssistantRecentSessions();
+    if (supportsRecentSessions) {
+      hydrateHomeAssistantRecentSessions();
+    }
     setHomeAssistantMode(homeAssistantState.mode);
     setHomeAssistantAutomationMode(homeAssistantState.automationMode);
+    syncHomeAssistantThinkingStatus();
 
     if (window.EventBus && typeof EventBus.on === 'function') {
       EventBus.on('session:deleted', function (payload) {
@@ -2151,7 +3867,6 @@
   }
 
   function initDashboard() {
-    setGreeting();
     initHomeAssistant();
 
     if (typeof API === 'undefined' || typeof API.get !== 'function') {
@@ -2160,43 +3875,69 @@
     }
 
     var evolutionEnabled = Boolean(window.oriFeatures && window.oriFeatures.evolutionEnabled);
+    var needsStats = Boolean(
+      document.getElementById('dashboardStatAgents') ||
+      document.getElementById('dashboardStatActive') ||
+      document.getElementById('dashboardStatMessages') ||
+      document.getElementById('dashboardStatCost')
+    );
+    var needsAgentList = Boolean(document.getElementById('dashboardAgentList'));
+    var needsProfile = Boolean(document.getElementById('dashboardPersonalizeBanner'));
+    var needsProgress = Boolean(evolutionEnabled && document.getElementById('dashboardProgressCard'));
 
-    var promises = [
-      API.get('/api/agents/dashboard/stats').catch(function (err) {
-        dashLog.debug('Failed to load dashboard stats', { error: err && err.message || err });
-        return null;
-      }),
-      API.get('/api/agents/dashboard/list').catch(function (err) {
-        dashLog.debug('Failed to load agent list', { error: err && err.message || err });
-        return null;
-      }),
-      API.get('/api/onboarding/user-profile').catch(function (err) {
-        dashLog.debug('Failed to load user profile', { error: err && err.message || err });
-        return null;
-      })
-    ];
+    var tasks = [];
 
-    if (evolutionEnabled) {
-      promises.push(
-        API.get('/api/evolution/assistant').catch(function (err) {
+    if (needsStats) {
+      tasks.push({
+        key: 'stats',
+        promise: API.get('/api/agents/dashboard/stats').catch(function (err) {
+          dashLog.debug('Failed to load dashboard stats', { error: err && err.message || err });
+          return null;
+        })
+      });
+    }
+
+    if (needsAgentList) {
+      tasks.push({
+        key: 'agents',
+        promise: API.get('/api/agents/dashboard/list').catch(function (err) {
+          dashLog.debug('Failed to load agent list', { error: err && err.message || err });
+          return null;
+        })
+      });
+    }
+
+    if (needsProfile) {
+      tasks.push({
+        key: 'profile',
+        promise: API.get('/api/onboarding/user-profile').catch(function (err) {
+          dashLog.debug('Failed to load user profile', { error: err && err.message || err });
+          return null;
+        })
+      });
+    }
+
+    if (needsProgress) {
+      tasks.push({
+        key: 'progress',
+        promise: API.get('/api/evolution/assistant').catch(function (err) {
           dashLog.debug('Failed to load assistant progress', { error: err && err.message || err });
           return null;
         })
-      );
+      });
     }
 
-    Promise.allSettled(promises).then(function (results) {
-      var statsData = results[0].status === 'fulfilled' ? results[0].value : null;
-      var agentData = results[1].status === 'fulfilled' ? results[1].value : null;
-      var profileData = results[2].status === 'fulfilled' ? results[2].value : null;
+    if (tasks.length === 0) return;
 
-      if (statsData) renderStats(statsData);
-      if (agentData) renderAgentList(agentData);
-      renderPersonalizeBanner(profileData);
-
-      if (evolutionEnabled && results.length > 3) {
-        var evoData = results[3].status === 'fulfilled' ? results[3].value : null;
-        if (evoData) renderAssistantProgress(evoData);
+    Promise.allSettled(tasks.map(function (task) { return task.promise; })).then(function (results) {
+      for (var i = 0; i < tasks.length; i++) {
+        var key = tasks[i].key;
+        var value = results[i].status === 'fulfilled' ? results[i].value : null;
+        if (!value) continue;
+        if (key === 'stats') renderStats(value);
+        if (key === 'agents') renderAgentList(value);
+        if (key === 'profile') renderPersonalizeBanner(value);
+        if (key === 'progress') renderAssistantProgress(value);
       }
     });
   }

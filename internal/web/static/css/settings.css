@@ -372,6 +372,11 @@
   color: var(--text-primary);
 }
 
+.utility-search-key-box .settings-info-value {
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}
+
 /* ============================================
    Settings Status Indicator
    ============================================ */

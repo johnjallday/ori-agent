@@ -1,0 +1,436 @@
+{
+  "fetched_at": "2026-02-21T16:54:33.474352+09:00",
+  "entries": [
+    {
+      "name": "filesystem",
+      "description": "Provides read/write access to local files and directories",
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-filesystem",
+        "/path/to/allowed/directory"
+      ],
+      "transport": "stdio",
+      "category": "file-system",
+      "maintainer": "Anthropic",
+      "tags": [
+        "files",
+        "local",
+        "read",
+        "write"
+      ],
+      "source": "Ori Curated"
+    },
+    {
+      "name": "github",
+      "description": "Interact with GitHub repositories, issues, and pull requests",
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-github"
+      ],
+      "transport": "stdio",
+      "category": "development",
+      "maintainer": "Anthropic",
+      "tags": [
+        "git",
+        "github",
+        "code",
+        "issues",
+        "prs"
+      ],
+      "env_required": {
+        "GITHUB_TOKEN": "GitHub personal access token"
+      },
+      "source": "Ori Curated"
+    },
+    {
+      "name": "brave-search",
+      "description": "Perform web searches using the Brave Search API",
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-brave-search"
+      ],
+      "transport": "stdio",
+      "category": "search",
+      "maintainer": "Anthropic",
+      "tags": [
+        "search",
+        "web",
+        "brave"
+      ],
+      "env_required": {
+        "BRAVE_API_KEY": "Brave Search API key"
+      },
+      "source": "Ori Curated"
+    },
+    {
+      "name": "postgres",
+      "description": "Query and manage PostgreSQL databases with read/write capabilities",
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-postgres"
+      ],
+      "transport": "stdio",
+      "category": "database",
+      "maintainer": "Anthropic",
+      "tags": [
+        "database",
+        "sql",
+        "postgres"
+      ],
+      "env_required": {
+        "DATABASE_URL": "PostgreSQL connection string"
+      },
+      "source": "Ori Curated"
+    },
+    {
+      "name": "memory",
+      "description": "Persistent key-value memory storage across conversations",
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-memory"
+      ],
+      "transport": "stdio",
+      "category": "storage",
+      "maintainer": "Anthropic",
+      "tags": [
+        "memory",
+        "storage",
+        "persistence"
+      ],
+      "source": "Ori Curated"
+    },
+    {
+      "name": "sqlite",
+      "description": "Read and query local SQLite database files",
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-sqlite",
+        "--db-path",
+        "/path/to/db.sqlite"
+      ],
+      "transport": "stdio",
+      "category": "database",
+      "maintainer": "Anthropic",
+      "tags": [
+        "database",
+        "sqlite",
+        "sql"
+      ],
+      "source": "Ori Curated"
+    },
+    {
+      "name": "playwright",
+      "description": "Browser automation and interactive control using Playwright MCP",
+      "command": "npx",
+      "args": [
+        "-y",
+        "@playwright/mcp"
+      ],
+      "transport": "stdio",
+      "category": "automation",
+      "maintainer": "Microsoft",
+      "tags": [
+        "browser",
+        "automation",
+        "playwright",
+        "web"
+      ],
+      "source": "Ori Curated"
+    },
+    {
+      "name": "puppeteer",
+      "description": "Legacy browser automation using Puppeteer MCP (deprecated upstream)",
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-puppeteer"
+      ],
+      "transport": "stdio",
+      "category": "automation",
+      "maintainer": "Anthropic",
+      "tags": [
+        "browser",
+        "scraping",
+        "automation",
+        "puppeteer"
+      ],
+      "source": "Ori Curated"
+    },
+    {
+      "name": "slack",
+      "description": "Read and send messages in Slack workspaces",
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-slack"
+      ],
+      "transport": "stdio",
+      "category": "communication",
+      "maintainer": "Anthropic",
+      "tags": [
+        "slack",
+        "messaging",
+        "team"
+      ],
+      "env_required": {
+        "SLACK_BOT_TOKEN": "Slack bot token",
+        "SLACK_TEAM_ID": "Slack team/workspace ID"
+      },
+      "source": "Ori Curated"
+    },
+    {
+      "name": "google-maps",
+      "description": "Access Google Maps for location, directions, and place search",
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-google-maps"
+      ],
+      "transport": "stdio",
+      "category": "location",
+      "maintainer": "Anthropic",
+      "tags": [
+        "maps",
+        "location",
+        "places",
+        "directions"
+      ],
+      "env_required": {
+        "GOOGLE_MAPS_API_KEY": "Google Maps API key"
+      },
+      "source": "Ori Curated"
+    },
+    {
+      "name": "gdrive",
+      "description": "Access and manage files in Google Drive",
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-gdrive"
+      ],
+      "transport": "stdio",
+      "category": "storage",
+      "maintainer": "Anthropic",
+      "tags": [
+        "google",
+        "drive",
+        "files",
+        "cloud"
+      ],
+      "source": "Ori Curated"
+    },
+    {
+      "name": "google-calendar",
+      "description": "Read and create Google Calendar events",
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-google-calendar"
+      ],
+      "transport": "stdio",
+      "category": "productivity",
+      "maintainer": "Community",
+      "tags": [
+        "calendar",
+        "google",
+        "scheduling"
+      ],
+      "env_required": {
+        "GOOGLE_CALENDAR_CREDENTIALS": "Google OAuth credentials JSON"
+      },
+      "source": "Ori Curated"
+    },
+    {
+      "name": "aws-kb-retrieval",
+      "description": "Retrieve data from AWS Knowledge Base using Bedrock Agent Runtime",
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-aws-kb-retrieval"
+      ],
+      "transport": "stdio",
+      "category": "cloud",
+      "maintainer": "Anthropic",
+      "tags": [
+        "aws",
+        "bedrock",
+        "knowledge-base",
+        "rag"
+      ],
+      "env_required": {
+        "AWS_ACCESS_KEY_ID": "AWS access key ID",
+        "AWS_REGION": "AWS region",
+        "AWS_SECRET_ACCESS_KEY": "AWS secret access key"
+      },
+      "source": "Ori Curated"
+    },
+    {
+      "name": "sentry",
+      "description": "Retrieve and analyze issues from Sentry error tracking",
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-sentry"
+      ],
+      "transport": "stdio",
+      "category": "development",
+      "maintainer": "Anthropic",
+      "tags": [
+        "sentry",
+        "errors",
+        "monitoring",
+        "debugging"
+      ],
+      "env_required": {
+        "SENTRY_AUTH_TOKEN": "Sentry authentication token"
+      },
+      "source": "Ori Curated"
+    },
+    {
+      "name": "everart",
+      "description": "Generate images using EverArt AI image generation API",
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-everart"
+      ],
+      "transport": "stdio",
+      "category": "ai",
+      "maintainer": "Anthropic",
+      "tags": [
+        "images",
+        "ai",
+        "generation",
+        "art"
+      ],
+      "env_required": {
+        "EVERART_API_KEY": "EverArt API key"
+      },
+      "source": "Ori Curated"
+    },
+    {
+      "name": "sequential-thinking",
+      "description": "Structured problem-solving with iterative thought chains",
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-sequential-thinking"
+      ],
+      "transport": "stdio",
+      "category": "ai",
+      "maintainer": "Anthropic",
+      "tags": [
+        "thinking",
+        "reasoning",
+        "chain-of-thought"
+      ],
+      "source": "Ori Curated"
+    },
+    {
+      "name": "fetch",
+      "description": "Fetch and extract content from URLs for web research",
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-fetch"
+      ],
+      "transport": "stdio",
+      "category": "search",
+      "maintainer": "Anthropic",
+      "tags": [
+        "http",
+        "fetch",
+        "web",
+        "scraping"
+      ],
+      "source": "Ori Curated"
+    },
+    {
+      "name": "redis",
+      "description": "Interact with Redis key-value stores for caching and data access",
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-redis"
+      ],
+      "transport": "stdio",
+      "category": "database",
+      "maintainer": "Community",
+      "tags": [
+        "redis",
+        "cache",
+        "key-value",
+        "database"
+      ],
+      "env_required": {
+        "REDIS_URL": "Redis connection URL"
+      },
+      "source": "Ori Curated"
+    },
+    {
+      "name": "git",
+      "description": "Interact with local Git repositories for history and diffs",
+      "command": "uvx",
+      "args": [
+        "mcp-server-git",
+        "--repository",
+        "/path/to/repo"
+      ],
+      "transport": "stdio",
+      "category": "development",
+      "maintainer": "Community",
+      "tags": [
+        "git",
+        "version-control",
+        "code"
+      ],
+      "source": "Ori Curated"
+    },
+    {
+      "name": "docker",
+      "description": "Manage Docker containers, images, and networks",
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-docker"
+      ],
+      "transport": "stdio",
+      "category": "devops",
+      "maintainer": "Community",
+      "tags": [
+        "docker",
+        "containers",
+        "devops"
+      ],
+      "source": "Ori Curated"
+    },
+    {
+      "name": "notion",
+      "description": "Read and write pages and databases in Notion workspaces",
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-notion"
+      ],
+      "transport": "stdio",
+      "category": "productivity",
+      "maintainer": "Community",
+      "tags": [
+        "notion",
+        "notes",
+        "productivity",
+        "wiki"
+      ],
+      "env_required": {
+        "NOTION_API_KEY": "Notion integration token"
+      },
+      "source": "Ori Curated"
+    }
+  ]
+}

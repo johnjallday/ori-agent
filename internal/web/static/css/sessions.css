@@ -96,8 +96,7 @@
   background: rgba(255, 255, 255, 0.1);
   color: var(--text-primary);
   font-size: 13px;
-  outline: none;
-  transition: all 0.2s ease;
+  transition: border-color 0.2s ease, background-color 0.2s ease, box-shadow 0.2s ease;
 }
 
 .session-search-input::placeholder {
@@ -107,6 +106,11 @@
 .session-search-input:focus {
   border-color: var(--primary-color);
   background: rgba(255, 255, 255, 0.15);
+}
+
+.session-search-input:focus-visible {
+  outline: 2px solid var(--primary-color);
+  outline-offset: 2px;
 }
 
 [data-bs-theme="dark"] .session-search-input {
@@ -989,7 +993,7 @@
   border-radius: 50%;
   border: 2px solid transparent;
   cursor: pointer;
-  transition: all 0.15s ease;
+  transition: transform 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease, background-color 0.15s ease;
   background: var(--bg-tertiary);
 }
 
@@ -1000,6 +1004,11 @@
 .folder-color-btn.active {
   border-color: var(--text-primary);
   box-shadow: 0 0 0 2px var(--bg-primary);
+}
+
+.folder-color-btn:focus-visible {
+  outline: 2px solid var(--primary-color);
+  outline-offset: 2px;
 }
 
 /* Main content adjustment when session sidebar is visible */
@@ -1305,6 +1314,92 @@ body:has(.chat-info-bar) #currentAgentDisplay {
 
 .agent-edit-tag-remove:hover {
   color: var(--text-primary);
+}
+
+.agent-edit-mcp-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 8px;
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  min-height: 44px;
+  background: var(--bg-secondary);
+}
+
+.agent-edit-mcp-pill {
+  display: inline-flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 6px 10px;
+  border-radius: 10px;
+  border: 1px solid var(--border-color);
+  background: var(--bg-tertiary);
+  max-width: 100%;
+}
+
+.agent-edit-mcp-name {
+  color: var(--text-primary);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.2;
+}
+
+.agent-edit-mcp-meta {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-secondary);
+  font-size: 11px;
+  line-height: 1.2;
+}
+
+.agent-edit-mcp-status {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  border: 1px solid var(--border-color);
+  padding: 1px 6px;
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: capitalize;
+}
+
+.agent-edit-mcp-status.running {
+  color: #22c55e;
+  border-color: rgba(34, 197, 94, 0.4);
+}
+
+.agent-edit-mcp-status.starting {
+  color: #f59e0b;
+  border-color: rgba(245, 158, 11, 0.4);
+}
+
+.agent-edit-mcp-status.stopped {
+  color: var(--text-muted, #9ca3af);
+  border-color: rgba(156, 163, 175, 0.35);
+}
+
+.agent-edit-mcp-status.error {
+  color: #ef4444;
+  border-color: rgba(239, 68, 68, 0.4);
+}
+
+.agent-edit-mcp-status.configured {
+  color: var(--primary-color);
+  border-color: rgba(99, 102, 241, 0.4);
+}
+
+.agent-edit-mcp-empty,
+.agent-edit-mcp-error {
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.agent-edit-mcp-error {
+  color: #ef4444;
 }
 
 /* ============================================================================

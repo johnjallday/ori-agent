@@ -40,9 +40,13 @@ const userProfileManager = {
       console.error('Error loading profile:', error);
       contentEl.innerHTML = `
         <div class="alert alert-warning mb-0">
-          <small>Could not load profile. <a href="#" onclick="userProfileManager.loadProfile(); return false;">Retry</a></small>
+          <small>Could not load profile. <button type="button" class="btn btn-link btn-sm p-0 align-baseline user-profile-retry">Retry</button></small>
         </div>
       `;
+      const retryBtn = contentEl.querySelector('.user-profile-retry');
+      if (retryBtn) {
+        retryBtn.addEventListener('click', () => this.loadProfile());
+      }
     }
   },
 

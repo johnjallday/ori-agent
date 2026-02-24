@@ -21,12 +21,14 @@ import (
 	orihttp "github.com/johnjallday/ori-agent/internal/http"
 	"github.com/johnjallday/ori-agent/internal/llm"
 	"github.com/johnjallday/ori-agent/internal/logger"
+	"github.com/johnjallday/ori-agent/internal/mcp"
 	"github.com/johnjallday/ori-agent/internal/orchestration"
 	"github.com/johnjallday/ori-agent/internal/pluginloader"
 	"github.com/johnjallday/ori-agent/internal/session"
 	"github.com/johnjallday/ori-agent/internal/skills"
 	"github.com/johnjallday/ori-agent/internal/store"
 	"github.com/johnjallday/ori-agent/internal/types"
+	"github.com/johnjallday/ori-agent/internal/utilitytelemetry"
 	"github.com/johnjallday/ori-agent/internal/workspace"
 	"github.com/oriagent/ori-pluginapi"
 )
@@ -56,39 +58,51 @@ type pluginDefinitionCache struct {
 }
 
 type Handler struct {
-	defCache       map[string]*pluginDefinitionCache
-	defMu          sync.RWMutex
-	pluginLoadMu   sync.Mutex // Mutex for lazy loading plugins
-	store          store.Store
-	clientFactory  *client.Factory
-	llmFactory     *llm.Factory
-	healthManager  *healthhttp.Manager
-	commandHandler *CommandHandler
-	orchestrator   *orchestration.Orchestrator
-	costTracker    *llm.CostTracker
-	sessionStore   session.HybridStore
-	toolCallStore  session.ToolCallStore
-	evolutionSvc   interface {
+	defCache         map[string]*pluginDefinitionCache
+	defMu            sync.RWMutex
+	pluginLoadMu     sync.Mutex // Mutex for lazy loading plugins
+	utilityRegistry  *UtilityToolRegistry
+	utilityTelemetry *utilitytelemetry.Tracker
+	settingsMu       sync.RWMutex
+	browserMCPPref   string
+	store            store.Store
+	clientFactory    *client.Factory
+	llmFactory       *llm.Factory
+	healthManager    *healthhttp.Manager
+	commandHandler   *CommandHandler
+	orchestrator     *orchestration.Orchestrator
+	costTracker      *llm.CostTracker
+	sessionStore     session.HybridStore
+	toolCallStore    session.ToolCallStore
+	evolutionSvc     interface {
 		AwardMessageXP(agentName string, tokenCount int, userMessage string) error
 	}
 	skillsManager interface {
 		GetSkill(string, string) (*skills.Skill, bool, error)
 		ListSkills(string) ([]skills.Skill, error)
+		ListEnabledSkillsWithPrompts(string) ([]skills.Skill, error)
 	}
 	mcpRegistry interface {
 		GetToolsForServer(string) ([]pluginapi.PluginTool, error)
 		GetAllTools() []pluginapi.PluginTool
 		StartServer(string) error
 	}
+	mcpConfigManager interface {
+		EnableServerForAgent(agentName, serverName string) error
+		GetServer(name string) (*mcp.ServerConfig, error)
+	}
 }
 
 func NewHandler(store store.Store, clientFactory *client.Factory) *Handler {
 	return &Handler{
-		store:          store,
-		clientFactory:  clientFactory,
-		llmFactory:     nil,
-		commandHandler: NewCommandHandler(store),
-		defCache:       make(map[string]*pluginDefinitionCache),
+		store:            store,
+		clientFactory:    clientFactory,
+		llmFactory:       nil,
+		commandHandler:   NewCommandHandler(store),
+		defCache:         make(map[string]*pluginDefinitionCache),
+		utilityRegistry:  NewDefaultUtilityToolRegistry(),
+		utilityTelemetry: utilitytelemetry.NewTracker(200),
+		browserMCPPref:   "auto",
 	}
 }
 
@@ -160,6 +174,14 @@ func (h *Handler) SetMCPRegistry(registry interface {
 	h.mcpRegistry = registry
 }
 
+// SetMCPConfigManager sets the MCP config manager used for per-agent enablement.
+func (h *Handler) SetMCPConfigManager(manager interface {
+	EnableServerForAgent(agentName, serverName string) error
+	GetServer(name string) (*mcp.ServerConfig, error)
+}) {
+	h.mcpConfigManager = manager
+}
+
 // SetWorkspaceStore sets the workspace store for workspace commands
 func (h *Handler) SetWorkspaceStore(ws workspace.Store) {
 	h.commandHandler.SetWorkspaceStore(ws)
@@ -191,9 +213,45 @@ func (h *Handler) SetEvolutionService(service interface {
 func (h *Handler) SetSkillsManager(manager interface {
 	GetSkill(string, string) (*skills.Skill, bool, error)
 	ListSkills(string) ([]skills.Skill, error)
+	ListEnabledSkillsWithPrompts(string) ([]skills.Skill, error)
 }) {
 	h.skillsManager = manager
 	h.commandHandler.SetSkillsManager(manager)
+}
+
+// SetUtilityToolRegistry sets the native utility tool registry used by chat routing.
+func (h *Handler) SetUtilityToolRegistry(registry *UtilityToolRegistry) {
+	h.utilityRegistry = registry
+}
+
+// SetBrowserMCPPreference configures preferred MCP browser connector ordering.
+func (h *Handler) SetBrowserMCPPreference(preference string) {
+	if h == nil {
+		return
+	}
+	pref := normalizeBrowserMCPPreference(preference)
+	h.settingsMu.Lock()
+	h.browserMCPPref = pref
+	h.settingsMu.Unlock()
+}
+
+func (h *Handler) getBrowserMCPPreference() string {
+	if h == nil {
+		return "auto"
+	}
+	h.settingsMu.RLock()
+	defer h.settingsMu.RUnlock()
+	return normalizeBrowserMCPPreference(h.browserMCPPref)
+}
+
+// SetUtilityTelemetry sets the utility telemetry tracker.
+func (h *Handler) SetUtilityTelemetry(tracker *utilitytelemetry.Tracker) {
+	h.utilityTelemetry = tracker
+}
+
+// UtilityTelemetry returns the utility telemetry tracker.
+func (h *Handler) UtilityTelemetry() *utilitytelemetry.Tracker {
+	return h.utilityTelemetry
 }
 
 // storeToolCall stores a tool call record for analysis
@@ -246,9 +304,216 @@ func (h *Handler) getSessionID(r *http.Request) string {
 	return r.Header.Get("X-Session-ID")
 }
 
+func (h *Handler) tryHandleUtilityDirect(
+	w http.ResponseWriter,
+	baseCtx context.Context,
+	ag *agent.Agent,
+	agentName string,
+	query string,
+	sessionID string,
+	decisionInput *UtilityRouteDecision,
+	plannerDecision *types.PlannerDecision,
+) bool {
+	if h == nil || ag == nil || strings.TrimSpace(query) == "" {
+		return false
+	}
+
+	decision := UtilityRouteDecision{}
+	if decisionInput != nil {
+		decision = *decisionInput
+	} else {
+		decision = classifyUtilityRoute(query)
+	}
+	if decision.Mode != UtilityRouteDirect || strings.TrimSpace(decision.ToolName) == "" {
+		return false
+	}
+	if !isUtilityToolAllowedForAgent(ag, decision.ToolName) {
+		responseText := disallowedUtilityToolMessage(decision.ToolName)
+		ag.Messages = append(ag.Messages, openai.UserMessage(query))
+		ag.Messages = append(ag.Messages, openai.AssistantMessage(responseText))
+		_ = h.store.SetAgent(agentName, ag)
+
+		h.storeMessageInSession(baseCtx, sessionID, "user", query)
+		h.storeMessageInSession(baseCtx, sessionID, "assistant", responseText)
+
+		receipt := buildActionReceipt(
+			"utility_direct",
+			"Blocked utility tool call",
+			"utility tool disabled by agent policy",
+			decision.ToolName,
+			decision.ToolArgs,
+			responseText,
+			0,
+			false,
+			"tool disabled by agent policy",
+		)
+		writeJSONResponse(w, attachPlannerDecision(attachActionReceipts(attachRouteMetadata(map[string]any{
+			"response": responseText,
+			"success":  false,
+			"error":    "tool disabled by agent policy",
+		}, chatRouteMetadata{
+			Mode:     string(decision.Mode),
+			ToolName: decision.ToolName,
+			Reason:   "utility tool disabled by agent policy",
+		}), []ActionReceipt{receipt}), plannerDecision))
+		return true
+	}
+
+	if h.utilityTelemetry != nil {
+		h.utilityTelemetry.RecordRouteDecision(string(decision.Mode), decision.Reason)
+	}
+
+	tool, found := h.findTool(ag, agentName, decision.ToolName)
+	if !found || tool == nil {
+		if strings.EqualFold(strings.TrimSpace(decision.ToolName), "browser") {
+			responseText := "I couldn't find an available browser tool for this agent. Attach/configure Playwright (or another browser MCP) and try again."
+			ag.Messages = append(ag.Messages, openai.UserMessage(query))
+			ag.Messages = append(ag.Messages, openai.AssistantMessage(responseText))
+			_ = h.store.SetAgent(agentName, ag)
+
+			h.storeMessageInSession(baseCtx, sessionID, "user", query)
+			h.storeMessageInSession(baseCtx, sessionID, "assistant", responseText)
+
+			receipt := buildActionReceipt(
+				"utility_direct",
+				"Browser tool unavailable",
+				"no compatible browser tool was available",
+				decision.ToolName,
+				decision.ToolArgs,
+				responseText,
+				0,
+				false,
+				"browser tool unavailable",
+			)
+			writeJSONResponse(w, attachPlannerDecision(attachActionReceipts(attachRouteMetadata(map[string]any{
+				"response": responseText,
+				"success":  false,
+				"error":    "browser tool unavailable",
+			}, chatRouteMetadata{
+				Mode:     string(decision.Mode),
+				ToolName: decision.ToolName,
+				Reason:   "no compatible browser tool was available",
+			}), []ActionReceipt{receipt}), plannerDecision))
+			return true
+		}
+		if h.utilityTelemetry != nil {
+			h.utilityTelemetry.RecordDelegationEvent(routeModeAssistantChat, "utility tool missing; fallback to chat", agentName)
+		}
+		return false
+	}
+
+	start := time.Now()
+	if h.utilityTelemetry != nil {
+		h.utilityTelemetry.RecordToolInvocation(decision.ToolName, "")
+	}
+	toolArgs := decision.ToolArgs
+	var rawResult string
+	var err error
+	if strings.EqualFold(strings.TrimSpace(decision.ToolName), "browser") {
+		if adapted, adaptErr := adaptBrowserToolArgsForDefinition(tool.Definition().Name, decision.ToolArgs); adaptErr != nil {
+			err = adaptErr
+		} else {
+			toolArgs = adapted
+		}
+	}
+	if err == nil {
+		toolCtx, toolCancel := context.WithTimeout(baseCtx, ToolExecutionTimeout)
+		rawResult, err = ExecuteToolWithFiles(toolCtx, tool, decision.ToolName, toolArgs, nil)
+		toolCancel()
+	}
+
+	duration := time.Since(start)
+	h.recordToolCallStats(decision.ToolName, duration, err)
+	providerName := inferUtilityProvider(decision.ToolName, rawResult)
+	if h.utilityTelemetry != nil {
+		errText := ""
+		if err != nil {
+			errText = err.Error()
+		}
+		h.utilityTelemetry.RecordToolResult(decision.ToolName, providerName, err == nil, duration, errText)
+	}
+
+	responseText := ""
+	success := err == nil
+	if err != nil {
+		responseText = formatUtilityDirectError(decision.ToolName, err)
+	} else {
+		responseText = formatUtilityDirectResponse(decision.ToolName, rawResult)
+	}
+	if strings.TrimSpace(responseText) == "" {
+		responseText = "I completed the utility request."
+	}
+
+	ag.Messages = append(ag.Messages, openai.UserMessage(query))
+	ag.Messages = append(ag.Messages, openai.AssistantMessage(responseText))
+	_ = h.store.SetAgent(agentName, ag)
+
+	h.storeMessageInSession(baseCtx, sessionID, "user", query)
+	h.storeMessageInSession(baseCtx, sessionID, "assistant", responseText)
+
+	errorText := ""
+	if err != nil {
+		errorText = err.Error()
+	}
+	receipt := buildActionReceipt(
+		"utility_direct",
+		"Executed utility tool",
+		decision.Reason,
+		decision.ToolName,
+		toolArgs,
+		rawResult,
+		duration.Milliseconds(),
+		success,
+		errorText,
+	)
+	payload := attachActionReceipts(attachRouteMetadata(map[string]any{
+		"response":  responseText,
+		"tool_args": toolArgs,
+		"success":   success,
+		"toolCalls": []map[string]string{
+			{
+				"function": decision.ToolName,
+				"args":     toolArgs,
+				"result":   rawResult,
+			},
+		},
+	}, chatRouteMetadata{
+		Mode:      string(decision.Mode),
+		ToolName:  decision.ToolName,
+		Provider:  providerName,
+		Reason:    decision.Reason,
+		ToolCount: 1,
+	}), []ActionReceipt{receipt})
+	if err != nil {
+		payload["error"] = err.Error()
+	}
+	writeJSONResponse(w, attachPlannerDecision(payload, plannerDecision))
+	return true
+}
+
 // findTool searches for a tool by name in both plugins and MCP servers.
 // If the plugin is not yet loaded, it will be loaded lazily on first use.
 func (h *Handler) findTool(ag *agent.Agent, agentName, toolName string) (pluginapi.PluginTool, bool) {
+	if !isUtilityToolAllowedForAgent(ag, toolName) {
+		return nil, false
+	}
+
+	if shouldPreferMCPToolOverUtility(toolName) {
+		if mcpTool, ok := h.findMCPToolByName(ag, toolName); ok {
+			return mcpTool, true
+		}
+		if shouldSuppressUtilityToolForAgent(ag, toolName) {
+			return nil, false
+		}
+	}
+
+	// Native utility tools are checked first to prioritize accurate daily utility behavior.
+	if h.utilityRegistry != nil {
+		if tool, ok := h.utilityRegistry.GetTool(toolName); ok {
+			return tool, true
+		}
+	}
+
 	// First check native plugins
 	for pluginName, plugin := range ag.Plugins {
 		if plugin.Definition.Name == toolName {
@@ -270,22 +535,185 @@ func (h *Handler) findTool(ag *agent.Agent, agentName, toolName string) (plugina
 		}
 	}
 
-	// Then check MCP tools
-	if h.mcpRegistry != nil && len(ag.MCPServers) > 0 {
-		for _, serverName := range ag.MCPServers {
-			mcpTools, err := h.getMCPToolsForServer(serverName)
-			if err != nil {
-				continue
-			}
-			for _, mcpTool := range mcpTools {
-				if mcpTool.Definition().Name == toolName {
+	// Then check MCP tools.
+	if mcpTool, ok := h.findMCPToolByName(ag, toolName); ok {
+		return mcpTool, true
+	}
+
+	return nil, false
+}
+
+func (h *Handler) findMCPToolByName(ag *agent.Agent, toolName string) (pluginapi.PluginTool, bool) {
+	if h == nil || h.mcpRegistry == nil || ag == nil || len(ag.MCPServers) == 0 {
+		return nil, false
+	}
+	target := strings.TrimSpace(toolName)
+	if target == "" {
+		return nil, false
+	}
+	candidateNames := mcpToolNameCandidates(target)
+	serverNames := prioritizeMCPServersForTool(ag.MCPServers, target, h.getBrowserMCPPreference())
+	for _, serverName := range serverNames {
+		mcpTools, err := h.getMCPToolsForServer(serverName)
+		if err != nil {
+			continue
+		}
+		for _, mcpTool := range mcpTools {
+			defName := strings.TrimSpace(mcpTool.Definition().Name)
+			for _, candidate := range candidateNames {
+				if defName == candidate {
 					return mcpTool, true
 				}
 			}
 		}
 	}
-
 	return nil, false
+}
+
+func mcpToolNameCandidates(target string) []string {
+	trimmed := strings.TrimSpace(target)
+	if strings.EqualFold(trimmed, "browser") {
+		return []string{"browser", "browser_navigate"}
+	}
+	return []string{trimmed}
+}
+
+func prioritizeMCPServersForTool(serverNames []string, toolName, browserPreference string) []string {
+	if len(serverNames) == 0 {
+		return []string{}
+	}
+
+	normalizedTool := strings.ToLower(strings.TrimSpace(toolName))
+	if normalizedTool != "browser" {
+		out := make([]string, 0, len(serverNames))
+		for _, serverName := range serverNames {
+			name := strings.TrimSpace(serverName)
+			if name == "" {
+				continue
+			}
+			out = append(out, name)
+		}
+		return out
+	}
+
+	out := make([]string, 0, len(serverNames))
+	seen := make(map[string]bool)
+
+	appendByName := func(target string) {
+		for _, serverName := range serverNames {
+			name := strings.TrimSpace(serverName)
+			if name == "" {
+				continue
+			}
+			key := strings.ToLower(name)
+			if seen[key] {
+				continue
+			}
+			if key == target {
+				seen[key] = true
+				out = append(out, name)
+			}
+		}
+	}
+
+	for _, preferredServer := range browserMCPPriorityOrder(browserPreference) {
+		appendByName(preferredServer)
+	}
+
+	for _, serverName := range serverNames {
+		name := strings.TrimSpace(serverName)
+		if name == "" {
+			continue
+		}
+		key := strings.ToLower(name)
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		out = append(out, name)
+	}
+
+	return out
+}
+
+func browserMCPPriorityOrder(preference string) []string {
+	switch normalizeBrowserMCPPreference(preference) {
+	case "browserbase":
+		return []string{"browserbase", "playwright", "puppeteer"}
+	case "puppeteer":
+		return []string{"puppeteer", "playwright", "browserbase"}
+	default:
+		// Auto and explicit Playwright both prioritize Playwright first.
+		return []string{"playwright", "browserbase", "puppeteer"}
+	}
+}
+
+func normalizeBrowserMCPPreference(preference string) string {
+	switch strings.ToLower(strings.TrimSpace(preference)) {
+	case "playwright", "browserbase", "puppeteer":
+		return strings.ToLower(strings.TrimSpace(preference))
+	default:
+		return "auto"
+	}
+}
+
+func adaptBrowserToolArgsForDefinition(definitionName, rawArgs string) (string, error) {
+	name := strings.ToLower(strings.TrimSpace(definitionName))
+	if name == "" || name == "browser" {
+		return rawArgs, nil
+	}
+	if name != "browser_navigate" {
+		return rawArgs, nil
+	}
+
+	req := BrowserRequest{}
+	if err := json.Unmarshal([]byte(rawArgs), &req); err != nil {
+		var direct map[string]interface{}
+		if err2 := json.Unmarshal([]byte(rawArgs), &direct); err2 == nil {
+			if url, ok := direct["url"].(string); ok && strings.TrimSpace(url) != "" {
+				payload, _ := json.Marshal(map[string]string{"url": normalizeBrowserOpenTargetURL(url)})
+				return string(payload), nil
+			}
+		}
+		return "", fmt.Errorf("%w: invalid browser arguments", ErrUtilityInvalidInput)
+	}
+
+	action := strings.ToLower(strings.TrimSpace(req.Action))
+	if action == "" {
+		action = "open_url"
+	}
+	if action != "open_url" {
+		return "", fmt.Errorf("%w: this browser connector supports open_url for direct open commands", ErrUtilityInvalidInput)
+	}
+	if strings.TrimSpace(req.URL) == "" {
+		return "", fmt.Errorf("%w: url is required", ErrUtilityInvalidInput)
+	}
+
+	payload, _ := json.Marshal(map[string]string{"url": normalizeBrowserOpenTargetURL(req.URL)})
+	return string(payload), nil
+}
+
+func shouldPreferMCPToolOverUtility(toolName string) bool {
+	switch strings.ToLower(strings.TrimSpace(toolName)) {
+	case "browser", "web_search", "web_fetch":
+		return true
+	default:
+		return false
+	}
+}
+
+func shouldSuppressUtilityToolForAgent(ag *agent.Agent, toolName string) bool {
+	if ag == nil {
+		return false
+	}
+	switch strings.ToLower(strings.TrimSpace(toolName)) {
+	case "browser":
+		// If a browser-control MCP is attached, avoid silently falling back to
+		// the lightweight native browser utility for auth-heavy flows (e.g. Gmail).
+		return hasAnyMCPServer(ag.MCPServers, []string{"playwright", "browserbase", "puppeteer"})
+	default:
+		return false
+	}
 }
 
 // loadPluginLazily loads a plugin on first use and updates the agent's plugin map.
@@ -360,11 +788,13 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 
 	var req struct {
-		Question            string         `json:"question"`
-		AgentName           string         `json:"agent_name,omitempty"` // Allow specifying target agent
-		Files               []UploadedFile `json:"files,omitempty"`
-		MultiAgentMode      string         `json:"multi_agent_mode,omitempty"`
-		MultiAgentThreshold float64        `json:"multi_agent_threshold,omitempty"`
+		Question             string         `json:"question"`
+		AgentName            string         `json:"agent_name,omitempty"` // Allow specifying target agent
+		Files                []UploadedFile `json:"files,omitempty"`
+		MultiAgentMode       string         `json:"multi_agent_mode,omitempty"`
+		MultiAgentThreshold  float64        `json:"multi_agent_threshold,omitempty"`
+		PlanBeforeAction     bool           `json:"plan_before_action,omitempty"`
+		ApprovedActionPlanID string         `json:"approved_action_plan_id,omitempty"`
 	}
 	if !orihttp.ParseJSONBody(w, r, &req) {
 		return
@@ -375,6 +805,7 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	originalQuery := q
+	approvedActionPlanID := strings.TrimSpace(req.ApprovedActionPlanID)
 
 	// Natural language app launch shortcut:
 	// "open safari" -> "/openapp safari"
@@ -619,11 +1050,13 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 		cmd, err := parseDirectToolCommand(q)
 		if err != nil {
 			// Return parsing error as response
-			orihttp.WriteJSON(w, map[string]any{
+			orihttp.WriteJSON(w, attachRouteMetadata(map[string]any{
 				"response":         fmt.Sprintf("❌ **Invalid command**: %v\n\nFormat: `/tool <tool_name> {\"key\": \"value\"}`\nExample: `/tool math {\"operation\": \"add\", \"a\": 5, \"b\": 3}`", err),
 				"direct_tool_call": true,
 				"success":          false,
-			})
+			}, chatRouteMetadata{
+				Mode: routeModeDirectTool,
+			}))
 			return
 		}
 
@@ -641,6 +1074,23 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 		ag, ok := h.store.GetAgent(current)
 		if !ok || ag == nil {
 			orihttp.InternalError(w, fmt.Sprintf("agent '%s' not found", current))
+			return
+		}
+
+		if req.PlanBeforeAction && approvedActionPlanID == "" {
+			plan := buildDirectToolActionPlan(q, cmd)
+			response := attachRouteMetadata(map[string]any{
+				"response":           formatActionPlanMessage(plan),
+				"requires_approval":  true,
+				"approval_type":      "action_plan",
+				"action_plan_id":     plan.ID,
+				"action_plan":        plan,
+				"plan_before_action": true,
+			}, chatRouteMetadata{
+				Mode:   routeModeDirectTool,
+				Reason: "awaiting action plan approval",
+			})
+			writeJSONResponse(w, response)
 			return
 		}
 
@@ -669,6 +1119,66 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 	ag, ok := h.store.GetAgent(current)
 	if !ok {
 		orihttp.InternalError(w, fmt.Sprintf("agent '%s' not found", current))
+		return
+	}
+
+	routeDecision := classifyUtilityRoute(originalQuery)
+
+	if req.PlanBeforeAction && approvedActionPlanID == "" {
+		actionPlan, planDecision := h.buildChatActionPlan(ctx, q, routeDecision, req.MultiAgentMode, req.MultiAgentThreshold)
+		response := attachPlannerDecision(attachRouteMetadata(map[string]any{
+			"response":           formatActionPlanMessage(actionPlan),
+			"requires_approval":  true,
+			"approval_type":      "action_plan",
+			"action_plan_id":     actionPlan.ID,
+			"action_plan":        actionPlan,
+			"plan_before_action": true,
+		}, chatRouteMetadata{
+			Mode:   actionPlan.RouteMode,
+			Reason: "awaiting action plan approval",
+		}), planDecision)
+		writeJSONResponse(w, response)
+		return
+	}
+
+	if invokedSkill == nil && routeNeedsWorkspace(routeDecision.Mode) {
+		autoWorkspace, created, wsErr := h.ensureWorkspaceForRoute(current, originalQuery, routeDecision)
+		if wsErr != nil {
+			logger.Warn("Failed to ensure workspace for routed chat request", logger.Fields{
+				"agent":      current,
+				"route_mode": routeDecision.Mode,
+				"error":      wsErr,
+			})
+		} else if autoWorkspace != nil {
+			q = enrichPromptWithWorkspaceContext(q, autoWorkspace, routeDecision.Mode, created)
+		}
+	}
+
+	// Utility-direct requests bypass planner/delegation and execute native tools immediately.
+	if invokedSkill == nil {
+		if routeDecision.Mode != "" && routeDecision.Mode != UtilityRouteDirect && h.utilityTelemetry != nil {
+			h.utilityTelemetry.RecordRouteDecision(string(routeDecision.Mode), routeDecision.Reason)
+		}
+		if h.tryHandleUtilityDirect(w, base, ag, current, originalQuery, sessionID, &routeDecision, nil) {
+			return
+		}
+		if h.utilityTelemetry != nil {
+			if routeDecision.Mode != "" {
+				h.utilityTelemetry.RecordDelegationEvent(string(routeDecision.Mode), routeDecision.Reason, current)
+			} else {
+				h.utilityTelemetry.RecordDelegationEvent(routeModeAssistantChat, "standard assistant chat flow", current)
+			}
+		}
+	}
+
+	preflight := h.maybeAutoEnableMCPForPrompt(current, ag, originalQuery)
+	if preflight != nil && strings.TrimSpace(preflight.userMessage) != "" {
+		writeJSONResponse(w, attachRouteMetadata(map[string]any{
+			"response": preflight.userMessage,
+		}, chatRouteMetadata{
+			Mode:   routeModeAssistantChat,
+			Reason: "mcp preflight notice",
+		}))
 		return
 	}
 
@@ -745,7 +1255,21 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 						if responseText == "" && result.Status == "pending_approval" {
 							responseText = "Dynamic agent approval required to continue."
 						}
-						orihttp.WriteJSON(w, map[string]any{
+						if h.utilityTelemetry != nil {
+							h.utilityTelemetry.RecordDelegationEvent(routeModeSpecialistFlow, "planner selected multi-agent execution", current)
+						}
+						receipt := buildActionReceipt(
+							"orchestration",
+							"Executed multi-agent workflow",
+							"planner selected multi-agent execution",
+							"",
+							"",
+							responseText,
+							0,
+							result.Error == "",
+							result.Error,
+						)
+						orihttp.WriteJSON(w, attachActionReceipts(attachRouteMetadata(map[string]any{
 							"response":               responseText,
 							"orchestrated":           true,
 							"studio_id":              result.WorkspaceID,
@@ -754,7 +1278,10 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 							"planner_decision":       result.PlannerDecision,
 							"planner_plan":           plan,
 							"dynamic_agent_requests": result.DynamicAgentRequests,
-						})
+						}, chatRouteMetadata{
+							Mode:   routeModeSpecialistFlow,
+							Reason: "planner selected multi-agent execution",
+						}), []ActionReceipt{receipt}))
 						return
 					}
 				}
@@ -774,6 +1301,41 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 
 	// Build tools - refresh definitions to get latest dynamic enums (e.g., script lists)
 	tools := []llm.Tool{}
+	toolIndex := make(map[string]int)
+	toolSource := make(map[string]string)
+	appendTool := func(def llm.Tool, source string) {
+		name := strings.TrimSpace(def.Name)
+		if name == "" {
+			return
+		}
+		if idx, exists := toolIndex[name]; exists {
+			if source == "mcp" && toolSource[name] == "utility" && shouldPreferMCPToolOverUtility(name) {
+				tools[idx] = def
+				toolSource[name] = source
+			}
+			return
+		}
+		toolIndex[name] = len(tools)
+		toolSource[name] = source
+		tools = append(tools, def)
+	}
+
+	// Add native utility tools first
+	if h.utilityRegistry != nil {
+		for _, def := range h.utilityRegistry.ListToolDefinitions() {
+			if !isUtilityToolAllowedForAgent(ag, def.Name) {
+				continue
+			}
+			if shouldSuppressUtilityToolForAgent(ag, def.Name) {
+				continue
+			}
+			appendTool(llm.Tool{
+				Name:        def.Name,
+				Description: def.Description,
+				Parameters:  def.Parameters,
+			}, "utility")
+		}
+	}
 
 	// Add native plugin tools
 	for pluginName, pl := range ag.Plugins {
@@ -793,11 +1355,11 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 		}
 
 		// Convert pluginapi.Tool to llm.Tool
-		tools = append(tools, llm.Tool{
+		appendTool(llm.Tool{
 			Name:        def.Name,
 			Description: def.Description,
 			Parameters:  def.Parameters,
-		})
+		}, "plugin")
 	}
 
 	// Add MCP tools for enabled servers
@@ -813,11 +1375,11 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 			}
 			for _, mcpTool := range mcpTools {
 				mcpDef := mcpTool.Definition()
-				tools = append(tools, llm.Tool{
+				appendTool(llm.Tool{
 					Name:        mcpDef.Name,
 					Description: mcpDef.Description,
 					Parameters:  mcpDef.Parameters,
-				})
+				}, "mcp")
 			}
 			logger.Debug("Added MCP tools from server", logger.Fields{"count": len(mcpTools), "server": serverName})
 		}
@@ -833,8 +1395,8 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 
 	// Add system message for better tool usage guidance
 	if len(ag.Messages) == 0 {
-		systemPrompt := resolveSystemPromptForAgent(
-			ag,
+		systemPrompt := h.buildSystemPromptWithSkills(
+			ag, current,
 			"You are a helpful assistant with access to various tools. When a user request can be fulfilled by using an available tool, use the tool instead of providing general information. Be concise and direct in your responses.",
 		)
 
@@ -894,8 +1456,14 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 
+	// Check if this is a Claude Code provider - route to Claude Code handler
+	if strings.EqualFold(ag.Settings.Provider, "claude_code") && h.llmFactory != nil {
+		h.handleClaudeCodeChat(w, r, ag, q, current, base, llmImages, plannerDecision)
+		return
+	}
+
 	// Check if this is a Claude model - if so, use provider system
-	if strings.HasPrefix(ag.Settings.Model, "claude-") && h.llmFactory != nil {
+	if (strings.HasPrefix(ag.Settings.Model, "claude-") || strings.EqualFold(ag.Settings.Provider, "claude") || strings.EqualFold(ag.Settings.Provider, "anthropic")) && h.llmFactory != nil {
 		// Use Claude provider
 		h.handleClaudeChat(w, r, ag, q, tools, current, base, fileAttachments, llmImages, plannerDecision)
 		return

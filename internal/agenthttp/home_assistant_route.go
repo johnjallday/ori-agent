@@ -12,26 +12,47 @@ import (
 )
 
 type HomeAssistantRouteHandler struct {
-	State store.Store
+	State             store.Store
+	SystemModelReader interface {
+		GetSystemModel() (provider, model string)
+	}
 }
 
 func NewHomeAssistantRouteHandler(state store.Store) *HomeAssistantRouteHandler {
 	return &HomeAssistantRouteHandler{State: state}
 }
 
+func (h *HomeAssistantRouteHandler) SetSystemModelReader(reader interface {
+	GetSystemModel() (provider, model string)
+}) {
+	h.SystemModelReader = reader
+}
+
 type HomeAssistantRouteRequest struct {
-	Prompt string `json:"prompt"`
+	Prompt  string                     `json:"prompt"`
+	Context *HomeAssistantRouteContext `json:"context,omitempty"`
+}
+
+type HomeAssistantRouteContext struct {
+	Surface     string `json:"surface,omitempty"`
+	PagePath    string `json:"page_path,omitempty"`
+	WorkspaceID string `json:"workspace_id,omitempty"`
+	SessionID   string `json:"session_id,omitempty"`
+	Origin      string `json:"origin,omitempty"`
 }
 
 type HomeAssistantRouteResponse struct {
-	Intent             string   `json:"intent"`
-	IntentLabel        string   `json:"intent_label"`
-	MatchedAgent       string   `json:"matched_agent,omitempty"`
-	Score              int      `json:"score"`
-	RequiresCreation   bool     `json:"requires_creation"`
-	Reasons            []string `json:"reasons,omitempty"`
-	SuggestedAgentName string   `json:"suggested_agent_name"`
-	SuggestedAgentType string   `json:"suggested_agent_type"`
+	Intent               string   `json:"intent"`
+	IntentLabel          string   `json:"intent_label"`
+	MatchedAgent         string   `json:"matched_agent,omitempty"`
+	Score                int      `json:"score"`
+	RequiresCreation     bool     `json:"requires_creation"`
+	WorkspaceRecommended bool     `json:"workspace_recommended"`
+	RouteMode            string   `json:"route_mode"`
+	TargetSurface        string   `json:"target_surface"`
+	Reasons              []string `json:"reasons,omitempty"`
+	SuggestedAgentName   string   `json:"suggested_agent_name"`
+	SuggestedAgentType   string   `json:"suggested_agent_type"`
 }
 
 type homeAssistantIntent struct {
@@ -52,7 +73,25 @@ type routedAgentMatch struct {
 	Reasons []string
 }
 
+type normalizedHomeAssistantRouteContext struct {
+	Surface     string
+	PagePath    string
+	WorkspaceID string
+	SessionID   string
+	Origin      string
+}
+
 var (
+	homeAssistantUtilityIntent = homeAssistantIntent{
+		Key:              "utility_direct",
+		Label:            "daily utility",
+		Keywords:         []string{"time", "timezone", "clock", "date", "weather", "forecast", "temperature", "air quality", "aqi", "pollution", "pm2.5", "pm10", "convert", "conversion", "calculate", "calculator", "quick fact", "fact", "capital", "define", "definition"},
+		PreferredPlugins: []string{"time", "weather", "calculator", "math", "search", "web"},
+		PreferredTypes:   []string{"general", "tool-calling", "research"},
+		DefaultType:      "general",
+		SuggestedName:    "Utility Assistant",
+		MinScore:         4,
+	}
 	homeAssistantTravelIntent = homeAssistantIntent{
 		Key:              "travel_planning",
 		Label:            "travel planning",
@@ -71,6 +110,16 @@ var (
 		PreferredTypes:   []string{"tool-calling", "general"},
 		DefaultType:      "tool-calling",
 		SuggestedName:    "Email Assistant",
+		MinScore:         4,
+	}
+	homeAssistantWorkspaceCreateIntent = homeAssistantIntent{
+		Key:              "workspace_create",
+		Label:            "workspace creation",
+		Keywords:         []string{"create workspace", "new workspace", "workspace called", "workspace named"},
+		PreferredPlugins: []string{},
+		PreferredTypes:   []string{"general", "tool-calling"},
+		DefaultType:      "general",
+		SuggestedName:    "Workspace Assistant",
 		MinScore:         4,
 	}
 	homeAssistantAppLaunchIntent = homeAssistantIntent{
@@ -94,14 +143,25 @@ var (
 		MinScore:         3,
 	}
 	homeAssistantSpecificIntents = []homeAssistantIntent{
+		homeAssistantUtilityIntent,
 		homeAssistantTravelIntent,
 		homeAssistantEmailIntent,
+		homeAssistantWorkspaceCreateIntent,
 	}
 	homeAssistantCommonTokens = map[string]bool{
 		"a": true, "an": true, "and": true, "are": true, "can": true, "do": true, "for": true, "help": true,
 		"i": true, "in": true, "is": true, "it": true, "my": true, "of": true, "on": true, "open": true,
 		"or": true, "please": true, "task": true, "that": true, "the": true, "this": true, "to": true,
 		"want": true, "with": true, "you": true,
+	}
+	homeAssistantComplexProjectBuildVerbs = []string{
+		"build", "create", "develop", "design", "implement", "make", "ship", "start", "set up", "setup",
+	}
+	homeAssistantComplexProjectTargets = []string{
+		"website", "web site", "web app", "app", "application", "landing page", "dashboard", "product", "project", "platform", "system",
+	}
+	homeAssistantComplexProjectSignals = []string{
+		"from scratch", "full stack", "frontend", "backend", "database", "authentication", "auth", "api", "deploy", "deployment", "production", "mvp", "architecture", "roadmap", "requirements",
 	}
 )
 
@@ -123,15 +183,31 @@ func (h *HomeAssistantRouteHandler) RouteHandler(w http.ResponseWriter, r *http.
 		return
 	}
 
+	// Keep a reserved orchestrator agent available for generic fallback routing.
+	systemProvider, systemModel := "", ""
+	if h.SystemModelReader != nil {
+		systemProvider, systemModel = h.SystemModelReader.GetSystemModel()
+	}
+	_ = ensureSystemAssistantAgentWithSystemModel(h.State, systemProvider, systemModel)
+
 	intent := detectHomeAssistantIntent(prompt)
 	match := h.findBestMatch(prompt, intent)
+	if match == nil {
+		match = h.systemAssistantFallback(intent)
+	}
+	routeContext := normalizeHomeAssistantRouteContext(req.Context)
+	workspaceRecommended := shouldRecommendWorkspace(prompt, intent)
+	routeMode, targetSurface := determineRouteModeAndTargetSurface(intent, routeContext, workspaceRecommended)
 
 	resp := HomeAssistantRouteResponse{
-		Intent:             intent.Key,
-		IntentLabel:        intent.Label,
-		RequiresCreation:   true,
-		SuggestedAgentName: intent.SuggestedName,
-		SuggestedAgentType: intent.DefaultType,
+		Intent:               intent.Key,
+		IntentLabel:          intent.Label,
+		RequiresCreation:     true,
+		WorkspaceRecommended: workspaceRecommended,
+		RouteMode:            routeMode,
+		TargetSurface:        targetSurface,
+		SuggestedAgentName:   intent.SuggestedName,
+		SuggestedAgentType:   intent.DefaultType,
 	}
 
 	if match != nil {
@@ -144,7 +220,30 @@ func (h *HomeAssistantRouteHandler) RouteHandler(w http.ResponseWriter, r *http.
 	orihttp.WriteJSON(w, resp)
 }
 
+func (h *HomeAssistantRouteHandler) systemAssistantFallback(intent homeAssistantIntent) *routedAgentMatch {
+	// Keep specialist intent behavior unchanged; fallback only for utility/general asks.
+	if intent.Key != homeAssistantDefaultIntent.Key && intent.Key != homeAssistantUtilityIntent.Key {
+		return nil
+	}
+
+	ag, ok := h.State.GetAgent(systemAssistantAgentName)
+	if !ok || ag == nil {
+		return nil
+	}
+
+	return &routedAgentMatch{
+		Name:    systemAssistantAgentName,
+		Agent:   ag,
+		Score:   intent.MinScore,
+		Reasons: []string{"fallback to system assistant"},
+	}
+}
+
 func detectHomeAssistantIntent(prompt string) homeAssistantIntent {
+	if shouldClassifyWorkspaceCreate(prompt) {
+		return homeAssistantWorkspaceCreateIntent
+	}
+
 	selectedIntent := homeAssistantDefaultIntent
 	selectedScore := 0
 	text := normalizeRouteToken(prompt)
@@ -427,6 +526,125 @@ func tokenizePrompt(prompt string) []string {
 	return tokens
 }
 
+func normalizeHomeAssistantRouteContext(context *HomeAssistantRouteContext) normalizedHomeAssistantRouteContext {
+	if context == nil {
+		return normalizedHomeAssistantRouteContext{}
+	}
+	return normalizedHomeAssistantRouteContext{
+		Surface:     normalizeRouteToken(context.Surface),
+		PagePath:    normalizeRouteToken(context.PagePath),
+		WorkspaceID: strings.TrimSpace(context.WorkspaceID),
+		SessionID:   strings.TrimSpace(context.SessionID),
+		Origin:      normalizeRouteToken(context.Origin),
+	}
+}
+
+func (c normalizedHomeAssistantRouteContext) hasWorkspaceContext() bool {
+	if strings.TrimSpace(c.WorkspaceID) != "" {
+		return true
+	}
+	if strings.HasPrefix(c.PagePath, "/workspaces/") {
+		return true
+	}
+	return c.Surface == "workspace" || c.Surface == "workspace_detail" || c.Surface == "workspace_canvas"
+}
+
+func determineRouteModeAndTargetSurface(intent homeAssistantIntent, context normalizedHomeAssistantRouteContext, workspaceRecommended bool) (string, string) {
+	if intent.Key == homeAssistantUtilityIntent.Key {
+		return "utility_direct", "current"
+	}
+	if intent.Key == homeAssistantWorkspaceCreateIntent.Key {
+		return "workspace_task", "workspace"
+	}
+	if intent.Key == homeAssistantAppLaunchIntent.Key {
+		return "specialist_handoff", "chat"
+	}
+	if context.hasWorkspaceContext() {
+		return "workspace_task", "workspace"
+	}
+	if workspaceRecommended {
+		return "workspace_task", "workspace"
+	}
+	return "specialist_handoff", "chat"
+}
+
+func shouldRecommendWorkspace(prompt string, intent homeAssistantIntent) bool {
+	if intent.Key != homeAssistantDefaultIntent.Key {
+		return false
+	}
+	if _, ok := parseHomeAssistantAppLaunchPrompt(prompt); ok {
+		return false
+	}
+
+	normalized := normalizeRouteToken(prompt)
+	if normalized == "" {
+		return false
+	}
+
+	hasBuildVerb := promptContainsAnyRoutePhrase(normalized, homeAssistantComplexProjectBuildVerbs)
+	hasProjectTarget := promptContainsAnyRoutePhrase(normalized, homeAssistantComplexProjectTargets)
+	if hasBuildVerb && hasProjectTarget {
+		return true
+	}
+
+	complexitySignalCount := countRoutePhraseMatches(normalized, homeAssistantComplexProjectSignals)
+	if hasProjectTarget && complexitySignalCount >= 1 {
+		return true
+	}
+
+	tokenCount := len(tokenizePrompt(normalized))
+	if hasBuildVerb && complexitySignalCount >= 1 && tokenCount >= 8 {
+		return true
+	}
+
+	return false
+}
+
+func shouldClassifyWorkspaceCreate(prompt string) bool {
+	normalized := normalizeRouteToken(prompt)
+	if normalized == "" {
+		return false
+	}
+	if _, ok := parseHomeAssistantAppLaunchPrompt(prompt); ok {
+		return false
+	}
+	return strings.HasPrefix(normalized, "create workspace") ||
+		strings.HasPrefix(normalized, "create a workspace") ||
+		strings.HasPrefix(normalized, "create an workspace") ||
+		strings.HasPrefix(normalized, "new workspace")
+}
+
+func promptContainsAnyRoutePhrase(normalizedPrompt string, phrases []string) bool {
+	if normalizedPrompt == "" || len(phrases) == 0 {
+		return false
+	}
+	for _, phrase := range phrases {
+		if phrase == "" {
+			continue
+		}
+		if strings.Contains(normalizedPrompt, normalizeRouteToken(phrase)) {
+			return true
+		}
+	}
+	return false
+}
+
+func countRoutePhraseMatches(normalizedPrompt string, phrases []string) int {
+	if normalizedPrompt == "" || len(phrases) == 0 {
+		return 0
+	}
+	count := 0
+	for _, phrase := range phrases {
+		if phrase == "" {
+			continue
+		}
+		if strings.Contains(normalizedPrompt, normalizeRouteToken(phrase)) {
+			count++
+		}
+	}
+	return count
+}
+
 func parseHomeAssistantAppLaunchPrompt(prompt string) (string, bool) {
 	normalized := normalizeRouteToken(prompt)
 	if normalized == "" {
@@ -462,9 +680,41 @@ func parseHomeAssistantAppLaunchPrompt(prompt string) (string, bool) {
 	}
 
 	// Skip obvious URL/path-like targets that are more likely file or web intents.
-	if strings.Contains(target, "://") || strings.Contains(target, "/") || strings.Contains(target, "\\") {
+	if strings.Contains(target, "://") || strings.Contains(target, "/") || strings.Contains(target, "\\") || looksLikeWebHostTarget(target) {
 		return "", false
 	}
 
 	return target, true
+}
+
+func looksLikeWebHostTarget(target string) bool {
+	candidate := strings.TrimSpace(strings.ToLower(target))
+	if candidate == "" {
+		return false
+	}
+	// Host-like targets should not be treated as desktop app names.
+	if strings.ContainsAny(candidate, " \t\n\r") || !strings.Contains(candidate, ".") {
+		return false
+	}
+
+	labels := strings.Split(candidate, ".")
+	if len(labels) < 2 {
+		return false
+	}
+
+	for _, label := range labels {
+		if label == "" {
+			return false
+		}
+		for _, r := range label {
+			if !unicode.IsLetter(r) && !unicode.IsDigit(r) && r != '-' {
+				return false
+			}
+		}
+		if strings.HasPrefix(label, "-") || strings.HasSuffix(label, "-") {
+			return false
+		}
+	}
+
+	return len(labels[len(labels)-1]) >= 2
 }
