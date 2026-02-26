@@ -650,6 +650,12 @@
     modal.show();
   }
 
+  function closeHomeAssistantThinkingModal() {
+    var modal = getHomeAssistantThinkingModalInstance();
+    if (!modal) return;
+    modal.hide();
+  }
+
   function syncHomeAssistantThinkingStatus() {
     var els = getHomeAssistantElements();
     if (!els.thinkingStatus) return;
@@ -809,6 +815,8 @@
     if (els.clearRecentBtn) els.clearRecentBtn.disabled = homeAssistantState.busy;
     if (homeAssistantState.busy) {
       openHomeAssistantThinkingModal();
+    } else {
+      closeHomeAssistantThinkingModal();
     }
     syncHomeAssistantThinkingStatus();
   }
@@ -2647,7 +2655,7 @@
     var createButton = document.getElementById('createAgentBtn');
     var form = document.getElementById('addAgentForm');
     if (!modalElement || !createButton || !form || typeof bootstrap === 'undefined' || !bootstrap.Modal) {
-      return null;
+      return { status: 'unavailable', reason: 'modal_prerequisites_missing' };
     }
 
     var nameInput = document.getElementById('agentName');
@@ -2658,7 +2666,7 @@
     var promptInput = document.getElementById('agentSystemPrompt');
     var allowWebSearchInput = document.getElementById('agentAllowWebSearch');
     if (!nameInput || !typeInput || !modelInput || !tempInput || !promptInput) {
-      return null;
+      return { status: 'unavailable', reason: 'modal_fields_missing' };
     }
 
     if (typeof resetBaseAutoConfigState === 'function') {
@@ -2684,6 +2692,7 @@
     }
 
     var modalInstance = bootstrap.Modal.getInstance(modalElement) || new bootstrap.Modal(modalElement);
+    closeHomeAssistantThinkingModal();
     modalInstance.show();
 
     return await new Promise(function (resolve) {
@@ -2691,7 +2700,7 @@
       var submitting = false;
       var originalHtml = createButton.innerHTML;
 
-      function finalize(agentName) {
+      function finalize(result) {
         if (settled) return;
         settled = true;
         createButton.disabled = false;
@@ -2699,11 +2708,11 @@
         createButton.removeEventListener('click', onCreateCapture, true);
         form.removeEventListener('submit', onSubmitCapture, true);
         modalElement.removeEventListener('hidden.bs.modal', onHidden, true);
-        resolve(agentName || null);
+        resolve(result || { status: 'cancelled' });
       }
 
       function onHidden() {
-        finalize(null);
+        finalize({ status: 'cancelled' });
       }
 
       async function submitCreate() {
@@ -2741,7 +2750,7 @@
 
           await API.post('/api/agents', requestBody);
           modalInstance.hide();
-          finalize(name);
+          finalize({ status: 'created', agentName: name });
         } catch (error) {
           dashLog.debug('Modal-confirmed agent creation failed', { error: error && error.message || error });
           if (window.Toast) Toast.error('Failed to create agent: ' + (error && error.message ? error.message : error));
@@ -2884,10 +2893,16 @@
             'I need your input to finalize model selection. Please confirm in the Create Agent modal.');
         }
         setHomeAssistantRoutingSummary('Semi-auto', 'Review and confirm agent details in the modal.');
-        var confirmedSemiAutoAgentName = await confirmAgentCreationWithModal(payload);
-        if (!confirmedSemiAutoAgentName) {
-          appendHomeAssistantMessage('assistant', 'Agent creation canceled. Ask again when you want to continue.');
-          setHomeAssistantRoutingSummary('Agent Creation', 'Canceled by user.');
+        setHomeAssistantBusy(false);
+        var semiAutoConfirmation = await confirmAgentCreationWithModal(payload);
+        if (!semiAutoConfirmation || semiAutoConfirmation.status !== 'created') {
+          if (semiAutoConfirmation && semiAutoConfirmation.status === 'unavailable') {
+            appendHomeAssistantMessage('assistant', 'I could not open the Create Agent modal. Please open Agents and create it manually.');
+            setHomeAssistantRoutingSummary('Agent Creation', 'Create Agent modal was unavailable.');
+          } else {
+            appendHomeAssistantMessage('assistant', 'Agent creation canceled. Ask again when you want to continue.');
+            setHomeAssistantRoutingSummary('Agent Creation', 'Agent creation canceled.');
+          }
           renderHomeAssistantActions([
             {
               label: 'Create Agent',
@@ -2902,15 +2917,22 @@
           ]);
           return;
         }
-        agentName = confirmedSemiAutoAgentName;
+        agentName = semiAutoConfirmation.agentName;
+        setHomeAssistantBusy(true, 'Finalizing...');
       } else if (!payload.model) {
         appendHomeAssistantMessage('assistant',
           'I could not auto-select a model. Please review and confirm in the Create Agent modal.');
         setHomeAssistantRoutingSummary('Agent Creation', 'Model selection needs your confirmation.');
-        var confirmedAgentName = await confirmAgentCreationWithModal(payload);
-        if (!confirmedAgentName) {
-          appendHomeAssistantMessage('assistant', 'Agent creation canceled. Ask again when you want to continue.');
-          setHomeAssistantRoutingSummary('Agent Creation', 'Canceled by user.');
+        setHomeAssistantBusy(false);
+        var confirmation = await confirmAgentCreationWithModal(payload);
+        if (!confirmation || confirmation.status !== 'created') {
+          if (confirmation && confirmation.status === 'unavailable') {
+            appendHomeAssistantMessage('assistant', 'I could not open the Create Agent modal. Please open Agents and create it manually.');
+            setHomeAssistantRoutingSummary('Agent Creation', 'Create Agent modal was unavailable.');
+          } else {
+            appendHomeAssistantMessage('assistant', 'Agent creation canceled. Ask again when you want to continue.');
+            setHomeAssistantRoutingSummary('Agent Creation', 'Agent creation canceled.');
+          }
           renderHomeAssistantActions([
             {
               label: 'Create Agent',
@@ -2925,7 +2947,8 @@
           ]);
           return;
         }
-        agentName = confirmedAgentName;
+        agentName = confirmation.agentName;
+        setHomeAssistantBusy(true, 'Finalizing...');
       } else {
         appendHomeAssistantMessage('assistant', 'Auto-selected model "' + payload.model + '" for "' + agentName + '".');
         await API.post('/api/agents', payload);

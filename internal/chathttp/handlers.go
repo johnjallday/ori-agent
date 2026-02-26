@@ -1488,6 +1488,12 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Route Codex provider/model through Codex CLI provider path (no OpenAI API key required).
+	if isCodexProviderOrModel(ag.Settings.Provider, ag.Settings.Model) && h.llmFactory != nil {
+		h.handleCodexChat(w, r, ag, q, current, base, llmImages, plannerDecision)
+		return
+	}
+
 	// OpenAI models require an API key; return a clear error if none is configured.
 	if h.clientFactory != nil && !h.clientFactory.HasKeyForAgent(ag) {
 		writeJSONResponse(w, map[string]any{
@@ -1508,6 +1514,13 @@ func isImageMimeType(mimeType string) bool {
 	default:
 		return false
 	}
+}
+
+func isCodexProviderOrModel(provider, model string) bool {
+	if strings.EqualFold(strings.TrimSpace(provider), "codex") {
+		return true
+	}
+	return strings.Contains(strings.ToLower(strings.TrimSpace(model)), "codex")
 }
 
 func isParseableDocument(filename string) bool {

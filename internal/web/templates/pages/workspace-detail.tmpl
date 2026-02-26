@@ -339,6 +339,9 @@
   <!-- Include chat area for additional modals (scheduledTasksModal, etc.) -->
   {{template "chat-area.tmpl" .}}
 
+  <!-- Shared modals (includes Add Agent modal used by Ask Ori) -->
+  {{template "modals.tmpl" .}}
+
   <!-- Ask Ori Thinking Modal -->
   <div class="modal fade" id="homeAssistantThinkingModal" tabindex="-1"
        aria-labelledby="homeAssistantThinkingModalLabel" aria-hidden="true">
