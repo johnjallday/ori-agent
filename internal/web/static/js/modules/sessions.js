@@ -2726,6 +2726,7 @@ const sessionManager = {
     const nameInput = document.getElementById('folderNameInput');
     const descriptionInput = document.getElementById('folderDescriptionInput');
     const parentSelect = document.getElementById('folderParentSelect');
+    const modalElement = document.getElementById('addFolderModal');
     const colorBtn = document.querySelector('.folder-color-btn.active');
 
     const name = nameInput?.value.trim();
@@ -2743,15 +2744,28 @@ const sessionManager = {
       });
 
       if (!response.ok) throw new Error('Failed to create workspace');
+      const result = await response.json();
+      const createdWorkspaceId = result && result.folder && result.folder.id
+        ? String(result.folder.id)
+        : '';
+      const askOriPostCreate = modalElement ? String(modalElement.dataset.askOriPostCreate || '') : '';
+      if (modalElement) {
+        delete modalElement.dataset.askOriPostCreate;
+      }
 
       // Close modal
-      const modal = bootstrap.Modal.getInstance(document.getElementById('addFolderModal'));
+      const modal = bootstrap.Modal.getInstance(modalElement);
       modal?.hide();
 
       // Clear inputs
       if (nameInput) nameInput.value = '';
       if (descriptionInput) descriptionInput.value = '';
       if (parentSelect) parentSelect.value = '';
+
+      if (askOriPostCreate === 'open_workspace_dashboard' && createdWorkspaceId) {
+        window.location.href = `/workspaces/${encodeURIComponent(createdWorkspaceId)}`;
+        return;
+      }
 
       // Refresh folders
       await this.loadFolders();

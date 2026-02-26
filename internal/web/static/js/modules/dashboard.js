@@ -3221,7 +3221,55 @@
     return 'Created from Ask Ori task: "' + text + '"';
   }
 
-  async function createWorkspaceByName(workspaceName, prompt, _) {
+  async function openCreateWorkspaceModalWithSeed(seedPayload) {
+    var modalElement = document.getElementById('addFolderModal');
+    var nameInput = document.getElementById('folderNameInput');
+    var descriptionInput = document.getElementById('folderDescriptionInput');
+    var parentSelect = document.getElementById('folderParentSelect');
+    if (!modalElement || !nameInput || !descriptionInput || typeof bootstrap === 'undefined' || !bootstrap.Modal) {
+      return { status: 'unavailable', reason: 'workspace_modal_prerequisites_missing' };
+    }
+
+    nameInput.value = String(seedPayload && seedPayload.name || '').trim();
+    descriptionInput.value = String(seedPayload && seedPayload.description || '').trim();
+    if (parentSelect) {
+      parentSelect.value = '';
+    }
+    modalElement.dataset.askOriPostCreate = 'open_workspace_dashboard';
+    if (!modalElement.dataset.askOriCleanupBound) {
+      modalElement.addEventListener('hidden.bs.modal', function () {
+        delete modalElement.dataset.askOriPostCreate;
+      }, true);
+      modalElement.dataset.askOriCleanupBound = '1';
+    }
+
+    var colorButtons = modalElement.querySelectorAll('.folder-color-btn');
+    for (var i = 0; i < colorButtons.length; i++) {
+      colorButtons[i].classList.remove('active');
+    }
+    var defaultColorBtn = modalElement.querySelector('.folder-color-btn[data-color=""]');
+    if (defaultColorBtn) {
+      defaultColorBtn.classList.add('active');
+    } else if (colorButtons.length > 0) {
+      colorButtons[0].classList.add('active');
+    }
+
+    closeHomeAssistantThinkingModal();
+    var modalInstance = bootstrap.Modal.getInstance(modalElement) || new bootstrap.Modal(modalElement);
+    modalInstance.show();
+
+    window.setTimeout(function () {
+      if (!nameInput) return;
+      nameInput.focus();
+      if (typeof nameInput.select === 'function') {
+        nameInput.select();
+      }
+    }, 120);
+
+    return { status: 'opened' };
+  }
+
+  async function createWorkspaceByName(workspaceName, prompt) {
     var name = String(workspaceName || '').trim() || 'New Workspace';
     var sourcePrompt = String(prompt || '').trim();
     var payload = {
@@ -3229,37 +3277,30 @@
       description: buildWorkspaceDescriptionFromPrompt(sourcePrompt || ('Create workspace: ' + name))
     };
 
-    setHomeAssistantBusy(true, 'Creating Workspace...');
+    setHomeAssistantBusy(true, 'Preparing Workspace...');
     renderHomeAssistantActions([]);
-    appendHomeAssistantMessage('assistant', 'Creating workspace "' + name + '"...');
-    setHomeAssistantRoutingSummary('Workspace', 'Creating workspace "' + name + '".');
+    appendHomeAssistantMessage('assistant', 'Opening the Create Workspace modal for "' + name + '"...');
+    setHomeAssistantRoutingSummary('Workspace', 'Preparing Create Workspace modal.');
 
     try {
-      var result = null;
-      if (typeof API !== 'undefined' && typeof API.post === 'function') {
-        result = await API.post('/api/workspaces', payload);
-      } else {
-        var response = await fetch('/api/workspaces', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload)
-        });
-        if (!response.ok) throw new Error('Workspace create request failed');
-        result = await response.json();
+      var modalResult = await openCreateWorkspaceModalWithSeed(payload);
+      if (!modalResult || modalResult.status !== 'opened') {
+        throw new Error('Workspace create modal unavailable');
       }
 
-      var folder = result && result.folder ? result.folder : null;
-      var workspaceId = folder && folder.id ? String(folder.id) : '';
-      var createdName = folder && folder.name ? String(folder.name) : name;
-      if (!workspaceId) throw new Error('Workspace create response missing id');
-
-      appendHomeAssistantMessage('assistant', 'Created workspace "' + createdName + '". Opening canvas...');
-      setHomeAssistantRoutingSummary('Workspace Created', '"' + createdName + '" is ready.');
-      window.location.href = '/workspaces/' + encodeURIComponent(workspaceId) + '/canvas';
+      appendHomeAssistantMessage('assistant', 'Create Workspace is ready. Review details and click Create. I will open its Workspace Dashboard next.');
+      setHomeAssistantRoutingSummary('Workspace', 'Review and confirm in the Create Workspace modal.');
+      renderHomeAssistantActions([
+        {
+          label: 'Ask Another Task',
+          variant: 'secondary',
+          onClick: function () { focusHomeAssistantInput(); }
+        }
+      ]);
     } catch (error) {
-      dashLog.debug('Direct workspace creation from Ask Ori failed', { error: error && error.message || error });
-      appendHomeAssistantMessage('assistant', 'I could not create that workspace right now. You can open Workspaces and create it there.');
-      setHomeAssistantRoutingSummary('Workspace Create Failed', 'Could not create workspace automatically.');
+      dashLog.debug('Opening workspace create modal from Ask Ori failed', { error: error && error.message || error });
+      appendHomeAssistantMessage('assistant', 'I could not open the Create Workspace modal right now. You can open Workspaces and create it there.');
+      setHomeAssistantRoutingSummary('Workspace Modal Failed', 'Could not open Create Workspace modal automatically.');
       renderHomeAssistantActions([
         {
           label: 'Open Workspaces',
@@ -3289,71 +3330,36 @@
       description: buildWorkspaceDescriptionFromPrompt(text)
     };
 
-    setHomeAssistantBusy(true, 'Creating Workspace...');
+    setHomeAssistantBusy(true, 'Preparing Workspace...');
     renderHomeAssistantActions([]);
-    appendHomeAssistantMessage('assistant', 'Creating a workspace from this task and opening the canvas...');
-    setHomeAssistantRoutingSummary('Workspace', 'Creating workspace and opening canvas.');
+    appendHomeAssistantMessage('assistant', 'Opening Create Workspace so you can review details first...');
+    setHomeAssistantRoutingSummary('Workspace', 'Preparing Create Workspace modal.');
 
     try {
-      var result = null;
-      if (typeof API !== 'undefined' && typeof API.post === 'function') {
-        result = await API.post('/api/workspaces', payload);
-      } else {
-        var response = await fetch('/api/workspaces', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload)
-        });
-        if (!response.ok) {
-          throw new Error('Workspace create request failed');
+      var modalResult = await openCreateWorkspaceModalWithSeed(payload);
+      if (!modalResult || modalResult.status !== 'opened') {
+        throw new Error('Workspace create modal unavailable');
+      }
+
+      appendHomeAssistantMessage('assistant', 'Create Workspace is ready. Review details and click Create. I will open its Workspace Dashboard next.');
+      setHomeAssistantRoutingSummary('Workspace', 'Review and confirm in the Create Workspace modal.');
+      renderHomeAssistantActions([
+        {
+          label: 'Continue in Chat',
+          variant: 'secondary',
+          disabled: !agentName,
+          onClick: function () { runPendingTaskWithAgent(text, agentName, { appLaunchRequest: appLaunchRequest, routeContext: routeContext }); }
+        },
+        {
+          label: 'Ask Another Task',
+          variant: 'secondary',
+          onClick: function () { focusHomeAssistantInput(); }
         }
-        result = await response.json();
-      }
-
-      var folder = result && result.folder ? result.folder : null;
-      var workspaceId = folder && folder.id ? String(folder.id) : '';
-      var workspaceName = folder && folder.name ? String(folder.name) : payload.name;
-      if (!workspaceId) {
-        throw new Error('Workspace create response missing id');
-      }
-
-      var agentAttached = false;
-      if (agentName) {
-        try {
-          if (typeof API !== 'undefined' && typeof API.post === 'function') {
-            await API.post('/api/workspaces/' + encodeURIComponent(workspaceId) + '/agents', { agent_name: agentName });
-          } else {
-            var addAgentResponse = await fetch('/api/workspaces/' + encodeURIComponent(workspaceId) + '/agents', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ agent_name: agentName })
-            });
-            if (!addAgentResponse.ok) {
-              throw new Error('Workspace agent attach request failed');
-            }
-          }
-          agentAttached = true;
-        } catch (attachError) {
-          dashLog.debug('Workspace created but failed to add agent', {
-            workspaceId: workspaceId,
-            agentName: agentName,
-            error: attachError && attachError.message || attachError
-          });
-        }
-      }
-
-      if (agentName && agentAttached) {
-        appendHomeAssistantMessage('assistant', 'Created workspace "' + workspaceName + '" and added "' + agentName + '". Opening canvas...');
-        setHomeAssistantRoutingSummary('Workspace Created', '"' + workspaceName + '" is ready with "' + agentName + '" attached.');
-      } else {
-        appendHomeAssistantMessage('assistant', 'Created workspace "' + workspaceName + '". Opening canvas...');
-        setHomeAssistantRoutingSummary('Workspace Created', '"' + workspaceName + '" is ready.');
-      }
-      window.location.href = '/workspaces/' + encodeURIComponent(workspaceId) + '/canvas';
+      ]);
     } catch (error) {
-      dashLog.debug('Workspace creation from Ask Ori failed', { error: error && error.message || error });
-      appendHomeAssistantMessage('assistant', 'I could not create that workspace automatically. You can open Workspaces manually or continue in chat.');
-      setHomeAssistantRoutingSummary('Workspace Create Failed', 'Could not create workspace automatically.');
+      dashLog.debug('Opening workspace create modal from Ask Ori failed', { error: error && error.message || error });
+      appendHomeAssistantMessage('assistant', 'I could not open Create Workspace automatically. You can open Workspaces manually or continue in chat.');
+      setHomeAssistantRoutingSummary('Workspace Modal Failed', 'Could not open Create Workspace modal automatically.');
       renderHomeAssistantActions([
         {
           label: 'Open Workspaces',
@@ -3481,7 +3487,7 @@
     appendHomeAssistantMessage('user', text);
 
     if (directWorkspaceCommand && directWorkspaceCommand.name) {
-      await createWorkspaceByName(directWorkspaceCommand.name, text, routeContext);
+      await createWorkspaceByName(directWorkspaceCommand.name, text);
       return;
     }
 
