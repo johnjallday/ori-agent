@@ -115,9 +115,11 @@ console.log('[workspace-hub.js] FILE LOADED');
     launcherOverviewInProgress: document.getElementById('launcherOverviewInProgress'),
     launcherOverviewAttention: document.getElementById('launcherOverviewAttention'),
     launcherOverviewScheduled: document.getElementById('launcherOverviewScheduled'),
+    launcherOverviewOpenSessions: document.getElementById('launcherOverviewOpenSessions'),
     launcherOverviewByWorkspace: document.getElementById('launcherOverviewByWorkspace'),
     launcherOverviewTopTasks: document.getElementById('launcherOverviewTopTasks'),
     launcherOverviewScheduledTasks: document.getElementById('launcherOverviewScheduledTasks'),
+    launcherOverviewOpenSessionsList: document.getElementById('launcherOverviewOpenSessionsList'),
     launcherOverviewDetails: document.getElementById('launcherOverviewDetails'),
     launcherOverviewToggleBtn: document.getElementById('launcherOverviewToggleBtn'),
     loadingOverlay: document.getElementById('workspaceHubLoading'),
@@ -282,6 +284,7 @@ console.log('[workspace-hub.js] FILE LOADED');
     if (elements.launcherOverviewInProgress) elements.launcherOverviewInProgress.textContent = String(metrics.inProgress || 0);
     if (elements.launcherOverviewAttention) elements.launcherOverviewAttention.textContent = String(metrics.needsAttention || 0);
     if (elements.launcherOverviewScheduled) elements.launcherOverviewScheduled.textContent = String(metrics.scheduled || 0);
+    if (elements.launcherOverviewOpenSessions) elements.launcherOverviewOpenSessions.textContent = String(metrics.openSessions || 0);
   }
 
   function renderLauncherTaskBadge(workspaceID) {
@@ -383,6 +386,11 @@ console.log('[workspace-hub.js] FILE LOADED');
     window.location.href = `/workspaces/${encodeURIComponent(workspaceId)}`;
   }
 
+  function navigateToSession(sessionId) {
+    if (!sessionId) return;
+    window.location.href = `/chat/${encodeURIComponent(sessionId)}`;
+  }
+
   function bindLauncherOverviewLinks() {
     if (elements.launcherOverviewByWorkspace) {
       elements.launcherOverviewByWorkspace.querySelectorAll('[data-overview-workspace]').forEach((btn) => {
@@ -410,6 +418,15 @@ console.log('[workspace-hub.js] FILE LOADED');
         });
       });
     }
+
+    if (elements.launcherOverviewOpenSessionsList) {
+      elements.launcherOverviewOpenSessionsList.querySelectorAll('[data-overview-session]').forEach((btn) => {
+        btn.addEventListener('click', (event) => {
+          event.preventDefault();
+          navigateToSession(btn.getAttribute('data-overview-session'));
+        });
+      });
+    }
   }
 
   function renderLauncherOverviewLoading() {
@@ -424,6 +441,9 @@ console.log('[workspace-hub.js] FILE LOADED');
     }
     if (elements.launcherOverviewScheduledTasks) {
       elements.launcherOverviewScheduledTasks.innerHTML = '<div class="hub-loading">Refreshing scheduled tasks...</div>';
+    }
+    if (elements.launcherOverviewOpenSessionsList) {
+      elements.launcherOverviewOpenSessionsList.innerHTML = '<div class="hub-loading">Refreshing open sessions...</div>';
     }
   }
 
@@ -447,6 +467,62 @@ console.log('[workspace-hub.js] FILE LOADED');
     return results;
   }
 
+  async function fetchWorkspaceOverviewData(workspaceId) {
+    const safeWorkspaceId = String(workspaceId || '').trim();
+    if (!safeWorkspaceId) {
+      return {
+        tasks: [],
+        sessions: [],
+        taskError: new Error('Missing workspace ID for overview fetch'),
+        sessionError: new Error('Missing workspace ID for overview fetch')
+      };
+    }
+
+    const [taskResponse, sessionResponse] = await Promise.allSettled([
+      fetch(`/api/orchestration/tasks?studio_id=${encodeURIComponent(safeWorkspaceId)}`),
+      fetch(`/api/sessions?folder_id=${encodeURIComponent(safeWorkspaceId)}&sort=updated_desc&limit=50`)
+    ]);
+
+    const payload = {
+      tasks: [],
+      sessions: [],
+      taskError: null,
+      sessionError: null
+    };
+
+    if (taskResponse.status === 'fulfilled') {
+      if (!taskResponse.value.ok) {
+        payload.taskError = new Error(`Task request failed (${taskResponse.value.status})`);
+      } else {
+        try {
+          const taskData = await taskResponse.value.json();
+          payload.tasks = Array.isArray(taskData.tasks) ? taskData.tasks : [];
+        } catch (err) {
+          payload.taskError = err;
+        }
+      }
+    } else {
+      payload.taskError = taskResponse.reason || new Error('Task request failed');
+    }
+
+    if (sessionResponse.status === 'fulfilled') {
+      if (!sessionResponse.value.ok) {
+        payload.sessionError = new Error(`Session request failed (${sessionResponse.value.status})`);
+      } else {
+        try {
+          const sessionData = await sessionResponse.value.json();
+          payload.sessions = Array.isArray(sessionData.sessions) ? sessionData.sessions : [];
+        } catch (err) {
+          payload.sessionError = err;
+        }
+      }
+    } else {
+      payload.sessionError = sessionResponse.reason || new Error('Session request failed');
+    }
+
+    return payload;
+  }
+
   async function refreshLauncherTaskOverview(flattened) {
     if (!elements.launcherTaskOverview) return;
 
@@ -458,7 +534,8 @@ console.log('[workspace-hub.js] FILE LOADED');
         pending: 0,
         inProgress: 0,
         needsAttention: 0,
-        scheduled: 0
+        scheduled: 0,
+        openSessions: 0
       });
       if (elements.launcherOverviewUpdatedAt) {
         elements.launcherOverviewUpdatedAt.textContent = 'No workspaces';
@@ -472,6 +549,9 @@ console.log('[workspace-hub.js] FILE LOADED');
       if (elements.launcherOverviewScheduledTasks) {
         elements.launcherOverviewScheduledTasks.innerHTML = '<div class="launcher-overview-empty">No scheduled tasks yet.</div>';
       }
+      if (elements.launcherOverviewOpenSessionsList) {
+        elements.launcherOverviewOpenSessionsList.innerHTML = '<div class="launcher-overview-empty">No open sessions yet.</div>';
+      }
       if (hubEl.dataset.state === 'launcher') {
         const state = window.WorkspaceHubState.getState();
         renderLauncher(flattenWorkspaces(state.workspaces || []));
@@ -482,24 +562,24 @@ console.log('[workspace-hub.js] FILE LOADED');
     const requestSeq = ++launcherOverviewRequestSeq;
     renderLauncherOverviewLoading();
 
-    const taskResults = await mapWithConcurrency(workspaces, 6, async (workspace) => {
+    const overviewResults = await mapWithConcurrency(workspaces, 6, async (workspace) => {
       try {
-        const response = await fetch(`/api/orchestration/tasks?studio_id=${encodeURIComponent(workspace.id)}`);
-        if (!response.ok) {
-          throw new Error(`Request failed (${response.status})`);
-        }
-        const data = await response.json();
+        const payload = await fetchWorkspaceOverviewData(workspace.id);
         return {
           workspace,
-          tasks: Array.isArray(data.tasks) ? data.tasks : [],
-          error: null
+          tasks: payload.tasks,
+          sessions: payload.sessions,
+          taskError: payload.taskError,
+          sessionError: payload.sessionError
         };
       } catch (err) {
-        console.error('Failed to load workspace tasks for overview:', workspace.id, err);
+        console.error('Failed to load workspace overview:', workspace.id, err);
         return {
           workspace,
           tasks: [],
-          error: err
+          sessions: [],
+          taskError: err,
+          sessionError: err
         };
       }
     });
@@ -513,17 +593,28 @@ console.log('[workspace-hub.js] FILE LOADED');
       pending: 0,
       inProgress: 0,
       needsAttention: 0,
-      scheduled: 0
+      scheduled: 0,
+      openSessions: 0
     };
     const workspaceSummaries = [];
     const aggregateTasks = [];
     const scheduledTasks = [];
-    let failedFetches = 0;
+    const openSessions = [];
+    let failedTaskFetches = 0;
+    let failedSessionFetches = 0;
 
-    taskResults.forEach((result) => {
+    overviewResults.forEach((result) => {
       const workspace = result.workspace;
       const tasks = Array.isArray(result.tasks) ? result.tasks : [];
-      if (result.error) failedFetches += 1;
+      const sessions = Array.isArray(result.sessions) ? result.sessions : [];
+      if (result.taskError) {
+        failedTaskFetches += 1;
+        console.error('Failed to load workspace tasks for overview:', workspace.id, result.taskError);
+      }
+      if (result.sessionError) {
+        failedSessionFetches += 1;
+        console.error('Failed to load workspace sessions for overview:', workspace.id, result.sessionError);
+      }
 
       const summary = {
         id: workspace.id,
@@ -533,8 +624,26 @@ console.log('[workspace-hub.js] FILE LOADED');
         pending: 0,
         inProgress: 0,
         needsAttention: 0,
-        scheduled: 0
+        scheduled: 0,
+        openSessions: 0
       };
+      const workspaceSessionCount = Number(workspace.session_count);
+      summary.openSessions = Number.isFinite(workspaceSessionCount) && workspaceSessionCount >= 0
+        ? workspaceSessionCount
+        : sessions.length;
+      totals.openSessions += summary.openSessions;
+
+      sessions.forEach((chatSession) => {
+        openSessions.push({
+          id: chatSession.id || '',
+          title: chatSession.title || chatSession.name || 'Untitled chat',
+          workspaceId: workspace.id,
+          workspaceName: workspace.name || 'Untitled Workspace',
+          agentName: chatSession.agent_name || 'default',
+          messageCount: Number(chatSession.message_count) || 0,
+          updatedAt: chatSession.updated_at || chatSession.created_at || ''
+        });
+      });
 
       tasks.forEach((task) => {
         const status = normalizeOverviewStatus(task.status);
@@ -628,22 +737,41 @@ console.log('[workspace-hub.js] FILE LOADED');
       return String(a.description).localeCompare(String(b.description));
     });
 
+    openSessions.sort((a, b) => {
+      const aTimeRaw = a.updatedAt ? new Date(a.updatedAt).getTime() : 0;
+      const bTimeRaw = b.updatedAt ? new Date(b.updatedAt).getTime() : 0;
+      const aTime = Number.isFinite(aTimeRaw) ? aTimeRaw : 0;
+      const bTime = Number.isFinite(bTimeRaw) ? bTimeRaw : 0;
+      if (aTime !== bTime) return bTime - aTime;
+      const wsCmp = String(a.workspaceName).localeCompare(String(b.workspaceName));
+      if (wsCmp !== 0) return wsCmp;
+      return String(a.title).localeCompare(String(b.title));
+    });
+
     updateLauncherOverviewMetrics(totals);
     if (elements.launcherOverviewUpdatedAt) {
-      const suffix = failedFetches > 0 ? ` | ${failedFetches} unavailable` : '';
+      const unavailable = [];
+      if (failedTaskFetches > 0) {
+        unavailable.push(`${failedTaskFetches} task feed${failedTaskFetches === 1 ? '' : 's'}`);
+      }
+      if (failedSessionFetches > 0) {
+        unavailable.push(`${failedSessionFetches} session feed${failedSessionFetches === 1 ? '' : 's'}`);
+      }
+      const suffix = unavailable.length > 0 ? ` | ${unavailable.join(', ')} unavailable` : '';
       elements.launcherOverviewUpdatedAt.textContent = `Updated ${formatOverviewTimestamp()}${suffix}`;
     }
 
     if (elements.launcherOverviewByWorkspace) {
-      const rows = workspaceSummaries.filter((item) => item.open > 0);
+      const rows = workspaceSummaries.filter((item) => item.open > 0 || item.openSessions > 0);
       if (rows.length === 0) {
-        elements.launcherOverviewByWorkspace.innerHTML = '<div class="launcher-overview-empty">No open tasks across workspaces.</div>';
+        elements.launcherOverviewByWorkspace.innerHTML = '<div class="launcher-overview-empty">No open tasks or sessions across workspaces.</div>';
       } else {
         elements.launcherOverviewByWorkspace.innerHTML = rows.map((item) => {
           const metaParts = [];
           metaParts.push(`${item.open} open`);
           if (item.inProgress > 0) metaParts.push(`${item.inProgress} active`);
           if (item.needsAttention > 0) metaParts.push(`${item.needsAttention} attention`);
+          if (item.openSessions > 0) metaParts.push(`${item.openSessions} sessions`);
           return `
             <button type="button" class="launcher-overview-workspace" data-overview-workspace="${escapeHtml(item.id)}" title="${escapeHtml(item.path)}">
               <span class="launcher-overview-workspace-name">${escapeHtml(item.name)}</span>
@@ -683,6 +811,27 @@ console.log('[workspace-hub.js] FILE LOADED');
               <div class="launcher-overview-task-meta">${escapeHtml(task.workspaceName)} | ${escapeHtml(statusLabel)}</div>
               <div class="launcher-overview-task-meta">${escapeHtml(task.scheduleText)} | Next: ${escapeHtml(nextRun)}</div>
               <button type="button" class="launcher-overview-task-link" data-overview-workspace="${escapeHtml(task.workspaceId)}">Open workspace</button>
+            </div>
+          `;
+        }).join('');
+      }
+    }
+
+    if (elements.launcherOverviewOpenSessionsList) {
+      const recentSessions = openSessions.slice(0, 20);
+      if (recentSessions.length === 0) {
+        elements.launcherOverviewOpenSessionsList.innerHTML = '<div class="launcher-overview-empty">No open sessions to show.</div>';
+      } else {
+        elements.launcherOverviewOpenSessionsList.innerHTML = recentSessions.map((chatSession) => {
+          const updated = chatSession.updatedAt ? formatDate(chatSession.updatedAt) : 'No activity';
+          const hasSessionId = Boolean(chatSession.id);
+          const messageLabel = `${chatSession.messageCount} message${chatSession.messageCount === 1 ? '' : 's'}`;
+          return `
+            <div class="launcher-overview-task">
+              <div class="launcher-overview-task-title">${escapeHtml(truncateText(chatSession.title, 96) || 'Untitled chat')}</div>
+              <div class="launcher-overview-task-meta">${escapeHtml(chatSession.workspaceName)} | ${escapeHtml(chatSession.agentName)}</div>
+              <div class="launcher-overview-task-meta">${escapeHtml(messageLabel)} | ${escapeHtml(updated)}</div>
+              <button type="button" class="launcher-overview-task-link" data-overview-session="${escapeHtml(chatSession.id)}" ${hasSessionId ? '' : 'disabled'}>Open chat</button>
             </div>
           `;
         }).join('');

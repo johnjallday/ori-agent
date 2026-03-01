@@ -78,7 +78,7 @@
           <div class="launcher-overview-header">
             <div>
               <h3 class="launcher-overview-title">All Workspaces Summary</h3>
-              <p class="launcher-overview-subtitle">Track ongoing work and scheduled runs across all workspaces.</p>
+              <p class="launcher-overview-subtitle">Track ongoing work, scheduled runs, and open sessions across all workspaces.</p>
             </div>
             <div class="launcher-overview-header-actions">
               <span class="launcher-overview-updated" id="launcherOverviewUpdatedAt">Loading...</span>
@@ -108,6 +108,10 @@
               <span class="launcher-overview-metric-label">Scheduled</span>
               <span class="launcher-overview-metric-value" id="launcherOverviewScheduled">0</span>
             </div>
+            <div class="launcher-overview-metric">
+              <span class="launcher-overview-metric-label">Open Sessions</span>
+              <span class="launcher-overview-metric-value" id="launcherOverviewOpenSessions">0</span>
+            </div>
           </div>
           <div class="launcher-overview-content" id="launcherOverviewDetails" hidden>
             <div class="launcher-overview-column">
@@ -126,6 +130,12 @@
               <h4 class="launcher-overview-column-title">Scheduled Tasks</h4>
               <div class="launcher-overview-list" id="launcherOverviewScheduledTasks">
                 <div class="hub-loading">Loading scheduled tasks...</div>
+              </div>
+            </div>
+            <div class="launcher-overview-column">
+              <h4 class="launcher-overview-column-title">Open Sessions</h4>
+              <div class="launcher-overview-list" id="launcherOverviewOpenSessionsList">
+                <div class="hub-loading">Loading open sessions...</div>
               </div>
             </div>
           </div>
