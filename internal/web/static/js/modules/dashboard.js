@@ -420,16 +420,87 @@
     var raw = String(prompt || '').trim();
     if (!raw || raw.charAt(0) !== '/') return null;
 
-    var match = raw.match(/^\/(task|chat|c|note)(?:\s+([\s\S]*))?$/i);
+    var match = raw.match(/^\/(task|chat|c|note|directory|dir|file|upload)(?:\s+([\s\S]*))?$/i);
     if (!match) return null;
 
     var command = normalizeToken(match[1]);
     if (command === 'c') command = 'chat';
+    if (command === 'dir') command = 'directory';
+    if (command === 'upload') command = 'file';
 
     return {
       command: command,
       content: String(match[2] || '').trim()
     };
+  }
+
+  function sanitizeWorkspaceCommandContent(content) {
+    var text = String(content || '').trim();
+    if (!text) return '';
+    if ((text.charAt(0) === '"' && text.charAt(text.length - 1) === '"') ||
+        (text.charAt(0) === '\'' && text.charAt(text.length - 1) === '\'') ||
+        (text.charAt(0) === '`' && text.charAt(text.length - 1) === '`')) {
+      text = text.slice(1, -1).trim();
+    }
+    text = text.replace(/^(?:about|for|to|at|from|path|called|named)\s+/i, '').trim();
+    return text;
+  }
+
+  function extractLikelyPathFromText(text) {
+    var value = String(text || '').trim();
+    if (!value) return '';
+
+    var quoted = value.match(/["'`]([^"'`]*(?:\/|\\)[^"'`]*)["'`]/);
+    if (quoted && quoted[1]) return sanitizeWorkspaceCommandContent(quoted[1]);
+
+    var inline = value.match(/(?:^|\s)(~\/[^\s,;]+|\/[^\s,;]+|[A-Za-z]:\\[^\s,;]+)/);
+    if (inline && inline[1]) return sanitizeWorkspaceCommandContent(inline[1]);
+
+    return '';
+  }
+
+  function inferWorkspaceActionCommand(prompt, appLaunchRequest) {
+    var raw = String(prompt || '').trim();
+    if (!raw) return null;
+    if (appLaunchRequest && appLaunchRequest.appName) return null;
+
+    var normalized = normalizeToken(raw);
+    if (!normalized) return null;
+
+    if (/^(?:open\s+chat|start\s+chat|chat\s|continue\s+in\s+chat|talk\s+to\s|discuss\s)/i.test(normalized)) {
+      return { command: 'chat', content: raw };
+    }
+
+    var noteMatch = raw.match(/^(?:add|create|write|save|make)?\s*(?:a\s+)?note(?:\s+(?:about|for|to))?[\s:,-]*(.*)$/i);
+    if (!noteMatch) {
+      noteMatch = raw.match(/^remember(?:\s+to)?[\s:,-]*(.*)$/i);
+    }
+    if (noteMatch) {
+      var noteContent = sanitizeWorkspaceCommandContent(noteMatch[1] || '');
+      if (!noteContent) noteContent = raw;
+      return { command: 'note', content: noteContent };
+    }
+
+    var directoryMatch = raw.match(/^(?:add|attach|link|include|use|set|open)\s+(?:a\s+)?(?:directory|folder)\b[\s:,-]*(.*)$/i);
+    if (!directoryMatch) {
+      directoryMatch = raw.match(/^(?:directory|folder)\b[\s:,-]*(.*)$/i);
+    }
+    if (directoryMatch) {
+      var directoryContent = sanitizeWorkspaceCommandContent(directoryMatch[1] || '');
+      var inferredPath = extractLikelyPathFromText(directoryContent || raw);
+      return { command: 'directory', content: inferredPath || directoryContent };
+    }
+
+    var fileMatch = raw.match(/^(?:add|attach|upload|include)\s+(?:a\s+)?(?:file|document|attachment)\b[\s:,-]*(.*)$/i);
+    if (!fileMatch) {
+      fileMatch = raw.match(/^(?:file|upload)\b[\s:,-]*(.*)$/i);
+    }
+    if (fileMatch) {
+      var fileContent = sanitizeWorkspaceCommandContent(fileMatch[1] || '');
+      return { command: 'file', content: fileContent };
+    }
+
+    return { command: 'task', content: raw };
   }
 
   function parseAppLaunchRequest(prompt) {
@@ -539,26 +610,9 @@
     return Boolean(String(routeContext.workspace_id || '').trim());
   }
 
-  function buildWorkspaceContextDispatchPrefix(routeContext) {
-    if (!hasWorkspaceRouteContext(routeContext)) return '';
-    var workspaceId = String(routeContext.workspace_id || '').trim();
-    var pagePath = String(routeContext.page_path || '').trim() || '/workspaces/' + workspaceId;
-    return [
-      'Workspace context:',
-      '- workspace_id: ' + workspaceId,
-      '- page_path: ' + pagePath,
-      '- origin: ask_ori',
-      ''
-    ].join('\n');
-  }
-
   function buildEmailDispatchMessage(prompt, routeContext) {
     var userPrompt = String(prompt || '').trim();
     var lines = [];
-    var workspacePrefix = buildWorkspaceContextDispatchPrefix(routeContext);
-    if (workspacePrefix) {
-      lines.push(workspacePrefix);
-    }
     lines.push(
       'Email task:',
       userPrompt,
@@ -577,9 +631,7 @@
       return buildEmailDispatchMessage(prompt, routeContext);
     }
     if (!appLaunchRequest || !appLaunchRequest.appName) {
-      var workspacePrefix = buildWorkspaceContextDispatchPrefix(routeContext);
-      if (!workspacePrefix) return String(prompt || '').trim();
-      return workspacePrefix + String(prompt || '').trim();
+      return String(prompt || '').trim();
     }
     return '/openapp ' + appLaunchRequest.appName;
   }
@@ -3112,7 +3164,7 @@
     openChatPanel();
     if (typeof window.sendMessageToChat !== 'function') return null;
     await waitForDelay(120);
-    window.sendMessageToChat(prompt);
+    window.sendMessageToChat(prompt, { routeContext: normalizeHomeRouteContext(routeContext) });
     return session;
   }
 
@@ -3240,7 +3292,7 @@
     return true;
   }
 
-  async function handleWorkspaceSlashCommand(commandPayload, routeContext) {
+  async function handleWorkspaceSlashCommand(commandPayload, routeContext, options) {
     if (!commandPayload || !commandPayload.command) return false;
     if (!hasWorkspaceRouteContext(routeContext)) return false;
 
@@ -3250,10 +3302,12 @@
     var command = String(commandPayload.command).trim();
     var content = String(commandPayload.content || '').trim();
     var displayCommand = '/' + command;
+    var isInferredAction = Boolean(options && options.inferred);
+    var commandSummaryTitle = isInferredAction ? 'Workspace Action' : 'Workspace Command';
 
     setHomeAssistantBusy(true, 'Running Command...');
     renderHomeAssistantActions([]);
-    setHomeAssistantRoutingSummary('Workspace Command', 'Executing ' + displayCommand + ' in this workspace.');
+    setHomeAssistantRoutingSummary(commandSummaryTitle, 'Executing ' + displayCommand + ' in this workspace.');
 
     try {
       if (command === 'task') {
@@ -3350,6 +3404,75 @@
             variant: 'primary',
             onClick: function () { openChatPanel(); }
           },
+          {
+            label: 'Ask Another Task',
+            variant: 'secondary',
+            onClick: function () { focusHomeAssistantInput(); }
+          }
+        ]);
+        return true;
+      }
+
+      if (command === 'directory') {
+        var directoryPath = sanitizeWorkspaceCommandContent(content);
+        if (!directoryPath) {
+          directoryPath = extractLikelyPathFromText(content);
+        }
+
+        if (window.workspaceDetail && typeof window.workspaceDetail.addDirectory === 'function' && directoryPath) {
+          await window.workspaceDetail.addDirectory(directoryPath);
+        } else if (window.workspaceDetail && typeof window.workspaceDetail.showAddDirectoryModal === 'function') {
+          await window.workspaceDetail.showAddDirectoryModal();
+        } else if (directoryPath) {
+          var directorySegments = String(directoryPath).split(/[\\/]/).filter(Boolean);
+          var directoryTitle = directorySegments.length > 0 ? directorySegments[directorySegments.length - 1] : directoryPath;
+          var directoryResponse = await fetch(`/api/studios/${encodeURIComponent(workspaceId)}/attachments`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              type: 'directory',
+              path: directoryPath,
+              title: directoryTitle
+            })
+          });
+          if (!directoryResponse.ok) throw new Error('Failed to add directory');
+        } else {
+          throw new Error('Directory picker unavailable');
+        }
+
+        if (directoryPath) {
+          appendHomeAssistantMessage('assistant', 'Added directory "' + directoryPath + '" to this workspace.');
+          setHomeAssistantRoutingSummary('Directory Added', 'Directory linked to this workspace.');
+        } else {
+          appendHomeAssistantMessage('assistant', 'Opened the folder picker. Select a directory to add it to this workspace.');
+          setHomeAssistantRoutingSummary('Directory Picker', 'Select a folder to add it to this workspace.');
+        }
+        renderHomeAssistantActions([
+          {
+            label: 'Ask Another Task',
+            variant: 'secondary',
+            onClick: function () { focusHomeAssistantInput(); }
+          }
+        ]);
+        return true;
+      }
+
+      if (command === 'file') {
+        if (window.workspaceDetail && typeof window.workspaceDetail.showFileModal === 'function') {
+          window.workspaceDetail.showFileModal();
+        } else if (window.WorkspaceHubFiles && typeof window.WorkspaceHubFiles.openAddFileModal === 'function') {
+          window.WorkspaceHubFiles.openAddFileModal();
+        } else {
+          throw new Error('File upload modal unavailable');
+        }
+
+        if (content) {
+          appendHomeAssistantMessage('assistant', 'Opened the upload modal for "' + content + '". Select the file to attach it to this workspace.');
+        } else {
+          appendHomeAssistantMessage('assistant', 'Opened the upload modal. Select file(s) to attach to this workspace.');
+        }
+        setHomeAssistantRoutingSummary('File Upload', 'File upload modal is ready for this workspace.');
+        renderHomeAssistantActions([
           {
             label: 'Ask Another Task',
             variant: 'secondary',
@@ -3724,6 +3847,14 @@
     if (directWorkspaceCommand && directWorkspaceCommand.name) {
       await createWorkspaceByName(directWorkspaceCommand.name, text);
       return;
+    }
+
+    if (inWorkspaceContext) {
+      var inferredWorkspaceAction = inferWorkspaceActionCommand(text, appLaunchRequest);
+      if (inferredWorkspaceAction && inferredWorkspaceAction.command) {
+        var inferredHandled = await handleWorkspaceSlashCommand(inferredWorkspaceAction, routeContext, { inferred: true });
+        if (inferredHandled) return;
+      }
     }
 
     setHomeAssistantBusy(true, 'Routing...');

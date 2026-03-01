@@ -788,13 +788,14 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 
 	var req struct {
-		Question             string         `json:"question"`
-		AgentName            string         `json:"agent_name,omitempty"` // Allow specifying target agent
-		Files                []UploadedFile `json:"files,omitempty"`
-		MultiAgentMode       string         `json:"multi_agent_mode,omitempty"`
-		MultiAgentThreshold  float64        `json:"multi_agent_threshold,omitempty"`
-		PlanBeforeAction     bool           `json:"plan_before_action,omitempty"`
-		ApprovedActionPlanID string         `json:"approved_action_plan_id,omitempty"`
+		Question             string            `json:"question"`
+		AgentName            string            `json:"agent_name,omitempty"` // Allow specifying target agent
+		Files                []UploadedFile    `json:"files,omitempty"`
+		RouteContext         *chatRouteContext `json:"route_context,omitempty"`
+		MultiAgentMode       string            `json:"multi_agent_mode,omitempty"`
+		MultiAgentThreshold  float64           `json:"multi_agent_threshold,omitempty"`
+		PlanBeforeAction     bool              `json:"plan_before_action,omitempty"`
+		ApprovedActionPlanID string            `json:"approved_action_plan_id,omitempty"`
 	}
 	if !orihttp.ParseJSONBody(w, r, &req) {
 		return
@@ -806,6 +807,8 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	originalQuery := q
 	approvedActionPlanID := strings.TrimSpace(req.ApprovedActionPlanID)
+	normalizedRouteContext := normalizeChatRouteContext(req.RouteContext)
+	runtimeSystemPrompt := buildRouteContextSystemPrompt(normalizedRouteContext)
 
 	// Natural language app launch shortcut:
 	// "open safari" -> "/openapp safari"
@@ -1458,14 +1461,14 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 
 	// Check if this is a Claude Code provider - route to Claude Code handler
 	if strings.EqualFold(ag.Settings.Provider, "claude_code") && h.llmFactory != nil {
-		h.handleClaudeCodeChat(w, r, ag, q, current, base, llmImages, plannerDecision)
+		h.handleClaudeCodeChat(w, r, ag, q, current, base, llmImages, plannerDecision, runtimeSystemPrompt)
 		return
 	}
 
 	// Check if this is a Claude model - if so, use provider system
 	if (strings.HasPrefix(ag.Settings.Model, "claude-") || strings.EqualFold(ag.Settings.Provider, "claude") || strings.EqualFold(ag.Settings.Provider, "anthropic")) && h.llmFactory != nil {
 		// Use Claude provider
-		h.handleClaudeChat(w, r, ag, q, tools, current, base, fileAttachments, llmImages, plannerDecision)
+		h.handleClaudeChat(w, r, ag, q, tools, current, base, fileAttachments, llmImages, plannerDecision, runtimeSystemPrompt)
 		return
 	}
 
@@ -1475,7 +1478,7 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 			if ollamaProv, ok := ollamaProvider.(*llm.OllamaProvider); ok {
 				if ollamaProv.HasModel(ag.Settings.Model) {
 					logger.Info("Model found in Ollama, routing to Ollama provider", logger.Fields{"model": ag.Settings.Model})
-					h.handleOllamaChat(w, r, ag, q, tools, current, base, fileAttachments, llmImages, plannerDecision)
+					h.handleOllamaChat(w, r, ag, q, tools, current, base, fileAttachments, llmImages, plannerDecision, runtimeSystemPrompt)
 					return
 				}
 			}
@@ -1484,13 +1487,13 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 
 	// Check if this is a Gemini model or provider
 	if strings.HasPrefix(strings.ToLower(ag.Settings.Model), "gemini-") || strings.EqualFold(ag.Settings.Provider, "gemini") {
-		h.handleGeminiChat(w, r, ag, q, tools, current, base, fileAttachments, llmImages, plannerDecision)
+		h.handleGeminiChat(w, r, ag, q, tools, current, base, fileAttachments, llmImages, plannerDecision, runtimeSystemPrompt)
 		return
 	}
 
 	// Route Codex provider/model through Codex CLI provider path (no OpenAI API key required).
 	if isCodexProviderOrModel(ag.Settings.Provider, ag.Settings.Model) && h.llmFactory != nil {
-		h.handleCodexChat(w, r, ag, q, current, base, llmImages, plannerDecision)
+		h.handleCodexChat(w, r, ag, q, current, base, llmImages, plannerDecision, runtimeSystemPrompt)
 		return
 	}
 
@@ -1503,7 +1506,7 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Handle OpenAI models
-	h.handleOpenAIChat(w, r, ag, q, tools, current, base, fileAttachments, agentClient, plannerDecision)
+	h.handleOpenAIChat(w, r, ag, q, tools, current, base, fileAttachments, agentClient, plannerDecision, runtimeSystemPrompt)
 }
 
 // isImageMimeType checks if a MIME type represents an image

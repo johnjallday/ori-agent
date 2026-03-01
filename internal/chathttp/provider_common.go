@@ -457,6 +457,18 @@ func (h *Handler) buildSystemPromptWithSkills(ag *agent.Agent, agentName, defaul
 	return sb.String()
 }
 
+func composeRuntimeSystemPrompt(basePrompt, runtimePrompt string) string {
+	base := strings.TrimSpace(basePrompt)
+	runtime := strings.TrimSpace(runtimePrompt)
+	if runtime == "" {
+		return base
+	}
+	if base == "" {
+		return runtime
+	}
+	return base + "\n\n---\n# Runtime Context\n" + runtime
+}
+
 func prioritizeToolsForPath(ag *agent.Agent, tools []llm.Tool) []llm.Tool {
 	if ag == nil || len(tools) <= 1 || ag.Evolution == nil || ag.Evolution.Path == "" {
 		return tools

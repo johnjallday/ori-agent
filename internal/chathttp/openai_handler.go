@@ -35,6 +35,7 @@ func (h *Handler) handleOpenAIChat(
 	files []pluginapi.FileAttachment,
 	agentClient openai.Client,
 	plannerDecision *types.PlannerDecision,
+	runtimeSystemPrompt string,
 ) {
 	sessionID := h.getSessionID(r)
 	ctx, cancel := context.WithTimeout(baseCtx, ChatRequestTimeout)
@@ -54,7 +55,7 @@ func (h *Handler) handleOpenAIChat(
 	params := openai.ChatCompletionNewParams{
 		Model:       openai.ChatModel(ag.Settings.Model),
 		Temperature: openai.Float(ag.Settings.Temperature),
-		Messages:    ag.Messages,
+		Messages:    injectRuntimeSystemPrompt(ag.Messages, runtimeSystemPrompt),
 		Tools:       openaiTools,
 	}
 
@@ -97,11 +98,12 @@ func (h *Handler) handleOpenAIChat(
 	if len(choice.ToolCalls) == 0 && strings.TrimSpace(choice.Content) == "" {
 		fbCtx, fbCancel := context.WithTimeout(baseCtx, 20*time.Second)
 		defer fbCancel()
+		fallbackMessages := injectRuntimeSystemPrompt(ag.Messages, runtimeSystemPrompt)
 
 		respFB, errFB := agentClient.Chat.Completions.New(fbCtx, openai.ChatCompletionNewParams{
 			Model:       openai.ChatModel(ag.Settings.Model),
 			Temperature: openai.Float(ag.Settings.Temperature),
-			Messages: append(ag.Messages,
+			Messages: append(fallbackMessages,
 				openai.SystemMessage("Answer directly in plain text. Do not call any tools."),
 			),
 		})
@@ -124,7 +126,7 @@ func (h *Handler) handleOpenAIChat(
 
 	// Tool-call branch
 	if len(choice.ToolCalls) > 0 {
-		h.handleOpenAIToolCalls(w, ag, agentName, baseCtx, ctx, files, agentClient, choice, openaiTools, start, sessionID, plannerDecision)
+		h.handleOpenAIToolCalls(w, ag, agentName, baseCtx, ctx, files, agentClient, choice, openaiTools, start, sessionID, plannerDecision, runtimeSystemPrompt)
 		return
 	}
 
@@ -162,6 +164,7 @@ func (h *Handler) handleOpenAIToolCalls(
 	start time.Time,
 	sessionID string,
 	plannerDecision *types.PlannerDecision,
+	runtimeSystemPrompt string,
 ) {
 	loopResult := h.runBoundedToolLoop(
 		choice.Content,
@@ -183,10 +186,11 @@ func (h *Handler) handleOpenAIToolCalls(
 				}
 			},
 			RequestNextResponse: func() (string, []llm.ToolCall, error) {
+				messages := injectRuntimeSystemPrompt(ag.Messages, runtimeSystemPrompt)
 				resp2, err := requestOpenAICompletionWithRetry(ctx, agentClient, openai.ChatCompletionNewParams{
 					Model:       openai.ChatModel(ag.Settings.Model),
 					Temperature: openai.Float(ag.Settings.Temperature),
-					Messages: append(ag.Messages,
+					Messages: append(messages,
 						openai.SystemMessage(getFollowUpSystemPrompt()),
 					),
 					Tools: openaiTools,
@@ -287,6 +291,35 @@ func convertLLMToolCallsToOpenAI(toolCalls []llm.ToolCall) []openai.ChatCompleti
 		})
 	}
 	return result
+}
+
+func injectRuntimeSystemPrompt(
+	messages []openai.ChatCompletionMessageParamUnion,
+	runtimeSystemPrompt string,
+) []openai.ChatCompletionMessageParamUnion {
+	runtime := strings.TrimSpace(runtimeSystemPrompt)
+	if runtime == "" {
+		return messages
+	}
+
+	runtimeMessage := openai.SystemMessage(runtime)
+	if len(messages) == 0 {
+		return []openai.ChatCompletionMessageParamUnion{runtimeMessage}
+	}
+
+	lastIdx := len(messages) - 1
+	lastMessage := messages[lastIdx]
+	if lastMessage.OfUser != nil {
+		withRuntime := make([]openai.ChatCompletionMessageParamUnion, 0, len(messages)+1)
+		withRuntime = append(withRuntime, messages[:lastIdx]...)
+		withRuntime = append(withRuntime, runtimeMessage, lastMessage)
+		return withRuntime
+	}
+
+	withRuntime := make([]openai.ChatCompletionMessageParamUnion, 0, len(messages)+1)
+	withRuntime = append(withRuntime, messages...)
+	withRuntime = append(withRuntime, runtimeMessage)
+	return withRuntime
 }
 
 func requestOpenAICompletionWithRetry(

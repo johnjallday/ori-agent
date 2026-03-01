@@ -87,6 +87,26 @@ func TestBuildSystemPromptWithSkills_EmptyAgentName(t *testing.T) {
 	}
 }
 
+func TestComposeRuntimeSystemPrompt_WithoutRuntime(t *testing.T) {
+	got := composeRuntimeSystemPrompt("base prompt", "")
+	if got != "base prompt" {
+		t.Fatalf("expected base prompt, got %q", got)
+	}
+}
+
+func TestComposeRuntimeSystemPrompt_WithRuntime(t *testing.T) {
+	got := composeRuntimeSystemPrompt("base prompt", "runtime prompt")
+	if !strings.Contains(got, "base prompt") {
+		t.Fatalf("expected base prompt to be included, got %q", got)
+	}
+	if !strings.Contains(got, "# Runtime Context") {
+		t.Fatalf("expected runtime context header, got %q", got)
+	}
+	if !strings.Contains(got, "runtime prompt") {
+		t.Fatalf("expected runtime prompt to be included, got %q", got)
+	}
+}
+
 func TestCanonicalizeToolArguments_EquivalentJSON(t *testing.T) {
 	first := canonicalizeToolArguments(`{"b":2,"a":1}`)
 	second := canonicalizeToolArguments(`{"a":1, "b":2}`)

@@ -16,7 +16,7 @@ import (
 
 // handleCodexChat handles chat requests routed through the Codex CLI provider.
 // Codex provider currently does not support tool calling, so this path is request/response only.
-func (h *Handler) handleCodexChat(w http.ResponseWriter, r *http.Request, ag *agent.Agent, userMessage string, agentName string, baseCtx context.Context, images []llm.ImageAttachment, plannerDecision *types.PlannerDecision) {
+func (h *Handler) handleCodexChat(w http.ResponseWriter, r *http.Request, ag *agent.Agent, userMessage string, agentName string, baseCtx context.Context, images []llm.ImageAttachment, plannerDecision *types.PlannerDecision, runtimeSystemPrompt string) {
 	sessionID := h.getSessionID(r)
 	ctx, cancel := context.WithTimeout(baseCtx, ChatRequestTimeout)
 	defer cancel()
@@ -33,9 +33,12 @@ func (h *Handler) handleCodexChat(w http.ResponseWriter, r *http.Request, ag *ag
 	}
 
 	var messages []llm.Message
-	systemPrompt := h.buildSystemPromptWithSkills(
-		ag, agentName,
-		"You are a helpful assistant. Be concise and direct in your responses.",
+	systemPrompt := composeRuntimeSystemPrompt(
+		h.buildSystemPromptWithSkills(
+			ag, agentName,
+			"You are a helpful assistant. Be concise and direct in your responses.",
+		),
+		runtimeSystemPrompt,
 	)
 
 	if len(images) > 0 {
