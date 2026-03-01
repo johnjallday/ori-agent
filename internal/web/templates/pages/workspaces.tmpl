@@ -15,21 +15,6 @@
 
     <!-- Main Content -->
     <main class="main-content" role="main" aria-label="Workspace hub">
-      <div class="container-fluid py-3 pb-0">
-        <div id="homeAssistantCard" class="modern-card p-2 mb-3">
-          <form id="homeAssistantForm" class="d-flex align-items-center gap-2">
-            <div class="d-none d-md-flex align-items-center gap-2 px-2" style="color: var(--text-secondary); font-size: 0.82rem; white-space: nowrap;">
-              <span style="font-weight: 600; color: var(--text-primary);">Ask Ori</span>
-              <span style="opacity: 0.6;">Workspaces</span>
-            </div>
-            <input id="homeAssistantInput" type="text" class="modern-input flex-grow-1" maxlength="800"
-                   placeholder="Message Ori about your workspaces..."
-                   aria-label="Ask Ori prompt"
-                   style="min-height: 42px;">
-            <button id="homeAssistantSendBtn" type="submit" class="modern-btn modern-btn-primary home-assistant-send-btn">Send</button>
-          </form>
-        </div>
-      </div>
       {{template "workspace-hub.tmpl" .}}
     </main>
   </div>
@@ -118,6 +103,7 @@
   <script src="/js/modules/workspace-hub-sessions.js"></script>
   <script src="/js/modules/workspace-hub-notes.js"></script>
   <script src="/js/modules/workspace-hub-files.js"></script>
+  <script src="/js/modules/workspace-input-router.js"></script>
   <script src="/js/modules/workspace-hub-smart-input.js"></script>
   <script src="/js/modules/workspace-hub-panels.js"></script>
   <script src="/js/modules/workspace-hub.js"></script>

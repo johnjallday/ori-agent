@@ -2363,6 +2363,9 @@ export class WorkspaceDetailPage {
       const session = await response.json();
       await this.loadSessions();
       this.openSession(session.id);
+      if (message && typeof window.sendMessageToChat === 'function') {
+        setTimeout(() => window.sendMessageToChat(message), 150);
+      }
     } catch (error) {
       console.error('Failed to create session:', error);
       if (window.Toast) window.Toast.error('Failed to create chat');
