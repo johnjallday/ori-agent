@@ -73,6 +73,7 @@ export class WorkspaceDetailPage {
     this.boardConfig = null;
     this.agentOptions = null;
     this.boardDidDrag = false;
+    this.currentTaskResultText = '';
 
     // DOM elements
     this.elements = {};
@@ -274,7 +275,14 @@ export class WorkspaceDetailPage {
       tasksBoard: document.getElementById('workspace-detail-tasks-board'),
       boardColumns: document.getElementById('workspace-detail-board-columns'),
       boardEmpty: document.getElementById('workspace-detail-board-empty'),
-      boardSetupBtn: document.getElementById('workspace-detail-board-setup')
+      boardSetupBtn: document.getElementById('workspace-detail-board-setup'),
+
+      // Result modal
+      taskResultModal: document.getElementById('workspace-detail-task-result-modal'),
+      taskResultTitle: document.getElementById('workspace-detail-task-result-title'),
+      taskResultMeta: document.getElementById('workspace-detail-task-result-meta'),
+      taskResultBody: document.getElementById('workspace-detail-task-result-body'),
+      taskResultCopyBtn: document.getElementById('workspace-detail-task-result-copy')
     };
   }
 
@@ -314,6 +322,7 @@ export class WorkspaceDetailPage {
 
     // Schedule buttons
     this.elements.viewSchedulesBtn?.addEventListener('click', () => this.showSchedulesModal());
+    this.elements.taskResultCopyBtn?.addEventListener('click', () => this.copyCurrentTaskResult());
 
     // Make workspace name and description editable
     this.makeEditable(this.elements.workspaceName, 'name', false);
@@ -671,8 +680,52 @@ export class WorkspaceDetailPage {
     // Filter to only show top-level tasks (no parent)
     const topLevelTasks = this.tasks.filter(t => !t.parent_task_id);
 
-    this.elements.tasksList.innerHTML = topLevelTasks.map(task => `
+    this.elements.tasksList.innerHTML = topLevelTasks.map(task => {
+      const taskLabel = this.escapeHtml(task.description || task.name || 'Untitled Task');
+      const assignedAgent = task.to && task.to !== 'unassigned' ? task.to : '';
+      const subtasks = this.tasks.filter((subtask) => subtask.parent_task_id === task.id);
+      const isParent = subtasks.length > 0;
+      const hasUnassignedSubtasks = isParent && subtasks.some((subtask) => !subtask.to || subtask.to === 'unassigned');
+      const hasRunningSubtasks = isParent && subtasks.some((subtask) => subtask.status === 'in_progress');
+      const canExecute = isParent
+        ? subtasks.length > 0 && !hasUnassignedSubtasks && !hasRunningSubtasks
+        : task.status !== 'in_progress';
+      const resultData = this.getDisplayResult(task, subtasks);
+      const hasResultData = !!resultData;
+      const executeTitle = isParent
+        ? hasUnassignedSubtasks ? 'Assign agents to all subtasks before executing'
+          : hasRunningSubtasks ? 'A subtask is already running'
+            : 'Execute workflow now'
+        : !assignedAgent ? 'Will auto-assign a workspace agent before execution'
+          : task.status === 'in_progress' ? 'Task is already running'
+            : 'Execute task now';
+      const resultTitle = hasResultData
+        ? `View ${resultData.label} from ${resultData.answeredBy || 'Unknown agent'}`
+        : '';
+
+      return `
       <div class="workspace-detail-item" data-task-id="${task.id}">
+        ${hasResultData ? `
+        <button type="button"
+                class="workspace-detail-item-result"
+                onclick="event.stopPropagation(); window.workspaceDetail?.showTaskResult('${task.id}')"
+                title="${this.escapeHtml(resultTitle)}"
+                aria-label="View result for task ${taskLabel}">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor">
+            <path d="M14,17H7V15H14M17,13H7V11H17M17,9H7V7H17M19,3H5C3.89,3 3,3.89 3,5V19A2,2 0 0,0 5,21H19A2,2 0 0,0 21,19V5C21,3.89 20.1,3 19,3Z"/>
+          </svg>
+        </button>
+        ` : ''}
+        <button type="button"
+                class="workspace-detail-item-run"
+                onclick="event.stopPropagation(); window.workspaceDetail?.executeTask('${task.id}')"
+                title="${this.escapeHtml(executeTitle)}"
+                aria-label="Execute task ${taskLabel}"
+                ${canExecute ? '' : 'disabled'}>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+            <path d="M8,5.14V19.14L19,12.14L8,5.14Z"/>
+          </svg>
+        </button>
         <button type="button" class="workspace-detail-item-delete" onclick="event.stopPropagation(); window.workspaceDetail?.deleteTask('${task.id}')" title="Delete task" aria-label="Delete task ${this.escapeHtml(task.description || task.name || 'Untitled Task')}">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
             <path d="M19,4H15.5L14.5,3H9.5L8.5,4H5V6H19M6,19A2,2 0 0,0 8,21H16A2,2 0 0,0 18,19V7H6V19Z"/>
@@ -685,7 +738,7 @@ export class WorkspaceDetailPage {
              onclick="window.workspaceDetail?.openTask('${task.id}')"
              onkeydown="if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); window.workspaceDetail?.openTask('${task.id}'); }">
           <div class="d-flex justify-content-between align-items-start">
-            <div class="workspace-detail-item-title">${this.escapeHtml(task.description || task.name || 'Untitled Task')}</div>
+            <div class="workspace-detail-item-title">${taskLabel}</div>
             <span class="workspace-detail-task-status ${getStatusClass(task.status)}">${getDisplayStatus(task.status)}</span>
           </div>
           <div class="workspace-detail-item-meta">
@@ -694,7 +747,278 @@ export class WorkspaceDetailPage {
           </div>
         </div>
       </div>
-    `).join('');
+      `;
+    }).join('');
+  }
+
+  getDisplayResult(task, subtasks = []) {
+    if (!task) return null;
+    if (task.error) {
+      return {
+        label: 'Error',
+        text: this.normalizeResultText(task.error),
+        sourceTask: task,
+        answeredBy: this.getAnsweringAgentLabel(task)
+      };
+    }
+    if (task.result) {
+      return {
+        label: 'Result',
+        text: this.normalizeResultText(task.result),
+        sourceTask: task,
+        answeredBy: this.getAnsweringAgentLabel(task)
+      };
+    }
+
+    if (Array.isArray(subtasks) && subtasks.length > 0) {
+      const orderedSubtasks = [...subtasks].sort((a, b) => {
+        const aIndex = Number.isFinite(a?.subtask_index) && a.subtask_index > 0 ? a.subtask_index : Number.MAX_SAFE_INTEGER;
+        const bIndex = Number.isFinite(b?.subtask_index) && b.subtask_index > 0 ? b.subtask_index : Number.MAX_SAFE_INTEGER;
+        if (aIndex !== bIndex) return aIndex - bIndex;
+        const aTime = a?.created_at ? new Date(a.created_at).getTime() : 0;
+        const bTime = b?.created_at ? new Date(b.created_at).getTime() : 0;
+        return aTime - bTime;
+      });
+
+      const lastSubtask = orderedSubtasks[orderedSubtasks.length - 1];
+      if (lastSubtask?.error) {
+        return {
+          label: 'Error (last step)',
+          text: this.normalizeResultText(lastSubtask.error),
+          sourceTask: lastSubtask,
+          answeredBy: this.getAnsweringAgentLabel(lastSubtask)
+        };
+      }
+      if (lastSubtask?.result) {
+        return {
+          label: 'Result (last step)',
+          text: this.normalizeResultText(lastSubtask.result),
+          sourceTask: lastSubtask,
+          answeredBy: this.getAnsweringAgentLabel(lastSubtask)
+        };
+      }
+    }
+
+    return null;
+  }
+
+  getAnsweringAgentLabel(task) {
+    if (!task || typeof task !== 'object') return 'Unknown agent';
+
+    const to = String(task.to || '').trim();
+    const assignedNodeId = String(task.assigned_node_id || '').trim();
+    const from = String(task.from || '').trim();
+
+    if (assignedNodeId) {
+      const nodeMatch = assignedNodeId.match(/^(.+)-node-(\d+)$/);
+      if (nodeMatch) {
+        const nodeAgentName = nodeMatch[1];
+        const nodeNumber = nodeMatch[2];
+        if (to && to !== 'unassigned' && to !== nodeAgentName) {
+          return `${to} (${assignedNodeId})`;
+        }
+        return `${nodeAgentName} (node ${nodeNumber})`;
+      }
+
+      if (to && to !== 'unassigned') {
+        return `${to} (${assignedNodeId})`;
+      }
+      return assignedNodeId;
+    }
+
+    if (to && to !== 'unassigned') return to;
+    if (from && from !== 'system') return from;
+    return 'Unknown agent';
+  }
+
+  showTaskResult(taskId) {
+    const task = this.tasks.find((item) => item.id === taskId);
+    if (!task) return;
+
+    const subtasks = this.getSubtasksForParent(taskId);
+    const isParent = subtasks.length > 0;
+    const resultData = this.getDisplayResult(task, subtasks);
+    if (!resultData || !resultData.text) {
+      if (window.Toast) window.Toast.info('No result captured for this task yet.');
+      return;
+    }
+
+    const taskName = task.description || task.name || task.id || 'Task Result';
+    const statusText = getDisplayStatus(task.status);
+    const timestamp = formatDate(task.completed_at || task.updated_at || task.created_at);
+    const answeredBy = resultData.answeredBy || 'Unknown agent';
+    const metaParts = [`Answered by ${answeredBy}`, `${statusText}`, timestamp];
+    if (isParent) {
+      metaParts.unshift(`${subtasks.length} step${subtasks.length === 1 ? '' : 's'}`);
+    }
+
+    if (this.elements.taskResultTitle) {
+      this.elements.taskResultTitle.textContent = taskName;
+    }
+    if (this.elements.taskResultMeta) {
+      this.elements.taskResultMeta.textContent = `${resultData.label} • ${metaParts.join(' • ')}`;
+    }
+    if (this.elements.taskResultBody) {
+      this.elements.taskResultBody.textContent = String(resultData.text || '');
+    }
+    this.currentTaskResultText = String(resultData.text || '');
+
+    if (this.elements.taskResultModal && window.bootstrap) {
+      const modal = typeof bootstrap.Modal.getOrCreateInstance === 'function'
+        ? bootstrap.Modal.getOrCreateInstance(this.elements.taskResultModal)
+        : (bootstrap.Modal.getInstance(this.elements.taskResultModal) || new bootstrap.Modal(this.elements.taskResultModal));
+      modal.show();
+    }
+  }
+
+  normalizeResultText(value) {
+    if (value === undefined || value === null) return '';
+    if (typeof value === 'string') return value;
+    if (typeof value === 'number' || typeof value === 'boolean') return String(value);
+    try {
+      return JSON.stringify(value, null, 2);
+    } catch (_error) {
+      return String(value);
+    }
+  }
+
+  getSubtasksForParent(taskId) {
+    if (!taskId) return [];
+    return this.tasks.filter((task) => task.parent_task_id === taskId);
+  }
+
+  getWorkspaceFallbackAgent() {
+    if (!this.workspace) return '';
+
+    const seen = new Set();
+    const candidates = [];
+    const addCandidate = (name) => {
+      const normalized = String(name || '').trim();
+      if (!normalized || normalized === 'unassigned' || seen.has(normalized)) return;
+      seen.add(normalized);
+      candidates.push(normalized);
+    };
+
+    if (Array.isArray(this.workspace.agent_instances)) {
+      this.workspace.agent_instances.forEach((instance) => addCandidate(instance && instance.name));
+    }
+    if (Array.isArray(this.workspace.agents)) {
+      this.workspace.agents.forEach((name) => addCandidate(name));
+    }
+
+    return candidates[0] || '';
+  }
+
+  async assignTaskToAgent(taskId, agentName) {
+    const response = await fetch(`/api/orchestration/tasks/${encodeURIComponent(taskId)}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ to: agentName })
+    });
+    if (!response.ok) {
+      const text = await response.text();
+      throw new Error(text || 'Failed to assign task');
+    }
+  }
+
+  async executeTask(taskId) {
+    const task = this.tasks.find((item) => item.id === taskId);
+    if (!task) return;
+
+    const subtasks = this.getSubtasksForParent(taskId);
+    const isParent = subtasks.length > 0;
+
+    if (isParent) {
+      const hasUnassigned = subtasks.some((subtask) => !subtask.to || subtask.to === 'unassigned');
+      if (hasUnassigned) {
+        if (window.Toast) window.Toast.error('Assign agents to all subtasks before executing this workflow.');
+        return;
+      }
+      const hasRunning = subtasks.some((subtask) => subtask.status === 'in_progress');
+      if (hasRunning) {
+        if (window.Toast) window.Toast.error('A subtask is already running.');
+        return;
+      }
+    } else if (task.status === 'in_progress') {
+      if (window.Toast) window.Toast.error('This task is already running.');
+      return;
+    }
+
+    let assignedAgent = task.to && task.to !== 'unassigned' ? task.to : '';
+    if (!isParent && !assignedAgent) {
+      const fallbackAgent = this.getWorkspaceFallbackAgent();
+      if (!fallbackAgent) {
+        if (window.Toast) window.Toast.error('No agent is available in this workspace. Add an agent or assign this task first.');
+        return;
+      }
+
+      const assignAndRun = confirm(`This task is unassigned. Assign it to "${fallbackAgent}" and execute now?`);
+      if (!assignAndRun) return;
+
+      try {
+        await this.assignTaskToAgent(taskId, fallbackAgent);
+        assignedAgent = fallbackAgent;
+        task.to = fallbackAgent;
+      } catch (error) {
+        console.error('Failed to auto-assign task before execution:', error);
+        if (window.Toast) window.Toast.error('Failed to assign task before execution');
+        return;
+      }
+    }
+
+    const confirmMessage = isParent
+      ? `Execute this workflow (${subtasks.length} step${subtasks.length === 1 ? '' : 's'}) now?`
+      : `Execute this task${assignedAgent ? ` with "${assignedAgent}"` : ''} now?`;
+    if (!confirm(confirmMessage)) return;
+
+    try {
+      const response = await fetch('/api/orchestration/tasks/execute', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ task_id: taskId })
+      });
+      if (!response.ok) {
+        const text = await response.text();
+        throw new Error(text || 'Failed to execute task');
+      }
+
+      if (window.Toast) window.Toast.success('Task started');
+      await this.loadTasks();
+      this.pollTaskCompletion(taskId);
+    } catch (error) {
+      console.error('Failed to execute task:', error);
+      if (window.Toast) window.Toast.error('Failed to execute task');
+    }
+  }
+
+  async pollTaskCompletion(taskId, maxAttempts = 36, intervalMs = 5000) {
+    let attempts = 0;
+
+    const poll = async () => {
+      attempts += 1;
+      if (attempts > maxAttempts) return;
+
+      try {
+        const response = await fetch(`/api/orchestration/tasks?id=${encodeURIComponent(taskId)}`);
+        if (!response.ok) {
+          setTimeout(poll, intervalMs);
+          return;
+        }
+
+        const task = await response.json();
+        const status = task && task.status;
+        if (status === 'completed' || status === 'failed' || status === 'cancelled' || status === 'timeout') {
+          await this.loadTasks();
+          return;
+        }
+      } catch (error) {
+        console.error('Failed to poll task status:', error);
+      }
+
+      setTimeout(poll, intervalMs);
+    };
+
+    setTimeout(poll, intervalMs);
   }
 
   /**
@@ -2573,6 +2897,21 @@ export class WorkspaceDetailPage {
       }
     } finally {
       this.updateCopyNotesButtonState(false);
+    }
+  }
+
+  async copyCurrentTaskResult() {
+    if (!this.currentTaskResultText) {
+      if (window.Toast) window.Toast.info('No result to copy.');
+      return;
+    }
+
+    try {
+      await this.writeClipboardText(this.currentTaskResultText);
+      if (window.Toast) window.Toast.success('Result copied to clipboard');
+    } catch (error) {
+      console.error('Failed to copy task result:', error);
+      if (window.Toast) window.Toast.error('Failed to copy result');
     }
   }
 

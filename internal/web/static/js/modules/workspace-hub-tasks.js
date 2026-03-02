@@ -22,6 +22,45 @@
     return hierarchy.subtasksByParent.get(taskId) || [];
   }
 
+  function getWorkspaceFallbackAgent(state) {
+    if (!state || !state.workspaceMap || !state.selectedId) return '';
+    const workspace = state.workspaceMap.get(state.selectedId);
+    if (!workspace) return '';
+
+    const seen = new Set();
+    const candidates = [];
+
+    const addCandidate = (name) => {
+      const normalized = String(name || '').trim();
+      if (!normalized || normalized === 'unassigned' || seen.has(normalized)) return;
+      seen.add(normalized);
+      candidates.push(normalized);
+    };
+
+    if (Array.isArray(workspace.agent_instances)) {
+      workspace.agent_instances.forEach((instance) => addCandidate(instance && instance.name));
+    }
+
+    if (Array.isArray(workspace.agents)) {
+      workspace.agents.forEach((name) => addCandidate(name));
+    }
+
+    return candidates[0] || '';
+  }
+
+  async function assignTaskToAgent(taskId, agentName) {
+    const response = await fetch(`/api/orchestration/tasks/${encodeURIComponent(taskId)}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ to: agentName })
+    });
+
+    if (!response.ok) {
+      const text = await response.text();
+      throw new Error(text || 'Failed to assign task');
+    }
+  }
+
   /**
    * Delete a task
    * @param {string} taskId - Task ID to delete
@@ -118,13 +157,33 @@
         }
         return;
       }
-    } else {
-      const assignedAgent = task.to && task.to !== 'unassigned' ? task.to : '';
-      if (!assignedAgent) {
+    }
+
+    let assignedAgent = task.to && task.to !== 'unassigned' ? task.to : '';
+    if (!isParent && !assignedAgent) {
+      const fallbackAgent = getWorkspaceFallbackAgent(state);
+      if (!fallbackAgent) {
         if (window.Toast) {
-          window.Toast.error('Assign an agent before executing this task.');
+          window.Toast.error('No agent is available in this workspace. Add an agent or assign this task first.');
         } else {
-          alert('Assign an agent before executing this task.');
+          alert('No agent is available in this workspace. Add an agent or assign this task first.');
+        }
+        return;
+      }
+
+      const assignAndRun = confirm(`This task is unassigned. Assign it to "${fallbackAgent}" and execute now?`);
+      if (!assignAndRun) return;
+
+      try {
+        await assignTaskToAgent(taskId, fallbackAgent);
+        assignedAgent = fallbackAgent;
+        task.to = fallbackAgent;
+      } catch (error) {
+        console.error('Failed to auto-assign task before execution:', error);
+        if (window.Toast) {
+          window.Toast.error('Failed to assign task before execution');
+        } else {
+          alert('Failed to assign task before execution');
         }
         return;
       }
@@ -432,13 +491,13 @@
       const hasRunningSubtasks = isParent && subtasks.some((s) => s.status === 'in_progress');
       const canExecute = isParent
         ? subtasks.length > 0 && !hasUnassignedSubtasks && !hasRunningSubtasks
-        : Boolean(assignedAgent) && status !== 'in_progress';
+        : status !== 'in_progress';
       const executeLabel = status === 'completed' || status === 'failed' ? 'Re-run' : (isParent ? 'Run All' : 'Execute');
       const executeTitle = isParent
         ? hasUnassignedSubtasks ? 'Assign agents to all subtasks before executing'
           : hasRunningSubtasks ? 'A subtask is already running'
             : executeLabel === 'Re-run' ? 'Re-run workflow' : 'Execute workflow now'
-        : !assignedAgent ? 'Assign an agent before executing'
+        : !assignedAgent ? 'Will auto-assign a workspace agent before execution'
           : status === 'in_progress' ? 'Task is already running'
             : executeLabel === 'Re-run' ? 'Re-execute task' : 'Execute task now';
       const executeAriaLabel = isParent

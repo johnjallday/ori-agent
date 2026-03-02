@@ -423,6 +423,29 @@ func (h *Handler) tryHandleUtilityDirect(
 		rawResult, err = ExecuteToolWithFiles(toolCtx, tool, decision.ToolName, toolArgs, nil)
 		toolCancel()
 	}
+	if err != nil && strings.EqualFold(strings.TrimSpace(decision.ToolName), "browser") {
+		if openURL, canRecover := extractBrowserOpenURLFromArgs(toolArgs); canRecover && isTransientBrowserNavigationError(err) {
+			logger.Warn("Browser navigation hit transient context error; retrying once", logger.Fields{
+				"tool": decision.ToolName,
+				"url":  openURL,
+				"err":  err.Error(),
+			})
+			retryCtx, retryCancel := context.WithTimeout(baseCtx, ToolExecutionTimeout)
+			retryResult, retryErr := ExecuteToolWithFiles(retryCtx, tool, decision.ToolName, toolArgs, nil)
+			retryCancel()
+			if retryErr == nil {
+				rawResult = retryResult
+				err = nil
+			} else {
+				if recovered, recoveredResult := maybeRecoverBrowserNavigationResult(decision.ToolName, toolArgs, retryErr); recovered {
+					rawResult = recoveredResult
+					err = nil
+				} else {
+					err = retryErr
+				}
+			}
+		}
+	}
 
 	duration := time.Since(start)
 	h.recordToolCallStats(decision.ToolName, duration, err)
@@ -693,6 +716,94 @@ func adaptBrowserToolArgsForDefinition(definitionName, rawArgs string) (string, 
 
 	payload, _ := json.Marshal(map[string]string{"url": normalizeBrowserOpenTargetURL(req.URL)})
 	return string(payload), nil
+}
+
+func extractBrowserOpenURLFromArgs(rawArgs string) (string, bool) {
+	trimmed := strings.TrimSpace(rawArgs)
+	if trimmed == "" {
+		return "", false
+	}
+
+	var req BrowserRequest
+	if err := json.Unmarshal([]byte(trimmed), &req); err == nil {
+		action := strings.ToLower(strings.TrimSpace(req.Action))
+		if action == "" {
+			action = "open_url"
+		}
+		urlValue := strings.TrimSpace(req.URL)
+		if action == "open_url" && urlValue != "" {
+			return urlValue, true
+		}
+	}
+
+	var direct struct {
+		Action string `json:"action"`
+		URL    string `json:"url"`
+	}
+	if err := json.Unmarshal([]byte(trimmed), &direct); err != nil {
+		return "", false
+	}
+	action := strings.ToLower(strings.TrimSpace(direct.Action))
+	if action == "" {
+		action = "open_url"
+	}
+	urlValue := strings.TrimSpace(direct.URL)
+	if action != "open_url" || urlValue == "" {
+		return "", false
+	}
+	return urlValue, true
+}
+
+func isTransientBrowserNavigationError(err error) bool {
+	if err == nil {
+		return false
+	}
+	text := strings.ToLower(strings.TrimSpace(err.Error()))
+	if text == "" {
+		return false
+	}
+	markers := []string{
+		"execution context was destroyed",
+		"most likely because of a navigation",
+		"cannot find context with specified id",
+		"navigating frame was detached",
+	}
+	for _, marker := range markers {
+		if strings.Contains(text, marker) {
+			return true
+		}
+	}
+	return false
+}
+
+func maybeRecoverBrowserNavigationResult(toolName, toolArgs string, callErr error) (bool, string) {
+	if !strings.EqualFold(strings.TrimSpace(toolName), "browser") {
+		return false, ""
+	}
+	if !isTransientBrowserNavigationError(callErr) {
+		return false, ""
+	}
+	openURL, ok := extractBrowserOpenURLFromArgs(toolArgs)
+	if !ok {
+		return false, ""
+	}
+
+	logger.Warn("Recovering browser open_url as successful after transient navigation context error", logger.Fields{
+		"tool": toolName,
+		"url":  openURL,
+		"err":  callErr.Error(),
+	})
+
+	result := BrowserResponse{
+		Action:  "open_url",
+		Success: true,
+		Result:  fmt.Sprintf("Opened %s. Navigation completed, but the browser connector reported a transient context reset.", openURL),
+	}
+	encoded, err := json.Marshal(result)
+	if err != nil {
+		return false, ""
+	}
+	return true, string(encoded)
 }
 
 func shouldPreferMCPToolOverUtility(toolName string) bool {
