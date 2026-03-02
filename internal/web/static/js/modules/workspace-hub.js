@@ -336,10 +336,15 @@ console.log('[workspace-hub.js] FILE LOADED');
     }
   }
 
-  function setLauncherTab(tabName) {
+  function setLauncherTab(tabName, options = {}) {
+    const refreshSummary = options.refreshSummary !== false;
+    const force = options.force === true;
     const nextTab = tabName === 'summary' ? 'summary' : 'workspaces';
+    const tabChanged = launcherActiveTab !== nextTab;
     launcherActiveTab = nextTab;
-    persistLauncherTab(nextTab);
+    if (tabChanged || force) {
+      persistLauncherTab(nextTab);
+    }
 
     if (elements.launcherTabWorkspaces) {
       const isActive = nextTab === 'workspaces';
@@ -366,8 +371,10 @@ console.log('[workspace-hub.js] FILE LOADED');
       if (elements.launcherOverviewDetails && elements.launcherOverviewDetails.hidden) {
         setLauncherOverviewExpanded(true);
       }
-      const flattened = flattenWorkspaces(state.workspaces || []);
-      void refreshLauncherTaskOverview(flattened);
+      if (refreshSummary && (tabChanged || force)) {
+        const flattened = flattenWorkspaces(state.workspaces || []);
+        void refreshLauncherTaskOverview(flattened);
+      }
     }
   }
 
@@ -378,7 +385,7 @@ console.log('[workspace-hub.js] FILE LOADED');
     } catch (err) {
       saved = '';
     }
-    setLauncherTab(saved === 'summary' ? 'summary' : 'workspaces');
+    setLauncherTab(saved === 'summary' ? 'summary' : 'workspaces', { force: true });
   }
 
   function navigateToWorkspace(workspaceId) {
@@ -1963,10 +1970,8 @@ console.log('[workspace-hub.js] FILE LOADED');
     }
 
     const flattened = flattenWorkspaces(state.workspaces || []);
-    setLauncherTab(launcherActiveTab);
-    if (launcherActiveTab !== 'summary') {
-      void refreshLauncherTaskOverview(flattened);
-    }
+    setLauncherTab(launcherActiveTab, { refreshSummary: false, force: true });
+    void refreshLauncherTaskOverview(flattened);
   }
 
   /**
