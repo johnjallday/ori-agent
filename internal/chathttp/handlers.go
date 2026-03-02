@@ -6,7 +6,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
+	"net/url"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -786,6 +788,13 @@ type UploadedFile struct {
 // ChatHandler handles chat requests
 func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
+	if !orihttp.RequireMethod(w, r, http.MethodPost) {
+		return
+	}
+	if !isTrustedChatRequestSource(r) {
+		orihttp.Forbidden(w, "Request origin not allowed")
+		return
+	}
 
 	var req struct {
 		Question             string            `json:"question"`
@@ -1517,6 +1526,81 @@ func isImageMimeType(mimeType string) bool {
 	default:
 		return false
 	}
+}
+
+func isTrustedChatRequestSource(r *http.Request) bool {
+	if r == nil {
+		return false
+	}
+
+	origin := strings.TrimSpace(r.Header.Get("Origin"))
+	referer := strings.TrimSpace(r.Header.Get("Referer"))
+	if origin == "" && referer == "" {
+		// Non-browser clients (CLI/tests) may omit browser source headers.
+		return true
+	}
+
+	requestHost, requestPort := splitHostPortForSourceCheck(r.Host)
+	if requestHost == "" {
+		return false
+	}
+
+	if origin != "" && !sourceURLMatchesRequestHost(origin, requestHost, requestPort) {
+		return false
+	}
+	if referer != "" && !sourceURLMatchesRequestHost(referer, requestHost, requestPort) {
+		return false
+	}
+	return true
+}
+
+func sourceURLMatchesRequestHost(rawSourceURL, requestHost, requestPort string) bool {
+	parsed, err := url.Parse(strings.TrimSpace(rawSourceURL))
+	if err != nil {
+		return false
+	}
+
+	sourceHost, sourcePort := splitHostPortForSourceCheck(parsed.Host)
+	if sourceHost == "" {
+		return false
+	}
+
+	sameHost := strings.EqualFold(sourceHost, requestHost)
+	sameLoopback := isLoopbackHost(sourceHost) && isLoopbackHost(requestHost)
+	if !sameHost && !sameLoopback {
+		return false
+	}
+
+	// Only enforce strict port equality when both sides provide explicit ports.
+	if sourcePort != "" && requestPort != "" && sourcePort != requestPort {
+		return false
+	}
+	// If request host omits a port, only allow default browser ports from source.
+	if sourcePort != "" && requestPort == "" && sourcePort != "80" && sourcePort != "443" {
+		return false
+	}
+	return true
+}
+
+func splitHostPortForSourceCheck(rawHost string) (string, string) {
+	host := strings.TrimSpace(rawHost)
+	if host == "" {
+		return "", ""
+	}
+	u := &url.URL{Host: host}
+	return strings.ToLower(strings.TrimSpace(u.Hostname())), strings.TrimSpace(u.Port())
+}
+
+func isLoopbackHost(host string) bool {
+	candidate := strings.ToLower(strings.TrimSpace(host))
+	if candidate == "" {
+		return false
+	}
+	if candidate == "localhost" {
+		return true
+	}
+	ip := net.ParseIP(candidate)
+	return ip != nil && ip.IsLoopback()
 }
 
 func isCodexProviderOrModel(provider, model string) bool {

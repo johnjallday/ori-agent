@@ -19,15 +19,31 @@ type normalizedChatRouteContext struct {
 	Origin      string
 }
 
+const (
+	maxRouteContextPagePathLen    = 256
+	maxRouteContextWorkspaceIDLen = 128
+	maxRouteContextOriginLen      = 96
+	maxRouteContextSurfaceLen     = 32
+)
+
+var allowedRouteSurfaces = map[string]struct{}{
+	"workspace_detail": {},
+	"workspace_canvas": {},
+	"workspace_chat":   {},
+	"workspace_hub":    {},
+	"dashboard":        {},
+	"chat":             {},
+}
+
 func normalizeChatRouteContext(input *chatRouteContext) normalizedChatRouteContext {
 	if input == nil {
 		return normalizedChatRouteContext{}
 	}
 
-	pagePath := strings.TrimSpace(input.PagePath)
-	workspaceID := strings.TrimSpace(input.WorkspaceID)
+	pagePath := sanitizeRouteContextPath(input.PagePath)
+	workspaceID := sanitizeRouteContextIdentifier(input.WorkspaceID, maxRouteContextWorkspaceIDLen)
 	if workspaceID == "" {
-		workspaceID = extractWorkspaceIDFromPagePath(pagePath)
+		workspaceID = sanitizeRouteContextIdentifier(extractWorkspaceIDFromPagePath(pagePath), maxRouteContextWorkspaceIDLen)
 	}
 	if pagePath == "" && workspaceID != "" {
 		pagePath = "/workspaces/" + workspaceID
@@ -36,8 +52,10 @@ func normalizeChatRouteContext(input *chatRouteContext) normalizedChatRouteConte
 		pagePath = "/"
 	}
 
-	surface := strings.TrimSpace(strings.ToLower(input.Surface))
+	surface := sanitizeRouteContextSurface(input.Surface)
 	if surface == "" {
+		surface = inferChatRouteSurface(pagePath, workspaceID)
+	} else if _, ok := allowedRouteSurfaces[surface]; !ok {
 		surface = inferChatRouteSurface(pagePath, workspaceID)
 	}
 
@@ -45,7 +63,7 @@ func normalizeChatRouteContext(input *chatRouteContext) normalizedChatRouteConte
 		Surface:     surface,
 		PagePath:    pagePath,
 		WorkspaceID: workspaceID,
-		Origin:      strings.TrimSpace(input.Origin),
+		Origin:      sanitizeRouteContextOrigin(input.Origin),
 	}
 }
 
@@ -141,14 +159,75 @@ func buildRouteContextSystemPrompt(ctx normalizedChatRouteContext) string {
 	}
 
 	if strings.TrimSpace(ctx.WorkspaceID) != "" {
-		lines = append(lines, fmt.Sprintf("Active workspace_id: %s", ctx.WorkspaceID))
+		lines = append(lines, fmt.Sprintf("Active workspace_id: %q", ctx.WorkspaceID))
 	}
 	if strings.TrimSpace(ctx.PagePath) != "" {
-		lines = append(lines, fmt.Sprintf("Page path: %s", ctx.PagePath))
+		lines = append(lines, fmt.Sprintf("Page path: %q", ctx.PagePath))
 	}
 	if strings.TrimSpace(ctx.Origin) != "" {
-		lines = append(lines, fmt.Sprintf("Request origin: %s", ctx.Origin))
+		lines = append(lines, fmt.Sprintf("Request origin: %q", ctx.Origin))
 	}
 
 	return strings.Join(lines, "\n")
+}
+
+func sanitizeRouteContextSurface(value string) string {
+	surface := strings.ToLower(sanitizeRouteContextText(value, maxRouteContextSurfaceLen))
+	return strings.ReplaceAll(surface, " ", "_")
+}
+
+func sanitizeRouteContextOrigin(value string) string {
+	return sanitizeRouteContextIdentifier(strings.ToLower(value), maxRouteContextOriginLen)
+}
+
+func sanitizeRouteContextPath(value string) string {
+	path := sanitizeRouteContextText(value, maxRouteContextPagePathLen)
+	if path == "" {
+		return ""
+	}
+	if idx := strings.IndexAny(path, "?#"); idx >= 0 {
+		path = strings.TrimSpace(path[:idx])
+	}
+	if path == "" {
+		return "/"
+	}
+	if !strings.HasPrefix(path, "/") {
+		path = "/" + path
+	}
+	return path
+}
+
+func sanitizeRouteContextIdentifier(value string, maxLen int) string {
+	raw := sanitizeRouteContextText(value, maxLen)
+	if raw == "" {
+		return ""
+	}
+	var b strings.Builder
+	for _, r := range raw {
+		if (r >= 'a' && r <= 'z') ||
+			(r >= 'A' && r <= 'Z') ||
+			(r >= '0' && r <= '9') ||
+			r == '-' || r == '_' || r == '.' || r == ':' {
+			b.WriteRune(r)
+		}
+	}
+	safe := b.String()
+	if len(safe) > maxLen {
+		safe = safe[:maxLen]
+	}
+	return safe
+}
+
+func sanitizeRouteContextText(value string, maxLen int) string {
+	text := strings.TrimSpace(value)
+	if text == "" {
+		return ""
+	}
+	text = strings.ReplaceAll(text, "\r", " ")
+	text = strings.ReplaceAll(text, "\n", " ")
+	text = strings.Join(strings.Fields(text), " ")
+	if maxLen > 0 && len(text) > maxLen {
+		text = text[:maxLen]
+	}
+	return strings.TrimSpace(text)
 }
