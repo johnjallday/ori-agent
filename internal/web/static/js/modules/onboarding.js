@@ -233,14 +233,11 @@ export class OnboardingManager {
       }
 
       modelSelect.innerHTML = '<option value="">Select a model...</option>';
-      const models = data.models || [];
-      models.forEach(model => {
+      const modelOptions = this.normalizeModelOptions(data.model_options, data.models);
+      modelOptions.forEach(modelOption => {
         const option = document.createElement('option');
-        option.value = model;
-        option.textContent = model;
-        if (model.includes('haiku') || model.includes('4o-mini')) {
-          option.textContent = model + ' (Recommended)';
-        }
+        option.value = modelOption.id;
+        option.textContent = this.formatModelOptionText(modelOption);
         modelSelect.appendChild(option);
       });
 
@@ -249,6 +246,37 @@ export class OnboardingManager {
       console.error('Error loading models:', error);
       modelSelect.innerHTML = '<option value="">Error loading models</option>';
     }
+  }
+
+  normalizeModelOptions(rawModelOptions, fallbackModels) {
+    if (Array.isArray(rawModelOptions) && rawModelOptions.length > 0) {
+      return rawModelOptions
+        .filter(option => option && typeof option.id === 'string' && option.id.length > 0)
+        .map(option => ({
+          id: option.id,
+          label: (typeof option.label === 'string' && option.label.length > 0) ? option.label : option.id,
+          description: (typeof option.description === 'string') ? option.description : '',
+          recommended: Boolean(option.recommended)
+        }));
+    }
+
+    const models = Array.isArray(fallbackModels) ? fallbackModels : [];
+    return models
+      .filter(model => typeof model === 'string' && model.length > 0)
+      .map(model => ({
+        id: model,
+        label: model,
+        description: '',
+        recommended: model.includes('haiku') || model.includes('4o-mini')
+      }));
+  }
+
+  formatModelOptionText(modelOption) {
+    const recommended = modelOption.recommended ? ' (Recommended)' : '';
+    if (modelOption.description) {
+      return `${modelOption.label}${recommended} — ${modelOption.description}`;
+    }
+    return `${modelOption.label}${recommended}`;
   }
 
   updateReasoningVisibility(providerName) {

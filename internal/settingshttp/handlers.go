@@ -813,6 +813,15 @@ type SystemModelResponse struct {
 	Configured      bool   `json:"configured"`
 }
 
+// AvailableModelOption represents UI metadata for a model option.
+// The model ID remains the source of truth for API requests.
+type AvailableModelOption struct {
+	ID          string `json:"id"`
+	Label       string `json:"label"`
+	Description string `json:"description,omitempty"`
+	Recommended bool   `json:"recommended,omitempty"`
+}
+
 // SystemModelHandler handles system model configuration
 func (h *Handler) SystemModelHandler(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
@@ -933,20 +942,68 @@ func (h *Handler) AvailableModelsHandler(w http.ResponseWriter, r *http.Request)
 	if err != nil {
 		// Provider not available - return empty models list with available=false
 		orihttp.WriteJSON(w, map[string]interface{}{
-			"provider":  providerName,
-			"available": false,
-			"models":    []string{},
-			"message":   "Provider not configured. Please add credentials first.",
+			"provider":      providerName,
+			"available":     false,
+			"models":        []string{},
+			"model_options": []AvailableModelOption{},
+			"message":       "Provider not configured. Please add credentials first.",
 		})
 		return
 	}
 
 	models := provider.DefaultModels()
 	orihttp.WriteJSON(w, map[string]interface{}{
-		"provider":  providerName,
-		"available": true,
-		"models":    models,
+		"provider":      providerName,
+		"available":     true,
+		"models":        models,
+		"model_options": buildAvailableModelOptions(providerName, models),
 	})
+}
+
+func buildAvailableModelOptions(providerName string, models []string) []AvailableModelOption {
+	options := make([]AvailableModelOption, 0, len(models))
+
+	switch providerName {
+	case "claude_code":
+		metadata := map[string]AvailableModelOption{
+			"opus": {
+				Label:       "Opus",
+				Description: "Most capable for complex work",
+			},
+			"sonnet": {
+				Label:       "Sonnet",
+				Description: "Best for everyday tasks",
+			},
+			"haiku": {
+				Label:       "Haiku",
+				Description: "Fastest for quick answers",
+				Recommended: true,
+			},
+		}
+
+		for _, modelName := range models {
+			key := strings.ToLower(strings.TrimSpace(modelName))
+			option := AvailableModelOption{
+				ID:    modelName,
+				Label: modelName,
+			}
+			if meta, ok := metadata[key]; ok {
+				option.Label = meta.Label
+				option.Description = meta.Description
+				option.Recommended = meta.Recommended
+			}
+			options = append(options, option)
+		}
+	default:
+		for _, modelName := range models {
+			options = append(options, AvailableModelOption{
+				ID:    modelName,
+				Label: modelName,
+			})
+		}
+	}
+
+	return options
 }
 
 // SystemPathsResponse represents system paths information

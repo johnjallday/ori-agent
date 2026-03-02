@@ -50,6 +50,25 @@ func (m *mockProvider) DefaultModels() []string {
 	return []string{"test-model-1", "test-model-2"}
 }
 
+type mockClaudeCodeProvider struct {
+	mockProvider
+}
+
+func (m *mockClaudeCodeProvider) Name() string {
+	return "claude_code"
+}
+
+func (m *mockClaudeCodeProvider) Capabilities() llm.ProviderCapabilities {
+	return llm.ProviderCapabilities{
+		SupportsTools:  false,
+		RequiresAPIKey: false,
+	}
+}
+
+func (m *mockClaudeCodeProvider) DefaultModels() []string {
+	return []string{"opus", "sonnet", "haiku"}
+}
+
 func TestSystemModelHandler_Get(t *testing.T) {
 	// Setup
 	tmpDir := t.TempDir()
@@ -282,20 +301,27 @@ func TestAvailableModelsHandler(t *testing.T) {
 		t.Errorf("Expected status 200, got %d", rec.Code)
 	}
 
-	var resp map[string]interface{}
+	var resp struct {
+		Provider     string                 `json:"provider"`
+		Available    bool                   `json:"available"`
+		Models       []string               `json:"models"`
+		ModelOptions []AvailableModelOption `json:"model_options"`
+	}
 	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
 		t.Fatalf("Failed to decode response: %v", err)
 	}
 
-	if resp["available"] != true {
+	if !resp.Available {
 		t.Error("Expected available to be true")
 	}
-	models, ok := resp["models"].([]interface{})
-	if !ok {
-		t.Fatal("Expected models to be an array")
+	if len(resp.Models) != 2 {
+		t.Errorf("Expected 2 models, got %d", len(resp.Models))
 	}
-	if len(models) != 2 {
-		t.Errorf("Expected 2 models, got %d", len(models))
+	if len(resp.ModelOptions) != 2 {
+		t.Errorf("Expected 2 model options, got %d", len(resp.ModelOptions))
+	}
+	if resp.ModelOptions[0].ID != "test-model-1" || resp.ModelOptions[0].Label != "test-model-1" {
+		t.Errorf("Expected first model option to mirror model ID, got %+v", resp.ModelOptions[0])
 	}
 }
 
@@ -319,13 +345,82 @@ func TestAvailableModelsHandler_UnavailableProvider(t *testing.T) {
 		t.Errorf("Expected status 200, got %d", rec.Code)
 	}
 
-	var resp map[string]interface{}
+	var resp struct {
+		Provider     string                 `json:"provider"`
+		Available    bool                   `json:"available"`
+		Models       []string               `json:"models"`
+		ModelOptions []AvailableModelOption `json:"model_options"`
+	}
 	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
 		t.Fatalf("Failed to decode response: %v", err)
 	}
 
-	if resp["available"] != false {
+	if resp.Available {
 		t.Error("Expected available to be false")
+	}
+	if len(resp.ModelOptions) != 0 {
+		t.Errorf("Expected no model options, got %d", len(resp.ModelOptions))
+	}
+}
+
+func TestAvailableModelsHandler_ClaudeCodeModelOptions(t *testing.T) {
+	tmpDir := t.TempDir()
+	tmpFile := filepath.Join(tmpDir, "settings.json")
+	configManager := config.NewManager(tmpFile)
+	_ = configManager.Load()
+
+	llmFactory := llm.NewFactory()
+	llmFactory.Register("claude_code", &mockClaudeCodeProvider{})
+
+	handler := NewHandler(nil, configManager, nil, llmFactory)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/settings/available-models?provider=claude_code", nil)
+	rec := httptest.NewRecorder()
+	handler.AvailableModelsHandler(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("Expected status 200, got %d", rec.Code)
+	}
+
+	var resp struct {
+		Provider     string                 `json:"provider"`
+		Available    bool                   `json:"available"`
+		Models       []string               `json:"models"`
+		ModelOptions []AvailableModelOption `json:"model_options"`
+	}
+	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+		t.Fatalf("Failed to decode response: %v", err)
+	}
+
+	if !resp.Available {
+		t.Fatal("Expected available to be true")
+	}
+	if len(resp.ModelOptions) != 3 {
+		t.Fatalf("Expected 3 model options, got %d", len(resp.ModelOptions))
+	}
+
+	optionsByID := make(map[string]AvailableModelOption, len(resp.ModelOptions))
+	for _, option := range resp.ModelOptions {
+		optionsByID[option.ID] = option
+	}
+
+	sonnet, ok := optionsByID["sonnet"]
+	if !ok {
+		t.Fatal("Expected sonnet model option")
+	}
+	if sonnet.Label != "Sonnet" {
+		t.Errorf("Expected sonnet label 'Sonnet', got %q", sonnet.Label)
+	}
+	if sonnet.Description == "" {
+		t.Error("Expected sonnet description to be populated")
+	}
+
+	haiku, ok := optionsByID["haiku"]
+	if !ok {
+		t.Fatal("Expected haiku model option")
+	}
+	if !haiku.Recommended {
+		t.Error("Expected haiku to be recommended")
 	}
 }
 
