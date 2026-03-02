@@ -72,9 +72,12 @@ export class WorkspaceDetailPage {
     this.currentView = 'list'; // 'list' or 'board'
     this.boardConfig = null;
     this.agentOptions = null;
+    this.agentCatalog = [];
+    this.agentIndex = new Map();
     this.boardDidDrag = false;
     this.currentTaskResultText = '';
     this.currentBlockedTask = null;
+    this.currentAssistRecommendation = null;
 
     // DOM elements
     this.elements = {};
@@ -88,6 +91,7 @@ export class WorkspaceDetailPage {
     this.bindEvents();
     this.setupFileModal();
     await this.loadWorkspace();
+    await this.loadAgentCatalog();
     await Promise.all([
       this.loadTasks(),
       this.loadSessions(),
@@ -290,6 +294,8 @@ export class WorkspaceDetailPage {
       taskAssistMeta: document.getElementById('workspace-detail-task-assist-meta'),
       taskAssistReason: document.getElementById('workspace-detail-task-assist-reason'),
       taskAssistQuestion: document.getElementById('workspace-detail-task-assist-question'),
+      taskAssistRecommendationWrap: document.getElementById('workspace-detail-task-assist-recommendation-wrap'),
+      taskAssistRecommendation: document.getElementById('workspace-detail-task-assist-recommendation'),
       taskAssistAgent: document.getElementById('workspace-detail-task-assist-agent'),
       taskAssistMessage: document.getElementById('workspace-detail-task-assist-message'),
       taskAssistResponseWrap: document.getElementById('workspace-detail-task-assist-response-wrap'),
@@ -342,6 +348,7 @@ export class WorkspaceDetailPage {
     this.elements.taskAssistContinueBtn?.addEventListener('click', () => this.submitTaskAssist('continue_with_instruction'));
     this.elements.taskAssistSwitchBtn?.addEventListener('click', () => this.submitTaskAssist('switch_agent_retry'));
     this.elements.taskAssistFailBtn?.addEventListener('click', () => this.submitTaskAssist('mark_failed'));
+    this.elements.taskAssistAgent?.addEventListener('change', () => this.updateAssistSwitchButtonState());
 
     // Make workspace name and description editable
     this.makeEditable(this.elements.workspaceName, 'name', false);
@@ -774,7 +781,7 @@ export class WorkspaceDetailPage {
             <span class="workspace-detail-task-status ${statusInfo.className}">${statusInfo.label}</span>
           </div>
           <div class="workspace-detail-item-meta">
-            ${task.to && task.to !== 'unassigned' ? `<span>Assigned to: ${this.escapeHtml(task.to)}</span> · ` : ''}
+            ${assignedAgent ? `<span class="workspace-detail-assigned-agent">Assigned to: ${this.escapeHtml(assignedAgent)}${this.renderAgentCapabilityBadges(assignedAgent)}</span> · ` : ''}
             ${formatDate(task.created_at)}
           </div>
         </div>
@@ -940,20 +947,121 @@ export class WorkspaceDetailPage {
 
     const addOption = (agentName) => {
       const normalized = String(agentName || '').trim();
-      if (!normalized || normalized === 'unassigned' || seen.has(normalized)) return;
-      seen.add(normalized);
-      const selected = normalized === currentAgent ? 'selected' : '';
-      options.push(`<option value="${this.escapeHtml(normalized)}" ${selected}>${this.escapeHtml(normalized)}</option>`);
+      const key = this.normalizeAgentName(normalized);
+      if (!normalized || normalized === 'unassigned' || seen.has(key)) return;
+      seen.add(key);
+      const isCurrent = this.normalizeAgentName(normalized) === this.normalizeAgentName(currentAgent);
+      const label = isCurrent ? `${normalized} (current)` : normalized;
+      options.push(`<option value="${this.escapeHtml(normalized)}">${this.escapeHtml(label)}</option>`);
     };
 
-    if (Array.isArray(this.workspace?.agent_instances)) {
-      this.workspace.agent_instances.forEach((instance) => addOption(instance?.name));
-    }
-    if (Array.isArray(this.workspace?.agents)) {
-      this.workspace.agents.forEach((name) => addOption(name));
-    }
+    this.getWorkspaceAgentNames().forEach((name) => addOption(name));
 
     select.innerHTML = options.join('');
+  }
+
+  parseAssistActions(value) {
+    if (Array.isArray(value)) {
+      return value.map((item) => String(item || '').trim().toLowerCase()).filter(Boolean);
+    }
+    if (typeof value === 'string') {
+      return value.split(',').map((item) => item.trim().toLowerCase()).filter(Boolean);
+    }
+    return [];
+  }
+
+  getAssistActionButton(action) {
+    if (action === 'retry') return this.elements.taskAssistRetryBtn;
+    if (action === 'continue_with_instruction') return this.elements.taskAssistContinueBtn;
+    if (action === 'switch_agent_retry') return this.elements.taskAssistSwitchBtn;
+    if (action === 'mark_failed') return this.elements.taskAssistFailBtn;
+    return null;
+  }
+
+  updateAssistSwitchButtonState() {
+    if (!this.elements.taskAssistSwitchBtn) return;
+    const selectedAgent = String(this.elements.taskAssistAgent?.value || '').trim();
+    this.elements.taskAssistSwitchBtn.disabled = selectedAgent === '';
+  }
+
+  setAssistRecommendationUI(recommendation) {
+    this.currentAssistRecommendation = recommendation || null;
+
+    [
+      this.elements.taskAssistRetryBtn,
+      this.elements.taskAssistContinueBtn,
+      this.elements.taskAssistSwitchBtn,
+      this.elements.taskAssistFailBtn
+    ].forEach((button) => {
+      button?.classList.remove('is-recommended');
+    });
+
+    if (this.elements.taskAssistRecommendationWrap && this.elements.taskAssistRecommendation) {
+      if (recommendation && recommendation.text) {
+        this.elements.taskAssistRecommendation.textContent = recommendation.text;
+        this.elements.taskAssistRecommendationWrap.classList.remove('d-none');
+      } else {
+        this.elements.taskAssistRecommendation.textContent = '';
+        this.elements.taskAssistRecommendationWrap.classList.add('d-none');
+      }
+    }
+
+    if (recommendation?.suggestedAgent && this.elements.taskAssistAgent) {
+      const hasOption = Array.from(this.elements.taskAssistAgent.options || [])
+        .some((option) => String(option?.value || '') === recommendation.suggestedAgent);
+      if (hasOption) {
+        this.elements.taskAssistAgent.value = recommendation.suggestedAgent;
+      }
+    }
+
+    const recommendedButton = this.getAssistActionButton(recommendation?.action || '');
+    if (recommendedButton) {
+      recommendedButton.classList.add('is-recommended');
+    }
+
+    this.updateAssistSwitchButtonState();
+  }
+
+  determineAssistRecommendation(reasonCode, suggestedActions, currentAgent) {
+    const normalizedCode = String(reasonCode || '').trim().toLowerCase();
+    const actions = this.parseAssistActions(suggestedActions);
+    const allows = (action) => actions.length === 0 || actions.includes(action);
+    const browserRelated = normalizedCode === 'capability_mismatch' ||
+      normalizedCode === 'capability_refusal' ||
+      normalizedCode.includes('capability');
+    const browserAgent = browserRelated ? this.findBestBrowserCapableAgent(currentAgent) : '';
+
+    if (browserRelated && browserAgent && allows('switch_agent_retry')) {
+      return {
+        action: 'switch_agent_retry',
+        suggestedAgent: browserAgent,
+        text: `Recommended: Switch to "${browserAgent}" and retry.`
+      };
+    }
+
+    if (allows('continue_with_instruction')) {
+      return {
+        action: 'continue_with_instruction',
+        text: 'Recommended: Add guidance and continue.'
+      };
+    }
+
+    if (allows('retry')) {
+      return {
+        action: 'retry',
+        text: 'Recommended: Retry with the current setup.'
+      };
+    }
+
+    if (allows('switch_agent_retry') && browserAgent) {
+      return {
+        action: 'switch_agent_retry',
+        suggestedAgent: browserAgent,
+        text: `Recommended: Switch to "${browserAgent}" and retry.`
+      };
+    }
+
+    return null;
   }
 
   openTaskAssistModal(taskId, eventData = null) {
@@ -963,16 +1071,21 @@ export class WorkspaceDetailPage {
     const humanLoop = this.getTaskHumanLoop(task) || {};
     const payload = (eventData && typeof eventData === 'object') ? eventData : {};
     const blockId = String(payload.block_id || humanLoop.block_id || '').trim();
+    const reasonCode = String(payload.reason_code || humanLoop.reason_code || '').trim();
+    const suggestedActions = payload.suggested_actions || humanLoop.suggested_actions;
     const reason = String(payload.reason || humanLoop.reason || 'The assigned agent needs guidance before it can continue.').trim();
     const question = String(payload.question || humanLoop.question || 'How should I proceed?').trim();
     const response = String(payload.agent_response || humanLoop.agent_response || '').trim();
     const statusText = getDisplayStatus(task.status);
     const timestamp = formatDate(task.updated_at || task.created_at);
 
+    const currentAgent = String(task.to || '').trim();
     this.currentBlockedTask = {
       taskId,
       blockId,
-      currentAgent: String(task.to || '').trim()
+      currentAgent,
+      reasonCode,
+      suggestedActions: this.parseAssistActions(suggestedActions)
     };
 
     if (this.elements.taskAssistMeta) {
@@ -997,7 +1110,9 @@ export class WorkspaceDetailPage {
       }
     }
 
-    this.populateAssistAgents(this.currentBlockedTask.currentAgent);
+    this.populateAssistAgents(currentAgent);
+    const recommendation = this.determineAssistRecommendation(reasonCode, suggestedActions, currentAgent);
+    this.setAssistRecommendationUI(recommendation);
 
     if (this.elements.taskAssistModal && window.bootstrap) {
       const modal = typeof bootstrap.Modal.getOrCreateInstance === 'function'
@@ -1014,6 +1129,11 @@ export class WorkspaceDetailPage {
     const message = String(this.elements.taskAssistMessage?.value || '').trim();
     if (action === 'switch_agent_retry' && !selectedAgent) {
       if (window.Toast) window.Toast.error('Select an agent to switch before retrying.');
+      return;
+    }
+    if (action === 'switch_agent_retry' &&
+        this.normalizeAgentName(selectedAgent) === this.normalizeAgentName(this.currentBlockedTask.currentAgent)) {
+      if (window.Toast) window.Toast.error('Select a different agent before switching.');
       return;
     }
 
@@ -1064,26 +1184,243 @@ export class WorkspaceDetailPage {
     return this.tasks.filter((task) => task.parent_task_id === taskId);
   }
 
-  getWorkspaceFallbackAgent() {
-    if (!this.workspace) return '';
+  normalizeAgentName(name) {
+    return String(name || '').trim().toLowerCase();
+  }
+
+  getWorkspaceAgentNames() {
+    if (!this.workspace) return [];
 
     const seen = new Set();
-    const candidates = [];
-    const addCandidate = (name) => {
+    const names = [];
+    const add = (name) => {
       const normalized = String(name || '').trim();
-      if (!normalized || normalized === 'unassigned' || seen.has(normalized)) return;
-      seen.add(normalized);
-      candidates.push(normalized);
+      if (!normalized || normalized === 'unassigned') return;
+      const key = this.normalizeAgentName(normalized);
+      if (seen.has(key)) return;
+      seen.add(key);
+      names.push(normalized);
     };
 
     if (Array.isArray(this.workspace.agent_instances)) {
-      this.workspace.agent_instances.forEach((instance) => addCandidate(instance && instance.name));
+      this.workspace.agent_instances.forEach((instance) => add(instance?.name));
     }
     if (Array.isArray(this.workspace.agents)) {
-      this.workspace.agents.forEach((name) => addCandidate(name));
+      this.workspace.agents.forEach((name) => add(name));
     }
 
-    return candidates[0] || '';
+    return names;
+  }
+
+  getAgentProfile(agentName) {
+    const key = this.normalizeAgentName(agentName);
+    if (!key || !this.agentIndex) return null;
+    return this.agentIndex.get(key) || null;
+  }
+
+  async loadAgentCatalog(force = false) {
+    if (!force && this.agentIndex instanceof Map && this.agentIndex.size > 0) {
+      return this.agentCatalog;
+    }
+
+    const nextCatalog = [];
+    const nextIndex = new Map();
+    try {
+      const response = await fetch('/api/agents/dashboard/list');
+      if (response.ok) {
+        const data = await response.json();
+        const agents = Array.isArray(data?.agents) ? data.agents : [];
+        agents.forEach((agent) => {
+          const name = String(agent?.name || '').trim();
+          if (!name) return;
+
+          const profile = {
+            name,
+            capabilities: Array.isArray(agent?.capabilities) ? agent.capabilities.map((value) => String(value || '').trim()).filter(Boolean) : [],
+            allowWebSearch: Boolean(agent?.allow_web_search),
+            enabledPlugins: Array.isArray(agent?.enabled_plugins) ? agent.enabled_plugins.map((value) => String(value || '').trim()).filter(Boolean) : [],
+            mcpServers: Array.isArray(agent?.mcp_servers) ? agent.mcp_servers.map((value) => String(value || '').trim()).filter(Boolean) : []
+          };
+
+          nextCatalog.push(profile);
+          nextIndex.set(this.normalizeAgentName(name), profile);
+        });
+      }
+    } catch (error) {
+      console.error('Failed to load agent catalog:', error);
+    }
+
+    this.agentCatalog = nextCatalog;
+    this.agentIndex = nextIndex;
+
+    if (!Array.isArray(this.agentOptions) || this.agentOptions.length === 0) {
+      this.agentOptions = this.buildAgentOptionsFromCatalog();
+    }
+
+    return this.agentCatalog;
+  }
+
+  buildAgentOptionsFromCatalog() {
+    const options = [{ label: 'Unassigned', value: '' }];
+    const seen = new Set();
+    this.agentCatalog.forEach((profile) => {
+      const name = String(profile?.name || '').trim();
+      if (!name) return;
+      const key = this.normalizeAgentName(name);
+      if (seen.has(key)) return;
+      seen.add(key);
+      options.push({ label: name, value: `node:${name}-node-1` });
+    });
+    return options;
+  }
+
+  agentSupportsBrowserAutomation(profile) {
+    if (!profile || !profile.allowWebSearch) {
+      return false;
+    }
+
+    const lowerCapabilities = new Set((profile.capabilities || []).map((value) => String(value || '').trim().toLowerCase()).filter(Boolean));
+    if (lowerCapabilities.has('browser') || lowerCapabilities.has('browser_automation') || lowerCapabilities.has('web_search') || lowerCapabilities.has('web_fetch')) {
+      return true;
+    }
+
+    const pluginNames = (profile.enabledPlugins || []).map((value) => String(value || '').trim().toLowerCase()).filter(Boolean);
+    for (const name of pluginNames) {
+      if (name.startsWith('browser') ||
+          name.startsWith('web_fetch') ||
+          name.startsWith('web_search') ||
+          name === 'navigate' ||
+          name === 'open_url' ||
+          name.includes('playwright') ||
+          name.includes('browserbase') ||
+          name.includes('puppeteer')) {
+        return true;
+      }
+    }
+
+    const serverNames = (profile.mcpServers || []).map((value) => String(value || '').trim().toLowerCase()).filter(Boolean);
+    for (const name of serverNames) {
+      if (name.includes('playwright') || name.includes('browserbase') || name.includes('puppeteer') || name.includes('browser')) {
+        return true;
+      }
+    }
+
+    return false;
+  }
+
+  findBestBrowserCapableAgent(excludeAgent = '') {
+    const exclude = this.normalizeAgentName(excludeAgent);
+    const candidates = this.getWorkspaceAgentNames();
+    for (const candidate of candidates) {
+      if (this.normalizeAgentName(candidate) === exclude) continue;
+      if (this.agentSupportsBrowserAutomation(this.getAgentProfile(candidate))) {
+        return candidate;
+      }
+    }
+    return '';
+  }
+
+  isLikelyBrowserAutomationIntent(description) {
+    const lower = String(description || '').trim().toLowerCase();
+    if (!lower) return false;
+
+    const verbs = ['open', 'visit', 'navigate', 'go to', 'browse', 'click', 'fill', 'type', 'extract'];
+    const hasVerb = verbs.some((verb) => lower.includes(verb));
+    if (!hasVerb) return false;
+
+    if (lower.includes('http://') || lower.includes('https://') || lower.includes('www.')) {
+      return true;
+    }
+
+    const tokens = lower.split(/\s+/);
+    for (const token of tokens) {
+      const cleaned = token.replace(/^[\s,.;:!?"'`()\[\]{}<>]+|[\s,.;:!?"'`()\[\]{}<>]+$/g, '');
+      if (!cleaned || cleaned.includes('/') || (cleaned.split('.').length - 1) < 1) continue;
+      const parts = cleaned.split('.');
+      const tld = parts[parts.length - 1];
+      if (tld.length >= 2 && tld.length <= 12) {
+        return true;
+      }
+    }
+
+    return false;
+  }
+
+  getTaskExecutionPreflight(task, assignedAgent) {
+    const description = String(task?.description || task?.name || '').trim();
+    if (!this.isLikelyBrowserAutomationIntent(description)) {
+      return { kind: 'none' };
+    }
+
+    const currentAgent = String(assignedAgent || '').trim();
+    if (!currentAgent) {
+      return { kind: 'none' };
+    }
+
+    const currentProfile = this.getAgentProfile(currentAgent);
+    if (!currentProfile || this.agentSupportsBrowserAutomation(currentProfile)) {
+      return { kind: 'none' };
+    }
+
+    const recommendedAgent = this.findBestBrowserCapableAgent(currentAgent);
+    if (recommendedAgent) {
+      return {
+        kind: 'switch_recommended',
+        recommendedAgent,
+        message: `"${currentAgent}" likely cannot execute browser actions for this task.`
+      };
+    }
+
+    return {
+      kind: 'warning',
+      message: `This looks like a browser task, but "${currentAgent}" likely lacks browser capability in this workspace.`
+    };
+  }
+
+  getAgentCapabilityBadges(agentName) {
+    const profile = this.getAgentProfile(agentName);
+    if (!profile) return [];
+
+    const badges = [];
+    if (this.agentSupportsBrowserAutomation(profile)) {
+      badges.push({ key: 'browser', label: 'Browser' });
+    }
+    if (profile.allowWebSearch) {
+      badges.push({ key: 'web', label: 'Web' });
+    }
+    if ((profile.mcpServers || []).length > 0) {
+      badges.push({ key: 'mcp', label: 'MCP' });
+    }
+    if ((profile.enabledPlugins || []).length > 0) {
+      badges.push({ key: 'tools', label: 'Tools' });
+    }
+
+    return badges.slice(0, 4);
+  }
+
+  renderAgentCapabilityBadges(agentName) {
+    const badges = this.getAgentCapabilityBadges(agentName);
+    if (!badges.length) return '';
+
+    const chips = badges
+      .map((badge) => `<span class="workspace-detail-capability-chip ${this.escapeHtml(badge.key)}">${this.escapeHtml(badge.label)}</span>`)
+      .join('');
+
+    return `<span class="workspace-detail-agent-capabilities">${chips}</span>`;
+  }
+
+  getWorkspaceFallbackAgent(options = {}) {
+    const candidates = this.getWorkspaceAgentNames();
+    if (candidates.length === 0) return '';
+
+    if (options.preferBrowser === true) {
+      const browserCandidate = candidates.find((name) => this.agentSupportsBrowserAutomation(this.getAgentProfile(name)));
+      if (browserCandidate) {
+        return browserCandidate;
+      }
+    }
+
+    return candidates[0];
   }
 
   async assignTaskToAgent(taskId, agentName) {
@@ -1099,11 +1436,14 @@ export class WorkspaceDetailPage {
   }
 
   async executeTask(taskId) {
+    await this.loadAgentCatalog();
+
     const task = this.tasks.find((item) => item.id === taskId);
     if (!task) return;
 
     const subtasks = this.getSubtasksForParent(taskId);
     const isParent = subtasks.length > 0;
+    const isBrowserIntent = !isParent && this.isLikelyBrowserAutomationIntent(task.description || task.name || '');
 
     if (isParent) {
       const hasUnassigned = subtasks.some((subtask) => !subtask.to || subtask.to === 'unassigned');
@@ -1123,7 +1463,7 @@ export class WorkspaceDetailPage {
 
     let assignedAgent = task.to && task.to !== 'unassigned' ? task.to : '';
     if (!isParent && !assignedAgent) {
-      const fallbackAgent = this.getWorkspaceFallbackAgent();
+      const fallbackAgent = this.getWorkspaceFallbackAgent({ preferBrowser: isBrowserIntent });
       if (!fallbackAgent) {
         if (window.Toast) window.Toast.error('No agent is available in this workspace. Add an agent or assign this task first.');
         return;
@@ -1143,9 +1483,33 @@ export class WorkspaceDetailPage {
       }
     }
 
-    const confirmMessage = isParent
+    let preflightWarning = '';
+    if (!isParent) {
+      const preflight = this.getTaskExecutionPreflight(task, assignedAgent);
+      if (preflight.kind === 'switch_recommended' && preflight.recommendedAgent) {
+        const switchNow = confirm(`${preflight.message}\n\nRecommended: switch to "${preflight.recommendedAgent}" before execution. Switch now?`);
+        if (switchNow) {
+          try {
+            await this.assignTaskToAgent(taskId, preflight.recommendedAgent);
+            assignedAgent = preflight.recommendedAgent;
+            task.to = preflight.recommendedAgent;
+          } catch (error) {
+            console.error('Failed to switch task to recommended agent:', error);
+            if (window.Toast) window.Toast.error('Failed to switch to recommended agent');
+            return;
+          }
+        } else {
+          preflightWarning = `${preflight.message} Continuing may trigger a pause for user input.`;
+        }
+      } else if (preflight.kind === 'warning') {
+        preflightWarning = preflight.message;
+      }
+    }
+
+    const baseConfirmMessage = isParent
       ? `Execute this workflow (${subtasks.length} step${subtasks.length === 1 ? '' : 's'}) now?`
       : `Execute this task${assignedAgent ? ` with "${assignedAgent}"` : ''} now?`;
+    const confirmMessage = preflightWarning ? `${preflightWarning}\n\n${baseConfirmMessage}` : baseConfirmMessage;
     if (!confirm(confirmMessage)) return;
 
     try {
@@ -1282,24 +1646,18 @@ export class WorkspaceDetailPage {
       return this.agentOptions;
     }
 
-    const options = [{ label: 'Unassigned', value: '' }];
-    try {
-      const response = await fetch('/api/agents/dashboard/list');
-      if (response.ok) {
-        const data = await response.json();
-        const agents = data.agents || [];
-        agents.forEach((agent) => {
-          if (!agent || !agent.name) return;
-          const nodeId = `${agent.name}-node-1`;
-          options.push({ label: agent.name, value: `node:${nodeId}` });
-        });
-      }
-    } catch (error) {
-      console.error('Failed to load agents:', error);
+    await this.loadAgentCatalog();
+    if (Array.isArray(this.agentOptions) && this.agentOptions.length > 0) {
+      return this.agentOptions;
     }
 
+    const options = [{ label: 'Unassigned', value: '' }];
+    this.getWorkspaceAgentNames().forEach((name) => {
+      const nodeId = `${name}-node-1`;
+      options.push({ label: name, value: `node:${nodeId}` });
+    });
     this.agentOptions = options;
-    return options;
+    return this.agentOptions;
   }
 
   getKanbanLabels(task) {
