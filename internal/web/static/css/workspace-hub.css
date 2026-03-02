@@ -1295,6 +1295,29 @@
   align-items: center;
 }
 
+.hub-task-header-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  flex-shrink: 0;
+}
+
+.hub-task-run-btn {
+  width: 1.6rem;
+  height: 1.6rem;
+  padding: 0;
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.hub-task-run-btn svg {
+  width: 0.75rem;
+  height: 0.75rem;
+  margin-left: 0.05rem;
+}
+
 .hub-task-title {
   font-weight: 600;
   font-size: 0.85rem;

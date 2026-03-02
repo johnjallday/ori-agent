@@ -441,6 +441,11 @@
         : !assignedAgent ? 'Assign an agent before executing'
           : status === 'in_progress' ? 'Task is already running'
             : executeLabel === 'Re-run' ? 'Re-execute task' : 'Execute task now';
+      const executeAriaLabel = isParent
+        ? executeLabel === 'Re-run' ? 'Re-run workflow'
+          : 'Run workflow'
+        : executeLabel === 'Re-run' ? 'Re-run task'
+          : 'Run task';
       const resultData = getDisplayResult(task, isParent ? subtasks : null);
       const stepBadge = isSubtask
         ? `<span class="hub-task-step">Step ${escapeHtml(stepNumber || '')}</span>`
@@ -466,7 +471,14 @@
                 <span>${escapeHtml(task.name || task.description || task.id)}</span>
                 ${inputBadge}
               </div>
-              <span class="hub-task-status status-${escapeHtml(status)}">${escapeHtml(statusLabel)}</span>
+              <div class="hub-task-header-actions">
+                <button class="hub-task-run-btn modern-btn modern-btn-primary modern-btn-icon" data-action="execute" ${canExecute ? '' : 'disabled'} title="${escapeHtml(executeTitle)}" aria-label="${escapeHtml(executeAriaLabel)}">
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                    <path d="M8,5.14V19.14L19,12.14L8,5.14Z"/>
+                  </svg>
+                </button>
+                <span class="hub-task-status status-${escapeHtml(status)}">${escapeHtml(statusLabel)}</span>
+              </div>
             </div>
             <div class="hub-task-meta">
               <span>${escapeHtml(assignment)}</span>
@@ -477,7 +489,6 @@
               ${isParent ? '<button class="modern-btn modern-btn-secondary" data-action="view-canvas" title="View workflow in canvas">Canvas</button>' : ''}
               ${isParent ? '<button class="modern-btn modern-btn-secondary" data-action="save-workflow" title="Save to Workflows library">Save</button>' : ''}
               ${isParent ? '<button class="modern-btn modern-btn-secondary" data-action="export" title="Export workflow to file">Export</button>' : ''}
-              <button class="modern-btn modern-btn-primary" data-action="execute" ${canExecute ? '' : 'disabled'} title="${escapeHtml(executeTitle)}">${escapeHtml(executeLabel)}</button>
             </div>
             ${resultData ? `
             <details class="hub-task-result">
