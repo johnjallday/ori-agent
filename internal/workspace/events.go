@@ -31,6 +31,8 @@ const (
 	EventTaskThinking   EventType = "task.thinking"    // Agent is processing/thinking
 	EventTaskToolCall   EventType = "task.tool_call"   // Agent is calling a tool
 	EventTaskToolResult EventType = "task.tool_result" // Tool call completed
+	EventTaskBlocked    EventType = "task.blocked"     // Task needs user input before it can continue
+	EventTaskResumed    EventType = "task.resumed"     // Task resumed after user input
 
 	// Scheduled task events
 	EventScheduledTaskTriggered EventType = "scheduled_task.triggered" // Scheduled task executed successfully

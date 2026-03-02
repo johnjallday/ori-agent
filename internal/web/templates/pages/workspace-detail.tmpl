@@ -446,6 +446,55 @@
     </div>
   </div>
 
+  <!-- Task Assist Modal -->
+  <div class="modal fade" id="workspace-detail-task-assist-modal" tabindex="-1" aria-labelledby="workspace-detail-task-assist-title" aria-hidden="true">
+    <div class="modal-dialog modal-lg modal-dialog-centered modal-dialog-scrollable">
+      <div class="modal-content">
+        <div class="modal-header">
+          <div>
+            <h5 class="modal-title" id="workspace-detail-task-assist-title">Task Needs Input</h5>
+            <div id="workspace-detail-task-assist-meta" class="workspace-detail-task-result-meta"></div>
+          </div>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+        </div>
+        <div class="modal-body">
+          <div class="workspace-detail-task-assist-reason">
+            <div class="workspace-detail-task-assist-label">Why it paused</div>
+            <div id="workspace-detail-task-assist-reason">The assigned agent needs guidance before it can continue.</div>
+          </div>
+          <div class="workspace-detail-task-assist-question mt-3">
+            <div class="workspace-detail-task-assist-label">Agent question</div>
+            <div id="workspace-detail-task-assist-question">How should I proceed?</div>
+          </div>
+          <div class="mt-3">
+            <label class="form-label" for="workspace-detail-task-assist-agent">Switch to agent (optional)</label>
+            <select id="workspace-detail-task-assist-agent" class="form-select">
+              <option value="">Keep current assignment</option>
+            </select>
+          </div>
+          <div class="mt-3">
+            <label class="form-label" for="workspace-detail-task-assist-message">Guidance for the agent (optional)</label>
+            <textarea id="workspace-detail-task-assist-message" class="form-control" rows="4" placeholder="Example: Use the browser tool to open instagram.com and confirm the page title."></textarea>
+          </div>
+          <div id="workspace-detail-task-assist-response-wrap" class="mt-3 d-none">
+            <div class="workspace-detail-task-assist-label">Last agent response</div>
+            <pre id="workspace-detail-task-assist-response" class="workspace-detail-task-result-body"></pre>
+          </div>
+        </div>
+        <div class="modal-footer d-flex justify-content-between">
+          <div class="d-flex gap-2">
+            <button type="button" class="btn btn-outline-danger" id="workspace-detail-task-assist-fail">Mark Failed</button>
+          </div>
+          <div class="d-flex gap-2">
+            <button type="button" class="btn btn-secondary" id="workspace-detail-task-assist-retry">Retry</button>
+            <button type="button" class="btn btn-primary" id="workspace-detail-task-assist-continue">Continue</button>
+            <button type="button" class="btn btn-warning" id="workspace-detail-task-assist-switch">Switch Agent + Retry</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <!-- Styles for workspace detail page -->
   <style>
     /* Bento Grid Layout */
@@ -813,6 +862,30 @@
     .workspace-detail-task-status.failed {
       background: rgba(220, 53, 69, 0.1);
       color: #dc3545;
+    }
+
+    .workspace-detail-task-status.blocked {
+      background: rgba(245, 158, 11, 0.15);
+      color: #f59e0b;
+    }
+
+    .workspace-detail-task-assist-reason,
+    .workspace-detail-task-assist-question {
+      background: var(--bg-secondary);
+      border: 1px solid var(--border-color);
+      border-radius: 8px;
+      padding: 0.75rem;
+      color: var(--text-primary);
+      font-size: 0.9rem;
+    }
+
+    .workspace-detail-task-assist-label {
+      font-size: 0.75rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      color: var(--text-secondary);
+      margin-bottom: 0.35rem;
     }
 
     /* View Toggle */

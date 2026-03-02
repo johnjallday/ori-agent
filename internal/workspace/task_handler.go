@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-
 	"strings"
 
 	"github.com/johnjallday/ori-agent/internal/agent"
@@ -47,6 +46,12 @@ type LLMTaskHandler struct {
 	llmFactory     *llm.Factory
 	workspaceStore Store     // Added to access workspace attachments
 	eventBus       *EventBus // Optional event bus for publishing execution events
+	mcpRegistry    mcpRegistry
+}
+
+type mcpRegistry interface {
+	GetToolsForServer(string) ([]pluginapi.PluginTool, error)
+	StartServer(string) error
 }
 
 // NewLLMTaskHandler creates a new LLM-based task handler
@@ -61,6 +66,11 @@ func NewLLMTaskHandler(agentStore store.Store, llmFactory *llm.Factory, workspac
 // SetEventBus sets the event bus for publishing execution progress events
 func (h *LLMTaskHandler) SetEventBus(eventBus *EventBus) {
 	h.eventBus = eventBus
+}
+
+// SetMCPRegistry enables MCP tool resolution for workspace task execution.
+func (h *LLMTaskHandler) SetMCPRegistry(registry mcpRegistry) {
+	h.mcpRegistry = registry
 }
 
 // ExecuteTask executes a task by sending it to the agent's LLM
@@ -79,6 +89,22 @@ func (h *LLMTaskHandler) ExecuteTask(ctx context.Context, agentName string, task
 	ag, ok := h.agentStore.GetAgent(agentName)
 	if !ok {
 		return "", fmt.Errorf("agent %s not found", agentName)
+	}
+
+	// Guard common browser-automation intents to avoid misleading "completed" responses
+	// when the assigned agent cannot actually drive web tooling.
+	if isLikelyBrowserAutomationIntent(task.Description) && !h.agentSupportsBrowserAutomation(ag) {
+		return "", &TaskBlockedError{
+			ReasonCode: "capability_mismatch",
+			Reason:     fmt.Sprintf("%s cannot execute browser actions for this task", agentName),
+			Question:   "Switch to an agent with browser capability and retry?",
+			SuggestedActions: []string{
+				"switch_agent_retry",
+				"continue_with_instruction",
+				"retry",
+				"mark_failed",
+			},
+		}
 	}
 
 	// Determine which provider to use based on model
@@ -105,8 +131,8 @@ func (h *LLMTaskHandler) ExecuteTask(ctx context.Context, agentName string, task
 
 	messages = append([]llm.Message{llm.NewSystemMessage(taskSystemPrompt)}, messages...)
 
-	// Convert tools (plugins) to LLM format
-	tools := h.convertPluginsToTools(ag)
+	// Convert agent tools (plugins + MCP) to LLM format
+	tools := h.convertAgentToolsToLLMTools(ag)
 
 	// Call the LLM
 	resp, err := provider.Chat(ctx, llm.ChatRequest{
@@ -153,6 +179,22 @@ func (h *LLMTaskHandler) ExecuteTask(ctx context.Context, agentName string, task
 	// Return the response content
 	if resp.Content == "" {
 		return "Task completed (no output)", nil
+	}
+
+	// Heuristic: detect capability-refusal responses for browser tasks and pause for user help.
+	if isLikelyBrowserAutomationIntent(task.Description) && looksLikeBrowserCapabilityRefusal(resp.Content) {
+		return "", &TaskBlockedError{
+			ReasonCode: "capability_refusal",
+			Reason:     fmt.Sprintf("%s responded with a capability refusal for a browser task", agentName),
+			Question:   "Would you like to switch agents, add guidance, or retry?",
+			SuggestedActions: []string{
+				"switch_agent_retry",
+				"continue_with_instruction",
+				"retry",
+				"mark_failed",
+			},
+			RawResponse: resp.Content,
+		}
 	}
 
 	return resp.Content, nil
@@ -228,6 +270,129 @@ func (h *LLMTaskHandler) cleanToolResult(result string) string {
 
 	// If not in tool format, return as-is
 	return result
+}
+
+func (h *LLMTaskHandler) agentSupportsBrowserAutomation(ag *agent.Agent) bool {
+	if ag == nil {
+		return false
+	}
+	if !ag.Settings.IsWebSearchAllowed() {
+		return false
+	}
+
+	for _, capability := range ag.Capabilities {
+		switch strings.ToLower(strings.TrimSpace(capability)) {
+		case "browser", "browser_automation", "web_search", "web_fetch":
+			return true
+		}
+	}
+
+	for _, plugin := range ag.Plugins {
+		if plugin.Tool == nil {
+			continue
+		}
+		name := strings.ToLower(strings.TrimSpace(plugin.Tool.Definition().Name))
+		if strings.HasPrefix(name, "browser") ||
+			strings.HasPrefix(name, "web_fetch") ||
+			strings.HasPrefix(name, "web_search") ||
+			name == "navigate" ||
+			name == "open_url" {
+			return true
+		}
+	}
+
+	for _, serverName := range ag.MCPServers {
+		name := strings.ToLower(strings.TrimSpace(serverName))
+		if name == "" {
+			continue
+		}
+		if strings.Contains(name, "playwright") || strings.Contains(name, "browserbase") || strings.Contains(name, "puppeteer") || strings.Contains(name, "browser") {
+			return true
+		}
+	}
+
+	for _, tool := range h.getAgentMCPTools(ag) {
+		if tool == nil {
+			continue
+		}
+		name := strings.ToLower(strings.TrimSpace(tool.Definition().Name))
+		if strings.HasPrefix(name, "browser") ||
+			strings.HasPrefix(name, "web_fetch") ||
+			strings.HasPrefix(name, "web_search") ||
+			name == "navigate" ||
+			name == "open_url" {
+			return true
+		}
+	}
+
+	return false
+}
+
+func isLikelyBrowserAutomationIntent(description string) bool {
+	lower := strings.ToLower(strings.TrimSpace(description))
+	if lower == "" {
+		return false
+	}
+
+	verbs := []string{
+		"open", "visit", "navigate", "go to", "browse", "click", "fill", "type", "extract",
+	}
+	hasVerb := false
+	for _, verb := range verbs {
+		if strings.Contains(lower, verb) {
+			hasVerb = true
+			break
+		}
+	}
+	if !hasVerb {
+		return false
+	}
+
+	if strings.Contains(lower, "http://") || strings.Contains(lower, "https://") || strings.Contains(lower, "www.") {
+		return true
+	}
+
+	for _, token := range strings.Fields(lower) {
+		cleaned := strings.Trim(token, " \t\r\n,.;:!?\"'`()[]{}<>")
+		if strings.Count(cleaned, ".") < 1 || strings.Contains(cleaned, "/") {
+			continue
+		}
+		parts := strings.Split(cleaned, ".")
+		tld := parts[len(parts)-1]
+		if len(tld) >= 2 && len(tld) <= 12 {
+			return true
+		}
+	}
+
+	return false
+}
+
+func looksLikeBrowserCapabilityRefusal(response string) bool {
+	lower := strings.ToLower(strings.TrimSpace(response))
+	if lower == "" {
+		return false
+	}
+
+	markers := []string{
+		"i don't have the capability",
+		"i do not have the capability",
+		"i can't open websites",
+		"i cannot open websites",
+		"cannot open websites directly",
+		"can't access websites directly",
+		"cannot access websites directly",
+		"i'm unable to open websites",
+		"i am unable to open websites",
+		"i can't browse",
+		"i cannot browse",
+	}
+	for _, marker := range markers {
+		if strings.Contains(lower, marker) {
+			return true
+		}
+	}
+
+	return false
 }
 
 // buildTaskPrompt creates a prompt for the task
@@ -397,9 +562,10 @@ func (h *LLMTaskHandler) getProviderForModel(model string) string {
 	return "openai"
 }
 
-// convertPluginsToTools converts agent plugins to LLM tools
-func (h *LLMTaskHandler) convertPluginsToTools(ag *agent.Agent) []llm.Tool {
+// convertAgentToolsToLLMTools converts agent plugins + MCP tools into LLM tools.
+func (h *LLMTaskHandler) convertAgentToolsToLLMTools(ag *agent.Agent) []llm.Tool {
 	var tools []llm.Tool
+	seen := make(map[string]struct{})
 
 	for _, plugin := range ag.Plugins {
 		if plugin.Tool == nil {
@@ -407,8 +573,36 @@ func (h *LLMTaskHandler) convertPluginsToTools(ag *agent.Agent) []llm.Tool {
 		}
 
 		def := plugin.Tool.Definition()
+		name := strings.ToLower(strings.TrimSpace(def.Name))
+		if name == "" {
+			continue
+		}
+		if _, exists := seen[name]; exists {
+			continue
+		}
+		seen[name] = struct{}{}
 
-		// Definition is already in generic pluginapi.Tool format
+		tools = append(tools, llm.Tool{
+			Name:        def.Name,
+			Description: def.Description,
+			Parameters:  def.Parameters,
+		})
+	}
+
+	for _, mcpTool := range h.getAgentMCPTools(ag) {
+		if mcpTool == nil {
+			continue
+		}
+		def := mcpTool.Definition()
+		name := strings.ToLower(strings.TrimSpace(def.Name))
+		if name == "" {
+			continue
+		}
+		if _, exists := seen[name]; exists {
+			continue
+		}
+		seen[name] = struct{}{}
+
 		tools = append(tools, llm.Tool{
 			Name:        def.Name,
 			Description: def.Description,
@@ -450,16 +644,9 @@ func (h *LLMTaskHandler) executeToolCall(ctx context.Context, ag *agent.Agent, a
 		h.eventBus.Publish(event)
 	}
 
-	// Find the tool
-	var tool pluginapi.PluginTool
-	for _, plugin := range ag.Plugins {
-		if plugin.Tool != nil && plugin.Tool.Definition().Name == toolCall.Name {
-			tool = plugin.Tool
-			break
-		}
-	}
+	tool, found := h.findTool(ag, toolCall.Name)
 
-	if tool == nil {
+	if !found || tool == nil {
 		result := toolCallResult{
 			Name:  toolCall.Name,
 			Error: fmt.Errorf("tool %s not found", toolCall.Name),
@@ -512,4 +699,90 @@ func (h *LLMTaskHandler) executeToolCall(ctx context.Context, ag *agent.Agent, a
 		Name:   toolCall.Name,
 		Result: result,
 	}
+}
+
+func (h *LLMTaskHandler) findTool(ag *agent.Agent, toolName string) (pluginapi.PluginTool, bool) {
+	target := strings.ToLower(strings.TrimSpace(toolName))
+	if target == "" {
+		return nil, false
+	}
+
+	for _, plugin := range ag.Plugins {
+		if plugin.Tool == nil {
+			continue
+		}
+		name := strings.ToLower(strings.TrimSpace(plugin.Tool.Definition().Name))
+		if name == target {
+			return plugin.Tool, true
+		}
+	}
+
+	for _, mcpTool := range h.getAgentMCPTools(ag) {
+		if mcpTool == nil {
+			continue
+		}
+		name := strings.ToLower(strings.TrimSpace(mcpTool.Definition().Name))
+		if name == target {
+			return mcpTool, true
+		}
+	}
+
+	return nil, false
+}
+
+func (h *LLMTaskHandler) getAgentMCPTools(ag *agent.Agent) []pluginapi.PluginTool {
+	if h == nil || h.mcpRegistry == nil || ag == nil || len(ag.MCPServers) == 0 {
+		return nil
+	}
+
+	tools := make([]pluginapi.PluginTool, 0, 8)
+	for _, serverName := range ag.MCPServers {
+		name := strings.TrimSpace(serverName)
+		if name == "" {
+			continue
+		}
+		serverTools, err := h.getMCPToolsForServer(name)
+		if err != nil {
+			logger.Warn("Failed to load MCP tools for task execution", logger.Fields{
+				"server": name,
+				"error":  err.Error(),
+			})
+			continue
+		}
+		tools = append(tools, serverTools...)
+	}
+
+	return tools
+}
+
+func (h *LLMTaskHandler) getMCPToolsForServer(serverName string) ([]pluginapi.PluginTool, error) {
+	if h == nil || h.mcpRegistry == nil {
+		return nil, fmt.Errorf("mcp registry is not configured")
+	}
+
+	mcpTools, err := h.mcpRegistry.GetToolsForServer(serverName)
+	if err == nil {
+		return mcpTools, nil
+	}
+	if !isMCPServerNotRunningError(err) {
+		return nil, err
+	}
+
+	if startErr := h.mcpRegistry.StartServer(serverName); startErr != nil {
+		return nil, fmt.Errorf("failed to start MCP server %q: %w", serverName, startErr)
+	}
+
+	mcpTools, retryErr := h.mcpRegistry.GetToolsForServer(serverName)
+	if retryErr != nil {
+		return nil, fmt.Errorf("MCP server %q started but tool discovery failed: %w", serverName, retryErr)
+	}
+
+	return mcpTools, nil
+}
+
+func isMCPServerNotRunningError(err error) bool {
+	if err == nil {
+		return false
+	}
+	return strings.Contains(strings.ToLower(err.Error()), "is not running")
 }

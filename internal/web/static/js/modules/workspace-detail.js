@@ -74,6 +74,7 @@ export class WorkspaceDetailPage {
     this.agentOptions = null;
     this.boardDidDrag = false;
     this.currentTaskResultText = '';
+    this.currentBlockedTask = null;
 
     // DOM elements
     this.elements = {};
@@ -282,7 +283,21 @@ export class WorkspaceDetailPage {
       taskResultTitle: document.getElementById('workspace-detail-task-result-title'),
       taskResultMeta: document.getElementById('workspace-detail-task-result-meta'),
       taskResultBody: document.getElementById('workspace-detail-task-result-body'),
-      taskResultCopyBtn: document.getElementById('workspace-detail-task-result-copy')
+      taskResultCopyBtn: document.getElementById('workspace-detail-task-result-copy'),
+
+      // Assist modal
+      taskAssistModal: document.getElementById('workspace-detail-task-assist-modal'),
+      taskAssistMeta: document.getElementById('workspace-detail-task-assist-meta'),
+      taskAssistReason: document.getElementById('workspace-detail-task-assist-reason'),
+      taskAssistQuestion: document.getElementById('workspace-detail-task-assist-question'),
+      taskAssistAgent: document.getElementById('workspace-detail-task-assist-agent'),
+      taskAssistMessage: document.getElementById('workspace-detail-task-assist-message'),
+      taskAssistResponseWrap: document.getElementById('workspace-detail-task-assist-response-wrap'),
+      taskAssistResponse: document.getElementById('workspace-detail-task-assist-response'),
+      taskAssistRetryBtn: document.getElementById('workspace-detail-task-assist-retry'),
+      taskAssistContinueBtn: document.getElementById('workspace-detail-task-assist-continue'),
+      taskAssistSwitchBtn: document.getElementById('workspace-detail-task-assist-switch'),
+      taskAssistFailBtn: document.getElementById('workspace-detail-task-assist-fail')
     };
   }
 
@@ -323,6 +338,10 @@ export class WorkspaceDetailPage {
     // Schedule buttons
     this.elements.viewSchedulesBtn?.addEventListener('click', () => this.showSchedulesModal());
     this.elements.taskResultCopyBtn?.addEventListener('click', () => this.copyCurrentTaskResult());
+    this.elements.taskAssistRetryBtn?.addEventListener('click', () => this.submitTaskAssist('retry'));
+    this.elements.taskAssistContinueBtn?.addEventListener('click', () => this.submitTaskAssist('continue_with_instruction'));
+    this.elements.taskAssistSwitchBtn?.addEventListener('click', () => this.submitTaskAssist('switch_agent_retry'));
+    this.elements.taskAssistFailBtn?.addEventListener('click', () => this.submitTaskAssist('mark_failed'));
 
     // Make workspace name and description editable
     this.makeEditable(this.elements.workspaceName, 'name', false);
@@ -685,6 +704,7 @@ export class WorkspaceDetailPage {
       const assignedAgent = task.to && task.to !== 'unassigned' ? task.to : '';
       const subtasks = this.tasks.filter((subtask) => subtask.parent_task_id === task.id);
       const isParent = subtasks.length > 0;
+      const statusInfo = this.getTaskStatusPresentation(task);
       const hasUnassignedSubtasks = isParent && subtasks.some((subtask) => !subtask.to || subtask.to === 'unassigned');
       const hasRunningSubtasks = isParent && subtasks.some((subtask) => subtask.status === 'in_progress');
       const canExecute = isParent
@@ -692,6 +712,7 @@ export class WorkspaceDetailPage {
         : task.status !== 'in_progress';
       const resultData = this.getDisplayResult(task, subtasks);
       const hasResultData = !!resultData;
+      const hasAssistData = !!statusInfo.isBlocked;
       const executeTitle = isParent
         ? hasUnassignedSubtasks ? 'Assign agents to all subtasks before executing'
           : hasRunningSubtasks ? 'A subtask is already running'
@@ -702,10 +723,21 @@ export class WorkspaceDetailPage {
       const resultTitle = hasResultData
         ? `View ${resultData.label} from ${resultData.answeredBy || 'Unknown agent'}`
         : '';
+      const assistTitle = statusInfo.reason || 'Agent needs your guidance before this task can continue.';
 
       return `
       <div class="workspace-detail-item" data-task-id="${task.id}">
-        ${hasResultData ? `
+        ${hasAssistData ? `
+        <button type="button"
+                class="workspace-detail-item-result"
+                onclick="event.stopPropagation(); window.workspaceDetail?.openTaskAssistModal('${task.id}')"
+                title="${this.escapeHtml(assistTitle)}"
+                aria-label="Help blocked task ${taskLabel}">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor">
+            <path d="M13,13H11V7H13M13,17H11V15H13M12,2A10,10 0 0,0 2,12A10,10 0 0,0 12,22A10,10 0 0,0 22,12A10,10 0 0,0 12,2Z"/>
+          </svg>
+        </button>
+        ` : hasResultData ? `
         <button type="button"
                 class="workspace-detail-item-result"
                 onclick="event.stopPropagation(); window.workspaceDetail?.showTaskResult('${task.id}')"
@@ -739,7 +771,7 @@ export class WorkspaceDetailPage {
              onkeydown="if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); window.workspaceDetail?.openTask('${task.id}'); }">
           <div class="d-flex justify-content-between align-items-start">
             <div class="workspace-detail-item-title">${taskLabel}</div>
-            <span class="workspace-detail-task-status ${getStatusClass(task.status)}">${getDisplayStatus(task.status)}</span>
+            <span class="workspace-detail-task-status ${statusInfo.className}">${statusInfo.label}</span>
           </div>
           <div class="workspace-detail-item-meta">
             ${task.to && task.to !== 'unassigned' ? `<span>Assigned to: ${this.escapeHtml(task.to)}</span> · ` : ''}
@@ -749,6 +781,34 @@ export class WorkspaceDetailPage {
       </div>
       `;
     }).join('');
+  }
+
+  getTaskHumanLoop(task) {
+    if (!task || typeof task !== 'object' || !task.context || typeof task.context !== 'object') {
+      return null;
+    }
+    const humanLoop = task.context.human_loop;
+    return humanLoop && typeof humanLoop === 'object' ? humanLoop : null;
+  }
+
+  getTaskStatusPresentation(task) {
+    const humanLoop = this.getTaskHumanLoop(task);
+    if (humanLoop && String(humanLoop.state || '').toLowerCase() === 'blocked') {
+      const reason = String(humanLoop.reason || '').trim();
+      return {
+        className: 'blocked',
+        label: 'Needs Input',
+        isBlocked: true,
+        reason
+      };
+    }
+
+    return {
+      className: getStatusClass(task?.status),
+      label: getDisplayStatus(task?.status),
+      isBlocked: false,
+      reason: ''
+    };
   }
 
   getDisplayResult(task, subtasks = []) {
@@ -868,6 +928,123 @@ export class WorkspaceDetailPage {
         ? bootstrap.Modal.getOrCreateInstance(this.elements.taskResultModal)
         : (bootstrap.Modal.getInstance(this.elements.taskResultModal) || new bootstrap.Modal(this.elements.taskResultModal));
       modal.show();
+    }
+  }
+
+  populateAssistAgents(currentAgent = '') {
+    if (!this.elements.taskAssistAgent) return;
+
+    const select = this.elements.taskAssistAgent;
+    const seen = new Set();
+    const options = ['<option value="">Keep current assignment</option>'];
+
+    const addOption = (agentName) => {
+      const normalized = String(agentName || '').trim();
+      if (!normalized || normalized === 'unassigned' || seen.has(normalized)) return;
+      seen.add(normalized);
+      const selected = normalized === currentAgent ? 'selected' : '';
+      options.push(`<option value="${this.escapeHtml(normalized)}" ${selected}>${this.escapeHtml(normalized)}</option>`);
+    };
+
+    if (Array.isArray(this.workspace?.agent_instances)) {
+      this.workspace.agent_instances.forEach((instance) => addOption(instance?.name));
+    }
+    if (Array.isArray(this.workspace?.agents)) {
+      this.workspace.agents.forEach((name) => addOption(name));
+    }
+
+    select.innerHTML = options.join('');
+  }
+
+  openTaskAssistModal(taskId, eventData = null) {
+    const task = this.tasks.find((item) => item.id === taskId);
+    if (!task) return;
+
+    const humanLoop = this.getTaskHumanLoop(task) || {};
+    const payload = (eventData && typeof eventData === 'object') ? eventData : {};
+    const blockId = String(payload.block_id || humanLoop.block_id || '').trim();
+    const reason = String(payload.reason || humanLoop.reason || 'The assigned agent needs guidance before it can continue.').trim();
+    const question = String(payload.question || humanLoop.question || 'How should I proceed?').trim();
+    const response = String(payload.agent_response || humanLoop.agent_response || '').trim();
+    const statusText = getDisplayStatus(task.status);
+    const timestamp = formatDate(task.updated_at || task.created_at);
+
+    this.currentBlockedTask = {
+      taskId,
+      blockId,
+      currentAgent: String(task.to || '').trim()
+    };
+
+    if (this.elements.taskAssistMeta) {
+      this.elements.taskAssistMeta.textContent = `${task.description || task.name || task.id} • ${statusText} • ${timestamp}`;
+    }
+    if (this.elements.taskAssistReason) {
+      this.elements.taskAssistReason.textContent = reason;
+    }
+    if (this.elements.taskAssistQuestion) {
+      this.elements.taskAssistQuestion.textContent = question;
+    }
+    if (this.elements.taskAssistMessage) {
+      this.elements.taskAssistMessage.value = '';
+    }
+    if (this.elements.taskAssistResponse && this.elements.taskAssistResponseWrap) {
+      if (response) {
+        this.elements.taskAssistResponse.textContent = response;
+        this.elements.taskAssistResponseWrap.classList.remove('d-none');
+      } else {
+        this.elements.taskAssistResponse.textContent = '';
+        this.elements.taskAssistResponseWrap.classList.add('d-none');
+      }
+    }
+
+    this.populateAssistAgents(this.currentBlockedTask.currentAgent);
+
+    if (this.elements.taskAssistModal && window.bootstrap) {
+      const modal = typeof bootstrap.Modal.getOrCreateInstance === 'function'
+        ? bootstrap.Modal.getOrCreateInstance(this.elements.taskAssistModal)
+        : (bootstrap.Modal.getInstance(this.elements.taskAssistModal) || new bootstrap.Modal(this.elements.taskAssistModal));
+      modal.show();
+    }
+  }
+
+  async submitTaskAssist(action) {
+    if (!this.currentBlockedTask?.taskId) return;
+
+    const selectedAgent = String(this.elements.taskAssistAgent?.value || '').trim();
+    const message = String(this.elements.taskAssistMessage?.value || '').trim();
+    if (action === 'switch_agent_retry' && !selectedAgent) {
+      if (window.Toast) window.Toast.error('Select an agent to switch before retrying.');
+      return;
+    }
+
+    const payload = {
+      action,
+      block_id: this.currentBlockedTask.blockId || undefined,
+      message: message || undefined,
+      agent: selectedAgent || undefined
+    };
+
+    try {
+      const response = await fetch(`/api/orchestration/tasks/${encodeURIComponent(this.currentBlockedTask.taskId)}/assist`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      if (!response.ok) {
+        const text = await response.text();
+        throw new Error(text || 'Failed to submit assistance');
+      }
+
+      if (window.Toast) window.Toast.success('Task updated');
+      await this.loadTasks();
+
+      if (action !== 'mark_failed' && this.elements.taskAssistModal && window.bootstrap) {
+        const modal = bootstrap.Modal.getInstance(this.elements.taskAssistModal);
+        modal?.hide();
+      }
+    } catch (error) {
+      console.error('Failed to assist blocked task:', error);
+      if (window.Toast) window.Toast.error(error.message || 'Failed to assist task');
     }
   }
 
@@ -2442,7 +2619,29 @@ export class WorkspaceDetailPage {
       case 'task_created':
       case 'task_updated':
       case 'task_deleted':
+      case 'task.created':
+      case 'task.assigned':
+      case 'task.started':
+      case 'task.completed':
+      case 'task.failed':
+      case 'task.deleted':
         this.loadTasks();
+        break;
+      case 'task.blocked': {
+        this.loadTasks();
+        const payload = event?.data?.data || event?.data || {};
+        const taskId = payload.task_id || event?.data?.task_id;
+        if (taskId) {
+          this.openTaskAssistModal(taskId, payload);
+        }
+        break;
+      }
+      case 'task.resumed':
+        this.loadTasks();
+        if (this.elements.taskAssistModal && window.bootstrap) {
+          const modal = bootstrap.Modal.getInstance(this.elements.taskAssistModal);
+          modal?.hide();
+        }
         break;
       case 'session_created':
       case 'session_updated':

@@ -2,7 +2,7 @@ package orchestrationhttp
 
 import (
 	"context"
-
+	"errors"
 	"fmt"
 	"net/http"
 	"sort"
@@ -303,12 +303,18 @@ func (th *TaskHandler) ExecuteTaskHandler(w http.ResponseWriter, r *http.Request
 			return
 		}
 
-		// Update task with result
-		completedAt := time.Now()
-		task.CompletedAt = &completedAt
-
 		if execErr != nil {
+			var blockedErr *workspace.TaskBlockedError
+			if errors.As(execErr, &blockedErr) {
+				if err := th.markTaskBlocked(ws, task, blockedErr, true, nil); err != nil {
+					logger.Error("Failed to persist blocked task state", logger.Fields{"task_id": task.ID, "error": err})
+				}
+				return
+			}
+
 			logger.Error("Task failed", logger.Fields{"task_id": task.ID, "execErr": execErr})
+			completedAt := time.Now()
+			task.CompletedAt = &completedAt
 			task.Status = workspace.TaskStatusFailed
 			task.Error = execErr.Error()
 
@@ -323,6 +329,8 @@ func (th *TaskHandler) ExecuteTaskHandler(w http.ResponseWriter, r *http.Request
 			}
 		} else {
 			logger.Info("Task completed successfully", logger.Fields{"task_id": task.ID})
+			completedAt := time.Now()
+			task.CompletedAt = &completedAt
 			task.Status = workspace.TaskStatusCompleted
 			task.Result = result
 
@@ -367,6 +375,209 @@ func (th *TaskHandler) ExecuteTaskHandler(w http.ResponseWriter, r *http.Request
 		"message": "Task execution started",
 		"task_id": req.TaskID,
 	})
+}
+
+func (th *TaskHandler) handleAssistTask(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		orihttp.MethodNotAllowed(w)
+		return
+	}
+
+	pathParts := strings.Split(strings.TrimPrefix(r.URL.Path, "/api/orchestration/tasks/"), "/")
+	if len(pathParts) < 2 || strings.TrimSpace(pathParts[0]) == "" {
+		orihttp.BadRequest(w, "task_id is required in URL path")
+		return
+	}
+	taskID := strings.TrimSpace(pathParts[0])
+
+	var req struct {
+		BlockID string `json:"block_id"`
+		Action  string `json:"action"`
+		Agent   string `json:"agent"`
+		Message string `json:"message"`
+	}
+	if !orihttp.ParseJSONBody(w, r, &req) {
+		return
+	}
+
+	action := strings.ToLower(strings.TrimSpace(req.Action))
+	if action == "" {
+		action = "continue_with_instruction"
+	}
+
+	task, ws, err := th.getTaskWithWorkspace(taskID)
+	if err != nil {
+		orihttp.RespondErrorWithErr(w, http.StatusNotFound, "Task not found", err)
+		return
+	}
+
+	if task.Context == nil {
+		task.Context = map[string]interface{}{}
+	}
+	humanLoop := map[string]interface{}{}
+	if existing, ok := task.Context["human_loop"].(map[string]interface{}); ok {
+		for key, value := range existing {
+			humanLoop[key] = value
+		}
+	}
+
+	blockID := strings.TrimSpace(req.BlockID)
+	if blockID == "" {
+		if existingID, ok := humanLoop["block_id"].(string); ok {
+			blockID = strings.TrimSpace(existingID)
+		}
+	}
+	if blockID == "" {
+		blockID = fmt.Sprintf("blk_%d", time.Now().UnixNano())
+	}
+
+	history := make([]interface{}, 0, 4)
+	if existingHistory, ok := humanLoop["history"].([]interface{}); ok {
+		history = append(history, existingHistory...)
+	}
+	history = append(history, map[string]interface{}{
+		"at":      time.Now().UTC().Format(time.RFC3339),
+		"action":  action,
+		"agent":   strings.TrimSpace(req.Agent),
+		"message": strings.TrimSpace(req.Message),
+	})
+
+	humanLoop["block_id"] = blockID
+	humanLoop["history"] = history
+	humanLoop["updated_at"] = time.Now().UTC().Format(time.RFC3339)
+	humanLoop["last_action"] = action
+
+	if msg := strings.TrimSpace(req.Message); msg != "" {
+		task.Context["user_assist_message"] = msg
+	}
+
+	switch action {
+	case "mark_failed":
+		now := time.Now()
+		task.Status = workspace.TaskStatusFailed
+		task.CompletedAt = &now
+		task.Result = ""
+		if msg := strings.TrimSpace(req.Message); msg != "" {
+			task.Error = fmt.Sprintf("Marked as failed by user: %s", msg)
+		} else {
+			task.Error = "Marked as failed by user"
+		}
+		humanLoop["state"] = "failed"
+	case "switch_agent_retry":
+		agentName := strings.TrimSpace(req.Agent)
+		if agentName == "" {
+			orihttp.BadRequest(w, "agent is required for switch_agent_retry")
+			return
+		}
+		task.To = agentName
+		task.AssignedNodeID = resolveAssignedNodeID(ws, agentName)
+		task.Status = workspace.TaskStatusPending
+		task.StartedAt = nil
+		task.CompletedAt = nil
+		task.Error = ""
+		task.Result = ""
+		humanLoop["state"] = "resumed"
+	case "retry", "continue_with_instruction":
+		task.Status = workspace.TaskStatusPending
+		task.StartedAt = nil
+		task.CompletedAt = nil
+		task.Error = ""
+		task.Result = ""
+		humanLoop["state"] = "resumed"
+	default:
+		orihttp.BadRequest(w, "unsupported action; use retry, continue_with_instruction, switch_agent_retry, or mark_failed")
+		return
+	}
+
+	task.Context["human_loop"] = humanLoop
+	if err := ws.UpdateTask(*task); err != nil {
+		orihttp.RespondErrorWithErr(w, http.StatusInternalServerError, "Failed to update task", err)
+		return
+	}
+	if err := th.workspaceStore.Save(ws); err != nil {
+		orihttp.RespondErrorWithErr(w, http.StatusInternalServerError, "Failed to save workspace", err)
+		return
+	}
+
+	if th.eventBus != nil {
+		if action == "mark_failed" {
+			th.eventBus.Publish(workspace.NewTaskEvent(workspace.EventTaskFailed, ws.ID, task.ID, task.To, map[string]interface{}{
+				"description": task.Description,
+				"error":       task.Error,
+				"manual":      true,
+			}))
+		} else {
+			th.eventBus.Publish(workspace.NewTaskEvent(workspace.EventTaskResumed, ws.ID, task.ID, task.To, map[string]interface{}{
+				"description": task.Description,
+				"action":      action,
+				"block_id":    blockID,
+				"message":     strings.TrimSpace(req.Message),
+				"agent":       task.To,
+				"manual":      true,
+			}))
+		}
+
+		th.eventBus.Publish(workspace.NewWorkspaceEvent(workspace.EventWorkspaceUpdated, ws.ID, "task.assist", map[string]interface{}{
+			"task_id": task.ID,
+			"status":  task.Status,
+			"action":  action,
+		}))
+	}
+
+	if action != "mark_failed" {
+		th.resumeTaskExecutionAsync(ws.ID, task.ID)
+	}
+
+	w.WriteHeader(http.StatusOK)
+	orihttp.WriteJSON(w, map[string]interface{}{
+		"success": true,
+		"task_id": task.ID,
+		"status":  task.Status,
+		"action":  action,
+	})
+}
+
+func resolveAssignedNodeID(ws *workspace.Workspace, agentName string) string {
+	normalizedAgent := strings.TrimSpace(agentName)
+	if ws == nil || normalizedAgent == "" {
+		return ""
+	}
+	for _, instance := range ws.AgentInstances {
+		if strings.EqualFold(strings.TrimSpace(instance.Name), normalizedAgent) && strings.TrimSpace(instance.NodeID) != "" {
+			return instance.NodeID
+		}
+	}
+	return ""
+}
+
+func (th *TaskHandler) resumeTaskExecutionAsync(workspaceID, taskID string) {
+	go func() {
+		ws, err := th.workspaceStore.Get(workspaceID)
+		if err != nil {
+			logger.Error("Failed to load workspace for task resume", logger.Fields{"workspace_id": workspaceID, "error": err})
+			return
+		}
+
+		task, err := ws.GetTask(taskID)
+		if err != nil {
+			logger.Error("Failed to load task for resume", logger.Fields{"task_id": taskID, "error": err})
+			return
+		}
+
+		subtasks := ws.GetSubtasks(task.ID)
+		if len(subtasks) > 0 {
+			th.executeParentTaskSequence(workspaceID, taskID)
+			return
+		}
+
+		if _, err := th.executeTaskWithDependencies(ws, task, true); err != nil {
+			var blockedErr *workspace.TaskBlockedError
+			if errors.As(err, &blockedErr) {
+				return
+			}
+			logger.Error("Task resume failed", logger.Fields{"task_id": taskID, "error": err})
+		}
+	}()
 }
 
 func (th *TaskHandler) executeParentTaskSequence(workspaceID, parentTaskID string) {
@@ -428,6 +639,8 @@ func (th *TaskHandler) executeParentTaskSequence(workspaceID, parentTaskID strin
 
 	var lastResult string
 	var execErr error
+	var blockedErr *workspace.TaskBlockedError
+	var blockedSubtaskID string
 
 	for _, subtaskInfo := range subtasks {
 		subtask, err := ws.GetTask(subtaskInfo.ID)
@@ -467,6 +680,9 @@ func (th *TaskHandler) executeParentTaskSequence(workspaceID, parentTaskID strin
 
 		result, err := th.executeTaskWithDependencies(ws, subtask, true)
 		if err != nil {
+			if errors.As(err, &blockedErr) {
+				blockedSubtaskID = subtask.ID
+			}
 			execErr = err
 			break
 		}
@@ -479,10 +695,20 @@ func (th *TaskHandler) executeParentTaskSequence(workspaceID, parentTaskID strin
 		return
 	}
 
-	completedAt := time.Now()
-	parentTask.CompletedAt = &completedAt
-
 	if execErr != nil {
+		if blockedErr != nil {
+			extra := map[string]interface{}{}
+			if blockedSubtaskID != "" {
+				extra["blocked_subtask_id"] = blockedSubtaskID
+			}
+			if err := th.markTaskBlocked(ws, parentTask, blockedErr, true, extra); err != nil {
+				logger.Error("Failed to persist blocked parent task", logger.Fields{"task_id": parentTaskID, "error": err})
+			}
+			return
+		}
+
+		completedAt := time.Now()
+		parentTask.CompletedAt = &completedAt
 		logger.Error("Task sequence failed", logger.Fields{"task_id": parentTaskID, "error": execErr})
 		parentTask.Status = workspace.TaskStatusFailed
 		parentTask.Error = execErr.Error()
@@ -497,6 +723,8 @@ func (th *TaskHandler) executeParentTaskSequence(workspaceID, parentTaskID strin
 			th.eventBus.Publish(event)
 		}
 	} else {
+		completedAt := time.Now()
+		parentTask.CompletedAt = &completedAt
 		logger.Info("Task sequence completed successfully", logger.Fields{"task_id": parentTaskID})
 		parentTask.Status = workspace.TaskStatusCompleted
 		parentTask.Result = lastResult
@@ -609,14 +837,23 @@ func (th *TaskHandler) executeTaskWithDependencies(ws *workspace.Workspace, task
 
 	result, execErr := th.taskHandler.ExecuteTask(ctx, task.To, taskForExecution)
 
-	completedAt := time.Now()
-	task.CompletedAt = &completedAt
-
 	if execErr != nil {
+		var blockedErr *workspace.TaskBlockedError
+		if errors.As(execErr, &blockedErr) {
+			if err := th.markTaskBlocked(ws, task, blockedErr, manual, nil); err != nil {
+				return "", fmt.Errorf("failed to persist blocked task state: %w", err)
+			}
+			return "", blockedErr
+		}
+
+		completedAt := time.Now()
+		task.CompletedAt = &completedAt
 		logger.Error("Task failed", logger.Fields{"task_id": task.ID, "execErr": execErr})
 		task.Status = workspace.TaskStatusFailed
 		task.Error = execErr.Error()
 	} else {
+		completedAt := time.Now()
+		task.CompletedAt = &completedAt
 		logger.Info("Task completed successfully", logger.Fields{"task_id": task.ID})
 		task.Status = workspace.TaskStatusCompleted
 		task.Result = result
@@ -656,6 +893,104 @@ func (th *TaskHandler) executeTaskWithDependencies(ws *workspace.Workspace, task
 	}
 
 	return result, execErr
+}
+
+func (th *TaskHandler) markTaskBlocked(ws *workspace.Workspace, task *workspace.Task, blockedErr *workspace.TaskBlockedError, manual bool, extra map[string]interface{}) error {
+	if ws == nil || task == nil {
+		return fmt.Errorf("workspace and task are required")
+	}
+
+	now := time.Now()
+	task.Status = workspace.TaskStatusPending
+	task.CompletedAt = nil
+	task.Error = ""
+	task.Result = ""
+
+	humanLoop := buildTaskBlockedContext(task, blockedErr, extra)
+	if err := ws.UpdateTask(*task); err != nil {
+		return fmt.Errorf("failed to update blocked task: %w", err)
+	}
+	if err := th.workspaceStore.Save(ws); err != nil {
+		return fmt.Errorf("failed to save blocked task: %w", err)
+	}
+
+	if th.eventBus != nil {
+		payload := map[string]interface{}{
+			"description": task.Description,
+			"manual":      manual,
+			"human_loop":  humanLoop,
+			"status":      task.Status,
+			"updated_at":  now.UTC().Format(time.RFC3339),
+		}
+		if blockedErr != nil && strings.TrimSpace(blockedErr.RawResponse) != "" {
+			payload["agent_response"] = blockedErr.RawResponse
+		}
+		event := workspace.NewTaskEvent(workspace.EventTaskBlocked, ws.ID, task.ID, task.To, payload)
+		th.eventBus.Publish(event)
+
+		th.eventBus.Publish(workspace.NewWorkspaceEvent(workspace.EventWorkspaceUpdated, ws.ID, "manual-execution-blocked", map[string]interface{}{
+			"task_id": task.ID,
+			"status":  task.Status,
+		}))
+	}
+
+	logger.Warn("Task blocked awaiting user assistance", logger.Fields{
+		"task_id":     task.ID,
+		"reason_code": blockedErrReasonCode(blockedErr),
+	})
+
+	return nil
+}
+
+func blockedErrReasonCode(blockedErr *workspace.TaskBlockedError) string {
+	if blockedErr == nil {
+		return "blocked"
+	}
+	code := strings.TrimSpace(blockedErr.ReasonCode)
+	if code == "" {
+		return "blocked"
+	}
+	return code
+}
+
+func buildTaskBlockedContext(task *workspace.Task, blockedErr *workspace.TaskBlockedError, extra map[string]interface{}) map[string]interface{} {
+	if task.Context == nil {
+		task.Context = map[string]interface{}{}
+	}
+
+	blockID := fmt.Sprintf("blk_%d", time.Now().UnixNano())
+	if existing, ok := task.Context["human_loop"].(map[string]interface{}); ok {
+		if prior, ok := existing["block_id"].(string); ok && strings.TrimSpace(prior) != "" {
+			blockID = strings.TrimSpace(prior)
+		}
+	}
+
+	humanLoop := map[string]interface{}{
+		"state":       "blocked",
+		"block_id":    blockID,
+		"reason_code": blockedErrReasonCode(blockedErr),
+		"updated_at":  time.Now().UTC().Format(time.RFC3339),
+	}
+	if blockedErr != nil {
+		if reason := strings.TrimSpace(blockedErr.Reason); reason != "" {
+			humanLoop["reason"] = reason
+		}
+		if question := strings.TrimSpace(blockedErr.Question); question != "" {
+			humanLoop["question"] = question
+		}
+		if len(blockedErr.SuggestedActions) > 0 {
+			humanLoop["suggested_actions"] = blockedErr.SuggestedActions
+		}
+		if raw := strings.TrimSpace(blockedErr.RawResponse); raw != "" {
+			humanLoop["agent_response"] = raw
+		}
+	}
+	for key, value := range extra {
+		humanLoop[key] = value
+	}
+
+	task.Context["human_loop"] = humanLoop
+	return humanLoop
 }
 
 // executeInputTasksIfNeeded recursively executes any pending/unassigned input tasks
