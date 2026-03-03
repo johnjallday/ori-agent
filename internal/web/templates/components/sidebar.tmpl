@@ -114,6 +114,11 @@
         </svg>
         <span>Settings</span>
       </a>
+      {{if .Version}}
+      <div class="sidebar-version" style="padding: 6px 12px 8px; text-align: center; font-size: 0.7rem; color: var(--text-muted, #6b7280); opacity: 0.6; letter-spacing: 0.05em;">
+        {{.Version}}
+      </div>
+      {{end}}
     </div>
   </div>
 
