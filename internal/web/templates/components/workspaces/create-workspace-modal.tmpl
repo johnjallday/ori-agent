@@ -33,6 +33,50 @@
             <button type="button" class="folder-color-btn" data-color="#ec4899" title="Pink" aria-label="Pink color" style="background: #ec4899;"></button>
           </div>
         </div>
+
+        <div class="workspace-setup-card mt-3" id="folderSetupCard">
+          <div class="workspace-setup-header">
+            <label for="folderEnableSetup" class="workspace-setup-title">Set Up With Ori</label>
+            <div class="form-check form-switch m-0">
+              <input class="form-check-input" type="checkbox" id="folderEnableSetup" role="switch" aria-label="Enable setup with Ori">
+            </div>
+          </div>
+          <p class="workspace-setup-help">Create a starter kit so this workspace is ready to run immediately.</p>
+
+          <div id="folderSetupControls" class="workspace-setup-controls" hidden>
+            <div class="workspace-setup-section">
+              <span class="workspace-setup-label">Template</span>
+              <div class="workspace-setup-templates" id="folderSetupTemplateGroup" role="radiogroup" aria-label="Workspace setup template">
+                <button type="button" class="workspace-setup-template is-active" data-template="feature" role="radio" aria-checked="true">Feature Build</button>
+                <button type="button" class="workspace-setup-template" data-template="bug" role="radio" aria-checked="false">Bug Fix</button>
+                <button type="button" class="workspace-setup-template" data-template="research" role="radio" aria-checked="false">Research</button>
+              </div>
+            </div>
+
+            <div class="workspace-setup-section">
+              <span class="workspace-setup-label">Create</span>
+              <div class="workspace-setup-options">
+                <label class="workspace-setup-option">
+                  <input type="checkbox" id="folderSetupTasks" checked>
+                  <span>Starter tasks</span>
+                </label>
+                <label class="workspace-setup-option">
+                  <input type="checkbox" id="folderSetupNotes" checked>
+                  <span>Note templates</span>
+                </label>
+                <label class="workspace-setup-option">
+                  <input type="checkbox" id="folderSetupSchedule">
+                  <span>Weekly review schedule</span>
+                </label>
+              </div>
+            </div>
+
+            <div class="workspace-setup-preview">
+              <div class="workspace-setup-label">Preview</div>
+              <ul id="folderSetupPreview" class="workspace-setup-preview-list"></ul>
+            </div>
+          </div>
+        </div>
       </div>
       <div class="modal-footer" style="border-top: 1px solid var(--border-color);">
         <button type="button" class="modern-btn modern-btn-secondary" data-bs-dismiss="modal">Cancel</button>

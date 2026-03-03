@@ -14,16 +14,21 @@ import (
 	"github.com/johnjallday/ori-agent/internal/types"
 )
 
-// handleClaudeCodeChat handles chat requests routed through the Claude Code CLI provider.
-// This provider does not support tool calling, so the flow is a simple request/response.
-func (h *Handler) handleClaudeCodeChat(w http.ResponseWriter, r *http.Request, ag *agent.Agent, userMessage string, agentName string, baseCtx context.Context, images []llm.ImageAttachment, plannerDecision *types.PlannerDecision, runtimeSystemPrompt string) {
+// handleCodexChat handles chat requests routed through the Codex CLI provider.
+// Codex provider currently does not support tool calling, so this path is request/response only.
+func (h *Handler) handleCodexChat(w http.ResponseWriter, r *http.Request, ag *agent.Agent, userMessage string, agentName string, baseCtx context.Context, images []llm.ImageAttachment, plannerDecision *types.PlannerDecision, runtimeSystemPrompt string) {
 	sessionID := h.getSessionID(r)
 	ctx, cancel := context.WithTimeout(baseCtx, ChatRequestTimeout)
 	defer cancel()
 
-	provider, err := h.llmFactory.GetProvider("claude_code")
+	if h.llmFactory == nil {
+		writeErrorResponse(w, "Codex provider not available")
+		return
+	}
+
+	provider, err := h.llmFactory.GetProvider("codex")
 	if err != nil {
-		writeErrorResponse(w, fmt.Sprintf("Claude Code provider not available: %v", err))
+		writeErrorResponse(w, fmt.Sprintf("Codex provider not available: %v", err))
 		return
 	}
 
@@ -54,16 +59,13 @@ func (h *Handler) handleClaudeCodeChat(w http.ResponseWriter, r *http.Request, a
 	}
 
 	text := getResponseText(resp.Content)
-	ag.Messages = append(ag.Messages, openai.UserMessage(userMessage))
 	ag.Messages = append(ag.Messages, openai.AssistantMessage(text))
 
-	logger.Debug("Claude Code chat response completed", logger.Fields{"duration": time.Since(start)})
+	logger.Debug("Codex chat response completed", logger.Fields{"duration": time.Since(start)})
 	_ = h.store.SetAgent(agentName, ag)
 
-	h.storeMessageInSession(baseCtx, sessionID, "user", userMessage)
 	h.storeMessageInSession(baseCtx, sessionID, "assistant", text)
-
-	h.trackUsageCommon("claude_code", ag.Settings.Model, agentName, resp.Usage, ag, userMessage)
+	h.trackUsageCommon("codex", ag.Settings.Model, agentName, resp.Usage, ag, userMessage)
 
 	writeJSONResponse(w, attachPlannerDecision(attachRouteMetadata(map[string]any{
 		"response": text,

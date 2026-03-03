@@ -918,6 +918,37 @@ document.getElementById('systemDiagnosticsBtn')?.addEventListener('click', async
     reasoningSelect.disabled = true;
   }
 
+  function normalizeModelOptions(rawModelOptions, fallbackModels) {
+    if (Array.isArray(rawModelOptions) && rawModelOptions.length > 0) {
+      return rawModelOptions
+        .filter(option => option && typeof option.id === 'string' && option.id.length > 0)
+        .map(option => ({
+          id: option.id,
+          label: (typeof option.label === 'string' && option.label.length > 0) ? option.label : option.id,
+          description: (typeof option.description === 'string') ? option.description : '',
+          recommended: Boolean(option.recommended)
+        }));
+    }
+
+    const models = Array.isArray(fallbackModels) ? fallbackModels : [];
+    return models
+      .filter(model => typeof model === 'string' && model.length > 0)
+      .map(model => ({
+        id: model,
+        label: model,
+        description: '',
+        recommended: false
+      }));
+  }
+
+  function formatModelOptionText(modelOption) {
+    const recommended = modelOption.recommended ? ' (recommended)' : '';
+    if (modelOption.description) {
+      return `${modelOption.label}${recommended} — ${modelOption.description}`;
+    }
+    return `${modelOption.label}${recommended}`;
+  }
+
   // Load available providers
   async function loadProviders() {
     try {
@@ -1017,22 +1048,11 @@ document.getElementById('systemDiagnosticsBtn')?.addEventListener('click', async
       }
 
       modelSelect.innerHTML = '<option value="">Select a model...</option>';
-      const models = data.models || [];
-      const claudeCodeDescriptions = {
-        opus: 'Opus 4.6 · Most capable for complex work',
-        sonnet: 'Sonnet 4.5 · Best for everyday tasks',
-        haiku: 'Haiku 4.5 · Fastest for quick answers'
-      };
-      const claudeCodeRecommended = 'haiku';
-      models.forEach(model => {
+      const modelOptions = normalizeModelOptions(data.model_options, data.models);
+      modelOptions.forEach(modelOption => {
         const option = document.createElement('option');
-        option.value = model;
-        if (providerName === 'claude_code' && claudeCodeDescriptions[model]) {
-          const recommended = model === claudeCodeRecommended ? ' (recommended)' : '';
-          option.textContent = `${model}${recommended} — ${claudeCodeDescriptions[model]}`;
-        } else {
-          option.textContent = model;
-        }
+        option.value = modelOption.id;
+        option.textContent = formatModelOptionText(modelOption);
         modelSelect.appendChild(option);
       });
 

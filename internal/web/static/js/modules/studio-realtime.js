@@ -122,6 +122,14 @@ class WorkspaceRealtime {
       this.handleTaskEvent(workspaceId, 'task.failed', e);
     });
 
+    eventSource.addEventListener('task.blocked', (e) => {
+      this.handleTaskEvent(workspaceId, 'task.blocked', e);
+    });
+
+    eventSource.addEventListener('task.resumed', (e) => {
+      this.handleTaskEvent(workspaceId, 'task.resumed', e);
+    });
+
     eventSource.addEventListener('task.deleted', (e) => {
       this.handleTaskEvent(workspaceId, 'task.deleted', e);
     });

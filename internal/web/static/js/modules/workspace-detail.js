@@ -72,7 +72,12 @@ export class WorkspaceDetailPage {
     this.currentView = 'list'; // 'list' or 'board'
     this.boardConfig = null;
     this.agentOptions = null;
+    this.agentCatalog = [];
+    this.agentIndex = new Map();
     this.boardDidDrag = false;
+    this.currentTaskResultText = '';
+    this.currentBlockedTask = null;
+    this.currentAssistRecommendation = null;
 
     // DOM elements
     this.elements = {};
@@ -86,6 +91,7 @@ export class WorkspaceDetailPage {
     this.bindEvents();
     this.setupFileModal();
     await this.loadWorkspace();
+    await this.loadAgentCatalog();
     await Promise.all([
       this.loadTasks(),
       this.loadSessions(),
@@ -274,7 +280,30 @@ export class WorkspaceDetailPage {
       tasksBoard: document.getElementById('workspace-detail-tasks-board'),
       boardColumns: document.getElementById('workspace-detail-board-columns'),
       boardEmpty: document.getElementById('workspace-detail-board-empty'),
-      boardSetupBtn: document.getElementById('workspace-detail-board-setup')
+      boardSetupBtn: document.getElementById('workspace-detail-board-setup'),
+
+      // Result modal
+      taskResultModal: document.getElementById('workspace-detail-task-result-modal'),
+      taskResultTitle: document.getElementById('workspace-detail-task-result-title'),
+      taskResultMeta: document.getElementById('workspace-detail-task-result-meta'),
+      taskResultBody: document.getElementById('workspace-detail-task-result-body'),
+      taskResultCopyBtn: document.getElementById('workspace-detail-task-result-copy'),
+
+      // Assist modal
+      taskAssistModal: document.getElementById('workspace-detail-task-assist-modal'),
+      taskAssistMeta: document.getElementById('workspace-detail-task-assist-meta'),
+      taskAssistReason: document.getElementById('workspace-detail-task-assist-reason'),
+      taskAssistQuestion: document.getElementById('workspace-detail-task-assist-question'),
+      taskAssistRecommendationWrap: document.getElementById('workspace-detail-task-assist-recommendation-wrap'),
+      taskAssistRecommendation: document.getElementById('workspace-detail-task-assist-recommendation'),
+      taskAssistAgent: document.getElementById('workspace-detail-task-assist-agent'),
+      taskAssistMessage: document.getElementById('workspace-detail-task-assist-message'),
+      taskAssistResponseWrap: document.getElementById('workspace-detail-task-assist-response-wrap'),
+      taskAssistResponse: document.getElementById('workspace-detail-task-assist-response'),
+      taskAssistRetryBtn: document.getElementById('workspace-detail-task-assist-retry'),
+      taskAssistContinueBtn: document.getElementById('workspace-detail-task-assist-continue'),
+      taskAssistSwitchBtn: document.getElementById('workspace-detail-task-assist-switch'),
+      taskAssistFailBtn: document.getElementById('workspace-detail-task-assist-fail')
     };
   }
 
@@ -314,6 +343,12 @@ export class WorkspaceDetailPage {
 
     // Schedule buttons
     this.elements.viewSchedulesBtn?.addEventListener('click', () => this.showSchedulesModal());
+    this.elements.taskResultCopyBtn?.addEventListener('click', () => this.copyCurrentTaskResult());
+    this.elements.taskAssistRetryBtn?.addEventListener('click', () => this.submitTaskAssist('retry'));
+    this.elements.taskAssistContinueBtn?.addEventListener('click', () => this.submitTaskAssist('continue_with_instruction'));
+    this.elements.taskAssistSwitchBtn?.addEventListener('click', () => this.submitTaskAssist('switch_agent_retry'));
+    this.elements.taskAssistFailBtn?.addEventListener('click', () => this.submitTaskAssist('mark_failed'));
+    this.elements.taskAssistAgent?.addEventListener('change', () => this.updateAssistSwitchButtonState());
 
     // Make workspace name and description editable
     this.makeEditable(this.elements.workspaceName, 'name', false);
@@ -671,8 +706,65 @@ export class WorkspaceDetailPage {
     // Filter to only show top-level tasks (no parent)
     const topLevelTasks = this.tasks.filter(t => !t.parent_task_id);
 
-    this.elements.tasksList.innerHTML = topLevelTasks.map(task => `
+    this.elements.tasksList.innerHTML = topLevelTasks.map(task => {
+      const taskLabel = this.escapeHtml(task.description || task.name || 'Untitled Task');
+      const assignedAgent = task.to && task.to !== 'unassigned' ? task.to : '';
+      const subtasks = this.tasks.filter((subtask) => subtask.parent_task_id === task.id);
+      const isParent = subtasks.length > 0;
+      const statusInfo = this.getTaskStatusPresentation(task);
+      const hasUnassignedSubtasks = isParent && subtasks.some((subtask) => !subtask.to || subtask.to === 'unassigned');
+      const hasRunningSubtasks = isParent && subtasks.some((subtask) => subtask.status === 'in_progress');
+      const canExecute = isParent
+        ? subtasks.length > 0 && !hasUnassignedSubtasks && !hasRunningSubtasks
+        : task.status !== 'in_progress';
+      const resultData = this.getDisplayResult(task, subtasks);
+      const hasResultData = !!resultData;
+      const hasAssistData = !!statusInfo.isBlocked;
+      const executeTitle = isParent
+        ? hasUnassignedSubtasks ? 'Assign agents to all subtasks before executing'
+          : hasRunningSubtasks ? 'A subtask is already running'
+            : 'Execute workflow now'
+        : !assignedAgent ? 'Will auto-assign a workspace agent before execution'
+          : task.status === 'in_progress' ? 'Task is already running'
+            : 'Execute task now';
+      const resultTitle = hasResultData
+        ? `View ${resultData.label} from ${resultData.answeredBy || 'Unknown agent'}`
+        : '';
+      const assistTitle = statusInfo.reason || 'Agent needs your guidance before this task can continue.';
+
+      return `
       <div class="workspace-detail-item" data-task-id="${task.id}">
+        ${hasAssistData ? `
+        <button type="button"
+                class="workspace-detail-item-result"
+                onclick="event.stopPropagation(); window.workspaceDetail?.openTaskAssistModal('${task.id}')"
+                title="${this.escapeHtml(assistTitle)}"
+                aria-label="Help blocked task ${taskLabel}">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor">
+            <path d="M13,13H11V7H13M13,17H11V15H13M12,2A10,10 0 0,0 2,12A10,10 0 0,0 12,22A10,10 0 0,0 22,12A10,10 0 0,0 12,2Z"/>
+          </svg>
+        </button>
+        ` : hasResultData ? `
+        <button type="button"
+                class="workspace-detail-item-result"
+                onclick="event.stopPropagation(); window.workspaceDetail?.showTaskResult('${task.id}')"
+                title="${this.escapeHtml(resultTitle)}"
+                aria-label="View result for task ${taskLabel}">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor">
+            <path d="M14,17H7V15H14M17,13H7V11H17M17,9H7V7H17M19,3H5C3.89,3 3,3.89 3,5V19A2,2 0 0,0 5,21H19A2,2 0 0,0 21,19V5C21,3.89 20.1,3 19,3Z"/>
+          </svg>
+        </button>
+        ` : ''}
+        <button type="button"
+                class="workspace-detail-item-run"
+                onclick="event.stopPropagation(); window.workspaceDetail?.executeTask('${task.id}')"
+                title="${this.escapeHtml(executeTitle)}"
+                aria-label="Execute task ${taskLabel}"
+                ${canExecute ? '' : 'disabled'}>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+            <path d="M8,5.14V19.14L19,12.14L8,5.14Z"/>
+          </svg>
+        </button>
         <button type="button" class="workspace-detail-item-delete" onclick="event.stopPropagation(); window.workspaceDetail?.deleteTask('${task.id}')" title="Delete task" aria-label="Delete task ${this.escapeHtml(task.description || task.name || 'Untitled Task')}">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
             <path d="M19,4H15.5L14.5,3H9.5L8.5,4H5V6H19M6,19A2,2 0 0,0 8,21H16A2,2 0 0,0 18,19V7H6V19Z"/>
@@ -685,16 +777,789 @@ export class WorkspaceDetailPage {
              onclick="window.workspaceDetail?.openTask('${task.id}')"
              onkeydown="if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); window.workspaceDetail?.openTask('${task.id}'); }">
           <div class="d-flex justify-content-between align-items-start">
-            <div class="workspace-detail-item-title">${this.escapeHtml(task.description || task.name || 'Untitled Task')}</div>
-            <span class="workspace-detail-task-status ${getStatusClass(task.status)}">${getDisplayStatus(task.status)}</span>
+            <div class="workspace-detail-item-title">${taskLabel}</div>
+            <span class="workspace-detail-task-status ${statusInfo.className}">${statusInfo.label}</span>
           </div>
           <div class="workspace-detail-item-meta">
-            ${task.to && task.to !== 'unassigned' ? `<span>Assigned to: ${this.escapeHtml(task.to)}</span> · ` : ''}
+            ${assignedAgent ? `<span class="workspace-detail-assigned-agent">Assigned to: ${this.escapeHtml(assignedAgent)}${this.renderAgentCapabilityBadges(assignedAgent)}</span> · ` : ''}
             ${formatDate(task.created_at)}
           </div>
         </div>
       </div>
-    `).join('');
+      `;
+    }).join('');
+  }
+
+  getTaskHumanLoop(task) {
+    if (!task || typeof task !== 'object' || !task.context || typeof task.context !== 'object') {
+      return null;
+    }
+    const humanLoop = task.context.human_loop;
+    return humanLoop && typeof humanLoop === 'object' ? humanLoop : null;
+  }
+
+  getTaskStatusPresentation(task) {
+    const humanLoop = this.getTaskHumanLoop(task);
+    if (humanLoop && String(humanLoop.state || '').toLowerCase() === 'blocked') {
+      const reason = String(humanLoop.reason || '').trim();
+      return {
+        className: 'blocked',
+        label: 'Needs Input',
+        isBlocked: true,
+        reason
+      };
+    }
+
+    return {
+      className: getStatusClass(task?.status),
+      label: getDisplayStatus(task?.status),
+      isBlocked: false,
+      reason: ''
+    };
+  }
+
+  getDisplayResult(task, subtasks = []) {
+    if (!task) return null;
+    if (task.error) {
+      return {
+        label: 'Error',
+        text: this.normalizeResultText(task.error),
+        sourceTask: task,
+        answeredBy: this.getAnsweringAgentLabel(task)
+      };
+    }
+    if (task.result) {
+      return {
+        label: 'Result',
+        text: this.normalizeResultText(task.result),
+        sourceTask: task,
+        answeredBy: this.getAnsweringAgentLabel(task)
+      };
+    }
+
+    if (Array.isArray(subtasks) && subtasks.length > 0) {
+      const orderedSubtasks = [...subtasks].sort((a, b) => {
+        const aIndex = Number.isFinite(a?.subtask_index) && a.subtask_index > 0 ? a.subtask_index : Number.MAX_SAFE_INTEGER;
+        const bIndex = Number.isFinite(b?.subtask_index) && b.subtask_index > 0 ? b.subtask_index : Number.MAX_SAFE_INTEGER;
+        if (aIndex !== bIndex) return aIndex - bIndex;
+        const aTime = a?.created_at ? new Date(a.created_at).getTime() : 0;
+        const bTime = b?.created_at ? new Date(b.created_at).getTime() : 0;
+        return aTime - bTime;
+      });
+
+      const lastSubtask = orderedSubtasks[orderedSubtasks.length - 1];
+      if (lastSubtask?.error) {
+        return {
+          label: 'Error (last step)',
+          text: this.normalizeResultText(lastSubtask.error),
+          sourceTask: lastSubtask,
+          answeredBy: this.getAnsweringAgentLabel(lastSubtask)
+        };
+      }
+      if (lastSubtask?.result) {
+        return {
+          label: 'Result (last step)',
+          text: this.normalizeResultText(lastSubtask.result),
+          sourceTask: lastSubtask,
+          answeredBy: this.getAnsweringAgentLabel(lastSubtask)
+        };
+      }
+    }
+
+    return null;
+  }
+
+  getAnsweringAgentLabel(task) {
+    if (!task || typeof task !== 'object') return 'Unknown agent';
+
+    const to = String(task.to || '').trim();
+    const assignedNodeId = String(task.assigned_node_id || '').trim();
+    const from = String(task.from || '').trim();
+
+    if (assignedNodeId) {
+      const nodeMatch = assignedNodeId.match(/^(.+)-node-(\d+)$/);
+      if (nodeMatch) {
+        const nodeAgentName = nodeMatch[1];
+        const nodeNumber = nodeMatch[2];
+        if (to && to !== 'unassigned' && to !== nodeAgentName) {
+          return `${to} (${assignedNodeId})`;
+        }
+        return `${nodeAgentName} (node ${nodeNumber})`;
+      }
+
+      if (to && to !== 'unassigned') {
+        return `${to} (${assignedNodeId})`;
+      }
+      return assignedNodeId;
+    }
+
+    if (to && to !== 'unassigned') return to;
+    if (from && from !== 'system') return from;
+    return 'Unknown agent';
+  }
+
+  showTaskResult(taskId) {
+    const task = this.tasks.find((item) => item.id === taskId);
+    if (!task) return;
+
+    const subtasks = this.getSubtasksForParent(taskId);
+    const isParent = subtasks.length > 0;
+    const resultData = this.getDisplayResult(task, subtasks);
+    if (!resultData || !resultData.text) {
+      if (window.Toast) window.Toast.info('No result captured for this task yet.');
+      return;
+    }
+
+    const taskName = task.description || task.name || task.id || 'Task Result';
+    const statusText = getDisplayStatus(task.status);
+    const timestamp = formatDate(task.completed_at || task.updated_at || task.created_at);
+    const answeredBy = resultData.answeredBy || 'Unknown agent';
+    const metaParts = [`Answered by ${answeredBy}`, `${statusText}`, timestamp];
+    if (isParent) {
+      metaParts.unshift(`${subtasks.length} step${subtasks.length === 1 ? '' : 's'}`);
+    }
+
+    if (this.elements.taskResultTitle) {
+      this.elements.taskResultTitle.textContent = taskName;
+    }
+    if (this.elements.taskResultMeta) {
+      this.elements.taskResultMeta.textContent = `${resultData.label} • ${metaParts.join(' • ')}`;
+    }
+    if (this.elements.taskResultBody) {
+      this.elements.taskResultBody.textContent = String(resultData.text || '');
+    }
+    this.currentTaskResultText = String(resultData.text || '');
+
+    if (this.elements.taskResultModal && window.bootstrap) {
+      const modal = typeof bootstrap.Modal.getOrCreateInstance === 'function'
+        ? bootstrap.Modal.getOrCreateInstance(this.elements.taskResultModal)
+        : (bootstrap.Modal.getInstance(this.elements.taskResultModal) || new bootstrap.Modal(this.elements.taskResultModal));
+      modal.show();
+    }
+  }
+
+  populateAssistAgents(currentAgent = '') {
+    if (!this.elements.taskAssistAgent) return;
+
+    const select = this.elements.taskAssistAgent;
+    const seen = new Set();
+    const options = ['<option value="">Keep current assignment</option>'];
+
+    const addOption = (agentName) => {
+      const normalized = String(agentName || '').trim();
+      const key = this.normalizeAgentName(normalized);
+      if (!normalized || normalized === 'unassigned' || seen.has(key)) return;
+      seen.add(key);
+      const isCurrent = this.normalizeAgentName(normalized) === this.normalizeAgentName(currentAgent);
+      const label = isCurrent ? `${normalized} (current)` : normalized;
+      options.push(`<option value="${this.escapeHtml(normalized)}">${this.escapeHtml(label)}</option>`);
+    };
+
+    this.getWorkspaceAgentNames().forEach((name) => addOption(name));
+
+    select.innerHTML = options.join('');
+  }
+
+  parseAssistActions(value) {
+    if (Array.isArray(value)) {
+      return value.map((item) => String(item || '').trim().toLowerCase()).filter(Boolean);
+    }
+    if (typeof value === 'string') {
+      return value.split(',').map((item) => item.trim().toLowerCase()).filter(Boolean);
+    }
+    return [];
+  }
+
+  getAssistActionButton(action) {
+    if (action === 'retry') return this.elements.taskAssistRetryBtn;
+    if (action === 'continue_with_instruction') return this.elements.taskAssistContinueBtn;
+    if (action === 'switch_agent_retry') return this.elements.taskAssistSwitchBtn;
+    if (action === 'mark_failed') return this.elements.taskAssistFailBtn;
+    return null;
+  }
+
+  updateAssistSwitchButtonState() {
+    if (!this.elements.taskAssistSwitchBtn) return;
+    const selectedAgent = String(this.elements.taskAssistAgent?.value || '').trim();
+    this.elements.taskAssistSwitchBtn.disabled = selectedAgent === '';
+  }
+
+  setAssistRecommendationUI(recommendation) {
+    this.currentAssistRecommendation = recommendation || null;
+
+    [
+      this.elements.taskAssistRetryBtn,
+      this.elements.taskAssistContinueBtn,
+      this.elements.taskAssistSwitchBtn,
+      this.elements.taskAssistFailBtn
+    ].forEach((button) => {
+      button?.classList.remove('is-recommended');
+    });
+
+    if (this.elements.taskAssistRecommendationWrap && this.elements.taskAssistRecommendation) {
+      if (recommendation && recommendation.text) {
+        this.elements.taskAssistRecommendation.textContent = recommendation.text;
+        this.elements.taskAssistRecommendationWrap.classList.remove('d-none');
+      } else {
+        this.elements.taskAssistRecommendation.textContent = '';
+        this.elements.taskAssistRecommendationWrap.classList.add('d-none');
+      }
+    }
+
+    if (recommendation?.suggestedAgent && this.elements.taskAssistAgent) {
+      const hasOption = Array.from(this.elements.taskAssistAgent.options || [])
+        .some((option) => String(option?.value || '') === recommendation.suggestedAgent);
+      if (hasOption) {
+        this.elements.taskAssistAgent.value = recommendation.suggestedAgent;
+      }
+    }
+
+    const recommendedButton = this.getAssistActionButton(recommendation?.action || '');
+    if (recommendedButton) {
+      recommendedButton.classList.add('is-recommended');
+    }
+
+    this.updateAssistSwitchButtonState();
+  }
+
+  determineAssistRecommendation(reasonCode, suggestedActions, currentAgent) {
+    const normalizedCode = String(reasonCode || '').trim().toLowerCase();
+    const actions = this.parseAssistActions(suggestedActions);
+    const allows = (action) => actions.length === 0 || actions.includes(action);
+    const browserRelated = normalizedCode === 'capability_mismatch' ||
+      normalizedCode === 'capability_refusal' ||
+      normalizedCode.includes('capability');
+    const browserAgent = browserRelated ? this.findBestBrowserCapableAgent(currentAgent) : '';
+
+    if (browserRelated && browserAgent && allows('switch_agent_retry')) {
+      return {
+        action: 'switch_agent_retry',
+        suggestedAgent: browserAgent,
+        text: `Recommended: Switch to "${browserAgent}" and retry.`
+      };
+    }
+
+    if (allows('continue_with_instruction')) {
+      return {
+        action: 'continue_with_instruction',
+        text: 'Recommended: Add guidance and continue.'
+      };
+    }
+
+    if (allows('retry')) {
+      return {
+        action: 'retry',
+        text: 'Recommended: Retry with the current setup.'
+      };
+    }
+
+    if (allows('switch_agent_retry') && browserAgent) {
+      return {
+        action: 'switch_agent_retry',
+        suggestedAgent: browserAgent,
+        text: `Recommended: Switch to "${browserAgent}" and retry.`
+      };
+    }
+
+    return null;
+  }
+
+  openTaskAssistModal(taskId, eventData = null) {
+    const task = this.tasks.find((item) => item.id === taskId);
+    if (!task) return;
+
+    const humanLoop = this.getTaskHumanLoop(task) || {};
+    const payload = (eventData && typeof eventData === 'object') ? eventData : {};
+    const blockId = String(payload.block_id || humanLoop.block_id || '').trim();
+    const reasonCode = String(payload.reason_code || humanLoop.reason_code || '').trim();
+    const suggestedActions = payload.suggested_actions || humanLoop.suggested_actions;
+    const reason = String(payload.reason || humanLoop.reason || 'The assigned agent needs guidance before it can continue.').trim();
+    const question = String(payload.question || humanLoop.question || 'How should I proceed?').trim();
+    const response = String(payload.agent_response || humanLoop.agent_response || '').trim();
+    const statusText = getDisplayStatus(task.status);
+    const timestamp = formatDate(task.updated_at || task.created_at);
+
+    const currentAgent = String(task.to || '').trim();
+    this.currentBlockedTask = {
+      taskId,
+      blockId,
+      currentAgent,
+      reasonCode,
+      suggestedActions: this.parseAssistActions(suggestedActions)
+    };
+
+    if (this.elements.taskAssistMeta) {
+      this.elements.taskAssistMeta.textContent = `${task.description || task.name || task.id} • ${statusText} • ${timestamp}`;
+    }
+    if (this.elements.taskAssistReason) {
+      this.elements.taskAssistReason.textContent = reason;
+    }
+    if (this.elements.taskAssistQuestion) {
+      this.elements.taskAssistQuestion.textContent = question;
+    }
+    if (this.elements.taskAssistMessage) {
+      this.elements.taskAssistMessage.value = '';
+    }
+    if (this.elements.taskAssistResponse && this.elements.taskAssistResponseWrap) {
+      if (response) {
+        this.elements.taskAssistResponse.textContent = response;
+        this.elements.taskAssistResponseWrap.classList.remove('d-none');
+      } else {
+        this.elements.taskAssistResponse.textContent = '';
+        this.elements.taskAssistResponseWrap.classList.add('d-none');
+      }
+    }
+
+    this.populateAssistAgents(currentAgent);
+    const recommendation = this.determineAssistRecommendation(reasonCode, suggestedActions, currentAgent);
+    this.setAssistRecommendationUI(recommendation);
+
+    if (this.elements.taskAssistModal && window.bootstrap) {
+      const modal = typeof bootstrap.Modal.getOrCreateInstance === 'function'
+        ? bootstrap.Modal.getOrCreateInstance(this.elements.taskAssistModal)
+        : (bootstrap.Modal.getInstance(this.elements.taskAssistModal) || new bootstrap.Modal(this.elements.taskAssistModal));
+      modal.show();
+    }
+  }
+
+  async submitTaskAssist(action) {
+    if (!this.currentBlockedTask?.taskId) return;
+
+    const selectedAgent = String(this.elements.taskAssistAgent?.value || '').trim();
+    const message = String(this.elements.taskAssistMessage?.value || '').trim();
+    if (action === 'switch_agent_retry' && !selectedAgent) {
+      if (window.Toast) window.Toast.error('Select an agent to switch before retrying.');
+      return;
+    }
+    if (action === 'switch_agent_retry' &&
+        this.normalizeAgentName(selectedAgent) === this.normalizeAgentName(this.currentBlockedTask.currentAgent)) {
+      if (window.Toast) window.Toast.error('Select a different agent before switching.');
+      return;
+    }
+
+    const payload = {
+      action,
+      block_id: this.currentBlockedTask.blockId || undefined,
+      message: message || undefined,
+      agent: selectedAgent || undefined
+    };
+
+    try {
+      const response = await fetch(`/api/orchestration/tasks/${encodeURIComponent(this.currentBlockedTask.taskId)}/assist`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      if (!response.ok) {
+        const text = await response.text();
+        throw new Error(text || 'Failed to submit assistance');
+      }
+
+      if (window.Toast) window.Toast.success('Task updated');
+      await this.loadTasks();
+
+      if (action !== 'mark_failed' && this.elements.taskAssistModal && window.bootstrap) {
+        const modal = bootstrap.Modal.getInstance(this.elements.taskAssistModal);
+        modal?.hide();
+      }
+    } catch (error) {
+      console.error('Failed to assist blocked task:', error);
+      if (window.Toast) window.Toast.error(error.message || 'Failed to assist task');
+    }
+  }
+
+  normalizeResultText(value) {
+    if (value === undefined || value === null) return '';
+    if (typeof value === 'string') return value;
+    if (typeof value === 'number' || typeof value === 'boolean') return String(value);
+    try {
+      return JSON.stringify(value, null, 2);
+    } catch (_error) {
+      return String(value);
+    }
+  }
+
+  getSubtasksForParent(taskId) {
+    if (!taskId) return [];
+    return this.tasks.filter((task) => task.parent_task_id === taskId);
+  }
+
+  normalizeAgentName(name) {
+    return String(name || '').trim().toLowerCase();
+  }
+
+  getWorkspaceAgentNames() {
+    if (!this.workspace) return [];
+
+    const seen = new Set();
+    const names = [];
+    const add = (name) => {
+      const normalized = String(name || '').trim();
+      if (!normalized || normalized === 'unassigned') return;
+      const key = this.normalizeAgentName(normalized);
+      if (seen.has(key)) return;
+      seen.add(key);
+      names.push(normalized);
+    };
+
+    if (Array.isArray(this.workspace.agent_instances)) {
+      this.workspace.agent_instances.forEach((instance) => add(instance?.name));
+    }
+    if (Array.isArray(this.workspace.agents)) {
+      this.workspace.agents.forEach((name) => add(name));
+    }
+
+    return names;
+  }
+
+  getAgentProfile(agentName) {
+    const key = this.normalizeAgentName(agentName);
+    if (!key || !this.agentIndex) return null;
+    return this.agentIndex.get(key) || null;
+  }
+
+  async loadAgentCatalog(force = false) {
+    if (!force && this.agentIndex instanceof Map && this.agentIndex.size > 0) {
+      return this.agentCatalog;
+    }
+
+    const nextCatalog = [];
+    const nextIndex = new Map();
+    try {
+      const response = await fetch('/api/agents/dashboard/list');
+      if (response.ok) {
+        const data = await response.json();
+        const agents = Array.isArray(data?.agents) ? data.agents : [];
+        agents.forEach((agent) => {
+          const name = String(agent?.name || '').trim();
+          if (!name) return;
+
+          const profile = {
+            name,
+            capabilities: Array.isArray(agent?.capabilities) ? agent.capabilities.map((value) => String(value || '').trim()).filter(Boolean) : [],
+            allowWebSearch: Boolean(agent?.allow_web_search),
+            enabledPlugins: Array.isArray(agent?.enabled_plugins) ? agent.enabled_plugins.map((value) => String(value || '').trim()).filter(Boolean) : [],
+            mcpServers: Array.isArray(agent?.mcp_servers) ? agent.mcp_servers.map((value) => String(value || '').trim()).filter(Boolean) : []
+          };
+
+          nextCatalog.push(profile);
+          nextIndex.set(this.normalizeAgentName(name), profile);
+        });
+      }
+    } catch (error) {
+      console.error('Failed to load agent catalog:', error);
+    }
+
+    this.agentCatalog = nextCatalog;
+    this.agentIndex = nextIndex;
+
+    if (!Array.isArray(this.agentOptions) || this.agentOptions.length === 0) {
+      this.agentOptions = this.buildAgentOptionsFromCatalog();
+    }
+
+    return this.agentCatalog;
+  }
+
+  buildAgentOptionsFromCatalog() {
+    const options = [{ label: 'Unassigned', value: '' }];
+    const seen = new Set();
+    this.agentCatalog.forEach((profile) => {
+      const name = String(profile?.name || '').trim();
+      if (!name) return;
+      const key = this.normalizeAgentName(name);
+      if (seen.has(key)) return;
+      seen.add(key);
+      options.push({ label: name, value: `node:${name}-node-1` });
+    });
+    return options;
+  }
+
+  agentSupportsBrowserAutomation(profile) {
+    if (!profile || !profile.allowWebSearch) {
+      return false;
+    }
+
+    const lowerCapabilities = new Set((profile.capabilities || []).map((value) => String(value || '').trim().toLowerCase()).filter(Boolean));
+    if (lowerCapabilities.has('browser') || lowerCapabilities.has('browser_automation') || lowerCapabilities.has('web_search') || lowerCapabilities.has('web_fetch')) {
+      return true;
+    }
+
+    const pluginNames = (profile.enabledPlugins || []).map((value) => String(value || '').trim().toLowerCase()).filter(Boolean);
+    for (const name of pluginNames) {
+      if (name.startsWith('browser') ||
+          name.startsWith('web_fetch') ||
+          name.startsWith('web_search') ||
+          name === 'navigate' ||
+          name === 'open_url' ||
+          name.includes('playwright') ||
+          name.includes('browserbase') ||
+          name.includes('puppeteer')) {
+        return true;
+      }
+    }
+
+    const serverNames = (profile.mcpServers || []).map((value) => String(value || '').trim().toLowerCase()).filter(Boolean);
+    for (const name of serverNames) {
+      if (name.includes('playwright') || name.includes('browserbase') || name.includes('puppeteer') || name.includes('browser')) {
+        return true;
+      }
+    }
+
+    return false;
+  }
+
+  findBestBrowserCapableAgent(excludeAgent = '') {
+    const exclude = this.normalizeAgentName(excludeAgent);
+    const candidates = this.getWorkspaceAgentNames();
+    for (const candidate of candidates) {
+      if (this.normalizeAgentName(candidate) === exclude) continue;
+      if (this.agentSupportsBrowserAutomation(this.getAgentProfile(candidate))) {
+        return candidate;
+      }
+    }
+    return '';
+  }
+
+  isLikelyBrowserAutomationIntent(description) {
+    const lower = String(description || '').trim().toLowerCase();
+    if (!lower) return false;
+
+    const verbs = ['open', 'visit', 'navigate', 'go to', 'browse', 'click', 'fill', 'type', 'extract'];
+    const hasVerb = verbs.some((verb) => lower.includes(verb));
+    if (!hasVerb) return false;
+
+    if (lower.includes('http://') || lower.includes('https://') || lower.includes('www.')) {
+      return true;
+    }
+
+    const tokens = lower.split(/\s+/);
+    for (const token of tokens) {
+      const cleaned = token.replace(/^[\s,.;:!?"'`()[\]{}<>]+|[\s,.;:!?"'`()[\]{}<>]+$/g, '');
+      if (!cleaned || cleaned.includes('/') || (cleaned.split('.').length - 1) < 1) continue;
+      const parts = cleaned.split('.');
+      const tld = parts[parts.length - 1];
+      if (tld.length >= 2 && tld.length <= 12) {
+        return true;
+      }
+    }
+
+    return false;
+  }
+
+  getTaskExecutionPreflight(task, assignedAgent) {
+    const description = String(task?.description || task?.name || '').trim();
+    if (!this.isLikelyBrowserAutomationIntent(description)) {
+      return { kind: 'none' };
+    }
+
+    const currentAgent = String(assignedAgent || '').trim();
+    if (!currentAgent) {
+      return { kind: 'none' };
+    }
+
+    const currentProfile = this.getAgentProfile(currentAgent);
+    if (!currentProfile || this.agentSupportsBrowserAutomation(currentProfile)) {
+      return { kind: 'none' };
+    }
+
+    const recommendedAgent = this.findBestBrowserCapableAgent(currentAgent);
+    if (recommendedAgent) {
+      return {
+        kind: 'switch_recommended',
+        recommendedAgent,
+        message: `"${currentAgent}" likely cannot execute browser actions for this task.`
+      };
+    }
+
+    return {
+      kind: 'warning',
+      message: `This looks like a browser task, but "${currentAgent}" likely lacks browser capability in this workspace.`
+    };
+  }
+
+  getAgentCapabilityBadges(agentName) {
+    const profile = this.getAgentProfile(agentName);
+    if (!profile) return [];
+
+    const badges = [];
+    if (this.agentSupportsBrowserAutomation(profile)) {
+      badges.push({ key: 'browser', label: 'Browser' });
+    }
+    if (profile.allowWebSearch) {
+      badges.push({ key: 'web', label: 'Web' });
+    }
+    if ((profile.mcpServers || []).length > 0) {
+      badges.push({ key: 'mcp', label: 'MCP' });
+    }
+    if ((profile.enabledPlugins || []).length > 0) {
+      badges.push({ key: 'tools', label: 'Tools' });
+    }
+
+    return badges.slice(0, 4);
+  }
+
+  renderAgentCapabilityBadges(agentName) {
+    const badges = this.getAgentCapabilityBadges(agentName);
+    if (!badges.length) return '';
+
+    const chips = badges
+      .map((badge) => `<span class="workspace-detail-capability-chip ${this.escapeHtml(badge.key)}">${this.escapeHtml(badge.label)}</span>`)
+      .join('');
+
+    return `<span class="workspace-detail-agent-capabilities">${chips}</span>`;
+  }
+
+  getWorkspaceFallbackAgent(options = {}) {
+    const candidates = this.getWorkspaceAgentNames();
+    if (candidates.length === 0) return '';
+
+    if (options.preferBrowser === true) {
+      const browserCandidate = candidates.find((name) => this.agentSupportsBrowserAutomation(this.getAgentProfile(name)));
+      if (browserCandidate) {
+        return browserCandidate;
+      }
+    }
+
+    return candidates[0];
+  }
+
+  async assignTaskToAgent(taskId, agentName) {
+    const response = await fetch(`/api/orchestration/tasks/${encodeURIComponent(taskId)}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ to: agentName })
+    });
+    if (!response.ok) {
+      const text = await response.text();
+      throw new Error(text || 'Failed to assign task');
+    }
+  }
+
+  async executeTask(taskId) {
+    await this.loadAgentCatalog();
+
+    const task = this.tasks.find((item) => item.id === taskId);
+    if (!task) return;
+
+    const subtasks = this.getSubtasksForParent(taskId);
+    const isParent = subtasks.length > 0;
+    const isBrowserIntent = !isParent && this.isLikelyBrowserAutomationIntent(task.description || task.name || '');
+
+    if (isParent) {
+      const hasUnassigned = subtasks.some((subtask) => !subtask.to || subtask.to === 'unassigned');
+      if (hasUnassigned) {
+        if (window.Toast) window.Toast.error('Assign agents to all subtasks before executing this workflow.');
+        return;
+      }
+      const hasRunning = subtasks.some((subtask) => subtask.status === 'in_progress');
+      if (hasRunning) {
+        if (window.Toast) window.Toast.error('A subtask is already running.');
+        return;
+      }
+    } else if (task.status === 'in_progress') {
+      if (window.Toast) window.Toast.error('This task is already running.');
+      return;
+    }
+
+    let assignedAgent = task.to && task.to !== 'unassigned' ? task.to : '';
+    if (!isParent && !assignedAgent) {
+      const fallbackAgent = this.getWorkspaceFallbackAgent({ preferBrowser: isBrowserIntent });
+      if (!fallbackAgent) {
+        if (window.Toast) window.Toast.error('No agent is available in this workspace. Add an agent or assign this task first.');
+        return;
+      }
+
+      const assignAndRun = confirm(`This task is unassigned. Assign it to "${fallbackAgent}" and execute now?`);
+      if (!assignAndRun) return;
+
+      try {
+        await this.assignTaskToAgent(taskId, fallbackAgent);
+        assignedAgent = fallbackAgent;
+        task.to = fallbackAgent;
+      } catch (error) {
+        console.error('Failed to auto-assign task before execution:', error);
+        if (window.Toast) window.Toast.error('Failed to assign task before execution');
+        return;
+      }
+    }
+
+    let preflightWarning = '';
+    if (!isParent) {
+      const preflight = this.getTaskExecutionPreflight(task, assignedAgent);
+      if (preflight.kind === 'switch_recommended' && preflight.recommendedAgent) {
+        const switchNow = confirm(`${preflight.message}\n\nRecommended: switch to "${preflight.recommendedAgent}" before execution. Switch now?`);
+        if (switchNow) {
+          try {
+            await this.assignTaskToAgent(taskId, preflight.recommendedAgent);
+            assignedAgent = preflight.recommendedAgent;
+            task.to = preflight.recommendedAgent;
+          } catch (error) {
+            console.error('Failed to switch task to recommended agent:', error);
+            if (window.Toast) window.Toast.error('Failed to switch to recommended agent');
+            return;
+          }
+        } else {
+          preflightWarning = `${preflight.message} Continuing may trigger a pause for user input.`;
+        }
+      } else if (preflight.kind === 'warning') {
+        preflightWarning = preflight.message;
+      }
+    }
+
+    const baseConfirmMessage = isParent
+      ? `Execute this workflow (${subtasks.length} step${subtasks.length === 1 ? '' : 's'}) now?`
+      : `Execute this task${assignedAgent ? ` with "${assignedAgent}"` : ''} now?`;
+    const confirmMessage = preflightWarning ? `${preflightWarning}\n\n${baseConfirmMessage}` : baseConfirmMessage;
+    if (!confirm(confirmMessage)) return;
+
+    try {
+      const response = await fetch('/api/orchestration/tasks/execute', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ task_id: taskId })
+      });
+      if (!response.ok) {
+        const text = await response.text();
+        throw new Error(text || 'Failed to execute task');
+      }
+
+      if (window.Toast) window.Toast.success('Task started');
+      await this.loadTasks();
+      this.pollTaskCompletion(taskId);
+    } catch (error) {
+      console.error('Failed to execute task:', error);
+      if (window.Toast) window.Toast.error('Failed to execute task');
+    }
+  }
+
+  async pollTaskCompletion(taskId, maxAttempts = 36, intervalMs = 5000) {
+    let attempts = 0;
+
+    const poll = async () => {
+      attempts += 1;
+      if (attempts > maxAttempts) return;
+
+      try {
+        const response = await fetch(`/api/orchestration/tasks?id=${encodeURIComponent(taskId)}`);
+        if (!response.ok) {
+          setTimeout(poll, intervalMs);
+          return;
+        }
+
+        const task = await response.json();
+        const status = task && task.status;
+        if (status === 'completed' || status === 'failed' || status === 'cancelled' || status === 'timeout') {
+          await this.loadTasks();
+          return;
+        }
+      } catch (error) {
+        console.error('Failed to poll task status:', error);
+      }
+
+      setTimeout(poll, intervalMs);
+    };
+
+    setTimeout(poll, intervalMs);
   }
 
   /**
@@ -781,24 +1646,18 @@ export class WorkspaceDetailPage {
       return this.agentOptions;
     }
 
-    const options = [{ label: 'Unassigned', value: '' }];
-    try {
-      const response = await fetch('/api/agents/dashboard/list');
-      if (response.ok) {
-        const data = await response.json();
-        const agents = data.agents || [];
-        agents.forEach((agent) => {
-          if (!agent || !agent.name) return;
-          const nodeId = `${agent.name}-node-1`;
-          options.push({ label: agent.name, value: `node:${nodeId}` });
-        });
-      }
-    } catch (error) {
-      console.error('Failed to load agents:', error);
+    await this.loadAgentCatalog();
+    if (Array.isArray(this.agentOptions) && this.agentOptions.length > 0) {
+      return this.agentOptions;
     }
 
+    const options = [{ label: 'Unassigned', value: '' }];
+    this.getWorkspaceAgentNames().forEach((name) => {
+      const nodeId = `${name}-node-1`;
+      options.push({ label: name, value: `node:${nodeId}` });
+    });
     this.agentOptions = options;
-    return options;
+    return this.agentOptions;
   }
 
   getKanbanLabels(task) {
@@ -2118,7 +2977,29 @@ export class WorkspaceDetailPage {
       case 'task_created':
       case 'task_updated':
       case 'task_deleted':
+      case 'task.created':
+      case 'task.assigned':
+      case 'task.started':
+      case 'task.completed':
+      case 'task.failed':
+      case 'task.deleted':
         this.loadTasks();
+        break;
+      case 'task.blocked': {
+        this.loadTasks();
+        const payload = event?.data?.data || event?.data || {};
+        const taskId = payload.task_id || event?.data?.task_id;
+        if (taskId) {
+          this.openTaskAssistModal(taskId, payload);
+        }
+        break;
+      }
+      case 'task.resumed':
+        this.loadTasks();
+        if (this.elements.taskAssistModal && window.bootstrap) {
+          const modal = bootstrap.Modal.getInstance(this.elements.taskAssistModal);
+          modal?.hide();
+        }
         break;
       case 'session_created':
       case 'session_updated':
@@ -2363,6 +3244,9 @@ export class WorkspaceDetailPage {
       const session = await response.json();
       await this.loadSessions();
       this.openSession(session.id);
+      if (message && typeof window.sendMessageToChat === 'function') {
+        setTimeout(() => window.sendMessageToChat(message), 150);
+      }
     } catch (error) {
       console.error('Failed to create session:', error);
       if (window.Toast) window.Toast.error('Failed to create chat');
@@ -2570,6 +3454,21 @@ export class WorkspaceDetailPage {
       }
     } finally {
       this.updateCopyNotesButtonState(false);
+    }
+  }
+
+  async copyCurrentTaskResult() {
+    if (!this.currentTaskResultText) {
+      if (window.Toast) window.Toast.info('No result to copy.');
+      return;
+    }
+
+    try {
+      await this.writeClipboardText(this.currentTaskResultText);
+      if (window.Toast) window.Toast.success('Result copied to clipboard');
+    } catch (error) {
+      console.error('Failed to copy task result:', error);
+      if (window.Toast) window.Toast.error('Failed to copy result');
     }
   }
 

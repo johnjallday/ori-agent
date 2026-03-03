@@ -30,10 +30,12 @@ type AgentListItem struct {
 	Name           string                 `json:"name"`
 	Type           string                 `json:"type"`
 	Role           types.AgentRole        `json:"role"`
+	Capabilities   []string               `json:"capabilities,omitempty"`
 	Status         types.AgentStatus      `json:"status"`
 	Statistics     *types.AgentStatistics `json:"statistics,omitempty"`
 	Metadata       *types.AgentMetadata   `json:"metadata,omitempty"`
 	Evolution      *types.AgentEvolution  `json:"evolution,omitempty"`
+	AllowWebSearch bool                   `json:"allow_web_search"`
 	EnabledPlugins []string               `json:"enabled_plugins"`
 	MCPServers     []string               `json:"mcp_servers,omitempty"`
 	Model          string                 `json:"model"`
@@ -122,10 +124,12 @@ func (h *DashboardHandler) ListAgentsWithStats(w http.ResponseWriter, r *http.Re
 			Name:           name,
 			Type:           ag.Type,
 			Role:           ag.Role,
+			Capabilities:   append([]string{}, ag.Capabilities...),
 			Status:         ag.Status,
 			Statistics:     ag.Statistics,
 			Metadata:       ag.Metadata,
 			Evolution:      cloneAgentEvolution(ag),
+			AllowWebSearch: ag.Settings.IsWebSearchAllowed(),
 			EnabledPlugins: enabledPlugins,
 			MCPServers:     append([]string{}, ag.MCPServers...),
 			Model:          ag.Settings.Model,

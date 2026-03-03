@@ -6,7 +6,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
+	"net/url"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -421,6 +423,29 @@ func (h *Handler) tryHandleUtilityDirect(
 		rawResult, err = ExecuteToolWithFiles(toolCtx, tool, decision.ToolName, toolArgs, nil)
 		toolCancel()
 	}
+	if err != nil && strings.EqualFold(strings.TrimSpace(decision.ToolName), "browser") {
+		if openURL, canRecover := extractBrowserOpenURLFromArgs(toolArgs); canRecover && isTransientBrowserNavigationError(err) {
+			logger.Warn("Browser navigation hit transient context error; retrying once", logger.Fields{
+				"tool": decision.ToolName,
+				"url":  openURL,
+				"err":  err.Error(),
+			})
+			retryCtx, retryCancel := context.WithTimeout(baseCtx, ToolExecutionTimeout)
+			retryResult, retryErr := ExecuteToolWithFiles(retryCtx, tool, decision.ToolName, toolArgs, nil)
+			retryCancel()
+			if retryErr == nil {
+				rawResult = retryResult
+				err = nil
+			} else {
+				if recovered, recoveredResult := maybeRecoverBrowserNavigationResult(decision.ToolName, toolArgs, retryErr); recovered {
+					rawResult = recoveredResult
+					err = nil
+				} else {
+					err = retryErr
+				}
+			}
+		}
+	}
 
 	duration := time.Since(start)
 	h.recordToolCallStats(decision.ToolName, duration, err)
@@ -693,6 +718,94 @@ func adaptBrowserToolArgsForDefinition(definitionName, rawArgs string) (string, 
 	return string(payload), nil
 }
 
+func extractBrowserOpenURLFromArgs(rawArgs string) (string, bool) {
+	trimmed := strings.TrimSpace(rawArgs)
+	if trimmed == "" {
+		return "", false
+	}
+
+	var req BrowserRequest
+	if err := json.Unmarshal([]byte(trimmed), &req); err == nil {
+		action := strings.ToLower(strings.TrimSpace(req.Action))
+		if action == "" {
+			action = "open_url"
+		}
+		urlValue := strings.TrimSpace(req.URL)
+		if action == "open_url" && urlValue != "" {
+			return urlValue, true
+		}
+	}
+
+	var direct struct {
+		Action string `json:"action"`
+		URL    string `json:"url"`
+	}
+	if err := json.Unmarshal([]byte(trimmed), &direct); err != nil {
+		return "", false
+	}
+	action := strings.ToLower(strings.TrimSpace(direct.Action))
+	if action == "" {
+		action = "open_url"
+	}
+	urlValue := strings.TrimSpace(direct.URL)
+	if action != "open_url" || urlValue == "" {
+		return "", false
+	}
+	return urlValue, true
+}
+
+func isTransientBrowserNavigationError(err error) bool {
+	if err == nil {
+		return false
+	}
+	text := strings.ToLower(strings.TrimSpace(err.Error()))
+	if text == "" {
+		return false
+	}
+	markers := []string{
+		"execution context was destroyed",
+		"most likely because of a navigation",
+		"cannot find context with specified id",
+		"navigating frame was detached",
+	}
+	for _, marker := range markers {
+		if strings.Contains(text, marker) {
+			return true
+		}
+	}
+	return false
+}
+
+func maybeRecoverBrowserNavigationResult(toolName, toolArgs string, callErr error) (bool, string) {
+	if !strings.EqualFold(strings.TrimSpace(toolName), "browser") {
+		return false, ""
+	}
+	if !isTransientBrowserNavigationError(callErr) {
+		return false, ""
+	}
+	openURL, ok := extractBrowserOpenURLFromArgs(toolArgs)
+	if !ok {
+		return false, ""
+	}
+
+	logger.Warn("Recovering browser open_url as successful after transient navigation context error", logger.Fields{
+		"tool": toolName,
+		"url":  openURL,
+		"err":  callErr.Error(),
+	})
+
+	result := BrowserResponse{
+		Action:  "open_url",
+		Success: true,
+		Result:  fmt.Sprintf("Opened %s. Navigation completed, but the browser connector reported a transient context reset.", openURL),
+	}
+	encoded, err := json.Marshal(result)
+	if err != nil {
+		return false, ""
+	}
+	return true, string(encoded)
+}
+
 func shouldPreferMCPToolOverUtility(toolName string) bool {
 	switch strings.ToLower(strings.TrimSpace(toolName)) {
 	case "browser", "web_search", "web_fetch":
@@ -786,15 +899,23 @@ type UploadedFile struct {
 // ChatHandler handles chat requests
 func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
+	if !orihttp.RequireMethod(w, r, http.MethodPost) {
+		return
+	}
+	if !isTrustedChatRequestSource(r) {
+		orihttp.Forbidden(w, "Request origin not allowed")
+		return
+	}
 
 	var req struct {
-		Question             string         `json:"question"`
-		AgentName            string         `json:"agent_name,omitempty"` // Allow specifying target agent
-		Files                []UploadedFile `json:"files,omitempty"`
-		MultiAgentMode       string         `json:"multi_agent_mode,omitempty"`
-		MultiAgentThreshold  float64        `json:"multi_agent_threshold,omitempty"`
-		PlanBeforeAction     bool           `json:"plan_before_action,omitempty"`
-		ApprovedActionPlanID string         `json:"approved_action_plan_id,omitempty"`
+		Question             string            `json:"question"`
+		AgentName            string            `json:"agent_name,omitempty"` // Allow specifying target agent
+		Files                []UploadedFile    `json:"files,omitempty"`
+		RouteContext         *chatRouteContext `json:"route_context,omitempty"`
+		MultiAgentMode       string            `json:"multi_agent_mode,omitempty"`
+		MultiAgentThreshold  float64           `json:"multi_agent_threshold,omitempty"`
+		PlanBeforeAction     bool              `json:"plan_before_action,omitempty"`
+		ApprovedActionPlanID string            `json:"approved_action_plan_id,omitempty"`
 	}
 	if !orihttp.ParseJSONBody(w, r, &req) {
 		return
@@ -806,6 +927,8 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	originalQuery := q
 	approvedActionPlanID := strings.TrimSpace(req.ApprovedActionPlanID)
+	normalizedRouteContext := normalizeChatRouteContext(req.RouteContext)
+	runtimeSystemPrompt := buildRouteContextSystemPrompt(normalizedRouteContext)
 
 	// Natural language app launch shortcut:
 	// "open safari" -> "/openapp safari"
@@ -1458,14 +1581,14 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 
 	// Check if this is a Claude Code provider - route to Claude Code handler
 	if strings.EqualFold(ag.Settings.Provider, "claude_code") && h.llmFactory != nil {
-		h.handleClaudeCodeChat(w, r, ag, q, current, base, llmImages, plannerDecision)
+		h.handleClaudeCodeChat(w, r, ag, q, current, base, llmImages, plannerDecision, runtimeSystemPrompt)
 		return
 	}
 
 	// Check if this is a Claude model - if so, use provider system
 	if (strings.HasPrefix(ag.Settings.Model, "claude-") || strings.EqualFold(ag.Settings.Provider, "claude") || strings.EqualFold(ag.Settings.Provider, "anthropic")) && h.llmFactory != nil {
 		// Use Claude provider
-		h.handleClaudeChat(w, r, ag, q, tools, current, base, fileAttachments, llmImages, plannerDecision)
+		h.handleClaudeChat(w, r, ag, q, tools, current, base, fileAttachments, llmImages, plannerDecision, runtimeSystemPrompt)
 		return
 	}
 
@@ -1475,7 +1598,7 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 			if ollamaProv, ok := ollamaProvider.(*llm.OllamaProvider); ok {
 				if ollamaProv.HasModel(ag.Settings.Model) {
 					logger.Info("Model found in Ollama, routing to Ollama provider", logger.Fields{"model": ag.Settings.Model})
-					h.handleOllamaChat(w, r, ag, q, tools, current, base, fileAttachments, llmImages, plannerDecision)
+					h.handleOllamaChat(w, r, ag, q, tools, current, base, fileAttachments, llmImages, plannerDecision, runtimeSystemPrompt)
 					return
 				}
 			}
@@ -1484,7 +1607,13 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 
 	// Check if this is a Gemini model or provider
 	if strings.HasPrefix(strings.ToLower(ag.Settings.Model), "gemini-") || strings.EqualFold(ag.Settings.Provider, "gemini") {
-		h.handleGeminiChat(w, r, ag, q, tools, current, base, fileAttachments, llmImages, plannerDecision)
+		h.handleGeminiChat(w, r, ag, q, tools, current, base, fileAttachments, llmImages, plannerDecision, runtimeSystemPrompt)
+		return
+	}
+
+	// Route Codex provider/model through Codex CLI provider path (no OpenAI API key required).
+	if isCodexProviderOrModel(ag.Settings.Provider, ag.Settings.Model) && h.llmFactory != nil {
+		h.handleCodexChat(w, r, ag, q, current, base, llmImages, plannerDecision, runtimeSystemPrompt)
 		return
 	}
 
@@ -1497,7 +1626,7 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Handle OpenAI models
-	h.handleOpenAIChat(w, r, ag, q, tools, current, base, fileAttachments, agentClient, plannerDecision)
+	h.handleOpenAIChat(w, r, ag, q, tools, current, base, fileAttachments, agentClient, plannerDecision, runtimeSystemPrompt)
 }
 
 // isImageMimeType checks if a MIME type represents an image
@@ -1508,6 +1637,88 @@ func isImageMimeType(mimeType string) bool {
 	default:
 		return false
 	}
+}
+
+func isTrustedChatRequestSource(r *http.Request) bool {
+	if r == nil {
+		return false
+	}
+
+	origin := strings.TrimSpace(r.Header.Get("Origin"))
+	referer := strings.TrimSpace(r.Header.Get("Referer"))
+	if origin == "" && referer == "" {
+		// Non-browser clients (CLI/tests) may omit browser source headers.
+		return true
+	}
+
+	requestHost, requestPort := splitHostPortForSourceCheck(r.Host)
+	if requestHost == "" {
+		return false
+	}
+
+	if origin != "" && !sourceURLMatchesRequestHost(origin, requestHost, requestPort) {
+		return false
+	}
+	if referer != "" && !sourceURLMatchesRequestHost(referer, requestHost, requestPort) {
+		return false
+	}
+	return true
+}
+
+func sourceURLMatchesRequestHost(rawSourceURL, requestHost, requestPort string) bool {
+	parsed, err := url.Parse(strings.TrimSpace(rawSourceURL))
+	if err != nil {
+		return false
+	}
+
+	sourceHost, sourcePort := splitHostPortForSourceCheck(parsed.Host)
+	if sourceHost == "" {
+		return false
+	}
+
+	sameHost := strings.EqualFold(sourceHost, requestHost)
+	sameLoopback := isLoopbackHost(sourceHost) && isLoopbackHost(requestHost)
+	if !sameHost && !sameLoopback {
+		return false
+	}
+
+	// Only enforce strict port equality when both sides provide explicit ports.
+	if sourcePort != "" && requestPort != "" && sourcePort != requestPort {
+		return false
+	}
+	// If request host omits a port, only allow default browser ports from source.
+	if sourcePort != "" && requestPort == "" && sourcePort != "80" && sourcePort != "443" {
+		return false
+	}
+	return true
+}
+
+func splitHostPortForSourceCheck(rawHost string) (string, string) {
+	host := strings.TrimSpace(rawHost)
+	if host == "" {
+		return "", ""
+	}
+	u := &url.URL{Host: host}
+	return strings.ToLower(strings.TrimSpace(u.Hostname())), strings.TrimSpace(u.Port())
+}
+
+func isLoopbackHost(host string) bool {
+	candidate := strings.ToLower(strings.TrimSpace(host))
+	if candidate == "" {
+		return false
+	}
+	if candidate == "localhost" {
+		return true
+	}
+	ip := net.ParseIP(candidate)
+	return ip != nil && ip.IsLoopback()
+}
+
+func isCodexProviderOrModel(provider, model string) bool {
+	if strings.EqualFold(strings.TrimSpace(provider), "codex") {
+		return true
+	}
+	return strings.Contains(strings.ToLower(strings.TrimSpace(model)), "codex")
 }
 
 func isParseableDocument(filename string) bool {

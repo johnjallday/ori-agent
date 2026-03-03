@@ -1011,6 +1011,122 @@
   outline-offset: 2px;
 }
 
+.workspace-setup-card {
+  display: none;
+  border: 1px solid var(--border-color);
+  border-radius: 10px;
+  padding: 10px;
+  background: rgba(255, 255, 255, 0.03);
+}
+
+body.workspace-page .workspace-setup-card {
+  display: block;
+}
+
+.workspace-setup-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.workspace-setup-title {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.workspace-setup-help {
+  margin: 4px 0 0;
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+
+.workspace-setup-controls {
+  margin-top: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.workspace-setup-section {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.workspace-setup-label {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-muted);
+}
+
+.workspace-setup-templates {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.workspace-setup-template {
+  border: 1px solid var(--border-color);
+  border-radius: 999px;
+  padding: 3px 10px;
+  background: var(--bg-secondary);
+  color: var(--text-secondary);
+  font-size: 12px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.workspace-setup-template:hover {
+  color: var(--text-primary);
+  border-color: var(--accent-primary, #3b82f6);
+}
+
+.workspace-setup-template.is-active {
+  color: #fff;
+  border-color: var(--accent-primary, #3b82f6);
+  background: var(--accent-primary, #3b82f6);
+}
+
+.workspace-setup-options {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 4px;
+}
+
+.workspace-setup-option {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.workspace-setup-option input[type="checkbox"] {
+  margin-top: 0;
+}
+
+.workspace-setup-preview {
+  border: 1px dashed var(--border-color);
+  border-radius: 8px;
+  padding: 8px;
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.workspace-setup-preview-list {
+  margin: 6px 0 0;
+  padding-left: 16px;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.workspace-setup-preview-list li + li {
+  margin-top: 2px;
+}
+
 /* Main content adjustment when session sidebar is visible */
 @media (min-width: 992px) {
   /* When session sidebar is visible (not collapsed), adjust main content */

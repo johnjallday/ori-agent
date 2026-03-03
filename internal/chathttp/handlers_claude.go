@@ -16,7 +16,7 @@ import (
 )
 
 // handleClaudeChat handles chat requests for Claude models using the provider system
-func (h *Handler) handleClaudeChat(w http.ResponseWriter, r *http.Request, ag *agent.Agent, userMessage string, tools []llm.Tool, agentName string, baseCtx context.Context, files []pluginapi.FileAttachment, images []llm.ImageAttachment, plannerDecision *types.PlannerDecision) {
+func (h *Handler) handleClaudeChat(w http.ResponseWriter, r *http.Request, ag *agent.Agent, userMessage string, tools []llm.Tool, agentName string, baseCtx context.Context, files []pluginapi.FileAttachment, images []llm.ImageAttachment, plannerDecision *types.PlannerDecision, runtimeSystemPrompt string) {
 	sessionID := h.getSessionID(r)
 	ctx, cancel := context.WithTimeout(baseCtx, ChatRequestTimeout)
 	defer cancel()
@@ -30,9 +30,12 @@ func (h *Handler) handleClaudeChat(w http.ResponseWriter, r *http.Request, ag *a
 
 	// Build message list
 	var messages []llm.Message
-	systemPrompt := h.buildSystemPromptWithSkills(
-		ag, agentName,
-		"You are a helpful assistant with access to tools. Use tools when they provide a more accurate answer.",
+	systemPrompt := composeRuntimeSystemPrompt(
+		h.buildSystemPromptWithSkills(
+			ag, agentName,
+			"You are a helpful assistant with access to tools. Use tools when they provide a more accurate answer.",
+		),
+		runtimeSystemPrompt,
 	)
 	messages = append(messages, llm.NewSystemMessage(systemPrompt))
 

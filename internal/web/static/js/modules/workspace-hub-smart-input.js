@@ -710,6 +710,34 @@
     // Handle slash commands
     const lowerInput = input.toLowerCase();
 
+    if (window.WorkspaceInputRouter &&
+        typeof window.WorkspaceInputRouter.isAskCommand === 'function' &&
+        window.WorkspaceInputRouter.isAskCommand(input)) {
+      setBusy(true, 'Routing with Ask Ori...');
+      showProgress('analyze', {
+        headline: 'Ask Ori routing',
+        message: 'Analyzing your request.'
+      });
+
+      try {
+        await window.WorkspaceInputRouter.dispatchToAskOri(input, { workspaceId: state.selectedId });
+        clearField();
+        resetPrompt();
+        setBusy(false);
+        setStatus('');
+      } catch (error) {
+        console.error('Ask Ori routing failed:', error);
+        setBusy(false);
+        setStatus(error.message || 'Failed to route with Ask Ori', { busy: false });
+        if (window.Toast) {
+          window.Toast.error(error.message || 'Failed to route with Ask Ori');
+        }
+      } finally {
+        hideProgress();
+      }
+      return;
+    }
+
     if (lowerInput.startsWith('/note ') || lowerInput === '/note') {
       const noteContent = input.slice(6).trim();
       if (!noteContent) {
@@ -756,6 +784,25 @@
       classification = await classifyInput(input);
     } catch (error) {
       console.error('Smart input classification failed:', error);
+      if (window.WorkspaceInputRouter &&
+          typeof window.WorkspaceInputRouter.canUseAskOri === 'function' &&
+          window.WorkspaceInputRouter.canUseAskOri()) {
+        try {
+          updateProgress('decide', {
+            headline: 'Escalating to Ask Ori',
+            message: 'Smart classification unavailable, using full routing.'
+          });
+          await window.WorkspaceInputRouter.dispatchToAskOri(`/ask ${input}`, { workspaceId: state.selectedId });
+          clearField();
+          resetPrompt();
+          setBusy(false);
+          setStatus('');
+          hideProgress();
+          return;
+        } catch (askOriError) {
+          console.error('Ask Ori fallback failed:', askOriError);
+        }
+      }
       setBusy(false);
       hideProgress();
       showPrompt({

@@ -863,6 +863,12 @@ func (th *TaskHandler) TasksPathHandler(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
+	// Check if this is an /assist endpoint
+	if strings.HasSuffix(path, "/assist") {
+		th.handleAssistTask(w, r)
+		return
+	}
+
 	// Route based on method
 	switch r.Method {
 	case http.MethodGet:

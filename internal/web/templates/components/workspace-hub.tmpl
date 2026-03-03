@@ -25,80 +25,122 @@
           </button>
         </div>
       </div>
-      <section class="launcher-overview" id="launcherTaskOverview" aria-live="polite">
-        <div class="launcher-overview-header">
-          <div>
-            <h3 class="launcher-overview-title">All Workspaces Task Overview</h3>
-            <p class="launcher-overview-subtitle">What still needs to be done across all workspaces.</p>
-          </div>
-          <div class="launcher-overview-header-actions">
-            <span class="launcher-overview-updated" id="launcherOverviewUpdatedAt">Loading...</span>
-            <button id="launcherOverviewToggleBtn" class="modern-btn modern-btn-secondary modern-btn-sm" type="button" aria-expanded="false" aria-controls="launcherOverviewDetails">
-              Show Details
+      <div class="launcher-tabs" role="tablist" aria-label="Launcher views">
+        <button
+          id="launcherTabWorkspaces"
+          class="modern-btn modern-btn-secondary launcher-tab-btn is-active"
+          type="button"
+          role="tab"
+          aria-selected="true"
+          aria-controls="launcherWorkspacesPanel">
+          Workspaces
+        </button>
+        <button
+          id="launcherTabSummary"
+          class="modern-btn modern-btn-secondary launcher-tab-btn"
+          type="button"
+          role="tab"
+          aria-selected="false"
+          aria-controls="launcherSummaryPanel">
+          Summary
+        </button>
+      </div>
+
+      <section id="launcherWorkspacesPanel" class="launcher-tab-panel" role="tabpanel" aria-labelledby="launcherTabWorkspaces">
+        <!-- Selection Bar (shows only in selection mode) -->
+        <div id="launcherSelectionBar" class="launcher-selection-bar" hidden>
+          <span id="launcherSelectionCount" class="launcher-selection-count">0 selected</span>
+          <div class="launcher-selection-actions">
+            <button id="launcherGroupSelectedBtn" class="modern-btn modern-btn-primary modern-btn-sm" type="button" disabled>
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" class="me-1" aria-hidden="true">
+                <path d="M10,4H4C2.89,4 2,4.89 2,6V18A2,2 0 0,0 4,20H20A2,2 0 0,0 22,18V8C22,6.89 21.1,6 20,6H12L10,4Z"/>
+              </svg>
+              Group
             </button>
+            <button id="launcherDeleteSelectedBtn" class="modern-btn modern-btn-danger modern-btn-sm" type="button" disabled>
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" class="me-1" aria-hidden="true">
+                <path d="M19,4H15.5L14.5,3H9.5L8.5,4H5V6H19M6,19A2,2 0 0,0 8,21H16A2,2 0 0,0 18,19V7H6V19Z"/>
+              </svg>
+              Delete
+            </button>
+            <button id="launcherCancelSelectionBtn" class="modern-btn modern-btn-secondary modern-btn-sm" type="button">Cancel</button>
           </div>
         </div>
-        <div class="launcher-overview-metrics">
-          <div class="launcher-overview-metric">
-            <span class="launcher-overview-metric-label">Open</span>
-            <span class="launcher-overview-metric-value" id="launcherOverviewOpen">0</span>
-          </div>
-          <div class="launcher-overview-metric">
-            <span class="launcher-overview-metric-label">Pending</span>
-            <span class="launcher-overview-metric-value" id="launcherOverviewPending">0</span>
-          </div>
-          <div class="launcher-overview-metric">
-            <span class="launcher-overview-metric-label">In Progress</span>
-            <span class="launcher-overview-metric-value" id="launcherOverviewInProgress">0</span>
-          </div>
-          <div class="launcher-overview-metric">
-            <span class="launcher-overview-metric-label">Needs Attention</span>
-            <span class="launcher-overview-metric-value" id="launcherOverviewAttention">0</span>
-          </div>
-          <div class="launcher-overview-metric">
-            <span class="launcher-overview-metric-label">Scheduled</span>
-            <span class="launcher-overview-metric-value" id="launcherOverviewScheduled">0</span>
-          </div>
+        <div id="launcherRootDropZone" class="launcher-root-drop" hidden>
+          Drop here to move to top level
         </div>
-        <div class="launcher-overview-content" id="launcherOverviewDetails" hidden>
-          <div class="launcher-overview-column">
-            <h4 class="launcher-overview-column-title">By Workspace</h4>
-            <div class="launcher-overview-list" id="launcherOverviewByWorkspace">
-              <div class="hub-loading">Loading overview...</div>
-            </div>
-          </div>
-          <div class="launcher-overview-column">
-            <h4 class="launcher-overview-column-title">Aggregate Tasks</h4>
-            <div class="launcher-overview-list" id="launcherOverviewTopTasks">
-              <div class="hub-loading">Loading tasks...</div>
-            </div>
-          </div>
-        </div>
+        <div id="launcherGrid" class="launcher-grid"></div>
+        <div id="launcherEmptyState" class="launcher-empty" style="display: none;">No workspaces yet. Create one to get started.</div>
       </section>
-      <!-- Selection Bar (shows only in selection mode) -->
-      <div id="launcherSelectionBar" class="launcher-selection-bar" hidden>
-        <span id="launcherSelectionCount" class="launcher-selection-count">0 selected</span>
-        <div class="launcher-selection-actions">
-          <button id="launcherGroupSelectedBtn" class="modern-btn modern-btn-primary modern-btn-sm" type="button" disabled>
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" class="me-1" aria-hidden="true">
-              <path d="M10,4H4C2.89,4 2,4.89 2,6V18A2,2 0 0,0 4,20H20A2,2 0 0,0 22,18V8C22,6.89 21.1,6 20,6H12L10,4Z"/>
-            </svg>
-            Group
-          </button>
-          <button id="launcherDeleteSelectedBtn" class="modern-btn modern-btn-danger modern-btn-sm" type="button" disabled>
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" class="me-1" aria-hidden="true">
-              <path d="M19,4H15.5L14.5,3H9.5L8.5,4H5V6H19M6,19A2,2 0 0,0 8,21H16A2,2 0 0,0 18,19V7H6V19Z"/>
-            </svg>
-            Delete
-          </button>
-          <button id="launcherCancelSelectionBtn" class="modern-btn modern-btn-secondary modern-btn-sm" type="button">Cancel</button>
-        </div>
-      </div>
-      <div id="launcherRootDropZone" class="launcher-root-drop" hidden>
-        Drop here to move to top level
-      </div>
-      <div id="launcherGrid" class="launcher-grid"></div>
-      <div id="launcherEmptyState" class="launcher-empty" style="display: none;">No workspaces yet. Create one to get started.</div>
+
+      <section id="launcherSummaryPanel" class="launcher-tab-panel" role="tabpanel" aria-labelledby="launcherTabSummary" hidden>
+        <section class="launcher-overview" id="launcherTaskOverview" aria-live="polite">
+          <div class="launcher-overview-header">
+            <div>
+              <h3 class="launcher-overview-title">All Workspaces Summary</h3>
+              <p class="launcher-overview-subtitle">Track ongoing work, scheduled runs, and open sessions across all workspaces.</p>
+            </div>
+            <div class="launcher-overview-header-actions">
+              <span class="launcher-overview-updated" id="launcherOverviewUpdatedAt">Loading...</span>
+              <button id="launcherOverviewToggleBtn" class="modern-btn modern-btn-secondary modern-btn-sm" type="button" aria-expanded="false" aria-controls="launcherOverviewDetails">
+                Show Details
+              </button>
+            </div>
+          </div>
+          <div class="launcher-overview-metrics">
+            <div class="launcher-overview-metric">
+              <span class="launcher-overview-metric-label">Open</span>
+              <span class="launcher-overview-metric-value" id="launcherOverviewOpen">0</span>
+            </div>
+            <div class="launcher-overview-metric">
+              <span class="launcher-overview-metric-label">Pending</span>
+              <span class="launcher-overview-metric-value" id="launcherOverviewPending">0</span>
+            </div>
+            <div class="launcher-overview-metric">
+              <span class="launcher-overview-metric-label">In Progress</span>
+              <span class="launcher-overview-metric-value" id="launcherOverviewInProgress">0</span>
+            </div>
+            <div class="launcher-overview-metric">
+              <span class="launcher-overview-metric-label">Needs Attention</span>
+              <span class="launcher-overview-metric-value" id="launcherOverviewAttention">0</span>
+            </div>
+            <div class="launcher-overview-metric">
+              <span class="launcher-overview-metric-label">Scheduled</span>
+              <span class="launcher-overview-metric-value" id="launcherOverviewScheduled">0</span>
+            </div>
+            <div class="launcher-overview-metric">
+              <span class="launcher-overview-metric-label">Open Sessions</span>
+              <span class="launcher-overview-metric-value" id="launcherOverviewOpenSessions">0</span>
+            </div>
+          </div>
+          <div class="launcher-overview-content" id="launcherOverviewDetails" hidden>
+            <div class="launcher-overview-column">
+              <h4 class="launcher-overview-column-title">By Workspace</h4>
+              <div class="launcher-overview-list" id="launcherOverviewByWorkspace">
+                <div class="hub-loading">Loading overview...</div>
+              </div>
+            </div>
+            <div class="launcher-overview-column">
+              <h4 class="launcher-overview-column-title">Ongoing Tasks</h4>
+              <div class="launcher-overview-list" id="launcherOverviewTopTasks">
+                <div class="hub-loading">Loading ongoing tasks...</div>
+              </div>
+            </div>
+            <div class="launcher-overview-column">
+              <h4 class="launcher-overview-column-title">Scheduled Tasks</h4>
+              <div class="launcher-overview-list" id="launcherOverviewScheduledTasks">
+                <div class="hub-loading">Loading scheduled tasks...</div>
+              </div>
+            </div>
+            <div class="launcher-overview-column">
+              <h4 class="launcher-overview-column-title">Open Sessions</h4>
+              <div class="launcher-overview-list" id="launcherOverviewOpenSessionsList">
+                <div class="hub-loading">Loading open sessions...</div>
+              </div>
+            </div>
+          </div>
+        </section>
+      </section>
     </div>
   </section>
 
@@ -214,7 +256,7 @@
       </div>
       <div class="hub-smart-input-main">
         <label for="hubSmartInputField" class="visually-hidden">Describe a task or question</label>
-        <input id="hubSmartInputField" class="modern-input" type="text" placeholder="Type a message or use /task, /chat, /note, @file..." autocomplete="off">
+        <input id="hubSmartInputField" class="modern-input" type="text" placeholder="Type a message or use /task, /chat, /note, /ask, @file..." autocomplete="off">
         <button id="hubSmartInputAttachBtn" class="modern-btn modern-btn-secondary hub-smart-input-attach" type="button" title="Attach file" aria-label="Attach file">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
             <path d="M16.5,6.5V17.5A4.5,4.5 0 0,1 12,22A4.5,4.5 0 0,1 7.5,17.5V8A3.5,3.5 0 0,1 11,4.5A3.5,3.5 0 0,1 14.5,8V16.5A2.5,2.5 0 0,1 12,19A2.5,2.5 0 0,1 9.5,16.5V7.5H11V16.5A1,1 0 0,0 12,17.5A1,1 0 0,0 13,16.5V8A2,2 0 0,0 11,6A2,2 0 0,0 9,8V17.5A3.5,3.5 0 0,0 12.5,21A3.5,3.5 0 0,0 16,17.5V6.5H16.5Z"/>

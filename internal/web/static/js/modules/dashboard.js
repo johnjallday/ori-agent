@@ -416,6 +416,93 @@
     };
   }
 
+  function parseWorkspaceSlashCommand(prompt) {
+    var raw = String(prompt || '').trim();
+    if (!raw || raw.charAt(0) !== '/') return null;
+
+    var match = raw.match(/^\/(task|chat|c|note|directory|dir|file|upload)(?:\s+([\s\S]*))?$/i);
+    if (!match) return null;
+
+    var command = normalizeToken(match[1]);
+    if (command === 'c') command = 'chat';
+    if (command === 'dir') command = 'directory';
+    if (command === 'upload') command = 'file';
+
+    return {
+      command: command,
+      content: String(match[2] || '').trim()
+    };
+  }
+
+  function sanitizeWorkspaceCommandContent(content) {
+    var text = String(content || '').trim();
+    if (!text) return '';
+    if ((text.charAt(0) === '"' && text.charAt(text.length - 1) === '"') ||
+        (text.charAt(0) === '\'' && text.charAt(text.length - 1) === '\'') ||
+        (text.charAt(0) === '`' && text.charAt(text.length - 1) === '`')) {
+      text = text.slice(1, -1).trim();
+    }
+    text = text.replace(/^(?:about|for|to|at|from|path|called|named)\s+/i, '').trim();
+    return text;
+  }
+
+  function extractLikelyPathFromText(text) {
+    var value = String(text || '').trim();
+    if (!value) return '';
+
+    var quoted = value.match(/["'`]([^"'`]*(?:\/|\\)[^"'`]*)["'`]/);
+    if (quoted && quoted[1]) return sanitizeWorkspaceCommandContent(quoted[1]);
+
+    var inline = value.match(/(?:^|\s)(~\/[^\s,;]+|\/[^\s,;]+|[A-Za-z]:\\[^\s,;]+)/);
+    if (inline && inline[1]) return sanitizeWorkspaceCommandContent(inline[1]);
+
+    return '';
+  }
+
+  function inferWorkspaceActionCommand(prompt, appLaunchRequest) {
+    var raw = String(prompt || '').trim();
+    if (!raw) return null;
+    if (appLaunchRequest && appLaunchRequest.appName) return null;
+
+    var normalized = normalizeToken(raw);
+    if (!normalized) return null;
+
+    if (/^(?:open\s+chat|start\s+chat|chat\s|continue\s+in\s+chat|talk\s+to\s|discuss\s)/i.test(normalized)) {
+      return { command: 'chat', content: raw };
+    }
+
+    var noteMatch = raw.match(/^(?:add|create|write|save|make)?\s*(?:a\s+)?note(?:\s+(?:about|for|to))?[\s:,-]*(.*)$/i);
+    if (!noteMatch) {
+      noteMatch = raw.match(/^remember(?:\s+to)?[\s:,-]*(.*)$/i);
+    }
+    if (noteMatch) {
+      var noteContent = sanitizeWorkspaceCommandContent(noteMatch[1] || '');
+      if (!noteContent) noteContent = raw;
+      return { command: 'note', content: noteContent };
+    }
+
+    var directoryMatch = raw.match(/^(?:add|attach|link|include|use|set|open)\s+(?:a\s+)?(?:directory|folder)\b[\s:,-]*(.*)$/i);
+    if (!directoryMatch) {
+      directoryMatch = raw.match(/^(?:directory|folder)\b[\s:,-]*(.*)$/i);
+    }
+    if (directoryMatch) {
+      var directoryContent = sanitizeWorkspaceCommandContent(directoryMatch[1] || '');
+      var inferredPath = extractLikelyPathFromText(directoryContent || raw);
+      return { command: 'directory', content: inferredPath || directoryContent };
+    }
+
+    var fileMatch = raw.match(/^(?:add|attach|upload|include)\s+(?:a\s+)?(?:file|document|attachment)\b[\s:,-]*(.*)$/i);
+    if (!fileMatch) {
+      fileMatch = raw.match(/^(?:file|upload)\b[\s:,-]*(.*)$/i);
+    }
+    if (fileMatch) {
+      var fileContent = sanitizeWorkspaceCommandContent(fileMatch[1] || '');
+      return { command: 'file', content: fileContent };
+    }
+
+    return { command: 'task', content: raw };
+  }
+
   function parseAppLaunchRequest(prompt) {
     var text = String(prompt || '').trim();
     if (!text) return null;
@@ -523,26 +610,9 @@
     return Boolean(String(routeContext.workspace_id || '').trim());
   }
 
-  function buildWorkspaceContextDispatchPrefix(routeContext) {
-    if (!hasWorkspaceRouteContext(routeContext)) return '';
-    var workspaceId = String(routeContext.workspace_id || '').trim();
-    var pagePath = String(routeContext.page_path || '').trim() || '/workspaces/' + workspaceId;
-    return [
-      'Workspace context:',
-      '- workspace_id: ' + workspaceId,
-      '- page_path: ' + pagePath,
-      '- origin: ask_ori',
-      ''
-    ].join('\n');
-  }
-
-  function buildEmailDispatchMessage(prompt, routeContext) {
+  function buildEmailDispatchMessage(prompt, _) {
     var userPrompt = String(prompt || '').trim();
     var lines = [];
-    var workspacePrefix = buildWorkspaceContextDispatchPrefix(routeContext);
-    if (workspacePrefix) {
-      lines.push(workspacePrefix);
-    }
     lines.push(
       'Email task:',
       userPrompt,
@@ -561,9 +631,7 @@
       return buildEmailDispatchMessage(prompt, routeContext);
     }
     if (!appLaunchRequest || !appLaunchRequest.appName) {
-      var workspacePrefix = buildWorkspaceContextDispatchPrefix(routeContext);
-      if (!workspacePrefix) return String(prompt || '').trim();
-      return workspacePrefix + String(prompt || '').trim();
+      return String(prompt || '').trim();
     }
     return '/openapp ' + appLaunchRequest.appName;
   }
@@ -648,6 +716,12 @@
     var modal = getHomeAssistantThinkingModalInstance();
     if (!modal) return;
     modal.show();
+  }
+
+  function closeHomeAssistantThinkingModal() {
+    var modal = getHomeAssistantThinkingModalInstance();
+    if (!modal) return;
+    modal.hide();
   }
 
   function syncHomeAssistantThinkingStatus() {
@@ -791,13 +865,14 @@
   function setHomeAssistantBusy(isBusy, busyLabel) {
     homeAssistantState.busy = Boolean(isBusy);
     var els = getHomeAssistantElements();
-    if (!els.sendBtn || !els.input) return;
-    if (!els.sendBtn.dataset.defaultLabel) {
-      els.sendBtn.dataset.defaultLabel = els.sendBtn.textContent || 'Ask';
+    if (els.sendBtn && els.input) {
+      if (!els.sendBtn.dataset.defaultLabel) {
+        els.sendBtn.dataset.defaultLabel = els.sendBtn.textContent || 'Ask';
+      }
+      els.sendBtn.disabled = homeAssistantState.busy;
+      els.input.disabled = homeAssistantState.busy;
+      els.sendBtn.textContent = homeAssistantState.busy ? (busyLabel || 'Working...') : els.sendBtn.dataset.defaultLabel;
     }
-    els.sendBtn.disabled = homeAssistantState.busy;
-    els.input.disabled = homeAssistantState.busy;
-    els.sendBtn.textContent = homeAssistantState.busy ? (busyLabel || 'Working...') : els.sendBtn.dataset.defaultLabel;
     for (var i = 0; i < els.quickButtons.length; i++) {
       els.quickButtons[i].disabled = homeAssistantState.busy;
     }
@@ -809,6 +884,8 @@
     if (els.clearRecentBtn) els.clearRecentBtn.disabled = homeAssistantState.busy;
     if (homeAssistantState.busy) {
       openHomeAssistantThinkingModal();
+    } else {
+      closeHomeAssistantThinkingModal();
     }
     syncHomeAssistantThinkingStatus();
   }
@@ -2479,18 +2556,38 @@
     };
   }
 
+  function normalizeHomeRouteContext(routeContext) {
+    var fallback = buildHomeRouteContext();
+    if (!routeContext || typeof routeContext !== 'object') return fallback;
+
+    var pagePath = String(routeContext.page_path || fallback.page_path || '/').trim() || '/';
+    var sessionId = routeContext.session_id;
+    if (sessionId === undefined && window.sessionManager && window.sessionManager.currentSessionId) {
+      sessionId = window.sessionManager.currentSessionId;
+    }
+
+    return {
+      surface: String(routeContext.surface || fallback.surface || inferHomeRouteSurface(pagePath)).trim() || inferHomeRouteSurface(pagePath),
+      page_path: pagePath,
+      workspace_id: String(routeContext.workspace_id || '').trim(),
+      session_id: String(sessionId || '').trim(),
+      origin: String(routeContext.origin || fallback.origin || 'ask_ori').trim() || 'ask_ori'
+    };
+  }
+
   function routeContextTargetsCurrentWorkspace(routeData, routeContext) {
     var mode = normalizeToken(routeData && routeData.route_mode);
     var target = normalizeToken(routeData && routeData.target_surface);
     return mode === 'workspace_task' && target === 'workspace' && hasWorkspaceRouteContext(routeContext);
   }
 
-  async function routePromptWithBackend(prompt) {
+  async function routePromptWithBackend(prompt, routeContext) {
     if (typeof API === 'undefined' || typeof API.post !== 'function') return null;
     try {
+      var normalizedContext = normalizeHomeRouteContext(routeContext);
       var data = await API.post('/api/home-assistant/route', {
         prompt: prompt,
-        context: buildHomeRouteContext()
+        context: normalizedContext
       });
       if (!data || typeof data.intent !== 'string') return null;
       return data;
@@ -2647,7 +2744,7 @@
     var createButton = document.getElementById('createAgentBtn');
     var form = document.getElementById('addAgentForm');
     if (!modalElement || !createButton || !form || typeof bootstrap === 'undefined' || !bootstrap.Modal) {
-      return null;
+      return { status: 'unavailable', reason: 'modal_prerequisites_missing' };
     }
 
     var nameInput = document.getElementById('agentName');
@@ -2658,7 +2755,7 @@
     var promptInput = document.getElementById('agentSystemPrompt');
     var allowWebSearchInput = document.getElementById('agentAllowWebSearch');
     if (!nameInput || !typeInput || !modelInput || !tempInput || !promptInput) {
-      return null;
+      return { status: 'unavailable', reason: 'modal_fields_missing' };
     }
 
     if (typeof resetBaseAutoConfigState === 'function') {
@@ -2684,6 +2781,7 @@
     }
 
     var modalInstance = bootstrap.Modal.getInstance(modalElement) || new bootstrap.Modal(modalElement);
+    closeHomeAssistantThinkingModal();
     modalInstance.show();
 
     return await new Promise(function (resolve) {
@@ -2691,7 +2789,7 @@
       var submitting = false;
       var originalHtml = createButton.innerHTML;
 
-      function finalize(agentName) {
+      function finalize(result) {
         if (settled) return;
         settled = true;
         createButton.disabled = false;
@@ -2699,11 +2797,11 @@
         createButton.removeEventListener('click', onCreateCapture, true);
         form.removeEventListener('submit', onSubmitCapture, true);
         modalElement.removeEventListener('hidden.bs.modal', onHidden, true);
-        resolve(agentName || null);
+        resolve(result || { status: 'cancelled' });
       }
 
       function onHidden() {
-        finalize(null);
+        finalize({ status: 'cancelled' });
       }
 
       async function submitCreate() {
@@ -2741,7 +2839,7 @@
 
           await API.post('/api/agents', requestBody);
           modalInstance.hide();
-          finalize(name);
+          finalize({ status: 'created', agentName: name });
         } catch (error) {
           dashLog.debug('Modal-confirmed agent creation failed', { error: error && error.message || error });
           if (window.Toast) Toast.error('Failed to create agent: ' + (error && error.message ? error.message : error));
@@ -2884,10 +2982,16 @@
             'I need your input to finalize model selection. Please confirm in the Create Agent modal.');
         }
         setHomeAssistantRoutingSummary('Semi-auto', 'Review and confirm agent details in the modal.');
-        var confirmedSemiAutoAgentName = await confirmAgentCreationWithModal(payload);
-        if (!confirmedSemiAutoAgentName) {
-          appendHomeAssistantMessage('assistant', 'Agent creation canceled. Ask again when you want to continue.');
-          setHomeAssistantRoutingSummary('Agent Creation', 'Canceled by user.');
+        setHomeAssistantBusy(false);
+        var semiAutoConfirmation = await confirmAgentCreationWithModal(payload);
+        if (!semiAutoConfirmation || semiAutoConfirmation.status !== 'created') {
+          if (semiAutoConfirmation && semiAutoConfirmation.status === 'unavailable') {
+            appendHomeAssistantMessage('assistant', 'I could not open the Create Agent modal. Please open Agents and create it manually.');
+            setHomeAssistantRoutingSummary('Agent Creation', 'Create Agent modal was unavailable.');
+          } else {
+            appendHomeAssistantMessage('assistant', 'Agent creation canceled. Ask again when you want to continue.');
+            setHomeAssistantRoutingSummary('Agent Creation', 'Agent creation canceled.');
+          }
           renderHomeAssistantActions([
             {
               label: 'Create Agent',
@@ -2902,15 +3006,22 @@
           ]);
           return;
         }
-        agentName = confirmedSemiAutoAgentName;
+        agentName = semiAutoConfirmation.agentName;
+        setHomeAssistantBusy(true, 'Finalizing...');
       } else if (!payload.model) {
         appendHomeAssistantMessage('assistant',
           'I could not auto-select a model. Please review and confirm in the Create Agent modal.');
         setHomeAssistantRoutingSummary('Agent Creation', 'Model selection needs your confirmation.');
-        var confirmedAgentName = await confirmAgentCreationWithModal(payload);
-        if (!confirmedAgentName) {
-          appendHomeAssistantMessage('assistant', 'Agent creation canceled. Ask again when you want to continue.');
-          setHomeAssistantRoutingSummary('Agent Creation', 'Canceled by user.');
+        setHomeAssistantBusy(false);
+        var confirmation = await confirmAgentCreationWithModal(payload);
+        if (!confirmation || confirmation.status !== 'created') {
+          if (confirmation && confirmation.status === 'unavailable') {
+            appendHomeAssistantMessage('assistant', 'I could not open the Create Agent modal. Please open Agents and create it manually.');
+            setHomeAssistantRoutingSummary('Agent Creation', 'Create Agent modal was unavailable.');
+          } else {
+            appendHomeAssistantMessage('assistant', 'Agent creation canceled. Ask again when you want to continue.');
+            setHomeAssistantRoutingSummary('Agent Creation', 'Agent creation canceled.');
+          }
           renderHomeAssistantActions([
             {
               label: 'Create Agent',
@@ -2925,7 +3036,8 @@
           ]);
           return;
         }
-        agentName = confirmedAgentName;
+        agentName = confirmation.agentName;
+        setHomeAssistantBusy(true, 'Finalizing...');
       } else {
         appendHomeAssistantMessage('assistant', 'Auto-selected model "' + payload.model + '" for "' + agentName + '".');
         await API.post('/api/agents', payload);
@@ -3052,7 +3164,7 @@
     openChatPanel();
     if (typeof window.sendMessageToChat !== 'function') return null;
     await waitForDelay(120);
-    window.sendMessageToChat(prompt);
+    window.sendMessageToChat(prompt, { routeContext: normalizeHomeRouteContext(routeContext) });
     return session;
   }
 
@@ -3134,6 +3246,269 @@
     }
   }
 
+  function extractCreatedSessionId(payload) {
+    if (!payload || typeof payload !== 'object') return '';
+    if (payload.session && payload.session.id) return String(payload.session.id);
+    if (payload.id) return String(payload.id);
+    return '';
+  }
+
+  async function createWorkspaceChatSessionWithMessage(workspaceId, message) {
+    var initialMessage = String(message || '').trim();
+    if (window.workspaceDetail) {
+      if (initialMessage && typeof window.workspaceDetail.createSessionWithMessage === 'function') {
+        await window.workspaceDetail.createSessionWithMessage(initialMessage);
+        return true;
+      }
+      if (!initialMessage && typeof window.workspaceDetail.createNewSession === 'function') {
+        await window.workspaceDetail.createNewSession();
+        return true;
+      }
+    }
+
+    var title = initialMessage ? truncateText(initialMessage, 50) : 'New Chat';
+    var payload = null;
+    if (typeof API !== 'undefined' && typeof API.post === 'function') {
+      payload = await API.post('/api/sessions', { folder_id: workspaceId, title: title });
+    } else {
+      var response = await fetch('/api/sessions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ folder_id: workspaceId, title: title })
+      });
+      if (!response.ok) throw new Error('Failed to create workspace chat');
+      payload = await response.json();
+    }
+
+    var sessionId = extractCreatedSessionId(payload);
+    if (sessionId && window.sessionManager && typeof window.sessionManager.switchToSession === 'function') {
+      await window.sessionManager.switchToSession(sessionId, true);
+    }
+    openChatPanel();
+    if (initialMessage && typeof window.sendMessageToChat === 'function') {
+      await waitForDelay(140);
+      window.sendMessageToChat(initialMessage);
+    }
+    return true;
+  }
+
+  async function handleWorkspaceSlashCommand(commandPayload, routeContext, options) {
+    if (!commandPayload || !commandPayload.command) return false;
+    if (!hasWorkspaceRouteContext(routeContext)) return false;
+
+    var workspaceId = String(routeContext.workspace_id || '').trim();
+    if (!workspaceId) return false;
+
+    var command = String(commandPayload.command).trim();
+    var content = String(commandPayload.content || '').trim();
+    var displayCommand = '/' + command;
+    var isInferredAction = Boolean(options && options.inferred);
+    var commandSummaryTitle = isInferredAction ? 'Workspace Action' : 'Workspace Command';
+
+    setHomeAssistantBusy(true, 'Running Command...');
+    renderHomeAssistantActions([]);
+    setHomeAssistantRoutingSummary(commandSummaryTitle, 'Executing ' + displayCommand + ' in this workspace.');
+
+    try {
+      if (command === 'task') {
+        if (!content) {
+          var taskUsage = 'Usage: /task <task description>';
+          appendHomeAssistantMessage('assistant', taskUsage);
+          setHomeAssistantRoutingSummary('Workspace Command', taskUsage);
+          return true;
+        }
+
+        if (window.workspaceDetail && typeof window.workspaceDetail.createTask === 'function') {
+          await window.workspaceDetail.createTask(content);
+        } else if (typeof API !== 'undefined' && typeof API.post === 'function') {
+          await API.post('/api/orchestration/tasks', {
+            studio_id: workspaceId,
+            description: content,
+            details: '',
+            status: 'pending'
+          });
+        } else {
+          var taskResponse = await fetch('/api/orchestration/tasks', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              studio_id: workspaceId,
+              description: content,
+              details: '',
+              status: 'pending'
+            })
+          });
+          if (!taskResponse.ok) throw new Error('Failed to create task');
+        }
+
+        appendHomeAssistantMessage('assistant', 'Created a task in this workspace.');
+        setHomeAssistantRoutingSummary('Task Created', 'Task added to this workspace.');
+        renderHomeAssistantActions([
+          {
+            label: 'Ask Another Task',
+            variant: 'secondary',
+            onClick: function () { focusHomeAssistantInput(); }
+          }
+        ]);
+        return true;
+      }
+
+      if (command === 'note') {
+        if (!content) {
+          var noteUsage = 'Usage: /note <note content>';
+          appendHomeAssistantMessage('assistant', noteUsage);
+          setHomeAssistantRoutingSummary('Workspace Command', noteUsage);
+          return true;
+        }
+
+        if (window.workspaceDetail && typeof window.workspaceDetail.createNote === 'function') {
+          await window.workspaceDetail.createNote('Quick Note', content);
+        } else if (typeof API !== 'undefined' && typeof API.post === 'function') {
+          await API.post('/api/workspaces/' + encodeURIComponent(workspaceId) + '/notes', {
+            name: 'Quick Note',
+            content: content
+          });
+        } else {
+          var noteResponse = await fetch('/api/workspaces/' + encodeURIComponent(workspaceId) + '/notes', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ name: 'Quick Note', content: content })
+          });
+          if (!noteResponse.ok) throw new Error('Failed to create note');
+        }
+
+        appendHomeAssistantMessage('assistant', 'Created a note in this workspace.');
+        setHomeAssistantRoutingSummary('Note Created', 'Note added to this workspace.');
+        renderHomeAssistantActions([
+          {
+            label: 'Ask Another Task',
+            variant: 'secondary',
+            onClick: function () { focusHomeAssistantInput(); }
+          }
+        ]);
+        return true;
+      }
+
+      if (command === 'chat') {
+        await createWorkspaceChatSessionWithMessage(workspaceId, content);
+        if (content) {
+          appendHomeAssistantMessage('assistant', 'Opened chat and sent your initial message.');
+          setHomeAssistantRoutingSummary('Chat Started', 'Workspace chat opened and message sent.');
+        } else {
+          appendHomeAssistantMessage('assistant', 'Opened a new chat in this workspace.');
+          setHomeAssistantRoutingSummary('Chat Started', 'Workspace chat opened.');
+        }
+        renderHomeAssistantActions([
+          {
+            label: 'Open Chat',
+            variant: 'primary',
+            onClick: function () { openChatPanel(); }
+          },
+          {
+            label: 'Ask Another Task',
+            variant: 'secondary',
+            onClick: function () { focusHomeAssistantInput(); }
+          }
+        ]);
+        return true;
+      }
+
+      if (command === 'directory') {
+        var directoryPath = sanitizeWorkspaceCommandContent(content);
+        if (!directoryPath) {
+          directoryPath = extractLikelyPathFromText(content);
+        }
+
+        if (window.workspaceDetail && typeof window.workspaceDetail.addDirectory === 'function' && directoryPath) {
+          await window.workspaceDetail.addDirectory(directoryPath);
+        } else if (window.workspaceDetail && typeof window.workspaceDetail.showAddDirectoryModal === 'function') {
+          await window.workspaceDetail.showAddDirectoryModal();
+        } else if (directoryPath) {
+          var directorySegments = String(directoryPath).split(/[\\/]/).filter(Boolean);
+          var directoryTitle = directorySegments.length > 0 ? directorySegments[directorySegments.length - 1] : directoryPath;
+          var directoryResponse = await fetch(`/api/studios/${encodeURIComponent(workspaceId)}/attachments`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              type: 'directory',
+              path: directoryPath,
+              title: directoryTitle
+            })
+          });
+          if (!directoryResponse.ok) throw new Error('Failed to add directory');
+        } else {
+          throw new Error('Directory picker unavailable');
+        }
+
+        if (directoryPath) {
+          appendHomeAssistantMessage('assistant', 'Added directory "' + directoryPath + '" to this workspace.');
+          setHomeAssistantRoutingSummary('Directory Added', 'Directory linked to this workspace.');
+        } else {
+          appendHomeAssistantMessage('assistant', 'Opened the folder picker. Select a directory to add it to this workspace.');
+          setHomeAssistantRoutingSummary('Directory Picker', 'Select a folder to add it to this workspace.');
+        }
+        renderHomeAssistantActions([
+          {
+            label: 'Ask Another Task',
+            variant: 'secondary',
+            onClick: function () { focusHomeAssistantInput(); }
+          }
+        ]);
+        return true;
+      }
+
+      if (command === 'file') {
+        if (window.workspaceDetail && typeof window.workspaceDetail.showFileModal === 'function') {
+          window.workspaceDetail.showFileModal();
+        } else if (window.WorkspaceHubFiles && typeof window.WorkspaceHubFiles.openAddFileModal === 'function') {
+          window.WorkspaceHubFiles.openAddFileModal();
+        } else {
+          throw new Error('File upload modal unavailable');
+        }
+
+        if (content) {
+          appendHomeAssistantMessage('assistant', 'Opened the upload modal for "' + content + '". Select the file to attach it to this workspace.');
+        } else {
+          appendHomeAssistantMessage('assistant', 'Opened the upload modal. Select file(s) to attach to this workspace.');
+        }
+        setHomeAssistantRoutingSummary('File Upload', 'File upload modal is ready for this workspace.');
+        renderHomeAssistantActions([
+          {
+            label: 'Ask Another Task',
+            variant: 'secondary',
+            onClick: function () { focusHomeAssistantInput(); }
+          }
+        ]);
+        return true;
+      }
+    } catch (error) {
+      dashLog.debug('Workspace slash command failed', {
+        command: command,
+        workspaceId: workspaceId,
+        error: error && error.message || error
+      });
+      appendHomeAssistantMessage('assistant', 'I could not run ' + displayCommand + ' right now. Please try again.');
+      setHomeAssistantRoutingSummary('Workspace Command Failed', 'Could not execute ' + displayCommand + ' right now.');
+      renderHomeAssistantActions([
+        {
+          label: 'Retry',
+          variant: 'primary',
+          onClick: function () { focusHomeAssistantInput(); }
+        },
+        {
+          label: 'Ask Another Task',
+          variant: 'secondary',
+          onClick: function () { focusHomeAssistantInput(); }
+        }
+      ]);
+      return true;
+    } finally {
+      setHomeAssistantBusy(false);
+    }
+
+    return false;
+  }
+
   function buildWorkspaceNameFromPrompt(prompt) {
     var normalized = normalizeToken(prompt);
     if (!normalized) return 'New Workspace';
@@ -3198,7 +3573,55 @@
     return 'Created from Ask Ori task: "' + text + '"';
   }
 
-  async function createWorkspaceByName(workspaceName, prompt, _) {
+  async function openCreateWorkspaceModalWithSeed(seedPayload) {
+    var modalElement = document.getElementById('addFolderModal');
+    var nameInput = document.getElementById('folderNameInput');
+    var descriptionInput = document.getElementById('folderDescriptionInput');
+    var parentSelect = document.getElementById('folderParentSelect');
+    if (!modalElement || !nameInput || !descriptionInput || typeof bootstrap === 'undefined' || !bootstrap.Modal) {
+      return { status: 'unavailable', reason: 'workspace_modal_prerequisites_missing' };
+    }
+
+    nameInput.value = String(seedPayload && seedPayload.name || '').trim();
+    descriptionInput.value = String(seedPayload && seedPayload.description || '').trim();
+    if (parentSelect) {
+      parentSelect.value = '';
+    }
+    modalElement.dataset.askOriPostCreate = 'open_workspace_dashboard';
+    if (!modalElement.dataset.askOriCleanupBound) {
+      modalElement.addEventListener('hidden.bs.modal', function () {
+        delete modalElement.dataset.askOriPostCreate;
+      }, true);
+      modalElement.dataset.askOriCleanupBound = '1';
+    }
+
+    var colorButtons = modalElement.querySelectorAll('.folder-color-btn');
+    for (var i = 0; i < colorButtons.length; i++) {
+      colorButtons[i].classList.remove('active');
+    }
+    var defaultColorBtn = modalElement.querySelector('.folder-color-btn[data-color=""]');
+    if (defaultColorBtn) {
+      defaultColorBtn.classList.add('active');
+    } else if (colorButtons.length > 0) {
+      colorButtons[0].classList.add('active');
+    }
+
+    closeHomeAssistantThinkingModal();
+    var modalInstance = bootstrap.Modal.getInstance(modalElement) || new bootstrap.Modal(modalElement);
+    modalInstance.show();
+
+    window.setTimeout(function () {
+      if (!nameInput) return;
+      nameInput.focus();
+      if (typeof nameInput.select === 'function') {
+        nameInput.select();
+      }
+    }, 120);
+
+    return { status: 'opened' };
+  }
+
+  async function createWorkspaceByName(workspaceName, prompt) {
     var name = String(workspaceName || '').trim() || 'New Workspace';
     var sourcePrompt = String(prompt || '').trim();
     var payload = {
@@ -3206,37 +3629,30 @@
       description: buildWorkspaceDescriptionFromPrompt(sourcePrompt || ('Create workspace: ' + name))
     };
 
-    setHomeAssistantBusy(true, 'Creating Workspace...');
+    setHomeAssistantBusy(true, 'Preparing Workspace...');
     renderHomeAssistantActions([]);
-    appendHomeAssistantMessage('assistant', 'Creating workspace "' + name + '"...');
-    setHomeAssistantRoutingSummary('Workspace', 'Creating workspace "' + name + '".');
+    appendHomeAssistantMessage('assistant', 'Opening the Create Workspace modal for "' + name + '"...');
+    setHomeAssistantRoutingSummary('Workspace', 'Preparing Create Workspace modal.');
 
     try {
-      var result = null;
-      if (typeof API !== 'undefined' && typeof API.post === 'function') {
-        result = await API.post('/api/workspaces', payload);
-      } else {
-        var response = await fetch('/api/workspaces', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload)
-        });
-        if (!response.ok) throw new Error('Workspace create request failed');
-        result = await response.json();
+      var modalResult = await openCreateWorkspaceModalWithSeed(payload);
+      if (!modalResult || modalResult.status !== 'opened') {
+        throw new Error('Workspace create modal unavailable');
       }
 
-      var folder = result && result.folder ? result.folder : null;
-      var workspaceId = folder && folder.id ? String(folder.id) : '';
-      var createdName = folder && folder.name ? String(folder.name) : name;
-      if (!workspaceId) throw new Error('Workspace create response missing id');
-
-      appendHomeAssistantMessage('assistant', 'Created workspace "' + createdName + '". Opening canvas...');
-      setHomeAssistantRoutingSummary('Workspace Created', '"' + createdName + '" is ready.');
-      window.location.href = '/workspaces/' + encodeURIComponent(workspaceId) + '/canvas';
+      appendHomeAssistantMessage('assistant', 'Create Workspace is ready. Review details and click Create. I will open its Workspace Dashboard next.');
+      setHomeAssistantRoutingSummary('Workspace', 'Review and confirm in the Create Workspace modal.');
+      renderHomeAssistantActions([
+        {
+          label: 'Ask Another Task',
+          variant: 'secondary',
+          onClick: function () { focusHomeAssistantInput(); }
+        }
+      ]);
     } catch (error) {
-      dashLog.debug('Direct workspace creation from Ask Ori failed', { error: error && error.message || error });
-      appendHomeAssistantMessage('assistant', 'I could not create that workspace right now. You can open Workspaces and create it there.');
-      setHomeAssistantRoutingSummary('Workspace Create Failed', 'Could not create workspace automatically.');
+      dashLog.debug('Opening workspace create modal from Ask Ori failed', { error: error && error.message || error });
+      appendHomeAssistantMessage('assistant', 'I could not open the Create Workspace modal right now. You can open Workspaces and create it there.');
+      setHomeAssistantRoutingSummary('Workspace Modal Failed', 'Could not open Create Workspace modal automatically.');
       renderHomeAssistantActions([
         {
           label: 'Open Workspaces',
@@ -3266,71 +3682,36 @@
       description: buildWorkspaceDescriptionFromPrompt(text)
     };
 
-    setHomeAssistantBusy(true, 'Creating Workspace...');
+    setHomeAssistantBusy(true, 'Preparing Workspace...');
     renderHomeAssistantActions([]);
-    appendHomeAssistantMessage('assistant', 'Creating a workspace from this task and opening the canvas...');
-    setHomeAssistantRoutingSummary('Workspace', 'Creating workspace and opening canvas.');
+    appendHomeAssistantMessage('assistant', 'Opening Create Workspace so you can review details first...');
+    setHomeAssistantRoutingSummary('Workspace', 'Preparing Create Workspace modal.');
 
     try {
-      var result = null;
-      if (typeof API !== 'undefined' && typeof API.post === 'function') {
-        result = await API.post('/api/workspaces', payload);
-      } else {
-        var response = await fetch('/api/workspaces', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload)
-        });
-        if (!response.ok) {
-          throw new Error('Workspace create request failed');
+      var modalResult = await openCreateWorkspaceModalWithSeed(payload);
+      if (!modalResult || modalResult.status !== 'opened') {
+        throw new Error('Workspace create modal unavailable');
+      }
+
+      appendHomeAssistantMessage('assistant', 'Create Workspace is ready. Review details and click Create. I will open its Workspace Dashboard next.');
+      setHomeAssistantRoutingSummary('Workspace', 'Review and confirm in the Create Workspace modal.');
+      renderHomeAssistantActions([
+        {
+          label: 'Continue in Chat',
+          variant: 'secondary',
+          disabled: !agentName,
+          onClick: function () { runPendingTaskWithAgent(text, agentName, { appLaunchRequest: appLaunchRequest, routeContext: routeContext }); }
+        },
+        {
+          label: 'Ask Another Task',
+          variant: 'secondary',
+          onClick: function () { focusHomeAssistantInput(); }
         }
-        result = await response.json();
-      }
-
-      var folder = result && result.folder ? result.folder : null;
-      var workspaceId = folder && folder.id ? String(folder.id) : '';
-      var workspaceName = folder && folder.name ? String(folder.name) : payload.name;
-      if (!workspaceId) {
-        throw new Error('Workspace create response missing id');
-      }
-
-      var agentAttached = false;
-      if (agentName) {
-        try {
-          if (typeof API !== 'undefined' && typeof API.post === 'function') {
-            await API.post('/api/workspaces/' + encodeURIComponent(workspaceId) + '/agents', { agent_name: agentName });
-          } else {
-            var addAgentResponse = await fetch('/api/workspaces/' + encodeURIComponent(workspaceId) + '/agents', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ agent_name: agentName })
-            });
-            if (!addAgentResponse.ok) {
-              throw new Error('Workspace agent attach request failed');
-            }
-          }
-          agentAttached = true;
-        } catch (attachError) {
-          dashLog.debug('Workspace created but failed to add agent', {
-            workspaceId: workspaceId,
-            agentName: agentName,
-            error: attachError && attachError.message || attachError
-          });
-        }
-      }
-
-      if (agentName && agentAttached) {
-        appendHomeAssistantMessage('assistant', 'Created workspace "' + workspaceName + '" and added "' + agentName + '". Opening canvas...');
-        setHomeAssistantRoutingSummary('Workspace Created', '"' + workspaceName + '" is ready with "' + agentName + '" attached.');
-      } else {
-        appendHomeAssistantMessage('assistant', 'Created workspace "' + workspaceName + '". Opening canvas...');
-        setHomeAssistantRoutingSummary('Workspace Created', '"' + workspaceName + '" is ready.');
-      }
-      window.location.href = '/workspaces/' + encodeURIComponent(workspaceId) + '/canvas';
+      ]);
     } catch (error) {
-      dashLog.debug('Workspace creation from Ask Ori failed', { error: error && error.message || error });
-      appendHomeAssistantMessage('assistant', 'I could not create that workspace automatically. You can open Workspaces manually or continue in chat.');
-      setHomeAssistantRoutingSummary('Workspace Create Failed', 'Could not create workspace automatically.');
+      dashLog.debug('Opening workspace create modal from Ask Ori failed', { error: error && error.message || error });
+      appendHomeAssistantMessage('assistant', 'I could not open Create Workspace automatically. You can open Workspaces manually or continue in chat.');
+      setHomeAssistantRoutingSummary('Workspace Modal Failed', 'Could not open Create Workspace modal automatically.');
       renderHomeAssistantActions([
         {
           label: 'Open Workspaces',
@@ -3416,14 +3797,15 @@
     }
   }
 
-  async function handleHomeAssistantPrompt(prompt) {
+  async function handleHomeAssistantPrompt(prompt, options) {
     var text = String(prompt || '').trim();
     if (!text) return;
     setHomeAssistantMode('new_task');
     var appLaunchRequest = parseAppLaunchRequest(text);
-    var routeContext = buildHomeRouteContext();
+    var routeContext = normalizeHomeRouteContext(options && options.routeContext);
     var inWorkspaceContext = hasWorkspaceRouteContext(routeContext);
     var directWorkspaceCommand = parseCreateWorkspaceCommand(text);
+    var workspaceSlashCommand = parseWorkspaceSlashCommand(text);
 
     if (homeAssistantState.awaitingCreateConfirmation && isAffirmativeConfirmation(text)) {
       appendHomeAssistantMessage('user', text);
@@ -3457,9 +3839,22 @@
 
     appendHomeAssistantMessage('user', text);
 
+    if (workspaceSlashCommand) {
+      var slashHandled = await handleWorkspaceSlashCommand(workspaceSlashCommand, routeContext);
+      if (slashHandled) return;
+    }
+
     if (directWorkspaceCommand && directWorkspaceCommand.name) {
-      await createWorkspaceByName(directWorkspaceCommand.name, text, routeContext);
+      await createWorkspaceByName(directWorkspaceCommand.name, text);
       return;
+    }
+
+    if (inWorkspaceContext) {
+      var inferredWorkspaceAction = inferWorkspaceActionCommand(text, appLaunchRequest);
+      if (inferredWorkspaceAction && inferredWorkspaceAction.command) {
+        var inferredHandled = await handleWorkspaceSlashCommand(inferredWorkspaceAction, routeContext, { inferred: true });
+        if (inferredHandled) return;
+      }
     }
 
     setHomeAssistantBusy(true, 'Routing...');
@@ -3467,7 +3862,7 @@
     setHomeAssistantRoutingSummary('Routing', 'Analyzing task and selecting the best agent...');
 
     try {
-      var routeData = await routePromptWithBackend(text);
+      var routeData = await routePromptWithBackend(text, routeContext);
       var match = null;
       var useFallbackRouting = !routeData;
       var workspaceRecommended = false;
@@ -3672,7 +4067,6 @@
 
   function initHomeAssistant() {
     var els = getHomeAssistantElements();
-    if (!els.form || !els.input) return;
     var supportsRecentSessions = Boolean(els.recentSection || els.recentSessions || els.viewAllBtn || els.clearRecentBtn);
 
     homeAssistantState.automationMode = loadHomeAssistantAutomationMode();
@@ -3693,7 +4087,9 @@
       });
     }
 
-    els.form.addEventListener('submit', handleHomeAssistantSubmit);
+    if (els.form && els.input) {
+      els.form.addEventListener('submit', handleHomeAssistantSubmit);
+    }
     if (els.modeNewBtn) {
       els.modeNewBtn.addEventListener('click', function () {
         if (homeAssistantState.busy) return;
@@ -3865,6 +4261,25 @@
       banner.classList.remove('d-none');
     }
   }
+
+  async function submitPromptViaAskOri(prompt, options) {
+    var text = String(prompt || '').trim();
+    if (!text) {
+      return { handled: false, reason: 'empty_prompt' };
+    }
+
+    var routeContext = normalizeHomeRouteContext(options && options.routeContext);
+    if (!options || options.openThinkingModal !== false) {
+      openHomeAssistantThinkingModal();
+    }
+
+    await handleHomeAssistantPrompt(text, { routeContext: routeContext });
+    return { handled: true, routeContext: routeContext };
+  }
+
+  window.OriAskRouting = window.OriAskRouting || {};
+  window.OriAskRouting.submit = submitPromptViaAskOri;
+  window.OriAskRouting.buildRouteContext = normalizeHomeRouteContext;
 
   function initDashboard() {
     initHomeAssistant();

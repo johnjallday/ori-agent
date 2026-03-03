@@ -15,6 +15,7 @@ let chatMessages = [];
 let chatWebSearchToggleRequestId = 0;
 const PLAN_BEFORE_ACTION_STORAGE_KEY = 'planBeforeAction';
 const pendingActionPlanContexts = new Map();
+let pendingChatRouteContext = null;
 
 // Remove stored slash-command exchanges and system announcements from history
 function sanitizeHistory(messages) {
@@ -1499,8 +1500,68 @@ async function persistUploadedFilesToSession(sessionId, files, workspaceId) {
   }
 }
 
+function extractWorkspaceIdFromPath(pathname) {
+  const path = String(pathname || '').trim();
+  const match = path.match(/^\/(?:workspaces|studios)\/([^/]+)/i);
+  if (!match || !match[1]) return '';
+  try {
+    return decodeURIComponent(match[1]);
+  } catch (_error) {
+    return match[1];
+  }
+}
+
+function inferChatRouteSurface(pathname, workspaceId) {
+  const path = String(pathname || '').trim().toLowerCase();
+  if (!path) return workspaceId ? 'workspace_detail' : 'dashboard';
+  if (path.startsWith('/workspaces/') || path.startsWith('/studios/')) {
+    if (path.includes('/canvas')) return 'workspace_canvas';
+    return 'workspace_detail';
+  }
+  if (path.startsWith('/workspaces') || path.startsWith('/studios')) return 'workspace_hub';
+  if (path.startsWith('/chat')) return workspaceId ? 'workspace_chat' : 'chat';
+  if (path.startsWith('/dashboard') || path === '/') return 'dashboard';
+  return workspaceId ? 'workspace_detail' : 'dashboard';
+}
+
+function normalizeRouteContextForChat(routeContext) {
+  if (!routeContext || typeof routeContext !== 'object') return null;
+  const normalized = {
+    surface: String(routeContext.surface || '').trim().toLowerCase(),
+    page_path: String(routeContext.page_path || '').trim(),
+    workspace_id: String(routeContext.workspace_id || '').trim(),
+    origin: String(routeContext.origin || '').trim()
+  };
+  if (!normalized.workspace_id && normalized.page_path) {
+    normalized.workspace_id = extractWorkspaceIdFromPath(normalized.page_path);
+  }
+  return normalized;
+}
+
+function buildChatRequestRouteContext(overrideRouteContext) {
+  const normalizedOverride = normalizeRouteContextForChat(overrideRouteContext);
+  const pathname = String(window.location?.pathname || '/').trim() || '/';
+  const activeWorkspaceId = String(window.sessionManager?.getActiveSession?.()?.folder_id || '').trim();
+  const workspaceIdFromPath = extractWorkspaceIdFromPath(pathname);
+
+  const routeContext = {
+    page_path: (normalizedOverride && normalizedOverride.page_path) || pathname,
+    workspace_id: (normalizedOverride && normalizedOverride.workspace_id) || workspaceIdFromPath || activeWorkspaceId,
+    origin: (normalizedOverride && normalizedOverride.origin) || 'chat'
+  };
+
+  routeContext.surface =
+    (normalizedOverride && normalizedOverride.surface) ||
+    inferChatRouteSurface(routeContext.page_path, routeContext.workspace_id);
+
+  return routeContext;
+}
+
 // Send message to chat API
 async function sendMessage(message) {
+  const routeContextOverride = pendingChatRouteContext;
+  pendingChatRouteContext = null;
+
   // Check if state machine is active (replaces isWaitingForResponse)
   if (chatStateMachine && chatStateMachine.isActive()) return;
 
@@ -1556,9 +1617,12 @@ async function sendMessage(message) {
   updateSendButton();
 
   try {
+    const routeContext = buildChatRequestRouteContext(routeContextOverride);
+
     // Prepare request body with files
     const requestBody = {
-      question: trimmedMessage
+      question: trimmedMessage,
+      route_context: routeContext
     };
 
     // Add files if any
@@ -1654,7 +1718,9 @@ async function sendMessage(message) {
 
 // Send a message to chat programmatically (used by task execution, etc.)
 // Exposed globally so other modules can trigger chat messages
-window.sendMessageToChat = function(message) {
+window.sendMessageToChat = function(message, options) {
+  const routeContext = options && typeof options === 'object' ? options.routeContext : null;
+  pendingChatRouteContext = routeContext || null;
   const input = document.getElementById('input');
   if (input) {
     input.value = message;
