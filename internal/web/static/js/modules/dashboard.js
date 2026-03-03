@@ -610,7 +610,7 @@
     return Boolean(String(routeContext.workspace_id || '').trim());
   }
 
-  function buildEmailDispatchMessage(prompt, routeContext) {
+  function buildEmailDispatchMessage(prompt, _) {
     var userPrompt = String(prompt || '').trim();
     var lines = [];
     lines.push(

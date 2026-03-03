@@ -1334,7 +1334,7 @@ export class WorkspaceDetailPage {
 
     const tokens = lower.split(/\s+/);
     for (const token of tokens) {
-      const cleaned = token.replace(/^[\s,.;:!?"'`()\[\]{}<>]+|[\s,.;:!?"'`()\[\]{}<>]+$/g, '');
+      const cleaned = token.replace(/^[\s,.;:!?"'`()[\]{}<>]+|[\s,.;:!?"'`()[\]{}<>]+$/g, '');
       if (!cleaned || cleaned.includes('/') || (cleaned.split('.').length - 1) < 1) continue;
       const parts = cleaned.split('.');
       const tld = parts[parts.length - 1];
