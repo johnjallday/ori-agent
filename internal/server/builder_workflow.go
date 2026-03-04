@@ -67,6 +67,18 @@ func (b *ServerBuilder) initializeEventSystem() error {
 		logger.Info("Notification service initialized", logger.Fields{})
 	}
 
+	if b.workspaceStore != nil {
+		syncMgr, err := workspace.NewDirectorySyncManager(b.workspaceStore, b.eventBus, workspace.DefaultDirectorySyncConfig())
+		if err != nil {
+			logger.Warn("Failed to initialize directory sync manager", logger.Fields{"error": err})
+		} else {
+			b.directorySyncManager = syncMgr
+			if verbose {
+				logger.Info("Directory sync manager initialized", logger.Fields{})
+			}
+		}
+	}
+
 	return nil
 }
 

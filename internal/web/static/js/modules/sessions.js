@@ -27,6 +27,11 @@ const sessionManager = {
   editAgentModalInitialized: false,
   editAgentModelOptionsLoaded: false,
   isCreatingFolder: false,
+  importModeEnabled: false,
+  importAllowDuplicate: false,
+  importDuplicateWorkspaceId: '',
+  importDuplicateWorkspaceName: '',
+  importEntryPoint: 'workspace_hub_create',
 
   // Auto mode state
   chatAutoMode: false,
@@ -204,6 +209,46 @@ const sessionManager = {
     // Create folder button
     document.getElementById('createFolderBtn')?.addEventListener('click', () => this.createFolder());
 
+    const importToggle = document.getElementById('folderImportToggle');
+    importToggle?.addEventListener('change', (event) => {
+      const checked = Boolean(event?.currentTarget?.checked);
+      this.setImportModeEnabled(checked);
+      if (!checked) {
+        this.importAllowDuplicate = false;
+      }
+    });
+
+    const importPathInput = document.getElementById('folderImportPathInput');
+    importPathInput?.addEventListener('input', (event) => {
+      this.importAllowDuplicate = false;
+      this.clearImportDuplicateWarning();
+      this.prefillWorkspaceNameFromImportPath(event?.target?.value || '');
+    });
+    importPathInput?.addEventListener('blur', (event) => {
+      void this.checkImportDuplicate(event?.target?.value || '');
+    });
+
+    const importBrowseBtn = document.getElementById('folderImportBrowseBtn');
+    importBrowseBtn?.addEventListener('click', () => {
+      void this.browseImportFolderPath();
+    });
+
+    const openExistingBtn = document.getElementById('folderImportOpenExistingBtn');
+    openExistingBtn?.addEventListener('click', () => {
+      if (!this.importDuplicateWorkspaceId) {
+        return;
+      }
+      this.emitImportDuplicateActionTelemetry('suggestion_accepted', importPathInput?.value || '');
+      window.location.href = `/workspaces/${encodeURIComponent(this.importDuplicateWorkspaceId)}`;
+    });
+
+    const proceedDuplicateBtn = document.getElementById('folderImportProceedDuplicateBtn');
+    proceedDuplicateBtn?.addEventListener('click', () => {
+      this.importAllowDuplicate = true;
+      this.emitImportDuplicateActionTelemetry('override_confirmed', importPathInput?.value || '');
+      this.showToast('Duplicate override enabled. Click Create to continue.', 'warning');
+    });
+
     // Folder color options
     document.querySelectorAll('.folder-color-btn').forEach(btn => {
       btn.addEventListener('click', (e) => {
@@ -239,6 +284,7 @@ const sessionManager = {
     const addFolderModal = document.getElementById('addFolderModal');
     addFolderModal?.addEventListener('show.bs.modal', () => {
       this.resetAddWorkspaceModalForm({ preserveAskOri: true });
+      this.importEntryPoint = 'workspace_hub_create';
     });
 
     // Save tags button
@@ -2940,6 +2986,180 @@ const sessionManager = {
       .join('');
   },
 
+  extractFolderNameFromPath(pathValue) {
+    const trimmed = String(pathValue || '').trim().replace(/[\\/]+$/, '');
+    if (!trimmed) return '';
+    const parts = trimmed.split(/[\\/]/);
+    return parts[parts.length - 1] || '';
+  },
+
+  prefillWorkspaceNameFromImportPath(pathValue) {
+    const nameInput = document.getElementById('folderNameInput');
+    if (!nameInput) return;
+
+    const folderName = this.extractFolderNameFromPath(pathValue);
+    if (!folderName) return;
+
+    const currentName = nameInput.value.trim();
+    const previousAutoName = nameInput.dataset.autofillName || '';
+    if (!currentName || currentName === previousAutoName) {
+      nameInput.value = folderName;
+      nameInput.dataset.autofillName = folderName;
+    }
+  },
+
+  setImportModeEnabled(enabled) {
+    this.importModeEnabled = Boolean(enabled);
+    const section = document.getElementById('folderImportSection');
+    if (section) {
+      section.hidden = !this.importModeEnabled;
+    }
+
+    const createBtn = document.getElementById('createFolderBtn');
+    if (createBtn && !this.isCreatingFolder) {
+      createBtn.textContent = this.importModeEnabled ? 'Import' : 'Create';
+    }
+
+    if (!this.importModeEnabled) {
+      this.importAllowDuplicate = false;
+      this.clearImportDuplicateWarning();
+    }
+  },
+
+  clearImportDuplicateWarning() {
+    const warning = document.getElementById('folderImportDuplicateWarning');
+    const text = document.getElementById('folderImportDuplicateText');
+    if (warning) warning.style.display = 'none';
+    if (text) text.textContent = '';
+    this.importDuplicateWorkspaceId = '';
+    this.importDuplicateWorkspaceName = '';
+  },
+
+  showImportDuplicateWarning(duplicate) {
+    const warning = document.getElementById('folderImportDuplicateWarning');
+    const text = document.getElementById('folderImportDuplicateText');
+    if (!warning || !text || !duplicate) return;
+
+    const workspaceName = duplicate.workspace_name || duplicate.workspace_id || 'this workspace';
+    text.textContent = `This folder is already linked to "${workspaceName}".`;
+    warning.style.display = 'block';
+
+    this.importDuplicateWorkspaceId = duplicate.workspace_id || '';
+    this.importDuplicateWorkspaceName = duplicate.workspace_name || '';
+  },
+
+  async checkImportDuplicate(pathValue) {
+    const path = String(pathValue || '').trim();
+    if (!path || !this.importModeEnabled) {
+      this.clearImportDuplicateWarning();
+      return;
+    }
+
+    try {
+      const response = await fetch(`/api/workspaces/import/check?path=${encodeURIComponent(path)}`);
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok || !result.success) {
+        this.clearImportDuplicateWarning();
+        return;
+      }
+
+      if (result.duplicate && result.duplicate.found) {
+        this.showImportDuplicateWarning(result.duplicate);
+      } else {
+        this.clearImportDuplicateWarning();
+      }
+    } catch (error) {
+      console.error('Failed to check import duplicate:', error);
+      this.clearImportDuplicateWarning();
+    }
+  },
+
+  setImportBrowseLoading(isLoading) {
+    const browseBtn = document.getElementById('folderImportBrowseBtn');
+    if (!browseBtn) return;
+
+    if (isLoading) {
+      browseBtn.disabled = true;
+      browseBtn.dataset.originalText = browseBtn.textContent || 'Browse';
+      browseBtn.textContent = 'Selecting...';
+      return;
+    }
+
+    browseBtn.disabled = false;
+    browseBtn.textContent = browseBtn.dataset.originalText || 'Browse';
+  },
+
+  async browseImportFolderPath() {
+    const importPathInput = document.getElementById('folderImportPathInput');
+    if (!importPathInput) return;
+
+    this.setImportBrowseLoading(true);
+    try {
+      const response = await fetch('/api/folder-picker/select-path', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          title: 'Select Folder to Import as Workspace'
+        })
+      });
+
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok || !result.success) {
+        this.showToast(result.error || 'Failed to open folder picker', 'error');
+        return;
+      }
+
+      if (!result.selected || !result.path) {
+        return;
+      }
+
+      importPathInput.value = result.path;
+      this.importAllowDuplicate = false;
+      this.clearImportDuplicateWarning();
+      this.prefillWorkspaceNameFromImportPath(result.path);
+      await this.checkImportDuplicate(result.path);
+    } catch (error) {
+      console.error('Failed to browse import path:', error);
+      this.showToast('Failed to open folder picker', 'error');
+    } finally {
+      this.setImportBrowseLoading(false);
+      importPathInput.focus();
+    }
+  },
+
+  emitImportDuplicateActionTelemetry(action, pathValue) {
+    const normalizedAction = String(action || '').trim();
+    if (!normalizedAction) return;
+
+    const payload = {
+      action: normalizedAction,
+      workspace_id: this.importDuplicateWorkspaceId || '',
+      entry_point: this.importEntryPoint || 'workspace_hub_create',
+      path: String(pathValue || '').trim()
+    };
+
+    const endpoint = '/api/workspaces/import/duplicate-action';
+    const body = JSON.stringify(payload);
+    try {
+      if (navigator.sendBeacon) {
+        const data = new Blob([body], { type: 'application/json' });
+        navigator.sendBeacon(endpoint, data);
+        return;
+      }
+    } catch (error) {
+      console.debug('sendBeacon failed for import duplicate telemetry:', error);
+    }
+
+    fetch(endpoint, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body,
+      keepalive: true
+    }).catch((error) => {
+      console.debug('Failed to send import duplicate telemetry:', error);
+    });
+  },
+
   resetAddWorkspaceModalForm(options = {}) {
     const { preserveAskOri = false } = options;
     const modalElement = document.getElementById('addFolderModal');
@@ -2954,6 +3174,7 @@ const sessionManager = {
 
     if (!keepSeedValues) {
       if (nameInput) nameInput.value = '';
+      if (nameInput) nameInput.dataset.autofillName = '';
       if (descriptionInput) descriptionInput.value = '';
     }
     if (parentSelect) {
@@ -3001,6 +3222,16 @@ const sessionManager = {
     if (setupTasks) setupTasks.checked = true;
     if (setupNotes) setupNotes.checked = true;
     if (setupSchedule) setupSchedule.checked = false;
+
+    const importToggle = document.getElementById('folderImportToggle');
+    const importPathInput = document.getElementById('folderImportPathInput');
+    if (importToggle) importToggle.checked = false;
+    if (importPathInput) importPathInput.value = '';
+    this.importEntryPoint = 'workspace_hub_create';
+    this.importAllowDuplicate = false;
+    this.setImportBrowseLoading(false);
+    this.setImportModeEnabled(false);
+    this.clearImportDuplicateWarning();
 
     this.updateWorkspaceSetupControlsState();
     this.renderWorkspaceSetupPreview();
@@ -3108,11 +3339,19 @@ const sessionManager = {
     const modalElement = document.getElementById('addFolderModal');
     const colorBtn = document.querySelector('#addFolderModal .folder-color-btn.active');
     const createBtn = document.getElementById('createFolderBtn');
+    const importToggle = document.getElementById('folderImportToggle');
+    const importPathInput = document.getElementById('folderImportPathInput');
     const setupConfig = this.getWorkspaceSetupConfigFromModal();
 
-    const name = nameInput?.value.trim();
-    if (!name) {
+    const importEnabled = Boolean(importToggle?.checked);
+    const importPath = importPathInput?.value?.trim() || '';
+    const name = nameInput?.value.trim() || '';
+    if (!name && !importEnabled) {
       this.showToast('Workspace name is required', 'warning');
+      return;
+    }
+    if (importEnabled && !importPath) {
+      this.showToast('Please enter or browse for a folder path to import', 'warning');
       return;
     }
 
@@ -3124,14 +3363,32 @@ const sessionManager = {
     this.isCreatingFolder = true;
     if (createBtn) {
       createBtn.disabled = true;
-      createBtn.textContent = setupConfig.enabled ? 'Creating + Setup...' : 'Creating...';
+      if (importEnabled) {
+        createBtn.textContent = setupConfig.enabled ? 'Importing + Setup...' : 'Importing...';
+      } else {
+        createBtn.textContent = setupConfig.enabled ? 'Creating + Setup...' : 'Creating...';
+      }
     }
 
     try {
-      const response = await fetch('/api/workspaces', {
+      const payload = {
+        name,
+        description,
+        parent_id: parentId,
+        color
+      };
+      let endpoint = '/api/workspaces';
+      if (importEnabled) {
+        endpoint = '/api/workspaces/import';
+        payload.path = importPath;
+        payload.allow_duplicate = Boolean(this.importAllowDuplicate);
+        payload.entry_point = this.importEntryPoint || 'workspace_hub_create';
+      }
+
+      const response = await fetch(endpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name, description, parent_id: parentId, color })
+        body: JSON.stringify(payload)
       });
 
       let result = {};
@@ -3141,8 +3398,15 @@ const sessionManager = {
         result = {};
       }
 
+      if (response.status === 409 && importEnabled && result.duplicate) {
+        this.showImportDuplicateWarning(result.duplicate);
+        this.showToast('This folder is already imported. Open the existing workspace or click "Import Anyway".', 'warning');
+        return;
+      }
+
       if (!response.ok || result.error) {
-        throw new Error(result.error || 'Failed to create workspace');
+        const fallbackMessage = importEnabled ? 'Failed to import folder as workspace' : 'Failed to create workspace';
+        throw new Error(result.error || fallbackMessage);
       }
 
       const createdWorkspaceId = result && result.folder && result.folder.id
@@ -3154,17 +3418,20 @@ const sessionManager = {
       }
 
       if (setupConfig.enabled && createdWorkspaceId) {
-        const setupResult = await this.applyWorkspaceSetup(createdWorkspaceId, name, setupConfig);
+        const setupWorkspaceName = name || this.extractFolderNameFromPath(importPath) || 'Imported Workspace';
+        const setupResult = await this.applyWorkspaceSetup(createdWorkspaceId, setupWorkspaceName, setupConfig);
         const summaryParts = [];
         if (setupResult.tasksCreated > 0) summaryParts.push(`${setupResult.tasksCreated} tasks`);
         if (setupResult.notesCreated > 0) summaryParts.push(`${setupResult.notesCreated} notes`);
         if (setupResult.schedulesCreated > 0) summaryParts.push(`${setupResult.schedulesCreated} schedules`);
         const summaryText = summaryParts.length > 0 ? summaryParts.join(', ') : 'no setup items';
         if (setupResult.errors.length > 0) {
-          this.showToast(`Workspace created with partial setup (${summaryText}).`, 'warning');
+          this.showToast(`${importEnabled ? 'Workspace imported' : 'Workspace created'} with partial setup (${summaryText}).`, 'warning');
         } else {
-          this.showToast(`Workspace created with Ori setup (${summaryText}).`, 'success');
+          this.showToast(`${importEnabled ? 'Workspace imported' : 'Workspace created'} with Ori setup (${summaryText}).`, 'success');
         }
+      } else {
+        this.showToast(importEnabled ? 'Workspace imported successfully' : 'Workspace created successfully', 'success');
       }
 
       // Close modal

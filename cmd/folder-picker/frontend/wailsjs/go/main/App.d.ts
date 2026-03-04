@@ -14,6 +14,8 @@ export function HideWindow():Promise<void>;
 
 export function OpenFolderDialog():Promise<string>;
 
+export function OpenFolderDialogWithTitle(arg1:string):Promise<string>;
+
 export function Quit():Promise<void>;
 
 export function ShowWindow():Promise<void>;

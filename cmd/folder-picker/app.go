@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/wailsapp/wails/v2/pkg/runtime"
@@ -78,6 +79,55 @@ func (a *App) startLocalServer() {
 		}()
 	})
 
+	mux.HandleFunc("/select-folder", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{
+				"success": false,
+				"error":   "method not allowed",
+			})
+			return
+		}
+
+		var reqBody struct {
+			Title string `json:"title"`
+		}
+		if r.Body != nil {
+			_ = json.NewDecoder(r.Body).Decode(&reqBody)
+		}
+
+		title := strings.TrimSpace(reqBody.Title)
+		if title == "" {
+			title = "Select Folder"
+		}
+
+		a.ShowWindow()
+		path, err := a.OpenFolderDialogWithTitle(title)
+		if err != nil {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusInternalServerError)
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{
+				"success": false,
+				"error":   err.Error(),
+			})
+			return
+		}
+
+		a.HideWindow()
+
+		resp := map[string]interface{}{
+			"success":  true,
+			"selected": path != "",
+		}
+		if path != "" {
+			resp["path"] = path
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(resp)
+	})
+
 	listener, err := net.Listen("tcp", "127.0.0.1:"+localServerPort)
 	if err != nil {
 		// Port might be in use by another instance - that's fine
@@ -144,8 +194,17 @@ func (a *App) GetWorkspaces() ([]Workspace, error) {
 
 // OpenFolderDialog opens a native folder picker dialog
 func (a *App) OpenFolderDialog() (string, error) {
+	return a.OpenFolderDialogWithTitle("Select Directory to Add")
+}
+
+// OpenFolderDialogWithTitle opens a native folder picker dialog with custom title
+func (a *App) OpenFolderDialogWithTitle(title string) (string, error) {
+	if strings.TrimSpace(title) == "" {
+		title = "Select Directory"
+	}
+
 	path, err := runtime.OpenDirectoryDialog(a.ctx, runtime.OpenDialogOptions{
-		Title: "Select Directory to Add",
+		Title: title,
 	})
 	if err != nil {
 		return "", err

@@ -2743,7 +2743,9 @@ export class WorkspaceDetailPage {
     }
 
     try {
-      // Directories are stored as attachments with type 'directory'
+      // Directories may come from:
+      // 1) directory_references (workspace imports / folder picker)
+      // 2) legacy attachments with type "directory"
       const response = await fetch(`/api/studios/${encodeURIComponent(this.workspaceId)}`);
       if (!response.ok) {
         this.directories = [];
@@ -2752,7 +2754,47 @@ export class WorkspaceDetailPage {
       }
 
       const workspace = await response.json();
-      this.directories = (workspace.attachments || []).filter(a => a.type === 'directory');
+
+      const refs = Array.isArray(workspace.directory_references)
+        ? workspace.directory_references.map((ref) => ({
+          id: ref.id,
+          name: ref.name || '',
+          path: ref.path || '',
+          source: 'reference'
+        }))
+        : [];
+
+      const attachmentDirs = Array.isArray(workspace.attachments)
+        ? workspace.attachments
+          .filter((attachment) => attachment && attachment.type === 'directory')
+          .map((attachment) => ({
+            id: attachment.id,
+            name: attachment.title || attachment.name || '',
+            path: attachment.path || attachment.body || '',
+            source: 'attachment'
+          }))
+        : [];
+
+      // De-duplicate by id first, then by normalized path for mixed legacy/new sources.
+      const seenById = new Set();
+      const seenByPath = new Set();
+      this.directories = [];
+      [...refs, ...attachmentDirs].forEach((dir) => {
+        if (!dir || !dir.id) return;
+        if (seenById.has(dir.id)) return;
+
+        const normalizedPath = String(dir.path || '').trim().replace(/[\\/]+$/, '').toLowerCase();
+        if (normalizedPath && seenByPath.has(normalizedPath)) {
+          return;
+        }
+
+        seenById.add(dir.id);
+        if (normalizedPath) {
+          seenByPath.add(normalizedPath);
+        }
+        this.directories.push(dir);
+      });
+
       this.renderDirectories();
     } catch (error) {
       console.error('Failed to load directories:', error);
@@ -2775,6 +2817,7 @@ export class WorkspaceDetailPage {
     this.elements.directoriesList.innerHTML = this.directories.map(dir => {
       const name = dir.title || dir.name || dir.path || 'Unnamed Directory';
       const path = dir.path || '';
+      const sourceLabel = dir.source === 'reference' ? 'Reference' : 'Attachment';
       return `
         <div class="workspace-detail-item" data-directory-id="${dir.id}">
           <div class="workspace-detail-item-title">
@@ -2783,7 +2826,7 @@ export class WorkspaceDetailPage {
             </svg>
             ${this.escapeHtml(name)}
           </div>
-          <div class="workspace-detail-item-meta">${this.escapeHtml(path)}</div>
+          <div class="workspace-detail-item-meta">${this.escapeHtml(path)}${path ? ' • ' : ''}${this.escapeHtml(sourceLabel)}</div>
         </div>
       `;
     }).join('');
@@ -3027,6 +3070,14 @@ export class WorkspaceDetailPage {
       case 'schedule_deleted':
         this.loadSchedules();
         break;
+      case 'workspace.updated': {
+        const action = event?.data?.action || '';
+        if (typeof action === 'string' && action.startsWith('directory_')) {
+          this.loadDirectories();
+          this.loadFiles();
+        }
+        break;
+      }
     }
   }
 

@@ -2,6 +2,7 @@ package session
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 	"time"
 
@@ -387,6 +388,146 @@ func TestSQLiteStore_Workspaces(t *testing.T) {
 	}
 	if len(subworkspaceIDs) != 1 {
 		t.Errorf("Expected 1 subworkspace ID, got %d", len(subworkspaceIDs))
+	}
+}
+
+func TestSQLiteStore_WorkspaceImportMetadataPersistence(t *testing.T) {
+	db, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	store := NewSQLiteStore(db)
+	ctx := context.Background()
+	now := time.Now().UTC().Round(time.Second)
+
+	initialRefsJSON, err := json.Marshal([]map[string]interface{}{
+		{
+			"id":           "dir-ref-1",
+			"workspace_id": "import-workspace",
+			"name":         "repo",
+			"path":         "/tmp/repo",
+			"x":            400,
+			"y":            300,
+			"created_at":   now.Format(time.RFC3339),
+			"updated_at":   now.Format(time.RFC3339),
+		},
+	})
+	if err != nil {
+		t.Fatalf("failed to marshal initial directory references: %v", err)
+	}
+
+	workspace := &Workspace{
+		ID:   "import-workspace",
+		Name: "Imported Workspace",
+		SharedData: map[string]interface{}{
+			"folder_import": map[string]interface{}{
+				"enabled":     true,
+				"path":        "/tmp/repo",
+				"path_hash":   "abc123:repo",
+				"entry_point": "dashboard_button",
+				"imported_at": now.Format(time.RFC3339),
+			},
+		},
+		DirectoryReferencesJSON: initialRefsJSON,
+		CreatedAt:               now,
+		UpdatedAt:               now,
+	}
+
+	if err := store.CreateWorkspace(ctx, workspace); err != nil {
+		t.Fatalf("failed to create imported workspace: %v", err)
+	}
+
+	got, err := store.GetWorkspace(ctx, workspace.ID)
+	if err != nil {
+		t.Fatalf("failed to fetch imported workspace: %v", err)
+	}
+
+	importMetaRaw, ok := got.SharedData["folder_import"]
+	if !ok {
+		t.Fatalf("expected folder_import metadata in shared_data")
+	}
+
+	importMeta, ok := importMetaRaw.(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected folder_import metadata to be a map, got %T", importMetaRaw)
+	}
+	if importMeta["path"] != "/tmp/repo" {
+		t.Fatalf("expected folder_import.path to persist, got %#v", importMeta["path"])
+	}
+	if importMeta["entry_point"] != "dashboard_button" {
+		t.Fatalf("expected folder_import.entry_point to persist, got %#v", importMeta["entry_point"])
+	}
+
+	var refs []map[string]interface{}
+	if err := json.Unmarshal(got.DirectoryReferencesJSON, &refs); err != nil {
+		t.Fatalf("failed to decode persisted directory references: %v", err)
+	}
+	if len(refs) != 1 {
+		t.Fatalf("expected 1 persisted directory reference, got %d", len(refs))
+	}
+	if refs[0]["path"] != "/tmp/repo" {
+		t.Fatalf("expected persisted directory reference path '/tmp/repo', got %#v", refs[0]["path"])
+	}
+
+	updatedRefsJSON, err := json.Marshal([]map[string]interface{}{
+		{
+			"id":           "dir-ref-1",
+			"workspace_id": "import-workspace",
+			"name":         "repo",
+			"path":         "/tmp/repo",
+		},
+		{
+			"id":           "dir-ref-2",
+			"workspace_id": "import-workspace",
+			"name":         "docs",
+			"path":         "/tmp/docs",
+		},
+	})
+	if err != nil {
+		t.Fatalf("failed to marshal updated directory references: %v", err)
+	}
+
+	got.SharedData["folder_import"] = map[string]interface{}{
+		"enabled":         true,
+		"path":            "/tmp/repo",
+		"path_hash":       "abc123:repo",
+		"entry_point":     "create_modal",
+		"allow_duplicate": true,
+		"imported_at":     now.Format(time.RFC3339),
+	}
+	got.DirectoryReferencesJSON = updatedRefsJSON
+	got.UpdatedAt = time.Now().UTC().Round(time.Second)
+
+	if err := store.UpdateWorkspace(ctx, got); err != nil {
+		t.Fatalf("failed to update imported workspace metadata: %v", err)
+	}
+
+	updated, err := store.GetWorkspace(ctx, workspace.ID)
+	if err != nil {
+		t.Fatalf("failed to fetch updated imported workspace: %v", err)
+	}
+
+	updatedMetaRaw, ok := updated.SharedData["folder_import"]
+	if !ok {
+		t.Fatalf("expected folder_import metadata after update")
+	}
+	updatedMeta, ok := updatedMetaRaw.(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected updated folder_import metadata to be a map, got %T", updatedMetaRaw)
+	}
+
+	if updatedMeta["entry_point"] != "create_modal" {
+		t.Fatalf("expected updated entry_point to be create_modal, got %#v", updatedMeta["entry_point"])
+	}
+	if allow, ok := updatedMeta["allow_duplicate"].(bool); !ok || !allow {
+		t.Fatalf("expected allow_duplicate=true, got %#v", updatedMeta["allow_duplicate"])
+	}
+
+	var updatedRefs []map[string]interface{}
+	if err := json.Unmarshal(updated.DirectoryReferencesJSON, &updatedRefs); err != nil {
+		t.Fatalf("failed to decode updated directory references: %v", err)
+	}
+	if len(updatedRefs) != 2 {
+		t.Fatalf("expected 2 updated directory references, got %d", len(updatedRefs))
 	}
 }
 

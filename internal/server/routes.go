@@ -699,6 +699,7 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 	// Folder Picker Launcher
 	// =============================================================================
 	mux.HandleFunc("/api/launch-folder-picker", s.Handlers.Studio.LaunchFolderPicker)
+	mux.HandleFunc("/api/folder-picker/select-path", s.Handlers.Studio.SelectFolderPath)
 
 	// =============================================================================
 	// Agent Studio API Endpoints

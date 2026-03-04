@@ -122,6 +122,7 @@ type ServerBuilder struct {
 	taskScheduler         *workspace.TaskScheduler
 	eventBus              *workspace.EventBus
 	notificationService   *workspace.NotificationService
+	directorySyncManager  *workspace.DirectorySyncManager
 	studioOrchestrator    *workspace.Orchestrator
 	costTracker           *llm.CostTracker
 	mcpRegistry           *mcp.Registry
@@ -374,6 +375,7 @@ func (b *ServerBuilder) createDomainFacades() error {
 		b.taskScheduler,
 		b.eventBus,
 		b.notificationService,
+		b.directorySyncManager,
 		b.studioOrchestrator,
 	)
 
