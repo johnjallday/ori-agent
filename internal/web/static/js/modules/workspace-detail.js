@@ -408,6 +408,12 @@ export class WorkspaceDetailPage {
         this.showTaskResult(this.currentExecutionTaskId);
       }
     });
+    this.elements.taskResultModal?.addEventListener('shown.bs.modal', () => {
+      this.applyTopBackdropLayer('workspace-detail-backdrop-result');
+    });
+    this.elements.taskExecutionModal?.addEventListener('shown.bs.modal', () => {
+      this.applyTopBackdropLayer('workspace-detail-backdrop-execution');
+    });
     this.elements.taskExecutionModal?.addEventListener('hidden.bs.modal', () => {
       this.stopExecutionMonitor();
       this.currentExecutionTaskId = null;
@@ -2258,6 +2264,20 @@ export class WorkspaceDetailPage {
   setExecutionViewResultEnabled(enabled) {
     if (!this.elements.taskExecutionViewResultBtn) return;
     this.elements.taskExecutionViewResultBtn.disabled = !enabled;
+  }
+
+  applyTopBackdropLayer(layerClass) {
+    const backdrops = Array.from(document.querySelectorAll('.modal-backdrop.show'));
+    if (!backdrops.length) return;
+
+    const topBackdrop = backdrops[backdrops.length - 1];
+    topBackdrop.classList.remove(
+      'workspace-detail-backdrop-execution',
+      'workspace-detail-backdrop-result'
+    );
+    if (layerClass) {
+      topBackdrop.classList.add(layerClass);
+    }
   }
 
   updateTaskExecutionMeta(task) {
