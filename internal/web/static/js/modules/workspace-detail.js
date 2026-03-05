@@ -120,6 +120,7 @@ export class WorkspaceDetailPage {
    */
   async init() {
     this.cacheElements();
+    this.ensureScrollablePanelAccessibility();
     this.bindEvents();
     this.setupFileModal();
     await this.loadWorkspace();
@@ -133,6 +134,26 @@ export class WorkspaceDetailPage {
       this.loadSchedules()
     ]);
     this.setupRealtime();
+  }
+
+  ensureScrollablePanelAccessibility() {
+    const panelConfig = [
+      { id: 'workspace-detail-agents-panel', label: 'Agents panel content' },
+      { id: 'workspace-detail-notes-panel', label: 'Notes panel content' },
+      { id: 'workspace-detail-files-panel', label: 'Files panel content' },
+      { id: 'workspace-detail-directories-panel', label: 'Directories panel content' },
+      { id: 'workspace-detail-schedules-panel', label: 'Schedules panel content' }
+    ];
+
+    panelConfig.forEach(({ id, label }) => {
+      const panel = document.getElementById(id);
+      const body = panel?.querySelector('.workspace-detail-panel-body');
+      if (!body) return;
+
+      body.setAttribute('role', 'region');
+      body.setAttribute('tabindex', '0');
+      body.setAttribute('aria-label', label);
+    });
   }
 
   /**
