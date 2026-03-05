@@ -62,6 +62,10 @@ export class WorkspaceDetailPage {
     this.workspace = null;
     this.tasks = [];
     this.sessions = [];
+    this.tasksLoading = false;
+    this.sessionsLoading = false;
+    this.tasksLoadFailed = false;
+    this.sessionsLoadFailed = false;
     this.files = [];
     this.notes = [];
     this.directories = [];
@@ -265,8 +269,7 @@ export class WorkspaceDetailPage {
       smartSubmit: document.getElementById('workspace-detail-submit'),
 
       // Lists
-      tasksList: document.getElementById('workspace-detail-tasks-list'),
-      sessionsList: document.getElementById('workspace-detail-sessions-list'),
+      agentsList: document.getElementById('workspace-detail-agents-list'),
       filesList: document.getElementById('workspace-detail-files-list'),
       notesList: document.getElementById('workspace-detail-notes-list'),
       directoriesList: document.getElementById('workspace-detail-directories-list'),
@@ -279,6 +282,7 @@ export class WorkspaceDetailPage {
 
       // Buttons
       addTaskBtn: document.getElementById('workspace-detail-add-task'),
+      addAgentBtn: document.getElementById('workspace-detail-add-agent-btn'),
       refreshTasksBtn: document.getElementById('workspace-detail-refresh-tasks'),
       newSessionBtn: document.getElementById('workspace-detail-new-session'),
       addFileBtn: document.getElementById('workspace-detail-add-file'),
@@ -292,7 +296,7 @@ export class WorkspaceDetailPage {
       viewBoardBtn: document.getElementById('workspace-detail-view-board'),
 
       // Board elements
-      tasksPanel: document.getElementById('workspace-detail-tasks-panel'),
+      agentsPanel: document.getElementById('workspace-detail-agents-panel'),
       tasksBoard: document.getElementById('workspace-detail-tasks-board'),
       boardColumns: document.getElementById('workspace-detail-board-columns'),
       boardEmpty: document.getElementById('workspace-detail-board-empty'),
@@ -321,6 +325,13 @@ export class WorkspaceDetailPage {
       taskAssistSwitchBtn: document.getElementById('workspace-detail-task-assist-switch'),
       taskAssistFailBtn: document.getElementById('workspace-detail-task-assist-fail'),
 
+      // Add agent modal
+      addAgentModal: document.getElementById('workspace-detail-add-agent-modal'),
+      addAgentSelect: document.getElementById('workspace-detail-add-agent-select'),
+      addAgentEmpty: document.getElementById('workspace-detail-add-agent-empty'),
+      addAgentSubmitBtn: document.getElementById('workspace-detail-add-agent-submit'),
+      createAgentBtn: document.getElementById('workspace-detail-create-agent-btn'),
+
       // Directory explorer modal
       directoryExplorerModal: document.getElementById('workspace-directory-explorer-modal'),
       directoryExplorerTitle: document.getElementById('workspace-directory-explorer-title'),
@@ -347,6 +358,7 @@ export class WorkspaceDetailPage {
 
     // Task buttons
     this.elements.addTaskBtn?.addEventListener('click', () => this.showAddTaskModal());
+    this.elements.addAgentBtn?.addEventListener('click', () => this.openAddAgentModal());
     this.elements.refreshTasksBtn?.addEventListener('click', () => this.loadTasks());
 
     // View toggle
@@ -378,6 +390,9 @@ export class WorkspaceDetailPage {
     this.elements.taskAssistSwitchBtn?.addEventListener('click', () => this.submitTaskAssist('switch_agent_retry'));
     this.elements.taskAssistFailBtn?.addEventListener('click', () => this.submitTaskAssist('mark_failed'));
     this.elements.taskAssistAgent?.addEventListener('change', () => this.updateAssistSwitchButtonState());
+    this.elements.addAgentSubmitBtn?.addEventListener('click', () => this.addSelectedAgentToWorkspace());
+    this.elements.createAgentBtn?.addEventListener('click', () => this.openCreateAgentFlow());
+    this.elements.addAgentModal?.addEventListener('show.bs.modal', () => { this.populateAddAgentOptions(); });
 
     // Make workspace name and description editable
     this.makeEditable(this.elements.workspaceName, 'name', false);
@@ -423,6 +438,11 @@ export class WorkspaceDetailPage {
         if (!data?.workspaceId || data.workspaceId === this.workspaceId) {
           this.loadFiles();
         }
+      }, 'workspaceDetail');
+
+      EventBus.on('agent:created', async () => {
+        await this.loadAgentCatalog(true);
+        await this.populateAddAgentOptions();
       }, 'workspaceDetail');
     }
   }
@@ -623,6 +643,7 @@ export class WorkspaceDetailPage {
 
       this.workspace = await response.json();
       await this.renderWorkspaceInfo();
+      this.renderAgentGroups();
     } catch (error) {
       console.error('Failed to load workspace:', error);
       if (window.Toast) window.Toast.error('Failed to load workspace');
@@ -763,9 +784,9 @@ export class WorkspaceDetailPage {
    * Load tasks for the workspace
    */
   async loadTasks() {
-    if (this.elements.tasksList) {
-      this.elements.tasksList.innerHTML = '<div class="workspace-detail-loading">Loading tasks...</div>';
-    }
+    this.tasksLoading = true;
+    this.tasksLoadFailed = false;
+    this.renderAgentGroups();
 
     try {
       const response = await fetch(`/api/orchestration/tasks?studio_id=${encodeURIComponent(this.workspaceId)}`);
@@ -773,66 +794,240 @@ export class WorkspaceDetailPage {
 
       const data = await response.json();
       this.tasks = data.tasks || [];
-      this.renderTasks();
-
-      // Also refresh board if in board view
       if (this.currentView === 'board' && this.boardConfig) {
         this.renderBoard();
       }
-
-      // Update task count
-      if (this.elements.taskCount) {
-        this.elements.taskCount.textContent = this.tasks.length;
-      }
+      this.tasksLoadFailed = false;
     } catch (error) {
       console.error('Failed to load tasks:', error);
-      if (this.elements.tasksList) {
-        this.elements.tasksList.innerHTML = '<div class="workspace-detail-empty">Failed to load tasks</div>';
+      this.tasks = [];
+      this.tasksLoadFailed = true;
+    } finally {
+      this.tasksLoading = false;
+      this.renderTasks();
+
+      if (this.elements.taskCount) {
+        this.elements.taskCount.textContent = this.tasks.length;
       }
     }
   }
 
   /**
-   * Render tasks list
+   * Render tasks grouped by agent
    */
   renderTasks() {
-    if (!this.elements.tasksList) return;
+    this.renderAgentGroups();
+  }
 
-    if (this.tasks.length === 0) {
-      this.elements.tasksList.innerHTML = '<div class="workspace-detail-empty">No tasks yet. Create one to get started.</div>';
+  renderAgentGroups() {
+    if (!this.elements.agentsList) return;
+
+    const groups = this.buildAgentGroups();
+    if (groups.length === 0) {
+      if (this.tasksLoading || this.sessionsLoading) {
+        this.elements.agentsList.innerHTML = '<div class="workspace-detail-loading">Loading agents...</div>';
+      } else {
+        this.elements.agentsList.innerHTML = `
+          <div class="workspace-detail-empty">
+            No agents yet. Add an agent to this workspace to assign tasks.
+            <div class="mt-2">
+              <button type="button" class="modern-btn modern-btn-primary modern-btn-sm" onclick="window.workspaceDetail?.openAddAgentModal()">Add Agent</button>
+            </div>
+          </div>
+        `;
+      }
       return;
     }
 
-    // Filter to only show top-level tasks (no parent)
-    const topLevelTasks = this.tasks.filter(t => !t.parent_task_id);
-
-    this.elements.tasksList.innerHTML = topLevelTasks.map(task => {
-      const taskLabel = this.escapeHtml(task.description || task.name || 'Untitled Task');
-      const assignedAgent = task.to && task.to !== 'unassigned' ? task.to : '';
-      const subtasks = this.tasks.filter((subtask) => subtask.parent_task_id === task.id);
-      const isParent = subtasks.length > 0;
-      const statusInfo = this.getTaskStatusPresentation(task);
-      const hasUnassignedSubtasks = isParent && subtasks.some((subtask) => !subtask.to || subtask.to === 'unassigned');
-      const hasRunningSubtasks = isParent && subtasks.some((subtask) => subtask.status === 'in_progress');
-      const canExecute = isParent
-        ? subtasks.length > 0 && !hasUnassignedSubtasks && !hasRunningSubtasks
-        : task.status !== 'in_progress';
-      const resultData = this.getDisplayResult(task, subtasks);
-      const hasResultData = !!resultData;
-      const hasAssistData = !!statusInfo.isBlocked;
-      const executeTitle = isParent
-        ? hasUnassignedSubtasks ? 'Assign agents to all subtasks before executing'
-          : hasRunningSubtasks ? 'A subtask is already running'
-            : 'Execute workflow now'
-        : !assignedAgent ? 'Will auto-assign a workspace agent before execution'
-          : task.status === 'in_progress' ? 'Task is already running'
-            : 'Execute task now';
-      const resultTitle = hasResultData
-        ? `View ${resultData.label} from ${resultData.answeredBy || 'Unknown agent'}`
-        : '';
-      const assistTitle = statusInfo.reason || 'Agent needs your guidance before this task can continue.';
+    this.elements.agentsList.innerHTML = groups.map((group) => {
+      const taskCount = group.tasks.length;
+      const sessionCount = group.sessions.length;
+      const taskLabel = `${taskCount} task${taskCount === 1 ? '' : 's'}`;
+      const sessionLabel = `${sessionCount} session${sessionCount === 1 ? '' : 's'}`;
+      const capabilityBadges = group.isUnassigned ? '' : this.renderAgentCapabilityBadges(group.name);
+      const encodedAgentName = encodeURIComponent(group.name);
+      const taskActionButton = group.isUnassigned ? '' : `
+        <button type="button"
+                class="workspace-detail-agent-section-btn"
+                title="Add task for ${this.escapeHtml(group.name)}"
+                aria-label="Add task for ${this.escapeHtml(group.name)}"
+                onclick="event.stopPropagation(); window.workspaceDetail?.showAddTaskModalForAgent('${encodedAgentName}')">
+          <svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor">
+            <path d="M19,13H13V19H11V13H5V11H11V5H13V11H19V13Z"/>
+          </svg>
+        </button>
+      `;
+      const sessionActionButton = group.isUnassigned ? '' : `
+        <button type="button"
+                class="workspace-detail-agent-section-btn"
+                title="Start session with ${this.escapeHtml(group.name)}"
+                aria-label="Start session with ${this.escapeHtml(group.name)}"
+                onclick="event.stopPropagation(); window.workspaceDetail?.createNewSessionForAgent('${encodedAgentName}')">
+          <svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor">
+            <path d="M19,13H13V19H11V13H5V11H11V5H13V11H19V13Z"/>
+          </svg>
+        </button>
+      `;
 
       return `
+      <section class="workspace-detail-agent-card" data-agent-name="${this.escapeHtml(group.name)}">
+        <div class="workspace-detail-agent-card-header">
+          <div class="workspace-detail-agent-card-title">
+            <span>${this.escapeHtml(group.name)}</span>
+            ${capabilityBadges}
+          </div>
+          <div class="workspace-detail-agent-card-meta">${taskLabel} · ${sessionLabel}</div>
+        </div>
+        <div class="workspace-detail-agent-sections">
+          <div class="workspace-detail-agent-section">
+            <div class="workspace-detail-agent-section-header">
+              <div class="workspace-detail-agent-section-title">Tasks</div>
+              ${taskActionButton}
+            </div>
+            <div class="workspace-detail-list workspace-detail-agent-list">
+              ${this.renderAgentTasksContent(group.tasks)}
+            </div>
+          </div>
+          <div class="workspace-detail-agent-section">
+            <div class="workspace-detail-agent-section-header">
+              <div class="workspace-detail-agent-section-title">Sessions</div>
+              ${sessionActionButton}
+            </div>
+            <div class="workspace-detail-list workspace-detail-agent-list">
+              ${this.renderAgentSessionsContent(group.sessions)}
+            </div>
+          </div>
+        </div>
+      </section>
+      `;
+    }).join('');
+  }
+
+  buildAgentGroups() {
+    const groups = [];
+    const groupByKey = new Map();
+
+    const ensureGroup = (name, { isWorkspaceAgent = false, isUnassigned = false } = {}) => {
+      const normalized = isUnassigned ? '__unassigned__' : this.normalizeAgentName(name);
+      if (!normalized) return null;
+
+      let group = groupByKey.get(normalized);
+      if (!group) {
+        group = {
+          key: normalized,
+          name: isUnassigned ? 'Unassigned' : String(name || '').trim(),
+          isWorkspaceAgent,
+          isUnassigned,
+          tasks: [],
+          sessions: []
+        };
+        groupByKey.set(normalized, group);
+        groups.push(group);
+      } else if (isWorkspaceAgent) {
+        group.isWorkspaceAgent = true;
+      }
+
+      return group;
+    };
+
+    this.getWorkspaceAgentNames().forEach((name) => {
+      ensureGroup(name, { isWorkspaceAgent: true, isUnassigned: false });
+    });
+
+    const topLevelTasks = Array.isArray(this.tasks)
+      ? this.tasks.filter((task) => !task.parent_task_id)
+      : [];
+
+    topLevelTasks.forEach((task) => {
+      const assigned = String(task?.to || '').trim();
+      if (assigned && assigned !== 'unassigned') {
+        ensureGroup(assigned)?.tasks.push(task);
+      } else {
+        ensureGroup('Unassigned', { isUnassigned: true })?.tasks.push(task);
+      }
+    });
+
+    const sessions = Array.isArray(this.sessions) ? this.sessions : [];
+    sessions.forEach((session) => {
+      const sessionAgent = String(session?.agent_name || '').trim();
+      if (sessionAgent && sessionAgent !== 'unassigned') {
+        ensureGroup(sessionAgent)?.sessions.push(session);
+      } else {
+        ensureGroup('Unassigned', { isUnassigned: true })?.sessions.push(session);
+      }
+    });
+
+    const workspaceGroups = [];
+    const extraGroups = [];
+    const unassignedGroups = [];
+
+    groups.forEach((group) => {
+      if (group.isUnassigned) {
+        unassignedGroups.push(group);
+      } else if (group.isWorkspaceAgent) {
+        workspaceGroups.push(group);
+      } else {
+        extraGroups.push(group);
+      }
+    });
+
+    extraGroups.sort((a, b) => a.name.localeCompare(b.name));
+    return [...workspaceGroups, ...extraGroups, ...unassignedGroups];
+  }
+
+  renderAgentTasksContent(tasks) {
+    if (this.tasksLoading) {
+      return '<div class="workspace-detail-loading workspace-detail-loading-inline">Loading tasks...</div>';
+    }
+    if (this.tasksLoadFailed) {
+      return '<div class="workspace-detail-empty workspace-detail-empty-inline">Failed to load tasks.</div>';
+    }
+    if (!Array.isArray(tasks) || tasks.length === 0) {
+      return '<div class="workspace-detail-empty workspace-detail-empty-inline">No tasks assigned.</div>';
+    }
+    return tasks.map((task) => this.renderTaskItem(task)).join('');
+  }
+
+  renderAgentSessionsContent(sessions) {
+    if (this.sessionsLoading) {
+      return '<div class="workspace-detail-loading workspace-detail-loading-inline">Loading sessions...</div>';
+    }
+    if (this.sessionsLoadFailed) {
+      return '<div class="workspace-detail-empty workspace-detail-empty-inline">Failed to load sessions.</div>';
+    }
+    if (!Array.isArray(sessions) || sessions.length === 0) {
+      return '<div class="workspace-detail-empty workspace-detail-empty-inline">No sessions yet.</div>';
+    }
+    return sessions.map((session) => this.renderSessionItem(session)).join('');
+  }
+
+  renderTaskItem(task) {
+    const taskLabel = this.escapeHtml(task.description || task.name || 'Untitled Task');
+    const assignedAgent = task.to && task.to !== 'unassigned' ? task.to : '';
+    const subtasks = this.tasks.filter((subtask) => subtask.parent_task_id === task.id);
+    const isParent = subtasks.length > 0;
+    const statusInfo = this.getTaskStatusPresentation(task);
+    const hasUnassignedSubtasks = isParent && subtasks.some((subtask) => !subtask.to || subtask.to === 'unassigned');
+    const hasRunningSubtasks = isParent && subtasks.some((subtask) => subtask.status === 'in_progress');
+    const canExecute = isParent
+      ? subtasks.length > 0 && !hasUnassignedSubtasks && !hasRunningSubtasks
+      : task.status !== 'in_progress';
+    const resultData = this.getDisplayResult(task, subtasks);
+    const hasResultData = !!resultData;
+    const hasAssistData = !!statusInfo.isBlocked;
+    const executeTitle = isParent
+      ? hasUnassignedSubtasks ? 'Assign agents to all subtasks before executing'
+        : hasRunningSubtasks ? 'A subtask is already running'
+          : 'Execute workflow now'
+      : !assignedAgent ? 'Will auto-assign a workspace agent before execution'
+        : task.status === 'in_progress' ? 'Task is already running'
+          : 'Execute task now';
+    const resultTitle = hasResultData
+      ? `View ${resultData.label} from ${resultData.answeredBy || 'Unknown agent'}`
+      : '';
+    const assistTitle = statusInfo.reason || 'Agent needs your guidance before this task can continue.';
+
+    return `
       <div class="workspace-detail-item" data-task-id="${task.id}">
         ${hasAssistData ? `
         <button type="button"
@@ -886,8 +1081,151 @@ export class WorkspaceDetailPage {
           </div>
         </div>
       </div>
-      `;
-    }).join('');
+    `;
+  }
+
+  renderSessionItem(session) {
+    return `
+      <div class="workspace-detail-item" data-session-id="${session.id}">
+        <button type="button" class="workspace-detail-item-delete" onclick="event.stopPropagation(); window.workspaceDetail?.deleteSession('${session.id}')" title="Delete session" aria-label="Delete session ${this.escapeHtml(session.title || session.name || 'Untitled Session')}">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+            <path d="M19,4H15.5L14.5,3H9.5L8.5,4H5V6H19M6,19A2,2 0 0,0 8,21H16A2,2 0 0,0 18,19V7H6V19Z"/>
+          </svg>
+        </button>
+        <div class="workspace-detail-item-content"
+             role="button"
+             tabindex="0"
+             aria-label="Open session ${this.escapeHtml(session.title || session.name || 'Untitled Session')}"
+             onclick="window.workspaceDetail?.openSession('${session.id}')"
+             onkeydown="if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); window.workspaceDetail?.openSession('${session.id}'); }">
+          <div class="workspace-detail-item-title">${this.escapeHtml(session.title || session.name || 'Untitled Session')}</div>
+          <div class="workspace-detail-item-meta">
+            ${session.agent_name ? `${this.escapeHtml(session.agent_name)} · ` : ''}
+            ${formatDate(session.updated_at || session.created_at)}
+          </div>
+        </div>
+      </div>
+    `;
+  }
+
+  async openAddAgentModal() {
+    await this.loadAgentCatalog(true);
+    await this.populateAddAgentOptions();
+
+    if (this.elements.addAgentModal && window.bootstrap) {
+      const modal = typeof bootstrap.Modal.getOrCreateInstance === 'function'
+        ? bootstrap.Modal.getOrCreateInstance(this.elements.addAgentModal)
+        : (bootstrap.Modal.getInstance(this.elements.addAgentModal) || new bootstrap.Modal(this.elements.addAgentModal));
+      modal.show();
+    }
+  }
+
+  async populateAddAgentOptions() {
+    if (!this.elements.addAgentSelect || !this.elements.addAgentSubmitBtn || !this.elements.addAgentEmpty) return;
+
+    if (!Array.isArray(this.agentCatalog) || this.agentCatalog.length === 0) {
+      try {
+        const response = await fetch('/api/agents');
+        if (response.ok) {
+          const data = await response.json();
+          const baseAgents = Array.isArray(data?.agents) ? data.agents : [];
+          this.agentCatalog = baseAgents
+            .map((agent) => {
+              const name = typeof agent === 'string' ? agent : agent?.name;
+              return name ? { name: String(name).trim() } : null;
+            })
+            .filter((agent) => agent && agent.name);
+          this.agentIndex = new Map(this.agentCatalog.map((agent) => [this.normalizeAgentName(agent.name), agent]));
+        }
+      } catch (error) {
+        console.error('Failed to load fallback agent list:', error);
+      }
+    }
+
+    const workspaceAgents = new Set(this.getWorkspaceAgentNames().map((name) => this.normalizeAgentName(name)));
+    const allAgents = Array.isArray(this.agentCatalog) ? this.agentCatalog : [];
+    const candidates = allAgents
+      .map((agent) => String(agent?.name || '').trim())
+      .filter(Boolean)
+      .filter((name) => !workspaceAgents.has(this.normalizeAgentName(name)));
+
+    if (candidates.length === 0) {
+      this.elements.addAgentSelect.innerHTML = '<option value="">No agents available</option>';
+      this.elements.addAgentSelect.disabled = true;
+      this.elements.addAgentSubmitBtn.disabled = true;
+      this.elements.addAgentEmpty.classList.remove('d-none');
+      return;
+    }
+
+    this.elements.addAgentSelect.innerHTML = candidates
+      .map((name) => `<option value="${this.escapeHtml(name)}">${this.escapeHtml(name)}</option>`)
+      .join('');
+    this.elements.addAgentSelect.disabled = false;
+    this.elements.addAgentSubmitBtn.disabled = false;
+    this.elements.addAgentEmpty.classList.add('d-none');
+  }
+
+  openCreateAgentFlow() {
+    if (this.elements.addAgentModal && window.bootstrap) {
+      const modal = bootstrap.Modal.getInstance(this.elements.addAgentModal);
+      modal?.hide();
+    }
+
+    if (typeof window.showAddAgentModal === 'function') {
+      window.showAddAgentModal();
+      return;
+    }
+
+    window.location.href = '/agents';
+  }
+
+  async addSelectedAgentToWorkspace() {
+    const agentName = String(this.elements.addAgentSelect?.value || '').trim();
+    if (!agentName) {
+      if (window.Toast) window.Toast.warning('Select an agent first.');
+      return;
+    }
+
+    const submitButton = this.elements.addAgentSubmitBtn;
+    const originalLabel = submitButton ? submitButton.innerHTML : '';
+    if (submitButton) {
+      submitButton.disabled = true;
+      submitButton.innerHTML = '<span class="spinner-border spinner-border-sm me-1" aria-hidden="true"></span>Adding...';
+    }
+
+    try {
+      const response = await fetch(`/api/workspaces/${encodeURIComponent(this.workspaceId)}/agents`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ agent_name: agentName })
+      });
+      if (!response.ok) {
+        const text = await response.text();
+        throw new Error(text || 'Failed to add agent to workspace');
+      }
+
+      if (window.Toast) window.Toast.success(`Added "${agentName}" to workspace`);
+
+      if (this.elements.addAgentModal && window.bootstrap) {
+        const modal = bootstrap.Modal.getInstance(this.elements.addAgentModal);
+        modal?.hide();
+      }
+
+      this.agentOptions = null;
+      await Promise.all([
+        this.loadWorkspace(),
+        this.loadAgentCatalog(true)
+      ]);
+      this.renderAgentGroups();
+    } catch (error) {
+      console.error('Failed to add agent to workspace:', error);
+      if (window.Toast) window.Toast.error(error.message || 'Failed to add agent');
+    } finally {
+      if (submitButton) {
+        submitButton.disabled = false;
+        submitButton.innerHTML = originalLabel;
+      }
+    }
   }
 
   getTaskHumanLoop(task) {
@@ -1679,13 +2017,13 @@ export class WorkspaceDetailPage {
     }
 
     // Toggle panel class for expanded board view
-    if (this.elements.tasksPanel) {
-      this.elements.tasksPanel.classList.toggle('board-view', view === 'board');
+    if (this.elements.agentsPanel) {
+      this.elements.agentsPanel.classList.toggle('board-view', view === 'board');
     }
 
     // Show/hide views
-    if (this.elements.tasksList) {
-      this.elements.tasksList.style.display = view === 'list' ? '' : 'none';
+    if (this.elements.agentsList) {
+      this.elements.agentsList.style.display = view === 'list' ? '' : 'none';
     }
     if (this.elements.tasksBoard) {
       this.elements.tasksBoard.style.display = view === 'board' ? '' : 'none';
@@ -2656,9 +2994,9 @@ export class WorkspaceDetailPage {
    * Load sessions for the workspace
    */
   async loadSessions() {
-    if (this.elements.sessionsList) {
-      this.elements.sessionsList.innerHTML = '<div class="workspace-detail-loading">Loading sessions...</div>';
-    }
+    this.sessionsLoading = true;
+    this.sessionsLoadFailed = false;
+    this.renderAgentGroups();
 
     try {
       const response = await fetch(`/api/sessions?folder_id=${encodeURIComponent(this.workspaceId)}`);
@@ -2666,52 +3004,26 @@ export class WorkspaceDetailPage {
 
       const data = await response.json();
       this.sessions = data.sessions || data || [];
-      this.renderSessions();
-
-      // Update session count
-      if (this.elements.sessionCount) {
-        this.elements.sessionCount.textContent = this.sessions.length;
-      }
+      this.sessionsLoadFailed = false;
     } catch (error) {
       console.error('Failed to load sessions:', error);
-      if (this.elements.sessionsList) {
-        this.elements.sessionsList.innerHTML = '<div class="workspace-detail-empty">Failed to load sessions</div>';
+      this.sessions = [];
+      this.sessionsLoadFailed = true;
+    } finally {
+      this.sessionsLoading = false;
+      this.renderSessions();
+
+      if (this.elements.sessionCount) {
+        this.elements.sessionCount.textContent = this.sessions.length;
       }
     }
   }
 
   /**
-   * Render sessions list
+   * Render sessions grouped by agent
    */
   renderSessions() {
-    if (!this.elements.sessionsList) return;
-
-    if (this.sessions.length === 0) {
-      this.elements.sessionsList.innerHTML = '<div class="workspace-detail-empty">No chat sessions yet.</div>';
-      return;
-    }
-
-    this.elements.sessionsList.innerHTML = this.sessions.map(session => `
-      <div class="workspace-detail-item" data-session-id="${session.id}">
-        <button type="button" class="workspace-detail-item-delete" onclick="event.stopPropagation(); window.workspaceDetail?.deleteSession('${session.id}')" title="Delete session" aria-label="Delete session ${this.escapeHtml(session.title || session.name || 'Untitled Session')}">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
-            <path d="M19,4H15.5L14.5,3H9.5L8.5,4H5V6H19M6,19A2,2 0 0,0 8,21H16A2,2 0 0,0 18,19V7H6V19Z"/>
-          </svg>
-        </button>
-        <div class="workspace-detail-item-content"
-             role="button"
-             tabindex="0"
-             aria-label="Open session ${this.escapeHtml(session.title || session.name || 'Untitled Session')}"
-             onclick="window.workspaceDetail?.openSession('${session.id}')"
-             onkeydown="if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); window.workspaceDetail?.openSession('${session.id}'); }">
-          <div class="workspace-detail-item-title">${this.escapeHtml(session.title || session.name || 'Untitled Session')}</div>
-          <div class="workspace-detail-item-meta">
-            ${session.agent_name ? `${this.escapeHtml(session.agent_name)} · ` : ''}
-            ${formatDate(session.updated_at || session.created_at)}
-          </div>
-        </div>
-      </div>
-    `).join('');
+    this.renderAgentGroups();
   }
 
   /**
@@ -4132,6 +4444,13 @@ export class WorkspaceDetailPage {
     }
   }
 
+  showAddTaskModalForAgent(encodedAgentName = '') {
+    // Keep current behavior (workspace task modal), but route from per-agent section actions.
+    // Future enhancement can preselect agent assignment in the task modal.
+    void encodedAgentName;
+    this.showAddTaskModal();
+  }
+
   /**
    * Open a task for editing
    */
@@ -4221,6 +4540,22 @@ export class WorkspaceDetailPage {
       // Fallback to simple API call
       this.createSimpleSession();
     }
+  }
+
+  createNewSessionForAgent(encodedAgentName = '') {
+    let agentName = '';
+    try {
+      agentName = decodeURIComponent(String(encodedAgentName || '')).trim();
+    } catch (_error) {
+      agentName = String(encodedAgentName || '').trim();
+    }
+
+    if (agentName && window.sessionManager && typeof window.sessionManager.createSessionWithAgentInFolder === 'function') {
+      window.sessionManager.createSessionWithAgentInFolder(agentName, this.workspaceId);
+      return;
+    }
+
+    this.createNewSession();
   }
 
   /**

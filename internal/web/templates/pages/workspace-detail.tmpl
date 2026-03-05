@@ -121,14 +121,14 @@
 
           <!-- Bento Grid Panels -->
           <div class="workspace-detail-bento">
-            <!-- Tasks Panel - Left column (rows 1-4) -->
-            <div class="modern-card workspace-detail-panel workspace-detail-panel-tasks" id="workspace-detail-tasks-panel">
+            <!-- Agents Panel - Left column (rows 1-4) -->
+            <div class="modern-card workspace-detail-panel workspace-detail-panel-agents" id="workspace-detail-agents-panel">
               <div class="workspace-detail-panel-header">
                 <h2 class="workspace-detail-panel-title">
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
-                    <path d="M19,3H5A2,2 0 0,0 3,5V19A2,2 0 0,0 5,21H19A2,2 0 0,0 21,19V5A2,2 0 0,0 19,3M19,19H5V5H19V19M17,8.4L15.6,7L10,12.6L7.4,10L6,11.4L10,15.4L17,8.4Z"/>
+                    <path d="M16,4A2,2 0 0,1 18,6V8A2,2 0 0,1 16,10H13A2,2 0 0,1 11,8V6A2,2 0 0,1 13,4H16M11,14A2,2 0 0,1 13,16V18A2,2 0 0,1 11,20H8A2,2 0 0,1 6,18V16A2,2 0 0,1 8,14H11M21,14A2,2 0 0,1 23,16V18A2,2 0 0,1 21,20H18A2,2 0 0,1 16,18V16A2,2 0 0,1 18,14H21M10.5,8H7A2,2 0 0,0 5,10V11H2V13H5V14A2,2 0 0,0 7,16H8V14H7V10H10.5V8Z"/>
                   </svg>
-                  Tasks
+                  Agents
                 </h2>
                 <div class="workspace-detail-panel-actions">
                   <div class="workspace-detail-view-toggle" role="tablist">
@@ -148,16 +148,16 @@
                       <path d="M17.65,6.35C16.2,4.9 14.21,4 12,4A8,8 0 0,0 4,12A8,8 0 0,0 12,20C15.73,20 18.84,17.45 19.73,14H17.65C16.83,16.33 14.61,18 12,18A6,6 0 0,1 6,12A6,6 0 0,1 12,6C13.66,6 15.14,6.69 16.22,7.78L13,11H20V4L17.65,6.35Z"/>
                     </svg>
                   </button>
-                  <button id="workspace-detail-add-task" class="workspace-detail-panel-btn workspace-detail-panel-btn-primary" type="button" title="Add task">
+                  <button id="workspace-detail-add-agent-btn" class="workspace-detail-panel-btn" type="button" title="Add agent to workspace">
                     <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
-                      <path d="M19,13H13V19H11V13H5V11H11V5H13V11H19V13Z"/>
+                      <path d="M15,14C12.33,14 7,15.33 7,18V20H23V18C23,15.33 17.67,14 15,14M6,10V7H4V10H1V12H4V15H6V12H9V10M15,12A4,4 0 0,0 19,8A4,4 0 0,0 15,4A4,4 0 0,0 11,8A4,4 0 0,0 15,12Z"/>
                     </svg>
                   </button>
                 </div>
               </div>
               <div class="workspace-detail-panel-body">
-                <div id="workspace-detail-tasks-list" class="workspace-detail-list">
-                  <div class="workspace-detail-loading">Loading tasks...</div>
+                <div id="workspace-detail-agents-list" class="workspace-detail-agent-grid">
+                  <div class="workspace-detail-loading">Loading agents...</div>
                 </div>
                 <div id="workspace-detail-tasks-board" class="workspace-detail-board" style="display: none;">
                   <div class="workspace-detail-board-columns" id="workspace-detail-board-columns"></div>
@@ -168,30 +168,6 @@
                     <p>No board configured.</p>
                     <button id="workspace-detail-board-setup" class="modern-btn modern-btn-primary modern-btn-sm" type="button">Set Up Board</button>
                   </div>
-                </div>
-              </div>
-            </div>
-
-            <!-- Sessions Panel - Middle column (rows 1-4) -->
-            <div class="modern-card workspace-detail-panel workspace-detail-panel-sessions" id="workspace-detail-sessions-panel">
-              <div class="workspace-detail-panel-header">
-                <h2 class="workspace-detail-panel-title">
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
-                    <path d="M20,2H4A2,2 0 0,0 2,4V22L6,18H20A2,2 0 0,0 22,16V4A2,2 0 0,0 20,2M20,16H6L4,18V4H20"/>
-                  </svg>
-                  Sessions
-                </h2>
-                <div class="workspace-detail-panel-actions">
-                  <button id="workspace-detail-new-session" class="workspace-detail-panel-btn workspace-detail-panel-btn-primary" type="button" title="New chat">
-                    <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
-                      <path d="M19,13H13V19H11V13H5V11H11V5H13V11H19V13Z"/>
-                    </svg>
-                  </button>
-                </div>
-              </div>
-              <div class="workspace-detail-panel-body">
-                <div id="workspace-detail-sessions-list" class="workspace-detail-list">
-                  <div class="workspace-detail-empty">No sessions yet.</div>
                 </div>
               </div>
             </div>
@@ -499,6 +475,34 @@
     </div>
   </div>
 
+  <!-- Add Agent To Workspace Modal -->
+  <div class="modal fade" id="workspace-detail-add-agent-modal" tabindex="-1" aria-labelledby="workspace-detail-add-agent-title" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h5 class="modal-title" id="workspace-detail-add-agent-title">Add Agent to Workspace</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+        </div>
+        <div class="modal-body">
+          <div class="mb-3">
+            <label for="workspace-detail-add-agent-select" class="form-label">Available Agents</label>
+            <select id="workspace-detail-add-agent-select" class="form-select">
+              <option value="">Loading agents...</option>
+            </select>
+          </div>
+          <div id="workspace-detail-add-agent-empty" class="alert alert-info d-none mb-0">
+            No unassigned agents are available. Create a new agent first.
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" id="workspace-detail-create-agent-btn" class="btn btn-outline-secondary">Create Agent</button>
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+          <button type="button" class="btn btn-primary" id="workspace-detail-add-agent-submit">Add to Workspace</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <!-- Directory Explorer Modal -->
   <div class="modal fade" id="workspace-directory-explorer-modal" tabindex="-1" aria-labelledby="workspace-directory-explorer-title" aria-hidden="true">
     <div class="modal-dialog modal-xl modal-dialog-centered workspace-directory-explorer-dialog">
@@ -553,7 +557,7 @@
     /* Bento Grid Layout */
     .workspace-detail-bento {
       display: grid;
-      grid-template-columns: 2fr 1fr 1fr;
+      grid-template-columns: 2fr 1fr;
       grid-template-rows: repeat(4, 1fr);
       gap: 0.5rem;
       height: calc(100vh - 280px);
@@ -566,59 +570,53 @@
     }
 
     /* Panel positioning */
-    .workspace-detail-panel-tasks {
+    .workspace-detail-panel-agents {
       grid-column: 1;
       grid-row: 1 / -1;
     }
 
-    .workspace-detail-panel-sessions {
-      grid-column: 2;
-      grid-row: 1 / -1;
-    }
-
     .workspace-detail-panel-notes {
-      grid-column: 3;
+      grid-column: 2;
       grid-row: 1;
     }
 
     .workspace-detail-panel-files {
-      grid-column: 3;
+      grid-column: 2;
       grid-row: 2;
     }
 
     .workspace-detail-panel-directories {
-      grid-column: 3;
+      grid-column: 2;
       grid-row: 3;
     }
 
     .workspace-detail-panel-schedules {
-      grid-column: 3;
+      grid-column: 2;
       grid-row: 4;
     }
 
     /* Responsive layout */
     @media (max-width: 1200px) {
       .workspace-detail-bento {
-        grid-template-columns: 1fr 1fr;
+        grid-template-columns: 1fr;
         grid-template-rows: auto auto auto auto auto;
         height: auto;
         min-height: auto;
         max-height: none;
       }
 
-      .workspace-detail-panel-tasks {
+      .workspace-detail-panel-agents {
         grid-column: 1 / -1;
         grid-row: 1;
       }
 
-      .workspace-detail-panel-sessions {
+      .workspace-detail-panel-notes {
         grid-column: 1 / -1;
         grid-row: 2;
       }
 
-      .workspace-detail-panel-notes,
       .workspace-detail-panel-files {
-        grid-column: span 1;
+        grid-column: 1 / -1;
         grid-row: 3;
       }
 
@@ -737,6 +735,120 @@
       flex-direction: column;
       gap: 0.35rem;
       padding-top: 0.5rem;
+    }
+
+    .workspace-detail-agent-grid {
+      display: flex;
+      flex-direction: column;
+      gap: 0.65rem;
+      padding-top: 0.5rem;
+    }
+
+    .workspace-detail-agent-card {
+      border: 1px solid var(--border-color);
+      background: var(--bg-secondary);
+      border-radius: 10px;
+      padding: 0.6rem;
+      display: flex;
+      flex-direction: column;
+      gap: 0.5rem;
+    }
+
+    .workspace-detail-agent-card-header {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 0.75rem;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+      padding-bottom: 0.45rem;
+    }
+
+    .workspace-detail-agent-card-title {
+      font-size: 0.8rem;
+      font-weight: 600;
+      color: var(--text-primary);
+      display: flex;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 0.35rem;
+    }
+
+    .workspace-detail-agent-card-meta {
+      font-size: 0.68rem;
+      color: var(--text-secondary);
+      white-space: nowrap;
+      margin-top: 0.06rem;
+    }
+
+    .workspace-detail-agent-sections {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 0.55rem;
+    }
+
+    @media (max-width: 900px) {
+      .workspace-detail-agent-sections {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    .workspace-detail-agent-section {
+      background: var(--bg-primary);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      border-radius: 8px;
+      padding: 0.5rem;
+      min-height: 120px;
+      display: flex;
+      flex-direction: column;
+      gap: 0.4rem;
+    }
+
+    .workspace-detail-agent-section-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 0.4rem;
+    }
+
+    .workspace-detail-agent-section-title {
+      font-size: 0.68rem;
+      font-weight: 600;
+      color: var(--text-secondary);
+      letter-spacing: 0.02em;
+      text-transform: uppercase;
+    }
+
+    .workspace-detail-agent-section-btn {
+      border: 1px solid rgba(255, 255, 255, 0.15);
+      background: var(--bg-secondary);
+      color: var(--text-secondary);
+      width: 22px;
+      height: 22px;
+      border-radius: 6px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      padding: 0;
+      transition: background-color 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+    }
+
+    .workspace-detail-agent-section-btn:hover {
+      color: var(--text-primary);
+      border-color: var(--primary-color);
+      background: rgba(var(--primary-color-rgb, 255, 138, 86), 0.14);
+    }
+
+    .workspace-detail-agent-list {
+      flex: 1;
+      gap: 0.35rem;
+      padding-top: 0;
+    }
+
+    .workspace-detail-empty.workspace-detail-empty-inline,
+    .workspace-detail-loading.workspace-detail-loading-inline {
+      text-align: left;
+      padding: 0.2rem 0.1rem;
+      font-size: 0.72rem;
     }
 
     .workspace-detail-loading,
@@ -1622,13 +1734,13 @@
 
     /* Board view reorganizes the grid */
     .workspace-detail-bento:has(.board-view) {
-      grid-template-columns: repeat(5, 1fr);
+      grid-template-columns: repeat(4, 1fr);
       grid-template-rows: 1fr auto;
       height: auto;
       min-height: 500px;
     }
 
-    .workspace-detail-panel-tasks.board-view {
+    .workspace-detail-panel-agents.board-view {
       grid-column: 1 / -1;
       grid-row: 1;
       min-height: 350px;
@@ -1636,28 +1748,23 @@
     }
 
     /* Rearrange other panels to bottom row when board view is active */
-    .workspace-detail-bento:has(.board-view) .workspace-detail-panel-sessions {
+    .workspace-detail-bento:has(.board-view) .workspace-detail-panel-notes {
       grid-column: 1;
       grid-row: 2;
     }
 
-    .workspace-detail-bento:has(.board-view) .workspace-detail-panel-notes {
+    .workspace-detail-bento:has(.board-view) .workspace-detail-panel-files {
       grid-column: 2;
       grid-row: 2;
     }
 
-    .workspace-detail-bento:has(.board-view) .workspace-detail-panel-files {
+    .workspace-detail-bento:has(.board-view) .workspace-detail-panel-directories {
       grid-column: 3;
       grid-row: 2;
     }
 
-    .workspace-detail-bento:has(.board-view) .workspace-detail-panel-directories {
-      grid-column: 4;
-      grid-row: 2;
-    }
-
     .workspace-detail-bento:has(.board-view) .workspace-detail-panel-schedules {
-      grid-column: 5;
+      grid-column: 4;
       grid-row: 2;
     }
 
@@ -1666,7 +1773,7 @@
       animation: slideInUp 0.4s cubic-bezier(0.4, 0, 0.2, 1) forwards;
     }
 
-    .workspace-detail-panel-tasks.board-view {
+    .workspace-detail-panel-agents.board-view {
       animation: expandBoard 0.4s cubic-bezier(0.4, 0, 0.2, 1) forwards;
     }
 
@@ -1693,24 +1800,20 @@
     }
 
     /* Stagger animation for bottom panels */
-    .workspace-detail-bento:has(.board-view) .workspace-detail-panel-sessions {
+    .workspace-detail-bento:has(.board-view) .workspace-detail-panel-notes {
       animation-delay: 0.05s;
     }
 
-    .workspace-detail-bento:has(.board-view) .workspace-detail-panel-notes {
+    .workspace-detail-bento:has(.board-view) .workspace-detail-panel-files {
       animation-delay: 0.1s;
     }
 
-    .workspace-detail-bento:has(.board-view) .workspace-detail-panel-files {
+    .workspace-detail-bento:has(.board-view) .workspace-detail-panel-directories {
       animation-delay: 0.15s;
     }
 
-    .workspace-detail-bento:has(.board-view) .workspace-detail-panel-directories {
-      animation-delay: 0.2s;
-    }
-
     .workspace-detail-bento:has(.board-view) .workspace-detail-panel-schedules {
-      animation-delay: 0.25s;
+      animation-delay: 0.2s;
     }
 
     /* Children workspaces grid */

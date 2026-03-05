@@ -94,7 +94,11 @@ async function loadSettings() {
     settingsLog.debug('Settings loaded successfully');
     EventBus.emit('settings:loaded', settings);
   } catch (error) {
-    settingsLog.error('Error loading settings:', error);
+    if (error && error.status === 404) {
+      settingsLog.debug('Settings endpoint unavailable in this context, using defaults');
+    } else {
+      settingsLog.error('Error loading settings:', error);
+    }
     // Fallback to defaults
     const modelSelect = document.getElementById('gptModelSelect');
     const temperatureSlider = document.getElementById('temperatureSlider');
@@ -265,8 +269,16 @@ function setupSettings() {
     });
   });
 
-  // Load current settings
-  loadSettings();
+  // Only load settings when settings controls exist on the page.
+  const hasSettingsControls = Boolean(
+    modelSelect ||
+    temperatureSlider ||
+    updateBtn ||
+    document.getElementById('systemPromptInput')
+  );
+  if (hasSettingsControls) {
+    loadSettings();
+  }
 
   settingsLog.debug('Settings management setup complete');
 }

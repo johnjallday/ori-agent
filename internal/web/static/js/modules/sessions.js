@@ -1128,7 +1128,10 @@ const sessionManager = {
       const agents = await this.fetchAgents();
 
       if (!agents || agents.length === 0) {
-        console.error('No agents available');
+        console.warn('No agents available');
+        if (window.Toast) {
+          Toast.warning('No agents configured yet. Create an agent first.');
+        }
         return;
       }
 
@@ -1204,11 +1207,17 @@ const sessionManager = {
   // Show create chat modal with workspace pre-selected
   async showCreateChatModalForWorkspace(workspaceId) {
     try {
-      // Fetch agents
-      const agents = await this.fetchAgents();
+      // Prefer agents configured in this workspace; fall back to global agents
+      const agents = await this.fetchWorkspaceAgents(workspaceId);
 
       if (!agents || agents.length === 0) {
-        console.error('No agents available');
+        console.warn('No agents available');
+        if (window.Toast) {
+          Toast.warning('No agents available in this workspace. Add an agent to continue.');
+        }
+        if (window.workspaceDetail && typeof window.workspaceDetail.openAddAgentModal === 'function') {
+          window.workspaceDetail.openAddAgentModal();
+        }
         return;
       }
 
@@ -1324,21 +1333,29 @@ const sessionManager = {
     }
 
     if (this.chatAutoMode && this.chatLlmAvailable) {
-      // Auto mode - create session with default agent
-      // If workspace is pre-selected, use it (no AI classification needed for workspace)
-      const agents = await this.fetchAgents();
-      if (!agents || agents.length === 0) {
-        console.error('No agents available');
-        return;
-      }
-
       // Check if workspace was pre-selected
       const workspaceSelect = document.getElementById('chatWorkspaceSelect');
       const preSelectedWorkspace = workspaceSelect?.value || '';
 
-      // Use pre-selected agent from dropdown (set when clicking Chat on an agent card), or first agent as fallback
+      // Use selected agent from dropdown first, then workspace/global fallbacks.
       const agentSelect = document.getElementById('chatAgentSelect');
-      const defaultAgent = agentSelect?.value || agents[0].name;
+      let defaultAgent = agentSelect?.value || '';
+      if (!defaultAgent && agentSelect && agentSelect.options && agentSelect.options.length > 0) {
+        defaultAgent = agentSelect.options[0].value || '';
+      }
+      if (!defaultAgent) {
+        const fallbackAgents = preSelectedWorkspace
+          ? await this.fetchWorkspaceAgents(preSelectedWorkspace)
+          : await this.fetchAgents();
+        defaultAgent = fallbackAgents[0]?.name || '';
+      }
+      if (!defaultAgent) {
+        console.warn('No agents available');
+        if (window.Toast) {
+          Toast.warning('No agents available. Add an agent first.');
+        }
+        return;
+      }
 
       let session;
       if (preSelectedWorkspace) {
@@ -1555,16 +1572,87 @@ const sessionManager = {
     return response.json();
   },
 
-  // Fetch available agents
+  normalizeAgentList(rawAgents) {
+    const source = Array.isArray(rawAgents) ? rawAgents : [];
+    const result = [];
+    const seen = new Set();
+
+    source.forEach((agent) => {
+      const isString = typeof agent === 'string';
+      const name = String(isString ? agent : agent?.name || '').trim();
+      if (!name) return;
+
+      const key = name.toLowerCase();
+      if (seen.has(key)) return;
+      seen.add(key);
+
+      result.push({
+        name,
+        model: isString ? '' : String(agent?.model || '').trim(),
+        description: isString ? '' : String(agent?.description || '').trim()
+      });
+    });
+
+    return result;
+  },
+
+  // Fetch available global agents
   async fetchAgents() {
     try {
       const response = await fetch('/api/agents');
-      if (!response.ok) return [];
-      const data = await response.json();
-      return data.agents || [];
+      if (response.ok) {
+        const data = await response.json();
+        const agents = this.normalizeAgentList(data.agents);
+        if (agents.length > 0) return agents;
+      }
+
+      // Fallback endpoint used by dashboard/workspace pages
+      const fallback = await fetch('/api/agents/dashboard/list');
+      if (!fallback.ok) return [];
+      const fallbackData = await fallback.json();
+      return this.normalizeAgentList(fallbackData.agents);
     } catch (error) {
       console.error('Failed to fetch agents:', error);
       return [];
+    }
+  },
+
+  // Fetch agents scoped to a workspace; falls back to global agents
+  async fetchWorkspaceAgents(workspaceId) {
+    const globalAgents = await this.fetchAgents();
+    if (!workspaceId) return globalAgents;
+
+    try {
+      const response = await fetch(`/api/orchestration/workspace?id=${encodeURIComponent(workspaceId)}`);
+      if (!response.ok) return globalAgents;
+
+      const workspace = await response.json();
+      const names = [];
+      const seen = new Set();
+
+      const addName = (value) => {
+        const name = String(value || '').trim();
+        if (!name) return;
+        const key = name.toLowerCase();
+        if (seen.has(key)) return;
+        seen.add(key);
+        names.push(name);
+      };
+
+      if (Array.isArray(workspace?.agent_instances)) {
+        workspace.agent_instances.forEach((instance) => addName(instance?.name));
+      }
+      if (Array.isArray(workspace?.agents)) {
+        workspace.agents.forEach((name) => addName(name));
+      }
+
+      if (names.length === 0) return globalAgents;
+
+      const globalByName = new Map(globalAgents.map((agent) => [String(agent.name || '').toLowerCase(), agent]));
+      return names.map((name) => globalByName.get(name.toLowerCase()) || { name, model: '', description: '' });
+    } catch (error) {
+      console.error('Failed to fetch workspace agents:', error);
+      return globalAgents;
     }
   },
 
@@ -1686,10 +1774,13 @@ const sessionManager = {
   // Create a new session in a specific folder/workspace
   async createNewSessionInFolder(folderId) {
     try {
-      // Fetch available agents
-      const agents = await this.fetchAgents();
+      // Fetch agents scoped to the folder first
+      const agents = await this.fetchWorkspaceAgents(folderId);
       if (!agents || agents.length === 0) {
-        console.error('No agents available');
+        console.warn('No agents available');
+        if (window.Toast) {
+          Toast.warning('No agents available in this workspace. Add an agent first.');
+        }
         return;
       }
 
@@ -6217,31 +6308,37 @@ const sessionManager = {
       }
     });
 
-    // Task modal event handlers
-    document.getElementById('taskModalClose')?.addEventListener('click', () => this.closeTaskModal());
-    document.getElementById('taskModalCancel')?.addEventListener('click', () => this.closeTaskModal());
-    document.getElementById('taskModalSave')?.addEventListener('click', () => this.saveTaskFromModal());
-    document.querySelector('.task-modal-backdrop')?.addEventListener('click', () => this.closeTaskModal());
+    // Shared task modal controller owns these bindings when present.
+    const hasSharedTaskController = Boolean(
+      window.taskModalController && typeof window.taskModalController.openForCreate === 'function'
+    );
+    if (!hasSharedTaskController) {
+      // Task modal event handlers
+      document.getElementById('taskModalClose')?.addEventListener('click', () => this.closeTaskModal());
+      document.getElementById('taskModalCancel')?.addEventListener('click', () => this.closeTaskModal());
+      document.getElementById('taskModalSave')?.addEventListener('click', () => this.saveTaskFromModal());
+      document.querySelector('.task-modal-backdrop')?.addEventListener('click', () => this.closeTaskModal());
 
-    // Schedule fields toggle
-    document.getElementById('taskModalScheduleEnabled')?.addEventListener('change', (e) => {
-      const scheduleFields = document.getElementById('taskModalScheduleFields');
-      if (scheduleFields) {
-        scheduleFields.style.display = e.target.checked ? 'block' : 'none';
-      }
-    });
+      // Schedule fields toggle
+      document.getElementById('taskModalScheduleEnabled')?.addEventListener('change', (e) => {
+        const scheduleFields = document.getElementById('taskModalScheduleFields');
+        if (scheduleFields) {
+          scheduleFields.style.display = e.target.checked ? 'block' : 'none';
+        }
+      });
 
-    // Schedule type change handler
-    document.getElementById('taskModalScheduleType')?.addEventListener('change', (e) => {
-      this.updateTaskModalScheduleTypeFields();
-    });
+      // Schedule type change handler
+      document.getElementById('taskModalScheduleType')?.addEventListener('change', () => {
+        this.updateTaskModalScheduleTypeFields();
+      });
 
-    // Modal escape key for task modal
-    document.getElementById('taskModal')?.addEventListener('keydown', (e) => {
-      if (e.key === 'Escape') {
-        this.closeTaskModal();
-      }
-    });
+      // Modal escape key for task modal
+      document.getElementById('taskModal')?.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') {
+          this.closeTaskModal();
+        }
+      });
+    }
 
     // Escape key for main task modal
     document.getElementById('mainTaskModal')?.addEventListener('keydown', (e) => {
