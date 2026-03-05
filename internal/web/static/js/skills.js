@@ -6,8 +6,10 @@ let selectedAgentName = '';
 let defaultAgentName = '';
 let editingSkillName = '';
 let marketplaceResults = [];
+let marketplaceInstalledSkills = [];
 let marketplaceSearchBusy = false;
 let marketplaceInstallBusy = false;
+let marketplaceManageBusy = false;
 
 function getSkillPageDefaultAgent() {
   const page = document.getElementById('skillsPage');
@@ -131,8 +133,10 @@ function renderSkills(skills) {
       </div>
       <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: auto; padding-top: 12px;">
         <button class="modern-btn modern-btn-secondary btn-sm" data-action="run" ${(requiresTrust || hasErrors) ? 'disabled' : ''}>Run</button>
-        <button class="modern-btn modern-btn-secondary btn-sm" data-action="edit" ${isEditable ? '' : 'disabled'}>Edit</button>
-        <button class="modern-btn modern-btn-secondary btn-sm" data-action="delete" ${isEditable ? '' : 'disabled'}>Delete</button>
+        ${isEditable
+    ? `<button class="modern-btn modern-btn-secondary btn-sm" data-action="edit">Edit</button>
+           <button class="modern-btn modern-btn-secondary btn-sm" data-action="delete">Delete</button>`
+    : `<button class="modern-btn modern-btn-secondary btn-sm" data-action="clone">Clone & Edit</button>`}
         ${hasScripts ? `<button class="modern-btn modern-btn-secondary btn-sm" data-action="trust">${isTrusted ? 'Untrust' : 'Trust'}</button>` : ''}
       </div>
     `;
@@ -150,6 +154,11 @@ function renderSkills(skills) {
     const deleteBtn = card.querySelector('[data-action="delete"]');
     if (deleteBtn) {
       deleteBtn.addEventListener('click', () => deleteSkill(skill));
+    }
+
+    const cloneBtn = card.querySelector('[data-action="clone"]');
+    if (cloneBtn) {
+      cloneBtn.addEventListener('click', () => cloneSkillToAgent(skill));
     }
 
     const trustBtn = card.querySelector('[data-action="trust"]');
@@ -294,6 +303,12 @@ function setupSkillsEvents() {
   const marketPackageInput = document.getElementById('skillsMarketplacePackageInput');
   const marketInstallBtn = document.getElementById('skillsMarketplaceInstallBtn');
   const marketQuickFindSkillsBtn = document.getElementById('skillsMarketplaceQuickFindSkillsBtn');
+  const marketManageTab = document.getElementById('skillsMarketplaceManageTab');
+  const marketManageRefreshBtn = document.getElementById('skillsMarketplaceManageRefreshBtn');
+  const marketCheckUpdatesBtn = document.getElementById('skillsMarketplaceCheckUpdatesBtn');
+  const marketUpdateAllBtn = document.getElementById('skillsMarketplaceUpdateAllBtn');
+  const marketRemoveInput = document.getElementById('skillsMarketplaceRemoveSkillInput');
+  const marketRemoveBtn = document.getElementById('skillsMarketplaceRemoveBtn');
 
   if (select) {
     select.addEventListener('change', () => {
@@ -362,6 +377,42 @@ function setupSkillsEvents() {
       installMarketplacePackage(findSkillsPackage);
     });
   }
+
+  if (marketManageTab) {
+    marketManageTab.addEventListener('shown.bs.tab', () => {
+      if (!Array.isArray(marketplaceInstalledSkills) || marketplaceInstalledSkills.length === 0) {
+        loadInstalledMarketplaceSkills();
+      }
+    });
+  }
+
+  if (marketManageRefreshBtn) {
+    marketManageRefreshBtn.addEventListener('click', () => loadInstalledMarketplaceSkills());
+  }
+
+  if (marketCheckUpdatesBtn) {
+    marketCheckUpdatesBtn.addEventListener('click', () => checkMarketplaceUpdates());
+  }
+
+  if (marketUpdateAllBtn) {
+    marketUpdateAllBtn.addEventListener('click', () => updateMarketplaceSkills());
+  }
+
+  if (marketRemoveBtn) {
+    marketRemoveBtn.addEventListener('click', () => {
+      const value = marketRemoveInput ? marketRemoveInput.value : '';
+      removeMarketplaceSkill(value);
+    });
+  }
+
+  if (marketRemoveInput) {
+    marketRemoveInput.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter') {
+        event.preventDefault();
+        removeMarketplaceSkill(marketRemoveInput.value);
+      }
+    });
+  }
 }
 
 function getEditorModal() {
@@ -409,11 +460,28 @@ function setMarketplaceActionBusy(isBusy) {
   const quickBtn = document.getElementById('skillsMarketplaceQuickFindSkillsBtn');
   const queryInput = document.getElementById('skillsMarketplaceSearchQuery');
   const packageInput = document.getElementById('skillsMarketplacePackageInput');
+  const refreshBtn = document.getElementById('skillsMarketplaceManageRefreshBtn');
+  const checkBtn = document.getElementById('skillsMarketplaceCheckUpdatesBtn');
+  const updateBtn = document.getElementById('skillsMarketplaceUpdateAllBtn');
+  const removeInput = document.getElementById('skillsMarketplaceRemoveSkillInput');
+  const removeBtn = document.getElementById('skillsMarketplaceRemoveBtn');
   if (searchBtn) searchBtn.disabled = isBusy;
   if (installBtn) installBtn.disabled = isBusy;
   if (quickBtn) quickBtn.disabled = isBusy;
   if (queryInput) queryInput.disabled = isBusy;
   if (packageInput) packageInput.disabled = isBusy;
+  if (refreshBtn) refreshBtn.disabled = isBusy;
+  if (checkBtn) checkBtn.disabled = isBusy;
+  if (updateBtn) updateBtn.disabled = isBusy;
+  if (removeInput) removeInput.disabled = isBusy;
+  if (removeBtn) removeBtn.disabled = isBusy;
+
+  document.querySelectorAll('[data-market-install]').forEach((button) => {
+    button.disabled = isBusy;
+  });
+  document.querySelectorAll('[data-market-remove]').forEach((button) => {
+    button.disabled = isBusy;
+  });
 }
 
 function renderMarketplaceResults(results) {
@@ -424,6 +492,8 @@ function renderMarketplaceResults(results) {
     setMarketplaceResultsMessage('No matching skills found. Try another query.');
     return;
   }
+
+  const anyMarketplaceBusy = marketplaceSearchBusy || marketplaceInstallBusy || marketplaceManageBusy;
 
   container.innerHTML = results.map((result) => {
     const packageSpec = result?.package || '';
@@ -447,7 +517,7 @@ function renderMarketplaceResults(results) {
         </div>
         <div style="display: flex; justify-content: space-between; align-items: center; gap: 8px;">
           ${urlHtml}
-          <button class="modern-btn modern-btn-primary btn-sm" data-market-install="${safeText(packageSpec)}" ${marketplaceInstallBusy ? 'disabled' : ''}>
+          <button class="modern-btn modern-btn-primary btn-sm" data-market-install="${safeText(packageSpec)}" ${anyMarketplaceBusy ? 'disabled' : ''}>
             Install
           </button>
         </div>
@@ -463,8 +533,221 @@ function renderMarketplaceResults(results) {
   });
 }
 
+function setMarketplaceInstalledMessage(message) {
+  const container = document.getElementById('skillsMarketplaceInstalledList');
+  if (!container) return;
+  container.innerHTML = `<div class="text-center py-3" style="color: var(--text-secondary);">${safeText(message)}</div>`;
+}
+
+function renderInstalledMarketplaceSkills(skills) {
+  const container = document.getElementById('skillsMarketplaceInstalledList');
+  if (!container) return;
+
+  if (!Array.isArray(skills) || skills.length === 0) {
+    setMarketplaceInstalledMessage('No global skills are installed yet.');
+    return;
+  }
+
+  const anyMarketplaceBusy = marketplaceSearchBusy || marketplaceInstallBusy || marketplaceManageBusy;
+
+  container.innerHTML = skills.map((skill) => {
+    const name = skill?.name || '';
+    const path = skill?.path || '';
+    const agents = skill?.agents || '';
+    const scope = skill?.scope || '';
+
+    return `
+      <div class="plugin-item" style="display: flex; flex-direction: column; gap: 10px;">
+        <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 8px;">
+          <div style="min-width: 0;">
+            <div style="font-weight: 600; color: var(--text-primary); word-break: break-word;">${safeText(name)}</div>
+            <div style="font-size: 11px; color: var(--text-secondary); margin-top: 6px; opacity: 0.85; word-break: break-all;">${safeText(path)}</div>
+          </div>
+          ${scope ? `<span class="badge bg-secondary" style="font-size: 10px;">${safeText(scope)}</span>` : ''}
+        </div>
+        <div style="display: flex; justify-content: space-between; align-items: center; gap: 8px;">
+          <small style="color: var(--text-secondary);">Agents: ${safeText(agents || 'unknown')}</small>
+          <button class="modern-btn modern-btn-secondary btn-sm" data-market-remove="${safeText(name)}" ${anyMarketplaceBusy ? 'disabled' : ''}>
+            Remove
+          </button>
+        </div>
+      </div>
+    `;
+  }).join('');
+
+  container.querySelectorAll('[data-market-remove]').forEach((button) => {
+    button.addEventListener('click', () => {
+      const skillName = button.getAttribute('data-market-remove') || '';
+      removeMarketplaceSkill(skillName);
+    });
+  });
+}
+
+async function loadInstalledMarketplaceSkills(force = false) {
+  if (!force && (marketplaceSearchBusy || marketplaceInstallBusy || marketplaceManageBusy)) return;
+
+  marketplaceManageBusy = true;
+  setMarketplaceActionBusy(true);
+  setMarketplaceStatus('Loading installed skills...', false);
+  setMarketplaceInstalledMessage('Loading installed skills...');
+
+  try {
+    const response = await fetch('/api/skills/marketplace/installed');
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      const details = data?.details ? ` ${data.details}` : '';
+      throw new Error((data?.error || 'Failed to list installed skills.') + details);
+    }
+
+    marketplaceInstalledSkills = Array.isArray(data?.skills) ? data.skills : [];
+    renderInstalledMarketplaceSkills(marketplaceInstalledSkills);
+    setMarketplaceStatus(`Loaded ${marketplaceInstalledSkills.length} installed skill${marketplaceInstalledSkills.length === 1 ? '' : 's'}.`, false);
+  } catch (error) {
+    console.error('Failed to load installed marketplace skills:', error);
+    setMarketplaceStatus(error?.message || 'Failed to load installed skills.', true);
+    setMarketplaceInstalledMessage('Could not load installed skills.');
+  } finally {
+    marketplaceManageBusy = false;
+    setMarketplaceActionBusy(false);
+  }
+}
+
+async function checkMarketplaceUpdates() {
+  if (marketplaceSearchBusy || marketplaceInstallBusy || marketplaceManageBusy) return;
+
+  marketplaceManageBusy = true;
+  setMarketplaceActionBusy(true);
+  setMarketplaceStatus('Checking for skill updates...', false);
+
+  try {
+    const response = await fetch('/api/skills/marketplace/check', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: '{}',
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      const details = data?.details ? ` ${data.details}` : '';
+      throw new Error((data?.error || 'Failed to check updates.') + details);
+    }
+
+    const summary = data?.summary || 'Update check complete.';
+    setMarketplaceStatus(summary, false);
+    if (typeof showToast === 'function') {
+      showToast(summary, 'success');
+    }
+  } catch (error) {
+    console.error('Failed to check marketplace updates:', error);
+    setMarketplaceStatus(error?.message || 'Failed to check updates.', true);
+    if (typeof showToast === 'function') {
+      showToast('Failed to check skill updates.', 'error');
+    }
+  } finally {
+    marketplaceManageBusy = false;
+    setMarketplaceActionBusy(false);
+  }
+}
+
+async function updateMarketplaceSkills() {
+  if (marketplaceSearchBusy || marketplaceInstallBusy || marketplaceManageBusy) return;
+
+  marketplaceManageBusy = true;
+  setMarketplaceActionBusy(true);
+  setMarketplaceStatus('Updating installed skills...', false);
+
+  try {
+    const response = await fetch('/api/skills/marketplace/update', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: '{}',
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      const details = data?.details ? ` ${data.details}` : '';
+      throw new Error((data?.error || 'Failed to update installed skills.') + details);
+    }
+
+    const summary = data?.summary || 'Installed skills updated.';
+    setMarketplaceStatus(summary, false);
+    if (typeof showToast === 'function') {
+      showToast(summary, 'success');
+    }
+    await loadInstalledMarketplaceSkills(true);
+    await loadSkills(selectedAgentName);
+  } catch (error) {
+    console.error('Failed to update marketplace skills:', error);
+    setMarketplaceStatus(error?.message || 'Failed to update installed skills.', true);
+    if (typeof showToast === 'function') {
+      showToast('Failed to update installed skills.', 'error');
+    }
+  } finally {
+    marketplaceManageBusy = false;
+    setMarketplaceActionBusy(false);
+    renderInstalledMarketplaceSkills(marketplaceInstalledSkills);
+  }
+}
+
+async function removeMarketplaceSkill(skillName) {
+  const normalized = (skillName || '').trim();
+  if (!normalized) {
+    setMarketplaceStatus('Skill name is required.', true);
+    return;
+  }
+  if (marketplaceSearchBusy || marketplaceInstallBusy || marketplaceManageBusy) return;
+
+  const confirmed = window.confirm(`Remove skill "${normalized}" from global skills?`);
+  if (!confirmed) return;
+
+  marketplaceManageBusy = true;
+  setMarketplaceActionBusy(true);
+  setMarketplaceStatus(`Removing ${normalized}...`, false);
+
+  const removeInput = document.getElementById('skillsMarketplaceRemoveSkillInput');
+  if (removeInput) removeInput.value = normalized;
+
+  try {
+    const response = await fetch('/api/skills/marketplace/remove', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ skill: normalized }),
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      const details = data?.details ? ` ${data.details}` : '';
+      throw new Error((data?.error || 'Failed to remove skill.') + details);
+    }
+
+    const status = data?.status || '';
+    if (status === 'not_found') {
+      setMarketplaceStatus(`No installed skill matched "${normalized}".`, true);
+      if (typeof showToast === 'function') {
+        showToast(`No installed skill matched "${normalized}"`, 'error');
+      }
+    } else {
+      const summary = data?.summary || `Removed ${normalized}.`;
+      setMarketplaceStatus(summary, false);
+      if (typeof showToast === 'function') {
+        showToast(`Removed ${normalized}`, 'success');
+      }
+    }
+
+    await loadInstalledMarketplaceSkills(true);
+    await loadSkills(selectedAgentName);
+  } catch (error) {
+    console.error('Failed to remove marketplace skill:', error);
+    setMarketplaceStatus(error?.message || 'Failed to remove skill.', true);
+    if (typeof showToast === 'function') {
+      showToast('Failed to remove skill.', 'error');
+    }
+  } finally {
+    marketplaceManageBusy = false;
+    setMarketplaceActionBusy(false);
+    renderInstalledMarketplaceSkills(marketplaceInstalledSkills);
+  }
+}
+
 async function searchMarketplaceSkills() {
-  if (marketplaceSearchBusy || marketplaceInstallBusy) return;
+  if (marketplaceSearchBusy || marketplaceInstallBusy || marketplaceManageBusy) return;
   const queryInput = document.getElementById('skillsMarketplaceSearchQuery');
   const query = queryInput ? queryInput.value.trim() : '';
   if (!query) {
@@ -512,7 +795,7 @@ async function installMarketplacePackage(packageSpec) {
     setMarketplaceStatus('Package is required (owner/repo@skill).', true);
     return;
   }
-  if (marketplaceSearchBusy || marketplaceInstallBusy) return;
+  if (marketplaceSearchBusy || marketplaceInstallBusy || marketplaceManageBusy) return;
 
   marketplaceInstallBusy = true;
   setMarketplaceActionBusy(true);
@@ -538,6 +821,7 @@ async function installMarketplacePackage(packageSpec) {
       showToast(`Installed ${normalized}`, 'success');
     }
     await loadSkills(selectedAgentName);
+    await loadInstalledMarketplaceSkills(true);
   } catch (error) {
     console.error('Failed to install marketplace skill package:', error);
     setMarketplaceStatus(error?.message || 'Failed to install skill package.', true);
@@ -565,6 +849,88 @@ function openSkillsMarketplace() {
   const queryInput = document.getElementById('skillsMarketplaceSearchQuery');
   if (queryInput && !queryInput.value.trim()) {
     queryInput.value = 'find-skills';
+  }
+
+  if (!Array.isArray(marketplaceInstalledSkills) || marketplaceInstalledSkills.length === 0) {
+    loadInstalledMarketplaceSkills();
+  } else {
+    renderInstalledMarketplaceSkills(marketplaceInstalledSkills);
+  }
+}
+
+function normalizeCloneSkillBaseName(name) {
+  let normalized = (name || '')
+    .toLowerCase()
+    .replace(/[^a-z0-9-]+/g, '-')
+    .replace(/-+/g, '-')
+    .replace(/^-|-$/g, '');
+
+  if (!normalized) normalized = 'skill';
+  if (normalized.length > 56) {
+    normalized = normalized.slice(0, 56).replace(/-+$/g, '');
+  }
+  return normalized || 'skill';
+}
+
+function buildCloneSkillName(name) {
+  const existing = new Set((skillsAll || [])
+    .map(skill => (skill?.name || '').toLowerCase())
+    .filter(Boolean));
+
+  const base = `${normalizeCloneSkillBaseName(name)}-local`;
+  let candidate = base;
+  let index = 2;
+
+  while (existing.has(candidate.toLowerCase())) {
+    const suffix = `-${index}`;
+    const maxBaseLength = Math.max(1, 64 - suffix.length);
+    candidate = `${base.slice(0, maxBaseLength)}${suffix}`;
+    index += 1;
+  }
+
+  return candidate;
+}
+
+async function cloneSkillToAgent(skill) {
+  if (!skill?.name) return;
+
+  const title = document.getElementById('skillsEditorTitle');
+  const nameInput = document.getElementById('skillNameInput');
+  const descriptionInput = document.getElementById('skillDescriptionInput');
+  const promptInput = document.getElementById('skillPromptInput');
+  const errorBox = document.getElementById('skillsEditorError');
+
+  editingSkillName = '';
+
+  if (errorBox) {
+    errorBox.classList.add('d-none');
+    errorBox.textContent = '';
+  }
+  if (title) title.textContent = 'Clone Skill to Agent';
+  if (nameInput) {
+    nameInput.value = buildCloneSkillName(skill.name);
+    nameInput.disabled = false;
+  }
+  if (descriptionInput) descriptionInput.value = skill?.description || '';
+  if (promptInput) promptInput.value = 'Loading...';
+
+  const modal = getEditorModal();
+  if (modal) modal.show();
+
+  try {
+    const response = await fetch(`/api/skills/${encodeURIComponent(skill.name)}?agent=${encodeURIComponent(selectedAgentName)}`);
+    if (!response.ok) {
+      throw new Error('Failed to load source skill content.');
+    }
+    const data = await response.json();
+    if (promptInput) promptInput.value = data?.prompt || '';
+  } catch (error) {
+    console.error('Failed to clone skill:', error);
+    if (promptInput) promptInput.value = '';
+    if (errorBox) {
+      errorBox.textContent = 'Failed to load skill content for cloning.';
+      errorBox.classList.remove('d-none');
+    }
   }
 }
 

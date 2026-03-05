@@ -139,6 +139,9 @@
             <li class="nav-item" role="presentation">
               <button class="nav-link" id="skillsMarketplaceInstallTab" data-bs-toggle="tab" data-bs-target="#skillsMarketplaceInstallPane" type="button" role="tab" aria-controls="skillsMarketplaceInstallPane" aria-selected="false">Install Package</button>
             </li>
+            <li class="nav-item" role="presentation">
+              <button class="nav-link" id="skillsMarketplaceManageTab" data-bs-toggle="tab" data-bs-target="#skillsMarketplaceManagePane" type="button" role="tab" aria-controls="skillsMarketplaceManagePane" aria-selected="false">Manage Installed</button>
+            </li>
           </ul>
 
           <div class="tab-content">
@@ -165,6 +168,22 @@
               <div class="d-flex gap-2 flex-wrap">
                 <button id="skillsMarketplaceInstallBtn" class="modern-btn modern-btn-primary btn-sm">Install Package</button>
                 <button id="skillsMarketplaceQuickFindSkillsBtn" class="modern-btn modern-btn-secondary btn-sm">Install find-skills</button>
+              </div>
+            </div>
+
+            <div class="tab-pane fade" id="skillsMarketplaceManagePane" role="tabpanel" aria-labelledby="skillsMarketplaceManageTab">
+              <div class="d-flex gap-2 flex-wrap mb-3">
+                <button id="skillsMarketplaceManageRefreshBtn" class="modern-btn modern-btn-secondary btn-sm">Refresh Installed</button>
+                <button id="skillsMarketplaceCheckUpdatesBtn" class="modern-btn modern-btn-secondary btn-sm">Check Updates</button>
+                <button id="skillsMarketplaceUpdateAllBtn" class="modern-btn modern-btn-primary btn-sm">Update All</button>
+              </div>
+              <div class="d-flex gap-2 flex-wrap mb-2">
+                <input id="skillsMarketplaceRemoveSkillInput" type="text" class="form-control form-control-sm" placeholder="Skill name to remove (e.g. find-skills)" style="flex: 1; min-width: 240px; background: var(--bg-secondary); border: 1px solid var(--border-color); color: var(--text-primary);">
+                <button id="skillsMarketplaceRemoveBtn" class="modern-btn modern-btn-secondary btn-sm">Remove Skill</button>
+              </div>
+              <small style="color: var(--text-secondary);">Uses `npx skills list/check/update/remove` in global scope.</small>
+              <div id="skillsMarketplaceInstalledList" class="mt-3" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px;">
+                <div class="text-center py-3" style="color: var(--text-secondary);">Loading installed skills...</div>
               </div>
             </div>
           </div>

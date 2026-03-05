@@ -25,6 +25,38 @@ func TestIsValidMarketplacePackageSpec(t *testing.T) {
 	}
 }
 
+func TestIsValidMarketplaceSkillName(t *testing.T) {
+	tests := []struct {
+		name  string
+		value string
+		valid bool
+	}{
+		{name: "simple", value: "find-skills", valid: true},
+		{name: "underscores and dots", value: "my_skill.v2", valid: true},
+		{name: "empty", value: "", valid: false},
+		{name: "spaces", value: "find skills", valid: false},
+		{name: "slashes", value: "vercel-labs/find-skills", valid: false},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := isValidMarketplaceSkillName(tc.value)
+			if got != tc.valid {
+				t.Fatalf("isValidMarketplaceSkillName(%q) = %v, want %v", tc.value, got, tc.valid)
+			}
+		})
+	}
+}
+
+func TestNormalizeMarketplaceSkillName(t *testing.T) {
+	if got := normalizeMarketplaceSkillName("vercel-labs/skills@find-skills"); got != "find-skills" {
+		t.Fatalf("normalizeMarketplaceSkillName(package) = %q", got)
+	}
+	if got := normalizeMarketplaceSkillName(" find-skills "); got != "find-skills" {
+		t.Fatalf("normalizeMarketplaceSkillName(skill) = %q", got)
+	}
+}
+
 func TestSanitizeMarketplaceQuery(t *testing.T) {
 	raw := "   find    skills   for  ui   "
 	got := sanitizeMarketplaceQuery(raw)
@@ -66,5 +98,39 @@ func TestParseSkillsFindOutput(t *testing.T) {
 	}
 	if results[1].Skill != "find-skills-ai" {
 		t.Fatalf("unexpected skill[1]: %q", results[1].Skill)
+	}
+}
+
+func TestParseSkillsListOutput(t *testing.T) {
+	output := "\x1b[1mGlobal Skills\x1b[0m\n\n" +
+		"\x1b[36mfind-skills\x1b[0m \x1b[38;5;102m~/.agents/skills/find-skills\x1b[0m\n" +
+		"  \x1b[38;5;102mAgents:\x1b[0m \x1b[33muniversal\x1b[0m\n" +
+		"\x1b[36mfrontend-design\x1b[0m \x1b[38;5;102m~/.agents/skills/frontend-design\x1b[0m\n" +
+		"  \x1b[38;5;102mAgents:\x1b[0m \x1b[33mnot linked\x1b[0m\n"
+
+	results := parseSkillsListOutput(output, 10)
+	if len(results) != 2 {
+		t.Fatalf("expected 2 results, got %d", len(results))
+	}
+
+	if results[0].Name != "find-skills" {
+		t.Fatalf("unexpected name[0]: %q", results[0].Name)
+	}
+	if results[0].Scope != "global" {
+		t.Fatalf("unexpected scope[0]: %q", results[0].Scope)
+	}
+	if results[0].Agents != "universal" {
+		t.Fatalf("unexpected agents[0]: %q", results[0].Agents)
+	}
+	if results[0].Path != "~/.agents/skills/find-skills" {
+		t.Fatalf("unexpected path[0]: %q", results[0].Path)
+	}
+}
+
+func TestMarketplaceOutputSummary(t *testing.T) {
+	output := "\x1b[38;5;145mChecking for skill updates...\x1b[0m\n\n\x1b[38;5;145m✓ All skills are up to date\x1b[0m\n"
+	got := marketplaceOutputSummary(output)
+	if got != "✓ All skills are up to date" {
+		t.Fatalf("marketplaceOutputSummary() = %q", got)
 	}
 }
