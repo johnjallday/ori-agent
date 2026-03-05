@@ -12,6 +12,7 @@ import (
 
 	"github.com/johnjallday/ori-agent/internal/config"
 	"github.com/johnjallday/ori-agent/internal/llm"
+	"github.com/johnjallday/ori-agent/internal/modelinfo"
 )
 
 // mockProvider implements llm.Provider for testing
@@ -52,6 +53,21 @@ func (m *mockProvider) DefaultModels() []string {
 
 type mockClaudeCodeProvider struct {
 	mockProvider
+}
+
+type mockCodexProvider struct {
+	mockProvider
+}
+
+func (m *mockCodexProvider) Capabilities() llm.ProviderCapabilities {
+	return llm.ProviderCapabilities{
+		SupportsTools:  false,
+		RequiresAPIKey: false,
+	}
+}
+
+func (m *mockCodexProvider) DefaultModels() []string {
+	return []string{"gpt-5.3-codex"}
 }
 
 func (m *mockClaudeCodeProvider) Name() string {
@@ -516,6 +532,57 @@ func TestGetModelCategories_Codex(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestProvidersHandler_CodexPricingHidden(t *testing.T) {
+	if modelinfo.GetPricing("gpt-5.3-codex") == nil {
+		t.Skip("codex pricing entry missing from model catalog")
+	}
+
+	tmpDir := t.TempDir()
+	tmpFile := filepath.Join(tmpDir, "settings.json")
+	configManager := config.NewManager(tmpFile)
+	_ = configManager.Load()
+
+	llmFactory := llm.NewFactory()
+	llmFactory.Register("codex", &mockCodexProvider{})
+
+	handler := NewHandler(nil, configManager, nil, llmFactory)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/providers", nil)
+	rec := httptest.NewRecorder()
+	handler.ProvidersHandler(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("Expected status 200, got %d", rec.Code)
+	}
+
+	var resp struct {
+		Providers []ProviderInfo `json:"providers"`
+	}
+	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+		t.Fatalf("Failed to decode response: %v", err)
+	}
+
+	var codex *ProviderInfo
+	for i := range resp.Providers {
+		if resp.Providers[i].Name == "codex" {
+			codex = &resp.Providers[i]
+			break
+		}
+	}
+	if codex == nil {
+		t.Fatal("Expected codex provider in response")
+	}
+	if len(codex.Models) == 0 {
+		t.Fatal("Expected codex models in response")
+	}
+
+	for _, model := range codex.Models {
+		if model.Pricing != "" {
+			t.Fatalf("Expected empty pricing for codex model %q, got %q", model.Value, model.Pricing)
+		}
 	}
 }
 

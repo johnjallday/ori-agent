@@ -571,7 +571,11 @@ func (h *Handler) ProvidersHandler(w http.ResponseWriter, r *http.Request) {
 				goodFor := modelinfo.GetGoodFor(modelName)
 				pricingInfo := modelinfo.GetPricing(modelName)
 				pricing := ""
-				if pricingInfo != nil {
+				if name == "codex" {
+					// Codex (CLI) usage is billed through the CLI integration path,
+					// so we intentionally hide per-model API pricing on the models page.
+					pricing = ""
+				} else if pricingInfo != nil {
 					pricing = modelinfo.FormatPricing(pricingInfo)
 				} else if provider.Type() == llm.ProviderTypeLocal {
 					pricing = modelinfo.FormatPricing(nil)
