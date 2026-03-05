@@ -107,12 +107,13 @@ func (h *LLMTaskHandler) ExecuteTask(ctx context.Context, agentName string, task
 		}
 	}
 
-	// Determine which provider to use based on model
-	providerName := h.getProviderForModel(ag.Settings.Model)
+	// Determine which provider to use based on explicit agent provider + model fallback.
+	providerName := h.getProviderForAgent(ag.Settings.Provider, ag.Settings.Model)
 	provider, err := h.llmFactory.GetProvider(providerName)
 	if err != nil {
 		return "", fmt.Errorf("failed to get LLM provider: %w", err)
 	}
+	modelName := h.normalizeModelForProvider(providerName, ag.Settings.Model)
 
 	// Build the prompt for the task
 	prompt := h.buildTaskPrompt(task, ag)
@@ -136,7 +137,7 @@ func (h *LLMTaskHandler) ExecuteTask(ctx context.Context, agentName string, task
 
 	// Call the LLM
 	resp, err := provider.Chat(ctx, llm.ChatRequest{
-		Model:       ag.Settings.Model,
+		Model:       modelName,
 		Messages:    messages,
 		Temperature: ag.Settings.Temperature,
 		Tools:       tools,
@@ -198,6 +199,113 @@ func (h *LLMTaskHandler) ExecuteTask(ctx context.Context, agentName string, task
 	}
 
 	return resp.Content, nil
+}
+
+func normalizeProviderName(provider string) string {
+	normalized := strings.ToLower(strings.TrimSpace(provider))
+	switch normalized {
+	case "anthropic":
+		return "claude"
+	default:
+		return normalized
+	}
+}
+
+func isClaudeFamilyModel(model string) bool {
+	normalized := strings.ToLower(strings.TrimSpace(model))
+	if normalized == "" {
+		return false
+	}
+	if strings.HasPrefix(normalized, "claude-") {
+		return true
+	}
+	return normalized == "haiku" || normalized == "sonnet" || normalized == "opus"
+}
+
+func isGeminiFamilyModel(model string) bool {
+	normalized := strings.ToLower(strings.TrimSpace(model))
+	return strings.HasPrefix(normalized, "gemini")
+}
+
+func isCodexFamilyModel(model string) bool {
+	normalized := strings.ToLower(strings.TrimSpace(model))
+	return strings.HasPrefix(normalized, "codex")
+}
+
+func (h *LLMTaskHandler) normalizeModelForProvider(providerName, model string) string {
+	trimmedModel := strings.TrimSpace(model)
+	normalizedModel := strings.ToLower(trimmedModel)
+
+	if providerName == "claude" {
+		switch normalizedModel {
+		case "haiku":
+			return "claude-3-5-haiku-latest"
+		case "sonnet":
+			return "claude-3-5-sonnet-latest"
+		case "opus":
+			return "claude-3-opus-latest"
+		}
+	}
+
+	return trimmedModel
+}
+
+// getProviderForAgent resolves the best provider for the agent's configured provider/model.
+func (h *LLMTaskHandler) getProviderForAgent(configuredProvider, model string) string {
+	explicitProvider := normalizeProviderName(configuredProvider)
+	inferredProvider := h.getProviderForModel(model)
+
+	if explicitProvider == "" {
+		return inferredProvider
+	}
+
+	if h.llmFactory.HasProvider(explicitProvider) {
+		// Auto-correct common stale mismatch cases where provider was not persisted with model updates.
+		if explicitProvider == "openai" &&
+			inferredProvider != "" &&
+			inferredProvider != "openai" &&
+			(isClaudeFamilyModel(model) || isGeminiFamilyModel(model) || isCodexFamilyModel(model)) {
+			logFields := logger.Fields{
+				"configured_provider": explicitProvider,
+				"inferred_provider":   inferredProvider,
+				"model":               model,
+			}
+			if h.llmFactory.HasProvider(inferredProvider) {
+				logger.Warn("Detected provider/model mismatch; using inferred provider for task execution", logFields)
+			} else {
+				logger.Warn("Detected provider/model mismatch; inferred provider is not configured", logFields)
+			}
+			return inferredProvider
+		}
+
+		// Claude API does not accept short Claude Code model aliases.
+		if explicitProvider == "claude" && isClaudeFamilyModel(model) &&
+			(strings.EqualFold(strings.TrimSpace(model), "haiku") ||
+				strings.EqualFold(strings.TrimSpace(model), "sonnet") ||
+				strings.EqualFold(strings.TrimSpace(model), "opus")) &&
+			h.llmFactory.HasProvider("claude_code") {
+			logger.Warn("Detected Claude short model alias; using claude_code provider", logger.Fields{
+				"configured_provider": explicitProvider,
+				"inferred_provider":   "claude_code",
+				"model":               model,
+			})
+			return "claude_code"
+		}
+
+		return explicitProvider
+	}
+
+	if inferredProvider != "" && h.llmFactory.HasProvider(inferredProvider) {
+		logger.Warn("Configured provider unavailable; falling back to inferred provider", logger.Fields{
+			"configured_provider": explicitProvider,
+			"inferred_provider":   inferredProvider,
+			"model":               model,
+		})
+		return inferredProvider
+	}
+
+	// Preserve configured name for clearer upstream error messaging if no fallback exists.
+	return explicitProvider
 }
 
 // substitutePlaceholders replaces placeholders like {result}, {input}, {result1}, {result2} in task description
@@ -543,16 +651,44 @@ func (h *LLMTaskHandler) formatInputResults(prompt *strings.Builder, task Task, 
 
 // getProviderForModel determines which LLM provider to use (dynamic detection)
 func (h *LLMTaskHandler) getProviderForModel(model string) string {
-	// Check for Claude models (prefix-based)
-	if strings.HasPrefix(model, "claude-") {
+	trimmedModel := strings.TrimSpace(model)
+	normalizedModel := strings.ToLower(trimmedModel)
+	if trimmedModel == "" {
+		return "openai"
+	}
+
+	// Claude Code short aliases map directly to claude_code when available.
+	if normalizedModel == "haiku" || normalizedModel == "sonnet" || normalizedModel == "opus" {
+		if h.llmFactory.HasProvider("claude_code") {
+			return "claude_code"
+		}
+		if h.llmFactory.HasProvider("claude") {
+			return "claude"
+		}
+		// Keep this in the Claude family even if provider isn't currently configured.
 		return "claude"
+	}
+
+	// Check for Claude API models.
+	if strings.HasPrefix(normalizedModel, "claude-") {
+		return "claude"
+	}
+
+	// Check for Gemini models.
+	if strings.HasPrefix(normalizedModel, "gemini") {
+		return "gemini"
+	}
+
+	// Check for Codex models.
+	if strings.HasPrefix(normalizedModel, "codex") {
+		return "codex"
 	}
 
 	// Check if Ollama has this model (dynamic detection)
 	if ollamaProvider, err := h.llmFactory.GetProvider("ollama"); err == nil {
 		if ollamaProv, ok := ollamaProvider.(*llm.OllamaProvider); ok {
-			if ollamaProv.HasModel(model) {
-				logger.Info("Model '' found in Ollama, using Ollama provider", logger.Fields{"model": model})
+			if ollamaProv.HasModel(trimmedModel) || ollamaProv.HasModel(normalizedModel) {
+				logger.Info("Model found in Ollama, using Ollama provider", logger.Fields{"model": trimmedModel})
 				return "ollama"
 			}
 		}

@@ -219,6 +219,11 @@ async function createNewAgent() {
     // Add model if provided
     if (agentModelInput && agentModelInput.value) {
       requestBody.model = agentModelInput.value;
+      const selectedModelOption = agentModelInput.selectedOptions?.[0];
+      const selectedProvider = selectedModelOption?.getAttribute('data-provider');
+      if (selectedProvider) {
+        requestBody.llm_provider = selectedProvider;
+      }
     }
 
     // Add temperature if provided

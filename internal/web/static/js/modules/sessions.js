@@ -22,6 +22,7 @@ const sessionManager = {
   agentModelCache: new Map(),
   sessionTaskCounts: new Map(), // Cache of task counts per session: sessionId -> {total, pending, completed}
   editAgentOriginalName: '',
+  editAgentCurrentProvider: '',
   editAgentSelectedTags: [],
   editAgentMCPServers: [],
   editAgentModalInitialized: false,
@@ -2250,6 +2251,8 @@ const sessionManager = {
   },
 
   populateEditAgentForm(agent) {
+    this.editAgentCurrentProvider = String(agent.provider || '').trim();
+
     const nameInput = document.getElementById('editAgentNameInput');
     if (nameInput) nameInput.value = agent.name || '';
 
@@ -2485,6 +2488,7 @@ const sessionManager = {
         const option = document.createElement('option');
         option.value = model.value;
         option.textContent = model.label || model.value;
+        option.setAttribute('data-provider', model.provider || provider.name || '');
         if (model.value === currentModel) {
           option.selected = true;
         }
@@ -2499,6 +2503,9 @@ const sessionManager = {
       const customOption = document.createElement('option');
       customOption.value = currentModel;
       customOption.textContent = `${currentModel} (current)`;
+      if (this.editAgentCurrentProvider) {
+        customOption.setAttribute('data-provider', this.editAgentCurrentProvider);
+      }
       customOption.selected = true;
       select.insertBefore(customOption, select.firstChild.nextSibling);
     }
@@ -2578,6 +2585,10 @@ const sessionManager = {
     const type = typeSelect?.value;
     const role = roleSelect?.value;
     const model = modelSelect?.value;
+    const selectedModelOption = modelSelect?.selectedOptions?.[0] || null;
+    const selectedProvider = String(selectedModelOption?.getAttribute('data-provider') || this.editAgentCurrentProvider || '').trim();
+    const validProviders = new Set(['openai', 'codex', 'claude_code', 'claude', 'gemini', 'ollama']);
+    const resolvedProvider = validProviders.has(selectedProvider) ? selectedProvider : String(this.editAgentCurrentProvider || '').trim();
 
     if (!newName) {
       this.showEditAgentError('Name is required.');
@@ -2604,6 +2615,9 @@ const sessionManager = {
       tags: this.editAgentSelectedTags,
       favorite: Boolean(favoriteToggle?.checked)
     };
+    if (resolvedProvider && validProviders.has(resolvedProvider)) {
+      payload.llm_provider = resolvedProvider;
+    }
 
     const saveBtn = document.getElementById('editAgentSaveBtn');
     const originalText = saveBtn?.innerHTML;
@@ -2636,6 +2650,7 @@ const sessionManager = {
       const updatedName = data.name || newName || this.editAgentOriginalName;
       const previousName = this.editAgentOriginalName;
       this.editAgentOriginalName = updatedName;
+      this.editAgentCurrentProvider = resolvedProvider || this.editAgentCurrentProvider;
 
       this.sessions.forEach((session) => {
         if (session.agent_name === previousName) {
@@ -2734,6 +2749,7 @@ const sessionManager = {
 
   resetEditAgentModal() {
     this.editAgentOriginalName = '';
+    this.editAgentCurrentProvider = '';
     this.editAgentSelectedTags = [];
     this.editAgentMCPServers = [];
     const form = document.getElementById('editAgentForm');
