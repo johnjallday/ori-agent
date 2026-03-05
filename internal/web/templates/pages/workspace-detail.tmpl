@@ -65,6 +65,25 @@
                      style="min-height: 42px;">
               <button id="homeAssistantSendBtn" type="submit" class="modern-btn modern-btn-primary home-assistant-send-btn">Send</button>
             </form>
+            <div id="homeAssistantQuickPrompts" class="d-flex flex-wrap align-items-center gap-2 px-2 pt-2">
+              <span class="home-assistant-quick-label mb-0">Quick Actions</span>
+              <button id="homeAssistantQuickPlan" type="button" class="modern-btn modern-btn-secondary modern-btn-sm home-assistant-quick-btn"
+                      data-home-prompt="Analyze this workspace and propose the next 3 highest-impact tasks with acceptance criteria.">
+                Plan Next
+              </button>
+              <button id="homeAssistantQuickTasks" type="button" class="modern-btn modern-btn-secondary modern-btn-sm home-assistant-quick-btn"
+                      data-home-prompt="Review current tasks in this workspace, identify blockers, and suggest the next 3 tasks.">
+                Unblock Tasks
+              </button>
+              <button id="homeAssistantQuickNotes" type="button" class="modern-btn modern-btn-secondary modern-btn-sm home-assistant-quick-btn"
+                      data-home-prompt="/note # Workspace Brief\n## Goal\n- \n## Constraints\n- \n## Open Questions\n- ">
+                Create Brief
+              </button>
+              <button id="homeAssistantQuickReview" type="button" class="modern-btn modern-btn-secondary modern-btn-sm home-assistant-quick-btn"
+                      data-home-prompt="Run a risk review for this workspace and recommend mitigation steps.">
+                Risk Review
+              </button>
+            </div>
           </div>
 
           <!-- Workspace Info Card -->

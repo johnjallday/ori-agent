@@ -121,6 +121,7 @@ export class WorkspaceDetailPage {
   async init() {
     this.cacheElements();
     this.ensureScrollablePanelAccessibility();
+    this.refreshHomeAssistantQuickPrompts();
     this.bindEvents();
     this.setupFileModal();
     await this.loadWorkspace();
@@ -154,6 +155,81 @@ export class WorkspaceDetailPage {
       body.setAttribute('tabindex', '0');
       body.setAttribute('aria-label', label);
     });
+  }
+
+  setHomeAssistantQuickPrompt(button, label, prompt) {
+    if (!button) return;
+    button.textContent = label;
+    button.setAttribute('data-home-prompt', prompt);
+    button.setAttribute('title', prompt);
+    button.setAttribute('aria-label', label);
+  }
+
+  refreshHomeAssistantQuickPrompts() {
+    const {
+      homeAssistantQuickPlanBtn,
+      homeAssistantQuickTasksBtn,
+      homeAssistantQuickNotesBtn,
+      homeAssistantQuickReviewBtn
+    } = this.elements;
+
+    if (!homeAssistantQuickPlanBtn || !homeAssistantQuickTasksBtn || !homeAssistantQuickNotesBtn || !homeAssistantQuickReviewBtn) {
+      return;
+    }
+
+    const workspaceName = String(this.workspace?.name || '').trim() || 'this workspace';
+    const taskCount = Array.isArray(this.tasks) ? this.tasks.length : 0;
+    const noteCount = Array.isArray(this.notes) ? this.notes.length : 0;
+    const directoryCount = Array.isArray(this.directories) ? this.directories.length : 0;
+    const fileCount = Array.isArray(this.files) ? this.files.length : 0;
+
+    this.setHomeAssistantQuickPrompt(
+      homeAssistantQuickPlanBtn,
+      'Plan Next',
+      `Analyze ${workspaceName} and propose the next 3 highest-impact tasks with acceptance criteria.`
+    );
+
+    if (taskCount === 0) {
+      this.setHomeAssistantQuickPrompt(
+        homeAssistantQuickTasksBtn,
+        'Bootstrap Tasks',
+        `Create the first 5 actionable tasks for ${workspaceName}, each with clear acceptance criteria.`
+      );
+    } else {
+      this.setHomeAssistantQuickPrompt(
+        homeAssistantQuickTasksBtn,
+        'Unblock Tasks',
+        `Review tasks in ${workspaceName}, identify blockers, and suggest the next 3 tasks to move progress forward.`
+      );
+    }
+
+    if (noteCount === 0) {
+      this.setHomeAssistantQuickPrompt(
+        homeAssistantQuickNotesBtn,
+        'Create Brief',
+        `/note # ${workspaceName} Brief\n## Goal\n- \n## Constraints\n- \n## Open Questions\n- `
+      );
+    } else {
+      this.setHomeAssistantQuickPrompt(
+        homeAssistantQuickNotesBtn,
+        'Summarize Notes',
+        `/chat Summarize notes in ${workspaceName} and produce a prioritized execution checklist.`
+      );
+    }
+
+    if (directoryCount === 0 && fileCount === 0) {
+      this.setHomeAssistantQuickPrompt(
+        homeAssistantQuickReviewBtn,
+        'Gather Context',
+        `Tell me what context is missing for ${workspaceName} and ask 3 focused questions before execution.`
+      );
+    } else {
+      this.setHomeAssistantQuickPrompt(
+        homeAssistantQuickReviewBtn,
+        'Risk Review',
+        `Run a risk review for ${workspaceName} using available tasks, notes, files, and directories. Recommend mitigation steps.`
+      );
+    }
   }
 
   /**
@@ -323,6 +399,10 @@ export class WorkspaceDetailPage {
       copyNotesBtn: document.getElementById('workspace-detail-copy-notes'),
       addDirectoryBtn: document.getElementById('workspace-detail-add-directory'),
       viewSchedulesBtn: document.getElementById('workspace-detail-view-schedules'),
+      homeAssistantQuickPlanBtn: document.getElementById('homeAssistantQuickPlan'),
+      homeAssistantQuickTasksBtn: document.getElementById('homeAssistantQuickTasks'),
+      homeAssistantQuickNotesBtn: document.getElementById('homeAssistantQuickNotes'),
+      homeAssistantQuickReviewBtn: document.getElementById('homeAssistantQuickReview'),
 
       // View toggle
       viewListBtn: document.getElementById('workspace-detail-view-list'),
@@ -701,6 +781,7 @@ export class WorkspaceDetailPage {
       this.workspace = await response.json();
       await this.renderWorkspaceInfo();
       this.renderAgentGroups();
+      this.refreshHomeAssistantQuickPrompts();
     } catch (error) {
       console.error('Failed to load workspace:', error);
       if (window.Toast) window.Toast.error('Failed to load workspace');
@@ -866,6 +947,7 @@ export class WorkspaceDetailPage {
       if (this.elements.taskCount) {
         this.elements.taskCount.textContent = this.tasks.length;
       }
+      this.refreshHomeAssistantQuickPrompts();
     }
   }
 
@@ -3861,6 +3943,7 @@ export class WorkspaceDetailPage {
       if (this.elements.sessionCount) {
         this.elements.sessionCount.textContent = this.sessions.length;
       }
+      this.refreshHomeAssistantQuickPrompts();
     }
   }
 
@@ -3884,6 +3967,7 @@ export class WorkspaceDetailPage {
       if (!response.ok) {
         this.files = [];
         this.renderFiles();
+        this.refreshHomeAssistantQuickPrompts();
         return;
       }
 
@@ -3891,10 +3975,12 @@ export class WorkspaceDetailPage {
       // Filter attachments to only include files (not text content)
       this.files = (workspace.attachments || []).filter(a => a.file_meta || a.type === 'image' || a.type === 'other');
       this.renderFiles();
+      this.refreshHomeAssistantQuickPrompts();
     } catch (error) {
       console.error('Failed to load files:', error);
       this.files = [];
       this.renderFiles();
+      this.refreshHomeAssistantQuickPrompts();
     }
   }
 
@@ -3939,16 +4025,19 @@ export class WorkspaceDetailPage {
         // Notes endpoint might return workspace notes differently
         this.notes = [];
         this.renderNotes();
+        this.refreshHomeAssistantQuickPrompts();
         return;
       }
 
       const data = await response.json();
       this.notes = data.notes || (Array.isArray(data) ? data : [data]).filter(Boolean);
       this.renderNotes();
+      this.refreshHomeAssistantQuickPrompts();
     } catch (error) {
       console.error('Failed to load notes:', error);
       this.notes = [];
       this.renderNotes();
+      this.refreshHomeAssistantQuickPrompts();
     }
   }
 
@@ -4007,6 +4096,7 @@ export class WorkspaceDetailPage {
       if (!response.ok) {
         this.directories = [];
         this.renderDirectories();
+        this.refreshHomeAssistantQuickPrompts();
         return;
       }
 
@@ -4053,10 +4143,12 @@ export class WorkspaceDetailPage {
       });
 
       this.renderDirectories();
+      this.refreshHomeAssistantQuickPrompts();
     } catch (error) {
       console.error('Failed to load directories:', error);
       this.directories = [];
       this.renderDirectories();
+      this.refreshHomeAssistantQuickPrompts();
     }
   }
 
