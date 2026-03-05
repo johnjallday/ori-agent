@@ -325,6 +325,7 @@ export class WorkspaceDetailPage {
       taskExecutionTitle: document.getElementById('workspace-detail-task-execution-title'),
       taskExecutionMeta: document.getElementById('workspace-detail-task-execution-meta'),
       taskExecutionStatus: document.getElementById('workspace-detail-task-execution-status'),
+      taskExecutionBreakdown: document.getElementById('workspace-detail-task-execution-breakdown'),
       taskExecutionLog: document.getElementById('workspace-detail-task-execution-log'),
       taskExecutionViewResultBtn: document.getElementById('workspace-detail-task-execution-view-result'),
 
@@ -418,6 +419,7 @@ export class WorkspaceDetailPage {
     this.elements.taskExecutionModal?.addEventListener('hidden.bs.modal', () => {
       this.stopExecutionMonitor();
       this.currentExecutionTaskId = null;
+      this.renderTaskExecutionBreakdown(null);
     });
     this.elements.taskAssistRetryBtn?.addEventListener('click', () => this.submitTaskAssist('retry'));
     this.elements.taskAssistContinueBtn?.addEventListener('click', () => this.submitTaskAssist('continue_with_instruction'));
@@ -1713,11 +1715,23 @@ export class WorkspaceDetailPage {
   }
 
   renderTaskResultBreakdown(task, subtasks = []) {
-    if (!this.elements.taskResultBreakdown || !task) return;
+    this.renderTaskBreakdown(this.elements.taskResultBreakdown, task, subtasks);
+  }
+
+  renderTaskExecutionBreakdown(task, subtasks = []) {
+    this.renderTaskBreakdown(this.elements.taskExecutionBreakdown, task, subtasks);
+  }
+
+  renderTaskBreakdown(container, task, subtasks = []) {
+    if (!container) return;
+    if (!task) {
+      container.innerHTML = '';
+      return;
+    }
 
     const steps = this.getTaskResultBreakdownSteps(task, subtasks);
     if (!steps.length) {
-      this.elements.taskResultBreakdown.innerHTML = '';
+      container.innerHTML = '';
       return;
     }
 
@@ -1744,10 +1758,133 @@ export class WorkspaceDetailPage {
       `;
     }).join('');
 
-    this.elements.taskResultBreakdown.innerHTML = `
+    container.innerHTML = `
       <div class="workspace-detail-task-breakdown-title">Execution Breakdown</div>
       ${stepsHtml}
     `;
+  }
+
+  normalizeBreakdownField(value) {
+    if (value === undefined || value === null) return '';
+    if (typeof value === 'string') return value.trim();
+    if (typeof value === 'number' || typeof value === 'boolean') return String(value);
+    try {
+      return JSON.stringify(value, null, 2).trim();
+    } catch (_error) {
+      return String(value).trim();
+    }
+  }
+
+  truncateBreakdownText(text, maxLength = 220) {
+    const normalized = this.normalizeBreakdownField(text);
+    if (!normalized) return '';
+    if (normalized.length <= maxLength) return normalized;
+    return `${normalized.slice(0, maxLength).trim()}...`;
+  }
+
+  buildTaskExecutionDetail(task, fallbackDetail = '') {
+    const parts = [];
+    const initialDetail = this.normalizeBreakdownField(fallbackDetail);
+    if (initialDetail) parts.push(initialDetail);
+
+    const currentStep = this.normalizeBreakdownField(task?.progress?.current_step);
+    if (currentStep) {
+      parts.push(`Execution: ${currentStep}`);
+    }
+
+    const attemptsUsed = Number(task?.context?.execution_retry?.attempts_used || 0);
+    const maxAttempts = Number(task?.context?.execution_retry?.max_attempts || task?.context?.execution_max_attempts || 0);
+    if (attemptsUsed > 0 && maxAttempts > 0) {
+      parts.push(`Attempts: ${attemptsUsed}/${maxAttempts}`);
+    }
+
+    const retryFinalOutcome = this.normalizeBreakdownField(task?.context?.execution_retry?.final_outcome);
+    if (retryFinalOutcome) {
+      parts.push(`Final outcome: ${retryFinalOutcome}`);
+    }
+
+    const blockedReason = this.normalizeBreakdownField(task?.context?.human_loop?.reason);
+    const blockedQuestion = this.normalizeBreakdownField(task?.context?.human_loop?.question);
+    if (blockedReason) {
+      parts.push(`Blocked reason: ${this.truncateBreakdownText(blockedReason, 260)}`);
+    }
+    if (blockedQuestion) {
+      parts.push(`Needs input: ${this.truncateBreakdownText(blockedQuestion, 260)}`);
+    }
+
+    const errorText = this.normalizeBreakdownField(task?.error);
+    if (errorText) {
+      parts.push(`Error: ${this.truncateBreakdownText(errorText, 360)}`);
+    }
+
+    const resultText = this.normalizeBreakdownField(task?.result);
+    if (resultText) {
+      parts.push(`Result: ${this.truncateBreakdownText(resultText, 360)}`);
+    }
+
+    return parts.join('\n');
+  }
+
+  getRetryHistoryBreakdownSteps(task) {
+    const history = Array.isArray(task?.context?.execution_retry?.history)
+      ? task.context.execution_retry.history
+      : [];
+    if (!history.length) return [];
+
+    const outcomeToStatus = (outcome) => {
+      const normalized = String(outcome || '').trim().toLowerCase();
+      if (normalized === 'success') return 'completed';
+      if (normalized === 'error') return 'failed';
+      if (normalized === 'needs_input' || normalized === 'blocked') return 'blocked';
+      return 'pending';
+    };
+
+    return history.map((item, index) => {
+      const attemptNumber = Number.isFinite(Number(item?.attempt)) ? Number(item.attempt) : (index + 1);
+      const outcome = String(item?.outcome || '').trim().toLowerCase();
+      const summary = this.normalizeBreakdownField(item?.summary);
+      const createdAt = this.normalizeBreakdownField(item?.created_at);
+      const detailParts = [];
+      if (summary) detailParts.push(summary);
+      if (createdAt) detailParts.push(`Recorded at: ${formatDate(createdAt)}`);
+      if (outcome) detailParts.push(`Outcome: ${outcome.replace(/_/g, ' ')}`);
+
+      return {
+        title: `Attempt ${attemptNumber}`,
+        status: outcomeToStatus(outcome),
+        detail: detailParts.join('\n')
+      };
+    });
+  }
+
+  async fetchLatestSubtasksForParent(parentTaskID) {
+    if (!parentTaskID || !this.workspaceId) return [];
+    try {
+      const response = await fetch(`/api/orchestration/tasks?studio_id=${encodeURIComponent(this.workspaceId)}`);
+      if (!response.ok) return [];
+      const payload = await response.json();
+      const tasks = Array.isArray(payload?.tasks) ? payload.tasks : [];
+      return tasks.filter((task) => task?.parent_task_id === parentTaskID);
+    } catch (error) {
+      console.error('Failed to fetch latest subtasks for breakdown:', error);
+      return [];
+    }
+  }
+
+  async refreshExecutionBreakdown(task) {
+    if (!task) {
+      this.renderTaskExecutionBreakdown(null);
+      return;
+    }
+
+    let subtasks = this.getSubtasksForParent(task.id);
+    this.renderTaskExecutionBreakdown(task, subtasks);
+
+    if (!subtasks.length) return;
+
+    const latestSubtasks = await this.fetchLatestSubtasksForParent(task.id);
+    if (!latestSubtasks.length) return;
+    this.renderTaskExecutionBreakdown(task, latestSubtasks);
   }
 
   getTaskResultBreakdownSteps(task, subtasks = []) {
@@ -1766,8 +1903,16 @@ export class WorkspaceDetailPage {
       return sortedSubtasks.map((subtask, index) => ({
         title: String(subtask.description || subtask.name || `Step ${index + 1}`).trim(),
         status: String(subtask.status || task.status || 'pending').trim(),
-        detail: String(subtask.details || subtask.error || subtask.result || '').trim()
+        detail: this.buildTaskExecutionDetail(
+          subtask,
+          String(subtask.details || '').trim()
+        )
       }));
+    }
+
+    const retryHistorySteps = this.getRetryHistoryBreakdownSteps(task);
+    if (retryHistorySteps.length > 0) {
+      return retryHistorySteps;
     }
 
     return this.inferSyntheticBreakdownSteps(task);
@@ -2423,6 +2568,7 @@ export class WorkspaceDetailPage {
     }
     this.updateTaskExecutionMeta(task);
     this.setExecutionModalStatus(this.getTaskExecutionState(task));
+    this.refreshExecutionBreakdown(task);
     this.setExecutionViewResultEnabled(false);
     this.clearExecutionLog();
     this.appendExecutionLog('Preparing execution...', 'info', `${task.id}:prepare`);
@@ -2456,6 +2602,7 @@ export class WorkspaceDetailPage {
         const state = this.getTaskExecutionState(task);
         this.updateTaskExecutionMeta(task);
         this.setExecutionModalStatus(state);
+        await this.refreshExecutionBreakdown(task);
 
         if (state !== this.executionLastStatus) {
           this.executionLastStatus = state;
