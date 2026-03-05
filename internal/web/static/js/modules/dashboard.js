@@ -3292,6 +3292,811 @@
     return true;
   }
 
+  function hasRecurringScheduleLanguage(prompt) {
+    var text = normalizeToken(prompt);
+    if (!text) return false;
+    if (/\b(?:daily|weekly|monthly|weekdays|weekends|recurring)\b/.test(text)) return true;
+    if (/\bevery\s+(?:day|week|month|weekday|weekend|monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b/.test(text)) return true;
+    if (/\bevery\s+\d+\s*(?:min|mins|minute|minutes|hour|hours|day|days)\b/.test(text)) return true;
+    return false;
+  }
+
+  function promptHasSchedulingIntent(prompt) {
+    var text = normalizeToken(prompt);
+    if (!text) return false;
+    if (hasRecurringScheduleLanguage(text)) return true;
+    if (/\b(?:schedule|scheduled|remind me|reminder)\b/.test(text)) return true;
+    if (/\b(?:today|tomorrow|tonight|next\s+(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday))\b/.test(text)) return true;
+    if (/\b(?:at|@)\s*\d{1,2}(?::\d{2})?\s*(?:am|pm)\b/i.test(String(prompt || ''))) return true;
+    if (/\b(?:at|@)\s*\d{1,2}:\d{2}\b/i.test(String(prompt || ''))) return true;
+    return false;
+  }
+
+  function parseClockTimeFromText(prompt) {
+    var raw = String(prompt || '');
+    var match = raw.match(/\b(?:at|@)\s*(\d{1,2})(?::(\d{2}))?\s*(am|pm)?\b/i);
+    if (!match) {
+      match = raw.match(/\b(\d{1,2}):(\d{2})\s*(am|pm)?\b/i);
+    }
+    if (!match) return null;
+
+    var hour = Number(match[1]);
+    var minute = Number(match[2] || 0);
+    var meridiem = normalizeToken(match[3] || '');
+    if (!Number.isFinite(hour) || !Number.isFinite(minute)) return null;
+    if (minute < 0 || minute > 59) return null;
+
+    if (meridiem === 'am' || meridiem === 'pm') {
+      if (hour < 1 || hour > 12) return null;
+      if (hour === 12) hour = 0;
+      if (meridiem === 'pm') hour += 12;
+    } else {
+      if (hour === 24 && minute === 0) {
+        hour = 0;
+      } else if (hour < 0 || hour > 23) {
+        return null;
+      }
+    }
+
+    var hh = String(hour).padStart(2, '0');
+    var mm = String(minute).padStart(2, '0');
+    return {
+      hour24: hour,
+      minute: minute,
+      hhmm: hh + ':' + mm
+    };
+  }
+
+  function normalizeScheduleDayOfWeek(value) {
+    if (Number.isInteger(value) && value >= 0 && value <= 6) return value;
+    var parsed = Number(value);
+    if (Number.isFinite(parsed) && parsed >= 0 && parsed <= 6) return Math.floor(parsed);
+
+    var day = normalizeToken(value);
+    var map = {
+      sunday: 0,
+      monday: 1,
+      tuesday: 2,
+      wednesday: 3,
+      thursday: 4,
+      friday: 5,
+      saturday: 6
+    };
+    if (Object.prototype.hasOwnProperty.call(map, day)) {
+      return map[day];
+    }
+    return 0;
+  }
+
+  function formatScheduleTimeLabel(hhmm) {
+    var value = String(hhmm || '').trim();
+    var match = value.match(/^(\d{1,2}):(\d{2})$/);
+    if (!match) return value || '09:00';
+    var hour = Number(match[1]);
+    var minute = Number(match[2]);
+    if (!Number.isFinite(hour) || !Number.isFinite(minute)) return value;
+    var suffix = hour >= 12 ? 'PM' : 'AM';
+    var hour12 = hour % 12;
+    if (hour12 === 0) hour12 = 12;
+    return hour12 + ':' + String(minute).padStart(2, '0') + ' ' + suffix;
+  }
+
+  function buildNextRunAtISO(hour, minute, options) {
+    var now = new Date();
+    var target = new Date(now.getTime());
+    target.setSeconds(0, 0);
+    target.setHours(hour, minute, 0, 0);
+
+    var forceTomorrow = Boolean(options && options.forceTomorrow);
+    var forceToday = Boolean(options && options.forceToday);
+    if (forceTomorrow) {
+      target.setDate(target.getDate() + 1);
+    } else if (!forceToday && target.getTime() <= now.getTime()) {
+      target.setDate(target.getDate() + 1);
+    }
+
+    return target.toISOString();
+  }
+
+  function normalizeScheduleConfigForTaskCreation(rawSchedule) {
+    if (!rawSchedule || typeof rawSchedule !== 'object') return null;
+    var schedule = Object.assign({}, rawSchedule);
+    var type = normalizeToken(schedule.type);
+    if (!type) return null;
+    schedule.type = type;
+
+    if (schedule.once_at && !schedule.run_at) {
+      schedule.run_at = schedule.once_at;
+    }
+
+    if (type === 'daily' || type === 'weekly') {
+      if (!schedule.time && schedule.time_of_day) {
+        schedule.time = schedule.time_of_day;
+      }
+      if (!schedule.time || typeof schedule.time !== 'string') {
+        schedule.time = '09:00';
+      }
+      if (type === 'weekly') {
+        schedule.day_of_week = normalizeScheduleDayOfWeek(schedule.day_of_week);
+      } else {
+        delete schedule.day_of_week;
+      }
+      delete schedule.time_of_day;
+      delete schedule.interval_minutes;
+      delete schedule.run_at;
+      delete schedule.execute_at;
+      delete schedule.once_at;
+      return schedule;
+    }
+
+    if (type === 'interval') {
+      var minutes = Number(schedule.interval_minutes);
+      if (!Number.isFinite(minutes) || minutes <= 0) return null;
+      schedule.interval_minutes = Math.round(minutes);
+      delete schedule.time;
+      delete schedule.time_of_day;
+      delete schedule.day_of_week;
+      delete schedule.run_at;
+      delete schedule.execute_at;
+      delete schedule.once_at;
+      return schedule;
+    }
+
+    if (type === 'once') {
+      var runAt = String(schedule.run_at || schedule.execute_at || '').trim();
+      if (!runAt) return null;
+      schedule.run_at = runAt;
+      delete schedule.execute_at;
+      delete schedule.once_at;
+      delete schedule.time;
+      delete schedule.time_of_day;
+      delete schedule.day_of_week;
+      delete schedule.interval_minutes;
+      return schedule;
+    }
+
+    return null;
+  }
+
+  function inferScheduleFromPromptFallback(prompt) {
+    var text = normalizeToken(prompt);
+    if (!text) return null;
+
+    var intervalMatch = text.match(/\bevery\s+(\d+)\s*(min|mins|minute|minutes|hour|hours|day|days)\b/);
+    if (intervalMatch) {
+      var amount = Number(intervalMatch[1]);
+      if (Number.isFinite(amount) && amount > 0) {
+        var unit = normalizeToken(intervalMatch[2]);
+        var intervalMinutes = amount;
+        if (unit === 'hour' || unit === 'hours') {
+          intervalMinutes = amount * 60;
+        } else if (unit === 'day' || unit === 'days') {
+          intervalMinutes = amount * 1440;
+        }
+        var intervalSchedule = { type: 'interval', interval_minutes: intervalMinutes };
+        return { schedule: intervalSchedule, schedule_name: buildScheduleNameFromConfig(intervalSchedule) };
+      }
+    }
+
+    var clock = parseClockTimeFromText(prompt);
+    var weekdayMatch = text.match(/\bevery\s+(sunday|monday|tuesday|wednesday|thursday|friday|saturday)\b/);
+    if (weekdayMatch) {
+      var weeklySchedule = {
+        type: 'weekly',
+        day_of_week: normalizeScheduleDayOfWeek(weekdayMatch[1]),
+        time: clock ? clock.hhmm : '09:00'
+      };
+      return { schedule: weeklySchedule, schedule_name: buildScheduleNameFromConfig(weeklySchedule) };
+    }
+
+    if (/\b(?:every day|daily|each day)\b/.test(text)) {
+      var dailySchedule = { type: 'daily', time: clock ? clock.hhmm : '09:00' };
+      return { schedule: dailySchedule, schedule_name: buildScheduleNameFromConfig(dailySchedule) };
+    }
+
+    if (clock) {
+      var onceSchedule = {
+        type: 'once',
+        run_at: buildNextRunAtISO(clock.hour24, clock.minute, {
+          forceTomorrow: /\btomorrow\b/.test(text),
+          forceToday: /\btoday\b/.test(text)
+        })
+      };
+      return { schedule: onceSchedule, schedule_name: buildScheduleNameFromConfig(onceSchedule) };
+    }
+
+    return null;
+  }
+
+  function buildScheduleNameFromConfig(schedule) {
+    if (!schedule || typeof schedule !== 'object') return 'Scheduled Task';
+    var type = normalizeToken(schedule.type);
+    var days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+
+    if (type === 'daily') {
+      return 'Daily at ' + formatScheduleTimeLabel(schedule.time || schedule.time_of_day || '09:00');
+    }
+
+    if (type === 'weekly') {
+      var dayIndex = normalizeScheduleDayOfWeek(schedule.day_of_week);
+      var dayLabel = days[dayIndex] || 'Weekly';
+      return 'Every ' + dayLabel + ' at ' + formatScheduleTimeLabel(schedule.time || schedule.time_of_day || '09:00');
+    }
+
+    if (type === 'interval') {
+      var minutes = Number(schedule.interval_minutes || 0);
+      if (!Number.isFinite(minutes) || minutes <= 0) return 'Recurring schedule';
+      if (minutes % 1440 === 0) {
+        var daysCount = minutes / 1440;
+        return 'Every ' + daysCount + ' day' + (daysCount === 1 ? '' : 's');
+      }
+      if (minutes % 60 === 0) {
+        var hoursCount = minutes / 60;
+        return 'Every ' + hoursCount + ' hour' + (hoursCount === 1 ? '' : 's');
+      }
+      return 'Every ' + minutes + ' minute' + (minutes === 1 ? '' : 's');
+    }
+
+    if (type === 'once') {
+      var runAt = String(schedule.run_at || '').trim();
+      var runDate = runAt ? new Date(runAt) : null;
+      if (runDate && !Number.isNaN(runDate.getTime())) {
+        return 'One-time on ' + runDate.toLocaleString();
+      }
+      return 'One-time schedule';
+    }
+
+    return 'Scheduled Task';
+  }
+
+  function formatScheduleSummary(schedule, scheduleName) {
+    var explicitName = String(scheduleName || '').trim();
+    if (explicitName) return explicitName;
+    return buildScheduleNameFromConfig(schedule);
+  }
+
+  function shouldAskScheduleFrequencyChoice(prompt, schedule) {
+    if (!schedule || normalizeToken(schedule.type) !== 'once') return false;
+    var text = normalizeToken(prompt);
+    if (!text) return false;
+    if (hasRecurringScheduleLanguage(text)) return false;
+    if (/\b(?:once|one-time|one time|today|tomorrow|tonight)\b/.test(text)) return false;
+    if (/\b(?:at|@)\s*\d{1,2}(?::\d{2})?\s*(?:am|pm)?\b/i.test(String(prompt || ''))) return true;
+    if (/\b\d{1,2}:\d{2}\s*(?:am|pm)?\b/i.test(String(prompt || ''))) return true;
+    return false;
+  }
+
+  function buildDailyScheduleFromPrompt(prompt, schedule) {
+    var clock = parseClockTimeFromText(prompt);
+    var fallbackTime = '09:00';
+    if (clock && clock.hhmm) {
+      fallbackTime = clock.hhmm;
+    } else if (schedule && schedule.run_at) {
+      var runDate = new Date(schedule.run_at);
+      if (!Number.isNaN(runDate.getTime())) {
+        fallbackTime = String(runDate.getHours()).padStart(2, '0') + ':' + String(runDate.getMinutes()).padStart(2, '0');
+      }
+    }
+    return { type: 'daily', time: fallbackTime };
+  }
+
+  async function parseWorkspaceTaskScheduleDraft(prompt, workspaceId) {
+    var description = String(prompt || '').trim();
+    var draft = {
+      hasSchedulingIntent: promptHasSchedulingIntent(description),
+      schedule_enabled: false,
+      schedule: null,
+      schedule_name: '',
+      parsedAgentName: '',
+      needsFrequencyChoice: false,
+      dailyAlternative: null
+    };
+    if (!draft.hasSchedulingIntent) return draft;
+
+    var parsed = null;
+    if (typeof API !== 'undefined' && typeof API.post === 'function') {
+      try {
+        parsed = await API.post('/api/orchestration/tasks/auto-parse', {
+          description: description,
+          workspace_id: workspaceId
+        });
+      } catch (error) {
+        dashLog.debug('Auto-parse schedule draft unavailable', { error: error && error.message || error });
+      }
+    } else {
+      try {
+        var response = await fetch('/api/orchestration/tasks/auto-parse', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            description: description,
+            workspace_id: workspaceId
+          })
+        });
+        if (response.ok) {
+          parsed = await response.json();
+        }
+      } catch (error) {
+        dashLog.debug('Fallback auto-parse schedule draft unavailable', { error: error && error.message || error });
+      }
+    }
+
+    if (parsed && typeof parsed === 'object') {
+      draft.parsedAgentName = String(parsed.agent_name || '').trim();
+      if (parsed.schedule_enabled && parsed.schedule) {
+        var normalized = normalizeScheduleConfigForTaskCreation(parsed.schedule);
+        if (normalized) {
+          draft.schedule_enabled = true;
+          draft.schedule = normalized;
+          draft.schedule_name = String(parsed.schedule_name || '').trim();
+        }
+      }
+    }
+
+    if (!draft.schedule_enabled || !draft.schedule) {
+      var fallback = inferScheduleFromPromptFallback(description);
+      if (fallback && fallback.schedule) {
+        var normalizedFallback = normalizeScheduleConfigForTaskCreation(fallback.schedule);
+        if (normalizedFallback) {
+          draft.schedule_enabled = true;
+          draft.schedule = normalizedFallback;
+          draft.schedule_name = String(fallback.schedule_name || '').trim();
+        }
+      }
+    }
+
+    if (draft.schedule_enabled && draft.schedule) {
+      draft.needsFrequencyChoice = shouldAskScheduleFrequencyChoice(description, draft.schedule);
+      if (draft.needsFrequencyChoice) {
+        draft.dailyAlternative = buildDailyScheduleFromPrompt(description, draft.schedule);
+      }
+      if (!draft.schedule_name) {
+        draft.schedule_name = buildScheduleNameFromConfig(draft.schedule);
+      }
+    }
+
+    return draft;
+  }
+
+  function normalizeAgentNameList(names) {
+    if (!Array.isArray(names)) return [];
+    var seen = Object.create(null);
+    var out = [];
+    for (var i = 0; i < names.length; i++) {
+      var name = String(names[i] || '').trim();
+      if (!name) continue;
+      var key = normalizeToken(name);
+      if (!key || seen[key]) continue;
+      seen[key] = true;
+      out.push(name);
+    }
+    return out;
+  }
+
+  function extractAgentName(agent) {
+    if (typeof agent === 'string') return String(agent).trim();
+    if (!agent || typeof agent !== 'object') return '';
+    return String(agent.name || '').trim();
+  }
+
+  async function fetchWorkspaceTaskAgentInventory(workspaceId) {
+    var workspaceAgents = [];
+    if (window.workspaceDetail && typeof window.workspaceDetail.getWorkspaceAgentNames === 'function') {
+      workspaceAgents = normalizeAgentNameList(window.workspaceDetail.getWorkspaceAgentNames());
+    }
+
+    if (workspaceAgents.length === 0) {
+      try {
+        var workspaceData = null;
+        if (typeof API !== 'undefined' && typeof API.get === 'function') {
+          workspaceData = await API.get('/api/orchestration/workspace?id=' + encodeURIComponent(workspaceId));
+        } else {
+          var wsResponse = await fetch('/api/orchestration/workspace?id=' + encodeURIComponent(workspaceId));
+          if (wsResponse.ok) workspaceData = await wsResponse.json();
+        }
+        if (workspaceData && typeof workspaceData === 'object') {
+          var merged = [];
+          if (Array.isArray(workspaceData.agent_instances)) {
+            for (var i = 0; i < workspaceData.agent_instances.length; i++) {
+              merged.push(workspaceData.agent_instances[i] && workspaceData.agent_instances[i].name);
+            }
+          }
+          if (Array.isArray(workspaceData.agents)) {
+            for (var j = 0; j < workspaceData.agents.length; j++) {
+              merged.push(workspaceData.agents[j]);
+            }
+          }
+          workspaceAgents = normalizeAgentNameList(merged);
+        }
+      } catch (error) {
+        dashLog.debug('Failed to load workspace agents for scheduled task', {
+          workspaceId: workspaceId,
+          error: error && error.message || error
+        });
+      }
+    }
+
+    var allAgents = [];
+    try {
+      allAgents = await fetchAgentsForMatching();
+    } catch (error) {
+      dashLog.debug('Failed to load global agents for scheduled task', { error: error && error.message || error });
+      allAgents = [];
+    }
+
+    var allAgentNames = normalizeAgentNameList(allAgents.map(extractAgentName));
+    return {
+      workspaceAgents: workspaceAgents,
+      allAgents: allAgents,
+      allAgentNames: allAgentNames
+    };
+  }
+
+  function openWorkspaceTaskModalForConfiguration(workspaceId, description) {
+    if (window.taskModalController && typeof window.taskModalController.openForCreate === 'function') {
+      window.taskModalController.openForCreate(workspaceId, String(description || '').trim(), function () {
+        if (window.workspaceDetail && typeof window.workspaceDetail.loadTasks === 'function') {
+          window.workspaceDetail.loadTasks();
+        }
+        if (window.workspaceDetail && typeof window.workspaceDetail.loadSchedules === 'function') {
+          window.workspaceDetail.loadSchedules();
+        }
+      });
+      return true;
+    }
+    if (window.workspaceDetail && typeof window.workspaceDetail.showAddTaskModal === 'function') {
+      window.workspaceDetail.showAddTaskModal();
+      return true;
+    }
+    return false;
+  }
+
+  function openWorkspaceAgentAddFlow(workspaceId) {
+    if (window.workspaceDetail && typeof window.workspaceDetail.openAddAgentModal === 'function') {
+      window.workspaceDetail.openAddAgentModal();
+      return true;
+    }
+    if (workspaceId) {
+      window.location.href = '/workspaces/' + encodeURIComponent(workspaceId);
+      return true;
+    }
+    return false;
+  }
+
+  function openAgentCreationFlow() {
+    if (window.workspaceDetail && typeof window.workspaceDetail.openCreateAgentFlow === 'function') {
+      window.workspaceDetail.openCreateAgentFlow();
+      return;
+    }
+    if (typeof window.showAddAgentModal === 'function') {
+      window.showAddAgentModal();
+      return;
+    }
+    window.location.href = '/agents';
+  }
+
+  async function createWorkspaceTaskRecord(workspaceId, payload) {
+    var body = Object.assign({
+      studio_id: workspaceId,
+      details: '',
+      status: 'pending'
+    }, payload || {});
+
+    if (typeof API !== 'undefined' && typeof API.post === 'function') {
+      return await API.post('/api/orchestration/tasks', body);
+    }
+
+    var response = await fetch('/api/orchestration/tasks', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    });
+    if (!response.ok) {
+      var text = '';
+      try {
+        text = await response.text();
+      } catch (_error) {
+        text = '';
+      }
+      throw new Error(text || 'Failed to create task');
+    }
+    return await response.json();
+  }
+
+  async function refreshWorkspaceDetailTaskPanels() {
+    if (!window.workspaceDetail) return;
+    var refreshCalls = [];
+    if (typeof window.workspaceDetail.loadWorkspace === 'function') {
+      refreshCalls.push(window.workspaceDetail.loadWorkspace());
+    }
+    if (typeof window.workspaceDetail.loadTasks === 'function') {
+      refreshCalls.push(window.workspaceDetail.loadTasks());
+    }
+    if (typeof window.workspaceDetail.loadSchedules === 'function') {
+      refreshCalls.push(window.workspaceDetail.loadSchedules());
+    }
+    if (refreshCalls.length > 0) {
+      await Promise.allSettled(refreshCalls);
+    }
+    if (typeof window.workspaceDetail.renderAgentGroups === 'function') {
+      window.workspaceDetail.renderAgentGroups();
+    }
+  }
+
+  async function createScheduledWorkspaceTask(workspaceId, description, agentName, scheduleConfig, scheduleName) {
+    var assignedAgent = String(agentName || '').trim();
+    if (!assignedAgent) {
+      throw new Error('Scheduled tasks require an assigned agent.');
+    }
+    var normalizedSchedule = normalizeScheduleConfigForTaskCreation(scheduleConfig);
+    if (!normalizedSchedule) {
+      throw new Error('Could not parse schedule details from the prompt.');
+    }
+    var label = String(scheduleName || '').trim() || buildScheduleNameFromConfig(normalizedSchedule);
+    return await createWorkspaceTaskRecord(workspaceId, {
+      description: String(description || '').trim(),
+      to: assignedAgent,
+      schedule: normalizedSchedule,
+      schedule_enabled: true,
+      schedule_name: label
+    });
+  }
+
+  async function handleWorkspaceScheduledTaskCreation(content, workspaceId) {
+    var prompt = String(content || '').trim();
+    if (!prompt) return false;
+
+    var scheduleDraft = await parseWorkspaceTaskScheduleDraft(prompt, workspaceId);
+    if (!scheduleDraft.hasSchedulingIntent) {
+      return false;
+    }
+
+    var inventory = await fetchWorkspaceTaskAgentInventory(workspaceId);
+    var workspaceAgents = inventory.workspaceAgents || [];
+    var globalAgents = inventory.allAgents || [];
+    var candidateAgents = workspaceAgents.length > 0 ? workspaceAgents.slice() : (inventory.allAgentNames || []);
+
+    if (candidateAgents.length === 0) {
+      appendHomeAssistantMessage(
+        'assistant',
+        'This task looks scheduled, and scheduled tasks need an assigned agent. There are no agents available yet.'
+      );
+      setHomeAssistantRoutingSummary('Scheduled Task Needs Agent', 'Create an agent first, then assign the scheduled task.');
+      renderHomeAssistantActions([
+        {
+          label: 'Create Agent',
+          variant: 'primary',
+          onClick: function () { openAgentCreationFlow(); }
+        },
+        {
+          label: 'Open Task Modal',
+          variant: 'secondary',
+          onClick: function () { openWorkspaceTaskModalForConfiguration(workspaceId, prompt); }
+        },
+        {
+          label: 'Ask Another Task',
+          variant: 'secondary',
+          onClick: function () { focusHomeAssistantInput(); }
+        }
+      ]);
+      return true;
+    }
+
+    if (!scheduleDraft.schedule_enabled || !scheduleDraft.schedule) {
+      appendHomeAssistantMessage(
+        'assistant',
+        'I detected scheduling intent, but I need one more step to confirm the schedule details.'
+      );
+      setHomeAssistantRoutingSummary('Schedule Confirmation', 'Review schedule details in the task modal.');
+      renderHomeAssistantActions([
+        {
+          label: 'Configure in Task Modal',
+          variant: 'primary',
+          onClick: function () { openWorkspaceTaskModalForConfiguration(workspaceId, prompt); }
+        },
+        {
+          label: 'Ask Another Task',
+          variant: 'secondary',
+          onClick: function () { focusHomeAssistantInput(); }
+        }
+      ]);
+      return true;
+    }
+
+    var preferredAgent = '';
+    var preferredKey = normalizeToken(scheduleDraft.parsedAgentName);
+    if (preferredKey) {
+      for (var i = 0; i < candidateAgents.length; i++) {
+        if (normalizeToken(candidateAgents[i]) === preferredKey) {
+          preferredAgent = candidateAgents[i];
+          break;
+        }
+      }
+    }
+
+    var candidateLookup = Object.create(null);
+    for (var j = 0; j < candidateAgents.length; j++) {
+      candidateLookup[normalizeToken(candidateAgents[j])] = true;
+    }
+
+    var candidateAgentObjects = [];
+    for (var g = 0; g < globalAgents.length; g++) {
+      var globalAgentName = extractAgentName(globalAgents[g]);
+      if (!globalAgentName) continue;
+      if (!candidateLookup[normalizeToken(globalAgentName)]) continue;
+      candidateAgentObjects.push(globalAgents[g]);
+    }
+
+    var selectedAgent = preferredAgent;
+    if (!selectedAgent && candidateAgentObjects.length > 0) {
+      var intent = detectHomeIntent(prompt);
+      var match = findSuitableAgent(candidateAgentObjects, intent, prompt);
+      if (match && match.agent && match.agent.name) {
+        selectedAgent = String(match.agent.name).trim();
+      }
+    }
+    if (!selectedAgent) selectedAgent = candidateAgents[0];
+
+    var scheduleSummary = formatScheduleSummary(scheduleDraft.schedule, scheduleDraft.schedule_name);
+    var workspaceHasSelectedAgent = false;
+    for (var a = 0; a < workspaceAgents.length; a++) {
+      if (normalizeToken(workspaceAgents[a]) === normalizeToken(selectedAgent)) {
+        workspaceHasSelectedAgent = true;
+        break;
+      }
+    }
+
+    var openSchedulesAction = {
+      label: 'Open Schedules',
+      variant: 'secondary',
+      onClick: function () {
+        if (window.workspaceDetail && typeof window.workspaceDetail.showSchedulesModal === 'function') {
+          window.workspaceDetail.showSchedulesModal();
+          return;
+        }
+        if (workspaceId) {
+          window.location.href = '/workspaces/' + encodeURIComponent(workspaceId);
+        }
+      }
+    };
+
+    async function finalizeScheduledCreation(agentName, scheduleConfig, scheduleName) {
+      var chosenAgent = String(agentName || '').trim();
+      if (!chosenAgent) return;
+
+      setHomeAssistantBusy(true, 'Creating Scheduled Task...');
+      renderHomeAssistantActions([]);
+      appendHomeAssistantMessage('assistant', 'Creating a scheduled task and assigning it to "' + chosenAgent + '"...');
+      setHomeAssistantRoutingSummary('Scheduled Task', 'Creating and assigning scheduled task...');
+
+      try {
+        await createScheduledWorkspaceTask(workspaceId, prompt, chosenAgent, scheduleConfig, scheduleName);
+        await refreshWorkspaceDetailTaskPanels();
+
+        var summary = formatScheduleSummary(scheduleConfig, scheduleName);
+        appendHomeAssistantMessage('assistant', 'Scheduled task created for "' + chosenAgent + '" (' + summary + ').');
+        if (!workspaceHasSelectedAgent) {
+          appendHomeAssistantMessage('assistant', '"' + chosenAgent + '" was added to this workspace for this scheduled task.');
+        }
+        setHomeAssistantRoutingSummary('Scheduled Task Created', 'Assigned to "' + chosenAgent + '" with ' + summary + '.');
+        renderHomeAssistantActions([
+          openSchedulesAction,
+          {
+            label: 'Ask Another Task',
+            variant: 'secondary',
+            onClick: function () { focusHomeAssistantInput(); }
+          }
+        ]);
+      } catch (error) {
+        dashLog.debug('Failed to create scheduled workspace task', {
+          workspaceId: workspaceId,
+          error: error && error.message || error
+        });
+        appendHomeAssistantMessage('assistant', 'I could not create the scheduled task right now. Please try again.');
+        setHomeAssistantRoutingSummary('Scheduled Task Failed', 'Could not create scheduled task.');
+        renderHomeAssistantActions([
+          {
+            label: 'Retry',
+            variant: 'primary',
+            onClick: function () { finalizeScheduledCreation(chosenAgent, scheduleConfig, scheduleName); }
+          },
+          {
+            label: 'Open Task Modal',
+            variant: 'secondary',
+            onClick: function () { openWorkspaceTaskModalForConfiguration(workspaceId, prompt); }
+          }
+        ]);
+      } finally {
+        setHomeAssistantBusy(false);
+      }
+    }
+
+    if (scheduleDraft.needsFrequencyChoice) {
+      var dailyAlternative = normalizeScheduleConfigForTaskCreation(scheduleDraft.dailyAlternative || buildDailyScheduleFromPrompt(prompt, scheduleDraft.schedule));
+      var onceName = buildScheduleNameFromConfig(scheduleDraft.schedule);
+      var dailyName = dailyAlternative ? buildScheduleNameFromConfig(dailyAlternative) : 'Daily schedule';
+      appendHomeAssistantMessage(
+        'assistant',
+        'I detected a scheduled task. Should this run once or every day? I can assign it to "' + selectedAgent + '".'
+      );
+      setHomeAssistantRoutingSummary('Schedule Choice', 'Choose one-time or daily schedule and confirm assignment.');
+      renderHomeAssistantActions([
+        {
+          label: 'Run Once',
+          variant: 'primary',
+          onClick: function () { finalizeScheduledCreation(selectedAgent, scheduleDraft.schedule, onceName); }
+        },
+        {
+          label: 'Run Daily',
+          variant: 'secondary',
+          disabled: !dailyAlternative,
+          onClick: function () { finalizeScheduledCreation(selectedAgent, dailyAlternative, dailyName); }
+        },
+        {
+          label: 'Pick Agent',
+          variant: 'secondary',
+          onClick: function () { openWorkspaceAgentAddFlow(workspaceId); }
+        },
+        {
+          label: 'Open Task Modal',
+          variant: 'secondary',
+          onClick: function () { openWorkspaceTaskModalForConfiguration(workspaceId, prompt); }
+        }
+      ]);
+      return true;
+    }
+
+    appendHomeAssistantMessage(
+      'assistant',
+      'This task includes scheduling. I can assign it to "' + selectedAgent + '" and set "' + scheduleSummary + '".'
+    );
+    if (!workspaceHasSelectedAgent) {
+      appendHomeAssistantMessage(
+        'assistant',
+        '"' + selectedAgent + '" is not in this workspace yet. I can add and assign this agent when creating the task.'
+      );
+    }
+    setHomeAssistantRoutingSummary('Scheduled Task Ready', 'Confirm agent assignment and schedule.');
+
+    var actions = [
+      {
+        label: workspaceHasSelectedAgent ? 'Create Scheduled Task' : 'Add + Create Scheduled Task',
+        variant: 'primary',
+        onClick: function () { finalizeScheduledCreation(selectedAgent, scheduleDraft.schedule, scheduleDraft.schedule_name); }
+      }
+    ];
+
+    var alternateAgents = [];
+    for (var k = 0; k < candidateAgents.length; k++) {
+      if (normalizeToken(candidateAgents[k]) === normalizeToken(selectedAgent)) continue;
+      alternateAgents.push(candidateAgents[k]);
+      if (alternateAgents.length >= 1) break;
+    }
+    if (alternateAgents.length > 0) {
+      (function (altAgent) {
+        actions.push({
+          label: 'Use ' + altAgent,
+          variant: 'secondary',
+          onClick: function () { finalizeScheduledCreation(altAgent, scheduleDraft.schedule, scheduleDraft.schedule_name); }
+        });
+      })(alternateAgents[0]);
+    }
+
+    actions.push({
+      label: 'Open Task Modal',
+      variant: 'secondary',
+      onClick: function () { openWorkspaceTaskModalForConfiguration(workspaceId, prompt); }
+    });
+    actions.push({
+      label: 'Ask Another Task',
+      variant: 'secondary',
+      onClick: function () { focusHomeAssistantInput(); }
+    });
+
+    renderHomeAssistantActions(actions);
+    return true;
+  }
+
   async function handleWorkspaceSlashCommand(commandPayload, routeContext, options) {
     if (!commandPayload || !commandPayload.command) return false;
     if (!hasWorkspaceRouteContext(routeContext)) return false;
@@ -3315,6 +4120,11 @@
           var taskUsage = 'Usage: /task <task description>';
           appendHomeAssistantMessage('assistant', taskUsage);
           setHomeAssistantRoutingSummary('Workspace Command', taskUsage);
+          return true;
+        }
+
+        var scheduledTaskHandled = await handleWorkspaceScheduledTaskCreation(content, workspaceId);
+        if (scheduledTaskHandled) {
           return true;
         }
 
