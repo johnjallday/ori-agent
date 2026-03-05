@@ -6,12 +6,18 @@ import (
 	"fmt"
 	"net/http"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
 	orihttp "github.com/johnjallday/ori-agent/internal/http"
 	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/workspace"
+)
+
+const (
+	defaultTaskExecutionAttempts = 3
+	maxTaskExecutionAttempts     = 6
 )
 
 // TaskResultsHandler retrieves results from one or more tasks
@@ -201,171 +207,29 @@ func (th *TaskHandler) ExecuteTaskHandler(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	if len(foundTask.InputTaskIDs) > 0 {
-		logger.Info("Task has input tasks, checking if they need execution first", logger.Fields{"task_id": foundTask.ID, "input_count": len(foundTask.InputTaskIDs)})
-
-		if err := th.executeInputTasksIfNeeded(foundWorkspace, foundTask); err != nil {
-			logger.Error("Failed to execute input tasks", logger.Fields{"task_id": foundTask.ID, "error": err})
-			orihttp.InternalError(w, fmt.Sprintf("Failed to execute input tasks: %v", err))
-			return
-		}
-	}
-
 	// Execute the task immediately in a goroutine with a timeout
 	// Default timeout is 30 minutes to prevent runaway tasks
-	go func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
-		defer cancel()
-
-		// Update task status to in_progress
-		foundTask.Status = workspace.TaskStatusInProgress
-		now := time.Now()
-		foundTask.StartedAt = &now
-
-		if err := foundWorkspace.UpdateTask(*foundTask); err != nil {
-			logger.Error("Failed to update task status", logger.Fields{"task_id": err})
-			return
-		}
-		if err := th.workspaceStore.Save(foundWorkspace); err != nil {
-			logger.Error("Failed to save workspace", logger.Fields{"error": err})
-			return
-		}
-
-		// Publish task started event
-		if th.eventBus != nil {
-			event := workspace.NewTaskEvent(workspace.EventTaskStarted, foundWorkspace.ID, foundTask.ID, foundTask.To, map[string]interface{}{
-				"description": foundTask.Description,
-				"priority":    foundTask.Priority,
-				"manual":      true,
-			})
-			th.eventBus.Publish(event)
-		}
-
-		logger.Debug("Manually executing task for agent", logger.Fields{"description": foundTask.Description, "agent": foundTask.ID, "to": foundTask.To})
-
-		// Gather input task results and substitute placeholders in description
-		var inputResults []string
-		if len(foundTask.InputTaskIDs) > 0 {
-			logger.Debug("Task has input task IDs", logger.Fields{"task_id": foundTask.ID, "inputtaskids)": len(foundTask.InputTaskIDs), "inputtaskids": foundTask.InputTaskIDs})
-
-			// Get input context (includes results map)
-			enrichedContext := foundWorkspace.GetInputContext(foundTask)
-			foundTask.Context = enrichedContext
-
-			// Extract results for placeholder substitution (in order of InputTaskIDs)
-			if inputResultsMap, ok := enrichedContext["input_task_results"]; ok {
-				resultsMap := inputResultsMap.(map[string]string)
-				logger.Debug("Injected input task results into task context", logger.Fields{"task_id": len(resultsMap), "id": foundTask.ID})
-
-				// Build ordered results array matching InputTaskIDs order
-				for _, inputTaskID := range foundTask.InputTaskIDs {
-					if result, exists := resultsMap[inputTaskID]; exists {
-						inputResults = append(inputResults, result)
-						preview := result
-						if len(preview) > 100 {
-							preview = preview[:100] + "..."
-						}
-						logger.Debug("- Task result", logger.Fields{"result": inputTaskID, "preview": preview})
-					}
-				}
-			} else {
-				logger.Warn("Warning: No input results found for task despite having InputTaskIDs", logger.Fields{"task_id": foundTask.ID})
-			}
-
-			// Substitute placeholders in task description
-			if len(inputResults) > 0 {
-				originalDesc := foundTask.Description
-				foundTask.Description = substituteInputPlaceholders(foundTask.Description, inputResults)
-				if originalDesc != foundTask.Description {
-					logger.Debug("Substituted placeholders in description", logger.Fields{})
-					logger.Debug("Original", logger.Fields{"originalDesc": originalDesc})
-					logger.Debug("Processed", logger.Fields{"description": foundTask.Description})
-				}
-			}
-		} else {
-			logger.Debug("Task has no input task IDs", logger.Fields{"task_id": foundTask.ID})
-		}
-
-		// Execute the task (with processed description if placeholders were substituted)
-		result, execErr := th.taskHandler.ExecuteTask(ctx, foundTask.To, *foundTask)
-
-		// Reload workspace (may have changed)
-		ws, err := th.workspaceStore.Get(foundWorkspace.ID)
+	go func(workspaceID, taskID string) {
+		ws, err := th.workspaceStore.Get(workspaceID)
 		if err != nil {
-			logger.Error("Failed to reload workspace", logger.Fields{"err": err, "workspace_id": foundWorkspace.ID})
+			logger.Error("Failed to reload workspace for manual task execution", logger.Fields{"workspace_id": workspaceID, "error": err})
 			return
 		}
 
-		// Find the task in the reloaded workspace
-		task, err := ws.GetTask(foundTask.ID)
+		task, err := ws.GetTask(taskID)
 		if err != nil {
-			logger.Error("Task not found in workspace after execution", logger.Fields{"task_id": foundTask.ID})
+			logger.Error("Task not found for manual execution", logger.Fields{"task_id": taskID, "error": err})
 			return
 		}
 
-		if execErr != nil {
+		if _, err := th.executeTaskWithDependencies(ws, task, true); err != nil {
 			var blockedErr *workspace.TaskBlockedError
-			if errors.As(execErr, &blockedErr) {
-				if err := th.markTaskBlocked(ws, task, blockedErr, true, nil); err != nil {
-					logger.Error("Failed to persist blocked task state", logger.Fields{"task_id": task.ID, "error": err})
-				}
+			if errors.As(err, &blockedErr) {
 				return
 			}
-
-			logger.Error("Task failed", logger.Fields{"task_id": task.ID, "execErr": execErr})
-			completedAt := time.Now()
-			task.CompletedAt = &completedAt
-			task.Status = workspace.TaskStatusFailed
-			task.Error = execErr.Error()
-
-			// Publish task failed event
-			if th.eventBus != nil {
-				event := workspace.NewTaskEvent(workspace.EventTaskFailed, ws.ID, task.ID, task.To, map[string]interface{}{
-					"description": task.Description,
-					"error":       execErr.Error(),
-					"manual":      true,
-				})
-				th.eventBus.Publish(event)
-			}
-		} else {
-			logger.Info("Task completed successfully", logger.Fields{"task_id": task.ID})
-			completedAt := time.Now()
-			task.CompletedAt = &completedAt
-			task.Status = workspace.TaskStatusCompleted
-			task.Result = result
-
-			// Automatically store result if agent is connected to a store node
-			workspace.AutoStoreResult(ws, task, result, th.workspaceStore)
-
-			// Publish task completed event
-			if th.eventBus != nil {
-				event := workspace.NewTaskEvent(workspace.EventTaskCompleted, ws.ID, task.ID, task.To, map[string]interface{}{
-					"description": task.Description,
-					"result":      result,
-					"manual":      true,
-				})
-				th.eventBus.Publish(event)
-			}
+			logger.Error("Manual task execution failed", logger.Fields{"task_id": taskID, "error": err})
 		}
-
-		// Save updated task
-		if err := ws.UpdateTask(*task); err != nil {
-			logger.Error("Failed to update task", logger.Fields{"task_id": err})
-			return
-		}
-		if err := th.workspaceStore.Save(ws); err != nil {
-			logger.Error("Failed to save workspace", logger.Fields{"error": err})
-		}
-
-		// Publish workspace updated event
-		if th.eventBus != nil {
-			event := workspace.NewWorkspaceEvent(workspace.EventWorkspaceUpdated, ws.ID, "manual-execution", map[string]interface{}{
-				"task_id": task.ID,
-				"status":  task.Status,
-			})
-			th.eventBus.Publish(event)
-		}
-	}()
+	}(foundWorkspace.ID, foundTask.ID)
 
 	logger.Info("Started manual execution of task", logger.Fields{"task_id": req.TaskID})
 
@@ -835,7 +699,7 @@ func (th *TaskHandler) executeTaskWithDependencies(ws *workspace.Workspace, task
 		}
 	}
 
-	result, execErr := th.taskHandler.ExecuteTask(ctx, task.To, taskForExecution)
+	result, execErr := th.executeTaskIteratively(ctx, ws, task, taskForExecution, manual)
 
 	if execErr != nil {
 		var blockedErr *workspace.TaskBlockedError
@@ -993,6 +857,332 @@ func buildTaskBlockedContext(task *workspace.Task, blockedErr *workspace.TaskBlo
 	return humanLoop
 }
 
+func (th *TaskHandler) executeTaskIteratively(ctx context.Context, ws *workspace.Workspace, persistedTask *workspace.Task, taskForExecution workspace.Task, manual bool) (string, error) {
+	maxAttempts := resolveTaskExecutionAttempts(persistedTask)
+	baseContext := cloneTaskContext(taskForExecution.Context)
+	attemptHistory := make([]map[string]interface{}, 0, maxAttempts)
+
+	for attempt := 1; attempt <= maxAttempts; attempt++ {
+		currentTask := taskForExecution
+		currentTask.Context = cloneTaskContext(baseContext)
+		applyIterationContext(&currentTask, attempt, maxAttempts, attemptHistory)
+
+		if attempt > 1 && th.eventBus != nil {
+			th.eventBus.Publish(workspace.NewTaskEvent(workspace.EventTaskThinking, ws.ID, persistedTask.ID, persistedTask.To, map[string]interface{}{
+				"message":      fmt.Sprintf("Retrying task autonomously (%d/%d)...", attempt, maxAttempts),
+				"attempt":      attempt,
+				"max_attempts": maxAttempts,
+				"manual":       manual,
+			}))
+		}
+
+		result, execErr := th.taskHandler.ExecuteTask(ctx, currentTask.To, currentTask)
+		if execErr != nil {
+			var blockedErr *workspace.TaskBlockedError
+			if errors.As(execErr, &blockedErr) {
+				attemptHistory = append(attemptHistory, map[string]interface{}{
+					"attempt":    attempt,
+					"outcome":    "blocked",
+					"summary":    summarizeExecutionText(blockedErr.Error()),
+					"created_at": time.Now().UTC().Format(time.RFC3339),
+				})
+				recordIterationHistory(persistedTask, maxAttempts, attemptHistory, "blocked")
+				return "", blockedErr
+			}
+
+			attemptHistory = append(attemptHistory, map[string]interface{}{
+				"attempt":    attempt,
+				"outcome":    "error",
+				"summary":    summarizeExecutionText(execErr.Error()),
+				"created_at": time.Now().UTC().Format(time.RFC3339),
+			})
+			if attempt < maxAttempts {
+				continue
+			}
+
+			recordIterationHistory(persistedTask, maxAttempts, attemptHistory, "retry_exhausted")
+			return "", &workspace.TaskBlockedError{
+				ReasonCode: "retry_exhausted",
+				Reason:     fmt.Sprintf("Task failed after %d attempts", maxAttempts),
+				Question:   "I could not complete this task autonomously. Should I retry, switch agents, or continue with your guidance?",
+				SuggestedActions: []string{
+					"continue_with_instruction",
+					"retry",
+					"switch_agent_retry",
+					"mark_failed",
+				},
+				RawResponse: execErr.Error(),
+			}
+		}
+
+		if responseNeedsUserInput(result) {
+			attemptHistory = append(attemptHistory, map[string]interface{}{
+				"attempt":    attempt,
+				"outcome":    "needs_input",
+				"summary":    summarizeExecutionText(result),
+				"created_at": time.Now().UTC().Format(time.RFC3339),
+			})
+			if attempt < maxAttempts {
+				continue
+			}
+
+			recordIterationHistory(persistedTask, maxAttempts, attemptHistory, "needs_user_confirmation")
+			return "", &workspace.TaskBlockedError{
+				ReasonCode: "needs_user_confirmation",
+				Reason:     fmt.Sprintf("Task still needs confirmation after %d autonomous attempts", maxAttempts),
+				Question:   extractClarificationQuestion(result),
+				SuggestedActions: []string{
+					"continue_with_instruction",
+					"retry",
+					"switch_agent_retry",
+					"mark_failed",
+				},
+				RawResponse: result,
+			}
+		}
+
+		attemptHistory = append(attemptHistory, map[string]interface{}{
+			"attempt":    attempt,
+			"outcome":    "success",
+			"summary":    summarizeExecutionText(result),
+			"created_at": time.Now().UTC().Format(time.RFC3339),
+		})
+		recordIterationHistory(persistedTask, maxAttempts, attemptHistory, "success")
+		return result, nil
+	}
+
+	recordIterationHistory(persistedTask, maxAttempts, attemptHistory, "retry_exhausted")
+	return "", &workspace.TaskBlockedError{
+		ReasonCode: "retry_exhausted",
+		Reason:     fmt.Sprintf("Task failed after %d attempts", maxAttempts),
+		Question:   "I could not complete this task autonomously. Should I retry, switch agents, or continue with your guidance?",
+		SuggestedActions: []string{
+			"continue_with_instruction",
+			"retry",
+			"switch_agent_retry",
+			"mark_failed",
+		},
+	}
+}
+
+func cloneTaskContext(src map[string]interface{}) map[string]interface{} {
+	if len(src) == 0 {
+		return map[string]interface{}{}
+	}
+	cloned := make(map[string]interface{}, len(src))
+	for key, value := range src {
+		cloned[key] = value
+	}
+	return cloned
+}
+
+func resolveTaskExecutionAttempts(task *workspace.Task) int {
+	attempts := defaultTaskExecutionAttempts
+	if task == nil || task.Context == nil {
+		return attempts
+	}
+
+	keys := []string{"max_iterations", "max_attempts", "retry_attempts", "execution_max_attempts"}
+	for _, key := range keys {
+		raw, ok := task.Context[key]
+		if !ok {
+			continue
+		}
+		if parsed, ok := parsePositiveInt(raw); ok {
+			attempts = parsed
+			break
+		}
+	}
+
+	if attempts < 1 {
+		attempts = 1
+	}
+	if attempts > maxTaskExecutionAttempts {
+		attempts = maxTaskExecutionAttempts
+	}
+	return attempts
+}
+
+func parsePositiveInt(raw interface{}) (int, bool) {
+	switch value := raw.(type) {
+	case int:
+		if value > 0 {
+			return value, true
+		}
+	case int8:
+		if value > 0 {
+			return int(value), true
+		}
+	case int16:
+		if value > 0 {
+			return int(value), true
+		}
+	case int32:
+		if value > 0 {
+			return int(value), true
+		}
+	case int64:
+		if value > 0 {
+			return int(value), true
+		}
+	case uint:
+		if value > 0 {
+			return int(value), true
+		}
+	case uint8:
+		if value > 0 {
+			return int(value), true
+		}
+	case uint16:
+		if value > 0 {
+			return int(value), true
+		}
+	case uint32:
+		if value > 0 {
+			return int(value), true
+		}
+	case uint64:
+		if value > 0 {
+			return int(value), true
+		}
+	case float64:
+		if value > 0 {
+			return int(value), true
+		}
+	case float32:
+		if value > 0 {
+			return int(value), true
+		}
+	case string:
+		trimmed := strings.TrimSpace(value)
+		if trimmed == "" {
+			return 0, false
+		}
+		if parsed, err := strconv.Atoi(trimmed); err == nil && parsed > 0 {
+			return parsed, true
+		}
+	}
+	return 0, false
+}
+
+func applyIterationContext(task *workspace.Task, attempt, maxAttempts int, history []map[string]interface{}) {
+	if task == nil {
+		return
+	}
+	if task.Context == nil {
+		task.Context = map[string]interface{}{}
+	}
+
+	task.Context["execution_attempt"] = attempt
+	task.Context["execution_max_attempts"] = maxAttempts
+
+	if len(history) == 0 {
+		return
+	}
+
+	last := history[len(history)-1]
+	previousOutcome, _ := last["outcome"].(string)
+	previousSummary, _ := last["summary"].(string)
+
+	task.Context["execution_previous_attempts"] = history
+	task.Context["execution_retry_guidance"] = fmt.Sprintf(
+		"Previous attempt was '%s'. Continue autonomously with reasonable assumptions and provide a concrete best-effort result. Only ask for user confirmation if absolutely necessary.",
+		previousOutcome,
+	)
+	if strings.TrimSpace(previousSummary) != "" {
+		task.Context["execution_previous_summary"] = previousSummary
+	}
+}
+
+func recordIterationHistory(task *workspace.Task, maxAttempts int, history []map[string]interface{}, finalOutcome string) {
+	if task == nil {
+		return
+	}
+	if task.Context == nil {
+		task.Context = map[string]interface{}{}
+	}
+
+	task.Context["execution_retry"] = map[string]interface{}{
+		"max_attempts":  maxAttempts,
+		"attempts_used": len(history),
+		"final_outcome": strings.TrimSpace(finalOutcome),
+		"updated_at":    time.Now().UTC().Format(time.RFC3339),
+		"history":       history,
+	}
+}
+
+func summarizeExecutionText(value string) string {
+	trimmed := strings.TrimSpace(value)
+	if len(trimmed) <= 260 {
+		return trimmed
+	}
+	return strings.TrimSpace(trimmed[:260]) + "..."
+}
+
+func responseNeedsUserInput(result string) bool {
+	normalized := strings.ToLower(strings.TrimSpace(result))
+	if normalized == "" {
+		return true
+	}
+
+	highConfidenceMarkers := []string{
+		"i need clarification",
+		"need clarification to complete this task",
+		"please provide these details",
+		"before i can complete this task",
+		"i need more information",
+		"awaiting your input",
+	}
+	for _, marker := range highConfidenceMarkers {
+		if strings.Contains(normalized, marker) {
+			return true
+		}
+	}
+
+	softMarkers := []string{
+		"could you clarify",
+		"please clarify",
+		"which location",
+		"what specific",
+		"how should i proceed",
+		"what format",
+		"i don't have direct access",
+		"i do not have direct access",
+	}
+
+	matches := 0
+	for _, marker := range softMarkers {
+		if strings.Contains(normalized, marker) {
+			matches++
+		}
+	}
+
+	questionMarks := strings.Count(result, "?")
+	if matches >= 2 && questionMarks >= 1 {
+		return true
+	}
+
+	if strings.Contains(normalized, "1.") &&
+		strings.Contains(normalized, "2.") &&
+		questionMarks >= 2 &&
+		(matches >= 1 || strings.Contains(normalized, "however")) {
+		return true
+	}
+
+	return false
+}
+
+func extractClarificationQuestion(result string) string {
+	lines := strings.Split(result, "\n")
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if strings.Contains(trimmed, "?") && len(trimmed) <= 200 {
+			return trimmed
+		}
+	}
+	return "I still need confirmation to continue. Should I retry, switch agents, or proceed with your guidance?"
+}
+
 // executeInputTasksIfNeeded recursively executes any pending/unassigned input tasks
 // before executing the main task. This ensures fresh results for all inputs.
 func (th *TaskHandler) executeInputTasksIfNeeded(ws *workspace.Workspace, task *workspace.Task) error {
@@ -1076,9 +1266,9 @@ func (th *TaskHandler) executeInputTasksIfNeeded(ws *workspace.Workspace, task *
 			inputTask.Context = enrichedContext
 		}
 
-		// Execute the task
+		// Execute the task (iterative best-effort)
 		logger.Debug("Executing input task", logger.Fields{"input_task_id": inputTaskID, "agent": inputTask.To})
-		result, err := th.taskHandler.ExecuteTask(ctx, inputTask.To, *inputTask)
+		result, err := th.executeTaskIteratively(ctx, ws, inputTask, *inputTask, false)
 
 		// Update task with result
 		completed := time.Now()

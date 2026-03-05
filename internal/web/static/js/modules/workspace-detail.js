@@ -36,7 +36,10 @@ function getStatusClass(status) {
     pending: 'pending',
     in_progress: 'in_progress',
     completed: 'completed',
-    failed: 'failed'
+    failed: 'failed',
+    blocked: 'blocked',
+    cancelled: 'pending',
+    timeout: 'failed'
   };
   return statusMap[status] || 'pending';
 }
@@ -51,7 +54,10 @@ function getDisplayStatus(status) {
     pending: 'Pending',
     in_progress: 'In Progress',
     completed: 'Completed',
-    failed: 'Failed'
+    failed: 'Failed',
+    blocked: 'Blocked',
+    cancelled: 'Cancelled',
+    timeout: 'Timed Out'
   };
   return statusMap[status] || status;
 }
@@ -100,6 +106,10 @@ export class WorkspaceDetailPage {
     this.currentTaskResultText = '';
     this.currentBlockedTask = null;
     this.currentAssistRecommendation = null;
+    this.currentExecutionTaskId = null;
+    this.executionMonitorTimer = null;
+    this.executionLogKeys = new Set();
+    this.executionLastStatus = '';
 
     // DOM elements
     this.elements = {};
@@ -310,6 +320,12 @@ export class WorkspaceDetailPage {
       taskResultMeta: document.getElementById('workspace-detail-task-result-meta'),
       taskResultBody: document.getElementById('workspace-detail-task-result-body'),
       taskResultCopyBtn: document.getElementById('workspace-detail-task-result-copy'),
+      taskExecutionModal: document.getElementById('workspace-detail-task-execution-modal'),
+      taskExecutionTitle: document.getElementById('workspace-detail-task-execution-title'),
+      taskExecutionMeta: document.getElementById('workspace-detail-task-execution-meta'),
+      taskExecutionStatus: document.getElementById('workspace-detail-task-execution-status'),
+      taskExecutionLog: document.getElementById('workspace-detail-task-execution-log'),
+      taskExecutionViewResultBtn: document.getElementById('workspace-detail-task-execution-view-result'),
 
       // Assist modal
       taskAssistModal: document.getElementById('workspace-detail-task-assist-modal'),
@@ -387,6 +403,15 @@ export class WorkspaceDetailPage {
     // Schedule buttons
     this.elements.viewSchedulesBtn?.addEventListener('click', () => this.showSchedulesModal());
     this.elements.taskResultCopyBtn?.addEventListener('click', () => this.copyCurrentTaskResult());
+    this.elements.taskExecutionViewResultBtn?.addEventListener('click', () => {
+      if (this.currentExecutionTaskId) {
+        this.showTaskResult(this.currentExecutionTaskId);
+      }
+    });
+    this.elements.taskExecutionModal?.addEventListener('hidden.bs.modal', () => {
+      this.stopExecutionMonitor();
+      this.currentExecutionTaskId = null;
+    });
     this.elements.taskAssistRetryBtn?.addEventListener('click', () => this.submitTaskAssist('retry'));
     this.elements.taskAssistContinueBtn?.addEventListener('click', () => this.submitTaskAssist('continue_with_instruction'));
     this.elements.taskAssistSwitchBtn?.addEventListener('click', () => this.submitTaskAssist('switch_agent_retry'));
@@ -2179,6 +2204,204 @@ export class WorkspaceDetailPage {
     }
   }
 
+  getTaskExecutionState(task) {
+    if (!task || typeof task !== 'object') return 'pending';
+    const status = String(task.status || '').trim().toLowerCase();
+    const humanLoopState = String(task?.context?.human_loop?.state || '').trim().toLowerCase();
+    if (humanLoopState === 'blocked') return 'blocked';
+    return status || 'pending';
+  }
+
+  setExecutionModalStatus(status) {
+    if (!this.elements.taskExecutionStatus) return;
+    const safeStatus = String(status || 'pending').trim().toLowerCase();
+    this.elements.taskExecutionStatus.className = `workspace-detail-task-status ${getStatusClass(safeStatus)}`;
+    this.elements.taskExecutionStatus.textContent = getDisplayStatus(safeStatus);
+  }
+
+  clearExecutionLog() {
+    this.executionLogKeys = new Set();
+    this.executionLastStatus = '';
+    if (!this.elements.taskExecutionLog) return;
+    this.elements.taskExecutionLog.innerHTML = '<div class="workspace-detail-task-execution-empty">Execution updates will appear here.</div>';
+  }
+
+  appendExecutionLog(message, variant = 'info', dedupeKey = '') {
+    if (!this.elements.taskExecutionLog || !message) return;
+    const key = String(dedupeKey || '').trim();
+    if (key) {
+      if (this.executionLogKeys.has(key)) return;
+      this.executionLogKeys.add(key);
+    }
+
+    const empty = this.elements.taskExecutionLog.querySelector('.workspace-detail-task-execution-empty');
+    if (empty) empty.remove();
+
+    const entry = document.createElement('div');
+    const safeVariant = ['info', 'success', 'warning', 'error'].includes(variant) ? variant : 'info';
+    entry.className = `workspace-detail-task-execution-log-entry ${safeVariant}`;
+
+    const timeEl = document.createElement('div');
+    timeEl.className = 'workspace-detail-task-execution-log-time';
+    timeEl.textContent = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+
+    const messageEl = document.createElement('div');
+    messageEl.className = 'workspace-detail-task-execution-log-message';
+    messageEl.textContent = String(message);
+
+    entry.appendChild(timeEl);
+    entry.appendChild(messageEl);
+    this.elements.taskExecutionLog.appendChild(entry);
+    this.elements.taskExecutionLog.scrollTop = this.elements.taskExecutionLog.scrollHeight;
+  }
+
+  setExecutionViewResultEnabled(enabled) {
+    if (!this.elements.taskExecutionViewResultBtn) return;
+    this.elements.taskExecutionViewResultBtn.disabled = !enabled;
+  }
+
+  updateTaskExecutionMeta(task) {
+    if (!this.elements.taskExecutionMeta || !task) return;
+    const answeredBy = this.getAnsweringAgentLabel(task);
+    const updatedAt = formatDate(task.updated_at || task.completed_at || task.started_at || task.created_at);
+    const retry = task?.context?.execution_retry || {};
+    const attemptsUsed = Number(retry.attempts_used || 0);
+    const maxAttempts = Number(retry.max_attempts || task?.context?.execution_max_attempts || 0);
+    const parts = [answeredBy, updatedAt].filter(Boolean);
+    if (attemptsUsed > 0 && maxAttempts > 0) {
+      parts.push(`Attempt ${attemptsUsed}/${maxAttempts}`);
+    }
+    this.elements.taskExecutionMeta.textContent = parts.join(' • ');
+  }
+
+  openTaskExecutionModal(task) {
+    if (!this.elements.taskExecutionModal || !window.bootstrap || !task) return;
+    const taskName = task.description || task.name || task.id || 'Task Execution';
+    this.currentExecutionTaskId = task.id;
+    if (this.elements.taskExecutionTitle) {
+      this.elements.taskExecutionTitle.textContent = taskName;
+    }
+    this.updateTaskExecutionMeta(task);
+    this.setExecutionModalStatus(this.getTaskExecutionState(task));
+    this.setExecutionViewResultEnabled(false);
+    this.clearExecutionLog();
+    this.appendExecutionLog('Preparing execution...', 'info', `${task.id}:prepare`);
+
+    const modal = typeof bootstrap.Modal.getOrCreateInstance === 'function'
+      ? bootstrap.Modal.getOrCreateInstance(this.elements.taskExecutionModal)
+      : (bootstrap.Modal.getInstance(this.elements.taskExecutionModal) || new bootstrap.Modal(this.elements.taskExecutionModal));
+    modal.show();
+  }
+
+  stopExecutionMonitor() {
+    if (this.executionMonitorTimer) {
+      clearInterval(this.executionMonitorTimer);
+      this.executionMonitorTimer = null;
+    }
+  }
+
+  async startExecutionMonitor(taskId) {
+    this.stopExecutionMonitor();
+    if (!taskId) return;
+    this.currentExecutionTaskId = taskId;
+
+    const poll = async () => {
+      try {
+        const response = await fetch(`/api/orchestration/tasks?id=${encodeURIComponent(taskId)}`);
+        if (!response.ok) return;
+
+        const task = await response.json();
+        if (!task || task.id !== taskId) return;
+
+        const state = this.getTaskExecutionState(task);
+        this.updateTaskExecutionMeta(task);
+        this.setExecutionModalStatus(state);
+
+        if (state !== this.executionLastStatus) {
+          this.executionLastStatus = state;
+          this.appendExecutionLog(`Status changed to ${getDisplayStatus(state)}.`, state === 'failed' ? 'error' : state === 'blocked' ? 'warning' : state === 'completed' ? 'success' : 'info', `${taskId}:status:${state}:${task.updated_at || ''}`);
+        }
+
+        if (state === 'completed' || state === 'failed' || state === 'cancelled' || state === 'timeout' || state === 'blocked') {
+          this.stopExecutionMonitor();
+          this.setExecutionViewResultEnabled(Boolean(task.result || task.error));
+          if (state === 'completed') {
+            this.appendExecutionLog('Execution completed successfully.', 'success', `${taskId}:terminal:completed`);
+          } else if (state === 'blocked') {
+            this.appendExecutionLog('Execution paused and requires your input.', 'warning', `${taskId}:terminal:blocked`);
+          } else {
+            this.appendExecutionLog('Execution ended with an issue.', 'error', `${taskId}:terminal:${state}`);
+          }
+          await this.loadTasks();
+        }
+      } catch (error) {
+        console.error('Failed to monitor task execution:', error);
+      }
+    };
+
+    await poll();
+    this.executionMonitorTimer = setInterval(poll, 3000);
+  }
+
+  extractRealtimeTaskPayload(event) {
+    const eventData = event && typeof event === 'object' ? (event.data || {}) : {};
+    const payload = eventData && typeof eventData.data === 'object' ? eventData.data : eventData;
+    const taskId = String(payload?.task_id || eventData?.task_id || '').trim();
+    return { taskId, payload };
+  }
+
+  handleTaskExecutionRealtimeEvent(event) {
+    if (!this.currentExecutionTaskId || !event) return;
+    const { taskId, payload } = this.extractRealtimeTaskPayload(event);
+    if (!taskId || taskId !== this.currentExecutionTaskId) return;
+
+    switch (event.type) {
+      case 'task.started':
+        this.setExecutionModalStatus('in_progress');
+        this.appendExecutionLog('Agent started executing this task.', 'info', `${taskId}:evt:started:${payload?.updated_at || ''}`);
+        break;
+      case 'task.thinking':
+        this.setExecutionModalStatus('in_progress');
+        this.appendExecutionLog(payload?.message || 'Agent is analyzing the task...', 'info');
+        break;
+      case 'task.tool_call':
+        this.appendExecutionLog(`Calling tool: ${payload?.tool_name || 'unknown tool'}`, 'info');
+        break;
+      case 'task.tool_result': {
+        const success = payload?.success !== false;
+        const resultPreview = payload?.result_preview ? ` (${payload.result_preview})` : '';
+        const message = success
+          ? `Tool completed: ${payload?.tool_name || 'tool'}${resultPreview}`
+          : `Tool failed: ${payload?.tool_name || 'tool'}${payload?.error ? ` (${payload.error})` : ''}`;
+        this.appendExecutionLog(message, success ? 'success' : 'warning');
+        break;
+      }
+      case 'task.blocked':
+        this.setExecutionModalStatus('blocked');
+        this.appendExecutionLog(payload?.reason || 'Execution paused and requires your input.', 'warning', `${taskId}:evt:blocked:${payload?.updated_at || ''}`);
+        this.stopExecutionMonitor();
+        this.setExecutionViewResultEnabled(false);
+        break;
+      case 'task.completed':
+        this.setExecutionModalStatus('completed');
+        this.appendExecutionLog('Task completed.', 'success', `${taskId}:evt:completed:${payload?.updated_at || ''}`);
+        this.stopExecutionMonitor();
+        this.setExecutionViewResultEnabled(true);
+        break;
+      case 'task.failed':
+        this.setExecutionModalStatus('failed');
+        this.appendExecutionLog(payload?.error || 'Task failed.', 'error', `${taskId}:evt:failed:${payload?.updated_at || ''}`);
+        this.stopExecutionMonitor();
+        this.setExecutionViewResultEnabled(true);
+        break;
+      case 'task.resumed':
+        this.setExecutionModalStatus('in_progress');
+        this.appendExecutionLog('Task resumed after guidance.', 'info', `${taskId}:evt:resumed:${payload?.updated_at || ''}`);
+        this.startExecutionMonitor(taskId);
+        break;
+    }
+  }
+
   async executeTask(taskId) {
     await this.loadAgentCatalog();
 
@@ -2256,6 +2479,8 @@ export class WorkspaceDetailPage {
     const confirmMessage = preflightWarning ? `${preflightWarning}\n\n${baseConfirmMessage}` : baseConfirmMessage;
     if (!confirm(confirmMessage)) return;
 
+    this.openTaskExecutionModal(task);
+
     try {
       const response = await fetch('/api/orchestration/tasks/execute', {
         method: 'POST',
@@ -2268,10 +2493,14 @@ export class WorkspaceDetailPage {
       }
 
       if (window.Toast) window.Toast.success('Task started');
+      this.appendExecutionLog('Task dispatched. Waiting for agent updates...', 'info', `${taskId}:dispatched`);
       await this.loadTasks();
-      this.pollTaskCompletion(taskId);
+      this.startExecutionMonitor(taskId);
     } catch (error) {
       console.error('Failed to execute task:', error);
+      const message = error && error.message ? error.message : 'Failed to execute task';
+      this.setExecutionModalStatus('failed');
+      this.appendExecutionLog(message, 'error', `${taskId}:dispatch-error`);
       if (window.Toast) window.Toast.error('Failed to execute task');
     }
   }
@@ -4611,6 +4840,8 @@ export class WorkspaceDetailPage {
    * Handle real-time events
    */
   handleRealtimeEvent(event) {
+    this.handleTaskExecutionRealtimeEvent(event);
+
     switch (event.type) {
       case 'task_created':
       case 'task_updated':
@@ -4622,6 +4853,10 @@ export class WorkspaceDetailPage {
       case 'task.failed':
       case 'task.deleted':
         this.loadTasks();
+        break;
+      case 'task.thinking':
+      case 'task.tool_call':
+      case 'task.tool_result':
         break;
       case 'task.blocked': {
         this.loadTasks();

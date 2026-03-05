@@ -128,6 +128,8 @@ func (h *LLMTaskHandler) ExecuteTask(ctx context.Context, agentName string, task
 	taskSystemPrompt := "You are a helpful AI assistant completing a task in a collaborative workspace. "
 	taskSystemPrompt += "You have access to tools, but only use them when they are clearly necessary to complete the specific task. "
 	taskSystemPrompt += "For simple questions, greetings, or informational requests, respond naturally without calling tools. "
+	taskSystemPrompt += "When details are missing, make reasonable assumptions and still produce a concrete best-effort result. "
+	taskSystemPrompt += "Only ask for user confirmation if the task is truly blocked or risky without explicit user input. "
 	taskSystemPrompt += "Be thoughtful and precise in your responses."
 
 	messages = append([]llm.Message{llm.NewSystemMessage(taskSystemPrompt)}, messages...)
