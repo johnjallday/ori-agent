@@ -234,18 +234,42 @@ func (h *Handler) updateSkill(w http.ResponseWriter, r *http.Request, name strin
 		return
 	}
 
-	skill, err := h.manager.UpdateSkill(agentName, name, skills.SkillInput{
+	existing, found, err := h.manager.GetSkill(agentName, name)
+	if err != nil {
+		orihttp.InternalError(w, err.Error())
+		return
+	}
+	if !found || existing == nil {
+		orihttp.NotFound(w, skills.ErrSkillNotFound.Error())
+		return
+	}
+
+	input := skills.SkillInput{
 		Name:        strings.TrimSpace(req.Name),
 		Description: strings.TrimSpace(req.Description),
 		Prompt:      req.Prompt,
 		OpenAIYAML:  req.OpenAIYAML,
-	})
+	}
+
+	var skill skills.Skill
+	switch existing.Source {
+	case skills.SourceAgent:
+		skill, err = h.manager.UpdateSkill(agentName, name, input)
+	case skills.SourcePersonal, skills.SourceAgentsCompat:
+		skill, err = h.manager.UpdateSkillAtPath(existing.Source, existing.Path, name, input)
+	default:
+		orihttp.RespondErrorWithErr(w, http.StatusForbidden, "skill source is read-only", skills.ErrSkillReadOnly)
+		return
+	}
+
 	if err != nil {
 		switch {
 		case errors.Is(err, skills.ErrSkillNotFound):
 			orihttp.NotFound(w, err.Error())
 		case errors.Is(err, skills.ErrSkillRenameNotSupported):
 			orihttp.BadRequest(w, err.Error())
+		case errors.Is(err, skills.ErrSkillReadOnly):
+			orihttp.RespondErrorWithErr(w, http.StatusForbidden, "skill source is read-only", err)
 		default:
 			orihttp.RespondErrorWithErr(w, http.StatusBadRequest, "failed to update skill", err)
 		}

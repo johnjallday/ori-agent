@@ -87,6 +87,36 @@ func (m *Manager) UpdateSkill(agentName, skillName string, input SkillInput) (Sk
 		return Skill{}, err
 	}
 	skillPath := filepath.Join(skillDir, "SKILL.md")
+	return m.updateSkillAtPath(skillPath, skillDir, skillName, SourceAgent, input)
+}
+
+func (m *Manager) UpdateSkillAtPath(source, skillPath, skillName string, input SkillInput) (Skill, error) {
+	if source != SourcePersonal && source != SourceAgentsCompat {
+		return Skill{}, ErrSkillReadOnly
+	}
+	if !m.isEditableSkillPath(source, skillPath) {
+		return Skill{}, fmt.Errorf("invalid skill path")
+	}
+
+	skillPath = filepath.Clean(skillPath)
+	skillDir := filepath.Dir(skillPath)
+	return m.updateSkillAtPath(skillPath, skillDir, skillName, source, input)
+}
+
+func (m *Manager) updateSkillAtPath(skillPath, skillDir, skillName, source string, input SkillInput) (Skill, error) {
+	if input.Name != "" && !strings.EqualFold(input.Name, skillName) {
+		return Skill{}, ErrSkillRenameNotSupported
+	}
+	if err := validateSkillName(skillName); err != nil {
+		return Skill{}, err
+	}
+	if err := validateSkillDescription(input.Description); err != nil {
+		return Skill{}, err
+	}
+	if strings.TrimSpace(input.Prompt) == "" {
+		return Skill{}, fmt.Errorf("prompt is required")
+	}
+
 	if _, err := os.Stat(skillPath); err != nil {
 		if os.IsNotExist(err) {
 			return Skill{}, ErrSkillNotFound
@@ -108,12 +138,58 @@ func (m *Manager) UpdateSkill(agentName, skillName string, input SkillInput) (Sk
 		}
 	}
 
-	skill, err := m.loadSkillEntry(skillPath, skillName, SourceAgent, skillDir, true)
+	skill, err := m.loadSkillEntry(skillPath, skillName, source, skillDir, true)
 	if err != nil {
 		return Skill{}, err
 	}
 	skill.Enabled = true
 	return skill, nil
+}
+
+func (m *Manager) isEditableSkillPath(source, skillPath string) bool {
+	skillPath = filepath.Clean(strings.TrimSpace(skillPath))
+	if skillPath == "." || skillPath == "" {
+		return false
+	}
+	if !strings.EqualFold(filepath.Base(skillPath), "SKILL.md") {
+		return false
+	}
+
+	var root string
+	switch source {
+	case SourcePersonal:
+		root = strings.TrimSpace(m.personalSkillsDir)
+	case SourceAgentsCompat:
+		if m.agentStorePath == "" {
+			return false
+		}
+		repoRoot := filepath.Dir(m.agentStorePath)
+		root = filepath.Join(repoRoot, ".agents", "skills")
+	default:
+		return false
+	}
+
+	if strings.TrimSpace(root) == "" {
+		return false
+	}
+
+	rootAbs, err := filepath.Abs(root)
+	if err != nil {
+		return false
+	}
+	pathAbs, err := filepath.Abs(skillPath)
+	if err != nil {
+		return false
+	}
+
+	rel, err := filepath.Rel(rootAbs, pathAbs)
+	if err != nil {
+		return false
+	}
+	if rel == "." {
+		return true
+	}
+	return !strings.HasPrefix(rel, ".."+string(filepath.Separator)) && rel != ".."
 }
 
 func (m *Manager) DeleteSkill(agentName, skillName string) error {

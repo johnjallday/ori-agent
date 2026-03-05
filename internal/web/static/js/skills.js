@@ -86,7 +86,8 @@ function renderSkills(skills) {
     const name = skill?.name || '(unnamed skill)';
     const description = skill?.description || 'No description';
     const source = getSourceLabel(skill?.source);
-    const isEditable = source === 'agent';
+    const isEditable = source === 'agent' || source === '.agents' || source === 'personal';
+    const canDelete = source === 'agent';
     const validationErrors = Array.isArray(skill?.validation_errors) ? skill.validation_errors : [];
     const hasErrors = validationErrors.length > 0;
     const hasScripts = Boolean(skill?.has_scripts);
@@ -135,7 +136,7 @@ function renderSkills(skills) {
         <button class="modern-btn modern-btn-secondary btn-sm" data-action="run" ${(requiresTrust || hasErrors) ? 'disabled' : ''}>Run</button>
         ${isEditable
     ? `<button class="modern-btn modern-btn-secondary btn-sm" data-action="edit">Edit</button>
-           <button class="modern-btn modern-btn-secondary btn-sm" data-action="delete">Delete</button>`
+           ${canDelete ? '<button class="modern-btn modern-btn-secondary btn-sm" data-action="delete">Delete</button>' : ''}`
     : `<button class="modern-btn modern-btn-secondary btn-sm" data-action="clone">Clone & Edit</button>`}
         ${hasScripts ? `<button class="modern-btn modern-btn-secondary btn-sm" data-action="trust">${isTrusted ? 'Untrust' : 'Trust'}</button>` : ''}
       </div>
