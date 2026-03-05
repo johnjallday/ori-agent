@@ -98,7 +98,13 @@ func (e *APIError) WithRequestID(requestID string) *APIError {
 func RespondAPIError(w http.ResponseWriter, statusCode int, err *APIError) error {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(statusCode)
-	return json.NewEncoder(w).Encode(err)
+	if encodeErr := json.NewEncoder(w).Encode(err); encodeErr != nil {
+		if IsClientDisconnectError(encodeErr) {
+			return nil
+		}
+		return encodeErr
+	}
+	return nil
 }
 
 // Convenience functions for common HTTP error responses

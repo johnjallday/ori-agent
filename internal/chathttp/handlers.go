@@ -139,12 +139,7 @@ func (h *Handler) setCachedDefinition(pluginName string, definition pluginapi.To
 
 // writeJSONResponse writes a JSON response and logs errors if encoding fails
 func writeJSONResponse(w http.ResponseWriter, data any) {
-	w.Header().Set("Content-Type", "application/json")
-	if encErr := json.NewEncoder(w).Encode(data); encErr != nil {
-		logger.Error("Failed to encode JSON response", logger.Fields{"error": encErr})
-		// If we've already started writing, we can't change the status code
-		// But at least we've logged the error
-	}
+	orihttp.WriteJSON(w, data)
 }
 
 // SetLLMFactory sets the LLM factory

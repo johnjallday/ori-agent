@@ -2,8 +2,13 @@ package http
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
+	"net"
 	"net/http"
+	"os"
+	"strings"
+	"syscall"
 
 	"github.com/johnjallday/ori-agent/internal/logger"
 )
@@ -31,7 +36,13 @@ type ErrorResponse struct {
 func RespondJSON(w http.ResponseWriter, statusCode int, data interface{}) error {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(statusCode)
-	return json.NewEncoder(w).Encode(data)
+	if err := json.NewEncoder(w).Encode(data); err != nil {
+		if IsClientDisconnectError(err) {
+			return nil
+		}
+		return err
+	}
+	return nil
 }
 
 // RespondError writes a JSON error response with the given status code and message.
@@ -96,6 +107,9 @@ func RespondNoContent(w http.ResponseWriter) {
 func WriteJSON(w http.ResponseWriter, data interface{}) {
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(data); err != nil {
+		if IsClientDisconnectError(err) {
+			return
+		}
 		logger.Error("Failed to encode JSON response", logger.Fields{"error": err})
 	}
 }
@@ -139,6 +153,9 @@ func Created(w http.ResponseWriter, data interface{}) {
 func WriteContent(w http.ResponseWriter, contentType string, content []byte) {
 	w.Header().Set("Content-Type", contentType)
 	if _, err := w.Write(content); err != nil {
+		if IsClientDisconnectError(err) {
+			return
+		}
 		logger.Error("Failed to write response content", logger.Fields{"error": err})
 	}
 }
@@ -165,6 +182,9 @@ func WriteText(w http.ResponseWriter, text string) {
 //	orihttp.WriteBytes(w, content)
 func WriteBytes(w http.ResponseWriter, content []byte) {
 	if _, err := w.Write(content); err != nil {
+		if IsClientDisconnectError(err) {
+			return
+		}
 		logger.Error("Failed to write response", logger.Fields{"error": err})
 	}
 }
@@ -191,6 +211,60 @@ func RespondErrorWithErr(w http.ResponseWriter, status int, message string, err 
 	}
 
 	if encodeErr := json.NewEncoder(w).Encode(response); encodeErr != nil {
+		if IsClientDisconnectError(encodeErr) {
+			return
+		}
 		logger.Error("Failed to encode error response", logger.Fields{"error": encodeErr})
 	}
+}
+
+// IsClientDisconnectError returns true if err indicates the HTTP client disconnected
+// before the server completed writing the response body.
+func IsClientDisconnectError(err error) bool {
+	if err == nil {
+		return false
+	}
+
+	if errors.Is(err, net.ErrClosed) ||
+		errors.Is(err, syscall.EPIPE) ||
+		errors.Is(err, syscall.ECONNRESET) {
+		return true
+	}
+
+	var opErr *net.OpError
+	if errors.As(err, &opErr) {
+		if errors.Is(opErr.Err, net.ErrClosed) ||
+			errors.Is(opErr.Err, syscall.EPIPE) ||
+			errors.Is(opErr.Err, syscall.ECONNRESET) {
+			return true
+		}
+	}
+
+	var sysErr *os.SyscallError
+	if errors.As(err, &sysErr) {
+		if errors.Is(sysErr.Err, syscall.EPIPE) || errors.Is(sysErr.Err, syscall.ECONNRESET) {
+			return true
+		}
+	}
+
+	msg := strings.ToLower(strings.TrimSpace(err.Error()))
+	if msg == "" {
+		return false
+	}
+
+	markers := []string{
+		"broken pipe",
+		"connection reset by peer",
+		"use of closed network connection",
+		"client disconnected",
+		"http2: stream closed",
+		"stream error: stream id",
+	}
+	for _, marker := range markers {
+		if strings.Contains(msg, marker) {
+			return true
+		}
+	}
+
+	return false
 }
