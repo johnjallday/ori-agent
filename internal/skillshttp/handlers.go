@@ -1,10 +1,16 @@
 package skillshttp
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
+	"os"
+	"os/exec"
+	"regexp"
 	"strings"
+	"time"
 
 	orihttp "github.com/johnjallday/ori-agent/internal/http"
 	"github.com/johnjallday/ori-agent/internal/skills"
@@ -15,6 +21,19 @@ type Handler struct {
 	manager *skills.Manager
 	store   store.Store
 }
+
+var (
+	ansiEscapePattern          = regexp.MustCompile(`\x1b\[[0-9;?]*[ -/]*[@-~]`)
+	marketplacePackagePattern  = regexp.MustCompile(`^([A-Za-z0-9._-]+/[A-Za-z0-9._-]+@[A-Za-z0-9._-]+)\b`)
+	marketplaceInstallsPattern = regexp.MustCompile(`([0-9][0-9.,]*(?:[KMB])?\s+installs)\b`)
+)
+
+const (
+	marketplaceSearchTimeout  = 45 * time.Second
+	marketplaceInstallTimeout = 2 * time.Minute
+	marketplaceMaxResults     = 24
+	marketplaceOutputMaxChars = 3500
+)
 
 func New(manager *skills.Manager, st store.Store) *Handler {
 	return &Handler{
@@ -39,6 +58,11 @@ func (h *Handler) Handle(w http.ResponseWriter, r *http.Request) {
 	path = strings.TrimSpace(path)
 	if path == "" {
 		orihttp.BadRequest(w, "skill name required")
+		return
+	}
+
+	if path == "marketplace" || strings.HasPrefix(path, "marketplace/") {
+		h.handleMarketplace(w, r, path)
 		return
 	}
 
@@ -89,6 +113,23 @@ type skillStateRequest struct {
 	Agent   string `json:"agent"`
 	Enabled *bool  `json:"enabled,omitempty"`
 	Trusted *bool  `json:"trusted,omitempty"`
+}
+
+type marketplaceSearchRequest struct {
+	Query string `json:"query"`
+	Limit int    `json:"limit,omitempty"`
+}
+
+type marketplaceInstallRequest struct {
+	Package string `json:"package"`
+}
+
+type marketplaceSkillResult struct {
+	Package    string `json:"package"`
+	Repository string `json:"repository"`
+	Skill      string `json:"skill"`
+	URL        string `json:"url,omitempty"`
+	Installs   string `json:"installs,omitempty"`
 }
 
 func (h *Handler) listSkills(w http.ResponseWriter, r *http.Request) {
@@ -288,6 +329,236 @@ func (h *Handler) setSkillTrusted(w http.ResponseWriter, r *http.Request, name s
 		"name":    name,
 		"trusted": *req.Trusted,
 	})
+}
+
+func (h *Handler) handleMarketplace(w http.ResponseWriter, r *http.Request, path string) {
+	if path == "marketplace/search" {
+		h.searchMarketplace(w, r)
+		return
+	}
+	if path == "marketplace/install" {
+		h.installMarketplaceSkill(w, r)
+		return
+	}
+	orihttp.NotFound(w, "skills marketplace endpoint not found")
+}
+
+func (h *Handler) searchMarketplace(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		orihttp.MethodNotAllowed(w)
+		return
+	}
+
+	var req marketplaceSearchRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		orihttp.BadRequest(w, "invalid request body")
+		return
+	}
+
+	query := sanitizeMarketplaceQuery(req.Query)
+	if query == "" {
+		orihttp.BadRequest(w, "query is required")
+		return
+	}
+
+	limit := req.Limit
+	if limit <= 0 {
+		limit = 8
+	}
+	if limit > marketplaceMaxResults {
+		limit = marketplaceMaxResults
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), marketplaceSearchTimeout)
+	defer cancel()
+
+	output, err := runSkillsCLI(ctx, "find", query)
+	if err != nil {
+		_ = orihttp.RespondJSON(w, http.StatusBadGateway, map[string]any{
+			"error":   "failed to search skills marketplace",
+			"details": truncateMarketplaceOutput(output),
+		})
+		return
+	}
+
+	results := parseSkillsFindOutput(output, limit)
+	orihttp.Success(w, map[string]any{
+		"query":   query,
+		"results": results,
+		"count":   len(results),
+	})
+}
+
+func (h *Handler) installMarketplaceSkill(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		orihttp.MethodNotAllowed(w)
+		return
+	}
+
+	var req marketplaceInstallRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		orihttp.BadRequest(w, "invalid request body")
+		return
+	}
+
+	packageSpec := strings.TrimSpace(req.Package)
+	if !isValidMarketplacePackageSpec(packageSpec) {
+		orihttp.BadRequest(w, "invalid package format (expected owner/repo@skill)")
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), marketplaceInstallTimeout)
+	defer cancel()
+
+	output, err := runSkillsCLI(ctx, "add", packageSpec, "-g", "-y", "--agent", "universal", "--copy")
+	if err != nil {
+		_ = orihttp.RespondJSON(w, http.StatusBadGateway, map[string]any{
+			"error":   "failed to install skill package",
+			"details": truncateMarketplaceOutput(output),
+		})
+		return
+	}
+
+	orihttp.Success(w, map[string]any{
+		"package": packageSpec,
+		"status":  "installed",
+		"details": truncateMarketplaceOutput(output),
+	})
+}
+
+func sanitizeMarketplaceQuery(query string) string {
+	normalized := strings.TrimSpace(query)
+	if normalized == "" {
+		return ""
+	}
+	normalized = strings.Join(strings.Fields(normalized), " ")
+	if len(normalized) > 160 {
+		normalized = normalized[:160]
+	}
+	return normalized
+}
+
+func stripANSI(input string) string {
+	if input == "" {
+		return ""
+	}
+	return ansiEscapePattern.ReplaceAllString(input, "")
+}
+
+func isValidMarketplacePackageSpec(value string) bool {
+	trimmed := strings.TrimSpace(value)
+	return marketplacePackagePattern.MatchString(trimmed) && marketplacePackagePattern.FindString(trimmed) == trimmed
+}
+
+func parsePackageSpec(spec string) (repository, skillName string) {
+	trimmed := strings.TrimSpace(spec)
+	if trimmed == "" {
+		return "", ""
+	}
+	parts := strings.SplitN(trimmed, "@", 2)
+	if len(parts) != 2 {
+		return trimmed, ""
+	}
+	return parts[0], parts[1]
+}
+
+func parseSkillsFindOutput(output string, limit int) []marketplaceSkillResult {
+	cleaned := stripANSI(output)
+	if cleaned == "" {
+		return []marketplaceSkillResult{}
+	}
+
+	if limit <= 0 || limit > marketplaceMaxResults {
+		limit = 8
+	}
+
+	lines := strings.Split(cleaned, "\n")
+	results := make([]marketplaceSkillResult, 0, limit)
+	indexByPackage := make(map[string]int)
+	currentIndex := -1
+
+	for _, rawLine := range lines {
+		line := strings.TrimSpace(rawLine)
+		if line == "" {
+			continue
+		}
+
+		line = strings.TrimSpace(strings.TrimLeft(line, "│└├─•·"))
+		if line == "" {
+			continue
+		}
+
+		if packageMatch := marketplacePackagePattern.FindStringSubmatch(line); len(packageMatch) > 1 {
+			packageSpec := strings.TrimSpace(packageMatch[1])
+			resultIndex, exists := indexByPackage[packageSpec]
+			if !exists {
+				if len(results) >= limit {
+					currentIndex = -1
+					continue
+				}
+				repository, skillName := parsePackageSpec(packageSpec)
+				results = append(results, marketplaceSkillResult{
+					Package:    packageSpec,
+					Repository: repository,
+					Skill:      skillName,
+				})
+				resultIndex = len(results) - 1
+				indexByPackage[packageSpec] = resultIndex
+			}
+			currentIndex = resultIndex
+			if installMatch := marketplaceInstallsPattern.FindStringSubmatch(line); len(installMatch) > 1 {
+				results[currentIndex].Installs = strings.TrimSpace(installMatch[1])
+			}
+			continue
+		}
+
+		if currentIndex < 0 || currentIndex >= len(results) {
+			continue
+		}
+
+		if urlIndex := strings.Index(line, "https://skills.sh/"); urlIndex >= 0 {
+			url := strings.TrimSpace(line[urlIndex:])
+			if url != "" {
+				results[currentIndex].URL = url
+			}
+			continue
+		}
+
+		if results[currentIndex].Installs == "" {
+			if installMatch := marketplaceInstallsPattern.FindStringSubmatch(line); len(installMatch) > 1 {
+				results[currentIndex].Installs = strings.TrimSpace(installMatch[1])
+			}
+		}
+	}
+
+	return results
+}
+
+func runSkillsCLI(ctx context.Context, args ...string) (string, error) {
+	commandArgs := append([]string{"--yes", "skills"}, args...)
+	cmd := exec.CommandContext(ctx, "npx", commandArgs...)
+	cmd.Env = append(os.Environ(), "CI=1", "NO_COLOR=1", "FORCE_COLOR=0")
+
+	outputBytes, err := cmd.CombinedOutput()
+	output := string(outputBytes)
+	if err != nil {
+		if output == "" {
+			output = err.Error()
+		}
+		return output, fmt.Errorf("skills command failed: %w", err)
+	}
+	return output, nil
+}
+
+func truncateMarketplaceOutput(output string) string {
+	cleaned := strings.TrimSpace(stripANSI(output))
+	if cleaned == "" {
+		return ""
+	}
+	if len(cleaned) <= marketplaceOutputMaxChars {
+		return cleaned
+	}
+	return cleaned[:marketplaceOutputMaxChars] + "..."
 }
 
 func resolveAgentName(r *http.Request, st store.Store) string {

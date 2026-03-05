@@ -31,6 +31,12 @@
                 </svg>
                 New Skill
               </button>
+              <button id="skillsDiscoverBtn" class="modern-btn modern-btn-secondary btn-sm">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" class="me-1">
+                  <path d="M5,20H19V18H5M19,9H15V3H9V9H5L12,16L19,9Z"/>
+                </svg>
+                Discover Skills
+              </button>
               <select id="skillsAgentSelect" class="form-select form-select-sm" style="min-width: 200px; background: var(--bg-secondary); border: 1px solid var(--border-color); color: var(--text-primary);">
                 <option value="">Current Agent</option>
               </select>
@@ -109,6 +115,59 @@
         </div>
         <div class="modal-body" style="color: var(--text-primary);">
           <div id="skillsRunOutput" style="white-space: pre-wrap; font-size: 0.9em;"></div>
+        </div>
+        <div class="modal-footer" style="border-top: 1px solid var(--border-color);">
+          <button type="button" class="modern-btn modern-btn-secondary" data-bs-dismiss="modal">Close</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal fade" id="skillsMarketplaceModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-xl modal-dialog-scrollable">
+      <div class="modal-content" style="background: var(--bg-primary); border: 1px solid var(--border-color);">
+        <div class="modal-header" style="border-bottom: 1px solid var(--border-color);">
+          <h5 class="modal-title" style="color: var(--text-primary);">Install Skills from skills.sh</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+        </div>
+        <div class="modal-body" style="color: var(--text-primary);">
+          <div id="skillsMarketplaceStatus" class="alert d-none" style="font-size: 0.875rem;"></div>
+          <ul class="nav nav-tabs mb-3" id="skillsMarketplaceTabs" role="tablist">
+            <li class="nav-item" role="presentation">
+              <button class="nav-link active" id="skillsMarketplaceSearchTab" data-bs-toggle="tab" data-bs-target="#skillsMarketplaceSearchPane" type="button" role="tab" aria-controls="skillsMarketplaceSearchPane" aria-selected="true">Search</button>
+            </li>
+            <li class="nav-item" role="presentation">
+              <button class="nav-link" id="skillsMarketplaceInstallTab" data-bs-toggle="tab" data-bs-target="#skillsMarketplaceInstallPane" type="button" role="tab" aria-controls="skillsMarketplaceInstallPane" aria-selected="false">Install Package</button>
+            </li>
+          </ul>
+
+          <div class="tab-content">
+            <div class="tab-pane fade show active" id="skillsMarketplaceSearchPane" role="tabpanel" aria-labelledby="skillsMarketplaceSearchTab">
+              <div class="d-flex gap-2 flex-wrap mb-3">
+                <input id="skillsMarketplaceSearchQuery" type="text" class="form-control form-control-sm" placeholder="e.g. find-skills, playwright, react" style="flex: 1; min-width: 240px; background: var(--bg-secondary); border: 1px solid var(--border-color); color: var(--text-primary);">
+                <button id="skillsMarketplaceSearchBtn" class="modern-btn modern-btn-primary btn-sm">Search skills.sh</button>
+              </div>
+              <div class="d-flex justify-content-between align-items-center mb-2">
+                <small style="color: var(--text-secondary);">Searches public skills packages and shows install-ready package IDs.</small>
+                <a href="https://skills.sh/" target="_blank" rel="noopener noreferrer" style="font-size: 12px;">Open skills.sh</a>
+              </div>
+              <div id="skillsMarketplaceResults" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px;">
+                <div class="text-center py-3" style="color: var(--text-secondary);">Search to discover installable skills.</div>
+              </div>
+            </div>
+
+            <div class="tab-pane fade" id="skillsMarketplaceInstallPane" role="tabpanel" aria-labelledby="skillsMarketplaceInstallTab">
+              <div class="mb-3">
+                <label for="skillsMarketplacePackageInput" class="form-label">Package</label>
+                <input id="skillsMarketplacePackageInput" type="text" class="modern-input w-100" placeholder="owner/repo@skill (e.g. vercel-labs/skills@find-skills)">
+                <small class="form-helper">Installs globally for Ori via `npx skills add ... -g --agent universal`.</small>
+              </div>
+              <div class="d-flex gap-2 flex-wrap">
+                <button id="skillsMarketplaceInstallBtn" class="modern-btn modern-btn-primary btn-sm">Install Package</button>
+                <button id="skillsMarketplaceQuickFindSkillsBtn" class="modern-btn modern-btn-secondary btn-sm">Install find-skills</button>
+              </div>
+            </div>
+          </div>
         </div>
         <div class="modal-footer" style="border-top: 1px solid var(--border-color);">
           <button type="button" class="modern-btn modern-btn-secondary" data-bs-dismiss="modal">Close</button>

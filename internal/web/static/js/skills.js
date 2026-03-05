@@ -5,6 +5,9 @@ let skillsFiltered = [];
 let selectedAgentName = '';
 let defaultAgentName = '';
 let editingSkillName = '';
+let marketplaceResults = [];
+let marketplaceSearchBusy = false;
+let marketplaceInstallBusy = false;
 
 function getSkillPageDefaultAgent() {
   const page = document.getElementById('skillsPage');
@@ -108,11 +111,20 @@ function renderSkills(skills) {
       ? `<div style="font-size: 11px; color: var(--danger-color); margin-top: 6px;">${safeText(validationErrors.join('; '))}</div>`
       : '';
 
+    const skillPath = skill?.path || '';
+    const pathHtml = skillPath
+      ? `<div style="font-size: 11px; color: var(--text-secondary); margin-top: 6px; word-break: break-all; opacity: 0.7;" title="${safeText(skillPath)}">
+           <svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor" style="margin-right: 3px; flex-shrink: 0; vertical-align: middle;">
+             <path d="M10,4H4C2.89,4 2,4.89 2,6V18A2,2 0 0,0 4,20H20A2,2 0 0,0 22,18V8C22,6.89 21.1,6 20,6H12L10,4Z"/>
+           </svg>${safeText(skillPath)}</div>`
+      : '';
+
     card.innerHTML = `
       <div style="display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; flex: 1 1 auto;">
         <div style="min-width: 0;">
           <div style="font-weight: 600; color: var(--text-primary);">${safeText(name)}</div>
           <div style="font-size: 12px; color: var(--text-secondary); margin-top: 4px;">${safeText(description)}</div>
+          ${pathHtml}
           ${errorHtml}
         </div>
         <div style="display: flex; flex-wrap: wrap; gap: 4px; justify-content: flex-end;">${badges.join('')}</div>
@@ -275,7 +287,13 @@ function setupSkillsEvents() {
   const search = document.getElementById('skillsSearch');
   const refresh = document.getElementById('skillsRefreshBtn');
   const createBtn = document.getElementById('skillsCreateBtn');
+  const discoverBtn = document.getElementById('skillsDiscoverBtn');
   const saveBtn = document.getElementById('skillsSaveBtn');
+  const marketQuery = document.getElementById('skillsMarketplaceSearchQuery');
+  const marketSearchBtn = document.getElementById('skillsMarketplaceSearchBtn');
+  const marketPackageInput = document.getElementById('skillsMarketplacePackageInput');
+  const marketInstallBtn = document.getElementById('skillsMarketplaceInstallBtn');
+  const marketQuickFindSkillsBtn = document.getElementById('skillsMarketplaceQuickFindSkillsBtn');
 
   if (select) {
     select.addEventListener('change', () => {
@@ -300,8 +318,49 @@ function setupSkillsEvents() {
     createBtn.addEventListener('click', () => openSkillEditor(null));
   }
 
+  if (discoverBtn) {
+    discoverBtn.addEventListener('click', () => openSkillsMarketplace());
+  }
+
   if (saveBtn) {
     saveBtn.addEventListener('click', () => saveSkillEditor());
+  }
+
+  if (marketSearchBtn) {
+    marketSearchBtn.addEventListener('click', () => searchMarketplaceSkills());
+  }
+
+  if (marketQuery) {
+    marketQuery.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter') {
+        event.preventDefault();
+        searchMarketplaceSkills();
+      }
+    });
+  }
+
+  if (marketInstallBtn) {
+    marketInstallBtn.addEventListener('click', () => {
+      const value = marketPackageInput ? marketPackageInput.value : '';
+      installMarketplacePackage(value);
+    });
+  }
+
+  if (marketPackageInput) {
+    marketPackageInput.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter') {
+        event.preventDefault();
+        installMarketplacePackage(marketPackageInput.value);
+      }
+    });
+  }
+
+  if (marketQuickFindSkillsBtn) {
+    marketQuickFindSkillsBtn.addEventListener('click', () => {
+      const findSkillsPackage = 'vercel-labs/skills@find-skills';
+      if (marketPackageInput) marketPackageInput.value = findSkillsPackage;
+      installMarketplacePackage(findSkillsPackage);
+    });
   }
 }
 
@@ -315,6 +374,198 @@ function getRunModal() {
   const el = document.getElementById('skillsRunModal');
   if (!el) return null;
   return bootstrap.Modal.getOrCreateInstance(el);
+}
+
+function getMarketplaceModal() {
+  const el = document.getElementById('skillsMarketplaceModal');
+  if (!el) return null;
+  return bootstrap.Modal.getOrCreateInstance(el);
+}
+
+function setMarketplaceStatus(message, isError) {
+  const box = document.getElementById('skillsMarketplaceStatus');
+  if (!box) return;
+  const text = (message || '').trim();
+  if (!text) {
+    box.classList.add('d-none');
+    box.textContent = '';
+    box.classList.remove('alert-danger', 'alert-success');
+    return;
+  }
+  box.classList.remove('d-none', 'alert-danger', 'alert-success');
+  box.classList.add(isError ? 'alert-danger' : 'alert-success');
+  box.textContent = text;
+}
+
+function setMarketplaceResultsMessage(message) {
+  const container = document.getElementById('skillsMarketplaceResults');
+  if (!container) return;
+  container.innerHTML = `<div class="text-center py-3" style="color: var(--text-secondary);">${safeText(message)}</div>`;
+}
+
+function setMarketplaceActionBusy(isBusy) {
+  const searchBtn = document.getElementById('skillsMarketplaceSearchBtn');
+  const installBtn = document.getElementById('skillsMarketplaceInstallBtn');
+  const quickBtn = document.getElementById('skillsMarketplaceQuickFindSkillsBtn');
+  const queryInput = document.getElementById('skillsMarketplaceSearchQuery');
+  const packageInput = document.getElementById('skillsMarketplacePackageInput');
+  if (searchBtn) searchBtn.disabled = isBusy;
+  if (installBtn) installBtn.disabled = isBusy;
+  if (quickBtn) quickBtn.disabled = isBusy;
+  if (queryInput) queryInput.disabled = isBusy;
+  if (packageInput) packageInput.disabled = isBusy;
+}
+
+function renderMarketplaceResults(results) {
+  const container = document.getElementById('skillsMarketplaceResults');
+  if (!container) return;
+
+  if (!Array.isArray(results) || results.length === 0) {
+    setMarketplaceResultsMessage('No matching skills found. Try another query.');
+    return;
+  }
+
+  container.innerHTML = results.map((result) => {
+    const packageSpec = result?.package || '';
+    const repository = result?.repository || '';
+    const skillName = result?.skill || '';
+    const installs = result?.installs || '';
+    const url = result?.url || '';
+    const urlHtml = url
+      ? `<a href="${safeText(url)}" target="_blank" rel="noopener noreferrer" style="font-size: 12px;">View on skills.sh</a>`
+      : '';
+
+    return `
+      <div class="plugin-item" style="display: flex; flex-direction: column; gap: 10px;">
+        <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 8px;">
+          <div style="min-width: 0;">
+            <div style="font-weight: 600; color: var(--text-primary); word-break: break-word;">${safeText(skillName || packageSpec)}</div>
+            <div style="font-size: 12px; color: var(--text-secondary); margin-top: 4px; word-break: break-word;">${safeText(repository)}</div>
+            <div style="font-size: 11px; color: var(--text-secondary); margin-top: 6px; opacity: 0.85; word-break: break-all;">${safeText(packageSpec)}</div>
+          </div>
+          ${installs ? `<span class="badge bg-secondary" style="font-size: 10px;">${safeText(installs)}</span>` : ''}
+        </div>
+        <div style="display: flex; justify-content: space-between; align-items: center; gap: 8px;">
+          ${urlHtml}
+          <button class="modern-btn modern-btn-primary btn-sm" data-market-install="${safeText(packageSpec)}" ${marketplaceInstallBusy ? 'disabled' : ''}>
+            Install
+          </button>
+        </div>
+      </div>
+    `;
+  }).join('');
+
+  container.querySelectorAll('[data-market-install]').forEach((button) => {
+    button.addEventListener('click', () => {
+      const packageSpec = button.getAttribute('data-market-install') || '';
+      installMarketplacePackage(packageSpec);
+    });
+  });
+}
+
+async function searchMarketplaceSkills() {
+  if (marketplaceSearchBusy || marketplaceInstallBusy) return;
+  const queryInput = document.getElementById('skillsMarketplaceSearchQuery');
+  const query = queryInput ? queryInput.value.trim() : '';
+  if (!query) {
+    setMarketplaceStatus('Enter a search query first.', true);
+    return;
+  }
+
+  marketplaceSearchBusy = true;
+  setMarketplaceActionBusy(true);
+  setMarketplaceStatus('Searching skills marketplace...', false);
+  setMarketplaceResultsMessage('Searching...');
+
+  try {
+    const response = await fetch('/api/skills/marketplace/search', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ query, limit: 12 }),
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      const details = data?.details ? ` ${data.details}` : '';
+      throw new Error((data?.error || 'Failed to search marketplace.') + details);
+    }
+
+    marketplaceResults = Array.isArray(data?.results) ? data.results : [];
+    renderMarketplaceResults(marketplaceResults);
+    if (marketplaceResults.length === 0) {
+      setMarketplaceStatus('Search completed. No skills matched your query.', true);
+    } else {
+      setMarketplaceStatus(`Found ${marketplaceResults.length} matching skill${marketplaceResults.length === 1 ? '' : 's'}.`, false);
+    }
+  } catch (error) {
+    console.error('Failed to search marketplace skills:', error);
+    setMarketplaceStatus(error?.message || 'Failed to search marketplace skills.', true);
+    setMarketplaceResultsMessage('Could not load search results.');
+  } finally {
+    marketplaceSearchBusy = false;
+    setMarketplaceActionBusy(false);
+  }
+}
+
+async function installMarketplacePackage(packageSpec) {
+  const normalized = (packageSpec || '').trim();
+  if (!normalized) {
+    setMarketplaceStatus('Package is required (owner/repo@skill).', true);
+    return;
+  }
+  if (marketplaceSearchBusy || marketplaceInstallBusy) return;
+
+  marketplaceInstallBusy = true;
+  setMarketplaceActionBusy(true);
+  setMarketplaceStatus(`Installing ${normalized}...`, false);
+
+  const packageInput = document.getElementById('skillsMarketplacePackageInput');
+  if (packageInput) packageInput.value = normalized;
+
+  try {
+    const response = await fetch('/api/skills/marketplace/install', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ package: normalized }),
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      const details = data?.details ? ` ${data.details}` : '';
+      throw new Error((data?.error || 'Failed to install skill package.') + details);
+    }
+
+    setMarketplaceStatus(`Installed ${normalized}. Refreshing your skills list...`, false);
+    if (typeof showToast === 'function') {
+      showToast(`Installed ${normalized}`, 'success');
+    }
+    await loadSkills(selectedAgentName);
+  } catch (error) {
+    console.error('Failed to install marketplace skill package:', error);
+    setMarketplaceStatus(error?.message || 'Failed to install skill package.', true);
+    if (typeof showToast === 'function') {
+      showToast('Failed to install skill package.', 'error');
+    }
+  } finally {
+    marketplaceInstallBusy = false;
+    setMarketplaceActionBusy(false);
+    renderMarketplaceResults(marketplaceResults);
+  }
+}
+
+function openSkillsMarketplace() {
+  const modal = getMarketplaceModal();
+  if (modal) modal.show();
+
+  setMarketplaceStatus('', false);
+  if (!Array.isArray(marketplaceResults) || marketplaceResults.length === 0) {
+    setMarketplaceResultsMessage('Search to discover installable skills.');
+  } else {
+    renderMarketplaceResults(marketplaceResults);
+  }
+
+  const queryInput = document.getElementById('skillsMarketplaceSearchQuery');
+  if (queryInput && !queryInput.value.trim()) {
+    queryInput.value = 'find-skills';
+  }
 }
 
 function openSkillEditor(skill) {
