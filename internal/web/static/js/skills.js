@@ -38,6 +38,75 @@ function safeText(value) {
     .replace(/'/g, '&#39;');
 }
 
+function styleSystemModelProviderBadge(providerEl, providerName) {
+  if (!providerEl) return;
+  const provider = String(providerName || '').toLowerCase();
+  switch (provider) {
+    case 'openai':
+      providerEl.style.background = 'rgba(16, 163, 127, 0.2)';
+      providerEl.style.color = '#10a37f';
+      break;
+    case 'claude':
+    case 'anthropic':
+      providerEl.style.background = 'rgba(204, 147, 102, 0.2)';
+      providerEl.style.color = '#cc9366';
+      break;
+    case 'gemini':
+      providerEl.style.background = 'rgba(66, 133, 244, 0.2)';
+      providerEl.style.color = '#4285f4';
+      break;
+    case 'ollama':
+      providerEl.style.background = 'rgba(59, 130, 246, 0.2)';
+      providerEl.style.color = '#3b82f6';
+      break;
+    default:
+      providerEl.style.background = 'var(--bg-tertiary)';
+      providerEl.style.color = 'var(--text-muted)';
+  }
+}
+
+async function refreshSystemModelDisplay() {
+  const modelNameEl = document.getElementById('systemModelName');
+  const providerEl = document.getElementById('navSystemModelProvider');
+  const indicatorEl = document.getElementById('systemModelIndicator');
+  if (!modelNameEl || !providerEl) return;
+
+  try {
+    const response = await fetch('/api/settings/system-model');
+    if (!response.ok) throw new Error('Failed to fetch system model');
+    const data = await response.json();
+
+    if (data?.configured && data?.model) {
+      const fullModelName = String(data.model);
+      modelNameEl.textContent = fullModelName.length > 20 ? `${fullModelName.substring(0, 18)}...` : fullModelName;
+      modelNameEl.title = fullModelName;
+
+      if (data.provider) {
+        providerEl.textContent = data.provider;
+        providerEl.style.display = 'inline';
+        styleSystemModelProviderBadge(providerEl, data.provider);
+      } else {
+        providerEl.style.display = 'none';
+      }
+
+      if (indicatorEl) {
+        indicatorEl.title = `System Model: ${data.model} (${data.provider || 'unknown'}) - Click to configure`;
+      }
+      return;
+    }
+
+    modelNameEl.textContent = 'Not configured';
+    providerEl.style.display = 'none';
+    if (indicatorEl) {
+      indicatorEl.title = 'System Model not configured - Click to set up';
+    }
+  } catch (error) {
+    console.error('Failed to load system model:', error);
+    modelNameEl.textContent = 'Error';
+    providerEl.style.display = 'none';
+  }
+}
+
 function setSkillsCount(count) {
   const countEl = document.getElementById('skillsCount');
   if (countEl) countEl.textContent = String(count);
@@ -1316,6 +1385,7 @@ async function runSkill(name) {
 async function initializeSkillsPage() {
   defaultAgentName = getSkillPageDefaultAgent();
   setupSkillsEvents();
+  await refreshSystemModelDisplay();
   await loadAgents();
   if (!selectedAgentName) {
     selectedAgentName = defaultAgentName;
