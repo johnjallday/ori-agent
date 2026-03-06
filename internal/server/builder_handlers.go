@@ -228,7 +228,7 @@ func (b *ServerBuilder) initializeHandlers() error {
 		ExternalAgents:    b.externalAgentsCache,
 		ConfigManager:     b.configManager,
 	})
-	b.skillsHandler = skillshttp.New(b.skillsManager, b.st)
+	b.skillsHandler = skillshttp.New(b.skillsManager, b.st, b.llmFactory, b.configManager)
 	b.chatHandler.SetSkillsManager(b.skillsManager)
 
 	return nil

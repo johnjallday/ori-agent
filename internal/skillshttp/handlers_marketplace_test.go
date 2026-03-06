@@ -134,3 +134,48 @@ func TestMarketplaceOutputSummary(t *testing.T) {
 		t.Fatalf("marketplaceOutputSummary() = %q", got)
 	}
 }
+
+func TestSkillsInitAlreadyExists(t *testing.T) {
+	already := "\x1b[38;5;145mSkill already exists at \x1b[38;5;102mdemo-skill/SKILL.md\x1b[0m"
+	if !skillsInitAlreadyExists(already) {
+		t.Fatalf("skillsInitAlreadyExists() = false, want true")
+	}
+
+	created := "\x1b[38;5;145mInitialized skill: \x1b[38;5;102mdemo-skill\x1b[0m"
+	if skillsInitAlreadyExists(created) {
+		t.Fatalf("skillsInitAlreadyExists() = true, want false")
+	}
+}
+
+func TestSanitizeGeneratedPrompt(t *testing.T) {
+	raw := "```text\nPrompt:\nLine 1\nLine 2\n```\n"
+	got := sanitizeGeneratedPrompt(raw)
+	want := "Line 1\nLine 2"
+	if got != want {
+		t.Fatalf("sanitizeGeneratedPrompt() = %q, want %q", got, want)
+	}
+}
+
+func TestSanitizeGeneratedPrompt_TruncatesToTwentyLines(t *testing.T) {
+	raw := ""
+	for i := 1; i <= 25; i++ {
+		if i > 1 {
+			raw += "\n"
+		}
+		raw += "Line"
+	}
+	got := sanitizeGeneratedPrompt(raw)
+	lines := 0
+	for _, ch := range got {
+		if ch == '\n' {
+			lines++
+		}
+	}
+	// number of lines = newline count + 1 when non-empty
+	if got != "" {
+		lines++
+	}
+	if lines != 20 {
+		t.Fatalf("sanitizeGeneratedPrompt() line count = %d, want 20", lines)
+	}
+}

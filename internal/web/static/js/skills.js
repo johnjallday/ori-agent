@@ -10,6 +10,8 @@ let marketplaceInstalledSkills = [];
 let marketplaceSearchBusy = false;
 let marketplaceInstallBusy = false;
 let marketplaceManageBusy = false;
+let promptGenerationAbortController = null;
+let promptGenerationRequestId = 0;
 
 function getSkillPageDefaultAgent() {
   const page = document.getElementById('skillsPage');
@@ -297,8 +299,10 @@ function setupSkillsEvents() {
   const search = document.getElementById('skillsSearch');
   const refresh = document.getElementById('skillsRefreshBtn');
   const createBtn = document.getElementById('skillsCreateBtn');
+  const generatePromptBtn = document.getElementById('skillsGeneratePromptBtn');
   const discoverBtn = document.getElementById('skillsDiscoverBtn');
   const saveBtn = document.getElementById('skillsSaveBtn');
+  const generateConfigBtn = document.getElementById('skillsGenerateConfigBtn');
   const marketQuery = document.getElementById('skillsMarketplaceSearchQuery');
   const marketSearchBtn = document.getElementById('skillsMarketplaceSearchBtn');
   const marketPackageInput = document.getElementById('skillsMarketplacePackageInput');
@@ -334,12 +338,22 @@ function setupSkillsEvents() {
     createBtn.addEventListener('click', () => openSkillEditor(null));
   }
 
+  if (generatePromptBtn) {
+    generatePromptBtn.addEventListener('click', () => {
+      generatePromptWithAssistant(true);
+    });
+  }
+
   if (discoverBtn) {
     discoverBtn.addEventListener('click', () => openSkillsMarketplace());
   }
 
   if (saveBtn) {
     saveBtn.addEventListener('click', () => saveSkillEditor());
+  }
+
+  if (generateConfigBtn) {
+    generateConfigBtn.addEventListener('click', () => generateSkillConfiguration());
   }
 
   if (marketSearchBtn) {
@@ -859,6 +873,184 @@ function openSkillsMarketplace() {
   }
 }
 
+function toYamlQuoted(value) {
+  const normalized = value == null ? '' : String(value).trim();
+  return JSON.stringify(normalized);
+}
+
+function resetPromptGenerationState() {
+  if (promptGenerationAbortController) {
+    promptGenerationAbortController.abort();
+    promptGenerationAbortController = null;
+  }
+}
+
+function extractAssistantPrompt(raw) {
+  let text = String(raw || '').trim();
+  if (!text) return '';
+
+  if (text.startsWith('```')) {
+    text = text.replace(/^```[a-zA-Z0-9_-]*\s*/u, '');
+    text = text.replace(/\s*```$/u, '').trim();
+  }
+
+  const lower = text.toLowerCase();
+  const promptPrefixIdx = lower.indexOf('prompt:');
+  if (promptPrefixIdx === 0) {
+    text = text.slice('prompt:'.length).trim();
+  }
+
+  if ((text.startsWith('"') && text.endsWith('"')) || (text.startsWith("'") && text.endsWith("'"))) {
+    text = text.slice(1, -1).trim();
+  }
+
+  return text;
+}
+
+async function generatePromptWithAssistant(force = false) {
+  if (promptGenerationAbortController) {
+    promptGenerationAbortController.abort();
+  }
+
+  const promptInput = document.getElementById('skillPromptInput');
+  const nameInput = document.getElementById('skillNameInput');
+  const descriptionInput = document.getElementById('skillDescriptionInput');
+  const errorBox = document.getElementById('skillsEditorError');
+  if (!promptInput || !nameInput || !descriptionInput) return;
+
+  const name = nameInput.value.trim();
+  const description = descriptionInput.value.trim();
+  if (!description) {
+    if (errorBox) {
+      errorBox.textContent = 'Add a description first so the assistant can generate a prompt.';
+      errorBox.classList.remove('d-none');
+    }
+    return;
+  }
+
+  if (force && promptInput.value.trim()) {
+    const confirmed = window.confirm('Replace the current prompt with a newly generated one?');
+    if (!confirmed) return;
+  }
+
+  const controller = new AbortController();
+  promptGenerationAbortController = controller;
+  const requestId = ++promptGenerationRequestId;
+
+  if (errorBox) {
+    errorBox.classList.add('d-none');
+    errorBox.textContent = '';
+  }
+
+  promptInput.value = 'Generating prompt...';
+
+  try {
+    const response = await fetch('/api/skills/generate-prompt', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        agent: selectedAgentName,
+        name,
+        description,
+      }),
+      signal: controller.signal,
+    });
+    const data = await response.json().catch(() => ({}));
+    if (requestId !== promptGenerationRequestId) return;
+
+    const details = typeof data?.details === 'string' ? data.details.trim() : '';
+    const baseError = typeof data?.error === 'string' ? data.error : 'Failed to generate prompt.';
+    if (!response.ok) throw new Error(`${baseError}${details ? ` ${details}` : ''}`);
+
+    const generated = extractAssistantPrompt(data?.prompt || '');
+    if (!generated) {
+      throw new Error('Assistant returned an empty prompt.');
+    }
+
+    promptInput.value = generated;
+  } catch (error) {
+    if (controller.signal.aborted) return;
+    console.error('Failed to generate prompt with assistant:', error);
+    if (requestId !== promptGenerationRequestId) return;
+
+    promptInput.value = '';
+    if (errorBox) {
+      errorBox.textContent = error?.message || 'Failed to generate prompt.';
+      errorBox.classList.remove('d-none');
+    }
+  } finally {
+    if (requestId === promptGenerationRequestId) {
+      promptGenerationAbortController = null;
+    }
+  }
+}
+
+function toSkillDisplayName(value) {
+  const normalized = (value || '').trim();
+  if (!normalized) return 'New Skill';
+  return normalized
+    .split('-')
+    .filter(Boolean)
+    .map(part => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(' ');
+}
+
+function toYamlList(key, values) {
+  const normalized = Array.isArray(values)
+    ? values.map(item => String(item || '').trim()).filter(Boolean)
+    : [];
+  if (normalized.length === 0) {
+    return [`  ${key}: []`];
+  }
+  return [
+    `  ${key}:`,
+    ...normalized.map(item => `    - ${toYamlQuoted(item)}`),
+  ];
+}
+
+function buildGeneratedSkillConfig() {
+  const nameInput = document.getElementById('skillNameInput');
+  const descriptionInput = document.getElementById('skillDescriptionInput');
+  const promptInput = document.getElementById('skillPromptInput');
+
+  const skillName = nameInput ? nameInput.value.trim() : '';
+  const description = descriptionInput ? descriptionInput.value.trim() : '';
+  const prompt = promptInput ? promptInput.value : '';
+  const cleanedPrompt = (prompt || '').trim() === 'Loading...'
+    ? ''
+    : (prompt || '').replace(/\r\n/g, '\n').trim();
+
+  const promptLines = cleanedPrompt
+    ? cleanedPrompt.split('\n').map(line => `  ${line}`)
+    : ['  Add default prompt behavior for this skill.'];
+
+  const lines = [
+    `display_name: ${toYamlQuoted(toSkillDisplayName(skillName))}`,
+    `short_description: ${toYamlQuoted(description || 'Skill configuration for Ori Agent')}`,
+    'default_prompt: |',
+    ...promptLines,
+    'dependencies:',
+    ...toYamlList('tools', []),
+    ...toYamlList('mcp_servers', []),
+    '',
+  ];
+
+  return lines.join('\n');
+}
+
+function generateSkillConfiguration() {
+  const openAIYamlInput = document.getElementById('skillOpenAIYamlInput');
+  if (!openAIYamlInput) return;
+
+  const existing = openAIYamlInput.value.trim();
+  if (existing) {
+    const confirmed = window.confirm('Replace the current OpenAI configuration with a generated template?');
+    if (!confirmed) return;
+  }
+
+  openAIYamlInput.value = buildGeneratedSkillConfig();
+}
+
 function normalizeCloneSkillBaseName(name) {
   let normalized = (name || '')
     .toLowerCase()
@@ -899,9 +1091,11 @@ async function cloneSkillToAgent(skill) {
   const nameInput = document.getElementById('skillNameInput');
   const descriptionInput = document.getElementById('skillDescriptionInput');
   const promptInput = document.getElementById('skillPromptInput');
+  const openAIYamlInput = document.getElementById('skillOpenAIYamlInput');
   const errorBox = document.getElementById('skillsEditorError');
 
   editingSkillName = '';
+  resetPromptGenerationState();
 
   if (errorBox) {
     errorBox.classList.add('d-none');
@@ -914,6 +1108,7 @@ async function cloneSkillToAgent(skill) {
   }
   if (descriptionInput) descriptionInput.value = skill?.description || '';
   if (promptInput) promptInput.value = 'Loading...';
+  if (openAIYamlInput) openAIYamlInput.value = '';
 
   const modal = getEditorModal();
   if (modal) modal.show();
@@ -937,10 +1132,12 @@ async function cloneSkillToAgent(skill) {
 
 function openSkillEditor(skill) {
   editingSkillName = skill?.name || '';
+  resetPromptGenerationState();
   const title = document.getElementById('skillsEditorTitle');
   const nameInput = document.getElementById('skillNameInput');
   const descriptionInput = document.getElementById('skillDescriptionInput');
   const promptInput = document.getElementById('skillPromptInput');
+  const openAIYamlInput = document.getElementById('skillOpenAIYamlInput');
   const errorBox = document.getElementById('skillsEditorError');
 
   if (errorBox) {
@@ -956,6 +1153,7 @@ function openSkillEditor(skill) {
   }
   if (descriptionInput) descriptionInput.value = skill?.description || '';
   if (promptInput) promptInput.value = skill ? 'Loading...' : '';
+  if (openAIYamlInput) openAIYamlInput.value = '';
 
   const modal = getEditorModal();
   if (modal) modal.show();
@@ -973,6 +1171,7 @@ function openSkillEditor(skill) {
           errorBox.classList.remove('d-none');
         }
       });
+    return;
   }
 }
 
@@ -980,6 +1179,7 @@ async function saveSkillEditor() {
   const nameInput = document.getElementById('skillNameInput');
   const descriptionInput = document.getElementById('skillDescriptionInput');
   const promptInput = document.getElementById('skillPromptInput');
+  const openAIYamlInput = document.getElementById('skillOpenAIYamlInput');
   const errorBox = document.getElementById('skillsEditorError');
 
   const payload = {
@@ -988,10 +1188,14 @@ async function saveSkillEditor() {
     description: descriptionInput ? descriptionInput.value.trim() : '',
     prompt: promptInput ? promptInput.value : '',
   };
+  const openAIYamlValue = openAIYamlInput ? openAIYamlInput.value.trim() : '';
+  if (openAIYamlValue !== '') {
+    payload.openai_yaml = openAIYamlValue;
+  }
 
-  if (payload.prompt.trim() === 'Loading...') {
+  if (payload.prompt.trim() === 'Loading...' || payload.prompt.trim() === 'Generating prompt...') {
     if (errorBox) {
-      errorBox.textContent = 'Skill content is still loading. Try again in a moment.';
+      errorBox.textContent = 'Skill prompt is still generating. Try again in a moment.';
       errorBox.classList.remove('d-none');
     }
     return;
@@ -1020,7 +1224,8 @@ async function saveSkillEditor() {
 
     if (!response.ok) {
       const data = await response.json().catch(() => ({}));
-      const message = data?.error || 'Failed to save skill.';
+      const details = typeof data?.details === 'string' ? data.details.trim() : '';
+      const message = `${data?.error || 'Failed to save skill.'}${details ? ` ${details}` : ''}`;
       if (errorBox) {
         errorBox.textContent = message;
         errorBox.classList.remove('d-none');

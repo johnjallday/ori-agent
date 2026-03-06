@@ -8,18 +8,23 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"time"
 
+	"github.com/johnjallday/ori-agent/internal/config"
 	orihttp "github.com/johnjallday/ori-agent/internal/http"
+	"github.com/johnjallday/ori-agent/internal/llm"
 	"github.com/johnjallday/ori-agent/internal/skills"
 	"github.com/johnjallday/ori-agent/internal/store"
 )
 
 type Handler struct {
-	manager *skills.Manager
-	store   store.Store
+	manager       *skills.Manager
+	store         store.Store
+	llmFactory    *llm.Factory
+	configManager *config.Manager
 }
 
 var (
@@ -36,15 +41,19 @@ const (
 	marketplaceCheckTimeout   = 75 * time.Second
 	marketplaceUpdateTimeout  = 2 * time.Minute
 	marketplaceRemoveTimeout  = 75 * time.Second
+	skillCreateTimeout        = 75 * time.Second
+	skillPromptTimeout        = 45 * time.Second
 	marketplaceMaxResults     = 24
 	marketplaceMaxInstalled   = 200
 	marketplaceOutputMaxChars = 3500
 )
 
-func New(manager *skills.Manager, st store.Store) *Handler {
+func New(manager *skills.Manager, st store.Store, llmFactory *llm.Factory, cfg *config.Manager) *Handler {
 	return &Handler{
-		manager: manager,
-		store:   st,
+		manager:       manager,
+		store:         st,
+		llmFactory:    llmFactory,
+		configManager: cfg,
 	}
 }
 
@@ -69,6 +78,10 @@ func (h *Handler) Handle(w http.ResponseWriter, r *http.Request) {
 
 	if path == "marketplace" || strings.HasPrefix(path, "marketplace/") {
 		h.handleMarketplace(w, r, path)
+		return
+	}
+	if path == "generate-prompt" {
+		h.generateSkillPrompt(w, r)
 		return
 	}
 
@@ -134,6 +147,12 @@ type marketplaceRemoveRequest struct {
 	Skill string `json:"skill"`
 }
 
+type skillPromptGenerateRequest struct {
+	Agent       string `json:"agent"`
+	Name        string `json:"name"`
+	Description string `json:"description"`
+}
+
 type marketplaceSkillResult struct {
 	Package    string `json:"package"`
 	Repository string `json:"repository"`
@@ -187,16 +206,84 @@ func (h *Handler) createSkill(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	skill, err := h.manager.CreateSkill(agentName, skills.SkillInput{
-		Name:        strings.TrimSpace(req.Name),
+	name := strings.TrimSpace(req.Name)
+	if name == "" {
+		orihttp.BadRequest(w, "name is required")
+		return
+	}
+
+	if existing, found, err := h.manager.GetSkill(agentName, name); err != nil {
+		orihttp.RespondErrorWithErr(w, http.StatusBadRequest, "failed to create skill", err)
+		return
+	} else if found && existing != nil {
+		orihttp.RespondErrorWithErr(w, http.StatusConflict, "skill already exists", skills.ErrSkillExists)
+		return
+	}
+
+	skillDir, err := h.manager.AgentSkillDir(agentName, name)
+	if err != nil {
+		orihttp.RespondErrorWithErr(w, http.StatusBadRequest, "failed to create skill", err)
+		return
+	}
+
+	if _, statErr := os.Stat(skillDir); statErr == nil {
+		orihttp.RespondErrorWithErr(w, http.StatusConflict, "skill already exists", skills.ErrSkillExists)
+		return
+	} else if !os.IsNotExist(statErr) {
+		orihttp.RespondErrorWithErr(w, http.StatusBadRequest, "failed to create skill", statErr)
+		return
+	}
+
+	skillsRootDir := filepath.Dir(skillDir)
+	if err := os.MkdirAll(skillsRootDir, 0o755); err != nil {
+		orihttp.RespondErrorWithErr(w, http.StatusBadRequest, "failed to create skill", err)
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), skillCreateTimeout)
+	defer cancel()
+
+	output, err := runSkillsCLIInDir(ctx, skillsRootDir, "init", name)
+	if err != nil {
+		if skillsInitAlreadyExists(output) {
+			orihttp.RespondErrorWithErr(w, http.StatusConflict, "skill already exists", skills.ErrSkillExists)
+			return
+		}
+		_ = orihttp.RespondJSON(w, http.StatusBadGateway, map[string]any{
+			"error":   "failed to initialize skill with npx skills",
+			"details": truncateMarketplaceOutput(output),
+		})
+		return
+	}
+
+	if skillsInitAlreadyExists(output) {
+		orihttp.RespondErrorWithErr(w, http.StatusConflict, "skill already exists", skills.ErrSkillExists)
+		return
+	}
+
+	skillPath := filepath.Join(skillDir, "SKILL.md")
+	if _, statErr := os.Stat(skillPath); statErr != nil {
+		_ = orihttp.RespondJSON(w, http.StatusBadGateway, map[string]any{
+			"error":   "skills init did not create SKILL.md",
+			"details": truncateMarketplaceOutput(output),
+		})
+		return
+	}
+
+	skill, err := h.manager.UpdateSkill(agentName, name, skills.SkillInput{
+		Name:        name,
 		Description: strings.TrimSpace(req.Description),
 		Prompt:      req.Prompt,
 		OpenAIYAML:  req.OpenAIYAML,
 	})
 	if err != nil {
+		_ = os.RemoveAll(skillDir)
 		switch {
-		case errors.Is(err, skills.ErrSkillExists):
-			orihttp.RespondErrorWithErr(w, http.StatusConflict, "skill already exists", err)
+		case errors.Is(err, skills.ErrSkillNotFound):
+			_ = orihttp.RespondJSON(w, http.StatusBadGateway, map[string]any{
+				"error":   "failed to initialize skill with npx skills",
+				"details": truncateMarketplaceOutput(output),
+			})
 		default:
 			orihttp.RespondErrorWithErr(w, http.StatusBadRequest, "failed to create skill", err)
 		}
@@ -204,6 +291,151 @@ func (h *Handler) createSkill(w http.ResponseWriter, r *http.Request) {
 	}
 
 	orihttp.Created(w, skill)
+}
+
+func (h *Handler) generateSkillPrompt(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		orihttp.MethodNotAllowed(w)
+		return
+	}
+
+	var req skillPromptGenerateRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		orihttp.BadRequest(w, "invalid request body")
+		return
+	}
+
+	description := strings.TrimSpace(req.Description)
+	if description == "" {
+		orihttp.BadRequest(w, "description is required")
+		return
+	}
+	name := strings.TrimSpace(req.Name)
+	if name == "" {
+		name = "new-skill"
+	}
+
+	agentName := resolveAgentNameWithFallback(req.Agent, h.store)
+	provider, model, reasoningEffort, err := h.resolvePromptProvider(agentName)
+	if err != nil {
+		orihttp.RespondErrorWithErr(w, http.StatusServiceUnavailable, "no LLM provider available for prompt generation", err)
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), skillPromptTimeout)
+	defer cancel()
+
+	prompt, err := h.generatePromptBody(ctx, provider, model, reasoningEffort, name, description)
+	if err != nil {
+		orihttp.RespondErrorWithErr(w, http.StatusBadGateway, "failed to generate prompt", err)
+		return
+	}
+
+	orihttp.Success(w, map[string]any{
+		"prompt": prompt,
+		"model":  model,
+	})
+}
+
+func (h *Handler) resolvePromptProvider(agentName string) (llm.Provider, string, string, error) {
+	if h.llmFactory == nil || h.configManager == nil {
+		return nil, "", "", fmt.Errorf("LLM factory is not configured")
+	}
+
+	if agentName != "" && h.store != nil {
+		if ag, ok := h.store.GetAgent(agentName); ok && ag != nil {
+			providerName := strings.TrimSpace(ag.Settings.Provider)
+			model := strings.TrimSpace(ag.Settings.Model)
+			if providerName != "" && model != "" {
+				provider, err := h.llmFactory.GetProvider(providerName)
+				if err == nil {
+					return provider, model, "", nil
+				}
+			}
+		}
+	}
+
+	systemProvider, systemModel := h.configManager.GetSystemModel()
+	result, err := h.llmFactory.GetSystemModelProvider(systemProvider, systemModel)
+	if err != nil {
+		return nil, "", "", err
+	}
+	return result.Provider, result.Model, h.configManager.GetSystemReasoningEffort(), nil
+}
+
+func (h *Handler) generatePromptBody(ctx context.Context, provider llm.Provider, model, reasoningEffort, name, description string) (string, error) {
+	systemPrompt := `You write prompt bodies for AI coding assistant skills.
+
+Return only the prompt text with no markdown fences or explanations.
+Write 8-20 lines that are concise, specific, and actionable.
+Include clear execution steps and explicit output expectations.
+Only allow clarifying questions when essential input is missing.`
+
+	userPrompt := fmt.Sprintf("Skill name: %s\nSkill description: %s", strings.TrimSpace(name), strings.TrimSpace(description))
+
+	resp, err := provider.Chat(ctx, llm.ChatRequest{
+		Model:           model,
+		ReasoningEffort: reasoningEffort,
+		SystemPrompt:    systemPrompt,
+		Messages: []llm.Message{
+			{
+				Role:    llm.RoleUser,
+				Content: userPrompt,
+			},
+		},
+		Temperature: 0.2,
+		MaxTokens:   700,
+	})
+	if err != nil {
+		return "", err
+	}
+
+	prompt := sanitizeGeneratedPrompt(resp.Content)
+	if prompt == "" {
+		return "", fmt.Errorf("empty prompt generated")
+	}
+	return prompt, nil
+}
+
+func sanitizeGeneratedPrompt(raw string) string {
+	text := strings.TrimSpace(raw)
+	if text == "" {
+		return ""
+	}
+
+	if strings.HasPrefix(text, "```") {
+		lines := strings.Split(text, "\n")
+		if len(lines) > 0 {
+			lines = lines[1:]
+		}
+		if n := len(lines); n > 0 && strings.TrimSpace(lines[n-1]) == "```" {
+			lines = lines[:n-1]
+		}
+		text = strings.TrimSpace(strings.Join(lines, "\n"))
+	}
+
+	lower := strings.ToLower(text)
+	if strings.HasPrefix(lower, "prompt:") {
+		text = strings.TrimSpace(text[len("prompt:"):])
+	}
+
+	lines := strings.Split(text, "\n")
+	cleaned := make([]string, 0, len(lines))
+	for _, line := range lines {
+		cleaned = append(cleaned, strings.TrimRight(line, " \t"))
+	}
+
+	for len(cleaned) > 0 && strings.TrimSpace(cleaned[0]) == "" {
+		cleaned = cleaned[1:]
+	}
+	for len(cleaned) > 0 && strings.TrimSpace(cleaned[len(cleaned)-1]) == "" {
+		cleaned = cleaned[:len(cleaned)-1]
+	}
+	if len(cleaned) > 20 {
+		cleaned = cleaned[:20]
+	}
+
+	return strings.TrimSpace(strings.Join(cleaned, "\n"))
 }
 
 func (h *Handler) getSkill(w http.ResponseWriter, r *http.Request, name string) {
@@ -824,8 +1056,15 @@ func marketplaceOutputSummary(output string) string {
 }
 
 func runSkillsCLI(ctx context.Context, args ...string) (string, error) {
+	return runSkillsCLIInDir(ctx, "", args...)
+}
+
+func runSkillsCLIInDir(ctx context.Context, workingDir string, args ...string) (string, error) {
 	commandArgs := append([]string{"--yes", "skills"}, args...)
 	cmd := exec.CommandContext(ctx, "npx", commandArgs...)
+	if dir := strings.TrimSpace(workingDir); dir != "" {
+		cmd.Dir = dir
+	}
 	cmd.Env = append(os.Environ(), "CI=1", "NO_COLOR=1", "FORCE_COLOR=0")
 
 	outputBytes, err := cmd.CombinedOutput()
@@ -837,6 +1076,11 @@ func runSkillsCLI(ctx context.Context, args ...string) (string, error) {
 		return output, fmt.Errorf("skills command failed: %w", err)
 	}
 	return output, nil
+}
+
+func skillsInitAlreadyExists(output string) bool {
+	cleaned := strings.ToLower(stripANSI(output))
+	return strings.Contains(cleaned, "skill already exists")
 }
 
 func truncateMarketplaceOutput(output string) string {

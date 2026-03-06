@@ -91,10 +91,23 @@
                         placeholder="What does this skill do?"></textarea>
             </div>
             <div class="mb-3">
-              <label for="skillPromptInput" class="form-label required">Prompt</label>
+              <div class="d-flex justify-content-between align-items-center gap-2 flex-wrap mb-1">
+                <label for="skillPromptInput" class="form-label required mb-0">Prompt</label>
+                <button type="button" id="skillsGeneratePromptBtn" class="modern-btn modern-btn-secondary btn-sm">Generate Prompt</button>
+              </div>
               <textarea id="skillPromptInput" class="form-control" rows="8" required
                         style="background: var(--bg-tertiary); border: 1px solid var(--border-color); color: var(--text-primary); font-size: 0.9em; resize: vertical;"
                         placeholder="Skill instructions go here..."></textarea>
+            </div>
+            <div class="mb-1 d-flex justify-content-between align-items-center gap-2 flex-wrap">
+              <label for="skillOpenAIYamlInput" class="form-label mb-0">OpenAI Configuration (optional)</label>
+              <button type="button" id="skillsGenerateConfigBtn" class="modern-btn modern-btn-secondary btn-sm">Generate Configuration</button>
+            </div>
+            <div class="mb-3">
+              <textarea id="skillOpenAIYamlInput" class="form-control" rows="8"
+                        style="background: var(--bg-tertiary); border: 1px solid var(--border-color); color: var(--text-primary); font-size: 0.85em; resize: vertical; font-family: 'SF Mono', Monaco, Inconsolata, 'Roboto Mono', monospace;"
+                        placeholder="agents/openai.yaml content (optional)"></textarea>
+              <small class="form-helper">Saved to <code>agents/openai.yaml</code>. Leave empty to skip on create or keep existing config on edit.</small>
             </div>
           </form>
         </div>

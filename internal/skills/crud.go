@@ -225,6 +225,14 @@ func (m *Manager) agentSkillDir(agentName, skillName string) (string, error) {
 	return filepath.Join(agentsDir, agentName, "skills", skillName), nil
 }
 
+// AgentSkillDir returns the expected absolute directory for an agent-scoped skill.
+func (m *Manager) AgentSkillDir(agentName, skillName string) (string, error) {
+	if err := validateSkillName(skillName); err != nil {
+		return "", err
+	}
+	return m.agentSkillDir(agentName, skillName)
+}
+
 func writeSkillMarkdown(path, name, description, prompt string) error {
 	frontmatter := map[string]string{
 		"name":        name,
