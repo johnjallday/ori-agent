@@ -508,7 +508,7 @@ export class WorkspaceDetailPage {
     this.elements.taskResultCopyBtn?.addEventListener('click', () => this.copyCurrentTaskResult());
     this.elements.taskExecutionViewResultBtn?.addEventListener('click', () => {
       if (this.currentExecutionTaskId) {
-        this.showTaskResult(this.currentExecutionTaskId);
+        this.showTaskResult(this.currentExecutionTaskId, { closeExecutionModal: true });
       }
     });
     this.elements.taskResultModal?.addEventListener('shown.bs.modal', () => {
@@ -1776,9 +1776,10 @@ export class WorkspaceDetailPage {
     return 'Unknown agent';
   }
 
-  showTaskResult(taskId) {
+  showTaskResult(taskId, options = {}) {
     const task = this.tasks.find((item) => item.id === taskId);
     if (!task) return;
+    const closeExecutionModal = Boolean(options?.closeExecutionModal);
 
     const subtasks = this.getSubtasksForParent(taskId);
     const isParent = subtasks.length > 0;
@@ -1809,12 +1810,29 @@ export class WorkspaceDetailPage {
     }
     this.currentTaskResultText = String(resultData.text || '');
 
-    if (this.elements.taskResultModal && window.bootstrap) {
+    const openResultModal = () => {
+      if (!this.elements.taskResultModal || !window.bootstrap) return;
       const modal = typeof bootstrap.Modal.getOrCreateInstance === 'function'
         ? bootstrap.Modal.getOrCreateInstance(this.elements.taskResultModal)
         : (bootstrap.Modal.getInstance(this.elements.taskResultModal) || new bootstrap.Modal(this.elements.taskResultModal));
       modal.show();
+    };
+
+    if (closeExecutionModal && this.elements.taskExecutionModal && window.bootstrap) {
+      const isExecutionModalOpen = this.elements.taskExecutionModal.classList.contains('show');
+      if (isExecutionModalOpen) {
+        const executionModal = typeof bootstrap.Modal.getOrCreateInstance === 'function'
+          ? bootstrap.Modal.getOrCreateInstance(this.elements.taskExecutionModal)
+          : (bootstrap.Modal.getInstance(this.elements.taskExecutionModal) || new bootstrap.Modal(this.elements.taskExecutionModal));
+        this.elements.taskExecutionModal.addEventListener('hidden.bs.modal', () => {
+          openResultModal();
+        }, { once: true });
+        executionModal.hide();
+        return;
+      }
     }
+
+    openResultModal();
   }
 
   renderTaskResultBreakdown(task, subtasks = []) {
