@@ -487,6 +487,77 @@ func TestExternalAgentsSettingsHandler_CodexToggleDoesNotUnregisterProvider(t *t
 	}
 }
 
+func TestSessionSettingsHandler_Get(t *testing.T) {
+	tmpDir := t.TempDir()
+	tmpFile := filepath.Join(tmpDir, "settings.json")
+	configManager := config.NewManager(tmpFile)
+	_ = configManager.Load()
+
+	handler := NewHandler(nil, configManager, nil, llm.NewFactory())
+
+	req := httptest.NewRequest(http.MethodGet, "/api/settings/session", nil)
+	rec := httptest.NewRecorder()
+	handler.SessionSettingsHandler(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("Expected status 200, got %d", rec.Code)
+	}
+
+	var resp struct {
+		SessionCleanupEnabled bool `json:"session_cleanup_enabled"`
+		SessionCleanupDays    int  `json:"session_cleanup_days"`
+		SessionMaxCount       int  `json:"session_max_count"`
+	}
+	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+		t.Fatalf("Failed to decode response: %v", err)
+	}
+
+	if !resp.SessionCleanupEnabled {
+		t.Error("Expected session_cleanup_enabled=true by default")
+	}
+	if resp.SessionCleanupDays != 30 {
+		t.Errorf("Expected session_cleanup_days=30, got %d", resp.SessionCleanupDays)
+	}
+	if resp.SessionMaxCount != 1000 {
+		t.Errorf("Expected session_max_count=1000, got %d", resp.SessionMaxCount)
+	}
+}
+
+func TestSessionSettingsHandler_Post(t *testing.T) {
+	tmpDir := t.TempDir()
+	tmpFile := filepath.Join(tmpDir, "settings.json")
+	configManager := config.NewManager(tmpFile)
+	_ = configManager.Load()
+
+	handler := NewHandler(nil, configManager, nil, llm.NewFactory())
+
+	reqBody := map[string]any{
+		"session_cleanup_enabled": false,
+		"session_cleanup_days":    14,
+		"session_max_count":       250,
+	}
+	body, _ := json.Marshal(reqBody)
+	req := httptest.NewRequest(http.MethodPost, "/api/settings/session", bytes.NewReader(body))
+	rec := httptest.NewRecorder()
+	handler.SessionSettingsHandler(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("Expected status 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	configManager2 := config.NewManager(tmpFile)
+	_ = configManager2.Load()
+	if configManager2.GetSessionCleanupEnabled() {
+		t.Error("Expected session cleanup to be disabled after update")
+	}
+	if got := configManager2.GetSessionCleanupDays(); got != 14 {
+		t.Errorf("Expected session_cleanup_days=14, got %d", got)
+	}
+	if got := configManager2.GetSessionMaxCount(); got != 250 {
+		t.Errorf("Expected session_max_count=250, got %d", got)
+	}
+}
+
 func TestCategorizeModel_Codex(t *testing.T) {
 	tests := []struct {
 		name     string

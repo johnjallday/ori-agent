@@ -527,7 +527,7 @@ document.getElementById('systemDiagnosticsBtn')?.addEventListener('click', async
   async function loadSessionSettings() {
     try {
       // Load settings
-      const settingsResp = await fetch('/api/settings');
+      const settingsResp = await fetch('/api/settings/session');
       if (settingsResp.ok) {
         const settings = await settingsResp.json();
         if (sessionCleanupEnabled) {
@@ -579,7 +579,7 @@ document.getElementById('systemDiagnosticsBtn')?.addEventListener('click', async
   // Save session settings
   saveSessionSettingsBtn?.addEventListener('click', async function() {
     try {
-      const response = await fetch('/api/settings', {
+      const response = await fetch('/api/settings/session', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

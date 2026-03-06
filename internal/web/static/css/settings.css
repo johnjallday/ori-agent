@@ -303,32 +303,37 @@
   line-height: 1.4;
 }
 
-/* Input group for API key fields */
-.settings-input-group {
+/* Input groups should match the rounded visual language used across settings cards */
+.settings-input-group,
+body.settings-page .settings-field .input-group {
   display: flex;
   gap: 0;
+  align-items: stretch;
 }
 
-.settings-input-group .settings-input {
-  border-top-right-radius: 0;
-  border-bottom-right-radius: 0;
-  border-right: none;
+.settings-input-group .settings-input,
+body.settings-page .settings-field .input-group > .settings-input {
+  border-top-right-radius: var(--radius-md);
+  border-bottom-right-radius: var(--radius-md);
 }
 
-.settings-input-group .btn {
-  border-top-left-radius: 0;
-  border-bottom-left-radius: 0;
+.settings-input-group .btn,
+.settings-input-group .input-group-text,
+body.settings-page .settings-field .input-group > .btn,
+body.settings-page .settings-field .input-group > .input-group-text {
+  border-radius: var(--radius-md) !important;
 }
 
-.settings-input-group .btn:not(:last-child) {
-  border-top-right-radius: 0;
-  border-bottom-right-radius: 0;
-  border-right: none;
+.settings-input-group .input-group-text,
+body.settings-page .settings-field .input-group > .input-group-text {
+  background: var(--bg-secondary);
+  border-color: var(--border-color);
+  color: var(--text-secondary);
 }
 
-.settings-input-group .btn:last-child {
-  border-top-left-radius: 0;
-  border-bottom-left-radius: 0;
+.settings-input-group > :not(:first-child),
+body.settings-page .settings-field .input-group > :not(:first-child) {
+  margin-left: -1px;
 }
 
 /* ============================================
