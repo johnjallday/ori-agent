@@ -802,6 +802,7 @@
       autoSemiBtn: document.getElementById('homeAssistantAutoSemiBtn'),
       viewAllBtn: document.getElementById('homeAssistantViewAllBtn'),
       clearRecentBtn: document.getElementById('homeAssistantClearRecentBtn'),
+      launcherBtn: document.getElementById('homeAssistantReopenBtn'),
       quickButtons: document.querySelectorAll('.home-assistant-quick-btn'),
       avatarBtn: document.getElementById('dashboardAssistantAvatarBtn'),
       bubbleBtn: document.getElementById('dashboardAssistantBubbleBtn')
@@ -835,6 +836,11 @@
   function hasVisibleHomeAssistantActions() {
     var els = getHomeAssistantElements();
     return Boolean(els.actions && !els.actions.classList.contains('d-none') && els.actions.children.length > 0);
+  }
+
+  function hasHomeAssistantConversation() {
+    var els = getHomeAssistantElements();
+    return Boolean(els.conversation && els.conversation.dataset.initialized === 'true' && els.conversation.children.length > 0);
   }
 
   function shouldKeepHomeAssistantThinkingModalOpen() {
@@ -898,6 +904,42 @@
     if (textNode) textNode.textContent = statusText;
     if (els.thinkingSpinner) {
       els.thinkingSpinner.classList.toggle('d-none', !homeAssistantState.busy);
+    }
+
+    syncHomeAssistantLauncher();
+  }
+
+  function syncHomeAssistantLauncher() {
+    var els = getHomeAssistantElements();
+    var button = els.launcherBtn;
+    if (!button) return;
+
+    var available = Boolean(els.thinkingModal);
+    button.classList.toggle('d-none', !available);
+    button.disabled = !available;
+
+    if (!available) {
+      button.setAttribute('aria-hidden', 'true');
+      return;
+    }
+
+    button.removeAttribute('aria-hidden');
+
+    var active = Boolean(
+      homeAssistantState.busy ||
+      (homeAssistantState.routingSummary && homeAssistantState.routingSummary.text) ||
+      hasVisibleHomeAssistantActions() ||
+      hasHomeAssistantConversation()
+    );
+
+    button.classList.toggle('modern-btn-primary', active);
+    button.classList.toggle('modern-btn-secondary', !active);
+    button.setAttribute('aria-pressed', active ? 'true' : 'false');
+    button.setAttribute('title', active ? 'Reopen Ask Ori activity' : 'Open Ask Ori activity');
+
+    var label = button.querySelector('[data-home-assistant-launcher-label]');
+    if (label) {
+      label.textContent = homeAssistantState.busy ? 'Live Activity' : 'Task Activity';
     }
   }
 
@@ -1084,6 +1126,7 @@
       conversation.removeChild(conversation.firstChild);
     }
     conversation.scrollTop = conversation.scrollHeight;
+    syncHomeAssistantLauncher();
     openHomeAssistantThinkingModal();
   }
 
@@ -1095,6 +1138,7 @@
     container.innerHTML = '';
     if (!actions || actions.length === 0) {
       container.classList.add('d-none');
+      syncHomeAssistantLauncher();
       if (!homeAssistantState.busy) {
         closeHomeAssistantThinkingModal();
       }
@@ -1118,6 +1162,7 @@
     }
 
     container.classList.remove('d-none');
+    syncHomeAssistantLauncher();
     openHomeAssistantThinkingModal();
   }
 
@@ -6145,6 +6190,7 @@
     setHomeAssistantMode(homeAssistantState.mode);
     setHomeAssistantAutomationMode(homeAssistantState.automationMode);
     syncHomeAssistantThinkingStatus();
+    syncHomeAssistantLauncher();
 
     if (window.EventBus && typeof EventBus.on === 'function') {
       EventBus.on('session:deleted', function (payload) {
