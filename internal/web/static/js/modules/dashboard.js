@@ -12,6 +12,7 @@
   const HOME_ASSISTANT_BACKEND_LOOKUP_LIMIT = 50;
   const HOME_ASSISTANT_SESSION_STORAGE_KEY = 'ori.homeAssistant.recentSessions';
   const HOME_ASSISTANT_AUTOMATION_MODE_KEY = 'ori.homeAssistant.automationMode';
+  const HOME_ASSISTANT_THINKING_MIN_VISIBLE_MS = 1400;
 
   const HOME_INTENTS = {
     utility_direct: {
@@ -44,6 +45,16 @@
       suggestedName: 'Email Assistant',
       tags: ['email', 'inbox', 'communication']
     },
+    calendar_check: {
+      key: 'calendar_check',
+      label: 'calendar or schedule',
+      keywords: ['calendar', 'schedule', 'meeting', 'meetings', 'appointment', 'appointments', 'availability', 'free time', 'busy', 'events'],
+      preferredPlugins: ['calendar', 'schedule', 'google-calendar'],
+      preferredTypes: ['tool-calling', 'general'],
+      defaultType: 'tool-calling',
+      suggestedName: 'Calendar Assistant',
+      tags: ['calendar', 'schedule', 'planning']
+    },
     app_launch: {
       key: 'app_launch',
       label: 'app launch',
@@ -66,58 +77,135 @@
     }
   };
 
-  const HOME_MCP_REQUIREMENTS = [
+  const HOME_CAPABILITY_REQUIREMENTS = [
+    {
+      key: 'calendar_access',
+      label: 'calendar access',
+      intents: ['calendar_check'],
+      phrases: ['check my schedule', 'calendar', 'my calendar', 'schedule', 'meeting', 'meetings', 'appointment', 'appointments', 'availability', 'am i free', 'free time', 'busy', 'events'],
+      preferredSkillNames: ['calendar-assistant'],
+      skillMarketplaceQueries: ['calendar assistant', 'calendar'],
+      preferredServerNames: ['google-calendar'],
+      preferredCategories: ['productivity'],
+      preferredAgentType: 'tool-calling',
+      defaultAgentName: 'Calendar Assistant',
+      canAnswerInline: true,
+      requiresMCP: true,
+      dispatchMode: 'calendar',
+      workspaceEscalationPolicy: 'feature_gap'
+    },
     {
       key: 'github_ops',
       label: 'GitHub operations',
+      intents: ['general_task'],
       phrases: ['github', 'repository', 'repo', 'pull request', 'pull-request', 'issue', 'commit', 'branch', 'release'],
+      preferredSkillNames: [],
+      skillMarketplaceQueries: ['github'],
       preferredServerNames: ['github'],
-      preferredCategories: ['development']
+      preferredCategories: ['development'],
+      preferredAgentType: 'tool-calling',
+      defaultAgentName: 'GitHub Assistant',
+      canAnswerInline: false,
+      requiresMCP: true,
+      dispatchMode: 'generic',
+      workspaceEscalationPolicy: 'feature_gap'
     },
     {
       key: 'web_research',
       label: 'web research',
+      intents: ['general_task'],
       phrases: ['search the web', 'web search', 'search online', 'look up', 'lookup', 'internet search', 'latest news'],
+      preferredSkillNames: [],
+      skillMarketplaceQueries: ['research'],
       preferredServerNames: ['brave-search'],
-      preferredCategories: ['search']
+      preferredCategories: ['search'],
+      preferredAgentType: 'research',
+      defaultAgentName: 'Research Assistant',
+      canAnswerInline: false,
+      requiresMCP: true,
+      dispatchMode: 'generic',
+      workspaceEscalationPolicy: 'feature_gap'
     },
     {
       key: 'email_inbox',
       label: 'email inbox access',
+      intents: ['email_check'],
       phrases: ['check my email', 'check email', 'email', 'inbox', 'mailbox', 'gmail', 'outlook', 'unread', 'reply to email', 'triage'],
+      preferredSkillNames: [],
+      skillMarketplaceQueries: ['email assistant', 'email'],
       preferredServerNames: ['gmail', 'outlook', 'imap', 'microsoft-graph'],
-      preferredCategories: ['communication', 'email', 'productivity']
+      preferredCategories: ['communication', 'email', 'productivity'],
+      preferredAgentType: 'tool-calling',
+      defaultAgentName: 'Email Assistant',
+      canAnswerInline: true,
+      requiresMCP: true,
+      dispatchMode: 'email',
+      workspaceEscalationPolicy: 'feature_gap'
     },
     {
       key: 'browser_automation',
       label: 'browser automation',
+      intents: ['general_task'],
       phrases: ['browser automation', 'control browser', 'use browser', 'website automation', 'automate website', 'playwright', 'browserbase', 'puppeteer'],
+      preferredSkillNames: [],
+      skillMarketplaceQueries: ['browser automation'],
       preferredServerNames: ['playwright', 'browserbase', 'puppeteer'],
-      preferredCategories: ['automation', 'development', 'productivity']
+      preferredCategories: ['automation', 'development', 'productivity'],
+      preferredAgentType: 'tool-calling',
+      defaultAgentName: 'Browser Assistant',
+      canAnswerInline: false,
+      requiresMCP: true,
+      dispatchMode: 'generic',
+      workspaceEscalationPolicy: 'feature_gap'
     },
     {
       key: 'database_query',
       label: 'database query',
+      intents: ['general_task'],
       phrases: ['postgres', 'postgresql', 'database', 'sql query', 'run sql', 'db query', 'schema'],
+      preferredSkillNames: [],
+      skillMarketplaceQueries: ['database'],
       preferredServerNames: ['postgres'],
-      preferredCategories: ['database']
+      preferredCategories: ['database'],
+      preferredAgentType: 'tool-calling',
+      defaultAgentName: 'Database Assistant',
+      canAnswerInline: false,
+      requiresMCP: true,
+      dispatchMode: 'generic',
+      workspaceEscalationPolicy: 'feature_gap'
     },
     {
       key: 'filesystem_ops',
       label: 'filesystem access',
+      intents: ['general_task'],
       phrases: ['filesystem', 'file system', 'local files', 'read file', 'write file', 'directory', 'folder on my computer'],
+      preferredSkillNames: [],
+      skillMarketplaceQueries: ['filesystem'],
       preferredServerNames: ['filesystem'],
-      preferredCategories: ['file-system']
+      preferredCategories: ['file-system'],
+      preferredAgentType: 'tool-calling',
+      defaultAgentName: 'Filesystem Assistant',
+      canAnswerInline: false,
+      requiresMCP: true,
+      dispatchMode: 'generic',
+      workspaceEscalationPolicy: 'feature_gap'
     }
   ];
+
+  const HOME_MCP_REQUIREMENTS = HOME_CAPABILITY_REQUIREMENTS.filter(function (requirement) {
+    return Boolean(requirement && requirement.requiresMCP);
+  });
 
   const homeAssistantState = {
     pendingPrompt: '',
     pendingIntent: HOME_INTENTS.general_task,
+    pendingIntentVariant: '',
     pendingAgentName: '',
     pendingSuggestedName: '',
     pendingSuggestedType: '',
     pendingAppLaunch: null,
+    pendingCapabilityPlan: null,
+    pendingCapabilityBrief: '',
     awaitingCreateConfirmation: false,
     busy: false,
     recentSessions: [],
@@ -127,6 +215,8 @@
   };
 
   var homeAssistantThinkingModalInstance = null;
+  var homeAssistantThinkingOpenedAt = 0;
+  var homeAssistantThinkingCloseTimer = null;
   var providersCache = null;
   var HOME_ASSISTANT_COMMON_TOKENS = {
     a: true, an: true, and: true, are: true, can: true, do: true, for: true, help: true,
@@ -626,9 +716,28 @@
     return lines.join('\n');
   }
 
+  function buildCalendarDispatchMessage(prompt, _) {
+    var userPrompt = String(prompt || '').trim();
+    var lines = [];
+    lines.push(
+      'Calendar task:',
+      userPrompt,
+      '',
+      'Execution requirements:',
+      '- Use configured calendar skills and MCP connectors first.',
+      '- If the time range is omitted, default to today in the user\'s local timezone.',
+      '- Do not claim lack of access before attempting available calendar capabilities.',
+      '- Keep operations read-only unless the user explicitly approves create/update/delete actions.'
+    );
+    return lines.join('\n');
+  }
+
   function buildAskOriDispatchMessage(prompt, appLaunchRequest, intent, routeContext) {
     if (intent && intent.key === 'email_check') {
       return buildEmailDispatchMessage(prompt, routeContext);
+    }
+    if (intent && intent.key === 'calendar_check') {
+      return buildCalendarDispatchMessage(prompt, routeContext);
     }
     if (!appLaunchRequest || !appLaunchRequest.appName) {
       return String(prompt || '').trim();
@@ -712,16 +821,62 @@
     return homeAssistantThinkingModalInstance;
   }
 
+  function clearHomeAssistantThinkingCloseTimer() {
+    if (!homeAssistantThinkingCloseTimer) return;
+    window.clearTimeout(homeAssistantThinkingCloseTimer);
+    homeAssistantThinkingCloseTimer = null;
+  }
+
+  function isHomeAssistantThinkingModalVisible() {
+    var els = getHomeAssistantElements();
+    return Boolean(els.thinkingModal && els.thinkingModal.classList.contains('show'));
+  }
+
+  function hasVisibleHomeAssistantActions() {
+    var els = getHomeAssistantElements();
+    return Boolean(els.actions && !els.actions.classList.contains('d-none') && els.actions.children.length > 0);
+  }
+
+  function shouldKeepHomeAssistantThinkingModalOpen() {
+    if (homeAssistantState.busy) return true;
+    if (homeAssistantState.routingSummary && homeAssistantState.routingSummary.text) return true;
+    if (hasVisibleHomeAssistantActions()) return true;
+    return false;
+  }
+
   function openHomeAssistantThinkingModal() {
+    clearHomeAssistantThinkingCloseTimer();
     var modal = getHomeAssistantThinkingModalInstance();
     if (!modal) return;
+    if (!isHomeAssistantThinkingModalVisible()) {
+      homeAssistantThinkingOpenedAt = Date.now();
+    }
     modal.show();
   }
 
-  function closeHomeAssistantThinkingModal() {
+  function closeHomeAssistantThinkingModal(options) {
+    var force = Boolean(options && options.force);
+    clearHomeAssistantThinkingCloseTimer();
+    if (!force && shouldKeepHomeAssistantThinkingModalOpen()) {
+      return;
+    }
     var modal = getHomeAssistantThinkingModalInstance();
     if (!modal) return;
-    modal.hide();
+    var elapsed = homeAssistantThinkingOpenedAt > 0 ? (Date.now() - homeAssistantThinkingOpenedAt) : HOME_ASSISTANT_THINKING_MIN_VISIBLE_MS;
+    var remaining = force ? 0 : Math.max(0, HOME_ASSISTANT_THINKING_MIN_VISIBLE_MS - elapsed);
+
+    function hideNow() {
+      if (!force && shouldKeepHomeAssistantThinkingModalOpen()) {
+        return;
+      }
+      modal.hide();
+    }
+
+    if (remaining > 0) {
+      homeAssistantThinkingCloseTimer = window.setTimeout(hideNow, remaining);
+      return;
+    }
+    hideNow();
   }
 
   function syncHomeAssistantThinkingStatus() {
@@ -733,6 +888,8 @@
       statusText = homeAssistantState.routingSummary.text;
     } else if (homeAssistantState.busy) {
       statusText = 'Working...';
+    } else if (hasVisibleHomeAssistantActions()) {
+      statusText = 'Review the next steps or dismiss this window.';
     } else {
       statusText = 'Ready for your next task.';
     }
@@ -775,6 +932,9 @@
     if (!title || !text) {
       homeAssistantState.routingSummary = null;
       renderHomeAssistantRoutingSummary();
+      if (!homeAssistantState.busy) {
+        closeHomeAssistantThinkingModal();
+      }
       syncHomeAssistantThinkingStatus();
       return;
     }
@@ -783,7 +943,7 @@
       text: String(text)
     };
     renderHomeAssistantRoutingSummary();
-    if (homeAssistantState.busy) {
+    if (homeAssistantState.busy || hasVisibleHomeAssistantActions()) {
       openHomeAssistantThinkingModal();
     }
   }
@@ -935,6 +1095,9 @@
     container.innerHTML = '';
     if (!actions || actions.length === 0) {
       container.classList.add('d-none');
+      if (!homeAssistantState.busy) {
+        closeHomeAssistantThinkingModal();
+      }
       return;
     }
 
@@ -1131,7 +1294,7 @@
     var text = normalizeToken(prompt);
     var selected = HOME_INTENTS.general_task;
     var selectedScore = 0;
-    var keys = ['utility_direct', 'travel_planning', 'email_check'];
+    var keys = ['calendar_check', 'utility_direct', 'travel_planning', 'email_check'];
     for (var i = 0; i < keys.length; i++) {
       var intent = HOME_INTENTS[keys[i]];
       var score = 0;
@@ -1182,15 +1345,32 @@
     return score;
   }
 
-  function detectMCPRequirement(prompt) {
+  function normalizeSkillName(name) {
+    return normalizeToken(name).replace(/_/g, '-');
+  }
+
+  function scoreCapabilityRequirement(promptText, requirement, intentKey) {
+    if (!requirement) return 0;
+    var score = scoreMCPRequirement(promptText, requirement);
+    var preferredIntents = Array.isArray(requirement.intents) ? requirement.intents : [];
+    if (intentKey && preferredIntents.indexOf(intentKey) >= 0) {
+      score += 4;
+    }
+    return score;
+  }
+
+  function detectCapabilityRequirement(prompt, intent, intentVariant) {
+    if (normalizeToken(intentVariant) === 'workspace_schedule') return null;
+
     var promptText = normalizeToken(prompt);
     if (!promptText) return null;
 
+    var intentKey = normalizeToken(intent && intent.key ? intent.key : intent);
     var best = null;
     var bestScore = 0;
-    for (var i = 0; i < HOME_MCP_REQUIREMENTS.length; i++) {
-      var requirement = HOME_MCP_REQUIREMENTS[i];
-      var score = scoreMCPRequirement(promptText, requirement);
+    for (var i = 0; i < HOME_CAPABILITY_REQUIREMENTS.length; i++) {
+      var requirement = HOME_CAPABILITY_REQUIREMENTS[i];
+      var score = scoreCapabilityRequirement(promptText, requirement, intentKey);
       if (score > bestScore) {
         best = requirement;
         bestScore = score;
@@ -1200,13 +1380,65 @@
     return best;
   }
 
-  function findMCPRequirementByKey(requirementKey) {
+  function findCapabilityRequirementByKey(requirementKey) {
     if (!requirementKey) return null;
-    for (var i = 0; i < HOME_MCP_REQUIREMENTS.length; i++) {
-      var requirement = HOME_MCP_REQUIREMENTS[i];
+    for (var i = 0; i < HOME_CAPABILITY_REQUIREMENTS.length; i++) {
+      var requirement = HOME_CAPABILITY_REQUIREMENTS[i];
       if (requirement && requirement.key === requirementKey) return requirement;
     }
     return null;
+  }
+
+  function detectMCPRequirement(prompt) {
+    var requirement = detectCapabilityRequirement(prompt, homeAssistantState.pendingIntent, homeAssistantState.pendingIntentVariant);
+    return requirement && requirement.requiresMCP ? requirement : null;
+  }
+
+  function findMCPRequirementByKey(requirementKey) {
+    var requirement = findCapabilityRequirementByKey(requirementKey);
+    return requirement && requirement.requiresMCP ? requirement : null;
+  }
+
+  function findCapabilityRequirementSkill(requirement, skills, enabledOnly) {
+    if (!requirement || !Array.isArray(requirement.preferredSkillNames) || !Array.isArray(skills)) return null;
+    var preferred = requirement.preferredSkillNames.map(normalizeSkillName);
+    for (var i = 0; i < skills.length; i++) {
+      var skill = skills[i];
+      var skillName = normalizeSkillName(skill && skill.name);
+      if (!skillName) continue;
+      if (preferred.indexOf(skillName) < 0) continue;
+      if (enabledOnly && skill && skill.enabled === false) continue;
+      return skill;
+    }
+    return null;
+  }
+
+  function looksLikeImplementationRequest(prompt) {
+    var text = normalizeToken(prompt);
+    if (!text) return false;
+
+    var phrases = [
+      'make ori able to',
+      'make ask ori able to',
+      'make the assistant able to',
+      'add support for',
+      'build a way to',
+      'create a way to',
+      'implement support for',
+      'feature request',
+      'new feature',
+      'capability gap'
+    ];
+
+    for (var i = 0; i < phrases.length; i++) {
+      if (text.indexOf(phrases[i]) >= 0) {
+        return true;
+      }
+    }
+    if (text.indexOf('ori') >= 0 && (text.indexOf('implement') >= 0 || text.indexOf('support') >= 0)) {
+      return true;
+    }
+    return false;
   }
 
   function selectExistingMCPServer(requirement, servers) {
@@ -1312,6 +1544,120 @@
       dashLog.debug('Failed to fetch agent MCP servers', { agent: agentName, error: error && error.message || error });
       return [];
     }
+  }
+
+  async function fetchAgentSkills(agentName) {
+    if (typeof API === 'undefined' || typeof API.get !== 'function') return [];
+    try {
+      var path = '/api/skills';
+      if (String(agentName || '').trim()) {
+        path += '?agent=' + encodeURIComponent(agentName);
+      }
+      var data = await API.get(path);
+      return Array.isArray(data && data.skills) ? data.skills : [];
+    } catch (error) {
+      dashLog.debug('Failed to fetch agent skills', { agent: agentName, error: error && error.message || error });
+      return [];
+    }
+  }
+
+  async function searchCapabilitySkillPackages(query, limit) {
+    var normalizedQuery = String(query || '').trim();
+    if (!normalizedQuery || typeof API === 'undefined' || typeof API.post !== 'function') return [];
+    try {
+      var data = await API.post('/api/skills/marketplace/search', {
+        query: normalizedQuery,
+        limit: typeof limit === 'number' && limit > 0 ? limit : 6
+      });
+      return Array.isArray(data && data.results) ? data.results : [];
+    } catch (error) {
+      dashLog.debug('Failed to search skills marketplace', { query: normalizedQuery, error: error && error.message || error });
+      return [];
+    }
+  }
+
+  async function installCapabilitySkillPackage(packageSpec) {
+    var normalizedPackage = String(packageSpec || '').trim();
+    if (!normalizedPackage || typeof API === 'undefined' || typeof API.post !== 'function') {
+      return { status: 'invalid_package', message: 'Skill package is required.' };
+    }
+    try {
+      await API.post('/api/skills/marketplace/install', { package: normalizedPackage });
+      return {
+        status: 'installed',
+        package: normalizedPackage,
+        message: 'Installed skill package "' + normalizedPackage + '".'
+      };
+    } catch (error) {
+      return {
+        status: 'install_failed',
+        package: normalizedPackage,
+        message: 'Failed to install skill package "' + normalizedPackage + '": ' + String(error && error.message || error || '')
+      };
+    }
+  }
+
+  async function enableSkillForAgent(agentName, skillName) {
+    if (!agentName || !skillName || typeof API === 'undefined' || typeof API.post !== 'function') {
+      return { status: 'enable_failed', message: 'Agent name and skill are required.' };
+    }
+    try {
+      await API.post('/api/skills/' + encodeURIComponent(skillName) + '/enable', {
+        agent: agentName,
+        enabled: true
+      });
+      return {
+        status: 'enabled',
+        skillName: skillName,
+        message: 'Enabled skill "' + skillName + '" for "' + agentName + '".'
+      };
+    } catch (error) {
+      return {
+        status: 'enable_failed',
+        skillName: skillName,
+        message: 'Failed to enable skill "' + skillName + '" for "' + agentName + '": ' + String(error && error.message || error || '')
+      };
+    }
+  }
+
+  function scoreMarketplaceSkillResult(requirement, result) {
+    if (!requirement || !result) return 0;
+    var score = 0;
+    var preferredNames = Array.isArray(requirement.preferredSkillNames)
+      ? requirement.preferredSkillNames.map(normalizeSkillName)
+      : [];
+    var skillName = normalizeSkillName(result && result.skill);
+    var repository = normalizeToken(result && result.repository);
+    var packageName = normalizeToken(result && result.package);
+
+    if (skillName && preferredNames.indexOf(skillName) >= 0) {
+      score += 100;
+    }
+    if (packageName && preferredNames.indexOf(packageName) >= 0) {
+      score += 80;
+    }
+    if (repository) {
+      score += scoreMCPRequirement(repository, requirement) * 4;
+    }
+    if (packageName) {
+      score += scoreMCPRequirement(packageName.replace(/[@/]/g, ' '), requirement) * 4;
+    }
+    return score;
+  }
+
+  function chooseMarketplaceSkillResult(requirement, results) {
+    if (!requirement || !Array.isArray(results)) return null;
+    var best = null;
+    var bestScore = 0;
+    for (var i = 0; i < results.length; i++) {
+      var score = scoreMarketplaceSkillResult(requirement, results[i]);
+      if (score > bestScore) {
+        best = results[i];
+        bestScore = score;
+      }
+    }
+    if (bestScore <= 0) return null;
+    return best;
   }
 
   async function fetchMarketplaceMCPServers() {
@@ -2342,6 +2688,675 @@
     };
   }
 
+  function inferCalendarIntentVariant(prompt, routeContext, routeData) {
+    var backendVariant = normalizeToken(routeData && routeData.intent_variant);
+    if (backendVariant) return backendVariant;
+
+    var normalized = normalizeToken(prompt);
+    if (!normalized) return 'personal_calendar';
+
+    var workspaceSignals = [
+      'workspace schedule', 'scheduled task', 'scheduled tasks', 'scheduler',
+      'next run', 'cron', 'run today in this workspace', 'workspace tasks'
+    ];
+    var personalSignals = [
+      'my calendar', 'calendar', 'meeting', 'meetings', 'appointment', 'appointments',
+      'am i free', 'availability', 'free time', 'busy', 'events'
+    ];
+
+    for (var i = 0; i < workspaceSignals.length; i++) {
+      if (normalized.indexOf(workspaceSignals[i]) >= 0) return 'workspace_schedule';
+    }
+    for (var j = 0; j < personalSignals.length; j++) {
+      if (normalized.indexOf(personalSignals[j]) >= 0) return 'personal_calendar';
+    }
+    if (hasWorkspaceRouteContext(routeContext) && normalized.indexOf('schedule') >= 0) {
+      return 'ambiguous';
+    }
+    return 'personal_calendar';
+  }
+
+  async function chooseCapabilitySkillPackage(requirement) {
+    if (!requirement || !Array.isArray(requirement.skillMarketplaceQueries) || requirement.skillMarketplaceQueries.length === 0) {
+      return null;
+    }
+    var best = null;
+    var bestScore = 0;
+    for (var i = 0; i < requirement.skillMarketplaceQueries.length; i++) {
+      var query = String(requirement.skillMarketplaceQueries[i] || '').trim();
+      if (!query) continue;
+      var results = await searchCapabilitySkillPackages(query, 8);
+      var candidate = chooseMarketplaceSkillResult(requirement, results);
+      var score = scoreMarketplaceSkillResult(requirement, candidate);
+      if (score > bestScore) {
+        best = candidate;
+        bestScore = score;
+      }
+    }
+    return best;
+  }
+
+  function describeCapabilityAction(action) {
+    if (!action || !action.type) return '';
+    switch (action.type) {
+      case 'create_agent':
+        return 'Create "' + String(action.desiredAgentName || 'new agent') + '"';
+      case 'enable_skill':
+        return 'Enable skill "' + String(action.skillName || '') + '"';
+      case 'install_skill_package':
+        return 'Install skill package "' + String(action.packageSpec || '') + '"';
+      case 'attach_mcp':
+        return 'Attach MCP "' + String(action.serverName || '') + '"';
+      case 'install_and_attach_mcp':
+        return 'Install and attach MCP "' + String(action.serverName || '') + '"';
+      case 'handoff':
+        return 'Hand off to chat';
+      case 'offer_workspace':
+        return 'Create a workspace to implement support';
+      default:
+        return toTitleCase(action.type);
+    }
+  }
+
+  function buildCapabilityPlanSummary(plan) {
+    if (!plan) return '';
+    var actionLabels = [];
+    for (var i = 0; i < plan.actions.length; i++) {
+      var label = describeCapabilityAction(plan.actions[i]);
+      if (!label || plan.actions[i].type === 'handoff' || plan.actions[i].type === 'pause_for_user_choice') continue;
+      actionLabels.push(label);
+    }
+
+    if (plan.classification === 'solvable_now') {
+      if (plan.executionMode === 'workspace_schedule') {
+        return 'I can check the scheduled tasks in this workspace directly.';
+      }
+      return 'This request is already solvable with the current capabilities.';
+    }
+    if (plan.classification === 'user_setup_only') {
+      return plan.summary || 'This needs manual connector setup before I can continue.';
+    }
+    if (plan.classification === 'implementation_request') {
+      return 'This looks like product work rather than an executable task. I can create a workspace to implement it.';
+    }
+    if (plan.classification === 'reusable_feature_gap') {
+      return 'I can’t satisfy this with the current capabilities, but I can create a workspace to implement support for it.';
+    }
+    if (actionLabels.length === 0) {
+      return plan.summary || 'I found a capability plan for this request.';
+    }
+    return 'I can make this work by: ' + actionLabels.join(' -> ') + '.';
+  }
+
+  function buildCapabilityImplementationBrief(plan, prompt) {
+    var lines = [];
+    var requirementLabel = plan && plan.requirement ? plan.requirement.label : 'this capability';
+    var gaps = Array.isArray(plan && plan.gaps) ? plan.gaps : [];
+
+    lines.push('Problem:');
+    lines.push('- User request: "' + String(prompt || '').trim() + '"');
+    lines.push('- Ask Ori cannot satisfy this today using the currently attached agents, skills, and MCP connectors.');
+    lines.push('');
+    lines.push('Observed gaps:');
+    if (gaps.length === 0) {
+      lines.push('- No executable capability plan was available for ' + requirementLabel + '.');
+    } else {
+      for (var i = 0; i < gaps.length; i++) {
+        lines.push('- ' + gaps[i]);
+      }
+    }
+    lines.push('');
+    lines.push('Recommended path:');
+    if (plan && Array.isArray(plan.actions) && plan.actions.length > 0) {
+      for (var j = 0; j < plan.actions.length; j++) {
+        var label = describeCapabilityAction(plan.actions[j]);
+        if (!label || plan.actions[j].type === 'offer_workspace') continue;
+        lines.push('- ' + label);
+      }
+    } else {
+      lines.push('- Add a capability requirement entry and the supporting skill/MCP flow for ' + requirementLabel + '.');
+    }
+    lines.push('');
+    lines.push('Acceptance criteria:');
+    lines.push('- Ask Ori recognizes the request and produces a capability plan instead of refusing.');
+    lines.push('- Setup steps require explicit user confirmation before any mutation.');
+    lines.push('- Once the capability is attached, Ask Ori can hand off or answer inline as appropriate.');
+    lines.push('');
+    lines.push('Starter actions:');
+    lines.push('1. Add or refine the capability requirement entry for this request.');
+    lines.push('2. Wire the required skill and MCP discovery into the Ask Ori planner.');
+    lines.push('3. Add the confirmation UI and execution path for the chosen setup steps.');
+    lines.push('4. Add regression coverage for direct execution, setup, and workspace escalation.');
+
+    return lines.join('\n');
+  }
+
+  function buildCapabilityWorkspaceSeed(plan, prompt) {
+    var title = truncateText(String(prompt || '').trim(), 120) || 'Capability gap';
+    return {
+      seedNote: {
+        name: 'Capability Gap Brief',
+        content: plan && plan.brief ? plan.brief : buildCapabilityImplementationBrief(plan, prompt)
+      },
+      seedTask: {
+        description: 'Implement support for: ' + title,
+        details: plan && plan.brief ? plan.brief : buildCapabilityImplementationBrief(plan, prompt),
+        priority: 2
+      }
+    };
+  }
+
+  async function planCapabilityResolution(options) {
+    var prompt = String(options && options.prompt || '').trim();
+    var intent = options && options.intent ? options.intent : homeAssistantState.pendingIntent;
+    var routeContext = options && options.routeContext ? options.routeContext : buildHomeRouteContext();
+    var routeData = options && options.routeData ? options.routeData : null;
+    var matchedAgentName = String(options && options.matchedAgentName || '').trim();
+    var intentVariant = normalizeToken(options && options.intentVariant || homeAssistantState.pendingIntentVariant || routeData && routeData.intent_variant);
+
+    if (intent && intent.key === 'calendar_check') {
+      intentVariant = intentVariant || inferCalendarIntentVariant(prompt, routeContext, routeData);
+      if (intentVariant === 'ambiguous' && hasWorkspaceRouteContext(routeContext)) {
+        var ambiguousPlan = {
+          classification: 'solvable_now',
+          intentVariant: intentVariant,
+          actions: [{ type: 'pause_for_user_choice' }],
+          summary: 'This could mean your personal calendar or the scheduled tasks in this workspace.',
+          gaps: [],
+          requirement: findCapabilityRequirementByKey('calendar_access')
+        };
+        ambiguousPlan.brief = buildCapabilityImplementationBrief(ambiguousPlan, prompt);
+        return ambiguousPlan;
+      }
+      if (intentVariant === 'workspace_schedule') {
+        var workspacePlan = {
+          classification: hasWorkspaceRouteContext(routeContext) ? 'solvable_now' : 'user_setup_only',
+          intentVariant: intentVariant,
+          executionMode: hasWorkspaceRouteContext(routeContext) ? 'workspace_schedule' : '',
+          actions: [],
+          summary: hasWorkspaceRouteContext(routeContext)
+            ? 'I can inspect the scheduled tasks in this workspace directly.'
+            : 'I need you to choose or open a workspace before I can inspect scheduled tasks.',
+          gaps: hasWorkspaceRouteContext(routeContext) ? [] : ['No workspace context is available for the requested scheduled-task lookup.'],
+          requirement: null
+        };
+        workspacePlan.brief = buildCapabilityImplementationBrief(workspacePlan, prompt);
+        return workspacePlan;
+      }
+    }
+
+    var requirement = detectCapabilityRequirement(prompt, intent, intentVariant);
+    if (!requirement) {
+      if (!looksLikeImplementationRequest(prompt)) return null;
+      var implementationPlan = {
+        classification: 'implementation_request',
+        intentVariant: intentVariant,
+        requirement: null,
+        actions: [{ type: 'offer_workspace' }],
+        summary: 'This looks like implementation work rather than an executable task.',
+        gaps: ['No existing capability requirement matches this request.']
+      };
+      implementationPlan.brief = buildCapabilityImplementationBrief(implementationPlan, prompt);
+      return implementationPlan;
+    }
+
+    var plan = {
+      classification: 'solvable_now',
+      intentVariant: intentVariant,
+      requirement: requirement,
+      targetAgentName: matchedAgentName,
+      actions: [],
+      summary: '',
+      gaps: [],
+      evidence: []
+    };
+
+    var visibleSkills = await fetchAgentSkills(matchedAgentName);
+    var enabledSkill = matchedAgentName ? findCapabilityRequirementSkill(requirement, visibleSkills, true) : null;
+    var availableSkill = matchedAgentName ? findCapabilityRequirementSkill(requirement, visibleSkills, false) : null;
+    var repoScopedSkill = !matchedAgentName ? findCapabilityRequirementSkill(requirement, visibleSkills, false) : null;
+    var skillCandidate = null;
+
+    if (!enabledSkill && !availableSkill && !repoScopedSkill && Array.isArray(requirement.skillMarketplaceQueries) && requirement.skillMarketplaceQueries.length > 0) {
+      skillCandidate = await chooseCapabilitySkillPackage(requirement);
+    }
+
+    var agentServers = matchedAgentName && requirement.requiresMCP ? await fetchAgentMCPServers(matchedAgentName) : [];
+    var existingServer = requirement.requiresMCP ? selectExistingMCPServer(requirement, agentServers) : null;
+    var existingServerStatus = normalizeToken(existingServer && existingServer.status);
+
+    if (!matchedAgentName) {
+      plan.classification = 'solvable_with_setup';
+      plan.actions.push({
+        type: 'create_agent',
+        desiredAgentName: requirement.defaultAgentName || (intent && intent.suggestedName) || 'Task Assistant',
+        desiredAgentType: requirement.preferredAgentType || (intent && intent.defaultType) || 'tool-calling'
+      });
+      plan.gaps.push('No existing agent is a strong match for ' + requirement.label + '.');
+      if (repoScopedSkill) {
+        plan.evidence.push('Repo skill "' + repoScopedSkill.name + '" is already available for new agents.');
+      }
+    }
+
+    if (Array.isArray(requirement.preferredSkillNames) && requirement.preferredSkillNames.length > 0 && !enabledSkill) {
+      plan.classification = 'solvable_with_setup';
+      if (availableSkill) {
+        plan.actions.push({ type: 'enable_skill', skillName: availableSkill.name });
+        plan.gaps.push('Skill "' + availableSkill.name + '" is available but not enabled for this agent.');
+      } else if (skillCandidate && skillCandidate.package) {
+        plan.actions.push({ type: 'install_skill_package', packageSpec: skillCandidate.package, skillName: skillCandidate.skill || requirement.preferredSkillNames[0] });
+        plan.actions.push({ type: 'enable_skill', skillName: skillCandidate.skill || requirement.preferredSkillNames[0] });
+        plan.gaps.push('No matching skill is installed locally for ' + requirement.label + '.');
+      } else {
+        plan.gaps.push('No matching skill is available locally or in the skills marketplace for ' + requirement.label + '.');
+      }
+    }
+
+    if (requirement.requiresMCP) {
+      if (existingServer && existingServer.enabled && (!existingServerStatus || existingServerStatus === 'running')) {
+        plan.evidence.push('MCP "' + existingServer.name + '" is already enabled.');
+      } else if (existingServer && existingServer.enabled && existingServerStatus !== 'running') {
+        plan.classification = 'user_setup_only';
+        plan.summary = 'MCP "' + existingServer.name + '" is attached, but it is currently "' + String(existingServer.status || 'unknown') + '".';
+        plan.gaps.push('Attached MCP "' + existingServer.name + '" is not currently running.');
+      } else if (existingServer) {
+        plan.classification = 'solvable_with_setup';
+        plan.actions.push({ type: 'attach_mcp', serverName: existingServer.name });
+        plan.gaps.push('MCP "' + existingServer.name + '" is available but not attached to this agent.');
+      } else {
+        var configuredServers = await fetchConfiguredMCPServers();
+        var configuredCandidate = selectExistingMCPServer(requirement, configuredServers);
+        if (configuredCandidate) {
+          plan.classification = 'solvable_with_setup';
+          plan.actions.push({ type: 'attach_mcp', serverName: configuredCandidate.name });
+          plan.gaps.push('MCP "' + configuredCandidate.name + '" is configured globally but not attached to this agent.');
+        } else {
+          var marketplaceServers = await fetchMarketplaceMCPServers();
+          var mcpCandidate = chooseMarketplaceMCPServer(requirement, prompt, marketplaceServers);
+          if (mcpCandidate) {
+            var manualReason = getMCPManualConfigReason(mcpCandidate);
+            if (manualReason) {
+              plan.classification = 'user_setup_only';
+              plan.summary = 'I found "' + mcpCandidate.name + '" for ' + requirement.label + ', but it ' + manualReason + '.';
+              plan.gaps.push('Suggested MCP "' + mcpCandidate.name + '" needs manual configuration.');
+            } else {
+              plan.classification = 'solvable_with_setup';
+              plan.actions.push({
+                type: 'install_and_attach_mcp',
+                serverName: mcpCandidate.name,
+                candidate: mcpCandidate
+              });
+              plan.gaps.push('No matching MCP connector is currently attached for ' + requirement.label + '.');
+            }
+          } else {
+            plan.gaps.push('No matching MCP connector is available for ' + requirement.label + '.');
+          }
+        }
+      }
+    }
+
+    if ((plan.classification === 'solvable_now' || plan.classification === 'solvable_with_setup') && (plan.gaps.length > 0 && plan.actions.length === 0)) {
+      plan.classification = looksLikeImplementationRequest(prompt) ? 'implementation_request' : 'reusable_feature_gap';
+      plan.actions = [{ type: 'offer_workspace' }];
+    }
+
+    if (plan.classification === 'solvable_with_setup') {
+      plan.actions.push({ type: 'handoff' });
+    }
+
+    if (!plan.summary) {
+      plan.summary = buildCapabilityPlanSummary(plan);
+    }
+    plan.brief = buildCapabilityImplementationBrief(plan, prompt);
+    return plan;
+  }
+
+  async function createAgentFromCapabilityPlan(plan, prompt, intent) {
+    var llmAvailability = await checkHomeAssistantLLMAvailability();
+    if (!llmAvailability.available) {
+      throw new Error(getHomeAssistantLLMRequirementMessage(llmAvailability));
+    }
+
+    var listData = await API.get('/api/agents');
+    var existing = Array.isArray(listData && listData.agents) ? listData.agents : [];
+    var existingNames = [];
+    for (var i = 0; i < existing.length; i++) {
+      var agentInfo = existing[i];
+      existingNames.push(typeof agentInfo === 'string' ? agentInfo : agentInfo.name);
+    }
+
+    var requirement = plan && plan.requirement ? plan.requirement : null;
+    var seedName = requirement && requirement.defaultAgentName
+      ? requirement.defaultAgentName
+      : (intent && intent.suggestedName) || 'Task Assistant';
+    var description = buildAutoConfigDescription(prompt, intent || HOME_INTENTS.general_task);
+    var autoConfig = await maybeLoadAutoConfig(description);
+    var agentName = buildUniqueAgentName(
+      autoConfig && autoConfig.agent_name ? autoConfig.agent_name : seedName,
+      existingNames
+    );
+    var agentType = autoConfig && autoConfig.agent_type
+      ? autoConfig.agent_type
+      : (requirement && requirement.preferredAgentType) || (intent && intent.defaultType) || 'tool-calling';
+
+    var payload = {
+      name: agentName,
+      type: agentType,
+      system_prompt: autoConfig && autoConfig.system_prompt ? autoConfig.system_prompt : buildDefaultSystemPrompt(intent || HOME_INTENTS.general_task),
+      description: description,
+      tags: uniqueValues(((intent && intent.tags) || []).concat(['auto-created', 'home-assistant', 'capability-plan']))
+    };
+
+    var selectedModel = await resolveAutoSelectedModel(payload.type, autoConfig && autoConfig.model);
+    if (selectedModel) payload.model = selectedModel;
+    if (autoConfig && typeof autoConfig.temperature === 'number') payload.temperature = autoConfig.temperature;
+
+    if (!payload.model) {
+      throw new Error('I could not auto-select a model for the planned agent.');
+    }
+
+    await API.post('/api/agents', payload);
+    return agentName;
+  }
+
+  async function executeCapabilityPlan(plan, prompt, routeContext, appLaunchRequest) {
+    if (!plan) return;
+
+    setHomeAssistantBusy(true, 'Applying Plan...');
+    renderHomeAssistantActions([]);
+    appendHomeAssistantMessage('assistant', 'Applying the capability plan now.');
+
+    var agentName = String(plan.targetAgentName || '').trim();
+    var requirement = plan.requirement;
+
+    try {
+      for (var i = 0; i < plan.actions.length; i++) {
+        var action = plan.actions[i];
+        if (!action || !action.type || action.type === 'handoff') continue;
+
+        if (action.type === 'create_agent') {
+          agentName = await createAgentFromCapabilityPlan(plan, prompt, homeAssistantState.pendingIntent);
+          homeAssistantState.pendingAgentName = agentName;
+          appendHomeAssistantMessage('assistant', 'Created "' + agentName + '" for this capability plan.');
+          continue;
+        }
+
+        if (action.type === 'install_skill_package') {
+          var skillInstallOutcome = await installCapabilitySkillPackage(action.packageSpec);
+          if (normalizeToken(skillInstallOutcome && skillInstallOutcome.status) !== 'installed') {
+            throw new Error(skillInstallOutcome && skillInstallOutcome.message || 'Failed to install skill package.');
+          }
+          appendHomeAssistantMessage('assistant', skillInstallOutcome.message);
+          continue;
+        }
+
+        if (action.type === 'enable_skill') {
+          var enableSkillOutcome = await enableSkillForAgent(agentName, action.skillName);
+          if (normalizeToken(enableSkillOutcome && enableSkillOutcome.status) !== 'enabled') {
+            throw new Error(enableSkillOutcome && enableSkillOutcome.message || 'Failed to enable skill.');
+          }
+          appendHomeAssistantMessage('assistant', enableSkillOutcome.message);
+          continue;
+        }
+
+        if (action.type === 'attach_mcp') {
+          var attachOutcome = await enableMCPServerForAgent(agentName, action.serverName);
+          if (normalizeToken(attachOutcome && attachOutcome.status) !== 'attached_running') {
+            throw new Error(attachOutcome && attachOutcome.message || 'Failed to attach MCP server.');
+          }
+          appendHomeAssistantMessage('assistant', attachOutcome.message);
+          continue;
+        }
+
+        if (action.type === 'install_and_attach_mcp') {
+          var installOutcome = await installMCPServerCandidate(buildEmailMCPCandidateFromRegistry(action.candidate));
+          var installStatus = normalizeToken(installOutcome && installOutcome.status);
+          if (installStatus !== 'installed' && installStatus !== 'already_installed') {
+            throw new Error(installOutcome && installOutcome.message || 'Failed to install MCP server.');
+          }
+          var attachInstalledOutcome = await enableMCPServerForAgent(agentName, action.serverName);
+          if (normalizeToken(attachInstalledOutcome && attachInstalledOutcome.status) !== 'attached_running') {
+            throw new Error(attachInstalledOutcome && attachInstalledOutcome.message || 'Failed to attach MCP server.');
+          }
+          appendHomeAssistantMessage('assistant', attachInstalledOutcome.message);
+        }
+      }
+
+      homeAssistantState.pendingAgentName = agentName;
+      homeAssistantState.pendingCapabilityPlan = null;
+      homeAssistantState.pendingCapabilityBrief = '';
+
+      if (requirement && requirement.canAnswerInline && matchedAgentCanAnswerInline(agentName)) {
+        await runCapabilityTaskDirect(prompt, agentName, {
+          routeContext: routeContext,
+          intent: homeAssistantState.pendingIntent,
+          appLaunchRequest: appLaunchRequest
+        });
+        return;
+      }
+
+      appendHomeAssistantMessage('assistant', 'The capability plan is ready. Handing off to chat now.');
+      await runPendingTaskWithAgent(prompt, agentName, { appLaunchRequest: appLaunchRequest, routeContext: routeContext });
+    } catch (error) {
+      dashLog.debug('Capability plan execution failed', { error: error && error.message || error, plan: plan });
+      appendHomeAssistantMessage('assistant', String(error && error.message || error || 'Capability plan failed.'));
+      setHomeAssistantRoutingSummary('Capability Plan Failed', 'The capability plan did not complete.');
+      renderHomeAssistantActions([
+        {
+          label: 'Show Plan',
+          variant: 'primary',
+          onClick: function () { appendHomeAssistantMessage('assistant', plan.brief); }
+        },
+        {
+          label: 'Ask Another Task',
+          variant: 'secondary',
+          onClick: function () { focusHomeAssistantInput(); }
+        }
+      ]);
+    } finally {
+      setHomeAssistantBusy(false);
+    }
+  }
+
+  function matchedAgentCanAnswerInline(agentName) {
+    return Boolean(String(agentName || '').trim());
+  }
+
+  function renderCapabilityWorkspaceActions(plan, prompt, routeContext, appLaunchRequest) {
+    var seed = buildCapabilityWorkspaceSeed(plan, prompt);
+    setHomeAssistantRoutingSummary('Workspace Available', 'This looks like missing product capability. Create a workspace or review the plan.');
+    renderHomeAssistantActions([
+      {
+        label: 'Create Workspace',
+        variant: 'primary',
+        onClick: function () {
+          createWorkspaceFromPrompt(prompt, {
+            agentName: plan && plan.targetAgentName ? plan.targetAgentName : '',
+            appLaunchRequest: appLaunchRequest,
+            routeContext: routeContext,
+            seedNote: seed.seedNote,
+            seedTask: seed.seedTask
+          });
+        }
+      },
+      {
+        label: 'Show Plan',
+        variant: 'secondary',
+        onClick: function () { appendHomeAssistantMessage('assistant', plan.brief); }
+      },
+      {
+        label: 'Not Now',
+        variant: 'secondary',
+        onClick: function () {
+          appendHomeAssistantMessage('assistant', 'No problem. The implementation brief is ready whenever you want to turn this into workspace work.');
+          focusHomeAssistantInput();
+        }
+      }
+    ]);
+  }
+
+  function renderCapabilitySetupActions(plan, prompt, routeContext, appLaunchRequest) {
+    setHomeAssistantRoutingSummary('Capability Plan', 'Review the proposed setup steps before continuing.');
+    renderHomeAssistantActions([
+      {
+        label: 'Apply Plan',
+        variant: 'primary',
+        onClick: function () { executeCapabilityPlan(plan, prompt, routeContext, appLaunchRequest); }
+      },
+      {
+        label: 'Show Plan',
+        variant: 'secondary',
+        onClick: function () { appendHomeAssistantMessage('assistant', plan.brief); }
+      },
+      {
+        label: 'Continue Without Setup',
+        variant: 'secondary',
+        disabled: !plan.targetAgentName,
+        onClick: function () { runPendingTaskWithAgent(prompt, plan.targetAgentName, { appLaunchRequest: appLaunchRequest, routeContext: routeContext }); }
+      },
+      {
+        label: 'Not Now',
+        variant: 'secondary',
+        onClick: function () {
+          appendHomeAssistantMessage('assistant', 'Okay. I kept the capability plan visible above.');
+          focusHomeAssistantInput();
+        }
+      }
+    ]);
+  }
+
+  async function handleCapabilityResolutionFlow(options) {
+    var prompt = String(options && options.prompt || '').trim();
+    var routeContext = options && options.routeContext ? options.routeContext : buildHomeRouteContext();
+    var routeData = options && options.routeData ? options.routeData : null;
+    var matchedAgentName = String(options && options.matchedAgentName || '').trim();
+    var appLaunchRequest = options && options.appLaunchRequest ? options.appLaunchRequest : null;
+    var capabilityCandidate = detectCapabilityRequirement(prompt, homeAssistantState.pendingIntent, homeAssistantState.pendingIntentVariant);
+    if (homeAssistantState.pendingIntent.key === 'calendar_check' || capabilityCandidate || looksLikeImplementationRequest(prompt)) {
+      setHomeAssistantRoutingSummary('Capability Planning', 'Checking available agents, skills, and MCP connectors.');
+    }
+
+    var plan = await planCapabilityResolution({
+      prompt: prompt,
+      intent: homeAssistantState.pendingIntent,
+      intentVariant: homeAssistantState.pendingIntentVariant,
+      routeContext: routeContext,
+      routeData: routeData,
+      matchedAgentName: matchedAgentName
+    });
+    if (!plan) return false;
+
+    homeAssistantState.pendingCapabilityPlan = plan;
+    homeAssistantState.pendingCapabilityBrief = plan.brief || '';
+
+    if (plan.actions.length > 0 && plan.actions[0].type === 'pause_for_user_choice') {
+      appendHomeAssistantMessage('assistant', plan.summary || 'Do you mean your personal calendar or scheduled tasks in this workspace?');
+      setHomeAssistantRoutingSummary('Schedule Choice', 'Choose your calendar or this workspace schedule.');
+      renderHomeAssistantActions([
+        {
+          label: 'My Calendar',
+          variant: 'primary',
+          onClick: async function () {
+            homeAssistantState.pendingIntentVariant = 'personal_calendar';
+            var followUpHandled = await handleCapabilityResolutionFlow({
+              prompt: prompt,
+              routeContext: routeContext,
+              routeData: routeData,
+              matchedAgentName: matchedAgentName,
+              appLaunchRequest: appLaunchRequest
+            });
+            if (!followUpHandled && matchedAgentName) {
+              await runPendingTaskWithAgent(prompt, matchedAgentName, { appLaunchRequest: appLaunchRequest, routeContext: routeContext });
+            }
+          }
+        },
+        {
+          label: 'This Workspace',
+          variant: 'secondary',
+          onClick: function () {
+            homeAssistantState.pendingIntentVariant = 'workspace_schedule';
+            runWorkspaceScheduleSummaryDirect(prompt, routeContext);
+          }
+        },
+        {
+          label: 'Ask Another Task',
+          variant: 'secondary',
+          onClick: function () { focusHomeAssistantInput(); }
+        }
+      ]);
+      return true;
+    }
+
+    if (plan.executionMode === 'workspace_schedule') {
+      await runWorkspaceScheduleSummaryDirect(prompt, routeContext);
+      return true;
+    }
+
+    if (plan.classification === 'solvable_now' && matchedAgentName && plan.requirement && plan.requirement.canAnswerInline) {
+      await runCapabilityTaskDirect(prompt, matchedAgentName, {
+        routeContext: routeContext,
+        intent: homeAssistantState.pendingIntent,
+        appLaunchRequest: appLaunchRequest
+      });
+      return true;
+    }
+
+    if (plan.classification === 'solvable_with_setup') {
+      appendHomeAssistantMessage('assistant', plan.summary || buildCapabilityPlanSummary(plan));
+      renderCapabilitySetupActions(plan, prompt, routeContext, appLaunchRequest);
+      return true;
+    }
+
+    if (plan.classification === 'user_setup_only') {
+      if (plan.intentVariant === 'workspace_schedule' && !hasWorkspaceRouteContext(routeContext)) {
+        appendHomeAssistantMessage('assistant', plan.summary || 'I need a workspace before I can inspect scheduled tasks.');
+        setHomeAssistantRoutingSummary('Workspace Needed', 'Choose or open a workspace before continuing.');
+        renderHomeAssistantActions([
+          {
+            label: 'Open Workspaces',
+            variant: 'primary',
+            onClick: function () { window.location.href = '/workspaces'; }
+          },
+          {
+            label: 'Ask Another Task',
+            variant: 'secondary',
+            onClick: function () { focusHomeAssistantInput(); }
+          }
+        ]);
+        return true;
+      }
+      appendHomeAssistantMessage('assistant', plan.summary || 'This needs manual setup before I can continue.');
+      setHomeAssistantRoutingSummary('Manual Setup Needed', 'Open MCP settings or review the implementation plan.');
+      renderHomeAssistantActions([
+        {
+          label: 'Open MCP Page',
+          variant: 'primary',
+          onClick: function () { window.location.href = '/mcp'; }
+        },
+        {
+          label: 'Show Plan',
+          variant: 'secondary',
+          onClick: function () { appendHomeAssistantMessage('assistant', plan.brief); }
+        },
+        {
+          label: 'Continue Without Setup',
+          variant: 'secondary',
+          disabled: !matchedAgentName,
+          onClick: function () { runPendingTaskWithAgent(prompt, matchedAgentName, { appLaunchRequest: appLaunchRequest, routeContext: routeContext }); }
+        }
+      ]);
+      return true;
+    }
+
+    if (plan.classification === 'reusable_feature_gap' || plan.classification === 'implementation_request') {
+      appendHomeAssistantMessage('assistant', plan.summary || buildCapabilityPlanSummary(plan));
+      renderCapabilityWorkspaceActions(plan, prompt, routeContext, appLaunchRequest);
+      return true;
+    }
+
+    return false;
+  }
+
   function normalizePluginNames(plugins) {
     if (!Array.isArray(plugins)) return [];
     return plugins.map(function (name) {
@@ -2467,6 +3482,8 @@
       base = 'Create an agent that plans multi-day travel itineraries with day-by-day plans, transportation ideas, budget ranges, and local recommendations.';
     } else if (intent.key === 'email_check') {
       base = 'Create an email triage agent that summarizes unread mail, categorizes urgency, and drafts replies. It must default to read-only behavior and never send without explicit user confirmation.';
+    } else if (intent.key === 'calendar_check') {
+      base = 'Create a calendar assistant that checks schedule availability, summarizes upcoming events, and answers calendar questions. It must default to read-only behavior and always use configured skills or MCP connectors before claiming lack of access.';
     } else if (intent.key === 'app_launch') {
       base = 'Create a desktop launcher agent that can interpret app-launch requests, execute safe local launch commands, and confirm completion clearly.';
     } else {
@@ -2484,6 +3501,9 @@
     }
     if (intent.key === 'email_check') {
       return 'You are an email assistant. Summarize inbox content and draft responses. Never send or delete email without explicit user approval. Start in read-only mode.';
+    }
+    if (intent.key === 'calendar_check') {
+      return 'You are a calendar assistant. Use configured calendar skills and MCP connectors first, default to today when the user omits a range, and stay read-only unless the user explicitly asks to create or edit events.';
     }
     if (intent.key === 'app_launch') {
       return 'You are a desktop app launcher assistant. For requests like "open obsidian", launch the requested app immediately and confirm success or report the exact failure reason.';
@@ -2781,7 +3801,7 @@
     }
 
     var modalInstance = bootstrap.Modal.getInstance(modalElement) || new bootstrap.Modal(modalElement);
-    closeHomeAssistantThinkingModal();
+    closeHomeAssistantThinkingModal({ force: true });
     modalInstance.show();
 
     return await new Promise(function (resolve) {
@@ -3189,6 +4209,213 @@
       text += ' using ' + routeMeta.provider;
     }
     return text + '.';
+  }
+
+  async function runCapabilityTaskDirect(prompt, agentName, options) {
+    if (!prompt || !agentName) return;
+    var routeContext = options && options.routeContext ? options.routeContext : buildHomeRouteContext();
+    var dispatchIntent = options && options.intent ? options.intent : homeAssistantState.pendingIntent;
+    var appLaunchRequest = options && options.appLaunchRequest ? options.appLaunchRequest : null;
+    var dispatchMessage = buildAskOriDispatchMessage(prompt, appLaunchRequest, dispatchIntent, routeContext);
+
+    setHomeAssistantBusy(true, 'Running Capability...');
+    renderHomeAssistantActions([]);
+    appendHomeAssistantMessage('assistant', 'Using the current capability setup to answer this directly.');
+    setHomeAssistantRoutingSummary('Capability Direct', 'Running the request inline with the selected agent.');
+
+    try {
+      var data = await API.post('/api/chat', {
+        question: dispatchMessage,
+        agent_name: agentName,
+        route_context: normalizeHomeRouteContext(routeContext)
+      });
+      var responseText = String(data && data.response || '').trim();
+      if (!responseText) {
+        responseText = 'The capability ran, but no text response was returned.';
+      }
+
+      appendHomeAssistantMessage('assistant', responseText);
+      setHomeAssistantRoutingSummary('Capability Direct', 'Completed inline with "' + agentName + '".');
+      renderHomeAssistantActions([
+        {
+          label: 'Continue in Chat',
+          variant: 'primary',
+          onClick: function () { runPendingTaskWithAgent(prompt, agentName, options); }
+        },
+        {
+          label: 'Ask Another Task',
+          variant: 'secondary',
+          onClick: function () { focusHomeAssistantInput(); }
+        }
+      ]);
+    } catch (error) {
+      dashLog.debug('Direct capability execution failed', { error: error && error.message || error, agent: agentName });
+      appendHomeAssistantMessage('assistant', 'I could not run that capability directly right now.');
+      setHomeAssistantRoutingSummary('Capability Direct Failed', 'Direct execution failed.');
+      renderHomeAssistantActions([
+        {
+          label: 'Retry',
+          variant: 'primary',
+          onClick: function () { runCapabilityTaskDirect(prompt, agentName, options); }
+        },
+        {
+          label: 'Continue in Chat',
+          variant: 'secondary',
+          onClick: function () { runPendingTaskWithAgent(prompt, agentName, options); }
+        }
+      ]);
+    } finally {
+      setHomeAssistantBusy(false);
+    }
+  }
+
+  function formatWorkspaceScheduleTask(task) {
+    if (!task || typeof task !== 'object') return 'Scheduled task';
+    if (task.schedule_summary) return String(task.schedule_summary);
+    if (task.schedule_expression) return String(task.schedule_expression);
+    if (task.schedule_name) return String(task.schedule_name);
+    if (task.schedule && typeof task.schedule === 'object') {
+      if (task.schedule.description) return String(task.schedule.description);
+      if (task.schedule.expression) return String(task.schedule.expression);
+      if (task.schedule.cron) return String(task.schedule.cron);
+      if (task.schedule.type) return String(task.schedule.type).replace(/_/g, ' ');
+    }
+    if (task.schedule_type) return String(task.schedule_type).replace(/_/g, ' ');
+    return 'Scheduled';
+  }
+
+  function formatWorkspaceScheduleNextRun(value) {
+    var raw = String(value || '').trim();
+    if (!raw) return 'not scheduled';
+    var parsed = new Date(raw);
+    if (Number.isNaN(parsed.getTime())) return raw;
+    return parsed.toLocaleString();
+  }
+
+  async function runWorkspaceScheduleSummaryDirect(prompt, routeContext) {
+    var activeContext = normalizeHomeRouteContext(routeContext);
+    var workspaceId = String(activeContext && activeContext.workspace_id || '').trim();
+    if (!workspaceId) {
+      appendHomeAssistantMessage('assistant', 'I need a workspace before I can inspect scheduled tasks.');
+      setHomeAssistantRoutingSummary('Workspace Needed', 'Choose or open a workspace before continuing.');
+      renderHomeAssistantActions([
+        {
+          label: 'Open Workspaces',
+          variant: 'primary',
+          onClick: function () { window.location.href = '/workspaces'; }
+        },
+        {
+          label: 'Ask Another Task',
+          variant: 'secondary',
+          onClick: function () { focusHomeAssistantInput(); }
+        }
+      ]);
+      return;
+    }
+
+    setHomeAssistantBusy(true, 'Checking Workspace Schedule...');
+    renderHomeAssistantActions([]);
+    appendHomeAssistantMessage('assistant', 'Checking scheduled tasks in the current workspace.');
+    setHomeAssistantRoutingSummary('Workspace Schedule', 'Loading scheduled tasks for this workspace.');
+
+    try {
+      var data = await API.get('/api/orchestration/tasks?studio_id=' + encodeURIComponent(workspaceId));
+      var tasks = Array.isArray(data && data.tasks) ? data.tasks : [];
+      var scheduledTasks = tasks.filter(function (task) {
+        return Boolean(task && (task.schedule_enabled || task.schedule || task.next_run || task.schedule_type || task.schedule_expression));
+      });
+
+      scheduledTasks.sort(function (a, b) {
+        var left = String(a && a.next_run || '').trim();
+        var right = String(b && b.next_run || '').trim();
+        if (!left && !right) return 0;
+        if (!left) return 1;
+        if (!right) return -1;
+        return new Date(left).getTime() - new Date(right).getTime();
+      });
+
+      if (scheduledTasks.length === 0) {
+        appendHomeAssistantMessage('assistant', 'This workspace does not have any scheduled tasks yet.');
+        setHomeAssistantRoutingSummary('Workspace Schedule', 'No scheduled tasks found.');
+        renderHomeAssistantActions([
+          {
+            label: 'Open Workspace',
+            variant: 'primary',
+            onClick: function () { window.location.href = '/workspaces/' + encodeURIComponent(workspaceId); }
+          },
+          {
+            label: 'Ask Another Task',
+            variant: 'secondary',
+            onClick: function () { focusHomeAssistantInput(); }
+          }
+        ]);
+        return;
+      }
+
+      var enabledCount = scheduledTasks.filter(function (task) {
+        return Boolean(task && task.schedule_enabled);
+      }).length;
+      var lines = [
+        'Scheduled tasks in this workspace: ' + scheduledTasks.length,
+        'Enabled schedules: ' + enabledCount,
+        ''
+      ];
+      for (var i = 0; i < scheduledTasks.length && i < 5; i++) {
+        var task = scheduledTasks[i];
+        var description = String(task && (task.description || task.name || task.id) || 'Untitled task').trim();
+        lines.push(
+          (i + 1) + '. ' + description +
+          ' | ' + formatWorkspaceScheduleTask(task) +
+          ' | next run: ' + formatWorkspaceScheduleNextRun(task && task.next_run)
+        );
+      }
+      if (scheduledTasks.length > 5) {
+        lines.push('');
+        lines.push((scheduledTasks.length - 5) + ' more scheduled task(s) available in the workspace.');
+      }
+
+      appendHomeAssistantMessage('assistant', lines.join('\n'));
+      setHomeAssistantRoutingSummary('Workspace Schedule', 'Scheduled task summary is ready.');
+      renderHomeAssistantActions([
+        {
+          label: 'Open Workspace',
+          variant: 'primary',
+          onClick: function () { window.location.href = '/workspaces/' + encodeURIComponent(workspaceId); }
+        },
+        {
+          label: 'Continue in Chat',
+          variant: 'secondary',
+          disabled: !homeAssistantState.pendingAgentName,
+          onClick: function () {
+            if (!homeAssistantState.pendingAgentName) return;
+            runPendingTaskWithAgent(prompt, homeAssistantState.pendingAgentName, { routeContext: activeContext });
+          }
+        },
+        {
+          label: 'Ask Another Task',
+          variant: 'secondary',
+          onClick: function () { focusHomeAssistantInput(); }
+        }
+      ]);
+    } catch (error) {
+      dashLog.debug('Workspace schedule summary failed', { error: error && error.message || error, workspaceId: workspaceId });
+      appendHomeAssistantMessage('assistant', 'I could not load scheduled tasks for this workspace right now.');
+      setHomeAssistantRoutingSummary('Workspace Schedule Failed', 'Could not load scheduled tasks.');
+      renderHomeAssistantActions([
+        {
+          label: 'Retry',
+          variant: 'primary',
+          onClick: function () { runWorkspaceScheduleSummaryDirect(prompt, activeContext); }
+        },
+        {
+          label: 'Open Workspace',
+          variant: 'secondary',
+          onClick: function () { window.location.href = '/workspaces/' + encodeURIComponent(workspaceId); }
+        }
+      ]);
+    } finally {
+      setHomeAssistantBusy(false);
+    }
   }
 
   async function runUtilityTaskDirect(prompt, agentName) {
@@ -4398,9 +5625,21 @@
       parentSelect.value = '';
     }
     modalElement.dataset.askOriPostCreate = 'open_workspace_dashboard';
+    if (seedPayload && seedPayload.seedNote) {
+      modalElement.dataset.askOriSeedNote = JSON.stringify(seedPayload.seedNote);
+    } else {
+      delete modalElement.dataset.askOriSeedNote;
+    }
+    if (seedPayload && seedPayload.seedTask) {
+      modalElement.dataset.askOriSeedTask = JSON.stringify(seedPayload.seedTask);
+    } else {
+      delete modalElement.dataset.askOriSeedTask;
+    }
     if (!modalElement.dataset.askOriCleanupBound) {
       modalElement.addEventListener('hidden.bs.modal', function () {
         delete modalElement.dataset.askOriPostCreate;
+        delete modalElement.dataset.askOriSeedNote;
+        delete modalElement.dataset.askOriSeedTask;
       }, true);
       modalElement.dataset.askOriCleanupBound = '1';
     }
@@ -4416,7 +5655,7 @@
       colorButtons[0].classList.add('active');
     }
 
-    closeHomeAssistantThinkingModal();
+    closeHomeAssistantThinkingModal({ force: true });
     var modalInstance = bootstrap.Modal.getInstance(modalElement) || new bootstrap.Modal(modalElement);
     modalInstance.show();
 
@@ -4489,7 +5728,9 @@
     var routeContext = options && options.routeContext ? options.routeContext : buildHomeRouteContext();
     var payload = {
       name: buildWorkspaceNameFromPrompt(text),
-      description: buildWorkspaceDescriptionFromPrompt(text)
+      description: buildWorkspaceDescriptionFromPrompt(text),
+      seedNote: options && options.seedNote ? options.seedNote : null,
+      seedTask: options && options.seedTask ? options.seedTask : null
     };
 
     setHomeAssistantBusy(true, 'Preparing Workspace...');
@@ -4641,10 +5882,13 @@
 
     homeAssistantState.pendingPrompt = text;
     homeAssistantState.pendingIntent = detectHomeIntent(text);
+    homeAssistantState.pendingIntentVariant = '';
     homeAssistantState.pendingAgentName = '';
     homeAssistantState.pendingSuggestedName = '';
     homeAssistantState.pendingSuggestedType = '';
     homeAssistantState.pendingAppLaunch = appLaunchRequest;
+    homeAssistantState.pendingCapabilityPlan = null;
+    homeAssistantState.pendingCapabilityBrief = '';
     homeAssistantState.awaitingCreateConfirmation = false;
 
     appendHomeAssistantMessage('user', text);
@@ -4688,6 +5932,9 @@
         if (typeof routeData.suggested_agent_type === 'string') {
           homeAssistantState.pendingSuggestedType = routeData.suggested_agent_type.trim();
         }
+        if (typeof routeData.intent_variant === 'string') {
+          homeAssistantState.pendingIntentVariant = normalizeToken(routeData.intent_variant);
+        }
         if (appLaunchRequest) {
           if (!homeAssistantState.pendingSuggestedName) {
             homeAssistantState.pendingSuggestedName = HOME_INTENTS.app_launch.suggestedName;
@@ -4724,6 +5971,9 @@
       if (inWorkspaceContext) {
         workspaceRecommended = false;
       }
+      if (homeAssistantState.pendingIntent.key === 'calendar_check' && !homeAssistantState.pendingIntentVariant) {
+        homeAssistantState.pendingIntentVariant = inferCalendarIntentVariant(text, routeContext, routeData);
+      }
 
       if (match && match.agent) {
         homeAssistantState.pendingAgentName = match.agent.name;
@@ -4742,6 +5992,16 @@
 
         if (homeAssistantState.pendingIntent && homeAssistantState.pendingIntent.key === 'utility_direct') {
           await runUtilityTaskDirect(text, match.agent.name);
+          return;
+        }
+        var matchedCapabilityHandled = await handleCapabilityResolutionFlow({
+          prompt: text,
+          routeContext: routeContext,
+          routeData: routeData,
+          matchedAgentName: match.agent.name,
+          appLaunchRequest: appLaunchRequest
+        });
+        if (matchedCapabilityHandled) {
           return;
         }
         if (workspaceRecommended) {
@@ -4778,26 +6038,22 @@
           ]);
           return;
         }
-        var matchedAgentMCP = await ensureMCPForTask(
-          match.agent.name,
-          text,
-          homeAssistantState.pendingIntent.key === 'email_check' ? { allowMutations: false } : null
-        );
-        if (matchedAgentMCP && matchedAgentMCP.message) {
-          appendHomeAssistantMessage('assistant', matchedAgentMCP.message);
-        }
-        if (homeAssistantState.pendingIntent.key === 'email_check') {
-          var matchedEmailMCPResolution = await maybeResolveEmailMCPBeforeHandoff(match.agent.name, text, matchedAgentMCP);
-          if (!matchedEmailMCPResolution || !matchedEmailMCPResolution.continueHandoff) {
-            return;
-          }
-        }
         if (isSemiAutoMode()) {
           appendHomeAssistantMessage('assistant', 'Match found. Handing off to "' + match.agent.name + '" now.');
           setHomeAssistantRoutingSummary('Semi-auto', 'Match found. Handing off to "' + match.agent.name + '".');
         }
         await runPendingTaskWithAgent(text, match.agent.name, { appLaunchRequest: appLaunchRequest, routeContext: routeContext });
       } else {
+        var unmatchedCapabilityHandled = await handleCapabilityResolutionFlow({
+          prompt: text,
+          routeContext: routeContext,
+          routeData: routeData,
+          matchedAgentName: '',
+          appLaunchRequest: appLaunchRequest
+        });
+        if (unmatchedCapabilityHandled) {
+          return;
+        }
         var llmAvailabilityForCreate = await checkHomeAssistantLLMAvailability();
         if (!llmAvailabilityForCreate.available) {
           homeAssistantState.awaitingCreateConfirmation = false;

@@ -54,7 +54,9 @@ temp/
 .gobuild/
 
 # Agent data and configuration
-agents/
+agents/*
+!agents/skills/
+!agents/skills/**
 agents.json
 
 # Plugin binaries and uploads

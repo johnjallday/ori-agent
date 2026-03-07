@@ -3520,8 +3520,52 @@ const sessionManager = {
         ? String(result.folder.id)
         : '';
       const askOriPostCreate = modalElement ? String(modalElement.dataset.askOriPostCreate || '') : '';
+      const askOriSeedNoteRaw = modalElement ? String(modalElement.dataset.askOriSeedNote || '') : '';
+      const askOriSeedTaskRaw = modalElement ? String(modalElement.dataset.askOriSeedTask || '') : '';
       if (modalElement) {
         delete modalElement.dataset.askOriPostCreate;
+        delete modalElement.dataset.askOriSeedNote;
+        delete modalElement.dataset.askOriSeedTask;
+      }
+
+      let askOriSeedNote = null;
+      let askOriSeedTask = null;
+      if (askOriSeedNoteRaw) {
+        try {
+          askOriSeedNote = JSON.parse(askOriSeedNoteRaw);
+        } catch (error) {
+          console.warn('Failed to parse Ask Ori seed note:', error);
+        }
+      }
+      if (askOriSeedTaskRaw) {
+        try {
+          askOriSeedTask = JSON.parse(askOriSeedTaskRaw);
+        } catch (error) {
+          console.warn('Failed to parse Ask Ori seed task:', error);
+        }
+      }
+
+      const askOriSeedResult = {
+        notesCreated: 0,
+        tasksCreated: 0,
+        errors: []
+      };
+
+      if (createdWorkspaceId && askOriSeedNote) {
+        try {
+          await this.createWorkspaceSeedNote(createdWorkspaceId, askOriSeedNote);
+          askOriSeedResult.notesCreated += 1;
+        } catch (error) {
+          askOriSeedResult.errors.push(error);
+        }
+      }
+      if (createdWorkspaceId && askOriSeedTask) {
+        try {
+          await this.createWorkspaceSeedTask(createdWorkspaceId, askOriSeedTask);
+          askOriSeedResult.tasksCreated += 1;
+        } catch (error) {
+          askOriSeedResult.errors.push(error);
+        }
       }
 
       if (setupConfig.enabled && createdWorkspaceId) {
@@ -3531,11 +3575,23 @@ const sessionManager = {
         if (setupResult.tasksCreated > 0) summaryParts.push(`${setupResult.tasksCreated} tasks`);
         if (setupResult.notesCreated > 0) summaryParts.push(`${setupResult.notesCreated} notes`);
         if (setupResult.schedulesCreated > 0) summaryParts.push(`${setupResult.schedulesCreated} schedules`);
+        if (askOriSeedResult.tasksCreated > 0) summaryParts.push(`${askOriSeedResult.tasksCreated} Ask Ori task`);
+        if (askOriSeedResult.notesCreated > 0) summaryParts.push(`${askOriSeedResult.notesCreated} Ask Ori note`);
         const summaryText = summaryParts.length > 0 ? summaryParts.join(', ') : 'no setup items';
-        if (setupResult.errors.length > 0) {
+        if (setupResult.errors.length > 0 || askOriSeedResult.errors.length > 0) {
           this.showToast(`${importEnabled ? 'Workspace imported' : 'Workspace created'} with partial setup (${summaryText}).`, 'warning');
         } else {
           this.showToast(`${importEnabled ? 'Workspace imported' : 'Workspace created'} with Ori setup (${summaryText}).`, 'success');
+        }
+      } else if (askOriSeedResult.tasksCreated > 0 || askOriSeedResult.notesCreated > 0) {
+        const summaryParts = [];
+        if (askOriSeedResult.tasksCreated > 0) summaryParts.push(`${askOriSeedResult.tasksCreated} Ask Ori task`);
+        if (askOriSeedResult.notesCreated > 0) summaryParts.push(`${askOriSeedResult.notesCreated} Ask Ori note`);
+        const summaryText = summaryParts.join(', ');
+        if (askOriSeedResult.errors.length > 0) {
+          this.showToast(`${importEnabled ? 'Workspace imported' : 'Workspace created'} with partial Ask Ori setup (${summaryText}).`, 'warning');
+        } else {
+          this.showToast(`${importEnabled ? 'Workspace imported' : 'Workspace created'} with Ask Ori setup (${summaryText}).`, 'success');
         }
       } else {
         this.showToast(importEnabled ? 'Workspace imported successfully' : 'Workspace created successfully', 'success');
