@@ -87,6 +87,9 @@ func (b *ServerBuilder) initializeTaskExecution() error {
 	taskHandler := workspace.NewLLMTaskHandler(b.st, b.llmFactory, b.workspaceStore)
 	taskHandler.SetEventBus(b.eventBus)
 	taskHandler.SetMCPRegistry(b.mcpRegistry)
+	if b.sessionStore != nil {
+		taskHandler.SetContextStore(session.NewWorkspaceTaskContextAdapter(b.sessionStore))
+	}
 
 	b.taskExecutor = workspace.NewTaskExecutor(b.workspaceStore, taskHandler, workspace.ExecutorConfig{
 		PollInterval:  10 * time.Second,
@@ -125,6 +128,9 @@ func (b *ServerBuilder) initializeOrchestration() error {
 
 	taskHandler := workspace.NewLLMTaskHandler(b.st, b.llmFactory, b.workspaceStore)
 	taskHandler.SetMCPRegistry(b.mcpRegistry)
+	if b.sessionStore != nil {
+		taskHandler.SetContextStore(session.NewWorkspaceTaskContextAdapter(b.sessionStore))
+	}
 
 	// Create session store adapter for orchestration handler
 	var sessionStoreAdapter orchestrationhttp.SessionStore

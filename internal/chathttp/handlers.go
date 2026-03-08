@@ -75,6 +75,7 @@ type Handler struct {
 	orchestrator     *orchestration.Orchestrator
 	costTracker      *llm.CostTracker
 	sessionStore     session.HybridStore
+	workspaceStore   workspace.Store
 	toolCallStore    session.ToolCallStore
 	evolutionSvc     interface {
 		AwardMessageXP(agentName string, tokenCount int, userMessage string) error
@@ -181,6 +182,7 @@ func (h *Handler) SetMCPConfigManager(manager interface {
 
 // SetWorkspaceStore sets the workspace store for workspace commands
 func (h *Handler) SetWorkspaceStore(ws workspace.Store) {
+	h.workspaceStore = ws
 	h.commandHandler.SetWorkspaceStore(ws)
 }
 
@@ -923,7 +925,6 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 	originalQuery := q
 	approvedActionPlanID := strings.TrimSpace(req.ApprovedActionPlanID)
 	normalizedRouteContext := normalizeChatRouteContext(req.RouteContext)
-	runtimeSystemPrompt := buildRouteContextSystemPrompt(normalizedRouteContext)
 
 	// Natural language app launch shortcut:
 	// "open safari" -> "/openapp safari"
@@ -1573,6 +1574,8 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 			Base64Data: img.Content,
 		})
 	}
+
+	runtimeSystemPrompt := h.buildRuntimeSystemPrompt(ctx, normalizedRouteContext)
 
 	// Check if this is a Claude Code provider - route to Claude Code handler
 	if strings.EqualFold(ag.Settings.Provider, "claude_code") && h.llmFactory != nil {
