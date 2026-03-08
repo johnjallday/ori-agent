@@ -19,6 +19,8 @@ import (
 
 const folderPickerControlPort = "21547"
 
+var errFolderPickerAppNotFound = errors.New("folder picker app not found")
+
 type folderPickerSelectPathRequest struct {
 	WorkspaceID string `json:"workspace_id,omitempty"`
 	Title       string `json:"title,omitempty"`
@@ -60,12 +62,13 @@ func (h *HTTPHandler) LaunchFolderPicker(w http.ResponseWriter, r *http.Request)
 
 	// App not running, need to launch it
 	if err := launchFolderPickerApp(reqBody.WorkspaceID); err != nil {
-		logger.Error("Folder picker app not found", logger.Fields{"error": err})
+		logger.Error("Failed to launch folder picker", logger.Fields{"error": err})
 		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusNotFound)
+		status, errMsg := folderPickerLaunchErrorResponse(err)
+		w.WriteHeader(status)
 		_ = json.NewEncoder(w).Encode(map[string]interface{}{
 			"success": false,
-			"error":   "Folder picker app not found. Please build it with: ./scripts/build-folder-picker.sh",
+			"error":   errMsg,
 		})
 		return
 	}
@@ -94,12 +97,7 @@ func (h *HTTPHandler) SelectFolderPath(w http.ResponseWriter, r *http.Request) {
 		if err := launchFolderPickerApp(req.WorkspaceID); err != nil {
 			logger.Error("Failed to launch folder picker for path selection", logger.Fields{"error": err})
 			w.Header().Set("Content-Type", "application/json")
-			status := http.StatusInternalServerError
-			errMsg := "Failed to launch folder picker: " + err.Error()
-			if errors.Is(err, os.ErrNotExist) {
-				status = http.StatusNotFound
-				errMsg = "Folder picker app not found. Please build it with: ./scripts/build-folder-picker.sh"
-			}
+			status, errMsg := folderPickerLaunchErrorResponse(err)
 			w.WriteHeader(status)
 			_ = json.NewEncoder(w).Encode(folderPickerSelectPathResponse{
 				Success: false,
@@ -177,6 +175,9 @@ func ShutdownFolderPicker() {
 func launchFolderPickerApp(workspaceID string) error {
 	appPath, err := findFolderPickerApp()
 	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return fmt.Errorf("%w: %w", errFolderPickerAppNotFound, err)
+		}
 		return err
 	}
 
@@ -208,6 +209,13 @@ func launchFolderPickerApp(workspaceID string) error {
 
 	logger.Info("Launched folder picker app", logger.Fields{"path": appPath})
 	return nil
+}
+
+func folderPickerLaunchErrorResponse(err error) (int, string) {
+	if errors.Is(err, errFolderPickerAppNotFound) {
+		return http.StatusNotFound, "Folder picker app not found. Please build it with: ./scripts/build-folder-picker.sh"
+	}
+	return http.StatusInternalServerError, "Failed to launch folder picker: " + err.Error()
 }
 
 func waitForFolderPickerReady(timeout time.Duration) error {

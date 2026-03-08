@@ -63,11 +63,11 @@ func TestGetProviderForAgent_CorrectsOpenAIMismatchForHaiku(t *testing.T) {
 	}
 }
 
-func TestGetProviderForAgent_DoesNotFallbackToOpenAIForHaikuWhenClaudeUnavailable(t *testing.T) {
+func TestGetProviderForAgent_KeepsConfiguredProviderWhenInferredProviderUnavailable(t *testing.T) {
 	handler := newTestTaskHandler("openai")
 	got := handler.getProviderForAgent("openai", "haiku")
-	if got != "claude" {
-		t.Fatalf("expected claude for openai+haiku when claude provider unavailable, got %q", got)
+	if got != "openai" {
+		t.Fatalf("expected openai for openai+haiku when inferred provider is unavailable, got %q", got)
 	}
 }
 

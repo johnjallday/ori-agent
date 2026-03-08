@@ -21,10 +21,11 @@ import (
 )
 
 type Handler struct {
-	manager       *skills.Manager
-	store         store.Store
-	llmFactory    *llm.Factory
-	configManager *config.Manager
+	manager        *skills.Manager
+	store          store.Store
+	llmFactory     *llm.Factory
+	configManager  *config.Manager
+	skillsCLIInDir func(ctx context.Context, workingDir string, args ...string) (string, error)
 }
 
 var (
@@ -50,10 +51,11 @@ const (
 
 func New(manager *skills.Manager, st store.Store, llmFactory *llm.Factory, cfg *config.Manager) *Handler {
 	return &Handler{
-		manager:       manager,
-		store:         st,
-		llmFactory:    llmFactory,
-		configManager: cfg,
+		manager:        manager,
+		store:          st,
+		llmFactory:     llmFactory,
+		configManager:  cfg,
+		skillsCLIInDir: runSkillsCLIInDir,
 	}
 }
 
@@ -243,47 +245,42 @@ func (h *Handler) createSkill(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), skillCreateTimeout)
 	defer cancel()
 
-	output, err := runSkillsCLIInDir(ctx, skillsRootDir, "init", name)
+	initializedWithCLI, err := h.tryInitializeSkillTemplate(ctx, skillsRootDir, skillDir, name)
 	if err != nil {
-		if skillsInitAlreadyExists(output) {
-			orihttp.RespondErrorWithErr(w, http.StatusConflict, "skill already exists", skills.ErrSkillExists)
+		if errors.Is(err, skills.ErrSkillExists) {
+			orihttp.RespondErrorWithErr(w, http.StatusConflict, "skill already exists", err)
 			return
 		}
-		_ = orihttp.RespondJSON(w, http.StatusBadGateway, map[string]any{
-			"error":   "failed to initialize skill with npx skills",
-			"details": truncateMarketplaceOutput(output),
-		})
+		orihttp.RespondErrorWithErr(w, http.StatusBadRequest, "failed to create skill", err)
 		return
 	}
 
-	if skillsInitAlreadyExists(output) {
-		orihttp.RespondErrorWithErr(w, http.StatusConflict, "skill already exists", skills.ErrSkillExists)
-		return
-	}
-
-	skillPath := filepath.Join(skillDir, "SKILL.md")
-	if _, statErr := os.Stat(skillPath); statErr != nil {
-		_ = orihttp.RespondJSON(w, http.StatusBadGateway, map[string]any{
-			"error":   "skills init did not create SKILL.md",
-			"details": truncateMarketplaceOutput(output),
-		})
-		return
-	}
-
-	skill, err := h.manager.UpdateSkill(agentName, name, skills.SkillInput{
+	input := skills.SkillInput{
 		Name:        name,
 		Description: strings.TrimSpace(req.Description),
 		Prompt:      req.Prompt,
 		OpenAIYAML:  req.OpenAIYAML,
-	})
+	}
+
+	var skill skills.Skill
+	if initializedWithCLI {
+		skill, err = h.manager.UpdateSkill(agentName, name, input)
+		if errors.Is(err, skills.ErrSkillNotFound) {
+			_ = os.RemoveAll(skillDir)
+			skill, err = h.manager.CreateSkill(agentName, input)
+			initializedWithCLI = false
+		}
+	} else {
+		skill, err = h.manager.CreateSkill(agentName, input)
+	}
+
 	if err != nil {
-		_ = os.RemoveAll(skillDir)
+		if initializedWithCLI {
+			_ = os.RemoveAll(skillDir)
+		}
 		switch {
-		case errors.Is(err, skills.ErrSkillNotFound):
-			_ = orihttp.RespondJSON(w, http.StatusBadGateway, map[string]any{
-				"error":   "failed to initialize skill with npx skills",
-				"details": truncateMarketplaceOutput(output),
-			})
+		case errors.Is(err, skills.ErrSkillExists):
+			orihttp.RespondErrorWithErr(w, http.StatusConflict, "skill already exists", err)
 		default:
 			orihttp.RespondErrorWithErr(w, http.StatusBadRequest, "failed to create skill", err)
 		}
@@ -344,8 +341,9 @@ func (h *Handler) resolvePromptProvider(agentName string) (llm.Provider, string,
 
 	if agentName != "" && h.store != nil {
 		if ag, ok := h.store.GetAgent(agentName); ok && ag != nil {
-			providerName := strings.TrimSpace(ag.Settings.Provider)
 			model := strings.TrimSpace(ag.Settings.Model)
+			providerName := resolveSkillPromptProviderName(h.llmFactory, ag.Settings.Provider, model)
+			model = normalizeSkillPromptModelForProvider(providerName, model)
 			if providerName != "" && model != "" {
 				provider, err := h.llmFactory.GetProvider(providerName)
 				if err == nil {
@@ -361,6 +359,157 @@ func (h *Handler) resolvePromptProvider(agentName string) (llm.Provider, string,
 		return nil, "", "", err
 	}
 	return result.Provider, result.Model, h.configManager.GetSystemReasoningEffort(), nil
+}
+
+func (h *Handler) runSkillsCLIInDir(ctx context.Context, workingDir string, args ...string) (string, error) {
+	if h != nil && h.skillsCLIInDir != nil {
+		return h.skillsCLIInDir(ctx, workingDir, args...)
+	}
+	return runSkillsCLIInDir(ctx, workingDir, args...)
+}
+
+func (h *Handler) tryInitializeSkillTemplate(ctx context.Context, skillsRootDir, skillDir, name string) (bool, error) {
+	output, err := h.runSkillsCLIInDir(ctx, skillsRootDir, "init", name)
+	if skillsInitAlreadyExists(output) {
+		return false, skills.ErrSkillExists
+	}
+
+	skillPath := filepath.Join(skillDir, "SKILL.md")
+	if _, statErr := os.Stat(skillPath); statErr == nil {
+		return true, nil
+	}
+
+	if err == nil {
+		_ = os.RemoveAll(skillDir)
+		return false, nil
+	}
+
+	_ = os.RemoveAll(skillDir)
+	return false, nil
+}
+
+func normalizeSkillPromptProviderName(provider string) string {
+	normalized := strings.ToLower(strings.TrimSpace(provider))
+	switch normalized {
+	case "anthropic":
+		return "claude"
+	default:
+		return normalized
+	}
+}
+
+func isSkillPromptClaudeFamilyModel(model string) bool {
+	normalized := strings.ToLower(strings.TrimSpace(model))
+	if normalized == "" {
+		return false
+	}
+	if strings.HasPrefix(normalized, "claude-") {
+		return true
+	}
+	return normalized == "haiku" || normalized == "sonnet" || normalized == "opus"
+}
+
+func isSkillPromptGeminiFamilyModel(model string) bool {
+	normalized := strings.ToLower(strings.TrimSpace(model))
+	return strings.HasPrefix(normalized, "gemini")
+}
+
+func isSkillPromptCodexFamilyModel(model string) bool {
+	normalized := strings.ToLower(strings.TrimSpace(model))
+	return strings.HasPrefix(normalized, "codex")
+}
+
+func inferSkillPromptProviderName(factory *llm.Factory, model string) string {
+	trimmedModel := strings.TrimSpace(model)
+	normalizedModel := strings.ToLower(trimmedModel)
+	if trimmedModel == "" {
+		return ""
+	}
+
+	if normalizedModel == "haiku" || normalizedModel == "sonnet" || normalizedModel == "opus" {
+		if factory != nil && factory.HasProvider("claude_code") {
+			return "claude_code"
+		}
+		if factory != nil && factory.HasProvider("claude") {
+			return "claude"
+		}
+		return "claude"
+	}
+
+	if strings.HasPrefix(normalizedModel, "claude-") {
+		return "claude"
+	}
+	if strings.HasPrefix(normalizedModel, "gemini") {
+		return "gemini"
+	}
+	if strings.HasPrefix(normalizedModel, "codex") {
+		return "codex"
+	}
+	if factory != nil {
+		if ollamaProvider, err := factory.GetProvider("ollama"); err == nil {
+			if ollamaProv, ok := ollamaProvider.(*llm.OllamaProvider); ok {
+				if ollamaProv.HasModel(trimmedModel) || ollamaProv.HasModel(normalizedModel) {
+					return "ollama"
+				}
+			}
+		}
+	}
+	return "openai"
+}
+
+func resolveSkillPromptProviderName(factory *llm.Factory, configuredProvider, model string) string {
+	explicitProvider := normalizeSkillPromptProviderName(configuredProvider)
+	inferredProvider := inferSkillPromptProviderName(factory, model)
+
+	if explicitProvider == "" {
+		return inferredProvider
+	}
+
+	if factory != nil && factory.HasProvider(explicitProvider) {
+		if explicitProvider == "openai" &&
+			inferredProvider != "" &&
+			inferredProvider != "openai" &&
+			(isSkillPromptClaudeFamilyModel(model) || isSkillPromptGeminiFamilyModel(model) || isSkillPromptCodexFamilyModel(model)) {
+			if factory.HasProvider(inferredProvider) {
+				return inferredProvider
+			}
+			return explicitProvider
+		}
+
+		if explicitProvider == "claude" && isSkillPromptClaudeFamilyModel(model) &&
+			(strings.EqualFold(strings.TrimSpace(model), "haiku") ||
+				strings.EqualFold(strings.TrimSpace(model), "sonnet") ||
+				strings.EqualFold(strings.TrimSpace(model), "opus")) &&
+			factory.HasProvider("claude_code") {
+			return "claude_code"
+		}
+
+		return explicitProvider
+	}
+
+	if factory != nil && inferredProvider != "" && factory.HasProvider(inferredProvider) {
+		return inferredProvider
+	}
+
+	return explicitProvider
+}
+
+func normalizeSkillPromptModelForProvider(providerName, model string) string {
+	trimmedModel := strings.TrimSpace(model)
+	normalizedModel := strings.ToLower(trimmedModel)
+
+	if providerName == "claude" {
+		switch normalizedModel {
+		case "haiku":
+			return "claude-3-5-haiku-latest"
+		case "sonnet":
+			return "claude-3-5-sonnet-latest"
+		case "opus":
+			return "claude-3-opus-latest"
+		}
+	}
+
+	return trimmedModel
 }
 
 func (h *Handler) generatePromptBody(ctx context.Context, provider llm.Provider, model, reasoningEffort, name, description string) (string, error) {

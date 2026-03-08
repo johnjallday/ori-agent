@@ -275,10 +275,10 @@ func (h *LLMTaskHandler) getProviderForAgent(configuredProvider, model string) s
 			}
 			if h.llmFactory.HasProvider(inferredProvider) {
 				logger.Warn("Detected provider/model mismatch; using inferred provider for task execution", logFields)
-			} else {
-				logger.Warn("Detected provider/model mismatch; inferred provider is not configured", logFields)
+				return inferredProvider
 			}
-			return inferredProvider
+			logger.Warn("Detected provider/model mismatch; inferred provider is not configured, keeping configured provider", logFields)
+			return explicitProvider
 		}
 
 		// Claude API does not accept short Claude Code model aliases.
