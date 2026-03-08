@@ -941,6 +941,17 @@ func (th *TaskHandler) executeTaskIteratively(ctx context.Context, ws *workspace
 			}
 		}
 
+		if blockedErr := classifyToolAccessBlockedResponse(result); blockedErr != nil {
+			attemptHistory = append(attemptHistory, map[string]interface{}{
+				"attempt":    attempt,
+				"outcome":    "blocked",
+				"summary":    summarizeExecutionText(result),
+				"created_at": time.Now().UTC().Format(time.RFC3339),
+			})
+			recordIterationHistory(persistedTask, maxAttempts, attemptHistory, "blocked")
+			return "", blockedErr
+		}
+
 		attemptHistory = append(attemptHistory, map[string]interface{}{
 			"attempt":    attempt,
 			"outcome":    "success",
@@ -1117,6 +1128,98 @@ func summarizeExecutionText(value string) string {
 		return trimmed
 	}
 	return strings.TrimSpace(trimmed[:260]) + "..."
+}
+
+func classifyToolAccessBlockedResponse(result string) *workspace.TaskBlockedError {
+	normalized := strings.ToLower(strings.TrimSpace(result))
+	if normalized == "" {
+		return nil
+	}
+
+	explicitMarkers := []string{
+		"the available tools are limited to",
+		"i don't have filesystem browsing tools available in this context",
+		"i do not have filesystem browsing tools available in this context",
+		"i don't have filesystem access",
+		"i do not have filesystem access",
+		"cannot explore a general directory",
+		"can't explore a general directory",
+		"appropriate file-reading tools configured",
+		"filesystem access enabled",
+		"may not be loaded or configured in the current agent context",
+		"may need the appropriate file-reading tools configured",
+	}
+
+	if containsAnyExecutionMarker(normalized, explicitMarkers) {
+		return buildToolAccessBlockedError(result)
+	}
+
+	accessMarkers := []string{
+		"i don't have access to",
+		"i do not have access to",
+		"i don't have",
+		"i do not have",
+		"i can't access",
+		"i cannot access",
+		"i'm unable to access",
+		"i am unable to access",
+	}
+	toolMarkers := []string{
+		"tool",
+		"tools",
+		"filesystem",
+		"directory",
+		"file-reading",
+		"plugin",
+		"weather data",
+		"real-time weather",
+		"available in this context",
+		"agent context",
+	}
+	unresolvedMarkers := []string{
+		"i'd need you to either",
+		"you'd need to either",
+		"share the directory listing",
+		"paste the output of",
+		"to complete this task autonomously",
+		"to walk you through",
+		"neither provides",
+		"neither of which can",
+		"configured to complete this task",
+		"loaded or configured",
+	}
+
+	if containsAnyExecutionMarker(normalized, accessMarkers) &&
+		containsAnyExecutionMarker(normalized, toolMarkers) &&
+		containsAnyExecutionMarker(normalized, unresolvedMarkers) {
+		return buildToolAccessBlockedError(result)
+	}
+
+	return nil
+}
+
+func containsAnyExecutionMarker(value string, markers []string) bool {
+	for _, marker := range markers {
+		if strings.Contains(value, marker) {
+			return true
+		}
+	}
+	return false
+}
+
+func buildToolAccessBlockedError(result string) *workspace.TaskBlockedError {
+	return &workspace.TaskBlockedError{
+		ReasonCode: "tool_access_unavailable",
+		Reason:     "The assigned agent reported that required tools or external access were unavailable for this task.",
+		Question:   "This task could not be completed with the tools currently available. Do you want to provide the missing context, retry after enabling the needed tools, or switch agents?",
+		SuggestedActions: []string{
+			"continue_with_instruction",
+			"retry",
+			"switch_agent_retry",
+			"mark_failed",
+		},
+		RawResponse: strings.TrimSpace(result),
+	}
 }
 
 func responseNeedsUserInput(result string) bool {
