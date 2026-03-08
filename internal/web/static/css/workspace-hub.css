@@ -724,6 +724,27 @@
   line-height: 1.5;
 }
 
+.task-details-header-id-row {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  flex-wrap: wrap;
+  margin-bottom: 0.7rem;
+}
+
+.task-details-header-id-label {
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.task-details-header-id-value {
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}
+
 .task-details-meta-grid {
   display: grid;
   grid-template-columns: repeat(2, 1fr);

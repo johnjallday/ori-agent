@@ -424,8 +424,12 @@
     <div class="modal-dialog modal-lg modal-dialog-centered modal-dialog-scrollable">
       <div class="modal-content">
         <div class="modal-header">
-          <div>
+          <div class="workspace-detail-task-modal-heading">
             <h5 class="modal-title" id="workspace-detail-task-result-title">Task Result</h5>
+            <div class="workspace-detail-task-modal-id-row">
+              <span class="workspace-detail-task-modal-id-label">Task ID</span>
+              <code id="workspace-detail-task-result-id" class="workspace-detail-task-modal-id-value">--</code>
+            </div>
             <div id="workspace-detail-task-result-meta" class="workspace-detail-task-result-meta"></div>
           </div>
           <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
@@ -447,8 +451,12 @@
     <div class="modal-dialog modal-lg modal-dialog-centered modal-dialog-scrollable">
       <div class="modal-content">
         <div class="modal-header">
-          <div>
+          <div class="workspace-detail-task-modal-heading">
             <h5 class="modal-title" id="workspace-detail-task-execution-title">Task Execution</h5>
+            <div class="workspace-detail-task-modal-id-row">
+              <span class="workspace-detail-task-modal-id-label">Task ID</span>
+              <code id="workspace-detail-task-execution-id" class="workspace-detail-task-modal-id-value">--</code>
+            </div>
             <div id="workspace-detail-task-execution-meta" class="workspace-detail-task-result-meta"></div>
           </div>
           <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
@@ -476,8 +484,12 @@
     <div class="modal-dialog modal-lg modal-dialog-centered modal-dialog-scrollable">
       <div class="modal-content">
         <div class="modal-header">
-          <div>
+          <div class="workspace-detail-task-modal-heading">
             <h5 class="modal-title" id="workspace-detail-task-assist-title">Task Needs Input</h5>
+            <div class="workspace-detail-task-modal-id-row">
+              <span class="workspace-detail-task-modal-id-label">Task ID</span>
+              <code id="workspace-detail-task-assist-id" class="workspace-detail-task-modal-id-value">--</code>
+            </div>
             <div id="workspace-detail-task-assist-meta" class="workspace-detail-task-result-meta"></div>
           </div>
           <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
@@ -1194,6 +1206,42 @@
       font-size: 0.75rem;
       color: var(--text-secondary);
       margin-top: 0.25rem;
+    }
+
+    .workspace-detail-task-modal-heading {
+      display: flex;
+      flex-direction: column;
+      gap: 0.2rem;
+      min-width: 0;
+    }
+
+    .workspace-detail-task-modal-id-row {
+      display: flex;
+      align-items: center;
+      gap: 0.45rem;
+      flex-wrap: wrap;
+    }
+
+    .workspace-detail-task-modal-id-label {
+      font-size: 0.68rem;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--text-muted);
+    }
+
+    .workspace-detail-task-modal-id-value {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      font-size: 0.72rem;
+      font-weight: 500;
+      color: var(--text-primary);
+      background: color-mix(in srgb, var(--bg-secondary) 88%, transparent);
+      border: 1px solid var(--border-color);
+      border-radius: 999px;
+      padding: 0.18rem 0.5rem;
+      line-height: 1.25;
+      max-width: 100%;
+      overflow-wrap: anywhere;
     }
 
     .workspace-detail-task-result-breakdown {

@@ -418,12 +418,14 @@ export class WorkspaceDetailPage {
       // Result modal
       taskResultModal: document.getElementById('workspace-detail-task-result-modal'),
       taskResultTitle: document.getElementById('workspace-detail-task-result-title'),
+      taskResultId: document.getElementById('workspace-detail-task-result-id'),
       taskResultMeta: document.getElementById('workspace-detail-task-result-meta'),
       taskResultBreakdown: document.getElementById('workspace-detail-task-result-breakdown'),
       taskResultBody: document.getElementById('workspace-detail-task-result-body'),
       taskResultCopyBtn: document.getElementById('workspace-detail-task-result-copy'),
       taskExecutionModal: document.getElementById('workspace-detail-task-execution-modal'),
       taskExecutionTitle: document.getElementById('workspace-detail-task-execution-title'),
+      taskExecutionId: document.getElementById('workspace-detail-task-execution-id'),
       taskExecutionMeta: document.getElementById('workspace-detail-task-execution-meta'),
       taskExecutionStatus: document.getElementById('workspace-detail-task-execution-status'),
       taskExecutionBreakdown: document.getElementById('workspace-detail-task-execution-breakdown'),
@@ -432,6 +434,7 @@ export class WorkspaceDetailPage {
 
       // Assist modal
       taskAssistModal: document.getElementById('workspace-detail-task-assist-modal'),
+      taskAssistId: document.getElementById('workspace-detail-task-assist-id'),
       taskAssistMeta: document.getElementById('workspace-detail-task-assist-meta'),
       taskAssistReason: document.getElementById('workspace-detail-task-assist-reason'),
       taskAssistQuestion: document.getElementById('workspace-detail-task-assist-question'),
@@ -1776,6 +1779,13 @@ export class WorkspaceDetailPage {
     return 'Unknown agent';
   }
 
+  setTaskModalHeaderId(element, taskId) {
+    if (!element) return;
+    const value = String(taskId || '').trim();
+    element.textContent = value || '--';
+    element.title = value || 'Task ID unavailable';
+  }
+
   showTaskResult(taskId, options = {}) {
     const task = this.tasks.find((item) => item.id === taskId);
     if (!task) return;
@@ -1801,6 +1811,7 @@ export class WorkspaceDetailPage {
     if (this.elements.taskResultTitle) {
       this.elements.taskResultTitle.textContent = taskName;
     }
+    this.setTaskModalHeaderId(this.elements.taskResultId, task.id);
     if (this.elements.taskResultMeta) {
       this.elements.taskResultMeta.textContent = `${resultData.label} • ${metaParts.join(' • ')}`;
     }
@@ -2246,6 +2257,7 @@ export class WorkspaceDetailPage {
       suggestedActions: this.parseAssistActions(suggestedActions)
     };
 
+    this.setTaskModalHeaderId(this.elements.taskAssistId, task.id);
     if (this.elements.taskAssistMeta) {
       this.elements.taskAssistMeta.textContent = `${task.description || task.name || task.id} • ${statusText} • ${timestamp}`;
     }
@@ -2687,6 +2699,7 @@ export class WorkspaceDetailPage {
     if (this.elements.taskExecutionTitle) {
       this.elements.taskExecutionTitle.textContent = taskName;
     }
+    this.setTaskModalHeaderId(this.elements.taskExecutionId, task.id);
     this.updateTaskExecutionMeta(task);
     this.setExecutionModalStatus(this.getTaskExecutionState(task));
     this.refreshExecutionBreakdown(task);
