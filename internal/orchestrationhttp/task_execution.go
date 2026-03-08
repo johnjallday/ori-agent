@@ -715,6 +715,11 @@ func (th *TaskHandler) executeTaskWithDependencies(ws *workspace.Workspace, task
 		logger.Error("Task failed", logger.Fields{"task_id": task.ID, "execErr": execErr})
 		task.Status = workspace.TaskStatusFailed
 		task.Error = execErr.Error()
+		startedAt := completedAt
+		if task.StartedAt != nil && !task.StartedAt.IsZero() {
+			startedAt = *task.StartedAt
+		}
+		workspace.RecordTaskExecution(task, "failed", execErr.Error(), startedAt, completedAt.Sub(startedAt))
 	} else {
 		completedAt := time.Now()
 		task.CompletedAt = &completedAt
@@ -722,6 +727,11 @@ func (th *TaskHandler) executeTaskWithDependencies(ws *workspace.Workspace, task
 		task.Status = workspace.TaskStatusCompleted
 		task.Result = result
 		task.Error = ""
+		startedAt := completedAt
+		if task.StartedAt != nil && !task.StartedAt.IsZero() {
+			startedAt = *task.StartedAt
+		}
+		workspace.RecordTaskExecution(task, "success", result, startedAt, completedAt.Sub(startedAt))
 
 		workspace.AutoStoreResult(ws, task, result, th.workspaceStore)
 	}
@@ -769,6 +779,11 @@ func (th *TaskHandler) markTaskBlocked(ws *workspace.Workspace, task *workspace.
 	task.CompletedAt = nil
 	task.Error = ""
 	task.Result = ""
+	startedAt := now
+	if task.StartedAt != nil && !task.StartedAt.IsZero() {
+		startedAt = *task.StartedAt
+	}
+	workspace.RecordTaskExecution(task, "blocked", blockedExecutionSummary(blockedErr), startedAt, now.Sub(startedAt))
 
 	humanLoop := buildTaskBlockedContext(task, blockedErr, extra)
 	if err := ws.UpdateTask(*task); err != nil {
@@ -1220,6 +1235,22 @@ func buildToolAccessBlockedError(result string) *workspace.TaskBlockedError {
 		},
 		RawResponse: strings.TrimSpace(result),
 	}
+}
+
+func blockedExecutionSummary(blockedErr *workspace.TaskBlockedError) string {
+	if blockedErr == nil {
+		return ""
+	}
+	if raw := strings.TrimSpace(blockedErr.RawResponse); raw != "" {
+		return raw
+	}
+	if reason := strings.TrimSpace(blockedErr.Reason); reason != "" {
+		if question := strings.TrimSpace(blockedErr.Question); question != "" {
+			return reason + "\n\n" + question
+		}
+		return reason
+	}
+	return blockedErr.Error()
 }
 
 func responseNeedsUserInput(result string) bool {

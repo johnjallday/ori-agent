@@ -249,13 +249,14 @@ type ScheduleConfig struct {
 	EndDate *time.Time `json:"end_date,omitempty"` // nil = no end date
 }
 
-// TaskExecution represents a single execution of a scheduled task
+// TaskExecution represents a single recorded run of a task.
 type TaskExecution struct {
-	TaskID     string    `json:"task_id"`            // ID of the created Task
-	ExecutedAt time.Time `json:"executed_at"`        // When it was triggered
-	Status     string    `json:"status"`             // "success" or "failed"
-	Error      string    `json:"error,omitempty"`    // Error message if failed
-	Duration   int64     `json:"duration,omitempty"` // Execution duration in milliseconds (future)
+	TaskID     string    `json:"task_id"`            // ID of the executed task
+	ExecutedAt time.Time `json:"executed_at"`        // When the run started
+	Status     string    `json:"status"`             // "success", "failed", or "blocked"
+	Summary    string    `json:"summary,omitempty"`  // Short result or failure summary
+	Error      string    `json:"error,omitempty"`    // Full error message if failed or blocked
+	Duration   int64     `json:"duration,omitempty"` // Execution duration in milliseconds
 }
 
 // ScheduledTask represents a recurring or one-time scheduled task template

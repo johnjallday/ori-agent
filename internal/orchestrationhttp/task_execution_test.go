@@ -201,3 +201,105 @@ To walk you through the directory, I'd need you to either share the directory li
 		t.Fatalf("expected attempts_used 1, got %v", got)
 	}
 }
+
+func TestExecuteTaskWithDependencies_RecordsSuccessfulRunHistory(t *testing.T) {
+	store := workspace.NewInMemoryStore()
+	ws := workspace.NewWorkspace(workspace.CreateWorkspaceParams{Name: "amr", Agents: []string{"Ori"}})
+	task := workspace.Task{
+		ID:          "task-success",
+		To:          "Ori",
+		Description: "summarize workspace",
+	}
+	if err := ws.AddTask(task); err != nil {
+		t.Fatalf("failed to add task: %v", err)
+	}
+	if err := store.Save(ws); err != nil {
+		t.Fatalf("failed to save workspace: %v", err)
+	}
+
+	persistedTask, err := ws.GetTask(task.ID)
+	if err != nil {
+		t.Fatalf("failed to fetch task: %v", err)
+	}
+
+	handler := &TaskHandler{
+		workspaceStore: store,
+		taskHandler: &stubWorkspaceTaskExecutor{
+			result: "Workspace summary result",
+		},
+	}
+
+	if _, err := handler.executeTaskWithDependencies(ws, persistedTask, true); err != nil {
+		t.Fatalf("executeTaskWithDependencies failed: %v", err)
+	}
+
+	updatedTask, err := ws.GetTask(task.ID)
+	if err != nil {
+		t.Fatalf("failed to fetch updated task: %v", err)
+	}
+	if updatedTask.ExecutionCount != 1 {
+		t.Fatalf("expected execution count 1, got %d", updatedTask.ExecutionCount)
+	}
+	if len(updatedTask.ExecutionHistory) != 1 {
+		t.Fatalf("expected 1 execution history entry, got %d", len(updatedTask.ExecutionHistory))
+	}
+	if updatedTask.ExecutionHistory[0].Status != "success" {
+		t.Fatalf("expected success history status, got %q", updatedTask.ExecutionHistory[0].Status)
+	}
+	if updatedTask.ExecutionHistory[0].Summary == "" {
+		t.Fatalf("expected summary to be recorded")
+	}
+}
+
+func TestExecuteTaskWithDependencies_RecordsBlockedRunHistory(t *testing.T) {
+	store := workspace.NewInMemoryStore()
+	ws := workspace.NewWorkspace(workspace.CreateWorkspaceParams{Name: "amr", Agents: []string{"Ori"}})
+	task := workspace.Task{
+		ID:          "task-blocked",
+		To:          "Ori",
+		Description: "walk me through the amr directory",
+	}
+	if err := ws.AddTask(task); err != nil {
+		t.Fatalf("failed to add task: %v", err)
+	}
+	if err := store.Save(ws); err != nil {
+		t.Fatalf("failed to save workspace: %v", err)
+	}
+
+	persistedTask, err := ws.GetTask(task.ID)
+	if err != nil {
+		t.Fatalf("failed to fetch task: %v", err)
+	}
+
+	handler := &TaskHandler{
+		workspaceStore: store,
+		taskHandler: &stubWorkspaceTaskExecutor{
+			err: &workspace.TaskBlockedError{
+				ReasonCode:  "tool_access_unavailable",
+				Reason:      "Missing filesystem tools",
+				RawResponse: "I don't have filesystem access for this task.",
+			},
+		},
+	}
+
+	if _, err := handler.executeTaskWithDependencies(ws, persistedTask, true); err == nil {
+		t.Fatalf("expected blocked error")
+	}
+
+	updatedTask, err := ws.GetTask(task.ID)
+	if err != nil {
+		t.Fatalf("failed to fetch updated task: %v", err)
+	}
+	if updatedTask.ExecutionCount != 1 {
+		t.Fatalf("expected execution count 1, got %d", updatedTask.ExecutionCount)
+	}
+	if len(updatedTask.ExecutionHistory) != 1 {
+		t.Fatalf("expected 1 execution history entry, got %d", len(updatedTask.ExecutionHistory))
+	}
+	if updatedTask.ExecutionHistory[0].Status != "blocked" {
+		t.Fatalf("expected blocked history status, got %q", updatedTask.ExecutionHistory[0].Status)
+	}
+	if updatedTask.ExecutionHistory[0].Summary == "" {
+		t.Fatalf("expected blocked summary to be recorded")
+	}
+}

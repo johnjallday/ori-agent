@@ -1989,6 +1989,49 @@ export class WorkspaceDetailPage {
     });
   }
 
+  getExecutionHistoryBreakdownSteps(task, options = {}) {
+    const history = Array.isArray(task?.execution_history) ? task.execution_history : [];
+    if (!history.length) return [];
+
+    const includeLatest = options.includeLatest !== false;
+    const relevantHistory = includeLatest ? history : history.slice(0, -1);
+    if (!relevantHistory.length) return [];
+
+    const startIndex = Number.isFinite(Number(options.startIndex)) && Number(options.startIndex) > 0
+      ? Number(options.startIndex)
+      : 1;
+
+    const mapRecordedStatus = (status) => {
+      const normalized = String(status || '').trim().toLowerCase();
+      if (normalized === 'success') return 'completed';
+      if (normalized === 'failed') return 'failed';
+      if (normalized === 'blocked') return 'blocked';
+      return normalized || 'pending';
+    };
+
+    return relevantHistory.map((item, index) => {
+      const recordedAt = this.normalizeBreakdownField(item?.executed_at);
+      const rawStatus = String(item?.status || '').trim().toLowerCase();
+      const summary = this.normalizeBreakdownField(item?.summary);
+      const errorText = this.normalizeBreakdownField(item?.error);
+      const detailParts = [];
+
+      if (recordedAt) detailParts.push(`Recorded at: ${formatDate(recordedAt)}`);
+      if (rawStatus) detailParts.push(`Outcome: ${rawStatus.replace(/_/g, ' ')}`);
+      if (summary) {
+        detailParts.push(this.truncateBreakdownText(summary, 360));
+      } else if (errorText) {
+        detailParts.push(this.truncateBreakdownText(errorText, 360));
+      }
+
+      return {
+        title: `Run ${startIndex + index}`,
+        status: mapRecordedStatus(rawStatus),
+        detail: detailParts.join('\n')
+      };
+    });
+  }
+
   async fetchLatestSubtasksForParent(parentTaskID) {
     if (!parentTaskID || !this.workspaceId) return [];
     try {
@@ -2043,6 +2086,21 @@ export class WorkspaceDetailPage {
     }
 
     const retryHistorySteps = this.getRetryHistoryBreakdownSteps(task);
+    const historicalRunSteps = this.getExecutionHistoryBreakdownSteps(task, {
+      includeLatest: retryHistorySteps.length === 0
+    });
+    if (historicalRunSteps.length > 0) {
+      if (retryHistorySteps.length > 0) {
+        const currentRunNumber = historicalRunSteps.length + 1;
+        const currentRunSteps = retryHistorySteps.map((step) => ({
+          ...step,
+          title: `Run ${currentRunNumber} • ${step.title}`
+        }));
+        return [...historicalRunSteps, ...currentRunSteps];
+      }
+      return historicalRunSteps;
+    }
+
     if (retryHistorySteps.length > 0) {
       return retryHistorySteps;
     }

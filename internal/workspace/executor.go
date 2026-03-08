@@ -327,11 +327,25 @@ func (te *TaskExecutor) executeTask(ws *Workspace, task Task) {
 		// Update task with result
 		completedAt := time.Now()
 		updatedTask.CompletedAt = &completedAt
+		startedAt := completedAt
+		if updatedTask.StartedAt != nil && !updatedTask.StartedAt.IsZero() {
+			startedAt = *updatedTask.StartedAt
+		}
 
 		if err != nil {
 			logger.Error("Task failed", logger.Fields{"task_id": task.ID, "err": err})
 			updatedTask.Status = TaskStatusFailed
 			updatedTask.Error = err.Error()
+			executionStatus := "failed"
+			executionSummary := err.Error()
+			if blockedErr, ok := AsTaskBlockedError(err); ok {
+				executionStatus = "blocked"
+				executionSummary = blockedErr.Error()
+				if strings.TrimSpace(blockedErr.RawResponse) != "" {
+					executionSummary = blockedErr.RawResponse
+				}
+			}
+			RecordTaskExecution(updatedTask, executionStatus, executionSummary, startedAt, completedAt.Sub(startedAt))
 
 			// Publish task failed event
 			if te.eventBus != nil {
@@ -345,6 +359,7 @@ func (te *TaskExecutor) executeTask(ws *Workspace, task Task) {
 			logger.Info("Task completed successfully", logger.Fields{"task_id": task.ID})
 			updatedTask.Status = TaskStatusCompleted
 			updatedTask.Result = result
+			RecordTaskExecution(updatedTask, "success", result, startedAt, completedAt.Sub(startedAt))
 
 			// Automatically store result if agent is connected to a store node
 			te.autoStoreResult(ws, &task, result)
