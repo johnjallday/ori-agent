@@ -137,6 +137,8 @@ mcp_servers.json
 # Agent-specific runtime files
 agents/*/agent_settings.json
 agents/*/workspace/
+internal/pluginhttp/agents/
+internal/server/agents/
 
 # Session data
 .claude-sessions/
@@ -147,6 +149,7 @@ tasks/
 marketplace_config.json
 .gomodcache/
 session_files/
+tests/e2e/ori-data/
 
 # User uploads and custom templates
 uploads/
