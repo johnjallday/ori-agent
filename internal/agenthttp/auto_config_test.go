@@ -191,6 +191,37 @@ func TestAutoConfigHandler_AutoConfig_EmptyDescription(t *testing.T) {
 	}
 }
 
+func TestAutoConfigHandler_AutoConfig_SuccessIncludesGeneratedDescription(t *testing.T) {
+	factory := llm.NewFactory()
+	factory.Register("openai", &mockProvider{})
+	configManager := createTestConfigManager(t, "openai", "mock-model")
+	handler := NewAutoConfigHandler(factory, configManager)
+
+	reqBody := AutoConfigRequest{
+		Description: "An agent that helps with weather forecasts and severe weather alerts",
+	}
+	body, _ := json.Marshal(reqBody)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/agents/auto-config", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+
+	handler.AutoConfigHandler(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("Expected status %d, got %d. Body: %s", http.StatusOK, rr.Code, rr.Body.String())
+	}
+
+	var response AutoConfigResponse
+	if err := json.NewDecoder(rr.Body).Decode(&response); err != nil {
+		t.Fatalf("Failed to decode response: %v", err)
+	}
+
+	if response.Description == "" {
+		t.Fatal("Expected generated description to be populated")
+	}
+}
+
 // TestAutoConfigHandler_AutoConfig_InvalidMethod tests auto-config with wrong HTTP method
 func TestAutoConfigHandler_AutoConfig_InvalidMethod(t *testing.T) {
 	factory := llm.NewFactory()
@@ -381,6 +412,51 @@ func TestAutoConfigHandler_getDefaultConfig(t *testing.T) {
 	if config.SystemPrompt == "" {
 		t.Error("Expected non-empty default system prompt")
 	}
+	if config.Description == "" {
+		t.Error("Expected non-empty default description")
+	}
+}
+
+func TestResolveAutoConfigDescription(t *testing.T) {
+	tests := []struct {
+		name      string
+		generated string
+		source    string
+		agentName string
+		expected  string
+	}{
+		{
+			name:      "prefers generated description",
+			generated: "Provides concise weather forecasts and storm updates.",
+			source:    "weather helper",
+			agentName: "Weather Assistant",
+			expected:  "Provides concise weather forecasts and storm updates.",
+		},
+		{
+			name:      "falls back to source description",
+			source:    "  Helps triage inbox requests for the team.  ",
+			agentName: "Inbox Agent",
+			expected:  "Helps triage inbox requests for the team.",
+		},
+		{
+			name:      "falls back to agent name",
+			agentName: "Research Agent",
+			expected:  "Research Agent helps with specialized tasks.",
+		},
+		{
+			name:     "falls back to generic description",
+			expected: "Helpful AI assistant for general tasks.",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := resolveAutoConfigDescription(tt.generated, tt.source, tt.agentName)
+			if result != tt.expected {
+				t.Fatalf("expected %q, got %q", tt.expected, result)
+			}
+		})
+	}
 }
 
 // mockProvider is a minimal mock LLM provider for testing
@@ -390,6 +466,8 @@ func (m *mockProvider) Chat(ctx context.Context, req llm.ChatRequest) (*llm.Chat
 	// Return a mock auto-config response
 	return &llm.ChatResponse{
 		Content: `{
+			"agent_name": "Weather Assistant",
+			"description": "Provides weather forecasts, current conditions, and alert guidance in a concise format.",
 			"agent_type": "tool-calling",
 			"model": "gpt-4o-mini",
 			"provider": "openai",

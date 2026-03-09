@@ -904,8 +904,12 @@ function applyCreateAutoConfig(config) {
   // Apply description to the agent description field
   const descriptionField = document.getElementById('agentDescription');
   const autoDescription = document.getElementById('createAutoConfigDescription');
-  if (descriptionField && autoDescription && autoDescription.value.trim()) {
-    descriptionField.value = autoDescription.value.trim();
+  if (descriptionField) {
+    if (config.description) {
+      descriptionField.value = config.description;
+    } else if (autoDescription && autoDescription.value.trim()) {
+      descriptionField.value = autoDescription.value.trim();
+    }
   }
 
   // Apply model (need to wait a moment for model list to repopulate)

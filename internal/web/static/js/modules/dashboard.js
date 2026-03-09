@@ -3088,7 +3088,7 @@
       name: agentName,
       type: agentType,
       system_prompt: autoConfig && autoConfig.system_prompt ? autoConfig.system_prompt : buildDefaultSystemPrompt(intent || HOME_INTENTS.general_task),
-      description: description,
+      description: autoConfig && autoConfig.description ? autoConfig.description : description,
       tags: uniqueValues(((intent && intent.tags) || []).concat(['auto-created', 'home-assistant', 'capability-plan']))
     };
 
@@ -4030,7 +4030,7 @@
         name: agentName,
         type: autoConfig && autoConfig.agent_type ? autoConfig.agent_type : fallbackType,
         system_prompt: autoConfig && autoConfig.system_prompt ? autoConfig.system_prompt : buildDefaultSystemPrompt(intent),
-        description: description,
+        description: autoConfig && autoConfig.description ? autoConfig.description : description,
         tags: uniqueValues((intent.tags || []).concat(['auto-created', 'home-assistant']))
       };
 

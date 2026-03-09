@@ -37,6 +37,7 @@ type AutoConfigRequest struct {
 // AutoConfigResponse represents the auto-generated configuration
 type AutoConfigResponse struct {
 	AgentName          string   `json:"agent_name"`
+	Description        string   `json:"description"`
 	AgentType          string   `json:"agent_type"`
 	Model              string   `json:"model"`
 	Provider           string   `json:"provider"`
@@ -136,6 +137,7 @@ func (h *AutoConfigHandler) AutoConfigHandler(w http.ResponseWriter, r *http.Req
 		logger.Error("Auto-config generation failed", logger.Fields{"error": err})
 		// Return defaults on failure
 		config = h.getDefaultConfig()
+		config.Description = resolveAutoConfigDescription("", req.Description, config.AgentName)
 		config.Reasoning = "Auto-config failed, using defaults: " + err.Error()
 	}
 
@@ -150,6 +152,7 @@ IMPORTANT: All string values must be on a single line. Do not use literal newlin
 
 Required JSON fields:
 - agent_name: A short, descriptive name for the agent (e.g., "Weather Assistant", "Code Reviewer")
+- description: A short, polished 1-2 sentence description for the agent details field
 - agent_type: One of "tool-calling" (for tool/plugin tasks), "general" (balanced), or "research" (complex reasoning)
 - model: "gpt-4.1-nano" for tool-calling, "gpt-5" or "gpt-5.1-codex" for general/research, "claude-sonnet-4-20250514", or "gemini-2.5-flash"/"gemini-2.5-pro"
 - provider: "openai", "codex", "claude_code", "claude", or "gemini" based on model
@@ -159,7 +162,7 @@ Required JSON fields:
 - reasoning: Brief explanation (single line)
 
 Example:
-{"agent_name":"Weather Assistant","agent_type":"tool-calling","model":"gpt-4.1-nano","provider":"openai","temperature":0.2,"system_prompt":"You are a weather assistant that provides accurate weather information.","recommended_plugins":["weather"],"reasoning":"Tool-calling for API-based weather lookups."}`
+{"agent_name":"Weather Assistant","description":"Provides current conditions, forecasts, and weather-related guidance with clear, reliable answers.","agent_type":"tool-calling","model":"gpt-4.1-nano","provider":"openai","temperature":0.2,"system_prompt":"You are a weather assistant that provides accurate weather information.","recommended_plugins":["weather"],"reasoning":"Tool-calling for API-based weather lookups."}`
 
 	userMessage := fmt.Sprintf("Configure an agent for the following purpose:\n\n%s", description)
 
@@ -215,6 +218,7 @@ Example:
 
 	// Validate and sanitize the response
 	config = h.validateAndSanitizeConfig(config)
+	config.Description = resolveAutoConfigDescription(config.Description, description, config.AgentName)
 
 	return &config, nil
 }
@@ -264,12 +268,30 @@ func (h *AutoConfigHandler) validateAndSanitizeConfig(config AutoConfigResponse)
 func (h *AutoConfigHandler) getDefaultConfig() *AutoConfigResponse {
 	return &AutoConfigResponse{
 		AgentName:    "New Agent",
+		Description:  "Helpful AI assistant for general tasks.",
 		AgentType:    "tool-calling",
 		Model:        "gpt-4.1-nano",
 		Provider:     "openai",
 		Temperature:  0.7,
 		SystemPrompt: "You are a helpful AI assistant.",
 	}
+}
+
+func resolveAutoConfigDescription(generatedDescription, sourceDescription, agentName string) string {
+	normalize := func(value string) string {
+		return strings.Join(strings.Fields(strings.TrimSpace(value)), " ")
+	}
+
+	if description := normalize(generatedDescription); description != "" {
+		return description
+	}
+	if description := normalize(sourceDescription); description != "" {
+		return description
+	}
+	if name := normalize(agentName); name != "" {
+		return fmt.Sprintf("%s helps with specialized tasks.", name)
+	}
+	return "Helpful AI assistant for general tasks."
 }
 
 // fixMalformedJSON attempts to fix common LLM JSON issues like literal newlines in strings
