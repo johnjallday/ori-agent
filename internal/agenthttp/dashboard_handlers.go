@@ -54,6 +54,7 @@ type AgentDetailResponse struct {
 	Model           string                 `json:"model"`
 	Temperature     float64                `json:"temperature"`
 	Provider        string                 `json:"provider,omitempty"`
+	ReasoningEffort string                 `json:"reasoning_effort,omitempty"`
 	MaxOutputTokens int                    `json:"max_output_tokens,omitempty"`
 	SystemPrompt    string                 `json:"system_prompt"`
 	AllowWebSearch  bool                   `json:"allow_web_search"`
@@ -211,6 +212,7 @@ func (h *DashboardHandler) GetAgentDetail(w http.ResponseWriter, r *http.Request
 		Model:           ag.Settings.Model,
 		Temperature:     ag.Settings.Temperature,
 		Provider:        ag.Settings.Provider,
+		ReasoningEffort: ag.Settings.EffectiveReasoningEffort(ag.Settings.Provider),
 		MaxOutputTokens: ag.Settings.MaxOutputTokens,
 		SystemPrompt:    ag.Settings.SystemPrompt,
 		AllowWebSearch:  ag.Settings.IsWebSearchAllowed(),

@@ -336,6 +336,10 @@
                     <div class="info-item-label" style="font-size: 13px; font-weight: 500; color: var(--text-secondary); margin-bottom: 4px;">Provider</div>
                     <div id="agentProvider" class="info-item-value" style="color: var(--text-primary);">Loading...</div>
                   </div>
+                  <div class="info-item" id="agentReasoningRow" style="padding: 12px 0; border-bottom: 1px solid var(--border-color); display: none;">
+                    <div class="info-item-label" style="font-size: 13px; font-weight: 500; color: var(--text-secondary); margin-bottom: 4px;">Reasoning Level</div>
+                    <div id="agentReasoningEffort" class="info-item-value" style="color: var(--text-primary);">Medium</div>
+                  </div>
                   <div class="info-item" style="padding: 12px 0; border-bottom: 1px solid var(--border-color);">
                     <div class="info-item-label" style="font-size: 13px; font-weight: 500; color: var(--text-secondary); margin-bottom: 4px;">Temperature</div>
                     <div id="agentTemperature" class="info-item-value" style="color: var(--text-primary);">Loading...</div>
@@ -373,6 +377,15 @@
                       <label for="editModel" class="info-item-label" style="font-size: 13px; color: var(--text-secondary);">Model</label>
                       <select id="editModel" class="form-select" style="background: var(--bg-secondary); border: 1px solid var(--border-color); color: var(--text-primary);">
                         <option value="">Loading models...</option>
+                      </select>
+                    </div>
+                    <div class="col-sm-6" id="editReasoningField" style="display: none;">
+                      <label for="editReasoningEffort" class="info-item-label" style="font-size: 13px; color: var(--text-secondary);">Reasoning Level</label>
+                      <select id="editReasoningEffort" class="form-select" style="background: var(--bg-secondary); border: 1px solid var(--border-color); color: var(--text-primary);">
+                        <option value="medium" selected>Medium (Recommended)</option>
+                        <option value="high">High</option>
+                        <option value="low">Low</option>
+                        <option value="xhigh">Extra High</option>
                       </select>
                     </div>
                     <div class="col-sm-6">

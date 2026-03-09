@@ -9,6 +9,7 @@ const modelOptions = [
   'gpt-4o-mini',
   'gpt-4-turbo',
   'gpt-3.5-turbo',
+  'gpt-5.4',
   'gpt-5-codex',
   'gpt-5-codex-mini',
   'gpt-5.1-codex',
@@ -26,6 +27,29 @@ const modelOptions = [
   'mistral',
   'codellama'
 ];
+
+function supportsCodexReasoning(providerName, modelName) {
+  const provider = String(providerName || '').trim().toLowerCase();
+  const model = String(modelName || '').trim().toLowerCase();
+  return provider === 'codex' || model.includes('codex');
+}
+
+function updateReasoningVisibility() {
+  const field = document.getElementById('agentReasoningField');
+  const select = document.getElementById('agentReasoningEffort');
+  const modelInput = document.getElementById('agentModel');
+  if (!field || !select || !modelInput) {
+    return;
+  }
+
+  const provider = currentAgent?.provider || '';
+  const show = supportsCodexReasoning(provider, modelInput.value);
+  field.style.display = show ? 'block' : 'none';
+  select.disabled = !show;
+  if (show && !select.value) {
+    select.value = 'medium';
+  }
+}
 
 // Get agent name from URL - supports both path and query parameter
 function getAgentNameFromURL() {
@@ -59,6 +83,7 @@ document.addEventListener('DOMContentLoaded', () => {
   setupTagsInput();
   setupAvatarUpload();
   populateModelDatalist();
+  document.getElementById('agentModel')?.addEventListener('input', updateReasoningVisibility);
   loadAgentDetails();
 });
 
@@ -85,6 +110,10 @@ function populateForm(agent) {
   document.getElementById('agentType').value = agent.type || 'tool-calling';
   document.getElementById('agentRole').value = agent.role || 'general';
   document.getElementById('agentModel').value = agent.model || '';
+  const reasoningSelect = document.getElementById('agentReasoningEffort');
+  if (reasoningSelect) {
+    reasoningSelect.value = agent.reasoning_effort || 'medium';
+  }
 
   const metadata = agent.metadata || {};
   document.getElementById('agentDescription').value = metadata.description || '';
@@ -101,6 +130,7 @@ function populateForm(agent) {
   renderTags();
 
   document.getElementById('favoriteToggle').checked = Boolean(metadata.favorite);
+  updateReasoningVisibility();
 }
 
 async function updateAgent() {
@@ -108,6 +138,7 @@ async function updateAgent() {
   const type = document.getElementById('agentType').value;
   const role = document.getElementById('agentRole').value;
   const model = document.getElementById('agentModel').value.trim();
+  const reasoningEffort = document.getElementById('agentReasoningEffort')?.value || 'medium';
   if (!newName) {
     showError('Name is required');
     return;
@@ -134,6 +165,9 @@ async function updateAgent() {
     tags: selectedTags,
     favorite
   };
+  if (supportsCodexReasoning(currentAgent?.provider, model)) {
+    payload.reasoning_effort = reasoningEffort;
+  }
 
   try {
     showLoading(true, 'Saving changes...');

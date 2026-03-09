@@ -13,6 +13,35 @@ let globalMCPServers = [];
 let mcpAutoRecoveryAttempted = false;
 let mcpAutoRecoveryInFlight = false;
 
+function supportsCodexReasoning(providerName, modelName) {
+  const provider = String(providerName || '').trim().toLowerCase();
+  const model = String(modelName || '').trim().toLowerCase();
+  return provider === 'codex' || model.includes('codex');
+}
+
+function updateEditReasoningVisibility() {
+  const field = document.getElementById('editReasoningField');
+  const select = document.getElementById('editReasoningEffort');
+  const modelSelect = document.getElementById('editModel');
+  const providerFilter = document.getElementById('editProviderFilter');
+  if (!field || !select || !modelSelect) {
+    return;
+  }
+
+  const selectedOption = modelSelect.selectedOptions?.[0];
+  const provider = selectedOption?.getAttribute('data-provider')
+    || providerFilter?.value
+    || currentAgent?.provider
+    || '';
+  const show = supportsCodexReasoning(provider, modelSelect.value);
+
+  field.style.display = show ? '' : 'none';
+  select.disabled = !show;
+  if (show && !select.value) {
+    select.value = 'medium';
+  }
+}
+
 // Fetch and display system model in navbar
 async function refreshSystemModelDisplay() {
   const modelNameEl = document.getElementById('systemModelName');
@@ -209,6 +238,8 @@ function populateEditModelOptions() {
       }
     }
   }
+
+  updateEditReasoningVisibility();
 }
 
 // Filter models by provider (called when provider filter changes)
@@ -242,6 +273,11 @@ document.addEventListener('DOMContentLoaded', async () => {
     loadGlobalMCPServers(),
     loadAgentDetails()
   ]);
+
+  document.getElementById('editProviderFilter')?.addEventListener('change', () => {
+    window.requestAnimationFrame(updateEditReasoningVisibility);
+  });
+  document.getElementById('editModel')?.addEventListener('change', updateEditReasoningVisibility);
 
   const pluginPanel = document.getElementById('pluginManagerPanel');
   if (pluginPanel) {
@@ -332,6 +368,13 @@ function renderAgentDetails() {
   const providerEl = document.getElementById('agentProvider');
   const provider = currentAgent.provider || currentAgent.llm_provider || '';
   if (providerEl) providerEl.textContent = provider || 'Not set';
+
+  const reasoningRow = document.getElementById('agentReasoningRow');
+  const reasoningEl = document.getElementById('agentReasoningEffort');
+  const reasoningEffort = currentAgent.reasoning_effort || '';
+  const showReasoning = supportsCodexReasoning(provider, currentAgent.model);
+  if (reasoningRow) reasoningRow.style.display = showReasoning ? '' : 'none';
+  if (reasoningEl) reasoningEl.textContent = reasoningEffort || 'Medium';
 
   const tempEl = document.getElementById('agentTemperature');
   if (tempEl) tempEl.textContent = currentAgent.temperature ?? 'Not set';
@@ -459,10 +502,12 @@ function populateConfigForm() {
   const maxTokensInput = document.getElementById('editMaxTokens');
   const typeSelect = document.getElementById('editType');
   const roleSelect = document.getElementById('editRole');
+  const reasoningSelect = document.getElementById('editReasoningEffort');
 
   // Set type and role first as they affect model filtering
   if (typeSelect) typeSelect.value = currentAgent.type || 'tool-calling';
   if (roleSelect) roleSelect.value = currentAgent.role || 'general';
+  if (reasoningSelect) reasoningSelect.value = currentAgent.reasoning_effort || 'medium';
   if (tempInput) tempInput.value = currentAgent.temperature ?? '';
   if (maxTokensInput) maxTokensInput.value = currentAgent.max_output_tokens || '';
 
@@ -481,6 +526,8 @@ function populateConfigForm() {
       }
     }
   }
+
+  updateEditReasoningVisibility();
 }
 
 async function saveConfigChanges() {
@@ -492,6 +539,7 @@ async function saveConfigChanges() {
   const maxTokensRaw = document.getElementById('editMaxTokens')?.value;
   const type = document.getElementById('editType')?.value || 'tool-calling';
   const role = document.getElementById('editRole')?.value || 'general';
+  const reasoningEffort = document.getElementById('editReasoningEffort')?.value || 'medium';
 
   if (!model) {
     setConfigStatus('Model is required to save configuration.', 'error');
@@ -520,6 +568,9 @@ async function saveConfigChanges() {
 
   if (provider) {
     payload.llm_provider = provider;
+  }
+  if (supportsCodexReasoning(provider, model)) {
+    payload.reasoning_effort = reasoningEffort;
   }
 
   try {

@@ -49,9 +49,10 @@ func (h *Handler) handleCodexChat(w http.ResponseWriter, r *http.Request, ag *ag
 
 	start := time.Now()
 	resp, err := provider.Chat(ctx, llm.ChatRequest{
-		Model:        ag.Settings.Model,
-		Messages:     messages,
-		SystemPrompt: systemPrompt,
+		Model:           ag.Settings.Model,
+		Messages:        messages,
+		SystemPrompt:    systemPrompt,
+		ReasoningEffort: ag.Settings.EffectiveReasoningEffort("codex"),
 	})
 	if err != nil {
 		writeErrorResponse(w, err.Error())

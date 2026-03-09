@@ -14,6 +14,7 @@ type Settings struct {
 	APIKey          string  `json:"api_key,omitempty"`           // OpenAI API key (optional, falls back to env var)
 	SystemPrompt    string  `json:"system_prompt,omitempty"`     // Custom system prompt for the agent
 	Provider        string  `json:"provider,omitempty"`          // LLM provider backing the model (e.g., openai, anthropic)
+	ReasoningEffort string  `json:"reasoning_effort,omitempty"`  // Optional reasoning depth for providers that support it (currently Codex)
 	MaxOutputTokens int     `json:"max_output_tokens,omitempty"` // Optional max tokens for responses
 	AllowWebSearch  *bool   `json:"allow_web_search,omitempty"`  // Nil defaults to true for backward compatibility
 }
@@ -25,6 +26,38 @@ func (s Settings) IsWebSearchAllowed() bool {
 		return true
 	}
 	return *s.AllowWebSearch
+}
+
+// NormalizeReasoningEffort normalizes supported reasoning effort values.
+// Returns an empty string when the input is unset or invalid.
+func NormalizeReasoningEffort(effort string) string {
+	switch strings.ToLower(strings.TrimSpace(effort)) {
+	case "low":
+		return "low"
+	case "medium":
+		return "medium"
+	case "high":
+		return "high"
+	case "xhigh":
+		return "xhigh"
+	default:
+		return ""
+	}
+}
+
+// EffectiveReasoningEffort returns the reasoning effort that should be used for
+// the configured provider/model. Codex defaults to medium when unset.
+func (s Settings) EffectiveReasoningEffort(providerName string) string {
+	normalizedProvider := strings.ToLower(strings.TrimSpace(providerName))
+	normalizedModel := strings.ToLower(strings.TrimSpace(s.Model))
+	if normalizedProvider != "codex" && !strings.Contains(normalizedModel, "codex") {
+		return ""
+	}
+
+	if normalized := NormalizeReasoningEffort(s.ReasoningEffort); normalized != "" {
+		return normalized
+	}
+	return "medium"
 }
 
 // OnboardingState tracks user's onboarding progress

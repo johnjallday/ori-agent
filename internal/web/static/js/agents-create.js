@@ -12,8 +12,63 @@ const createValidatedFields = [
   'llmModel'
 ];
 
+function supportsCodexReasoning(providerName, modelName) {
+  const provider = String(providerName || '').trim().toLowerCase();
+  const model = String(modelName || '').trim().toLowerCase();
+  return provider === 'codex' || model.includes('codex');
+}
+
+function ensureCreateReasoningField() {
+  if (document.getElementById('llmReasoningField')) {
+    return;
+  }
+
+  const modelSelect = document.getElementById('llmModel');
+  const modelRow = modelSelect?.closest('.form-row');
+  if (!modelRow) {
+    return;
+  }
+
+  const field = document.createElement('div');
+  field.className = 'form-group';
+  field.id = 'llmReasoningField';
+  field.hidden = true;
+  field.innerHTML = `
+    <label class="form-label" for="llmReasoning">Reasoning Level</label>
+    <select id="llmReasoning" class="form-select" name="llm_reasoning_effort">
+      <option value="medium" selected>Medium (Recommended)</option>
+      <option value="high">High</option>
+      <option value="low">Low</option>
+      <option value="xhigh">Extra High</option>
+    </select>
+    <div class="form-help">Codex only. Higher levels improve difficult reasoning at the cost of speed.</div>
+  `;
+
+  modelRow.insertAdjacentElement('afterend', field);
+}
+
+function updateCreateReasoningVisibility() {
+  const field = document.getElementById('llmReasoningField');
+  const select = document.getElementById('llmReasoning');
+  const modelSelect = document.getElementById('llmModel');
+  if (!field || !select || !modelSelect) {
+    return;
+  }
+
+  const selectedOption = modelSelect.selectedOptions?.[0];
+  const provider = selectedOption ? selectedOption.getAttribute('data-provider') : '';
+  const show = supportsCodexReasoning(provider, modelSelect.value);
+
+  field.hidden = !show;
+  select.disabled = !show;
+  if (show && !select.value) {
+    select.value = 'medium';
+  }
+}
+
 // Initialize page
 document.addEventListener('DOMContentLoaded', () => {
+  ensureCreateReasoningField();
   loadPlugins();
   loadMCPServers();
   setupTagsInput();
@@ -22,6 +77,18 @@ document.addEventListener('DOMContentLoaded', () => {
   setupValidationListeners();
   setupCreateFormSubmission();
   refreshSystemModelDisplay();
+
+  const providerSelect = document.getElementById('llmProvider');
+  if (providerSelect) {
+    providerSelect.addEventListener('change', () => {
+      window.requestAnimationFrame(updateCreateReasoningVisibility);
+    });
+  }
+
+  const modelSelect = document.getElementById('llmModel');
+  if (modelSelect) {
+    modelSelect.addEventListener('change', updateCreateReasoningVisibility);
+  }
 });
 
 // Fetch and display system model in navbar
@@ -389,6 +456,8 @@ function updateModelOptions() {
     option.textContent = 'No models available for this configuration';
     modelSelect.appendChild(option);
   }
+
+  updateCreateReasoningVisibility();
 }
 
 function clearGlobalError() {
@@ -503,6 +572,7 @@ async function createAgent() {
   // Get provider from the selected model's data attribute
   const selectedOption = modelSelect.options[modelSelect.selectedIndex];
   const provider = selectedOption ? selectedOption.getAttribute('data-provider') : null;
+  const reasoningSelect = document.getElementById('llmReasoning');
 
   // Gather optional fields
   const description = document.getElementById('agentDescription').value.trim();
@@ -531,6 +601,9 @@ async function createAgent() {
   // Add provider if we could determine it
   if (provider) {
     requestData.llm_provider = provider;
+  }
+  if (supportsCodexReasoning(provider, model) && reasoningSelect?.value) {
+    requestData.reasoning_effort = reasoningSelect.value;
   }
 
   // Add optional fields
@@ -846,6 +919,7 @@ function applyCreateAutoConfig(config) {
           break;
         }
       }
+      updateCreateReasoningVisibility();
     }
   }, 100);
 

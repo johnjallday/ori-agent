@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/http"
 	"regexp"
+	"strings"
 	"time"
 
 	"github.com/johnjallday/ori-agent/internal/agent"
@@ -85,6 +86,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				"model":             agent.Settings.Model,
 				"temperature":       agent.Settings.Temperature,
 				"provider":          agent.Settings.Provider,
+				"reasoning_effort":  agent.Settings.EffectiveReasoningEffort(agent.Settings.Provider),
 				"max_output_tokens": agent.Settings.MaxOutputTokens,
 				"system_prompt":     agent.Settings.SystemPrompt,
 				"allow_web_search":  agent.Settings.IsWebSearchAllowed(),
@@ -137,6 +139,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			Tags            []string `json:"tags,omitempty"`
 			AvatarColor     string   `json:"avatar_color,omitempty"`
 			LLMProvider     string   `json:"llm_provider,omitempty"`
+			ReasoningEffort string   `json:"reasoning_effort,omitempty"`
 			MaxOutputTokens int      `json:"max_output_tokens,omitempty"`
 			AllowWebSearch  *bool    `json:"allow_web_search,omitempty"`
 		}
@@ -159,6 +162,13 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
+		reasoningEffort, err := normalizeAgentReasoningEffort(req.LLMProvider, req.Model, req.ReasoningEffort)
+		if err != nil {
+			logger.Error("CreateAgent error: invalid reasoning effort", logger.Fields{"error": err})
+			orihttp.BadRequest(w, err.Error())
+			return
+		}
+
 		// Build config from request
 		config := &store.CreateAgentConfig{
 			Type:            req.Type,
@@ -166,6 +176,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			Temperature:     req.Temperature,
 			SystemPrompt:    req.SystemPrompt,
 			LLMProvider:     req.LLMProvider,
+			ReasoningEffort: reasoningEffort,
 			MaxOutputTokens: req.MaxOutputTokens,
 			AllowWebSearch:  req.AllowWebSearch,
 		}
@@ -251,15 +262,16 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		// Parse update request
 		var req struct {
 			// Core fields
-			Name           *string  `json:"name,omitempty"`
-			Type           *string  `json:"type,omitempty"`
-			Role           *string  `json:"role,omitempty"`
-			Model          *string  `json:"model,omitempty"`
-			Temperature    *float64 `json:"temperature,omitempty"`
-			LLMProvider    *string  `json:"llm_provider,omitempty"`
-			MaxTokens      *int     `json:"max_output_tokens,omitempty"`
-			SystemPrompt   *string  `json:"system_prompt,omitempty"`
-			AllowWebSearch *bool    `json:"allow_web_search,omitempty"`
+			Name            *string  `json:"name,omitempty"`
+			Type            *string  `json:"type,omitempty"`
+			Role            *string  `json:"role,omitempty"`
+			Model           *string  `json:"model,omitempty"`
+			Temperature     *float64 `json:"temperature,omitempty"`
+			LLMProvider     *string  `json:"llm_provider,omitempty"`
+			ReasoningEffort *string  `json:"reasoning_effort,omitempty"`
+			MaxTokens       *int     `json:"max_output_tokens,omitempty"`
+			SystemPrompt    *string  `json:"system_prompt,omitempty"`
+			AllowWebSearch  *bool    `json:"allow_web_search,omitempty"`
 			// Metadata
 			Description *string   `json:"description,omitempty"`
 			Tags        *[]string `json:"tags,omitempty"`
@@ -291,6 +303,14 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if req.LLMProvider != nil {
 			agent.Settings.Provider = *req.LLMProvider
 		}
+		if req.ReasoningEffort != nil {
+			reasoningEffort, err := normalizeAgentReasoningEffort(agent.Settings.Provider, agent.Settings.Model, *req.ReasoningEffort)
+			if err != nil {
+				orihttp.BadRequest(w, err.Error())
+				return
+			}
+			agent.Settings.ReasoningEffort = reasoningEffort
+		}
 		if req.MaxTokens != nil {
 			agent.Settings.MaxOutputTokens = *req.MaxTokens
 		}
@@ -300,6 +320,9 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if req.AllowWebSearch != nil {
 			allow := *req.AllowWebSearch
 			agent.Settings.AllowWebSearch = &allow
+		}
+		if !agentSupportsReasoningEffort(agent.Settings.Provider, agent.Settings.Model) {
+			agent.Settings.ReasoningEffort = ""
 		}
 
 		// Update metadata fields if provided (partial update)
@@ -442,4 +465,28 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	default:
 		w.WriteHeader(http.StatusMethodNotAllowed)
 	}
+}
+
+func normalizeAgentReasoningEffort(providerName, modelName, reasoningEffort string) (string, error) {
+	if strings.TrimSpace(reasoningEffort) == "" {
+		return "", nil
+	}
+
+	normalized := types.NormalizeReasoningEffort(reasoningEffort)
+	if normalized == "" {
+		return "", fmt.Errorf("invalid reasoning_effort %q: must be one of [low medium high xhigh]", reasoningEffort)
+	}
+
+	if !agentSupportsReasoningEffort(providerName, modelName) {
+		return "", nil
+	}
+
+	return normalized, nil
+}
+
+func agentSupportsReasoningEffort(providerName, modelName string) bool {
+	if strings.EqualFold(strings.TrimSpace(providerName), "codex") {
+		return true
+	}
+	return strings.Contains(strings.ToLower(strings.TrimSpace(modelName)), "codex")
 }
