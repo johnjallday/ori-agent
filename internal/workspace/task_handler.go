@@ -140,10 +140,11 @@ func (h *LLMTaskHandler) ExecuteTask(ctx context.Context, agentName string, task
 
 	// Call the LLM
 	resp, err := provider.Chat(ctx, llm.ChatRequest{
-		Model:       modelName,
-		Messages:    messages,
-		Temperature: ag.Settings.Temperature,
-		Tools:       tools,
+		Model:           modelName,
+		Messages:        messages,
+		Temperature:     ag.Settings.Temperature,
+		ReasoningEffort: ag.Settings.EffectiveReasoningEffort(providerName),
+		Tools:           tools,
 	})
 
 	if err != nil {

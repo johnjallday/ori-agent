@@ -347,7 +347,7 @@ func (h *Handler) resolvePromptProvider(agentName string) (llm.Provider, string,
 			if providerName != "" && model != "" {
 				provider, err := h.llmFactory.GetProvider(providerName)
 				if err == nil {
-					return provider, model, "", nil
+					return provider, model, ag.Settings.EffectiveReasoningEffort(providerName), nil
 				}
 			}
 		}
