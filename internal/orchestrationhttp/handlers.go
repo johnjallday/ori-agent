@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/johnjallday/ori-agent/internal/agentcomm"
+	"github.com/johnjallday/ori-agent/internal/filewatcher"
 	orihttp "github.com/johnjallday/ori-agent/internal/http"
 	"github.com/johnjallday/ori-agent/internal/orchestration"
 	"github.com/johnjallday/ori-agent/internal/orchestration/templates"
@@ -38,7 +39,8 @@ type HandlerConfig struct {
 	TemplateManager     *templates.TemplateManager
 	NotificationService *workspace.NotificationService
 	TaskHandler         workspace.TaskHandler
-	SessionStore        SessionStore // For fetching sessions and session tasks
+	SessionStore        SessionStore         // For fetching sessions and session tasks
+	FileWatcher         *filewatcher.Watcher // For workspace directory watching
 }
 
 // SessionStore interface for fetching session data
@@ -91,6 +93,7 @@ type Handler struct {
 	eventBus            *workspace.EventBus
 	notificationService *workspace.NotificationService
 	taskHandler         workspace.TaskHandler
+	fileWatcher         *filewatcher.Watcher
 
 	// Sub-handlers for modular organization
 	workspaceHandler    *WorkspaceHandler
@@ -130,6 +133,7 @@ func NewHandler(cfg HandlerConfig) (*Handler, error) {
 		templateManager:     cfg.TemplateManager,
 		notificationService: cfg.NotificationService,
 		taskHandler:         cfg.TaskHandler,
+		fileWatcher:         cfg.FileWatcher,
 	}
 
 	// Initialize all sub-handlers
@@ -142,6 +146,9 @@ func NewHandler(cfg HandlerConfig) (*Handler, error) {
 func (h *Handler) initializeSubHandlers() {
 	// Core sub-handlers (always created - depend only on required fields)
 	h.workspaceHandler = NewWorkspaceHandler(h.agentStore, h.workspaceStore, h.eventBus, h.sessionStore)
+	if h.fileWatcher != nil {
+		h.workspaceHandler.SetFileWatcher(h.fileWatcher)
+	}
 	h.messageHandler = NewMessageHandler(h.workspaceStore, h.eventBus)
 	h.capabilitiesHandler = NewCapabilitiesHandler(h.agentStore, h.workspaceStore, h.communicator, h.eventBus)
 
@@ -266,6 +273,11 @@ func (h *Handler) WorkspaceHandler(w http.ResponseWriter, r *http.Request) {
 // Delegates to WorkspaceHandler for modular organization
 func (h *Handler) WorkspaceAgentsHandler(w http.ResponseWriter, r *http.Request) {
 	h.workspaceHandler.WorkspaceAgentsHandler(w, r)
+}
+
+// WorkspaceActivateHandler starts watching workspace directories on page load.
+func (h *Handler) WorkspaceActivateHandler(w http.ResponseWriter, r *http.Request) {
+	h.workspaceHandler.ActivateHandler(w, r)
 }
 
 // MessagesHandler handles workspace message operations

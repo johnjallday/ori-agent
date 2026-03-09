@@ -134,6 +134,7 @@ export class WorkspaceDetailPage {
       this.loadDirectories(),
       this.loadSchedules()
     ]);
+    this.activateWorkspace();
     this.setupRealtime();
   }
 
@@ -4167,6 +4168,16 @@ export class WorkspaceDetailPage {
     `;
     }).join('');
     this.updateCopyNotesButtonState(false);
+  }
+
+  /**
+   * Activate the workspace on the backend, starting directory watchers
+   * and any other context needed for the assistant.
+   */
+  activateWorkspace() {
+    fetch(`/api/orchestration/workspace/activate?id=${encodeURIComponent(this.workspaceId)}`, {
+      method: 'POST'
+    }).catch(err => console.warn('Failed to activate workspace:', err));
   }
 
   /**
