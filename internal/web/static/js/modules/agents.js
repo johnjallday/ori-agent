@@ -22,6 +22,20 @@ const agentCreationCapabilityState = {
   loadingToken: 0
 };
 
+function createDefaultAgentCreationFlowState() {
+  return {
+    seedName: '',
+    seedType: '',
+    autoDescription: '',
+    preferAutoConfig: false,
+    workspaceId: '',
+    taskId: '',
+    assignTask: false
+  };
+}
+
+let pendingAgentCreationFlow = createDefaultAgentCreationFlowState();
+
 function supportsCodexReasoning(providerName, modelName) {
   const provider = String(providerName || '').trim().toLowerCase();
   const model = String(modelName || '').trim().toLowerCase();
@@ -164,7 +178,8 @@ function selectAgent(agentName) {
 }
 
 // Show add agent modal
-function showAddAgentModal() {
+function showAddAgentModal(options = {}) {
+  pendingAgentCreationFlow = normalizeAgentCreationFlowOptions(options);
   const modalElement = document.getElementById('addAgentModal');
   if (!modalElement) {
     agentsLog.debug('addAgentModal not available on this page');
@@ -213,6 +228,7 @@ function showAddAgentModal() {
 
   modal.show();
   void loadAgentCreationCapabilityCatalog();
+  void applyPendingAgentCreationFlowToModal();
 
   // Focus on input after modal is shown
   setTimeout(() => {
@@ -228,6 +244,58 @@ function filterModelsByType(agentType, modelSelect) {
 
   // Repopulate the select with filtered models
   populateModelSelect(modelSelect, agentType);
+}
+
+function normalizeAgentCreationFlowOptions(options = {}) {
+  return {
+    seedName: String(options?.seedName || '').trim(),
+    seedType: String(options?.seedType || '').trim(),
+    autoDescription: String(options?.autoDescription || '').trim(),
+    preferAutoConfig: Boolean(options?.preferAutoConfig),
+    workspaceId: String(options?.workspaceId || '').trim(),
+    taskId: String(options?.taskId || '').trim(),
+    assignTask: Boolean(options?.assignTask)
+  };
+}
+
+function clearPendingAgentCreationFlow() {
+  pendingAgentCreationFlow = createDefaultAgentCreationFlowState();
+}
+
+async function applyPendingAgentCreationFlowToModal() {
+  const options = pendingAgentCreationFlow;
+  if (!options) return;
+
+  const agentNameInput = document.getElementById('agentName');
+  const agentTypeInput = document.getElementById('agentType');
+  const descriptionTextarea = document.getElementById('baseAutoConfigDescription');
+  const autoModeInput = document.getElementById('baseConfigModeAuto');
+  const manualModeInput = document.getElementById('baseConfigModeManual');
+
+  if (options.seedName && agentNameInput) {
+    agentNameInput.value = options.seedName;
+  }
+
+  if (options.seedType && agentTypeInput) {
+    agentTypeInput.value = options.seedType;
+    agentTypeInput.dispatchEvent(new Event('change'));
+  }
+
+  if (options.autoDescription && descriptionTextarea) {
+    descriptionTextarea.value = options.autoDescription;
+  }
+
+  if (options.preferAutoConfig && options.autoDescription) {
+    if (autoModeInput) autoModeInput.checked = true;
+    if (manualModeInput) manualModeInput.checked = false;
+    await checkBaseLLMAvailability();
+    handleBaseConfigModeChange('auto');
+    if (baseLLMAvailable) {
+      await generateBaseAutoConfig();
+    }
+  }
+
+  updateAgentReasoningVisibility();
 }
 
 function normalizeAgentCapabilityName(value) {
@@ -631,6 +699,60 @@ function describeAgentCreationCapabilities(summary) {
   return `${parts.slice(0, -1).join(', ')} and ${parts[parts.length - 1]}`;
 }
 
+async function applyPendingAgentCreationFollowUp(agentName) {
+  const flow = pendingAgentCreationFlow;
+  const summary = {
+    workspaceAdded: false,
+    taskAssigned: false,
+    failures: []
+  };
+
+  if (!flow || (!flow.workspaceId && !flow.taskId)) {
+    return summary;
+  }
+
+  if (flow.workspaceId) {
+    try {
+      await API.post(`/api/workspaces/${encodeURIComponent(flow.workspaceId)}/agents`, {
+        agent_name: agentName
+      });
+      summary.workspaceAdded = true;
+      if (window.EventBus) {
+        EventBus.emit('workspace:agents:updated', { workspaceId: flow.workspaceId, agentName });
+      }
+    } catch (error) {
+      summary.failures.push(`workspace add: ${error.message || 'failed'}`);
+    }
+  }
+
+  if (flow.taskId && flow.assignTask && (!flow.workspaceId || summary.workspaceAdded)) {
+    try {
+      await API.put(`/api/orchestration/tasks/${encodeURIComponent(flow.taskId)}`, { to: agentName });
+      summary.taskAssigned = true;
+      if (window.EventBus) {
+        EventBus.emit('task:updated', { workspaceId: flow.workspaceId, taskId: flow.taskId });
+      }
+    } catch (error) {
+      summary.failures.push(`task assignment: ${error.message || 'failed'}`);
+    }
+  }
+
+  return summary;
+}
+
+function describeAgentCreationFollowUp(summary) {
+  const parts = [];
+  if (summary.workspaceAdded) {
+    parts.push('added to the workspace');
+  }
+  if (summary.taskAssigned) {
+    parts.push('assigned to the task');
+  }
+  if (parts.length === 0) return '';
+  if (parts.length === 1) return parts[0];
+  return `${parts[0]} and ${parts[1]}`;
+}
+
 // Create new agent
 async function createNewAgent() {
   const agentNameInput = document.getElementById('agentName');
@@ -708,6 +830,16 @@ async function createNewAgent() {
       capabilitySummary = await applyAgentCreationCapabilities(agentName);
     }
 
+    let followUpSummary = {
+      workspaceAdded: false,
+      taskAssigned: false,
+      failures: []
+    };
+    if (pendingAgentCreationFlow.workspaceId || pendingAgentCreationFlow.taskId) {
+      createBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-2" role="status"></span>Linking...';
+      followUpSummary = await applyPendingAgentCreationFollowUp(agentName);
+    }
+
     // Success - close modal and refresh agent list
     const modal = bootstrap.Modal.getInstance(document.getElementById('addAgentModal'));
     if (modal) {
@@ -737,25 +869,31 @@ async function createNewAgent() {
     }
     resetBaseAutoConfigState();
     resetAgentCreationCapabilitySelections();
+    clearPendingAgentCreationFlow();
     updateAgentReasoningVisibility();
 
     // Show success message
     agentsLog.info('Agent created successfully', {
       agent: agentName,
-      capabilities: capabilitySummary
+      capabilities: capabilitySummary,
+      followUp: followUpSummary
     });
     if (window.Toast) {
       const capabilityDetails = describeAgentCreationCapabilities(capabilitySummary);
-      if (capabilitySummary.failures.length > 0) {
-        Toast.warning(`Agent "${agentName}" created${capabilityDetails ? ` with ${capabilityDetails}` : ''}, but ${capabilitySummary.failures.length} capability update${capabilitySummary.failures.length === 1 ? '' : 's'} failed.`);
+      const followUpDetails = describeAgentCreationFollowUp(followUpSummary);
+      const failureCount = capabilitySummary.failures.length + followUpSummary.failures.length;
+      const detailParts = [capabilityDetails, followUpDetails].filter(Boolean);
+      const detailText = detailParts.length > 0 ? ` with ${detailParts.join(' and ')}` : '';
+      if (failureCount > 0) {
+        Toast.warning(`Agent "${agentName}" created${detailText}, but ${failureCount} follow-up update${failureCount === 1 ? '' : 's'} failed.`);
       } else {
-        Toast.success(`Agent "${agentName}" created successfully${capabilityDetails ? ` with ${capabilityDetails}` : ''}.`);
+        Toast.success(`Agent "${agentName}" created successfully${detailText}.`);
       }
     }
-    if (capabilitySummary.failures.length > 0) {
+    if (capabilitySummary.failures.length > 0 || followUpSummary.failures.length > 0) {
       agentsLog.warn('Agent created with capability setup warnings', {
         agent: agentName,
-        failures: capabilitySummary.failures
+        failures: [...capabilitySummary.failures, ...followUpSummary.failures]
       });
     }
 
@@ -1306,6 +1444,13 @@ function setupAgentManagement() {
     addAgentForm.addEventListener('submit', (e) => {
       e.preventDefault();
       createNewAgent();
+    });
+  }
+
+  const addAgentModal = document.getElementById('addAgentModal');
+  if (addAgentModal) {
+    addAgentModal.addEventListener('hidden.bs.modal', () => {
+      clearPendingAgentCreationFlow();
     });
   }
 
@@ -1983,6 +2128,8 @@ async function toggleMCPServer(agentName, serverName, enabled, accordionId) {
 }
 
 // Initialize agent management when DOM is ready
+window.showAddAgentModal = showAddAgentModal;
+
 if (document.readyState === 'loading') {
   document.addEventListener('DOMContentLoaded', setupAgentManagement);
 } else {

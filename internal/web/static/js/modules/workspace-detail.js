@@ -1591,6 +1591,57 @@ export class WorkspaceDetailPage {
     }, 150);
   }
 
+  isSystemAssistantAgentName(name) {
+    const normalized = this.normalizeAgentName(name);
+    return normalized === 'ori' || normalized === 'system assistant';
+  }
+
+  getTaskAgentSuggestionPrompt(task) {
+    if (!task || typeof task !== 'object') return '';
+
+    const summary = String(task.description || task.name || '').trim();
+    const details = String(task.details || '').trim();
+    return [summary, details].filter(Boolean).join('\n\n');
+  }
+
+  async fetchTaskAgentSuggestion(task) {
+    const prompt = this.getTaskAgentSuggestionPrompt(task);
+    if (!prompt) return null;
+
+    try {
+      const response = await fetch('/api/home-assistant/route', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          prompt,
+          context: {
+            surface: 'workspace_detail',
+            page_path: window.location.pathname || `/workspaces/${this.workspaceId}`,
+            workspace_id: this.workspaceId,
+            origin: 'task_execution'
+          }
+        })
+      });
+      if (!response.ok) {
+        return null;
+      }
+
+      const data = await response.json().catch(() => null);
+      return data && typeof data === 'object' ? data : null;
+    } catch (error) {
+      console.error('Failed to fetch task agent suggestion:', error);
+      return null;
+    }
+  }
+
+  getTaskAgentSuggestionReasonText(routeData) {
+    const reasons = Array.isArray(routeData?.reasons)
+      ? routeData.reasons.map((reason) => String(reason || '').trim()).filter(Boolean).slice(0, 3)
+      : [];
+    if (reasons.length === 0) return '';
+    return `\n\nWhy this suggestion:\n- ${reasons.join('\n- ')}`;
+  }
+
   async populateAddAgentOptions() {
     if (!this.elements.addAgentSelect || !this.elements.addAgentSubmitBtn || !this.elements.addAgentEmpty) return;
 
@@ -1636,18 +1687,53 @@ export class WorkspaceDetailPage {
     this.elements.addAgentEmpty.classList.add('d-none');
   }
 
-  openCreateAgentFlow() {
+  openCreateAgentFlow(options = {}) {
     if (this.elements.addAgentModal && window.bootstrap) {
       const modal = bootstrap.Modal.getInstance(this.elements.addAgentModal);
       modal?.hide();
     }
 
     if (typeof window.showAddAgentModal === 'function') {
-      window.showAddAgentModal();
+      window.showAddAgentModal(options);
       return;
     }
 
     window.location.href = '/agents';
+  }
+
+  async addAgentToWorkspace(agentName, options = {}) {
+    const normalizedAgentName = String(agentName || '').trim();
+    if (!normalizedAgentName) {
+      throw new Error('Select an agent first.');
+    }
+
+    const response = await fetch(`/api/workspaces/${encodeURIComponent(this.workspaceId)}/agents`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ agent_name: normalizedAgentName })
+    });
+    if (!response.ok) {
+      const text = await response.text();
+      throw new Error(text || 'Failed to add agent to workspace');
+    }
+
+    if (options.toast !== false && window.Toast) {
+      window.Toast.success(`Added "${normalizedAgentName}" to workspace`);
+    }
+
+    if (options.closeModal !== false && this.elements.addAgentModal && window.bootstrap) {
+      const modal = bootstrap.Modal.getInstance(this.elements.addAgentModal);
+      modal?.hide();
+    }
+
+    this.agentOptions = null;
+    await Promise.all([
+      this.loadWorkspace(),
+      this.loadAgentCatalog(true)
+    ]);
+    this.renderAgentGroups();
+
+    return normalizedAgentName;
   }
 
   async addSelectedAgentToWorkspace() {
@@ -1665,29 +1751,7 @@ export class WorkspaceDetailPage {
     }
 
     try {
-      const response = await fetch(`/api/workspaces/${encodeURIComponent(this.workspaceId)}/agents`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ agent_name: agentName })
-      });
-      if (!response.ok) {
-        const text = await response.text();
-        throw new Error(text || 'Failed to add agent to workspace');
-      }
-
-      if (window.Toast) window.Toast.success(`Added "${agentName}" to workspace`);
-
-      if (this.elements.addAgentModal && window.bootstrap) {
-        const modal = bootstrap.Modal.getInstance(this.elements.addAgentModal);
-        modal?.hide();
-      }
-
-      this.agentOptions = null;
-      await Promise.all([
-        this.loadWorkspace(),
-        this.loadAgentCatalog(true)
-      ]);
-      this.renderAgentGroups();
+      await this.addAgentToWorkspace(agentName);
     } catch (error) {
       console.error('Failed to add agent to workspace:', error);
       if (window.Toast) window.Toast.error(error.message || 'Failed to add agent');
@@ -1697,6 +1761,72 @@ export class WorkspaceDetailPage {
         submitButton.innerHTML = originalLabel;
       }
     }
+  }
+
+  async suggestAgentSetupForTask(task) {
+    if (!task || typeof task !== 'object') return '';
+
+    const taskLabel = String(task.description || task.name || task.id || 'this task').trim() || 'this task';
+    const prompt = this.getTaskAgentSuggestionPrompt(task);
+    const routeData = await this.fetchTaskAgentSuggestion(task);
+    const suggestedAgent = String(routeData?.matched_agent || '').trim();
+    const alreadyInWorkspace = suggestedAgent
+      ? this.getWorkspaceAgentNames().some((name) => this.normalizeAgentName(name) === this.normalizeAgentName(suggestedAgent))
+      : false;
+
+    if (suggestedAgent && !this.isSystemAssistantAgentName(suggestedAgent) && routeData?.requires_creation !== true) {
+      const reasonText = this.getTaskAgentSuggestionReasonText(routeData);
+      const confirmationMessage = alreadyInWorkspace
+        ? `Ori suggests assigning "${suggestedAgent}" to "${taskLabel}".${reasonText}\n\nAssign it now?`
+        : `Ori suggests adding "${suggestedAgent}" to this workspace for "${taskLabel}".${reasonText}\n\nAdd it and assign it now?`;
+
+      if (!confirm(confirmationMessage)) {
+        return '';
+      }
+
+      try {
+        if (!alreadyInWorkspace) {
+          await this.addAgentToWorkspace(suggestedAgent, { toast: false });
+        }
+        await this.assignTaskToAgent(task.id, suggestedAgent);
+        task.to = suggestedAgent;
+        this.renderTasks();
+        if (window.Toast) {
+          window.Toast.success(alreadyInWorkspace
+            ? `Assigned "${suggestedAgent}" to this task.`
+            : `Added "${suggestedAgent}" and assigned it to this task.`);
+        }
+        return suggestedAgent;
+      } catch (error) {
+        console.error('Failed to apply suggested agent setup:', error);
+        if (window.Toast) {
+          window.Toast.error(error.message || 'Failed to apply suggested agent');
+        }
+        return '';
+      }
+    }
+
+    const prefersBrowserAgent = this.isLikelyBrowserAutomationIntent(prompt);
+    const suggestedName = String(routeData?.suggested_agent_name || '').trim() || (prefersBrowserAgent ? 'Browser Assistant' : 'Task Assistant');
+    const suggestedType = String(routeData?.suggested_agent_type || '').trim() || 'tool-calling';
+    const reasonText = this.getTaskAgentSuggestionReasonText(routeData);
+    if (window.Toast) {
+      const message = routeData?.requires_creation === true
+        ? `Ori suggests creating "${suggestedName}" for this task.`
+        : `No workspace agent matches this task yet. Ori prepared "${suggestedName}" for you.`;
+      window.Toast.info(reasonText ? `${message} ${reasonText.replace(/\n+/g, ' ')}` : message);
+    }
+
+    this.openCreateAgentFlow({
+      seedName: suggestedName,
+      seedType: suggestedType,
+      autoDescription: prompt || taskLabel,
+      preferAutoConfig: true,
+      workspaceId: this.workspaceId,
+      taskId: task.id,
+      assignTask: true
+    });
+    return '';
   }
 
   getTaskHumanLoop(task) {
@@ -2909,7 +3039,7 @@ export class WorkspaceDetailPage {
     }
   }
 
-  async executeTask(taskId) {
+  async executeTask(taskId, options = {}) {
     await this.loadAgentCatalog();
 
     const task = this.tasks.find((item) => item.id === taskId);
@@ -2939,20 +3069,29 @@ export class WorkspaceDetailPage {
     if (!isParent && !assignedAgent) {
       const fallbackAgent = this.getWorkspaceFallbackAgent({ preferBrowser: isBrowserIntent });
       if (!fallbackAgent) {
-        await this.promptAddAgentForExecution('No agent is available in this workspace. Add one to continue.');
-        return;
+        assignedAgent = await this.suggestAgentSetupForTask(task);
+        if (!assignedAgent) {
+          return;
+        }
+      } else {
+        const assignAndRun = options.skipConfirm === true
+          ? true
+          : confirm(`This task is unassigned. Assign it to "${fallbackAgent}" and execute now?`);
+        if (!assignAndRun) return;
+
+        try {
+          await this.assignTaskToAgent(taskId, fallbackAgent);
+          assignedAgent = fallbackAgent;
+          task.to = fallbackAgent;
+          this.renderTasks();
+        } catch (error) {
+          console.error('Failed to auto-assign task before execution:', error);
+          if (window.Toast) window.Toast.error('Failed to assign task before execution');
+          return;
+        }
       }
 
-      const assignAndRun = confirm(`This task is unassigned. Assign it to "${fallbackAgent}" and execute now?`);
-      if (!assignAndRun) return;
-
-      try {
-        await this.assignTaskToAgent(taskId, fallbackAgent);
-        assignedAgent = fallbackAgent;
-        task.to = fallbackAgent;
-      } catch (error) {
-        console.error('Failed to auto-assign task before execution:', error);
-        if (window.Toast) window.Toast.error('Failed to assign task before execution');
+      if (!assignedAgent) {
         return;
       }
     }
@@ -2984,7 +3123,7 @@ export class WorkspaceDetailPage {
       ? `Execute this workflow (${subtasks.length} step${subtasks.length === 1 ? '' : 's'}) now?`
       : `Execute this task${assignedAgent ? ` with "${assignedAgent}"` : ''} now?`;
     const confirmMessage = preflightWarning ? `${preflightWarning}\n\n${baseConfirmMessage}` : baseConfirmMessage;
-    if (!confirm(confirmMessage)) return;
+    if (options.skipConfirm !== true && !confirm(confirmMessage)) return;
 
     this.openTaskExecutionModal(task);
 
@@ -3008,7 +3147,7 @@ export class WorkspaceDetailPage {
       const message = error && error.message ? error.message : 'Failed to execute task';
       if (this.isMissingWorkspaceAgentError(message)) {
         this.setExecutionModalStatus('blocked');
-        this.appendExecutionLog('No agent is assigned to this workspace yet. Add one to continue, then run the task again.', 'warning', `${taskId}:dispatch-agent-missing`);
+        this.appendExecutionLog('No agent is assigned to this workspace yet. Ori is preparing a suggested agent setup.', 'warning', `${taskId}:dispatch-agent-missing`);
         this.setExecutionViewResultEnabled(false);
 
         if (this.elements.taskExecutionModal && window.bootstrap) {
@@ -3016,7 +3155,18 @@ export class WorkspaceDetailPage {
           modal?.hide();
         }
 
-        await this.promptAddAgentForExecution('No agent is available in this workspace. Add one to continue.');
+        if (options.skipMissingAgentRecovery === true) {
+          if (window.Toast) window.Toast.error(message);
+          return;
+        }
+
+        const suggestedAgent = await this.suggestAgentSetupForTask(task);
+        if (suggestedAgent) {
+          await this.executeTask(taskId, {
+            skipConfirm: true,
+            skipMissingAgentRecovery: true
+          });
+        }
         return;
       }
 
