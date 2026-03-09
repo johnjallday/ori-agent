@@ -4,6 +4,13 @@ let availablePlugins = [];
 let availableMCPServers = [];
 let selectedTags = [];
 let availableProviders = []; // Cache for available providers and models from API
+const createValidatedFields = [
+  'createAutoConfigDescription',
+  'agentName',
+  'agentType',
+  'agentRole',
+  'llmModel'
+];
 
 // Initialize page
 document.addEventListener('DOMContentLoaded', () => {
@@ -12,6 +19,8 @@ document.addEventListener('DOMContentLoaded', () => {
   setupTagsInput();
   loadAvailableProviders();
   setupAutoConfigListeners();
+  setupValidationListeners();
+  setupCreateFormSubmission();
   refreshSystemModelDisplay();
 });
 
@@ -226,7 +235,7 @@ function renderMCPServers() {
 // Setup tags input
 function setupTagsInput() {
   const input = document.getElementById('tagsInput');
-  
+  if (!input) return;
 
   input.addEventListener('keydown', (e) => {
     if (e.key === 'Enter' && input.value.trim()) {
@@ -257,6 +266,7 @@ function removeTag(tag) {
 function renderTags() {
   const container = document.getElementById('tagsContainer');
   const input = document.getElementById('tagsInput');
+  if (!container || !input) return;
 
   // Clear existing tags
   const existingTags = container.querySelectorAll('.tag-item');
@@ -266,11 +276,46 @@ function renderTags() {
   selectedTags.forEach(tag => {
     const tagEl = document.createElement('div');
     tagEl.className = 'tag-item';
-    tagEl.innerHTML = `
-            ${escapeHtml(tag)}
-            <span class="tag-remove" onclick="removeTag('${escapeHtml(tag)}')">×</span>
-        `;
+    const textEl = document.createElement('span');
+    textEl.textContent = tag;
+
+    const removeBtn = document.createElement('button');
+    removeBtn.type = 'button';
+    removeBtn.className = 'tag-remove';
+    removeBtn.setAttribute('aria-label', `Remove tag ${tag}`);
+    removeBtn.textContent = '×';
+    removeBtn.addEventListener('click', () => removeTag(tag));
+
+    tagEl.appendChild(textEl);
+    tagEl.appendChild(removeBtn);
     container.insertBefore(tagEl, input);
+  });
+}
+
+function setupValidationListeners() {
+  const inputFieldIds = ['createAutoConfigDescription', 'agentName'];
+  const selectFieldIds = ['agentType', 'agentRole', 'llmModel'];
+
+  inputFieldIds.forEach((fieldId) => {
+    const field = document.getElementById(fieldId);
+    if (!field) return;
+    field.addEventListener('input', () => clearFieldError(fieldId));
+  });
+
+  selectFieldIds.forEach((fieldId) => {
+    const field = document.getElementById(fieldId);
+    if (!field) return;
+    field.addEventListener('change', () => clearFieldError(fieldId));
+  });
+}
+
+function setupCreateFormSubmission() {
+  const form = document.getElementById('createAgentForm');
+  if (!form) return;
+
+  form.addEventListener('submit', (event) => {
+    event.preventDefault();
+    createAgent();
   });
 }
 
@@ -346,24 +391,114 @@ function updateModelOptions() {
   }
 }
 
+function clearGlobalError() {
+  const errorEl = document.getElementById('errorMessage');
+  if (!errorEl) return;
+
+  errorEl.textContent = '';
+  errorEl.hidden = true;
+}
+
+function showError(message) {
+  const errorEl = document.getElementById('errorMessage');
+  if (!errorEl) return;
+
+  errorEl.textContent = message;
+  errorEl.hidden = false;
+  errorEl.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  errorEl.focus();
+}
+
+function setFieldError(fieldId, message) {
+  const field = document.getElementById(fieldId);
+  const errorEl = document.getElementById(`${fieldId}Error`);
+  const hasError = Boolean(message);
+
+  if (field) {
+    field.classList.toggle('is-invalid', hasError);
+    field.setAttribute('aria-invalid', hasError ? 'true' : 'false');
+  }
+
+  if (errorEl) {
+    errorEl.textContent = message || '';
+    errorEl.classList.toggle('is-visible', hasError);
+  }
+}
+
+function clearFieldError(fieldId) {
+  setFieldError(fieldId, '');
+}
+
+function clearValidationErrors() {
+  createValidatedFields.forEach(clearFieldError);
+}
+
+function focusField(fieldId) {
+  const field = document.getElementById(fieldId);
+  if (!field) return;
+
+  field.focus();
+  field.scrollIntoView({ behavior: 'smooth', block: 'center' });
+}
+
+function validateCreateAgentForm() {
+  clearGlobalError();
+  clearValidationErrors();
+
+  const validations = [
+    {
+      id: 'agentName',
+      invalid: !document.getElementById('agentName')?.value.trim(),
+      message: 'Enter an agent name.'
+    },
+    {
+      id: 'agentType',
+      invalid: !document.getElementById('agentType')?.value,
+      message: 'Choose an agent type.'
+    },
+    {
+      id: 'agentRole',
+      invalid: !document.getElementById('agentRole')?.value,
+      message: 'Choose a role.'
+    },
+    {
+      id: 'llmModel',
+      invalid: !document.getElementById('llmModel')?.value,
+      message: 'Choose a model before creating the agent.'
+    }
+  ];
+
+  let firstInvalidField = null;
+
+  validations.forEach(({ id, invalid, message }) => {
+    if (!invalid) return;
+    setFieldError(id, message);
+    if (!firstInvalidField) {
+      firstInvalidField = id;
+    }
+  });
+
+  if (firstInvalidField) {
+    focusField(firstInvalidField);
+    return false;
+  }
+
+  return true;
+}
+
 // Create agent
 async function createAgent() {
-  // Validate required fields
-  const name = document.getElementById('agentName').value.trim();
-  if (!name) {
-    showError('Agent name is required');
+  if (!validateCreateAgentForm()) {
     return;
   }
 
+  // Validate required fields
+  const name = document.getElementById('agentName').value.trim();
   const type = document.getElementById('agentType').value;
   const role = document.getElementById('agentRole').value;
   const modelSelect = document.getElementById('llmModel');
   const model = modelSelect.value;
-
-  if (!type || !role || !model) {
-    showError('Please fill in all required fields');
-    return;
-  }
+  clearGlobalError();
 
   // Get provider from the selected model's data attribute
   const selectedOption = modelSelect.options[modelSelect.selectedIndex];
@@ -481,21 +616,6 @@ async function enableMCPServersForAgent(agentName, serverNames) {
   return { successCount, failures };
 }
 
-// Helper functions
-function showError(message) {
-  const errorEl = document.getElementById('errorMessage');
-  errorEl.textContent = message;
-  errorEl.style.display = 'block';
-
-  // Scroll to error
-  errorEl.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-
-  // Auto-hide after 5 seconds
-  setTimeout(() => {
-    errorEl.style.display = 'none';
-  }, 5000);
-}
-
 function showLoading(show) {
   document.getElementById('loadingOverlay').style.display = show ? 'flex' : 'none';
 }
@@ -562,11 +682,14 @@ function handleCreateConfigModeChange(mode) {
   const llmWarning = document.getElementById('createLlmNotAvailableWarning');
   const llmWarningMessage = document.getElementById('createLlmWarningMessage');
   const autoSelectedIndicator = document.getElementById('createAutoSelectedIndicator');
+  const autoConfigStatus = document.getElementById('createAutoConfigStatus');
+  const autoConfigDescription = document.getElementById('createAutoConfigDescription');
 
   if (mode === 'auto') {
     if (createLLMAvailable) {
       if (autoConfigSection) autoConfigSection.classList.remove('d-none');
       if (llmWarning) llmWarning.classList.add('d-none');
+      if (autoConfigDescription) autoConfigDescription.focus();
     } else {
       if (autoConfigSection) autoConfigSection.classList.add('d-none');
       if (llmWarning) llmWarning.classList.remove('d-none');
@@ -586,24 +709,41 @@ function handleCreateConfigModeChange(mode) {
     if (autoSelectedIndicator) autoSelectedIndicator.classList.add('d-none');
     createAutoConfigApplied = false;
   }
+
+  if (autoConfigStatus) {
+    autoConfigStatus.textContent = '';
+    autoConfigStatus.classList.add('d-none');
+    autoConfigStatus.classList.remove('bg-success', 'bg-danger', 'bg-warning');
+    autoConfigStatus.classList.add('bg-secondary');
+  }
+
+  clearFieldError('createAutoConfigDescription');
 }
 
 // Generate auto-config
 async function generateCreateAutoConfig() {
-  const description = document.getElementById('createAutoConfigDescription').value.trim();
+  const autoConfigDescription = document.getElementById('createAutoConfigDescription');
+  const description = autoConfigDescription ? autoConfigDescription.value.trim() : '';
   const generateBtn = document.getElementById('createGenerateAutoConfigBtn');
   const autoConfigStatus = document.getElementById('createAutoConfigStatus');
+  const indicator = document.getElementById('createAutoSelectedIndicator');
+  const indicatorTitle = document.getElementById('createAutoSelectedTitle');
+  const indicatorMessage = document.getElementById('createAutoSelectedMessage');
+
+  clearGlobalError();
+  clearFieldError('createAutoConfigDescription');
 
   if (!description) {
-    showError('Please enter a description of what you want your agent to do.');
+    setFieldError('createAutoConfigDescription', 'Describe the agent before generating settings.');
+    focusField('createAutoConfigDescription');
     return;
   }
 
   generateBtn.disabled = true;
-  generateBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-1" role="status"></span>Generating...';
+  generateBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-1" aria-hidden="true"></span>Generating…';
   if (autoConfigStatus) {
-    autoConfigStatus.textContent = 'Analyzing...';
-    autoConfigStatus.classList.remove('d-none', 'bg-success', 'bg-danger');
+    autoConfigStatus.textContent = 'Analyzing…';
+    autoConfigStatus.classList.remove('d-none', 'bg-success', 'bg-danger', 'bg-warning');
     autoConfigStatus.classList.add('bg-secondary');
   }
 
@@ -626,13 +766,28 @@ async function generateCreateAutoConfig() {
 
     const fallback = isCreateAutoConfigFallback(config);
     if (autoConfigStatus) {
-      autoConfigStatus.textContent = fallback ? 'Applied (defaults)' : 'Applied!';
+      autoConfigStatus.textContent = fallback ? 'Review Defaults' : '';
       autoConfigStatus.classList.remove('bg-secondary', 'bg-success', 'bg-danger', 'bg-warning');
-      autoConfigStatus.classList.add(fallback ? 'bg-warning' : 'bg-success');
+      if (fallback) {
+        autoConfigStatus.classList.add('bg-warning');
+        autoConfigStatus.classList.remove('d-none');
+      } else {
+        autoConfigStatus.classList.add('d-none');
+      }
     }
 
-    const indicator = document.getElementById('createAutoSelectedIndicator');
-    if (indicator) indicator.classList.remove('d-none');
+    if (indicator) {
+      indicator.classList.remove('d-none', 'alert-info', 'alert-warning');
+      indicator.classList.add(fallback ? 'alert-warning' : 'alert-info');
+    }
+    if (indicatorTitle) {
+      indicatorTitle.textContent = fallback ? 'Defaults Applied:' : 'Auto-configured!';
+    }
+    if (indicatorMessage) {
+      indicatorMessage.textContent = fallback
+        ? 'Default settings were applied because auto-config could not complete. Review them before creating the agent.'
+        : 'Settings below were generated from your description. You can still adjust them manually.';
+    }
     createAutoConfigApplied = true;
 
     if (fallback && window.Toast) {
@@ -643,28 +798,32 @@ async function generateCreateAutoConfig() {
     console.error('Auto-config error:', error);
     if (autoConfigStatus) {
       autoConfigStatus.textContent = 'Failed';
-      autoConfigStatus.classList.remove('bg-secondary');
+      autoConfigStatus.classList.remove('bg-secondary', 'bg-warning');
       autoConfigStatus.classList.add('bg-danger');
     }
     showError('Failed to generate configuration: ' + error.message);
   } finally {
     generateBtn.disabled = false;
-    generateBtn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" class="me-1"><path d="M12,3L2,12H5V20H19V12H22L12,3M12,8.75A2.25,2.25 0 0,1 14.25,11A2.25,2.25 0 0,1 12,13.25A2.25,2.25 0 0,1 9.75,11A2.25,2.25 0 0,1 12,8.75Z"/></svg>Generate Configuration';
+    generateBtn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" class="me-1" aria-hidden="true" focusable="false"><path d="M12,3L2,12H5V20H19V12H22L12,3M12,8.75A2.25,2.25 0 0,1 14.25,11A2.25,2.25 0 0,1 12,13.25A2.25,2.25 0 0,1 9.75,11A2.25,2.25 0 0,1 12,8.75Z"/></svg>Generate Configuration';
   }
 }
 
 // Apply auto-generated config to form fields
 function applyCreateAutoConfig(config) {
+  clearFieldError('createAutoConfigDescription');
+
   // Apply agent name
   const nameField = document.getElementById('agentName');
   if (nameField && config.agent_name) {
     nameField.value = config.agent_name;
+    clearFieldError('agentName');
   }
 
   // Apply agent type
   const typeSelect = document.getElementById('agentType');
   if (typeSelect && config.agent_type) {
     typeSelect.value = config.agent_type;
+    clearFieldError('agentType');
     // Trigger change to update model list
     updateModelOptions();
   }
@@ -683,6 +842,7 @@ function applyCreateAutoConfig(config) {
       for (let i = 0; i < modelSelect.options.length; i++) {
         if (modelSelect.options[i].value === config.model) {
           modelSelect.selectedIndex = i;
+          clearFieldError('llmModel');
           break;
         }
       }
