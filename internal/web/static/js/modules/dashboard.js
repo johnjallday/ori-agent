@@ -192,7 +192,7 @@
     }
   ];
 
-  const HOME_MCP_REQUIREMENTS = HOME_CAPABILITY_REQUIREMENTS.filter(function (requirement) {
+  const _HOME_MCP_REQUIREMENTS = HOME_CAPABILITY_REQUIREMENTS.filter(function (requirement) {
     return Boolean(requirement && requirement.requiresMCP);
   });
 
