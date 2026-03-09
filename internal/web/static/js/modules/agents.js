@@ -9,6 +9,18 @@ let allAgents = [];
 let currentAgentName = '';
 let visibleAgentCount = 3;
 let availableProviders = []; // Cache for available providers and models
+const AGENT_CREATION_SKILL_CATALOG_AGENT = '__ori_agent_create_catalog__';
+const agentCreationCapabilityState = {
+  mcpServers: [],
+  skills: [],
+  selectedMCPServers: new Set(),
+  selectedSkills: new Set(),
+  errors: {
+    mcp: '',
+    skills: ''
+  },
+  loadingToken: 0
+};
 
 function supportsCodexReasoning(providerName, modelName) {
   const provider = String(providerName || '').trim().toLowerCase();
@@ -165,6 +177,7 @@ function showAddAgentModal() {
   const agentModelInput = document.getElementById('agentModel');
   const agentTemperatureInput = document.getElementById('agentTemperature');
   const temperatureValueSpan = document.getElementById('temperatureValue');
+  const agentAllowWebSearchInput = document.getElementById('agentAllowWebSearch');
 
   // Clear previous inputs
   if (agentNameInput) {
@@ -190,9 +203,16 @@ function showAddAgentModal() {
       temperatureValueSpan.textContent = '1.0';
     }
   }
+  if (agentAllowWebSearchInput) {
+    agentAllowWebSearchInput.checked = true;
+  }
+  resetBaseAutoConfigState();
+  resetAgentCreationCapabilitySelections();
+  setAgentCreationCapabilityLoadingState();
   updateAgentReasoningVisibility();
 
   modal.show();
+  void loadAgentCreationCapabilityCatalog();
 
   // Focus on input after modal is shown
   setTimeout(() => {
@@ -208,6 +228,407 @@ function filterModelsByType(agentType, modelSelect) {
 
   // Repopulate the select with filtered models
   populateModelSelect(modelSelect, agentType);
+}
+
+function normalizeAgentCapabilityName(value) {
+  return String(value || '').trim().toLowerCase();
+}
+
+function getAgentCreationCapabilityElements() {
+  return {
+    mcpList: document.getElementById('agentCreateMCPList'),
+    skillsList: document.getElementById('agentCreateSkillsList'),
+    mcpCount: document.getElementById('agentCreateMCPCount'),
+    skillCount: document.getElementById('agentCreateSkillCount')
+  };
+}
+
+function buildAgentCreationCommandSummary(server) {
+  const pieces = [server?.command, ...(Array.isArray(server?.args) ? server.args.slice(0, 3) : [])]
+    .map((piece) => String(piece || '').trim())
+    .filter(Boolean);
+
+  return pieces.length > 0 ? pieces.join(' ') : 'Configured MCP server';
+}
+
+function resetAgentCreationCapabilitySelections() {
+  agentCreationCapabilityState.selectedMCPServers = new Set();
+  agentCreationCapabilityState.selectedSkills = new Set();
+  agentCreationCapabilityState.errors = { mcp: '', skills: '' };
+}
+
+function getRequiredAgentCreationMCPServerKeys() {
+  const required = new Set();
+  const skillIndex = new Map(
+    agentCreationCapabilityState.skills.map((skill) => [normalizeAgentCapabilityName(skill?.name), skill])
+  );
+
+  agentCreationCapabilityState.selectedSkills.forEach((skillKey) => {
+    const skill = skillIndex.get(skillKey);
+    if (!skill || !Array.isArray(skill.requiredMCPServers)) return;
+    skill.requiredMCPServers.forEach((serverName) => {
+      const normalized = normalizeAgentCapabilityName(serverName);
+      if (normalized) required.add(normalized);
+    });
+  });
+
+  return required;
+}
+
+function getSelectedAgentCreationMCPServers() {
+  const serverNameByKey = new Map(
+    agentCreationCapabilityState.mcpServers.map((server) => [normalizeAgentCapabilityName(server?.name), server?.name])
+  );
+  const selected = new Set([
+    ...agentCreationCapabilityState.selectedMCPServers,
+    ...getRequiredAgentCreationMCPServerKeys()
+  ]);
+
+  return Array.from(selected)
+    .map((key) => serverNameByKey.get(key))
+    .filter(Boolean);
+}
+
+function getSelectedAgentCreationSkills() {
+  return agentCreationCapabilityState.skills.filter((skill) =>
+    agentCreationCapabilityState.selectedSkills.has(normalizeAgentCapabilityName(skill?.name))
+  );
+}
+
+function renderAgentCreationCapabilityCounts() {
+  const { mcpCount, skillCount } = getAgentCreationCapabilityElements();
+  const selectedMCPCount = getSelectedAgentCreationMCPServers().length;
+  const selectedSkillCount = getSelectedAgentCreationSkills().length;
+
+  if (mcpCount) {
+    mcpCount.textContent = `${selectedMCPCount} selected`;
+  }
+  if (skillCount) {
+    skillCount.textContent = `${selectedSkillCount} selected`;
+  }
+}
+
+function setAgentCreationCapabilityLoadingState() {
+  const { mcpList, skillsList } = getAgentCreationCapabilityElements();
+  if (mcpList) {
+    mcpList.innerHTML = '<div class="agent-create-capability-empty">Loading MCP servers...</div>';
+  }
+  if (skillsList) {
+    skillsList.innerHTML = '<div class="agent-create-capability-empty">Loading skills...</div>';
+  }
+  renderAgentCreationCapabilityCounts();
+}
+
+function renderAgentCreationMCPServers() {
+  const { mcpList } = getAgentCreationCapabilityElements();
+  if (!mcpList) return;
+
+  const errorMessage = agentCreationCapabilityState.errors.mcp;
+  if (errorMessage) {
+    mcpList.innerHTML = `<div class="agent-create-capability-empty is-error">${escapeHtml(errorMessage)}</div>`;
+    renderAgentCreationCapabilityCounts();
+    return;
+  }
+
+  const servers = Array.isArray(agentCreationCapabilityState.mcpServers) ? agentCreationCapabilityState.mcpServers : [];
+  const requiredKeys = getRequiredAgentCreationMCPServerKeys();
+
+  if (servers.length === 0) {
+    mcpList.innerHTML = `
+      <div class="agent-create-capability-empty">
+        No MCP servers are configured yet.
+        <a href="/mcp">Open MCP Servers</a>
+      </div>
+    `;
+    renderAgentCreationCapabilityCounts();
+    return;
+  }
+
+  mcpList.innerHTML = servers.map((server) => {
+    const name = String(server?.name || '').trim();
+    const normalizedName = normalizeAgentCapabilityName(name);
+    const isRequired = requiredKeys.has(normalizedName);
+    const isSelected = isRequired || agentCreationCapabilityState.selectedMCPServers.has(normalizedName);
+    const commandSummary = buildAgentCreationCommandSummary(server);
+    const toolCount = Number.isFinite(server?.toolCount) ? server.toolCount : 0;
+    const status = String(server?.status || 'configured').trim() || 'configured';
+    const statusClass = status === 'running'
+      ? 'is-success'
+      : (status === 'starting' || status === 'restarting' ? 'is-warning' : 'is-muted');
+
+    return `
+      <label class="agent-create-capability-card${isSelected ? ' is-selected' : ''}${isRequired ? ' is-locked' : ''}">
+        <input type="checkbox"
+               value="${escapeHtml(name)}"
+               data-agent-create-mcp="true"
+               ${isSelected ? 'checked' : ''}
+               ${isRequired ? 'disabled' : ''}>
+        <span class="agent-create-capability-copy">
+          <span class="agent-create-capability-title-row">
+            <span class="agent-create-capability-title">${escapeHtml(name)}</span>
+            <span class="agent-create-capability-pills">
+              <span class="agent-create-capability-pill ${statusClass}">${escapeHtml(status)}</span>
+              ${toolCount > 0 ? `<span class="agent-create-capability-pill is-muted">${toolCount} tool${toolCount === 1 ? '' : 's'}</span>` : ''}
+            </span>
+          </span>
+          <span class="agent-create-capability-description">${escapeHtml(commandSummary)}</span>
+          <span class="agent-create-capability-tags">
+            <span class="agent-create-capability-tag is-muted">${escapeHtml(server?.transport || 'stdio')}</span>
+            ${isRequired ? '<span class="agent-create-capability-tag is-required">required by selected skill</span>' : ''}
+          </span>
+        </span>
+      </label>
+    `;
+  }).join('');
+
+  mcpList.querySelectorAll('input[data-agent-create-mcp]').forEach((checkbox) => {
+    checkbox.addEventListener('change', () => {
+      const normalizedName = normalizeAgentCapabilityName(checkbox.value);
+      if (!normalizedName) return;
+
+      if (checkbox.checked) {
+        agentCreationCapabilityState.selectedMCPServers.add(normalizedName);
+      } else {
+        agentCreationCapabilityState.selectedMCPServers.delete(normalizedName);
+      }
+
+      renderAgentCreationMCPServers();
+      renderAgentCreationSkills();
+    });
+  });
+
+  renderAgentCreationCapabilityCounts();
+}
+
+function renderAgentCreationSkills() {
+  const { skillsList } = getAgentCreationCapabilityElements();
+  if (!skillsList) return;
+
+  const errorMessage = agentCreationCapabilityState.errors.skills;
+  if (errorMessage) {
+    skillsList.innerHTML = `<div class="agent-create-capability-empty is-error">${escapeHtml(errorMessage)}</div>`;
+    renderAgentCreationCapabilityCounts();
+    return;
+  }
+
+  const skills = Array.isArray(agentCreationCapabilityState.skills) ? agentCreationCapabilityState.skills : [];
+  const availableMCPServerKeys = new Set(
+    agentCreationCapabilityState.mcpServers.map((server) => normalizeAgentCapabilityName(server?.name))
+  );
+
+  if (skills.length === 0) {
+    skillsList.innerHTML = `
+      <div class="agent-create-capability-empty">
+        No reusable skills are available yet.
+        <a href="/skills">Open Skills</a>
+      </div>
+    `;
+    renderAgentCreationCapabilityCounts();
+    return;
+  }
+
+  skillsList.innerHTML = skills.map((skill) => {
+    const name = String(skill?.name || '').trim();
+    const normalizedName = normalizeAgentCapabilityName(name);
+    const validationErrors = Array.isArray(skill?.validationErrors) ? skill.validationErrors : [];
+    const requiredMCPServers = Array.isArray(skill?.requiredMCPServers) ? skill.requiredMCPServers.filter(Boolean) : [];
+    const missingMCPServers = requiredMCPServers.filter((serverName) => !availableMCPServerKeys.has(normalizeAgentCapabilityName(serverName)));
+    const hasBlockingIssue = validationErrors.length > 0 || missingMCPServers.length > 0;
+    const isSelected = agentCreationCapabilityState.selectedSkills.has(normalizedName);
+    const description = String(skill?.description || '').trim() || 'No description provided.';
+
+    return `
+      <label class="agent-create-capability-card${isSelected ? ' is-selected' : ''}">
+        <input type="checkbox"
+               value="${escapeHtml(name)}"
+               data-agent-create-skill="true"
+               ${isSelected ? 'checked' : ''}
+               ${hasBlockingIssue ? 'disabled' : ''}>
+        <span class="agent-create-capability-copy">
+          <span class="agent-create-capability-title-row">
+            <span class="agent-create-capability-title">${escapeHtml(name)}</span>
+            <span class="agent-create-capability-pills">
+              <span class="agent-create-capability-pill is-source">${escapeHtml(skill?.source || 'repo')}</span>
+              ${skill?.hasScripts ? '<span class="agent-create-capability-pill is-script">scripted</span>' : ''}
+              ${hasBlockingIssue ? '<span class="agent-create-capability-pill is-danger">unavailable</span>' : ''}
+            </span>
+          </span>
+          <span class="agent-create-capability-description">${escapeHtml(description)}</span>
+          ${requiredMCPServers.length > 0 ? `
+            <span class="agent-create-capability-tags">
+              ${requiredMCPServers.map((serverName) => {
+                const missing = missingMCPServers.includes(serverName);
+                return `<span class="agent-create-capability-tag ${missing ? 'is-danger' : 'is-required'}">${escapeHtml(serverName)}</span>`;
+              }).join('')}
+            </span>
+          ` : ''}
+          ${validationErrors.length > 0 ? `<span class="agent-create-capability-meta">${escapeHtml(validationErrors.join('; '))}</span>` : ''}
+          ${missingMCPServers.length > 0 ? `<span class="agent-create-capability-meta">Missing MCP servers: ${escapeHtml(missingMCPServers.join(', '))}</span>` : ''}
+        </span>
+      </label>
+    `;
+  }).join('');
+
+  skillsList.querySelectorAll('input[data-agent-create-skill]').forEach((checkbox) => {
+    checkbox.addEventListener('change', () => {
+      const normalizedName = normalizeAgentCapabilityName(checkbox.value);
+      if (!normalizedName) return;
+
+      if (checkbox.checked) {
+        agentCreationCapabilityState.selectedSkills.add(normalizedName);
+      } else {
+        agentCreationCapabilityState.selectedSkills.delete(normalizedName);
+      }
+
+      renderAgentCreationSkills();
+      renderAgentCreationMCPServers();
+    });
+  });
+
+  renderAgentCreationCapabilityCounts();
+}
+
+async function loadAgentCreationCapabilityCatalog() {
+  const currentLoadToken = ++agentCreationCapabilityState.loadingToken;
+  agentCreationCapabilityState.errors = { mcp: '', skills: '' };
+
+  const [mcpResult, skillsResult] = await Promise.allSettled([
+    fetch('/api/mcp/servers'),
+    fetch(`/api/skills?agent=${encodeURIComponent(AGENT_CREATION_SKILL_CATALOG_AGENT)}`)
+  ]);
+
+  if (currentLoadToken !== agentCreationCapabilityState.loadingToken) {
+    return;
+  }
+
+  if (mcpResult.status === 'fulfilled') {
+    const response = mcpResult.value;
+    if (response.ok) {
+      const data = await response.json().catch(() => ({}));
+      const stats = data?.stats && typeof data.stats === 'object' ? data.stats : {};
+      const servers = Array.isArray(data?.servers) ? data.servers : [];
+      agentCreationCapabilityState.mcpServers = servers
+        .map((server) => {
+          const name = String(server?.name || '').trim();
+          if (!name) return null;
+          const stat = stats[name] || {};
+          const toolCount = Number(stat?.tool_count ?? stat?.toolCount ?? 0);
+          return {
+            name,
+            command: server?.command || '',
+            args: Array.isArray(server?.args) ? server.args : [],
+            transport: server?.transport || 'stdio',
+            status: stat?.status || (server?.enabled === false ? 'disabled' : 'configured'),
+            toolCount
+          };
+        })
+        .filter(Boolean)
+        .sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }));
+    } else {
+      agentCreationCapabilityState.mcpServers = [];
+      agentCreationCapabilityState.errors.mcp = 'Failed to load MCP servers.';
+    }
+  } else {
+    agentCreationCapabilityState.mcpServers = [];
+    agentCreationCapabilityState.errors.mcp = 'Failed to load MCP servers.';
+  }
+
+  if (skillsResult.status === 'fulfilled') {
+    const response = skillsResult.value;
+    if (response.ok) {
+      const data = await response.json().catch(() => ({}));
+      const skills = Array.isArray(data?.skills) ? data.skills : [];
+      agentCreationCapabilityState.skills = skills
+        .map((skill) => {
+          const name = String(skill?.name || '').trim();
+          if (!name) return null;
+          return {
+            name,
+            description: skill?.description || '',
+            source: skill?.source || 'repo',
+            hasScripts: Boolean(skill?.has_scripts),
+            requiredMCPServers: Array.isArray(skill?.required_mcp_servers) ? skill.required_mcp_servers : [],
+            validationErrors: Array.isArray(skill?.validation_errors) ? skill.validation_errors : []
+          };
+        })
+        .filter(Boolean)
+        .sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }));
+    } else {
+      const data = await response.json().catch(() => ({}));
+      agentCreationCapabilityState.skills = [];
+      agentCreationCapabilityState.errors.skills = data?.error || 'Failed to load skills.';
+    }
+  } else {
+    agentCreationCapabilityState.skills = [];
+    agentCreationCapabilityState.errors.skills = 'Failed to load skills.';
+  }
+
+  renderAgentCreationSkills();
+  renderAgentCreationMCPServers();
+}
+
+async function applyAgentCreationCapabilities(agentName) {
+  const selectedMCPServers = getSelectedAgentCreationMCPServers();
+  const selectedSkills = getSelectedAgentCreationSkills();
+  const summary = {
+    mcpEnabled: 0,
+    skillsEnabled: 0,
+    scriptedSkillsTrusted: 0,
+    failures: []
+  };
+
+  await Promise.all(selectedMCPServers.map(async (serverName) => {
+    try {
+      await API.post(`/api/agents/${encodeURIComponent(agentName)}/mcp-servers/${encodeURIComponent(serverName)}/enable`, {});
+      summary.mcpEnabled += 1;
+    } catch (error) {
+      summary.failures.push(`MCP ${serverName}: ${error.message || 'failed to enable'}`);
+    }
+  }));
+
+  await Promise.all(selectedSkills.map(async (skill) => {
+    try {
+      await API.post(`/api/skills/${encodeURIComponent(skill.name)}/enable`, {
+        agent: agentName,
+        enabled: true
+      });
+      summary.skillsEnabled += 1;
+    } catch (error) {
+      summary.failures.push(`Skill ${skill.name}: ${error.message || 'failed to enable'}`);
+      return;
+    }
+
+    if (skill.hasScripts) {
+      try {
+        await API.post(`/api/skills/${encodeURIComponent(skill.name)}/trust`, {
+          agent: agentName,
+          trusted: true
+        });
+        summary.scriptedSkillsTrusted += 1;
+      } catch (error) {
+        summary.failures.push(`Skill ${skill.name}: ${error.message || 'failed to trust'}`);
+      }
+    }
+  }));
+
+  return summary;
+}
+
+function describeAgentCreationCapabilities(summary) {
+  const parts = [];
+  if (summary.mcpEnabled > 0) {
+    parts.push(`${summary.mcpEnabled} MCP server${summary.mcpEnabled === 1 ? '' : 's'}`);
+  }
+  if (summary.skillsEnabled > 0) {
+    parts.push(`${summary.skillsEnabled} skill${summary.skillsEnabled === 1 ? '' : 's'}`);
+  }
+  if (summary.scriptedSkillsTrusted > 0) {
+    parts.push(`${summary.scriptedSkillsTrusted} scripted trust${summary.scriptedSkillsTrusted === 1 ? '' : 's'}`);
+  }
+
+  if (parts.length === 0) return '';
+  if (parts.length === 1) return parts[0];
+  return `${parts.slice(0, -1).join(', ')} and ${parts[parts.length - 1]}`;
 }
 
 // Create new agent
@@ -271,6 +692,22 @@ async function createNewAgent() {
 
     await API.post('/api/agents', requestBody);
 
+    const capabilitySelections = {
+      mcpServers: getSelectedAgentCreationMCPServers(),
+      skills: getSelectedAgentCreationSkills()
+    };
+    let capabilitySummary = {
+      mcpEnabled: 0,
+      skillsEnabled: 0,
+      scriptedSkillsTrusted: 0,
+      failures: []
+    };
+
+    if (capabilitySelections.mcpServers.length > 0 || capabilitySelections.skills.length > 0) {
+      createBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-2" role="status"></span>Configuring...';
+      capabilitySummary = await applyAgentCreationCapabilities(agentName);
+    }
+
     // Success - close modal and refresh agent list
     const modal = bootstrap.Modal.getInstance(document.getElementById('addAgentModal'));
     if (modal) {
@@ -298,12 +735,28 @@ async function createNewAgent() {
     if (agentAllowWebSearchInput) {
       agentAllowWebSearchInput.checked = true;
     }
+    resetBaseAutoConfigState();
+    resetAgentCreationCapabilitySelections();
     updateAgentReasoningVisibility();
 
     // Show success message
-    agentsLog.info('Agent created successfully', { agent: agentName });
+    agentsLog.info('Agent created successfully', {
+      agent: agentName,
+      capabilities: capabilitySummary
+    });
     if (window.Toast) {
-      Toast.success(`Agent "${agentName}" created successfully`);
+      const capabilityDetails = describeAgentCreationCapabilities(capabilitySummary);
+      if (capabilitySummary.failures.length > 0) {
+        Toast.warning(`Agent "${agentName}" created${capabilityDetails ? ` with ${capabilityDetails}` : ''}, but ${capabilitySummary.failures.length} capability update${capabilitySummary.failures.length === 1 ? '' : 's'} failed.`);
+      } else {
+        Toast.success(`Agent "${agentName}" created successfully${capabilityDetails ? ` with ${capabilityDetails}` : ''}.`);
+      }
+    }
+    if (capabilitySummary.failures.length > 0) {
+      agentsLog.warn('Agent created with capability setup warnings', {
+        agent: agentName,
+        failures: capabilitySummary.failures
+      });
     }
 
     // Emit event for other modules

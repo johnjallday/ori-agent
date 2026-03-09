@@ -2,7 +2,7 @@
 
 <!-- Add Agent Modal (shared across pages with sidebar) -->
 <div class="modal fade" id="addAgentModal" tabindex="-1" aria-labelledby="addAgentModalLabel" aria-hidden="true">
-  <div class="modal-dialog">
+  <div class="modal-dialog modal-lg modal-dialog-scrollable">
     <div class="modal-content" style="background: var(--bg-primary); border: 1px solid var(--border-color);">
       <div class="modal-header" style="border-bottom: 1px solid var(--border-color);">
         <h5 class="modal-title" id="addAgentModalLabel" style="color: var(--text-primary);">
@@ -116,6 +116,47 @@
             <label class="form-check-label" for="agentAllowWebSearch" style="color: var(--text-primary);">Allow Web Tools</label>
             <div class="form-helper mt-1">If enabled, this agent can use <code>web_search</code>, <code>web_fetch</code>, and <code>browser</code>.</div>
           </div>
+          <section class="agent-create-capabilities" aria-labelledby="agentCreateCapabilitiesTitle">
+            <div class="d-flex justify-content-between align-items-start gap-3 mb-3">
+              <div>
+                <label id="agentCreateCapabilitiesTitle" class="form-label mb-1" style="color: var(--text-primary);">Add MCP Servers or Skills</label>
+                <div class="form-helper">Optional. Connect runtime servers and reusable skills during agent creation instead of configuring them later.</div>
+              </div>
+              <span class="agent-create-capability-pill is-muted">Optional</span>
+            </div>
+
+            <div class="agent-create-capabilities-grid">
+              <div class="agent-create-capabilities-panel">
+                <div class="agent-create-capabilities-panel-header">
+                  <div>
+                    <div class="agent-create-capabilities-panel-title">MCP Servers</div>
+                    <div class="agent-create-capabilities-panel-subtitle">Attach live tools and integrations</div>
+                  </div>
+                  <span id="agentCreateMCPCount" class="agent-create-capability-pill is-muted">0 selected</span>
+                </div>
+                <div id="agentCreateMCPList" class="agent-create-capability-list" aria-live="polite">
+                  <div class="agent-create-capability-empty">Loading MCP servers...</div>
+                </div>
+              </div>
+
+              <div class="agent-create-capabilities-panel">
+                <div class="agent-create-capabilities-panel-header">
+                  <div>
+                    <div class="agent-create-capabilities-panel-title">Skills</div>
+                    <div class="agent-create-capabilities-panel-subtitle">Enable reusable domain knowledge and flows</div>
+                  </div>
+                  <span id="agentCreateSkillCount" class="agent-create-capability-pill is-muted">0 selected</span>
+                </div>
+                <div id="agentCreateSkillsList" class="agent-create-capability-list" aria-live="polite">
+                  <div class="agent-create-capability-empty">Loading skills...</div>
+                </div>
+              </div>
+            </div>
+
+            <div class="agent-create-capability-note">
+              Selecting a skill auto-selects its required MCP servers. Skills with scripts are trusted for this agent when selected.
+            </div>
+          </section>
         </form>
       </div>
       <div class="modal-footer" style="border-top: 1px solid var(--border-color);">
@@ -130,6 +171,221 @@
     </div>
   </div>
 </div>
+
+<style>
+  .agent-create-capabilities {
+    margin-top: 1.1rem;
+    padding: 1rem;
+    border-radius: 18px;
+    border: 1px solid rgba(221, 128, 82, 0.18);
+    background:
+      radial-gradient(circle at top right, rgba(221, 128, 82, 0.12), transparent 32%),
+      linear-gradient(180deg, rgba(255,255,255,0.03), rgba(255,255,255,0.01));
+  }
+
+  .agent-create-capabilities-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.85rem;
+  }
+
+  .agent-create-capabilities-panel {
+    min-width: 0;
+    padding: 0.9rem;
+    border-radius: 16px;
+    border: 1px solid rgba(255,255,255,0.06);
+    background: rgba(8, 16, 34, 0.48);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.04);
+  }
+
+  .agent-create-capabilities-panel-header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 0.75rem;
+    margin-bottom: 0.75rem;
+  }
+
+  .agent-create-capabilities-panel-title {
+    color: var(--text-primary);
+    font-weight: 600;
+    line-height: 1.2;
+  }
+
+  .agent-create-capabilities-panel-subtitle {
+    margin-top: 0.18rem;
+    color: var(--text-secondary);
+    font-size: 0.75rem;
+  }
+
+  .agent-create-capability-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.65rem;
+    max-height: 240px;
+    overflow-y: auto;
+    padding-right: 0.1rem;
+  }
+
+  .agent-create-capability-card {
+    display: flex;
+    gap: 0.75rem;
+    padding: 0.8rem;
+    border-radius: 14px;
+    border: 1px solid rgba(255,255,255,0.08);
+    background: rgba(15, 24, 46, 0.72);
+    cursor: pointer;
+    transition: border-color 0.18s ease, transform 0.18s ease, box-shadow 0.18s ease, background 0.18s ease;
+  }
+
+  .agent-create-capability-card:hover {
+    border-color: rgba(221, 128, 82, 0.34);
+    transform: translateY(-1px);
+  }
+
+  .agent-create-capability-card.is-selected {
+    border-color: rgba(221, 128, 82, 0.52);
+    background: linear-gradient(180deg, rgba(221, 128, 82, 0.12), rgba(20, 30, 54, 0.82));
+    box-shadow: 0 8px 24px rgba(8, 13, 27, 0.28);
+  }
+
+  .agent-create-capability-card.is-locked {
+    border-style: solid;
+  }
+
+  .agent-create-capability-card input[type="checkbox"] {
+    margin-top: 0.22rem;
+    flex-shrink: 0;
+  }
+
+  .agent-create-capability-copy {
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0.38rem;
+  }
+
+  .agent-create-capability-title-row {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 0.5rem;
+  }
+
+  .agent-create-capability-title {
+    color: var(--text-primary);
+    font-weight: 600;
+    line-height: 1.2;
+  }
+
+  .agent-create-capability-description {
+    color: var(--text-secondary);
+    font-size: 0.79rem;
+    line-height: 1.45;
+  }
+
+  .agent-create-capability-meta,
+  .agent-create-capability-empty,
+  .agent-create-capability-note {
+    color: var(--text-secondary);
+    font-size: 0.76rem;
+  }
+
+  .agent-create-capability-empty {
+    padding: 0.8rem;
+    border-radius: 12px;
+    border: 1px dashed rgba(255,255,255,0.08);
+    background: rgba(255,255,255,0.02);
+  }
+
+  .agent-create-capability-empty.is-error {
+    color: var(--danger-color);
+    border-color: rgba(220, 53, 69, 0.35);
+    background: rgba(220, 53, 69, 0.08);
+  }
+
+  .agent-create-capability-empty a,
+  .agent-create-capability-note a {
+    color: var(--primary-color);
+    text-decoration: none;
+  }
+
+  .agent-create-capability-pills,
+  .agent-create-capability-tags {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.35rem;
+  }
+
+  .agent-create-capability-pill,
+  .agent-create-capability-tag {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.25rem;
+    padding: 0.18rem 0.45rem;
+    border-radius: 999px;
+    font-size: 0.68rem;
+    line-height: 1;
+    letter-spacing: 0.02em;
+    border: 1px solid transparent;
+    white-space: nowrap;
+  }
+
+  .agent-create-capability-pill.is-muted,
+  .agent-create-capability-tag.is-muted {
+    color: var(--text-secondary);
+    background: rgba(255,255,255,0.04);
+    border-color: rgba(255,255,255,0.06);
+  }
+
+  .agent-create-capability-pill.is-source {
+    color: #f7ddc9;
+    background: rgba(221, 128, 82, 0.14);
+    border-color: rgba(221, 128, 82, 0.26);
+  }
+
+  .agent-create-capability-pill.is-success {
+    color: #b9f6cf;
+    background: rgba(25, 135, 84, 0.18);
+    border-color: rgba(25, 135, 84, 0.28);
+  }
+
+  .agent-create-capability-pill.is-warning {
+    color: #ffe1a8;
+    background: rgba(255, 193, 7, 0.16);
+    border-color: rgba(255, 193, 7, 0.24);
+  }
+
+  .agent-create-capability-pill.is-danger,
+  .agent-create-capability-tag.is-danger {
+    color: #ffd0d6;
+    background: rgba(220, 53, 69, 0.16);
+    border-color: rgba(220, 53, 69, 0.24);
+  }
+
+  .agent-create-capability-tag.is-required {
+    color: #d6ecff;
+    background: rgba(13, 110, 253, 0.14);
+    border-color: rgba(13, 110, 253, 0.22);
+  }
+
+  .agent-create-capability-pill.is-script {
+    color: #edd8ff;
+    background: rgba(111, 66, 193, 0.18);
+    border-color: rgba(111, 66, 193, 0.24);
+  }
+
+  .agent-create-capability-note {
+    margin-top: 0.75rem;
+    line-height: 1.45;
+  }
+
+  @media (max-width: 768px) {
+    .agent-create-capabilities-grid {
+      grid-template-columns: 1fr;
+    }
+  }
+</style>
 
 <!-- Add Marketplace Modal (shared across pages) -->
 <div class="modal fade" id="marketplaceModal" tabindex="-1">

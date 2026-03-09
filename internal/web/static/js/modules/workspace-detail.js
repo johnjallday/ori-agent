@@ -1563,6 +1563,34 @@ export class WorkspaceDetailPage {
     }
   }
 
+  isMissingWorkspaceAgentError(message) {
+    const normalized = String(message || '').trim().toLowerCase();
+    if (!normalized) return false;
+
+    return normalized.includes('no agent is available in this workspace')
+      || normalized.includes('no agents available in this workspace')
+      || normalized.includes('no agent assigned')
+      || normalized.includes('no agent assigned to step')
+      || normalized.includes('parent task has no agent');
+  }
+
+  async promptAddAgentForExecution(message = 'No agent is available in this workspace. Add one to continue.') {
+    if (window.Toast) {
+      window.Toast.warning(message);
+    }
+
+    await this.openAddAgentModal();
+
+    window.setTimeout(() => {
+      if (this.elements.addAgentSelect && !this.elements.addAgentSelect.disabled) {
+        this.elements.addAgentSelect.focus();
+        return;
+      }
+
+      this.elements.createAgentBtn?.focus();
+    }, 150);
+  }
+
   async populateAddAgentOptions() {
     if (!this.elements.addAgentSelect || !this.elements.addAgentSubmitBtn || !this.elements.addAgentEmpty) return;
 
@@ -2911,7 +2939,7 @@ export class WorkspaceDetailPage {
     if (!isParent && !assignedAgent) {
       const fallbackAgent = this.getWorkspaceFallbackAgent({ preferBrowser: isBrowserIntent });
       if (!fallbackAgent) {
-        if (window.Toast) window.Toast.error('No agent is available in this workspace. Add an agent or assign this task first.');
+        await this.promptAddAgentForExecution('No agent is available in this workspace. Add one to continue.');
         return;
       }
 
@@ -2978,6 +3006,20 @@ export class WorkspaceDetailPage {
     } catch (error) {
       console.error('Failed to execute task:', error);
       const message = error && error.message ? error.message : 'Failed to execute task';
+      if (this.isMissingWorkspaceAgentError(message)) {
+        this.setExecutionModalStatus('blocked');
+        this.appendExecutionLog('No agent is assigned to this workspace yet. Add one to continue, then run the task again.', 'warning', `${taskId}:dispatch-agent-missing`);
+        this.setExecutionViewResultEnabled(false);
+
+        if (this.elements.taskExecutionModal && window.bootstrap) {
+          const modal = bootstrap.Modal.getInstance(this.elements.taskExecutionModal);
+          modal?.hide();
+        }
+
+        await this.promptAddAgentForExecution('No agent is available in this workspace. Add one to continue.');
+        return;
+      }
+
       this.setExecutionModalStatus('failed');
       this.appendExecutionLog(message, 'error', `${taskId}:dispatch-error`);
       if (window.Toast) window.Toast.error('Failed to execute task');
