@@ -17,7 +17,8 @@ func TestCodexProviderDefaultModels_UsesCachedModels(t *testing.T) {
     {"slug": "gpt-5.2", "visibility": "list"},
     {"slug": "gpt-5.3-codex", "visibility": "list"},
     {"slug": "gpt-5.2-codex", "visibility": "list"},
-    {"slug": "hidden-codex", "visibility": "hidden"}
+    {"slug": "hidden-codex", "visibility": "hidden"},
+    {"slug": "gpt-5.1-codex", "visibility": "hide"}
   ]
 }`
 	cachePath := filepath.Join(codexHome, "models_cache.json")
@@ -34,14 +35,17 @@ func TestCodexProviderDefaultModels_UsesCachedModels(t *testing.T) {
 	if !containsModel(models, "gpt-5.2-codex") {
 		t.Fatalf("expected gpt-5.2-codex in models, got %v", models)
 	}
-	if containsModel(models, "gpt-5.2") {
-		t.Fatalf("non-codex model should not be included, got %v", models)
+	if !containsModel(models, "gpt-5.2") {
+		t.Fatalf("expected visible non-codex model in models, got %v", models)
 	}
 	if countModel(models, "gpt-5.3-codex") != 1 {
 		t.Fatalf("expected duplicate cached model to be de-duplicated, got %v", models)
 	}
 	if containsModel(models, "hidden-codex") {
 		t.Fatalf("hidden model should not be included, got %v", models)
+	}
+	if containsModel(models, "gpt-5.1-codex") {
+		t.Fatalf("hide visibility model should not be included, got %v", models)
 	}
 }
 
@@ -92,6 +96,29 @@ func TestCodexProviderDefaultModels_PrioritizesGPT53(t *testing.T) {
 	}
 	if models[0] != "gpt-5.3-codex" {
 		t.Fatalf("expected gpt-5.3-codex to be first, got %q (full list: %v)", models[0], models)
+	}
+}
+
+func TestCodexProviderDefaultModels_IncludesVisibleGPT54FromCache(t *testing.T) {
+	codexHome := t.TempDir()
+	t.Setenv("CODEX_HOME", codexHome)
+
+	cache := `{
+  "models": [
+    {"slug": "gpt-5.4", "visibility": "list"},
+    {"slug": "gpt-5.3-codex", "visibility": "list"}
+  ]
+}`
+	cachePath := filepath.Join(codexHome, "models_cache.json")
+	if err := os.WriteFile(cachePath, []byte(cache), 0600); err != nil {
+		t.Fatalf("write cache: %v", err)
+	}
+
+	provider := &CodexProvider{cliPath: "codex"}
+	models := provider.DefaultModels()
+
+	if !containsModel(models, "gpt-5.4") {
+		t.Fatalf("expected gpt-5.4 in models, got %v", models)
 	}
 }
 
