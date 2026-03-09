@@ -613,6 +613,35 @@
     </div>
   </div>
 
+  <!-- Task Execution Confirm Modal -->
+  <div class="modal fade" id="hubExecutionConfirmModal" tabindex="-1" aria-labelledby="hubExecutionConfirmTitle" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered hub-execution-confirm-dialog">
+      <div class="modal-content hub-execution-confirm-modal">
+        <div class="modal-body hub-execution-confirm-body">
+          <button type="button" class="btn-close hub-execution-confirm-close" data-bs-dismiss="modal" aria-label="Close"></button>
+          <div class="hub-execution-confirm-header">
+            <div class="hub-execution-confirm-icon" aria-hidden="true">
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M8,5.14V19.14L19,12.14L8,5.14M4,4H6V20H4V4Z"/>
+              </svg>
+            </div>
+            <div class="hub-execution-confirm-copy">
+              <div id="hubExecutionConfirmEyebrow" class="hub-execution-confirm-eyebrow">Execution Check</div>
+              <h5 id="hubExecutionConfirmTitle" class="hub-execution-confirm-title">Confirm this action</h5>
+              <p id="hubExecutionConfirmMessage" class="hub-execution-confirm-message"></p>
+            </div>
+          </div>
+          <div id="hubExecutionConfirmMeta" class="hub-execution-confirm-meta"></div>
+          <div id="hubExecutionConfirmDetails" class="hub-execution-confirm-details d-none"></div>
+          <div class="hub-execution-confirm-actions">
+            <button type="button" id="hubExecutionConfirmCancelBtn" class="modern-btn modern-btn-secondary">Cancel</button>
+            <button type="button" id="hubExecutionConfirmConfirmBtn" class="modern-btn modern-btn-primary">Continue</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <!-- Add File Modal -->
   <div class="modal fade" id="hubAddFileModal" tabindex="-1" aria-labelledby="hubAddFileModalTitle" aria-hidden="true">
     <div class="modal-dialog modal-dialog-centered">

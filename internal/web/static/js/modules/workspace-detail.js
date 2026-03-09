@@ -110,6 +110,7 @@ export class WorkspaceDetailPage {
     this.executionMonitorTimer = null;
     this.executionLogKeys = new Set();
     this.executionLastStatus = '';
+    this.pendingTaskConfirm = null;
 
     // DOM elements
     this.elements = {};
@@ -431,6 +432,14 @@ export class WorkspaceDetailPage {
       taskExecutionBreakdown: document.getElementById('workspace-detail-task-execution-breakdown'),
       taskExecutionLog: document.getElementById('workspace-detail-task-execution-log'),
       taskExecutionViewResultBtn: document.getElementById('workspace-detail-task-execution-view-result'),
+      taskConfirmModal: document.getElementById('workspace-detail-task-confirm-modal'),
+      taskConfirmEyebrow: document.getElementById('workspace-detail-task-confirm-eyebrow'),
+      taskConfirmTitle: document.getElementById('workspace-detail-task-confirm-title'),
+      taskConfirmMessage: document.getElementById('workspace-detail-task-confirm-message'),
+      taskConfirmMeta: document.getElementById('workspace-detail-task-confirm-meta'),
+      taskConfirmDetails: document.getElementById('workspace-detail-task-confirm-details'),
+      taskConfirmCancelBtn: document.getElementById('workspace-detail-task-confirm-cancel'),
+      taskConfirmConfirmBtn: document.getElementById('workspace-detail-task-confirm-confirm'),
 
       // Assist modal
       taskAssistModal: document.getElementById('workspace-detail-task-assist-modal'),
@@ -525,6 +534,9 @@ export class WorkspaceDetailPage {
       this.currentExecutionTaskId = null;
       this.renderTaskExecutionBreakdown(null);
     });
+    this.elements.taskConfirmCancelBtn?.addEventListener('click', () => this.handleTaskConfirmChoice(false));
+    this.elements.taskConfirmConfirmBtn?.addEventListener('click', () => this.handleTaskConfirmChoice(true));
+    this.elements.taskConfirmModal?.addEventListener('hidden.bs.modal', () => this.handleTaskConfirmHidden());
     this.elements.taskAssistRetryBtn?.addEventListener('click', () => this.submitTaskAssist('retry'));
     this.elements.taskAssistContinueBtn?.addEventListener('click', () => this.submitTaskAssist('continue_with_instruction'));
     this.elements.taskAssistSwitchBtn?.addEventListener('click', () => this.submitTaskAssist('switch_agent_retry'));
@@ -1591,6 +1603,159 @@ export class WorkspaceDetailPage {
     }, 150);
   }
 
+  getTaskDisplayLabel(task) {
+    return String(task?.description || task?.name || task?.id || 'Task').trim() || 'Task';
+  }
+
+  resetTaskConfirmDialog() {
+    if (this.elements.taskConfirmEyebrow) {
+      this.elements.taskConfirmEyebrow.textContent = 'Execution Check';
+    }
+    if (this.elements.taskConfirmTitle) {
+      this.elements.taskConfirmTitle.textContent = 'Confirm this action';
+    }
+    if (this.elements.taskConfirmMessage) {
+      this.elements.taskConfirmMessage.textContent = '';
+    }
+    if (this.elements.taskConfirmCancelBtn) {
+      this.elements.taskConfirmCancelBtn.textContent = 'Cancel';
+    }
+    if (this.elements.taskConfirmConfirmBtn) {
+      this.elements.taskConfirmConfirmBtn.textContent = 'Continue';
+    }
+    if (this.elements.taskConfirmMeta) {
+      this.elements.taskConfirmMeta.innerHTML = '';
+    }
+    if (this.elements.taskConfirmDetails) {
+      this.elements.taskConfirmDetails.innerHTML = '';
+      this.elements.taskConfirmDetails.classList.add('d-none');
+    }
+  }
+
+  renderTaskConfirmMeta(items = []) {
+    if (!this.elements.taskConfirmMeta) return;
+    this.elements.taskConfirmMeta.innerHTML = '';
+
+    items
+      .map((item) => String(item || '').trim())
+      .filter(Boolean)
+      .forEach((item) => {
+        const chip = document.createElement('span');
+        chip.className = 'workspace-detail-task-confirm-chip';
+        chip.textContent = item;
+        this.elements.taskConfirmMeta.appendChild(chip);
+      });
+  }
+
+  renderTaskConfirmDetails(items = []) {
+    if (!this.elements.taskConfirmDetails) return;
+
+    const normalizedItems = items
+      .map((item) => String(item || '').trim())
+      .filter(Boolean);
+
+    this.elements.taskConfirmDetails.innerHTML = '';
+    if (normalizedItems.length === 0) {
+      this.elements.taskConfirmDetails.classList.add('d-none');
+      return;
+    }
+
+    normalizedItems.forEach((item, index) => {
+      const row = document.createElement('div');
+      row.className = 'workspace-detail-task-confirm-detail';
+
+      const indexBadge = document.createElement('span');
+      indexBadge.className = 'workspace-detail-task-confirm-detail-index';
+      indexBadge.textContent = String(index + 1);
+
+      const text = document.createElement('div');
+      text.className = 'workspace-detail-task-confirm-detail-text';
+      text.textContent = item;
+
+      row.appendChild(indexBadge);
+      row.appendChild(text);
+      this.elements.taskConfirmDetails.appendChild(row);
+    });
+
+    this.elements.taskConfirmDetails.classList.remove('d-none');
+  }
+
+  getTaskConfirmModalInstance() {
+    if (!this.elements.taskConfirmModal || !window.bootstrap) return null;
+    return typeof bootstrap.Modal.getOrCreateInstance === 'function'
+      ? bootstrap.Modal.getOrCreateInstance(this.elements.taskConfirmModal)
+      : (bootstrap.Modal.getInstance(this.elements.taskConfirmModal) || new bootstrap.Modal(this.elements.taskConfirmModal));
+  }
+
+  handleTaskConfirmChoice(confirmed) {
+    if (this.pendingTaskConfirm && !this.pendingTaskConfirm.resolved) {
+      this.pendingTaskConfirm.resolved = true;
+      this.pendingTaskConfirm.resolve(Boolean(confirmed));
+    }
+
+    const modal = this.getTaskConfirmModalInstance();
+    modal?.hide();
+  }
+
+  handleTaskConfirmHidden() {
+    if (this.pendingTaskConfirm && !this.pendingTaskConfirm.resolved) {
+      this.pendingTaskConfirm.resolved = true;
+      this.pendingTaskConfirm.resolve(false);
+    }
+    this.pendingTaskConfirm = null;
+    this.resetTaskConfirmDialog();
+  }
+
+  async showTaskConfirmDialog(options = {}) {
+    const title = String(options?.title || 'Confirm this action').trim();
+    const message = String(options?.message || '').trim();
+    const eyebrow = String(options?.eyebrow || 'Execution Check').trim();
+    const confirmLabel = String(options?.confirmLabel || 'Continue').trim();
+    const cancelLabel = String(options?.cancelLabel || 'Cancel').trim();
+    const metaItems = Array.isArray(options?.metaItems) ? options.metaItems : [];
+    const details = Array.isArray(options?.details) ? options.details : [];
+
+    if (!this.elements.taskConfirmModal || !window.bootstrap) {
+      const fallbackText = [message, ...details].filter(Boolean).join('\n\n');
+      return confirm([title, fallbackText].filter(Boolean).join('\n\n'));
+    }
+
+    if (this.pendingTaskConfirm && !this.pendingTaskConfirm.resolved) {
+      this.pendingTaskConfirm.resolved = true;
+      this.pendingTaskConfirm.resolve(false);
+    }
+
+    this.resetTaskConfirmDialog();
+
+    if (this.elements.taskConfirmEyebrow) {
+      this.elements.taskConfirmEyebrow.textContent = eyebrow || 'Execution Check';
+    }
+    if (this.elements.taskConfirmTitle) {
+      this.elements.taskConfirmTitle.textContent = title;
+    }
+    if (this.elements.taskConfirmMessage) {
+      this.elements.taskConfirmMessage.textContent = message;
+    }
+    if (this.elements.taskConfirmCancelBtn) {
+      this.elements.taskConfirmCancelBtn.textContent = cancelLabel || 'Cancel';
+    }
+    if (this.elements.taskConfirmConfirmBtn) {
+      this.elements.taskConfirmConfirmBtn.textContent = confirmLabel || 'Continue';
+    }
+
+    this.renderTaskConfirmMeta(metaItems);
+    this.renderTaskConfirmDetails(details);
+
+    return new Promise((resolve) => {
+      this.pendingTaskConfirm = { resolve, resolved: false };
+      const modal = this.getTaskConfirmModalInstance();
+      modal?.show();
+      window.setTimeout(() => {
+        this.elements.taskConfirmConfirmBtn?.focus();
+      }, 120);
+    });
+  }
+
   isSystemAssistantAgentName(name) {
     const normalized = this.normalizeAgentName(name);
     return normalized === 'ori' || normalized === 'system assistant';
@@ -1775,12 +1940,21 @@ export class WorkspaceDetailPage {
       : false;
 
     if (suggestedAgent && !this.isSystemAssistantAgentName(suggestedAgent) && routeData?.requires_creation !== true) {
-      const reasonText = this.getTaskAgentSuggestionReasonText(routeData);
-      const confirmationMessage = alreadyInWorkspace
-        ? `Ori suggests assigning "${suggestedAgent}" to "${taskLabel}".${reasonText}\n\nAssign it now?`
-        : `Ori suggests adding "${suggestedAgent}" to this workspace for "${taskLabel}".${reasonText}\n\nAdd it and assign it now?`;
+      const reasonItems = Array.isArray(routeData?.reasons)
+        ? routeData.reasons.map((reason) => String(reason || '').trim()).filter(Boolean).slice(0, 3)
+        : [];
+      const confirmed = await this.showTaskConfirmDialog({
+        eyebrow: 'Ori Recommendation',
+        title: alreadyInWorkspace ? `Assign "${suggestedAgent}" to this task?` : `Add "${suggestedAgent}" and assign it?`,
+        message: alreadyInWorkspace
+          ? `Ori matched ${taskLabel} to "${suggestedAgent}" and can assign it in one step.`
+          : `Ori matched ${taskLabel} to "${suggestedAgent}" and can add it to this workspace before execution.`,
+        confirmLabel: alreadyInWorkspace ? 'Assign Agent' : 'Add and Assign',
+        metaItems: [taskLabel, suggestedAgent, alreadyInWorkspace ? 'Ready to assign' : 'Needs workspace add'],
+        details: reasonItems
+      });
 
-      if (!confirm(confirmationMessage)) {
+      if (!confirmed) {
         return '';
       }
 
@@ -3076,7 +3250,14 @@ export class WorkspaceDetailPage {
       } else {
         const assignAndRun = options.skipConfirm === true
           ? true
-          : confirm(`This task is unassigned. Assign it to "${fallbackAgent}" and execute now?`);
+          : await this.showTaskConfirmDialog({
+            eyebrow: 'Assignment Required',
+            title: `Execute with "${fallbackAgent}"?`,
+            message: `This task is unassigned. I can assign it to "${fallbackAgent}" and start execution immediately.`,
+            confirmLabel: 'Assign and Execute',
+            metaItems: [this.getTaskDisplayLabel(task), fallbackAgent, 'Workspace agent'],
+            details: ['The task will be updated before dispatch.', 'Live execution updates will appear after confirmation.']
+          });
         if (!assignAndRun) return;
 
         try {
@@ -3100,7 +3281,14 @@ export class WorkspaceDetailPage {
     if (!isParent) {
       const preflight = this.getTaskExecutionPreflight(task, assignedAgent);
       if (preflight.kind === 'switch_recommended' && preflight.recommendedAgent) {
-        const switchNow = confirm(`${preflight.message}\n\nRecommended: switch to "${preflight.recommendedAgent}" before execution. Switch now?`);
+        const switchNow = await this.showTaskConfirmDialog({
+          eyebrow: 'Capability Check',
+          title: `Switch to "${preflight.recommendedAgent}" before running?`,
+          message: preflight.message,
+          confirmLabel: 'Switch Agent',
+          metaItems: [this.getTaskDisplayLabel(task), preflight.recommendedAgent, 'Recommended agent'],
+          details: ['This task likely needs browser capability.', `Switching now avoids a likely pause for "${assignedAgent}".`]
+        });
         if (switchNow) {
           try {
             await this.assignTaskToAgent(taskId, preflight.recommendedAgent);
@@ -3119,11 +3307,23 @@ export class WorkspaceDetailPage {
       }
     }
 
-    const baseConfirmMessage = isParent
-      ? `Execute this workflow (${subtasks.length} step${subtasks.length === 1 ? '' : 's'}) now?`
-      : `Execute this task${assignedAgent ? ` with "${assignedAgent}"` : ''} now?`;
-    const confirmMessage = preflightWarning ? `${preflightWarning}\n\n${baseConfirmMessage}` : baseConfirmMessage;
-    if (options.skipConfirm !== true && !confirm(confirmMessage)) return;
+    if (options.skipConfirm !== true) {
+      const confirmed = await this.showTaskConfirmDialog({
+        eyebrow: isParent ? 'Workflow Launch' : 'Task Launch',
+        title: isParent ? 'Execute this workflow now?' : 'Execute this task now?',
+        message: isParent
+          ? `This workflow will dispatch ${subtasks.length} step${subtasks.length === 1 ? '' : 's'} in sequence.`
+          : `This task will run with "${assignedAgent}".`,
+        confirmLabel: isParent ? 'Execute Workflow' : 'Execute Task',
+        metaItems: isParent
+          ? [this.getTaskDisplayLabel(task), `${subtasks.length} step${subtasks.length === 1 ? '' : 's'}`]
+          : [this.getTaskDisplayLabel(task), assignedAgent, 'Ready to run'],
+        details: preflightWarning
+          ? [preflightWarning, 'Execution updates will appear in the live log after dispatch.']
+          : ['Execution updates will appear in the live log after dispatch.']
+      });
+      if (!confirmed) return;
+    }
 
     this.openTaskExecutionModal(task);
 

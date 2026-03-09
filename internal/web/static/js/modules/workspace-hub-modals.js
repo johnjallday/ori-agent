@@ -9,6 +9,91 @@
 
   let deleteConfirmResolve = null;
   let parentDeleteResolve = null;
+  let executionConfirmResolve = null;
+
+  function resetExecutionConfirmModal() {
+    const elements = window.WorkspaceHubState.getElements();
+    if (elements.executionConfirmEyebrow) {
+      elements.executionConfirmEyebrow.textContent = 'Execution Check';
+    }
+    if (elements.executionConfirmTitle) {
+      elements.executionConfirmTitle.textContent = 'Confirm this action';
+    }
+    if (elements.executionConfirmMessage) {
+      elements.executionConfirmMessage.textContent = '';
+    }
+    if (elements.executionConfirmCancelBtn) {
+      elements.executionConfirmCancelBtn.textContent = 'Cancel';
+    }
+    if (elements.executionConfirmConfirmBtn) {
+      elements.executionConfirmConfirmBtn.textContent = 'Continue';
+    }
+    if (elements.executionConfirmMeta) {
+      elements.executionConfirmMeta.innerHTML = '';
+    }
+    if (elements.executionConfirmDetails) {
+      elements.executionConfirmDetails.innerHTML = '';
+      elements.executionConfirmDetails.classList.add('d-none');
+    }
+  }
+
+  function renderExecutionConfirmMeta(items) {
+    const elements = window.WorkspaceHubState.getElements();
+    if (!elements.executionConfirmMeta) return;
+
+    elements.executionConfirmMeta.innerHTML = '';
+    (Array.isArray(items) ? items : [])
+      .map((item) => String(item || '').trim())
+      .filter(Boolean)
+      .forEach((item) => {
+        const chip = document.createElement('span');
+        chip.className = 'hub-execution-confirm-chip';
+        chip.textContent = item;
+        elements.executionConfirmMeta.appendChild(chip);
+      });
+  }
+
+  function renderExecutionConfirmDetails(items) {
+    const elements = window.WorkspaceHubState.getElements();
+    if (!elements.executionConfirmDetails) return;
+
+    const normalizedItems = (Array.isArray(items) ? items : [])
+      .map((item) => String(item || '').trim())
+      .filter(Boolean);
+
+    elements.executionConfirmDetails.innerHTML = '';
+    if (normalizedItems.length === 0) {
+      elements.executionConfirmDetails.classList.add('d-none');
+      return;
+    }
+
+    normalizedItems.forEach((item, index) => {
+      const row = document.createElement('div');
+      row.className = 'hub-execution-confirm-detail';
+
+      const badge = document.createElement('span');
+      badge.className = 'hub-execution-confirm-detail-index';
+      badge.textContent = String(index + 1);
+
+      const text = document.createElement('div');
+      text.className = 'hub-execution-confirm-detail-text';
+      text.textContent = item;
+
+      row.appendChild(badge);
+      row.appendChild(text);
+      elements.executionConfirmDetails.appendChild(row);
+    });
+
+    elements.executionConfirmDetails.classList.remove('d-none');
+  }
+
+  function getExecutionConfirmModal() {
+    const elements = window.WorkspaceHubState.getElements();
+    if (!elements.executionConfirmModal || !window.bootstrap) return null;
+    return typeof bootstrap.Modal.getOrCreateInstance === 'function'
+      ? bootstrap.Modal.getOrCreateInstance(elements.executionConfirmModal)
+      : (bootstrap.Modal.getInstance(elements.executionConfirmModal) || new bootstrap.Modal(elements.executionConfirmModal));
+  }
 
   /**
    * Show delete confirmation modal
@@ -121,6 +206,71 @@
     }
   }
 
+  function showExecutionConfirm(options) {
+    const elements = window.WorkspaceHubState.getElements();
+    const title = String(options?.title || 'Confirm this action').trim();
+    const message = String(options?.message || '').trim();
+    const eyebrow = String(options?.eyebrow || 'Execution Check').trim();
+    const confirmLabel = String(options?.confirmLabel || 'Continue').trim();
+    const cancelLabel = String(options?.cancelLabel || 'Cancel').trim();
+    const metaItems = Array.isArray(options?.metaItems) ? options.metaItems : [];
+    const details = Array.isArray(options?.details) ? options.details : [];
+
+    if (!elements.executionConfirmModal || !window.bootstrap) {
+      const fallbackText = [message, ...details].filter(Boolean).join('\n\n');
+      return Promise.resolve(window.confirm([title, fallbackText].filter(Boolean).join('\n\n')));
+    }
+
+    if (executionConfirmResolve) {
+      executionConfirmResolve(false);
+      executionConfirmResolve = null;
+    }
+
+    resetExecutionConfirmModal();
+
+    if (elements.executionConfirmEyebrow) {
+      elements.executionConfirmEyebrow.textContent = eyebrow || 'Execution Check';
+    }
+    if (elements.executionConfirmTitle) {
+      elements.executionConfirmTitle.textContent = title;
+    }
+    if (elements.executionConfirmMessage) {
+      elements.executionConfirmMessage.textContent = message;
+    }
+    if (elements.executionConfirmCancelBtn) {
+      elements.executionConfirmCancelBtn.textContent = cancelLabel || 'Cancel';
+    }
+    if (elements.executionConfirmConfirmBtn) {
+      elements.executionConfirmConfirmBtn.textContent = confirmLabel || 'Continue';
+    }
+
+    renderExecutionConfirmMeta(metaItems);
+    renderExecutionConfirmDetails(details);
+
+    return new Promise((resolve) => {
+      executionConfirmResolve = resolve;
+      const modal = getExecutionConfirmModal();
+      modal?.show();
+      window.setTimeout(() => {
+        elements.executionConfirmConfirmBtn?.focus();
+      }, 120);
+    });
+  }
+
+  function handleExecutionConfirm(confirmed) {
+    if (executionConfirmResolve) {
+      const resolve = executionConfirmResolve;
+      executionConfirmResolve = null;
+      resolve(Boolean(confirmed));
+    }
+    const modal = getExecutionConfirmModal();
+    if (modal) modal.hide();
+  }
+
+  function handleExecutionConfirmCancel() {
+    handleExecutionConfirm(false);
+  }
+
   /**
    * Bind modal event handlers
    */
@@ -143,6 +293,23 @@
     if (elements.parentDeleteModal) {
       elements.parentDeleteModal.addEventListener('hidden.bs.modal', handleParentDeleteCancel);
     }
+
+    if (elements.executionConfirmCancelBtn) {
+      elements.executionConfirmCancelBtn.addEventListener('click', handleExecutionConfirmCancel);
+    }
+    if (elements.executionConfirmConfirmBtn) {
+      elements.executionConfirmConfirmBtn.addEventListener('click', () => handleExecutionConfirm(true));
+    }
+    if (elements.executionConfirmModal) {
+      elements.executionConfirmModal.addEventListener('hidden.bs.modal', () => {
+        if (executionConfirmResolve) {
+          const resolve = executionConfirmResolve;
+          executionConfirmResolve = null;
+          resolve(false);
+        }
+        resetExecutionConfirmModal();
+      });
+    }
   }
 
   // Expose modals manager globally
@@ -153,6 +320,7 @@
     showParentDeletePrompt,
     handleParentDeleteChoice,
     handleParentDeleteCancel,
+    showExecutionConfirm,
     bindModalEvents
   };
 })();

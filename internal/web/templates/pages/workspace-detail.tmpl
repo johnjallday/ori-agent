@@ -479,6 +479,35 @@
     </div>
   </div>
 
+  <!-- Task Execution Confirm Modal -->
+  <div class="modal fade" id="workspace-detail-task-confirm-modal" tabindex="-1" aria-labelledby="workspace-detail-task-confirm-title" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered workspace-detail-task-confirm-dialog">
+      <div class="modal-content workspace-detail-task-confirm-content">
+        <div class="modal-body workspace-detail-task-confirm-body">
+          <button type="button" class="btn-close workspace-detail-task-confirm-close" data-bs-dismiss="modal" aria-label="Close"></button>
+          <div class="workspace-detail-task-confirm-header">
+            <div class="workspace-detail-task-confirm-icon" aria-hidden="true">
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M12,2L20,6V12C20,17.55 16.16,22.74 12,24C7.84,22.74 4,17.55 4,12V6L12,2M11,7V13H13V7H11M11,15V17H13V15H11Z"/>
+              </svg>
+            </div>
+            <div class="workspace-detail-task-confirm-copy">
+              <div id="workspace-detail-task-confirm-eyebrow" class="workspace-detail-task-confirm-eyebrow">Execution Check</div>
+              <h5 id="workspace-detail-task-confirm-title" class="workspace-detail-task-confirm-title">Confirm this action</h5>
+              <p id="workspace-detail-task-confirm-message" class="workspace-detail-task-confirm-message"></p>
+            </div>
+          </div>
+          <div id="workspace-detail-task-confirm-meta" class="workspace-detail-task-confirm-meta"></div>
+          <div id="workspace-detail-task-confirm-details" class="workspace-detail-task-confirm-details d-none"></div>
+          <div class="workspace-detail-task-confirm-actions">
+            <button type="button" id="workspace-detail-task-confirm-cancel" class="modern-btn modern-btn-secondary">Cancel</button>
+            <button type="button" id="workspace-detail-task-confirm-confirm" class="modern-btn modern-btn-primary">Continue</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <!-- Task Assist Modal -->
   <div class="modal fade" id="workspace-detail-task-assist-modal" tabindex="-1" aria-labelledby="workspace-detail-task-assist-title" aria-hidden="true">
     <div class="modal-dialog modal-lg modal-dialog-centered modal-dialog-scrollable">
@@ -1330,6 +1359,170 @@
       color: var(--text-primary);
       font-size: 0.8rem;
       line-height: 1.45;
+    }
+
+    .workspace-detail-task-confirm-dialog {
+      max-width: 34rem;
+    }
+
+    .workspace-detail-task-confirm-content {
+      border: 1px solid color-mix(in srgb, var(--primary-color) 24%, var(--border-color));
+      border-radius: 22px;
+      background:
+        radial-gradient(circle at top right, rgba(var(--primary-color-rgb, 255, 138, 86), 0.2), transparent 34%),
+        radial-gradient(circle at bottom left, rgba(56, 189, 248, 0.12), transparent 38%),
+        linear-gradient(155deg, color-mix(in srgb, var(--bg-primary) 92%, #08111d 8%), color-mix(in srgb, var(--bg-secondary) 90%, #040812 10%));
+      box-shadow: 0 30px 80px rgba(2, 6, 23, 0.55);
+      overflow: hidden;
+    }
+
+    .workspace-detail-task-confirm-body {
+      position: relative;
+      padding: 1.35rem;
+    }
+
+    .workspace-detail-task-confirm-close {
+      position: absolute;
+      top: 1rem;
+      right: 1rem;
+      opacity: 0.78;
+      z-index: 1;
+    }
+
+    .workspace-detail-task-confirm-header {
+      display: flex;
+      align-items: flex-start;
+      gap: 1rem;
+      padding-right: 2.25rem;
+    }
+
+    .workspace-detail-task-confirm-icon {
+      width: 3rem;
+      height: 3rem;
+      border-radius: 16px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      background: linear-gradient(135deg, rgba(var(--primary-color-rgb, 255, 138, 86), 0.22), rgba(251, 191, 36, 0.18));
+      border: 1px solid rgba(var(--primary-color-rgb, 255, 138, 86), 0.28);
+      color: color-mix(in srgb, var(--primary-color) 74%, white);
+      box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08), 0 18px 34px rgba(15, 23, 42, 0.28);
+      flex-shrink: 0;
+    }
+
+    .workspace-detail-task-confirm-copy {
+      flex: 1;
+      min-width: 0;
+    }
+
+    .workspace-detail-task-confirm-eyebrow {
+      font-size: 0.7rem;
+      font-weight: 700;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+      color: color-mix(in srgb, var(--text-secondary) 85%, #f8fafc 15%);
+      margin-bottom: 0.45rem;
+    }
+
+    .workspace-detail-task-confirm-title {
+      margin: 0;
+      font-size: 1.18rem;
+      font-weight: 650;
+      color: var(--text-primary);
+      line-height: 1.2;
+    }
+
+    .workspace-detail-task-confirm-message {
+      margin: 0.6rem 0 0;
+      font-size: 0.92rem;
+      line-height: 1.55;
+      color: var(--text-secondary);
+      white-space: pre-wrap;
+    }
+
+    .workspace-detail-task-confirm-meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.45rem;
+      margin-top: 1rem;
+    }
+
+    .workspace-detail-task-confirm-chip {
+      display: inline-flex;
+      align-items: center;
+      padding: 0.24rem 0.65rem;
+      border-radius: 999px;
+      border: 1px solid color-mix(in srgb, var(--border-color) 72%, var(--primary-color) 28%);
+      background: color-mix(in srgb, var(--bg-secondary) 78%, rgba(var(--primary-color-rgb, 255, 138, 86), 0.2));
+      color: var(--text-primary);
+      font-size: 0.72rem;
+      font-weight: 600;
+      line-height: 1.2;
+    }
+
+    .workspace-detail-task-confirm-details {
+      display: grid;
+      gap: 0.55rem;
+      margin-top: 1rem;
+    }
+
+    .workspace-detail-task-confirm-detail {
+      display: flex;
+      align-items: flex-start;
+      gap: 0.7rem;
+      padding: 0.72rem 0.78rem;
+      border-radius: 14px;
+      border: 1px solid color-mix(in srgb, var(--border-color) 76%, #38bdf8 24%);
+      background: color-mix(in srgb, var(--bg-secondary) 88%, rgba(56, 189, 248, 0.08));
+    }
+
+    .workspace-detail-task-confirm-detail-index {
+      width: 1.45rem;
+      height: 1.45rem;
+      border-radius: 999px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      background: rgba(56, 189, 248, 0.16);
+      color: #7dd3fc;
+      font-size: 0.72rem;
+      font-weight: 700;
+      flex-shrink: 0;
+    }
+
+    .workspace-detail-task-confirm-detail-text {
+      color: var(--text-primary);
+      font-size: 0.82rem;
+      line-height: 1.45;
+      white-space: pre-wrap;
+    }
+
+    .workspace-detail-task-confirm-actions {
+      display: flex;
+      justify-content: flex-end;
+      gap: 0.7rem;
+      margin-top: 1.15rem;
+      flex-wrap: wrap;
+    }
+
+    @media (max-width: 576px) {
+      .workspace-detail-task-confirm-body {
+        padding: 1.1rem;
+      }
+
+      .workspace-detail-task-confirm-header {
+        flex-direction: column;
+        padding-right: 1.4rem;
+      }
+
+      .workspace-detail-task-confirm-actions {
+        flex-direction: column-reverse;
+      }
+
+      .workspace-detail-task-confirm-actions .modern-btn {
+        width: 100%;
+        justify-content: center;
+      }
     }
 
     .workspace-detail-task-execution-status-wrap {
