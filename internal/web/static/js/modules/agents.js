@@ -10,6 +10,29 @@ let currentAgentName = '';
 let visibleAgentCount = 3;
 let availableProviders = []; // Cache for available providers and models
 
+function supportsCodexReasoning(providerName, modelName) {
+  const provider = String(providerName || '').trim().toLowerCase();
+  const model = String(modelName || '').trim().toLowerCase();
+  return provider === 'codex' || model.includes('codex');
+}
+
+function updateAgentReasoningVisibility() {
+  const field = document.getElementById('agentReasoningField');
+  const select = document.getElementById('agentReasoning');
+  const modelSelect = document.getElementById('agentModel');
+  if (!field || !select || !modelSelect) return;
+
+  const selectedOption = modelSelect.selectedOptions?.[0];
+  const provider = selectedOption?.getAttribute('data-provider') || '';
+  const show = supportsCodexReasoning(provider, modelSelect.value);
+
+  field.classList.toggle('d-none', !show);
+  select.disabled = !show;
+  if (show && !select.value) {
+    select.value = 'medium';
+  }
+}
+
 // Fetch available providers and models from API
 async function loadAvailableProviders() {
   try {
@@ -70,6 +93,7 @@ async function initializeModels() {
   const agentModelSelect = document.getElementById('agentModel');
   if (agentModelSelect) {
     populateModelSelect(agentModelSelect, 'tool-calling');
+    updateAgentReasoningVisibility();
   }
 }
 
@@ -156,12 +180,17 @@ function showAddAgentModal() {
     // Re-filter models based on default type (models already loaded on page init)
     populateModelSelect(agentModelInput, 'tool-calling');
   }
+  const agentReasoningInput = document.getElementById('agentReasoning');
+  if (agentReasoningInput) {
+    agentReasoningInput.value = 'medium';
+  }
   if (agentTemperatureInput) {
     agentTemperatureInput.value = '1.0';
     if (temperatureValueSpan) {
       temperatureValueSpan.textContent = '1.0';
     }
   }
+  updateAgentReasoningVisibility();
 
   modal.show();
 
@@ -187,6 +216,7 @@ async function createNewAgent() {
   const agentTypeInput = document.getElementById('agentType');
   const agentSystemPromptInput = document.getElementById('agentSystemPrompt');
   const agentModelInput = document.getElementById('agentModel');
+  const agentReasoningInput = document.getElementById('agentReasoning');
   const agentTemperatureInput = document.getElementById('agentTemperature');
   const agentAllowWebSearchInput = document.getElementById('agentAllowWebSearch');
   const createBtn = document.getElementById('createAgentBtn');
@@ -219,6 +249,14 @@ async function createNewAgent() {
     // Add model if provided
     if (agentModelInput && agentModelInput.value) {
       requestBody.model = agentModelInput.value;
+      const selectedModelOption = agentModelInput.selectedOptions?.[0];
+      const selectedProvider = selectedModelOption?.getAttribute('data-provider');
+      if (selectedProvider) {
+        requestBody.llm_provider = selectedProvider;
+      }
+      if (supportsCodexReasoning(selectedProvider, agentModelInput.value) && agentReasoningInput?.value) {
+        requestBody.reasoning_effort = agentReasoningInput.value;
+      }
     }
 
     // Add temperature if provided
@@ -254,9 +292,13 @@ async function createNewAgent() {
     if (agentTemperatureInput) {
       agentTemperatureInput.value = '1.0';
     }
+    if (agentReasoningInput) {
+      agentReasoningInput.value = 'medium';
+    }
     if (agentAllowWebSearchInput) {
       agentAllowWebSearchInput.checked = true;
     }
+    updateAgentReasoningVisibility();
 
     // Show success message
     agentsLog.info('Agent created successfully', { agent: agentName });
@@ -837,6 +879,13 @@ function setupAgentManagement() {
   if (agentTypeInput && agentModelInput) {
     agentTypeInput.addEventListener('change', (e) => {
       filterModelsByType(e.target.value, agentModelInput);
+      updateAgentReasoningVisibility();
+    });
+  }
+
+  if (agentModelInput) {
+    agentModelInput.addEventListener('change', () => {
+      updateAgentReasoningVisibility();
     });
   }
 
@@ -1026,6 +1075,7 @@ function applyBaseAutoConfig(config) {
           break;
         }
       }
+      updateAgentReasoningVisibility();
     }
   }, 100);
 

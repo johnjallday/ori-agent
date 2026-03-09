@@ -59,6 +59,7 @@ console.log('[workspace-hub.js] FILE LOADED');
     taskDetailsModal: document.getElementById('hubTaskDetailsModal'),
     taskDetailsTitle: document.getElementById('hubTaskDetailsTitle'),
     taskDetailsDescription: document.getElementById('hubTaskDetailsDescription'),
+    taskDetailsHeaderId: document.getElementById('hubTaskDetailsHeaderId'),
     taskDetailsId: document.getElementById('hubTaskDetailsId'),
     taskDetailsStatus: document.getElementById('hubTaskDetailsStatus'),
     taskDetailsAssignedTo: document.getElementById('hubTaskDetailsAssignedTo'),

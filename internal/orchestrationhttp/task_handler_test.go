@@ -1,6 +1,7 @@
 package orchestrationhttp
 
 import (
+	"net/http/httptest"
 	"testing"
 
 	"github.com/johnjallday/ori-agent/internal/workspace"
@@ -206,4 +207,38 @@ func TestApplyBasicFieldUpdates_KanbanMetadata(t *testing.T) {
 	if _, ok := task.Context["kanban_due_date"]; ok {
 		t.Fatalf("expected kanban_due_date to be cleared")
 	}
+}
+
+func TestExtractTaskIDForDelete(t *testing.T) {
+	t.Run("from query id", func(t *testing.T) {
+		req := httptest.NewRequest("DELETE", "/api/orchestration/tasks?id=task-query-1", nil)
+		got := extractTaskIDForDelete(req)
+		if got != "task-query-1" {
+			t.Fatalf("expected task-query-1, got %q", got)
+		}
+	})
+
+	t.Run("from rest path", func(t *testing.T) {
+		req := httptest.NewRequest("DELETE", "/api/orchestration/tasks/task-path-1", nil)
+		got := extractTaskIDForDelete(req)
+		if got != "task-path-1" {
+			t.Fatalf("expected task-path-1, got %q", got)
+		}
+	})
+
+	t.Run("path with extra segment", func(t *testing.T) {
+		req := httptest.NewRequest("DELETE", "/api/orchestration/tasks/task-path-2/assist", nil)
+		got := extractTaskIDForDelete(req)
+		if got != "task-path-2" {
+			t.Fatalf("expected task-path-2, got %q", got)
+		}
+	})
+
+	t.Run("query takes precedence over path", func(t *testing.T) {
+		req := httptest.NewRequest("DELETE", "/api/orchestration/tasks/task-path-3?id=task-query-3", nil)
+		got := extractTaskIDForDelete(req)
+		if got != "task-query-3" {
+			t.Fatalf("expected task-query-3, got %q", got)
+		}
+	})
 }

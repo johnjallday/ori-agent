@@ -13,6 +13,37 @@
         <label for="folderDescriptionInput" style="font-size: 12px; color: var(--text-secondary);">Description <span style="opacity: 0.8;">(optional)</span></label>
         <textarea id="folderDescriptionInput" class="modern-input w-100 mb-2" placeholder="Description (optional)" rows="2" style="resize: vertical;"></textarea>
 
+        <div class="workspace-setup-card mb-2">
+          <div class="workspace-setup-header">
+            <label for="folderImportToggle" class="workspace-setup-title">Import from Existing Folder</label>
+            <div class="form-check form-switch m-0">
+              <input class="form-check-input" type="checkbox" id="folderImportToggle" role="switch" aria-label="Import from existing folder">
+            </div>
+          </div>
+          <p class="workspace-setup-help mb-2">Link a local folder so this workspace starts with real project context.</p>
+
+          <div id="folderImportSection" hidden>
+            <label for="folderImportPathInput" style="font-size: 12px; color: var(--text-secondary);">Folder path</label>
+            <div class="d-flex flex-column flex-sm-row gap-2 mb-2">
+              <input type="text" id="folderImportPathInput" class="modern-input w-100" placeholder="/absolute/path/to/project" autocomplete="off">
+              <button type="button" id="folderImportBrowseBtn" class="modern-btn modern-btn-secondary" style="white-space: nowrap; min-width: 96px;" aria-label="Browse for folder path">
+                Browse
+              </button>
+            </div>
+            <div style="margin-top: -6px; margin-bottom: 8px; font-size: 12px; color: var(--text-secondary);">
+              Enter an absolute path to import. Workspace name defaults to the folder name, and you can edit it.
+            </div>
+
+            <div id="folderImportDuplicateWarning" class="modern-card p-2 mb-2" style="display: none; border: 1px solid #f59e0b; background: rgba(245, 158, 11, 0.08);">
+              <div id="folderImportDuplicateText" style="font-size: 12px; color: var(--text-primary); margin-bottom: 8px;" aria-live="polite"></div>
+              <div class="d-flex flex-column flex-sm-row gap-2">
+                <button type="button" id="folderImportOpenExistingBtn" class="modern-btn modern-btn-secondary" style="flex: 1;">Open Existing</button>
+                <button type="button" id="folderImportProceedDuplicateBtn" class="modern-btn modern-btn-primary" style="flex: 1;">Import Anyway</button>
+              </div>
+            </div>
+          </div>
+        </div>
+
         <label for="folderParentSelect" style="font-size: 12px; color: var(--text-secondary);">Group (optional)</label>
         <select id="folderParentSelect" class="modern-input w-100 mb-2" aria-label="Select parent workspace">
           <option value="">No group</option>

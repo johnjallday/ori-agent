@@ -1,0 +1,181 @@
+package skillshttp
+
+import "testing"
+
+func TestIsValidMarketplacePackageSpec(t *testing.T) {
+	tests := []struct {
+		name  string
+		spec  string
+		valid bool
+	}{
+		{name: "valid basic", spec: "vercel-labs/skills@find-skills", valid: true},
+		{name: "valid dotted owner", spec: "mcp-hub.momenta.works/finder@find-skills-ai", valid: true},
+		{name: "invalid missing skill", spec: "vercel-labs/skills", valid: false},
+		{name: "invalid spaces", spec: "vercel labs/skills@find-skills", valid: false},
+		{name: "invalid extra text", spec: "vercel-labs/skills@find-skills --agent universal", valid: false},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := isValidMarketplacePackageSpec(tc.spec)
+			if got != tc.valid {
+				t.Fatalf("isValidMarketplacePackageSpec(%q) = %v, want %v", tc.spec, got, tc.valid)
+			}
+		})
+	}
+}
+
+func TestIsValidMarketplaceSkillName(t *testing.T) {
+	tests := []struct {
+		name  string
+		value string
+		valid bool
+	}{
+		{name: "simple", value: "find-skills", valid: true},
+		{name: "underscores and dots", value: "my_skill.v2", valid: true},
+		{name: "empty", value: "", valid: false},
+		{name: "spaces", value: "find skills", valid: false},
+		{name: "slashes", value: "vercel-labs/find-skills", valid: false},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := isValidMarketplaceSkillName(tc.value)
+			if got != tc.valid {
+				t.Fatalf("isValidMarketplaceSkillName(%q) = %v, want %v", tc.value, got, tc.valid)
+			}
+		})
+	}
+}
+
+func TestNormalizeMarketplaceSkillName(t *testing.T) {
+	if got := normalizeMarketplaceSkillName("vercel-labs/skills@find-skills"); got != "find-skills" {
+		t.Fatalf("normalizeMarketplaceSkillName(package) = %q", got)
+	}
+	if got := normalizeMarketplaceSkillName(" find-skills "); got != "find-skills" {
+		t.Fatalf("normalizeMarketplaceSkillName(skill) = %q", got)
+	}
+}
+
+func TestSanitizeMarketplaceQuery(t *testing.T) {
+	raw := "   find    skills   for  ui   "
+	got := sanitizeMarketplaceQuery(raw)
+	if got != "find skills for ui" {
+		t.Fatalf("sanitizeMarketplaceQuery() = %q", got)
+	}
+}
+
+func TestParseSkillsFindOutput(t *testing.T) {
+	output := "\x1b[38;5;102mInstall with\x1b[0m npx skills add <owner/repo@skill>\n\n" +
+		"\x1b[38;5;145mvercel-labs/skills@find-skills\x1b[0m \x1b[36m418K installs\x1b[0m\n" +
+		"\x1b[38;5;102m└ https://skills.sh/vercel-labs/skills/find-skills\x1b[0m\n\n" +
+		"\x1b[38;5;145mmcp-hub.momenta.works/finder@find-skills-ai\x1b[0m \x1b[36m74 installs\x1b[0m\n" +
+		"\x1b[38;5;102m└ https://skills.sh/mcp-hub.momenta.works/finder/find-skills-ai\x1b[0m\n"
+
+	results := parseSkillsFindOutput(output, 10)
+	if len(results) != 2 {
+		t.Fatalf("expected 2 results, got %d", len(results))
+	}
+
+	if results[0].Package != "vercel-labs/skills@find-skills" {
+		t.Fatalf("unexpected package[0]: %q", results[0].Package)
+	}
+	if results[0].Repository != "vercel-labs/skills" {
+		t.Fatalf("unexpected repository[0]: %q", results[0].Repository)
+	}
+	if results[0].Skill != "find-skills" {
+		t.Fatalf("unexpected skill[0]: %q", results[0].Skill)
+	}
+	if results[0].Installs != "418K installs" {
+		t.Fatalf("unexpected installs[0]: %q", results[0].Installs)
+	}
+	if results[0].URL != "https://skills.sh/vercel-labs/skills/find-skills" {
+		t.Fatalf("unexpected url[0]: %q", results[0].URL)
+	}
+
+	if results[1].Package != "mcp-hub.momenta.works/finder@find-skills-ai" {
+		t.Fatalf("unexpected package[1]: %q", results[1].Package)
+	}
+	if results[1].Skill != "find-skills-ai" {
+		t.Fatalf("unexpected skill[1]: %q", results[1].Skill)
+	}
+}
+
+func TestParseSkillsListOutput(t *testing.T) {
+	output := "\x1b[1mGlobal Skills\x1b[0m\n\n" +
+		"\x1b[36mfind-skills\x1b[0m \x1b[38;5;102m~/.agents/skills/find-skills\x1b[0m\n" +
+		"  \x1b[38;5;102mAgents:\x1b[0m \x1b[33muniversal\x1b[0m\n" +
+		"\x1b[36mfrontend-design\x1b[0m \x1b[38;5;102m~/.agents/skills/frontend-design\x1b[0m\n" +
+		"  \x1b[38;5;102mAgents:\x1b[0m \x1b[33mnot linked\x1b[0m\n"
+
+	results := parseSkillsListOutput(output, 10)
+	if len(results) != 2 {
+		t.Fatalf("expected 2 results, got %d", len(results))
+	}
+
+	if results[0].Name != "find-skills" {
+		t.Fatalf("unexpected name[0]: %q", results[0].Name)
+	}
+	if results[0].Scope != "global" {
+		t.Fatalf("unexpected scope[0]: %q", results[0].Scope)
+	}
+	if results[0].Agents != "universal" {
+		t.Fatalf("unexpected agents[0]: %q", results[0].Agents)
+	}
+	if results[0].Path != "~/.agents/skills/find-skills" {
+		t.Fatalf("unexpected path[0]: %q", results[0].Path)
+	}
+}
+
+func TestMarketplaceOutputSummary(t *testing.T) {
+	output := "\x1b[38;5;145mChecking for skill updates...\x1b[0m\n\n\x1b[38;5;145m✓ All skills are up to date\x1b[0m\n"
+	got := marketplaceOutputSummary(output)
+	if got != "✓ All skills are up to date" {
+		t.Fatalf("marketplaceOutputSummary() = %q", got)
+	}
+}
+
+func TestSkillsInitAlreadyExists(t *testing.T) {
+	already := "\x1b[38;5;145mSkill already exists at \x1b[38;5;102mdemo-skill/SKILL.md\x1b[0m"
+	if !skillsInitAlreadyExists(already) {
+		t.Fatalf("skillsInitAlreadyExists() = false, want true")
+	}
+
+	created := "\x1b[38;5;145mInitialized skill: \x1b[38;5;102mdemo-skill\x1b[0m"
+	if skillsInitAlreadyExists(created) {
+		t.Fatalf("skillsInitAlreadyExists() = true, want false")
+	}
+}
+
+func TestSanitizeGeneratedPrompt(t *testing.T) {
+	raw := "```text\nPrompt:\nLine 1\nLine 2\n```\n"
+	got := sanitizeGeneratedPrompt(raw)
+	want := "Line 1\nLine 2"
+	if got != want {
+		t.Fatalf("sanitizeGeneratedPrompt() = %q, want %q", got, want)
+	}
+}
+
+func TestSanitizeGeneratedPrompt_TruncatesToTwentyLines(t *testing.T) {
+	raw := ""
+	for i := 1; i <= 25; i++ {
+		if i > 1 {
+			raw += "\n"
+		}
+		raw += "Line"
+	}
+	got := sanitizeGeneratedPrompt(raw)
+	lines := 0
+	for _, ch := range got {
+		if ch == '\n' {
+			lines++
+		}
+	}
+	// number of lines = newline count + 1 when non-empty
+	if got != "" {
+		lines++
+	}
+	if lines != 20 {
+		t.Fatalf("sanitizeGeneratedPrompt() line count = %d, want 20", lines)
+	}
+}

@@ -2,9 +2,13 @@ package sessionhttp
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
+	"os"
+	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 
@@ -21,6 +25,19 @@ func (h *Handler) HandleWorkspaces(w http.ResponseWriter, r *http.Request) {
 	path = strings.TrimPrefix(path, "/api/folders")
 	path = strings.TrimPrefix(path, "/api/workspaces")
 	path = strings.TrimPrefix(path, "/")
+
+	// Import routes must be handled before generic workspace-id routing.
+	switch path {
+	case "import":
+		h.handleWorkspaceImport(w, r)
+		return
+	case "import/check":
+		h.handleWorkspaceImportCheck(w, r)
+		return
+	case "import/duplicate-action":
+		h.handleWorkspaceImportDuplicateAction(w, r)
+		return
+	}
 
 	// Handle sub-paths like {id}/agents, {id}/layout
 	if path != "" && strings.Contains(path, "/") {
@@ -261,6 +278,406 @@ func (h *Handler) listWorkspaces(w http.ResponseWriter, r *http.Request) {
 	orihttp.WriteJSON(w, map[string]interface{}{
 		"folders": workspaces,
 	})
+}
+
+// =============================================================================
+// Workspace Folder Import
+// =============================================================================
+
+type createWorkspaceImportRequest struct {
+	Name           string `json:"name,omitempty"`
+	Description    string `json:"description,omitempty"`
+	ParentID       string `json:"parent_id,omitempty"`
+	OrderIndex     *int   `json:"order_index,omitempty"`
+	Color          string `json:"color,omitempty"`
+	Path           string `json:"path"`
+	AllowDuplicate bool   `json:"allow_duplicate,omitempty"`
+	EntryPoint     string `json:"entry_point,omitempty"`
+}
+
+type workspaceImportDuplicate struct {
+	Found         bool   `json:"found"`
+	WorkspaceID   string `json:"workspace_id,omitempty"`
+	WorkspaceName string `json:"workspace_name,omitempty"`
+	DirectoryID   string `json:"directory_id,omitempty"`
+	Path          string `json:"path,omitempty"`
+}
+
+type workspaceDirectoryReference struct {
+	ID          string    `json:"id"`
+	WorkspaceID string    `json:"workspace_id"`
+	Name        string    `json:"name"`
+	Path        string    `json:"path"`
+	X           float64   `json:"x"`
+	Y           float64   `json:"y"`
+	CreatedAt   time.Time `json:"created_at"`
+	UpdatedAt   time.Time `json:"updated_at"`
+}
+
+func (h *Handler) handleWorkspaceImportCheck(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost && r.Method != http.MethodGet {
+		_ = orihttp.RespondMethodNotAllowed(w)
+		return
+	}
+
+	pathValue := strings.TrimSpace(r.URL.Query().Get("path"))
+	if r.Method == http.MethodPost {
+		var req struct {
+			Path string `json:"path"`
+		}
+		if !orihttp.ParseJSONBody(w, r, &req) {
+			return
+		}
+		pathValue = strings.TrimSpace(req.Path)
+	}
+
+	if pathValue == "" {
+		_ = orihttp.RespondBadRequest(w, "path is required")
+		return
+	}
+
+	normalizedPath, err := normalizeImportPath(pathValue)
+	if err != nil {
+		_ = orihttp.RespondBadRequest(w, fmt.Sprintf("invalid path: %v", err))
+		return
+	}
+
+	duplicate, err := h.findDuplicateImportedWorkspace(r.Context(), normalizedPath)
+	if err != nil {
+		logger.Error("Failed duplicate check for workspace import", logger.Fields{"error": err})
+		_ = orihttp.RespondInternalError(w, "Failed to check folder import status")
+		return
+	}
+
+	orihttp.WriteJSON(w, map[string]interface{}{
+		"success":         true,
+		"normalized_path": normalizedPath,
+		"duplicate":       duplicate,
+	})
+}
+
+func (h *Handler) handleWorkspaceImport(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		_ = orihttp.RespondMethodNotAllowed(w)
+		return
+	}
+
+	var req createWorkspaceImportRequest
+	if !orihttp.ParseJSONBody(w, r, &req) {
+		return
+	}
+
+	if strings.TrimSpace(req.Path) == "" {
+		_ = orihttp.RespondBadRequest(w, "path is required")
+		return
+	}
+
+	normalizedPath, err := normalizeImportPath(req.Path)
+	if err != nil {
+		_ = orihttp.RespondBadRequest(w, fmt.Sprintf("invalid path: %v", err))
+		return
+	}
+
+	info, err := os.Stat(normalizedPath)
+	if err != nil {
+		_ = orihttp.RespondBadRequest(w, fmt.Sprintf("path is not accessible: %v", err))
+		return
+	}
+	if !info.IsDir() {
+		_ = orihttp.RespondBadRequest(w, "path must be a directory")
+		return
+	}
+
+	duplicate, err := h.findDuplicateImportedWorkspace(r.Context(), normalizedPath)
+	if err != nil {
+		logger.Error("Failed duplicate check for workspace import", logger.Fields{"error": err})
+		_ = orihttp.RespondInternalError(w, "Failed to check existing imported workspaces")
+		return
+	}
+
+	if duplicate.Found && !req.AllowDuplicate {
+		recordWorkspaceImportTelemetry("duplicate_detected", logger.Fields{
+			"path_hash":      hashPathForTelemetry(normalizedPath),
+			"entry_point":    req.EntryPoint,
+			"workspace_id":   duplicate.WorkspaceID,
+			"workspace_name": duplicate.WorkspaceName,
+		})
+		writeWorkspaceImportConflict(w, "Folder is already imported in another workspace", duplicate)
+		return
+	}
+
+	workspaceName := strings.TrimSpace(req.Name)
+	if workspaceName == "" {
+		workspaceName = filepath.Base(normalizedPath)
+	}
+
+	workspace := &session.Workspace{
+		Name:        workspaceName,
+		Description: req.Description,
+		ParentID:    req.ParentID,
+		Color:       req.Color,
+	}
+	if req.OrderIndex != nil {
+		workspace.OrderIndex = *req.OrderIndex
+	}
+	workspace.SharedData = map[string]interface{}{
+		"folder_import": map[string]interface{}{
+			"enabled":         true,
+			"path":            normalizedPath,
+			"path_hash":       hashPathForTelemetry(normalizedPath),
+			"entry_point":     req.EntryPoint,
+			"allow_duplicate": req.AllowDuplicate,
+			"imported_at":     time.Now().UTC().Format(time.RFC3339),
+		},
+	}
+
+	recordWorkspaceImportTelemetry("import_attempt", logger.Fields{
+		"path_hash":       hashPathForTelemetry(normalizedPath),
+		"entry_point":     req.EntryPoint,
+		"allow_duplicate": req.AllowDuplicate,
+	})
+
+	if err := h.store.CreateWorkspace(r.Context(), workspace); err != nil {
+		logger.Error("Failed to create workspace from folder import", logger.Fields{"error": err})
+		recordWorkspaceImportTelemetry("import_failed", logger.Fields{
+			"path_hash":   hashPathForTelemetry(normalizedPath),
+			"entry_point": req.EntryPoint,
+			"reason":      "workspace_create_failed",
+		})
+		_ = orihttp.RespondInternalError(w, "Failed to create workspace from folder")
+		return
+	}
+
+	dirRef := workspaceDirectoryReference{
+		ID:          uuid.New().String(),
+		WorkspaceID: workspace.ID,
+		Name:        filepath.Base(normalizedPath),
+		Path:        normalizedPath,
+		X:           400,
+		Y:           300,
+		CreatedAt:   time.Now(),
+		UpdatedAt:   time.Now(),
+	}
+
+	var refs []workspaceDirectoryReference
+	if len(workspace.DirectoryReferencesJSON) > 0 {
+		if existingRefs, err := decodeDirectoryReferences(workspace.DirectoryReferencesJSON); err == nil {
+			refs = existingRefs
+		}
+	}
+	refs = append(refs, dirRef)
+
+	data, err := json.Marshal(refs)
+	if err != nil {
+		logger.Error("Failed to marshal directory references for workspace import", logger.Fields{"workspace_id": workspace.ID, "error": err})
+		_ = h.store.DeleteWorkspace(r.Context(), workspace.ID)
+		recordWorkspaceImportTelemetry("import_failed", logger.Fields{
+			"path_hash":    hashPathForTelemetry(normalizedPath),
+			"workspace_id": workspace.ID,
+			"entry_point":  req.EntryPoint,
+			"reason":       "directory_reference_marshal_failed",
+		})
+		_ = orihttp.RespondInternalError(w, "Failed to attach imported folder")
+		return
+	}
+	workspace.DirectoryReferencesJSON = data
+	workspace.UpdatedAt = time.Now()
+
+	if err := h.store.UpdateWorkspace(r.Context(), workspace); err != nil {
+		logger.Error("Failed to attach imported folder reference to workspace", logger.Fields{"workspace_id": workspace.ID, "error": err})
+		if delErr := h.store.DeleteWorkspace(r.Context(), workspace.ID); delErr != nil {
+			logger.Warn("Failed to rollback workspace after import attach failure", logger.Fields{"workspace_id": workspace.ID, "error": delErr})
+		}
+		recordWorkspaceImportTelemetry("import_failed", logger.Fields{
+			"path_hash":    hashPathForTelemetry(normalizedPath),
+			"workspace_id": workspace.ID,
+			"entry_point":  req.EntryPoint,
+			"reason":       "directory_reference_save_failed",
+		})
+		_ = orihttp.RespondInternalError(w, "Failed to attach imported folder")
+		return
+	}
+
+	logger.Info("Workspace imported from folder", logger.Fields{
+		"workspace_id": workspace.ID,
+		"name":         workspaceName,
+		"path_hash":    hashPathForTelemetry(normalizedPath),
+		"entry_point":  req.EntryPoint,
+	})
+	recordWorkspaceImportTelemetry("import_success", logger.Fields{
+		"workspace_id": workspace.ID,
+		"path_hash":    hashPathForTelemetry(normalizedPath),
+		"entry_point":  req.EntryPoint,
+	})
+
+	_ = orihttp.RespondCreated(w, map[string]interface{}{
+		"success": true,
+		"folder":  workspace,
+		"directory": map[string]interface{}{
+			"id":           dirRef.ID,
+			"workspace_id": dirRef.WorkspaceID,
+			"name":         dirRef.Name,
+			"path":         dirRef.Path,
+		},
+		"duplicate": workspaceImportDuplicate{Found: false},
+	})
+}
+
+func (h *Handler) handleWorkspaceImportDuplicateAction(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		_ = orihttp.RespondMethodNotAllowed(w)
+		return
+	}
+
+	var req struct {
+		Action      string `json:"action"`
+		WorkspaceID string `json:"workspace_id,omitempty"`
+		EntryPoint  string `json:"entry_point,omitempty"`
+		Path        string `json:"path,omitempty"`
+	}
+	if !orihttp.ParseJSONBody(w, r, &req) {
+		return
+	}
+
+	action := strings.TrimSpace(req.Action)
+	switch action {
+	case "suggestion_accepted", "override_confirmed":
+	default:
+		_ = orihttp.RespondBadRequest(w, "action must be one of: suggestion_accepted, override_confirmed")
+		return
+	}
+
+	fields := logger.Fields{
+		"entry_point": strings.TrimSpace(req.EntryPoint),
+	}
+	if strings.TrimSpace(req.WorkspaceID) != "" {
+		fields["workspace_id"] = strings.TrimSpace(req.WorkspaceID)
+	}
+
+	if trimmedPath := strings.TrimSpace(req.Path); trimmedPath != "" {
+		if normalizedPath, err := normalizeImportPath(trimmedPath); err == nil {
+			fields["path_hash"] = hashPathForTelemetry(normalizedPath)
+		} else {
+			fields["path_hash"] = hashPathForTelemetry(filepath.Clean(trimmedPath))
+			fields["path_normalization"] = "failed"
+		}
+	}
+
+	recordWorkspaceImportTelemetry(action, fields)
+
+	orihttp.WriteJSON(w, map[string]interface{}{
+		"success": true,
+	})
+}
+
+func (h *Handler) findDuplicateImportedWorkspace(ctx context.Context, normalizedPath string) (workspaceImportDuplicate, error) {
+	workspaces, err := h.store.ListWorkspaces(ctx)
+	if err != nil {
+		return workspaceImportDuplicate{}, err
+	}
+
+	for _, wsSummary := range workspaces {
+		ws, err := h.store.GetWorkspace(ctx, wsSummary.ID)
+		if err != nil {
+			continue
+		}
+
+		refs, err := decodeDirectoryReferences(ws.DirectoryReferencesJSON)
+		if err != nil {
+			logger.Warn("Failed to decode directory references while checking duplicates", logger.Fields{
+				"workspace_id": ws.ID,
+				"error":        err,
+			})
+			continue
+		}
+
+		for _, ref := range refs {
+			refPath, err := normalizeImportPath(ref.Path)
+			if err != nil {
+				continue
+			}
+			if refPath == normalizedPath {
+				return workspaceImportDuplicate{
+					Found:         true,
+					WorkspaceID:   ws.ID,
+					WorkspaceName: ws.Name,
+					DirectoryID:   ref.ID,
+					Path:          ref.Path,
+				}, nil
+			}
+		}
+	}
+
+	return workspaceImportDuplicate{Found: false}, nil
+}
+
+func decodeDirectoryReferences(raw json.RawMessage) ([]workspaceDirectoryReference, error) {
+	if len(raw) == 0 {
+		return []workspaceDirectoryReference{}, nil
+	}
+	var refs []workspaceDirectoryReference
+	if err := json.Unmarshal(raw, &refs); err != nil {
+		return nil, err
+	}
+	return refs, nil
+}
+
+func normalizeImportPath(input string) (string, error) {
+	cleaned := strings.TrimSpace(input)
+	if cleaned == "" {
+		return "", fmt.Errorf("path is empty")
+	}
+	cleaned = filepath.Clean(cleaned)
+
+	absPath, err := filepath.Abs(cleaned)
+	if err != nil {
+		return "", err
+	}
+
+	normalized := absPath
+	if resolved, err := filepath.EvalSymlinks(absPath); err == nil {
+		normalized = resolved
+	}
+
+	normalized = filepath.Clean(normalized)
+	if runtime.GOOS == "windows" {
+		normalized = strings.ToLower(normalized)
+	}
+	return normalized, nil
+}
+
+func writeWorkspaceImportConflict(w http.ResponseWriter, message string, duplicate workspaceImportDuplicate) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusConflict)
+	if err := json.NewEncoder(w).Encode(map[string]interface{}{
+		"success":   false,
+		"error":     message,
+		"duplicate": duplicate,
+	}); err != nil {
+		logger.Error("Failed to encode workspace import conflict response", logger.Fields{"error": err})
+	}
+}
+
+func recordWorkspaceImportTelemetry(event string, fields logger.Fields) {
+	if fields == nil {
+		fields = logger.Fields{}
+	}
+	fields["event"] = event
+	fields["scope"] = "workspace.folder_import"
+	logger.Info("Workspace folder import telemetry", fields)
+}
+
+func hashPathForTelemetry(path string) string {
+	if path == "" {
+		return ""
+	}
+	// Keep telemetry path-safe while remaining deterministic across runs.
+	parts := strings.Split(path, string(filepath.Separator))
+	if len(parts) == 0 {
+		return ""
+	}
+	tail := parts[len(parts)-1]
+	return fmt.Sprintf("%x", uuid.NewSHA1(uuid.NameSpaceOID, []byte(path)))[:16] + ":" + tail
 }
 
 // =============================================================================

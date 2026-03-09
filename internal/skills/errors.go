@@ -9,6 +9,7 @@ var (
 	ErrSkillExists             = errors.New("skill already exists")
 	ErrSkillNotFound           = errors.New("skill not found")
 	ErrSkillRenameNotSupported = errors.New("renaming skills is not supported")
+	ErrSkillReadOnly           = errors.New("skill source is read-only")
 )
 
 // SkillConflict represents a duplicate skill name across discovery paths.

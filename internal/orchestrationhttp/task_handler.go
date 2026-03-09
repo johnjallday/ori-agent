@@ -762,7 +762,7 @@ func (th *TaskHandler) handleUpdateTask(w http.ResponseWriter, r *http.Request) 
 
 // handleDeleteTask deletes a task
 func (th *TaskHandler) handleDeleteTask(w http.ResponseWriter, r *http.Request) {
-	taskID := r.URL.Query().Get("id")
+	taskID := extractTaskIDForDelete(r)
 	if taskID == "" {
 		orihttp.BadRequest(w, "id parameter required")
 		return
@@ -830,6 +830,38 @@ func (th *TaskHandler) handleDeleteTask(w http.ResponseWriter, r *http.Request) 
 		"message": "Task deleted successfully",
 		"task_id": taskID,
 	})
+}
+
+func extractTaskIDForDelete(r *http.Request) string {
+	if r == nil || r.URL == nil {
+		return ""
+	}
+
+	taskID := strings.TrimSpace(r.URL.Query().Get("id"))
+	if taskID != "" {
+		return taskID
+	}
+
+	path := strings.TrimSpace(r.URL.Path)
+	if path == "" {
+		return ""
+	}
+
+	trimmed := strings.TrimPrefix(path, "/api/orchestration/tasks/")
+	if trimmed == path {
+		return ""
+	}
+	trimmed = strings.Trim(trimmed, "/")
+	if trimmed == "" {
+		return ""
+	}
+
+	parts := strings.Split(trimmed, "/")
+	if len(parts) == 0 {
+		return ""
+	}
+
+	return strings.TrimSpace(parts[0])
 }
 
 // TasksPathHandler handles requests to /api/orchestration/tasks/{id}...

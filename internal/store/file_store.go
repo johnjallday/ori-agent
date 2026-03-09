@@ -110,6 +110,9 @@ func (s *fileStore) CreateAgent(name string, config *CreateAgentConfig) error {
 			if config.LLMProvider != "" {
 				defaultSettings.Provider = config.LLMProvider
 			}
+			if config.ReasoningEffort != "" {
+				defaultSettings.ReasoningEffort = config.ReasoningEffort
+			}
 			if config.MaxOutputTokens > 0 {
 				defaultSettings.MaxOutputTokens = config.MaxOutputTokens
 			}
@@ -117,6 +120,9 @@ func (s *fileStore) CreateAgent(name string, config *CreateAgentConfig) error {
 				allow := *config.AllowWebSearch
 				defaultSettings.AllowWebSearch = &allow
 			}
+		}
+		if defaultSettings.EffectiveReasoningEffort(defaultSettings.Provider) == "" {
+			defaultSettings.ReasoningEffort = ""
 		}
 
 		newAgent := &agent.Agent{

@@ -53,6 +53,16 @@
               <input type="text" id="agentModel" class="form-input" placeholder="e.g., gpt-4o" list="modelOptionsList" style="width: 100%; padding: 10px 14px; border: 1px solid var(--border-color); border-radius: 6px; font-size: 14px; background: var(--bg-primary); color: var(--text-primary);">
               <datalist id="modelOptionsList"></datalist>
             </div>
+            <div class="form-group" id="agentReasoningField" style="margin-bottom: 18px; display: none;">
+              <label class="form-label" for="agentReasoningEffort" style="display: block; font-weight: 500; margin-bottom: 8px; color: var(--text-primary);">Reasoning Level</label>
+              <select id="agentReasoningEffort" class="form-select" style="width: 100%; padding: 10px 14px; border: 1px solid var(--border-color); border-radius: 6px; font-size: 14px; background: var(--bg-primary); color: var(--text-primary);">
+                <option value="medium" selected>Medium (Recommended)</option>
+                <option value="high">High</option>
+                <option value="low">Low</option>
+                <option value="xhigh">Extra High</option>
+              </select>
+              <div class="form-help" style="color: var(--text-muted); font-size: 13px; margin-top: 4px;">Codex only. Higher levels improve difficult reasoning at the cost of speed.</div>
+            </div>
           </div>
         </div>
 

@@ -83,6 +83,7 @@ func (h *Handler) GenerateHandler(w http.ResponseWriter, r *http.Request) {
 			if err == nil {
 				provider = p
 				model = agent.Settings.Model
+				reasoningEffort = agent.Settings.EffectiveReasoningEffort(agent.Settings.Provider)
 				// Use agent's max output tokens if sufficient, otherwise use default
 				if agent.Settings.MaxOutputTokens >= MinOutputTokens {
 					maxTokens = agent.Settings.MaxOutputTokens

@@ -9,6 +9,7 @@ type CreateAgentConfig struct {
 	Temperature     float64 // Temperature (0.0-2.0)
 	SystemPrompt    string  // Custom system prompt
 	LLMProvider     string  // Provider backing the model (openai, anthropic, ollama, etc.)
+	ReasoningEffort string  // Optional reasoning effort for providers that support it
 	MaxOutputTokens int     // Optional max tokens for responses
 	AllowWebSearch  *bool   // Optional web utility permission (nil defaults to allowed)
 }

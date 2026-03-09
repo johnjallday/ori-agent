@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -312,6 +313,84 @@ func TestListEnabledSkillsWithPrompts(t *testing.T) {
 	}
 	if enabled[0].Prompt == "" {
 		t.Fatalf("expected prompt to be loaded")
+	}
+}
+
+func TestUpdateSkillAtPath_PersonalSource(t *testing.T) {
+	tmpDir := t.TempDir()
+	agentStorePath := filepath.Join(tmpDir, "agents.json")
+	if err := os.WriteFile(agentStorePath, []byte(`{}`), 0o644); err != nil {
+		t.Fatalf("write agents.json: %v", err)
+	}
+
+	personalSkillsDir := filepath.Join(tmpDir, "personal-skills")
+	skillDir := filepath.Join(personalSkillsDir, "workspace-intake-router")
+	writeTestSkill(t, skillDir, "workspace-intake-router", "Old description", "Old prompt")
+
+	manager := NewManager(ManagerConfig{
+		AgentStorePath:    agentStorePath,
+		PersonalSkillsDir: personalSkillsDir,
+	})
+
+	skillPath := filepath.Join(skillDir, "SKILL.md")
+	updated, err := manager.UpdateSkillAtPath(SourcePersonal, skillPath, "workspace-intake-router", SkillInput{
+		Name:        "workspace-intake-router",
+		Description: "New description",
+		Prompt:      "New prompt body",
+	})
+	if err != nil {
+		t.Fatalf("UpdateSkillAtPath error: %v", err)
+	}
+
+	if updated.Source != SourcePersonal {
+		t.Fatalf("updated source = %q, want %q", updated.Source, SourcePersonal)
+	}
+	if updated.Description != "New description" {
+		t.Fatalf("updated description = %q", updated.Description)
+	}
+	if updated.Prompt != "New prompt body" {
+		t.Fatalf("updated prompt = %q", updated.Prompt)
+	}
+}
+
+func TestUpdateSkillAtPath_ReadOnlySource(t *testing.T) {
+	tmpDir := t.TempDir()
+	agentStorePath := filepath.Join(tmpDir, "agents.json")
+	if err := os.WriteFile(agentStorePath, []byte(`{}`), 0o644); err != nil {
+		t.Fatalf("write agents.json: %v", err)
+	}
+
+	manager := NewManager(ManagerConfig{AgentStorePath: agentStorePath})
+	_, err := manager.UpdateSkillAtPath(SourceClaude, filepath.Join(tmpDir, "SKILL.md"), "test", SkillInput{
+		Name:        "test",
+		Description: "desc",
+		Prompt:      "prompt",
+	})
+	if !errors.Is(err, ErrSkillReadOnly) {
+		t.Fatalf("expected ErrSkillReadOnly, got %v", err)
+	}
+}
+
+func TestUpdateSkillAtPath_InvalidPath(t *testing.T) {
+	tmpDir := t.TempDir()
+	agentStorePath := filepath.Join(tmpDir, "agents.json")
+	if err := os.WriteFile(agentStorePath, []byte(`{}`), 0o644); err != nil {
+		t.Fatalf("write agents.json: %v", err)
+	}
+
+	personalSkillsDir := filepath.Join(tmpDir, "personal-skills")
+	manager := NewManager(ManagerConfig{
+		AgentStorePath:    agentStorePath,
+		PersonalSkillsDir: personalSkillsDir,
+	})
+
+	_, err := manager.UpdateSkillAtPath(SourcePersonal, filepath.Join(tmpDir, "outside", "SKILL.md"), "test", SkillInput{
+		Name:        "test",
+		Description: "desc",
+		Prompt:      "prompt",
+	})
+	if err == nil || !strings.Contains(err.Error(), "invalid skill path") {
+		t.Fatalf("expected invalid skill path error, got %v", err)
 	}
 }
 

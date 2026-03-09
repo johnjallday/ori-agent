@@ -67,6 +67,12 @@
           <div class="col-md-3">
             <label for="searchFilter" class="form-label" style="color: var(--text-secondary); font-weight: 500;">Search</label>
             <input type="text" id="searchFilter" class="form-control" placeholder="Search models..." style="color: var(--text-color);">
+            <div class="form-check mt-2">
+              <input class="form-check-input" type="checkbox" id="showLegacyFilter">
+              <label class="form-check-label" for="showLegacyFilter" style="color: var(--text-secondary); font-size: 0.875rem;">
+                Show Legacy models
+              </label>
+            </div>
           </div>
           <div class="col-md-3">
             <label class="form-label" style="color: var(--text-secondary); font-weight: 500;">View</label>
@@ -785,6 +791,7 @@ document.addEventListener('DOMContentLoaded', function() {
   document.getElementById('providerFilter').addEventListener('change', applyFilters);
   document.getElementById('categoryFilter').addEventListener('change', applyFilters);
   document.getElementById('searchFilter').addEventListener('input', applyFilters);
+  document.getElementById('showLegacyFilter').addEventListener('change', applyFilters);
   document.getElementById('addCategoryBtn').addEventListener('click', openCategoryEditor);
   document.getElementById('saveCategoryBtn').addEventListener('click', saveCategory);
   document.getElementById('saveAssignmentBtn').addEventListener('click', saveAssignment);
@@ -894,6 +901,7 @@ function applyFilters() {
   const providerFilter = document.getElementById('providerFilter').value;
   const categoryFilter = document.getElementById('categoryFilter').value;
   const searchFilter = document.getElementById('searchFilter').value.toLowerCase();
+  const showLegacy = document.getElementById('showLegacyFilter').checked;
   const container = document.getElementById('providersContainer');
   const noResults = document.getElementById('noResults');
 
@@ -901,21 +909,21 @@ function applyFilters() {
   let hasResults = false;
 
   if (viewPreference === 'provider') {
-    hasResults = renderByProvider(providerFilter, categoryFilter, searchFilter, container);
+    hasResults = renderByProvider(providerFilter, categoryFilter, searchFilter, showLegacy, container);
   } else {
-    hasResults = renderByCategory(providerFilter, categoryFilter, searchFilter, container);
+    hasResults = renderByCategory(providerFilter, categoryFilter, searchFilter, showLegacy, container);
   }
 
   noResults.classList.toggle('d-none', hasResults);
 }
 
-function renderByProvider(providerFilter, categoryFilter, searchFilter, container) {
+function renderByProvider(providerFilter, categoryFilter, searchFilter, showLegacy, container) {
   let hasResults = false;
 
   allProviders.forEach(provider => {
     if (providerFilter !== 'all' && provider.name !== providerFilter) return;
 
-    let models = getFilteredModels(provider.models || [], categoryFilter, searchFilter);
+    let models = getFilteredModels(provider.models || [], categoryFilter, searchFilter, showLegacy);
     if (models.length === 0) return;
 
     hasResults = true;
@@ -925,7 +933,7 @@ function renderByProvider(providerFilter, categoryFilter, searchFilter, containe
   return hasResults;
 }
 
-function renderByCategory(providerFilter, categoryFilter, searchFilter, container) {
+function renderByCategory(providerFilter, categoryFilter, searchFilter, showLegacy, container) {
   let hasResults = false;
   const visibleCategories = allCategories.filter(c => !c.is_hidden);
 
@@ -935,7 +943,7 @@ function renderByCategory(providerFilter, categoryFilter, searchFilter, containe
     : visibleCategories;
 
   categoriesToShow.forEach(category => {
-    const modelsInCategory = getAllModelsInCategory(category.id, providerFilter, searchFilter);
+    const modelsInCategory = getAllModelsInCategory(category.id, providerFilter, searchFilter, showLegacy);
     if (modelsInCategory.length === 0) return;
 
     hasResults = true;
@@ -944,7 +952,7 @@ function renderByCategory(providerFilter, categoryFilter, searchFilter, containe
 
   // Uncategorized section
   if (categoryFilter === 'all') {
-    const uncategorizedModels = getAllUncategorizedModels(providerFilter, searchFilter);
+    const uncategorizedModels = getAllUncategorizedModels(providerFilter, searchFilter, showLegacy);
     if (uncategorizedModels.length > 0) {
       hasResults = true;
       container.appendChild(createCategorySection(
@@ -957,8 +965,10 @@ function renderByCategory(providerFilter, categoryFilter, searchFilter, containe
   return hasResults;
 }
 
-function getFilteredModels(models, categoryFilter, searchFilter) {
+function getFilteredModels(models, categoryFilter, searchFilter, showLegacy) {
   return models.filter(m => {
+    if (!showLegacy && m.is_legacy) return false;
+
     // Category filter
     if (categoryFilter !== 'all') {
       const modelCats = modelAssignments[m.value] || [];
@@ -972,11 +982,12 @@ function getFilteredModels(models, categoryFilter, searchFilter) {
   });
 }
 
-function getAllModelsInCategory(categoryId, providerFilter, searchFilter) {
+function getAllModelsInCategory(categoryId, providerFilter, searchFilter, showLegacy) {
   const models = [];
   allProviders.forEach(provider => {
     if (providerFilter !== 'all' && provider.name !== providerFilter) return;
     (provider.models || []).forEach(model => {
+      if (!showLegacy && model.is_legacy) return;
       const cats = modelAssignments[model.value] || [];
       if (!cats.includes(categoryId)) return;
       if (searchFilter && !model.value.toLowerCase().includes(searchFilter)) return;
@@ -992,11 +1003,12 @@ function getAllModelsInCategory(categoryId, providerFilter, searchFilter) {
   });
 }
 
-function getAllUncategorizedModels(providerFilter, searchFilter) {
+function getAllUncategorizedModels(providerFilter, searchFilter, showLegacy) {
   const models = [];
   allProviders.forEach(provider => {
     if (providerFilter !== 'all' && provider.name !== providerFilter) return;
     (provider.models || []).forEach(model => {
+      if (!showLegacy && model.is_legacy) return;
       const cats = modelAssignments[model.value] || [];
       if (cats.length > 0) return;
       if (searchFilter && !model.value.toLowerCase().includes(searchFilter)) return;
@@ -1581,10 +1593,12 @@ async function autoCategorizeAll() {
   const providerFilter = document.getElementById('providerFilter').value;
   const categoryFilter = document.getElementById('categoryFilter').value;
   const searchFilter = document.getElementById('searchFilter').value.toLowerCase();
+  const showLegacy = document.getElementById('showLegacyFilter').checked;
 
   allProviders.forEach(provider => {
     if (providerFilter !== 'all' && provider.name !== providerFilter) return;
     (provider.models || []).forEach(model => {
+      if (!showLegacy && model.is_legacy) return;
       // Apply filters
       if (categoryFilter !== 'all') {
         const modelCats = modelAssignments[model.value] || [];

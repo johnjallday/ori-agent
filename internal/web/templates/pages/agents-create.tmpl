@@ -9,10 +9,31 @@
       margin: 0;
       padding: 0;
       min-height: 100vh;
+      overflow-x: hidden;
       background:
         radial-gradient(circle at 15% -10%, rgba(29, 78, 216, 0.15), transparent 42%),
         radial-gradient(circle at 100% 20%, rgba(56, 189, 248, 0.12), transparent 36%),
         var(--bg-primary);
+    }
+
+    .skip-link {
+      position: absolute;
+      left: 20px;
+      top: 18px;
+      z-index: 1100;
+      padding: 10px 14px;
+      border-radius: 999px;
+      background: var(--bg-primary);
+      color: var(--text-primary);
+      border: 1px solid color-mix(in srgb, var(--border-color) 76%, var(--primary-color) 24%);
+      box-shadow: 0 10px 22px rgba(0, 0, 0, 0.18);
+      text-decoration: none;
+      transform: translateY(-180%);
+      transition: transform 0.2s ease;
+    }
+
+    .skip-link:focus-visible {
+      transform: translateY(0);
     }
 
     .create-container {
@@ -48,6 +69,7 @@
       font-size: clamp(26px, 4vw, 32px);
       margin-bottom: 6px;
       color: var(--text-primary);
+      text-wrap: balance;
       position: relative;
       z-index: 1;
     }
@@ -113,9 +135,9 @@
       transition: border-color 0.2s ease, box-shadow 0.2s ease, background 0.2s ease;
     }
 
-    .form-input:focus,
-    .form-select:focus,
-    .form-textarea:focus {
+    .form-input:focus-visible,
+    .form-select:focus-visible,
+    .form-textarea:focus-visible {
       outline: none;
       border-color: var(--primary-color);
       box-shadow: 0 0 0 3px color-mix(in srgb, var(--primary-color) 20%, transparent);
@@ -223,25 +245,41 @@
     }
 
     .tag-remove {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 20px;
+      height: 20px;
+      border: none;
+      border-radius: 999px;
+      background: rgba(255, 255, 255, 0.16);
+      color: inherit;
       cursor: pointer;
       font-weight: 700;
-      opacity: 0.85;
+      opacity: 0.9;
       line-height: 1;
+      padding: 0;
+      transition: background 0.2s ease, opacity 0.2s ease, transform 0.2s ease;
     }
 
     .tag-remove:hover {
       opacity: 1;
+      background: rgba(255, 255, 255, 0.24);
+      transform: scale(1.05);
     }
 
     .tag-input {
       border: none;
-      outline: none;
       padding: 4px;
       flex: 1;
       min-width: 120px;
       font-size: 14px;
       background: transparent;
       color: var(--text-primary);
+    }
+
+    .tag-input:focus-visible {
+      outline: none;
     }
 
     .plugin-list {
@@ -357,6 +395,12 @@
       margin-top: 2px;
     }
 
+    .modern-btn,
+    .btn-group .btn,
+    .tag-remove {
+      touch-action: manipulation;
+    }
+
     .btn-group .btn {
       border-radius: 10px;
       border: 1px solid color-mix(in srgb, var(--border-color) 78%, var(--primary-color) 22%);
@@ -374,6 +418,15 @@
       box-shadow: 0 0 0 2px color-mix(in srgb, var(--primary-color) 18%, transparent);
     }
 
+    .modern-btn:focus-visible,
+    .btn-check:focus-visible + .btn,
+    .plugin-checkbox:focus-visible,
+    .form-check-input:focus-visible,
+    .tag-remove:focus-visible {
+      outline: none;
+      box-shadow: 0 0 0 3px color-mix(in srgb, var(--primary-color) 24%, transparent);
+    }
+
     .error-message {
       padding: 12px 14px;
       background: rgba(239, 68, 68, 0.12);
@@ -381,8 +434,32 @@
       border: 1px solid rgba(239, 68, 68, 0.25);
       border-radius: 10px;
       margin-bottom: 16px;
-      display: none;
+      display: block;
       font-size: 13px;
+    }
+
+    .error-message[hidden] {
+      display: none !important;
+    }
+
+    .field-error {
+      margin-top: 6px;
+      color: var(--danger-color);
+      font-size: 12px;
+      line-height: 1.4;
+      display: none;
+    }
+
+    .field-error.is-visible {
+      display: block;
+    }
+
+    .form-input.is-invalid,
+    .form-select.is-invalid,
+    .form-textarea.is-invalid {
+      border-color: var(--danger-color);
+      box-shadow: 0 0 0 3px color-mix(in srgb, var(--danger-color) 16%, transparent);
+      background: color-mix(in srgb, var(--bg-secondary) 92%, var(--danger-color) 8%);
     }
 
     [data-bs-theme="dark"] .error-message {
@@ -441,17 +518,20 @@
 
   {{template "navbar.tmpl" .}}
 
+  <a class="skip-link" href="#create-agent-main">Skip to Main Content</a>
+
   <div class="main-content-wrapper">
     {{template "sidebar.tmpl" .}}
 
-    <div class="main-content">
+    <main class="main-content" id="create-agent-main" role="main" aria-labelledby="create-agent-title">
       <div class="create-container">
         <div class="page-header">
-          <h1>Create New Agent</h1>
+          <h1 id="create-agent-title">Create New Agent</h1>
           <p>Configure and customize your AI agent</p>
         </div>
 
-        <div id="errorMessage" class="error-message"></div>
+        <form id="createAgentForm" novalidate>
+        <div id="errorMessage" class="error-message" role="alert" aria-live="polite" hidden tabindex="-1"></div>
 
         <div class="form-card modern-card">
           <h2 class="form-section-title">Configuration Mode</h2>
@@ -462,13 +542,13 @@
                 <label class="btn btn-outline-secondary" for="createConfigModeManual">Manual</label>
                 <input type="radio" class="btn-check" name="createConfigMode" id="createConfigModeAuto" value="auto">
                 <label class="btn btn-outline-secondary" for="createConfigModeAuto">
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" class="me-1">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" class="me-1" aria-hidden="true" focusable="false">
                     <path d="M19,2L14,6.5V17.5L19,13V2M6.5,5C4.55,5 2.45,5.4 1,6.5V21.16C1,21.41 1.25,21.66 1.5,21.66C1.6,21.66 1.65,21.59 1.75,21.59C3.1,20.94 5.05,20.5 6.5,20.5C8.45,20.5 10.55,20.9 12,22C13.35,21.15 15.8,20.5 17.5,20.5C19.15,20.5 20.85,20.81 22.25,21.56C22.35,21.61 22.4,21.59 22.5,21.59C22.75,21.59 23,21.34 23,21.09V6.5C22.4,6.05 21.75,5.75 21,5.5V19C19.9,18.65 18.7,18.5 17.5,18.5C15.8,18.5 13.35,19.15 12,20V6.5C10.55,5.4 8.45,5 6.5,5Z"/>
                   </svg>
                   Auto Configure
                 </label>
               </div>
-              <span id="createAutoConfigStatus" class="badge bg-secondary d-none" style="font-size: 0.75rem;"></span>
+              <span id="createAutoConfigStatus" class="badge bg-secondary d-none" style="font-size: 0.75rem;" role="status" aria-live="polite"></span>
             </div>
             <div class="form-help">Choose Manual to set all options yourself, or Auto to generate configuration from a description.</div>
           </div>
@@ -476,31 +556,33 @@
           <div id="createAutoConfigSection" class="d-none">
             <div class="form-group">
               <label class="form-label" for="createAutoConfigDescription">Describe Your Agent</label>
-              <textarea id="createAutoConfigDescription" class="form-textarea" rows="3"
-                placeholder="Example: An agent that helps with code reviews, understands multiple programming languages, and can suggest improvements..."></textarea>
+              <textarea id="createAutoConfigDescription" class="form-textarea" rows="3" name="auto_config_description" autocomplete="off" aria-describedby="createAutoConfigDescriptionError"
+                placeholder="Example: An agent that helps with code reviews, understands multiple programming languages, and can suggest improvements…"></textarea>
               <div class="form-help">Be specific about what tasks this agent should handle and what tools it needs.</div>
+              <div id="createAutoConfigDescriptionError" class="field-error" aria-live="polite"></div>
             </div>
             <button type="button" id="createGenerateAutoConfigBtn" class="modern-btn modern-btn-primary mb-3">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" class="me-1">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" class="me-1" aria-hidden="true" focusable="false">
                 <path d="M12,3L2,12H5V20H19V12H22L12,3M12,8.75A2.25,2.25 0 0,1 14.25,11A2.25,2.25 0 0,1 12,13.25A2.25,2.25 0 0,1 9.75,11A2.25,2.25 0 0,1 12,8.75Z"/>
               </svg>
               Generate Configuration
             </button>
           </div>
 
-          <div id="createLlmNotAvailableWarning" class="alert alert-warning d-none" style="font-size: 0.875rem;">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" class="me-1" style="vertical-align: text-bottom;">
+          <div id="createLlmNotAvailableWarning" class="alert alert-warning d-none" style="font-size: 0.875rem;" role="status" aria-live="polite">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" class="me-1" style="vertical-align: text-bottom;" aria-hidden="true" focusable="false">
               <path d="M13,14H11V10H13M13,18H11V16H13M1,21H23L12,2L1,21Z"/>
             </svg>
             <span id="createLlmWarningMessage">Auto-config requires an LLM provider. Please set up an API key or install Ollama in Settings.</span>
             <a href="/settings" class="alert-link ms-1" id="createLlmWarningSettingsLink">Go to Settings</a>
           </div>
 
-          <div id="createAutoSelectedIndicator" class="alert alert-info d-none" style="font-size: 0.875rem;">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" class="me-1" style="vertical-align: text-bottom;">
+          <div id="createAutoSelectedIndicator" class="alert alert-info d-none" style="font-size: 0.875rem;" role="status" aria-live="polite">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" class="me-1" style="vertical-align: text-bottom;" aria-hidden="true" focusable="false">
               <path d="M21,7L9,19L3.5,13.5L4.91,12.09L9,16.17L19.59,5.59L21,7Z"/>
             </svg>
-            <strong>Auto-configured!</strong> Settings below were generated from your description. You can still adjust them manually.
+            <strong id="createAutoSelectedTitle">Auto-configured!</strong>
+            <span id="createAutoSelectedMessage">Settings below were generated from your description. You can still adjust them manually.</span>
           </div>
         </div>
 
@@ -509,31 +591,33 @@
 
           <div class="form-group">
             <label class="form-label required" for="agentName">Agent Name</label>
-            <input type="text" id="agentName" class="form-input" placeholder="e.g., Code Assistant" required>
+            <input type="text" id="agentName" class="form-input" name="agent_name" autocomplete="off" aria-describedby="agentNameError" placeholder="e.g., Code Assistant" required>
             <div class="form-help">Choose a unique, descriptive name for your agent</div>
+            <div id="agentNameError" class="field-error" aria-live="polite"></div>
           </div>
 
           <div class="form-group">
             <label class="form-label" for="agentDescription">Description</label>
-            <textarea id="agentDescription" class="form-textarea" placeholder="Describe what this agent does..."></textarea>
+            <textarea id="agentDescription" class="form-textarea" name="agent_description" autocomplete="off" placeholder="Describe what this agent does…"></textarea>
             <div class="form-help">Optional: Help others understand the agent's purpose</div>
           </div>
 
           <div class="form-row">
             <div class="form-group">
               <label class="form-label required" for="agentType">Agent Type</label>
-              <select id="agentType" class="form-select" required onchange="updateModelOptions()">
+              <select id="agentType" class="form-select" name="agent_type" aria-describedby="agentTypeError" required onchange="updateModelOptions()">
                 <option value="tool-calling">Tool Calling</option>
                 <option value="general">General Purpose</option>
                 <option value="research">Research</option>
                 <option value="orchestration">Orchestration</option>
               </select>
               <div class="form-help">Defines the agent's interaction style and available models</div>
+              <div id="agentTypeError" class="field-error" aria-live="polite"></div>
             </div>
 
             <div class="form-group">
               <label class="form-label required" for="agentRole">Role</label>
-              <select id="agentRole" class="form-select" required>
+              <select id="agentRole" class="form-select" name="agent_role" aria-describedby="agentRoleError" required>
                 <option value="general">General</option>
                 <option value="coding">Coding</option>
                 <option value="research">Research</option>
@@ -541,6 +625,7 @@
                 <option value="analysis">Analysis</option>
               </select>
               <div class="form-help">The agent's primary role or specialty</div>
+              <div id="agentRoleError" class="field-error" aria-live="polite"></div>
             </div>
           </div>
         </div>
@@ -551,7 +636,7 @@
           <div class="form-row">
             <div class="form-group">
               <label class="form-label" for="llmProvider">Provider Filter</label>
-              <select id="llmProvider" class="form-select" onchange="updateModelOptions()">
+              <select id="llmProvider" class="form-select" name="llm_provider_filter" onchange="updateModelOptions()">
                 <option value="">All Providers</option>
                 <option value="openai">OpenAI</option>
                 <option value="codex">OpenAI Codex (CLI)</option>
@@ -565,28 +650,29 @@
 
             <div class="form-group">
               <label class="form-label required" for="llmModel">Model</label>
-              <select id="llmModel" class="form-select" required>
-                <option value="">Loading models...</option>
+              <select id="llmModel" class="form-select" name="llm_model" aria-describedby="llmModelError" required>
+                <option value="">Loading models…</option>
               </select>
+              <div id="llmModelError" class="field-error" aria-live="polite"></div>
             </div>
           </div>
 
           <div class="form-group">
             <label class="form-label" for="temperature">Temperature: <span id="tempValue">1.0</span></label>
-            <input type="range" id="temperature" class="form-input" min="0" max="2" step="0.1" value="1.0"
+            <input type="range" id="temperature" class="form-input" name="temperature" min="0" max="2" step="0.1" value="1.0"
               oninput="document.getElementById('tempValue').textContent = this.value">
             <div class="form-help">Controls randomness: 0 = focused, 2 = creative</div>
           </div>
 
           <div class="form-group">
             <label class="form-label" for="systemPrompt">System Prompt</label>
-            <textarea id="systemPrompt" class="form-textarea" placeholder="You are a helpful assistant..."></textarea>
+            <textarea id="systemPrompt" class="form-textarea" name="system_prompt" autocomplete="off" placeholder="You are a helpful assistant…"></textarea>
             <div class="form-help">Optional: Custom instructions for the agent's behavior</div>
           </div>
 
           <div class="form-group">
             <div class="form-check">
-              <input class="form-check-input" type="checkbox" id="allowWebSearch" checked>
+              <input class="form-check-input" type="checkbox" id="allowWebSearch" name="allow_web_search" checked>
               <label class="form-label mb-0" for="allowWebSearch">Allow Web Tools</label>
             </div>
             <div class="form-help">If enabled, this agent can use `web_search`, `web_fetch`, and `browser` utility tools.</div>
@@ -600,7 +686,7 @@
             <label class="form-label" for="avatarColor">Avatar Color</label>
             <div class="color-picker-group">
               <div id="colorPreview" class="color-preview" style="background: #1d4ed8;"></div>
-              <input type="color" id="avatarColor" class="form-input color-input" value="#1d4ed8"
+              <input type="color" id="avatarColor" class="form-input color-input" name="avatar_color" autocomplete="off" value="#1d4ed8"
                 onchange="document.getElementById('colorPreview').style.background = this.value">
               <span class="form-help">Choose a color for the agent's avatar</span>
             </div>
@@ -609,7 +695,7 @@
           <div class="form-group">
             <label class="form-label" for="tagsInput">Tags</label>
             <div id="tagsContainer" class="tags-input-container" onclick="document.getElementById('tagsInput').focus()">
-              <input type="text" id="tagsInput" class="tag-input" placeholder="Add tags...">
+              <input type="text" id="tagsInput" class="tag-input" name="tags_input" autocomplete="off" placeholder="Add tags…">
             </div>
             <div class="form-help">Press Enter to add tags (e.g., "coding", "creative", "research")</div>
           </div>
@@ -629,23 +715,24 @@
           <div class="form-help" style="margin-bottom: 12px;">Select MCP servers to enable for this agent during creation.</div>
 
           <div id="mcpServersList" class="plugin-list">
-            <div style="text-align: center; padding: 20px; color: var(--text-muted, #666);">Loading MCP servers...</div>
+            <div style="text-align: center; padding: 20px; color: var(--text-muted, #666);">Loading MCP servers…</div>
           </div>
         </div>
 
         <div class="form-card modern-card">
           <div class="form-actions">
-            <button type="button" class="modern-btn modern-btn-secondary" onclick="window.location.href='/agents'">Cancel</button>
-            <button type="button" class="modern-btn modern-btn-primary" onclick="createAgent()" id="createBtn">Create Agent</button>
+            <a href="/agents" class="modern-btn modern-btn-secondary">Cancel</a>
+            <button type="submit" class="modern-btn modern-btn-primary" id="createBtn">Create Agent</button>
           </div>
         </div>
+        </form>
       </div>
-    </div>
+    </main>
   </div>
 
   <div id="loadingOverlay" class="loading-overlay">
     <div class="loading-spinner">
-      <p>Creating agent...</p>
+      <p>Creating Agent…</p>
     </div>
   </div>
 

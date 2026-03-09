@@ -36,7 +36,10 @@ function getStatusClass(status) {
     pending: 'pending',
     in_progress: 'in_progress',
     completed: 'completed',
-    failed: 'failed'
+    failed: 'failed',
+    blocked: 'blocked',
+    cancelled: 'pending',
+    timeout: 'failed'
   };
   return statusMap[status] || 'pending';
 }
@@ -51,7 +54,10 @@ function getDisplayStatus(status) {
     pending: 'Pending',
     in_progress: 'In Progress',
     completed: 'Completed',
-    failed: 'Failed'
+    failed: 'Failed',
+    blocked: 'Blocked',
+    cancelled: 'Cancelled',
+    timeout: 'Timed Out'
   };
   return statusMap[status] || status;
 }
@@ -62,11 +68,31 @@ export class WorkspaceDetailPage {
     this.workspace = null;
     this.tasks = [];
     this.sessions = [];
+    this.tasksLoading = false;
+    this.sessionsLoading = false;
+    this.tasksLoadFailed = false;
+    this.sessionsLoadFailed = false;
     this.files = [];
     this.notes = [];
     this.directories = [];
     this.schedules = [];
     this.children = [];
+    this.directoryExplorer = {
+      directory: null,
+      source: 'reference',
+      files: [],
+      treeRoot: null,
+      nodeIndex: new Map(),
+      expandedPaths: new Set(),
+      selectedPath: '',
+      selectedType: '',
+      searchQuery: '',
+      sortDirection: 'asc',
+      fileCache: new Map(),
+      previewCache: new Map(),
+      previewAbortController: null,
+      loadToken: 0
+    };
 
     // Board state
     this.currentView = 'list'; // 'list' or 'board'
@@ -74,10 +100,16 @@ export class WorkspaceDetailPage {
     this.agentOptions = null;
     this.agentCatalog = [];
     this.agentIndex = new Map();
+    this.agentSkillsCache = new Map();
+    this.flippedAgentCards = new Set();
     this.boardDidDrag = false;
     this.currentTaskResultText = '';
     this.currentBlockedTask = null;
     this.currentAssistRecommendation = null;
+    this.currentExecutionTaskId = null;
+    this.executionMonitorTimer = null;
+    this.executionLogKeys = new Set();
+    this.executionLastStatus = '';
 
     // DOM elements
     this.elements = {};
@@ -88,6 +120,8 @@ export class WorkspaceDetailPage {
    */
   async init() {
     this.cacheElements();
+    this.ensureScrollablePanelAccessibility();
+    this.refreshHomeAssistantQuickPrompts();
     this.bindEvents();
     this.setupFileModal();
     await this.loadWorkspace();
@@ -101,6 +135,101 @@ export class WorkspaceDetailPage {
       this.loadSchedules()
     ]);
     this.setupRealtime();
+  }
+
+  ensureScrollablePanelAccessibility() {
+    const panelConfig = [
+      { id: 'workspace-detail-agents-panel', label: 'Agents panel content' },
+      { id: 'workspace-detail-notes-panel', label: 'Notes panel content' },
+      { id: 'workspace-detail-files-panel', label: 'Files panel content' },
+      { id: 'workspace-detail-directories-panel', label: 'Directories panel content' },
+      { id: 'workspace-detail-schedules-panel', label: 'Schedules panel content' }
+    ];
+
+    panelConfig.forEach(({ id, label }) => {
+      const panel = document.getElementById(id);
+      const body = panel?.querySelector('.workspace-detail-panel-body');
+      if (!body) return;
+
+      body.setAttribute('role', 'region');
+      body.setAttribute('tabindex', '0');
+      body.setAttribute('aria-label', label);
+    });
+  }
+
+  setHomeAssistantQuickPrompt(button, label, prompt) {
+    if (!button) return;
+    button.textContent = label;
+    button.setAttribute('data-home-prompt', prompt);
+    button.setAttribute('title', prompt);
+    button.setAttribute('aria-label', label);
+  }
+
+  refreshHomeAssistantQuickPrompts() {
+    const {
+      homeAssistantQuickPlanBtn,
+      homeAssistantQuickTasksBtn,
+      homeAssistantQuickNotesBtn,
+      homeAssistantQuickReviewBtn
+    } = this.elements;
+
+    if (!homeAssistantQuickPlanBtn || !homeAssistantQuickTasksBtn || !homeAssistantQuickNotesBtn || !homeAssistantQuickReviewBtn) {
+      return;
+    }
+
+    const workspaceName = String(this.workspace?.name || '').trim() || 'this workspace';
+    const taskCount = Array.isArray(this.tasks) ? this.tasks.length : 0;
+    const noteCount = Array.isArray(this.notes) ? this.notes.length : 0;
+    const directoryCount = Array.isArray(this.directories) ? this.directories.length : 0;
+    const fileCount = Array.isArray(this.files) ? this.files.length : 0;
+
+    this.setHomeAssistantQuickPrompt(
+      homeAssistantQuickPlanBtn,
+      'Plan Next',
+      `Analyze ${workspaceName} and propose the next 3 highest-impact tasks with acceptance criteria.`
+    );
+
+    if (taskCount === 0) {
+      this.setHomeAssistantQuickPrompt(
+        homeAssistantQuickTasksBtn,
+        'Bootstrap Tasks',
+        `Create the first 5 actionable tasks for ${workspaceName}, each with clear acceptance criteria.`
+      );
+    } else {
+      this.setHomeAssistantQuickPrompt(
+        homeAssistantQuickTasksBtn,
+        'Unblock Tasks',
+        `Review tasks in ${workspaceName}, identify blockers, and suggest the next 3 tasks to move progress forward.`
+      );
+    }
+
+    if (noteCount === 0) {
+      this.setHomeAssistantQuickPrompt(
+        homeAssistantQuickNotesBtn,
+        'Create Brief',
+        `/note # ${workspaceName} Brief\n## Goal\n- \n## Constraints\n- \n## Open Questions\n- `
+      );
+    } else {
+      this.setHomeAssistantQuickPrompt(
+        homeAssistantQuickNotesBtn,
+        'Summarize Notes',
+        `/chat Summarize notes in ${workspaceName} and produce a prioritized execution checklist.`
+      );
+    }
+
+    if (directoryCount === 0 && fileCount === 0) {
+      this.setHomeAssistantQuickPrompt(
+        homeAssistantQuickReviewBtn,
+        'Gather Context',
+        `Tell me what context is missing for ${workspaceName} and ask 3 focused questions before execution.`
+      );
+    } else {
+      this.setHomeAssistantQuickPrompt(
+        homeAssistantQuickReviewBtn,
+        'Risk Review',
+        `Run a risk review for ${workspaceName} using available tasks, notes, files, and directories. Recommend mitigation steps.`
+      );
+    }
   }
 
   /**
@@ -249,8 +378,7 @@ export class WorkspaceDetailPage {
       smartSubmit: document.getElementById('workspace-detail-submit'),
 
       // Lists
-      tasksList: document.getElementById('workspace-detail-tasks-list'),
-      sessionsList: document.getElementById('workspace-detail-sessions-list'),
+      agentsList: document.getElementById('workspace-detail-agents-list'),
       filesList: document.getElementById('workspace-detail-files-list'),
       notesList: document.getElementById('workspace-detail-notes-list'),
       directoriesList: document.getElementById('workspace-detail-directories-list'),
@@ -263,6 +391,7 @@ export class WorkspaceDetailPage {
 
       // Buttons
       addTaskBtn: document.getElementById('workspace-detail-add-task'),
+      addAgentBtn: document.getElementById('workspace-detail-add-agent-btn'),
       refreshTasksBtn: document.getElementById('workspace-detail-refresh-tasks'),
       newSessionBtn: document.getElementById('workspace-detail-new-session'),
       addFileBtn: document.getElementById('workspace-detail-add-file'),
@@ -270,13 +399,17 @@ export class WorkspaceDetailPage {
       copyNotesBtn: document.getElementById('workspace-detail-copy-notes'),
       addDirectoryBtn: document.getElementById('workspace-detail-add-directory'),
       viewSchedulesBtn: document.getElementById('workspace-detail-view-schedules'),
+      homeAssistantQuickPlanBtn: document.getElementById('homeAssistantQuickPlan'),
+      homeAssistantQuickTasksBtn: document.getElementById('homeAssistantQuickTasks'),
+      homeAssistantQuickNotesBtn: document.getElementById('homeAssistantQuickNotes'),
+      homeAssistantQuickReviewBtn: document.getElementById('homeAssistantQuickReview'),
 
       // View toggle
       viewListBtn: document.getElementById('workspace-detail-view-list'),
       viewBoardBtn: document.getElementById('workspace-detail-view-board'),
 
       // Board elements
-      tasksPanel: document.getElementById('workspace-detail-tasks-panel'),
+      agentsPanel: document.getElementById('workspace-detail-agents-panel'),
       tasksBoard: document.getElementById('workspace-detail-tasks-board'),
       boardColumns: document.getElementById('workspace-detail-board-columns'),
       boardEmpty: document.getElementById('workspace-detail-board-empty'),
@@ -285,12 +418,23 @@ export class WorkspaceDetailPage {
       // Result modal
       taskResultModal: document.getElementById('workspace-detail-task-result-modal'),
       taskResultTitle: document.getElementById('workspace-detail-task-result-title'),
+      taskResultId: document.getElementById('workspace-detail-task-result-id'),
       taskResultMeta: document.getElementById('workspace-detail-task-result-meta'),
+      taskResultBreakdown: document.getElementById('workspace-detail-task-result-breakdown'),
       taskResultBody: document.getElementById('workspace-detail-task-result-body'),
       taskResultCopyBtn: document.getElementById('workspace-detail-task-result-copy'),
+      taskExecutionModal: document.getElementById('workspace-detail-task-execution-modal'),
+      taskExecutionTitle: document.getElementById('workspace-detail-task-execution-title'),
+      taskExecutionId: document.getElementById('workspace-detail-task-execution-id'),
+      taskExecutionMeta: document.getElementById('workspace-detail-task-execution-meta'),
+      taskExecutionStatus: document.getElementById('workspace-detail-task-execution-status'),
+      taskExecutionBreakdown: document.getElementById('workspace-detail-task-execution-breakdown'),
+      taskExecutionLog: document.getElementById('workspace-detail-task-execution-log'),
+      taskExecutionViewResultBtn: document.getElementById('workspace-detail-task-execution-view-result'),
 
       // Assist modal
       taskAssistModal: document.getElementById('workspace-detail-task-assist-modal'),
+      taskAssistId: document.getElementById('workspace-detail-task-assist-id'),
       taskAssistMeta: document.getElementById('workspace-detail-task-assist-meta'),
       taskAssistReason: document.getElementById('workspace-detail-task-assist-reason'),
       taskAssistQuestion: document.getElementById('workspace-detail-task-assist-question'),
@@ -303,7 +447,26 @@ export class WorkspaceDetailPage {
       taskAssistRetryBtn: document.getElementById('workspace-detail-task-assist-retry'),
       taskAssistContinueBtn: document.getElementById('workspace-detail-task-assist-continue'),
       taskAssistSwitchBtn: document.getElementById('workspace-detail-task-assist-switch'),
-      taskAssistFailBtn: document.getElementById('workspace-detail-task-assist-fail')
+      taskAssistFailBtn: document.getElementById('workspace-detail-task-assist-fail'),
+
+      // Add agent modal
+      addAgentModal: document.getElementById('workspace-detail-add-agent-modal'),
+      addAgentSelect: document.getElementById('workspace-detail-add-agent-select'),
+      addAgentEmpty: document.getElementById('workspace-detail-add-agent-empty'),
+      addAgentSubmitBtn: document.getElementById('workspace-detail-add-agent-submit'),
+      createAgentBtn: document.getElementById('workspace-detail-create-agent-btn'),
+
+      // Directory explorer modal
+      directoryExplorerModal: document.getElementById('workspace-directory-explorer-modal'),
+      directoryExplorerTitle: document.getElementById('workspace-directory-explorer-title'),
+      directoryExplorerSubtitle: document.getElementById('workspace-directory-explorer-subtitle'),
+      directoryExplorerSummary: document.getElementById('workspace-directory-explorer-summary'),
+      directoryExplorerBreadcrumb: document.getElementById('workspace-directory-explorer-breadcrumb'),
+      directoryExplorerSearch: document.getElementById('workspace-directory-explorer-search'),
+      directoryExplorerSortBtn: document.getElementById('workspace-directory-explorer-sort'),
+      directoryExplorerRefreshBtn: document.getElementById('workspace-directory-explorer-refresh'),
+      directoryExplorerTree: document.getElementById('workspace-directory-explorer-tree'),
+      directoryExplorerPreview: document.getElementById('workspace-directory-explorer-preview')
     };
   }
 
@@ -319,6 +482,7 @@ export class WorkspaceDetailPage {
 
     // Task buttons
     this.elements.addTaskBtn?.addEventListener('click', () => this.showAddTaskModal());
+    this.elements.addAgentBtn?.addEventListener('click', () => this.openAddAgentModal());
     this.elements.refreshTasksBtn?.addEventListener('click', () => this.loadTasks());
 
     // View toggle
@@ -340,15 +504,35 @@ export class WorkspaceDetailPage {
 
     // Directory buttons
     this.elements.addDirectoryBtn?.addEventListener('click', () => this.showAddDirectoryModal());
+    this.bindDirectoryExplorerEvents();
 
     // Schedule buttons
     this.elements.viewSchedulesBtn?.addEventListener('click', () => this.showSchedulesModal());
     this.elements.taskResultCopyBtn?.addEventListener('click', () => this.copyCurrentTaskResult());
+    this.elements.taskExecutionViewResultBtn?.addEventListener('click', () => {
+      if (this.currentExecutionTaskId) {
+        this.showTaskResult(this.currentExecutionTaskId, { closeExecutionModal: true });
+      }
+    });
+    this.elements.taskResultModal?.addEventListener('shown.bs.modal', () => {
+      this.applyTopBackdropLayer('workspace-detail-backdrop-result');
+    });
+    this.elements.taskExecutionModal?.addEventListener('shown.bs.modal', () => {
+      this.applyTopBackdropLayer('workspace-detail-backdrop-execution');
+    });
+    this.elements.taskExecutionModal?.addEventListener('hidden.bs.modal', () => {
+      this.stopExecutionMonitor();
+      this.currentExecutionTaskId = null;
+      this.renderTaskExecutionBreakdown(null);
+    });
     this.elements.taskAssistRetryBtn?.addEventListener('click', () => this.submitTaskAssist('retry'));
     this.elements.taskAssistContinueBtn?.addEventListener('click', () => this.submitTaskAssist('continue_with_instruction'));
     this.elements.taskAssistSwitchBtn?.addEventListener('click', () => this.submitTaskAssist('switch_agent_retry'));
     this.elements.taskAssistFailBtn?.addEventListener('click', () => this.submitTaskAssist('mark_failed'));
     this.elements.taskAssistAgent?.addEventListener('change', () => this.updateAssistSwitchButtonState());
+    this.elements.addAgentSubmitBtn?.addEventListener('click', () => this.addSelectedAgentToWorkspace());
+    this.elements.createAgentBtn?.addEventListener('click', () => this.openCreateAgentFlow());
+    this.elements.addAgentModal?.addEventListener('show.bs.modal', () => { this.populateAddAgentOptions(); });
 
     // Make workspace name and description editable
     this.makeEditable(this.elements.workspaceName, 'name', false);
@@ -395,7 +579,83 @@ export class WorkspaceDetailPage {
           this.loadFiles();
         }
       }, 'workspaceDetail');
+
+      EventBus.on('agent:created', async () => {
+        await this.loadAgentCatalog(true);
+        await this.populateAddAgentOptions();
+      }, 'workspaceDetail');
     }
+  }
+
+  bindDirectoryExplorerEvents() {
+    this.elements.directoryExplorerRefreshBtn?.addEventListener('click', () => this.loadDirectoryExplorerFiles({ force: true }));
+
+    this.elements.directoryExplorerSortBtn?.addEventListener('click', () => {
+      this.directoryExplorer.sortDirection = this.directoryExplorer.sortDirection === 'asc' ? 'desc' : 'asc';
+      this.renderDirectoryExplorer();
+    });
+
+    this.elements.directoryExplorerSearch?.addEventListener('input', (event) => {
+      this.directoryExplorer.searchQuery = (event.target.value || '').trim();
+      this.renderDirectoryExplorer();
+    });
+
+    this.elements.directoryExplorerTree?.addEventListener('click', (event) => {
+      const toggleButton = event.target.closest('[data-action="toggle-folder"]');
+      if (toggleButton) {
+        const path = this.decodeDataPath(toggleButton.dataset.path);
+        this.toggleDirectoryNode(path);
+        return;
+      }
+
+      const nodeButton = event.target.closest('[data-action="select-node"]');
+      if (nodeButton) {
+        const path = this.decodeDataPath(nodeButton.dataset.path);
+        const type = nodeButton.dataset.type || 'file';
+        this.selectDirectoryNode(path, type, { autoExpand: true });
+      }
+    });
+
+    this.elements.directoryExplorerTree?.addEventListener('keydown', (event) => {
+      const nodeButton = event.target.closest('[data-action="select-node"]');
+      if (!nodeButton) return;
+      if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
+
+      const path = this.decodeDataPath(nodeButton.dataset.path);
+      const type = nodeButton.dataset.type || 'file';
+      if (type !== 'dir') return;
+
+      if (event.key === 'ArrowRight') {
+        event.preventDefault();
+        this.expandDirectoryNode(path);
+      } else if (event.key === 'ArrowLeft') {
+        event.preventDefault();
+        this.collapseDirectoryNode(path);
+      }
+    });
+
+    this.elements.directoryExplorerPreview?.addEventListener('click', (event) => {
+      const entryButton = event.target.closest('[data-action="select-node"]');
+      if (!entryButton) return;
+      const path = this.decodeDataPath(entryButton.dataset.path);
+      const type = entryButton.dataset.type || 'file';
+      this.selectDirectoryNode(path, type, { autoExpand: true });
+    });
+
+    this.elements.directoryExplorerBreadcrumb?.addEventListener('click', (event) => {
+      const crumb = event.target.closest('[data-action="breadcrumb"]');
+      if (!crumb) return;
+      const path = this.decodeDataPath(crumb.dataset.path);
+      this.selectDirectoryNode(path, 'dir', { autoExpand: true });
+    });
+
+    this.elements.directoryExplorerModal?.addEventListener('hidden.bs.modal', () => {
+      this.abortDirectoryPreviewRequest();
+      this.directoryExplorer.searchQuery = '';
+      if (this.elements.directoryExplorerSearch) {
+        this.elements.directoryExplorerSearch.value = '';
+      }
+    });
   }
 
   /**
@@ -523,6 +783,8 @@ export class WorkspaceDetailPage {
 
       this.workspace = await response.json();
       await this.renderWorkspaceInfo();
+      this.renderAgentGroups();
+      this.refreshHomeAssistantQuickPrompts();
     } catch (error) {
       console.error('Failed to load workspace:', error);
       if (window.Toast) window.Toast.error('Failed to load workspace');
@@ -663,9 +925,9 @@ export class WorkspaceDetailPage {
    * Load tasks for the workspace
    */
   async loadTasks() {
-    if (this.elements.tasksList) {
-      this.elements.tasksList.innerHTML = '<div class="workspace-detail-loading">Loading tasks...</div>';
-    }
+    this.tasksLoading = true;
+    this.tasksLoadFailed = false;
+    this.renderAgentGroups();
 
     try {
       const response = await fetch(`/api/orchestration/tasks?studio_id=${encodeURIComponent(this.workspaceId)}`);
@@ -673,66 +935,543 @@ export class WorkspaceDetailPage {
 
       const data = await response.json();
       this.tasks = data.tasks || [];
-      this.renderTasks();
-
-      // Also refresh board if in board view
       if (this.currentView === 'board' && this.boardConfig) {
         this.renderBoard();
       }
+      this.tasksLoadFailed = false;
+    } catch (error) {
+      console.error('Failed to load tasks:', error);
+      this.tasks = [];
+      this.tasksLoadFailed = true;
+    } finally {
+      this.tasksLoading = false;
+      this.renderTasks();
 
-      // Update task count
       if (this.elements.taskCount) {
         this.elements.taskCount.textContent = this.tasks.length;
       }
-    } catch (error) {
-      console.error('Failed to load tasks:', error);
-      if (this.elements.tasksList) {
-        this.elements.tasksList.innerHTML = '<div class="workspace-detail-empty">Failed to load tasks</div>';
-      }
+      this.refreshHomeAssistantQuickPrompts();
     }
   }
 
   /**
-   * Render tasks list
+   * Render tasks grouped by agent
    */
   renderTasks() {
-    if (!this.elements.tasksList) return;
+    this.renderAgentGroups();
+  }
 
-    if (this.tasks.length === 0) {
-      this.elements.tasksList.innerHTML = '<div class="workspace-detail-empty">No tasks yet. Create one to get started.</div>';
+  renderAgentGroups() {
+    if (!this.elements.agentsList) return;
+
+    const groups = this.buildAgentGroups();
+    if (groups.length === 0) {
+      if (this.tasksLoading || this.sessionsLoading) {
+        this.elements.agentsList.innerHTML = '<div class="workspace-detail-loading">Loading agents...</div>';
+      } else {
+        this.elements.agentsList.innerHTML = `
+          <div class="workspace-detail-empty">
+            No agents yet. Add an agent to this workspace to assign tasks.
+            <div class="mt-2">
+              <button type="button" class="modern-btn modern-btn-primary modern-btn-sm" onclick="window.workspaceDetail?.openAddAgentModal()">Add Agent</button>
+            </div>
+          </div>
+        `;
+      }
       return;
     }
 
-    // Filter to only show top-level tasks (no parent)
-    const topLevelTasks = this.tasks.filter(t => !t.parent_task_id);
-
-    this.elements.tasksList.innerHTML = topLevelTasks.map(task => {
-      const taskLabel = this.escapeHtml(task.description || task.name || 'Untitled Task');
-      const assignedAgent = task.to && task.to !== 'unassigned' ? task.to : '';
-      const subtasks = this.tasks.filter((subtask) => subtask.parent_task_id === task.id);
-      const isParent = subtasks.length > 0;
-      const statusInfo = this.getTaskStatusPresentation(task);
-      const hasUnassignedSubtasks = isParent && subtasks.some((subtask) => !subtask.to || subtask.to === 'unassigned');
-      const hasRunningSubtasks = isParent && subtasks.some((subtask) => subtask.status === 'in_progress');
-      const canExecute = isParent
-        ? subtasks.length > 0 && !hasUnassignedSubtasks && !hasRunningSubtasks
-        : task.status !== 'in_progress';
-      const resultData = this.getDisplayResult(task, subtasks);
-      const hasResultData = !!resultData;
-      const hasAssistData = !!statusInfo.isBlocked;
-      const executeTitle = isParent
-        ? hasUnassignedSubtasks ? 'Assign agents to all subtasks before executing'
-          : hasRunningSubtasks ? 'A subtask is already running'
-            : 'Execute workflow now'
-        : !assignedAgent ? 'Will auto-assign a workspace agent before execution'
-          : task.status === 'in_progress' ? 'Task is already running'
-            : 'Execute task now';
-      const resultTitle = hasResultData
-        ? `View ${resultData.label} from ${resultData.answeredBy || 'Unknown agent'}`
+    this.elements.agentsList.innerHTML = groups.map((group) => {
+      const taskCount = group.tasks.length;
+      const sessionCount = group.sessions.length;
+      const taskLabel = `${taskCount} task${taskCount === 1 ? '' : 's'}`;
+      const sessionLabel = `${sessionCount} session${sessionCount === 1 ? '' : 's'}`;
+      const capabilityBadges = group.isUnassigned ? '' : this.renderAgentCapabilityBadges(group.name);
+      const encodedAgentName = encodeURIComponent(group.name);
+      const canFlip = !group.isUnassigned;
+      const isFlipped = canFlip && this.flippedAgentCards.has(group.key);
+      const frontFlipButton = canFlip ? `
+        <button type="button"
+                class="workspace-detail-agent-flip-btn"
+                title="Show ${this.escapeHtml(group.name)} info"
+                aria-label="Show ${this.escapeHtml(group.name)} info"
+                onclick="event.stopPropagation(); window.workspaceDetail?.toggleAgentCardFlip('${encodedAgentName}')">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+            <path d="M7.41,8.58L12,13.17L16.59,8.58L18,10L12,16L6,10L7.41,8.58Z"/>
+          </svg>
+        </button>
+      ` : '';
+      const taskActionButton = group.isUnassigned ? '' : `
+        <button type="button"
+                class="workspace-detail-agent-section-btn"
+                title="Add task for ${this.escapeHtml(group.name)}"
+                aria-label="Add task for ${this.escapeHtml(group.name)}"
+                onclick="event.stopPropagation(); window.workspaceDetail?.showAddTaskModalForAgent('${encodedAgentName}')">
+          <svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor">
+            <path d="M19,13H13V19H11V13H5V11H11V5H13V11H19V13Z"/>
+          </svg>
+        </button>
+      `;
+      const sessionActionButton = group.isUnassigned ? '' : `
+        <button type="button"
+                class="workspace-detail-agent-section-btn"
+                title="Start session with ${this.escapeHtml(group.name)}"
+                aria-label="Start session with ${this.escapeHtml(group.name)}"
+                onclick="event.stopPropagation(); window.workspaceDetail?.createNewSessionForAgent('${encodedAgentName}')">
+          <svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor">
+            <path d="M19,13H13V19H11V13H5V11H11V5H13V11H19V13Z"/>
+          </svg>
+        </button>
+      `;
+      const backFace = canFlip
+        ? this.renderAgentBackFace(group, taskLabel, sessionLabel, encodedAgentName)
         : '';
-      const assistTitle = statusInfo.reason || 'Agent needs your guidance before this task can continue.';
+      const flippedClass = isFlipped ? ' is-flipped' : '';
 
       return `
+      <section class="workspace-detail-agent-card${flippedClass}" data-agent-name="${this.escapeHtml(group.name)}" data-agent-key="${this.escapeHtml(group.key)}">
+        <div class="workspace-detail-agent-card-flipper">
+          <div class="workspace-detail-agent-card-face workspace-detail-agent-card-face-front">
+            <div class="workspace-detail-agent-card-header">
+              <div class="workspace-detail-agent-card-title">
+                <span>${this.escapeHtml(group.name)}</span>
+                ${capabilityBadges}
+              </div>
+              <div class="workspace-detail-agent-card-meta-wrap">
+                <div class="workspace-detail-agent-card-meta">${taskLabel} · ${sessionLabel}</div>
+                ${frontFlipButton}
+              </div>
+            </div>
+            <div class="workspace-detail-agent-sections">
+              <div class="workspace-detail-agent-section">
+                <div class="workspace-detail-agent-section-header">
+                  <div class="workspace-detail-agent-section-title">Tasks</div>
+                  ${taskActionButton}
+                </div>
+                <div class="workspace-detail-list workspace-detail-agent-list">
+                  ${this.renderAgentTasksContent(group.tasks)}
+                </div>
+              </div>
+              <div class="workspace-detail-agent-section">
+                <div class="workspace-detail-agent-section-header">
+                  <div class="workspace-detail-agent-section-title">Sessions</div>
+                  ${sessionActionButton}
+                </div>
+                <div class="workspace-detail-list workspace-detail-agent-list">
+                  ${this.renderAgentSessionsContent(group.sessions)}
+                </div>
+              </div>
+            </div>
+          </div>
+          ${backFace}
+        </div>
+      </section>
+      `;
+    }).join('');
+  }
+
+  renderAgentBackFace(group, taskLabel, sessionLabel, encodedAgentName) {
+    const profile = this.getAgentProfile(group.name);
+    const levelValue = Number(profile?.evolution?.level ?? profile?.level);
+    const level = Number.isFinite(levelValue) ? Math.max(0, Math.floor(levelValue)) : 0;
+    const stage = String(profile?.evolution?.stage || profile?.stage || '').trim();
+    const levelLabel = stage ? `Lv ${level} · ${stage}` : `Lv ${level}`;
+
+    const skillsState = this.getAgentSkillsState(group.name);
+    const skillsMarkup = this.renderAgentSkillsChips(skillsState, profile);
+
+    const mcpServers = Array.isArray(profile?.mcpServers)
+      ? profile.mcpServers.map((value) => String(value || '').trim()).filter(Boolean)
+      : [];
+    const mcpMarkup = mcpServers.length > 0
+      ? mcpServers.map((server) => `<span class="workspace-detail-agent-info-chip mcp">${this.escapeHtml(server)}</span>`).join('')
+      : '<span class="workspace-detail-agent-info-empty">No MCP servers attached.</span>';
+
+    return `
+      <div class="workspace-detail-agent-card-face workspace-detail-agent-card-face-back">
+        <div class="workspace-detail-agent-card-header">
+          <div class="workspace-detail-agent-card-title">
+            <span>${this.escapeHtml(group.name)}</span>
+            <span class="workspace-detail-agent-info-tag">Agent Info</span>
+          </div>
+          <div class="workspace-detail-agent-card-meta-wrap">
+            <div class="workspace-detail-agent-card-meta">${taskLabel} · ${sessionLabel}</div>
+            <button type="button"
+                    class="workspace-detail-agent-flip-btn"
+                    title="Back to tasks and sessions"
+                    aria-label="Back to tasks and sessions"
+                    onclick="event.stopPropagation(); window.workspaceDetail?.toggleAgentCardFlip('${encodedAgentName}')">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                <path d="M7.41,15.41L12,10.83L16.59,15.41L18,14L12,8L6,14L7.41,15.41Z"/>
+              </svg>
+            </button>
+          </div>
+        </div>
+        <div class="workspace-detail-agent-info-grid">
+          <div class="workspace-detail-agent-info-block">
+            <div class="workspace-detail-agent-info-label">Agent Lvl</div>
+            <div class="workspace-detail-agent-info-value">${this.escapeHtml(levelLabel)}</div>
+          </div>
+          <div class="workspace-detail-agent-info-block">
+            <div class="workspace-detail-agent-info-label">Skills</div>
+            <div class="workspace-detail-agent-chip-list workspace-detail-agent-skills-list" data-agent-skills-key="${this.escapeHtml(group.key)}">${skillsMarkup}</div>
+          </div>
+          <div class="workspace-detail-agent-info-block">
+            <div class="workspace-detail-agent-info-label">MCP Attached</div>
+            <div class="workspace-detail-agent-chip-list">${mcpMarkup}</div>
+          </div>
+        </div>
+      </div>
+    `;
+  }
+
+  getAgentSkillsState(agentName) {
+    const key = this.normalizeAgentName(agentName);
+    if (!key) return { status: 'idle', skills: [] };
+    return this.agentSkillsCache.get(key) || { status: 'idle', skills: [] };
+  }
+
+  renderAgentSkillsChips(skillsState, profile = null) {
+    const fallbackSkills = [];
+    const fallbackSeen = new Set();
+    const addFallbackSkill = (value) => {
+      const name = String(value || '').trim();
+      if (!name) return;
+      const key = name.toLowerCase();
+      if (fallbackSeen.has(key)) return;
+      fallbackSeen.add(key);
+      fallbackSkills.push(name);
+    };
+
+    if (Array.isArray(profile?.capabilities)) {
+      profile.capabilities.forEach(addFallbackSkill);
+    }
+    if (Array.isArray(profile?.enabledPlugins)) {
+      profile.enabledPlugins.forEach(addFallbackSkill);
+    }
+
+    if (!skillsState || skillsState.status === 'idle' || skillsState.status === 'loading') {
+      if (fallbackSkills.length > 0) {
+        return fallbackSkills
+          .slice(0, 8)
+          .map((skill) => `<span class="workspace-detail-agent-info-chip skill">${this.escapeHtml(skill)}</span>`)
+          .join('');
+      }
+      return '<span class="workspace-detail-agent-info-empty">Loading skills...</span>';
+    }
+
+    if (skillsState.status === 'conflict') {
+      return '<span class="workspace-detail-agent-info-empty">Skill conflicts detected.</span>';
+    }
+
+    if (skillsState.status === 'error') {
+      if (fallbackSkills.length > 0) {
+        return fallbackSkills
+          .slice(0, 8)
+          .map((skill) => `<span class="workspace-detail-agent-info-chip skill">${this.escapeHtml(skill)}</span>`)
+          .join('');
+      }
+      return '<span class="workspace-detail-agent-info-empty">Failed to load skills.</span>';
+    }
+
+    const enabledSkills = Array.isArray(skillsState.skills)
+      ? skillsState.skills.filter((skill) => skill.enabled !== false && skill.name)
+      : [];
+
+    if (enabledSkills.length === 0) {
+      return '<span class="workspace-detail-agent-info-empty">No enabled skills.</span>';
+    }
+
+    const visibleSkills = enabledSkills.slice(0, 8);
+    const overflowCount = enabledSkills.length - visibleSkills.length;
+    const chips = visibleSkills
+      .map((skill) => `<span class="workspace-detail-agent-info-chip skill">${this.escapeHtml(skill.name)}</span>`)
+      .join('');
+
+    return overflowCount > 0
+      ? `${chips}<span class="workspace-detail-agent-info-chip count">+${overflowCount} more</span>`
+      : chips;
+  }
+
+  getAgentCardElementByKey(agentKey) {
+    if (!this.elements?.agentsList || !agentKey) return null;
+    const cards = this.elements.agentsList.querySelectorAll('.workspace-detail-agent-card[data-agent-key]');
+    for (const card of cards) {
+      if (card.getAttribute('data-agent-key') === agentKey) {
+        return card;
+      }
+    }
+    return null;
+  }
+
+  refreshAgentCardSkills(agentName) {
+    const key = this.normalizeAgentName(agentName);
+    if (!key) return false;
+
+    const card = this.getAgentCardElementByKey(key);
+    if (!card) return false;
+
+    const profile = this.getAgentProfile(agentName);
+    const skillsState = this.getAgentSkillsState(agentName);
+    const skillsMarkup = this.renderAgentSkillsChips(skillsState, profile);
+
+    const skillContainers = card.querySelectorAll('.workspace-detail-agent-skills-list[data-agent-skills-key]');
+    let updated = false;
+    skillContainers.forEach((container) => {
+      if (container.getAttribute('data-agent-skills-key') === key) {
+        container.innerHTML = skillsMarkup;
+        updated = true;
+      }
+    });
+
+    return updated;
+  }
+
+  toggleAgentCardFlip(encodedAgentName = '') {
+    let agentName = '';
+    try {
+      agentName = decodeURIComponent(String(encodedAgentName || ''));
+    } catch (error) {
+      agentName = String(encodedAgentName || '');
+    }
+
+    const key = this.normalizeAgentName(agentName);
+    if (!key) return;
+    const card = this.getAgentCardElementByKey(key);
+
+    if (this.flippedAgentCards.has(key)) {
+      this.flippedAgentCards.delete(key);
+      if (card) {
+        card.classList.remove('is-flipped');
+      } else {
+        this.renderAgentGroups();
+      }
+      return;
+    }
+
+    this.flippedAgentCards.add(key);
+    if (card) {
+      card.classList.add('is-flipped');
+    } else {
+      this.renderAgentGroups();
+    }
+    this.ensureAgentSkillsLoaded(agentName);
+  }
+
+  async ensureAgentSkillsLoaded(agentName) {
+    const normalizedName = String(agentName || '').trim();
+    const key = this.normalizeAgentName(normalizedName);
+    if (!normalizedName || !key) return;
+
+    const existing = this.agentSkillsCache.get(key);
+    if (existing?.status === 'loading' || existing?.status === 'loaded') {
+      return;
+    }
+
+    this.agentSkillsCache.set(key, { status: 'loading', skills: [] });
+    this.refreshAgentCardSkills(normalizedName);
+
+    try {
+      const response = await fetch(`/api/skills?agent=${encodeURIComponent(normalizedName)}`);
+      if (response.status === 409) {
+        this.agentSkillsCache.set(key, { status: 'conflict', skills: [] });
+        if (!this.refreshAgentCardSkills(normalizedName)) {
+          this.renderAgentGroups();
+        }
+        return;
+      }
+      if (!response.ok) {
+        throw new Error(`Failed to load skills (${response.status})`);
+      }
+
+      const data = await response.json();
+      const skills = Array.isArray(data?.skills)
+        ? data.skills
+          .map((skill) => ({
+            name: String(skill?.name || '').trim(),
+            enabled: skill?.enabled !== false
+          }))
+          .filter((skill) => skill.name)
+        : [];
+
+      this.agentSkillsCache.set(key, { status: 'loaded', skills });
+    } catch (error) {
+      console.error(`Failed to load skills for ${normalizedName}:`, error);
+      this.agentSkillsCache.set(key, { status: 'error', skills: [] });
+    }
+
+    if (!this.refreshAgentCardSkills(normalizedName)) {
+      this.renderAgentGroups();
+    }
+  }
+
+  buildAgentGroups() {
+    const groups = [];
+    const groupByKey = new Map();
+
+    const ensureGroup = (name, { isWorkspaceAgent = false, isUnassigned = false } = {}) => {
+      const normalized = isUnassigned ? '__unassigned__' : this.normalizeAgentName(name);
+      if (!normalized) return null;
+
+      let group = groupByKey.get(normalized);
+      if (!group) {
+        group = {
+          key: normalized,
+          name: isUnassigned ? 'Unassigned' : String(name || '').trim(),
+          isWorkspaceAgent,
+          isUnassigned,
+          tasks: [],
+          sessions: []
+        };
+        groupByKey.set(normalized, group);
+        groups.push(group);
+      } else if (isWorkspaceAgent) {
+        group.isWorkspaceAgent = true;
+      }
+
+      return group;
+    };
+
+    this.getWorkspaceAgentNames().forEach((name) => {
+      ensureGroup(name, { isWorkspaceAgent: true, isUnassigned: false });
+    });
+
+    const topLevelTasks = Array.isArray(this.tasks)
+      ? this.tasks.filter((task) => !task.parent_task_id)
+      : [];
+
+    topLevelTasks.forEach((task) => {
+      const assigned = String(task?.to || '').trim();
+      if (assigned && assigned !== 'unassigned') {
+        ensureGroup(assigned)?.tasks.push(task);
+      } else {
+        ensureGroup('Unassigned', { isUnassigned: true })?.tasks.push(task);
+      }
+    });
+
+    const sessions = Array.isArray(this.sessions) ? this.sessions : [];
+    sessions.forEach((session) => {
+      const sessionAgent = String(session?.agent_name || '').trim();
+      if (sessionAgent && sessionAgent !== 'unassigned') {
+        ensureGroup(sessionAgent)?.sessions.push(session);
+      } else {
+        ensureGroup('Unassigned', { isUnassigned: true })?.sessions.push(session);
+      }
+    });
+
+    const workspaceGroups = [];
+    const extraGroups = [];
+    const unassignedGroups = [];
+
+    groups.forEach((group) => {
+      if (group.isUnassigned) {
+        unassignedGroups.push(group);
+      } else if (group.isWorkspaceAgent) {
+        workspaceGroups.push(group);
+      } else {
+        extraGroups.push(group);
+      }
+    });
+
+    extraGroups.sort((a, b) => a.name.localeCompare(b.name));
+    return [...workspaceGroups, ...extraGroups, ...unassignedGroups];
+  }
+
+  renderAgentTasksContent(tasks) {
+    if (this.tasksLoading) {
+      return '<div class="workspace-detail-loading workspace-detail-loading-inline">Loading tasks...</div>';
+    }
+    if (this.tasksLoadFailed) {
+      return '<div class="workspace-detail-empty workspace-detail-empty-inline">Failed to load tasks.</div>';
+    }
+    if (!Array.isArray(tasks) || tasks.length === 0) {
+      return '<div class="workspace-detail-empty workspace-detail-empty-inline">No tasks assigned.</div>';
+    }
+    return tasks.map((task) => this.renderTaskItem(task)).join('');
+  }
+
+  renderAgentSessionsContent(sessions) {
+    if (this.sessionsLoading) {
+      return '<div class="workspace-detail-loading workspace-detail-loading-inline">Loading sessions...</div>';
+    }
+    if (this.sessionsLoadFailed) {
+      return '<div class="workspace-detail-empty workspace-detail-empty-inline">Failed to load sessions.</div>';
+    }
+    if (!Array.isArray(sessions) || sessions.length === 0) {
+      return '<div class="workspace-detail-empty workspace-detail-empty-inline">No sessions yet.</div>';
+    }
+    return sessions.map((session) => this.renderSessionItem(session)).join('');
+  }
+
+  getTaskScheduleIndicatorData(task) {
+    if (!task || task.schedule == null) return null;
+
+    const isActive = task.schedule_enabled !== false;
+    const scheduleName = typeof task.schedule_name === 'string' ? task.schedule_name.trim() : '';
+    const title = scheduleName
+      ? `${isActive ? 'Scheduled task' : 'Scheduled task (paused)'}: ${scheduleName}`
+      : (isActive ? 'Scheduled task' : 'Scheduled task (paused)');
+
+    return { isActive, title };
+  }
+
+  renderTaskScheduleIndicator(task, variant = 'default') {
+    const scheduleInfo = this.getTaskScheduleIndicatorData(task);
+    if (!scheduleInfo) return '';
+
+    const stateClass = scheduleInfo.isActive ? 'active' : 'paused';
+    const variantClass = variant === 'board' ? 'workspace-detail-task-schedule-indicator-board' : '';
+    const classes = ['workspace-detail-task-schedule-indicator', stateClass, variantClass]
+      .filter(Boolean)
+      .join(' ');
+
+    return `
+      <span class="${classes}"
+            title="${this.escapeHtml(scheduleInfo.title)}"
+            aria-label="${this.escapeHtml(scheduleInfo.title)}">
+        <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+          <path d="M12,20A8,8 0 0,1 4,12A8,8 0 0,1 12,4A8,8 0 0,1 20,12A8,8 0 0,1 12,20M12.5,7H11V12.3L15.6,15L16.35,13.77L12.5,11.5V7Z"/>
+        </svg>
+      </span>
+    `;
+  }
+
+  renderTaskItem(task) {
+    const taskLabel = this.escapeHtml(task.description || task.name || 'Untitled Task');
+    const assignedAgent = task.to && task.to !== 'unassigned' ? task.to : '';
+    const subtasks = this.tasks.filter((subtask) => subtask.parent_task_id === task.id);
+    const isParent = subtasks.length > 0;
+    const statusInfo = this.getTaskStatusPresentation(task);
+    const hasUnassignedSubtasks = isParent && subtasks.some((subtask) => !subtask.to || subtask.to === 'unassigned');
+    const hasRunningSubtasks = isParent && subtasks.some((subtask) => subtask.status === 'in_progress');
+    const canExecute = isParent
+      ? subtasks.length > 0 && !hasUnassignedSubtasks && !hasRunningSubtasks
+      : task.status !== 'in_progress';
+    const resultData = this.getDisplayResult(task, subtasks);
+    const hasResultData = !!resultData;
+    const hasAssistData = !!statusInfo.isBlocked;
+    const executeTitle = isParent
+      ? hasUnassignedSubtasks ? 'Assign agents to all subtasks before executing'
+        : hasRunningSubtasks ? 'A subtask is already running'
+          : 'Execute workflow now'
+      : !assignedAgent ? 'Will auto-assign a workspace agent before execution'
+        : task.status === 'in_progress' ? 'Task is already running'
+          : 'Execute task now';
+    const resultTitle = hasResultData
+      ? `View ${resultData.label} from ${resultData.answeredBy || 'Unknown agent'}`
+      : '';
+    const assistTitle = statusInfo.reason || 'Agent needs your guidance before this task can continue.';
+    const scheduleIndicator = this.renderTaskScheduleIndicator(task);
+    const taskMetaParts = [];
+    if (assignedAgent) {
+      taskMetaParts.push(`<span class="workspace-detail-assigned-agent">Assigned to: ${this.escapeHtml(assignedAgent)}${this.renderAgentCapabilityBadges(assignedAgent)}</span>`);
+    }
+    if (scheduleIndicator) {
+      taskMetaParts.push(scheduleIndicator);
+    }
+    taskMetaParts.push(formatDate(task.created_at));
+
+    return `
       <div class="workspace-detail-item" data-task-id="${task.id}">
         ${hasAssistData ? `
         <button type="button"
@@ -781,13 +1520,155 @@ export class WorkspaceDetailPage {
             <span class="workspace-detail-task-status ${statusInfo.className}">${statusInfo.label}</span>
           </div>
           <div class="workspace-detail-item-meta">
-            ${assignedAgent ? `<span class="workspace-detail-assigned-agent">Assigned to: ${this.escapeHtml(assignedAgent)}${this.renderAgentCapabilityBadges(assignedAgent)}</span> · ` : ''}
-            ${formatDate(task.created_at)}
+            ${taskMetaParts.join(' · ')}
           </div>
         </div>
       </div>
-      `;
-    }).join('');
+    `;
+  }
+
+  renderSessionItem(session) {
+    return `
+      <div class="workspace-detail-item" data-session-id="${session.id}">
+        <button type="button" class="workspace-detail-item-delete" onclick="event.stopPropagation(); window.workspaceDetail?.deleteSession('${session.id}')" title="Delete session" aria-label="Delete session ${this.escapeHtml(session.title || session.name || 'Untitled Session')}">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+            <path d="M19,4H15.5L14.5,3H9.5L8.5,4H5V6H19M6,19A2,2 0 0,0 8,21H16A2,2 0 0,0 18,19V7H6V19Z"/>
+          </svg>
+        </button>
+        <div class="workspace-detail-item-content"
+             role="button"
+             tabindex="0"
+             aria-label="Open session ${this.escapeHtml(session.title || session.name || 'Untitled Session')}"
+             onclick="window.workspaceDetail?.openSession('${session.id}')"
+             onkeydown="if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); window.workspaceDetail?.openSession('${session.id}'); }">
+          <div class="workspace-detail-item-title">${this.escapeHtml(session.title || session.name || 'Untitled Session')}</div>
+          <div class="workspace-detail-item-meta">
+            ${session.agent_name ? `${this.escapeHtml(session.agent_name)} · ` : ''}
+            ${formatDate(session.updated_at || session.created_at)}
+          </div>
+        </div>
+      </div>
+    `;
+  }
+
+  async openAddAgentModal() {
+    await this.loadAgentCatalog(true);
+    await this.populateAddAgentOptions();
+
+    if (this.elements.addAgentModal && window.bootstrap) {
+      const modal = typeof bootstrap.Modal.getOrCreateInstance === 'function'
+        ? bootstrap.Modal.getOrCreateInstance(this.elements.addAgentModal)
+        : (bootstrap.Modal.getInstance(this.elements.addAgentModal) || new bootstrap.Modal(this.elements.addAgentModal));
+      modal.show();
+    }
+  }
+
+  async populateAddAgentOptions() {
+    if (!this.elements.addAgentSelect || !this.elements.addAgentSubmitBtn || !this.elements.addAgentEmpty) return;
+
+    if (!Array.isArray(this.agentCatalog) || this.agentCatalog.length === 0) {
+      try {
+        const response = await fetch('/api/agents');
+        if (response.ok) {
+          const data = await response.json();
+          const baseAgents = Array.isArray(data?.agents) ? data.agents : [];
+          this.agentCatalog = baseAgents
+            .map((agent) => {
+              const name = typeof agent === 'string' ? agent : agent?.name;
+              return name ? { name: String(name).trim() } : null;
+            })
+            .filter((agent) => agent && agent.name);
+          this.agentIndex = new Map(this.agentCatalog.map((agent) => [this.normalizeAgentName(agent.name), agent]));
+        }
+      } catch (error) {
+        console.error('Failed to load fallback agent list:', error);
+      }
+    }
+
+    const workspaceAgents = new Set(this.getWorkspaceAgentNames().map((name) => this.normalizeAgentName(name)));
+    const allAgents = Array.isArray(this.agentCatalog) ? this.agentCatalog : [];
+    const candidates = allAgents
+      .map((agent) => String(agent?.name || '').trim())
+      .filter(Boolean)
+      .filter((name) => !workspaceAgents.has(this.normalizeAgentName(name)));
+
+    if (candidates.length === 0) {
+      this.elements.addAgentSelect.innerHTML = '<option value="">No agents available</option>';
+      this.elements.addAgentSelect.disabled = true;
+      this.elements.addAgentSubmitBtn.disabled = true;
+      this.elements.addAgentEmpty.classList.remove('d-none');
+      return;
+    }
+
+    this.elements.addAgentSelect.innerHTML = candidates
+      .map((name) => `<option value="${this.escapeHtml(name)}">${this.escapeHtml(name)}</option>`)
+      .join('');
+    this.elements.addAgentSelect.disabled = false;
+    this.elements.addAgentSubmitBtn.disabled = false;
+    this.elements.addAgentEmpty.classList.add('d-none');
+  }
+
+  openCreateAgentFlow() {
+    if (this.elements.addAgentModal && window.bootstrap) {
+      const modal = bootstrap.Modal.getInstance(this.elements.addAgentModal);
+      modal?.hide();
+    }
+
+    if (typeof window.showAddAgentModal === 'function') {
+      window.showAddAgentModal();
+      return;
+    }
+
+    window.location.href = '/agents';
+  }
+
+  async addSelectedAgentToWorkspace() {
+    const agentName = String(this.elements.addAgentSelect?.value || '').trim();
+    if (!agentName) {
+      if (window.Toast) window.Toast.warning('Select an agent first.');
+      return;
+    }
+
+    const submitButton = this.elements.addAgentSubmitBtn;
+    const originalLabel = submitButton ? submitButton.innerHTML : '';
+    if (submitButton) {
+      submitButton.disabled = true;
+      submitButton.innerHTML = '<span class="spinner-border spinner-border-sm me-1" aria-hidden="true"></span>Adding...';
+    }
+
+    try {
+      const response = await fetch(`/api/workspaces/${encodeURIComponent(this.workspaceId)}/agents`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ agent_name: agentName })
+      });
+      if (!response.ok) {
+        const text = await response.text();
+        throw new Error(text || 'Failed to add agent to workspace');
+      }
+
+      if (window.Toast) window.Toast.success(`Added "${agentName}" to workspace`);
+
+      if (this.elements.addAgentModal && window.bootstrap) {
+        const modal = bootstrap.Modal.getInstance(this.elements.addAgentModal);
+        modal?.hide();
+      }
+
+      this.agentOptions = null;
+      await Promise.all([
+        this.loadWorkspace(),
+        this.loadAgentCatalog(true)
+      ]);
+      this.renderAgentGroups();
+    } catch (error) {
+      console.error('Failed to add agent to workspace:', error);
+      if (window.Toast) window.Toast.error(error.message || 'Failed to add agent');
+    } finally {
+      if (submitButton) {
+        submitButton.disabled = false;
+        submitButton.innerHTML = originalLabel;
+      }
+    }
   }
 
   getTaskHumanLoop(task) {
@@ -898,9 +1779,17 @@ export class WorkspaceDetailPage {
     return 'Unknown agent';
   }
 
-  showTaskResult(taskId) {
+  setTaskModalHeaderId(element, taskId) {
+    if (!element) return;
+    const value = String(taskId || '').trim();
+    element.textContent = value || '--';
+    element.title = value || 'Task ID unavailable';
+  }
+
+  showTaskResult(taskId, options = {}) {
     const task = this.tasks.find((item) => item.id === taskId);
     if (!task) return;
+    const closeExecutionModal = Boolean(options?.closeExecutionModal);
 
     const subtasks = this.getSubtasksForParent(taskId);
     const isParent = subtasks.length > 0;
@@ -922,20 +1811,358 @@ export class WorkspaceDetailPage {
     if (this.elements.taskResultTitle) {
       this.elements.taskResultTitle.textContent = taskName;
     }
+    this.setTaskModalHeaderId(this.elements.taskResultId, task.id);
     if (this.elements.taskResultMeta) {
       this.elements.taskResultMeta.textContent = `${resultData.label} • ${metaParts.join(' • ')}`;
     }
+    this.renderTaskResultBreakdown(task, subtasks);
     if (this.elements.taskResultBody) {
       this.elements.taskResultBody.textContent = String(resultData.text || '');
     }
     this.currentTaskResultText = String(resultData.text || '');
 
-    if (this.elements.taskResultModal && window.bootstrap) {
+    const openResultModal = () => {
+      if (!this.elements.taskResultModal || !window.bootstrap) return;
       const modal = typeof bootstrap.Modal.getOrCreateInstance === 'function'
         ? bootstrap.Modal.getOrCreateInstance(this.elements.taskResultModal)
         : (bootstrap.Modal.getInstance(this.elements.taskResultModal) || new bootstrap.Modal(this.elements.taskResultModal));
       modal.show();
+    };
+
+    if (closeExecutionModal && this.elements.taskExecutionModal && window.bootstrap) {
+      const isExecutionModalOpen = this.elements.taskExecutionModal.classList.contains('show');
+      if (isExecutionModalOpen) {
+        const executionModal = typeof bootstrap.Modal.getOrCreateInstance === 'function'
+          ? bootstrap.Modal.getOrCreateInstance(this.elements.taskExecutionModal)
+          : (bootstrap.Modal.getInstance(this.elements.taskExecutionModal) || new bootstrap.Modal(this.elements.taskExecutionModal));
+        this.elements.taskExecutionModal.addEventListener('hidden.bs.modal', () => {
+          openResultModal();
+        }, { once: true });
+        executionModal.hide();
+        return;
+      }
     }
+
+    openResultModal();
+  }
+
+  renderTaskResultBreakdown(task, subtasks = []) {
+    this.renderTaskBreakdown(this.elements.taskResultBreakdown, task, subtasks);
+  }
+
+  renderTaskExecutionBreakdown(task, subtasks = []) {
+    this.renderTaskBreakdown(this.elements.taskExecutionBreakdown, task, subtasks);
+  }
+
+  renderTaskBreakdown(container, task, subtasks = []) {
+    if (!container) return;
+    if (!task) {
+      container.innerHTML = '';
+      return;
+    }
+
+    const steps = this.getTaskResultBreakdownSteps(task, subtasks);
+    if (!steps.length) {
+      container.innerHTML = '';
+      return;
+    }
+
+    const stepsHtml = steps.map((step, index) => {
+      const statusKey = String(step.status || task.status || 'pending').trim().toLowerCase();
+      const statusClass = getStatusClass(statusKey);
+      const statusLabel = getDisplayStatus(statusKey);
+      const detail = String(step.detail || '').trim();
+      const defaultOpen = index < 2 ? ' open' : '';
+      const safeTitle = this.escapeHtml(step.title || `Step ${index + 1}`);
+      const safeDetail = detail ? this.escapeHtml(detail) : 'No additional detail.';
+
+      return `
+        <details class="workspace-detail-task-breakdown-step"${defaultOpen}>
+          <summary>
+            <span class="workspace-detail-task-breakdown-step-title">
+              <span class="workspace-detail-task-breakdown-step-index">${index + 1}</span>
+              <span>${safeTitle}</span>
+            </span>
+            <span class="workspace-detail-task-status ${statusClass}">${statusLabel}</span>
+          </summary>
+          <div class="workspace-detail-task-breakdown-step-body">${safeDetail}</div>
+        </details>
+      `;
+    }).join('');
+
+    container.innerHTML = `
+      <div class="workspace-detail-task-breakdown-title">Execution Breakdown</div>
+      ${stepsHtml}
+    `;
+  }
+
+  normalizeBreakdownField(value) {
+    if (value === undefined || value === null) return '';
+    if (typeof value === 'string') return value.trim();
+    if (typeof value === 'number' || typeof value === 'boolean') return String(value);
+    try {
+      return JSON.stringify(value, null, 2).trim();
+    } catch (_error) {
+      return String(value).trim();
+    }
+  }
+
+  truncateBreakdownText(text, maxLength = 220) {
+    const normalized = this.normalizeBreakdownField(text);
+    if (!normalized) return '';
+    if (normalized.length <= maxLength) return normalized;
+    return `${normalized.slice(0, maxLength).trim()}...`;
+  }
+
+  buildTaskExecutionDetail(task, fallbackDetail = '') {
+    const parts = [];
+    const initialDetail = this.normalizeBreakdownField(fallbackDetail);
+    if (initialDetail) parts.push(initialDetail);
+
+    const currentStep = this.normalizeBreakdownField(task?.progress?.current_step);
+    if (currentStep) {
+      parts.push(`Execution: ${currentStep}`);
+    }
+
+    const attemptsUsed = Number(task?.context?.execution_retry?.attempts_used || 0);
+    const maxAttempts = Number(task?.context?.execution_retry?.max_attempts || task?.context?.execution_max_attempts || 0);
+    if (attemptsUsed > 0 && maxAttempts > 0) {
+      parts.push(`Attempts: ${attemptsUsed}/${maxAttempts}`);
+    }
+
+    const retryFinalOutcome = this.normalizeBreakdownField(task?.context?.execution_retry?.final_outcome);
+    if (retryFinalOutcome) {
+      parts.push(`Final outcome: ${retryFinalOutcome}`);
+    }
+
+    const blockedReason = this.normalizeBreakdownField(task?.context?.human_loop?.reason);
+    const blockedQuestion = this.normalizeBreakdownField(task?.context?.human_loop?.question);
+    if (blockedReason) {
+      parts.push(`Blocked reason: ${this.truncateBreakdownText(blockedReason, 260)}`);
+    }
+    if (blockedQuestion) {
+      parts.push(`Needs input: ${this.truncateBreakdownText(blockedQuestion, 260)}`);
+    }
+
+    const errorText = this.normalizeBreakdownField(task?.error);
+    if (errorText) {
+      parts.push(`Error: ${this.truncateBreakdownText(errorText, 360)}`);
+    }
+
+    const resultText = this.normalizeBreakdownField(task?.result);
+    if (resultText) {
+      parts.push(`Result: ${this.truncateBreakdownText(resultText, 360)}`);
+    }
+
+    return parts.join('\n');
+  }
+
+  getRetryHistoryBreakdownSteps(task) {
+    const history = Array.isArray(task?.context?.execution_retry?.history)
+      ? task.context.execution_retry.history
+      : [];
+    if (!history.length) return [];
+
+    const outcomeToStatus = (outcome) => {
+      const normalized = String(outcome || '').trim().toLowerCase();
+      if (normalized === 'success') return 'completed';
+      if (normalized === 'error') return 'failed';
+      if (normalized === 'needs_input' || normalized === 'blocked') return 'blocked';
+      return 'pending';
+    };
+
+    return history.map((item, index) => {
+      const attemptNumber = Number.isFinite(Number(item?.attempt)) ? Number(item.attempt) : (index + 1);
+      const outcome = String(item?.outcome || '').trim().toLowerCase();
+      const summary = this.normalizeBreakdownField(item?.summary);
+      const createdAt = this.normalizeBreakdownField(item?.created_at);
+      const detailParts = [];
+      if (summary) detailParts.push(summary);
+      if (createdAt) detailParts.push(`Recorded at: ${formatDate(createdAt)}`);
+      if (outcome) detailParts.push(`Outcome: ${outcome.replace(/_/g, ' ')}`);
+
+      return {
+        title: `Attempt ${attemptNumber}`,
+        status: outcomeToStatus(outcome),
+        detail: detailParts.join('\n')
+      };
+    });
+  }
+
+  getExecutionHistoryBreakdownSteps(task, options = {}) {
+    const history = Array.isArray(task?.execution_history) ? task.execution_history : [];
+    if (!history.length) return [];
+
+    const includeLatest = options.includeLatest !== false;
+    const relevantHistory = includeLatest ? history : history.slice(0, -1);
+    if (!relevantHistory.length) return [];
+
+    const startIndex = Number.isFinite(Number(options.startIndex)) && Number(options.startIndex) > 0
+      ? Number(options.startIndex)
+      : 1;
+
+    const mapRecordedStatus = (status) => {
+      const normalized = String(status || '').trim().toLowerCase();
+      if (normalized === 'success') return 'completed';
+      if (normalized === 'failed') return 'failed';
+      if (normalized === 'blocked') return 'blocked';
+      return normalized || 'pending';
+    };
+
+    return relevantHistory.map((item, index) => {
+      const recordedAt = this.normalizeBreakdownField(item?.executed_at);
+      const rawStatus = String(item?.status || '').trim().toLowerCase();
+      const summary = this.normalizeBreakdownField(item?.summary);
+      const errorText = this.normalizeBreakdownField(item?.error);
+      const detailParts = [];
+
+      if (recordedAt) detailParts.push(`Recorded at: ${formatDate(recordedAt)}`);
+      if (rawStatus) detailParts.push(`Outcome: ${rawStatus.replace(/_/g, ' ')}`);
+      if (summary) {
+        detailParts.push(this.truncateBreakdownText(summary, 360));
+      } else if (errorText) {
+        detailParts.push(this.truncateBreakdownText(errorText, 360));
+      }
+
+      return {
+        title: `Run ${startIndex + index}`,
+        status: mapRecordedStatus(rawStatus),
+        detail: detailParts.join('\n')
+      };
+    });
+  }
+
+  async fetchLatestSubtasksForParent(parentTaskID) {
+    if (!parentTaskID || !this.workspaceId) return [];
+    try {
+      const response = await fetch(`/api/orchestration/tasks?studio_id=${encodeURIComponent(this.workspaceId)}`);
+      if (!response.ok) return [];
+      const payload = await response.json();
+      const tasks = Array.isArray(payload?.tasks) ? payload.tasks : [];
+      return tasks.filter((task) => task?.parent_task_id === parentTaskID);
+    } catch (error) {
+      console.error('Failed to fetch latest subtasks for breakdown:', error);
+      return [];
+    }
+  }
+
+  async refreshExecutionBreakdown(task) {
+    if (!task) {
+      this.renderTaskExecutionBreakdown(null);
+      return;
+    }
+
+    let subtasks = this.getSubtasksForParent(task.id);
+    this.renderTaskExecutionBreakdown(task, subtasks);
+
+    if (!subtasks.length) return;
+
+    const latestSubtasks = await this.fetchLatestSubtasksForParent(task.id);
+    if (!latestSubtasks.length) return;
+    this.renderTaskExecutionBreakdown(task, latestSubtasks);
+  }
+
+  getTaskResultBreakdownSteps(task, subtasks = []) {
+    if (!task) return [];
+
+    const sortedSubtasks = Array.isArray(subtasks) ? [...subtasks].sort((a, b) => {
+      const aIndex = Number.isFinite(Number(a?.subtask_index)) ? Number(a.subtask_index) : Number.MAX_SAFE_INTEGER;
+      const bIndex = Number.isFinite(Number(b?.subtask_index)) ? Number(b.subtask_index) : Number.MAX_SAFE_INTEGER;
+      if (aIndex !== bIndex) return aIndex - bIndex;
+      const aTime = a?.created_at ? new Date(a.created_at).getTime() : 0;
+      const bTime = b?.created_at ? new Date(b.created_at).getTime() : 0;
+      return aTime - bTime;
+    }) : [];
+
+    if (sortedSubtasks.length > 0) {
+      return sortedSubtasks.map((subtask, index) => ({
+        title: String(subtask.description || subtask.name || `Step ${index + 1}`).trim(),
+        status: String(subtask.status || task.status || 'pending').trim(),
+        detail: this.buildTaskExecutionDetail(
+          subtask,
+          String(subtask.details || '').trim()
+        )
+      }));
+    }
+
+    const retryHistorySteps = this.getRetryHistoryBreakdownSteps(task);
+    const historicalRunSteps = this.getExecutionHistoryBreakdownSteps(task, {
+      includeLatest: retryHistorySteps.length === 0
+    });
+    if (historicalRunSteps.length > 0) {
+      if (retryHistorySteps.length > 0) {
+        const currentRunNumber = historicalRunSteps.length + 1;
+        const currentRunSteps = retryHistorySteps.map((step) => ({
+          ...step,
+          title: `Run ${currentRunNumber} • ${step.title}`
+        }));
+        return [...historicalRunSteps, ...currentRunSteps];
+      }
+      return historicalRunSteps;
+    }
+
+    if (retryHistorySteps.length > 0) {
+      return retryHistorySteps;
+    }
+
+    return this.inferSyntheticBreakdownSteps(task);
+  }
+
+  inferSyntheticBreakdownSteps(task) {
+    const description = String(task?.description || '').trim();
+    const lower = description.toLowerCase();
+
+    const toStep = (title, detail = '') => ({ title, detail });
+
+    let baseSteps = [];
+    if ((lower.includes('wear') && lower.includes('tomorrow')) || lower.includes('what should i wear')) {
+      baseSteps = [
+        toStep("Checking tomorrow's weather", 'Collect forecast details such as temperature, rain chance, and wind.'),
+        toStep('Recommendation for clothing based on the weather', 'Translate weather conditions into practical outfit guidance.')
+      ];
+    } else if (lower.includes('weather')) {
+      baseSteps = [
+        toStep('Checking weather conditions', 'Gather forecast or relevant weather signals.'),
+        toStep('Summarizing weather insight', 'Return a concise recommendation tailored to the request.')
+      ];
+    } else {
+      baseSteps = [
+        toStep('Understanding the request', 'Clarify intent and constraints from task context.'),
+        toStep('Producing final recommendation', 'Generate the final answer with clear reasoning.')
+      ];
+    }
+
+    const statusSequence = this.getSyntheticStepStatuses(String(task?.status || 'pending'), baseSteps.length);
+    return baseSteps.map((step, index) => ({
+      ...step,
+      status: statusSequence[index] || String(task?.status || 'pending')
+    }));
+  }
+
+  getSyntheticStepStatuses(status, count) {
+    const normalized = String(status || 'pending').trim().toLowerCase();
+    if (count <= 0) return [];
+
+    if (normalized === 'completed') {
+      return Array.from({ length: count }, () => 'completed');
+    }
+    if (normalized === 'in_progress') {
+      return Array.from({ length: count }, (_value, index) => (index === 0 ? 'in_progress' : 'pending'));
+    }
+    if (normalized === 'failed' || normalized === 'timeout') {
+      return Array.from({ length: count }, (_value, index) => {
+        if (index < Math.max(0, count - 1)) return 'completed';
+        return 'failed';
+      });
+    }
+    if (normalized === 'blocked') {
+      return Array.from({ length: count }, (_value, index) => {
+        if (index === 0) return 'completed';
+        if (index === 1) return 'blocked';
+        return 'pending';
+      });
+    }
+    return Array.from({ length: count }, () => 'pending');
   }
 
   populateAssistAgents(currentAgent = '') {
@@ -1088,6 +2315,7 @@ export class WorkspaceDetailPage {
       suggestedActions: this.parseAssistActions(suggestedActions)
     };
 
+    this.setTaskModalHeaderId(this.elements.taskAssistId, task.id);
     if (this.elements.taskAssistMeta) {
       this.elements.taskAssistMeta.textContent = `${task.description || task.name || task.id} • ${statusText} • ${timestamp}`;
     }
@@ -1239,7 +2467,10 @@ export class WorkspaceDetailPage {
             capabilities: Array.isArray(agent?.capabilities) ? agent.capabilities.map((value) => String(value || '').trim()).filter(Boolean) : [],
             allowWebSearch: Boolean(agent?.allow_web_search),
             enabledPlugins: Array.isArray(agent?.enabled_plugins) ? agent.enabled_plugins.map((value) => String(value || '').trim()).filter(Boolean) : [],
-            mcpServers: Array.isArray(agent?.mcp_servers) ? agent.mcp_servers.map((value) => String(value || '').trim()).filter(Boolean) : []
+            mcpServers: Array.isArray(agent?.mcp_servers) ? agent.mcp_servers.map((value) => String(value || '').trim()).filter(Boolean) : [],
+            evolution: agent?.evolution && typeof agent.evolution === 'object' ? agent.evolution : null,
+            level: Number.isFinite(Number(agent?.evolution?.level)) ? Math.max(0, Math.floor(Number(agent.evolution.level))) : 0,
+            stage: String(agent?.evolution?.stage || '').trim()
           };
 
           nextCatalog.push(profile);
@@ -1435,6 +2666,221 @@ export class WorkspaceDetailPage {
     }
   }
 
+  getTaskExecutionState(task) {
+    if (!task || typeof task !== 'object') return 'pending';
+    const status = String(task.status || '').trim().toLowerCase();
+    const humanLoopState = String(task?.context?.human_loop?.state || '').trim().toLowerCase();
+    if (humanLoopState === 'blocked') return 'blocked';
+    return status || 'pending';
+  }
+
+  setExecutionModalStatus(status) {
+    if (!this.elements.taskExecutionStatus) return;
+    const safeStatus = String(status || 'pending').trim().toLowerCase();
+    this.elements.taskExecutionStatus.className = `workspace-detail-task-status ${getStatusClass(safeStatus)}`;
+    this.elements.taskExecutionStatus.textContent = getDisplayStatus(safeStatus);
+  }
+
+  clearExecutionLog() {
+    this.executionLogKeys = new Set();
+    this.executionLastStatus = '';
+    if (!this.elements.taskExecutionLog) return;
+    this.elements.taskExecutionLog.innerHTML = '<div class="workspace-detail-task-execution-empty">Execution updates will appear here.</div>';
+  }
+
+  appendExecutionLog(message, variant = 'info', dedupeKey = '') {
+    if (!this.elements.taskExecutionLog || !message) return;
+    const key = String(dedupeKey || '').trim();
+    if (key) {
+      if (this.executionLogKeys.has(key)) return;
+      this.executionLogKeys.add(key);
+    }
+
+    const empty = this.elements.taskExecutionLog.querySelector('.workspace-detail-task-execution-empty');
+    if (empty) empty.remove();
+
+    const entry = document.createElement('div');
+    const safeVariant = ['info', 'success', 'warning', 'error'].includes(variant) ? variant : 'info';
+    entry.className = `workspace-detail-task-execution-log-entry ${safeVariant}`;
+
+    const timeEl = document.createElement('div');
+    timeEl.className = 'workspace-detail-task-execution-log-time';
+    timeEl.textContent = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+
+    const messageEl = document.createElement('div');
+    messageEl.className = 'workspace-detail-task-execution-log-message';
+    messageEl.textContent = String(message);
+
+    entry.appendChild(timeEl);
+    entry.appendChild(messageEl);
+    this.elements.taskExecutionLog.appendChild(entry);
+    this.elements.taskExecutionLog.scrollTop = this.elements.taskExecutionLog.scrollHeight;
+  }
+
+  setExecutionViewResultEnabled(enabled) {
+    if (!this.elements.taskExecutionViewResultBtn) return;
+    this.elements.taskExecutionViewResultBtn.disabled = !enabled;
+  }
+
+  applyTopBackdropLayer(layerClass) {
+    const backdrops = Array.from(document.querySelectorAll('.modal-backdrop.show'));
+    if (!backdrops.length) return;
+
+    const topBackdrop = backdrops[backdrops.length - 1];
+    topBackdrop.classList.remove(
+      'workspace-detail-backdrop-execution',
+      'workspace-detail-backdrop-result'
+    );
+    if (layerClass) {
+      topBackdrop.classList.add(layerClass);
+    }
+  }
+
+  updateTaskExecutionMeta(task) {
+    if (!this.elements.taskExecutionMeta || !task) return;
+    const answeredBy = this.getAnsweringAgentLabel(task);
+    const updatedAt = formatDate(task.updated_at || task.completed_at || task.started_at || task.created_at);
+    const retry = task?.context?.execution_retry || {};
+    const attemptsUsed = Number(retry.attempts_used || 0);
+    const maxAttempts = Number(retry.max_attempts || task?.context?.execution_max_attempts || 0);
+    const parts = [answeredBy, updatedAt].filter(Boolean);
+    if (attemptsUsed > 0 && maxAttempts > 0) {
+      parts.push(`Attempt ${attemptsUsed}/${maxAttempts}`);
+    }
+    this.elements.taskExecutionMeta.textContent = parts.join(' • ');
+  }
+
+  openTaskExecutionModal(task) {
+    if (!this.elements.taskExecutionModal || !window.bootstrap || !task) return;
+    const taskName = task.description || task.name || task.id || 'Task Execution';
+    this.currentExecutionTaskId = task.id;
+    if (this.elements.taskExecutionTitle) {
+      this.elements.taskExecutionTitle.textContent = taskName;
+    }
+    this.setTaskModalHeaderId(this.elements.taskExecutionId, task.id);
+    this.updateTaskExecutionMeta(task);
+    this.setExecutionModalStatus(this.getTaskExecutionState(task));
+    this.refreshExecutionBreakdown(task);
+    this.setExecutionViewResultEnabled(false);
+    this.clearExecutionLog();
+    this.appendExecutionLog('Preparing execution...', 'info', `${task.id}:prepare`);
+
+    const modal = typeof bootstrap.Modal.getOrCreateInstance === 'function'
+      ? bootstrap.Modal.getOrCreateInstance(this.elements.taskExecutionModal)
+      : (bootstrap.Modal.getInstance(this.elements.taskExecutionModal) || new bootstrap.Modal(this.elements.taskExecutionModal));
+    modal.show();
+  }
+
+  stopExecutionMonitor() {
+    if (this.executionMonitorTimer) {
+      clearInterval(this.executionMonitorTimer);
+      this.executionMonitorTimer = null;
+    }
+  }
+
+  async startExecutionMonitor(taskId) {
+    this.stopExecutionMonitor();
+    if (!taskId) return;
+    this.currentExecutionTaskId = taskId;
+
+    const poll = async () => {
+      try {
+        const response = await fetch(`/api/orchestration/tasks?id=${encodeURIComponent(taskId)}`);
+        if (!response.ok) return;
+
+        const task = await response.json();
+        if (!task || task.id !== taskId) return;
+
+        const state = this.getTaskExecutionState(task);
+        this.updateTaskExecutionMeta(task);
+        this.setExecutionModalStatus(state);
+        await this.refreshExecutionBreakdown(task);
+
+        if (state !== this.executionLastStatus) {
+          this.executionLastStatus = state;
+          this.appendExecutionLog(`Status changed to ${getDisplayStatus(state)}.`, state === 'failed' ? 'error' : state === 'blocked' ? 'warning' : state === 'completed' ? 'success' : 'info', `${taskId}:status:${state}:${task.updated_at || ''}`);
+        }
+
+        if (state === 'completed' || state === 'failed' || state === 'cancelled' || state === 'timeout' || state === 'blocked') {
+          this.stopExecutionMonitor();
+          this.setExecutionViewResultEnabled(Boolean(task.result || task.error));
+          if (state === 'completed') {
+            this.appendExecutionLog('Execution completed successfully.', 'success', `${taskId}:terminal:completed`);
+          } else if (state === 'blocked') {
+            this.appendExecutionLog('Execution paused and requires your input.', 'warning', `${taskId}:terminal:blocked`);
+          } else {
+            this.appendExecutionLog('Execution ended with an issue.', 'error', `${taskId}:terminal:${state}`);
+          }
+          await this.loadTasks();
+        }
+      } catch (error) {
+        console.error('Failed to monitor task execution:', error);
+      }
+    };
+
+    await poll();
+    this.executionMonitorTimer = setInterval(poll, 3000);
+  }
+
+  extractRealtimeTaskPayload(event) {
+    const eventData = event && typeof event === 'object' ? (event.data || {}) : {};
+    const payload = eventData && typeof eventData.data === 'object' ? eventData.data : eventData;
+    const taskId = String(payload?.task_id || eventData?.task_id || '').trim();
+    return { taskId, payload };
+  }
+
+  handleTaskExecutionRealtimeEvent(event) {
+    if (!this.currentExecutionTaskId || !event) return;
+    const { taskId, payload } = this.extractRealtimeTaskPayload(event);
+    if (!taskId || taskId !== this.currentExecutionTaskId) return;
+
+    switch (event.type) {
+      case 'task.started':
+        this.setExecutionModalStatus('in_progress');
+        this.appendExecutionLog('Agent started executing this task.', 'info', `${taskId}:evt:started:${payload?.updated_at || ''}`);
+        break;
+      case 'task.thinking':
+        this.setExecutionModalStatus('in_progress');
+        this.appendExecutionLog(payload?.message || 'Agent is analyzing the task...', 'info');
+        break;
+      case 'task.tool_call':
+        this.appendExecutionLog(`Calling tool: ${payload?.tool_name || 'unknown tool'}`, 'info');
+        break;
+      case 'task.tool_result': {
+        const success = payload?.success !== false;
+        const resultPreview = payload?.result_preview ? ` (${payload.result_preview})` : '';
+        const message = success
+          ? `Tool completed: ${payload?.tool_name || 'tool'}${resultPreview}`
+          : `Tool failed: ${payload?.tool_name || 'tool'}${payload?.error ? ` (${payload.error})` : ''}`;
+        this.appendExecutionLog(message, success ? 'success' : 'warning');
+        break;
+      }
+      case 'task.blocked':
+        this.setExecutionModalStatus('blocked');
+        this.appendExecutionLog(payload?.reason || 'Execution paused and requires your input.', 'warning', `${taskId}:evt:blocked:${payload?.updated_at || ''}`);
+        this.stopExecutionMonitor();
+        this.setExecutionViewResultEnabled(false);
+        break;
+      case 'task.completed':
+        this.setExecutionModalStatus('completed');
+        this.appendExecutionLog('Task completed.', 'success', `${taskId}:evt:completed:${payload?.updated_at || ''}`);
+        this.stopExecutionMonitor();
+        this.setExecutionViewResultEnabled(true);
+        break;
+      case 'task.failed':
+        this.setExecutionModalStatus('failed');
+        this.appendExecutionLog(payload?.error || 'Task failed.', 'error', `${taskId}:evt:failed:${payload?.updated_at || ''}`);
+        this.stopExecutionMonitor();
+        this.setExecutionViewResultEnabled(true);
+        break;
+      case 'task.resumed':
+        this.setExecutionModalStatus('in_progress');
+        this.appendExecutionLog('Task resumed after guidance.', 'info', `${taskId}:evt:resumed:${payload?.updated_at || ''}`);
+        this.startExecutionMonitor(taskId);
+        break;
+    }
+  }
+
   async executeTask(taskId) {
     await this.loadAgentCatalog();
 
@@ -1512,6 +2958,8 @@ export class WorkspaceDetailPage {
     const confirmMessage = preflightWarning ? `${preflightWarning}\n\n${baseConfirmMessage}` : baseConfirmMessage;
     if (!confirm(confirmMessage)) return;
 
+    this.openTaskExecutionModal(task);
+
     try {
       const response = await fetch('/api/orchestration/tasks/execute', {
         method: 'POST',
@@ -1524,10 +2972,14 @@ export class WorkspaceDetailPage {
       }
 
       if (window.Toast) window.Toast.success('Task started');
+      this.appendExecutionLog('Task dispatched. Waiting for agent updates...', 'info', `${taskId}:dispatched`);
       await this.loadTasks();
-      this.pollTaskCompletion(taskId);
+      this.startExecutionMonitor(taskId);
     } catch (error) {
       console.error('Failed to execute task:', error);
+      const message = error && error.message ? error.message : 'Failed to execute task';
+      this.setExecutionModalStatus('failed');
+      this.appendExecutionLog(message, 'error', `${taskId}:dispatch-error`);
       if (window.Toast) window.Toast.error('Failed to execute task');
     }
   }
@@ -1579,13 +3031,13 @@ export class WorkspaceDetailPage {
     }
 
     // Toggle panel class for expanded board view
-    if (this.elements.tasksPanel) {
-      this.elements.tasksPanel.classList.toggle('board-view', view === 'board');
+    if (this.elements.agentsPanel) {
+      this.elements.agentsPanel.classList.toggle('board-view', view === 'board');
     }
 
     // Show/hide views
-    if (this.elements.tasksList) {
-      this.elements.tasksList.style.display = view === 'list' ? '' : 'none';
+    if (this.elements.agentsList) {
+      this.elements.agentsList.style.display = view === 'list' ? '' : 'none';
     }
     if (this.elements.tasksBoard) {
       this.elements.tasksBoard.style.display = view === 'board' ? '' : 'none';
@@ -1876,6 +3328,7 @@ export class WorkspaceDetailPage {
     const assignedMarkup = assignmentLabel && assignmentLabel !== 'Unassigned'
       ? `<span class="workspace-detail-board-card-assignee">${this.escapeHtml(assignmentLabel)}</span>`
       : '<span class="workspace-detail-board-card-assignee is-muted">Unassigned</span>';
+    const scheduleIndicator = this.renderTaskScheduleIndicator(task, 'board');
     const editTitleValue = this.escapeHtml(task.description || task.name || task.id || '');
     const editDetailsValue = this.escapeHtml(task.details || '');
     const editLabelsValue = this.escapeHtml(this.formatLabelsInput(labels));
@@ -1905,6 +3358,7 @@ export class WorkspaceDetailPage {
           </div>
           <div class="workspace-detail-board-card-meta workspace-detail-board-card-meta-secondary">
             <span>${getDisplayStatus(task.status)}</span>
+            ${scheduleIndicator}
           </div>
         </div>
         <div class="workspace-detail-board-card-edit" hidden>
@@ -2556,9 +4010,9 @@ export class WorkspaceDetailPage {
    * Load sessions for the workspace
    */
   async loadSessions() {
-    if (this.elements.sessionsList) {
-      this.elements.sessionsList.innerHTML = '<div class="workspace-detail-loading">Loading sessions...</div>';
-    }
+    this.sessionsLoading = true;
+    this.sessionsLoadFailed = false;
+    this.renderAgentGroups();
 
     try {
       const response = await fetch(`/api/sessions?folder_id=${encodeURIComponent(this.workspaceId)}`);
@@ -2566,52 +4020,27 @@ export class WorkspaceDetailPage {
 
       const data = await response.json();
       this.sessions = data.sessions || data || [];
+      this.sessionsLoadFailed = false;
+    } catch (error) {
+      console.error('Failed to load sessions:', error);
+      this.sessions = [];
+      this.sessionsLoadFailed = true;
+    } finally {
+      this.sessionsLoading = false;
       this.renderSessions();
 
-      // Update session count
       if (this.elements.sessionCount) {
         this.elements.sessionCount.textContent = this.sessions.length;
       }
-    } catch (error) {
-      console.error('Failed to load sessions:', error);
-      if (this.elements.sessionsList) {
-        this.elements.sessionsList.innerHTML = '<div class="workspace-detail-empty">Failed to load sessions</div>';
-      }
+      this.refreshHomeAssistantQuickPrompts();
     }
   }
 
   /**
-   * Render sessions list
+   * Render sessions grouped by agent
    */
   renderSessions() {
-    if (!this.elements.sessionsList) return;
-
-    if (this.sessions.length === 0) {
-      this.elements.sessionsList.innerHTML = '<div class="workspace-detail-empty">No chat sessions yet.</div>';
-      return;
-    }
-
-    this.elements.sessionsList.innerHTML = this.sessions.map(session => `
-      <div class="workspace-detail-item" data-session-id="${session.id}">
-        <button type="button" class="workspace-detail-item-delete" onclick="event.stopPropagation(); window.workspaceDetail?.deleteSession('${session.id}')" title="Delete session" aria-label="Delete session ${this.escapeHtml(session.title || session.name || 'Untitled Session')}">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
-            <path d="M19,4H15.5L14.5,3H9.5L8.5,4H5V6H19M6,19A2,2 0 0,0 8,21H16A2,2 0 0,0 18,19V7H6V19Z"/>
-          </svg>
-        </button>
-        <div class="workspace-detail-item-content"
-             role="button"
-             tabindex="0"
-             aria-label="Open session ${this.escapeHtml(session.title || session.name || 'Untitled Session')}"
-             onclick="window.workspaceDetail?.openSession('${session.id}')"
-             onkeydown="if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); window.workspaceDetail?.openSession('${session.id}'); }">
-          <div class="workspace-detail-item-title">${this.escapeHtml(session.title || session.name || 'Untitled Session')}</div>
-          <div class="workspace-detail-item-meta">
-            ${session.agent_name ? `${this.escapeHtml(session.agent_name)} · ` : ''}
-            ${formatDate(session.updated_at || session.created_at)}
-          </div>
-        </div>
-      </div>
-    `).join('');
+    this.renderAgentGroups();
   }
 
   /**
@@ -2627,6 +4056,7 @@ export class WorkspaceDetailPage {
       if (!response.ok) {
         this.files = [];
         this.renderFiles();
+        this.refreshHomeAssistantQuickPrompts();
         return;
       }
 
@@ -2634,10 +4064,12 @@ export class WorkspaceDetailPage {
       // Filter attachments to only include files (not text content)
       this.files = (workspace.attachments || []).filter(a => a.file_meta || a.type === 'image' || a.type === 'other');
       this.renderFiles();
+      this.refreshHomeAssistantQuickPrompts();
     } catch (error) {
       console.error('Failed to load files:', error);
       this.files = [];
       this.renderFiles();
+      this.refreshHomeAssistantQuickPrompts();
     }
   }
 
@@ -2682,16 +4114,19 @@ export class WorkspaceDetailPage {
         // Notes endpoint might return workspace notes differently
         this.notes = [];
         this.renderNotes();
+        this.refreshHomeAssistantQuickPrompts();
         return;
       }
 
       const data = await response.json();
       this.notes = data.notes || (Array.isArray(data) ? data : [data]).filter(Boolean);
       this.renderNotes();
+      this.refreshHomeAssistantQuickPrompts();
     } catch (error) {
       console.error('Failed to load notes:', error);
       this.notes = [];
       this.renderNotes();
+      this.refreshHomeAssistantQuickPrompts();
     }
   }
 
@@ -2743,21 +4178,66 @@ export class WorkspaceDetailPage {
     }
 
     try {
-      // Directories are stored as attachments with type 'directory'
+      // Directories may come from:
+      // 1) directory_references (workspace imports / folder picker)
+      // 2) legacy attachments with type "directory"
       const response = await fetch(`/api/studios/${encodeURIComponent(this.workspaceId)}`);
       if (!response.ok) {
         this.directories = [];
         this.renderDirectories();
+        this.refreshHomeAssistantQuickPrompts();
         return;
       }
 
       const workspace = await response.json();
-      this.directories = (workspace.attachments || []).filter(a => a.type === 'directory');
+
+      const refs = Array.isArray(workspace.directory_references)
+        ? workspace.directory_references.map((ref) => ({
+          id: ref.id,
+          name: ref.name || '',
+          path: ref.path || '',
+          source: 'reference'
+        }))
+        : [];
+
+      const attachmentDirs = Array.isArray(workspace.attachments)
+        ? workspace.attachments
+          .filter((attachment) => attachment && attachment.type === 'directory')
+          .map((attachment) => ({
+            id: attachment.id,
+            name: attachment.title || attachment.name || '',
+            path: attachment.path || attachment.body || '',
+            source: 'attachment'
+          }))
+        : [];
+
+      // De-duplicate by id first, then by normalized path for mixed legacy/new sources.
+      const seenById = new Set();
+      const seenByPath = new Set();
+      this.directories = [];
+      [...refs, ...attachmentDirs].forEach((dir) => {
+        if (!dir || !dir.id) return;
+        if (seenById.has(dir.id)) return;
+
+        const normalizedPath = String(dir.path || '').trim().replace(/[\\/]+$/, '').toLowerCase();
+        if (normalizedPath && seenByPath.has(normalizedPath)) {
+          return;
+        }
+
+        seenById.add(dir.id);
+        if (normalizedPath) {
+          seenByPath.add(normalizedPath);
+        }
+        this.directories.push(dir);
+      });
+
       this.renderDirectories();
+      this.refreshHomeAssistantQuickPrompts();
     } catch (error) {
       console.error('Failed to load directories:', error);
       this.directories = [];
       this.renderDirectories();
+      this.refreshHomeAssistantQuickPrompts();
     }
   }
 
@@ -2775,18 +4255,894 @@ export class WorkspaceDetailPage {
     this.elements.directoriesList.innerHTML = this.directories.map(dir => {
       const name = dir.title || dir.name || dir.path || 'Unnamed Directory';
       const path = dir.path || '';
+      const sourceLabel = dir.source === 'reference' ? 'Reference' : 'Attachment';
+      const source = dir.source === 'attachment' ? 'attachment' : 'reference';
       return `
         <div class="workspace-detail-item" data-directory-id="${dir.id}">
-          <div class="workspace-detail-item-title">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" class="me-2" style="color: var(--text-secondary);">
-              <path d="M10,4H4C2.89,4 2,4.89 2,6V18A2,2 0 0,0 4,20H20A2,2 0 0,0 22,18V8C22,6.89 21.1,6 20,6H12L10,4Z"/>
+          <button type="button" class="workspace-detail-item-run" onclick="event.stopPropagation(); window.workspaceDetail?.openDirectoryExplorer('${dir.id}', '${source}')" title="Explore directory" aria-label="Explore directory ${this.escapeHtml(name)}">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+              <path d="M15,12H16.5L15,13.5L16.42,14.92L20.34,11L16.42,7.08L15,8.5L16.5,10H15V12M19,19H5V5H13V3H5C3.89,3 3,3.89 3,5V19A2,2 0 0,0 5,21H19A2,2 0 0,0 21,19V13H19V19Z"/>
             </svg>
-            ${this.escapeHtml(name)}
+          </button>
+          <button type="button" class="workspace-detail-item-delete" onclick="event.stopPropagation(); window.workspaceDetail?.deleteDirectory('${dir.id}', '${source}')" title="Remove directory" aria-label="Remove directory ${this.escapeHtml(name)}">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+              <path d="M19,4H15.5L14.5,3H9.5L8.5,4H5V6H19M6,19A2,2 0 0,0 8,21H16A2,2 0 0,0 18,19V7H6V19Z"/>
+            </svg>
+          </button>
+          <div class="workspace-detail-item-content"
+               role="button"
+               tabindex="0"
+               aria-label="Explore directory ${this.escapeHtml(name)}"
+               onclick="window.workspaceDetail?.openDirectoryExplorer('${dir.id}', '${source}')"
+               onkeydown="if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); window.workspaceDetail?.openDirectoryExplorer('${dir.id}', '${source}'); }">
+            <div class="workspace-detail-item-title">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" class="me-2" style="color: var(--text-secondary);">
+                <path d="M10,4H4C2.89,4 2,4.89 2,6V18A2,2 0 0,0 4,20H20A2,2 0 0,0 22,18V8C22,6.89 21.1,6 20,6H12L10,4Z"/>
+              </svg>
+              ${this.escapeHtml(name)}
+            </div>
+            <div class="workspace-detail-item-meta">${this.escapeHtml(path)}${path ? ' • ' : ''}${this.escapeHtml(sourceLabel)}</div>
           </div>
-          <div class="workspace-detail-item-meta">${this.escapeHtml(path)}</div>
         </div>
       `;
     }).join('');
+  }
+
+  async deleteDirectory(directoryId, source = 'reference') {
+    if (!directoryId) return;
+
+    const confirmed = confirm('Remove this directory from the workspace? The folder on disk will not be deleted.');
+    if (!confirmed) return;
+
+    const normalizedSource = source === 'attachment' ? 'attachment' : 'reference';
+    const endpoint = normalizedSource === 'attachment'
+      ? `/api/studios/${encodeURIComponent(this.workspaceId)}/attachments/${encodeURIComponent(directoryId)}`
+      : `/api/studios/${encodeURIComponent(this.workspaceId)}/directories/${encodeURIComponent(directoryId)}`;
+
+    try {
+      const response = await fetch(endpoint, { method: 'DELETE' });
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(errorText || 'Failed to remove directory');
+      }
+
+      if (window.Toast) window.Toast.success('Directory removed');
+      await this.loadDirectories();
+    } catch (error) {
+      console.error('Failed to remove directory:', error);
+      if (window.Toast) window.Toast.error('Failed to remove directory');
+    }
+  }
+
+  async openDirectoryExplorer(directoryId, source = 'reference') {
+    if (!directoryId) return;
+
+    const normalizedSource = source === 'attachment' ? 'attachment' : 'reference';
+    const directory = this.directories.find((entry) => entry.id === directoryId);
+    if (!directory) {
+      if (window.Toast) window.Toast.error('Directory not found');
+      return;
+    }
+
+    const modal = this.getDirectoryExplorerModalInstance();
+    if (!modal) {
+      if (window.Toast) window.Toast.error('Directory explorer is unavailable');
+      return;
+    }
+
+    this.abortDirectoryPreviewRequest();
+    this.directoryExplorer.directory = directory;
+    this.directoryExplorer.source = normalizedSource;
+    this.directoryExplorer.searchQuery = '';
+    this.directoryExplorer.files = [];
+    this.directoryExplorer.treeRoot = null;
+    this.directoryExplorer.nodeIndex = new Map();
+    this.directoryExplorer.selectedType = '';
+    this.directoryExplorer.previewCache = new Map();
+
+    this.loadDirectoryExplorerPersistedState(directory.id);
+    if (this.elements.directoryExplorerSearch) {
+      this.elements.directoryExplorerSearch.value = '';
+    }
+    if (this.elements.directoryExplorerTitle) {
+      this.elements.directoryExplorerTitle.textContent = directory.name || directory.path || 'Directory Explorer';
+    }
+    if (this.elements.directoryExplorerSubtitle) {
+      this.elements.directoryExplorerSubtitle.textContent = directory.path || '';
+    }
+
+    modal.show();
+    this.renderDirectoryExplorerLoading();
+    await this.loadDirectoryExplorerFiles();
+  }
+
+  getDirectoryExplorerModalInstance() {
+    if (!this.elements.directoryExplorerModal || typeof bootstrap === 'undefined' || !bootstrap.Modal) {
+      return null;
+    }
+
+    return typeof bootstrap.Modal.getOrCreateInstance === 'function'
+      ? bootstrap.Modal.getOrCreateInstance(this.elements.directoryExplorerModal)
+      : new bootstrap.Modal(this.elements.directoryExplorerModal);
+  }
+
+  renderDirectoryExplorerLoading(message = 'Scanning directory...') {
+    if (this.elements.directoryExplorerTree) {
+      this.elements.directoryExplorerTree.innerHTML = `<div class="workspace-directory-tree-empty">${this.escapeHtml(message)}</div>`;
+    }
+    if (this.elements.directoryExplorerPreview) {
+      this.elements.directoryExplorerPreview.innerHTML = '<div class="workspace-directory-preview-empty">Select a file to preview.</div>';
+    }
+    if (this.elements.directoryExplorerSummary) {
+      this.elements.directoryExplorerSummary.innerHTML = '';
+    }
+  }
+
+  async loadDirectoryExplorerFiles({ force = false } = {}) {
+    const explorer = this.directoryExplorer;
+    const currentDirectory = explorer.directory;
+    if (!currentDirectory || !currentDirectory.id) return;
+
+    const loadToken = explorer.loadToken + 1;
+    explorer.loadToken = loadToken;
+    const cacheKey = currentDirectory.id;
+
+    if (explorer.source !== 'reference') {
+      if (this.elements.directoryExplorerTree) {
+        this.elements.directoryExplorerTree.innerHTML = `
+          <div class="workspace-directory-tree-empty">
+            Legacy directory attachments cannot be browsed yet. Re-add this folder with the folder picker to enable Finder view.
+          </div>
+        `;
+      }
+      if (this.elements.directoryExplorerPreview) {
+        this.elements.directoryExplorerPreview.innerHTML = '<div class="workspace-directory-preview-empty">Preview unavailable.</div>';
+      }
+      return;
+    }
+
+    const cached = explorer.fileCache.get(cacheKey);
+    if (!force && cached && Array.isArray(cached.files)) {
+      explorer.files = cached.files;
+      const { root, nodeIndex } = this.buildDirectoryExplorerTree(cached.files);
+      explorer.treeRoot = root;
+      explorer.nodeIndex = nodeIndex;
+      if (explorer.selectedPath && !nodeIndex.has(explorer.selectedPath)) {
+        explorer.selectedPath = '';
+        explorer.selectedType = '';
+      }
+      this.selectDefaultDirectoryNode();
+      this.renderDirectoryExplorer();
+      return;
+    }
+
+    this.renderDirectoryExplorerLoading(force ? 'Refreshing directory...' : 'Scanning directory...');
+
+    try {
+      const endpoint = `/api/studios/${encodeURIComponent(this.workspaceId)}/directories/${encodeURIComponent(currentDirectory.id)}/files`;
+      const response = await fetch(endpoint);
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(errorText || 'Failed to load directory contents');
+      }
+
+      const payload = await response.json();
+      if (loadToken !== explorer.loadToken) return;
+
+      const normalizedFiles = (Array.isArray(payload.files) ? payload.files : [])
+        .map((item) => {
+          const normalizedPath = this.normalizeRelativePath(item?.relative_path || item?.relativePath || '');
+          if (!normalizedPath) return null;
+
+          return {
+            name: item?.name || normalizedPath.split('/').pop() || normalizedPath,
+            path: normalizedPath,
+            isDir: Boolean(item?.is_dir),
+            size: Number(item?.size) || 0,
+            modTime: item?.mod_time || ''
+          };
+        })
+        .filter(Boolean);
+
+      explorer.files = normalizedFiles;
+      explorer.fileCache.set(cacheKey, { files: normalizedFiles, loadedAt: Date.now() });
+
+      const { root, nodeIndex } = this.buildDirectoryExplorerTree(normalizedFiles);
+      explorer.treeRoot = root;
+      explorer.nodeIndex = nodeIndex;
+
+      if (explorer.selectedPath && !nodeIndex.has(explorer.selectedPath)) {
+        explorer.selectedPath = '';
+        explorer.selectedType = '';
+      }
+
+      this.selectDefaultDirectoryNode();
+      this.renderDirectoryExplorer();
+    } catch (error) {
+      if (loadToken !== explorer.loadToken) return;
+      console.error('Failed to load directory explorer files:', error);
+      if (this.elements.directoryExplorerTree) {
+        this.elements.directoryExplorerTree.innerHTML = '<div class="workspace-directory-tree-empty">Failed to load directory. Check the folder path and try again.</div>';
+      }
+      if (this.elements.directoryExplorerPreview) {
+        this.elements.directoryExplorerPreview.innerHTML = '<div class="workspace-directory-preview-empty">No preview available.</div>';
+      }
+      if (window.Toast) window.Toast.error('Failed to load directory contents');
+    }
+  }
+
+  selectDefaultDirectoryNode() {
+    const explorer = this.directoryExplorer;
+    if (explorer.selectedPath && explorer.nodeIndex.has(explorer.selectedPath)) {
+      if (!explorer.selectedType) {
+        explorer.selectedType = explorer.nodeIndex.get(explorer.selectedPath)?.type || 'file';
+      }
+      this.ensureDirectoryAncestorsExpanded(explorer.selectedPath, explorer.selectedType);
+      return;
+    }
+
+    const firstFile = explorer.files.find((entry) => !entry.isDir);
+    if (firstFile) {
+      explorer.selectedPath = firstFile.path;
+      explorer.selectedType = 'file';
+      this.ensureDirectoryAncestorsExpanded(firstFile.path, 'file');
+      this.persistDirectoryExplorerState();
+      return;
+    }
+
+    const firstDirectory = explorer.files.find((entry) => entry.isDir);
+    if (firstDirectory) {
+      explorer.selectedPath = firstDirectory.path;
+      explorer.selectedType = 'dir';
+      explorer.expandedPaths.add(firstDirectory.path);
+      this.ensureDirectoryAncestorsExpanded(firstDirectory.path, 'dir');
+      this.persistDirectoryExplorerState();
+    }
+  }
+
+  buildDirectoryExplorerTree(files) {
+    const rootName = this.directoryExplorer.directory?.name || this.directoryExplorer.directory?.path || 'Directory';
+    const root = {
+      type: 'dir',
+      name: rootName,
+      path: '',
+      size: 0,
+      modTime: '',
+      children: []
+    };
+    const nodeIndex = new Map();
+    nodeIndex.set('', root);
+
+    const ensureDirectoryNode = (path) => {
+      if (nodeIndex.has(path)) {
+        return nodeIndex.get(path);
+      }
+
+      const normalizedPath = this.normalizeRelativePath(path);
+      if (!normalizedPath) return root;
+
+      const slashIndex = normalizedPath.lastIndexOf('/');
+      const parentPath = slashIndex >= 0 ? normalizedPath.slice(0, slashIndex) : '';
+      const parentNode = ensureDirectoryNode(parentPath);
+      const name = normalizedPath.split('/').pop() || normalizedPath;
+
+      const node = {
+        type: 'dir',
+        name,
+        path: normalizedPath,
+        size: 0,
+        modTime: '',
+        children: []
+      };
+      parentNode.children.push(node);
+      nodeIndex.set(normalizedPath, node);
+      return node;
+    };
+
+    files.forEach((entry) => {
+      const normalizedPath = this.normalizeRelativePath(entry.path);
+      if (!normalizedPath) return;
+
+      if (entry.isDir) {
+        const dirNode = ensureDirectoryNode(normalizedPath);
+        dirNode.modTime = entry.modTime || dirNode.modTime;
+        return;
+      }
+
+      const slashIndex = normalizedPath.lastIndexOf('/');
+      const parentPath = slashIndex >= 0 ? normalizedPath.slice(0, slashIndex) : '';
+      const parentNode = ensureDirectoryNode(parentPath);
+
+      if (nodeIndex.has(normalizedPath)) {
+        return;
+      }
+
+      const fileNode = {
+        type: 'file',
+        name: entry.name || normalizedPath.split('/').pop() || normalizedPath,
+        path: normalizedPath,
+        size: entry.size || 0,
+        modTime: entry.modTime || '',
+        children: null
+      };
+      parentNode.children.push(fileNode);
+      nodeIndex.set(normalizedPath, fileNode);
+    });
+
+    return { root, nodeIndex };
+  }
+
+  renderDirectoryExplorer() {
+    const explorer = this.directoryExplorer;
+    const directory = explorer.directory;
+    if (!directory) return;
+
+    if (this.elements.directoryExplorerTitle) {
+      this.elements.directoryExplorerTitle.textContent = directory.name || directory.path || 'Directory Explorer';
+    }
+    if (this.elements.directoryExplorerSubtitle) {
+      this.elements.directoryExplorerSubtitle.textContent = directory.path || '';
+    }
+    if (this.elements.directoryExplorerSortBtn) {
+      const direction = explorer.sortDirection === 'desc' ? 'Z-A' : 'A-Z';
+      this.elements.directoryExplorerSortBtn.innerHTML = `
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+          <path d="M7,3H9V17H12L8,21L4,17H7V3M14,7V5H20V7H14M14,11V9H18V11H14M14,15V13H20V15H14M14,19V17H18V19H14Z"/>
+        </svg>
+        ${direction}
+      `;
+    }
+
+    this.renderDirectoryExplorerSummary();
+    this.renderDirectoryExplorerBreadcrumb();
+
+    const query = explorer.searchQuery.toLowerCase();
+    const hasSearch = query.length > 0;
+    const sourceRoot = explorer.treeRoot;
+
+    if (!sourceRoot || !Array.isArray(sourceRoot.children) || sourceRoot.children.length === 0) {
+      if (this.elements.directoryExplorerTree) {
+        this.elements.directoryExplorerTree.innerHTML = '<div class="workspace-directory-tree-empty">This directory is empty.</div>';
+      }
+      if (this.elements.directoryExplorerPreview) {
+        this.elements.directoryExplorerPreview.innerHTML = '<div class="workspace-directory-preview-empty">No files to preview yet.</div>';
+      }
+      return;
+    }
+
+    const renderRoot = hasSearch ? this.filterDirectoryTree(sourceRoot, query) : sourceRoot;
+    const treeChildren = renderRoot?.children || [];
+
+    if (this.elements.directoryExplorerTree) {
+      if (treeChildren.length === 0) {
+        this.elements.directoryExplorerTree.innerHTML = '<div class="workspace-directory-tree-empty">No matches for this search.</div>';
+      } else {
+        this.elements.directoryExplorerTree.innerHTML = `
+          <div class="workspace-directory-tree-scroll">
+            ${this.renderDirectoryTreeChildren(treeChildren, 0, hasSearch)}
+          </div>
+        `;
+      }
+    }
+
+    this.renderDirectoryPreview();
+  }
+
+  renderDirectoryExplorerSummary() {
+    if (!this.elements.directoryExplorerSummary) return;
+
+    const files = this.directoryExplorer.files || [];
+    const folderCount = files.filter((entry) => entry.isDir).length;
+    const fileCount = files.length - folderCount;
+    const selectedNode = this.directoryExplorer.nodeIndex.get(this.directoryExplorer.selectedPath);
+    const selectedLabel = selectedNode
+      ? `${selectedNode.type === 'dir' ? 'Folder' : 'File'} selected`
+      : 'No selection';
+
+    this.elements.directoryExplorerSummary.innerHTML = `
+      <span class="workspace-directory-pill">${fileCount} file${fileCount === 1 ? '' : 's'}</span>
+      <span class="workspace-directory-pill">${folderCount} folder${folderCount === 1 ? '' : 's'}</span>
+      <span class="workspace-directory-pill is-muted">${this.escapeHtml(selectedLabel)}</span>
+    `;
+  }
+
+  renderDirectoryExplorerBreadcrumb() {
+    if (!this.elements.directoryExplorerBreadcrumb) return;
+
+    const directory = this.directoryExplorer.directory;
+    if (!directory) {
+      this.elements.directoryExplorerBreadcrumb.innerHTML = '';
+      return;
+    }
+
+    const selectedPath = this.directoryExplorer.selectedPath || '';
+    const selectedType = this.directoryExplorer.selectedType || '';
+    const segments = selectedPath ? selectedPath.split('/') : [];
+    const crumbs = [
+      { label: directory.name || 'Root', path: '', clickable: true, active: !selectedPath }
+    ];
+
+    let cursor = '';
+    segments.forEach((segment, index) => {
+      cursor = cursor ? `${cursor}/${segment}` : segment;
+      const isLast = index === segments.length - 1;
+      const canClick = !isLast || selectedType === 'file';
+      crumbs.push({
+        label: segment,
+        path: cursor,
+        clickable: canClick,
+        active: isLast
+      });
+    });
+
+    this.elements.directoryExplorerBreadcrumb.innerHTML = crumbs.map((crumb, index) => {
+      const escapedLabel = this.escapeHtml(crumb.label || 'Root');
+      const separator = index === 0 ? '' : '<span class="workspace-directory-crumb-separator">/</span>';
+      if (!crumb.clickable || crumb.active) {
+        return `${separator}<span class="workspace-directory-crumb is-active">${escapedLabel}</span>`;
+      }
+
+      return `
+        ${separator}
+        <button type="button"
+                class="workspace-directory-crumb"
+                data-action="breadcrumb"
+                data-path="${this.encodeDataPath(crumb.path)}">
+          ${escapedLabel}
+        </button>
+      `;
+    }).join('');
+  }
+
+  filterDirectoryTree(node, query) {
+    const isMatch = String(node.name || '').toLowerCase().includes(query)
+      || String(node.path || '').toLowerCase().includes(query);
+
+    if (node.type === 'file') {
+      return isMatch ? { ...node } : null;
+    }
+
+    const filteredChildren = (node.children || [])
+      .map((child) => this.filterDirectoryTree(child, query))
+      .filter(Boolean);
+
+    if (node.path === '' || isMatch || filteredChildren.length > 0) {
+      return {
+        ...node,
+        children: filteredChildren
+      };
+    }
+
+    return null;
+  }
+
+  renderDirectoryTreeChildren(children, depth, forceExpanded) {
+    const sortedChildren = this.getSortedDirectoryChildren(children);
+    return sortedChildren.map((node) => this.renderDirectoryTreeNode(node, depth, forceExpanded)).join('');
+  }
+
+  renderDirectoryTreeNode(node, depth, forceExpanded) {
+    const encodedPath = this.encodeDataPath(node.path);
+    const isDirectory = node.type === 'dir';
+    const isExpanded = isDirectory && (forceExpanded || this.directoryExplorer.expandedPaths.has(node.path));
+    const isSelected = this.directoryExplorer.selectedPath === node.path;
+    const sizeText = !isDirectory && Number.isFinite(node.size) ? this.formatFileSize(node.size) : '';
+    const modifiedText = node.modTime ? formatDate(node.modTime) : '';
+    const metaText = isDirectory
+      ? `${(node.children || []).length} item${(node.children || []).length === 1 ? '' : 's'}`
+      : [sizeText, modifiedText].filter(Boolean).join(' · ');
+
+    const icon = isDirectory
+      ? '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M10,4H4C2.89,4 2,4.89 2,6V18A2,2 0 0,0 4,20H20A2,2 0 0,0 22,18V8C22,6.89 21.1,6 20,6H12L10,4Z"/></svg>'
+      : '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M14,2H6A2,2 0 0,0 4,4V20A2,2 0 0,0 6,22H18A2,2 0 0,0 20,20V8L14,2M13,9V3.5L18.5,9H13Z"/></svg>';
+
+    const toggleButton = isDirectory
+      ? `
+        <button type="button"
+                class="workspace-directory-tree-toggle ${isExpanded ? 'is-expanded' : ''}"
+                data-action="toggle-folder"
+                data-path="${encodedPath}"
+                aria-label="${isExpanded ? 'Collapse folder' : 'Expand folder'}">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
+            <path d="M8.59,16.59L13.17,12L8.59,7.41L10,6L16,12L10,18L8.59,16.59Z"/>
+          </svg>
+        </button>
+      `
+      : '<span class="workspace-directory-tree-spacer"></span>';
+
+    const childrenHtml = isDirectory && isExpanded && Array.isArray(node.children) && node.children.length > 0
+      ? `<div class="workspace-directory-tree-children">${this.renderDirectoryTreeChildren(node.children, depth + 1, forceExpanded)}</div>`
+      : '';
+
+    return `
+      <div class="workspace-directory-tree-node ${isSelected ? 'is-selected' : ''}">
+        <div class="workspace-directory-tree-row" style="--tree-depth:${depth};">
+          ${toggleButton}
+          <button type="button"
+                  class="workspace-directory-tree-main"
+                  data-action="select-node"
+                  data-path="${encodedPath}"
+                  data-type="${isDirectory ? 'dir' : 'file'}">
+            <span class="workspace-directory-tree-icon">${icon}</span>
+            <span class="workspace-directory-tree-label">${this.escapeHtml(node.name || node.path || 'Untitled')}</span>
+            <span class="workspace-directory-tree-meta">${this.escapeHtml(metaText)}</span>
+          </button>
+        </div>
+        ${childrenHtml}
+      </div>
+    `;
+  }
+
+  getSortedDirectoryChildren(children) {
+    const direction = this.directoryExplorer.sortDirection === 'desc' ? -1 : 1;
+    return [...children].sort((a, b) => {
+      if (a.type !== b.type) {
+        return a.type === 'dir' ? -1 : 1;
+      }
+      return a.name.localeCompare(b.name, undefined, { sensitivity: 'base', numeric: true }) * direction;
+    });
+  }
+
+  toggleDirectoryNode(path) {
+    if (!path) return;
+    if (!this.directoryExplorer.nodeIndex.has(path)) return;
+    if (this.directoryExplorer.expandedPaths.has(path)) {
+      this.directoryExplorer.expandedPaths.delete(path);
+    } else {
+      this.directoryExplorer.expandedPaths.add(path);
+    }
+    this.persistDirectoryExplorerState();
+    this.renderDirectoryExplorer();
+  }
+
+  expandDirectoryNode(path) {
+    if (!path) return;
+    if (!this.directoryExplorer.nodeIndex.has(path)) return;
+    this.directoryExplorer.expandedPaths.add(path);
+    this.persistDirectoryExplorerState();
+    this.renderDirectoryExplorer();
+  }
+
+  collapseDirectoryNode(path) {
+    if (!path) return;
+    this.directoryExplorer.expandedPaths.delete(path);
+    this.persistDirectoryExplorerState();
+    this.renderDirectoryExplorer();
+  }
+
+  selectDirectoryNode(path, type, { autoExpand = false } = {}) {
+    const normalizedPath = this.normalizeRelativePath(path);
+    const node = this.directoryExplorer.nodeIndex.get(normalizedPath);
+    if (!node) return;
+
+    this.directoryExplorer.selectedPath = normalizedPath;
+    this.directoryExplorer.selectedType = type === 'dir' ? 'dir' : node.type;
+
+    if (autoExpand && this.directoryExplorer.selectedType === 'dir') {
+      this.directoryExplorer.expandedPaths.add(normalizedPath);
+    }
+
+    this.ensureDirectoryAncestorsExpanded(normalizedPath, this.directoryExplorer.selectedType);
+    this.persistDirectoryExplorerState();
+    this.renderDirectoryExplorer();
+  }
+
+  ensureDirectoryAncestorsExpanded(path, type) {
+    const normalizedPath = this.normalizeRelativePath(path);
+    if (!normalizedPath) return;
+
+    const parts = normalizedPath.split('/');
+    const limit = type === 'dir' ? parts.length : parts.length - 1;
+    let current = '';
+
+    for (let i = 0; i < limit; i += 1) {
+      current = current ? `${current}/${parts[i]}` : parts[i];
+      this.directoryExplorer.expandedPaths.add(current);
+    }
+  }
+
+  renderDirectoryPreview() {
+    const previewEl = this.elements.directoryExplorerPreview;
+    if (!previewEl) return;
+
+    const selectedPath = this.directoryExplorer.selectedPath;
+    if (!selectedPath) {
+      previewEl.innerHTML = '<div class="workspace-directory-preview-empty">Select a file or folder to inspect.</div>';
+      return;
+    }
+
+    const node = this.directoryExplorer.nodeIndex.get(selectedPath);
+    if (!node) {
+      previewEl.innerHTML = '<div class="workspace-directory-preview-empty">Select a valid entry to preview.</div>';
+      return;
+    }
+
+    if (node.type === 'dir') {
+      this.renderDirectoryFolderPreview(node);
+      return;
+    }
+
+    void this.renderDirectoryFilePreview(node);
+  }
+
+  renderDirectoryFolderPreview(node) {
+    const previewEl = this.elements.directoryExplorerPreview;
+    if (!previewEl) return;
+
+    const stats = this.collectDirectoryStats(node);
+    const childItems = this.getSortedDirectoryChildren(node.children || []).slice(0, 16);
+
+    previewEl.innerHTML = `
+      <div class="workspace-directory-preview-header">
+        <div class="workspace-directory-preview-title">${this.escapeHtml(node.name || 'Folder')}</div>
+        <div class="workspace-directory-preview-subtitle">${this.escapeHtml(node.path || '/')}</div>
+      </div>
+      <div class="workspace-directory-preview-stats">
+        <span class="workspace-directory-pill">${stats.files} file${stats.files === 1 ? '' : 's'}</span>
+        <span class="workspace-directory-pill">${stats.folders} folder${stats.folders === 1 ? '' : 's'}</span>
+      </div>
+      <div class="workspace-directory-preview-directory-list">
+        ${childItems.length === 0
+      ? '<div class="workspace-directory-preview-empty-inline">Folder is empty.</div>'
+      : childItems.map((child) => `
+            <button type="button"
+                    class="workspace-directory-preview-entry"
+                    data-action="select-node"
+                    data-path="${this.encodeDataPath(child.path)}"
+                    data-type="${child.type}">
+              <span>${this.escapeHtml(child.name)}</span>
+              <span>${this.escapeHtml(child.type === 'dir' ? 'Folder' : this.formatFileSize(child.size || 0))}</span>
+            </button>
+          `).join('')}
+      </div>
+    `;
+  }
+
+  async renderDirectoryFilePreview(node) {
+    const previewEl = this.elements.directoryExplorerPreview;
+    if (!previewEl) return;
+
+    const directoryId = this.directoryExplorer.directory?.id;
+    if (!directoryId) return;
+
+    const endpoint = this.getDirectoryFileEndpoint(directoryId, node.path);
+    previewEl.innerHTML = `
+      <div class="workspace-directory-preview-header">
+        <div class="workspace-directory-preview-title">${this.escapeHtml(node.name || 'File')}</div>
+        <div class="workspace-directory-preview-subtitle">${this.escapeHtml(node.path || '')}</div>
+      </div>
+      <div class="workspace-directory-preview-loading">Loading preview...</div>
+    `;
+
+    try {
+      const preview = await this.loadDirectoryFilePreview(node.path);
+      if (this.directoryExplorer.selectedPath !== node.path) return;
+
+      const metadata = [
+        preview.contentType || 'Unknown type',
+        this.formatFileSize(preview.size || node.size || 0),
+        node.modTime ? formatDate(node.modTime) : ''
+      ].filter(Boolean).join(' · ');
+
+      if (!preview.text) {
+        previewEl.innerHTML = `
+          <div class="workspace-directory-preview-header">
+            <div class="workspace-directory-preview-title">${this.escapeHtml(node.name || 'File')}</div>
+            <div class="workspace-directory-preview-subtitle">${this.escapeHtml(node.path || '')}</div>
+          </div>
+          <div class="workspace-directory-preview-stats">
+            <span class="workspace-directory-pill">${this.escapeHtml(metadata)}</span>
+            <a href="${endpoint}" target="_blank" rel="noopener noreferrer" class="workspace-directory-preview-open-link">Open raw</a>
+          </div>
+          <div class="workspace-directory-preview-empty-inline">
+            ${preview.tooLarge ? 'File is too large for inline preview.' : 'Binary file preview is unavailable.'}
+          </div>
+        `;
+        return;
+      }
+
+      previewEl.innerHTML = `
+        <div class="workspace-directory-preview-header">
+          <div class="workspace-directory-preview-title">${this.escapeHtml(node.name || 'File')}</div>
+          <div class="workspace-directory-preview-subtitle">${this.escapeHtml(node.path || '')}</div>
+        </div>
+        <div class="workspace-directory-preview-stats">
+          <span class="workspace-directory-pill">${this.escapeHtml(metadata)}</span>
+          <a href="${endpoint}" target="_blank" rel="noopener noreferrer" class="workspace-directory-preview-open-link">Open raw</a>
+        </div>
+        <pre class="workspace-directory-preview-code">${this.escapeHtml(preview.text)}</pre>
+        ${preview.truncated ? '<div class="workspace-directory-preview-note">Preview truncated for readability.</div>' : ''}
+      `;
+    } catch (error) {
+      if (error?.name === 'AbortError') return;
+      console.error('Failed to render directory file preview:', error);
+      previewEl.innerHTML = `
+        <div class="workspace-directory-preview-empty-inline">
+          Failed to load file preview.
+        </div>
+      `;
+    }
+  }
+
+  collectDirectoryStats(node) {
+    if (!node || node.type !== 'dir') {
+      return { files: 0, folders: 0 };
+    }
+
+    const stats = { files: 0, folders: 0 };
+    const walk = (current) => {
+      (current.children || []).forEach((child) => {
+        if (child.type === 'dir') {
+          stats.folders += 1;
+          walk(child);
+        } else {
+          stats.files += 1;
+        }
+      });
+    };
+    walk(node);
+    return stats;
+  }
+
+  async loadDirectoryFilePreview(relativePath) {
+    const directoryId = this.directoryExplorer.directory?.id;
+    if (!directoryId) {
+      throw new Error('No directory selected');
+    }
+
+    const normalizedPath = this.normalizeRelativePath(relativePath);
+    const cacheKey = `${directoryId}:${normalizedPath}`;
+    const cached = this.directoryExplorer.previewCache.get(cacheKey);
+    if (cached) {
+      return cached;
+    }
+
+    const endpoint = this.getDirectoryFileEndpoint(directoryId, normalizedPath);
+    this.abortDirectoryPreviewRequest();
+    const controller = new AbortController();
+    this.directoryExplorer.previewAbortController = controller;
+
+    const response = await fetch(endpoint, { signal: controller.signal });
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(errorText || 'Failed to fetch file content');
+    }
+
+    const contentType = (response.headers.get('content-type') || '').split(';')[0].trim();
+    const blob = await response.blob();
+    const preview = {
+      text: '',
+      contentType,
+      size: blob.size,
+      truncated: false,
+      tooLarge: false
+    };
+
+    const MAX_PREVIEW_BYTES = 1_500_000;
+    const MAX_PREVIEW_CHARS = 30_000;
+
+    if (this.isTextPreviewable(normalizedPath, contentType)) {
+      if (blob.size <= MAX_PREVIEW_BYTES) {
+        let text = await blob.text();
+        if (text.length > MAX_PREVIEW_CHARS) {
+          text = text.slice(0, MAX_PREVIEW_CHARS);
+          preview.truncated = true;
+        }
+        preview.text = text;
+      } else {
+        preview.tooLarge = true;
+      }
+    }
+
+    this.directoryExplorer.previewCache.set(cacheKey, preview);
+    return preview;
+  }
+
+  isTextPreviewable(relativePath, contentType) {
+    const lowerPath = relativePath.toLowerCase();
+    const textExtensions = [
+      '.txt', '.md', '.markdown', '.json', '.yaml', '.yml', '.xml', '.csv', '.ts', '.tsx',
+      '.js', '.jsx', '.cjs', '.mjs', '.go', '.py', '.java', '.rb', '.php', '.sh', '.zsh',
+      '.bash', '.html', '.htm', '.css', '.scss', '.sass', '.less', '.sql', '.toml', '.ini',
+      '.env', '.gitignore', '.dockerfile', '.makefile', '.conf', '.log'
+    ];
+
+    if (textExtensions.some((extension) => lowerPath.endsWith(extension))) {
+      return true;
+    }
+
+    return contentType.startsWith('text/')
+      || contentType.includes('json')
+      || contentType.includes('xml')
+      || contentType.includes('javascript')
+      || contentType.includes('yaml');
+  }
+
+  getDirectoryFileEndpoint(directoryId, relativePath) {
+    const normalizedPath = this.normalizeRelativePath(relativePath);
+    const encodedPath = normalizedPath
+      .split('/')
+      .filter(Boolean)
+      .map((part) => encodeURIComponent(part))
+      .join('/');
+
+    return `/api/studios/${encodeURIComponent(this.workspaceId)}/directories/${encodeURIComponent(directoryId)}/files/${encodedPath}`;
+  }
+
+  normalizeRelativePath(path) {
+    if (!path) return '';
+    return String(path)
+      .trim()
+      .replace(/\\/g, '/')
+      .replace(/^\.\/+/, '')
+      .replace(/^\/+/, '')
+      .replace(/\/+/g, '/');
+  }
+
+  abortDirectoryPreviewRequest() {
+    if (this.directoryExplorer.previewAbortController) {
+      this.directoryExplorer.previewAbortController.abort();
+      this.directoryExplorer.previewAbortController = null;
+    }
+  }
+
+  getDirectoryExplorerStateStorageKey(directoryId) {
+    return `workspace-directory-explorer:${this.workspaceId}:${directoryId}`;
+  }
+
+  loadDirectoryExplorerPersistedState(directoryId) {
+    this.directoryExplorer.expandedPaths = new Set();
+    this.directoryExplorer.selectedPath = '';
+
+    if (!directoryId || typeof localStorage === 'undefined') return;
+
+    try {
+      const raw = localStorage.getItem(this.getDirectoryExplorerStateStorageKey(directoryId));
+      if (!raw) return;
+
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed.expanded_paths)) {
+        this.directoryExplorer.expandedPaths = new Set(
+          parsed.expanded_paths.map((path) => this.normalizeRelativePath(path)).filter(Boolean)
+        );
+      }
+      if (typeof parsed.selected_path === 'string') {
+        this.directoryExplorer.selectedPath = this.normalizeRelativePath(parsed.selected_path);
+      }
+      if (parsed.selected_type === 'dir' || parsed.selected_type === 'file') {
+        this.directoryExplorer.selectedType = parsed.selected_type;
+      }
+    } catch (error) {
+      console.warn('Failed to restore directory explorer state:', error);
+    }
+  }
+
+  persistDirectoryExplorerState() {
+    const directoryId = this.directoryExplorer.directory?.id;
+    if (!directoryId || typeof localStorage === 'undefined') return;
+
+    try {
+      const payload = {
+        expanded_paths: Array.from(this.directoryExplorer.expandedPaths),
+        selected_path: this.directoryExplorer.selectedPath || '',
+        selected_type: this.directoryExplorer.selectedType || ''
+      };
+      localStorage.setItem(this.getDirectoryExplorerStateStorageKey(directoryId), JSON.stringify(payload));
+    } catch (error) {
+      console.warn('Failed to persist directory explorer state:', error);
+    }
+  }
+
+  encodeDataPath(path) {
+    return encodeURIComponent(path || '');
+  }
+
+  decodeDataPath(path) {
+    try {
+      return decodeURIComponent(path || '');
+    } catch {
+      return path || '';
+    }
   }
 
   /**
@@ -2973,6 +5329,8 @@ export class WorkspaceDetailPage {
    * Handle real-time events
    */
   handleRealtimeEvent(event) {
+    this.handleTaskExecutionRealtimeEvent(event);
+
     switch (event.type) {
       case 'task_created':
       case 'task_updated':
@@ -2984,6 +5342,10 @@ export class WorkspaceDetailPage {
       case 'task.failed':
       case 'task.deleted':
         this.loadTasks();
+        break;
+      case 'task.thinking':
+      case 'task.tool_call':
+      case 'task.tool_result':
         break;
       case 'task.blocked': {
         this.loadTasks();
@@ -3027,6 +5389,14 @@ export class WorkspaceDetailPage {
       case 'schedule_deleted':
         this.loadSchedules();
         break;
+      case 'workspace.updated': {
+        const action = event?.data?.action || '';
+        if (typeof action === 'string' && action.startsWith('directory_')) {
+          this.loadDirectories();
+          this.loadFiles();
+        }
+        break;
+      }
     }
   }
 
@@ -3104,6 +5474,13 @@ export class WorkspaceDetailPage {
       const name = prompt('Enter task name:');
       if (name) this.createTask(name);
     }
+  }
+
+  showAddTaskModalForAgent(encodedAgentName = '') {
+    // Keep current behavior (workspace task modal), but route from per-agent section actions.
+    // Future enhancement can preselect agent assignment in the task modal.
+    void encodedAgentName;
+    this.showAddTaskModal();
   }
 
   /**
@@ -3195,6 +5572,22 @@ export class WorkspaceDetailPage {
       // Fallback to simple API call
       this.createSimpleSession();
     }
+  }
+
+  createNewSessionForAgent(encodedAgentName = '') {
+    let agentName = '';
+    try {
+      agentName = decodeURIComponent(String(encodedAgentName || '')).trim();
+    } catch (_error) {
+      agentName = String(encodedAgentName || '').trim();
+    }
+
+    if (agentName && window.sessionManager && typeof window.sessionManager.createSessionWithAgentInFolder === 'function') {
+      window.sessionManager.createSessionWithAgentInFolder(agentName, this.workspaceId);
+      return;
+    }
+
+    this.createNewSession();
   }
 
   /**

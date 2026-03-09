@@ -875,8 +875,5 @@ func (h *SmartOnboardingHandler) fallbackRecommendations(profile *profiler.UserP
 
 // sendJSON sends a JSON response.
 func (h *SmartOnboardingHandler) sendJSON(w http.ResponseWriter, data interface{}) {
-	w.Header().Set("Content-Type", "application/json")
-	if err := json.NewEncoder(w).Encode(data); err != nil {
-		logger.Error("Failed to encode JSON response", logger.Fields{"error": err})
-	}
+	orihttp.WriteJSON(w, data)
 }

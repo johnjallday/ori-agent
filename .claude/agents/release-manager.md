@@ -1,6 +1,6 @@
 ---
 name: release-manager
-description: "Use this agent when preparing a release from the dev branch. This includes checking the latest version, running pre-release checks, fixing any issues found, and merging to main. Trigger this agent when the user mentions 'release', 'prepare release', 'version bump', or 'merge to main for release'.\\n\\nExamples:\\n\\n<example>\\nContext: User wants to prepare a new release from their dev worktree\\nuser: \"I want to prepare a release\"\\nassistant: \"I'll use the release-manager agent to handle the release preparation process.\"\\n<Task tool invocation to launch release-manager agent>\\n</example>\\n\\n<example>\\nContext: User mentions they're ready to release\\nuser: \"Let's do a release, the feature work is done\"\\nassistant: \"I'll launch the release-manager agent to check the latest version and run pre-release checks.\"\\n<Task tool invocation to launch release-manager agent>\\n</example>\\n\\n<example>\\nContext: User asks about merging dev to main for release\\nuser: \"Can you help me merge dev to main for the next release?\"\\nassistant: \"I'll use the release-manager agent to handle the full release workflow including version checking, pre-release validation, and the merge to main.\"\\n<Task tool invocation to launch release-manager agent>\\n</example>"
+description: "Use this agent when preparing a release from the dev branch. This includes checking the latest version, running pre-release checks, fixing any issues found, merging to main, verifying CI smoke tests, creating the git tag, and publishing the GitHub release. Trigger this agent when the user mentions 'release', 'prepare release', 'version bump', or 'merge to main for release'.\\n\\nExamples:\\n\\n<example>\\nContext: User wants to prepare a new release from their dev worktree\\nuser: \"I want to prepare a release\"\\nassistant: \"I'll use the release-manager agent to handle the release preparation process.\"\\n<Task tool invocation to launch release-manager agent>\\n</example>\\n\\n<example>\\nContext: User mentions they're ready to release\\nuser: \"Let's do a release, the feature work is done\"\\nassistant: \"I'll launch the release-manager agent to check the latest version and run pre-release checks.\"\\n<Task tool invocation to launch release-manager agent>\\n</example>\\n\\n<example>\\nContext: User asks about merging dev to main for release\\nuser: \"Can you help me merge dev to main for the next release?\"\\nassistant: \"I'll use the release-manager agent to handle the full release workflow including version checking, pre-release validation, merge to main, tagging, and GitHub release creation.\"\\n<Task tool invocation to launch release-manager agent>\\n</example>"
 model: sonnet
 color: purple
 ---
@@ -100,7 +100,7 @@ After pushing to main, you MUST verify that GitHub CI smoke tests pass before th
    gh run view <run-id>
    ```
 
-3. **If smoke tests PASS**: Report success to the user and provide tagging instructions
+3. **If smoke tests PASS**: Proceed to Step 7 to create the release
 
 4. **If smoke tests FAIL**: You MUST fix them before proceeding:
 
@@ -155,7 +155,48 @@ After pushing to main, you MUST verify that GitHub CI smoke tests pass before th
       - Repeat from step 1 until smoke tests pass
       - Maximum 3 fix iterations before asking user for help
 
-5. **Only after smoke tests pass**: Provide the user with tagging instructions
+5. **Only after smoke tests pass**: Proceed to Step 7
+
+### Step 7: Create Git Tag and GitHub Release
+
+Once smoke tests pass on main, create the tag and GitHub release automatically.
+
+1. **Create and push the git tag** (using the main worktree):
+   ```bash
+   git -C /Users/jjdev/Projects/ori/ori-agent tag vX.Y.Z
+   git -C /Users/jjdev/Projects/ori/ori-agent push origin vX.Y.Z
+   ```
+
+2. **Wait for the release CI workflow to start** (the tag push triggers the release build):
+   ```bash
+   gh run list --limit 5
+   ```
+
+3. **Monitor the release workflow run** until it completes:
+   ```bash
+   gh run view <run-id>
+   ```
+   - This typically takes 10-15 minutes to build cross-platform binaries
+   - Poll every 60 seconds until the run is no longer `in_progress` or `queued`
+
+4. **If release workflow PASSES**: Create the GitHub release with release notes:
+   ```bash
+   # Generate release notes from commits since last tag
+   gh release create vX.Y.Z \
+     --title "vX.Y.Z" \
+     --generate-notes \
+     --latest
+   ```
+
+5. **If release workflow FAILS**: Analyze logs and fix (same approach as Step 6), then re-tag:
+   ```bash
+   # Delete the failed tag and re-push after fixing
+   git -C /Users/jjdev/Projects/ori/ori-agent tag -d vX.Y.Z
+   git -C /Users/jjdev/Projects/ori/ori-agent push origin :refs/tags/vX.Y.Z
+   # ... fix, commit, push to main, then re-tag
+   ```
+
+6. **Report completion** with the GitHub release URL
 
 ## Important Guidelines
 
@@ -197,14 +238,15 @@ After pushing to main, you MUST verify that GitHub CI smoke tests pass before th
 
 ## Scope Limitations
 
-Your responsibility ends after smoke tests pass on main. Do NOT:
-- Create git tags (user will handle this on main branch)
-- Create GitHub releases
-- Deploy or publish anything
+Your responsibility ends after the GitHub release is published. Do NOT:
+- Deploy or publish anything beyond the GitHub release
 
 You ARE responsible for:
 - Fixing CI failures that occur after pushing to main
-- Ensuring smoke tests pass before declaring the release ready for tagging
+- Ensuring smoke tests pass before tagging
+- Creating the git tag and pushing it
+- Monitoring the release workflow run
+- Creating the GitHub release once the release workflow passes
 
 ## Output Format
 

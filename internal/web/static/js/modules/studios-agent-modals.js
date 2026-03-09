@@ -516,7 +516,8 @@ function initializeAgentModalListeners() {
 
       const name = document.getElementById('studios-new-agent-name').value.trim();
       const type = document.getElementById('studios-new-agent-type').value;
-      const model = document.getElementById('studios-new-agent-model').value.trim();
+      const modelSelectEl = document.getElementById('studios-new-agent-model');
+      const model = modelSelectEl?.value?.trim() || '';
       const temperature = document.getElementById('studios-new-agent-temperature').value;
       const systemPrompt = document.getElementById('studios-new-agent-prompt').value.trim();
       const allowWebSearchInput = document.getElementById('studios-new-agent-allow-web-search');
@@ -536,7 +537,14 @@ function initializeAgentModalListeners() {
         const requestBody = { name, type };
         requestBody.allow_web_search = allowWebSearchInput ? Boolean(allowWebSearchInput.checked) : true;
 
-        if (model) requestBody.model = model;
+        if (model) {
+          requestBody.model = model;
+          const selectedModelOption = modelSelectEl?.selectedOptions?.[0];
+          const selectedProvider = selectedModelOption?.getAttribute('data-provider');
+          if (selectedProvider) {
+            requestBody.llm_provider = selectedProvider;
+          }
+        }
         if (temperature) requestBody.temperature = parseFloat(temperature);
         if (systemPrompt) requestBody.system_prompt = systemPrompt;
 

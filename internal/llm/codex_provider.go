@@ -62,12 +62,13 @@ func (p *CodexProvider) ValidateConfig(_ ProviderConfig) error {
 	return nil
 }
 
-// DefaultModels returns Codex models from local Codex cache with curated fallback.
+// DefaultModels returns visible Codex CLI models from local cache with curated fallback.
 func (p *CodexProvider) DefaultModels() []string {
 	cached := loadCodexCachedModels()
-	curated := modelinfo.GetCodexModels()
-	merged := mergeUniqueModels(cached, curated)
-	return prioritizeCodexModels(merged)
+	if len(cached) > 0 {
+		return prioritizeCodexModels(dedupeModels(cached))
+	}
+	return prioritizeCodexModels(dedupeModels(modelinfo.GetCodexModels()))
 }
 
 // Chat sends a chat request via the Codex CLI.
@@ -260,16 +261,24 @@ func loadCodexCachedModels() []string {
 		if slug == "" {
 			continue
 		}
-		// Codex provider should only expose codex-family models.
-		if !strings.Contains(strings.ToLower(slug), "codex") {
-			continue
-		}
-		if strings.EqualFold(strings.TrimSpace(model.Visibility), "hidden") {
+		// Trust the Codex CLI cache for which models are selectable. This includes
+		// newer GPT-5 variants such as gpt-5.4 that do not include "codex" in
+		// the slug but are still available in the local CLI.
+		if !isCodexCacheModelVisible(model.Visibility) {
 			continue
 		}
 		models = append(models, slug)
 	}
 	return models
+}
+
+func isCodexCacheModelVisible(visibility string) bool {
+	switch strings.ToLower(strings.TrimSpace(visibility)) {
+	case "hide", "hidden":
+		return false
+	default:
+		return true
+	}
 }
 
 func codexHomeDir() string {
@@ -283,28 +292,24 @@ func codexHomeDir() string {
 	return filepath.Join(userHome, ".codex")
 }
 
-func mergeUniqueModels(primary, secondary []string) []string {
-	seen := make(map[string]struct{}, len(primary)+len(secondary))
-	merged := make([]string, 0, len(primary)+len(secondary))
+func dedupeModels(models []string) []string {
+	seen := make(map[string]struct{}, len(models))
+	deduped := make([]string, 0, len(models))
 
-	addModels := func(models []string) {
-		for _, model := range models {
-			clean := strings.TrimSpace(model)
-			if clean == "" {
-				continue
-			}
-			key := strings.ToLower(clean)
-			if _, exists := seen[key]; exists {
-				continue
-			}
-			seen[key] = struct{}{}
-			merged = append(merged, clean)
+	for _, model := range models {
+		clean := strings.TrimSpace(model)
+		if clean == "" {
+			continue
 		}
+		key := strings.ToLower(clean)
+		if _, exists := seen[key]; exists {
+			continue
+		}
+		seen[key] = struct{}{}
+		deduped = append(deduped, clean)
 	}
 
-	addModels(primary)
-	addModels(secondary)
-	return merged
+	return deduped
 }
 
 func prioritizeCodexModels(models []string) []string {

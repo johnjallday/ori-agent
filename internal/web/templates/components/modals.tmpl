@@ -81,6 +81,16 @@
               <option value="">Loading models...</option>
             </select>
           </div>
+          <div class="mb-3 d-none" id="agentReasoningField">
+            <label for="agentReasoning" class="form-label" style="color: var(--text-primary);">Reasoning Level</label>
+            <select id="agentReasoning" class="modern-input w-100" aria-describedby="agentReasoningHelp">
+              <option value="medium" selected>Medium (Recommended)</option>
+              <option value="high">High</option>
+              <option value="low">Low</option>
+              <option value="xhigh">Extra High</option>
+            </select>
+            <small id="agentReasoningHelp" class="form-helper">Codex only. Higher levels improve difficult reasoning at the cost of speed.</small>
+          </div>
           <div class="mb-3">
             <label for="agentTemperature" class="form-label" style="color: var(--text-primary);">
               Temperature: <span id="temperatureValue">1.0</span>

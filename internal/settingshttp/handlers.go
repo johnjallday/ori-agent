@@ -97,6 +97,58 @@ func (h *Handler) SettingsHandler(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// SessionSettingsHandler handles session cleanup configuration operations.
+func (h *Handler) SessionSettingsHandler(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodGet:
+		orihttp.WriteJSON(w, map[string]any{
+			"session_cleanup_enabled": h.configManager.GetSessionCleanupEnabled(),
+			"session_cleanup_days":    h.configManager.GetSessionCleanupDays(),
+			"session_max_count":       h.configManager.GetSessionMaxCount(),
+		})
+
+	case http.MethodPost:
+		var req struct {
+			SessionCleanupEnabled *bool `json:"session_cleanup_enabled"`
+			SessionCleanupDays    *int  `json:"session_cleanup_days"`
+			SessionMaxCount       *int  `json:"session_max_count"`
+		}
+		if !orihttp.ParseJSONBody(w, r, &req) {
+			return
+		}
+
+		enabled := h.configManager.GetSessionCleanupEnabled()
+		days := h.configManager.GetSessionCleanupDays()
+		maxCount := h.configManager.GetSessionMaxCount()
+
+		if req.SessionCleanupEnabled != nil {
+			enabled = *req.SessionCleanupEnabled
+		}
+		if req.SessionCleanupDays != nil {
+			days = *req.SessionCleanupDays
+		}
+		if req.SessionMaxCount != nil {
+			maxCount = *req.SessionMaxCount
+		}
+
+		h.configManager.SetSessionCleanupSettings(enabled, days, maxCount)
+		if err := h.configManager.Save(); err != nil {
+			orihttp.InternalError(w, err.Error())
+			return
+		}
+
+		orihttp.WriteJSON(w, map[string]any{
+			"success":                 true,
+			"session_cleanup_enabled": enabled,
+			"session_cleanup_days":    days,
+			"session_max_count":       maxCount,
+		})
+
+	default:
+		w.WriteHeader(http.StatusMethodNotAllowed)
+	}
+}
+
 // APIKeyHandler handles API key management
 func (h *Handler) APIKeyHandler(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
@@ -571,7 +623,11 @@ func (h *Handler) ProvidersHandler(w http.ResponseWriter, r *http.Request) {
 				goodFor := modelinfo.GetGoodFor(modelName)
 				pricingInfo := modelinfo.GetPricing(modelName)
 				pricing := ""
-				if pricingInfo != nil {
+				if name == "codex" {
+					// Codex (CLI) usage is billed through the CLI integration path,
+					// so we intentionally hide per-model API pricing on the models page.
+					pricing = ""
+				} else if pricingInfo != nil {
 					pricing = modelinfo.FormatPricing(pricingInfo)
 				} else if provider.Type() == llm.ProviderTypeLocal {
 					pricing = modelinfo.FormatPricing(nil)

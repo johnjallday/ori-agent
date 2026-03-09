@@ -114,6 +114,18 @@ class WorkspaceRealtime {
       this.handleTaskEvent(workspaceId, 'task.started', e);
     });
 
+    eventSource.addEventListener('task.thinking', (e) => {
+      this.handleTaskEvent(workspaceId, 'task.thinking', e);
+    });
+
+    eventSource.addEventListener('task.tool_call', (e) => {
+      this.handleTaskEvent(workspaceId, 'task.tool_call', e);
+    });
+
+    eventSource.addEventListener('task.tool_result', (e) => {
+      this.handleTaskEvent(workspaceId, 'task.tool_result', e);
+    });
+
     eventSource.addEventListener('task.completed', (e) => {
       this.handleTaskEvent(workspaceId, 'task.completed', e);
     });

@@ -274,6 +274,97 @@ func TestHomeAssistantRouteHandler_EmailMatch_UsesMCPServers(t *testing.T) {
 	}
 }
 
+func TestHomeAssistantRouteHandler_CalendarMatch_UsesIntentVariant(t *testing.T) {
+	st := newHomeRouteTestStore(t)
+	handler := NewHomeAssistantRouteHandler(st)
+
+	addHomeRouteTestAgent(t, st, "Calendar Assistant", &store.CreateAgentConfig{Type: "tool-calling"}, types.AgentStatusActive,
+		"Checks calendar events and schedule availability", []string{"calendar", "schedule"}, nil)
+	setHomeRouteAgentMCPServers(t, st, "Calendar Assistant", []string{"google-calendar"})
+
+	rr := postRouteRequest(t, handler, map[string]string{"prompt": "check my schedule"})
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d: %s", http.StatusOK, rr.Code, rr.Body.String())
+	}
+
+	var resp HomeAssistantRouteResponse
+	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+
+	if resp.Intent != "calendar_check" {
+		t.Fatalf("expected intent calendar_check, got %q", resp.Intent)
+	}
+	if resp.IntentVariant != "personal_calendar" {
+		t.Fatalf("expected personal_calendar variant, got %q", resp.IntentVariant)
+	}
+	if resp.MatchedAgent != "Calendar Assistant" {
+		t.Fatalf("expected matched agent Calendar Assistant, got %q", resp.MatchedAgent)
+	}
+}
+
+func TestHomeAssistantRouteHandler_CalendarIntent_AmbiguousInWorkspaceContext(t *testing.T) {
+	st := newHomeRouteTestStore(t)
+	handler := NewHomeAssistantRouteHandler(st)
+
+	rr := postRouteRequest(t, handler, map[string]any{
+		"prompt": "check my schedule",
+		"context": map[string]any{
+			"workspace_id": "ws-123",
+			"page_path":    "/workspaces/ws-123",
+		},
+	})
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d: %s", http.StatusOK, rr.Code, rr.Body.String())
+	}
+
+	var resp HomeAssistantRouteResponse
+	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+
+	if resp.Intent != "calendar_check" {
+		t.Fatalf("expected intent calendar_check, got %q", resp.Intent)
+	}
+	if resp.IntentVariant != "ambiguous" {
+		t.Fatalf("expected ambiguous variant, got %q", resp.IntentVariant)
+	}
+	if resp.RouteMode != "specialist_handoff" || resp.TargetSurface != "chat" {
+		t.Fatalf("expected ambiguous request to stay in chat flow, got mode=%q surface=%q", resp.RouteMode, resp.TargetSurface)
+	}
+}
+
+func TestHomeAssistantRouteHandler_CalendarIntent_WorkspaceScheduleRoutesToWorkspace(t *testing.T) {
+	st := newHomeRouteTestStore(t)
+	handler := NewHomeAssistantRouteHandler(st)
+
+	rr := postRouteRequest(t, handler, map[string]any{
+		"prompt": "what scheduled tasks run today in this workspace",
+		"context": map[string]any{
+			"workspace_id": "ws-123",
+			"page_path":    "/workspaces/ws-123",
+		},
+	})
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d: %s", http.StatusOK, rr.Code, rr.Body.String())
+	}
+
+	var resp HomeAssistantRouteResponse
+	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+
+	if resp.Intent != "calendar_check" {
+		t.Fatalf("expected intent calendar_check, got %q", resp.Intent)
+	}
+	if resp.IntentVariant != "workspace_schedule" {
+		t.Fatalf("expected workspace_schedule variant, got %q", resp.IntentVariant)
+	}
+	if resp.RouteMode != "workspace_task" || resp.TargetSurface != "workspace" {
+		t.Fatalf("expected workspace route, got mode=%q surface=%q", resp.RouteMode, resp.TargetSurface)
+	}
+}
+
 func TestHomeAssistantRouteHandler_GeneralPrompt_NoLowSignalReuse(t *testing.T) {
 	st := newHomeRouteTestStore(t)
 	handler := NewHomeAssistantRouteHandler(st)

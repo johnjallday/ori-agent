@@ -81,6 +81,7 @@ type WorkflowSystemFacade struct {
 	TaskScheduler       *workspace.TaskScheduler
 	EventBus            *workspace.EventBus
 	NotificationService *workspace.NotificationService
+	DirectorySync       *workspace.DirectorySyncManager
 	StudioOrchestrator  *workspace.Orchestrator
 }
 
@@ -205,6 +206,7 @@ func NewWorkflowSystemFacade(
 	taskScheduler *workspace.TaskScheduler,
 	eventBus *workspace.EventBus,
 	notificationService *workspace.NotificationService,
+	directorySync *workspace.DirectorySyncManager,
 	studioOrchestrator *workspace.Orchestrator,
 ) *WorkflowSystemFacade {
 	return &WorkflowSystemFacade{
@@ -213,6 +215,7 @@ func NewWorkflowSystemFacade(
 		TaskScheduler:       taskScheduler,
 		EventBus:            eventBus,
 		NotificationService: notificationService,
+		DirectorySync:       directorySync,
 		StudioOrchestrator:  studioOrchestrator,
 	}
 }
@@ -337,10 +340,16 @@ func (w *WorkflowSystemFacade) Start() {
 	if w.TaskScheduler != nil {
 		w.TaskScheduler.Start()
 	}
+	if w.DirectorySync != nil {
+		w.DirectorySync.Start()
+	}
 }
 
 // Shutdown gracefully shuts down all workflow system background services
 func (w *WorkflowSystemFacade) Shutdown() {
+	if w.DirectorySync != nil {
+		w.DirectorySync.Stop()
+	}
 	if w.TaskExecutor != nil {
 		w.TaskExecutor.Stop()
 	}

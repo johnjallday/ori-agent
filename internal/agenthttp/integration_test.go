@@ -189,6 +189,55 @@ func TestCreateAgent_WithAllowWebSearchSetting(t *testing.T) {
 	}
 }
 
+func TestCreateAgent_WithCodexReasoningEffort(t *testing.T) {
+	ts := setupTestServer(t)
+	defer ts.cleanup()
+
+	reqBody := map[string]interface{}{
+		"name":             "codex-reasoning-agent",
+		"type":             "research",
+		"llm_provider":     "codex",
+		"model":            "gpt-5.4",
+		"reasoning_effort": "xhigh",
+	}
+
+	rr := ts.doRequest(t, http.MethodPost, "/api/agents", reqBody)
+	assertStatus(t, rr, http.StatusOK)
+
+	ag, ok := ts.store.GetAgent("codex-reasoning-agent")
+	if !ok || ag == nil {
+		t.Fatal("expected agent to be stored")
+	}
+	if ag.Settings.ReasoningEffort != "xhigh" {
+		t.Fatalf("expected store reasoning_effort xhigh, got %q", ag.Settings.ReasoningEffort)
+	}
+
+	rr = ts.doRequest(t, http.MethodGet, "/api/agents/codex-reasoning-agent/detail", nil)
+	assertStatus(t, rr, http.StatusOK)
+
+	var detail map[string]interface{}
+	decodeResponse(t, rr, &detail)
+	if got := detail["reasoning_effort"]; got != "xhigh" {
+		t.Fatalf("expected reasoning_effort xhigh in detail response, got %#v", got)
+	}
+}
+
+func TestCreateAgent_WithInvalidReasoningEffort(t *testing.T) {
+	ts := setupTestServer(t)
+	defer ts.cleanup()
+
+	reqBody := map[string]interface{}{
+		"name":             "invalid-reasoning-agent",
+		"type":             "research",
+		"llm_provider":     "codex",
+		"model":            "gpt-5.4",
+		"reasoning_effort": "ultra",
+	}
+
+	rr := ts.doRequest(t, http.MethodPost, "/api/agents", reqBody)
+	assertStatus(t, rr, http.StatusBadRequest)
+}
+
 // Test 7.1: Complete agent lifecycle (create → list → detail → update → delete)
 func TestCompleteAgentLifecycle(t *testing.T) {
 	ts := setupTestServer(t)

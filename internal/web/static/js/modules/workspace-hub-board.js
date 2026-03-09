@@ -792,6 +792,10 @@
 
     if (elements.taskDetailsTitle) elements.taskDetailsTitle.textContent = title;
     if (elements.taskDetailsDescription) elements.taskDetailsDescription.textContent = description;
+    if (elements.taskDetailsHeaderId) {
+      elements.taskDetailsHeaderId.textContent = task.id || '--';
+      elements.taskDetailsHeaderId.title = task.id || 'Task ID unavailable';
+    }
     if (elements.taskDetailsId) elements.taskDetailsId.textContent = task.id || '--';
     if (elements.taskDetailsStatus) elements.taskDetailsStatus.textContent = status;
     if (elements.taskDetailsAssignedTo) elements.taskDetailsAssignedTo.textContent = assigned;

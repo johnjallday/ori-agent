@@ -43,6 +43,7 @@ type HomeAssistantRouteContext struct {
 
 type HomeAssistantRouteResponse struct {
 	Intent               string   `json:"intent"`
+	IntentVariant        string   `json:"intent_variant,omitempty"`
 	IntentLabel          string   `json:"intent_label"`
 	MatchedAgent         string   `json:"matched_agent,omitempty"`
 	Score                int      `json:"score"`
@@ -112,6 +113,16 @@ var (
 		SuggestedName:    "Email Assistant",
 		MinScore:         4,
 	}
+	homeAssistantCalendarIntent = homeAssistantIntent{
+		Key:              "calendar_check",
+		Label:            "calendar or schedule",
+		Keywords:         []string{"calendar", "schedule", "meeting", "meetings", "appointment", "appointments", "availability", "free time", "busy", "free", "events"},
+		PreferredPlugins: []string{"calendar", "schedule", "google-calendar"},
+		PreferredTypes:   []string{"tool-calling", "general"},
+		DefaultType:      "tool-calling",
+		SuggestedName:    "Calendar Assistant",
+		MinScore:         4,
+	}
 	homeAssistantWorkspaceCreateIntent = homeAssistantIntent{
 		Key:              "workspace_create",
 		Label:            "workspace creation",
@@ -146,7 +157,16 @@ var (
 		homeAssistantUtilityIntent,
 		homeAssistantTravelIntent,
 		homeAssistantEmailIntent,
+		homeAssistantCalendarIntent,
 		homeAssistantWorkspaceCreateIntent,
+	}
+	homeAssistantWorkspaceScheduleSignals = []string{
+		"workspace schedule", "scheduled task", "scheduled tasks", "scheduler", "next run", "next runs",
+		"cron", "workspace tasks", "task schedule", "task schedules", "run today in this workspace",
+	}
+	homeAssistantPersonalCalendarSignals = []string{
+		"my calendar", "calendar", "meeting", "meetings", "appointment", "appointments",
+		"am i free", "availability", "free time", "busy", "event", "events",
 	}
 	homeAssistantCommonTokens = map[string]bool{
 		"a": true, "an": true, "and": true, "are": true, "can": true, "do": true, "for": true, "help": true,
@@ -191,16 +211,18 @@ func (h *HomeAssistantRouteHandler) RouteHandler(w http.ResponseWriter, r *http.
 	_ = ensureSystemAssistantAgentWithSystemModel(h.State, systemProvider, systemModel)
 
 	intent := detectHomeAssistantIntent(prompt)
+	intentVariant := detectHomeAssistantIntentVariant(prompt, intent, normalizeHomeAssistantRouteContext(req.Context))
 	match := h.findBestMatch(prompt, intent)
 	if match == nil {
 		match = h.systemAssistantFallback(intent)
 	}
 	routeContext := normalizeHomeAssistantRouteContext(req.Context)
 	workspaceRecommended := shouldRecommendWorkspace(prompt, intent)
-	routeMode, targetSurface := determineRouteModeAndTargetSurface(intent, routeContext, workspaceRecommended)
+	routeMode, targetSurface := determineRouteModeAndTargetSurface(intent, intentVariant, routeContext, workspaceRecommended)
 
 	resp := HomeAssistantRouteResponse{
 		Intent:               intent.Key,
+		IntentVariant:        intentVariant,
 		IntentLabel:          intent.Label,
 		RequiresCreation:     true,
 		WorkspaceRecommended: workspaceRecommended,
@@ -270,6 +292,28 @@ func detectHomeAssistantIntent(prompt string) homeAssistantIntent {
 	}
 
 	return selectedIntent
+}
+
+func detectHomeAssistantIntentVariant(prompt string, intent homeAssistantIntent, context normalizedHomeAssistantRouteContext) string {
+	if intent.Key != homeAssistantCalendarIntent.Key {
+		return ""
+	}
+
+	normalized := normalizeRouteToken(prompt)
+	if normalized == "" {
+		return "personal_calendar"
+	}
+
+	if promptContainsAnyRoutePhrase(normalized, homeAssistantWorkspaceScheduleSignals) {
+		return "workspace_schedule"
+	}
+	if promptContainsAnyRoutePhrase(normalized, homeAssistantPersonalCalendarSignals) {
+		return "personal_calendar"
+	}
+	if context.hasWorkspaceContext() && strings.Contains(normalized, "schedule") {
+		return "ambiguous"
+	}
+	return "personal_calendar"
 }
 
 func (h *HomeAssistantRouteHandler) findBestMatch(prompt string, intent homeAssistantIntent) *routedAgentMatch {
@@ -549,12 +593,18 @@ func (c normalizedHomeAssistantRouteContext) hasWorkspaceContext() bool {
 	return c.Surface == "workspace" || c.Surface == "workspace_detail" || c.Surface == "workspace_canvas"
 }
 
-func determineRouteModeAndTargetSurface(intent homeAssistantIntent, context normalizedHomeAssistantRouteContext, workspaceRecommended bool) (string, string) {
+func determineRouteModeAndTargetSurface(intent homeAssistantIntent, intentVariant string, context normalizedHomeAssistantRouteContext, workspaceRecommended bool) (string, string) {
 	if intent.Key == homeAssistantUtilityIntent.Key {
 		return "utility_direct", "current"
 	}
 	if intent.Key == homeAssistantWorkspaceCreateIntent.Key {
 		return "workspace_task", "workspace"
+	}
+	if intent.Key == homeAssistantCalendarIntent.Key && intentVariant == "workspace_schedule" && context.hasWorkspaceContext() {
+		return "workspace_task", "workspace"
+	}
+	if intent.Key == homeAssistantCalendarIntent.Key {
+		return "specialist_handoff", "chat"
 	}
 	if intent.Key == homeAssistantAppLaunchIntent.Key {
 		return "specialist_handoff", "chat"

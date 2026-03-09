@@ -35,10 +35,11 @@ func TestFileStore_SaveLoad_NestedRoundTrip(t *testing.T) {
 				Role:         types.RoleAnalyzer,
 				Capabilities: []string{types.CapabilityWebSearch, types.CapabilityCodeAnalysis},
 				Settings: types.Settings{
-					Model:           "gpt-4o-mini",
+					Model:           "gpt-5.4",
 					Temperature:     0.6,
 					SystemPrompt:    "You are an analytical assistant.",
-					Provider:        "openai",
+					Provider:        "codex",
+					ReasoningEffort: "high",
 					MaxOutputTokens: 1200,
 				},
 				Plugins: map[string]types.LoadedPlugin{
@@ -93,11 +94,14 @@ func TestFileStore_SaveLoad_NestedRoundTrip(t *testing.T) {
 	if len(got.Capabilities) != 2 {
 		t.Errorf("expected 2 capabilities, got %d", len(got.Capabilities))
 	}
-	if got.Settings.Model != "gpt-4o-mini" {
-		t.Errorf("expected model gpt-4o-mini, got %q", got.Settings.Model)
+	if got.Settings.Model != "gpt-5.4" {
+		t.Errorf("expected model gpt-5.4, got %q", got.Settings.Model)
 	}
-	if got.Settings.Provider != "openai" {
-		t.Errorf("expected provider openai, got %q", got.Settings.Provider)
+	if got.Settings.Provider != "codex" {
+		t.Errorf("expected provider codex, got %q", got.Settings.Provider)
+	}
+	if got.Settings.ReasoningEffort != "high" {
+		t.Errorf("expected reasoning_effort high, got %q", got.Settings.ReasoningEffort)
 	}
 	if got.Settings.MaxOutputTokens != 1200 {
 		t.Errorf("expected max_output_tokens 1200, got %d", got.Settings.MaxOutputTokens)
@@ -370,5 +374,36 @@ func TestFileStore_CreateAgent_AppliesAllowWebSearchOverride(t *testing.T) {
 	}
 	if created.Settings.IsWebSearchAllowed() {
 		t.Fatalf("expected web search to be disabled")
+	}
+}
+
+func TestFileStore_CreateAgent_AppliesReasoningEffortOverride(t *testing.T) {
+	tempDir := t.TempDir()
+	indexPath := filepath.Join(tempDir, "agents_index.json")
+
+	fs, err := NewFileStore(indexPath, types.Settings{
+		Model:       "gpt-5.4",
+		Provider:    "codex",
+		Temperature: 1.0,
+	})
+	if err != nil {
+		t.Fatalf("NewFileStore() failed: %v", err)
+	}
+
+	if err := fs.CreateAgent("codex-agent", &CreateAgentConfig{
+		Type:            agent.TypeResearch,
+		Model:           "gpt-5.4",
+		LLMProvider:     "codex",
+		ReasoningEffort: "xhigh",
+	}); err != nil {
+		t.Fatalf("CreateAgent() failed: %v", err)
+	}
+
+	created, ok := fs.GetAgent("codex-agent")
+	if !ok || created == nil {
+		t.Fatalf("expected created agent to exist")
+	}
+	if created.Settings.ReasoningEffort != "xhigh" {
+		t.Fatalf("expected reasoning_effort xhigh, got %q", created.Settings.ReasoningEffort)
 	}
 }

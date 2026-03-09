@@ -26,6 +26,10 @@ export function OpenFolderDialog() {
   return window['go']['main']['App']['OpenFolderDialog']();
 }
 
+export function OpenFolderDialogWithTitle(arg1) {
+  return window['go']['main']['App']['OpenFolderDialogWithTitle'](arg1);
+}
+
 export function Quit() {
   return window['go']['main']['App']['Quit']();
 }

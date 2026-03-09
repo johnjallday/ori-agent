@@ -44,7 +44,8 @@ func classifyContextError(err error) string {
 type LLMTaskHandler struct {
 	agentStore     store.Store
 	llmFactory     *llm.Factory
-	workspaceStore Store     // Added to access workspace attachments
+	workspaceStore Store // Added to access workspace attachments
+	contextStore   taskPromptContextStore
 	eventBus       *EventBus // Optional event bus for publishing execution events
 	mcpRegistry    mcpRegistry
 }
@@ -71,6 +72,11 @@ func (h *LLMTaskHandler) SetEventBus(eventBus *EventBus) {
 // SetMCPRegistry enables MCP tool resolution for workspace task execution.
 func (h *LLMTaskHandler) SetMCPRegistry(registry mcpRegistry) {
 	h.mcpRegistry = registry
+}
+
+// SetContextStore configures optional workspace note/session summaries for task prompts.
+func (h *LLMTaskHandler) SetContextStore(store taskPromptContextStore) {
+	h.contextStore = store
 }
 
 // ExecuteTask executes a task by sending it to the agent's LLM
@@ -107,15 +113,16 @@ func (h *LLMTaskHandler) ExecuteTask(ctx context.Context, agentName string, task
 		}
 	}
 
-	// Determine which provider to use based on model
-	providerName := h.getProviderForModel(ag.Settings.Model)
+	// Determine which provider to use based on explicit agent provider + model fallback.
+	providerName := h.getProviderForAgent(ag.Settings.Provider, ag.Settings.Model)
 	provider, err := h.llmFactory.GetProvider(providerName)
 	if err != nil {
 		return "", fmt.Errorf("failed to get LLM provider: %w", err)
 	}
+	modelName := h.normalizeModelForProvider(providerName, ag.Settings.Model)
 
 	// Build the prompt for the task
-	prompt := h.buildTaskPrompt(task, ag)
+	prompt := h.buildTaskPrompt(ctx, task, ag)
 
 	// Prepare messages
 	messages := []llm.Message{
@@ -124,10 +131,7 @@ func (h *LLMTaskHandler) ExecuteTask(ctx context.Context, agentName string, task
 
 	// Use a task-specific system prompt that's more conservative about tool use
 	// The agent's system prompt may encourage aggressive tool use which is inappropriate for workspace tasks
-	taskSystemPrompt := "You are a helpful AI assistant completing a task in a collaborative workspace. "
-	taskSystemPrompt += "You have access to tools, but only use them when they are clearly necessary to complete the specific task. "
-	taskSystemPrompt += "For simple questions, greetings, or informational requests, respond naturally without calling tools. "
-	taskSystemPrompt += "Be thoughtful and precise in your responses."
+	taskSystemPrompt := h.buildTaskSystemPrompt()
 
 	messages = append([]llm.Message{llm.NewSystemMessage(taskSystemPrompt)}, messages...)
 
@@ -136,10 +140,11 @@ func (h *LLMTaskHandler) ExecuteTask(ctx context.Context, agentName string, task
 
 	// Call the LLM
 	resp, err := provider.Chat(ctx, llm.ChatRequest{
-		Model:       ag.Settings.Model,
-		Messages:    messages,
-		Temperature: ag.Settings.Temperature,
-		Tools:       tools,
+		Model:           modelName,
+		Messages:        messages,
+		Temperature:     ag.Settings.Temperature,
+		ReasoningEffort: ag.Settings.EffectiveReasoningEffort(providerName),
+		Tools:           tools,
 	})
 
 	if err != nil {
@@ -198,6 +203,113 @@ func (h *LLMTaskHandler) ExecuteTask(ctx context.Context, agentName string, task
 	}
 
 	return resp.Content, nil
+}
+
+func normalizeProviderName(provider string) string {
+	normalized := strings.ToLower(strings.TrimSpace(provider))
+	switch normalized {
+	case "anthropic":
+		return "claude"
+	default:
+		return normalized
+	}
+}
+
+func isClaudeFamilyModel(model string) bool {
+	normalized := strings.ToLower(strings.TrimSpace(model))
+	if normalized == "" {
+		return false
+	}
+	if strings.HasPrefix(normalized, "claude-") {
+		return true
+	}
+	return normalized == "haiku" || normalized == "sonnet" || normalized == "opus"
+}
+
+func isGeminiFamilyModel(model string) bool {
+	normalized := strings.ToLower(strings.TrimSpace(model))
+	return strings.HasPrefix(normalized, "gemini")
+}
+
+func isCodexFamilyModel(model string) bool {
+	normalized := strings.ToLower(strings.TrimSpace(model))
+	return strings.HasPrefix(normalized, "codex")
+}
+
+func (h *LLMTaskHandler) normalizeModelForProvider(providerName, model string) string {
+	trimmedModel := strings.TrimSpace(model)
+	normalizedModel := strings.ToLower(trimmedModel)
+
+	if providerName == "claude" {
+		switch normalizedModel {
+		case "haiku":
+			return "claude-3-5-haiku-latest"
+		case "sonnet":
+			return "claude-3-5-sonnet-latest"
+		case "opus":
+			return "claude-3-opus-latest"
+		}
+	}
+
+	return trimmedModel
+}
+
+// getProviderForAgent resolves the best provider for the agent's configured provider/model.
+func (h *LLMTaskHandler) getProviderForAgent(configuredProvider, model string) string {
+	explicitProvider := normalizeProviderName(configuredProvider)
+	inferredProvider := h.getProviderForModel(model)
+
+	if explicitProvider == "" {
+		return inferredProvider
+	}
+
+	if h.llmFactory.HasProvider(explicitProvider) {
+		// Auto-correct common stale mismatch cases where provider was not persisted with model updates.
+		if explicitProvider == "openai" &&
+			inferredProvider != "" &&
+			inferredProvider != "openai" &&
+			(isClaudeFamilyModel(model) || isGeminiFamilyModel(model) || isCodexFamilyModel(model)) {
+			logFields := logger.Fields{
+				"configured_provider": explicitProvider,
+				"inferred_provider":   inferredProvider,
+				"model":               model,
+			}
+			if h.llmFactory.HasProvider(inferredProvider) {
+				logger.Warn("Detected provider/model mismatch; using inferred provider for task execution", logFields)
+				return inferredProvider
+			}
+			logger.Warn("Detected provider/model mismatch; inferred provider is not configured, keeping configured provider", logFields)
+			return explicitProvider
+		}
+
+		// Claude API does not accept short Claude Code model aliases.
+		if explicitProvider == "claude" && isClaudeFamilyModel(model) &&
+			(strings.EqualFold(strings.TrimSpace(model), "haiku") ||
+				strings.EqualFold(strings.TrimSpace(model), "sonnet") ||
+				strings.EqualFold(strings.TrimSpace(model), "opus")) &&
+			h.llmFactory.HasProvider("claude_code") {
+			logger.Warn("Detected Claude short model alias; using claude_code provider", logger.Fields{
+				"configured_provider": explicitProvider,
+				"inferred_provider":   "claude_code",
+				"model":               model,
+			})
+			return "claude_code"
+		}
+
+		return explicitProvider
+	}
+
+	if inferredProvider != "" && h.llmFactory.HasProvider(inferredProvider) {
+		logger.Warn("Configured provider unavailable; falling back to inferred provider", logger.Fields{
+			"configured_provider": explicitProvider,
+			"inferred_provider":   inferredProvider,
+			"model":               model,
+		})
+		return inferredProvider
+	}
+
+	// Preserve configured name for clearer upstream error messaging if no fallback exists.
+	return explicitProvider
 }
 
 // substitutePlaceholders replaces placeholders like {result}, {input}, {result1}, {result2} in task description
@@ -396,80 +508,6 @@ func looksLikeBrowserCapabilityRefusal(response string) bool {
 }
 
 // buildTaskPrompt creates a prompt for the task
-func (h *LLMTaskHandler) buildTaskPrompt(task Task, ag *agent.Agent) string {
-	var prompt strings.Builder
-
-	prompt.WriteString("# Task Assignment\n\n")
-	prompt.WriteString("You have been assigned a task in a collaborative studio.\n\n")
-	prompt.WriteString(fmt.Sprintf("**Task ID**: %s\n", task.ID))
-	prompt.WriteString(fmt.Sprintf("**From**: %s\n", task.From))
-	prompt.WriteString(fmt.Sprintf("**Priority**: %d/5\n\n", task.Priority))
-
-	// Process task description with placeholder substitution
-	processedDescription := h.substitutePlaceholders(task)
-	prompt.WriteString(fmt.Sprintf("## Task Description\n\n%s\n\n", processedDescription))
-
-	// Include attachments if any are connected to this task
-	attachmentContents := h.getAttachedFileContents(task)
-	if len(attachmentContents) > 0 {
-		prompt.WriteString("## Attached Files\n\n")
-		prompt.WriteString("The following files are attached to this task:\n\n")
-		for _, att := range attachmentContents {
-			prompt.WriteString(fmt.Sprintf("### %s\n\n", att.Title))
-			if att.FilePath != "" {
-				prompt.WriteString(fmt.Sprintf("**File**: `%s`\n\n", att.FilePath))
-			}
-			if att.Body != "" {
-				prompt.WriteString(fmt.Sprintf("**Note**: %s\n\n", att.Body))
-			}
-			if att.Content != "" {
-				prompt.WriteString("**Content**:\n```\n")
-				prompt.WriteString(att.Content)
-				prompt.WriteString("\n```\n\n")
-			}
-		}
-	}
-
-	// Handle input task results specially for better formatting
-	inputTaskResults, hasInputResults := task.Context["input_task_results"]
-	if hasInputResults {
-		h.formatInputResults(&prompt, task, inputTaskResults)
-	}
-
-	// Include other context fields
-	if len(task.Context) > 0 {
-		hasOtherContext := false
-		for key := range task.Context {
-			if key != "input_task_results" {
-				hasOtherContext = true
-				break
-			}
-		}
-
-		if hasOtherContext {
-			prompt.WriteString("## Additional Context\n\n")
-			for key, value := range task.Context {
-				if key != "input_task_results" {
-					prompt.WriteString(fmt.Sprintf("- **%s**: %v\n", key, value))
-				}
-			}
-			prompt.WriteString("\n")
-		}
-	}
-
-	if task.Timeout > 0 {
-		prompt.WriteString(fmt.Sprintf("**Time Limit**: %v\n\n", task.Timeout))
-	}
-
-	prompt.WriteString("Please complete this task to the best of your ability. ")
-	prompt.WriteString("**Important**: Only use tools when they are explicitly necessary to complete the task. ")
-	prompt.WriteString("For informational requests, meta-commands (like /tools, /help), or simple questions, ")
-	prompt.WriteString("respond directly without calling tools. ")
-	prompt.WriteString("Provide a clear, concise response with your findings or results.")
-
-	return prompt.String()
-}
-
 // AttachmentContent holds attachment info and file contents
 type AttachmentContent struct {
 	Title    string
@@ -480,6 +518,10 @@ type AttachmentContent struct {
 
 // getAttachedFileContents finds attachments connected to this task and reads their file contents
 func (h *LLMTaskHandler) getAttachedFileContents(task Task) []AttachmentContent {
+	if h.workspaceStore == nil || strings.TrimSpace(task.WorkspaceID) == "" {
+		return nil
+	}
+
 	// Get the workspace to access attachments and connections
 	workspace, err := h.workspaceStore.Get(task.WorkspaceID)
 	if err != nil {
@@ -543,16 +585,44 @@ func (h *LLMTaskHandler) formatInputResults(prompt *strings.Builder, task Task, 
 
 // getProviderForModel determines which LLM provider to use (dynamic detection)
 func (h *LLMTaskHandler) getProviderForModel(model string) string {
-	// Check for Claude models (prefix-based)
-	if strings.HasPrefix(model, "claude-") {
+	trimmedModel := strings.TrimSpace(model)
+	normalizedModel := strings.ToLower(trimmedModel)
+	if trimmedModel == "" {
+		return "openai"
+	}
+
+	// Claude Code short aliases map directly to claude_code when available.
+	if normalizedModel == "haiku" || normalizedModel == "sonnet" || normalizedModel == "opus" {
+		if h.llmFactory.HasProvider("claude_code") {
+			return "claude_code"
+		}
+		if h.llmFactory.HasProvider("claude") {
+			return "claude"
+		}
+		// Keep this in the Claude family even if provider isn't currently configured.
 		return "claude"
+	}
+
+	// Check for Claude API models.
+	if strings.HasPrefix(normalizedModel, "claude-") {
+		return "claude"
+	}
+
+	// Check for Gemini models.
+	if strings.HasPrefix(normalizedModel, "gemini") {
+		return "gemini"
+	}
+
+	// Check for Codex models.
+	if strings.HasPrefix(normalizedModel, "codex") {
+		return "codex"
 	}
 
 	// Check if Ollama has this model (dynamic detection)
 	if ollamaProvider, err := h.llmFactory.GetProvider("ollama"); err == nil {
 		if ollamaProv, ok := ollamaProvider.(*llm.OllamaProvider); ok {
-			if ollamaProv.HasModel(model) {
-				logger.Info("Model '' found in Ollama, using Ollama provider", logger.Fields{"model": model})
+			if ollamaProv.HasModel(trimmedModel) || ollamaProv.HasModel(normalizedModel) {
+				logger.Info("Model found in Ollama, using Ollama provider", logger.Fields{"model": trimmedModel})
 				return "ollama"
 			}
 		}

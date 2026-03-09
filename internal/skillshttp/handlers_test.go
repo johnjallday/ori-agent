@@ -1,0 +1,211 @@
+package skillshttp
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"testing"
+
+	"github.com/johnjallday/ori-agent/internal/agent"
+	"github.com/johnjallday/ori-agent/internal/config"
+	"github.com/johnjallday/ori-agent/internal/llm"
+	"github.com/johnjallday/ori-agent/internal/skills"
+	"github.com/johnjallday/ori-agent/internal/store"
+	"github.com/johnjallday/ori-agent/internal/types"
+)
+
+type testSkillsProvider struct {
+	name string
+}
+
+func (p *testSkillsProvider) Chat(_ context.Context, _ llm.ChatRequest) (*llm.ChatResponse, error) {
+	return &llm.ChatResponse{Content: "prompt body"}, nil
+}
+
+func (p *testSkillsProvider) StreamChat(_ context.Context, _ llm.ChatRequest) (llm.StreamReader, error) {
+	return nil, nil
+}
+
+func (p *testSkillsProvider) Name() string {
+	return p.name
+}
+
+func (p *testSkillsProvider) Type() llm.ProviderType {
+	return llm.ProviderTypeCloud
+}
+
+func (p *testSkillsProvider) Capabilities() llm.ProviderCapabilities {
+	return llm.ProviderCapabilities{}
+}
+
+func (p *testSkillsProvider) ValidateConfig(_ llm.ProviderConfig) error {
+	return nil
+}
+
+func (p *testSkillsProvider) DefaultModels() []string {
+	return nil
+}
+
+type testAgentStore struct {
+	current string
+	agents  map[string]*agent.Agent
+}
+
+var _ store.Store = (*testAgentStore)(nil)
+
+func (s *testAgentStore) ListAgents() ([]string, string) {
+	names := make([]string, 0, len(s.agents))
+	for name := range s.agents {
+		names = append(names, name)
+	}
+	return names, s.current
+}
+
+func (s *testAgentStore) SetCurrentAgent(name string) error {
+	s.current = name
+	return nil
+}
+
+func (s *testAgentStore) CreateAgent(string, *store.CreateAgentConfig) error {
+	return nil
+}
+
+func (s *testAgentStore) DeleteAgent(string) error {
+	return nil
+}
+
+func (s *testAgentStore) GetAgent(name string) (*agent.Agent, bool) {
+	ag, ok := s.agents[name]
+	return ag, ok
+}
+
+func (s *testAgentStore) SetAgent(name string, ag *agent.Agent) error {
+	if s.agents == nil {
+		s.agents = map[string]*agent.Agent{}
+	}
+	s.agents[name] = ag
+	return nil
+}
+
+func (s *testAgentStore) ClearAgents() error {
+	s.agents = map[string]*agent.Agent{}
+	return nil
+}
+
+func (s *testAgentStore) Save() error {
+	return nil
+}
+
+func TestCreateSkill_FallsBackToLocalCreationWhenSkillsCLIUnavailable(t *testing.T) {
+	tmpDir := t.TempDir()
+	manager := skills.NewManager(skills.ManagerConfig{
+		AgentStorePath: filepath.Join(tmpDir, "agents", "index.json"),
+	})
+	store := &testAgentStore{current: "Ori"}
+	handler := New(manager, store, nil, nil)
+	handler.skillsCLIInDir = func(context.Context, string, ...string) (string, error) {
+		return "", exec.ErrNotFound
+	}
+
+	body, err := json.Marshal(map[string]any{
+		"agent":       "Ori",
+		"name":        "demo-skill",
+		"description": "Demo skill",
+		"prompt":      "Do the thing.",
+	})
+	if err != nil {
+		t.Fatalf("marshal request: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/api/skills", bytes.NewReader(body))
+	rec := httptest.NewRecorder()
+
+	handler.createSkill(rec, req)
+
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("expected status 201, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	skillPath := filepath.Join(tmpDir, "agents", "Ori", "skills", "demo-skill", "SKILL.md")
+	if _, err := os.Stat(skillPath); err != nil {
+		t.Fatalf("expected local fallback skill at %s: %v", skillPath, err)
+	}
+}
+
+func TestResolvePromptProvider_UsesModelOnlyAgentConfig(t *testing.T) {
+	tmpDir := t.TempDir()
+	cfg := config.NewManager(filepath.Join(tmpDir, "settings.json"))
+	if err := cfg.Load(); err != nil {
+		t.Fatalf("load config: %v", err)
+	}
+
+	factory := llm.NewFactory()
+	factory.Register("claude_code", &testSkillsProvider{name: "claude_code"})
+
+	store := &testAgentStore{
+		current: "Ori",
+		agents: map[string]*agent.Agent{
+			"Ori": {
+				Settings: types.Settings{
+					Model: "sonnet",
+				},
+			},
+		},
+	}
+
+	handler := New(nil, store, factory, cfg)
+	provider, model, reasoningEffort, err := handler.resolvePromptProvider("Ori")
+	if err != nil {
+		t.Fatalf("resolvePromptProvider failed: %v", err)
+	}
+	if provider.Name() != "claude_code" {
+		t.Fatalf("expected claude_code provider, got %q", provider.Name())
+	}
+	if model != "sonnet" {
+		t.Fatalf("expected sonnet model, got %q", model)
+	}
+	if reasoningEffort != "" {
+		t.Fatalf("expected empty reasoning effort for agent-specific provider, got %q", reasoningEffort)
+	}
+}
+
+func TestResolvePromptProvider_CorrectsStaleOpenAIProviderForClaudeAlias(t *testing.T) {
+	tmpDir := t.TempDir()
+	cfg := config.NewManager(filepath.Join(tmpDir, "settings.json"))
+	if err := cfg.Load(); err != nil {
+		t.Fatalf("load config: %v", err)
+	}
+
+	factory := llm.NewFactory()
+	factory.Register("openai", &testSkillsProvider{name: "openai"})
+	factory.Register("claude_code", &testSkillsProvider{name: "claude_code"})
+
+	store := &testAgentStore{
+		current: "Ori",
+		agents: map[string]*agent.Agent{
+			"Ori": {
+				Settings: types.Settings{
+					Provider: "openai",
+					Model:    "sonnet",
+				},
+			},
+		},
+	}
+
+	handler := New(nil, store, factory, cfg)
+	provider, model, _, err := handler.resolvePromptProvider("Ori")
+	if err != nil {
+		t.Fatalf("resolvePromptProvider failed: %v", err)
+	}
+	if provider.Name() != "claude_code" {
+		t.Fatalf("expected claude_code provider, got %q", provider.Name())
+	}
+	if model != "sonnet" {
+		t.Fatalf("expected sonnet model, got %q", model)
+	}
+}

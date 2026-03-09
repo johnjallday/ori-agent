@@ -107,6 +107,140 @@ test.describe('Agent Management', () => {
   });
 });
 
+test.describe('Workspace Import Flow', () => {
+  test('import modal supports picker selection and duplicate override', async ({ page }) => {
+    await page.route('**/api/folder-picker/select-path', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          success: true,
+          selected: true,
+          path: '/tmp/demo-project'
+        })
+      });
+    });
+
+    await page.route('**/api/workspaces/import/check*', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          success: true,
+          duplicate: {
+            found: true,
+            workspace_id: 'existing-ws',
+            workspace_name: 'Existing Workspace'
+          }
+        })
+      });
+    });
+
+    await page.route('**/api/workspaces/import/duplicate-action', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ success: true })
+      });
+    });
+
+    let importAttemptCount = 0;
+    await page.route('**/api/workspaces/import', async (route) => {
+      importAttemptCount += 1;
+      const body = route.request().postDataJSON();
+
+      if (!body.allow_duplicate) {
+        await route.fulfill({
+          status: 409,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            success: false,
+            error: 'Folder is already imported in another workspace',
+            duplicate: {
+              found: true,
+              workspace_id: 'existing-ws',
+              workspace_name: 'Existing Workspace'
+            }
+          })
+        });
+        return;
+      }
+
+      await route.fulfill({
+        status: 201,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          success: true,
+          folder: {
+            id: 'new-imported-ws',
+            name: body.name || 'demo-project'
+          },
+          directory: {
+            id: 'dir-ref-1',
+            workspace_id: 'new-imported-ws',
+            name: 'demo-project',
+            path: '/tmp/demo-project'
+          },
+          duplicate: { found: false }
+        })
+      });
+    });
+
+    await page.goto('/workspaces');
+    await page.waitForLoadState('networkidle');
+    const modal = page.locator('#addFolderModal');
+    if (!await modal.isVisible()) {
+      await page.locator('#launcherCreateWorkspaceBtn').click();
+    }
+    await expect(modal).toBeVisible();
+
+    const importToggle = page.locator('#folderImportToggle');
+    if (!await importToggle.isChecked()) {
+      await importToggle.click();
+    }
+    await expect(importToggle).toBeChecked();
+    await expect(page.locator('#folderImportSection')).toBeVisible();
+
+    await page.locator('#folderImportBrowseBtn').click();
+    await expect(page.locator('#folderImportPathInput')).toHaveValue('/tmp/demo-project');
+    await expect(page.locator('#folderImportDuplicateWarning')).toBeVisible();
+
+    await page.locator('#folderImportProceedDuplicateBtn').click();
+    await page.locator('#createFolderBtn').click();
+
+    await expect(page.locator('#addFolderModal.show')).toHaveCount(0);
+    expect(importAttemptCount).toBeGreaterThan(0);
+  });
+
+  test('import controls are keyboard and mobile friendly', async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.goto('/workspaces');
+    await page.waitForLoadState('networkidle');
+
+    const modal = page.locator('#addFolderModal');
+    if (!await modal.isVisible()) {
+      await page.locator('#launcherCreateWorkspaceBtn').click();
+    }
+
+    const importToggle = page.locator('#folderImportToggle');
+    if (await importToggle.isChecked()) {
+      await importToggle.focus();
+      await page.keyboard.press('Space');
+    }
+    await importToggle.focus();
+    await page.keyboard.press('Space');
+    await expect(page.locator('#folderImportSection')).toBeVisible();
+
+    const pathBox = await page.locator('#folderImportPathInput').boundingBox();
+    const browseBox = await page.locator('#folderImportBrowseBtn').boundingBox();
+    expect(pathBox).not.toBeNull();
+    expect(browseBox).not.toBeNull();
+    if (pathBox && browseBox) {
+      expect(browseBox.y).toBeGreaterThanOrEqual(pathBox.y);
+    }
+  });
+});
+
 test.describe('API Health', () => {
   test('health endpoint returns OK', async ({ request }) => {
     const response = await request.get('/api/health');
