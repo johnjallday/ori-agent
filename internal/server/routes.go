@@ -456,6 +456,7 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 	// Orchestration Endpoints
 	// =============================================================================
 	mux.HandleFunc("/api/orchestration/workspace", s.Handlers.Orchestration.WorkspaceHandler)
+	mux.HandleFunc("/api/orchestration/workspace/activate", s.Handlers.Orchestration.WorkspaceActivateHandler)
 	mux.HandleFunc("/api/orchestration/workspace/agents", s.Handlers.Orchestration.WorkspaceAgentsHandler)
 	mux.HandleFunc("/api/orchestration/workspace/layout", s.Handlers.Orchestration.SaveLayoutHandler)
 	mux.HandleFunc("/api/orchestration/messages", s.Handlers.Orchestration.MessagesHandler)

@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/johnjallday/ori-agent/internal/filewatcher"
 	orihttp "github.com/johnjallday/ori-agent/internal/http"
 	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/store"
@@ -19,6 +20,7 @@ type WorkspaceHandler struct {
 	workspaceStore workspace.Store
 	eventBus       *workspace.EventBus
 	sessionStore   SessionStore
+	fileWatcher    *filewatcher.Watcher // optional, for workspace directory watching
 }
 
 // NewWorkspaceHandler creates a new workspace handler
@@ -29,6 +31,11 @@ func NewWorkspaceHandler(agentStore store.Store, workspaceStore workspace.Store,
 		eventBus:       eventBus,
 		sessionStore:   sessionStore,
 	}
+}
+
+// SetFileWatcher sets the optional file watcher for workspace directory watching.
+func (wh *WorkspaceHandler) SetFileWatcher(fw *filewatcher.Watcher) {
+	wh.fileWatcher = fw
 }
 
 // WorkspaceHandler handles workspace CRUD operations
@@ -555,4 +562,62 @@ func (wh *WorkspaceHandler) SaveLayoutHandler(w http.ResponseWriter, r *http.Req
 	}); encErr != nil {
 		logger.Error("Failed to encode response", logger.Fields{"error": encErr})
 	}
+}
+
+// ActivateHandler handles POST /api/orchestration/workspace/activate?id={id}
+// It starts watching all directory references in the workspace so that
+// file change events are available while the user is on the workspace page.
+func (wh *WorkspaceHandler) ActivateHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		orihttp.MethodNotAllowed(w)
+		return
+	}
+
+	wsID := r.URL.Query().Get("id")
+	if wsID == "" {
+		orihttp.BadRequest(w, "workspace id is required")
+		return
+	}
+
+	ws, err := wh.workspaceStore.Get(wsID)
+	if err != nil || ws == nil {
+		orihttp.NotFound(w, "workspace not found")
+		return
+	}
+
+	watched := 0
+	if wh.fileWatcher != nil && len(ws.DirectoryReferences) > 0 {
+		for _, dir := range ws.DirectoryReferences {
+			if dir.Path == "" {
+				continue
+			}
+			watchKey := fmt.Sprintf("workspace:%s:dir:%s", wsID, dir.ID)
+			if wh.fileWatcher.IsWatching(watchKey) {
+				watched++
+				continue
+			}
+			if err := wh.fileWatcher.Watch(watchKey, dir.Path); err != nil {
+				logger.Warn("Failed to watch workspace directory", logger.Fields{
+					"workspace_id": wsID,
+					"directory":    dir.Name,
+					"path":         dir.Path,
+					"error":        err,
+				})
+			} else {
+				watched++
+			}
+		}
+	}
+
+	logger.Info("Workspace activated", logger.Fields{
+		"workspace_id":        wsID,
+		"directories_watched": watched,
+		"total_directories":   len(ws.DirectoryReferences),
+	})
+
+	orihttp.WriteJSON(w, map[string]interface{}{
+		"success":             true,
+		"workspace_id":        wsID,
+		"directories_watched": watched,
+	})
 }
