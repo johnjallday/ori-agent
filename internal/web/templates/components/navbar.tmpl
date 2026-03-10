@@ -10,7 +10,7 @@
         </svg>
       </a>
       {{else if ne .ShowSidebarToggle false}}
-      <button {{if .SidebarToggleId}}id="{{.SidebarToggleId}}"{{else}}id="sidebarToggle"{{end}} class="modern-btn modern-btn-secondary {{if .SidebarToggleHideOnLg}}d-lg-none{{end}} me-2" type="button" title="Toggle Sidebar" aria-label="Toggle sidebar menu" aria-expanded="false">
+      <button {{if .SidebarToggleId}}id="{{.SidebarToggleId}}"{{else}}id="sidebarToggle"{{end}} class="modern-btn modern-btn-secondary navbar-sidebar-toggle {{if .SidebarToggleHideOnLg}}d-lg-none{{end}} me-2" type="button" title="Toggle Sidebar" aria-label="Toggle sidebar menu" aria-expanded="false">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
           <path d="M3 18h18v-2H3v2zm0-5h18v-2H3v2zm0-7v2h18V6H3z"/>
         </svg>

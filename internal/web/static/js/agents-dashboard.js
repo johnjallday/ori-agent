@@ -32,19 +32,9 @@ function notifySuccess(message) {
 }
 
 function initializeDashboard() {
-  syncDrawerOffsetWithNavbar();
-  window.addEventListener('resize', syncDrawerOffsetWithNavbar);
   setupEventListeners();
   setMode('operations');
   loadAgents();
-}
-
-function syncDrawerOffsetWithNavbar() {
-  const navbar = document.querySelector('nav.navbar');
-  const fallbackOffset = 76;
-  const navbarHeight = navbar ? Math.ceil(navbar.getBoundingClientRect().height) : fallbackOffset;
-  const offset = Number.isFinite(navbarHeight) ? Math.max(fallbackOffset, navbarHeight) : fallbackOffset;
-  document.documentElement.style.setProperty('--ops-navbar-offset', `${offset}px`);
 }
 
 function setupEventListeners() {
@@ -308,6 +298,11 @@ function createAgentCard(agent) {
     ? 'disabled title="System assistant cannot be deleted."'
     : '';
 
+  card.tabIndex = 0;
+  card.setAttribute('role', 'button');
+  card.setAttribute('aria-haspopup', 'dialog');
+  card.setAttribute('aria-label', `Open details for ${name}`);
+
   card.innerHTML = `
     <div class="ops-card-top">
       ${getAvatarHtml(agent, 'ops-agent-avatar')}
@@ -323,7 +318,6 @@ function createAgentCard(agent) {
     <div class="ops-card-actions">
       <button class="ops-action-btn primary" data-action="chat" ${chatDisabled ? 'disabled' : ''}>Chat</button>
       <button class="ops-action-btn" data-action="pause">${safeEscapeHtml(pauseLabel)}</button>
-      <button class="ops-action-btn" data-action="open">Open</button>
       <button class="ops-action-btn danger" data-action="delete" ${deleteDisabledAttr}>Delete</button>
     </div>
     <div class="config-only">
@@ -336,7 +330,6 @@ function createAgentCard(agent) {
 
   const chatButton = card.querySelector('[data-action="chat"]');
   const pauseButton = card.querySelector('[data-action="pause"]');
-  const openButton = card.querySelector('[data-action="open"]');
   const deleteButton = card.querySelector('[data-action="delete"]');
 
   if (chatButton) {
@@ -356,13 +349,6 @@ function createAgentCard(agent) {
     });
   }
 
-  if (openButton) {
-    openButton.addEventListener('click', (event) => {
-      event.stopPropagation();
-      openAgentDrawer(name);
-    });
-  }
-
   if (deleteButton) {
     deleteButton.addEventListener('click', async (event) => {
       event.stopPropagation();
@@ -375,6 +361,14 @@ function createAgentCard(agent) {
   }
 
   card.addEventListener('click', () => {
+    openAgentDrawer(name);
+  });
+
+  card.addEventListener('keydown', (event) => {
+    if (event.key !== 'Enter' && event.key !== ' ') {
+      return;
+    }
+    event.preventDefault();
     openAgentDrawer(name);
   });
 
@@ -559,6 +553,7 @@ async function openAgentDrawer(agentName) {
   const drawer = document.getElementById('agentDrawer');
   const backdrop = document.getElementById('agentDrawerBackdrop');
   const drawerAgentName = document.getElementById('drawerAgentName');
+  const closeDrawerBtn = document.getElementById('closeDrawerBtn');
 
   if (drawerAgentName) {
     drawerAgentName.textContent = agentName;
@@ -572,6 +567,9 @@ async function openAgentDrawer(agentName) {
   if (backdrop) {
     backdrop.classList.remove('hidden');
   }
+
+  document.body.classList.add('ops-modal-open');
+  requestAnimationFrame(() => closeDrawerBtn?.focus());
 
   setDrawerTab('overview');
   setDrawerLoadingState();
@@ -612,6 +610,11 @@ function closeAgentDrawer() {
   if (backdrop) {
     backdrop.classList.add('hidden');
   }
+
+  document.body.classList.remove('ops-modal-open');
+  selectedAgentName = '';
+  selectedAgentDetail = null;
+  selectedAgentSkills = null;
 }
 
 function setDrawerTab(tabName) {

@@ -209,6 +209,19 @@ body::after {
   height: 32px;
 }
 
+.navbar-sidebar-toggle {
+  flex: 0 0 auto;
+  min-inline-size: 50px;
+  justify-content: center;
+  align-self: center;
+  padding-inline: 1rem;
+}
+
+.navbar-sidebar-toggle svg {
+  flex: 0 0 auto;
+  display: block;
+}
+
 .nav-link-item {
   border: 1px solid transparent;
   font-size: 0.78rem;
