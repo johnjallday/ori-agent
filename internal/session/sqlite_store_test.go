@@ -548,6 +548,11 @@ func TestSQLiteStore_WorkspaceMCPPersistence(t *testing.T) {
 			"scope": map[string]interface{}{
 				"roots": []string{"/tmp/repo"},
 			},
+			"config": map[string]interface{}{
+				"env": map[string]interface{}{
+					"ORI_SCOPE": "workspace",
+				},
+			},
 			"created_at": now.Format(time.RFC3339),
 			"updated_at": now.Format(time.RFC3339),
 		},

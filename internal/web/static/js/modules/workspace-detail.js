@@ -109,6 +109,10 @@ export class WorkspaceDetailPage {
     this.agentIndex = new Map();
     this.agentSkillsCache = new Map();
     this.agentSkillsPromises = new Map();
+    this.availableMCPServers = [];
+    this.availableMCPServersPromise = null;
+    this.activeWorkspaceMCPBindingId = '';
+    this.activeWorkspaceMCPMode = 'create';
     this.capabilitySuggestionCatalog = null;
     this.capabilitySuggestionCatalogPromise = null;
     this.flippedAgentCards = new Set();
@@ -156,6 +160,7 @@ export class WorkspaceDetailPage {
       { id: 'workspace-detail-notes-panel', label: 'Notes panel content' },
       { id: 'workspace-detail-files-panel', label: 'Files panel content' },
       { id: 'workspace-detail-directories-panel', label: 'Directories panel content' },
+      { id: 'workspace-detail-mcp-panel', label: 'Workspace MCP panel content' },
       { id: 'workspace-detail-schedules-panel', label: 'Schedules panel content' }
     ];
 
@@ -395,6 +400,7 @@ export class WorkspaceDetailPage {
       filesList: document.getElementById('workspace-detail-files-list'),
       notesList: document.getElementById('workspace-detail-notes-list'),
       directoriesList: document.getElementById('workspace-detail-directories-list'),
+      mcpList: document.getElementById('workspace-detail-mcp-list'),
       schedulesList: document.getElementById('workspace-detail-schedules-list'),
       childrenList: document.getElementById('workspace-detail-children-list'),
 
@@ -411,6 +417,8 @@ export class WorkspaceDetailPage {
       addNoteBtn: document.getElementById('workspace-detail-add-note'),
       copyNotesBtn: document.getElementById('workspace-detail-copy-notes'),
       addDirectoryBtn: document.getElementById('workspace-detail-add-directory'),
+      addMcpBtn: document.getElementById('workspace-detail-add-mcp'),
+      refreshMcpBtn: document.getElementById('workspace-detail-refresh-mcp'),
       viewSchedulesBtn: document.getElementById('workspace-detail-view-schedules'),
       homeAssistantQuickPlanBtn: document.getElementById('homeAssistantQuickPlan'),
       homeAssistantQuickTasksBtn: document.getElementById('homeAssistantQuickTasks'),
@@ -481,6 +489,21 @@ export class WorkspaceDetailPage {
       addAgentSubmitBtn: document.getElementById('workspace-detail-add-agent-submit'),
       createAgentBtn: document.getElementById('workspace-detail-create-agent-btn'),
 
+      // Workspace MCP modal
+      mcpModal: document.getElementById('workspace-detail-mcp-modal'),
+      mcpForm: document.getElementById('workspace-detail-mcp-form'),
+      mcpModalTitle: document.getElementById('workspace-detail-mcp-modal-title'),
+      mcpModalSubtitle: document.getElementById('workspace-detail-mcp-modal-subtitle'),
+      mcpServerSelect: document.getElementById('workspace-detail-mcp-server'),
+      mcpServerHelp: document.getElementById('workspace-detail-mcp-server-help'),
+      mcpAliasInput: document.getElementById('workspace-detail-mcp-alias'),
+      mcpEnabledInput: document.getElementById('workspace-detail-mcp-enabled'),
+      mcpScopeInput: document.getElementById('workspace-detail-mcp-scope'),
+      mcpConfigInput: document.getElementById('workspace-detail-mcp-config'),
+      mcpAgentOptions: document.getElementById('workspace-detail-mcp-agent-options'),
+      mcpAgentAccessSummary: document.getElementById('workspace-detail-mcp-agent-access-summary'),
+      mcpSubmitBtn: document.getElementById('workspace-detail-mcp-submit'),
+
       // Directory explorer modal
       directoryExplorerModal: document.getElementById('workspace-directory-explorer-modal'),
       directoryExplorerTitle: document.getElementById('workspace-directory-explorer-title'),
@@ -529,7 +552,22 @@ export class WorkspaceDetailPage {
 
     // Directory buttons
     this.elements.addDirectoryBtn?.addEventListener('click', () => this.showAddDirectoryModal());
+    this.elements.addMcpBtn?.addEventListener('click', () => this.openWorkspaceMCPModal());
     this.bindDirectoryExplorerEvents();
+    this.elements.refreshMcpBtn?.addEventListener('click', async () => {
+      await this.loadAvailableMCPServers(true).catch((error) => {
+        console.warn('Failed to refresh MCP connector catalog:', error);
+      });
+      await this.loadWorkspace();
+    });
+    this.elements.mcpList?.addEventListener('click', (event) => this.handleWorkspaceMCPListClick(event));
+    this.elements.mcpForm?.addEventListener('submit', (event) => {
+      event.preventDefault();
+      this.submitWorkspaceMCPModal();
+    });
+    this.elements.mcpServerSelect?.addEventListener('change', () => this.handleWorkspaceMCPServerChange());
+    this.elements.mcpAgentOptions?.addEventListener('change', () => this.updateWorkspaceMCPAgentAccessSummary());
+    this.elements.mcpModal?.addEventListener('hidden.bs.modal', () => this.resetWorkspaceMCPModal());
 
     // Schedule buttons
     this.elements.viewSchedulesBtn?.addEventListener('click', () => this.showSchedulesModal());
@@ -813,6 +851,7 @@ export class WorkspaceDetailPage {
 
       this.workspace = await response.json();
       await this.renderWorkspaceInfo();
+      this.renderWorkspaceMCPBindings();
       this.renderAgentGroups();
       this.refreshHomeAssistantQuickPrompts();
     } catch (error) {
@@ -3611,24 +3650,40 @@ export class WorkspaceDetailPage {
     return this.agentIndex.get(key) || null;
   }
 
-  getWorkspaceMCPBindings() {
+  normalizeWorkspaceMCPBinding(binding, source = 'workspace') {
+    return {
+      id: String(binding?.id || '').trim(),
+      serverName: String(binding?.server_name || binding?.serverName || '').trim(),
+      alias: String(binding?.alias || '').trim(),
+      enabled: binding?.enabled !== false,
+      scope: binding?.scope && typeof binding.scope === 'object' ? { ...binding.scope } : {},
+      config: binding?.config && typeof binding.config === 'object' ? { ...binding.config } : {},
+      source
+    };
+  }
+
+  getExplicitWorkspaceMCPBindings() {
+    if (!this.workspace || !Array.isArray(this.workspace.mcp_bindings)) {
+      return [];
+    }
+
+    return this.workspace.mcp_bindings
+      .map((binding) => this.normalizeWorkspaceMCPBinding(binding, 'workspace'))
+      .filter((binding) => binding.id && binding.serverName);
+  }
+
+  getWorkspaceMCPBindings(options = {}) {
     if (!this.workspace) return [];
 
-    const explicitBindings = Array.isArray(this.workspace.mcp_bindings)
-      ? this.workspace.mcp_bindings
-        .map((binding) => ({
-          id: String(binding?.id || '').trim(),
-          serverName: String(binding?.server_name || '').trim(),
-          alias: String(binding?.alias || '').trim(),
-          enabled: binding?.enabled !== false
-        }))
-        .filter((binding) => binding.id && binding.serverName && binding.enabled)
-      : [];
+    const includeDisabled = options.includeDisabled === true;
+    const explicitBindings = this.getExplicitWorkspaceMCPBindings();
+    const explicitFilesystemExists = explicitBindings.some(
+      (binding) => binding.serverName.toLowerCase() === 'filesystem'
+    );
 
-    const hasFilesystemBinding = explicitBindings.some((binding) => binding.serverName.toLowerCase() === 'filesystem');
-    if (hasFilesystemBinding) {
-      return explicitBindings;
-    }
+    const visibleExplicitBindings = includeDisabled
+      ? explicitBindings
+      : explicitBindings.filter((binding) => binding.enabled);
 
     const directoryRoots = Array.isArray(this.workspace.directory_references)
       ? this.workspace.directory_references
@@ -3636,19 +3691,806 @@ export class WorkspaceDetailPage {
         .filter(Boolean)
       : [];
 
-    if (directoryRoots.length === 0) {
-      return explicitBindings;
+    if (explicitFilesystemExists || directoryRoots.length === 0) {
+      return visibleExplicitBindings;
     }
 
     return [
-      ...explicitBindings,
+      ...visibleExplicitBindings,
       {
         id: 'workspace-filesystem',
         serverName: 'filesystem',
         alias: 'workspace_filesystem',
-        enabled: true
+        enabled: true,
+        scope: { roots: directoryRoots },
+        source: 'synthesized'
       }
     ];
+  }
+
+  getWorkspaceExplicitMCPBinding(bindingId) {
+    const normalizedBindingId = String(bindingId || '').trim().toLowerCase();
+    if (!normalizedBindingId) return null;
+    return this.getExplicitWorkspaceMCPBindings().find(
+      (binding) => String(binding?.id || '').trim().toLowerCase() === normalizedBindingId
+    ) || null;
+  }
+
+  getWorkspaceMCPBinding(bindingId, options = {}) {
+    const normalizedBindingId = String(bindingId || '').trim().toLowerCase();
+    if (!normalizedBindingId) return null;
+    return this.getWorkspaceMCPBindings(options).find(
+      (binding) => String(binding?.id || '').trim().toLowerCase() === normalizedBindingId
+    ) || null;
+  }
+
+  isWorkspaceRuntimeMCPServerName(serverName) {
+    return String(serverName || '').trim().toLowerCase().startsWith('ws:');
+  }
+
+  async loadAvailableMCPServers(force = false) {
+    if (!force && Array.isArray(this.availableMCPServers) && this.availableMCPServers.length > 0) {
+      return this.availableMCPServers;
+    }
+    if (!force && this.availableMCPServersPromise) {
+      return this.availableMCPServersPromise;
+    }
+
+    this.availableMCPServersPromise = (async () => {
+      const response = await fetch('/api/mcp/servers');
+      if (!response.ok) {
+        const text = await response.text();
+        throw new Error(text || 'Failed to load MCP connectors');
+      }
+
+      const data = await response.json();
+      const seen = new Set();
+      const servers = (Array.isArray(data?.servers) ? data.servers : [])
+        .map((server) => ({
+          name: String(server?.name || '').trim(),
+          enabled: server?.enabled !== false
+        }))
+        .filter((server) => server.name && server.enabled && !this.isWorkspaceRuntimeMCPServerName(server.name))
+        .filter((server) => {
+          const key = server.name.toLowerCase();
+          if (seen.has(key)) return false;
+          seen.add(key);
+          return true;
+        })
+        .sort((left, right) => left.name.localeCompare(right.name));
+
+      this.availableMCPServers = servers;
+      return servers;
+    })();
+
+    try {
+      return await this.availableMCPServersPromise;
+    } finally {
+      this.availableMCPServersPromise = null;
+    }
+  }
+
+  getWorkspaceAgentAccessEntry(agentInstanceId) {
+    const normalizedAgentInstanceId = String(agentInstanceId || '').trim();
+    if (!normalizedAgentInstanceId || !this.workspace || !Array.isArray(this.workspace.agent_mcp_access)) {
+      return null;
+    }
+
+    return this.workspace.agent_mcp_access.find(
+      (entry) => String(entry?.agent_instance_id || '').trim() === normalizedAgentInstanceId
+    ) || null;
+  }
+
+  getWorkspaceMCPAgentNamesForBinding(bindingId) {
+    const normalizedBindingId = String(bindingId || '').trim().toLowerCase();
+    if (!normalizedBindingId || !this.workspace || !Array.isArray(this.workspace.agent_instances)) {
+      return [];
+    }
+
+    const accessEntries = Array.isArray(this.workspace.agent_mcp_access)
+      ? this.workspace.agent_mcp_access
+      : [];
+
+    const names = [];
+    const seen = new Set();
+    this.workspace.agent_instances.forEach((instance) => {
+      const instanceId = String(instance?.id || '').trim();
+      const agentName = String(instance?.name || '').trim();
+      if (!instanceId || !agentName) return;
+
+      const entry = accessEntries.find((item) => String(item?.agent_instance_id || '').trim() === instanceId);
+      let allowed = true;
+      if (entry) {
+        const enabledIDs = Array.isArray(entry.enabled_binding_ids)
+          ? entry.enabled_binding_ids.map((value) => String(value || '').trim().toLowerCase()).filter(Boolean)
+          : [];
+        allowed = enabledIDs.includes(normalizedBindingId);
+      }
+      if (!allowed) return;
+
+      const key = this.normalizeAgentName(agentName);
+      if (!key || seen.has(key)) return;
+      seen.add(key);
+      names.push(agentName);
+    });
+    return names;
+  }
+
+  getWorkspaceMCPAgentAccessSelections(bindingId) {
+    if (!this.workspace || !Array.isArray(this.workspace.agent_instances)) {
+      return [];
+    }
+
+    const normalizedBindingId = String(bindingId || '').trim().toLowerCase();
+    return this.workspace.agent_instances
+      .map((instance) => {
+        const instanceId = String(instance?.id || '').trim();
+        const instanceName = String(instance?.name || '').trim();
+        if (!instanceId || !instanceName) return null;
+
+        const entry = this.getWorkspaceAgentAccessEntry(instanceId);
+        const enabledBindingIds = Array.isArray(entry?.enabled_binding_ids)
+          ? entry.enabled_binding_ids.map((value) => String(value || '').trim().toLowerCase()).filter(Boolean)
+          : [];
+
+        const instanceNumber = Number(instance?.instance_number || 0);
+        const nodeID = String(instance?.node_id || '').trim();
+        const label = instanceNumber > 1 ? `${instanceName} #${instanceNumber}` : instanceName;
+        const meta = nodeID || 'Workspace agent instance';
+        const checked = entry
+          ? enabledBindingIds.includes(normalizedBindingId)
+          : true;
+
+        return {
+          id: instanceId,
+          label,
+          meta,
+          checked
+        };
+      })
+      .filter(Boolean);
+  }
+
+  summarizeWorkspaceMCPBindingScope(binding) {
+    const serverName = String(binding?.serverName || '').trim().toLowerCase();
+    const scope = binding?.scope && typeof binding.scope === 'object' ? binding.scope : {};
+
+    if (serverName === 'filesystem') {
+      const roots = Array.isArray(scope.roots)
+        ? scope.roots.map((value) => String(value || '').trim()).filter(Boolean)
+        : [];
+      if (roots.length === 0) return 'No roots configured';
+      if (roots.length === 1) return `1 root: ${roots[0]}`;
+      return `${roots.length} roots`;
+    }
+
+    const entries = Object.entries(scope)
+      .filter(([key, value]) => String(key || '').trim() && value !== null && value !== undefined);
+    if (entries.length === 0) return '';
+
+    const [firstKey, firstValue] = entries[0];
+    if (Array.isArray(firstValue)) {
+      return `${firstKey}: ${firstValue.length} item${firstValue.length === 1 ? '' : 's'}`;
+    }
+    if (typeof firstValue === 'object') {
+      return `${firstKey}: configured`;
+    }
+    return `${firstKey}: ${String(firstValue).trim()}`;
+  }
+
+  summarizeWorkspaceMCPBindingConfig(binding) {
+    const config = binding?.config && typeof binding.config === 'object' ? binding.config : {};
+    const entries = Object.entries(config)
+      .filter(([key, value]) => String(key || '').trim() && value !== null && value !== undefined);
+    if (entries.length === 0) return '';
+
+    const [firstKey, firstValue] = entries[0];
+    if (Array.isArray(firstValue)) {
+      return `${firstKey}: ${firstValue.length} value${firstValue.length === 1 ? '' : 's'}`;
+    }
+    if (typeof firstValue === 'object') {
+      return `${firstKey}: configured`;
+    }
+    return `${firstKey}: ${String(firstValue).trim()}`;
+  }
+
+  describeWorkspaceMCPBinding(binding) {
+    const serverName = String(binding?.serverName || '').trim().toLowerCase();
+    if (binding?.enabled === false) {
+      return 'Saved on this workspace but currently disabled. Re-enable it to materialize at runtime for agent instances.';
+    }
+    if (serverName === 'filesystem' && binding?.source === 'synthesized') {
+      return 'Derived from imported workspace directories so filesystem access follows this workspace automatically.';
+    }
+    if (serverName === 'filesystem') {
+      return 'Workspace-scoped filesystem access. Agents only see the roots allowed by this workspace binding.';
+    }
+    return 'Explicit workspace MCP binding available to agent instances in this workspace.';
+  }
+
+  getWorkspaceMCPModalInstance() {
+    if (!this.elements.mcpModal || typeof bootstrap === 'undefined' || !bootstrap.Modal) {
+      return null;
+    }
+
+    return typeof bootstrap.Modal.getOrCreateInstance === 'function'
+      ? bootstrap.Modal.getOrCreateInstance(this.elements.mcpModal)
+      : (bootstrap.Modal.getInstance(this.elements.mcpModal) || new bootstrap.Modal(this.elements.mcpModal));
+  }
+
+  generateWorkspaceMCPBindingId() {
+    if (window.crypto && typeof window.crypto.randomUUID === 'function') {
+      return window.crypto.randomUUID();
+    }
+    return `mcp-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+  }
+
+  slugifyWorkspaceMCPAlias(serverName) {
+    return String(serverName || '')
+      .trim()
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '_')
+      .replace(/^_+|_+$/g, '');
+  }
+
+  setWorkspaceMCPServerHelp(message, isError = false) {
+    if (!this.elements.mcpServerHelp) return;
+    this.elements.mcpServerHelp.textContent = message;
+    this.elements.mcpServerHelp.classList.toggle('is-error', !!isError);
+  }
+
+  populateWorkspaceMCPServerOptions(selectedServerName = '') {
+    if (!this.elements.mcpServerSelect) return;
+
+    const normalizedSelected = String(selectedServerName || '').trim();
+    const availableServers = Array.isArray(this.availableMCPServers) ? [...this.availableMCPServers] : [];
+    const selectedExists = normalizedSelected
+      ? availableServers.some((server) => String(server?.name || '').trim().toLowerCase() === normalizedSelected.toLowerCase())
+      : false;
+
+    if (normalizedSelected && !selectedExists) {
+      availableServers.unshift({ name: normalizedSelected, unavailable: true });
+    }
+
+    const options = ['<option value="">Select a connector</option>'];
+    availableServers.forEach((server) => {
+      const name = String(server?.name || '').trim();
+      if (!name) return;
+
+      const unavailable = server?.unavailable === true;
+      const selected = normalizedSelected && name.toLowerCase() === normalizedSelected.toLowerCase() ? ' selected' : '';
+      const label = unavailable ? `${name} (currently not globally enabled)` : name;
+      options.push(`<option value="${this.escapeHtml(name)}"${selected}>${this.escapeHtml(label)}</option>`);
+    });
+
+    this.elements.mcpServerSelect.innerHTML = options.join('');
+
+    if (normalizedSelected) {
+      this.elements.mcpServerSelect.value = normalizedSelected;
+    }
+
+    if (availableServers.length === 0) {
+      this.setWorkspaceMCPServerHelp('No globally enabled connectors are available yet. Enable an MCP globally first.', true);
+      return;
+    }
+
+    if (normalizedSelected && !selectedExists) {
+      this.setWorkspaceMCPServerHelp(`${normalizedSelected} is not globally enabled right now, but you can still update or remove this workspace binding.`, true);
+      return;
+    }
+
+    this.setWorkspaceMCPServerHelp('Only globally enabled connectors can be added here.');
+  }
+
+  renderWorkspaceMCPAgentOptions(bindingId) {
+    if (!this.elements.mcpAgentOptions) return;
+
+    const accessOptions = this.getWorkspaceMCPAgentAccessSelections(bindingId);
+    if (accessOptions.length === 0) {
+      this.elements.mcpAgentOptions.innerHTML = `
+        <div class="workspace-detail-mcp-agent-empty">
+          Add one or more agents to this workspace before assigning MCP access.
+        </div>
+      `;
+      this.updateWorkspaceMCPAgentAccessSummary();
+      return;
+    }
+
+    this.elements.mcpAgentOptions.innerHTML = accessOptions.map((option) => `
+      <label class="workspace-detail-mcp-agent-option">
+        <input type="checkbox" class="form-check-input workspace-detail-mcp-agent-checkbox" value="${this.escapeHtml(option.id)}"${option.checked ? ' checked' : ''}>
+        <span class="workspace-detail-mcp-agent-option-copy">
+          <span class="workspace-detail-mcp-agent-option-title">${this.escapeHtml(option.label)}</span>
+          <span class="workspace-detail-mcp-agent-option-meta">${this.escapeHtml(option.meta)}</span>
+        </span>
+      </label>
+    `).join('');
+    this.updateWorkspaceMCPAgentAccessSummary();
+  }
+
+  updateWorkspaceMCPAgentAccessSummary() {
+    if (!this.elements.mcpAgentAccessSummary || !this.elements.mcpAgentOptions) return;
+
+    const checkboxes = Array.from(this.elements.mcpAgentOptions.querySelectorAll('.workspace-detail-mcp-agent-checkbox'));
+    if (checkboxes.length === 0) {
+      this.elements.mcpAgentAccessSummary.textContent = 'No agents';
+      return;
+    }
+
+    const selectedCount = checkboxes.filter((checkbox) => checkbox.checked).length;
+    this.elements.mcpAgentAccessSummary.textContent = `${selectedCount} of ${checkboxes.length} selected`;
+  }
+
+  resetWorkspaceMCPModal() {
+    this.activeWorkspaceMCPBindingId = '';
+    this.activeWorkspaceMCPMode = 'create';
+
+    if (this.elements.mcpForm) {
+      this.elements.mcpForm.reset();
+    }
+    if (this.elements.mcpServerSelect) {
+      this.elements.mcpServerSelect.innerHTML = '<option value="">Select a connector</option>';
+    }
+    if (this.elements.mcpAgentOptions) {
+      this.elements.mcpAgentOptions.innerHTML = '<div class="workspace-detail-mcp-agent-empty">No agent instances in this workspace yet.</div>';
+    }
+    if (this.elements.mcpModalTitle) {
+      this.elements.mcpModalTitle.textContent = 'Add Workspace MCP';
+    }
+    if (this.elements.mcpModalSubtitle) {
+      this.elements.mcpModalSubtitle.textContent = 'Bind a globally available MCP connector to this workspace, then decide which agent instances can use it here.';
+    }
+    if (this.elements.mcpEnabledInput) {
+      this.elements.mcpEnabledInput.checked = true;
+    }
+    if (this.elements.mcpScopeInput) {
+      this.elements.mcpScopeInput.value = '';
+    }
+    if (this.elements.mcpConfigInput) {
+      this.elements.mcpConfigInput.value = '';
+    }
+    if (this.elements.mcpAliasInput) {
+      this.elements.mcpAliasInput.value = '';
+    }
+    if (this.elements.mcpSubmitBtn) {
+      this.elements.mcpSubmitBtn.disabled = false;
+      this.elements.mcpSubmitBtn.textContent = 'Add Binding';
+    }
+    this.setWorkspaceMCPServerHelp('Only globally enabled connectors can be added here.');
+    this.updateWorkspaceMCPAgentAccessSummary();
+  }
+
+  handleWorkspaceMCPServerChange() {
+    const serverName = String(this.elements.mcpServerSelect?.value || '').trim();
+    if (!serverName || !this.elements.mcpAliasInput) return;
+
+    if (!this.elements.mcpAliasInput.value.trim()) {
+      this.elements.mcpAliasInput.value = this.slugifyWorkspaceMCPAlias(serverName);
+    }
+  }
+
+  handleWorkspaceMCPListClick(event) {
+    const button = event.target.closest('[data-workspace-mcp-action]');
+    if (!button) return;
+
+    const action = String(button.dataset.workspaceMcpAction || '').trim();
+    const bindingId = String(button.dataset.bindingId || '').trim();
+    if (!bindingId) return;
+
+    if (action === 'edit') {
+      this.openWorkspaceMCPModal(bindingId);
+      return;
+    }
+
+    if (action === 'delete') {
+      this.deleteWorkspaceMCPBinding(bindingId);
+    }
+  }
+
+  async openWorkspaceMCPModal(bindingId = '') {
+    const explicitBinding = bindingId ? this.getWorkspaceExplicitMCPBinding(bindingId) : null;
+    const existingBinding = explicitBinding || (bindingId ? this.getWorkspaceMCPBinding(bindingId, { includeDisabled: true }) : null);
+    if (bindingId && !existingBinding) {
+      if (window.Toast) {
+        window.Toast.info('That workspace MCP binding is no longer available.');
+      }
+      return;
+    }
+
+    try {
+      await this.loadAvailableMCPServers();
+    } catch (error) {
+      console.error('Failed to load MCP connectors:', error);
+      if (!existingBinding) {
+        if (window.Toast) window.Toast.error(error.message || 'Failed to load MCP connectors');
+        return;
+      }
+    }
+
+    const isSynthesized = existingBinding?.source === 'synthesized' && !explicitBinding;
+    this.activeWorkspaceMCPMode = explicitBinding ? 'edit' : (isSynthesized ? 'customize' : 'create');
+    this.activeWorkspaceMCPBindingId = existingBinding?.id || this.generateWorkspaceMCPBindingId();
+    this.populateWorkspaceMCPServerOptions(existingBinding?.serverName || '');
+
+    if (this.elements.mcpModalTitle) {
+      this.elements.mcpModalTitle.textContent = explicitBinding
+        ? 'Edit Workspace MCP'
+        : (isSynthesized ? 'Customize Workspace MCP' : 'Add Workspace MCP');
+    }
+    if (this.elements.mcpModalSubtitle) {
+      this.elements.mcpModalSubtitle.textContent = explicitBinding
+        ? 'Update this workspace binding, refine its scope, or tighten which agent instances can reach it.'
+        : (isSynthesized
+          ? 'This binding is currently derived from imported directories. Saving here will create an explicit workspace binding that you can edit directly.'
+          : 'Create a new MCP binding for this workspace and decide which agent instances should be able to use it.');
+    }
+    if (this.elements.mcpAliasInput) {
+      this.elements.mcpAliasInput.value = existingBinding?.alias || '';
+    }
+    if (this.elements.mcpEnabledInput) {
+      this.elements.mcpEnabledInput.checked = existingBinding ? existingBinding.enabled !== false : true;
+    }
+    if (this.elements.mcpScopeInput) {
+      const scope = existingBinding?.scope && Object.keys(existingBinding.scope).length > 0
+        ? JSON.stringify(existingBinding.scope, null, 2)
+        : '';
+      this.elements.mcpScopeInput.value = scope;
+    }
+    if (this.elements.mcpConfigInput) {
+      const config = existingBinding?.config && Object.keys(existingBinding.config).length > 0
+        ? JSON.stringify(existingBinding.config, null, 2)
+        : '';
+      this.elements.mcpConfigInput.value = config;
+    }
+    if (this.elements.mcpSubmitBtn) {
+      this.elements.mcpSubmitBtn.textContent = explicitBinding
+        ? 'Save Changes'
+        : (isSynthesized ? 'Customize Binding' : 'Add Binding');
+      this.elements.mcpSubmitBtn.disabled = false;
+    }
+
+    this.renderWorkspaceMCPAgentOptions(this.activeWorkspaceMCPBindingId);
+    this.getWorkspaceMCPModalInstance()?.show();
+  }
+
+  parseWorkspaceMCPScopeValue() {
+    const raw = String(this.elements.mcpScopeInput?.value || '').trim();
+    if (!raw) return {};
+
+    let parsed;
+    try {
+      parsed = JSON.parse(raw);
+    } catch (_error) {
+      throw new Error('Scope JSON must be valid JSON');
+    }
+
+    if (!parsed || Array.isArray(parsed) || typeof parsed !== 'object') {
+      throw new Error('Scope JSON must be an object');
+    }
+
+    return parsed;
+  }
+
+  parseWorkspaceMCPConfigValue() {
+    const raw = String(this.elements.mcpConfigInput?.value || '').trim();
+    if (!raw) return {};
+
+    let parsed;
+    try {
+      parsed = JSON.parse(raw);
+    } catch (_error) {
+      throw new Error('Config JSON must be valid JSON');
+    }
+
+    if (!parsed || Array.isArray(parsed) || typeof parsed !== 'object') {
+      throw new Error('Config JSON must be an object');
+    }
+
+    return parsed;
+  }
+
+  getWorkspaceMCPSelectedAgentInstanceIDs() {
+    if (!this.elements.mcpAgentOptions) return [];
+    return Array.from(this.elements.mcpAgentOptions.querySelectorAll('.workspace-detail-mcp-agent-checkbox:checked'))
+      .map((checkbox) => String(checkbox.value || '').trim())
+      .filter(Boolean);
+  }
+
+  setWorkspaceMCPModalSubmitting(isSubmitting) {
+    if (!this.elements.mcpSubmitBtn) return;
+    this.elements.mcpSubmitBtn.disabled = isSubmitting;
+    this.elements.mcpSubmitBtn.textContent = isSubmitting
+      ? (this.activeWorkspaceMCPMode === 'edit'
+        ? 'Saving...'
+        : (this.activeWorkspaceMCPMode === 'customize' ? 'Customizing...' : 'Adding...'))
+      : (this.activeWorkspaceMCPMode === 'edit'
+        ? 'Save Changes'
+        : (this.activeWorkspaceMCPMode === 'customize' ? 'Customize Binding' : 'Add Binding'));
+  }
+
+  async saveWorkspaceMCPBinding(payload) {
+    const isEditing = this.activeWorkspaceMCPMode === 'edit';
+    const endpoint = isEditing
+      ? `/api/studios/${encodeURIComponent(this.workspaceId)}/mcp-bindings/${encodeURIComponent(this.activeWorkspaceMCPBindingId)}`
+      : `/api/studios/${encodeURIComponent(this.workspaceId)}/mcp-bindings`;
+
+    const response = await fetch(endpoint, {
+      method: isEditing ? 'PUT' : 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+
+    if (!response.ok) {
+      const text = await response.text();
+      throw new Error(text || 'Failed to save workspace MCP binding');
+    }
+
+    return response.json();
+  }
+
+  async persistWorkspaceMCPAgentAccess(bindingId, selectedAgentInstanceIds) {
+    if (!this.workspace || !Array.isArray(this.workspace.agent_instances) || this.workspace.agent_instances.length === 0) {
+      return;
+    }
+
+    const selectedSet = new Set(selectedAgentInstanceIds.map((value) => String(value || '').trim()).filter(Boolean));
+    const effectiveBindingIds = this.getWorkspaceMCPBindings()
+      .map((binding) => String(binding?.id || '').trim())
+      .filter(Boolean);
+    const defaultBindingIds = Array.from(new Set(effectiveBindingIds)).sort();
+    const normalizeIDs = (ids) => Array.from(new Set(ids.map((value) => String(value || '').trim()).filter(Boolean))).sort();
+    const arraysEqual = (left, right) => (
+      left.length === right.length && left.every((value, index) => value === right[index])
+    );
+
+    const requests = this.workspace.agent_instances.map(async (instance) => {
+      const instanceId = String(instance?.id || '').trim();
+      if (!instanceId) return;
+
+      const entry = this.getWorkspaceAgentAccessEntry(instanceId);
+      const currentIds = entry
+        ? Array.isArray(entry.enabled_binding_ids)
+          ? entry.enabled_binding_ids.map((value) => String(value || '').trim()).filter(Boolean)
+          : []
+        : [...defaultBindingIds];
+      const allowedSet = new Set(currentIds);
+
+      if (selectedSet.has(instanceId)) {
+        allowedSet.add(bindingId);
+      } else {
+        allowedSet.delete(bindingId);
+      }
+
+      const enabledBindingIDs = normalizeIDs(Array.from(allowedSet));
+      const currentNormalized = normalizeIDs(currentIds);
+
+      if (!entry && arraysEqual(enabledBindingIDs, defaultBindingIds)) {
+        return;
+      }
+
+      if (entry && arraysEqual(enabledBindingIDs, defaultBindingIds)) {
+        const response = await fetch(
+          `/api/studios/${encodeURIComponent(this.workspaceId)}/agent-mcp-access/${encodeURIComponent(instanceId)}`,
+          { method: 'DELETE' }
+        );
+
+        if (!response.ok) {
+          const text = await response.text();
+          throw new Error(text || `Failed to clear MCP access rule for ${instanceId}`);
+        }
+        return;
+      }
+
+      if (arraysEqual(enabledBindingIDs, currentNormalized)) {
+        return;
+      }
+
+      const response = await fetch(
+        `/api/studios/${encodeURIComponent(this.workspaceId)}/agent-mcp-access/${encodeURIComponent(instanceId)}`,
+        {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ enabled_binding_ids: enabledBindingIDs })
+        }
+      );
+
+      if (!response.ok) {
+        const text = await response.text();
+        throw new Error(text || `Failed to update MCP access for ${instanceId}`);
+      }
+    });
+
+    await Promise.all(requests);
+  }
+
+  async submitWorkspaceMCPModal() {
+    const serverName = String(this.elements.mcpServerSelect?.value || '').trim();
+    const alias = String(this.elements.mcpAliasInput?.value || '').trim();
+
+    if (!serverName) {
+      this.setWorkspaceMCPServerHelp('Choose a connector before saving this workspace binding.', true);
+      if (window.Toast) window.Toast.error('Choose a connector');
+      return;
+    }
+
+    let scope;
+    try {
+      scope = this.parseWorkspaceMCPScopeValue();
+    } catch (error) {
+      this.setWorkspaceMCPServerHelp(error.message || 'Scope JSON is invalid', true);
+      if (window.Toast) window.Toast.error(error.message || 'Scope JSON is invalid');
+      return;
+    }
+
+    let config;
+    try {
+      config = this.parseWorkspaceMCPConfigValue();
+    } catch (error) {
+      this.setWorkspaceMCPServerHelp(error.message || 'Config JSON is invalid', true);
+      if (window.Toast) window.Toast.error(error.message || 'Config JSON is invalid');
+      return;
+    }
+
+    this.setWorkspaceMCPServerHelp('Only globally enabled connectors can be added here.');
+    this.setWorkspaceMCPModalSubmitting(true);
+
+    try {
+      const enabled = this.elements.mcpEnabledInput?.checked !== false;
+      const selectedAgentInstanceIds = this.getWorkspaceMCPSelectedAgentInstanceIDs();
+      const payload = {
+        server_name: serverName,
+        alias,
+        enabled,
+        scope,
+        config
+      };
+
+      if (this.activeWorkspaceMCPMode !== 'edit') {
+        payload.id = this.activeWorkspaceMCPBindingId;
+      }
+
+      await this.saveWorkspaceMCPBinding(payload);
+      await this.loadWorkspace();
+      await this.persistWorkspaceMCPAgentAccess(this.activeWorkspaceMCPBindingId, selectedAgentInstanceIds);
+      await this.loadWorkspace();
+
+      this.getWorkspaceMCPModalInstance()?.hide();
+      if (window.Toast) {
+        window.Toast.success(
+          this.activeWorkspaceMCPMode === 'edit'
+            ? 'Workspace MCP updated'
+            : (this.activeWorkspaceMCPMode === 'customize' ? 'Workspace MCP customized' : 'Workspace MCP added')
+        );
+      }
+    } catch (error) {
+      console.error('Failed to save workspace MCP binding:', error);
+      if (window.Toast) window.Toast.error(error.message || 'Failed to save workspace MCP binding');
+    } finally {
+      this.setWorkspaceMCPModalSubmitting(false);
+    }
+  }
+
+  async deleteWorkspaceMCPBinding(bindingId) {
+    const binding = this.getWorkspaceExplicitMCPBinding(bindingId);
+    if (!binding) {
+      if (window.Toast) {
+        window.Toast.info('Synthesized bindings follow workspace directories and are removed by changing directory scope.');
+      }
+      return;
+    }
+
+    const label = binding.alias || binding.serverName || binding.id;
+    if (!window.confirm(`Remove workspace MCP binding "${label}"?`)) {
+      return;
+    }
+
+    try {
+      const response = await fetch(
+        `/api/studios/${encodeURIComponent(this.workspaceId)}/mcp-bindings/${encodeURIComponent(bindingId)}`,
+        { method: 'DELETE' }
+      );
+
+      if (!response.ok) {
+        const text = await response.text();
+        throw new Error(text || 'Failed to remove workspace MCP binding');
+      }
+
+      await this.loadWorkspace();
+      if (window.Toast) window.Toast.success('Workspace MCP removed');
+    } catch (error) {
+      console.error('Failed to delete workspace MCP binding:', error);
+      if (window.Toast) window.Toast.error(error.message || 'Failed to remove workspace MCP binding');
+    }
+  }
+
+  renderWorkspaceMCPBindings() {
+    if (!this.elements.mcpList) return;
+
+    const bindings = this.getWorkspaceMCPBindings({ includeDisabled: true });
+    if (bindings.length === 0) {
+      this.elements.mcpList.innerHTML = `
+        <div class="workspace-detail-empty">
+          No workspace MCP bindings yet.
+          <div class="workspace-detail-mcp-empty-note">Import directories to synthesize <code>filesystem</code>, or add an explicit binding with the <strong>+</strong> button.</div>
+        </div>
+      `;
+      return;
+    }
+
+    this.elements.mcpList.innerHTML = bindings.map((binding) => {
+      const serverName = String(binding?.serverName || '').trim() || 'unknown';
+      const alias = String(binding?.alias || '').trim();
+      const source = binding?.source === 'synthesized' ? 'Synthesized' : 'Explicit';
+      const isDisabled = binding?.enabled === false;
+      const scopeSummary = this.summarizeWorkspaceMCPBindingScope(binding);
+      const configSummary = this.summarizeWorkspaceMCPBindingConfig(binding);
+      const agentNames = this.getWorkspaceMCPAgentNamesForBinding(binding.id);
+      const accessSummary = isDisabled
+        ? 'Disabled for this workspace'
+        : agentNames.length > 0
+        ? `${agentNames.length} agent${agentNames.length === 1 ? '' : 's'} can use this`
+        : (Array.isArray(this.workspace?.agent_instances) && this.workspace.agent_instances.length > 0
+          ? 'No agent instances currently have access'
+          : 'No agent instances in this workspace');
+      const accessLabel = isDisabled
+        ? 'Agents: unavailable while disabled'
+        : agentNames.length > 0
+        ? `Agents: ${agentNames.join(', ')}`
+        : 'Agents: none';
+      const actions = binding?.source === 'workspace'
+        ? `
+          <div class="workspace-detail-mcp-card-actions">
+            <button type="button" class="workspace-detail-mcp-card-btn" data-workspace-mcp-action="edit" data-binding-id="${this.escapeHtml(binding.id)}" title="Edit binding" aria-label="Edit binding ${this.escapeHtml(alias || serverName)}">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M20.71,7.04C21.1,6.65 21.1,6 20.71,5.63L18.37,3.29C18,2.9 17.35,2.9 16.96,3.29L15.12,5.12L18.87,8.87M3,17.25V21H6.75L17.81,9.93L14.06,6.18L3,17.25Z"/>
+              </svg>
+            </button>
+            <button type="button" class="workspace-detail-mcp-card-btn is-danger" data-workspace-mcp-action="delete" data-binding-id="${this.escapeHtml(binding.id)}" title="Remove binding" aria-label="Remove binding ${this.escapeHtml(alias || serverName)}">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M9,3V4H4V6H5V19A2,2 0 0,0 7,21H17A2,2 0 0,0 19,19V6H20V4H15V3H9M7,6H17V19H7V6M9,8V17H11V8H9M13,8V17H15V8H13Z"/>
+              </svg>
+            </button>
+          </div>
+        `
+        : (binding?.source === 'synthesized'
+          ? `
+            <div class="workspace-detail-mcp-card-actions">
+              <button type="button" class="workspace-detail-mcp-card-btn" data-workspace-mcp-action="edit" data-binding-id="${this.escapeHtml(binding.id)}" title="Customize binding" aria-label="Customize binding ${this.escapeHtml(alias || serverName)}">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
+                  <path d="M20.71,7.04C21.1,6.65 21.1,6 20.71,5.63L18.37,3.29C18,2.9 17.35,2.9 16.96,3.29L15.12,5.12L18.87,8.87M3,17.25V21H6.75L17.81,9.93L14.06,6.18L3,17.25Z"/>
+                </svg>
+              </button>
+            </div>
+          `
+          : '')
+        ;
+
+      const chips = [
+        `<span class="workspace-detail-mcp-chip source">${this.escapeHtml(source)}</span>`,
+        `<span class="workspace-detail-mcp-chip status${isDisabled ? ' is-disabled' : ''}">${isDisabled ? 'Disabled' : 'Enabled'}</span>`,
+        alias ? `<span class="workspace-detail-mcp-chip alias">Alias: ${this.escapeHtml(alias)}</span>` : '',
+        scopeSummary ? `<span class="workspace-detail-mcp-chip scope">${this.escapeHtml(scopeSummary)}</span>` : '',
+        configSummary ? `<span class="workspace-detail-mcp-chip scope">Config: ${this.escapeHtml(configSummary)}</span>` : '',
+        `<span class="workspace-detail-mcp-chip access">${this.escapeHtml(accessLabel)}</span>`
+      ].filter(Boolean).join('');
+
+      return `
+        <div class="workspace-detail-mcp-card" data-binding-id="${this.escapeHtml(binding.id)}">
+          <div class="workspace-detail-mcp-card-top">
+            <div class="workspace-detail-mcp-card-top-main">
+              <div class="workspace-detail-mcp-server">
+                <span>${this.escapeHtml(serverName)}</span>
+                <code>${this.escapeHtml(binding.id)}</code>
+              </div>
+              <div class="workspace-detail-mcp-meta">${this.escapeHtml(accessSummary)}</div>
+            </div>
+            ${actions}
+          </div>
+          <div class="workspace-detail-mcp-description">${this.escapeHtml(this.describeWorkspaceMCPBinding(binding))}</div>
+          <div class="workspace-detail-mcp-chip-row">${chips}</div>
+        </div>
+      `;
+    }).join('');
   }
 
   getAgentInstanceIdsForName(agentName) {
@@ -5715,6 +6557,12 @@ export class WorkspaceDetailPage {
 
       const workspace = await response.json();
 
+      if (this.workspace && workspace && typeof workspace === 'object') {
+        this.workspace.directory_references = Array.isArray(workspace.directory_references) ? workspace.directory_references : [];
+        this.workspace.mcp_bindings = Array.isArray(workspace.mcp_bindings) ? workspace.mcp_bindings : [];
+        this.workspace.agent_mcp_access = Array.isArray(workspace.agent_mcp_access) ? workspace.agent_mcp_access : [];
+      }
+
       const refs = Array.isArray(workspace.directory_references)
         ? workspace.directory_references.map((ref) => ({
           id: ref.id,
@@ -5756,6 +6604,8 @@ export class WorkspaceDetailPage {
       });
 
       this.renderDirectories();
+      this.renderWorkspaceMCPBindings();
+      this.renderAgentGroups();
       this.refreshHomeAssistantQuickPrompts();
     } catch (error) {
       console.error('Failed to load directories:', error);
@@ -6917,8 +7767,13 @@ export class WorkspaceDetailPage {
       case 'workspace.updated': {
         const action = event?.data?.action || '';
         if (typeof action === 'string' && action.startsWith('directory_')) {
+          this.loadWorkspace();
           this.loadDirectories();
           this.loadFiles();
+          return;
+        }
+        if (typeof action === 'string' && (action.startsWith('mcp_') || action.startsWith('agent_mcp_access_'))) {
+          this.loadWorkspace();
         }
         break;
       }

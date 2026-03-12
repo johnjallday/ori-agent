@@ -12,6 +12,11 @@ func TestWorkspaceMCPBindingLifecycle(t *testing.T) {
 		Scope: map[string]interface{}{
 			"roots": []string{"/tmp/repo"},
 		},
+		Config: map[string]interface{}{
+			"env": map[string]interface{}{
+				"ORI_SCOPE": "workspace",
+			},
+		},
 	}); err != nil {
 		t.Fatalf("UpsertMCPBinding returned error: %v", err)
 	}
@@ -22,6 +27,9 @@ func TestWorkspaceMCPBindingLifecycle(t *testing.T) {
 	}
 	if binding.ServerName != "filesystem" {
 		t.Fatalf("expected server_name filesystem, got %q", binding.ServerName)
+	}
+	if binding.Config == nil {
+		t.Fatalf("expected config to be preserved on binding")
 	}
 
 	if err := ws.SetAgentMCPAccess(WorkspaceAgentMCPAccess{

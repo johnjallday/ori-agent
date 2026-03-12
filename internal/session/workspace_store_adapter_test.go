@@ -27,6 +27,11 @@ func TestWorkspaceStoreAdapter_MCPRoundTrip(t *testing.T) {
 				Scope: map[string]interface{}{
 					"roots": []string{"/tmp/repo"},
 				},
+				Config: map[string]interface{}{
+					"env": map[string]interface{}{
+						"ORI_SCOPE": "workspace",
+					},
+				},
 				CreatedAt: now,
 				UpdatedAt: now,
 			},
@@ -62,6 +67,9 @@ func TestWorkspaceStoreAdapter_MCPRoundTrip(t *testing.T) {
 	}
 	if roundTripped.MCPBindings[0].ServerName != "filesystem" {
 		t.Fatalf("expected round-tripped server_name filesystem, got %q", roundTripped.MCPBindings[0].ServerName)
+	}
+	if roundTripped.MCPBindings[0].Config == nil {
+		t.Fatalf("expected round-tripped config to be preserved")
 	}
 	if len(roundTripped.AgentMCPAccess) != 1 {
 		t.Fatalf("expected 1 round-tripped MCP access rule, got %d", len(roundTripped.AgentMCPAccess))

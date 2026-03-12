@@ -41,6 +41,7 @@ func (h *HTTPHandler) CreateMCPBinding(w http.ResponseWriter, r *http.Request) {
 		Alias      string                 `json:"alias,omitempty"`
 		Enabled    *bool                  `json:"enabled,omitempty"`
 		Scope      map[string]interface{} `json:"scope,omitempty"`
+		Config     map[string]interface{} `json:"config,omitempty"`
 	}
 	if !orihttp.ParseJSONBody(w, r, &req) {
 		return
@@ -76,6 +77,7 @@ func (h *HTTPHandler) CreateMCPBinding(w http.ResponseWriter, r *http.Request) {
 		Alias:      req.Alias,
 		Enabled:    enabled,
 		Scope:      req.Scope,
+		Config:     req.Config,
 		CreatedAt:  time.Now(),
 		UpdatedAt:  time.Now(),
 	}
@@ -193,6 +195,7 @@ func (h *HTTPHandler) UpdateMCPBinding(w http.ResponseWriter, r *http.Request) {
 		Alias      *string                `json:"alias,omitempty"`
 		Enabled    *bool                  `json:"enabled,omitempty"`
 		Scope      map[string]interface{} `json:"scope,omitempty"`
+		Config     map[string]interface{} `json:"config,omitempty"`
 	}
 	if !orihttp.ParseJSONBody(w, r, &req) {
 		return
@@ -221,6 +224,9 @@ func (h *HTTPHandler) UpdateMCPBinding(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.Scope != nil {
 		binding.Scope = req.Scope
+	}
+	if req.Config != nil {
+		binding.Config = req.Config
 	}
 
 	if err := studio.UpsertMCPBinding(*binding); err != nil {

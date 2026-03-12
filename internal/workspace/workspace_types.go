@@ -361,6 +361,7 @@ type WorkspaceMCPBinding struct {
 	Alias      string                 `json:"alias,omitempty"`
 	Enabled    bool                   `json:"enabled"`
 	Scope      map[string]interface{} `json:"scope,omitempty"`
+	Config     map[string]interface{} `json:"config,omitempty"`
 	CreatedAt  time.Time              `json:"created_at,omitempty"`
 	UpdatedAt  time.Time              `json:"updated_at,omitempty"`
 }

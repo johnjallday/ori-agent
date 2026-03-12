@@ -70,6 +70,9 @@ func (w *Workspace) GetMCPBinding(bindingID string) (*WorkspaceMCPBinding, bool)
 			if len(binding.Scope) > 0 {
 				copy.Scope = cloneInterfaceMap(binding.Scope)
 			}
+			if len(binding.Config) > 0 {
+				copy.Config = cloneInterfaceMap(binding.Config)
+			}
 			return &copy, true
 		}
 	}
@@ -226,6 +229,9 @@ func cloneBinding(binding WorkspaceMCPBinding) WorkspaceMCPBinding {
 	copy := binding
 	if len(binding.Scope) > 0 {
 		copy.Scope = cloneInterfaceMap(binding.Scope)
+	}
+	if len(binding.Config) > 0 {
+		copy.Config = cloneInterfaceMap(binding.Config)
 	}
 	return copy
 }

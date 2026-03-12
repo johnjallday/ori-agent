@@ -244,6 +244,7 @@ func (r *AgentRuntimeResolver) materializeRuntimeBinding(workspaceID string, bin
 	runtimeConfig := cloneServerConfig(*template)
 	runtimeConfig.Name = runtimeName
 	runtimeConfig.Enabled = false
+	applyWorkspaceBindingRuntimeConfig(&runtimeConfig, binding.Config)
 
 	if strings.EqualFold(templateName, "filesystem") {
 		roots := extractFilesystemRoots(binding.Scope)
@@ -400,6 +401,94 @@ func cloneServerConfig(src mcp.ServerConfig) mcp.ServerConfig {
 		}
 	}
 	return cloned
+}
+
+func applyWorkspaceBindingRuntimeConfig(runtimeConfig *mcp.ServerConfig, config map[string]interface{}) {
+	if runtimeConfig == nil || len(config) == 0 {
+		return
+	}
+
+	if command, ok := stringFromConfigValue(config["command"]); ok {
+		runtimeConfig.Command = command
+	}
+	if transport, ok := stringFromConfigValue(config["transport"]); ok {
+		runtimeConfig.Transport = transport
+	}
+	if args, ok := stringSliceFromConfigValue(config["args"]); ok {
+		runtimeConfig.Args = args
+	}
+	if env, ok := stringMapFromConfigValue(config["env"]); ok {
+		if runtimeConfig.Env == nil {
+			runtimeConfig.Env = make(map[string]string, len(env))
+		}
+		for key, value := range env {
+			runtimeConfig.Env[key] = value
+		}
+	}
+}
+
+func stringFromConfigValue(value interface{}) (string, bool) {
+	text, ok := value.(string)
+	if !ok {
+		return "", false
+	}
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return "", false
+	}
+	return text, true
+}
+
+func stringSliceFromConfigValue(value interface{}) ([]string, bool) {
+	switch typed := value.(type) {
+	case []string:
+		out := make([]string, 0, len(typed))
+		for _, item := range typed {
+			trimmed := strings.TrimSpace(item)
+			if trimmed != "" {
+				out = append(out, trimmed)
+			}
+		}
+		return out, len(out) > 0
+	case []interface{}:
+		out := make([]string, 0, len(typed))
+		for _, raw := range typed {
+			item, ok := raw.(string)
+			if !ok {
+				continue
+			}
+			trimmed := strings.TrimSpace(item)
+			if trimmed != "" {
+				out = append(out, trimmed)
+			}
+		}
+		return out, len(out) > 0
+	default:
+		return nil, false
+	}
+}
+
+func stringMapFromConfigValue(value interface{}) (map[string]string, bool) {
+	rawMap, ok := value.(map[string]interface{})
+	if !ok || len(rawMap) == 0 {
+		return nil, false
+	}
+
+	out := make(map[string]string, len(rawMap))
+	for key, raw := range rawMap {
+		trimmedKey := strings.TrimSpace(key)
+		if trimmedKey == "" {
+			continue
+		}
+
+		text, ok := raw.(string)
+		if !ok {
+			continue
+		}
+		out[trimmedKey] = text
+	}
+
+	return out, len(out) > 0
 }
 
 func normalizeValueSet(values []string) map[string]bool {

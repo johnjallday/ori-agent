@@ -289,3 +289,74 @@ func TestAgentRuntimeResolver_RespectsAgentInstanceBindingAccess(t *testing.T) {
 		t.Fatalf("denied agent should not inherit base filesystem server when workspace binding overrides it, got %v", denied.MCPServers)
 	}
 }
+
+func TestAgentRuntimeResolver_AppliesWorkspaceBindingConfigOverrides(t *testing.T) {
+	agentStore := &resolverAgentStoreStub{
+		agents: map[string]*agent.Agent{
+			"Coder": {},
+		},
+	}
+	ws := &Workspace{
+		ID: "ws-config",
+		AgentInstances: []AgentInstance{
+			{ID: "agent-1", Name: "Coder", NodeID: "coder-1"},
+		},
+		MCPBindings: []WorkspaceMCPBinding{
+			{
+				ID:         "binding-1",
+				ServerName: "browser",
+				Enabled:    true,
+				Config: map[string]interface{}{
+					"command":   "uvx",
+					"args":      []interface{}{"playwright-mcp", "--headless"},
+					"transport": "stdio",
+					"env": map[string]interface{}{
+						"BROWSER_CONTEXT": "workspace",
+					},
+				},
+			},
+		},
+	}
+	workspaceStore := &resolverWorkspaceStoreStub{workspaces: map[string]*Workspace{ws.ID: ws}}
+	registry := &runtimeRegistryStub{}
+	templates := &templateLookupStub{
+		servers: map[string]mcp.ServerConfig{
+			"browser": {
+				Name:      "browser",
+				Command:   "npx",
+				Args:      []string{"@playwright/mcp"},
+				Transport: "stdio",
+				Env: map[string]string{
+					"TEMPLATE_ENV": "keep",
+				},
+			},
+		},
+	}
+
+	resolver := NewAgentRuntimeResolver(agentStore, workspaceStore, registry, templates)
+	resolved, err := resolver.ResolveAgentForTask("Coder", Task{WorkspaceID: ws.ID, AssignedNodeID: "coder-1"})
+	if err != nil {
+		t.Fatalf("ResolveAgentForTask() error = %v", err)
+	}
+
+	if len(resolved.MCPServers) != 1 {
+		t.Fatalf("expected exactly one runtime MCP server, got %v", resolved.MCPServers)
+	}
+
+	config, ok := registry.configs[resolved.MCPServers[0]]
+	if !ok {
+		t.Fatalf("expected runtime config for %q to be materialized", resolved.MCPServers[0])
+	}
+	if config.Command != "uvx" {
+		t.Fatalf("runtime command = %q, want uvx", config.Command)
+	}
+	if len(config.Args) != 2 || config.Args[0] != "playwright-mcp" || config.Args[1] != "--headless" {
+		t.Fatalf("runtime args = %v, want overridden args", config.Args)
+	}
+	if config.Env["TEMPLATE_ENV"] != "keep" {
+		t.Fatalf("expected template env to remain, got %v", config.Env)
+	}
+	if config.Env["BROWSER_CONTEXT"] != "workspace" {
+		t.Fatalf("expected workspace env override, got %v", config.Env)
+	}
+}
