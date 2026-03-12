@@ -9,6 +9,47 @@ import (
 
 var nonAlphaNumericStepChars = regexp.MustCompile(`[^a-z0-9]+`)
 
+var filesystemMutationDirectPhrases = []string{
+	"move files",
+	"copy files",
+	"rename files",
+	"organize files",
+	"organise files",
+	"gather files",
+	"collect files",
+	"sort files",
+	"clean up files",
+	"into folder",
+	"into directory",
+	"filesystem",
+	"file management",
+}
+
+var filesystemMutationActionSignals = []string{"move", "copy", "rename", "organize", "organise", "gather", "collect", "sort", "group", "archive"}
+
+var filesystemMutationNounSignals = []string{"file", "files", "folder", "folders", "directory", "directories", "filesystem", "path", "paths"}
+
+var filesystemListingDirectPhrases = []string{
+	"list files",
+	"list the files",
+	"list of files",
+	"show files",
+	"show me the files",
+	"file list",
+	"what files",
+	"which files",
+	"folder contents",
+	"directory contents",
+	"contents of",
+	"contents in",
+	"what is in",
+	"what's in",
+}
+
+var filesystemListingVerbSignals = []string{"list", "show", "display"}
+
+var filesystemListingNounSignals = []string{"file", "files", "folder", "folders", "directory", "directories", "contents"}
+
 // NormalizeTaskExecutionMode clamps task execution mode to supported values.
 func NormalizeTaskExecutionMode(value string) TaskExecutionMode {
 	switch strings.ToLower(strings.TrimSpace(value)) {
@@ -20,45 +61,84 @@ func NormalizeTaskExecutionMode(value string) TaskExecutionMode {
 }
 
 // IsLikelyFilesystemExecutionIntent detects tasks that likely require file operations.
-func IsLikelyFilesystemExecutionIntent(description string) bool {
+func IsReadOnlyFilesystemListingIntent(description string) bool {
 	lower := strings.ToLower(strings.TrimSpace(description))
 	if lower == "" {
 		return false
 	}
 
-	directPhrases := []string{
-		"move files",
-		"copy files",
-		"rename files",
-		"organize files",
-		"organise files",
-		"gather files",
-		"collect files",
-		"sort files",
-		"clean up files",
-		"into folder",
-		"into directory",
-		"filesystem",
-		"file management",
-	}
-	for _, phrase := range directPhrases {
+	for _, phrase := range filesystemMutationDirectPhrases {
 		if strings.Contains(lower, phrase) {
-			return true
+			return false
 		}
 	}
 
-	actionSignals := []string{"move", "copy", "rename", "organize", "organise", "gather", "collect", "sort", "group", "archive"}
-	nounSignals := []string{"file", "files", "folder", "folders", "directory", "directories", "filesystem", "path", "paths"}
-
 	actionCount := 0
-	for _, signal := range actionSignals {
+	for _, signal := range filesystemMutationActionSignals {
 		if strings.Contains(lower, signal) {
 			actionCount++
 		}
 	}
 
 	nounCount := 0
-	for _, signal := range nounSignals {
+	for _, signal := range filesystemMutationNounSignals {
+		if strings.Contains(lower, signal) {
+			nounCount++
+		}
+	}
+
+	if actionCount > 0 && nounCount > 0 {
+		return false
+	}
+
+	for _, phrase := range filesystemListingDirectPhrases {
+		if strings.Contains(lower, phrase) {
+			return true
+		}
+	}
+
+	listingVerbCount := 0
+	for _, signal := range filesystemListingVerbSignals {
+		if strings.Contains(lower, signal) {
+			listingVerbCount++
+		}
+	}
+
+	listingNounCount := 0
+	for _, signal := range filesystemListingNounSignals {
+		if strings.Contains(lower, signal) {
+			listingNounCount++
+		}
+	}
+
+	return listingVerbCount > 0 && listingNounCount > 0
+}
+
+func IsLikelyFilesystemExecutionIntent(description string) bool {
+	lower := strings.ToLower(strings.TrimSpace(description))
+	if lower == "" {
+		return false
+	}
+
+	if IsReadOnlyFilesystemListingIntent(description) {
+		return false
+	}
+
+	for _, phrase := range filesystemMutationDirectPhrases {
+		if strings.Contains(lower, phrase) {
+			return true
+		}
+	}
+
+	actionCount := 0
+	for _, signal := range filesystemMutationActionSignals {
+		if strings.Contains(lower, signal) {
+			actionCount++
+		}
+	}
+
+	nounCount := 0
+	for _, signal := range filesystemMutationNounSignals {
 		if strings.Contains(lower, signal) {
 			nounCount++
 		}
@@ -95,6 +175,14 @@ func InferTaskExecutionSteps(task Task) []TaskExecutionStep {
 			toStep(5, "Move or copy matching files", "Relocate the selected files safely into the destination.", "Mutation"),
 			toStep(6, "Verify the final folder contents", "Confirm the destination contains the expected files and note anything skipped.", "Verify"),
 			toStep(7, "Return a summary", "Report what changed, what was skipped, and any follow-up needed.", "Summary"),
+		}
+	}
+
+	if IsReadOnlyFilesystemListingIntent(description) {
+		return []TaskExecutionStep{
+			toStep(1, "Check allowed filesystem scope", "Confirm which directories are available before inspecting folder contents.", "Discovery"),
+			toStep(2, "Inspect the target directory", "Locate the requested folder and gather its visible file list.", "Discovery"),
+			toStep(3, "Return the file list", "Return the concrete file list, or explain clearly if the folder is missing or empty.", "Summary"),
 		}
 	}
 

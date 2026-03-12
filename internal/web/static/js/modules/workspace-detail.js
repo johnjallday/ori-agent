@@ -1110,9 +1110,7 @@ export class WorkspaceDetailPage {
     const skillsState = this.getAgentSkillsState(group.name);
     const skillsMarkup = this.renderAgentSkillsChips(skillsState, profile);
 
-    const mcpServers = Array.isArray(profile?.mcpServers)
-      ? profile.mcpServers.map((value) => String(value || '').trim()).filter(Boolean)
-      : [];
+    const mcpServers = this.getEffectiveWorkspaceMCPServerNames(group.name);
     const mcpMarkup = mcpServers.length > 0
       ? mcpServers.map((server) => `<span class="workspace-detail-agent-info-chip mcp">${this.escapeHtml(server)}</span>`).join('')
       : '<span class="workspace-detail-agent-info-empty">No MCP servers attached.</span>';
@@ -1944,6 +1942,10 @@ export class WorkspaceDetailPage {
     const lower = String(description || '').trim().toLowerCase();
     if (!lower) return false;
 
+    if (this.isReadOnlyFilesystemListingIntent(description)) {
+      return false;
+    }
+
     const directPhrases = [
       'move files',
       'copy files',
@@ -1969,6 +1971,64 @@ export class WorkspaceDetailPage {
     const nounCount = nounSignals.filter((signal) => lower.includes(signal)).length;
 
     return (actionCount > 0 && nounCount > 0) || nounCount > 1;
+  }
+
+  isReadOnlyFilesystemListingIntent(description) {
+    const lower = String(description || '').trim().toLowerCase();
+    if (!lower) return false;
+
+    const mutationPhrases = [
+      'move files',
+      'copy files',
+      'rename files',
+      'organize files',
+      'organise files',
+      'gather files',
+      'collect files',
+      'sort files',
+      'clean up files',
+      'into folder',
+      'into directory',
+      'filesystem',
+      'file management'
+    ];
+    if (mutationPhrases.some((phrase) => lower.includes(phrase))) {
+      return false;
+    }
+
+    const mutationSignals = ['move', 'copy', 'rename', 'organize', 'organise', 'gather', 'collect', 'sort', 'group', 'archive'];
+    const mutationNouns = ['file', 'files', 'folder', 'folders', 'directory', 'directories', 'filesystem', 'path', 'paths'];
+    const actionCount = mutationSignals.filter((signal) => lower.includes(signal)).length;
+    const nounCount = mutationNouns.filter((signal) => lower.includes(signal)).length;
+    if (actionCount > 0 && nounCount > 0) {
+      return false;
+    }
+
+    const directPhrases = [
+      'list files',
+      'list the files',
+      'list of files',
+      'show files',
+      'show me the files',
+      'file list',
+      'what files',
+      'which files',
+      'folder contents',
+      'directory contents',
+      'contents of',
+      'contents in',
+      'what is in',
+      "what's in"
+    ];
+    if (directPhrases.some((phrase) => lower.includes(phrase))) {
+      return true;
+    }
+
+    const listingSignals = ['list', 'show', 'display'];
+    const listingNouns = ['file', 'files', 'folder', 'folders', 'directory', 'directories', 'contents'];
+    const listingVerbCount = listingSignals.filter((signal) => lower.includes(signal)).length;
+    const listingNounCount = listingNouns.filter((signal) => lower.includes(signal)).length;
+    return listingVerbCount > 0 && listingNounCount > 0;
   }
 
   inferTaskExecutionRequirements(description) {
@@ -2110,7 +2170,8 @@ export class WorkspaceDetailPage {
       reasons.push(`has tool support via "${pluginMatches[0]}"`);
     }
 
-    const mcpMatches = this.getTaskRequirementMatches(profile.mcpServers, signals.mcp);
+    const effectiveMCPServers = this.getEffectiveWorkspaceMCPServerNames(profile.name);
+    const mcpMatches = this.getTaskRequirementMatches(effectiveMCPServers, signals.mcp);
     if (mcpMatches.length > 0) {
       score += 3;
       reasons.push(`has MCP support via "${mcpMatches[0]}"`);
@@ -3159,10 +3220,19 @@ export class WorkspaceDetailPage {
     const requirements = this.inferTaskExecutionRequirements(description);
     const hasFilesystem = requirements.some((requirement) => requirement.key === TASK_REQUIREMENT_KEYS.FILESYSTEM);
     const hasBrowser = requirements.some((requirement) => requirement.key === TASK_REQUIREMENT_KEYS.BROWSER);
+    const isFilesystemListing = this.isReadOnlyFilesystemListingIntent(description);
     const assignedAgent = String(options?.assignedAgent || '').trim();
     const agentLabel = assignedAgent && assignedAgent !== 'unassigned' ? assignedAgent : 'the selected agent';
 
     const toStep = (title, detail = '', tag = '') => ({ title, detail, tag });
+
+    if (isFilesystemListing) {
+      return [
+        toStep('Check allowed filesystem scope', `Confirm which directories ${agentLabel} can access before inspecting folder contents.`, 'Discovery'),
+        toStep('Inspect the target directory', 'Locate the requested folder and gather its visible file list.', 'Discovery'),
+        toStep('Return the file list', 'Return the concrete file list, or explain clearly if the folder is missing or empty.', 'Summary')
+      ];
+    }
 
     if (hasFilesystem) {
       return [
@@ -3541,6 +3611,129 @@ export class WorkspaceDetailPage {
     return this.agentIndex.get(key) || null;
   }
 
+  getWorkspaceMCPBindings() {
+    if (!this.workspace) return [];
+
+    const explicitBindings = Array.isArray(this.workspace.mcp_bindings)
+      ? this.workspace.mcp_bindings
+        .map((binding) => ({
+          id: String(binding?.id || '').trim(),
+          serverName: String(binding?.server_name || '').trim(),
+          alias: String(binding?.alias || '').trim(),
+          enabled: binding?.enabled !== false
+        }))
+        .filter((binding) => binding.id && binding.serverName && binding.enabled)
+      : [];
+
+    const hasFilesystemBinding = explicitBindings.some((binding) => binding.serverName.toLowerCase() === 'filesystem');
+    if (hasFilesystemBinding) {
+      return explicitBindings;
+    }
+
+    const directoryRoots = Array.isArray(this.workspace.directory_references)
+      ? this.workspace.directory_references
+        .map((reference) => String(reference?.path || '').trim())
+        .filter(Boolean)
+      : [];
+
+    if (directoryRoots.length === 0) {
+      return explicitBindings;
+    }
+
+    return [
+      ...explicitBindings,
+      {
+        id: 'workspace-filesystem',
+        serverName: 'filesystem',
+        alias: 'workspace_filesystem',
+        enabled: true
+      }
+    ];
+  }
+
+  getAgentInstanceIdsForName(agentName) {
+    const normalized = this.normalizeAgentName(agentName);
+    if (!normalized || !this.workspace || !Array.isArray(this.workspace.agent_instances)) {
+      return [];
+    }
+
+    const ids = [];
+    const seen = new Set();
+    this.workspace.agent_instances.forEach((instance) => {
+      if (this.normalizeAgentName(instance?.name) !== normalized) return;
+      const id = String(instance?.id || '').trim();
+      if (!id || seen.has(id)) return;
+      seen.add(id);
+      ids.push(id);
+    });
+    return ids;
+  }
+
+  getEffectiveWorkspaceMCPBindingsForAgent(agentName) {
+    const bindings = this.getWorkspaceMCPBindings();
+    if (bindings.length === 0) {
+      return [];
+    }
+
+    const instanceIds = this.getAgentInstanceIdsForName(agentName);
+    if (instanceIds.length === 0) {
+      return bindings;
+    }
+
+    const accessEntries = Array.isArray(this.workspace?.agent_mcp_access)
+      ? this.workspace.agent_mcp_access
+      : [];
+
+    const allowedByInstance = instanceIds.map((instanceID) => {
+      const entry = accessEntries.find((item) => String(item?.agent_instance_id || '').trim() === instanceID);
+      if (!entry) {
+        return bindings;
+      }
+      if (!Array.isArray(entry.enabled_binding_ids) || entry.enabled_binding_ids.length === 0) {
+        return [];
+      }
+
+      const allowedIDs = new Set(
+        entry.enabled_binding_ids
+          .map((value) => String(value || '').trim().toLowerCase())
+          .filter(Boolean)
+      );
+      return bindings.filter((binding) => allowedIDs.has(String(binding.id || '').trim().toLowerCase()));
+    });
+
+    const merged = [];
+    const seen = new Set();
+    allowedByInstance.flat().forEach((binding) => {
+      const key = String(binding?.id || '').trim().toLowerCase() || String(binding?.serverName || '').trim().toLowerCase();
+      if (!key || seen.has(key)) return;
+      seen.add(key);
+      merged.push(binding);
+    });
+    return merged;
+  }
+
+  getEffectiveWorkspaceMCPServerNames(agentName) {
+    const names = [];
+    const seen = new Set();
+    const add = (value) => {
+      const name = String(value || '').trim();
+      if (!name) return;
+      const key = name.toLowerCase();
+      if (seen.has(key)) return;
+      seen.add(key);
+      names.push(name);
+    };
+
+    this.getEffectiveWorkspaceMCPBindingsForAgent(agentName).forEach((binding) => add(binding.serverName));
+
+    const profile = this.getAgentProfile(agentName);
+    if (Array.isArray(profile?.mcpServers)) {
+      profile.mcpServers.forEach(add);
+    }
+
+    return names;
+  }
+
   async loadAgentCatalog(force = false) {
     if (!force && this.agentIndex instanceof Map && this.agentIndex.size > 0) {
       return this.agentCatalog;
@@ -3625,7 +3818,9 @@ export class WorkspaceDetailPage {
       }
     }
 
-    const serverNames = (profile.mcpServers || []).map((value) => String(value || '').trim().toLowerCase()).filter(Boolean);
+    const serverNames = this.getEffectiveWorkspaceMCPServerNames(profile.name)
+      .map((value) => String(value || '').trim().toLowerCase())
+      .filter(Boolean);
     for (const name of serverNames) {
       if (name.includes('playwright') || name.includes('browserbase') || name.includes('puppeteer') || name.includes('browser')) {
         return true;
@@ -3745,7 +3940,7 @@ export class WorkspaceDetailPage {
     if (profile.allowWebSearch) {
       badges.push({ key: 'web', label: 'Web' });
     }
-    if ((profile.mcpServers || []).length > 0) {
+    if (this.getEffectiveWorkspaceMCPServerNames(agentName).length > 0) {
       badges.push({ key: 'mcp', label: 'MCP' });
     }
     if ((profile.enabledPlugins || []).length > 0) {
