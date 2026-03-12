@@ -96,7 +96,9 @@ func (th *TaskHandler) ExecuteTaskHandler(w http.ResponseWriter, r *http.Request
 	}
 
 	var req struct {
-		TaskID string `json:"task_id"`
+		TaskID        string `json:"task_id"`
+		ExecutionMode string `json:"execution_mode"`
+		StepAction    string `json:"step_action"`
 	}
 
 	if !orihttp.ParseJSONBody(w, r, &req) {
@@ -107,6 +109,9 @@ func (th *TaskHandler) ExecuteTaskHandler(w http.ResponseWriter, r *http.Request
 		orihttp.BadRequest(w, "task_id is required")
 		return
 	}
+
+	requestedMode := workspace.NormalizeTaskExecutionMode(req.ExecutionMode)
+	stepAction := strings.ToLower(strings.TrimSpace(req.StepAction))
 
 	workspaceIDs, err := th.workspaceStore.List()
 	if err != nil {
@@ -182,6 +187,7 @@ func (th *TaskHandler) ExecuteTaskHandler(w http.ResponseWriter, r *http.Request
 		foundTask.Error = ""
 		foundTask.StartedAt = nil
 		foundTask.CompletedAt = nil
+		workspace.ResetTaskExecutionSteps(foundTask)
 
 		// Save the reset task status
 		if err := foundWorkspace.UpdateTask(*foundTask); err != nil {
@@ -197,7 +203,28 @@ func (th *TaskHandler) ExecuteTaskHandler(w http.ResponseWriter, r *http.Request
 	}
 
 	if foundTask.Status == workspace.TaskStatusInProgress {
-		orihttp.BadRequest(w, "Task is already in progress")
+		if !workspace.IsTaskAwaitingNextStep(foundTask) {
+			orihttp.BadRequest(w, "Task is already in progress")
+			return
+		}
+		if stepAction == "" {
+			stepAction = "next"
+		}
+	}
+
+	if strings.TrimSpace(req.ExecutionMode) != "" {
+		foundTask.ExecutionMode = requestedMode
+	} else if foundTask.ExecutionMode == "" {
+		foundTask.ExecutionMode = workspace.TaskExecutionModeAuto
+	}
+	if err := foundWorkspace.UpdateTask(*foundTask); err != nil {
+		logger.Error("Failed to update task execution mode", logger.Fields{"task_id": foundTask.ID, "error": err})
+		orihttp.InternalError(w, "Failed to update task execution settings")
+		return
+	}
+	if err := th.workspaceStore.Save(foundWorkspace); err != nil {
+		logger.Error("Failed to save workspace", logger.Fields{"error": err})
+		orihttp.InternalError(w, "Failed to save workspace")
 		return
 	}
 
@@ -235,9 +262,11 @@ func (th *TaskHandler) ExecuteTaskHandler(w http.ResponseWriter, r *http.Request
 
 	w.WriteHeader(http.StatusAccepted)
 	orihttp.WriteJSON(w, map[string]interface{}{
-		"success": true,
-		"message": "Task execution started",
-		"task_id": req.TaskID,
+		"success":        true,
+		"message":        "Task execution started",
+		"task_id":        req.TaskID,
+		"execution_mode": foundTask.ExecutionMode,
+		"step_action":    stepAction,
 	})
 }
 
@@ -340,6 +369,7 @@ func (th *TaskHandler) handleAssistTask(w http.ResponseWriter, r *http.Request) 
 		task.CompletedAt = nil
 		task.Error = ""
 		task.Result = ""
+		workspace.PrepareTaskExecutionStepsForResume(task)
 		humanLoop["state"] = "resumed"
 	case "retry", "continue_with_instruction":
 		task.Status = workspace.TaskStatusPending
@@ -347,6 +377,7 @@ func (th *TaskHandler) handleAssistTask(w http.ResponseWriter, r *http.Request) 
 		task.CompletedAt = nil
 		task.Error = ""
 		task.Result = ""
+		workspace.PrepareTaskExecutionStepsForResume(task)
 		humanLoop["state"] = "resumed"
 	default:
 		orihttp.BadRequest(w, "unsupported action; use retry, continue_with_instruction, switch_agent_retry, or mark_failed")
@@ -641,9 +672,15 @@ func (th *TaskHandler) executeTaskWithDependencies(ws *workspace.Workspace, task
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 
+	if task.Status != workspace.TaskStatusInProgress {
+		workspace.PrepareTaskExecutionStepsForResume(task)
+	}
+
 	task.Status = workspace.TaskStatusInProgress
 	now := time.Now()
-	task.StartedAt = &now
+	if task.StartedAt == nil || task.StartedAt.IsZero() {
+		task.StartedAt = &now
+	}
 	task.Result = ""
 	task.Error = ""
 
@@ -699,12 +736,29 @@ func (th *TaskHandler) executeTaskWithDependencies(ws *workspace.Workspace, task
 		}
 	}
 
-	result, execErr := th.executeTaskIteratively(ctx, ws, task, taskForExecution, manual)
+	var result string
+	var execErr error
+	if shouldUseStructuredExecution(task, taskForExecution) {
+		result, execErr = th.executeTaskWithStructuredSteps(ctx, ws, task, taskForExecution, manual)
+	} else {
+		result, execErr = th.executeTaskIteratively(ctx, ws, task, taskForExecution, manual)
+	}
+
+	var awaitingErr *taskExecutionAwaitingStepError
+	if errors.As(execErr, &awaitingErr) {
+		if err := ws.UpdateTask(*task); err != nil {
+			return awaitingErr.Result, fmt.Errorf("failed to update waiting task: %w", err)
+		}
+		if err := th.workspaceStore.Save(ws); err != nil {
+			return awaitingErr.Result, fmt.Errorf("failed to save waiting task: %w", err)
+		}
+		return awaitingErr.Result, nil
+	}
 
 	if execErr != nil {
 		var blockedErr *workspace.TaskBlockedError
 		if errors.As(execErr, &blockedErr) {
-			if err := th.markTaskBlocked(ws, task, blockedErr, manual, nil); err != nil {
+			if err := th.markTaskBlocked(ws, task, blockedErr, manual, buildStructuredExecutionExtra(task)); err != nil {
 				return "", fmt.Errorf("failed to persist blocked task state: %w", err)
 			}
 			return "", blockedErr

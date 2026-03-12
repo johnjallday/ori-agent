@@ -2,6 +2,8 @@ package llm
 
 import (
 	"context"
+	"encoding/json"
+	"strings"
 	"testing"
 )
 
@@ -243,6 +245,83 @@ func TestOpenAIProviderStreamChatNotImplemented(t *testing.T) {
 		if err.Error()[:len(expectedMsg)] != expectedMsg {
 			t.Errorf("Expected error message to start with '%s', got '%s'", expectedMsg, err.Error())
 		}
+	}
+}
+
+func TestOpenAIProviderConvertMessages_PreservesAssistantToolCalls(t *testing.T) {
+	provider := NewOpenAIProvider(ProviderConfig{APIKey: "test-key"})
+
+	toolCallID := strings.Repeat("x", 45)
+	messages := []Message{
+		{
+			Role: RoleAssistant,
+			ToolCalls: []ToolCall{
+				{
+					ID:        toolCallID,
+					Name:      "list_allowed_directories",
+					Arguments: `{}`,
+				},
+			},
+		},
+		NewToolMessage(toolCallID, "Allowed directories:\n/Users/jjdev/Documents"),
+	}
+
+	converted := provider.convertMessages(messages, "")
+	if len(converted) != 2 {
+		t.Fatalf("expected 2 messages, got %d", len(converted))
+	}
+
+	assistantCalls := converted[0].GetToolCalls()
+	if len(assistantCalls) != 1 {
+		t.Fatalf("expected 1 assistant tool call, got %d", len(assistantCalls))
+	}
+
+	assistantToolCallID := assistantCalls[0].GetID()
+	if assistantToolCallID == nil || *assistantToolCallID == "" {
+		t.Fatalf("expected assistant tool call ID to be present")
+	}
+	if len(*assistantToolCallID) > 40 {
+		t.Fatalf("expected assistant tool call ID <= 40 chars, got %d", len(*assistantToolCallID))
+	}
+
+	toolMessageID := converted[1].GetToolCallID()
+	if toolMessageID == nil || *toolMessageID == "" {
+		t.Fatalf("expected tool message tool_call_id to be present")
+	}
+	if *toolMessageID != *assistantToolCallID {
+		t.Fatalf("expected tool message ID %q to match assistant tool call ID %q", *toolMessageID, *assistantToolCallID)
+	}
+}
+
+func TestOpenAIProviderConvertMessages_UsesToolResultAsContentNotToolCallID(t *testing.T) {
+	provider := NewOpenAIProvider(ProviderConfig{APIKey: "test-key"})
+
+	converted := provider.convertMessages([]Message{
+		NewToolMessage("tool-123", "Allowed directories:\n/Users/jjdev/Documents"),
+	}, "")
+
+	if len(converted) != 1 {
+		t.Fatalf("expected 1 message, got %d", len(converted))
+	}
+
+	data, err := json.Marshal(converted[0])
+	if err != nil {
+		t.Fatalf("failed to marshal converted message: %v", err)
+	}
+
+	var payload struct {
+		Content    string `json:"content"`
+		ToolCallID string `json:"tool_call_id"`
+	}
+	if err := json.Unmarshal(data, &payload); err != nil {
+		t.Fatalf("failed to unmarshal converted message: %v", err)
+	}
+
+	if payload.ToolCallID != "tool-123" {
+		t.Fatalf("expected tool_call_id to be tool-123, got %q", payload.ToolCallID)
+	}
+	if payload.Content != "Allowed directories:\n/Users/jjdev/Documents" {
+		t.Fatalf("expected tool result content to be preserved, got %q", payload.Content)
 	}
 }
 

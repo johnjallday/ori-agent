@@ -473,6 +473,7 @@
         </div>
         <div class="modal-footer">
           <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+          <button type="button" class="btn btn-outline-light d-none" id="workspace-detail-task-execution-next-step">Run Next Step</button>
           <button type="button" class="btn btn-primary" id="workspace-detail-task-execution-view-result" disabled>View Result</button>
         </div>
       </div>
@@ -499,6 +500,14 @@
           </div>
           <div id="workspace-detail-task-confirm-meta" class="workspace-detail-task-confirm-meta"></div>
           <div id="workspace-detail-task-confirm-details" class="workspace-detail-task-confirm-details d-none"></div>
+          <div id="workspace-detail-task-confirm-sequence" class="workspace-detail-task-confirm-sequence d-none"></div>
+          <label id="workspace-detail-task-confirm-step-mode" class="workspace-detail-task-confirm-step-mode d-none" for="workspace-detail-task-confirm-step-mode-input">
+            <input id="workspace-detail-task-confirm-step-mode-input" type="checkbox">
+            <span class="workspace-detail-task-confirm-step-mode-copy">
+              <span class="workspace-detail-task-confirm-step-mode-title">Run step by step</span>
+              <span class="workspace-detail-task-confirm-step-mode-detail">Pause after each internal execution step so you can inspect progress before continuing.</span>
+            </span>
+          </label>
           <div class="workspace-detail-task-confirm-actions">
             <button type="button" id="workspace-detail-task-confirm-cancel" class="modern-btn modern-btn-secondary">Cancel</button>
             <button type="button" id="workspace-detail-task-confirm-confirm" class="modern-btn modern-btn-primary">Continue</button>
@@ -1503,6 +1512,129 @@
       gap: 0.7rem;
       margin-top: 1.15rem;
       flex-wrap: wrap;
+    }
+
+    .workspace-detail-task-confirm-sequence {
+      margin-top: 1rem;
+      padding: 0.95rem;
+      border-radius: 18px;
+      border: 1px solid color-mix(in srgb, var(--border-color) 72%, #34d399 28%);
+      background: color-mix(in srgb, var(--bg-secondary) 88%, rgba(52, 211, 153, 0.08));
+    }
+
+    .workspace-detail-task-confirm-sequence-title {
+      font-size: 0.74rem;
+      font-weight: 700;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: color-mix(in srgb, var(--text-secondary) 82%, #d1fae5 18%);
+      margin-bottom: 0.75rem;
+    }
+
+    .workspace-detail-task-confirm-sequence-list {
+      display: grid;
+      gap: 0.55rem;
+    }
+
+    .workspace-detail-task-confirm-sequence-step {
+      display: flex;
+      gap: 0.7rem;
+      align-items: flex-start;
+      padding: 0.7rem 0.78rem;
+      border-radius: 14px;
+      border: 1px solid color-mix(in srgb, var(--border-color) 78%, #34d399 22%);
+      background: color-mix(in srgb, var(--bg-primary) 74%, rgba(15, 23, 42, 0.16));
+    }
+
+    .workspace-detail-task-confirm-sequence-index {
+      width: 1.5rem;
+      height: 1.5rem;
+      border-radius: 999px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      background: rgba(52, 211, 153, 0.16);
+      color: #86efac;
+      font-size: 0.72rem;
+      font-weight: 700;
+      flex-shrink: 0;
+    }
+
+    .workspace-detail-task-confirm-sequence-copy {
+      min-width: 0;
+      flex: 1;
+    }
+
+    .workspace-detail-task-confirm-sequence-step-title {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      flex-wrap: wrap;
+      color: var(--text-primary);
+      font-size: 0.86rem;
+      font-weight: 600;
+      line-height: 1.35;
+    }
+
+    .workspace-detail-task-confirm-sequence-step-detail {
+      margin-top: 0.28rem;
+      color: var(--text-secondary);
+      font-size: 0.78rem;
+      line-height: 1.45;
+      white-space: pre-wrap;
+    }
+
+    .workspace-detail-task-confirm-sequence-tag {
+      display: inline-flex;
+      align-items: center;
+      padding: 0.14rem 0.44rem;
+      border-radius: 999px;
+      background: rgba(52, 211, 153, 0.12);
+      color: #bbf7d0;
+      font-size: 0.66rem;
+      font-weight: 700;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+    }
+
+    .workspace-detail-task-confirm-step-mode {
+      margin-top: 0.95rem;
+      display: flex;
+      align-items: flex-start;
+      gap: 0.8rem;
+      padding: 0.85rem 0.95rem;
+      border-radius: 16px;
+      border: 1px solid color-mix(in srgb, var(--border-color) 76%, #f59e0b 24%);
+      background: color-mix(in srgb, var(--bg-secondary) 90%, rgba(245, 158, 11, 0.08));
+      cursor: pointer;
+    }
+
+    .workspace-detail-task-confirm-step-mode input {
+      margin-top: 0.2rem;
+      width: 1rem;
+      height: 1rem;
+      accent-color: #f59e0b;
+      flex-shrink: 0;
+    }
+
+    .workspace-detail-task-confirm-step-mode-copy {
+      display: flex;
+      flex-direction: column;
+      gap: 0.18rem;
+      min-width: 0;
+    }
+
+    .workspace-detail-task-confirm-step-mode-title {
+      color: var(--text-primary);
+      font-size: 0.86rem;
+      font-weight: 600;
+      line-height: 1.35;
+    }
+
+    .workspace-detail-task-confirm-step-mode-detail {
+      color: var(--text-secondary);
+      font-size: 0.76rem;
+      line-height: 1.45;
     }
 
     @media (max-width: 576px) {

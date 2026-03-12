@@ -30,7 +30,9 @@ function createDefaultAgentCreationFlowState() {
     preferAutoConfig: false,
     workspaceId: '',
     taskId: '',
-    assignTask: false
+    assignTask: false,
+    suggestedMCPServers: [],
+    suggestedSkills: []
   };
 }
 
@@ -246,6 +248,22 @@ function filterModelsByType(agentType, modelSelect) {
   populateModelSelect(modelSelect, agentType);
 }
 
+function normalizeAgentCreationFlowSelections(values) {
+  const source = Array.isArray(values) ? values : [values];
+  const seen = new Set();
+  const normalized = [];
+
+  source.forEach((value) => {
+    const name = String(value || '').trim();
+    const key = normalizeAgentCapabilityName(name);
+    if (!name || !key || seen.has(key)) return;
+    seen.add(key);
+    normalized.push(name);
+  });
+
+  return normalized;
+}
+
 function normalizeAgentCreationFlowOptions(options = {}) {
   return {
     seedName: String(options?.seedName || '').trim(),
@@ -254,7 +272,9 @@ function normalizeAgentCreationFlowOptions(options = {}) {
     preferAutoConfig: Boolean(options?.preferAutoConfig),
     workspaceId: String(options?.workspaceId || '').trim(),
     taskId: String(options?.taskId || '').trim(),
-    assignTask: Boolean(options?.assignTask)
+    assignTask: Boolean(options?.assignTask),
+    suggestedMCPServers: normalizeAgentCreationFlowSelections(options?.suggestedMCPServers),
+    suggestedSkills: normalizeAgentCreationFlowSelections(options?.suggestedSkills)
   };
 }
 
@@ -323,6 +343,43 @@ function resetAgentCreationCapabilitySelections() {
   agentCreationCapabilityState.selectedMCPServers = new Set();
   agentCreationCapabilityState.selectedSkills = new Set();
   agentCreationCapabilityState.errors = { mcp: '', skills: '' };
+}
+
+function applyPendingAgentCreationCapabilitySuggestions() {
+  const flow = pendingAgentCreationFlow || createDefaultAgentCreationFlowState();
+  const suggestedMCPServers = normalizeAgentCreationFlowSelections(flow.suggestedMCPServers);
+  const suggestedSkills = normalizeAgentCreationFlowSelections(flow.suggestedSkills);
+  if (suggestedMCPServers.length === 0 && suggestedSkills.length === 0) {
+    return;
+  }
+
+  const availableMCPKeys = new Set(
+    agentCreationCapabilityState.mcpServers.map((server) => normalizeAgentCapabilityName(server?.name))
+  );
+  suggestedMCPServers.forEach((serverName) => {
+    const key = normalizeAgentCapabilityName(serverName);
+    if (key && availableMCPKeys.has(key)) {
+      agentCreationCapabilityState.selectedMCPServers.add(key);
+    }
+  });
+
+  const skillByKey = new Map(
+    agentCreationCapabilityState.skills.map((skill) => [normalizeAgentCapabilityName(skill?.name), skill])
+  );
+  suggestedSkills.forEach((skillName) => {
+    const key = normalizeAgentCapabilityName(skillName);
+    const skill = skillByKey.get(key);
+    if (!key || !skill) return;
+
+    const validationErrors = Array.isArray(skill.validationErrors) ? skill.validationErrors : [];
+    if (validationErrors.length > 0) return;
+
+    const requiredMCPServers = Array.isArray(skill.requiredMCPServers) ? skill.requiredMCPServers : [];
+    const missingMCPServers = requiredMCPServers.filter((serverName) => !availableMCPKeys.has(normalizeAgentCapabilityName(serverName)));
+    if (missingMCPServers.length > 0) return;
+
+    agentCreationCapabilityState.selectedSkills.add(key);
+  });
 }
 
 function getRequiredAgentCreationMCPServerKeys() {
@@ -631,6 +688,7 @@ async function loadAgentCreationCapabilityCatalog() {
     agentCreationCapabilityState.errors.skills = 'Failed to load skills.';
   }
 
+  applyPendingAgentCreationCapabilitySuggestions();
   renderAgentCreationSkills();
   renderAgentCreationMCPServers();
 }

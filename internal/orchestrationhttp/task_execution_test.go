@@ -162,6 +162,30 @@ func (s *stubWorkspaceTaskExecutor) ExecuteTask(_ context.Context, _ string, _ w
 	return s.result, s.err
 }
 
+type stubSequenceTaskExecutor struct {
+	results []string
+	err     error
+	calls   int
+}
+
+func (s *stubSequenceTaskExecutor) ExecuteTask(_ context.Context, _ string, task workspace.Task) (string, error) {
+	s.calls++
+	if s.err != nil {
+		return "", s.err
+	}
+	if len(s.results) == 0 {
+		return task.Description, nil
+	}
+	index := s.calls - 1
+	if index < 0 {
+		index = 0
+	}
+	if index >= len(s.results) {
+		index = len(s.results) - 1
+	}
+	return s.results[index], nil
+}
+
 func TestExecuteTaskIteratively_BlocksWhenToolsAreUnavailable(t *testing.T) {
 	stub := &stubWorkspaceTaskExecutor{
 		result: `I don't have filesystem browsing tools available in this context — only REAPER scripting and LSP code intelligence tools, neither of which can explore a general directory.
@@ -301,5 +325,129 @@ func TestExecuteTaskWithDependencies_RecordsBlockedRunHistory(t *testing.T) {
 	}
 	if updatedTask.ExecutionHistory[0].Summary == "" {
 		t.Fatalf("expected blocked summary to be recorded")
+	}
+}
+
+func TestExecuteTaskWithDependencies_StepThroughPausesAfterFirstStructuredStep(t *testing.T) {
+	store := workspace.NewInMemoryStore()
+	ws := workspace.NewWorkspace(workspace.CreateWorkspaceParams{Name: "Folder Organizer", Agents: []string{"Ori"}})
+	task := workspace.Task{
+		ID:            "task-step-through",
+		To:            "Ori",
+		Description:   "Gather DNM related files into DNM folder",
+		ExecutionMode: workspace.TaskExecutionModeStepThrough,
+		Context:       map[string]interface{}{},
+	}
+	if err := ws.AddTask(task); err != nil {
+		t.Fatalf("failed to add task: %v", err)
+	}
+	if err := store.Save(ws); err != nil {
+		t.Fatalf("failed to save workspace: %v", err)
+	}
+
+	persistedTask, err := ws.GetTask(task.ID)
+	if err != nil {
+		t.Fatalf("failed to fetch task: %v", err)
+	}
+
+	handler := &TaskHandler{
+		workspaceStore: store,
+		taskHandler: &stubSequenceTaskExecutor{
+			results: []string{"Allowed directories: /Users/jjdev/Documents"},
+		},
+	}
+
+	if _, err := handler.executeTaskWithDependencies(ws, persistedTask, true); err != nil {
+		t.Fatalf("executeTaskWithDependencies failed: %v", err)
+	}
+
+	updatedTask, err := ws.GetTask(task.ID)
+	if err != nil {
+		t.Fatalf("failed to fetch updated task: %v", err)
+	}
+	if updatedTask.Status != workspace.TaskStatusInProgress {
+		t.Fatalf("expected task to remain in progress, got %q", updatedTask.Status)
+	}
+	if !workspace.IsTaskAwaitingNextStep(updatedTask) {
+		t.Fatalf("expected task to wait for the next step")
+	}
+	if len(updatedTask.ExecutionSteps) != 7 {
+		t.Fatalf("expected 7 execution steps, got %d", len(updatedTask.ExecutionSteps))
+	}
+	if updatedTask.ExecutionSteps[0].Status != workspace.TaskExecutionStepCompleted {
+		t.Fatalf("expected first step completed, got %q", updatedTask.ExecutionSteps[0].Status)
+	}
+	if updatedTask.ExecutionSteps[1].Status != workspace.TaskExecutionStepPending {
+		t.Fatalf("expected second step pending, got %q", updatedTask.ExecutionSteps[1].Status)
+	}
+	if updatedTask.ExecutionCount != 0 {
+		t.Fatalf("expected no terminal execution history entry yet, got %d", updatedTask.ExecutionCount)
+	}
+}
+
+func TestExecuteTaskWithDependencies_AutoRunsStructuredStepsToCompletion(t *testing.T) {
+	store := workspace.NewInMemoryStore()
+	ws := workspace.NewWorkspace(workspace.CreateWorkspaceParams{Name: "Folder Organizer", Agents: []string{"Ori"}})
+	task := workspace.Task{
+		ID:            "task-auto-steps",
+		To:            "Ori",
+		Description:   "Gather DNM related files into DNM folder",
+		ExecutionMode: workspace.TaskExecutionModeAuto,
+		Context:       map[string]interface{}{},
+	}
+	if err := ws.AddTask(task); err != nil {
+		t.Fatalf("failed to add task: %v", err)
+	}
+	if err := store.Save(ws); err != nil {
+		t.Fatalf("failed to save workspace: %v", err)
+	}
+
+	persistedTask, err := ws.GetTask(task.ID)
+	if err != nil {
+		t.Fatalf("failed to fetch task: %v", err)
+	}
+
+	handler := &TaskHandler{
+		workspaceStore: store,
+		taskHandler: &stubSequenceTaskExecutor{
+			results: []string{
+				"Allowed directories: /Users/jjdev/Documents",
+				"Inspected candidate directories.",
+				"Identified matching DNM files.",
+				"Created DNM folder.",
+				"Moved matching files into DNM.",
+				"Verified final folder contents.",
+				"Moved 3 files into /Users/jjdev/Documents/DNM",
+			},
+		},
+	}
+
+	if _, err := handler.executeTaskWithDependencies(ws, persistedTask, true); err != nil {
+		t.Fatalf("executeTaskWithDependencies failed: %v", err)
+	}
+
+	updatedTask, err := ws.GetTask(task.ID)
+	if err != nil {
+		t.Fatalf("failed to fetch updated task: %v", err)
+	}
+	if updatedTask.Status != workspace.TaskStatusCompleted {
+		t.Fatalf("expected task completed, got %q", updatedTask.Status)
+	}
+	if workspace.IsTaskAwaitingNextStep(updatedTask) {
+		t.Fatalf("did not expect task to wait for the next step")
+	}
+	if len(updatedTask.ExecutionSteps) != 7 {
+		t.Fatalf("expected 7 execution steps, got %d", len(updatedTask.ExecutionSteps))
+	}
+	for index, step := range updatedTask.ExecutionSteps {
+		if step.Status != workspace.TaskExecutionStepCompleted {
+			t.Fatalf("expected step %d completed, got %q", index+1, step.Status)
+		}
+	}
+	if updatedTask.Result != "Moved 3 files into /Users/jjdev/Documents/DNM" {
+		t.Fatalf("unexpected final result: %q", updatedTask.Result)
+	}
+	if updatedTask.ExecutionCount != 1 {
+		t.Fatalf("expected one completed execution, got %d", updatedTask.ExecutionCount)
 	}
 }

@@ -154,6 +154,8 @@ type Task struct {
 	Result         string                 `json:"result,omitempty"`
 	Error          string                 `json:"error,omitempty"`
 	Progress       *TaskProgress          `json:"progress,omitempty"`
+	ExecutionMode  TaskExecutionMode      `json:"execution_mode,omitempty"`
+	ExecutionSteps []TaskExecutionStep    `json:"execution_steps,omitempty"`
 	// InputTaskIDs specifies task IDs whose results should be included as input context
 	InputTaskIDs []string `json:"input_task_ids,omitempty"`
 	// ParentTaskID groups this task under a parent workflow task when set.
@@ -207,6 +209,40 @@ type TaskProgress struct {
 	CompletedSteps int       `json:"completed_steps,omitempty"`
 	ElapsedTimeMs  float64   `json:"elapsed_time_ms,omitempty"`
 	UpdatedAt      time.Time `json:"updated_at,omitempty"`
+}
+
+// TaskExecutionMode controls how internal execution steps advance.
+type TaskExecutionMode string
+
+const (
+	TaskExecutionModeAuto        TaskExecutionMode = "auto"
+	TaskExecutionModeStepThrough TaskExecutionMode = "step_through"
+)
+
+// TaskExecutionStepStatus tracks a single internal execution step.
+type TaskExecutionStepStatus string
+
+const (
+	TaskExecutionStepPending    TaskExecutionStepStatus = "pending"
+	TaskExecutionStepInProgress TaskExecutionStepStatus = "in_progress"
+	TaskExecutionStepCompleted  TaskExecutionStepStatus = "completed"
+	TaskExecutionStepFailed     TaskExecutionStepStatus = "failed"
+	TaskExecutionStepBlocked    TaskExecutionStepStatus = "blocked"
+	TaskExecutionStepSkipped    TaskExecutionStepStatus = "skipped"
+)
+
+// TaskExecutionStep represents a persisted internal step for a task.
+type TaskExecutionStep struct {
+	ID          string                  `json:"id"`
+	Index       int                     `json:"index"`
+	Title       string                  `json:"title"`
+	Detail      string                  `json:"detail,omitempty"`
+	Tag         string                  `json:"tag,omitempty"`
+	Status      TaskExecutionStepStatus `json:"status"`
+	Result      string                  `json:"result,omitempty"`
+	Error       string                  `json:"error,omitempty"`
+	StartedAt   *time.Time              `json:"started_at,omitempty"`
+	CompletedAt *time.Time              `json:"completed_at,omitempty"`
 }
 
 // ScheduleType represents the type of schedule

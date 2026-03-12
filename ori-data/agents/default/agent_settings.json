@@ -5,48 +5,21 @@
     "temperature": 1,
     "system_prompt": "You are a helpful assistant with access to various tools. When a user request can be fulfilled by using an available tool, use the tool instead of providing general information. Be concise and direct in your responses."
   },
-  "Plugins": {
-    "ori_shell_executor-0.0.5": {
-      "Definition": {
-        "Name": "ori-shell-executor",
-        "Description": "Execute shell/bash commands with safety controls. Commands are validated against allowlist/blocklist patterns before execution. Use for running scripts, git commands, build tools, etc.",
-        "Parameters": {
-          "properties": {
-            "command": {
-              "description": "The shell command to execute. Must match allowed patterns and not match blocked patterns.",
-              "type": "string"
-            },
-            "shell": {
-              "description": "Shell to use: sh, bash, zsh, powershell, cmd. Defaults to sh on Unix, cmd on Windows.",
-              "enum": [
-                "sh",
-                "bash",
-                "zsh",
-                "powershell",
-                "cmd"
-              ],
-              "type": "string"
-            },
-            "timeout_seconds": {
-              "description": "Command timeout in seconds (1-300). Defaults to 60.",
-              "maximum": 300,
-              "minimum": 1,
-              "type": "integer"
-            },
-            "working_dir": {
-              "description": "Working directory for command execution. Defaults to configured default_working_dir or agent context.",
-              "type": "string"
-            }
-          },
-          "required": [
-            "command"
-          ],
-          "type": "object"
-        }
-      },
-      "Path": "uploaded_plugins/ori_shell_executor-0.0.5",
-      "Version": "0.0.5",
-      "SupportsFiles": true
-    }
+  "Plugins": {},
+  "status": "idle",
+  "statistics": {
+    "message_count": 0,
+    "token_usage": 0,
+    "total_cost": 0,
+    "last_active": "2026-03-11T10:06:19.223581+09:00",
+    "created_at": "2026-03-11T10:06:19.223581+09:00",
+    "updated_at": "2026-03-11T10:06:19.223581+09:00"
+  },
+  "evolution": {
+    "level": 0,
+    "experience": 0,
+    "stage": "spark",
+    "last_evolved_at": "0001-01-01T00:00:00Z",
+    "updated_at": "2026-03-11T10:06:19.223581+09:00"
   }
 }

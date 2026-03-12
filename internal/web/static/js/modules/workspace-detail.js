@@ -62,6 +62,13 @@ function getDisplayStatus(status) {
   return statusMap[status] || status;
 }
 
+const AGENT_CREATION_SKILL_CATALOG_AGENT = '__ori_agent_create_catalog__';
+
+const TASK_REQUIREMENT_KEYS = Object.freeze({
+  BROWSER: 'browser',
+  FILESYSTEM: 'filesystem'
+});
+
 export class WorkspaceDetailPage {
   constructor(workspaceId) {
     this.workspaceId = workspaceId;
@@ -101,6 +108,9 @@ export class WorkspaceDetailPage {
     this.agentCatalog = [];
     this.agentIndex = new Map();
     this.agentSkillsCache = new Map();
+    this.agentSkillsPromises = new Map();
+    this.capabilitySuggestionCatalog = null;
+    this.capabilitySuggestionCatalogPromise = null;
     this.flippedAgentCards = new Set();
     this.boardDidDrag = false;
     this.currentTaskResultText = '';
@@ -111,6 +121,7 @@ export class WorkspaceDetailPage {
     this.executionLogKeys = new Set();
     this.executionLastStatus = '';
     this.pendingTaskConfirm = null;
+    this.pendingTaskConfirmSelection = { stepThrough: false };
 
     // DOM elements
     this.elements = {};
@@ -432,6 +443,7 @@ export class WorkspaceDetailPage {
       taskExecutionStatus: document.getElementById('workspace-detail-task-execution-status'),
       taskExecutionBreakdown: document.getElementById('workspace-detail-task-execution-breakdown'),
       taskExecutionLog: document.getElementById('workspace-detail-task-execution-log'),
+      taskExecutionNextStepBtn: document.getElementById('workspace-detail-task-execution-next-step'),
       taskExecutionViewResultBtn: document.getElementById('workspace-detail-task-execution-view-result'),
       taskConfirmModal: document.getElementById('workspace-detail-task-confirm-modal'),
       taskConfirmEyebrow: document.getElementById('workspace-detail-task-confirm-eyebrow'),
@@ -439,6 +451,9 @@ export class WorkspaceDetailPage {
       taskConfirmMessage: document.getElementById('workspace-detail-task-confirm-message'),
       taskConfirmMeta: document.getElementById('workspace-detail-task-confirm-meta'),
       taskConfirmDetails: document.getElementById('workspace-detail-task-confirm-details'),
+      taskConfirmSequence: document.getElementById('workspace-detail-task-confirm-sequence'),
+      taskConfirmStepMode: document.getElementById('workspace-detail-task-confirm-step-mode'),
+      taskConfirmStepModeInput: document.getElementById('workspace-detail-task-confirm-step-mode-input'),
       taskConfirmCancelBtn: document.getElementById('workspace-detail-task-confirm-cancel'),
       taskConfirmConfirmBtn: document.getElementById('workspace-detail-task-confirm-confirm'),
 
@@ -524,6 +539,7 @@ export class WorkspaceDetailPage {
         this.showTaskResult(this.currentExecutionTaskId, { closeExecutionModal: true });
       }
     });
+    this.elements.taskExecutionNextStepBtn?.addEventListener('click', () => this.advanceCurrentExecutionStep());
     this.elements.taskResultModal?.addEventListener('shown.bs.modal', () => {
       this.applyTopBackdropLayer('workspace-detail-backdrop-result');
     });
@@ -533,6 +549,7 @@ export class WorkspaceDetailPage {
     this.elements.taskExecutionModal?.addEventListener('hidden.bs.modal', () => {
       this.stopExecutionMonitor();
       this.currentExecutionTaskId = null;
+      this.setExecutionNextStepEnabled(false);
       this.renderTaskExecutionBreakdown(null);
     });
     this.elements.taskConfirmCancelBtn?.addEventListener('click', () => this.handleTaskConfirmChoice(false));
@@ -1272,50 +1289,69 @@ export class WorkspaceDetailPage {
   }
 
   async ensureAgentSkillsLoaded(agentName) {
+    await this.loadAgentSkills(agentName, { refreshUI: true });
+  }
+
+  async loadAgentSkills(agentName, options = {}) {
     const normalizedName = String(agentName || '').trim();
     const key = this.normalizeAgentName(normalizedName);
-    if (!normalizedName || !key) return;
+    if (!normalizedName || !key) return { status: 'idle', skills: [] };
 
     const existing = this.agentSkillsCache.get(key);
-    if (existing?.status === 'loading' || existing?.status === 'loaded') {
-      return;
+    if (existing?.status === 'loaded' || existing?.status === 'conflict' || existing?.status === 'error') {
+      return existing;
+    }
+    if (this.agentSkillsPromises.has(key)) {
+      return this.agentSkillsPromises.get(key);
     }
 
     this.agentSkillsCache.set(key, { status: 'loading', skills: [] });
-    this.refreshAgentCardSkills(normalizedName);
+    if (options.refreshUI !== false) {
+      this.refreshAgentCardSkills(normalizedName);
+    }
 
-    try {
-      const response = await fetch(`/api/skills?agent=${encodeURIComponent(normalizedName)}`);
-      if (response.status === 409) {
-        this.agentSkillsCache.set(key, { status: 'conflict', skills: [] });
-        if (!this.refreshAgentCardSkills(normalizedName)) {
-          this.renderAgentGroups();
+    const loadPromise = (async () => {
+      try {
+        const response = await fetch(`/api/skills?agent=${encodeURIComponent(normalizedName)}`);
+        if (response.status === 409) {
+          this.agentSkillsCache.set(key, { status: 'conflict', skills: [] });
+          return this.agentSkillsCache.get(key);
         }
-        return;
+        if (!response.ok) {
+          throw new Error(`Failed to load skills (${response.status})`);
+        }
+
+        const data = await response.json();
+        const skills = Array.isArray(data?.skills)
+          ? data.skills
+            .map((skill) => ({
+              name: String(skill?.name || '').trim(),
+              description: String(skill?.description || '').trim(),
+              enabled: skill?.enabled !== false,
+              requiredMCPServers: Array.isArray(skill?.required_mcp_servers) ? skill.required_mcp_servers.map((value) => String(value || '').trim()).filter(Boolean) : [],
+              allowedTools: Array.isArray(skill?.allowed_tools) ? skill.allowed_tools.map((value) => String(value || '').trim()).filter(Boolean) : []
+            }))
+            .filter((skill) => skill.name)
+          : [];
+
+        this.agentSkillsCache.set(key, { status: 'loaded', skills });
+      } catch (error) {
+        console.error(`Failed to load skills for ${normalizedName}:`, error);
+        this.agentSkillsCache.set(key, { status: 'error', skills: [] });
+      } finally {
+        this.agentSkillsPromises.delete(key);
+        if (options.refreshUI !== false) {
+          if (!this.refreshAgentCardSkills(normalizedName)) {
+            this.renderAgentGroups();
+          }
+        }
       }
-      if (!response.ok) {
-        throw new Error(`Failed to load skills (${response.status})`);
-      }
 
-      const data = await response.json();
-      const skills = Array.isArray(data?.skills)
-        ? data.skills
-          .map((skill) => ({
-            name: String(skill?.name || '').trim(),
-            enabled: skill?.enabled !== false
-          }))
-          .filter((skill) => skill.name)
-        : [];
+      return this.agentSkillsCache.get(key) || { status: 'error', skills: [] };
+    })();
 
-      this.agentSkillsCache.set(key, { status: 'loaded', skills });
-    } catch (error) {
-      console.error(`Failed to load skills for ${normalizedName}:`, error);
-      this.agentSkillsCache.set(key, { status: 'error', skills: [] });
-    }
-
-    if (!this.refreshAgentCardSkills(normalizedName)) {
-      this.renderAgentGroups();
-    }
+    this.agentSkillsPromises.set(key, loadPromise);
+    return loadPromise;
   }
 
   buildAgentGroups() {
@@ -1455,11 +1491,12 @@ export class WorkspaceDetailPage {
     const subtasks = this.tasks.filter((subtask) => subtask.parent_task_id === task.id);
     const isParent = subtasks.length > 0;
     const statusInfo = this.getTaskStatusPresentation(task);
+    const awaitingNextStep = this.isTaskAwaitingNextStep(task);
     const hasUnassignedSubtasks = isParent && subtasks.some((subtask) => !subtask.to || subtask.to === 'unassigned');
     const hasRunningSubtasks = isParent && subtasks.some((subtask) => subtask.status === 'in_progress');
     const canExecute = isParent
       ? subtasks.length > 0 && !hasUnassignedSubtasks && !hasRunningSubtasks
-      : task.status !== 'in_progress';
+      : task.status !== 'in_progress' || awaitingNextStep;
     const resultData = this.getDisplayResult(task, subtasks);
     const hasResultData = !!resultData;
     const hasAssistData = !!statusInfo.isBlocked;
@@ -1468,7 +1505,8 @@ export class WorkspaceDetailPage {
         : hasRunningSubtasks ? 'A subtask is already running'
           : 'Execute workflow now'
       : !assignedAgent ? 'Will auto-assign a workspace agent before execution'
-        : task.status === 'in_progress' ? 'Task is already running'
+        : awaitingNextStep ? 'Execute the next internal step'
+          : task.status === 'in_progress' ? 'Task is already running'
           : 'Execute task now';
     const resultTitle = hasResultData
       ? `View ${resultData.label} from ${resultData.answeredBy || 'Unknown agent'}`
@@ -1609,6 +1647,7 @@ export class WorkspaceDetailPage {
   }
 
   resetTaskConfirmDialog() {
+    this.pendingTaskConfirmSelection = { stepThrough: false };
     if (this.elements.taskConfirmEyebrow) {
       this.elements.taskConfirmEyebrow.textContent = 'Execution Check';
     }
@@ -1630,6 +1669,14 @@ export class WorkspaceDetailPage {
     if (this.elements.taskConfirmDetails) {
       this.elements.taskConfirmDetails.innerHTML = '';
       this.elements.taskConfirmDetails.classList.add('d-none');
+    }
+    if (this.elements.taskConfirmSequence) {
+      this.elements.taskConfirmSequence.innerHTML = '';
+      this.elements.taskConfirmSequence.classList.add('d-none');
+    }
+    if (this.elements.taskConfirmStepMode && this.elements.taskConfirmStepModeInput) {
+      this.elements.taskConfirmStepMode.classList.add('d-none');
+      this.elements.taskConfirmStepModeInput.checked = false;
     }
   }
 
@@ -1681,6 +1728,59 @@ export class WorkspaceDetailPage {
     this.elements.taskConfirmDetails.classList.remove('d-none');
   }
 
+  normalizeTaskConfirmSequenceItems(items = []) {
+    if (!Array.isArray(items)) return [];
+
+    return items
+      .map((item) => {
+        if (!item || typeof item !== 'object') return null;
+        const title = String(item.title || '').trim();
+        if (!title) return null;
+        return {
+          title,
+          detail: String(item.detail || '').trim(),
+          tag: String(item.tag || '').trim()
+        };
+      })
+      .filter(Boolean)
+      .slice(0, 8);
+  }
+
+  renderTaskConfirmSequence(items = []) {
+    if (!this.elements.taskConfirmSequence) return;
+
+    const normalizedItems = this.normalizeTaskConfirmSequenceItems(items);
+    this.elements.taskConfirmSequence.innerHTML = '';
+    if (normalizedItems.length === 0) {
+      this.elements.taskConfirmSequence.classList.add('d-none');
+      return;
+    }
+
+    const list = normalizedItems.map((item, index) => {
+      const title = this.escapeHtml(item.title);
+      const detail = item.detail ? `<div class="workspace-detail-task-confirm-sequence-step-detail">${this.escapeHtml(item.detail)}</div>` : '';
+      const tag = item.tag ? `<span class="workspace-detail-task-confirm-sequence-tag">${this.escapeHtml(item.tag)}</span>` : '';
+      return `
+        <div class="workspace-detail-task-confirm-sequence-step">
+          <span class="workspace-detail-task-confirm-sequence-index">${index + 1}</span>
+          <div class="workspace-detail-task-confirm-sequence-copy">
+            <div class="workspace-detail-task-confirm-sequence-step-title">
+              <span>${title}</span>
+              ${tag}
+            </div>
+            ${detail}
+          </div>
+        </div>
+      `;
+    }).join('');
+
+    this.elements.taskConfirmSequence.innerHTML = `
+      <div class="workspace-detail-task-confirm-sequence-title">Predicted Sequence</div>
+      <div class="workspace-detail-task-confirm-sequence-list">${list}</div>
+    `;
+    this.elements.taskConfirmSequence.classList.remove('d-none');
+  }
+
   getTaskConfirmModalInstance() {
     if (!this.elements.taskConfirmModal || !window.bootstrap) return null;
     return typeof bootstrap.Modal.getOrCreateInstance === 'function'
@@ -1688,7 +1788,30 @@ export class WorkspaceDetailPage {
       : (bootstrap.Modal.getInstance(this.elements.taskConfirmModal) || new bootstrap.Modal(this.elements.taskConfirmModal));
   }
 
+  renderTaskConfirmStepMode(options = {}) {
+    if (!this.elements.taskConfirmStepMode || !this.elements.taskConfirmStepModeInput) return;
+
+    const enabled = options?.allowStepThrough === true;
+    if (!enabled) {
+      this.elements.taskConfirmStepMode.classList.add('d-none');
+      this.elements.taskConfirmStepModeInput.checked = false;
+      return;
+    }
+
+    this.elements.taskConfirmStepModeInput.checked = options?.defaultStepThrough === true;
+    this.elements.taskConfirmStepMode.classList.remove('d-none');
+  }
+
+  consumePendingTaskConfirmStepThroughSelection() {
+    const selected = this.pendingTaskConfirmSelection?.stepThrough === true;
+    this.pendingTaskConfirmSelection = { stepThrough: false };
+    return selected;
+  }
+
   handleTaskConfirmChoice(confirmed) {
+    this.pendingTaskConfirmSelection = {
+      stepThrough: Boolean(this.elements.taskConfirmStepModeInput?.checked)
+    };
     if (this.pendingTaskConfirm && !this.pendingTaskConfirm.resolved) {
       this.pendingTaskConfirm.resolved = true;
       this.pendingTaskConfirm.resolve(Boolean(confirmed));
@@ -1715,9 +1838,16 @@ export class WorkspaceDetailPage {
     const cancelLabel = String(options?.cancelLabel || 'Cancel').trim();
     const metaItems = Array.isArray(options?.metaItems) ? options.metaItems : [];
     const details = Array.isArray(options?.details) ? options.details : [];
+    const sequenceItems = this.normalizeTaskConfirmSequenceItems(options?.sequenceItems);
+    const allowStepThrough = options?.allowStepThrough === true;
+    const defaultStepThrough = options?.defaultStepThrough === true;
 
     if (!this.elements.taskConfirmModal || !window.bootstrap) {
-      const fallbackText = [message, ...details].filter(Boolean).join('\n\n');
+      const fallbackSequence = sequenceItems.length > 0
+        ? `Predicted sequence:\n${sequenceItems.map((item, index) => `${index + 1}. ${item.title}${item.detail ? ` - ${item.detail}` : ''}`).join('\n')}`
+        : '';
+      const fallbackMode = allowStepThrough ? `Execution mode: ${defaultStepThrough ? 'step through' : 'automatic'}` : '';
+      const fallbackText = [message, ...details, fallbackSequence, fallbackMode].filter(Boolean).join('\n\n');
       return confirm([title, fallbackText].filter(Boolean).join('\n\n'));
     }
 
@@ -1746,6 +1876,8 @@ export class WorkspaceDetailPage {
 
     this.renderTaskConfirmMeta(metaItems);
     this.renderTaskConfirmDetails(details);
+    this.renderTaskConfirmSequence(sequenceItems);
+    this.renderTaskConfirmStepMode({ allowStepThrough, defaultStepThrough });
 
     return new Promise((resolve) => {
       this.pendingTaskConfirm = { resolve, resolved: false };
@@ -1806,6 +1938,493 @@ export class WorkspaceDetailPage {
       : [];
     if (reasons.length === 0) return '';
     return `\n\nWhy this suggestion:\n- ${reasons.join('\n- ')}`;
+  }
+
+  isLikelyFilesystemIntent(description) {
+    const lower = String(description || '').trim().toLowerCase();
+    if (!lower) return false;
+
+    const directPhrases = [
+      'move files',
+      'copy files',
+      'rename files',
+      'organize files',
+      'organise files',
+      'gather files',
+      'collect files',
+      'sort files',
+      'clean up files',
+      'into folder',
+      'into directory',
+      'filesystem',
+      'file management'
+    ];
+    if (directPhrases.some((phrase) => lower.includes(phrase))) {
+      return true;
+    }
+
+    const actionSignals = ['move', 'copy', 'rename', 'organize', 'organise', 'gather', 'collect', 'sort', 'group', 'archive'];
+    const nounSignals = ['file', 'files', 'folder', 'folders', 'directory', 'directories', 'filesystem', 'path', 'paths'];
+    const actionCount = actionSignals.filter((signal) => lower.includes(signal)).length;
+    const nounCount = nounSignals.filter((signal) => lower.includes(signal)).length;
+
+    return (actionCount > 0 && nounCount > 0) || nounCount > 1;
+  }
+
+  inferTaskExecutionRequirements(description) {
+    const requirements = [];
+    if (this.isLikelyBrowserAutomationIntent(description)) {
+      requirements.push({
+        key: TASK_REQUIREMENT_KEYS.BROWSER,
+        label: 'Browser access',
+        reason: 'This task appears to require visiting or interacting with webpages.'
+      });
+    }
+    if (this.isLikelyFilesystemIntent(description)) {
+      requirements.push({
+        key: TASK_REQUIREMENT_KEYS.FILESYSTEM,
+        label: 'File management',
+        reason: 'This task appears to require gathering, moving, renaming, or organizing files and folders.'
+      });
+    }
+    return requirements;
+  }
+
+  getTaskRequirementSignals(requirementKey) {
+    switch (String(requirementKey || '').trim().toLowerCase()) {
+      case TASK_REQUIREMENT_KEYS.BROWSER:
+        return {
+          capabilities: ['browser', 'browser_automation', 'web_search', 'web_fetch'],
+          plugins: ['browser', 'playwright', 'browserbase', 'puppeteer', 'navigate', 'open_url', 'web_fetch', 'web_search'],
+          mcp: ['playwright', 'browserbase', 'puppeteer', 'browser'],
+          skills: ['browser', 'web', 'playwright', 'navigate', 'website', 'scrape']
+        };
+      case TASK_REQUIREMENT_KEYS.FILESYSTEM:
+        return {
+          capabilities: ['file_operations', 'filesystem', 'storage'],
+          plugins: ['filesystem', 'file', 'files', 'folder', 'directory', 'finder', 'shell', 'command', 'os-shell'],
+          mcp: ['filesystem', 'files', 'file', 'finder', 'directory'],
+          skills: ['file', 'files', 'folder', 'folders', 'directory', 'filesystem', 'finder', 'organize', 'organiser', 'move', 'rename', 'copy']
+        };
+      default:
+        return {
+          capabilities: [],
+          plugins: [],
+          mcp: [],
+          skills: []
+        };
+    }
+  }
+
+  getTaskRequirementSeedDefaults(requirements = []) {
+    const keys = new Set((Array.isArray(requirements) ? requirements : []).map((requirement) => String(requirement?.key || '').trim().toLowerCase()));
+    if (keys.has(TASK_REQUIREMENT_KEYS.FILESYSTEM)) {
+      return { name: 'Folder Organizer', type: 'tool-calling' };
+    }
+    if (keys.has(TASK_REQUIREMENT_KEYS.BROWSER)) {
+      return { name: 'Browser Assistant', type: 'tool-calling' };
+    }
+    return { name: 'Task Assistant', type: 'tool-calling' };
+  }
+
+  getTaskRequirementMatches(values, signals) {
+    const normalizedValues = Array.isArray(values)
+      ? values.map((value) => String(value || '').trim()).filter(Boolean)
+      : [];
+    const normalizedSignals = Array.isArray(signals)
+      ? signals.map((value) => String(value || '').trim().toLowerCase()).filter(Boolean)
+      : [];
+
+    const matches = [];
+    const seen = new Set();
+    normalizedValues.forEach((value) => {
+      const lower = value.toLowerCase();
+      if (!lower) return;
+      if (!normalizedSignals.some((signal) => lower.includes(signal))) return;
+      if (seen.has(lower)) return;
+      seen.add(lower);
+      matches.push(value);
+    });
+
+    return matches;
+  }
+
+  getTaskRequirementSkillText(skill) {
+    if (!skill || typeof skill !== 'object') return '';
+
+    const parts = [
+      skill.name,
+      skill.description,
+      ...(Array.isArray(skill.requiredMCPServers) ? skill.requiredMCPServers : []),
+      ...(Array.isArray(skill.allowedTools) ? skill.allowedTools : [])
+    ];
+
+    return parts
+      .map((value) => String(value || '').trim().toLowerCase())
+      .filter(Boolean)
+      .join(' ');
+  }
+
+  async getEnabledSkillsForAgent(agentName) {
+    const state = await this.loadAgentSkills(agentName, { refreshUI: false });
+    if (!state || !Array.isArray(state.skills)) return [];
+    return state.skills.filter((skill) => skill?.enabled !== false && skill?.name);
+  }
+
+  skillSupportsTaskRequirement(skill, requirementKey) {
+    if (!skill || skill.enabled === false) return false;
+
+    const signals = this.getTaskRequirementSignals(requirementKey);
+    const skillText = this.getTaskRequirementSkillText(skill);
+    const mcpMatches = this.getTaskRequirementMatches(skill.requiredMCPServers, signals.mcp);
+    if (mcpMatches.length > 0) {
+      return true;
+    }
+
+    return signals.skills.some((signal) => skillText.includes(signal));
+  }
+
+  getAgentSupportForTaskRequirement(profile, skills, requirement) {
+    if (!profile || !requirement) {
+      return { supported: false, score: 0, reasons: [] };
+    }
+
+    const signals = this.getTaskRequirementSignals(requirement.key);
+    const reasons = [];
+    let score = 0;
+
+    if (requirement.key === TASK_REQUIREMENT_KEYS.BROWSER && this.agentSupportsBrowserAutomation(profile)) {
+      score += 3;
+      reasons.push('has browser automation support');
+    }
+
+    const capabilityMatches = this.getTaskRequirementMatches(profile.capabilities, signals.capabilities);
+    if (capabilityMatches.length > 0) {
+      score += 1;
+      reasons.push(`has capability "${capabilityMatches[0]}"`);
+    }
+
+    const pluginMatches = this.getTaskRequirementMatches(profile.enabledPlugins, signals.plugins);
+    if (pluginMatches.length > 0) {
+      score += 2;
+      reasons.push(`has tool support via "${pluginMatches[0]}"`);
+    }
+
+    const mcpMatches = this.getTaskRequirementMatches(profile.mcpServers, signals.mcp);
+    if (mcpMatches.length > 0) {
+      score += 3;
+      reasons.push(`has MCP support via "${mcpMatches[0]}"`);
+    }
+
+    const skillMatches = (Array.isArray(skills) ? skills : [])
+      .filter((skill) => this.skillSupportsTaskRequirement(skill, requirement.key))
+      .slice(0, 2);
+    if (skillMatches.length > 0) {
+      score += 4;
+      reasons.push(`has skill support via "${skillMatches[0].name}"`);
+    }
+
+    const dedupedReasons = [];
+    const seenReasons = new Set();
+    reasons.forEach((reason) => {
+      const normalized = String(reason || '').trim().toLowerCase();
+      if (!normalized || seenReasons.has(normalized)) return;
+      seenReasons.add(normalized);
+      dedupedReasons.push(reason);
+    });
+
+    return {
+      supported: score > 0,
+      score,
+      reasons: dedupedReasons.slice(0, 3)
+    };
+  }
+
+  async evaluateAgentForTaskRequirements(agentName, requirements = []) {
+    const profile = this.getAgentProfile(agentName);
+    const normalizedRequirements = Array.isArray(requirements) ? requirements.filter(Boolean) : [];
+    if (!profile || normalizedRequirements.length === 0) return null;
+
+    const skills = await this.getEnabledSkillsForAgent(agentName);
+    const requirementSupport = [];
+    let totalScore = 0;
+    const reasons = [];
+    const seenReasons = new Set();
+
+    for (const requirement of normalizedRequirements) {
+      const support = this.getAgentSupportForTaskRequirement(profile, skills, requirement);
+      if (!support.supported) {
+        return null;
+      }
+      totalScore += support.score;
+      requirementSupport.push({ requirement, support });
+      support.reasons.forEach((reason) => {
+        const key = String(reason || '').trim().toLowerCase();
+        if (!key || seenReasons.has(key)) return;
+        seenReasons.add(key);
+        reasons.push(reason);
+      });
+    }
+
+    const inWorkspace = this.getWorkspaceAgentNames()
+      .some((name) => this.normalizeAgentName(name) === this.normalizeAgentName(agentName));
+    if (inWorkspace) {
+      totalScore += 2;
+    }
+    if (profile.status === 'active') {
+      totalScore += 1;
+    }
+
+    return {
+      agentName: profile.name || agentName,
+      inWorkspace,
+      score: totalScore,
+      reasons: reasons.slice(0, 4),
+      requirementSupport
+    };
+  }
+
+  async findBestAgentForTaskRequirements(requirements = [], options = {}) {
+    await this.loadAgentCatalog();
+
+    const exclude = this.normalizeAgentName(options?.excludeAgent || '');
+    const workspaceOnly = options?.workspaceOnly === true;
+    const candidateNames = workspaceOnly
+      ? this.getWorkspaceAgentNames()
+      : Array.from(new Set((this.agentCatalog || []).map((profile) => String(profile?.name || '').trim()).filter(Boolean)));
+
+    const evaluations = await Promise.all(candidateNames.map(async (name) => {
+      if (this.normalizeAgentName(name) === exclude) return null;
+      return this.evaluateAgentForTaskRequirements(name, requirements);
+    }));
+
+    const ranked = evaluations
+      .filter(Boolean)
+      .sort((left, right) => {
+        if (right.score !== left.score) {
+          return right.score - left.score;
+        }
+        if (left.inWorkspace !== right.inWorkspace) {
+          return left.inWorkspace ? -1 : 1;
+        }
+        return left.agentName.localeCompare(right.agentName, undefined, { sensitivity: 'base' });
+      });
+
+    return ranked[0] || null;
+  }
+
+  async loadCapabilitySuggestionCatalog(force = false) {
+    if (!force && this.capabilitySuggestionCatalog) {
+      return this.capabilitySuggestionCatalog;
+    }
+    if (!force && this.capabilitySuggestionCatalogPromise) {
+      return this.capabilitySuggestionCatalogPromise;
+    }
+
+    this.capabilitySuggestionCatalogPromise = (async () => {
+      const catalog = {
+        mcpServers: [],
+        skills: []
+      };
+
+      try {
+        const [mcpResult, skillsResult] = await Promise.allSettled([
+          fetch('/api/mcp/servers'),
+          fetch(`/api/skills?agent=${encodeURIComponent(AGENT_CREATION_SKILL_CATALOG_AGENT)}`)
+        ]);
+
+        if (mcpResult.status === 'fulfilled' && mcpResult.value.ok) {
+          const data = await mcpResult.value.json().catch(() => ({}));
+          const servers = Array.isArray(data?.servers) ? data.servers : [];
+          catalog.mcpServers = servers
+            .map((server) => ({
+              name: String(server?.name || '').trim()
+            }))
+            .filter((server) => server.name);
+        }
+
+        if (skillsResult.status === 'fulfilled' && skillsResult.value.ok) {
+          const data = await skillsResult.value.json().catch(() => ({}));
+          const skills = Array.isArray(data?.skills) ? data.skills : [];
+          catalog.skills = skills
+            .map((skill) => ({
+              name: String(skill?.name || '').trim(),
+              description: String(skill?.description || '').trim(),
+              requiredMCPServers: Array.isArray(skill?.required_mcp_servers) ? skill.required_mcp_servers.map((value) => String(value || '').trim()).filter(Boolean) : []
+            }))
+            .filter((skill) => skill.name);
+        }
+      } catch (error) {
+        console.error('Failed to load capability suggestion catalog:', error);
+      }
+
+      this.capabilitySuggestionCatalog = catalog;
+      this.capabilitySuggestionCatalogPromise = null;
+      return catalog;
+    })();
+
+    return this.capabilitySuggestionCatalogPromise;
+  }
+
+  getCapabilitySuggestionsForRequirements(requirements = [], catalog = null) {
+    const sourceCatalog = catalog && typeof catalog === 'object'
+      ? catalog
+      : { mcpServers: [], skills: [] };
+    const requirementKeys = Array.isArray(requirements)
+      ? requirements.map((requirement) => String(requirement?.key || '').trim().toLowerCase()).filter(Boolean)
+      : [];
+
+    const matchedMCPServers = [];
+    const matchedSkills = [];
+    const seenMCPServers = new Set();
+    const seenSkills = new Set();
+
+    requirementKeys.forEach((requirementKey) => {
+      const signals = this.getTaskRequirementSignals(requirementKey);
+
+      (sourceCatalog.mcpServers || []).forEach((server) => {
+        const name = String(server?.name || '').trim();
+        const normalized = name.toLowerCase();
+        if (!name || seenMCPServers.has(normalized)) return;
+        if (!signals.mcp.some((signal) => normalized.includes(signal))) return;
+        seenMCPServers.add(normalized);
+        matchedMCPServers.push(name);
+      });
+
+      (sourceCatalog.skills || []).forEach((skill) => {
+        const name = String(skill?.name || '').trim();
+        const normalized = name.toLowerCase();
+        if (!name || seenSkills.has(normalized)) return;
+        const skillText = this.getTaskRequirementSkillText(skill);
+        const requiredMCPServers = Array.isArray(skill?.requiredMCPServers) ? skill.requiredMCPServers : [];
+        const hasRequirementMatch = signals.skills.some((signal) => skillText.includes(signal)) ||
+          this.getTaskRequirementMatches(requiredMCPServers, signals.mcp).length > 0;
+        if (!hasRequirementMatch) return;
+        seenSkills.add(normalized);
+        matchedSkills.push(name);
+      });
+    });
+
+    return {
+      mcpServers: matchedMCPServers.slice(0, 3),
+      skills: matchedSkills.slice(0, 4)
+    };
+  }
+
+  buildCapabilityAwareAgentDescription(task, requirements = [], suggestions = {}) {
+    const taskLabel = this.getTaskDisplayLabel(task);
+    const details = [
+      `Create an agent that can complete the task "${taskLabel}".`
+    ];
+
+    const requirementKeys = new Set((Array.isArray(requirements) ? requirements : []).map((requirement) => String(requirement?.key || '').trim().toLowerCase()));
+    if (requirementKeys.has(TASK_REQUIREMENT_KEYS.FILESYSTEM)) {
+      details.push('It should be able to inspect folders, gather related files, and move or organize them safely.');
+    }
+    if (requirementKeys.has(TASK_REQUIREMENT_KEYS.BROWSER)) {
+      details.push('It should be able to open websites and interact with browser pages when needed.');
+    }
+    if (Array.isArray(suggestions?.mcpServers) && suggestions.mcpServers.length > 0) {
+      details.push(`Enable MCP servers such as ${suggestions.mcpServers.join(', ')}.`);
+    }
+    if (Array.isArray(suggestions?.skills) && suggestions.skills.length > 0) {
+      details.push(`Enable relevant skills such as ${suggestions.skills.join(', ')}.`);
+    }
+
+    return details.join(' ');
+  }
+
+  async suggestCapabilityAwareAgentSetup(task, requirements = []) {
+    const normalizedRequirements = Array.isArray(requirements) ? requirements.filter(Boolean) : [];
+    if (!task || normalizedRequirements.length === 0) {
+      return { handled: false, agentName: '' };
+    }
+
+    const taskLabel = this.getTaskDisplayLabel(task);
+    const recommendedAgent = await this.findBestAgentForTaskRequirements(normalizedRequirements);
+    if (recommendedAgent) {
+      const alreadyInWorkspace = recommendedAgent.inWorkspace === true;
+      const previewSequence = this.getPredictedTaskExecutionSequence(task, [], {
+        assignedAgent: recommendedAgent.agentName
+      });
+      const confirmed = await this.showTaskConfirmDialog({
+        eyebrow: 'Capability Match',
+        title: alreadyInWorkspace
+          ? `Assign "${recommendedAgent.agentName}" to this task?`
+          : `Add "${recommendedAgent.agentName}" and assign it?`,
+        message: alreadyInWorkspace
+          ? `This task needs ${normalizedRequirements.map((requirement) => requirement.label.toLowerCase()).join(' and ')}. "${recommendedAgent.agentName}" is the best current match.`
+          : `This task needs ${normalizedRequirements.map((requirement) => requirement.label.toLowerCase()).join(' and ')}. "${recommendedAgent.agentName}" is the best current match and can be added to this workspace.`,
+        confirmLabel: alreadyInWorkspace ? 'Assign Agent' : 'Add and Assign',
+        metaItems: [taskLabel, recommendedAgent.agentName, alreadyInWorkspace ? 'Capability match' : 'Add to workspace'],
+        details: [
+          ...normalizedRequirements.map((requirement) => requirement.reason),
+          ...recommendedAgent.reasons
+        ].slice(0, 5),
+        sequenceItems: previewSequence
+      });
+
+      if (!confirmed) {
+        return { handled: true, agentName: '' };
+      }
+
+      try {
+        if (!alreadyInWorkspace) {
+          await this.addAgentToWorkspace(recommendedAgent.agentName, { toast: false });
+        }
+        await this.assignTaskToAgent(task.id, recommendedAgent.agentName);
+        task.to = recommendedAgent.agentName;
+        this.renderTasks();
+        if (window.Toast) {
+          window.Toast.success(alreadyInWorkspace
+            ? `Assigned "${recommendedAgent.agentName}" to this task.`
+            : `Added "${recommendedAgent.agentName}" and assigned it to this task.`);
+        }
+        return { handled: true, agentName: recommendedAgent.agentName };
+      } catch (error) {
+        console.error('Failed to apply capability-aware agent setup:', error);
+        if (window.Toast) {
+          window.Toast.error(error.message || 'Failed to apply suggested agent');
+        }
+        return { handled: true, agentName: '' };
+      }
+    }
+
+    const catalog = await this.loadCapabilitySuggestionCatalog();
+    const suggestions = this.getCapabilitySuggestionsForRequirements(normalizedRequirements, catalog);
+    const defaults = this.getTaskRequirementSeedDefaults(normalizedRequirements);
+    const previewSequence = this.getPredictedTaskExecutionSequence(task);
+    const createAgent = await this.showTaskConfirmDialog({
+      eyebrow: 'Capability Required',
+      title: 'Create a capable agent for this task?',
+      message: `No current agent advertises ${normalizedRequirements.map((requirement) => requirement.label.toLowerCase()).join(' and ')} for "${taskLabel}".`,
+      confirmLabel: 'Create Agent',
+      cancelLabel: 'Cancel',
+      metaItems: [taskLabel, defaults.name, 'Needs MCP or skills'],
+      details: [
+        ...normalizedRequirements.map((requirement) => requirement.reason),
+        suggestions.mcpServers.length > 0 ? `Suggested MCP servers: ${suggestions.mcpServers.join(', ')}` : 'No matching MCP server is configured yet.',
+        suggestions.skills.length > 0 ? `Suggested skills: ${suggestions.skills.join(', ')}` : 'No matching reusable skill is available yet.'
+      ],
+      sequenceItems: previewSequence
+    });
+    if (!createAgent) {
+      return { handled: true, agentName: '' };
+    }
+
+    this.openCreateAgentFlow({
+      seedName: defaults.name,
+      seedType: defaults.type,
+      autoDescription: this.buildCapabilityAwareAgentDescription(task, normalizedRequirements, suggestions),
+      preferAutoConfig: true,
+      workspaceId: this.workspaceId,
+      taskId: task.id,
+      assignTask: true,
+      suggestedMCPServers: suggestions.mcpServers,
+      suggestedSkills: suggestions.skills
+    });
+
+    return { handled: true, agentName: '' };
   }
 
   async populateAddAgentOptions() {
@@ -1934,6 +2553,14 @@ export class WorkspaceDetailPage {
 
     const taskLabel = String(task.description || task.name || task.id || 'this task').trim() || 'this task';
     const prompt = this.getTaskAgentSuggestionPrompt(task);
+    const requirements = this.inferTaskExecutionRequirements(prompt);
+    if (requirements.length > 0) {
+      const capabilitySuggestion = await this.suggestCapabilityAwareAgentSetup(task, requirements);
+      if (capabilitySuggestion.handled) {
+        return capabilitySuggestion.agentName || '';
+      }
+    }
+
     const routeData = await this.fetchTaskAgentSuggestion(task);
     const suggestedAgent = String(routeData?.matched_agent || '').trim();
     const alreadyInWorkspace = suggestedAgent
@@ -1944,6 +2571,9 @@ export class WorkspaceDetailPage {
       const reasonItems = Array.isArray(routeData?.reasons)
         ? routeData.reasons.map((reason) => String(reason || '').trim()).filter(Boolean).slice(0, 3)
         : [];
+      const previewSequence = this.getPredictedTaskExecutionSequence(task, [], {
+        assignedAgent: suggestedAgent
+      });
       const confirmed = await this.showTaskConfirmDialog({
         eyebrow: 'Ori Recommendation',
         title: alreadyInWorkspace ? `Assign "${suggestedAgent}" to this task?` : `Add "${suggestedAgent}" and assign it?`,
@@ -1952,7 +2582,8 @@ export class WorkspaceDetailPage {
           : `Ori matched ${taskLabel} to "${suggestedAgent}" and can add it to this workspace before execution.`,
         confirmLabel: alreadyInWorkspace ? 'Assign Agent' : 'Add and Assign',
         metaItems: [taskLabel, suggestedAgent, alreadyInWorkspace ? 'Ready to assign' : 'Needs workspace add'],
-        details: reasonItems
+        details: reasonItems,
+        sequenceItems: previewSequence
       });
 
       if (!confirmed) {
@@ -2012,7 +2643,27 @@ export class WorkspaceDetailPage {
     return humanLoop && typeof humanLoop === 'object' ? humanLoop : null;
   }
 
+  getTaskExecutionMode(task) {
+    const mode = String(task?.execution_mode || '').trim().toLowerCase();
+    return mode === 'step_through' ? 'step_through' : 'auto';
+  }
+
+  isTaskAwaitingNextStep(task) {
+    return this.getTaskExecutionMode(task) === 'step_through'
+      && task?.status === 'in_progress'
+      && task?.context?.execution_step_waiting === true;
+  }
+
   getTaskStatusPresentation(task) {
+    if (this.isTaskAwaitingNextStep(task)) {
+      return {
+        className: 'assigned',
+        label: 'Next Step Ready',
+        isBlocked: false,
+        reason: 'This task is paused between internal execution steps.'
+      };
+    }
+
     const humanLoop = this.getTaskHumanLoop(task);
     if (humanLoop && String(humanLoop.state || '').toLowerCase() === 'blocked') {
       const reason = String(humanLoop.reason || '').trim();
@@ -2290,6 +2941,34 @@ export class WorkspaceDetailPage {
     return parts.join('\n');
   }
 
+  getExecutionStepBreakdownSteps(task) {
+    const steps = Array.isArray(task?.execution_steps) ? task.execution_steps : [];
+    if (!steps.length) return [];
+
+    return steps.map((step, index) => {
+      const detailParts = [];
+      const detail = this.normalizeBreakdownField(step?.detail);
+      const result = this.normalizeBreakdownField(step?.result);
+      const errorText = this.normalizeBreakdownField(step?.error);
+      const startedAt = this.normalizeBreakdownField(step?.started_at);
+      const completedAt = this.normalizeBreakdownField(step?.completed_at);
+      const tag = this.normalizeBreakdownField(step?.tag);
+
+      if (detail) detailParts.push(detail);
+      if (tag) detailParts.push(`Type: ${tag}`);
+      if (startedAt) detailParts.push(`Started: ${formatDate(startedAt)}`);
+      if (completedAt) detailParts.push(`Completed: ${formatDate(completedAt)}`);
+      if (result) detailParts.push(`Result: ${this.truncateBreakdownText(result, 360)}`);
+      if (errorText) detailParts.push(`Error: ${this.truncateBreakdownText(errorText, 360)}`);
+
+      return {
+        title: String(step?.title || `Step ${index + 1}`).trim() || `Step ${index + 1}`,
+        status: String(step?.status || 'pending').trim().toLowerCase() || 'pending',
+        detail: detailParts.join('\n')
+      };
+    });
+  }
+
   getRetryHistoryBreakdownSteps(task) {
     const history = Array.isArray(task?.context?.execution_retry?.history)
       ? task.context.execution_retry.history
@@ -2398,6 +3077,11 @@ export class WorkspaceDetailPage {
   getTaskResultBreakdownSteps(task, subtasks = []) {
     if (!task) return [];
 
+    const executionSteps = this.getExecutionStepBreakdownSteps(task);
+    if (executionSteps.length > 0) {
+      return executionSteps;
+    }
+
     const sortedSubtasks = Array.isArray(subtasks) ? [...subtasks].sort((a, b) => {
       const aIndex = Number.isFinite(Number(a?.subtask_index)) ? Number(a.subtask_index) : Number.MAX_SAFE_INTEGER;
       const bIndex = Number.isFinite(Number(b?.subtask_index)) ? Number(b.subtask_index) : Number.MAX_SAFE_INTEGER;
@@ -2439,6 +3123,84 @@ export class WorkspaceDetailPage {
     }
 
     return this.inferSyntheticBreakdownSteps(task);
+  }
+
+  getPredictedTaskExecutionSequence(task, subtasks = [], options = {}) {
+    if (!task) return [];
+
+    const sortedSubtasks = Array.isArray(subtasks) ? [...subtasks].sort((a, b) => {
+      const aIndex = Number.isFinite(Number(a?.subtask_index)) ? Number(a.subtask_index) : Number.MAX_SAFE_INTEGER;
+      const bIndex = Number.isFinite(Number(b?.subtask_index)) ? Number(b.subtask_index) : Number.MAX_SAFE_INTEGER;
+      if (aIndex !== bIndex) return aIndex - bIndex;
+      const aTime = a?.created_at ? new Date(a.created_at).getTime() : 0;
+      const bTime = b?.created_at ? new Date(b.created_at).getTime() : 0;
+      return aTime - bTime;
+    }) : [];
+
+    if (sortedSubtasks.length > 0) {
+      return sortedSubtasks.map((subtask) => {
+        const assignedAgent = String(subtask?.to || '').trim();
+        return {
+          title: String(subtask?.description || subtask?.name || 'Workflow step').trim() || 'Workflow step',
+          detail: assignedAgent && assignedAgent !== 'unassigned'
+            ? `Assigned to ${assignedAgent}.`
+            : 'Needs an assigned agent before execution.',
+          tag: 'Workflow'
+        };
+      });
+    }
+
+    return this.inferPredictedSequenceSteps(task, options);
+  }
+
+  inferPredictedSequenceSteps(task, options = {}) {
+    const description = String(task?.description || task?.name || '').trim();
+    const lower = description.toLowerCase();
+    const requirements = this.inferTaskExecutionRequirements(description);
+    const hasFilesystem = requirements.some((requirement) => requirement.key === TASK_REQUIREMENT_KEYS.FILESYSTEM);
+    const hasBrowser = requirements.some((requirement) => requirement.key === TASK_REQUIREMENT_KEYS.BROWSER);
+    const assignedAgent = String(options?.assignedAgent || '').trim();
+    const agentLabel = assignedAgent && assignedAgent !== 'unassigned' ? assignedAgent : 'the selected agent';
+
+    const toStep = (title, detail = '', tag = '') => ({ title, detail, tag });
+
+    if (hasFilesystem) {
+      return [
+        toStep('Check allowed filesystem scope', `Confirm which directories ${agentLabel} can access before making changes.`, 'Discovery'),
+        toStep('Inspect candidate directories', 'Look through likely source folders for DNM-related material.', 'Discovery'),
+        toStep('Identify DNM-related files', 'Match files by filename, path, and available task context.', 'Analysis'),
+        toStep('Create the DNM folder if needed', 'Prepare the destination folder without overwriting unrelated content.', 'Mutation'),
+        toStep('Move or copy matching files', 'Relocate the selected files into the DNM folder safely.', 'Mutation'),
+        toStep('Verify final folder contents', 'Confirm the destination contains the expected files and note anything skipped.', 'Verify'),
+        toStep('Return a summary', 'List moved files, skipped files, and any follow-up needed.', 'Summary')
+      ];
+    }
+
+    if (hasBrowser) {
+      return [
+        toStep('Check available browser capability', `Confirm ${agentLabel} can open and interact with the required site.`, 'Discovery'),
+        toStep('Open the target page', 'Navigate to the relevant website or URL for this task.', 'Action'),
+        toStep('Inspect the required information or controls', 'Locate the data, form, or interface element needed to complete the task.', 'Analysis'),
+        toStep('Perform the requested browser action', 'Carry out the needed interaction or extraction.', 'Action'),
+        toStep('Verify the outcome', 'Confirm the page state or extracted result matches the task goal.', 'Verify'),
+        toStep('Return a summary', 'Report what was done and any follow-up needed.', 'Summary')
+      ];
+    }
+
+    if (lower.includes('summarize') || lower.includes('summary') || lower.includes('review')) {
+      return [
+        toStep('Collect the relevant context', 'Gather the information needed to answer the request.', 'Discovery'),
+        toStep('Synthesize the main findings', 'Turn the collected context into a concise result.', 'Analysis'),
+        toStep('Return a summary', 'Present the final result with the most relevant details.', 'Summary')
+      ];
+    }
+
+    const fallbackSteps = this.inferSyntheticBreakdownSteps({ ...task, status: 'pending' });
+    return fallbackSteps.map((step, index) => ({
+      title: String(step?.title || `Step ${index + 1}`).trim() || `Step ${index + 1}`,
+      detail: String(step?.detail || '').trim(),
+      tag: index === 0 ? 'Discovery' : (index === fallbackSteps.length - 1 ? 'Summary' : 'Action')
+    }));
   }
 
   inferSyntheticBreakdownSteps(task) {
@@ -2797,6 +3559,7 @@ export class WorkspaceDetailPage {
 
           const profile = {
             name,
+            status: String(agent?.status || '').trim().toLowerCase(),
             capabilities: Array.isArray(agent?.capabilities) ? agent.capabilities.map((value) => String(value || '').trim()).filter(Boolean) : [],
             allowWebSearch: Boolean(agent?.allow_web_search),
             enabledPlugins: Array.isArray(agent?.enabled_plugins) ? agent.enabled_plugins.map((value) => String(value || '').trim()).filter(Boolean) : [],
@@ -2872,6 +3635,13 @@ export class WorkspaceDetailPage {
     return false;
   }
 
+  agentSupportsFilesystemOperations(profile) {
+    const support = this.getAgentSupportForTaskRequirement(profile, [], {
+      key: TASK_REQUIREMENT_KEYS.FILESYSTEM
+    });
+    return support.supported;
+  }
+
   findBestBrowserCapableAgent(excludeAgent = '') {
     const exclude = this.normalizeAgentName(excludeAgent);
     const candidates = this.getWorkspaceAgentNames();
@@ -2910,9 +3680,10 @@ export class WorkspaceDetailPage {
     return false;
   }
 
-  getTaskExecutionPreflight(task, assignedAgent) {
+  async getTaskExecutionPreflight(task, assignedAgent) {
     const description = String(task?.description || task?.name || '').trim();
-    if (!this.isLikelyBrowserAutomationIntent(description)) {
+    const requirements = this.inferTaskExecutionRequirements(description);
+    if (requirements.length === 0) {
       return { kind: 'none' };
     }
 
@@ -2921,23 +3692,42 @@ export class WorkspaceDetailPage {
       return { kind: 'none' };
     }
 
-    const currentProfile = this.getAgentProfile(currentAgent);
-    if (!currentProfile || this.agentSupportsBrowserAutomation(currentProfile)) {
+    const currentEvaluation = await this.evaluateAgentForTaskRequirements(currentAgent, requirements);
+    if (currentEvaluation) {
       return { kind: 'none' };
     }
 
-    const recommendedAgent = this.findBestBrowserCapableAgent(currentAgent);
+    const requirementSummary = requirements.map((requirement) => requirement.label.toLowerCase()).join(' and ');
+    const recommendedAgent = await this.findBestAgentForTaskRequirements(requirements, { excludeAgent: currentAgent });
     if (recommendedAgent) {
       return {
         kind: 'switch_recommended',
-        recommendedAgent,
-        message: `"${currentAgent}" likely cannot execute browser actions for this task.`
+        recommendedAgent: recommendedAgent.agentName,
+        message: `"${currentAgent}" likely lacks ${requirementSummary} for this task.`,
+        details: [
+          ...requirements.map((requirement) => requirement.reason),
+          ...recommendedAgent.reasons
+        ].slice(0, 5)
       };
     }
 
+    const capabilityCatalog = await this.loadCapabilitySuggestionCatalog();
+    const suggestions = this.getCapabilitySuggestionsForRequirements(requirements, capabilityCatalog);
+    const defaults = this.getTaskRequirementSeedDefaults(requirements);
+
     return {
-      kind: 'warning',
-      message: `This looks like a browser task, but "${currentAgent}" likely lacks browser capability in this workspace.`
+      kind: 'create_recommended',
+      message: `This task likely needs ${requirementSummary}, but "${currentAgent}" does not advertise matching MCP servers, tools, or skills.`,
+      details: [
+        ...requirements.map((requirement) => requirement.reason),
+        suggestions.mcpServers.length > 0 ? `Suggested MCP servers: ${suggestions.mcpServers.join(', ')}` : 'No matching MCP server is configured yet.',
+        suggestions.skills.length > 0 ? `Suggested skills: ${suggestions.skills.join(', ')}` : 'No matching reusable skill is available yet.'
+      ],
+      suggestedMCPServers: suggestions.mcpServers,
+      suggestedSkills: suggestions.skills,
+      seedName: defaults.name,
+      seedType: defaults.type,
+      autoDescription: this.buildCapabilityAwareAgentDescription(task, requirements, suggestions)
     };
   }
 
@@ -2948,6 +3738,9 @@ export class WorkspaceDetailPage {
     const badges = [];
     if (this.agentSupportsBrowserAutomation(profile)) {
       badges.push({ key: 'browser', label: 'Browser' });
+    }
+    if (this.agentSupportsFilesystemOperations(profile)) {
+      badges.push({ key: 'files', label: 'Files' });
     }
     if (profile.allowWebSearch) {
       badges.push({ key: 'web', label: 'Web' });
@@ -3055,6 +3848,13 @@ export class WorkspaceDetailPage {
     this.elements.taskExecutionViewResultBtn.disabled = !enabled;
   }
 
+  setExecutionNextStepEnabled(enabled, label = 'Run Next Step') {
+    if (!this.elements.taskExecutionNextStepBtn) return;
+    this.elements.taskExecutionNextStepBtn.textContent = label;
+    this.elements.taskExecutionNextStepBtn.classList.toggle('d-none', !enabled);
+    this.elements.taskExecutionNextStepBtn.disabled = !enabled;
+  }
+
   applyTopBackdropLayer(layerClass) {
     const backdrops = Array.from(document.querySelectorAll('.modal-backdrop.show'));
     if (!backdrops.length) return;
@@ -3077,10 +3877,45 @@ export class WorkspaceDetailPage {
     const attemptsUsed = Number(retry.attempts_used || 0);
     const maxAttempts = Number(retry.max_attempts || task?.context?.execution_max_attempts || 0);
     const parts = [answeredBy, updatedAt].filter(Boolean);
+    if (this.getTaskExecutionMode(task) === 'step_through') {
+      parts.push('Step-through');
+    }
     if (attemptsUsed > 0 && maxAttempts > 0) {
       parts.push(`Attempt ${attemptsUsed}/${maxAttempts}`);
     }
     this.elements.taskExecutionMeta.textContent = parts.join(' • ');
+  }
+
+  updateTaskExecutionControls(task) {
+    const awaitingNextStep = this.isTaskAwaitingNextStep(task);
+    this.setExecutionNextStepEnabled(awaitingNextStep, awaitingNextStep ? 'Run Next Step' : 'Run Next Step');
+  }
+
+  async advanceCurrentExecutionStep() {
+    if (!this.currentExecutionTaskId) return;
+
+    try {
+      this.setExecutionNextStepEnabled(false, 'Running...');
+      const response = await fetch('/api/orchestration/tasks/execute', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          task_id: this.currentExecutionTaskId,
+          step_action: 'next'
+        })
+      });
+      if (!response.ok) {
+        const text = await response.text();
+        throw new Error(text || 'Failed to execute the next step');
+      }
+      this.appendExecutionLog('Running the next internal step.', 'info', `${this.currentExecutionTaskId}:next-step`);
+      await this.startExecutionMonitor(this.currentExecutionTaskId);
+      await this.loadTasks();
+    } catch (error) {
+      console.error('Failed to advance task step:', error);
+      if (window.Toast) window.Toast.error(error.message || 'Failed to run the next step');
+      this.setExecutionNextStepEnabled(true);
+    }
   }
 
   openTaskExecutionModal(task) {
@@ -3094,6 +3929,7 @@ export class WorkspaceDetailPage {
     this.updateTaskExecutionMeta(task);
     this.setExecutionModalStatus(this.getTaskExecutionState(task));
     this.refreshExecutionBreakdown(task);
+    this.updateTaskExecutionControls(task);
     this.setExecutionViewResultEnabled(false);
     this.clearExecutionLog();
     this.appendExecutionLog('Preparing execution...', 'info', `${task.id}:prepare`);
@@ -3128,10 +3964,20 @@ export class WorkspaceDetailPage {
         this.updateTaskExecutionMeta(task);
         this.setExecutionModalStatus(state);
         await this.refreshExecutionBreakdown(task);
+        this.updateTaskExecutionControls(task);
 
         if (state !== this.executionLastStatus) {
           this.executionLastStatus = state;
           this.appendExecutionLog(`Status changed to ${getDisplayStatus(state)}.`, state === 'failed' ? 'error' : state === 'blocked' ? 'warning' : state === 'completed' ? 'success' : 'info', `${taskId}:status:${state}:${task.updated_at || ''}`);
+        }
+
+        if (this.isTaskAwaitingNextStep(task)) {
+          const nextStepIndex = Number(task?.context?.execution_step_waiting_index || 0);
+          const nextStep = Array.isArray(task?.execution_steps)
+            ? task.execution_steps.find((step) => Number(step?.index) === nextStepIndex)
+            : null;
+          const nextLabel = nextStep?.title ? ` ${nextStep.title}` : '';
+          this.appendExecutionLog(`Paused after the current step. Ready for step ${nextStepIndex || '?'}${nextLabel ? `: ${nextLabel}` : ''}.`, 'info', `${taskId}:waiting:${nextStepIndex}`);
         }
 
         if (state === 'completed' || state === 'failed' || state === 'cancelled' || state === 'timeout' || state === 'blocked') {
@@ -3172,6 +4018,16 @@ export class WorkspaceDetailPage {
         this.setExecutionModalStatus('in_progress');
         this.appendExecutionLog('Agent started executing this task.', 'info', `${taskId}:evt:started:${payload?.updated_at || ''}`);
         break;
+      case 'task.progress': {
+        this.setExecutionModalStatus('in_progress');
+        const progress = payload?.progress || {};
+        const currentStep = String(progress?.current_step || '').trim();
+        const waiting = payload?.waiting_for_next_step === true;
+        if (currentStep) {
+          this.appendExecutionLog(currentStep, waiting ? 'success' : 'info', `${taskId}:evt:progress:${currentStep}`);
+        }
+        break;
+      }
       case 'task.thinking':
         this.setExecutionModalStatus('in_progress');
         this.appendExecutionLog(payload?.message || 'Agent is analyzing the task...', 'info');
@@ -3222,7 +4078,11 @@ export class WorkspaceDetailPage {
 
     const subtasks = this.getSubtasksForParent(taskId);
     const isParent = subtasks.length > 0;
-    const isBrowserIntent = !isParent && this.isLikelyBrowserAutomationIntent(task.description || task.name || '');
+    const awaitingNextStep = !isParent && this.isTaskAwaitingNextStep(task);
+    const stepAction = String(options?.stepAction || (awaitingNextStep ? 'next' : '')).trim().toLowerCase();
+    const taskDescription = task.description || task.name || '';
+    const taskRequirements = !isParent ? this.inferTaskExecutionRequirements(taskDescription) : [];
+    const isBrowserIntent = taskRequirements.some((requirement) => requirement.key === TASK_REQUIREMENT_KEYS.BROWSER);
 
     if (isParent) {
       const hasUnassigned = subtasks.some((subtask) => !subtask.to || subtask.to === 'unassigned');
@@ -3235,41 +4095,54 @@ export class WorkspaceDetailPage {
         if (window.Toast) window.Toast.error('A subtask is already running.');
         return;
       }
-    } else if (task.status === 'in_progress') {
+    } else if (task.status === 'in_progress' && !awaitingNextStep) {
       if (window.Toast) window.Toast.error('This task is already running.');
       return;
     }
 
     let assignedAgent = task.to && task.to !== 'unassigned' ? task.to : '';
-    if (!isParent && !assignedAgent) {
-      const fallbackAgent = this.getWorkspaceFallbackAgent({ preferBrowser: isBrowserIntent });
-      if (!fallbackAgent) {
+    const getExecutionSequencePreview = (agentName = assignedAgent) => this.getPredictedTaskExecutionSequence(
+      task,
+      isParent ? subtasks : [],
+      { assignedAgent: agentName }
+    );
+    if (!isParent && !assignedAgent && !awaitingNextStep) {
+      if (taskRequirements.length > 0) {
         assignedAgent = await this.suggestAgentSetupForTask(task);
         if (!assignedAgent) {
           return;
         }
       } else {
-        const assignAndRun = options.skipConfirm === true
-          ? true
-          : await this.showTaskConfirmDialog({
-            eyebrow: 'Assignment Required',
-            title: `Execute with "${fallbackAgent}"?`,
-            message: `This task is unassigned. I can assign it to "${fallbackAgent}" and start execution immediately.`,
-            confirmLabel: 'Assign and Execute',
-            metaItems: [this.getTaskDisplayLabel(task), fallbackAgent, 'Workspace agent'],
-            details: ['The task will be updated before dispatch.', 'Live execution updates will appear after confirmation.']
-          });
-        if (!assignAndRun) return;
+        const fallbackAgent = this.getWorkspaceFallbackAgent({ preferBrowser: isBrowserIntent });
+        if (!fallbackAgent) {
+          assignedAgent = await this.suggestAgentSetupForTask(task);
+          if (!assignedAgent) {
+            return;
+          }
+        } else {
+          const assignAndRun = options.skipConfirm === true
+            ? true
+            : await this.showTaskConfirmDialog({
+              eyebrow: 'Assignment Required',
+              title: `Execute with "${fallbackAgent}"?`,
+              message: `This task is unassigned. I can assign it to "${fallbackAgent}" and start execution immediately.`,
+              confirmLabel: 'Assign and Execute',
+              metaItems: [this.getTaskDisplayLabel(task), fallbackAgent, 'Workspace agent'],
+              details: ['The task will be updated before dispatch.', 'Live execution updates will appear after confirmation.'],
+              sequenceItems: getExecutionSequencePreview(fallbackAgent)
+            });
+          if (!assignAndRun) return;
 
-        try {
-          await this.assignTaskToAgent(taskId, fallbackAgent);
-          assignedAgent = fallbackAgent;
-          task.to = fallbackAgent;
-          this.renderTasks();
-        } catch (error) {
-          console.error('Failed to auto-assign task before execution:', error);
-          if (window.Toast) window.Toast.error('Failed to assign task before execution');
-          return;
+          try {
+            await this.assignTaskToAgent(taskId, fallbackAgent);
+            assignedAgent = fallbackAgent;
+            task.to = fallbackAgent;
+            this.renderTasks();
+          } catch (error) {
+            console.error('Failed to auto-assign task before execution:', error);
+            if (window.Toast) window.Toast.error('Failed to assign task before execution');
+            return;
+          }
         }
       }
 
@@ -3279,8 +4152,8 @@ export class WorkspaceDetailPage {
     }
 
     let preflightWarning = '';
-    if (!isParent) {
-      const preflight = this.getTaskExecutionPreflight(task, assignedAgent);
+    if (!isParent && !awaitingNextStep) {
+      const preflight = await this.getTaskExecutionPreflight(task, assignedAgent);
       if (preflight.kind === 'switch_recommended' && preflight.recommendedAgent) {
         const switchNow = await this.showTaskConfirmDialog({
           eyebrow: 'Capability Check',
@@ -3288,13 +4161,17 @@ export class WorkspaceDetailPage {
           message: preflight.message,
           confirmLabel: 'Switch Agent',
           metaItems: [this.getTaskDisplayLabel(task), preflight.recommendedAgent, 'Recommended agent'],
-          details: ['This task likely needs browser capability.', `Switching now avoids a likely pause for "${assignedAgent}".`]
+          details: Array.isArray(preflight.details) && preflight.details.length > 0
+            ? preflight.details
+            : [`Switching now avoids a likely pause for "${assignedAgent}".`],
+          sequenceItems: getExecutionSequencePreview(preflight.recommendedAgent)
         });
         if (switchNow) {
           try {
             await this.assignTaskToAgent(taskId, preflight.recommendedAgent);
             assignedAgent = preflight.recommendedAgent;
             task.to = preflight.recommendedAgent;
+            this.renderTasks();
           } catch (error) {
             console.error('Failed to switch task to recommended agent:', error);
             if (window.Toast) window.Toast.error('Failed to switch to recommended agent');
@@ -3303,27 +4180,72 @@ export class WorkspaceDetailPage {
         } else {
           preflightWarning = `${preflight.message} Continuing may trigger a pause for user input.`;
         }
+      } else if (preflight.kind === 'create_recommended') {
+        const createAgent = await this.showTaskConfirmDialog({
+          eyebrow: 'Capability Check',
+          title: 'Create a capable agent before running?',
+          message: preflight.message,
+          confirmLabel: 'Create Agent',
+          cancelLabel: 'Continue Anyway',
+          metaItems: [this.getTaskDisplayLabel(task), assignedAgent, 'Current assignment'],
+          details: Array.isArray(preflight.details) ? preflight.details : [],
+          sequenceItems: getExecutionSequencePreview()
+        });
+        if (createAgent) {
+          this.openCreateAgentFlow({
+            seedName: String(preflight.seedName || '').trim(),
+            seedType: String(preflight.seedType || '').trim(),
+            autoDescription: String(preflight.autoDescription || '').trim(),
+            preferAutoConfig: true,
+            workspaceId: this.workspaceId,
+            taskId: task.id,
+            assignTask: true,
+            suggestedMCPServers: Array.isArray(preflight.suggestedMCPServers) ? preflight.suggestedMCPServers : [],
+            suggestedSkills: Array.isArray(preflight.suggestedSkills) ? preflight.suggestedSkills : []
+          });
+          return;
+        }
+        preflightWarning = `${preflight.message} Continuing may trigger a pause for user input.`;
       } else if (preflight.kind === 'warning') {
         preflightWarning = preflight.message;
       }
     }
 
+    const sequencePreview = getExecutionSequencePreview();
     if (options.skipConfirm !== true) {
       const confirmed = await this.showTaskConfirmDialog({
-        eyebrow: isParent ? 'Workflow Launch' : 'Task Launch',
-        title: isParent ? 'Execute this workflow now?' : 'Execute this task now?',
-        message: isParent
+        eyebrow: stepAction === 'next' ? 'Step Launch' : isParent ? 'Workflow Launch' : 'Task Launch',
+        title: stepAction === 'next'
+          ? 'Run the next step now?'
+          : isParent ? 'Execute this workflow now?' : 'Execute this task now?',
+        message: stepAction === 'next'
+          ? 'This task is paused between internal execution steps. Ori will run the next step and keep the current plan intact.'
+          : isParent
           ? `This workflow will dispatch ${subtasks.length} step${subtasks.length === 1 ? '' : 's'} in sequence.`
           : `This task will run with "${assignedAgent}".`,
-        confirmLabel: isParent ? 'Execute Workflow' : 'Execute Task',
-        metaItems: isParent
+        confirmLabel: stepAction === 'next' ? 'Run Next Step' : isParent ? 'Execute Workflow' : 'Execute Task',
+        metaItems: stepAction === 'next'
+          ? [this.getTaskDisplayLabel(task), assignedAgent, 'Step-through']
+          : isParent
           ? [this.getTaskDisplayLabel(task), `${subtasks.length} step${subtasks.length === 1 ? '' : 's'}`]
           : [this.getTaskDisplayLabel(task), assignedAgent, 'Ready to run'],
         details: preflightWarning
           ? [preflightWarning, 'Execution updates will appear in the live log after dispatch.']
-          : ['Execution updates will appear in the live log after dispatch.']
+          : ['Execution updates will appear in the live log after dispatch.'],
+        sequenceItems: sequencePreview,
+        allowStepThrough: !isParent && stepAction !== 'next' && sequencePreview.length > 1,
+        defaultStepThrough: this.getTaskExecutionMode(task) === 'step_through'
       });
       if (!confirmed) return;
+    }
+
+    const selectedStepThrough = !isParent && stepAction !== 'next'
+      ? (options.skipConfirm === true
+        ? this.getTaskExecutionMode(task) === 'step_through'
+        : this.consumePendingTaskConfirmStepThroughSelection())
+      : false;
+    if (!isParent && stepAction !== 'next') {
+      task.execution_mode = selectedStepThrough ? 'step_through' : 'auto';
     }
 
     this.openTaskExecutionModal(task);
@@ -3332,7 +4254,11 @@ export class WorkspaceDetailPage {
       const response = await fetch('/api/orchestration/tasks/execute', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ task_id: taskId })
+        body: JSON.stringify({
+          task_id: taskId,
+          step_action: stepAction || undefined,
+          execution_mode: isParent ? undefined : (selectedStepThrough ? 'step_through' : 'auto')
+        })
       });
       if (!response.ok) {
         const text = await response.text();
@@ -5741,6 +6667,7 @@ export class WorkspaceDetailPage {
       case 'task.created':
       case 'task.assigned':
       case 'task.started':
+      case 'task.progress':
       case 'task.completed':
       case 'task.failed':
       case 'task.deleted':
