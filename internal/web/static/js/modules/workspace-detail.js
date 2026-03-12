@@ -584,6 +584,9 @@ export class WorkspaceDetailPage {
     this.elements.taskExecutionModal?.addEventListener('shown.bs.modal', () => {
       this.applyTopBackdropLayer('workspace-detail-backdrop-execution');
     });
+    this.elements.mcpModal?.addEventListener('shown.bs.modal', () => {
+      this.applyTopBackdropLayer('workspace-detail-backdrop-mcp');
+    });
     this.elements.taskExecutionModal?.addEventListener('hidden.bs.modal', () => {
       this.stopExecutionMonitor();
       this.currentExecutionTaskId = null;
@@ -4072,6 +4075,8 @@ export class WorkspaceDetailPage {
   handleWorkspaceMCPListClick(event) {
     const button = event.target.closest('[data-workspace-mcp-action]');
     if (!button) return;
+    event.preventDefault();
+    event.stopPropagation();
 
     const action = String(button.dataset.workspaceMcpAction || '').trim();
     const bindingId = String(button.dataset.bindingId || '').trim();
@@ -4440,12 +4445,12 @@ export class WorkspaceDetailPage {
       const actions = binding?.source === 'workspace'
         ? `
           <div class="workspace-detail-mcp-card-actions">
-            <button type="button" class="workspace-detail-mcp-card-btn" data-workspace-mcp-action="edit" data-binding-id="${this.escapeHtml(binding.id)}" title="Edit binding" aria-label="Edit binding ${this.escapeHtml(alias || serverName)}">
+            <button type="button" class="workspace-detail-mcp-card-btn" data-workspace-mcp-action="edit" data-binding-id="${this.escapeHtml(binding.id)}" onclick="event.preventDefault(); event.stopPropagation(); window.workspaceDetail?.openWorkspaceMCPModal('${this.escapeHtml(binding.id)}')" title="Edit binding" aria-label="Edit binding ${this.escapeHtml(alias || serverName)}">
               <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
                 <path d="M20.71,7.04C21.1,6.65 21.1,6 20.71,5.63L18.37,3.29C18,2.9 17.35,2.9 16.96,3.29L15.12,5.12L18.87,8.87M3,17.25V21H6.75L17.81,9.93L14.06,6.18L3,17.25Z"/>
               </svg>
             </button>
-            <button type="button" class="workspace-detail-mcp-card-btn is-danger" data-workspace-mcp-action="delete" data-binding-id="${this.escapeHtml(binding.id)}" title="Remove binding" aria-label="Remove binding ${this.escapeHtml(alias || serverName)}">
+            <button type="button" class="workspace-detail-mcp-card-btn is-danger" data-workspace-mcp-action="delete" data-binding-id="${this.escapeHtml(binding.id)}" onclick="event.preventDefault(); event.stopPropagation(); window.workspaceDetail?.deleteWorkspaceMCPBinding('${this.escapeHtml(binding.id)}')" title="Remove binding" aria-label="Remove binding ${this.escapeHtml(alias || serverName)}">
               <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
                 <path d="M9,3V4H4V6H5V19A2,2 0 0,0 7,21H17A2,2 0 0,0 19,19V6H20V4H15V3H9M7,6H17V19H7V6M9,8V17H11V8H9M13,8V17H15V8H13Z"/>
               </svg>
@@ -4455,7 +4460,7 @@ export class WorkspaceDetailPage {
         : (binding?.source === 'synthesized'
           ? `
             <div class="workspace-detail-mcp-card-actions">
-              <button type="button" class="workspace-detail-mcp-card-btn" data-workspace-mcp-action="edit" data-binding-id="${this.escapeHtml(binding.id)}" title="Customize binding" aria-label="Customize binding ${this.escapeHtml(alias || serverName)}">
+              <button type="button" class="workspace-detail-mcp-card-btn" data-workspace-mcp-action="edit" data-binding-id="${this.escapeHtml(binding.id)}" onclick="event.preventDefault(); event.stopPropagation(); window.workspaceDetail?.openWorkspaceMCPModal('${this.escapeHtml(binding.id)}')" title="Customize binding" aria-label="Customize binding ${this.escapeHtml(alias || serverName)}">
                 <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
                   <path d="M20.71,7.04C21.1,6.65 21.1,6 20.71,5.63L18.37,3.29C18,2.9 17.35,2.9 16.96,3.29L15.12,5.12L18.87,8.87M3,17.25V21H6.75L17.81,9.93L14.06,6.18L3,17.25Z"/>
                 </svg>
@@ -4898,6 +4903,7 @@ export class WorkspaceDetailPage {
 
     const topBackdrop = backdrops[backdrops.length - 1];
     topBackdrop.classList.remove(
+      'workspace-detail-backdrop-mcp',
       'workspace-detail-backdrop-execution',
       'workspace-detail-backdrop-result'
     );
