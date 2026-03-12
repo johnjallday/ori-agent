@@ -8,7 +8,6 @@ import (
 
 	"github.com/openai/openai-go/v3"
 
-	"github.com/johnjallday/ori-agent/internal/agent"
 	"github.com/johnjallday/ori-agent/internal/llm"
 	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/types"
@@ -16,7 +15,7 @@ import (
 
 // handleCodexChat handles chat requests routed through the Codex CLI provider.
 // Codex provider currently does not support tool calling, so this path is request/response only.
-func (h *Handler) handleCodexChat(w http.ResponseWriter, r *http.Request, ag *agent.Agent, userMessage string, agentName string, baseCtx context.Context, images []llm.ImageAttachment, plannerDecision *types.PlannerDecision, runtimeSystemPrompt string) {
+func (h *Handler) handleCodexChat(w http.ResponseWriter, r *http.Request, ag *resolvedChatAgent, userMessage string, agentName string, baseCtx context.Context, images []llm.ImageAttachment, plannerDecision *types.PlannerDecision, runtimeSystemPrompt string) {
 	sessionID := h.getSessionID(r)
 	ctx, cancel := context.WithTimeout(baseCtx, ChatRequestTimeout)
 	defer cancel()
@@ -35,7 +34,7 @@ func (h *Handler) handleCodexChat(w http.ResponseWriter, r *http.Request, ag *ag
 	var messages []llm.Message
 	systemPrompt := composeRuntimeSystemPrompt(
 		h.buildSystemPromptWithSkills(
-			ag, agentName,
+			ag.Agent, agentName,
 			"You are a helpful assistant. Be concise and direct in your responses.",
 		),
 		runtimeSystemPrompt,
@@ -63,10 +62,10 @@ func (h *Handler) handleCodexChat(w http.ResponseWriter, r *http.Request, ag *ag
 	ag.Messages = append(ag.Messages, openai.AssistantMessage(text))
 
 	logger.Debug("Codex chat response completed", logger.Fields{"duration": time.Since(start)})
-	_ = h.store.SetAgent(agentName, ag)
+	_ = h.persistAgent(agentName, ag.Agent)
 
 	h.storeMessageInSession(baseCtx, sessionID, "assistant", text)
-	h.trackUsageCommon("codex", ag.Settings.Model, agentName, resp.Usage, ag, userMessage)
+	h.trackUsageCommon("codex", ag.Settings.Model, agentName, resp.Usage, ag.Agent, userMessage)
 
 	writeJSONResponse(w, attachPlannerDecision(attachRouteMetadata(map[string]any{
 		"response": text,

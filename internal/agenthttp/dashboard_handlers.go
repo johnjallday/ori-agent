@@ -37,7 +37,6 @@ type AgentListItem struct {
 	Evolution      *types.AgentEvolution  `json:"evolution,omitempty"`
 	AllowWebSearch bool                   `json:"allow_web_search"`
 	EnabledPlugins []string               `json:"enabled_plugins"`
-	MCPServers     []string               `json:"mcp_servers,omitempty"`
 	Model          string                 `json:"model"`
 }
 
@@ -59,7 +58,6 @@ type AgentDetailResponse struct {
 	SystemPrompt    string                 `json:"system_prompt"`
 	AllowWebSearch  bool                   `json:"allow_web_search"`
 	EnabledPlugins  []PluginInfo           `json:"enabled_plugins"`
-	MCPServers      []string               `json:"mcp_servers,omitempty"`
 }
 
 // PluginInfo represents plugin information in the detail view
@@ -132,7 +130,6 @@ func (h *DashboardHandler) ListAgentsWithStats(w http.ResponseWriter, r *http.Re
 			Evolution:      cloneAgentEvolution(ag),
 			AllowWebSearch: ag.Settings.IsWebSearchAllowed(),
 			EnabledPlugins: enabledPlugins,
-			MCPServers:     append([]string{}, ag.MCPServers...),
 			Model:          ag.Settings.Model,
 		})
 	}
@@ -217,7 +214,6 @@ func (h *DashboardHandler) GetAgentDetail(w http.ResponseWriter, r *http.Request
 		SystemPrompt:    ag.Settings.SystemPrompt,
 		AllowWebSearch:  ag.Settings.IsWebSearchAllowed(),
 		EnabledPlugins:  pluginInfos,
-		MCPServers:      ag.MCPServers,
 	}
 
 	// Return JSON response

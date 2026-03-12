@@ -12,6 +12,7 @@ import (
 	orihttp "github.com/johnjallday/ori-agent/internal/http"
 	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/updatehttp"
+	"github.com/johnjallday/ori-agent/internal/workspace"
 )
 
 // registerRoutes registers all HTTP routes for the server.
@@ -106,8 +107,6 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 	mux.HandleFunc("/api/agents/dashboard/list", dashboardHandler.ListAgentsWithStats)
 	mux.HandleFunc("/api/agents/dashboard/stats", dashboardHandler.GetDashboardStats)
 
-	// Agent MCP handlers
-	s.Handlers.AgentMCP = agenthttp.NewMCPHandler(s.Integration.MCPRegistry, s.Integration.MCPConfigManager, agentHandler)
 	mux.HandleFunc("/api/agents/", func(w http.ResponseWriter, r *http.Request) {
 		// Route evolution API requests first
 		if s.Handlers.Evolution != nil && strings.HasSuffix(r.URL.Path, "/evolution/path") && r.Method == http.MethodPost {
@@ -142,22 +141,8 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 			avatarHandler.ServeHTTP(w, r)
 			return
 		}
-		// Route agent MCP-specific requests
-		if strings.Contains(r.URL.Path, "/mcp-servers") {
-			if strings.HasSuffix(r.URL.Path, "/enable") {
-				s.Handlers.AgentMCP.EnableAgentMCPServerHandler(w, r)
-			} else if strings.HasSuffix(r.URL.Path, "/disable") {
-				s.Handlers.AgentMCP.DisableAgentMCPServerHandler(w, r)
-			} else if strings.HasSuffix(r.URL.Path, "/config") {
-				s.Handlers.AgentMCP.UpdateAgentMCPServerConfigHandler(w, r)
-			} else {
-				// List MCP servers for agent
-				s.Handlers.AgentMCP.ListAgentMCPServersHandler(w, r)
-			}
-		} else {
-			// Regular agent requests - delegate to agentHandler
-			agentHandler.ServeHTTP(w, r)
-		}
+		// Regular agent requests - delegate to agentHandler
+		agentHandler.ServeHTTP(w, r)
 	})
 
 	// Agent capabilities endpoint
@@ -170,6 +155,16 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 	// Home assistant task routing endpoint
 	homeAssistantRouteHandler := agenthttp.NewHomeAssistantRouteHandler(s.Storage.AgentStore)
 	homeAssistantRouteHandler.SetSystemModelReader(s.Core.ConfigManager)
+	if s.Storage != nil && s.Integration != nil {
+		homeAssistantRouteHandler.SetRuntimeResolver(
+			workspace.NewAgentRuntimeResolver(
+				s.Storage.AgentStore,
+				s.Storage.WorkspaceStore,
+				s.Integration.MCPRegistry,
+				s.Integration.MCPConfigManager,
+			),
+		)
+	}
 	mux.HandleFunc("/api/home-assistant/route", homeAssistantRouteHandler.RouteHandler)
 
 	// =============================================================================
@@ -832,6 +827,48 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 					s.Handlers.Studio.UpdateDirectory(w, r)
 				case http.MethodDelete:
 					s.Handlers.Studio.DeleteDirectory(w, r)
+				default:
+					orihttp.MethodNotAllowed(w)
+				}
+			}
+		} else if strings.Contains(r.URL.Path, "/mcp-bindings") {
+			if strings.HasSuffix(r.URL.Path, "/mcp-bindings") {
+				switch r.Method {
+				case http.MethodPost:
+					s.Handlers.Studio.CreateMCPBinding(w, r)
+				case http.MethodGet:
+					s.Handlers.Studio.ListMCPBindings(w, r)
+				default:
+					orihttp.MethodNotAllowed(w)
+				}
+			} else {
+				switch r.Method {
+				case http.MethodGet:
+					s.Handlers.Studio.GetMCPBinding(w, r)
+				case http.MethodPut, http.MethodPatch:
+					s.Handlers.Studio.UpdateMCPBinding(w, r)
+				case http.MethodDelete:
+					s.Handlers.Studio.DeleteMCPBinding(w, r)
+				default:
+					orihttp.MethodNotAllowed(w)
+				}
+			}
+		} else if strings.Contains(r.URL.Path, "/agent-mcp-access") {
+			if strings.HasSuffix(r.URL.Path, "/agent-mcp-access") {
+				switch r.Method {
+				case http.MethodGet:
+					s.Handlers.Studio.ListAgentMCPAccess(w, r)
+				default:
+					orihttp.MethodNotAllowed(w)
+				}
+			} else {
+				switch r.Method {
+				case http.MethodGet:
+					s.Handlers.Studio.GetAgentMCPAccessEntry(w, r)
+				case http.MethodPut, http.MethodPatch:
+					s.Handlers.Studio.UpdateAgentMCPAccess(w, r)
+				case http.MethodDelete:
+					s.Handlers.Studio.DeleteAgentMCPAccess(w, r)
 				default:
 					orihttp.MethodNotAllowed(w)
 				}

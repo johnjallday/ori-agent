@@ -76,6 +76,7 @@ type Handler struct {
 	costTracker      *llm.CostTracker
 	sessionStore     session.HybridStore
 	workspaceStore   workspace.Store
+	runtimeResolver  chatRuntimeResolver
 	toolCallStore    session.ToolCallStore
 	evolutionSvc     interface {
 		AwardMessageXP(agentName string, tokenCount int, userMessage string) error
@@ -91,7 +92,6 @@ type Handler struct {
 		StartServer(string) error
 	}
 	mcpConfigManager interface {
-		EnableServerForAgent(agentName, serverName string) error
 		GetServer(name string) (*mcp.ServerConfig, error)
 	}
 }
@@ -172,9 +172,8 @@ func (h *Handler) SetMCPRegistry(registry interface {
 	h.mcpRegistry = registry
 }
 
-// SetMCPConfigManager sets the MCP config manager used for per-agent enablement.
+// SetMCPConfigManager sets the MCP config manager used for global MCP templates.
 func (h *Handler) SetMCPConfigManager(manager interface {
-	EnableServerForAgent(agentName, serverName string) error
 	GetServer(name string) (*mcp.ServerConfig, error)
 }) {
 	h.mcpConfigManager = manager
@@ -306,14 +305,14 @@ func (h *Handler) getSessionID(r *http.Request) string {
 func (h *Handler) tryHandleUtilityDirect(
 	w http.ResponseWriter,
 	baseCtx context.Context,
-	ag *agent.Agent,
+	ag *resolvedChatAgent,
 	agentName string,
 	query string,
 	sessionID string,
 	decisionInput *UtilityRouteDecision,
 	plannerDecision *types.PlannerDecision,
 ) bool {
-	if h == nil || ag == nil || strings.TrimSpace(query) == "" {
+	if h == nil || ag == nil || ag.Agent == nil || strings.TrimSpace(query) == "" {
 		return false
 	}
 
@@ -326,11 +325,11 @@ func (h *Handler) tryHandleUtilityDirect(
 	if decision.Mode != UtilityRouteDirect || strings.TrimSpace(decision.ToolName) == "" {
 		return false
 	}
-	if !isUtilityToolAllowedForAgent(ag, decision.ToolName) {
+	if !isUtilityToolAllowedForAgent(ag.Agent, decision.ToolName) {
 		responseText := disallowedUtilityToolMessage(decision.ToolName)
 		ag.Messages = append(ag.Messages, openai.UserMessage(query))
 		ag.Messages = append(ag.Messages, openai.AssistantMessage(responseText))
-		_ = h.store.SetAgent(agentName, ag)
+		_ = h.persistAgent(agentName, ag.Agent)
 
 		h.storeMessageInSession(baseCtx, sessionID, "user", query)
 		h.storeMessageInSession(baseCtx, sessionID, "assistant", responseText)
@@ -368,7 +367,7 @@ func (h *Handler) tryHandleUtilityDirect(
 			responseText := "I couldn't find an available browser tool for this agent. Attach/configure Playwright (or another browser MCP) and try again."
 			ag.Messages = append(ag.Messages, openai.UserMessage(query))
 			ag.Messages = append(ag.Messages, openai.AssistantMessage(responseText))
-			_ = h.store.SetAgent(agentName, ag)
+			_ = h.persistAgent(agentName, ag.Agent)
 
 			h.storeMessageInSession(baseCtx, sessionID, "user", query)
 			h.storeMessageInSession(baseCtx, sessionID, "assistant", responseText)
@@ -468,7 +467,7 @@ func (h *Handler) tryHandleUtilityDirect(
 
 	ag.Messages = append(ag.Messages, openai.UserMessage(query))
 	ag.Messages = append(ag.Messages, openai.AssistantMessage(responseText))
-	_ = h.store.SetAgent(agentName, ag)
+	_ = h.persistAgent(agentName, ag.Agent)
 
 	h.storeMessageInSession(baseCtx, sessionID, "user", query)
 	h.storeMessageInSession(baseCtx, sessionID, "assistant", responseText)
@@ -515,8 +514,8 @@ func (h *Handler) tryHandleUtilityDirect(
 
 // findTool searches for a tool by name in both plugins and MCP servers.
 // If the plugin is not yet loaded, it will be loaded lazily on first use.
-func (h *Handler) findTool(ag *agent.Agent, agentName, toolName string) (pluginapi.PluginTool, bool) {
-	if !isUtilityToolAllowedForAgent(ag, toolName) {
+func (h *Handler) findTool(ag *resolvedChatAgent, agentName, toolName string) (pluginapi.PluginTool, bool) {
+	if ag == nil || ag.Agent == nil || !isUtilityToolAllowedForAgent(ag.Agent, toolName) {
 		return nil, false
 	}
 
@@ -565,7 +564,7 @@ func (h *Handler) findTool(ag *agent.Agent, agentName, toolName string) (plugina
 	return nil, false
 }
 
-func (h *Handler) findMCPToolByName(ag *agent.Agent, toolName string) (pluginapi.PluginTool, bool) {
+func (h *Handler) findMCPToolByName(ag *resolvedChatAgent, toolName string) (pluginapi.PluginTool, bool) {
 	if h == nil || h.mcpRegistry == nil || ag == nil || len(ag.MCPServers) == 0 {
 		return nil, false
 	}
@@ -627,7 +626,7 @@ func prioritizeMCPServersForTool(serverNames []string, toolName, browserPreferen
 			if name == "" {
 				continue
 			}
-			key := strings.ToLower(name)
+			key := normalizeLogicalMCPServerName(name)
 			if seen[key] {
 				continue
 			}
@@ -647,7 +646,7 @@ func prioritizeMCPServersForTool(serverNames []string, toolName, browserPreferen
 		if name == "" {
 			continue
 		}
-		key := strings.ToLower(name)
+		key := normalizeLogicalMCPServerName(name)
 		if seen[key] {
 			continue
 		}
@@ -812,7 +811,7 @@ func shouldPreferMCPToolOverUtility(toolName string) bool {
 	}
 }
 
-func shouldSuppressUtilityToolForAgent(ag *agent.Agent, toolName string) bool {
+func shouldSuppressUtilityToolForAgent(ag *resolvedChatAgent, toolName string) bool {
 	if ag == nil {
 		return false
 	}
@@ -1190,8 +1189,8 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 			orihttp.InternalError(w, "no agent available for direct tool execution")
 			return
 		}
-		ag, ok := h.store.GetAgent(current)
-		if !ok || ag == nil {
+		ag, err := h.resolveEffectiveAgent(current, normalizedRouteContext)
+		if err != nil {
 			orihttp.InternalError(w, fmt.Sprintf("agent '%s' not found", current))
 			return
 		}
@@ -1218,7 +1217,7 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 		// Add to conversation history for context
 		ag.Messages = append(ag.Messages, openai.UserMessage(q))
 		ag.Messages = append(ag.Messages, openai.AssistantMessage(result.Result))
-		_ = h.store.SetAgent(current, ag)
+		_ = h.persistAgent(current, ag.Agent)
 
 		// Return formatted response
 		response := formatDirectToolResponse(result)
@@ -1235,8 +1234,8 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 	// Load agent - priority: session's agent > request agent_name > global current agent
 	current := resolveAgentName()
 
-	ag, ok := h.store.GetAgent(current)
-	if !ok {
+	ag, err := h.resolveEffectiveAgent(current, normalizedRouteContext)
+	if err != nil {
 		orihttp.InternalError(w, fmt.Sprintf("agent '%s' not found", current))
 		return
 	}
@@ -1290,7 +1289,10 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	preflight := h.maybeAutoEnableMCPForPrompt(current, ag, originalQuery)
+	preflight, updatedAgent := h.maybeAutoEnableMCPForPrompt(current, ag, originalQuery, normalizedRouteContext)
+	if updatedAgent != nil {
+		ag = updatedAgent
+	}
 	if preflight != nil && strings.TrimSpace(preflight.userMessage) != "" {
 		writeJSONResponse(w, attachRouteMetadata(map[string]any{
 			"response": preflight.userMessage,
@@ -1305,7 +1307,7 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 		missing := missingMCPServers(ag.MCPServers, invokedSkill.Skill.RequiredMCPServers)
 		if len(missing) > 0 {
 			orihttp.WriteJSON(w, map[string]any{
-				"response": fmt.Sprintf("❌ Skill '%s' requires MCP servers: %s. Enable them in agent settings.", invokedSkill.Skill.Name, strings.Join(missing, ", ")),
+				"response": fmt.Sprintf("❌ Skill '%s' requires MCP connectors: %s. Bind them from the target workspace.", invokedSkill.Skill.Name, strings.Join(missing, ", ")),
 			})
 			return
 		}
@@ -1325,7 +1327,7 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 	logger.Debug("Agent MCP servers loaded", logger.Fields{"agent": current, "server_count": len(ag.MCPServers), "servers": ag.MCPServers})
 
 	// Check for uninitialized plugins before proceeding with chat
-	uninitializedPlugins := h.checkUninitializedPlugins(ag)
+	uninitializedPlugins := h.checkUninitializedPlugins(ag.Agent)
 	if len(uninitializedPlugins) > 0 {
 		initPrompt := h.generateInitializationPrompt(uninitializedPlugins)
 		orihttp.WriteJSON(w, map[string]any{
@@ -1442,7 +1444,7 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 	// Add native utility tools first
 	if h.utilityRegistry != nil {
 		for _, def := range h.utilityRegistry.ListToolDefinitions() {
-			if !isUtilityToolAllowedForAgent(ag, def.Name) {
+			if !isUtilityToolAllowedForAgent(ag.Agent, def.Name) {
 				continue
 			}
 			if shouldSuppressUtilityToolForAgent(ag, def.Name) {
@@ -1507,15 +1509,15 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 	if invokedSkill != nil {
 		tools = filterToolsForSkill(tools, invokedSkill.Skill)
 	}
-	tools = prioritizeToolsForPath(ag, tools)
+	tools = prioritizeToolsForPath(ag.Agent, tools)
 
 	// Get appropriate client for this agent
-	agentClient := h.getClientForAgent(ag)
+	agentClient := h.getClientForAgent(ag.Agent)
 
 	// Add system message for better tool usage guidance
 	if len(ag.Messages) == 0 {
 		systemPrompt := h.buildSystemPromptWithSkills(
-			ag, current,
+			ag.Agent, current,
 			"You are a helpful assistant with access to various tools. When a user request can be fulfilled by using an available tool, use the tool instead of providing general information. Be concise and direct in your responses.",
 		)
 
@@ -1616,7 +1618,7 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// OpenAI models require an API key; return a clear error if none is configured.
-	if h.clientFactory != nil && !h.clientFactory.HasKeyForAgent(ag) {
+	if h.clientFactory != nil && !h.clientFactory.HasKeyForAgent(ag.Agent) {
 		writeJSONResponse(w, map[string]any{
 			"response": "❌ **Error**: OpenAI API key is not configured. Set `OPENAI_API_KEY` for the server process, or add an API key in the app Settings.",
 		})

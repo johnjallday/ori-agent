@@ -9,7 +9,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/johnjallday/ori-agent/internal/agent"
 	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/oriagent/ori-pluginapi"
 )
@@ -111,14 +110,14 @@ type DirectToolResult struct {
 }
 
 // executeDirectTool executes a tool directly without LLM decision-making
-func (h *Handler) executeDirectTool(ctx context.Context, ag *agent.Agent, agentName string, cmd *DirectToolCommand) *DirectToolResult {
+func (h *Handler) executeDirectTool(ctx context.Context, ag *resolvedChatAgent, agentName string, cmd *DirectToolCommand) *DirectToolResult {
 	startTime := time.Now()
 	result := &DirectToolResult{
 		ToolName: cmd.ToolName,
 		ToolArgs: cmd.Args,
 	}
 
-	if !isUtilityToolAllowedForAgent(ag, cmd.ToolName) {
+	if ag == nil || ag.Agent == nil || !isUtilityToolAllowedForAgent(ag.Agent, cmd.ToolName) {
 		result.Success = false
 		result.Error = "tool disabled by agent policy"
 		result.Result = fmt.Sprintf("❌ %s", disallowedUtilityToolMessage(cmd.ToolName))
@@ -189,13 +188,17 @@ func (h *Handler) executeDirectTool(ctx context.Context, ag *agent.Agent, agentN
 }
 
 // getAvailableToolNames returns a list of available tool names for the current agent
-func (h *Handler) getAvailableToolNames(ag *agent.Agent) []string {
+func (h *Handler) getAvailableToolNames(ag *resolvedChatAgent) []string {
+	if ag == nil || ag.Agent == nil {
+		return nil
+	}
+
 	var toolNames []string
 
 	// Add native utility tools first
 	if h.utilityRegistry != nil {
 		for _, def := range h.utilityRegistry.ListToolDefinitions() {
-			if !isUtilityToolAllowedForAgent(ag, def.Name) {
+			if ag == nil || ag.Agent == nil || !isUtilityToolAllowedForAgent(ag.Agent, def.Name) {
 				continue
 			}
 			toolNames = append(toolNames, def.Name)
@@ -212,7 +215,7 @@ func (h *Handler) getAvailableToolNames(ag *agent.Agent) []string {
 	}
 
 	// Add MCP tools
-	if h.mcpRegistry != nil && len(ag.MCPServers) > 0 {
+	if h.mcpRegistry != nil && ag != nil && len(ag.MCPServers) > 0 {
 		for _, serverName := range ag.MCPServers {
 			mcpTools, err := h.getMCPToolsForServer(serverName)
 			if err != nil {

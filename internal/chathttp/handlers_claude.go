@@ -8,7 +8,6 @@ import (
 
 	"github.com/openai/openai-go/v3"
 
-	"github.com/johnjallday/ori-agent/internal/agent"
 	"github.com/johnjallday/ori-agent/internal/llm"
 	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/types"
@@ -16,7 +15,7 @@ import (
 )
 
 // handleClaudeChat handles chat requests for Claude models using the provider system
-func (h *Handler) handleClaudeChat(w http.ResponseWriter, r *http.Request, ag *agent.Agent, userMessage string, tools []llm.Tool, agentName string, baseCtx context.Context, files []pluginapi.FileAttachment, images []llm.ImageAttachment, plannerDecision *types.PlannerDecision, runtimeSystemPrompt string) {
+func (h *Handler) handleClaudeChat(w http.ResponseWriter, r *http.Request, ag *resolvedChatAgent, userMessage string, tools []llm.Tool, agentName string, baseCtx context.Context, files []pluginapi.FileAttachment, images []llm.ImageAttachment, plannerDecision *types.PlannerDecision, runtimeSystemPrompt string) {
 	sessionID := h.getSessionID(r)
 	ctx, cancel := context.WithTimeout(baseCtx, ChatRequestTimeout)
 	defer cancel()
@@ -32,7 +31,7 @@ func (h *Handler) handleClaudeChat(w http.ResponseWriter, r *http.Request, ag *a
 	var messages []llm.Message
 	systemPrompt := composeRuntimeSystemPrompt(
 		h.buildSystemPromptWithSkills(
-			ag, agentName,
+			ag.Agent, agentName,
 			"You are a helpful assistant with access to tools. Use tools when they provide a more accurate answer.",
 		),
 		runtimeSystemPrompt,
@@ -62,7 +61,7 @@ func (h *Handler) handleClaudeChat(w http.ResponseWriter, r *http.Request, ag *a
 	}
 
 	// Track usage and cost
-	h.trackUsageCommon("claude", ag.Settings.Model, agentName, resp.Usage, ag, userMessage)
+	h.trackUsageCommon("claude", ag.Settings.Model, agentName, resp.Usage, ag.Agent, userMessage)
 
 	// Tool-call branch
 	if len(resp.ToolCalls) > 0 {
@@ -75,7 +74,7 @@ func (h *Handler) handleClaudeChat(w http.ResponseWriter, r *http.Request, ag *a
 	ag.Messages = append(ag.Messages, openai.AssistantMessage(text))
 
 	logger.Debug("Claude chat response completed", logger.Fields{"duration": time.Since(start)})
-	_ = h.store.SetAgent(agentName, ag)
+	_ = h.persistAgent(agentName, ag.Agent)
 
 	// Store assistant response in session
 	h.storeMessageInSession(baseCtx, sessionID, "assistant", text)
@@ -91,7 +90,7 @@ func (h *Handler) handleClaudeChat(w http.ResponseWriter, r *http.Request, ag *a
 func (h *Handler) handleClaudeToolCalls(
 	w http.ResponseWriter,
 	ctx context.Context,
-	ag *agent.Agent,
+	ag *resolvedChatAgent,
 	agentName string,
 	messages []llm.Message,
 	resp *llm.ChatResponse,
@@ -143,7 +142,7 @@ func (h *Handler) handleClaudeToolCalls(
 				if resp2 == nil {
 					return "", nil, fmt.Errorf("claude follow-up returned no response")
 				}
-				h.trackUsageCommon("claude", ag.Settings.Model, agentName, resp2.Usage, ag, userMessage)
+				h.trackUsageCommon("claude", ag.Settings.Model, agentName, resp2.Usage, ag.Agent, userMessage)
 				return resp2.Content, resp2.ToolCalls, nil
 			},
 		},
@@ -156,7 +155,7 @@ func (h *Handler) handleClaudeToolCalls(
 	ag.Messages = append(ag.Messages, openai.AssistantMessage(finalText))
 
 	logger.Debug("Claude chat with tool completed", logger.Fields{"duration": time.Since(start)})
-	_ = h.store.SetAgent(agentName, ag)
+	_ = h.persistAgent(agentName, ag.Agent)
 
 	// Store assistant response in session
 	h.storeMessageInSession(baseCtx, sessionID, "assistant", finalText)

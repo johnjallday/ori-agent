@@ -108,6 +108,38 @@ func TestMigrations(t *testing.T) {
 	if err != nil {
 		t.Errorf("View tag_counts does not exist: %v", err)
 	}
+
+	workspaceColumns := map[string]bool{
+		"mcp_bindings_json":     false,
+		"agent_mcp_access_json": false,
+	}
+
+	rows, err := db.QueryContext(ctx, "PRAGMA table_info(workspaces)")
+	if err != nil {
+		t.Fatalf("Failed to inspect workspaces columns: %v", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	for rows.Next() {
+		var cid int
+		var name string
+		var colType string
+		var notNull int
+		var defaultValue sql.NullString
+		var pk int
+		if err := rows.Scan(&cid, &name, &colType, &notNull, &defaultValue, &pk); err != nil {
+			t.Fatalf("Failed to scan workspaces column info: %v", err)
+		}
+		if _, ok := workspaceColumns[name]; ok {
+			workspaceColumns[name] = true
+		}
+	}
+
+	for name, found := range workspaceColumns {
+		if !found {
+			t.Errorf("workspace column %s does not exist", name)
+		}
+	}
 }
 
 func TestForeignKeys(t *testing.T) {

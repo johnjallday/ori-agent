@@ -8,7 +8,6 @@ import (
 
 	"github.com/openai/openai-go/v3"
 
-	"github.com/johnjallday/ori-agent/internal/agent"
 	orihttp "github.com/johnjallday/ori-agent/internal/http"
 	"github.com/johnjallday/ori-agent/internal/llm"
 	"github.com/johnjallday/ori-agent/internal/logger"
@@ -17,7 +16,7 @@ import (
 )
 
 // handleOllamaChat handles chat requests for Ollama models using the provider system
-func (h *Handler) handleOllamaChat(w http.ResponseWriter, r *http.Request, ag *agent.Agent, userMessage string, tools []llm.Tool, agentName string, baseCtx context.Context, files []pluginapi.FileAttachment, images []llm.ImageAttachment, plannerDecision *types.PlannerDecision, runtimeSystemPrompt string) {
+func (h *Handler) handleOllamaChat(w http.ResponseWriter, r *http.Request, ag *resolvedChatAgent, userMessage string, tools []llm.Tool, agentName string, baseCtx context.Context, files []pluginapi.FileAttachment, images []llm.ImageAttachment, plannerDecision *types.PlannerDecision, runtimeSystemPrompt string) {
 	sessionID := h.getSessionID(r)
 	ctx, cancel := context.WithTimeout(baseCtx, ChatRequestTimeout)
 	defer cancel()
@@ -34,7 +33,7 @@ func (h *Handler) handleOllamaChat(w http.ResponseWriter, r *http.Request, ag *a
 
 	systemPrompt := composeRuntimeSystemPrompt(
 		h.buildSystemPromptWithSkills(
-			ag, agentName,
+			ag.Agent, agentName,
 			"You are a helpful assistant with access to tools. When you use a tool and receive results, report those results directly to the user. Be concise and accurate.",
 		),
 		runtimeSystemPrompt,
@@ -66,7 +65,7 @@ func (h *Handler) handleOllamaChat(w http.ResponseWriter, r *http.Request, ag *a
 	logger.Debug("Ollama response received", logger.Fields{"duration": time.Since(start)})
 
 	// Track statistics (Ollama is free/local, no cost tracking)
-	h.trackUsageCommon("ollama", ag.Settings.Model, agentName, resp.Usage, ag, userMessage)
+	h.trackUsageCommon("ollama", ag.Settings.Model, agentName, resp.Usage, ag.Agent, userMessage)
 
 	// Tool-call branch
 	if len(resp.ToolCalls) > 0 {
@@ -77,7 +76,7 @@ func (h *Handler) handleOllamaChat(w http.ResponseWriter, r *http.Request, ag *a
 	// No tool calls - direct response
 	text := getResponseText(resp.Content)
 	ag.Messages = append(ag.Messages, openai.AssistantMessage(resp.Content))
-	_ = h.store.SetAgent(agentName, ag)
+	_ = h.persistAgent(agentName, ag.Agent)
 
 	// Store assistant response in session
 	h.storeMessageInSession(baseCtx, sessionID, "assistant", text)
@@ -93,7 +92,7 @@ func (h *Handler) handleOllamaChat(w http.ResponseWriter, r *http.Request, ag *a
 func (h *Handler) handleOllamaToolCalls(
 	w http.ResponseWriter,
 	ctx context.Context,
-	ag *agent.Agent,
+	ag *resolvedChatAgent,
 	agentName string,
 	messages []llm.Message,
 	resp *llm.ChatResponse,
@@ -145,7 +144,7 @@ func (h *Handler) handleOllamaToolCalls(
 				if finalResp == nil {
 					return "", nil, fmt.Errorf("ollama follow-up returned no response")
 				}
-				h.trackUsageCommon("ollama", ag.Settings.Model, agentName, finalResp.Usage, ag, userMessage)
+				h.trackUsageCommon("ollama", ag.Settings.Model, agentName, finalResp.Usage, ag.Agent, userMessage)
 				return finalResp.Content, finalResp.ToolCalls, nil
 			},
 		},
@@ -159,7 +158,7 @@ func (h *Handler) handleOllamaToolCalls(
 	logger.Debug("Final response from LLM", logger.Fields{"content": finalText})
 
 	ag.Messages = append(ag.Messages, openai.AssistantMessage(finalText))
-	_ = h.store.SetAgent(agentName, ag)
+	_ = h.persistAgent(agentName, ag.Agent)
 
 	// Store assistant response in session
 	h.storeMessageInSession(baseCtx, sessionID, "assistant", finalText)

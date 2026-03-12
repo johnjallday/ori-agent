@@ -55,7 +55,7 @@ func (b *ServerBuilder) initializeMCP() error {
 		}
 	}
 
-	enabledServers := b.collectEnabledMCPServerNames()
+	enabledServers := collectEnabledMCPServerNames(mcpGlobalConfig.Servers)
 	startedCount, failedCount := startEnabledMCPServers(b.mcpRegistry, enabledServers)
 	if failedCount > 0 {
 		logger.Warn("some enabled MCP servers failed to start during startup", logger.Fields{
@@ -77,38 +77,18 @@ func (b *ServerBuilder) initializeMCP() error {
 	return nil
 }
 
-func (b *ServerBuilder) collectEnabledMCPServerNames() []string {
-	if b == nil || b.st == nil || b.mcpConfigManager == nil {
-		return nil
-	}
-
-	agentNames, _ := b.st.ListAgents()
-	if len(agentNames) == 0 {
-		return nil
-	}
-
-	serverNames := make([]string, 0)
-	seen := make(map[string]struct{})
-	for _, agentName := range agentNames {
-		enabledServers, err := b.mcpConfigManager.GetEnabledServersForAgent(agentName)
-		if err != nil {
-			logger.Warn("failed to load enabled MCP servers for agent during startup", logger.Fields{
-				"agent": agentName,
-				"err":   err,
-			})
+func collectEnabledMCPServerNames(servers []mcp.ServerConfig) []string {
+	serverNames := make([]string, 0, len(servers))
+	seen := make(map[string]struct{}, len(servers))
+	for _, server := range servers {
+		if server.Name == "" || !server.Enabled {
 			continue
 		}
-
-		for _, server := range enabledServers {
-			if server.Name == "" {
-				continue
-			}
-			if _, ok := seen[server.Name]; ok {
-				continue
-			}
-			seen[server.Name] = struct{}{}
-			serverNames = append(serverNames, server.Name)
+		if _, ok := seen[server.Name]; ok {
+			continue
 		}
+		seen[server.Name] = struct{}{}
+		serverNames = append(serverNames, server.Name)
 	}
 
 	return serverNames

@@ -189,6 +189,20 @@ func (a *WorkspaceStoreAdapter) toSessionWorkspace(ws *workspace.Workspace) *Wor
 			sessionWS.DirectoryReferencesJSON = data
 		}
 	}
+	if len(ws.MCPBindings) > 0 {
+		if data, err := json.Marshal(ws.MCPBindings); err != nil {
+			logger.Warn("Failed to marshal workspace MCP bindings", logger.Fields{"workspace_id": ws.ID, "error": err})
+		} else {
+			sessionWS.MCPBindingsJSON = data
+		}
+	}
+	if len(ws.AgentMCPAccess) > 0 {
+		if data, err := json.Marshal(ws.AgentMCPAccess); err != nil {
+			logger.Warn("Failed to marshal workspace agent MCP access", logger.Fields{"workspace_id": ws.ID, "error": err})
+		} else {
+			sessionWS.AgentMCPAccessJSON = data
+		}
+	}
 
 	return sessionWS
 }
@@ -280,6 +294,27 @@ func (a *WorkspaceStoreAdapter) toAgentStudioWorkspace(ws *Workspace) *workspace
 		if err := json.Unmarshal(ws.DirectoryReferencesJSON, &agentWS.DirectoryReferences); err != nil {
 			logger.Warn("Failed to unmarshal workspace directory references", logger.Fields{"workspace_id": ws.ID, "error": err})
 		}
+	}
+	if agentWS.DirectoryReferences == nil {
+		agentWS.DirectoryReferences = []workspace.DirectoryReference{}
+	}
+
+	if len(ws.MCPBindingsJSON) > 0 {
+		if err := json.Unmarshal(ws.MCPBindingsJSON, &agentWS.MCPBindings); err != nil {
+			logger.Warn("Failed to unmarshal workspace MCP bindings", logger.Fields{"workspace_id": ws.ID, "error": err})
+		}
+	}
+	if agentWS.MCPBindings == nil {
+		agentWS.MCPBindings = []workspace.WorkspaceMCPBinding{}
+	}
+
+	if len(ws.AgentMCPAccessJSON) > 0 {
+		if err := json.Unmarshal(ws.AgentMCPAccessJSON, &agentWS.AgentMCPAccess); err != nil {
+			logger.Warn("Failed to unmarshal workspace agent MCP access", logger.Fields{"workspace_id": ws.ID, "error": err})
+		}
+	}
+	if agentWS.AgentMCPAccess == nil {
+		agentWS.AgentMCPAccess = []workspace.WorkspaceAgentMCPAccess{}
 	}
 
 	if agentWS.SharedData == nil {

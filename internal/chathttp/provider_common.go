@@ -225,7 +225,7 @@ func fallbackToolLoopContent(results []ToolCallResult, fallbackMessage string) s
 // executeToolCallsCommonWithSession executes tool calls and stores them for the given session
 func (h *Handler) executeToolCallsCommonWithSession(
 	baseCtx context.Context,
-	ag *agent.Agent,
+	ag *resolvedChatAgent,
 	agentName string,
 	toolCalls []llm.ToolCall,
 	files []pluginapi.FileAttachment,

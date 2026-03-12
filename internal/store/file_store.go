@@ -335,7 +335,6 @@ func (s *fileStore) saveUnlocked() error {
 		Capabilities []string                      `json:"capabilities,omitempty"`
 		Settings     types.Settings                `json:"Settings"`
 		Plugins      map[string]types.LoadedPlugin `json:"Plugins"`
-		MCPServers   []string                      `json:"mcp_servers,omitempty"`
 		Status       types.AgentStatus             `json:"status,omitempty"`
 		Statistics   *types.AgentStatistics        `json:"statistics,omitempty"`
 		Metadata     *types.AgentMetadata          `json:"metadata,omitempty"`
@@ -357,7 +356,6 @@ func (s *fileStore) saveUnlocked() error {
 			Capabilities: agent.Capabilities,
 			Settings:     agent.Settings,
 			Plugins:      agent.Plugins,
-			MCPServers:   agent.MCPServers,
 			Status:       agent.Status,
 			Statistics:   agent.Statistics,
 			Metadata:     agent.Metadata,
@@ -483,18 +481,6 @@ func (s *fileStore) load() error {
 						logger.Verbosef("⚠️ Could not read agent_settings.json for '%s': %v", agentName, err)
 					}
 
-					// Load MCP servers from mcp_servers.json
-					mcpServersPath := filepath.Join(agentsDir, agentName, "mcp_servers.json")
-					if mcpData, err := os.ReadFile(mcpServersPath); err == nil {
-						var mcpConfig struct {
-							EnabledServers []string `json:"enabled_servers"`
-						}
-						if err := json.Unmarshal(mcpData, &mcpConfig); err == nil {
-							ag.MCPServers = mcpConfig.EnabledServers
-							logger.Verbosef("✅ Loaded %d MCP servers for agent '%s'", len(mcpConfig.EnabledServers), agentName)
-						}
-					}
-
 					s.normalizeLoadedAgent(&ag)
 					s.agents[agentName] = &ag
 				} else if filepath.Ext(entry.Name()) == ".json" {
@@ -510,18 +496,6 @@ func (s *fileStore) load() error {
 					var ag agent.Agent
 					if err := json.Unmarshal(agentData, &ag); err != nil {
 						continue
-					}
-
-					// Load MCP servers from mcp_servers.json (legacy structure)
-					mcpServersPath := filepath.Join(agentsDir, agentName, "mcp_servers.json")
-					if mcpData, err := os.ReadFile(mcpServersPath); err == nil {
-						var mcpConfig struct {
-							EnabledServers []string `json:"enabled_servers"`
-						}
-						if err := json.Unmarshal(mcpData, &mcpConfig); err == nil {
-							ag.MCPServers = mcpConfig.EnabledServers
-							logger.Verbosef("✅ Loaded %d MCP servers for agent '%s' (legacy)", len(mcpConfig.EnabledServers), agentName)
-						}
 					}
 
 					s.normalizeLoadedAgent(&ag)

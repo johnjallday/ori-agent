@@ -43,17 +43,23 @@ func classifyContextError(err error) string {
 
 // LLMTaskHandler executes tasks using the LLM system
 type LLMTaskHandler struct {
-	agentStore     store.Store
-	llmFactory     *llm.Factory
-	workspaceStore Store // Added to access workspace attachments
-	contextStore   taskPromptContextStore
-	eventBus       *EventBus // Optional event bus for publishing execution events
-	mcpRegistry    mcpRegistry
+	agentStore      store.Store
+	llmFactory      *llm.Factory
+	workspaceStore  Store // Added to access workspace attachments
+	contextStore    taskPromptContextStore
+	eventBus        *EventBus // Optional event bus for publishing execution events
+	mcpRegistry     mcpRegistry
+	runtimeResolver *AgentRuntimeResolver
 }
 
 type mcpRegistry interface {
 	GetToolsForServer(string) ([]pluginapi.PluginTool, error)
 	StartServer(string) error
+}
+
+type resolvedTaskAgent struct {
+	*agent.Agent
+	MCPServers []string
 }
 
 const maxTaskToolRounds = 6
@@ -89,6 +95,11 @@ func (h *LLMTaskHandler) SetMCPRegistry(registry mcpRegistry) {
 	h.mcpRegistry = registry
 }
 
+// SetRuntimeResolver configures workspace-aware runtime MCP resolution for task execution.
+func (h *LLMTaskHandler) SetRuntimeResolver(resolver *AgentRuntimeResolver) {
+	h.runtimeResolver = resolver
+}
+
 // SetContextStore configures optional workspace note/session summaries for task prompts.
 func (h *LLMTaskHandler) SetContextStore(store taskPromptContextStore) {
 	h.contextStore = store
@@ -107,9 +118,9 @@ func (h *LLMTaskHandler) ExecuteTask(ctx context.Context, agentName string, task
 	}
 
 	// Get the agent
-	ag, ok := h.agentStore.GetAgent(agentName)
-	if !ok {
-		return "", fmt.Errorf("agent %s not found", agentName)
+	ag, err := h.resolveExecutionAgent(agentName, task)
+	if err != nil {
+		return "", err
 	}
 
 	// Guard common browser-automation intents to avoid misleading "completed" responses
@@ -137,7 +148,7 @@ func (h *LLMTaskHandler) ExecuteTask(ctx context.Context, agentName string, task
 	modelName := h.normalizeModelForProvider(providerName, ag.Settings.Model)
 
 	// Build the prompt for the task
-	prompt := h.buildTaskPrompt(ctx, task, ag)
+	prompt := h.buildTaskPrompt(ctx, task, ag.Agent)
 
 	// Prepare messages
 	messages := []llm.Message{
@@ -157,12 +168,33 @@ func (h *LLMTaskHandler) ExecuteTask(ctx context.Context, agentName string, task
 	return h.executeTaskConversation(ctx, provider, providerName, modelName, ag, agentName, task, messages, tools)
 }
 
+func (h *LLMTaskHandler) resolveExecutionAgent(agentName string, task Task) (*resolvedTaskAgent, error) {
+	if h.runtimeResolver != nil {
+		resolved, err := h.runtimeResolver.ResolveAgentForTask(agentName, task)
+		if err != nil {
+			return nil, err
+		}
+		if resolved != nil && resolved.Agent != nil {
+			return &resolvedTaskAgent{
+				Agent:      resolved.Agent,
+				MCPServers: append([]string{}, resolved.MCPServers...),
+			}, nil
+		}
+	}
+
+	ag, ok := h.agentStore.GetAgent(agentName)
+	if !ok {
+		return nil, fmt.Errorf("agent %s not found", agentName)
+	}
+	return &resolvedTaskAgent{Agent: ag}, nil
+}
+
 func (h *LLMTaskHandler) executeTaskConversation(
 	ctx context.Context,
 	provider llm.Provider,
 	providerName string,
 	modelName string,
-	ag *agent.Agent,
+	ag *resolvedTaskAgent,
 	agentName string,
 	task Task,
 	messages []llm.Message,
@@ -444,8 +476,8 @@ func (h *LLMTaskHandler) cleanToolResult(result string) string {
 	return result
 }
 
-func (h *LLMTaskHandler) agentSupportsBrowserAutomation(ag *agent.Agent) bool {
-	if ag == nil {
+func (h *LLMTaskHandler) agentSupportsBrowserAutomation(ag *resolvedTaskAgent) bool {
+	if ag == nil || ag.Agent == nil {
 		return false
 	}
 	if !ag.Settings.IsWebSearchAllowed() {
@@ -704,7 +736,7 @@ func (h *LLMTaskHandler) getProviderForModel(model string) string {
 }
 
 // convertAgentToolsToLLMTools converts agent plugins + MCP tools into LLM tools.
-func (h *LLMTaskHandler) convertAgentToolsToLLMTools(ag *agent.Agent) []llm.Tool {
+func (h *LLMTaskHandler) convertAgentToolsToLLMTools(ag *resolvedTaskAgent) []llm.Tool {
 	var tools []llm.Tool
 	seen := make(map[string]struct{})
 
@@ -762,7 +794,7 @@ type toolCallResult struct {
 }
 
 // executeToolCalls executes tool calls and returns results
-func (h *LLMTaskHandler) executeToolCalls(ctx context.Context, ag *agent.Agent, agentName string, task Task, toolCalls []llm.ToolCall) []toolCallResult {
+func (h *LLMTaskHandler) executeToolCalls(ctx context.Context, ag *resolvedTaskAgent, agentName string, task Task, toolCalls []llm.ToolCall) []toolCallResult {
 	results := make([]toolCallResult, len(toolCalls))
 
 	for i, tc := range toolCalls {
@@ -773,7 +805,7 @@ func (h *LLMTaskHandler) executeToolCalls(ctx context.Context, ag *agent.Agent, 
 }
 
 // executeToolCall executes a single tool call
-func (h *LLMTaskHandler) executeToolCall(ctx context.Context, ag *agent.Agent, agentName string, task Task, toolCall llm.ToolCall) toolCallResult {
+func (h *LLMTaskHandler) executeToolCall(ctx context.Context, ag *resolvedTaskAgent, agentName string, task Task, toolCall llm.ToolCall) toolCallResult {
 	logger.Debug("Executing tool", logger.Fields{"tool": toolCall.Name})
 
 	// Publish tool call event
@@ -842,7 +874,7 @@ func (h *LLMTaskHandler) executeToolCall(ctx context.Context, ag *agent.Agent, a
 	}
 }
 
-func (h *LLMTaskHandler) findTool(ag *agent.Agent, toolName string) (pluginapi.PluginTool, bool) {
+func (h *LLMTaskHandler) findTool(ag *resolvedTaskAgent, toolName string) (pluginapi.PluginTool, bool) {
 	target := strings.ToLower(strings.TrimSpace(toolName))
 	if target == "" {
 		return nil, false
@@ -871,7 +903,7 @@ func (h *LLMTaskHandler) findTool(ag *agent.Agent, toolName string) (pluginapi.P
 	return nil, false
 }
 
-func (h *LLMTaskHandler) getAgentMCPTools(ag *agent.Agent) []pluginapi.PluginTool {
+func (h *LLMTaskHandler) getAgentMCPTools(ag *resolvedTaskAgent) []pluginapi.PluginTool {
 	if h == nil || h.mcpRegistry == nil || ag == nil || len(ag.MCPServers) == 0 {
 		return nil
 	}

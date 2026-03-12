@@ -3,6 +3,7 @@ package mcp
 import (
 	"context"
 	"fmt"
+	"reflect"
 	"sync"
 
 	"github.com/oriagent/ori-pluginapi"
@@ -34,6 +35,23 @@ func (r *Registry) AddServer(config ServerConfig) error {
 	r.servers[config.Name] = server
 
 	return nil
+}
+
+// UpsertServer adds a new server or replaces an existing server when its config changes.
+func (r *Registry) UpsertServer(config ServerConfig) error {
+	existing, err := r.GetServer(config.Name)
+	if err == nil && existing != nil {
+		if reflect.DeepEqual(existing.GetConfig(), config) {
+			return nil
+		}
+		if err := r.RemoveServer(config.Name); err != nil {
+			return err
+		}
+	} else if err != nil && config.Name == "" {
+		return fmt.Errorf("server name is required")
+	}
+
+	return r.AddServer(config)
 }
 
 // RemoveServer removes an MCP server from the registry

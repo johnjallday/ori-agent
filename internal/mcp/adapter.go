@@ -242,7 +242,7 @@ func isFilesystemPathArgumentKey(key string) bool {
 
 func resolveFilesystemBasePath(serverConfig ServerConfig) string {
 	// Server-filesystem accepts one or more allowed directories as args after package name.
-	for i := len(serverConfig.Args) - 1; i >= 0; i-- {
+	for i := 0; i < len(serverConfig.Args); i++ {
 		candidate := strings.TrimSpace(serverConfig.Args[i])
 		if candidate == "" {
 			continue

@@ -422,11 +422,19 @@ function getSelectedAgentCreationSkills() {
 
 function renderAgentCreationCapabilityCounts() {
   const { mcpCount, skillCount } = getAgentCreationCapabilityElements();
-  const selectedMCPCount = getSelectedAgentCreationMCPServers().length;
+  const availableMCPCount = Array.isArray(agentCreationCapabilityState.mcpServers) ? agentCreationCapabilityState.mcpServers.length : 0;
+  const requiredMCPCount = getRequiredAgentCreationMCPServerKeys().size;
+  const suggestedMCPCount = agentCreationCapabilityState.selectedMCPServers.size;
   const selectedSkillCount = getSelectedAgentCreationSkills().length;
 
   if (mcpCount) {
-    mcpCount.textContent = `${selectedMCPCount} selected`;
+    if (requiredMCPCount > 0) {
+      mcpCount.textContent = `${requiredMCPCount} required`;
+    } else if (suggestedMCPCount > 0) {
+      mcpCount.textContent = `${suggestedMCPCount} suggested`;
+    } else {
+      mcpCount.textContent = `${availableMCPCount} available`;
+    }
   }
   if (skillCount) {
     skillCount.textContent = `${selectedSkillCount} selected`;
@@ -473,7 +481,8 @@ function renderAgentCreationMCPServers() {
     const name = String(server?.name || '').trim();
     const normalizedName = normalizeAgentCapabilityName(name);
     const isRequired = requiredKeys.has(normalizedName);
-    const isSelected = isRequired || agentCreationCapabilityState.selectedMCPServers.has(normalizedName);
+    const isSuggested = agentCreationCapabilityState.selectedMCPServers.has(normalizedName);
+    const isHighlighted = isRequired || isSuggested;
     const commandSummary = buildAgentCreationCommandSummary(server);
     const toolCount = Number.isFinite(server?.toolCount) ? server.toolCount : 0;
     const status = String(server?.status || 'configured').trim() || 'configured';
@@ -482,12 +491,7 @@ function renderAgentCreationMCPServers() {
       : (status === 'starting' || status === 'restarting' ? 'is-warning' : 'is-muted');
 
     return `
-      <label class="agent-create-capability-card${isSelected ? ' is-selected' : ''}${isRequired ? ' is-locked' : ''}">
-        <input type="checkbox"
-               value="${escapeHtml(name)}"
-               data-agent-create-mcp="true"
-               ${isSelected ? 'checked' : ''}
-               ${isRequired ? 'disabled' : ''}>
+      <div class="agent-create-capability-card${isHighlighted ? ' is-selected' : ''}${isRequired ? ' is-locked' : ''}">
         <span class="agent-create-capability-copy">
           <span class="agent-create-capability-title-row">
             <span class="agent-create-capability-title">${escapeHtml(name)}</span>
@@ -499,28 +503,14 @@ function renderAgentCreationMCPServers() {
           <span class="agent-create-capability-description">${escapeHtml(commandSummary)}</span>
           <span class="agent-create-capability-tags">
             <span class="agent-create-capability-tag is-muted">${escapeHtml(server?.transport || 'stdio')}</span>
+            <span class="agent-create-capability-tag is-muted">workspace-scoped</span>
             ${isRequired ? '<span class="agent-create-capability-tag is-required">required by selected skill</span>' : ''}
+            ${!isRequired && isSuggested ? '<span class="agent-create-capability-tag is-required">suggested</span>' : ''}
           </span>
         </span>
-      </label>
+      </div>
     `;
   }).join('');
-
-  mcpList.querySelectorAll('input[data-agent-create-mcp]').forEach((checkbox) => {
-    checkbox.addEventListener('change', () => {
-      const normalizedName = normalizeAgentCapabilityName(checkbox.value);
-      if (!normalizedName) return;
-
-      if (checkbox.checked) {
-        agentCreationCapabilityState.selectedMCPServers.add(normalizedName);
-      } else {
-        agentCreationCapabilityState.selectedMCPServers.delete(normalizedName);
-      }
-
-      renderAgentCreationMCPServers();
-      renderAgentCreationSkills();
-    });
-  });
 
   renderAgentCreationCapabilityCounts();
 }
@@ -697,20 +687,11 @@ async function applyAgentCreationCapabilities(agentName) {
   const selectedMCPServers = getSelectedAgentCreationMCPServers();
   const selectedSkills = getSelectedAgentCreationSkills();
   const summary = {
-    mcpEnabled: 0,
+    workspaceMCPReferences: selectedMCPServers.length,
     skillsEnabled: 0,
     scriptedSkillsTrusted: 0,
     failures: []
   };
-
-  await Promise.all(selectedMCPServers.map(async (serverName) => {
-    try {
-      await API.post(`/api/agents/${encodeURIComponent(agentName)}/mcp-servers/${encodeURIComponent(serverName)}/enable`, {});
-      summary.mcpEnabled += 1;
-    } catch (error) {
-      summary.failures.push(`MCP ${serverName}: ${error.message || 'failed to enable'}`);
-    }
-  }));
 
   await Promise.all(selectedSkills.map(async (skill) => {
     try {
@@ -742,8 +723,8 @@ async function applyAgentCreationCapabilities(agentName) {
 
 function describeAgentCreationCapabilities(summary) {
   const parts = [];
-  if (summary.mcpEnabled > 0) {
-    parts.push(`${summary.mcpEnabled} MCP server${summary.mcpEnabled === 1 ? '' : 's'}`);
+  if (summary.workspaceMCPReferences > 0) {
+    parts.push(`${summary.workspaceMCPReferences} workspace MCP connector${summary.workspaceMCPReferences === 1 ? '' : 's'} to bind`);
   }
   if (summary.skillsEnabled > 0) {
     parts.push(`${summary.skillsEnabled} skill${summary.skillsEnabled === 1 ? '' : 's'}`);
@@ -877,7 +858,7 @@ async function createNewAgent() {
       skills: getSelectedAgentCreationSkills()
     };
     let capabilitySummary = {
-      mcpEnabled: 0,
+      workspaceMCPReferences: 0,
       skillsEnabled: 0,
       scriptedSkillsTrusted: 0,
       failures: []
@@ -1303,10 +1284,10 @@ function createAgentElement(agent, currentAgent) {
               <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" class="me-1">
                 <path d="M20,2H4A2,2 0 0,0 2,4V22L6,18H20A2,2 0 0,0 22,16V4A2,2 0 0,0 20,2M6,9H18V11H6M14,14H6V12H14M18,8H6V6H18"/>
               </svg>
-              MCP Servers
+              MCP Connectors
             </h6>
             <div id="mcpServersList-${accordionId}" style="font-size: 0.85rem;">
-              <div class="text-muted small">Loading MCP servers...</div>
+              <div class="text-muted small">Loading MCP connector summary...</div>
             </div>
           </div>
         </div>
@@ -2107,82 +2088,16 @@ async function loadAgentMCPServers(agentName, accordionId) {
   const mcpServersList = document.getElementById(`mcpServersList-${accordionId}`);
   if (!mcpServersList) return;
 
-  try {
-    const data = await API.get(`/api/agents/${encodeURIComponent(agentName)}/mcp-servers`);
-    const servers = data.servers || [];
-
-    if (servers.length === 0) {
-      mcpServersList.innerHTML = '<div class="text-muted small">No MCP servers configured</div>';
-      return;
-    }
-
-    // Render MCP servers list
-    let html = '';
-    servers.forEach(server => {
-      const statusColor = server.status === 'running' ? 'success' :
-        server.status === 'error' ? 'danger' : 'secondary';
-      const statusIcon = server.status === 'running' ? '●' : '○';
-
-      html += `
-        <div class="d-flex align-items-center justify-content-between mb-2 p-2"
-             style="background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 6px;">
-          <div class="d-flex flex-column flex-grow-1">
-            <div class="d-flex align-items-center gap-2">
-              <span class="text-${statusColor}" style="font-size: 0.6rem;">${statusIcon}</span>
-              <span style="color: var(--text-primary); font-weight: 500;">${server.name}</span>
-              ${server.tool_count > 0 ? `<span class="badge bg-secondary" style="font-size: 0.65rem;">${server.tool_count} tools</span>` : ''}
-            </div>
-            ${server.description ? `<span class="text-muted small mt-1">${server.description}</span>` : ''}
-          </div>
-          <div class="form-check form-switch mb-0">
-            <input class="form-check-input" type="checkbox" role="switch"
-                   id="mcp-${server.name}-${accordionId}"
-                   ${server.enabled ? 'checked' : ''}
-                   onchange="toggleMCPServer('${agentName}', '${server.name}', this.checked, '${accordionId}')"
-                   style="cursor: pointer;">
-          </div>
-        </div>
-      `;
-    });
-
-    mcpServersList.innerHTML = html;
-
-  } catch (error) {
-    agentsLog.error('Error loading MCP servers for agent', { agent: agentName, error });
-    mcpServersList.innerHTML = '<div class="text-danger small">Failed to load MCP servers</div>';
-  }
-}
-
-// Toggle MCP server for an agent
-async function toggleMCPServer(agentName, serverName, enabled, accordionId) {
-  const checkbox = document.getElementById(`mcp-${serverName}-${accordionId}`);
-  const originalState = !enabled; // Store original state for rollback
-
-  try {
-    const endpoint = enabled ? 'enable' : 'disable';
-    const data = await API.post(`/api/agents/${encodeURIComponent(agentName)}/mcp-servers/${serverName}/${endpoint}`);
-
-    // Show success notification
-    if (typeof showNotification === 'function') {
-      showNotification(data.message || `MCP server ${enabled ? 'enabled' : 'disabled'}`, 'success');
-    }
-
-    // Reload MCP servers list to update status and tool count
-    await loadAgentMCPServers(agentName, accordionId);
-
-  } catch (error) {
-    agentsLog.error('Error toggling MCP server', error);
-
-    // Rollback checkbox state on error
-    if (checkbox) {
-      checkbox.checked = originalState;
-    }
-
-    // Show error notification
-    if (typeof showNotification === 'function') {
-      showNotification(`Failed to ${enabled ? 'enable' : 'disable'} MCP server: ${error.message}`, 'error');
-    }
-  }
+  mcpServersList.innerHTML = `
+    <div class="small" style="color: var(--text-secondary); line-height: 1.5;">
+      MCP is now configured per workspace instead of per agent.
+      <div style="margin-top: 8px;">
+        <a href="/workspaces" style="color: var(--primary-color); text-decoration: none;">Open Workspaces</a>
+        <span style="margin: 0 6px; color: var(--text-muted);">|</span>
+        <a href="/mcp" style="color: var(--primary-color); text-decoration: none;">Manage Global MCP</a>
+      </div>
+    </div>
+  `;
 }
 
 // Initialize agent management when DOM is ready

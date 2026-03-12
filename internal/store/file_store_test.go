@@ -48,7 +48,6 @@ func TestFileStore_SaveLoad_NestedRoundTrip(t *testing.T) {
 						Version: "1.0.0",
 					},
 				},
-				MCPServers: []string{"filesystem", "github"},
 				Status:     types.AgentStatusActive,
 				Statistics: stats,
 				Metadata: &types.AgentMetadata{
@@ -108,9 +107,6 @@ func TestFileStore_SaveLoad_NestedRoundTrip(t *testing.T) {
 	}
 	if len(got.Plugins) != 1 {
 		t.Errorf("expected 1 plugin, got %d", len(got.Plugins))
-	}
-	if len(got.MCPServers) != 2 {
-		t.Errorf("expected 2 MCP servers, got %d", len(got.MCPServers))
 	}
 	if got.Statistics == nil {
 		t.Fatal("expected statistics to be loaded")
@@ -232,7 +228,7 @@ func TestFileStore_Load_OldTopLevelFormat_MigratesDefaults(t *testing.T) {
 	}
 }
 
-func TestFileStore_Load_LegacyFlatAgentFile_MCPOverrideAndDefaults(t *testing.T) {
+func TestFileStore_Load_LegacyFlatAgentFile_IgnoresLegacyMCPOverrideAndDefaults(t *testing.T) {
 	tempDir := t.TempDir()
 	indexPath := filepath.Join(tempDir, "agents_index.json")
 
@@ -295,9 +291,6 @@ func TestFileStore_Load_LegacyFlatAgentFile_MCPOverrideAndDefaults(t *testing.T)
 	}
 	if got.Statistics == nil {
 		t.Fatal("expected statistics to be initialized")
-	}
-	if len(got.MCPServers) != 2 {
-		t.Fatalf("expected 2 MCP servers from legacy override, got %d", len(got.MCPServers))
 	}
 }
 

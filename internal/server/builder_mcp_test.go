@@ -5,30 +5,8 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/johnjallday/ori-agent/internal/agent"
 	"github.com/johnjallday/ori-agent/internal/mcp"
-	"github.com/johnjallday/ori-agent/internal/store"
 )
-
-type mcpBuilderTestStore struct {
-	names []string
-}
-
-func (s *mcpBuilderTestStore) ListAgents() (names []string, current string) {
-	return append([]string{}, s.names...), ""
-}
-
-func (s *mcpBuilderTestStore) SetCurrentAgent(string) error { return nil }
-func (s *mcpBuilderTestStore) CreateAgent(string, *store.CreateAgentConfig) error {
-	return nil
-}
-func (s *mcpBuilderTestStore) DeleteAgent(string) error { return nil }
-func (s *mcpBuilderTestStore) GetAgent(string) (*agent.Agent, bool) {
-	return nil, false
-}
-func (s *mcpBuilderTestStore) SetAgent(string, *agent.Agent) error { return nil }
-func (s *mcpBuilderTestStore) ClearAgents() error                  { return nil }
-func (s *mcpBuilderTestStore) Save() error                         { return nil }
 
 type fakeMCPStarter struct {
 	statuses  map[string]mcp.ServerStatus
@@ -70,36 +48,13 @@ func (f *fakeMCPStarter) StopServer(name string) error {
 }
 
 func TestCollectEnabledMCPServerNames(t *testing.T) {
-	tempDir := t.TempDir()
-	configManager := mcp.NewConfigManager(tempDir)
-	if err := configManager.SaveGlobalConfig(&mcp.GlobalConfig{
-		Servers: []mcp.ServerConfig{
-			{Name: "filesystem"},
-			{Name: "ori-reaper"},
-			{Name: "sqlite"},
-		},
-	}); err != nil {
-		t.Fatalf("failed to save global config: %v", err)
-	}
-
-	if err := configManager.SaveAgentConfig("alpha", &mcp.AgentMCPConfig{
-		EnabledServers: []string{"filesystem", "ori-reaper"},
-	}); err != nil {
-		t.Fatalf("failed to save alpha config: %v", err)
-	}
-
-	if err := configManager.SaveAgentConfig("beta", &mcp.AgentMCPConfig{
-		EnabledServers: []string{"ori-reaper", "missing"},
-	}); err != nil {
-		t.Fatalf("failed to save beta config: %v", err)
-	}
-
-	builder := &ServerBuilder{
-		st:               &mcpBuilderTestStore{names: []string{"alpha", "beta"}},
-		mcpConfigManager: configManager,
-	}
-
-	got := builder.collectEnabledMCPServerNames()
+	got := collectEnabledMCPServerNames([]mcp.ServerConfig{
+		{Name: "filesystem", Enabled: true},
+		{Name: "ori-reaper", Enabled: true},
+		{Name: "ori-reaper", Enabled: true},
+		{Name: "sqlite", Enabled: false},
+		{Name: "", Enabled: true},
+	})
 	want := []string{"filesystem", "ori-reaper"}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("expected enabled server names %v, got %v", want, got)

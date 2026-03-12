@@ -288,7 +288,6 @@ function createAgentCard(agent) {
   const description = String(agent?.metadata?.description || 'No purpose written yet.');
   const model = String(agent?.model || '-');
   const pluginsCount = Array.isArray(agent?.enabled_plugins) ? agent.enabled_plugins.length : 0;
-  const mcpCount = Array.isArray(agent?.mcp_servers) ? agent.mcp_servers.length : 0;
   const typeLabel = toTitleCase(String(agent?.type || 'tool-calling'));
   const health = getHealthState(agent);
   const chatDisabled = health.kind === 'needs-setup';
@@ -323,7 +322,7 @@ function createAgentCard(agent) {
     <div class="config-only">
       <div>Type: ${safeEscapeHtml(typeLabel)}</div>
       <div>Model: ${safeEscapeHtml(model)}</div>
-      <div>Tools: ${pluginsCount} plugins, ${mcpCount} MCP</div>
+      <div>Tools: ${pluginsCount} plugins</div>
       <div>Total cost: $${Number(agent?.statistics?.total_cost || 0).toFixed(2)}</div>
     </div>
   `;
@@ -693,7 +692,6 @@ function renderDrawerContent() {
         .map((plugin) => (typeof plugin === 'string' ? plugin : plugin?.name))
         .filter(Boolean)
     : [];
-  const mcpServers = Array.isArray(detail?.mcp_servers) ? detail.mcp_servers : [];
   const skillCount = Number(selectedAgentSkills?.total || 0);
   const enabledSkillCount = Number(selectedAgentSkills?.enabled || 0);
 
@@ -704,12 +702,12 @@ function renderDrawerContent() {
         <div class="ops-data-value">${enabledPlugins.length > 0 ? safeEscapeHtml(enabledPlugins.join(', ')) : 'No plugins enabled.'}</div>
       </div>
       <div class="ops-data-card">
-        <span class="ops-data-label">MCP Servers (${mcpServers.length})</span>
-        <div class="ops-data-value">${mcpServers.length > 0 ? safeEscapeHtml(mcpServers.join(', ')) : 'No MCP servers enabled.'}</div>
-      </div>
-      <div class="ops-data-card">
         <span class="ops-data-label">Skills</span>
         <div class="ops-data-value">${safeEscapeHtml(`${enabledSkillCount}/${skillCount} enabled`)}</div>
+      </div>
+      <div class="ops-data-card">
+        <span class="ops-data-label">MCP Access</span>
+        <div class="ops-data-value">Workspace-scoped. Configure connector bindings from the target workspace.</div>
       </div>
     `;
   }

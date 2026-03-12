@@ -10,7 +10,6 @@ import (
 
 	"github.com/openai/openai-go/v3"
 
-	"github.com/johnjallday/ori-agent/internal/agent"
 	orihttp "github.com/johnjallday/ori-agent/internal/http"
 	"github.com/johnjallday/ori-agent/internal/llm"
 	"github.com/johnjallday/ori-agent/internal/logger"
@@ -27,7 +26,7 @@ const (
 func (h *Handler) handleOpenAIChat(
 	w http.ResponseWriter,
 	r *http.Request,
-	ag *agent.Agent,
+	ag *resolvedChatAgent,
 	userMessage string,
 	tools []llm.Tool,
 	agentName string,
@@ -89,7 +88,7 @@ func (h *Handler) handleOpenAIChat(
 		if err := h.costTracker.TrackUsage("openai", string(ag.Settings.Model), agentName, usage, ""); err != nil {
 			logger.Warn("Failed to track usage", logger.Fields{"error": err})
 		}
-		h.trackAgentStatistics(ag, agentName, usage.TotalTokens, "openai", string(ag.Settings.Model), userMessage)
+		h.trackAgentStatistics(ag.Agent, agentName, usage.TotalTokens, "openai", string(ag.Settings.Model), userMessage)
 	}
 
 	choice := resp.Choices[0].Message
@@ -119,7 +118,7 @@ func (h *Handler) handleOpenAIChat(
 				if err := h.costTracker.TrackUsage("openai", string(ag.Settings.Model), agentName, usage, ""); err != nil {
 					logger.Warn("Failed to track fallback usage", logger.Fields{"error": err})
 				}
-				h.trackAgentStatistics(ag, agentName, usage.TotalTokens, "openai", string(ag.Settings.Model), userMessage)
+				h.trackAgentStatistics(ag.Agent, agentName, usage.TotalTokens, "openai", string(ag.Settings.Model), userMessage)
 			}
 		}
 	}
@@ -138,7 +137,7 @@ func (h *Handler) handleOpenAIChat(
 	ag.Messages = append(ag.Messages, choice.ToParam())
 
 	logger.Debug("Chat response completed", logger.Fields{"duration": time.Since(start), "response": text})
-	_ = h.store.SetAgent(agentName, ag)
+	_ = h.persistAgent(agentName, ag.Agent)
 
 	// Store assistant response in session
 	h.storeMessageInSession(baseCtx, sessionID, "assistant", text)
@@ -153,7 +152,7 @@ func (h *Handler) handleOpenAIChat(
 // handleOpenAIToolCalls handles the tool execution loop for OpenAI models
 func (h *Handler) handleOpenAIToolCalls(
 	w http.ResponseWriter,
-	ag *agent.Agent,
+	ag *resolvedChatAgent,
 	agentName string,
 	baseCtx context.Context,
 	ctx context.Context,
@@ -227,7 +226,7 @@ func (h *Handler) handleOpenAIToolCalls(
 	ag.Messages = append(ag.Messages, openai.AssistantMessage(finalText))
 
 	logger.Debug("Chat with tool completed", logger.Fields{"duration": time.Since(start)})
-	_ = h.store.SetAgent(agentName, ag)
+	_ = h.persistAgent(agentName, ag.Agent)
 
 	// Store assistant response in session
 	h.storeMessageInSession(baseCtx, sessionID, "assistant", finalText)

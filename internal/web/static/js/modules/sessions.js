@@ -2215,7 +2215,7 @@ const sessionManager = {
     this.editAgentSelectedTags = [];
     this.editAgentMCPServers = [];
     this.clearEditAgentMessages();
-    this.renderEditAgentMCPServers([], { loading: true });
+    this.renderEditAgentMCPServers([], { workspaceScoped: true });
     this.setEditAgentLoading(true, 'Loading agent...');
     this.setEditAgentFormEnabled(false);
 
@@ -2224,10 +2224,7 @@ const sessionManager = {
 
     try {
       await this.ensureEditAgentModelOptions();
-      await Promise.all([
-        this.loadEditAgentDetails(agentName),
-        this.loadEditAgentMCPServers(agentName)
-      ]);
+      await this.loadEditAgentDetails(agentName);
     } catch (error) {
       console.error('Failed to load agent details:', error);
       this.showEditAgentError(error.message || 'Failed to load agent details');
@@ -2291,40 +2288,7 @@ const sessionManager = {
 
     this.editAgentSelectedTags = agent.metadata?.tags || [];
     this.renderEditAgentTags();
-
-    const fallbackMCPServers = this.normalizeEditAgentMCPServers(agent.mcp_servers || [], true);
-    if (fallbackMCPServers.length > 0) {
-      this.editAgentMCPServers = fallbackMCPServers;
-      this.renderEditAgentMCPServers(fallbackMCPServers);
-    }
-  },
-
-  async loadEditAgentMCPServers(agentName) {
-    try {
-      const response = await fetch(`/api/agents/${encodeURIComponent(agentName)}/mcp-servers`);
-      if (!response.ok) {
-        throw new Error('Failed to load MCP servers');
-      }
-
-      const data = await response.json();
-      const enabledServers = this.normalizeEditAgentMCPServers(data?.servers || [], true);
-
-      // Agent changed while request was inflight.
-      if (this.editAgentOriginalName !== agentName) {
-        return [];
-      }
-
-      this.editAgentMCPServers = enabledServers;
-      this.renderEditAgentMCPServers(enabledServers);
-      return enabledServers;
-    } catch (error) {
-      console.error('Failed to load MCP servers for edit modal:', error);
-      if (this.editAgentOriginalName === agentName) {
-        this.editAgentMCPServers = [];
-        this.renderEditAgentMCPServers([], { error: true });
-      }
-      return [];
-    }
+    this.renderEditAgentMCPServers([], { workspaceScoped: true });
   },
 
   normalizeEditAgentMCPServers(servers, enabledOnly = false) {
@@ -2389,6 +2353,11 @@ const sessionManager = {
     const container = document.getElementById('editAgentMCPList');
     if (!container) return;
 
+    if (options.workspaceScoped) {
+      container.innerHTML = '<span class="agent-edit-mcp-empty">Workspace-scoped. Configure MCP bindings from the target workspace.</span>';
+      return;
+    }
+
     if (options.loading) {
       container.innerHTML = '<span class="agent-edit-mcp-empty">Loading MCP servers...</span>';
       return;
@@ -2401,7 +2370,7 @@ const sessionManager = {
 
     const enabledServers = this.normalizeEditAgentMCPServers(servers, true);
     if (enabledServers.length === 0) {
-      container.innerHTML = '<span class="agent-edit-mcp-empty">No MCP servers enabled for this agent.</span>';
+      container.innerHTML = '<span class="agent-edit-mcp-empty">No MCP preferences saved for this agent.</span>';
       return;
     }
 

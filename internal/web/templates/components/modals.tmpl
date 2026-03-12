@@ -119,8 +119,8 @@
           <section class="agent-create-capabilities" aria-labelledby="agentCreateCapabilitiesTitle">
             <div class="d-flex justify-content-between align-items-start gap-3 mb-3">
               <div>
-                <label id="agentCreateCapabilitiesTitle" class="form-label mb-1" style="color: var(--text-primary);">Add MCP Servers or Skills</label>
-                <div class="form-helper">Optional. Connect runtime servers and reusable skills during agent creation instead of configuring them later.</div>
+                <label id="agentCreateCapabilitiesTitle" class="form-label mb-1" style="color: var(--text-primary);">Review MCP Connectors and Skills</label>
+                <div class="form-helper">Optional. Skills still attach to the agent here. MCP stays workspace-scoped, so this step only shows which connectors are available before you add the agent to a workspace.</div>
               </div>
               <span class="agent-create-capability-pill is-muted">Optional</span>
             </div>
@@ -129,13 +129,13 @@
               <div class="agent-create-capabilities-panel">
                 <div class="agent-create-capabilities-panel-header">
                   <div>
-                    <div class="agent-create-capabilities-panel-title">MCP Servers</div>
-                    <div class="agent-create-capabilities-panel-subtitle">Attach live tools and integrations</div>
+                    <div class="agent-create-capabilities-panel-title">MCP Connectors</div>
+                    <div class="agent-create-capabilities-panel-subtitle">Available globally, then bound per workspace</div>
                   </div>
-                  <span id="agentCreateMCPCount" class="agent-create-capability-pill is-muted">0 selected</span>
+                  <span id="agentCreateMCPCount" class="agent-create-capability-pill is-muted">0 available</span>
                 </div>
                 <div id="agentCreateMCPList" class="agent-create-capability-list" aria-live="polite">
-                  <div class="agent-create-capability-empty">Loading MCP servers...</div>
+                  <div class="agent-create-capability-empty">Loading MCP connectors...</div>
                 </div>
               </div>
 
@@ -154,7 +154,7 @@
             </div>
 
             <div class="agent-create-capability-note">
-              Selecting a skill auto-selects its required MCP servers. Skills with scripts are trusted for this agent when selected.
+              Skills with scripts are trusted for this agent when selected. Required MCP connectors are still configured from the target workspace after the agent is created.
             </div>
           </section>
         </form>

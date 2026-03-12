@@ -9,13 +9,22 @@ import (
 	orihttp "github.com/johnjallday/ori-agent/internal/http"
 	"github.com/johnjallday/ori-agent/internal/store"
 	"github.com/johnjallday/ori-agent/internal/types"
+	"github.com/johnjallday/ori-agent/internal/workspace"
 )
 
 type HomeAssistantRouteHandler struct {
-	State             store.Store
+	State           store.Store
+	RuntimeResolver interface {
+		ResolveAgentForWorkspace(agentName, workspaceID, nodeID string) (*workspace.ResolvedAgentRuntime, error)
+	}
 	SystemModelReader interface {
 		GetSystemModel() (provider, model string)
 	}
+}
+
+type resolvedRouteAgent struct {
+	*agent.Agent
+	MCPServers []string
 }
 
 func NewHomeAssistantRouteHandler(state store.Store) *HomeAssistantRouteHandler {
@@ -26,6 +35,12 @@ func (h *HomeAssistantRouteHandler) SetSystemModelReader(reader interface {
 	GetSystemModel() (provider, model string)
 }) {
 	h.SystemModelReader = reader
+}
+
+func (h *HomeAssistantRouteHandler) SetRuntimeResolver(resolver interface {
+	ResolveAgentForWorkspace(agentName, workspaceID, nodeID string) (*workspace.ResolvedAgentRuntime, error)
+}) {
+	h.RuntimeResolver = resolver
 }
 
 type HomeAssistantRouteRequest struct {
@@ -210,13 +225,13 @@ func (h *HomeAssistantRouteHandler) RouteHandler(w http.ResponseWriter, r *http.
 	}
 	_ = ensureSystemAssistantAgentWithSystemModel(h.State, systemProvider, systemModel)
 
+	routeContext := normalizeHomeAssistantRouteContext(req.Context)
 	intent := detectHomeAssistantIntent(prompt)
-	intentVariant := detectHomeAssistantIntentVariant(prompt, intent, normalizeHomeAssistantRouteContext(req.Context))
-	match := h.findBestMatch(prompt, intent)
+	intentVariant := detectHomeAssistantIntentVariant(prompt, intent, routeContext)
+	match := h.findBestMatch(prompt, intent, routeContext)
 	if match == nil {
 		match = h.systemAssistantFallback(intent)
 	}
-	routeContext := normalizeHomeAssistantRouteContext(req.Context)
 	workspaceRecommended := shouldRecommendWorkspace(prompt, intent)
 	routeMode, targetSurface := determineRouteModeAndTargetSurface(intent, intentVariant, routeContext, workspaceRecommended)
 
@@ -310,13 +325,13 @@ func detectHomeAssistantIntentVariant(prompt string, intent homeAssistantIntent,
 	if promptContainsAnyRoutePhrase(normalized, homeAssistantPersonalCalendarSignals) {
 		return "personal_calendar"
 	}
-	if context.hasWorkspaceContext() && strings.Contains(normalized, "schedule") {
+	if context.hasWorkspaceSurfaceContext() && strings.Contains(normalized, "schedule") {
 		return "ambiguous"
 	}
 	return "personal_calendar"
 }
 
-func (h *HomeAssistantRouteHandler) findBestMatch(prompt string, intent homeAssistantIntent) *routedAgentMatch {
+func (h *HomeAssistantRouteHandler) findBestMatch(prompt string, intent homeAssistantIntent, routeContext normalizedHomeAssistantRouteContext) *routedAgentMatch {
 	names, current := h.State.ListAgents()
 	if len(names) == 0 {
 		return nil
@@ -324,10 +339,11 @@ func (h *HomeAssistantRouteHandler) findBestMatch(prompt string, intent homeAssi
 
 	var best *routedAgentMatch
 	for _, name := range names {
-		ag, ok := h.State.GetAgent(name)
-		if !ok || ag == nil {
+		baseAgent, ok := h.State.GetAgent(name)
+		if !ok || baseAgent == nil {
 			continue
 		}
+		ag := h.resolveAgentForContext(name, baseAgent, routeContext)
 
 		candidate := scoreAgentForIntent(name, current, ag, intent, prompt)
 		if isBetterMatch(candidate, best, current) {
@@ -342,6 +358,25 @@ func (h *HomeAssistantRouteHandler) findBestMatch(prompt string, intent homeAssi
 		return nil
 	}
 	return best
+}
+
+func (h *HomeAssistantRouteHandler) resolveAgentForContext(
+	agentName string,
+	baseAgent *agent.Agent,
+	routeContext normalizedHomeAssistantRouteContext,
+) *resolvedRouteAgent {
+	if h == nil || h.RuntimeResolver == nil || strings.TrimSpace(routeContext.WorkspaceID) == "" {
+		return &resolvedRouteAgent{Agent: baseAgent}
+	}
+
+	resolved, err := h.RuntimeResolver.ResolveAgentForWorkspace(agentName, routeContext.WorkspaceID, "")
+	if err != nil || resolved == nil || resolved.Agent == nil {
+		return &resolvedRouteAgent{Agent: baseAgent}
+	}
+	return &resolvedRouteAgent{
+		Agent:      resolved.Agent,
+		MCPServers: append([]string{}, resolved.MCPServers...),
+	}
 }
 
 func isBetterMatch(candidate, best *routedAgentMatch, current string) bool {
@@ -371,7 +406,7 @@ func isBetterMatch(candidate, best *routedAgentMatch, current string) bool {
 	return strings.ToLower(candidate.Name) < strings.ToLower(best.Name)
 }
 
-func scoreAgentForIntent(name, current string, ag *agent.Agent, intent homeAssistantIntent, prompt string) *routedAgentMatch {
+func scoreAgentForIntent(name, current string, ag *resolvedRouteAgent, intent homeAssistantIntent, prompt string) *routedAgentMatch {
 	summary := buildAgentSummary(name, ag)
 	plugins := extractNormalizedPluginNames(ag)
 	mcpServers := extractNormalizedMCPServerNames(ag)
@@ -447,7 +482,7 @@ func scoreAgentForIntent(name, current string, ag *agent.Agent, intent homeAssis
 
 	return &routedAgentMatch{
 		Name:    name,
-		Agent:   ag,
+		Agent:   ag.Agent,
 		Score:   score,
 		Reasons: reasons,
 	}
@@ -460,7 +495,7 @@ func isSignalPromptToken(token string) bool {
 	return !homeAssistantCommonTokens[token]
 }
 
-func buildAgentSummary(name string, ag *agent.Agent) string {
+func buildAgentSummary(name string, ag *resolvedRouteAgent) string {
 	parts := []string{
 		normalizeRouteToken(name),
 		normalizeRouteToken(ag.Type),
@@ -492,8 +527,8 @@ func buildAgentSummary(name string, ag *agent.Agent) string {
 	return strings.Join(parts, " ")
 }
 
-func extractNormalizedPluginNames(ag *agent.Agent) []string {
-	if ag == nil || len(ag.Plugins) == 0 {
+func extractNormalizedPluginNames(ag *resolvedRouteAgent) []string {
+	if ag == nil || ag.Agent == nil || len(ag.Plugins) == 0 {
 		return []string{}
 	}
 
@@ -508,14 +543,18 @@ func extractNormalizedPluginNames(ag *agent.Agent) []string {
 	return plugins
 }
 
-func extractNormalizedMCPServerNames(ag *agent.Agent) []string {
+func extractNormalizedMCPServerNames(ag *resolvedRouteAgent) []string {
 	if ag == nil || len(ag.MCPServers) == 0 {
 		return []string{}
 	}
 
 	servers := make([]string, 0, len(ag.MCPServers))
 	for _, name := range ag.MCPServers {
-		normalized := normalizeRouteToken(strings.ReplaceAll(name, "_", "-"))
+		logicalName := name
+		if _, serverName, _, ok := workspace.ParseRuntimeMCPServerName(name); ok {
+			logicalName = serverName
+		}
+		normalized := normalizeRouteToken(strings.ReplaceAll(logicalName, "_", "-"))
 		if normalized == "" {
 			continue
 		}
@@ -587,6 +626,10 @@ func (c normalizedHomeAssistantRouteContext) hasWorkspaceContext() bool {
 	if strings.TrimSpace(c.WorkspaceID) != "" {
 		return true
 	}
+	return c.hasWorkspaceSurfaceContext()
+}
+
+func (c normalizedHomeAssistantRouteContext) hasWorkspaceSurfaceContext() bool {
 	if strings.HasPrefix(c.PagePath, "/workspaces/") {
 		return true
 	}

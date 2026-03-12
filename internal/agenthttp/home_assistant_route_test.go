@@ -11,6 +11,7 @@ import (
 
 	"github.com/johnjallday/ori-agent/internal/store"
 	"github.com/johnjallday/ori-agent/internal/types"
+	"github.com/johnjallday/ori-agent/internal/workspace"
 )
 
 func newHomeRouteTestStore(t *testing.T) store.Store {
@@ -62,18 +63,27 @@ func addHomeRouteTestAgent(t *testing.T, st store.Store, name string, cfg *store
 	}
 }
 
-func setHomeRouteAgentMCPServers(t *testing.T, st store.Store, name string, servers []string) {
-	t.Helper()
+type homeRouteRuntimeResolverStub struct {
+	store   store.Store
+	servers map[string][]string
+}
 
-	ag, ok := st.GetAgent(name)
+func (s *homeRouteRuntimeResolverStub) ResolveAgentForWorkspace(agentName, workspaceID, nodeID string) (*workspace.ResolvedAgentRuntime, error) {
+	ag, ok := s.store.GetAgent(agentName)
 	if !ok || ag == nil {
-		t.Fatalf("agent %q not found", name)
+		return nil, nil
 	}
+	return &workspace.ResolvedAgentRuntime{
+		Agent:      ag,
+		MCPServers: append([]string{}, s.servers[agentName]...),
+	}, nil
+}
 
-	ag.MCPServers = append([]string{}, servers...)
-	if err := st.SetAgent(name, ag); err != nil {
-		t.Fatalf("failed to persist MCP servers for %q: %v", name, err)
-	}
+func setHomeRouteRuntimeMCPServers(handler *HomeAssistantRouteHandler, st store.Store, name string, servers []string) {
+	handler.SetRuntimeResolver(&homeRouteRuntimeResolverStub{
+		store:   st,
+		servers: map[string][]string{name: append([]string{}, servers...)},
+	})
 }
 
 func postRouteRequest(t *testing.T, handler *HomeAssistantRouteHandler, payload interface{}) *httptest.ResponseRecorder {
@@ -240,9 +250,14 @@ func TestHomeAssistantRouteHandler_EmailMatch_UsesMCPServers(t *testing.T) {
 
 	addHomeRouteTestAgent(t, st, "Task Runner", &store.CreateAgentConfig{Type: "tool-calling"}, types.AgentStatusActive,
 		"General assistant for home tasks", []string{"automation"}, []string{})
-	setHomeRouteAgentMCPServers(t, st, "Task Runner", []string{"gmail"})
+	setHomeRouteRuntimeMCPServers(handler, st, "Task Runner", []string{"gmail"})
 
-	rr := postRouteRequest(t, handler, map[string]string{"prompt": "check my email and summarize unread messages"})
+	rr := postRouteRequest(t, handler, map[string]any{
+		"prompt": "check my email and summarize unread messages",
+		"context": map[string]any{
+			"workspace_id": "ws-email",
+		},
+	})
 	if rr.Code != http.StatusOK {
 		t.Fatalf("expected status %d, got %d: %s", http.StatusOK, rr.Code, rr.Body.String())
 	}
@@ -280,9 +295,14 @@ func TestHomeAssistantRouteHandler_CalendarMatch_UsesIntentVariant(t *testing.T)
 
 	addHomeRouteTestAgent(t, st, "Calendar Assistant", &store.CreateAgentConfig{Type: "tool-calling"}, types.AgentStatusActive,
 		"Checks calendar events and schedule availability", []string{"calendar", "schedule"}, nil)
-	setHomeRouteAgentMCPServers(t, st, "Calendar Assistant", []string{"google-calendar"})
+	setHomeRouteRuntimeMCPServers(handler, st, "Calendar Assistant", []string{"google-calendar"})
 
-	rr := postRouteRequest(t, handler, map[string]string{"prompt": "check my schedule"})
+	rr := postRouteRequest(t, handler, map[string]any{
+		"prompt": "check my schedule",
+		"context": map[string]any{
+			"workspace_id": "ws-calendar",
+		},
+	})
 	if rr.Code != http.StatusOK {
 		t.Fatalf("expected status %d, got %d: %s", http.StatusOK, rr.Code, rr.Body.String())
 	}

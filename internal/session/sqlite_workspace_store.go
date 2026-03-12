@@ -27,6 +27,8 @@ type workspaceJSONFields struct {
 	storeNodes          []byte
 	workflows           []byte
 	directoryReferences []byte
+	mcpBindings         []byte
+	agentMCPAccess      []byte
 	status              WorkspaceStatus
 }
 
@@ -98,6 +100,14 @@ func serializeWorkspaceFields(workspace *Workspace) workspaceJSONFields {
 	if fields.directoryReferences == nil {
 		fields.directoryReferences = []byte("[]")
 	}
+	fields.mcpBindings = workspace.MCPBindingsJSON
+	if fields.mcpBindings == nil {
+		fields.mcpBindings = []byte("[]")
+	}
+	fields.agentMCPAccess = workspace.AgentMCPAccessJSON
+	if fields.agentMCPAccess == nil {
+		fields.agentMCPAccess = []byte("[]")
+	}
 
 	// Default status
 	fields.status = workspace.Status
@@ -128,12 +138,14 @@ func (s *SQLiteStore) CreateWorkspace(ctx context.Context, workspace *Workspace)
 	_, err := s.db.ExecContext(ctx, `
 		INSERT INTO workspaces (id, name, description, parent_id, order_index, color, session_count, created_at, updated_at,
 			agents, agent_instances, shared_data, status, layout,
-			messages_json, tasks_json, attachments_json, scheduled_tasks_json, store_nodes_json, workflows_json, directory_references_json)
-		VALUES (?, ?, ?, NULLIF(?, ''), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			messages_json, tasks_json, attachments_json, scheduled_tasks_json, store_nodes_json, workflows_json, directory_references_json,
+			mcp_bindings_json, agent_mcp_access_json)
+		VALUES (?, ?, ?, NULLIF(?, ''), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`, workspace.ID, workspace.Name, workspace.Description, workspace.ParentID, workspace.OrderIndex, workspace.Color,
 		workspace.SessionCount, workspace.CreatedAt, workspace.UpdatedAt,
 		string(f.agents), string(f.agentInstances), string(f.sharedData), string(f.status), f.layout,
-		string(f.messages), string(f.tasks), string(f.attachments), string(f.scheduledTasks), string(f.storeNodes), string(f.workflows), string(f.directoryReferences))
+		string(f.messages), string(f.tasks), string(f.attachments), string(f.scheduledTasks), string(f.storeNodes), string(f.workflows), string(f.directoryReferences),
+		string(f.mcpBindings), string(f.agentMCPAccess))
 
 	if err != nil {
 		if strings.Contains(err.Error(), "UNIQUE constraint") {
@@ -183,16 +195,20 @@ func (s *SQLiteStore) GetWorkspace(ctx context.Context, id string) (*Workspace, 
 	var storeNodesJSON sql.NullString
 	var workflowsJSON sql.NullString
 	var directoryReferencesJSON sql.NullString
+	var mcpBindingsJSON sql.NullString
+	var agentMCPAccessJSON sql.NullString
 
 	err := s.db.QueryRowContext(ctx, `
 		SELECT id, name, description, parent_id, order_index, color, session_count, created_at, updated_at,
 			agents, agent_instances, shared_data, status, layout,
-			messages_json, tasks_json, attachments_json, scheduled_tasks_json, store_nodes_json, workflows_json, directory_references_json
+			messages_json, tasks_json, attachments_json, scheduled_tasks_json, store_nodes_json, workflows_json, directory_references_json,
+			mcp_bindings_json, agent_mcp_access_json
 		FROM workspaces WHERE id = ?
 	`, id).Scan(&workspace.ID, &workspace.Name, &description, &parentID, &workspace.OrderIndex, &color,
 		&workspace.SessionCount, &workspace.CreatedAt, &workspace.UpdatedAt,
 		&agentsJSON, &agentInstancesJSON, &sharedDataJSON, &status, &layoutJSON,
-		&messagesJSON, &tasksJSON, &attachmentsJSON, &scheduledTasksJSON, &storeNodesJSON, &workflowsJSON, &directoryReferencesJSON)
+		&messagesJSON, &tasksJSON, &attachmentsJSON, &scheduledTasksJSON, &storeNodesJSON, &workflowsJSON, &directoryReferencesJSON,
+		&mcpBindingsJSON, &agentMCPAccessJSON)
 
 	if err == sql.ErrNoRows {
 		return nil, ErrWorkspaceNotFound
@@ -247,6 +263,12 @@ func (s *SQLiteStore) GetWorkspace(ctx context.Context, id string) (*Workspace, 
 	if directoryReferencesJSON.Valid && directoryReferencesJSON.String != "" {
 		workspace.DirectoryReferencesJSON = json.RawMessage(directoryReferencesJSON.String)
 	}
+	if mcpBindingsJSON.Valid && mcpBindingsJSON.String != "" {
+		workspace.MCPBindingsJSON = json.RawMessage(mcpBindingsJSON.String)
+	}
+	if agentMCPAccessJSON.Valid && agentMCPAccessJSON.String != "" {
+		workspace.AgentMCPAccessJSON = json.RawMessage(agentMCPAccessJSON.String)
+	}
 
 	return workspace, nil
 }
@@ -260,11 +282,13 @@ func (s *SQLiteStore) UpdateWorkspace(ctx context.Context, workspace *Workspace)
 		UPDATE workspaces
 		SET name = ?, description = ?, parent_id = NULLIF(?, ''), order_index = ?, color = ?, updated_at = ?,
 			agents = ?, agent_instances = ?, shared_data = ?, status = ?, layout = ?,
-			messages_json = ?, tasks_json = ?, attachments_json = ?, scheduled_tasks_json = ?, store_nodes_json = ?, workflows_json = ?, directory_references_json = ?
+			messages_json = ?, tasks_json = ?, attachments_json = ?, scheduled_tasks_json = ?, store_nodes_json = ?, workflows_json = ?, directory_references_json = ?,
+			mcp_bindings_json = ?, agent_mcp_access_json = ?
 		WHERE id = ?
 	`, workspace.Name, workspace.Description, workspace.ParentID, workspace.OrderIndex, workspace.Color, workspace.UpdatedAt,
 		string(f.agents), string(f.agentInstances), string(f.sharedData), string(f.status), f.layout,
 		string(f.messages), string(f.tasks), string(f.attachments), string(f.scheduledTasks), string(f.storeNodes), string(f.workflows), string(f.directoryReferences),
+		string(f.mcpBindings), string(f.agentMCPAccess),
 		workspace.ID)
 
 	if err != nil {

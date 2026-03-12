@@ -8,7 +8,6 @@ import (
 
 	"github.com/openai/openai-go/v3"
 
-	"github.com/johnjallday/ori-agent/internal/agent"
 	orihttp "github.com/johnjallday/ori-agent/internal/http"
 	"github.com/johnjallday/ori-agent/internal/llm"
 	"github.com/johnjallday/ori-agent/internal/logger"
@@ -17,7 +16,7 @@ import (
 )
 
 // handleGeminiChat handles chat requests for Gemini models using the provider system.
-func (h *Handler) handleGeminiChat(w http.ResponseWriter, r *http.Request, ag *agent.Agent, userMessage string, tools []llm.Tool, agentName string, baseCtx context.Context, files []pluginapi.FileAttachment, images []llm.ImageAttachment, plannerDecision *types.PlannerDecision, runtimeSystemPrompt string) {
+func (h *Handler) handleGeminiChat(w http.ResponseWriter, r *http.Request, ag *resolvedChatAgent, userMessage string, tools []llm.Tool, agentName string, baseCtx context.Context, files []pluginapi.FileAttachment, images []llm.ImageAttachment, plannerDecision *types.PlannerDecision, runtimeSystemPrompt string) {
 	sessionID := h.getSessionID(r)
 	ctx, cancel := context.WithTimeout(baseCtx, ChatRequestTimeout)
 	defer cancel()
@@ -37,7 +36,7 @@ func (h *Handler) handleGeminiChat(w http.ResponseWriter, r *http.Request, ag *a
 	var messages []llm.Message
 	systemPrompt := composeRuntimeSystemPrompt(
 		h.buildSystemPromptWithSkills(
-			ag, agentName,
+			ag.Agent, agentName,
 			"You are a helpful assistant with access to tools. When you use a tool and receive results, report those results directly to the user. Be concise and accurate.",
 		),
 		runtimeSystemPrompt,
@@ -65,7 +64,7 @@ func (h *Handler) handleGeminiChat(w http.ResponseWriter, r *http.Request, ag *a
 	}
 
 	logger.Debug("Gemini response received", logger.Fields{"duration": time.Since(start)})
-	h.trackUsageCommon("gemini", ag.Settings.Model, agentName, resp.Usage, ag, userMessage)
+	h.trackUsageCommon("gemini", ag.Settings.Model, agentName, resp.Usage, ag.Agent, userMessage)
 
 	if len(resp.ToolCalls) > 0 {
 		h.handleGeminiToolCalls(w, ctx, ag, agentName, messages, resp, tools, files, provider, baseCtx, sessionID, userMessage, plannerDecision)
@@ -74,7 +73,7 @@ func (h *Handler) handleGeminiChat(w http.ResponseWriter, r *http.Request, ag *a
 
 	text := getResponseText(resp.Content)
 	ag.Messages = append(ag.Messages, openai.AssistantMessage(text))
-	_ = h.store.SetAgent(agentName, ag)
+	_ = h.persistAgent(agentName, ag.Agent)
 
 	h.storeMessageInSession(baseCtx, sessionID, "assistant", text)
 	writeJSONResponse(w, attachPlannerDecision(attachRouteMetadata(map[string]any{
@@ -88,7 +87,7 @@ func (h *Handler) handleGeminiChat(w http.ResponseWriter, r *http.Request, ag *a
 func (h *Handler) handleGeminiToolCalls(
 	w http.ResponseWriter,
 	ctx context.Context,
-	ag *agent.Agent,
+	ag *resolvedChatAgent,
 	agentName string,
 	messages []llm.Message,
 	resp *llm.ChatResponse,
@@ -139,7 +138,7 @@ func (h *Handler) handleGeminiToolCalls(
 				if finalResp == nil {
 					return "", nil, fmt.Errorf("gemini follow-up returned no response")
 				}
-				h.trackUsageCommon("gemini", ag.Settings.Model, agentName, finalResp.Usage, ag, userMessage)
+				h.trackUsageCommon("gemini", ag.Settings.Model, agentName, finalResp.Usage, ag.Agent, userMessage)
 				return finalResp.Content, finalResp.ToolCalls, nil
 			},
 		},
@@ -150,7 +149,7 @@ func (h *Handler) handleGeminiToolCalls(
 		finalText = loopResult.FinalContent
 	}
 	ag.Messages = append(ag.Messages, openai.AssistantMessage(finalText))
-	_ = h.store.SetAgent(agentName, ag)
+	_ = h.persistAgent(agentName, ag.Agent)
 
 	h.storeMessageInSession(baseCtx, sessionID, "assistant", finalText)
 

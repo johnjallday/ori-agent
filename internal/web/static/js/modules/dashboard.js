@@ -1580,17 +1580,6 @@
     };
   }
 
-  async function fetchAgentMCPServers(agentName) {
-    if (!agentName || typeof API === 'undefined' || typeof API.get !== 'function') return [];
-    try {
-      var data = await API.get('/api/agents/' + encodeURIComponent(agentName) + '/mcp-servers');
-      return Array.isArray(data && data.servers) ? data.servers : [];
-    } catch (error) {
-      dashLog.debug('Failed to fetch agent MCP servers', { agent: agentName, error: error && error.message || error });
-      return [];
-    }
-  }
-
   async function fetchAgentSkills(agentName) {
     if (typeof API === 'undefined' || typeof API.get !== 'function') return [];
     try {
@@ -1735,6 +1724,257 @@
   async function fetchConfiguredMCPServers() {
     var snapshot = await fetchConfiguredMCPServerSnapshot();
     return snapshot.servers;
+  }
+
+  async function fetchWorkspaceMCPState(workspaceId) {
+    if (!workspaceId || typeof API === 'undefined' || typeof API.get !== 'function') return null;
+    try {
+      return await API.get('/api/studios/' + encodeURIComponent(workspaceId));
+    } catch (error) {
+      dashLog.debug('Failed to fetch workspace MCP state', { workspaceId: workspaceId, error: error && error.message || error });
+      return null;
+    }
+  }
+
+  function getWorkspaceAgentInstanceByName(workspaceData, agentName) {
+    if (!workspaceData || !agentName) return null;
+    var target = normalizeToken(agentName);
+    var instances = Array.isArray(workspaceData.agent_instances) ? workspaceData.agent_instances : [];
+    for (var i = 0; i < instances.length; i++) {
+      var instance = instances[i];
+      if (normalizeToken(instance && instance.name) === target) {
+        return instance;
+      }
+    }
+    return null;
+  }
+
+  function getWorkspaceAgentMCPAccessEntry(workspaceData, agentInstanceId) {
+    if (!workspaceData || !agentInstanceId) return null;
+    var target = normalizeToken(agentInstanceId);
+    var entries = Array.isArray(workspaceData.agent_mcp_access) ? workspaceData.agent_mcp_access : [];
+    for (var i = 0; i < entries.length; i++) {
+      var entry = entries[i];
+      if (normalizeToken(entry && entry.agent_instance_id) === target) {
+        return entry;
+      }
+    }
+    return null;
+  }
+
+  function findWorkspaceMCPBindingByServerName(workspaceData, serverName) {
+    if (!workspaceData || !serverName) return null;
+    var target = normalizeMCPServerName(serverName);
+    var bindings = Array.isArray(workspaceData.mcp_bindings) ? workspaceData.mcp_bindings : [];
+    for (var i = 0; i < bindings.length; i++) {
+      var binding = bindings[i];
+      if (normalizeMCPServerName(binding && binding.server_name) === target) {
+        return binding;
+      }
+    }
+    return null;
+  }
+
+  function normalizeWorkspaceMCPBinding(binding, configuredSnapshot) {
+    if (!binding || !binding.server_name) return null;
+    var serverName = String(binding.server_name || '').trim();
+    if (!serverName) return null;
+
+    var snapshot = configuredSnapshot || { servers: [], stats: {} };
+    var globalConfig = findMCPServerByName(snapshot.servers, serverName);
+    var stats = lookupMCPServerStats(snapshot.stats, serverName);
+    var enabled = binding.enabled !== false;
+    var status = normalizeToken(stats && stats.status);
+    if (!status) {
+      if (!globalConfig) {
+        status = 'missing';
+      } else if (!enabled) {
+        status = 'disabled';
+      } else {
+        status = 'configured';
+      }
+    }
+
+    return {
+      id: String(binding.id || '').trim(),
+      name: serverName,
+      enabled: enabled,
+      status: status,
+      tool_count: Number(stats && (stats.tool_count || stats.toolCount) || 0),
+      globally_configured: Boolean(globalConfig),
+      workspace_binding: true
+    };
+  }
+
+  function buildWorkspaceAccessibleMCPBindings(workspaceData, agentName, configuredSnapshot) {
+    if (!workspaceData) return [];
+
+    var bindings = Array.isArray(workspaceData.mcp_bindings) ? workspaceData.mcp_bindings : [];
+    if (bindings.length === 0) return [];
+
+    var allowedIds = null;
+    if (agentName) {
+      var instance = getWorkspaceAgentInstanceByName(workspaceData, agentName);
+      if (instance && instance.id) {
+        var access = getWorkspaceAgentMCPAccessEntry(workspaceData, instance.id);
+        if (access) {
+          allowedIds = Object.create(null);
+          var ids = Array.isArray(access.enabled_binding_ids) ? access.enabled_binding_ids : [];
+          for (var i = 0; i < ids.length; i++) {
+            var normalizedId = normalizeToken(ids[i]);
+            if (normalizedId) {
+              allowedIds[normalizedId] = true;
+            }
+          }
+        }
+      }
+    }
+
+    var out = [];
+    for (var i = 0; i < bindings.length; i++) {
+      var binding = bindings[i];
+      var bindingId = normalizeToken(binding && binding.id);
+      if (allowedIds && (!bindingId || !allowedIds[bindingId])) {
+        continue;
+      }
+      var normalizedBinding = normalizeWorkspaceMCPBinding(binding, configuredSnapshot);
+      if (!normalizedBinding) continue;
+      out.push(normalizedBinding);
+    }
+    return out;
+  }
+
+  async function fetchAgentMCPServers(agentName, routeContext) {
+    var normalizedContext = normalizeHomeRouteContext(routeContext);
+    var workspaceId = hasWorkspaceRouteContext(normalizedContext) ? String(normalizedContext.workspace_id || '').trim() : '';
+    if (!workspaceId) {
+      return [];
+    }
+
+    try {
+      var loaded = await Promise.all([
+        fetchWorkspaceMCPState(workspaceId),
+        fetchConfiguredMCPServerSnapshot()
+      ]);
+      var workspaceData = loaded[0];
+      var configuredSnapshot = loaded[1] || { servers: [], stats: {} };
+      return buildWorkspaceAccessibleMCPBindings(workspaceData, agentName, configuredSnapshot);
+    } catch (error) {
+      dashLog.debug('Failed to fetch workspace MCP bindings for agent', {
+        agent: agentName,
+        workspaceId: workspaceId,
+        error: error && error.message || error
+      });
+      return [];
+    }
+  }
+
+  async function bindMCPServerForWorkspace(workspaceId, agentName, serverName) {
+    var normalizedWorkspaceId = String(workspaceId || '').trim();
+    var normalizedServerName = String(serverName || '').trim();
+    if (!normalizedWorkspaceId || !normalizedServerName || typeof API === 'undefined' || typeof API.post !== 'function') {
+      return { status: 'bind_failed', message: 'Workspace and MCP server are required.' };
+    }
+
+    var workspaceData = await fetchWorkspaceMCPState(normalizedWorkspaceId);
+    if (!workspaceData) {
+      return {
+        status: 'bind_failed',
+        serverName: normalizedServerName,
+        message: 'Failed to load workspace MCP bindings before applying "' + normalizedServerName + '".'
+      };
+    }
+
+    var binding = findWorkspaceMCPBindingByServerName(workspaceData, normalizedServerName);
+    var createdBinding = false;
+    var enabledBinding = false;
+    var accessUpdated = false;
+
+    try {
+      if (!binding) {
+        var createResult = await API.post('/api/studios/' + encodeURIComponent(normalizedWorkspaceId) + '/mcp-bindings', {
+          server_name: normalizedServerName,
+          enabled: true
+        });
+        binding = createResult && createResult.binding ? createResult.binding : {
+          id: '',
+          server_name: normalizedServerName,
+          enabled: true
+        };
+        createdBinding = true;
+      } else if (binding.enabled === false) {
+        var updateResult = await API.put('/api/studios/' + encodeURIComponent(normalizedWorkspaceId) + '/mcp-bindings/' + encodeURIComponent(binding.id), {
+          enabled: true
+        });
+        binding = updateResult && updateResult.binding ? updateResult.binding : Object.assign({}, binding, { enabled: true });
+        enabledBinding = true;
+      }
+    } catch (error) {
+      return {
+        status: 'bind_failed',
+        serverName: normalizedServerName,
+        message: 'Failed to bind MCP connector "' + normalizedServerName + '" in this workspace: ' + String(error && error.message || error || '')
+      };
+    }
+
+    if (agentName && binding && binding.id) {
+      var instance = getWorkspaceAgentInstanceByName(workspaceData, agentName);
+      if (instance && instance.id) {
+        var access = getWorkspaceAgentMCPAccessEntry(workspaceData, instance.id);
+        if (access) {
+          var nextIds = uniqueValues((Array.isArray(access.enabled_binding_ids) ? access.enabled_binding_ids : [])
+            .map(function (value) { return String(value || '').trim(); })
+            .filter(Boolean)
+            .concat([String(binding.id || '').trim()]));
+          if (nextIds.length !== (Array.isArray(access.enabled_binding_ids) ? access.enabled_binding_ids.length : 0)
+            || nextIds.indexOf(String(binding.id || '').trim()) < 0) {
+            try {
+              await API.put('/api/studios/' + encodeURIComponent(normalizedWorkspaceId) + '/agent-mcp-access/' + encodeURIComponent(instance.id), {
+                enabled_binding_ids: nextIds
+              });
+              accessUpdated = true;
+            } catch (error) {
+              return {
+                status: 'bind_failed',
+                serverName: normalizedServerName,
+                message: 'Bound MCP connector "' + normalizedServerName + '" in the workspace, but failed to update agent access: ' + String(error && error.message || error || '')
+              };
+            }
+          }
+        }
+      }
+    }
+
+    var message = 'MCP connector "' + normalizedServerName + '" is already bound in this workspace.';
+    var status = 'already_bound';
+    if (createdBinding) {
+      status = 'bound_existing';
+      message = 'Bound MCP connector "' + normalizedServerName + '" in this workspace.';
+    } else if (enabledBinding || accessUpdated) {
+      status = 'bound_existing';
+      message = 'Updated the workspace binding for MCP connector "' + normalizedServerName + '".';
+    }
+
+    return {
+      status: status,
+      serverName: normalizedServerName,
+      workspaceId: normalizedWorkspaceId,
+      bindingId: binding && binding.id ? binding.id : '',
+      message: message
+    };
+  }
+
+  async function bindMCPServerForRouteContext(agentName, serverName, routeContext) {
+    var normalizedContext = normalizeHomeRouteContext(routeContext);
+    var workspaceId = hasWorkspaceRouteContext(normalizedContext) ? String(normalizedContext.workspace_id || '').trim() : '';
+    if (!workspaceId) {
+      return {
+        status: 'requires_workspace',
+        serverName: String(serverName || '').trim(),
+        message: 'MCP connectors are workspace-scoped now. Open a workspace first so I can bind "' + String(serverName || '').trim() + '".'
+      };
+    }
+    return bindMCPServerForWorkspace(workspaceId, agentName, serverName);
   }
 
   async function fetchMCPRegistryServers() {
@@ -2042,61 +2282,39 @@
     }
   }
 
-  async function enableMCPServerForAgent(agentName, serverName) {
-    if (!agentName || !serverName) {
-      return { status: 'enable_failed', message: 'Agent name and MCP server are required.' };
-    }
-    try {
-      await API.post('/api/agents/' + encodeURIComponent(agentName) + '/mcp-servers/' + encodeURIComponent(serverName) + '/enable', {});
-    } catch (error) {
-      var enableError = String(error && error.message || error || '');
-      return {
-        status: 'enable_failed',
-        serverName: serverName,
-        message: 'Failed to attach MCP server "' + serverName + '" to "' + agentName + '": ' + enableError
-      };
-    }
-
-    var agentServers = await fetchAgentMCPServers(agentName);
-    var attached = findMCPServerByName(agentServers, serverName);
-    var runtimeStatus = normalizeToken(attached && attached.status);
-    if (runtimeStatus && runtimeStatus !== 'running') {
-      return {
-        status: 'attached_not_running',
-        serverName: serverName,
-        runtimeStatus: String(attached && attached.status || 'unknown'),
-        message: 'Attached MCP server "' + serverName + '" to "' + agentName + '", but it is currently "' + (attached && attached.status || 'unknown') + '".'
-      };
-    }
-
-    return {
-      status: 'attached_running',
-      serverName: serverName,
-      message: 'Attached MCP server "' + serverName + '" to "' + agentName + '".'
-    };
-  }
-
-  async function applyEmailMCPCandidate(agentName, candidate) {
+  async function applyEmailMCPCandidate(agentName, candidate, routeContext) {
     var installOutcome = await installMCPServerCandidate(candidate);
     var status = normalizeToken(installOutcome && installOutcome.status);
     if (!status || ['installed', 'already_installed'].indexOf(status) < 0) {
       return installOutcome;
     }
 
-    if (!agentName) {
+    var bindOutcome = await bindMCPServerForRouteContext(agentName, installOutcome.serverName || candidate && candidate.name, routeContext);
+    var bindStatus = normalizeToken(bindOutcome && bindOutcome.status);
+    if (bindStatus === 'requires_workspace') {
       return {
         status: status === 'installed' ? 'installed_only' : 'already_installed',
         serverName: installOutcome.serverName || candidate && candidate.name,
         message: status === 'installed'
-          ? 'Installed MCP server "' + (installOutcome.serverName || candidate && candidate.name || 'selected server') + '".'
-          : 'MCP server "' + (installOutcome.serverName || candidate && candidate.name || 'selected server') + '" is already installed.'
+          ? 'Installed MCP connector "' + (installOutcome.serverName || candidate && candidate.name || 'selected server') + '". Open a workspace to bind it before continuing.'
+          : 'MCP connector "' + (installOutcome.serverName || candidate && candidate.name || 'selected server') + '" is already installed. Open a workspace to bind it before continuing.'
       };
     }
 
-    return enableMCPServerForAgent(agentName, installOutcome.serverName || candidate && candidate.name);
+    if (bindStatus === 'bound_existing' || bindStatus === 'already_bound') {
+      return {
+        status: status === 'installed' ? 'installed_and_bound' : bindOutcome.status,
+        serverName: bindOutcome.serverName || installOutcome.serverName || candidate && candidate.name,
+        message: status === 'installed'
+          ? 'Installed and bound MCP connector "' + (bindOutcome.serverName || installOutcome.serverName || candidate && candidate.name || 'selected server') + '" in this workspace.'
+          : bindOutcome.message
+      };
+    }
+
+    return bindOutcome;
   }
 
-  async function openScopedMCPBrowseModal(agentName, prompt, options) {
+  async function openScopedMCPBrowseModal(agentName, prompt, routeContext, options) {
     var modalOptions = options || {};
     var buildCandidates = typeof modalOptions.buildCandidates === 'function'
       ? modalOptions.buildCandidates
@@ -2272,11 +2490,11 @@
           } else if (candidate.legacy && candidate.legacyReason) {
             note.textContent = candidate.legacyReason;
           } else if (candidate.isInstalled && candidate.enabled) {
-            note.textContent = 'Already enabled globally.';
+            note.textContent = 'Already configured globally.';
           } else if (candidate.isInstalled) {
-            note.textContent = 'Installed. Selecting this will attach it to the agent.';
+            note.textContent = 'Installed. Selecting this will bind it from the active workspace.';
           } else {
-            note.textContent = String(modalOptions.pendingInstallText || 'Will be installed and then attached.');
+            note.textContent = String(modalOptions.pendingInstallText || 'Will be installed and then bound from the active workspace.');
           }
 
           content.appendChild(top);
@@ -2369,9 +2587,9 @@
             : String(modalOptions.progressWithoutAgentLabel || 'Installing...');
 
           try {
-            var outcome = await applyEmailMCPCandidate(agentName, selectedCandidate);
+            var outcome = await applyEmailMCPCandidate(agentName, selectedCandidate, routeContext);
             var outcomeStatus = normalizeToken(outcome && outcome.status);
-            if (['attached_running', 'installed_only', 'already_installed'].indexOf(outcomeStatus) >= 0) {
+            if (['already_bound', 'bound_existing', 'installed_and_bound', 'installed_only', 'already_installed'].indexOf(outcomeStatus) >= 0) {
               closeWith(outcome);
               return;
             }
@@ -2396,40 +2614,40 @@
     });
   }
 
-  async function openEmailMCPBrowseModal(agentName, prompt) {
-    return openScopedMCPBrowseModal(agentName, prompt, {
+  async function openEmailMCPBrowseModal(agentName, prompt, routeContext) {
+    return openScopedMCPBrowseModal(agentName, prompt, routeContext, {
       modalPrefix: 'homeEmailMCPBrowseModal',
       title: 'Browse Email MCP Connectors',
-      description: 'Select an email connector for Gmail, Outlook, or IMAP. You can search, select, and apply without leaving this flow.',
+      description: 'Select an email connector for Gmail, Outlook, or IMAP. Installed connectors are bound from the active workspace when one is available.',
       searchPlaceholder: 'gmail, outlook, imap...',
       emptyStateText: 'No matching email MCP connectors found.',
-      pendingInstallText: 'Will be installed and then attached.',
+      pendingInstallText: 'Will be installed and then bound in the active workspace.',
       switchLabel: 'Use Browser Control',
       switchTarget: 'browser_control',
       buildCandidates: buildEmailMCPBrowseCandidates
     });
   }
 
-  async function openBrowserControlMCPBrowseModal(agentName, prompt) {
-    return openScopedMCPBrowseModal(agentName, prompt, {
+  async function openBrowserControlMCPBrowseModal(agentName, prompt, routeContext) {
+    return openScopedMCPBrowseModal(agentName, prompt, routeContext, {
       modalPrefix: 'homeBrowserMCPBrowseModal',
       title: 'Browse Browser Control MCP',
-      description: 'Select a browser-control connector (Playwright, Browserbase, or Puppeteer). Use this when email APIs are unavailable and you want guided browser-based access.',
+      description: 'Select a browser-control connector (Playwright, Browserbase, or Puppeteer). Installed connectors are bound from the active workspace when one is available.',
       searchPlaceholder: 'playwright, browserbase, puppeteer...',
       emptyStateText: 'No matching browser-control MCP connectors found.',
-      pendingInstallText: 'Will be installed and then attached for browser-control tasks.',
+      pendingInstallText: 'Will be installed and then bound in the active workspace.',
       switchLabel: 'Use Email Connector',
       switchTarget: 'email_connector',
       buildCandidates: buildBrowserMCPBrowseCandidates
     });
   }
 
-  async function runEmailAccessMCPSelection(agentName, prompt, startingMode) {
+  async function runEmailAccessMCPSelection(agentName, prompt, startingMode, routeContext) {
     var mode = normalizeToken(startingMode) === 'browser' ? 'browser' : 'email';
     for (var i = 0; i < 4; i++) {
       var result = mode === 'browser'
-        ? await openBrowserControlMCPBrowseModal(agentName, prompt)
-        : await openEmailMCPBrowseModal(agentName, prompt);
+        ? await openBrowserControlMCPBrowseModal(agentName, prompt, routeContext)
+        : await openEmailMCPBrowseModal(agentName, prompt, routeContext);
       var status = normalizeToken(result && result.status);
       if (status === 'switch_browse') {
         var target = normalizeToken(result && result.target);
@@ -2461,7 +2679,7 @@
       lines.push('   If no connector is installed yet, browse and add Gmail, Outlook, or IMAP.');
     }
     lines.push('2) Use Browser Control MCP (Playwright/Browserbase/Puppeteer) when mailbox APIs are unavailable.');
-    lines.push('3) Create a dedicated Email Assistant and attach MCP after setup.');
+    lines.push('3) Create a dedicated Email Assistant and bind MCP from the target workspace after setup.');
     lines.push('Safety defaults: start read-only and require explicit approval before sending or deleting.');
 
     return lines.join('\n');
@@ -2497,6 +2715,7 @@
   async function renderEmailSolutionActions(prompt) {
     var advice = await buildEmailSolutionAdvice(prompt);
     var summary = formatEmailMCPOptionSummary(advice);
+    var routeContext = buildHomeRouteContext();
     if (summary) {
       appendHomeAssistantMessage('assistant', summary);
     }
@@ -2505,9 +2724,9 @@
     setHomeAssistantRoutingSummary('Email Setup Options', 'Choose email MCP, browser control MCP, or create a dedicated email agent.');
 
     function openSelection(mode) {
-      runEmailAccessMCPSelection('', prompt, mode).then(function (result) {
+      runEmailAccessMCPSelection('', prompt, mode, routeContext).then(function (result) {
         var resultStatus = normalizeToken(result && result.status);
-        if (resultStatus === 'installed_only' || resultStatus === 'already_installed') {
+        if (resultStatus === 'installed_only' || resultStatus === 'already_installed' || resultStatus === 'already_bound' || resultStatus === 'bound_existing' || resultStatus === 'installed_and_bound') {
           appendHomeAssistantMessage('assistant', result.message || 'Selected MCP connector is ready.');
         } else if (resultStatus === 'opened_mcp_page') {
           appendHomeAssistantMessage('assistant', 'Opened MCP settings so you can review connector details.');
@@ -2544,13 +2763,13 @@
   function shouldPauseForEmailMCPSelection(mcpOutcome) {
     var status = normalizeToken(mcpOutcome && mcpOutcome.status);
     if (!status) return true;
-    if (['already_enabled', 'enabled_existing', 'installed_and_enabled'].indexOf(status) >= 0) {
+    if (['already_bound', 'bound_existing', 'installed_and_bound'].indexOf(status) >= 0) {
       return false;
     }
     return true;
   }
 
-  async function maybeResolveEmailMCPBeforeHandoff(agentName, prompt, mcpOutcome) {
+  async function maybeResolveEmailMCPBeforeHandoff(agentName, prompt, mcpOutcome, routeContext) {
     if (!agentName) {
       return { continueHandoff: false };
     }
@@ -2561,11 +2780,11 @@
     appendHomeAssistantMessage('assistant', 'Before handoff, select an email connector or browser-control connector so this task can access your inbox.');
     setHomeAssistantRoutingSummary('Email MCP Required', 'Select an email or browser-control connector before continuing.');
 
-    var selection = await runEmailAccessMCPSelection(agentName, prompt, 'email');
+    var selection = await runEmailAccessMCPSelection(agentName, prompt, 'email', routeContext);
     var selectionStatus = normalizeToken(selection && selection.status);
 
-    if (selectionStatus === 'attached_running') {
-      appendHomeAssistantMessage('assistant', selection.message || ('Attached MCP server "' + (selection.serverName || 'selected server') + '".'));
+    if (selectionStatus === 'already_bound' || selectionStatus === 'bound_existing' || selectionStatus === 'installed_and_bound') {
+      appendHomeAssistantMessage('assistant', selection.message || ('Bound MCP connector "' + (selection.serverName || 'selected server') + '" in this workspace.'));
       if (isLegacyMCPServerName(selection && selection.serverName)) {
         appendHomeAssistantMessage('assistant', 'Note: Puppeteer MCP is legacy/deprecated. Playwright is recommended for browser control.');
       }
@@ -2577,14 +2796,14 @@
       return { continueHandoff: true };
     }
 
-    if (selectionStatus === 'attached_not_running') {
-      appendHomeAssistantMessage('assistant', selection.message || 'Selected MCP connector is not running yet. Configure it before handoff.');
-      setHomeAssistantRoutingSummary('MCP Needs Configuration', 'Selected email connector is attached but not running yet.');
+    if (selectionStatus === 'requires_workspace') {
+      appendHomeAssistantMessage('assistant', selection.message || 'Selected MCP connector still needs a workspace binding before handoff.');
+      setHomeAssistantRoutingSummary('Workspace Required', 'Open a workspace before continuing with MCP-dependent email access.');
       renderHomeAssistantActions([
         {
-          label: 'Open MCP Settings',
+          label: 'Open Workspaces',
           variant: 'primary',
-          onClick: function () { window.location.href = '/mcp'; }
+          onClick: function () { window.location.href = '/workspaces'; }
         },
         {
           label: 'Ask Another Task',
@@ -2608,21 +2827,24 @@
     var requirement = detectMCPRequirement(prompt);
     if (!requirement || !agentName) return null;
     var allowMutations = !(options && options.allowMutations === false);
+    var routeContext = options && options.routeContext ? options.routeContext : buildHomeRouteContext();
+    var normalizedContext = normalizeHomeRouteContext(routeContext);
+    var workspaceId = hasWorkspaceRouteContext(normalizedContext) ? String(normalizedContext.workspace_id || '').trim() : '';
 
-    var currentServers = await fetchAgentMCPServers(agentName);
+    if (!workspaceId) {
+      var missingWorkspaceMessage = 'MCP connectors are workspace-scoped now. Open a workspace before I bind the connector required for ' + requirement.label + '.';
+      return {
+        status: 'requires_workspace',
+        message: missingWorkspaceMessage
+      };
+    }
+
+    var currentServers = await fetchAgentMCPServers(agentName, normalizedContext);
     var existing = selectExistingMCPServer(requirement, currentServers);
 
     if (existing && existing.enabled) {
-      var currentStatus = normalizeToken(existing.status);
-      if (currentStatus && currentStatus !== 'running') {
-        return {
-          status: 'enabled_not_running',
-          serverName: existing.name,
-          message: 'MCP server "' + existing.name + '" is enabled for this task, but currently "' + (existing.status || 'unknown') + '".'
-        };
-      }
       return {
-        status: 'already_enabled',
+        status: 'already_bound',
         serverName: existing.name
       };
     }
@@ -2631,105 +2853,103 @@
       return {
         status: 'existing_disabled',
         serverName: existing.name,
-        message: 'MCP server "' + existing.name + '" matches this task but is not enabled for "' + agentName + '".'
+        message: 'MCP connector "' + existing.name + '" matches this task but is not enabled in this workspace.'
       };
     }
 
     var targetServerName = existing && existing.name ? existing.name : '';
     var installCandidate = null;
+    var configuredServers = await fetchConfiguredMCPServers();
 
     if (!targetServerName) {
-      var marketplaceServers = await fetchMarketplaceMCPServers();
-      installCandidate = chooseMarketplaceMCPServer(requirement, prompt, marketplaceServers);
-      if (!installCandidate) {
-        return {
-          status: 'not_found',
-          message: 'This task may need MCP (' + requirement.label + '), but no matching connector is currently configured.'
-        };
+      var configuredCandidate = selectExistingMCPServer(requirement, configuredServers);
+      if (configuredCandidate) {
+        targetServerName = configuredCandidate.name;
+      } else {
+        var marketplaceServers = await fetchMarketplaceMCPServers();
+        installCandidate = chooseMarketplaceMCPServer(requirement, prompt, marketplaceServers);
+        if (!installCandidate) {
+          return {
+            status: 'not_found',
+            message: 'This task may need MCP (' + requirement.label + '), but no matching connector is currently configured.'
+          };
+        }
+        targetServerName = installCandidate.name;
       }
-      targetServerName = installCandidate.name;
 
       if (!allowMutations) {
         return {
           status: 'candidate_available',
           serverName: targetServerName,
-          message: 'Found MCP connector "' + targetServerName + '" for ' + requirement.label + '. Select it to install and attach.'
+          message: 'Found MCP connector "' + targetServerName + '" for ' + requirement.label + '. Select it to install and bind in this workspace.'
         };
       }
 
-      var manualReason = getMCPManualConfigReason(installCandidate);
-      if (manualReason) {
-        return {
-          status: 'needs_manual_config',
-          serverName: targetServerName,
-          message: 'Found MCP server "' + targetServerName + '" for ' + requirement.label + ', but it ' + manualReason + '. Configure it in MCP settings first.'
-        };
-      }
-
-      var payload = buildMCPServerInstallPayload(installCandidate);
-      if (!payload.name || !payload.command) {
-        return {
-          status: 'invalid_candidate',
-          message: 'Found an MCP candidate for ' + requirement.label + ', but its install configuration is incomplete.'
-        };
-      }
-
-      try {
-        await API.post('/api/mcp/servers', payload);
-      } catch (error) {
-        var installError = String(error && error.message || error || '');
-        if (installError.toLowerCase().indexOf('already exists') < 0) {
+      if (installCandidate) {
+        var manualReason = getMCPManualConfigReason(installCandidate);
+        if (manualReason) {
           return {
-            status: 'install_failed',
-            serverName: payload.name,
-            message: 'I found MCP server "' + payload.name + '" for ' + requirement.label + ' but failed to install it: ' + installError
+            status: 'needs_manual_config',
+            serverName: targetServerName,
+            message: 'Found MCP server "' + targetServerName + '" for ' + requirement.label + ', but it ' + manualReason + '. Configure it in MCP settings first.'
           };
+        }
+
+        var payload = buildMCPServerInstallPayload(installCandidate);
+        if (!payload.name || !payload.command) {
+          return {
+            status: 'invalid_candidate',
+            message: 'Found an MCP candidate for ' + requirement.label + ', but its install configuration is incomplete.'
+          };
+        }
+
+        try {
+          await API.post('/api/mcp/servers', payload);
+        } catch (error) {
+          var installError = String(error && error.message || error || '');
+          if (installError.toLowerCase().indexOf('already exists') < 0) {
+            return {
+              status: 'install_failed',
+              serverName: payload.name,
+              message: 'I found MCP server "' + payload.name + '" for ' + requirement.label + ' but failed to install it: ' + installError
+            };
+          }
         }
       }
     }
 
     if (!allowMutations) {
       return {
-        status: 'needs_enable',
+        status: 'needs_bind',
         serverName: targetServerName,
-        message: 'MCP connector "' + targetServerName + '" is available. Select it to attach before continuing.'
+        message: 'MCP connector "' + targetServerName + '" is available. Select it to bind in this workspace before continuing.'
       };
     }
 
-    try {
-      await API.post('/api/agents/' + encodeURIComponent(agentName) + '/mcp-servers/' + encodeURIComponent(targetServerName) + '/enable', {});
-    } catch (error) {
-      var enableError = String(error && error.message || error || '');
+    var bindOutcome = await bindMCPServerForRouteContext(agentName, targetServerName, normalizedContext);
+    var bindStatus = normalizeToken(bindOutcome && bindOutcome.status);
+    if (bindStatus !== 'already_bound' && bindStatus !== 'bound_existing') {
       return {
-        status: 'enable_failed',
+        status: bindOutcome && bindOutcome.status ? bindOutcome.status : 'bind_failed',
         serverName: targetServerName,
-        message: 'I found MCP server "' + targetServerName + '" for ' + requirement.label + ' but failed to enable it: ' + enableError
-      };
-    }
-
-    var refreshedServers = await fetchAgentMCPServers(agentName);
-    var refreshed = selectExistingMCPServer(requirement, refreshedServers);
-    var refreshedStatus = normalizeToken(refreshed && refreshed.status);
-    if (refreshedStatus && refreshedStatus !== 'running') {
-      return {
-        status: 'enabled_not_running',
-        serverName: targetServerName,
-        message: 'Enabled MCP server "' + targetServerName + '" for this task, but it is currently "' + (refreshed && refreshed.status || 'unknown') + '".'
+        message: bindOutcome && bindOutcome.message
+          ? bindOutcome.message
+          : 'I found MCP server "' + targetServerName + '" for ' + requirement.label + ' but failed to bind it in this workspace.'
       };
     }
 
     if (installCandidate) {
       return {
-        status: 'installed_and_enabled',
+        status: 'installed_and_bound',
         serverName: targetServerName,
-        message: 'Installed and enabled MCP server "' + targetServerName + '" for this task.'
+        message: 'Installed and bound MCP connector "' + targetServerName + '" in this workspace.'
       };
     }
 
     return {
-      status: 'enabled_existing',
+      status: bindOutcome.status || 'bound_existing',
       serverName: targetServerName,
-      message: 'Enabled MCP server "' + targetServerName + '" for this task.'
+      message: bindOutcome.message || ('Bound MCP connector "' + targetServerName + '" in this workspace.')
     };
   }
 
@@ -2791,9 +3011,9 @@
       case 'install_skill_package':
         return 'Install skill package "' + String(action.packageSpec || '') + '"';
       case 'attach_mcp':
-        return 'Attach MCP "' + String(action.serverName || '') + '"';
+        return 'Bind MCP "' + String(action.serverName || '') + '" in the workspace';
       case 'install_and_attach_mcp':
-        return 'Install and attach MCP "' + String(action.serverName || '') + '"';
+        return 'Install and bind MCP "' + String(action.serverName || '') + '" in the workspace';
       case 'handoff':
         return 'Hand off to chat';
       case 'offer_workspace':
@@ -2840,7 +3060,7 @@
 
     lines.push('Problem:');
     lines.push('- User request: "' + String(prompt || '').trim() + '"');
-    lines.push('- Ask Ori cannot satisfy this today using the currently attached agents, skills, and MCP connectors.');
+    lines.push('- Ask Ori cannot satisfy this today using the currently available agents, skills, and workspace MCP bindings.');
     lines.push('');
     lines.push('Observed gaps:');
     if (gaps.length === 0) {
@@ -2865,7 +3085,7 @@
     lines.push('Acceptance criteria:');
     lines.push('- Ask Ori recognizes the request and produces a capability plan instead of refusing.');
     lines.push('- Setup steps require explicit user confirmation before any mutation.');
-    lines.push('- Once the capability is attached, Ask Ori can hand off or answer inline as appropriate.');
+    lines.push('- Once the capability is bound in the workspace, Ask Ori can hand off or answer inline as appropriate.');
     lines.push('');
     lines.push('Starter actions:');
     lines.push('1. Add or refine the capability requirement entry for this request.');
@@ -2966,7 +3186,10 @@
       skillCandidate = await chooseCapabilitySkillPackage(requirement);
     }
 
-    var agentServers = matchedAgentName && requirement.requiresMCP ? await fetchAgentMCPServers(matchedAgentName) : [];
+    var workspaceContextAvailable = hasWorkspaceRouteContext(routeContext);
+    var agentServers = matchedAgentName && requirement.requiresMCP
+      ? await fetchAgentMCPServers(matchedAgentName, routeContext)
+      : [];
     var existingServer = requirement.requiresMCP ? selectExistingMCPServer(requirement, agentServers) : null;
     var existingServerStatus = normalizeToken(existingServer && existingServer.status);
 
@@ -2998,23 +3221,24 @@
     }
 
     if (requirement.requiresMCP) {
-      if (existingServer && existingServer.enabled && (!existingServerStatus || existingServerStatus === 'running')) {
-        plan.evidence.push('MCP "' + existingServer.name + '" is already enabled.');
-      } else if (existingServer && existingServer.enabled && existingServerStatus !== 'running') {
+      if (!workspaceContextAvailable) {
         plan.classification = 'user_setup_only';
-        plan.summary = 'MCP "' + existingServer.name + '" is attached, but it is currently "' + String(existingServer.status || 'unknown') + '".';
-        plan.gaps.push('Attached MCP "' + existingServer.name + '" is not currently running.');
+        plan.actions = [];
+        plan.summary = 'MCP connectors are workspace-scoped. Open a workspace before I bind the connector required for ' + requirement.label + '.';
+        plan.gaps.push('No workspace context is available for the required MCP connector.');
+      } else if (existingServer && existingServer.enabled && existingServerStatus !== 'missing') {
+        plan.evidence.push('MCP "' + existingServer.name + '" is already bound in this workspace.');
       } else if (existingServer) {
         plan.classification = 'solvable_with_setup';
         plan.actions.push({ type: 'attach_mcp', serverName: existingServer.name });
-        plan.gaps.push('MCP "' + existingServer.name + '" is available but not attached to this agent.');
+        plan.gaps.push('MCP "' + existingServer.name + '" exists but is not enabled for this workspace context.');
       } else {
         var configuredServers = await fetchConfiguredMCPServers();
         var configuredCandidate = selectExistingMCPServer(requirement, configuredServers);
         if (configuredCandidate) {
           plan.classification = 'solvable_with_setup';
           plan.actions.push({ type: 'attach_mcp', serverName: configuredCandidate.name });
-          plan.gaps.push('MCP "' + configuredCandidate.name + '" is configured globally but not attached to this agent.');
+          plan.gaps.push('MCP "' + configuredCandidate.name + '" is configured globally but not yet bound in this workspace.');
         } else {
           var marketplaceServers = await fetchMarketplaceMCPServers();
           var mcpCandidate = chooseMarketplaceMCPServer(requirement, prompt, marketplaceServers);
@@ -3031,7 +3255,7 @@
                 serverName: mcpCandidate.name,
                 candidate: mcpCandidate
               });
-              plan.gaps.push('No matching MCP connector is currently attached for ' + requirement.label + '.');
+              plan.gaps.push('No matching MCP connector is currently bound in this workspace for ' + requirement.label + '.');
             }
           } else {
             plan.gaps.push('No matching MCP connector is available for ' + requirement.label + '.');
@@ -3145,9 +3369,10 @@
         }
 
         if (action.type === 'attach_mcp') {
-          var attachOutcome = await enableMCPServerForAgent(agentName, action.serverName);
-          if (normalizeToken(attachOutcome && attachOutcome.status) !== 'attached_running') {
-            throw new Error(attachOutcome && attachOutcome.message || 'Failed to attach MCP server.');
+          var attachOutcome = await bindMCPServerForRouteContext(agentName, action.serverName, routeContext);
+          var attachStatus = normalizeToken(attachOutcome && attachOutcome.status);
+          if (attachStatus !== 'already_bound' && attachStatus !== 'bound_existing') {
+            throw new Error(attachOutcome && attachOutcome.message || 'Failed to bind MCP connector in this workspace.');
           }
           appendHomeAssistantMessage('assistant', attachOutcome.message);
           continue;
@@ -3159,9 +3384,10 @@
           if (installStatus !== 'installed' && installStatus !== 'already_installed') {
             throw new Error(installOutcome && installOutcome.message || 'Failed to install MCP server.');
           }
-          var attachInstalledOutcome = await enableMCPServerForAgent(agentName, action.serverName);
-          if (normalizeToken(attachInstalledOutcome && attachInstalledOutcome.status) !== 'attached_running') {
-            throw new Error(attachInstalledOutcome && attachInstalledOutcome.message || 'Failed to attach MCP server.');
+          var attachInstalledOutcome = await bindMCPServerForRouteContext(agentName, action.serverName, routeContext);
+          var installedBindStatus = normalizeToken(attachInstalledOutcome && attachInstalledOutcome.status);
+          if (installedBindStatus !== 'already_bound' && installedBindStatus !== 'bound_existing') {
+            throw new Error(attachInstalledOutcome && attachInstalledOutcome.message || 'Failed to bind MCP connector in this workspace.');
           }
           appendHomeAssistantMessage('assistant', attachInstalledOutcome.message);
         }
@@ -4116,17 +4342,20 @@
         appendHomeAssistantMessage('assistant',
           'Email idea: connect Gmail/Outlook via OAuth, start with read-only scopes, summarize unread first, and require explicit approval before sending replies.');
       }
+      var routeContext = buildHomeRouteContext();
 
       var createdAgentMCP = await ensureMCPForTask(
         agentName,
         prompt,
-        intent.key === 'email_check' ? { allowMutations: false } : null
+        intent.key === 'email_check'
+          ? { allowMutations: false, routeContext: routeContext }
+          : { routeContext: routeContext }
       );
       if (createdAgentMCP && createdAgentMCP.message) {
         appendHomeAssistantMessage('assistant', createdAgentMCP.message);
       }
       if (intent.key === 'email_check') {
-        var createdEmailMCPResolution = await maybeResolveEmailMCPBeforeHandoff(agentName, prompt, createdAgentMCP);
+        var createdEmailMCPResolution = await maybeResolveEmailMCPBeforeHandoff(agentName, prompt, createdAgentMCP, routeContext);
         if (!createdEmailMCPResolution || !createdEmailMCPResolution.continueHandoff) {
           return;
         }
@@ -4136,7 +4365,7 @@
         appendHomeAssistantMessage('assistant', 'Agent is ready. Handing off this task to chat now.');
         setHomeAssistantRoutingSummary('Semi-auto', '"' + agentName + '" is ready. Handing off to chat.');
       }
-      await runPendingTaskWithAgent(prompt, agentName, { appLaunchRequest: appLaunchRequest });
+      await runPendingTaskWithAgent(prompt, agentName, { appLaunchRequest: appLaunchRequest, routeContext: routeContext });
 
       API.get('/api/agents/dashboard/list').then(function (agentData) {
         if (agentData) renderAgentList(agentData);
