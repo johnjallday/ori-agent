@@ -281,7 +281,16 @@ func normalizeFilesystemPathValue(pathValue, basePath string) string {
 		return filepath.Clean(trimmed)
 	}
 
-	return filepath.Join(basePath, trimmed)
+	cleanBase := filepath.Clean(basePath)
+	cleanRelative := filepath.Clean(trimmed)
+	candidate := filepath.Join(cleanBase, cleanRelative)
+	if cleanBase != "" && cleanRelative == filepath.Base(cleanBase) {
+		if _, err := os.Stat(candidate); err != nil && os.IsNotExist(err) {
+			return cleanBase
+		}
+	}
+
+	return candidate
 }
 
 func annotateGetFileInfoResult(toolName, result string, arguments map[string]interface{}) string {

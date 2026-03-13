@@ -130,6 +130,7 @@ func (b *ServerBuilder) initializeOrchestration() error {
 	}
 
 	taskHandler := workspace.NewLLMTaskHandler(b.st, b.llmFactory, b.workspaceStore)
+	taskHandler.SetEventBus(b.eventBus)
 	taskHandler.SetMCPRegistry(b.mcpRegistry)
 	taskHandler.SetRuntimeResolver(workspace.NewAgentRuntimeResolver(b.st, b.workspaceStore, b.mcpRegistry, b.mcpConfigManager))
 	if b.sessionStore != nil {

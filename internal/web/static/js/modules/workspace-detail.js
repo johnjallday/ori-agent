@@ -3611,10 +3611,10 @@ export class WorkspaceDetailPage {
       };
     }
 
-    if (allows('continue_with_instruction')) {
+    if (normalizedCode === 'filesystem_result_unverified' && allows('retry')) {
       return {
-        action: 'continue_with_instruction',
-        text: 'Recommended: Add guidance and continue.'
+        action: 'retry',
+        text: 'Recommended: Retry so the agent can verify the folder contents with filesystem tools.'
       };
     }
 
@@ -3622,6 +3622,13 @@ export class WorkspaceDetailPage {
       return {
         action: 'retry',
         text: 'Recommended: Retry with the current setup.'
+      };
+    }
+
+    if (allows('continue_with_instruction')) {
+      return {
+        action: 'continue_with_instruction',
+        text: 'Recommended: Add guidance and continue.'
       };
     }
 
@@ -3642,12 +3649,15 @@ export class WorkspaceDetailPage {
 
     const humanLoop = this.getTaskHumanLoop(task) || {};
     const payload = (eventData && typeof eventData === 'object') ? eventData : {};
+    const payloadHumanLoop = payload.human_loop && typeof payload.human_loop === 'object'
+      ? payload.human_loop
+      : {};
     const blockId = String(payload.block_id || humanLoop.block_id || '').trim();
-    const reasonCode = String(payload.reason_code || humanLoop.reason_code || '').trim();
-    const suggestedActions = payload.suggested_actions || humanLoop.suggested_actions;
-    const reason = String(payload.reason || humanLoop.reason || 'The assigned agent needs guidance before it can continue.').trim();
-    const question = String(payload.question || humanLoop.question || 'How should I proceed?').trim();
-    const response = String(payload.agent_response || humanLoop.agent_response || '').trim();
+    const reasonCode = String(payload.reason_code || payloadHumanLoop.reason_code || humanLoop.reason_code || '').trim();
+    const suggestedActions = payload.suggested_actions || payloadHumanLoop.suggested_actions || humanLoop.suggested_actions;
+    const reason = String(payload.reason || payloadHumanLoop.reason || humanLoop.reason || 'The assigned agent needs guidance before it can continue.').trim();
+    const question = String(payload.question || payloadHumanLoop.question || humanLoop.question || 'How should I proceed?').trim();
+    const response = String(payload.agent_response || payloadHumanLoop.agent_response || humanLoop.agent_response || '').trim();
     const statusText = getDisplayStatus(task.status);
     const timestamp = formatDate(task.updated_at || task.created_at);
 

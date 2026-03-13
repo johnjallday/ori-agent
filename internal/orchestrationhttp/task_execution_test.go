@@ -2,6 +2,7 @@ package orchestrationhttp
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/johnjallday/ori-agent/internal/workspace"
@@ -28,6 +29,13 @@ However, I need clarification to complete this task:
 - Precipitation: 10%
 - Wind: 8 km/h`,
 			want: false,
+		},
+		{
+			name: "filesystem clarification disguised as answer",
+			response: `It seems that the directory "/Users/jjdev/Documents" is empty or not accessible at the moment, as every attempt to list its contents results in an error.
+
+Could you please confirm if the "DNM" folder is located somewhere else or provide additional directions?`,
+			want: true,
 		},
 		{
 			name:     "empty output",
@@ -102,6 +110,35 @@ func TestExtractClarificationQuestion(t *testing.T) {
 	got := extractClarificationQuestion(response)
 	if got != "Which city should I check weather for?" {
 		t.Fatalf("extractClarificationQuestion() = %q, want %q", got, "Which city should I check weather for?")
+	}
+}
+
+func TestApplyIterationContext_RequiresFilesystemVerificationAfterUnverifiedListing(t *testing.T) {
+	task := &workspace.Task{
+		Description: "Get list of files in DNM folder",
+		Context:     map[string]interface{}{},
+	}
+
+	history := []map[string]interface{}{
+		{
+			"attempt": 1,
+			"outcome": "unverified",
+			"summary": "Task returned a filesystem listing answer without successful filesystem verification",
+		},
+	}
+
+	applyIterationContext(task, 2, 3, history)
+
+	guidance, _ := task.Context["execution_retry_guidance"].(string)
+	if !strings.Contains(guidance, "must use a filesystem tool to verify the folder contents before answering") {
+		t.Fatalf("expected retry guidance to require filesystem verification, got %q", guidance)
+	}
+	if requireVerification, _ := task.Context["execution_require_filesystem_verification"].(bool); !requireVerification {
+		t.Fatalf("expected execution_require_filesystem_verification to be true")
+	}
+	requiredTools, ok := task.Context["execution_required_filesystem_tools"].([]string)
+	if !ok || len(requiredTools) == 0 {
+		t.Fatalf("expected execution_required_filesystem_tools to be populated, got %#v", task.Context["execution_required_filesystem_tools"])
 	}
 }
 
@@ -186,6 +223,31 @@ func (s *stubSequenceTaskExecutor) ExecuteTask(_ context.Context, _ string, task
 	return s.results[index], nil
 }
 
+type stubEventingTaskExecutor struct {
+	result     string
+	err        error
+	calls      int
+	eventBus   *workspace.EventBus
+	toolName   string
+	toolResult string
+	success    bool
+}
+
+func (s *stubEventingTaskExecutor) ExecuteTask(_ context.Context, agentName string, task workspace.Task) (string, error) {
+	s.calls++
+	if s.eventBus != nil && strings.TrimSpace(s.toolName) != "" {
+		data := map[string]interface{}{
+			"tool_name": s.toolName,
+			"success":   s.success,
+		}
+		if strings.TrimSpace(s.toolResult) != "" {
+			data["result_preview"] = s.toolResult
+		}
+		s.eventBus.Publish(workspace.NewTaskEvent(workspace.EventTaskToolResult, task.WorkspaceID, task.ID, agentName, data))
+	}
+	return s.result, s.err
+}
+
 func TestExecuteTaskIteratively_BlocksWhenToolsAreUnavailable(t *testing.T) {
 	stub := &stubWorkspaceTaskExecutor{
 		result: `I don't have filesystem browsing tools available in this context — only REAPER scripting and LSP code intelligence tools, neither of which can explore a general directory.
@@ -223,6 +285,76 @@ To walk you through the directory, I'd need you to either share the directory li
 	}
 	if got := retryData["attempts_used"]; got != 1 {
 		t.Fatalf("expected attempts_used 1, got %v", got)
+	}
+}
+
+func TestExecuteTaskIteratively_BlocksUnverifiedFilesystemListingResult(t *testing.T) {
+	eventBus := workspace.DefaultEventBus()
+	stub := &stubEventingTaskExecutor{
+		result:   `The "Documents" directory exists, but it does not contain a folder named "DNM".`,
+		eventBus: eventBus,
+	}
+	handler := &TaskHandler{
+		taskHandler: stub,
+		eventBus:    eventBus,
+	}
+	ws := workspace.NewWorkspace(workspace.CreateWorkspaceParams{Name: "amr", Agents: []string{"Ori"}})
+	task := workspace.Task{
+		ID:          "task-listing-unverified",
+		WorkspaceID: ws.ID,
+		To:          "Ori",
+		Description: "Give me list of files in DNM folder",
+		Context: map[string]interface{}{
+			"max_attempts": 1,
+		},
+	}
+
+	_, err := handler.executeTaskIteratively(context.Background(), ws, &task, task, true)
+	blockedErr, ok := workspace.AsTaskBlockedError(err)
+	if !ok {
+		t.Fatalf("expected TaskBlockedError, got %v", err)
+	}
+	if blockedErr.ReasonCode != "filesystem_result_unverified" {
+		t.Fatalf("expected filesystem_result_unverified, got %q", blockedErr.ReasonCode)
+	}
+	if stub.calls != 1 {
+		t.Fatalf("expected a single execution attempt, got %d", stub.calls)
+	}
+}
+
+func TestExecuteTaskIteratively_AllowsVerifiedFilesystemListingResult(t *testing.T) {
+	eventBus := workspace.DefaultEventBus()
+	stub := &stubEventingTaskExecutor{
+		result:     "The DNM folder contains:\n- file-a.pdf\n- file-b.pages",
+		eventBus:   eventBus,
+		toolName:   "list_directory",
+		toolResult: "file-a.pdf\nfile-b.pages",
+		success:    true,
+	}
+	handler := &TaskHandler{
+		taskHandler: stub,
+		eventBus:    eventBus,
+	}
+	ws := workspace.NewWorkspace(workspace.CreateWorkspaceParams{Name: "amr", Agents: []string{"Ori"}})
+	task := workspace.Task{
+		ID:          "task-listing-verified",
+		WorkspaceID: ws.ID,
+		To:          "Ori",
+		Description: "Give me list of files in DNM folder",
+		Context: map[string]interface{}{
+			"max_attempts": 1,
+		},
+	}
+
+	result, err := handler.executeTaskIteratively(context.Background(), ws, &task, task, true)
+	if err != nil {
+		t.Fatalf("expected verified listing result to succeed, got %v", err)
+	}
+	if result == "" {
+		t.Fatalf("expected a non-empty listing result")
+	}
+	if stub.calls != 1 {
+		t.Fatalf("expected a single execution attempt, got %d", stub.calls)
 	}
 }
 

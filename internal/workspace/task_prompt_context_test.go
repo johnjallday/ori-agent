@@ -144,6 +144,8 @@ func TestBuildTaskSystemPrompt_DisambiguatesWorkspaceFromRepository(t *testing.T
 		"workspace as the collaborative workspace data provided in the prompt",
 		"not the server's current working directory, git checkout, or repository state",
 		"Use the workspace snapshot in the prompt as the source of truth",
+		"must verify the answer with filesystem tools before responding",
+		"Do not answer filesystem listing tasks from the workspace snapshot",
 	} {
 		if !strings.Contains(prompt, want) {
 			t.Fatalf("expected system prompt to contain %q, got %q", want, prompt)

@@ -49,6 +49,8 @@ func (h *LLMTaskHandler) buildTaskSystemPrompt() string {
 	prompt.WriteString("Use the workspace snapshot in the prompt as the source of truth for workspace-summary requests. ")
 	prompt.WriteString("If the available workspace data is limited, say that directly instead of substituting repository/worktree context. ")
 	prompt.WriteString("If you use tools, continue reasoning from the tool results until you can either complete the requested step or explain exactly what is still blocked. ")
+	prompt.WriteString("If a task asks for file or folder contents, directory listings, or filesystem state, you must verify the answer with filesystem tools before responding. ")
+	prompt.WriteString("Do not answer filesystem listing tasks from the workspace snapshot, prior attempt summaries, or assumptions alone. ")
 	prompt.WriteString("Do not treat a discovery-only tool call as completion for a task that requires making changes. ")
 	prompt.WriteString("Only ask for user confirmation if the task is truly blocked or risky without explicit user input. ")
 	prompt.WriteString("Be thoughtful and precise in your responses.")
