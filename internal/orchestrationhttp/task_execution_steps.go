@@ -21,10 +21,11 @@ func shouldUseStructuredExecution(task *workspace.Task, taskForExecution workspa
 	if task == nil {
 		return false
 	}
+	inferred := workspace.InferTaskExecutionSteps(taskForExecution)
 	if len(task.ExecutionSteps) > 0 {
-		return true
+		return len(inferred) > 0
 	}
-	return len(workspace.InferTaskExecutionSteps(taskForExecution)) > 1
+	return len(inferred) > 1
 }
 
 func buildStructuredExecutionExtra(task *workspace.Task) map[string]interface{} {

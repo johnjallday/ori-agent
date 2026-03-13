@@ -179,11 +179,8 @@ func InferTaskExecutionSteps(task Task) []TaskExecutionStep {
 	}
 
 	if IsReadOnlyFilesystemListingIntent(description) {
-		return []TaskExecutionStep{
-			toStep(1, "Check allowed filesystem scope", "Confirm which directories are available before inspecting folder contents.", "Discovery"),
-			toStep(2, "Inspect the target directory", "Locate the requested folder and gather its visible file list.", "Discovery"),
-			toStep(3, "Return the file list", "Return the concrete file list, or explain clearly if the folder is missing or empty.", "Summary"),
-		}
+		// Simple read-only listings do not benefit from structured execution.
+		return nil
 	}
 
 	if isLikelyBrowserAutomationIntent(description) {
@@ -206,6 +203,24 @@ func InferTaskExecutionSteps(task Task) []TaskExecutionStep {
 	}
 
 	return nil
+}
+
+// ClearTaskExecutionSteps removes stale structured execution state from a task.
+func ClearTaskExecutionSteps(task *Task) {
+	if task == nil {
+		return
+	}
+
+	task.ExecutionSteps = nil
+	task.Progress = nil
+	if task.Context == nil {
+		return
+	}
+
+	delete(task.Context, "execution_step_waiting")
+	delete(task.Context, "execution_step_waiting_index")
+	delete(task.Context, "execution_blocked_step_index")
+	delete(task.Context, "execution_blocked_step_title")
 }
 
 // ResetTaskExecutionSteps clears runtime state for a structured execution plan.
@@ -232,6 +247,39 @@ func ResetTaskExecutionSteps(task *Task) {
 		task.ExecutionSteps[i].Error = ""
 		task.ExecutionSteps[i].StartedAt = nil
 		task.ExecutionSteps[i].CompletedAt = nil
+	}
+}
+
+// SkipPendingExecutionSteps marks any remaining structured execution steps as skipped.
+func SkipPendingExecutionSteps(task *Task) {
+	if task == nil || len(task.ExecutionSteps) == 0 {
+		return
+	}
+
+	now := time.Now()
+	for i := range task.ExecutionSteps {
+		switch task.ExecutionSteps[i].Status {
+		case TaskExecutionStepPending, TaskExecutionStepBlocked, TaskExecutionStepFailed, TaskExecutionStepInProgress:
+			task.ExecutionSteps[i].Status = TaskExecutionStepSkipped
+			task.ExecutionSteps[i].Error = ""
+			task.ExecutionSteps[i].StartedAt = nil
+			task.ExecutionSteps[i].CompletedAt = &now
+		}
+	}
+
+	if task.Context != nil {
+		delete(task.Context, "execution_step_waiting")
+		delete(task.Context, "execution_step_waiting_index")
+		delete(task.Context, "execution_blocked_step_index")
+		delete(task.Context, "execution_blocked_step_title")
+	}
+
+	task.Progress = &TaskProgress{
+		Percentage:     100,
+		CurrentStep:    "All execution steps completed.",
+		TotalSteps:     len(task.ExecutionSteps),
+		CompletedSteps: CountCompletedExecutionSteps(task),
+		UpdatedAt:      now,
 	}
 }
 

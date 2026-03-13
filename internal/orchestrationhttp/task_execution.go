@@ -738,7 +738,16 @@ func (th *TaskHandler) executeTaskWithDependencies(ws *workspace.Workspace, task
 
 	var result string
 	var execErr error
-	if shouldUseStructuredExecution(task, taskForExecution) {
+	inferredExecutionSteps := workspace.InferTaskExecutionSteps(taskForExecution)
+	if len(task.ExecutionSteps) > 0 && len(inferredExecutionSteps) == 0 {
+		if cachedResult := strings.TrimSpace(workspace.BuildTaskExecutionSummary(task)); cachedResult != "" {
+			workspace.SkipPendingExecutionSteps(task)
+			result = cachedResult
+		} else {
+			workspace.ClearTaskExecutionSteps(task)
+			result, execErr = th.executeTaskIteratively(ctx, ws, task, taskForExecution, manual)
+		}
+	} else if shouldUseStructuredExecution(task, taskForExecution) {
 		result, execErr = th.executeTaskWithStructuredSteps(ctx, ws, task, taskForExecution, manual)
 	} else {
 		result, execErr = th.executeTaskIteratively(ctx, ws, task, taskForExecution, manual)

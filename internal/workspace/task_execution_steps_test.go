@@ -22,22 +22,9 @@ func TestIsReadOnlyFilesystemListingIntent_DoesNotMatchMutationWorkflow(t *testi
 	}
 }
 
-func TestInferTaskExecutionSteps_UsesListingPlanForReadOnlyFilesystemRequest(t *testing.T) {
+func TestInferTaskExecutionSteps_DoesNotUseStructuredPlanForReadOnlyFilesystemRequest(t *testing.T) {
 	steps := InferTaskExecutionSteps(Task{Description: "Give me list of files in DNM folder"})
-	if len(steps) != 3 {
-		t.Fatalf("expected 3 listing steps, got %d", len(steps))
-	}
-
-	if got := steps[0].Title; got != "Check allowed filesystem scope" {
-		t.Fatalf("unexpected step 1 title %q", got)
-	}
-	if got := steps[1].Title; got != "Inspect the target directory" {
-		t.Fatalf("unexpected step 2 title %q", got)
-	}
-	if got := steps[2].Title; got != "Return the file list" {
-		t.Fatalf("unexpected final step title %q", got)
-	}
-	if got := steps[2].Detail; got != "Return the concrete file list, or explain clearly if the folder is missing or empty." {
-		t.Fatalf("unexpected final step detail %q", got)
+	if len(steps) != 0 {
+		t.Fatalf("expected no structured listing steps, got %d", len(steps))
 	}
 }

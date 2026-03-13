@@ -385,6 +385,80 @@ func TestExecuteTaskWithDependencies_StepThroughPausesAfterFirstStructuredStep(t
 	}
 }
 
+func TestExecuteTaskWithDependencies_CompletesStaleListingPlanFromExistingResult(t *testing.T) {
+	store := workspace.NewInMemoryStore()
+	ws := workspace.NewWorkspace(workspace.CreateWorkspaceParams{Name: "Folder Organizer", Agents: []string{"Ori"}})
+
+	staleSteps := workspace.InferTaskExecutionSteps(workspace.Task{Description: "Gather DNM related files into DNM folder"})
+	if len(staleSteps) != 7 {
+		t.Fatalf("expected stale mutation plan to contain 7 steps, got %d", len(staleSteps))
+	}
+	staleResult := "The DNM folder contains:\n- file-a.pdf\n- file-b.pages"
+	for i := 0; i < 3; i++ {
+		staleSteps[i].Status = workspace.TaskExecutionStepCompleted
+		staleSteps[i].Result = staleResult
+	}
+
+	task := workspace.Task{
+		ID:            "task-stale-listing-plan",
+		To:            "Ori",
+		Description:   "Give me list of files in DNM folder",
+		ExecutionMode: workspace.TaskExecutionModeStepThrough,
+		Context: map[string]interface{}{
+			"execution_step_waiting":       true,
+			"execution_step_waiting_index": 4,
+		},
+		ExecutionSteps: staleSteps,
+		Status:         workspace.TaskStatusInProgress,
+	}
+	if err := ws.AddTask(task); err != nil {
+		t.Fatalf("failed to add task: %v", err)
+	}
+	if err := store.Save(ws); err != nil {
+		t.Fatalf("failed to save workspace: %v", err)
+	}
+
+	persistedTask, err := ws.GetTask(task.ID)
+	if err != nil {
+		t.Fatalf("failed to fetch task: %v", err)
+	}
+
+	stub := &stubSequenceTaskExecutor{
+		results: []string{"this executor should not be called"},
+	}
+	handler := &TaskHandler{
+		workspaceStore: store,
+		taskHandler:    stub,
+	}
+
+	result, err := handler.executeTaskWithDependencies(ws, persistedTask, true)
+	if err != nil {
+		t.Fatalf("executeTaskWithDependencies failed: %v", err)
+	}
+	if stub.calls != 0 {
+		t.Fatalf("expected stale listing task not to re-execute, got %d calls", stub.calls)
+	}
+	if result != staleResult {
+		t.Fatalf("unexpected result: %q", result)
+	}
+
+	updatedTask, err := ws.GetTask(task.ID)
+	if err != nil {
+		t.Fatalf("failed to fetch updated task: %v", err)
+	}
+	if updatedTask.Status != workspace.TaskStatusCompleted {
+		t.Fatalf("expected task completed, got %q", updatedTask.Status)
+	}
+	if workspace.IsTaskAwaitingNextStep(updatedTask) {
+		t.Fatalf("did not expect task to remain waiting for a next step")
+	}
+	for i := 3; i < len(updatedTask.ExecutionSteps); i++ {
+		if updatedTask.ExecutionSteps[i].Status != workspace.TaskExecutionStepSkipped {
+			t.Fatalf("expected stale step %d skipped, got %q", i+1, updatedTask.ExecutionSteps[i].Status)
+		}
+	}
+}
+
 func TestExecuteTaskWithDependencies_AutoRunsStructuredStepsToCompletion(t *testing.T) {
 	store := workspace.NewInMemoryStore()
 	ws := workspace.NewWorkspace(workspace.CreateWorkspaceParams{Name: "Folder Organizer", Agents: []string{"Ori"}})
