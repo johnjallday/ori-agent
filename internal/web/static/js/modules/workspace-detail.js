@@ -1058,10 +1058,29 @@ export class WorkspaceDetailPage {
       const sessionCount = group.sessions.length;
       const taskLabel = `${taskCount} task${taskCount === 1 ? '' : 's'}`;
       const sessionLabel = `${sessionCount} session${sessionCount === 1 ? '' : 's'}`;
+      const instanceLabel = group.instanceCount > 1 ? `${group.instanceCount} instances` : '';
+      const cardMeta = [instanceLabel, taskLabel, sessionLabel].filter(Boolean).join(' · ');
       const capabilityBadges = group.isUnassigned ? '' : this.renderAgentCapabilityBadges(group.name);
       const encodedAgentName = encodeURIComponent(group.name);
       const canFlip = !group.isUnassigned;
       const isFlipped = canFlip && this.flippedAgentCards.has(group.key);
+      const removeLabel = group.instanceCount > 1
+        ? `Remove all ${group.instanceCount} ${group.name} instances from workspace`
+        : `Remove ${group.name} from workspace`;
+      const removeButton = group.isWorkspaceAgent && !group.isUnassigned ? `
+        <button type="button"
+                class="workspace-detail-agent-remove-btn"
+                title="${this.escapeHtml(removeLabel)}"
+                aria-label="${this.escapeHtml(removeLabel)}"
+                onclick="event.stopPropagation(); window.workspaceDetail?.removeAgentFromWorkspace('${encodedAgentName}')">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+            <path d="M9,3V4H4V6H5V19A2,2 0 0,0 7,21H17A2,2 0 0,0 19,19V6H20V4H15V3H9M7,6H17V19H7V6M9,8V17H11V8H9M13,8V17H15V8H13Z"/>
+          </svg>
+        </button>
+      ` : '';
+      const instanceChip = group.instanceCount > 1
+        ? `<span class="workspace-detail-agent-instance-tag">${group.instanceCount}x</span>`
+        : '';
       const frontFlipButton = canFlip ? `
         <button type="button"
                 class="workspace-detail-agent-flip-btn"
@@ -1096,7 +1115,7 @@ export class WorkspaceDetailPage {
         </button>
       `;
       const backFace = canFlip
-        ? this.renderAgentBackFace(group, taskLabel, sessionLabel, encodedAgentName)
+        ? this.renderAgentBackFace(group, cardMeta, encodedAgentName)
         : '';
       const flippedClass = isFlipped ? ' is-flipped' : '';
 
@@ -1107,10 +1126,12 @@ export class WorkspaceDetailPage {
             <div class="workspace-detail-agent-card-header">
               <div class="workspace-detail-agent-card-title">
                 <span>${this.escapeHtml(group.name)}</span>
+                ${instanceChip}
                 ${capabilityBadges}
               </div>
               <div class="workspace-detail-agent-card-meta-wrap">
-                <div class="workspace-detail-agent-card-meta">${taskLabel} · ${sessionLabel}</div>
+                <div class="workspace-detail-agent-card-meta">${cardMeta}</div>
+                ${removeButton}
                 ${frontFlipButton}
               </div>
             </div>
@@ -1142,7 +1163,7 @@ export class WorkspaceDetailPage {
     }).join('');
   }
 
-  renderAgentBackFace(group, taskLabel, sessionLabel, encodedAgentName) {
+  renderAgentBackFace(group, cardMeta, encodedAgentName) {
     const profile = this.getAgentProfile(group.name);
     const levelValue = Number(profile?.evolution?.level ?? profile?.level);
     const level = Number.isFinite(levelValue) ? Math.max(0, Math.floor(levelValue)) : 0;
@@ -1156,6 +1177,20 @@ export class WorkspaceDetailPage {
     const mcpMarkup = mcpServers.length > 0
       ? mcpServers.map((server) => `<span class="workspace-detail-agent-info-chip mcp">${this.escapeHtml(server)}</span>`).join('')
       : '<span class="workspace-detail-agent-info-empty">No MCP servers attached.</span>';
+    const removeLabel = group.instanceCount > 1
+      ? `Remove all ${group.instanceCount} ${group.name} instances from workspace`
+      : `Remove ${group.name} from workspace`;
+    const removeButton = group.isWorkspaceAgent && !group.isUnassigned ? `
+      <button type="button"
+              class="workspace-detail-agent-remove-btn"
+              title="${this.escapeHtml(removeLabel)}"
+              aria-label="${this.escapeHtml(removeLabel)}"
+              onclick="event.stopPropagation(); window.workspaceDetail?.removeAgentFromWorkspace('${encodedAgentName}')">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+          <path d="M9,3V4H4V6H5V19A2,2 0 0,0 7,21H17A2,2 0 0,0 19,19V6H20V4H15V3H9M7,6H17V19H7V6M9,8V17H11V8H9M13,8V17H15V8H13Z"/>
+        </svg>
+      </button>
+    ` : '';
 
     return `
       <div class="workspace-detail-agent-card-face workspace-detail-agent-card-face-back">
@@ -1165,7 +1200,8 @@ export class WorkspaceDetailPage {
             <span class="workspace-detail-agent-info-tag">Agent Info</span>
           </div>
           <div class="workspace-detail-agent-card-meta-wrap">
-            <div class="workspace-detail-agent-card-meta">${taskLabel} · ${sessionLabel}</div>
+            <div class="workspace-detail-agent-card-meta">${cardMeta}</div>
+            ${removeButton}
             <button type="button"
                     class="workspace-detail-agent-flip-btn"
                     title="Back to tasks and sessions"
@@ -1409,6 +1445,7 @@ export class WorkspaceDetailPage {
           name: isUnassigned ? 'Unassigned' : String(name || '').trim(),
           isWorkspaceAgent,
           isUnassigned,
+          instanceCount: 0,
           tasks: [],
           sessions: []
         };
@@ -1421,9 +1458,21 @@ export class WorkspaceDetailPage {
       return group;
     };
 
-    this.getWorkspaceAgentNames().forEach((name) => {
-      ensureGroup(name, { isWorkspaceAgent: true, isUnassigned: false });
-    });
+    if (Array.isArray(this.workspace?.agent_instances) && this.workspace.agent_instances.length > 0) {
+      this.workspace.agent_instances.forEach((instance) => {
+        const group = ensureGroup(instance?.name, { isWorkspaceAgent: true, isUnassigned: false });
+        if (group) {
+          group.instanceCount += 1;
+        }
+      });
+    } else {
+      this.getWorkspaceAgentNames().forEach((name) => {
+        const group = ensureGroup(name, { isWorkspaceAgent: true, isUnassigned: false });
+        if (group) {
+          group.instanceCount = Math.max(1, group.instanceCount);
+        }
+      });
+    }
 
     const topLevelTasks = Array.isArray(this.tasks)
       ? this.tasks.filter((task) => !task.parent_task_id)
@@ -2647,6 +2696,95 @@ export class WorkspaceDetailPage {
       if (submitButton) {
         submitButton.disabled = false;
         submitButton.innerHTML = originalLabel;
+      }
+    }
+  }
+
+  getWorkspaceAgentInstances(agentName) {
+    const normalized = this.normalizeAgentName(agentName);
+    if (!normalized || !this.workspace) return [];
+
+    const instances = Array.isArray(this.workspace.agent_instances)
+      ? this.workspace.agent_instances.filter((instance) => this.normalizeAgentName(instance?.name) === normalized)
+      : [];
+    if (instances.length > 0) {
+      return instances;
+    }
+
+    const names = Array.isArray(this.workspace.agents) ? this.workspace.agents : [];
+    if (names.some((name) => this.normalizeAgentName(name) === normalized)) {
+      return [{ id: '', name: String(agentName || '').trim(), instance_number: 1, node_id: '' }];
+    }
+
+    return [];
+  }
+
+  async removeAgentFromWorkspace(encodedAgentName = '') {
+    let agentName = '';
+    try {
+      agentName = decodeURIComponent(String(encodedAgentName || ''));
+    } catch (error) {
+      agentName = String(encodedAgentName || '');
+    }
+
+    const normalizedAgentName = String(agentName || '').trim();
+    const normalizedKey = this.normalizeAgentName(normalizedAgentName);
+    if (!normalizedAgentName || !normalizedKey) return;
+
+    const instances = this.getWorkspaceAgentInstances(normalizedAgentName);
+    const instanceCount = instances.length > 0 ? instances.length : 1;
+    const taskCount = Array.isArray(this.tasks)
+      ? this.tasks.filter((task) => this.normalizeAgentName(task?.to) === normalizedKey).length
+      : 0;
+    const sessionCount = Array.isArray(this.sessions)
+      ? this.sessions.filter((session) => this.normalizeAgentName(session?.agent_name) === normalizedKey).length
+      : 0;
+
+    const confirmationLines = [`Remove "${normalizedAgentName}" from this workspace?`];
+    if (instanceCount > 1) {
+      confirmationLines.push(`This will remove all ${instanceCount} instances of this agent from the workspace.`);
+    }
+    if (taskCount > 0) {
+      confirmationLines.push(`${taskCount} assigned task${taskCount === 1 ? '' : 's'} will be moved to Unassigned.`);
+    }
+    if (sessionCount > 0) {
+      confirmationLines.push(`${sessionCount} session${sessionCount === 1 ? '' : 's'} will remain in workspace history.`);
+    }
+
+    if (!window.confirm(confirmationLines.join('\n\n'))) {
+      return;
+    }
+
+    try {
+      const response = await fetch(`/api/workspaces/${encodeURIComponent(this.workspaceId)}/agents/${encodeURIComponent(normalizedAgentName)}`, {
+        method: 'DELETE'
+      });
+      if (!response.ok) {
+        const text = await response.text();
+        throw new Error(text || 'Failed to remove agent from workspace');
+      }
+
+      this.flippedAgentCards.delete(normalizedKey);
+      this.agentSkillsCache.delete(normalizedKey);
+      this.agentSkillsPromises.delete(normalizedKey);
+
+      await Promise.all([
+        this.loadWorkspace(),
+        this.loadTasks(),
+        this.loadSessions()
+      ]);
+
+      if (window.Toast) {
+        window.Toast.success(
+          instanceCount > 1
+            ? `Removed ${instanceCount} "${normalizedAgentName}" instances from workspace`
+            : `Removed "${normalizedAgentName}" from workspace`
+        );
+      }
+    } catch (error) {
+      console.error('Failed to remove agent from workspace:', error);
+      if (window.Toast) {
+        window.Toast.error(error.message || 'Failed to remove agent from workspace');
       }
     }
   }
