@@ -222,6 +222,111 @@ body::after {
   display: block;
 }
 
+.ori-navbar-shell {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 0.85rem 1rem;
+  width: 100%;
+  min-width: 0;
+}
+
+.ori-navbar-shell > * {
+  min-width: 0;
+}
+
+.ori-navbar-left {
+  grid-column: 1;
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  min-width: 0;
+}
+
+.ori-navbar-brand {
+  margin-right: 0;
+  min-width: 0;
+  white-space: nowrap;
+}
+
+.ori-navbar-links {
+  grid-column: 2;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  min-width: 0;
+}
+
+.ori-navbar-divider {
+  color: var(--text-muted);
+  flex: 0 0 auto;
+}
+
+.ori-navbar-plugin-pages {
+  position: relative;
+  z-index: 10001;
+}
+
+.ori-navbar-utilities {
+  grid-column: 3;
+  justify-self: end;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 0.85rem;
+  min-width: 0;
+}
+
+.ori-navbar-model-group {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+}
+
+.ori-navbar-system-model {
+  display: inline-flex !important;
+  align-items: center;
+  gap: 0.6rem;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.ori-navbar-system-model svg {
+  flex: 0 0 auto;
+}
+
+#systemModelName {
+  display: inline-block;
+  max-width: 10rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+#navSystemModelProvider {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
+.ori-navbar-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  min-width: 0;
+}
+
+.ori-navbar-actions .modern-btn,
+.ori-navbar-actions .modern-badge,
+.ori-navbar-actions #locationIndicator {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
 .nav-link-item {
   border: 1px solid transparent;
   font-size: 0.78rem;
@@ -712,6 +817,27 @@ textarea.form-control:focus {
 }
 
 @media (max-width: 1200px) {
+  .ori-navbar-shell {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .ori-navbar-links {
+    grid-column: 1 / -1;
+    justify-content: flex-start;
+  }
+
+  .ori-navbar-utilities {
+    gap: 0.7rem;
+  }
+
+  .ori-navbar-divider {
+    display: none !important;
+  }
+
+  #navSystemModelProvider {
+    display: none !important;
+  }
+
   .navbar-brand {
     letter-spacing: 0.03em;
   }
@@ -721,7 +847,64 @@ textarea.form-control:focus {
   }
 }
 
+@media (max-width: 1100px) {
+  .ori-navbar-utilities,
+  .ori-navbar-actions {
+    gap: 0.55rem;
+  }
+
+  .ori-navbar-actions .modern-btn,
+  .ori-navbar-actions #locationIndicator,
+  .ori-navbar-system-model {
+    padding-inline: 0.8rem !important;
+  }
+
+  #systemModelName {
+    max-width: 7.25rem;
+  }
+
+  #homeAssistantReopenBtn [data-home-assistant-launcher-label],
+  #refreshAppBtn span:last-child,
+  #updateNotificationBtn > span:first-of-type,
+  #darkModeText,
+  #locationIndicator .fw-medium {
+    display: none;
+  }
+}
+
 @media (max-width: 991px) {
+  .ori-navbar-shell {
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: start;
+  }
+
+  .ori-navbar-left {
+    grid-column: 1 / -1;
+  }
+
+  .ori-navbar-links {
+    grid-column: 1;
+    grid-row: 2;
+    justify-content: flex-start;
+  }
+
+  .ori-navbar-utilities {
+    grid-column: 2;
+    grid-row: 2;
+    justify-self: end;
+    justify-content: flex-end;
+    align-self: center;
+    gap: 0.5rem;
+  }
+
+  .ori-navbar-actions {
+    gap: 0.5rem;
+  }
+
+  #systemModelName {
+    max-width: 6rem;
+  }
+
   .main-content {
     padding: 0.95rem;
   }
@@ -741,6 +924,72 @@ textarea.form-control:focus {
 
   .dashboard-stat-value {
     font-size: 1.38rem;
+  }
+}
+
+@media (max-width: 768px) {
+  .ori-navbar-shell {
+    grid-template-columns: 1fr;
+    gap: 0.75rem;
+  }
+
+  .ori-navbar-left {
+    grid-column: 1;
+    width: 100%;
+  }
+
+  .ori-navbar-links {
+    grid-column: 1;
+    grid-row: auto;
+    gap: 0.45rem;
+  }
+
+  .ori-navbar-utilities {
+    grid-column: 1;
+    grid-row: auto;
+    justify-self: stretch;
+    justify-content: flex-start;
+    gap: 0.5rem;
+  }
+
+  .ori-navbar-actions {
+    gap: 0.6rem;
+  }
+
+  .navbar-brand {
+    font-size: 0.95rem !important;
+    letter-spacing: 0.02em;
+  }
+
+  #systemModelIndicator {
+    width: 100%;
+    justify-content: center;
+  }
+
+  #systemModelName {
+    max-width: 11rem;
+  }
+
+  #darkModeText {
+    display: none;
+  }
+}
+
+@media (max-width: 576px) {
+  .ori-navbar-utilities {
+    flex-wrap: wrap;
+  }
+
+  #systemModelName {
+    max-width: 5rem;
+  }
+
+  .ori-navbar-links .nav-link-item {
+    padding-inline: 0.75rem !important;
+  }
+
+  .ori-navbar-actions {
+    width: auto;
   }
 }
 
