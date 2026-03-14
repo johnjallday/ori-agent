@@ -141,7 +141,12 @@
           <!-- Bento Grid Panels -->
           <div class="workspace-detail-bento">
             <!-- Agents Panel - Left column (rows 1-4) -->
-            <div class="modern-card workspace-detail-panel workspace-detail-panel-agents" id="workspace-detail-agents-panel">
+            <div class="modern-card workspace-detail-panel workspace-detail-panel-agents is-expandable" id="workspace-detail-agents-panel">
+              <button class="workspace-detail-panel-close" type="button" title="Close" aria-label="Close expanded panel">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+                  <path d="M19,6.41L17.59,5L12,10.59L6.41,5L5,6.41L10.59,12L5,17.59L6.41,19L12,13.41L17.59,19L19,17.59L13.41,12L19,6.41Z"/>
+                </svg>
+              </button>
               <div class="workspace-detail-panel-header">
                 <h2 class="workspace-detail-panel-title">
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
@@ -1377,10 +1382,32 @@
     }
 
     .workspace-detail-mcp-modal-content {
+      display: flex;
+      flex-direction: column;
+      max-height: min(88vh, 960px);
+      overflow: hidden;
       background:
         radial-gradient(circle at top left, rgba(73, 113, 255, 0.15), transparent 46%),
         rgba(8, 14, 34, 0.98);
       color: var(--text-primary);
+    }
+
+    #workspace-detail-mcp-form {
+      display: flex;
+      flex: 1 1 auto;
+      flex-direction: column;
+      min-height: 0;
+    }
+
+    #workspace-detail-mcp-modal .modal-body {
+      min-height: 0;
+      overflow-y: auto;
+      overscroll-behavior: contain;
+      -webkit-overflow-scrolling: touch;
+    }
+
+    #workspace-detail-mcp-modal .modal-footer {
+      flex-shrink: 0;
     }
 
     .workspace-detail-mcp-modal-heading {
@@ -3826,7 +3853,7 @@
         // Click on panel to expand
         panel.addEventListener('click', (event) => {
           // Don't expand if clicking on interactive elements
-          if (event.target.closest('button, a, input, select, textarea, .workspace-detail-item')) {
+          if (event.target.closest('button, a, input, select, textarea, .workspace-detail-item, .workspace-detail-agent-card, .workspace-detail-board')) {
             return;
           }
 
