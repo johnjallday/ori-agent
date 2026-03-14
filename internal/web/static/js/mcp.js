@@ -314,6 +314,11 @@ function createServerCard(server) {
   const statusBadge = getStatusBadge(server.status || 'stopped');
   const argsDisplay = server.args ? server.args.join(' ') : '';
   const toolCountBadge = server.tool_count > 0 ? `<span class="badge bg-info ms-2">${server.tool_count} tools</span>` : '';
+  const enabledBadge = server.enabled
+    ? '<span class="badge bg-primary ms-2">Enabled globally</span>'
+    : '<span class="badge bg-secondary ms-2">Disabled globally</span>';
+  const toggleLabel = server.enabled ? 'Disable' : 'Enable';
+  const toggleClass = server.enabled ? 'modern-btn-secondary' : 'modern-btn-primary';
 
   div.innerHTML = `
     <div class="d-flex justify-content-between align-items-start">
@@ -323,9 +328,13 @@ function createServerCard(server) {
         <div class="mt-2">
           ${statusBadge}
           ${toolCountBadge}
+          ${enabledBadge}
         </div>
       </div>
       <div class="d-flex gap-2">
+        <button class="modern-btn ${toggleClass} modern-btn-sm" onclick="toggleServerEnabled('${encodeURIComponent(server.name)}', ${server.enabled})">
+          ${toggleLabel}
+        </button>
         <button class="modern-btn modern-btn-secondary modern-btn-sm" onclick="testConnection('${server.name}')">
           Test
         </button>
@@ -342,6 +351,35 @@ function createServerCard(server) {
   `;
 
   return div;
+}
+
+async function toggleServerEnabled(encodedServerName, currentlyEnabled) {
+  const serverName = decodeURIComponent(encodedServerName);
+  const action = currentlyEnabled ? 'disable' : 'enable';
+
+  try {
+    const response = await fetch(`/api/mcp/servers/${encodeURIComponent(serverName)}/${action}`, {
+      method: 'POST'
+    });
+
+    if (!response.ok) {
+      const error = await response.text();
+      showToast(`Failed to ${action} ${serverName}: ${error}`, 'error');
+      return;
+    }
+
+    const result = await response.json();
+    if (!currentlyEnabled && result.start_error) {
+      showToast(`${serverName} enabled globally, but startup failed: ${result.start_error}`, 'warning');
+    } else {
+      showToast(`${serverName} ${currentlyEnabled ? 'disabled' : 'enabled'} globally`, 'success');
+    }
+
+    loadServers();
+  } catch (error) {
+    console.error(`Failed to ${action} MCP server:`, error);
+    showToast(`Failed to ${action} ${serverName}`, 'error');
+  }
 }
 
 function getStatusBadge(status) {
