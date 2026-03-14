@@ -284,13 +284,50 @@ func normalizeFilesystemPathValue(pathValue, basePath string) string {
 	cleanBase := filepath.Clean(basePath)
 	cleanRelative := filepath.Clean(trimmed)
 	candidate := filepath.Join(cleanBase, cleanRelative)
-	if cleanBase != "" && cleanRelative == filepath.Base(cleanBase) {
-		if _, err := os.Stat(candidate); err != nil && os.IsNotExist(err) {
-			return cleanBase
+	if cleanBase != "" {
+		if _, err := os.Stat(candidate); err == nil {
+			return candidate
+		}
+		if collapsedRelative, ok := collapseRedundantBasePrefix(cleanRelative, cleanBase); ok {
+			if collapsedRelative == "." {
+				return cleanBase
+			}
+			return filepath.Join(cleanBase, collapsedRelative)
 		}
 	}
 
 	return candidate
+}
+
+func collapseRedundantBasePrefix(relativePath, basePath string) (string, bool) {
+	baseName := strings.TrimSpace(filepath.Base(filepath.Clean(basePath)))
+	if baseName == "" || baseName == "." || baseName == string(filepath.Separator) {
+		return "", false
+	}
+
+	segments := splitFilesystemPathSegments(relativePath)
+	if len(segments) == 0 || !strings.EqualFold(segments[0], baseName) {
+		return "", false
+	}
+
+	if len(segments) == 1 {
+		return ".", true
+	}
+	return filepath.Join(segments[1:]...), true
+}
+
+func splitFilesystemPathSegments(pathValue string) []string {
+	replaced := strings.ReplaceAll(pathValue, "\\", "/")
+	rawSegments := strings.Split(replaced, "/")
+	segments := make([]string, 0, len(rawSegments))
+	for _, segment := range rawSegments {
+		trimmed := strings.TrimSpace(segment)
+		if trimmed == "" || trimmed == "." {
+			continue
+		}
+		segments = append(segments, trimmed)
+	}
+	return segments
 }
 
 func annotateGetFileInfoResult(toolName, result string, arguments map[string]interface{}) string {

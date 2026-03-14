@@ -51,6 +51,8 @@ func (h *LLMTaskHandler) buildTaskSystemPrompt() string {
 	prompt.WriteString("If you use tools, continue reasoning from the tool results until you can either complete the requested step or explain exactly what is still blocked. ")
 	prompt.WriteString("If a task asks for file or folder contents, directory listings, or filesystem state, you must verify the answer with filesystem tools before responding. ")
 	prompt.WriteString("Do not answer filesystem listing tasks from the workspace snapshot, prior attempt summaries, or assumptions alone. ")
+	prompt.WriteString("If the task explicitly asks for a file list or folder contents and you can answer, return the list directly instead of asking whether the user wants to see it. ")
+	prompt.WriteString("If the task names a specific file or folder, inspect that exact target after locating it instead of stopping at the parent directory. ")
 	prompt.WriteString("Do not treat a discovery-only tool call as completion for a task that requires making changes. ")
 	prompt.WriteString("Only ask for user confirmation if the task is truly blocked or risky without explicit user input. ")
 	prompt.WriteString("Be thoughtful and precise in your responses.")

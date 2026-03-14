@@ -142,6 +142,28 @@ func TestApplyIterationContext_RequiresFilesystemVerificationAfterUnverifiedList
 	}
 }
 
+func TestApplyIterationContext_RequiresDirectFileListAfterIncompleteListing(t *testing.T) {
+	task := &workspace.Task{
+		Description: "Get list of files in DNM folder",
+		Context:     map[string]interface{}{},
+	}
+
+	history := []map[string]interface{}{
+		{
+			"attempt": 1,
+			"outcome": "incomplete",
+			"summary": "Task did not return the requested filesystem file list",
+		},
+	}
+
+	applyIterationContext(task, 2, 3, history)
+
+	guidance, _ := task.Context["execution_retry_guidance"].(string)
+	if !strings.Contains(guidance, "do not ask a follow-up question or offer to provide it later") {
+		t.Fatalf("expected retry guidance to require a direct list answer, got %q", guidance)
+	}
+}
+
 func TestClassifyToolAccessBlockedResponse(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -246,6 +268,49 @@ func (s *stubEventingTaskExecutor) ExecuteTask(_ context.Context, agentName stri
 		s.eventBus.Publish(workspace.NewTaskEvent(workspace.EventTaskToolResult, task.WorkspaceID, task.ID, agentName, data))
 	}
 	return s.result, s.err
+}
+
+type stubEventingStep struct {
+	result     string
+	err        error
+	toolName   string
+	toolResult string
+	success    bool
+}
+
+type stubSequenceEventingTaskExecutor struct {
+	steps    []stubEventingStep
+	calls    int
+	eventBus *workspace.EventBus
+}
+
+func (s *stubSequenceEventingTaskExecutor) ExecuteTask(_ context.Context, agentName string, task workspace.Task) (string, error) {
+	s.calls++
+	if len(s.steps) == 0 {
+		return "", nil
+	}
+
+	index := s.calls - 1
+	if index < 0 {
+		index = 0
+	}
+	if index >= len(s.steps) {
+		index = len(s.steps) - 1
+	}
+	step := s.steps[index]
+
+	if s.eventBus != nil && strings.TrimSpace(step.toolName) != "" {
+		data := map[string]interface{}{
+			"tool_name": step.toolName,
+			"success":   step.success,
+		}
+		if strings.TrimSpace(step.toolResult) != "" {
+			data["result_preview"] = step.toolResult
+		}
+		s.eventBus.Publish(workspace.NewTaskEvent(workspace.EventTaskToolResult, task.WorkspaceID, task.ID, agentName, data))
+	}
+
+	return step.result, step.err
 }
 
 func TestExecuteTaskIteratively_BlocksWhenToolsAreUnavailable(t *testing.T) {
@@ -355,6 +420,60 @@ func TestExecuteTaskIteratively_AllowsVerifiedFilesystemListingResult(t *testing
 	}
 	if stub.calls != 1 {
 		t.Fatalf("expected a single execution attempt, got %d", stub.calls)
+	}
+}
+
+func TestExecuteTaskIteratively_RetriesIncompleteFilesystemListingAnswer(t *testing.T) {
+	eventBus := workspace.DefaultEventBus()
+	stub := &stubSequenceEventingTaskExecutor{
+		eventBus: eventBus,
+		steps: []stubEventingStep{
+			{
+				result:     `The "DNM" folder is located within the "Documents" directory. Would you like to see the contents of the "DNM" folder?`,
+				toolName:   "list_directory",
+				toolResult: "DNM Publishing Agreement - Don't Kill the Buzz.pdf",
+				success:    true,
+			},
+			{
+				result:     "The DNM folder contains:\n1. DNM Publishing Agreement - Don't Kill the Buzz.pdf",
+				toolName:   "list_directory",
+				toolResult: "DNM Publishing Agreement - Don't Kill the Buzz.pdf",
+				success:    true,
+			},
+		},
+	}
+	handler := &TaskHandler{
+		taskHandler: stub,
+		eventBus:    eventBus,
+	}
+	ws := workspace.NewWorkspace(workspace.CreateWorkspaceParams{Name: "amr", Agents: []string{"Ori"}})
+	task := workspace.Task{
+		ID:          "task-listing-incomplete",
+		WorkspaceID: ws.ID,
+		To:          "Ori",
+		Description: "Get list of files in DNM folder",
+		Context: map[string]interface{}{
+			"max_attempts": 2,
+		},
+	}
+
+	result, err := handler.executeTaskIteratively(context.Background(), ws, &task, task, true)
+	if err != nil {
+		t.Fatalf("expected listing task to succeed after retry, got %v", err)
+	}
+	if !strings.Contains(result, "Don't Kill the Buzz.pdf") {
+		t.Fatalf("expected final result to contain the verified file list, got %q", result)
+	}
+	if stub.calls != 2 {
+		t.Fatalf("expected two execution attempts, got %d", stub.calls)
+	}
+
+	retryData, ok := task.Context["execution_retry"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected execution_retry context to be recorded")
+	}
+	if got := retryData["final_outcome"]; got != "success" {
+		t.Fatalf("expected final_outcome success, got %v", got)
 	}
 }
 

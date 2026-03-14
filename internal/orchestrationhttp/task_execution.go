@@ -1047,6 +1047,20 @@ func (th *TaskHandler) executeTaskIteratively(ctx context.Context, ws *workspace
 			recordIterationHistory(persistedTask, maxAttempts, attemptHistory, "blocked")
 			return "", blockedErr
 		}
+		if blockedErr := classifyFilesystemListingIncompleteResponse(currentTask, result); blockedErr != nil {
+			attemptHistory = append(attemptHistory, map[string]interface{}{
+				"attempt":    attempt,
+				"outcome":    "incomplete",
+				"summary":    summarizeExecutionText(blockedErr.Reason),
+				"created_at": time.Now().UTC().Format(time.RFC3339),
+			})
+			if attempt < maxAttempts {
+				continue
+			}
+
+			recordIterationHistory(persistedTask, maxAttempts, attemptHistory, "blocked")
+			return "", blockedErr
+		}
 
 		attemptHistory = append(attemptHistory, map[string]interface{}{
 			"attempt":    attempt,
@@ -1200,7 +1214,7 @@ func applyIterationContext(task *workspace.Task, attempt, maxAttempts int, histo
 
 func buildRetryGuidance(task *workspace.Task, previousOutcome string) string {
 	trimmedOutcome := strings.TrimSpace(previousOutcome)
-	if task != nil && trimmedOutcome == "unverified" && workspace.IsReadOnlyFilesystemListingIntent(task.Description) {
+	if task != nil && (trimmedOutcome == "unverified" || trimmedOutcome == "incomplete") && workspace.IsReadOnlyFilesystemListingIntent(task.Description) {
 		task.Context["execution_require_filesystem_verification"] = true
 		task.Context["execution_required_filesystem_tools"] = []string{
 			"list_directory",
@@ -1209,7 +1223,10 @@ func buildRetryGuidance(task *workspace.Task, previousOutcome string) string {
 			"get_file_info",
 			"read_file",
 		}
-		return "Previous attempt returned an unverified filesystem listing. You must use a filesystem tool to verify the folder contents before answering. Do not answer from the workspace snapshot, prior summaries, or assumptions alone. Call a filesystem verification tool first, then return only the verified file list."
+		if trimmedOutcome == "incomplete" {
+			return "Previous attempt did not return the requested file list. The user already asked for the list, so do not ask a follow-up question or offer to provide it later. If you locate the named folder inside a parent directory, call a filesystem tool on that folder itself and return its contents directly. Use a filesystem tool to verify the folder contents if needed, then answer directly with the actual verified file list or state clearly that the folder is empty."
+		}
+		return "Previous attempt returned an unverified filesystem listing. You must use a filesystem tool to verify the folder contents before answering. If you locate the named folder inside a parent directory, call a filesystem tool on that folder itself instead of stopping at the parent listing. Do not answer from the workspace snapshot, prior summaries, or assumptions alone. Call a filesystem verification tool first, then return only the verified file list."
 	}
 
 	return fmt.Sprintf(
@@ -1454,6 +1471,86 @@ func classifyFilesystemListingVerificationFailure(task workspace.Task, result st
 		},
 		RawResponse: strings.TrimSpace(result),
 	}
+}
+
+func classifyFilesystemListingIncompleteResponse(task workspace.Task, result string) *workspace.TaskBlockedError {
+	if !workspace.IsReadOnlyFilesystemListingIntent(task.Description) {
+		return nil
+	}
+	if filesystemListingAnswerLooksComplete(result) {
+		return nil
+	}
+
+	return &workspace.TaskBlockedError{
+		ReasonCode: "filesystem_listing_incomplete",
+		Reason:     "Task did not return the requested filesystem file list",
+		Question:   "I need to return the actual file list, not a follow-up offer. Retry and return the verified list directly?",
+		SuggestedActions: []string{
+			"retry",
+			"switch_agent_retry",
+			"continue_with_instruction",
+			"mark_failed",
+		},
+		RawResponse: strings.TrimSpace(result),
+	}
+}
+
+func filesystemListingAnswerLooksComplete(result string) bool {
+	normalized := strings.ToLower(strings.TrimSpace(result))
+	if normalized == "" {
+		return false
+	}
+
+	emptyMarkers := []string{
+		"folder is empty",
+		"directory is empty",
+		"contains no files",
+		"no files found",
+		"there are no files",
+		"empty folder",
+		"empty directory",
+	}
+	for _, marker := range emptyMarkers {
+		if strings.Contains(normalized, marker) {
+			return true
+		}
+	}
+
+	return responseContainsFilenameLikeEntry(result)
+}
+
+func responseContainsFilenameLikeEntry(result string) bool {
+	for _, line := range strings.Split(result, "\n") {
+		trimmed := strings.TrimSpace(strings.TrimLeft(line, "-*0123456789.) \t"))
+		if trimmed == "" {
+			continue
+		}
+		for _, token := range strings.Fields(trimmed) {
+			cleaned := strings.Trim(token, "\"'`,;:()[]{}")
+			if looksLikeFilenameToken(cleaned) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func looksLikeFilenameToken(token string) bool {
+	dot := strings.LastIndex(token, ".")
+	if dot <= 0 || dot >= len(token)-1 {
+		return false
+	}
+
+	ext := token[dot+1:]
+	if len(ext) > 8 {
+		return false
+	}
+	for _, r := range ext {
+		if (r < 'a' || r > 'z') && (r < 'A' || r > 'Z') && (r < '0' || r > '9') {
+			return false
+		}
+	}
+	return true
 }
 
 func blockedExecutionSummary(blockedErr *workspace.TaskBlockedError) string {

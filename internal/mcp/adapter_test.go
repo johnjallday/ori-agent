@@ -71,10 +71,34 @@ func TestNormalizeFilesystemArguments_RootAliasFallsBackToAllowedRoot(t *testing
 		"path": "Documents",
 	}
 
-	out := normalizeFilesystemArguments("get_file_info", input, cfg)
+	out := normalizeFilesystemArguments("list_directory", input, cfg)
 	got, _ := out["path"].(string)
 	if got != filepath.Clean(baseRoot) {
 		t.Fatalf("expected root alias to resolve to base root, got=%q want=%q", got, filepath.Clean(baseRoot))
+	}
+}
+
+func TestNormalizeFilesystemArguments_RedundantRootPrefixIsCollapsed(t *testing.T) {
+	tempDir := t.TempDir()
+	baseRoot := filepath.Join(tempDir, "Documents")
+	if err := os.MkdirAll(filepath.Join(baseRoot, "DNM"), 0o755); err != nil {
+		t.Fatalf("failed to create test directories: %v", err)
+	}
+
+	cfg := ServerConfig{
+		Name: "filesystem",
+		Args: []string{"-y", "@modelcontextprotocol/server-filesystem", baseRoot},
+	}
+
+	input := map[string]interface{}{
+		"path": filepath.Join("Documents", "DNM"),
+	}
+
+	out := normalizeFilesystemArguments("list_directory", input, cfg)
+	got, _ := out["path"].(string)
+	want := filepath.Join(filepath.Clean(baseRoot), "DNM")
+	if got != want {
+		t.Fatalf("expected redundant root prefix to be collapsed, got=%q want=%q", got, want)
 	}
 }
 
