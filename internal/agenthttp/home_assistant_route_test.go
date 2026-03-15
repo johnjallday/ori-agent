@@ -756,12 +756,3 @@ func TestHomeAssistantRouteHandler_DoesNotMigrateLegacyAssistantNameByRoute(t *t
 		t.Fatalf("expected legacy assistant %q to still exist", systemAssistantAgentLegacyName)
 	}
 }
-
-type systemModelReaderStub struct {
-	provider string
-	model    string
-}
-
-func (s systemModelReaderStub) GetSystemModel() (string, string) {
-	return s.provider, s.model
-}

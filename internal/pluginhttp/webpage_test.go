@@ -22,8 +22,11 @@ func (s *emptyAgentStore) GetAgent(name string) (*agent.Agent, bool) {
 	return nil, false
 }
 func (s *emptyAgentStore) SetAgent(name string, ag *agent.Agent) error { return nil }
-func (s *emptyAgentStore) ClearAgents() error                          { return nil }
-func (s *emptyAgentStore) Save() error                                 { return nil }
+func (s *emptyAgentStore) UpdateAgent(name string, updateFn func(*agent.Agent) error) error {
+	return nil
+}
+func (s *emptyAgentStore) ClearAgents() error { return nil }
+func (s *emptyAgentStore) Save() error        { return nil }
 
 func TestListAllPages_NoCurrentAgent_ReturnsEmptyPages(t *testing.T) {
 	handler := &WebPageHandler{State: &emptyAgentStore{}}

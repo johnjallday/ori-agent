@@ -35,6 +35,10 @@ func (s *resolverAgentStoreStub) GetAgent(name string) (*agent.Agent, bool) {
 
 func (s *resolverAgentStoreStub) SetAgent(string, *agent.Agent) error { return nil }
 
+func (s *resolverAgentStoreStub) UpdateAgent(name string, updateFn func(*agent.Agent) error) error {
+	return nil
+}
+
 func (s *resolverAgentStoreStub) ClearAgents() error { return nil }
 
 func (s *resolverAgentStoreStub) Save() error { return nil }

@@ -1831,8 +1831,8 @@
     }
 
     var out = [];
-    for (var i = 0; i < bindings.length; i++) {
-      var binding = bindings[i];
+    for (var j = 0; j < bindings.length; j++) {
+      var binding = bindings[j];
       var bindingId = normalizeToken(binding && binding.id);
       if (allowedIds && (!bindingId || !allowedIds[bindingId])) {
         continue;

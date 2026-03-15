@@ -64,6 +64,13 @@ func (ts *testStore) SetAgent(name string, ag *agent.Agent) error {
 	return nil
 }
 
+func (ts *testStore) UpdateAgent(name string, updateFn func(*agent.Agent) error) error {
+	ag, ok := ts.agents[name]
+	if !ok {
+		return nil
+	}
+	return updateFn(ag)
+}
 func (ts *testStore) Save() error        { return nil }
 func (ts *testStore) ClearAgents() error { return nil }
 
