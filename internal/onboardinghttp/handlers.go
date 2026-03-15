@@ -242,7 +242,7 @@ func (h *Handler) SaveNames(w http.ResponseWriter, r *http.Request) {
 
 	assistantName := strings.TrimSpace(req.AssistantName)
 	if assistantName == "" {
-		assistantName = "Ori"
+		assistantName = "Assistant"
 	}
 	if len(assistantName) > 60 {
 		orihttp.BadRequest(w, "assistant_name must be 60 characters or fewer")

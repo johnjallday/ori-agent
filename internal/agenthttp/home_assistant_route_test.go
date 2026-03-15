@@ -478,6 +478,11 @@ func TestHomeAssistantRouteHandler_GeneralPrompt_FallsBackToSystemAssistant(t *t
 	st := newHomeRouteTestStore(t)
 	handler := NewHomeAssistantRouteHandler(st)
 
+	// Explicitly create the system assistant for fallback tests
+	if err := ensureSystemAssistantAgent(st); err != nil {
+		t.Fatalf("failed to ensure system assistant: %v", err)
+	}
+
 	rr := postRouteRequest(t, handler, map[string]string{"prompt": "Help me organize my thoughts for tomorrow"})
 	if rr.Code != http.StatusOK {
 		t.Fatalf("expected status %d, got %d: %s", http.StatusOK, rr.Code, rr.Body.String())
@@ -639,6 +644,11 @@ func TestHomeAssistantRouteHandler_UtilityPrompt_FallsBackToSystemAssistant(t *t
 	st := newHomeRouteTestStore(t)
 	handler := NewHomeAssistantRouteHandler(st)
 
+	// Explicitly create the system assistant for utility tests
+	if err := ensureSystemAssistantAgent(st); err != nil {
+		t.Fatalf("failed to ensure system assistant: %v", err)
+	}
+
 	rr := postRouteRequest(t, handler, map[string]string{"prompt": "What time is it in Tokyo?"})
 	if rr.Code != http.StatusOK {
 		t.Fatalf("expected status %d, got %d: %s", http.StatusOK, rr.Code, rr.Body.String())
@@ -673,6 +683,11 @@ func TestHomeAssistantRouteHandler_AirQualityPrompt_UsesUtilityIntent(t *testing
 	st := newHomeRouteTestStore(t)
 	handler := NewHomeAssistantRouteHandler(st)
 
+	// Explicitly create the system assistant for utility tests
+	if err := ensureSystemAssistantAgent(st); err != nil {
+		t.Fatalf("failed to ensure system assistant: %v", err)
+	}
+
 	rr := postRouteRequest(t, handler, map[string]string{"prompt": "air quality in seoul today"})
 	if rr.Code != http.StatusOK {
 		t.Fatalf("expected status %d, got %d: %s", http.StatusOK, rr.Code, rr.Body.String())
@@ -694,7 +709,7 @@ func TestHomeAssistantRouteHandler_AirQualityPrompt_UsesUtilityIntent(t *testing
 	}
 }
 
-func TestHomeAssistantRouteHandler_CreatesSystemAssistantFiles(t *testing.T) {
+func TestHomeAssistantRouteHandler_DoesNotCreateSystemAssistantFilesByDefault(t *testing.T) {
 	tmpDir := t.TempDir()
 	storePath := filepath.Join(tmpDir, "agents_index.json")
 	st, err := store.NewFileStore(storePath, types.Settings{
@@ -713,37 +728,12 @@ func TestHomeAssistantRouteHandler_CreatesSystemAssistantFiles(t *testing.T) {
 	}
 
 	agentSettingsPath := filepath.Join(tmpDir, "agents", systemAssistantAgentName, "agent_settings.json")
-	if _, err := os.Stat(agentSettingsPath); err != nil {
-		t.Fatalf("expected persisted assistant file at %s: %v", agentSettingsPath, err)
+	if _, err := os.Stat(agentSettingsPath); !os.IsNotExist(err) {
+		t.Fatalf("expected system assistant file at %s NOT to exist, but it does", agentSettingsPath)
 	}
 }
 
-func TestHomeAssistantRouteHandler_SystemAssistantUsesConfiguredSystemModel(t *testing.T) {
-	st := newHomeRouteTestStore(t)
-	handler := NewHomeAssistantRouteHandler(st)
-	handler.SetSystemModelReader(systemModelReaderStub{
-		provider: "openai",
-		model:    "gpt-4o-mini",
-	})
-
-	rr := postRouteRequest(t, handler, map[string]string{"prompt": "What time is it in Tokyo?"})
-	if rr.Code != http.StatusOK {
-		t.Fatalf("expected status %d, got %d: %s", http.StatusOK, rr.Code, rr.Body.String())
-	}
-
-	ag, ok := st.GetAgent(systemAssistantAgentName)
-	if !ok || ag == nil {
-		t.Fatalf("expected system assistant to exist")
-	}
-	if ag.Settings.Provider != "openai" {
-		t.Fatalf("expected provider openai, got %q", ag.Settings.Provider)
-	}
-	if ag.Settings.Model != "gpt-4o-mini" {
-		t.Fatalf("expected model gpt-4o-mini, got %q", ag.Settings.Model)
-	}
-}
-
-func TestHomeAssistantRouteHandler_MigratesLegacyAssistantName(t *testing.T) {
+func TestHomeAssistantRouteHandler_DoesNotMigrateLegacyAssistantNameByRoute(t *testing.T) {
 	st := newHomeRouteTestStore(t)
 	if err := st.CreateAgent(systemAssistantAgentLegacyName, &store.CreateAgentConfig{
 		Type:        "general",
@@ -759,11 +749,11 @@ func TestHomeAssistantRouteHandler_MigratesLegacyAssistantName(t *testing.T) {
 		t.Fatalf("expected status %d, got %d: %s", http.StatusOK, rr.Code, rr.Body.String())
 	}
 
-	if _, ok := st.GetAgent(systemAssistantAgentName); !ok {
-		t.Fatalf("expected migrated assistant %q to exist", systemAssistantAgentName)
+	if _, ok := st.GetAgent(systemAssistantAgentName); ok {
+		t.Fatalf("expected assistant %q NOT to exist yet", systemAssistantAgentName)
 	}
-	if _, ok := st.GetAgent(systemAssistantAgentLegacyName); ok {
-		t.Fatalf("expected legacy assistant %q to be removed", systemAssistantAgentLegacyName)
+	if _, ok := st.GetAgent(systemAssistantAgentLegacyName); !ok {
+		t.Fatalf("expected legacy assistant %q to still exist", systemAssistantAgentLegacyName)
 	}
 }
 

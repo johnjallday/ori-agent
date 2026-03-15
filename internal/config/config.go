@@ -120,7 +120,7 @@ func (m *Manager) Load() error {
 // defaultSettings returns the default configuration
 func defaultSettings() Settings {
 	return Settings{
-		CurrentAgent:          "default",
+		CurrentAgent:          "",
 		OpenAIAPIKey:          "",
 		GeminiAPIKey:          "",
 		SessionCleanupEnabled: true,
@@ -288,9 +288,6 @@ func (m *Manager) SetGeminiAPIKey(apiKey string) error {
 func (m *Manager) GetCurrentAgent() string {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	if m.settings.CurrentAgent == "" {
-		return "default"
-	}
 	return m.settings.CurrentAgent
 }
 
@@ -325,9 +322,6 @@ func (m *Manager) GetAllowedOrigins() []string {
 
 // validate performs basic validation on configuration
 func (m *Manager) validate() error {
-	if m.settings.CurrentAgent == "" {
-		m.settings.CurrentAgent = "default"
-	}
 	if m.settings.MultiAgentMode == "" {
 		m.settings.MultiAgentMode = "off"
 	}

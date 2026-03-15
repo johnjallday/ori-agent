@@ -219,11 +219,12 @@ func (h *HomeAssistantRouteHandler) RouteHandler(w http.ResponseWriter, r *http.
 	}
 
 	// Keep a reserved orchestrator agent available for generic fallback routing.
-	systemProvider, systemModel := "", ""
-	if h.SystemModelReader != nil {
-		systemProvider, systemModel = h.SystemModelReader.GetSystemModel()
-	}
-	_ = ensureSystemAssistantAgentWithSystemModel(h.State, systemProvider, systemModel)
+	// NOTE: Automatic creation of "Ori" is now removed to respect user preference for no default agent.
+	// systemProvider, systemModel := "", ""
+	// if h.SystemModelReader != nil {
+	// 	systemProvider, systemModel = h.SystemModelReader.GetSystemModel()
+	// }
+	// _ = ensureSystemAssistantAgentWithSystemModel(h.State, systemProvider, systemModel)
 
 	routeContext := normalizeHomeAssistantRouteContext(req.Context)
 	intent := detectHomeAssistantIntent(prompt)
