@@ -61,6 +61,36 @@ func TestCollectEnabledMCPServerNames(t *testing.T) {
 	}
 }
 
+func TestExternalMCPImportEnabled(t *testing.T) {
+	t.Run("default enabled", func(t *testing.T) {
+		t.Setenv(disableExternalMCPImportEnv, "")
+		if !externalMCPImportEnabled() {
+			t.Fatal("expected external MCP import to be enabled by default")
+		}
+	})
+
+	t.Run("explicit disable", func(t *testing.T) {
+		t.Setenv(disableExternalMCPImportEnv, "true")
+		if externalMCPImportEnabled() {
+			t.Fatal("expected external MCP import to be disabled when env is true")
+		}
+	})
+
+	t.Run("explicit enable", func(t *testing.T) {
+		t.Setenv(disableExternalMCPImportEnv, "false")
+		if !externalMCPImportEnabled() {
+			t.Fatal("expected external MCP import to remain enabled when env is false")
+		}
+	})
+
+	t.Run("invalid value keeps default", func(t *testing.T) {
+		t.Setenv(disableExternalMCPImportEnv, "not-a-bool")
+		if !externalMCPImportEnabled() {
+			t.Fatal("expected invalid env values to preserve default enabled behavior")
+		}
+	})
+}
+
 func TestStartEnabledMCPServers(t *testing.T) {
 	starter := &fakeMCPStarter{
 		statuses: map[string]mcp.ServerStatus{

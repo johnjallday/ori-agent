@@ -99,6 +99,39 @@ function setupSidebar() {
   sidebarLog.debug('Sidebar setup complete');
 }
 
+function syncNavbarOffset() {
+  const root = document.documentElement;
+  const navbar = document.querySelector('.navbar');
+
+  if (!root || !navbar) {
+    return;
+  }
+
+  let frameId = null;
+
+  const updateOffset = () => {
+    frameId = null;
+    const navbarHeight = Math.max(76, Math.ceil(navbar.getBoundingClientRect().height));
+    root.style.setProperty('--navbar-offset', `${navbarHeight}px`);
+  };
+
+  const scheduleOffsetUpdate = () => {
+    if (frameId !== null) {
+      cancelAnimationFrame(frameId);
+    }
+    frameId = requestAnimationFrame(updateOffset);
+  };
+
+  scheduleOffsetUpdate();
+  window.addEventListener('load', scheduleOffsetUpdate, { once: true });
+  window.addEventListener('resize', scheduleOffsetUpdate);
+
+  if (typeof ResizeObserver === 'function') {
+    const navbarObserver = new ResizeObserver(scheduleOffsetUpdate);
+    navbarObserver.observe(navbar);
+  }
+}
+
 // Sidebar toggle and responsive behavior
 function setupSidebarToggle() {
   const sidebarToggle = document.getElementById('sidebarToggle');
@@ -249,11 +282,13 @@ async function initializeSidebar() {
 // Initialize sidebar when DOM is ready
 if (document.readyState === 'loading') {
   document.addEventListener('DOMContentLoaded', async () => {
+    syncNavbarOffset();
     setupSidebar();
     setupSidebarToggle();
     await initializeSidebar();
   });
 } else {
+  syncNavbarOffset();
   setupSidebar();
   setupSidebarToggle();
   initializeSidebar();

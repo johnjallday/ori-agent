@@ -4,11 +4,15 @@ package server
 
 import (
 	"os"
+	"strconv"
+	"strings"
 
 	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/mcp"
 	"github.com/johnjallday/ori-agent/internal/mcp/mcpregistry"
 )
+
+const disableExternalMCPImportEnv = "ORI_DISABLE_EXTERNAL_MCP_IMPORT"
 
 // initializeMCPRegistry initializes the MCP server browser registry store.
 func (b *ServerBuilder) initializeMCPRegistry() {
@@ -31,12 +35,16 @@ func (b *ServerBuilder) initializeMCP() error {
 		}
 	}
 
-	if imported, err := b.mcpConfigManager.ImportExternalGlobalServers(); err != nil {
-		if verbose {
-			logger.Error("failed to import external MCP servers", logger.Fields{"err": err})
+	if externalMCPImportEnabled() {
+		if imported, err := b.mcpConfigManager.ImportExternalGlobalServers(); err != nil {
+			if verbose {
+				logger.Error("failed to import external MCP servers", logger.Fields{"err": err})
+			}
+		} else if verbose && imported > 0 {
+			logger.Info("imported external MCP servers", logger.Fields{"count": imported})
 		}
-	} else if verbose && imported > 0 {
-		logger.Info("imported external MCP servers", logger.Fields{"count": imported})
+	} else if verbose {
+		logger.Info("skipping external MCP server import", logger.Fields{"env": disableExternalMCPImportEnv})
 	}
 
 	mcpGlobalConfig, err := b.mcpConfigManager.LoadGlobalConfig()
@@ -75,6 +83,20 @@ func (b *ServerBuilder) initializeMCP() error {
 	}
 
 	return nil
+}
+
+func externalMCPImportEnabled() bool {
+	raw, ok := os.LookupEnv(disableExternalMCPImportEnv)
+	if !ok {
+		return true
+	}
+
+	disabled, err := strconv.ParseBool(strings.TrimSpace(raw))
+	if err != nil {
+		return true
+	}
+
+	return !disabled
 }
 
 func collectEnabledMCPServerNames(servers []mcp.ServerConfig) []string {
