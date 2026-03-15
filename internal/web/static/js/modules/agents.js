@@ -38,6 +38,11 @@ function createDefaultAgentCreationFlowState() {
 
 let pendingAgentCreationFlow = createDefaultAgentCreationFlowState();
 
+function isWorkspaceGeneratedMCPServer(server) {
+  const name = String(server?.name || '').trim();
+  return /^ws:[^:]+:mcp:/i.test(name);
+}
+
 function supportsCodexReasoning(providerName, modelName) {
   const provider = String(providerName || '').trim().toLowerCase();
   const model = String(modelName || '').trim().toLowerCase();
@@ -226,6 +231,7 @@ function showAddAgentModal(options = {}) {
   resetBaseAutoConfigState();
   resetAgentCreationCapabilitySelections();
   setAgentCreationCapabilityLoadingState();
+  updateAgentCreationCapabilityCopy();
   updateAgentReasoningVisibility();
 
   modal.show();
@@ -324,11 +330,63 @@ function normalizeAgentCapabilityName(value) {
 
 function getAgentCreationCapabilityElements() {
   return {
+    title: document.getElementById('agentCreateCapabilitiesTitle'),
+    grid: document.getElementById('agentCreateCapabilitiesGrid'),
+    mcpPanel: document.getElementById('agentCreateMCPPanel'),
     mcpList: document.getElementById('agentCreateMCPList'),
     skillsList: document.getElementById('agentCreateSkillsList'),
     mcpCount: document.getElementById('agentCreateMCPCount'),
-    skillCount: document.getElementById('agentCreateSkillCount')
+    skillCount: document.getElementById('agentCreateSkillCount'),
+    capabilitiesIntro: document.getElementById('agentCreateCapabilitiesIntro'),
+    mcpSubtitle: document.getElementById('agentCreateMCPSubtitle'),
+    capabilitiesNote: document.getElementById('agentCreateCapabilitiesNote')
   };
+}
+
+function isAgentCreationMCPSelectionEnabled() {
+  return Boolean(String(pendingAgentCreationFlow?.workspaceId || '').trim());
+}
+
+function updateAgentCreationCapabilityCopy() {
+  const {
+    title,
+    grid,
+    mcpPanel,
+    capabilitiesIntro,
+    mcpSubtitle,
+    capabilitiesNote
+  } = getAgentCreationCapabilityElements();
+  const selectionEnabled = isAgentCreationMCPSelectionEnabled();
+
+  if (title) {
+    title.textContent = selectionEnabled ? 'Review MCP Connectors and Skills' : 'Review Skills';
+  }
+
+  if (mcpPanel) {
+    mcpPanel.hidden = !selectionEnabled;
+  }
+
+  if (grid) {
+    grid.classList.toggle('is-single-column', !selectionEnabled);
+  }
+
+  if (capabilitiesIntro) {
+    capabilitiesIntro.textContent = selectionEnabled
+      ? 'Optional. Select global MCP connectors now and they will be bound into this workspace after the agent is created. Workspace-generated bindings stay hidden here.'
+      : 'Optional. Skills attach to the agent here. If a skill needs MCP connectors, you will bind them after adding the agent to a workspace.'
+  }
+
+  if (mcpSubtitle) {
+    mcpSubtitle.textContent = selectionEnabled
+      ? 'Select global connectors to bind into this workspace'
+      : 'Global connectors shown for reference until a workspace is selected'
+  }
+
+  if (capabilitiesNote) {
+    capabilitiesNote.textContent = selectionEnabled
+      ? 'Skills with scripts are trusted for this agent when selected. Required MCP connectors are bound into this workspace automatically after the agent is created.'
+      : 'Skills with scripts are trusted for this agent when selected. MCP connector access is configured later from the target workspace.'
+  }
 }
 
 function buildAgentCreationCommandSummary(server) {
@@ -465,11 +523,12 @@ function renderAgentCreationMCPServers() {
 
   const servers = Array.isArray(agentCreationCapabilityState.mcpServers) ? agentCreationCapabilityState.mcpServers : [];
   const requiredKeys = getRequiredAgentCreationMCPServerKeys();
+  const selectionEnabled = isAgentCreationMCPSelectionEnabled();
 
   if (servers.length === 0) {
     mcpList.innerHTML = `
       <div class="agent-create-capability-empty">
-        No MCP servers are configured yet.
+        No global MCP servers are configured yet.
         <a href="/mcp">Open MCP Servers</a>
       </div>
     `;
@@ -489,9 +548,23 @@ function renderAgentCreationMCPServers() {
     const statusClass = status === 'running'
       ? 'is-success'
       : (status === 'starting' || status === 'restarting' ? 'is-warning' : 'is-muted');
+    const wrapperTag = selectionEnabled ? 'label' : 'div';
+    const selectionInput = selectionEnabled
+      ? `
+        <input type="checkbox"
+               value="${escapeHtml(name)}"
+               data-agent-create-mcp="true"
+               ${isHighlighted ? 'checked' : ''}
+               ${isRequired ? 'disabled' : ''}>
+      `
+      : '';
+    const availabilityTag = selectionEnabled
+      ? '<span class="agent-create-capability-tag is-required">bind on create</span>'
+      : '<span class="agent-create-capability-tag is-muted">bind from a workspace</span>';
 
     return `
-      <div class="agent-create-capability-card${isHighlighted ? ' is-selected' : ''}${isRequired ? ' is-locked' : ''}">
+      <${wrapperTag} class="agent-create-capability-card${isHighlighted ? ' is-selected' : ''}${isRequired ? ' is-locked' : ''}${selectionEnabled ? '' : ' is-readonly'}">
+        ${selectionInput}
         <span class="agent-create-capability-copy">
           <span class="agent-create-capability-title-row">
             <span class="agent-create-capability-title">${escapeHtml(name)}</span>
@@ -503,14 +576,32 @@ function renderAgentCreationMCPServers() {
           <span class="agent-create-capability-description">${escapeHtml(commandSummary)}</span>
           <span class="agent-create-capability-tags">
             <span class="agent-create-capability-tag is-muted">${escapeHtml(server?.transport || 'stdio')}</span>
-            <span class="agent-create-capability-tag is-muted">workspace-scoped</span>
+            <span class="agent-create-capability-tag is-muted">global</span>
+            ${availabilityTag}
             ${isRequired ? '<span class="agent-create-capability-tag is-required">required by selected skill</span>' : ''}
             ${!isRequired && isSuggested ? '<span class="agent-create-capability-tag is-required">suggested</span>' : ''}
           </span>
         </span>
-      </div>
+      </${wrapperTag}>
     `;
   }).join('');
+
+  if (selectionEnabled) {
+    mcpList.querySelectorAll('input[data-agent-create-mcp]').forEach((checkbox) => {
+      checkbox.addEventListener('change', () => {
+        const normalizedName = normalizeAgentCapabilityName(checkbox.value);
+        if (!normalizedName) return;
+
+        if (checkbox.checked) {
+          agentCreationCapabilityState.selectedMCPServers.add(normalizedName);
+        } else {
+          agentCreationCapabilityState.selectedMCPServers.delete(normalizedName);
+        }
+
+        renderAgentCreationMCPServers();
+      });
+    });
+  }
 
   renderAgentCreationCapabilityCounts();
 }
@@ -530,6 +621,7 @@ function renderAgentCreationSkills() {
   const availableMCPServerKeys = new Set(
     agentCreationCapabilityState.mcpServers.map((server) => normalizeAgentCapabilityName(server?.name))
   );
+  const selectionEnabled = isAgentCreationMCPSelectionEnabled();
 
   if (skills.length === 0) {
     skillsList.innerHTML = `
@@ -577,6 +669,7 @@ function renderAgentCreationSkills() {
               }).join('')}
             </span>
           ` : ''}
+          ${requiredMCPServers.length > 0 && !selectionEnabled ? '<span class="agent-create-capability-meta">Bind these connectors after adding the agent to a workspace.</span>' : ''}
           ${validationErrors.length > 0 ? `<span class="agent-create-capability-meta">${escapeHtml(validationErrors.join('; '))}</span>` : ''}
           ${missingMCPServers.length > 0 ? `<span class="agent-create-capability-meta">Missing MCP servers: ${escapeHtml(missingMCPServers.join(', '))}</span>` : ''}
         </span>
@@ -623,6 +716,7 @@ async function loadAgentCreationCapabilityCatalog() {
       const stats = data?.stats && typeof data.stats === 'object' ? data.stats : {};
       const servers = Array.isArray(data?.servers) ? data.servers : [];
       agentCreationCapabilityState.mcpServers = servers
+        .filter((server) => !isWorkspaceGeneratedMCPServer(server))
         .map((server) => {
           const name = String(server?.name || '').trim();
           if (!name) return null;
@@ -684,10 +778,8 @@ async function loadAgentCreationCapabilityCatalog() {
 }
 
 async function applyAgentCreationCapabilities(agentName) {
-  const selectedMCPServers = getSelectedAgentCreationMCPServers();
   const selectedSkills = getSelectedAgentCreationSkills();
   const summary = {
-    workspaceMCPReferences: selectedMCPServers.length,
     skillsEnabled: 0,
     scriptedSkillsTrusted: 0,
     failures: []
@@ -723,9 +815,6 @@ async function applyAgentCreationCapabilities(agentName) {
 
 function describeAgentCreationCapabilities(summary) {
   const parts = [];
-  if (summary.workspaceMCPReferences > 0) {
-    parts.push(`${summary.workspaceMCPReferences} workspace MCP connector${summary.workspaceMCPReferences === 1 ? '' : 's'} to bind`);
-  }
   if (summary.skillsEnabled > 0) {
     parts.push(`${summary.skillsEnabled} skill${summary.skillsEnabled === 1 ? '' : 's'}`);
   }
@@ -738,10 +827,150 @@ function describeAgentCreationCapabilities(summary) {
   return `${parts.slice(0, -1).join(', ')} and ${parts[parts.length - 1]}`;
 }
 
+function findAgentCreationWorkspaceBindingByServerName(workspaceData, serverName) {
+  if (!workspaceData || !serverName) return null;
+
+  const target = normalizeAgentCapabilityName(serverName);
+  const bindings = Array.isArray(workspaceData.mcp_bindings) ? workspaceData.mcp_bindings : [];
+  return bindings.find((binding) => normalizeAgentCapabilityName(binding?.server_name) === target) || null;
+}
+
+function getAgentCreationWorkspaceAccessEntry(workspaceData, agentInstanceId) {
+  if (!workspaceData || !agentInstanceId) return null;
+
+  const target = String(agentInstanceId || '').trim();
+  const entries = Array.isArray(workspaceData.agent_mcp_access) ? workspaceData.agent_mcp_access : [];
+  return entries.find((entry) => String(entry?.agent_instance_id || '').trim() === target) || null;
+}
+
+function upsertAgentCreationWorkspaceBinding(workspaceData, nextBinding) {
+  if (!workspaceData || !nextBinding) return;
+
+  const bindings = Array.isArray(workspaceData.mcp_bindings) ? workspaceData.mcp_bindings.slice() : [];
+  const bindingId = String(nextBinding.id || '').trim();
+  const existingIndex = bindings.findIndex((binding) => String(binding?.id || '').trim() === bindingId);
+  if (existingIndex >= 0) {
+    bindings[existingIndex] = nextBinding;
+  } else {
+    bindings.push(nextBinding);
+  }
+  workspaceData.mcp_bindings = bindings;
+}
+
+function upsertAgentCreationWorkspaceAccessEntry(workspaceData, nextEntry) {
+  if (!workspaceData || !nextEntry) return;
+
+  const entries = Array.isArray(workspaceData.agent_mcp_access) ? workspaceData.agent_mcp_access.slice() : [];
+  const agentInstanceId = String(nextEntry.agent_instance_id || '').trim();
+  const existingIndex = entries.findIndex((entry) => String(entry?.agent_instance_id || '').trim() === agentInstanceId);
+  if (existingIndex >= 0) {
+    entries[existingIndex] = nextEntry;
+  } else {
+    entries.push(nextEntry);
+  }
+  workspaceData.agent_mcp_access = entries;
+}
+
+function mergeAgentCreationBindingIDs(values = []) {
+  return Array.from(new Set(
+    values
+      .map((value) => String(value || '').trim())
+      .filter(Boolean)
+  ));
+}
+
+async function bindAgentCreationMCPServersForWorkspace(workspaceId, agentInstanceId, serverNames, workspaceData) {
+  const normalizedWorkspaceId = String(workspaceId || '').trim();
+  const normalizedAgentInstanceId = String(agentInstanceId || '').trim();
+  const dedupedServerNames = Array.from(new Set(
+    (Array.isArray(serverNames) ? serverNames : [])
+      .map((value) => String(value || '').trim())
+      .filter(Boolean)
+  ));
+  const summary = {
+    connectorsReady: 0,
+    failures: []
+  };
+
+  if (!normalizedWorkspaceId || !normalizedAgentInstanceId || dedupedServerNames.length === 0) {
+    return summary;
+  }
+
+  const localWorkspaceData = workspaceData && typeof workspaceData === 'object'
+    ? workspaceData
+    : { mcp_bindings: [], agent_mcp_access: [] };
+
+  if (!Array.isArray(localWorkspaceData.mcp_bindings)) {
+    localWorkspaceData.mcp_bindings = [];
+  }
+  if (!Array.isArray(localWorkspaceData.agent_mcp_access)) {
+    localWorkspaceData.agent_mcp_access = [];
+  }
+
+  for (const serverName of dedupedServerNames) {
+    let binding = findAgentCreationWorkspaceBindingByServerName(localWorkspaceData, serverName);
+
+    try {
+      if (!binding) {
+        const created = await API.post(`/api/studios/${encodeURIComponent(normalizedWorkspaceId)}/mcp-bindings`, {
+          server_name: serverName,
+          enabled: true
+        });
+        binding = created?.binding || {
+          id: '',
+          server_name: serverName,
+          enabled: true
+        };
+      } else if (binding.enabled === false) {
+        const updated = await API.put(
+          `/api/studios/${encodeURIComponent(normalizedWorkspaceId)}/mcp-bindings/${encodeURIComponent(binding.id)}`,
+          { enabled: true }
+        );
+        binding = updated?.binding || { ...binding, enabled: true };
+      }
+    } catch (error) {
+      summary.failures.push(`MCP ${serverName}: ${error.message || 'failed to bind in workspace'}`);
+      continue;
+    }
+
+    upsertAgentCreationWorkspaceBinding(localWorkspaceData, binding);
+
+    const bindingId = String(binding?.id || '').trim();
+    if (!bindingId) {
+      summary.failures.push(`MCP ${serverName}: missing workspace binding identifier`);
+      continue;
+    }
+
+    const accessEntry = getAgentCreationWorkspaceAccessEntry(localWorkspaceData, normalizedAgentInstanceId);
+    const nextBindingIDs = mergeAgentCreationBindingIDs([
+      ...(Array.isArray(accessEntry?.enabled_binding_ids) ? accessEntry.enabled_binding_ids : []),
+      bindingId
+    ]);
+
+    try {
+      await API.put(
+        `/api/studios/${encodeURIComponent(normalizedWorkspaceId)}/agent-mcp-access/${encodeURIComponent(normalizedAgentInstanceId)}`,
+        { enabled_binding_ids: nextBindingIDs }
+      );
+      upsertAgentCreationWorkspaceAccessEntry(localWorkspaceData, {
+        ...(accessEntry || {}),
+        agent_instance_id: normalizedAgentInstanceId,
+        enabled_binding_ids: nextBindingIDs
+      });
+      summary.connectorsReady += 1;
+    } catch (error) {
+      summary.failures.push(`MCP ${serverName}: ${error.message || 'failed to update agent access'}`);
+    }
+  }
+
+  return summary;
+}
+
 async function applyPendingAgentCreationFollowUp(agentName) {
   const flow = pendingAgentCreationFlow;
   const summary = {
     workspaceAdded: false,
+    workspaceMCPReady: 0,
     taskAssigned: false,
     failures: []
   };
@@ -750,17 +979,45 @@ async function applyPendingAgentCreationFollowUp(agentName) {
     return summary;
   }
 
+  let workspaceAgentInstanceId = '';
+  let workspaceData = null;
+
   if (flow.workspaceId) {
     try {
-      await API.post(`/api/workspaces/${encodeURIComponent(flow.workspaceId)}/agents`, {
+      const result = await API.post(`/api/workspaces/${encodeURIComponent(flow.workspaceId)}/agents`, {
         agent_name: agentName
       });
       summary.workspaceAdded = true;
+      workspaceAgentInstanceId = String(result?.agent_instance?.id || '').trim();
+      workspaceData = result?.workspace && typeof result.workspace === 'object'
+        ? {
+            ...result.workspace,
+            mcp_bindings: Array.isArray(result.workspace.mcp_bindings) ? result.workspace.mcp_bindings : [],
+            agent_mcp_access: Array.isArray(result.workspace.agent_mcp_access) ? result.workspace.agent_mcp_access : []
+          }
+        : { mcp_bindings: [], agent_mcp_access: [] };
       if (window.EventBus) {
         EventBus.emit('workspace:agents:updated', { workspaceId: flow.workspaceId, agentName });
       }
     } catch (error) {
       summary.failures.push(`workspace add: ${error.message || 'failed'}`);
+    }
+  }
+
+  if (flow.workspaceId && summary.workspaceAdded) {
+    if (!workspaceAgentInstanceId) {
+      summary.failures.push('MCP binding: missing workspace agent instance');
+    } else {
+      const mcpBindingSummary = await bindAgentCreationMCPServersForWorkspace(
+        flow.workspaceId,
+        workspaceAgentInstanceId,
+        getSelectedAgentCreationMCPServers(),
+        workspaceData
+      );
+      summary.workspaceMCPReady = mcpBindingSummary.connectorsReady;
+      if (mcpBindingSummary.failures.length > 0) {
+        summary.failures.push(...mcpBindingSummary.failures);
+      }
     }
   }
 
@@ -784,12 +1041,15 @@ function describeAgentCreationFollowUp(summary) {
   if (summary.workspaceAdded) {
     parts.push('added to the workspace');
   }
+  if (summary.workspaceMCPReady > 0) {
+    parts.push(`${summary.workspaceMCPReady} MCP connector${summary.workspaceMCPReady === 1 ? '' : 's'} ready in the workspace`);
+  }
   if (summary.taskAssigned) {
     parts.push('assigned to the task');
   }
   if (parts.length === 0) return '';
   if (parts.length === 1) return parts[0];
-  return `${parts[0]} and ${parts[1]}`;
+  return `${parts.slice(0, -1).join(', ')} and ${parts[parts.length - 1]}`;
 }
 
 // Create new agent
@@ -858,13 +1118,12 @@ async function createNewAgent() {
       skills: getSelectedAgentCreationSkills()
     };
     let capabilitySummary = {
-      workspaceMCPReferences: 0,
       skillsEnabled: 0,
       scriptedSkillsTrusted: 0,
       failures: []
     };
 
-    if (capabilitySelections.mcpServers.length > 0 || capabilitySelections.skills.length > 0) {
+    if (capabilitySelections.skills.length > 0) {
       createBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-2" role="status"></span>Configuring...';
       capabilitySummary = await applyAgentCreationCapabilities(agentName);
     }

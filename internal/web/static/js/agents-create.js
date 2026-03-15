@@ -13,6 +13,11 @@ const createValidatedFields = [
   'llmModel'
 ];
 
+function isWorkspaceGeneratedMCPServer(server) {
+  const name = String(server?.name || '').trim();
+  return /^ws:[^:]+:mcp:/i.test(name);
+}
+
 function supportsCodexReasoning(providerName, modelName) {
   const provider = String(providerName || '').trim().toLowerCase();
   const model = String(modelName || '').trim().toLowerCase();
@@ -213,7 +218,9 @@ async function loadMCPServers() {
     }
 
     const data = await response.json();
-    availableMCPServers = Array.isArray(data.servers) ? data.servers : [];
+    availableMCPServers = Array.isArray(data.servers)
+      ? data.servers.filter((server) => !isWorkspaceGeneratedMCPServer(server))
+      : [];
     availableMCPServerStats = data?.stats && typeof data.stats === 'object' ? data.stats : {};
     renderMCPServers();
   } catch (error) {
@@ -292,7 +299,7 @@ function renderMCPServers() {
       item.innerHTML = `
             <div class="plugin-info">
                 <div class="plugin-name">${escapeHtml(serverName)}</div>
-                <div class="plugin-description">Available to bind from a workspace after the agent is created.</div>
+                <div class="plugin-description">Configured globally and available to bind from a workspace after the agent is created.</div>
                 <div class="mcp-meta">
                   <span class="mcp-status-badge ${statusClass}">${escapeHtml(status)}</span>
                   ${toolCount > 0 ? `<span class="mcp-command">${toolCount} tool${toolCount === 1 ? '' : 's'}</span>` : ''}

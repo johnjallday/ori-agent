@@ -116,21 +116,21 @@
             <label class="form-check-label" for="agentAllowWebSearch" style="color: var(--text-primary);">Allow Web Tools</label>
             <div class="form-helper mt-1">If enabled, this agent can use <code>web_search</code>, <code>web_fetch</code>, and <code>browser</code>.</div>
           </div>
-          <section class="agent-create-capabilities" aria-labelledby="agentCreateCapabilitiesTitle">
+          <section id="agentCreateCapabilitiesSection" class="agent-create-capabilities" aria-labelledby="agentCreateCapabilitiesTitle">
             <div class="d-flex justify-content-between align-items-start gap-3 mb-3">
               <div>
-                <label id="agentCreateCapabilitiesTitle" class="form-label mb-1" style="color: var(--text-primary);">Review MCP Connectors and Skills</label>
-                <div class="form-helper">Optional. Skills still attach to the agent here. MCP stays workspace-scoped, so this step only shows which connectors are available before you add the agent to a workspace.</div>
+                <label id="agentCreateCapabilitiesTitle" class="form-label mb-1" style="color: var(--text-primary);">Review Skills</label>
+                <div id="agentCreateCapabilitiesIntro" class="form-helper">Optional. Skills attach to the agent here. If a skill needs MCP connectors, you will bind them after adding the agent to a workspace.</div>
               </div>
               <span class="agent-create-capability-pill is-muted">Optional</span>
             </div>
 
-            <div class="agent-create-capabilities-grid">
-              <div class="agent-create-capabilities-panel">
+            <div id="agentCreateCapabilitiesGrid" class="agent-create-capabilities-grid is-single-column">
+              <div id="agentCreateMCPPanel" class="agent-create-capabilities-panel" hidden>
                 <div class="agent-create-capabilities-panel-header">
                   <div>
                     <div class="agent-create-capabilities-panel-title">MCP Connectors</div>
-                    <div class="agent-create-capabilities-panel-subtitle">Available globally, then bound per workspace</div>
+                    <div id="agentCreateMCPSubtitle" class="agent-create-capabilities-panel-subtitle">Global connectors available before workspace binding</div>
                   </div>
                   <span id="agentCreateMCPCount" class="agent-create-capability-pill is-muted">0 available</span>
                 </div>
@@ -153,8 +153,8 @@
               </div>
             </div>
 
-            <div class="agent-create-capability-note">
-              Skills with scripts are trusted for this agent when selected. Required MCP connectors are still configured from the target workspace after the agent is created.
+            <div id="agentCreateCapabilitiesNote" class="agent-create-capability-note">
+              Skills with scripts are trusted for this agent when selected. MCP connector access is configured later from the target workspace.
             </div>
           </section>
         </form>
@@ -187,6 +187,10 @@
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 0.85rem;
+  }
+
+  .agent-create-capabilities-grid.is-single-column {
+    grid-template-columns: 1fr;
   }
 
   .agent-create-capabilities-panel {
@@ -241,6 +245,15 @@
   .agent-create-capability-card:hover {
     border-color: rgba(221, 128, 82, 0.34);
     transform: translateY(-1px);
+  }
+
+  .agent-create-capability-card.is-readonly {
+    cursor: default;
+  }
+
+  .agent-create-capability-card.is-readonly:hover {
+    border-color: rgba(255,255,255,0.08);
+    transform: none;
   }
 
   .agent-create-capability-card.is-selected {
