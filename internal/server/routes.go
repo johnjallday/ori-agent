@@ -700,6 +700,21 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 	mux.HandleFunc("PATCH /api/studios/{studioID}/agent-mcp-access/{agentInstanceID}", s.Handlers.Studio.UpdateAgentMCPAccess)
 	mux.HandleFunc("DELETE /api/studios/{studioID}/agent-mcp-access/{agentInstanceID}", s.Handlers.Studio.DeleteAgentMCPAccess)
 
+	// Skill binding routes
+	mux.HandleFunc("POST /api/studios/{studioID}/skill-bindings", s.Handlers.Studio.CreateSkillBinding)
+	mux.HandleFunc("GET /api/studios/{studioID}/skill-bindings", s.Handlers.Studio.ListSkillBindings)
+	mux.HandleFunc("GET /api/studios/{studioID}/skill-bindings/{bindingID}", s.Handlers.Studio.GetSkillBindingByID)
+	mux.HandleFunc("PUT /api/studios/{studioID}/skill-bindings/{bindingID}", s.Handlers.Studio.UpdateSkillBinding)
+	mux.HandleFunc("PATCH /api/studios/{studioID}/skill-bindings/{bindingID}", s.Handlers.Studio.UpdateSkillBinding)
+	mux.HandleFunc("DELETE /api/studios/{studioID}/skill-bindings/{bindingID}", s.Handlers.Studio.DeleteSkillBinding)
+
+	// Agent skill access routes
+	mux.HandleFunc("GET /api/studios/{studioID}/agent-skill-access", s.Handlers.Studio.ListAgentSkillAccess)
+	mux.HandleFunc("GET /api/studios/{studioID}/agent-skill-access/{agentInstanceID}", s.Handlers.Studio.GetAgentSkillAccessEntry)
+	mux.HandleFunc("PUT /api/studios/{studioID}/agent-skill-access/{agentInstanceID}", s.Handlers.Studio.UpdateAgentSkillAccess)
+	mux.HandleFunc("PATCH /api/studios/{studioID}/agent-skill-access/{agentInstanceID}", s.Handlers.Studio.UpdateAgentSkillAccess)
+	mux.HandleFunc("DELETE /api/studios/{studioID}/agent-skill-access/{agentInstanceID}", s.Handlers.Studio.DeleteAgentSkillAccess)
+
 	mux.HandleFunc("/api/studios/", func(w http.ResponseWriter, r *http.Request) {
 		// Parse the path to determine which handler to use
 		if strings.HasSuffix(r.URL.Path, "/events") {

@@ -1517,7 +1517,7 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 	// Add system message for better tool usage guidance
 	if len(ag.Messages) == 0 {
 		systemPrompt := h.buildSystemPromptWithSkills(
-			ag.Agent, current,
+			ag, current,
 			"You are a helpful assistant with access to various tools. When a user request can be fulfilled by using an available tool, use the tool instead of providing general information. Be concise and direct in your responses.",
 		)
 

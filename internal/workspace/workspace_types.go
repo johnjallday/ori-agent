@@ -55,6 +55,8 @@ type Workspace struct {
 	DirectoryReferences  []DirectoryReference        `json:"directory_references,omitempty"`
 	MCPBindings          []WorkspaceMCPBinding       `json:"mcp_bindings,omitempty"`
 	AgentMCPAccess       []WorkspaceAgentMCPAccess   `json:"agent_mcp_access,omitempty"`
+	SkillBindings        []WorkspaceSkillBinding     `json:"skill_bindings,omitempty"`
+	AgentSkillAccess     []WorkspaceAgentSkillAccess `json:"agent_skill_access,omitempty"`
 	Workflows            map[string]Workflow         `json:"workflows,omitempty"`
 	Layout               *CanvasLayout               `json:"layout,omitempty"` // Canvas layout (positions of tasks and agents)
 	Status               WorkspaceStatus             `json:"status"`
@@ -369,6 +371,26 @@ type WorkspaceMCPBinding struct {
 // WorkspaceAgentMCPAccess narrows which workspace MCP bindings an agent instance
 // may use. When no access entry exists for an instance, all enabled bindings are allowed.
 type WorkspaceAgentMCPAccess struct {
+	AgentInstanceID   string    `json:"agent_instance_id"`
+	EnabledBindingIDs []string  `json:"enabled_binding_ids,omitempty"`
+	UpdatedAt         time.Time `json:"updated_at,omitempty"`
+}
+
+// WorkspaceSkillBinding represents a skill binding owned by the workspace.
+// SkillName maps to a skill known to the SkillManager (resolved by name at runtime).
+type WorkspaceSkillBinding struct {
+	ID        string                 `json:"id"`
+	SkillName string                 `json:"skill_name"`
+	Enabled   bool                   `json:"enabled"`
+	Trusted   bool                   `json:"trusted"`
+	Config    map[string]interface{} `json:"config,omitempty"`
+	CreatedAt time.Time              `json:"created_at,omitempty"`
+	UpdatedAt time.Time              `json:"updated_at,omitempty"`
+}
+
+// WorkspaceAgentSkillAccess narrows which workspace skill bindings an agent instance
+// may use. When no access entry exists for an instance, all enabled bindings are allowed.
+type WorkspaceAgentSkillAccess struct {
 	AgentInstanceID   string    `json:"agent_instance_id"`
 	EnabledBindingIDs []string  `json:"enabled_binding_ids,omitempty"`
 	UpdatedAt         time.Time `json:"updated_at,omitempty"`

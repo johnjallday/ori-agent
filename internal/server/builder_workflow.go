@@ -88,6 +88,9 @@ func (b *ServerBuilder) initializeTaskExecution() error {
 	taskHandler.SetEventBus(b.eventBus)
 	taskHandler.SetMCPRegistry(b.mcpRegistry)
 	runtimeResolver := workspace.NewAgentRuntimeResolver(b.st, b.workspaceStore, b.mcpRegistry, b.mcpConfigManager)
+	if b.skillsManager != nil {
+		runtimeResolver.SetSkillResolver(newSkillResolverAdapter(b.skillsManager))
+	}
 	taskHandler.SetRuntimeResolver(runtimeResolver)
 	b.chatHandler.SetRuntimeResolver(runtimeResolver)
 	if b.sessionStore != nil {

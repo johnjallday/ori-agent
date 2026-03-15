@@ -113,6 +113,10 @@ export class WorkspaceDetailPage {
     this.availableMCPServersPromise = null;
     this.activeWorkspaceMCPBindingId = '';
     this.activeWorkspaceMCPMode = 'create';
+    this.availableSkills = [];
+    this.availableSkillsPromise = null;
+    this.activeWorkspaceSkillBindingId = '';
+    this.activeWorkspaceSkillMode = 'create';
     this.capabilitySuggestionCatalog = null;
     this.capabilitySuggestionCatalogPromise = null;
     this.flippedAgentCards = new Set();
@@ -401,6 +405,7 @@ export class WorkspaceDetailPage {
       notesList: document.getElementById('workspace-detail-notes-list'),
       directoriesList: document.getElementById('workspace-detail-directories-list'),
       mcpList: document.getElementById('workspace-detail-mcp-list'),
+      skillsList: document.getElementById('workspace-detail-skills-list'),
       schedulesList: document.getElementById('workspace-detail-schedules-list'),
       childrenList: document.getElementById('workspace-detail-children-list'),
 
@@ -419,6 +424,8 @@ export class WorkspaceDetailPage {
       addDirectoryBtn: document.getElementById('workspace-detail-add-directory'),
       addMcpBtn: document.getElementById('workspace-detail-add-mcp'),
       refreshMcpBtn: document.getElementById('workspace-detail-refresh-mcp'),
+      addSkillBtn: document.getElementById('workspace-detail-add-skill'),
+      refreshSkillsBtn: document.getElementById('workspace-detail-refresh-skills'),
       viewSchedulesBtn: document.getElementById('workspace-detail-view-schedules'),
       homeAssistantQuickPlanBtn: document.getElementById('homeAssistantQuickPlan'),
       homeAssistantQuickTasksBtn: document.getElementById('homeAssistantQuickTasks'),
@@ -503,6 +510,17 @@ export class WorkspaceDetailPage {
       mcpAgentOptions: document.getElementById('workspace-detail-mcp-agent-options'),
       mcpAgentAccessSummary: document.getElementById('workspace-detail-mcp-agent-access-summary'),
       mcpSubmitBtn: document.getElementById('workspace-detail-mcp-submit'),
+      skillsModal: document.getElementById('workspace-detail-skills-modal'),
+      skillsForm: document.getElementById('workspace-detail-skills-form'),
+      skillsModalTitle: document.getElementById('workspace-detail-skills-modal-title'),
+      skillsModalSubtitle: document.getElementById('workspace-detail-skills-modal-subtitle'),
+      skillNameSelect: document.getElementById('workspace-detail-skill-name'),
+      skillNameHelp: document.getElementById('workspace-detail-skill-name-help'),
+      skillEnabledInput: document.getElementById('workspace-detail-skill-enabled'),
+      skillTrustedInput: document.getElementById('workspace-detail-skill-trusted'),
+      skillAgentOptions: document.getElementById('workspace-detail-skill-agent-options'),
+      skillAgentAccessSummary: document.getElementById('workspace-detail-skill-agent-access-summary'),
+      skillSubmitBtn: document.getElementById('workspace-detail-skills-submit'),
 
       // Directory explorer modal
       directoryExplorerModal: document.getElementById('workspace-directory-explorer-modal'),
@@ -568,6 +586,25 @@ export class WorkspaceDetailPage {
     this.elements.mcpServerSelect?.addEventListener('change', () => this.handleWorkspaceMCPServerChange());
     this.elements.mcpAgentOptions?.addEventListener('change', () => this.updateWorkspaceMCPAgentAccessSummary());
     this.elements.mcpModal?.addEventListener('hidden.bs.modal', () => this.resetWorkspaceMCPModal());
+
+    // Skill buttons
+    this.elements.addSkillBtn?.addEventListener('click', () => this.openWorkspaceSkillModal());
+    this.elements.refreshSkillsBtn?.addEventListener('click', async () => {
+      await this.loadAvailableSkills(true).catch((error) => {
+        console.warn('Failed to refresh skill catalog:', error);
+      });
+      await this.loadWorkspace();
+    });
+    this.elements.skillsList?.addEventListener('click', (event) => this.handleWorkspaceSkillListClick(event));
+    this.elements.skillsForm?.addEventListener('submit', (event) => {
+      event.preventDefault();
+      this.submitWorkspaceSkillModal();
+    });
+    this.elements.skillAgentOptions?.addEventListener('change', () => this.updateWorkspaceSkillAgentAccessSummary());
+    this.elements.skillsModal?.addEventListener('hidden.bs.modal', () => this.resetWorkspaceSkillModal());
+    this.elements.skillsModal?.addEventListener('shown.bs.modal', () => {
+      this.applyTopBackdropLayer('workspace-detail-backdrop-skills');
+    });
 
     // Schedule buttons
     this.elements.viewSchedulesBtn?.addEventListener('click', () => this.showSchedulesModal());
@@ -855,6 +892,7 @@ export class WorkspaceDetailPage {
       this.workspace = await response.json();
       await this.renderWorkspaceInfo();
       this.renderWorkspaceMCPBindings();
+      this.renderWorkspaceSkillBindings();
       this.renderAgentGroups();
       this.refreshHomeAssistantQuickPrompts();
     } catch (error) {
@@ -4646,6 +4684,622 @@ export class WorkspaceDetailPage {
     }).join('');
   }
 
+  // ── Workspace Skill Binding Methods ──────────────────────────────────
+
+  getWorkspaceSkillBindings(options = {}) {
+    if (!this.workspace || !Array.isArray(this.workspace.skill_bindings)) {
+      return [];
+    }
+
+    const includeDisabled = options.includeDisabled === true;
+    return this.workspace.skill_bindings
+      .map((binding) => ({
+        id: String(binding?.id || '').trim(),
+        skillName: String(binding?.skill_name || binding?.skillName || '').trim(),
+        enabled: binding?.enabled !== false,
+        trusted: binding?.trusted === true,
+        config: binding?.config && typeof binding.config === 'object' ? { ...binding.config } : {}
+      }))
+      .filter((binding) => binding.id && binding.skillName)
+      .filter((binding) => includeDisabled || binding.enabled);
+  }
+
+  getWorkspaceSkillBinding(bindingId) {
+    const normalizedBindingId = String(bindingId || '').trim().toLowerCase();
+    if (!normalizedBindingId) return null;
+    return this.getWorkspaceSkillBindings({ includeDisabled: true }).find(
+      (binding) => String(binding?.id || '').trim().toLowerCase() === normalizedBindingId
+    ) || null;
+  }
+
+  getWorkspaceSkillAgentAccessEntry(agentInstanceId) {
+    const normalizedAgentInstanceId = String(agentInstanceId || '').trim();
+    if (!normalizedAgentInstanceId || !this.workspace || !Array.isArray(this.workspace.agent_skill_access)) {
+      return null;
+    }
+
+    return this.workspace.agent_skill_access.find(
+      (entry) => String(entry?.agent_instance_id || '').trim() === normalizedAgentInstanceId
+    ) || null;
+  }
+
+  getWorkspaceSkillAgentNamesForBinding(bindingId) {
+    const normalizedBindingId = String(bindingId || '').trim().toLowerCase();
+    if (!normalizedBindingId || !this.workspace || !Array.isArray(this.workspace.agent_instances)) {
+      return [];
+    }
+
+    const accessEntries = Array.isArray(this.workspace.agent_skill_access)
+      ? this.workspace.agent_skill_access
+      : [];
+
+    const names = [];
+    const seen = new Set();
+    this.workspace.agent_instances.forEach((instance) => {
+      const instanceId = String(instance?.id || '').trim();
+      const agentName = String(instance?.name || '').trim();
+      if (!instanceId || !agentName) return;
+
+      const entry = accessEntries.find((item) => String(item?.agent_instance_id || '').trim() === instanceId);
+      let allowed = true;
+      if (entry) {
+        const enabledIDs = Array.isArray(entry.enabled_binding_ids)
+          ? entry.enabled_binding_ids.map((value) => String(value || '').trim().toLowerCase()).filter(Boolean)
+          : [];
+        allowed = enabledIDs.includes(normalizedBindingId);
+      }
+      if (!allowed) return;
+
+      const key = this.normalizeAgentName(agentName);
+      if (!key || seen.has(key)) return;
+      seen.add(key);
+      names.push(agentName);
+    });
+    return names;
+  }
+
+  getWorkspaceSkillAgentAccessSelections(bindingId) {
+    if (!this.workspace || !Array.isArray(this.workspace.agent_instances)) {
+      return [];
+    }
+
+    const normalizedBindingId = String(bindingId || '').trim().toLowerCase();
+    return this.workspace.agent_instances
+      .map((instance) => {
+        const instanceId = String(instance?.id || '').trim();
+        const instanceName = String(instance?.name || '').trim();
+        if (!instanceId || !instanceName) return null;
+
+        const entry = this.getWorkspaceSkillAgentAccessEntry(instanceId);
+        const enabledBindingIds = Array.isArray(entry?.enabled_binding_ids)
+          ? entry.enabled_binding_ids.map((value) => String(value || '').trim().toLowerCase()).filter(Boolean)
+          : [];
+
+        const instanceNumber = Number(instance?.instance_number || 0);
+        const nodeID = String(instance?.node_id || '').trim();
+        const label = instanceNumber > 1 ? `${instanceName} #${instanceNumber}` : instanceName;
+        const meta = nodeID || 'Workspace agent instance';
+        const checked = entry
+          ? enabledBindingIds.includes(normalizedBindingId)
+          : true;
+
+        return {
+          id: instanceId,
+          label,
+          meta,
+          checked
+        };
+      })
+      .filter(Boolean);
+  }
+
+  async loadAvailableSkills(force = false) {
+    if (!force && Array.isArray(this.availableSkills) && this.availableSkills.length > 0) {
+      return this.availableSkills;
+    }
+    if (!force && this.availableSkillsPromise) {
+      return this.availableSkillsPromise;
+    }
+
+    this.availableSkillsPromise = (async () => {
+      const response = await fetch('/api/skills?agent=default');
+      if (!response.ok) {
+        const text = await response.text();
+        throw new Error(text || 'Failed to load skills');
+      }
+
+      const data = await response.json();
+      const seen = new Set();
+      const skillsList = (Array.isArray(data?.skills) ? data.skills : [])
+        .map((skill) => ({
+          name: String(skill?.name || '').trim(),
+          description: String(skill?.description || '').trim(),
+          enabled: skill?.enabled !== false
+        }))
+        .filter((skill) => skill.name)
+        .filter((skill) => {
+          const key = skill.name.toLowerCase();
+          if (seen.has(key)) return false;
+          seen.add(key);
+          return true;
+        })
+        .sort((left, right) => left.name.localeCompare(right.name));
+
+      this.availableSkills = skillsList;
+      return skillsList;
+    })();
+
+    try {
+      return await this.availableSkillsPromise;
+    } finally {
+      this.availableSkillsPromise = null;
+    }
+  }
+
+  getWorkspaceSkillModalInstance() {
+    if (!this.elements.skillsModal || typeof bootstrap === 'undefined' || !bootstrap.Modal) {
+      return null;
+    }
+
+    return typeof bootstrap.Modal.getOrCreateInstance === 'function'
+      ? bootstrap.Modal.getOrCreateInstance(this.elements.skillsModal)
+      : (bootstrap.Modal.getInstance(this.elements.skillsModal) || new bootstrap.Modal(this.elements.skillsModal));
+  }
+
+  generateWorkspaceSkillBindingId() {
+    if (window.crypto && typeof window.crypto.randomUUID === 'function') {
+      return window.crypto.randomUUID();
+    }
+    return `skill-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+  }
+
+  setWorkspaceSkillNameHelp(message, isError = false) {
+    if (!this.elements.skillNameHelp) return;
+    this.elements.skillNameHelp.textContent = message;
+    this.elements.skillNameHelp.classList.toggle('is-error', !!isError);
+  }
+
+  populateWorkspaceSkillOptions(selectedSkillName = '') {
+    if (!this.elements.skillNameSelect) return;
+
+    const normalizedSelected = String(selectedSkillName || '').trim();
+    const available = Array.isArray(this.availableSkills) ? [...this.availableSkills] : [];
+    const selectedExists = normalizedSelected
+      ? available.some((skill) => String(skill?.name || '').trim().toLowerCase() === normalizedSelected.toLowerCase())
+      : false;
+
+    if (normalizedSelected && !selectedExists) {
+      available.unshift({ name: normalizedSelected, unavailable: true });
+    }
+
+    const options = ['<option value="">Select a skill</option>'];
+    available.forEach((skill) => {
+      const name = String(skill?.name || '').trim();
+      if (!name) return;
+
+      const unavailable = skill?.unavailable === true;
+      const selected = normalizedSelected && name.toLowerCase() === normalizedSelected.toLowerCase() ? ' selected' : '';
+      const label = unavailable ? `${name} (not currently available)` : name;
+      options.push(`<option value="${this.escapeHtml(name)}"${selected}>${this.escapeHtml(label)}</option>`);
+    });
+
+    this.elements.skillNameSelect.innerHTML = options.join('');
+
+    if (normalizedSelected) {
+      this.elements.skillNameSelect.value = normalizedSelected;
+    }
+
+    if (available.length === 0) {
+      this.setWorkspaceSkillNameHelp('No skills are available yet. Create or install skills first.', true);
+      return;
+    }
+
+    if (normalizedSelected && !selectedExists) {
+      this.setWorkspaceSkillNameHelp(`${normalizedSelected} is not currently available, but you can still update or remove this workspace binding.`, true);
+      return;
+    }
+
+    this.setWorkspaceSkillNameHelp('Choose a skill to bind to this workspace.');
+  }
+
+  renderWorkspaceSkillAgentOptions(bindingId) {
+    if (!this.elements.skillAgentOptions) return;
+
+    const accessOptions = this.getWorkspaceSkillAgentAccessSelections(bindingId);
+    if (accessOptions.length === 0) {
+      this.elements.skillAgentOptions.innerHTML = `
+        <div class="workspace-detail-mcp-agent-empty">
+          Add one or more agents to this workspace before assigning skill access.
+        </div>
+      `;
+      this.updateWorkspaceSkillAgentAccessSummary();
+      return;
+    }
+
+    this.elements.skillAgentOptions.innerHTML = accessOptions.map((option) => `
+      <label class="workspace-detail-mcp-agent-option">
+        <input type="checkbox" class="form-check-input workspace-detail-skill-agent-checkbox" value="${this.escapeHtml(option.id)}"${option.checked ? ' checked' : ''}>
+        <span class="workspace-detail-mcp-agent-option-copy">
+          <span class="workspace-detail-mcp-agent-option-title">${this.escapeHtml(option.label)}</span>
+          <span class="workspace-detail-mcp-agent-option-meta">${this.escapeHtml(option.meta)}</span>
+        </span>
+      </label>
+    `).join('');
+    this.updateWorkspaceSkillAgentAccessSummary();
+  }
+
+  updateWorkspaceSkillAgentAccessSummary() {
+    if (!this.elements.skillAgentAccessSummary || !this.elements.skillAgentOptions) return;
+
+    const checkboxes = Array.from(this.elements.skillAgentOptions.querySelectorAll('.workspace-detail-skill-agent-checkbox'));
+    if (checkboxes.length === 0) {
+      this.elements.skillAgentAccessSummary.textContent = 'No agents';
+      return;
+    }
+
+    const selectedCount = checkboxes.filter((checkbox) => checkbox.checked).length;
+    this.elements.skillAgentAccessSummary.textContent = `${selectedCount} of ${checkboxes.length} selected`;
+  }
+
+  resetWorkspaceSkillModal() {
+    this.activeWorkspaceSkillBindingId = '';
+    this.activeWorkspaceSkillMode = 'create';
+
+    if (this.elements.skillsForm) {
+      this.elements.skillsForm.reset();
+    }
+    if (this.elements.skillNameSelect) {
+      this.elements.skillNameSelect.innerHTML = '<option value="">Select a skill</option>';
+    }
+    if (this.elements.skillAgentOptions) {
+      this.elements.skillAgentOptions.innerHTML = '<div class="workspace-detail-mcp-agent-empty">No agent instances in this workspace yet.</div>';
+    }
+    if (this.elements.skillsModalTitle) {
+      this.elements.skillsModalTitle.textContent = 'Add Workspace Skill';
+    }
+    if (this.elements.skillsModalSubtitle) {
+      this.elements.skillsModalSubtitle.textContent = 'Bind a skill to this workspace, then decide which agent instances can use it here.';
+    }
+    if (this.elements.skillEnabledInput) {
+      this.elements.skillEnabledInput.checked = true;
+    }
+    if (this.elements.skillTrustedInput) {
+      this.elements.skillTrustedInput.checked = false;
+    }
+    if (this.elements.skillSubmitBtn) {
+      this.elements.skillSubmitBtn.disabled = false;
+      this.elements.skillSubmitBtn.textContent = 'Add Binding';
+    }
+    this.setWorkspaceSkillNameHelp('Choose a skill to bind to this workspace.');
+    this.updateWorkspaceSkillAgentAccessSummary();
+  }
+
+  handleWorkspaceSkillListClick(event) {
+    const button = event.target.closest('[data-workspace-skill-action]');
+    if (!button) return;
+    event.preventDefault();
+    event.stopPropagation();
+
+    const action = String(button.dataset.workspaceSkillAction || '').trim();
+    const bindingId = String(button.dataset.bindingId || '').trim();
+    if (!bindingId) return;
+
+    if (action === 'edit') {
+      this.openWorkspaceSkillModal(bindingId);
+      return;
+    }
+
+    if (action === 'delete') {
+      this.deleteWorkspaceSkillBinding(bindingId);
+    }
+  }
+
+  async openWorkspaceSkillModal(bindingId = '') {
+    const existingBinding = bindingId ? this.getWorkspaceSkillBinding(bindingId) : null;
+    if (bindingId && !existingBinding) {
+      if (window.Toast) {
+        window.Toast.info('That workspace skill binding is no longer available.');
+      }
+      return;
+    }
+
+    try {
+      await this.loadAvailableSkills();
+    } catch (error) {
+      console.error('Failed to load skills:', error);
+      if (!existingBinding) {
+        if (window.Toast) window.Toast.error(error.message || 'Failed to load skills');
+        return;
+      }
+    }
+
+    this.activeWorkspaceSkillMode = existingBinding ? 'edit' : 'create';
+    this.activeWorkspaceSkillBindingId = existingBinding?.id || this.generateWorkspaceSkillBindingId();
+    this.populateWorkspaceSkillOptions(existingBinding?.skillName || '');
+
+    if (this.elements.skillsModalTitle) {
+      this.elements.skillsModalTitle.textContent = existingBinding
+        ? 'Edit Workspace Skill'
+        : 'Add Workspace Skill';
+    }
+    if (this.elements.skillsModalSubtitle) {
+      this.elements.skillsModalSubtitle.textContent = existingBinding
+        ? 'Update this workspace skill binding or change which agent instances can use it.'
+        : 'Bind a skill to this workspace and decide which agent instances should be able to use it.';
+    }
+    if (this.elements.skillEnabledInput) {
+      this.elements.skillEnabledInput.checked = existingBinding ? existingBinding.enabled !== false : true;
+    }
+    if (this.elements.skillTrustedInput) {
+      this.elements.skillTrustedInput.checked = existingBinding ? existingBinding.trusted === true : false;
+    }
+    if (this.elements.skillSubmitBtn) {
+      this.elements.skillSubmitBtn.textContent = existingBinding ? 'Save Changes' : 'Add Binding';
+      this.elements.skillSubmitBtn.disabled = false;
+    }
+
+    this.renderWorkspaceSkillAgentOptions(this.activeWorkspaceSkillBindingId);
+    this.getWorkspaceSkillModalInstance()?.show();
+  }
+
+  getWorkspaceSkillSelectedAgentInstanceIDs() {
+    if (!this.elements.skillAgentOptions) return [];
+    return Array.from(this.elements.skillAgentOptions.querySelectorAll('.workspace-detail-skill-agent-checkbox:checked'))
+      .map((checkbox) => String(checkbox.value || '').trim())
+      .filter(Boolean);
+  }
+
+  setWorkspaceSkillModalSubmitting(isSubmitting) {
+    if (!this.elements.skillSubmitBtn) return;
+    this.elements.skillSubmitBtn.disabled = isSubmitting;
+    this.elements.skillSubmitBtn.textContent = isSubmitting
+      ? (this.activeWorkspaceSkillMode === 'edit' ? 'Saving...' : 'Adding...')
+      : (this.activeWorkspaceSkillMode === 'edit' ? 'Save Changes' : 'Add Binding');
+  }
+
+  async saveWorkspaceSkillBinding(payload) {
+    const isEditing = this.activeWorkspaceSkillMode === 'edit';
+    const endpoint = isEditing
+      ? `/api/studios/${encodeURIComponent(this.workspaceId)}/skill-bindings/${encodeURIComponent(this.activeWorkspaceSkillBindingId)}`
+      : `/api/studios/${encodeURIComponent(this.workspaceId)}/skill-bindings`;
+
+    const response = await fetch(endpoint, {
+      method: isEditing ? 'PUT' : 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+
+    if (!response.ok) {
+      const text = await response.text();
+      throw new Error(text || 'Failed to save workspace skill binding');
+    }
+
+    return response.json();
+  }
+
+  async persistWorkspaceSkillAgentAccess(bindingId, selectedAgentInstanceIds) {
+    if (!this.workspace || !Array.isArray(this.workspace.agent_instances) || this.workspace.agent_instances.length === 0) {
+      return;
+    }
+
+    const selectedSet = new Set(selectedAgentInstanceIds.map((value) => String(value || '').trim()).filter(Boolean));
+    const effectiveBindingIds = this.getWorkspaceSkillBindings()
+      .map((binding) => String(binding?.id || '').trim())
+      .filter(Boolean);
+    const defaultBindingIds = Array.from(new Set(effectiveBindingIds)).sort();
+    const normalizeIDs = (ids) => Array.from(new Set(ids.map((value) => String(value || '').trim()).filter(Boolean))).sort();
+    const arraysEqual = (left, right) => (
+      left.length === right.length && left.every((value, index) => value === right[index])
+    );
+
+    const requests = this.workspace.agent_instances.map(async (instance) => {
+      const instanceId = String(instance?.id || '').trim();
+      if (!instanceId) return;
+
+      const entry = this.getWorkspaceSkillAgentAccessEntry(instanceId);
+      const currentIds = entry
+        ? Array.isArray(entry.enabled_binding_ids)
+          ? entry.enabled_binding_ids.map((value) => String(value || '').trim()).filter(Boolean)
+          : []
+        : [...defaultBindingIds];
+      const allowedSet = new Set(currentIds);
+
+      if (selectedSet.has(instanceId)) {
+        allowedSet.add(bindingId);
+      } else {
+        allowedSet.delete(bindingId);
+      }
+
+      const enabledBindingIDs = normalizeIDs(Array.from(allowedSet));
+      const currentNormalized = normalizeIDs(currentIds);
+
+      if (!entry && arraysEqual(enabledBindingIDs, defaultBindingIds)) {
+        return;
+      }
+
+      if (entry && arraysEqual(enabledBindingIDs, defaultBindingIds)) {
+        const response = await fetch(
+          `/api/studios/${encodeURIComponent(this.workspaceId)}/agent-skill-access/${encodeURIComponent(instanceId)}`,
+          { method: 'DELETE' }
+        );
+
+        if (!response.ok) {
+          const text = await response.text();
+          throw new Error(text || `Failed to clear skill access rule for ${instanceId}`);
+        }
+        return;
+      }
+
+      if (arraysEqual(enabledBindingIDs, currentNormalized)) {
+        return;
+      }
+
+      const response = await fetch(
+        `/api/studios/${encodeURIComponent(this.workspaceId)}/agent-skill-access/${encodeURIComponent(instanceId)}`,
+        {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ enabled_binding_ids: enabledBindingIDs })
+        }
+      );
+
+      if (!response.ok) {
+        const text = await response.text();
+        throw new Error(text || `Failed to update skill access for ${instanceId}`);
+      }
+    });
+
+    await Promise.all(requests);
+  }
+
+  async submitWorkspaceSkillModal() {
+    const skillName = String(this.elements.skillNameSelect?.value || '').trim();
+
+    if (!skillName) {
+      this.setWorkspaceSkillNameHelp('Choose a skill before saving this workspace binding.', true);
+      if (window.Toast) window.Toast.error('Choose a skill');
+      return;
+    }
+
+    this.setWorkspaceSkillNameHelp('Choose a skill to bind to this workspace.');
+    this.setWorkspaceSkillModalSubmitting(true);
+
+    try {
+      const enabled = this.elements.skillEnabledInput?.checked !== false;
+      const trusted = this.elements.skillTrustedInput?.checked === true;
+      const selectedAgentInstanceIds = this.getWorkspaceSkillSelectedAgentInstanceIDs();
+      const payload = {
+        skill_name: skillName,
+        enabled,
+        trusted,
+        config: {}
+      };
+
+      if (this.activeWorkspaceSkillMode !== 'edit') {
+        payload.id = this.activeWorkspaceSkillBindingId;
+      }
+
+      await this.saveWorkspaceSkillBinding(payload);
+      await this.loadWorkspace();
+      await this.persistWorkspaceSkillAgentAccess(this.activeWorkspaceSkillBindingId, selectedAgentInstanceIds);
+      await this.loadWorkspace();
+
+      this.getWorkspaceSkillModalInstance()?.hide();
+      if (window.Toast) {
+        window.Toast.success(
+          this.activeWorkspaceSkillMode === 'edit'
+            ? 'Workspace skill updated'
+            : 'Workspace skill added'
+        );
+      }
+    } catch (error) {
+      console.error('Failed to save workspace skill binding:', error);
+      if (window.Toast) window.Toast.error(error.message || 'Failed to save workspace skill binding');
+    } finally {
+      this.setWorkspaceSkillModalSubmitting(false);
+    }
+  }
+
+  async deleteWorkspaceSkillBinding(bindingId) {
+    const binding = this.getWorkspaceSkillBinding(bindingId);
+    if (!binding) {
+      if (window.Toast) {
+        window.Toast.info('That skill binding was not found.');
+      }
+      return;
+    }
+
+    const label = binding.skillName || binding.id;
+    if (!window.confirm(`Remove workspace skill binding "${label}"?`)) {
+      return;
+    }
+
+    try {
+      const response = await fetch(
+        `/api/studios/${encodeURIComponent(this.workspaceId)}/skill-bindings/${encodeURIComponent(bindingId)}`,
+        { method: 'DELETE' }
+      );
+
+      if (!response.ok) {
+        const text = await response.text();
+        throw new Error(text || 'Failed to remove workspace skill binding');
+      }
+
+      await this.loadWorkspace();
+      if (window.Toast) window.Toast.success('Workspace skill removed');
+    } catch (error) {
+      console.error('Failed to delete workspace skill binding:', error);
+      if (window.Toast) window.Toast.error(error.message || 'Failed to remove workspace skill binding');
+    }
+  }
+
+  renderWorkspaceSkillBindings() {
+    if (!this.elements.skillsList) return;
+
+    const bindings = this.getWorkspaceSkillBindings({ includeDisabled: true });
+    if (bindings.length === 0) {
+      this.elements.skillsList.innerHTML = `
+        <div class="workspace-detail-empty">
+          No workspace skill bindings yet.
+          <div class="workspace-detail-mcp-empty-note">Add a skill with the <strong>+</strong> button to make it available to agents in this workspace.</div>
+        </div>
+      `;
+      return;
+    }
+
+    this.elements.skillsList.innerHTML = bindings.map((binding) => {
+      const skillName = String(binding?.skillName || '').trim() || 'unknown';
+      const isDisabled = binding?.enabled === false;
+      const isTrusted = binding?.trusted === true;
+      const agentNames = this.getWorkspaceSkillAgentNamesForBinding(binding.id);
+      const accessSummary = isDisabled
+        ? 'Disabled for this workspace'
+        : agentNames.length > 0
+        ? `${agentNames.length} agent${agentNames.length === 1 ? '' : 's'} can use this`
+        : (Array.isArray(this.workspace?.agent_instances) && this.workspace.agent_instances.length > 0
+          ? 'No agent instances currently have access'
+          : 'No agent instances in this workspace');
+      const accessLabel = isDisabled
+        ? 'Agents: unavailable while disabled'
+        : agentNames.length > 0
+        ? `Agents: ${agentNames.join(', ')}`
+        : 'Agents: none';
+
+      const chips = [
+        `<span class="workspace-detail-mcp-chip status${isDisabled ? ' is-disabled' : ''}">${isDisabled ? 'Disabled' : 'Enabled'}</span>`,
+        isTrusted ? `<span class="workspace-detail-mcp-chip source">Trusted</span>` : '',
+        `<span class="workspace-detail-mcp-chip access">${this.escapeHtml(accessLabel)}</span>`
+      ].filter(Boolean).join('');
+
+      return `
+        <div class="workspace-detail-mcp-card" data-skill-binding-id="${this.escapeHtml(binding.id)}">
+          <div class="workspace-detail-mcp-card-top">
+            <div class="workspace-detail-mcp-card-top-main">
+              <div class="workspace-detail-mcp-server">
+                <span>${this.escapeHtml(skillName)}</span>
+                <code>${this.escapeHtml(binding.id)}</code>
+              </div>
+              <div class="workspace-detail-mcp-meta">${this.escapeHtml(accessSummary)}</div>
+            </div>
+            <div class="workspace-detail-mcp-card-actions">
+              <button type="button" class="workspace-detail-mcp-card-btn" data-workspace-skill-action="edit" data-binding-id="${this.escapeHtml(binding.id)}" title="Edit binding" aria-label="Edit skill binding ${this.escapeHtml(skillName)}">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
+                  <path d="M20.71,7.04C21.1,6.65 21.1,6 20.71,5.63L18.37,3.29C18,2.9 17.35,2.9 16.96,3.29L15.12,5.12L18.87,8.87M3,17.25V21H6.75L17.81,9.93L14.06,6.18L3,17.25Z"/>
+                </svg>
+              </button>
+              <button type="button" class="workspace-detail-mcp-card-btn is-danger" data-workspace-skill-action="delete" data-binding-id="${this.escapeHtml(binding.id)}" title="Remove binding" aria-label="Remove skill binding ${this.escapeHtml(skillName)}">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
+                  <path d="M9,3V4H4V6H5V19A2,2 0 0,0 7,21H17A2,2 0 0,0 19,19V6H20V4H15V3H9M7,6H17V19H7V6M9,8V17H11V8H9M13,8V17H15V8H13Z"/>
+                </svg>
+              </button>
+            </div>
+          </div>
+          <div class="workspace-detail-mcp-chip-row">${chips}</div>
+        </div>
+      `;
+    }).join('');
+  }
+
   getAgentInstanceIdsForName(agentName) {
     const normalized = this.normalizeAgentName(agentName);
     if (!normalized || !this.workspace || !Array.isArray(this.workspace.agent_instances)) {
@@ -6759,6 +7413,7 @@ export class WorkspaceDetailPage {
 
       this.renderDirectories();
       this.renderWorkspaceMCPBindings();
+      this.renderWorkspaceSkillBindings();
       this.renderAgentGroups();
       this.refreshHomeAssistantQuickPrompts();
     } catch (error) {

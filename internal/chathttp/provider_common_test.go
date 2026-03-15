@@ -29,7 +29,7 @@ func (m *mockSkillsManager) ListEnabledSkillsWithPrompts(string) ([]skills.Skill
 
 func TestBuildSystemPromptWithSkills_NilManager(t *testing.T) {
 	h := &Handler{}
-	ag := &agent.Agent{}
+	ag := &resolvedChatAgent{Agent: &agent.Agent{}}
 	result := h.buildSystemPromptWithSkills(ag, "test-agent", "default prompt")
 	if result != "default prompt" {
 		t.Fatalf("expected default prompt, got %q", result)
@@ -40,7 +40,7 @@ func TestBuildSystemPromptWithSkills_NoEnabledSkills(t *testing.T) {
 	h := &Handler{
 		skillsManager: &mockSkillsManager{enabledSkills: nil},
 	}
-	ag := &agent.Agent{}
+	ag := &resolvedChatAgent{Agent: &agent.Agent{}}
 	result := h.buildSystemPromptWithSkills(ag, "test-agent", "default prompt")
 	if result != "default prompt" {
 		t.Fatalf("expected default prompt, got %q", result)
@@ -55,7 +55,7 @@ func TestBuildSystemPromptWithSkills_WithSkills(t *testing.T) {
 			},
 		},
 	}
-	ag := &agent.Agent{}
+	ag := &resolvedChatAgent{Agent: &agent.Agent{}}
 	result := h.buildSystemPromptWithSkills(ag, "test-agent", "default prompt")
 
 	if !strings.Contains(result, "default prompt") {
@@ -80,7 +80,7 @@ func TestBuildSystemPromptWithSkills_EmptyAgentName(t *testing.T) {
 			},
 		},
 	}
-	ag := &agent.Agent{}
+	ag := &resolvedChatAgent{Agent: &agent.Agent{}}
 	result := h.buildSystemPromptWithSkills(ag, "", "default prompt")
 	if result != "default prompt" {
 		t.Fatalf("expected default prompt when agentName is empty, got %q", result)

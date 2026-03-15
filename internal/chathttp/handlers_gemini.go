@@ -36,7 +36,7 @@ func (h *Handler) handleGeminiChat(w http.ResponseWriter, r *http.Request, ag *r
 	var messages []llm.Message
 	systemPrompt := composeRuntimeSystemPrompt(
 		h.buildSystemPromptWithSkills(
-			ag.Agent, agentName,
+			ag, agentName,
 			"You are a helpful assistant with access to tools. When you use a tool and receive results, report those results directly to the user. Be concise and accurate.",
 		),
 		runtimeSystemPrompt,

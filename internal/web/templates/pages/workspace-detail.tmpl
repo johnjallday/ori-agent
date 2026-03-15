@@ -322,7 +322,41 @@
               </div>
             </div>
 
-            <!-- Schedules Panel - Right column row 5 -->
+            <!-- Workspace Skills Panel - Right column row 5 -->
+            <div class="modern-card workspace-detail-panel workspace-detail-panel-skills is-expandable" id="workspace-detail-skills-panel">
+              <button class="workspace-detail-panel-close" type="button" title="Close" aria-label="Close expanded panel">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+                  <path d="M19,6.41L17.59,5L12,10.59L6.41,5L5,6.41L10.59,12L5,17.59L6.41,19L12,13.41L17.59,19L19,17.59L13.41,12L19,6.41Z"/>
+                </svg>
+              </button>
+              <div class="workspace-detail-panel-header">
+                <h2 class="workspace-detail-panel-title">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+                    <path d="M7,2V13H10V22L17,10H13L17,2H7Z"/>
+                  </svg>
+                  Workspace Skills
+                </h2>
+                <div class="workspace-detail-panel-actions">
+                  <button id="workspace-detail-refresh-skills" class="workspace-detail-panel-btn" type="button" title="Refresh skill bindings">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
+                      <path d="M17.65,6.35C16.2,4.9 14.21,4 12,4A8,8 0 0,0 4,12A8,8 0 0,0 12,20C15.73,20 18.84,17.45 19.73,14H17.65C16.83,16.33 14.61,18 12,18A6,6 0 0,1 6,12A6,6 0 0,1 12,6C13.66,6 15.14,6.69 16.22,7.78L13,11H20V4L17.65,6.35Z"/>
+                    </svg>
+                  </button>
+                  <button id="workspace-detail-add-skill" class="workspace-detail-panel-btn workspace-detail-panel-btn-primary" type="button" title="Add workspace skill binding">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
+                      <path d="M19,13H13V19H11V13H5V11H11V5H13V11H19V13Z"/>
+                    </svg>
+                  </button>
+                </div>
+              </div>
+              <div class="workspace-detail-panel-body" role="region" tabindex="0" aria-label="Workspace Skills panel content">
+                <div id="workspace-detail-skills-list" class="workspace-detail-mcp-list">
+                  <div class="workspace-detail-empty">Loading workspace skill bindings...</div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Schedules Panel - Right column row 6 -->
             <div class="modern-card workspace-detail-panel workspace-detail-panel-schedules is-expandable" id="workspace-detail-schedules-panel">
               <button class="workspace-detail-panel-close" type="button" title="Close" aria-label="Close expanded panel">
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
@@ -533,6 +567,72 @@
           <div class="modal-footer">
             <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
             <button type="submit" class="btn btn-primary" id="workspace-detail-mcp-submit">Save Binding</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <!-- Workspace Skills Modal -->
+  <div class="modal fade" id="workspace-detail-skills-modal" tabindex="-1" aria-labelledby="workspace-detail-skills-modal-title" aria-hidden="true">
+    <div class="modal-dialog modal-lg modal-dialog-centered modal-dialog-scrollable">
+      <div class="modal-content workspace-detail-mcp-modal-content">
+        <div class="modal-header">
+          <div class="workspace-detail-mcp-modal-heading">
+            <div class="workspace-detail-mcp-modal-kicker">Workspace-scoped skill</div>
+            <h5 class="modal-title" id="workspace-detail-skills-modal-title">Add Workspace Skill</h5>
+            <p id="workspace-detail-skills-modal-subtitle" class="workspace-detail-mcp-modal-subtitle mb-0">
+              Bind a skill to this workspace, then decide which agent instances can use it here.
+            </p>
+          </div>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+        </div>
+        <form id="workspace-detail-skills-form">
+          <div class="modal-body">
+            <div class="workspace-detail-mcp-modal-banner">
+              Workspace skill bindings control which skills are available and which agents can invoke them. Global skill settings still apply.
+            </div>
+            <div class="row g-3">
+              <div class="col-12">
+                <label for="workspace-detail-skill-name" class="form-label">Skill</label>
+                <select id="workspace-detail-skill-name" class="form-select">
+                  <option value="">Select a skill</option>
+                </select>
+                <div id="workspace-detail-skill-name-help" class="workspace-detail-mcp-field-help">
+                  Choose a skill to bind to this workspace.
+                </div>
+              </div>
+              <div class="col-12">
+                <div class="form-check form-switch workspace-detail-mcp-toggle">
+                  <input class="form-check-input" type="checkbox" role="switch" id="workspace-detail-skill-enabled" checked>
+                  <label class="form-check-label" for="workspace-detail-skill-enabled">Enabled in this workspace</label>
+                </div>
+              </div>
+              <div class="col-12">
+                <div class="form-check form-switch workspace-detail-mcp-toggle">
+                  <input class="form-check-input" type="checkbox" role="switch" id="workspace-detail-skill-trusted">
+                  <label class="form-check-label" for="workspace-detail-skill-trusted">Trusted (allow tool use without confirmation)</label>
+                </div>
+              </div>
+              <div class="col-12">
+                <div class="workspace-detail-mcp-agent-access-card">
+                  <div class="workspace-detail-mcp-agent-access-header">
+                    <div>
+                      <div class="workspace-detail-mcp-agent-access-title">Agent access</div>
+                      <div class="workspace-detail-mcp-agent-access-subtitle">Choose which agent instances can use this skill in this workspace.</div>
+                    </div>
+                    <div id="workspace-detail-skill-agent-access-summary" class="workspace-detail-mcp-agent-access-summary">0 selected</div>
+                  </div>
+                  <div id="workspace-detail-skill-agent-options" class="workspace-detail-mcp-agent-options">
+                    <div class="workspace-detail-mcp-agent-empty">No agent instances in this workspace yet.</div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="modal-footer">
+            <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+            <button type="submit" class="btn btn-primary" id="workspace-detail-skills-submit">Save Binding</button>
           </div>
         </form>
       </div>
@@ -777,7 +877,7 @@
     .workspace-detail-bento {
       display: grid;
       grid-template-columns: 2fr 1fr;
-      grid-template-rows: repeat(5, 1fr);
+      grid-template-rows: repeat(6, 1fr);
       gap: 0.5rem;
       height: calc(100vh - 280px);
       min-height: 400px;
@@ -814,16 +914,21 @@
       grid-row: 4;
     }
 
-    .workspace-detail-panel-schedules {
+    .workspace-detail-panel-skills {
       grid-column: 2;
       grid-row: 5;
+    }
+
+    .workspace-detail-panel-schedules {
+      grid-column: 2;
+      grid-row: 6;
     }
 
     /* Responsive layout */
     @media (max-width: 1200px) {
       .workspace-detail-bento {
         grid-template-columns: 1fr;
-        grid-template-rows: auto auto auto auto auto auto;
+        grid-template-rows: auto auto auto auto auto auto auto;
         height: auto;
         min-height: auto;
         max-height: none;
@@ -854,9 +959,14 @@
         grid-row: 5;
       }
 
-      .workspace-detail-panel-schedules {
+      .workspace-detail-panel-skills {
         grid-column: 1 / -1;
         grid-row: 6;
+      }
+
+      .workspace-detail-panel-schedules {
+        grid-column: 1 / -1;
+        grid-row: 7;
       }
 
       .workspace-detail-bento .workspace-detail-panel-body {
@@ -1392,21 +1502,24 @@
       color: var(--text-primary);
     }
 
-    #workspace-detail-mcp-form {
+    #workspace-detail-mcp-form,
+    #workspace-detail-skills-form {
       display: flex;
       flex: 1 1 auto;
       flex-direction: column;
       min-height: 0;
     }
 
-    #workspace-detail-mcp-modal .modal-body {
+    #workspace-detail-mcp-modal .modal-body,
+    #workspace-detail-skills-modal .modal-body {
       min-height: 0;
       overflow-y: auto;
       overscroll-behavior: contain;
       -webkit-overflow-scrolling: touch;
     }
 
-    #workspace-detail-mcp-modal .modal-footer {
+    #workspace-detail-mcp-modal .modal-footer,
+    #workspace-detail-skills-modal .modal-footer {
       flex-shrink: 0;
     }
 
@@ -2262,6 +2375,10 @@
       z-index: 10030;
     }
 
+    #workspace-detail-skills-modal {
+      z-index: 10030;
+    }
+
     .modal-backdrop.workspace-detail-backdrop-execution {
       z-index: 1055;
     }
@@ -2271,6 +2388,10 @@
     }
 
     .modal-backdrop.workspace-detail-backdrop-mcp {
+      z-index: 10020;
+    }
+
+    .modal-backdrop.workspace-detail-backdrop-skills {
       z-index: 10020;
     }
 
@@ -3061,7 +3182,7 @@
 
     /* Board view reorganizes the grid */
     .workspace-detail-bento:has(.board-view) {
-      grid-template-columns: repeat(5, 1fr);
+      grid-template-columns: repeat(6, 1fr);
       grid-template-rows: 1fr auto;
       height: auto;
       min-height: 500px;
@@ -3095,8 +3216,13 @@
       grid-row: 2;
     }
 
-    .workspace-detail-bento:has(.board-view) .workspace-detail-panel-schedules {
+    .workspace-detail-bento:has(.board-view) .workspace-detail-panel-skills {
       grid-column: 5;
+      grid-row: 2;
+    }
+
+    .workspace-detail-bento:has(.board-view) .workspace-detail-panel-schedules {
+      grid-column: 6;
       grid-row: 2;
     }
 
@@ -3148,8 +3274,12 @@
       animation-delay: 0.2s;
     }
 
-    .workspace-detail-bento:has(.board-view) .workspace-detail-panel-schedules {
+    .workspace-detail-bento:has(.board-view) .workspace-detail-panel-skills {
       animation-delay: 0.25s;
+    }
+
+    .workspace-detail-bento:has(.board-view) .workspace-detail-panel-schedules {
+      animation-delay: 0.3s;
     }
 
     /* Children workspaces grid */

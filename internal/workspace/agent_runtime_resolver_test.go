@@ -337,3 +337,231 @@ func TestAgentRuntimeResolver_AppliesWorkspaceBindingConfigOverrides(t *testing.
 		t.Fatalf("expected workspace env override, got %v", config.Env)
 	}
 }
+
+// --- Skill resolution tests ---
+
+type stubSkillResolver struct {
+	skills      map[string]ResolvedSkill
+	agentSkills map[string][]ResolvedSkill
+}
+
+func (s *stubSkillResolver) ResolveSkillsByNames(names []string) ([]ResolvedSkill, []string, error) {
+	var resolved []ResolvedSkill
+	var unresolved []string
+	for _, name := range names {
+		if skill, ok := s.skills[name]; ok {
+			resolved = append(resolved, skill)
+		} else {
+			unresolved = append(unresolved, name)
+		}
+	}
+	return resolved, unresolved, nil
+}
+
+func (s *stubSkillResolver) ListEnabledAgentSkills(agentName string) ([]ResolvedSkill, error) {
+	return s.agentSkills[agentName], nil
+}
+
+func TestResolveEffectiveSkills_WorkspaceOnly(t *testing.T) {
+	ws := &Workspace{
+		ID: "ws-skill-1",
+		AgentInstances: []AgentInstance{
+			{ID: "inst-1", Name: "Coder", NodeID: "coder-1"},
+		},
+		SkillBindings: []WorkspaceSkillBinding{
+			{ID: "sb-1", SkillName: "code-review", Enabled: true},
+			{ID: "sb-2", SkillName: "testing", Enabled: true},
+		},
+	}
+
+	agentStore := &resolverAgentStoreStub{agents: map[string]*agent.Agent{
+		"Coder": {},
+	}}
+	workspaceStore := newTestWorkspaceStore(t, ws)
+	registry := &runtimeRegistryStub{}
+	templates := &templateLookupStub{servers: map[string]mcp.ServerConfig{}}
+	skillResolver := &stubSkillResolver{
+		skills: map[string]ResolvedSkill{
+			"code-review": {Name: "code-review", Prompt: "Review code carefully.", Enabled: true},
+			"testing":     {Name: "testing", Prompt: "Write thorough tests.", Enabled: true},
+		},
+	}
+
+	resolver := NewAgentRuntimeResolver(agentStore, workspaceStore, registry, templates)
+	resolver.SetSkillResolver(skillResolver)
+
+	resolved, err := resolver.ResolveAgentForWorkspace("Coder", ws.ID, "")
+	if err != nil {
+		t.Fatalf("ResolveAgentForWorkspace() error = %v", err)
+	}
+	if len(resolved.EffectiveSkills) != 2 {
+		t.Fatalf("expected 2 effective skills, got %d", len(resolved.EffectiveSkills))
+	}
+}
+
+func TestResolveEffectiveSkills_AgentOverridesWorkspace(t *testing.T) {
+	ws := &Workspace{
+		ID: "ws-skill-2",
+		AgentInstances: []AgentInstance{
+			{ID: "inst-1", Name: "Coder", NodeID: "coder-1"},
+		},
+		SkillBindings: []WorkspaceSkillBinding{
+			{ID: "sb-1", SkillName: "code-review", Enabled: true},
+		},
+	}
+
+	agentStore := &resolverAgentStoreStub{agents: map[string]*agent.Agent{
+		"Coder": {},
+	}}
+	workspaceStore := newTestWorkspaceStore(t, ws)
+	registry := &runtimeRegistryStub{}
+	templates := &templateLookupStub{servers: map[string]mcp.ServerConfig{}}
+	skillResolver := &stubSkillResolver{
+		skills: map[string]ResolvedSkill{
+			"code-review": {Name: "code-review", Prompt: "Workspace prompt", Enabled: true},
+		},
+		agentSkills: map[string][]ResolvedSkill{
+			"Coder": {
+				{Name: "code-review", Prompt: "Agent-specific prompt", Enabled: true},
+			},
+		},
+	}
+
+	resolver := NewAgentRuntimeResolver(agentStore, workspaceStore, registry, templates)
+	resolver.SetSkillResolver(skillResolver)
+
+	resolved, err := resolver.ResolveAgentForWorkspace("Coder", ws.ID, "")
+	if err != nil {
+		t.Fatalf("ResolveAgentForWorkspace() error = %v", err)
+	}
+	// Agent-specific overrides workspace — should be 1 skill with the agent prompt
+	if len(resolved.EffectiveSkills) != 1 {
+		t.Fatalf("expected 1 effective skill (agent overrides workspace), got %d", len(resolved.EffectiveSkills))
+	}
+	if resolved.EffectiveSkills[0].Prompt != "Agent-specific prompt" {
+		t.Fatalf("expected agent-specific prompt to win, got %q", resolved.EffectiveSkills[0].Prompt)
+	}
+}
+
+func TestResolveEffectiveSkills_AccessControlFilters(t *testing.T) {
+	ws := &Workspace{
+		ID: "ws-skill-3",
+		AgentInstances: []AgentInstance{
+			{ID: "inst-1", Name: "Coder", NodeID: "coder-1"},
+		},
+		SkillBindings: []WorkspaceSkillBinding{
+			{ID: "sb-1", SkillName: "code-review", Enabled: true},
+			{ID: "sb-2", SkillName: "testing", Enabled: true},
+			{ID: "sb-3", SkillName: "deploy", Enabled: true},
+		},
+		AgentSkillAccess: []WorkspaceAgentSkillAccess{
+			{AgentInstanceID: "inst-1", EnabledBindingIDs: []string{"sb-1", "sb-3"}},
+		},
+	}
+
+	agentStore := &resolverAgentStoreStub{agents: map[string]*agent.Agent{
+		"Coder": {},
+	}}
+	workspaceStore := newTestWorkspaceStore(t, ws)
+	registry := &runtimeRegistryStub{}
+	templates := &templateLookupStub{servers: map[string]mcp.ServerConfig{}}
+	skillResolver := &stubSkillResolver{
+		skills: map[string]ResolvedSkill{
+			"code-review": {Name: "code-review", Prompt: "Review", Enabled: true},
+			"testing":     {Name: "testing", Prompt: "Test", Enabled: true},
+			"deploy":      {Name: "deploy", Prompt: "Deploy", Enabled: true},
+		},
+	}
+
+	resolver := NewAgentRuntimeResolver(agentStore, workspaceStore, registry, templates)
+	resolver.SetSkillResolver(skillResolver)
+
+	resolved, err := resolver.ResolveAgentForWorkspace("Coder", ws.ID, "coder-1")
+	if err != nil {
+		t.Fatalf("ResolveAgentForWorkspace() error = %v", err)
+	}
+	// Access control allows sb-1 and sb-3 only
+	if len(resolved.EffectiveSkills) != 2 {
+		t.Fatalf("expected 2 skills (access control filtered), got %d", len(resolved.EffectiveSkills))
+	}
+	names := make(map[string]bool)
+	for _, s := range resolved.EffectiveSkills {
+		names[s.Name] = true
+	}
+	if !names["code-review"] || !names["deploy"] {
+		t.Fatalf("expected code-review and deploy, got %v", names)
+	}
+	if names["testing"] {
+		t.Fatal("testing should have been filtered out by access control")
+	}
+}
+
+func TestResolveEffectiveSkills_UnresolvableSkipped(t *testing.T) {
+	ws := &Workspace{
+		ID: "ws-skill-4",
+		AgentInstances: []AgentInstance{
+			{ID: "inst-1", Name: "Coder", NodeID: "coder-1"},
+		},
+		SkillBindings: []WorkspaceSkillBinding{
+			{ID: "sb-1", SkillName: "exists", Enabled: true},
+			{ID: "sb-2", SkillName: "deleted-skill", Enabled: true},
+		},
+	}
+
+	agentStore := &resolverAgentStoreStub{agents: map[string]*agent.Agent{
+		"Coder": {},
+	}}
+	workspaceStore := newTestWorkspaceStore(t, ws)
+	registry := &runtimeRegistryStub{}
+	templates := &templateLookupStub{servers: map[string]mcp.ServerConfig{}}
+	skillResolver := &stubSkillResolver{
+		skills: map[string]ResolvedSkill{
+			"exists": {Name: "exists", Prompt: "I exist", Enabled: true},
+		},
+	}
+
+	resolver := NewAgentRuntimeResolver(agentStore, workspaceStore, registry, templates)
+	resolver.SetSkillResolver(skillResolver)
+
+	resolved, err := resolver.ResolveAgentForWorkspace("Coder", ws.ID, "")
+	if err != nil {
+		t.Fatalf("ResolveAgentForWorkspace() error = %v", err)
+	}
+	// Only the resolvable skill should be returned
+	if len(resolved.EffectiveSkills) != 1 {
+		t.Fatalf("expected 1 skill (unresolvable skipped), got %d", len(resolved.EffectiveSkills))
+	}
+	if resolved.EffectiveSkills[0].Name != "exists" {
+		t.Fatalf("expected 'exists' skill, got %q", resolved.EffectiveSkills[0].Name)
+	}
+}
+
+func TestResolveEffectiveSkills_NoSkillResolver(t *testing.T) {
+	ws := &Workspace{
+		ID: "ws-skill-5",
+		AgentInstances: []AgentInstance{
+			{ID: "inst-1", Name: "Coder", NodeID: "coder-1"},
+		},
+		SkillBindings: []WorkspaceSkillBinding{
+			{ID: "sb-1", SkillName: "code-review", Enabled: true},
+		},
+	}
+
+	agentStore := &resolverAgentStoreStub{agents: map[string]*agent.Agent{
+		"Coder": {},
+	}}
+	workspaceStore := newTestWorkspaceStore(t, ws)
+	registry := &runtimeRegistryStub{}
+	templates := &templateLookupStub{servers: map[string]mcp.ServerConfig{}}
+
+	resolver := NewAgentRuntimeResolver(agentStore, workspaceStore, registry, templates)
+	// No skill resolver set
+
+	resolved, err := resolver.ResolveAgentForWorkspace("Coder", ws.ID, "")
+	if err != nil {
+		t.Fatalf("ResolveAgentForWorkspace() error = %v", err)
+	}
+	if len(resolved.EffectiveSkills) != 0 {
+		t.Fatalf("expected 0 skills when no resolver set, got %d", len(resolved.EffectiveSkills))
+	}
+}

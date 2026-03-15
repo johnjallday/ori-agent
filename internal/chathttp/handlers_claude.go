@@ -31,7 +31,7 @@ func (h *Handler) handleClaudeChat(w http.ResponseWriter, r *http.Request, ag *r
 	var messages []llm.Message
 	systemPrompt := composeRuntimeSystemPrompt(
 		h.buildSystemPromptWithSkills(
-			ag.Agent, agentName,
+			ag, agentName,
 			"You are a helpful assistant with access to tools. Use tools when they provide a more accurate answer.",
 		),
 		runtimeSystemPrompt,

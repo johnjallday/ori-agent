@@ -34,7 +34,7 @@ func (h *Handler) handleCodexChat(w http.ResponseWriter, r *http.Request, ag *re
 	var messages []llm.Message
 	systemPrompt := composeRuntimeSystemPrompt(
 		h.buildSystemPromptWithSkills(
-			ag.Agent, agentName,
+			ag, agentName,
 			"You are a helpful assistant. Be concise and direct in your responses.",
 		),
 		runtimeSystemPrompt,

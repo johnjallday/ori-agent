@@ -18,7 +18,8 @@ type chatRuntimeResolver interface {
 
 type resolvedChatAgent struct {
 	*agent.Agent
-	MCPServers []string
+	MCPServers      []string
+	EffectiveSkills []workspace.ResolvedSkill
 }
 
 // SetRuntimeResolver configures workspace-aware agent runtime resolution for chat requests.
@@ -55,10 +56,14 @@ func (h *Handler) resolveEffectiveAgent(agentName string, routeCtx normalizedCha
 	if resolved == nil || resolved.Agent == nil {
 		return &resolvedChatAgent{Agent: baseAgent}, nil
 	}
-	return &resolvedChatAgent{
+	result := &resolvedChatAgent{
 		Agent:      resolved.Agent,
 		MCPServers: append([]string{}, resolved.MCPServers...),
-	}, nil
+	}
+	if len(resolved.EffectiveSkills) > 0 {
+		result.EffectiveSkills = append([]workspace.ResolvedSkill{}, resolved.EffectiveSkills...)
+	}
+	return result, nil
 }
 
 func (h *Handler) persistAgent(agentName string, ag *agent.Agent) error {
