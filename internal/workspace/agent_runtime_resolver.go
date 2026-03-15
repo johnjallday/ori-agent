@@ -268,11 +268,9 @@ func (r *AgentRuntimeResolver) materializeRuntimeBinding(workspaceID string, bin
 	return runtimeName, nil
 }
 
-func runtimeMCPServerName(workspaceID, serverName, bindingID string) string {
-	return RuntimeMCPServerName(workspaceID, serverName, bindingID)
-}
-
 // RuntimeMCPServerName returns the materialized runtime server name for a workspace MCP binding.
+// The format is "ws:{workspaceID}:mcp:{serverName}:{bindingID}".
+// Assumption: workspaceID, serverName, and bindingID must not contain colons.
 func RuntimeMCPServerName(workspaceID, serverName, bindingID string) string {
 	return fmt.Sprintf(
 		"ws:%s:mcp:%s:%s",
@@ -283,6 +281,7 @@ func RuntimeMCPServerName(workspaceID, serverName, bindingID string) string {
 }
 
 // ParseRuntimeMCPServerName extracts workspace, logical server, and binding IDs from a runtime server name.
+// Assumes parts do not contain colons (see RuntimeMCPServerName).
 func ParseRuntimeMCPServerName(name string) (workspaceID, serverName, bindingID string, ok bool) {
 	parts := strings.Split(strings.TrimSpace(name), ":")
 	if len(parts) < 5 {

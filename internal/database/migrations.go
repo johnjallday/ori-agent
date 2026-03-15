@@ -405,19 +405,25 @@ func (db *DB) migration001Baseline(ctx context.Context) error {
 }
 
 func (db *DB) migration002WorkspaceMCPState(ctx context.Context) error {
-	if _, err := db.ExecContext(ctx, `
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("failed to begin transaction: %w", err)
+	}
+	defer tx.Rollback()
+
+	if _, err := tx.ExecContext(ctx, `
 		ALTER TABLE workspaces ADD COLUMN mcp_bindings_json TEXT DEFAULT '[]'
 	`); err != nil && !isDuplicateColumnError(err) {
 		return fmt.Errorf("failed to add mcp_bindings_json column: %w", err)
 	}
 
-	if _, err := db.ExecContext(ctx, `
+	if _, err := tx.ExecContext(ctx, `
 		ALTER TABLE workspaces ADD COLUMN agent_mcp_access_json TEXT DEFAULT '[]'
 	`); err != nil && !isDuplicateColumnError(err) {
 		return fmt.Errorf("failed to add agent_mcp_access_json column: %w", err)
 	}
 
-	return nil
+	return tx.Commit()
 }
 
 func isDuplicateColumnError(err error) bool {

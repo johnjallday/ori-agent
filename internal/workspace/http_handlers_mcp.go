@@ -391,6 +391,25 @@ func (h *HTTPHandler) UpdateAgentMCPAccess(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
+	// Validate that all referenced binding IDs exist in the workspace
+	if len(req.EnabledBindingIDs) > 0 {
+		bindings := studio.GetMCPBindings()
+		bindingIDSet := make(map[string]bool, len(bindings))
+		for _, b := range bindings {
+			bindingIDSet[strings.ToLower(strings.TrimSpace(b.ID))] = true
+		}
+		for _, id := range req.EnabledBindingIDs {
+			normalized := strings.ToLower(strings.TrimSpace(id))
+			if normalized == "" {
+				continue
+			}
+			if !bindingIDSet[normalized] {
+				orihttp.BadRequest(w, fmt.Sprintf("binding ID %q does not exist in workspace", id))
+				return
+			}
+		}
+	}
+
 	entry := WorkspaceAgentMCPAccess{
 		AgentInstanceID:   agentInstanceID,
 		EnabledBindingIDs: req.EnabledBindingIDs,

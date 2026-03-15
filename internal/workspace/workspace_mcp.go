@@ -1,6 +1,7 @@
 package workspace
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
@@ -248,9 +249,18 @@ func cloneInterfaceMap(src map[string]interface{}) map[string]interface{} {
 	if len(src) == 0 {
 		return nil
 	}
-	out := make(map[string]interface{}, len(src))
-	for key, value := range src {
-		out[key] = value
+	data, err := json.Marshal(src)
+	if err != nil {
+		// Fallback to shallow copy if marshalling fails
+		out := make(map[string]interface{}, len(src))
+		for key, value := range src {
+			out[key] = value
+		}
+		return out
+	}
+	var out map[string]interface{}
+	if err := json.Unmarshal(data, &out); err != nil {
+		return nil
 	}
 	return out
 }

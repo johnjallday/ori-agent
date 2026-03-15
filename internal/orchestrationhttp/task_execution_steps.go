@@ -264,8 +264,8 @@ func buildStructuredExecutionStepDescription(baseTask workspace.Task, persistedT
 
 	if previous := collectCompletedStructuredStepResults(persistedTask.ExecutionSteps); len(previous) > 0 {
 		prompt.WriteString("\nCompleted step results so far:\n")
-		for title, result := range previous {
-			prompt.WriteString(fmt.Sprintf("- %s: %s\n", title, summarizeExecutionText(result)))
+		for _, sr := range previous {
+			prompt.WriteString(fmt.Sprintf("- %s: %s\n", sr.title, summarizeExecutionText(sr.result)))
 		}
 	}
 
@@ -278,14 +278,19 @@ func buildStructuredExecutionStepDescription(baseTask workspace.Task, persistedT
 	return prompt.String()
 }
 
-func collectCompletedStructuredStepResults(steps []workspace.TaskExecutionStep) map[string]string {
-	results := make(map[string]string)
+type completedStepResult struct {
+	title  string
+	result string
+}
+
+func collectCompletedStructuredStepResults(steps []workspace.TaskExecutionStep) []completedStepResult {
+	var results []completedStepResult
 	for _, step := range steps {
 		if step.Status != workspace.TaskExecutionStepCompleted {
 			continue
 		}
 		if result := strings.TrimSpace(step.Result); result != "" {
-			results[step.Title] = result
+			results = append(results, completedStepResult{title: step.Title, result: result})
 		}
 	}
 	return results

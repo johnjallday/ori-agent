@@ -248,19 +248,6 @@ func hasAnyMCPServer(enabledServers, candidates []string) bool {
 	return false
 }
 
-func appendMCPServerIfMissing(servers *[]string, serverName string) bool {
-	if servers == nil {
-		return false
-	}
-	for _, existing := range *servers {
-		if strings.EqualFold(strings.TrimSpace(existing), strings.TrimSpace(serverName)) {
-			return false
-		}
-	}
-	*servers = append(*servers, serverName)
-	return true
-}
-
 func (h *Handler) attachWorkspaceMCPBindingForPrompt(agentName, workspaceID, serverName string) (*resolvedChatAgent, error) {
 	if h == nil || h.workspaceStore == nil {
 		return nil, fmt.Errorf("workspace store is not configured")
@@ -291,9 +278,19 @@ func (h *Handler) attachWorkspaceMCPBindingForPrompt(agentName, workspaceID, ser
 
 	if instance, ok := ws.FindAgentInstance(agentName, ""); ok {
 		if access, exists := ws.GetAgentMCPAccess(instance.ID); exists {
-			access.EnabledBindingIDs = append(access.EnabledBindingIDs, binding.ID)
-			if err := ws.SetAgentMCPAccess(*access); err != nil {
-				return nil, fmt.Errorf("update agent MCP access: %w", err)
+			alreadyEnabled := false
+			normalizedNewID := strings.ToLower(strings.TrimSpace(binding.ID))
+			for _, id := range access.EnabledBindingIDs {
+				if strings.ToLower(strings.TrimSpace(id)) == normalizedNewID {
+					alreadyEnabled = true
+					break
+				}
+			}
+			if !alreadyEnabled {
+				access.EnabledBindingIDs = append(access.EnabledBindingIDs, binding.ID)
+				if err := ws.SetAgentMCPAccess(*access); err != nil {
+					return nil, fmt.Errorf("update agent MCP access: %w", err)
+				}
 			}
 		}
 	}
@@ -361,7 +358,7 @@ func buildWorkspaceRequiredMCPMessage(requirement *mcpAutoRequirement) string {
 	if requirement == nil {
 		return "This request needs an MCP binding in a workspace."
 	}
-	return fmt.Sprintf("This request needs %s tools, but MCP bindings are workspace-scoped now. Open it from a workspace and try again.", requirement.label)
+	return fmt.Sprintf("This request needs %s tools, but they require a workspace. Please open a workspace first, then try again.", requirement.label)
 }
 
 func buildWorkspaceAttachMCPFailureMessage(serverName string) string {
@@ -401,13 +398,6 @@ func (h *Handler) selectAvailableMCPServer(candidates []string) string {
 	return ""
 }
 
-func isMCPServerAlreadyRunningError(err error) bool {
-	if err == nil {
-		return false
-	}
-	return strings.Contains(strings.ToLower(err.Error()), "already running")
-}
-
 func buildMissingMCPMessage(requirement *mcpAutoRequirement) string {
 	if requirement == nil {
 		return "I cannot run this tool request because no suitable MCP server is configured."
@@ -420,20 +410,4 @@ func buildMissingMCPMessage(requirement *mcpAutoRequirement) string {
 	default:
 		return "I cannot run this tool request because no suitable MCP server is configured."
 	}
-}
-
-func buildEnableMCPFailureMessage(serverName string) string {
-	name := strings.TrimSpace(serverName)
-	if name == "" {
-		return "I found a required MCP server but failed to enable it. Check MCP settings and try again."
-	}
-	return "I found MCP server \"" + name + "\" but failed to enable it. Check MCP settings and try again."
-}
-
-func buildStartMCPFailureMessage(serverName string) string {
-	name := strings.TrimSpace(serverName)
-	if name == "" {
-		return "I enabled the required MCP server, but it failed to start. Check MCP settings and runtime dependencies, then try again."
-	}
-	return "I enabled MCP server \"" + name + "\", but it failed to start. Check MCP settings and runtime dependencies, then try again."
 }

@@ -152,7 +152,7 @@ func TestAgentRuntimeResolver_UsesWorkspaceFilesystemRuntimeServer(t *testing.T)
 		t.Fatalf("expected exactly one runtime MCP server, got %v", resolved.MCPServers)
 	}
 
-	runtimeName := runtimeMCPServerName(ws.ID, "filesystem", synthesizedFilesystemBindingID)
+	runtimeName := RuntimeMCPServerName(ws.ID, "filesystem", synthesizedFilesystemBindingID)
 	if resolved.MCPServers[0] != runtimeName {
 		t.Fatalf("runtime server name = %q, want %q", resolved.MCPServers[0], runtimeName)
 	}
