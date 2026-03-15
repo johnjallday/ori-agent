@@ -8,6 +8,7 @@
 :root {
   /* Sidebar */
   --sidebar-width: 300px;
+  --navbar-offset: 76px;
 
   /* Primary Colors */
   --primary-color: #1d4ed8;
