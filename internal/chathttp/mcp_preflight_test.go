@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -73,6 +74,14 @@ func (s *preflightStore) SetAgent(name string, ag *agent.Agent) error {
 	}
 	s.agents[name] = ag
 	return nil
+}
+
+func (s *preflightStore) UpdateAgent(name string, updateFn func(*agent.Agent) error) error {
+	ag, ok := s.agents[name]
+	if !ok || ag == nil {
+		return fmt.Errorf("agent %q not found", name)
+	}
+	return updateFn(ag)
 }
 
 func (s *preflightStore) ClearAgents() error {

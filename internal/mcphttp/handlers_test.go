@@ -28,6 +28,7 @@ func TestEnableServerHandler_EnablesServerGlobally(t *testing.T) {
 	}
 
 	req := httptest.NewRequest(http.MethodPost, "/api/mcp/servers/filesystem/enable", nil)
+	req.SetPathValue("name", "filesystem")
 	rr := httptest.NewRecorder()
 
 	handler.EnableServerHandler(rr, req)
@@ -74,6 +75,7 @@ func TestDisableServerHandler_DisablesServerGlobally(t *testing.T) {
 	}
 
 	req := httptest.NewRequest(http.MethodPost, "/api/mcp/servers/filesystem/disable", nil)
+	req.SetPathValue("name", "filesystem")
 	rr := httptest.NewRecorder()
 
 	handler.DisableServerHandler(rr, req)
@@ -96,6 +98,7 @@ func TestDisableServerHandler_UnknownServerReturnsNotFound(t *testing.T) {
 	handler := NewHandler(registry, configManager)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/mcp/servers/filesystem/disable", nil)
+	req.SetPathValue("name", "filesystem")
 	rr := httptest.NewRecorder()
 
 	handler.DisableServerHandler(rr, req)
@@ -119,6 +122,7 @@ func TestGetServerToolsHandler_AttemptsLazyStartAndReturnsStartError(t *testing.
 	}
 
 	req := httptest.NewRequest(http.MethodGet, "/api/mcp/servers/broken/tools", nil)
+	req.SetPathValue("name", "broken")
 	rr := httptest.NewRecorder()
 
 	handler.GetServerToolsHandler(rr, req)

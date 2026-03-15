@@ -22,6 +22,14 @@ func (f *fakeAgentStore) SetAgent(name string, ag *agent.Agent) error {
 	return nil
 }
 
+func (f *fakeAgentStore) UpdateAgent(name string, updateFn func(*agent.Agent) error) error {
+	ag, ok := f.agents[name]
+	if !ok || ag == nil {
+		return ErrAgentNotFound
+	}
+	return updateFn(ag)
+}
+
 type fakeAssistantProgressStore struct {
 	progress types.AssistantProgress
 }

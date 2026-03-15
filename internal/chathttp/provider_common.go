@@ -411,24 +411,25 @@ func resolveSystemPromptForAgent(ag *agent.Agent, defaultPrompt string) string {
 	if ag == nil {
 		return defaultPrompt
 	}
-	if strings.TrimSpace(ag.Settings.SystemPrompt) != "" {
-		// Respect explicit user override.
-		return ag.Settings.SystemPrompt
+
+	base := strings.TrimSpace(ag.Settings.SystemPrompt)
+	if base == "" {
+		base = defaultPrompt
 	}
 
-	if ag.Evolution == nil {
-		return defaultPrompt
+	if ag.Evolution == nil || ag.Evolution.Path == "" {
+		return base
 	}
 
 	switch ag.Evolution.Path {
 	case types.AgentPathCoder:
-		return defaultPrompt + " You are on the Coder path: prioritize implementation accuracy, tests, and concrete code-level fixes."
+		return base + "\n\n[Evolution Path: Coder]\nPrioritize implementation accuracy, tests, and concrete code-level fixes."
 	case types.AgentPathResearcher:
-		return defaultPrompt + " You are on the Researcher path: prioritize evidence quality, comparisons, and clear assumptions."
+		return base + "\n\n[Evolution Path: Researcher]\nPrioritize evidence quality, comparisons, and clear assumptions."
 	case types.AgentPathWriter:
-		return defaultPrompt + " You are on the Writer path: prioritize clarity, structure, tone, and concise polish."
+		return base + "\n\n[Evolution Path: Writer]\nPrioritize clarity, structure, tone, and concise polish."
 	default:
-		return defaultPrompt
+		return base
 	}
 }
 

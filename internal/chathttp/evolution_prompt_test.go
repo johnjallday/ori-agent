@@ -1,6 +1,7 @@
 package chathttp
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/johnjallday/ori-agent/internal/agent"
@@ -19,8 +20,11 @@ func TestResolveSystemPromptForAgent_RespectsCustomPrompt(t *testing.T) {
 	}
 
 	got := resolveSystemPromptForAgent(ag, "default prompt")
-	if got != "custom prompt override" {
-		t.Fatalf("expected custom prompt override, got %q", got)
+	if !strings.HasPrefix(got, "custom prompt override") {
+		t.Errorf("expected custom prompt at start, got %q", got)
+	}
+	if !strings.Contains(got, "[Evolution Path: Coder]") {
+		t.Errorf("expected coder path guidance to be appended, got %q", got)
 	}
 }
 
@@ -32,11 +36,8 @@ func TestResolveSystemPromptForAgent_AddsPathDefaults(t *testing.T) {
 	}
 
 	got := resolveSystemPromptForAgent(ag, "default prompt")
-	if got == "default prompt" {
-		t.Fatal("expected researcher path guidance to be appended")
-	}
-	if got == "" {
-		t.Fatal("expected non-empty prompt")
+	if !strings.Contains(got, "[Evolution Path: Researcher]") {
+		t.Errorf("expected researcher path guidance to be appended, got %q", got)
 	}
 }
 

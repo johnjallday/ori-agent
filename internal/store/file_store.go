@@ -275,6 +275,22 @@ func (s *fileStore) SetAgent(name string, ag *agent.Agent) error {
 	return s.saveUnlocked()
 }
 
+func (s *fileStore) UpdateAgent(name string, updateFn func(*agent.Agent) error) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	ag, ok := s.agents[name]
+	if !ok || ag == nil {
+		return fmt.Errorf("agent %q not found", name)
+	}
+
+	if err := updateFn(ag); err != nil {
+		return err
+	}
+
+	return s.saveUnlocked()
+}
+
 func (s *fileStore) Save() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -368,12 +384,17 @@ func (s *fileStore) saveUnlocked() error {
 		}
 
 		settingsPath := filepath.Join(agentSpecificDir, "agent_settings.json")
-		if err := os.WriteFile(settingsPath, settingsData, 0o644); err != nil {
+		tmpSettingsPath := settingsPath + ".tmp"
+		if err := os.WriteFile(tmpSettingsPath, settingsData, 0644); err != nil {
+			return err
+		}
+		if err := os.Rename(tmpSettingsPath, settingsPath); err != nil {
 			return err
 		}
 	}
 
 	// Save main index file with just current agent pointer
+
 	indexConfig := struct {
 		Current string `json:"current"`
 	}{
@@ -385,7 +406,12 @@ func (s *fileStore) saveUnlocked() error {
 		return err
 	}
 
-	return os.WriteFile(s.path, data, 0o644)
+	// Use atomic write: write to .tmp then rename
+	tmpPath := s.path + ".tmp"
+	if err := os.WriteFile(tmpPath, data, 0644); err != nil {
+		return err
+	}
+	return os.Rename(tmpPath, s.path)
 }
 
 func (s *fileStore) load() error {

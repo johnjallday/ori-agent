@@ -401,51 +401,23 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 	// =============================================================================
 	// MCP (Model Context Protocol) Endpoints
 	// =============================================================================
-	mux.HandleFunc("/api/mcp/servers", func(w http.ResponseWriter, r *http.Request) {
-		switch r.Method {
-		case http.MethodGet:
-			s.Handlers.MCP.ListServersHandler(w, r)
-		case http.MethodPost:
-			s.Handlers.MCP.AddServerHandler(w, r)
-		default:
-			orihttp.MethodNotAllowed(w)
-		}
-	})
-	mux.HandleFunc("/api/mcp/servers/", func(w http.ResponseWriter, r *http.Request) {
-		// Check for specific actions in the path
-		if strings.HasSuffix(r.URL.Path, "/enable") {
-			s.Handlers.MCP.EnableServerHandler(w, r)
-		} else if strings.HasSuffix(r.URL.Path, "/disable") {
-			s.Handlers.MCP.DisableServerHandler(w, r)
-		} else if strings.HasSuffix(r.URL.Path, "/tools") {
-			s.Handlers.MCP.GetServerToolsHandler(w, r)
-		} else if strings.HasSuffix(r.URL.Path, "/status") {
-			s.Handlers.MCP.GetServerStatusHandler(w, r)
-		} else if strings.HasSuffix(r.URL.Path, "/test") {
-			s.Handlers.MCP.TestConnectionHandler(w, r)
-		} else if strings.HasSuffix(r.URL.Path, "/retry") {
-			s.Handlers.MCP.RetryConnectionHandler(w, r)
-		} else if r.Method == http.MethodDelete {
-			s.Handlers.MCP.RemoveServerHandler(w, r)
-		} else {
-			orihttp.NotFound(w, "Not found")
-		}
-	})
-	mux.HandleFunc("/api/mcp/import", s.Handlers.MCP.ImportServersHandler)
-	mux.HandleFunc("/api/mcp/marketplace", s.Handlers.MCP.GetMarketplaceServersHandler)
-	mux.HandleFunc("/api/mcp/search", s.Handlers.MCP.SearchServersHandler)
-	mux.HandleFunc("/api/mcp/registry-sources", func(w http.ResponseWriter, r *http.Request) {
-		switch r.Method {
-		case http.MethodGet:
-			s.Handlers.MCP.ListRegistrySourcesHandler(w, r)
-		case http.MethodPost:
-			s.Handlers.MCP.AddRegistrySourceHandler(w, r)
-		default:
-			orihttp.MethodNotAllowed(w)
-		}
-	})
-	mux.HandleFunc("/api/mcp/registry-sources/", s.Handlers.MCP.RegistrySourcesItemHandler)
-	mux.HandleFunc("/api/mcp/registry/refresh", s.Handlers.MCP.RefreshRegistryHandler)
+	mux.HandleFunc("GET /api/mcp/servers", s.Handlers.MCP.ListServersHandler)
+	mux.HandleFunc("POST /api/mcp/servers", s.Handlers.MCP.AddServerHandler)
+	mux.HandleFunc("DELETE /api/mcp/servers/{name}", s.Handlers.MCP.RemoveServerHandler)
+	mux.HandleFunc("POST /api/mcp/servers/{name}/enable", s.Handlers.MCP.EnableServerHandler)
+	mux.HandleFunc("POST /api/mcp/servers/{name}/disable", s.Handlers.MCP.DisableServerHandler)
+	mux.HandleFunc("GET /api/mcp/servers/{name}/tools", s.Handlers.MCP.GetServerToolsHandler)
+	mux.HandleFunc("GET /api/mcp/servers/{name}/status", s.Handlers.MCP.GetServerStatusHandler)
+	mux.HandleFunc("POST /api/mcp/servers/{name}/test", s.Handlers.MCP.TestConnectionHandler)
+	mux.HandleFunc("POST /api/mcp/servers/{name}/retry", s.Handlers.MCP.RetryConnectionHandler)
+
+	mux.HandleFunc("POST /api/mcp/import", s.Handlers.MCP.ImportServersHandler)
+	mux.HandleFunc("GET /api/mcp/marketplace", s.Handlers.MCP.GetMarketplaceServersHandler)
+	mux.HandleFunc("GET /api/mcp/search", s.Handlers.MCP.SearchServersHandler)
+	mux.HandleFunc("GET /api/mcp/registry-sources", s.Handlers.MCP.ListRegistrySourcesHandler)
+	mux.HandleFunc("POST /api/mcp/registry-sources", s.Handlers.MCP.AddRegistrySourceHandler)
+	mux.HandleFunc("DELETE /api/mcp/registry-sources/{id}", s.Handlers.MCP.RegistrySourcesItemHandler)
+	mux.HandleFunc("POST /api/mcp/registry/refresh", s.Handlers.MCP.RefreshRegistryHandler)
 
 	// =============================================================================
 	// Orchestration Endpoints

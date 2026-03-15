@@ -15,12 +15,13 @@ import (
 
 // ServerConfig contains configuration for an MCP server
 type ServerConfig struct {
-	Name      string            `json:"name"`
-	Command   string            `json:"command"`
-	Args      []string          `json:"args"`
-	Env       map[string]string `json:"env"`
-	Transport string            `json:"transport"` // currently only "stdio" is supported at runtime
-	Enabled   bool              `json:"enabled"`
+	Name        string            `json:"name"`
+	Command     string            `json:"command"`
+	Args        []string          `json:"args"`
+	Env         map[string]string `json:"env"`
+	EnvRequired map[string]string `json:"env_required,omitempty"`
+	Transport   string            `json:"transport"` // currently only "stdio" is supported at runtime
+	Enabled     bool              `json:"enabled"`
 }
 
 // Server manages an MCP server process and client
@@ -79,6 +80,22 @@ func (s *Server) Start() error {
 		s.ctx, s.cancel = context.WithCancel(context.Background())
 	}
 	s.mu.Unlock()
+
+	// Validate required environment variables
+	if len(s.config.EnvRequired) > 0 {
+		var missing []string
+		for k, desc := range s.config.EnvRequired {
+			val, ok := s.config.Env[k]
+			// Check if provided in config OR already in OS env
+			if (!ok || strings.TrimSpace(val) == "") && os.Getenv(k) == "" {
+				missing = append(missing, fmt.Sprintf("%s (%s)", k, desc))
+			}
+		}
+		if len(missing) > 0 {
+			s.setStatus(StatusError)
+			return fmt.Errorf("missing required environment variables: %s", strings.Join(missing, ", "))
+		}
+	}
 
 	// Build environment variables
 	env := os.Environ()

@@ -21,9 +21,10 @@ type Store interface {
 	CreateAgent(name string, config *CreateAgentConfig) error
 	DeleteAgent(name string) error
 
-	// Get/Set directly
+	// Get/Set/Update directly
 	GetAgent(name string) (*agent.Agent, bool)
 	SetAgent(name string, ag *agent.Agent) error
+	UpdateAgent(name string, updateFn func(*agent.Agent) error) error
 
 	// Management
 	ClearAgents() error

@@ -39,11 +39,6 @@ func (h *Handler) SetRegistryStore(s *mcpregistry.Store) {
 // ListServersHandler lists all MCP servers
 // GET /api/mcp/servers
 func (h *Handler) ListServersHandler(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		orihttp.MethodNotAllowed(w)
-		return
-	}
-
 	servers := h.registry.ListServers()
 	stats := h.registry.GetServerStats()
 
@@ -61,11 +56,6 @@ func (h *Handler) ListServersHandler(w http.ResponseWriter, r *http.Request) {
 // AddServerHandler adds a new MCP server
 // POST /api/mcp/servers
 func (h *Handler) AddServerHandler(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		orihttp.MethodNotAllowed(w)
-		return
-	}
-
 	var serverConfig mcp.ServerConfig
 	if !orihttp.ParseJSONBody(w, r, &serverConfig) {
 		return
@@ -94,21 +84,13 @@ func (h *Handler) AddServerHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 // RemoveServerHandler removes an MCP server
-// DELETE /api/mcp/servers/:name
+// DELETE /api/mcp/servers/{name}
 func (h *Handler) RemoveServerHandler(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodDelete {
-		orihttp.MethodNotAllowed(w)
-		return
-	}
-
-	// Extract server name from path: /api/mcp/servers/NAME
-
-	parts := strings.Split(r.URL.Path, "/")
-	if len(parts) < 5 {
+	serverName := r.PathValue("name")
+	if serverName == "" {
 		orihttp.BadRequest(w, "Server name required")
 		return
 	}
-	serverName := parts[4]
 
 	// Remove from registry (stops if running)
 	if err := h.registry.RemoveServer(serverName); err != nil {
@@ -132,20 +114,13 @@ func (h *Handler) RemoveServerHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 // EnableServerHandler enables an MCP server globally so it is available to workspaces.
-// POST /api/mcp/servers/:name/enable
+// POST /api/mcp/servers/{name}/enable
 func (h *Handler) EnableServerHandler(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		orihttp.MethodNotAllowed(w)
-		return
-	}
-
-	// Extract server name from path
-	parts := strings.Split(r.URL.Path, "/")
-	if len(parts) < 5 {
+	serverName := r.PathValue("name")
+	if serverName == "" {
 		orihttp.BadRequest(w, "Server name required")
 		return
 	}
-	serverName := parts[4]
 
 	current, err := h.configManager.GetServer(serverName)
 	if err != nil {
@@ -205,20 +180,13 @@ func (h *Handler) EnableServerHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 // DisableServerHandler disables an MCP server globally.
-// POST /api/mcp/servers/:name/disable
+// POST /api/mcp/servers/{name}/disable
 func (h *Handler) DisableServerHandler(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		orihttp.MethodNotAllowed(w)
-		return
-	}
-
-	// Extract server name from path
-	parts := strings.Split(r.URL.Path, "/")
-	if len(parts) < 5 {
+	serverName := r.PathValue("name")
+	if serverName == "" {
 		orihttp.BadRequest(w, "Server name required")
 		return
 	}
-	serverName := parts[4]
 
 	current, err := h.configManager.GetServer(serverName)
 	if err != nil {
@@ -256,21 +224,13 @@ func (h *Handler) DisableServerHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 // GetServerToolsHandler lists tools available from a specific server
-// GET /api/mcp/servers/:name/tools
+// GET /api/mcp/servers/{name}/tools
 func (h *Handler) GetServerToolsHandler(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		orihttp.MethodNotAllowed(w)
-		return
-	}
-
-	// Extract server name from path
-
-	parts := strings.Split(r.URL.Path, "/")
-	if len(parts) < 5 {
+	serverName := r.PathValue("name")
+	if serverName == "" {
 		orihttp.BadRequest(w, "Server name required")
 		return
 	}
-	serverName := parts[4]
 
 	server, err := h.registry.GetServer(serverName)
 	if err != nil {
@@ -309,21 +269,13 @@ func (h *Handler) GetServerToolsHandler(w http.ResponseWriter, r *http.Request) 
 }
 
 // GetServerStatusHandler gets status for a specific server
-// GET /api/mcp/servers/:name/status
+// GET /api/mcp/servers/{name}/status
 func (h *Handler) GetServerStatusHandler(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		orihttp.MethodNotAllowed(w)
-		return
-	}
-
-	// Extract server name from path
-
-	parts := strings.Split(r.URL.Path, "/")
-	if len(parts) < 5 {
+	serverName := r.PathValue("name")
+	if serverName == "" {
 		orihttp.BadRequest(w, "Server name required")
 		return
 	}
-	serverName := parts[4]
 
 	status, err := h.registry.GetServerStatus(serverName)
 	if err != nil {
@@ -341,21 +293,13 @@ func (h *Handler) GetServerStatusHandler(w http.ResponseWriter, r *http.Request)
 }
 
 // TestConnectionHandler tests connection to an MCP server
-// POST /api/mcp/servers/:name/test
+// POST /api/mcp/servers/{name}/test
 func (h *Handler) TestConnectionHandler(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		orihttp.MethodNotAllowed(w)
-		return
-	}
-
-	// Extract server name from path
-
-	parts := strings.Split(r.URL.Path, "/")
-	if len(parts) < 5 {
+	serverName := r.PathValue("name")
+	if serverName == "" {
 		orihttp.BadRequest(w, "Server name required")
 		return
 	}
-	serverName := parts[4]
 
 	// Get server
 	server, err := h.registry.GetServer(serverName)
@@ -402,21 +346,13 @@ func (h *Handler) TestConnectionHandler(w http.ResponseWriter, r *http.Request) 
 }
 
 // RetryConnectionHandler manually retries a failed server connection
-// POST /api/mcp/servers/:name/retry
+// POST /api/mcp/servers/{name}/retry
 func (h *Handler) RetryConnectionHandler(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		orihttp.MethodNotAllowed(w)
-		return
-	}
-
-	// Extract server name from path
-
-	parts := strings.Split(r.URL.Path, "/")
-	if len(parts) < 5 {
+	serverName := r.PathValue("name")
+	if serverName == "" {
 		orihttp.BadRequest(w, "Server name required")
 		return
 	}
-	serverName := parts[4]
 
 	// Get server
 	server, err := h.registry.GetServer(serverName)
