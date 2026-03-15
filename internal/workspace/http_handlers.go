@@ -142,6 +142,8 @@ func (h *HTTPHandler) GetStudio(w http.ResponseWriter, r *http.Request) {
 		"scheduled_tasks":      studio.ScheduledTasks, // Include scheduled tasks for scheduler nodes
 		"store_nodes":          studio.StoreNodes,     // Include store nodes
 		"directory_references": studio.DirectoryReferences,
+		"mcp_bindings":         studio.MCPBindings,
+		"agent_mcp_access":     studio.AgentMCPAccess,
 		"messages":             studio.Messages,
 		"shared_data":          studio.SharedData,
 		"layout":               studio.Layout,

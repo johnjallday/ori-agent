@@ -184,7 +184,7 @@ func GetDefaultData() TemplateData {
 	return TemplateData{
 		Title:        "Ori Agent",
 		Theme:        "light",
-		CurrentAgent: "Default Agent",
+		CurrentAgent: "No Agent Selected",
 		Model:        "gpt-5-nano",
 		Version:      version.GetVersion(),
 		Extra:        make(map[string]interface{}), // Initialize Extra map

@@ -1,52 +1,54 @@
 <!-- Top Navbar - Flexible component for all pages -->
 <nav class="navbar {{if .NavbarClass}}{{.NavbarClass}}{{else}}modern-card glassmorphism{{end}} {{if .NavbarFixed}}navbar-expand-lg position-fixed w-100 top-0{{end}}" style="position: {{if .NavbarFixed}}fixed{{else}}sticky{{end}}; top: 0; z-index: 10002; {{if .NavbarFixed}}backdrop-filter: blur(10px);{{else}}border-radius: 0; border: none; border-bottom: 1px solid var(--border-color); backdrop-filter: blur(20px);{{end}}">
   <div class="container-fluid {{if .NavbarPadding}}{{.NavbarPadding}}{{else}}{{if .NavbarFixed}}px-4{{end}}{{end}}">
-    <div class="d-flex align-items-center w-100">
-      <!-- Left: Back button OR Sidebar toggle -->
-      {{if .ShowBackButton}}
-      <a href="{{if .BackButtonURL}}{{.BackButtonURL}}{{else}}/{{end}}" class="modern-btn modern-btn-secondary me-3" title="{{if .BackButtonTitle}}{{.BackButtonTitle}}{{else}}Back to Chat{{end}}" aria-label="{{if .BackButtonTitle}}{{.BackButtonTitle}}{{else}}Back to Chat{{end}}">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-          <path d="M20,11V13H8L13.5,18.5L12.08,19.92L4.16,12L12.08,4.08L13.5,5.5L8,11H20Z"/>
-        </svg>
-      </a>
-      {{else if ne .ShowSidebarToggle false}}
-      <button {{if .SidebarToggleId}}id="{{.SidebarToggleId}}"{{else}}id="sidebarToggle"{{end}} class="modern-btn modern-btn-secondary {{if .SidebarToggleHideOnLg}}d-lg-none{{end}} me-2" type="button" title="Toggle Sidebar" aria-label="Toggle sidebar menu" aria-expanded="false">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-          <path d="M3 18h18v-2H3v2zm0-5h18v-2H3v2zm0-7v2h18V6H3z"/>
-        </svg>
-      </button>
-      {{end}}
-
-      <!-- Brand -->
-      <a class="navbar-brand fw-bold {{if .BrandNoDecoration}}text-decoration-none{{else}}d-flex{{end}} align-items-center" href="{{if .BrandURL}}{{.BrandURL}}{{else}}/{{end}}" style="color: {{if .BrandColor}}{{.BrandColor}}{{else}}var(--primary-color){{end}};{{if not .NavbarFixed}} font-size: 1.25rem; cursor: pointer;{{end}}">
-        {{if .BrandIcon}}
-        {{.BrandIcon}}
-        {{else if .UseLegacyIcon}}
-        <span data-icon="plugin" data-icon-size="36" data-icon-class="me-2" style="color: var(--primary-color);"></span>
-        {{else}}
-        <svg width="36" height="36" viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg" class="me-2">
-          <path d="M 724 410 L 714 405 L 686 404 L 663 397 L 651 386 L 632 352 L 618 339 L 600 329 L 582 324 L 561 324 L 542 329 L 518 344
-               L 503 362 L 493 386 L 491 412 L 494 428 L 503 448 L 541 493 L 554 520 L 526 508 L 501 503 L 464 504 L 414 514 L 383 513
-               L 349 498 L 330 480 L 321 467 L 308 498 L 303 523 L 304 562 L 316 601 L 338 635 L 362 658 L 386 674 L 432 693 L 467 700
-               L 527 701 L 570 695 L 607 683 L 638 665 L 659 645 L 675 619 L 682 591 L 680 562 L 674 544 L 658 518 L 626 486 L 621 474
-               L 623 459 L 626 453 L 638 444 L 672 442 L 702 434 L 723 418 Z"
-            fill="currentColor"/>
-        </svg>
+    <div class="ori-navbar-shell">
+      <div class="ori-navbar-left">
+        <!-- Left: Back button OR Sidebar toggle -->
+        {{if .ShowBackButton}}
+        <a href="{{if .BackButtonURL}}{{.BackButtonURL}}{{else}}/{{end}}" class="modern-btn modern-btn-secondary" title="{{if .BackButtonTitle}}{{.BackButtonTitle}}{{else}}Back to Chat{{end}}" aria-label="{{if .BackButtonTitle}}{{.BackButtonTitle}}{{else}}Back to Chat{{end}}">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+            <path d="M20,11V13H8L13.5,18.5L12.08,19.92L4.16,12L12.08,4.08L13.5,5.5L8,11H20Z"/>
+          </svg>
+        </a>
+        {{else if ne .ShowSidebarToggle false}}
+        <button {{if .SidebarToggleId}}id="{{.SidebarToggleId}}"{{else}}id="sidebarToggle"{{end}} class="modern-btn modern-btn-secondary navbar-sidebar-toggle {{if .SidebarToggleHideOnLg}}d-lg-none{{end}}" type="button" title="Toggle Sidebar" aria-label="Toggle sidebar menu" aria-expanded="false">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+            <path d="M3 18h18v-2H3v2zm0-5h18v-2H3v2zm0-7v2h18V6H3z"/>
+          </svg>
+        </button>
         {{end}}
-        {{if .BrandText}}{{.BrandText}}{{else}}{{.Title}}{{end}}
-      </a>
+
+        <!-- Brand -->
+        <a class="navbar-brand ori-navbar-brand fw-bold {{if .BrandNoDecoration}}text-decoration-none{{else}}d-flex{{end}} align-items-center" href="{{if .BrandURL}}{{.BrandURL}}{{else}}/{{end}}" style="color: {{if .BrandColor}}{{.BrandColor}}{{else}}var(--primary-color){{end}};{{if not .NavbarFixed}} font-size: 1.25rem; cursor: pointer;{{end}}">
+          {{if .BrandIcon}}
+          {{.BrandIcon}}
+          {{else if .UseLegacyIcon}}
+          <span data-icon="plugin" data-icon-size="36" data-icon-class="me-2" style="color: var(--primary-color);"></span>
+          {{else}}
+          <svg width="36" height="36" viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg" class="me-2">
+            <path d="M 724 410 L 714 405 L 686 404 L 663 397 L 651 386 L 632 352 L 618 339 L 600 329 L 582 324 L 561 324 L 542 329 L 518 344
+                 L 503 362 L 493 386 L 491 412 L 494 428 L 503 448 L 541 493 L 554 520 L 526 508 L 501 503 L 464 504 L 414 514 L 383 513
+                 L 349 498 L 330 480 L 321 467 L 308 498 L 303 523 L 304 562 L 316 601 L 338 635 L 362 658 L 386 674 L 432 693 L 467 700
+                 L 527 701 L 570 695 L 607 683 L 638 665 L 659 645 L 675 619 L 682 591 L 680 562 L 674 544 L 658 518 L 626 486 L 621 474
+                 L 623 459 L 626 453 L 638 444 L 672 442 L 702 434 L 723 418 Z"
+              fill="currentColor"/>
+          </svg>
+          {{end}}
+          {{if .BrandText}}{{.BrandText}}{{else}}{{.Title}}{{end}}
+        </a>
+      </div>
 
       <!-- Center: Navigation Links (optional) -->
       {{if ne .ShowNavLinks false}}
-      <div class="d-flex align-items-center gap-2 ms-4">
+      <div class="ori-navbar-links">
         <a href="/agents" class="nav-link-item" style="color: var(--text-primary); text-decoration: none; padding: 0.5rem 1rem; border-radius: var(--radius-md); transition: background 0.2s;">Agents</a>
-        <span style="color: var(--text-muted);">|</span>
+        <span class="ori-navbar-divider" aria-hidden="true">|</span>
         <a href="/plugins" class="nav-link-item" style="color: var(--text-primary); text-decoration: none; padding: 0.5rem 1rem; border-radius: var(--radius-md); transition: background 0.2s;">Plugins</a>
-        <span style="color: var(--text-muted);">|</span>
+        <span class="ori-navbar-divider" aria-hidden="true">|</span>
         <a href="/workspaces" class="nav-link-item" style="color: var(--text-primary); text-decoration: none; padding: 0.5rem 1rem; border-radius: var(--radius-md); transition: background 0.2s;">Workspaces</a>
         <!-- Plugin Pages Dropdown (hidden by default, populated via JS) -->
-        <span id="pluginPagesDelimiter" style="color: var(--text-muted); display: none;">|</span>
-        <div id="pluginPagesDropdown" class="dropdown" style="display: none; position: relative; z-index: 10001;">
+        <span id="pluginPagesDelimiter" class="ori-navbar-divider" style="display: none;" aria-hidden="true">|</span>
+        <div id="pluginPagesDropdown" class="dropdown ori-navbar-plugin-pages" style="display: none;">
           <button class="nav-link-item dropdown-toggle" type="button" id="pluginPagesBtn" data-bs-toggle="dropdown" aria-expanded="false" style="color: var(--text-primary); background: none; border: none; padding: 0.5rem 1rem; border-radius: var(--radius-md); transition: background 0.2s; cursor: pointer;">
             Pages
           </button>
@@ -57,73 +59,75 @@
       </div>
       {{end}}
 
-      <!-- Center-Right: System Model Indicator -->
-      <div class="d-flex align-items-center ms-auto me-3">
-        <a href="/settings#system-model" id="systemModelIndicator" class="d-flex align-items-center gap-2 text-decoration-none" style="padding: 0.4rem 0.8rem; border-radius: var(--radius-md); background: var(--bg-secondary); border: 1px solid var(--border-color); transition: all 0.2s;" title="System Model - Click to configure">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" style="color: var(--text-muted);">
-            <path d="M12,2A2,2 0 0,1 14,4C14,4.74 13.6,5.39 13,5.73V7H14A7,7 0 0,1 21,14H22A1,1 0 0,1 23,15V18A1,1 0 0,1 22,19H21V20A2,2 0 0,1 19,22H5A2,2 0 0,1 3,20V19H2A1,1 0 0,1 1,18V15A1,1 0 0,1 2,14H3A7,7 0 0,1 10,7H11V5.73C10.4,5.39 10,4.74 10,4A2,2 0 0,1 12,2M7.5,13A2.5,2.5 0 0,0 5,15.5A2.5,2.5 0 0,0 7.5,18A2.5,2.5 0 0,0 10,15.5A2.5,2.5 0 0,0 7.5,13M16.5,13A2.5,2.5 0 0,0 14,15.5A2.5,2.5 0 0,0 16.5,18A2.5,2.5 0 0,0 19,15.5A2.5,2.5 0 0,0 16.5,13Z"/>
-          </svg>
-          <span id="systemModelName" style="font-size: 0.85rem; font-weight: 500; color: var(--text-primary);">Loading...</span>
-          <span id="navSystemModelProvider" class="badge" style="font-size: 0.7rem; padding: 0.2rem 0.4rem; background: var(--bg-tertiary); color: var(--text-muted);"></span>
-        </a>
-      </div>
+      <div class="ori-navbar-utilities">
+        <!-- Center-Right: System Model Indicator -->
+        <div class="ori-navbar-model-group">
+          <a href="/settings#system-model" id="systemModelIndicator" class="ori-navbar-system-model d-flex align-items-center gap-2 text-decoration-none" style="padding: 0.4rem 0.8rem; border-radius: var(--radius-md); background: var(--bg-secondary); border: 1px solid var(--border-color); transition: all 0.2s;" title="System Model - Click to configure">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" style="color: var(--text-muted);">
+              <path d="M12,2A2,2 0 0,1 14,4C14,4.74 13.6,5.39 13,5.73V7H14A7,7 0 0,1 21,14H22A1,1 0 0,1 23,15V18A1,1 0 0,1 22,19H21V20A2,2 0 0,1 19,22H5A2,2 0 0,1 3,20V19H2A1,1 0 0,1 1,18V15A1,1 0 0,1 2,14H3A7,7 0 0,1 10,7H11V5.73C10.4,5.39 10,4.74 10,4A2,2 0 0,1 12,2M7.5,13A2.5,2.5 0 0,0 5,15.5A2.5,2.5 0 0,0 7.5,18A2.5,2.5 0 0,0 10,15.5A2.5,2.5 0 0,0 7.5,13M16.5,13A2.5,2.5 0 0,0 14,15.5A2.5,2.5 0 0,0 16.5,18A2.5,2.5 0 0,0 19,15.5A2.5,2.5 0 0,0 16.5,13Z"/>
+            </svg>
+            <span id="systemModelName" style="font-size: 0.85rem; font-weight: 500; color: var(--text-primary);">Loading...</span>
+            <span id="navSystemModelProvider" class="badge" style="font-size: 0.7rem; padding: 0.2rem 0.4rem; background: var(--bg-tertiary); color: var(--text-muted);"></span>
+          </a>
+        </div>
 
-      <!-- Right: Location, Actions, Theme -->
-      <div class="d-flex align-items-center gap-3">
-        <!-- Location Indicator (optional) -->
-        {{if .ShowLocationIndicator}}
-        <span id="locationIndicator" class="modern-badge badge-secondary d-flex align-items-center gap-2" style="padding: 0.5rem 1rem; border-radius: var(--radius-lg);" title="Current location">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" style="color: var(--text-secondary);">
-            <path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-          </svg>
-          <span class="fw-medium">Loading...</span>
-        </span>
-        {{end}}
-
-        <!-- Update Notification Button (optional) -->
-        <button id="updateNotificationBtn" class="modern-btn modern-btn-primary position-relative" style="display: none; align-items: center; gap: 0.5rem;" onclick="showUpdateModal()" title="Update available" aria-label="Update available - click to view details">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-            <path d="M5,20H19V18H5M19,9H15V3H9V9H5L12,16L19,9Z"/>
-          </svg>
-          <span>{{if .UpdateButtonText}}{{.UpdateButtonText}}{{else}}Update Available{{end}}</span>
-          <span class="position-absolute top-0 start-100 translate-middle p-1 bg-danger border border-light rounded-circle">
-            <span class="visually-hidden">New update</span>
+        <!-- Right: Location, Actions, Theme -->
+        <div class="ori-navbar-actions">
+          <!-- Location Indicator (optional) -->
+          {{if .ShowLocationIndicator}}
+          <span id="locationIndicator" class="modern-badge badge-secondary d-flex align-items-center gap-2" style="padding: 0.5rem 1rem; border-radius: var(--radius-lg);" title="Current location">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" style="color: var(--text-secondary);">
+              <path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+            <span class="fw-medium">Loading...</span>
           </span>
-        </button>
+          {{end}}
 
-        <!-- Refresh Button (optional) -->
-        {{if .ShowRefreshButton}}
-        <button id="refreshAppBtn" class="modern-btn modern-btn-secondary me-2" onclick="refreshApp(true)" style="display: flex; align-items: center; gap: 0.5rem;" title="Refresh all app data" aria-label="Refresh all application data">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-            <path d="M21 12C21 16.9706 16.9706 21 12 21C7.02944 21 3 16.9706 3 12C3 7.02944 7.02944 3 12 3C13.3256 3 14.5859 3.28125 15.7285 3.78906" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-            <path d="M17 8L21 4L17 4L17 8Z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-          </svg>
-          <span>Refresh</span>
-        </button>
-        {{end}}
+          <!-- Update Notification Button (optional) -->
+          <button id="updateNotificationBtn" class="modern-btn modern-btn-primary position-relative" style="display: none; align-items: center; gap: 0.5rem;" onclick="showUpdateModal()" title="Update available" aria-label="Update available - click to view details">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+              <path d="M5,20H19V18H5M19,9H15V3H9V9H5L12,16L19,9Z"/>
+            </svg>
+            <span>{{if .UpdateButtonText}}{{.UpdateButtonText}}{{else}}Update Available{{end}}</span>
+            <span class="position-absolute top-0 start-100 translate-middle p-1 bg-danger border border-light rounded-circle">
+              <span class="visually-hidden">New update</span>
+            </span>
+          </button>
 
-        <button
-          id="homeAssistantReopenBtn"
-          class="modern-btn modern-btn-secondary d-none"
-          type="button"
-          data-bs-toggle="modal"
-          data-bs-target="#homeAssistantThinkingModal"
-          aria-controls="homeAssistantThinkingModal"
-          aria-pressed="false"
-          title="Open Ask Ori activity">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-            <path d="M4,4H20A2,2 0 0,1 22,6V18A2,2 0 0,1 20,20H4A2,2 0 0,1 2,18V6A2,2 0 0,1 4,4M4,6V8L12,13L20,8V6L12,11L4,6M4,18H20V10.5L12,15.5L4,10.5V18Z"/>
-          </svg>
-          <span data-home-assistant-launcher-label>Task Activity</span>
-        </button>
+          <!-- Refresh Button (optional) -->
+          {{if .ShowRefreshButton}}
+          <button id="refreshAppBtn" class="modern-btn modern-btn-secondary" onclick="refreshApp(true)" style="display: flex; align-items: center; gap: 0.5rem;" title="Refresh all app data" aria-label="Refresh all application data">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+              <path d="M21 12C21 16.9706 16.9706 21 12 21C7.02944 21 3 16.9706 3 12C3 7.02944 7.02944 3 12 3C13.3256 3 14.5859 3.28125 15.7285 3.78906" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+              <path d="M17 8L21 4L17 4L17 8Z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+            <span>Refresh</span>
+          </button>
+          {{end}}
 
-        <!-- Dark Mode Toggle (always shown) -->
-        <button id="darkModeToggle" class="modern-btn modern-btn-secondary" aria-label="Toggle dark mode" aria-pressed="false">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-            <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79Z"/>
-          </svg>
-          <span id="darkModeText">Dark</span>
-        </button>
+          <button
+            id="homeAssistantReopenBtn"
+            class="modern-btn modern-btn-secondary d-none"
+            type="button"
+            data-bs-toggle="modal"
+            data-bs-target="#homeAssistantThinkingModal"
+            aria-controls="homeAssistantThinkingModal"
+            aria-pressed="false"
+            title="Open Ask Ori activity">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+              <path d="M4,4H20A2,2 0 0,1 22,6V18A2,2 0 0,1 20,20H4A2,2 0 0,1 2,18V6A2,2 0 0,1 4,4M4,6V8L12,13L20,8V6L12,11L4,6M4,18H20V10.5L12,15.5L4,10.5V18Z"/>
+            </svg>
+            <span data-home-assistant-launcher-label>Task Activity</span>
+          </button>
+
+          <!-- Dark Mode Toggle (always shown) -->
+          <button id="darkModeToggle" class="modern-btn modern-btn-secondary" aria-label="Toggle dark mode" aria-pressed="false">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+              <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79Z"/>
+            </svg>
+            <span id="darkModeText">Dark</span>
+          </button>
+        </div>
       </div>
     </div>
   </div>

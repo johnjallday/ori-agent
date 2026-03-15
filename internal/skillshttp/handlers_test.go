@@ -92,6 +92,14 @@ func (s *testAgentStore) SetAgent(name string, ag *agent.Agent) error {
 	return nil
 }
 
+func (s *testAgentStore) UpdateAgent(name string, updateFn func(*agent.Agent) error) error {
+	ag, ok := s.agents[name]
+	if !ok {
+		return nil
+	}
+	return updateFn(ag)
+}
+
 func (s *testAgentStore) ClearAgents() error {
 	s.agents = map[string]*agent.Agent{}
 	return nil

@@ -124,8 +124,7 @@ type Agent struct {
 	Capabilities []string                                 `json:"capabilities"` // Agent capabilities (web_search, code_analysis, etc.)
 	Settings     types.Settings                           `json:"Settings"`
 	Plugins      map[string]types.LoadedPlugin            `json:"Plugins"`
-	MCPServers   []string                                 `json:"mcp_servers,omitempty"` // List of enabled MCP server names
-	Messages     []openai.ChatCompletionMessageParamUnion `json:"-"`                     // in-memory only
+	Messages     []openai.ChatCompletionMessageParamUnion `json:"-"` // in-memory only
 
 	// Dashboard-specific fields (optional for backward compatibility)
 	Status     types.AgentStatus      `json:"status,omitempty"`     // Operational status (active, idle, error, disabled)

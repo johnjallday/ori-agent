@@ -12,6 +12,7 @@ import (
 	orihttp "github.com/johnjallday/ori-agent/internal/http"
 	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/updatehttp"
+	"github.com/johnjallday/ori-agent/internal/workspace"
 )
 
 // registerRoutes registers all HTTP routes for the server.
@@ -106,8 +107,6 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 	mux.HandleFunc("/api/agents/dashboard/list", dashboardHandler.ListAgentsWithStats)
 	mux.HandleFunc("/api/agents/dashboard/stats", dashboardHandler.GetDashboardStats)
 
-	// Agent MCP handlers
-	s.Handlers.AgentMCP = agenthttp.NewMCPHandler(s.Integration.MCPRegistry, s.Integration.MCPConfigManager, agentHandler)
 	mux.HandleFunc("/api/agents/", func(w http.ResponseWriter, r *http.Request) {
 		// Route evolution API requests first
 		if s.Handlers.Evolution != nil && strings.HasSuffix(r.URL.Path, "/evolution/path") && r.Method == http.MethodPost {
@@ -142,22 +141,8 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 			avatarHandler.ServeHTTP(w, r)
 			return
 		}
-		// Route agent MCP-specific requests
-		if strings.Contains(r.URL.Path, "/mcp-servers") {
-			if strings.HasSuffix(r.URL.Path, "/enable") {
-				s.Handlers.AgentMCP.EnableAgentMCPServerHandler(w, r)
-			} else if strings.HasSuffix(r.URL.Path, "/disable") {
-				s.Handlers.AgentMCP.DisableAgentMCPServerHandler(w, r)
-			} else if strings.HasSuffix(r.URL.Path, "/config") {
-				s.Handlers.AgentMCP.UpdateAgentMCPServerConfigHandler(w, r)
-			} else {
-				// List MCP servers for agent
-				s.Handlers.AgentMCP.ListAgentMCPServersHandler(w, r)
-			}
-		} else {
-			// Regular agent requests - delegate to agentHandler
-			agentHandler.ServeHTTP(w, r)
-		}
+		// Regular agent requests - delegate to agentHandler
+		agentHandler.ServeHTTP(w, r)
 	})
 
 	// Agent capabilities endpoint
@@ -170,6 +155,16 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 	// Home assistant task routing endpoint
 	homeAssistantRouteHandler := agenthttp.NewHomeAssistantRouteHandler(s.Storage.AgentStore)
 	homeAssistantRouteHandler.SetSystemModelReader(s.Core.ConfigManager)
+	if s.Storage != nil && s.Integration != nil {
+		homeAssistantRouteHandler.SetRuntimeResolver(
+			workspace.NewAgentRuntimeResolver(
+				s.Storage.AgentStore,
+				s.Storage.WorkspaceStore,
+				s.Integration.MCPRegistry,
+				s.Integration.MCPConfigManager,
+			),
+		)
+	}
 	mux.HandleFunc("/api/home-assistant/route", homeAssistantRouteHandler.RouteHandler)
 
 	// =============================================================================
@@ -406,56 +401,29 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 	// =============================================================================
 	// MCP (Model Context Protocol) Endpoints
 	// =============================================================================
-	mux.HandleFunc("/api/mcp/servers", func(w http.ResponseWriter, r *http.Request) {
-		switch r.Method {
-		case http.MethodGet:
-			s.Handlers.MCP.ListServersHandler(w, r)
-		case http.MethodPost:
-			s.Handlers.MCP.AddServerHandler(w, r)
-		default:
-			orihttp.MethodNotAllowed(w)
-		}
-	})
-	mux.HandleFunc("/api/mcp/servers/", func(w http.ResponseWriter, r *http.Request) {
-		// Check for specific actions in the path
-		if strings.HasSuffix(r.URL.Path, "/enable") {
-			s.Handlers.MCP.EnableServerHandler(w, r)
-		} else if strings.HasSuffix(r.URL.Path, "/disable") {
-			s.Handlers.MCP.DisableServerHandler(w, r)
-		} else if strings.HasSuffix(r.URL.Path, "/tools") {
-			s.Handlers.MCP.GetServerToolsHandler(w, r)
-		} else if strings.HasSuffix(r.URL.Path, "/status") {
-			s.Handlers.MCP.GetServerStatusHandler(w, r)
-		} else if strings.HasSuffix(r.URL.Path, "/test") {
-			s.Handlers.MCP.TestConnectionHandler(w, r)
-		} else if strings.HasSuffix(r.URL.Path, "/retry") {
-			s.Handlers.MCP.RetryConnectionHandler(w, r)
-		} else if r.Method == http.MethodDelete {
-			s.Handlers.MCP.RemoveServerHandler(w, r)
-		} else {
-			orihttp.NotFound(w, "Not found")
-		}
-	})
-	mux.HandleFunc("/api/mcp/import", s.Handlers.MCP.ImportServersHandler)
-	mux.HandleFunc("/api/mcp/marketplace", s.Handlers.MCP.GetMarketplaceServersHandler)
-	mux.HandleFunc("/api/mcp/search", s.Handlers.MCP.SearchServersHandler)
-	mux.HandleFunc("/api/mcp/registry-sources", func(w http.ResponseWriter, r *http.Request) {
-		switch r.Method {
-		case http.MethodGet:
-			s.Handlers.MCP.ListRegistrySourcesHandler(w, r)
-		case http.MethodPost:
-			s.Handlers.MCP.AddRegistrySourceHandler(w, r)
-		default:
-			orihttp.MethodNotAllowed(w)
-		}
-	})
-	mux.HandleFunc("/api/mcp/registry-sources/", s.Handlers.MCP.RegistrySourcesItemHandler)
-	mux.HandleFunc("/api/mcp/registry/refresh", s.Handlers.MCP.RefreshRegistryHandler)
+	mux.HandleFunc("GET /api/mcp/servers", s.Handlers.MCP.ListServersHandler)
+	mux.HandleFunc("POST /api/mcp/servers", s.Handlers.MCP.AddServerHandler)
+	mux.HandleFunc("DELETE /api/mcp/servers/{name}", s.Handlers.MCP.RemoveServerHandler)
+	mux.HandleFunc("POST /api/mcp/servers/{name}/enable", s.Handlers.MCP.EnableServerHandler)
+	mux.HandleFunc("POST /api/mcp/servers/{name}/disable", s.Handlers.MCP.DisableServerHandler)
+	mux.HandleFunc("GET /api/mcp/servers/{name}/tools", s.Handlers.MCP.GetServerToolsHandler)
+	mux.HandleFunc("GET /api/mcp/servers/{name}/status", s.Handlers.MCP.GetServerStatusHandler)
+	mux.HandleFunc("POST /api/mcp/servers/{name}/test", s.Handlers.MCP.TestConnectionHandler)
+	mux.HandleFunc("POST /api/mcp/servers/{name}/retry", s.Handlers.MCP.RetryConnectionHandler)
+
+	mux.HandleFunc("POST /api/mcp/import", s.Handlers.MCP.ImportServersHandler)
+	mux.HandleFunc("GET /api/mcp/marketplace", s.Handlers.MCP.GetMarketplaceServersHandler)
+	mux.HandleFunc("GET /api/mcp/search", s.Handlers.MCP.SearchServersHandler)
+	mux.HandleFunc("GET /api/mcp/registry-sources", s.Handlers.MCP.ListRegistrySourcesHandler)
+	mux.HandleFunc("POST /api/mcp/registry-sources", s.Handlers.MCP.AddRegistrySourceHandler)
+	mux.HandleFunc("DELETE /api/mcp/registry-sources/{id}", s.Handlers.MCP.RegistrySourcesItemHandler)
+	mux.HandleFunc("POST /api/mcp/registry/refresh", s.Handlers.MCP.RefreshRegistryHandler)
 
 	// =============================================================================
 	// Orchestration Endpoints
 	// =============================================================================
 	mux.HandleFunc("/api/orchestration/workspace", s.Handlers.Orchestration.WorkspaceHandler)
+	mux.HandleFunc("/api/orchestration/workspace/activate", s.Handlers.Orchestration.WorkspaceActivateHandler)
 	mux.HandleFunc("/api/orchestration/workspace/agents", s.Handlers.Orchestration.WorkspaceAgentsHandler)
 	mux.HandleFunc("/api/orchestration/workspace/layout", s.Handlers.Orchestration.SaveLayoutHandler)
 	mux.HandleFunc("/api/orchestration/messages", s.Handlers.Orchestration.MessagesHandler)
@@ -717,6 +685,21 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 		}
 	})
 
+	// MCP binding routes (Go 1.22+ method patterns)
+	mux.HandleFunc("POST /api/studios/{studioID}/mcp-bindings", s.Handlers.Studio.CreateMCPBinding)
+	mux.HandleFunc("GET /api/studios/{studioID}/mcp-bindings", s.Handlers.Studio.ListMCPBindings)
+	mux.HandleFunc("GET /api/studios/{studioID}/mcp-bindings/{bindingID}", s.Handlers.Studio.GetMCPBinding)
+	mux.HandleFunc("PUT /api/studios/{studioID}/mcp-bindings/{bindingID}", s.Handlers.Studio.UpdateMCPBinding)
+	mux.HandleFunc("PATCH /api/studios/{studioID}/mcp-bindings/{bindingID}", s.Handlers.Studio.UpdateMCPBinding)
+	mux.HandleFunc("DELETE /api/studios/{studioID}/mcp-bindings/{bindingID}", s.Handlers.Studio.DeleteMCPBinding)
+
+	// Agent MCP access routes
+	mux.HandleFunc("GET /api/studios/{studioID}/agent-mcp-access", s.Handlers.Studio.ListAgentMCPAccess)
+	mux.HandleFunc("GET /api/studios/{studioID}/agent-mcp-access/{agentInstanceID}", s.Handlers.Studio.GetAgentMCPAccessEntry)
+	mux.HandleFunc("PUT /api/studios/{studioID}/agent-mcp-access/{agentInstanceID}", s.Handlers.Studio.UpdateAgentMCPAccess)
+	mux.HandleFunc("PATCH /api/studios/{studioID}/agent-mcp-access/{agentInstanceID}", s.Handlers.Studio.UpdateAgentMCPAccess)
+	mux.HandleFunc("DELETE /api/studios/{studioID}/agent-mcp-access/{agentInstanceID}", s.Handlers.Studio.DeleteAgentMCPAccess)
+
 	mux.HandleFunc("/api/studios/", func(w http.ResponseWriter, r *http.Request) {
 		// Parse the path to determine which handler to use
 		if strings.HasSuffix(r.URL.Path, "/events") {
@@ -835,7 +818,7 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 					orihttp.MethodNotAllowed(w)
 				}
 			}
-			// Handle agent add/remove operations
+			// MCP binding and agent-mcp-access routes are registered as specific patterns above.
 		} else if strings.Contains(r.URL.Path, "/agents") {
 
 			switch r.Method {

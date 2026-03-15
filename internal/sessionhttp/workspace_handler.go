@@ -16,6 +16,7 @@ import (
 	orihttp "github.com/johnjallday/ori-agent/internal/http"
 	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/session"
+	agentworkspace "github.com/johnjallday/ori-agent/internal/workspace"
 )
 
 // HandleWorkspaces routes requests to /api/workspaces (also supports legacy /api/folders).
@@ -807,17 +808,36 @@ func (h *Handler) removeWorkspaceAgent(w http.ResponseWriter, r *http.Request, w
 		return
 	}
 
-	// Try to find and remove by instance ID first, then by node ID, then by name
+	// Try to find and remove by instance ID first, then by node ID, then by name.
 	removed := false
-	var removedInstance *session.AgentInstance
+	removedNames := make(map[string]struct{})
+	removedNodeIDs := make(map[string]struct{})
+	removedInstanceIDs := make(map[string]struct{})
 	newInstances := make([]session.AgentInstance, 0, len(workspace.AgentInstances))
 	for _, inst := range workspace.AgentInstances {
 		if inst.ID == agentIdentifier || inst.NodeID == agentIdentifier || inst.Name == agentIdentifier {
 			removed = true
-			removedInstance = &inst
-			// Don't add this one to new list
+			if name := strings.TrimSpace(inst.Name); name != "" {
+				removedNames[name] = struct{}{}
+			}
+			if nodeID := strings.TrimSpace(inst.NodeID); nodeID != "" {
+				removedNodeIDs[nodeID] = struct{}{}
+			}
+			if instanceID := strings.TrimSpace(inst.ID); instanceID != "" {
+				removedInstanceIDs[instanceID] = struct{}{}
+			}
 		} else {
 			newInstances = append(newInstances, inst)
+		}
+	}
+
+	if !removed && strings.TrimSpace(agentIdentifier) != "" {
+		for _, name := range workspace.Agents {
+			if name == agentIdentifier {
+				removed = true
+				removedNames[agentIdentifier] = struct{}{}
+				break
+			}
 		}
 	}
 
@@ -828,24 +848,31 @@ func (h *Handler) removeWorkspaceAgent(w http.ResponseWriter, r *http.Request, w
 
 	workspace.AgentInstances = newInstances
 
-	// Update legacy agents array - remove if no more instances of this agent type
-	if removedInstance != nil {
-		hasOtherInstances := false
+	// Update legacy agents array - remove names that no longer have active instances.
+	if len(removedNames) > 0 {
+		remainingNames := make(map[string]struct{}, len(workspace.AgentInstances))
 		for _, inst := range workspace.AgentInstances {
-			if inst.Name == removedInstance.Name {
-				hasOtherInstances = true
-				break
+			if name := strings.TrimSpace(inst.Name); name != "" {
+				remainingNames[name] = struct{}{}
 			}
 		}
-		if !hasOtherInstances {
-			newAgents := make([]string, 0, len(workspace.Agents))
-			for _, a := range workspace.Agents {
-				if a != removedInstance.Name {
-					newAgents = append(newAgents, a)
+
+		newAgents := make([]string, 0, len(workspace.Agents))
+		for _, name := range workspace.Agents {
+			if _, wasRemoved := removedNames[name]; wasRemoved {
+				if _, stillPresent := remainingNames[name]; !stillPresent {
+					continue
 				}
 			}
-			workspace.Agents = newAgents
+			newAgents = append(newAgents, name)
 		}
+		workspace.Agents = newAgents
+	}
+
+	if err := cleanupRemovedAgentWorkspaceState(workspace, removedNames, removedNodeIDs, removedInstanceIDs); err != nil {
+		logger.Error("Failed to cleanup workspace state after removing agent", logger.Fields{"id": workspaceID, "error": err})
+		_ = orihttp.RespondInternalError(w, "Failed to remove agent")
+		return
 	}
 
 	workspace.UpdatedAt = time.Now()
@@ -865,6 +892,96 @@ func (h *Handler) removeWorkspaceAgent(w http.ResponseWriter, r *http.Request, w
 		"success":   true,
 		"workspace": workspace,
 	})
+}
+
+func cleanupRemovedAgentWorkspaceState(
+	workspace *session.Workspace,
+	removedNames map[string]struct{},
+	removedNodeIDs map[string]struct{},
+	removedInstanceIDs map[string]struct{},
+) error {
+	if workspace == nil {
+		return nil
+	}
+
+	if workspace.Layout != nil {
+		if len(removedNodeIDs) > 0 && workspace.Layout.AgentPositions != nil {
+			for nodeID := range removedNodeIDs {
+				delete(workspace.Layout.AgentPositions, nodeID)
+			}
+		}
+		if len(removedNodeIDs) > 0 && len(workspace.Layout.WorkflowConnections) > 0 {
+			filteredConnections := workspace.Layout.WorkflowConnections[:0]
+			for _, connection := range workspace.Layout.WorkflowConnections {
+				if _, removedFrom := removedNodeIDs[connection.From]; removedFrom {
+					continue
+				}
+				if _, removedTo := removedNodeIDs[connection.To]; removedTo {
+					continue
+				}
+				filteredConnections = append(filteredConnections, connection)
+			}
+			workspace.Layout.WorkflowConnections = filteredConnections
+		}
+	}
+
+	if len(workspace.TasksJSON) > 0 && (len(removedNames) > 0 || len(removedNodeIDs) > 0) {
+		var tasks []agentworkspace.Task
+		if err := json.Unmarshal(workspace.TasksJSON, &tasks); err != nil {
+			return fmt.Errorf("decode tasks: %w", err)
+		}
+
+		changed := false
+		for i := range tasks {
+			if _, removedNode := removedNodeIDs[strings.TrimSpace(tasks[i].AssignedNodeID)]; removedNode {
+				tasks[i].To = "unassigned"
+				tasks[i].AssignedNodeID = ""
+				tasks[i].InputTaskIDs = nil
+				changed = true
+			} else if tasks[i].AssignedNodeID == "" {
+				if _, removedName := removedNames[strings.TrimSpace(tasks[i].To)]; removedName {
+					tasks[i].To = "unassigned"
+					changed = true
+				}
+			}
+
+			if _, removedName := removedNames[strings.TrimSpace(tasks[i].From)]; removedName {
+				tasks[i].From = ""
+				changed = true
+			}
+		}
+
+		if changed {
+			data, err := json.Marshal(tasks)
+			if err != nil {
+				return fmt.Errorf("encode tasks: %w", err)
+			}
+			workspace.TasksJSON = data
+		}
+	}
+
+	if len(workspace.AgentMCPAccessJSON) > 0 && len(removedInstanceIDs) > 0 {
+		var accessEntries []agentworkspace.WorkspaceAgentMCPAccess
+		if err := json.Unmarshal(workspace.AgentMCPAccessJSON, &accessEntries); err != nil {
+			return fmt.Errorf("decode agent mcp access: %w", err)
+		}
+
+		filteredAccess := accessEntries[:0]
+		for _, entry := range accessEntries {
+			if _, removed := removedInstanceIDs[strings.TrimSpace(entry.AgentInstanceID)]; removed {
+				continue
+			}
+			filteredAccess = append(filteredAccess, entry)
+		}
+
+		data, err := json.Marshal(filteredAccess)
+		if err != nil {
+			return fmt.Errorf("encode agent mcp access: %w", err)
+		}
+		workspace.AgentMCPAccessJSON = data
+	}
+
+	return nil
 }
 
 // =============================================================================

@@ -271,6 +271,12 @@ type Workspace struct {
 
 	// DirectoryReferencesJSON contains serialized directory references.
 	DirectoryReferencesJSON json.RawMessage `json:"directory_references,omitempty"`
+
+	// MCPBindingsJSON contains serialized workspace-owned MCP bindings.
+	MCPBindingsJSON json.RawMessage `json:"mcp_bindings,omitempty"`
+
+	// AgentMCPAccessJSON contains serialized per-agent-instance MCP access rules.
+	AgentMCPAccessJSON json.RawMessage `json:"agent_mcp_access,omitempty"`
 }
 
 // Tag represents a unique tag used across sessions.

@@ -48,6 +48,10 @@
     return candidates[0] || '';
   }
 
+  function getTaskLabel(task) {
+    return String(task?.name || task?.description || task?.id || 'Task').trim() || 'Task';
+  }
+
   async function assignTaskToAgent(taskId, agentName) {
     const response = await fetch(`/api/orchestration/tasks/${encodeURIComponent(taskId)}`, {
       method: 'PUT',
@@ -171,7 +175,14 @@
         return;
       }
 
-      const assignAndRun = confirm(`This task is unassigned. Assign it to "${fallbackAgent}" and execute now?`);
+      const assignAndRun = await window.WorkspaceHubModals.showExecutionConfirm({
+        eyebrow: 'Assignment Required',
+        title: `Execute with "${fallbackAgent}"?`,
+        message: `This task is unassigned. I can assign it to "${fallbackAgent}" and start execution immediately.`,
+        confirmLabel: 'Assign and Execute',
+        metaItems: [getTaskLabel(task), fallbackAgent, 'Workspace agent'],
+        details: ['The task will be updated before dispatch.', 'The task list will refresh after execution starts.']
+      });
       if (!assignAndRun) return;
 
       try {
@@ -189,10 +200,18 @@
       }
     }
 
-    const confirmMessage = isParent
-      ? `Execute this workflow (${subtasks.length} step${subtasks.length === 1 ? '' : 's'}) now?`
-      : 'Execute this task now?';
-    const confirmed = confirm(confirmMessage);
+    const confirmed = await window.WorkspaceHubModals.showExecutionConfirm({
+      eyebrow: isParent ? 'Workflow Launch' : 'Task Launch',
+      title: isParent ? 'Execute this workflow now?' : 'Execute this task now?',
+      message: isParent
+        ? `This workflow will dispatch ${subtasks.length} step${subtasks.length === 1 ? '' : 's'} in sequence.`
+        : `This task will run${assignedAgent ? ` with "${assignedAgent}"` : ''}.`,
+      confirmLabel: isParent ? 'Execute Workflow' : 'Execute Task',
+      metaItems: isParent
+        ? [getTaskLabel(task), `${subtasks.length} step${subtasks.length === 1 ? '' : 's'}`]
+        : [getTaskLabel(task), assignedAgent || 'Unassigned', 'Ready to run'],
+      details: ['The task list will refresh after dispatch.', 'Use the task details panel to re-run or inspect results later.']
+    });
     if (!confirmed) return;
 
     try {

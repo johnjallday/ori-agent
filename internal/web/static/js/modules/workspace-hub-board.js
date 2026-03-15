@@ -838,6 +838,10 @@
     return (state.board.tasks || []).filter((t) => t && t.parent_task_id === taskId);
   }
 
+  function getTaskLabel(task) {
+    return String(task?.name || task?.description || task?.id || 'Task').trim() || 'Task';
+  }
+
   async function executeTaskFromModal(task) {
     const state = getState();
     if (!task || !task.id) return;
@@ -864,10 +868,20 @@
       }
     }
 
-    const confirmMessage = isParent
-      ? `Execute this workflow (${subtasks.length} step${subtasks.length === 1 ? '' : 's'}) now?`
-      : 'Execute this task now?';
-    if (!confirm(confirmMessage)) return;
+    const assignedAgent = !isParent && task.to && task.to !== 'unassigned' ? task.to : '';
+    const confirmed = await window.WorkspaceHubModals.showExecutionConfirm({
+      eyebrow: isParent ? 'Workflow Launch' : 'Task Launch',
+      title: isParent ? 'Execute this workflow now?' : 'Execute this task now?',
+      message: isParent
+        ? `This workflow will dispatch ${subtasks.length} step${subtasks.length === 1 ? '' : 's'} in sequence.`
+        : `This task will run${assignedAgent ? ` with "${assignedAgent}"` : ''}.`,
+      confirmLabel: isParent ? 'Execute Workflow' : 'Execute Task',
+      metaItems: isParent
+        ? [getTaskLabel(task), `${subtasks.length} step${subtasks.length === 1 ? '' : 's'}`]
+        : [getTaskLabel(task), assignedAgent || 'Assigned agent', 'Ready to run'],
+      details: ['The board and task list will refresh after dispatch.', 'Open task details again later to inspect the result.']
+    });
+    if (!confirmed) return;
 
     try {
       const response = await fetch('/api/orchestration/tasks/execute', {

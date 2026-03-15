@@ -36,13 +36,13 @@ func filterToolsForSkill(tools []llm.Tool, skill *skills.Skill) []llm.Tool {
 }
 
 func missingMCPServers(enabled []string, required []string) []string {
-	enabledSet := normalizeStringSet(enabled)
+	enabledSet := normalizeLogicalMCPServerSet(enabled)
 	missing := make([]string, 0)
 	for _, server := range required {
 		if server == "" {
 			continue
 		}
-		if !enabledSet[strings.ToLower(server)] {
+		if !enabledSet[strings.ToLower(strings.TrimSpace(server))] {
 			missing = append(missing, server)
 		}
 	}

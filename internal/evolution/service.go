@@ -29,6 +29,7 @@ const (
 type AgentStore interface {
 	GetAgent(name string) (*agent.Agent, bool)
 	SetAgent(name string, ag *agent.Agent) error
+	UpdateAgent(name string, updateFn func(*agent.Agent) error) error
 }
 
 type AssistantProgressStore interface {
@@ -182,25 +183,26 @@ func (s *Service) SelectPath(agentName string, requestedPath types.AgentPath) er
 		return fmt.Errorf("%w: %q", ErrInvalidPath, requestedPath)
 	}
 
-	ag, found := s.agentStore.GetAgent(agentName)
-	if !found || ag == nil {
-		return fmt.Errorf("%w: %q", ErrAgentNotFound, agentName)
+	var previousPath types.AgentPath
+
+	err := s.agentStore.UpdateAgent(agentName, func(ag *agent.Agent) error {
+		ag.InitializeEvolution()
+		ag.Evolution.EnsureDefaults()
+		ag.Evolution.Stage = stageForLevel(ag.Evolution.Level)
+		if ag.Evolution.Level < 10 {
+			return ErrNotLearnerStage
+		}
+
+		previousPath = ag.Evolution.Path
+		ag.Evolution.Path = path
+		ag.Evolution.UpdatedAt = s.now()
+		return nil
+	})
+
+	if err != nil {
+		return err
 	}
 
-	ag.InitializeEvolution()
-	ag.Evolution.EnsureDefaults()
-	ag.Evolution.Stage = stageForLevel(ag.Evolution.Level)
-	if ag.Evolution.Level < 10 {
-		return ErrNotLearnerStage
-	}
-
-	previousPath := ag.Evolution.Path
-	ag.Evolution.Path = path
-	ag.Evolution.UpdatedAt = s.now()
-
-	if err := s.agentStore.SetAgent(agentName, ag); err != nil {
-		return fmt.Errorf("persisting agent path: %w", err)
-	}
 	s.logActivity(agentName, types.ActivityEventEvolutionPath, map[string]interface{}{
 		"path":     string(path),
 		"old_path": string(previousPath),
@@ -306,30 +308,38 @@ func (s *Service) awardXP(agentName string, requestedXP int64, userMessage strin
 		return nil
 	}
 
-	// Agent store operations use the store's own mutex; no need to hold s.mu.
-	ag, ok := s.agentStore.GetAgent(agentName)
-	if !ok || ag == nil {
-		return fmt.Errorf("agent %q not found", agentName)
-	}
+	var previousLevel int
+	var previousStage types.AgentStage
+	var newLevel int
+	var newStage types.AgentStage
+	var feedCount int64
 
-	ag.InitializeEvolution()
-	ag.Evolution.EnsureDefaults()
+	// Atomic update for agent evolution.
+	err := s.agentStore.UpdateAgent(agentName, func(ag *agent.Agent) error {
+		ag.InitializeEvolution()
+		ag.Evolution.EnsureDefaults()
 
-	previousLevel := ag.Evolution.Level
-	previousStage := ag.Evolution.Stage
+		previousLevel = ag.Evolution.Level
+		previousStage = ag.Evolution.Stage
 
-	ag.Evolution.Experience += awardXP
-	ag.Evolution.Level = levelForExperience(ag.Evolution.Experience, s.cfg.XPPerLevel)
-	ag.Evolution.Stage = stageForLevel(ag.Evolution.Level)
-	if incrementFeedCount {
-		ag.Evolution.FeedCount++
-	}
-	if ag.Evolution.Level != previousLevel || ag.Evolution.Stage != previousStage {
-		ag.Evolution.LastEvolvedAt = now
-	}
-	ag.Evolution.UpdatedAt = now
+		ag.Evolution.Experience += awardXP
+		ag.Evolution.Level = levelForExperience(ag.Evolution.Experience, s.cfg.XPPerLevel)
+		ag.Evolution.Stage = stageForLevel(ag.Evolution.Level)
 
-	if err := s.agentStore.SetAgent(agentName, ag); err != nil {
+		newLevel = ag.Evolution.Level
+		newStage = ag.Evolution.Stage
+
+		if incrementFeedCount {
+			ag.Evolution.FeedCount++
+		}
+		feedCount = ag.Evolution.FeedCount
+		if ag.Evolution.Level != previousLevel || ag.Evolution.Stage != previousStage {
+			ag.Evolution.LastEvolvedAt = now
+		}
+		ag.Evolution.UpdatedAt = now
+		return nil
+	})
+	if err != nil {
 		return fmt.Errorf("persisting agent evolution: %w", err)
 	}
 
@@ -353,15 +363,15 @@ func (s *Service) awardXP(agentName string, requestedXP int64, userMessage strin
 		s.logActivity(agentName, types.ActivityEventEvolutionFeed, map[string]interface{}{
 			"source":     source,
 			"awarded_xp": awardXP,
-			"feed_count": ag.Evolution.FeedCount,
+			"feed_count": feedCount,
 		})
 	}
-	if previousStage != ag.Evolution.Stage {
+	if previousStage != newStage {
 		s.logActivity(agentName, types.ActivityEventEvolutionStage, map[string]interface{}{
 			"old_stage": string(previousStage),
-			"new_stage": string(ag.Evolution.Stage),
+			"new_stage": string(newStage),
 			"old_level": previousLevel,
-			"new_level": ag.Evolution.Level,
+			"new_level": newLevel,
 		})
 	}
 

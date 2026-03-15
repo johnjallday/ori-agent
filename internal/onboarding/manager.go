@@ -39,7 +39,7 @@ func NewManager(statePath string) *Manager {
 				StepsCompleted: []string{},
 			},
 			AssistantProgress: types.NewAssistantProgress(),
-			AssistantName:     "Ori",
+			AssistantName:     "Assistant",
 		},
 	}
 
@@ -259,7 +259,7 @@ func (m *Manager) ensureStateDefaultsUnlocked() {
 		m.state.AssistantProgress.EnsureDefaults()
 	}
 	if m.state.AssistantName == "" {
-		m.state.AssistantName = "Ori"
+		m.state.AssistantName = "Assistant"
 	}
 }
 
@@ -439,7 +439,7 @@ func (m *Manager) SetNames(userName, assistantName string) error {
 	m.state.UserName = userName
 	m.state.AssistantName = strings.TrimSpace(assistantName)
 	if m.state.AssistantName == "" {
-		m.state.AssistantName = "Ori"
+		m.state.AssistantName = "Assistant"
 	}
 	return m.saveUnlocked()
 }
@@ -447,7 +447,7 @@ func (m *Manager) SetNames(userName, assistantName string) error {
 func (m *Manager) getAssistantNameLocked() string {
 	name := strings.TrimSpace(m.state.AssistantName)
 	if name == "" {
-		return "Ori"
+		return "Assistant"
 	}
 	return name
 }

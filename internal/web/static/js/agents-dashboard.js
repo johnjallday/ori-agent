@@ -32,19 +32,9 @@ function notifySuccess(message) {
 }
 
 function initializeDashboard() {
-  syncDrawerOffsetWithNavbar();
-  window.addEventListener('resize', syncDrawerOffsetWithNavbar);
   setupEventListeners();
   setMode('operations');
   loadAgents();
-}
-
-function syncDrawerOffsetWithNavbar() {
-  const navbar = document.querySelector('nav.navbar');
-  const fallbackOffset = 76;
-  const navbarHeight = navbar ? Math.ceil(navbar.getBoundingClientRect().height) : fallbackOffset;
-  const offset = Number.isFinite(navbarHeight) ? Math.max(fallbackOffset, navbarHeight) : fallbackOffset;
-  document.documentElement.style.setProperty('--ops-navbar-offset', `${offset}px`);
 }
 
 function setupEventListeners() {
@@ -298,7 +288,6 @@ function createAgentCard(agent) {
   const description = String(agent?.metadata?.description || 'No purpose written yet.');
   const model = String(agent?.model || '-');
   const pluginsCount = Array.isArray(agent?.enabled_plugins) ? agent.enabled_plugins.length : 0;
-  const mcpCount = Array.isArray(agent?.mcp_servers) ? agent.mcp_servers.length : 0;
   const typeLabel = toTitleCase(String(agent?.type || 'tool-calling'));
   const health = getHealthState(agent);
   const chatDisabled = health.kind === 'needs-setup';
@@ -307,6 +296,11 @@ function createAgentCard(agent) {
   const deleteDisabledAttr = isSystemAgent
     ? 'disabled title="System assistant cannot be deleted."'
     : '';
+
+  card.tabIndex = 0;
+  card.setAttribute('role', 'button');
+  card.setAttribute('aria-haspopup', 'dialog');
+  card.setAttribute('aria-label', `Open details for ${name}`);
 
   card.innerHTML = `
     <div class="ops-card-top">
@@ -323,20 +317,18 @@ function createAgentCard(agent) {
     <div class="ops-card-actions">
       <button class="ops-action-btn primary" data-action="chat" ${chatDisabled ? 'disabled' : ''}>Chat</button>
       <button class="ops-action-btn" data-action="pause">${safeEscapeHtml(pauseLabel)}</button>
-      <button class="ops-action-btn" data-action="open">Open</button>
       <button class="ops-action-btn danger" data-action="delete" ${deleteDisabledAttr}>Delete</button>
     </div>
     <div class="config-only">
       <div>Type: ${safeEscapeHtml(typeLabel)}</div>
       <div>Model: ${safeEscapeHtml(model)}</div>
-      <div>Tools: ${pluginsCount} plugins, ${mcpCount} MCP</div>
+      <div>Tools: ${pluginsCount} plugins</div>
       <div>Total cost: $${Number(agent?.statistics?.total_cost || 0).toFixed(2)}</div>
     </div>
   `;
 
   const chatButton = card.querySelector('[data-action="chat"]');
   const pauseButton = card.querySelector('[data-action="pause"]');
-  const openButton = card.querySelector('[data-action="open"]');
   const deleteButton = card.querySelector('[data-action="delete"]');
 
   if (chatButton) {
@@ -356,13 +348,6 @@ function createAgentCard(agent) {
     });
   }
 
-  if (openButton) {
-    openButton.addEventListener('click', (event) => {
-      event.stopPropagation();
-      openAgentDrawer(name);
-    });
-  }
-
   if (deleteButton) {
     deleteButton.addEventListener('click', async (event) => {
       event.stopPropagation();
@@ -375,6 +360,14 @@ function createAgentCard(agent) {
   }
 
   card.addEventListener('click', () => {
+    openAgentDrawer(name);
+  });
+
+  card.addEventListener('keydown', (event) => {
+    if (event.key !== 'Enter' && event.key !== ' ') {
+      return;
+    }
+    event.preventDefault();
     openAgentDrawer(name);
   });
 
@@ -559,6 +552,7 @@ async function openAgentDrawer(agentName) {
   const drawer = document.getElementById('agentDrawer');
   const backdrop = document.getElementById('agentDrawerBackdrop');
   const drawerAgentName = document.getElementById('drawerAgentName');
+  const closeDrawerBtn = document.getElementById('closeDrawerBtn');
 
   if (drawerAgentName) {
     drawerAgentName.textContent = agentName;
@@ -572,6 +566,9 @@ async function openAgentDrawer(agentName) {
   if (backdrop) {
     backdrop.classList.remove('hidden');
   }
+
+  document.body.classList.add('ops-modal-open');
+  requestAnimationFrame(() => closeDrawerBtn?.focus());
 
   setDrawerTab('overview');
   setDrawerLoadingState();
@@ -612,6 +609,11 @@ function closeAgentDrawer() {
   if (backdrop) {
     backdrop.classList.add('hidden');
   }
+
+  document.body.classList.remove('ops-modal-open');
+  selectedAgentName = '';
+  selectedAgentDetail = null;
+  selectedAgentSkills = null;
 }
 
 function setDrawerTab(tabName) {
@@ -690,7 +692,6 @@ function renderDrawerContent() {
         .map((plugin) => (typeof plugin === 'string' ? plugin : plugin?.name))
         .filter(Boolean)
     : [];
-  const mcpServers = Array.isArray(detail?.mcp_servers) ? detail.mcp_servers : [];
   const skillCount = Number(selectedAgentSkills?.total || 0);
   const enabledSkillCount = Number(selectedAgentSkills?.enabled || 0);
 
@@ -701,12 +702,12 @@ function renderDrawerContent() {
         <div class="ops-data-value">${enabledPlugins.length > 0 ? safeEscapeHtml(enabledPlugins.join(', ')) : 'No plugins enabled.'}</div>
       </div>
       <div class="ops-data-card">
-        <span class="ops-data-label">MCP Servers (${mcpServers.length})</span>
-        <div class="ops-data-value">${mcpServers.length > 0 ? safeEscapeHtml(mcpServers.join(', ')) : 'No MCP servers enabled.'}</div>
-      </div>
-      <div class="ops-data-card">
         <span class="ops-data-label">Skills</span>
         <div class="ops-data-value">${safeEscapeHtml(`${enabledSkillCount}/${skillCount} enabled`)}</div>
+      </div>
+      <div class="ops-data-card">
+        <span class="ops-data-label">MCP Access</span>
+        <div class="ops-data-value">Workspace-scoped. Configure connector bindings from the target workspace.</div>
       </div>
     `;
   }

@@ -29,8 +29,11 @@ func (m *mockAgentStore) SetCurrentAgent(name string) error                     
 func (m *mockAgentStore) CreateAgent(name string, config *store.CreateAgentConfig) error { return nil }
 func (m *mockAgentStore) DeleteAgent(name string) error                                  { return nil }
 func (m *mockAgentStore) SetAgent(name string, ag *agent.Agent) error                    { return nil }
-func (m *mockAgentStore) Save() error                                                    { return nil }
-func (m *mockAgentStore) ClearAgents() error                                             { return nil }
+func (m *mockAgentStore) UpdateAgent(name string, updateFn func(*agent.Agent) error) error {
+	return nil
+}
+func (m *mockAgentStore) Save() error        { return nil }
+func (m *mockAgentStore) ClearAgents() error { return nil }
 
 func boolPtr(b bool) *bool {
 	return &b

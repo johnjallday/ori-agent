@@ -202,7 +202,7 @@ func TestExecuteDirectTool(t *testing.T) {
 			}
 
 			// Execute
-			result := h.executeDirectTool(context.Background(), ag, "test-agent", cmd)
+			result := h.executeDirectTool(context.Background(), runtimeTestAgent(ag), "test-agent", cmd)
 
 			// Verify success/failure
 			if result.Success != tt.wantSuccess {
@@ -255,7 +255,7 @@ func TestGetAvailableToolNames(t *testing.T) {
 	}
 
 	h := &Handler{}
-	toolNames := h.getAvailableToolNames(ag)
+	toolNames := h.getAvailableToolNames(runtimeTestAgent(ag))
 
 	// Verify we got the expected number of tools
 	if len(toolNames) != 2 {
@@ -569,7 +569,7 @@ func TestExecuteDirectToolWithFiles(t *testing.T) {
 			}
 
 			// Execute
-			result := h.executeDirectTool(context.Background(), ag, "test-agent", cmd)
+			result := h.executeDirectTool(context.Background(), runtimeTestAgent(ag), "test-agent", cmd)
 
 			// Verify success
 			if result.Success != tt.wantSuccess {

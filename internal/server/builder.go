@@ -155,7 +155,6 @@ type ServerBuilder struct {
 	studioHandler          *workspace.HTTPHandler
 	usageHandler           *usagehttp.Handler
 	mcpHandler             *mcphttp.Handler
-	agentMCPHandler        *agenthttp.MCPHandler
 	locationHandler        *locationhttp.Handler
 	pluginsPageHandler     *pluginhttp.PluginsPageHandler
 	permissionsHandler     *pluginhttp.PermissionsHandler
@@ -411,7 +410,6 @@ func (b *ServerBuilder) createDomainFacades() error {
 		b.studioHandler,
 		b.usageHandler,
 		b.mcpHandler,
-		b.agentMCPHandler,
 		b.locationHandler,
 		b.pluginsPageHandler,
 		b.permissionsHandler,

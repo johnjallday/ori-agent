@@ -87,6 +87,9 @@ func (b *ServerBuilder) initializeTaskExecution() error {
 	taskHandler := workspace.NewLLMTaskHandler(b.st, b.llmFactory, b.workspaceStore)
 	taskHandler.SetEventBus(b.eventBus)
 	taskHandler.SetMCPRegistry(b.mcpRegistry)
+	runtimeResolver := workspace.NewAgentRuntimeResolver(b.st, b.workspaceStore, b.mcpRegistry, b.mcpConfigManager)
+	taskHandler.SetRuntimeResolver(runtimeResolver)
+	b.chatHandler.SetRuntimeResolver(runtimeResolver)
 	if b.sessionStore != nil {
 		taskHandler.SetContextStore(session.NewWorkspaceTaskContextAdapter(b.sessionStore))
 	}
@@ -127,7 +130,9 @@ func (b *ServerBuilder) initializeOrchestration() error {
 	}
 
 	taskHandler := workspace.NewLLMTaskHandler(b.st, b.llmFactory, b.workspaceStore)
+	taskHandler.SetEventBus(b.eventBus)
 	taskHandler.SetMCPRegistry(b.mcpRegistry)
+	taskHandler.SetRuntimeResolver(workspace.NewAgentRuntimeResolver(b.st, b.workspaceStore, b.mcpRegistry, b.mcpConfigManager))
 	if b.sessionStore != nil {
 		taskHandler.SetContextStore(session.NewWorkspaceTaskContextAdapter(b.sessionStore))
 	}
@@ -148,6 +153,7 @@ func (b *ServerBuilder) initializeOrchestration() error {
 		NotificationService: b.notificationService,
 		TaskHandler:         taskHandler,
 		SessionStore:        sessionStoreAdapter,
+		FileWatcher:         b.sessionFilesWatcher,
 		// TemplateManager: nil - loaded later in initializeTemplateManager
 	})
 	if err != nil {

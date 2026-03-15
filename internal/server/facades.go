@@ -117,7 +117,6 @@ type HandlerFacade struct {
 	Studio          *workspace.HTTPHandler
 	Usage           *usagehttp.Handler
 	MCP             *mcphttp.Handler
-	AgentMCP        *agenthttp.MCPHandler
 	Location        *locationhttp.Handler
 	PluginsPage     *pluginhttp.PluginsPageHandler
 	Permissions     *pluginhttp.PermissionsHandler
@@ -261,7 +260,6 @@ func NewHandlerFacade(
 	studio *workspace.HTTPHandler,
 	usage *usagehttp.Handler,
 	mcp *mcphttp.Handler,
-	agentMCP *agenthttp.MCPHandler,
 	location *locationhttp.Handler,
 	pluginsPage *pluginhttp.PluginsPageHandler,
 	permissions *pluginhttp.PermissionsHandler,
@@ -303,7 +301,6 @@ func NewHandlerFacade(
 		Studio:          studio,
 		Usage:           usage,
 		MCP:             mcp,
-		AgentMCP:        agentMCP,
 		Location:        location,
 		PluginsPage:     pluginsPage,
 		Permissions:     permissions,

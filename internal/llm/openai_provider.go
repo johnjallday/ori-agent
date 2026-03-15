@@ -2,6 +2,8 @@ package llm
 
 import (
 	"context"
+	"crypto/sha1"
+	"encoding/hex"
 	"fmt"
 	"net/http"
 	"strings"
@@ -10,6 +12,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/modelinfo"
 	"github.com/openai/openai-go/v3"
 	"github.com/openai/openai-go/v3/option"
+	"github.com/openai/openai-go/v3/packages/param"
 )
 
 // isReasoningModel checks if the model is an OpenAI model that requires
@@ -207,6 +210,26 @@ func (p *OpenAIProvider) ChatWithStructuredOutput(ctx context.Context, req Struc
 // convertMessages converts unified messages to OpenAI format
 func (p *OpenAIProvider) convertMessages(messages []Message, systemPrompt string) []openai.ChatCompletionMessageParamUnion {
 	var openaiMessages []openai.ChatCompletionMessageParamUnion
+	toolCallIDMap := map[string]string{}
+
+	normalizeToolCallID := func(toolCallID string) string {
+		trimmed := strings.TrimSpace(toolCallID)
+		if trimmed == "" {
+			return ""
+		}
+		if existing, ok := toolCallIDMap[trimmed]; ok {
+			return existing
+		}
+		if len(trimmed) <= 40 {
+			toolCallIDMap[trimmed] = trimmed
+			return trimmed
+		}
+
+		sum := sha1.Sum([]byte(trimmed))
+		normalized := "call_" + hex.EncodeToString(sum[:])[:35]
+		toolCallIDMap[trimmed] = normalized
+		return normalized
+	}
 
 	// Add system message if provided
 	if systemPrompt != "" {
@@ -223,11 +246,38 @@ func (p *OpenAIProvider) convertMessages(messages []Message, systemPrompt string
 			openaiMessages = append(openaiMessages, openai.UserMessage(msg.Content))
 
 		case RoleAssistant:
-			openaiMessages = append(openaiMessages, openai.AssistantMessage(msg.Content))
+			if len(msg.ToolCalls) == 0 {
+				openaiMessages = append(openaiMessages, openai.AssistantMessage(msg.Content))
+				continue
+			}
+
+			assistant := openai.ChatCompletionAssistantMessageParam{}
+			if strings.TrimSpace(msg.Content) != "" {
+				assistant.Content.OfString = param.NewOpt(msg.Content)
+			}
+			assistant.ToolCalls = make([]openai.ChatCompletionMessageToolCallUnionParam, 0, len(msg.ToolCalls))
+			for index, toolCall := range msg.ToolCalls {
+				toolCallID := normalizeToolCallID(toolCall.ID)
+				if toolCallID == "" {
+					toolCallID = normalizeToolCallID(fmt.Sprintf("tool_%d_%s", index+1, strings.TrimSpace(toolCall.Name)))
+				}
+				assistant.ToolCalls = append(assistant.ToolCalls, openai.ChatCompletionMessageToolCallUnionParam{
+					OfFunction: &openai.ChatCompletionMessageFunctionToolCallParam{
+						ID: toolCallID,
+						Function: openai.ChatCompletionMessageFunctionToolCallFunctionParam{
+							Name:      toolCall.Name,
+							Arguments: toolCall.Arguments,
+						},
+					},
+				})
+			}
+			openaiMessages = append(openaiMessages, openai.ChatCompletionMessageParamUnion{
+				OfAssistant: &assistant,
+			})
 
 		case RoleTool:
 			// Tool response message
-			openaiMessages = append(openaiMessages, openai.ToolMessage(msg.ToolCallID, msg.Content))
+			openaiMessages = append(openaiMessages, openai.ToolMessage(msg.Content, normalizeToolCallID(msg.ToolCallID)))
 		}
 	}
 

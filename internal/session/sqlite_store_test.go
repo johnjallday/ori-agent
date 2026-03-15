@@ -531,6 +531,149 @@ func TestSQLiteStore_WorkspaceImportMetadataPersistence(t *testing.T) {
 	}
 }
 
+func TestSQLiteStore_WorkspaceMCPPersistence(t *testing.T) {
+	db, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	store := NewSQLiteStore(db)
+	ctx := context.Background()
+	now := time.Now().UTC().Round(time.Second)
+
+	initialBindingsJSON, err := json.Marshal([]map[string]interface{}{
+		{
+			"id":          "binding-1",
+			"server_name": "filesystem",
+			"alias":       "repo_fs",
+			"enabled":     true,
+			"scope": map[string]interface{}{
+				"roots": []string{"/tmp/repo"},
+			},
+			"config": map[string]interface{}{
+				"env": map[string]interface{}{
+					"ORI_SCOPE": "workspace",
+				},
+			},
+			"created_at": now.Format(time.RFC3339),
+			"updated_at": now.Format(time.RFC3339),
+		},
+	})
+	if err != nil {
+		t.Fatalf("failed to marshal initial MCP bindings: %v", err)
+	}
+
+	initialAccessJSON, err := json.Marshal([]map[string]interface{}{
+		{
+			"agent_instance_id":   "agent-1",
+			"enabled_binding_ids": []string{"binding-1"},
+			"updated_at":          now.Format(time.RFC3339),
+		},
+	})
+	if err != nil {
+		t.Fatalf("failed to marshal initial MCP access: %v", err)
+	}
+
+	workspace := &Workspace{
+		ID:                 "workspace-mcp",
+		Name:               "Workspace MCP",
+		MCPBindingsJSON:    initialBindingsJSON,
+		AgentMCPAccessJSON: initialAccessJSON,
+		CreatedAt:          now,
+		UpdatedAt:          now,
+	}
+
+	if err := store.CreateWorkspace(ctx, workspace); err != nil {
+		t.Fatalf("failed to create workspace: %v", err)
+	}
+
+	got, err := store.GetWorkspace(ctx, workspace.ID)
+	if err != nil {
+		t.Fatalf("failed to fetch workspace: %v", err)
+	}
+
+	var bindings []map[string]interface{}
+	if err := json.Unmarshal(got.MCPBindingsJSON, &bindings); err != nil {
+		t.Fatalf("failed to decode MCP bindings: %v", err)
+	}
+	if len(bindings) != 1 {
+		t.Fatalf("expected 1 MCP binding, got %d", len(bindings))
+	}
+	if bindings[0]["server_name"] != "filesystem" {
+		t.Fatalf("expected MCP server_name filesystem, got %#v", bindings[0]["server_name"])
+	}
+
+	var access []map[string]interface{}
+	if err := json.Unmarshal(got.AgentMCPAccessJSON, &access); err != nil {
+		t.Fatalf("failed to decode MCP access: %v", err)
+	}
+	if len(access) != 1 {
+		t.Fatalf("expected 1 MCP access rule, got %d", len(access))
+	}
+	if access[0]["agent_instance_id"] != "agent-1" {
+		t.Fatalf("expected agent_instance_id agent-1, got %#v", access[0]["agent_instance_id"])
+	}
+
+	updatedBindingsJSON, err := json.Marshal([]map[string]interface{}{
+		{
+			"id":          "binding-1",
+			"server_name": "filesystem",
+			"alias":       "repo_fs",
+			"enabled":     true,
+		},
+		{
+			"id":          "binding-2",
+			"server_name": "github",
+			"alias":       "app_repo",
+			"enabled":     false,
+		},
+	})
+	if err != nil {
+		t.Fatalf("failed to marshal updated MCP bindings: %v", err)
+	}
+
+	updatedAccessJSON, err := json.Marshal([]map[string]interface{}{
+		{
+			"agent_instance_id":   "agent-1",
+			"enabled_binding_ids": []string{"binding-1", "binding-2"},
+		},
+		{
+			"agent_instance_id":   "agent-2",
+			"enabled_binding_ids": []string{"binding-1"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("failed to marshal updated MCP access: %v", err)
+	}
+
+	got.MCPBindingsJSON = updatedBindingsJSON
+	got.AgentMCPAccessJSON = updatedAccessJSON
+	got.UpdatedAt = time.Now().UTC().Round(time.Second)
+
+	if err := store.UpdateWorkspace(ctx, got); err != nil {
+		t.Fatalf("failed to update workspace MCP metadata: %v", err)
+	}
+
+	updated, err := store.GetWorkspace(ctx, workspace.ID)
+	if err != nil {
+		t.Fatalf("failed to fetch updated workspace: %v", err)
+	}
+
+	var updatedBindings []map[string]interface{}
+	if err := json.Unmarshal(updated.MCPBindingsJSON, &updatedBindings); err != nil {
+		t.Fatalf("failed to decode updated MCP bindings: %v", err)
+	}
+	if len(updatedBindings) != 2 {
+		t.Fatalf("expected 2 updated MCP bindings, got %d", len(updatedBindings))
+	}
+
+	var updatedAccess []map[string]interface{}
+	if err := json.Unmarshal(updated.AgentMCPAccessJSON, &updatedAccess); err != nil {
+		t.Fatalf("failed to decode updated MCP access: %v", err)
+	}
+	if len(updatedAccess) != 2 {
+		t.Fatalf("expected 2 updated MCP access rules, got %d", len(updatedAccess))
+	}
+}
+
 func TestSQLiteStore_DeleteWorkspaceCascade(t *testing.T) {
 	db, cleanup := setupTestDB(t)
 	defer cleanup()

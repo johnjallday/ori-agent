@@ -62,6 +62,13 @@ function getDisplayStatus(status) {
   return statusMap[status] || status;
 }
 
+const AGENT_CREATION_SKILL_CATALOG_AGENT = '__ori_agent_create_catalog__';
+
+const TASK_REQUIREMENT_KEYS = Object.freeze({
+  BROWSER: 'browser',
+  FILESYSTEM: 'filesystem'
+});
+
 export class WorkspaceDetailPage {
   constructor(workspaceId) {
     this.workspaceId = workspaceId;
@@ -101,6 +108,13 @@ export class WorkspaceDetailPage {
     this.agentCatalog = [];
     this.agentIndex = new Map();
     this.agentSkillsCache = new Map();
+    this.agentSkillsPromises = new Map();
+    this.availableMCPServers = [];
+    this.availableMCPServersPromise = null;
+    this.activeWorkspaceMCPBindingId = '';
+    this.activeWorkspaceMCPMode = 'create';
+    this.capabilitySuggestionCatalog = null;
+    this.capabilitySuggestionCatalogPromise = null;
     this.flippedAgentCards = new Set();
     this.boardDidDrag = false;
     this.currentTaskResultText = '';
@@ -110,6 +124,8 @@ export class WorkspaceDetailPage {
     this.executionMonitorTimer = null;
     this.executionLogKeys = new Set();
     this.executionLastStatus = '';
+    this.pendingTaskConfirm = null;
+    this.pendingTaskConfirmSelection = { stepThrough: false };
 
     // DOM elements
     this.elements = {};
@@ -134,6 +150,7 @@ export class WorkspaceDetailPage {
       this.loadDirectories(),
       this.loadSchedules()
     ]);
+    this.activateWorkspace();
     this.setupRealtime();
   }
 
@@ -143,6 +160,7 @@ export class WorkspaceDetailPage {
       { id: 'workspace-detail-notes-panel', label: 'Notes panel content' },
       { id: 'workspace-detail-files-panel', label: 'Files panel content' },
       { id: 'workspace-detail-directories-panel', label: 'Directories panel content' },
+      { id: 'workspace-detail-mcp-panel', label: 'Workspace MCP panel content' },
       { id: 'workspace-detail-schedules-panel', label: 'Schedules panel content' }
     ];
 
@@ -382,6 +400,7 @@ export class WorkspaceDetailPage {
       filesList: document.getElementById('workspace-detail-files-list'),
       notesList: document.getElementById('workspace-detail-notes-list'),
       directoriesList: document.getElementById('workspace-detail-directories-list'),
+      mcpList: document.getElementById('workspace-detail-mcp-list'),
       schedulesList: document.getElementById('workspace-detail-schedules-list'),
       childrenList: document.getElementById('workspace-detail-children-list'),
 
@@ -398,6 +417,8 @@ export class WorkspaceDetailPage {
       addNoteBtn: document.getElementById('workspace-detail-add-note'),
       copyNotesBtn: document.getElementById('workspace-detail-copy-notes'),
       addDirectoryBtn: document.getElementById('workspace-detail-add-directory'),
+      addMcpBtn: document.getElementById('workspace-detail-add-mcp'),
+      refreshMcpBtn: document.getElementById('workspace-detail-refresh-mcp'),
       viewSchedulesBtn: document.getElementById('workspace-detail-view-schedules'),
       homeAssistantQuickPlanBtn: document.getElementById('homeAssistantQuickPlan'),
       homeAssistantQuickTasksBtn: document.getElementById('homeAssistantQuickTasks'),
@@ -430,7 +451,19 @@ export class WorkspaceDetailPage {
       taskExecutionStatus: document.getElementById('workspace-detail-task-execution-status'),
       taskExecutionBreakdown: document.getElementById('workspace-detail-task-execution-breakdown'),
       taskExecutionLog: document.getElementById('workspace-detail-task-execution-log'),
+      taskExecutionNextStepBtn: document.getElementById('workspace-detail-task-execution-next-step'),
       taskExecutionViewResultBtn: document.getElementById('workspace-detail-task-execution-view-result'),
+      taskConfirmModal: document.getElementById('workspace-detail-task-confirm-modal'),
+      taskConfirmEyebrow: document.getElementById('workspace-detail-task-confirm-eyebrow'),
+      taskConfirmTitle: document.getElementById('workspace-detail-task-confirm-title'),
+      taskConfirmMessage: document.getElementById('workspace-detail-task-confirm-message'),
+      taskConfirmMeta: document.getElementById('workspace-detail-task-confirm-meta'),
+      taskConfirmDetails: document.getElementById('workspace-detail-task-confirm-details'),
+      taskConfirmSequence: document.getElementById('workspace-detail-task-confirm-sequence'),
+      taskConfirmStepMode: document.getElementById('workspace-detail-task-confirm-step-mode'),
+      taskConfirmStepModeInput: document.getElementById('workspace-detail-task-confirm-step-mode-input'),
+      taskConfirmCancelBtn: document.getElementById('workspace-detail-task-confirm-cancel'),
+      taskConfirmConfirmBtn: document.getElementById('workspace-detail-task-confirm-confirm'),
 
       // Assist modal
       taskAssistModal: document.getElementById('workspace-detail-task-assist-modal'),
@@ -455,6 +488,21 @@ export class WorkspaceDetailPage {
       addAgentEmpty: document.getElementById('workspace-detail-add-agent-empty'),
       addAgentSubmitBtn: document.getElementById('workspace-detail-add-agent-submit'),
       createAgentBtn: document.getElementById('workspace-detail-create-agent-btn'),
+
+      // Workspace MCP modal
+      mcpModal: document.getElementById('workspace-detail-mcp-modal'),
+      mcpForm: document.getElementById('workspace-detail-mcp-form'),
+      mcpModalTitle: document.getElementById('workspace-detail-mcp-modal-title'),
+      mcpModalSubtitle: document.getElementById('workspace-detail-mcp-modal-subtitle'),
+      mcpServerSelect: document.getElementById('workspace-detail-mcp-server'),
+      mcpServerHelp: document.getElementById('workspace-detail-mcp-server-help'),
+      mcpAliasInput: document.getElementById('workspace-detail-mcp-alias'),
+      mcpEnabledInput: document.getElementById('workspace-detail-mcp-enabled'),
+      mcpScopeInput: document.getElementById('workspace-detail-mcp-scope'),
+      mcpConfigInput: document.getElementById('workspace-detail-mcp-config'),
+      mcpAgentOptions: document.getElementById('workspace-detail-mcp-agent-options'),
+      mcpAgentAccessSummary: document.getElementById('workspace-detail-mcp-agent-access-summary'),
+      mcpSubmitBtn: document.getElementById('workspace-detail-mcp-submit'),
 
       // Directory explorer modal
       directoryExplorerModal: document.getElementById('workspace-directory-explorer-modal'),
@@ -504,7 +552,22 @@ export class WorkspaceDetailPage {
 
     // Directory buttons
     this.elements.addDirectoryBtn?.addEventListener('click', () => this.showAddDirectoryModal());
+    this.elements.addMcpBtn?.addEventListener('click', () => this.openWorkspaceMCPModal());
     this.bindDirectoryExplorerEvents();
+    this.elements.refreshMcpBtn?.addEventListener('click', async () => {
+      await this.loadAvailableMCPServers(true).catch((error) => {
+        console.warn('Failed to refresh MCP connector catalog:', error);
+      });
+      await this.loadWorkspace();
+    });
+    this.elements.mcpList?.addEventListener('click', (event) => this.handleWorkspaceMCPListClick(event));
+    this.elements.mcpForm?.addEventListener('submit', (event) => {
+      event.preventDefault();
+      this.submitWorkspaceMCPModal();
+    });
+    this.elements.mcpServerSelect?.addEventListener('change', () => this.handleWorkspaceMCPServerChange());
+    this.elements.mcpAgentOptions?.addEventListener('change', () => this.updateWorkspaceMCPAgentAccessSummary());
+    this.elements.mcpModal?.addEventListener('hidden.bs.modal', () => this.resetWorkspaceMCPModal());
 
     // Schedule buttons
     this.elements.viewSchedulesBtn?.addEventListener('click', () => this.showSchedulesModal());
@@ -514,17 +577,25 @@ export class WorkspaceDetailPage {
         this.showTaskResult(this.currentExecutionTaskId, { closeExecutionModal: true });
       }
     });
+    this.elements.taskExecutionNextStepBtn?.addEventListener('click', () => this.advanceCurrentExecutionStep());
     this.elements.taskResultModal?.addEventListener('shown.bs.modal', () => {
       this.applyTopBackdropLayer('workspace-detail-backdrop-result');
     });
     this.elements.taskExecutionModal?.addEventListener('shown.bs.modal', () => {
       this.applyTopBackdropLayer('workspace-detail-backdrop-execution');
     });
+    this.elements.mcpModal?.addEventListener('shown.bs.modal', () => {
+      this.applyTopBackdropLayer('workspace-detail-backdrop-mcp');
+    });
     this.elements.taskExecutionModal?.addEventListener('hidden.bs.modal', () => {
       this.stopExecutionMonitor();
       this.currentExecutionTaskId = null;
+      this.setExecutionNextStepEnabled(false);
       this.renderTaskExecutionBreakdown(null);
     });
+    this.elements.taskConfirmCancelBtn?.addEventListener('click', () => this.handleTaskConfirmChoice(false));
+    this.elements.taskConfirmConfirmBtn?.addEventListener('click', () => this.handleTaskConfirmChoice(true));
+    this.elements.taskConfirmModal?.addEventListener('hidden.bs.modal', () => this.handleTaskConfirmHidden());
     this.elements.taskAssistRetryBtn?.addEventListener('click', () => this.submitTaskAssist('retry'));
     this.elements.taskAssistContinueBtn?.addEventListener('click', () => this.submitTaskAssist('continue_with_instruction'));
     this.elements.taskAssistSwitchBtn?.addEventListener('click', () => this.submitTaskAssist('switch_agent_retry'));
@@ -783,6 +854,7 @@ export class WorkspaceDetailPage {
 
       this.workspace = await response.json();
       await this.renderWorkspaceInfo();
+      this.renderWorkspaceMCPBindings();
       this.renderAgentGroups();
       this.refreshHomeAssistantQuickPrompts();
     } catch (error) {
@@ -986,10 +1058,29 @@ export class WorkspaceDetailPage {
       const sessionCount = group.sessions.length;
       const taskLabel = `${taskCount} task${taskCount === 1 ? '' : 's'}`;
       const sessionLabel = `${sessionCount} session${sessionCount === 1 ? '' : 's'}`;
+      const instanceLabel = group.instanceCount > 1 ? `${group.instanceCount} instances` : '';
+      const cardMeta = [instanceLabel, taskLabel, sessionLabel].filter(Boolean).join(' · ');
       const capabilityBadges = group.isUnassigned ? '' : this.renderAgentCapabilityBadges(group.name);
       const encodedAgentName = encodeURIComponent(group.name);
       const canFlip = !group.isUnassigned;
       const isFlipped = canFlip && this.flippedAgentCards.has(group.key);
+      const removeLabel = group.instanceCount > 1
+        ? `Remove all ${group.instanceCount} ${group.name} instances from workspace`
+        : `Remove ${group.name} from workspace`;
+      const removeButton = group.isWorkspaceAgent && !group.isUnassigned ? `
+        <button type="button"
+                class="workspace-detail-agent-remove-btn"
+                title="${this.escapeHtml(removeLabel)}"
+                aria-label="${this.escapeHtml(removeLabel)}"
+                onclick="event.stopPropagation(); window.workspaceDetail?.removeAgentFromWorkspace('${encodedAgentName}')">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+            <path d="M9,3V4H4V6H5V19A2,2 0 0,0 7,21H17A2,2 0 0,0 19,19V6H20V4H15V3H9M7,6H17V19H7V6M9,8V17H11V8H9M13,8V17H15V8H13Z"/>
+          </svg>
+        </button>
+      ` : '';
+      const instanceChip = group.instanceCount > 1
+        ? `<span class="workspace-detail-agent-instance-tag">${group.instanceCount}x</span>`
+        : '';
       const frontFlipButton = canFlip ? `
         <button type="button"
                 class="workspace-detail-agent-flip-btn"
@@ -1024,7 +1115,7 @@ export class WorkspaceDetailPage {
         </button>
       `;
       const backFace = canFlip
-        ? this.renderAgentBackFace(group, taskLabel, sessionLabel, encodedAgentName)
+        ? this.renderAgentBackFace(group, cardMeta, encodedAgentName)
         : '';
       const flippedClass = isFlipped ? ' is-flipped' : '';
 
@@ -1035,10 +1126,12 @@ export class WorkspaceDetailPage {
             <div class="workspace-detail-agent-card-header">
               <div class="workspace-detail-agent-card-title">
                 <span>${this.escapeHtml(group.name)}</span>
+                ${instanceChip}
                 ${capabilityBadges}
               </div>
               <div class="workspace-detail-agent-card-meta-wrap">
-                <div class="workspace-detail-agent-card-meta">${taskLabel} · ${sessionLabel}</div>
+                <div class="workspace-detail-agent-card-meta">${cardMeta}</div>
+                ${removeButton}
                 ${frontFlipButton}
               </div>
             </div>
@@ -1070,7 +1163,7 @@ export class WorkspaceDetailPage {
     }).join('');
   }
 
-  renderAgentBackFace(group, taskLabel, sessionLabel, encodedAgentName) {
+  renderAgentBackFace(group, cardMeta, encodedAgentName) {
     const profile = this.getAgentProfile(group.name);
     const levelValue = Number(profile?.evolution?.level ?? profile?.level);
     const level = Number.isFinite(levelValue) ? Math.max(0, Math.floor(levelValue)) : 0;
@@ -1080,12 +1173,24 @@ export class WorkspaceDetailPage {
     const skillsState = this.getAgentSkillsState(group.name);
     const skillsMarkup = this.renderAgentSkillsChips(skillsState, profile);
 
-    const mcpServers = Array.isArray(profile?.mcpServers)
-      ? profile.mcpServers.map((value) => String(value || '').trim()).filter(Boolean)
-      : [];
+    const mcpServers = this.getEffectiveWorkspaceMCPServerNames(group.name);
     const mcpMarkup = mcpServers.length > 0
       ? mcpServers.map((server) => `<span class="workspace-detail-agent-info-chip mcp">${this.escapeHtml(server)}</span>`).join('')
       : '<span class="workspace-detail-agent-info-empty">No MCP servers attached.</span>';
+    const removeLabel = group.instanceCount > 1
+      ? `Remove all ${group.instanceCount} ${group.name} instances from workspace`
+      : `Remove ${group.name} from workspace`;
+    const removeButton = group.isWorkspaceAgent && !group.isUnassigned ? `
+      <button type="button"
+              class="workspace-detail-agent-remove-btn"
+              title="${this.escapeHtml(removeLabel)}"
+              aria-label="${this.escapeHtml(removeLabel)}"
+              onclick="event.stopPropagation(); window.workspaceDetail?.removeAgentFromWorkspace('${encodedAgentName}')">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+          <path d="M9,3V4H4V6H5V19A2,2 0 0,0 7,21H17A2,2 0 0,0 19,19V6H20V4H15V3H9M7,6H17V19H7V6M9,8V17H11V8H9M13,8V17H15V8H13Z"/>
+        </svg>
+      </button>
+    ` : '';
 
     return `
       <div class="workspace-detail-agent-card-face workspace-detail-agent-card-face-back">
@@ -1095,7 +1200,8 @@ export class WorkspaceDetailPage {
             <span class="workspace-detail-agent-info-tag">Agent Info</span>
           </div>
           <div class="workspace-detail-agent-card-meta-wrap">
-            <div class="workspace-detail-agent-card-meta">${taskLabel} · ${sessionLabel}</div>
+            <div class="workspace-detail-agent-card-meta">${cardMeta}</div>
+            ${removeButton}
             <button type="button"
                     class="workspace-detail-agent-flip-btn"
                     title="Back to tasks and sessions"
@@ -1259,50 +1365,69 @@ export class WorkspaceDetailPage {
   }
 
   async ensureAgentSkillsLoaded(agentName) {
+    await this.loadAgentSkills(agentName, { refreshUI: true });
+  }
+
+  async loadAgentSkills(agentName, options = {}) {
     const normalizedName = String(agentName || '').trim();
     const key = this.normalizeAgentName(normalizedName);
-    if (!normalizedName || !key) return;
+    if (!normalizedName || !key) return { status: 'idle', skills: [] };
 
     const existing = this.agentSkillsCache.get(key);
-    if (existing?.status === 'loading' || existing?.status === 'loaded') {
-      return;
+    if (existing?.status === 'loaded' || existing?.status === 'conflict' || existing?.status === 'error') {
+      return existing;
+    }
+    if (this.agentSkillsPromises.has(key)) {
+      return this.agentSkillsPromises.get(key);
     }
 
     this.agentSkillsCache.set(key, { status: 'loading', skills: [] });
-    this.refreshAgentCardSkills(normalizedName);
+    if (options.refreshUI !== false) {
+      this.refreshAgentCardSkills(normalizedName);
+    }
 
-    try {
-      const response = await fetch(`/api/skills?agent=${encodeURIComponent(normalizedName)}`);
-      if (response.status === 409) {
-        this.agentSkillsCache.set(key, { status: 'conflict', skills: [] });
-        if (!this.refreshAgentCardSkills(normalizedName)) {
-          this.renderAgentGroups();
+    const loadPromise = (async () => {
+      try {
+        const response = await fetch(`/api/skills?agent=${encodeURIComponent(normalizedName)}`);
+        if (response.status === 409) {
+          this.agentSkillsCache.set(key, { status: 'conflict', skills: [] });
+          return this.agentSkillsCache.get(key);
         }
-        return;
+        if (!response.ok) {
+          throw new Error(`Failed to load skills (${response.status})`);
+        }
+
+        const data = await response.json();
+        const skills = Array.isArray(data?.skills)
+          ? data.skills
+            .map((skill) => ({
+              name: String(skill?.name || '').trim(),
+              description: String(skill?.description || '').trim(),
+              enabled: skill?.enabled !== false,
+              requiredMCPServers: Array.isArray(skill?.required_mcp_servers) ? skill.required_mcp_servers.map((value) => String(value || '').trim()).filter(Boolean) : [],
+              allowedTools: Array.isArray(skill?.allowed_tools) ? skill.allowed_tools.map((value) => String(value || '').trim()).filter(Boolean) : []
+            }))
+            .filter((skill) => skill.name)
+          : [];
+
+        this.agentSkillsCache.set(key, { status: 'loaded', skills });
+      } catch (error) {
+        console.error(`Failed to load skills for ${normalizedName}:`, error);
+        this.agentSkillsCache.set(key, { status: 'error', skills: [] });
+      } finally {
+        this.agentSkillsPromises.delete(key);
+        if (options.refreshUI !== false) {
+          if (!this.refreshAgentCardSkills(normalizedName)) {
+            this.renderAgentGroups();
+          }
+        }
       }
-      if (!response.ok) {
-        throw new Error(`Failed to load skills (${response.status})`);
-      }
 
-      const data = await response.json();
-      const skills = Array.isArray(data?.skills)
-        ? data.skills
-          .map((skill) => ({
-            name: String(skill?.name || '').trim(),
-            enabled: skill?.enabled !== false
-          }))
-          .filter((skill) => skill.name)
-        : [];
+      return this.agentSkillsCache.get(key) || { status: 'error', skills: [] };
+    })();
 
-      this.agentSkillsCache.set(key, { status: 'loaded', skills });
-    } catch (error) {
-      console.error(`Failed to load skills for ${normalizedName}:`, error);
-      this.agentSkillsCache.set(key, { status: 'error', skills: [] });
-    }
-
-    if (!this.refreshAgentCardSkills(normalizedName)) {
-      this.renderAgentGroups();
-    }
+    this.agentSkillsPromises.set(key, loadPromise);
+    return loadPromise;
   }
 
   buildAgentGroups() {
@@ -1320,6 +1445,7 @@ export class WorkspaceDetailPage {
           name: isUnassigned ? 'Unassigned' : String(name || '').trim(),
           isWorkspaceAgent,
           isUnassigned,
+          instanceCount: 0,
           tasks: [],
           sessions: []
         };
@@ -1332,9 +1458,21 @@ export class WorkspaceDetailPage {
       return group;
     };
 
-    this.getWorkspaceAgentNames().forEach((name) => {
-      ensureGroup(name, { isWorkspaceAgent: true, isUnassigned: false });
-    });
+    if (Array.isArray(this.workspace?.agent_instances) && this.workspace.agent_instances.length > 0) {
+      this.workspace.agent_instances.forEach((instance) => {
+        const group = ensureGroup(instance?.name, { isWorkspaceAgent: true, isUnassigned: false });
+        if (group) {
+          group.instanceCount += 1;
+        }
+      });
+    } else {
+      this.getWorkspaceAgentNames().forEach((name) => {
+        const group = ensureGroup(name, { isWorkspaceAgent: true, isUnassigned: false });
+        if (group) {
+          group.instanceCount = Math.max(1, group.instanceCount);
+        }
+      });
+    }
 
     const topLevelTasks = Array.isArray(this.tasks)
       ? this.tasks.filter((task) => !task.parent_task_id)
@@ -1442,11 +1580,12 @@ export class WorkspaceDetailPage {
     const subtasks = this.tasks.filter((subtask) => subtask.parent_task_id === task.id);
     const isParent = subtasks.length > 0;
     const statusInfo = this.getTaskStatusPresentation(task);
+    const awaitingNextStep = this.isTaskAwaitingNextStep(task);
     const hasUnassignedSubtasks = isParent && subtasks.some((subtask) => !subtask.to || subtask.to === 'unassigned');
     const hasRunningSubtasks = isParent && subtasks.some((subtask) => subtask.status === 'in_progress');
     const canExecute = isParent
       ? subtasks.length > 0 && !hasUnassignedSubtasks && !hasRunningSubtasks
-      : task.status !== 'in_progress';
+      : task.status !== 'in_progress' || awaitingNextStep;
     const resultData = this.getDisplayResult(task, subtasks);
     const hasResultData = !!resultData;
     const hasAssistData = !!statusInfo.isBlocked;
@@ -1455,7 +1594,8 @@ export class WorkspaceDetailPage {
         : hasRunningSubtasks ? 'A subtask is already running'
           : 'Execute workflow now'
       : !assignedAgent ? 'Will auto-assign a workspace agent before execution'
-        : task.status === 'in_progress' ? 'Task is already running'
+        : awaitingNextStep ? 'Execute the next internal step'
+          : task.status === 'in_progress' ? 'Task is already running'
           : 'Execute task now';
     const resultTitle = hasResultData
       ? `View ${resultData.label} from ${resultData.answeredBy || 'Unknown agent'}`
@@ -1563,6 +1703,882 @@ export class WorkspaceDetailPage {
     }
   }
 
+  isMissingWorkspaceAgentError(message) {
+    const normalized = String(message || '').trim().toLowerCase();
+    if (!normalized) return false;
+
+    return normalized.includes('no agent is available in this workspace')
+      || normalized.includes('no agents available in this workspace')
+      || normalized.includes('no agent assigned')
+      || normalized.includes('no agent assigned to step')
+      || normalized.includes('parent task has no agent');
+  }
+
+  async promptAddAgentForExecution(message = 'No agent is available in this workspace. Add one to continue.') {
+    if (window.Toast) {
+      window.Toast.warning(message);
+    }
+
+    await this.openAddAgentModal();
+
+    window.setTimeout(() => {
+      if (this.elements.addAgentSelect && !this.elements.addAgentSelect.disabled) {
+        this.elements.addAgentSelect.focus();
+        return;
+      }
+
+      this.elements.createAgentBtn?.focus();
+    }, 150);
+  }
+
+  getTaskDisplayLabel(task) {
+    return String(task?.description || task?.name || task?.id || 'Task').trim() || 'Task';
+  }
+
+  resetTaskConfirmDialog() {
+    this.pendingTaskConfirmSelection = { stepThrough: false };
+    if (this.elements.taskConfirmEyebrow) {
+      this.elements.taskConfirmEyebrow.textContent = 'Execution Check';
+    }
+    if (this.elements.taskConfirmTitle) {
+      this.elements.taskConfirmTitle.textContent = 'Confirm this action';
+    }
+    if (this.elements.taskConfirmMessage) {
+      this.elements.taskConfirmMessage.textContent = '';
+    }
+    if (this.elements.taskConfirmCancelBtn) {
+      this.elements.taskConfirmCancelBtn.textContent = 'Cancel';
+    }
+    if (this.elements.taskConfirmConfirmBtn) {
+      this.elements.taskConfirmConfirmBtn.textContent = 'Continue';
+    }
+    if (this.elements.taskConfirmMeta) {
+      this.elements.taskConfirmMeta.innerHTML = '';
+    }
+    if (this.elements.taskConfirmDetails) {
+      this.elements.taskConfirmDetails.innerHTML = '';
+      this.elements.taskConfirmDetails.classList.add('d-none');
+    }
+    if (this.elements.taskConfirmSequence) {
+      this.elements.taskConfirmSequence.innerHTML = '';
+      this.elements.taskConfirmSequence.classList.add('d-none');
+    }
+    if (this.elements.taskConfirmStepMode && this.elements.taskConfirmStepModeInput) {
+      this.elements.taskConfirmStepMode.classList.add('d-none');
+      this.elements.taskConfirmStepModeInput.checked = false;
+    }
+  }
+
+  renderTaskConfirmMeta(items = []) {
+    if (!this.elements.taskConfirmMeta) return;
+    this.elements.taskConfirmMeta.innerHTML = '';
+
+    items
+      .map((item) => String(item || '').trim())
+      .filter(Boolean)
+      .forEach((item) => {
+        const chip = document.createElement('span');
+        chip.className = 'workspace-detail-task-confirm-chip';
+        chip.textContent = item;
+        this.elements.taskConfirmMeta.appendChild(chip);
+      });
+  }
+
+  renderTaskConfirmDetails(items = []) {
+    if (!this.elements.taskConfirmDetails) return;
+
+    const normalizedItems = items
+      .map((item) => String(item || '').trim())
+      .filter(Boolean);
+
+    this.elements.taskConfirmDetails.innerHTML = '';
+    if (normalizedItems.length === 0) {
+      this.elements.taskConfirmDetails.classList.add('d-none');
+      return;
+    }
+
+    normalizedItems.forEach((item, index) => {
+      const row = document.createElement('div');
+      row.className = 'workspace-detail-task-confirm-detail';
+
+      const indexBadge = document.createElement('span');
+      indexBadge.className = 'workspace-detail-task-confirm-detail-index';
+      indexBadge.textContent = String(index + 1);
+
+      const text = document.createElement('div');
+      text.className = 'workspace-detail-task-confirm-detail-text';
+      text.textContent = item;
+
+      row.appendChild(indexBadge);
+      row.appendChild(text);
+      this.elements.taskConfirmDetails.appendChild(row);
+    });
+
+    this.elements.taskConfirmDetails.classList.remove('d-none');
+  }
+
+  normalizeTaskConfirmSequenceItems(items = []) {
+    if (!Array.isArray(items)) return [];
+
+    return items
+      .map((item) => {
+        if (!item || typeof item !== 'object') return null;
+        const title = String(item.title || '').trim();
+        if (!title) return null;
+        return {
+          title,
+          detail: String(item.detail || '').trim(),
+          tag: String(item.tag || '').trim()
+        };
+      })
+      .filter(Boolean)
+      .slice(0, 8);
+  }
+
+  renderTaskConfirmSequence(items = []) {
+    if (!this.elements.taskConfirmSequence) return;
+
+    const normalizedItems = this.normalizeTaskConfirmSequenceItems(items);
+    this.elements.taskConfirmSequence.innerHTML = '';
+    if (normalizedItems.length === 0) {
+      this.elements.taskConfirmSequence.classList.add('d-none');
+      return;
+    }
+
+    const list = normalizedItems.map((item, index) => {
+      const title = this.escapeHtml(item.title);
+      const detail = item.detail ? `<div class="workspace-detail-task-confirm-sequence-step-detail">${this.escapeHtml(item.detail)}</div>` : '';
+      const tag = item.tag ? `<span class="workspace-detail-task-confirm-sequence-tag">${this.escapeHtml(item.tag)}</span>` : '';
+      return `
+        <div class="workspace-detail-task-confirm-sequence-step">
+          <span class="workspace-detail-task-confirm-sequence-index">${index + 1}</span>
+          <div class="workspace-detail-task-confirm-sequence-copy">
+            <div class="workspace-detail-task-confirm-sequence-step-title">
+              <span>${title}</span>
+              ${tag}
+            </div>
+            ${detail}
+          </div>
+        </div>
+      `;
+    }).join('');
+
+    this.elements.taskConfirmSequence.innerHTML = `
+      <div class="workspace-detail-task-confirm-sequence-title">Predicted Sequence</div>
+      <div class="workspace-detail-task-confirm-sequence-list">${list}</div>
+    `;
+    this.elements.taskConfirmSequence.classList.remove('d-none');
+  }
+
+  getTaskConfirmModalInstance() {
+    if (!this.elements.taskConfirmModal || !window.bootstrap) return null;
+    return typeof bootstrap.Modal.getOrCreateInstance === 'function'
+      ? bootstrap.Modal.getOrCreateInstance(this.elements.taskConfirmModal)
+      : (bootstrap.Modal.getInstance(this.elements.taskConfirmModal) || new bootstrap.Modal(this.elements.taskConfirmModal));
+  }
+
+  renderTaskConfirmStepMode(options = {}) {
+    if (!this.elements.taskConfirmStepMode || !this.elements.taskConfirmStepModeInput) return;
+
+    const enabled = options?.allowStepThrough === true;
+    if (!enabled) {
+      this.elements.taskConfirmStepMode.classList.add('d-none');
+      this.elements.taskConfirmStepModeInput.checked = false;
+      return;
+    }
+
+    this.elements.taskConfirmStepModeInput.checked = options?.defaultStepThrough === true;
+    this.elements.taskConfirmStepMode.classList.remove('d-none');
+  }
+
+  consumePendingTaskConfirmStepThroughSelection() {
+    const selected = this.pendingTaskConfirmSelection?.stepThrough === true;
+    this.pendingTaskConfirmSelection = { stepThrough: false };
+    return selected;
+  }
+
+  handleTaskConfirmChoice(confirmed) {
+    this.pendingTaskConfirmSelection = {
+      stepThrough: Boolean(this.elements.taskConfirmStepModeInput?.checked)
+    };
+    if (this.pendingTaskConfirm && !this.pendingTaskConfirm.resolved) {
+      this.pendingTaskConfirm.resolved = true;
+      this.pendingTaskConfirm.resolve(Boolean(confirmed));
+    }
+
+    const modal = this.getTaskConfirmModalInstance();
+    modal?.hide();
+  }
+
+  handleTaskConfirmHidden() {
+    if (this.pendingTaskConfirm && !this.pendingTaskConfirm.resolved) {
+      this.pendingTaskConfirm.resolved = true;
+      this.pendingTaskConfirm.resolve(false);
+    }
+    this.pendingTaskConfirm = null;
+    this.resetTaskConfirmDialog();
+  }
+
+  async showTaskConfirmDialog(options = {}) {
+    const title = String(options?.title || 'Confirm this action').trim();
+    const message = String(options?.message || '').trim();
+    const eyebrow = String(options?.eyebrow || 'Execution Check').trim();
+    const confirmLabel = String(options?.confirmLabel || 'Continue').trim();
+    const cancelLabel = String(options?.cancelLabel || 'Cancel').trim();
+    const metaItems = Array.isArray(options?.metaItems) ? options.metaItems : [];
+    const details = Array.isArray(options?.details) ? options.details : [];
+    const sequenceItems = this.normalizeTaskConfirmSequenceItems(options?.sequenceItems);
+    const allowStepThrough = options?.allowStepThrough === true;
+    const defaultStepThrough = options?.defaultStepThrough === true;
+
+    if (!this.elements.taskConfirmModal || !window.bootstrap) {
+      const fallbackSequence = sequenceItems.length > 0
+        ? `Predicted sequence:\n${sequenceItems.map((item, index) => `${index + 1}. ${item.title}${item.detail ? ` - ${item.detail}` : ''}`).join('\n')}`
+        : '';
+      const fallbackMode = allowStepThrough ? `Execution mode: ${defaultStepThrough ? 'step through' : 'automatic'}` : '';
+      const fallbackText = [message, ...details, fallbackSequence, fallbackMode].filter(Boolean).join('\n\n');
+      return confirm([title, fallbackText].filter(Boolean).join('\n\n'));
+    }
+
+    if (this.pendingTaskConfirm && !this.pendingTaskConfirm.resolved) {
+      this.pendingTaskConfirm.resolved = true;
+      this.pendingTaskConfirm.resolve(false);
+    }
+
+    this.resetTaskConfirmDialog();
+
+    if (this.elements.taskConfirmEyebrow) {
+      this.elements.taskConfirmEyebrow.textContent = eyebrow || 'Execution Check';
+    }
+    if (this.elements.taskConfirmTitle) {
+      this.elements.taskConfirmTitle.textContent = title;
+    }
+    if (this.elements.taskConfirmMessage) {
+      this.elements.taskConfirmMessage.textContent = message;
+    }
+    if (this.elements.taskConfirmCancelBtn) {
+      this.elements.taskConfirmCancelBtn.textContent = cancelLabel || 'Cancel';
+    }
+    if (this.elements.taskConfirmConfirmBtn) {
+      this.elements.taskConfirmConfirmBtn.textContent = confirmLabel || 'Continue';
+    }
+
+    this.renderTaskConfirmMeta(metaItems);
+    this.renderTaskConfirmDetails(details);
+    this.renderTaskConfirmSequence(sequenceItems);
+    this.renderTaskConfirmStepMode({ allowStepThrough, defaultStepThrough });
+
+    return new Promise((resolve) => {
+      this.pendingTaskConfirm = { resolve, resolved: false };
+      const modal = this.getTaskConfirmModalInstance();
+      modal?.show();
+      window.setTimeout(() => {
+        this.elements.taskConfirmConfirmBtn?.focus();
+      }, 120);
+    });
+  }
+
+  isSystemAssistantAgentName(name) {
+    const normalized = this.normalizeAgentName(name);
+    return normalized === 'ori' || normalized === 'system assistant';
+  }
+
+  getTaskAgentSuggestionPrompt(task) {
+    if (!task || typeof task !== 'object') return '';
+
+    const summary = String(task.description || task.name || '').trim();
+    const details = String(task.details || '').trim();
+    return [summary, details].filter(Boolean).join('\n\n');
+  }
+
+  async fetchTaskAgentSuggestion(task) {
+    const prompt = this.getTaskAgentSuggestionPrompt(task);
+    if (!prompt) return null;
+
+    try {
+      const response = await fetch('/api/home-assistant/route', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          prompt,
+          context: {
+            surface: 'workspace_detail',
+            page_path: window.location.pathname || `/workspaces/${this.workspaceId}`,
+            workspace_id: this.workspaceId,
+            origin: 'task_execution'
+          }
+        })
+      });
+      if (!response.ok) {
+        return null;
+      }
+
+      const data = await response.json().catch(() => null);
+      return data && typeof data === 'object' ? data : null;
+    } catch (error) {
+      console.error('Failed to fetch task agent suggestion:', error);
+      return null;
+    }
+  }
+
+  getTaskAgentSuggestionReasonText(routeData) {
+    const reasons = Array.isArray(routeData?.reasons)
+      ? routeData.reasons.map((reason) => String(reason || '').trim()).filter(Boolean).slice(0, 3)
+      : [];
+    if (reasons.length === 0) return '';
+    return `\n\nWhy this suggestion:\n- ${reasons.join('\n- ')}`;
+  }
+
+  isLikelyFilesystemIntent(description) {
+    const lower = String(description || '').trim().toLowerCase();
+    if (!lower) return false;
+
+    if (this.isReadOnlyFilesystemListingIntent(description)) {
+      return false;
+    }
+
+    const directPhrases = [
+      'move files',
+      'copy files',
+      'rename files',
+      'organize files',
+      'organise files',
+      'gather files',
+      'collect files',
+      'sort files',
+      'clean up files',
+      'into folder',
+      'into directory',
+      'filesystem',
+      'file management'
+    ];
+    if (directPhrases.some((phrase) => lower.includes(phrase))) {
+      return true;
+    }
+
+    const actionSignals = ['move', 'copy', 'rename', 'organize', 'organise', 'gather', 'collect', 'sort', 'group', 'archive'];
+    const nounSignals = ['file', 'files', 'folder', 'folders', 'directory', 'directories', 'filesystem', 'path', 'paths'];
+    const actionCount = actionSignals.filter((signal) => lower.includes(signal)).length;
+    const nounCount = nounSignals.filter((signal) => lower.includes(signal)).length;
+
+    return (actionCount > 0 && nounCount > 0) || nounCount > 1;
+  }
+
+  isReadOnlyFilesystemListingIntent(description) {
+    const lower = String(description || '').trim().toLowerCase();
+    if (!lower) return false;
+
+    const mutationPhrases = [
+      'move files',
+      'copy files',
+      'rename files',
+      'organize files',
+      'organise files',
+      'gather files',
+      'collect files',
+      'sort files',
+      'clean up files',
+      'into folder',
+      'into directory',
+      'filesystem',
+      'file management'
+    ];
+    if (mutationPhrases.some((phrase) => lower.includes(phrase))) {
+      return false;
+    }
+
+    const mutationSignals = ['move', 'copy', 'rename', 'organize', 'organise', 'gather', 'collect', 'sort', 'group', 'archive'];
+    const mutationNouns = ['file', 'files', 'folder', 'folders', 'directory', 'directories', 'filesystem', 'path', 'paths'];
+    const actionCount = mutationSignals.filter((signal) => lower.includes(signal)).length;
+    const nounCount = mutationNouns.filter((signal) => lower.includes(signal)).length;
+    if (actionCount > 0 && nounCount > 0) {
+      return false;
+    }
+
+    const directPhrases = [
+      'list files',
+      'list the files',
+      'list of files',
+      'show files',
+      'show me the files',
+      'file list',
+      'what files',
+      'which files',
+      'folder contents',
+      'directory contents',
+      'contents of',
+      'contents in',
+      'what is in',
+      "what's in"
+    ];
+    if (directPhrases.some((phrase) => lower.includes(phrase))) {
+      return true;
+    }
+
+    const listingSignals = ['list', 'show', 'display'];
+    const listingNouns = ['file', 'files', 'folder', 'folders', 'directory', 'directories', 'contents'];
+    const listingVerbCount = listingSignals.filter((signal) => lower.includes(signal)).length;
+    const listingNounCount = listingNouns.filter((signal) => lower.includes(signal)).length;
+    return listingVerbCount > 0 && listingNounCount > 0;
+  }
+
+  inferTaskExecutionRequirements(description) {
+    const requirements = [];
+    if (this.isLikelyBrowserAutomationIntent(description)) {
+      requirements.push({
+        key: TASK_REQUIREMENT_KEYS.BROWSER,
+        label: 'Browser access',
+        reason: 'This task appears to require visiting or interacting with webpages.'
+      });
+    }
+    if (this.isLikelyFilesystemIntent(description)) {
+      requirements.push({
+        key: TASK_REQUIREMENT_KEYS.FILESYSTEM,
+        label: 'File management',
+        reason: 'This task appears to require gathering, moving, renaming, or organizing files and folders.'
+      });
+    }
+    return requirements;
+  }
+
+  getTaskRequirementSignals(requirementKey) {
+    switch (String(requirementKey || '').trim().toLowerCase()) {
+      case TASK_REQUIREMENT_KEYS.BROWSER:
+        return {
+          capabilities: ['browser', 'browser_automation', 'web_search', 'web_fetch'],
+          plugins: ['browser', 'playwright', 'browserbase', 'puppeteer', 'navigate', 'open_url', 'web_fetch', 'web_search'],
+          mcp: ['playwright', 'browserbase', 'puppeteer', 'browser'],
+          skills: ['browser', 'web', 'playwright', 'navigate', 'website', 'scrape']
+        };
+      case TASK_REQUIREMENT_KEYS.FILESYSTEM:
+        return {
+          capabilities: ['file_operations', 'filesystem', 'storage'],
+          plugins: ['filesystem', 'file', 'files', 'folder', 'directory', 'finder', 'shell', 'command', 'os-shell'],
+          mcp: ['filesystem', 'files', 'file', 'finder', 'directory'],
+          skills: ['file', 'files', 'folder', 'folders', 'directory', 'filesystem', 'finder', 'organize', 'organiser', 'move', 'rename', 'copy']
+        };
+      default:
+        return {
+          capabilities: [],
+          plugins: [],
+          mcp: [],
+          skills: []
+        };
+    }
+  }
+
+  getTaskRequirementSeedDefaults(requirements = []) {
+    const keys = new Set((Array.isArray(requirements) ? requirements : []).map((requirement) => String(requirement?.key || '').trim().toLowerCase()));
+    if (keys.has(TASK_REQUIREMENT_KEYS.FILESYSTEM)) {
+      return { name: 'Folder Organizer', type: 'tool-calling' };
+    }
+    if (keys.has(TASK_REQUIREMENT_KEYS.BROWSER)) {
+      return { name: 'Browser Assistant', type: 'tool-calling' };
+    }
+    return { name: 'Task Assistant', type: 'tool-calling' };
+  }
+
+  getTaskRequirementMatches(values, signals) {
+    const normalizedValues = Array.isArray(values)
+      ? values.map((value) => String(value || '').trim()).filter(Boolean)
+      : [];
+    const normalizedSignals = Array.isArray(signals)
+      ? signals.map((value) => String(value || '').trim().toLowerCase()).filter(Boolean)
+      : [];
+
+    const matches = [];
+    const seen = new Set();
+    normalizedValues.forEach((value) => {
+      const lower = value.toLowerCase();
+      if (!lower) return;
+      if (!normalizedSignals.some((signal) => lower.includes(signal))) return;
+      if (seen.has(lower)) return;
+      seen.add(lower);
+      matches.push(value);
+    });
+
+    return matches;
+  }
+
+  getTaskRequirementSkillText(skill) {
+    if (!skill || typeof skill !== 'object') return '';
+
+    const parts = [
+      skill.name,
+      skill.description,
+      ...(Array.isArray(skill.requiredMCPServers) ? skill.requiredMCPServers : []),
+      ...(Array.isArray(skill.allowedTools) ? skill.allowedTools : [])
+    ];
+
+    return parts
+      .map((value) => String(value || '').trim().toLowerCase())
+      .filter(Boolean)
+      .join(' ');
+  }
+
+  async getEnabledSkillsForAgent(agentName) {
+    const state = await this.loadAgentSkills(agentName, { refreshUI: false });
+    if (!state || !Array.isArray(state.skills)) return [];
+    return state.skills.filter((skill) => skill?.enabled !== false && skill?.name);
+  }
+
+  skillSupportsTaskRequirement(skill, requirementKey) {
+    if (!skill || skill.enabled === false) return false;
+
+    const signals = this.getTaskRequirementSignals(requirementKey);
+    const skillText = this.getTaskRequirementSkillText(skill);
+    const mcpMatches = this.getTaskRequirementMatches(skill.requiredMCPServers, signals.mcp);
+    if (mcpMatches.length > 0) {
+      return true;
+    }
+
+    return signals.skills.some((signal) => skillText.includes(signal));
+  }
+
+  getAgentSupportForTaskRequirement(profile, skills, requirement) {
+    if (!profile || !requirement) {
+      return { supported: false, score: 0, reasons: [] };
+    }
+
+    const signals = this.getTaskRequirementSignals(requirement.key);
+    const reasons = [];
+    let score = 0;
+
+    if (requirement.key === TASK_REQUIREMENT_KEYS.BROWSER && this.agentSupportsBrowserAutomation(profile)) {
+      score += 3;
+      reasons.push('has browser automation support');
+    }
+
+    const capabilityMatches = this.getTaskRequirementMatches(profile.capabilities, signals.capabilities);
+    if (capabilityMatches.length > 0) {
+      score += 1;
+      reasons.push(`has capability "${capabilityMatches[0]}"`);
+    }
+
+    const pluginMatches = this.getTaskRequirementMatches(profile.enabledPlugins, signals.plugins);
+    if (pluginMatches.length > 0) {
+      score += 2;
+      reasons.push(`has tool support via "${pluginMatches[0]}"`);
+    }
+
+    const effectiveMCPServers = this.getEffectiveWorkspaceMCPServerNames(profile.name);
+    const mcpMatches = this.getTaskRequirementMatches(effectiveMCPServers, signals.mcp);
+    if (mcpMatches.length > 0) {
+      score += 3;
+      reasons.push(`has MCP support via "${mcpMatches[0]}"`);
+    }
+
+    const skillMatches = (Array.isArray(skills) ? skills : [])
+      .filter((skill) => this.skillSupportsTaskRequirement(skill, requirement.key))
+      .slice(0, 2);
+    if (skillMatches.length > 0) {
+      score += 4;
+      reasons.push(`has skill support via "${skillMatches[0].name}"`);
+    }
+
+    const dedupedReasons = [];
+    const seenReasons = new Set();
+    reasons.forEach((reason) => {
+      const normalized = String(reason || '').trim().toLowerCase();
+      if (!normalized || seenReasons.has(normalized)) return;
+      seenReasons.add(normalized);
+      dedupedReasons.push(reason);
+    });
+
+    return {
+      supported: score > 0,
+      score,
+      reasons: dedupedReasons.slice(0, 3)
+    };
+  }
+
+  async evaluateAgentForTaskRequirements(agentName, requirements = []) {
+    const profile = this.getAgentProfile(agentName);
+    const normalizedRequirements = Array.isArray(requirements) ? requirements.filter(Boolean) : [];
+    if (!profile || normalizedRequirements.length === 0) return null;
+
+    const skills = await this.getEnabledSkillsForAgent(agentName);
+    const requirementSupport = [];
+    let totalScore = 0;
+    const reasons = [];
+    const seenReasons = new Set();
+
+    for (const requirement of normalizedRequirements) {
+      const support = this.getAgentSupportForTaskRequirement(profile, skills, requirement);
+      if (!support.supported) {
+        return null;
+      }
+      totalScore += support.score;
+      requirementSupport.push({ requirement, support });
+      support.reasons.forEach((reason) => {
+        const key = String(reason || '').trim().toLowerCase();
+        if (!key || seenReasons.has(key)) return;
+        seenReasons.add(key);
+        reasons.push(reason);
+      });
+    }
+
+    const inWorkspace = this.getWorkspaceAgentNames()
+      .some((name) => this.normalizeAgentName(name) === this.normalizeAgentName(agentName));
+    if (inWorkspace) {
+      totalScore += 2;
+    }
+    if (profile.status === 'active') {
+      totalScore += 1;
+    }
+
+    return {
+      agentName: profile.name || agentName,
+      inWorkspace,
+      score: totalScore,
+      reasons: reasons.slice(0, 4),
+      requirementSupport
+    };
+  }
+
+  async findBestAgentForTaskRequirements(requirements = [], options = {}) {
+    await this.loadAgentCatalog();
+
+    const exclude = this.normalizeAgentName(options?.excludeAgent || '');
+    const workspaceOnly = options?.workspaceOnly === true;
+    const candidateNames = workspaceOnly
+      ? this.getWorkspaceAgentNames()
+      : Array.from(new Set((this.agentCatalog || []).map((profile) => String(profile?.name || '').trim()).filter(Boolean)));
+
+    const evaluations = await Promise.all(candidateNames.map(async (name) => {
+      if (this.normalizeAgentName(name) === exclude) return null;
+      return this.evaluateAgentForTaskRequirements(name, requirements);
+    }));
+
+    const ranked = evaluations
+      .filter(Boolean)
+      .sort((left, right) => {
+        if (right.score !== left.score) {
+          return right.score - left.score;
+        }
+        if (left.inWorkspace !== right.inWorkspace) {
+          return left.inWorkspace ? -1 : 1;
+        }
+        return left.agentName.localeCompare(right.agentName, undefined, { sensitivity: 'base' });
+      });
+
+    return ranked[0] || null;
+  }
+
+  async loadCapabilitySuggestionCatalog(force = false) {
+    if (!force && this.capabilitySuggestionCatalog) {
+      return this.capabilitySuggestionCatalog;
+    }
+    if (!force && this.capabilitySuggestionCatalogPromise) {
+      return this.capabilitySuggestionCatalogPromise;
+    }
+
+    this.capabilitySuggestionCatalogPromise = (async () => {
+      const catalog = {
+        mcpServers: [],
+        skills: []
+      };
+
+      try {
+        const [mcpResult, skillsResult] = await Promise.allSettled([
+          fetch('/api/mcp/servers'),
+          fetch(`/api/skills?agent=${encodeURIComponent(AGENT_CREATION_SKILL_CATALOG_AGENT)}`)
+        ]);
+
+        if (mcpResult.status === 'fulfilled' && mcpResult.value.ok) {
+          const data = await mcpResult.value.json().catch(() => ({}));
+          const servers = Array.isArray(data?.servers) ? data.servers : [];
+          catalog.mcpServers = servers
+            .map((server) => ({
+              name: String(server?.name || '').trim()
+            }))
+            .filter((server) => server.name);
+        }
+
+        if (skillsResult.status === 'fulfilled' && skillsResult.value.ok) {
+          const data = await skillsResult.value.json().catch(() => ({}));
+          const skills = Array.isArray(data?.skills) ? data.skills : [];
+          catalog.skills = skills
+            .map((skill) => ({
+              name: String(skill?.name || '').trim(),
+              description: String(skill?.description || '').trim(),
+              requiredMCPServers: Array.isArray(skill?.required_mcp_servers) ? skill.required_mcp_servers.map((value) => String(value || '').trim()).filter(Boolean) : []
+            }))
+            .filter((skill) => skill.name);
+        }
+      } catch (error) {
+        console.error('Failed to load capability suggestion catalog:', error);
+      }
+
+      this.capabilitySuggestionCatalog = catalog;
+      this.capabilitySuggestionCatalogPromise = null;
+      return catalog;
+    })();
+
+    return this.capabilitySuggestionCatalogPromise;
+  }
+
+  getCapabilitySuggestionsForRequirements(requirements = [], catalog = null) {
+    const sourceCatalog = catalog && typeof catalog === 'object'
+      ? catalog
+      : { mcpServers: [], skills: [] };
+    const requirementKeys = Array.isArray(requirements)
+      ? requirements.map((requirement) => String(requirement?.key || '').trim().toLowerCase()).filter(Boolean)
+      : [];
+
+    const matchedMCPServers = [];
+    const matchedSkills = [];
+    const seenMCPServers = new Set();
+    const seenSkills = new Set();
+
+    requirementKeys.forEach((requirementKey) => {
+      const signals = this.getTaskRequirementSignals(requirementKey);
+
+      (sourceCatalog.mcpServers || []).forEach((server) => {
+        const name = String(server?.name || '').trim();
+        const normalized = name.toLowerCase();
+        if (!name || seenMCPServers.has(normalized)) return;
+        if (!signals.mcp.some((signal) => normalized.includes(signal))) return;
+        seenMCPServers.add(normalized);
+        matchedMCPServers.push(name);
+      });
+
+      (sourceCatalog.skills || []).forEach((skill) => {
+        const name = String(skill?.name || '').trim();
+        const normalized = name.toLowerCase();
+        if (!name || seenSkills.has(normalized)) return;
+        const skillText = this.getTaskRequirementSkillText(skill);
+        const requiredMCPServers = Array.isArray(skill?.requiredMCPServers) ? skill.requiredMCPServers : [];
+        const hasRequirementMatch = signals.skills.some((signal) => skillText.includes(signal)) ||
+          this.getTaskRequirementMatches(requiredMCPServers, signals.mcp).length > 0;
+        if (!hasRequirementMatch) return;
+        seenSkills.add(normalized);
+        matchedSkills.push(name);
+      });
+    });
+
+    return {
+      mcpServers: matchedMCPServers.slice(0, 3),
+      skills: matchedSkills.slice(0, 4)
+    };
+  }
+
+  buildCapabilityAwareAgentDescription(task, requirements = [], suggestions = {}) {
+    const taskLabel = this.getTaskDisplayLabel(task);
+    const details = [
+      `Create an agent that can complete the task "${taskLabel}".`
+    ];
+
+    const requirementKeys = new Set((Array.isArray(requirements) ? requirements : []).map((requirement) => String(requirement?.key || '').trim().toLowerCase()));
+    if (requirementKeys.has(TASK_REQUIREMENT_KEYS.FILESYSTEM)) {
+      details.push('It should be able to inspect folders, gather related files, and move or organize them safely.');
+    }
+    if (requirementKeys.has(TASK_REQUIREMENT_KEYS.BROWSER)) {
+      details.push('It should be able to open websites and interact with browser pages when needed.');
+    }
+    if (Array.isArray(suggestions?.mcpServers) && suggestions.mcpServers.length > 0) {
+      details.push(`Enable MCP servers such as ${suggestions.mcpServers.join(', ')}.`);
+    }
+    if (Array.isArray(suggestions?.skills) && suggestions.skills.length > 0) {
+      details.push(`Enable relevant skills such as ${suggestions.skills.join(', ')}.`);
+    }
+
+    return details.join(' ');
+  }
+
+  async suggestCapabilityAwareAgentSetup(task, requirements = []) {
+    const normalizedRequirements = Array.isArray(requirements) ? requirements.filter(Boolean) : [];
+    if (!task || normalizedRequirements.length === 0) {
+      return { handled: false, agentName: '' };
+    }
+
+    const taskLabel = this.getTaskDisplayLabel(task);
+    const recommendedAgent = await this.findBestAgentForTaskRequirements(normalizedRequirements);
+    if (recommendedAgent) {
+      const alreadyInWorkspace = recommendedAgent.inWorkspace === true;
+      const previewSequence = this.getPredictedTaskExecutionSequence(task, [], {
+        assignedAgent: recommendedAgent.agentName
+      });
+      const confirmed = await this.showTaskConfirmDialog({
+        eyebrow: 'Capability Match',
+        title: alreadyInWorkspace
+          ? `Assign "${recommendedAgent.agentName}" to this task?`
+          : `Add "${recommendedAgent.agentName}" and assign it?`,
+        message: alreadyInWorkspace
+          ? `This task needs ${normalizedRequirements.map((requirement) => requirement.label.toLowerCase()).join(' and ')}. "${recommendedAgent.agentName}" is the best current match.`
+          : `This task needs ${normalizedRequirements.map((requirement) => requirement.label.toLowerCase()).join(' and ')}. "${recommendedAgent.agentName}" is the best current match and can be added to this workspace.`,
+        confirmLabel: alreadyInWorkspace ? 'Assign Agent' : 'Add and Assign',
+        metaItems: [taskLabel, recommendedAgent.agentName, alreadyInWorkspace ? 'Capability match' : 'Add to workspace'],
+        details: [
+          ...normalizedRequirements.map((requirement) => requirement.reason),
+          ...recommendedAgent.reasons
+        ].slice(0, 5),
+        sequenceItems: previewSequence
+      });
+
+      if (!confirmed) {
+        return { handled: true, agentName: '' };
+      }
+
+      try {
+        if (!alreadyInWorkspace) {
+          await this.addAgentToWorkspace(recommendedAgent.agentName, { toast: false });
+        }
+        await this.assignTaskToAgent(task.id, recommendedAgent.agentName);
+        task.to = recommendedAgent.agentName;
+        this.renderTasks();
+        if (window.Toast) {
+          window.Toast.success(alreadyInWorkspace
+            ? `Assigned "${recommendedAgent.agentName}" to this task.`
+            : `Added "${recommendedAgent.agentName}" and assigned it to this task.`);
+        }
+        return { handled: true, agentName: recommendedAgent.agentName };
+      } catch (error) {
+        console.error('Failed to apply capability-aware agent setup:', error);
+        if (window.Toast) {
+          window.Toast.error(error.message || 'Failed to apply suggested agent');
+        }
+        return { handled: true, agentName: '' };
+      }
+    }
+
+    const catalog = await this.loadCapabilitySuggestionCatalog();
+    const suggestions = this.getCapabilitySuggestionsForRequirements(normalizedRequirements, catalog);
+    const defaults = this.getTaskRequirementSeedDefaults(normalizedRequirements);
+    const previewSequence = this.getPredictedTaskExecutionSequence(task);
+    const createAgent = await this.showTaskConfirmDialog({
+      eyebrow: 'Capability Required',
+      title: 'Create a capable agent for this task?',
+      message: `No current agent advertises ${normalizedRequirements.map((requirement) => requirement.label.toLowerCase()).join(' and ')} for "${taskLabel}".`,
+      confirmLabel: 'Create Agent',
+      cancelLabel: 'Cancel',
+      metaItems: [taskLabel, defaults.name, 'Needs MCP or skills'],
+      details: [
+        ...normalizedRequirements.map((requirement) => requirement.reason),
+        suggestions.mcpServers.length > 0 ? `Suggested MCP servers: ${suggestions.mcpServers.join(', ')}` : 'No matching MCP server is configured yet.',
+        suggestions.skills.length > 0 ? `Suggested skills: ${suggestions.skills.join(', ')}` : 'No matching reusable skill is available yet.'
+      ],
+      sequenceItems: previewSequence
+    });
+    if (!createAgent) {
+      return { handled: true, agentName: '' };
+    }
+
+    this.openCreateAgentFlow({
+      seedName: defaults.name,
+      seedType: defaults.type,
+      autoDescription: this.buildCapabilityAwareAgentDescription(task, normalizedRequirements, suggestions),
+      preferAutoConfig: true,
+      workspaceId: this.workspaceId,
+      taskId: task.id,
+      assignTask: true,
+      suggestedMCPServers: suggestions.mcpServers,
+      suggestedSkills: suggestions.skills
+    });
+
+    return { handled: true, agentName: '' };
+  }
+
   async populateAddAgentOptions() {
     if (!this.elements.addAgentSelect || !this.elements.addAgentSubmitBtn || !this.elements.addAgentEmpty) return;
 
@@ -1608,18 +2624,53 @@ export class WorkspaceDetailPage {
     this.elements.addAgentEmpty.classList.add('d-none');
   }
 
-  openCreateAgentFlow() {
+  openCreateAgentFlow(options = {}) {
     if (this.elements.addAgentModal && window.bootstrap) {
       const modal = bootstrap.Modal.getInstance(this.elements.addAgentModal);
       modal?.hide();
     }
 
     if (typeof window.showAddAgentModal === 'function') {
-      window.showAddAgentModal();
+      window.showAddAgentModal(options);
       return;
     }
 
     window.location.href = '/agents';
+  }
+
+  async addAgentToWorkspace(agentName, options = {}) {
+    const normalizedAgentName = String(agentName || '').trim();
+    if (!normalizedAgentName) {
+      throw new Error('Select an agent first.');
+    }
+
+    const response = await fetch(`/api/workspaces/${encodeURIComponent(this.workspaceId)}/agents`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ agent_name: normalizedAgentName })
+    });
+    if (!response.ok) {
+      const text = await response.text();
+      throw new Error(text || 'Failed to add agent to workspace');
+    }
+
+    if (options.toast !== false && window.Toast) {
+      window.Toast.success(`Added "${normalizedAgentName}" to workspace`);
+    }
+
+    if (options.closeModal !== false && this.elements.addAgentModal && window.bootstrap) {
+      const modal = bootstrap.Modal.getInstance(this.elements.addAgentModal);
+      modal?.hide();
+    }
+
+    this.agentOptions = null;
+    await Promise.all([
+      this.loadWorkspace(),
+      this.loadAgentCatalog(true)
+    ]);
+    this.renderAgentGroups();
+
+    return normalizedAgentName;
   }
 
   async addSelectedAgentToWorkspace() {
@@ -1637,29 +2688,7 @@ export class WorkspaceDetailPage {
     }
 
     try {
-      const response = await fetch(`/api/workspaces/${encodeURIComponent(this.workspaceId)}/agents`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ agent_name: agentName })
-      });
-      if (!response.ok) {
-        const text = await response.text();
-        throw new Error(text || 'Failed to add agent to workspace');
-      }
-
-      if (window.Toast) window.Toast.success(`Added "${agentName}" to workspace`);
-
-      if (this.elements.addAgentModal && window.bootstrap) {
-        const modal = bootstrap.Modal.getInstance(this.elements.addAgentModal);
-        modal?.hide();
-      }
-
-      this.agentOptions = null;
-      await Promise.all([
-        this.loadWorkspace(),
-        this.loadAgentCatalog(true)
-      ]);
-      this.renderAgentGroups();
+      await this.addAgentToWorkspace(agentName);
     } catch (error) {
       console.error('Failed to add agent to workspace:', error);
       if (window.Toast) window.Toast.error(error.message || 'Failed to add agent');
@@ -1671,6 +2700,182 @@ export class WorkspaceDetailPage {
     }
   }
 
+  getWorkspaceAgentInstances(agentName) {
+    const normalized = this.normalizeAgentName(agentName);
+    if (!normalized || !this.workspace) return [];
+
+    const instances = Array.isArray(this.workspace.agent_instances)
+      ? this.workspace.agent_instances.filter((instance) => this.normalizeAgentName(instance?.name) === normalized)
+      : [];
+    if (instances.length > 0) {
+      return instances;
+    }
+
+    const names = Array.isArray(this.workspace.agents) ? this.workspace.agents : [];
+    if (names.some((name) => this.normalizeAgentName(name) === normalized)) {
+      return [{ id: '', name: String(agentName || '').trim(), instance_number: 1, node_id: '' }];
+    }
+
+    return [];
+  }
+
+  async removeAgentFromWorkspace(encodedAgentName = '') {
+    let agentName = '';
+    try {
+      agentName = decodeURIComponent(String(encodedAgentName || ''));
+    } catch (error) {
+      agentName = String(encodedAgentName || '');
+    }
+
+    const normalizedAgentName = String(agentName || '').trim();
+    const normalizedKey = this.normalizeAgentName(normalizedAgentName);
+    if (!normalizedAgentName || !normalizedKey) return;
+
+    const instances = this.getWorkspaceAgentInstances(normalizedAgentName);
+    const instanceCount = instances.length > 0 ? instances.length : 1;
+    const taskCount = Array.isArray(this.tasks)
+      ? this.tasks.filter((task) => this.normalizeAgentName(task?.to) === normalizedKey).length
+      : 0;
+    const sessionCount = Array.isArray(this.sessions)
+      ? this.sessions.filter((session) => this.normalizeAgentName(session?.agent_name) === normalizedKey).length
+      : 0;
+
+    const confirmationLines = [`Remove "${normalizedAgentName}" from this workspace?`];
+    if (instanceCount > 1) {
+      confirmationLines.push(`This will remove all ${instanceCount} instances of this agent from the workspace.`);
+    }
+    if (taskCount > 0) {
+      confirmationLines.push(`${taskCount} assigned task${taskCount === 1 ? '' : 's'} will be moved to Unassigned.`);
+    }
+    if (sessionCount > 0) {
+      confirmationLines.push(`${sessionCount} session${sessionCount === 1 ? '' : 's'} will remain in workspace history.`);
+    }
+
+    if (!window.confirm(confirmationLines.join('\n\n'))) {
+      return;
+    }
+
+    try {
+      const response = await fetch(`/api/workspaces/${encodeURIComponent(this.workspaceId)}/agents/${encodeURIComponent(normalizedAgentName)}`, {
+        method: 'DELETE'
+      });
+      if (!response.ok) {
+        const text = await response.text();
+        throw new Error(text || 'Failed to remove agent from workspace');
+      }
+
+      this.flippedAgentCards.delete(normalizedKey);
+      this.agentSkillsCache.delete(normalizedKey);
+      this.agentSkillsPromises.delete(normalizedKey);
+
+      await Promise.all([
+        this.loadWorkspace(),
+        this.loadTasks(),
+        this.loadSessions()
+      ]);
+
+      if (window.Toast) {
+        window.Toast.success(
+          instanceCount > 1
+            ? `Removed ${instanceCount} "${normalizedAgentName}" instances from workspace`
+            : `Removed "${normalizedAgentName}" from workspace`
+        );
+      }
+    } catch (error) {
+      console.error('Failed to remove agent from workspace:', error);
+      if (window.Toast) {
+        window.Toast.error(error.message || 'Failed to remove agent from workspace');
+      }
+    }
+  }
+
+  async suggestAgentSetupForTask(task) {
+    if (!task || typeof task !== 'object') return '';
+
+    const taskLabel = String(task.description || task.name || task.id || 'this task').trim() || 'this task';
+    const prompt = this.getTaskAgentSuggestionPrompt(task);
+    const requirements = this.inferTaskExecutionRequirements(prompt);
+    if (requirements.length > 0) {
+      const capabilitySuggestion = await this.suggestCapabilityAwareAgentSetup(task, requirements);
+      if (capabilitySuggestion.handled) {
+        return capabilitySuggestion.agentName || '';
+      }
+    }
+
+    const routeData = await this.fetchTaskAgentSuggestion(task);
+    const suggestedAgent = String(routeData?.matched_agent || '').trim();
+    const alreadyInWorkspace = suggestedAgent
+      ? this.getWorkspaceAgentNames().some((name) => this.normalizeAgentName(name) === this.normalizeAgentName(suggestedAgent))
+      : false;
+
+    if (suggestedAgent && !this.isSystemAssistantAgentName(suggestedAgent) && routeData?.requires_creation !== true) {
+      const reasonItems = Array.isArray(routeData?.reasons)
+        ? routeData.reasons.map((reason) => String(reason || '').trim()).filter(Boolean).slice(0, 3)
+        : [];
+      const previewSequence = this.getPredictedTaskExecutionSequence(task, [], {
+        assignedAgent: suggestedAgent
+      });
+      const confirmed = await this.showTaskConfirmDialog({
+        eyebrow: 'Ori Recommendation',
+        title: alreadyInWorkspace ? `Assign "${suggestedAgent}" to this task?` : `Add "${suggestedAgent}" and assign it?`,
+        message: alreadyInWorkspace
+          ? `Ori matched ${taskLabel} to "${suggestedAgent}" and can assign it in one step.`
+          : `Ori matched ${taskLabel} to "${suggestedAgent}" and can add it to this workspace before execution.`,
+        confirmLabel: alreadyInWorkspace ? 'Assign Agent' : 'Add and Assign',
+        metaItems: [taskLabel, suggestedAgent, alreadyInWorkspace ? 'Ready to assign' : 'Needs workspace add'],
+        details: reasonItems,
+        sequenceItems: previewSequence
+      });
+
+      if (!confirmed) {
+        return '';
+      }
+
+      try {
+        if (!alreadyInWorkspace) {
+          await this.addAgentToWorkspace(suggestedAgent, { toast: false });
+        }
+        await this.assignTaskToAgent(task.id, suggestedAgent);
+        task.to = suggestedAgent;
+        this.renderTasks();
+        if (window.Toast) {
+          window.Toast.success(alreadyInWorkspace
+            ? `Assigned "${suggestedAgent}" to this task.`
+            : `Added "${suggestedAgent}" and assigned it to this task.`);
+        }
+        return suggestedAgent;
+      } catch (error) {
+        console.error('Failed to apply suggested agent setup:', error);
+        if (window.Toast) {
+          window.Toast.error(error.message || 'Failed to apply suggested agent');
+        }
+        return '';
+      }
+    }
+
+    const prefersBrowserAgent = this.isLikelyBrowserAutomationIntent(prompt);
+    const suggestedName = String(routeData?.suggested_agent_name || '').trim() || (prefersBrowserAgent ? 'Browser Assistant' : 'Task Assistant');
+    const suggestedType = String(routeData?.suggested_agent_type || '').trim() || 'tool-calling';
+    const reasonText = this.getTaskAgentSuggestionReasonText(routeData);
+    if (window.Toast) {
+      const message = routeData?.requires_creation === true
+        ? `Ori suggests creating "${suggestedName}" for this task.`
+        : `No workspace agent matches this task yet. Ori prepared "${suggestedName}" for you.`;
+      window.Toast.info(reasonText ? `${message} ${reasonText.replace(/\n+/g, ' ')}` : message);
+    }
+
+    this.openCreateAgentFlow({
+      seedName: suggestedName,
+      seedType: suggestedType,
+      autoDescription: prompt || taskLabel,
+      preferAutoConfig: true,
+      workspaceId: this.workspaceId,
+      taskId: task.id,
+      assignTask: true
+    });
+    return '';
+  }
+
   getTaskHumanLoop(task) {
     if (!task || typeof task !== 'object' || !task.context || typeof task.context !== 'object') {
       return null;
@@ -1679,7 +2884,27 @@ export class WorkspaceDetailPage {
     return humanLoop && typeof humanLoop === 'object' ? humanLoop : null;
   }
 
+  getTaskExecutionMode(task) {
+    const mode = String(task?.execution_mode || '').trim().toLowerCase();
+    return mode === 'step_through' ? 'step_through' : 'auto';
+  }
+
+  isTaskAwaitingNextStep(task) {
+    return this.getTaskExecutionMode(task) === 'step_through'
+      && task?.status === 'in_progress'
+      && task?.context?.execution_step_waiting === true;
+  }
+
   getTaskStatusPresentation(task) {
+    if (this.isTaskAwaitingNextStep(task)) {
+      return {
+        className: 'assigned',
+        label: 'Next Step Ready',
+        isBlocked: false,
+        reason: 'This task is paused between internal execution steps.'
+      };
+    }
+
     const humanLoop = this.getTaskHumanLoop(task);
     if (humanLoop && String(humanLoop.state || '').toLowerCase() === 'blocked') {
       const reason = String(humanLoop.reason || '').trim();
@@ -1957,6 +3182,34 @@ export class WorkspaceDetailPage {
     return parts.join('\n');
   }
 
+  getExecutionStepBreakdownSteps(task) {
+    const steps = Array.isArray(task?.execution_steps) ? task.execution_steps : [];
+    if (!steps.length) return [];
+
+    return steps.map((step, index) => {
+      const detailParts = [];
+      const detail = this.normalizeBreakdownField(step?.detail);
+      const result = this.normalizeBreakdownField(step?.result);
+      const errorText = this.normalizeBreakdownField(step?.error);
+      const startedAt = this.normalizeBreakdownField(step?.started_at);
+      const completedAt = this.normalizeBreakdownField(step?.completed_at);
+      const tag = this.normalizeBreakdownField(step?.tag);
+
+      if (detail) detailParts.push(detail);
+      if (tag) detailParts.push(`Type: ${tag}`);
+      if (startedAt) detailParts.push(`Started: ${formatDate(startedAt)}`);
+      if (completedAt) detailParts.push(`Completed: ${formatDate(completedAt)}`);
+      if (result) detailParts.push(`Result: ${this.truncateBreakdownText(result, 360)}`);
+      if (errorText) detailParts.push(`Error: ${this.truncateBreakdownText(errorText, 360)}`);
+
+      return {
+        title: String(step?.title || `Step ${index + 1}`).trim() || `Step ${index + 1}`,
+        status: String(step?.status || 'pending').trim().toLowerCase() || 'pending',
+        detail: detailParts.join('\n')
+      };
+    });
+  }
+
   getRetryHistoryBreakdownSteps(task) {
     const history = Array.isArray(task?.context?.execution_retry?.history)
       ? task.context.execution_retry.history
@@ -2065,6 +3318,11 @@ export class WorkspaceDetailPage {
   getTaskResultBreakdownSteps(task, subtasks = []) {
     if (!task) return [];
 
+    const executionSteps = this.getExecutionStepBreakdownSteps(task);
+    if (executionSteps.length > 0) {
+      return executionSteps;
+    }
+
     const sortedSubtasks = Array.isArray(subtasks) ? [...subtasks].sort((a, b) => {
       const aIndex = Number.isFinite(Number(a?.subtask_index)) ? Number(a.subtask_index) : Number.MAX_SAFE_INTEGER;
       const bIndex = Number.isFinite(Number(b?.subtask_index)) ? Number(b.subtask_index) : Number.MAX_SAFE_INTEGER;
@@ -2106,6 +3364,93 @@ export class WorkspaceDetailPage {
     }
 
     return this.inferSyntheticBreakdownSteps(task);
+  }
+
+  getPredictedTaskExecutionSequence(task, subtasks = [], options = {}) {
+    if (!task) return [];
+
+    const sortedSubtasks = Array.isArray(subtasks) ? [...subtasks].sort((a, b) => {
+      const aIndex = Number.isFinite(Number(a?.subtask_index)) ? Number(a.subtask_index) : Number.MAX_SAFE_INTEGER;
+      const bIndex = Number.isFinite(Number(b?.subtask_index)) ? Number(b.subtask_index) : Number.MAX_SAFE_INTEGER;
+      if (aIndex !== bIndex) return aIndex - bIndex;
+      const aTime = a?.created_at ? new Date(a.created_at).getTime() : 0;
+      const bTime = b?.created_at ? new Date(b.created_at).getTime() : 0;
+      return aTime - bTime;
+    }) : [];
+
+    if (sortedSubtasks.length > 0) {
+      return sortedSubtasks.map((subtask) => {
+        const assignedAgent = String(subtask?.to || '').trim();
+        return {
+          title: String(subtask?.description || subtask?.name || 'Workflow step').trim() || 'Workflow step',
+          detail: assignedAgent && assignedAgent !== 'unassigned'
+            ? `Assigned to ${assignedAgent}.`
+            : 'Needs an assigned agent before execution.',
+          tag: 'Workflow'
+        };
+      });
+    }
+
+    return this.inferPredictedSequenceSteps(task, options);
+  }
+
+  inferPredictedSequenceSteps(task, options = {}) {
+    const description = String(task?.description || task?.name || '').trim();
+    const lower = description.toLowerCase();
+    const requirements = this.inferTaskExecutionRequirements(description);
+    const hasFilesystem = requirements.some((requirement) => requirement.key === TASK_REQUIREMENT_KEYS.FILESYSTEM);
+    const hasBrowser = requirements.some((requirement) => requirement.key === TASK_REQUIREMENT_KEYS.BROWSER);
+    const isFilesystemListing = this.isReadOnlyFilesystemListingIntent(description);
+    const assignedAgent = String(options?.assignedAgent || '').trim();
+    const agentLabel = assignedAgent && assignedAgent !== 'unassigned' ? assignedAgent : 'the selected agent';
+
+    const toStep = (title, detail = '', tag = '') => ({ title, detail, tag });
+
+    if (isFilesystemListing) {
+      return [
+        toStep('Check allowed filesystem scope', `Confirm which directories ${agentLabel} can access before inspecting folder contents.`, 'Discovery'),
+        toStep('Inspect the target directory', 'Locate the requested folder and gather its visible file list.', 'Discovery'),
+        toStep('Return the file list', 'Return the concrete file list, or explain clearly if the folder is missing or empty.', 'Summary')
+      ];
+    }
+
+    if (hasFilesystem) {
+      return [
+        toStep('Check allowed filesystem scope', `Confirm which directories ${agentLabel} can access before making changes.`, 'Discovery'),
+        toStep('Inspect candidate directories', 'Look through likely source folders for DNM-related material.', 'Discovery'),
+        toStep('Identify DNM-related files', 'Match files by filename, path, and available task context.', 'Analysis'),
+        toStep('Create the DNM folder if needed', 'Prepare the destination folder without overwriting unrelated content.', 'Mutation'),
+        toStep('Move or copy matching files', 'Relocate the selected files into the DNM folder safely.', 'Mutation'),
+        toStep('Verify final folder contents', 'Confirm the destination contains the expected files and note anything skipped.', 'Verify'),
+        toStep('Return a summary', 'List moved files, skipped files, and any follow-up needed.', 'Summary')
+      ];
+    }
+
+    if (hasBrowser) {
+      return [
+        toStep('Check available browser capability', `Confirm ${agentLabel} can open and interact with the required site.`, 'Discovery'),
+        toStep('Open the target page', 'Navigate to the relevant website or URL for this task.', 'Action'),
+        toStep('Inspect the required information or controls', 'Locate the data, form, or interface element needed to complete the task.', 'Analysis'),
+        toStep('Perform the requested browser action', 'Carry out the needed interaction or extraction.', 'Action'),
+        toStep('Verify the outcome', 'Confirm the page state or extracted result matches the task goal.', 'Verify'),
+        toStep('Return a summary', 'Report what was done and any follow-up needed.', 'Summary')
+      ];
+    }
+
+    if (lower.includes('summarize') || lower.includes('summary') || lower.includes('review')) {
+      return [
+        toStep('Collect the relevant context', 'Gather the information needed to answer the request.', 'Discovery'),
+        toStep('Synthesize the main findings', 'Turn the collected context into a concise result.', 'Analysis'),
+        toStep('Return a summary', 'Present the final result with the most relevant details.', 'Summary')
+      ];
+    }
+
+    const fallbackSteps = this.inferSyntheticBreakdownSteps({ ...task, status: 'pending' });
+    return fallbackSteps.map((step, index) => ({
+      title: String(step?.title || `Step ${index + 1}`).trim() || `Step ${index + 1}`,
+      detail: String(step?.detail || '').trim(),
+      tag: index === 0 ? 'Discovery' : (index === fallbackSteps.length - 1 ? 'Summary' : 'Action')
+    }));
   }
 
   inferSyntheticBreakdownSteps(task) {
@@ -2266,10 +3611,10 @@ export class WorkspaceDetailPage {
       };
     }
 
-    if (allows('continue_with_instruction')) {
+    if (normalizedCode === 'filesystem_result_unverified' && allows('retry')) {
       return {
-        action: 'continue_with_instruction',
-        text: 'Recommended: Add guidance and continue.'
+        action: 'retry',
+        text: 'Recommended: Retry so the agent can verify the folder contents with filesystem tools.'
       };
     }
 
@@ -2277,6 +3622,13 @@ export class WorkspaceDetailPage {
       return {
         action: 'retry',
         text: 'Recommended: Retry with the current setup.'
+      };
+    }
+
+    if (allows('continue_with_instruction')) {
+      return {
+        action: 'continue_with_instruction',
+        text: 'Recommended: Add guidance and continue.'
       };
     }
 
@@ -2297,12 +3649,15 @@ export class WorkspaceDetailPage {
 
     const humanLoop = this.getTaskHumanLoop(task) || {};
     const payload = (eventData && typeof eventData === 'object') ? eventData : {};
+    const payloadHumanLoop = payload.human_loop && typeof payload.human_loop === 'object'
+      ? payload.human_loop
+      : {};
     const blockId = String(payload.block_id || humanLoop.block_id || '').trim();
-    const reasonCode = String(payload.reason_code || humanLoop.reason_code || '').trim();
-    const suggestedActions = payload.suggested_actions || humanLoop.suggested_actions;
-    const reason = String(payload.reason || humanLoop.reason || 'The assigned agent needs guidance before it can continue.').trim();
-    const question = String(payload.question || humanLoop.question || 'How should I proceed?').trim();
-    const response = String(payload.agent_response || humanLoop.agent_response || '').trim();
+    const reasonCode = String(payload.reason_code || payloadHumanLoop.reason_code || humanLoop.reason_code || '').trim();
+    const suggestedActions = payload.suggested_actions || payloadHumanLoop.suggested_actions || humanLoop.suggested_actions;
+    const reason = String(payload.reason || payloadHumanLoop.reason || humanLoop.reason || 'The assigned agent needs guidance before it can continue.').trim();
+    const question = String(payload.question || payloadHumanLoop.question || humanLoop.question || 'How should I proceed?').trim();
+    const response = String(payload.agent_response || payloadHumanLoop.agent_response || humanLoop.agent_response || '').trim();
     const statusText = getDisplayStatus(task.status);
     const timestamp = formatDate(task.updated_at || task.created_at);
 
@@ -2446,6 +3801,934 @@ export class WorkspaceDetailPage {
     return this.agentIndex.get(key) || null;
   }
 
+  normalizeWorkspaceMCPBinding(binding, source = 'workspace') {
+    return {
+      id: String(binding?.id || '').trim(),
+      serverName: String(binding?.server_name || binding?.serverName || '').trim(),
+      alias: String(binding?.alias || '').trim(),
+      enabled: binding?.enabled !== false,
+      scope: binding?.scope && typeof binding.scope === 'object' ? { ...binding.scope } : {},
+      config: binding?.config && typeof binding.config === 'object' ? { ...binding.config } : {},
+      source
+    };
+  }
+
+  getExplicitWorkspaceMCPBindings() {
+    if (!this.workspace || !Array.isArray(this.workspace.mcp_bindings)) {
+      return [];
+    }
+
+    return this.workspace.mcp_bindings
+      .map((binding) => this.normalizeWorkspaceMCPBinding(binding, 'workspace'))
+      .filter((binding) => binding.id && binding.serverName);
+  }
+
+  getWorkspaceMCPBindings(options = {}) {
+    if (!this.workspace) return [];
+
+    const includeDisabled = options.includeDisabled === true;
+    const explicitBindings = this.getExplicitWorkspaceMCPBindings();
+    const explicitFilesystemExists = explicitBindings.some(
+      (binding) => binding.serverName.toLowerCase() === 'filesystem'
+    );
+
+    const visibleExplicitBindings = includeDisabled
+      ? explicitBindings
+      : explicitBindings.filter((binding) => binding.enabled);
+
+    const directoryRoots = Array.isArray(this.workspace.directory_references)
+      ? this.workspace.directory_references
+        .map((reference) => String(reference?.path || '').trim())
+        .filter(Boolean)
+      : [];
+
+    if (explicitFilesystemExists || directoryRoots.length === 0) {
+      return visibleExplicitBindings;
+    }
+
+    return [
+      ...visibleExplicitBindings,
+      {
+        id: 'workspace-filesystem',
+        serverName: 'filesystem',
+        alias: 'workspace_filesystem',
+        enabled: true,
+        scope: { roots: directoryRoots },
+        source: 'synthesized'
+      }
+    ];
+  }
+
+  getWorkspaceExplicitMCPBinding(bindingId) {
+    const normalizedBindingId = String(bindingId || '').trim().toLowerCase();
+    if (!normalizedBindingId) return null;
+    return this.getExplicitWorkspaceMCPBindings().find(
+      (binding) => String(binding?.id || '').trim().toLowerCase() === normalizedBindingId
+    ) || null;
+  }
+
+  getWorkspaceMCPBinding(bindingId, options = {}) {
+    const normalizedBindingId = String(bindingId || '').trim().toLowerCase();
+    if (!normalizedBindingId) return null;
+    return this.getWorkspaceMCPBindings(options).find(
+      (binding) => String(binding?.id || '').trim().toLowerCase() === normalizedBindingId
+    ) || null;
+  }
+
+  isWorkspaceRuntimeMCPServerName(serverName) {
+    return String(serverName || '').trim().toLowerCase().startsWith('ws:');
+  }
+
+  async loadAvailableMCPServers(force = false) {
+    if (!force && Array.isArray(this.availableMCPServers) && this.availableMCPServers.length > 0) {
+      return this.availableMCPServers;
+    }
+    if (!force && this.availableMCPServersPromise) {
+      return this.availableMCPServersPromise;
+    }
+
+    this.availableMCPServersPromise = (async () => {
+      const response = await fetch('/api/mcp/servers');
+      if (!response.ok) {
+        const text = await response.text();
+        throw new Error(text || 'Failed to load MCP connectors');
+      }
+
+      const data = await response.json();
+      const seen = new Set();
+      const servers = (Array.isArray(data?.servers) ? data.servers : [])
+        .map((server) => ({
+          name: String(server?.name || '').trim(),
+          enabled: server?.enabled !== false
+        }))
+        .filter((server) => server.name && server.enabled && !this.isWorkspaceRuntimeMCPServerName(server.name))
+        .filter((server) => {
+          const key = server.name.toLowerCase();
+          if (seen.has(key)) return false;
+          seen.add(key);
+          return true;
+        })
+        .sort((left, right) => left.name.localeCompare(right.name));
+
+      this.availableMCPServers = servers;
+      return servers;
+    })();
+
+    try {
+      return await this.availableMCPServersPromise;
+    } finally {
+      this.availableMCPServersPromise = null;
+    }
+  }
+
+  getWorkspaceAgentAccessEntry(agentInstanceId) {
+    const normalizedAgentInstanceId = String(agentInstanceId || '').trim();
+    if (!normalizedAgentInstanceId || !this.workspace || !Array.isArray(this.workspace.agent_mcp_access)) {
+      return null;
+    }
+
+    return this.workspace.agent_mcp_access.find(
+      (entry) => String(entry?.agent_instance_id || '').trim() === normalizedAgentInstanceId
+    ) || null;
+  }
+
+  getWorkspaceMCPAgentNamesForBinding(bindingId) {
+    const normalizedBindingId = String(bindingId || '').trim().toLowerCase();
+    if (!normalizedBindingId || !this.workspace || !Array.isArray(this.workspace.agent_instances)) {
+      return [];
+    }
+
+    const accessEntries = Array.isArray(this.workspace.agent_mcp_access)
+      ? this.workspace.agent_mcp_access
+      : [];
+
+    const names = [];
+    const seen = new Set();
+    this.workspace.agent_instances.forEach((instance) => {
+      const instanceId = String(instance?.id || '').trim();
+      const agentName = String(instance?.name || '').trim();
+      if (!instanceId || !agentName) return;
+
+      const entry = accessEntries.find((item) => String(item?.agent_instance_id || '').trim() === instanceId);
+      let allowed = true;
+      if (entry) {
+        const enabledIDs = Array.isArray(entry.enabled_binding_ids)
+          ? entry.enabled_binding_ids.map((value) => String(value || '').trim().toLowerCase()).filter(Boolean)
+          : [];
+        allowed = enabledIDs.includes(normalizedBindingId);
+      }
+      if (!allowed) return;
+
+      const key = this.normalizeAgentName(agentName);
+      if (!key || seen.has(key)) return;
+      seen.add(key);
+      names.push(agentName);
+    });
+    return names;
+  }
+
+  getWorkspaceMCPAgentAccessSelections(bindingId) {
+    if (!this.workspace || !Array.isArray(this.workspace.agent_instances)) {
+      return [];
+    }
+
+    const normalizedBindingId = String(bindingId || '').trim().toLowerCase();
+    return this.workspace.agent_instances
+      .map((instance) => {
+        const instanceId = String(instance?.id || '').trim();
+        const instanceName = String(instance?.name || '').trim();
+        if (!instanceId || !instanceName) return null;
+
+        const entry = this.getWorkspaceAgentAccessEntry(instanceId);
+        const enabledBindingIds = Array.isArray(entry?.enabled_binding_ids)
+          ? entry.enabled_binding_ids.map((value) => String(value || '').trim().toLowerCase()).filter(Boolean)
+          : [];
+
+        const instanceNumber = Number(instance?.instance_number || 0);
+        const nodeID = String(instance?.node_id || '').trim();
+        const label = instanceNumber > 1 ? `${instanceName} #${instanceNumber}` : instanceName;
+        const meta = nodeID || 'Workspace agent instance';
+        const checked = entry
+          ? enabledBindingIds.includes(normalizedBindingId)
+          : true;
+
+        return {
+          id: instanceId,
+          label,
+          meta,
+          checked
+        };
+      })
+      .filter(Boolean);
+  }
+
+  summarizeWorkspaceMCPBindingScope(binding) {
+    const serverName = String(binding?.serverName || '').trim().toLowerCase();
+    const scope = binding?.scope && typeof binding.scope === 'object' ? binding.scope : {};
+
+    if (serverName === 'filesystem') {
+      const roots = Array.isArray(scope.roots)
+        ? scope.roots.map((value) => String(value || '').trim()).filter(Boolean)
+        : [];
+      if (roots.length === 0) return 'No roots configured';
+      if (roots.length === 1) return `1 root: ${roots[0]}`;
+      return `${roots.length} roots`;
+    }
+
+    const entries = Object.entries(scope)
+      .filter(([key, value]) => String(key || '').trim() && value !== null && value !== undefined);
+    if (entries.length === 0) return '';
+
+    const [firstKey, firstValue] = entries[0];
+    if (Array.isArray(firstValue)) {
+      return `${firstKey}: ${firstValue.length} item${firstValue.length === 1 ? '' : 's'}`;
+    }
+    if (typeof firstValue === 'object') {
+      return `${firstKey}: configured`;
+    }
+    return `${firstKey}: ${String(firstValue).trim()}`;
+  }
+
+  summarizeWorkspaceMCPBindingConfig(binding) {
+    const config = binding?.config && typeof binding.config === 'object' ? binding.config : {};
+    const entries = Object.entries(config)
+      .filter(([key, value]) => String(key || '').trim() && value !== null && value !== undefined);
+    if (entries.length === 0) return '';
+
+    const [firstKey, firstValue] = entries[0];
+    if (Array.isArray(firstValue)) {
+      return `${firstKey}: ${firstValue.length} value${firstValue.length === 1 ? '' : 's'}`;
+    }
+    if (typeof firstValue === 'object') {
+      return `${firstKey}: configured`;
+    }
+    return `${firstKey}: ${String(firstValue).trim()}`;
+  }
+
+  describeWorkspaceMCPBinding(binding) {
+    const serverName = String(binding?.serverName || '').trim().toLowerCase();
+    if (binding?.enabled === false) {
+      return 'Saved on this workspace but currently disabled. Re-enable it to materialize at runtime for agent instances.';
+    }
+    if (serverName === 'filesystem' && binding?.source === 'synthesized') {
+      return 'Derived from imported workspace directories so filesystem access follows this workspace automatically.';
+    }
+    if (serverName === 'filesystem') {
+      return 'Workspace-scoped filesystem access. Agents only see the roots allowed by this workspace binding.';
+    }
+    return 'Explicit workspace MCP binding available to agent instances in this workspace.';
+  }
+
+  getWorkspaceMCPModalInstance() {
+    if (!this.elements.mcpModal || typeof bootstrap === 'undefined' || !bootstrap.Modal) {
+      return null;
+    }
+
+    return typeof bootstrap.Modal.getOrCreateInstance === 'function'
+      ? bootstrap.Modal.getOrCreateInstance(this.elements.mcpModal)
+      : (bootstrap.Modal.getInstance(this.elements.mcpModal) || new bootstrap.Modal(this.elements.mcpModal));
+  }
+
+  generateWorkspaceMCPBindingId() {
+    if (window.crypto && typeof window.crypto.randomUUID === 'function') {
+      return window.crypto.randomUUID();
+    }
+    return `mcp-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+  }
+
+  slugifyWorkspaceMCPAlias(serverName) {
+    return String(serverName || '')
+      .trim()
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '_')
+      .replace(/^_+|_+$/g, '');
+  }
+
+  setWorkspaceMCPServerHelp(message, isError = false) {
+    if (!this.elements.mcpServerHelp) return;
+    this.elements.mcpServerHelp.textContent = message;
+    this.elements.mcpServerHelp.classList.toggle('is-error', !!isError);
+  }
+
+  populateWorkspaceMCPServerOptions(selectedServerName = '') {
+    if (!this.elements.mcpServerSelect) return;
+
+    const normalizedSelected = String(selectedServerName || '').trim();
+    const availableServers = Array.isArray(this.availableMCPServers) ? [...this.availableMCPServers] : [];
+    const selectedExists = normalizedSelected
+      ? availableServers.some((server) => String(server?.name || '').trim().toLowerCase() === normalizedSelected.toLowerCase())
+      : false;
+
+    if (normalizedSelected && !selectedExists) {
+      availableServers.unshift({ name: normalizedSelected, unavailable: true });
+    }
+
+    const options = ['<option value="">Select a connector</option>'];
+    availableServers.forEach((server) => {
+      const name = String(server?.name || '').trim();
+      if (!name) return;
+
+      const unavailable = server?.unavailable === true;
+      const selected = normalizedSelected && name.toLowerCase() === normalizedSelected.toLowerCase() ? ' selected' : '';
+      const label = unavailable ? `${name} (currently not globally enabled)` : name;
+      options.push(`<option value="${this.escapeHtml(name)}"${selected}>${this.escapeHtml(label)}</option>`);
+    });
+
+    this.elements.mcpServerSelect.innerHTML = options.join('');
+
+    if (normalizedSelected) {
+      this.elements.mcpServerSelect.value = normalizedSelected;
+    }
+
+    if (availableServers.length === 0) {
+      this.setWorkspaceMCPServerHelp('No globally enabled connectors are available yet. Enable an MCP globally first.', true);
+      return;
+    }
+
+    if (normalizedSelected && !selectedExists) {
+      this.setWorkspaceMCPServerHelp(`${normalizedSelected} is not globally enabled right now, but you can still update or remove this workspace binding.`, true);
+      return;
+    }
+
+    this.setWorkspaceMCPServerHelp('Only globally enabled connectors can be added here.');
+  }
+
+  renderWorkspaceMCPAgentOptions(bindingId) {
+    if (!this.elements.mcpAgentOptions) return;
+
+    const accessOptions = this.getWorkspaceMCPAgentAccessSelections(bindingId);
+    if (accessOptions.length === 0) {
+      this.elements.mcpAgentOptions.innerHTML = `
+        <div class="workspace-detail-mcp-agent-empty">
+          Add one or more agents to this workspace before assigning MCP access.
+        </div>
+      `;
+      this.updateWorkspaceMCPAgentAccessSummary();
+      return;
+    }
+
+    this.elements.mcpAgentOptions.innerHTML = accessOptions.map((option) => `
+      <label class="workspace-detail-mcp-agent-option">
+        <input type="checkbox" class="form-check-input workspace-detail-mcp-agent-checkbox" value="${this.escapeHtml(option.id)}"${option.checked ? ' checked' : ''}>
+        <span class="workspace-detail-mcp-agent-option-copy">
+          <span class="workspace-detail-mcp-agent-option-title">${this.escapeHtml(option.label)}</span>
+          <span class="workspace-detail-mcp-agent-option-meta">${this.escapeHtml(option.meta)}</span>
+        </span>
+      </label>
+    `).join('');
+    this.updateWorkspaceMCPAgentAccessSummary();
+  }
+
+  updateWorkspaceMCPAgentAccessSummary() {
+    if (!this.elements.mcpAgentAccessSummary || !this.elements.mcpAgentOptions) return;
+
+    const checkboxes = Array.from(this.elements.mcpAgentOptions.querySelectorAll('.workspace-detail-mcp-agent-checkbox'));
+    if (checkboxes.length === 0) {
+      this.elements.mcpAgentAccessSummary.textContent = 'No agents';
+      return;
+    }
+
+    const selectedCount = checkboxes.filter((checkbox) => checkbox.checked).length;
+    this.elements.mcpAgentAccessSummary.textContent = `${selectedCount} of ${checkboxes.length} selected`;
+  }
+
+  resetWorkspaceMCPModal() {
+    this.activeWorkspaceMCPBindingId = '';
+    this.activeWorkspaceMCPMode = 'create';
+
+    if (this.elements.mcpForm) {
+      this.elements.mcpForm.reset();
+    }
+    if (this.elements.mcpServerSelect) {
+      this.elements.mcpServerSelect.innerHTML = '<option value="">Select a connector</option>';
+    }
+    if (this.elements.mcpAgentOptions) {
+      this.elements.mcpAgentOptions.innerHTML = '<div class="workspace-detail-mcp-agent-empty">No agent instances in this workspace yet.</div>';
+    }
+    if (this.elements.mcpModalTitle) {
+      this.elements.mcpModalTitle.textContent = 'Add Workspace MCP';
+    }
+    if (this.elements.mcpModalSubtitle) {
+      this.elements.mcpModalSubtitle.textContent = 'Bind a globally available MCP connector to this workspace, then decide which agent instances can use it here.';
+    }
+    if (this.elements.mcpEnabledInput) {
+      this.elements.mcpEnabledInput.checked = true;
+    }
+    if (this.elements.mcpScopeInput) {
+      this.elements.mcpScopeInput.value = '';
+    }
+    if (this.elements.mcpConfigInput) {
+      this.elements.mcpConfigInput.value = '';
+    }
+    if (this.elements.mcpAliasInput) {
+      this.elements.mcpAliasInput.value = '';
+    }
+    if (this.elements.mcpSubmitBtn) {
+      this.elements.mcpSubmitBtn.disabled = false;
+      this.elements.mcpSubmitBtn.textContent = 'Add Binding';
+    }
+    this.setWorkspaceMCPServerHelp('Only globally enabled connectors can be added here.');
+    this.updateWorkspaceMCPAgentAccessSummary();
+  }
+
+  handleWorkspaceMCPServerChange() {
+    const serverName = String(this.elements.mcpServerSelect?.value || '').trim();
+    if (!serverName || !this.elements.mcpAliasInput) return;
+
+    if (!this.elements.mcpAliasInput.value.trim()) {
+      this.elements.mcpAliasInput.value = this.slugifyWorkspaceMCPAlias(serverName);
+    }
+  }
+
+  handleWorkspaceMCPListClick(event) {
+    const button = event.target.closest('[data-workspace-mcp-action]');
+    if (!button) return;
+    event.preventDefault();
+    event.stopPropagation();
+
+    const action = String(button.dataset.workspaceMcpAction || '').trim();
+    const bindingId = String(button.dataset.bindingId || '').trim();
+    if (!bindingId) return;
+
+    if (action === 'edit') {
+      this.openWorkspaceMCPModal(bindingId);
+      return;
+    }
+
+    if (action === 'delete') {
+      this.deleteWorkspaceMCPBinding(bindingId);
+    }
+  }
+
+  async openWorkspaceMCPModal(bindingId = '') {
+    const explicitBinding = bindingId ? this.getWorkspaceExplicitMCPBinding(bindingId) : null;
+    const existingBinding = explicitBinding || (bindingId ? this.getWorkspaceMCPBinding(bindingId, { includeDisabled: true }) : null);
+    if (bindingId && !existingBinding) {
+      if (window.Toast) {
+        window.Toast.info('That workspace MCP binding is no longer available.');
+      }
+      return;
+    }
+
+    try {
+      await this.loadAvailableMCPServers();
+    } catch (error) {
+      console.error('Failed to load MCP connectors:', error);
+      if (!existingBinding) {
+        if (window.Toast) window.Toast.error(error.message || 'Failed to load MCP connectors');
+        return;
+      }
+    }
+
+    const isSynthesized = existingBinding?.source === 'synthesized' && !explicitBinding;
+    this.activeWorkspaceMCPMode = explicitBinding ? 'edit' : (isSynthesized ? 'customize' : 'create');
+    this.activeWorkspaceMCPBindingId = existingBinding?.id || this.generateWorkspaceMCPBindingId();
+    this.populateWorkspaceMCPServerOptions(existingBinding?.serverName || '');
+
+    if (this.elements.mcpModalTitle) {
+      this.elements.mcpModalTitle.textContent = explicitBinding
+        ? 'Edit Workspace MCP'
+        : (isSynthesized ? 'Customize Workspace MCP' : 'Add Workspace MCP');
+    }
+    if (this.elements.mcpModalSubtitle) {
+      this.elements.mcpModalSubtitle.textContent = explicitBinding
+        ? 'Update this workspace binding, refine its scope, or tighten which agent instances can reach it.'
+        : (isSynthesized
+          ? 'This binding is currently derived from imported directories. Saving here will create an explicit workspace binding that you can edit directly.'
+          : 'Create a new MCP binding for this workspace and decide which agent instances should be able to use it.');
+    }
+    if (this.elements.mcpAliasInput) {
+      this.elements.mcpAliasInput.value = existingBinding?.alias || '';
+    }
+    if (this.elements.mcpEnabledInput) {
+      this.elements.mcpEnabledInput.checked = existingBinding ? existingBinding.enabled !== false : true;
+    }
+    if (this.elements.mcpScopeInput) {
+      const scope = existingBinding?.scope && Object.keys(existingBinding.scope).length > 0
+        ? JSON.stringify(existingBinding.scope, null, 2)
+        : '';
+      this.elements.mcpScopeInput.value = scope;
+    }
+    if (this.elements.mcpConfigInput) {
+      const config = existingBinding?.config && Object.keys(existingBinding.config).length > 0
+        ? JSON.stringify(existingBinding.config, null, 2)
+        : '';
+      this.elements.mcpConfigInput.value = config;
+    }
+    if (this.elements.mcpSubmitBtn) {
+      this.elements.mcpSubmitBtn.textContent = explicitBinding
+        ? 'Save Changes'
+        : (isSynthesized ? 'Customize Binding' : 'Add Binding');
+      this.elements.mcpSubmitBtn.disabled = false;
+    }
+
+    this.renderWorkspaceMCPAgentOptions(this.activeWorkspaceMCPBindingId);
+    this.getWorkspaceMCPModalInstance()?.show();
+  }
+
+  parseWorkspaceMCPScopeValue() {
+    const raw = String(this.elements.mcpScopeInput?.value || '').trim();
+    if (!raw) return {};
+
+    let parsed;
+    try {
+      parsed = JSON.parse(raw);
+    } catch (_error) {
+      throw new Error('Scope JSON must be valid JSON');
+    }
+
+    if (!parsed || Array.isArray(parsed) || typeof parsed !== 'object') {
+      throw new Error('Scope JSON must be an object');
+    }
+
+    return parsed;
+  }
+
+  parseWorkspaceMCPConfigValue() {
+    const raw = String(this.elements.mcpConfigInput?.value || '').trim();
+    if (!raw) return {};
+
+    let parsed;
+    try {
+      parsed = JSON.parse(raw);
+    } catch (_error) {
+      throw new Error('Config JSON must be valid JSON');
+    }
+
+    if (!parsed || Array.isArray(parsed) || typeof parsed !== 'object') {
+      throw new Error('Config JSON must be an object');
+    }
+
+    return parsed;
+  }
+
+  getWorkspaceMCPSelectedAgentInstanceIDs() {
+    if (!this.elements.mcpAgentOptions) return [];
+    return Array.from(this.elements.mcpAgentOptions.querySelectorAll('.workspace-detail-mcp-agent-checkbox:checked'))
+      .map((checkbox) => String(checkbox.value || '').trim())
+      .filter(Boolean);
+  }
+
+  setWorkspaceMCPModalSubmitting(isSubmitting) {
+    if (!this.elements.mcpSubmitBtn) return;
+    this.elements.mcpSubmitBtn.disabled = isSubmitting;
+    this.elements.mcpSubmitBtn.textContent = isSubmitting
+      ? (this.activeWorkspaceMCPMode === 'edit'
+        ? 'Saving...'
+        : (this.activeWorkspaceMCPMode === 'customize' ? 'Customizing...' : 'Adding...'))
+      : (this.activeWorkspaceMCPMode === 'edit'
+        ? 'Save Changes'
+        : (this.activeWorkspaceMCPMode === 'customize' ? 'Customize Binding' : 'Add Binding'));
+  }
+
+  async saveWorkspaceMCPBinding(payload) {
+    const isEditing = this.activeWorkspaceMCPMode === 'edit';
+    const endpoint = isEditing
+      ? `/api/studios/${encodeURIComponent(this.workspaceId)}/mcp-bindings/${encodeURIComponent(this.activeWorkspaceMCPBindingId)}`
+      : `/api/studios/${encodeURIComponent(this.workspaceId)}/mcp-bindings`;
+
+    const response = await fetch(endpoint, {
+      method: isEditing ? 'PUT' : 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+
+    if (!response.ok) {
+      const text = await response.text();
+      throw new Error(text || 'Failed to save workspace MCP binding');
+    }
+
+    return response.json();
+  }
+
+  async persistWorkspaceMCPAgentAccess(bindingId, selectedAgentInstanceIds) {
+    if (!this.workspace || !Array.isArray(this.workspace.agent_instances) || this.workspace.agent_instances.length === 0) {
+      return;
+    }
+
+    const selectedSet = new Set(selectedAgentInstanceIds.map((value) => String(value || '').trim()).filter(Boolean));
+    const effectiveBindingIds = this.getWorkspaceMCPBindings()
+      .map((binding) => String(binding?.id || '').trim())
+      .filter(Boolean);
+    const defaultBindingIds = Array.from(new Set(effectiveBindingIds)).sort();
+    const normalizeIDs = (ids) => Array.from(new Set(ids.map((value) => String(value || '').trim()).filter(Boolean))).sort();
+    const arraysEqual = (left, right) => (
+      left.length === right.length && left.every((value, index) => value === right[index])
+    );
+
+    const requests = this.workspace.agent_instances.map(async (instance) => {
+      const instanceId = String(instance?.id || '').trim();
+      if (!instanceId) return;
+
+      const entry = this.getWorkspaceAgentAccessEntry(instanceId);
+      const currentIds = entry
+        ? Array.isArray(entry.enabled_binding_ids)
+          ? entry.enabled_binding_ids.map((value) => String(value || '').trim()).filter(Boolean)
+          : []
+        : [...defaultBindingIds];
+      const allowedSet = new Set(currentIds);
+
+      if (selectedSet.has(instanceId)) {
+        allowedSet.add(bindingId);
+      } else {
+        allowedSet.delete(bindingId);
+      }
+
+      const enabledBindingIDs = normalizeIDs(Array.from(allowedSet));
+      const currentNormalized = normalizeIDs(currentIds);
+
+      if (!entry && arraysEqual(enabledBindingIDs, defaultBindingIds)) {
+        return;
+      }
+
+      if (entry && arraysEqual(enabledBindingIDs, defaultBindingIds)) {
+        const response = await fetch(
+          `/api/studios/${encodeURIComponent(this.workspaceId)}/agent-mcp-access/${encodeURIComponent(instanceId)}`,
+          { method: 'DELETE' }
+        );
+
+        if (!response.ok) {
+          const text = await response.text();
+          throw new Error(text || `Failed to clear MCP access rule for ${instanceId}`);
+        }
+        return;
+      }
+
+      if (arraysEqual(enabledBindingIDs, currentNormalized)) {
+        return;
+      }
+
+      const response = await fetch(
+        `/api/studios/${encodeURIComponent(this.workspaceId)}/agent-mcp-access/${encodeURIComponent(instanceId)}`,
+        {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ enabled_binding_ids: enabledBindingIDs })
+        }
+      );
+
+      if (!response.ok) {
+        const text = await response.text();
+        throw new Error(text || `Failed to update MCP access for ${instanceId}`);
+      }
+    });
+
+    await Promise.all(requests);
+  }
+
+  async submitWorkspaceMCPModal() {
+    const serverName = String(this.elements.mcpServerSelect?.value || '').trim();
+    const alias = String(this.elements.mcpAliasInput?.value || '').trim();
+
+    if (!serverName) {
+      this.setWorkspaceMCPServerHelp('Choose a connector before saving this workspace binding.', true);
+      if (window.Toast) window.Toast.error('Choose a connector');
+      return;
+    }
+
+    let scope;
+    try {
+      scope = this.parseWorkspaceMCPScopeValue();
+    } catch (error) {
+      this.setWorkspaceMCPServerHelp(error.message || 'Scope JSON is invalid', true);
+      if (window.Toast) window.Toast.error(error.message || 'Scope JSON is invalid');
+      return;
+    }
+
+    let config;
+    try {
+      config = this.parseWorkspaceMCPConfigValue();
+    } catch (error) {
+      this.setWorkspaceMCPServerHelp(error.message || 'Config JSON is invalid', true);
+      if (window.Toast) window.Toast.error(error.message || 'Config JSON is invalid');
+      return;
+    }
+
+    this.setWorkspaceMCPServerHelp('Only globally enabled connectors can be added here.');
+    this.setWorkspaceMCPModalSubmitting(true);
+
+    try {
+      const enabled = this.elements.mcpEnabledInput?.checked !== false;
+      const selectedAgentInstanceIds = this.getWorkspaceMCPSelectedAgentInstanceIDs();
+      const payload = {
+        server_name: serverName,
+        alias,
+        enabled,
+        scope,
+        config
+      };
+
+      if (this.activeWorkspaceMCPMode !== 'edit') {
+        payload.id = this.activeWorkspaceMCPBindingId;
+      }
+
+      await this.saveWorkspaceMCPBinding(payload);
+      await this.loadWorkspace();
+      await this.persistWorkspaceMCPAgentAccess(this.activeWorkspaceMCPBindingId, selectedAgentInstanceIds);
+      await this.loadWorkspace();
+
+      this.getWorkspaceMCPModalInstance()?.hide();
+      if (window.Toast) {
+        window.Toast.success(
+          this.activeWorkspaceMCPMode === 'edit'
+            ? 'Workspace MCP updated'
+            : (this.activeWorkspaceMCPMode === 'customize' ? 'Workspace MCP customized' : 'Workspace MCP added')
+        );
+      }
+    } catch (error) {
+      console.error('Failed to save workspace MCP binding:', error);
+      if (window.Toast) window.Toast.error(error.message || 'Failed to save workspace MCP binding');
+    } finally {
+      this.setWorkspaceMCPModalSubmitting(false);
+    }
+  }
+
+  async deleteWorkspaceMCPBinding(bindingId) {
+    const binding = this.getWorkspaceExplicitMCPBinding(bindingId);
+    if (!binding) {
+      if (window.Toast) {
+        window.Toast.info('Synthesized bindings follow workspace directories and are removed by changing directory scope.');
+      }
+      return;
+    }
+
+    const label = binding.alias || binding.serverName || binding.id;
+    if (!window.confirm(`Remove workspace MCP binding "${label}"?`)) {
+      return;
+    }
+
+    try {
+      const response = await fetch(
+        `/api/studios/${encodeURIComponent(this.workspaceId)}/mcp-bindings/${encodeURIComponent(bindingId)}`,
+        { method: 'DELETE' }
+      );
+
+      if (!response.ok) {
+        const text = await response.text();
+        throw new Error(text || 'Failed to remove workspace MCP binding');
+      }
+
+      await this.loadWorkspace();
+      if (window.Toast) window.Toast.success('Workspace MCP removed');
+    } catch (error) {
+      console.error('Failed to delete workspace MCP binding:', error);
+      if (window.Toast) window.Toast.error(error.message || 'Failed to remove workspace MCP binding');
+    }
+  }
+
+  renderWorkspaceMCPBindings() {
+    if (!this.elements.mcpList) return;
+
+    const bindings = this.getWorkspaceMCPBindings({ includeDisabled: true });
+    if (bindings.length === 0) {
+      this.elements.mcpList.innerHTML = `
+        <div class="workspace-detail-empty">
+          No workspace MCP bindings yet.
+          <div class="workspace-detail-mcp-empty-note">Import directories to synthesize <code>filesystem</code>, or add an explicit binding with the <strong>+</strong> button.</div>
+        </div>
+      `;
+      return;
+    }
+
+    this.elements.mcpList.innerHTML = bindings.map((binding) => {
+      const serverName = String(binding?.serverName || '').trim() || 'unknown';
+      const alias = String(binding?.alias || '').trim();
+      const source = binding?.source === 'synthesized' ? 'Synthesized' : 'Explicit';
+      const isDisabled = binding?.enabled === false;
+      const scopeSummary = this.summarizeWorkspaceMCPBindingScope(binding);
+      const configSummary = this.summarizeWorkspaceMCPBindingConfig(binding);
+      const agentNames = this.getWorkspaceMCPAgentNamesForBinding(binding.id);
+      const accessSummary = isDisabled
+        ? 'Disabled for this workspace'
+        : agentNames.length > 0
+        ? `${agentNames.length} agent${agentNames.length === 1 ? '' : 's'} can use this`
+        : (Array.isArray(this.workspace?.agent_instances) && this.workspace.agent_instances.length > 0
+          ? 'No agent instances currently have access'
+          : 'No agent instances in this workspace');
+      const accessLabel = isDisabled
+        ? 'Agents: unavailable while disabled'
+        : agentNames.length > 0
+        ? `Agents: ${agentNames.join(', ')}`
+        : 'Agents: none';
+      const actions = binding?.source === 'workspace'
+        ? `
+          <div class="workspace-detail-mcp-card-actions">
+            <button type="button" class="workspace-detail-mcp-card-btn" data-workspace-mcp-action="edit" data-binding-id="${this.escapeHtml(binding.id)}" onclick="event.preventDefault(); event.stopPropagation(); window.workspaceDetail?.openWorkspaceMCPModal('${this.escapeHtml(binding.id)}')" title="Edit binding" aria-label="Edit binding ${this.escapeHtml(alias || serverName)}">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M20.71,7.04C21.1,6.65 21.1,6 20.71,5.63L18.37,3.29C18,2.9 17.35,2.9 16.96,3.29L15.12,5.12L18.87,8.87M3,17.25V21H6.75L17.81,9.93L14.06,6.18L3,17.25Z"/>
+              </svg>
+            </button>
+            <button type="button" class="workspace-detail-mcp-card-btn is-danger" data-workspace-mcp-action="delete" data-binding-id="${this.escapeHtml(binding.id)}" onclick="event.preventDefault(); event.stopPropagation(); window.workspaceDetail?.deleteWorkspaceMCPBinding('${this.escapeHtml(binding.id)}')" title="Remove binding" aria-label="Remove binding ${this.escapeHtml(alias || serverName)}">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M9,3V4H4V6H5V19A2,2 0 0,0 7,21H17A2,2 0 0,0 19,19V6H20V4H15V3H9M7,6H17V19H7V6M9,8V17H11V8H9M13,8V17H15V8H13Z"/>
+              </svg>
+            </button>
+          </div>
+        `
+        : (binding?.source === 'synthesized'
+          ? `
+            <div class="workspace-detail-mcp-card-actions">
+              <button type="button" class="workspace-detail-mcp-card-btn" data-workspace-mcp-action="edit" data-binding-id="${this.escapeHtml(binding.id)}" onclick="event.preventDefault(); event.stopPropagation(); window.workspaceDetail?.openWorkspaceMCPModal('${this.escapeHtml(binding.id)}')" title="Customize binding" aria-label="Customize binding ${this.escapeHtml(alias || serverName)}">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
+                  <path d="M20.71,7.04C21.1,6.65 21.1,6 20.71,5.63L18.37,3.29C18,2.9 17.35,2.9 16.96,3.29L15.12,5.12L18.87,8.87M3,17.25V21H6.75L17.81,9.93L14.06,6.18L3,17.25Z"/>
+                </svg>
+              </button>
+            </div>
+          `
+          : '')
+        ;
+
+      const chips = [
+        `<span class="workspace-detail-mcp-chip source">${this.escapeHtml(source)}</span>`,
+        `<span class="workspace-detail-mcp-chip status${isDisabled ? ' is-disabled' : ''}">${isDisabled ? 'Disabled' : 'Enabled'}</span>`,
+        alias ? `<span class="workspace-detail-mcp-chip alias">Alias: ${this.escapeHtml(alias)}</span>` : '',
+        scopeSummary ? `<span class="workspace-detail-mcp-chip scope">${this.escapeHtml(scopeSummary)}</span>` : '',
+        configSummary ? `<span class="workspace-detail-mcp-chip scope">Config: ${this.escapeHtml(configSummary)}</span>` : '',
+        `<span class="workspace-detail-mcp-chip access">${this.escapeHtml(accessLabel)}</span>`
+      ].filter(Boolean).join('');
+
+      return `
+        <div class="workspace-detail-mcp-card" data-binding-id="${this.escapeHtml(binding.id)}">
+          <div class="workspace-detail-mcp-card-top">
+            <div class="workspace-detail-mcp-card-top-main">
+              <div class="workspace-detail-mcp-server">
+                <span>${this.escapeHtml(serverName)}</span>
+                <code>${this.escapeHtml(binding.id)}</code>
+              </div>
+              <div class="workspace-detail-mcp-meta">${this.escapeHtml(accessSummary)}</div>
+            </div>
+            ${actions}
+          </div>
+          <div class="workspace-detail-mcp-description">${this.escapeHtml(this.describeWorkspaceMCPBinding(binding))}</div>
+          <div class="workspace-detail-mcp-chip-row">${chips}</div>
+        </div>
+      `;
+    }).join('');
+  }
+
+  getAgentInstanceIdsForName(agentName) {
+    const normalized = this.normalizeAgentName(agentName);
+    if (!normalized || !this.workspace || !Array.isArray(this.workspace.agent_instances)) {
+      return [];
+    }
+
+    const ids = [];
+    const seen = new Set();
+    this.workspace.agent_instances.forEach((instance) => {
+      if (this.normalizeAgentName(instance?.name) !== normalized) return;
+      const id = String(instance?.id || '').trim();
+      if (!id || seen.has(id)) return;
+      seen.add(id);
+      ids.push(id);
+    });
+    return ids;
+  }
+
+  getEffectiveWorkspaceMCPBindingsForAgent(agentName) {
+    const bindings = this.getWorkspaceMCPBindings();
+    if (bindings.length === 0) {
+      return [];
+    }
+
+    const instanceIds = this.getAgentInstanceIdsForName(agentName);
+    if (instanceIds.length === 0) {
+      return bindings;
+    }
+
+    const accessEntries = Array.isArray(this.workspace?.agent_mcp_access)
+      ? this.workspace.agent_mcp_access
+      : [];
+
+    const allowedByInstance = instanceIds.map((instanceID) => {
+      const entry = accessEntries.find((item) => String(item?.agent_instance_id || '').trim() === instanceID);
+      if (!entry) {
+        return bindings;
+      }
+      if (!Array.isArray(entry.enabled_binding_ids) || entry.enabled_binding_ids.length === 0) {
+        return [];
+      }
+
+      const allowedIDs = new Set(
+        entry.enabled_binding_ids
+          .map((value) => String(value || '').trim().toLowerCase())
+          .filter(Boolean)
+      );
+      return bindings.filter((binding) => allowedIDs.has(String(binding.id || '').trim().toLowerCase()));
+    });
+
+    const merged = [];
+    const seen = new Set();
+    allowedByInstance.flat().forEach((binding) => {
+      const key = String(binding?.id || '').trim().toLowerCase() || String(binding?.serverName || '').trim().toLowerCase();
+      if (!key || seen.has(key)) return;
+      seen.add(key);
+      merged.push(binding);
+    });
+    return merged;
+  }
+
+  getEffectiveWorkspaceMCPServerNames(agentName) {
+    const names = [];
+    const seen = new Set();
+    const add = (value) => {
+      const name = String(value || '').trim();
+      if (!name) return;
+      const key = name.toLowerCase();
+      if (seen.has(key)) return;
+      seen.add(key);
+      names.push(name);
+    };
+
+    this.getEffectiveWorkspaceMCPBindingsForAgent(agentName).forEach((binding) => add(binding.serverName));
+
+    const profile = this.getAgentProfile(agentName);
+    if (Array.isArray(profile?.mcpServers)) {
+      profile.mcpServers.forEach(add);
+    }
+
+    return names;
+  }
+
   async loadAgentCatalog(force = false) {
     if (!force && this.agentIndex instanceof Map && this.agentIndex.size > 0) {
       return this.agentCatalog;
@@ -2464,6 +4747,7 @@ export class WorkspaceDetailPage {
 
           const profile = {
             name,
+            status: String(agent?.status || '').trim().toLowerCase(),
             capabilities: Array.isArray(agent?.capabilities) ? agent.capabilities.map((value) => String(value || '').trim()).filter(Boolean) : [],
             allowWebSearch: Boolean(agent?.allow_web_search),
             enabledPlugins: Array.isArray(agent?.enabled_plugins) ? agent.enabled_plugins.map((value) => String(value || '').trim()).filter(Boolean) : [],
@@ -2529,7 +4813,9 @@ export class WorkspaceDetailPage {
       }
     }
 
-    const serverNames = (profile.mcpServers || []).map((value) => String(value || '').trim().toLowerCase()).filter(Boolean);
+    const serverNames = this.getEffectiveWorkspaceMCPServerNames(profile.name)
+      .map((value) => String(value || '').trim().toLowerCase())
+      .filter(Boolean);
     for (const name of serverNames) {
       if (name.includes('playwright') || name.includes('browserbase') || name.includes('puppeteer') || name.includes('browser')) {
         return true;
@@ -2537,6 +4823,13 @@ export class WorkspaceDetailPage {
     }
 
     return false;
+  }
+
+  agentSupportsFilesystemOperations(profile) {
+    const support = this.getAgentSupportForTaskRequirement(profile, [], {
+      key: TASK_REQUIREMENT_KEYS.FILESYSTEM
+    });
+    return support.supported;
   }
 
   findBestBrowserCapableAgent(excludeAgent = '') {
@@ -2577,9 +4870,10 @@ export class WorkspaceDetailPage {
     return false;
   }
 
-  getTaskExecutionPreflight(task, assignedAgent) {
+  async getTaskExecutionPreflight(task, assignedAgent) {
     const description = String(task?.description || task?.name || '').trim();
-    if (!this.isLikelyBrowserAutomationIntent(description)) {
+    const requirements = this.inferTaskExecutionRequirements(description);
+    if (requirements.length === 0) {
       return { kind: 'none' };
     }
 
@@ -2588,23 +4882,42 @@ export class WorkspaceDetailPage {
       return { kind: 'none' };
     }
 
-    const currentProfile = this.getAgentProfile(currentAgent);
-    if (!currentProfile || this.agentSupportsBrowserAutomation(currentProfile)) {
+    const currentEvaluation = await this.evaluateAgentForTaskRequirements(currentAgent, requirements);
+    if (currentEvaluation) {
       return { kind: 'none' };
     }
 
-    const recommendedAgent = this.findBestBrowserCapableAgent(currentAgent);
+    const requirementSummary = requirements.map((requirement) => requirement.label.toLowerCase()).join(' and ');
+    const recommendedAgent = await this.findBestAgentForTaskRequirements(requirements, { excludeAgent: currentAgent });
     if (recommendedAgent) {
       return {
         kind: 'switch_recommended',
-        recommendedAgent,
-        message: `"${currentAgent}" likely cannot execute browser actions for this task.`
+        recommendedAgent: recommendedAgent.agentName,
+        message: `"${currentAgent}" likely lacks ${requirementSummary} for this task.`,
+        details: [
+          ...requirements.map((requirement) => requirement.reason),
+          ...recommendedAgent.reasons
+        ].slice(0, 5)
       };
     }
 
+    const capabilityCatalog = await this.loadCapabilitySuggestionCatalog();
+    const suggestions = this.getCapabilitySuggestionsForRequirements(requirements, capabilityCatalog);
+    const defaults = this.getTaskRequirementSeedDefaults(requirements);
+
     return {
-      kind: 'warning',
-      message: `This looks like a browser task, but "${currentAgent}" likely lacks browser capability in this workspace.`
+      kind: 'create_recommended',
+      message: `This task likely needs ${requirementSummary}, but "${currentAgent}" does not advertise matching MCP servers, tools, or skills.`,
+      details: [
+        ...requirements.map((requirement) => requirement.reason),
+        suggestions.mcpServers.length > 0 ? `Suggested MCP servers: ${suggestions.mcpServers.join(', ')}` : 'No matching MCP server is configured yet.',
+        suggestions.skills.length > 0 ? `Suggested skills: ${suggestions.skills.join(', ')}` : 'No matching reusable skill is available yet.'
+      ],
+      suggestedMCPServers: suggestions.mcpServers,
+      suggestedSkills: suggestions.skills,
+      seedName: defaults.name,
+      seedType: defaults.type,
+      autoDescription: this.buildCapabilityAwareAgentDescription(task, requirements, suggestions)
     };
   }
 
@@ -2616,10 +4929,13 @@ export class WorkspaceDetailPage {
     if (this.agentSupportsBrowserAutomation(profile)) {
       badges.push({ key: 'browser', label: 'Browser' });
     }
+    if (this.agentSupportsFilesystemOperations(profile)) {
+      badges.push({ key: 'files', label: 'Files' });
+    }
     if (profile.allowWebSearch) {
       badges.push({ key: 'web', label: 'Web' });
     }
-    if ((profile.mcpServers || []).length > 0) {
+    if (this.getEffectiveWorkspaceMCPServerNames(agentName).length > 0) {
       badges.push({ key: 'mcp', label: 'MCP' });
     }
     if ((profile.enabledPlugins || []).length > 0) {
@@ -2722,12 +5038,20 @@ export class WorkspaceDetailPage {
     this.elements.taskExecutionViewResultBtn.disabled = !enabled;
   }
 
+  setExecutionNextStepEnabled(enabled, label = 'Run Next Step') {
+    if (!this.elements.taskExecutionNextStepBtn) return;
+    this.elements.taskExecutionNextStepBtn.textContent = label;
+    this.elements.taskExecutionNextStepBtn.classList.toggle('d-none', !enabled);
+    this.elements.taskExecutionNextStepBtn.disabled = !enabled;
+  }
+
   applyTopBackdropLayer(layerClass) {
     const backdrops = Array.from(document.querySelectorAll('.modal-backdrop.show'));
     if (!backdrops.length) return;
 
     const topBackdrop = backdrops[backdrops.length - 1];
     topBackdrop.classList.remove(
+      'workspace-detail-backdrop-mcp',
       'workspace-detail-backdrop-execution',
       'workspace-detail-backdrop-result'
     );
@@ -2744,10 +5068,45 @@ export class WorkspaceDetailPage {
     const attemptsUsed = Number(retry.attempts_used || 0);
     const maxAttempts = Number(retry.max_attempts || task?.context?.execution_max_attempts || 0);
     const parts = [answeredBy, updatedAt].filter(Boolean);
+    if (this.getTaskExecutionMode(task) === 'step_through') {
+      parts.push('Step-through');
+    }
     if (attemptsUsed > 0 && maxAttempts > 0) {
       parts.push(`Attempt ${attemptsUsed}/${maxAttempts}`);
     }
     this.elements.taskExecutionMeta.textContent = parts.join(' • ');
+  }
+
+  updateTaskExecutionControls(task) {
+    const awaitingNextStep = this.isTaskAwaitingNextStep(task);
+    this.setExecutionNextStepEnabled(awaitingNextStep, awaitingNextStep ? 'Run Next Step' : 'Run Next Step');
+  }
+
+  async advanceCurrentExecutionStep() {
+    if (!this.currentExecutionTaskId) return;
+
+    try {
+      this.setExecutionNextStepEnabled(false, 'Running...');
+      const response = await fetch('/api/orchestration/tasks/execute', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          task_id: this.currentExecutionTaskId,
+          step_action: 'next'
+        })
+      });
+      if (!response.ok) {
+        const text = await response.text();
+        throw new Error(text || 'Failed to execute the next step');
+      }
+      this.appendExecutionLog('Running the next internal step.', 'info', `${this.currentExecutionTaskId}:next-step`);
+      await this.startExecutionMonitor(this.currentExecutionTaskId);
+      await this.loadTasks();
+    } catch (error) {
+      console.error('Failed to advance task step:', error);
+      if (window.Toast) window.Toast.error(error.message || 'Failed to run the next step');
+      this.setExecutionNextStepEnabled(true);
+    }
   }
 
   openTaskExecutionModal(task) {
@@ -2761,6 +5120,7 @@ export class WorkspaceDetailPage {
     this.updateTaskExecutionMeta(task);
     this.setExecutionModalStatus(this.getTaskExecutionState(task));
     this.refreshExecutionBreakdown(task);
+    this.updateTaskExecutionControls(task);
     this.setExecutionViewResultEnabled(false);
     this.clearExecutionLog();
     this.appendExecutionLog('Preparing execution...', 'info', `${task.id}:prepare`);
@@ -2795,10 +5155,20 @@ export class WorkspaceDetailPage {
         this.updateTaskExecutionMeta(task);
         this.setExecutionModalStatus(state);
         await this.refreshExecutionBreakdown(task);
+        this.updateTaskExecutionControls(task);
 
         if (state !== this.executionLastStatus) {
           this.executionLastStatus = state;
           this.appendExecutionLog(`Status changed to ${getDisplayStatus(state)}.`, state === 'failed' ? 'error' : state === 'blocked' ? 'warning' : state === 'completed' ? 'success' : 'info', `${taskId}:status:${state}:${task.updated_at || ''}`);
+        }
+
+        if (this.isTaskAwaitingNextStep(task)) {
+          const nextStepIndex = Number(task?.context?.execution_step_waiting_index || 0);
+          const nextStep = Array.isArray(task?.execution_steps)
+            ? task.execution_steps.find((step) => Number(step?.index) === nextStepIndex)
+            : null;
+          const nextLabel = nextStep?.title ? ` ${nextStep.title}` : '';
+          this.appendExecutionLog(`Paused after the current step. Ready for step ${nextStepIndex || '?'}${nextLabel ? `: ${nextLabel}` : ''}.`, 'info', `${taskId}:waiting:${nextStepIndex}`);
         }
 
         if (state === 'completed' || state === 'failed' || state === 'cancelled' || state === 'timeout' || state === 'blocked') {
@@ -2839,6 +5209,16 @@ export class WorkspaceDetailPage {
         this.setExecutionModalStatus('in_progress');
         this.appendExecutionLog('Agent started executing this task.', 'info', `${taskId}:evt:started:${payload?.updated_at || ''}`);
         break;
+      case 'task.progress': {
+        this.setExecutionModalStatus('in_progress');
+        const progress = payload?.progress || {};
+        const currentStep = String(progress?.current_step || '').trim();
+        const waiting = payload?.waiting_for_next_step === true;
+        if (currentStep) {
+          this.appendExecutionLog(currentStep, waiting ? 'success' : 'info', `${taskId}:evt:progress:${currentStep}`);
+        }
+        break;
+      }
       case 'task.thinking':
         this.setExecutionModalStatus('in_progress');
         this.appendExecutionLog(payload?.message || 'Agent is analyzing the task...', 'info');
@@ -2881,7 +5261,7 @@ export class WorkspaceDetailPage {
     }
   }
 
-  async executeTask(taskId) {
+  async executeTask(taskId, options = {}) {
     await this.loadAgentCatalog();
 
     const task = this.tasks.find((item) => item.id === taskId);
@@ -2889,7 +5269,11 @@ export class WorkspaceDetailPage {
 
     const subtasks = this.getSubtasksForParent(taskId);
     const isParent = subtasks.length > 0;
-    const isBrowserIntent = !isParent && this.isLikelyBrowserAutomationIntent(task.description || task.name || '');
+    const awaitingNextStep = !isParent && this.isTaskAwaitingNextStep(task);
+    const stepAction = String(options?.stepAction || (awaitingNextStep ? 'next' : '')).trim().toLowerCase();
+    const taskDescription = task.description || task.name || '';
+    const taskRequirements = !isParent ? this.inferTaskExecutionRequirements(taskDescription) : [];
+    const isBrowserIntent = taskRequirements.some((requirement) => requirement.key === TASK_REQUIREMENT_KEYS.BROWSER);
 
     if (isParent) {
       const hasUnassigned = subtasks.some((subtask) => !subtask.to || subtask.to === 'unassigned');
@@ -2902,43 +5286,83 @@ export class WorkspaceDetailPage {
         if (window.Toast) window.Toast.error('A subtask is already running.');
         return;
       }
-    } else if (task.status === 'in_progress') {
+    } else if (task.status === 'in_progress' && !awaitingNextStep) {
       if (window.Toast) window.Toast.error('This task is already running.');
       return;
     }
 
     let assignedAgent = task.to && task.to !== 'unassigned' ? task.to : '';
-    if (!isParent && !assignedAgent) {
-      const fallbackAgent = this.getWorkspaceFallbackAgent({ preferBrowser: isBrowserIntent });
-      if (!fallbackAgent) {
-        if (window.Toast) window.Toast.error('No agent is available in this workspace. Add an agent or assign this task first.');
-        return;
+    const getExecutionSequencePreview = (agentName = assignedAgent) => this.getPredictedTaskExecutionSequence(
+      task,
+      isParent ? subtasks : [],
+      { assignedAgent: agentName }
+    );
+    if (!isParent && !assignedAgent && !awaitingNextStep) {
+      if (taskRequirements.length > 0) {
+        assignedAgent = await this.suggestAgentSetupForTask(task);
+        if (!assignedAgent) {
+          return;
+        }
+      } else {
+        const fallbackAgent = this.getWorkspaceFallbackAgent({ preferBrowser: isBrowserIntent });
+        if (!fallbackAgent) {
+          assignedAgent = await this.suggestAgentSetupForTask(task);
+          if (!assignedAgent) {
+            return;
+          }
+        } else {
+          const assignAndRun = options.skipConfirm === true
+            ? true
+            : await this.showTaskConfirmDialog({
+              eyebrow: 'Assignment Required',
+              title: `Execute with "${fallbackAgent}"?`,
+              message: `This task is unassigned. I can assign it to "${fallbackAgent}" and start execution immediately.`,
+              confirmLabel: 'Assign and Execute',
+              metaItems: [this.getTaskDisplayLabel(task), fallbackAgent, 'Workspace agent'],
+              details: ['The task will be updated before dispatch.', 'Live execution updates will appear after confirmation.'],
+              sequenceItems: getExecutionSequencePreview(fallbackAgent)
+            });
+          if (!assignAndRun) return;
+
+          try {
+            await this.assignTaskToAgent(taskId, fallbackAgent);
+            assignedAgent = fallbackAgent;
+            task.to = fallbackAgent;
+            this.renderTasks();
+          } catch (error) {
+            console.error('Failed to auto-assign task before execution:', error);
+            if (window.Toast) window.Toast.error('Failed to assign task before execution');
+            return;
+          }
+        }
       }
 
-      const assignAndRun = confirm(`This task is unassigned. Assign it to "${fallbackAgent}" and execute now?`);
-      if (!assignAndRun) return;
-
-      try {
-        await this.assignTaskToAgent(taskId, fallbackAgent);
-        assignedAgent = fallbackAgent;
-        task.to = fallbackAgent;
-      } catch (error) {
-        console.error('Failed to auto-assign task before execution:', error);
-        if (window.Toast) window.Toast.error('Failed to assign task before execution');
+      if (!assignedAgent) {
         return;
       }
     }
 
     let preflightWarning = '';
-    if (!isParent) {
-      const preflight = this.getTaskExecutionPreflight(task, assignedAgent);
+    if (!isParent && !awaitingNextStep) {
+      const preflight = await this.getTaskExecutionPreflight(task, assignedAgent);
       if (preflight.kind === 'switch_recommended' && preflight.recommendedAgent) {
-        const switchNow = confirm(`${preflight.message}\n\nRecommended: switch to "${preflight.recommendedAgent}" before execution. Switch now?`);
+        const switchNow = await this.showTaskConfirmDialog({
+          eyebrow: 'Capability Check',
+          title: `Switch to "${preflight.recommendedAgent}" before running?`,
+          message: preflight.message,
+          confirmLabel: 'Switch Agent',
+          metaItems: [this.getTaskDisplayLabel(task), preflight.recommendedAgent, 'Recommended agent'],
+          details: Array.isArray(preflight.details) && preflight.details.length > 0
+            ? preflight.details
+            : [`Switching now avoids a likely pause for "${assignedAgent}".`],
+          sequenceItems: getExecutionSequencePreview(preflight.recommendedAgent)
+        });
         if (switchNow) {
           try {
             await this.assignTaskToAgent(taskId, preflight.recommendedAgent);
             assignedAgent = preflight.recommendedAgent;
             task.to = preflight.recommendedAgent;
+            this.renderTasks();
           } catch (error) {
             console.error('Failed to switch task to recommended agent:', error);
             if (window.Toast) window.Toast.error('Failed to switch to recommended agent');
@@ -2947,16 +5371,73 @@ export class WorkspaceDetailPage {
         } else {
           preflightWarning = `${preflight.message} Continuing may trigger a pause for user input.`;
         }
+      } else if (preflight.kind === 'create_recommended') {
+        const createAgent = await this.showTaskConfirmDialog({
+          eyebrow: 'Capability Check',
+          title: 'Create a capable agent before running?',
+          message: preflight.message,
+          confirmLabel: 'Create Agent',
+          cancelLabel: 'Continue Anyway',
+          metaItems: [this.getTaskDisplayLabel(task), assignedAgent, 'Current assignment'],
+          details: Array.isArray(preflight.details) ? preflight.details : [],
+          sequenceItems: getExecutionSequencePreview()
+        });
+        if (createAgent) {
+          this.openCreateAgentFlow({
+            seedName: String(preflight.seedName || '').trim(),
+            seedType: String(preflight.seedType || '').trim(),
+            autoDescription: String(preflight.autoDescription || '').trim(),
+            preferAutoConfig: true,
+            workspaceId: this.workspaceId,
+            taskId: task.id,
+            assignTask: true,
+            suggestedMCPServers: Array.isArray(preflight.suggestedMCPServers) ? preflight.suggestedMCPServers : [],
+            suggestedSkills: Array.isArray(preflight.suggestedSkills) ? preflight.suggestedSkills : []
+          });
+          return;
+        }
+        preflightWarning = `${preflight.message} Continuing may trigger a pause for user input.`;
       } else if (preflight.kind === 'warning') {
         preflightWarning = preflight.message;
       }
     }
 
-    const baseConfirmMessage = isParent
-      ? `Execute this workflow (${subtasks.length} step${subtasks.length === 1 ? '' : 's'}) now?`
-      : `Execute this task${assignedAgent ? ` with "${assignedAgent}"` : ''} now?`;
-    const confirmMessage = preflightWarning ? `${preflightWarning}\n\n${baseConfirmMessage}` : baseConfirmMessage;
-    if (!confirm(confirmMessage)) return;
+    const sequencePreview = getExecutionSequencePreview();
+    if (options.skipConfirm !== true) {
+      const confirmed = await this.showTaskConfirmDialog({
+        eyebrow: stepAction === 'next' ? 'Step Launch' : isParent ? 'Workflow Launch' : 'Task Launch',
+        title: stepAction === 'next'
+          ? 'Run the next step now?'
+          : isParent ? 'Execute this workflow now?' : 'Execute this task now?',
+        message: stepAction === 'next'
+          ? 'This task is paused between internal execution steps. Ori will run the next step and keep the current plan intact.'
+          : isParent
+          ? `This workflow will dispatch ${subtasks.length} step${subtasks.length === 1 ? '' : 's'} in sequence.`
+          : `This task will run with "${assignedAgent}".`,
+        confirmLabel: stepAction === 'next' ? 'Run Next Step' : isParent ? 'Execute Workflow' : 'Execute Task',
+        metaItems: stepAction === 'next'
+          ? [this.getTaskDisplayLabel(task), assignedAgent, 'Step-through']
+          : isParent
+          ? [this.getTaskDisplayLabel(task), `${subtasks.length} step${subtasks.length === 1 ? '' : 's'}`]
+          : [this.getTaskDisplayLabel(task), assignedAgent, 'Ready to run'],
+        details: preflightWarning
+          ? [preflightWarning, 'Execution updates will appear in the live log after dispatch.']
+          : ['Execution updates will appear in the live log after dispatch.'],
+        sequenceItems: sequencePreview,
+        allowStepThrough: !isParent && stepAction !== 'next' && sequencePreview.length > 1,
+        defaultStepThrough: this.getTaskExecutionMode(task) === 'step_through'
+      });
+      if (!confirmed) return;
+    }
+
+    const selectedStepThrough = !isParent && stepAction !== 'next'
+      ? (options.skipConfirm === true
+        ? this.getTaskExecutionMode(task) === 'step_through'
+        : this.consumePendingTaskConfirmStepThroughSelection())
+      : false;
+    if (!isParent && stepAction !== 'next') {
+      task.execution_mode = selectedStepThrough ? 'step_through' : 'auto';
+    }
 
     this.openTaskExecutionModal(task);
 
@@ -2964,7 +5445,11 @@ export class WorkspaceDetailPage {
       const response = await fetch('/api/orchestration/tasks/execute', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ task_id: taskId })
+        body: JSON.stringify({
+          task_id: taskId,
+          step_action: stepAction || undefined,
+          execution_mode: isParent ? undefined : (selectedStepThrough ? 'step_through' : 'auto')
+        })
       });
       if (!response.ok) {
         const text = await response.text();
@@ -2978,6 +5463,31 @@ export class WorkspaceDetailPage {
     } catch (error) {
       console.error('Failed to execute task:', error);
       const message = error && error.message ? error.message : 'Failed to execute task';
+      if (this.isMissingWorkspaceAgentError(message)) {
+        this.setExecutionModalStatus('blocked');
+        this.appendExecutionLog('No agent is assigned to this workspace yet. Ori is preparing a suggested agent setup.', 'warning', `${taskId}:dispatch-agent-missing`);
+        this.setExecutionViewResultEnabled(false);
+
+        if (this.elements.taskExecutionModal && window.bootstrap) {
+          const modal = bootstrap.Modal.getInstance(this.elements.taskExecutionModal);
+          modal?.hide();
+        }
+
+        if (options.skipMissingAgentRecovery === true) {
+          if (window.Toast) window.Toast.error(message);
+          return;
+        }
+
+        const suggestedAgent = await this.suggestAgentSetupForTask(task);
+        if (suggestedAgent) {
+          await this.executeTask(taskId, {
+            skipConfirm: true,
+            skipMissingAgentRecovery: true
+          });
+        }
+        return;
+      }
+
       this.setExecutionModalStatus('failed');
       this.appendExecutionLog(message, 'error', `${taskId}:dispatch-error`);
       if (window.Toast) window.Toast.error('Failed to execute task');
@@ -4170,6 +6680,16 @@ export class WorkspaceDetailPage {
   }
 
   /**
+   * Activate the workspace on the backend, starting directory watchers
+   * and any other context needed for the assistant.
+   */
+  activateWorkspace() {
+    fetch(`/api/orchestration/workspace/activate?id=${encodeURIComponent(this.workspaceId)}`, {
+      method: 'POST'
+    }).catch(err => console.warn('Failed to activate workspace:', err));
+  }
+
+  /**
    * Load directories for the workspace
    */
   async loadDirectories() {
@@ -4190,6 +6710,12 @@ export class WorkspaceDetailPage {
       }
 
       const workspace = await response.json();
+
+      if (this.workspace && workspace && typeof workspace === 'object') {
+        this.workspace.directory_references = Array.isArray(workspace.directory_references) ? workspace.directory_references : [];
+        this.workspace.mcp_bindings = Array.isArray(workspace.mcp_bindings) ? workspace.mcp_bindings : [];
+        this.workspace.agent_mcp_access = Array.isArray(workspace.agent_mcp_access) ? workspace.agent_mcp_access : [];
+      }
 
       const refs = Array.isArray(workspace.directory_references)
         ? workspace.directory_references.map((ref) => ({
@@ -4232,6 +6758,8 @@ export class WorkspaceDetailPage {
       });
 
       this.renderDirectories();
+      this.renderWorkspaceMCPBindings();
+      this.renderAgentGroups();
       this.refreshHomeAssistantQuickPrompts();
     } catch (error) {
       console.error('Failed to load directories:', error);
@@ -5338,6 +7866,7 @@ export class WorkspaceDetailPage {
       case 'task.created':
       case 'task.assigned':
       case 'task.started':
+      case 'task.progress':
       case 'task.completed':
       case 'task.failed':
       case 'task.deleted':
@@ -5392,8 +7921,13 @@ export class WorkspaceDetailPage {
       case 'workspace.updated': {
         const action = event?.data?.action || '';
         if (typeof action === 'string' && action.startsWith('directory_')) {
+          this.loadWorkspace();
           this.loadDirectories();
           this.loadFiles();
+          return;
+        }
+        if (typeof action === 'string' && (action.startsWith('mcp_') || action.startsWith('agent_mcp_access_'))) {
+          this.loadWorkspace();
         }
         break;
       }

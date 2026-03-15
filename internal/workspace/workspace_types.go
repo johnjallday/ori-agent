@@ -53,6 +53,8 @@ type Workspace struct {
 	ScheduledTasks       []ScheduledTask             `json:"scheduled_tasks,omitempty"`
 	StoreNodes           []StoreNode                 `json:"store_nodes,omitempty"`
 	DirectoryReferences  []DirectoryReference        `json:"directory_references,omitempty"`
+	MCPBindings          []WorkspaceMCPBinding       `json:"mcp_bindings,omitempty"`
+	AgentMCPAccess       []WorkspaceAgentMCPAccess   `json:"agent_mcp_access,omitempty"`
 	Workflows            map[string]Workflow         `json:"workflows,omitempty"`
 	Layout               *CanvasLayout               `json:"layout,omitempty"` // Canvas layout (positions of tasks and agents)
 	Status               WorkspaceStatus             `json:"status"`
@@ -154,6 +156,8 @@ type Task struct {
 	Result         string                 `json:"result,omitempty"`
 	Error          string                 `json:"error,omitempty"`
 	Progress       *TaskProgress          `json:"progress,omitempty"`
+	ExecutionMode  TaskExecutionMode      `json:"execution_mode,omitempty"`
+	ExecutionSteps []TaskExecutionStep    `json:"execution_steps,omitempty"`
 	// InputTaskIDs specifies task IDs whose results should be included as input context
 	InputTaskIDs []string `json:"input_task_ids,omitempty"`
 	// ParentTaskID groups this task under a parent workflow task when set.
@@ -207,6 +211,40 @@ type TaskProgress struct {
 	CompletedSteps int       `json:"completed_steps,omitempty"`
 	ElapsedTimeMs  float64   `json:"elapsed_time_ms,omitempty"`
 	UpdatedAt      time.Time `json:"updated_at,omitempty"`
+}
+
+// TaskExecutionMode controls how internal execution steps advance.
+type TaskExecutionMode string
+
+const (
+	TaskExecutionModeAuto        TaskExecutionMode = "auto"
+	TaskExecutionModeStepThrough TaskExecutionMode = "step_through"
+)
+
+// TaskExecutionStepStatus tracks a single internal execution step.
+type TaskExecutionStepStatus string
+
+const (
+	TaskExecutionStepPending    TaskExecutionStepStatus = "pending"
+	TaskExecutionStepInProgress TaskExecutionStepStatus = "in_progress"
+	TaskExecutionStepCompleted  TaskExecutionStepStatus = "completed"
+	TaskExecutionStepFailed     TaskExecutionStepStatus = "failed"
+	TaskExecutionStepBlocked    TaskExecutionStepStatus = "blocked"
+	TaskExecutionStepSkipped    TaskExecutionStepStatus = "skipped"
+)
+
+// TaskExecutionStep represents a persisted internal step for a task.
+type TaskExecutionStep struct {
+	ID          string                  `json:"id"`
+	Index       int                     `json:"index"`
+	Title       string                  `json:"title"`
+	Detail      string                  `json:"detail,omitempty"`
+	Tag         string                  `json:"tag,omitempty"`
+	Status      TaskExecutionStepStatus `json:"status"`
+	Result      string                  `json:"result,omitempty"`
+	Error       string                  `json:"error,omitempty"`
+	StartedAt   *time.Time              `json:"started_at,omitempty"`
+	CompletedAt *time.Time              `json:"completed_at,omitempty"`
 }
 
 // ScheduleType represents the type of schedule
@@ -313,6 +351,27 @@ type StoreNode struct {
 	Y             float64   `json:"y"`
 	CreatedAt     time.Time `json:"created_at"`
 	UpdatedAt     time.Time `json:"updated_at"`
+}
+
+// WorkspaceMCPBinding represents a concrete MCP binding owned by the workspace.
+// ServerName maps to the globally configured MCP server template/definition.
+type WorkspaceMCPBinding struct {
+	ID         string                 `json:"id"`
+	ServerName string                 `json:"server_name"`
+	Alias      string                 `json:"alias,omitempty"`
+	Enabled    bool                   `json:"enabled"`
+	Scope      map[string]interface{} `json:"scope,omitempty"`
+	Config     map[string]interface{} `json:"config,omitempty"`
+	CreatedAt  time.Time              `json:"created_at,omitempty"`
+	UpdatedAt  time.Time              `json:"updated_at,omitempty"`
+}
+
+// WorkspaceAgentMCPAccess narrows which workspace MCP bindings an agent instance
+// may use. When no access entry exists for an instance, all enabled bindings are allowed.
+type WorkspaceAgentMCPAccess struct {
+	AgentInstanceID   string    `json:"agent_instance_id"`
+	EnabledBindingIDs []string  `json:"enabled_binding_ids,omitempty"`
+	UpdatedAt         time.Time `json:"updated_at,omitempty"`
 }
 
 // DirectoryReference represents a reference to a filesystem directory for reading files

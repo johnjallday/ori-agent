@@ -275,6 +275,22 @@ func (s *fileStore) SetAgent(name string, ag *agent.Agent) error {
 	return s.saveUnlocked()
 }
 
+func (s *fileStore) UpdateAgent(name string, updateFn func(*agent.Agent) error) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	ag, ok := s.agents[name]
+	if !ok || ag == nil {
+		return fmt.Errorf("agent %q not found", name)
+	}
+
+	if err := updateFn(ag); err != nil {
+		return err
+	}
+
+	return s.saveUnlocked()
+}
+
 func (s *fileStore) Save() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -335,7 +351,6 @@ func (s *fileStore) saveUnlocked() error {
 		Capabilities []string                      `json:"capabilities,omitempty"`
 		Settings     types.Settings                `json:"Settings"`
 		Plugins      map[string]types.LoadedPlugin `json:"Plugins"`
-		MCPServers   []string                      `json:"mcp_servers,omitempty"`
 		Status       types.AgentStatus             `json:"status,omitempty"`
 		Statistics   *types.AgentStatistics        `json:"statistics,omitempty"`
 		Metadata     *types.AgentMetadata          `json:"metadata,omitempty"`
@@ -357,7 +372,6 @@ func (s *fileStore) saveUnlocked() error {
 			Capabilities: agent.Capabilities,
 			Settings:     agent.Settings,
 			Plugins:      agent.Plugins,
-			MCPServers:   agent.MCPServers,
 			Status:       agent.Status,
 			Statistics:   agent.Statistics,
 			Metadata:     agent.Metadata,
@@ -370,12 +384,17 @@ func (s *fileStore) saveUnlocked() error {
 		}
 
 		settingsPath := filepath.Join(agentSpecificDir, "agent_settings.json")
-		if err := os.WriteFile(settingsPath, settingsData, 0o644); err != nil {
+		tmpSettingsPath := settingsPath + ".tmp"
+		if err := os.WriteFile(tmpSettingsPath, settingsData, 0644); err != nil {
+			return err
+		}
+		if err := os.Rename(tmpSettingsPath, settingsPath); err != nil {
 			return err
 		}
 	}
 
 	// Save main index file with just current agent pointer
+
 	indexConfig := struct {
 		Current string `json:"current"`
 	}{
@@ -387,7 +406,12 @@ func (s *fileStore) saveUnlocked() error {
 		return err
 	}
 
-	return os.WriteFile(s.path, data, 0o644)
+	// Use atomic write: write to .tmp then rename
+	tmpPath := s.path + ".tmp"
+	if err := os.WriteFile(tmpPath, data, 0644); err != nil {
+		return err
+	}
+	return os.Rename(tmpPath, s.path)
 }
 
 func (s *fileStore) load() error {
@@ -483,18 +507,6 @@ func (s *fileStore) load() error {
 						logger.Verbosef("⚠️ Could not read agent_settings.json for '%s': %v", agentName, err)
 					}
 
-					// Load MCP servers from mcp_servers.json
-					mcpServersPath := filepath.Join(agentsDir, agentName, "mcp_servers.json")
-					if mcpData, err := os.ReadFile(mcpServersPath); err == nil {
-						var mcpConfig struct {
-							EnabledServers []string `json:"enabled_servers"`
-						}
-						if err := json.Unmarshal(mcpData, &mcpConfig); err == nil {
-							ag.MCPServers = mcpConfig.EnabledServers
-							logger.Verbosef("✅ Loaded %d MCP servers for agent '%s'", len(mcpConfig.EnabledServers), agentName)
-						}
-					}
-
 					s.normalizeLoadedAgent(&ag)
 					s.agents[agentName] = &ag
 				} else if filepath.Ext(entry.Name()) == ".json" {
@@ -510,18 +522,6 @@ func (s *fileStore) load() error {
 					var ag agent.Agent
 					if err := json.Unmarshal(agentData, &ag); err != nil {
 						continue
-					}
-
-					// Load MCP servers from mcp_servers.json (legacy structure)
-					mcpServersPath := filepath.Join(agentsDir, agentName, "mcp_servers.json")
-					if mcpData, err := os.ReadFile(mcpServersPath); err == nil {
-						var mcpConfig struct {
-							EnabledServers []string `json:"enabled_servers"`
-						}
-						if err := json.Unmarshal(mcpData, &mcpConfig); err == nil {
-							ag.MCPServers = mcpConfig.EnabledServers
-							logger.Verbosef("✅ Loaded %d MCP servers for agent '%s' (legacy)", len(mcpConfig.EnabledServers), agentName)
-						}
 					}
 
 					s.normalizeLoadedAgent(&ag)

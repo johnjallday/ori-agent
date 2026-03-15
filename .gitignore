@@ -151,6 +151,15 @@ marketplace_config.json
 session_files/
 tests/e2e/ori-data/
 
+# Runtime app data under ori-data/
+# Keep the live app profile out of Git, but allow the checked-in seed agent configs.
+ori-data/**
+!ori-data/agents/
+!ori-data/agents/Ori/
+!ori-data/agents/Ori/**
+!ori-data/agents/default/
+!ori-data/agents/default/**
+
 # User uploads and custom templates
 uploads/
 workflow_templates/

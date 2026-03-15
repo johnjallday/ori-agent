@@ -48,7 +48,7 @@ func (ch *ComponentHandler) ServeComponent(w http.ResponseWriter, r *http.Reques
 	data := ComponentData{
 		Title:        "Ori Agent",
 		Theme:        "light",
-		CurrentAgent: "default",
+		CurrentAgent: "No Agent Selected",
 		Model:        "gpt-4",
 	}
 

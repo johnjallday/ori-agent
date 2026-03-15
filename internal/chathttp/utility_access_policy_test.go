@@ -69,7 +69,7 @@ func TestExecuteDirectTool_BlocksWebUtilityWhenDisabled(t *testing.T) {
 		utilityRegistry: NewDefaultUtilityToolRegistry(),
 	}
 
-	result := h.executeDirectTool(context.Background(), ag, "test-agent", &DirectToolCommand{
+	result := h.executeDirectTool(context.Background(), runtimeTestAgent(ag), "test-agent", &DirectToolCommand{
 		ToolName: "web_search",
 		Args:     `{"query":"ai"}`,
 	})
@@ -95,7 +95,7 @@ func TestGetAvailableToolNames_FiltersDisabledWebUtilities(t *testing.T) {
 		utilityRegistry: NewDefaultUtilityToolRegistry(),
 	}
 
-	tools := h.getAvailableToolNames(ag)
+	tools := h.getAvailableToolNames(runtimeTestAgent(ag))
 	joined := strings.Join(tools, ",")
 	if strings.Contains(joined, "web_search") || strings.Contains(joined, "web_fetch") || strings.Contains(joined, "browser") {
 		t.Fatalf("expected web utilities to be filtered, got %v", tools)

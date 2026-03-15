@@ -121,14 +121,15 @@ func TestNewHandler(t *testing.T) {
 // mockStore implements store.Store interface
 type mockStore struct{}
 
-func (m *mockStore) ListAgents() (names []string, current string)                { return nil, "" }
-func (m *mockStore) SetCurrentAgent(name string) error                           { return nil }
-func (m *mockStore) CreateAgent(name string, cfg *store.CreateAgentConfig) error { return nil }
-func (m *mockStore) DeleteAgent(name string) error                               { return nil }
-func (m *mockStore) GetAgent(name string) (*agent.Agent, bool)                   { return nil, false }
-func (m *mockStore) SetAgent(name string, ag *agent.Agent) error                 { return nil }
-func (m *mockStore) Save() error                                                 { return nil }
-func (m *mockStore) ClearAgents() error                                          { return nil }
+func (m *mockStore) ListAgents() (names []string, current string)                     { return nil, "" }
+func (m *mockStore) SetCurrentAgent(name string) error                                { return nil }
+func (m *mockStore) CreateAgent(name string, cfg *store.CreateAgentConfig) error      { return nil }
+func (m *mockStore) DeleteAgent(name string) error                                    { return nil }
+func (m *mockStore) GetAgent(name string) (*agent.Agent, bool)                        { return nil, false }
+func (m *mockStore) SetAgent(name string, ag *agent.Agent) error                      { return nil }
+func (m *mockStore) UpdateAgent(name string, updateFn func(*agent.Agent) error) error { return nil }
+func (m *mockStore) Save() error                                                      { return nil }
+func (m *mockStore) ClearAgents() error                                               { return nil }
 
 // mockWorkspaceStore implements workspace.Store interface
 type mockWorkspaceStore struct{}

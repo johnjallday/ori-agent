@@ -96,7 +96,9 @@ func (th *TaskHandler) ExecuteTaskHandler(w http.ResponseWriter, r *http.Request
 	}
 
 	var req struct {
-		TaskID string `json:"task_id"`
+		TaskID        string `json:"task_id"`
+		ExecutionMode string `json:"execution_mode"`
+		StepAction    string `json:"step_action"`
 	}
 
 	if !orihttp.ParseJSONBody(w, r, &req) {
@@ -107,6 +109,9 @@ func (th *TaskHandler) ExecuteTaskHandler(w http.ResponseWriter, r *http.Request
 		orihttp.BadRequest(w, "task_id is required")
 		return
 	}
+
+	requestedMode := workspace.NormalizeTaskExecutionMode(req.ExecutionMode)
+	stepAction := strings.ToLower(strings.TrimSpace(req.StepAction))
 
 	workspaceIDs, err := th.workspaceStore.List()
 	if err != nil {
@@ -182,6 +187,7 @@ func (th *TaskHandler) ExecuteTaskHandler(w http.ResponseWriter, r *http.Request
 		foundTask.Error = ""
 		foundTask.StartedAt = nil
 		foundTask.CompletedAt = nil
+		workspace.ResetTaskExecutionSteps(foundTask)
 
 		// Save the reset task status
 		if err := foundWorkspace.UpdateTask(*foundTask); err != nil {
@@ -197,7 +203,28 @@ func (th *TaskHandler) ExecuteTaskHandler(w http.ResponseWriter, r *http.Request
 	}
 
 	if foundTask.Status == workspace.TaskStatusInProgress {
-		orihttp.BadRequest(w, "Task is already in progress")
+		if !workspace.IsTaskAwaitingNextStep(foundTask) {
+			orihttp.BadRequest(w, "Task is already in progress")
+			return
+		}
+		if stepAction == "" {
+			stepAction = "next"
+		}
+	}
+
+	if strings.TrimSpace(req.ExecutionMode) != "" {
+		foundTask.ExecutionMode = requestedMode
+	} else if foundTask.ExecutionMode == "" {
+		foundTask.ExecutionMode = workspace.TaskExecutionModeAuto
+	}
+	if err := foundWorkspace.UpdateTask(*foundTask); err != nil {
+		logger.Error("Failed to update task execution mode", logger.Fields{"task_id": foundTask.ID, "error": err})
+		orihttp.InternalError(w, "Failed to update task execution settings")
+		return
+	}
+	if err := th.workspaceStore.Save(foundWorkspace); err != nil {
+		logger.Error("Failed to save workspace", logger.Fields{"error": err})
+		orihttp.InternalError(w, "Failed to save workspace")
 		return
 	}
 
@@ -235,9 +262,11 @@ func (th *TaskHandler) ExecuteTaskHandler(w http.ResponseWriter, r *http.Request
 
 	w.WriteHeader(http.StatusAccepted)
 	orihttp.WriteJSON(w, map[string]interface{}{
-		"success": true,
-		"message": "Task execution started",
-		"task_id": req.TaskID,
+		"success":        true,
+		"message":        "Task execution started",
+		"task_id":        req.TaskID,
+		"execution_mode": foundTask.ExecutionMode,
+		"step_action":    stepAction,
 	})
 }
 
@@ -340,6 +369,7 @@ func (th *TaskHandler) handleAssistTask(w http.ResponseWriter, r *http.Request) 
 		task.CompletedAt = nil
 		task.Error = ""
 		task.Result = ""
+		workspace.PrepareTaskExecutionStepsForResume(task)
 		humanLoop["state"] = "resumed"
 	case "retry", "continue_with_instruction":
 		task.Status = workspace.TaskStatusPending
@@ -347,6 +377,7 @@ func (th *TaskHandler) handleAssistTask(w http.ResponseWriter, r *http.Request) 
 		task.CompletedAt = nil
 		task.Error = ""
 		task.Result = ""
+		workspace.PrepareTaskExecutionStepsForResume(task)
 		humanLoop["state"] = "resumed"
 	default:
 		orihttp.BadRequest(w, "unsupported action; use retry, continue_with_instruction, switch_agent_retry, or mark_failed")
@@ -641,9 +672,15 @@ func (th *TaskHandler) executeTaskWithDependencies(ws *workspace.Workspace, task
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 
+	if task.Status != workspace.TaskStatusInProgress {
+		workspace.PrepareTaskExecutionStepsForResume(task)
+	}
+
 	task.Status = workspace.TaskStatusInProgress
 	now := time.Now()
-	task.StartedAt = &now
+	if task.StartedAt == nil || task.StartedAt.IsZero() {
+		task.StartedAt = &now
+	}
 	task.Result = ""
 	task.Error = ""
 
@@ -699,12 +736,38 @@ func (th *TaskHandler) executeTaskWithDependencies(ws *workspace.Workspace, task
 		}
 	}
 
-	result, execErr := th.executeTaskIteratively(ctx, ws, task, taskForExecution, manual)
+	var result string
+	var execErr error
+	inferredExecutionSteps := workspace.InferTaskExecutionSteps(taskForExecution)
+	if len(task.ExecutionSteps) > 0 && len(inferredExecutionSteps) == 0 {
+		if cachedResult := strings.TrimSpace(workspace.BuildTaskExecutionSummary(task)); cachedResult != "" {
+			workspace.SkipPendingExecutionSteps(task)
+			result = cachedResult
+		} else {
+			workspace.ClearTaskExecutionSteps(task)
+			result, execErr = th.executeTaskIteratively(ctx, ws, task, taskForExecution, manual)
+		}
+	} else if shouldUseStructuredExecution(task, taskForExecution) {
+		result, execErr = th.executeTaskWithStructuredSteps(ctx, ws, task, taskForExecution, manual)
+	} else {
+		result, execErr = th.executeTaskIteratively(ctx, ws, task, taskForExecution, manual)
+	}
+
+	var awaitingErr *taskExecutionAwaitingStepError
+	if errors.As(execErr, &awaitingErr) {
+		if err := ws.UpdateTask(*task); err != nil {
+			return awaitingErr.Result, fmt.Errorf("failed to update waiting task: %w", err)
+		}
+		if err := th.workspaceStore.Save(ws); err != nil {
+			return awaitingErr.Result, fmt.Errorf("failed to save waiting task: %w", err)
+		}
+		return awaitingErr.Result, nil
+	}
 
 	if execErr != nil {
 		var blockedErr *workspace.TaskBlockedError
 		if errors.As(execErr, &blockedErr) {
-			if err := th.markTaskBlocked(ws, task, blockedErr, manual, nil); err != nil {
+			if err := th.markTaskBlocked(ws, task, blockedErr, manual, buildStructuredExecutionExtra(task)); err != nil {
 				return "", fmt.Errorf("failed to persist blocked task state: %w", err)
 			}
 			return "", blockedErr
@@ -891,7 +954,9 @@ func (th *TaskHandler) executeTaskIteratively(ctx context.Context, ws *workspace
 			}))
 		}
 
+		attemptStartedAt := time.Now().UTC()
 		result, execErr := th.taskHandler.ExecuteTask(ctx, currentTask.To, currentTask)
+		attemptCompletedAt := time.Now().UTC()
 		if execErr != nil {
 			var blockedErr *workspace.TaskBlockedError
 			if errors.As(execErr, &blockedErr) {
@@ -963,6 +1028,36 @@ func (th *TaskHandler) executeTaskIteratively(ctx context.Context, ws *workspace
 				"summary":    summarizeExecutionText(result),
 				"created_at": time.Now().UTC().Format(time.RFC3339),
 			})
+			recordIterationHistory(persistedTask, maxAttempts, attemptHistory, "blocked")
+			return "", blockedErr
+		}
+
+		evidence := th.collectTaskExecutionEvidence(ws.ID, persistedTask.ID, attemptStartedAt, attemptCompletedAt)
+		if blockedErr := classifyFilesystemListingVerificationFailure(currentTask, result, evidence); blockedErr != nil {
+			attemptHistory = append(attemptHistory, map[string]interface{}{
+				"attempt":    attempt,
+				"outcome":    "unverified",
+				"summary":    summarizeExecutionText(blockedErr.Reason),
+				"created_at": time.Now().UTC().Format(time.RFC3339),
+			})
+			if attempt < maxAttempts {
+				continue
+			}
+
+			recordIterationHistory(persistedTask, maxAttempts, attemptHistory, "blocked")
+			return "", blockedErr
+		}
+		if blockedErr := classifyFilesystemListingIncompleteResponse(currentTask, result); blockedErr != nil {
+			attemptHistory = append(attemptHistory, map[string]interface{}{
+				"attempt":    attempt,
+				"outcome":    "incomplete",
+				"summary":    summarizeExecutionText(blockedErr.Reason),
+				"created_at": time.Now().UTC().Format(time.RFC3339),
+			})
+			if attempt < maxAttempts {
+				continue
+			}
+
 			recordIterationHistory(persistedTask, maxAttempts, attemptHistory, "blocked")
 			return "", blockedErr
 		}
@@ -1111,13 +1206,33 @@ func applyIterationContext(task *workspace.Task, attempt, maxAttempts int, histo
 	previousSummary, _ := last["summary"].(string)
 
 	task.Context["execution_previous_attempts"] = history
-	task.Context["execution_retry_guidance"] = fmt.Sprintf(
-		"Previous attempt was '%s'. Continue autonomously with reasonable assumptions and provide a concrete best-effort result. Only ask for user confirmation if absolutely necessary.",
-		previousOutcome,
-	)
+	task.Context["execution_retry_guidance"] = buildRetryGuidance(task, previousOutcome)
 	if strings.TrimSpace(previousSummary) != "" {
 		task.Context["execution_previous_summary"] = previousSummary
 	}
+}
+
+func buildRetryGuidance(task *workspace.Task, previousOutcome string) string {
+	trimmedOutcome := strings.TrimSpace(previousOutcome)
+	if task != nil && (trimmedOutcome == "unverified" || trimmedOutcome == "incomplete") && workspace.IsReadOnlyFilesystemListingIntent(task.Description) {
+		task.Context["execution_require_filesystem_verification"] = true
+		task.Context["execution_required_filesystem_tools"] = []string{
+			"list_directory",
+			"list_directory_with_sizes",
+			"search_files",
+			"get_file_info",
+			"read_file",
+		}
+		if trimmedOutcome == "incomplete" {
+			return "Previous attempt did not return the requested file list. The user already asked for the list, so do not ask a follow-up question or offer to provide it later. If you locate the named folder inside a parent directory, call a filesystem tool on that folder itself and return its contents directly. Use a filesystem tool to verify the folder contents if needed, then answer directly with the actual verified file list or state clearly that the folder is empty."
+		}
+		return "Previous attempt returned an unverified filesystem listing. You must use a filesystem tool to verify the folder contents before answering. If you locate the named folder inside a parent directory, call a filesystem tool on that folder itself instead of stopping at the parent listing. Do not answer from the workspace snapshot, prior summaries, or assumptions alone. Call a filesystem verification tool first, then return only the verified file list."
+	}
+
+	return fmt.Sprintf(
+		"Previous attempt was '%s'. Continue autonomously with reasonable assumptions and provide a concrete best-effort result. Only ask for user confirmation if absolutely necessary.",
+		trimmedOutcome,
+	)
 }
 
 func recordIterationHistory(task *workspace.Task, maxAttempts int, history []map[string]interface{}, finalOutcome string) {
@@ -1143,6 +1258,105 @@ func summarizeExecutionText(value string) string {
 		return trimmed
 	}
 	return strings.TrimSpace(trimmed[:260]) + "..."
+}
+
+type taskExecutionEvidence struct {
+	SuccessfulToolNames               []string
+	SuccessfulFilesystemReadToolNames []string
+}
+
+func (th *TaskHandler) collectTaskExecutionEvidence(workspaceID, taskID string, startedAt, completedAt time.Time) taskExecutionEvidence {
+	if th == nil || th.eventBus == nil || strings.TrimSpace(workspaceID) == "" || strings.TrimSpace(taskID) == "" {
+		return taskExecutionEvidence{}
+	}
+
+	events := th.eventBus.GetHistory(func(event workspace.Event) bool {
+		if event.Type != workspace.EventTaskToolResult || event.WorkspaceID != workspaceID {
+			return false
+		}
+		if !startedAt.IsZero() && event.Timestamp.Before(startedAt) {
+			return false
+		}
+		if !completedAt.IsZero() && event.Timestamp.After(completedAt) {
+			return false
+		}
+		return eventDataString(event.Data, "task_id") == taskID
+	}, 256)
+
+	evidence := taskExecutionEvidence{
+		SuccessfulToolNames:               make([]string, 0, len(events)),
+		SuccessfulFilesystemReadToolNames: make([]string, 0, len(events)),
+	}
+
+	seenTools := make(map[string]struct{}, len(events))
+	seenFilesystemTools := make(map[string]struct{}, len(events))
+	for _, event := range events {
+		if !eventDataBool(event.Data, "success") {
+			continue
+		}
+
+		toolName := strings.ToLower(strings.TrimSpace(eventDataString(event.Data, "tool_name")))
+		if toolName == "" {
+			continue
+		}
+		if _, ok := seenTools[toolName]; !ok {
+			seenTools[toolName] = struct{}{}
+			evidence.SuccessfulToolNames = append(evidence.SuccessfulToolNames, toolName)
+		}
+		if isFilesystemReadVerificationTool(toolName) {
+			if _, ok := seenFilesystemTools[toolName]; !ok {
+				seenFilesystemTools[toolName] = struct{}{}
+				evidence.SuccessfulFilesystemReadToolNames = append(evidence.SuccessfulFilesystemReadToolNames, toolName)
+			}
+		}
+	}
+
+	sort.Strings(evidence.SuccessfulToolNames)
+	sort.Strings(evidence.SuccessfulFilesystemReadToolNames)
+	return evidence
+}
+
+func eventDataString(data map[string]interface{}, key string) string {
+	if len(data) == 0 {
+		return ""
+	}
+	value, ok := data[key]
+	if !ok {
+		return ""
+	}
+	switch typed := value.(type) {
+	case string:
+		return strings.TrimSpace(typed)
+	default:
+		return strings.TrimSpace(fmt.Sprint(typed))
+	}
+}
+
+func eventDataBool(data map[string]interface{}, key string) bool {
+	if len(data) == 0 {
+		return false
+	}
+	value, ok := data[key]
+	if !ok {
+		return false
+	}
+	switch typed := value.(type) {
+	case bool:
+		return typed
+	case string:
+		return strings.EqualFold(strings.TrimSpace(typed), "true")
+	default:
+		return false
+	}
+}
+
+func isFilesystemReadVerificationTool(toolName string) bool {
+	switch strings.ToLower(strings.TrimSpace(toolName)) {
+	case "list_directory", "list_directory_with_sizes", "search_files", "get_file_info", "read_file":
+		return true
+	default:
+		return false
+	}
 }
 
 func classifyToolAccessBlockedResponse(result string) *workspace.TaskBlockedError {
@@ -1237,6 +1451,108 @@ func buildToolAccessBlockedError(result string) *workspace.TaskBlockedError {
 	}
 }
 
+func classifyFilesystemListingVerificationFailure(task workspace.Task, result string, evidence taskExecutionEvidence) *workspace.TaskBlockedError {
+	if !workspace.IsReadOnlyFilesystemListingIntent(task.Description) {
+		return nil
+	}
+	if len(evidence.SuccessfulFilesystemReadToolNames) > 0 {
+		return nil
+	}
+
+	return &workspace.TaskBlockedError{
+		ReasonCode: "filesystem_result_unverified",
+		Reason:     "Task returned a filesystem listing answer without successful filesystem verification",
+		Question:   "I need to verify the folder contents with filesystem tools before completing this task. Retry with explicit filesystem verification?",
+		SuggestedActions: []string{
+			"retry",
+			"switch_agent_retry",
+			"continue_with_instruction",
+			"mark_failed",
+		},
+		RawResponse: strings.TrimSpace(result),
+	}
+}
+
+func classifyFilesystemListingIncompleteResponse(task workspace.Task, result string) *workspace.TaskBlockedError {
+	if !workspace.IsReadOnlyFilesystemListingIntent(task.Description) {
+		return nil
+	}
+	if filesystemListingAnswerLooksComplete(result) {
+		return nil
+	}
+
+	return &workspace.TaskBlockedError{
+		ReasonCode: "filesystem_listing_incomplete",
+		Reason:     "Task did not return the requested filesystem file list",
+		Question:   "I need to return the actual file list, not a follow-up offer. Retry and return the verified list directly?",
+		SuggestedActions: []string{
+			"retry",
+			"switch_agent_retry",
+			"continue_with_instruction",
+			"mark_failed",
+		},
+		RawResponse: strings.TrimSpace(result),
+	}
+}
+
+func filesystemListingAnswerLooksComplete(result string) bool {
+	normalized := strings.ToLower(strings.TrimSpace(result))
+	if normalized == "" {
+		return false
+	}
+
+	emptyMarkers := []string{
+		"folder is empty",
+		"directory is empty",
+		"contains no files",
+		"no files found",
+		"there are no files",
+		"empty folder",
+		"empty directory",
+	}
+	for _, marker := range emptyMarkers {
+		if strings.Contains(normalized, marker) {
+			return true
+		}
+	}
+
+	return responseContainsFilenameLikeEntry(result)
+}
+
+func responseContainsFilenameLikeEntry(result string) bool {
+	for _, line := range strings.Split(result, "\n") {
+		trimmed := strings.TrimSpace(strings.TrimLeft(line, "-*0123456789.) \t"))
+		if trimmed == "" {
+			continue
+		}
+		for _, token := range strings.Fields(trimmed) {
+			cleaned := strings.Trim(token, "\"'`,;:()[]{}")
+			if looksLikeFilenameToken(cleaned) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func looksLikeFilenameToken(token string) bool {
+	dot := strings.LastIndex(token, ".")
+	if dot <= 0 || dot >= len(token)-1 {
+		return false
+	}
+
+	ext := token[dot+1:]
+	if len(ext) > 8 {
+		return false
+	}
+	for _, r := range ext {
+		if (r < 'a' || r > 'z') && (r < 'A' || r > 'Z') && (r < '0' || r > '9') {
+			return false
+		}
+	}
+	return true
+}
+
 func blockedExecutionSummary(blockedErr *workspace.TaskBlockedError) string {
 	if blockedErr == nil {
 		return ""
@@ -1266,6 +1582,9 @@ func responseNeedsUserInput(result string) bool {
 		"before i can complete this task",
 		"i need more information",
 		"awaiting your input",
+		"could you please confirm",
+		"please confirm if",
+		"provide additional directions",
 	}
 	for _, marker := range highConfidenceMarkers {
 		if strings.Contains(normalized, marker) {
@@ -1276,12 +1595,14 @@ func responseNeedsUserInput(result string) bool {
 	softMarkers := []string{
 		"could you clarify",
 		"please clarify",
+		"please confirm",
 		"which location",
 		"what specific",
 		"how should i proceed",
 		"what format",
 		"i don't have direct access",
 		"i do not have direct access",
+		"located somewhere else",
 	}
 
 	matches := 0

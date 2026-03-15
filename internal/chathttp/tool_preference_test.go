@@ -50,9 +50,7 @@ func TestFindTool_PrefersMCPBrowserOverNativeUtility(t *testing.T) {
 		mcpRegistry:     registry,
 	}
 
-	ag := &agent.Agent{
-		MCPServers: []string{"playwright"},
-	}
+	ag := runtimeTestAgent(&agent.Agent{}, "playwright")
 
 	tool, found := h.findTool(ag, "Email Triage Assistant", "browser")
 	if !found {
@@ -94,9 +92,7 @@ func TestFindTool_BrowserPrefersPlaywrightServer(t *testing.T) {
 		mcpRegistry:     registry,
 	}
 
-	ag := &agent.Agent{
-		MCPServers: []string{"puppeteer", "playwright"},
-	}
+	ag := runtimeTestAgent(&agent.Agent{}, "puppeteer", "playwright")
 
 	tool, found := h.findTool(ag, "Email Triage Assistant", "browser")
 	if !found {
@@ -136,9 +132,7 @@ func TestFindTool_BrowserHonorsBrowserbasePreference(t *testing.T) {
 	}
 	h.SetBrowserMCPPreference("browserbase")
 
-	ag := &agent.Agent{
-		MCPServers: []string{"playwright", "browserbase"},
-	}
+	ag := runtimeTestAgent(&agent.Agent{}, "playwright", "browserbase")
 
 	tool, found := h.findTool(ag, "Email Triage Assistant", "browser")
 	if !found {
@@ -171,9 +165,7 @@ func TestFindTool_BrowserFallsBackToBrowserNavigateAlias(t *testing.T) {
 		mcpRegistry:     registry,
 	}
 
-	ag := &agent.Agent{
-		MCPServers: []string{"playwright"},
-	}
+	ag := runtimeTestAgent(&agent.Agent{}, "playwright")
 
 	tool, found := h.findTool(ag, "Email Triage Assistant", "browser")
 	if !found {
@@ -215,9 +207,7 @@ func TestFindTool_BrowserSuppressedWhenBrowserMCPConfiguredButNoMatchingTool(t *
 		mcpRegistry:     registry,
 	}
 
-	ag := &agent.Agent{
-		MCPServers: []string{"playwright"},
-	}
+	ag := runtimeTestAgent(&agent.Agent{}, "playwright")
 
 	_, found := h.findTool(ag, "Email Triage Assistant", "browser")
 	if found {
@@ -233,7 +223,7 @@ func TestFindTool_BrowserUsesUtilityWhenNoBrowserMCPConfigured(t *testing.T) {
 		utilityRegistry: NewDefaultUtilityToolRegistry(),
 	}
 
-	ag := &agent.Agent{}
+	ag := runtimeTestAgent(&agent.Agent{})
 
 	tool, found := h.findTool(ag, "General Agent", "browser")
 	if !found {

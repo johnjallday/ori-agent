@@ -2,6 +2,7 @@ package orchestrationhttp
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/johnjallday/ori-agent/internal/workspace"
@@ -28,6 +29,13 @@ However, I need clarification to complete this task:
 - Precipitation: 10%
 - Wind: 8 km/h`,
 			want: false,
+		},
+		{
+			name: "filesystem clarification disguised as answer",
+			response: `It seems that the directory "/Users/jjdev/Documents" is empty or not accessible at the moment, as every attempt to list its contents results in an error.
+
+Could you please confirm if the "DNM" folder is located somewhere else or provide additional directions?`,
+			want: true,
 		},
 		{
 			name:     "empty output",
@@ -105,6 +113,57 @@ func TestExtractClarificationQuestion(t *testing.T) {
 	}
 }
 
+func TestApplyIterationContext_RequiresFilesystemVerificationAfterUnverifiedListing(t *testing.T) {
+	task := &workspace.Task{
+		Description: "Get list of files in DNM folder",
+		Context:     map[string]interface{}{},
+	}
+
+	history := []map[string]interface{}{
+		{
+			"attempt": 1,
+			"outcome": "unverified",
+			"summary": "Task returned a filesystem listing answer without successful filesystem verification",
+		},
+	}
+
+	applyIterationContext(task, 2, 3, history)
+
+	guidance, _ := task.Context["execution_retry_guidance"].(string)
+	if !strings.Contains(guidance, "must use a filesystem tool to verify the folder contents before answering") {
+		t.Fatalf("expected retry guidance to require filesystem verification, got %q", guidance)
+	}
+	if requireVerification, _ := task.Context["execution_require_filesystem_verification"].(bool); !requireVerification {
+		t.Fatalf("expected execution_require_filesystem_verification to be true")
+	}
+	requiredTools, ok := task.Context["execution_required_filesystem_tools"].([]string)
+	if !ok || len(requiredTools) == 0 {
+		t.Fatalf("expected execution_required_filesystem_tools to be populated, got %#v", task.Context["execution_required_filesystem_tools"])
+	}
+}
+
+func TestApplyIterationContext_RequiresDirectFileListAfterIncompleteListing(t *testing.T) {
+	task := &workspace.Task{
+		Description: "Get list of files in DNM folder",
+		Context:     map[string]interface{}{},
+	}
+
+	history := []map[string]interface{}{
+		{
+			"attempt": 1,
+			"outcome": "incomplete",
+			"summary": "Task did not return the requested filesystem file list",
+		},
+	}
+
+	applyIterationContext(task, 2, 3, history)
+
+	guidance, _ := task.Context["execution_retry_guidance"].(string)
+	if !strings.Contains(guidance, "do not ask a follow-up question or offer to provide it later") {
+		t.Fatalf("expected retry guidance to require a direct list answer, got %q", guidance)
+	}
+}
+
 func TestClassifyToolAccessBlockedResponse(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -162,6 +221,98 @@ func (s *stubWorkspaceTaskExecutor) ExecuteTask(_ context.Context, _ string, _ w
 	return s.result, s.err
 }
 
+type stubSequenceTaskExecutor struct {
+	results []string
+	err     error
+	calls   int
+}
+
+func (s *stubSequenceTaskExecutor) ExecuteTask(_ context.Context, _ string, task workspace.Task) (string, error) {
+	s.calls++
+	if s.err != nil {
+		return "", s.err
+	}
+	if len(s.results) == 0 {
+		return task.Description, nil
+	}
+	index := s.calls - 1
+	if index < 0 {
+		index = 0
+	}
+	if index >= len(s.results) {
+		index = len(s.results) - 1
+	}
+	return s.results[index], nil
+}
+
+type stubEventingTaskExecutor struct {
+	result     string
+	err        error
+	calls      int
+	eventBus   *workspace.EventBus
+	toolName   string
+	toolResult string
+	success    bool
+}
+
+func (s *stubEventingTaskExecutor) ExecuteTask(_ context.Context, agentName string, task workspace.Task) (string, error) {
+	s.calls++
+	if s.eventBus != nil && strings.TrimSpace(s.toolName) != "" {
+		data := map[string]interface{}{
+			"tool_name": s.toolName,
+			"success":   s.success,
+		}
+		if strings.TrimSpace(s.toolResult) != "" {
+			data["result_preview"] = s.toolResult
+		}
+		s.eventBus.Publish(workspace.NewTaskEvent(workspace.EventTaskToolResult, task.WorkspaceID, task.ID, agentName, data))
+	}
+	return s.result, s.err
+}
+
+type stubEventingStep struct {
+	result     string
+	err        error
+	toolName   string
+	toolResult string
+	success    bool
+}
+
+type stubSequenceEventingTaskExecutor struct {
+	steps    []stubEventingStep
+	calls    int
+	eventBus *workspace.EventBus
+}
+
+func (s *stubSequenceEventingTaskExecutor) ExecuteTask(_ context.Context, agentName string, task workspace.Task) (string, error) {
+	s.calls++
+	if len(s.steps) == 0 {
+		return "", nil
+	}
+
+	index := s.calls - 1
+	if index < 0 {
+		index = 0
+	}
+	if index >= len(s.steps) {
+		index = len(s.steps) - 1
+	}
+	step := s.steps[index]
+
+	if s.eventBus != nil && strings.TrimSpace(step.toolName) != "" {
+		data := map[string]interface{}{
+			"tool_name": step.toolName,
+			"success":   step.success,
+		}
+		if strings.TrimSpace(step.toolResult) != "" {
+			data["result_preview"] = step.toolResult
+		}
+		s.eventBus.Publish(workspace.NewTaskEvent(workspace.EventTaskToolResult, task.WorkspaceID, task.ID, agentName, data))
+	}
+
+	return step.result, step.err
+}
+
 func TestExecuteTaskIteratively_BlocksWhenToolsAreUnavailable(t *testing.T) {
 	stub := &stubWorkspaceTaskExecutor{
 		result: `I don't have filesystem browsing tools available in this context — only REAPER scripting and LSP code intelligence tools, neither of which can explore a general directory.
@@ -199,6 +350,130 @@ To walk you through the directory, I'd need you to either share the directory li
 	}
 	if got := retryData["attempts_used"]; got != 1 {
 		t.Fatalf("expected attempts_used 1, got %v", got)
+	}
+}
+
+func TestExecuteTaskIteratively_BlocksUnverifiedFilesystemListingResult(t *testing.T) {
+	eventBus := workspace.DefaultEventBus()
+	stub := &stubEventingTaskExecutor{
+		result:   `The "Documents" directory exists, but it does not contain a folder named "DNM".`,
+		eventBus: eventBus,
+	}
+	handler := &TaskHandler{
+		taskHandler: stub,
+		eventBus:    eventBus,
+	}
+	ws := workspace.NewWorkspace(workspace.CreateWorkspaceParams{Name: "amr", Agents: []string{"Ori"}})
+	task := workspace.Task{
+		ID:          "task-listing-unverified",
+		WorkspaceID: ws.ID,
+		To:          "Ori",
+		Description: "Give me list of files in DNM folder",
+		Context: map[string]interface{}{
+			"max_attempts": 1,
+		},
+	}
+
+	_, err := handler.executeTaskIteratively(context.Background(), ws, &task, task, true)
+	blockedErr, ok := workspace.AsTaskBlockedError(err)
+	if !ok {
+		t.Fatalf("expected TaskBlockedError, got %v", err)
+	}
+	if blockedErr.ReasonCode != "filesystem_result_unverified" {
+		t.Fatalf("expected filesystem_result_unverified, got %q", blockedErr.ReasonCode)
+	}
+	if stub.calls != 1 {
+		t.Fatalf("expected a single execution attempt, got %d", stub.calls)
+	}
+}
+
+func TestExecuteTaskIteratively_AllowsVerifiedFilesystemListingResult(t *testing.T) {
+	eventBus := workspace.DefaultEventBus()
+	stub := &stubEventingTaskExecutor{
+		result:     "The DNM folder contains:\n- file-a.pdf\n- file-b.pages",
+		eventBus:   eventBus,
+		toolName:   "list_directory",
+		toolResult: "file-a.pdf\nfile-b.pages",
+		success:    true,
+	}
+	handler := &TaskHandler{
+		taskHandler: stub,
+		eventBus:    eventBus,
+	}
+	ws := workspace.NewWorkspace(workspace.CreateWorkspaceParams{Name: "amr", Agents: []string{"Ori"}})
+	task := workspace.Task{
+		ID:          "task-listing-verified",
+		WorkspaceID: ws.ID,
+		To:          "Ori",
+		Description: "Give me list of files in DNM folder",
+		Context: map[string]interface{}{
+			"max_attempts": 1,
+		},
+	}
+
+	result, err := handler.executeTaskIteratively(context.Background(), ws, &task, task, true)
+	if err != nil {
+		t.Fatalf("expected verified listing result to succeed, got %v", err)
+	}
+	if result == "" {
+		t.Fatalf("expected a non-empty listing result")
+	}
+	if stub.calls != 1 {
+		t.Fatalf("expected a single execution attempt, got %d", stub.calls)
+	}
+}
+
+func TestExecuteTaskIteratively_RetriesIncompleteFilesystemListingAnswer(t *testing.T) {
+	eventBus := workspace.DefaultEventBus()
+	stub := &stubSequenceEventingTaskExecutor{
+		eventBus: eventBus,
+		steps: []stubEventingStep{
+			{
+				result:     `The "DNM" folder is located within the "Documents" directory. Would you like to see the contents of the "DNM" folder?`,
+				toolName:   "list_directory",
+				toolResult: "DNM Publishing Agreement - Don't Kill the Buzz.pdf",
+				success:    true,
+			},
+			{
+				result:     "The DNM folder contains:\n1. DNM Publishing Agreement - Don't Kill the Buzz.pdf",
+				toolName:   "list_directory",
+				toolResult: "DNM Publishing Agreement - Don't Kill the Buzz.pdf",
+				success:    true,
+			},
+		},
+	}
+	handler := &TaskHandler{
+		taskHandler: stub,
+		eventBus:    eventBus,
+	}
+	ws := workspace.NewWorkspace(workspace.CreateWorkspaceParams{Name: "amr", Agents: []string{"Ori"}})
+	task := workspace.Task{
+		ID:          "task-listing-incomplete",
+		WorkspaceID: ws.ID,
+		To:          "Ori",
+		Description: "Get list of files in DNM folder",
+		Context: map[string]interface{}{
+			"max_attempts": 2,
+		},
+	}
+
+	result, err := handler.executeTaskIteratively(context.Background(), ws, &task, task, true)
+	if err != nil {
+		t.Fatalf("expected listing task to succeed after retry, got %v", err)
+	}
+	if !strings.Contains(result, "Don't Kill the Buzz.pdf") {
+		t.Fatalf("expected final result to contain the verified file list, got %q", result)
+	}
+	if stub.calls != 2 {
+		t.Fatalf("expected two execution attempts, got %d", stub.calls)
+	}
+
+	retryData, ok := task.Context["execution_retry"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected execution_retry context to be recorded")
+	}
+	if got := retryData["final_outcome"]; got != "success" {
+		t.Fatalf("expected final_outcome success, got %v", got)
 	}
 }
 
@@ -301,5 +576,203 @@ func TestExecuteTaskWithDependencies_RecordsBlockedRunHistory(t *testing.T) {
 	}
 	if updatedTask.ExecutionHistory[0].Summary == "" {
 		t.Fatalf("expected blocked summary to be recorded")
+	}
+}
+
+func TestExecuteTaskWithDependencies_StepThroughPausesAfterFirstStructuredStep(t *testing.T) {
+	store := workspace.NewInMemoryStore()
+	ws := workspace.NewWorkspace(workspace.CreateWorkspaceParams{Name: "Folder Organizer", Agents: []string{"Ori"}})
+	task := workspace.Task{
+		ID:            "task-step-through",
+		To:            "Ori",
+		Description:   "Gather DNM related files into DNM folder",
+		ExecutionMode: workspace.TaskExecutionModeStepThrough,
+		Context:       map[string]interface{}{},
+	}
+	if err := ws.AddTask(task); err != nil {
+		t.Fatalf("failed to add task: %v", err)
+	}
+	if err := store.Save(ws); err != nil {
+		t.Fatalf("failed to save workspace: %v", err)
+	}
+
+	persistedTask, err := ws.GetTask(task.ID)
+	if err != nil {
+		t.Fatalf("failed to fetch task: %v", err)
+	}
+
+	handler := &TaskHandler{
+		workspaceStore: store,
+		taskHandler: &stubSequenceTaskExecutor{
+			results: []string{"Allowed directories: /Users/jjdev/Documents"},
+		},
+	}
+
+	if _, err := handler.executeTaskWithDependencies(ws, persistedTask, true); err != nil {
+		t.Fatalf("executeTaskWithDependencies failed: %v", err)
+	}
+
+	updatedTask, err := ws.GetTask(task.ID)
+	if err != nil {
+		t.Fatalf("failed to fetch updated task: %v", err)
+	}
+	if updatedTask.Status != workspace.TaskStatusInProgress {
+		t.Fatalf("expected task to remain in progress, got %q", updatedTask.Status)
+	}
+	if !workspace.IsTaskAwaitingNextStep(updatedTask) {
+		t.Fatalf("expected task to wait for the next step")
+	}
+	if len(updatedTask.ExecutionSteps) != 7 {
+		t.Fatalf("expected 7 execution steps, got %d", len(updatedTask.ExecutionSteps))
+	}
+	if updatedTask.ExecutionSteps[0].Status != workspace.TaskExecutionStepCompleted {
+		t.Fatalf("expected first step completed, got %q", updatedTask.ExecutionSteps[0].Status)
+	}
+	if updatedTask.ExecutionSteps[1].Status != workspace.TaskExecutionStepPending {
+		t.Fatalf("expected second step pending, got %q", updatedTask.ExecutionSteps[1].Status)
+	}
+	if updatedTask.ExecutionCount != 0 {
+		t.Fatalf("expected no terminal execution history entry yet, got %d", updatedTask.ExecutionCount)
+	}
+}
+
+func TestExecuteTaskWithDependencies_CompletesStaleListingPlanFromExistingResult(t *testing.T) {
+	store := workspace.NewInMemoryStore()
+	ws := workspace.NewWorkspace(workspace.CreateWorkspaceParams{Name: "Folder Organizer", Agents: []string{"Ori"}})
+
+	staleSteps := workspace.InferTaskExecutionSteps(workspace.Task{Description: "Gather DNM related files into DNM folder"})
+	if len(staleSteps) != 7 {
+		t.Fatalf("expected stale mutation plan to contain 7 steps, got %d", len(staleSteps))
+	}
+	staleResult := "The DNM folder contains:\n- file-a.pdf\n- file-b.pages"
+	for i := 0; i < 3; i++ {
+		staleSteps[i].Status = workspace.TaskExecutionStepCompleted
+		staleSteps[i].Result = staleResult
+	}
+
+	task := workspace.Task{
+		ID:            "task-stale-listing-plan",
+		To:            "Ori",
+		Description:   "Give me list of files in DNM folder",
+		ExecutionMode: workspace.TaskExecutionModeStepThrough,
+		Context: map[string]interface{}{
+			"execution_step_waiting":       true,
+			"execution_step_waiting_index": 4,
+		},
+		ExecutionSteps: staleSteps,
+		Status:         workspace.TaskStatusInProgress,
+	}
+	if err := ws.AddTask(task); err != nil {
+		t.Fatalf("failed to add task: %v", err)
+	}
+	if err := store.Save(ws); err != nil {
+		t.Fatalf("failed to save workspace: %v", err)
+	}
+
+	persistedTask, err := ws.GetTask(task.ID)
+	if err != nil {
+		t.Fatalf("failed to fetch task: %v", err)
+	}
+
+	stub := &stubSequenceTaskExecutor{
+		results: []string{"this executor should not be called"},
+	}
+	handler := &TaskHandler{
+		workspaceStore: store,
+		taskHandler:    stub,
+	}
+
+	result, err := handler.executeTaskWithDependencies(ws, persistedTask, true)
+	if err != nil {
+		t.Fatalf("executeTaskWithDependencies failed: %v", err)
+	}
+	if stub.calls != 0 {
+		t.Fatalf("expected stale listing task not to re-execute, got %d calls", stub.calls)
+	}
+	if result != staleResult {
+		t.Fatalf("unexpected result: %q", result)
+	}
+
+	updatedTask, err := ws.GetTask(task.ID)
+	if err != nil {
+		t.Fatalf("failed to fetch updated task: %v", err)
+	}
+	if updatedTask.Status != workspace.TaskStatusCompleted {
+		t.Fatalf("expected task completed, got %q", updatedTask.Status)
+	}
+	if workspace.IsTaskAwaitingNextStep(updatedTask) {
+		t.Fatalf("did not expect task to remain waiting for a next step")
+	}
+	for i := 3; i < len(updatedTask.ExecutionSteps); i++ {
+		if updatedTask.ExecutionSteps[i].Status != workspace.TaskExecutionStepSkipped {
+			t.Fatalf("expected stale step %d skipped, got %q", i+1, updatedTask.ExecutionSteps[i].Status)
+		}
+	}
+}
+
+func TestExecuteTaskWithDependencies_AutoRunsStructuredStepsToCompletion(t *testing.T) {
+	store := workspace.NewInMemoryStore()
+	ws := workspace.NewWorkspace(workspace.CreateWorkspaceParams{Name: "Folder Organizer", Agents: []string{"Ori"}})
+	task := workspace.Task{
+		ID:            "task-auto-steps",
+		To:            "Ori",
+		Description:   "Gather DNM related files into DNM folder",
+		ExecutionMode: workspace.TaskExecutionModeAuto,
+		Context:       map[string]interface{}{},
+	}
+	if err := ws.AddTask(task); err != nil {
+		t.Fatalf("failed to add task: %v", err)
+	}
+	if err := store.Save(ws); err != nil {
+		t.Fatalf("failed to save workspace: %v", err)
+	}
+
+	persistedTask, err := ws.GetTask(task.ID)
+	if err != nil {
+		t.Fatalf("failed to fetch task: %v", err)
+	}
+
+	handler := &TaskHandler{
+		workspaceStore: store,
+		taskHandler: &stubSequenceTaskExecutor{
+			results: []string{
+				"Allowed directories: /Users/jjdev/Documents",
+				"Inspected candidate directories.",
+				"Identified matching DNM files.",
+				"Created DNM folder.",
+				"Moved matching files into DNM.",
+				"Verified final folder contents.",
+				"Moved 3 files into /Users/jjdev/Documents/DNM",
+			},
+		},
+	}
+
+	if _, err := handler.executeTaskWithDependencies(ws, persistedTask, true); err != nil {
+		t.Fatalf("executeTaskWithDependencies failed: %v", err)
+	}
+
+	updatedTask, err := ws.GetTask(task.ID)
+	if err != nil {
+		t.Fatalf("failed to fetch updated task: %v", err)
+	}
+	if updatedTask.Status != workspace.TaskStatusCompleted {
+		t.Fatalf("expected task completed, got %q", updatedTask.Status)
+	}
+	if workspace.IsTaskAwaitingNextStep(updatedTask) {
+		t.Fatalf("did not expect task to wait for the next step")
+	}
+	if len(updatedTask.ExecutionSteps) != 7 {
+		t.Fatalf("expected 7 execution steps, got %d", len(updatedTask.ExecutionSteps))
+	}
+	for index, step := range updatedTask.ExecutionSteps {
+		if step.Status != workspace.TaskExecutionStepCompleted {
+			t.Fatalf("expected step %d completed, got %q", index+1, step.Status)
+		}
+	}
+	if updatedTask.Result != "Moved 3 files into /Users/jjdev/Documents/DNM" {
+		t.Fatalf("unexpected final result: %q", updatedTask.Result)
+	}
+	if updatedTask.ExecutionCount != 1 {
+		t.Fatalf("expected one completed execution, got %d", updatedTask.ExecutionCount)
 	}
 }

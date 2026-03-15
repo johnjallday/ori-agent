@@ -3,13 +3,14 @@ package database
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/johnjallday/ori-agent/internal/logger"
 )
 
 // schemaVersion is the current database schema version.
 // Increment this when adding new migrations.
-const schemaVersion = 1
+const schemaVersion = 2
 
 // migrate runs all pending migrations to bring the database up to the current schema.
 func (db *DB) migrate(ctx context.Context) error {
@@ -66,6 +67,8 @@ func (db *DB) runMigration(ctx context.Context, version int) error {
 	switch version {
 	case 1:
 		return db.migration001Baseline(ctx)
+	case 2:
+		return db.migration002WorkspaceMCPState(ctx)
 	default:
 		return fmt.Errorf("unknown migration version: %d", version)
 	}
@@ -96,6 +99,8 @@ func (db *DB) migration001Baseline(ctx context.Context) error {
 			store_nodes_json TEXT DEFAULT '[]',
 			workflows_json TEXT DEFAULT '{}',
 			directory_references_json TEXT DEFAULT '[]',
+			mcp_bindings_json TEXT DEFAULT '[]',
+			agent_mcp_access_json TEXT DEFAULT '[]',
 			order_index INTEGER DEFAULT 0,
 			FOREIGN KEY (parent_id) REFERENCES workspaces(id) ON DELETE SET NULL
 		)
@@ -397,6 +402,35 @@ func (db *DB) migration001Baseline(ctx context.Context) error {
 	}
 
 	return nil
+}
+
+func (db *DB) migration002WorkspaceMCPState(ctx context.Context) error {
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("failed to begin transaction: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	if _, err := tx.ExecContext(ctx, `
+		ALTER TABLE workspaces ADD COLUMN mcp_bindings_json TEXT DEFAULT '[]'
+	`); err != nil && !isDuplicateColumnError(err) {
+		return fmt.Errorf("failed to add mcp_bindings_json column: %w", err)
+	}
+
+	if _, err := tx.ExecContext(ctx, `
+		ALTER TABLE workspaces ADD COLUMN agent_mcp_access_json TEXT DEFAULT '[]'
+	`); err != nil && !isDuplicateColumnError(err) {
+		return fmt.Errorf("failed to add agent_mcp_access_json column: %w", err)
+	}
+
+	return tx.Commit()
+}
+
+func isDuplicateColumnError(err error) bool {
+	if err == nil {
+		return false
+	}
+	return strings.Contains(err.Error(), "duplicate column name")
 }
 
 // GetSchemaVersion returns the current database schema version.

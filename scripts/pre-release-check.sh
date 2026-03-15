@@ -447,7 +447,13 @@ if ! run_check "Go Mod Tidy" "$GO_MOD_CHECK"; then
   echo "Changes will be committed automatically if all checks pass."
   echo ""
   # Don't treat this as a failure - we'll commit the changes
-  FAILED_CHECKS=("${FAILED_CHECKS[@]/Go Mod Tidy/}")
+  # Rebuild array without the "Go Mod Tidy" entry (string substitution leaves empty elements)
+  NEW_FAILED=()
+  for item in "${FAILED_CHECKS[@]}"; do
+    [[ "$item" == "Go Mod Tidy" ]] && continue
+    NEW_FAILED+=("$item")
+  done
+  FAILED_CHECKS=("${NEW_FAILED[@]}")
 fi
 
 # ════════════════════════════════════════════════════════════════════════════

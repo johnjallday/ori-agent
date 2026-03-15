@@ -462,11 +462,9 @@ func (h *Handler) FileEvents(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Start watching if not already
-	filesPath := h.store.GetSessionFilesPath(sessionID)
-	if h.watcher != nil && !h.watcher.IsWatching(sessionID) {
-		_ = h.watcher.Watch(sessionID, filesPath)
-	}
+	// Note: We no longer auto-start watching here. The client should
+	// explicitly call POST /api/sessions/{id}/files/watch when file
+	// monitoring is needed, to avoid watching large directories on connect.
 
 	// Send initial connection event
 	_, _ = fmt.Fprintf(w, "event: connected\ndata: {\"session_id\": \"%s\"}\n\n", sessionID)

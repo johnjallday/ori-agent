@@ -61,7 +61,7 @@ body::before {
   overflow: hidden;
   position: fixed;
   left: 0;
-  top: 76px;
+  top: var(--navbar-offset, 76px);
   bottom: 0;
   z-index: 1010;
   min-width: 250px;
@@ -488,9 +488,12 @@ body::before {
 /* Mobile: sidebar hidden (< 992px) */
 @media (max-width: 991px) {
   .sidebar {
+    top: calc(var(--navbar-offset, 76px) + 0.75rem);
+    bottom: 0.75rem;
     transform: translateX(-100%);
     transition: transform 0.3s ease;
     z-index: 1030;
+    box-shadow: 14px 0 32px rgba(2, 6, 12, 0.34);
   }
 
   .sidebar.show {

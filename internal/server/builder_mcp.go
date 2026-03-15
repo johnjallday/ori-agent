@@ -4,11 +4,15 @@ package server
 
 import (
 	"os"
+	"strconv"
+	"strings"
 
 	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/mcp"
 	"github.com/johnjallday/ori-agent/internal/mcp/mcpregistry"
 )
+
+const disableExternalMCPImportEnv = "ORI_DISABLE_EXTERNAL_MCP_IMPORT"
 
 // initializeMCPRegistry initializes the MCP server browser registry store.
 func (b *ServerBuilder) initializeMCPRegistry() {
@@ -31,12 +35,16 @@ func (b *ServerBuilder) initializeMCP() error {
 		}
 	}
 
-	if imported, err := b.mcpConfigManager.ImportExternalGlobalServers(); err != nil {
-		if verbose {
-			logger.Error("failed to import external MCP servers", logger.Fields{"err": err})
+	if externalMCPImportEnabled() {
+		if imported, err := b.mcpConfigManager.ImportExternalGlobalServers(); err != nil {
+			if verbose {
+				logger.Error("failed to import external MCP servers", logger.Fields{"err": err})
+			}
+		} else if verbose && imported > 0 {
+			logger.Info("imported external MCP servers", logger.Fields{"count": imported})
 		}
-	} else if verbose && imported > 0 {
-		logger.Info("imported external MCP servers", logger.Fields{"count": imported})
+	} else if verbose {
+		logger.Info("skipping external MCP server import", logger.Fields{"env": disableExternalMCPImportEnv})
 	}
 
 	mcpGlobalConfig, err := b.mcpConfigManager.LoadGlobalConfig()
@@ -55,7 +63,7 @@ func (b *ServerBuilder) initializeMCP() error {
 		}
 	}
 
-	enabledServers := b.collectEnabledMCPServerNames()
+	enabledServers := collectEnabledMCPServerNames(mcpGlobalConfig.Servers)
 	startedCount, failedCount := startEnabledMCPServers(b.mcpRegistry, enabledServers)
 	if failedCount > 0 {
 		logger.Warn("some enabled MCP servers failed to start during startup", logger.Fields{
@@ -77,38 +85,32 @@ func (b *ServerBuilder) initializeMCP() error {
 	return nil
 }
 
-func (b *ServerBuilder) collectEnabledMCPServerNames() []string {
-	if b == nil || b.st == nil || b.mcpConfigManager == nil {
-		return nil
+func externalMCPImportEnabled() bool {
+	raw, ok := os.LookupEnv(disableExternalMCPImportEnv)
+	if !ok {
+		return true
 	}
 
-	agentNames, _ := b.st.ListAgents()
-	if len(agentNames) == 0 {
-		return nil
+	disabled, err := strconv.ParseBool(strings.TrimSpace(raw))
+	if err != nil {
+		return true
 	}
 
-	serverNames := make([]string, 0)
-	seen := make(map[string]struct{})
-	for _, agentName := range agentNames {
-		enabledServers, err := b.mcpConfigManager.GetEnabledServersForAgent(agentName)
-		if err != nil {
-			logger.Warn("failed to load enabled MCP servers for agent during startup", logger.Fields{
-				"agent": agentName,
-				"err":   err,
-			})
+	return !disabled
+}
+
+func collectEnabledMCPServerNames(servers []mcp.ServerConfig) []string {
+	serverNames := make([]string, 0, len(servers))
+	seen := make(map[string]struct{}, len(servers))
+	for _, server := range servers {
+		if server.Name == "" || !server.Enabled {
 			continue
 		}
-
-		for _, server := range enabledServers {
-			if server.Name == "" {
-				continue
-			}
-			if _, ok := seen[server.Name]; ok {
-				continue
-			}
-			seen[server.Name] = struct{}{}
-			serverNames = append(serverNames, server.Name)
+		if _, ok := seen[server.Name]; ok {
+			continue
 		}
+		seen[server.Name] = struct{}{}
+		serverNames = append(serverNames, server.Name)
 	}
 
 	return serverNames

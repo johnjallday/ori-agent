@@ -48,7 +48,7 @@ import (
 func (b *ServerBuilder) initializeHandlers() error {
 	b.locationHandler = locationhttp.NewHandler(b.locationManager)
 	b.usageHandler = usagehttp.NewHandler(b.costTracker)
-	b.mcpHandler = mcphttp.NewHandler(b.mcpRegistry, b.mcpConfigManager, b.st)
+	b.mcpHandler = mcphttp.NewHandler(b.mcpRegistry, b.mcpConfigManager)
 	b.settingsHandler = settingshttp.NewHandler(b.st, b.configManager, b.clientFactory, b.llmFactory)
 	b.speechHandler = speechhttp.NewHandler(b.configManager)
 

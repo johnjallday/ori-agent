@@ -520,7 +520,7 @@
               </div>
             </div>
 
-            <!-- MCP Servers Section -->
+            <!-- MCP Dependencies Section -->
             <div class="col-12">
               <div class="section-card modern-card p-4" id="mcpSection" style="display: none;">
                 <div class="d-flex justify-content-between align-items-center mb-3">
@@ -528,14 +528,16 @@
                     <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" class="me-2" style="vertical-align: text-bottom;">
                       <path d="M12 2C6.48 2 2 6.48 2 12H0l3 3 3-3H4C4 7.59 7.59 4 12 4s8 3.59 8 8c0 4.41-3.59 8-8 8-2.21 0-4.21-.9-5.65-2.35l-1.42 1.42C6.73 21.19 9.23 22 12 22c5.52 0 10-4.48 10-10S17.52 2 12 2z"/>
                     </svg>
-                    MCP Servers
+                    MCP Dependencies
                   </h3>
-                  <button class="modern-btn modern-btn-secondary" onclick="toggleMCPConfig()">Configure</button>
+                  <a class="modern-btn modern-btn-secondary" href="/workspaces">Open Workspaces</a>
                 </div>
+                <p style="margin: 0 0 16px; color: var(--text-secondary); font-size: 13px; line-height: 1.5;">
+                  MCP bindings are configured per workspace now. This page shows the connectors required by this agent's enabled skills and whether those connectors exist globally.
+                </p>
                 <div id="mcpList" class="plugins-grid" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 12px;">
-                  <div class="text-center py-3" style="color: var(--text-secondary);">Loading MCP servers...</div>
+                  <div class="text-center py-3" style="color: var(--text-secondary);">Loading MCP dependencies...</div>
                 </div>
-                <div id="mcpConfigPanel" style="display: none; margin-top: 16px;"></div>
               </div>
             </div>
 

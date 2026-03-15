@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"regexp"
 	"strings"
 
 	"github.com/johnjallday/ori-agent/internal/agent"
@@ -42,17 +43,37 @@ func classifyContextError(err error) string {
 
 // LLMTaskHandler executes tasks using the LLM system
 type LLMTaskHandler struct {
-	agentStore     store.Store
-	llmFactory     *llm.Factory
-	workspaceStore Store // Added to access workspace attachments
-	contextStore   taskPromptContextStore
-	eventBus       *EventBus // Optional event bus for publishing execution events
-	mcpRegistry    mcpRegistry
+	agentStore      store.Store
+	llmFactory      *llm.Factory
+	workspaceStore  Store // Added to access workspace attachments
+	contextStore    taskPromptContextStore
+	eventBus        *EventBus // Optional event bus for publishing execution events
+	mcpRegistry     mcpRegistry
+	runtimeResolver *AgentRuntimeResolver
 }
 
 type mcpRegistry interface {
 	GetToolsForServer(string) ([]pluginapi.PluginTool, error)
 	StartServer(string) error
+}
+
+type resolvedTaskAgent struct {
+	*agent.Agent
+	MCPServers []string
+}
+
+const maxTaskToolRounds = 6
+
+var (
+	browserIntentWordPattern = regexp.MustCompile(`\b(open|visit|navigate|browse|click|fill|type|extract)\b`)
+	browserIntentGoToPattern = regexp.MustCompile(`\bgo\s+to\b`)
+	browserDomainPattern     = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*(\.[a-z0-9-]+)+$`)
+)
+
+var browserLikeFileExtensions = map[string]struct{}{
+	"app": {}, "csv": {}, "doc": {}, "docx": {}, "gif": {}, "go": {}, "gz": {}, "heic": {}, "jpeg": {}, "jpg": {},
+	"js": {}, "json": {}, "key": {}, "md": {}, "mov": {}, "mp3": {}, "mp4": {}, "numbers": {}, "pages": {}, "pdf": {}, "png": {},
+	"ppt": {}, "pptx": {}, "py": {}, "rb": {}, "sh": {}, "svg": {}, "tar": {}, "ts": {}, "txt": {}, "wav": {}, "webp": {}, "xlsx": {}, "xls": {}, "zip": {},
 }
 
 // NewLLMTaskHandler creates a new LLM-based task handler
@@ -74,6 +95,11 @@ func (h *LLMTaskHandler) SetMCPRegistry(registry mcpRegistry) {
 	h.mcpRegistry = registry
 }
 
+// SetRuntimeResolver configures workspace-aware runtime MCP resolution for task execution.
+func (h *LLMTaskHandler) SetRuntimeResolver(resolver *AgentRuntimeResolver) {
+	h.runtimeResolver = resolver
+}
+
 // SetContextStore configures optional workspace note/session summaries for task prompts.
 func (h *LLMTaskHandler) SetContextStore(store taskPromptContextStore) {
 	h.contextStore = store
@@ -92,14 +118,14 @@ func (h *LLMTaskHandler) ExecuteTask(ctx context.Context, agentName string, task
 	}
 
 	// Get the agent
-	ag, ok := h.agentStore.GetAgent(agentName)
-	if !ok {
-		return "", fmt.Errorf("agent %s not found", agentName)
+	ag, err := h.resolveExecutionAgent(agentName, task)
+	if err != nil {
+		return "", err
 	}
 
 	// Guard common browser-automation intents to avoid misleading "completed" responses
 	// when the assigned agent cannot actually drive web tooling.
-	if isLikelyBrowserAutomationIntent(task.Description) && !h.agentSupportsBrowserAutomation(ag) {
+	if taskRequiresBrowserAutomation(task) && !h.agentSupportsBrowserAutomation(ag) {
 		return "", &TaskBlockedError{
 			ReasonCode: "capability_mismatch",
 			Reason:     fmt.Sprintf("%s cannot execute browser actions for this task", agentName),
@@ -122,7 +148,7 @@ func (h *LLMTaskHandler) ExecuteTask(ctx context.Context, agentName string, task
 	modelName := h.normalizeModelForProvider(providerName, ag.Settings.Model)
 
 	// Build the prompt for the task
-	prompt := h.buildTaskPrompt(ctx, task, ag)
+	prompt := h.buildTaskPrompt(ctx, task, ag.Agent)
 
 	// Prepare messages
 	messages := []llm.Message{
@@ -139,70 +165,136 @@ func (h *LLMTaskHandler) ExecuteTask(ctx context.Context, agentName string, task
 	tools := h.convertAgentToolsToLLMTools(ag)
 
 	// Call the LLM
-	resp, err := provider.Chat(ctx, llm.ChatRequest{
-		Model:           modelName,
-		Messages:        messages,
-		Temperature:     ag.Settings.Temperature,
-		ReasoningEffort: ag.Settings.EffectiveReasoningEffort(providerName),
-		Tools:           tools,
-	})
+	return h.executeTaskConversation(ctx, provider, providerName, modelName, ag, agentName, task, messages, tools)
+}
 
-	if err != nil {
-		// Provide user-friendly error messages for context-related errors
-		if friendlyMsg := classifyContextError(err); friendlyMsg != "" {
-			return "", fmt.Errorf("%s", friendlyMsg)
+func (h *LLMTaskHandler) resolveExecutionAgent(agentName string, task Task) (*resolvedTaskAgent, error) {
+	if h.runtimeResolver != nil {
+		resolved, err := h.runtimeResolver.ResolveAgentForTask(agentName, task)
+		if err != nil {
+			return nil, err
 		}
-		return "", fmt.Errorf("LLM call failed: %w", err)
+		if resolved != nil && resolved.Agent != nil {
+			return &resolvedTaskAgent{
+				Agent:      resolved.Agent,
+				MCPServers: append([]string{}, resolved.MCPServers...),
+			}, nil
+		}
 	}
 
-	// Handle tool calls if present
-	if len(resp.ToolCalls) > 0 {
-		logger.Debug("Task triggered tool call(s)", logger.Fields{"task_id": task.ID, "toolcalls)": len(resp.ToolCalls)})
+	ag, ok := h.agentStore.GetAgent(agentName)
+	if !ok {
+		return nil, fmt.Errorf("agent %s not found", agentName)
+	}
+	return &resolvedTaskAgent{Agent: ag}, nil
+}
 
-		// Execute tool calls
-		toolResults := h.executeToolCalls(ctx, ag, agentName, task, resp.ToolCalls)
+func (h *LLMTaskHandler) executeTaskConversation(
+	ctx context.Context,
+	provider llm.Provider,
+	providerName string,
+	modelName string,
+	ag *resolvedTaskAgent,
+	agentName string,
+	task Task,
+	messages []llm.Message,
+	tools []llm.Tool,
+) (string, error) {
+	conversation := append([]llm.Message(nil), messages...)
+	var lastToolSummary string
 
-		// Build result summary
-		var resultBuilder strings.Builder
-		if resp.Content != "" {
-			resultBuilder.WriteString(resp.Content)
-			resultBuilder.WriteString("\n\n")
+	for round := 0; round < maxTaskToolRounds; round++ {
+		resp, err := provider.Chat(ctx, llm.ChatRequest{
+			Model:           modelName,
+			Messages:        conversation,
+			Temperature:     ag.Settings.Temperature,
+			ReasoningEffort: ag.Settings.EffectiveReasoningEffort(providerName),
+			Tools:           tools,
+		})
+		if err != nil {
+			if friendlyMsg := classifyContextError(err); friendlyMsg != "" {
+				return "", fmt.Errorf("%s", friendlyMsg)
+			}
+			return "", fmt.Errorf("LLM call failed: %w", err)
 		}
 
-		resultBuilder.WriteString("Tool Results:\n")
-		for _, tr := range toolResults {
-			if tr.Error != nil {
-				resultBuilder.WriteString(fmt.Sprintf("- %s: ERROR: %s\n", tr.Name, tr.Error.Error()))
-			} else {
-				resultBuilder.WriteString(fmt.Sprintf("- %s: %s\n", tr.Name, tr.Result))
+		if len(resp.ToolCalls) == 0 {
+			if strings.TrimSpace(resp.Content) == "" {
+				if strings.TrimSpace(lastToolSummary) != "" {
+					return lastToolSummary, nil
+				}
+				return "Task completed (no output)", nil
+			}
+
+			if taskRequiresBrowserAutomation(task) && looksLikeBrowserCapabilityRefusal(resp.Content) {
+				return "", &TaskBlockedError{
+					ReasonCode: "capability_refusal",
+					Reason:     fmt.Sprintf("%s responded with a capability refusal for a browser task", agentName),
+					Question:   "Would you like to switch agents, add guidance, or retry?",
+					SuggestedActions: []string{
+						"switch_agent_retry",
+						"continue_with_instruction",
+						"retry",
+						"mark_failed",
+					},
+					RawResponse: resp.Content,
+				}
+			}
+
+			return resp.Content, nil
+		}
+
+		logger.Debug("Task triggered tool call(s)", logger.Fields{"task_id": task.ID, "toolcalls)": len(resp.ToolCalls), "round": round + 1})
+		conversationToolCalls := make([]llm.ToolCall, len(resp.ToolCalls))
+		copy(conversationToolCalls, resp.ToolCalls)
+		for index := range conversationToolCalls {
+			if strings.TrimSpace(conversationToolCalls[index].ID) == "" {
+				conversationToolCalls[index].ID = fmt.Sprintf("tool_%d_%d", round+1, index+1)
 			}
 		}
+		conversation = append(conversation, llm.Message{
+			Role:      llm.RoleAssistant,
+			Content:   resp.Content,
+			ToolCalls: conversationToolCalls,
+		})
 
-		return resultBuilder.String(), nil
-	}
+		toolResults := h.executeToolCalls(ctx, ag, agentName, task, resp.ToolCalls)
+		lastToolSummary = buildToolResultsSummary(resp.Content, toolResults)
+		for index, tr := range toolResults {
+			toolContent := tr.Result
+			if tr.Error != nil {
+				toolContent = fmt.Sprintf("ERROR: %s", tr.Error.Error())
+			}
 
-	// Return the response content
-	if resp.Content == "" {
-		return "Task completed (no output)", nil
-	}
-
-	// Heuristic: detect capability-refusal responses for browser tasks and pause for user help.
-	if isLikelyBrowserAutomationIntent(task.Description) && looksLikeBrowserCapabilityRefusal(resp.Content) {
-		return "", &TaskBlockedError{
-			ReasonCode: "capability_refusal",
-			Reason:     fmt.Sprintf("%s responded with a capability refusal for a browser task", agentName),
-			Question:   "Would you like to switch agents, add guidance, or retry?",
-			SuggestedActions: []string{
-				"switch_agent_retry",
-				"continue_with_instruction",
-				"retry",
-				"mark_failed",
-			},
-			RawResponse: resp.Content,
+			toolCallID := strings.TrimSpace(conversationToolCalls[index].ID)
+			conversation = append(conversation, llm.NewToolMessage(toolCallID, toolContent))
 		}
 	}
 
-	return resp.Content, nil
+	if strings.TrimSpace(lastToolSummary) != "" {
+		return lastToolSummary, nil
+	}
+
+	return "", fmt.Errorf("task exceeded %d tool rounds without a final answer", maxTaskToolRounds)
+}
+
+func buildToolResultsSummary(content string, toolResults []toolCallResult) string {
+	var resultBuilder strings.Builder
+	if strings.TrimSpace(content) != "" {
+		resultBuilder.WriteString(strings.TrimSpace(content))
+		resultBuilder.WriteString("\n\n")
+	}
+
+	resultBuilder.WriteString("Tool Results:\n")
+	for _, tr := range toolResults {
+		if tr.Error != nil {
+			resultBuilder.WriteString(fmt.Sprintf("- %s: ERROR: %s\n", tr.Name, tr.Error.Error()))
+		} else {
+			resultBuilder.WriteString(fmt.Sprintf("- %s: %s\n", tr.Name, tr.Result))
+		}
+	}
+
+	return strings.TrimSpace(resultBuilder.String())
 }
 
 func normalizeProviderName(provider string) string {
@@ -384,8 +476,8 @@ func (h *LLMTaskHandler) cleanToolResult(result string) string {
 	return result
 }
 
-func (h *LLMTaskHandler) agentSupportsBrowserAutomation(ag *agent.Agent) bool {
-	if ag == nil {
+func (h *LLMTaskHandler) agentSupportsBrowserAutomation(ag *resolvedTaskAgent) bool {
+	if ag == nil || ag.Agent == nil {
 		return false
 	}
 	if !ag.Settings.IsWebSearchAllowed() {
@@ -446,21 +538,11 @@ func isLikelyBrowserAutomationIntent(description string) bool {
 		return false
 	}
 
-	verbs := []string{
-		"open", "visit", "navigate", "go to", "browse", "click", "fill", "type", "extract",
-	}
-	hasVerb := false
-	for _, verb := range verbs {
-		if strings.Contains(lower, verb) {
-			hasVerb = true
-			break
-		}
-	}
-	if !hasVerb {
+	if !browserIntentWordPattern.MatchString(lower) && !browserIntentGoToPattern.MatchString(lower) {
 		return false
 	}
 
-	if strings.Contains(lower, "http://") || strings.Contains(lower, "https://") || strings.Contains(lower, "www.") {
+	if strings.Contains(lower, "http://") || strings.Contains(lower, "https://") || strings.Contains(lower, "www.") || strings.Contains(lower, "localhost:") {
 		return true
 	}
 
@@ -469,14 +551,35 @@ func isLikelyBrowserAutomationIntent(description string) bool {
 		if strings.Count(cleaned, ".") < 1 || strings.Contains(cleaned, "/") {
 			continue
 		}
+		if !browserDomainPattern.MatchString(cleaned) {
+			continue
+		}
 		parts := strings.Split(cleaned, ".")
 		tld := parts[len(parts)-1]
+		if _, isFileExtension := browserLikeFileExtensions[tld]; isFileExtension {
+			continue
+		}
 		if len(tld) >= 2 && len(tld) <= 12 {
 			return true
 		}
 	}
 
 	return false
+}
+
+func taskRequiresBrowserAutomation(task Task) bool {
+	return isLikelyBrowserAutomationIntent(taskBrowserIntentDescription(task))
+}
+
+func taskBrowserIntentDescription(task Task) string {
+	if task.Context != nil {
+		if overall, ok := task.Context["execution_overall_task_description"].(string); ok {
+			if trimmed := strings.TrimSpace(overall); trimmed != "" {
+				return trimmed
+			}
+		}
+	}
+	return task.Description
 }
 
 func looksLikeBrowserCapabilityRefusal(response string) bool {
@@ -633,7 +736,7 @@ func (h *LLMTaskHandler) getProviderForModel(model string) string {
 }
 
 // convertAgentToolsToLLMTools converts agent plugins + MCP tools into LLM tools.
-func (h *LLMTaskHandler) convertAgentToolsToLLMTools(ag *agent.Agent) []llm.Tool {
+func (h *LLMTaskHandler) convertAgentToolsToLLMTools(ag *resolvedTaskAgent) []llm.Tool {
 	var tools []llm.Tool
 	seen := make(map[string]struct{})
 
@@ -691,7 +794,7 @@ type toolCallResult struct {
 }
 
 // executeToolCalls executes tool calls and returns results
-func (h *LLMTaskHandler) executeToolCalls(ctx context.Context, ag *agent.Agent, agentName string, task Task, toolCalls []llm.ToolCall) []toolCallResult {
+func (h *LLMTaskHandler) executeToolCalls(ctx context.Context, ag *resolvedTaskAgent, agentName string, task Task, toolCalls []llm.ToolCall) []toolCallResult {
 	results := make([]toolCallResult, len(toolCalls))
 
 	for i, tc := range toolCalls {
@@ -702,7 +805,7 @@ func (h *LLMTaskHandler) executeToolCalls(ctx context.Context, ag *agent.Agent, 
 }
 
 // executeToolCall executes a single tool call
-func (h *LLMTaskHandler) executeToolCall(ctx context.Context, ag *agent.Agent, agentName string, task Task, toolCall llm.ToolCall) toolCallResult {
+func (h *LLMTaskHandler) executeToolCall(ctx context.Context, ag *resolvedTaskAgent, agentName string, task Task, toolCall llm.ToolCall) toolCallResult {
 	logger.Debug("Executing tool", logger.Fields{"tool": toolCall.Name})
 
 	// Publish tool call event
@@ -771,7 +874,7 @@ func (h *LLMTaskHandler) executeToolCall(ctx context.Context, ag *agent.Agent, a
 	}
 }
 
-func (h *LLMTaskHandler) findTool(ag *agent.Agent, toolName string) (pluginapi.PluginTool, bool) {
+func (h *LLMTaskHandler) findTool(ag *resolvedTaskAgent, toolName string) (pluginapi.PluginTool, bool) {
 	target := strings.ToLower(strings.TrimSpace(toolName))
 	if target == "" {
 		return nil, false
@@ -800,7 +903,7 @@ func (h *LLMTaskHandler) findTool(ag *agent.Agent, toolName string) (pluginapi.P
 	return nil, false
 }
 
-func (h *LLMTaskHandler) getAgentMCPTools(ag *agent.Agent) []pluginapi.PluginTool {
+func (h *LLMTaskHandler) getAgentMCPTools(ag *resolvedTaskAgent) []pluginapi.PluginTool {
 	if h == nil || h.mcpRegistry == nil || ag == nil || len(ag.MCPServers) == 0 {
 		return nil
 	}
