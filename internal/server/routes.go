@@ -713,6 +713,21 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 		}
 	})
 
+	// MCP binding routes (Go 1.22+ method patterns)
+	mux.HandleFunc("POST /api/studios/{studioID}/mcp-bindings", s.Handlers.Studio.CreateMCPBinding)
+	mux.HandleFunc("GET /api/studios/{studioID}/mcp-bindings", s.Handlers.Studio.ListMCPBindings)
+	mux.HandleFunc("GET /api/studios/{studioID}/mcp-bindings/{bindingID}", s.Handlers.Studio.GetMCPBinding)
+	mux.HandleFunc("PUT /api/studios/{studioID}/mcp-bindings/{bindingID}", s.Handlers.Studio.UpdateMCPBinding)
+	mux.HandleFunc("PATCH /api/studios/{studioID}/mcp-bindings/{bindingID}", s.Handlers.Studio.UpdateMCPBinding)
+	mux.HandleFunc("DELETE /api/studios/{studioID}/mcp-bindings/{bindingID}", s.Handlers.Studio.DeleteMCPBinding)
+
+	// Agent MCP access routes
+	mux.HandleFunc("GET /api/studios/{studioID}/agent-mcp-access", s.Handlers.Studio.ListAgentMCPAccess)
+	mux.HandleFunc("GET /api/studios/{studioID}/agent-mcp-access/{agentInstanceID}", s.Handlers.Studio.GetAgentMCPAccessEntry)
+	mux.HandleFunc("PUT /api/studios/{studioID}/agent-mcp-access/{agentInstanceID}", s.Handlers.Studio.UpdateAgentMCPAccess)
+	mux.HandleFunc("PATCH /api/studios/{studioID}/agent-mcp-access/{agentInstanceID}", s.Handlers.Studio.UpdateAgentMCPAccess)
+	mux.HandleFunc("DELETE /api/studios/{studioID}/agent-mcp-access/{agentInstanceID}", s.Handlers.Studio.DeleteAgentMCPAccess)
+
 	mux.HandleFunc("/api/studios/", func(w http.ResponseWriter, r *http.Request) {
 		// Parse the path to determine which handler to use
 		if strings.HasSuffix(r.URL.Path, "/events") {
@@ -831,49 +846,7 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 					orihttp.MethodNotAllowed(w)
 				}
 			}
-		} else if strings.Contains(r.URL.Path, "/mcp-bindings") {
-			if strings.HasSuffix(r.URL.Path, "/mcp-bindings") {
-				switch r.Method {
-				case http.MethodPost:
-					s.Handlers.Studio.CreateMCPBinding(w, r)
-				case http.MethodGet:
-					s.Handlers.Studio.ListMCPBindings(w, r)
-				default:
-					orihttp.MethodNotAllowed(w)
-				}
-			} else {
-				switch r.Method {
-				case http.MethodGet:
-					s.Handlers.Studio.GetMCPBinding(w, r)
-				case http.MethodPut, http.MethodPatch:
-					s.Handlers.Studio.UpdateMCPBinding(w, r)
-				case http.MethodDelete:
-					s.Handlers.Studio.DeleteMCPBinding(w, r)
-				default:
-					orihttp.MethodNotAllowed(w)
-				}
-			}
-		} else if strings.Contains(r.URL.Path, "/agent-mcp-access") {
-			if strings.HasSuffix(r.URL.Path, "/agent-mcp-access") {
-				switch r.Method {
-				case http.MethodGet:
-					s.Handlers.Studio.ListAgentMCPAccess(w, r)
-				default:
-					orihttp.MethodNotAllowed(w)
-				}
-			} else {
-				switch r.Method {
-				case http.MethodGet:
-					s.Handlers.Studio.GetAgentMCPAccessEntry(w, r)
-				case http.MethodPut, http.MethodPatch:
-					s.Handlers.Studio.UpdateAgentMCPAccess(w, r)
-				case http.MethodDelete:
-					s.Handlers.Studio.DeleteAgentMCPAccess(w, r)
-				default:
-					orihttp.MethodNotAllowed(w)
-				}
-			}
-			// Handle agent add/remove operations
+			// MCP binding and agent-mcp-access routes are registered as specific patterns above.
 		} else if strings.Contains(r.URL.Path, "/agents") {
 
 			switch r.Method {

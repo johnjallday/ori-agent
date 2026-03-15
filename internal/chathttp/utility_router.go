@@ -97,7 +97,7 @@ func classifyUtilityRoute(prompt string) UtilityRouteDecision {
 
 func classifyTimeRoute(original, lower string) (UtilityRouteDecision, bool) {
 	// Use word-boundary matching for "time" to avoid false matches on "times", "sometime", etc.
-	if !containsWholeWord(lower, "time") && !containsAny(lower, []string{"timezone", "clock"}) {
+	if !containsWholeWord(lower, "time") && !containsAnyPhrase(lower, []string{"timezone", "clock"}) {
 		return UtilityRouteDecision{}, false
 	}
 
@@ -112,7 +112,7 @@ func classifyTimeRoute(original, lower string) (UtilityRouteDecision, bool) {
 }
 
 func classifyWeatherRoute(original, lower string) (UtilityRouteDecision, bool) {
-	if !containsAny(lower, []string{"weather", "forecast", "temperature"}) {
+	if !containsAnyPhrase(lower, []string{"weather", "forecast", "temperature"}) {
 		return UtilityRouteDecision{}, false
 	}
 
@@ -177,7 +177,7 @@ func classifyWebFetchRoute(original, lower string) (UtilityRouteDecision, bool) 
 	if strings.TrimSpace(urlMatch) == "" {
 		return UtilityRouteDecision{}, false
 	}
-	if !containsAny(lower, []string{"fetch", "read", "open", "summarize", "extract", "webpage", "web page", "url"}) {
+	if !containsAnyPhrase(lower, []string{"fetch", "read", "open", "summarize", "extract", "webpage", "web page", "url"}) {
 		return UtilityRouteDecision{}, false
 	}
 
@@ -377,14 +377,14 @@ func inferLocationForAirQuality(prompt string) string {
 }
 
 func inferWeatherUnits(lower string) string {
-	if containsAny(lower, []string{"fahrenheit", "f ", " f)", " f."}) {
+	if containsAnyPhrase(lower, []string{"fahrenheit", "f ", " f)", " f."}) {
 		return "fahrenheit"
 	}
 	return "celsius"
 }
 
 func inferAirQualityStandard(lower string) string {
-	if containsAny(lower, []string{"eu aqi", "european aqi", "european scale", "eu scale"}) {
+	if containsAnyPhrase(lower, []string{"eu aqi", "european aqi", "european scale", "eu scale"}) {
 		return "eu"
 	}
 	return "us"
@@ -412,20 +412,20 @@ func inferSearchQuery(prompt string) string {
 }
 
 func looksLikeWebSearchPrompt(lower string) bool {
-	if containsAny(lower, []string{"search the web", "web search", "search online", "internet search"}) {
+	if containsAnyPhrase(lower, []string{"search the web", "web search", "search online", "internet search"}) {
 		return true
 	}
-	if containsAny(lower, []string{"search", "look up", "lookup", "find"}) && containsAny(lower, []string{"web", "online", "internet"}) {
+	if containsAnyPhrase(lower, []string{"search", "look up", "lookup", "find"}) && containsAnyPhrase(lower, []string{"web", "online", "internet"}) {
 		return true
 	}
-	if containsAny(lower, []string{"latest news", "look up", "lookup"}) && containsAny(lower, []string{"web", "online", "internet"}) {
+	if containsAnyPhrase(lower, []string{"latest news", "look up", "lookup"}) && containsAnyPhrase(lower, []string{"web", "online", "internet"}) {
 		return true
 	}
 	return false
 }
 
 func looksLikeAirQualityPrompt(lower string) bool {
-	return containsAny(lower, []string{
+	return containsAnyPhrase(lower, []string{
 		"air quality", "aqi", "pm2.5", "pm2_5", "pm10", "pollution level", "pollution",
 	})
 }
@@ -460,30 +460,21 @@ func normalizeInferredLocation(raw string) string {
 }
 
 func looksLikeWorkspaceTask(lower string) bool {
-	return containsAny(lower, []string{
+	return containsAnyPhrase(lower, []string{
 		"code", "repo", "repository", "file", "files", "test", "build", "compile", "refactor", "workspace",
 	})
 }
 
 func looksLikeScratchTask(lower string) bool {
-	return containsAny(lower, []string{
+	return containsAnyPhrase(lower, []string{
 		"scratch", "temporary", "temp workspace", "throwaway", "sandbox",
 	})
 }
 
 func looksLikeSpecialistTask(lower string) bool {
-	return containsAny(lower, []string{
+	return containsAnyPhrase(lower, []string{
 		"high risk", "compliance", "legal", "medical", "specialist", "delegate",
 	})
-}
-
-func containsAny(text string, phrases []string) bool {
-	for _, phrase := range phrases {
-		if strings.Contains(text, phrase) {
-			return true
-		}
-	}
-	return false
 }
 
 // containsWholeWord returns true if text contains word as a standalone word

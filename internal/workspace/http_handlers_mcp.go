@@ -12,28 +12,13 @@ import (
 	"github.com/johnjallday/ori-agent/internal/logger"
 )
 
-func parseStudioPathParts(path, prefix string) ([]string, bool) {
-	trimmed := strings.TrimPrefix(path, prefix)
-	parts := strings.Split(trimmed, "/")
-	if len(parts) < 2 || strings.TrimSpace(parts[0]) == "" {
-		return nil, false
-	}
-	return parts, true
-}
-
-// CreateMCPBinding handles POST /api/studios/:id/mcp-bindings
+// CreateMCPBinding handles POST /api/studios/{studioID}/mcp-bindings
 func (h *HTTPHandler) CreateMCPBinding(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		orihttp.MethodNotAllowed(w)
+	studioID := r.PathValue("studioID")
+	if studioID == "" {
+		orihttp.BadRequest(w, "studio ID is required")
 		return
 	}
-
-	parts, ok := parseStudioPathParts(r.URL.Path, "/api/studios/")
-	if !ok {
-		orihttp.BadRequest(w, "Invalid URL format")
-		return
-	}
-	studioID := parts[0]
 
 	var req struct {
 		ID         string                 `json:"id,omitempty"`
@@ -108,19 +93,13 @@ func (h *HTTPHandler) CreateMCPBinding(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// ListMCPBindings handles GET /api/studios/:id/mcp-bindings
+// ListMCPBindings handles GET /api/studios/{studioID}/mcp-bindings
 func (h *HTTPHandler) ListMCPBindings(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		orihttp.MethodNotAllowed(w)
+	studioID := r.PathValue("studioID")
+	if studioID == "" {
+		orihttp.BadRequest(w, "studio ID is required")
 		return
 	}
-
-	parts, ok := parseStudioPathParts(r.URL.Path, "/api/studios/")
-	if !ok {
-		orihttp.BadRequest(w, "Invalid URL format")
-		return
-	}
-	studioID := parts[0]
 
 	studio, err := h.store.Get(studioID)
 	if err != nil {
@@ -139,20 +118,14 @@ func (h *HTTPHandler) ListMCPBindings(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// GetMCPBinding handles GET /api/studios/:id/mcp-bindings/:binding_id
+// GetMCPBinding handles GET /api/studios/{studioID}/mcp-bindings/{bindingID}
 func (h *HTTPHandler) GetMCPBinding(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		orihttp.MethodNotAllowed(w)
+	studioID := r.PathValue("studioID")
+	bindingID := r.PathValue("bindingID")
+	if studioID == "" || bindingID == "" {
+		orihttp.BadRequest(w, "studio ID and binding ID are required")
 		return
 	}
-
-	parts, ok := parseStudioPathParts(r.URL.Path, "/api/studios/")
-	if !ok || len(parts) < 3 {
-		orihttp.BadRequest(w, "Invalid URL format")
-		return
-	}
-	studioID := parts[0]
-	bindingID := parts[2]
 
 	studio, err := h.store.Get(studioID)
 	if err != nil {
@@ -175,20 +148,14 @@ func (h *HTTPHandler) GetMCPBinding(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// UpdateMCPBinding handles PUT/PATCH /api/studios/:id/mcp-bindings/:binding_id
+// UpdateMCPBinding handles PUT/PATCH /api/studios/{studioID}/mcp-bindings/{bindingID}
 func (h *HTTPHandler) UpdateMCPBinding(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPut && r.Method != http.MethodPatch {
-		orihttp.MethodNotAllowed(w)
+	studioID := r.PathValue("studioID")
+	bindingID := r.PathValue("bindingID")
+	if studioID == "" || bindingID == "" {
+		orihttp.BadRequest(w, "studio ID and binding ID are required")
 		return
 	}
-
-	parts, ok := parseStudioPathParts(r.URL.Path, "/api/studios/")
-	if !ok || len(parts) < 3 {
-		orihttp.BadRequest(w, "Invalid URL format")
-		return
-	}
-	studioID := parts[0]
-	bindingID := parts[2]
 
 	var req struct {
 		ServerName *string                `json:"server_name,omitempty"`
@@ -254,20 +221,14 @@ func (h *HTTPHandler) UpdateMCPBinding(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// DeleteMCPBinding handles DELETE /api/studios/:id/mcp-bindings/:binding_id
+// DeleteMCPBinding handles DELETE /api/studios/{studioID}/mcp-bindings/{bindingID}
 func (h *HTTPHandler) DeleteMCPBinding(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodDelete {
-		orihttp.MethodNotAllowed(w)
+	studioID := r.PathValue("studioID")
+	bindingID := r.PathValue("bindingID")
+	if studioID == "" || bindingID == "" {
+		orihttp.BadRequest(w, "studio ID and binding ID are required")
 		return
 	}
-
-	parts, ok := parseStudioPathParts(r.URL.Path, "/api/studios/")
-	if !ok || len(parts) < 3 {
-		orihttp.BadRequest(w, "Invalid URL format")
-		return
-	}
-	studioID := parts[0]
-	bindingID := parts[2]
 
 	studio, err := h.store.Get(studioID)
 	if err != nil {
@@ -296,19 +257,13 @@ func (h *HTTPHandler) DeleteMCPBinding(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// ListAgentMCPAccess handles GET /api/studios/:id/agent-mcp-access
+// ListAgentMCPAccess handles GET /api/studios/{studioID}/agent-mcp-access
 func (h *HTTPHandler) ListAgentMCPAccess(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		orihttp.MethodNotAllowed(w)
+	studioID := r.PathValue("studioID")
+	if studioID == "" {
+		orihttp.BadRequest(w, "studio ID is required")
 		return
 	}
-
-	parts, ok := parseStudioPathParts(r.URL.Path, "/api/studios/")
-	if !ok {
-		orihttp.BadRequest(w, "Invalid URL format")
-		return
-	}
-	studioID := parts[0]
 
 	studio, err := h.store.Get(studioID)
 	if err != nil {
@@ -327,20 +282,14 @@ func (h *HTTPHandler) ListAgentMCPAccess(w http.ResponseWriter, r *http.Request)
 	}
 }
 
-// GetAgentMCPAccessEntry handles GET /api/studios/:id/agent-mcp-access/:agent_instance_id
+// GetAgentMCPAccessEntry handles GET /api/studios/{studioID}/agent-mcp-access/{agentInstanceID}
 func (h *HTTPHandler) GetAgentMCPAccessEntry(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		orihttp.MethodNotAllowed(w)
+	studioID := r.PathValue("studioID")
+	agentInstanceID := r.PathValue("agentInstanceID")
+	if studioID == "" || agentInstanceID == "" {
+		orihttp.BadRequest(w, "studio ID and agent instance ID are required")
 		return
 	}
-
-	parts, ok := parseStudioPathParts(r.URL.Path, "/api/studios/")
-	if !ok || len(parts) < 3 {
-		orihttp.BadRequest(w, "Invalid URL format")
-		return
-	}
-	studioID := parts[0]
-	agentInstanceID := parts[2]
 
 	studio, err := h.store.Get(studioID)
 	if err != nil {
@@ -363,20 +312,14 @@ func (h *HTTPHandler) GetAgentMCPAccessEntry(w http.ResponseWriter, r *http.Requ
 	}
 }
 
-// UpdateAgentMCPAccess handles PUT/PATCH /api/studios/:id/agent-mcp-access/:agent_instance_id
+// UpdateAgentMCPAccess handles PUT/PATCH /api/studios/{studioID}/agent-mcp-access/{agentInstanceID}
 func (h *HTTPHandler) UpdateAgentMCPAccess(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPut && r.Method != http.MethodPatch {
-		orihttp.MethodNotAllowed(w)
+	studioID := r.PathValue("studioID")
+	agentInstanceID := r.PathValue("agentInstanceID")
+	if studioID == "" || agentInstanceID == "" {
+		orihttp.BadRequest(w, "studio ID and agent instance ID are required")
 		return
 	}
-
-	parts, ok := parseStudioPathParts(r.URL.Path, "/api/studios/")
-	if !ok || len(parts) < 3 {
-		orihttp.BadRequest(w, "Invalid URL format")
-		return
-	}
-	studioID := parts[0]
-	agentInstanceID := parts[2]
 
 	var req struct {
 		EnabledBindingIDs []string `json:"enabled_binding_ids,omitempty"`
@@ -440,20 +383,14 @@ func (h *HTTPHandler) UpdateAgentMCPAccess(w http.ResponseWriter, r *http.Reques
 	}
 }
 
-// DeleteAgentMCPAccess handles DELETE /api/studios/:id/agent-mcp-access/:agent_instance_id
+// DeleteAgentMCPAccess handles DELETE /api/studios/{studioID}/agent-mcp-access/{agentInstanceID}
 func (h *HTTPHandler) DeleteAgentMCPAccess(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodDelete {
-		orihttp.MethodNotAllowed(w)
+	studioID := r.PathValue("studioID")
+	agentInstanceID := r.PathValue("agentInstanceID")
+	if studioID == "" || agentInstanceID == "" {
+		orihttp.BadRequest(w, "studio ID and agent instance ID are required")
 		return
 	}
-
-	parts, ok := parseStudioPathParts(r.URL.Path, "/api/studios/")
-	if !ok || len(parts) < 3 {
-		orihttp.BadRequest(w, "Invalid URL format")
-		return
-	}
-	studioID := parts[0]
-	agentInstanceID := parts[2]
 
 	studio, err := h.store.Get(studioID)
 	if err != nil {

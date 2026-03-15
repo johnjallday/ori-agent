@@ -41,39 +41,15 @@ func (s *resolverAgentStoreStub) Save() error { return nil }
 
 var _ store.Store = (*resolverAgentStoreStub)(nil)
 
-type resolverWorkspaceStoreStub struct {
-	workspaces map[string]*Workspace
-}
-
-func (s *resolverWorkspaceStoreStub) Save(ws *Workspace) error {
-	s.workspaces[ws.ID] = ws
-	return nil
-}
-
-func (s *resolverWorkspaceStoreStub) Get(id string) (*Workspace, error) {
-	ws, ok := s.workspaces[id]
-	if !ok {
-		return nil, errWorkspaceNotFound{id: id}
+func newTestWorkspaceStore(t *testing.T, workspaces ...*Workspace) Store {
+	t.Helper()
+	s := NewInMemoryStore()
+	for _, ws := range workspaces {
+		if err := s.Save(ws); err != nil {
+			t.Fatalf("failed to seed workspace store: %v", err)
+		}
 	}
-	return ws, nil
-}
-
-func (s *resolverWorkspaceStoreStub) List() ([]string, error) { return nil, nil }
-
-func (s *resolverWorkspaceStoreStub) Delete(string) error { return nil }
-
-func (s *resolverWorkspaceStoreStub) ListActive() ([]*Workspace, error) { return nil, nil }
-
-func (s *resolverWorkspaceStoreStub) GetFilesPath(string) string { return "" }
-
-var _ Store = (*resolverWorkspaceStoreStub)(nil)
-
-type errWorkspaceNotFound struct {
-	id string
-}
-
-func (e errWorkspaceNotFound) Error() string {
-	return "workspace " + e.id + " not found"
+	return s
 }
 
 type runtimeRegistryStub struct {
@@ -128,7 +104,7 @@ func TestAgentRuntimeResolver_UsesWorkspaceFilesystemRuntimeServer(t *testing.T)
 		},
 		UpdatedAt: time.Now(),
 	}
-	workspaceStore := &resolverWorkspaceStoreStub{workspaces: map[string]*Workspace{ws.ID: ws}}
+	workspaceStore := newTestWorkspaceStore(t, ws)
 	registry := &runtimeRegistryStub{}
 	templates := &templateLookupStub{
 		servers: map[string]mcp.ServerConfig{
@@ -198,10 +174,7 @@ func TestAgentRuntimeResolver_DifferentWorkspacesGetDifferentRuntimeServers(t *t
 		DirectoryReferences: []DirectoryReference{{ID: "dir-b", Path: rootB}},
 		UpdatedAt:           time.Now(),
 	}
-	workspaceStore := &resolverWorkspaceStoreStub{workspaces: map[string]*Workspace{
-		wsA.ID: wsA,
-		wsB.ID: wsB,
-	}}
+	workspaceStore := newTestWorkspaceStore(t, wsA, wsB)
 	registry := &runtimeRegistryStub{}
 	templates := &templateLookupStub{
 		servers: map[string]mcp.ServerConfig{
@@ -261,7 +234,7 @@ func TestAgentRuntimeResolver_RespectsAgentInstanceBindingAccess(t *testing.T) {
 			{AgentInstanceID: "denied", EnabledBindingIDs: []string{}},
 		},
 	}
-	workspaceStore := &resolverWorkspaceStoreStub{workspaces: map[string]*Workspace{ws.ID: ws}}
+	workspaceStore := newTestWorkspaceStore(t, ws)
 	registry := &runtimeRegistryStub{}
 	templates := &templateLookupStub{
 		servers: map[string]mcp.ServerConfig{
@@ -317,7 +290,7 @@ func TestAgentRuntimeResolver_AppliesWorkspaceBindingConfigOverrides(t *testing.
 			},
 		},
 	}
-	workspaceStore := &resolverWorkspaceStoreStub{workspaces: map[string]*Workspace{ws.ID: ws}}
+	workspaceStore := newTestWorkspaceStore(t, ws)
 	registry := &runtimeRegistryStub{}
 	templates := &templateLookupStub{
 		servers: map[string]mcp.ServerConfig{
