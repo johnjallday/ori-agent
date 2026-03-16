@@ -52,10 +52,14 @@ func (h *Handler) resolveEffectiveAgent(agentName string, routeCtx normalizedCha
 			"workspace_id": routeCtx.WorkspaceID,
 			"error":        err,
 		})
-		return &resolvedChatAgent{Agent: baseAgent}, nil
+		result := &resolvedChatAgent{Agent: baseAgent}
+		h.attachWorkspaceTools(result, routeCtx.WorkspaceID)
+		return result, nil
 	}
 	if resolved == nil || resolved.Agent == nil {
-		return &resolvedChatAgent{Agent: baseAgent}, nil
+		result := &resolvedChatAgent{Agent: baseAgent}
+		h.attachWorkspaceTools(result, routeCtx.WorkspaceID)
+		return result, nil
 	}
 	result := &resolvedChatAgent{
 		Agent:      resolved.Agent,
@@ -64,24 +68,30 @@ func (h *Handler) resolveEffectiveAgent(agentName string, routeCtx normalizedCha
 	if len(resolved.EffectiveSkills) > 0 {
 		result.EffectiveSkills = append([]workspace.ResolvedSkill{}, resolved.EffectiveSkills...)
 	}
-	// Attach workspace-scoped tools when both stores are available
-	if h.sessionStore != nil && h.workspaceStore != nil {
-		wtp := NewWorkspaceToolProvider(h.sessionStore, h.workspaceStore, routeCtx.WorkspaceID)
-		// Wire management deps if available
-		if h.store != nil || h.mcpRegistry != nil || h.skillsManager != nil {
-			var mcpLister mcpServerLister
-			if reg, ok := h.mcpRegistry.(mcpServerLister); ok {
-				mcpLister = reg
-			}
-			var skillsMgr skillLister
-			if mgr, ok := h.skillsManager.(skillLister); ok {
-				skillsMgr = mgr
-			}
-			wtp.SetManagementDeps(h.store, mcpLister, skillsMgr)
-		}
-		result.WorkspaceTools = wtp
-	}
+	h.attachWorkspaceTools(result, routeCtx.WorkspaceID)
 	return result, nil
+}
+
+// attachWorkspaceTools adds workspace-scoped tools to a resolved agent when
+// the necessary stores are available. This must be called on every code path
+// that returns a resolvedChatAgent for a workspace surface.
+func (h *Handler) attachWorkspaceTools(ag *resolvedChatAgent, workspaceID string) {
+	if h.sessionStore == nil || h.workspaceStore == nil || strings.TrimSpace(workspaceID) == "" {
+		return
+	}
+	wtp := NewWorkspaceToolProvider(h.sessionStore, h.workspaceStore, workspaceID)
+	if h.store != nil || h.mcpRegistry != nil || h.skillsManager != nil {
+		var mcpLister mcpServerLister
+		if reg, ok := h.mcpRegistry.(mcpServerLister); ok {
+			mcpLister = reg
+		}
+		var skillsMgr skillLister
+		if mgr, ok := h.skillsManager.(skillLister); ok {
+			skillsMgr = mgr
+		}
+		wtp.SetManagementDeps(h.store, mcpLister, skillsMgr)
+	}
+	ag.WorkspaceTools = wtp
 }
 
 func (h *Handler) persistAgent(agentName string, ag *agent.Agent) error {
