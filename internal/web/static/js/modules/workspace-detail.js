@@ -401,6 +401,7 @@ export class WorkspaceDetailPage {
 
       // Lists
       agentsList: document.getElementById('workspace-detail-agents-list'),
+      sessionsList: document.getElementById('workspace-detail-sessions-list'),
       filesList: document.getElementById('workspace-detail-files-list'),
       notesList: document.getElementById('workspace-detail-notes-list'),
       directoriesList: document.getElementById('workspace-detail-directories-list'),
@@ -418,6 +419,7 @@ export class WorkspaceDetailPage {
       addAgentBtn: document.getElementById('workspace-detail-add-agent-btn'),
       refreshTasksBtn: document.getElementById('workspace-detail-refresh-tasks'),
       newSessionBtn: document.getElementById('workspace-detail-new-session'),
+      refreshSessionsBtn: document.getElementById('workspace-detail-refresh-sessions'),
       addFileBtn: document.getElementById('workspace-detail-add-file'),
       addNoteBtn: document.getElementById('workspace-detail-add-note'),
       copyNotesBtn: document.getElementById('workspace-detail-copy-notes'),
@@ -560,6 +562,7 @@ export class WorkspaceDetailPage {
 
     // Session buttons
     this.elements.newSessionBtn?.addEventListener('click', () => this.createNewSession());
+    this.elements.refreshSessionsBtn?.addEventListener('click', () => this.loadSessions());
 
     // File buttons
     this.elements.addFileBtn?.addEventListener('click', () => this.showFileModal());
@@ -1076,7 +1079,7 @@ export class WorkspaceDetailPage {
 
     const groups = this.buildAgentGroups();
     if (groups.length === 0) {
-      if (this.tasksLoading || this.sessionsLoading) {
+      if (this.tasksLoading) {
         this.elements.agentsList.innerHTML = '<div class="workspace-detail-loading">Loading agents...</div>';
       } else {
         this.elements.agentsList.innerHTML = `
@@ -1093,11 +1096,9 @@ export class WorkspaceDetailPage {
 
     this.elements.agentsList.innerHTML = groups.map((group) => {
       const taskCount = group.tasks.length;
-      const sessionCount = group.sessions.length;
       const taskLabel = `${taskCount} task${taskCount === 1 ? '' : 's'}`;
-      const sessionLabel = `${sessionCount} session${sessionCount === 1 ? '' : 's'}`;
       const instanceLabel = group.instanceCount > 1 ? `${group.instanceCount} instances` : '';
-      const cardMeta = [instanceLabel, taskLabel, sessionLabel].filter(Boolean).join(' · ');
+      const cardMeta = [instanceLabel, taskLabel].filter(Boolean).join(' · ');
       const capabilityBadges = group.isUnassigned ? '' : this.renderAgentCapabilityBadges(group.name);
       const encodedAgentName = encodeURIComponent(group.name);
       const canFlip = !group.isUnassigned;
@@ -1141,17 +1142,6 @@ export class WorkspaceDetailPage {
           </svg>
         </button>
       `;
-      const sessionActionButton = group.isUnassigned ? '' : `
-        <button type="button"
-                class="workspace-detail-agent-section-btn"
-                title="Start session with ${this.escapeHtml(group.name)}"
-                aria-label="Start session with ${this.escapeHtml(group.name)}"
-                onclick="event.stopPropagation(); window.workspaceDetail?.createNewSessionForAgent('${encodedAgentName}')">
-          <svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor">
-            <path d="M19,13H13V19H11V13H5V11H11V5H13V11H19V13Z"/>
-          </svg>
-        </button>
-      `;
       const backFace = canFlip
         ? this.renderAgentBackFace(group, cardMeta, encodedAgentName)
         : '';
@@ -1181,15 +1171,6 @@ export class WorkspaceDetailPage {
                 </div>
                 <div class="workspace-detail-list workspace-detail-agent-list">
                   ${this.renderAgentTasksContent(group.tasks)}
-                </div>
-              </div>
-              <div class="workspace-detail-agent-section">
-                <div class="workspace-detail-agent-section-header">
-                  <div class="workspace-detail-agent-section-title">Sessions</div>
-                  ${sessionActionButton}
-                </div>
-                <div class="workspace-detail-list workspace-detail-agent-list">
-                  ${this.renderAgentSessionsContent(group.sessions)}
                 </div>
               </div>
             </div>
@@ -1484,8 +1465,7 @@ export class WorkspaceDetailPage {
           isWorkspaceAgent,
           isUnassigned,
           instanceCount: 0,
-          tasks: [],
-          sessions: []
+          tasks: []
         };
         groupByKey.set(normalized, group);
         groups.push(group);
@@ -1522,16 +1502,6 @@ export class WorkspaceDetailPage {
         ensureGroup(assigned)?.tasks.push(task);
       } else {
         ensureGroup('Unassigned', { isUnassigned: true })?.tasks.push(task);
-      }
-    });
-
-    const sessions = Array.isArray(this.sessions) ? this.sessions : [];
-    sessions.forEach((session) => {
-      const sessionAgent = String(session?.agent_name || '').trim();
-      if (sessionAgent && sessionAgent !== 'unassigned') {
-        ensureGroup(sessionAgent)?.sessions.push(session);
-      } else {
-        ensureGroup('Unassigned', { isUnassigned: true })?.sessions.push(session);
       }
     });
 
@@ -7182,7 +7152,7 @@ export class WorkspaceDetailPage {
   async loadSessions() {
     this.sessionsLoading = true;
     this.sessionsLoadFailed = false;
-    this.renderAgentGroups();
+    this.renderSessions();
 
     try {
       const response = await fetch(`/api/sessions?folder_id=${encodeURIComponent(this.workspaceId)}`);
@@ -7207,10 +7177,28 @@ export class WorkspaceDetailPage {
   }
 
   /**
-   * Render sessions grouped by agent
+   * Render sessions into the workspace-level sessions panel
    */
   renderSessions() {
-    this.renderAgentGroups();
+    if (!this.elements.sessionsList) return;
+
+    if (this.sessionsLoading) {
+      this.elements.sessionsList.innerHTML = '<div class="workspace-detail-loading">Loading sessions...</div>';
+      return;
+    }
+
+    if (this.sessionsLoadFailed) {
+      this.elements.sessionsList.innerHTML = '<div class="workspace-detail-empty">Failed to load sessions.</div>';
+      return;
+    }
+
+    const sessions = Array.isArray(this.sessions) ? this.sessions : [];
+    if (sessions.length === 0) {
+      this.elements.sessionsList.innerHTML = '<div class="workspace-detail-empty">No sessions yet.</div>';
+      return;
+    }
+
+    this.elements.sessionsList.innerHTML = sessions.map((session) => this.renderSessionItem(session)).join('');
   }
 
   /**
