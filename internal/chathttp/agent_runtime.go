@@ -42,7 +42,9 @@ func (h *Handler) resolveEffectiveAgent(agentName string, routeCtx normalizedCha
 	}
 
 	if h.runtimeResolver == nil || strings.TrimSpace(routeCtx.WorkspaceID) == "" {
-		return &resolvedChatAgent{Agent: baseAgent}, nil
+		result := &resolvedChatAgent{Agent: baseAgent}
+		h.attachWorkspaceTools(result, routeCtx.WorkspaceID)
+		return result, nil
 	}
 
 	resolved, err := h.runtimeResolver.ResolveAgentForWorkspace(agentName, routeCtx.WorkspaceID, "")
