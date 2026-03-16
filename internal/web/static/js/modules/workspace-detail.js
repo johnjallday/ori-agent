@@ -2647,9 +2647,15 @@ export class WorkspaceDetailPage {
       .filter((name) => !workspaceAgents.has(this.normalizeAgentName(name)));
 
     if (candidates.length === 0) {
-      this.elements.addAgentSelect.innerHTML = '<option value="">No agents available</option>';
+      const hasCatalogAgents = allAgents.length > 0;
+      this.elements.addAgentSelect.innerHTML = hasCatalogAgents
+        ? '<option value="">All agents already added</option>'
+        : '<option value="">No agents available</option>';
       this.elements.addAgentSelect.disabled = true;
       this.elements.addAgentSubmitBtn.disabled = true;
+      this.elements.addAgentEmpty.textContent = hasCatalogAgents
+        ? 'All available agents are already in this workspace. Create a new agent to add another profile.'
+        : 'No unassigned agents are available. Create a new agent first.';
       this.elements.addAgentEmpty.classList.remove('d-none');
       return;
     }
@@ -8596,22 +8602,27 @@ export class WorkspaceDetailPage {
     const input = this.elements.smartInput?.value?.trim();
     if (!input) return;
 
+    let handled = null;
+
     // Check for commands
     if (input.startsWith('/task ')) {
       const taskName = input.substring(6).trim();
-      await this.createTask(taskName);
+      handled = await this.createTask(taskName, '', '', {
+        requireConfirmation: true,
+        source: 'assistant'
+      });
     } else if (input.startsWith('/chat ') || input.startsWith('/c ')) {
       const message = input.replace(/^\/(chat|c)\s+/, '').trim();
-      await this.createSessionWithMessage(message);
+      handled = await this.createSessionWithMessage(message);
     } else if (input.startsWith('/note ')) {
       const noteContent = input.substring(6).trim();
-      await this.createNote('Quick Note', noteContent);
+      handled = await this.createNote('Quick Note', noteContent);
     } else {
-      // Default: create a task
-      await this.createTask(input);
+      // Default: continue Assistant chat in this workspace
+      handled = await this.createSessionWithMessage(input);
     }
 
-    if (this.elements.smartInput) {
+    if (handled && this.elements.smartInput) {
       this.elements.smartInput.value = '';
     }
   }
@@ -8619,15 +8630,54 @@ export class WorkspaceDetailPage {
   /**
    * Create a new task
    */
-  async createTask(name, description = '', columnId = '') {
+  async createTask(name, description = '', columnId = '', options = {}) {
+    const normalizedName = String(name || '').trim();
+    const normalizedDescription = String(description || '').trim();
+    if (!normalizedName) return null;
+
+    if (options.requireConfirmation) {
+      const metaItems = ['Assistant', 'Task'];
+      const details = [normalizedName];
+      if (normalizedDescription) {
+        details.push(normalizedDescription);
+      }
+      if (options.assignee) {
+        metaItems.push(String(options.assignee));
+        details.push(`Assigned to: ${options.assignee}`);
+      }
+      if (options.scheduleSummary) {
+        details.push(`Schedule: ${options.scheduleSummary}`);
+      }
+      if (options.executionMode) {
+        details.push(`Execution: ${options.executionMode}`);
+      }
+
+      const confirmed = await this.showTaskConfirmDialog({
+        eyebrow: 'Assistant Task',
+        title: 'Create this task?',
+        message: 'Assistant wants to add this task to the workspace.',
+        confirmLabel: 'Create Task',
+        cancelLabel: 'Cancel',
+        metaItems,
+        details
+      });
+
+      if (!confirmed) {
+        if (options.cancelToast !== false && window.Toast) {
+          window.Toast.info('Task creation cancelled');
+        }
+        return false;
+      }
+    }
+
     try {
       const response = await fetch('/api/orchestration/tasks', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           studio_id: this.workspaceId,
-          description: name, // Task API uses description as the main field
-          details: description,
+          description: normalizedName, // Task API uses description as the main field
+          details: normalizedDescription,
           status: 'pending'
         })
       });
@@ -8644,10 +8694,12 @@ export class WorkspaceDetailPage {
         await this.loadTasks();
       }
 
-      if (window.Toast) window.Toast.success('Task created');
+      if (options.successToast !== false && window.Toast) window.Toast.success('Task created');
+      return createdTask;
     } catch (error) {
       console.error('Failed to create task:', error);
       if (window.Toast) window.Toast.error('Failed to create task');
+      return null;
     }
   }
 
@@ -8752,15 +8804,7 @@ export class WorkspaceDetailPage {
    * Create a new session using the existing chat modal
    */
   createNewSession() {
-    // Use the existing create chat modal from sessionManager
-    if (window.sessionManager && typeof window.sessionManager.showCreateChatModalForWorkspace === 'function') {
-      window.sessionManager.showCreateChatModalForWorkspace(this.workspaceId);
-    } else if (window.sessionManager && typeof window.sessionManager.showCreateChatModal === 'function') {
-      window.sessionManager.showCreateChatModal();
-    } else {
-      // Fallback to simple API call
-      this.createSimpleSession();
-    }
+    this.createSimpleSession();
   }
 
   createNewSessionForAgent(encodedAgentName = '') {
@@ -8789,21 +8833,25 @@ export class WorkspaceDetailPage {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           folder_id: this.workspaceId,
-          title: 'New Chat'
+          title: 'Assistant'
         })
       });
 
       if (!response.ok) throw new Error('Failed to create session');
 
-      const session = await response.json();
-      if (window.Toast) window.Toast.success('Chat session created');
+      const payload = await response.json();
+      const session = payload?.session || payload;
+      if (!session?.id) throw new Error('Invalid session response');
+      if (window.Toast) window.Toast.success('Assistant session created');
       await this.loadSessions();
 
       // Open the session
       this.openSession(session.id);
+      return session;
     } catch (error) {
       console.error('Failed to create session:', error);
       if (window.Toast) window.Toast.error('Failed to create session');
+      return null;
     }
   }
 
@@ -8823,15 +8871,19 @@ export class WorkspaceDetailPage {
 
       if (!response.ok) throw new Error('Failed to create session');
 
-      const session = await response.json();
+      const payload = await response.json();
+      const session = payload?.session || payload;
+      if (!session?.id) throw new Error('Invalid session response');
       await this.loadSessions();
       this.openSession(session.id);
       if (message && typeof window.sendMessageToChat === 'function') {
         setTimeout(() => window.sendMessageToChat(message), 150);
       }
+      return session;
     } catch (error) {
       console.error('Failed to create session:', error);
       if (window.Toast) window.Toast.error('Failed to create chat');
+      return null;
     }
   }
 
@@ -8944,9 +8996,11 @@ export class WorkspaceDetailPage {
 
       if (window.Toast) window.Toast.success(noteId ? 'Note updated' : 'Note created');
       await this.loadNotes();
+      return true;
     } catch (error) {
       console.error('Failed to save note:', error);
       if (window.Toast) window.Toast.error('Failed to save note');
+      return false;
     }
   }
 

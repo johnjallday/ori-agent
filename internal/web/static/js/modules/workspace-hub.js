@@ -2318,7 +2318,9 @@ console.log('[workspace-hub.js] FILE LOADED');
     if (elements.newSessionBtn) {
       elements.newSessionBtn.addEventListener('click', () => {
         if (!state.selectedId) return;
-        if (window.sessionManager && typeof window.sessionManager.showCreateChatModalForWorkspace === 'function') {
+        if (window.sessionManager && typeof window.sessionManager.createAssistantSession === 'function') {
+          window.sessionManager.createAssistantSession(state.selectedId, 'Assistant');
+        } else if (window.sessionManager && typeof window.sessionManager.showCreateChatModalForWorkspace === 'function') {
           window.sessionManager.showCreateChatModalForWorkspace(state.selectedId);
         }
       });

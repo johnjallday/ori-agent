@@ -175,7 +175,7 @@
       if (isTask) {
         elements.smartInputPromptHint.textContent = 'Suggested: Create Task';
       } else if (isChat) {
-        elements.smartInputPromptHint.textContent = 'Suggested: Start Chat';
+        elements.smartInputPromptHint.textContent = 'Suggested: Start Assistant';
       } else {
         elements.smartInputPromptHint.textContent = '';
       }
@@ -282,6 +282,61 @@
     return null;
   }
 
+  function summarizeScheduleForConfirmation(scheduleData) {
+    if (!scheduleData || scheduleData.schedule_enabled !== true || !scheduleData.schedule) return '';
+    const schedule = scheduleData.schedule;
+    return String(
+      scheduleData.schedule_name ||
+      schedule.description ||
+      schedule.expression ||
+      schedule.cron ||
+      schedule.run_at ||
+      schedule.type ||
+      'Scheduled'
+    ).trim();
+  }
+
+  function summarizeResultStorageForConfirmation(resultStorageData) {
+    const storage = resultStorageData?.result_storage;
+    if (!storage || storage.enabled !== true) return '';
+    if (storage.file_path) return `Store result at ${storage.file_path}`;
+    if (storage.store_node_id) return `Store result in node ${storage.store_node_id}`;
+    return `Store result as ${storage.format || 'text'}`;
+  }
+
+  async function confirmTaskCreation(options = {}) {
+    const kind = String(options.kind || 'task').trim();
+    const title = kind === 'workflow' ? 'Create this workflow?' : 'Create this task?';
+    const confirmLabel = kind === 'workflow' ? 'Create Workflow' : 'Create Task';
+    const metaItems = ['Assistant', kind === 'workflow' ? `${options.stepCount || 0} steps` : 'Task'];
+    if (options.assignee) {
+      metaItems.push(String(options.assignee));
+    }
+    if (options.scheduleSummary) {
+      metaItems.push(options.scheduleSummary);
+    }
+
+    const details = (Array.isArray(options.details) ? options.details : [])
+      .map((item) => String(item || '').trim())
+      .filter(Boolean);
+
+    if (window.WorkspaceHubModals && typeof window.WorkspaceHubModals.showExecutionConfirm === 'function') {
+      return window.WorkspaceHubModals.showExecutionConfirm({
+        eyebrow: 'Assistant Task',
+        title,
+        message: kind === 'workflow'
+          ? 'Assistant wants to create a workflow in this workspace.'
+          : 'Assistant wants to create this task in the workspace.',
+        confirmLabel,
+        cancelLabel: 'Cancel',
+        metaItems,
+        details
+      });
+    }
+
+    return window.confirm([title, ...details].join('\n\n'));
+  }
+
   /**
    * Create task from smart input (with auto-parsing)
    * @param {string} input - Input text
@@ -291,6 +346,17 @@
     const state = window.WorkspaceHubState.getState();
 
     const fallbackCreate = async (fallbackError) => {
+      const confirmed = await confirmTaskCreation({
+        kind: 'task',
+        details: [
+          input,
+          fallbackError ? 'Assistant could not auto-parse this request, so it will create a basic task instead.' : ''
+        ]
+      });
+      if (!confirmed) {
+        return { kind: 'task', cancelled: true, fallback: false };
+      }
+
       const response = await fetch('/api/orchestration/tasks', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -359,6 +425,39 @@
       const parentTitle = parsed.title || workflowSteps[0]?.title || 'New Workflow';
       const parentDetails = parsed.details || '';
       const parentPriority = parsed.priority || 3;
+      const workflowScheduleSummary = summarizeScheduleForConfirmation(scheduleData);
+      const workflowStorageSummary = summarizeResultStorageForConfirmation(resultStorageData);
+      const workflowDetails = [];
+
+      if (parentTitle) workflowDetails.push(parentTitle);
+      if (parentDetails) workflowDetails.push(parentDetails);
+      workflowSteps.forEach((step, index) => {
+        const stepTitle = String(step?.title || step?.description || `Task ${index + 1}`).trim();
+        const stepBits = [`Step ${index + 1}: ${stepTitle}`];
+        if (step?.agent_name) {
+          stepBits.push(`Assign to ${step.agent_name}`);
+        }
+        if (step?.details) {
+          stepBits.push(String(step.details).trim());
+        }
+        workflowDetails.push(stepBits.join(' | '));
+      });
+      if (workflowScheduleSummary) {
+        workflowDetails.push(`Schedule: ${workflowScheduleSummary}`);
+      }
+      if (workflowStorageSummary) {
+        workflowDetails.push(workflowStorageSummary);
+      }
+
+      const confirmed = await confirmTaskCreation({
+        kind: 'workflow',
+        stepCount: workflowSteps.length,
+        scheduleSummary: workflowScheduleSummary,
+        details: workflowDetails
+      });
+      if (!confirmed) {
+        return { kind: 'workflow', cancelled: true, fallback: false };
+      }
 
       const parentResponse = await fetch('/api/orchestration/tasks', {
         method: 'POST',
@@ -452,6 +551,22 @@
       to = parsed.agent_name;
     }
 
+    const singleTaskScheduleSummary = summarizeScheduleForConfirmation(scheduleData);
+    const singleTaskStorageSummary = summarizeResultStorageForConfirmation(resultStorageData);
+    const confirmed = await confirmTaskCreation({
+      kind: 'task',
+      assignee: parsed.agent_name || '',
+      scheduleSummary: singleTaskScheduleSummary,
+      details: [
+        parsed.title || input,
+        parsed.details || '',
+        singleTaskStorageSummary
+      ]
+    });
+    if (!confirmed) {
+      return { kind: 'task', cancelled: true, fallback: false };
+    }
+
     const response = await fetch('/api/orchestration/tasks', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -483,20 +598,20 @@
   async function createChatFromSmartInput(input) {
     const state = window.WorkspaceHubState.getState();
 
-    if (!window.sessionManager || typeof window.sessionManager.fetchAgents !== 'function') {
+    if (!window.sessionManager) {
       throw new Error('Chat manager not available');
     }
 
-    const agents = await window.sessionManager.fetchAgents();
-    if (!agents || agents.length === 0) {
-      throw new Error('No agents available');
-    }
-
-    const agentName = agents[0].name;
-    if (typeof window.sessionManager.createSessionWithAgentInFolder === 'function') {
-      await window.sessionManager.createSessionWithAgentInFolder(agentName, state.selectedId);
-    } else if (typeof window.sessionManager.createSessionWithAgent === 'function') {
-      await window.sessionManager.createSessionWithAgent(agentName);
+    if (typeof window.sessionManager.createAssistantSession === 'function') {
+      await window.sessionManager.createAssistantSession(
+        state.selectedId,
+        input ? input.slice(0, 50) : 'Assistant'
+      );
+    } else if (window.workspaceDetail && typeof window.workspaceDetail.createSessionWithMessage === 'function') {
+      await window.workspaceDetail.createSessionWithMessage(input);
+      return;
+    } else {
+      throw new Error('Assistant session creation is unavailable');
     }
 
     if (window.sendMessageToChat) {
@@ -526,15 +641,24 @@
     const method = meta.method || 'fallback';
 
     hidePrompt();
-    setBusy(true, decision === 'task' ? 'Creating task...' : 'Starting chat...');
+    setBusy(true, decision === 'task' ? 'Creating task...' : 'Starting Assistant...');
     showProgress('execute', {
-      headline: decision === 'task' ? 'Creating task' : 'Starting chat',
+      headline: decision === 'task' ? 'Creating task' : 'Starting Assistant',
       message: decision === 'task' ? 'Building tasks in your workspace.' : 'Opening a new session.'
     });
 
     try {
       if (decision === 'task') {
         const createResult = await createTaskFromSmartInput(input);
+        if (createResult?.cancelled) {
+          setBusy(false, 'Task creation cancelled.');
+          setStatus('Task creation cancelled.', { busy: false });
+          if (window.Toast) {
+            window.Toast.info('Task creation cancelled');
+          }
+          state.smartInput = null;
+          return;
+        }
         if (createResult?.fallback && window.Toast) {
           window.Toast.warning('Auto-parse unavailable. Created a basic task instead.');
         }
@@ -542,7 +666,7 @@
         setBusy(false, createdLabel);
       } else {
         await createChatFromSmartInput(input);
-        setBusy(false, 'Chat started.');
+        setBusy(false, 'Assistant started.');
       }
 
       clearField();
@@ -579,6 +703,18 @@
     const elements = window.WorkspaceHubState.getElements();
 
     if (!state.selectedId) return;
+
+    const confirmed = await confirmTaskCreation({
+      kind: 'task',
+      details: [description]
+    });
+    if (!confirmed) {
+      setStatus('Task creation cancelled.', { busy: false });
+      if (window.Toast) {
+        window.Toast.info('Task creation cancelled');
+      }
+      return;
+    }
 
     setBusy(true, 'Creating task...');
 
@@ -629,14 +765,14 @@
 
     if (!state.selectedId) return;
 
-    setBusy(true, 'Starting chat...');
+    setBusy(true, 'Starting Assistant...');
 
     try {
-      if (window.sessionManager && typeof window.sessionManager.createChatSession === 'function') {
-        const session = await window.sessionManager.createChatSession(state.selectedId, {
-          title: initialMessage ? initialMessage.slice(0, 50) : 'New Chat',
-          initialMessage: initialMessage || null
-        });
+      if (window.sessionManager && typeof window.sessionManager.createAssistantSession === 'function') {
+        const session = await window.sessionManager.createAssistantSession(
+          state.selectedId,
+          initialMessage ? initialMessage.slice(0, 50) : 'Assistant'
+        );
 
         if (elements.smartInputField) {
           elements.smartInputField.value = '';
@@ -655,8 +791,8 @@
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          workspace_id: state.selectedId,
-          title: initialMessage ? initialMessage.slice(0, 50) : 'New Chat'
+          folder_id: state.selectedId,
+          title: initialMessage ? initialMessage.slice(0, 50) : 'Assistant'
         })
       });
 
@@ -713,9 +849,9 @@
     if (window.WorkspaceInputRouter &&
         typeof window.WorkspaceInputRouter.isAskCommand === 'function' &&
         window.WorkspaceInputRouter.isAskCommand(input)) {
-      setBusy(true, 'Routing with Ask Ori...');
+      setBusy(true, 'Routing with Assistant...');
       showProgress('analyze', {
-        headline: 'Ask Ori routing',
+        headline: 'Assistant routing',
         message: 'Analyzing your request.'
       });
 
@@ -726,11 +862,11 @@
         setBusy(false);
         setStatus('');
       } catch (error) {
-        console.error('Ask Ori routing failed:', error);
+        console.error('Assistant routing failed:', error);
         setBusy(false);
-        setStatus(error.message || 'Failed to route with Ask Ori', { busy: false });
+        setStatus(error.message || 'Failed to route with Assistant', { busy: false });
         if (window.Toast) {
-          window.Toast.error(error.message || 'Failed to route with Ask Ori');
+          window.Toast.error(error.message || 'Failed to route with Assistant');
         }
       } finally {
         hideProgress();
@@ -789,7 +925,7 @@
           window.WorkspaceInputRouter.canUseAskOri()) {
         try {
           updateProgress('decide', {
-            headline: 'Escalating to Ask Ori',
+            headline: 'Escalating to Assistant',
             message: 'Smart classification unavailable, using full routing.'
           });
           await window.WorkspaceInputRouter.dispatchToAskOri(`/ask ${input}`, { workspaceId: state.selectedId });
@@ -800,7 +936,7 @@
           hideProgress();
           return;
         } catch (askOriError) {
-          console.error('Ask Ori fallback failed:', askOriError);
+          console.error('Assistant fallback failed:', askOriError);
         }
       }
       setBusy(false);

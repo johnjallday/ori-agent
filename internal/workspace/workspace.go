@@ -138,6 +138,7 @@ func FromJSON(data []byte) (*Workspace, error) {
 		return nil, err
 	}
 	ws.MigrateToAgentInstances()      // Auto-migrate legacy agent format
+	ws.NormalizeAgentInstances()      // Collapse duplicate agent instances to one per profile
 	ws.MigrateScheduledTasksToTasks() // Auto-migrate legacy scheduled tasks
 	ws.rebuildTaskIndex()             // Build index for O(1) task lookups
 	return &ws, nil

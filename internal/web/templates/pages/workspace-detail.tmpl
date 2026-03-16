@@ -52,16 +52,16 @@
             </div>
           </div>
 
-          <!-- Ask Ori Prompt Bar -->
+          <!-- Assistant Prompt Bar -->
           <div id="homeAssistantCard" class="modern-card p-2 mb-3">
             <form id="homeAssistantForm" class="d-flex align-items-center gap-2">
               <div class="d-none d-md-flex align-items-center gap-2 px-2" style="color: var(--text-secondary); font-size: 0.82rem; white-space: nowrap;">
-                <span style="font-weight: 600; color: var(--text-primary);">Ask Ori</span>
+                <span style="font-weight: 600; color: var(--text-primary);">Assistant</span>
                 <span style="opacity: 0.6;">Workspace</span>
               </div>
               <input id="homeAssistantInput" type="text" class="modern-input flex-grow-1" maxlength="800"
-                     placeholder="Ask Ori about this workspace... (or use /task, /note, /directory, /file, /chat)"
-                     aria-label="Ask Ori prompt"
+                     placeholder="Ask Assistant about this workspace... (or use /task, /note, /directory, /file, /chat)"
+                     aria-label="Assistant prompt"
                      style="min-height: 42px;">
               <button id="homeAssistantSendBtn" type="submit" class="modern-btn modern-btn-primary home-assistant-send-btn">Send</button>
             </form>
@@ -399,17 +399,17 @@
   <!-- Include chat area for additional modals (scheduledTasksModal, etc.) -->
   {{template "chat-area.tmpl" .}}
 
-  <!-- Shared modals (includes Add Agent modal used by Ask Ori) -->
+  <!-- Shared modals (includes Add Agent modal used by Assistant) -->
   {{template "modals.tmpl" .}}
 
-  <!-- Ask Ori Thinking Modal -->
+  <!-- Assistant Thinking Modal -->
   <div class="modal fade" id="homeAssistantThinkingModal" tabindex="-1"
        aria-labelledby="homeAssistantThinkingModalLabel" aria-hidden="true">
     <div class="modal-dialog modal-lg modal-dialog-centered modal-dialog-scrollable">
       <div class="modal-content home-thinking-modal-content">
         <div class="modal-header home-thinking-modal-header">
           <div>
-            <h5 id="homeAssistantThinkingModalLabel" class="modal-title">Ori is working</h5>
+            <h5 id="homeAssistantThinkingModalLabel" class="modal-title">Assistant is working</h5>
             <div id="homeAssistantThinkingStatus" class="home-thinking-modal-status" role="status" aria-live="polite">
               <span id="homeAssistantThinkingSpinner" class="spinner-border spinner-border-sm me-2" aria-hidden="true"></span>
               <span>Analyzing your request...</span>
@@ -421,7 +421,7 @@
           <div id="homeAssistantRoutingSummary" class="home-assistant-routing-summary d-none"></div>
           <div id="homeAssistantConversation" class="home-assistant-conversation home-assistant-conversation-modal p-3">
             <div class="home-assistant-thinking-placeholder">
-              Progress updates will appear here after you send a task.
+              Progress updates will appear here after you send a message.
             </div>
           </div>
           <div id="homeAssistantActions" class="d-flex flex-wrap gap-2 mt-3 d-none"></div>

@@ -95,11 +95,6 @@ func (h *Handler) createSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if req.AgentName == "" {
-		_ = orihttp.RespondBadRequest(w, "agent_name is required")
-		return
-	}
-
 	// Default title
 	if req.Title == "" {
 		req.Title = "New Session"
