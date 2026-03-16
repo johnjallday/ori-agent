@@ -1469,14 +1469,21 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 
 	// Add workspace-scoped tools when in a workspace context
 	if ag.WorkspaceTools != nil {
-		for _, wt := range ag.WorkspaceTools.Tools() {
+		wsTools := ag.WorkspaceTools.Tools()
+		logger.Info("Adding workspace tools to LLM request", logger.Fields{
+			"count": len(wsTools),
+		})
+		for _, wt := range wsTools {
 			def := wt.Definition()
+			logger.Debug("Registering workspace tool", logger.Fields{"name": def.Name})
 			appendTool(llm.Tool{
 				Name:        def.Name,
 				Description: def.Description,
 				Parameters:  def.Parameters,
 			}, "workspace")
 		}
+	} else {
+		logger.Debug("No workspace tools to add (WorkspaceTools is nil)")
 	}
 
 	// Add native plugin tools
@@ -1598,10 +1605,11 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 
-	runtimeSystemPrompt := h.buildRuntimeSystemPrompt(ctx, normalizedRouteContext)
+	toolRuntimeSystemPrompt := h.buildRuntimeSystemPrompt(ctx, normalizedRouteContext)
 
 	// Check if this is a Claude Code provider - route to Claude Code handler
 	if strings.EqualFold(ag.Settings.Provider, "claude_code") && h.llmFactory != nil {
+		runtimeSystemPrompt := h.buildRuntimeSystemPromptForToolCapability(ctx, normalizedRouteContext, false)
 		h.handleClaudeCodeChat(w, r, ag, q, current, base, llmImages, plannerDecision, runtimeSystemPrompt)
 		return
 	}
@@ -1609,7 +1617,7 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 	// Check if this is a Claude model - if so, use provider system
 	if (strings.HasPrefix(ag.Settings.Model, "claude-") || strings.EqualFold(ag.Settings.Provider, "claude") || strings.EqualFold(ag.Settings.Provider, "anthropic")) && h.llmFactory != nil {
 		// Use Claude provider
-		h.handleClaudeChat(w, r, ag, q, tools, current, base, fileAttachments, llmImages, plannerDecision, runtimeSystemPrompt)
+		h.handleClaudeChat(w, r, ag, q, tools, current, base, fileAttachments, llmImages, plannerDecision, toolRuntimeSystemPrompt)
 		return
 	}
 
@@ -1619,7 +1627,7 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 			if ollamaProv, ok := ollamaProvider.(*llm.OllamaProvider); ok {
 				if ollamaProv.HasModel(ag.Settings.Model) {
 					logger.Info("Model found in Ollama, routing to Ollama provider", logger.Fields{"model": ag.Settings.Model})
-					h.handleOllamaChat(w, r, ag, q, tools, current, base, fileAttachments, llmImages, plannerDecision, runtimeSystemPrompt)
+					h.handleOllamaChat(w, r, ag, q, tools, current, base, fileAttachments, llmImages, plannerDecision, toolRuntimeSystemPrompt)
 					return
 				}
 			}
@@ -1628,12 +1636,13 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 
 	// Check if this is a Gemini model or provider
 	if strings.HasPrefix(strings.ToLower(ag.Settings.Model), "gemini-") || strings.EqualFold(ag.Settings.Provider, "gemini") {
-		h.handleGeminiChat(w, r, ag, q, tools, current, base, fileAttachments, llmImages, plannerDecision, runtimeSystemPrompt)
+		h.handleGeminiChat(w, r, ag, q, tools, current, base, fileAttachments, llmImages, plannerDecision, toolRuntimeSystemPrompt)
 		return
 	}
 
 	// Route Codex provider/model through Codex CLI provider path (no OpenAI API key required).
 	if isCodexProviderOrModel(ag.Settings.Provider, ag.Settings.Model) && h.llmFactory != nil {
+		runtimeSystemPrompt := h.buildRuntimeSystemPromptForToolCapability(ctx, normalizedRouteContext, false)
 		h.handleCodexChat(w, r, ag, q, current, base, llmImages, plannerDecision, runtimeSystemPrompt)
 		return
 	}
@@ -1647,7 +1656,7 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Handle OpenAI models
-	h.handleOpenAIChat(w, r, ag, q, tools, current, base, fileAttachments, agentClient, plannerDecision, runtimeSystemPrompt)
+	h.handleOpenAIChat(w, r, ag, q, tools, current, base, fileAttachments, agentClient, plannerDecision, toolRuntimeSystemPrompt)
 }
 
 // isImageMimeType checks if a MIME type represents an image

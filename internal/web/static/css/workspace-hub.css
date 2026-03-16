@@ -1560,6 +1560,18 @@
   align-items: center;
 }
 
+.hub-session-id {
+  font-family: 'SF Mono', 'Menlo', 'Monaco', 'Consolas', monospace;
+  font-size: 0.6rem;
+  color: var(--text-secondary);
+  opacity: 0.6;
+  max-width: 8ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: default;
+}
+
 .hub-session-agent {
   background: rgba(59, 130, 246, 0.12);
   color: #3b82f6;

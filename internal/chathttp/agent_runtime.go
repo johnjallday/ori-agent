@@ -79,6 +79,11 @@ func (h *Handler) resolveEffectiveAgent(agentName string, routeCtx normalizedCha
 // that returns a resolvedChatAgent for a workspace surface.
 func (h *Handler) attachWorkspaceTools(ag *resolvedChatAgent, workspaceID string) {
 	if h.sessionStore == nil || h.workspaceStore == nil || strings.TrimSpace(workspaceID) == "" {
+		logger.Debug("attachWorkspaceTools: skipping", logger.Fields{
+			"workspace_id":    workspaceID,
+			"session_store":   h.sessionStore != nil,
+			"workspace_store": h.workspaceStore != nil,
+		})
 		return
 	}
 	wtp := NewWorkspaceToolProvider(h.sessionStore, h.workspaceStore, workspaceID)
@@ -94,6 +99,10 @@ func (h *Handler) attachWorkspaceTools(ag *resolvedChatAgent, workspaceID string
 		wtp.SetManagementDeps(h.store, mcpLister, skillsMgr)
 	}
 	ag.WorkspaceTools = wtp
+	logger.Info("attachWorkspaceTools: attached workspace tools", logger.Fields{
+		"workspace_id": workspaceID,
+		"tool_count":   len(wtp.Tools()),
+	})
 }
 
 func (h *Handler) persistAgent(agentName string, ag *agent.Agent) error {

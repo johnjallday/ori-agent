@@ -1691,8 +1691,9 @@ export class WorkspaceDetailPage {
              onkeydown="if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); window.workspaceDetail?.openSession('${session.id}'); }">
           <div class="workspace-detail-item-title">${this.escapeHtml(session.title || session.name || 'Untitled Session')}</div>
           <div class="workspace-detail-item-meta">
-            ${session.agent_name ? `${this.escapeHtml(session.agent_name)} · ` : ''}
-            ${formatDate(session.updated_at || session.created_at)}
+            <span class="workspace-detail-session-id" title="${this.escapeHtml(session.id)}">${this.escapeHtml(session.id.substring(0, 8))}</span>
+            ${session.agent_name ? ` · ${this.escapeHtml(session.agent_name)}` : ''}
+             · ${formatDate(session.updated_at || session.created_at)}
           </div>
         </div>
       </div>

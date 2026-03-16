@@ -147,6 +147,7 @@
           <div class="hub-session-info">
             <div class="hub-session-title">${escapeHtml(title)}</div>
             <div class="hub-session-meta">
+              <span class="hub-session-id" title="${escapeHtml(session.id)}">${escapeHtml(session.id)}</span>
               <span class="hub-session-agent">${escapeHtml(agent)}</span>
               <span>${messageCount} message${messageCount === 1 ? '' : 's'}</span>
               <span>${escapeHtml(updated)}</span>
