@@ -535,6 +535,15 @@ func (h *Handler) findTool(ag *resolvedChatAgent, agentName, toolName string) (p
 		}
 	}
 
+	// Check workspace-scoped tools (notes, tasks, sessions, files, directories)
+	if ag.WorkspaceTools != nil {
+		for _, wt := range ag.WorkspaceTools.Tools() {
+			if wt.Definition().Name == toolName {
+				return wt, true
+			}
+		}
+	}
+
 	// First check native plugins
 	for pluginName, plugin := range ag.Plugins {
 		if plugin.Definition.Name == toolName {
@@ -1455,6 +1464,18 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 				Description: def.Description,
 				Parameters:  def.Parameters,
 			}, "utility")
+		}
+	}
+
+	// Add workspace-scoped tools when in a workspace context
+	if ag.WorkspaceTools != nil {
+		for _, wt := range ag.WorkspaceTools.Tools() {
+			def := wt.Definition()
+			appendTool(llm.Tool{
+				Name:        def.Name,
+				Description: def.Description,
+				Parameters:  def.Parameters,
+			}, "workspace")
 		}
 	}
 

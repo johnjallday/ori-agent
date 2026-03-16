@@ -205,6 +205,13 @@ func (h *Handler) getAvailableToolNames(ag *resolvedChatAgent) []string {
 		}
 	}
 
+	// Add workspace-scoped tools
+	if ag.WorkspaceTools != nil {
+		for _, wt := range ag.WorkspaceTools.Tools() {
+			toolNames = append(toolNames, wt.Definition().Name)
+		}
+	}
+
 	// Add native plugin tools
 	for _, plugin := range ag.Plugins {
 		if plugin.Tool != nil {
