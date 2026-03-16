@@ -190,7 +190,19 @@ func buildWorkspaceSnapshotPrompt(
 
 	lines = append(lines,
 		"",
-		"Treat this snapshot as current workspace state. If deeper detail is needed, request or fetch it; do not invent missing specifics.",
+		"Treat this snapshot as current workspace state.",
+		"You have workspace tools available to access full details and manage this workspace:",
+		"- workspace_notes: list or read full note content by ID",
+		"- workspace_save_note: create or update a note (use this when the user asks to save something)",
+		"- workspace_tasks: list tasks with optional status filter",
+		"- workspace_sessions: list sessions in this workspace",
+		"- workspace_session_detail: read messages from a specific session",
+		"- workspace_files: list attached files",
+		"- workspace_directories: list referenced directories",
+		"- workspace_manage_agents: list/add/remove workspace agents",
+		"- workspace_manage_mcp: list/attach/detach MCP server bindings",
+		"- workspace_manage_skills: list/attach/detach skill bindings",
+		"Use these tools proactively to look up workspace data when answering questions, and to save results when asked.",
 	)
 
 	return strings.Join(lines, "\n")
