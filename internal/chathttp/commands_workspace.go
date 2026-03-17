@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/johnjallday/ori-agent/internal/logger"
+	"github.com/johnjallday/ori-agent/internal/store"
 	"github.com/johnjallday/ori-agent/internal/workspace"
 )
 
@@ -25,11 +26,15 @@ func (ch *CommandHandler) HandleWorkspace(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	// Get current agent
-	_, current := ch.store.ListAgents()
+	current := ""
+	if assistant, ok := ch.store.GetAgent(assistantExecutionAgentName); ok && assistant != nil {
+		current = assistantExecutionAgentName
+	} else {
+		current = store.FirstAgentName(ch.store)
+	}
 	if current == "" {
 		response := map[string]any{
-			"response": "❌ No active agent found.",
+			"response": "❌ No execution agent found.",
 		}
 		if encErr := json.NewEncoder(w).Encode(response); encErr != nil {
 			logger.Error("Failed to encode response", logger.Fields{"error": encErr})

@@ -2,6 +2,7 @@ package chathttp
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -66,6 +67,21 @@ func TestChatHandler_PlanBeforeAction_PreviewsUtilityRoute(t *testing.T) {
 	steps, ok := plan["steps"].([]any)
 	if !ok || len(steps) == 0 {
 		t.Fatalf("expected at least one plan step, got %#v", plan["steps"])
+	}
+}
+
+func TestBuildChatActionPlan_UsesAssistantTerminology(t *testing.T) {
+	h := newActionPlanTestHandler(t)
+
+	plan, _ := h.buildChatActionPlan(context.Background(), "say hi", UtilityRouteDecision{}, "", 0)
+	if plan == nil {
+		t.Fatal("expected action plan")
+	}
+	if len(plan.Steps) == 0 {
+		t.Fatal("expected at least one plan step")
+	}
+	if got := plan.Steps[0].Title; got != "Ask the Assistant to answer" {
+		t.Fatalf("expected Assistant wording, got %q", got)
 	}
 }
 

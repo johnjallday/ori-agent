@@ -99,9 +99,12 @@ class CommandBar {
         this.agentSelect.appendChild(option);
       });
 
-      // Select current agent if available
-      if (data.current) {
-        this.agentSelect.value = data.current;
+      const sessionAgent = window.sessionManager?.getActiveSession?.()?.agent_name;
+      const assistantAgent = agents.find(agent => agent.name === 'Ori')?.name || '';
+      if (sessionAgent) {
+        this.agentSelect.value = sessionAgent;
+      } else if (assistantAgent) {
+        this.agentSelect.value = assistantAgent;
       }
     } catch (error) {
       console.error('CommandBar: Failed to load agents', error);

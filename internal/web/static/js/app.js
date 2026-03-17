@@ -2,7 +2,6 @@
 
 const appLog = Logger.withContext('App');
 
-let currentAgent = '';
 let isComposing = false; // IME safety
 // Note: Chat state is now managed by chatStateMachine (see modules/chat-state.js)
 
@@ -63,12 +62,29 @@ function sanitizeHistory(messages) {
 
 // ---- Chat Persistence (localStorage) ----
 
-// Save chat messages to localStorage for current agent
-function saveChatToLocalStorage() {
-  if (!currentAgent) return;
+function getDefaultAssistantAgentName() {
+  return 'Ori';
+}
 
+function getActiveChatStorageKey() {
+  const activeSessionId = window.sessionManager?.getActiveSessionId?.();
+  if (activeSessionId) {
+    return `ori_chat_session_${activeSessionId}`;
+  }
+
+  const pathname = String(window.location?.pathname || '/').trim() || '/';
+  const workspaceId = extractWorkspaceIdFromPath(pathname) || String(window.sessionManager?.getActiveSession?.()?.folder_id || '').trim();
+  if (workspaceId) {
+    return `ori_chat_assistant_${workspaceId}`;
+  }
+
+  return 'ori_chat_assistant';
+}
+
+// Save chat messages to localStorage for the active Assistant thread/session.
+function saveChatToLocalStorage() {
   try {
-    const storageKey = `ori_chat_${currentAgent}`;
+    const storageKey = getActiveChatStorageKey();
     const sanitized = sanitizeHistory(chatMessages);
     localStorage.setItem(storageKey, JSON.stringify(sanitized));
   } catch (error) {
@@ -77,12 +93,10 @@ function saveChatToLocalStorage() {
   }
 }
 
-// Load chat messages from localStorage for current agent
+// Load chat messages from localStorage for the active Assistant thread/session.
 function loadChatFromLocalStorage() {
-  if (!currentAgent) return;
-
   try {
-    const storageKey = `ori_chat_${currentAgent}`;
+    const storageKey = getActiveChatStorageKey();
     const stored = localStorage.getItem(storageKey);
 
     if (stored) {
@@ -113,12 +127,19 @@ function restoreChatMessages() {
   });
 }
 
-// Clear chat history for current agent
-function clearChatHistory() {
-  if (!currentAgent) return;
+function replaceChatHistoryMessages(messages) {
+  if (!Array.isArray(messages)) {
+    chatMessages = [];
+  } else {
+    chatMessages = sanitizeHistory(messages);
+  }
+  saveChatToLocalStorage();
+}
 
+// Clear chat history for the active Assistant thread/session.
+function clearChatHistory() {
   try {
-    const storageKey = `ori_chat_${currentAgent}`;
+    const storageKey = getActiveChatStorageKey();
     localStorage.removeItem(storageKey);
     chatMessages = [];
 
@@ -129,7 +150,6 @@ function clearChatHistory() {
     }
 
     appLog.info('Chat history cleared');
-    EventBus.emit('chat:cleared', { agent: currentAgent });
     if (window.Toast) {
       Toast.success('Chat history cleared');
     }
@@ -148,7 +168,7 @@ function resolveChatWebSearchAgentName(explicitAgentName = '') {
   const sessionAgent = window.sessionManager?.getActiveSession?.()?.agent_name;
   if (sessionAgent) return String(sessionAgent).trim();
 
-  return String(currentAgent || '').trim();
+  return getDefaultAssistantAgentName();
 }
 
 function setChatWebSearchToggleVisualState({ enabled, loading, agentName, available }) {
@@ -290,6 +310,7 @@ function setupChatWebSearchToggle() {
 }
 
 window.refreshChatWebSearchToggle = refreshChatWebSearchToggle;
+window.refreshAgentDisplay = refreshAgentDisplay;
 
 // ---- Agent Display Functionality ----
 
@@ -298,47 +319,45 @@ function setupAgentDisplayClick() {
   const agentDisplay = document.getElementById('currentAgentDisplay');
   if (!agentDisplay) return;
 
-  // Make it look clickable
-  agentDisplay.style.cursor = 'pointer';
-  agentDisplay.title = 'Click to view agent details';
+  const updateDisplayState = () => {
+    const agentName = String(agentDisplay.dataset.agentName || '').trim();
+    if (agentName) {
+      agentDisplay.style.cursor = 'pointer';
+      agentDisplay.title = 'Click to view agent details';
+      return;
+    }
+    agentDisplay.style.cursor = 'default';
+    agentDisplay.title = 'Assistant';
+  };
 
   agentDisplay.addEventListener('click', function() {
-    const agentNameSpan = this.querySelector('.fw-medium');
-    const agentName = agentNameSpan?.textContent?.trim();
-
+    const agentName = String(this.dataset.agentName || '').trim();
     if (agentName) {
       window.location.href = `/agents/${encodeURIComponent(agentName)}`;
     }
   });
+
+  updateDisplayState();
 }
 
-// Refresh agent display in navbar
+// Refresh the Assistant/execution-agent display in the navbar.
 async function refreshAgentDisplay() {
-  try {
-    const data = await API.get('/api/agents');
-    const currentAgentElement = document.querySelector('#currentAgentDisplay span.fw-medium');
+  const currentAgentElement = document.querySelector('#currentAgentDisplay span.fw-medium');
+  const agentDisplay = document.getElementById('currentAgentDisplay');
+  const sessionAgent = String(window.sessionManager?.getActiveSession?.()?.agent_name || '').trim();
+  const displayName = sessionAgent || 'Assistant';
 
-    if (currentAgentElement && data.current) {
-      currentAgentElement.textContent = data.current;
-
-      // Update current agent and load chat history when agent changes
-      const previousAgent = currentAgent;
-      currentAgent = data.current;
-
-      // Load chat history if agent changed
-      if (previousAgent !== currentAgent) {
-        loadChatFromLocalStorage();
-        EventBus.emit('agent:display:changed', { from: previousAgent, to: currentAgent });
-      }
-
-      refreshChatWebSearchToggle(data.current);
-    }
-  } catch (error) {
-    appLog.error('Failed to refresh agent display:', error);
-    if (window.Toast) {
-      Toast.error('Failed to load agent information');
-    }
+  if (currentAgentElement) {
+    currentAgentElement.textContent = displayName;
   }
+  if (agentDisplay) {
+    agentDisplay.dataset.agentName = sessionAgent;
+    agentDisplay.style.cursor = sessionAgent ? 'pointer' : 'default';
+    agentDisplay.title = sessionAgent ? 'Click to view agent details' : 'Assistant';
+  }
+
+  loadChatFromLocalStorage();
+  refreshChatWebSearchToggle(sessionAgent || getDefaultAssistantAgentName());
 }
 
 // ---- System Model Display ----
@@ -1151,24 +1170,6 @@ async function handleChatResponsePayload(data, trimmedMessage, isSlashCommand) {
       addMessageToChat(receiptsText, false, false, true, true, routeMeta);
     }
 
-    appLog.debug('Checking for switch command:', {
-      message: trimmedMessage,
-      startsWithSwitch: trimmedMessage.startsWith('/switch'),
-      hasCheckmark: responseText.includes('✅'),
-      hasSwitched: responseText.includes('Switched to agent'),
-      response: responseText
-    });
-
-    if (trimmedMessage.startsWith('/switch') && responseText.includes('✅') && responseText.includes('Switched to agent')) {
-      appLog.debug('Successful agent switch detected, refreshing agent display and sidebar');
-      setTimeout(() => {
-        refreshAgentDisplay();
-        if (typeof loadAgents === 'function') {
-          loadAgents();
-        }
-      }, 100);
-    }
-
     if (window.sessionManager && window.sessionManager.onMessageSent) {
       window.sessionManager.onMessageSent();
     }
@@ -1949,6 +1950,7 @@ function setupChatPanel() {
 // Export functions for use by session manager
 window.appendMessageToUI = appendMessageToUI;
 window.clearChatHistory = clearChatHistory;
+window.replaceChatHistoryMessages = replaceChatHistoryMessages;
 
 function setupSkillsDropdown() {
   const btn = document.getElementById('skillsDropdownBtn');
@@ -2091,7 +2093,7 @@ async function initializeApp() {
   // Set up agent display click handler (navigate to agent details)
   setupAgentDisplayClick();
 
-  // Load current agent and restore chat history
+  // Load Assistant/session display state and restore any local Assistant history.
   await refreshAgentDisplay();
 
   // Load system model display in navbar

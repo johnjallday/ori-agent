@@ -862,3 +862,25 @@ func TestReservedSystemAssistantProtection(t *testing.T) {
 		assertStatus(t, rr, http.StatusBadRequest)
 	})
 }
+
+func TestPutAgentSwitchIsDeprecated(t *testing.T) {
+	ts := setupTestServer(t)
+	defer ts.cleanup()
+
+	createTestAgent(t, ts, "reviewer", "general")
+
+	rr := ts.doRequest(t, http.MethodPut, "/api/agents?name=reviewer", nil)
+	assertStatus(t, rr, http.StatusOK)
+
+	var payload map[string]interface{}
+	decodeResponse(t, rr, &payload)
+	if payload["deprecated"] != true {
+		t.Fatalf("expected deprecated=true, got %#v", payload["deprecated"])
+	}
+	if payload["success"] != false {
+		t.Fatalf("expected success=false, got %#v", payload["success"])
+	}
+	if !strings.Contains(payload["message"].(string), "deprecated") {
+		t.Fatalf("expected deprecation message, got %#v", payload["message"])
+	}
+}

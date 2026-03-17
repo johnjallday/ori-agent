@@ -1641,7 +1641,7 @@ const sessionManager = {
     const existingModal = document.getElementById('agentPickerModal');
     if (existingModal) existingModal.remove();
 
-    const currentAgentName = typeof currentAgent !== 'undefined' ? currentAgent : '';
+    const currentAgentName = this.getActiveSession()?.agent_name || '';
 
     const modalHtml = `
       <div class="modal fade" id="agentPickerModal" tabindex="-1">
@@ -1666,7 +1666,7 @@ const sessionManager = {
                         <strong>${this.escapeHtml(agent.name)}</strong>
                         ${agent.model ? `<small class="text-muted ms-2">${this.escapeHtml(agent.model)}</small>` : ''}
                       </div>
-                      ${agent.name === currentAgentName ? '<span class="badge bg-primary">Current</span>' : ''}
+                      ${agent.name === currentAgentName ? '<span class="badge bg-primary">Pinned</span>' : ''}
                     </div>
                     ${agent.description ? `<small class="text-muted d-block mt-1">${this.escapeHtml(agent.description)}</small>` : ''}
                   </button>
@@ -1726,7 +1726,6 @@ const sessionManager = {
         // Update the combined chat info bar with session title and agent
         this.updateChatInfoBar(data.session.title || 'New Session', agentName);
 
-        // Update the current agent globally
         this.updateCurrentAgent(agentName);
 
         // Clear chat area for new session
@@ -1875,7 +1874,6 @@ const sessionManager = {
         // Update the combined chat info bar with session title and agent
         this.updateChatInfoBar(data.session.title || 'New Session', agentName);
 
-        // Update the current agent globally
         this.updateCurrentAgent(agentName);
 
         // Clear chat area for new session
@@ -1962,11 +1960,9 @@ const sessionManager = {
     }
   },
 
-  // Update the current agent display (chat area bar and navbar)
+  // Update the execution-agent display for the active session.
   updateCurrentAgent(agentName) {
     const normalizedAgentName = String(agentName || '').trim();
-
-    window.currentAgent = normalizedAgentName;
 
     const session = this.getActiveSession();
     this.updateChatInfoBar(session?.title, normalizedAgentName);
@@ -1983,6 +1979,10 @@ const sessionManager = {
     const agentHeader = document.querySelector('.agent-name');
     if (agentHeader) {
       agentHeader.textContent = normalizedAgentName || 'Assistant';
+    }
+
+    if (typeof window.refreshAgentDisplay === 'function') {
+      window.refreshAgentDisplay();
     }
 
     if (typeof loadAgentsForSidebar === 'function') {
@@ -2013,7 +2013,7 @@ const sessionManager = {
       agentNameEl.textContent = displayAgentName;
     }
     if (typeof window.refreshChatWebSearchToggle === 'function') {
-      window.refreshChatWebSearchToggle(agentName || '');
+      window.refreshChatWebSearchToggle(agentName || 'Ori');
     }
 
     if (editAgentBtn) {
@@ -2065,7 +2065,7 @@ const sessionManager = {
     }
   },
 
-  // Fetch and update the model for the current agent
+  // Fetch and update the model for the active execution agent
   async updateChatModelForAgent(agentName) {
     if (!agentName) {
       this.updateChatModelName('');
@@ -2112,13 +2112,8 @@ const sessionManager = {
     }
 
     const changeBtn = document.getElementById('chatChangeAgentBtn');
-    if (changeBtn && !changeBtn.dataset.bound) {
-      changeBtn.dataset.bound = 'true';
-      changeBtn.addEventListener('click', async () => {
-        if (this.activeSessionId) {
-          await this.showChangeAgentDialog(this.activeSessionId);
-        }
-      });
+    if (changeBtn) {
+      changeBtn.style.display = 'none';
     }
 
     const editBtn = document.getElementById('chatEditAgentBtn');
@@ -2736,12 +2731,22 @@ const sessionManager = {
     chatArea.innerHTML = '';
 
     const messages = session.messages || [];
+    const persistedMessages = [];
     messages.forEach(msg => {
       const isUser = msg.role === 'user';
+      persistedMessages.push({
+        content: msg.content,
+        isUser,
+        timestamp: msg.created_at || new Date().toISOString()
+      });
       if (typeof appendMessageToUI === 'function') {
         appendMessageToUI(msg.content, isUser);
       }
     });
+
+    if (typeof window.replaceChatHistoryMessages === 'function') {
+      window.replaceChatHistoryMessages(persistedMessages);
+    }
   },
 
   // Delete session
@@ -4648,10 +4653,7 @@ const sessionManager = {
       // Update the combined chat info bar with session title and agent
       this.updateChatInfoBar(session.title || 'New Session', session.agent_name);
 
-      // Update the current agent globally
-      if (session.agent_name) {
-        this.updateCurrentAgent(session.agent_name);
-      }
+      this.updateCurrentAgent(session.agent_name || '');
 
       // Initialize session files panel
       this.initializeSessionFiles(savedId);

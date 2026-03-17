@@ -333,9 +333,15 @@ func detectHomeAssistantIntentVariant(prompt string, intent homeAssistantIntent,
 }
 
 func (h *HomeAssistantRouteHandler) findBestMatch(prompt string, intent homeAssistantIntent, routeContext normalizedHomeAssistantRouteContext) *routedAgentMatch {
-	names, current := h.State.ListAgents()
+	names := h.State.ListAgents()
 	if len(names) == 0 {
 		return nil
+	}
+	current := ""
+	if assistant, ok := h.State.GetAgent(systemAssistantAgentName); ok && assistant != nil {
+		current = systemAssistantAgentName
+	} else if len(names) > 0 {
+		current = names[0]
 	}
 
 	var best *routedAgentMatch

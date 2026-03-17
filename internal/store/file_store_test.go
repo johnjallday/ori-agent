@@ -27,8 +27,7 @@ func TestFileStore_SaveLoad_NestedRoundTrip(t *testing.T) {
 	stats.UpdatedAt = stats.LastActive
 
 	source := &fileStore{
-		path:    indexPath,
-		current: "alpha",
+		path: indexPath,
 		agents: map[string]*agent.Agent{
 			"alpha": {
 				Type:         agent.TypeGeneral,
@@ -70,10 +69,6 @@ func TestFileStore_SaveLoad_NestedRoundTrip(t *testing.T) {
 	}
 	if err := loaded.load(); err != nil {
 		t.Fatalf("load() failed: %v", err)
-	}
-
-	if loaded.current != "alpha" {
-		t.Fatalf("expected current agent alpha, got %q", loaded.current)
 	}
 
 	got, ok := loaded.agents["alpha"]

@@ -63,15 +63,14 @@ Common HTTP status codes:
 
 ### List Agents
 
-Get all available agents and the current active agent.
+Get all available agents.
 
 **Endpoint:** `GET /api/agents`
 
 **Response:**
 ```json
 {
-  "agents": ["default", "my-agent", "test-agent"],
-  "current": "default"
+  "agents": ["Ori", "my-agent", "test-agent"]
 }
 ```
 
@@ -95,9 +94,9 @@ Create a new agent with the specified name and optional configuration.
 **Parameters:**
 - `name` (required): Name of the agent
 - `type` (optional): Agent type - `"tool-calling"`, `"general"`, or `"research"`. Defaults to `"tool-calling"`. If `model` is provided without `type`, the type is auto-detected based on the model.
-- `model` (optional): Model to use (e.g., `"gpt-4o-mini"`, `"claude-3-haiku-20240307"`). Defaults to current agent's model or system default.
-- `temperature` (optional): Temperature setting (0.0-2.0). Defaults to current agent's temperature or system default.
-- `system_prompt` (optional): Custom system prompt. Defaults to current agent's system prompt or empty.
+- `model` (optional): Model to use (e.g., `"gpt-4o-mini"`, `"claude-3-haiku-20240307"`). Defaults to system defaults.
+- `temperature` (optional): Temperature setting (0.0-2.0). Defaults to system defaults.
+- `system_prompt` (optional): Custom system prompt. Defaults to the agent template or empty.
 
 **Response:**
 ```json
@@ -202,7 +201,7 @@ Classify a home page assistant prompt and find the best matching existing agent.
 
 ### List Loaded Plugins
 
-Get all plugins loaded for the current agent.
+Get plugin state for the requested agent context. When `agent` is omitted, the server uses the Assistant runtime (`Ori`) if present, otherwise the first available agent.
 
 **Endpoint:** `GET /api/plugins`
 
@@ -248,7 +247,7 @@ curl -X POST -F "plugin=@my_plugin.so" http://localhost:8765/api/plugins
 
 ### Unload Plugin
 
-Remove a plugin from the current agent.
+Remove a plugin from every agent that has it enabled.
 
 **Endpoint:** `DELETE /api/plugins?name=<plugin_name>`
 
@@ -864,7 +863,7 @@ Download a specific plugin from the registry.
 
 ### Get Agent Settings
 
-Get the current agent's configuration settings.
+Get configuration settings for the requested agent context. When `agent` is omitted, the server uses the Assistant runtime (`Ori`) if present, otherwise the first available agent.
 
 **Endpoint:** `GET /api/settings`
 
@@ -884,7 +883,7 @@ Get the current agent's configuration settings.
 
 ### Update Agent Settings
 
-Update the current agent's configuration.
+Update configuration for the requested agent context. When `agent` is omitted, the server uses the Assistant runtime (`Ori`) if present, otherwise the first available agent.
 
 **Endpoint:** `POST /api/settings`
 
@@ -944,7 +943,7 @@ Set or update the OpenAI API key.
 
 ### Send Message
 
-Send a message to the current agent and get a response.
+Send a message to the Assistant or a session-pinned specialist and get a response.
 
 **Endpoint:** `POST /api/chat`
 

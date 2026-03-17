@@ -2558,7 +2558,7 @@ export class WorkspaceDetailPage {
     const createAgent = await this.showTaskConfirmDialog({
       eyebrow: 'Capability Required',
       title: 'Create a capable agent for this task?',
-      message: `No current agent advertises ${normalizedRequirements.map((requirement) => requirement.label.toLowerCase()).join(' and ')} for "${taskLabel}".`,
+      message: `No assigned agent advertises ${normalizedRequirements.map((requirement) => requirement.label.toLowerCase()).join(' and ')} for "${taskLabel}".`,
       confirmLabel: 'Create Agent',
       cancelLabel: 'Cancel',
       metaItems: [taskLabel, defaults.name, 'Needs MCP or skills'],

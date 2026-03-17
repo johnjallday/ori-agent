@@ -1467,17 +1467,7 @@ async function togglePlugin(pluginName, enabled) {
   const checkbox = document.getElementById(`plugin_${pluginName}`);
 
   try {
-    // First, switch to this agent
-    const switchResponse = await fetch(`/api/agents?name=${encodeURIComponent(agentName)}`, {
-      method: 'PUT'
-    });
-
-    if (!switchResponse.ok) {
-      throw new Error('Failed to switch to agent');
-    }
-
-    // Then enable/disable the plugin
-    const endpoint = `/api/plugins/${encodeURIComponent(pluginName)}/${enabled ? 'enable' : 'disable'}`;
+    const endpoint = `/api/plugins/${encodeURIComponent(pluginName)}/${enabled ? 'enable' : 'disable'}?agent=${encodeURIComponent(agentName)}`;
     const response = await fetch(endpoint, {
       method: 'POST'
     });
@@ -1579,9 +1569,13 @@ function showToast(message, type = 'info') {
 
 // Actions
 function chatWithAgent() {
-  // Switch to this agent and go to chat
-  fetch(`/api/agents?name=${encodeURIComponent(agentName)}`, {
-    method: 'PUT'
+  fetch('/api/sessions', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      title: 'New Session',
+      agent_name: agentName
+    })
   })
     .then(response => {
       if (response.ok) {
@@ -1589,8 +1583,8 @@ function chatWithAgent() {
       }
     })
     .catch(error => {
-      console.error('Error switching agent:', error);
-      showError('Failed to switch to agent');
+      console.error('Error starting agent chat:', error);
+      showError('Failed to start chat with agent');
     });
 }
 

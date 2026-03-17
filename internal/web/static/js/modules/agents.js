@@ -1223,8 +1223,8 @@ async function loadAgentsForSidebar() {
   agentsLog.debug('Loading agents from /api/agents...');
   try {
     const data = await API.get('/api/agents');
-    agentsLog.debug('Received agents', { count: data.agents?.length || 0, current: data.current });
-    displayAgents(data.agents, resolveSidebarCurrentAgent(data.current));
+    agentsLog.debug('Received agents', { count: data.agents?.length || 0 });
+    displayAgents(data.agents, resolveSidebarCurrentAgent());
 
   } catch (error) {
     agentsLog.error('Error loading agents', error);
@@ -1264,9 +1264,9 @@ function displayAgents(agents, currentAgent) {
   renderAgents();
 }
 
-function resolveSidebarCurrentAgent(fallbackAgent) {
+function resolveSidebarCurrentAgent() {
   const sessionAgent = window.sessionManager?.getActiveSession?.()?.agent_name;
-  return sessionAgent || fallbackAgent;
+  return sessionAgent || '';
 }
 
 function renderAgents() {

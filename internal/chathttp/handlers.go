@@ -956,6 +956,14 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 		"file_count": len(req.Files),
 		"session_id": sessionID,
 	})
+	executionAgent := h.resolveExecutionAgentName(r.Context(), sessionID, req.AgentName)
+	if executionAgent.usesCompatibilityFallback() {
+		logger.Info("Chat request used compatibility execution-agent fallback", logger.Fields{
+			"agent_name": executionAgent.Name,
+			"source":     executionAgent.Source,
+			"session_id": sessionID,
+		})
+	}
 	for i, f := range req.Files {
 		logger.Info("Received file", logger.Fields{
 			"index": i,
@@ -963,6 +971,15 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 			"type":  f.Type,
 			"size":  f.Size,
 		})
+	}
+	if !executionAgent.isResolved() {
+		writeJSONResponse(w, attachRouteMetadata(map[string]any{
+			"response": "❌ **Error**: Assistant is unavailable because no execution agent is configured. Configure a System Model so Assistant can be created, or use a session pinned to a specific agent.",
+		}, chatRouteMetadata{
+			Mode:   routeModeAssistantChat,
+			Reason: "no execution agent resolved",
+		}))
+		return
 	}
 
 	// Separate image files from text files for proper API handling
@@ -1016,7 +1033,7 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if q == "/agent" {
-		h.commandHandler.HandleAgentStatus(w, r)
+		h.commandHandler.HandleAgentStatus(w, r, executionAgent)
 		return
 	}
 	if q == "/agents" {
@@ -1024,11 +1041,11 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if q == "/tools" {
-		h.commandHandler.HandleToolsList(w, r)
+		h.commandHandler.HandleToolsList(w, r, executionAgent)
 		return
 	}
 	if q == "/skills" {
-		h.commandHandler.HandleSkillsList(w, r)
+		h.commandHandler.HandleSkillsList(w, r, executionAgent)
 		return
 	}
 	if q == "/exit" {
@@ -1061,22 +1078,6 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	resolveAgentName := func() string {
-		if sessionID != "" && h.sessionStore != nil {
-			if sess, err := h.sessionStore.GetSession(r.Context(), sessionID); err == nil && sess != nil && sess.AgentName != "" {
-				return sess.AgentName
-			}
-		}
-		if req.AgentName != "" {
-			return req.AgentName
-		}
-		names, current := h.store.ListAgents()
-		if current == "" && len(names) > 0 {
-			return names[0]
-		}
-		return current
-	}
-
 	var invokedSkill *skillInvocation
 	if strings.HasPrefix(q, "/skill") {
 		if h.skillsManager == nil {
@@ -1092,8 +1093,7 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 			})
 			return
 		}
-		agentName := resolveAgentName()
-		skill, found, err := h.skillsManager.GetSkill(agentName, name)
+		skill, found, err := h.skillsManager.GetSkill(executionAgent.Name, name)
 		if err != nil {
 			var conflicts *skills.SkillConflictError
 			if errors.As(err, &conflicts) {
@@ -1135,8 +1135,7 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 
 	if invokedSkill == nil {
 		if name, args, ok := parseImplicitSkillCommand(q); ok && h.skillsManager != nil {
-			agentName := resolveAgentName()
-			skill, found, err := h.skillsManager.GetSkill(agentName, name)
+			skill, found, err := h.skillsManager.GetSkill(executionAgent.Name, name)
 			if err != nil {
 				var conflicts *skills.SkillConflictError
 				if errors.As(err, &conflicts) {
@@ -1193,7 +1192,7 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 		}
 
 		// Load agent - use session-bound agent if available
-		current := resolveAgentName()
+		current := executionAgent.Name
 		if current == "" {
 			orihttp.InternalError(w, "no agent available for direct tool execution")
 			return
@@ -1240,8 +1239,8 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(base, ContextTimeout)
 	defer cancel()
 
-	// Load agent - priority: session's agent > request agent_name > global current agent
-	current := resolveAgentName()
+	// Load the execution agent for this chat turn.
+	current := executionAgent.Name
 
 	ag, err := h.resolveEffectiveAgent(current, normalizedRouteContext)
 	if err != nil {
@@ -1336,7 +1335,7 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 	logger.Debug("Agent MCP servers loaded", logger.Fields{"agent": current, "server_count": len(ag.MCPServers), "servers": ag.MCPServers})
 
 	// Check for uninitialized plugins before proceeding with chat
-	uninitializedPlugins := h.checkUninitializedPlugins(ag.Agent)
+	uninitializedPlugins := h.checkUninitializedPlugins(ag.Agent, current)
 	if len(uninitializedPlugins) > 0 {
 		initPrompt := h.generateInitializationPrompt(uninitializedPlugins)
 		orihttp.WriteJSON(w, map[string]any{
@@ -1539,8 +1538,11 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	tools = prioritizeToolsForPath(ag.Agent, tools)
 
-	// Get appropriate client for this agent
-	agentClient := h.getClientForAgent(ag.Agent)
+	if invokedSkill == nil {
+		if h.maybeHandleCapabilityRecovery(w, base, ag, current, originalQuery, sessionID, tools, plannerDecision) {
+			return
+		}
+	}
 
 	// Add system message for better tool usage guidance
 	if len(ag.Messages) == 0 {
@@ -1606,44 +1608,54 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	toolRuntimeSystemPrompt := h.buildRuntimeSystemPrompt(ctx, normalizedRouteContext)
+	providerName, providerErr := resolveChatProviderName(current, ag, h.llmFactory)
+	if providerErr != nil {
+		writeJSONResponse(w, attachRouteMetadata(map[string]any{
+			"response": fmt.Sprintf("❌ **Error**: %v", providerErr),
+		}, chatRouteMetadata{
+			Mode:   routeModeAssistantChat,
+			Reason: "agent provider misconfigured",
+		}))
+		return
+	}
 
 	// Check if this is a Claude Code provider - route to Claude Code handler
-	if strings.EqualFold(ag.Settings.Provider, "claude_code") && h.llmFactory != nil {
+	if providerName == "claude_code" && h.llmFactory != nil {
 		runtimeSystemPrompt := h.buildRuntimeSystemPromptForToolCapability(ctx, normalizedRouteContext, false)
 		h.handleClaudeCodeChat(w, r, ag, q, current, base, llmImages, plannerDecision, runtimeSystemPrompt)
 		return
 	}
 
-	// Check if this is a Claude model - if so, use provider system
-	if (strings.HasPrefix(ag.Settings.Model, "claude-") || strings.EqualFold(ag.Settings.Provider, "claude") || strings.EqualFold(ag.Settings.Provider, "anthropic")) && h.llmFactory != nil {
+	// Route Anthropic-backed models through the Claude provider.
+	if providerName == "claude" && h.llmFactory != nil {
 		// Use Claude provider
 		h.handleClaudeChat(w, r, ag, q, tools, current, base, fileAttachments, llmImages, plannerDecision, toolRuntimeSystemPrompt)
 		return
 	}
 
-	// Check if Ollama has this model - route to Ollama provider (dynamic detection)
-	if h.llmFactory != nil {
-		if ollamaProvider, err := h.llmFactory.GetProvider("ollama"); err == nil {
-			if ollamaProv, ok := ollamaProvider.(*llm.OllamaProvider); ok {
-				if ollamaProv.HasModel(ag.Settings.Model) {
-					logger.Info("Model found in Ollama, routing to Ollama provider", logger.Fields{"model": ag.Settings.Model})
-					h.handleOllamaChat(w, r, ag, q, tools, current, base, fileAttachments, llmImages, plannerDecision, toolRuntimeSystemPrompt)
-					return
-				}
-			}
-		}
+	if providerName == "ollama" {
+		h.handleOllamaChat(w, r, ag, q, tools, current, base, fileAttachments, llmImages, plannerDecision, toolRuntimeSystemPrompt)
+		return
 	}
 
-	// Check if this is a Gemini model or provider
-	if strings.HasPrefix(strings.ToLower(ag.Settings.Model), "gemini-") || strings.EqualFold(ag.Settings.Provider, "gemini") {
+	if providerName == "gemini" {
 		h.handleGeminiChat(w, r, ag, q, tools, current, base, fileAttachments, llmImages, plannerDecision, toolRuntimeSystemPrompt)
 		return
 	}
 
-	// Route Codex provider/model through Codex CLI provider path (no OpenAI API key required).
-	if isCodexProviderOrModel(ag.Settings.Provider, ag.Settings.Model) && h.llmFactory != nil {
+	if providerName == "codex" && h.llmFactory != nil {
 		runtimeSystemPrompt := h.buildRuntimeSystemPromptForToolCapability(ctx, normalizedRouteContext, false)
 		h.handleCodexChat(w, r, ag, q, current, base, llmImages, plannerDecision, runtimeSystemPrompt)
+		return
+	}
+
+	if providerName != "openai" {
+		writeJSONResponse(w, attachRouteMetadata(map[string]any{
+			"response": fmt.Sprintf("❌ **Error**: Agent %q is configured with unsupported provider %q.", current, providerName),
+		}, chatRouteMetadata{
+			Mode:   routeModeAssistantChat,
+			Reason: "unsupported provider",
+		}))
 		return
 	}
 
@@ -1656,6 +1668,7 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Handle OpenAI models
+	agentClient := h.getClientForAgent(ag.Agent)
 	h.handleOpenAIChat(w, r, ag, q, tools, current, base, fileAttachments, agentClient, plannerDecision, toolRuntimeSystemPrompt)
 }
 

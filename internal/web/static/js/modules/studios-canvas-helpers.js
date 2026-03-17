@@ -1940,7 +1940,7 @@ function updateCurrentAgentsList() {
 
   listDiv.innerHTML = `
         <div style="border-top: 1px solid var(--border-color); padding-top: 0.75rem; margin-top: 0.5rem;">
-            <small style="color: var(--text-secondary); font-weight: 600; text-transform: uppercase;">Current Agents:</small>
+            <small style="color: var(--text-secondary); font-weight: 600; text-transform: uppercase;">Assigned Agents:</small>
             <div class="mt-2">
                 ${agents.map(agent => `
                     <div class="d-flex justify-content-between align-items-center mb-1 p-2" style="background: rgba(255,255,255,0.03); border-radius: 4px;">

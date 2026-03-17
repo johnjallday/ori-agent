@@ -25,6 +25,17 @@ func isSystemAssistantAgent(name string) bool {
 	return strings.EqualFold(strings.TrimSpace(name), systemAssistantAgentName)
 }
 
+// EnsureSystemAssistantAgent ensures the canonical Assistant agent exists.
+func EnsureSystemAssistantAgent(st store.Store) error {
+	return ensureSystemAssistantAgent(st)
+}
+
+// EnsureSystemAssistantAgentWithSystemModel ensures the canonical Assistant
+// agent exists and is aligned with the configured system model.
+func EnsureSystemAssistantAgentWithSystemModel(st store.Store, systemProvider, systemModel string) error {
+	return ensureSystemAssistantAgentWithSystemModel(st, systemProvider, systemModel)
+}
+
 func ensureSystemAssistantAgent(st store.Store) error {
 	return ensureSystemAssistantAgentWithSystemModel(st, "", "")
 }

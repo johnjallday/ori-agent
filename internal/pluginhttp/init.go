@@ -120,7 +120,7 @@ func (h *InitHandler) PluginInitHandler(w http.ResponseWriter, r *http.Request) 
 	}
 
 	// Get current agent and its plugins
-	_, current := h.store.ListAgents()
+	current := store.FirstAgentName(h.store)
 	fmt.Printf("📁 Current agent: %s\n", current)
 
 	ag, ok := h.store.GetAgent(current)
@@ -228,7 +228,7 @@ func (h *InitHandler) handlePluginConfigDiscovery(w http.ResponseWriter, tool pl
 	w.Header().Set("Content-Type", "application/json")
 
 	// Get current agent
-	_, current := h.store.ListAgents()
+	current := store.FirstAgentName(h.store)
 	if current == "" {
 		current = agentName
 	}
@@ -400,7 +400,7 @@ func (h *InitHandler) PluginExecuteHandler(w http.ResponseWriter, r *http.Reques
 	}
 
 	// Get current agent and its plugins
-	_, current := h.store.ListAgents()
+	current := store.FirstAgentName(h.store)
 	ag, ok := h.store.GetAgent(current)
 	if !ok {
 		orihttp.InternalError(w, "current agent not found")
@@ -450,9 +450,9 @@ func (h *InitHandler) PluginInitStatusHandler(w http.ResponseWriter, r *http.Req
 	w.Header().Set("Content-Type", "application/json")
 
 	// Get current agent
-	_, current := h.store.ListAgents()
+	current := store.FirstAgentName(h.store)
 	if current == "" {
-		names, _ := h.store.ListAgents()
+		names := h.store.ListAgents()
 		if len(names) > 0 {
 			current = names[0]
 		} else {

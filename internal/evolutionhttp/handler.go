@@ -13,7 +13,7 @@ import (
 )
 
 type AgentStore interface {
-	ListAgents() (names []string, current string)
+	ListAgents() []string
 	GetAgent(name string) (*agent.Agent, bool)
 	SetAgent(name string, ag *agent.Agent) error
 }
@@ -219,7 +219,7 @@ func (h *Handler) GetSuggestions(w http.ResponseWriter, r *http.Request) {
 
 	suggestions := make([]map[string]any, 0)
 	if h.agentStore != nil {
-		names, _ := h.agentStore.ListAgents()
+		names := h.agentStore.ListAgents()
 		for _, name := range names {
 			if h.evolutionService == nil {
 				continue

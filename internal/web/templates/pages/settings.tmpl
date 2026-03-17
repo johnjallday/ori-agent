@@ -1135,8 +1135,8 @@
 
               <div class="settings-info-box">
                 <div class="settings-info-row">
-                  <span class="settings-info-label">Current Agent</span>
-                  <span class="settings-info-value">{{.CurrentAgent}}</span>
+                  <span class="settings-info-label">Assistant Context</span>
+                  <span class="settings-info-value">Assistant{{with index .Extra "DefaultAgentName"}} ({{.}}){{end}}</span>
                 </div>
               </div>
 

@@ -33,7 +33,6 @@ type UtilitySettings struct {
 
 // Settings holds application-wide configuration
 type Settings struct {
-	CurrentAgent    string   `json:"current_agent"`
 	OpenAIAPIKey    string   `json:"openai_api_key"`
 	AnthropicAPIKey string   `json:"anthropic_api_key"`
 	GeminiAPIKey    string   `json:"gemini_api_key"`
@@ -120,7 +119,6 @@ func (m *Manager) Load() error {
 // defaultSettings returns the default configuration
 func defaultSettings() Settings {
 	return Settings{
-		CurrentAgent:          "",
 		OpenAIAPIKey:          "",
 		GeminiAPIKey:          "",
 		SessionCleanupEnabled: true,
@@ -280,25 +278,6 @@ func (m *Manager) SetGeminiAPIKey(apiKey string) error {
 	apiKey = strings.TrimSpace(apiKey)
 	m.mu.Lock()
 	m.settings.GeminiAPIKey = apiKey
-	m.mu.Unlock()
-	return nil
-}
-
-// GetCurrentAgent returns the current agent name
-func (m *Manager) GetCurrentAgent() string {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-	return m.settings.CurrentAgent
-}
-
-// SetCurrentAgent updates the current agent
-func (m *Manager) SetCurrentAgent(agent string) error {
-	agent = strings.TrimSpace(agent)
-	if agent == "" {
-		return fmt.Errorf("agent name cannot be empty")
-	}
-	m.mu.Lock()
-	m.settings.CurrentAgent = agent
 	m.mu.Unlock()
 	return nil
 }

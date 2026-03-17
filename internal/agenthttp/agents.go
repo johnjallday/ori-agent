@@ -97,7 +97,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 
 		// Otherwise, return list of all agents
-		names, current := h.State.ListAgents()
+		names := h.State.ListAgents()
 
 		// Build agent details list with name and type
 		type AgentInfo struct {
@@ -124,8 +124,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 
 		orihttp.WriteJSON(w, map[string]any{
-			"agents":  agentInfos,
-			"current": current,
+			"agents": agentInfos,
 		})
 
 	case http.MethodPost:
@@ -224,26 +223,12 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		})
 
 	case http.MethodPut:
-		agentName := r.URL.Query().Get("name")
-		if agentName == "" {
-			orihttp.BadRequest(w, "name required")
-			return
-		}
-
-		if _, ok := h.State.GetAgent(agentName); !ok {
-			orihttp.NotFound(w, "Agent not found")
-			return
-		}
-
-		if err := h.State.SetCurrentAgent(agentName); err != nil {
-			orihttp.RespondErrorWithErr(w, http.StatusInternalServerError, "Failed to switch agent", err)
-			return
-		}
-
-		orihttp.Success(w, map[string]any{
-			"success": true,
-			"message": "Switched to agent '" + agentName + "'",
+		orihttp.WriteJSON(w, map[string]any{
+			"success":    false,
+			"deprecated": true,
+			"message":    "Global agent switching is deprecated. Use Assistant sessions or pin a specialist to a specific session instead.",
 		})
+		return
 
 	case http.MethodPatch:
 		// PATCH /api/agents/:name - Update agent metadata

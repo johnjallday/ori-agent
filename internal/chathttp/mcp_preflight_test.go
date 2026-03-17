@@ -21,9 +21,8 @@ import (
 )
 
 type preflightStore struct {
-	agents  map[string]*agent.Agent
-	names   []string
-	current string
+	agents map[string]*agent.Agent
+	names  []string
 }
 
 func newPreflightStore(name string, ag *agent.Agent) *preflightStore {
@@ -31,19 +30,13 @@ func newPreflightStore(name string, ag *agent.Agent) *preflightStore {
 		ag = &agent.Agent{}
 	}
 	return &preflightStore{
-		agents:  map[string]*agent.Agent{name: ag},
-		names:   []string{name},
-		current: name,
+		agents: map[string]*agent.Agent{name: ag},
+		names:  []string{name},
 	}
 }
 
-func (s *preflightStore) ListAgents() ([]string, string) {
-	return append([]string{}, s.names...), s.current
-}
-
-func (s *preflightStore) SetCurrentAgent(name string) error {
-	s.current = name
-	return nil
+func (s *preflightStore) ListAgents() []string {
+	return append([]string{}, s.names...)
 }
 
 func (s *preflightStore) CreateAgent(name string, _ *store.CreateAgentConfig) error {
@@ -52,9 +45,6 @@ func (s *preflightStore) CreateAgent(name string, _ *store.CreateAgentConfig) er
 	}
 	s.agents[name] = &agent.Agent{}
 	s.names = append(s.names, name)
-	if s.current == "" {
-		s.current = name
-	}
 	return nil
 }
 
@@ -87,7 +77,6 @@ func (s *preflightStore) UpdateAgent(name string, updateFn func(*agent.Agent) er
 func (s *preflightStore) ClearAgents() error {
 	s.agents = make(map[string]*agent.Agent)
 	s.names = nil
-	s.current = ""
 	return nil
 }
 

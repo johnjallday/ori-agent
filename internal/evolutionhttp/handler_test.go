@@ -17,12 +17,12 @@ type fakeAgentStore struct {
 	agents map[string]*agent.Agent
 }
 
-func (f *fakeAgentStore) ListAgents() ([]string, string) {
+func (f *fakeAgentStore) ListAgents() []string {
 	names := make([]string, 0, len(f.agents))
 	for name := range f.agents {
 		names = append(names, name)
 	}
-	return names, ""
+	return names
 }
 
 func (f *fakeAgentStore) GetAgent(name string) (*agent.Agent, bool) {

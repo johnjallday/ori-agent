@@ -22,6 +22,22 @@ const (
 	openAITransportRetryDelay    = 300 * time.Millisecond
 )
 
+func openAIModelRequiresDefaultTemperature(model string) bool {
+	lower := strings.ToLower(strings.TrimSpace(model))
+	return strings.HasPrefix(lower, "o1") ||
+		strings.HasPrefix(lower, "o3") ||
+		strings.HasPrefix(lower, "o4") ||
+		strings.HasPrefix(lower, "gpt-5") ||
+		strings.Contains(lower, "-nano")
+}
+
+func setOpenAIChatTemperature(params *openai.ChatCompletionNewParams, model string, temperature float64) {
+	if params == nil || openAIModelRequiresDefaultTemperature(model) {
+		return
+	}
+	params.Temperature = openai.Float(temperature)
+}
+
 // handleOpenAIChat handles chat requests for OpenAI models
 func (h *Handler) handleOpenAIChat(
 	w http.ResponseWriter,
@@ -52,11 +68,11 @@ func (h *Handler) handleOpenAIChat(
 	}
 
 	params := openai.ChatCompletionNewParams{
-		Model:       openai.ChatModel(ag.Settings.Model),
-		Temperature: openai.Float(ag.Settings.Temperature),
-		Messages:    injectRuntimeSystemPrompt(ag.Messages, runtimeSystemPrompt),
-		Tools:       openaiTools,
+		Model:    openai.ChatModel(ag.Settings.Model),
+		Messages: injectRuntimeSystemPrompt(ag.Messages, runtimeSystemPrompt),
+		Tools:    openaiTools,
 	}
+	setOpenAIChatTemperature(&params, ag.Settings.Model, ag.Settings.Temperature)
 
 	start := time.Now()
 	resp, err := requestOpenAICompletionWithRetry(ctx, agentClient, params)
@@ -99,13 +115,14 @@ func (h *Handler) handleOpenAIChat(
 		defer fbCancel()
 		fallbackMessages := injectRuntimeSystemPrompt(ag.Messages, runtimeSystemPrompt)
 
-		respFB, errFB := agentClient.Chat.Completions.New(fbCtx, openai.ChatCompletionNewParams{
-			Model:       openai.ChatModel(ag.Settings.Model),
-			Temperature: openai.Float(ag.Settings.Temperature),
+		fallbackParams := openai.ChatCompletionNewParams{
+			Model: openai.ChatModel(ag.Settings.Model),
 			Messages: append(fallbackMessages,
 				openai.SystemMessage("Answer directly in plain text. Do not call any tools."),
 			),
-		})
+		}
+		setOpenAIChatTemperature(&fallbackParams, ag.Settings.Model, ag.Settings.Temperature)
+		respFB, errFB := agentClient.Chat.Completions.New(fbCtx, fallbackParams)
 		if errFB == nil && respFB != nil && len(respFB.Choices) > 0 {
 			choice = respFB.Choices[0].Message
 
@@ -186,14 +203,15 @@ func (h *Handler) handleOpenAIToolCalls(
 			},
 			RequestNextResponse: func() (string, []llm.ToolCall, error) {
 				messages := injectRuntimeSystemPrompt(ag.Messages, runtimeSystemPrompt)
-				resp2, err := requestOpenAICompletionWithRetry(ctx, agentClient, openai.ChatCompletionNewParams{
-					Model:       openai.ChatModel(ag.Settings.Model),
-					Temperature: openai.Float(ag.Settings.Temperature),
+				params := openai.ChatCompletionNewParams{
+					Model: openai.ChatModel(ag.Settings.Model),
 					Messages: append(messages,
 						openai.SystemMessage(getFollowUpSystemPrompt()),
 					),
 					Tools: openaiTools,
-				})
+				}
+				setOpenAIChatTemperature(&params, ag.Settings.Model, ag.Settings.Temperature)
+				resp2, err := requestOpenAICompletionWithRetry(ctx, agentClient, params)
 				if err != nil {
 					return "", nil, err
 				}

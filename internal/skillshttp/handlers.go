@@ -1251,9 +1251,10 @@ func resolveAgentName(r *http.Request, st store.Store) string {
 func resolveAgentNameWithFallback(agentName string, st store.Store) string {
 	agentName = strings.TrimSpace(agentName)
 	if agentName == "" && st != nil {
-		if _, current := st.ListAgents(); current != "" {
-			return current
+		if agent, ok := st.GetAgent("Ori"); ok && agent != nil {
+			return "Ori"
 		}
+		return store.FirstAgentName(st)
 	}
 	return agentName
 }

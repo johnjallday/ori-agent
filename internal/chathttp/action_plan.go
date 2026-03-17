@@ -94,7 +94,7 @@ func (h *Handler) buildChatActionPlan(
 		steps = append(steps, ActionPlanStep{
 			Kind:    "workspace",
 			Title:   "Ensure workspace context (create if needed)",
-			Details: "Use an active workspace for the current agent, or auto-create one.",
+			Details: "Use an active workspace for this Assistant session, or auto-create one.",
 		}, ActionPlanStep{
 			Kind:    "delegation",
 			Title:   "Route request to workspace-scoped execution",
@@ -105,7 +105,7 @@ func (h *Handler) buildChatActionPlan(
 		steps = append(steps, ActionPlanStep{
 			Kind:    "workspace",
 			Title:   "Ensure scratch workspace context (create if needed)",
-			Details: "Use an active workspace for the current agent, or auto-create one for scratch execution.",
+			Details: "Use an active workspace for this Assistant session, or auto-create one for scratch execution.",
 		}, ActionPlanStep{
 			Kind:    "delegation",
 			Title:   "Route request to scratch execution",
@@ -116,7 +116,7 @@ func (h *Handler) buildChatActionPlan(
 		steps = append(steps, ActionPlanStep{
 			Kind:    "workspace",
 			Title:   "Ensure specialist workspace context (create if needed)",
-			Details: "Use an active workspace for the current agent, or auto-create one for specialist routing.",
+			Details: "Use an active workspace for this Assistant session, or auto-create one for specialist routing.",
 		}, ActionPlanStep{
 			Kind:    "delegation",
 			Title:   "Route request to specialist workflow",
@@ -125,7 +125,7 @@ func (h *Handler) buildChatActionPlan(
 	default:
 		steps = append(steps, ActionPlanStep{
 			Kind:    "assistant_chat",
-			Title:   "Ask the current agent to answer",
+			Title:   "Ask the Assistant to answer",
 			Details: "The agent may call tools as needed before producing a response.",
 		})
 	}

@@ -43,16 +43,29 @@ func (h *Handler) SetUtilitySettingsReloader(fn func()) {
 	h.utilitySettingsReloader = fn
 }
 
+func resolveAssistantDefaultAgentName(st store.Store) string {
+	if st == nil {
+		return ""
+	}
+	if agent, ok := st.GetAgent("Ori"); ok && agent != nil {
+		return "Ori"
+	}
+	return store.FirstAgentName(st)
+}
+
+func (h *Handler) resolveSettingsAgentName(r *http.Request) string {
+	agentName := strings.TrimSpace(r.URL.Query().Get("agent"))
+	if agentName != "" {
+		return agentName
+	}
+	return resolveAssistantDefaultAgentName(h.store)
+}
+
 // SettingsHandler handles agent settings operations
 func (h *Handler) SettingsHandler(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodGet:
-		// Check if a specific agent name is requested
-		agentName := r.URL.Query().Get("agent")
-		if agentName == "" {
-			// If no agent specified, use current agent
-			_, agentName = h.store.ListAgents()
-		}
+		agentName := h.resolveSettingsAgentName(r)
 
 		ag, ok := h.store.GetAgent(agentName)
 		if !ok {
@@ -73,12 +86,7 @@ func (h *Handler) SettingsHandler(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		// Check if a specific agent name is requested
-		agentName := r.URL.Query().Get("agent")
-		if agentName == "" {
-			// If no agent specified, use current agent
-			_, agentName = h.store.ListAgents()
-		}
+		agentName := h.resolveSettingsAgentName(r)
 
 		ag, ok := h.store.GetAgent(agentName)
 		if !ok {

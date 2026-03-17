@@ -369,7 +369,7 @@ func (s *StorageSystemFacade) GetAgentByName(name string) (*agent.Agent, bool) {
 	return s.AgentStore.GetAgent(name)
 }
 
-// ListAgents returns all agents and the current agent name
-func (s *StorageSystemFacade) ListAgents() ([]string, string) {
+// ListAgents returns all agent names.
+func (s *StorageSystemFacade) ListAgents() []string {
 	return s.AgentStore.ListAgents()
 }

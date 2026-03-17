@@ -24,6 +24,11 @@ func newChatHandlerForOpenAppTests(t *testing.T) *Handler {
 	if err != nil {
 		t.Fatalf("failed to create store: %v", err)
 	}
+	if err := st.CreateAgent(assistantExecutionAgentName, &store.CreateAgentConfig{
+		Type: "general",
+	}); err != nil {
+		t.Fatalf("failed to create assistant agent: %v", err)
+	}
 
 	return NewHandler(st, nil)
 }

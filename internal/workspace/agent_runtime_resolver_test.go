@@ -14,15 +14,13 @@ type resolverAgentStoreStub struct {
 	agents map[string]*agent.Agent
 }
 
-func (s *resolverAgentStoreStub) ListAgents() ([]string, string) {
+func (s *resolverAgentStoreStub) ListAgents() []string {
 	names := make([]string, 0, len(s.agents))
 	for name := range s.agents {
 		names = append(names, name)
 	}
-	return names, ""
+	return names
 }
-
-func (s *resolverAgentStoreStub) SetCurrentAgent(string) error { return nil }
 
 func (s *resolverAgentStoreStub) CreateAgent(string, *store.CreateAgentConfig) error { return nil }
 

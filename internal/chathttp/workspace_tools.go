@@ -572,7 +572,7 @@ func (p *WorkspaceToolProvider) manageAgentsTool() pluginapi.PluginTool {
 				return string(raw), nil
 
 			case "available":
-				allNames, _ := p.agentStore.ListAgents()
+				allNames := p.agentStore.ListAgents()
 				wsAgentMap := make(map[string]bool)
 				for _, inst := range ws.AgentInstances {
 					wsAgentMap[strings.ToLower(inst.Name)] = true

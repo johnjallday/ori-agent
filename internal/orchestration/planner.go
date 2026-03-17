@@ -111,7 +111,7 @@ func (o *Orchestrator) DecideMultiAgent(plan *types.PlannerOutput, mode types.Mu
 
 // listAgentProfiles loads available agent metadata for planning.
 func (o *Orchestrator) listAgentProfiles() []agentProfile {
-	names, _ := o.agentStore.ListAgents()
+	names := o.agentStore.ListAgents()
 	profiles := make([]agentProfile, 0, len(names))
 
 	for _, name := range names {

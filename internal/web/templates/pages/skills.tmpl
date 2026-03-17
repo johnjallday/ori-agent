@@ -7,7 +7,7 @@
   <!-- Navigation -->
   {{template "navbar.tmpl" .}}
 
-  <div class="main-content-wrapper" id="skillsPage" data-current-agent="{{.CurrentAgent}}">
+  <div class="main-content-wrapper" id="skillsPage" data-current-agent="{{index .Extra "DefaultAgentName"}}">
     {{template "sidebar.tmpl" .}}
 
     <!-- Main Content -->
@@ -38,7 +38,7 @@
                 Discover Skills
               </button>
               <select id="skillsAgentSelect" class="form-select form-select-sm" style="min-width: 200px; background: var(--bg-secondary); border: 1px solid var(--border-color); color: var(--text-primary);">
-                <option value="">Current Agent</option>
+                <option value="">Assistant Default</option>
               </select>
               <input id="skillsSearch" type="text" class="form-control form-control-sm" placeholder="Search skills..." style="min-width: 200px; background: var(--bg-secondary); border: 1px solid var(--border-color); color: var(--text-primary);">
               <button id="skillsRefreshBtn" class="modern-btn modern-btn-secondary btn-sm">

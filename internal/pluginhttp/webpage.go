@@ -53,7 +53,7 @@ func (h *WebPageHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	pluginName := parts[0]
 	pagePath := parts[1]
 
-	_, current := h.State.ListAgents()
+	current := store.FirstAgentName(h.State)
 	ag, ok := h.State.GetAgent(current)
 	if !ok {
 		orihttp.InternalError(w, "Current agent not found")
@@ -173,7 +173,7 @@ func (h *WebPageHandler) ListPages(w http.ResponseWriter, r *http.Request) {
 	pluginName := strings.TrimSuffix(path, "/pages")
 
 	// Get current agent
-	_, current := h.State.ListAgents()
+	current := store.FirstAgentName(h.State)
 	ag, ok := h.State.GetAgent(current)
 	if !ok {
 		orihttp.InternalError(w, "Current agent not found")

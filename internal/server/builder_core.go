@@ -5,6 +5,7 @@ package server
 import (
 	"context"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/johnjallday/ori-agent/internal/agenthttp"
@@ -93,6 +94,14 @@ func (b *ServerBuilder) initializeStorage() error {
 	st, err := createFileStore(agentStorePath, defaultConf)
 	if err != nil {
 		return err
+	}
+	if b.configManager != nil {
+		systemProvider, systemModel := b.configManager.GetSystemModel()
+		if strings.TrimSpace(systemProvider) != "" && strings.TrimSpace(systemModel) != "" {
+			if err := agenthttp.EnsureSystemAssistantAgentWithSystemModel(st, systemProvider, systemModel); err != nil {
+				return err
+			}
+		}
 	}
 	b.st = st
 

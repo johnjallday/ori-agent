@@ -18,7 +18,6 @@ type fileStore struct {
 	mu              sync.Mutex
 	path            string
 	agents          map[string]*agent.Agent
-	current         string
 	defaultSettings types.Settings
 }
 
@@ -51,26 +50,14 @@ func NewFileStore(path string, defaultSettings types.Settings) (Store, error) {
 	return fs, nil
 }
 
-func (s *fileStore) ListAgents() (names []string, current string) {
+func (s *fileStore) ListAgents() (names []string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	names = make([]string, 0, len(s.agents))
 	for n := range s.agents {
 		names = append(names, n)
 	}
-	return names, s.current
-}
-
-func (s *fileStore) SetCurrentAgent(name string) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	if _, exists := s.agents[name]; !exists {
-		return fmt.Errorf("agent not found")
-	}
-
-	s.current = name
-	return s.saveUnlocked()
+	return names
 }
 
 func (s *fileStore) CreateAgent(name string, config *CreateAgentConfig) error {
@@ -78,15 +65,7 @@ func (s *fileStore) CreateAgent(name string, config *CreateAgentConfig) error {
 	defer s.mu.Unlock()
 	created := false
 	if _, exists := s.agents[name]; !exists {
-		// Get default settings - either from current agent or use hardcoded defaults
-		var defaultSettings types.Settings
-		if s.current != "" && s.agents[s.current] != nil {
-			// Copy from current agent (preserve provider/max tokens too)
-			defaultSettings = s.agents[s.current].Settings
-		} else {
-			// Use hardcoded defaults if no current agent exists
-			defaultSettings = s.defaultSettings
-		}
+		defaultSettings := s.defaultSettings
 
 		// Apply config overrides if provided
 		agentType := agent.TypeToolCalling // Default to cheapest tier
@@ -216,15 +195,6 @@ func (s *fileStore) DeleteAgent(name string) error {
 	// Remove agent from memory
 	delete(s.agents, name)
 
-	// Update current agent if it was deleted
-	if s.current == name {
-		s.current = ""
-		for k := range s.agents {
-			s.current = k
-			break
-		}
-	}
-
 	// Delete the agent folder from filesystem
 	baseDir := filepath.Dir(s.path)
 	var agentsDir string
@@ -257,7 +227,6 @@ func (s *fileStore) ClearAgents() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.agents = make(map[string]*agent.Agent)
-	s.current = ""
 	return s.saveUnlocked()
 }
 
@@ -299,13 +268,7 @@ func (s *fileStore) Save() error {
 
 // writeAgentsJSON writes agents.json in the current working directory for plugins
 func (s *fileStore) writeAgentsJSON() error {
-	agentsConfig := struct {
-		Current string `json:"current"`
-	}{
-		Current: s.current,
-	}
-
-	data, err := json.MarshalIndent(agentsConfig, "", "  ")
+	data, err := json.MarshalIndent(map[string]any{}, "", "  ")
 	if err != nil {
 		return err
 	}
@@ -393,15 +356,8 @@ func (s *fileStore) saveUnlocked() error {
 		}
 	}
 
-	// Save main index file with just current agent pointer
-
-	indexConfig := struct {
-		Current string `json:"current"`
-	}{
-		Current: s.current,
-	}
-
-	data, err := json.MarshalIndent(indexConfig, "", "  ")
+	// Save a minimal index file for compatibility with older tooling.
+	data, err := json.MarshalIndent(map[string]any{}, "", "  ")
 	if err != nil {
 		return err
 	}
@@ -438,8 +394,7 @@ func (s *fileStore) load() error {
 	if _, hasAgents := rawConfig["agents"]; hasAgents {
 		// Old format: {"agents": {...}, "current": "..."}
 		var in struct {
-			Agents  map[string]*agent.Agent `json:"agents"`
-			Current string                  `json:"current"`
+			Agents map[string]*agent.Agent `json:"agents"`
 		}
 		if err := json.Unmarshal(b, &in); err != nil {
 			return err
@@ -447,23 +402,12 @@ func (s *fileStore) load() error {
 		if in.Agents != nil {
 			s.agents = in.Agents
 		}
-		s.current = in.Current
 		// Normalize migrated agents from legacy schema.
 		for _, ag := range s.agents {
 			s.normalizeLoadedAgent(ag)
 		}
 		return nil
 	}
-
-	// New format: just {"current": "..."}
-	var indexConfig struct {
-		Current string `json:"current"`
-	}
-	if err := json.Unmarshal(b, &indexConfig); err != nil {
-		return err
-	}
-
-	s.current = indexConfig.Current
 
 	// Load individual agent files from agents/ directory (nested structure)
 	baseDir := filepath.Dir(s.path)
