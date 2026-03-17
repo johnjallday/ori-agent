@@ -1248,6 +1248,10 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Rehydrate conversation history from session store so the LLM has
+	// full context across page reloads and server restarts.
+	h.rehydrateSessionHistory(r.Context(), sessionID, ag)
+
 	routeDecision := classifyUtilityRoute(originalQuery)
 
 	if req.PlanBeforeAction && approvedActionPlanID == "" {

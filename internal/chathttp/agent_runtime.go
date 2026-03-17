@@ -1,6 +1,7 @@
 package chathttp
 
 import (
+	"context"
 	"fmt"
 	"strings"
 
@@ -8,6 +9,7 @@ import (
 
 	"github.com/johnjallday/ori-agent/internal/agent"
 	"github.com/johnjallday/ori-agent/internal/logger"
+	"github.com/johnjallday/ori-agent/internal/session"
 	"github.com/johnjallday/ori-agent/internal/types"
 	"github.com/johnjallday/ori-agent/internal/workspace"
 )
@@ -102,6 +104,52 @@ func (h *Handler) attachWorkspaceTools(ag *resolvedChatAgent, workspaceID string
 	logger.Info("attachWorkspaceTools: attached workspace tools", logger.Fields{
 		"workspace_id": workspaceID,
 		"tool_count":   len(wtp.Tools()),
+	})
+}
+
+// rehydrateSessionHistory loads conversation history from the session store
+// and populates the agent's Messages slice so the LLM has full context.
+// This is called when a session already has stored messages but the agent's
+// in-memory messages are empty (e.g. after server restart or page reload).
+func (h *Handler) rehydrateSessionHistory(ctx context.Context, sessionID string, ag *resolvedChatAgent) {
+	if h.sessionStore == nil || sessionID == "" || ag == nil {
+		return
+	}
+
+	// Only rehydrate if the agent has no existing conversation history.
+	// A non-empty Messages slice means we already have in-memory context.
+	if len(ag.Messages) > 0 {
+		return
+	}
+
+	msgs, err := h.sessionStore.GetMessages(ctx, sessionID)
+	if err != nil {
+		logger.Warn("Failed to load session messages for rehydration", logger.Fields{
+			"session_id": sessionID,
+			"error":      err,
+		})
+		return
+	}
+
+	if len(msgs) == 0 {
+		return
+	}
+
+	// Convert stored messages to OpenAI message format.
+	for _, m := range msgs {
+		switch m.Role {
+		case session.RoleUser:
+			ag.Messages = append(ag.Messages, openai.UserMessage(m.Content))
+		case session.RoleAssistant:
+			ag.Messages = append(ag.Messages, openai.AssistantMessage(m.Content))
+		case session.RoleSystem:
+			ag.Messages = append(ag.Messages, openai.SystemMessage(m.Content))
+		}
+	}
+
+	logger.Info("Rehydrated session history into agent context", logger.Fields{
+		"session_id":    sessionID,
+		"message_count": len(msgs),
 	})
 }
 
