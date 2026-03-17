@@ -910,7 +910,7 @@
     /* Bento Grid Layout */
     .workspace-detail-bento {
       display: grid;
-      grid-template-columns: 2fr 1fr;
+      grid-template-columns: 3fr 1fr 1fr;
       grid-template-rows: repeat(6, 1fr);
       gap: 0.5rem;
       height: calc(100vh - 280px);
@@ -935,32 +935,32 @@
 
     .workspace-detail-panel-notes {
       grid-column: 2;
-      grid-row: 1;
+      grid-row: 1 / 3;
     }
 
     .workspace-detail-panel-files {
       grid-column: 2;
-      grid-row: 2;
+      grid-row: 3 / 5;
     }
 
     .workspace-detail-panel-directories {
       grid-column: 2;
-      grid-row: 3;
+      grid-row: 5 / 7;
     }
 
     .workspace-detail-panel-mcp {
-      grid-column: 2;
-      grid-row: 4;
+      grid-column: 3;
+      grid-row: 1 / 3;
     }
 
     .workspace-detail-panel-skills {
-      grid-column: 2;
-      grid-row: 5;
+      grid-column: 3;
+      grid-row: 3 / 5;
     }
 
     .workspace-detail-panel-schedules {
-      grid-column: 2;
-      grid-row: 6;
+      grid-column: 3;
+      grid-row: 5 / 7;
     }
 
     /* Responsive layout */
