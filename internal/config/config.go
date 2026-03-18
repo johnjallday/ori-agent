@@ -67,6 +67,9 @@ type Settings struct {
 	SpeechModel    string `json:"speech_model,omitempty"`    // Provider-specific model override
 	SpeechLanguage string `json:"speech_language,omitempty"` // BCP-47 tag or "auto"
 
+	// Workspace settings
+	WorkspaceRoot string `json:"workspace_root,omitempty"` // Default directory for new workspace folders (e.g., ~/Documents/Ori Workspaces)
+
 	// Native utility settings
 	Utility UtilitySettings `json:"utility,omitempty"`
 }

@@ -1,0 +1,461 @@
+package workspace
+
+import (
+	"fmt"
+	"os"
+	"path/filepath"
+	"testing"
+	"time"
+)
+
+func newTestWorkspace(id, name string) *Workspace {
+	return &Workspace{
+		ID:         id,
+		Name:       name,
+		Status:     StatusActive,
+		CreatedAt:  time.Now(),
+		UpdatedAt:  time.Now(),
+		SharedData: map[string]interface{}{},
+	}
+}
+
+func TestFileStore_SaveAndGet(t *testing.T) {
+	dir := t.TempDir()
+	store, err := NewFileStore(dir)
+	if err != nil {
+		t.Fatalf("NewFileStore: %v", err)
+	}
+
+	ws := newTestWorkspace("ws-1", "My Project")
+	if err := store.Save(ws); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+
+	// Verify folder structure on disk
+	configPath := filepath.Join(dir, "my-project", WorkspaceConfigFile)
+	if _, err := os.Stat(configPath); err != nil {
+		t.Errorf("workspace.json not found at %s", configPath)
+	}
+	filesDir := filepath.Join(dir, "my-project", FilesDir)
+	if _, err := os.Stat(filesDir); err != nil {
+		t.Errorf("files/ dir not found at %s", filesDir)
+	}
+
+	// Retrieve by ID
+	got, err := store.Get("ws-1")
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if got.Name != "My Project" {
+		t.Errorf("got Name=%q, want %q", got.Name, "My Project")
+	}
+	if got.FolderSlug != "my-project" {
+		t.Errorf("got FolderSlug=%q, want %q", got.FolderSlug, "my-project")
+	}
+}
+
+func TestFileStore_List(t *testing.T) {
+	dir := t.TempDir()
+	store, err := NewFileStore(dir)
+	if err != nil {
+		t.Fatalf("NewFileStore: %v", err)
+	}
+
+	// Save two workspaces
+	store.Save(newTestWorkspace("ws-1", "Alpha"))
+	store.Save(newTestWorkspace("ws-2", "Beta"))
+
+	ids, err := store.List()
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if len(ids) != 2 {
+		t.Errorf("List returned %d IDs, want 2", len(ids))
+	}
+}
+
+func TestFileStore_Delete(t *testing.T) {
+	dir := t.TempDir()
+	store, err := NewFileStore(dir)
+	if err != nil {
+		t.Fatalf("NewFileStore: %v", err)
+	}
+
+	ws := newTestWorkspace("ws-1", "To Delete")
+	store.Save(ws)
+
+	if err := store.Delete("ws-1"); err != nil {
+		t.Fatalf("Delete: %v", err)
+	}
+
+	// Folder should be gone
+	folderPath := filepath.Join(dir, "to-delete")
+	if _, err := os.Stat(folderPath); !os.IsNotExist(err) {
+		t.Errorf("workspace folder still exists after delete")
+	}
+
+	// Get should fail
+	if _, err := store.Get("ws-1"); err == nil {
+		t.Error("Get after Delete should fail")
+	}
+}
+
+func TestFileStore_DeleteNotFound(t *testing.T) {
+	dir := t.TempDir()
+	store, err := NewFileStore(dir)
+	if err != nil {
+		t.Fatalf("NewFileStore: %v", err)
+	}
+
+	if err := store.Delete("nonexistent"); err == nil {
+		t.Error("Delete of nonexistent workspace should fail")
+	}
+}
+
+func TestFileStore_GetFilesPath(t *testing.T) {
+	dir := t.TempDir()
+	store, err := NewFileStore(dir)
+	if err != nil {
+		t.Fatalf("NewFileStore: %v", err)
+	}
+
+	ws := newTestWorkspace("ws-1", "My Project")
+	store.Save(ws)
+
+	got := store.GetFilesPath("ws-1")
+	want := filepath.Join(dir, "my-project", FilesDir)
+	if got != want {
+		t.Errorf("GetFilesPath=%q, want %q", got, want)
+	}
+}
+
+func TestFileStore_Rename(t *testing.T) {
+	dir := t.TempDir()
+	store, err := NewFileStore(dir)
+	if err != nil {
+		t.Fatalf("NewFileStore: %v", err)
+	}
+
+	ws := newTestWorkspace("ws-1", "Old Name")
+	store.Save(ws)
+
+	if err := store.Rename("ws-1", "New Name"); err != nil {
+		t.Fatalf("Rename: %v", err)
+	}
+
+	// Old folder should not exist
+	if _, err := os.Stat(filepath.Join(dir, "old-name")); !os.IsNotExist(err) {
+		t.Error("old folder still exists after rename")
+	}
+
+	// New folder should exist
+	if _, err := os.Stat(filepath.Join(dir, "new-name", WorkspaceConfigFile)); err != nil {
+		t.Error("new folder workspace.json not found after rename")
+	}
+
+	// Get by same ID should work
+	got, err := store.Get("ws-1")
+	if err != nil {
+		t.Fatalf("Get after rename: %v", err)
+	}
+	if got.Name != "New Name" {
+		t.Errorf("Name=%q after rename, want %q", got.Name, "New Name")
+	}
+	if got.FolderSlug != "new-name" {
+		t.Errorf("FolderSlug=%q after rename, want %q", got.FolderSlug, "new-name")
+	}
+}
+
+func TestFileStore_RenameConflict(t *testing.T) {
+	dir := t.TempDir()
+	store, err := NewFileStore(dir)
+	if err != nil {
+		t.Fatalf("NewFileStore: %v", err)
+	}
+
+	store.Save(newTestWorkspace("ws-1", "Alpha"))
+	store.Save(newTestWorkspace("ws-2", "Beta"))
+
+	// Rename Alpha to Beta should fail
+	if err := store.Rename("ws-1", "Beta"); err == nil {
+		t.Error("Rename to existing name should fail")
+	}
+}
+
+func TestFileStore_LoadCacheOnStartup(t *testing.T) {
+	dir := t.TempDir()
+
+	// Create a workspace with one store instance
+	store1, err := NewFileStore(dir)
+	if err != nil {
+		t.Fatalf("NewFileStore: %v", err)
+	}
+	ws := newTestWorkspace("ws-1", "Persistent")
+	store1.Save(ws)
+
+	// Create a new store instance — it should discover the workspace on disk
+	store2, err := NewFileStore(dir)
+	if err != nil {
+		t.Fatalf("NewFileStore (reload): %v", err)
+	}
+
+	got, err := store2.Get("ws-1")
+	if err != nil {
+		t.Fatalf("Get from reloaded store: %v", err)
+	}
+	if got.Name != "Persistent" {
+		t.Errorf("Name=%q, want %q", got.Name, "Persistent")
+	}
+}
+
+func TestFileStore_SaveConflict(t *testing.T) {
+	dir := t.TempDir()
+	store, err := NewFileStore(dir)
+	if err != nil {
+		t.Fatalf("NewFileStore: %v", err)
+	}
+
+	store.Save(newTestWorkspace("ws-1", "My Project"))
+
+	// Saving a different workspace with the same name should fail
+	ws2 := newTestWorkspace("ws-2", "My Project")
+	if err := store.Save(ws2); err == nil {
+		t.Error("Save with conflicting folder name should fail")
+	}
+}
+
+func TestFileStore_SaveUpdate(t *testing.T) {
+	dir := t.TempDir()
+	store, err := NewFileStore(dir)
+	if err != nil {
+		t.Fatalf("NewFileStore: %v", err)
+	}
+
+	ws := newTestWorkspace("ws-1", "My Project")
+	store.Save(ws)
+
+	// Saving the same workspace again (update) should succeed
+	ws.Description = "updated"
+	if err := store.Save(ws); err != nil {
+		t.Fatalf("Save update: %v", err)
+	}
+
+	got, _ := store.Get("ws-1")
+	if got.Description != "updated" {
+		t.Errorf("Description=%q after update, want %q", got.Description, "updated")
+	}
+}
+
+func TestFileStore_SubWorkspace(t *testing.T) {
+	dir := t.TempDir()
+	store, err := NewFileStore(dir)
+	if err != nil {
+		t.Fatalf("NewFileStore: %v", err)
+	}
+
+	// Create parent
+	parent := newTestWorkspace("ws-parent", "Parent Project")
+	if err := store.Save(parent); err != nil {
+		t.Fatalf("Save parent: %v", err)
+	}
+
+	// Create child
+	child := newTestWorkspace("ws-child", "Child Module")
+	child.ParentID = "ws-parent"
+	if err := store.Save(child); err != nil {
+		t.Fatalf("Save child: %v", err)
+	}
+
+	// Verify folder structure
+	childConfig := filepath.Join(dir, "parent-project", SubWorkspacesDir, "child-module", WorkspaceConfigFile)
+	if _, err := os.Stat(childConfig); err != nil {
+		t.Errorf("child workspace.json not found at %s", childConfig)
+	}
+
+	// Get child by ID
+	got, err := store.Get("ws-child")
+	if err != nil {
+		t.Fatalf("Get child: %v", err)
+	}
+	if got.Name != "Child Module" {
+		t.Errorf("child Name=%q, want %q", got.Name, "Child Module")
+	}
+	if got.ParentID != "ws-parent" {
+		t.Errorf("child ParentID=%q, want %q", got.ParentID, "ws-parent")
+	}
+
+	// List should include both
+	ids, err := store.List()
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if len(ids) != 2 {
+		t.Errorf("List returned %d IDs, want 2", len(ids))
+	}
+
+	// Delete parent should cascade
+	if err := store.Delete("ws-parent"); err != nil {
+		t.Fatalf("Delete parent: %v", err)
+	}
+	if _, err := store.Get("ws-child"); err == nil {
+		t.Error("Get child after parent delete should fail")
+	}
+}
+
+func TestFileStore_NestingDepthLimit(t *testing.T) {
+	dir := t.TempDir()
+	store, err := NewFileStore(dir)
+	if err != nil {
+		t.Fatalf("NewFileStore: %v", err)
+	}
+
+	// Create a chain of workspaces up to MaxNestingDepth
+	parentID := ""
+	for i := 0; i < MaxNestingDepth; i++ {
+		ws := newTestWorkspace(fmt.Sprintf("ws-%d", i), fmt.Sprintf("Level %d", i))
+		ws.ParentID = parentID
+		if err := store.Save(ws); err != nil {
+			t.Fatalf("Save level %d: %v", i, err)
+		}
+		parentID = ws.ID
+	}
+
+	// One more should fail
+	tooDeep := newTestWorkspace("ws-too-deep", "Too Deep")
+	tooDeep.ParentID = parentID
+	if err := store.Save(tooDeep); err == nil {
+		t.Error("Save beyond max nesting depth should fail")
+	}
+}
+
+func TestFileStore_Import(t *testing.T) {
+	storeDir := t.TempDir()
+	store, err := NewFileStore(storeDir)
+	if err != nil {
+		t.Fatalf("NewFileStore: %v", err)
+	}
+
+	// Create a workspace folder externally (simulating an exported workspace)
+	extDir := t.TempDir()
+	wsDir := filepath.Join(extDir, "imported-project")
+	os.MkdirAll(filepath.Join(wsDir, FilesDir), 0755)
+
+	ws := newTestWorkspace("ws-imported", "Imported Project")
+	ws.FolderSlug = "imported-project"
+	data, _ := ws.ToJSON()
+	os.WriteFile(filepath.Join(wsDir, WorkspaceConfigFile), data, 0644)
+
+	// Import it
+	imported, warning, err := store.Import(wsDir)
+	if err != nil {
+		t.Fatalf("Import: %v", err)
+	}
+	if warning != "" {
+		t.Logf("Warning: %s", warning)
+	}
+	if imported.ID != "ws-imported" {
+		t.Errorf("imported ID=%q, want %q", imported.ID, "ws-imported")
+	}
+
+	// Should be accessible by ID
+	got, err := store.Get("ws-imported")
+	if err != nil {
+		t.Fatalf("Get after import: %v", err)
+	}
+	if got.Name != "Imported Project" {
+		t.Errorf("Name=%q, want %q", got.Name, "Imported Project")
+	}
+
+	// The folder should exist under the store's basePath
+	importedConfig := filepath.Join(storeDir, "imported-project", WorkspaceConfigFile)
+	if _, err := os.Stat(importedConfig); err != nil {
+		t.Errorf("imported workspace.json not found at %s", importedConfig)
+	}
+}
+
+func TestFileStore_ImportConflict(t *testing.T) {
+	storeDir := t.TempDir()
+	store, err := NewFileStore(storeDir)
+	if err != nil {
+		t.Fatalf("NewFileStore: %v", err)
+	}
+
+	// Create an existing workspace
+	store.Save(newTestWorkspace("ws-existing", "My Project"))
+
+	// Create an external workspace with the same slug
+	extDir := t.TempDir()
+	wsDir := filepath.Join(extDir, "my-project")
+	os.MkdirAll(wsDir, 0755)
+	ws := newTestWorkspace("ws-other", "My Project")
+	ws.FolderSlug = "my-project"
+	data, _ := ws.ToJSON()
+	os.WriteFile(filepath.Join(wsDir, WorkspaceConfigFile), data, 0644)
+
+	// Import should fail due to conflict
+	_, _, err = store.Import(wsDir)
+	if err == nil {
+		t.Error("Import with conflicting folder name should fail")
+	}
+}
+
+func TestFileStore_ImportInvalid(t *testing.T) {
+	storeDir := t.TempDir()
+	store, err := NewFileStore(storeDir)
+	if err != nil {
+		t.Fatalf("NewFileStore: %v", err)
+	}
+
+	// Import a folder without workspace.json
+	emptyDir := t.TempDir()
+	_, _, err = store.Import(emptyDir)
+	if err == nil {
+		t.Error("Import of folder without workspace.json should fail")
+	}
+}
+
+func TestFileStore_ImportProjectPathWarning(t *testing.T) {
+	storeDir := t.TempDir()
+	store, err := NewFileStore(storeDir)
+	if err != nil {
+		t.Fatalf("NewFileStore: %v", err)
+	}
+
+	// Create a workspace with an unresolvable project_path
+	extDir := t.TempDir()
+	wsDir := filepath.Join(extDir, "with-path")
+	os.MkdirAll(wsDir, 0755)
+	ws := newTestWorkspace("ws-path", "With Path")
+	ws.FolderSlug = "with-path"
+	ws.ProjectPath = "../../nonexistent-project"
+	data, _ := ws.ToJSON()
+	os.WriteFile(filepath.Join(wsDir, WorkspaceConfigFile), data, 0644)
+
+	_, warning, err := store.Import(wsDir)
+	if err != nil {
+		t.Fatalf("Import: %v", err)
+	}
+	if warning == "" {
+		t.Error("Expected warning about unresolvable project_path")
+	}
+}
+
+func TestFileStore_GetFolderPath(t *testing.T) {
+	dir := t.TempDir()
+	store, err := NewFileStore(dir)
+	if err != nil {
+		t.Fatalf("NewFileStore: %v", err)
+	}
+
+	ws := newTestWorkspace("ws-1", "Test Project")
+	store.Save(ws)
+
+	got, err := store.GetFolderPath("ws-1")
+	if err != nil {
+		t.Fatalf("GetFolderPath: %v", err)
+	}
+	want := filepath.Join(dir, "test-project")
+	if got != want {
+		t.Errorf("GetFolderPath=%q, want %q", got, want)
+	}
+}

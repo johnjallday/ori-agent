@@ -202,6 +202,12 @@ type Workspace struct {
 	// Description is an optional short description of the workspace's purpose.
 	Description string `json:"description,omitempty"`
 
+	// FolderSlug is the filesystem folder name for this workspace.
+	FolderSlug string `json:"folder_slug,omitempty"`
+
+	// ProjectPath is an optional relative path to the associated project code directory.
+	ProjectPath string `json:"project_path,omitempty"`
+
 	// ParentID is the ID of the parent workspace, or empty for root-level workspaces.
 	ParentID string `json:"parent_id,omitempty"`
 

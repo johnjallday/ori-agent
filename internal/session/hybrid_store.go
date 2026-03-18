@@ -270,6 +270,16 @@ func (h *hybridStore) DeleteWorkspace(ctx context.Context, id string) error {
 	return h.sqlite.DeleteWorkspace(ctx, id)
 }
 
+// DeleteSessionsByWorkspace deletes all sessions belonging to a workspace.
+func (h *hybridStore) DeleteSessionsByWorkspace(ctx context.Context, workspaceID string) error {
+	return h.sqlite.DeleteSessionsByWorkspace(ctx, workspaceID)
+}
+
+// UnlinkSessionsFromWorkspace sets workspace_id to NULL for all sessions in a workspace.
+func (h *hybridStore) UnlinkSessionsFromWorkspace(ctx context.Context, workspaceID string) error {
+	return h.sqlite.UnlinkSessionsFromWorkspace(ctx, workspaceID)
+}
+
 // ListWorkspaces returns all workspaces.
 func (h *hybridStore) ListWorkspaces(ctx context.Context) ([]Workspace, error) {
 	return h.sqlite.ListWorkspaces(ctx)

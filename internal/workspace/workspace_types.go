@@ -41,6 +41,9 @@ type Workspace struct {
 	ID                   string                      `json:"id"`
 	Name                 string                      `json:"name"`
 	Description          string                      `json:"description,omitempty"`
+	FolderSlug           string                      `json:"folder_slug,omitempty"`     // Filesystem folder name (derived from Name via Slugify)
+	ProjectPath          string                      `json:"project_path,omitempty"`    // Relative path to associated project code directory
+	ParentID             string                      `json:"parent_id,omitempty"`       // ID of parent workspace (empty for root-level)
 	Agents               []string                    `json:"agents,omitempty"`          // Deprecated: Use AgentInstances instead. Auto-migrated by MigrateToAgentInstances().
 	AgentInstances       []AgentInstance             `json:"agent_instances,omitempty"` // NEW: Stable agent instances with persistent IDs
 	SharedData           map[string]interface{}      `json:"shared_data"`

@@ -96,6 +96,12 @@ type WorkspaceStore interface {
 	// GetSubworkspaceIDs returns all descendant workspace IDs for a given workspace.
 	// Useful for filtering sessions including subworkspaces.
 	GetSubworkspaceIDs(ctx context.Context, workspaceID string) ([]string, error)
+
+	// DeleteSessionsByWorkspace deletes all sessions belonging to a workspace.
+	DeleteSessionsByWorkspace(ctx context.Context, workspaceID string) error
+
+	// UnlinkSessionsFromWorkspace sets workspace_id to NULL for all sessions in a workspace.
+	UnlinkSessionsFromWorkspace(ctx context.Context, workspaceID string) error
 }
 
 // NoteStore defines the interface for workspace note persistence operations.

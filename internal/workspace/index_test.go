@@ -1,0 +1,236 @@
+package workspace
+
+import (
+	"os"
+	"path/filepath"
+	"testing"
+	"time"
+)
+
+func TestIndex_RegisterAndList(t *testing.T) {
+	dir := t.TempDir()
+	idx, err := NewIndex(dir)
+	if err != nil {
+		t.Fatalf("NewIndex: %v", err)
+	}
+	defer idx.Close()
+
+	now := time.Now().Truncate(time.Second)
+
+	err = idx.Register(IndexEntry{
+		ID: "ws-1", Name: "Alpha", FolderPath: "alpha", UpdatedAt: now,
+	})
+	if err != nil {
+		t.Fatalf("Register: %v", err)
+	}
+
+	err = idx.Register(IndexEntry{
+		ID: "ws-2", Name: "Beta", FolderPath: "beta", UpdatedAt: now,
+	})
+	if err != nil {
+		t.Fatalf("Register: %v", err)
+	}
+
+	entries, err := idx.List()
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if len(entries) != 2 {
+		t.Fatalf("List returned %d entries, want 2", len(entries))
+	}
+	// Should be sorted by name
+	if entries[0].Name != "Alpha" {
+		t.Errorf("first entry Name=%q, want Alpha", entries[0].Name)
+	}
+}
+
+func TestIndex_Get(t *testing.T) {
+	dir := t.TempDir()
+	idx, err := NewIndex(dir)
+	if err != nil {
+		t.Fatalf("NewIndex: %v", err)
+	}
+	defer idx.Close()
+
+	idx.Register(IndexEntry{
+		ID: "ws-1", Name: "Alpha", FolderPath: "alpha", UpdatedAt: time.Now(),
+	})
+
+	entry, err := idx.Get("ws-1")
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if entry.Name != "Alpha" {
+		t.Errorf("Name=%q, want Alpha", entry.Name)
+	}
+
+	_, err = idx.Get("nonexistent")
+	if err == nil {
+		t.Error("Get nonexistent should fail")
+	}
+}
+
+func TestIndex_Unregister(t *testing.T) {
+	dir := t.TempDir()
+	idx, err := NewIndex(dir)
+	if err != nil {
+		t.Fatalf("NewIndex: %v", err)
+	}
+	defer idx.Close()
+
+	idx.Register(IndexEntry{
+		ID: "ws-1", Name: "Alpha", FolderPath: "alpha", UpdatedAt: time.Now(),
+	})
+
+	if err := idx.Unregister("ws-1"); err != nil {
+		t.Fatalf("Unregister: %v", err)
+	}
+
+	entries, err := idx.List()
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if len(entries) != 0 {
+		t.Errorf("List returned %d entries after unregister, want 0", len(entries))
+	}
+}
+
+func TestIndex_RegisterUpsert(t *testing.T) {
+	dir := t.TempDir()
+	idx, err := NewIndex(dir)
+	if err != nil {
+		t.Fatalf("NewIndex: %v", err)
+	}
+	defer idx.Close()
+
+	idx.Register(IndexEntry{
+		ID: "ws-1", Name: "Old Name", FolderPath: "old-name", UpdatedAt: time.Now(),
+	})
+
+	// Re-register with updated name
+	idx.Register(IndexEntry{
+		ID: "ws-1", Name: "New Name", FolderPath: "new-name", UpdatedAt: time.Now(),
+	})
+
+	entry, err := idx.Get("ws-1")
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if entry.Name != "New Name" {
+		t.Errorf("Name=%q after upsert, want %q", entry.Name, "New Name")
+	}
+	if entry.FolderPath != "new-name" {
+		t.Errorf("FolderPath=%q after upsert, want %q", entry.FolderPath, "new-name")
+	}
+}
+
+func TestIndex_Rebuild(t *testing.T) {
+	dir := t.TempDir()
+
+	// Create workspace folders on disk manually
+	ws1Dir := filepath.Join(dir, "alpha")
+	os.MkdirAll(ws1Dir, 0755)
+	ws1 := newTestWorkspace("ws-1", "Alpha")
+	ws1.FolderSlug = "alpha"
+	data1, _ := ws1.ToJSON()
+	os.WriteFile(filepath.Join(ws1Dir, WorkspaceConfigFile), data1, 0644)
+
+	ws2Dir := filepath.Join(dir, "beta")
+	os.MkdirAll(ws2Dir, 0755)
+	ws2 := newTestWorkspace("ws-2", "Beta")
+	ws2.FolderSlug = "beta"
+	data2, _ := ws2.ToJSON()
+	os.WriteFile(filepath.Join(ws2Dir, WorkspaceConfigFile), data2, 0644)
+
+	// Create index (starts empty)
+	idx, err := NewIndex(dir)
+	if err != nil {
+		t.Fatalf("NewIndex: %v", err)
+	}
+	defer idx.Close()
+
+	// Rebuild should discover both workspaces
+	if err := idx.Rebuild(); err != nil {
+		t.Fatalf("Rebuild: %v", err)
+	}
+
+	entries, err := idx.List()
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if len(entries) != 2 {
+		t.Fatalf("List returned %d entries after rebuild, want 2", len(entries))
+	}
+}
+
+func TestIndex_RebuildWithSubWorkspaces(t *testing.T) {
+	dir := t.TempDir()
+
+	// Create parent workspace
+	parentDir := filepath.Join(dir, "parent")
+	os.MkdirAll(parentDir, 0755)
+	parent := newTestWorkspace("ws-parent", "Parent")
+	parent.FolderSlug = "parent"
+	parentData, _ := parent.ToJSON()
+	os.WriteFile(filepath.Join(parentDir, WorkspaceConfigFile), parentData, 0644)
+
+	// Create child workspace inside sub-workspaces/
+	childDir := filepath.Join(parentDir, SubWorkspacesDir, "child")
+	os.MkdirAll(childDir, 0755)
+	child := newTestWorkspace("ws-child", "Child")
+	child.FolderSlug = "child"
+	childData, _ := child.ToJSON()
+	os.WriteFile(filepath.Join(childDir, WorkspaceConfigFile), childData, 0644)
+
+	idx, err := NewIndex(dir)
+	if err != nil {
+		t.Fatalf("NewIndex: %v", err)
+	}
+	defer idx.Close()
+
+	if err := idx.Rebuild(); err != nil {
+		t.Fatalf("Rebuild: %v", err)
+	}
+
+	entries, err := idx.List()
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if len(entries) != 2 {
+		t.Fatalf("List returned %d entries, want 2 (parent + child)", len(entries))
+	}
+
+	// Child should have parent_id set
+	childEntry, err := idx.Get("ws-child")
+	if err != nil {
+		t.Fatalf("Get child: %v", err)
+	}
+	if childEntry.ParentID != "ws-parent" {
+		t.Errorf("child ParentID=%q, want %q", childEntry.ParentID, "ws-parent")
+	}
+}
+
+func TestIndex_ParentID(t *testing.T) {
+	dir := t.TempDir()
+	idx, err := NewIndex(dir)
+	if err != nil {
+		t.Fatalf("NewIndex: %v", err)
+	}
+	defer idx.Close()
+
+	idx.Register(IndexEntry{
+		ID: "ws-parent", Name: "Parent", FolderPath: "parent", UpdatedAt: time.Now(),
+	})
+	idx.Register(IndexEntry{
+		ID: "ws-child", Name: "Child", FolderPath: "parent/sub-workspaces/child",
+		ParentID: "ws-parent", UpdatedAt: time.Now(),
+	})
+
+	child, err := idx.Get("ws-child")
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if child.ParentID != "ws-parent" {
+		t.Errorf("ParentID=%q, want %q", child.ParentID, "ws-parent")
+	}
+}

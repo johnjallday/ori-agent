@@ -337,6 +337,49 @@ func (s *SQLiteStore) DeleteWorkspace(ctx context.Context, id string) error {
 	})
 }
 
+// DeleteSessionsByWorkspace deletes all sessions (and their messages/tool_calls) belonging to a workspace.
+func (s *SQLiteStore) DeleteSessionsByWorkspace(ctx context.Context, workspaceID string) error {
+	return s.db.InTransaction(ctx, func(tx *sql.Tx) error {
+		// Delete tool_calls for sessions in this workspace
+		_, err := tx.ExecContext(ctx,
+			"DELETE FROM tool_calls WHERE session_id IN (SELECT id FROM sessions WHERE workspace_id = ?)", workspaceID)
+		if err != nil {
+			return fmt.Errorf("failed to delete tool calls: %w", err)
+		}
+
+		// Delete messages for sessions in this workspace
+		_, err = tx.ExecContext(ctx,
+			"DELETE FROM messages WHERE session_id IN (SELECT id FROM sessions WHERE workspace_id = ?)", workspaceID)
+		if err != nil {
+			return fmt.Errorf("failed to delete messages: %w", err)
+		}
+
+		// Delete session tags
+		_, err = tx.ExecContext(ctx,
+			"DELETE FROM session_tags WHERE session_id IN (SELECT id FROM sessions WHERE workspace_id = ?)", workspaceID)
+		if err != nil {
+			return fmt.Errorf("failed to delete session tags: %w", err)
+		}
+
+		// Delete sessions
+		_, err = tx.ExecContext(ctx, "DELETE FROM sessions WHERE workspace_id = ?", workspaceID)
+		if err != nil {
+			return fmt.Errorf("failed to delete sessions: %w", err)
+		}
+
+		return nil
+	})
+}
+
+// UnlinkSessionsFromWorkspace sets workspace_id to NULL for all sessions in a workspace.
+func (s *SQLiteStore) UnlinkSessionsFromWorkspace(ctx context.Context, workspaceID string) error {
+	_, err := s.db.ExecContext(ctx, "UPDATE sessions SET workspace_id = NULL WHERE workspace_id = ?", workspaceID)
+	if err != nil {
+		return fmt.Errorf("failed to unlink sessions: %w", err)
+	}
+	return nil
+}
+
 // ListWorkspaces returns all workspaces as a flat list.
 func (s *SQLiteStore) ListWorkspaces(ctx context.Context) ([]Workspace, error) {
 	rows, err := s.db.QueryContext(ctx, `

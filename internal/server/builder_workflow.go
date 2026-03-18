@@ -50,6 +50,27 @@ func (b *ServerBuilder) initializeWorkspaceStore() error {
 	// Now update chat handler with workspace store
 	b.chatHandler.SetWorkspaceStore(ws)
 
+	// Always create the folder-based FileStore alongside the primary store.
+	// The FileStore manages workspace folders on disk (workspace.json, files/, etc.)
+	// while the session adapter handles SQLite metadata. Both are needed.
+	//
+	// Priority for workspace root:
+	// 1. Settings workspace_root (user-configured)
+	// 2. WORKSPACE_DIR env var
+	// 3. Default: ~/Ori Workspaces
+	workspaceDir := resolveWorkspaceRoot(b.configManager)
+	fileStore, err := workspace.NewFileStore(workspaceDir)
+	if err != nil {
+		logger.Warn("Failed to create folder-based workspace store", logger.Fields{"error": err})
+	} else {
+		if b.sessionHandler != nil {
+			b.sessionHandler.SetWorkspaceStore(fileStore)
+		}
+		if verbose {
+			logger.Info("Folder-based workspace store initialized", logger.Fields{"dir": workspaceDir})
+		}
+	}
+
 	return nil
 }
 
