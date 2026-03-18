@@ -1548,50 +1548,6 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Add system message for better tool usage guidance
-	if len(ag.Messages) == 0 {
-		systemPrompt := h.buildSystemPromptWithSkills(
-			ag, current,
-			"You are a helpful assistant with access to various tools. When a user request can be fulfilled by using an available tool, use the tool instead of providing general information. Be concise and direct in your responses.",
-		)
-
-		// Append available tools list if there are any
-		if len(tools) > 0 {
-			systemPrompt += " Available tools: "
-			var toolNames []string
-			for _, tool := range tools {
-				toolNames = append(toolNames, tool.Name)
-			}
-			systemPrompt += strings.Join(toolNames, ", ") + "."
-		}
-
-		ag.Messages = append(ag.Messages, openai.SystemMessage(systemPrompt))
-	}
-
-	// Prepare and call the model
-	// If there are image files, use multi-part message with vision API format
-	if len(imageFiles) > 0 {
-		var contentParts []openai.ChatCompletionContentPartUnionParam
-
-		// Add text content first
-		contentParts = append(contentParts, openai.TextContentPart(q))
-
-		// Add image parts with base64 data URLs
-		for _, img := range imageFiles {
-			// Build data URL: data:image/png;base64,<content>
-			dataURL := fmt.Sprintf("data:%s;base64,%s", img.Type, img.Content)
-			contentParts = append(contentParts, openai.ImageContentPart(openai.ChatCompletionContentPartImageImageURLParam{
-				URL:    dataURL,
-				Detail: "auto",
-			}))
-			logger.Info("Added image to message", logger.Fields{"name": img.Name, "type": img.Type})
-		}
-
-		ag.Messages = append(ag.Messages, openai.UserMessage(contentParts))
-	} else {
-		ag.Messages = append(ag.Messages, openai.UserMessage(q))
-	}
-
 	// Store user message in session if session ID is provided
 	h.storeMessageInSession(r.Context(), sessionID, "user", sessionQuery)
 
@@ -1673,7 +1629,7 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 
 	// Handle OpenAI models
 	agentClient := h.getClientForAgent(ag.Agent)
-	h.handleOpenAIChat(w, r, ag, q, tools, current, base, fileAttachments, agentClient, plannerDecision, toolRuntimeSystemPrompt)
+	h.handleOpenAIChat(w, r, ag, q, tools, current, base, fileAttachments, llmImages, agentClient, plannerDecision, toolRuntimeSystemPrompt)
 }
 
 // isImageMimeType checks if a MIME type represents an image

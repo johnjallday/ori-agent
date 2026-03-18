@@ -1726,7 +1726,7 @@ window.sendMessageToChat = function(message, options) {
   if (input) {
     input.value = message;
   }
-  sendMessage(message);
+  return sendMessage(message);
 };
 
 // Update send button state based on chat state machine

@@ -4506,7 +4506,7 @@
     openChatPanel();
     if (prompt && typeof window.sendMessageToChat === 'function') {
       await waitForDelay(120);
-      window.sendMessageToChat(prompt, {
+      await window.sendMessageToChat(prompt, {
         routeContext: normalizeHomeRouteContext({
           surface: routeContext && routeContext.surface,
           page_path: routeContext && routeContext.page_path,
@@ -4557,7 +4557,7 @@
     openChatPanel();
     if (typeof window.sendMessageToChat !== 'function') return null;
     await waitForDelay(120);
-    window.sendMessageToChat(prompt, { routeContext: normalizeHomeRouteContext(routeContext) });
+    await window.sendMessageToChat(prompt, { routeContext: normalizeHomeRouteContext(routeContext) });
     return session;
   }
 

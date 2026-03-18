@@ -42,6 +42,7 @@ func (h *Handler) resolveEffectiveAgent(agentName string, routeCtx normalizedCha
 	if !ok || baseAgent == nil {
 		return nil, fmt.Errorf("agent '%s' not found", agentName)
 	}
+	baseAgent = cloneAgentForChat(baseAgent)
 
 	if h.runtimeResolver == nil || strings.TrimSpace(routeCtx.WorkspaceID) == "" {
 		result := &resolvedChatAgent{Agent: baseAgent}
@@ -66,7 +67,7 @@ func (h *Handler) resolveEffectiveAgent(agentName string, routeCtx normalizedCha
 		return result, nil
 	}
 	result := &resolvedChatAgent{
-		Agent:      resolved.Agent,
+		Agent:      cloneAgentForChat(resolved.Agent),
 		MCPServers: append([]string{}, resolved.MCPServers...),
 	}
 	if len(resolved.EffectiveSkills) > 0 {
@@ -116,12 +117,6 @@ func (h *Handler) rehydrateSessionHistory(ctx context.Context, sessionID string,
 		return
 	}
 
-	// Only rehydrate if the agent has no existing conversation history.
-	// A non-empty Messages slice means we already have in-memory context.
-	if len(ag.Messages) > 0 {
-		return
-	}
-
 	msgs, err := h.sessionStore.GetMessages(ctx, sessionID)
 	if err != nil {
 		logger.Warn("Failed to load session messages for rehydration", logger.Fields{
@@ -132,8 +127,11 @@ func (h *Handler) rehydrateSessionHistory(ctx context.Context, sessionID string,
 	}
 
 	if len(msgs) == 0 {
+		ag.Messages = nil
 		return
 	}
+
+	ag.Messages = make([]openai.ChatCompletionMessageParamUnion, 0, len(msgs))
 
 	// Convert stored messages to OpenAI message format.
 	for _, m := range msgs {
@@ -158,19 +156,41 @@ func (h *Handler) persistAgent(agentName string, ag *agent.Agent) error {
 		return nil
 	}
 
-	copyAgent := *ag
-	if len(ag.Capabilities) > 0 {
-		copyAgent.Capabilities = append([]string{}, ag.Capabilities...)
+	return h.store.SetAgent(agentName, cloneAgentForChat(ag))
+}
+
+func cloneAgentForChat(src *agent.Agent) *agent.Agent {
+	if src == nil {
+		return nil
 	}
-	if len(ag.Messages) > 0 {
-		copyAgent.Messages = append([]openai.ChatCompletionMessageParamUnion{}, ag.Messages...)
+
+	copyAgent := *src
+	copyAgent.Messages = nil
+
+	if len(src.Capabilities) > 0 {
+		copyAgent.Capabilities = append([]string{}, src.Capabilities...)
 	}
-	if len(ag.Plugins) > 0 {
-		copyAgent.Plugins = make(map[string]types.LoadedPlugin, len(ag.Plugins))
-		for key, value := range ag.Plugins {
+	if len(src.Plugins) > 0 {
+		copyAgent.Plugins = make(map[string]types.LoadedPlugin, len(src.Plugins))
+		for key, value := range src.Plugins {
 			copyAgent.Plugins[key] = value
 		}
 	}
+	if src.Statistics != nil {
+		statsCopy := src.Statistics.GetSafeStats()
+		copyAgent.Statistics = &statsCopy
+	}
+	if src.Metadata != nil {
+		metadataCopy := *src.Metadata
+		if len(src.Metadata.Tags) > 0 {
+			metadataCopy.Tags = append([]string{}, src.Metadata.Tags...)
+		}
+		copyAgent.Metadata = &metadataCopy
+	}
+	if src.Evolution != nil {
+		evolutionCopy := *src.Evolution
+		copyAgent.Evolution = &evolutionCopy
+	}
 
-	return h.store.SetAgent(agentName, &copyAgent)
+	return &copyAgent
 }
