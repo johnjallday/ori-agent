@@ -300,6 +300,8 @@ func (s *FileStore) List() ([]string, error) {
 
 // Delete removes a workspace from storage by deleting the entire folder.
 // This also removes all sub-workspaces (cascading delete).
+// Safety: only deletes folders that are inside the workspace root.
+// Folders outside the root (e.g., imported project directories) are unregistered but not deleted.
 func (s *FileStore) Delete(id string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -310,14 +312,40 @@ func (s *FileStore) Delete(id string) error {
 	}
 
 	folderPath := s.resolveFolder(relPath)
-	if err := os.RemoveAll(folderPath); err != nil {
-		return fmt.Errorf("failed to delete workspace folder: %w", err)
+
+	// Safety check: only delete folders inside the workspace root.
+	// Never delete imported/external folders (e.g., user project directories).
+	if s.isInsideRoot(folderPath) {
+		if err := os.RemoveAll(folderPath); err != nil {
+			return fmt.Errorf("failed to delete workspace folder: %w", err)
+		}
+	} else {
+		logger.Info("Workspace folder outside root, unregistering without deleting from disk",
+			logger.Fields{"id": id, "path": folderPath})
 	}
 
 	// Remove this workspace and all children from cache and mappings
 	s.removeFromCacheRecursive(id)
 
 	return nil
+}
+
+// isInsideRoot checks whether a path is inside the workspace root directory.
+func (s *FileStore) isInsideRoot(path string) bool {
+	absPath, err := filepath.Abs(path)
+	if err != nil {
+		return false
+	}
+	absBase, err := filepath.Abs(s.basePath)
+	if err != nil {
+		return false
+	}
+	rel, err := filepath.Rel(absBase, absPath)
+	if err != nil {
+		return false
+	}
+	// Must be relative (not starting with "..") and not equal to "."
+	return !filepath.IsAbs(rel) && rel != "." && (len(rel) < 2 || rel[:2] != "..")
 }
 
 // removeFromCacheRecursive removes a workspace and all its children from cache/index.

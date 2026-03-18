@@ -1462,7 +1462,7 @@ console.log('[workspace-hub.js] FILE LOADED');
 
     try {
       for (const id of ids) {
-        const response = await fetch(`/api/workspaces/${encodeURIComponent(id)}`, { method: 'DELETE' });
+        const response = await fetch(`/api/workspaces/${encodeURIComponent(id)}?confirm=true`, { method: 'DELETE' });
         if (!response.ok && response.status !== 404) {
           const text = await response.text();
           throw new Error(text || 'Failed to delete workspace');
@@ -1487,7 +1487,7 @@ console.log('[workspace-hub.js] FILE LOADED');
     const childCount = descendants.length;
 
     if (!elements.launcherDeleteGroupModal || typeof bootstrap === 'undefined' || !bootstrap.Modal) {
-      const deleteAll = confirm(`"${workspace?.name || 'Group'}" has ${childCount} workspace(s). Click OK to delete the group and all contents, or Cancel to delete only the group.`);
+      const deleteAll = confirm(`"${workspace?.name || 'Group'}" has ${childCount} sub-workspace(s).\n\nClick OK to delete the group and all contents (workspace folders and files will be permanently removed from disk).\nClick Cancel to delete only the parent group.`);
       if (deleteAll) {
         void deleteGroupAndContents(workspaceId);
       } else {
@@ -1541,7 +1541,7 @@ console.log('[workspace-hub.js] FILE LOADED');
     }
 
     const label = getWorkspaceLabel(workspaceId);
-    if (!confirm(`Delete "${label}"? This action cannot be undone.`)) return;
+    if (!confirm(`Delete "${label}"?\n\nThis will permanently remove the workspace folder and all its contents (files, notes, etc.) from disk. This action cannot be undone.`)) return;
 
     void deleteWorkspacesByIds([workspaceId]);
   }
@@ -1551,7 +1551,7 @@ console.log('[workspace-hub.js] FILE LOADED');
     const selected = Array.from(state.selectedWorkspaces || []);
     if (selected.length === 0) return;
 
-    if (!confirm(`Are you sure you want to delete ${selected.length} workspace(s)? This action cannot be undone.`)) {
+    if (!confirm(`Delete ${selected.length} workspace(s)?\n\nThis will permanently remove the workspace folders and all their contents (files, notes, etc.) from disk. This action cannot be undone.`)) {
       return;
     }
 
