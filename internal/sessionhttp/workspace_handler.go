@@ -160,8 +160,25 @@ func (h *Handler) createWorkspace(w http.ResponseWriter, r *http.Request) {
 		if folderErr != nil {
 			logger.Warn("Failed to create workspace folder on disk", logger.Fields{"id": ws.ID, "error": folderErr})
 			// Non-fatal: SQLite creation succeeded, folder is supplementary
-		} else {
-			folderPath, _ := h.workspaceStore.GetFolderPath(ws.ID)
+		} else if folderPath, err := h.workspaceStore.GetFolderPath(ws.ID); err == nil {
+			// Add the workspace folder as the initial directory reference
+			dirRef := workspaceDirectoryReference{
+				ID:          uuid.New().String(),
+				WorkspaceID: ws.ID,
+				Name:        ws.FolderSlug,
+				Path:        folderPath,
+				X:           400,
+				Y:           300,
+				CreatedAt:   time.Now(),
+				UpdatedAt:   time.Now(),
+			}
+			if data, err := json.Marshal([]workspaceDirectoryReference{dirRef}); err == nil {
+				ws.DirectoryReferencesJSON = data
+				ws.UpdatedAt = time.Now()
+				if err := h.store.UpdateWorkspace(r.Context(), ws); err != nil {
+					logger.Warn("Failed to set initial directory reference", logger.Fields{"id": ws.ID, "error": err})
+				}
+			}
 			logger.Info("Workspace folder created on disk", logger.Fields{"id": ws.ID, "path": folderPath})
 		}
 	}
