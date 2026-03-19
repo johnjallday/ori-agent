@@ -161,6 +161,8 @@ func (h *Handler) createWorkspace(w http.ResponseWriter, r *http.Request) {
 			logger.Warn("Failed to create workspace folder on disk", logger.Fields{"id": ws.ID, "error": folderErr})
 			// Non-fatal: SQLite creation succeeded, folder is supplementary
 		} else if folderPath, err := h.workspaceStore.GetFolderPath(ws.ID); err == nil {
+			now := time.Now()
+
 			// Add the workspace folder as the initial directory reference
 			dirRef := workspaceDirectoryReference{
 				ID:          uuid.New().String(),
@@ -169,16 +171,54 @@ func (h *Handler) createWorkspace(w http.ResponseWriter, r *http.Request) {
 				Path:        folderPath,
 				X:           400,
 				Y:           300,
-				CreatedAt:   time.Now(),
-				UpdatedAt:   time.Now(),
+				CreatedAt:   now,
+				UpdatedAt:   now,
 			}
 			if data, err := json.Marshal([]workspaceDirectoryReference{dirRef}); err == nil {
 				ws.DirectoryReferencesJSON = data
-				ws.UpdatedAt = time.Now()
-				if err := h.store.UpdateWorkspace(r.Context(), ws); err != nil {
-					logger.Warn("Failed to set initial directory reference", logger.Fields{"id": ws.ID, "error": err})
-				}
 			}
+
+			// Auto-provision a filesystem MCP binding scoped to the workspace folder
+			mcpBinding := agentworkspace.WorkspaceMCPBinding{
+				ID:         uuid.New().String(),
+				ServerName: "filesystem",
+				Alias:      "workspace-files",
+				Enabled:    true,
+				Config: map[string]interface{}{
+					"roots": []string{folderPath},
+				},
+				CreatedAt: now,
+				UpdatedAt: now,
+			}
+			if data, err := json.Marshal([]agentworkspace.WorkspaceMCPBinding{mcpBinding}); err == nil {
+				ws.MCPBindingsJSON = data
+			}
+
+			ws.UpdatedAt = now
+			if err := h.store.UpdateWorkspace(r.Context(), ws); err != nil {
+				logger.Warn("Failed to set initial workspace config", logger.Fields{"id": ws.ID, "error": err})
+			}
+
+			// Resync workspace.json to include directory reference and MCP binding
+			folderWS.SharedData = make(map[string]interface{})
+			folderWS.DirectoryReferences = []agentworkspace.DirectoryReference{
+				{
+					ID:          dirRef.ID,
+					WorkspaceID: dirRef.WorkspaceID,
+					Name:        dirRef.Name,
+					Path:        dirRef.Path,
+					X:           dirRef.X,
+					Y:           dirRef.Y,
+					CreatedAt:   dirRef.CreatedAt,
+					UpdatedAt:   dirRef.UpdatedAt,
+				},
+			}
+			folderWS.MCPBindings = []agentworkspace.WorkspaceMCPBinding{mcpBinding}
+			folderWS.UpdatedAt = now
+			if err := h.workspaceStore.Save(folderWS); err != nil {
+				logger.Warn("Failed to resync workspace.json after creation", logger.Fields{"id": ws.ID, "error": err})
+			}
+
 			logger.Info("Workspace folder created on disk", logger.Fields{"id": ws.ID, "path": folderPath})
 		}
 	}
