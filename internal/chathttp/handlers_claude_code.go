@@ -18,10 +18,6 @@ func (h *Handler) handleClaudeCodeChat(w http.ResponseWriter, r *http.Request, a
 	ctx, cancel := context.WithTimeout(baseCtx, ChatRequestTimeout)
 	defer cancel()
 
-	if h.maybeHandleWorkspaceSaveNoteWithoutModel(w, ag, agentName, userMessage, baseCtx, sessionID, plannerDecision) {
-		return
-	}
-
 	provider, err := h.llmFactory.GetProvider("claude_code")
 	if err != nil {
 		writeErrorResponse(w, fmt.Sprintf("Claude Code provider not available: %v", err))

@@ -1552,6 +1552,10 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 	// Store user message in session if session ID is provided
 	h.storeMessageInSession(r.Context(), sessionID, "user", sessionQuery)
 
+	if h.maybeHandleWorkspaceSaveNoteWithoutModel(w, ag, current, originalQuery, base, sessionID, plannerDecision) {
+		return
+	}
+
 	// Convert uploaded files to FileAttachments for tool execution
 	fileAttachments := ConvertUploadedFilesToAttachments(req.Files)
 	logger.Info("Converted files for tool execution", logger.Fields{

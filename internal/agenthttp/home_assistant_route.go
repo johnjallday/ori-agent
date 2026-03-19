@@ -1091,6 +1091,9 @@ func parseHomeAssistantAppLaunchPrompt(prompt string) (string, bool) {
 	if target == "" {
 		return "", false
 	}
+	if looksLikeWorkspaceArtifactTarget(target) {
+		return "", false
+	}
 
 	// Skip obvious URL/path-like targets that are more likely file or web intents.
 	if strings.Contains(target, "://") || strings.Contains(target, "/") || strings.Contains(target, "\\") || looksLikeWebHostTarget(target) {
@@ -1098,6 +1101,33 @@ func parseHomeAssistantAppLaunchPrompt(prompt string) (string, bool) {
 	}
 
 	return target, true
+}
+
+func looksLikeWorkspaceArtifactTarget(target string) bool {
+	tokens := tokenizePrompt(target)
+	if len(tokens) == 0 {
+		return false
+	}
+
+	last := tokens[len(tokens)-1]
+	switch last {
+	case "note", "notes", "task", "tasks", "workspace", "workspaces", "session", "sessions":
+	default:
+		return false
+	}
+
+	if len(tokens) == 1 {
+		return true
+	}
+
+	for _, token := range tokens[:len(tokens)-1] {
+		switch token {
+		case "a", "an", "the", "my", "new", "another", "separate", "this", "that":
+			return true
+		}
+	}
+
+	return false
 }
 
 func looksLikeWebHostTarget(target string) bool {

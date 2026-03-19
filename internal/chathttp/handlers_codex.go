@@ -18,10 +18,6 @@ func (h *Handler) handleCodexChat(w http.ResponseWriter, r *http.Request, ag *re
 	ctx, cancel := context.WithTimeout(baseCtx, ChatRequestTimeout)
 	defer cancel()
 
-	if h.maybeHandleWorkspaceSaveNoteWithoutModel(w, ag, agentName, userMessage, baseCtx, sessionID, plannerDecision) {
-		return
-	}
-
 	if h.llmFactory == nil {
 		writeErrorResponse(w, "Codex provider not available")
 		return

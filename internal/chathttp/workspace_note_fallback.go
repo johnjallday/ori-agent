@@ -3,7 +3,9 @@ package chathttp
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
+	"sort"
 	"strings"
 	"unicode/utf8"
 
@@ -14,6 +16,14 @@ import (
 )
 
 const defaultWorkspaceSavedNoteName = "Saved Chat Note"
+
+type workspaceNoteFallbackMode string
+
+const (
+	workspaceNoteFallbackNone         workspaceNoteFallbackMode = ""
+	workspaceNoteFallbackCreateNew    workspaceNoteFallbackMode = "create_new"
+	workspaceNoteFallbackAppendRecent workspaceNoteFallbackMode = "append_recent"
+)
 
 type workspaceSaveNoteToolResponse struct {
 	ID      string `json:"id"`
@@ -34,21 +44,45 @@ func (h *Handler) maybeHandleWorkspaceSaveNoteWithoutModel(
 	if h == nil || ag == nil || ag.WorkspaceTools == nil {
 		return false
 	}
-	if !matchesWorkspaceSaveNoteIntent(userMessage) {
+	latestAssistant := latestAssistantMessageText(ag.Messages)
+	mode := detectWorkspaceNoteFallbackMode(userMessage, latestAssistant)
+	if mode == workspaceNoteFallbackNone {
 		return false
 	}
 
-	content := latestAssistantMessageText(ag.Messages)
+	content := sanitizeAssistantContentForNote(latestAssistant)
 	if strings.TrimSpace(content) == "" {
 		responseText := "I couldn't find earlier assistant content in this chat to save as a note."
 		h.finishWorkspaceNoteFallbackResponse(w, ag, agentName, baseCtx, sessionID, responseText, nil, plannerDecision)
 		return true
 	}
 
-	args, err := json.Marshal(map[string]string{
-		"name":    deriveWorkspaceSavedNoteName(content),
+	request := map[string]string{
 		"content": content,
-	})
+	}
+	actionSummary := "Saved prior assistant response to a workspace note"
+	actionReason := "workspace note save fallback"
+	expectedNoteName := deriveWorkspaceSavedNoteName(content)
+
+	if mode == workspaceNoteFallbackAppendRecent {
+		noteID, noteName, mergedContent, err := prepareWorkspaceNoteAppend(baseCtx, ag.WorkspaceTools, content)
+		if err != nil {
+			responseText := "I couldn't update the existing note: " + strings.TrimSpace(err.Error())
+			h.finishWorkspaceNoteFallbackResponse(w, ag, agentName, baseCtx, sessionID, responseText, nil, plannerDecision)
+			return true
+		}
+		request["note_id"] = noteID
+		request["content"] = mergedContent
+		if noteName != "" {
+			expectedNoteName = noteName
+		}
+		actionSummary = "Updated the most recent workspace note with prior assistant response"
+		actionReason = "workspace note append fallback"
+	} else {
+		request["name"] = expectedNoteName
+	}
+
+	args, err := json.Marshal(request)
 	if err != nil {
 		responseText := "I couldn't prepare the note payload for saving."
 		h.finishWorkspaceNoteFallbackResponse(w, ag, agentName, baseCtx, sessionID, responseText, nil, plannerDecision)
@@ -62,8 +96,8 @@ func (h *Handler) maybeHandleWorkspaceSaveNoteWithoutModel(
 
 	receipt := buildActionReceipt(
 		"workspace_note",
-		"Saved prior assistant response to a workspace note",
-		"non-tool-provider workspace save fallback",
+		actionSummary,
+		actionReason,
 		result.ToolName,
 		result.ToolArgs,
 		result.Result,
@@ -74,12 +108,16 @@ func (h *Handler) maybeHandleWorkspaceSaveNoteWithoutModel(
 
 	responseText := "I couldn't save that to a note."
 	if result.Success {
-		savedName := deriveWorkspaceSavedNoteName(content)
+		savedName := expectedNoteName
 		var payload workspaceSaveNoteToolResponse
 		if err := json.Unmarshal([]byte(result.Result), &payload); err == nil && strings.TrimSpace(payload.Name) != "" {
 			savedName = strings.TrimSpace(payload.Name)
 		}
-		responseText = "Saved the previous answer to note " + quoteForResponse(savedName) + "."
+		if mode == workspaceNoteFallbackAppendRecent {
+			responseText = "Added the previous answer to note " + quoteForResponse(savedName) + "."
+		} else {
+			responseText = "Saved the previous answer to note " + quoteForResponse(savedName) + "."
+		}
 	} else if strings.TrimSpace(result.Error) != "" {
 		responseText = "I couldn't save that to a note: " + strings.TrimSpace(result.Error)
 	}
@@ -165,6 +203,71 @@ func matchesWorkspaceSaveNoteIntent(userMessage string) bool {
 	}
 }
 
+func detectWorkspaceNoteFallbackMode(userMessage, latestAssistant string) workspaceNoteFallbackMode {
+	message := normalizeWorkspaceSaveIntentText(userMessage)
+	if message == "" {
+		return workspaceNoteFallbackNone
+	}
+
+	if matchesWorkspaceSeparateNoteIntent(message) {
+		return workspaceNoteFallbackCreateNew
+	}
+	if matchesWorkspaceAppendNoteIntent(message) {
+		return workspaceNoteFallbackAppendRecent
+	}
+	if matchesWorkspaceSaveNoteIntent(message) {
+		return workspaceNoteFallbackCreateNew
+	}
+	if isWorkspaceNoteAffirmation(message) && assistantPromptRequestsNoteAppend(latestAssistant) {
+		return workspaceNoteFallbackAppendRecent
+	}
+
+	return workspaceNoteFallbackNone
+}
+
+func matchesWorkspaceSeparateNoteIntent(message string) bool {
+	if message == "" || !strings.Contains(message, "note") {
+		return false
+	}
+	return strings.Contains(message, "separate note") ||
+		strings.Contains(message, "another note") ||
+		strings.Contains(message, "new note") ||
+		strings.Contains(message, "separate ") && strings.Contains(message, " note") ||
+		strings.HasPrefix(message, "start ") && strings.Contains(message, " note")
+}
+
+func matchesWorkspaceAppendNoteIntent(message string) bool {
+	if message == "" || !strings.Contains(message, "note") {
+		return false
+	}
+	return strings.Contains(message, "add this to") ||
+		strings.Contains(message, "add it to") ||
+		strings.Contains(message, "append") ||
+		strings.Contains(message, "update the note") ||
+		strings.Contains(message, "to my note") ||
+		strings.Contains(message, "to the note")
+}
+
+func isWorkspaceNoteAffirmation(message string) bool {
+	switch message {
+	case "yes", "yes please", "yeah", "yep", "sure", "ok", "okay", "please do", "do it", "go ahead", "sounds good":
+		return true
+	default:
+		return false
+	}
+}
+
+func assistantPromptRequestsNoteAppend(message string) bool {
+	normalized := normalizeWorkspaceSaveIntentText(message)
+	if normalized == "" || !strings.Contains(normalized, "note") {
+		return false
+	}
+	return (strings.Contains(normalized, "want me to add") ||
+		strings.Contains(normalized, "would you like me to add") ||
+		strings.Contains(normalized, "should i add")) &&
+		strings.Contains(normalized, "note")
+}
+
 func latestAssistantMessageText(messages []openai.ChatCompletionMessageParamUnion) string {
 	for i := len(messages) - 1; i >= 0; i-- {
 		msg := messages[i]
@@ -185,6 +288,38 @@ func assistantMessageText(msg *openai.ChatCompletionAssistantMessageParam) strin
 	return msg.Content.OfString.Value
 }
 
+func sanitizeAssistantContentForNote(content string) string {
+	content = strings.TrimSpace(content)
+	if content == "" {
+		return ""
+	}
+
+	parts := strings.Split(content, "\n\n")
+	for len(parts) > 0 {
+		last := strings.TrimSpace(parts[len(parts)-1])
+		if !assistantMessageLooksLikeNotePrompt(last) {
+			break
+		}
+		parts = parts[:len(parts)-1]
+	}
+
+	sanitized := strings.TrimSpace(strings.Join(parts, "\n\n"))
+	if sanitized == "" {
+		return content
+	}
+	return sanitized
+}
+
+func assistantMessageLooksLikeNotePrompt(message string) bool {
+	normalized := normalizeWorkspaceSaveIntentText(message)
+	if normalized == "" || !strings.Contains(normalized, "note") {
+		return false
+	}
+	return strings.Contains(normalized, "want me to") ||
+		strings.Contains(normalized, "would you like me to") ||
+		strings.Contains(normalized, "should i")
+}
+
 func deriveWorkspaceSavedNoteName(content string) string {
 	for _, line := range strings.Split(content, "\n") {
 		name := strings.TrimSpace(line)
@@ -201,6 +336,50 @@ func deriveWorkspaceSavedNoteName(content string) string {
 		return name
 	}
 	return defaultWorkspaceSavedNoteName
+}
+
+func prepareWorkspaceNoteAppend(
+	ctx context.Context,
+	workspaceTools *WorkspaceToolProvider,
+	addition string,
+) (string, string, string, error) {
+	if workspaceTools == nil || workspaceTools.sessionStore == nil || strings.TrimSpace(workspaceTools.workspaceID) == "" {
+		return "", "", "", fmt.Errorf("workspace note tools are unavailable")
+	}
+
+	notes, err := workspaceTools.sessionStore.ListNotesByWorkspace(ctx, workspaceTools.workspaceID)
+	if err != nil {
+		return "", "", "", err
+	}
+	if len(notes) == 0 {
+		return "", "", "", fmt.Errorf("no existing workspace notes found")
+	}
+
+	sort.SliceStable(notes, func(i, j int) bool {
+		return notes[i].UpdatedAt.After(notes[j].UpdatedAt)
+	})
+	target := notes[0]
+	existing, err := workspaceTools.sessionStore.GetNote(ctx, target.ID)
+	if err != nil {
+		return "", "", "", err
+	}
+
+	return existing.ID, existing.Name, mergeWorkspaceNoteContent(existing.Content, addition), nil
+}
+
+func mergeWorkspaceNoteContent(existing, addition string) string {
+	existing = strings.TrimSpace(existing)
+	addition = strings.TrimSpace(addition)
+	switch {
+	case existing == "":
+		return addition
+	case addition == "":
+		return existing
+	case strings.Contains(existing, addition):
+		return existing
+	default:
+		return existing + "\n\n" + addition
+	}
 }
 
 func normalizeWorkspaceSaveIntentText(text string) string {

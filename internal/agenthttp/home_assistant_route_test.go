@@ -518,6 +518,40 @@ func TestHomeAssistantRouteHandler_AppLaunchMatch_UsesRoutingProfile(t *testing.
 	}
 }
 
+func TestHomeAssistantRouteHandler_WorkspaceNotePrompt_NotClassifiedAsAppLaunch(t *testing.T) {
+	st := newHomeRouteTestStore(t)
+	handler := NewHomeAssistantRouteHandler(st)
+
+	addHomeRouteTestAgent(t, st, "Desktop Launcher", &store.CreateAgentConfig{Type: "tool-calling"}, types.AgentStatusActive,
+		"Opens desktop applications like reaper and finder", []string{"desktop", "automation"}, []string{"os-shell"})
+
+	rr := postRouteRequest(t, handler, map[string]any{
+		"prompt": "start another note",
+		"context": map[string]any{
+			"workspace_id": "ws-notes",
+			"page_path":    "/workspaces/ws-notes",
+		},
+	})
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d: %s", http.StatusOK, rr.Code, rr.Body.String())
+	}
+
+	var resp HomeAssistantRouteResponse
+	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+
+	if resp.Intent == "app_launch" {
+		t.Fatalf("expected workspace note follow-up to avoid app launch, got %q", resp.Intent)
+	}
+	if resp.RoutingPolicy != homeAssistantPolicyAssistantOnly {
+		t.Fatalf("expected routing policy %q, got %q", homeAssistantPolicyAssistantOnly, resp.RoutingPolicy)
+	}
+	if resp.RouteMode != "workspace_task" || resp.TargetSurface != "workspace" {
+		t.Fatalf("expected workspace note follow-up to stay in workspace flow, got mode=%q surface=%q", resp.RouteMode, resp.TargetSurface)
+	}
+}
+
 func TestHomeAssistantRouteHandler_GeneralPrompt_UsesRoutingProfileExamples(t *testing.T) {
 	st := newHomeRouteTestStore(t)
 	handler := NewHomeAssistantRouteHandler(st)
