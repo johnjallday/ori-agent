@@ -2004,6 +2004,17 @@ const sessionManager = {
 
     if (!infoBar) return;
 
+    // Update session ID in header
+    const sessionIdEl = document.getElementById('chatPanelSessionId');
+    if (sessionIdEl) {
+      if (this.activeSessionId) {
+        sessionIdEl.textContent = this.activeSessionId;
+        sessionIdEl.style.display = '';
+      } else {
+        sessionIdEl.style.display = 'none';
+      }
+    }
+
     // Update session title
     if (sessionTitleEl && sessionTitle) {
       sessionTitleEl.textContent = sessionTitle;
