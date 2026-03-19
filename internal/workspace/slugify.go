@@ -15,6 +15,9 @@ const (
 	// FilesDir is the subdirectory for workspace-specific file storage.
 	FilesDir = "files"
 
+	// NotesDir is the subdirectory for workspace notes stored as markdown files.
+	NotesDir = "notes"
+
 	// SubWorkspacesDir is the subdirectory for nested child workspaces.
 	SubWorkspacesDir = "sub-workspaces"
 

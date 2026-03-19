@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/johnjallday/ori-agent/internal/agenthttp"
 	"github.com/johnjallday/ori-agent/internal/client"
 	"github.com/johnjallday/ori-agent/internal/config"
 	orihttp "github.com/johnjallday/ori-agent/internal/http"
@@ -969,6 +970,16 @@ func (h *Handler) SystemModelHandler(w http.ResponseWriter, r *http.Request) {
 		if err := h.configManager.Save(); err != nil {
 			orihttp.InternalError(w, err.Error())
 			return
+		}
+
+		// Ensure the system assistant agent exists and is aligned with the new system model.
+		// Without this, chat won't work until a server restart.
+		if err := agenthttp.EnsureSystemAssistantAgentWithSystemModel(h.store, provider, model); err != nil {
+			logger.Warn("Failed to ensure system assistant agent after system model update", logger.Fields{
+				"provider": provider,
+				"model":    model,
+				"error":    err,
+			})
 		}
 
 		savedReasoning := ""

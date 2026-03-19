@@ -130,6 +130,9 @@ func (h *Handler) createNote(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Sync note to workspace folder as a markdown file
+	h.syncNoteToFile(note)
+
 	logger.Info("Note created", logger.Fields{"id": note.ID, "workspace_id": req.WorkspaceID, "name": req.Name})
 
 	_ = orihttp.RespondCreated(w, map[string]interface{}{
@@ -172,6 +175,9 @@ func (h *Handler) createNoteInWorkspace(w http.ResponseWriter, r *http.Request, 
 		_ = orihttp.RespondInternalError(w, "Failed to create note")
 		return
 	}
+
+	// Sync note to workspace folder as a markdown file
+	h.syncNoteToFile(note)
 
 	logger.Info("Note created", logger.Fields{"id": note.ID, "workspace_id": workspaceID, "name": req.Name})
 
@@ -222,6 +228,9 @@ func (h *Handler) updateNote(w http.ResponseWriter, r *http.Request, id string) 
 		return
 	}
 
+	// Track old name for file rename
+	oldName := note.Name
+
 	// Apply partial updates
 	if req.Name != nil {
 		note.Name = *req.Name
@@ -240,6 +249,9 @@ func (h *Handler) updateNote(w http.ResponseWriter, r *http.Request, id string) 
 		return
 	}
 
+	// Sync updated note to workspace folder
+	h.syncNoteToFileAfterRename(note, oldName)
+
 	logger.Info("Note updated", logger.Fields{"id": id})
 
 	orihttp.WriteJSON(w, map[string]interface{}{
@@ -250,6 +262,9 @@ func (h *Handler) updateNote(w http.ResponseWriter, r *http.Request, id string) 
 
 // deleteNote handles DELETE /api/notes/{id}.
 func (h *Handler) deleteNote(w http.ResponseWriter, r *http.Request, id string) {
+	// Get note before deleting so we can remove the file
+	note, _ := h.store.GetNote(r.Context(), id)
+
 	err := h.store.DeleteNote(r.Context(), id)
 	if err == session.ErrNoteNotFound {
 		_ = orihttp.RespondNotFound(w, "Note not found")
@@ -259,6 +274,11 @@ func (h *Handler) deleteNote(w http.ResponseWriter, r *http.Request, id string) 
 		logger.Error("Failed to delete note", logger.Fields{"id": id, "error": err})
 		_ = orihttp.RespondInternalError(w, "Failed to delete note")
 		return
+	}
+
+	// Remove the note file from the workspace folder
+	if note != nil {
+		h.deleteNoteFile(note)
 	}
 
 	logger.Info("Note deleted", logger.Fields{"id": id})
@@ -332,6 +352,9 @@ func (h *Handler) HandleBulkDeleteNotes(w http.ResponseWriter, r *http.Request) 
 	var errors []string
 
 	for _, noteID := range req.NoteIDs {
+		// Get note before deleting so we can remove the file
+		note, _ := h.store.GetNote(r.Context(), noteID)
+
 		err := h.store.DeleteNote(r.Context(), noteID)
 		if err != nil {
 			failedCount++
@@ -339,6 +362,11 @@ func (h *Handler) HandleBulkDeleteNotes(w http.ResponseWriter, r *http.Request) 
 			continue
 		}
 		successCount++
+
+		// Remove the note file from the workspace folder
+		if note != nil {
+			h.deleteNoteFile(note)
+		}
 	}
 
 	logger.Info("Bulk delete notes completed", logger.Fields{

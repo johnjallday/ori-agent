@@ -117,9 +117,12 @@ func (s *FileStore) Save(ws *Workspace) error {
 		}
 	}
 
-	// Create workspace folder and files subdirectory
+	// Create workspace folder with files and notes subdirectories
 	if err := os.MkdirAll(filepath.Join(folderPath, FilesDir), 0755); err != nil {
 		return fmt.Errorf("failed to create workspace folder: %w", err)
+	}
+	if err := os.MkdirAll(filepath.Join(folderPath, NotesDir), 0755); err != nil {
+		return fmt.Errorf("failed to create workspace notes folder: %w", err)
 	}
 
 	// Serialize workspace
@@ -178,9 +181,12 @@ func (s *FileStore) SaveAt(ws *Workspace, location string) error {
 		return fmt.Errorf("a workspace folder named %q already exists at %s, choose a different name", ws.FolderSlug, location)
 	}
 
-	// Create workspace folder and files subdirectory
+	// Create workspace folder with files and notes subdirectories
 	if err := os.MkdirAll(filepath.Join(folderPath, FilesDir), 0755); err != nil {
 		return fmt.Errorf("failed to create workspace folder: %w", err)
+	}
+	if err := os.MkdirAll(filepath.Join(folderPath, NotesDir), 0755); err != nil {
+		return fmt.Errorf("failed to create workspace notes folder: %w", err)
 	}
 
 	// Serialize and write workspace.json
