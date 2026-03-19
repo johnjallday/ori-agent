@@ -54,6 +54,13 @@ func TestFileStore_SaveLoad_NestedRoundTrip(t *testing.T) {
 					Tags:        []string{"analysis", "primary"},
 					AvatarColor: "#3366ff",
 					Favorite:    true,
+					RoutingProfile: &types.AgentRoutingProfile{
+						MatchPhrases:    []string{"open my latest reaper project"},
+						ExampleRequests: []string{"render stems from yesterday's session"},
+						Domains:         []string{"reaper", "audio"},
+						ExternalSystems: []string{"reaper"},
+						SideEffects:     "local_app",
+					},
 				},
 			},
 		},
@@ -120,6 +127,12 @@ func TestFileStore_SaveLoad_NestedRoundTrip(t *testing.T) {
 	}
 	if !got.Metadata.Favorite {
 		t.Error("expected metadata favorite to persist")
+	}
+	if got.Metadata.RoutingProfile == nil {
+		t.Fatal("expected routing profile to be loaded")
+	}
+	if len(got.Metadata.RoutingProfile.ExampleRequests) != 1 {
+		t.Errorf("expected routing profile examples to persist, got %d", len(got.Metadata.RoutingProfile.ExampleRequests))
 	}
 }
 

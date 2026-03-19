@@ -63,6 +63,22 @@ func addHomeRouteTestAgent(t *testing.T, st store.Store, name string, cfg *store
 	}
 }
 
+func setHomeRouteTestAgentRoutingProfile(t *testing.T, st store.Store, name string, profile *types.AgentRoutingProfile) {
+	t.Helper()
+
+	ag, ok := st.GetAgent(name)
+	if !ok || ag == nil {
+		t.Fatalf("agent %q not found", name)
+	}
+	if ag.Metadata == nil {
+		ag.Metadata = &types.AgentMetadata{}
+	}
+	ag.Metadata.RoutingProfile = profile
+	if err := st.SetAgent(name, ag); err != nil {
+		t.Fatalf("failed to persist routing profile for %q: %v", name, err)
+	}
+}
+
 type homeRouteRuntimeResolverStub struct {
 	store   store.Store
 	servers map[string][]string
@@ -146,6 +162,9 @@ func TestHomeAssistantRouteHandler_TravelMatch(t *testing.T) {
 	if resp.Intent != "travel_planning" {
 		t.Fatalf("expected intent travel_planning, got %q", resp.Intent)
 	}
+	if resp.RoutingPolicy != homeAssistantPolicyAssistantPreferred {
+		t.Fatalf("expected routing policy %q, got %q", homeAssistantPolicyAssistantPreferred, resp.RoutingPolicy)
+	}
 	if resp.RequiresCreation {
 		t.Fatalf("expected requires_creation false, got true")
 	}
@@ -213,6 +232,9 @@ func TestHomeAssistantRouteHandler_EmailMatch(t *testing.T) {
 
 	if resp.Intent != "email_check" {
 		t.Fatalf("expected intent email_check, got %q", resp.Intent)
+	}
+	if resp.RoutingPolicy != homeAssistantPolicySpecialistRequired {
+		t.Fatalf("expected routing policy %q, got %q", homeAssistantPolicySpecialistRequired, resp.RoutingPolicy)
 	}
 	if resp.RequiresCreation {
 		t.Fatalf("expected requires_creation false")
@@ -380,6 +402,9 @@ func TestHomeAssistantRouteHandler_CalendarIntent_WorkspaceScheduleRoutesToWorks
 	if resp.IntentVariant != "workspace_schedule" {
 		t.Fatalf("expected workspace_schedule variant, got %q", resp.IntentVariant)
 	}
+	if resp.RoutingPolicy != homeAssistantPolicyAssistantOnly {
+		t.Fatalf("expected routing policy %q, got %q", homeAssistantPolicyAssistantOnly, resp.RoutingPolicy)
+	}
 	if resp.RouteMode != "workspace_task" || resp.TargetSurface != "workspace" {
 		t.Fatalf("expected workspace route, got mode=%q surface=%q", resp.RouteMode, resp.TargetSurface)
 	}
@@ -449,6 +474,90 @@ func TestHomeAssistantRouteHandler_GeneralPrompt_ContextualMatch(t *testing.T) {
 	}
 	if resp.Score < 4 {
 		t.Fatalf("expected score >= 4, got %d", resp.Score)
+	}
+}
+
+func TestHomeAssistantRouteHandler_AppLaunchMatch_UsesRoutingProfile(t *testing.T) {
+	st := newHomeRouteTestStore(t)
+	handler := NewHomeAssistantRouteHandler(st)
+
+	addHomeRouteTestAgent(t, st, "REAPER Assistant", &store.CreateAgentConfig{Type: "tool-calling"}, types.AgentStatusActive,
+		"Handles audio production workflows", []string{"audio"}, []string{})
+	setHomeRouteTestAgentRoutingProfile(t, st, "REAPER Assistant", &types.AgentRoutingProfile{
+		MatchPhrases:    []string{"open my latest reaper project"},
+		ExampleRequests: []string{"open my latest reaper project", "render stems from yesterday's session"},
+		Domains:         []string{"reaper", "audio production"},
+		ExternalSystems: []string{"reaper"},
+		SideEffects:     "local_app",
+	})
+
+	rr := postRouteRequest(t, handler, map[string]string{"prompt": "open my latest reaper project"})
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d: %s", http.StatusOK, rr.Code, rr.Body.String())
+	}
+
+	var resp HomeAssistantRouteResponse
+	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+
+	if resp.Intent != "app_launch" {
+		t.Fatalf("expected intent app_launch, got %q", resp.Intent)
+	}
+	if resp.RoutingPolicy != homeAssistantPolicySpecialistRequired {
+		t.Fatalf("expected routing policy %q, got %q", homeAssistantPolicySpecialistRequired, resp.RoutingPolicy)
+	}
+	if resp.RequiresCreation {
+		t.Fatalf("expected routing-profile match, got requires_creation=true")
+	}
+	if resp.MatchedAgent != "REAPER Assistant" {
+		t.Fatalf("expected matched agent REAPER Assistant, got %q", resp.MatchedAgent)
+	}
+	if resp.Score < 4 {
+		t.Fatalf("expected score >= 4, got %d", resp.Score)
+	}
+}
+
+func TestHomeAssistantRouteHandler_GeneralPrompt_UsesRoutingProfileExamples(t *testing.T) {
+	st := newHomeRouteTestStore(t)
+	handler := NewHomeAssistantRouteHandler(st)
+
+	addHomeRouteTestAgent(t, st, "REAPER Assistant", &store.CreateAgentConfig{Type: "tool-calling"}, types.AgentStatusActive,
+		"Handles DAW automation", []string{"audio"}, []string{})
+	setHomeRouteTestAgentRoutingProfile(t, st, "REAPER Assistant", &types.AgentRoutingProfile{
+		ExampleRequests: []string{
+			"render stems from yesterday's session",
+			"show muted tracks in the current reaper session",
+		},
+		Domains:         []string{"reaper", "mixing"},
+		ExternalSystems: []string{"reaper"},
+		SideEffects:     "local_app",
+	})
+
+	rr := postRouteRequest(t, handler, map[string]string{"prompt": "show muted tracks in reaper"})
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d: %s", http.StatusOK, rr.Code, rr.Body.String())
+	}
+
+	var resp HomeAssistantRouteResponse
+	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+
+	if resp.Intent != "general_task" {
+		t.Fatalf("expected intent general_task, got %q", resp.Intent)
+	}
+	if resp.RoutingPolicy != homeAssistantPolicyAssistantPreferred {
+		t.Fatalf("expected routing policy %q, got %q", homeAssistantPolicyAssistantPreferred, resp.RoutingPolicy)
+	}
+	if resp.RequiresCreation {
+		t.Fatalf("expected routing-profile match for general prompt, got requires_creation=true")
+	}
+	if resp.MatchedAgent != "REAPER Assistant" {
+		t.Fatalf("expected matched agent REAPER Assistant, got %q", resp.MatchedAgent)
+	}
+	if resp.Score < 3 {
+		t.Fatalf("expected score >= 3, got %d", resp.Score)
 	}
 }
 

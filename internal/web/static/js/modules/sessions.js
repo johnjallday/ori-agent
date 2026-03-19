@@ -1887,9 +1887,13 @@ const sessionManager = {
         if (window.EventBus) {
           EventBus.emit('session:created', { session: data.session, folderId });
         }
+
+        return data.session;
       }
+      return null;
     } catch (error) {
       console.error('Failed to create session in folder:', error);
+      return null;
     }
   },
 

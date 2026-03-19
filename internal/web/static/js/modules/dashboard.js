@@ -3888,6 +3888,52 @@
     return mode === 'workspace_task' && target === 'workspace' && hasWorkspaceRouteContext(routeContext);
   }
 
+  function routePolicyRequiresSpecialist(routeData) {
+    return normalizeToken(routeData && routeData.routing_policy) === 'specialist_required';
+  }
+
+  function shouldOpenWorkspaceAssistantForRoute(routeData, routeContext) {
+    if (!hasWorkspaceRouteContext(routeContext)) return false;
+    if (!routeData) return true;
+    return !routePolicyRequiresSpecialist(routeData);
+  }
+
+  async function openWorkspaceAssistantForPrompt(prompt, routeContext) {
+    setHomeAssistantRoutingSummary('Assistant', 'Opening the workspace Assistant session.');
+
+    var assistantSessionResult = await dispatchPromptToWorkspaceAssistantSession(prompt, routeContext);
+    if (!assistantSessionResult || !assistantSessionResult.session) {
+      throw new Error('Failed to open workspace Assistant session');
+    }
+
+    trackHomeAssistantSession(assistantSessionResult.session, prompt, 'Assistant');
+    setHomeAssistantMode('continue_session');
+    appendHomeAssistantMessage(
+      'assistant',
+      assistantSessionResult.reused
+        ? 'Continuing the workspace Assistant session in chat.'
+        : 'Started a new workspace Assistant session in chat.'
+    );
+    setHomeAssistantRoutingSummary(
+      assistantSessionResult.reused ? 'Assistant Continued' : 'Assistant Session Started',
+      assistantSessionResult.reused
+        ? 'Your message was sent to the current workspace Assistant session.'
+        : 'A new workspace Assistant session is ready in chat.'
+    );
+    renderHomeAssistantActions([
+      {
+        label: 'Open Chat',
+        variant: 'primary',
+        onClick: function () { openChatPanel(); }
+      },
+      {
+        label: 'Ask Another Task',
+        variant: 'secondary',
+        onClick: function () { focusHomeAssistantInput(); }
+      }
+    ]);
+  }
+
   async function routePromptWithBackend(prompt, routeContext) {
     if (typeof API === 'undefined' || typeof API.post !== 'function') return null;
     try {
@@ -6321,53 +6367,6 @@
       return;
     }
 
-    if (inWorkspaceContext) {
-      setHomeAssistantBusy(true, 'Opening Assistant...');
-      renderHomeAssistantActions([]);
-      setHomeAssistantRoutingSummary('Assistant', 'Opening the workspace Assistant session.');
-
-      try {
-        var assistantSessionResult = await dispatchPromptToWorkspaceAssistantSession(text, routeContext);
-        if (!assistantSessionResult || !assistantSessionResult.session) {
-          throw new Error('Failed to open workspace Assistant session');
-        }
-
-        trackHomeAssistantSession(assistantSessionResult.session, text, 'Assistant');
-        setHomeAssistantMode('continue_session');
-        appendHomeAssistantMessage(
-          'assistant',
-          assistantSessionResult.reused
-            ? 'Continuing the workspace Assistant session in chat.'
-            : 'Started a new workspace Assistant session in chat.'
-        );
-        setHomeAssistantRoutingSummary(
-          assistantSessionResult.reused ? 'Assistant Continued' : 'Assistant Session Started',
-          assistantSessionResult.reused
-            ? 'Your message was sent to the current workspace Assistant session.'
-            : 'A new workspace Assistant session is ready in chat.'
-        );
-        renderHomeAssistantActions([
-          {
-            label: 'Open Chat',
-            variant: 'primary',
-            onClick: function () { openChatPanel(); }
-          },
-          {
-            label: 'Ask Another Task',
-            variant: 'secondary',
-            onClick: function () { focusHomeAssistantInput(); }
-          }
-        ]);
-      } catch (workspaceAssistantError) {
-        dashLog.debug('Workspace assistant launch failed', { error: workspaceAssistantError && workspaceAssistantError.message || workspaceAssistantError });
-        appendHomeAssistantMessage('assistant', 'I could not open the workspace Assistant session right now. Please try again.');
-        setHomeAssistantRoutingSummary('Assistant Failed', 'Could not open the workspace Assistant session.');
-      } finally {
-        setHomeAssistantBusy(false);
-      }
-      return;
-    }
-
     setHomeAssistantBusy(true, 'Routing...');
     renderHomeAssistantActions([]);
     setHomeAssistantRoutingSummary('Routing', 'Analyzing task and selecting the best agent...');
@@ -6407,6 +6406,11 @@
           workspaceRecommended = false;
         }
 
+        if (inWorkspaceContext && shouldOpenWorkspaceAssistantForRoute(routeData, routeContext)) {
+          await openWorkspaceAssistantForPrompt(text, routeContext);
+          return;
+        }
+
         if (shouldAcceptBackendRouteMatch(routeData)) {
           match = {
             agent: { name: routeData.matched_agent.trim() },
@@ -6416,6 +6420,11 @@
         } else if (routeData.requires_creation === true) {
           useFallbackRouting = false;
         }
+      }
+
+      if (inWorkspaceContext && shouldOpenWorkspaceAssistantForRoute(routeData, routeContext)) {
+        await openWorkspaceAssistantForPrompt(text, routeContext);
+        return;
       }
 
       if (useFallbackRouting) {

@@ -934,20 +934,6 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 	approvedActionPlanID := strings.TrimSpace(req.ApprovedActionPlanID)
 	normalizedRouteContext := normalizeChatRouteContext(req.RouteContext)
 
-	// Natural language app launch shortcut:
-	// "open safari" -> "/openapp safari"
-	if len(req.Files) == 0 {
-		if rewritten, ok := inferOpenAppCommandFromChat(q); ok {
-			logger.Debug("Auto-routed chat prompt to /openapp", logger.Fields{
-				"original":  q,
-				"rewritten": rewritten,
-			})
-			q = rewritten
-		}
-	}
-
-	// Debug: Log received files
-
 	// Get session ID from header for multi-tab support
 	sessionID := h.getSessionID(r)
 
@@ -980,6 +966,21 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 			Reason: "no execution agent resolved",
 		}))
 		return
+	}
+	if h.maybeHandleAssistantSpecialistHandoff(w, r, originalQuery, sessionID, normalizedRouteContext, executionAgent) {
+		return
+	}
+
+	// Natural language app launch shortcut:
+	// "open safari" -> "/openapp safari"
+	if len(req.Files) == 0 {
+		if rewritten, ok := inferOpenAppCommandFromChat(q); ok {
+			logger.Debug("Auto-routed chat prompt to /openapp", logger.Fields{
+				"original":  q,
+				"rewritten": rewritten,
+			})
+			q = rewritten
+		}
 	}
 
 	// Separate image files from text files for proper API handling

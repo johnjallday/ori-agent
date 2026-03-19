@@ -50,15 +50,25 @@ type AgentStatistics struct {
 	mu sync.RWMutex `json:"-"` // Mutex for thread-safe updates
 }
 
+// AgentRoutingProfile describes user-defined routing hints for specialist matching.
+type AgentRoutingProfile struct {
+	MatchPhrases    []string `json:"match_phrases,omitempty"`    // High-signal phrases that should strongly match this agent
+	ExampleRequests []string `json:"example_requests,omitempty"` // Example user requests this agent should handle
+	Domains         []string `json:"domains,omitempty"`          // User-defined domains or topics such as "reaper" or "tax"
+	ExternalSystems []string `json:"external_systems,omitempty"` // External apps or services this agent can operate on
+	SideEffects     string   `json:"side_effects,omitempty"`     // none, local_app, external_account, destructive, etc.
+}
+
 // AgentMetadata contains descriptive and organizational information about an agent
 type AgentMetadata struct {
-	Description       string   `json:"description,omitempty"`        // Human-readable description of the agent's purpose
-	Tags              []string `json:"tags,omitempty"`               // Organizational tags for filtering and categorization
-	AvatarColor       string   `json:"avatar_color,omitempty"`       // Color for avatar display (hex color code)
-	AvatarImage       string   `json:"avatar_image,omitempty"`       // Path to custom avatar image (relative to /avatars/)
-	Favorite          bool     `json:"favorite,omitempty"`           // Whether this agent is marked as favorite
-	ReviewEnabled     *bool    `json:"review_enabled,omitempty"`     // Whether conversation review is enabled for this agent
-	ReviewSensitivity string   `json:"review_sensitivity,omitempty"` // Review sensitivity level: "low", "medium", "high" (default: "medium")
+	Description       string               `json:"description,omitempty"`        // Human-readable description of the agent's purpose
+	Tags              []string             `json:"tags,omitempty"`               // Organizational tags for filtering and categorization
+	AvatarColor       string               `json:"avatar_color,omitempty"`       // Color for avatar display (hex color code)
+	AvatarImage       string               `json:"avatar_image,omitempty"`       // Path to custom avatar image (relative to /avatars/)
+	Favorite          bool                 `json:"favorite,omitempty"`           // Whether this agent is marked as favorite
+	ReviewEnabled     *bool                `json:"review_enabled,omitempty"`     // Whether conversation review is enabled for this agent
+	ReviewSensitivity string               `json:"review_sensitivity,omitempty"` // Review sensitivity level: "low", "medium", "high" (default: "medium")
+	RoutingProfile    *AgentRoutingProfile `json:"routing_profile,omitempty"`    // User-defined routing hints for specialist selection
 }
 
 // AgentEvolution tracks progression state for an agent.

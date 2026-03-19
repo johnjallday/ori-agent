@@ -15,6 +15,68 @@ let chatWebSearchToggleRequestId = 0;
 const PLAN_BEFORE_ACTION_STORAGE_KEY = 'planBeforeAction';
 const pendingActionPlanContexts = new Map();
 let pendingChatRouteContext = null;
+const CHAT_SPECIALIST_INTENT_DEFAULTS = {
+  utility_direct: {
+    defaultType: 'general',
+    suggestedName: 'Utility Assistant',
+    tags: ['utility', 'time', 'weather', 'facts'],
+    domains: ['utility'],
+    externalSystems: [],
+    sideEffects: 'none',
+    descriptionBase: 'Create a utility assistant for quick everyday requests such as time lookups, weather checks, simple conversions, and short factual questions.',
+    systemPrompt: 'You are a utility assistant for quick requests. Handle time, weather, simple conversions, and short factual lookups with concise direct answers.'
+  },
+  travel_planning: {
+    defaultType: 'research',
+    suggestedName: 'Travel Planner',
+    tags: ['travel', 'itinerary', 'planning'],
+    domains: ['travel'],
+    externalSystems: [],
+    sideEffects: 'none',
+    descriptionBase: 'Create an agent that plans multi-day travel itineraries with day-by-day plans, transportation ideas, budget ranges, and local recommendations.',
+    systemPrompt: 'You are a travel planning assistant. Build realistic day-by-day itineraries with concise options, practical transit notes, and budget-aware recommendations.'
+  },
+  email_check: {
+    defaultType: 'tool-calling',
+    suggestedName: 'Email Assistant',
+    tags: ['email', 'inbox', 'communication'],
+    domains: ['email'],
+    externalSystems: ['email', 'gmail', 'outlook'],
+    sideEffects: 'external_account',
+    descriptionBase: 'Create an email triage agent that summarizes unread mail, categorizes urgency, and drafts replies. It must default to read-only behavior and never send without explicit user confirmation.',
+    systemPrompt: 'You are an email assistant. Summarize inbox content and draft responses. Never send or delete email without explicit user approval. Start in read-only mode.'
+  },
+  calendar_check: {
+    defaultType: 'tool-calling',
+    suggestedName: 'Calendar Assistant',
+    tags: ['calendar', 'schedule', 'planning'],
+    domains: ['calendar'],
+    externalSystems: ['calendar'],
+    sideEffects: 'external_account',
+    descriptionBase: 'Create a calendar assistant that checks schedule availability, summarizes upcoming events, and answers calendar questions. It must default to read-only behavior and always use configured skills or MCP connectors before claiming lack of access.',
+    systemPrompt: 'You are a calendar assistant. Default to read-only behavior unless the user explicitly asks to create or edit events.'
+  },
+  app_launch: {
+    defaultType: 'tool-calling',
+    suggestedName: 'Desktop Launcher',
+    tags: ['desktop', 'automation', 'apps'],
+    domains: ['desktop'],
+    externalSystems: [],
+    sideEffects: 'local_app',
+    descriptionBase: 'Create a desktop launcher agent that can interpret app-launch requests, execute safe local launch commands, and confirm completion clearly.',
+    systemPrompt: 'You are a desktop app launcher assistant. For requests like "open obsidian", launch the requested app immediately and confirm success or report the exact failure reason.'
+  },
+  general_task: {
+    defaultType: 'general',
+    suggestedName: 'Task Assistant',
+    tags: ['tasks', 'assistant'],
+    domains: ['tasks'],
+    externalSystems: [],
+    sideEffects: '',
+    descriptionBase: 'Create a practical task execution assistant that can route and complete user requests from chat.',
+    systemPrompt: 'You are a helpful assistant focused on completing practical user tasks with clear, concise outputs.'
+  }
+};
 
 // Remove stored slash-command exchanges and system announcements from history
 function sanitizeHistory(messages) {
@@ -812,6 +874,328 @@ function normalizeRouteMetadata(payload) {
   };
 }
 
+function normalizeSpecialistToken(value) {
+  return String(value || '').trim().toLowerCase();
+}
+
+function uniqueSpecialistValues(values) {
+  const seen = Object.create(null);
+  const out = [];
+  for (const value of Array.isArray(values) ? values : []) {
+    const trimmed = String(value || '').trim();
+    if (!trimmed || seen[trimmed]) continue;
+    seen[trimmed] = true;
+    out.push(trimmed);
+  }
+  return out;
+}
+
+function getChatSpecialistIntentDefaults(intentKey) {
+  const normalizedKey = normalizeSpecialistToken(intentKey);
+  return CHAT_SPECIALIST_INTENT_DEFAULTS[normalizedKey] || CHAT_SPECIALIST_INTENT_DEFAULTS.general_task;
+}
+
+function normalizeSpecialistHandoff(payload) {
+  if (!payload || typeof payload !== 'object') return null;
+
+  const handoff = payload.specialist_handoff && typeof payload.specialist_handoff === 'object'
+    ? payload.specialist_handoff
+    : payload;
+  const mode = String(handoff.route_mode || payload.route_mode || '').trim().toLowerCase();
+  if (mode !== 'specialist_handoff') return null;
+
+  const matchedAgent = String(handoff.matched_agent || payload.matched_agent || '').trim();
+  return {
+    mode,
+    matchedAgent,
+    requiresCreation: handoff.requires_creation === true || payload.requires_creation === true,
+    routingPolicy: String(handoff.routing_policy || payload.routing_policy || '').trim().toLowerCase(),
+    intent: String(handoff.intent || payload.intent || '').trim(),
+    intentLabel: String(handoff.intent_label || payload.intent_label || '').trim(),
+    suggestedAgentName: String(handoff.suggested_agent_name || payload.suggested_agent_name || '').trim(),
+    suggestedAgentType: String(handoff.suggested_agent_type || payload.suggested_agent_type || '').trim()
+  };
+}
+
+function buildChatSpecialistDescription(originalMessage, handoff) {
+  const defaults = getChatSpecialistIntentDefaults(handoff && handoff.intent);
+  const taskText = String(originalMessage || '').trim();
+  return `${defaults.descriptionBase} User task: "${taskText}".`;
+}
+
+function buildChatSpecialistSystemPrompt(handoff) {
+  return getChatSpecialistIntentDefaults(handoff && handoff.intent).systemPrompt;
+}
+
+function buildChatSpecialistTags(handoff) {
+  const defaults = getChatSpecialistIntentDefaults(handoff && handoff.intent);
+  return uniqueSpecialistValues((defaults.tags || []).concat(['auto-created', 'chat-handoff']));
+}
+
+function buildChatSpecialistRoutingProfile(originalMessage, handoff) {
+  const defaults = getChatSpecialistIntentDefaults(handoff && handoff.intent);
+  const taskText = String(originalMessage || '').trim();
+  return {
+    match_phrases: taskText ? [taskText] : [],
+    example_requests: taskText ? [taskText] : [],
+    domains: Array.isArray(defaults.domains) ? defaults.domains.slice() : [],
+    external_systems: Array.isArray(defaults.externalSystems) ? defaults.externalSystems.slice() : [],
+    side_effects: defaults.sideEffects || ''
+  };
+}
+
+function buildUniqueChatSpecialistAgentName(baseName, existingNames) {
+  let sanitized = String(baseName || 'Task Assistant').replace(/[^a-zA-Z0-9 _-]/g, '').trim();
+  if (!sanitized) sanitized = 'Task Assistant';
+
+  const lowerNames = Object.create(null);
+  for (const existingName of Array.isArray(existingNames) ? existingNames : []) {
+    lowerNames[normalizeSpecialistToken(existingName)] = true;
+  }
+
+  if (!lowerNames[normalizeSpecialistToken(sanitized)]) {
+    return sanitized;
+  }
+
+  for (let suffix = 2; suffix <= 99; suffix += 1) {
+    const candidate = `${sanitized} ${suffix}`;
+    if (!lowerNames[normalizeSpecialistToken(candidate)]) {
+      return candidate;
+    }
+  }
+
+  return `${sanitized} ${Date.now()}`;
+}
+
+async function fetchChatSpecialistCreationAvailability() {
+  try {
+    const response = await fetch('/api/agents/auto-config/availability');
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}`);
+    }
+    const data = await response.json();
+    return {
+      available: Boolean(data && data.available),
+      systemModelConfigured: Boolean(data && data.system_model_configured),
+      message: String(data && data.message || '')
+    };
+  } catch (error) {
+    appLog.warn('Failed to load specialist creation availability', error);
+    return {
+      available: false,
+      systemModelConfigured: false,
+      message: ''
+    };
+  }
+}
+
+function buildChatSpecialistAvailabilityMessage(availability) {
+  if (!availability || availability.systemModelConfigured !== true) {
+    return 'A System Model must be configured before I can create this specialist. Open Settings to configure it.';
+  }
+  return 'No suitable LLM provider is available right now. Open Settings to configure a provider or model before creating this specialist.';
+}
+
+async function maybeLoadChatSpecialistAutoConfig(description) {
+  try {
+    const response = await fetch('/api/agents/auto-config', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ description })
+    });
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}`);
+    }
+    return await response.json();
+  } catch (error) {
+    appLog.warn('Failed to auto-configure specialist agent, using fallback defaults', error);
+    return null;
+  }
+}
+
+async function fetchExistingChatAgentNames() {
+  const response = await fetch('/api/agents');
+  if (!response.ok) {
+    throw new Error(`HTTP ${response.status}`);
+  }
+  const data = await response.json();
+  const agents = Array.isArray(data && data.agents) ? data.agents : [];
+  return agents
+    .map(agent => (typeof agent === 'string' ? agent : agent && agent.name))
+    .filter(Boolean);
+}
+
+async function createSpecialistAgentFromHandoff(payload, originalMessage) {
+  const handoff = normalizeSpecialistHandoff(payload);
+  if (!handoff || !handoff.requiresCreation) {
+    throw new Error('No pending specialist creation was found.');
+  }
+
+  const availability = await fetchChatSpecialistCreationAvailability();
+  if (!availability.available) {
+    throw new Error(buildChatSpecialistAvailabilityMessage(availability));
+  }
+
+  const defaults = getChatSpecialistIntentDefaults(handoff.intent);
+  const description = buildChatSpecialistDescription(originalMessage, handoff);
+  const autoConfig = await maybeLoadChatSpecialistAutoConfig(description);
+  const existingNames = await fetchExistingChatAgentNames();
+  const desiredBaseName = autoConfig && autoConfig.agent_name
+    ? autoConfig.agent_name
+    : (handoff.suggestedAgentName || defaults.suggestedName);
+  const agentName = buildUniqueChatSpecialistAgentName(desiredBaseName, existingNames);
+
+  const requestBody = {
+    name: agentName,
+    type: (autoConfig && autoConfig.agent_type) || handoff.suggestedAgentType || defaults.defaultType || 'tool-calling',
+    system_prompt: (autoConfig && autoConfig.system_prompt) || buildChatSpecialistSystemPrompt(handoff),
+    description: (autoConfig && autoConfig.description) || description,
+    tags: buildChatSpecialistTags(handoff),
+    routing_profile: buildChatSpecialistRoutingProfile(originalMessage, handoff)
+  };
+  if (autoConfig && typeof autoConfig.model === 'string' && autoConfig.model.trim()) {
+    requestBody.model = autoConfig.model.trim();
+  }
+  if (autoConfig && typeof autoConfig.temperature === 'number') {
+    requestBody.temperature = autoConfig.temperature;
+  }
+
+  const response = await fetch('/api/agents', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(requestBody)
+  });
+  if (!response.ok) {
+    let message = `Failed to create specialist (HTTP ${response.status})`;
+    try {
+      const errorData = await response.json();
+      if (errorData && errorData.error) {
+        message = errorData.error;
+      }
+    } catch {
+      // Ignore response parse errors.
+    }
+    throw new Error(message);
+  }
+
+  return agentName;
+}
+
+function buildDisplayMessageForRequest(requestBody, fallbackMessage) {
+  const question = typeof requestBody?.question === 'string' ? requestBody.question : fallbackMessage;
+  let displayMessage = String(question || '').trim();
+  const files = Array.isArray(requestBody?.files) ? requestBody.files : [];
+  if (files.length > 0) {
+    const fileNames = files.map(file => file && file.name).filter(Boolean).join(', ');
+    if (fileNames) {
+      displayMessage += `\n\n📎 Attached: ${fileNames}`;
+    }
+  }
+  return displayMessage;
+}
+
+async function createSpecialistSessionForHandoff(agentName, requestBody) {
+  const manager = window.sessionManager;
+  if (!manager || !agentName) return null;
+
+  const workspaceId = String(
+    requestBody?.route_context?.workspace_id ||
+    requestBody?.route_context?.studio_id ||
+    manager.getActiveSession?.()?.folder_id ||
+    ''
+  ).trim();
+
+  if (workspaceId && typeof manager.createSessionWithAgentInFolder === 'function') {
+    const createdInWorkspace = await manager.createSessionWithAgentInFolder(agentName, workspaceId);
+    if (createdInWorkspace && createdInWorkspace.id) {
+      return createdInWorkspace;
+    }
+    const activeWorkspaceSession = manager.getActiveSession?.();
+    if (activeWorkspaceSession && activeWorkspaceSession.id && activeWorkspaceSession.agent_name === agentName) {
+      return activeWorkspaceSession;
+    }
+  }
+
+  if (typeof manager.createSessionWithAgent === 'function') {
+    const created = await manager.createSessionWithAgent(agentName);
+    if (created && created.id) {
+      return created;
+    }
+  }
+
+  const activeSession = manager.getActiveSession?.() || null;
+  if (activeSession && activeSession.agent_name === agentName) {
+    return activeSession;
+  }
+  return null;
+}
+
+async function executeSpecialistHandoff(payload, fallbackMessage, isSlashCommand) {
+  const handoff = normalizeSpecialistHandoff(payload);
+  if (!handoff || !handoff.matchedAgent || handoff.requiresCreation) {
+    return false;
+  }
+
+  const requestBody = payload && typeof payload._requestBody === 'object' ? { ...payload._requestBody } : null;
+  if (!requestBody) return false;
+
+  const requestHeaders = payload && typeof payload._requestHeaders === 'object'
+    ? { ...payload._requestHeaders }
+    : { 'Content-Type': 'application/json' };
+
+  const session = await createSpecialistSessionForHandoff(handoff.matchedAgent, requestBody);
+  if (!session || !session.id) {
+    throw new Error(`Failed to open specialist session for ${handoff.matchedAgent}`);
+  }
+
+  const handoffRequestBody = {
+    ...requestBody,
+    agent_name: handoff.matchedAgent
+  };
+  const handoffRouteContext = handoffRequestBody.route_context && typeof handoffRequestBody.route_context === 'object'
+    ? { ...handoffRequestBody.route_context }
+    : {};
+  if (!handoffRouteContext.workspace_id && session.folder_id) {
+    handoffRouteContext.workspace_id = session.folder_id;
+  }
+  handoffRequestBody.route_context = handoffRouteContext;
+
+  const handoffHeaders = {
+    ...requestHeaders,
+    'Content-Type': 'application/json',
+    'X-Session-ID': session.id
+  };
+
+  addMessageToChat(buildDisplayMessageForRequest(handoffRequestBody, fallbackMessage), true, false, false, isSlashCommand);
+
+  if (chatStateMachine && chatStateMachine.isActive()) {
+    chatStateMachine.think();
+  }
+
+  const response = await fetch('/api/chat', {
+    method: 'POST',
+    headers: handoffHeaders,
+    body: JSON.stringify(handoffRequestBody),
+    signal: chatStateMachine ? chatStateMachine.getSignal() : undefined
+  });
+
+  if (!response.ok) {
+    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+  }
+
+  const data = await response.json();
+  data._requestBody = { ...handoffRequestBody };
+  data._requestHeaders = { ...handoffHeaders };
+  updatePlannerIndicator(data?.planner_decision);
+
+  if (chatStateMachine && chatStateMachine.isActive()) {
+    chatStateMachine.process();
+  }
+
+  await handleChatResponsePayload(data, handoffRequestBody.question || fallbackMessage, isSlashCommand);
+  return true;
+}
+
 function shouldRenderRouteBadge(routeMeta) {
   if (!routeMeta || !routeMeta.mode) return false;
   return routeMeta.mode === 'utility_direct' ||
@@ -1076,6 +1460,112 @@ function renderActionPlanControls(planId, originalMessage) {
   });
 }
 
+function renderSpecialistCreationControls(payload, originalMessage, isSlashCommand) {
+  const handoff = normalizeSpecialistHandoff(payload);
+  if (!handoff || !handoff.requiresCreation) return;
+
+  const chatArea = document.getElementById('chatArea');
+  if (!chatArea) return;
+
+  const wrapper = document.createElement('div');
+  wrapper.className = 'message-container mb-3 assistant-message';
+
+  const content = document.createElement('div');
+  content.className = 'modern-card p-3 me-auto';
+  content.style.maxWidth = '85%';
+  content.style.background = 'var(--bg-secondary)';
+
+  const title = document.createElement('div');
+  title.style.fontSize = '12px';
+  title.style.color = 'var(--text-muted)';
+  title.style.marginBottom = '8px';
+  title.textContent = 'Specialist creation required';
+  content.appendChild(title);
+
+  const summary = document.createElement('div');
+  summary.style.marginBottom = '12px';
+  const suggestedName = handoff.suggestedAgentName || 'Specialist Agent';
+  const intentLabel = handoff.intentLabel || 'this request';
+  summary.textContent = `Create "${suggestedName}" to handle ${intentLabel}?`;
+  content.appendChild(summary);
+
+  const controls = document.createElement('div');
+  controls.style.display = 'flex';
+  controls.style.gap = '8px';
+  controls.style.flexWrap = 'wrap';
+
+  const createBtn = document.createElement('button');
+  createBtn.type = 'button';
+  createBtn.className = 'btn btn-sm btn-primary';
+  createBtn.textContent = `Create ${suggestedName}`;
+
+  const cancelBtn = document.createElement('button');
+  cancelBtn.type = 'button';
+  cancelBtn.className = 'btn btn-sm btn-outline-secondary';
+  cancelBtn.textContent = 'Not now';
+
+  const openAgentsBtn = document.createElement('button');
+  openAgentsBtn.type = 'button';
+  openAgentsBtn.className = 'btn btn-sm btn-outline-primary';
+  openAgentsBtn.textContent = 'Open Agents';
+
+  controls.appendChild(createBtn);
+  controls.appendChild(cancelBtn);
+  controls.appendChild(openAgentsBtn);
+  content.appendChild(controls);
+  wrapper.appendChild(content);
+  chatArea.appendChild(wrapper);
+
+  if (window.scrollChatToBottomIfNeeded) {
+    window.scrollChatToBottomIfNeeded();
+  }
+
+  const setDisabled = (disabled) => {
+    createBtn.disabled = disabled;
+    cancelBtn.disabled = disabled;
+    openAgentsBtn.disabled = disabled;
+  };
+
+  createBtn.addEventListener('click', async () => {
+    const originalHtml = createBtn.innerHTML;
+    setDisabled(true);
+    createBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-2" role="status"></span>Creating...';
+
+    try {
+      const createdAgentName = await createSpecialistAgentFromHandoff(payload, originalMessage);
+      addMessageToChat(`Created "${createdAgentName}". Continuing in specialist chat.`, false, false, true, true);
+
+      const resumedPayload = {
+        ...payload,
+        matched_agent: createdAgentName,
+        requires_creation: false,
+        specialist_handoff: {
+          ...(payload && typeof payload.specialist_handoff === 'object' ? payload.specialist_handoff : {}),
+          matched_agent: createdAgentName,
+          requires_creation: false
+        }
+      };
+
+      wrapper.remove();
+      await executeSpecialistHandoff(resumedPayload, originalMessage, isSlashCommand);
+    } catch (error) {
+      appLog.error('Specialist creation failed:', error);
+      addMessageToChat(`Error: ${error.message}`, false, true, false, isSlashCommand);
+      createBtn.innerHTML = originalHtml;
+      setDisabled(false);
+    }
+  });
+
+  cancelBtn.addEventListener('click', () => {
+    addMessageToChat('Specialist creation canceled.', false, false, true, true);
+    wrapper.remove();
+  });
+
+  openAgentsBtn.addEventListener('click', () => {
+    window.location.href = '/agents';
+  });
+}
+
 async function executeApprovedActionPlan(planId) {
   const context = pendingActionPlanContexts.get(planId);
   if (!context) {
@@ -1134,6 +1624,23 @@ async function executeApprovedActionPlan(planId) {
 
 async function handleChatResponsePayload(data, trimmedMessage, isSlashCommand) {
   const routeMeta = normalizeRouteMetadata(data);
+  const specialistHandoff = normalizeSpecialistHandoff(data);
+
+  if (specialistHandoff && specialistHandoff.matchedAgent && !specialistHandoff.requiresCreation) {
+    try {
+      const handedOff = await executeSpecialistHandoff(data, trimmedMessage, isSlashCommand);
+      if (handedOff) {
+        return;
+      }
+    } catch (error) {
+      appLog.error('Specialist handoff failed:', error);
+      addMessageToChat(`Error: ${error.message}`, false, true, false, isSlashCommand);
+      if (window.Toast) {
+        Toast.error('Failed to continue in specialist chat');
+      }
+      return;
+    }
+  }
 
   if (data?.requires_approval && data?.approval_type === 'action_plan' && data?.action_plan_id) {
     const planMessage = formatActionPlanForChat(data);
@@ -1156,6 +1663,25 @@ async function handleChatResponsePayload(data, trimmedMessage, isSlashCommand) {
   const responseText = typeof data.response === 'string' ? data.response : null;
   const toolCallsText = formatToolCallsForChat(data.toolCalls);
   const receiptsText = formatActionReceiptsForChat(data.action_receipts);
+
+  if (specialistHandoff && specialistHandoff.requiresCreation) {
+    if (hasResponseField && responseText !== null && responseText.trim().length > 0) {
+      addMessageToChat(responseText, false, false, false, isSlashCommand, routeMeta);
+    } else {
+      addMessageToChat('This request needs a specialist before it can continue.', false, false, false, isSlashCommand, routeMeta);
+    }
+
+    if (receiptsText) {
+      addMessageToChat(receiptsText, false, false, true, true, routeMeta);
+    }
+
+    renderSpecialistCreationControls(data, trimmedMessage, isSlashCommand);
+    if (window.sessionManager && window.sessionManager.onMessageSent) {
+      window.sessionManager.onMessageSent();
+    }
+    EventBus.emit('chat:message:sent', { message: trimmedMessage, isSlashCommand });
+    return;
+  }
 
   if (hasResponseField && responseText !== null) {
     if (responseText.trim().length > 0) {

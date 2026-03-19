@@ -46,6 +46,27 @@ func cloneAgentEvolution(ag *agent.Agent) *types.AgentEvolution {
 	return &copy
 }
 
+func cloneRoutingProfile(profile *types.AgentRoutingProfile) *types.AgentRoutingProfile {
+	if profile == nil {
+		return nil
+	}
+
+	copy := *profile
+	if len(profile.MatchPhrases) > 0 {
+		copy.MatchPhrases = append([]string{}, profile.MatchPhrases...)
+	}
+	if len(profile.ExampleRequests) > 0 {
+		copy.ExampleRequests = append([]string{}, profile.ExampleRequests...)
+	}
+	if len(profile.Domains) > 0 {
+		copy.Domains = append([]string{}, profile.Domains...)
+	}
+	if len(profile.ExternalSystems) > 0 {
+		copy.ExternalSystems = append([]string{}, profile.ExternalSystems...)
+	}
+	return &copy
+}
+
 type Handler struct {
 	State          store.Store
 	ActivityLogger *ActivityLogger
@@ -91,6 +112,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				"system_prompt":     agent.Settings.SystemPrompt,
 				"allow_web_search":  agent.Settings.IsWebSearchAllowed(),
 				"enabled_plugins":   enabledPlugins,
+				"metadata":          agent.Metadata,
 				"evolution":         cloneAgentEvolution(agent),
 			})
 			return
@@ -129,18 +151,19 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	case http.MethodPost:
 		var req struct {
-			Name            string   `json:"name"`
-			Type            string   `json:"type,omitempty"`
-			Model           string   `json:"model,omitempty"`
-			Temperature     float64  `json:"temperature,omitempty"`
-			SystemPrompt    string   `json:"system_prompt,omitempty"`
-			Description     string   `json:"description,omitempty"`
-			Tags            []string `json:"tags,omitempty"`
-			AvatarColor     string   `json:"avatar_color,omitempty"`
-			LLMProvider     string   `json:"llm_provider,omitempty"`
-			ReasoningEffort string   `json:"reasoning_effort,omitempty"`
-			MaxOutputTokens int      `json:"max_output_tokens,omitempty"`
-			AllowWebSearch  *bool    `json:"allow_web_search,omitempty"`
+			Name            string                     `json:"name"`
+			Type            string                     `json:"type,omitempty"`
+			Model           string                     `json:"model,omitempty"`
+			Temperature     float64                    `json:"temperature,omitempty"`
+			SystemPrompt    string                     `json:"system_prompt,omitempty"`
+			Description     string                     `json:"description,omitempty"`
+			Tags            []string                   `json:"tags,omitempty"`
+			AvatarColor     string                     `json:"avatar_color,omitempty"`
+			LLMProvider     string                     `json:"llm_provider,omitempty"`
+			ReasoningEffort string                     `json:"reasoning_effort,omitempty"`
+			MaxOutputTokens int                        `json:"max_output_tokens,omitempty"`
+			AllowWebSearch  *bool                      `json:"allow_web_search,omitempty"`
+			RoutingProfile  *types.AgentRoutingProfile `json:"routing_profile,omitempty"`
 		}
 		if !orihttp.ParseJSONBody(w, r, &req) {
 			return
@@ -188,7 +211,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 
 		// Set metadata if provided
-		if req.Description != "" || len(req.Tags) > 0 || req.AvatarColor != "" {
+		if req.Description != "" || len(req.Tags) > 0 || req.AvatarColor != "" || req.RoutingProfile != nil {
 			agent, ok := h.State.GetAgent(req.Name)
 			if ok && agent != nil {
 				if agent.Metadata == nil {
@@ -197,6 +220,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				agent.Metadata.Description = req.Description
 				agent.Metadata.Tags = req.Tags
 				agent.Metadata.AvatarColor = req.AvatarColor
+				agent.Metadata.RoutingProfile = cloneRoutingProfile(req.RoutingProfile)
 				if err := h.State.SetAgent(req.Name, agent); err != nil {
 					logger.Error("Failed to set metadata", logger.Fields{"err": err})
 				}
@@ -258,10 +282,11 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			SystemPrompt    *string  `json:"system_prompt,omitempty"`
 			AllowWebSearch  *bool    `json:"allow_web_search,omitempty"`
 			// Metadata
-			Description *string   `json:"description,omitempty"`
-			Tags        *[]string `json:"tags,omitempty"`
-			AvatarColor *string   `json:"avatar_color,omitempty"`
-			Favorite    *bool     `json:"favorite,omitempty"`
+			Description    *string                    `json:"description,omitempty"`
+			Tags           *[]string                  `json:"tags,omitempty"`
+			AvatarColor    *string                    `json:"avatar_color,omitempty"`
+			Favorite       *bool                      `json:"favorite,omitempty"`
+			RoutingProfile *types.AgentRoutingProfile `json:"routing_profile,omitempty"`
 		}
 		if !orihttp.ParseJSONBody(w, r, &req) {
 			return
@@ -322,6 +347,9 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		if req.Favorite != nil {
 			agent.Metadata.Favorite = *req.Favorite
+		}
+		if req.RoutingProfile != nil {
+			agent.Metadata.RoutingProfile = cloneRoutingProfile(req.RoutingProfile)
 		}
 
 		newName := agentName
