@@ -90,6 +90,9 @@ func (h *Handler) attachWorkspaceTools(ag *resolvedChatAgent, workspaceID string
 		return
 	}
 	wtp := NewWorkspaceToolProvider(h.sessionStore, h.workspaceStore, workspaceID)
+	if h.fileStore != nil {
+		wtp.SetFileStore(h.fileStore)
+	}
 	if h.store != nil || h.mcpRegistry != nil || h.skillsManager != nil {
 		var mcpLister mcpServerLister
 		if reg, ok := h.mcpRegistry.(mcpServerLister); ok {

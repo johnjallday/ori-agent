@@ -23,7 +23,7 @@ func TestNoteFilename(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		got := noteFilename(tt.name, tt.noteID)
+		got := workspace.NoteFilename(tt.name, tt.noteID)
 		if got != tt.want {
 			t.Errorf("noteFilename(%q, %q) = %q, want %q", tt.name, tt.noteID, got, tt.want)
 		}
@@ -134,7 +134,7 @@ func TestSyncNoteToFileAfterRename(t *testing.T) {
 	h.syncNoteToFile(note)
 
 	folderPath, _ := store.GetFolderPath("ws-rename-test")
-	oldFile := filepath.Join(folderPath, workspace.NotesDir, noteFilename("Old Name", note.ID))
+	oldFile := filepath.Join(folderPath, workspace.NotesDir, workspace.NoteFilename("Old Name", note.ID))
 
 	// Verify old file exists
 	if _, err := os.Stat(oldFile); err != nil {
@@ -152,7 +152,7 @@ func TestSyncNoteToFileAfterRename(t *testing.T) {
 	}
 
 	// Verify new file exists
-	newFile := filepath.Join(folderPath, workspace.NotesDir, noteFilename("New Name", note.ID))
+	newFile := filepath.Join(folderPath, workspace.NotesDir, workspace.NoteFilename("New Name", note.ID))
 	if _, err := os.Stat(newFile); err != nil {
 		t.Errorf("New file should exist: %v", err)
 	}
@@ -193,7 +193,7 @@ func TestDeleteNoteFile(t *testing.T) {
 	h.syncNoteToFile(note)
 
 	folderPath, _ := store.GetFolderPath("ws-delete-test")
-	noteFile := filepath.Join(folderPath, workspace.NotesDir, noteFilename("To Delete", note.ID))
+	noteFile := filepath.Join(folderPath, workspace.NotesDir, workspace.NoteFilename("To Delete", note.ID))
 
 	// Verify file exists
 	if _, err := os.Stat(noteFile); err != nil {

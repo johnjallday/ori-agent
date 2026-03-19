@@ -24,6 +24,7 @@ import (
 type WorkspaceToolProvider struct {
 	sessionStore   session.HybridStore
 	workspaceStore workspace.Store
+	fileStore      *workspace.FileStore // Optional: for syncing notes to disk
 	workspaceID    string
 
 	// Optional dependencies for management tools (Phase 2)
@@ -49,6 +50,11 @@ func NewWorkspaceToolProvider(sessionStore session.HybridStore, workspaceStore w
 		workspaceStore: workspaceStore,
 		workspaceID:    workspaceID,
 	}
+}
+
+// SetFileStore sets the folder-based workspace store for syncing notes to disk.
+func (p *WorkspaceToolProvider) SetFileStore(fs *workspace.FileStore) {
+	p.fileStore = fs
 }
 
 // SetManagementDeps sets optional dependencies needed for management tools.
@@ -204,6 +210,11 @@ func (p *WorkspaceToolProvider) saveNoteTool() pluginapi.PluginTool {
 				if err := p.sessionStore.UpdateNote(ctx, existing); err != nil {
 					return "", fmt.Errorf("failed to update note: %w", err)
 				}
+				workspace.SyncNoteFile(p.fileStore, workspace.NoteFileParams{
+					ID: existing.ID, WorkspaceID: existing.WorkspaceID,
+					Name: existing.Name, Content: existing.Content,
+					CreatedAt: existing.CreatedAt, UpdatedAt: existing.UpdatedAt,
+				})
 				raw, _ := json.Marshal(map[string]interface{}{
 					"id":      existing.ID,
 					"name":    existing.Name,
@@ -229,6 +240,11 @@ func (p *WorkspaceToolProvider) saveNoteTool() pluginapi.PluginTool {
 			if err := p.sessionStore.CreateNote(ctx, note); err != nil {
 				return "", fmt.Errorf("failed to create note: %w", err)
 			}
+			workspace.SyncNoteFile(p.fileStore, workspace.NoteFileParams{
+				ID: note.ID, WorkspaceID: note.WorkspaceID,
+				Name: note.Name, Content: note.Content,
+				CreatedAt: note.CreatedAt, UpdatedAt: note.UpdatedAt,
+			})
 			logger.Info("Workspace tool created note", logger.Fields{
 				"workspace_id": p.workspaceID,
 				"note_id":      note.ID,

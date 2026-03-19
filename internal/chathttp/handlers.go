@@ -76,6 +76,7 @@ type Handler struct {
 	costTracker      *llm.CostTracker
 	sessionStore     session.HybridStore
 	workspaceStore   workspace.Store
+	fileStore        *workspace.FileStore
 	runtimeResolver  chatRuntimeResolver
 	toolCallStore    session.ToolCallStore
 	evolutionSvc     interface {
@@ -183,6 +184,11 @@ func (h *Handler) SetMCPConfigManager(manager interface {
 func (h *Handler) SetWorkspaceStore(ws workspace.Store) {
 	h.workspaceStore = ws
 	h.commandHandler.SetWorkspaceStore(ws)
+}
+
+// SetFileStore sets the folder-based workspace store for syncing notes to disk.
+func (h *Handler) SetFileStore(fs *workspace.FileStore) {
+	h.fileStore = fs
 }
 
 // SetShutdownFunc sets the shutdown function for the /exit command
