@@ -722,7 +722,7 @@ func createTestWorkspace(t *testing.T, handler *Handler, name string) string {
 	return workspace["id"].(string)
 }
 
-func TestHandler_CreateWorkspaceAutoCreatesEntryAgent(t *testing.T) {
+func TestHandler_CreateWorkspaceWithoutEntryAgent(t *testing.T) {
 	handler, cleanup := createTestHandler(t)
 	defer cleanup()
 
@@ -748,14 +748,12 @@ func TestHandler_CreateWorkspaceAutoCreatesEntryAgent(t *testing.T) {
 		t.Fatalf("failed to load created workspace: %v", err)
 	}
 
-	if got := currentWorkspaceEntryAgentName(ws); got != "Trip Planning Manager" {
-		t.Fatalf("entry agent = %q, want %q", got, "Trip Planning Manager")
+	// Without an entry_agent_name, no entry agent should be set — the UI will prompt the user.
+	if got := currentWorkspaceEntryAgentName(ws); got != "" {
+		t.Fatalf("entry agent = %q, want empty", got)
 	}
-	if len(ws.AgentInstances) != 1 || !ws.AgentInstances[0].EntryPoint {
-		t.Fatalf("expected one entry-point agent instance, got %#v", ws.AgentInstances)
-	}
-	if _, ok := handler.agentStore.GetAgent("Trip Planning Manager"); !ok {
-		t.Fatal("expected auto-created workspace manager agent to exist")
+	if len(ws.AgentInstances) != 0 {
+		t.Fatalf("expected no agent instances, got %d", len(ws.AgentInstances))
 	}
 }
 

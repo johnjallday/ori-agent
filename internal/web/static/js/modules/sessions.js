@@ -3595,7 +3595,7 @@ const sessionManager = {
 
       // Navigate to the new workspace and open the Create Agent modal
       if (createdWorkspaceId) {
-        window.location.href = `/workspaces/${encodeURIComponent(createdWorkspaceId)}`;
+        window.location.href = `/workspaces/${encodeURIComponent(createdWorkspaceId)}?addAgent=1`;
         return;
       }
 

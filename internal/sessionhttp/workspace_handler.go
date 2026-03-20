@@ -118,13 +118,6 @@ func (h *Handler) createWorkspace(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	entryAgentName, createdEntryAgent, err := h.ensureWorkspaceEntryAgent(req.Name, req.EntryAgentName)
-	if err != nil {
-		logger.Error("Failed to provision workspace entry agent", logger.Fields{"name": req.Name, "error": err})
-		_ = orihttp.RespondBadRequest(w, err.Error())
-		return
-	}
-
 	ws := &session.Workspace{
 		Name:        req.Name,
 		Description: req.Description,
@@ -136,10 +129,21 @@ func (h *Handler) createWorkspace(w http.ResponseWriter, r *http.Request) {
 	if req.OrderIndex != nil {
 		ws.OrderIndex = *req.OrderIndex
 	}
-	setWorkspaceEntryAgent(ws, entryAgentName)
+
+	// If an existing entry agent was specified, validate and set it.
+	// Otherwise the workspace is created without an entry agent;
+	// the UI will prompt the user to create one with their choice of model/provider.
+	if req.EntryAgentName != "" {
+		entryAgentName, _, err := h.ensureWorkspaceEntryAgent(req.Name, req.EntryAgentName)
+		if err != nil {
+			logger.Error("Failed to provision workspace entry agent", logger.Fields{"name": req.Name, "error": err})
+			_ = orihttp.RespondBadRequest(w, err.Error())
+			return
+		}
+		setWorkspaceEntryAgent(ws, entryAgentName)
+	}
 
 	if err := h.store.CreateWorkspace(r.Context(), ws); err != nil {
-		h.rollbackWorkspaceEntryAgent(entryAgentName, createdEntryAgent)
 		logger.Error("Failed to create workspace", logger.Fields{"error": err})
 		_ = orihttp.RespondInternalError(w, "Failed to create workspace")
 		return
@@ -644,13 +648,6 @@ func (h *Handler) handleWorkspaceImport(w http.ResponseWriter, r *http.Request) 
 		workspaceName = filepath.Base(normalizedPath)
 	}
 
-	entryAgentName, createdEntryAgent, err := h.ensureWorkspaceEntryAgent(workspaceName, req.EntryAgentName)
-	if err != nil {
-		logger.Error("Failed to provision imported workspace entry agent", logger.Fields{"name": workspaceName, "error": err})
-		_ = orihttp.RespondBadRequest(w, err.Error())
-		return
-	}
-
 	workspace := &session.Workspace{
 		Name:        workspaceName,
 		Description: req.Description,
@@ -670,7 +667,17 @@ func (h *Handler) handleWorkspaceImport(w http.ResponseWriter, r *http.Request) 
 			"imported_at":     time.Now().UTC().Format(time.RFC3339),
 		},
 	}
-	setWorkspaceEntryAgent(workspace, entryAgentName)
+
+	// If an existing entry agent was specified, validate and set it.
+	if req.EntryAgentName != "" {
+		entryAgentName, _, err := h.ensureWorkspaceEntryAgent(workspaceName, req.EntryAgentName)
+		if err != nil {
+			logger.Error("Failed to provision imported workspace entry agent", logger.Fields{"name": workspaceName, "error": err})
+			_ = orihttp.RespondBadRequest(w, err.Error())
+			return
+		}
+		setWorkspaceEntryAgent(workspace, entryAgentName)
+	}
 
 	recordWorkspaceImportTelemetry("import_attempt", logger.Fields{
 		"path_hash":       hashPathForTelemetry(normalizedPath),
@@ -679,7 +686,6 @@ func (h *Handler) handleWorkspaceImport(w http.ResponseWriter, r *http.Request) 
 	})
 
 	if err := h.store.CreateWorkspace(r.Context(), workspace); err != nil {
-		h.rollbackWorkspaceEntryAgent(entryAgentName, createdEntryAgent)
 		logger.Error("Failed to create workspace from folder import", logger.Fields{"error": err})
 		recordWorkspaceImportTelemetry("import_failed", logger.Fields{
 			"path_hash":   hashPathForTelemetry(normalizedPath),
@@ -713,7 +719,6 @@ func (h *Handler) handleWorkspaceImport(w http.ResponseWriter, r *http.Request) 
 	if err != nil {
 		logger.Error("Failed to marshal directory references for workspace import", logger.Fields{"workspace_id": workspace.ID, "error": err})
 		_ = h.store.DeleteWorkspace(r.Context(), workspace.ID)
-		h.rollbackWorkspaceEntryAgent(entryAgentName, createdEntryAgent)
 		recordWorkspaceImportTelemetry("import_failed", logger.Fields{
 			"path_hash":    hashPathForTelemetry(normalizedPath),
 			"workspace_id": workspace.ID,
@@ -731,7 +736,6 @@ func (h *Handler) handleWorkspaceImport(w http.ResponseWriter, r *http.Request) 
 		if delErr := h.store.DeleteWorkspace(r.Context(), workspace.ID); delErr != nil {
 			logger.Warn("Failed to rollback workspace after import attach failure", logger.Fields{"workspace_id": workspace.ID, "error": delErr})
 		}
-		h.rollbackWorkspaceEntryAgent(entryAgentName, createdEntryAgent)
 		recordWorkspaceImportTelemetry("import_failed", logger.Fields{
 			"path_hash":    hashPathForTelemetry(normalizedPath),
 			"workspace_id": workspace.ID,

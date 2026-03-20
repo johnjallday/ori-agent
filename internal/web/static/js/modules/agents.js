@@ -274,6 +274,7 @@ function normalizeAgentCreationFlowOptions(options = {}) {
   return {
     seedName: String(options?.seedName || '').trim(),
     seedType: String(options?.seedType || '').trim(),
+    seedSystemPrompt: String(options?.seedSystemPrompt || '').trim(),
     autoDescription: String(options?.autoDescription || '').trim(),
     preferAutoConfig: Boolean(options?.preferAutoConfig),
     workspaceId: String(options?.workspaceId || '').trim(),
@@ -305,6 +306,13 @@ async function applyPendingAgentCreationFlowToModal() {
   if (options.seedType && agentTypeInput) {
     agentTypeInput.value = options.seedType;
     agentTypeInput.dispatchEvent(new Event('change'));
+  }
+
+  if (options.seedSystemPrompt) {
+    const systemPromptInput = document.getElementById('agentSystemPrompt');
+    if (systemPromptInput) {
+      systemPromptInput.value = options.seedSystemPrompt;
+    }
   }
 
   if (options.autoDescription && descriptionTextarea) {

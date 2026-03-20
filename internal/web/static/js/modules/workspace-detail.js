@@ -156,6 +156,7 @@ export class WorkspaceDetailPage {
     ]);
     this.activateWorkspace();
     this.setupRealtime();
+    this.checkAutoOpenCreateAgent();
   }
 
   ensureScrollablePanelAccessibility() {
@@ -1108,6 +1109,10 @@ export class WorkspaceDetailPage {
       const instanceLabel = group.instanceCount > 1 ? `${group.instanceCount} instances` : '';
       const cardMeta = [instanceLabel, taskLabel].filter(Boolean).join(' · ');
       const capabilityBadges = group.isUnassigned ? '' : this.renderAgentCapabilityBadges(group.name);
+      const agentProfile = group.isUnassigned ? null : this.getAgentProfile(group.name);
+      const modelLabel = agentProfile?.model
+        ? `<span class="workspace-detail-agent-model-badge">${this.escapeHtml(agentProfile.model)}</span>`
+        : '';
       const encodedAgentName = encodeURIComponent(group.name);
       const canFlip = !group.isUnassigned;
       const isFlipped = canFlip && this.flippedAgentCards.has(group.key);
@@ -1164,6 +1169,7 @@ export class WorkspaceDetailPage {
                 <span>${this.escapeHtml(group.name)}</span>
                 ${instanceChip}
                 ${capabilityBadges}
+                ${modelLabel}
               </div>
               <div class="workspace-detail-agent-card-meta-wrap">
                 <div class="workspace-detail-agent-card-meta">${cardMeta}</div>
@@ -1706,6 +1712,37 @@ export class WorkspaceDetailPage {
         </div>
       </div>
     `;
+  }
+
+  /**
+   * Check for ?addAgent=1 query param and open the Create Agent modal
+   * pre-filled with workspace manager defaults so the user picks model/provider.
+   */
+  checkAutoOpenCreateAgent() {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('addAgent') !== '1') return;
+
+    // Clean the URL so refresh won't re-trigger
+    window.history.replaceState({}, '', window.location.pathname);
+
+    const workspaceName = String(this.workspace?.name || '').trim();
+    const agentName = workspaceName
+      ? (workspaceName.toLowerCase().endsWith(' manager') ? workspaceName : workspaceName + ' Manager')
+      : 'Workspace Manager';
+    const systemPrompt = `You are the workspace manager for "${workspaceName || 'this workspace'}". `
+      + 'Act as the default front door for the workspace: clarify user intent, answer directly when '
+      + 'the request only needs shared context, and break work into tasks for specialists when needed.';
+
+    setTimeout(() => {
+      if (typeof window.showAddAgentModal === 'function') {
+        window.showAddAgentModal({
+          workspaceId: this.workspaceId,
+          seedName: agentName,
+          seedType: 'general',
+          seedSystemPrompt: systemPrompt
+        });
+      }
+    }, 300);
   }
 
   async openAddAgentModal() {
@@ -5386,6 +5423,7 @@ export class WorkspaceDetailPage {
 
           const profile = {
             name,
+            model: String(agent?.model || '').trim(),
             status: String(agent?.status || '').trim().toLowerCase(),
             capabilities: Array.isArray(agent?.capabilities) ? agent.capabilities.map((value) => String(value || '').trim()).filter(Boolean) : [],
             allowWebSearch: Boolean(agent?.allow_web_search),

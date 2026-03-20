@@ -426,7 +426,7 @@ async function createWorkspace() {
     // Navigate to the new workspace and open the Create Agent modal
     const workspaceId = result.folder && result.folder.id;
     if (workspaceId) {
-      window.location.href = `/workspaces/${encodeURIComponent(workspaceId)}`;
+      window.location.href = `/workspaces/${encodeURIComponent(workspaceId)}?addAgent=1`;
       return;
     }
 
