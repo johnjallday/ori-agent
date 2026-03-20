@@ -1738,7 +1738,7 @@ export class WorkspaceDetailPage {
         window.showAddAgentModal({
           workspaceId: this.workspaceId,
           seedName: agentName,
-          seedType: 'general',
+          seedType: 'workspace-manager',
           seedSystemPrompt: systemPrompt
         });
       }

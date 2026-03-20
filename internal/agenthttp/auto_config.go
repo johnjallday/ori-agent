@@ -226,7 +226,7 @@ Example:
 // validateAndSanitizeConfig ensures the config values are valid
 func (h *AutoConfigHandler) validateAndSanitizeConfig(config AutoConfigResponse) AutoConfigResponse {
 	// Validate agent type
-	validTypes := map[string]bool{"tool-calling": true, "general": true, "research": true}
+	validTypes := map[string]bool{"tool-calling": true, "general": true, "workspace-manager": true, "orchestration": true, "research": true}
 	if !validTypes[config.AgentType] {
 		config.AgentType = "tool-calling"
 	}
@@ -251,6 +251,20 @@ func (h *AutoConfigHandler) validateAndSanitizeConfig(config AutoConfigResponse)
 			config.Model = "gpt-4.1-nano"
 		case "general":
 			config.Model = "gpt-5"
+		case "workspace-manager":
+			// Default to the system model so the workspace manager matches the user's preferred setup
+			if h != nil && h.configManager != nil {
+				sysProvider, sysModel := h.configManager.GetSystemModel()
+				if sysModel != "" {
+					config.Model = sysModel
+					if config.Provider == "" && sysProvider != "" {
+						config.Provider = sysProvider
+					}
+				}
+			}
+			if config.Model == "" {
+				config.Model = "gpt-5"
+			}
 		case "research":
 			config.Model = "gpt-5"
 		}
