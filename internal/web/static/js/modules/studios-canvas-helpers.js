@@ -726,7 +726,7 @@ async function editAttachment(attachmentId) {
   const fileMeta = filePath ? { name: getFileNameFromPath(filePath), url: filePath } : (existing.file || existing.file_meta || null);
 
   try {
-    const resp = await fetch(`/api/studios/${window.agentCanvas.studioId}/attachments/${attachmentId}`, {
+    const resp = await fetch(`/api/workspaces/${window.agentCanvas.studioId}/attachments/${attachmentId}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -858,7 +858,7 @@ async function updateAttachmentColor(attachmentId, color) {
   if (!attachmentId || !window.agentCanvas) return;
 
   try {
-    const resp = await fetch(`/api/studios/${window.agentCanvas.studioId}/attachments/${attachmentId}`, {
+    const resp = await fetch(`/api/workspaces/${window.agentCanvas.studioId}/attachments/${attachmentId}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -904,7 +904,7 @@ async function deleteCurrentTask() {
   }
 
   try {
-    const response = await fetch(`/api/studios/${currentStudioId}/tasks/${task.id}`, {
+    const response = await fetch(`/api/workspaces/${currentStudioId}/tasks/${task.id}`, {
       method: 'DELETE'
     });
 
@@ -958,7 +958,7 @@ async function editCurrentTask() {
   const assignedNodeId = task.assigned_node_id || '';
 
   try {
-    const response = await fetch(`/api/studios/${currentStudioId}/tasks/${task.id}`, {
+    const response = await fetch(`/api/workspaces/${currentStudioId}/tasks/${task.id}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -1364,7 +1364,7 @@ async function addCombinerInput(combinerTaskId) {
   const newInputs = [...currentInputs, selectedTask.id];
 
   try {
-    const response = await fetch(`/api/studios/${currentStudioId}/tasks/${combinerTaskId}`, {
+    const response = await fetch(`/api/workspaces/${currentStudioId}/tasks/${combinerTaskId}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -1455,7 +1455,7 @@ async function addTaskInput(taskId) {
   const newInputs = [...currentInputs, selectedTask.id];
 
   try {
-    const response = await fetch(`/api/studios/${currentStudioId}/tasks/${taskId}`, {
+    const response = await fetch(`/api/workspaces/${currentStudioId}/tasks/${taskId}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -1536,7 +1536,7 @@ async function removeTaskInput(taskId, inputTaskIdToRemove) {
   const newInputs = currentInputs.filter(id => id !== inputTaskIdToRemove);
 
   try {
-    const response = await fetch(`/api/studios/${currentStudioId}/tasks/${taskId}`, {
+    const response = await fetch(`/api/workspaces/${currentStudioId}/tasks/${taskId}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -1796,7 +1796,7 @@ async function executeMission() {
   btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Executing...';
 
   try {
-    const response = await fetch(`/api/studios/${currentStudioId}/mission`, {
+    const response = await fetch(`/api/workspaces/${currentStudioId}/mission`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ mission })
@@ -1868,7 +1868,7 @@ async function addAgentToCanvas() {
   }
 
   try {
-    const response = await fetch(`/api/studios/${currentStudioId}/agents`, {
+    const response = await fetch(`/api/workspaces/${currentStudioId}/agents`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ agent_name: agentName })
@@ -1900,7 +1900,7 @@ async function removeAgentFromCanvas(agentName) {
   }
 
   try {
-    const response = await fetch(`/api/studios/${currentStudioId}/agents/${agentName}`, {
+    const response = await fetch(`/api/workspaces/${currentStudioId}/agents/${agentName}`, {
       method: 'DELETE'
     });
 
@@ -2006,7 +2006,7 @@ async function createTask() {
   }
 
   try {
-    const response = await fetch(`/api/studios/${currentStudioId}/tasks`, {
+    const response = await fetch(`/api/workspaces/${currentStudioId}/tasks`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -2835,7 +2835,7 @@ async function submitStoreNode() {
       y = (height / 2 - offsetY) / scale + (Math.random() - 0.5) * 100;
     }
 
-    const response = await fetch(`/api/studios/${studioId}/canvas/store-nodes`, {
+    const response = await fetch(`/api/workspaces/${studioId}/canvas/store-nodes`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -2920,7 +2920,7 @@ async function submitDirectory() {
       y = (height / 2 - offsetY) / scale + (Math.random() - 0.5) * 100;
     }
 
-    const response = await fetch(`/api/studios/${studioId}/directories`, {
+    const response = await fetch(`/api/workspaces/${studioId}/directories`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({

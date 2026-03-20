@@ -211,7 +211,9 @@
     recentSessions: [],
     mode: 'new_task',
     routingSummary: null,
-    automationMode: 'semi_auto'
+    automationMode: 'semi_auto',
+    workspaceEntryAgentName: '',
+    workspaceEntryWorkspaceId: ''
   };
 
   var homeAssistantThinkingModalInstance = null;
@@ -786,10 +788,12 @@
       card: document.getElementById('homeAssistantCard'),
       form: document.getElementById('homeAssistantForm'),
       input: document.getElementById('homeAssistantInput'),
+      identityName: document.getElementById('homeAssistantIdentityName'),
       sendBtn: document.getElementById('homeAssistantSendBtn'),
       conversation: document.getElementById('homeAssistantConversation'),
       routingSummary: document.getElementById('homeAssistantRoutingSummary'),
       thinkingModal: document.getElementById('homeAssistantThinkingModal'),
+      thinkingModalLabel: document.getElementById('homeAssistantThinkingModalLabel'),
       thinkingStatus: document.getElementById('homeAssistantThinkingStatus'),
       thinkingSpinner: document.getElementById('homeAssistantThinkingSpinner'),
       quickPrompts: document.getElementById('homeAssistantQuickPrompts'),
@@ -990,6 +994,66 @@
     }
   }
 
+  function getWorkspaceHomeAssistantDisplayName() {
+    return String(homeAssistantState.workspaceEntryAgentName || '').trim() || 'Workspace Manager';
+  }
+
+  function buildHomeAssistantPlaceholder(routeContext) {
+    if (!routeContext) return 'Ask Ori to do something...';
+    if (routeContext.surface === 'workspace_canvas') {
+      return 'Message ' + getWorkspaceHomeAssistantDisplayName() + ' about this workspace canvas...';
+    }
+    if (hasWorkspaceRouteContext(routeContext)) {
+      return 'Ask ' + getWorkspaceHomeAssistantDisplayName() + ' about this workspace... (or use /task, /note, /directory, /file, /chat)';
+    }
+    return 'Ask Ori to do something...';
+  }
+
+  function renderHomeAssistantWorkspaceIdentity(routeContext) {
+    var normalizedContext = normalizeHomeRouteContext(routeContext);
+    if (!hasWorkspaceRouteContext(normalizedContext)) return;
+
+    var els = getHomeAssistantElements();
+    var displayName = getWorkspaceHomeAssistantDisplayName();
+
+    if (els.identityName) {
+      els.identityName.textContent = displayName;
+      els.identityName.setAttribute('title', displayName);
+    }
+
+    if (els.input) {
+      els.input.placeholder = buildHomeAssistantPlaceholder(normalizedContext);
+      els.input.setAttribute('aria-label', displayName + ' prompt');
+    }
+
+    if (els.thinkingModalLabel) {
+      els.thinkingModalLabel.textContent = displayName + ' is working';
+    }
+  }
+
+  async function refreshHomeAssistantWorkspaceIdentity(routeContext) {
+    var normalizedContext = normalizeHomeRouteContext(routeContext);
+    if (!hasWorkspaceRouteContext(normalizedContext)) {
+      homeAssistantState.workspaceEntryAgentName = '';
+      homeAssistantState.workspaceEntryWorkspaceId = '';
+      return;
+    }
+
+    var workspaceId = String(normalizedContext.workspace_id || '').trim();
+    homeAssistantState.workspaceEntryWorkspaceId = workspaceId;
+    homeAssistantState.workspaceEntryAgentName = '';
+    renderHomeAssistantWorkspaceIdentity(normalizedContext);
+
+    if (!workspaceId) return;
+
+    var entryAgentName = await fetchWorkspaceEntryAgentName(workspaceId);
+    if (homeAssistantState.workspaceEntryWorkspaceId !== workspaceId) return;
+    if (!entryAgentName) return;
+
+    homeAssistantState.workspaceEntryAgentName = entryAgentName;
+    renderHomeAssistantWorkspaceIdentity(normalizedContext);
+  }
+
   function setHomeAssistantMode(mode) {
     var nextMode = mode === 'continue_session' ? 'continue_session' : 'new_task';
     homeAssistantState.mode = nextMode;
@@ -1014,13 +1078,10 @@
       els.conversation.classList.toggle('d-none', nextMode === 'continue_session');
     }
     if (els.input) {
-      if (routeContext.surface === 'workspace_canvas') {
-        els.input.placeholder = 'Ask Assistant about this workspace canvas... (or use /task, /note, /directory, /file, /chat)';
-      } else if (hasWorkspaceRouteContext(routeContext)) {
-        els.input.placeholder = 'Ask Assistant about this workspace... (or use /task, /note, /directory, /file, /chat)';
-      } else {
-        els.input.placeholder = 'Ask Ori to do something...';
-      }
+      els.input.placeholder = buildHomeAssistantPlaceholder(routeContext);
+    }
+    if (hasWorkspaceRouteContext(routeContext)) {
+      renderHomeAssistantWorkspaceIdentity(routeContext);
     }
 
     renderHomeAssistantRecentSessions();
@@ -1736,7 +1797,7 @@
   async function fetchWorkspaceMCPState(workspaceId) {
     if (!workspaceId || typeof API === 'undefined' || typeof API.get !== 'function') return null;
     try {
-      return await API.get('/api/studios/' + encodeURIComponent(workspaceId));
+      return await API.get('/api/workspaces/' + encodeURIComponent(workspaceId));
     } catch (error) {
       dashLog.debug('Failed to fetch workspace MCP state', { workspaceId: workspaceId, error: error && error.message || error });
       return null;
@@ -1744,14 +1805,58 @@
   }
 
   async function fetchWorkspaceEntryAgentName(workspaceId) {
-    if (!workspaceId || typeof API === 'undefined' || typeof API.get !== 'function') return '';
+    if (!workspaceId) return '';
+
+    var cached = getLoadedWorkspaceEntryAgentName(workspaceId);
+    if (cached) return cached;
+
+    if (typeof API === 'undefined' || typeof API.get !== 'function') return '';
     try {
-      var data = await API.get('/api/studios/' + encodeURIComponent(workspaceId));
-      return String(data && data.entry_agent_name || '').trim();
+      var data = await API.get('/api/workspaces/' + encodeURIComponent(workspaceId));
+      return inferWorkspaceEntryAgentNameFromData(data);
     } catch (error) {
       dashLog.debug('Failed to fetch workspace entry agent', { workspaceId: workspaceId, error: error && error.message || error });
       return '';
     }
+  }
+
+  function inferWorkspaceEntryAgentNameFromData(workspaceData) {
+    if (!workspaceData || typeof workspaceData !== 'object') return '';
+
+    var direct = String(workspaceData.entry_agent_name || '').trim();
+    if (direct) return direct;
+
+    var instances = Array.isArray(workspaceData.agent_instances) ? workspaceData.agent_instances : [];
+    for (var i = 0; i < instances.length; i++) {
+      var instance = instances[i];
+      if (instance && instance.entry_point && String(instance.name || '').trim()) {
+        return String(instance.name || '').trim();
+      }
+    }
+    for (var j = 0; j < instances.length; j++) {
+      var fallbackInstance = String(instances[j] && instances[j].name || '').trim();
+      if (fallbackInstance) return fallbackInstance;
+    }
+
+    var agents = Array.isArray(workspaceData.agents) ? workspaceData.agents : [];
+    for (var k = 0; k < agents.length; k++) {
+      var fallbackAgent = String(agents[k] || '').trim();
+      if (fallbackAgent) return fallbackAgent;
+    }
+
+    return '';
+  }
+
+  function getLoadedWorkspaceEntryAgentName(workspaceId) {
+    var targetWorkspace = String(workspaceId || '').trim();
+    if (!targetWorkspace) return '';
+
+    var detailWorkspace = window.workspaceDetail && window.workspaceDetail.workspace;
+    if (detailWorkspace && String(detailWorkspace.id || '').trim() === targetWorkspace) {
+      return inferWorkspaceEntryAgentNameFromData(detailWorkspace);
+    }
+
+    return '';
   }
 
   function getWorkspaceAgentInstanceByName(workspaceData, agentName) {
@@ -1910,7 +2015,7 @@
 
     try {
       if (!binding) {
-        var createResult = await API.post('/api/studios/' + encodeURIComponent(normalizedWorkspaceId) + '/mcp-bindings', {
+        var createResult = await API.post('/api/workspaces/' + encodeURIComponent(normalizedWorkspaceId) + '/mcp-bindings', {
           server_name: normalizedServerName,
           enabled: true
         });
@@ -1921,7 +2026,7 @@
         };
         createdBinding = true;
       } else if (binding.enabled === false) {
-        var updateResult = await API.put('/api/studios/' + encodeURIComponent(normalizedWorkspaceId) + '/mcp-bindings/' + encodeURIComponent(binding.id), {
+        var updateResult = await API.put('/api/workspaces/' + encodeURIComponent(normalizedWorkspaceId) + '/mcp-bindings/' + encodeURIComponent(binding.id), {
           enabled: true
         });
         binding = updateResult && updateResult.binding ? updateResult.binding : Object.assign({}, binding, { enabled: true });
@@ -1947,7 +2052,7 @@
           if (nextIds.length !== (Array.isArray(access.enabled_binding_ids) ? access.enabled_binding_ids.length : 0)
             || nextIds.indexOf(String(binding.id || '').trim()) < 0) {
             try {
-              await API.put('/api/studios/' + encodeURIComponent(normalizedWorkspaceId) + '/agent-mcp-access/' + encodeURIComponent(instance.id), {
+              await API.put('/api/workspaces/' + encodeURIComponent(normalizedWorkspaceId) + '/agent-mcp-access/' + encodeURIComponent(instance.id), {
                 enabled_binding_ids: nextIds
               });
               accessUpdated = true;
@@ -3912,15 +4017,15 @@
   async function openWorkspaceAssistantForPrompt(prompt, routeContext) {
     var assistantSessionResult = await dispatchPromptToWorkspaceAssistantSession(prompt, routeContext);
     if (!assistantSessionResult || !assistantSessionResult.session) {
-      throw new Error('Failed to open workspace Assistant session');
+      throw new Error('Failed to open workspace chat session');
     }
 
-    var entryLabel = assistantSessionResult.entryAgentName ? assistantSessionResult.entryAgentName : 'Assistant';
+    var entryLabel = assistantSessionResult.entryAgentName ? assistantSessionResult.entryAgentName : getWorkspaceHomeAssistantDisplayName();
     setHomeAssistantRoutingSummary(
       entryLabel,
       assistantSessionResult.entryAgentName
         ? 'Opening the workspace entry session.'
-        : 'Opening the workspace Assistant session.'
+        : 'Opening the workspace chat session.'
     );
 
     trackHomeAssistantSession(assistantSessionResult.session, prompt, entryLabel);
@@ -3936,10 +4041,10 @@
       assistantSessionResult.reused
         ? (assistantSessionResult.entryAgentName
           ? 'Your message was sent to the current workspace entry session.'
-          : 'Your message was sent to the current workspace Assistant session.')
+          : 'Your message was sent to the current workspace chat session.')
         : (assistantSessionResult.entryAgentName
           ? 'A new workspace entry session is ready in chat.'
-          : 'A new workspace Assistant session is ready in chat.')
+          : 'A new workspace chat session is ready in chat.')
     );
     renderHomeAssistantActions([
       {
@@ -5996,7 +6101,7 @@
         } else if (directoryPath) {
           var directorySegments = String(directoryPath).split(/[\\/]/).filter(Boolean);
           var directoryTitle = directorySegments.length > 0 ? directorySegments[directorySegments.length - 1] : directoryPath;
-          var directoryResponse = await fetch(`/api/studios/${encodeURIComponent(workspaceId)}/attachments`, {
+          var directoryResponse = await fetch(`/api/workspaces/${encodeURIComponent(workspaceId)}/attachments`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -6669,6 +6774,7 @@
   function initHomeAssistant() {
     var els = getHomeAssistantElements();
     var supportsRecentSessions = Boolean(els.recentSection || els.recentSessions || els.viewAllBtn || els.clearRecentBtn);
+    var routeContext = buildHomeRouteContext();
 
     homeAssistantState.automationMode = loadHomeAssistantAutomationMode();
     homeAssistantState.recentSessions = supportsRecentSessions ? loadHomeAssistantRecentSessions() : [];
@@ -6678,6 +6784,9 @@
       hydrateHomeAssistantRecentSessions();
     }
     setHomeAssistantMode(homeAssistantState.mode);
+    if (hasWorkspaceRouteContext(routeContext)) {
+      refreshHomeAssistantWorkspaceIdentity(routeContext);
+    }
     setHomeAssistantAutomationMode(homeAssistantState.automationMode);
     syncHomeAssistantThinkingStatus();
     syncHomeAssistantLauncher();
@@ -6882,6 +6991,7 @@
   window.OriAskRouting = window.OriAskRouting || {};
   window.OriAskRouting.submit = submitPromptViaAskOri;
   window.OriAskRouting.buildRouteContext = normalizeHomeRouteContext;
+  window.OriAskRouting.refreshWorkspaceIdentity = refreshHomeAssistantWorkspaceIdentity;
 
   function initDashboard() {
     initHomeAssistant();

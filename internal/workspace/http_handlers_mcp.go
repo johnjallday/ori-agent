@@ -12,7 +12,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/logger"
 )
 
-// CreateMCPBinding handles POST /api/studios/{studioID}/mcp-bindings
+// CreateMCPBinding handles POST /api/workspaces/{studioID}/mcp-bindings
 func (h *HTTPHandler) CreateMCPBinding(w http.ResponseWriter, r *http.Request) {
 	studioID := r.PathValue("studioID")
 	if studioID == "" {
@@ -93,7 +93,7 @@ func (h *HTTPHandler) CreateMCPBinding(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// ListMCPBindings handles GET /api/studios/{studioID}/mcp-bindings
+// ListMCPBindings handles GET /api/workspaces/{studioID}/mcp-bindings
 func (h *HTTPHandler) ListMCPBindings(w http.ResponseWriter, r *http.Request) {
 	studioID := r.PathValue("studioID")
 	if studioID == "" {
@@ -118,7 +118,7 @@ func (h *HTTPHandler) ListMCPBindings(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// GetMCPBinding handles GET /api/studios/{studioID}/mcp-bindings/{bindingID}
+// GetMCPBinding handles GET /api/workspaces/{studioID}/mcp-bindings/{bindingID}
 func (h *HTTPHandler) GetMCPBinding(w http.ResponseWriter, r *http.Request) {
 	studioID := r.PathValue("studioID")
 	bindingID := r.PathValue("bindingID")
@@ -148,7 +148,7 @@ func (h *HTTPHandler) GetMCPBinding(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// UpdateMCPBinding handles PUT/PATCH /api/studios/{studioID}/mcp-bindings/{bindingID}
+// UpdateMCPBinding handles PUT/PATCH /api/workspaces/{studioID}/mcp-bindings/{bindingID}
 func (h *HTTPHandler) UpdateMCPBinding(w http.ResponseWriter, r *http.Request) {
 	studioID := r.PathValue("studioID")
 	bindingID := r.PathValue("bindingID")
@@ -221,7 +221,7 @@ func (h *HTTPHandler) UpdateMCPBinding(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// DeleteMCPBinding handles DELETE /api/studios/{studioID}/mcp-bindings/{bindingID}
+// DeleteMCPBinding handles DELETE /api/workspaces/{studioID}/mcp-bindings/{bindingID}
 func (h *HTTPHandler) DeleteMCPBinding(w http.ResponseWriter, r *http.Request) {
 	studioID := r.PathValue("studioID")
 	bindingID := r.PathValue("bindingID")
@@ -257,7 +257,7 @@ func (h *HTTPHandler) DeleteMCPBinding(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// ListAgentMCPAccess handles GET /api/studios/{studioID}/agent-mcp-access
+// ListAgentMCPAccess handles GET /api/workspaces/{studioID}/agent-mcp-access
 func (h *HTTPHandler) ListAgentMCPAccess(w http.ResponseWriter, r *http.Request) {
 	studioID := r.PathValue("studioID")
 	if studioID == "" {
@@ -282,7 +282,7 @@ func (h *HTTPHandler) ListAgentMCPAccess(w http.ResponseWriter, r *http.Request)
 	}
 }
 
-// GetAgentMCPAccessEntry handles GET /api/studios/{studioID}/agent-mcp-access/{agentInstanceID}
+// GetAgentMCPAccessEntry handles GET /api/workspaces/{studioID}/agent-mcp-access/{agentInstanceID}
 func (h *HTTPHandler) GetAgentMCPAccessEntry(w http.ResponseWriter, r *http.Request) {
 	studioID := r.PathValue("studioID")
 	agentInstanceID := r.PathValue("agentInstanceID")
@@ -312,7 +312,7 @@ func (h *HTTPHandler) GetAgentMCPAccessEntry(w http.ResponseWriter, r *http.Requ
 	}
 }
 
-// UpdateAgentMCPAccess handles PUT/PATCH /api/studios/{studioID}/agent-mcp-access/{agentInstanceID}
+// UpdateAgentMCPAccess handles PUT/PATCH /api/workspaces/{studioID}/agent-mcp-access/{agentInstanceID}
 func (h *HTTPHandler) UpdateAgentMCPAccess(w http.ResponseWriter, r *http.Request) {
 	studioID := r.PathValue("studioID")
 	agentInstanceID := r.PathValue("agentInstanceID")
@@ -383,7 +383,7 @@ func (h *HTTPHandler) UpdateAgentMCPAccess(w http.ResponseWriter, r *http.Reques
 	}
 }
 
-// DeleteAgentMCPAccess handles DELETE /api/studios/{studioID}/agent-mcp-access/{agentInstanceID}
+// DeleteAgentMCPAccess handles DELETE /api/workspaces/{studioID}/agent-mcp-access/{agentInstanceID}
 func (h *HTTPHandler) DeleteAgentMCPAccess(w http.ResponseWriter, r *http.Request) {
 	studioID := r.PathValue("studioID")
 	agentInstanceID := r.PathValue("agentInstanceID")

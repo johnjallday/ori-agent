@@ -22,7 +22,7 @@ type CreateTaskRequest struct {
 	SubtaskIndex int    `json:"subtask_index"`
 }
 
-// CreateTask handles POST /api/studios/:id/tasks
+// CreateTask handles POST /api/workspaces/:id/tasks
 func (h *HTTPHandler) CreateTask(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		orihttp.MethodNotAllowed(w)
@@ -30,7 +30,7 @@ func (h *HTTPHandler) CreateTask(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Extract studio ID from URL path
-	path := strings.TrimPrefix(r.URL.Path, "/api/studios/")
+	path := strings.TrimPrefix(r.URL.Path, "/api/workspaces/")
 	parts := strings.Split(path, "/")
 	if len(parts) < 2 {
 		orihttp.BadRequest(w, "Invalid URL format")
@@ -104,7 +104,7 @@ func (h *HTTPHandler) CreateTask(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// UpdateTask handles PATCH /api/studios/:id/tasks/:task_id
+// UpdateTask handles PATCH /api/workspaces/:id/tasks/:task_id
 func (h *HTTPHandler) UpdateTask(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPatch {
 		orihttp.MethodNotAllowed(w)
@@ -112,8 +112,8 @@ func (h *HTTPHandler) UpdateTask(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Extract studio ID and task ID from URL path
-	// URL format: /api/studios/{studio_id}/tasks/{task_id}
-	path := strings.TrimPrefix(r.URL.Path, "/api/studios/")
+	// URL format: /api/workspaces/{studio_id}/tasks/{task_id}
+	path := strings.TrimPrefix(r.URL.Path, "/api/workspaces/")
 	parts := strings.Split(path, "/")
 	if len(parts) < 3 {
 		orihttp.BadRequest(w, "Invalid URL format")
@@ -202,7 +202,7 @@ func (h *HTTPHandler) UpdateTask(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// DeleteTask handles DELETE /api/studios/:id/tasks/:task_id
+// DeleteTask handles DELETE /api/workspaces/:id/tasks/:task_id
 func (h *HTTPHandler) DeleteTask(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodDelete {
 		orihttp.MethodNotAllowed(w)
@@ -210,8 +210,8 @@ func (h *HTTPHandler) DeleteTask(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Extract studio ID and task ID from URL path
-	// URL format: /api/studios/{studio_id}/tasks/{task_id}
-	path := strings.TrimPrefix(r.URL.Path, "/api/studios/")
+	// URL format: /api/workspaces/{studio_id}/tasks/{task_id}
+	path := strings.TrimPrefix(r.URL.Path, "/api/workspaces/")
 	parts := strings.Split(path, "/")
 	if len(parts) < 3 {
 		orihttp.BadRequest(w, "Invalid URL format")
@@ -250,7 +250,7 @@ func (h *HTTPHandler) DeleteTask(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// ExecuteTaskManually handles POST /api/studios/:id/tasks/:task_id/execute
+// ExecuteTaskManually handles POST /api/workspaces/:id/tasks/:task_id/execute
 func (h *HTTPHandler) ExecuteTaskManually(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		orihttp.MethodNotAllowed(w)
@@ -258,8 +258,8 @@ func (h *HTTPHandler) ExecuteTaskManually(w http.ResponseWriter, r *http.Request
 	}
 
 	// Extract studio ID and task ID from URL path
-	// URL format: /api/studios/{studio_id}/tasks/{task_id}/execute
-	path := strings.TrimPrefix(r.URL.Path, "/api/studios/")
+	// URL format: /api/workspaces/{studio_id}/tasks/{task_id}/execute
+	path := strings.TrimPrefix(r.URL.Path, "/api/workspaces/")
 	parts := strings.Split(path, "/")
 	if len(parts) < 4 {
 		orihttp.BadRequest(w, "Invalid URL format")

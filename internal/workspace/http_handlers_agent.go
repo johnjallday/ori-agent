@@ -17,7 +17,7 @@ type AddAgentRequest struct {
 	AgentName string `json:"agent_name"`
 }
 
-// AddAgent handles POST /api/studios/:id/agents
+// AddAgent handles POST /api/workspaces/:id/agents
 func (h *HTTPHandler) AddAgent(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		orihttp.MethodNotAllowed(w)
@@ -25,7 +25,7 @@ func (h *HTTPHandler) AddAgent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	path := strings.TrimPrefix(r.URL.Path, "/api/studios/")
+	path := strings.TrimPrefix(r.URL.Path, "/api/workspaces/")
 	parts := strings.Split(path, "/")
 	if len(parts) < 2 {
 		orihttp.BadRequest(w, "Invalid URL format")
@@ -81,7 +81,7 @@ func (h *HTTPHandler) AddAgent(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// RemoveAgent handles DELETE /api/studios/:id/agents/:agent_name
+// RemoveAgent handles DELETE /api/workspaces/:id/agents/:agent_name
 func (h *HTTPHandler) RemoveAgent(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodDelete {
 		orihttp.MethodNotAllowed(w)
@@ -89,7 +89,7 @@ func (h *HTTPHandler) RemoveAgent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	path := strings.TrimPrefix(r.URL.Path, "/api/studios/")
+	path := strings.TrimPrefix(r.URL.Path, "/api/workspaces/")
 	parts := strings.Split(path, "/")
 	if len(parts) < 3 {
 		orihttp.BadRequest(w, "Invalid URL format")

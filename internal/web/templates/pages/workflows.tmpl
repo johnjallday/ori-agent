@@ -475,9 +475,9 @@
 
       // Load studios
       try {
-        const response = await fetch('/api/studios');
+        const response = await fetch('/api/workspaces');
         const data = await response.json();
-        const studios = data.studios || [];
+        const studios = data.workspaces || data.folders || data.studios || [];
 
         if (studios.length === 0) {
           studioList.innerHTML = `

@@ -37,7 +37,7 @@ type CreateStudioRequest struct {
 	EntryAgentName string   `json:"entry_agent_name,omitempty"`
 }
 
-// CreateStudio handles POST /api/studios
+// CreateStudio handles POST /api/workspaces
 func (h *HTTPHandler) CreateStudio(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		orihttp.MethodNotAllowed(w)
@@ -118,7 +118,7 @@ func (h *HTTPHandler) CreateStudio(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// GetStudio handles GET /api/studios/:id
+// GetStudio handles GET /api/workspaces/:id
 func (h *HTTPHandler) GetStudio(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		orihttp.MethodNotAllowed(w)
@@ -126,7 +126,7 @@ func (h *HTTPHandler) GetStudio(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Extract studio ID from URL path
-	path := strings.TrimPrefix(r.URL.Path, "/api/studios/")
+	path := strings.TrimPrefix(r.URL.Path, "/api/workspaces/")
 	studioID := strings.TrimSuffix(path, "/")
 
 	// Get studio
@@ -178,7 +178,7 @@ func (h *HTTPHandler) GetStudio(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// ListStudios handles GET /api/studios
+// ListStudios handles GET /api/workspaces
 func (h *HTTPHandler) ListStudios(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		orihttp.MethodNotAllowed(w)
@@ -223,10 +223,10 @@ func (h *HTTPHandler) ListStudios(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// GetStudioEvents handles GET /api/studios/:id/events (Server-Sent Events)
+// GetStudioEvents handles GET /api/workspaces/:id/events (Server-Sent Events)
 func (h *HTTPHandler) GetStudioEvents(w http.ResponseWriter, r *http.Request) {
 	// Extract studio ID
-	path := strings.TrimPrefix(r.URL.Path, "/api/studios/")
+	path := strings.TrimPrefix(r.URL.Path, "/api/workspaces/")
 	parts := strings.Split(path, "/")
 	if len(parts) < 2 {
 		orihttp.BadRequest(w, "Invalid URL format")

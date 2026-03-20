@@ -353,7 +353,7 @@ export class AgentCanvasForms {
     }
 
     try {
-      const response = await fetch(`/api/studios/${this.canvas.studioId}/agents`, {
+      const response = await fetch(`/api/workspaces/${this.canvas.studioId}/agents`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ agent_name: this.selectedAgentToAdd })

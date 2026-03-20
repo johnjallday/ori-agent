@@ -341,7 +341,7 @@ export class WorkspaceDetailPage {
           if (title) formData.append('title', title);
           if (notes) formData.append('notes', notes);
 
-          const response = await fetch(`/api/studios/${encodeURIComponent(this.workspaceId)}/files`, {
+          const response = await fetch(`/api/workspaces/${encodeURIComponent(this.workspaceId)}/files`, {
             method: 'POST',
             body: formData
           });
@@ -893,6 +893,14 @@ export class WorkspaceDetailPage {
       if (!response.ok) throw new Error('Failed to load workspace');
 
       this.workspace = await response.json();
+      if (window.OriAskRouting && typeof window.OriAskRouting.refreshWorkspaceIdentity === 'function') {
+        window.OriAskRouting.refreshWorkspaceIdentity({
+          workspace_id: this.workspaceId,
+          page_path: window.location?.pathname || '',
+          surface: window.location?.pathname?.includes('/canvas') ? 'workspace_canvas' : 'workspace_detail',
+          origin: 'ask_ori'
+        });
+      }
       await this.renderWorkspaceInfo();
       this.renderWorkspaceMCPBindings();
       this.renderWorkspaceSkillBindings();
@@ -4379,8 +4387,8 @@ export class WorkspaceDetailPage {
   async saveWorkspaceMCPBinding(payload) {
     const isEditing = this.activeWorkspaceMCPMode === 'edit';
     const endpoint = isEditing
-      ? `/api/studios/${encodeURIComponent(this.workspaceId)}/mcp-bindings/${encodeURIComponent(this.activeWorkspaceMCPBindingId)}`
-      : `/api/studios/${encodeURIComponent(this.workspaceId)}/mcp-bindings`;
+      ? `/api/workspaces/${encodeURIComponent(this.workspaceId)}/mcp-bindings/${encodeURIComponent(this.activeWorkspaceMCPBindingId)}`
+      : `/api/workspaces/${encodeURIComponent(this.workspaceId)}/mcp-bindings`;
 
     const response = await fetch(endpoint, {
       method: isEditing ? 'PUT' : 'POST',
@@ -4438,7 +4446,7 @@ export class WorkspaceDetailPage {
 
       if (entry && arraysEqual(enabledBindingIDs, defaultBindingIds)) {
         const response = await fetch(
-          `/api/studios/${encodeURIComponent(this.workspaceId)}/agent-mcp-access/${encodeURIComponent(instanceId)}`,
+          `/api/workspaces/${encodeURIComponent(this.workspaceId)}/agent-mcp-access/${encodeURIComponent(instanceId)}`,
           { method: 'DELETE' }
         );
 
@@ -4454,7 +4462,7 @@ export class WorkspaceDetailPage {
       }
 
       const response = await fetch(
-        `/api/studios/${encodeURIComponent(this.workspaceId)}/agent-mcp-access/${encodeURIComponent(instanceId)}`,
+        `/api/workspaces/${encodeURIComponent(this.workspaceId)}/agent-mcp-access/${encodeURIComponent(instanceId)}`,
         {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
@@ -4554,7 +4562,7 @@ export class WorkspaceDetailPage {
 
     try {
       const response = await fetch(
-        `/api/studios/${encodeURIComponent(this.workspaceId)}/mcp-bindings/${encodeURIComponent(bindingId)}`,
+        `/api/workspaces/${encodeURIComponent(this.workspaceId)}/mcp-bindings/${encodeURIComponent(bindingId)}`,
         { method: 'DELETE' }
       );
 
@@ -5037,8 +5045,8 @@ export class WorkspaceDetailPage {
   async saveWorkspaceSkillBinding(payload) {
     const isEditing = this.activeWorkspaceSkillMode === 'edit';
     const endpoint = isEditing
-      ? `/api/studios/${encodeURIComponent(this.workspaceId)}/skill-bindings/${encodeURIComponent(this.activeWorkspaceSkillBindingId)}`
-      : `/api/studios/${encodeURIComponent(this.workspaceId)}/skill-bindings`;
+      ? `/api/workspaces/${encodeURIComponent(this.workspaceId)}/skill-bindings/${encodeURIComponent(this.activeWorkspaceSkillBindingId)}`
+      : `/api/workspaces/${encodeURIComponent(this.workspaceId)}/skill-bindings`;
 
     const response = await fetch(endpoint, {
       method: isEditing ? 'PUT' : 'POST',
@@ -5096,7 +5104,7 @@ export class WorkspaceDetailPage {
 
       if (entry && arraysEqual(enabledBindingIDs, defaultBindingIds)) {
         const response = await fetch(
-          `/api/studios/${encodeURIComponent(this.workspaceId)}/agent-skill-access/${encodeURIComponent(instanceId)}`,
+          `/api/workspaces/${encodeURIComponent(this.workspaceId)}/agent-skill-access/${encodeURIComponent(instanceId)}`,
           { method: 'DELETE' }
         );
 
@@ -5112,7 +5120,7 @@ export class WorkspaceDetailPage {
       }
 
       const response = await fetch(
-        `/api/studios/${encodeURIComponent(this.workspaceId)}/agent-skill-access/${encodeURIComponent(instanceId)}`,
+        `/api/workspaces/${encodeURIComponent(this.workspaceId)}/agent-skill-access/${encodeURIComponent(instanceId)}`,
         {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
@@ -5193,7 +5201,7 @@ export class WorkspaceDetailPage {
 
     try {
       const response = await fetch(
-        `/api/studios/${encodeURIComponent(this.workspaceId)}/skill-bindings/${encodeURIComponent(bindingId)}`,
+        `/api/workspaces/${encodeURIComponent(this.workspaceId)}/skill-bindings/${encodeURIComponent(bindingId)}`,
         { method: 'DELETE' }
       );
 
@@ -7211,7 +7219,7 @@ export class WorkspaceDetailPage {
     }
 
     try {
-      const response = await fetch(`/api/studios/${encodeURIComponent(this.workspaceId)}`);
+      const response = await fetch(`/api/workspaces/${encodeURIComponent(this.workspaceId)}`);
       if (!response.ok) {
         this.files = [];
         this.renderFiles();
@@ -7350,7 +7358,7 @@ export class WorkspaceDetailPage {
       // Directories may come from:
       // 1) directory_references (workspace imports / folder picker)
       // 2) legacy attachments with type "directory"
-      const response = await fetch(`/api/studios/${encodeURIComponent(this.workspaceId)}`);
+      const response = await fetch(`/api/workspaces/${encodeURIComponent(this.workspaceId)}`);
       if (!response.ok) {
         this.directories = [];
         this.renderDirectories();
@@ -7474,8 +7482,8 @@ export class WorkspaceDetailPage {
 
     const normalizedSource = source === 'attachment' ? 'attachment' : 'reference';
     const endpoint = normalizedSource === 'attachment'
-      ? `/api/studios/${encodeURIComponent(this.workspaceId)}/attachments/${encodeURIComponent(directoryId)}`
-      : `/api/studios/${encodeURIComponent(this.workspaceId)}/directories/${encodeURIComponent(directoryId)}`;
+      ? `/api/workspaces/${encodeURIComponent(this.workspaceId)}/attachments/${encodeURIComponent(directoryId)}`
+      : `/api/workspaces/${encodeURIComponent(this.workspaceId)}/directories/${encodeURIComponent(directoryId)}`;
 
     try {
       const response = await fetch(endpoint, { method: 'DELETE' });
@@ -7597,7 +7605,7 @@ export class WorkspaceDetailPage {
     this.renderDirectoryExplorerLoading(force ? 'Refreshing directory...' : 'Scanning directory...');
 
     try {
-      const endpoint = `/api/studios/${encodeURIComponent(this.workspaceId)}/directories/${encodeURIComponent(currentDirectory.id)}/files`;
+      const endpoint = `/api/workspaces/${encodeURIComponent(this.workspaceId)}/directories/${encodeURIComponent(currentDirectory.id)}/files`;
       const response = await fetch(endpoint);
       if (!response.ok) {
         const errorText = await response.text();
@@ -8244,7 +8252,7 @@ export class WorkspaceDetailPage {
       .map((part) => encodeURIComponent(part))
       .join('/');
 
-    return `/api/studios/${encodeURIComponent(this.workspaceId)}/directories/${encodeURIComponent(directoryId)}/files/${encodedPath}`;
+    return `/api/workspaces/${encodeURIComponent(this.workspaceId)}/directories/${encodeURIComponent(directoryId)}/files/${encodedPath}`;
   }
 
   normalizeRelativePath(path) {
@@ -8368,7 +8376,7 @@ export class WorkspaceDetailPage {
    */
   async addDirectory(path) {
     try {
-      const response = await fetch(`/api/studios/${encodeURIComponent(this.workspaceId)}/attachments`, {
+      const response = await fetch(`/api/workspaces/${encodeURIComponent(this.workspaceId)}/attachments`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -8922,7 +8930,7 @@ export class WorkspaceDetailPage {
       formData.append('workspace_id', this.workspaceId);
 
       try {
-        const response = await fetch(`/api/studios/${encodeURIComponent(this.workspaceId)}/files`, {
+        const response = await fetch(`/api/workspaces/${encodeURIComponent(this.workspaceId)}/files`, {
           method: 'POST',
           body: formData
         });

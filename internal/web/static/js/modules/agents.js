@@ -912,7 +912,7 @@ async function bindAgentCreationMCPServersForWorkspace(workspaceId, agentInstanc
 
     try {
       if (!binding) {
-        const created = await API.post(`/api/studios/${encodeURIComponent(normalizedWorkspaceId)}/mcp-bindings`, {
+        const created = await API.post(`/api/workspaces/${encodeURIComponent(normalizedWorkspaceId)}/mcp-bindings`, {
           server_name: serverName,
           enabled: true
         });
@@ -923,7 +923,7 @@ async function bindAgentCreationMCPServersForWorkspace(workspaceId, agentInstanc
         };
       } else if (binding.enabled === false) {
         const updated = await API.put(
-          `/api/studios/${encodeURIComponent(normalizedWorkspaceId)}/mcp-bindings/${encodeURIComponent(binding.id)}`,
+          `/api/workspaces/${encodeURIComponent(normalizedWorkspaceId)}/mcp-bindings/${encodeURIComponent(binding.id)}`,
           { enabled: true }
         );
         binding = updated?.binding || { ...binding, enabled: true };
@@ -949,7 +949,7 @@ async function bindAgentCreationMCPServersForWorkspace(workspaceId, agentInstanc
 
     try {
       await API.put(
-        `/api/studios/${encodeURIComponent(normalizedWorkspaceId)}/agent-mcp-access/${encodeURIComponent(normalizedAgentInstanceId)}`,
+        `/api/workspaces/${encodeURIComponent(normalizedWorkspaceId)}/agent-mcp-access/${encodeURIComponent(normalizedAgentInstanceId)}`,
         { enabled_binding_ids: nextBindingIDs }
       );
       upsertAgentCreationWorkspaceAccessEntry(localWorkspaceData, {
