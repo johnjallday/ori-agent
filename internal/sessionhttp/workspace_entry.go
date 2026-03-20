@@ -7,6 +7,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/johnjallday/ori-agent/internal/agent"
+	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/session"
 	"github.com/johnjallday/ori-agent/internal/store"
 	"github.com/johnjallday/ori-agent/internal/types"
@@ -168,6 +169,39 @@ func (h *Handler) ensureWorkspaceEntryAgent(workspaceName, requestedAgentName st
 	}
 
 	return agentName, true, nil
+}
+
+// deleteWorkspaceManagerAgent removes the auto-created workspace manager agent
+// when a workspace is deleted. Only deletes agents tagged as "workspace-manager"
+// to avoid removing user-chosen entry agents.
+func (h *Handler) deleteWorkspaceManagerAgent(ws *session.Workspace) {
+	if h == nil || h.agentStore == nil || ws == nil {
+		return
+	}
+
+	entryName := currentWorkspaceEntryAgentName(ws)
+	if entryName == "" {
+		return
+	}
+
+	ag, ok := h.agentStore.GetAgent(entryName)
+	if !ok || ag == nil || ag.Metadata == nil {
+		return
+	}
+
+	for _, tag := range ag.Metadata.Tags {
+		if tag == "workspace-manager" {
+			if err := h.agentStore.DeleteAgent(entryName); err != nil {
+				logger.Warn("Failed to delete workspace manager agent", logger.Fields{
+					"agent": entryName,
+					"error": err,
+				})
+			} else {
+				logger.Info("Deleted workspace manager agent", logger.Fields{"agent": entryName})
+			}
+			return
+		}
+	}
 }
 
 func (h *Handler) rollbackWorkspaceEntryAgent(agentName string, created bool) {

@@ -392,6 +392,9 @@ func (h *Handler) deleteWorkspace(w http.ResponseWriter, r *http.Request, id str
 		}
 	}
 
+	// Clean up auto-created workspace manager agent
+	h.deleteWorkspaceManagerAgent(ws)
+
 	// Delete the workspace
 	if err := h.store.DeleteWorkspace(ctx, id); err != nil {
 		logger.Error("Failed to delete workspace", logger.Fields{"id": id, "error": err})
