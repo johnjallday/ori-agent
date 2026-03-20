@@ -135,10 +135,10 @@ func (tc *TestContext) CreateAgent(name, model string) *Agent {
 	tc.T.Helper()
 
 	agentData := map[string]interface{}{
-		"name":        name,
-		"description": fmt.Sprintf("Test agent created at %s", time.Now().Format(time.RFC3339)),
-		"model":       model,
-		"provider":    tc.detectProvider(),
+		"name":         name,
+		"description":  fmt.Sprintf("Test agent created at %s", time.Now().Format(time.RFC3339)),
+		"model":        model,
+		"llm_provider": tc.detectProvider(),
 	}
 
 	jsonData, _ := json.Marshal(agentData)
