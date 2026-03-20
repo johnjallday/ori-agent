@@ -153,6 +153,8 @@ func (h *Handler) ensureWorkspaceEntryAgent(workspaceName, requestedAgentName st
 	agentName := uniqueWorkspaceEntryAgentName(h.agentStore, baseName)
 	config := &store.CreateAgentConfig{
 		Type:         agent.TypeGeneral,
+		Model:        "gpt-4o-mini",
+		LLMProvider:  "openai",
 		SystemPrompt: workspaceEntryAgentSystemPrompt(workspaceName),
 	}
 	if err := h.agentStore.CreateAgent(agentName, config); err != nil {
