@@ -161,17 +161,7 @@ function setImportBrowseLoading(isLoading) {
 }
 
 function populateWorkspaceEntryAgentSelect() {
-  const select = document.getElementById('workspaceEntryAgentSelect');
-  if (!select) return;
-
-  const options = ['<option value="">Auto-create workspace manager</option>'];
-  (window.availableAgents || []).forEach((agent) => {
-    const name = String(agent && agent.name || '').trim();
-    if (!name) return;
-    options.push(`<option value="${escapeHtml(name)}">${escapeHtml(name)}</option>`);
-  });
-  select.innerHTML = options.join('');
-  select.value = '';
+  // Entry agent is always auto-created as workspace manager — no UI needed.
 }
 
 async function browseImportFolderPath() {
@@ -256,7 +246,6 @@ function openCreateWorkspaceModal(options = {}) {
   const parentSelect = document.getElementById('folderParentSelect');
   const importToggle = document.getElementById('folderImportToggle');
   const importPathInput = document.getElementById('folderImportPathInput');
-  const entryAgentSelect = document.getElementById('workspaceEntryAgentSelect');
 
   if (nameInput) {
     nameInput.value = '';
@@ -264,7 +253,6 @@ function openCreateWorkspaceModal(options = {}) {
   }
   if (descriptionInput) descriptionInput.value = '';
   if (parentSelect) parentSelect.value = '';
-  if (entryAgentSelect) entryAgentSelect.value = '';
   if (importToggle) importToggle.checked = false;
   if (importPathInput) importPathInput.value = '';
   clearDuplicateWarning();
@@ -352,7 +340,6 @@ async function createWorkspace() {
   const colorBtn = document.querySelector('#addFolderModal .folder-color-btn.active');
   const importToggle = document.getElementById('folderImportToggle');
   const importPathInput = document.getElementById('folderImportPathInput');
-  const entryAgentSelect = document.getElementById('workspaceEntryAgentSelect');
 
   const name = nameInput?.value.trim() || '';
   const description = descriptionInput?.value.trim() || '';
@@ -360,7 +347,6 @@ async function createWorkspace() {
   const color = colorBtn?.dataset.color || '';
   const importEnabled = Boolean(importToggle?.checked);
   const importPath = importPathInput?.value?.trim() || '';
-  const entryAgentName = entryAgentSelect?.value?.trim() || '';
 
   if (!name && !importEnabled) {
     showError('Please fill in all required fields');
@@ -379,10 +365,6 @@ async function createWorkspace() {
       parent_id: parentId,
       color: color
     };
-    if (entryAgentName) {
-      payload.entry_agent_name = entryAgentName;
-    }
-
     if (importEnabled) {
       endpoint = '/api/workspaces/import';
       payload.path = importPath;
@@ -434,7 +416,6 @@ async function createWorkspace() {
     if (nameInput) nameInput.dataset.autofillName = '';
     if (descriptionInput) descriptionInput.value = '';
     if (parentSelect) parentSelect.value = '';
-    if (entryAgentSelect) entryAgentSelect.value = '';
     if (importToggle) importToggle.checked = false;
     if (importPathInput) importPathInput.value = '';
     setImportMode(false);
@@ -442,7 +423,14 @@ async function createWorkspace() {
     window.selectedAgents.clear();
     resetImportState();
 
-    // Refresh workspaces list if function exists
+    // Navigate to the new workspace and open the Create Agent modal
+    const workspaceId = result.folder && result.folder.id;
+    if (workspaceId) {
+      window.location.href = `/workspaces/${encodeURIComponent(workspaceId)}`;
+      return;
+    }
+
+    // Fallback: refresh workspaces list if we couldn't navigate
     const refreshFn = (window.WorkspaceHub && window.WorkspaceHub.loadWorkspaces)
       || window.loadWorkspaces;
     if (typeof refreshFn === 'function') {

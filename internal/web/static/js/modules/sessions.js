@@ -286,7 +286,6 @@ const sessionManager = {
     addFolderModal?.addEventListener('show.bs.modal', () => {
       this.resetAddWorkspaceModalForm({ preserveAskOri: true });
       this.importEntryPoint = 'workspace_hub_create';
-      void this.populateWorkspaceEntryAgentSelectFromAgents();
     });
 
     // Save tags button
@@ -1597,24 +1596,12 @@ const sessionManager = {
     }
   },
 
-  populateWorkspaceEntryAgentSelect(agents = []) {
-    const select = document.getElementById('workspaceEntryAgentSelect');
-    if (!select) return;
-
-    const options = ['<option value="">Auto-create workspace manager</option>'];
-    (agents || []).forEach((agent) => {
-      const name = String(agent && agent.name || '').trim();
-      if (!name) return;
-      options.push(`<option value="${this.escapeHtml(name)}">${this.escapeHtml(name)}</option>`);
-    });
-
-    select.innerHTML = options.join('');
-    select.value = '';
+  populateWorkspaceEntryAgentSelect() {
+    // Entry agent is always auto-created as workspace manager — no UI needed.
   },
 
   async populateWorkspaceEntryAgentSelectFromAgents() {
-    const agents = await this.fetchAgents();
-    this.populateWorkspaceEntryAgentSelect(agents);
+    // Entry agent is always auto-created as workspace manager — no UI needed.
   },
 
   // Fetch agents scoped to a workspace; falls back to global agents
@@ -3278,7 +3265,6 @@ const sessionManager = {
     const nameInput = document.getElementById('folderNameInput');
     const descriptionInput = document.getElementById('folderDescriptionInput');
     const parentSelect = document.getElementById('folderParentSelect');
-    const entryAgentSelect = document.getElementById('workspaceEntryAgentSelect');
     const keepSeedValues = Boolean(
       preserveAskOri &&
       modalElement &&
@@ -3308,10 +3294,6 @@ const sessionManager = {
       parentSelect.innerHTML = optionsHtml.join('');
       parentSelect.value = '';
     }
-    if (entryAgentSelect) {
-      entryAgentSelect.value = '';
-    }
-
     document.querySelectorAll('#addFolderModal .folder-color-btn').forEach((btn) => btn.classList.remove('active'));
     const defaultColorBtn = document.querySelector('#addFolderModal .folder-color-btn[data-color=""]')
       || document.querySelector('#addFolderModal .folder-color-btn');
@@ -3473,7 +3455,6 @@ const sessionManager = {
 
     const description = descriptionInput?.value.trim() || '';
     const parentId = parentSelect?.value?.trim() || '';
-    const entryAgentName = document.getElementById('workspaceEntryAgentSelect')?.value?.trim() || '';
     const color = colorBtn?.dataset.color || '';
     const originalCreateLabel = createBtn ? createBtn.textContent : '';
 
@@ -3494,9 +3475,6 @@ const sessionManager = {
         parent_id: parentId,
         color
       };
-      if (entryAgentName) {
-        payload.entry_agent_name = entryAgentName;
-      }
       let endpoint = '/api/workspaces';
       if (importEnabled) {
         endpoint = '/api/workspaces/import';
@@ -3615,7 +3593,8 @@ const sessionManager = {
       modal?.hide();
       this.resetAddWorkspaceModalForm();
 
-      if (askOriPostCreate === 'open_workspace_dashboard' && createdWorkspaceId) {
+      // Navigate to the new workspace and open the Create Agent modal
+      if (createdWorkspaceId) {
         window.location.href = `/workspaces/${encodeURIComponent(createdWorkspaceId)}`;
         return;
       }
@@ -4262,7 +4241,6 @@ const sessionManager = {
 
   // Show add folder modal
   showAddWorkspaceModal() {
-    void this.populateWorkspaceEntryAgentSelectFromAgents();
     const modal = new bootstrap.Modal(document.getElementById('addFolderModal'));
     modal.show();
   },
