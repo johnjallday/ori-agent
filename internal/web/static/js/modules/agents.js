@@ -364,36 +364,39 @@ function updateAgentCreationCapabilityCopy() {
     mcpSubtitle,
     capabilitiesNote
   } = getAgentCreationCapabilityElements();
-  const selectionEnabled = isAgentCreationMCPSelectionEnabled();
+  const hasWorkspace = isAgentCreationMCPSelectionEnabled();
 
+  // When creating from a workspace context, hide the entire MCP/Skills section.
+  // MCP connectors and skills are managed from the workspace detail panels instead.
+  const section = document.getElementById('agentCreateCapabilitiesSection');
+  if (section) {
+    section.hidden = hasWorkspace;
+  }
+  if (hasWorkspace) return;
+
+  // Standalone agent creation (no workspace) — show skills only
   if (title) {
-    title.textContent = selectionEnabled ? 'Review MCP Connectors and Skills' : 'Review Skills';
+    title.textContent = 'Review Skills';
   }
 
   if (mcpPanel) {
-    mcpPanel.hidden = !selectionEnabled;
+    mcpPanel.hidden = true;
   }
 
   if (grid) {
-    grid.classList.toggle('is-single-column', !selectionEnabled);
+    grid.classList.add('is-single-column');
   }
 
   if (capabilitiesIntro) {
-    capabilitiesIntro.textContent = selectionEnabled
-      ? 'Optional. Select global MCP connectors now and they will be bound into this workspace after the agent is created. Workspace-generated bindings stay hidden here.'
-      : 'Optional. Skills attach to the agent here. If a skill needs MCP connectors, you will bind them after adding the agent to a workspace.'
+    capabilitiesIntro.textContent = 'Optional. Skills attach to the agent here. If a skill needs MCP connectors, you will bind them after adding the agent to a workspace.';
   }
 
   if (mcpSubtitle) {
-    mcpSubtitle.textContent = selectionEnabled
-      ? 'Select global connectors to bind into this workspace'
-      : 'Global connectors shown for reference until a workspace is selected'
+    mcpSubtitle.textContent = 'Global connectors shown for reference until a workspace is selected';
   }
 
   if (capabilitiesNote) {
-    capabilitiesNote.textContent = selectionEnabled
-      ? 'Skills with scripts are trusted for this agent when selected. Required MCP connectors are bound into this workspace automatically after the agent is created.'
-      : 'Skills with scripts are trusted for this agent when selected. MCP connector access is configured later from the target workspace.'
+    capabilitiesNote.textContent = 'Skills with scripts are trusted for this agent when selected. MCP connector access is configured later from the target workspace.';
   }
 }
 
