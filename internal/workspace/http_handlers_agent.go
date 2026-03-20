@@ -151,12 +151,20 @@ func (h *HTTPHandler) RemoveAgent(w http.ResponseWriter, r *http.Request) {
 		}
 
 		if err := studio.RemoveAgentInstance(targetInstanceID); err != nil {
+			if errors.Is(err, ErrWorkspaceEntryAgentRequired) {
+				orihttp.BadRequest(w, err.Error())
+				return
+			}
 			orihttp.InternalError(w, fmt.Sprintf("Failed to remove agent instance: %v", err))
 			return
 		}
 	} else {
 
 		if err := studio.RemoveAgent(agentName); err != nil {
+			if errors.Is(err, ErrWorkspaceEntryAgentRequired) {
+				orihttp.BadRequest(w, err.Error())
+				return
+			}
 			orihttp.NotFound(w, fmt.Sprintf("Failed to remove agent: %v", err))
 			return
 		}

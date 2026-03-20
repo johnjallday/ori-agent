@@ -513,11 +513,15 @@ async function loadWorkspaceAgents() {
  * Populate agent dropdown
  */
 function populateAgentDropdown() {
-  const select = document.getElementById('parent-agent');
+  const select = document.getElementById('workspaceEntryAgentSelect');
   if (!select) return;
-  select.innerHTML = (window.availableAgents || []).map(agent =>
-    `<option value="${escapeHtml(agent.name)}">${escapeHtml(agent.name)}</option>`
-  ).join('');
+  const options = ['<option value="">Auto-create workspace manager</option>'];
+  (window.availableAgents || []).forEach((agent) => {
+    const name = String(agent && agent.name || '').trim();
+    if (!name) return;
+    options.push(`<option value="${escapeHtml(name)}">${escapeHtml(name)}</option>`);
+  });
+  select.innerHTML = options.join('');
 }
 
 /**

@@ -12,6 +12,7 @@ import (
 	orihttp "github.com/johnjallday/ori-agent/internal/http"
 	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/session"
+	"github.com/johnjallday/ori-agent/internal/store"
 	"github.com/johnjallday/ori-agent/internal/workspace"
 )
 
@@ -19,6 +20,7 @@ import (
 type Handler struct {
 	store          session.HybridStore
 	workspaceStore *workspace.FileStore // optional folder-based workspace store
+	agentStore     store.Store
 }
 
 // New creates a new session handler.
@@ -29,6 +31,11 @@ func New(store session.HybridStore) *Handler {
 // SetWorkspaceStore sets the folder-based workspace store for enhanced workspace operations.
 func (h *Handler) SetWorkspaceStore(ws *workspace.FileStore) {
 	h.workspaceStore = ws
+}
+
+// SetAgentStore sets the agent store used for workspace entry-agent provisioning.
+func (h *Handler) SetAgentStore(agentStore store.Store) {
+	h.agentStore = agentStore
 }
 
 // handleSessions routes requests to /api/sessions.

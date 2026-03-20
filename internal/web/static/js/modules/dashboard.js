@@ -1743,6 +1743,17 @@
     }
   }
 
+  async function fetchWorkspaceEntryAgentName(workspaceId) {
+    if (!workspaceId || typeof API === 'undefined' || typeof API.get !== 'function') return '';
+    try {
+      var data = await API.get('/api/studios/' + encodeURIComponent(workspaceId));
+      return String(data && data.entry_agent_name || '').trim();
+    } catch (error) {
+      dashLog.debug('Failed to fetch workspace entry agent', { workspaceId: workspaceId, error: error && error.message || error });
+      return '';
+    }
+  }
+
   function getWorkspaceAgentInstanceByName(workspaceData, agentName) {
     if (!workspaceData || !agentName) return null;
     var target = normalizeToken(agentName);
@@ -3899,26 +3910,36 @@
   }
 
   async function openWorkspaceAssistantForPrompt(prompt, routeContext) {
-    setHomeAssistantRoutingSummary('Assistant', 'Opening the workspace Assistant session.');
-
     var assistantSessionResult = await dispatchPromptToWorkspaceAssistantSession(prompt, routeContext);
     if (!assistantSessionResult || !assistantSessionResult.session) {
       throw new Error('Failed to open workspace Assistant session');
     }
 
-    trackHomeAssistantSession(assistantSessionResult.session, prompt, 'Assistant');
+    var entryLabel = assistantSessionResult.entryAgentName ? assistantSessionResult.entryAgentName : 'Assistant';
+    setHomeAssistantRoutingSummary(
+      entryLabel,
+      assistantSessionResult.entryAgentName
+        ? 'Opening the workspace entry session.'
+        : 'Opening the workspace Assistant session.'
+    );
+
+    trackHomeAssistantSession(assistantSessionResult.session, prompt, entryLabel);
     setHomeAssistantMode('continue_session');
     appendHomeAssistantMessage(
       'assistant',
       assistantSessionResult.reused
-        ? 'Continuing the workspace Assistant session in chat.'
-        : 'Started a new workspace Assistant session in chat.'
+        ? 'Continuing the workspace ' + entryLabel + ' session in chat.'
+        : 'Started a new workspace ' + entryLabel + ' session in chat.'
     );
     setHomeAssistantRoutingSummary(
-      assistantSessionResult.reused ? 'Assistant Continued' : 'Assistant Session Started',
+      assistantSessionResult.reused ? entryLabel + ' Continued' : entryLabel + ' Session Started',
       assistantSessionResult.reused
-        ? 'Your message was sent to the current workspace Assistant session.'
-        : 'A new workspace Assistant session is ready in chat.'
+        ? (assistantSessionResult.entryAgentName
+          ? 'Your message was sent to the current workspace entry session.'
+          : 'Your message was sent to the current workspace Assistant session.')
+        : (assistantSessionResult.entryAgentName
+          ? 'A new workspace entry session is ready in chat.'
+          : 'A new workspace Assistant session is ready in chat.')
     );
     renderHomeAssistantActions([
       {
@@ -4473,6 +4494,22 @@
     return null;
   }
 
+  function findSessionForAgentInWorkspace(agentName, workspaceId) {
+    var manager = window.sessionManager;
+    if (!manager || !Array.isArray(manager.sessions) || !agentName) return null;
+
+    var targetAgent = normalizeToken(agentName);
+    var targetWorkspace = String(workspaceId || '').trim();
+    for (var i = 0; i < manager.sessions.length; i++) {
+      var session = manager.sessions[i];
+      if (normalizeToken(session && session.agent_name) !== targetAgent) continue;
+      if (String(session && session.folder_id || '').trim() === targetWorkspace) {
+        return session;
+      }
+    }
+    return null;
+  }
+
   function findSessionById(sessionId) {
     var manager = window.sessionManager;
     if (!manager || !Array.isArray(manager.sessions) || !sessionId) return null;
@@ -4513,6 +4550,38 @@
     if (!manager) return null;
 
     var workspaceId = hasWorkspaceRouteContext(routeContext) ? String(routeContext.workspace_id).trim() : '';
+    var entryAgentName = workspaceId ? await fetchWorkspaceEntryAgentName(workspaceId) : '';
+    if (entryAgentName) {
+      var existingEntrySession = findSessionForAgentInWorkspace(entryAgentName, workspaceId);
+      if (existingEntrySession && existingEntrySession.id && typeof manager.switchToSession === 'function') {
+        await manager.switchToSession(existingEntrySession.id, true);
+        return { session: existingEntrySession, reused: true, entryAgentName: entryAgentName };
+      }
+
+      var entrySession = null;
+      if (typeof manager.createSessionWithAgentInFolder === 'function') {
+        entrySession = await manager.createSessionWithAgentInFolder(entryAgentName, workspaceId);
+      } else {
+        var entryResponse = await fetch('/api/sessions', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            folder_id: workspaceId,
+            title: truncateText(String(prompt || '').trim(), 50) || 'Workspace',
+            agent_name: entryAgentName
+          })
+        });
+        if (!entryResponse.ok) throw new Error('Failed to create workspace entry session');
+        entrySession = await entryResponse.json();
+        if (entrySession && entrySession.id && manager && typeof manager.switchToSession === 'function') {
+          await manager.switchToSession(entrySession.id, true);
+        }
+      }
+
+      if (!entrySession) return null;
+      return { session: entrySession.session || entrySession, reused: false, entryAgentName: entryAgentName };
+    }
+
     var existing = findWorkspaceAssistantSession(workspaceId);
     if (existing && existing.id && typeof manager.switchToSession === 'function') {
       await manager.switchToSession(existing.id, true);

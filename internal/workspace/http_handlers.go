@@ -2,6 +2,7 @@ package workspace
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -30,9 +31,10 @@ func NewHTTPHandler(store Store, orchestrator *Orchestrator, eventBus *EventBus)
 
 // CreateStudioRequest represents the request to create a new studio
 type CreateStudioRequest struct {
-	Name        string   `json:"name"`
-	Description string   `json:"description"`
-	Agents      []string `json:"agents"`
+	Name           string   `json:"name"`
+	Description    string   `json:"description"`
+	Agents         []string `json:"agents"`
+	EntryAgentName string   `json:"entry_agent_name,omitempty"`
 }
 
 // CreateStudio handles POST /api/studios
@@ -62,7 +64,6 @@ func (h *HTTPHandler) CreateStudio(w http.ResponseWriter, r *http.Request) {
 		ID:          uuid.New().String(),
 		Name:        req.Name,
 		Description: req.Description,
-		Agents:      req.Agents,
 		SharedData:  make(map[string]interface{}),
 		Messages:    make([]AgentMessage, 0),
 		Tasks:       make([]Task, 0),
@@ -70,6 +71,26 @@ func (h *HTTPHandler) CreateStudio(w http.ResponseWriter, r *http.Request) {
 		Status:      StatusActive,
 		CreatedAt:   time.Now(),
 		UpdatedAt:   time.Now(),
+	}
+
+	for _, agentName := range req.Agents {
+		if err := studio.AddAgent(agentName); err != nil {
+			if strings.TrimSpace(agentName) == "" || errors.Is(err, ErrAgentAlreadyInWorkspace) {
+				orihttp.BadRequest(w, fmt.Sprintf("Invalid studio agents: %v", err))
+				return
+			}
+			orihttp.InternalError(w, fmt.Sprintf("Failed to configure studio agents: %v", err))
+			return
+		}
+	}
+
+	entryAgentName := strings.TrimSpace(req.EntryAgentName)
+	if entryAgentName == "" {
+		entryAgentName = strings.TrimSpace(req.Agents[0])
+	}
+	if err := studio.SetEntryAgentName(entryAgentName); err != nil {
+		orihttp.BadRequest(w, fmt.Sprintf("Invalid entry agent: %v", err))
+		return
 	}
 
 	// Save studio
@@ -85,11 +106,13 @@ func (h *HTTPHandler) CreateStudio(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
 	if encErr := json.NewEncoder(w).Encode(map[string]interface{}{
-		"id":      studio.ID,
-		"name":    studio.Name,
-		"agents":  studio.Agents,
-		"status":  studio.Status,
-		"message": "Studio created successfully",
+		"id":               studio.ID,
+		"name":             studio.Name,
+		"agents":           studio.Agents,
+		"agent_instances":  studio.AgentInstances,
+		"entry_agent_name": studio.EntryAgentName(),
+		"status":           studio.Status,
+		"message":          "Studio created successfully",
 	}); encErr != nil {
 		logger.Error("Failed to encode response", logger.Fields{"error": encErr})
 	}
@@ -132,6 +155,7 @@ func (h *HTTPHandler) GetStudio(w http.ResponseWriter, r *http.Request) {
 		"id":                   studio.ID,
 		"name":                 studio.Name,
 		"description":          studio.Description,
+		"entry_agent_name":     studio.EntryAgentName(),
 		"agents":               studio.Agents,
 		"agent_instances":      studio.AgentInstances, // NEW: Stable agent instances
 		"agent_stats":          agentStats,
@@ -178,13 +202,14 @@ func (h *HTTPHandler) ListStudios(w http.ResponseWriter, r *http.Request) {
 		}
 
 		studios = append(studios, map[string]interface{}{
-			"id":          studio.ID,
-			"name":        studio.Name,
-			"description": studio.Description,
-			"agents":      studio.Agents,
-			"status":      studio.Status,
-			"created_at":  studio.CreatedAt,
-			"task_count":  len(studio.Tasks),
+			"id":               studio.ID,
+			"name":             studio.Name,
+			"description":      studio.Description,
+			"entry_agent_name": studio.EntryAgentName(),
+			"agents":           studio.Agents,
+			"status":           studio.Status,
+			"created_at":       studio.CreatedAt,
+			"task_count":       len(studio.Tasks),
 		})
 	}
 

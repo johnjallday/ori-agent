@@ -78,3 +78,45 @@ func TestWorkspaceStoreAdapter_MCPRoundTrip(t *testing.T) {
 		t.Fatalf("expected round-tripped agent_instance_id agent-1, got %q", roundTripped.AgentMCPAccess[0].AgentInstanceID)
 	}
 }
+
+func TestWorkspaceStoreAdapter_AgentInstanceMetadataRoundTrip(t *testing.T) {
+	adapter := &WorkspaceStoreAdapter{}
+	now := time.Now().UTC().Round(time.Second)
+
+	input := &workspace.Workspace{
+		ID:        "workspace-roles",
+		Name:      "Workspace Roles",
+		CreatedAt: now,
+		UpdatedAt: now,
+		AgentInstances: []workspace.AgentInstance{
+			{
+				ID:             "agent-manager",
+				Name:           "Trip Planning Manager",
+				InstanceNumber: 1,
+				NodeID:         "trip-manager-node",
+				Role:           "Manager",
+				Description:    "Default entry point for workspace requests.",
+				EntryPoint:     true,
+				CreatedAt:      now,
+			},
+		},
+	}
+
+	sessionWS := adapter.toSessionWorkspace(input)
+	roundTripped := adapter.toAgentStudioWorkspace(sessionWS)
+
+	if len(roundTripped.AgentInstances) != 1 {
+		t.Fatalf("expected 1 round-tripped agent instance, got %d", len(roundTripped.AgentInstances))
+	}
+
+	got := roundTripped.AgentInstances[0]
+	if got.Role != "Manager" {
+		t.Fatalf("expected role to round-trip, got %q", got.Role)
+	}
+	if got.Description != "Default entry point for workspace requests." {
+		t.Fatalf("expected description to round-trip, got %q", got.Description)
+	}
+	if !got.EntryPoint {
+		t.Fatal("expected entry_point to round-trip as true")
+	}
+}

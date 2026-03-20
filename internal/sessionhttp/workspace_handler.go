@@ -98,13 +98,14 @@ func (h *Handler) handleWorkspace(w http.ResponseWriter, r *http.Request, id str
 // createWorkspace handles POST /api/workspaces.
 func (h *Handler) createWorkspace(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		Name        string `json:"name"`
-		Description string `json:"description,omitempty"`
-		ParentID    string `json:"parent_id,omitempty"`
-		OrderIndex  *int   `json:"order_index,omitempty"`
-		Color       string `json:"color,omitempty"`
-		ProjectPath string `json:"project_path,omitempty"`
-		Location    string `json:"location,omitempty"` // Optional custom directory for workspace folder (overrides default root)
+		Name           string `json:"name"`
+		Description    string `json:"description,omitempty"`
+		ParentID       string `json:"parent_id,omitempty"`
+		OrderIndex     *int   `json:"order_index,omitempty"`
+		Color          string `json:"color,omitempty"`
+		ProjectPath    string `json:"project_path,omitempty"`
+		Location       string `json:"location,omitempty"`         // Optional custom directory for workspace folder (overrides default root)
+		EntryAgentName string `json:"entry_agent_name,omitempty"` // Optional existing agent name; otherwise a workspace manager is created automatically
 	}
 
 	if !orihttp.ParseJSONBody(w, r, &req) {
@@ -113,6 +114,13 @@ func (h *Handler) createWorkspace(w http.ResponseWriter, r *http.Request) {
 
 	if req.Name == "" {
 		_ = orihttp.RespondBadRequest(w, "name is required")
+		return
+	}
+
+	entryAgentName, createdEntryAgent, err := h.ensureWorkspaceEntryAgent(req.Name, req.EntryAgentName)
+	if err != nil {
+		logger.Error("Failed to provision workspace entry agent", logger.Fields{"name": req.Name, "error": err})
+		_ = orihttp.RespondBadRequest(w, err.Error())
 		return
 	}
 
@@ -127,8 +135,10 @@ func (h *Handler) createWorkspace(w http.ResponseWriter, r *http.Request) {
 	if req.OrderIndex != nil {
 		ws.OrderIndex = *req.OrderIndex
 	}
+	setWorkspaceEntryAgent(ws, entryAgentName)
 
 	if err := h.store.CreateWorkspace(r.Context(), ws); err != nil {
+		h.rollbackWorkspaceEntryAgent(entryAgentName, createdEntryAgent)
 		logger.Error("Failed to create workspace", logger.Fields{"error": err})
 		_ = orihttp.RespondInternalError(w, "Failed to create workspace")
 		return
@@ -137,15 +147,18 @@ func (h *Handler) createWorkspace(w http.ResponseWriter, r *http.Request) {
 	// Create workspace folder on disk if folder-based store is available
 	if h.workspaceStore != nil {
 		folderWS := &agentworkspace.Workspace{
-			ID:          ws.ID,
-			Name:        ws.Name,
-			Description: ws.Description,
-			FolderSlug:  ws.FolderSlug,
-			ProjectPath: ws.ProjectPath,
-			ParentID:    ws.ParentID,
-			Status:      agentworkspace.StatusActive,
-			CreatedAt:   ws.CreatedAt,
-			UpdatedAt:   ws.UpdatedAt,
+			ID:             ws.ID,
+			Name:           ws.Name,
+			Description:    ws.Description,
+			FolderSlug:     ws.FolderSlug,
+			ProjectPath:    ws.ProjectPath,
+			ParentID:       ws.ParentID,
+			Agents:         append([]string{}, ws.Agents...),
+			AgentInstances: toWorkspaceAgentInstances(ws.AgentInstances),
+			SharedData:     ws.SharedData,
+			Status:         agentworkspace.StatusActive,
+			CreatedAt:      ws.CreatedAt,
+			UpdatedAt:      ws.UpdatedAt,
 		}
 
 		var folderErr error
@@ -200,7 +213,9 @@ func (h *Handler) createWorkspace(w http.ResponseWriter, r *http.Request) {
 			}
 
 			// Resync workspace.json to include directory reference and MCP binding
-			folderWS.SharedData = make(map[string]interface{})
+			folderWS.SharedData = ws.SharedData
+			folderWS.Agents = append([]string{}, ws.Agents...)
+			folderWS.AgentInstances = toWorkspaceAgentInstances(ws.AgentInstances)
 			folderWS.DirectoryReferences = []agentworkspace.DirectoryReference{
 				{
 					ID:          dirRef.ID,
@@ -504,6 +519,7 @@ type createWorkspaceImportRequest struct {
 	Path           string `json:"path"`
 	AllowDuplicate bool   `json:"allow_duplicate,omitempty"`
 	EntryPoint     string `json:"entry_point,omitempty"`
+	EntryAgentName string `json:"entry_agent_name,omitempty"`
 }
 
 type workspaceImportDuplicate struct {
@@ -622,6 +638,13 @@ func (h *Handler) handleWorkspaceImport(w http.ResponseWriter, r *http.Request) 
 		workspaceName = filepath.Base(normalizedPath)
 	}
 
+	entryAgentName, createdEntryAgent, err := h.ensureWorkspaceEntryAgent(workspaceName, req.EntryAgentName)
+	if err != nil {
+		logger.Error("Failed to provision imported workspace entry agent", logger.Fields{"name": workspaceName, "error": err})
+		_ = orihttp.RespondBadRequest(w, err.Error())
+		return
+	}
+
 	workspace := &session.Workspace{
 		Name:        workspaceName,
 		Description: req.Description,
@@ -641,6 +664,7 @@ func (h *Handler) handleWorkspaceImport(w http.ResponseWriter, r *http.Request) 
 			"imported_at":     time.Now().UTC().Format(time.RFC3339),
 		},
 	}
+	setWorkspaceEntryAgent(workspace, entryAgentName)
 
 	recordWorkspaceImportTelemetry("import_attempt", logger.Fields{
 		"path_hash":       hashPathForTelemetry(normalizedPath),
@@ -649,6 +673,7 @@ func (h *Handler) handleWorkspaceImport(w http.ResponseWriter, r *http.Request) 
 	})
 
 	if err := h.store.CreateWorkspace(r.Context(), workspace); err != nil {
+		h.rollbackWorkspaceEntryAgent(entryAgentName, createdEntryAgent)
 		logger.Error("Failed to create workspace from folder import", logger.Fields{"error": err})
 		recordWorkspaceImportTelemetry("import_failed", logger.Fields{
 			"path_hash":   hashPathForTelemetry(normalizedPath),
@@ -682,6 +707,7 @@ func (h *Handler) handleWorkspaceImport(w http.ResponseWriter, r *http.Request) 
 	if err != nil {
 		logger.Error("Failed to marshal directory references for workspace import", logger.Fields{"workspace_id": workspace.ID, "error": err})
 		_ = h.store.DeleteWorkspace(r.Context(), workspace.ID)
+		h.rollbackWorkspaceEntryAgent(entryAgentName, createdEntryAgent)
 		recordWorkspaceImportTelemetry("import_failed", logger.Fields{
 			"path_hash":    hashPathForTelemetry(normalizedPath),
 			"workspace_id": workspace.ID,
@@ -699,6 +725,7 @@ func (h *Handler) handleWorkspaceImport(w http.ResponseWriter, r *http.Request) 
 		if delErr := h.store.DeleteWorkspace(r.Context(), workspace.ID); delErr != nil {
 			logger.Warn("Failed to rollback workspace after import attach failure", logger.Fields{"workspace_id": workspace.ID, "error": delErr})
 		}
+		h.rollbackWorkspaceEntryAgent(entryAgentName, createdEntryAgent)
 		recordWorkspaceImportTelemetry("import_failed", logger.Fields{
 			"path_hash":    hashPathForTelemetry(normalizedPath),
 			"workspace_id": workspace.ID,
@@ -977,6 +1004,10 @@ func (h *Handler) addWorkspaceAgent(w http.ResponseWriter, r *http.Request, work
 		workspace.Agents = append(workspace.Agents, req.AgentName)
 	}
 
+	if strings.TrimSpace(currentWorkspaceEntryAgentName(workspace)) == "" {
+		setWorkspaceEntryAgent(workspace, req.AgentName)
+	}
+
 	workspace.UpdatedAt = time.Now()
 
 	if err := h.store.UpdateWorkspace(r.Context(), workspace); err != nil {
@@ -1056,6 +1087,19 @@ func (h *Handler) removeWorkspaceAgent(w http.ResponseWriter, r *http.Request, w
 		return
 	}
 
+	entryAgentName := strings.TrimSpace(currentWorkspaceEntryAgentName(workspace))
+	entryAgentRemoved := false
+	for removedName := range removedNames {
+		if strings.EqualFold(strings.TrimSpace(removedName), entryAgentName) {
+			entryAgentRemoved = true
+			break
+		}
+	}
+	if entryAgentRemoved && len(newInstances) == 0 {
+		_ = orihttp.RespondBadRequest(w, "workspace must keep an entry agent")
+		return
+	}
+
 	workspace.AgentInstances = newInstances
 
 	// Update legacy agents array - remove names that no longer have active instances.
@@ -1077,6 +1121,12 @@ func (h *Handler) removeWorkspaceAgent(w http.ResponseWriter, r *http.Request, w
 			newAgents = append(newAgents, name)
 		}
 		workspace.Agents = newAgents
+	}
+
+	if entryAgentRemoved && len(newInstances) > 0 {
+		setWorkspaceEntryAgent(workspace, newInstances[0].Name)
+	} else if entryAgentName != "" {
+		setWorkspaceEntryAgent(workspace, entryAgentName)
 	}
 
 	if err := cleanupRemovedAgentWorkspaceState(workspace, removedNames, removedNodeIDs, removedInstanceIDs); err != nil {

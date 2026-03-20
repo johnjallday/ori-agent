@@ -85,6 +85,9 @@ func TestHandleWorkspaceAgents_DeleteCleansWorkspaceState(t *testing.T) {
 		Name:           "Agent Cleanup",
 		Agents:         []string{"Writer", "Reviewer"},
 		AgentInstances: []session.AgentInstance{writerOne, writerTwo, reviewer},
+		SharedData: map[string]interface{}{
+			"entry_agent_name": "Writer",
+		},
 		Layout: &session.CanvasLayout{
 			AgentPositions: map[string]session.Position{
 				writerOne.NodeID: {X: 10, Y: 20},
@@ -126,6 +129,12 @@ func TestHandleWorkspaceAgents_DeleteCleansWorkspaceState(t *testing.T) {
 	if updated.AgentInstances[0].Name != "Reviewer" {
 		t.Fatalf("expected reviewer to remain, got %q", updated.AgentInstances[0].Name)
 	}
+	if !updated.AgentInstances[0].EntryPoint {
+		t.Fatalf("expected reviewer to be promoted to entry agent, got %#v", updated.AgentInstances[0])
+	}
+	if got := currentWorkspaceEntryAgentName(updated); got != "Reviewer" {
+		t.Fatalf("expected entry agent to promote to Reviewer, got %q", got)
+	}
 	if len(updated.Agents) != 1 || updated.Agents[0] != "Reviewer" {
 		t.Fatalf("expected legacy agents to contain only reviewer, got %#v", updated.Agents)
 	}
@@ -166,5 +175,52 @@ func TestHandleWorkspaceAgents_DeleteCleansWorkspaceState(t *testing.T) {
 	}
 	if len(updatedAccess) != 1 || updatedAccess[0].AgentInstanceID != reviewer.ID {
 		t.Fatalf("expected only reviewer access entry to remain, got %#v", updatedAccess)
+	}
+}
+
+func TestHandleWorkspaceAgents_DeleteRejectsRemovingLastEntryAgent(t *testing.T) {
+	handler, cleanup := createTestHandler(t)
+	defer cleanup()
+
+	now := time.Now()
+	manager := session.AgentInstance{
+		ID:             "manager-1",
+		Name:           "Trip Planning Manager",
+		InstanceNumber: 1,
+		NodeID:         "trip-manager-node-1",
+		EntryPoint:     true,
+		CreatedAt:      now,
+	}
+
+	ws := &session.Workspace{
+		ID:             "workspace-last-entry",
+		Name:           "Trip Planning",
+		Agents:         []string{"Trip Planning Manager"},
+		AgentInstances: []session.AgentInstance{manager},
+		SharedData: map[string]interface{}{
+			"entry_agent_name": "Trip Planning Manager",
+		},
+		CreatedAt: now,
+		UpdatedAt: now,
+	}
+
+	if err := handler.store.CreateWorkspace(context.Background(), ws); err != nil {
+		t.Fatalf("failed to create workspace: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodDelete, "/api/workspaces/workspace-last-entry/agents/manager-1", nil)
+	w := httptest.NewRecorder()
+
+	handler.HandleWorkspaces(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 when removing last entry agent, got %d: %s", w.Code, w.Body.String())
+	}
+
+	updated, err := handler.store.GetWorkspace(context.Background(), ws.ID)
+	if err != nil {
+		t.Fatalf("failed to reload workspace: %v", err)
+	}
+	if len(updated.AgentInstances) != 1 || !updated.AgentInstances[0].EntryPoint {
+		t.Fatalf("expected last entry agent to remain intact, got %#v", updated.AgentInstances)
 	}
 }

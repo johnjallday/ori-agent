@@ -31,6 +31,21 @@ func TestWorkspaceAddAgentRejectsDuplicateName(t *testing.T) {
 	}
 }
 
+func TestWorkspaceAddAgentSetsFirstEntryAgent(t *testing.T) {
+	ws := &Workspace{}
+
+	if err := ws.AddAgent("Trip Planning Manager"); err != nil {
+		t.Fatalf("AddAgent() error = %v", err)
+	}
+
+	if got := ws.EntryAgentName(); got != "Trip Planning Manager" {
+		t.Fatalf("EntryAgentName() = %q, want %q", got, "Trip Planning Manager")
+	}
+	if len(ws.AgentInstances) != 1 || !ws.AgentInstances[0].EntryPoint {
+		t.Fatalf("expected first agent instance to be entry point, got %#v", ws.AgentInstances)
+	}
+}
+
 func TestNormalizeAgentInstancesDedupesAndRewritesReferences(t *testing.T) {
 	ws := &Workspace{
 		ID:     "ws-1",
@@ -137,5 +152,108 @@ func TestNormalizeAgentInstancesDedupesAndRewritesReferences(t *testing.T) {
 	}
 	if got := ws.AgentSkillAccess[0].EnabledBindingIDs; !reflect.DeepEqual(got, []string{"skill-a", "skill-b"}) {
 		t.Fatalf("expected merged skill bindings, got %#v", got)
+	}
+}
+
+func TestWorkspaceEntryAgentNameUsesConfiguredEntryAgent(t *testing.T) {
+	ws := &Workspace{
+		Agents: []string{"Trip Planning Manager", "Trip Planner"},
+		AgentInstances: []AgentInstance{
+			{Name: "Trip Planning Manager", NodeID: "trip-manager-node", EntryPoint: true},
+			{Name: "Trip Planner", NodeID: "trip-planner-node"},
+		},
+		SharedData: map[string]interface{}{},
+	}
+
+	if err := ws.SetEntryAgentName("Trip Planning Manager"); err != nil {
+		t.Fatalf("SetEntryAgentName() error = %v", err)
+	}
+
+	if got := ws.EntryAgentName(); got != "Trip Planning Manager" {
+		t.Fatalf("EntryAgentName() = %q, want %q", got, "Trip Planning Manager")
+	}
+
+	if ws.SharedData["entry_agent_name"] != "Trip Planning Manager" {
+		t.Fatalf("expected shared entry agent name to be stored, got %#v", ws.SharedData["entry_agent_name"])
+	}
+}
+
+func TestWorkspaceEntryAgentNameFallsBackToEntryPointInstance(t *testing.T) {
+	ws := &Workspace{
+		Agents: []string{"Music Project Manager", "DAW Agent"},
+		AgentInstances: []AgentInstance{
+			{Name: "Music Project Manager", NodeID: "manager-node", EntryPoint: true},
+			{Name: "DAW Agent", NodeID: "daw-node"},
+		},
+	}
+
+	if got := ws.EntryAgentName(); got != "Music Project Manager" {
+		t.Fatalf("EntryAgentName() = %q, want %q", got, "Music Project Manager")
+	}
+}
+
+func TestNormalizeAgentInstancesPreservesEntryPointMetadata(t *testing.T) {
+	ws := &Workspace{
+		Agents: []string{"Portfolio Manager", "Portfolio Manager"},
+		AgentInstances: []AgentInstance{
+			{ID: "manager-1", Name: "Portfolio Manager", InstanceNumber: 1, NodeID: "Portfolio Manager-node-1"},
+			{ID: "manager-2", Name: "Portfolio Manager", InstanceNumber: 2, NodeID: "Portfolio Manager-node-2", Role: "Manager", Description: "Primary entry point", EntryPoint: true},
+		},
+	}
+
+	if changed := ws.NormalizeAgentInstances(); !changed {
+		t.Fatal("NormalizeAgentInstances() = false, want true")
+	}
+
+	if len(ws.AgentInstances) != 1 {
+		t.Fatalf("expected 1 canonical agent instance, got %d", len(ws.AgentInstances))
+	}
+
+	got := ws.AgentInstances[0]
+	if got.Role != "Manager" {
+		t.Fatalf("expected canonical role Manager, got %q", got.Role)
+	}
+	if got.Description != "Primary entry point" {
+		t.Fatalf("expected canonical description to be preserved, got %q", got.Description)
+	}
+	if !got.EntryPoint {
+		t.Fatal("expected canonical instance to remain entry_point")
+	}
+}
+
+func TestWorkspaceRemoveAgentInstancePromotesNextEntryAgent(t *testing.T) {
+	ws := &Workspace{}
+	if err := ws.AddAgent("Portfolio Manager"); err != nil {
+		t.Fatalf("AddAgent(first) error = %v", err)
+	}
+	if err := ws.AddAgent("Chart Analysis Agent"); err != nil {
+		t.Fatalf("AddAgent(second) error = %v", err)
+	}
+
+	entryInstanceID := ws.AgentInstances[0].ID
+	if err := ws.RemoveAgentInstance(entryInstanceID); err != nil {
+		t.Fatalf("RemoveAgentInstance() error = %v", err)
+	}
+
+	if got := ws.EntryAgentName(); got != "Chart Analysis Agent" {
+		t.Fatalf("EntryAgentName() = %q, want %q", got, "Chart Analysis Agent")
+	}
+	if len(ws.AgentInstances) != 1 || !ws.AgentInstances[0].EntryPoint {
+		t.Fatalf("expected remaining agent instance to become entry point, got %#v", ws.AgentInstances)
+	}
+}
+
+func TestWorkspaceRemoveAgentInstanceRejectsRemovingLastEntryAgent(t *testing.T) {
+	ws := &Workspace{}
+	if err := ws.AddAgent("Music Project Manager"); err != nil {
+		t.Fatalf("AddAgent() error = %v", err)
+	}
+
+	err := ws.RemoveAgentInstance(ws.AgentInstances[0].ID)
+	if !errors.Is(err, ErrWorkspaceEntryAgentRequired) {
+		t.Fatalf("RemoveAgentInstance(last entry) error = %v, want %v", err, ErrWorkspaceEntryAgentRequired)
+	}
+	if got := ws.EntryAgentName(); got != "Music Project Manager" {
+		t.Fatalf("EntryAgentName() after rejected removal = %q, want %q", got, "Music Project Manager")
 	}
 }

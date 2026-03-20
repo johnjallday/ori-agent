@@ -33,7 +33,10 @@ type AgentInstance struct {
 	Name           string    `json:"name"`            // Agent type name (e.g., "default", "writer")
 	InstanceNumber int       `json:"instance_number"` // Instance number for display (e.g., 1, 2, 3)
 	NodeID         string    `json:"node_id"`         // Stable node ID (e.g., "default-node-1")
-	CreatedAt      time.Time `json:"created_at"`      // When this instance was added
+	Role           string    `json:"role,omitempty"`  // Workspace-specific responsibility label (e.g., "Project Manager")
+	Description    string    `json:"description,omitempty"`
+	EntryPoint     bool      `json:"entry_point,omitempty"` // Marks the default entry node for workspace-level requests
+	CreatedAt      time.Time `json:"created_at"`            // When this instance was added
 }
 
 // Workspace stores shared context between collaborating agents

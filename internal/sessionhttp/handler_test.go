@@ -6,11 +6,15 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"testing"
 	"time"
 
+	"github.com/johnjallday/ori-agent/internal/agent"
 	"github.com/johnjallday/ori-agent/internal/database"
 	"github.com/johnjallday/ori-agent/internal/session"
+	agentstore "github.com/johnjallday/ori-agent/internal/store"
+	"github.com/johnjallday/ori-agent/internal/types"
 )
 
 // createTestHandler creates a handler with an in-memory store for testing.
@@ -25,6 +29,12 @@ func createTestHandler(t *testing.T) (*Handler, func()) {
 
 	store := session.NewHybridStoreWithDB(db, 50)
 	handler := New(store)
+	agentStorePath := filepath.Join(t.TempDir(), "agents.json")
+	agentStore, err := agentstore.NewFileStore(agentStorePath, types.Settings{})
+	if err != nil {
+		t.Fatalf("Failed to create test agent store: %v", err)
+	}
+	handler.SetAgentStore(agentStore)
 
 	return handler, func() {
 		_ = store.Close()
@@ -710,6 +720,81 @@ func createTestWorkspace(t *testing.T, handler *Handler, name string) string {
 		workspace = resp["folder"].(map[string]interface{})
 	}
 	return workspace["id"].(string)
+}
+
+func TestHandler_CreateWorkspaceAutoCreatesEntryAgent(t *testing.T) {
+	handler, cleanup := createTestHandler(t)
+	defer cleanup()
+
+	body := `{"name":"Trip Planning"}`
+	req := httptest.NewRequest(http.MethodPost, "/api/workspaces", bytes.NewBufferString(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	handler.HandleWorkspaces(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp map[string]interface{}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+	workspacePayload := resp["folder"].(map[string]interface{})
+	workspaceID := workspacePayload["id"].(string)
+
+	ws, err := handler.store.GetWorkspace(context.Background(), workspaceID)
+	if err != nil {
+		t.Fatalf("failed to load created workspace: %v", err)
+	}
+
+	if got := currentWorkspaceEntryAgentName(ws); got != "Trip Planning Manager" {
+		t.Fatalf("entry agent = %q, want %q", got, "Trip Planning Manager")
+	}
+	if len(ws.AgentInstances) != 1 || !ws.AgentInstances[0].EntryPoint {
+		t.Fatalf("expected one entry-point agent instance, got %#v", ws.AgentInstances)
+	}
+	if _, ok := handler.agentStore.GetAgent("Trip Planning Manager"); !ok {
+		t.Fatal("expected auto-created workspace manager agent to exist")
+	}
+}
+
+func TestHandler_CreateWorkspaceUsesExplicitEntryAgent(t *testing.T) {
+	handler, cleanup := createTestHandler(t)
+	defer cleanup()
+
+	if err := handler.agentStore.CreateAgent("Reusable Manager", &agentstore.CreateAgentConfig{Type: agent.TypeGeneral}); err != nil {
+		t.Fatalf("failed to create reusable agent: %v", err)
+	}
+
+	body := `{"name":"Portfolio","entry_agent_name":"Reusable Manager"}`
+	req := httptest.NewRequest(http.MethodPost, "/api/workspaces", bytes.NewBufferString(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	handler.HandleWorkspaces(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp map[string]interface{}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+	workspacePayload := resp["folder"].(map[string]interface{})
+	workspaceID := workspacePayload["id"].(string)
+
+	ws, err := handler.store.GetWorkspace(context.Background(), workspaceID)
+	if err != nil {
+		t.Fatalf("failed to load created workspace: %v", err)
+	}
+
+	if got := currentWorkspaceEntryAgentName(ws); got != "Reusable Manager" {
+		t.Fatalf("entry agent = %q, want %q", got, "Reusable Manager")
+	}
+	if _, ok := handler.agentStore.GetAgent("Portfolio Manager"); ok {
+		t.Fatal("did not expect default workspace manager to be auto-created when explicit entry agent is provided")
+	}
 }
 
 // TestHandler_CreateNote tests creating a note via POST /api/notes.
