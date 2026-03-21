@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -39,6 +40,16 @@ func createTestHandler(t *testing.T) (*Handler, func()) {
 	return handler, func() {
 		_ = store.Close()
 	}
+}
+
+func containsTag(tags []string, target string) bool {
+	normalizedTarget := strings.TrimSpace(strings.ToLower(target))
+	for _, tag := range tags {
+		if strings.TrimSpace(strings.ToLower(tag)) == normalizedTarget {
+			return true
+		}
+	}
+	return false
 }
 
 // TestHandler_CreateSession tests session creation via API.
@@ -106,6 +117,106 @@ func TestHandler_CreateSessionWithoutAgent(t *testing.T) {
 	}
 	if sess["agent_name"] != "" {
 		t.Errorf("Expected empty agent_name for Assistant session, got %v", sess["agent_name"])
+	}
+}
+
+func TestHandler_CreateSessionInWorkspaceUsesEntryAgent(t *testing.T) {
+	handler, cleanup := createTestHandler(t)
+	defer cleanup()
+
+	now := time.Now()
+	ws := &session.Workspace{
+		ID:     "workspace-spain",
+		Name:   "Spain",
+		Agents: []string{"Spain Manager"},
+		AgentInstances: []session.AgentInstance{
+			{
+				ID:             "spain-manager-1",
+				Name:           "Spain Manager",
+				InstanceNumber: 1,
+				NodeID:         "spain-manager-node-1",
+				EntryPoint:     true,
+				CreatedAt:      now,
+			},
+		},
+		SharedData: map[string]interface{}{
+			workspaceEntryAgentNameKey: "Spain Manager",
+		},
+		CreatedAt: now,
+		UpdatedAt: now,
+	}
+	if err := handler.store.CreateWorkspace(context.Background(), ws); err != nil {
+		t.Fatalf("failed to create workspace: %v", err)
+	}
+
+	body := `{"title":"Spain Session","folder_id":"workspace-spain"}`
+	req := httptest.NewRequest(http.MethodPost, "/api/sessions", bytes.NewBufferString(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	handler.HandleSessions(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp map[string]interface{}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("failed to parse response: %v", err)
+	}
+
+	sess := resp["session"].(map[string]interface{})
+	if got := sess["agent_name"]; got != "Spain Manager" {
+		t.Fatalf("expected workspace entry agent binding, got %#v", got)
+	}
+}
+
+func TestHandler_CreateSessionInWorkspacePreservesExplicitAgent(t *testing.T) {
+	handler, cleanup := createTestHandler(t)
+	defer cleanup()
+
+	now := time.Now()
+	ws := &session.Workspace{
+		ID:     "workspace-explicit",
+		Name:   "Spain",
+		Agents: []string{"Spain Manager"},
+		AgentInstances: []session.AgentInstance{
+			{
+				ID:             "spain-manager-1",
+				Name:           "Spain Manager",
+				InstanceNumber: 1,
+				NodeID:         "spain-manager-node-1",
+				EntryPoint:     true,
+				CreatedAt:      now,
+			},
+		},
+		SharedData: map[string]interface{}{
+			workspaceEntryAgentNameKey: "Spain Manager",
+		},
+		CreatedAt: now,
+		UpdatedAt: now,
+	}
+	if err := handler.store.CreateWorkspace(context.Background(), ws); err != nil {
+		t.Fatalf("failed to create workspace: %v", err)
+	}
+
+	body := `{"title":"Spain Session","folder_id":"workspace-explicit","agent_name":"Writer"}`
+	req := httptest.NewRequest(http.MethodPost, "/api/sessions", bytes.NewBufferString(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	handler.HandleSessions(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp map[string]interface{}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("failed to parse response: %v", err)
+	}
+
+	sess := resp["session"].(map[string]interface{})
+	if got := sess["agent_name"]; got != "Writer" {
+		t.Fatalf("expected explicit agent binding to win, got %#v", got)
 	}
 }
 
@@ -792,6 +903,45 @@ func TestHandler_CreateWorkspaceUsesExplicitEntryAgent(t *testing.T) {
 	}
 	if _, ok := handler.agentStore.GetAgent("Portfolio Manager"); ok {
 		t.Fatal("did not expect default workspace manager to be auto-created when explicit entry agent is provided")
+	}
+}
+
+func TestEnsureWorkspaceEntryAgent_CreatesWorkspaceManagerAgent(t *testing.T) {
+	handler, cleanup := createTestHandler(t)
+	defer cleanup()
+
+	agentName, created, err := handler.ensureWorkspaceEntryAgent("Spain", "")
+	if err != nil {
+		t.Fatalf("failed to ensure workspace entry agent: %v", err)
+	}
+	if !created {
+		t.Fatal("expected workspace entry agent to be created")
+	}
+	if agentName != "Spain Manager" {
+		t.Fatalf("expected default agent name %q, got %q", "Spain Manager", agentName)
+	}
+
+	ag, ok := handler.agentStore.GetAgent(agentName)
+	if !ok || ag == nil {
+		t.Fatalf("expected created agent %q to exist", agentName)
+	}
+	if ag.Type != "workspace-manager" {
+		t.Fatalf("expected workspace-manager type, got %q", ag.Type)
+	}
+	if ag.Role != types.RoleOrchestrator {
+		t.Fatalf("expected orchestrator role, got %q", ag.Role)
+	}
+	if ag.Metadata == nil {
+		t.Fatal("expected metadata for workspace manager")
+	}
+	if !strings.Contains(ag.Metadata.Description, "Coordinate workspace tasks") {
+		t.Fatalf("unexpected metadata description: %q", ag.Metadata.Description)
+	}
+	if !containsTag(ag.Metadata.Tags, "workspace-manager") || !containsTag(ag.Metadata.Tags, "orchestrator") {
+		t.Fatalf("expected workspace-manager/orchestrator tags, got %#v", ag.Metadata.Tags)
+	}
+	if !strings.Contains(ag.Settings.SystemPrompt, "workspace manager") {
+		t.Fatalf("expected workspace-manager prompt, got %q", ag.Settings.SystemPrompt)
 	}
 }
 

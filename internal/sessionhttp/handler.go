@@ -114,6 +114,10 @@ func (h *Handler) createSession(w http.ResponseWriter, r *http.Request) {
 		req.Title = "New Session"
 	}
 
+	if strings.TrimSpace(req.AgentName) == "" && strings.TrimSpace(req.FolderID) != "" {
+		req.AgentName = h.defaultSessionAgentNameForWorkspace(r.Context(), req.FolderID)
+	}
+
 	sess := &session.Session{
 		Title:     req.Title,
 		AgentName: req.AgentName,

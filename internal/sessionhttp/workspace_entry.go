@@ -1,12 +1,12 @@
 package sessionhttp
 
 import (
+	"context"
 	"fmt"
 	"strings"
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/johnjallday/ori-agent/internal/agent"
 	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/session"
 	"github.com/johnjallday/ori-agent/internal/store"
@@ -152,7 +152,7 @@ func (h *Handler) ensureWorkspaceEntryAgent(workspaceName, requestedAgentName st
 	baseName := defaultWorkspaceEntryAgentName(workspaceName)
 	agentName := uniqueWorkspaceEntryAgentName(h.agentStore, baseName)
 	config := &store.CreateAgentConfig{
-		Type:         agent.TypeGeneral,
+		Type:         "workspace-manager",
 		SystemPrompt: workspaceEntryAgentSystemPrompt(workspaceName),
 	}
 	if err := h.agentStore.CreateAgent(agentName, config); err != nil {
@@ -160,15 +160,35 @@ func (h *Handler) ensureWorkspaceEntryAgent(workspaceName, requestedAgentName st
 	}
 
 	if ag, ok := h.agentStore.GetAgent(agentName); ok && ag != nil {
+		ag.Type = "workspace-manager"
+		ag.Role = types.RoleOrchestrator
 		if ag.Metadata == nil {
 			ag.Metadata = &types.AgentMetadata{}
 		}
-		ag.Metadata.Description = fmt.Sprintf("Entry agent for workspace %q. Coordinate work and delegate to specialists when appropriate.", strings.TrimSpace(workspaceName))
-		ag.Metadata.Tags = dedupeAgentMetadataTags(append(ag.Metadata.Tags, "workspace-entry", "workspace-manager"))
+		ag.Metadata.Description = fmt.Sprintf("Workspace manager for %q. Coordinate workspace tasks, notes, files, directories, and delegate to specialists when appropriate.", strings.TrimSpace(workspaceName))
+		ag.Metadata.Tags = dedupeAgentMetadataTags(append(ag.Metadata.Tags, "workspace-entry", "workspace-manager", "orchestrator"))
 		_ = h.agentStore.SetAgent(agentName, ag)
 	}
 
 	return agentName, true, nil
+}
+
+func (h *Handler) defaultSessionAgentNameForWorkspace(ctx context.Context, workspaceID string) string {
+	if h == nil || h.store == nil {
+		return ""
+	}
+
+	trimmedWorkspaceID := strings.TrimSpace(workspaceID)
+	if trimmedWorkspaceID == "" {
+		return ""
+	}
+
+	ws, err := h.store.GetWorkspace(ctx, trimmedWorkspaceID)
+	if err != nil || ws == nil {
+		return ""
+	}
+
+	return currentWorkspaceEntryAgentName(ws)
 }
 
 // deleteWorkspaceManagerAgent removes the auto-created workspace manager agent
@@ -256,7 +276,10 @@ func workspaceEntryAgentSystemPrompt(workspaceName string) string {
 	if name == "" {
 		name = "this workspace"
 	}
-	return fmt.Sprintf("You are the entry agent for the workspace %q. Act as the default front door for the workspace: clarify user intent, answer directly when the request only needs shared context, and break work into tasks for specialists when needed.", name)
+	return fmt.Sprintf(
+		"You are the workspace manager for %q. Stay focused on this workspace: tasks, notes, files, directories, sessions, and agent coordination. Act as the workspace front door: clarify intent, answer directly when shared workspace context is enough, and route or delegate to specialist agents when a request needs deeper domain expertise. Do not behave like a generic global assistant outside this workspace.",
+		name,
+	)
 }
 
 func dedupeAgentMetadataTags(tags []string) []string {

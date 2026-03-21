@@ -1781,7 +1781,7 @@ const sessionManager = {
         this.saveActiveSession();
         this.renderSessions();
 
-        this.updateCurrentAgent('');
+        this.updateCurrentAgent(data.session.agent_name || '');
 
         if (typeof clearChatHistory === 'function') {
           clearChatHistory();
