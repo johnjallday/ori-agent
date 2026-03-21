@@ -943,6 +943,12 @@ func TestEnsureWorkspaceEntryAgent_CreatesWorkspaceManagerAgent(t *testing.T) {
 	if !strings.Contains(ag.Settings.SystemPrompt, "workspace manager") {
 		t.Fatalf("expected workspace-manager prompt, got %q", ag.Settings.SystemPrompt)
 	}
+	if !strings.Contains(ag.Settings.SystemPrompt, "ask the user before adding or switching to a specialist") {
+		t.Fatalf("expected specialist confirmation guidance in prompt, got %q", ag.Settings.SystemPrompt)
+	}
+	if !strings.Contains(ag.Settings.SystemPrompt, "do not generate an itinerary or recommendations on the first reply") {
+		t.Fatalf("expected strict travel intake guidance in prompt, got %q", ag.Settings.SystemPrompt)
+	}
 }
 
 // TestHandler_CreateNote tests creating a note via POST /api/notes.

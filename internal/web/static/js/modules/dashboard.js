@@ -211,6 +211,8 @@
     recentSessions: [],
     mode: 'new_task',
     routingSummary: null,
+    planningState: null,
+    inlineReplyState: null,
     automationMode: 'semi_auto',
     workspaceEntryAgentName: '',
     workspaceEntryWorkspaceId: ''
@@ -734,6 +736,68 @@
     return lines.join('\n');
   }
 
+  function countTravelDateMentions(text) {
+    var value = String(text || '').trim();
+    if (!value) return 0;
+    var pattern = /\b(?:\d{1,2}\/\d{1,2}(?:\/\d{2,4})?|(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\.?\s+\d{1,2})\b/gi;
+    var matches = value.match(pattern);
+    return matches ? matches.length : 0;
+  }
+
+  function travelPlanningNeedsDateDetails(prompt) {
+    return countTravelDateMentions(prompt) < 2;
+  }
+
+  function isTravelPlanningBookedSelection(value) {
+    var token = normalizeToken(value);
+    return token === 'yes' || token === 'partially';
+  }
+
+  function formatTravelPlanningBookingLabel(value) {
+    switch (normalizeToken(value)) {
+      case 'yes':
+        return 'Yes';
+      case 'partially':
+        return 'Partially';
+      case 'no':
+        return 'No';
+      case 'not_sure':
+        return 'Not sure yet';
+      default:
+        return 'Not answered';
+    }
+  }
+
+  function formatTravelPlanningPaceLabel(value) {
+    switch (normalizeToken(value)) {
+      case 'relaxed':
+        return 'Relaxed';
+      case 'balanced':
+        return 'Balanced';
+      case 'packed':
+        return 'Packed';
+      default:
+        return 'Not specified';
+    }
+  }
+
+  function formatTravelPlanningBudgetLabel(value) {
+    switch (normalizeToken(value)) {
+      case 'budget':
+        return 'Budget';
+      case 'mid_range':
+        return 'Mid-range';
+      case 'premium':
+        return 'Premium';
+      default:
+        return 'Not specified';
+    }
+  }
+
+  function buildWorkspaceManagerDispatchMessage(prompt, routeContext, intent) {
+    return String(prompt || '').trim();
+  }
+
   function buildAskOriDispatchMessage(prompt, appLaunchRequest, intent, routeContext) {
     if (intent && intent.key === 'email_check') {
       return buildEmailDispatchMessage(prompt, routeContext);
@@ -792,6 +856,8 @@
       sendBtn: document.getElementById('homeAssistantSendBtn'),
       conversation: document.getElementById('homeAssistantConversation'),
       routingSummary: document.getElementById('homeAssistantRoutingSummary'),
+      planning: document.getElementById('homeAssistantPlanning'),
+      inlineReply: document.getElementById('homeAssistantInlineReply'),
       thinkingModal: document.getElementById('homeAssistantThinkingModal'),
       thinkingModalLabel: document.getElementById('homeAssistantThinkingModalLabel'),
       thinkingStatus: document.getElementById('homeAssistantThinkingStatus'),
@@ -842,6 +908,16 @@
     return Boolean(els.actions && !els.actions.classList.contains('d-none') && els.actions.children.length > 0);
   }
 
+  function hasVisibleHomeAssistantPlanning() {
+    var els = getHomeAssistantElements();
+    return Boolean(els.planning && !els.planning.classList.contains('d-none') && els.planning.children.length > 0);
+  }
+
+  function hasVisibleHomeAssistantInlineReply() {
+    var els = getHomeAssistantElements();
+    return Boolean(els.inlineReply && !els.inlineReply.classList.contains('d-none') && els.inlineReply.children.length > 0);
+  }
+
   function hasHomeAssistantConversation() {
     var els = getHomeAssistantElements();
     return Boolean(els.conversation && els.conversation.dataset.initialized === 'true' && els.conversation.children.length > 0);
@@ -850,6 +926,8 @@
   function shouldKeepHomeAssistantThinkingModalOpen() {
     if (homeAssistantState.busy) return true;
     if (homeAssistantState.routingSummary && homeAssistantState.routingSummary.text) return true;
+    if (hasVisibleHomeAssistantPlanning()) return true;
+    if (hasVisibleHomeAssistantInlineReply()) return true;
     if (hasVisibleHomeAssistantActions()) return true;
     return false;
   }
@@ -900,6 +978,8 @@
       statusText = 'Working...';
     } else if (hasVisibleHomeAssistantActions()) {
       statusText = 'Review the next steps or dismiss this window.';
+    } else if (hasVisibleHomeAssistantInlineReply()) {
+      statusText = 'Reply inline or open chat.';
     } else {
       statusText = 'Ready for your next task.';
     }
@@ -932,6 +1012,8 @@
     var active = Boolean(
       homeAssistantState.busy ||
       (homeAssistantState.routingSummary && homeAssistantState.routingSummary.text) ||
+      hasVisibleHomeAssistantPlanning() ||
+      hasVisibleHomeAssistantInlineReply() ||
       hasVisibleHomeAssistantActions() ||
       hasHomeAssistantConversation()
     );
@@ -1121,6 +1203,8 @@
   }
 
   function focusHomeAssistantInput() {
+    clearHomeAssistantPlanning();
+    clearHomeAssistantInlineReply();
     setHomeAssistantMode('new_task');
     var els = getHomeAssistantElements();
     if (!els.input) return;
@@ -1230,6 +1314,552 @@
       return JSON.stringify(JSON.parse(trimmed), null, 2);
     } catch (error) {
       return '';
+    }
+  }
+
+  function buildTravelPlanningAnswerSummary(planningState) {
+    if (!planningState) return '';
+
+    var formData = planningState.formData || {};
+    var lines = ['Travel intake update:'];
+    if (planningState.requiresDates) {
+      lines.push('- Travel dates and route: ' + String(formData.dateDetails || '').trim());
+    } else if (String(formData.dateDetails || '').trim()) {
+      lines.push('- Route/date adjustment: ' + String(formData.dateDetails || '').trim());
+    } else {
+      lines.push('- Route and dates: use the original request');
+    }
+    lines.push('- Flights booked: ' + formatTravelPlanningBookingLabel(formData.flightsBooked));
+    if (planningState.uploads && planningState.uploads.flight) {
+      lines.push('- Flight confirmation: upload modal opened in this workspace');
+    }
+    lines.push('- Hotels booked: ' + formatTravelPlanningBookingLabel(formData.hotelsBooked));
+    if (planningState.uploads && planningState.uploads.hotel) {
+      lines.push('- Hotel confirmation: upload modal opened in this workspace');
+    }
+    lines.push('- Pace: ' + formatTravelPlanningPaceLabel(formData.pace));
+    lines.push('- Budget: ' + formatTravelPlanningBudgetLabel(formData.budget));
+    if (String(formData.preferences || '').trim()) {
+      lines.push('- Preferences and must-dos: ' + String(formData.preferences || '').trim());
+    } else {
+      lines.push('- Preferences and must-dos: not answered yet');
+    }
+    return lines.join('\n');
+  }
+
+  function buildStructuredTravelPlanningPrompt(planningState) {
+    if (!planningState) return '';
+
+    var formData = planningState.formData || {};
+    var dateDetails = String(formData.dateDetails || '').trim();
+    var intakePayload = {
+      original_request: String(planningState.prompt || '').trim(),
+      date_or_route_details: planningState.requiresDates
+        ? dateDetails
+        : (dateDetails || 'Use the dates and city order already present in the original request.'),
+      flights_booked: formatTravelPlanningBookingLabel(formData.flightsBooked),
+      hotels_booked: formatTravelPlanningBookingLabel(formData.hotelsBooked),
+      preferences_and_constraints: String(formData.preferences || '').trim() || 'Not provided yet',
+      pace: formatTravelPlanningPaceLabel(formData.pace),
+      budget: formatTravelPlanningBudgetLabel(formData.budget),
+      workspace_file_follow_up: {
+        flight_confirmation_upload_opened: Boolean(planningState.uploads && planningState.uploads.flight),
+        hotel_confirmation_upload_opened: Boolean(planningState.uploads && planningState.uploads.hotel)
+      }
+    };
+
+    return [
+      'Structured travel intake for the workspace manager:',
+      JSON.stringify(intakePayload, null, 2),
+      '',
+      'Manager reply rules:',
+      '- Treat this as intake context, not a request for a full itinerary.',
+      '- Ask only the remaining missing questions.',
+      '- If the intake is sufficient, summarize the next step and ask whether to invite or create travel itinerary, hotel booking, or flight booking specialists.'
+    ].join('\n');
+  }
+
+  function clearHomeAssistantPlanning() {
+    homeAssistantState.planningState = null;
+    renderHomeAssistantPlanning();
+  }
+
+  function clearHomeAssistantInlineReply() {
+    homeAssistantState.inlineReplyState = null;
+    renderHomeAssistantInlineReply();
+  }
+
+  function buildHomeAssistantInlineReplyPlaceholder(intent, agentLabel) {
+    if (intent && intent.key === 'travel_planning') {
+      return 'Example: 1A, 2C, 3B, 4B, and I care about food and museums.';
+    }
+    return 'Reply to ' + (agentLabel || getWorkspaceHomeAssistantDisplayName()) + '...';
+  }
+
+  function enableHomeAssistantInlineReply(routeContext, intent, agentLabel) {
+    homeAssistantState.inlineReplyState = {
+      routeContext: normalizeHomeRouteContext(routeContext),
+      intent: intent || HOME_INTENTS.general_task,
+      agentLabel: String(agentLabel || getWorkspaceHomeAssistantDisplayName()).trim() || getWorkspaceHomeAssistantDisplayName(),
+      draft: '',
+      submitting: false
+    };
+    renderHomeAssistantInlineReply();
+  }
+
+  function openWorkspacePlanningFileUpload(kind) {
+    var planningState = homeAssistantState.planningState;
+    if (!planningState || planningState.kind !== 'travel_intake') return;
+
+    var normalizedKind = normalizeToken(kind) === 'hotel' ? 'hotel' : 'flight';
+    var attachmentLabel = normalizedKind === 'hotel' ? 'hotel confirmation' : 'flight confirmation';
+    try {
+      if (window.workspaceDetail && typeof window.workspaceDetail.showFileModal === 'function') {
+        window.workspaceDetail.showFileModal();
+      } else if (window.WorkspaceHubFiles && typeof window.WorkspaceHubFiles.openAddFileModal === 'function') {
+        window.WorkspaceHubFiles.openAddFileModal();
+      } else {
+        throw new Error('File upload modal unavailable');
+      }
+
+      if (!planningState.uploads) {
+        planningState.uploads = { flight: false, hotel: false };
+      }
+      planningState.uploads[normalizedKind] = true;
+      setHomeAssistantRoutingSummary('Trip Planning Intake', 'Attach the ' + attachmentLabel + ' to this workspace, then continue the intake step.');
+      renderHomeAssistantPlanning();
+    } catch (error) {
+      dashLog.debug('Failed to open workspace planning upload modal', {
+        kind: normalizedKind,
+        error: error && error.message || error
+      });
+      if (window.Toast) {
+        Toast.error('File upload modal is unavailable right now.');
+      }
+      setHomeAssistantRoutingSummary('Trip Planning Intake', 'Could not open the upload modal for the ' + attachmentLabel + '.');
+    }
+  }
+
+  function renderHomeAssistantPlanning() {
+    var els = getHomeAssistantElements();
+    var container = els.planning;
+    if (!container) return;
+
+    var planningState = homeAssistantState.planningState;
+    container.innerHTML = '';
+    if (!planningState || planningState.kind !== 'travel_intake') {
+      container.classList.add('d-none');
+      syncHomeAssistantLauncher();
+      if (!homeAssistantState.busy) {
+        closeHomeAssistantThinkingModal();
+      }
+      return;
+    }
+
+    var formData = planningState.formData || {};
+    var isSubmitting = Boolean(planningState.submitting || homeAssistantState.busy);
+    var card = document.createElement('div');
+    card.className = 'home-assistant-planning-card';
+
+    var eyebrow = document.createElement('div');
+    eyebrow.className = 'home-assistant-planning-eyebrow';
+    eyebrow.textContent = 'Planning Step';
+    card.appendChild(eyebrow);
+
+    var title = document.createElement('div');
+    title.className = 'home-assistant-planning-title';
+    title.textContent = 'Collect trip details before handoff';
+    card.appendChild(title);
+
+    var subtitle = document.createElement('p');
+    subtitle.className = 'home-assistant-planning-subtitle';
+    subtitle.textContent = getWorkspaceHomeAssistantDisplayName() + ' will use these answers to decide what to ask next or which specialist to invite.';
+    card.appendChild(subtitle);
+
+    var summary = document.createElement('div');
+    summary.className = 'home-assistant-planning-summary';
+    summary.textContent = planningState.requiresDates
+      ? 'Original request:\n' + planningState.prompt + '\n\nTravel dates were not clearly detected. Add the missing dates or route details below.'
+      : 'Original request:\n' + planningState.prompt + '\n\nDates and route were detected. Add corrections only if anything is missing or wrong.';
+    card.appendChild(summary);
+
+    var form = document.createElement('form');
+    form.className = 'home-assistant-planning-form';
+    form.noValidate = true;
+
+    function addFieldLabel(field, text, helpText) {
+      var label = document.createElement('label');
+      label.className = 'home-assistant-planning-label';
+      label.textContent = text;
+      field.appendChild(label);
+      if (helpText) {
+        var help = document.createElement('div');
+        help.className = 'home-assistant-planning-help';
+        help.textContent = helpText;
+        field.appendChild(help);
+      }
+    }
+
+    function buildSelect(name, selectedValue, options) {
+      var select = document.createElement('select');
+      select.className = 'home-assistant-planning-select';
+      select.name = name;
+      select.disabled = isSubmitting;
+
+      for (var i = 0; i < options.length; i++) {
+        var optionConfig = options[i];
+        var option = document.createElement('option');
+        option.value = optionConfig.value;
+        option.textContent = optionConfig.label;
+        if (String(optionConfig.value) === String(selectedValue || '')) {
+          option.selected = true;
+        }
+        select.appendChild(option);
+      }
+      return select;
+    }
+
+    var dateField = document.createElement('div');
+    dateField.className = 'home-assistant-planning-field';
+    addFieldLabel(
+      dateField,
+      planningState.requiresDates ? 'Travel dates and route' : 'Date or route changes (optional)',
+      planningState.requiresDates
+        ? 'Example: 5/11 Lisbon arrival, 5/14 San Sebastian arrival, 5/17 Madrid arrival, 5/23 leave Spain.'
+        : 'Only fill this in if the dates or city order above need to be corrected or completed.'
+    );
+
+    if (planningState.requiresDates) {
+      var dateTextarea = document.createElement('textarea');
+      dateTextarea.className = 'home-assistant-planning-textarea';
+      dateTextarea.name = 'dateDetails';
+      dateTextarea.required = true;
+      dateTextarea.disabled = isSubmitting;
+      dateTextarea.value = formData.dateDetails || '';
+      dateTextarea.addEventListener('input', function (event) {
+        if (!homeAssistantState.planningState) return;
+        homeAssistantState.planningState.formData.dateDetails = event.target.value;
+      });
+      dateField.appendChild(dateTextarea);
+    } else {
+      var dateInput = document.createElement('input');
+      dateInput.type = 'text';
+      dateInput.className = 'home-assistant-planning-input';
+      dateInput.name = 'dateDetails';
+      dateInput.disabled = isSubmitting;
+      dateInput.value = formData.dateDetails || '';
+      dateInput.placeholder = 'Optional corrections or missing legs';
+      dateInput.addEventListener('input', function (event) {
+        if (!homeAssistantState.planningState) return;
+        homeAssistantState.planningState.formData.dateDetails = event.target.value;
+      });
+      dateField.appendChild(dateInput);
+    }
+    form.appendChild(dateField);
+
+    var grid = document.createElement('div');
+    grid.className = 'home-assistant-planning-grid';
+
+    var flightsField = document.createElement('div');
+    flightsField.className = 'home-assistant-planning-field';
+    addFieldLabel(flightsField, 'Are flights already booked?', 'If yes or partial, attach the confirmation in this workspace.');
+    var flightsSelect = buildSelect('flightsBooked', formData.flightsBooked, [
+      { value: '', label: 'Choose one' },
+      { value: 'yes', label: 'Yes' },
+      { value: 'partially', label: 'Partially' },
+      { value: 'no', label: 'No' },
+      { value: 'not_sure', label: 'Not sure yet' }
+    ]);
+    flightsSelect.addEventListener('change', function (event) {
+      if (!homeAssistantState.planningState) return;
+      homeAssistantState.planningState.formData.flightsBooked = event.target.value;
+      renderHomeAssistantPlanning();
+    });
+    flightsField.appendChild(flightsSelect);
+    grid.appendChild(flightsField);
+
+    var hotelsField = document.createElement('div');
+    hotelsField.className = 'home-assistant-planning-field';
+    addFieldLabel(hotelsField, 'Are hotels already booked?', 'If yes or partial, attach the confirmation in this workspace.');
+    var hotelsSelect = buildSelect('hotelsBooked', formData.hotelsBooked, [
+      { value: '', label: 'Choose one' },
+      { value: 'yes', label: 'Yes' },
+      { value: 'partially', label: 'Partially' },
+      { value: 'no', label: 'No' },
+      { value: 'not_sure', label: 'Not sure yet' }
+    ]);
+    hotelsSelect.addEventListener('change', function (event) {
+      if (!homeAssistantState.planningState) return;
+      homeAssistantState.planningState.formData.hotelsBooked = event.target.value;
+      renderHomeAssistantPlanning();
+    });
+    hotelsField.appendChild(hotelsSelect);
+    grid.appendChild(hotelsField);
+
+    var paceField = document.createElement('div');
+    paceField.className = 'home-assistant-planning-field';
+    addFieldLabel(paceField, 'What pace do you want?', 'Use this to guide how packed or relaxed the trip should feel.');
+    var paceSelect = buildSelect('pace', formData.pace, [
+      { value: '', label: 'Choose one' },
+      { value: 'relaxed', label: 'Relaxed' },
+      { value: 'balanced', label: 'Balanced' },
+      { value: 'packed', label: 'Packed' }
+    ]);
+    paceSelect.addEventListener('change', function (event) {
+      if (!homeAssistantState.planningState) return;
+      homeAssistantState.planningState.formData.pace = event.target.value;
+    });
+    paceField.appendChild(paceSelect);
+    grid.appendChild(paceField);
+
+    var budgetField = document.createElement('div');
+    budgetField.className = 'home-assistant-planning-field';
+    addFieldLabel(budgetField, 'What budget level fits best?', 'This helps decide neighborhoods, transport, and hotel recommendations later.');
+    var budgetSelect = buildSelect('budget', formData.budget, [
+      { value: '', label: 'Choose one' },
+      { value: 'budget', label: 'Budget' },
+      { value: 'mid_range', label: 'Mid-range' },
+      { value: 'premium', label: 'Premium' }
+    ]);
+    budgetSelect.addEventListener('change', function (event) {
+      if (!homeAssistantState.planningState) return;
+      homeAssistantState.planningState.formData.budget = event.target.value;
+    });
+    budgetField.appendChild(budgetSelect);
+    grid.appendChild(budgetField);
+
+    form.appendChild(grid);
+
+    if (isTravelPlanningBookedSelection(formData.flightsBooked)) {
+      var flightUpload = document.createElement('div');
+      flightUpload.className = 'home-assistant-planning-upload';
+      var flightUploadText = document.createElement('p');
+      flightUploadText.className = 'home-assistant-planning-upload-text';
+      flightUploadText.textContent = 'If you already booked your flights, attach the confirmation or travel file to this workspace.';
+      if (planningState.uploads && planningState.uploads.flight) {
+        var flightUploadStatus = document.createElement('span');
+        flightUploadStatus.className = 'home-assistant-planning-upload-status';
+        flightUploadStatus.textContent = 'Upload modal opened for flight confirmation.';
+        flightUploadText.appendChild(document.createElement('br'));
+        flightUploadText.appendChild(flightUploadStatus);
+      }
+      var flightUploadButton = document.createElement('button');
+      flightUploadButton.type = 'button';
+      flightUploadButton.className = 'modern-btn modern-btn-secondary';
+      flightUploadButton.textContent = 'Attach Flight File';
+      flightUploadButton.disabled = isSubmitting;
+      flightUploadButton.addEventListener('click', function () {
+        openWorkspacePlanningFileUpload('flight');
+      });
+      flightUpload.appendChild(flightUploadText);
+      flightUpload.appendChild(flightUploadButton);
+      form.appendChild(flightUpload);
+    }
+
+    if (isTravelPlanningBookedSelection(formData.hotelsBooked)) {
+      var hotelUpload = document.createElement('div');
+      hotelUpload.className = 'home-assistant-planning-upload';
+      var hotelUploadText = document.createElement('p');
+      hotelUploadText.className = 'home-assistant-planning-upload-text';
+      hotelUploadText.textContent = 'If you already booked hotels, attach the confirmation or travel file to this workspace.';
+      if (planningState.uploads && planningState.uploads.hotel) {
+        var hotelUploadStatus = document.createElement('span');
+        hotelUploadStatus.className = 'home-assistant-planning-upload-status';
+        hotelUploadStatus.textContent = 'Upload modal opened for hotel confirmation.';
+        hotelUploadText.appendChild(document.createElement('br'));
+        hotelUploadText.appendChild(hotelUploadStatus);
+      }
+      var hotelUploadButton = document.createElement('button');
+      hotelUploadButton.type = 'button';
+      hotelUploadButton.className = 'modern-btn modern-btn-secondary';
+      hotelUploadButton.textContent = 'Attach Hotel File';
+      hotelUploadButton.disabled = isSubmitting;
+      hotelUploadButton.addEventListener('click', function () {
+        openWorkspacePlanningFileUpload('hotel');
+      });
+      hotelUpload.appendChild(hotelUploadText);
+      hotelUpload.appendChild(hotelUploadButton);
+      form.appendChild(hotelUpload);
+    }
+
+    var preferencesField = document.createElement('div');
+    preferencesField.className = 'home-assistant-planning-field';
+    addFieldLabel(
+      preferencesField,
+      'What do you care about most in Spain?',
+      'Share must-dos, neighborhoods, food, museums, nightlife, beaches, pace, accessibility, or any other constraints.'
+    );
+    var preferencesTextarea = document.createElement('textarea');
+    preferencesTextarea.className = 'home-assistant-planning-textarea';
+    preferencesTextarea.name = 'preferences';
+    preferencesTextarea.disabled = isSubmitting;
+    preferencesTextarea.value = formData.preferences || '';
+    preferencesTextarea.placeholder = 'Examples: pintxos in San Sebastian, art museums in Madrid, walkable areas, avoid late-night nightlife.';
+    preferencesTextarea.addEventListener('input', function (event) {
+      if (!homeAssistantState.planningState) return;
+      homeAssistantState.planningState.formData.preferences = event.target.value;
+    });
+    preferencesField.appendChild(preferencesTextarea);
+    form.appendChild(preferencesField);
+
+    var actions = document.createElement('div');
+    actions.className = 'home-assistant-planning-actions';
+
+    var continueButton = document.createElement('button');
+    continueButton.type = 'submit';
+    continueButton.className = 'modern-btn modern-btn-primary';
+    continueButton.textContent = isSubmitting ? 'Sending...' : 'Continue With ' + getWorkspaceHomeAssistantDisplayName();
+    continueButton.disabled = isSubmitting;
+    actions.appendChild(continueButton);
+
+    var resetButton = document.createElement('button');
+    resetButton.type = 'button';
+    resetButton.className = 'modern-btn modern-btn-secondary';
+    resetButton.textContent = 'Ask Another Task';
+    resetButton.disabled = isSubmitting;
+    resetButton.addEventListener('click', function () {
+      focusHomeAssistantInput();
+    });
+    actions.appendChild(resetButton);
+
+    form.appendChild(actions);
+    form.addEventListener('submit', function (event) {
+      event.preventDefault();
+      submitTravelPlanningQuestionnaire();
+    });
+
+    card.appendChild(form);
+    container.appendChild(card);
+    container.classList.remove('d-none');
+    syncHomeAssistantLauncher();
+    openHomeAssistantThinkingModal();
+
+    if (planningState.focusField) {
+      var focusName = planningState.focusField;
+      planningState.focusField = '';
+      window.setTimeout(function () {
+        var field = container.querySelector('[name="' + focusName + '"]');
+        if (field && typeof field.focus === 'function') {
+          field.focus();
+        }
+      }, 80);
+    }
+  }
+
+  function renderHomeAssistantInlineReply() {
+    var els = getHomeAssistantElements();
+    var container = els.inlineReply;
+    if (!container) return;
+
+    var replyState = homeAssistantState.inlineReplyState;
+    container.innerHTML = '';
+    if (!replyState) {
+      container.classList.add('d-none');
+      syncHomeAssistantLauncher();
+      if (!homeAssistantState.busy) {
+        closeHomeAssistantThinkingModal();
+      }
+      return;
+    }
+
+    var isSubmitting = Boolean(replyState.submitting || homeAssistantState.busy);
+    var card = document.createElement('div');
+    card.className = 'home-assistant-inline-reply-card';
+
+    var header = document.createElement('div');
+    header.className = 'home-assistant-inline-reply-header';
+    header.textContent = 'Reply Inline';
+    card.appendChild(header);
+
+    var copy = document.createElement('div');
+    copy.className = 'home-assistant-inline-reply-copy';
+    copy.textContent = 'Continue with ' + replyState.agentLabel + ' without leaving this modal.';
+    card.appendChild(copy);
+
+    var form = document.createElement('form');
+    form.className = 'home-assistant-inline-reply-form';
+    form.noValidate = true;
+
+    var textarea = document.createElement('textarea');
+    textarea.className = 'home-assistant-inline-reply-textarea';
+    textarea.name = 'inlineReplyMessage';
+    textarea.disabled = isSubmitting;
+    textarea.value = replyState.draft || '';
+    textarea.placeholder = buildHomeAssistantInlineReplyPlaceholder(replyState.intent, replyState.agentLabel);
+    textarea.addEventListener('input', function (event) {
+      if (!homeAssistantState.inlineReplyState) return;
+      homeAssistantState.inlineReplyState.draft = event.target.value;
+    });
+    form.appendChild(textarea);
+
+    var actions = document.createElement('div');
+    actions.className = 'home-assistant-inline-reply-actions';
+
+    var sendButton = document.createElement('button');
+    sendButton.type = 'submit';
+    sendButton.className = 'modern-btn modern-btn-primary';
+    sendButton.disabled = isSubmitting;
+    sendButton.textContent = isSubmitting ? 'Sending...' : 'Send Reply';
+    actions.appendChild(sendButton);
+
+    var openChatButton = document.createElement('button');
+    openChatButton.type = 'button';
+    openChatButton.className = 'modern-btn modern-btn-secondary';
+    openChatButton.disabled = isSubmitting;
+    openChatButton.textContent = 'Open Chat Instead';
+    openChatButton.addEventListener('click', function () {
+      openChatPanel();
+    });
+    actions.appendChild(openChatButton);
+
+    form.appendChild(actions);
+    form.addEventListener('submit', function (event) {
+      event.preventDefault();
+      submitHomeAssistantInlineReply();
+    });
+
+    card.appendChild(form);
+    container.appendChild(card);
+    container.classList.remove('d-none');
+    syncHomeAssistantLauncher();
+    openHomeAssistantThinkingModal();
+  }
+
+  async function submitHomeAssistantInlineReply() {
+    var replyState = homeAssistantState.inlineReplyState;
+    if (!replyState || replyState.submitting) return;
+
+    var text = String(replyState.draft || '').trim();
+    if (!text) {
+      if (window.Toast) {
+        Toast.warning('Enter a reply before sending it to the workspace manager.');
+      }
+      renderHomeAssistantInlineReply();
+      return;
+    }
+
+    replyState.submitting = true;
+    renderHomeAssistantInlineReply();
+    appendHomeAssistantMessage('user', text);
+    setHomeAssistantBusy(true, 'Sending Reply...');
+    setHomeAssistantRoutingSummary(replyState.agentLabel, 'Continuing inline with the workspace manager.');
+
+    try {
+      await openWorkspaceAssistantForPrompt(text, replyState.routeContext, replyState.intent);
+    } catch (error) {
+      dashLog.debug('Inline workspace reply failed', { error: error && error.message || error });
+      if (homeAssistantState.inlineReplyState === replyState) {
+        replyState.submitting = false;
+        renderHomeAssistantInlineReply();
+      }
+      appendHomeAssistantMessage('assistant', 'I could not send that reply right now. Please try again or open chat.');
+      setHomeAssistantRoutingSummary('Inline Reply Failed', 'Could not continue with the workspace manager right now.');
+    } finally {
+      if (homeAssistantState.inlineReplyState === replyState) {
+        replyState.submitting = false;
+      }
+      setHomeAssistantBusy(false);
+      renderHomeAssistantInlineReply();
     }
   }
 
@@ -4054,7 +4684,6 @@
 
     switch (intentKey) {
       case 'email_check':
-      case 'travel_planning':
       case 'app_launch':
         return true;
       case 'calendar_check':
@@ -4079,6 +4708,7 @@
   function shouldOpenWorkspaceAssistantForRoute(routeData, routeContext) {
     if (!hasWorkspaceRouteContext(routeContext)) return false;
     if (!routeData) return true;
+    if (routeContextTargetsCurrentWorkspace(routeData, routeContext)) return true;
     if (isWorkspaceSpecialistIntent(routeData)) return false;
     if (routePolicyRequiresSpecialist(routeData)) return false;
     if (shouldAcceptBackendRouteMatch(routeData) &&
@@ -4089,37 +4719,19 @@
     return true;
   }
 
-  async function openWorkspaceAssistantForPrompt(prompt, routeContext) {
-    var assistantSessionResult = await dispatchPromptToWorkspaceAssistantSession(prompt, routeContext);
+  async function openWorkspaceAssistantForPrompt(prompt, routeContext, intent, options) {
+    var assistantSessionResult = await runWorkspaceAssistantInline(prompt, routeContext, intent, options);
     if (!assistantSessionResult || !assistantSessionResult.session) {
-      throw new Error('Failed to open workspace chat session');
+      throw new Error('Failed to run workspace manager');
     }
 
     var entryLabel = assistantSessionResult.entryAgentName ? assistantSessionResult.entryAgentName : getWorkspaceHomeAssistantDisplayName();
+    enableHomeAssistantInlineReply(routeContext, intent, entryLabel);
     setHomeAssistantRoutingSummary(
       entryLabel,
-      assistantSessionResult.entryAgentName
-        ? 'Opening the workspace entry session.'
-        : 'Opening the workspace chat session.'
-    );
-
-    trackHomeAssistantSession(assistantSessionResult.session, prompt, entryLabel);
-    setHomeAssistantMode('continue_session');
-    appendHomeAssistantMessage(
-      'assistant',
       assistantSessionResult.reused
-        ? 'Continuing the workspace ' + entryLabel + ' session in chat.'
-        : 'Started a new workspace ' + entryLabel + ' session in chat.'
-    );
-    setHomeAssistantRoutingSummary(
-      assistantSessionResult.reused ? entryLabel + ' Continued' : entryLabel + ' Session Started',
-      assistantSessionResult.reused
-        ? (assistantSessionResult.entryAgentName
-          ? 'Your message was sent to the current workspace entry session.'
-          : 'Your message was sent to the current workspace chat session.')
-        : (assistantSessionResult.entryAgentName
-          ? 'A new workspace entry session is ready in chat.'
-          : 'A new workspace chat session is ready in chat.')
+        ? 'Reply in the box below or open chat.'
+        : 'The workspace manager replied inline. Reply in the box below or open chat.'
     );
     renderHomeAssistantActions([
       {
@@ -4704,6 +5316,109 @@
     return null;
   }
 
+  function hasActiveWorkspaceManagerSession(routeContext) {
+    if (!hasWorkspaceRouteContext(routeContext)) return false;
+
+    var activeSession = findSessionById(getCurrentHomeSessionId());
+    var workspaceId = String(routeContext && routeContext.workspace_id || '').trim();
+    var entryAgentName = normalizeToken(homeAssistantState.workspaceEntryAgentName);
+    if (!activeSession || !workspaceId || !entryAgentName) return false;
+
+    return String(activeSession.folder_id || '').trim() === workspaceId &&
+      normalizeToken(activeSession.agent_name) === entryAgentName;
+  }
+
+  function shouldStartTravelPlanningQuestionnaire(routeContext, intent) {
+    if (!hasWorkspaceRouteContext(routeContext)) return false;
+    if (!intent || intent.key !== 'travel_planning') return false;
+    if (hasActiveWorkspaceManagerSession(routeContext)) return false;
+    return true;
+  }
+
+  function startTravelPlanningQuestionnaire(prompt, routeContext, intent) {
+    var normalizedContext = normalizeHomeRouteContext(routeContext);
+    clearHomeAssistantInlineReply();
+    homeAssistantState.planningState = {
+      kind: 'travel_intake',
+      prompt: String(prompt || '').trim(),
+      routeContext: normalizedContext,
+      intent: intent || HOME_INTENTS.travel_planning,
+      requiresDates: travelPlanningNeedsDateDetails(prompt),
+      focusField: travelPlanningNeedsDateDetails(prompt) ? 'dateDetails' : 'flightsBooked',
+      submitting: false,
+      formData: {
+        dateDetails: '',
+        flightsBooked: '',
+        hotelsBooked: '',
+        pace: '',
+        budget: '',
+        preferences: ''
+      },
+      uploads: {
+        flight: false,
+        hotel: false
+      }
+    };
+
+    renderHomeAssistantActions([]);
+    setHomeAssistantRoutingSummary('Trip Planning Intake', 'Answer a few questions before ' + getWorkspaceHomeAssistantDisplayName() + ' continues.');
+    renderHomeAssistantPlanning();
+    setHomeAssistantBusy(false);
+    openHomeAssistantThinkingModal();
+  }
+
+  async function submitTravelPlanningQuestionnaire() {
+    var planningState = homeAssistantState.planningState;
+    if (!planningState || planningState.kind !== 'travel_intake' || planningState.submitting) return;
+
+    var dateDetails = String(planningState.formData && planningState.formData.dateDetails || '').trim();
+    if (planningState.requiresDates && !dateDetails) {
+      planningState.focusField = 'dateDetails';
+      renderHomeAssistantPlanning();
+      if (window.Toast) {
+        Toast.warning('Add the missing travel dates or route details before continuing.');
+      }
+      return;
+    }
+
+    planningState.submitting = true;
+    renderHomeAssistantPlanning();
+    appendHomeAssistantMessage('user', buildTravelPlanningAnswerSummary(planningState));
+    setHomeAssistantBusy(true, 'Sending Intake...');
+    setHomeAssistantRoutingSummary('Trip Planning Intake', 'Sending your trip details to ' + getWorkspaceHomeAssistantDisplayName() + '.');
+
+    try {
+      var dispatchPrompt = buildStructuredTravelPlanningPrompt(planningState);
+      await openWorkspaceAssistantForPrompt(
+        planningState.prompt,
+        planningState.routeContext,
+        planningState.intent,
+        { dispatchPrompt: dispatchPrompt }
+      );
+      clearHomeAssistantPlanning();
+    } catch (error) {
+      dashLog.debug('Travel planning intake handoff failed', { error: error && error.message || error });
+      planningState.submitting = false;
+      renderHomeAssistantPlanning();
+      appendHomeAssistantMessage('assistant', 'I could not continue with the workspace manager right now. Please review the intake step and try again.');
+      setHomeAssistantRoutingSummary('Trip Planning Intake Failed', 'Could not continue with the workspace manager right now.');
+      renderHomeAssistantActions([
+        {
+          label: 'Retry Intake',
+          variant: 'primary',
+          onClick: function () { submitTravelPlanningQuestionnaire(); }
+        },
+        {
+          label: 'Ask Another Task',
+          variant: 'secondary',
+          onClick: function () { focusHomeAssistantInput(); }
+        }
+      ]);
+    } finally {
+      setHomeAssistantBusy(false);
+    }
+  }
+
   function isAssistantSession(session, workspaceId) {
     if (!session || session.agent_name) return false;
     if (!workspaceId) return !String(session.folder_id || '').trim();
@@ -4736,6 +5451,21 @@
     var workspaceId = hasWorkspaceRouteContext(routeContext) ? String(routeContext.workspace_id).trim() : '';
     var entryAgentName = workspaceId ? await fetchWorkspaceEntryAgentName(workspaceId) : '';
     if (entryAgentName) {
+      var currentEntrySession = findSessionById(getCurrentHomeSessionId());
+      if (currentEntrySession &&
+          normalizeToken(currentEntrySession.agent_name) === normalizeToken(entryAgentName) &&
+          String(currentEntrySession.folder_id || '').trim() === workspaceId) {
+        return { session: currentEntrySession, reused: true, entryAgentName: entryAgentName };
+      }
+
+      var existingEntrySession = findSessionForAgentInWorkspace(entryAgentName, workspaceId);
+      if (existingEntrySession && existingEntrySession.id) {
+        if (typeof manager.switchToSession === 'function') {
+          await manager.switchToSession(existingEntrySession.id, true);
+        }
+        return { session: existingEntrySession, reused: true, entryAgentName: entryAgentName };
+      }
+
       var entrySession = null;
       if (typeof manager.createSessionWithAgentInFolder === 'function') {
         entrySession = await manager.createSessionWithAgentInFolder(entryAgentName, workspaceId);
@@ -4803,6 +5533,48 @@
         })
       });
     }
+
+    return result;
+  }
+
+  async function runWorkspaceAssistantInline(prompt, routeContext, intent, options) {
+    var result = await openOrCreateWorkspaceAssistantSession(routeContext, prompt);
+    if (!result || !result.session || typeof API === 'undefined' || typeof API.post !== 'function') {
+      return result;
+    }
+
+    var session = result.session;
+    var entryLabel = result.entryAgentName ? result.entryAgentName : getWorkspaceHomeAssistantDisplayName();
+    var dispatchMessage = options && typeof options.dispatchPrompt === 'string'
+      ? String(options.dispatchPrompt || '').trim()
+      : buildWorkspaceManagerDispatchMessage(prompt, routeContext, intent);
+    var requestContext = normalizeHomeRouteContext({
+      surface: routeContext && routeContext.surface,
+      page_path: routeContext && routeContext.page_path,
+      workspace_id: routeContext && routeContext.workspace_id,
+      session_id: session.id,
+      origin: routeContext && routeContext.origin
+    });
+
+    var data = await API.post('/api/chat', {
+      question: dispatchMessage,
+      agent_name: String(result.entryAgentName || session.agent_name || '').trim(),
+      route_context: requestContext
+    }, {
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Session-ID': String(session.id)
+      }
+    });
+
+    var responseText = String(data && data.response || '').trim();
+    if (!responseText) {
+      responseText = entryLabel + ' is ready for your next answer in chat.';
+    }
+
+    trackHomeAssistantSession(session, prompt, entryLabel);
+    setHomeAssistantMode('continue_session');
+    appendHomeAssistantMessage('assistant', responseText);
 
     return result;
   }
@@ -6631,6 +7403,8 @@
   async function handleHomeAssistantPrompt(prompt, options) {
     var text = String(prompt || '').trim();
     if (!text) return;
+    clearHomeAssistantPlanning();
+    clearHomeAssistantInlineReply();
     setHomeAssistantMode('new_task');
     var appLaunchRequest = parseAppLaunchRequest(text);
     var routeContext = normalizeHomeRouteContext(options && options.routeContext);
@@ -6723,7 +7497,11 @@
         }
 
         if (inWorkspaceContext && shouldOpenWorkspaceAssistantForRoute(routeData, routeContext)) {
-          await openWorkspaceAssistantForPrompt(text, routeContext);
+          if (shouldStartTravelPlanningQuestionnaire(routeContext, homeAssistantState.pendingIntent)) {
+            startTravelPlanningQuestionnaire(text, routeContext, homeAssistantState.pendingIntent);
+            return;
+          }
+          await openWorkspaceAssistantForPrompt(text, routeContext, homeAssistantState.pendingIntent);
           return;
         }
 
@@ -6739,7 +7517,11 @@
       }
 
       if (inWorkspaceContext && shouldOpenWorkspaceAssistantForRoute(routeData, routeContext)) {
-        await openWorkspaceAssistantForPrompt(text, routeContext);
+        if (shouldStartTravelPlanningQuestionnaire(routeContext, homeAssistantState.pendingIntent)) {
+          startTravelPlanningQuestionnaire(text, routeContext, homeAssistantState.pendingIntent);
+          return;
+        }
+        await openWorkspaceAssistantForPrompt(text, routeContext, homeAssistantState.pendingIntent);
         return;
       }
 
