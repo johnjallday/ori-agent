@@ -14,13 +14,6 @@ before:
   hooks:
     # Install dependencies
     - go mod tidy
-    # Sync plugin dependencies (ensures plugin go.mod files are in sync with main module)
-    - ./scripts/sync-plugin-deps.sh
-    # Build internal plugins (required for complete distribution)
-    - ./scripts/build-plugins.sh
-    # Build external/shared plugins (optional; these live outside this repo under ../plugins)
-    # Enable with: BUILD_EXTERNAL_PLUGINS=1 goreleaser release ...
-    - bash -c 'if [ "${BUILD_EXTERNAL_PLUGINS:-}" = "1" ] || [ "${BUILD_EXTERNAL_PLUGINS:-}" = "true" ]; then ./scripts/build-external-plugins.sh; else echo "Skipping external plugins (set BUILD_EXTERNAL_PLUGINS=1 to enable)"; fi'
 
 # Build configuration
 builds:
