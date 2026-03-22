@@ -1,6 +1,7 @@
 package agenthttp
 
 import (
+	"errors"
 	"net/http"
 	"strings"
 	"unicode"
@@ -60,6 +61,7 @@ type HomeAssistantRouteResponse struct {
 	Intent               string   `json:"intent"`
 	IntentVariant        string   `json:"intent_variant,omitempty"`
 	IntentLabel          string   `json:"intent_label"`
+	RoutingPolicy        string   `json:"routing_policy"`
 	MatchedAgent         string   `json:"matched_agent,omitempty"`
 	Score                int      `json:"score"`
 	RequiresCreation     bool     `json:"requires_creation"`
@@ -70,6 +72,8 @@ type HomeAssistantRouteResponse struct {
 	SuggestedAgentName   string   `json:"suggested_agent_name"`
 	SuggestedAgentType   string   `json:"suggested_agent_type"`
 }
+
+var errHomeAssistantPromptRequired = errors.New("prompt is required")
 
 type homeAssistantIntent struct {
 	Key              string
@@ -96,6 +100,12 @@ type normalizedHomeAssistantRouteContext struct {
 	SessionID   string
 	Origin      string
 }
+
+const (
+	homeAssistantPolicyAssistantOnly      = "assistant_only"
+	homeAssistantPolicyAssistantPreferred = "assistant_preferred"
+	homeAssistantPolicySpecialistRequired = "specialist_required"
+)
 
 var (
 	homeAssistantUtilityIntent = homeAssistantIntent{
@@ -212,10 +222,22 @@ func (h *HomeAssistantRouteHandler) RouteHandler(w http.ResponseWriter, r *http.
 		return
 	}
 
-	prompt := strings.TrimSpace(req.Prompt)
-	if prompt == "" {
-		orihttp.BadRequest(w, "prompt is required")
+	resp, err := h.RoutePrompt(req.Prompt, req.Context)
+	if err != nil {
+		if errors.Is(err, errHomeAssistantPromptRequired) {
+			orihttp.BadRequest(w, err.Error())
+			return
+		}
+		orihttp.InternalError(w, err.Error())
 		return
+	}
+	orihttp.WriteJSON(w, resp)
+}
+
+func (h *HomeAssistantRouteHandler) RoutePrompt(prompt string, context *HomeAssistantRouteContext) (*HomeAssistantRouteResponse, error) {
+	prompt = strings.TrimSpace(prompt)
+	if prompt == "" {
+		return nil, errHomeAssistantPromptRequired
 	}
 
 	// Keep a reserved orchestrator agent available for generic fallback routing.
@@ -226,7 +248,7 @@ func (h *HomeAssistantRouteHandler) RouteHandler(w http.ResponseWriter, r *http.
 	// }
 	// _ = ensureSystemAssistantAgentWithSystemModel(h.State, systemProvider, systemModel)
 
-	routeContext := normalizeHomeAssistantRouteContext(req.Context)
+	routeContext := normalizeHomeAssistantRouteContext(context)
 	intent := detectHomeAssistantIntent(prompt)
 	intentVariant := detectHomeAssistantIntentVariant(prompt, intent, routeContext)
 	match := h.findBestMatch(prompt, intent, routeContext)
@@ -235,11 +257,13 @@ func (h *HomeAssistantRouteHandler) RouteHandler(w http.ResponseWriter, r *http.
 	}
 	workspaceRecommended := shouldRecommendWorkspace(prompt, intent)
 	routeMode, targetSurface := determineRouteModeAndTargetSurface(intent, intentVariant, routeContext, workspaceRecommended)
+	routingPolicy := determineRoutingPolicy(intent, intentVariant, routeMode, targetSurface, routeContext)
 
-	resp := HomeAssistantRouteResponse{
+	resp := &HomeAssistantRouteResponse{
 		Intent:               intent.Key,
 		IntentVariant:        intentVariant,
 		IntentLabel:          intent.Label,
+		RoutingPolicy:        routingPolicy,
 		RequiresCreation:     true,
 		WorkspaceRecommended: workspaceRecommended,
 		RouteMode:            routeMode,
@@ -255,7 +279,7 @@ func (h *HomeAssistantRouteHandler) RouteHandler(w http.ResponseWriter, r *http.
 		resp.Reasons = match.Reasons
 	}
 
-	orihttp.WriteJSON(w, resp)
+	return resp, nil
 }
 
 func (h *HomeAssistantRouteHandler) systemAssistantFallback(intent homeAssistantIntent) *routedAgentMatch {
@@ -289,7 +313,7 @@ func detectHomeAssistantIntent(prompt string) homeAssistantIntent {
 	for _, intent := range homeAssistantSpecificIntents {
 		score := 0
 		for _, keyword := range intent.Keywords {
-			if strings.Contains(text, keyword) {
+			if containsRoutePhrase(text, keyword) {
 				score++
 			}
 		}
@@ -333,9 +357,15 @@ func detectHomeAssistantIntentVariant(prompt string, intent homeAssistantIntent,
 }
 
 func (h *HomeAssistantRouteHandler) findBestMatch(prompt string, intent homeAssistantIntent, routeContext normalizedHomeAssistantRouteContext) *routedAgentMatch {
-	names, current := h.State.ListAgents()
+	names := h.State.ListAgents()
 	if len(names) == 0 {
 		return nil
+	}
+	current := ""
+	if assistant, ok := h.State.GetAgent(systemAssistantAgentName); ok && assistant != nil {
+		current = systemAssistantAgentName
+	} else if len(names) > 0 {
+		current = names[0]
 	}
 
 	var best *routedAgentMatch
@@ -413,14 +443,21 @@ func scoreAgentForIntent(name, current string, ag *resolvedRouteAgent, intent ho
 	mcpServers := extractNormalizedMCPServerNames(ag)
 	lowerName := normalizeRouteToken(name)
 	promptTokens := tokenizePrompt(prompt)
+	routingProfile := agentRoutingProfile(ag)
 	score := 0
 	reasons := make([]string, 0, 3)
+
+	routingScore, routingReasons := scoreRoutingProfile(prompt, promptTokens, routingProfile)
+	score += routingScore
+	for _, reason := range routingReasons {
+		reasons = appendReason(reasons, reason)
+	}
 
 	for _, keyword := range intent.Keywords {
 		if keyword == "" {
 			continue
 		}
-		if strings.Contains(summary, keyword) {
+		if containsRoutePhrase(summary, keyword) {
 			score += 2
 			reasons = appendReason(reasons, `matches "`+keyword+`"`)
 		}
@@ -524,8 +561,161 @@ func buildAgentSummary(name string, ag *resolvedRouteAgent) string {
 	if len(mcpServerNames) > 0 {
 		parts = append(parts, strings.Join(mcpServerNames, " "))
 	}
+	if profile := agentRoutingProfile(ag); profile != nil {
+		if len(profile.MatchPhrases) > 0 {
+			parts = append(parts, normalizeRouteToken(strings.Join(profile.MatchPhrases, " ")))
+		}
+		if len(profile.ExampleRequests) > 0 {
+			parts = append(parts, normalizeRouteToken(strings.Join(profile.ExampleRequests, " ")))
+		}
+		if len(profile.Domains) > 0 {
+			parts = append(parts, normalizeRouteToken(strings.Join(profile.Domains, " ")))
+		}
+		if len(profile.ExternalSystems) > 0 {
+			parts = append(parts, normalizeRouteToken(strings.Join(profile.ExternalSystems, " ")))
+		}
+		if profile.SideEffects != "" {
+			parts = append(parts, normalizeRouteToken(profile.SideEffects))
+		}
+	}
 
 	return strings.Join(parts, " ")
+}
+
+func agentRoutingProfile(ag *resolvedRouteAgent) *types.AgentRoutingProfile {
+	if ag == nil || ag.Metadata == nil {
+		return nil
+	}
+	return ag.Metadata.RoutingProfile
+}
+
+func scoreRoutingProfile(prompt string, promptTokens []string, profile *types.AgentRoutingProfile) (int, []string) {
+	if profile == nil {
+		return 0, nil
+	}
+
+	normalizedPrompt := normalizeRouteToken(prompt)
+	score := 0
+	reasons := make([]string, 0, 3)
+
+	for _, phrase := range profile.MatchPhrases {
+		normalizedPhrase := normalizeRouteToken(phrase)
+		if normalizedPhrase == "" {
+			continue
+		}
+		if strings.Contains(normalizedPrompt, normalizedPhrase) || strings.Contains(normalizedPhrase, normalizedPrompt) {
+			score += 4
+			reasons = appendReason(reasons, `routing phrase matches "`+strings.TrimSpace(phrase)+`"`)
+		}
+	}
+
+	for _, domain := range profile.Domains {
+		normalizedDomain := normalizeRouteToken(domain)
+		if normalizedDomain == "" {
+			continue
+		}
+		if strings.Contains(normalizedPrompt, normalizedDomain) {
+			score += 2
+			reasons = appendReason(reasons, `domain matches "`+strings.TrimSpace(domain)+`"`)
+		}
+	}
+
+	targetApp, hasTargetApp := parseHomeAssistantAppLaunchPrompt(prompt)
+	normalizedTargetApp := normalizeRouteToken(targetApp)
+	for _, system := range profile.ExternalSystems {
+		normalizedSystem := normalizeRouteToken(system)
+		if normalizedSystem == "" {
+			continue
+		}
+		if strings.Contains(normalizedPrompt, normalizedSystem) {
+			score += 3
+			reasons = appendReason(reasons, `external system matches "`+strings.TrimSpace(system)+`"`)
+			continue
+		}
+		if hasTargetApp && normalizedSystem == normalizedTargetApp {
+			score += 4
+			reasons = appendReason(reasons, `launch target matches "`+strings.TrimSpace(system)+`"`)
+		}
+	}
+
+	overlap, example := bestRoutingExampleOverlap(prompt, promptTokens, profile.ExampleRequests)
+	switch {
+	case overlap >= 4:
+		score += 5
+	case overlap >= 3:
+		score += 4
+	case overlap >= 2:
+		score += 2
+	}
+	if overlap >= 2 && example != "" {
+		reasons = appendReason(reasons, `example request overlaps "`+example+`"`)
+	}
+
+	return score, reasons
+}
+
+func bestRoutingExampleOverlap(prompt string, promptTokens []string, examples []string) (int, string) {
+	normalizedPrompt := normalizeRouteToken(prompt)
+	bestOverlap := 0
+	bestExample := ""
+
+	for _, example := range examples {
+		normalizedExample := normalizeRouteToken(example)
+		if normalizedExample == "" {
+			continue
+		}
+
+		overlap := signalTokenOverlap(promptTokens, tokenizePrompt(example))
+		switch {
+		case normalizedExample == normalizedPrompt:
+			overlap = 5
+		case strings.Contains(normalizedPrompt, normalizedExample), strings.Contains(normalizedExample, normalizedPrompt):
+			if overlap < 4 {
+				overlap = 4
+			}
+		}
+
+		if overlap > bestOverlap {
+			bestOverlap = overlap
+			bestExample = strings.TrimSpace(example)
+		}
+	}
+
+	return bestOverlap, bestExample
+}
+
+func signalTokenOverlap(left, right []string) int {
+	if len(left) == 0 || len(right) == 0 {
+		return 0
+	}
+
+	leftSet := make(map[string]struct{}, len(left))
+	for _, token := range left {
+		if !isSignalPromptToken(token) {
+			continue
+		}
+		leftSet[token] = struct{}{}
+	}
+	if len(leftSet) == 0 {
+		return 0
+	}
+
+	seen := make(map[string]struct{}, len(right))
+	overlap := 0
+	for _, token := range right {
+		if !isSignalPromptToken(token) {
+			continue
+		}
+		if _, ok := seen[token]; ok {
+			continue
+		}
+		if _, ok := leftSet[token]; ok {
+			overlap++
+			seen[token] = struct{}{}
+		}
+	}
+
+	return overlap
 }
 
 func extractNormalizedPluginNames(ag *resolvedRouteAgent) []string {
@@ -662,6 +852,32 @@ func determineRouteModeAndTargetSurface(intent homeAssistantIntent, intentVarian
 	return "specialist_handoff", "chat"
 }
 
+func determineRoutingPolicy(
+	intent homeAssistantIntent,
+	intentVariant string,
+	routeMode string,
+	targetSurface string,
+	context normalizedHomeAssistantRouteContext,
+) string {
+	if routeMode == "workspace_task" && targetSurface == "workspace" {
+		return homeAssistantPolicyAssistantOnly
+	}
+
+	switch intent.Key {
+	case homeAssistantUtilityIntent.Key, homeAssistantWorkspaceCreateIntent.Key:
+		return homeAssistantPolicyAssistantOnly
+	case homeAssistantEmailIntent.Key, homeAssistantAppLaunchIntent.Key:
+		return homeAssistantPolicySpecialistRequired
+	case homeAssistantCalendarIntent.Key:
+		if intentVariant == "workspace_schedule" && context.hasWorkspaceContext() {
+			return homeAssistantPolicyAssistantOnly
+		}
+		return homeAssistantPolicySpecialistRequired
+	default:
+		return homeAssistantPolicyAssistantPreferred
+	}
+}
+
 func shouldRecommendWorkspace(prompt string, intent homeAssistantIntent) bool {
 	if intent.Key != homeAssistantDefaultIntent.Key {
 		return false
@@ -716,7 +932,7 @@ func promptContainsAnyRoutePhrase(normalizedPrompt string, phrases []string) boo
 		if phrase == "" {
 			continue
 		}
-		if strings.Contains(normalizedPrompt, normalizeRouteToken(phrase)) {
+		if containsRoutePhrase(normalizedPrompt, phrase) {
 			return true
 		}
 	}
@@ -732,11 +948,114 @@ func countRoutePhraseMatches(normalizedPrompt string, phrases []string) int {
 		if phrase == "" {
 			continue
 		}
-		if strings.Contains(normalizedPrompt, normalizeRouteToken(phrase)) {
+		if containsRoutePhrase(normalizedPrompt, phrase) {
 			count++
 		}
 	}
 	return count
+}
+
+func containsRoutePhrase(normalizedText, phrase string) bool {
+	if normalizedText == "" {
+		return false
+	}
+
+	phraseTokens := tokenizePrompt(phrase)
+	if len(phraseTokens) == 0 {
+		return false
+	}
+	textTokens := tokenizePrompt(normalizedText)
+	if len(textTokens) == 0 {
+		return false
+	}
+
+	if len(phraseTokens) == 1 {
+		for _, token := range textTokens {
+			if routeTokenMatches(token, phraseTokens[0]) {
+				return true
+			}
+		}
+		return false
+	}
+
+	if len(textTokens) < len(phraseTokens) {
+		return false
+	}
+	for i := 0; i <= len(textTokens)-len(phraseTokens); i++ {
+		match := true
+		for j := 0; j < len(phraseTokens); j++ {
+			if !routeTokenMatches(textTokens[i+j], phraseTokens[j]) {
+				match = false
+				break
+			}
+		}
+		if match {
+			return true
+		}
+	}
+
+	return false
+}
+
+func routeTokenMatches(textToken, phraseToken string) bool {
+	if textToken == phraseToken {
+		return true
+	}
+	if len(phraseToken) <= 3 {
+		return false
+	}
+
+	textVariants := routeTokenVariants(textToken)
+	phraseVariants := routeTokenVariants(phraseToken)
+	for _, textVariant := range textVariants {
+		for _, phraseVariant := range phraseVariants {
+			if textVariant == phraseVariant {
+				return true
+			}
+		}
+	}
+
+	return false
+}
+
+func routeTokenVariants(token string) []string {
+	if token == "" {
+		return nil
+	}
+
+	variants := make([]string, 0, 5)
+	seen := make(map[string]struct{}, 5)
+	add := func(value string) {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			return
+		}
+		if _, ok := seen[value]; ok {
+			return
+		}
+		seen[value] = struct{}{}
+		variants = append(variants, value)
+	}
+
+	add(token)
+	if len(token) > 4 && strings.HasSuffix(token, "s") {
+		add(strings.TrimSuffix(token, "s"))
+	}
+	if len(token) > 5 && strings.HasSuffix(token, "es") {
+		add(strings.TrimSuffix(token, "es"))
+	}
+	if len(token) > 5 && strings.HasSuffix(token, "ed") {
+		trimmed := strings.TrimSuffix(token, "ed")
+		add(trimmed)
+		add(trimmed + "e")
+	}
+	if len(token) > 6 && strings.HasSuffix(token, "ing") {
+		trimmed := strings.TrimSuffix(token, "ing")
+		add(trimmed)
+		add(trimmed + "e")
+	}
+
+	return variants
 }
 
 func parseHomeAssistantAppLaunchPrompt(prompt string) (string, bool) {
@@ -772,6 +1091,9 @@ func parseHomeAssistantAppLaunchPrompt(prompt string) (string, bool) {
 	if target == "" {
 		return "", false
 	}
+	if looksLikeWorkspaceArtifactTarget(target) {
+		return "", false
+	}
 
 	// Skip obvious URL/path-like targets that are more likely file or web intents.
 	if strings.Contains(target, "://") || strings.Contains(target, "/") || strings.Contains(target, "\\") || looksLikeWebHostTarget(target) {
@@ -779,6 +1101,33 @@ func parseHomeAssistantAppLaunchPrompt(prompt string) (string, bool) {
 	}
 
 	return target, true
+}
+
+func looksLikeWorkspaceArtifactTarget(target string) bool {
+	tokens := tokenizePrompt(target)
+	if len(tokens) == 0 {
+		return false
+	}
+
+	last := tokens[len(tokens)-1]
+	switch last {
+	case "note", "notes", "task", "tasks", "workspace", "workspaces", "session", "sessions":
+	default:
+		return false
+	}
+
+	if len(tokens) == 1 {
+		return true
+	}
+
+	for _, token := range tokens[:len(tokens)-1] {
+		switch token {
+		case "a", "an", "the", "my", "new", "another", "separate", "this", "that":
+			return true
+		}
+	}
+
+	return false
 }
 
 func looksLikeWebHostTarget(target string) bool {

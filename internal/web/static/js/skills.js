@@ -355,8 +355,10 @@ async function loadAgents() {
       throw new Error('Failed to load agents');
     }
     const data = await response.json();
-    const current = data.current || defaultAgentName;
-    populateAgentSelect(data.agents || [], current);
+    const sessionAgent = window.sessionManager?.getActiveSession?.()?.agent_name;
+    const assistantAgent = (data.agents || []).find(agent => getAgentDisplayName(agent) === 'Ori');
+    const selected = sessionAgent || defaultAgentName || getAgentDisplayName(assistantAgent);
+    populateAgentSelect(data.agents || [], selected);
   } catch (error) {
     console.error('Failed to load agents:', error);
     populateAgentSelect([], defaultAgentName);

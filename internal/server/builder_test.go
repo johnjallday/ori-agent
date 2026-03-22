@@ -1,6 +1,8 @@
 package server
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/johnjallday/ori-agent/internal/config"
@@ -169,5 +171,44 @@ func TestServerBuilder_WithWorkspaceStore(t *testing.T) {
 	}
 	if builder.server.Storage.WorkspaceStore != mockWorkspaceStore {
 		t.Error("Workspace store not set correctly")
+	}
+}
+
+func TestServerBuilder_InitializeStorage_EnsuresAssistantFromSystemModel(t *testing.T) {
+	builder, err := NewServerBuilder()
+	if err != nil {
+		t.Fatalf("NewServerBuilder failed: %v", err)
+	}
+
+	tempDir := t.TempDir()
+	storePath := filepath.Join(tempDir, "agents.json")
+	t.Setenv("AGENT_STORE_PATH", storePath)
+
+	cfg := config.NewManager(filepath.Join(tempDir, "settings.json"))
+	if err := cfg.Load(); err != nil {
+		t.Fatalf("failed to load config: %v", err)
+	}
+	if err := cfg.SetSystemModel("claude_code", "sonnet"); err != nil {
+		t.Fatalf("failed to set system model: %v", err)
+	}
+	builder.configManager = cfg
+
+	if err := builder.initializeStorage(); err != nil {
+		t.Fatalf("initializeStorage failed: %v", err)
+	}
+
+	ag, ok := builder.st.GetAgent("Ori")
+	if !ok || ag == nil {
+		t.Fatalf("expected system assistant agent to be created")
+	}
+	if ag.Settings.Provider != "claude_code" {
+		t.Fatalf("expected system assistant provider claude_code, got %q", ag.Settings.Provider)
+	}
+	if ag.Settings.Model != "sonnet" {
+		t.Fatalf("expected system assistant model sonnet, got %q", ag.Settings.Model)
+	}
+
+	if _, err := os.Stat(filepath.Join(tempDir, "agents", "Ori", "agent_settings.json")); err != nil {
+		t.Fatalf("expected persisted Ori agent settings: %v", err)
 	}
 }

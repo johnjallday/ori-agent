@@ -58,6 +58,16 @@ func TestInferOpenAppCommandFromChat(t *testing.T) {
 			wantCmd:   "/openapp obsidian",
 			wantMatch: true,
 		},
+		{
+			name:      "workspace note follow-up should not match",
+			input:     "start another note",
+			wantMatch: false,
+		},
+		{
+			name:      "workspace separate note should not match",
+			input:     "start a separate note",
+			wantMatch: false,
+		},
 	}
 
 	for _, tt := range tests {

@@ -56,6 +56,9 @@ func (h *Handler) HandleWorkspaces(w http.ResponseWriter, r *http.Request) {
 		case "board":
 			h.handleWorkspaceBoard(w, r, id)
 			return
+		case "rename":
+			h.handleWorkspaceRename(w, r, id)
+			return
 		}
 	}
 
@@ -100,6 +103,8 @@ func (h *Handler) createWorkspace(w http.ResponseWriter, r *http.Request) {
 		ParentID    string `json:"parent_id,omitempty"`
 		OrderIndex  *int   `json:"order_index,omitempty"`
 		Color       string `json:"color,omitempty"`
+		ProjectPath string `json:"project_path,omitempty"`
+		Location    string `json:"location,omitempty"` // Optional custom directory for workspace folder (overrides default root)
 	}
 
 	if !orihttp.ParseJSONBody(w, r, &req) {
@@ -111,27 +116,118 @@ func (h *Handler) createWorkspace(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	workspace := &session.Workspace{
+	ws := &session.Workspace{
 		Name:        req.Name,
 		Description: req.Description,
 		ParentID:    req.ParentID,
 		Color:       req.Color,
+		FolderSlug:  agentworkspace.Slugify(req.Name),
+		ProjectPath: req.ProjectPath,
 	}
 	if req.OrderIndex != nil {
-		workspace.OrderIndex = *req.OrderIndex
+		ws.OrderIndex = *req.OrderIndex
 	}
 
-	if err := h.store.CreateWorkspace(r.Context(), workspace); err != nil {
+	if err := h.store.CreateWorkspace(r.Context(), ws); err != nil {
 		logger.Error("Failed to create workspace", logger.Fields{"error": err})
 		_ = orihttp.RespondInternalError(w, "Failed to create workspace")
 		return
 	}
 
-	logger.Info("Workspace created", logger.Fields{"id": workspace.ID, "name": req.Name})
+	// Create workspace folder on disk if folder-based store is available
+	if h.workspaceStore != nil {
+		folderWS := &agentworkspace.Workspace{
+			ID:          ws.ID,
+			Name:        ws.Name,
+			Description: ws.Description,
+			FolderSlug:  ws.FolderSlug,
+			ProjectPath: ws.ProjectPath,
+			ParentID:    ws.ParentID,
+			Status:      agentworkspace.StatusActive,
+			CreatedAt:   ws.CreatedAt,
+			UpdatedAt:   ws.UpdatedAt,
+		}
+
+		var folderErr error
+		if req.Location != "" {
+			// Custom location — create folder at the user-specified directory
+			folderErr = h.workspaceStore.SaveAt(folderWS, req.Location)
+		} else {
+			// Default location (workspace root from settings)
+			folderErr = h.workspaceStore.Save(folderWS)
+		}
+
+		if folderErr != nil {
+			logger.Warn("Failed to create workspace folder on disk", logger.Fields{"id": ws.ID, "error": folderErr})
+			// Non-fatal: SQLite creation succeeded, folder is supplementary
+		} else if folderPath, err := h.workspaceStore.GetFolderPath(ws.ID); err == nil {
+			now := time.Now()
+
+			// Add the workspace folder as the initial directory reference
+			dirRef := workspaceDirectoryReference{
+				ID:          uuid.New().String(),
+				WorkspaceID: ws.ID,
+				Name:        ws.FolderSlug,
+				Path:        folderPath,
+				X:           400,
+				Y:           300,
+				CreatedAt:   now,
+				UpdatedAt:   now,
+			}
+			if data, err := json.Marshal([]workspaceDirectoryReference{dirRef}); err == nil {
+				ws.DirectoryReferencesJSON = data
+			}
+
+			// Auto-provision a filesystem MCP binding scoped to the workspace folder
+			mcpBinding := agentworkspace.WorkspaceMCPBinding{
+				ID:         uuid.New().String(),
+				ServerName: "filesystem",
+				Alias:      "workspace-files",
+				Enabled:    true,
+				Config: map[string]interface{}{
+					"roots": []string{folderPath},
+				},
+				CreatedAt: now,
+				UpdatedAt: now,
+			}
+			if data, err := json.Marshal([]agentworkspace.WorkspaceMCPBinding{mcpBinding}); err == nil {
+				ws.MCPBindingsJSON = data
+			}
+
+			ws.UpdatedAt = now
+			if err := h.store.UpdateWorkspace(r.Context(), ws); err != nil {
+				logger.Warn("Failed to set initial workspace config", logger.Fields{"id": ws.ID, "error": err})
+			}
+
+			// Resync workspace.json to include directory reference and MCP binding
+			folderWS.SharedData = make(map[string]interface{})
+			folderWS.DirectoryReferences = []agentworkspace.DirectoryReference{
+				{
+					ID:          dirRef.ID,
+					WorkspaceID: dirRef.WorkspaceID,
+					Name:        dirRef.Name,
+					Path:        dirRef.Path,
+					X:           dirRef.X,
+					Y:           dirRef.Y,
+					CreatedAt:   dirRef.CreatedAt,
+					UpdatedAt:   dirRef.UpdatedAt,
+				},
+			}
+			folderWS.MCPBindings = []agentworkspace.WorkspaceMCPBinding{mcpBinding}
+			folderWS.UpdatedAt = now
+			if err := h.workspaceStore.Save(folderWS); err != nil {
+				logger.Warn("Failed to resync workspace.json after creation", logger.Fields{"id": ws.ID, "error": err})
+			}
+
+			logger.Info("Workspace folder created on disk", logger.Fields{"id": ws.ID, "path": folderPath})
+		}
+	}
+
+	logger.Info("Workspace created", logger.Fields{"id": ws.ID, "name": req.Name, "folder_slug": ws.FolderSlug})
 
 	_ = orihttp.RespondCreated(w, map[string]interface{}{
 		"success": true,
-		"folder":  workspace,
+		"folder":  ws,
 	})
 }
 
@@ -169,6 +265,7 @@ func (h *Handler) updateWorkspace(w http.ResponseWriter, r *http.Request, id str
 		ParentID    *string `json:"parent_id,omitempty"`
 		OrderIndex  *int    `json:"order_index,omitempty"`
 		Color       *string `json:"color,omitempty"`
+		ProjectPath *string `json:"project_path,omitempty"`
 	}
 
 	if !orihttp.ParseJSONBody(w, r, &req) {
@@ -178,9 +275,13 @@ func (h *Handler) updateWorkspace(w http.ResponseWriter, r *http.Request, id str
 	// Apply partial updates
 	if req.Name != nil {
 		workspace.Name = *req.Name
+		workspace.FolderSlug = agentworkspace.Slugify(*req.Name)
 	}
 	if req.Description != nil {
 		workspace.Description = *req.Description
+	}
+	if req.ProjectPath != nil {
+		workspace.ProjectPath = *req.ProjectPath
 	}
 	if req.ParentID != nil {
 		// Check for circular reference
@@ -226,19 +327,71 @@ func (h *Handler) updateWorkspace(w http.ResponseWriter, r *http.Request, id str
 }
 
 // deleteWorkspace handles DELETE /api/workspaces/{id}.
+// Query params:
+//   - delete_sessions=true: also delete all sessions belonging to this workspace.
+//     If false or absent, sessions are unlinked (workspace_id set to NULL).
+//   - confirm=true: required to proceed with deletion (if absent, returns session count for confirmation).
 func (h *Handler) deleteWorkspace(w http.ResponseWriter, r *http.Request, id string) {
-	err := h.store.DeleteWorkspace(r.Context(), id)
+	ctx := r.Context()
+
+	// Check workspace exists
+	ws, err := h.store.GetWorkspace(ctx, id)
 	if err == session.ErrWorkspaceNotFound {
 		_ = orihttp.RespondNotFound(w, "Workspace not found")
 		return
 	}
 	if err != nil {
+		logger.Error("Failed to get workspace", logger.Fields{"id": id, "error": err})
+		_ = orihttp.RespondInternalError(w, "Failed to delete workspace")
+		return
+	}
+
+	// If confirm is not set, return session count for UI confirmation prompt
+	if r.URL.Query().Get("confirm") != "true" {
+		sessionCount := ws.SessionCount
+		orihttp.WriteJSON(w, map[string]interface{}{
+			"workspace_id":     id,
+			"name":             ws.Name,
+			"session_count":    sessionCount,
+			"confirm_required": true,
+			"message":          fmt.Sprintf("Workspace %q has %d sessions. Delete the workspace?", ws.Name, sessionCount),
+		})
+		return
+	}
+
+	deleteSessions := r.URL.Query().Get("delete_sessions") == "true"
+
+	// Handle session cleanup
+	if deleteSessions {
+		if err := h.store.DeleteSessionsByWorkspace(ctx, id); err != nil {
+			logger.Error("Failed to delete sessions for workspace", logger.Fields{"id": id, "error": err})
+			_ = orihttp.RespondInternalError(w, "Failed to delete workspace sessions")
+			return
+		}
+	} else {
+		if err := h.store.UnlinkSessionsFromWorkspace(ctx, id); err != nil {
+			logger.Error("Failed to unlink sessions from workspace", logger.Fields{"id": id, "error": err})
+			_ = orihttp.RespondInternalError(w, "Failed to unlink workspace sessions")
+			return
+		}
+	}
+
+	// Delete the workspace
+	if err := h.store.DeleteWorkspace(ctx, id); err != nil {
 		logger.Error("Failed to delete workspace", logger.Fields{"id": id, "error": err})
 		_ = orihttp.RespondInternalError(w, "Failed to delete workspace")
 		return
 	}
 
-	logger.Info("Workspace deleted", logger.Fields{"id": id})
+	// Also delete from folder-based store if available
+	if h.workspaceStore != nil {
+		if err := h.workspaceStore.Delete(id); err != nil {
+			logger.Warn("Failed to delete workspace folder", logger.Fields{"id": id, "error": err})
+			// Non-fatal: SQLite deletion succeeded
+		}
+	}
+
+	logger.Info("Workspace deleted", logger.Fields{"id": id, "delete_sessions": deleteSessions})
 
 	orihttp.RespondNoContent(w)
 }
@@ -278,6 +431,63 @@ func (h *Handler) listWorkspaces(w http.ResponseWriter, r *http.Request) {
 
 	orihttp.WriteJSON(w, map[string]interface{}{
 		"folders": workspaces,
+	})
+}
+
+// handleWorkspaceRename handles POST /api/workspaces/{id}/rename.
+func (h *Handler) handleWorkspaceRename(w http.ResponseWriter, r *http.Request, id string) {
+	if r.Method != http.MethodPost {
+		_ = orihttp.RespondMethodNotAllowed(w)
+		return
+	}
+
+	var req struct {
+		Name string `json:"name"`
+	}
+	if !orihttp.ParseJSONBody(w, r, &req) {
+		return
+	}
+
+	if req.Name == "" {
+		_ = orihttp.RespondBadRequest(w, "name is required")
+		return
+	}
+
+	ctx := r.Context()
+
+	// Update in session store
+	ws, err := h.store.GetWorkspace(ctx, id)
+	if err == session.ErrWorkspaceNotFound {
+		_ = orihttp.RespondNotFound(w, "Workspace not found")
+		return
+	}
+	if err != nil {
+		_ = orihttp.RespondInternalError(w, "Failed to get workspace")
+		return
+	}
+
+	ws.Name = req.Name
+	ws.FolderSlug = agentworkspace.Slugify(req.Name)
+	ws.UpdatedAt = time.Now()
+
+	if err := h.store.UpdateWorkspace(ctx, ws); err != nil {
+		_ = orihttp.RespondInternalError(w, "Failed to rename workspace")
+		return
+	}
+
+	// Rename the folder if folder-based store is available
+	if h.workspaceStore != nil {
+		if err := h.workspaceStore.Rename(id, req.Name); err != nil {
+			logger.Warn("Failed to rename workspace folder", logger.Fields{"id": id, "error": err})
+			// Non-fatal: SQLite rename succeeded
+		}
+	}
+
+	logger.Info("Workspace renamed", logger.Fields{"id": id, "new_name": req.Name})
+
+	orihttp.WriteJSON(w, map[string]interface{}{
+		"success": true,
+		"folder":  ws,
 	})
 }
 

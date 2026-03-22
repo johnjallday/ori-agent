@@ -23,19 +23,43 @@ type mcpTemplateLookup interface {
 	GetServer(name string) (*mcp.ServerConfig, error)
 }
 
-// ResolvedAgentRuntime is the effective runtime configuration for an agent executing inside a workspace.
-type ResolvedAgentRuntime struct {
-	Agent         *agent.Agent
-	AgentInstance *AgentInstance
-	MCPServers    []string
+// ResolvedSkill is a minimal skill representation used by the runtime resolver
+// to avoid importing the skills package directly.
+type ResolvedSkill struct {
+	Name               string
+	Description        string
+	Prompt             string
+	Source             string
+	AllowedTools       []string
+	DisallowedTools    []string
+	RequiredMCPServers []string
+	Model              string
+	Color              string
+	Enabled            bool
+	Trusted            bool
 }
 
-// AgentRuntimeResolver composes base agent configuration with workspace-owned MCP bindings.
+// SkillResolver resolves skills by name from all available sources.
+type SkillResolver interface {
+	ResolveSkillsByNames(skillNames []string) ([]ResolvedSkill, []string, error)
+	ListEnabledAgentSkills(agentName string) ([]ResolvedSkill, error)
+}
+
+// ResolvedAgentRuntime is the effective runtime configuration for an agent executing inside a workspace.
+type ResolvedAgentRuntime struct {
+	Agent           *agent.Agent
+	AgentInstance   *AgentInstance
+	MCPServers      []string
+	EffectiveSkills []ResolvedSkill
+}
+
+// AgentRuntimeResolver composes base agent configuration with workspace-owned MCP bindings and skills.
 type AgentRuntimeResolver struct {
 	agentStore       store.Store
 	workspaceStore   Store
 	mcpRegistry      runtimeMCPRegistry
 	mcpConfigManager mcpTemplateLookup
+	skillResolver    SkillResolver
 }
 
 // NewAgentRuntimeResolver creates a runtime resolver for workspace task execution.
@@ -50,6 +74,13 @@ func NewAgentRuntimeResolver(
 		workspaceStore:   workspaceStore,
 		mcpRegistry:      mcpRegistry,
 		mcpConfigManager: mcpConfigManager,
+	}
+}
+
+// SetSkillResolver configures the skill resolver for workspace skill binding resolution.
+func (r *AgentRuntimeResolver) SetSkillResolver(sr SkillResolver) {
+	if r != nil {
+		r.skillResolver = sr
 	}
 }
 
@@ -90,6 +121,9 @@ func (r *AgentRuntimeResolver) resolveAgentRuntime(agentName, workspaceID, nodeI
 
 	instance, _ := ws.FindAgentInstance(agentName, nodeID)
 	resolved.AgentInstance = instance
+
+	// Resolve effective skills
+	resolved.EffectiveSkills = r.resolveEffectiveSkills(ws, instance, agentName)
 
 	allowedBindings, overriddenServerNames := r.resolveWorkspaceBindings(ws, instance)
 	if len(overriddenServerNames) == 0 {
@@ -500,6 +534,124 @@ func normalizeValueSet(values []string) map[string]bool {
 		set[trimmed] = true
 	}
 	return set
+}
+
+// resolveWorkspaceSkillBindings filters workspace skill bindings by enabled state
+// and per-agent access control, returning the allowed bindings.
+func (r *AgentRuntimeResolver) resolveWorkspaceSkillBindings(ws *Workspace, instance *AgentInstance) []WorkspaceSkillBinding {
+	if ws == nil {
+		return nil
+	}
+
+	bindings := ws.GetSkillBindings()
+	if len(bindings) == 0 {
+		return nil
+	}
+
+	enabledBindings := make([]WorkspaceSkillBinding, 0, len(bindings))
+	for _, binding := range bindings {
+		if strings.TrimSpace(binding.SkillName) == "" || !binding.Enabled {
+			continue
+		}
+		enabledBindings = append(enabledBindings, binding)
+	}
+
+	if len(enabledBindings) == 0 || instance == nil {
+		return enabledBindings
+	}
+
+	accessEntry, ok := ws.GetAgentSkillAccess(instance.ID)
+	if !ok {
+		return enabledBindings
+	}
+
+	allowedIDs := normalizeValueSet(accessEntry.EnabledBindingIDs)
+	if len(allowedIDs) == 0 {
+		return nil
+	}
+
+	filtered := make([]WorkspaceSkillBinding, 0, len(enabledBindings))
+	for _, binding := range enabledBindings {
+		if allowedIDs[strings.ToLower(strings.TrimSpace(binding.ID))] {
+			filtered = append(filtered, binding)
+		}
+	}
+
+	return filtered
+}
+
+// resolveEffectiveSkills merges workspace skill bindings with agent-specific skills.
+// Agent-specific skills take priority on name collision.
+func (r *AgentRuntimeResolver) resolveEffectiveSkills(ws *Workspace, instance *AgentInstance, agentName string) []ResolvedSkill {
+	if r.skillResolver == nil {
+		return nil
+	}
+
+	// Load agent-specific skills (highest priority)
+	var agentSkills []ResolvedSkill
+	agentSkills, err := r.skillResolver.ListEnabledAgentSkills(agentName)
+	if err != nil {
+		logger.Warn("Failed to load agent-specific skills", logger.Fields{
+			"agent": agentName,
+			"error": err,
+		})
+	}
+
+	// Build set of agent skill names for deduplication
+	agentSkillNames := make(map[string]struct{}, len(agentSkills))
+	for _, s := range agentSkills {
+		agentSkillNames[strings.ToLower(strings.TrimSpace(s.Name))] = struct{}{}
+	}
+
+	// Resolve workspace skill bindings
+	allowedBindings := r.resolveWorkspaceSkillBindings(ws, instance)
+	if len(allowedBindings) == 0 {
+		return agentSkills
+	}
+
+	skillNames := make([]string, 0, len(allowedBindings))
+	bindingMap := make(map[string]WorkspaceSkillBinding, len(allowedBindings))
+	for _, binding := range allowedBindings {
+		name := strings.TrimSpace(binding.SkillName)
+		// Skip workspace skills that are overridden by agent-specific skills
+		if _, overridden := agentSkillNames[strings.ToLower(name)]; overridden {
+			continue
+		}
+		skillNames = append(skillNames, name)
+		bindingMap[strings.ToLower(name)] = binding
+	}
+
+	if len(skillNames) == 0 {
+		return agentSkills
+	}
+
+	wsSkills, unresolved, err := r.skillResolver.ResolveSkillsByNames(skillNames)
+	if err != nil {
+		logger.Warn("Failed to resolve workspace skill bindings", logger.Fields{
+			"error": err,
+		})
+		return agentSkills
+	}
+	if len(unresolved) > 0 {
+		logger.Warn("Some workspace skill bindings could not be resolved", logger.Fields{
+			"unresolved": unresolved,
+		})
+	}
+
+	// Apply workspace binding overrides (trusted flag)
+	for i := range wsSkills {
+		key := strings.ToLower(strings.TrimSpace(wsSkills[i].Name))
+		if binding, ok := bindingMap[key]; ok {
+			wsSkills[i].Trusted = binding.Trusted
+			wsSkills[i].Enabled = true
+		}
+	}
+
+	// Merge: agent-specific first, then workspace
+	effective := make([]ResolvedSkill, 0, len(agentSkills)+len(wsSkills))
+	effective = append(effective, agentSkills...)
+	effective = append(effective, wsSkills...)
+	return effective
 }
 
 func dedupeStringsPreserveOrder(values []string) []string {

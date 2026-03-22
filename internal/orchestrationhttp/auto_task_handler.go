@@ -132,7 +132,7 @@ func (h *AutoTaskHandler) HandleAutoTask(w http.ResponseWriter, r *http.Request)
 	}
 
 	// Get all agents with their descriptions for intelligent matching
-	agentNames, _ := h.agentStore.ListAgents()
+	agentNames := h.agentStore.ListAgents()
 	agents := make([]string, 0, len(agentNames))
 	agentDescriptions := make(map[string]string)
 	for _, name := range agentNames {

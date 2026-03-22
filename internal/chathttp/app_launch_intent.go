@@ -58,6 +58,9 @@ func inferOpenAppCommandFromChat(input string) (string, bool) {
 	if target == "" {
 		return "", false
 	}
+	if looksLikeWorkspaceArtifactLaunchTarget(target) {
+		return "", false
+	}
 
 	// Avoid launching for paths/URLs and multi-step prompts.
 	if strings.Contains(target, "://") ||
@@ -82,4 +85,30 @@ func inferOpenAppCommandFromChat(input string) (string, bool) {
 	}
 
 	return "/openapp " + target, true
+}
+
+func looksLikeWorkspaceArtifactLaunchTarget(target string) bool {
+	tokens := strings.Fields(strings.ToLower(strings.TrimSpace(target)))
+	if len(tokens) == 0 {
+		return false
+	}
+
+	switch tokens[len(tokens)-1] {
+	case "note", "notes", "task", "tasks", "workspace", "workspaces", "session", "sessions":
+	default:
+		return false
+	}
+
+	if len(tokens) == 1 {
+		return true
+	}
+
+	for _, token := range tokens[:len(tokens)-1] {
+		switch token {
+		case "a", "an", "the", "my", "new", "another", "separate", "this", "that":
+			return true
+		}
+	}
+
+	return false
 }

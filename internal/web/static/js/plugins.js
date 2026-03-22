@@ -62,7 +62,7 @@ async function loadPlugins() {
 
     if (data.plugins) {
       allPlugins = data.plugins;
-      const currentAgent = data.current_agent || 'Default';
+      const currentAgent = data.agent || 'Assistant';
       const agentDisplay = document.getElementById('currentAgentNameDisplay');
       if (agentDisplay) {
         agentDisplay.textContent = currentAgent;

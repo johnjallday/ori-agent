@@ -45,7 +45,7 @@ func getPluginEmoji(pluginName string) string {
 }
 
 // checkUninitializedPlugins checks which plugins need initialization
-func (h *Handler) checkUninitializedPlugins(ag *agent.Agent) []map[string]any {
+func (h *Handler) checkUninitializedPlugins(ag *agent.Agent, agentName string) []map[string]any {
 	var uninitializedPlugins []map[string]any
 
 	for name, plugin := range ag.Plugins {
@@ -58,14 +58,13 @@ func (h *Handler) checkUninitializedPlugins(ag *agent.Agent) []map[string]any {
 
 		// Check if plugin is initialized by checking if settings file exists
 		// Try multiple name variations (underscores vs hyphens) to handle naming inconsistencies
-		_, currentAgent := h.store.ListAgents()
 		normalizedName := registry.NormalizePluginName(name)
-		settingsFilePath := fmt.Sprintf("agents/%s/%s_settings.json", currentAgent, name)
+		settingsFilePath := fmt.Sprintf("agents/%s/%s_settings.json", agentName, name)
 		_, err := os.Stat(settingsFilePath)
 		isInitialized := err == nil
 		if !isInitialized {
 			// Try normalized name (hyphens)
-			settingsFilePath = fmt.Sprintf("agents/%s/%s_settings.json", currentAgent, normalizedName)
+			settingsFilePath = fmt.Sprintf("agents/%s/%s_settings.json", agentName, normalizedName)
 			_, err = os.Stat(settingsFilePath)
 			isInitialized = err == nil
 		}

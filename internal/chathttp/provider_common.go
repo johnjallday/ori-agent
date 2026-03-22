@@ -13,6 +13,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/llm"
 	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/types"
+	"github.com/johnjallday/ori-agent/internal/workspace"
 	"github.com/oriagent/ori-pluginapi"
 )
 
@@ -436,8 +437,17 @@ func resolveSystemPromptForAgent(ag *agent.Agent, defaultPrompt string) string {
 // buildSystemPromptWithSkills resolves the agent system prompt and appends
 // the prompt text of all enabled skills so the agent benefits from skill
 // knowledge during normal chat (not only via explicit /skill invocation).
-func (h *Handler) buildSystemPromptWithSkills(ag *agent.Agent, agentName, defaultPrompt string) string {
-	base := resolveSystemPromptForAgent(ag, defaultPrompt)
+// When the resolved chat agent carries pre-resolved workspace skills, those
+// are used directly; otherwise falls back to SkillManager.
+func (h *Handler) buildSystemPromptWithSkills(ag *resolvedChatAgent, agentName, defaultPrompt string) string {
+	base := resolveSystemPromptForAgent(ag.Agent, defaultPrompt)
+
+	// Use pre-resolved effective skills from workspace runtime resolution when available.
+	if len(ag.EffectiveSkills) > 0 {
+		return appendSkillPromptsFromResolved(base, ag.EffectiveSkills)
+	}
+
+	// Fallback: load from SkillManager (for non-workspace contexts).
 	if h.skillsManager == nil || agentName == "" {
 		return base
 	}
@@ -453,6 +463,34 @@ func (h *Handler) buildSystemPromptWithSkills(ag *agent.Agent, agentName, defaul
 		sb.WriteString(s.Name)
 		sb.WriteString("\n")
 		sb.WriteString(strings.TrimSpace(s.Prompt))
+		sb.WriteString("\n")
+	}
+	return sb.String()
+}
+
+func appendSkillPromptsFromResolved(base string, skills []workspace.ResolvedSkill) string {
+	var hasPrompt bool
+	for _, s := range skills {
+		if strings.TrimSpace(s.Prompt) != "" {
+			hasPrompt = true
+			break
+		}
+	}
+	if !hasPrompt {
+		return base
+	}
+	var sb strings.Builder
+	sb.WriteString(base)
+	sb.WriteString("\n\n---\n# Active Skills\n")
+	for _, s := range skills {
+		prompt := strings.TrimSpace(s.Prompt)
+		if prompt == "" {
+			continue
+		}
+		sb.WriteString("\n## ")
+		sb.WriteString(s.Name)
+		sb.WriteString("\n")
+		sb.WriteString(prompt)
 		sb.WriteString("\n")
 	}
 	return sb.String()

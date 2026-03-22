@@ -928,8 +928,8 @@
                             </h2>
                             <p class="page-subtitle">Manage installed plugins, health, and updates from one place.</p>
                             <div class="current-agent-chip">
-                                Current Agent:
-                                <strong id="currentAgentNameDisplay">{{.CurrentAgent}}</strong>
+                                Plugin Context:
+                                <strong id="currentAgentNameDisplay">Assistant{{with index .Extra "DefaultAgentName"}} ({{.}}){{end}}</strong>
                             </div>
                         </div>
                         <div class="header-actions">

@@ -65,20 +65,37 @@ func TestHandler_CreateSession(t *testing.T) {
 	}
 }
 
-// TestHandler_CreateSessionMissingAgent tests that agent_name is required.
-func TestHandler_CreateSessionMissingAgent(t *testing.T) {
+// TestHandler_CreateSessionWithoutAgent tests Assistant session creation without an agent.
+func TestHandler_CreateSessionWithoutAgent(t *testing.T) {
 	handler, cleanup := createTestHandler(t)
 	defer cleanup()
 
-	body := `{"title": "Test Session"}`
+	body := `{"title": "Assistant Session"}`
 	req := httptest.NewRequest(http.MethodPost, "/api/sessions", bytes.NewBufferString(body))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 
 	handler.HandleSessions(w, req)
 
-	if w.Code != http.StatusBadRequest {
-		t.Errorf("Expected status 400, got %d", w.Code)
+	if w.Code != http.StatusCreated {
+		t.Errorf("Expected status 201, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp map[string]interface{}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("Failed to parse response: %v", err)
+	}
+
+	if !resp["success"].(bool) {
+		t.Error("Expected success to be true")
+	}
+
+	sess := resp["session"].(map[string]interface{})
+	if sess["title"] != "Assistant Session" {
+		t.Errorf("Expected title 'Assistant Session', got %v", sess["title"])
+	}
+	if sess["agent_name"] != "" {
+		t.Errorf("Expected empty agent_name for Assistant session, got %v", sess["agent_name"])
 	}
 }
 

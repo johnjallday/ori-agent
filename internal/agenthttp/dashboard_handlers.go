@@ -77,7 +77,7 @@ func (h *DashboardHandler) ListAgentsWithStats(w http.ResponseWriter, r *http.Re
 	favoriteOnly := r.URL.Query().Get("favorite") == "true"
 
 	// Get all agents
-	names, _ := h.State.ListAgents()
+	names := h.State.ListAgents()
 	agents := make([]AgentListItem, 0, len(names))
 
 	for _, name := range names {
@@ -291,7 +291,7 @@ func getLastActive(stats *types.AgentStatistics) time.Time {
 // Returns aggregate statistics across all agents
 func (h *DashboardHandler) GetDashboardStats(w http.ResponseWriter, r *http.Request) {
 	// Get all agents
-	names, _ := h.State.ListAgents()
+	names := h.State.ListAgents()
 	agentsMap := make(map[string]*agent.Agent)
 
 	for _, name := range names {

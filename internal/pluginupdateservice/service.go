@@ -90,7 +90,7 @@ func (s *Service) CheckNow() error {
 		registryIndex[registry.NormalizePluginNameForLookup(entry.Name)] = entry
 	}
 
-	agentNames, _ := s.store.ListAgents()
+	agentNames := s.store.ListAgents()
 	checkedPlugins := make(map[string]bool)
 	updates := make([]PluginUpdateInfo, 0)
 	checkedAt := time.Now()

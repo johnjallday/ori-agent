@@ -36,7 +36,7 @@ func (b *ServerBuilder) initializeUpdateManager() error {
 // Plugins are loaded lazily on first use to improve startup time.
 func (b *ServerBuilder) validatePluginPaths() error {
 	verbose := os.Getenv("ORI_VERBOSE") == "true"
-	names, _ := b.st.ListAgents()
+	names := b.st.ListAgents()
 
 	for _, agName := range names {
 		ag, ok := b.st.GetAgent(agName)

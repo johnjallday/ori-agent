@@ -1,6 +1,10 @@
 package store
 
-import "github.com/johnjallday/ori-agent/internal/agent"
+import (
+	"strings"
+
+	"github.com/johnjallday/ori-agent/internal/agent"
+)
 
 // CreateAgentConfig holds optional configuration for creating a new agent
 type CreateAgentConfig struct {
@@ -16,8 +20,7 @@ type CreateAgentConfig struct {
 
 type Store interface {
 	// Agents
-	ListAgents() (names []string, current string)
-	SetCurrentAgent(name string) error
+	ListAgents() []string
 	CreateAgent(name string, config *CreateAgentConfig) error
 	DeleteAgent(name string) error
 
@@ -33,24 +36,32 @@ type Store interface {
 	Save() error
 }
 
-// GetCurrentAgent returns the current agent and its name from the store.
-// If no current agent is set, it falls back to the first available agent.
-// Returns nil, "", false if no agents exist.
+// FirstAgentName returns the first available agent name from the store.
+func FirstAgentName(s Store) string {
+	if s == nil {
+		return ""
+	}
+	for _, candidate := range s.ListAgents() {
+		if name := strings.TrimSpace(candidate); name != "" {
+			return name
+		}
+	}
+	return ""
+}
+
+// GetCurrentAgent is a legacy helper retained for single-agent code paths.
+// It no longer reads any global current-agent state; it returns the first
+// available agent instead.
 func GetCurrentAgent(s Store) (*agent.Agent, string, bool) {
-	names, current := s.ListAgents()
-	if len(names) == 0 {
+	name := FirstAgentName(s)
+	if name == "" {
 		return nil, "", false
 	}
 
-	// Fall back to first agent if no current is set
-	if current == "" {
-		current = names[0]
-	}
-
-	ag, found := s.GetAgent(current)
+	ag, found := s.GetAgent(name)
 	if !found || ag == nil {
 		return nil, "", false
 	}
 
-	return ag, current, true
+	return ag, name, true
 }

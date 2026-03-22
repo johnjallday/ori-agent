@@ -107,3 +107,19 @@ func TestHandleOpenApp_Failure(t *testing.T) {
 		t.Fatalf("expected failure response, got: %q", response)
 	}
 }
+
+func TestHandleHelp_RemovesSwitchGuidance(t *testing.T) {
+	ch := newCommandHandlerForSystemTests(t)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/chat", nil)
+	rr := httptest.NewRecorder()
+	ch.HandleHelp(rr, req)
+
+	response := decodeSystemCommandResponse(t, rr)
+	if strings.Contains(response, "/switch <agent-name>") {
+		t.Fatalf("did not expect /switch guidance, got %q", response)
+	}
+	if !strings.Contains(response, "Assistant sessions run without a global current agent") {
+		t.Fatalf("expected Assistant-first guidance, got %q", response)
+	}
+}

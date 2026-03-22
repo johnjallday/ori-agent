@@ -94,8 +94,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) list(w http.ResponseWriter, _ *http.Request) {
-	// Get enabled plugins for current agent
-	_, current := h.State.ListAgents()
+	current := store.FirstAgentName(h.State)
 
 	// Create map of enabled plugins (empty if agent doesn't exist yet)
 	enabledPlugins := make(map[string]bool)
@@ -339,8 +338,7 @@ func (h *Handler) loadFromRegistry(w http.ResponseWriter, r *http.Request) {
 	def := tool.Definition()
 	version := pluginloader.GetPluginVersion(tool)
 
-	// Get current agent
-	_, current := h.State.ListAgents()
+	current := store.FirstAgentName(h.State)
 	ag, ok := h.State.GetAgent(current)
 	if !ok {
 		orihttp.InternalError(w, "current agent not found")
@@ -407,7 +405,7 @@ func (h *Handler) unload(w http.ResponseWriter, r *http.Request) {
 		orihttp.BadRequest(w, "name required")
 		return
 	}
-	_, current := h.State.ListAgents()
+	current := store.FirstAgentName(h.State)
 	ag, ok := h.State.GetAgent(current)
 	if !ok {
 		orihttp.InternalError(w, "current agent not found")
@@ -423,7 +421,7 @@ func (h *Handler) unload(w http.ResponseWriter, r *http.Request) {
 
 // GetPluginEnums extracts enum values from a specific plugin's function definition
 func (h *Handler) GetPluginEnums(pluginName string) (map[string][]string, error) {
-	_, current := h.State.ListAgents()
+	current := store.FirstAgentName(h.State)
 	ag, ok := h.State.GetAgent(current)
 	if !ok {
 		return nil, fmt.Errorf("current agent not found")
@@ -447,7 +445,8 @@ func (h *Handler) GetPluginEnums(pluginName string) (map[string][]string, error)
 func (h *Handler) GetPluginConfig(pluginName string) ([]pluginapi.ConfigVariable, bool, error) {
 	logger.Debugf("🔍 GetPluginConfig called for plugin: %s", pluginName)
 
-	names, current := h.State.ListAgents()
+	names := h.State.ListAgents()
+	current := store.FirstAgentName(h.State)
 	logger.Verbosef("📋 Available agents: %v, current: %s", names, current)
 
 	ag, ok := h.State.GetAgent(current)
@@ -520,7 +519,7 @@ func (h *Handler) GetPluginConfig(pluginName string) ([]pluginapi.ConfigVariable
 
 // ValidatePluginEnumValue validates an enum value for a specific plugin and property
 func (h *Handler) ValidatePluginEnumValue(pluginName, propertyName, value string) (bool, error) {
-	_, current := h.State.ListAgents()
+	current := store.FirstAgentName(h.State)
 	ag, ok := h.State.GetAgent(current)
 	if !ok {
 		return false, fmt.Errorf("current agent not found")
@@ -567,8 +566,7 @@ func (h *Handler) saveSettings(w http.ResponseWriter, r *http.Request) {
 	// Convert ori_reaper -> ori-reaper
 	pluginName := strings.ReplaceAll(req.PluginName, "_", "-")
 
-	// Get current agent
-	_, current := h.State.ListAgents()
+	current := store.FirstAgentName(h.State)
 
 	// Normalize settings keys: Frontend may send display names, but we need to save config keys
 	// Get the plugin's config schema to build a mapping
@@ -748,8 +746,7 @@ func (h *Handler) uploadConfig(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Get current agent
-	_, current := h.State.ListAgents()
+	current := store.FirstAgentName(h.State)
 
 	// Create agent directory if it doesn't exist
 	agentDir := filepath.Join("agents", current)

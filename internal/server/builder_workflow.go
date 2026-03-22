@@ -21,6 +21,7 @@ import (
 // initializeWorkspaceStore creates the workspace storage system.
 // Uses the session HybridStore as the underlying storage via an adapter,
 // which unifies workspace data between the Sessions sidebar and Studios page.
+// A SyncStore wrapper ensures every Save also writes workspace.json to disk.
 func (b *ServerBuilder) initializeWorkspaceStore() error {
 	var ws workspace.Store
 	verbose := os.Getenv("ORI_VERBOSE") == "true"
@@ -45,9 +46,42 @@ func (b *ServerBuilder) initializeWorkspaceStore() error {
 		}
 	}
 
+	// Always create the folder-based FileStore alongside the primary store.
+	// The FileStore manages workspace folders on disk (workspace.json, files/, notes/, etc.)
+	//
+	// Priority for workspace root:
+	// 1. Settings workspace_root (user-configured)
+	// 2. WORKSPACE_DIR env var
+	// 3. Default: ~/Ori Workspaces
+	workspaceDir := resolveWorkspaceRoot(b.configManager)
+	fileStore, err := workspace.NewFileStore(workspaceDir)
+	if err != nil {
+		logger.Warn("Failed to create folder-based workspace store", logger.Fields{"error": err})
+	} else {
+		// When SQLite is the primary store, wrap with SyncStore so every
+		// Save() also writes workspace.json to disk. This keeps MCP configs,
+		// skills, schedules, tasks, and all other workspace data portable.
+		if b.sessionStore != nil {
+			ws = workspace.NewSyncStore(ws, fileStore)
+			if verbose {
+				logger.Info("Workspace SyncStore enabled (SQLite → disk write-through)", logger.Fields{"dir": workspaceDir})
+			}
+		}
+
+		if b.sessionHandler != nil {
+			b.sessionHandler.SetWorkspaceStore(fileStore)
+		}
+		if b.chatHandler != nil {
+			b.chatHandler.SetFileStore(fileStore)
+		}
+		if verbose {
+			logger.Info("Folder-based workspace store initialized", logger.Fields{"dir": workspaceDir})
+		}
+	}
+
 	b.workspaceStore = ws
 
-	// Now update chat handler with workspace store
+	// Set workspace store on chat handler (uses SyncStore when available)
 	b.chatHandler.SetWorkspaceStore(ws)
 
 	return nil
@@ -88,6 +122,9 @@ func (b *ServerBuilder) initializeTaskExecution() error {
 	taskHandler.SetEventBus(b.eventBus)
 	taskHandler.SetMCPRegistry(b.mcpRegistry)
 	runtimeResolver := workspace.NewAgentRuntimeResolver(b.st, b.workspaceStore, b.mcpRegistry, b.mcpConfigManager)
+	if b.skillsManager != nil {
+		runtimeResolver.SetSkillResolver(newSkillResolverAdapter(b.skillsManager))
+	}
 	taskHandler.SetRuntimeResolver(runtimeResolver)
 	b.chatHandler.SetRuntimeResolver(runtimeResolver)
 	if b.sessionStore != nil {

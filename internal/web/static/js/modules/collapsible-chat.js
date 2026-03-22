@@ -16,7 +16,6 @@ class CollapsibleChat {
     this.badgeElement = null;
     this.isExpanded = false;
     this.unreadCount = 0;
-    this.currentAgent = null;
   }
 
   /**
@@ -39,7 +38,7 @@ class CollapsibleChat {
     }
 
     this.setupEventListeners();
-    this.loadCurrentAgent();
+    this.syncSessionAgent();
 
     // Keyboard shortcut: Ctrl+J to toggle
     document.addEventListener('keydown', (e) => {
@@ -90,38 +89,20 @@ class CollapsibleChat {
     }
   }
 
-  /**
-   * Load current agent context
-   */
-  async loadCurrentAgent() {
-    try {
-      // Get current agent from session or API
-      const response = await fetch('/api/agents');
-      if (response.ok) {
-        const data = await response.json();
-        const agents = data.agents || [];
-        const currentName = data.current;
+  getSessionAgentName() {
+    return String(window.sessionManager?.getActiveSession?.()?.agent_name || '').trim();
+  }
 
-        // Find current agent or use first one
-        if (currentName) {
-          this.currentAgent = agents.find(a => a.name === currentName) || agents[0];
-        } else if (agents.length > 0) {
-          this.currentAgent = agents[0];
-        }
-
-        this.updateAgentDisplay();
-      }
-    } catch (error) {
-      console.error('CollapsibleChat: Failed to load agent', error);
-    }
+  syncSessionAgent() {
+    this.updateAgentDisplay(this.getSessionAgentName());
   }
 
   /**
    * Update agent name display
    */
-  updateAgentDisplay() {
-    if (this.agentNameElement && this.currentAgent) {
-      this.agentNameElement.textContent = this.currentAgent.name;
+  updateAgentDisplay(agentName = '') {
+    if (this.agentNameElement) {
+      this.agentNameElement.textContent = agentName || 'Assistant';
     }
   }
 
@@ -200,7 +181,7 @@ class CollapsibleChat {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           message: message,
-          agent_name: this.currentAgent?.name
+          agent_name: this.getSessionAgentName() || undefined
         })
       });
 
@@ -324,15 +305,6 @@ class CollapsibleChat {
     const div = document.createElement('div');
     div.textContent = str;
     return div.innerHTML;
-  }
-
-  /**
-   * Set the current agent for chat
-   * @param {Object} agent - Agent object
-   */
-  setAgent(agent) {
-    this.currentAgent = agent;
-    this.updateAgentDisplay();
   }
 
   /**

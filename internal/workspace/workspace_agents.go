@@ -1,39 +1,55 @@
 package workspace
 
 import (
+	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/johnjallday/ori-agent/internal/logger"
 )
 
+var ErrAgentAlreadyInWorkspace = errors.New("agent is already in workspace")
+
+func normalizeAgentNameKey(agentName string) string {
+	return strings.ToLower(strings.TrimSpace(agentName))
+}
+
+func canonicalAgentNodeID(agentName string) string {
+	return fmt.Sprintf("%s-node-1", strings.TrimSpace(agentName))
+}
+
+func buildAgentInstance(agentName string) AgentInstance {
+	trimmedName := strings.TrimSpace(agentName)
+	return AgentInstance{
+		ID:             uuid.New().String(),
+		Name:           trimmedName,
+		InstanceNumber: 1,
+		NodeID:         canonicalAgentNodeID(trimmedName),
+		CreatedAt:      time.Now(),
+	}
+}
+
 // AddAgent adds a new agent instance to the workspace
 func (w *Workspace) AddAgent(agentName string) error {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 
-	// Count existing instances of this agent type to get next instance number
-	instanceNumber := 1
-	for _, inst := range w.AgentInstances {
-		if inst.Name == agentName && inst.InstanceNumber >= instanceNumber {
-			instanceNumber = inst.InstanceNumber + 1
-		}
+	trimmedName := strings.TrimSpace(agentName)
+	if trimmedName == "" {
+		return fmt.Errorf("agent name is required")
 	}
 
-	// Create new agent instance with stable ID
-	instance := AgentInstance{
-		ID:             uuid.New().String(),
-		Name:           agentName,
-		InstanceNumber: instanceNumber,
-		NodeID:         fmt.Sprintf("%s-node-%d", agentName, instanceNumber),
-		CreatedAt:      time.Now(),
+	if w.hasAgent(trimmedName) {
+		return fmt.Errorf("%w: %s", ErrAgentAlreadyInWorkspace, trimmedName)
 	}
 
+	instance := buildAgentInstance(trimmedName)
 	w.AgentInstances = append(w.AgentInstances, instance)
 
 	// Also update legacy Agents array for backward compatibility
-	w.Agents = append(w.Agents, agentName)
+	w.Agents = append(w.Agents, trimmedName)
 
 	w.UpdatedAt = time.Now()
 	return nil
@@ -45,7 +61,7 @@ func (w *Workspace) RemoveAgent(agentName string) error {
 	defer w.mu.Unlock()
 
 	for i, agent := range w.Agents {
-		if agent == agentName {
+		if normalizeAgentNameKey(agent) == normalizeAgentNameKey(agentName) {
 			w.Agents = append(w.Agents[:i], w.Agents[i+1:]...)
 
 			// Clean up tasks assigned to this agent
@@ -138,7 +154,12 @@ func (w *Workspace) RemoveAgentInstance(instanceID string) error {
 // hasAgent checks if an agent is part of the workspace (NOT thread-safe, caller must hold lock)
 func (w *Workspace) hasAgent(agentName string) bool {
 	for _, agent := range w.Agents {
-		if agent == agentName {
+		if normalizeAgentNameKey(agent) == normalizeAgentNameKey(agentName) {
+			return true
+		}
+	}
+	for _, inst := range w.AgentInstances {
+		if normalizeAgentNameKey(inst.Name) == normalizeAgentNameKey(agentName) {
 			return true
 		}
 	}
@@ -162,24 +183,9 @@ func (w *Workspace) SyncAgentsFromTasks() int {
 	added := 0
 	for _, task := range w.Tasks {
 		if task.To != "" && task.To != "unassigned" && !w.hasAgent(task.To) {
-			// Add agent without lock (we already hold it)
-			instanceNumber := 1
-			for _, inst := range w.AgentInstances {
-				if inst.Name == task.To && inst.InstanceNumber >= instanceNumber {
-					instanceNumber = inst.InstanceNumber + 1
-				}
-			}
-
-			instance := AgentInstance{
-				ID:             fmt.Sprintf("%s-%d", task.To, instanceNumber),
-				Name:           task.To,
-				InstanceNumber: instanceNumber,
-				NodeID:         fmt.Sprintf("%s-node-%d", task.To, instanceNumber),
-				CreatedAt:      time.Now(),
-			}
-
+			instance := buildAgentInstance(task.To)
 			w.AgentInstances = append(w.AgentInstances, instance)
-			w.Agents = append(w.Agents, task.To)
+			w.Agents = append(w.Agents, strings.TrimSpace(task.To))
 			w.UpdatedAt = time.Now()
 			added++
 
@@ -188,4 +194,245 @@ func (w *Workspace) SyncAgentsFromTasks() int {
 	}
 
 	return added
+}
+
+// NormalizeAgentInstances collapses duplicate agent instances so each agent
+// profile appears at most once in a workspace. It rewrites old node and
+// instance references to the canonical single instance.
+func (w *Workspace) NormalizeAgentInstances() bool {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
+	changed := false
+
+	keptByName := make(map[string]AgentInstance)
+	normalizedInstances := make([]AgentInstance, 0, len(w.AgentInstances))
+	instanceIDMap := make(map[string]string, len(w.AgentInstances))
+	nodeIDMap := make(map[string]string, len(w.AgentInstances))
+
+	for _, inst := range w.AgentInstances {
+		name := strings.TrimSpace(inst.Name)
+		if name == "" {
+			changed = true
+			continue
+		}
+
+		key := normalizeAgentNameKey(name)
+		if canonical, exists := keptByName[key]; exists {
+			instanceIDMap[inst.ID] = canonical.ID
+			if oldNodeID := strings.TrimSpace(inst.NodeID); oldNodeID != "" {
+				nodeIDMap[oldNodeID] = canonical.NodeID
+			}
+			changed = true
+			continue
+		}
+
+		canonical := inst
+		if canonical.ID == "" {
+			canonical.ID = uuid.New().String()
+			changed = true
+		}
+		if canonical.Name != name {
+			canonical.Name = name
+			changed = true
+		}
+		if canonical.InstanceNumber != 1 {
+			canonical.InstanceNumber = 1
+			changed = true
+		}
+
+		expectedNodeID := canonicalAgentNodeID(name)
+		if oldNodeID := strings.TrimSpace(canonical.NodeID); oldNodeID != "" {
+			nodeIDMap[oldNodeID] = expectedNodeID
+		}
+		if canonical.NodeID != expectedNodeID {
+			canonical.NodeID = expectedNodeID
+			changed = true
+		}
+
+		instanceIDMap[inst.ID] = canonical.ID
+		keptByName[key] = canonical
+		normalizedInstances = append(normalizedInstances, canonical)
+	}
+
+	normalizedAgents := make([]string, 0, len(normalizedInstances))
+	seenAgents := make(map[string]struct{}, len(normalizedInstances))
+	for _, inst := range normalizedInstances {
+		key := normalizeAgentNameKey(inst.Name)
+		if _, exists := seenAgents[key]; exists {
+			continue
+		}
+		seenAgents[key] = struct{}{}
+		normalizedAgents = append(normalizedAgents, inst.Name)
+	}
+	if len(normalizedAgents) != len(w.Agents) {
+		changed = true
+	} else {
+		for i := range normalizedAgents {
+			if normalizeAgentNameKey(normalizedAgents[i]) != normalizeAgentNameKey(w.Agents[i]) {
+				changed = true
+				break
+			}
+		}
+	}
+
+	if len(normalizedInstances) != len(w.AgentInstances) {
+		changed = true
+	}
+
+	if len(keptByName) > 0 {
+		for i := range w.Tasks {
+			task := &w.Tasks[i]
+			if task.To == "" || task.To == "unassigned" {
+				continue
+			}
+			key := normalizeAgentNameKey(task.To)
+			canonical, exists := keptByName[key]
+			if !exists {
+				continue
+			}
+			if task.To != canonical.Name {
+				task.To = canonical.Name
+				changed = true
+			}
+
+			assignedNodeID := strings.TrimSpace(task.AssignedNodeID)
+			switch {
+			case assignedNodeID == "" || assignedNodeID == "unassigned":
+				task.AssignedNodeID = canonical.NodeID
+				changed = true
+			case nodeIDMap[assignedNodeID] != "" && nodeIDMap[assignedNodeID] != assignedNodeID:
+				task.AssignedNodeID = nodeIDMap[assignedNodeID]
+				changed = true
+			case assignedNodeID != canonical.NodeID:
+				task.AssignedNodeID = canonical.NodeID
+				changed = true
+			}
+		}
+	}
+
+	if len(w.StoreNodes) > 0 {
+		for i := range w.StoreNodes {
+			agentNodeID := strings.TrimSpace(w.StoreNodes[i].AgentNodeID)
+			if mapped := nodeIDMap[agentNodeID]; mapped != "" && mapped != agentNodeID {
+				w.StoreNodes[i].AgentNodeID = mapped
+				changed = true
+			}
+		}
+	}
+
+	if w.Layout != nil {
+		if len(w.Layout.AgentPositions) > 0 {
+			normalizedPositions := make(map[string]Position, len(w.Layout.AgentPositions))
+			for nodeID, pos := range w.Layout.AgentPositions {
+				mappedNodeID := nodeID
+				if mapped := nodeIDMap[nodeID]; mapped != "" {
+					mappedNodeID = mapped
+				}
+				if _, exists := normalizedPositions[mappedNodeID]; !exists {
+					normalizedPositions[mappedNodeID] = pos
+				}
+				if mappedNodeID != nodeID {
+					changed = true
+				}
+			}
+			w.Layout.AgentPositions = normalizedPositions
+		}
+
+		if len(w.Layout.WorkflowConnections) > 0 {
+			for i := range w.Layout.WorkflowConnections {
+				conn := &w.Layout.WorkflowConnections[i]
+				if mapped := nodeIDMap[strings.TrimSpace(conn.From)]; mapped != "" && mapped != conn.From {
+					conn.From = mapped
+					changed = true
+				}
+				if mapped := nodeIDMap[strings.TrimSpace(conn.To)]; mapped != "" && mapped != conn.To {
+					conn.To = mapped
+					changed = true
+				}
+			}
+		}
+	}
+
+	if len(w.AgentMCPAccess) > 0 {
+		merged := make(map[string]WorkspaceAgentMCPAccess, len(w.AgentMCPAccess))
+		for _, entry := range w.AgentMCPAccess {
+			canonicalID := strings.TrimSpace(entry.AgentInstanceID)
+			if mapped := instanceIDMap[canonicalID]; mapped != "" {
+				canonicalID = mapped
+			}
+			if canonicalID == "" {
+				changed = true
+				continue
+			}
+			current, exists := merged[canonicalID]
+			if !exists {
+				entry.AgentInstanceID = canonicalID
+				entry.EnabledBindingIDs = dedupeNormalizedValues(entry.EnabledBindingIDs)
+				merged[canonicalID] = cloneAccessEntry(entry)
+				continue
+			}
+			current.EnabledBindingIDs = dedupeNormalizedValues(append(current.EnabledBindingIDs, entry.EnabledBindingIDs...))
+			if entry.UpdatedAt.After(current.UpdatedAt) {
+				current.UpdatedAt = entry.UpdatedAt
+			}
+			merged[canonicalID] = current
+			changed = true
+		}
+		normalized := make([]WorkspaceAgentMCPAccess, 0, len(merged))
+		for _, inst := range normalizedInstances {
+			if entry, exists := merged[inst.ID]; exists {
+				normalized = append(normalized, entry)
+			}
+		}
+		if len(normalized) != len(w.AgentMCPAccess) {
+			changed = true
+		}
+		w.AgentMCPAccess = normalized
+	}
+
+	if len(w.AgentSkillAccess) > 0 {
+		merged := make(map[string]WorkspaceAgentSkillAccess, len(w.AgentSkillAccess))
+		for _, entry := range w.AgentSkillAccess {
+			canonicalID := strings.TrimSpace(entry.AgentInstanceID)
+			if mapped := instanceIDMap[canonicalID]; mapped != "" {
+				canonicalID = mapped
+			}
+			if canonicalID == "" {
+				changed = true
+				continue
+			}
+			current, exists := merged[canonicalID]
+			if !exists {
+				entry.AgentInstanceID = canonicalID
+				entry.EnabledBindingIDs = dedupeNormalizedValues(entry.EnabledBindingIDs)
+				merged[canonicalID] = cloneSkillAccessEntry(entry)
+				continue
+			}
+			current.EnabledBindingIDs = dedupeNormalizedValues(append(current.EnabledBindingIDs, entry.EnabledBindingIDs...))
+			if entry.UpdatedAt.After(current.UpdatedAt) {
+				current.UpdatedAt = entry.UpdatedAt
+			}
+			merged[canonicalID] = current
+			changed = true
+		}
+		normalized := make([]WorkspaceAgentSkillAccess, 0, len(merged))
+		for _, inst := range normalizedInstances {
+			if entry, exists := merged[inst.ID]; exists {
+				normalized = append(normalized, entry)
+			}
+		}
+		if len(normalized) != len(w.AgentSkillAccess) {
+			changed = true
+		}
+		w.AgentSkillAccess = normalized
+	}
+
+	if changed {
+		w.AgentInstances = normalizedInstances
+		w.Agents = normalizedAgents
+		w.UpdatedAt = time.Now()
+	}
+
+	return changed
 }

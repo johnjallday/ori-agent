@@ -1560,6 +1560,18 @@
   align-items: center;
 }
 
+.hub-session-id {
+  font-family: 'SF Mono', 'Menlo', 'Monaco', 'Consolas', monospace;
+  font-size: 0.6rem;
+  color: var(--text-secondary);
+  opacity: 0.6;
+  max-width: 8ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: default;
+}
+
 .hub-session-agent {
   background: rgba(59, 130, 246, 0.12);
   color: #3b82f6;
@@ -2719,35 +2731,30 @@
 
 .chat-panel {
   position: fixed;
-  top: 76px;
-  right: 0;
-  width: 520px;
+  top: 50%;
+  left: 50%;
+  width: 720px;
   min-width: 360px;
   max-width: 80vw;
-  height: calc(100vh - 76px);
+  height: calc(100vh - 120px);
+  max-height: 800px;
   background: var(--bg-primary);
-  border-left: 1px solid var(--border-color);
-  border-radius: var(--radius-xl) 0 0 var(--radius-xl);
-  box-shadow: -16px 0 40px rgba(0, 0, 0, 0.12);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-xl);
+  box-shadow: 0 24px 48px rgba(0, 0, 0, 0.2);
   overflow: hidden;
-  transform: translateX(100%);
-  transition: transform 0.25s ease, width 0s;
+  transform: translate(-50%, -50%) scale(0.95);
+  opacity: 0;
+  transition: transform 0.25s ease, opacity 0.25s ease;
   z-index: 10500;
   display: flex;
   flex-direction: column;
+  pointer-events: none;
 }
 
-/* Resize handle on left edge */
+/* Resize handle (hidden for centered modal) */
 .chat-panel-resize {
-  position: absolute;
-  left: 0;
-  top: 0;
-  bottom: 0;
-  width: 6px;
-  cursor: ew-resize;
-  background: transparent;
-  z-index: 10;
-  transition: background 0.15s ease;
+  display: none;
 }
 
 .chat-panel-resize:hover,
@@ -2784,7 +2791,9 @@
 }
 
 body.chat-panel-open .chat-panel {
-  transform: translateX(0);
+  transform: translate(-50%, -50%) scale(1);
+  opacity: 1;
+  pointer-events: auto;
 }
 
 body.chat-panel-open .chat-panel-backdrop {
@@ -2807,6 +2816,17 @@ body.chat-panel-open .chat-panel-backdrop {
   gap: 0.5rem;
   font-weight: 600;
   color: var(--text-primary);
+}
+
+.chat-panel-session-id {
+  font-size: 0.7rem;
+  font-weight: 400;
+  color: var(--text-muted);
+  background: var(--bg-secondary);
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-family: monospace;
+  user-select: all;
 }
 
 .chat-panel-close {
@@ -2938,7 +2958,10 @@ body.chat-panel-open .chat-panel-backdrop {
   .chat-panel {
     width: 100%;
     height: 100vh;
-    top: 0;
+    max-height: 100vh;
+    top: 50%;
+    left: 50%;
+    border-radius: 0;
   }
 
   .chat-panel-content {

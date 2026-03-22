@@ -58,17 +58,12 @@ type testAgentStore struct {
 
 var _ store.Store = (*testAgentStore)(nil)
 
-func (s *testAgentStore) ListAgents() ([]string, string) {
+func (s *testAgentStore) ListAgents() []string {
 	names := make([]string, 0, len(s.agents))
 	for name := range s.agents {
 		names = append(names, name)
 	}
-	return names, s.current
-}
-
-func (s *testAgentStore) SetCurrentAgent(name string) error {
-	s.current = name
-	return nil
+	return names
 }
 
 func (s *testAgentStore) CreateAgent(string, *store.CreateAgentConfig) error {

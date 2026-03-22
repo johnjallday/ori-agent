@@ -72,7 +72,7 @@ func (h *Handler) HandleUpdatePlugin(w http.ResponseWriter, r *http.Request) {
 	logger.Debug("Update request for plugin", logger.Fields{"plugin": pluginName})
 
 	// Get current agent (assuming single agent for now, or get from query param)
-	agentNames, _ := h.store.ListAgents()
+	agentNames := h.store.ListAgents()
 	if len(agentNames) == 0 {
 		orihttp.InternalError(w, "No agents found")
 		// Find the plugin in agents
@@ -258,7 +258,7 @@ func (h *Handler) HandleRollbackPlugin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	agentNames, _ := h.store.ListAgents()
+	agentNames := h.store.ListAgents()
 	if len(agentNames) == 0 {
 		orihttp.InternalError(w, "No agents found")
 		return
@@ -325,7 +325,7 @@ func (h *Handler) HandleCheckUpdates(w http.ResponseWriter, r *http.Request) {
 
 	updates := []map[string]interface{}{}
 
-	agentNames, _ := h.store.ListAgents()
+	agentNames := h.store.ListAgents()
 
 	// Track which plugins we've checked (to avoid duplicates)
 	checkedPlugins := make(map[string]bool)

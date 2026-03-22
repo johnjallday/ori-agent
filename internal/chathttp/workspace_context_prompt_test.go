@@ -152,6 +152,30 @@ func TestBuildWorkspaceSnapshotPrompt_EmptyWorkspace(t *testing.T) {
 	}
 }
 
+func TestBuildWorkspaceSnapshotPrompt_NonToolProviderOmitsToolCallInstructions(t *testing.T) {
+	wsStore := workspace.NewInMemoryStore()
+	ws := workspace.NewWorkspace(workspace.CreateWorkspaceParams{Name: "Codex Workspace"})
+	if err := wsStore.Save(ws); err != nil {
+		t.Fatalf("failed to save workspace: %v", err)
+	}
+
+	prompt := buildWorkspaceSnapshotPromptForToolCapability(context.Background(), normalizedChatRouteContext{
+		Surface:     "workspace_detail",
+		PagePath:    "/workspaces/" + ws.ID,
+		WorkspaceID: ws.ID,
+	}, wsStore, nil, false)
+
+	if !strings.Contains(prompt, "This route includes workspace snapshot context only.") {
+		t.Fatalf("expected non-tool provider warning, got %q", prompt)
+	}
+	if strings.Contains(prompt, "workspace_save_note") {
+		t.Fatalf("expected tool list to be omitted for non-tool providers, got %q", prompt)
+	}
+	if strings.Contains(prompt, "tool_call") {
+		t.Fatalf("expected tool-call instructions to be omitted for non-tool providers, got %q", prompt)
+	}
+}
+
 func TestBuildWorkspaceRuntimeSystemPrompt_RouteOnlyWhenWorkspaceMissing(t *testing.T) {
 	routeCtx := normalizedChatRouteContext{
 		Surface:     "workspace_detail",

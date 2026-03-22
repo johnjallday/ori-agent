@@ -12,16 +12,23 @@ import (
 	orihttp "github.com/johnjallday/ori-agent/internal/http"
 	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/session"
+	"github.com/johnjallday/ori-agent/internal/workspace"
 )
 
 // Handler handles session-related HTTP requests.
 type Handler struct {
-	store session.HybridStore
+	store          session.HybridStore
+	workspaceStore *workspace.FileStore // optional folder-based workspace store
 }
 
 // New creates a new session handler.
 func New(store session.HybridStore) *Handler {
 	return &Handler{store: store}
+}
+
+// SetWorkspaceStore sets the folder-based workspace store for enhanced workspace operations.
+func (h *Handler) SetWorkspaceStore(ws *workspace.FileStore) {
+	h.workspaceStore = ws
 }
 
 // handleSessions routes requests to /api/sessions.
@@ -92,11 +99,6 @@ func (h *Handler) createSession(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if !orihttp.ParseJSONBody(w, r, &req) {
-		return
-	}
-
-	if req.AgentName == "" {
-		_ = orihttp.RespondBadRequest(w, "agent_name is required")
 		return
 	}
 

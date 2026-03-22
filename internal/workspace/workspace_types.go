@@ -41,6 +41,9 @@ type Workspace struct {
 	ID                   string                      `json:"id"`
 	Name                 string                      `json:"name"`
 	Description          string                      `json:"description,omitempty"`
+	FolderSlug           string                      `json:"folder_slug,omitempty"`     // Filesystem folder name (derived from Name via Slugify)
+	ProjectPath          string                      `json:"project_path,omitempty"`    // Relative path to associated project code directory
+	ParentID             string                      `json:"parent_id,omitempty"`       // ID of parent workspace (empty for root-level)
 	Agents               []string                    `json:"agents,omitempty"`          // Deprecated: Use AgentInstances instead. Auto-migrated by MigrateToAgentInstances().
 	AgentInstances       []AgentInstance             `json:"agent_instances,omitempty"` // NEW: Stable agent instances with persistent IDs
 	SharedData           map[string]interface{}      `json:"shared_data"`
@@ -55,6 +58,8 @@ type Workspace struct {
 	DirectoryReferences  []DirectoryReference        `json:"directory_references,omitempty"`
 	MCPBindings          []WorkspaceMCPBinding       `json:"mcp_bindings,omitempty"`
 	AgentMCPAccess       []WorkspaceAgentMCPAccess   `json:"agent_mcp_access,omitempty"`
+	SkillBindings        []WorkspaceSkillBinding     `json:"skill_bindings,omitempty"`
+	AgentSkillAccess     []WorkspaceAgentSkillAccess `json:"agent_skill_access,omitempty"`
 	Workflows            map[string]Workflow         `json:"workflows,omitempty"`
 	Layout               *CanvasLayout               `json:"layout,omitempty"` // Canvas layout (positions of tasks and agents)
 	Status               WorkspaceStatus             `json:"status"`
@@ -369,6 +374,26 @@ type WorkspaceMCPBinding struct {
 // WorkspaceAgentMCPAccess narrows which workspace MCP bindings an agent instance
 // may use. When no access entry exists for an instance, all enabled bindings are allowed.
 type WorkspaceAgentMCPAccess struct {
+	AgentInstanceID   string    `json:"agent_instance_id"`
+	EnabledBindingIDs []string  `json:"enabled_binding_ids,omitempty"`
+	UpdatedAt         time.Time `json:"updated_at,omitempty"`
+}
+
+// WorkspaceSkillBinding represents a skill binding owned by the workspace.
+// SkillName maps to a skill known to the SkillManager (resolved by name at runtime).
+type WorkspaceSkillBinding struct {
+	ID        string                 `json:"id"`
+	SkillName string                 `json:"skill_name"`
+	Enabled   bool                   `json:"enabled"`
+	Trusted   bool                   `json:"trusted"`
+	Config    map[string]interface{} `json:"config,omitempty"`
+	CreatedAt time.Time              `json:"created_at,omitempty"`
+	UpdatedAt time.Time              `json:"updated_at,omitempty"`
+}
+
+// WorkspaceAgentSkillAccess narrows which workspace skill bindings an agent instance
+// may use. When no access entry exists for an instance, all enabled bindings are allowed.
+type WorkspaceAgentSkillAccess struct {
 	AgentInstanceID   string    `json:"agent_instance_id"`
 	EnabledBindingIDs []string  `json:"enabled_binding_ids,omitempty"`
 	UpdatedAt         time.Time `json:"updated_at,omitempty"`

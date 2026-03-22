@@ -109,7 +109,7 @@ func (h *AutoClassifyHandler) HandleAutoClassify(w http.ResponseWriter, r *http.
 	}
 
 	// Get all agents
-	agents, _ := h.agentStore.ListAgents()
+	agents := h.agentStore.ListAgents()
 
 	// Get the configured system model
 	systemProvider, systemModel := h.configManager.GetSystemModel()

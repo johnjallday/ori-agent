@@ -262,6 +262,13 @@ func TestAgentMetadata_JSONSerialization(t *testing.T) {
 		Tags:        []string{"test", "development"},
 		AvatarColor: "#3498db",
 		Favorite:    true,
+		RoutingProfile: &AgentRoutingProfile{
+			MatchPhrases:    []string{"open my latest reaper project"},
+			ExampleRequests: []string{"render stems from yesterday's session"},
+			Domains:         []string{"reaper", "audio"},
+			ExternalSystems: []string{"reaper"},
+			SideEffects:     "local_app",
+		},
 	}
 
 	// Serialize
@@ -291,6 +298,15 @@ func TestAgentMetadata_JSONSerialization(t *testing.T) {
 
 	if decoded.Favorite != metadata.Favorite {
 		t.Error("Favorite mismatch after serialization")
+	}
+	if decoded.RoutingProfile == nil {
+		t.Fatal("RoutingProfile missing after serialization")
+	}
+	if len(decoded.RoutingProfile.MatchPhrases) != len(metadata.RoutingProfile.MatchPhrases) {
+		t.Error("RoutingProfile.MatchPhrases length mismatch after serialization")
+	}
+	if decoded.RoutingProfile.SideEffects != metadata.RoutingProfile.SideEffects {
+		t.Error("RoutingProfile.SideEffects mismatch after serialization")
 	}
 }
 

@@ -159,7 +159,7 @@ func (h *RegistryHandler) PluginRegistryHandler(w http.ResponseWriter, r *http.R
 					entryPath = abs
 				}
 				// skip if already loaded for current agent (avoid duplicate plugin.Open errors)
-				_, current := h.store.ListAgents()
+				current := store.FirstAgentName(h.store)
 				ag, ok := h.store.GetAgent(current)
 				if ok {
 					for _, lp := range ag.Plugins {
@@ -196,7 +196,7 @@ func (h *RegistryHandler) PluginRegistryHandler(w http.ResponseWriter, r *http.R
 		def := tool.Definition()
 
 		// attach to current agent
-		_, current := h.store.ListAgents()
+		current := store.FirstAgentName(h.store)
 
 		// Set agent context for plugins that support it
 		// Construct the agent-specific path since agentStorePath is now the index file
@@ -319,7 +319,7 @@ func (h *RegistryHandler) PluginRegistryHandler(w http.ResponseWriter, r *http.R
 		}
 
 		// Also unload the plugin from current agent if it's loaded
-		_, current := h.store.ListAgents()
+		current := store.FirstAgentName(h.store)
 		ag, ok := h.store.GetAgent(current)
 		if ok && ag.Plugins != nil {
 			// Clean up RPC plugin if it is one

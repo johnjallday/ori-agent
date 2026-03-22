@@ -19,9 +19,8 @@ func (ch *CommandHandler) HandleHelp(w http.ResponseWriter, r *http.Request) {
 **System Commands:**
 - **/help** - Show this help message
 - **/version** - Show application version and build info
-- **/agent** - Display agent status dashboard
+- **/agent** - Display Assistant/session status
 - **/agents** - List all available agents
-- **/switch <agent-name>** - Switch to a different agent
 - **/tools** - List all available plugin tools and operations
 - **/skills** - List all available skills
 - **/openapp <application-name>** - Open a desktop app directly (e.g., Obsidian)
@@ -34,15 +33,15 @@ func (ch *CommandHandler) HandleHelp(w http.ResponseWriter, r *http.Request) {
 - **/workspace all** - Show all tasks (any status)
 
 **Agent Management:**
-- Use **/agent** to see current agent status and available agents
+- Use **/agent** to see Assistant/session status and execution details
 - Use **/agents** to see a list of all configured agents
-- Use **/switch** to change between configured agents
-- Each agent can have different plugins and configurations
+- Assistant sessions run without a global current agent
+- Specialists can still have different plugins and configurations
 
 **Plugin Tools:**
 - Use **/tools** to see all available plugin operations
 - Each tool shows available options and parameters
-- Tools are specific to your current agent configuration
+- Tools are specific to the Assistant runtime or pinned specialist for this session
 - Use **/tool** to execute tools directly (faster, no LLM overhead)
 
 **Skills:**
@@ -57,7 +56,6 @@ The **/tool** command allows you to call tools directly without LLM decision-mak
 
 **Tips:**
 - Commands must start with **/** (forward slash)
-- Agent names are case-sensitive when switching
 - Use the web interface to configure plugins and agents
 - Workspaces allow multiple agents to collaborate on complex tasks
 - Direct tool calls bypass the LLM for instant execution

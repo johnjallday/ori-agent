@@ -330,6 +330,13 @@ func TestCompleteAgentLifecycle(t *testing.T) {
 		updateBody := map[string]interface{}{
 			"description": "Updated description",
 			"tags":        []string{"test", "updated"},
+			"routing_profile": map[string]interface{}{
+				"match_phrases":    []string{"open my latest reaper project"},
+				"example_requests": []string{"render stems from yesterday's session"},
+				"domains":          []string{"reaper", "audio"},
+				"external_systems": []string{"reaper"},
+				"side_effects":     "local_app",
+			},
 		}
 
 		rr := ts.doRequest(t, http.MethodPatch, "/api/agents?name=lifecycle-agent", updateBody)
@@ -343,6 +350,13 @@ func TestCompleteAgentLifecycle(t *testing.T) {
 		metadata := agent["metadata"].(map[string]interface{})
 		if metadata["description"] != "Updated description" {
 			t.Errorf("Description not updated, got %v", metadata["description"])
+		}
+		routingProfile, ok := metadata["routing_profile"].(map[string]interface{})
+		if !ok {
+			t.Fatal("Expected routing_profile in metadata response")
+		}
+		if routingProfile["side_effects"] != "local_app" {
+			t.Errorf("Expected side_effects local_app, got %v", routingProfile["side_effects"])
 		}
 	})
 
@@ -861,4 +875,26 @@ func TestReservedSystemAssistantProtection(t *testing.T) {
 		})
 		assertStatus(t, rr, http.StatusBadRequest)
 	})
+}
+
+func TestPutAgentSwitchIsDeprecated(t *testing.T) {
+	ts := setupTestServer(t)
+	defer ts.cleanup()
+
+	createTestAgent(t, ts, "reviewer", "general")
+
+	rr := ts.doRequest(t, http.MethodPut, "/api/agents?name=reviewer", nil)
+	assertStatus(t, rr, http.StatusOK)
+
+	var payload map[string]interface{}
+	decodeResponse(t, rr, &payload)
+	if payload["deprecated"] != true {
+		t.Fatalf("expected deprecated=true, got %#v", payload["deprecated"])
+	}
+	if payload["success"] != false {
+		t.Fatalf("expected success=false, got %#v", payload["success"])
+	}
+	if !strings.Contains(payload["message"].(string), "deprecated") {
+		t.Fatalf("expected deprecation message, got %#v", payload["message"])
+	}
 }

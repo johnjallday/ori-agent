@@ -38,3 +38,30 @@ func TestInjectRuntimeSystemPrompt_AppendsWhenLastIsNotUser(t *testing.T) {
 		t.Fatalf("expected runtime system message to be appended")
 	}
 }
+
+func TestSetOpenAIChatTemperature_SkipsReasoningModels(t *testing.T) {
+	params := openai.ChatCompletionNewParams{
+		Model: openai.ChatModel("gpt-5-nano"),
+	}
+
+	setOpenAIChatTemperature(&params, "gpt-5-nano", 0)
+
+	if params.Temperature.Valid() {
+		t.Fatalf("expected temperature to be omitted for gpt-5 reasoning models")
+	}
+}
+
+func TestSetOpenAIChatTemperature_SetsNonReasoningModels(t *testing.T) {
+	params := openai.ChatCompletionNewParams{
+		Model: openai.ChatModel("gpt-4o-mini"),
+	}
+
+	setOpenAIChatTemperature(&params, "gpt-4o-mini", 0.2)
+
+	if !params.Temperature.Valid() {
+		t.Fatalf("expected temperature to be set for non-reasoning models")
+	}
+	if params.Temperature.Value != 0.2 {
+		t.Fatalf("expected temperature 0.2, got %v", params.Temperature.Value)
+	}
+}

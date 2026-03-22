@@ -6,8 +6,6 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/openai/openai-go/v3"
-
 	"github.com/johnjallday/ori-agent/internal/llm"
 	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/types"
@@ -31,20 +29,15 @@ func (h *Handler) handleCodexChat(w http.ResponseWriter, r *http.Request, ag *re
 		return
 	}
 
-	var messages []llm.Message
 	systemPrompt := composeRuntimeSystemPrompt(
-		h.buildSystemPromptWithSkills(
-			ag.Agent, agentName,
+		h.buildChatSystemPrompt(
+			ag, agentName,
 			"You are a helpful assistant. Be concise and direct in your responses.",
+			nil,
 		),
 		runtimeSystemPrompt,
 	)
-
-	if len(images) > 0 {
-		messages = append(messages, llm.NewUserMessageWithImages(userMessage, images))
-	} else {
-		messages = append(messages, llm.NewUserMessage(userMessage))
-	}
+	messages := buildLLMConversationMessages(ag.Messages, userMessage, images)
 
 	start := time.Now()
 	resp, err := provider.Chat(ctx, llm.ChatRequest{
@@ -59,7 +52,6 @@ func (h *Handler) handleCodexChat(w http.ResponseWriter, r *http.Request, ag *re
 	}
 
 	text := getResponseText(resp.Content)
-	ag.Messages = append(ag.Messages, openai.AssistantMessage(text))
 
 	logger.Debug("Codex chat response completed", logger.Fields{"duration": time.Since(start)})
 	_ = h.persistAgent(agentName, ag.Agent)

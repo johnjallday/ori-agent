@@ -12,8 +12,7 @@ import (
 
 type emptyAgentStore struct{}
 
-func (s *emptyAgentStore) ListAgents() (names []string, current string) { return []string{}, "" }
-func (s *emptyAgentStore) SetCurrentAgent(name string) error            { return nil }
+func (s *emptyAgentStore) ListAgents() []string { return []string{} }
 func (s *emptyAgentStore) CreateAgent(name string, config *store.CreateAgentConfig) error {
 	return nil
 }

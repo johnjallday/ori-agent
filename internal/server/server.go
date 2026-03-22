@@ -92,7 +92,7 @@ func (s *Server) Shutdown() {
 func (s *Server) cleanupPlugins() {
 	logger.Debug("Cleaning up plugins", logger.Fields{})
 
-	agentNames, _ := s.Storage.ListAgents()
+	agentNames := s.Storage.ListAgents()
 	cleanedCount := 0
 	errorCount := 0
 
@@ -150,7 +150,21 @@ func (s *Server) privateCapabilitiesSnapshot() privateservices.Capabilities {
 	return s.Integration.PrivateServices.Capabilities()
 }
 
-// prepareBasePageData prepares common page data with theme and current agent
+func resolveDefaultPageAgentName(storage *StorageSystemFacade) string {
+	if storage == nil {
+		return ""
+	}
+	if agent, found := storage.GetAgentByName("Ori"); found && agent != nil {
+		return "Ori"
+	}
+	names := storage.ListAgents()
+	if len(names) == 0 {
+		return ""
+	}
+	return strings.TrimSpace(names[0])
+}
+
+// prepareBasePageData prepares common page data with theme and Assistant context.
 func (s *Server) prepareBasePageData(pageName string) web.TemplateData {
 	data := web.GetDefaultData()
 	data.CurrentPage = pageName
@@ -162,16 +176,11 @@ func (s *Server) prepareBasePageData(pageName string) web.TemplateData {
 	data.Extra["TokenPayoutsEnabled"] = caps.TokenPayouts
 	data.Extra["EvolutionEnabled"] = featureflags.EvolutionEnabled()
 
-	if agents, current := s.Storage.ListAgents(); len(agents) > 0 {
-		currentAgentName := current
-		if currentAgentName == "" {
-			currentAgentName = agents[0]
-		}
-		if agent, found := s.Storage.GetAgentByName(currentAgentName); found && agent != nil {
-			data.CurrentAgent = currentAgentName
-			if agent.Settings.Model != "" {
-				data.Model = agent.Settings.Model
-			}
+	defaultAgentName := resolveDefaultPageAgentName(s.Storage)
+	data.Extra["DefaultAgentName"] = defaultAgentName
+	if defaultAgentName != "" {
+		if agent, found := s.Storage.GetAgentByName(defaultAgentName); found && agent != nil && agent.Settings.Model != "" {
+			data.Model = agent.Settings.Model
 		}
 	}
 

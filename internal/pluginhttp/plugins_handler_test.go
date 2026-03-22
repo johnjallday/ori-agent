@@ -30,16 +30,11 @@ func newTestStore() *testStore {
 	}
 }
 
-func (ts *testStore) ListAgents() (names []string, current string) {
+func (ts *testStore) ListAgents() (names []string) {
 	for name := range ts.agents {
 		names = append(names, name)
 	}
-	return names, ts.currentAgent
-}
-
-func (ts *testStore) SetCurrentAgent(name string) error {
-	ts.currentAgent = name
-	return nil
+	return names
 }
 
 func (ts *testStore) CreateAgent(name string, config *store.CreateAgentConfig) error {

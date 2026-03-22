@@ -33,7 +33,11 @@ const (
 )
 
 func (h *Handler) buildRuntimeSystemPrompt(ctx context.Context, routeCtx normalizedChatRouteContext) string {
-	return buildWorkspaceRuntimeSystemPrompt(ctx, routeCtx, h.workspaceStore, h.sessionStore)
+	return h.buildRuntimeSystemPromptForToolCapability(ctx, routeCtx, true)
+}
+
+func (h *Handler) buildRuntimeSystemPromptForToolCapability(ctx context.Context, routeCtx normalizedChatRouteContext, toolCallable bool) string {
+	return buildWorkspaceRuntimeSystemPromptForToolCapability(ctx, routeCtx, h.workspaceStore, h.sessionStore, toolCallable)
 }
 
 func buildWorkspaceRuntimeSystemPrompt(
@@ -42,8 +46,18 @@ func buildWorkspaceRuntimeSystemPrompt(
 	workspaceStore workspaceSnapshotWorkspaceStore,
 	sessionStore workspaceSnapshotSessionStore,
 ) string {
+	return buildWorkspaceRuntimeSystemPromptForToolCapability(ctx, routeCtx, workspaceStore, sessionStore, true)
+}
+
+func buildWorkspaceRuntimeSystemPromptForToolCapability(
+	ctx context.Context,
+	routeCtx normalizedChatRouteContext,
+	workspaceStore workspaceSnapshotWorkspaceStore,
+	sessionStore workspaceSnapshotSessionStore,
+	toolCallable bool,
+) string {
 	routePrompt := buildRouteContextSystemPrompt(routeCtx)
-	workspacePrompt := buildWorkspaceSnapshotPrompt(ctx, routeCtx, workspaceStore, sessionStore)
+	workspacePrompt := buildWorkspaceSnapshotPromptForToolCapability(ctx, routeCtx, workspaceStore, sessionStore, toolCallable)
 	if workspacePrompt == "" {
 		return routePrompt
 	}
@@ -58,6 +72,16 @@ func buildWorkspaceSnapshotPrompt(
 	routeCtx normalizedChatRouteContext,
 	workspaceStore workspaceSnapshotWorkspaceStore,
 	sessionStore workspaceSnapshotSessionStore,
+) string {
+	return buildWorkspaceSnapshotPromptForToolCapability(ctx, routeCtx, workspaceStore, sessionStore, true)
+}
+
+func buildWorkspaceSnapshotPromptForToolCapability(
+	ctx context.Context,
+	routeCtx normalizedChatRouteContext,
+	workspaceStore workspaceSnapshotWorkspaceStore,
+	sessionStore workspaceSnapshotSessionStore,
+	toolCallable bool,
 ) string {
 	if !shouldAttachWorkspaceSnapshot(routeCtx) || workspaceStore == nil {
 		return ""
@@ -188,10 +212,46 @@ func buildWorkspaceSnapshotPrompt(
 		}
 	}
 
-	lines = append(lines,
-		"",
-		"Treat this snapshot as current workspace state. If deeper detail is needed, request or fetch it; do not invent missing specifics.",
-	)
+	lines = append(lines, "", "Treat this snapshot as current workspace state.")
+
+	if toolCallable {
+		lines = append(lines,
+			"",
+			"## Workspace Tools",
+			"You have workspace tools that you MUST use to interact with this workspace:",
+			"",
+			"Context tools (use proactively to answer questions better):",
+			"- workspace_notes: list or read full note content by ID",
+			"- workspace_save_note: create or update a note",
+			"- workspace_tasks: list tasks with optional status filter",
+			"- workspace_sessions: list sessions in this workspace",
+			"- workspace_session_detail: read messages from a specific session",
+			"- workspace_files: list attached files",
+			"- workspace_directories: list referenced directories",
+			"",
+			"Management tools:",
+			"- workspace_manage_agents: list/add/remove workspace agents",
+			"- workspace_manage_mcp: list/attach/detach MCP server bindings",
+			"- workspace_manage_skills: list/attach/detach skill bindings",
+			"",
+			"CRITICAL behavior rules:",
+			"- You MUST use function calls (tool_call) to interact with the workspace. NEVER just say you did something — actually call the tool.",
+			"- WRONG: Responding with text that says 'I have saved this as a note'. RIGHT: Making a workspace_save_note function call, then confirming after the call succeeds.",
+			"- When the user asks to save, store, or remember something, emit a workspace_save_note tool_call immediately.",
+			"- When you generate useful content (lists, recommendations, plans, research), emit a workspace_save_note tool_call to save it, then tell the user you did after the call returns.",
+			"- When answering questions, check workspace_notes and workspace_sessions first for existing context.",
+			"- When the user confirms a suggestion you made (e.g. says 'yes', 'do it', 'go ahead'), execute the action immediately using the appropriate tool_call.",
+			"- NEVER claim you saved, created, or modified something without actually making the corresponding function call.",
+		)
+	} else {
+		lines = append(lines,
+			"",
+			"## Workspace Access",
+			"This route includes workspace snapshot context only. Live workspace tool calls are unavailable in this provider path.",
+			"- Do not claim you saved, created, updated, or fetched workspace data unless the server explicitly did it for you.",
+			"- If the user asks to modify workspace data, explain the limitation briefly unless the server handles the action directly.",
+		)
+	}
 
 	return strings.Join(lines, "\n")
 }

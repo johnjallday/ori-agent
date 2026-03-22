@@ -6,8 +6,6 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/openai/openai-go/v3"
-
 	"github.com/johnjallday/ori-agent/internal/llm"
 	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/types"
@@ -28,32 +26,28 @@ func (h *Handler) handleClaudeChat(w http.ResponseWriter, r *http.Request, ag *r
 	}
 
 	// Build message list
-	var messages []llm.Message
 	systemPrompt := composeRuntimeSystemPrompt(
-		h.buildSystemPromptWithSkills(
-			ag.Agent, agentName,
+		h.buildChatSystemPrompt(
+			ag, agentName,
 			"You are a helpful assistant with access to tools. Use tools when they provide a more accurate answer.",
+			tools,
 		),
 		runtimeSystemPrompt,
 	)
-	messages = append(messages, llm.NewSystemMessage(systemPrompt))
-
-	// Use message with images if images are present
+	messages := buildLLMConversationMessages(ag.Messages, userMessage, images)
 	if len(images) > 0 {
-		messages = append(messages, llm.NewUserMessageWithImages(userMessage, images))
 		logger.Info("Claude chat with images", logger.Fields{"image_count": len(images)})
-	} else {
-		messages = append(messages, llm.NewUserMessage(userMessage))
 	}
 
 	// Call Claude
 	start := time.Now()
 	resp, err := provider.Chat(ctx, llm.ChatRequest{
-		Model:       ag.Settings.Model,
-		Messages:    messages,
-		Tools:       tools,
-		Temperature: ag.Settings.Temperature,
-		MaxTokens:   4000,
+		Model:        ag.Settings.Model,
+		Messages:     messages,
+		SystemPrompt: systemPrompt,
+		Tools:        tools,
+		Temperature:  ag.Settings.Temperature,
+		MaxTokens:    4000,
 	})
 	if err != nil {
 		writeErrorResponse(w, err.Error())
@@ -65,13 +59,12 @@ func (h *Handler) handleClaudeChat(w http.ResponseWriter, r *http.Request, ag *r
 
 	// Tool-call branch
 	if len(resp.ToolCalls) > 0 {
-		h.handleClaudeToolCalls(w, ctx, ag, agentName, messages, resp, tools, files, provider, baseCtx, start, sessionID, userMessage, plannerDecision)
+		h.handleClaudeToolCalls(w, ctx, ag, agentName, messages, resp, tools, files, provider, baseCtx, start, sessionID, userMessage, plannerDecision, systemPrompt)
 		return
 	}
 
 	// Plain answer path (no tool calls)
 	text := getResponseText(resp.Content)
-	ag.Messages = append(ag.Messages, openai.AssistantMessage(text))
 
 	logger.Debug("Claude chat response completed", logger.Fields{"duration": time.Since(start)})
 	_ = h.persistAgent(agentName, ag.Agent)
@@ -102,6 +95,7 @@ func (h *Handler) handleClaudeToolCalls(
 	sessionID string,
 	userMessage string,
 	plannerDecision *types.PlannerDecision,
+	systemPrompt string,
 ) {
 	logger.Info("Claude requested tool calls", logger.Fields{"count": len(resp.ToolCalls)})
 
@@ -114,7 +108,6 @@ func (h *Handler) handleClaudeToolCalls(
 				assistantMsg := llm.NewAssistantMessage(content)
 				assistantMsg.ToolCalls = toolCalls
 				messages = append(messages, assistantMsg)
-				ag.Messages = append(ag.Messages, openai.AssistantMessage(content))
 			},
 			ExecuteToolCalls: func(toolCalls []llm.ToolCall) ExecuteToolCallsResult {
 				return h.executeToolCallsCommonWithSession(baseCtx, ag, agentName, toolCalls, files, sessionID)
@@ -125,16 +118,16 @@ func (h *Handler) handleClaudeToolCalls(
 						break
 					}
 					messages = append(messages, llm.NewToolMessage(tc.ID, execResult.Results[i].Result))
-					ag.Messages = append(ag.Messages, openai.ToolMessage(execResult.Results[i].Result, tc.ID))
 				}
 			},
 			RequestNextResponse: func() (string, []llm.ToolCall, error) {
 				resp2, err := provider.Chat(ctx, llm.ChatRequest{
-					Model:       ag.Settings.Model,
-					Messages:    append(messages, llm.NewSystemMessage(getFollowUpSystemPrompt())),
-					Tools:       tools,
-					Temperature: ag.Settings.Temperature,
-					MaxTokens:   4000,
+					Model:        ag.Settings.Model,
+					Messages:     messages,
+					SystemPrompt: systemPrompt + "\n\n" + getFollowUpSystemPrompt(),
+					Tools:        tools,
+					Temperature:  ag.Settings.Temperature,
+					MaxTokens:    4000,
 				})
 				if err != nil {
 					return "", nil, err
@@ -152,7 +145,6 @@ func (h *Handler) handleClaudeToolCalls(
 	if loopResult.HasStructuredResult {
 		finalText = loopResult.FinalContent
 	}
-	ag.Messages = append(ag.Messages, openai.AssistantMessage(finalText))
 
 	logger.Debug("Claude chat with tool completed", logger.Fields{"duration": time.Since(start)})
 	_ = h.persistAgent(agentName, ag.Agent)

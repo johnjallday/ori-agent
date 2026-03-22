@@ -6,8 +6,6 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/openai/openai-go/v3"
-
 	orihttp "github.com/johnjallday/ori-agent/internal/http"
 	"github.com/johnjallday/ori-agent/internal/llm"
 	"github.com/johnjallday/ori-agent/internal/logger"
@@ -28,34 +26,28 @@ func (h *Handler) handleOllamaChat(w http.ResponseWriter, r *http.Request, ag *r
 		return
 	}
 
-	// Build message list
-	var messages []llm.Message
-
 	systemPrompt := composeRuntimeSystemPrompt(
-		h.buildSystemPromptWithSkills(
-			ag.Agent, agentName,
+		h.buildChatSystemPrompt(
+			ag, agentName,
 			"You are a helpful assistant with access to tools. When you use a tool and receive results, report those results directly to the user. Be concise and accurate.",
+			tools,
 		),
 		runtimeSystemPrompt,
 	)
-	messages = append(messages, llm.NewSystemMessage(systemPrompt))
-
-	// Use message with images if images are present (for vision models like llava)
+	messages := buildLLMConversationMessages(ag.Messages, userMessage, images)
 	if len(images) > 0 {
-		messages = append(messages, llm.NewUserMessageWithImages(userMessage, images))
 		logger.Info("Ollama chat with images", logger.Fields{"image_count": len(images)})
-	} else {
-		messages = append(messages, llm.NewUserMessage(userMessage))
 	}
 
 	// Call Ollama
 	start := time.Now()
 	resp, err := provider.Chat(ctx, llm.ChatRequest{
-		Model:       ag.Settings.Model,
-		Messages:    messages,
-		Tools:       tools,
-		Temperature: ag.Settings.Temperature,
-		MaxTokens:   4000,
+		Model:        ag.Settings.Model,
+		Messages:     messages,
+		SystemPrompt: systemPrompt,
+		Tools:        tools,
+		Temperature:  ag.Settings.Temperature,
+		MaxTokens:    4000,
 	})
 	if err != nil {
 		writeErrorResponse(w, err.Error())
@@ -69,13 +61,12 @@ func (h *Handler) handleOllamaChat(w http.ResponseWriter, r *http.Request, ag *r
 
 	// Tool-call branch
 	if len(resp.ToolCalls) > 0 {
-		h.handleOllamaToolCalls(w, ctx, ag, agentName, messages, resp, tools, files, provider, baseCtx, sessionID, userMessage, plannerDecision)
+		h.handleOllamaToolCalls(w, ctx, ag, agentName, messages, resp, tools, files, provider, baseCtx, sessionID, userMessage, plannerDecision, systemPrompt)
 		return
 	}
 
 	// No tool calls - direct response
 	text := getResponseText(resp.Content)
-	ag.Messages = append(ag.Messages, openai.AssistantMessage(resp.Content))
 	_ = h.persistAgent(agentName, ag.Agent)
 
 	// Store assistant response in session
@@ -103,6 +94,7 @@ func (h *Handler) handleOllamaToolCalls(
 	sessionID string,
 	userMessage string,
 	plannerDecision *types.PlannerDecision,
+	systemPrompt string,
 ) {
 	logger.Info("Ollama requested tool calls", logger.Fields{"count": len(resp.ToolCalls)})
 
@@ -115,7 +107,6 @@ func (h *Handler) handleOllamaToolCalls(
 				assistantMsg := llm.NewAssistantMessage(content)
 				assistantMsg.ToolCalls = toolCalls
 				messages = append(messages, assistantMsg)
-				ag.Messages = append(ag.Messages, openai.AssistantMessage(content))
 			},
 			ExecuteToolCalls: func(toolCalls []llm.ToolCall) ExecuteToolCallsResult {
 				return h.executeToolCallsCommonWithSession(baseCtx, ag, agentName, toolCalls, files, sessionID)
@@ -126,17 +117,17 @@ func (h *Handler) handleOllamaToolCalls(
 						break
 					}
 					messages = append(messages, llm.NewToolMessage(tc.ID, execResult.Results[i].Result))
-					ag.Messages = append(ag.Messages, openai.ToolMessage(execResult.Results[i].Result, tc.ID))
 				}
 			},
 			RequestNextResponse: func() (string, []llm.ToolCall, error) {
 				logger.Debug("Sending tool results back to LLM", logger.Fields{"message_count": len(messages)})
 				finalResp, err := provider.Chat(ctx, llm.ChatRequest{
-					Model:       ag.Settings.Model,
-					Messages:    messages,
-					Tools:       tools,
-					Temperature: ag.Settings.Temperature,
-					MaxTokens:   4000,
+					Model:        ag.Settings.Model,
+					Messages:     messages,
+					SystemPrompt: systemPrompt,
+					Tools:        tools,
+					Temperature:  ag.Settings.Temperature,
+					MaxTokens:    4000,
 				})
 				if err != nil {
 					return "", nil, err
@@ -157,7 +148,6 @@ func (h *Handler) handleOllamaToolCalls(
 
 	logger.Debug("Final response from LLM", logger.Fields{"content": finalText})
 
-	ag.Messages = append(ag.Messages, openai.AssistantMessage(finalText))
 	_ = h.persistAgent(agentName, ag.Agent)
 
 	// Store assistant response in session

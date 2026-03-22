@@ -86,6 +86,89 @@ func (m *Manager) ListEnabledSkillsWithPrompts(agentName string) ([]Skill, error
 	return enabled, nil
 }
 
+// ResolveSkillByName searches all non-agent-specific sources for a skill by name
+// and returns it with its full prompt content loaded. This is used by workspace
+// skill bindings to resolve skills by name at runtime.
+func (m *Manager) ResolveSkillByName(skillName string) (*Skill, bool, error) {
+	target := strings.ToLower(strings.TrimSpace(skillName))
+	if target == "" {
+		return nil, false, nil
+	}
+
+	sources := []func(bool) ([]Skill, error){
+		m.loadRepoSkills,
+		m.loadCompatSkills,
+		m.loadPersonalSkills,
+	}
+	for _, loadFn := range sources {
+		skills, err := loadFn(true)
+		if err != nil {
+			return nil, false, err
+		}
+		for _, skill := range skills {
+			if strings.ToLower(strings.TrimSpace(skill.Name)) == target {
+				return &skill, true, nil
+			}
+		}
+	}
+
+	if m.externalAgents != nil && m.configManager != nil {
+		if m.configManager.GetExternalAgentsClaudeEnabled() {
+			for _, ext := range m.externalAgents.GetClaudeAgents() {
+				if strings.ToLower(strings.TrimSpace(ext.Name)) == target {
+					s := Skill{
+						Name:        ext.Name,
+						Description: ext.Description,
+						Prompt:      ext.SystemPrompt,
+						Source:      SourceClaude,
+						Model:       ext.Model,
+						Color:       ext.Color,
+						Enabled:     true,
+						Trusted:     true,
+					}
+					return &s, true, nil
+				}
+			}
+		}
+		if m.configManager.GetExternalAgentsCodexEnabled() {
+			for _, ext := range m.externalAgents.GetCodexAgents() {
+				if strings.ToLower(strings.TrimSpace(ext.Name)) == target {
+					s := Skill{
+						Name:        ext.Name,
+						Description: ext.Description,
+						Prompt:      ext.SystemPrompt,
+						Source:      SourceCodex,
+						Enabled:     true,
+						Trusted:     true,
+					}
+					return &s, true, nil
+				}
+			}
+		}
+	}
+
+	return nil, false, nil
+}
+
+// ResolveSkillsByNames resolves multiple skills by name, returning found skills
+// and a list of names that could not be resolved.
+func (m *Manager) ResolveSkillsByNames(skillNames []string) ([]Skill, []string, error) {
+	var resolved []Skill
+	var unresolved []string
+	for _, name := range skillNames {
+		skill, found, err := m.ResolveSkillByName(name)
+		if err != nil {
+			return nil, nil, err
+		}
+		if found {
+			resolved = append(resolved, *skill)
+		} else {
+			unresolved = append(unresolved, name)
+		}
+	}
+	return resolved, unresolved, nil
+}
+
 func (m *Manager) listSkills(agentName string, includePrompt bool) ([]Skill, error) {
 	agentSkills, err := m.loadAgentSkills(agentName, includePrompt)
 	if err != nil {

@@ -293,18 +293,23 @@ func (tc *TestContext) EnablePlugin(agent *Agent, pluginName string) {
 func (tc *TestContext) SendChat(agent *Agent, message string) *ChatResponse {
 	tc.T.Helper()
 
+	sessionID := tc.ensureSession(agent)
 	chatData := map[string]interface{}{
 		"question":   message, // API expects "question" not "message"
 		"agent_name": agent.Name,
 	}
 
 	jsonData, _ := json.Marshal(chatData)
+	req, err := http.NewRequest("POST", tc.ServerURL+"/api/chat", bytes.NewBuffer(jsonData))
+	if err != nil {
+		tc.T.Fatalf("Failed to create chat request: %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	if sessionID != "" {
+		req.Header.Set("X-Session-ID", sessionID)
+	}
 
-	resp, err := tc.Client.Post(
-		tc.ServerURL+"/api/chat",
-		"application/json",
-		bytes.NewBuffer(jsonData),
-	)
+	resp, err := tc.Client.Do(req)
 	if err != nil {
 		tc.T.Fatalf("Failed to send chat: %v", err)
 	}
@@ -457,10 +462,11 @@ func (tc *TestContext) WaitForCondition(condition func() bool, timeout time.Dura
 
 // Agent represents a test agent
 type Agent struct {
-	Name   string
-	Model  string
-	ctx    *TestContext
-	config map[string]interface{}
+	Name      string
+	Model     string
+	SessionID string
+	ctx       *TestContext
+	config    map[string]interface{}
 }
 
 // Plugin represents a test plugin
@@ -491,6 +497,55 @@ func (tc *TestContext) detectProvider() string {
 		return "claude"
 	}
 	return "openai"
+}
+
+func (tc *TestContext) ensureSession(agent *Agent) string {
+	tc.T.Helper()
+
+	if agent == nil {
+		return ""
+	}
+	if strings.TrimSpace(agent.SessionID) != "" {
+		return agent.SessionID
+	}
+
+	payload := map[string]interface{}{
+		"title":      "Test Session",
+		"agent_name": agent.Name,
+	}
+	jsonData, _ := json.Marshal(payload)
+
+	resp, err := tc.Client.Post(
+		tc.ServerURL+"/api/sessions",
+		"application/json",
+		bytes.NewBuffer(jsonData),
+	)
+	if err != nil {
+		tc.T.Fatalf("Failed to create session: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
+		body, _ := io.ReadAll(resp.Body)
+		tc.T.Fatalf("Failed to create session (status %d): %s", resp.StatusCode, body)
+	}
+
+	var result map[string]interface{}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		tc.T.Fatalf("Failed to decode session response: %v", err)
+	}
+
+	sessionData, _ := result["session"].(map[string]interface{})
+	if sessionData == nil {
+		sessionData = result
+	}
+	sessionID, _ := sessionData["id"].(string)
+	if strings.TrimSpace(sessionID) == "" {
+		tc.T.Fatalf("Session response did not include an id: %#v", result)
+	}
+
+	agent.SessionID = sessionID
+	return agent.SessionID
 }
 
 func (tc *TestContext) cleanupAll() {

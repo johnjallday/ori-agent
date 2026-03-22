@@ -655,7 +655,9 @@ const sessionManager = {
     const timeAgo = this.formatTimeAgo(session.updated_at);
     const preview = session.preview || 'No messages yet';
     const tags = session.tags || [];
-    const agentName = session.agent_name || 'Unknown';
+    const agentName = session.agent_name || '';
+    const modeLabel = agentName || 'Assistant';
+    const badgeTitle = agentName ? `Direct agent chat: ${agentName}` : 'Assistant session';
 
     return `
       <div class="session-item ${isActive ? 'active' : ''} ${isSelected ? 'selected' : ''}" data-session-id="${session.id}">
@@ -664,7 +666,7 @@ const sessionManager = {
             <path d="M20,2H4A2,2 0 0,0 2,4V22L6,18H20A2,2 0 0,0 22,16V4A2,2 0 0,0 20,2Z"/>
           </svg>
           <span class="session-title">${this.escapeHtml(session.title || 'New Session')}</span>
-          <span class="session-agent-badge" title="Agent: ${this.escapeHtml(agentName)}">${this.escapeHtml(agentName)}</span>
+          <span class="session-agent-badge" title="${this.escapeHtml(badgeTitle)}">${this.escapeHtml(modeLabel)}</span>
           <span class="session-time">${timeAgo}</span>
         </div>
         <div class="session-item-footer">
@@ -1098,7 +1100,7 @@ const sessionManager = {
         if (manualSection) manualSection.classList.add('d-none');
         if (autoSection) autoSection.classList.remove('d-none');
         if (llmWarning) llmWarning.classList.add('d-none');
-        if (createBtnText) createBtnText.textContent = 'Start Chat';
+        if (createBtnText) createBtnText.textContent = 'Start Assistant';
       } else {
         // LLM not available - show warning with action button
         if (manualSection) manualSection.classList.add('d-none');
@@ -1107,19 +1109,53 @@ const sessionManager = {
         if (createBtnText) createBtnText.textContent = 'Go to Settings';
         if (llmWarningMessage) {
           if (!this.chatSystemModelConfigured) {
-            llmWarningMessage.textContent = 'Auto mode requires a System Model to be configured.';
+            llmWarningMessage.textContent = 'Assistant mode requires a System Model to be configured.';
           } else {
-            llmWarningMessage.textContent = 'Auto mode requires an LLM provider. Please set up an API key or install Ollama.';
+            llmWarningMessage.textContent = 'Assistant mode requires an LLM provider. Please set up an API key or install Ollama.';
           }
         }
       }
     } else {
-      // Manual mode
+      // Direct agent chat mode
       if (manualSection) manualSection.classList.remove('d-none');
       if (autoSection) autoSection.classList.add('d-none');
       if (llmWarning) llmWarning.classList.add('d-none');
-      if (createBtnText) createBtnText.textContent = 'Create';
+      if (createBtnText) createBtnText.textContent = 'Start Direct Chat';
     }
+  },
+
+  populateChatAgentSelect(agentSelect, agents, emptyLabel = 'No direct-chat agents available') {
+    if (!agentSelect) return;
+
+    const normalizedAgents = Array.isArray(agents) ? agents : [];
+    if (normalizedAgents.length === 0) {
+      agentSelect.innerHTML = `<option value="">${this.escapeHtml(emptyLabel)}</option>`;
+      agentSelect.disabled = true;
+      return;
+    }
+
+    agentSelect.innerHTML = normalizedAgents
+      .map((agent) => `<option value="${this.escapeHtml(agent.name)}">${this.escapeHtml(agent.name)}</option>`)
+      .join('');
+    agentSelect.disabled = false;
+  },
+
+  updateAssistantModeText(workspaceId) {
+    const autoModeText = document.getElementById('chatAutoModeText');
+    if (!autoModeText) return;
+
+    if (workspaceId) {
+      autoModeText.textContent = 'Assistant stays in this workspace and uses workspace context by default. Switch to Direct agent chat only when you want a specific agent profile.';
+      return;
+    }
+
+    autoModeText.textContent = 'Assistant starts as the system assistant. Pick a workspace to keep context scoped, or continue here before deciding where the work belongs.';
+  },
+
+  buildAssistantSessionTitle(initialMessage) {
+    const message = String(initialMessage || '').trim();
+    if (!message) return 'Assistant';
+    return message.length > 50 ? `${message.slice(0, 47)}...` : message;
   },
 
   // Show create chat modal with workspace and agent selection
@@ -1127,14 +1163,6 @@ const sessionManager = {
     try {
       // Fetch agents
       const agents = await this.fetchAgents();
-
-      if (!agents || agents.length === 0) {
-        console.warn('No agents available');
-        if (window.Toast) {
-          Toast.warning('No agents configured yet. Create an agent first.');
-        }
-        return;
-      }
 
       // Check LLM availability to determine default mode
       await this.checkChatLlmAvailability();
@@ -1172,20 +1200,10 @@ const sessionManager = {
         });
       }
 
-      // Reset auto mode info text to default (no workspace pre-selected)
-      const autoModeText = document.getElementById('chatAutoModeText');
-      if (autoModeText) {
-        autoModeText.textContent = 'The AI will automatically select the best workspace and agent after a few messages.';
-      }
+      this.updateAssistantModeText('');
 
-      // Populate agent dropdown
       const agentSelect = document.getElementById('chatAgentSelect');
-      if (agentSelect) {
-        agentSelect.innerHTML = '';
-        agents.forEach(agent => {
-          agentSelect.innerHTML += `<option value="${agent.name}">${this.escapeHtml(agent.name)}</option>`;
-        });
-      }
+      this.populateChatAgentSelect(agentSelect, agents, 'No direct-chat agents available');
 
       // Show the modal
       const modal = document.getElementById('createChatModal');
@@ -1210,17 +1228,6 @@ const sessionManager = {
     try {
       // Prefer agents configured in this workspace; fall back to global agents
       const agents = await this.fetchWorkspaceAgents(workspaceId);
-
-      if (!agents || agents.length === 0) {
-        console.warn('No agents available');
-        if (window.Toast) {
-          Toast.warning('No agents available in this workspace. Add an agent to continue.');
-        }
-        if (window.workspaceDetail && typeof window.workspaceDetail.openAddAgentModal === 'function') {
-          window.workspaceDetail.openAddAgentModal();
-        }
-        return;
-      }
 
       // Check LLM availability to determine default mode
       await this.checkChatLlmAvailability();
@@ -1259,24 +1266,16 @@ const sessionManager = {
         });
       }
 
-      // Update auto mode info text based on whether workspace is pre-selected
-      const autoModeText = document.getElementById('chatAutoModeText');
-      if (autoModeText) {
-        if (workspaceId) {
-          autoModeText.textContent = 'The workspace is already set. The AI will select the best agent after a few messages.';
-        } else {
-          autoModeText.textContent = 'The AI will automatically select the best workspace and agent after a few messages.';
-        }
-      }
+      this.updateAssistantModeText(workspaceId);
 
-      // Populate agent dropdown
       const agentSelect = document.getElementById('chatAgentSelect');
-      if (agentSelect) {
-        agentSelect.innerHTML = '';
-        agents.forEach(agent => {
-          agentSelect.innerHTML += `<option value="${agent.name}">${this.escapeHtml(agent.name)}</option>`;
-        });
-      }
+      this.populateChatAgentSelect(
+        agentSelect,
+        agents,
+        workspaceId
+          ? 'No direct-chat agents in this workspace'
+          : 'No direct-chat agents available'
+      );
 
       // Show the modal
       const modal = document.getElementById('createChatModal');
@@ -1337,41 +1336,16 @@ const sessionManager = {
       // Check if workspace was pre-selected
       const workspaceSelect = document.getElementById('chatWorkspaceSelect');
       const preSelectedWorkspace = workspaceSelect?.value || '';
-
-      // Use selected agent from dropdown first, then workspace/global fallbacks.
-      const agentSelect = document.getElementById('chatAgentSelect');
-      let defaultAgent = agentSelect?.value || '';
-      if (!defaultAgent && agentSelect && agentSelect.options && agentSelect.options.length > 0) {
-        defaultAgent = agentSelect.options[0].value || '';
-      }
-      if (!defaultAgent) {
-        const fallbackAgents = preSelectedWorkspace
-          ? await this.fetchWorkspaceAgents(preSelectedWorkspace)
-          : await this.fetchAgents();
-        defaultAgent = fallbackAgents[0]?.name || '';
-      }
-      if (!defaultAgent) {
-        console.warn('No agents available');
-        if (window.Toast) {
-          Toast.warning('No agents available. Add an agent first.');
-        }
-        return;
-      }
-
-      let session;
-      if (preSelectedWorkspace) {
-        // Workspace already known - create session in that workspace directly
-        session = await this.createSessionWithAgentInFolder(defaultAgent, preSelectedWorkspace);
-      } else {
-        // No workspace pre-selected - let AI classify later
-        session = await this.createSessionWithAgent(defaultAgent);
-        if (session && session.id) {
-          // Mark this session for auto-classification (workspace will be determined by AI)
-          this.autoModeSessionIds.add(session.id);
-        }
-      }
+      const session = await this.createAssistantSession(
+        preSelectedWorkspace,
+        this.buildAssistantSessionTitle(autoInitialMessage)
+      );
 
       if (session && session.id) {
+        if (!preSelectedWorkspace) {
+          this.autoModeSessionIds.add(session.id);
+        }
+
         // Upload pending files first
         if (this.chatPendingFiles.length > 0) {
           await this.uploadChatPendingFiles(session.id);
@@ -1393,7 +1367,11 @@ const sessionManager = {
       const agentName = agentSelect?.value;
 
       if (!agentName) {
-        console.error('No agent selected');
+        if (window.Toast) {
+          Toast.warning(workspaceId
+            ? 'No direct-chat agent is available in this workspace. Add an agent or use Assistant.'
+            : 'No direct-chat agent is available. Add an agent or use Assistant.');
+        }
         return;
       }
 
@@ -1663,7 +1641,7 @@ const sessionManager = {
     const existingModal = document.getElementById('agentPickerModal');
     if (existingModal) existingModal.remove();
 
-    const currentAgentName = typeof currentAgent !== 'undefined' ? currentAgent : '';
+    const currentAgentName = this.getActiveSession()?.agent_name || '';
 
     const modalHtml = `
       <div class="modal fade" id="agentPickerModal" tabindex="-1">
@@ -1688,7 +1666,7 @@ const sessionManager = {
                         <strong>${this.escapeHtml(agent.name)}</strong>
                         ${agent.model ? `<small class="text-muted ms-2">${this.escapeHtml(agent.model)}</small>` : ''}
                       </div>
-                      ${agent.name === currentAgentName ? '<span class="badge bg-primary">Current</span>' : ''}
+                      ${agent.name === currentAgentName ? '<span class="badge bg-primary">Pinned</span>' : ''}
                     </div>
                     ${agent.description ? `<small class="text-muted d-block mt-1">${this.escapeHtml(agent.description)}</small>` : ''}
                   </button>
@@ -1748,7 +1726,6 @@ const sessionManager = {
         // Update the combined chat info bar with session title and agent
         this.updateChatInfoBar(data.session.title || 'New Session', agentName);
 
-        // Update the current agent globally
         this.updateCurrentAgent(agentName);
 
         // Clear chat area for new session
@@ -1772,30 +1749,54 @@ const sessionManager = {
     }
   },
 
+  async createAssistantSession(folderId = '', title = 'Assistant') {
+    try {
+      const payload = {
+        title: title || 'Assistant'
+      };
+      if (folderId) {
+        payload.folder_id = folderId;
+      }
+
+      const response = await fetch('/api/sessions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+
+      if (!response.ok) throw new Error('Failed to create assistant session');
+
+      const data = await response.json();
+      if (data.session) {
+        this.sessions.unshift(data.session);
+        this.activeSessionId = data.session.id;
+        this.saveActiveSession();
+        this.renderSessions();
+
+        this.updateCurrentAgent('');
+
+        if (typeof clearChatHistory === 'function') {
+          clearChatHistory();
+        }
+
+        this.openChatPanelIfAvailable();
+
+        if (window.EventBus) {
+          EventBus.emit('session:created', { session: data.session, folderId: folderId || null });
+        }
+
+        return data.session;
+      }
+      return null;
+    } catch (error) {
+      console.error('Failed to create assistant session:', error);
+      return null;
+    }
+  },
+
   // Create a new session in a specific folder/workspace
   async createNewSessionInFolder(folderId) {
-    try {
-      // Fetch agents scoped to the folder first
-      const agents = await this.fetchWorkspaceAgents(folderId);
-      if (!agents || agents.length === 0) {
-        console.warn('No agents available');
-        if (window.Toast) {
-          Toast.warning('No agents available in this workspace. Add an agent first.');
-        }
-        return;
-      }
-
-      // If only one agent, create directly
-      if (agents.length === 1) {
-        await this.createSessionWithAgentInFolder(agents[0].name, folderId);
-        return;
-      }
-
-      // Show agent picker dialog with folder context
-      this.showAgentPickerDialogForFolder(agents, folderId);
-    } catch (error) {
-      console.error('Failed to create session in folder:', error);
-    }
+    return this.createAssistantSession(folderId, 'Assistant');
   },
 
   // Show agent picker dialog for folder context
@@ -1873,7 +1874,6 @@ const sessionManager = {
         // Update the combined chat info bar with session title and agent
         this.updateChatInfoBar(data.session.title || 'New Session', agentName);
 
-        // Update the current agent globally
         this.updateCurrentAgent(agentName);
 
         // Clear chat area for new session
@@ -1887,9 +1887,13 @@ const sessionManager = {
         if (window.EventBus) {
           EventBus.emit('session:created', { session: data.session, folderId });
         }
+
+        return data.session;
       }
+      return null;
     } catch (error) {
       console.error('Failed to create session in folder:', error);
+      return null;
     }
   },
 
@@ -1916,13 +1920,7 @@ const sessionManager = {
       this.saveActiveSession();
       this.renderSessions();
 
-      // Update the combined chat info bar with session title and agent
-      this.updateChatInfoBar(session.title || 'New Session', session.agent_name);
-
-      // Update the current agent globally
-      if (session.agent_name) {
-        this.updateCurrentAgent(session.agent_name);
-      }
+      this.updateCurrentAgent(session.agent_name || '');
 
       // Restore messages to chat area
       this.restoreSessionMessages(session);
@@ -1966,31 +1964,29 @@ const sessionManager = {
     }
   },
 
-  // Update the current agent display (chat area bar and navbar)
+  // Update the execution-agent display for the active session.
   updateCurrentAgent(agentName) {
-    if (!agentName) return;
-
-    // Update the global currentAgent variable
-    if (typeof currentAgent !== 'undefined') {
-      window.currentAgent = agentName;
-    }
+    const normalizedAgentName = String(agentName || '').trim();
 
     const session = this.getActiveSession();
-    this.updateChatInfoBar(session?.title, agentName);
+    this.updateChatInfoBar(session?.title, normalizedAgentName);
 
-    // Update the model display for the active agent
-    this.updateChatModelForAgent(agentName);
+    this.updateChatModelForAgent(normalizedAgentName);
 
     // Update the navbar display (secondary/legacy)
     const agentElement = document.querySelector('#currentAgentDisplay span.fw-medium');
     if (agentElement) {
-      agentElement.textContent = agentName;
+      agentElement.textContent = normalizedAgentName || 'Assistant';
     }
 
     // Also update any agent display in the header
     const agentHeader = document.querySelector('.agent-name');
     if (agentHeader) {
-      agentHeader.textContent = agentName;
+      agentHeader.textContent = normalizedAgentName || 'Assistant';
+    }
+
+    if (typeof window.refreshAgentDisplay === 'function') {
+      window.refreshAgentDisplay();
     }
 
     if (typeof loadAgentsForSidebar === 'function') {
@@ -2008,17 +2004,31 @@ const sessionManager = {
 
     if (!infoBar) return;
 
+    // Update session ID in header
+    const sessionIdEl = document.getElementById('chatPanelSessionId');
+    if (sessionIdEl) {
+      if (this.activeSessionId) {
+        sessionIdEl.textContent = this.activeSessionId;
+        sessionIdEl.style.display = '';
+      } else {
+        sessionIdEl.style.display = 'none';
+      }
+    }
+
     // Update session title
     if (sessionTitleEl && sessionTitle) {
       sessionTitleEl.textContent = sessionTitle;
     }
 
+    const hasSessionContext = Boolean(this.activeSessionId || sessionTitle);
+    const displayAgentName = agentName || (hasSessionContext ? 'Assistant' : '');
+
     // Update agent name
-    if (agentNameEl && agentName) {
-      agentNameEl.textContent = agentName;
+    if (agentNameEl) {
+      agentNameEl.textContent = displayAgentName;
     }
     if (typeof window.refreshChatWebSearchToggle === 'function') {
-      window.refreshChatWebSearchToggle(agentName || '');
+      window.refreshChatWebSearchToggle(agentName || 'Ori');
     }
 
     if (editAgentBtn) {
@@ -2038,7 +2048,7 @@ const sessionManager = {
     }
 
     // Show bar if we have either session or agent
-    if (sessionTitle || agentName) {
+    if (sessionTitle || displayAgentName) {
       infoBar.style.display = 'block';
       // Hide navbar agent display when chat info bar is visible
       if (navbarAgentDisplay) {
@@ -2070,7 +2080,7 @@ const sessionManager = {
     }
   },
 
-  // Fetch and update the model for the current agent
+  // Fetch and update the model for the active execution agent
   async updateChatModelForAgent(agentName) {
     if (!agentName) {
       this.updateChatModelName('');
@@ -2117,13 +2127,8 @@ const sessionManager = {
     }
 
     const changeBtn = document.getElementById('chatChangeAgentBtn');
-    if (changeBtn && !changeBtn.dataset.bound) {
-      changeBtn.dataset.bound = 'true';
-      changeBtn.addEventListener('click', async () => {
-        if (this.activeSessionId) {
-          await this.showChangeAgentDialog(this.activeSessionId);
-        }
-      });
+    if (changeBtn) {
+      changeBtn.style.display = 'none';
     }
 
     const editBtn = document.getElementById('chatEditAgentBtn');
@@ -2741,12 +2746,22 @@ const sessionManager = {
     chatArea.innerHTML = '';
 
     const messages = session.messages || [];
+    const persistedMessages = [];
     messages.forEach(msg => {
       const isUser = msg.role === 'user';
+      persistedMessages.push({
+        content: msg.content,
+        isUser,
+        timestamp: msg.created_at || new Date().toISOString()
+      });
       if (typeof appendMessageToUI === 'function') {
         appendMessageToUI(msg.content, isUser);
       }
     });
+
+    if (typeof window.replaceChatHistoryMessages === 'function') {
+      window.replaceChatHistoryMessages(persistedMessages);
+    }
   },
 
   // Delete session
@@ -3503,14 +3518,14 @@ const sessionManager = {
         try {
           askOriSeedNote = JSON.parse(askOriSeedNoteRaw);
         } catch (error) {
-          console.warn('Failed to parse Ask Ori seed note:', error);
+          console.warn('Failed to parse Assistant seed note:', error);
         }
       }
       if (askOriSeedTaskRaw) {
         try {
           askOriSeedTask = JSON.parse(askOriSeedTaskRaw);
         } catch (error) {
-          console.warn('Failed to parse Ask Ori seed task:', error);
+          console.warn('Failed to parse Assistant seed task:', error);
         }
       }
 
@@ -3544,8 +3559,8 @@ const sessionManager = {
         if (setupResult.tasksCreated > 0) summaryParts.push(`${setupResult.tasksCreated} tasks`);
         if (setupResult.notesCreated > 0) summaryParts.push(`${setupResult.notesCreated} notes`);
         if (setupResult.schedulesCreated > 0) summaryParts.push(`${setupResult.schedulesCreated} schedules`);
-        if (askOriSeedResult.tasksCreated > 0) summaryParts.push(`${askOriSeedResult.tasksCreated} Ask Ori task`);
-        if (askOriSeedResult.notesCreated > 0) summaryParts.push(`${askOriSeedResult.notesCreated} Ask Ori note`);
+        if (askOriSeedResult.tasksCreated > 0) summaryParts.push(`${askOriSeedResult.tasksCreated} Assistant task`);
+        if (askOriSeedResult.notesCreated > 0) summaryParts.push(`${askOriSeedResult.notesCreated} Assistant note`);
         const summaryText = summaryParts.length > 0 ? summaryParts.join(', ') : 'no setup items';
         if (setupResult.errors.length > 0 || askOriSeedResult.errors.length > 0) {
           this.showToast(`${importEnabled ? 'Workspace imported' : 'Workspace created'} with partial setup (${summaryText}).`, 'warning');
@@ -3554,13 +3569,13 @@ const sessionManager = {
         }
       } else if (askOriSeedResult.tasksCreated > 0 || askOriSeedResult.notesCreated > 0) {
         const summaryParts = [];
-        if (askOriSeedResult.tasksCreated > 0) summaryParts.push(`${askOriSeedResult.tasksCreated} Ask Ori task`);
-        if (askOriSeedResult.notesCreated > 0) summaryParts.push(`${askOriSeedResult.notesCreated} Ask Ori note`);
+        if (askOriSeedResult.tasksCreated > 0) summaryParts.push(`${askOriSeedResult.tasksCreated} Assistant task`);
+        if (askOriSeedResult.notesCreated > 0) summaryParts.push(`${askOriSeedResult.notesCreated} Assistant note`);
         const summaryText = summaryParts.join(', ');
         if (askOriSeedResult.errors.length > 0) {
-          this.showToast(`${importEnabled ? 'Workspace imported' : 'Workspace created'} with partial Ask Ori setup (${summaryText}).`, 'warning');
+          this.showToast(`${importEnabled ? 'Workspace imported' : 'Workspace created'} with partial Assistant setup (${summaryText}).`, 'warning');
         } else {
-          this.showToast(`${importEnabled ? 'Workspace imported' : 'Workspace created'} with Ask Ori setup (${summaryText}).`, 'success');
+          this.showToast(`${importEnabled ? 'Workspace imported' : 'Workspace created'} with Assistant setup (${summaryText}).`, 'success');
         }
       } else {
         this.showToast(importEnabled ? 'Workspace imported successfully' : 'Workspace created successfully', 'success');
@@ -4653,10 +4668,7 @@ const sessionManager = {
       // Update the combined chat info bar with session title and agent
       this.updateChatInfoBar(session.title || 'New Session', session.agent_name);
 
-      // Update the current agent globally
-      if (session.agent_name) {
-        this.updateCurrentAgent(session.agent_name);
-      }
+      this.updateCurrentAgent(session.agent_name || '');
 
       // Initialize session files panel
       this.initializeSessionFiles(savedId);

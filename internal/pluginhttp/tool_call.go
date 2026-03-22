@@ -7,6 +7,7 @@ import (
 
 	orihttp "github.com/johnjallday/ori-agent/internal/http"
 	"github.com/johnjallday/ori-agent/internal/logger"
+	"github.com/johnjallday/ori-agent/internal/store"
 	"net/http"
 	"strings"
 	"time"
@@ -40,11 +41,7 @@ func (h *Handler) DirectToolCallHandler(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	// Get current agent
-	names, current := h.State.ListAgents()
-	if current == "" && len(names) > 0 {
-		current = names[0]
-	}
+	current := store.FirstAgentName(h.State)
 
 	agent, ok := h.State.GetAgent(current)
 	if !ok {

@@ -121,8 +121,7 @@ func TestNewHandler(t *testing.T) {
 // mockStore implements store.Store interface
 type mockStore struct{}
 
-func (m *mockStore) ListAgents() (names []string, current string)                     { return nil, "" }
-func (m *mockStore) SetCurrentAgent(name string) error                                { return nil }
+func (m *mockStore) ListAgents() []string                                             { return nil }
 func (m *mockStore) CreateAgent(name string, cfg *store.CreateAgentConfig) error      { return nil }
 func (m *mockStore) DeleteAgent(name string) error                                    { return nil }
 func (m *mockStore) GetAgent(name string) (*agent.Agent, bool)                        { return nil, false }

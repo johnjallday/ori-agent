@@ -52,16 +52,16 @@
             </div>
           </div>
 
-          <!-- Ask Ori Prompt Bar -->
+          <!-- Assistant Prompt Bar -->
           <div id="homeAssistantCard" class="modern-card p-2 mb-3">
             <form id="homeAssistantForm" class="d-flex align-items-center gap-2">
               <div class="d-none d-md-flex align-items-center gap-2 px-2" style="color: var(--text-secondary); font-size: 0.82rem; white-space: nowrap;">
-                <span style="font-weight: 600; color: var(--text-primary);">Ask Ori</span>
+                <span style="font-weight: 600; color: var(--text-primary);">Assistant</span>
                 <span style="opacity: 0.6;">Workspace</span>
               </div>
               <input id="homeAssistantInput" type="text" class="modern-input flex-grow-1" maxlength="800"
-                     placeholder="Ask Ori about this workspace... (or use /task, /note, /directory, /file, /chat)"
-                     aria-label="Ask Ori prompt"
+                     placeholder="Ask Assistant about this workspace... (or use /task, /note, /directory, /file, /chat)"
+                     aria-label="Assistant prompt"
                      style="min-height: 42px;">
               <button id="homeAssistantSendBtn" type="submit" class="modern-btn modern-btn-primary home-assistant-send-btn">Send</button>
             </form>
@@ -196,6 +196,40 @@
               </div>
             </div>
 
+            <!-- Sessions Panel - Left column (bottom) -->
+            <div class="modern-card workspace-detail-panel workspace-detail-panel-sessions is-expandable" id="workspace-detail-sessions-panel">
+              <button class="workspace-detail-panel-close" type="button" title="Close" aria-label="Close expanded panel">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+                  <path d="M19,6.41L17.59,5L12,10.59L6.41,5L5,6.41L10.59,12L5,17.59L6.41,19L12,13.41L17.59,19L19,17.59L13.41,12L19,6.41Z"/>
+                </svg>
+              </button>
+              <div class="workspace-detail-panel-header">
+                <h2 class="workspace-detail-panel-title">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+                    <path d="M20,2H4A2,2 0 0,0 2,4V22L6,18H20A2,2 0 0,0 22,16V4A2,2 0 0,0 20,2M20,16H6L4,18V4H20"/>
+                  </svg>
+                  Sessions
+                </h2>
+                <div class="workspace-detail-panel-actions">
+                  <button id="workspace-detail-refresh-sessions" class="workspace-detail-panel-btn" type="button" title="Refresh sessions">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
+                      <path d="M17.65,6.35C16.2,4.9 14.21,4 12,4A8,8 0 0,0 4,12A8,8 0 0,0 12,20C15.73,20 18.84,17.45 19.73,14H17.65C16.83,16.33 14.61,18 12,18A6,6 0 0,1 6,12A6,6 0 0,1 12,6C13.66,6 15.14,6.69 16.22,7.78L13,11H20V4L17.65,6.35Z"/>
+                    </svg>
+                  </button>
+                  <button id="workspace-detail-new-session" class="workspace-detail-panel-btn workspace-detail-panel-btn-primary" type="button" title="New session">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
+                      <path d="M19,13H13V19H11V13H5V11H11V5H13V11H19V13Z"/>
+                    </svg>
+                  </button>
+                </div>
+              </div>
+              <div class="workspace-detail-panel-body" role="region" tabindex="0" aria-label="Sessions panel content">
+                <div id="workspace-detail-sessions-list" class="workspace-detail-list">
+                  <div class="workspace-detail-loading">Loading sessions...</div>
+                </div>
+              </div>
+            </div>
+
             <!-- Notes Panel - Right column row 1 -->
             <div class="modern-card workspace-detail-panel workspace-detail-panel-notes is-expandable" id="workspace-detail-notes-panel">
               <button class="workspace-detail-panel-close" type="button" title="Close" aria-label="Close expanded panel">
@@ -322,7 +356,41 @@
               </div>
             </div>
 
-            <!-- Schedules Panel - Right column row 5 -->
+            <!-- Workspace Skills Panel - Right column row 5 -->
+            <div class="modern-card workspace-detail-panel workspace-detail-panel-skills is-expandable" id="workspace-detail-skills-panel">
+              <button class="workspace-detail-panel-close" type="button" title="Close" aria-label="Close expanded panel">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+                  <path d="M19,6.41L17.59,5L12,10.59L6.41,5L5,6.41L10.59,12L5,17.59L6.41,19L12,13.41L17.59,19L19,17.59L13.41,12L19,6.41Z"/>
+                </svg>
+              </button>
+              <div class="workspace-detail-panel-header">
+                <h2 class="workspace-detail-panel-title">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+                    <path d="M7,2V13H10V22L17,10H13L17,2H7Z"/>
+                  </svg>
+                  Workspace Skills
+                </h2>
+                <div class="workspace-detail-panel-actions">
+                  <button id="workspace-detail-refresh-skills" class="workspace-detail-panel-btn" type="button" title="Refresh skill bindings">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
+                      <path d="M17.65,6.35C16.2,4.9 14.21,4 12,4A8,8 0 0,0 4,12A8,8 0 0,0 12,20C15.73,20 18.84,17.45 19.73,14H17.65C16.83,16.33 14.61,18 12,18A6,6 0 0,1 6,12A6,6 0 0,1 12,6C13.66,6 15.14,6.69 16.22,7.78L13,11H20V4L17.65,6.35Z"/>
+                    </svg>
+                  </button>
+                  <button id="workspace-detail-add-skill" class="workspace-detail-panel-btn workspace-detail-panel-btn-primary" type="button" title="Add workspace skill binding">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
+                      <path d="M19,13H13V19H11V13H5V11H11V5H13V11H19V13Z"/>
+                    </svg>
+                  </button>
+                </div>
+              </div>
+              <div class="workspace-detail-panel-body" role="region" tabindex="0" aria-label="Workspace Skills panel content">
+                <div id="workspace-detail-skills-list" class="workspace-detail-mcp-list">
+                  <div class="workspace-detail-empty">Loading workspace skill bindings...</div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Schedules Panel - Right column row 6 -->
             <div class="modern-card workspace-detail-panel workspace-detail-panel-schedules is-expandable" id="workspace-detail-schedules-panel">
               <button class="workspace-detail-panel-close" type="button" title="Close" aria-label="Close expanded panel">
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
@@ -365,17 +433,17 @@
   <!-- Include chat area for additional modals (scheduledTasksModal, etc.) -->
   {{template "chat-area.tmpl" .}}
 
-  <!-- Shared modals (includes Add Agent modal used by Ask Ori) -->
+  <!-- Shared modals (includes Add Agent modal used by Assistant) -->
   {{template "modals.tmpl" .}}
 
-  <!-- Ask Ori Thinking Modal -->
+  <!-- Assistant Thinking Modal -->
   <div class="modal fade" id="homeAssistantThinkingModal" tabindex="-1"
        aria-labelledby="homeAssistantThinkingModalLabel" aria-hidden="true">
     <div class="modal-dialog modal-lg modal-dialog-centered modal-dialog-scrollable">
       <div class="modal-content home-thinking-modal-content">
         <div class="modal-header home-thinking-modal-header">
           <div>
-            <h5 id="homeAssistantThinkingModalLabel" class="modal-title">Ori is working</h5>
+            <h5 id="homeAssistantThinkingModalLabel" class="modal-title">Assistant is working</h5>
             <div id="homeAssistantThinkingStatus" class="home-thinking-modal-status" role="status" aria-live="polite">
               <span id="homeAssistantThinkingSpinner" class="spinner-border spinner-border-sm me-2" aria-hidden="true"></span>
               <span>Analyzing your request...</span>
@@ -387,7 +455,7 @@
           <div id="homeAssistantRoutingSummary" class="home-assistant-routing-summary d-none"></div>
           <div id="homeAssistantConversation" class="home-assistant-conversation home-assistant-conversation-modal p-3">
             <div class="home-assistant-thinking-placeholder">
-              Progress updates will appear here after you send a task.
+              Progress updates will appear here after you send a message.
             </div>
           </div>
           <div id="homeAssistantActions" class="d-flex flex-wrap gap-2 mt-3 d-none"></div>
@@ -533,6 +601,72 @@
           <div class="modal-footer">
             <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
             <button type="submit" class="btn btn-primary" id="workspace-detail-mcp-submit">Save Binding</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <!-- Workspace Skills Modal -->
+  <div class="modal fade" id="workspace-detail-skills-modal" tabindex="-1" aria-labelledby="workspace-detail-skills-modal-title" aria-hidden="true">
+    <div class="modal-dialog modal-lg modal-dialog-centered modal-dialog-scrollable">
+      <div class="modal-content workspace-detail-mcp-modal-content">
+        <div class="modal-header">
+          <div class="workspace-detail-mcp-modal-heading">
+            <div class="workspace-detail-mcp-modal-kicker">Workspace-scoped skill</div>
+            <h5 class="modal-title" id="workspace-detail-skills-modal-title">Add Workspace Skill</h5>
+            <p id="workspace-detail-skills-modal-subtitle" class="workspace-detail-mcp-modal-subtitle mb-0">
+              Bind a skill to this workspace, then decide which agent instances can use it here.
+            </p>
+          </div>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+        </div>
+        <form id="workspace-detail-skills-form">
+          <div class="modal-body">
+            <div class="workspace-detail-mcp-modal-banner">
+              Workspace skill bindings control which skills are available and which agents can invoke them. Global skill settings still apply.
+            </div>
+            <div class="row g-3">
+              <div class="col-12">
+                <label for="workspace-detail-skill-name" class="form-label">Skill</label>
+                <select id="workspace-detail-skill-name" class="form-select">
+                  <option value="">Select a skill</option>
+                </select>
+                <div id="workspace-detail-skill-name-help" class="workspace-detail-mcp-field-help">
+                  Choose a skill to bind to this workspace.
+                </div>
+              </div>
+              <div class="col-12">
+                <div class="form-check form-switch workspace-detail-mcp-toggle">
+                  <input class="form-check-input" type="checkbox" role="switch" id="workspace-detail-skill-enabled" checked>
+                  <label class="form-check-label" for="workspace-detail-skill-enabled">Enabled in this workspace</label>
+                </div>
+              </div>
+              <div class="col-12">
+                <div class="form-check form-switch workspace-detail-mcp-toggle">
+                  <input class="form-check-input" type="checkbox" role="switch" id="workspace-detail-skill-trusted">
+                  <label class="form-check-label" for="workspace-detail-skill-trusted">Trusted (allow tool use without confirmation)</label>
+                </div>
+              </div>
+              <div class="col-12">
+                <div class="workspace-detail-mcp-agent-access-card">
+                  <div class="workspace-detail-mcp-agent-access-header">
+                    <div>
+                      <div class="workspace-detail-mcp-agent-access-title">Agent access</div>
+                      <div class="workspace-detail-mcp-agent-access-subtitle">Choose which agent instances can use this skill in this workspace.</div>
+                    </div>
+                    <div id="workspace-detail-skill-agent-access-summary" class="workspace-detail-mcp-agent-access-summary">0 selected</div>
+                  </div>
+                  <div id="workspace-detail-skill-agent-options" class="workspace-detail-mcp-agent-options">
+                    <div class="workspace-detail-mcp-agent-empty">No agent instances in this workspace yet.</div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="modal-footer">
+            <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+            <button type="submit" class="btn btn-primary" id="workspace-detail-skills-submit">Save Binding</button>
           </div>
         </form>
       </div>
@@ -776,8 +910,8 @@
     /* Bento Grid Layout */
     .workspace-detail-bento {
       display: grid;
-      grid-template-columns: 2fr 1fr;
-      grid-template-rows: repeat(5, 1fr);
+      grid-template-columns: 3fr 1fr 1fr;
+      grid-template-rows: repeat(6, 1fr);
       gap: 0.5rem;
       height: calc(100vh - 280px);
       min-height: 400px;
@@ -791,39 +925,49 @@
     /* Panel positioning */
     .workspace-detail-panel-agents {
       grid-column: 1;
-      grid-row: 1 / -1;
+      grid-row: 1 / 5;
+    }
+
+    .workspace-detail-panel-sessions {
+      grid-column: 1;
+      grid-row: 5 / 7;
     }
 
     .workspace-detail-panel-notes {
       grid-column: 2;
-      grid-row: 1;
+      grid-row: 1 / 3;
     }
 
     .workspace-detail-panel-files {
       grid-column: 2;
-      grid-row: 2;
+      grid-row: 3 / 5;
     }
 
     .workspace-detail-panel-directories {
       grid-column: 2;
-      grid-row: 3;
+      grid-row: 5 / 7;
     }
 
     .workspace-detail-panel-mcp {
-      grid-column: 2;
-      grid-row: 4;
+      grid-column: 3;
+      grid-row: 1 / 3;
+    }
+
+    .workspace-detail-panel-skills {
+      grid-column: 3;
+      grid-row: 3 / 5;
     }
 
     .workspace-detail-panel-schedules {
-      grid-column: 2;
-      grid-row: 5;
+      grid-column: 3;
+      grid-row: 5 / 7;
     }
 
     /* Responsive layout */
     @media (max-width: 1200px) {
       .workspace-detail-bento {
         grid-template-columns: 1fr;
-        grid-template-rows: auto auto auto auto auto auto;
+        grid-template-rows: auto auto auto auto auto auto auto auto;
         height: auto;
         min-height: auto;
         max-height: none;
@@ -834,29 +978,39 @@
         grid-row: 1;
       }
 
-      .workspace-detail-panel-notes {
+      .workspace-detail-panel-sessions {
         grid-column: 1 / -1;
         grid-row: 2;
       }
 
-      .workspace-detail-panel-files {
+      .workspace-detail-panel-notes {
         grid-column: 1 / -1;
         grid-row: 3;
       }
 
-      .workspace-detail-panel-directories {
+      .workspace-detail-panel-files {
         grid-column: 1 / -1;
         grid-row: 4;
       }
 
-      .workspace-detail-panel-mcp {
+      .workspace-detail-panel-directories {
         grid-column: 1 / -1;
         grid-row: 5;
       }
 
-      .workspace-detail-panel-schedules {
+      .workspace-detail-panel-mcp {
         grid-column: 1 / -1;
         grid-row: 6;
+      }
+
+      .workspace-detail-panel-skills {
+        grid-column: 1 / -1;
+        grid-row: 7;
+      }
+
+      .workspace-detail-panel-schedules {
+        grid-column: 1 / -1;
+        grid-row: 8;
       }
 
       .workspace-detail-bento .workspace-detail-panel-body {
@@ -1392,21 +1546,24 @@
       color: var(--text-primary);
     }
 
-    #workspace-detail-mcp-form {
+    #workspace-detail-mcp-form,
+    #workspace-detail-skills-form {
       display: flex;
       flex: 1 1 auto;
       flex-direction: column;
       min-height: 0;
     }
 
-    #workspace-detail-mcp-modal .modal-body {
+    #workspace-detail-mcp-modal .modal-body,
+    #workspace-detail-skills-modal .modal-body {
       min-height: 0;
       overflow-y: auto;
       overscroll-behavior: contain;
       -webkit-overflow-scrolling: touch;
     }
 
-    #workspace-detail-mcp-modal .modal-footer {
+    #workspace-detail-mcp-modal .modal-footer,
+    #workspace-detail-skills-modal .modal-footer {
       flex-shrink: 0;
     }
 
@@ -2262,6 +2419,10 @@
       z-index: 10030;
     }
 
+    #workspace-detail-skills-modal {
+      z-index: 10030;
+    }
+
     .modal-backdrop.workspace-detail-backdrop-execution {
       z-index: 1055;
     }
@@ -2271,6 +2432,10 @@
     }
 
     .modal-backdrop.workspace-detail-backdrop-mcp {
+      z-index: 10020;
+    }
+
+    .modal-backdrop.workspace-detail-backdrop-skills {
       z-index: 10020;
     }
 
@@ -2287,6 +2452,13 @@
     .workspace-detail-item-meta {
       font-size: 0.7rem;
       color: var(--text-secondary);
+    }
+
+    .workspace-detail-session-id {
+      font-family: 'SF Mono', 'Menlo', 'Monaco', 'Consolas', monospace;
+      font-size: 0.65rem;
+      opacity: 0.7;
+      cursor: default;
     }
 
     .workspace-detail-task-schedule-indicator {
@@ -3061,7 +3233,7 @@
 
     /* Board view reorganizes the grid */
     .workspace-detail-bento:has(.board-view) {
-      grid-template-columns: repeat(5, 1fr);
+      grid-template-columns: repeat(7, 1fr);
       grid-template-rows: 1fr auto;
       height: auto;
       min-height: 500px;
@@ -3075,28 +3247,38 @@
     }
 
     /* Rearrange other panels to bottom row when board view is active */
-    .workspace-detail-bento:has(.board-view) .workspace-detail-panel-notes {
+    .workspace-detail-bento:has(.board-view) .workspace-detail-panel-sessions {
       grid-column: 1;
       grid-row: 2;
     }
 
-    .workspace-detail-bento:has(.board-view) .workspace-detail-panel-files {
+    .workspace-detail-bento:has(.board-view) .workspace-detail-panel-notes {
       grid-column: 2;
       grid-row: 2;
     }
 
-    .workspace-detail-bento:has(.board-view) .workspace-detail-panel-directories {
+    .workspace-detail-bento:has(.board-view) .workspace-detail-panel-files {
       grid-column: 3;
       grid-row: 2;
     }
 
-    .workspace-detail-bento:has(.board-view) .workspace-detail-panel-mcp {
+    .workspace-detail-bento:has(.board-view) .workspace-detail-panel-directories {
       grid-column: 4;
       grid-row: 2;
     }
 
-    .workspace-detail-bento:has(.board-view) .workspace-detail-panel-schedules {
+    .workspace-detail-bento:has(.board-view) .workspace-detail-panel-mcp {
       grid-column: 5;
+      grid-row: 2;
+    }
+
+    .workspace-detail-bento:has(.board-view) .workspace-detail-panel-skills {
+      grid-column: 6;
+      grid-row: 2;
+    }
+
+    .workspace-detail-bento:has(.board-view) .workspace-detail-panel-schedules {
+      grid-column: 7;
       grid-row: 2;
     }
 
@@ -3132,24 +3314,32 @@
     }
 
     /* Stagger animation for bottom panels */
-    .workspace-detail-bento:has(.board-view) .workspace-detail-panel-notes {
+    .workspace-detail-bento:has(.board-view) .workspace-detail-panel-sessions {
       animation-delay: 0.05s;
     }
 
-    .workspace-detail-bento:has(.board-view) .workspace-detail-panel-files {
+    .workspace-detail-bento:has(.board-view) .workspace-detail-panel-notes {
       animation-delay: 0.1s;
     }
 
-    .workspace-detail-bento:has(.board-view) .workspace-detail-panel-directories {
+    .workspace-detail-bento:has(.board-view) .workspace-detail-panel-files {
       animation-delay: 0.15s;
     }
 
-    .workspace-detail-bento:has(.board-view) .workspace-detail-panel-mcp {
+    .workspace-detail-bento:has(.board-view) .workspace-detail-panel-directories {
       animation-delay: 0.2s;
     }
 
-    .workspace-detail-bento:has(.board-view) .workspace-detail-panel-schedules {
+    .workspace-detail-bento:has(.board-view) .workspace-detail-panel-mcp {
       animation-delay: 0.25s;
+    }
+
+    .workspace-detail-bento:has(.board-view) .workspace-detail-panel-skills {
+      animation-delay: 0.3s;
+    }
+
+    .workspace-detail-bento:has(.board-view) .workspace-detail-panel-schedules {
+      animation-delay: 0.35s;
     }
 
     /* Children workspaces grid */

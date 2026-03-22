@@ -27,8 +27,7 @@ func TestFileStore_SaveLoad_NestedRoundTrip(t *testing.T) {
 	stats.UpdatedAt = stats.LastActive
 
 	source := &fileStore{
-		path:    indexPath,
-		current: "alpha",
+		path: indexPath,
 		agents: map[string]*agent.Agent{
 			"alpha": {
 				Type:         agent.TypeGeneral,
@@ -55,6 +54,13 @@ func TestFileStore_SaveLoad_NestedRoundTrip(t *testing.T) {
 					Tags:        []string{"analysis", "primary"},
 					AvatarColor: "#3366ff",
 					Favorite:    true,
+					RoutingProfile: &types.AgentRoutingProfile{
+						MatchPhrases:    []string{"open my latest reaper project"},
+						ExampleRequests: []string{"render stems from yesterday's session"},
+						Domains:         []string{"reaper", "audio"},
+						ExternalSystems: []string{"reaper"},
+						SideEffects:     "local_app",
+					},
 				},
 			},
 		},
@@ -70,10 +76,6 @@ func TestFileStore_SaveLoad_NestedRoundTrip(t *testing.T) {
 	}
 	if err := loaded.load(); err != nil {
 		t.Fatalf("load() failed: %v", err)
-	}
-
-	if loaded.current != "alpha" {
-		t.Fatalf("expected current agent alpha, got %q", loaded.current)
 	}
 
 	got, ok := loaded.agents["alpha"]
@@ -125,6 +127,12 @@ func TestFileStore_SaveLoad_NestedRoundTrip(t *testing.T) {
 	}
 	if !got.Metadata.Favorite {
 		t.Error("expected metadata favorite to persist")
+	}
+	if got.Metadata.RoutingProfile == nil {
+		t.Fatal("expected routing profile to be loaded")
+	}
+	if len(got.Metadata.RoutingProfile.ExampleRequests) != 1 {
+		t.Errorf("expected routing profile examples to persist, got %d", len(got.Metadata.RoutingProfile.ExampleRequests))
 	}
 }
 

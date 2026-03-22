@@ -78,7 +78,7 @@ func (o *Orchestrator) HandleGatewayMessage(ctx context.Context, msg gateway.Mes
 
 	// Fallback: Use first available agent if planning failed or returned no matches
 	if agentName == "" {
-		agents, _ := o.agentStore.ListAgents()
+		agents := o.agentStore.ListAgents()
 		if len(agents) == 0 {
 			return fmt.Errorf("no agents found in store")
 		}
@@ -281,7 +281,7 @@ func (o *Orchestrator) ExecuteCollaborativeTask(ctx context.Context, mainAgent s
 
 // findAgentsByRoles finds agents that match the required roles
 func (o *Orchestrator) findAgentsByRoles(requiredRoles []types.AgentRole) ([]string, error) {
-	allAgents, _ := o.agentStore.ListAgents()
+	allAgents := o.agentStore.ListAgents()
 
 	selectedAgents := make(map[types.AgentRole]string)
 
