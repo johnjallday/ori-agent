@@ -77,6 +77,36 @@
     }
   };
 
+  const HOME_PLANNING_SPECIALISTS = {
+    travel_itinerary: {
+      key: 'travel_itinerary',
+      agentName: 'Travel Itinerary Planner',
+      label: 'Travel Itinerary Planner',
+      type: 'research',
+      tags: ['travel', 'itinerary', 'planning', 'workspace-specialist'],
+      description: 'Plans multi-city trips with day-by-day pacing, neighborhood suggestions, food highlights, local logistics, and route-aware recommendations.',
+      systemPrompt: 'You are a travel itinerary planner. Build practical, day-by-day trip plans with realistic pacing, local food and neighborhood recommendations, transit notes, and concise options. Ask clarifying questions when key details are missing and avoid inventing bookings or confirmed reservations.'
+    },
+    hotel_booking: {
+      key: 'hotel_booking',
+      agentName: 'Hotel Booking Agent',
+      label: 'Hotel Booking Agent',
+      type: 'research',
+      tags: ['travel', 'hotels', 'lodging', 'workspace-specialist'],
+      description: 'Finds and compares hotels by neighborhood, budget, amenities, and travel constraints.',
+      systemPrompt: 'You are a hotel booking assistant. Help compare neighborhoods, lodging tradeoffs, budget fit, and stay logistics. Be explicit about assumptions, keep recommendations concise, and ask for missing constraints before making suggestions.'
+    },
+    flight_booking: {
+      key: 'flight_booking',
+      agentName: 'Flight Booking Agent',
+      label: 'Flight Booking Agent',
+      type: 'research',
+      tags: ['travel', 'flights', 'transport', 'workspace-specialist'],
+      description: 'Helps fill booking gaps for flights and longer-distance travel legs with schedule and transfer considerations.',
+      systemPrompt: 'You are a flight booking assistant. Help identify missing flight or long-distance travel legs, compare route options, call out tradeoffs, and confirm timing constraints before recommending bookings.'
+    }
+  };
+
   const HOME_CAPABILITY_REQUIREMENTS = [
     {
       key: 'calendar_access',
@@ -1242,6 +1272,8 @@
       closeHomeAssistantThinkingModal();
     }
     syncHomeAssistantThinkingStatus();
+    renderHomeAssistantPlanning();
+    renderHomeAssistantInlineReply();
   }
 
   function appendHomeAssistantMessage(role, text) {
@@ -1317,66 +1349,450 @@
     }
   }
 
-  function buildTravelPlanningAnswerSummary(planningState) {
-    if (!planningState) return '';
+  function getPlanningQuestions(planningState) {
+    if (!planningState || !planningState.schema || !Array.isArray(planningState.schema.questions)) {
+      return [];
+    }
+    return planningState.schema.questions;
+  }
 
+  function findPlanningQuestionById(planningState, questionId) {
+    var questions = getPlanningQuestions(planningState);
+    var target = String(questionId || '').trim();
+    if (!target) return null;
+    for (var i = 0; i < questions.length; i++) {
+      var question = questions[i];
+      if (String(question && question.id || '').trim() === target) {
+        return question;
+      }
+    }
+    return null;
+  }
+
+  function shouldShowPlanningQuestion(question, planningState) {
+    if (!question) return false;
+    var visibility = question.visible_when;
+    if (!visibility || !visibility.question_id) return true;
+
+    var formData = planningState && planningState.formData ? planningState.formData : {};
+    var sourceValue = formData[visibility.question_id];
+    var normalizedSource = normalizeToken(sourceValue);
+    if (visibility.not_empty) {
+      return Boolean(String(sourceValue || '').trim());
+    }
+
+    var anyOf = Array.isArray(visibility.any_of) ? visibility.any_of : [];
+    if (anyOf.length > 0) {
+      for (var i = 0; i < anyOf.length; i++) {
+        if (normalizedSource === normalizeToken(anyOf[i])) {
+          return true;
+        }
+      }
+      return false;
+    }
+
+    return true;
+  }
+
+  function getPlanningOptionLabel(question, value) {
+    var options = question && Array.isArray(question.options) ? question.options : [];
+    var raw = String(value || '');
+    for (var i = 0; i < options.length; i++) {
+      var option = options[i] || {};
+      if (String(option.value || '') === raw) {
+        return String(option.label || raw).trim();
+      }
+    }
+    return raw;
+  }
+
+  function getPlanningQuestionDisplayValue(question, value) {
+    if (!question) return String(value || '').trim();
+    if (question.type === 'select') {
+      return getPlanningOptionLabel(question, value);
+    }
+    return String(value || '').trim();
+  }
+
+  function buildPlanningFormAnswerSummary(planningState) {
+    if (!planningState || !planningState.schema) return '';
+
+    var questions = getPlanningQuestions(planningState);
     var formData = planningState.formData || {};
-    var lines = ['Travel intake update:'];
-    if (planningState.requiresDates) {
-      lines.push('- Travel dates and route: ' + String(formData.dateDetails || '').trim());
-    } else if (String(formData.dateDetails || '').trim()) {
-      lines.push('- Route/date adjustment: ' + String(formData.dateDetails || '').trim());
-    } else {
-      lines.push('- Route and dates: use the original request');
+    var uploads = planningState.uploads || {};
+    var lines = [String(planningState.schema.title || 'Planning update').trim() + ':'];
+
+    for (var i = 0; i < questions.length; i++) {
+      var question = questions[i];
+      if (!shouldShowPlanningQuestion(question, planningState)) continue;
+
+      if (question.type === 'file') {
+        if (uploads[question.id]) {
+          lines.push('- ' + question.label + ': upload modal opened in this workspace');
+        }
+        continue;
+      }
+
+      var rawValue = formData[question.id];
+      var displayValue = getPlanningQuestionDisplayValue(question, rawValue);
+      if (displayValue) {
+        lines.push('- ' + question.label + ': ' + displayValue);
+      } else if (question.required) {
+        lines.push('- ' + question.label + ': not answered yet');
+      }
     }
-    lines.push('- Flights booked: ' + formatTravelPlanningBookingLabel(formData.flightsBooked));
-    if (planningState.uploads && planningState.uploads.flight) {
-      lines.push('- Flight confirmation: upload modal opened in this workspace');
-    }
-    lines.push('- Hotels booked: ' + formatTravelPlanningBookingLabel(formData.hotelsBooked));
-    if (planningState.uploads && planningState.uploads.hotel) {
-      lines.push('- Hotel confirmation: upload modal opened in this workspace');
-    }
-    lines.push('- Pace: ' + formatTravelPlanningPaceLabel(formData.pace));
-    lines.push('- Budget: ' + formatTravelPlanningBudgetLabel(formData.budget));
-    if (String(formData.preferences || '').trim()) {
-      lines.push('- Preferences and must-dos: ' + String(formData.preferences || '').trim());
-    } else {
-      lines.push('- Preferences and must-dos: not answered yet');
-    }
+
     return lines.join('\n');
   }
 
-  function buildStructuredTravelPlanningPrompt(planningState) {
-    if (!planningState) return '';
+  function buildStructuredPlanningFormPrompt(planningState) {
+    if (!planningState || !planningState.schema) return '';
 
+    var questions = getPlanningQuestions(planningState);
     var formData = planningState.formData || {};
-    var dateDetails = String(formData.dateDetails || '').trim();
-    var intakePayload = {
-      original_request: String(planningState.prompt || '').trim(),
-      date_or_route_details: planningState.requiresDates
-        ? dateDetails
-        : (dateDetails || 'Use the dates and city order already present in the original request.'),
-      flights_booked: formatTravelPlanningBookingLabel(formData.flightsBooked),
-      hotels_booked: formatTravelPlanningBookingLabel(formData.hotelsBooked),
-      preferences_and_constraints: String(formData.preferences || '').trim() || 'Not provided yet',
-      pace: formatTravelPlanningPaceLabel(formData.pace),
-      budget: formatTravelPlanningBudgetLabel(formData.budget),
-      workspace_file_follow_up: {
-        flight_confirmation_upload_opened: Boolean(planningState.uploads && planningState.uploads.flight),
-        hotel_confirmation_upload_opened: Boolean(planningState.uploads && planningState.uploads.hotel)
+    var uploads = planningState.uploads || {};
+    var answers = [];
+    var attachments = [];
+
+    for (var i = 0; i < questions.length; i++) {
+      var question = questions[i];
+      if (!shouldShowPlanningQuestion(question, planningState)) continue;
+
+      if (question.type === 'file') {
+        attachments.push({
+          id: question.id,
+          label: question.label,
+          attachment_kind: question.file_config && question.file_config.attachment_kind ? question.file_config.attachment_kind : question.id,
+          upload_modal_opened: Boolean(uploads[question.id])
+        });
+        continue;
       }
+
+      var rawValue = formData[question.id];
+      answers.push({
+        id: question.id,
+        label: question.label,
+        type: question.type,
+        value: rawValue == null ? '' : rawValue,
+        display_value: getPlanningQuestionDisplayValue(question, rawValue),
+        required: Boolean(question.required)
+      });
+    }
+
+    var payload = {
+      form_id: planningState.schema.id || '',
+      form_kind: planningState.schema.kind || '',
+      form_title: planningState.schema.title || '',
+      original_request: String(planningState.prompt || '').trim(),
+      answers: answers,
+      attachments: attachments
     };
 
     return [
-      'Structured travel intake for the workspace manager:',
-      JSON.stringify(intakePayload, null, 2),
+      'Structured planning form submission:',
+      JSON.stringify(payload, null, 2),
       '',
-      'Manager reply rules:',
-      '- Treat this as intake context, not a request for a full itinerary.',
-      '- Ask only the remaining missing questions.',
-      '- If the intake is sufficient, summarize the next step and ask whether to invite or create travel itinerary, hotel booking, or flight booking specialists.'
+      'Follow-up instructions:',
+      String(planningState.schema.submit_instructions || 'Use this structured planning intake to continue the conversation.').trim()
     ].join('\n');
+  }
+
+  function normalizePlanningFormSchema(schema) {
+    if (!schema || typeof schema !== 'object') return null;
+
+    return {
+      id: String(schema.id || '').trim(),
+      kind: String(schema.kind || '').trim(),
+      title: String(schema.title || 'Planning Step').trim(),
+      subtitle: String(schema.subtitle || '').trim(),
+      summary: String(schema.summary || '').trim(),
+      submit_label: String(schema.submit_label || '').trim(),
+      submit_instructions: String(schema.submit_instructions || '').trim(),
+      questions: Array.isArray(schema.questions) ? schema.questions : []
+    };
+  }
+
+  function activateHomeAssistantPlanningForm(schema, options) {
+    var normalizedSchema = normalizePlanningFormSchema(schema);
+    if (!normalizedSchema) return;
+
+    clearHomeAssistantInlineReply();
+    homeAssistantState.planningState = {
+      kind: 'planning_form',
+      prompt: String(options && options.prompt || '').trim(),
+      routeContext: normalizeHomeRouteContext(options && options.routeContext),
+      intent: options && options.intent ? options.intent : HOME_INTENTS.general_task,
+      agentLabel: String(options && options.agentLabel || getWorkspaceHomeAssistantDisplayName()).trim() || getWorkspaceHomeAssistantDisplayName(),
+      schema: normalizedSchema,
+      formData: {},
+      uploads: {},
+      submitting: false,
+      focusField: ''
+    };
+
+    var questions = getPlanningQuestions(homeAssistantState.planningState);
+    for (var i = 0; i < questions.length; i++) {
+      var question = questions[i];
+      homeAssistantState.planningState.formData[question.id] = question.default_value || '';
+      if (!homeAssistantState.planningState.focusField && question.required) {
+        homeAssistantState.planningState.focusField = question.id;
+      }
+    }
+
+    renderHomeAssistantPlanning();
+  }
+
+  function derivePlanningReviewNoteName(planningState) {
+    var prompt = String(planningState && planningState.prompt || '').trim();
+    if (/\bspain\b/i.test(prompt)) return 'Spain Trip Intake';
+    if (planningState && planningState.schema && planningState.schema.kind === 'travel_intake') {
+      return 'Travel Intake Summary';
+    }
+    return truncateText((planningState && planningState.schema && planningState.schema.title) || 'Planning Summary', 60);
+  }
+
+  function buildPlanningReviewNoteContent(planningState) {
+    var lines = [
+      '# ' + derivePlanningReviewNoteName(planningState),
+      '',
+      'Original request:',
+      String(planningState && planningState.prompt || '').trim(),
+      '',
+      buildPlanningFormAnswerSummary(planningState)
+    ];
+    return lines.join('\n').trim();
+  }
+
+  function activateHomeAssistantPlanningReview(planningState) {
+    if (!planningState || planningState.kind !== 'planning_form' || !planningState.schema) return;
+
+    clearHomeAssistantInlineReply();
+    homeAssistantState.planningState = {
+      kind: 'planning_review',
+      prompt: planningState.prompt,
+      routeContext: normalizeHomeRouteContext(planningState.routeContext),
+      intent: planningState.intent || HOME_INTENTS.general_task,
+      agentLabel: planningState.agentLabel || getWorkspaceHomeAssistantDisplayName(),
+      schema: planningState.schema,
+      summaryText: buildPlanningFormAnswerSummary(planningState),
+      dispatchPrompt: buildStructuredPlanningFormPrompt(planningState),
+      noteName: derivePlanningReviewNoteName(planningState),
+      noteSaved: null,
+      noteSaving: false,
+      specialistStatuses: {},
+      specialistBusy: '',
+      continuing: false
+    };
+
+    renderHomeAssistantPlanning();
+  }
+
+  function getPlanningReviewState() {
+    var planningState = homeAssistantState.planningState;
+    if (!planningState || planningState.kind !== 'planning_review') return null;
+    return planningState;
+  }
+
+  async function savePlanningReviewToNote() {
+    var planningState = getPlanningReviewState();
+    if (!planningState || planningState.noteSaving || planningState.noteSaved) return;
+
+    var workspaceId = hasWorkspaceRouteContext(planningState.routeContext)
+      ? String(planningState.routeContext.workspace_id || '').trim()
+      : '';
+    if (!workspaceId) {
+      if (window.Toast) Toast.warning('Open this flow from a workspace before saving a note.');
+      return;
+    }
+
+    planningState.noteSaving = true;
+    renderHomeAssistantPlanning();
+
+    try {
+      var notePayload = {
+        name: planningState.noteName || 'Planning Summary',
+        content: buildPlanningReviewNoteContent(planningState)
+      };
+      var data = null;
+      if (typeof API !== 'undefined' && typeof API.post === 'function') {
+        data = await API.post('/api/workspaces/' + encodeURIComponent(workspaceId) + '/notes', notePayload);
+      } else {
+        var response = await fetch('/api/workspaces/' + encodeURIComponent(workspaceId) + '/notes', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(notePayload)
+        });
+        if (!response.ok) throw new Error('Failed to create note');
+        data = await response.json();
+      }
+
+      var savedName = data && data.note && data.note.name
+        ? String(data.note.name).trim()
+        : notePayload.name;
+      planningState.noteSaved = {
+        id: data && data.note && data.note.id ? String(data.note.id).trim() : '',
+        name: savedName
+      };
+
+      if (window.workspaceDetail &&
+          String(window.workspaceDetail.workspaceId || '').trim() === workspaceId &&
+          typeof window.workspaceDetail.loadWorkspace === 'function') {
+        window.workspaceDetail.loadWorkspace();
+      }
+
+      appendHomeAssistantMessage('assistant', 'Saved the intake summary to note "' + savedName + '".');
+      setHomeAssistantRoutingSummary('Planning Review', 'Intake summary saved to this workspace.');
+    } catch (error) {
+      dashLog.debug('Failed to save planning review note', { error: error && error.message || error });
+      appendHomeAssistantMessage('assistant', 'I could not save the intake summary to a note right now.');
+      setHomeAssistantRoutingSummary('Planning Review', 'Could not save the intake summary to a note.');
+      if (window.Toast) Toast.error('Failed to save note');
+    } finally {
+      planningState.noteSaving = false;
+      renderHomeAssistantPlanning();
+    }
+  }
+
+  function findExactAgentByName(agents, agentName) {
+    var target = normalizeToken(agentName);
+    if (!target || !Array.isArray(agents)) return null;
+    for (var i = 0; i < agents.length; i++) {
+      var agentInfo = agents[i];
+      var name = typeof agentInfo === 'string' ? agentInfo : agentInfo && agentInfo.name;
+      if (normalizeToken(name) === target) return agentInfo;
+    }
+    return null;
+  }
+
+  async function createPlanningSpecialistAgent(config, planningState) {
+    if (!config) throw new Error('Missing specialist configuration');
+    if (typeof API === 'undefined' || typeof API.post !== 'function' || typeof API.get !== 'function') {
+      throw new Error('Agent API unavailable');
+    }
+
+    var listData = await API.get('/api/agents');
+    var existing = (listData && listData.agents) || [];
+    var existingNames = [];
+    for (var i = 0; i < existing.length; i++) {
+      var agentInfo = existing[i];
+      existingNames.push(typeof agentInfo === 'string' ? agentInfo : agentInfo.name);
+    }
+
+    var agentName = buildUniqueAgentName(config.agentName, existingNames);
+    var payload = {
+      name: agentName,
+      type: config.type,
+      system_prompt: config.systemPrompt,
+      description: config.description + ' Workspace context: "' + truncateText(String(planningState.summaryText || '').trim(), 180) + '".',
+      tags: uniqueValues((config.tags || []).concat(['workspace-specialist', 'planning-review']))
+    };
+
+    var selectedModel = await resolveAutoSelectedModel(payload.type, '');
+    if (selectedModel) payload.model = selectedModel;
+
+    if (isSemiAutoMode() || !payload.model) {
+      var confirmation = await confirmAgentCreationWithModal(payload);
+      if (!confirmation || confirmation.status !== 'created') {
+        if (confirmation && confirmation.status === 'unavailable') {
+          throw new Error('Create Agent modal unavailable');
+        }
+        throw new Error('Agent creation canceled');
+      }
+      return confirmation.agentName;
+    }
+
+    await API.post('/api/agents', payload);
+    return agentName;
+  }
+
+  async function openWorkspaceSpecialistChat(agentName, routeContext) {
+    if (!agentName) return;
+    var session = await openOrCreateChatSession(agentName, routeContext);
+    if (!session) throw new Error('Failed to open agent chat');
+    openChatPanel();
+  }
+
+  async function addPlanningReviewSpecialist(specialistKey) {
+    var planningState = getPlanningReviewState();
+    var config = HOME_PLANNING_SPECIALISTS[specialistKey];
+    if (!planningState || !config) return;
+
+    var existingStatus = planningState.specialistStatuses[specialistKey];
+    if (existingStatus && existingStatus.status === 'added' && existingStatus.agentName) {
+      await openWorkspaceSpecialistChat(existingStatus.agentName, planningState.routeContext);
+      return;
+    }
+    if (planningState.specialistBusy) return;
+
+    planningState.specialistBusy = specialistKey;
+    renderHomeAssistantPlanning();
+
+    try {
+      var agents = await fetchAgentsForMatching();
+      var existingAgent = findExactAgentByName(agents, config.agentName);
+      var agentName = existingAgent
+        ? (typeof existingAgent === 'string' ? existingAgent : existingAgent.name)
+        : await createPlanningSpecialistAgent(config, planningState);
+
+      var addedToWorkspace = await addAgentToWorkspaceIfNeeded(agentName, planningState.routeContext);
+      if (!addedToWorkspace) {
+        throw new Error('Failed to attach specialist to workspace');
+      }
+      planningState.specialistStatuses[specialistKey] = {
+        status: 'added',
+        agentName: agentName,
+        created: !existingAgent
+      };
+
+      appendHomeAssistantMessage(
+        'assistant',
+        (existingAgent ? 'Added ' : 'Created and added ') + '"' + agentName + '" to this workspace.'
+      );
+      setHomeAssistantRoutingSummary(config.label, '"' + agentName + '" is now available in this workspace.');
+    } catch (error) {
+      dashLog.debug('Failed to add planning specialist', {
+        specialistKey: specialistKey,
+        error: error && error.message || error
+      });
+      appendHomeAssistantMessage('assistant', 'I could not add "' + config.label + '" right now.');
+      setHomeAssistantRoutingSummary(config.label, 'Could not add this specialist right now.');
+    } finally {
+      planningState.specialistBusy = '';
+      renderHomeAssistantPlanning();
+    }
+  }
+
+  async function continuePlanningReviewWithManager() {
+    var planningState = getPlanningReviewState();
+    if (!planningState || planningState.continuing) return;
+
+    planningState.continuing = true;
+    renderHomeAssistantPlanning();
+    setHomeAssistantBusy(true, 'Sending Plan...');
+    setHomeAssistantRoutingSummary(
+      planningState.agentLabel,
+      'Continuing with the workspace manager using the reviewed intake summary.'
+    );
+
+    try {
+      await openWorkspaceAssistantForPrompt(
+        planningState.prompt,
+        planningState.routeContext,
+        planningState.intent,
+        {
+          dispatchPrompt: planningState.dispatchPrompt,
+          preservePlanningReview: true
+        }
+      );
+    } catch (error) {
+      dashLog.debug('Planning review handoff failed', { error: error && error.message || error });
+      appendHomeAssistantMessage('assistant', 'I could not continue with the workspace manager right now.');
+      setHomeAssistantRoutingSummary('Planning Review', 'Could not continue with the workspace manager right now.');
+    } finally {
+      planningState.continuing = false;
+      setHomeAssistantBusy(false);
+      renderHomeAssistantPlanning();
+    }
   }
 
   function clearHomeAssistantPlanning() {
@@ -1407,12 +1823,17 @@
     renderHomeAssistantInlineReply();
   }
 
-  function openWorkspacePlanningFileUpload(kind) {
+  function openWorkspacePlanningFileUpload(questionId) {
     var planningState = homeAssistantState.planningState;
-    if (!planningState || planningState.kind !== 'travel_intake') return;
+    if (!planningState || planningState.kind !== 'planning_form') return;
 
-    var normalizedKind = normalizeToken(kind) === 'hotel' ? 'hotel' : 'flight';
-    var attachmentLabel = normalizedKind === 'hotel' ? 'hotel confirmation' : 'flight confirmation';
+    var question = findPlanningQuestionById(planningState, questionId);
+    if (!question || question.type !== 'file') return;
+
+    var statusText = question.file_config && question.file_config.opened_status
+      ? String(question.file_config.opened_status).trim()
+      : 'Upload modal opened for this planning step.';
+
     try {
       if (window.workspaceDetail && typeof window.workspaceDetail.showFileModal === 'function') {
         window.workspaceDetail.showFileModal();
@@ -1422,22 +1843,37 @@
         throw new Error('File upload modal unavailable');
       }
 
-      if (!planningState.uploads) {
-        planningState.uploads = { flight: false, hotel: false };
-      }
-      planningState.uploads[normalizedKind] = true;
-      setHomeAssistantRoutingSummary('Trip Planning Intake', 'Attach the ' + attachmentLabel + ' to this workspace, then continue the intake step.');
+      planningState.uploads[question.id] = true;
+      setHomeAssistantRoutingSummary(planningState.schema.title || 'Planning Step', statusText);
       renderHomeAssistantPlanning();
     } catch (error) {
       dashLog.debug('Failed to open workspace planning upload modal', {
-        kind: normalizedKind,
+        questionId: questionId,
         error: error && error.message || error
       });
       if (window.Toast) {
         Toast.error('File upload modal is unavailable right now.');
       }
-      setHomeAssistantRoutingSummary('Trip Planning Intake', 'Could not open the upload modal for the ' + attachmentLabel + '.');
+      setHomeAssistantRoutingSummary(planningState.schema.title || 'Planning Step', 'Could not open the upload modal right now.');
     }
+  }
+
+  function validatePlanningFormState(planningState) {
+    var questions = getPlanningQuestions(planningState);
+    var formData = planningState && planningState.formData ? planningState.formData : {};
+
+    for (var i = 0; i < questions.length; i++) {
+      var question = questions[i];
+      if (!question || !question.required || !shouldShowPlanningQuestion(question, planningState)) continue;
+      if (question.type === 'file') continue;
+
+      var value = formData[question.id];
+      if (!String(value || '').trim()) {
+        return question;
+      }
+    }
+
+    return null;
   }
 
   function renderHomeAssistantPlanning() {
@@ -1447,7 +1883,7 @@
 
     var planningState = homeAssistantState.planningState;
     container.innerHTML = '';
-    if (!planningState || planningState.kind !== 'travel_intake') {
+    if (!planningState || !planningState.schema || (planningState.kind !== 'planning_form' && planningState.kind !== 'planning_review')) {
       container.classList.add('d-none');
       syncHomeAssistantLauncher();
       if (!homeAssistantState.busy) {
@@ -1456,7 +1892,124 @@
       return;
     }
 
+    if (planningState.kind === 'planning_review') {
+      var isReviewBusy = Boolean(
+        homeAssistantState.busy ||
+        planningState.noteSaving ||
+        planningState.specialistBusy ||
+        planningState.continuing
+      );
+
+      var reviewCard = document.createElement('div');
+      reviewCard.className = 'home-assistant-planning-card';
+
+      var reviewEyebrow = document.createElement('div');
+      reviewEyebrow.className = 'home-assistant-planning-eyebrow';
+      reviewEyebrow.textContent = 'Planning Review';
+      reviewCard.appendChild(reviewEyebrow);
+
+      var reviewTitle = document.createElement('div');
+      reviewTitle.className = 'home-assistant-planning-title';
+      reviewTitle.textContent = planningState.schema.title || 'Review Intake Summary';
+      reviewCard.appendChild(reviewTitle);
+
+      var reviewSubtitle = document.createElement('p');
+      reviewSubtitle.className = 'home-assistant-planning-subtitle';
+      reviewSubtitle.textContent = 'Review the summary, save it to a note if you want, and choose what should happen next.';
+      reviewCard.appendChild(reviewSubtitle);
+
+      var reviewSummary = document.createElement('div');
+      reviewSummary.className = 'home-assistant-planning-summary';
+      reviewSummary.textContent = planningState.summaryText || 'No planning summary available.';
+      reviewCard.appendChild(reviewSummary);
+
+      if (planningState.noteSaved && planningState.noteSaved.name) {
+        var noteStatus = document.createElement('div');
+        noteStatus.className = 'home-assistant-planning-help';
+        noteStatus.textContent = 'Saved to workspace note "' + planningState.noteSaved.name + '".';
+        reviewCard.appendChild(noteStatus);
+      }
+
+      var noteActions = document.createElement('div');
+      noteActions.className = 'home-assistant-planning-actions';
+
+      var saveNoteButton = document.createElement('button');
+      saveNoteButton.type = 'button';
+      saveNoteButton.className = 'modern-btn modern-btn-secondary';
+      saveNoteButton.disabled = isReviewBusy || Boolean(planningState.noteSaved);
+      saveNoteButton.textContent = planningState.noteSaving
+        ? 'Saving Note...'
+        : (planningState.noteSaved && planningState.noteSaved.name
+            ? 'Saved To "' + planningState.noteSaved.name + '"'
+            : 'Save Summary To Note');
+      saveNoteButton.addEventListener('click', function () {
+        savePlanningReviewToNote();
+      });
+      noteActions.appendChild(saveNoteButton);
+
+      var continueButton = document.createElement('button');
+      continueButton.type = 'button';
+      continueButton.className = 'modern-btn modern-btn-primary';
+      continueButton.disabled = isReviewBusy;
+      continueButton.textContent = planningState.continuing
+        ? 'Continuing...'
+        : ('Continue With ' + planningState.agentLabel);
+      continueButton.addEventListener('click', function () {
+        continuePlanningReviewWithManager();
+      });
+      noteActions.appendChild(continueButton);
+      reviewCard.appendChild(noteActions);
+
+      var specialistHelp = document.createElement('div');
+      specialistHelp.className = 'home-assistant-planning-help';
+      specialistHelp.style.marginTop = '0.35rem';
+      specialistHelp.textContent = 'Add specialists to the workspace now, or open them after they are added.';
+      reviewCard.appendChild(specialistHelp);
+
+      var specialistActions = document.createElement('div');
+      specialistActions.className = 'home-assistant-planning-actions';
+
+      Object.keys(HOME_PLANNING_SPECIALISTS).forEach(function (specialistKey) {
+        var config = HOME_PLANNING_SPECIALISTS[specialistKey];
+        var status = planningState.specialistStatuses[specialistKey] || null;
+        var specialistButton = document.createElement('button');
+        specialistButton.type = 'button';
+        specialistButton.className = 'modern-btn modern-btn-secondary';
+        specialistButton.disabled = isReviewBusy && planningState.specialistBusy !== specialistKey;
+        if (planningState.specialistBusy === specialistKey) {
+          specialistButton.disabled = true;
+          specialistButton.textContent = 'Adding ' + config.label + '...';
+        } else if (status && status.status === 'added' && status.agentName) {
+          specialistButton.textContent = 'Open ' + status.agentName;
+        } else {
+          specialistButton.textContent = 'Add ' + config.label;
+        }
+        specialistButton.addEventListener('click', function () {
+          addPlanningReviewSpecialist(specialistKey);
+        });
+        specialistActions.appendChild(specialistButton);
+      });
+
+      var askAnotherButton = document.createElement('button');
+      askAnotherButton.type = 'button';
+      askAnotherButton.className = 'modern-btn modern-btn-secondary';
+      askAnotherButton.disabled = isReviewBusy;
+      askAnotherButton.textContent = 'Ask Another Task';
+      askAnotherButton.addEventListener('click', function () {
+        focusHomeAssistantInput();
+      });
+      specialistActions.appendChild(askAnotherButton);
+
+      reviewCard.appendChild(specialistActions);
+      container.appendChild(reviewCard);
+      container.classList.remove('d-none');
+      syncHomeAssistantLauncher();
+      openHomeAssistantThinkingModal();
+      return;
+    }
+
     var formData = planningState.formData || {};
+    var uploads = planningState.uploads || {};
     var isSubmitting = Boolean(planningState.submitting || homeAssistantState.busy);
     var card = document.createElement('div');
     card.className = 'home-assistant-planning-card';
@@ -1468,50 +2021,53 @@
 
     var title = document.createElement('div');
     title.className = 'home-assistant-planning-title';
-    title.textContent = 'Collect trip details before handoff';
+    title.textContent = planningState.schema.title || 'Planning Step';
     card.appendChild(title);
 
-    var subtitle = document.createElement('p');
-    subtitle.className = 'home-assistant-planning-subtitle';
-    subtitle.textContent = getWorkspaceHomeAssistantDisplayName() + ' will use these answers to decide what to ask next or which specialist to invite.';
-    card.appendChild(subtitle);
+    if (planningState.schema.subtitle) {
+      var subtitle = document.createElement('p');
+      subtitle.className = 'home-assistant-planning-subtitle';
+      subtitle.textContent = planningState.schema.subtitle;
+      card.appendChild(subtitle);
+    }
 
-    var summary = document.createElement('div');
-    summary.className = 'home-assistant-planning-summary';
-    summary.textContent = planningState.requiresDates
-      ? 'Original request:\n' + planningState.prompt + '\n\nTravel dates were not clearly detected. Add the missing dates or route details below.'
-      : 'Original request:\n' + planningState.prompt + '\n\nDates and route were detected. Add corrections only if anything is missing or wrong.';
-    card.appendChild(summary);
+    if (planningState.schema.summary) {
+      var summary = document.createElement('div');
+      summary.className = 'home-assistant-planning-summary';
+      summary.textContent = planningState.schema.summary;
+      card.appendChild(summary);
+    }
 
     var form = document.createElement('form');
     form.className = 'home-assistant-planning-form';
     form.noValidate = true;
 
-    function addFieldLabel(field, text, helpText) {
+    function addFieldLabel(field, question) {
       var label = document.createElement('label');
       label.className = 'home-assistant-planning-label';
-      label.textContent = text;
+      label.textContent = question.label || '';
       field.appendChild(label);
-      if (helpText) {
+      if (question.help_text) {
         var help = document.createElement('div');
         help.className = 'home-assistant-planning-help';
-        help.textContent = helpText;
+        help.textContent = question.help_text;
         field.appendChild(help);
       }
     }
 
-    function buildSelect(name, selectedValue, options) {
+    function buildSelect(question, selectedValue) {
       var select = document.createElement('select');
       select.className = 'home-assistant-planning-select';
-      select.name = name;
+      select.name = question.id;
       select.disabled = isSubmitting;
 
+      var options = Array.isArray(question.options) ? question.options : [];
       for (var i = 0; i < options.length; i++) {
-        var optionConfig = options[i];
+        var optionConfig = options[i] || {};
         var option = document.createElement('option');
-        option.value = optionConfig.value;
-        option.textContent = optionConfig.label;
-        if (String(optionConfig.value) === String(selectedValue || '')) {
+        option.value = String(optionConfig.value || '');
+        option.textContent = optionConfig.label || option.value;
+        if (String(option.value) === String(selectedValue || '')) {
           option.selected = true;
         }
         select.appendChild(option);
@@ -1519,188 +2075,118 @@
       return select;
     }
 
-    var dateField = document.createElement('div');
-    dateField.className = 'home-assistant-planning-field';
-    addFieldLabel(
-      dateField,
-      planningState.requiresDates ? 'Travel dates and route' : 'Date or route changes (optional)',
-      planningState.requiresDates
-        ? 'Example: 5/11 Lisbon arrival, 5/14 San Sebastian arrival, 5/17 Madrid arrival, 5/23 leave Spain.'
-        : 'Only fill this in if the dates or city order above need to be corrected or completed.'
-    );
+    function buildQuestionField(question) {
+      var field = document.createElement('div');
+      field.className = question.type === 'file'
+        ? 'home-assistant-planning-upload'
+        : 'home-assistant-planning-field';
 
-    if (planningState.requiresDates) {
-      var dateTextarea = document.createElement('textarea');
-      dateTextarea.className = 'home-assistant-planning-textarea';
-      dateTextarea.name = 'dateDetails';
-      dateTextarea.required = true;
-      dateTextarea.disabled = isSubmitting;
-      dateTextarea.value = formData.dateDetails || '';
-      dateTextarea.addEventListener('input', function (event) {
-        if (!homeAssistantState.planningState) return;
-        homeAssistantState.planningState.formData.dateDetails = event.target.value;
-      });
-      dateField.appendChild(dateTextarea);
-    } else {
-      var dateInput = document.createElement('input');
-      dateInput.type = 'text';
-      dateInput.className = 'home-assistant-planning-input';
-      dateInput.name = 'dateDetails';
-      dateInput.disabled = isSubmitting;
-      dateInput.value = formData.dateDetails || '';
-      dateInput.placeholder = 'Optional corrections or missing legs';
-      dateInput.addEventListener('input', function (event) {
-        if (!homeAssistantState.planningState) return;
-        homeAssistantState.planningState.formData.dateDetails = event.target.value;
-      });
-      dateField.appendChild(dateInput);
-    }
-    form.appendChild(dateField);
+      if (question.type === 'file') {
+        var uploadText = document.createElement('p');
+        uploadText.className = 'home-assistant-planning-upload-text';
+        uploadText.textContent = question.help_text || question.label || '';
+        if (uploads[question.id]) {
+          var uploadStatus = document.createElement('span');
+          uploadStatus.className = 'home-assistant-planning-upload-status';
+          uploadStatus.textContent = question.file_config && question.file_config.opened_status
+            ? question.file_config.opened_status
+            : 'Upload modal opened for this file.';
+          uploadText.appendChild(document.createElement('br'));
+          uploadText.appendChild(uploadStatus);
+        }
 
-    var grid = document.createElement('div');
-    grid.className = 'home-assistant-planning-grid';
+        var uploadButton = document.createElement('button');
+        uploadButton.type = 'button';
+        uploadButton.className = 'modern-btn modern-btn-secondary';
+        uploadButton.textContent = question.file_config && question.file_config.button_label
+          ? question.file_config.button_label
+          : (question.label || 'Attach File');
+        uploadButton.disabled = isSubmitting;
+        uploadButton.addEventListener('click', function () {
+          openWorkspacePlanningFileUpload(question.id);
+        });
 
-    var flightsField = document.createElement('div');
-    flightsField.className = 'home-assistant-planning-field';
-    addFieldLabel(flightsField, 'Are flights already booked?', 'If yes or partial, attach the confirmation in this workspace.');
-    var flightsSelect = buildSelect('flightsBooked', formData.flightsBooked, [
-      { value: '', label: 'Choose one' },
-      { value: 'yes', label: 'Yes' },
-      { value: 'partially', label: 'Partially' },
-      { value: 'no', label: 'No' },
-      { value: 'not_sure', label: 'Not sure yet' }
-    ]);
-    flightsSelect.addEventListener('change', function (event) {
-      if (!homeAssistantState.planningState) return;
-      homeAssistantState.planningState.formData.flightsBooked = event.target.value;
-      renderHomeAssistantPlanning();
-    });
-    flightsField.appendChild(flightsSelect);
-    grid.appendChild(flightsField);
-
-    var hotelsField = document.createElement('div');
-    hotelsField.className = 'home-assistant-planning-field';
-    addFieldLabel(hotelsField, 'Are hotels already booked?', 'If yes or partial, attach the confirmation in this workspace.');
-    var hotelsSelect = buildSelect('hotelsBooked', formData.hotelsBooked, [
-      { value: '', label: 'Choose one' },
-      { value: 'yes', label: 'Yes' },
-      { value: 'partially', label: 'Partially' },
-      { value: 'no', label: 'No' },
-      { value: 'not_sure', label: 'Not sure yet' }
-    ]);
-    hotelsSelect.addEventListener('change', function (event) {
-      if (!homeAssistantState.planningState) return;
-      homeAssistantState.planningState.formData.hotelsBooked = event.target.value;
-      renderHomeAssistantPlanning();
-    });
-    hotelsField.appendChild(hotelsSelect);
-    grid.appendChild(hotelsField);
-
-    var paceField = document.createElement('div');
-    paceField.className = 'home-assistant-planning-field';
-    addFieldLabel(paceField, 'What pace do you want?', 'Use this to guide how packed or relaxed the trip should feel.');
-    var paceSelect = buildSelect('pace', formData.pace, [
-      { value: '', label: 'Choose one' },
-      { value: 'relaxed', label: 'Relaxed' },
-      { value: 'balanced', label: 'Balanced' },
-      { value: 'packed', label: 'Packed' }
-    ]);
-    paceSelect.addEventListener('change', function (event) {
-      if (!homeAssistantState.planningState) return;
-      homeAssistantState.planningState.formData.pace = event.target.value;
-    });
-    paceField.appendChild(paceSelect);
-    grid.appendChild(paceField);
-
-    var budgetField = document.createElement('div');
-    budgetField.className = 'home-assistant-planning-field';
-    addFieldLabel(budgetField, 'What budget level fits best?', 'This helps decide neighborhoods, transport, and hotel recommendations later.');
-    var budgetSelect = buildSelect('budget', formData.budget, [
-      { value: '', label: 'Choose one' },
-      { value: 'budget', label: 'Budget' },
-      { value: 'mid_range', label: 'Mid-range' },
-      { value: 'premium', label: 'Premium' }
-    ]);
-    budgetSelect.addEventListener('change', function (event) {
-      if (!homeAssistantState.planningState) return;
-      homeAssistantState.planningState.formData.budget = event.target.value;
-    });
-    budgetField.appendChild(budgetSelect);
-    grid.appendChild(budgetField);
-
-    form.appendChild(grid);
-
-    if (isTravelPlanningBookedSelection(formData.flightsBooked)) {
-      var flightUpload = document.createElement('div');
-      flightUpload.className = 'home-assistant-planning-upload';
-      var flightUploadText = document.createElement('p');
-      flightUploadText.className = 'home-assistant-planning-upload-text';
-      flightUploadText.textContent = 'If you already booked your flights, attach the confirmation or travel file to this workspace.';
-      if (planningState.uploads && planningState.uploads.flight) {
-        var flightUploadStatus = document.createElement('span');
-        flightUploadStatus.className = 'home-assistant-planning-upload-status';
-        flightUploadStatus.textContent = 'Upload modal opened for flight confirmation.';
-        flightUploadText.appendChild(document.createElement('br'));
-        flightUploadText.appendChild(flightUploadStatus);
+        field.appendChild(uploadText);
+        field.appendChild(uploadButton);
+        return field;
       }
-      var flightUploadButton = document.createElement('button');
-      flightUploadButton.type = 'button';
-      flightUploadButton.className = 'modern-btn modern-btn-secondary';
-      flightUploadButton.textContent = 'Attach Flight File';
-      flightUploadButton.disabled = isSubmitting;
-      flightUploadButton.addEventListener('click', function () {
-        openWorkspacePlanningFileUpload('flight');
-      });
-      flightUpload.appendChild(flightUploadText);
-      flightUpload.appendChild(flightUploadButton);
-      form.appendChild(flightUpload);
-    }
 
-    if (isTravelPlanningBookedSelection(formData.hotelsBooked)) {
-      var hotelUpload = document.createElement('div');
-      hotelUpload.className = 'home-assistant-planning-upload';
-      var hotelUploadText = document.createElement('p');
-      hotelUploadText.className = 'home-assistant-planning-upload-text';
-      hotelUploadText.textContent = 'If you already booked hotels, attach the confirmation or travel file to this workspace.';
-      if (planningState.uploads && planningState.uploads.hotel) {
-        var hotelUploadStatus = document.createElement('span');
-        hotelUploadStatus.className = 'home-assistant-planning-upload-status';
-        hotelUploadStatus.textContent = 'Upload modal opened for hotel confirmation.';
-        hotelUploadText.appendChild(document.createElement('br'));
-        hotelUploadText.appendChild(hotelUploadStatus);
+      addFieldLabel(field, question);
+
+      if (question.type === 'select') {
+        var select = buildSelect(question, formData[question.id]);
+        select.addEventListener('change', function (event) {
+          if (!homeAssistantState.planningState) return;
+          homeAssistantState.planningState.formData[question.id] = event.target.value;
+          renderHomeAssistantPlanning();
+        });
+        field.appendChild(select);
+        return field;
       }
-      var hotelUploadButton = document.createElement('button');
-      hotelUploadButton.type = 'button';
-      hotelUploadButton.className = 'modern-btn modern-btn-secondary';
-      hotelUploadButton.textContent = 'Attach Hotel File';
-      hotelUploadButton.disabled = isSubmitting;
-      hotelUploadButton.addEventListener('click', function () {
-        openWorkspacePlanningFileUpload('hotel');
+
+      if (question.type === 'textarea') {
+        var textarea = document.createElement('textarea');
+        textarea.className = 'home-assistant-planning-textarea';
+        textarea.name = question.id;
+        textarea.disabled = isSubmitting;
+        textarea.required = Boolean(question.required);
+        textarea.rows = question.rows > 0 ? question.rows : 3;
+        textarea.value = formData[question.id] || '';
+        textarea.placeholder = question.placeholder || '';
+        textarea.addEventListener('input', function (event) {
+          if (!homeAssistantState.planningState) return;
+          homeAssistantState.planningState.formData[question.id] = event.target.value;
+        });
+        field.appendChild(textarea);
+        return field;
+      }
+
+      var input = document.createElement('input');
+      input.type = 'text';
+      input.className = 'home-assistant-planning-input';
+      input.name = question.id;
+      input.disabled = isSubmitting;
+      input.required = Boolean(question.required);
+      input.value = formData[question.id] || '';
+      input.placeholder = question.placeholder || '';
+      input.addEventListener('input', function (event) {
+        if (!homeAssistantState.planningState) return;
+        homeAssistantState.planningState.formData[question.id] = event.target.value;
       });
-      hotelUpload.appendChild(hotelUploadText);
-      hotelUpload.appendChild(hotelUploadButton);
-      form.appendChild(hotelUpload);
+      field.appendChild(input);
+      return field;
     }
 
-    var preferencesField = document.createElement('div');
-    preferencesField.className = 'home-assistant-planning-field';
-    addFieldLabel(
-      preferencesField,
-      'What do you care about most in Spain?',
-      'Share must-dos, neighborhoods, food, museums, nightlife, beaches, pace, accessibility, or any other constraints.'
-    );
-    var preferencesTextarea = document.createElement('textarea');
-    preferencesTextarea.className = 'home-assistant-planning-textarea';
-    preferencesTextarea.name = 'preferences';
-    preferencesTextarea.disabled = isSubmitting;
-    preferencesTextarea.value = formData.preferences || '';
-    preferencesTextarea.placeholder = 'Examples: pintxos in San Sebastian, art museums in Madrid, walkable areas, avoid late-night nightlife.';
-    preferencesTextarea.addEventListener('input', function (event) {
-      if (!homeAssistantState.planningState) return;
-      homeAssistantState.planningState.formData.preferences = event.target.value;
-    });
-    preferencesField.appendChild(preferencesTextarea);
-    form.appendChild(preferencesField);
+    var visibleQuestions = [];
+    var questions = getPlanningQuestions(planningState);
+    for (var i = 0; i < questions.length; i++) {
+      if (shouldShowPlanningQuestion(questions[i], planningState)) {
+        visibleQuestions.push(questions[i]);
+      }
+    }
+
+    var grid = null;
+    for (var qIndex = 0; qIndex < visibleQuestions.length; qIndex++) {
+      var question = visibleQuestions[qIndex];
+      var field = buildQuestionField(question);
+      if (question.type === 'select') {
+        if (!grid) {
+          grid = document.createElement('div');
+          grid.className = 'home-assistant-planning-grid';
+        }
+        grid.appendChild(field);
+        continue;
+      }
+
+      if (grid && grid.children.length > 0) {
+        form.appendChild(grid);
+        grid = null;
+      }
+      form.appendChild(field);
+    }
+    if (grid && grid.children.length > 0) {
+      form.appendChild(grid);
+    }
 
     var actions = document.createElement('div');
     actions.className = 'home-assistant-planning-actions';
@@ -1708,7 +2194,9 @@
     var continueButton = document.createElement('button');
     continueButton.type = 'submit';
     continueButton.className = 'modern-btn modern-btn-primary';
-    continueButton.textContent = isSubmitting ? 'Sending...' : 'Continue With ' + getWorkspaceHomeAssistantDisplayName();
+    continueButton.textContent = isSubmitting
+      ? 'Sending...'
+      : (planningState.schema.submit_label || ('Continue With ' + planningState.agentLabel));
     continueButton.disabled = isSubmitting;
     actions.appendChild(continueButton);
 
@@ -1725,7 +2213,7 @@
     form.appendChild(actions);
     form.addEventListener('submit', function (event) {
       event.preventDefault();
-      submitTravelPlanningQuestionnaire();
+      submitHomeAssistantPlanningForm();
     });
 
     card.appendChild(form);
@@ -4726,13 +5214,37 @@
     }
 
     var entryLabel = assistantSessionResult.entryAgentName ? assistantSessionResult.entryAgentName : getWorkspaceHomeAssistantDisplayName();
-    enableHomeAssistantInlineReply(routeContext, intent, entryLabel);
-    setHomeAssistantRoutingSummary(
-      entryLabel,
-      assistantSessionResult.reused
-        ? 'Reply in the box below or open chat.'
-        : 'The workspace manager replied inline. Reply in the box below or open chat.'
-    );
+    var responseData = assistantSessionResult.responseData || null;
+    var planningForm = responseData && responseData.planning_form ? responseData.planning_form : null;
+    if (planningForm) {
+      activateHomeAssistantPlanningForm(planningForm, {
+        prompt: prompt,
+        routeContext: routeContext,
+        intent: intent,
+        agentLabel: entryLabel
+      });
+      setHomeAssistantRoutingSummary(
+        entryLabel,
+        assistantSessionResult.reused
+          ? 'Complete the planning step below or open chat.'
+          : 'The workspace manager replied with a planning step. Complete it below or open chat.'
+      );
+    } else {
+      var keepPlanningReview = Boolean(options && options.preservePlanningReview);
+      if (!keepPlanningReview && homeAssistantState.planningState && homeAssistantState.planningState.kind === 'planning_review') {
+        keepPlanningReview = true;
+      }
+      if (!keepPlanningReview) {
+        clearHomeAssistantPlanning();
+      }
+      enableHomeAssistantInlineReply(routeContext, intent, entryLabel);
+      setHomeAssistantRoutingSummary(
+        entryLabel,
+        assistantSessionResult.reused
+          ? 'Reply in the box below or open chat.'
+          : 'The workspace manager replied inline. Reply in the box below or open chat.'
+      );
+    }
     renderHomeAssistantActions([
       {
         label: 'Open Chat',
@@ -5316,107 +5828,41 @@
     return null;
   }
 
-  function hasActiveWorkspaceManagerSession(routeContext) {
-    if (!hasWorkspaceRouteContext(routeContext)) return false;
-
-    var activeSession = findSessionById(getCurrentHomeSessionId());
-    var workspaceId = String(routeContext && routeContext.workspace_id || '').trim();
-    var entryAgentName = normalizeToken(homeAssistantState.workspaceEntryAgentName);
-    if (!activeSession || !workspaceId || !entryAgentName) return false;
-
-    return String(activeSession.folder_id || '').trim() === workspaceId &&
-      normalizeToken(activeSession.agent_name) === entryAgentName;
-  }
-
-  function shouldStartTravelPlanningQuestionnaire(routeContext, intent) {
-    if (!hasWorkspaceRouteContext(routeContext)) return false;
-    if (!intent || intent.key !== 'travel_planning') return false;
-    if (hasActiveWorkspaceManagerSession(routeContext)) return false;
-    return true;
-  }
-
-  function startTravelPlanningQuestionnaire(prompt, routeContext, intent) {
-    var normalizedContext = normalizeHomeRouteContext(routeContext);
-    clearHomeAssistantInlineReply();
-    homeAssistantState.planningState = {
-      kind: 'travel_intake',
-      prompt: String(prompt || '').trim(),
-      routeContext: normalizedContext,
-      intent: intent || HOME_INTENTS.travel_planning,
-      requiresDates: travelPlanningNeedsDateDetails(prompt),
-      focusField: travelPlanningNeedsDateDetails(prompt) ? 'dateDetails' : 'flightsBooked',
-      submitting: false,
-      formData: {
-        dateDetails: '',
-        flightsBooked: '',
-        hotelsBooked: '',
-        pace: '',
-        budget: '',
-        preferences: ''
-      },
-      uploads: {
-        flight: false,
-        hotel: false
-      }
-    };
-
-    renderHomeAssistantActions([]);
-    setHomeAssistantRoutingSummary('Trip Planning Intake', 'Answer a few questions before ' + getWorkspaceHomeAssistantDisplayName() + ' continues.');
-    renderHomeAssistantPlanning();
-    setHomeAssistantBusy(false);
-    openHomeAssistantThinkingModal();
-  }
-
-  async function submitTravelPlanningQuestionnaire() {
+  async function submitHomeAssistantPlanningForm() {
     var planningState = homeAssistantState.planningState;
-    if (!planningState || planningState.kind !== 'travel_intake' || planningState.submitting) return;
+    if (!planningState || planningState.kind !== 'planning_form' || planningState.submitting) return;
 
-    var dateDetails = String(planningState.formData && planningState.formData.dateDetails || '').trim();
-    if (planningState.requiresDates && !dateDetails) {
-      planningState.focusField = 'dateDetails';
+    var missingQuestion = validatePlanningFormState(planningState);
+    if (missingQuestion) {
+      planningState.focusField = missingQuestion.id;
       renderHomeAssistantPlanning();
       if (window.Toast) {
-        Toast.warning('Add the missing travel dates or route details before continuing.');
+        Toast.warning('Answer "' + missingQuestion.label + '" before continuing.');
       }
       return;
     }
 
-    planningState.submitting = true;
+    var submittingState = planningState;
+    submittingState.submitting = true;
     renderHomeAssistantPlanning();
-    appendHomeAssistantMessage('user', buildTravelPlanningAnswerSummary(planningState));
-    setHomeAssistantBusy(true, 'Sending Intake...');
-    setHomeAssistantRoutingSummary('Trip Planning Intake', 'Sending your trip details to ' + getWorkspaceHomeAssistantDisplayName() + '.');
-
-    try {
-      var dispatchPrompt = buildStructuredTravelPlanningPrompt(planningState);
-      await openWorkspaceAssistantForPrompt(
-        planningState.prompt,
-        planningState.routeContext,
-        planningState.intent,
-        { dispatchPrompt: dispatchPrompt }
-      );
-      clearHomeAssistantPlanning();
-    } catch (error) {
-      dashLog.debug('Travel planning intake handoff failed', { error: error && error.message || error });
-      planningState.submitting = false;
-      renderHomeAssistantPlanning();
-      appendHomeAssistantMessage('assistant', 'I could not continue with the workspace manager right now. Please review the intake step and try again.');
-      setHomeAssistantRoutingSummary('Trip Planning Intake Failed', 'Could not continue with the workspace manager right now.');
-      renderHomeAssistantActions([
-        {
-          label: 'Retry Intake',
-          variant: 'primary',
-          onClick: function () { submitTravelPlanningQuestionnaire(); }
-        },
-        {
-          label: 'Ask Another Task',
-          variant: 'secondary',
-          onClick: function () { focusHomeAssistantInput(); }
-        }
-      ]);
-    } finally {
-      setHomeAssistantBusy(false);
-    }
+    appendHomeAssistantMessage('user', buildPlanningFormAnswerSummary(submittingState));
+    activateHomeAssistantPlanningReview(submittingState);
+    setHomeAssistantRoutingSummary(
+      'Planning Review',
+      'Review the intake summary, save it to a note if needed, and choose the next step.'
+    );
+    renderHomeAssistantActions([
+      {
+        label: 'Open Chat',
+        variant: 'primary',
+        onClick: function () { openChatPanel(); }
+      },
+      {
+        label: 'Ask Another Task',
+        variant: 'secondary',
+        onClick: function () { focusHomeAssistantInput(); }
+      }
+    ]);
   }
 
   function isAssistantSession(session, workspaceId) {
@@ -5575,6 +6021,7 @@
     trackHomeAssistantSession(session, prompt, entryLabel);
     setHomeAssistantMode('continue_session');
     appendHomeAssistantMessage('assistant', responseText);
+    result.responseData = data;
 
     return result;
   }
@@ -7497,10 +7944,6 @@
         }
 
         if (inWorkspaceContext && shouldOpenWorkspaceAssistantForRoute(routeData, routeContext)) {
-          if (shouldStartTravelPlanningQuestionnaire(routeContext, homeAssistantState.pendingIntent)) {
-            startTravelPlanningQuestionnaire(text, routeContext, homeAssistantState.pendingIntent);
-            return;
-          }
           await openWorkspaceAssistantForPrompt(text, routeContext, homeAssistantState.pendingIntent);
           return;
         }
@@ -7517,10 +7960,6 @@
       }
 
       if (inWorkspaceContext && shouldOpenWorkspaceAssistantForRoute(routeData, routeContext)) {
-        if (shouldStartTravelPlanningQuestionnaire(routeContext, homeAssistantState.pendingIntent)) {
-          startTravelPlanningQuestionnaire(text, routeContext, homeAssistantState.pendingIntent);
-          return;
-        }
         await openWorkspaceAssistantForPrompt(text, routeContext, homeAssistantState.pendingIntent);
         return;
       }
