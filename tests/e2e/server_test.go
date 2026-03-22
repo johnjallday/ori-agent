@@ -192,51 +192,6 @@ func TestAgentLifecycle(t *testing.T) {
 	t.Log("✓ Agent deleted")
 }
 
-// TestPluginRegistry tests the plugin registry functionality
-func TestPluginRegistry(t *testing.T) {
-	if testing.Short() {
-		t.Skip("Skipping E2E test in short mode")
-	}
-
-	skipIfNoAPIKey(t)
-	ensureServerBuilt(t)
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-
-	cmd := startServer(t, ctx)
-	defer stopServer(cmd)
-
-	if err := waitForServer(baseURL, startTimeout); err != nil {
-		t.Fatalf("Server failed to start: %v", err)
-	}
-
-	client := &http.Client{Timeout: 10 * time.Second}
-
-	// List plugins
-	t.Log("Listing plugins...")
-	resp, err := client.Get(baseURL + "/api/plugins")
-	if err != nil {
-		t.Fatalf("Failed to list plugins: %v", err)
-	}
-	defer func() { _ = resp.Body.Close() }()
-
-	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		t.Fatalf("Failed to list plugins (status %d): %s", resp.StatusCode, body)
-	}
-
-	var result map[string]interface{}
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		t.Fatalf("Failed to decode plugins: %v", err)
-	}
-
-	if plugins, ok := result["plugins"]; ok {
-		t.Logf("✓ Found plugins: %v", plugins)
-	} else {
-		t.Log("✓ No plugins found (expected for fresh install)")
-	}
-}
-
 // TestSettingsEndpoint tests the settings endpoint
 func TestSettingsEndpoint(t *testing.T) {
 	if testing.Short() {

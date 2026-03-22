@@ -449,62 +449,6 @@
               </div>
             </div>
 
-            <!-- Enabled Plugins Section -->
-            <div class="col-12">
-              <div class="section-card modern-card p-4">
-                <div class="d-flex justify-content-between align-items-center mb-3">
-                  <h3 class="section-title" style="font-size: 18px; font-weight: 600; margin: 0; color: var(--text-primary);">
-                    <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" class="me-2" style="vertical-align: text-bottom;">
-                      <path d="M20.5,11H19V7C19,5.89 18.1,5 17,5H13V3.5A2.5,2.5 0 0,0 10.5,1A2.5,2.5 0 0,0 8,3.5V5H4C2.89,5 2,5.89 2,7V10.8H3.5C5,10.8 6.2,12 6.2,13.5C6.2,15 5,16.2 3.5,16.2H2V20C2,21.11 2.89,22 4,22H7.8V20.5C7.8,19 9,17.8 10.5,17.8C12,17.8 13.2,19 13.2,20.5V22H17C18.11,22 19,21.11 19,20V16H20.5A2.5,2.5 0 0,0 23,13.5A2.5,2.5 0 0,0 20.5,11Z"/>
-                    </svg>
-                    Enabled Plugins
-                    <span id="pluginCount" class="modern-badge badge-secondary ms-2" style="font-size: 12px;">0</span>
-                  </h3>
-                  <div class="d-flex align-items-center gap-2">
-                    <button class="modern-btn modern-btn-secondary" onclick="openUploadPluginModal()">
-                      <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" class="me-1">
-                        <path d="M9,16V10H5L12,3L19,10H15V16H9M5,20V18H19V20H5Z"/>
-                      </svg>
-                      Upload Plugin
-                    </button>
-                    <button id="toggleAvailablePluginsBtn" class="modern-btn modern-btn-primary" onclick="toggleAvailablePluginsPanel()" aria-expanded="true">
-                      <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" class="me-1">
-                        <path d="M7.41,15.41L12,10.83L16.59,15.41L18,14L12,8L6,14L7.41,15.41Z"/>
-                      </svg>
-                      Hide Available
-                    </button>
-                  </div>
-                </div>
-                <div id="enabledPluginsList" class="plugins-grid" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 16px;">
-                  <div class="text-center py-4" style="color: var(--text-secondary);">Loading plugins...</div>
-                </div>
-
-                <!-- Plugin Manager Panel (hidden by default) -->
-                <div id="pluginManagerPanel" style="margin-top: 20px; padding-top: 20px; border-top: 1px solid var(--border-color);">
-                  <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-2">
-                    <h4 style="font-size: 16px; font-weight: 600; margin: 0; color: var(--text-primary);">Available Plugins</h4>
-                    <div class="d-flex align-items-center gap-2">
-                      <a class="modern-btn modern-btn-secondary" href="/marketplace">
-                        <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" class="me-1">
-                          <path d="M16 6V4H8V6H3V8L5 12V20H19V12L21 8V6H16M11 18H7V12H11V18M17 18H13V12H17V18M5.67 8H18.33L17.33 10H6.67L5.67 8Z"/>
-                        </svg>
-                        Marketplace
-                      </a>
-                      <a class="modern-btn modern-btn-secondary" href="/plugins">
-                        <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" class="me-1">
-                          <path d="M4,2H20A2,2 0 0,1 22,4V20A2,2 0 0,1 20,22H4A2,2 0 0,1 2,20V4A2,2 0 0,1 4,2M4,4V8H9V4H4M11,4V8H20V4H11M4,10V14H9V10H4M11,10V14H20V10H11M4,16V20H9V16H4M11,16V20H20V16H11Z"/>
-                        </svg>
-                        Manage Plugins
-                      </a>
-                    </div>
-                  </div>
-                  <div id="availablePluginsList" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 12px;">
-                    <div class="text-center py-3" style="color: var(--text-secondary);">Loading available plugins...</div>
-                  </div>
-                </div>
-              </div>
-            </div>
-
             <!-- Tags Section -->
             <div class="col-12" id="tagsSection">
               <div class="section-card modern-card p-4">
@@ -588,65 +532,6 @@
     </div>
   </div>
 
-  <!-- Plugin Upload Modal -->
-  <div class="modal fade" id="pluginUploadModal" tabindex="-1" aria-labelledby="pluginUploadModalLabel" aria-hidden="true">
-    <div class="modal-dialog modal-lg">
-      <div class="modal-content" style="background: var(--bg-primary); border: 1px solid var(--border-color);">
-        <div class="modal-header" style="border-bottom: 1px solid var(--border-color);">
-          <h5 class="modal-title" id="pluginUploadModalLabel" style="color: var(--text-primary);">
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" class="me-2">
-              <path d="M14,2H6A2,2 0 0,0 4,4V20A2,2 0 0,0 6,22H18A2,2 0 0,0 20,20V8L14,2M18,20H6V4H13V9H18V20Z"/>
-            </svg>
-            Upload Plugin
-          </h5>
-          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close" style="filter: invert(1);"></button>
-        </div>
-        <div class="modal-body">
-          <div class="mb-3">
-            <p style="color: var(--text-secondary);">Upload a plugin binary by dragging and dropping it below or clicking to browse.</p>
-          </div>
-
-          <!-- Drag and Drop Area -->
-          <div id="uploadDropZone" class="upload-drop-zone mb-3" style="border: 2px dashed var(--border-color); border-radius: 8px; background: var(--bg-secondary); cursor: pointer; transition: all 0.3s ease;">
-            <div class="text-center py-5">
-              <svg width="48" height="48" viewBox="0 0 24 24" fill="currentColor" class="mb-3" style="color: var(--text-secondary);">
-                <path d="M14,2H6A2,2 0 0,0 4,4V20A2,2 0 0,0 6,22H18A2,2 0 0,0 20,20V8L14,2M18,20H6V4H13V9H18V20Z"/>
-              </svg>
-              <h6 style="color: var(--text-primary);">Drag & Drop Plugin File</h6>
-              <p class="text-muted mb-3">Or click to browse for files</p>
-              <button type="button" class="modern-btn modern-btn-secondary" onclick="event.stopPropagation(); document.getElementById('pluginFileInput').click()">
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" class="me-1">
-                  <path d="M16,13H15V18H13V13H8L12,9L16,13M15,4H9V6H15V4Z"/>
-                </svg>
-                Browse Files
-              </button>
-            </div>
-          </div>
-
-          <!-- Hidden File Input -->
-          <input type="file" id="pluginFileInput" style="display: none;">
-
-          <!-- Upload Progress -->
-          <div id="uploadProgress" class="d-none mb-3">
-            <div class="d-flex justify-content-between align-items-center mb-2">
-              <span style="color: var(--text-primary);">Uploading...</span>
-              <span id="uploadPercent" style="color: var(--text-secondary);">0%</span>
-            </div>
-            <div class="progress">
-              <div id="uploadProgressBar" class="progress-bar" role="progressbar" style="width: 0%" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100"></div>
-            </div>
-          </div>
-
-          <!-- Upload Result -->
-          <div id="uploadResult" class="d-none"></div>
-        </div>
-        <div class="modal-footer" style="border-top: 1px solid var(--border-color);">
-          <button type="button" class="modern-btn modern-btn-secondary" data-bs-dismiss="modal">Close</button>
-        </div>
-      </div>
-    </div>
-  </div>
-
   <!-- Delete Confirmation Modal -->
   <div class="modal fade" id="deleteModal" tabindex="-1" aria-hidden="true">
     <div class="modal-dialog">
@@ -723,8 +608,6 @@
   <script src="/js/modules/toast.js"></script>
   <script src="/js/modules/resizer.js"></script>
   <script src="/js/modules/sidebar.js"></script>
-  <script src="/js/modules/plugins.js"></script>
-  <script src="/js/modules/plugin-config.js"></script>
   <script src="/js/agents-detail.js"></script>
   <script>
     // Initialize theme

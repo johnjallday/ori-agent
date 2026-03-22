@@ -41,12 +41,6 @@ func TestFileStore_SaveLoad_NestedRoundTrip(t *testing.T) {
 					ReasoningEffort: "high",
 					MaxOutputTokens: 1200,
 				},
-				Plugins: map[string]types.LoadedPlugin{
-					"demo-plugin": {
-						Path:    "uploaded_plugins/demo-plugin",
-						Version: "1.0.0",
-					},
-				},
 				Status:     types.AgentStatusActive,
 				Statistics: stats,
 				Metadata: &types.AgentMetadata{
@@ -106,9 +100,6 @@ func TestFileStore_SaveLoad_NestedRoundTrip(t *testing.T) {
 	}
 	if got.Settings.MaxOutputTokens != 1200 {
 		t.Errorf("expected max_output_tokens 1200, got %d", got.Settings.MaxOutputTokens)
-	}
-	if len(got.Plugins) != 1 {
-		t.Errorf("expected 1 plugin, got %d", len(got.Plugins))
 	}
 	if got.Statistics == nil {
 		t.Fatal("expected statistics to be loaded")
@@ -173,9 +164,7 @@ func TestFileStore_Load_NestedMinimalSettings_MigratesDefaults(t *testing.T) {
 	if got.Status != types.AgentStatusIdle {
 		t.Errorf("expected default status idle, got %q", got.Status)
 	}
-	if got.Plugins == nil {
-		t.Fatal("expected plugins map to be initialized")
-	}
+
 	if got.Capabilities == nil {
 		t.Fatal("expected capabilities slice to be initialized")
 	}
@@ -199,7 +188,6 @@ func TestFileStore_Load_OldTopLevelFormat_MigratesDefaults(t *testing.T) {
 					Model:       "gpt-4o-mini",
 					Temperature: 1.0,
 				},
-				Plugins: nil,
 			},
 		},
 		Current: "legacy-top",
@@ -228,9 +216,7 @@ func TestFileStore_Load_OldTopLevelFormat_MigratesDefaults(t *testing.T) {
 	if got.Status != types.AgentStatusIdle {
 		t.Errorf("expected default status idle, got %q", got.Status)
 	}
-	if got.Plugins == nil {
-		t.Fatal("expected plugins map to be initialized")
-	}
+
 	if got.Statistics == nil {
 		t.Fatal("expected statistics to be initialized")
 	}
@@ -255,7 +241,6 @@ func TestFileStore_Load_LegacyFlatAgentFile_IgnoresLegacyMCPOverrideAndDefaults(
 			Model:       "gpt-5",
 			Temperature: 0.2,
 		},
-		Plugins: nil,
 	}
 	agentData, err := json.Marshal(legacyAgent)
 	if err != nil {
@@ -291,9 +276,7 @@ func TestFileStore_Load_LegacyFlatAgentFile_IgnoresLegacyMCPOverrideAndDefaults(
 	if got.Type != "research" {
 		t.Errorf("expected type research, got %q", got.Type)
 	}
-	if got.Plugins == nil {
-		t.Fatal("expected plugins map to be initialized")
-	}
+
 	if got.Status != types.AgentStatusIdle {
 		t.Errorf("expected default status idle, got %q", got.Status)
 	}

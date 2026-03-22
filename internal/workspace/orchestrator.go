@@ -13,7 +13,6 @@ import (
 	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/store"
 	"github.com/openai/openai-go/v3"
-	"github.com/oriagent/ori-pluginapi"
 )
 
 // Orchestrator manages autonomous task delegation and agent coordination
@@ -342,21 +341,7 @@ func (o *Orchestrator) executeTaskWithLLM(ctx context.Context, task Task) (strin
 		var ok bool
 		ag, ok = o.agentStore.GetAgent(task.To)
 		if ok && ag != nil {
-			// Build tools from agent's plugins
-			for _, pl := range ag.Plugins {
-				var def pluginapi.Tool
-				if pl.Tool != nil {
-					def = pl.Tool.Definition()
-				} else {
-					def = pl.Definition
-				}
-				tools = append(tools, llm.Tool{
-					Name:        def.Name,
-					Description: def.Description,
-					Parameters:  def.Parameters,
-				})
-			}
-			logger.Debug("[Orchestrator] Loaded agent tools", logger.Fields{"agent": task.To, "tool_count": len(tools)})
+			logger.Debug("[Orchestrator] Loaded agent", logger.Fields{"agent": task.To})
 		} else {
 			logger.Warn("[Orchestrator] Agent not found, executing without tools", logger.Fields{"agent": task.To})
 		}
@@ -478,37 +463,10 @@ func (o *Orchestrator) executeToolCallsAndContinue(ctx context.Context, ag *agen
 	return resp.Content, nil
 }
 
-// executeToolCall executes a single tool call and returns the result
+// executeToolCall executes a single tool call and returns the result.
+// Tool execution is handled via MCP; this is a fallback that reports the tool as not found.
 func (o *Orchestrator) executeToolCall(ctx context.Context, ag *agent.Agent, toolCall llm.ToolCall) string {
-	// Find the tool in the agent's plugins
-	for _, pl := range ag.Plugins {
-		var toolName string
-		if pl.Tool != nil {
-			toolName = pl.Tool.Definition().Name
-		} else {
-			toolName = pl.Definition.Name
-		}
-
-		if toolName == toolCall.Name {
-			if pl.Tool == nil {
-				return fmt.Sprintf("Error: Tool '%s' is not loaded", toolCall.Name)
-			}
-
-			// Execute the tool
-			toolCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
-			defer cancel()
-
-			result, err := pl.Tool.Call(toolCtx, toolCall.Arguments)
-			if err != nil {
-				logger.Error("[Orchestrator] Tool execution failed", logger.Fields{"tool": toolCall.Name, "error": err})
-				return fmt.Sprintf("Error executing tool '%s': %v", toolCall.Name, err)
-			}
-
-			return result
-		}
-	}
-
-	return fmt.Sprintf("Error: Tool '%s' not found", toolCall.Name)
+	return fmt.Sprintf("Error: Tool '%s' not found (plugins deprecated, use MCP)", toolCall.Name)
 }
 
 // formatAgentCapabilities formats agent list with capabilities.

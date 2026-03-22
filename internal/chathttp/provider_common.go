@@ -270,11 +270,8 @@ func (h *Handler) executeToolCallsCommonWithSession(
 			duration = time.Since(startTime)
 			toolCancel()
 
-			// Record call stats in health manager
-			h.recordToolCallStats(name, duration, err)
-
 			if err != nil {
-				result = augmentToolExecutionError(name, args, err)
+				result = fmt.Sprintf("Error executing %s: %v", name, err)
 				logger.Error("Tool execution failed", logger.Fields{"tool": name, "error": err})
 			} else {
 				logger.Info("Tool execution completed", logger.Fields{"tool": name})
@@ -356,17 +353,6 @@ func processToolResultsCommon(results []ToolCallResult) (combinedResult string, 
 		combinedResult += result
 	}
 	return
-}
-
-// recordToolCallStats records tool call statistics in health manager
-func (h *Handler) recordToolCallStats(toolName string, duration time.Duration, err error) {
-	if h.healthManager != nil {
-		if err != nil {
-			h.healthManager.RecordCallFailure(toolName, duration, err)
-		} else {
-			h.healthManager.RecordCallSuccess(toolName, duration)
-		}
-	}
 }
 
 // trackUsageCommon tracks LLM usage and cost

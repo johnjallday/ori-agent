@@ -19,7 +19,6 @@ require (
 	golang.org/x/net v0.49.0
 	golang.org/x/sys v0.40.0
 	golang.org/x/text v0.33.0
-	google.golang.org/grpc v1.78.0
 	gopkg.in/yaml.v3 v3.0.1
 	modernc.org/sqlite v1.44.3
 )
@@ -94,6 +93,7 @@ require (
 	golang.org/x/image v0.35.0 // indirect
 	golang.org/x/oauth2 v0.32.0 // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20251111163417-95abcf5c77ba // indirect
+	google.golang.org/grpc v1.78.0 // indirect
 	google.golang.org/protobuf v1.36.11 // indirect
 	modernc.org/libc v1.67.7 // indirect
 	modernc.org/mathutil v1.7.1 // indirect

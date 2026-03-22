@@ -72,16 +72,6 @@ func TestCreateConfigManager_NonExistentFile(t *testing.T) {
 	}
 }
 
-func TestCreateRegistryManager(t *testing.T) {
-	mgr, err := createRegistryManager()
-	if err != nil {
-		t.Fatalf("createRegistryManager failed: %v", err)
-	}
-	if mgr == nil {
-		t.Fatal("Expected registry manager to be non-nil")
-	}
-}
-
 func TestCreateLLMFactory(t *testing.T) {
 	factory := createLLMFactory()
 	if factory == nil {
@@ -177,31 +167,6 @@ func TestCreateFileStore(t *testing.T) {
 	}
 	if store == nil {
 		t.Fatal("Expected store to be non-nil")
-	}
-}
-
-func TestResolvePluginCacheDir(t *testing.T) {
-	// Test default path
-	dir := resolvePluginCacheDir()
-	if dir == "" {
-		t.Error("Expected non-empty directory")
-	}
-
-	// Test with environment variable
-	_ = os.Setenv("PLUGIN_CACHE_DIR", "/custom/cache")
-	defer func() { _ = os.Unsetenv("PLUGIN_CACHE_DIR") }()
-
-	dir = resolvePluginCacheDir()
-	if dir != "/custom/cache" {
-		t.Errorf("Expected '/custom/cache', got '%s'", dir)
-	}
-}
-
-func TestCreatePluginDownloader(t *testing.T) {
-	tempDir := t.TempDir()
-	downloader := createPluginDownloader(tempDir)
-	if downloader == nil {
-		t.Fatal("Expected plugin downloader to be non-nil")
 	}
 }
 

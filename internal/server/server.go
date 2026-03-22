@@ -12,7 +12,6 @@ import (
 	orihttp "github.com/johnjallday/ori-agent/internal/http"
 	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/platform"
-	"github.com/johnjallday/ori-agent/internal/pluginloader"
 	"github.com/johnjallday/ori-agent/internal/privateservices"
 	web "github.com/johnjallday/ori-agent/internal/web"
 	"github.com/johnjallday/ori-agent/internal/workspace"
@@ -23,7 +22,6 @@ import (
 type Server struct {
 	// Domain facades (grouped dependencies) - PUBLIC API
 	Core        *CoreSystemFacade
-	Plugin      *PluginSystemFacade
 	Storage     *StorageSystemFacade
 	Workflow    *WorkflowSystemFacade
 	Integration *IntegrationSystemFacade
@@ -67,9 +65,6 @@ func (s *Server) Shutdown() {
 	if s.Workflow != nil {
 		s.Workflow.Shutdown()
 	}
-	if s.Plugin != nil && s.Plugin.PluginUpdateService != nil {
-		s.Plugin.PluginUpdateService.Stop()
-	}
 	if s.Handlers != nil && s.Handlers.SessionFiles != nil {
 		if watcher := s.Handlers.SessionFiles.Watcher(); watcher != nil {
 			_ = watcher.Close()
@@ -83,49 +78,6 @@ func (s *Server) Shutdown() {
 	if s.Core != nil && s.Core.Gateway != nil {
 		_ = s.Core.Gateway.Shutdown(context.Background())
 	}
-
-	// Clean up all loaded plugins
-	s.cleanupPlugins()
-}
-
-// cleanupPlugins closes all RPC plugin connections for all agents
-func (s *Server) cleanupPlugins() {
-	logger.Debug("Cleaning up plugins", logger.Fields{})
-
-	agentNames := s.Storage.ListAgents()
-	cleanedCount := 0
-	errorCount := 0
-
-	for _, agentName := range agentNames {
-		ag, ok := s.Storage.GetAgentByName(agentName)
-		if !ok {
-			continue
-		}
-
-		// Clean up each loaded plugin with panic recovery
-		// This ensures one plugin failure doesn't prevent cleanup of others
-		for pluginName, loadedPlugin := range ag.Plugins {
-			if loadedPlugin.Tool != nil {
-				func() {
-					defer func() {
-						if r := recover(); r != nil {
-							errorCount++
-							logger.Error("Panic during plugin cleanup", logger.Fields{
-								"plugin": pluginName,
-								"agent":  agentName,
-								"error":  r,
-							})
-						}
-					}()
-					pluginloader.CloseRPCPlugin(loadedPlugin.Tool)
-					cleanedCount++
-					logger.Debug("Closed plugin for agent", logger.Fields{"plugin": pluginName, "agent": agentName})
-				}()
-			}
-		}
-	}
-
-	logger.Debug("Plugin cleanup complete", logger.Fields{"closed": cleanedCount, "errors": errorCount})
 }
 
 // HTTPServer returns a fully configured http.Server
@@ -254,25 +206,6 @@ func (s *Server) serveSettings(w http.ResponseWriter, r *http.Request) {
 func (s *Server) serveMCP(w http.ResponseWriter, r *http.Request) {
 	data := s.prepareBasePageData("mcp")
 	s.renderAndWritePage(w, "mcp", data)
-}
-
-func (s *Server) serveMarketplace(w http.ResponseWriter, r *http.Request) {
-	data := s.prepareBasePageData("marketplace")
-	data.ShowSidebarToggle = true
-
-	// Add platform information for compatibility checking
-	currentPlatform := platform.DetectPlatform()
-	currentPlatformDisplay := platform.GetPlatformDisplayName(currentPlatform)
-	data.Extra["CurrentPlatform"] = currentPlatform
-	data.Extra["CurrentPlatformDisplay"] = currentPlatformDisplay
-
-	s.renderAndWritePage(w, "marketplace", data)
-}
-
-func (s *Server) servePlugins(w http.ResponseWriter, r *http.Request) {
-	data := s.prepareBasePageData("plugins")
-	data.ShowSidebarToggle = true
-	s.renderAndWritePage(w, "plugins", data)
 }
 
 func (s *Server) serveSkills(w http.ResponseWriter, r *http.Request) {

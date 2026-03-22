@@ -719,19 +719,7 @@ func signalTokenOverlap(left, right []string) int {
 }
 
 func extractNormalizedPluginNames(ag *resolvedRouteAgent) []string {
-	if ag == nil || ag.Agent == nil || len(ag.Plugins) == 0 {
-		return []string{}
-	}
-
-	plugins := make([]string, 0, len(ag.Plugins))
-	for name := range ag.Plugins {
-		normalized := normalizeRouteToken(strings.ReplaceAll(name, "_", "-"))
-		if normalized == "" {
-			continue
-		}
-		plugins = append(plugins, normalized)
-	}
-	return plugins
+	return []string{}
 }
 
 func extractNormalizedMCPServerNames(ag *resolvedRouteAgent) []string {

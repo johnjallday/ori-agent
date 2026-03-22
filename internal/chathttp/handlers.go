@@ -19,13 +19,11 @@ import (
 	"github.com/johnjallday/ori-agent/internal/agent"
 	"github.com/johnjallday/ori-agent/internal/client"
 	"github.com/johnjallday/ori-agent/internal/fileparser"
-	"github.com/johnjallday/ori-agent/internal/healthhttp"
 	orihttp "github.com/johnjallday/ori-agent/internal/http"
 	"github.com/johnjallday/ori-agent/internal/llm"
 	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/mcp"
 	"github.com/johnjallday/ori-agent/internal/orchestration"
-	"github.com/johnjallday/ori-agent/internal/pluginloader"
 	"github.com/johnjallday/ori-agent/internal/session"
 	"github.com/johnjallday/ori-agent/internal/skills"
 	"github.com/johnjallday/ori-agent/internal/store"
@@ -48,21 +46,9 @@ const (
 
 	// StreamFlushInterval is how often to flush streaming responses
 	StreamFlushInterval = 100 * time.Millisecond
-
-	// PluginDefinitionCacheTTL is how long to cache plugin definitions
-	PluginDefinitionCacheTTL = 5 * time.Minute
 )
 
-// pluginDefinitionCache stores cached plugin definitions with expiration
-type pluginDefinitionCache struct {
-	definition pluginapi.Tool
-	cachedAt   time.Time
-}
-
 type Handler struct {
-	defCache         map[string]*pluginDefinitionCache
-	defMu            sync.RWMutex
-	pluginLoadMu     sync.Mutex // Mutex for lazy loading plugins
 	utilityRegistry  *UtilityToolRegistry
 	utilityTelemetry *utilitytelemetry.Tracker
 	settingsMu       sync.RWMutex
@@ -70,7 +56,6 @@ type Handler struct {
 	store            store.Store
 	clientFactory    *client.Factory
 	llmFactory       *llm.Factory
-	healthManager    *healthhttp.Manager
 	commandHandler   *CommandHandler
 	orchestrator     *orchestration.Orchestrator
 	costTracker      *llm.CostTracker
@@ -103,39 +88,9 @@ func NewHandler(store store.Store, clientFactory *client.Factory) *Handler {
 		clientFactory:    clientFactory,
 		llmFactory:       nil,
 		commandHandler:   NewCommandHandler(store),
-		defCache:         make(map[string]*pluginDefinitionCache),
 		utilityRegistry:  NewDefaultUtilityToolRegistry(),
 		utilityTelemetry: utilitytelemetry.NewTracker(200),
 		browserMCPPref:   "auto",
-	}
-}
-
-// getCachedDefinition retrieves a plugin definition from cache if valid
-func (h *Handler) getCachedDefinition(pluginName string) (pluginapi.Tool, bool) {
-	h.defMu.RLock()
-	defer h.defMu.RUnlock()
-
-	cached, ok := h.defCache[pluginName]
-	if !ok {
-		return pluginapi.Tool{}, false
-	}
-
-	// Check if cache is still valid
-	if time.Since(cached.cachedAt) > PluginDefinitionCacheTTL {
-		return pluginapi.Tool{}, false
-	}
-
-	return cached.definition, true
-}
-
-// setCachedDefinition stores a plugin definition in cache
-func (h *Handler) setCachedDefinition(pluginName string, definition pluginapi.Tool) {
-	h.defMu.Lock()
-	defer h.defMu.Unlock()
-
-	h.defCache[pluginName] = &pluginDefinitionCache{
-		definition: definition,
-		cachedAt:   time.Now(),
 	}
 }
 
@@ -147,11 +102,6 @@ func writeJSONResponse(w http.ResponseWriter, data any) {
 // SetLLMFactory sets the LLM factory
 func (h *Handler) SetLLMFactory(factory *llm.Factory) {
 	h.llmFactory = factory
-}
-
-// SetHealthManager sets the health manager
-func (h *Handler) SetHealthManager(manager *healthhttp.Manager) {
-	h.healthManager = manager
 }
 
 // SetOrchestrator sets the orchestrator
@@ -450,7 +400,6 @@ func (h *Handler) tryHandleUtilityDirect(
 	}
 
 	duration := time.Since(start)
-	h.recordToolCallStats(decision.ToolName, duration, err)
 	providerName := inferUtilityProvider(decision.ToolName, rawResult)
 	if h.utilityTelemetry != nil {
 		errText := ""
@@ -550,28 +499,7 @@ func (h *Handler) findTool(ag *resolvedChatAgent, agentName, toolName string) (p
 		}
 	}
 
-	// First check native plugins
-	for pluginName, plugin := range ag.Plugins {
-		if plugin.Definition.Name == toolName {
-			// If already loaded, return it
-			if plugin.Tool != nil {
-				return plugin.Tool, true
-			}
-			// Lazy load the plugin
-			tool, err := h.loadPluginLazily(agentName, pluginName, plugin)
-			if err != nil {
-				logger.Error("Failed to lazy load plugin", logger.Fields{
-					"plugin": pluginName,
-					"agent":  agentName,
-					"error":  err.Error(),
-				})
-				return nil, false
-			}
-			return tool, true
-		}
-	}
-
-	// Then check MCP tools.
+	// Check MCP tools.
 	if mcpTool, ok := h.findMCPToolByName(ag, toolName); ok {
 		return mcpTool, true
 	}
@@ -838,60 +766,6 @@ func shouldSuppressUtilityToolForAgent(ag *resolvedChatAgent, toolName string) b
 	default:
 		return false
 	}
-}
-
-// loadPluginLazily loads a plugin on first use and updates the agent's plugin map.
-func (h *Handler) loadPluginLazily(agentName, pluginName string, lp types.LoadedPlugin) (pluginapi.PluginTool, error) {
-	h.pluginLoadMu.Lock()
-	defer h.pluginLoadMu.Unlock()
-
-	// Double-check if already loaded (another goroutine may have loaded it)
-	ag, ok := h.store.GetAgent(agentName)
-	if !ok {
-		return nil, fmt.Errorf("agent not found: %s", agentName)
-	}
-	if existing, exists := ag.Plugins[pluginName]; exists && existing.Tool != nil {
-		return existing.Tool, nil
-	}
-
-	logger.Info("Lazy loading plugin", logger.Fields{
-		"plugin": pluginName,
-		"agent":  agentName,
-	})
-
-	// Load the plugin
-	tool, err := pluginloader.LoadPluginUnified(lp.Path)
-	if err != nil {
-		return nil, fmt.Errorf("failed to load plugin %s: %w", pluginName, err)
-	}
-
-	// Set agent context
-	agentSpecificStorePath := filepath.Join("agents", agentName, "config.json")
-	if abs, err := filepath.Abs(agentSpecificStorePath); err == nil {
-		agentSpecificStorePath = abs
-	}
-	pluginloader.SetAgentContext(tool, agentName, agentSpecificStorePath, "")
-
-	// Run health check if health manager is available
-	if h.healthManager != nil {
-		h.healthManager.CheckAndCachePlugin(pluginName, tool)
-	}
-
-	// Update the plugin in the agent
-	lp.Tool = tool
-	lp.Definition = tool.Definition()
-	ag.Plugins[pluginName] = lp
-
-	// Save the updated agent
-	if err := h.store.SetAgent(agentName, ag); err != nil {
-		logger.Warn("Failed to save agent after lazy loading plugin", logger.Fields{
-			"agent":  agentName,
-			"plugin": pluginName,
-			"error":  err.Error(),
-		})
-	}
-
-	return tool, nil
 }
 
 // getClientForAgent returns an OpenAI client using the agent's API key if provided, otherwise the global client
@@ -1345,18 +1219,6 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 
 	logger.Debug("Agent MCP servers loaded", logger.Fields{"agent": current, "server_count": len(ag.MCPServers), "servers": ag.MCPServers})
 
-	// Check for uninitialized plugins before proceeding with chat
-	uninitializedPlugins := h.checkUninitializedPlugins(ag.Agent, current)
-	if len(uninitializedPlugins) > 0 {
-		initPrompt := h.generateInitializationPrompt(uninitializedPlugins)
-		orihttp.WriteJSON(w, map[string]any{
-			"response":                initPrompt,
-			"requires_initialization": true,
-			"uninitialized_plugins":   uninitializedPlugins,
-		})
-		return
-	}
-
 	var plannerDecision *types.PlannerDecision
 
 	// Planner-first orchestration routing
@@ -1494,31 +1356,6 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 		}
 	} else {
 		logger.Debug("No workspace tools to add (WorkspaceTools is nil)")
-	}
-
-	// Add native plugin tools
-	for pluginName, pl := range ag.Plugins {
-		var def pluginapi.Tool
-
-		// Try to get from cache first
-		if cachedDef, found := h.getCachedDefinition(pluginName); found {
-			def = cachedDef
-		} else if pl.Tool != nil {
-			// Call Tool.Definition() to get fresh definition
-			def = pl.Tool.Definition()
-			// Cache it for future requests
-			h.setCachedDefinition(pluginName, def)
-		} else {
-			// Fallback to stored definition if tool is not available
-			def = pl.Definition
-		}
-
-		// Convert pluginapi.Tool to llm.Tool
-		appendTool(llm.Tool{
-			Name:        def.Name,
-			Description: def.Description,
-			Parameters:  def.Parameters,
-		}, "plugin")
 	}
 
 	// Add MCP tools for enabled servers

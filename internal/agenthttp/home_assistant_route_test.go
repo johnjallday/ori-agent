@@ -51,12 +51,8 @@ func addHomeRouteTestAgent(t *testing.T, st store.Store, name string, cfg *store
 	ag.Metadata.Tags = tags
 	ag.Metadata.Favorite = false
 
-	if ag.Plugins == nil {
-		ag.Plugins = map[string]types.LoadedPlugin{}
-	}
-	for _, plugin := range plugins {
-		ag.Plugins[plugin] = types.LoadedPlugin{}
-	}
+	// Plugins have been deprecated; plugin names are no longer stored on agents.
+	_ = plugins
 
 	if err := st.SetAgent(name, ag); err != nil {
 		t.Fatalf("failed to persist agent %q: %v", name, err)

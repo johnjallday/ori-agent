@@ -1399,7 +1399,6 @@ func classifyToolAccessBlockedResponse(result string) *workspace.TaskBlockedErro
 		"filesystem",
 		"directory",
 		"file-reading",
-		"plugin",
 		"weather data",
 		"real-time weather",
 		"available in this context",

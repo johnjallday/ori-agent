@@ -11,12 +11,12 @@ import (
 	"github.com/johnjallday/ori-agent/internal/agenthttp"
 	"github.com/johnjallday/ori-agent/internal/client"
 	"github.com/johnjallday/ori-agent/internal/gateway"
-	"github.com/johnjallday/ori-agent/internal/healthhttp"
 	"github.com/johnjallday/ori-agent/internal/llm"
 	"github.com/johnjallday/ori-agent/internal/logger"
-	"github.com/johnjallday/ori-agent/internal/marketplacehttp"
 	"github.com/johnjallday/ori-agent/internal/onboarding"
 	"github.com/johnjallday/ori-agent/internal/privateservices"
+	"github.com/johnjallday/ori-agent/internal/updatemanager"
+	"github.com/johnjallday/ori-agent/internal/version"
 	web "github.com/johnjallday/ori-agent/internal/web"
 )
 
@@ -28,23 +28,6 @@ func (b *ServerBuilder) initializeConfiguration() error {
 	}
 	b.configManager = configMgr
 	b.privateServicesClient = privateservices.NewEnvClient()
-	return nil
-}
-
-// initializeRegistry creates and refreshes the plugin registry manager with marketplace support.
-func (b *ServerBuilder) initializeRegistry() error {
-	mgr, mpStore, err := createRegistryManagerWithMarketplace()
-	if err != nil {
-		return err
-	}
-	b.registryManager = mgr
-	b.marketplaceStore = mpStore
-
-	// Create marketplace HTTP handler
-	if mpStore != nil {
-		b.marketplaceHandler = marketplacehttp.NewHandler(mpStore, mgr)
-	}
-
 	return nil
 }
 
@@ -127,12 +110,6 @@ func (b *ServerBuilder) initializeActivityLogger() error {
 	return nil
 }
 
-// initializeHealthManager creates the health manager.
-func (b *ServerBuilder) initializeHealthManager() error {
-	b.healthManager = healthhttp.NewManager()
-	return nil
-}
-
 // initializeLocationManager sets up location detection and management.
 func (b *ServerBuilder) initializeLocationManager() error {
 	locationZonesPath := resolveLocationZonesPath()
@@ -176,5 +153,12 @@ func (b *ServerBuilder) initializeCostTracker() error {
 	if verbose {
 		logger.Debug("Cost tracker initialized", logger.Fields{"dir": usageDataDir})
 	}
+	return nil
+}
+
+// initializeUpdateManager creates the update manager.
+func (b *ServerBuilder) initializeUpdateManager() error {
+	currentVersion := version.GetVersion()
+	b.updateMgr = updatemanager.NewManager(currentVersion, "johnjallday", "ori-agent")
 	return nil
 }

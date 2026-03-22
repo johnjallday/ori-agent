@@ -14,9 +14,6 @@ import (
 	"github.com/johnjallday/ori-agent/internal/llm"
 	"github.com/johnjallday/ori-agent/internal/location"
 	"github.com/johnjallday/ori-agent/internal/logger"
-	"github.com/johnjallday/ori-agent/internal/marketplace"
-	"github.com/johnjallday/ori-agent/internal/plugindownloader"
-	"github.com/johnjallday/ori-agent/internal/registry"
 	"github.com/johnjallday/ori-agent/internal/store"
 	"github.com/johnjallday/ori-agent/internal/types"
 	"github.com/johnjallday/ori-agent/internal/workspace"
@@ -38,87 +35,6 @@ func createConfigManager(configPath string) (*config.Manager, error) {
 		return nil, fmt.Errorf("failed to load configuration: %w", err)
 	}
 	return mgr, nil
-}
-
-// createMarketplaceStore initializes the marketplace configuration store.
-func createMarketplaceStore() (*marketplace.Store, error) {
-	mpStore := marketplace.NewStore("marketplace_config.json")
-	if err := mpStore.Load(); err != nil {
-		logger.Error("Failed to load marketplace config", logger.Fields{"error": err})
-		// Not fatal - will use defaults
-	}
-	return mpStore, nil
-}
-
-// createRegistryManager initializes the plugin registry manager and refreshes from GitHub.
-func createRegistryManager() (*registry.Manager, error) {
-	// Create marketplace store first
-	mpStore, _ := createMarketplaceStore()
-
-	// Create registry manager with marketplace support
-	var mgr *registry.Manager
-	if mpStore != nil {
-		mgr = registry.NewManagerWithMarketplaces(mpStore)
-		logger.Debug("Registry manager initialized with marketplace support", logger.Fields{})
-	} else {
-		mgr = registry.NewManager()
-	}
-
-	// Refresh plugin registry from GitHub on startup (skip in test mode to avoid blocking startup).
-	if shouldRefreshRegistryOnStartup() {
-		if err := mgr.RefreshFromGitHub(); err != nil {
-			logger.Error("Failed to refresh plugin registry from GitHub", logger.Fields{"plugin": err})
-			logger.Debug("Will use cached or local registry", logger.Fields{})
-		}
-	} else {
-		logger.Debug("Skipping GitHub registry refresh in test mode", logger.Fields{})
-	}
-
-	// Scan uploaded_plugins directory and auto-register any new plugins
-	if err := mgr.ScanUploadedPlugins(); err != nil {
-		logger.Error("Failed to scan uploaded_plugins directory", logger.Fields{"error": err})
-	} else {
-		logger.Debug("Scanned uploaded_plugins directory for new plugins", logger.Fields{})
-	}
-
-	return mgr, nil
-}
-
-// createRegistryManagerWithMarketplace initializes the plugin registry manager with marketplace support.
-// Returns both the manager and the marketplace store.
-func createRegistryManagerWithMarketplace() (*registry.Manager, *marketplace.Store, error) {
-	mpStore, _ := createMarketplaceStore()
-
-	var mgr *registry.Manager
-	if mpStore != nil {
-		mgr = registry.NewManagerWithMarketplaces(mpStore)
-		logger.Debug("Registry manager initialized with marketplace support", logger.Fields{})
-	} else {
-		mgr = registry.NewManager()
-	}
-
-	// Refresh plugin registry from GitHub on startup (skip in test mode to avoid blocking startup).
-	if shouldRefreshRegistryOnStartup() {
-		if err := mgr.RefreshFromGitHub(); err != nil {
-			logger.Error("Failed to refresh plugin registry from GitHub", logger.Fields{"plugin": err})
-			logger.Debug("Will use cached or local registry", logger.Fields{})
-		}
-	} else {
-		logger.Debug("Skipping GitHub registry refresh in test mode", logger.Fields{})
-	}
-
-	// Scan uploaded_plugins directory and auto-register any new plugins
-	if err := mgr.ScanUploadedPlugins(); err != nil {
-		logger.Error("Failed to scan uploaded_plugins directory", logger.Fields{"error": err})
-	} else {
-		logger.Debug("Scanned uploaded_plugins directory for new plugins", logger.Fields{})
-	}
-
-	return mgr, mpStore, nil
-}
-
-func shouldRefreshRegistryOnStartup() bool {
-	return os.Getenv("TEST_MODE") == ""
 }
 
 // createLLMFactory creates a new LLM factory instance.
@@ -260,40 +176,6 @@ func createFileStore(agentStorePath string, defaultConf types.Settings) (store.S
 		return nil, fmt.Errorf("failed to create file store: %w", err)
 	}
 	return st, nil
-}
-
-// resolvePluginCacheDir determines the plugin cache directory from environment or default.
-func resolvePluginCacheDir() string {
-	pluginCacheDir := "plugin_cache"
-	if p := os.Getenv("PLUGIN_CACHE_DIR"); p != "" {
-		pluginCacheDir = p
-	} else if abs, err := filepath.Abs(pluginCacheDir); err == nil {
-		pluginCacheDir = abs
-	}
-
-	verbose := os.Getenv("ORI_VERBOSE") == "true"
-	if verbose {
-		logger.Debug("Using plugin cache", logger.Fields{"plugin": pluginCacheDir})
-	}
-
-	return pluginCacheDir
-}
-
-// createPluginDownloader creates a new plugin downloader instance.
-func createPluginDownloader(cacheDir string) *plugindownloader.PluginDownloader {
-	return plugindownloader.NewDownloader(cacheDir)
-}
-
-// refreshLocalPluginRegistry refreshes the local plugin registry from uploaded_plugins directory.
-func refreshLocalPluginRegistry(mgr *registry.Manager) error {
-	verbose := os.Getenv("ORI_VERBOSE") == "true"
-	if err := mgr.RefreshLocalRegistry(); err != nil {
-		if verbose {
-			logger.Error("failed to refresh local plugin registry", logger.Fields{"plugin": err})
-		}
-		return err
-	}
-	return nil
 }
 
 // loadLocationZones loads location zones from the specified file path.

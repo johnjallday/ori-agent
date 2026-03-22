@@ -6,7 +6,6 @@ import (
 	"testing"
 
 	"github.com/johnjallday/ori-agent/internal/agent"
-	"github.com/johnjallday/ori-agent/internal/types"
 	"github.com/oriagent/ori-pluginapi"
 )
 
@@ -132,29 +131,9 @@ func TestExecuteDirectTool(t *testing.T) {
 		name               string
 		toolName           string
 		args               string
-		mockResult         string
-		mockErr            error
 		wantSuccess        bool
 		wantResultContains string
 	}{
-		{
-			name:               "successful tool execution",
-			toolName:           "math",
-			args:               `{"operation": "add", "a": 5, "b": 3}`,
-			mockResult:         "8",
-			mockErr:            nil,
-			wantSuccess:        true,
-			wantResultContains: "8",
-		},
-		{
-			name:               "tool execution with error",
-			toolName:           "math",
-			args:               `{"operation": "divide", "a": 5, "b": 0}`,
-			mockResult:         "",
-			mockErr:            fmt.Errorf("division by zero"),
-			wantSuccess:        false,
-			wantResultContains: "division by zero",
-		},
 		{
 			name:               "tool not found",
 			toolName:           "nonexistent",
@@ -166,31 +145,8 @@ func TestExecuteDirectTool(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Create mock tool
-			mock := &mockTool{
-				name:        "math",
-				description: "Math operations",
-				callFunc: func(ctx context.Context, args string) (string, error) {
-					return tt.mockResult, tt.mockErr
-				},
-			}
-
 			// Create test agent with mock tool
-			ag := &agent.Agent{
-				Plugins: map[string]types.LoadedPlugin{
-					"math": {
-						Tool: mock,
-						Definition: pluginapi.Tool{
-							Name:        "math",
-							Description: "Math operations",
-							Parameters: map[string]interface{}{
-								"type":       "object",
-								"properties": map[string]interface{}{},
-							},
-						},
-					},
-				},
-			}
+			ag := &agent.Agent{}
 
 			// Create handler with nil dependencies (not needed for this test)
 			h := &Handler{}
@@ -226,59 +182,14 @@ func TestExecuteDirectTool(t *testing.T) {
 
 // TestGetAvailableToolNames tests getting available tool names
 func TestGetAvailableToolNames(t *testing.T) {
-	// Create test agent with multiple tools
-	ag := &agent.Agent{
-		Plugins: map[string]types.LoadedPlugin{
-			"math": {
-				Tool: &mockTool{name: "math", description: "Math operations"},
-				Definition: pluginapi.Tool{
-					Name:        "math",
-					Description: "Math operations",
-					Parameters: map[string]interface{}{
-						"type":       "object",
-						"properties": map[string]interface{}{},
-					},
-				},
-			},
-			"weather": {
-				Tool: &mockTool{name: "weather", description: "Weather info"},
-				Definition: pluginapi.Tool{
-					Name:        "weather",
-					Description: "Weather info",
-					Parameters: map[string]interface{}{
-						"type":       "object",
-						"properties": map[string]interface{}{},
-					},
-				},
-			},
-		},
-	}
+	// Agent with no plugins has no tools (tools come from MCP now)
+	ag := &agent.Agent{}
 
 	h := &Handler{}
 	toolNames := h.getAvailableToolNames(runtimeTestAgent(ag))
 
-	// Verify we got the expected number of tools
-	if len(toolNames) != 2 {
-		t.Errorf("getAvailableToolNames() returned %d tools, want 2", len(toolNames))
-	}
-
-	// Verify tool names are present
-	foundMath := false
-	foundWeather := false
-	for _, name := range toolNames {
-		if name == "math" {
-			foundMath = true
-		}
-		if name == "weather" {
-			foundWeather = true
-		}
-	}
-
-	if !foundMath {
-		t.Errorf("getAvailableToolNames() missing 'math' tool")
-	}
-	if !foundWeather {
-		t.Errorf("getAvailableToolNames() missing 'weather' tool")
+	if len(toolNames) != 0 {
+		t.Errorf("getAvailableToolNames() returned %d tools, want 0 (no MCP tools configured)", len(toolNames))
 	}
 }
 
@@ -468,126 +379,23 @@ func TestConvertUploadedFilesToAttachmentsBase64(t *testing.T) {
 	}
 }
 
-// TestExecuteDirectToolWithFiles tests tool execution with file attachments
+// TestExecuteDirectToolWithFiles tests that tool execution without plugins returns not found
 func TestExecuteDirectToolWithFiles(t *testing.T) {
-	tests := []struct {
-		name               string
-		files              []pluginapi.FileAttachment
-		acceptedTypes      []string
-		wantFilesReceived  int
-		wantSuccess        bool
-		wantResultContains string
-	}{
-		{
-			name: "tool receives audio files",
-			files: []pluginapi.FileAttachment{
-				{Name: "song.wav", Type: "audio/wav", Size: 10, Content: []byte("audio")},
-			},
-			acceptedTypes:      []string{".wav", "audio/wav"},
-			wantFilesReceived:  1,
-			wantSuccess:        true,
-			wantResultContains: "1 files",
-		},
-		{
-			name: "tool filters non-accepted files",
-			files: []pluginapi.FileAttachment{
-				{Name: "song.wav", Type: "audio/wav", Size: 10, Content: []byte("audio")},
-				{Name: "doc.pdf", Type: "application/pdf", Size: 10, Content: []byte("pdf")},
-			},
-			acceptedTypes:      []string{".wav", "audio/wav"},
-			wantFilesReceived:  1,
-			wantSuccess:        true,
-			wantResultContains: "1 files",
-		},
-		{
-			name: "tool receives multiple accepted files",
-			files: []pluginapi.FileAttachment{
-				{Name: "song.wav", Type: "audio/wav", Size: 10, Content: []byte("audio")},
-				{Name: "melody.mid", Type: "audio/midi", Size: 10, Content: []byte("midi")},
-			},
-			acceptedTypes:      []string{".wav", "audio/wav", ".mid", "audio/midi"},
-			wantFilesReceived:  2,
-			wantSuccess:        true,
-			wantResultContains: "2 files",
-		},
-		{
-			name: "no matching files falls back to regular call",
-			files: []pluginapi.FileAttachment{
-				{Name: "doc.pdf", Type: "application/pdf", Size: 10, Content: []byte("pdf")},
-			},
-			acceptedTypes:      []string{".wav", "audio/wav"},
-			wantFilesReceived:  0,
-			wantSuccess:        true,
-			wantResultContains: "mock result",
+	ag := &agent.Agent{}
+	h := &Handler{}
+	cmd := &DirectToolCommand{
+		ToolName: "file-tool",
+		Args:     `{"operation": "test"}`,
+		Files: []pluginapi.FileAttachment{
+			{Name: "test.wav", Type: "audio/wav", Size: 5, Content: []byte("audio")},
 		},
 	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			filesReceived := 0
-
-			// Create mock file attachment tool
-			mock := &mockFileAttachmentTool{
-				mockTool: mockTool{
-					name:        "file-tool",
-					description: "Tool that accepts files",
-				},
-				acceptedTypes: tt.acceptedTypes,
-				callWithFiles: func(ctx context.Context, args string, files []pluginapi.FileAttachment) (string, error) {
-					filesReceived = len(files)
-					return fmt.Sprintf("received %d files", len(files)), nil
-				},
-			}
-
-			// Create test agent with mock tool
-			ag := &agent.Agent{
-				Plugins: map[string]types.LoadedPlugin{
-					"file-tool": {
-						Tool: mock,
-						Definition: pluginapi.Tool{
-							Name:        "file-tool",
-							Description: "Tool that accepts files",
-							Parameters: map[string]interface{}{
-								"type":       "object",
-								"properties": map[string]interface{}{},
-							},
-						},
-						SupportsFiles:     true,
-						AcceptedFileTypes: tt.acceptedTypes,
-					},
-				},
-			}
-
-			// Create handler
-			h := &Handler{}
-
-			// Create command with files
-			cmd := &DirectToolCommand{
-				ToolName: "file-tool",
-				Args:     `{"operation": "test"}`,
-				Files:    tt.files,
-			}
-
-			// Execute
-			result := h.executeDirectTool(context.Background(), runtimeTestAgent(ag), "test-agent", cmd)
-
-			// Verify success
-			if result.Success != tt.wantSuccess {
-				t.Errorf("executeDirectTool() success = %v, want %v", result.Success, tt.wantSuccess)
-			}
-
-			// Verify files received
-			if tt.wantFilesReceived > 0 && filesReceived != tt.wantFilesReceived {
-				t.Errorf("Tool received %d files, want %d", filesReceived, tt.wantFilesReceived)
-			}
-
-			// Verify result contains expected string
-			if tt.wantResultContains != "" {
-				if !containsSubstring(result.Result, tt.wantResultContains) {
-					t.Errorf("Result = %q, want to contain %q", result.Result, tt.wantResultContains)
-				}
-			}
-		})
+	result := h.executeDirectTool(context.Background(), runtimeTestAgent(ag), "test-agent", cmd)
+	if result.Success {
+		t.Error("expected tool not found, got success")
+	}
+	if !containsSubstring(result.Result, "not found") {
+		t.Errorf("expected 'not found' in result, got %q", result.Result)
 	}
 }
 

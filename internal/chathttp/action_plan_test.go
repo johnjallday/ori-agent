@@ -20,7 +20,6 @@ func newActionPlanTestHandler(t *testing.T) *Handler {
 			Model:       "gpt-5-nano",
 			Temperature: 0.3,
 		},
-		Plugins: map[string]types.LoadedPlugin{},
 	})
 
 	return NewHandler(st, nil)

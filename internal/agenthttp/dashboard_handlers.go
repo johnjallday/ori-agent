@@ -36,7 +36,6 @@ type AgentListItem struct {
 	Metadata       *types.AgentMetadata   `json:"metadata,omitempty"`
 	Evolution      *types.AgentEvolution  `json:"evolution,omitempty"`
 	AllowWebSearch bool                   `json:"allow_web_search"`
-	EnabledPlugins []string               `json:"enabled_plugins"`
 	Model          string                 `json:"model"`
 }
 
@@ -57,13 +56,6 @@ type AgentDetailResponse struct {
 	MaxOutputTokens int                    `json:"max_output_tokens,omitempty"`
 	SystemPrompt    string                 `json:"system_prompt"`
 	AllowWebSearch  bool                   `json:"allow_web_search"`
-	EnabledPlugins  []PluginInfo           `json:"enabled_plugins"`
-}
-
-// PluginInfo represents plugin information in the detail view
-type PluginInfo struct {
-	Name    string `json:"name"`
-	Version string `json:"version,omitempty"`
 }
 
 // ListAgentsWithStats handles GET /api/agents/dashboard/list
@@ -113,12 +105,6 @@ func (h *DashboardHandler) ListAgentsWithStats(w http.ResponseWriter, r *http.Re
 			}
 		}
 
-		// Get enabled plugins
-		enabledPlugins := make([]string, 0, len(ag.Plugins))
-		for pluginName := range ag.Plugins {
-			enabledPlugins = append(enabledPlugins, pluginName)
-		}
-
 		agents = append(agents, AgentListItem{
 			Name:           name,
 			Type:           ag.Type,
@@ -129,7 +115,6 @@ func (h *DashboardHandler) ListAgentsWithStats(w http.ResponseWriter, r *http.Re
 			Metadata:       ag.Metadata,
 			Evolution:      cloneAgentEvolution(ag),
 			AllowWebSearch: ag.Settings.IsWebSearchAllowed(),
-			EnabledPlugins: enabledPlugins,
 			Model:          ag.Settings.Model,
 		})
 	}
@@ -187,15 +172,6 @@ func (h *DashboardHandler) GetAgentDetail(w http.ResponseWriter, r *http.Request
 		ag.InitializeStatistics()
 	}
 
-	// Build plugin info list
-	pluginInfos := make([]PluginInfo, 0, len(ag.Plugins))
-	for pluginName, plugin := range ag.Plugins {
-		pluginInfos = append(pluginInfos, PluginInfo{
-			Name:    pluginName,
-			Version: plugin.Version,
-		})
-	}
-
 	// Build response
 	response := AgentDetailResponse{
 		Name:            agentName,
@@ -213,7 +189,6 @@ func (h *DashboardHandler) GetAgentDetail(w http.ResponseWriter, r *http.Request
 		MaxOutputTokens: ag.Settings.MaxOutputTokens,
 		SystemPrompt:    ag.Settings.SystemPrompt,
 		AllowWebSearch:  ag.Settings.IsWebSearchAllowed(),
-		EnabledPlugins:  pluginInfos,
 	}
 
 	// Return JSON response

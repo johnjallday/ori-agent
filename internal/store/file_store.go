@@ -109,7 +109,6 @@ func (s *fileStore) CreateAgent(name string, config *CreateAgentConfig) error {
 			Role:         types.RoleGeneral, // Default role
 			Capabilities: []string{},        // Empty capabilities by default
 			Settings:     defaultSettings,
-			Plugins:      make(map[string]types.LoadedPlugin),
 			Status:       types.AgentStatusActive, // New agents start as active
 		}
 		// Initialize statistics for the new agent
@@ -309,15 +308,14 @@ func (s *fileStore) saveUnlocked() error {
 
 	// Save individual agent files in nested structure
 	type persistSettings struct {
-		Type         string                        `json:"type"` // Agent type
-		Role         types.AgentRole               `json:"role,omitempty"`
-		Capabilities []string                      `json:"capabilities,omitempty"`
-		Settings     types.Settings                `json:"Settings"`
-		Plugins      map[string]types.LoadedPlugin `json:"Plugins"`
-		Status       types.AgentStatus             `json:"status,omitempty"`
-		Statistics   *types.AgentStatistics        `json:"statistics,omitempty"`
-		Metadata     *types.AgentMetadata          `json:"metadata,omitempty"`
-		Evolution    *types.AgentEvolution         `json:"evolution,omitempty"`
+		Type         string                 `json:"type"` // Agent type
+		Role         types.AgentRole        `json:"role,omitempty"`
+		Capabilities []string               `json:"capabilities,omitempty"`
+		Settings     types.Settings         `json:"Settings"`
+		Status       types.AgentStatus      `json:"status,omitempty"`
+		Statistics   *types.AgentStatistics `json:"statistics,omitempty"`
+		Metadata     *types.AgentMetadata   `json:"metadata,omitempty"`
+		Evolution    *types.AgentEvolution  `json:"evolution,omitempty"`
 	}
 
 	for agentName, agent := range s.agents {
@@ -327,14 +325,13 @@ func (s *fileStore) saveUnlocked() error {
 			return err
 		}
 
-		// Only save agent_settings.json with everything (Type + Settings + Plugins)
+		// Only save agent_settings.json with everything (Type + Settings)
 		// Don't create config.json unless necessary
 		agentSettings := persistSettings{
 			Type:         agent.Type,
 			Role:         agent.Role,
 			Capabilities: agent.Capabilities,
 			Settings:     agent.Settings,
-			Plugins:      agent.Plugins,
 			Status:       agent.Status,
 			Statistics:   agent.Statistics,
 			Metadata:     agent.Metadata,
@@ -443,7 +440,7 @@ func (s *fileStore) load() error {
 					// Load full agent settings so nested persistence remains forward-compatible.
 					if settingsData, err := os.ReadFile(settingsPath); err == nil {
 						if err := json.Unmarshal(settingsData, &ag); err == nil {
-							logger.Verbosef("✅ Loaded agent '%s' with %d plugins from %s", agentName, len(ag.Plugins), settingsPath)
+							logger.Verbosef("✅ Loaded agent '%s' from %s", agentName, settingsPath)
 						} else {
 							logger.Verbosef("❌ Failed to unmarshal agent_settings.json for '%s': %v", agentName, err)
 						}
@@ -485,9 +482,6 @@ func (s *fileStore) normalizeLoadedAgent(ag *agent.Agent) {
 		return
 	}
 
-	if ag.Plugins == nil {
-		ag.Plugins = make(map[string]types.LoadedPlugin)
-	}
 	if ag.Capabilities == nil {
 		ag.Capabilities = []string{}
 	}

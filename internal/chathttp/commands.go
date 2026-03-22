@@ -1,7 +1,6 @@
 package chathttp
 
 import (
-	"github.com/johnjallday/ori-agent/internal/pluginhttp"
 	"github.com/johnjallday/ori-agent/internal/skills"
 	"github.com/johnjallday/ori-agent/internal/store"
 	"github.com/johnjallday/ori-agent/internal/workspace"
@@ -11,7 +10,6 @@ import (
 type CommandHandler struct {
 	store          store.Store
 	workspaceStore workspace.Store
-	enumExtractor  *pluginhttp.EnumExtractor
 	shutdownFunc   func()
 	skillsManager  interface {
 		GetSkill(string, string) (*skills.Skill, bool, error)
@@ -22,8 +20,7 @@ type CommandHandler struct {
 // NewCommandHandler creates a new command handler
 func NewCommandHandler(store store.Store) *CommandHandler {
 	return &CommandHandler{
-		store:         store,
-		enumExtractor: pluginhttp.NewEnumExtractor(),
+		store: store,
 	}
 }
 

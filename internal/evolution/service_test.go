@@ -64,7 +64,6 @@ func newTestService(cfg *Config) (*Service, *fakeAgentStore, *fakeAssistantProgr
 			"alpha": {
 				Type:     agent.TypeGeneral,
 				Settings: types.Settings{Model: "gpt-4o-mini", Temperature: 1.0},
-				Plugins:  map[string]types.LoadedPlugin{},
 			},
 		},
 	}

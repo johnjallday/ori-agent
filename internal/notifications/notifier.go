@@ -15,19 +15,10 @@ import (
 type NotificationType string
 
 const (
-	// Plugin health notifications
-	NotifyPluginHealthy   NotificationType = "plugin_healthy"
-	NotifyPluginDegraded  NotificationType = "plugin_degraded"
-	NotifyPluginUnhealthy NotificationType = "plugin_unhealthy"
-
 	// Update notifications
 	NotifyUpdateAvailable NotificationType = "update_available"
 	NotifyUpdateSuccess   NotificationType = "update_success"
 	NotifyUpdateFailed    NotificationType = "update_failed"
-
-	// Call notifications
-	NotifyPluginError     NotificationType = "plugin_error"
-	NotifyHighFailureRate NotificationType = "high_failure_rate"
 )
 
 // Notification represents a notification event

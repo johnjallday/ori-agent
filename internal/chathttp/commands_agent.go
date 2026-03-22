@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"sort"
 	"strings"
 
 	"golang.org/x/text/cases"
@@ -12,7 +11,6 @@ import (
 
 	orihttp "github.com/johnjallday/ori-agent/internal/http"
 	"github.com/johnjallday/ori-agent/internal/logger"
-	"github.com/oriagent/ori-pluginapi"
 )
 
 func commandSessionModeLabel(resolution executionAgentResolution) string {
@@ -67,27 +65,14 @@ No resolved specialist runtime is available for this session yet.`, sessionMode,
 - Temperature: %.1f
 
 **API Configuration:**
-- API Key: %s
-
-**Plugin Status:**
-- Total Plugins: %d`,
+- API Key: %s`,
 		sessionMode,
 		executionAgent,
 		ag.Settings.Model,
 		ag.Settings.Temperature,
-		apiKeyStatus,
-		len(ag.Plugins))
+		apiKeyStatus)
 
-	if len(ag.Plugins) > 0 {
-		statusResponse += "\n- Active Plugins:\n"
-		for name, plugin := range ag.Plugins {
-			statusResponse += fmt.Sprintf("  - %s %s (v%s)\n", getPluginEmoji(name), name, plugin.Version)
-		}
-	} else {
-		statusResponse += "\n- No plugins loaded"
-	}
-
-	statusResponse += "\n\n**System Status:**\n- Server: Running ✅\n- Registry: Loaded ✅"
+	statusResponse += "\n\n**System Status:**\n- Server: Running ✅"
 
 	response := map[string]any{
 		"response": statusResponse,
@@ -118,153 +103,8 @@ func (ch *CommandHandler) HandleToolsList(w http.ResponseWriter, r *http.Request
 		toolsResponse.WriteString(fmt.Sprintf("These tools are available to pinned specialist `%s`.\n\n", resolution.Name))
 	}
 
-	if len(ag.Plugins) == 0 {
-		toolsResponse.WriteString("No tools are currently loaded.")
-	} else {
-		for name, plugin := range ag.Plugins {
-			def := plugin.Definition
-			if plugin.Tool != nil {
-				def = plugin.Tool.Definition()
-			}
-
-			emoji := getPluginEmoji(name)
-			toolsResponse.WriteString(fmt.Sprintf("### %s %s\n\n", emoji, def.Name))
-
-			description := def.Description
-			if description != "" {
-				toolsResponse.WriteString(fmt.Sprintf("**Description:** %s\n\n", description))
-			}
-
-			allEnums, err := ch.enumExtractor.GetAllEnumsFromParameter(def)
-			if err == nil && len(allEnums) > 0 {
-				toolsResponse.WriteString("**🎯 Available Options:**\n")
-
-				var parameterInfo map[string]map[string]any
-				var required []string
-				if def.Parameters != nil {
-					if props, ok := def.Parameters["properties"].(map[string]any); ok {
-						parameterInfo = make(map[string]map[string]any)
-						for paramName, paramData := range props {
-							if paramMap, ok := paramData.(map[string]any); ok {
-								parameterInfo[paramName] = paramMap
-							}
-						}
-
-						if reqField, exists := def.Parameters["required"]; exists {
-							if reqSlice, ok := reqField.([]string); ok {
-								required = reqSlice
-							}
-						}
-					}
-				}
-
-				for enumProperty, enumValues := range allEnums {
-					toolsResponse.WriteString(fmt.Sprintf("- **%s**:\n", enumProperty))
-
-					operationParamMap := make(map[string][]string)
-					requiredByOperation := make(map[string]map[string]bool)
-
-					if plugin.Tool != nil {
-						if opsProvider, ok := plugin.Tool.(pluginapi.OperationsProvider); ok {
-							operations := opsProvider.GetOperations()
-							for _, op := range operations {
-								operationParamMap[op.Name] = op.Parameters
-								requiredSet := make(map[string]bool)
-								for _, req := range op.RequiredParameters {
-									requiredSet[req] = true
-								}
-								requiredByOperation[op.Name] = requiredSet
-							}
-						}
-					}
-
-					if len(operationParamMap) == 0 && def.Parameters != nil {
-						if oneOfRaw, ok := def.Parameters["oneOf"].([]interface{}); ok {
-							for _, option := range oneOfRaw {
-								optionSchema, ok := option.(map[string]any)
-								if !ok {
-									continue
-								}
-
-								props, ok := optionSchema["properties"].(map[string]any)
-								if !ok {
-									continue
-								}
-
-								opValue := ""
-								if opProp, ok := props["operation"].(map[string]any); ok {
-									if enumRaw, ok := opProp["enum"]; ok {
-										enumValues := interfaceSliceToStrings(enumRaw)
-										if len(enumValues) == 1 {
-											opValue = enumValues[0]
-										}
-									}
-								}
-								if opValue == "" {
-									continue
-								}
-
-								requiredSet := make(map[string]bool)
-								if reqRaw, ok := optionSchema["required"]; ok {
-									for _, req := range interfaceSliceToStrings(reqRaw) {
-										requiredSet[req] = true
-									}
-								}
-
-								var params []string
-								for paramName := range props {
-									if paramName == "operation" {
-										continue
-									}
-									params = append(params, paramName)
-								}
-								sort.Strings(params)
-								operationParamMap[opValue] = params
-								requiredByOperation[opValue] = requiredSet
-							}
-						}
-					}
-
-					for _, enumValue := range enumValues {
-						var operationParams []string
-
-						if relevantParams, exists := operationParamMap[enumValue]; exists {
-							for _, paramName := range relevantParams {
-								if _, paramExists := parameterInfo[paramName]; paramExists {
-									isRequired := false
-									if requiredByOperation[enumValue] != nil {
-										isRequired = requiredByOperation[enumValue][paramName]
-									} else {
-										for _, req := range required {
-											if req == paramName {
-												isRequired = true
-												break
-											}
-										}
-									}
-
-									displayName := paramName
-									if isRequired {
-										displayName += "*"
-									}
-									operationParams = append(operationParams, displayName)
-								}
-							}
-						}
-
-						if len(operationParams) > 0 {
-							toolsResponse.WriteString(fmt.Sprintf("  - `%s` (%s)\n", enumValue, strings.Join(operationParams, ", ")))
-						} else {
-							toolsResponse.WriteString(fmt.Sprintf("  - `%s`\n", enumValue))
-						}
-					}
-				}
-				toolsResponse.WriteString("\n")
-			}
-
-			toolsResponse.WriteString("\n")
-		}
-	}
+	toolsResponse.WriteString("Tools are provided via MCP servers and workspace bindings.\n")
+	toolsResponse.WriteString("Use the MCP settings page to manage available tools.\n")
 
 	response := map[string]any{
 		"response": toolsResponse.String(),

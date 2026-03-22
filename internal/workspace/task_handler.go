@@ -491,20 +491,6 @@ func (h *LLMTaskHandler) agentSupportsBrowserAutomation(ag *resolvedTaskAgent) b
 		}
 	}
 
-	for _, plugin := range ag.Plugins {
-		if plugin.Tool == nil {
-			continue
-		}
-		name := strings.ToLower(strings.TrimSpace(plugin.Tool.Definition().Name))
-		if strings.HasPrefix(name, "browser") ||
-			strings.HasPrefix(name, "web_fetch") ||
-			strings.HasPrefix(name, "web_search") ||
-			name == "navigate" ||
-			name == "open_url" {
-			return true
-		}
-	}
-
 	for _, serverName := range ag.MCPServers {
 		name := strings.ToLower(strings.TrimSpace(serverName))
 		if name == "" {
@@ -735,32 +721,10 @@ func (h *LLMTaskHandler) getProviderForModel(model string) string {
 	return "openai"
 }
 
-// convertAgentToolsToLLMTools converts agent plugins + MCP tools into LLM tools.
+// convertAgentToolsToLLMTools converts MCP tools into LLM tools.
 func (h *LLMTaskHandler) convertAgentToolsToLLMTools(ag *resolvedTaskAgent) []llm.Tool {
 	var tools []llm.Tool
 	seen := make(map[string]struct{})
-
-	for _, plugin := range ag.Plugins {
-		if plugin.Tool == nil {
-			continue
-		}
-
-		def := plugin.Tool.Definition()
-		name := strings.ToLower(strings.TrimSpace(def.Name))
-		if name == "" {
-			continue
-		}
-		if _, exists := seen[name]; exists {
-			continue
-		}
-		seen[name] = struct{}{}
-
-		tools = append(tools, llm.Tool{
-			Name:        def.Name,
-			Description: def.Description,
-			Parameters:  def.Parameters,
-		})
-	}
 
 	for _, mcpTool := range h.getAgentMCPTools(ag) {
 		if mcpTool == nil {
@@ -878,16 +842,6 @@ func (h *LLMTaskHandler) findTool(ag *resolvedTaskAgent, toolName string) (plugi
 	target := strings.ToLower(strings.TrimSpace(toolName))
 	if target == "" {
 		return nil, false
-	}
-
-	for _, plugin := range ag.Plugins {
-		if plugin.Tool == nil {
-			continue
-		}
-		name := strings.ToLower(strings.TrimSpace(plugin.Tool.Definition().Name))
-		if name == target {
-			return plugin.Tool, true
-		}
 	}
 
 	for _, mcpTool := range h.getAgentMCPTools(ag) {

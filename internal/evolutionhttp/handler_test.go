@@ -140,7 +140,6 @@ func TestHandler_GetAgentEvolution(t *testing.T) {
 			"alpha": {
 				Type:     agent.TypeGeneral,
 				Settings: types.Settings{Model: "gpt-4o-mini", Temperature: 1},
-				Plugins:  map[string]types.LoadedPlugin{},
 			},
 		},
 	}
@@ -173,9 +172,9 @@ func TestHandler_FeedAgent(t *testing.T) {
 	store := &fakeAgentStore{
 		agents: map[string]*agent.Agent{
 			"alpha": {
-				Type:      agent.TypeGeneral,
-				Settings:  types.Settings{Model: "gpt-4o-mini", Temperature: 1},
-				Plugins:   map[string]types.LoadedPlugin{},
+				Type:     agent.TypeGeneral,
+				Settings: types.Settings{Model: "gpt-4o-mini", Temperature: 1},
+
 				Evolution: types.NewAgentEvolution(),
 			},
 		},
@@ -240,9 +239,9 @@ func TestHandler_GetSuggestions(t *testing.T) {
 	stats.MessageCount = 35
 	store := &fakeAgentStore{agents: map[string]*agent.Agent{
 		"alpha": {
-			Type:       agent.TypeGeneral,
-			Settings:   types.Settings{Model: "gpt-4o-mini", Temperature: 1},
-			Plugins:    map[string]types.LoadedPlugin{},
+			Type:     agent.TypeGeneral,
+			Settings: types.Settings{Model: "gpt-4o-mini", Temperature: 1},
+
 			Evolution:  &types.AgentEvolution{Level: 12},
 			Statistics: stats,
 		},
@@ -278,9 +277,9 @@ func TestHandler_GetSuggestions(t *testing.T) {
 func TestHandler_SetAgentPath(t *testing.T) {
 	store := &fakeAgentStore{agents: map[string]*agent.Agent{
 		"alpha": {
-			Type:      agent.TypeGeneral,
-			Settings:  types.Settings{Model: "gpt-4o-mini", Temperature: 1},
-			Plugins:   map[string]types.LoadedPlugin{},
+			Type:     agent.TypeGeneral,
+			Settings: types.Settings{Model: "gpt-4o-mini", Temperature: 1},
+
 			Evolution: &types.AgentEvolution{Level: 10, Stage: types.AgentStageLearner},
 		},
 	}}
@@ -305,9 +304,9 @@ func TestHandler_SetAgentPath(t *testing.T) {
 func TestHandler_SetAgentPath_GatesLearnerStage(t *testing.T) {
 	store := &fakeAgentStore{agents: map[string]*agent.Agent{
 		"alpha": {
-			Type:      agent.TypeGeneral,
-			Settings:  types.Settings{Model: "gpt-4o-mini", Temperature: 1},
-			Plugins:   map[string]types.LoadedPlugin{},
+			Type:     agent.TypeGeneral,
+			Settings: types.Settings{Model: "gpt-4o-mini", Temperature: 1},
+
 			Evolution: &types.AgentEvolution{Level: 2, Stage: types.AgentStageInfant},
 		},
 	}}

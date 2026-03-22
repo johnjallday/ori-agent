@@ -285,28 +285,6 @@ func FormatLogEntry(log types.ActivityLog) types.ActivityLogEntry {
 			}
 		}
 
-	case types.ActivityEventPluginEnabled:
-		entry.EventTitle = "Plugin Enabled"
-		entry.Icon = "🔌"
-		entry.Color = "#28a745" // Green
-
-		if log.Details != nil {
-			if plugin, ok := log.Details["plugin"].(string); ok {
-				entry.Description = fmt.Sprintf("Plugin '%s' enabled for '%s'", plugin, log.AgentName)
-			}
-		}
-
-	case types.ActivityEventPluginDisabled:
-		entry.EventTitle = "Plugin Disabled"
-		entry.Icon = "🔌"
-		entry.Color = "#ffc107" // Yellow
-
-		if log.Details != nil {
-			if plugin, ok := log.Details["plugin"].(string); ok {
-				entry.Description = fmt.Sprintf("Plugin '%s' disabled for '%s'", plugin, log.AgentName)
-			}
-		}
-
 	case types.ActivityEventStatusChanged:
 		entry.EventTitle = "Status Changed"
 		entry.Icon = "🔄"

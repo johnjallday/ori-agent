@@ -236,8 +236,6 @@ const (
 	ActivityEventUpdated        ActivityEventType = "updated"         // Agent configuration was updated
 	ActivityEventDeleted        ActivityEventType = "deleted"         // Agent was deleted
 	ActivityEventMessageSent    ActivityEventType = "message_sent"    // Chat message was sent to the agent
-	ActivityEventPluginEnabled  ActivityEventType = "plugin_enabled"  // Plugin was enabled for the agent
-	ActivityEventPluginDisabled ActivityEventType = "plugin_disabled" // Plugin was disabled for the agent
 	ActivityEventStatusChanged  ActivityEventType = "status_changed"  // Agent status changed
 	ActivityEventEvolutionFeed  ActivityEventType = "evolution_feed"  // Feed action granted evolution XP
 	ActivityEventEvolutionStage ActivityEventType = "evolution_stage" // Evolution stage changed

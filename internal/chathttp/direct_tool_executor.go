@@ -149,20 +149,11 @@ func (h *Handler) executeDirectTool(ctx context.Context, ag *resolvedChatAgent, 
 	toolResult, err = ExecuteToolWithFilesDebug(toolCtx, tool, cmd.ToolName, cmd.Args, cmd.Files)
 	duration := time.Since(startTime)
 
-	// Record call stats in health manager
-	if h.healthManager != nil {
-		if err != nil {
-			h.healthManager.RecordCallFailure(cmd.ToolName, duration, err)
-		} else {
-			h.healthManager.RecordCallSuccess(cmd.ToolName, duration)
-		}
-	}
-
 	// Handle execution error
 	if err != nil {
 		result.Success = false
 		result.Error = err.Error()
-		result.Result = augmentToolExecutionError(cmd.ToolName, cmd.Args, err)
+		result.Result = fmt.Sprintf("Error executing %s: %v", cmd.ToolName, err)
 		result.ExecutionTimeMs = duration.Milliseconds()
 		logger.Error("Direct tool execution failed", logger.Fields{"tool": err})
 		return result
@@ -209,15 +200,6 @@ func (h *Handler) getAvailableToolNames(ag *resolvedChatAgent) []string {
 	if ag.WorkspaceTools != nil {
 		for _, wt := range ag.WorkspaceTools.Tools() {
 			toolNames = append(toolNames, wt.Definition().Name)
-		}
-	}
-
-	// Add native plugin tools
-	for _, plugin := range ag.Plugins {
-		if plugin.Tool != nil {
-			toolNames = append(toolNames, plugin.Tool.Definition().Name)
-		} else {
-			toolNames = append(toolNames, plugin.Definition.Name)
 		}
 	}
 

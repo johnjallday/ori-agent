@@ -282,51 +282,13 @@
       outline: none;
     }
 
-    .plugin-list {
+    .mcp-server-list {
       max-height: 320px;
       overflow-y: auto;
       border: 1px solid color-mix(in srgb, var(--border-color) 86%, var(--primary-color) 14%);
       border-radius: 10px;
       padding: 8px;
       background: var(--bg-secondary);
-    }
-
-    .plugin-item {
-      display: flex;
-      align-items: center;
-      gap: 12px;
-      padding: 11px 10px;
-      border-radius: 8px;
-      margin-bottom: 5px;
-      transition: background 0.2s ease, border-color 0.2s ease;
-      border: 1px solid transparent;
-    }
-
-    .plugin-item:hover {
-      background: color-mix(in srgb, var(--bg-tertiary) 80%, var(--primary-color) 20%);
-      border-color: color-mix(in srgb, var(--border-color) 72%, var(--primary-color) 28%);
-    }
-
-    .plugin-checkbox {
-      width: 18px;
-      height: 18px;
-      cursor: pointer;
-      accent-color: var(--primary-color);
-    }
-
-    .plugin-info {
-      flex: 1;
-    }
-
-    .plugin-name {
-      font-weight: 600;
-      margin-bottom: 2px;
-      color: var(--text-primary);
-    }
-
-    .plugin-description {
-      font-size: 12px;
-      color: var(--text-secondary);
     }
 
     .mcp-meta {
@@ -420,7 +382,6 @@
 
     .modern-btn:focus-visible,
     .btn-check:focus-visible + .btn,
-    .plugin-checkbox:focus-visible,
     .form-check-input:focus-visible,
     .tag-remove:focus-visible {
       outline: none;
@@ -702,19 +663,10 @@
         </div>
 
         <div class="form-card modern-card">
-          <h2 class="form-section-title">Plugins</h2>
-          <div class="form-help" style="margin-bottom: 12px;">Select which plugins this agent can use</div>
-
-          <div id="pluginsList" class="plugin-list">
-            <!-- Populated by JavaScript -->
-          </div>
-        </div>
-
-        <div class="form-card modern-card">
           <h2 class="form-section-title">MCP Connectors</h2>
           <div class="form-help" style="margin-bottom: 12px;">This list shows only globally configured MCP connectors. Workspace-generated bindings stay hidden until you place the agent into a workspace.</div>
 
-          <div id="mcpServersList" class="plugin-list">
+          <div id="mcpServersList" class="mcp-server-list">
             <div style="text-align: center; padding: 20px; color: var(--text-muted, #666);">Loading MCP connectors…</div>
           </div>
         </div>

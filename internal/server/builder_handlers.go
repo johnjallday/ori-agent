@@ -20,7 +20,6 @@ import (
 	"github.com/johnjallday/ori-agent/internal/featureflags"
 	"github.com/johnjallday/ori-agent/internal/fileshttp"
 	"github.com/johnjallday/ori-agent/internal/filewatcher"
-	"github.com/johnjallday/ori-agent/internal/healthhttp"
 	"github.com/johnjallday/ori-agent/internal/locationhttp"
 	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/mcp"
@@ -28,9 +27,6 @@ import (
 	"github.com/johnjallday/ori-agent/internal/modelcategoryhttp"
 	"github.com/johnjallday/ori-agent/internal/notehttp"
 	"github.com/johnjallday/ori-agent/internal/onboardinghttp"
-	pluginhttp "github.com/johnjallday/ori-agent/internal/pluginhttp"
-	"github.com/johnjallday/ori-agent/internal/pluginmanager"
-	"github.com/johnjallday/ori-agent/internal/pluginupdate"
 	"github.com/johnjallday/ori-agent/internal/review"
 	"github.com/johnjallday/ori-agent/internal/reviewhttp"
 	"github.com/johnjallday/ori-agent/internal/session"
@@ -54,7 +50,6 @@ func (b *ServerBuilder) initializeHandlers() error {
 
 	b.chatHandler = chathttp.NewHandler(b.st, b.clientFactory)
 	b.chatHandler.SetLLMFactory(b.llmFactory)
-	b.chatHandler.SetHealthManager(b.healthManager)
 	b.chatHandler.SetCostTracker(b.costTracker)
 	b.chatHandler.SetMCPRegistry(b.mcpRegistry)
 	b.chatHandler.SetMCPConfigManager(b.mcpConfigManager)
@@ -87,24 +82,14 @@ func (b *ServerBuilder) initializeHandlers() error {
 		os.Exit(0)
 	})
 
-	b.pluginRegistryHandler = pluginhttp.NewRegistryHandler(b.st, b.registryManager, b.pluginDownloader, b.agentStorePath)
-	b.pluginHandler = pluginhttp.New(b.st, pluginhttp.NativeLoader{})
-	b.pluginHandler.HealthManager = b.healthManager
-	b.pluginInitHandler = pluginhttp.NewInitHandler(b.st, b.registryManager, b.pluginHandler)
-	b.healthHandler = healthhttp.NewHandler(b.healthManager, b.st)
 	if b.evolutionService != nil {
 		b.evolutionHandler = evolutionhttp.NewHandler(b.st, b.onboardingMgr, b.evolutionService)
 	} else {
 		b.evolutionHandler = nil
 	}
-	b.pluginUpdateHandler = pluginupdate.NewHandler(b.st, b.healthManager.GetChecker())
-	b.pluginUpdateHandler.SetPluginRegistry(&b.pluginReg)
-	b.pluginUpdateHandler.SetRegistryManager(b.registryManager)
 	b.onboardingHandler = onboardinghttp.NewHandler(b.onboardingMgr)
 	b.deviceHandler = devicehttp.NewHandler(b.onboardingMgr)
 	b.resetHandler = settingshttp.NewResetHandler(b.onboardingMgr, b.st, ".")
-	b.webPageHandler = pluginhttp.NewWebPageHandler(b.st, b.templateRenderer)
-	b.webPageHandler.SetLoader(pluginhttp.NativeLoader{})
 
 	// Initialize auto-config handler for agent creation
 	b.autoConfigHandler = agenthttp.NewAutoConfigHandler(b.llmFactory, b.configManager)
@@ -112,27 +97,6 @@ func (b *ServerBuilder) initializeHandlers() error {
 	// Initialize smart onboarding handler
 	systemProvider, systemModel := b.configManager.GetSystemModel()
 	b.smartOnboardingHandler = onboardinghttp.NewSmartOnboardingHandler(b.st, b.llmFactory, b.onboardingMgr, systemProvider, systemModel)
-
-	// Initialize plugin management components
-	b.categoryManager = pluginmanager.NewCategoryManager()
-	b.permissionManager = pluginmanager.NewPermissionManager("plugin_permissions.json")
-	b.notificationManager = pluginmanager.NewNotificationManager("plugin_notifications.json")
-	b.backupManager = pluginmanager.NewBackupManager("plugin_backups")
-
-	// Initialize plugin management handlers
-	b.pluginsPageHandler = pluginhttp.NewPluginsPageHandler(
-		b.st,
-		b.registryManager,
-		b.categoryManager,
-		b.permissionManager,
-		pluginhttp.NativeLoader{},
-	)
-	b.permissionsHandler = pluginhttp.NewPermissionsHandler(
-		b.permissionManager,
-		b.registryManager,
-	)
-	b.backupHandler = pluginhttp.NewBackupHandler(b.backupManager)
-	b.notificationsHandler = pluginhttp.NewNotificationsHandler(b.notificationManager)
 
 	// Initialize model category store and handler
 	modelCategoryStore, err := store.NewFileModelCategoryStore("model_categories.json")

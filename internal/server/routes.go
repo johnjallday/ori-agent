@@ -35,8 +35,6 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 	// =============================================================================
 	mux.HandleFunc("/", s.serveIndex)
 	mux.HandleFunc("/settings", s.serveSettings)
-	mux.HandleFunc("/marketplace", s.serveMarketplace)
-	mux.HandleFunc("/plugins", s.servePlugins)
 	mux.HandleFunc("/skills", s.serveSkills)
 	mux.HandleFunc("/workflows", s.serveWorkflows)
 	mux.HandleFunc("/mcp", s.serveMCP)
@@ -168,51 +166,6 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 	mux.HandleFunc("/api/home-assistant/route", homeAssistantRouteHandler.RouteHandler)
 
 	// =============================================================================
-	// Plugin API Endpoints
-	// =============================================================================
-	mux.HandleFunc("/api/plugin-registry", s.Handlers.PluginRegistry.PluginRegistryHandler)
-	mux.HandleFunc("/api/plugin-updates", s.Handlers.PluginRegistry.PluginUpdatesHandler)
-	mux.HandleFunc("/api/plugins/download", s.Handlers.PluginRegistry.PluginDownloadHandler)
-	mux.HandleFunc("/api/plugins/updates/check", s.Handlers.PluginRegistry.PluginUpdatesCheckHandler)
-	mux.HandleFunc("/api/plugins/execute", s.Handlers.PluginInit.PluginExecuteHandler)
-	mux.HandleFunc("/api/plugins/init-status", s.Handlers.PluginInit.PluginInitStatusHandler)
-
-	// Plugin health check endpoints (must be before catch-all /api/plugins/ pattern)
-	mux.HandleFunc("/api/plugins/health", s.Handlers.Health.HandleAllPluginsHealth)
-	mux.HandleFunc("/api/plugins/check-updates", s.Handlers.PluginUpdate.HandleCheckUpdates)
-	mux.HandleFunc("/api/plugins/updates/status", s.Handlers.PluginUpdate.HandleGetUpdateStatus)
-	mux.HandleFunc("/api/plugins/backups", s.Handlers.PluginUpdate.HandleListBackups)
-	mux.HandleFunc("/api/plugins/backups/clean", s.Handlers.PluginUpdate.HandleCleanBackups)
-
-	// Plugin upload endpoint (must be before catch-all /api/plugins/ pattern)
-	mux.HandleFunc("/api/plugins/upload", s.Handlers.Plugin.ServeHTTP)
-
-	// Dedicated plugins page endpoints (must be before catch-all /api/plugins/ pattern)
-	mux.HandleFunc("/api/plugins/notifications", s.Handlers.Notifications.HandleGetNotifications)
-
-	// Plugin-specific routes with pattern matching
-	mux.HandleFunc("/api/plugins/", s.routePluginRequest)
-
-	// Reuse the plugin handler instance
-	mux.HandleFunc("/api/plugins/save-settings", s.Handlers.Plugin.ServeHTTP)
-	mux.HandleFunc("/api/plugins/tool-call", s.Handlers.Plugin.DirectToolCallHandler)
-
-	// Tags endpoints for the plugins management UI
-	mux.HandleFunc("/api/plugins/tags", s.Handlers.PluginsPage.HandleListPluginTags)
-	mux.HandleFunc("/api/plugins/tags/", s.Handlers.PluginsPage.HandleListPluginsByTag)
-
-	// Main plugins list endpoint - route based on query parameters
-	mux.HandleFunc("/api/plugins", func(w http.ResponseWriter, r *http.Request) {
-		// If there's a 'management' query parameter, use the new handler
-		if r.URL.Query().Get("management") == "true" {
-			s.Handlers.PluginsPage.HandleListPlugins(w, r)
-			return
-		}
-		// Otherwise use the original handler for backward compatibility
-		s.Handlers.Plugin.ServeHTTP(w, r)
-	})
-
-	// =============================================================================
 	// Settings and Configuration Endpoints
 	// =============================================================================
 	mux.HandleFunc("/api/settings", s.Handlers.Settings.SettingsHandler)
@@ -238,41 +191,8 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 	mux.HandleFunc("/api/reset/preview", s.Handlers.Reset.GetResetPreview)
 
 	// =============================================================================
-	// Marketplace Management Endpoints
+	// Chat Endpoint
 	// =============================================================================
-	if s.Handlers.Marketplace != nil {
-		mux.HandleFunc("/api/marketplaces", func(w http.ResponseWriter, r *http.Request) {
-			switch r.Method {
-			case http.MethodGet:
-				s.Handlers.Marketplace.ListMarketplaces(w, r)
-			case http.MethodPost:
-				s.Handlers.Marketplace.AddMarketplace(w, r)
-			default:
-				orihttp.MethodNotAllowed(w)
-			}
-		})
-		mux.HandleFunc("/api/marketplaces/reorder", s.Handlers.Marketplace.ReorderMarketplaces)
-		mux.HandleFunc("/api/marketplaces/test", s.Handlers.Marketplace.TestMarketplace)
-		mux.HandleFunc("/api/marketplaces/", func(w http.ResponseWriter, r *http.Request) {
-			// Handle /api/marketplaces/{id} and /api/marketplaces/{id}/refresh
-			if strings.HasSuffix(r.URL.Path, "/refresh") {
-				s.Handlers.Marketplace.RefreshMarketplace(w, r)
-				return
-			}
-			switch r.Method {
-			case http.MethodPut:
-				s.Handlers.Marketplace.UpdateMarketplace(w, r)
-			case http.MethodDelete:
-				s.Handlers.Marketplace.DeleteMarketplace(w, r)
-			default:
-				orihttp.MethodNotAllowed(w)
-				// =============================================================================
-				// Chat Endpoint
-				// =============================================================================
-			}
-		})
-	}
-
 	mux.HandleFunc("/api/chat", s.Handlers.Chat.ChatHandler)
 
 	// =============================================================================
@@ -312,7 +232,6 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 	mux.HandleFunc("/api/onboarding/update-profile", s.Handlers.SmartOnboarding.UpdateProfile)
 	mux.HandleFunc("/api/onboarding/user-profile", s.Handlers.SmartOnboarding.GetStoredProfile)
 	mux.HandleFunc("/api/onboarding/personalize", s.Handlers.SmartOnboarding.SavePersonalization)
-	mux.HandleFunc("/api/onboarding/recommend-plugins", s.Handlers.SmartOnboarding.RecommendPlugins)
 
 	// Theme endpoints
 	mux.HandleFunc("/api/theme", func(w http.ResponseWriter, r *http.Request) {
@@ -848,84 +767,4 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 			s.Handlers.Studio.GetStudio(w, r)
 		}
 	})
-}
-
-// routePluginRequest handles routing for /api/plugins/ requests using suffix-based matching
-func (s *Server) routePluginRequest(w http.ResponseWriter, r *http.Request) {
-	path := r.URL.Path
-
-	// Exact path matches
-	if path == "/api/plugins/all-pages" {
-		s.Handlers.WebPage.ListAllPages(w, r)
-		return
-	}
-
-	// Notification dismiss has special pattern: /notifications/{id}/dismiss
-	if strings.Contains(path, "/notifications/") && strings.HasSuffix(path, "/dismiss") {
-		s.Handlers.Notifications.HandleDismissNotification(w, r)
-		return
-	}
-
-	// Suffix-based routing for plugin-specific endpoints
-	suffixHandlers := map[string]http.HandlerFunc{
-		"/pages":            s.Handlers.WebPage.ListPages,
-		"/health":           s.Handlers.Health.HandlePluginHealth,
-		"/enable":           s.Handlers.PluginsPage.HandleEnablePlugin,
-		"/disable":          s.Handlers.PluginsPage.HandleDisablePlugin,
-		"/update":           s.Handlers.PluginUpdate.HandleUpdatePlugin,
-		"/default-settings": s.Handlers.PluginInit.PluginInitHandler,
-		"/test":             s.Handlers.PluginsPage.HandleTestPlugin,
-		"/logs":             s.Handlers.PluginsPage.HandleGetPluginLogs,
-		"/reload":           s.Handlers.PluginsPage.HandleReloadPlugin,
-		"/agents":           s.Handlers.PluginsPage.HandleGetPluginAgents,
-	}
-
-	for suffix, handler := range suffixHandlers {
-		if strings.HasSuffix(path, suffix) {
-			handler(w, r)
-			return
-		}
-	}
-
-	// Config endpoint has method-specific handling
-	if strings.HasSuffix(path, "/config") {
-		if r.Method == http.MethodPut {
-			s.Handlers.PluginsPage.HandleUpdatePluginConfig(w, r)
-		} else {
-			s.Handlers.PluginInit.PluginInitHandler(w, r)
-		}
-		return
-	}
-
-	// Permissions endpoint has sub-route
-	if strings.Contains(path, "/permissions") {
-		if strings.HasSuffix(path, "/approve") {
-			s.Handlers.Permissions.HandleApprovePermissions(w, r)
-		} else {
-			s.Handlers.Permissions.HandleGetPermissions(w, r)
-		}
-		return
-	}
-
-	// DELETE method routes to delete handler
-	if r.Method == http.MethodDelete {
-		s.Handlers.PluginsPage.HandleDeletePlugin(w, r)
-		return
-	}
-
-	// GET requests: check if it's a web page or plugin details
-	if r.Method == http.MethodGet && !strings.HasSuffix(path, "/plugins/") {
-		pathAfterPlugins := strings.TrimPrefix(path, "/api/plugins/")
-		if strings.Contains(pathAfterPlugins, "/") {
-			// Has sub-path, try serving as web page
-			s.Handlers.WebPage.ServeHTTP(w, r)
-			return
-		}
-		// No sub-path, serve plugin details
-		s.Handlers.PluginsPage.HandleGetPluginDetails(w, r)
-		return
-	}
-
-	// Default: delegate to init handler
-	s.Handlers.PluginInit.PluginInitHandler(w, r)
 }

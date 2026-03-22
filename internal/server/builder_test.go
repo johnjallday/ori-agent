@@ -7,7 +7,6 @@ import (
 
 	"github.com/johnjallday/ori-agent/internal/config"
 	"github.com/johnjallday/ori-agent/internal/llm"
-	"github.com/johnjallday/ori-agent/internal/registry"
 	"github.com/johnjallday/ori-agent/internal/store"
 	"github.com/johnjallday/ori-agent/internal/workspace"
 )
@@ -49,15 +48,6 @@ func TestServerBuilder_WithMethods(t *testing.T) {
 		t.Error("Config manager not set correctly")
 	}
 
-	// Test WithRegistryManager
-	reg := registry.NewManager()
-	result = builder.WithRegistryManager(reg)
-	if result != builder {
-		t.Error("WithRegistryManager should return builder for chaining")
-	}
-	if builder.server.Plugin.RegistryManager != reg {
-		t.Error("Registry manager not set correctly")
-	}
 }
 
 func TestServerBuilder_MethodChaining(t *testing.T) {
@@ -66,8 +56,7 @@ func TestServerBuilder_MethodChaining(t *testing.T) {
 	// Test that methods can be chained
 	result := builder.
 		WithLLMFactory(llm.NewFactory()).
-		WithConfigManager(config.NewManager("test.json")).
-		WithRegistryManager(registry.NewManager())
+		WithConfigManager(config.NewManager("test.json"))
 
 	if result != builder {
 		t.Error("Method chaining should return same builder instance")
@@ -102,9 +91,6 @@ func TestServerBuilder_Build_Integration(t *testing.T) {
 	}
 	if server.Core.LLMFactory == nil {
 		t.Error("llmFactory not initialized")
-	}
-	if server.Plugin.RegistryManager == nil {
-		t.Error("registryManager not initialized")
 	}
 	if server.Storage.AgentStore == nil {
 		t.Error("store not initialized")

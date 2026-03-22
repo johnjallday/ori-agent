@@ -19,13 +19,10 @@ import (
 	"github.com/johnjallday/ori-agent/internal/fileshttp"
 	"github.com/johnjallday/ori-agent/internal/filewatcher"
 	"github.com/johnjallday/ori-agent/internal/gateway"
-	"github.com/johnjallday/ori-agent/internal/healthhttp"
 	"github.com/johnjallday/ori-agent/internal/llm"
 	"github.com/johnjallday/ori-agent/internal/location"
 	"github.com/johnjallday/ori-agent/internal/locationhttp"
 	"github.com/johnjallday/ori-agent/internal/logger"
-	"github.com/johnjallday/ori-agent/internal/marketplace"
-	"github.com/johnjallday/ori-agent/internal/marketplacehttp"
 	"github.com/johnjallday/ori-agent/internal/mcp"
 	"github.com/johnjallday/ori-agent/internal/mcphttp"
 	"github.com/johnjallday/ori-agent/internal/modelcategoryhttp"
@@ -33,13 +30,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/onboarding"
 	"github.com/johnjallday/ori-agent/internal/onboardinghttp"
 	"github.com/johnjallday/ori-agent/internal/orchestrationhttp"
-	"github.com/johnjallday/ori-agent/internal/plugindownloader"
-	pluginhttp "github.com/johnjallday/ori-agent/internal/pluginhttp"
-	"github.com/johnjallday/ori-agent/internal/pluginmanager"
-	"github.com/johnjallday/ori-agent/internal/pluginupdate"
-	"github.com/johnjallday/ori-agent/internal/pluginupdateservice"
 	"github.com/johnjallday/ori-agent/internal/privateservices"
-	"github.com/johnjallday/ori-agent/internal/registry"
 	"github.com/johnjallday/ori-agent/internal/reviewhttp"
 	"github.com/johnjallday/ori-agent/internal/session"
 	"github.com/johnjallday/ori-agent/internal/sessionfiles"
@@ -49,7 +40,6 @@ import (
 	"github.com/johnjallday/ori-agent/internal/skillshttp"
 	"github.com/johnjallday/ori-agent/internal/speechhttp"
 	"github.com/johnjallday/ori-agent/internal/store"
-	"github.com/johnjallday/ori-agent/internal/types"
 	"github.com/johnjallday/ori-agent/internal/updatemanager"
 	"github.com/johnjallday/ori-agent/internal/usagehttp"
 	web "github.com/johnjallday/ori-agent/internal/web"
@@ -73,7 +63,7 @@ import (
 //	  - Depends on: Configuration
 //
 //	GROUP 3: SERVICES (Phases 7-16)
-//	  - Health, Location, Plugins, Updates, Templates, Onboarding, Cost, MCP
+//	  - Health, Location, Updates, Templates, Onboarding, Cost, MCP
 //	  - Depends on: Core, Storage
 //
 //	GROUP 4: HANDLERS (Phase 17)
@@ -85,7 +75,7 @@ import (
 //	  - Depends on: Handlers, Services
 //
 //	GROUP 6: FINALIZATION (Phases 24-25)
-//	  - Plugin Update Service, Domain Facades
+//	  - Domain Facades
 //	  - Depends on: All previous phases
 //
 // # Usage
@@ -107,14 +97,11 @@ type ServerBuilder struct {
 	// Internal fields populated during initialization
 	clientFactory         *client.Factory
 	llmFactory            *llm.Factory
-	registryManager       *registry.Manager
 	st                    store.Store
-	pluginReg             types.PluginRegistry
 	agentStorePath        string
 	configManager         *config.Manager
 	privateServicesClient privateservices.Client
 	templateRenderer      *web.TemplateRenderer
-	pluginDownloader      *plugindownloader.PluginDownloader
 	updateMgr             *updatemanager.Manager
 	workspaceStore        workspace.Store
 	taskExecutor          *workspace.TaskExecutor
@@ -129,40 +116,22 @@ type ServerBuilder struct {
 	mcpConfigManager      *mcp.ConfigManager
 	locationManager       *location.Manager
 	onboardingMgr         *onboarding.Manager
-	categoryManager       *pluginmanager.CategoryManager
-	permissionManager     *pluginmanager.PermissionManager
-	notificationManager   *pluginmanager.NotificationManager
-	backupManager         *pluginmanager.BackupManager
-	pluginUpdateService   *pluginupdateservice.Service
 	gateway               *gateway.Service
 	evolutionService      *evolution.Service
 
 	// Handlers
-	healthManager          *healthhttp.Manager
 	activityLogger         *agenthttp.ActivityLogger
 	settingsHandler        *settingshttp.Handler
 	chatHandler            *chathttp.Handler
-	pluginHandler          *pluginhttp.Handler
-	pluginRegistryHandler  *pluginhttp.RegistryHandler
-	pluginInitHandler      *pluginhttp.InitHandler
-	healthHandler          *healthhttp.Handler
-	pluginUpdateHandler    *pluginupdate.Handler
 	onboardingHandler      *onboardinghttp.Handler
 	deviceHandler          *devicehttp.Handler
-	webPageHandler         *pluginhttp.WebPageHandler
 	orchestrationHandler   *orchestrationhttp.Handler
 	autoTaskHandler        *orchestrationhttp.AutoTaskHandler
 	studioHandler          *workspace.HTTPHandler
 	usageHandler           *usagehttp.Handler
 	mcpHandler             *mcphttp.Handler
 	locationHandler        *locationhttp.Handler
-	pluginsPageHandler     *pluginhttp.PluginsPageHandler
-	permissionsHandler     *pluginhttp.PermissionsHandler
-	backupHandler          *pluginhttp.BackupHandler
-	notificationsHandler   *pluginhttp.NotificationsHandler
 	workflowHandler        *workflowhttp.Handler
-	marketplaceStore       *marketplace.Store
-	marketplaceHandler     *marketplacehttp.Handler
 	modelCategoryStore     store.ModelCategoryStore
 	modelCategoryHandler   *modelcategoryhttp.Handler
 	autoCategorizeHandler  *modelcategoryhttp.AutoCategorizeHandler
@@ -203,7 +172,6 @@ func NewServerBuilder() (*ServerBuilder, error) {
 	return &ServerBuilder{
 		server: &Server{
 			Core:        &CoreSystemFacade{},
-			Plugin:      &PluginSystemFacade{},
 			Storage:     &StorageSystemFacade{},
 			Workflow:    &WorkflowSystemFacade{},
 			Integration: &IntegrationSystemFacade{},
@@ -224,9 +192,6 @@ func (b *ServerBuilder) Build() (*Server, error) {
 
 	if err := b.initializeConfiguration(); err != nil { // Phase 1
 		return nil, fmt.Errorf("configuration phase failed: %w", err)
-	}
-	if err := b.initializeRegistry(); err != nil { // Phase 2
-		return nil, fmt.Errorf("registry phase failed: %w", err)
 	}
 	if err := b.initializeClientFactory(); err != nil { // Phase 3 (deprecated)
 		return nil, fmt.Errorf("client factory phase failed: %w", err)
@@ -253,23 +218,11 @@ func (b *ServerBuilder) Build() (*Server, error) {
 	// GROUP 3: SERVICES - Business logic layer (depends on: Core, Storage)
 	// ═══════════════════════════════════════════════════════════════════════════
 
-	if err := b.initializeHealthManager(); err != nil { // Phase 7
-		return nil, fmt.Errorf("health manager phase failed: %w", err)
-	}
 	if err := b.initializeLocationManager(); err != nil { // Phase 8
 		return nil, fmt.Errorf("location manager phase failed: %w", err)
 	}
-	if err := b.initializePluginInfrastructure(); err != nil { // Phase 9
-		return nil, fmt.Errorf("plugin infrastructure phase failed: %w", err)
-	}
 	if err := b.initializeUpdateManager(); err != nil { // Phase 10
 		return nil, fmt.Errorf("update manager phase failed: %w", err)
-	}
-	if err := b.validatePluginPaths(); err != nil { // Phase 11 - validate paths only, load lazily
-		return nil, fmt.Errorf("plugin validation phase failed: %w", err)
-	}
-	if err := b.loadPluginRegistry(); err != nil { // Phase 12
-		return nil, fmt.Errorf("plugin registry loading phase failed: %w", err)
 	}
 	if err := b.initializeTemplateRenderer(); err != nil { // Phase 13
 		return nil, fmt.Errorf("template renderer phase failed: %w", err)
@@ -320,9 +273,6 @@ func (b *ServerBuilder) Build() (*Server, error) {
 	// GROUP 6: FINALIZATION - Wire everything together (depends on: All)
 	// ═══════════════════════════════════════════════════════════════════════════
 
-	if err := b.startPluginUpdateService(); err != nil { // Phase 24
-		return nil, fmt.Errorf("plugin update service phase failed: %w", err)
-	}
 	if err := b.createDomainFacades(); err != nil { // Phase 25
 		return nil, fmt.Errorf("facade creation phase failed: %w", err)
 	}
@@ -344,18 +294,6 @@ func (b *ServerBuilder) createDomainFacades() error {
 		b.configManager,
 		b.costTracker,
 		b.gateway,
-	)
-
-	// Plugin System Facade
-	b.server.Plugin = NewPluginSystemFacade(
-		b.registryManager,
-		b.pluginReg,
-		b.pluginDownloader,
-		b.categoryManager,
-		b.permissionManager,
-		b.notificationManager,
-		b.backupManager,
-		b.pluginUpdateService,
 	)
 
 	// Storage System Facade
@@ -393,30 +331,18 @@ func (b *ServerBuilder) createDomainFacades() error {
 
 	// Handler Facade
 	b.server.Handlers = NewHandlerFacade(
-		b.healthManager,
 		b.activityLogger,
 		b.settingsHandler,
 		b.chatHandler,
-		b.pluginHandler,
-		b.pluginRegistryHandler,
-		b.pluginInitHandler,
-		b.healthHandler,
-		b.pluginUpdateHandler,
 		b.onboardingHandler,
 		b.deviceHandler,
-		b.webPageHandler,
 		b.orchestrationHandler,
 		b.autoTaskHandler,
 		b.studioHandler,
 		b.usageHandler,
 		b.mcpHandler,
 		b.locationHandler,
-		b.pluginsPageHandler,
-		b.permissionsHandler,
-		b.backupHandler,
-		b.notificationsHandler,
 		b.workflowHandler,
-		b.marketplaceHandler,
 		b.modelCategoryHandler,
 		b.autoCategorizeHandler,
 		b.resetHandler,
@@ -433,25 +359,6 @@ func (b *ServerBuilder) createDomainFacades() error {
 		b.externalAgentsHandler,
 		b.skillsHandler,
 	)
-
-	return nil
-}
-
-// startPluginUpdateService initializes and starts the plugin update service.
-func (b *ServerBuilder) startPluginUpdateService() error {
-	if b.st == nil {
-		return fmt.Errorf("store not initialized for plugin update service")
-	}
-
-	b.pluginUpdateService = pluginupdateservice.NewService(b.st, &b.pluginReg)
-	b.pluginUpdateService.Start()
-
-	if b.pluginUpdateHandler != nil {
-		b.pluginUpdateHandler.SetUpdateService(b.pluginUpdateService)
-	}
-	if b.pluginsPageHandler != nil {
-		b.pluginsPageHandler.SetUpdateService(b.pluginUpdateService)
-	}
 
 	return nil
 }
@@ -473,16 +380,6 @@ func (b *ServerBuilder) WithConfigManager(c *config.Manager) *ServerBuilder {
 		b.server.Core = &CoreSystemFacade{}
 	}
 	b.server.Core.ConfigManager = c
-	return b
-}
-
-// WithRegistryManager injects a custom registry manager (for testing).
-func (b *ServerBuilder) WithRegistryManager(r *registry.Manager) *ServerBuilder {
-	b.registryManager = r
-	if b.server.Plugin == nil {
-		b.server.Plugin = &PluginSystemFacade{}
-	}
-	b.server.Plugin.RegistryManager = r
 	return b
 }
 

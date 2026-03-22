@@ -34,35 +34,6 @@ func TestCompleteAgentWorkflow(t *testing.T) {
 }
 
 // TestAgentWithPluginWorkflow tests enabling plugins and using them
-func TestAgentWithPluginWorkflow(t *testing.T) {
-	ctx := helpers.NewTestContext(t)
-	defer ctx.Cleanup()
-
-	model := helpers.GetTestModel()
-	t.Logf("Starting agent with plugin workflow test (model: %s)", model)
-
-	// Step 1: Create agent
-	agent := ctx.CreateAgent("plugin-test-agent", model)
-
-	// Step 2: Enable math plugin
-	t.Log("Step 2: Enabling math plugin...")
-	ctx.EnablePlugin(agent, "math")
-
-	// Step 3: Chat with tool usage
-	t.Log("Step 3: Sending chat requiring tool use...")
-	resp := ctx.SendChat(agent, "What is 15 plus 27?")
-
-	// Step 4: Verify tool was called
-	t.Log("Step 4: Verifying math tool was called...")
-	ctx.AssertToolCalled(resp, "math")
-
-	// Step 5: Verify correct answer
-	t.Log("Step 5: Verifying response contains answer...")
-	ctx.AssertResponseContains(resp, "42")
-
-	t.Log("✓ Agent with plugin workflow passed")
-}
-
 // TestMultipleAgentsWorkflow tests creating and using multiple agents
 func TestMultipleAgentsWorkflow(t *testing.T) {
 	ctx := helpers.NewTestContext(t)

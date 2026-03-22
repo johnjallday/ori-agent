@@ -15,7 +15,6 @@ import (
 	"github.com/johnjallday/ori-agent/internal/agent"
 	"github.com/johnjallday/ori-agent/internal/mcp"
 	"github.com/johnjallday/ori-agent/internal/store"
-	"github.com/johnjallday/ori-agent/internal/types"
 	"github.com/johnjallday/ori-agent/internal/workspace"
 	"github.com/oriagent/ori-pluginapi"
 )
@@ -436,9 +435,7 @@ func TestMaybeAutoEnableMCPForPrompt_RequiresWorkspaceContext(t *testing.T) {
 }
 
 func TestChatHandler_UsesNativeWebSearchWithoutMCP(t *testing.T) {
-	st := newPreflightStore("Ori", &agent.Agent{
-		Plugins: map[string]types.LoadedPlugin{},
-	})
+	st := newPreflightStore("Ori", &agent.Agent{})
 
 	h := NewHandler(st, nil)
 	h.SetUtilityToolRegistry(NewUtilityToolRegistry(UtilityAdapters{

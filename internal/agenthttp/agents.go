@@ -93,12 +93,6 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 
-			// Get enabled plugins list
-			enabledPlugins := make([]string, 0, len(agent.Plugins))
-			for pluginName := range agent.Plugins {
-				enabledPlugins = append(enabledPlugins, pluginName)
-			}
-
 			orihttp.WriteJSON(w, map[string]any{
 				"name":              agentName,
 				"type":              agent.Type,
@@ -111,7 +105,6 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				"max_output_tokens": agent.Settings.MaxOutputTokens,
 				"system_prompt":     agent.Settings.SystemPrompt,
 				"allow_web_search":  agent.Settings.IsWebSearchAllowed(),
-				"enabled_plugins":   enabledPlugins,
 				"metadata":          agent.Metadata,
 				"evolution":         cloneAgentEvolution(agent),
 			})

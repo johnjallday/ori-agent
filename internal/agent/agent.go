@@ -123,7 +123,6 @@ type Agent struct {
 	Role         types.AgentRole                          `json:"role"`         // Agent role for orchestration (orchestrator, researcher, analyzer, etc.)
 	Capabilities []string                                 `json:"capabilities"` // Agent capabilities (web_search, code_analysis, etc.)
 	Settings     types.Settings                           `json:"Settings"`
-	Plugins      map[string]types.LoadedPlugin            `json:"Plugins"`
 	Messages     []openai.ChatCompletionMessageParamUnion `json:"-"` // in-memory only
 
 	// Dashboard-specific fields (optional for backward compatibility)

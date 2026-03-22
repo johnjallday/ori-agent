@@ -10,7 +10,6 @@ import (
 	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/mcp"
 	"github.com/johnjallday/ori-agent/internal/store"
-	"github.com/johnjallday/ori-agent/internal/types"
 )
 
 const synthesizedFilesystemBindingID = "workspace-filesystem"
@@ -412,12 +411,6 @@ func cloneRuntimeAgent(src *agent.Agent) *agent.Agent {
 	cloned := *src
 	if len(src.Capabilities) > 0 {
 		cloned.Capabilities = append([]string{}, src.Capabilities...)
-	}
-	if len(src.Plugins) > 0 {
-		cloned.Plugins = make(map[string]types.LoadedPlugin, len(src.Plugins))
-		for key, value := range src.Plugins {
-			cloned.Plugins[key] = value
-		}
 	}
 	return &cloned
 }

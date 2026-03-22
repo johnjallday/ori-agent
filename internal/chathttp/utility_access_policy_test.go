@@ -63,7 +63,6 @@ func TestExecuteDirectTool_BlocksWebUtilityWhenDisabled(t *testing.T) {
 			Temperature:    1.0,
 			AllowWebSearch: &allowWebSearch,
 		},
-		Plugins: map[string]types.LoadedPlugin{},
 	}
 	h := &Handler{
 		utilityRegistry: NewDefaultUtilityToolRegistry(),
@@ -89,7 +88,6 @@ func TestGetAvailableToolNames_FiltersDisabledWebUtilities(t *testing.T) {
 			Temperature:    1.0,
 			AllowWebSearch: &allowWebSearch,
 		},
-		Plugins: map[string]types.LoadedPlugin{},
 	}
 	h := &Handler{
 		utilityRegistry: NewDefaultUtilityToolRegistry(),

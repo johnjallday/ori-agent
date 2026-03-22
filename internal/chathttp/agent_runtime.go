@@ -10,7 +10,6 @@ import (
 	"github.com/johnjallday/ori-agent/internal/agent"
 	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/session"
-	"github.com/johnjallday/ori-agent/internal/types"
 	"github.com/johnjallday/ori-agent/internal/workspace"
 )
 
@@ -172,12 +171,6 @@ func cloneAgentForChat(src *agent.Agent) *agent.Agent {
 
 	if len(src.Capabilities) > 0 {
 		copyAgent.Capabilities = append([]string{}, src.Capabilities...)
-	}
-	if len(src.Plugins) > 0 {
-		copyAgent.Plugins = make(map[string]types.LoadedPlugin, len(src.Plugins))
-		for key, value := range src.Plugins {
-			copyAgent.Plugins[key] = value
-		}
 	}
 	if src.Statistics != nil {
 		statsCopy := src.Statistics.GetSafeStats()

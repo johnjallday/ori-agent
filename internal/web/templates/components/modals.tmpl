@@ -400,50 +400,6 @@
   }
 </style>
 
-<!-- Add Marketplace Modal (shared across pages) -->
-<div class="modal fade" id="marketplaceModal" tabindex="-1">
-  <div class="modal-dialog">
-    <div class="modal-content" style="background: var(--bg-primary); border: 1px solid var(--border-color);">
-      <div class="modal-header" style="border-bottom: 1px solid var(--border-color);">
-        <h5 class="modal-title" id="marketplaceModalLabel" style="color: var(--text-primary);">Add Marketplace</h5>
-        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
-      </div>
-      <div class="modal-body" style="color: var(--text-primary);">
-        <div class="mb-3">
-          <label class="form-label">Marketplace Name</label>
-          <input type="text" class="form-control" id="marketplaceNameInput" required
-                 placeholder="e.g., My Team Plugins">
-          <small class="form-text" style="color: var(--text-secondary);">A friendly name for this marketplace</small>
-        </div>
-        <div class="mb-3">
-          <label class="form-label">Source</label>
-          <input type="text" class="form-control" id="marketplaceSourceInput" required
-                 placeholder="e.g., username/repo or /path/to/registry.json">
-          <small class="form-text" style="color: var(--text-secondary);">
-            Supported formats:
-            <ul class="mb-0 mt-1 ps-3">
-              <li><code>user/repo</code> - GitHub shorthand</li>
-              <li><code>https://github.com/user/repo</code> - GitHub URL</li>
-              <li><code>https://gitlab.com/user/repo</code> - GitLab URL</li>
-              <li><code>https://example.com/registry.json</code> - Direct URL</li>
-              <li><code>/path/to/registry.json</code> - Local file path</li>
-            </ul>
-          </small>
-        </div>
-        <div id="marketplaceTestResult" style="display: none;"></div>
-      </div>
-      <div class="modal-footer" style="border-top: 1px solid var(--border-color);">
-        <button type="button" class="btn btn-outline-secondary" id="testMarketplaceBtn">
-          Test Connection
-        </button>
-        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
-        <button type="button" id="saveMarketplaceBtn" class="btn btn-primary" disabled>
-          Add
-        </button>
-      </div>
-    </div>
-  </div>
-</div>
 <div class="modal fade" id="agentInfoModal" tabindex="-1" aria-labelledby="agentInfoModalLabel" aria-hidden="true">
   <div class="modal-dialog modal-lg">
     <div class="modal-content" style="background: var(--bg-primary); border: 1px solid var(--border-color);">
