@@ -2469,7 +2469,7 @@ function setupChatPanel() {
 // ---- Sidebar Functionality ----
 // Sidebar functionality has been moved to modular files:
 // - js/modules/agents.js - Agent management
-// - js/modules/plugins.js - Plugin management
+// - js/modules/skills.js - Skills management
 // - js/modules/settings.js - Settings management
 // - js/modules/sidebar.js - Main sidebar controller
 
@@ -2583,15 +2583,6 @@ async function initializeApp() {
   } catch (error) {
     appLog.error('Failed to initialize chat state machine:', error);
     // Fall back to simple behavior without state machine
-  }
-
-  // Initialize plugin initialization banner
-  try {
-    const pluginBannerModule = await import('./modules/plugin-init-banner.js');
-    await pluginBannerModule.initPluginBanner();
-    appLog.debug('Plugin init banner initialized');
-  } catch (error) {
-    appLog.error('Failed to initialize plugin banner:', error);
   }
 
   // Initialize chat auto-scroll

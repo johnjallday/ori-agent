@@ -3,6 +3,7 @@ package workspace
 import (
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 // ProjectPathInfo contains resolved project path information for a workspace.
@@ -17,13 +18,19 @@ type ProjectPathInfo struct {
 
 // ResolveProjectPath resolves a workspace's project_path relative to its folder.
 // Returns the absolute path and whether it exists on disk.
+// The resolved path must remain within the workspace folder to prevent traversal.
 func ResolveProjectPath(workspaceFolderPath, projectPath string) (string, bool) {
 	if projectPath == "" {
 		return "", false
 	}
 
-	absPath := filepath.Join(workspaceFolderPath, projectPath)
-	absPath = filepath.Clean(absPath)
+	absPath := filepath.Clean(filepath.Join(workspaceFolderPath, projectPath))
+	absFolder := filepath.Clean(workspaceFolderPath)
+
+	// Ensure the resolved path stays within the workspace folder
+	if !strings.HasPrefix(absPath, absFolder+string(filepath.Separator)) && absPath != absFolder {
+		return "", false
+	}
 
 	info, err := os.Stat(absPath)
 	if err != nil {

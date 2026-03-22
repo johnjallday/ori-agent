@@ -23,7 +23,6 @@ type ResetRequest struct {
 	Settings     bool   `json:"settings"`     // Reset settings.json
 	Agents       bool   `json:"agents"`       // Reset agents.json and agents/ directory
 	Sessions     bool   `json:"sessions"`     // Reset sessions.db, workspaces/, and session_files/
-	Plugins      bool   `json:"plugins"`      // Reset local_plugin_registry.json and uploaded_plugins/
 	Onboarding   bool   `json:"onboarding"`   // Reset app_state.json (onboarding)
 	Confirmation string `json:"confirmation"` // Must be "RESET" to confirm
 }
@@ -83,7 +82,7 @@ func (h *ResetHandler) HandleReset(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Validate that at least one option is selected
-	if !req.Settings && !req.Agents && !req.Sessions && !req.Plugins && !req.Onboarding {
+	if !req.Settings && !req.Agents && !req.Sessions && !req.Onboarding {
 		_ = orihttp.RespondBadRequest(w, "At least one reset option must be selected")
 		return
 	}
@@ -122,16 +121,6 @@ func (h *ResetHandler) HandleReset(w http.ResponseWriter, r *http.Request) {
 			logger.Error("Failed to reset sessions", logger.Fields{"error": err})
 		} else {
 			response.ResetItems = append(response.ResetItems, "sessions")
-		}
-	}
-
-	// Reset plugins
-	if req.Plugins {
-		if err := h.resetPlugins(); err != nil {
-			response.Errors = append(response.Errors, "plugins: "+err.Error())
-			logger.Error("Failed to reset plugins", logger.Fields{"error": err})
-		} else {
-			response.ResetItems = append(response.ResetItems, "plugins")
 		}
 	}
 
@@ -262,38 +251,6 @@ func (h *ResetHandler) resetSessions() error {
 	return nil
 }
 
-// resetPlugins removes local_plugin_registry.json and uploaded_plugins/ directory
-func (h *ResetHandler) resetPlugins() error {
-	// Remove local_plugin_registry.json
-	registryPath := filepath.Join(h.dataDir, "local_plugin_registry.json")
-	if err := h.validatePath(registryPath); err != nil {
-		return err
-	}
-	if err := os.Remove(registryPath); err != nil && !os.IsNotExist(err) {
-		return err
-	}
-
-	// Remove uploaded_plugins/ directory
-	uploadedPluginsDir := filepath.Join(h.dataDir, "uploaded_plugins")
-	if err := h.validatePath(uploadedPluginsDir); err != nil {
-		return err
-	}
-	if err := os.RemoveAll(uploadedPluginsDir); err != nil {
-		return err
-	}
-
-	// Also remove plugin_cache/ directory for a clean slate
-	pluginCacheDir := filepath.Join(h.dataDir, "plugin_cache")
-	if err := h.validatePath(pluginCacheDir); err != nil {
-		return err
-	}
-	if err := os.RemoveAll(pluginCacheDir); err != nil && !os.IsNotExist(err) {
-		return err
-	}
-
-	return nil
-}
-
 // GetResetPreview returns information about what would be reset
 func (h *ResetHandler) GetResetPreview(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
@@ -313,10 +270,6 @@ func (h *ResetHandler) GetResetPreview(w http.ResponseWriter, r *http.Request) {
 		"sessions": map[string]interface{}{
 			"description": "All chat sessions, message history, workspaces, and uploaded files",
 			"files":       []string{"sessions.db", "session_files/", "workspaces/"},
-		},
-		"plugins": map[string]interface{}{
-			"description": "Uploaded plugins and plugin registry",
-			"files":       []string{"local_plugin_registry.json", "uploaded_plugins/", "plugin_cache/"},
 		},
 		"onboarding": map[string]interface{}{
 			"description": "Onboarding state and app preferences",

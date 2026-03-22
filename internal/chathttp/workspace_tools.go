@@ -113,7 +113,9 @@ func (p *WorkspaceToolProvider) readNotesTool() toolapi.Tool {
 				NoteID string `json:"note_id"`
 			}
 			if strings.TrimSpace(args) != "" {
-				_ = json.Unmarshal([]byte(args), &req)
+				if err := json.Unmarshal([]byte(args), &req); err != nil {
+					return "", fmt.Errorf("invalid arguments: %w", err)
+				}
 			}
 
 			// Read a specific note
@@ -122,6 +124,9 @@ func (p *WorkspaceToolProvider) readNotesTool() toolapi.Tool {
 				if err != nil {
 					return "", fmt.Errorf("note not found: %w", err)
 				}
+				if note.WorkspaceID != p.workspaceID {
+					return "", fmt.Errorf("note does not belong to this workspace")
+				}
 				result := map[string]interface{}{
 					"id":         note.ID,
 					"name":       note.Name,
@@ -129,8 +134,7 @@ func (p *WorkspaceToolProvider) readNotesTool() toolapi.Tool {
 					"created_at": note.CreatedAt.Format(time.RFC3339),
 					"updated_at": note.UpdatedAt.Format(time.RFC3339),
 				}
-				raw, _ := json.Marshal(result)
-				return string(raw), nil
+				return marshalToolResponse(result)
 			}
 
 			// List all notes
@@ -151,8 +155,7 @@ func (p *WorkspaceToolProvider) readNotesTool() toolapi.Tool {
 					"updated_at": n.UpdatedAt.Format(time.RFC3339),
 				})
 			}
-			raw, _ := json.Marshal(map[string]interface{}{"notes": items})
-			return string(raw), nil
+			return marshalToolResponse(map[string]interface{}{"notes": items})
 		},
 	}
 }
@@ -202,6 +205,9 @@ func (p *WorkspaceToolProvider) saveNoteTool() toolapi.Tool {
 				if err != nil {
 					return "", fmt.Errorf("note not found: %w", err)
 				}
+				if existing.WorkspaceID != p.workspaceID {
+					return "", fmt.Errorf("note does not belong to this workspace")
+				}
 				existing.Content = req.Content
 				if req.Name != "" {
 					existing.Name = req.Name
@@ -215,13 +221,12 @@ func (p *WorkspaceToolProvider) saveNoteTool() toolapi.Tool {
 					Name: existing.Name, Content: existing.Content,
 					CreatedAt: existing.CreatedAt, UpdatedAt: existing.UpdatedAt,
 				})
-				raw, _ := json.Marshal(map[string]interface{}{
+				return marshalToolResponse(map[string]interface{}{
 					"id":      existing.ID,
 					"name":    existing.Name,
 					"action":  "updated",
 					"message": fmt.Sprintf("Note '%s' updated successfully.", existing.Name),
 				})
-				return string(raw), nil
 			}
 
 			// Create new note
@@ -250,13 +255,12 @@ func (p *WorkspaceToolProvider) saveNoteTool() toolapi.Tool {
 				"note_id":      note.ID,
 				"name":         note.Name,
 			})
-			raw, _ := json.Marshal(map[string]interface{}{
+			return marshalToolResponse(map[string]interface{}{
 				"id":      note.ID,
 				"name":    note.Name,
 				"action":  "created",
 				"message": fmt.Sprintf("Note '%s' created successfully.", note.Name),
 			})
-			return string(raw), nil
 		},
 	}
 }
@@ -283,7 +287,9 @@ func (p *WorkspaceToolProvider) readTasksTool() toolapi.Tool {
 				Status string `json:"status"`
 			}
 			if strings.TrimSpace(args) != "" {
-				_ = json.Unmarshal([]byte(args), &req)
+				if err := json.Unmarshal([]byte(args), &req); err != nil {
+					return "", fmt.Errorf("invalid arguments: %w", err)
+				}
 			}
 
 			ws, err := p.workspaceStore.Get(p.workspaceID)
@@ -324,8 +330,7 @@ func (p *WorkspaceToolProvider) readTasksTool() toolapi.Tool {
 				}
 				items = append(items, item)
 			}
-			raw, _ := json.Marshal(map[string]interface{}{"tasks": items, "total": len(items)})
-			return string(raw), nil
+			return marshalToolResponse(map[string]interface{}{"tasks": items, "total": len(items)})
 		},
 	}
 }
@@ -366,8 +371,7 @@ func (p *WorkspaceToolProvider) readSessionsTool() toolapi.Tool {
 					"updated_at":    s.UpdatedAt.Format(time.RFC3339),
 				})
 			}
-			raw, _ := json.Marshal(map[string]interface{}{"sessions": items, "total": result.Total})
-			return string(raw), nil
+			return marshalToolResponse(map[string]interface{}{"sessions": items, "total": result.Total})
 		},
 	}
 }
@@ -428,13 +432,12 @@ func (p *WorkspaceToolProvider) readSessionDetailTool() toolapi.Tool {
 				})
 			}
 
-			raw, _ := json.Marshal(map[string]interface{}{
+			return marshalToolResponse(map[string]interface{}{
 				"session_id": sess.ID,
 				"title":      sess.Title,
 				"agent_name": sess.AgentName,
 				"messages":   msgItems,
 			})
-			return string(raw), nil
 		},
 	}
 }
@@ -480,8 +483,7 @@ func (p *WorkspaceToolProvider) readFilesTool() toolapi.Tool {
 				return `{"files":[],"message":"No files attached to this workspace."}`, nil
 			}
 
-			raw, _ := json.Marshal(map[string]interface{}{"files": files, "total": len(files)})
-			return string(raw), nil
+			return marshalToolResponse(map[string]interface{}{"files": files, "total": len(files)})
 		},
 	}
 }
@@ -516,18 +518,27 @@ func (p *WorkspaceToolProvider) readDirectoriesTool() toolapi.Tool {
 					"path": d.Path,
 				})
 			}
-			raw, _ := json.Marshal(map[string]interface{}{"directories": items, "total": len(items)})
-			return string(raw), nil
+			return marshalToolResponse(map[string]interface{}{"directories": items, "total": len(items)})
 		},
 	}
 }
 
-// truncate shortens a string to maxLen, appending "..." if truncated.
+// marshalToolResponse marshals a tool response to JSON, returning an error if marshaling fails.
+func marshalToolResponse(v interface{}) (string, error) {
+	raw, err := json.Marshal(v)
+	if err != nil {
+		return "", fmt.Errorf("failed to marshal tool response: %w", err)
+	}
+	return string(raw), nil
+}
+
+// truncate shortens a string to maxLen runes, appending "..." if truncated.
 func truncate(s string, maxLen int) string {
-	if len(s) <= maxLen {
+	runes := []rune(s)
+	if len(runes) <= maxLen {
 		return s
 	}
-	return s[:maxLen] + "..."
+	return string(runes[:maxLen]) + "..."
 }
 
 // ============================================================
@@ -584,8 +595,7 @@ func (p *WorkspaceToolProvider) manageAgentsTool() toolapi.Tool {
 						"node_id": inst.NodeID,
 					})
 				}
-				raw, _ := json.Marshal(map[string]interface{}{"agents": items})
-				return string(raw), nil
+				return marshalToolResponse(map[string]interface{}{"agents": items})
 
 			case "available":
 				allNames := p.agentStore.ListAgents()
@@ -599,12 +609,11 @@ func (p *WorkspaceToolProvider) manageAgentsTool() toolapi.Tool {
 						available = append(available, name)
 					}
 				}
-				raw, _ := json.Marshal(map[string]interface{}{
+				return marshalToolResponse(map[string]interface{}{
 					"available_agents": available,
 					"workspace_agents": len(ws.AgentInstances),
 					"total_agents":     len(allNames),
 				})
-				return string(raw), nil
 
 			case "add":
 				if strings.TrimSpace(req.AgentName) == "" {
@@ -620,12 +629,11 @@ func (p *WorkspaceToolProvider) manageAgentsTool() toolapi.Tool {
 					"workspace_id": p.workspaceID,
 					"agent_name":   req.AgentName,
 				})
-				raw, _ := json.Marshal(map[string]interface{}{
+				return marshalToolResponse(map[string]interface{}{
 					"action":  "added",
 					"agent":   req.AgentName,
 					"message": fmt.Sprintf("Agent '%s' added to workspace.", req.AgentName),
 				})
-				return string(raw), nil
 
 			case "remove":
 				if strings.TrimSpace(req.AgentName) == "" {
@@ -641,12 +649,11 @@ func (p *WorkspaceToolProvider) manageAgentsTool() toolapi.Tool {
 					"workspace_id": p.workspaceID,
 					"agent_name":   req.AgentName,
 				})
-				raw, _ := json.Marshal(map[string]interface{}{
+				return marshalToolResponse(map[string]interface{}{
 					"action":  "removed",
 					"agent":   req.AgentName,
 					"message": fmt.Sprintf("Agent '%s' removed from workspace.", req.AgentName),
 				})
-				return string(raw), nil
 
 			default:
 				return "", fmt.Errorf("unknown action '%s'; use list, available, add, or remove", req.Action)
@@ -712,8 +719,7 @@ func (p *WorkspaceToolProvider) manageMCPTool() toolapi.Tool {
 						"enabled":     b.Enabled,
 					})
 				}
-				raw, _ := json.Marshal(map[string]interface{}{"mcp_bindings": items})
-				return string(raw), nil
+				return marshalToolResponse(map[string]interface{}{"mcp_bindings": items})
 
 			case "available":
 				servers := p.mcpRegistry.ListServers()
@@ -729,8 +735,7 @@ func (p *WorkspaceToolProvider) manageMCPTool() toolapi.Tool {
 						"already_attached": boundMap[strings.ToLower(s.Name)],
 					})
 				}
-				raw, _ := json.Marshal(map[string]interface{}{"available_servers": available})
-				return string(raw), nil
+				return marshalToolResponse(map[string]interface{}{"available_servers": available})
 
 			case "attach":
 				if strings.TrimSpace(req.ServerName) == "" {
@@ -754,13 +759,12 @@ func (p *WorkspaceToolProvider) manageMCPTool() toolapi.Tool {
 					"server_name":  req.ServerName,
 					"binding_id":   binding.ID,
 				})
-				raw, _ := json.Marshal(map[string]interface{}{
+				return marshalToolResponse(map[string]interface{}{
 					"action":     "attached",
 					"binding_id": binding.ID,
 					"server":     req.ServerName,
 					"message":    fmt.Sprintf("MCP server '%s' attached to workspace.", req.ServerName),
 				})
-				return string(raw), nil
 
 			case "detach":
 				bindingID := strings.TrimSpace(req.BindingID)
@@ -789,11 +793,10 @@ func (p *WorkspaceToolProvider) manageMCPTool() toolapi.Tool {
 					"workspace_id": p.workspaceID,
 					"binding_id":   bindingID,
 				})
-				raw, _ := json.Marshal(map[string]interface{}{
+				return marshalToolResponse(map[string]interface{}{
 					"action":  "detached",
 					"message": "MCP server detached from workspace.",
 				})
-				return string(raw), nil
 
 			default:
 				return "", fmt.Errorf("unknown action '%s'; use list, available, attach, or detach", req.Action)
@@ -859,8 +862,7 @@ func (p *WorkspaceToolProvider) manageSkillsTool() toolapi.Tool {
 						"trusted":    b.Trusted,
 					})
 				}
-				raw, _ := json.Marshal(map[string]interface{}{"skill_bindings": items})
-				return string(raw), nil
+				return marshalToolResponse(map[string]interface{}{"skill_bindings": items})
 
 			case "available":
 				// List skills for a generic agent name (empty uses defaults)
@@ -880,8 +882,7 @@ func (p *WorkspaceToolProvider) manageSkillsTool() toolapi.Tool {
 						"already_attached": boundMap[strings.ToLower(s.Name)],
 					})
 				}
-				raw, _ := json.Marshal(map[string]interface{}{"available_skills": available, "total": len(available)})
-				return string(raw), nil
+				return marshalToolResponse(map[string]interface{}{"available_skills": available, "total": len(available)})
 
 			case "attach":
 				if strings.TrimSpace(req.SkillName) == "" {
@@ -906,13 +907,12 @@ func (p *WorkspaceToolProvider) manageSkillsTool() toolapi.Tool {
 					"skill_name":   req.SkillName,
 					"binding_id":   binding.ID,
 				})
-				raw, _ := json.Marshal(map[string]interface{}{
+				return marshalToolResponse(map[string]interface{}{
 					"action":     "attached",
 					"binding_id": binding.ID,
 					"skill":      req.SkillName,
 					"message":    fmt.Sprintf("Skill '%s' attached to workspace.", req.SkillName),
 				})
-				return string(raw), nil
 
 			case "detach":
 				bindingID := strings.TrimSpace(req.BindingID)
@@ -941,11 +941,10 @@ func (p *WorkspaceToolProvider) manageSkillsTool() toolapi.Tool {
 					"workspace_id": p.workspaceID,
 					"binding_id":   bindingID,
 				})
-				raw, _ := json.Marshal(map[string]interface{}{
+				return marshalToolResponse(map[string]interface{}{
 					"action":  "detached",
 					"message": "Skill detached from workspace.",
 				})
-				return string(raw), nil
 
 			default:
 				return "", fmt.Errorf("unknown action '%s'; use list, available, attach, or detach", req.Action)

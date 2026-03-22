@@ -12,6 +12,7 @@ import (
 	"github.com/openai/openai-go/v3"
 	"github.com/openai/openai-go/v3/packages/param"
 
+	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/types"
 )
 
@@ -161,7 +162,9 @@ func (h *Handler) finishWorkspaceNoteFallbackResponse(
 	}
 
 	ag.Messages = append(ag.Messages, openai.AssistantMessage(responseText))
-	_ = h.persistAgent(agentName, ag.Agent)
+	if err := h.persistAgent(agentName, ag.Agent); err != nil {
+		logger.Warn("Failed to persist agent after note fallback", logger.Fields{"agent": agentName, "error": err})
+	}
 	h.storeMessageInSession(baseCtx, sessionID, "assistant", responseText)
 
 	payload := map[string]any{
@@ -232,8 +235,8 @@ func matchesWorkspaceSeparateNoteIntent(message string) bool {
 	return strings.Contains(message, "separate note") ||
 		strings.Contains(message, "another note") ||
 		strings.Contains(message, "new note") ||
-		strings.Contains(message, "separate ") && strings.Contains(message, " note") ||
-		strings.HasPrefix(message, "start ") && strings.Contains(message, " note")
+		(strings.Contains(message, "separate ") && strings.Contains(message, " note")) ||
+		(strings.HasPrefix(message, "start ") && strings.Contains(message, " note"))
 }
 
 func matchesWorkspaceAppendNoteIntent(message string) bool {
@@ -394,7 +397,7 @@ func normalizeWorkspaceSaveIntentText(text string) string {
 func quoteForResponse(value string) string {
 	value = strings.TrimSpace(value)
 	if value == "" {
-		return quoteForResponse(defaultWorkspaceSavedNoteName)
+		value = defaultWorkspaceSavedNoteName
 	}
 	return `"` + value + `"`
 }

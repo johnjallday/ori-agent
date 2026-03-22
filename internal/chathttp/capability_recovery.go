@@ -9,10 +9,12 @@ import (
 	"regexp"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/openai/openai-go/v3"
 
 	"github.com/johnjallday/ori-agent/internal/llm"
+	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/skills"
 	"github.com/johnjallday/ori-agent/internal/types"
 )
@@ -85,7 +87,9 @@ func (h *Handler) maybeHandleCapabilityRecovery(
 
 	ag.Messages = append(ag.Messages, openai.UserMessage(userMessage))
 	ag.Messages = append(ag.Messages, openai.AssistantMessage(responseText))
-	_ = h.persistAgent(agentName, ag.Agent)
+	if err := h.persistAgent(agentName, ag.Agent); err != nil {
+		logger.Warn("Failed to persist agent after capability recovery", logger.Fields{"agent": agentName, "error": err})
+	}
 
 	h.storeMessageInSession(baseCtx, sessionID, "user", userMessage)
 	h.storeMessageInSession(baseCtx, sessionID, "assistant", responseText)
@@ -388,6 +392,13 @@ func searchCapabilityRecoveryMarketplaceSkills(ctx context.Context, query string
 		return nil, nil
 	}
 
+	// Validate query contains only safe characters to prevent misuse of npx --yes
+	for _, r := range query {
+		if !isCapabilityRecoverySafeQueryRune(r) {
+			return nil, fmt.Errorf("invalid character in marketplace query: %q", string(r))
+		}
+	}
+
 	output, err := runCapabilityRecoverySkillsCLI(ctx, "find", query)
 	results := parseCapabilityRecoverySkillsFind(output, 3)
 	if err != nil && len(results) == 0 {
@@ -409,6 +420,11 @@ func runCapabilityRecoverySkillsCLI(ctx context.Context, args ...string) (string
 		return output, fmt.Errorf("skills command failed: %w", err)
 	}
 	return output, nil
+}
+
+// isCapabilityRecoverySafeQueryRune returns true for characters safe to pass to npx skills find.
+func isCapabilityRecoverySafeQueryRune(r rune) bool {
+	return unicode.IsLetter(r) || unicode.IsDigit(r) || r == ' ' || r == '-' || r == '_' || r == '.'
 }
 
 func parseCapabilityRecoverySkillsFind(output string, limit int) []capabilityRecoveryMarketplaceSkill {

@@ -176,9 +176,8 @@ func ensureDataDirectory() error {
 	// Check if we're already in a data directory or if data files exist
 	baseName := filepath.Base(cwd)
 	hasDataFiles := fileExists("agents.json") ||
-		fileExists("local_plugin_registry.json") ||
-		fileExists("plugin_cache") ||
-		fileExists("uploaded_plugins")
+		fileExists("settings.json") ||
+		fileExists("sessions.db")
 
 	// If already in ori-data directory (or OriAgent for installed app) or data files exist, we're good
 	if baseName == "ori-data" || baseName == "OriAgent" || hasDataFiles {

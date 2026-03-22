@@ -4,9 +4,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-**Ori Agent** is a modular, plugin-driven framework for building tool-calling AI agents. The system provides secure plugin loading (via direct gRPC), multi-agent orchestration, workspace collaboration, and HTTP interfaces for building autonomous AI systems.
+**Ori Agent** is a modular framework for building tool-calling AI agents. The system provides multi-agent orchestration, workspace collaboration, MCP (Model Context Protocol) integration, skills management, and HTTP interfaces for building autonomous AI systems.
 
-**Key Design Philosophy**: Plugins run as separate RPC processes (not shared libraries), providing strong isolation and cross-platform compatibility.
+**Key Design Philosophy**: Tool capabilities are provided via MCP servers and skills, not plugins. The legacy plugin system has been removed.
 
 ## Build & Development Commands
 
@@ -23,9 +23,6 @@ export ANTHROPIC_API_KEY="your-key-here"  # Optional, for Claude support
 ### Building
 
 ```bash
-# Build everything (server + menubar + plugins)
-./scripts/build.sh
-
 # Build server only
 ./scripts/build-server.sh
 # OR
@@ -34,18 +31,12 @@ go build -o bin/ori-agent ./cmd/server
 # Build menu bar app (macOS only)
 go build -o bin/ori-menubar ./cmd/menubar
 
-# Build plugins as RPC executables (NOT shared libraries)
-./scripts/build-plugins.sh
-
 # Using Makefile
 make build         # Build server binary
 make menubar       # Build menu bar app (macOS)
-make plugins       # Build all plugins
-make all           # Build server + menubar + plugins
+make all           # Build server + menubar
 make build-all     # Cross-compile for multiple platforms
 ```
-
-**IMPORTANT**: Plugins are built as standalone executables, NOT using `-buildmode=plugin`. They communicate via gRPC/RPC.
 
 ### Running
 
@@ -78,7 +69,7 @@ go test ./...
 
 # Run specific package tests
 go test ./internal/llm/
-go test ./internal/registry/
+go test ./internal/workspace/
 
 # Run specific test
 go test -v ./internal/llm/... -run TestOpenAIProvider
@@ -100,25 +91,24 @@ make lint          # Requires golangci-lint
 ### Core Technology Stack
 
 - **Language**: Go 1.25+
-- **Plugin System**: Direct gRPC with Protocol Buffers
+- **Tool System**: MCP (Model Context Protocol) servers + Skills
 - **LLM Providers**: OpenAI, Anthropic Claude, Ollama (via provider abstraction)
-- **Protocol Buffers**: `pluginapi/proto/tool.proto` defines plugin interface
+- **Tool Interface**: `internal/toolapi/` defines the internal tool interface
 - **UI**: HTML/CSS/JavaScript (Bootstrap-based, embedded in `internal/web/`)
 
 ### Key Architectural Patterns
 
-**1. Plugin System (RPC-Based, NOT Shared Libraries)**
-- Plugins are **separate executable processes**, not `.so` files
-- Communication via gRPC using Protocol Buffers (`pluginapi/proto/tool.proto`)
-- Plugin interface: `pluginapi.Tool` in `pluginapi/pluginapi.go`
-- Plugins run in isolated processes managed directly by ori-agent
-- Build plugins with: `go build -o plugin-name main.go` (NOT `-buildmode=plugin`)
+**1. MCP + Skills Tool System**
+- Tool capabilities are provided via **MCP servers** (external processes speaking Model Context Protocol) and **Skills** (reusable prompt-based capabilities)
+- MCP servers are configured per workspace and managed via `internal/mcp/`
+- Skills are managed via `internal/skills/` and `internal/skillshttp/`
+- Internal tool interface: `toolapi.Tool` in `internal/toolapi/tool.go`
+- The legacy gRPC plugin system has been fully removed
 
 **2. Modular HTTP Handler Pattern**
 Each domain has dedicated handler modules in `internal/*http/`:
 - `agenthttp` - Agent CRUD operations
-- `chathttp` - Chat interactions
-- `pluginhttp` - Plugin management (upload, configure, registry, web pages)
+- `chathttp` - Chat interactions and workspace tools
 - `settingshttp` - Configuration management
 - `updatehttp` - Update management
 - `devicehttp` - Device detection
@@ -126,6 +116,8 @@ Each domain has dedicated handler modules in `internal/*http/`:
 - `orchestrationhttp` - Multi-agent orchestration
 - `usagehttp` - Usage tracking and cost monitoring
 - `mcphttp` - MCP (Model Context Protocol) integration
+- `skillshttp` - Skills management and marketplace
+- `sessionhttp` - Session and workspace data management
 
 **3. LLM Provider Abstraction** (`internal/llm/`)
 - Factory pattern supports multiple providers: `factory.go`
@@ -136,30 +128,22 @@ Each domain has dedicated handler modules in `internal/*http/`:
 - Cost tracking: `cost_tracker.go`
 - See `internal/llm/README.md` for detailed usage patterns
 
-**4. Plugin Registry System**
-- Local registry: `local_plugin_registry.json` (user-uploaded plugins)
-- Remote registry: Cached in `plugin_registry_cache.json`
-- Registry manager: `internal/registry/registry.go`
-- Auto-validation on startup, searches common directories for moved plugins
-- Search locations (in order): `plugins/`, `uploaded_plugins/`, `example_plugins/`, `../plugins/`, `../uploaded_plugins/`
-
-**5. Agent Isolation & Workspaces**
-- Each agent has isolated plugin contexts
+**4. Agent Isolation & Workspaces**
 - Agent configs stored in `agents/<agent-name>/config.json`
-- Plugins maintain per-agent state via `AgentContext`
 - **Workspace System** (`internal/workspace/`): Multi-agent collaboration
-  - Shared data between agents
+  - Workspace-scoped MCP bindings and skill bindings
+  - Workspace-scoped tools for notes, tasks, sessions, files
+  - Folder-based storage with file sync
   - Task delegation and execution
   - Scheduled tasks with cron-like scheduling
   - Event bus for inter-agent communication
-  - Workflow orchestration
 
-**6. Communication & Orchestration**
+**5. Communication & Orchestration**
 - `internal/agentcomm/`: Inter-agent communication system
 - `internal/orchestration/`: Multi-agent workflow orchestration
 - `internal/orchestration/templates/`: Pre-built orchestration templates
 
-**7. macOS Menu Bar App** (`cmd/menubar/`, `internal/menubar/`)
+**6. macOS Menu Bar App** (`cmd/menubar/`, `internal/menubar/`)
 - Menu bar GUI for controlling the server (macOS only)
 - Components:
   - `controller.go` - Server lifecycle management (start/stop/status)
@@ -180,169 +164,39 @@ Each domain has dedicated handler modules in `internal/*http/`:
 HTTP Request → Handler (internal/*http/) → Business Logic → Store/Registry → File System
 ```
 
-### Plugin Execution Flow
+### Tool Execution Flow
 
 ```
-Chat Message → LLM Provider → Tool Call Decision → Plugin Loader →
-RPC Call to Plugin Process → Plugin Execution → Structured Result → UI Rendering
+Chat Message → LLM Provider → Tool Call Decision → MCP Server / Workspace Tool →
+Tool Execution → Result → UI Rendering
 ```
-
-## Plugin Development
-
-### Plugin Interface
-
-All plugins implement `pluginapi.Tool` (defined in `pluginapi/pluginapi.go`):
-
-```go
-type Tool interface {
-    Definition() openai.FunctionDefinitionParam
-    Call(ctx context.Context, args string) (string, error)
-}
-```
-
-### Optional Plugin Interfaces
-
-Plugins can optionally implement additional interfaces for enhanced functionality:
-
-- `VersionedTool` - Provides version information
-- `PluginCompatibility` - Declares version compatibility requirements (min/max agent version, API version)
-- `AgentAwareTool` - Receives agent context (name, config path, agent dir)
-- `DefaultSettingsProvider` - Provides default configuration
-- `InitializationProvider` - Describes required configuration variables
-- `WebPageProvider` - Enables plugins to serve custom web pages through ori-agent
-  - URL pattern: `http://localhost:8765/api/plugins/{plugin-name}/pages/{page-path}`
-  - Useful for: script marketplaces, configuration UIs, data visualization
-- `MetadataProvider` - Provides plugin metadata (maintainers, license, repository)
-- `HealthCheckProvider` - Implements custom health checks
-
-### Building a Plugin
-
-```bash
-# Plugins are built as executables (NOT shared libraries)
-cd plugins/math
-go build -o math math.go  # NOT -buildmode=plugin
-
-# Plugin automatically uses gRPC for communication with server
-```
-
-### Plugin Optimization APIs (Recommended)
-
-**New in 2024**: Ori Agent now provides optimization APIs that dramatically simplify plugin development:
-
-**1. YAML-Based Tool Definitions**
-Define tool parameters in `plugin.yaml` instead of code (70% less code):
-
-```yaml
-# plugin.yaml
-tool_definition:
-  description: "Your tool description"
-  parameters:
-    - name: operation
-      type: string
-      required: true
-      enum: [create, list, delete]
-    - name: count
-      type: integer
-      min: 1
-      max: 100
-```
-
-```go
-// Simplified Definition() method
-func (t *MyTool) Definition() pluginapi.Tool {
-    tool, _ := t.GetToolDefinition()  // Reads from plugin.yaml
-    return tool
-}
-```
-
-**2. Settings API**
-Simple key-value storage for plugin configuration:
-
-```go
-// Store settings
-sm := t.Settings()
-sm.Set("api_key", "sk-123")
-sm.Set("max_retries", 5)
-
-// Retrieve settings (type-safe)
-apiKey, _ := sm.GetString("api_key")
-retries, _ := sm.GetInt("max_retries")
-```
-
-**3. Template Rendering API**
-Serve web pages with Go templates:
-
-```yaml
-# plugin.yaml
-assets:
-  - templates
-```
-
-```go
-html, err := pluginapi.RenderTemplate(assetsFS, "templates/page.html", data)
-```
-
-**Benefits**:
-- 70-90% reduction in boilerplate code
-- Thread-safe settings with atomic writes
-- Automatic XSS protection in templates
-- Clean separation of concerns
-
-**Documentation**: See `PLUGIN_OPTIMIZATION_GUIDE.md` for complete migration guide.
-
-**Examples**: See `example_plugins/minimal/` and `example_plugins/webapp/` for working examples.
-
-### Plugin Locations
-
-1. `plugins/` - Built-in plugins (math, weather, result-handler)
-2. `uploaded_plugins/` - User-uploaded plugins (auto-scanned on startup)
-3. `plugin_cache/` - External plugins from remote registry
-
-### Structured Results
-
-Plugins can return structured data that the UI renders specially:
-- Tables (sortable, interactive)
-- Modals (with actions, multi-select)
-- Lists, Cards, JSON, Text
-
-See `pluginapi/result.go` for helper functions: `NewTableResult()`, `NewModalResult()`, etc.
 
 ## Important File Locations
 
 ### Configuration Files
 - `settings.json` - Global settings, API keys, LLM provider config
 - `agents.json` - Agent configurations
-- `local_plugin_registry.json` - User plugins registry
-- `plugin_registry_cache.json` - Cached remote registry
 - `app_state.json` - Onboarding and application state
-- `agents/<agent-name>/config.json` - Per-agent plugin settings
+- `agents/<agent-name>/config.json` - Per-agent settings
 - `agents/<agent-name>/agent_settings.json` - Per-agent settings
 
 ### Build Outputs
 - `bin/ori-agent` - Server binary
-- `plugins/*/[plugin-name]` - Built plugin executables (NOT .so files)
+- `bin/ori-menubar` - Menu bar app (macOS)
 
 ### Source Code Organization
 - `cmd/server/` - Main server entry point
 - `internal/server/server.go` - Server initialization and dependency injection
 - `internal/*http/` - HTTP handlers (modular by domain)
 - `internal/llm/` - LLM provider abstraction layer
-- `internal/pluginloader/` - Plugin loading and caching
+- `internal/toolapi/` - Internal tool interface definitions
+- `internal/mcp/` - MCP server integration
+- `internal/skills/` - Skills management
 - `internal/workspace/` - Multi-agent workspace system
 - `internal/orchestration/` - Multi-agent orchestration
 - `internal/web/` - Web server, templates, static files
-- `pluginapi/` - Plugin interface definitions
-- `pluginapi/proto/tool.proto` - Protocol Buffers definition
 
 ## Key Development Patterns
-
-### Plugin Path Resolution
-
-On server startup:
-1. Scans `uploaded_plugins/` for new plugins
-2. Validates all plugin paths in `local_plugin_registry.json`
-3. Updates paths if plugins moved to common locations
-4. Removes entries for missing plugins
 
 ### API Key Configuration
 
@@ -380,7 +234,6 @@ mux.HandleFunc("/api/new-endpoint", handler.NewEndpoint)
 The `Server` struct in `internal/server/server.go` holds all dependencies:
 - `clientFactory` - OpenAI client factory
 - `llmFactory` - LLM provider factory (multi-provider support)
-- `registryManager` - Plugin registry
 - `workspaceStore` - Workspace storage
 - `taskExecutor` / `stepExecutor` - Task execution
 - `taskScheduler` - Scheduled task management
@@ -400,12 +253,6 @@ The `Server` struct in `internal/server/server.go` holds all dependencies:
 
 ### "cannot load module X listed in go.work file"
 There is a `go.work` file in the parent directory. Edit it and remove non-existent module references.
-
-### Plugin not loading
-1. Ensure plugin built as **executable** (not `-buildmode=plugin`)
-2. Verify plugin in correct directory (`plugins/`, `uploaded_plugins/`)
-3. Check path in `local_plugin_registry.json`
-4. Review server logs for RPC communication errors
 
 ### API key not recognized
 1. Check environment variable: `echo $OPENAI_API_KEY`
@@ -454,9 +301,9 @@ This project follows a feature branch workflow with squash merging.
 - Switch branch: `git switch main`
 
 **Commit message format**: Present tense, descriptive
-- ✅ "Add plugin validation on startup"
+- ✅ "Add workspace skill bindings"
 - ✅ "Implement Claude provider cost tracking"
-- ✅ "Fix plugin path resolution for uploaded plugins"
+- ✅ "Fix MCP server connection handling"
 - ❌ "Fixed stuff"
 - ❌ "WIP"
 - ❌ "Updates"

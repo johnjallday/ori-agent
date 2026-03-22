@@ -1775,9 +1775,7 @@ body.agents-page .badge-codex {
 }
 
 body.agents-page .read-only-label,
-body.agents-page .plugin-tag,
 body.agents-page .settings-section,
-body.agents-page .installed-plugin-item,
 body.agents-page .system-prompt-display {
   border: 1px solid rgba(164, 126, 87, 0.23);
   background: rgba(255, 250, 241, 0.76);
@@ -1839,9 +1837,7 @@ body.agents-page .empty-state h3 {
 [data-bs-theme="dark"] body.agents-page .action-btn,
 [data-bs-theme="dark"] body.agents-page #refreshExternalBtn,
 [data-bs-theme="dark"] body.agents-page .read-only-label,
-[data-bs-theme="dark"] body.agents-page .plugin-tag,
 [data-bs-theme="dark"] body.agents-page .settings-section,
-[data-bs-theme="dark"] body.agents-page .installed-plugin-item,
 [data-bs-theme="dark"] body.agents-page .system-prompt-display,
 .dark-mode body.agents-page .search-box input,
 .dark-mode body.agents-page .filter-select,
@@ -1849,9 +1845,7 @@ body.agents-page .empty-state h3 {
 .dark-mode body.agents-page .action-btn,
 .dark-mode body.agents-page #refreshExternalBtn,
 .dark-mode body.agents-page .read-only-label,
-.dark-mode body.agents-page .plugin-tag,
 .dark-mode body.agents-page .settings-section,
-.dark-mode body.agents-page .installed-plugin-item,
 .dark-mode body.agents-page .system-prompt-display {
   background: rgba(39, 48, 64, 0.82);
   border-color: rgba(203, 166, 124, 0.2);

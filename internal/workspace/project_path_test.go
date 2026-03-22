@@ -9,16 +9,14 @@ import (
 func TestResolveProjectPath(t *testing.T) {
 	dir := t.TempDir()
 
-	// Create a project directory
-	projectDir := filepath.Join(dir, "my-project")
-	os.MkdirAll(projectDir, 0755)
-
-	// Workspace folder
+	// Create a workspace folder with a project subdirectory
 	wsDir := filepath.Join(dir, "workspaces", "my-workspace")
 	os.MkdirAll(wsDir, 0755)
+	projectDir := filepath.Join(wsDir, "my-project")
+	os.MkdirAll(projectDir, 0755)
 
-	// Relative path from workspace to project
-	absPath, resolved := ResolveProjectPath(wsDir, "../../my-project")
+	// Relative path within the workspace folder
+	absPath, resolved := ResolveProjectPath(wsDir, "my-project")
 	if !resolved {
 		t.Errorf("expected resolved=true for existing project dir")
 	}
@@ -30,12 +28,32 @@ func TestResolveProjectPath(t *testing.T) {
 func TestResolveProjectPath_NotFound(t *testing.T) {
 	dir := t.TempDir()
 
-	absPath, resolved := ResolveProjectPath(dir, "../../nonexistent")
+	absPath, resolved := ResolveProjectPath(dir, "nonexistent")
 	if resolved {
 		t.Errorf("expected resolved=false for nonexistent path")
 	}
 	if absPath == "" {
 		t.Error("absPath should still be set even when not resolved")
+	}
+}
+
+func TestResolveProjectPath_Traversal(t *testing.T) {
+	dir := t.TempDir()
+
+	// Create a target outside the workspace folder
+	outsideDir := filepath.Join(dir, "outside")
+	os.MkdirAll(outsideDir, 0755)
+
+	wsDir := filepath.Join(dir, "workspaces", "my-workspace")
+	os.MkdirAll(wsDir, 0755)
+
+	// Attempt to traverse outside the workspace folder
+	absPath, resolved := ResolveProjectPath(wsDir, "../../outside")
+	if resolved {
+		t.Error("expected resolved=false for path traversal")
+	}
+	if absPath != "" {
+		t.Errorf("expected empty absPath for traversal attempt, got %q", absPath)
 	}
 }
 
@@ -56,16 +74,14 @@ func TestFileStore_GetProjectPathInfo(t *testing.T) {
 		t.Fatalf("NewFileStore: %v", err)
 	}
 
-	// Create a project directory alongside the workspace
-	projectDir := filepath.Join(dir, "..", "my-project")
-	os.MkdirAll(projectDir, 0755)
-
 	ws := newTestWorkspace("ws-1", "My Workspace")
-	ws.ProjectPath = "../../my-project"
+	ws.ProjectPath = "src"
 	store.Save(ws)
 
-	// The path won't resolve because the relative path from the workspace folder
-	// doesn't match our temp dir layout, but it should still return info
+	// Create the project directory inside the workspace folder
+	wsFolder, _ := store.GetFolderPath("ws-1")
+	os.MkdirAll(filepath.Join(wsFolder, "src"), 0755)
+
 	info, err := store.GetProjectPathInfo("ws-1")
 	if err != nil {
 		t.Fatalf("GetProjectPathInfo: %v", err)
@@ -73,8 +89,8 @@ func TestFileStore_GetProjectPathInfo(t *testing.T) {
 	if info == nil {
 		t.Fatal("expected non-nil info")
 	}
-	if info.RelativePath != "../../my-project" {
-		t.Errorf("RelativePath=%q, want %q", info.RelativePath, "../../my-project")
+	if info.RelativePath != "src" {
+		t.Errorf("RelativePath=%q, want %q", info.RelativePath, "src")
 	}
 }
 

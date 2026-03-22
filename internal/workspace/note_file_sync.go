@@ -50,6 +50,12 @@ func SyncNoteFile(fs *FileStore, note NoteFileParams) {
 	filename := NoteFilename(note.Name, note.ID)
 	filePath := filepath.Join(notesDir, filename)
 
+	// Ensure the file path stays within the notes directory
+	if !strings.HasPrefix(filepath.Clean(filePath), filepath.Clean(notesDir)+string(filepath.Separator)) {
+		logger.Error("Note filename escapes notes directory", logger.Fields{"filename": filename})
+		return
+	}
+
 	// Build file content with YAML frontmatter
 	var sb strings.Builder
 	sb.WriteString("---\n")
@@ -94,6 +100,12 @@ func DeleteNoteFile(fs *FileStore, workspaceID, noteID, noteName string) {
 	notesDir := filepath.Join(folderPath, NotesDir)
 	filename := NoteFilename(noteName, noteID)
 	filePath := filepath.Join(notesDir, filename)
+
+	// Ensure the file path stays within the notes directory
+	if !strings.HasPrefix(filepath.Clean(filePath), filepath.Clean(notesDir)+string(filepath.Separator)) {
+		logger.Error("Note filename escapes notes directory", logger.Fields{"filename": filename})
+		return
+	}
 
 	if err := os.Remove(filePath); err != nil && !os.IsNotExist(err) {
 		logger.Error("Failed to delete note file", logger.Fields{
