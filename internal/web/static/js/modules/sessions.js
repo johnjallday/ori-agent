@@ -3468,6 +3468,22 @@ const sessionManager = {
         parent_id: parentId,
         color
       };
+      const buildSlugConflictMessage = (conflict) => {
+        const requestedSlug = typeof conflict?.requested_slug === 'string' ? conflict.requested_slug.trim() : '';
+        const suggestedSlug = typeof conflict?.suggested_slug === 'string' ? conflict.suggested_slug.trim() : '';
+        const location = typeof conflict?.location === 'string' ? conflict.location.trim().replace(/[\\/]+$/, '') : '';
+        const suggestedPath = location && suggestedSlug ? `${location}/${suggestedSlug}` : '';
+        const parts = [
+          `A workspace folder named "${requestedSlug || 'this workspace'}" already exists on disk.`
+        ];
+        if (suggestedSlug) {
+          parts.push(`Create this workspace with the folder name "${suggestedSlug}" instead?`);
+        }
+        if (suggestedPath) {
+          parts.push(`Folder: ${suggestedPath}`);
+        }
+        return parts.join('\n\n');
+      };
       let endpoint = '/api/workspaces';
       if (importEnabled) {
         endpoint = '/api/workspaces/import';
@@ -3476,23 +3492,47 @@ const sessionManager = {
         payload.entry_point = this.importEntryPoint || 'workspace_hub_create';
       }
 
-      const response = await fetch(endpoint, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
-      });
-
+      const requestPayload = { ...payload };
+      let response;
       let result = {};
-      try {
-        result = await response.json();
-      } catch (parseErr) {
-        result = {};
-      }
 
-      if (response.status === 409 && importEnabled && result.duplicate) {
-        this.showImportDuplicateWarning(result.duplicate);
-        this.showToast('This folder is already imported. Open the existing workspace or click "Import Anyway".', 'warning');
-        return;
+      while (true) {
+        response = await fetch(endpoint, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(requestPayload)
+        });
+
+        try {
+          result = await response.json();
+        } catch (parseErr) {
+          result = {};
+        }
+
+        if (response.status === 409 && importEnabled && result.duplicate) {
+          this.showImportDuplicateWarning(result.duplicate);
+          this.showToast('This folder is already imported. Open the existing workspace or click "Import Anyway".', 'warning');
+          return;
+        }
+
+        if (response.status === 409 && !importEnabled && result.conflict?.type === 'folder_slug') {
+          const suggestedSlug = typeof result.conflict.suggested_slug === 'string'
+            ? result.conflict.suggested_slug.trim()
+            : '';
+          if (!suggestedSlug) {
+            throw new Error(result.error || 'Failed to create workspace');
+          }
+
+          const confirmed = window.confirm(buildSlugConflictMessage(result.conflict));
+          if (!confirmed) {
+            return;
+          }
+
+          requestPayload.folder_slug = suggestedSlug;
+          continue;
+        }
+
+        break;
       }
 
       if (!response.ok || result.error) {

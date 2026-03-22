@@ -67,6 +67,24 @@ function prefillWorkspaceNameFromPath(pathValue) {
   }
 }
 
+function buildWorkspaceSlugConflictMessage(conflict) {
+  const requestedSlug = typeof conflict?.requested_slug === 'string' ? conflict.requested_slug.trim() : '';
+  const suggestedSlug = typeof conflict?.suggested_slug === 'string' ? conflict.suggested_slug.trim() : '';
+  const location = typeof conflict?.location === 'string' ? conflict.location.trim().replace(/[\\/]+$/, '') : '';
+  const suggestedPath = location && suggestedSlug ? `${location}/${suggestedSlug}` : '';
+
+  const parts = [
+    `A workspace folder named "${requestedSlug || 'this workspace'}" already exists on disk.`
+  ];
+  if (suggestedSlug) {
+    parts.push(`Create this workspace with the folder name "${suggestedSlug}" instead?`);
+  }
+  if (suggestedPath) {
+    parts.push(`Folder: ${suggestedPath}`);
+  }
+  return parts.join('\n\n');
+}
+
 function setImportMode(enabled) {
   workspaceCreateState.importMode = Boolean(enabled);
   if (!workspaceCreateState.importMode) {
@@ -370,18 +388,44 @@ async function createWorkspace() {
       payload.entry_point = workspaceCreateState.entryPoint || 'create_modal';
     }
 
-    const response = await fetch(endpoint, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload)
-    });
+    const requestPayload = { ...payload };
+    let response;
+    let result = {};
 
-    const result = await response.json().catch(() => ({}));
+    while (true) {
+      response = await fetch(endpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(requestPayload)
+      });
 
-    if (response.status === 409 && importEnabled && result.duplicate) {
-      showDuplicateWarning(result.duplicate);
-      showError('This folder is already imported. Open the existing workspace or click "Import Anyway".');
-      return;
+      result = await response.json().catch(() => ({}));
+
+      if (response.status === 409 && importEnabled && result.duplicate) {
+        showDuplicateWarning(result.duplicate);
+        showError('This folder is already imported. Open the existing workspace or click "Import Anyway".');
+        return;
+      }
+
+      if (response.status === 409 && !importEnabled && result.conflict?.type === 'folder_slug') {
+        const suggestedSlug = typeof result.conflict.suggested_slug === 'string'
+          ? result.conflict.suggested_slug.trim()
+          : '';
+        if (!suggestedSlug) {
+          showError(result.error || 'Failed to create workspace');
+          return;
+        }
+
+        const confirmed = window.confirm(buildWorkspaceSlugConflictMessage(result.conflict));
+        if (!confirmed) {
+          return;
+        }
+
+        requestPayload.folder_slug = suggestedSlug;
+        continue;
+      }
+
+      break;
     }
 
     if (!response.ok || result.error) {

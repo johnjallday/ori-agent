@@ -104,6 +104,7 @@ func (h *Handler) createWorkspace(w http.ResponseWriter, r *http.Request) {
 		OrderIndex  *int   `json:"order_index,omitempty"`
 		Color       string `json:"color,omitempty"`
 		ProjectPath string `json:"project_path,omitempty"`
+		FolderSlug  string `json:"folder_slug,omitempty"`
 		Location    string `json:"location,omitempty"` // Optional custom directory for workspace folder (overrides default root)
 	}
 
@@ -123,6 +124,9 @@ func (h *Handler) createWorkspace(w http.ResponseWriter, r *http.Request) {
 		Color:       req.Color,
 		FolderSlug:  agentworkspace.Slugify(req.Name),
 		ProjectPath: req.ProjectPath,
+	}
+	if requestedSlug := strings.TrimSpace(req.FolderSlug); requestedSlug != "" {
+		ws.FolderSlug = agentworkspace.Slugify(requestedSlug)
 	}
 	if req.OrderIndex != nil {
 		ws.OrderIndex = *req.OrderIndex
@@ -158,6 +162,16 @@ func (h *Handler) createWorkspace(w http.ResponseWriter, r *http.Request) {
 		}
 
 		if folderErr != nil {
+			var slugConflict *agentworkspace.FolderSlugConflictError
+			if errors.As(folderErr, &slugConflict) {
+				if delErr := h.store.DeleteWorkspace(r.Context(), ws.ID); delErr != nil {
+					logger.Error("Failed to rollback workspace after slug conflict", logger.Fields{"id": ws.ID, "error": delErr})
+					_ = orihttp.RespondInternalError(w, "Failed to rollback workspace after folder conflict")
+					return
+				}
+				writeWorkspaceCreateSlugConflict(w, req.Name, slugConflict)
+				return
+			}
 			logger.Warn("Failed to create workspace folder on disk", logger.Fields{"id": ws.ID, "error": folderErr})
 			// Non-fatal: SQLite creation succeeded, folder is supplementary
 		} else if folderPath, err := h.workspaceStore.GetFolderPath(ws.ID); err == nil {
@@ -514,6 +528,13 @@ type workspaceImportDuplicate struct {
 	Path          string `json:"path,omitempty"`
 }
 
+type workspaceCreateConflict struct {
+	Type          string `json:"type"`
+	RequestedSlug string `json:"requested_slug,omitempty"`
+	SuggestedSlug string `json:"suggested_slug,omitempty"`
+	Location      string `json:"location,omitempty"`
+}
+
 type workspaceDirectoryReference struct {
 	ID          string    `json:"id"`
 	WorkspaceID string    `json:"workspace_id"`
@@ -866,6 +887,29 @@ func writeWorkspaceImportConflict(w http.ResponseWriter, message string, duplica
 		"duplicate": duplicate,
 	}); err != nil {
 		logger.Error("Failed to encode workspace import conflict response", logger.Fields{"error": err})
+	}
+}
+
+func writeWorkspaceCreateSlugConflict(w http.ResponseWriter, workspaceName string, conflict *agentworkspace.FolderSlugConflictError) {
+	message := fmt.Sprintf("A workspace folder named %q already exists.", conflict.Slug)
+	if conflict != nil && conflict.SuggestedSlug != "" {
+		message = fmt.Sprintf("A workspace folder named %q already exists. Create %q instead?", conflict.Slug, conflict.SuggestedSlug)
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusConflict)
+	if err := json.NewEncoder(w).Encode(map[string]interface{}{
+		"success": false,
+		"error":   message,
+		"conflict": workspaceCreateConflict{
+			Type:          "folder_slug",
+			RequestedSlug: conflict.Slug,
+			SuggestedSlug: conflict.SuggestedSlug,
+			Location:      conflict.ParentDir,
+		},
+		"workspace_name": workspaceName,
+	}); err != nil {
+		logger.Error("Failed to encode workspace create conflict response", logger.Fields{"error": err})
 	}
 }
 

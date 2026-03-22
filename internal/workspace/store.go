@@ -1,9 +1,11 @@
 package workspace
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 
 	"github.com/johnjallday/ori-agent/internal/logger"
@@ -38,6 +40,30 @@ type FileStore struct {
 	idToPath map[string]string // maps workspace ID → relative folder path from basePath
 	index    *Index            // optional global index (nil if not configured)
 	mu       sync.RWMutex
+}
+
+var ErrWorkspaceFolderSlugConflict = errors.New("workspace folder slug conflict")
+
+// FolderSlugConflictError indicates that the requested workspace folder slug is
+// already in use on disk and includes a safe alternative suggestion.
+type FolderSlugConflictError struct {
+	Slug          string
+	SuggestedSlug string
+	ParentDir     string
+}
+
+func (e *FolderSlugConflictError) Error() string {
+	if e == nil {
+		return ErrWorkspaceFolderSlugConflict.Error()
+	}
+	if e.SuggestedSlug != "" {
+		return fmt.Sprintf("a workspace folder named %q already exists, suggested slug %q", e.Slug, e.SuggestedSlug)
+	}
+	return fmt.Sprintf("a workspace folder named %q already exists", e.Slug)
+}
+
+func (e *FolderSlugConflictError) Unwrap() error {
+	return ErrWorkspaceFolderSlugConflict
 }
 
 // NewFileStore creates a new file-based workspace store
@@ -107,13 +133,25 @@ func (s *FileStore) Save(ws *Workspace) error {
 	folderPath := filepath.Join(parentDir, ws.FolderSlug)
 	if existingPath, exists := s.idToPath[ws.ID]; !exists {
 		// New workspace — check if folder already exists
-		if _, err := os.Stat(folderPath); err == nil {
-			return fmt.Errorf("a workspace folder named %q already exists, choose a different name", ws.FolderSlug)
+		if existsOnDisk, err := pathExists(folderPath); err != nil {
+			return fmt.Errorf("failed to check workspace folder path: %w", err)
+		} else if existsOnDisk {
+			return &FolderSlugConflictError{
+				Slug:          ws.FolderSlug,
+				SuggestedSlug: nextAvailableWorkspaceSlug(parentDir, ws.FolderSlug),
+				ParentDir:     parentDir,
+			}
 		}
 	} else if filepath.Join(s.basePath, existingPath) != folderPath {
 		// Existing workspace with changed path — check new folder doesn't exist
-		if _, err := os.Stat(folderPath); err == nil {
-			return fmt.Errorf("a workspace folder named %q already exists, choose a different name", ws.FolderSlug)
+		if existsOnDisk, err := pathExists(folderPath); err != nil {
+			return fmt.Errorf("failed to check workspace folder path: %w", err)
+		} else if existsOnDisk {
+			return &FolderSlugConflictError{
+				Slug:          ws.FolderSlug,
+				SuggestedSlug: nextAvailableWorkspaceSlug(parentDir, ws.FolderSlug),
+				ParentDir:     parentDir,
+			}
 		}
 	}
 
@@ -177,8 +215,14 @@ func (s *FileStore) SaveAt(ws *Workspace, location string) error {
 	folderPath := filepath.Join(location, ws.FolderSlug)
 
 	// Check for conflict
-	if _, err := os.Stat(folderPath); err == nil {
-		return fmt.Errorf("a workspace folder named %q already exists at %s, choose a different name", ws.FolderSlug, location)
+	if existsOnDisk, err := pathExists(folderPath); err != nil {
+		return fmt.Errorf("failed to check workspace folder path: %w", err)
+	} else if existsOnDisk {
+		return &FolderSlugConflictError{
+			Slug:          ws.FolderSlug,
+			SuggestedSlug: nextAvailableWorkspaceSlug(location, ws.FolderSlug),
+			ParentDir:     location,
+		}
 	}
 
 	// Create workspace folder with files and notes subdirectories
@@ -224,6 +268,61 @@ func (s *FileStore) SaveAt(ws *Workspace, location string) error {
 	}
 
 	return nil
+}
+
+func pathExists(path string) (bool, error) {
+	_, err := os.Stat(path)
+	if err == nil {
+		return true, nil
+	}
+	if errors.Is(err, os.ErrNotExist) {
+		return false, nil
+	}
+	return false, err
+}
+
+func nextAvailableWorkspaceSlug(parentDir, baseSlug string) string {
+	baseSlug = Slugify(baseSlug)
+	if baseSlug == "" {
+		baseSlug = "untitled"
+	}
+
+	for suffix := 2; ; suffix++ {
+		candidate := appendWorkspaceSlugSuffix(baseSlug, suffix)
+		existsOnDisk, err := pathExists(filepath.Join(parentDir, candidate))
+		if err != nil {
+			// Fall back to the candidate even if stat fails; the create path will
+			// validate it again before writing to disk.
+			return candidate
+		}
+		if !existsOnDisk {
+			return candidate
+		}
+	}
+}
+
+func appendWorkspaceSlugSuffix(baseSlug string, suffix int) string {
+	suffixText := fmt.Sprintf("-%d", suffix)
+	maxBaseLen := MaxSlugLength - len(suffixText)
+	if maxBaseLen < 1 {
+		maxBaseLen = 1
+	}
+
+	trimmedBase := strings.Trim(strings.TrimSpace(baseSlug), "-")
+	if len(trimmedBase) > maxBaseLen {
+		trimmedBase = strings.TrimRight(trimmedBase[:maxBaseLen], "-")
+	}
+	if trimmedBase == "" {
+		trimmedBase = "untitled"
+		if len(trimmedBase) > maxBaseLen {
+			trimmedBase = strings.TrimRight(trimmedBase[:maxBaseLen], "-")
+		}
+		if trimmedBase == "" {
+			trimmedBase = "w"
+		}
+	}
+
+	return trimmedBase + suffixText
 }
 
 // BasePath returns the default workspace root directory.
