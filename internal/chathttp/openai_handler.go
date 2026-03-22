@@ -13,8 +13,8 @@ import (
 	orihttp "github.com/johnjallday/ori-agent/internal/http"
 	"github.com/johnjallday/ori-agent/internal/llm"
 	"github.com/johnjallday/ori-agent/internal/logger"
+	"github.com/johnjallday/ori-agent/internal/toolapi"
 	"github.com/johnjallday/ori-agent/internal/types"
-	"github.com/oriagent/ori-pluginapi"
 )
 
 const (
@@ -47,7 +47,7 @@ func (h *Handler) handleOpenAIChat(
 	tools []llm.Tool,
 	agentName string,
 	baseCtx context.Context,
-	files []pluginapi.FileAttachment,
+	files []toolapi.FileAttachment,
 	images []llm.ImageAttachment,
 	agentClient openai.Client,
 	plannerDecision *types.PlannerDecision,
@@ -186,7 +186,7 @@ func (h *Handler) handleOpenAIToolCalls(
 	agentName string,
 	baseCtx context.Context,
 	ctx context.Context,
-	files []pluginapi.FileAttachment,
+	files []toolapi.FileAttachment,
 	agentClient openai.Client,
 	conversation []openai.ChatCompletionMessageParamUnion,
 	choice openai.ChatCompletionMessage,

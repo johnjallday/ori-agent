@@ -8,7 +8,7 @@ import (
 	"testing"
 
 	"github.com/johnjallday/ori-agent/internal/agent"
-	"github.com/oriagent/ori-pluginapi"
+	"github.com/johnjallday/ori-agent/internal/toolapi"
 )
 
 type mockNamedTool struct {
@@ -16,8 +16,8 @@ type mockNamedTool struct {
 	result string
 }
 
-func (m mockNamedTool) Definition() pluginapi.Tool {
-	return pluginapi.Tool{
+func (m mockNamedTool) Definition() toolapi.ToolDefinition {
+	return toolapi.ToolDefinition{
 		Name:        m.name,
 		Description: "mock named tool",
 		Parameters: map[string]interface{}{
@@ -35,11 +35,11 @@ func (m mockNamedTool) Call(_ context.Context, _ string) (string, error) {
 
 func TestFindTool_PrefersMCPBrowserOverNativeUtility(t *testing.T) {
 	registry := &mockMCPRegistry{
-		getFn: func(server string) ([]pluginapi.PluginTool, error) {
+		getFn: func(server string) ([]toolapi.Tool, error) {
 			if server != "playwright" {
 				return nil, nil
 			}
-			return []pluginapi.PluginTool{
+			return []toolapi.Tool{
 				mockPluginTool{name: "browser"},
 			}, nil
 		},
@@ -71,14 +71,14 @@ func TestFindTool_PrefersMCPBrowserOverNativeUtility(t *testing.T) {
 
 func TestFindTool_BrowserPrefersPlaywrightServer(t *testing.T) {
 	registry := &mockMCPRegistry{
-		getFn: func(server string) ([]pluginapi.PluginTool, error) {
+		getFn: func(server string) ([]toolapi.Tool, error) {
 			switch server {
 			case "playwright":
-				return []pluginapi.PluginTool{
+				return []toolapi.Tool{
 					mockNamedTool{name: "browser", result: "playwright"},
 				}, nil
 			case "puppeteer":
-				return []pluginapi.PluginTool{
+				return []toolapi.Tool{
 					mockNamedTool{name: "browser", result: "puppeteer"},
 				}, nil
 			default:
@@ -110,14 +110,14 @@ func TestFindTool_BrowserPrefersPlaywrightServer(t *testing.T) {
 
 func TestFindTool_BrowserHonorsBrowserbasePreference(t *testing.T) {
 	registry := &mockMCPRegistry{
-		getFn: func(server string) ([]pluginapi.PluginTool, error) {
+		getFn: func(server string) ([]toolapi.Tool, error) {
 			switch server {
 			case "playwright":
-				return []pluginapi.PluginTool{
+				return []toolapi.Tool{
 					mockNamedTool{name: "browser", result: "playwright"},
 				}, nil
 			case "browserbase":
-				return []pluginapi.PluginTool{
+				return []toolapi.Tool{
 					mockNamedTool{name: "browser", result: "browserbase"},
 				}, nil
 			default:
@@ -150,11 +150,11 @@ func TestFindTool_BrowserHonorsBrowserbasePreference(t *testing.T) {
 
 func TestFindTool_BrowserFallsBackToBrowserNavigateAlias(t *testing.T) {
 	registry := &mockMCPRegistry{
-		getFn: func(server string) ([]pluginapi.PluginTool, error) {
+		getFn: func(server string) ([]toolapi.Tool, error) {
 			if server != "playwright" {
 				return nil, nil
 			}
-			return []pluginapi.PluginTool{
+			return []toolapi.Tool{
 				mockNamedTool{name: "browser_navigate", result: "playwright_navigate"},
 			}, nil
 		},
@@ -192,11 +192,11 @@ func TestAdaptBrowserToolArgsForDefinition_BrowserNavigate(t *testing.T) {
 
 func TestFindTool_BrowserSuppressedWhenBrowserMCPConfiguredButNoMatchingTool(t *testing.T) {
 	registry := &mockMCPRegistry{
-		getFn: func(server string) ([]pluginapi.PluginTool, error) {
+		getFn: func(server string) ([]toolapi.Tool, error) {
 			if server != "playwright" {
 				return nil, nil
 			}
-			return []pluginapi.PluginTool{
+			return []toolapi.Tool{
 				mockPluginTool{name: "navigate"},
 			}, nil
 		},

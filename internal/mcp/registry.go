@@ -6,7 +6,7 @@ import (
 	"reflect"
 	"sync"
 
-	"github.com/oriagent/ori-pluginapi"
+	"github.com/johnjallday/ori-agent/internal/toolapi"
 )
 
 // Registry manages multiple MCP servers and their tools
@@ -140,11 +140,11 @@ func (r *Registry) GetServerStatus(name string) (ServerStatus, error) {
 }
 
 // GetAllTools returns all tools from all running servers as adapters
-func (r *Registry) GetAllTools() []pluginapi.PluginTool {
+func (r *Registry) GetAllTools() []toolapi.Tool {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
-	var tools []pluginapi.PluginTool
+	var tools []toolapi.Tool
 
 	for _, server := range r.servers {
 		if server.GetStatus() != StatusRunning {
@@ -162,7 +162,7 @@ func (r *Registry) GetAllTools() []pluginapi.PluginTool {
 }
 
 // GetToolsForServer returns all tools from a specific server as adapters
-func (r *Registry) GetToolsForServer(serverName string) ([]pluginapi.PluginTool, error) {
+func (r *Registry) GetToolsForServer(serverName string) ([]toolapi.Tool, error) {
 	server, err := r.GetServer(serverName)
 	if err != nil {
 		return nil, err
@@ -173,7 +173,7 @@ func (r *Registry) GetToolsForServer(serverName string) ([]pluginapi.PluginTool,
 	}
 
 	mcpTools := server.GetTools()
-	tools := make([]pluginapi.PluginTool, 0, len(mcpTools))
+	tools := make([]toolapi.Tool, 0, len(mcpTools))
 
 	for _, tool := range mcpTools {
 		adapter := NewMCPAdapter(server, tool)

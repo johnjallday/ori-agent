@@ -4,7 +4,7 @@ import (
 	"context"
 
 	"github.com/johnjallday/ori-agent/internal/logger"
-	"github.com/oriagent/ori-pluginapi"
+	"github.com/johnjallday/ori-agent/internal/toolapi"
 )
 
 // ExecuteToolWithFiles executes a tool with optional file attachment support.
@@ -24,16 +24,16 @@ import (
 //   - err: Any error that occurred during execution
 func ExecuteToolWithFiles(
 	ctx context.Context,
-	tool pluginapi.PluginTool,
+	tool toolapi.Tool,
 	toolName string,
 	args string,
-	files []pluginapi.FileAttachment,
+	files []toolapi.FileAttachment,
 ) (result string, err error) {
 	// Check if the plugin supports file attachments and files are provided
-	if fileHandler, ok := tool.(pluginapi.FileAttachmentHandler); ok && len(files) > 0 {
+	if fileHandler, ok := tool.(toolapi.FileAttachmentHandler); ok && len(files) > 0 {
 		// Filter files to only those accepted by the plugin
 		acceptedTypes := fileHandler.AcceptsFiles()
-		filteredFiles := pluginapi.FilterFilesByAcceptedTypes(files, acceptedTypes)
+		filteredFiles := toolapi.FilterFilesByAcceptedTypes(files, acceptedTypes)
 
 		logger.Info("Tool supports file attachments", logger.Fields{
 			"tool":           toolName,
@@ -55,7 +55,7 @@ func ExecuteToolWithFiles(
 	}
 
 	// Regular call without files
-	_, isFileHandler := tool.(pluginapi.FileAttachmentHandler)
+	_, isFileHandler := tool.(toolapi.FileAttachmentHandler)
 	logger.Info("Tool call (no file support or no files)", logger.Fields{
 		"tool":            toolName,
 		"is_file_handler": isFileHandler,
@@ -69,16 +69,16 @@ func ExecuteToolWithFiles(
 // where verbose logging is not needed.
 func ExecuteToolWithFilesDebug(
 	ctx context.Context,
-	tool pluginapi.PluginTool,
+	tool toolapi.Tool,
 	toolName string,
 	args string,
-	files []pluginapi.FileAttachment,
+	files []toolapi.FileAttachment,
 ) (result string, err error) {
 	// Check if the plugin supports file attachments and files are provided
-	if fileHandler, ok := tool.(pluginapi.FileAttachmentHandler); ok && len(files) > 0 {
+	if fileHandler, ok := tool.(toolapi.FileAttachmentHandler); ok && len(files) > 0 {
 		// Filter files to only those accepted by the plugin
 		acceptedTypes := fileHandler.AcceptsFiles()
-		filteredFiles := pluginapi.FilterFilesByAcceptedTypes(files, acceptedTypes)
+		filteredFiles := toolapi.FilterFilesByAcceptedTypes(files, acceptedTypes)
 
 		if len(filteredFiles) > 0 {
 			logger.Debug("Tool execution with files", logger.Fields{

@@ -15,8 +15,8 @@ import (
 	"github.com/johnjallday/ori-agent/internal/agent"
 	"github.com/johnjallday/ori-agent/internal/mcp"
 	"github.com/johnjallday/ori-agent/internal/store"
+	"github.com/johnjallday/ori-agent/internal/toolapi"
 	"github.com/johnjallday/ori-agent/internal/workspace"
-	"github.com/oriagent/ori-pluginapi"
 )
 
 type preflightStore struct {
@@ -89,11 +89,11 @@ type preflightRegistry struct {
 	configs  map[string]mcp.ServerConfig
 }
 
-func (r *preflightRegistry) GetToolsForServer(string) ([]pluginapi.PluginTool, error) {
+func (r *preflightRegistry) GetToolsForServer(string) ([]toolapi.Tool, error) {
 	return nil, nil
 }
 
-func (r *preflightRegistry) GetAllTools() []pluginapi.PluginTool {
+func (r *preflightRegistry) GetAllTools() []toolapi.Tool {
 	return nil
 }
 

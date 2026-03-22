@@ -9,16 +9,16 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/johnjallday/ori-agent/internal/toolapi"
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
-	"github.com/oriagent/ori-pluginapi"
 )
 
-// MCPAdapter adapts an MCP server to the pluginapi.Tool interface
-// This allows MCP tools to be used seamlessly alongside native plugins
+// MCPAdapter adapts an MCP server to the toolapi.Tool interface
+// This allows MCP tools to be used seamlessly alongside native tools
 type MCPAdapter struct {
 	server      *Server
 	tool        Tool
-	agentCtx    pluginapi.AgentContext
+	agentCtx    toolapi.AgentContext
 	hasAgentCtx bool
 }
 
@@ -32,7 +32,7 @@ func NewMCPAdapter(server *Server, tool Tool) *MCPAdapter {
 
 // Definition converts MCP tool schema to generic tool definition
 // This is the bridge that makes MCP tools compatible with any LLM provider
-func (a *MCPAdapter) Definition() pluginapi.Tool {
+func (a *MCPAdapter) Definition() toolapi.ToolDefinition {
 	// Convert MCP inputSchema to generic parameters format
 	parameters := map[string]interface{}(nil)
 	switch schema := a.tool.InputSchema.(type) {
@@ -55,7 +55,7 @@ func (a *MCPAdapter) Definition() pluginapi.Tool {
 		}
 	}
 
-	return pluginapi.Tool{
+	return toolapi.ToolDefinition{
 		Name:        a.tool.Name,
 		Description: a.tool.Description,
 		Parameters:  parameters,
@@ -170,7 +170,7 @@ func (a *MCPAdapter) formatResult(result *ToolCallResult) (string, error) {
 }
 
 // SetAgentContext implements AgentAwareTool interface
-func (a *MCPAdapter) SetAgentContext(ctx pluginapi.AgentContext) {
+func (a *MCPAdapter) SetAgentContext(ctx toolapi.AgentContext) {
 	a.agentCtx = ctx
 	a.hasAgentCtx = true
 }
@@ -181,9 +181,9 @@ func (a *MCPAdapter) Version() string {
 }
 
 // Ensure MCPAdapter implements required interfaces
-var _ pluginapi.PluginTool = (*MCPAdapter)(nil)
-var _ pluginapi.AgentAwareTool = (*MCPAdapter)(nil)
-var _ pluginapi.VersionedTool = (*MCPAdapter)(nil)
+var _ toolapi.Tool = (*MCPAdapter)(nil)
+var _ toolapi.AgentAwareTool = (*MCPAdapter)(nil)
+var _ toolapi.VersionedTool = (*MCPAdapter)(nil)
 
 func normalizeFilesystemArguments(toolName string, arguments map[string]interface{}, serverConfig ServerConfig) map[string]interface{} {
 	if len(arguments) == 0 || !isFilesystemTool(toolName) {

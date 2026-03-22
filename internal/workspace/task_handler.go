@@ -12,7 +12,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/llm"
 	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/store"
-	"github.com/oriagent/ori-pluginapi"
+	"github.com/johnjallday/ori-agent/internal/toolapi"
 )
 
 // classifyContextError returns a user-friendly error message based on the context error type
@@ -53,7 +53,7 @@ type LLMTaskHandler struct {
 }
 
 type mcpRegistry interface {
-	GetToolsForServer(string) ([]pluginapi.PluginTool, error)
+	GetToolsForServer(string) ([]toolapi.Tool, error)
 	StartServer(string) error
 }
 
@@ -838,7 +838,7 @@ func (h *LLMTaskHandler) executeToolCall(ctx context.Context, ag *resolvedTaskAg
 	}
 }
 
-func (h *LLMTaskHandler) findTool(ag *resolvedTaskAgent, toolName string) (pluginapi.PluginTool, bool) {
+func (h *LLMTaskHandler) findTool(ag *resolvedTaskAgent, toolName string) (toolapi.Tool, bool) {
 	target := strings.ToLower(strings.TrimSpace(toolName))
 	if target == "" {
 		return nil, false
@@ -857,12 +857,12 @@ func (h *LLMTaskHandler) findTool(ag *resolvedTaskAgent, toolName string) (plugi
 	return nil, false
 }
 
-func (h *LLMTaskHandler) getAgentMCPTools(ag *resolvedTaskAgent) []pluginapi.PluginTool {
+func (h *LLMTaskHandler) getAgentMCPTools(ag *resolvedTaskAgent) []toolapi.Tool {
 	if h == nil || h.mcpRegistry == nil || ag == nil || len(ag.MCPServers) == 0 {
 		return nil
 	}
 
-	tools := make([]pluginapi.PluginTool, 0, 8)
+	tools := make([]toolapi.Tool, 0, 8)
 	for _, serverName := range ag.MCPServers {
 		name := strings.TrimSpace(serverName)
 		if name == "" {
@@ -882,7 +882,7 @@ func (h *LLMTaskHandler) getAgentMCPTools(ag *resolvedTaskAgent) []pluginapi.Plu
 	return tools
 }
 
-func (h *LLMTaskHandler) getMCPToolsForServer(serverName string) ([]pluginapi.PluginTool, error) {
+func (h *LLMTaskHandler) getMCPToolsForServer(serverName string) ([]toolapi.Tool, error) {
 	if h == nil || h.mcpRegistry == nil {
 		return nil, fmt.Errorf("mcp registry is not configured")
 	}

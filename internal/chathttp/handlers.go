@@ -27,10 +27,10 @@ import (
 	"github.com/johnjallday/ori-agent/internal/session"
 	"github.com/johnjallday/ori-agent/internal/skills"
 	"github.com/johnjallday/ori-agent/internal/store"
+	"github.com/johnjallday/ori-agent/internal/toolapi"
 	"github.com/johnjallday/ori-agent/internal/types"
 	"github.com/johnjallday/ori-agent/internal/utilitytelemetry"
 	"github.com/johnjallday/ori-agent/internal/workspace"
-	"github.com/oriagent/ori-pluginapi"
 )
 
 // Timeout constants for various operations
@@ -73,8 +73,8 @@ type Handler struct {
 		ListEnabledSkillsWithPrompts(string) ([]skills.Skill, error)
 	}
 	mcpRegistry interface {
-		GetToolsForServer(string) ([]pluginapi.PluginTool, error)
-		GetAllTools() []pluginapi.PluginTool
+		GetToolsForServer(string) ([]toolapi.Tool, error)
+		GetAllTools() []toolapi.Tool
 		StartServer(string) error
 	}
 	mcpConfigManager interface {
@@ -116,8 +116,8 @@ func (h *Handler) SetCostTracker(tracker *llm.CostTracker) {
 
 // SetMCPRegistry sets the MCP registry
 func (h *Handler) SetMCPRegistry(registry interface {
-	GetToolsForServer(string) ([]pluginapi.PluginTool, error)
-	GetAllTools() []pluginapi.PluginTool
+	GetToolsForServer(string) ([]toolapi.Tool, error)
+	GetAllTools() []toolapi.Tool
 	StartServer(string) error
 }) {
 	h.mcpRegistry = registry
@@ -469,7 +469,7 @@ func (h *Handler) tryHandleUtilityDirect(
 
 // findTool searches for a tool by name in both plugins and MCP servers.
 // If the plugin is not yet loaded, it will be loaded lazily on first use.
-func (h *Handler) findTool(ag *resolvedChatAgent, agentName, toolName string) (pluginapi.PluginTool, bool) {
+func (h *Handler) findTool(ag *resolvedChatAgent, agentName, toolName string) (toolapi.Tool, bool) {
 	if ag == nil || ag.Agent == nil || !isUtilityToolAllowedForAgent(ag.Agent, toolName) {
 		return nil, false
 	}
@@ -507,7 +507,7 @@ func (h *Handler) findTool(ag *resolvedChatAgent, agentName, toolName string) (p
 	return nil, false
 }
 
-func (h *Handler) findMCPToolByName(ag *resolvedChatAgent, toolName string) (pluginapi.PluginTool, bool) {
+func (h *Handler) findMCPToolByName(ag *resolvedChatAgent, toolName string) (toolapi.Tool, bool) {
 	if h == nil || h.mcpRegistry == nil || ag == nil || len(ag.MCPServers) == 0 {
 		return nil, false
 	}

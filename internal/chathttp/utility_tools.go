@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"github.com/johnjallday/ori-agent/internal/logger"
-	"github.com/oriagent/ori-pluginapi"
+	"github.com/johnjallday/ori-agent/internal/toolapi"
 )
 
 var (
@@ -174,11 +174,11 @@ type BrowserAdapter interface {
 }
 
 type nativeUtilityTool struct {
-	definition pluginapi.Tool
+	definition toolapi.ToolDefinition
 	call       func(ctx context.Context, args string) (string, error)
 }
 
-func (t *nativeUtilityTool) Definition() pluginapi.Tool {
+func (t *nativeUtilityTool) Definition() toolapi.ToolDefinition {
 	return t.definition
 }
 
@@ -192,7 +192,7 @@ func (t *nativeUtilityTool) Call(ctx context.Context, args string) (string, erro
 // UtilityToolRegistry stores native utility tools as plugin-compatible tools.
 type UtilityToolRegistry struct {
 	mu     sync.RWMutex
-	tools  map[string]pluginapi.PluginTool
+	tools  map[string]toolapi.Tool
 	policy UtilityCallPolicy
 }
 
@@ -209,7 +209,7 @@ func NewUtilityToolRegistry(adapters UtilityAdapters, policy UtilityCallPolicy) 
 	}
 
 	r := &UtilityToolRegistry{
-		tools:  make(map[string]pluginapi.PluginTool),
+		tools:  make(map[string]toolapi.Tool),
 		policy: policy,
 	}
 
@@ -256,7 +256,7 @@ func (r *UtilityToolRegistry) SetPolicy(policy UtilityCallPolicy) {
 }
 
 // GetTool returns a native utility tool by name.
-func (r *UtilityToolRegistry) GetTool(name string) (pluginapi.PluginTool, bool) {
+func (r *UtilityToolRegistry) GetTool(name string) (toolapi.Tool, bool) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	tool, ok := r.tools[name]
@@ -264,18 +264,18 @@ func (r *UtilityToolRegistry) GetTool(name string) (pluginapi.PluginTool, bool) 
 }
 
 // ListToolDefinitions returns all registered utility tool definitions.
-func (r *UtilityToolRegistry) ListToolDefinitions() []pluginapi.Tool {
+func (r *UtilityToolRegistry) ListToolDefinitions() []toolapi.ToolDefinition {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
-	defs := make([]pluginapi.Tool, 0, len(r.tools))
+	defs := make([]toolapi.ToolDefinition, 0, len(r.tools))
 	for _, tool := range r.tools {
 		defs = append(defs, tool.Definition())
 	}
 	return defs
 }
 
-func (r *UtilityToolRegistry) register(name string, tool pluginapi.PluginTool) {
+func (r *UtilityToolRegistry) register(name string, tool toolapi.Tool) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.tools[name] = tool
@@ -289,7 +289,7 @@ func (r *UtilityToolRegistry) getPolicy() UtilityCallPolicy {
 
 func (r *UtilityToolRegistry) registerTimeTool(adapter TimeAdapter) {
 	tool := &nativeUtilityTool{
-		definition: pluginapi.Tool{
+		definition: toolapi.ToolDefinition{
 			Name:        "time",
 			Description: "Get the current real time for a timezone (IANA format, e.g. Asia/Tokyo).",
 			Parameters: map[string]interface{}{
@@ -331,7 +331,7 @@ func (r *UtilityToolRegistry) registerTimeTool(adapter TimeAdapter) {
 
 func (r *UtilityToolRegistry) registerWeatherTool(adapter WeatherAdapter) {
 	tool := &nativeUtilityTool{
-		definition: pluginapi.Tool{
+		definition: toolapi.ToolDefinition{
 			Name:        "weather",
 			Description: "Get current weather for a city or location.",
 			Parameters: map[string]interface{}{
@@ -380,7 +380,7 @@ func (r *UtilityToolRegistry) registerWeatherTool(adapter WeatherAdapter) {
 
 func (r *UtilityToolRegistry) registerAirQualityTool(adapter AirQualityAdapter) {
 	tool := &nativeUtilityTool{
-		definition: pluginapi.Tool{
+		definition: toolapi.ToolDefinition{
 			Name:        "air_quality",
 			Description: "Get current air quality (AQI, PM2.5, PM10) for a city or location.",
 			Parameters: map[string]interface{}{
@@ -429,7 +429,7 @@ func (r *UtilityToolRegistry) registerAirQualityTool(adapter AirQualityAdapter) 
 
 func (r *UtilityToolRegistry) registerWebSearchTool(adapter WebSearchAdapter) {
 	tool := &nativeUtilityTool{
-		definition: pluginapi.Tool{
+		definition: toolapi.ToolDefinition{
 			Name:        "web_search",
 			Description: "Search the web for recent and relevant information.",
 			Parameters: map[string]interface{}{
@@ -477,7 +477,7 @@ func (r *UtilityToolRegistry) registerWebSearchTool(adapter WebSearchAdapter) {
 
 func (r *UtilityToolRegistry) registerWebFetchTool(adapter WebFetchAdapter) {
 	tool := &nativeUtilityTool{
-		definition: pluginapi.Tool{
+		definition: toolapi.ToolDefinition{
 			Name:        "web_fetch",
 			Description: "Fetch content from a URL and return extracted text.",
 			Parameters: map[string]interface{}{
@@ -521,7 +521,7 @@ func (r *UtilityToolRegistry) registerWebFetchTool(adapter WebFetchAdapter) {
 
 func (r *UtilityToolRegistry) registerBrowserTool(adapter BrowserAdapter) {
 	tool := &nativeUtilityTool{
-		definition: pluginapi.Tool{
+		definition: toolapi.ToolDefinition{
 			Name:        "browser",
 			Description: "Run basic browser automation actions (open, click, type, extract).",
 			Parameters: map[string]interface{}{

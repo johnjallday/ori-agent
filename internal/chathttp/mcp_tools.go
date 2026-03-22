@@ -5,10 +5,10 @@ import (
 	"strings"
 
 	"github.com/johnjallday/ori-agent/internal/logger"
-	"github.com/oriagent/ori-pluginapi"
+	"github.com/johnjallday/ori-agent/internal/toolapi"
 )
 
-func (h *Handler) getMCPToolsForServer(serverName string) ([]pluginapi.PluginTool, error) {
+func (h *Handler) getMCPToolsForServer(serverName string) ([]toolapi.Tool, error) {
 	if h.mcpRegistry == nil {
 		return nil, fmt.Errorf("mcp registry is not configured")
 	}

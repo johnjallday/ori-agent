@@ -9,12 +9,12 @@ import (
 	orihttp "github.com/johnjallday/ori-agent/internal/http"
 	"github.com/johnjallday/ori-agent/internal/llm"
 	"github.com/johnjallday/ori-agent/internal/logger"
+	"github.com/johnjallday/ori-agent/internal/toolapi"
 	"github.com/johnjallday/ori-agent/internal/types"
-	"github.com/oriagent/ori-pluginapi"
 )
 
 // handleGeminiChat handles chat requests for Gemini models using the provider system.
-func (h *Handler) handleGeminiChat(w http.ResponseWriter, r *http.Request, ag *resolvedChatAgent, userMessage string, tools []llm.Tool, agentName string, baseCtx context.Context, files []pluginapi.FileAttachment, images []llm.ImageAttachment, plannerDecision *types.PlannerDecision, runtimeSystemPrompt string) {
+func (h *Handler) handleGeminiChat(w http.ResponseWriter, r *http.Request, ag *resolvedChatAgent, userMessage string, tools []llm.Tool, agentName string, baseCtx context.Context, files []toolapi.FileAttachment, images []llm.ImageAttachment, plannerDecision *types.PlannerDecision, runtimeSystemPrompt string) {
 	sessionID := h.getSessionID(r)
 	ctx, cancel := context.WithTimeout(baseCtx, ChatRequestTimeout)
 	defer cancel()
@@ -85,7 +85,7 @@ func (h *Handler) handleGeminiToolCalls(
 	messages []llm.Message,
 	resp *llm.ChatResponse,
 	tools []llm.Tool,
-	files []pluginapi.FileAttachment,
+	files []toolapi.FileAttachment,
 	provider llm.Provider,
 	baseCtx context.Context,
 	sessionID string,

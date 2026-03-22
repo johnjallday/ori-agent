@@ -6,15 +6,15 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/oriagent/ori-pluginapi"
+	"github.com/johnjallday/ori-agent/internal/toolapi"
 )
 
 type mockPluginTool struct {
 	name string
 }
 
-func (m mockPluginTool) Definition() pluginapi.Tool {
-	return pluginapi.Tool{
+func (m mockPluginTool) Definition() toolapi.ToolDefinition {
+	return toolapi.ToolDefinition{
 		Name:        m.name,
 		Description: "mock tool",
 		Parameters: map[string]interface{}{
@@ -30,11 +30,11 @@ func (m mockPluginTool) Call(_ context.Context, _ string) (string, error) {
 type mockMCPRegistry struct {
 	getCalls   int
 	startCalls int
-	getFn      func(server string) ([]pluginapi.PluginTool, error)
+	getFn      func(server string) ([]toolapi.Tool, error)
 	startFn    func(server string) error
 }
 
-func (m *mockMCPRegistry) GetToolsForServer(server string) ([]pluginapi.PluginTool, error) {
+func (m *mockMCPRegistry) GetToolsForServer(server string) ([]toolapi.Tool, error) {
 	m.getCalls++
 	if m.getFn == nil {
 		return nil, nil
@@ -42,7 +42,7 @@ func (m *mockMCPRegistry) GetToolsForServer(server string) ([]pluginapi.PluginTo
 	return m.getFn(server)
 }
 
-func (m *mockMCPRegistry) GetAllTools() []pluginapi.PluginTool {
+func (m *mockMCPRegistry) GetAllTools() []toolapi.Tool {
 	return nil
 }
 
@@ -56,11 +56,11 @@ func (m *mockMCPRegistry) StartServer(server string) error {
 
 func TestGetMCPToolsForServer_StartsStoppedServer(t *testing.T) {
 	reg := &mockMCPRegistry{}
-	reg.getFn = func(server string) ([]pluginapi.PluginTool, error) {
+	reg.getFn = func(server string) ([]toolapi.Tool, error) {
 		if reg.getCalls == 1 {
 			return nil, errors.New("server " + server + " is not running")
 		}
-		return []pluginapi.PluginTool{mockPluginTool{name: "list_directory"}}, nil
+		return []toolapi.Tool{mockPluginTool{name: "list_directory"}}, nil
 	}
 	reg.startFn = func(server string) error {
 		if server != "filesystem" {
@@ -84,7 +84,7 @@ func TestGetMCPToolsForServer_StartsStoppedServer(t *testing.T) {
 
 func TestGetMCPToolsForServer_DoesNotStartOnOtherErrors(t *testing.T) {
 	reg := &mockMCPRegistry{
-		getFn: func(server string) ([]pluginapi.PluginTool, error) {
+		getFn: func(server string) ([]toolapi.Tool, error) {
 			return nil, errors.New("server not found")
 		},
 	}
@@ -101,7 +101,7 @@ func TestGetMCPToolsForServer_DoesNotStartOnOtherErrors(t *testing.T) {
 
 func TestGetMCPToolsForServer_ReturnsStartError(t *testing.T) {
 	reg := &mockMCPRegistry{
-		getFn: func(server string) ([]pluginapi.PluginTool, error) {
+		getFn: func(server string) ([]toolapi.Tool, error) {
 			return nil, errors.New("server " + server + " is not running")
 		},
 		startFn: func(server string) error {

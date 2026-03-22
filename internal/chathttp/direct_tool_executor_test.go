@@ -6,18 +6,18 @@ import (
 	"testing"
 
 	"github.com/johnjallday/ori-agent/internal/agent"
-	"github.com/oriagent/ori-pluginapi"
+	"github.com/johnjallday/ori-agent/internal/toolapi"
 )
 
-// mockTool is a mock implementation of pluginapi.Tool for testing
+// mockTool is a mock implementation of toolapi.Tool for testing
 type mockTool struct {
 	name        string
 	description string
 	callFunc    func(ctx context.Context, args string) (string, error)
 }
 
-func (m *mockTool) Definition() pluginapi.Tool {
-	return pluginapi.Tool{
+func (m *mockTool) Definition() toolapi.ToolDefinition {
+	return toolapi.ToolDefinition{
 		Name:        m.name,
 		Description: m.description,
 		Parameters: map[string]interface{}{
@@ -263,18 +263,18 @@ func TestFormatDirectToolResponse(t *testing.T) {
 	}
 }
 
-// mockFileAttachmentTool implements both PluginTool and FileAttachmentHandler
+// mockFileAttachmentTool implements both Tool and FileAttachmentHandler
 type mockFileAttachmentTool struct {
 	mockTool
 	acceptedTypes []string
-	callWithFiles func(ctx context.Context, args string, files []pluginapi.FileAttachment) (string, error)
+	callWithFiles func(ctx context.Context, args string, files []toolapi.FileAttachment) (string, error)
 }
 
 func (m *mockFileAttachmentTool) AcceptsFiles() []string {
 	return m.acceptedTypes
 }
 
-func (m *mockFileAttachmentTool) CallWithFiles(ctx context.Context, args string, files []pluginapi.FileAttachment) (string, error) {
+func (m *mockFileAttachmentTool) CallWithFiles(ctx context.Context, args string, files []toolapi.FileAttachment) (string, error) {
 	if m.callWithFiles != nil {
 		return m.callWithFiles(ctx, args, files)
 	}
@@ -386,7 +386,7 @@ func TestExecuteDirectToolWithFiles(t *testing.T) {
 	cmd := &DirectToolCommand{
 		ToolName: "file-tool",
 		Args:     `{"operation": "test"}`,
-		Files: []pluginapi.FileAttachment{
+		Files: []toolapi.FileAttachment{
 			{Name: "test.wav", Type: "audio/wav", Size: 5, Content: []byte("audio")},
 		},
 	}

@@ -10,13 +10,13 @@ import (
 	"time"
 
 	"github.com/johnjallday/ori-agent/internal/logger"
-	"github.com/oriagent/ori-pluginapi"
+	"github.com/johnjallday/ori-agent/internal/toolapi"
 )
 
 // ConvertUploadedFilesToAttachments converts UploadedFile slice to FileAttachment slice.
 // It handles both text content and base64-encoded binary content.
-func ConvertUploadedFilesToAttachments(files []UploadedFile) []pluginapi.FileAttachment {
-	attachments := make([]pluginapi.FileAttachment, 0, len(files))
+func ConvertUploadedFilesToAttachments(files []UploadedFile) []toolapi.FileAttachment {
+	attachments := make([]toolapi.FileAttachment, 0, len(files))
 
 	for _, f := range files {
 		var content []byte
@@ -29,7 +29,7 @@ func ConvertUploadedFilesToAttachments(files []UploadedFile) []pluginapi.FileAtt
 			content = []byte(f.Content)
 		}
 
-		attachments = append(attachments, pluginapi.FileAttachment{
+		attachments = append(attachments, toolapi.FileAttachment{
 			Name:    f.Name,
 			Type:    f.Type,
 			Size:    f.Size,
@@ -44,7 +44,7 @@ func ConvertUploadedFilesToAttachments(files []UploadedFile) []pluginapi.FileAtt
 type DirectToolCommand struct {
 	ToolName string
 	Args     string
-	Files    []pluginapi.FileAttachment // Optional file attachments
+	Files    []toolapi.FileAttachment // Optional file attachments
 }
 
 // parseDirectToolCommand parses a direct tool command in the format:
@@ -96,17 +96,17 @@ func parseDirectToolCommand(message string) (*DirectToolCommand, error) {
 
 // DirectToolResult represents the result of a direct tool execution
 type DirectToolResult struct {
-	Success         bool                        `json:"success"`
-	ToolName        string                      `json:"tool_name"`
-	ToolArgs        string                      `json:"tool_args"`
-	Result          string                      `json:"result"`
-	Error           string                      `json:"error,omitempty"`
-	ExecutionTimeMs int64                       `json:"execution_time_ms"`
-	Structured      bool                        `json:"structured,omitempty"`
-	DisplayType     string                      `json:"display_type,omitempty"`
-	Title           string                      `json:"title,omitempty"`
-	Description     string                      `json:"description,omitempty"`
-	StructuredData  *pluginapi.StructuredResult `json:"-"` // Don't serialize, used internally
+	Success         bool                      `json:"success"`
+	ToolName        string                    `json:"tool_name"`
+	ToolArgs        string                    `json:"tool_args"`
+	Result          string                    `json:"result"`
+	Error           string                    `json:"error,omitempty"`
+	ExecutionTimeMs int64                     `json:"execution_time_ms"`
+	Structured      bool                      `json:"structured,omitempty"`
+	DisplayType     string                    `json:"display_type,omitempty"`
+	Title           string                    `json:"title,omitempty"`
+	Description     string                    `json:"description,omitempty"`
+	StructuredData  *toolapi.StructuredResult `json:"-"` // Don't serialize, used internally
 }
 
 // executeDirectTool executes a tool directly without LLM decision-making
@@ -160,7 +160,7 @@ func (h *Handler) executeDirectTool(ctx context.Context, ag *resolvedChatAgent, 
 	}
 
 	// Check if result is a structured result
-	if sr, err := pluginapi.ParseStructuredResult(toolResult); err == nil {
+	if sr, err := toolapi.ParseStructuredResult(toolResult); err == nil {
 		result.Structured = true
 		result.DisplayType = string(sr.DisplayType)
 		result.Title = sr.Title

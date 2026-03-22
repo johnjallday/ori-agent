@@ -12,9 +12,9 @@ import (
 	"github.com/johnjallday/ori-agent/internal/agent"
 	"github.com/johnjallday/ori-agent/internal/llm"
 	"github.com/johnjallday/ori-agent/internal/logger"
+	"github.com/johnjallday/ori-agent/internal/toolapi"
 	"github.com/johnjallday/ori-agent/internal/types"
 	"github.com/johnjallday/ori-agent/internal/workspace"
-	"github.com/oriagent/ori-pluginapi"
 )
 
 // ToolCallResult holds the result of a tool execution
@@ -31,7 +31,7 @@ type ExecuteToolCallsResult struct {
 	Results             []ToolCallResult
 	CombinedResult      string
 	HasStructuredResult bool
-	StructuredData      *pluginapi.StructuredResult
+	StructuredData      *toolapi.StructuredResult
 	Receipts            []ActionReceipt
 }
 
@@ -57,7 +57,7 @@ type boundedToolLoopResult struct {
 	ToolCalls           []ToolCallResult
 	Receipts            []ActionReceipt
 	HasStructuredResult bool
-	StructuredData      *pluginapi.StructuredResult
+	StructuredData      *toolapi.StructuredResult
 	UsedToolFallback    bool
 	StopReason          string
 	Err                 error
@@ -229,7 +229,7 @@ func (h *Handler) executeToolCallsCommonWithSession(
 	ag *resolvedChatAgent,
 	agentName string,
 	toolCalls []llm.ToolCall,
-	files []pluginapi.FileAttachment,
+	files []toolapi.FileAttachment,
 	sessionID string,
 ) ExecuteToolCallsResult {
 	var results []ToolCallResult
@@ -329,12 +329,12 @@ func (h *Handler) executeToolCallsCommonWithSession(
 }
 
 // processToolResultsCommon checks tool results for structured data
-func processToolResultsCommon(results []ToolCallResult) (combinedResult string, hasStructured bool, structuredData *pluginapi.StructuredResult) {
+func processToolResultsCommon(results []ToolCallResult) (combinedResult string, hasStructured bool, structuredData *toolapi.StructuredResult) {
 	for i, tr := range results {
 		result := tr.Result
 
 		// Check if this is a structured result
-		if sr, err := pluginapi.ParseStructuredResult(result); err == nil {
+		if sr, err := toolapi.ParseStructuredResult(result); err == nil {
 			hasStructured = true
 			structuredData = sr
 		}

@@ -13,8 +13,8 @@ import (
 	"github.com/johnjallday/ori-agent/internal/session"
 	"github.com/johnjallday/ori-agent/internal/skills"
 	"github.com/johnjallday/ori-agent/internal/store"
+	"github.com/johnjallday/ori-agent/internal/toolapi"
 	"github.com/johnjallday/ori-agent/internal/workspace"
-	"github.com/oriagent/ori-pluginapi"
 )
 
 // WorkspaceToolProvider provides workspace-scoped tools that give the assistant
@@ -64,9 +64,9 @@ func (p *WorkspaceToolProvider) SetManagementDeps(agentStore store.Store, mcpReg
 	p.skillsManager = skillsMgr
 }
 
-// Tools returns all workspace tools as pluginapi-compatible tools.
-func (p *WorkspaceToolProvider) Tools() []pluginapi.PluginTool {
-	tools := []pluginapi.PluginTool{
+// Tools returns all workspace tools as toolapi-compatible tools.
+func (p *WorkspaceToolProvider) Tools() []toolapi.Tool {
+	tools := []toolapi.Tool{
 		// Phase 1: Context tools
 		p.readNotesTool(),
 		p.saveNoteTool(),
@@ -93,9 +93,9 @@ func (p *WorkspaceToolProvider) Tools() []pluginapi.PluginTool {
 
 // --- workspace_notes (read) ---
 
-func (p *WorkspaceToolProvider) readNotesTool() pluginapi.PluginTool {
+func (p *WorkspaceToolProvider) readNotesTool() toolapi.Tool {
 	return &nativeUtilityTool{
-		definition: pluginapi.Tool{
+		definition: toolapi.ToolDefinition{
 			Name:        "workspace_notes",
 			Description: "List and read notes in the current workspace. Use without arguments to list all notes. Provide a note_id to read the full content of a specific note.",
 			Parameters: map[string]interface{}{
@@ -159,9 +159,9 @@ func (p *WorkspaceToolProvider) readNotesTool() pluginapi.PluginTool {
 
 // --- workspace_save_note (write) ---
 
-func (p *WorkspaceToolProvider) saveNoteTool() pluginapi.PluginTool {
+func (p *WorkspaceToolProvider) saveNoteTool() toolapi.Tool {
 	return &nativeUtilityTool{
-		definition: pluginapi.Tool{
+		definition: toolapi.ToolDefinition{
 			Name:        "workspace_save_note",
 			Description: "Create or update a note in the current workspace. Provide name and content to create a new note, or note_id with content to update an existing one.",
 			Parameters: map[string]interface{}{
@@ -263,9 +263,9 @@ func (p *WorkspaceToolProvider) saveNoteTool() pluginapi.PluginTool {
 
 // --- workspace_tasks (read) ---
 
-func (p *WorkspaceToolProvider) readTasksTool() pluginapi.PluginTool {
+func (p *WorkspaceToolProvider) readTasksTool() toolapi.Tool {
 	return &nativeUtilityTool{
-		definition: pluginapi.Tool{
+		definition: toolapi.ToolDefinition{
 			Name:        "workspace_tasks",
 			Description: "List tasks in the current workspace. Returns task descriptions, statuses, assignees, and priorities.",
 			Parameters: map[string]interface{}{
@@ -332,9 +332,9 @@ func (p *WorkspaceToolProvider) readTasksTool() pluginapi.PluginTool {
 
 // --- workspace_sessions (read list) ---
 
-func (p *WorkspaceToolProvider) readSessionsTool() pluginapi.PluginTool {
+func (p *WorkspaceToolProvider) readSessionsTool() toolapi.Tool {
 	return &nativeUtilityTool{
-		definition: pluginapi.Tool{
+		definition: toolapi.ToolDefinition{
 			Name:        "workspace_sessions",
 			Description: "List chat sessions in the current workspace. Returns session titles, agents, and timestamps. Use workspace_session_detail to read a specific session's messages.",
 			Parameters: map[string]interface{}{
@@ -374,9 +374,9 @@ func (p *WorkspaceToolProvider) readSessionsTool() pluginapi.PluginTool {
 
 // --- workspace_session_detail (read messages) ---
 
-func (p *WorkspaceToolProvider) readSessionDetailTool() pluginapi.PluginTool {
+func (p *WorkspaceToolProvider) readSessionDetailTool() toolapi.Tool {
 	return &nativeUtilityTool{
-		definition: pluginapi.Tool{
+		definition: toolapi.ToolDefinition{
 			Name:        "workspace_session_detail",
 			Description: "Read the messages from a specific session in the workspace. Use workspace_sessions first to find the session ID.",
 			Parameters: map[string]interface{}{
@@ -441,9 +441,9 @@ func (p *WorkspaceToolProvider) readSessionDetailTool() pluginapi.PluginTool {
 
 // --- workspace_files (read) ---
 
-func (p *WorkspaceToolProvider) readFilesTool() pluginapi.PluginTool {
+func (p *WorkspaceToolProvider) readFilesTool() toolapi.Tool {
 	return &nativeUtilityTool{
-		definition: pluginapi.Tool{
+		definition: toolapi.ToolDefinition{
 			Name:        "workspace_files",
 			Description: "List files attached to the current workspace. Returns file names, types, and metadata.",
 			Parameters: map[string]interface{}{
@@ -488,9 +488,9 @@ func (p *WorkspaceToolProvider) readFilesTool() pluginapi.PluginTool {
 
 // --- workspace_directories (read) ---
 
-func (p *WorkspaceToolProvider) readDirectoriesTool() pluginapi.PluginTool {
+func (p *WorkspaceToolProvider) readDirectoriesTool() toolapi.Tool {
 	return &nativeUtilityTool{
-		definition: pluginapi.Tool{
+		definition: toolapi.ToolDefinition{
 			Name:        "workspace_directories",
 			Description: "List directories referenced by the current workspace. Returns directory names and filesystem paths.",
 			Parameters: map[string]interface{}{
@@ -536,9 +536,9 @@ func truncate(s string, maxLen int) string {
 
 // --- workspace_manage_agents ---
 
-func (p *WorkspaceToolProvider) manageAgentsTool() pluginapi.PluginTool {
+func (p *WorkspaceToolProvider) manageAgentsTool() toolapi.Tool {
 	return &nativeUtilityTool{
-		definition: pluginapi.Tool{
+		definition: toolapi.ToolDefinition{
 			Name:        "workspace_manage_agents",
 			Description: "Manage agents in the current workspace. Actions: 'list' shows workspace agents, 'available' shows all agents that can be added, 'add' adds an agent, 'remove' removes an agent.",
 			Parameters: map[string]interface{}{
@@ -657,9 +657,9 @@ func (p *WorkspaceToolProvider) manageAgentsTool() pluginapi.PluginTool {
 
 // --- workspace_manage_mcp ---
 
-func (p *WorkspaceToolProvider) manageMCPTool() pluginapi.PluginTool {
+func (p *WorkspaceToolProvider) manageMCPTool() toolapi.Tool {
 	return &nativeUtilityTool{
-		definition: pluginapi.Tool{
+		definition: toolapi.ToolDefinition{
 			Name:        "workspace_manage_mcp",
 			Description: "Manage MCP server bindings in the current workspace. Actions: 'list' shows workspace MCP bindings, 'available' shows all MCP servers that can be attached, 'attach' adds a binding, 'detach' removes a binding.",
 			Parameters: map[string]interface{}{
@@ -804,9 +804,9 @@ func (p *WorkspaceToolProvider) manageMCPTool() pluginapi.PluginTool {
 
 // --- workspace_manage_skills ---
 
-func (p *WorkspaceToolProvider) manageSkillsTool() pluginapi.PluginTool {
+func (p *WorkspaceToolProvider) manageSkillsTool() toolapi.Tool {
 	return &nativeUtilityTool{
-		definition: pluginapi.Tool{
+		definition: toolapi.ToolDefinition{
 			Name:        "workspace_manage_skills",
 			Description: "Manage skill bindings in the current workspace. Actions: 'list' shows workspace skills, 'available' shows all skills that can be attached, 'attach' adds a skill, 'detach' removes a skill.",
 			Parameters: map[string]interface{}{
