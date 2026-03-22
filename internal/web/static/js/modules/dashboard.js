@@ -549,50 +549,6 @@
     return '';
   }
 
-  function inferWorkspaceActionCommand(prompt, appLaunchRequest) {
-    var raw = String(prompt || '').trim();
-    if (!raw) return null;
-    if (appLaunchRequest && appLaunchRequest.appName) return null;
-
-    var normalized = normalizeToken(raw);
-    if (!normalized) return null;
-
-    if (/^(?:open\s+chat|start\s+chat|chat\s|continue\s+in\s+chat|talk\s+to\s|discuss\s)/i.test(normalized)) {
-      return { command: 'chat', content: raw };
-    }
-
-    var noteMatch = raw.match(/^(?:add|create|write|save|make)?\s*(?:a\s+)?note(?:\s+(?:about|for|to))?[\s:,-]*(.*)$/i);
-    if (!noteMatch) {
-      noteMatch = raw.match(/^remember(?:\s+to)?[\s:,-]*(.*)$/i);
-    }
-    if (noteMatch) {
-      var noteContent = sanitizeWorkspaceCommandContent(noteMatch[1] || '');
-      if (!noteContent) noteContent = raw;
-      return { command: 'note', content: noteContent };
-    }
-
-    var directoryMatch = raw.match(/^(?:add|attach|link|include|use|set|open)\s+(?:a\s+)?(?:directory|folder)\b[\s:,-]*(.*)$/i);
-    if (!directoryMatch) {
-      directoryMatch = raw.match(/^(?:directory|folder)\b[\s:,-]*(.*)$/i);
-    }
-    if (directoryMatch) {
-      var directoryContent = sanitizeWorkspaceCommandContent(directoryMatch[1] || '');
-      var inferredPath = extractLikelyPathFromText(directoryContent || raw);
-      return { command: 'directory', content: inferredPath || directoryContent };
-    }
-
-    var fileMatch = raw.match(/^(?:add|attach|upload|include)\s+(?:a\s+)?(?:file|document|attachment)\b[\s:,-]*(.*)$/i);
-    if (!fileMatch) {
-      fileMatch = raw.match(/^(?:file|upload)\b[\s:,-]*(.*)$/i);
-    }
-    if (fileMatch) {
-      var fileContent = sanitizeWorkspaceCommandContent(fileMatch[1] || '');
-      return { command: 'file', content: fileContent };
-    }
-
-    return { command: 'task', content: raw };
-  }
-
   function parseAppLaunchRequest(prompt) {
     var text = String(prompt || '').trim();
     if (!text) return null;
@@ -4890,13 +4846,6 @@
     } finally {
       setHomeAssistantBusy(false);
     }
-  }
-
-  function extractCreatedSessionId(payload) {
-    if (!payload || typeof payload !== 'object') return '';
-    if (payload.session && payload.session.id) return String(payload.session.id);
-    if (payload.id) return String(payload.id);
-    return '';
   }
 
   async function createWorkspaceChatSessionWithMessage(workspaceId, message) {

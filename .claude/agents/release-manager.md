@@ -24,9 +24,10 @@ Follow these steps in order:
 ### Step 2: Run Pre-Release Check
 1. **IMPORTANT**: Before running, ask the user to confirm the version number
 2. Wait for user confirmation before proceeding
-3. Execute `./scripts/pre-release-check.sh v{next_version}` where `{next_version}` is the determined version
-4. **NOTE**: This script takes approximately 6 minutes to complete (runs tests, builds, smoke tests)
-5. Capture and analyze the output
+3. **CRITICAL**: You MUST run the pre-release check script — do NOT run individual commands (go build, go test, go vet, etc.) as substitutes. The script includes checks you cannot replicate manually (frontend ESLint, security scans, cross-platform builds, dependency verification, etc.).
+4. Execute `./scripts/pre-release-check.sh v{next_version}` where `{next_version}` is the determined version
+5. **NOTE**: This script takes approximately 6 minutes to complete (runs Go lint, frontend ESLint, tests, builds, smoke tests, and more)
+6. Capture and analyze the output
 
 ### Step 3: Fix Errors and Re-run (Automated Loop)
 If the pre-release check reports errors, you MUST fix them automatically:
