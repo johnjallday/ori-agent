@@ -17,8 +17,9 @@ import (
 
 // Handler handles session-related HTTP requests.
 type Handler struct {
-	store          session.HybridStore
-	workspaceStore *workspace.FileStore // optional folder-based workspace store
+	store                 session.HybridStore
+	workspaceStore        *workspace.FileStore // optional folder-based workspace store
+	workspaceRootResolver func() string
 }
 
 // New creates a new session handler.
@@ -29,6 +30,12 @@ func New(store session.HybridStore) *Handler {
 // SetWorkspaceStore sets the folder-based workspace store for enhanced workspace operations.
 func (h *Handler) SetWorkspaceStore(ws *workspace.FileStore) {
 	h.workspaceStore = ws
+}
+
+// SetWorkspaceRootResolver sets the resolver used to determine the default
+// directory for newly created workspace folders.
+func (h *Handler) SetWorkspaceRootResolver(fn func() string) {
+	h.workspaceRootResolver = fn
 }
 
 // handleSessions routes requests to /api/sessions.

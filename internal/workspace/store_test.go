@@ -246,6 +246,46 @@ func TestFileStore_SaveUpdate(t *testing.T) {
 	}
 }
 
+func TestFileStore_SaveUpdatePreservesCustomLocation(t *testing.T) {
+	baseDir := t.TempDir()
+	customRoot := t.TempDir()
+
+	store, err := NewFileStore(baseDir)
+	if err != nil {
+		t.Fatalf("NewFileStore: %v", err)
+	}
+
+	ws := newTestWorkspace("ws-custom", "Custom Root")
+	if err := store.SaveAt(ws, customRoot); err != nil {
+		t.Fatalf("SaveAt: %v", err)
+	}
+
+	ws.Description = "updated"
+	if err := store.Save(ws); err != nil {
+		t.Fatalf("Save update: %v", err)
+	}
+
+	customConfig := filepath.Join(customRoot, "custom-root", WorkspaceConfigFile)
+	if _, err := os.Stat(customConfig); err != nil {
+		t.Fatalf("expected workspace.json at custom location: %v", err)
+	}
+
+	defaultConfig := filepath.Join(baseDir, "custom-root", WorkspaceConfigFile)
+	if _, err := os.Stat(defaultConfig); !os.IsNotExist(err) {
+		t.Fatalf("did not expect duplicate workspace under base path, stat err=%v", err)
+	}
+
+	gotPath, err := store.GetFolderPath("ws-custom")
+	if err != nil {
+		t.Fatalf("GetFolderPath: %v", err)
+	}
+
+	wantPath := filepath.Join(customRoot, "custom-root")
+	if gotPath != wantPath {
+		t.Fatalf("GetFolderPath=%q, want %q", gotPath, wantPath)
+	}
+}
+
 func TestFileStore_SubWorkspace(t *testing.T) {
 	dir := t.TempDir()
 	store, err := NewFileStore(dir)

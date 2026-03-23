@@ -129,9 +129,24 @@ func (s *FileStore) Save(ws *Workspace) error {
 		}
 	}
 
-	// Check for folder name conflict (only for new workspaces, not updates)
+	existingPath, exists := s.idToPath[ws.ID]
+	existingFolderPath := ""
+	if exists {
+		existingFolderPath = s.resolveFolder(existingPath)
+	}
+
+	// Default folder target is derived from the current base path and slug.
 	folderPath := filepath.Join(parentDir, ws.FolderSlug)
-	if existingPath, exists := s.idToPath[ws.ID]; !exists {
+
+	// Workspaces originally created with SaveAt are tracked by absolute paths.
+	// Preserve that absolute location for normal metadata/content saves so we do
+	// not accidentally recreate the workspace under the current base path.
+	if exists && filepath.IsAbs(existingPath) {
+		folderPath = existingFolderPath
+	}
+
+	// Check for folder name conflict (only for new workspaces or path changes).
+	if !exists {
 		// New workspace — check if folder already exists
 		if existsOnDisk, err := pathExists(folderPath); err != nil {
 			return fmt.Errorf("failed to check workspace folder path: %w", err)
@@ -142,7 +157,7 @@ func (s *FileStore) Save(ws *Workspace) error {
 				ParentDir:     parentDir,
 			}
 		}
-	} else if filepath.Join(s.basePath, existingPath) != folderPath {
+	} else if filepath.Clean(existingFolderPath) != filepath.Clean(folderPath) {
 		// Existing workspace with changed path — check new folder doesn't exist
 		if existsOnDisk, err := pathExists(folderPath); err != nil {
 			return fmt.Errorf("failed to check workspace folder path: %w", err)
@@ -182,8 +197,14 @@ func (s *FileStore) Save(ws *Workspace) error {
 	}
 
 	// Compute relative path from basePath
-	relPath, err := filepath.Rel(s.basePath, folderPath)
-	if err != nil {
+	relPath := folderPath
+	if !filepath.IsAbs(folderPath) {
+		relPath = folderPath
+	} else if filepath.IsAbs(existingPath) {
+		relPath = folderPath
+	} else if computedRelPath, err := filepath.Rel(s.basePath, folderPath); err == nil {
+		relPath = computedRelPath
+	} else {
 		relPath = ws.FolderSlug
 	}
 

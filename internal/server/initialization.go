@@ -241,33 +241,12 @@ func resolveWorkspaceDir() string {
 func resolveWorkspaceRoot(configManager *config.Manager) string {
 	// Check settings first
 	if configManager != nil {
-		cfg := configManager.Get()
-		if cfg.WorkspaceRoot != "" {
-			if abs, err := filepath.Abs(cfg.WorkspaceRoot); err == nil {
-				return abs
-			}
-			return cfg.WorkspaceRoot
+		if root := configManager.GetWorkspaceRoot(); root != "" {
+			return root
 		}
 	}
 
-	// Check environment variable
-	if p := os.Getenv("WORKSPACE_DIR"); p != "" {
-		if abs, err := filepath.Abs(p); err == nil {
-			return abs
-		}
-		return p
-	}
-
-	// Default: ~/Ori Workspaces
-	home, err := os.UserHomeDir()
-	if err != nil {
-		// Fallback to cwd/workspaces if home dir unavailable
-		if abs, err := filepath.Abs("workspaces"); err == nil {
-			return abs
-		}
-		return "workspaces"
-	}
-	return filepath.Join(home, "Ori Workspaces")
+	return config.ResolveWorkspaceRoot("")
 }
 
 // createWorkspaceStore creates a new file-based workspace storage system.

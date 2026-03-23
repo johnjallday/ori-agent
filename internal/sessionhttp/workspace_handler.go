@@ -152,12 +152,18 @@ func (h *Handler) createWorkspace(w http.ResponseWriter, r *http.Request) {
 			UpdatedAt:   ws.UpdatedAt,
 		}
 
+		targetLocation := strings.TrimSpace(req.Location)
+		if targetLocation == "" && h.workspaceRootResolver != nil {
+			targetLocation = strings.TrimSpace(h.workspaceRootResolver())
+		}
+
 		var folderErr error
-		if req.Location != "" {
-			// Custom location — create folder at the user-specified directory
-			folderErr = h.workspaceStore.SaveAt(folderWS, req.Location)
-		} else {
-			// Default location (workspace root from settings)
+		switch {
+		case targetLocation != "" && !workspacePathsEqual(targetLocation, h.workspaceStore.BasePath()):
+			// Custom location or updated default root outside the original file store base.
+			folderErr = h.workspaceStore.SaveAt(folderWS, targetLocation)
+		default:
+			// Default location inside the file store base path.
 			folderErr = h.workspaceStore.Save(folderWS)
 		}
 
@@ -243,6 +249,27 @@ func (h *Handler) createWorkspace(w http.ResponseWriter, r *http.Request) {
 		"success": true,
 		"folder":  ws,
 	})
+}
+
+func workspacePathsEqual(a, b string) bool {
+	if strings.TrimSpace(a) == "" || strings.TrimSpace(b) == "" {
+		return false
+	}
+
+	absA, err := filepath.Abs(strings.TrimSpace(a))
+	if err != nil {
+		absA = strings.TrimSpace(a)
+	}
+	absB, err := filepath.Abs(strings.TrimSpace(b))
+	if err != nil {
+		absB = strings.TrimSpace(b)
+	}
+
+	if runtime.GOOS == "windows" {
+		return strings.EqualFold(filepath.Clean(absA), filepath.Clean(absB))
+	}
+
+	return filepath.Clean(absA) == filepath.Clean(absB)
 }
 
 // getWorkspace handles GET /api/workspaces/{id}.

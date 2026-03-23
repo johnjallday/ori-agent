@@ -512,6 +512,188 @@ document.getElementById('systemDiagnosticsBtn')?.addEventListener('click', async
   loadUtilitySettings();
 })();
 
+// Workspace Directory Settings
+(function() {
+  const input = document.getElementById('workspaceRootInput');
+  const browseBtn = document.getElementById('browseWorkspaceRootBtn');
+  const saveBtn = document.getElementById('saveWorkspaceRootBtn');
+  const resetBtn = document.getElementById('resetWorkspaceRootBtn');
+  const statusIndicator = document.getElementById('workspaceRootStatusIndicator');
+  const statusText = document.getElementById('workspaceRootStatusText');
+  const statusDetails = document.getElementById('workspaceRootStatusDetails');
+
+  if (!input) {
+    return;
+  }
+
+  let workspaceRootState = null;
+
+  function setButtonLoading(btn, loading, loadingLabel) {
+    if (!btn) return;
+    if (loading) {
+      btn.dataset.originalLabel = btn.innerHTML;
+      btn.disabled = true;
+      btn.innerHTML = `<span class="spinner-border spinner-border-sm me-2"></span>${loadingLabel}`;
+      return;
+    }
+
+    btn.disabled = false;
+    if (btn.dataset.originalLabel) {
+      btn.innerHTML = btn.dataset.originalLabel;
+    }
+  }
+
+  function updateStatus(state) {
+    if (!statusIndicator || !statusText || !statusDetails) return;
+
+    const source = String(state?.source || 'default');
+    const effectiveRoot = String(state?.effective_workspace_root || '').trim();
+
+    if (source === 'settings') {
+      statusIndicator.innerHTML = `
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="#28a745">
+          <path d="M12,2A10,10 0 0,1 22,12A10,10 0 0,1 12,22A10,10 0 0,1 2,12A10,10 0 0,1 12,2M11,16.5L6.5,12L7.91,10.59L11,13.67L16.59,8.09L18,9.5L11,16.5Z"/>
+        </svg>
+      `;
+      statusText.textContent = 'Custom workspace directory active';
+      statusDetails.textContent = effectiveRoot ? `New workspaces will be created in ${effectiveRoot}.` : '';
+      return;
+    }
+
+    if (source === 'environment') {
+      statusIndicator.innerHTML = `
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="#3b82f6">
+          <path d="M12,2A10,10 0 0,1 22,12A10,10 0 0,1 12,22A10,10 0 0,1 2,12A10,10 0 0,1 12,2M13,17H11V11H13V17M13,9H11V7H13V9Z"/>
+        </svg>
+      `;
+      statusText.textContent = 'Using workspace directory from WORKSPACE_DIR';
+      statusDetails.textContent = effectiveRoot ? `${effectiveRoot} is active until you save a custom directory.` : '';
+      return;
+    }
+
+    statusIndicator.innerHTML = `
+      <svg width="24" height="24" viewBox="0 0 24 24" fill="#3b82f6">
+        <path d="M12,2A10,10 0 0,1 22,12A10,10 0 0,1 12,22A10,10 0 0,1 2,12A10,10 0 0,1 12,2M13,17H11V11H13V17M13,9H11V7H13V9Z"/>
+      </svg>
+    `;
+    statusText.textContent = 'Using built-in workspace directory';
+    statusDetails.textContent = effectiveRoot ? `${effectiveRoot} is the current default until you save a custom directory.` : '';
+  }
+
+  function applyWorkspaceRootState(state) {
+    workspaceRootState = state || {};
+    const configuredRoot = String(workspaceRootState.workspace_root || '').trim();
+    const effectiveRoot = String(workspaceRootState.effective_workspace_root || '').trim();
+    input.value = configuredRoot || effectiveRoot;
+    if (resetBtn) {
+      resetBtn.disabled = !configuredRoot;
+    }
+    updateStatus(workspaceRootState);
+  }
+
+  async function loadWorkspaceRoot() {
+    const response = await fetch('/api/settings/workspace-root');
+    if (!response.ok) {
+      throw new Error(await response.text() || 'Failed to load workspace directory');
+    }
+    const data = await response.json();
+    applyWorkspaceRootState(data);
+  }
+
+  async function saveWorkspaceRoot(workspaceRoot) {
+    const response = await fetch('/api/settings/workspace-root', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({ workspace_root: workspaceRoot })
+    });
+
+    if (!response.ok) {
+      throw new Error(await response.text() || 'Failed to save workspace directory');
+    }
+
+    const data = await response.json();
+    applyWorkspaceRootState(data);
+    return data;
+  }
+
+  browseBtn?.addEventListener('click', async function() {
+    setButtonLoading(browseBtn, true, 'Selecting...');
+    try {
+      const response = await fetch('/api/folder-picker/select-path', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          title: 'Select Default Workspace Directory'
+        })
+      });
+
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok || !result.success) {
+        throw new Error(result.error || 'Failed to open folder picker');
+      }
+
+      if (result.selected && result.path) {
+        input.value = result.path;
+        input.focus();
+      }
+    } catch (error) {
+      console.error('Failed to browse workspace directory:', error);
+      notify('Failed to open folder picker: ' + error.message, 'error');
+    } finally {
+      setButtonLoading(browseBtn, false);
+    }
+  });
+
+  saveBtn?.addEventListener('click', async function() {
+    setButtonLoading(saveBtn, true, 'Saving...');
+    try {
+      await saveWorkspaceRoot(input.value.trim());
+      notify('Workspace directory saved.', 'success');
+    } catch (error) {
+      console.error('Failed to save workspace directory:', error);
+      notify('Failed to save workspace directory: ' + error.message, 'error');
+    } finally {
+      setButtonLoading(saveBtn, false);
+    }
+  });
+
+  resetBtn?.addEventListener('click', async function() {
+    if (!workspaceRootState?.workspace_root) {
+      return;
+    }
+
+    setButtonLoading(resetBtn, true, 'Clearing...');
+    try {
+      await saveWorkspaceRoot('');
+      notify('Custom workspace directory cleared.', 'success');
+    } catch (error) {
+      console.error('Failed to clear workspace directory:', error);
+      notify('Failed to clear workspace directory: ' + error.message, 'error');
+    } finally {
+      setButtonLoading(resetBtn, false);
+    }
+  });
+
+  loadWorkspaceRoot().catch((error) => {
+    console.error('Failed to load workspace directory:', error);
+    if (statusIndicator) {
+      statusIndicator.innerHTML = `
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="#ef4444">
+          <path d="M13,13H11V7H13M13,17H11V15H13M12,2A10,10 0 0,0 2,12A10,10 0 0,0 12,22A10,10 0 0,0 22,12A10,10 0 0,0 12,2Z"/>
+        </svg>
+      `;
+    }
+    if (statusText) {
+      statusText.textContent = 'Failed to load workspace directory';
+    }
+    if (statusDetails) {
+      statusDetails.textContent = error.message || '';
+    }
+  });
+})();
+
 // Session Management Settings
 (function() {
   const sessionCleanupEnabled = document.getElementById('sessionCleanupEnabled');

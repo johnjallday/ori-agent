@@ -487,6 +487,137 @@ func TestExternalAgentsSettingsHandler_CodexToggleDoesNotUnregisterProvider(t *t
 	}
 }
 
+func TestWorkspaceRootSettingsHandler_Get_EnvironmentFallback(t *testing.T) {
+	tmpDir := t.TempDir()
+	tmpFile := filepath.Join(tmpDir, "settings.json")
+	configManager := config.NewManager(tmpFile)
+	_ = configManager.Load()
+
+	envRoot := filepath.Join(tmpDir, "env-workspaces")
+	t.Setenv("WORKSPACE_DIR", envRoot)
+
+	handler := NewHandler(nil, configManager, nil, llm.NewFactory())
+
+	req := httptest.NewRequest(http.MethodGet, "/api/settings/workspace-root", nil)
+	rec := httptest.NewRecorder()
+	handler.WorkspaceRootSettingsHandler(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("Expected status 200, got %d", rec.Code)
+	}
+
+	var resp WorkspaceRootResponse
+	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+		t.Fatalf("Failed to decode response: %v", err)
+	}
+
+	if resp.WorkspaceRoot != "" {
+		t.Fatalf("Expected no configured workspace_root, got %q", resp.WorkspaceRoot)
+	}
+	if resp.Source != "environment" {
+		t.Fatalf("Expected source environment, got %q", resp.Source)
+	}
+	if resp.EffectiveWorkspaceRoot != envRoot {
+		t.Fatalf("Expected effective root %q, got %q", envRoot, resp.EffectiveWorkspaceRoot)
+	}
+}
+
+func TestWorkspaceRootSettingsHandler_Post(t *testing.T) {
+	tmpDir := t.TempDir()
+	tmpFile := filepath.Join(tmpDir, "settings.json")
+	configManager := config.NewManager(tmpFile)
+	_ = configManager.Load()
+
+	handler := NewHandler(nil, configManager, nil, llm.NewFactory())
+
+	customRoot := filepath.Join(tmpDir, "custom-workspaces")
+	body, _ := json.Marshal(map[string]string{
+		"workspace_root": customRoot,
+	})
+
+	req := httptest.NewRequest(http.MethodPost, "/api/settings/workspace-root", bytes.NewReader(body))
+	rec := httptest.NewRecorder()
+	handler.WorkspaceRootSettingsHandler(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("Expected status 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	var resp struct {
+		Success                bool   `json:"success"`
+		WorkspaceRoot          string `json:"workspace_root"`
+		EffectiveWorkspaceRoot string `json:"effective_workspace_root"`
+		Source                 string `json:"source"`
+	}
+	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+		t.Fatalf("Failed to decode response: %v", err)
+	}
+
+	if !resp.Success {
+		t.Fatal("Expected success=true")
+	}
+	if resp.WorkspaceRoot != customRoot {
+		t.Fatalf("Expected workspace_root %q, got %q", customRoot, resp.WorkspaceRoot)
+	}
+	if resp.EffectiveWorkspaceRoot != customRoot {
+		t.Fatalf("Expected effective root %q, got %q", customRoot, resp.EffectiveWorkspaceRoot)
+	}
+	if resp.Source != "settings" {
+		t.Fatalf("Expected source settings, got %q", resp.Source)
+	}
+	if _, err := os.Stat(customRoot); err != nil {
+		t.Fatalf("Expected workspace root directory to exist: %v", err)
+	}
+
+	configManager2 := config.NewManager(tmpFile)
+	_ = configManager2.Load()
+	if got := configManager2.GetWorkspaceRoot(); got != customRoot {
+		t.Fatalf("Expected persisted workspace root %q, got %q", customRoot, got)
+	}
+}
+
+func TestWorkspaceRootSettingsHandler_Post_ClearFallsBackToDefault(t *testing.T) {
+	tmpDir := t.TempDir()
+	tmpFile := filepath.Join(tmpDir, "settings.json")
+	configManager := config.NewManager(tmpFile)
+	_ = configManager.Load()
+	if err := configManager.SetWorkspaceRoot(filepath.Join(tmpDir, "custom-workspaces")); err != nil {
+		t.Fatalf("SetWorkspaceRoot: %v", err)
+	}
+	if err := configManager.Save(); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+
+	handler := NewHandler(nil, configManager, nil, llm.NewFactory())
+
+	req := httptest.NewRequest(http.MethodPost, "/api/settings/workspace-root", bytes.NewReader([]byte(`{"workspace_root":""}`)))
+	rec := httptest.NewRecorder()
+	handler.WorkspaceRootSettingsHandler(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("Expected status 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	var resp struct {
+		WorkspaceRoot          string `json:"workspace_root"`
+		EffectiveWorkspaceRoot string `json:"effective_workspace_root"`
+		Source                 string `json:"source"`
+	}
+	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+		t.Fatalf("Failed to decode response: %v", err)
+	}
+
+	if resp.WorkspaceRoot != "" {
+		t.Fatalf("Expected cleared workspace_root, got %q", resp.WorkspaceRoot)
+	}
+	if resp.Source != "default" {
+		t.Fatalf("Expected source default, got %q", resp.Source)
+	}
+	if resp.EffectiveWorkspaceRoot != config.DefaultWorkspaceRoot() {
+		t.Fatalf("Expected default effective root %q, got %q", config.DefaultWorkspaceRoot(), resp.EffectiveWorkspaceRoot)
+	}
+}
+
 func TestSessionSettingsHandler_Get(t *testing.T) {
 	tmpDir := t.TempDir()
 	tmpFile := filepath.Join(tmpDir, "settings.json")

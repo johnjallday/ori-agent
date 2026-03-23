@@ -2,12 +2,15 @@ package config
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 
 	"github.com/johnjallday/ori-agent/internal/authdiscovery"
+	"github.com/johnjallday/ori-agent/internal/platform"
 )
 
 // UtilitySettings controls native utility tool providers and runtime safeguards.
@@ -152,6 +155,66 @@ func defaultUtilitySettings() UtilitySettings {
 	}
 }
 
+// DefaultWorkspaceRoot returns the fallback directory used for new workspace folders.
+func DefaultWorkspaceRoot() string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		if abs, err := filepath.Abs("workspaces"); err == nil {
+			return abs
+		}
+		return "workspaces"
+	}
+	return filepath.Join(home, "Ori Workspaces")
+}
+
+// NormalizeWorkspaceRoot expands and normalizes a configured workspace root path.
+func NormalizeWorkspaceRoot(path string) (string, error) {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return "", nil
+	}
+
+	expanded, err := platform.ExpandHome(path)
+	if err != nil {
+		return "", fmt.Errorf("failed to expand workspace directory: %w", err)
+	}
+
+	abs, err := filepath.Abs(expanded)
+	if err != nil {
+		return "", fmt.Errorf("failed to resolve workspace directory: %w", err)
+	}
+
+	return filepath.Clean(abs), nil
+}
+
+// ResolveWorkspaceRoot determines the effective workspace root using
+// settings first, then WORKSPACE_DIR, then the built-in default.
+func ResolveWorkspaceRoot(configured string) string {
+	if normalized, err := NormalizeWorkspaceRoot(configured); err == nil && normalized != "" {
+		return normalized
+	}
+
+	if envPath := strings.TrimSpace(os.Getenv("WORKSPACE_DIR")); envPath != "" {
+		if normalized, err := NormalizeWorkspaceRoot(envPath); err == nil && normalized != "" {
+			return normalized
+		}
+		return envPath
+	}
+
+	return DefaultWorkspaceRoot()
+}
+
+// WorkspaceRootSource reports where the effective workspace root comes from.
+func WorkspaceRootSource(configured string) string {
+	if strings.TrimSpace(configured) != "" {
+		return "settings"
+	}
+	if strings.TrimSpace(os.Getenv("WORKSPACE_DIR")) != "" {
+		return "environment"
+	}
+	return "default"
+}
+
 // Save writes current configuration to file
 func (m *Manager) Save() error {
 	m.mu.RLock()
@@ -188,6 +251,46 @@ func (m *Manager) Update(settings Settings) error {
 	defer m.mu.Unlock()
 	m.settings = settings
 	return m.validate()
+}
+
+// GetWorkspaceRoot returns the explicitly configured workspace root, if any.
+func (m *Manager) GetWorkspaceRoot() string {
+	m.mu.RLock()
+	raw := strings.TrimSpace(m.settings.WorkspaceRoot)
+	m.mu.RUnlock()
+
+	if raw == "" {
+		return ""
+	}
+
+	normalized, err := NormalizeWorkspaceRoot(raw)
+	if err != nil {
+		return raw
+	}
+	return normalized
+}
+
+// SetWorkspaceRoot updates the configured default workspace directory.
+func (m *Manager) SetWorkspaceRoot(path string) error {
+	normalized, err := NormalizeWorkspaceRoot(path)
+	if err != nil {
+		return err
+	}
+
+	if normalized != "" {
+		info, statErr := os.Stat(normalized)
+		if statErr == nil && !info.IsDir() {
+			return fmt.Errorf("workspace directory must be a folder")
+		}
+		if statErr != nil && !errors.Is(statErr, os.ErrNotExist) {
+			return fmt.Errorf("failed to inspect workspace directory: %w", statErr)
+		}
+	}
+
+	m.mu.Lock()
+	m.settings.WorkspaceRoot = normalized
+	m.mu.Unlock()
+	return nil
 }
 
 // GetAPIKey returns the OpenAI API key, checking settings first, then environment variable, then discovery
@@ -329,6 +432,13 @@ func (m *Manager) validate() error {
 	}
 	if m.settings.SpeechLanguage == "" {
 		m.settings.SpeechLanguage = "auto"
+	}
+
+	if m.settings.WorkspaceRoot != "" {
+		normalized, err := NormalizeWorkspaceRoot(m.settings.WorkspaceRoot)
+		if err == nil {
+			m.settings.WorkspaceRoot = normalized
+		}
 	}
 
 	validateUtilitySettings(&m.settings.Utility)
