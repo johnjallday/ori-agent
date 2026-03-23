@@ -1711,7 +1711,7 @@ const sessionManager = {
   },
 
   // Create session with specific agent
-  async createSessionWithAgent(agentName) {
+  async createSessionWithAgent(agentName, openChat = true) {
     try {
       const response = await fetch('/api/sessions', {
         method: 'POST',
@@ -1741,7 +1741,7 @@ const sessionManager = {
           clearChatHistory();
         }
 
-        this.openChatPanelIfAvailable();
+        if (openChat) this.openChatPanelIfAvailable();
 
         // Emit event for workspace hub to refresh
         if (window.EventBus) {
@@ -1757,7 +1757,7 @@ const sessionManager = {
     }
   },
 
-  async createAssistantSession(folderId = '', title = 'Assistant') {
+  async createAssistantSession(folderId = '', title = 'Assistant', openChat = true) {
     try {
       const payload = {
         title: title || 'Assistant'
@@ -1787,7 +1787,7 @@ const sessionManager = {
           clearChatHistory();
         }
 
-        this.openChatPanelIfAvailable();
+        if (openChat) this.openChatPanelIfAvailable();
 
         if (window.EventBus) {
           EventBus.emit('session:created', { session: data.session, folderId: folderId || null });
@@ -1858,7 +1858,7 @@ const sessionManager = {
   },
 
   // Create session with agent in a specific folder
-  async createSessionWithAgentInFolder(agentName, folderId) {
+  async createSessionWithAgentInFolder(agentName, folderId, openChat = true) {
     try {
       const response = await fetch('/api/sessions', {
         method: 'POST',
@@ -1889,7 +1889,7 @@ const sessionManager = {
           clearChatHistory();
         }
 
-        this.openChatPanelIfAvailable();
+        if (openChat) this.openChatPanelIfAvailable();
 
         // Emit event for workspace hub to refresh
         if (window.EventBus) {

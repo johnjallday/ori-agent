@@ -5780,14 +5780,14 @@
       var existingEntrySession = findSessionForAgentInWorkspace(entryAgentName, workspaceId);
       if (existingEntrySession && existingEntrySession.id) {
         if (typeof manager.switchToSession === 'function') {
-          await manager.switchToSession(existingEntrySession.id, true);
+          await manager.switchToSession(existingEntrySession.id, false);
         }
         return { session: existingEntrySession, reused: true, entryAgentName: entryAgentName };
       }
 
       var entrySession = null;
       if (typeof manager.createSessionWithAgentInFolder === 'function') {
-        entrySession = await manager.createSessionWithAgentInFolder(entryAgentName, workspaceId);
+        entrySession = await manager.createSessionWithAgentInFolder(entryAgentName, workspaceId, false);
       } else {
         var entryResponse = await fetch('/api/sessions', {
           method: 'POST',
@@ -5801,7 +5801,7 @@
         if (!entryResponse.ok) throw new Error('Failed to create workspace entry session');
         entrySession = await entryResponse.json();
         if (entrySession && entrySession.id && manager && typeof manager.switchToSession === 'function') {
-          await manager.switchToSession(entrySession.id, true);
+          await manager.switchToSession(entrySession.id, false);
         }
       }
 
@@ -5812,9 +5812,9 @@
     var title = truncateText(String(prompt || '').trim(), 50) || 'Assistant';
     var created = null;
     if (typeof manager.createAssistantSession === 'function') {
-      created = await manager.createAssistantSession(workspaceId, title);
+      created = await manager.createAssistantSession(workspaceId, title, false);
     } else if (window.workspaceDetail && typeof window.workspaceDetail.createSimpleSession === 'function' && workspaceId) {
-      created = await window.workspaceDetail.createSimpleSession();
+      created = await window.workspaceDetail.createSimpleSession(false);
     } else {
       var response = await fetch('/api/sessions', {
         method: 'POST',
@@ -5827,7 +5827,7 @@
       if (!response.ok) throw new Error('Failed to create assistant session');
       created = await response.json();
       if (created && created.id && manager && typeof manager.switchToSession === 'function') {
-        await manager.switchToSession(created.id, true);
+        await manager.switchToSession(created.id, false);
       }
     }
 

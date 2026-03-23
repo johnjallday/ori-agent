@@ -8861,7 +8861,7 @@ export class WorkspaceDetailPage {
   /**
    * Fallback simple session creation
    */
-  async createSimpleSession() {
+  async createSimpleSession(openChat = true) {
     try {
       const response = await fetch('/api/sessions', {
         method: 'POST',
@@ -8881,7 +8881,7 @@ export class WorkspaceDetailPage {
       await this.loadSessions();
 
       // Open the session
-      this.openSession(session.id);
+      this.openSession(session.id, openChat);
       return session;
     } catch (error) {
       console.error('Failed to create session:', error);
@@ -8925,13 +8925,13 @@ export class WorkspaceDetailPage {
   /**
    * Open a session
    */
-  openSession(sessionId) {
+  openSession(sessionId, openChat = true) {
     // Open chat panel if available
-    if (window.chatPanel && typeof window.chatPanel.open === 'function') {
+    if (openChat && window.chatPanel && typeof window.chatPanel.open === 'function') {
       window.chatPanel.open();
     }
     if (window.sessionManager && typeof window.sessionManager.switchToSession === 'function') {
-      window.sessionManager.switchToSession(sessionId);
+      window.sessionManager.switchToSession(sessionId, openChat);
     }
   }
 
