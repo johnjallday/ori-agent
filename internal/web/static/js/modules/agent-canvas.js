@@ -774,7 +774,7 @@ class AgentCanvas {
     try {
       // Use name:instanceNumber format for specific instance removal
       const agentIdentifier = `${agentName}:${instanceNumber}`;
-      const response = await fetch(`/api/studios/${this.studioId}/agents/${agentIdentifier}`, {
+      const response = await fetch(`/api/workspaces/${this.studioId}/agents/${agentIdentifier}`, {
         method: 'DELETE'
       });
 
@@ -879,7 +879,7 @@ class AgentCanvas {
       return;
     }
     try {
-      await apiDelete(`/api/studios/${this.studioId}/attachments/${attachment.id}`);
+      await apiDelete(`/api/workspaces/${this.studioId}/attachments/${attachment.id}`);
       this.state.removeAttachment(attachment.id);
       this.saveLayout();
       this.draw();
@@ -900,7 +900,7 @@ class AgentCanvas {
       return;
     }
     try {
-      await apiDelete(`/api/studios/${this.studioId}/canvas/store-nodes/${nodeId}`);
+      await apiDelete(`/api/workspaces/${this.studioId}/canvas/store-nodes/${nodeId}`);
       this.state.removeStoreNode(storeNode.id);
       this.saveLayout();
       this.draw();
@@ -941,7 +941,7 @@ class AgentCanvas {
 
     try {
       // Update the store node's agent_node_id
-      await apiPatch(`/api/studios/${this.studioId}/canvas/store-nodes/${storeNode.canvas_node_id}`, {
+      await apiPatch(`/api/workspaces/${this.studioId}/canvas/store-nodes/${storeNode.canvas_node_id}`, {
         agent_node_id: agent.nodeId || agent.id
       });
 
@@ -1063,7 +1063,7 @@ class AgentCanvas {
 
     // Create backend task for this combiner
     try {
-      const response = await apiPost(`/api/studios/${this.studioId}/tasks`, {
+      const response = await apiPost(`/api/workspaces/${this.studioId}/tasks`, {
         description: `${combinerType.name}: ${combinerType.description}`,
         from: '',
         to: '',
@@ -1275,7 +1275,7 @@ class AgentCanvas {
    */
   async createWorkflowTaskNode(node, x, y) {
     const config = node.config || {};
-    const response = await apiPost(`/api/studios/${this.studioId}/tasks`, {
+    const response = await apiPost(`/api/workspaces/${this.studioId}/tasks`, {
       description: config.description || 'New Task',
       to: config.to || 'unassigned',
       from: config.from || 'user',
@@ -1328,7 +1328,7 @@ class AgentCanvas {
   async createWorkflowStoreNode(node, x, y) {
     const config = node.config || {};
 
-    const response = await apiPost(`/api/studios/${this.studioId}/canvas/store-nodes`, {
+    const response = await apiPost(`/api/workspaces/${this.studioId}/canvas/store-nodes`, {
       name: config.name || 'New Store',
       base_dir: config.base_dir || config.file_path || '',
       format: config.format || 'json',
@@ -1351,7 +1351,7 @@ class AgentCanvas {
   async createWorkflowAttachmentNode(node, x, y) {
     const config = node.config || {};
 
-    const response = await apiPost(`/api/studios/${this.studioId}/attachments`, {
+    const response = await apiPost(`/api/workspaces/${this.studioId}/attachments`, {
       title: config.title || 'New Attachment',
       type: config.type || 'note',
       body: config.body || '',

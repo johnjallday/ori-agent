@@ -21,7 +21,7 @@ const (
 	MaxWorkspaceFileSize = 100 << 20 // 100 MB
 )
 
-// UploadFile handles POST /api/studios/:id/files
+// UploadFile handles POST /api/workspaces/:id/files
 // Accepts multipart form data with a file and creates an attachment with file metadata.
 func (h *HTTPHandler) UploadFile(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
@@ -30,7 +30,7 @@ func (h *HTTPHandler) UploadFile(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Extract studio ID from path
-	path := strings.TrimPrefix(r.URL.Path, "/api/studios/")
+	path := strings.TrimPrefix(r.URL.Path, "/api/workspaces/")
 	parts := strings.Split(path, "/")
 	if len(parts) < 2 {
 		orihttp.BadRequest(w, "Invalid URL format")
@@ -127,7 +127,7 @@ func (h *HTTPHandler) UploadFile(w http.ResponseWriter, r *http.Request) {
 			Name: filename,
 			Size: written,
 			Mime: mimeType,
-			URL:  fmt.Sprintf("/api/studios/%s/files/%s", studioID, destFilename),
+			URL:  fmt.Sprintf("/api/workspaces/%s/files/%s", studioID, destFilename),
 		},
 		X:         0,
 		Y:         0,
@@ -177,7 +177,7 @@ func (h *HTTPHandler) UploadFile(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// ServeFile handles GET /api/studios/:id/files/:filename
+// ServeFile handles GET /api/workspaces/:id/files/:filename
 // Serves uploaded files from the workspace files directory.
 func (h *HTTPHandler) ServeFile(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
@@ -186,7 +186,7 @@ func (h *HTTPHandler) ServeFile(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Extract studio ID and filename from path
-	path := strings.TrimPrefix(r.URL.Path, "/api/studios/")
+	path := strings.TrimPrefix(r.URL.Path, "/api/workspaces/")
 	parts := strings.Split(path, "/")
 	if len(parts) < 3 {
 		orihttp.BadRequest(w, "Invalid URL format")

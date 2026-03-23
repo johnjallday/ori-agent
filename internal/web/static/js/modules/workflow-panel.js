@@ -432,7 +432,7 @@ class WorkflowPanel {
    */
   async createTaskNode(node, x, y) {
     const config = node.config || {};
-    const response = await fetch(`/api/studios/${this.studioId}/tasks`, {
+    const response = await fetch(`/api/workspaces/${this.studioId}/tasks`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -488,7 +488,7 @@ class WorkflowPanel {
    */
   async createStoreNode(node, x, y) {
     const config = node.config || {};
-    const response = await fetch(`/api/studios/${this.studioId}/stores`, {
+    const response = await fetch(`/api/workspaces/${this.studioId}/stores`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -517,7 +517,7 @@ class WorkflowPanel {
    */
   async createAttachmentNode(node, x, y) {
     const config = node.config || {};
-    const response = await fetch(`/api/studios/${this.studioId}/attachments`, {
+    const response = await fetch(`/api/workspaces/${this.studioId}/attachments`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({

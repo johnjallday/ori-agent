@@ -2843,6 +2843,7 @@ body.chat-panel-open .chat-panel-backdrop {
   gap: 1rem;
   padding: 1rem;
   overflow: hidden;
+  min-height: 0;
 }
 
 .chat-panel #chatContainer {
@@ -2850,15 +2851,16 @@ body.chat-panel-open .chat-panel-backdrop {
   height: auto !important;
   margin-bottom: 0 !important;
   min-height: 0;
+  overflow: hidden;
+}
+
+.chat-panel #inputContainer {
+  flex-shrink: 0;
 }
 
 .chat-panel #chatArea {
   overflow-y: auto;
   min-height: 0;
-}
-
-.chat-panel #inputContainer {
-  margin-top: auto;
 }
 
 /* Modals that appear over chat panel need higher z-index */

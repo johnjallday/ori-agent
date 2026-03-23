@@ -274,6 +274,7 @@ function normalizeAgentCreationFlowOptions(options = {}) {
   return {
     seedName: String(options?.seedName || '').trim(),
     seedType: String(options?.seedType || '').trim(),
+    seedSystemPrompt: String(options?.seedSystemPrompt || '').trim(),
     autoDescription: String(options?.autoDescription || '').trim(),
     preferAutoConfig: Boolean(options?.preferAutoConfig),
     workspaceId: String(options?.workspaceId || '').trim(),
@@ -305,6 +306,13 @@ async function applyPendingAgentCreationFlowToModal() {
   if (options.seedType && agentTypeInput) {
     agentTypeInput.value = options.seedType;
     agentTypeInput.dispatchEvent(new Event('change'));
+  }
+
+  if (options.seedSystemPrompt) {
+    const systemPromptInput = document.getElementById('agentSystemPrompt');
+    if (systemPromptInput) {
+      systemPromptInput.value = options.seedSystemPrompt;
+    }
   }
 
   if (options.autoDescription && descriptionTextarea) {
@@ -356,36 +364,39 @@ function updateAgentCreationCapabilityCopy() {
     mcpSubtitle,
     capabilitiesNote
   } = getAgentCreationCapabilityElements();
-  const selectionEnabled = isAgentCreationMCPSelectionEnabled();
+  const hasWorkspace = isAgentCreationMCPSelectionEnabled();
 
+  // When creating from a workspace context, hide the entire MCP/Skills section.
+  // MCP connectors and skills are managed from the workspace detail panels instead.
+  const section = document.getElementById('agentCreateCapabilitiesSection');
+  if (section) {
+    section.hidden = hasWorkspace;
+  }
+  if (hasWorkspace) return;
+
+  // Standalone agent creation (no workspace) — show skills only
   if (title) {
-    title.textContent = selectionEnabled ? 'Review MCP Connectors and Skills' : 'Review Skills';
+    title.textContent = 'Review Skills';
   }
 
   if (mcpPanel) {
-    mcpPanel.hidden = !selectionEnabled;
+    mcpPanel.hidden = true;
   }
 
   if (grid) {
-    grid.classList.toggle('is-single-column', !selectionEnabled);
+    grid.classList.add('is-single-column');
   }
 
   if (capabilitiesIntro) {
-    capabilitiesIntro.textContent = selectionEnabled
-      ? 'Optional. Select global MCP connectors now and they will be bound into this workspace after the agent is created. Workspace-generated bindings stay hidden here.'
-      : 'Optional. Skills attach to the agent here. If a skill needs MCP connectors, you will bind them after adding the agent to a workspace.'
+    capabilitiesIntro.textContent = 'Optional. Skills attach to the agent here. If a skill needs MCP connectors, you will bind them after adding the agent to a workspace.';
   }
 
   if (mcpSubtitle) {
-    mcpSubtitle.textContent = selectionEnabled
-      ? 'Select global connectors to bind into this workspace'
-      : 'Global connectors shown for reference until a workspace is selected'
+    mcpSubtitle.textContent = 'Global connectors shown for reference until a workspace is selected';
   }
 
   if (capabilitiesNote) {
-    capabilitiesNote.textContent = selectionEnabled
-      ? 'Skills with scripts are trusted for this agent when selected. Required MCP connectors are bound into this workspace automatically after the agent is created.'
-      : 'Skills with scripts are trusted for this agent when selected. MCP connector access is configured later from the target workspace.'
+    capabilitiesNote.textContent = 'Skills with scripts are trusted for this agent when selected. MCP connector access is configured later from the target workspace.';
   }
 }
 
@@ -912,7 +923,7 @@ async function bindAgentCreationMCPServersForWorkspace(workspaceId, agentInstanc
 
     try {
       if (!binding) {
-        const created = await API.post(`/api/studios/${encodeURIComponent(normalizedWorkspaceId)}/mcp-bindings`, {
+        const created = await API.post(`/api/workspaces/${encodeURIComponent(normalizedWorkspaceId)}/mcp-bindings`, {
           server_name: serverName,
           enabled: true
         });
@@ -923,7 +934,7 @@ async function bindAgentCreationMCPServersForWorkspace(workspaceId, agentInstanc
         };
       } else if (binding.enabled === false) {
         const updated = await API.put(
-          `/api/studios/${encodeURIComponent(normalizedWorkspaceId)}/mcp-bindings/${encodeURIComponent(binding.id)}`,
+          `/api/workspaces/${encodeURIComponent(normalizedWorkspaceId)}/mcp-bindings/${encodeURIComponent(binding.id)}`,
           { enabled: true }
         );
         binding = updated?.binding || { ...binding, enabled: true };
@@ -949,7 +960,7 @@ async function bindAgentCreationMCPServersForWorkspace(workspaceId, agentInstanc
 
     try {
       await API.put(
-        `/api/studios/${encodeURIComponent(normalizedWorkspaceId)}/agent-mcp-access/${encodeURIComponent(normalizedAgentInstanceId)}`,
+        `/api/workspaces/${encodeURIComponent(normalizedWorkspaceId)}/agent-mcp-access/${encodeURIComponent(normalizedAgentInstanceId)}`,
         { enabled_binding_ids: nextBindingIDs }
       );
       upsertAgentCreationWorkspaceAccessEntry(localWorkspaceData, {

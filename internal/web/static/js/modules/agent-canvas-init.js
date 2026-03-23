@@ -36,7 +36,7 @@ export class AgentCanvasInitialization {
       this.resize();
 
       // Load studio data
-      this.parent.studio = await apiGet(`/api/studios/${this.parent.studioId}`);
+      this.parent.studio = await apiGet(`/api/workspaces/${this.parent.studioId}`);
 
       // Load workspace progress
       this.parent.workspaceProgress = this.parent.studio.workspace_progress || {
@@ -464,7 +464,7 @@ export class AgentCanvasInitialization {
   async fetchInitialProgressData() {
     try {
       // Fetch fresh studio data with progress
-      const response = await fetch(`/api/studios/${this.parent.studioId}`, {
+      const response = await fetch(`/api/workspaces/${this.parent.studioId}`, {
         method: 'GET',
         headers: { 'Content-Type': 'application/json' }
       });

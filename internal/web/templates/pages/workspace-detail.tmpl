@@ -52,16 +52,16 @@
             </div>
           </div>
 
-          <!-- Assistant Prompt Bar -->
+          <!-- Workspace Entry Prompt Bar -->
           <div id="homeAssistantCard" class="modern-card p-2 mb-3">
             <form id="homeAssistantForm" class="d-flex align-items-center gap-2">
               <div class="d-none d-md-flex align-items-center gap-2 px-2" style="color: var(--text-secondary); font-size: 0.82rem; white-space: nowrap;">
-                <span style="font-weight: 600; color: var(--text-primary);">Assistant</span>
+                <span id="homeAssistantIdentityName" style="font-weight: 600; color: var(--text-primary); display: inline-block; max-width: 180px; overflow: hidden; text-overflow: ellipsis;" title="Workspace Manager">Workspace Manager</span>
                 <span style="opacity: 0.6;">Workspace</span>
               </div>
               <input id="homeAssistantInput" type="text" class="modern-input flex-grow-1" maxlength="800"
-                     placeholder="Ask Assistant about this workspace... (or use /task, /note, /directory, /file, /chat)"
-                     aria-label="Assistant prompt"
+                     placeholder="Ask Workspace Manager about this workspace... (or use /task, /note, /directory, /file, /chat)"
+                     aria-label="Workspace manager prompt"
                      style="min-height: 42px;">
               <button id="homeAssistantSendBtn" type="submit" class="modern-btn modern-btn-primary home-assistant-send-btn">Send</button>
             </form>
@@ -436,14 +436,14 @@
   <!-- Shared modals (includes Add Agent modal used by Assistant) -->
   {{template "modals.tmpl" .}}
 
-  <!-- Assistant Thinking Modal -->
+  <!-- Workspace Entry Thinking Modal -->
   <div class="modal fade" id="homeAssistantThinkingModal" tabindex="-1"
        aria-labelledby="homeAssistantThinkingModalLabel" aria-hidden="true">
     <div class="modal-dialog modal-lg modal-dialog-centered modal-dialog-scrollable">
       <div class="modal-content home-thinking-modal-content">
         <div class="modal-header home-thinking-modal-header">
           <div>
-            <h5 id="homeAssistantThinkingModalLabel" class="modal-title">Assistant is working</h5>
+            <h5 id="homeAssistantThinkingModalLabel" class="modal-title">Workspace Manager is working</h5>
             <div id="homeAssistantThinkingStatus" class="home-thinking-modal-status" role="status" aria-live="polite">
               <span id="homeAssistantThinkingSpinner" class="spinner-border spinner-border-sm me-2" aria-hidden="true"></span>
               <span>Analyzing your request...</span>
@@ -458,6 +458,8 @@
               Progress updates will appear here after you send a message.
             </div>
           </div>
+          <div id="homeAssistantPlanning" class="home-assistant-planning d-none mt-3"></div>
+          <div id="homeAssistantInlineReply" class="home-assistant-inline-reply d-none mt-3"></div>
           <div id="homeAssistantActions" class="d-flex flex-wrap gap-2 mt-3 d-none"></div>
         </div>
       </div>
@@ -1279,6 +1281,20 @@
       font-weight: 700;
       letter-spacing: 0.04em;
       text-transform: uppercase;
+      padding: 0.08rem 0.36rem;
+      line-height: 1.2;
+    }
+
+    .workspace-detail-agent-model-badge {
+      display: inline-flex;
+      align-items: center;
+      border-radius: 999px;
+      border: 1px solid rgba(148, 163, 184, 0.25);
+      background: rgba(148, 163, 184, 0.10);
+      color: var(--text-secondary);
+      font-size: 0.56rem;
+      font-weight: 600;
+      letter-spacing: 0.02em;
       padding: 0.08rem 0.36rem;
       line-height: 1.2;
     }

@@ -79,6 +79,7 @@ func (wh *WorkspaceHandler) handleGetWorkspace(w http.ResponseWriter, r *http.Re
 			"id":                   ws.ID,
 			"name":                 ws.Name,
 			"description":          ws.Description,
+			"entry_agent_name":     ws.EntryAgentName(),
 			"agents":               ws.Agents,
 			"agent_instances":      ws.AgentInstances,
 			"shared_data":          ws.SharedData,

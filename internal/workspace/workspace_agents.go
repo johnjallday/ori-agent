@@ -11,6 +11,7 @@ import (
 )
 
 var ErrAgentAlreadyInWorkspace = errors.New("agent is already in workspace")
+var ErrWorkspaceEntryAgentRequired = errors.New("workspace must keep an entry agent")
 
 func normalizeAgentNameKey(agentName string) string {
 	return strings.ToLower(strings.TrimSpace(agentName))
@@ -45,13 +46,20 @@ func (w *Workspace) AddAgent(agentName string) error {
 		return fmt.Errorf("%w: %s", ErrAgentAlreadyInWorkspace, trimmedName)
 	}
 
+	currentEntryAgent := w.entryAgentNameLocked()
 	instance := buildAgentInstance(trimmedName)
 	w.AgentInstances = append(w.AgentInstances, instance)
 
 	// Also update legacy Agents array for backward compatibility
 	w.Agents = append(w.Agents, trimmedName)
 
-	w.UpdatedAt = time.Now()
+	if currentEntryAgent == "" {
+		if err := w.setEntryAgentNameLocked(trimmedName); err != nil {
+			return err
+		}
+	} else {
+		w.UpdatedAt = time.Now()
+	}
 	return nil
 }
 
@@ -60,8 +68,14 @@ func (w *Workspace) RemoveAgent(agentName string) error {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 
+	currentEntryAgent := w.entryAgentNameLocked()
+
 	for i, agent := range w.Agents {
 		if normalizeAgentNameKey(agent) == normalizeAgentNameKey(agentName) {
+			if normalizeAgentNameKey(agent) == normalizeAgentNameKey(currentEntryAgent) && len(w.Agents) == 1 {
+				return ErrWorkspaceEntryAgentRequired
+			}
+
 			w.Agents = append(w.Agents[:i], w.Agents[i+1:]...)
 
 			// Clean up tasks assigned to this agent
@@ -89,7 +103,18 @@ func (w *Workspace) RemoveAgent(agentName string) error {
 				}
 			}
 
-			w.UpdatedAt = time.Now()
+			switch {
+			case normalizeAgentNameKey(agent) == normalizeAgentNameKey(currentEntryAgent) && len(w.Agents) > 0:
+				if err := w.setEntryAgentNameLocked(w.Agents[0]); err != nil {
+					return err
+				}
+			case currentEntryAgent != "" && w.hasAgent(currentEntryAgent):
+				if err := w.setEntryAgentNameLocked(currentEntryAgent); err != nil {
+					return err
+				}
+			default:
+				w.UpdatedAt = time.Now()
+			}
 			return nil
 		}
 	}
@@ -101,6 +126,8 @@ func (w *Workspace) RemoveAgent(agentName string) error {
 func (w *Workspace) RemoveAgentInstance(instanceID string) error {
 	w.mu.Lock()
 	defer w.mu.Unlock()
+
+	currentEntryAgent := w.entryAgentNameLocked()
 
 	// Find and remove the agent instance
 	foundIndex := -1
@@ -115,6 +142,10 @@ func (w *Workspace) RemoveAgentInstance(instanceID string) error {
 
 	if foundIndex == -1 {
 		return fmt.Errorf("agent instance %s not found", instanceID)
+	}
+
+	if normalizeAgentNameKey(removedInstance.Name) == normalizeAgentNameKey(currentEntryAgent) && len(w.AgentInstances) == 1 {
+		return ErrWorkspaceEntryAgentRequired
 	}
 
 	// Remove from AgentInstances
@@ -146,7 +177,19 @@ func (w *Workspace) RemoveAgentInstance(instanceID string) error {
 		delete(w.Layout.AgentPositions, removedInstance.NodeID)
 	}
 
-	w.UpdatedAt = time.Now()
+	switch {
+	case normalizeAgentNameKey(removedInstance.Name) == normalizeAgentNameKey(currentEntryAgent) && len(w.AgentInstances) > 0:
+		if err := w.setEntryAgentNameLocked(w.AgentInstances[0].Name); err != nil {
+			return err
+		}
+	case currentEntryAgent != "" && w.hasAgent(currentEntryAgent):
+		if err := w.setEntryAgentNameLocked(currentEntryAgent); err != nil {
+			return err
+		}
+	default:
+		w.UpdatedAt = time.Now()
+	}
+
 	logger.Debug("Removed agent instance ( #)", logger.Fields{"instancenumber": removedInstance.InstanceNumber, "agent": removedInstance.ID, "name": removedInstance.Name})
 	return nil
 }
@@ -219,6 +262,25 @@ func (w *Workspace) NormalizeAgentInstances() bool {
 
 		key := normalizeAgentNameKey(name)
 		if canonical, exists := keptByName[key]; exists {
+			if strings.TrimSpace(canonical.Role) == "" && strings.TrimSpace(inst.Role) != "" {
+				canonical.Role = strings.TrimSpace(inst.Role)
+				changed = true
+			}
+			if strings.TrimSpace(canonical.Description) == "" && strings.TrimSpace(inst.Description) != "" {
+				canonical.Description = strings.TrimSpace(inst.Description)
+				changed = true
+			}
+			if inst.EntryPoint && !canonical.EntryPoint {
+				canonical.EntryPoint = true
+				changed = true
+			}
+			keptByName[key] = canonical
+			for idx := range normalizedInstances {
+				if normalizedInstances[idx].ID == canonical.ID {
+					normalizedInstances[idx] = canonical
+					break
+				}
+			}
 			instanceIDMap[inst.ID] = canonical.ID
 			if oldNodeID := strings.TrimSpace(inst.NodeID); oldNodeID != "" {
 				nodeIDMap[oldNodeID] = canonical.NodeID

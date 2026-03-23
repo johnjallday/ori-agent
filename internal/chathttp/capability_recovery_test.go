@@ -52,6 +52,20 @@ func TestDetectCapabilityRecoveryIntent_OpenInbox(t *testing.T) {
 	}
 }
 
+func TestDetectCapabilityRecoveryIntent_IgnoresStructuredPlanningSubmission(t *testing.T) {
+	query := strings.Join([]string{
+		"Structured planning form submission:",
+		"{",
+		`  "original_request": "let's plan a trip to Spain",`,
+		`  "answers": [{"id":"date_details","type":"textarea","display_value":"5/11 Lisbon arrival"}]`,
+		"}",
+	}, "\n")
+
+	if intent, ok := detectCapabilityRecoveryIntent(query); ok {
+		t.Fatalf("expected no capability recovery intent for planning submission, got %#v", intent)
+	}
+}
+
 func TestMaybeHandleCapabilityRecovery_SuggestsNearbyActionsAndMarketplaceSkill(t *testing.T) {
 	h := NewHandler(newPreflightStore("Ori", &agent.Agent{}), nil)
 	ag := &resolvedChatAgent{Agent: &agent.Agent{}}

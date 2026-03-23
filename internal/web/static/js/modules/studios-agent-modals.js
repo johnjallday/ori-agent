@@ -229,7 +229,7 @@ async function addAgentToSelectedWorkspace(agentName) {
   }
 
   try {
-    const response = await fetch(`/api/studios/${encodeURIComponent(workspaceId)}/agents`, {
+    const response = await fetch(`/api/workspaces/${encodeURIComponent(workspaceId)}/agents`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ agent_name: agentName })

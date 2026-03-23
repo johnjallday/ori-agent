@@ -1970,7 +1970,7 @@ async function createWorkspaceAttachment(workspaceId, sessionId, file, entry) {
     }
   };
 
-  const response = await fetch(`/api/studios/${encodeURIComponent(workspaceId)}/attachments`, {
+  const response = await fetch(`/api/workspaces/${encodeURIComponent(workspaceId)}/attachments`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload)

@@ -12,7 +12,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/logger"
 )
 
-// CreateSkillBinding handles POST /api/studios/{studioID}/skill-bindings
+// CreateSkillBinding handles POST /api/workspaces/{studioID}/skill-bindings
 func (h *HTTPHandler) CreateSkillBinding(w http.ResponseWriter, r *http.Request) {
 	studioID := r.PathValue("studioID")
 	if studioID == "" {
@@ -95,7 +95,7 @@ func (h *HTTPHandler) CreateSkillBinding(w http.ResponseWriter, r *http.Request)
 	}
 }
 
-// ListSkillBindings handles GET /api/studios/{studioID}/skill-bindings
+// ListSkillBindings handles GET /api/workspaces/{studioID}/skill-bindings
 func (h *HTTPHandler) ListSkillBindings(w http.ResponseWriter, r *http.Request) {
 	studioID := r.PathValue("studioID")
 	if studioID == "" {
@@ -120,7 +120,7 @@ func (h *HTTPHandler) ListSkillBindings(w http.ResponseWriter, r *http.Request) 
 	}
 }
 
-// GetSkillBindingByID handles GET /api/studios/{studioID}/skill-bindings/{bindingID}
+// GetSkillBindingByID handles GET /api/workspaces/{studioID}/skill-bindings/{bindingID}
 func (h *HTTPHandler) GetSkillBindingByID(w http.ResponseWriter, r *http.Request) {
 	studioID := r.PathValue("studioID")
 	bindingID := r.PathValue("bindingID")
@@ -150,7 +150,7 @@ func (h *HTTPHandler) GetSkillBindingByID(w http.ResponseWriter, r *http.Request
 	}
 }
 
-// UpdateSkillBinding handles PUT/PATCH /api/studios/{studioID}/skill-bindings/{bindingID}
+// UpdateSkillBinding handles PUT/PATCH /api/workspaces/{studioID}/skill-bindings/{bindingID}
 func (h *HTTPHandler) UpdateSkillBinding(w http.ResponseWriter, r *http.Request) {
 	studioID := r.PathValue("studioID")
 	bindingID := r.PathValue("bindingID")
@@ -219,7 +219,7 @@ func (h *HTTPHandler) UpdateSkillBinding(w http.ResponseWriter, r *http.Request)
 	}
 }
 
-// DeleteSkillBinding handles DELETE /api/studios/{studioID}/skill-bindings/{bindingID}
+// DeleteSkillBinding handles DELETE /api/workspaces/{studioID}/skill-bindings/{bindingID}
 func (h *HTTPHandler) DeleteSkillBinding(w http.ResponseWriter, r *http.Request) {
 	studioID := r.PathValue("studioID")
 	bindingID := r.PathValue("bindingID")
@@ -255,7 +255,7 @@ func (h *HTTPHandler) DeleteSkillBinding(w http.ResponseWriter, r *http.Request)
 	}
 }
 
-// ListAgentSkillAccess handles GET /api/studios/{studioID}/agent-skill-access
+// ListAgentSkillAccess handles GET /api/workspaces/{studioID}/agent-skill-access
 func (h *HTTPHandler) ListAgentSkillAccess(w http.ResponseWriter, r *http.Request) {
 	studioID := r.PathValue("studioID")
 	if studioID == "" {
@@ -280,7 +280,7 @@ func (h *HTTPHandler) ListAgentSkillAccess(w http.ResponseWriter, r *http.Reques
 	}
 }
 
-// GetAgentSkillAccessEntry handles GET /api/studios/{studioID}/agent-skill-access/{agentInstanceID}
+// GetAgentSkillAccessEntry handles GET /api/workspaces/{studioID}/agent-skill-access/{agentInstanceID}
 func (h *HTTPHandler) GetAgentSkillAccessEntry(w http.ResponseWriter, r *http.Request) {
 	studioID := r.PathValue("studioID")
 	agentInstanceID := r.PathValue("agentInstanceID")
@@ -310,7 +310,7 @@ func (h *HTTPHandler) GetAgentSkillAccessEntry(w http.ResponseWriter, r *http.Re
 	}
 }
 
-// UpdateAgentSkillAccess handles PUT/PATCH /api/studios/{studioID}/agent-skill-access/{agentInstanceID}
+// UpdateAgentSkillAccess handles PUT/PATCH /api/workspaces/{studioID}/agent-skill-access/{agentInstanceID}
 func (h *HTTPHandler) UpdateAgentSkillAccess(w http.ResponseWriter, r *http.Request) {
 	studioID := r.PathValue("studioID")
 	agentInstanceID := r.PathValue("agentInstanceID")
@@ -381,7 +381,7 @@ func (h *HTTPHandler) UpdateAgentSkillAccess(w http.ResponseWriter, r *http.Requ
 	}
 }
 
-// DeleteAgentSkillAccess handles DELETE /api/studios/{studioID}/agent-skill-access/{agentInstanceID}
+// DeleteAgentSkillAccess handles DELETE /api/workspaces/{studioID}/agent-skill-access/{agentInstanceID}
 func (h *HTTPHandler) DeleteAgentSkillAccess(w http.ResponseWriter, r *http.Request) {
 	studioID := r.PathValue("studioID")
 	agentInstanceID := r.PathValue("agentInstanceID")

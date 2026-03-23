@@ -131,6 +131,9 @@ func (a *WorkspaceStoreAdapter) toSessionWorkspace(ws *workspace.Workspace) *Wor
 				Name:           ai.Name,
 				InstanceNumber: ai.InstanceNumber,
 				NodeID:         ai.NodeID,
+				Role:           ai.Role,
+				Description:    ai.Description,
+				EntryPoint:     ai.EntryPoint,
 				CreatedAt:      ai.CreatedAt,
 			}
 		}
@@ -238,6 +241,9 @@ func (a *WorkspaceStoreAdapter) toAgentStudioWorkspace(ws *Workspace) *workspace
 				Name:           ai.Name,
 				InstanceNumber: ai.InstanceNumber,
 				NodeID:         ai.NodeID,
+				Role:           ai.Role,
+				Description:    ai.Description,
+				EntryPoint:     ai.EntryPoint,
 				CreatedAt:      ai.CreatedAt,
 			}
 		}

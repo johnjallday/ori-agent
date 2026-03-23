@@ -1596,6 +1596,14 @@ const sessionManager = {
     }
   },
 
+  populateWorkspaceEntryAgentSelect() {
+    // Entry agent is always auto-created as workspace manager — no UI needed.
+  },
+
+  async populateWorkspaceEntryAgentSelectFromAgents() {
+    // Entry agent is always auto-created as workspace manager — no UI needed.
+  },
+
   // Fetch agents scoped to a workspace; falls back to global agents
   async fetchWorkspaceAgents(workspaceId) {
     const globalAgents = await this.fetchAgents();
@@ -1773,7 +1781,7 @@ const sessionManager = {
         this.saveActiveSession();
         this.renderSessions();
 
-        this.updateCurrentAgent('');
+        this.updateCurrentAgent(data.session.agent_name || '');
 
         if (typeof clearChatHistory === 'function') {
           clearChatHistory();
@@ -3286,7 +3294,6 @@ const sessionManager = {
       parentSelect.innerHTML = optionsHtml.join('');
       parentSelect.value = '';
     }
-
     document.querySelectorAll('#addFolderModal .folder-color-btn').forEach((btn) => btn.classList.remove('active'));
     const defaultColorBtn = document.querySelector('#addFolderModal .folder-color-btn[data-color=""]')
       || document.querySelector('#addFolderModal .folder-color-btn');
@@ -3543,7 +3550,6 @@ const sessionManager = {
       const createdWorkspaceId = result && result.folder && result.folder.id
         ? String(result.folder.id)
         : '';
-      const askOriPostCreate = modalElement ? String(modalElement.dataset.askOriPostCreate || '') : '';
       const askOriSeedNoteRaw = modalElement ? String(modalElement.dataset.askOriSeedNote || '') : '';
       const askOriSeedTaskRaw = modalElement ? String(modalElement.dataset.askOriSeedTask || '') : '';
       if (modalElement) {
@@ -3626,8 +3632,9 @@ const sessionManager = {
       modal?.hide();
       this.resetAddWorkspaceModalForm();
 
-      if (askOriPostCreate === 'open_workspace_dashboard' && createdWorkspaceId) {
-        window.location.href = `/workspaces/${encodeURIComponent(createdWorkspaceId)}`;
+      // Navigate to the new workspace and open the Create Agent modal
+      if (createdWorkspaceId) {
+        window.location.href = `/workspaces/${encodeURIComponent(createdWorkspaceId)}?addAgent=1`;
         return;
       }
 

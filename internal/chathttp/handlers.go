@@ -1133,6 +1133,29 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 	// full context across page reloads and server restarts.
 	h.rehydrateSessionHistory(r.Context(), sessionID, ag)
 
+	if planningResp := maybeBuildWorkspacePlanningFormResponse(ag, originalQuery, normalizedRouteContext); planningResp != nil && planningResp.Form != nil {
+		responseText := strings.TrimSpace(planningResp.ResponseText)
+		if responseText == "" {
+			responseText = "Complete the planning step below."
+		}
+
+		ag.Messages = append(ag.Messages, openai.UserMessage(originalQuery))
+		ag.Messages = append(ag.Messages, openai.AssistantMessage(responseText))
+		_ = h.persistAgent(current, ag.Agent)
+
+		h.storeMessageInSession(base, sessionID, "user", originalQuery)
+		h.storeMessageInSession(base, sessionID, "assistant", responseText)
+
+		writeJSONResponse(w, attachRouteMetadata(map[string]any{
+			"response":      responseText,
+			"planning_form": planningResp.Form,
+		}, chatRouteMetadata{
+			Mode:   routeModeAssistantChat,
+			Reason: "workspace planning form required",
+		}))
+		return
+	}
+
 	routeDecision := classifyUtilityRoute(originalQuery)
 
 	if req.PlanBeforeAction && approvedActionPlanID == "" {

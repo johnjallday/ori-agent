@@ -12,6 +12,7 @@ import (
 	orihttp "github.com/johnjallday/ori-agent/internal/http"
 	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/session"
+	"github.com/johnjallday/ori-agent/internal/store"
 	"github.com/johnjallday/ori-agent/internal/workspace"
 )
 
@@ -20,6 +21,7 @@ type Handler struct {
 	store                 session.HybridStore
 	workspaceStore        *workspace.FileStore // optional folder-based workspace store
 	workspaceRootResolver func() string
+	agentStore            store.Store
 }
 
 // New creates a new session handler.
@@ -36,6 +38,11 @@ func (h *Handler) SetWorkspaceStore(ws *workspace.FileStore) {
 // directory for newly created workspace folders.
 func (h *Handler) SetWorkspaceRootResolver(fn func() string) {
 	h.workspaceRootResolver = fn
+}
+
+// SetAgentStore sets the agent store used for workspace entry-agent provisioning.
+func (h *Handler) SetAgentStore(agentStore store.Store) {
+	h.agentStore = agentStore
 }
 
 // handleSessions routes requests to /api/sessions.
@@ -112,6 +119,10 @@ func (h *Handler) createSession(w http.ResponseWriter, r *http.Request) {
 	// Default title
 	if req.Title == "" {
 		req.Title = "New Session"
+	}
+
+	if strings.TrimSpace(req.AgentName) == "" && strings.TrimSpace(req.FolderID) != "" {
+		req.AgentName = h.defaultSessionAgentNameForWorkspace(r.Context(), req.FolderID)
 	}
 
 	sess := &session.Session{

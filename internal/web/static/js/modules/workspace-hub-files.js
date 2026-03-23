@@ -24,7 +24,7 @@
     if (!confirmed) return;
 
     try {
-      const response = await fetch(`/api/studios/${encodeURIComponent(state.selectedId)}/attachments/${encodeURIComponent(fileId)}/trash`, {
+      const response = await fetch(`/api/workspaces/${encodeURIComponent(state.selectedId)}/attachments/${encodeURIComponent(fileId)}/trash`, {
         method: 'PATCH'
       });
       if (!response.ok) throw new Error('Failed to move file to trash');
@@ -53,7 +53,7 @@
     if (!confirmed) return;
 
     try {
-      const response = await fetch(`/api/studios/${encodeURIComponent(state.selectedId)}/attachments/bulk-trash`, {
+      const response = await fetch(`/api/workspaces/${encodeURIComponent(state.selectedId)}/attachments/bulk-trash`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ attachment_ids: ids })
@@ -102,7 +102,7 @@
     }
 
     try {
-      const response = await fetch(`/api/studios/${encodeURIComponent(workspaceId)}`);
+      const response = await fetch(`/api/workspaces/${encodeURIComponent(workspaceId)}`);
       if (!response.ok) throw new Error('Failed to load workspace');
 
       const workspace = await response.json();
@@ -257,7 +257,7 @@
     if (!confirmed) return;
 
     try {
-      const response = await fetch(`/api/studios/${encodeURIComponent(state.selectedId)}/directories/${encodeURIComponent(directoryId)}`, {
+      const response = await fetch(`/api/workspaces/${encodeURIComponent(state.selectedId)}/directories/${encodeURIComponent(directoryId)}`, {
         method: 'DELETE'
       });
       if (!response.ok) throw new Error('Failed to remove directory reference');
@@ -585,7 +585,7 @@
             }
           };
 
-          const response = await fetch(`/api/studios/${encodeURIComponent(state.selectedId)}/attachments`, {
+          const response = await fetch(`/api/workspaces/${encodeURIComponent(state.selectedId)}/attachments`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(attachment)

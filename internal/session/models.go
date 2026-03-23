@@ -155,6 +155,15 @@ type AgentInstance struct {
 	// NodeID is a stable node ID (e.g., "default-node-1").
 	NodeID string `json:"node_id"`
 
+	// Role is a workspace-specific responsibility label for the instance.
+	Role string `json:"role,omitempty"`
+
+	// Description is optional guidance about this instance's responsibility.
+	Description string `json:"description,omitempty"`
+
+	// EntryPoint marks the instance as the default workspace entry node.
+	EntryPoint bool `json:"entry_point,omitempty"`
+
 	// CreatedAt is when this instance was added.
 	CreatedAt time.Time `json:"created_at"`
 }

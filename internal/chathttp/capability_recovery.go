@@ -162,6 +162,9 @@ func detectCapabilityRecoveryIntent(query string) (capabilityRecoveryIntent, boo
 	if trimmed == "" {
 		return capabilityRecoveryIntent{}, false
 	}
+	if isPlanningFormSubmissionPrompt(trimmed) {
+		return capabilityRecoveryIntent{}, false
+	}
 	lower := strings.ToLower(trimmed)
 
 	if containsAnyPhrase(lower, []string{"open my inbox", "check my inbox", "show my inbox", "open inbox"}) {

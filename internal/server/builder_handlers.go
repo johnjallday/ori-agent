@@ -121,6 +121,7 @@ func (b *ServerBuilder) initializeHandlers() error {
 		b.sessionHandler.SetWorkspaceRootResolver(func() string {
 			return resolveWorkspaceRoot(b.configManager)
 		})
+		b.sessionHandler.SetAgentStore(b.st)
 		// Initialize auto-classify handler for session classification
 		b.autoClassifyHandler = sessionhttp.NewAutoClassifyHandler(sessionStore, b.st, b.llmFactory, b.configManager)
 		// Initialize smart input handler for Workspace Hub classification

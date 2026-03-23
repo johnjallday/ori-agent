@@ -81,16 +81,16 @@
             </div>
           </div>
 
-          <!-- Assistant Prompt Bar -->
+          <!-- Workspace Entry Prompt Bar -->
           <div id="homeAssistantCard" class="modern-card p-2 mb-3">
             <form id="homeAssistantForm" class="d-flex align-items-center gap-2">
               <div class="d-none d-md-flex align-items-center gap-2 px-2" style="color: var(--text-secondary); font-size: 0.82rem; white-space: nowrap;">
-                <span style="font-weight: 600; color: var(--text-primary);">Assistant</span>
+                <span id="homeAssistantIdentityName" style="font-weight: 600; color: var(--text-primary); display: inline-block; max-width: 180px; overflow: hidden; text-overflow: ellipsis;" title="Workspace Manager">Workspace Manager</span>
                 <span style="opacity: 0.6;">Canvas</span>
               </div>
               <input id="homeAssistantInput" type="text" class="modern-input flex-grow-1" maxlength="800"
-                     placeholder="Message Assistant about this workspace canvas..."
-                     aria-label="Assistant prompt"
+                     placeholder="Message Workspace Manager about this workspace canvas..."
+                     aria-label="Workspace manager prompt"
                      style="min-height: 42px;">
               <button id="homeAssistantSendBtn" type="submit" class="modern-btn modern-btn-primary home-assistant-send-btn">Send</button>
             </form>
@@ -297,6 +297,7 @@
               <select id="canvasAgentType" class="modern-input w-100">
                 <option value="tool-calling">Tool Calling (Cheapest - Optimized for tool use)</option>
                 <option value="general">General Purpose (Mid-tier - Balanced capability)</option>
+                <option value="workspace-manager">Workspace Manager (Coordinates workspace agents)</option>
                 <option value="orchestration">Orchestration (Advanced - Multi-agent coordination)</option>
                 <option value="research">Research (Expensive - Complex thinking)</option>
               </select>
@@ -626,14 +627,14 @@
   <!-- Include chat area (required for chat handoff from Ask Ori) -->
   {{template "chat-area.tmpl" .}}
 
-  <!-- Assistant Thinking Modal -->
+  <!-- Workspace Entry Thinking Modal -->
   <div class="modal fade" id="homeAssistantThinkingModal" tabindex="-1"
        aria-labelledby="homeAssistantThinkingModalLabel" aria-hidden="true">
     <div class="modal-dialog modal-lg modal-dialog-centered modal-dialog-scrollable">
       <div class="modal-content home-thinking-modal-content">
         <div class="modal-header home-thinking-modal-header">
           <div>
-            <h5 id="homeAssistantThinkingModalLabel" class="modal-title">Assistant is working</h5>
+            <h5 id="homeAssistantThinkingModalLabel" class="modal-title">Workspace Manager is working</h5>
             <div id="homeAssistantThinkingStatus" class="home-thinking-modal-status" role="status" aria-live="polite">
               <span id="homeAssistantThinkingSpinner" class="spinner-border spinner-border-sm me-2" aria-hidden="true"></span>
               <span>Analyzing your request...</span>
@@ -648,6 +649,8 @@
               Progress updates will appear here after you send a message.
             </div>
           </div>
+          <div id="homeAssistantPlanning" class="home-assistant-planning d-none mt-3"></div>
+          <div id="homeAssistantInlineReply" class="home-assistant-inline-reply d-none mt-3"></div>
           <div id="homeAssistantActions" class="d-flex flex-wrap gap-2 mt-3 d-none"></div>
         </div>
       </div>
@@ -994,7 +997,7 @@
       addBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-2" role="status"></span>Adding...';
 
       try {
-        const response = await fetch(`/api/studios/${workspaceId}/agents`, {
+        const response = await fetch(`/api/workspaces/${workspaceId}/agents`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ agent_name: selectedAgentToAdd })
@@ -1078,7 +1081,7 @@
       };
 
       try {
-        const response = await fetch(`/api/studios/${workspaceId}/attachments`, {
+        const response = await fetch(`/api/workspaces/${workspaceId}/attachments`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(attachment)
@@ -1264,7 +1267,7 @@
         console.log('Agent created successfully:', agentName);
 
         // Also add the new agent to the canvas
-        const addResponse = await fetch(`/api/studios/${workspaceId}/agents`, {
+        const addResponse = await fetch(`/api/workspaces/${workspaceId}/agents`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ agent_name: agentName })

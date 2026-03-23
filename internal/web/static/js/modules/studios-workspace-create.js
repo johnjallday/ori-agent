@@ -178,6 +178,10 @@ function setImportBrowseLoading(isLoading) {
   browseButton.textContent = browseButton.dataset.originalText || 'Browse';
 }
 
+function populateWorkspaceEntryAgentSelect() {
+  // Entry agent is always auto-created as workspace manager — no UI needed.
+}
+
 async function browseImportFolderPath() {
   const importPathInput = document.getElementById('folderImportPathInput');
   if (!importPathInput) {
@@ -249,6 +253,7 @@ function openCreateWorkspaceModal(options = {}) {
             </div>
         `).join('');
   }
+  populateWorkspaceEntryAgentSelect();
 
   // Reset selected agents
   window.selectedAgents.clear();
@@ -370,8 +375,6 @@ async function createWorkspace() {
     return;
   }
 
-  // Allow creating workspace without agents - they can be added later
-
   try {
     let endpoint = '/api/workspaces';
     const payload = {
@@ -380,7 +383,6 @@ async function createWorkspace() {
       parent_id: parentId,
       color: color
     };
-
     if (importEnabled) {
       endpoint = '/api/workspaces/import';
       payload.path = importPath;
@@ -465,7 +467,14 @@ async function createWorkspace() {
     window.selectedAgents.clear();
     resetImportState();
 
-    // Refresh workspaces list if function exists
+    // Navigate to the new workspace and open the Create Agent modal
+    const workspaceId = result.folder && result.folder.id;
+    if (workspaceId) {
+      window.location.href = `/workspaces/${encodeURIComponent(workspaceId)}?addAgent=1`;
+      return;
+    }
+
+    // Fallback: refresh workspaces list if we couldn't navigate
     const refreshFn = (window.WorkspaceHub && window.WorkspaceHub.loadWorkspaces)
       || window.loadWorkspaces;
     if (typeof refreshFn === 'function') {
@@ -504,6 +513,7 @@ function showError(message) {
  */
 function setAvailableAgents(agents) {
   window.availableAgents = agents;
+  populateWorkspaceEntryAgentSelect();
 }
 
 /**
