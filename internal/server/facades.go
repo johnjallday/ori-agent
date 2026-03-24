@@ -30,6 +30,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/store"
 	"github.com/johnjallday/ori-agent/internal/updatemanager"
 	"github.com/johnjallday/ori-agent/internal/usagehttp"
+	"github.com/johnjallday/ori-agent/internal/vaulthttp"
 	web "github.com/johnjallday/ori-agent/internal/web"
 	"github.com/johnjallday/ori-agent/internal/workflowhttp"
 	"github.com/johnjallday/ori-agent/internal/workspace"
@@ -104,6 +105,7 @@ type HandlerFacade struct {
 	SessionFiles    *fileshttp.Handler
 	Review          *reviewhttp.Handler
 	Evolution       *evolutionhttp.Handler
+	Vault           *vaulthttp.Handler
 	ExternalAgents  *externalagentshttp.Handler
 	Skills          *skillshttp.Handler
 }
@@ -212,6 +214,7 @@ func NewHandlerFacade(
 	sessionFiles *fileshttp.Handler,
 	review *reviewhttp.Handler,
 	evolutionHandler *evolutionhttp.Handler,
+	vaultHandler *vaulthttp.Handler,
 	externalAgents *externalagentshttp.Handler,
 	skills *skillshttp.Handler,
 ) *HandlerFacade {
@@ -241,6 +244,7 @@ func NewHandlerFacade(
 		SessionFiles:    sessionFiles,
 		Review:          review,
 		Evolution:       evolutionHandler,
+		Vault:           vaultHandler,
 		ExternalAgents:  externalAgents,
 		Skills:          skills,
 	}

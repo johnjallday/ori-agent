@@ -263,6 +263,48 @@ Configure session storage limits via the Settings page or `settings.json`:
 | `/api/sessions/storage/stats` | GET | Get storage statistics |
 | `/api/sessions/cleanup` | POST | Trigger manual cleanup |
 
+## 🔐 Private Vault
+
+Ori Agent now includes a local encrypted vault for sensitive records that should not live in normal session history.
+
+### What Goes In The Vault
+
+- Connector secrets and API credentials
+- Saved email snippets or private personal notes
+- Sensitive identifiers or structured personal records
+
+### What Does Not Go In The Vault
+
+- Normal chat/session history by default
+- Theme, onboarding, or general preference settings
+- Global search indexes
+
+### Storage Model
+
+- New API-key writes prefer the configured secure secret store instead of persisting raw values in `settings.json`
+- Existing installs still read legacy keys from `settings.json` for backward compatibility
+- Vault records are encrypted with a per-install data encryption key stored in the secure secret store
+- Free-form vault tags are encrypted at rest and are excluded from standard session search
+
+### Platform Behavior
+
+- macOS: uses Keychain when available
+- Linux desktop: uses Secret Service when available
+- Linux/headless fallback: requires `ORI_VAULT_PASSPHRASE`
+- Windows: secure-store plumbing is present, but the vault should be treated as unavailable until a writable backend is configured
+
+Ori Agent does not silently fall back to plaintext secret storage when secure storage is unavailable.
+
+### Settings UI
+
+Use **Settings → Private Vault** to:
+
+- check vault status and backend mode
+- unlock passphrase fallback mode
+- create, browse, update, and delete saved vault entries
+- review or revoke workspace-scoped persistent grants
+- export encrypted vault bundles with explicit confirmation and a vault password
+
 ### Performance
 
 The session system is optimized for handling many sessions efficiently:

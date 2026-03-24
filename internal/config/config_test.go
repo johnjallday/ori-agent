@@ -4,6 +4,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/johnjallday/ori-agent/internal/vault"
 )
 
 func TestValidateSystemModel(t *testing.T) {
@@ -355,6 +357,112 @@ func TestSystemReasoningEffort_PersistenceAndClearWithSystemModel(t *testing.T) 
 	}
 	if got := manager2.GetSystemReasoningEffort(); got != "medium" {
 		t.Fatalf("GetSystemReasoningEffort() after system model clear = %q, want %q", got, "medium")
+	}
+}
+
+func TestManagerSecretStoreSanitizesSavedSettings(t *testing.T) {
+	tmpDir := t.TempDir()
+	tmpFile := filepath.Join(tmpDir, "settings.json")
+
+	secretStore := vault.NewMemorySecretStore()
+	manager := NewManagerWithSecretStore(tmpFile, secretStore)
+	if err := manager.Load(); err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+
+	openAIKey := "sk-test1234567890abcdefghijklmnopqrstuvwxyz"
+	anthropicKey := "sk-ant-test1234567890abcdefghijklmnopqrstuvwxyz"
+	geminiKey := "gemini-secret"
+	braveKey := "brave-secret-token"
+
+	if err := manager.SetAPIKey(openAIKey); err != nil {
+		t.Fatalf("SetAPIKey() error = %v", err)
+	}
+	if err := manager.SetAnthropicAPIKey(anthropicKey); err != nil {
+		t.Fatalf("SetAnthropicAPIKey() error = %v", err)
+	}
+	if err := manager.SetGeminiAPIKey(geminiKey); err != nil {
+		t.Fatalf("SetGeminiAPIKey() error = %v", err)
+	}
+	if err := manager.SetBraveAPIKey(braveKey); err != nil {
+		t.Fatalf("SetBraveAPIKey() error = %v", err)
+	}
+	if err := manager.Save(); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+
+	raw, err := os.ReadFile(tmpFile)
+	if err != nil {
+		t.Fatalf("ReadFile() error = %v", err)
+	}
+	rawText := string(raw)
+	if contains(rawText, openAIKey) || contains(rawText, anthropicKey) || contains(rawText, geminiKey) || contains(rawText, braveKey) {
+		t.Fatalf("settings.json should not contain secret values when secret store is active: %s", rawText)
+	}
+
+	if got := manager.GetAPIKey(); got != openAIKey {
+		t.Fatalf("GetAPIKey() = %q, want %q", got, openAIKey)
+	}
+	if got := manager.GetAnthropicAPIKey(); got != anthropicKey {
+		t.Fatalf("GetAnthropicAPIKey() = %q, want %q", got, anthropicKey)
+	}
+	if got := manager.GetGeminiAPIKey(); got != geminiKey {
+		t.Fatalf("GetGeminiAPIKey() = %q, want %q", got, geminiKey)
+	}
+	if got := manager.GetBraveAPIKey(); got != braveKey {
+		t.Fatalf("GetBraveAPIKey() = %q, want %q", got, braveKey)
+	}
+
+	effective := manager.Get()
+	if effective.OpenAIAPIKey != openAIKey {
+		t.Fatalf("effective OpenAIAPIKey = %q, want %q", effective.OpenAIAPIKey, openAIKey)
+	}
+	if effective.Utility.BraveAPIKey != braveKey {
+		t.Fatalf("effective BraveAPIKey = %q, want %q", effective.Utility.BraveAPIKey, braveKey)
+	}
+}
+
+func TestManagerSecretStoreFallsBackToSettingsJSON(t *testing.T) {
+	tmpDir := t.TempDir()
+	tmpFile := filepath.Join(tmpDir, "settings.json")
+	legacyKey := "sk-test1234567890abcdefghijklmnopqrstuvwxyz"
+
+	if err := os.WriteFile(tmpFile, []byte(`{"openai_api_key":"`+legacyKey+`"}`), 0o600); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	manager := NewManagerWithSecretStore(tmpFile, vault.NewMemorySecretStore())
+	if err := manager.Load(); err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+
+	if got := manager.GetAPIKey(); got != legacyKey {
+		t.Fatalf("GetAPIKey() = %q, want %q", got, legacyKey)
+	}
+}
+
+func TestManagerSecretStoreTakesPrecedenceOverSettingsJSON(t *testing.T) {
+	tmpDir := t.TempDir()
+	tmpFile := filepath.Join(tmpDir, "settings.json")
+	legacyKey := "sk-test1234567890abcdefghijklmnopqrstuvwxyz"
+	secretKey := "sk-secret1234567890abcdefghijklmnopqrstuvwxyz"
+
+	if err := os.WriteFile(tmpFile, []byte(`{"openai_api_key":"`+legacyKey+`"}`), 0o600); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	secretStore := vault.NewMemorySecretStore()
+	if err := secretStore.Set(vault.SecretKeyOpenAIAPIKey, secretKey); err != nil {
+		t.Fatalf("secretStore.Set() error = %v", err)
+	}
+
+	manager := NewManagerWithSecretStore(tmpFile, secretStore)
+	if err := manager.Load(); err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+
+	if got := manager.GetAPIKey(); got != secretKey {
+		t.Fatalf("GetAPIKey() = %q, want %q", got, secretKey)
 	}
 }
 

@@ -180,6 +180,10 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 	mux.HandleFunc("/api/settings/speech", s.Handlers.Settings.SpeechSettingsHandler)
 	mux.HandleFunc("/api/settings/utility", s.Handlers.Settings.UtilitySettingsHandler)
 	mux.HandleFunc("/api/transcribe", s.Handlers.Speech.Transcribe)
+	if s.Handlers.Vault != nil {
+		mux.Handle("/api/vault", s.Handlers.Vault)
+		mux.Handle("/api/vault/", s.Handlers.Vault)
+	}
 
 	// Web3 Wallet endpoints
 	if caps.Web3Wallet {

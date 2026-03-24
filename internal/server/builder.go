@@ -42,6 +42,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/store"
 	"github.com/johnjallday/ori-agent/internal/updatemanager"
 	"github.com/johnjallday/ori-agent/internal/usagehttp"
+	"github.com/johnjallday/ori-agent/internal/vaulthttp"
 	web "github.com/johnjallday/ori-agent/internal/web"
 	"github.com/johnjallday/ori-agent/internal/workflowhttp"
 	"github.com/johnjallday/ori-agent/internal/workspace"
@@ -157,6 +158,7 @@ type ServerBuilder struct {
 	// Review system
 	reviewHandler    *reviewhttp.Handler
 	evolutionHandler *evolutionhttp.Handler
+	vaultHandler     *vaulthttp.Handler
 
 	// External agents (Claude Code, Codex)
 	externalAgentsCache   *externalagents.Cache
@@ -356,6 +358,7 @@ func (b *ServerBuilder) createDomainFacades() error {
 		b.sessionFilesHandler,
 		b.reviewHandler,
 		b.evolutionHandler,
+		b.vaultHandler,
 		b.externalAgentsHandler,
 		b.skillsHandler,
 	)

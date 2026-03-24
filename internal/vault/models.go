@@ -1,0 +1,208 @@
+package vault
+
+import (
+	"encoding/json"
+	"errors"
+	"strings"
+	"time"
+)
+
+var (
+	ErrRecordNotFound        = errors.New("vault: record not found")
+	ErrGrantNotFound         = errors.New("vault: grant not found")
+	ErrPermissionDenied      = errors.New("vault: permission denied")
+	ErrVaultLocked           = errors.New("vault: vault locked")
+	ErrVaultKeyUnavailable   = errors.New("vault: data encryption key unavailable")
+	ErrMalformedRecord       = errors.New("vault: malformed encrypted record")
+	ErrVaultPasswordRequired = errors.New("vault: passphrase is required")
+	ErrExportPasswordEmpty   = errors.New("vault: export password is required")
+)
+
+type ActorType string
+
+const (
+	ActorTypeUser   ActorType = "user"
+	ActorTypeAgent  ActorType = "agent"
+	ActorTypePlugin ActorType = "plugin"
+)
+
+type Capability string
+
+const (
+	CapabilitySecretsRead   Capability = "vault.secrets.read"
+	CapabilitySecretsWrite  Capability = "vault.secrets.write"
+	CapabilityPersonalRead  Capability = "vault.personal.read"
+	CapabilityPersonalWrite Capability = "vault.personal.write"
+	CapabilityEmailRead     Capability = "vault.email.read_saved"
+	CapabilityEmailWrite    Capability = "vault.email.write_saved"
+)
+
+type AccessContext struct {
+	WorkspaceID string    `json:"workspace_id,omitempty"`
+	ActorType   ActorType `json:"actor_type,omitempty"`
+	ActorID     string    `json:"actor_id,omitempty"`
+}
+
+type Record struct {
+	ID              string          `json:"id"`
+	Type            string          `json:"type"`
+	WorkspaceID     string          `json:"workspace_id,omitempty"`
+	Label           string          `json:"label"`
+	Tags            []string        `json:"tags,omitempty"`
+	Source          string          `json:"source,omitempty"`
+	RetentionPolicy string          `json:"retention_policy,omitempty"`
+	Payload         json.RawMessage `json:"payload"`
+	CreatedAt       time.Time       `json:"created_at"`
+	UpdatedAt       time.Time       `json:"updated_at"`
+}
+
+type RecordUpdate struct {
+	Label           *string          `json:"label,omitempty"`
+	Tags            *[]string        `json:"tags,omitempty"`
+	Source          *string          `json:"source,omitempty"`
+	RetentionPolicy *string          `json:"retention_policy,omitempty"`
+	Payload         *json.RawMessage `json:"payload,omitempty"`
+}
+
+type RecordListItem struct {
+	ID              string    `json:"id"`
+	Type            string    `json:"type"`
+	WorkspaceID     string    `json:"workspace_id,omitempty"`
+	Label           string    `json:"label"`
+	Tags            []string  `json:"tags,omitempty"`
+	Source          string    `json:"source,omitempty"`
+	RetentionPolicy string    `json:"retention_policy,omitempty"`
+	CreatedAt       time.Time `json:"created_at"`
+	UpdatedAt       time.Time `json:"updated_at"`
+}
+
+type RecordFilter struct {
+	WorkspaceID string
+	Type        string
+}
+
+type Grant struct {
+	ID          string     `json:"id"`
+	WorkspaceID string     `json:"workspace_id"`
+	ActorType   ActorType  `json:"actor_type"`
+	ActorID     string     `json:"actor_id"`
+	Capability  Capability `json:"capability"`
+	RecordType  string     `json:"record_type,omitempty"`
+	CreatedAt   time.Time  `json:"created_at"`
+	UpdatedAt   time.Time  `json:"updated_at"`
+}
+
+type AuditEvent struct {
+	ID          string    `json:"id"`
+	WorkspaceID string    `json:"workspace_id,omitempty"`
+	ActorType   ActorType `json:"actor_type,omitempty"`
+	ActorID     string    `json:"actor_id,omitempty"`
+	Action      string    `json:"action"`
+	RecordID    string    `json:"record_id,omitempty"`
+	RecordType  string    `json:"record_type,omitempty"`
+	Outcome     string    `json:"outcome"`
+	Details     string    `json:"details,omitempty"`
+	CreatedAt   time.Time `json:"created_at"`
+}
+
+type VaultStatus struct {
+	Available          bool        `json:"available"`
+	Locked             bool        `json:"locked"`
+	Writable           bool        `json:"writable"`
+	RequiresPassphrase bool        `json:"requires_passphrase"`
+	Message            string      `json:"message,omitempty"`
+	RecordCount        int         `json:"record_count"`
+	SecretStore        StoreStatus `json:"secret_store"`
+}
+
+type ExportRequest struct {
+	WorkspaceID string
+	Password    string
+}
+
+type ExportBundle struct {
+	Version     int       `json:"version"`
+	WorkspaceID string    `json:"workspace_id,omitempty"`
+	Salt        string    `json:"salt"`
+	Nonce       string    `json:"nonce"`
+	Ciphertext  string    `json:"ciphertext"`
+	ExportedAt  time.Time `json:"exported_at"`
+	RecordCount int       `json:"record_count"`
+	GrantCount  int       `json:"grant_count"`
+}
+
+func (a AccessContext) normalized() AccessContext {
+	a.WorkspaceID = strings.TrimSpace(a.WorkspaceID)
+	a.ActorID = strings.TrimSpace(a.ActorID)
+	a.ActorType = normalizeActorType(a.ActorType)
+	return a
+}
+
+func (a AccessContext) requiresGrant() bool {
+	a = a.normalized()
+	if a.ActorID != "" {
+		return true
+	}
+	return a.ActorType != "" && a.ActorType != ActorTypeUser
+}
+
+func normalizeActorType(actorType ActorType) ActorType {
+	switch ActorType(strings.ToLower(strings.TrimSpace(string(actorType)))) {
+	case ActorTypeAgent:
+		return ActorTypeAgent
+	case ActorTypePlugin:
+		return ActorTypePlugin
+	case ActorTypeUser:
+		return ActorTypeUser
+	default:
+		return ActorType(strings.ToLower(strings.TrimSpace(string(actorType))))
+	}
+}
+
+func normalizeCapability(cap Capability) Capability {
+	return Capability(strings.ToLower(strings.TrimSpace(string(cap))))
+}
+
+func normalizeRecordType(recordType string) string {
+	recordType = strings.ToLower(strings.TrimSpace(recordType))
+	if recordType == "" {
+		return "*"
+	}
+	return recordType
+}
+
+func normalizeTags(tags []string) []string {
+	if len(tags) == 0 {
+		return nil
+	}
+
+	seen := make(map[string]struct{}, len(tags))
+	normalized := make([]string, 0, len(tags))
+	for _, tag := range tags {
+		tag = strings.TrimSpace(tag)
+		if tag == "" {
+			continue
+		}
+		tag = strings.ToLower(tag)
+		if _, ok := seen[tag]; ok {
+			continue
+		}
+		seen[tag] = struct{}{}
+		normalized = append(normalized, tag)
+	}
+	if len(normalized) == 0 {
+		return nil
+	}
+	return normalized
+}
+
+func capabilitiesForRecordType(recordType string) (Capability, Capability) {
+	switch normalizeRecordType(recordType) {
+	case "secret", "credential", "credentials", "token", "api_key", "oauth_token":
+		return CapabilitySecretsRead, CapabilitySecretsWrite
+	case "email", "email_snippet", "email_address":
+		return CapabilityEmailRead, CapabilityEmailWrite
+	default:
+		return CapabilityPersonalRead, CapabilityPersonalWrite
+	}
+}

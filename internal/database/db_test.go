@@ -93,7 +93,17 @@ func TestMigrations(t *testing.T) {
 	}
 
 	// Verify tables exist
-	tables := []string{"sessions", "messages", "workspaces", "session_tags", "sessions_fts", "schema_migrations"}
+	tables := []string{
+		"sessions",
+		"messages",
+		"workspaces",
+		"session_tags",
+		"sessions_fts",
+		"schema_migrations",
+		"vault_records",
+		"vault_grants",
+		"vault_audit_events",
+	}
 	for _, table := range tables {
 		var name string
 		err := db.QueryRowContext(ctx, "SELECT name FROM sqlite_master WHERE type='table' AND name=?", table).Scan(&name)

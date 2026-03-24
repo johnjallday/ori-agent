@@ -16,6 +16,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/store"
 	"github.com/johnjallday/ori-agent/internal/types"
+	"github.com/johnjallday/ori-agent/internal/vault"
 	"github.com/johnjallday/ori-agent/internal/workspace"
 )
 
@@ -30,7 +31,7 @@ func loadDefaultSettings() types.Settings {
 
 // createConfigManager initializes and loads the configuration manager.
 func createConfigManager(configPath string) (*config.Manager, error) {
-	mgr := config.NewManager(configPath)
+	mgr := config.NewManagerWithSecretStore(configPath, vault.NewDefaultSecretStoreForNamespace(configPath))
 	if err := mgr.Load(); err != nil {
 		return nil, fmt.Errorf("failed to load configuration: %w", err)
 	}

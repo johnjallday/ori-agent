@@ -8,11 +8,14 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
+	"github.com/johnjallday/ori-agent/internal/client"
 	"github.com/johnjallday/ori-agent/internal/config"
 	"github.com/johnjallday/ori-agent/internal/llm"
 	"github.com/johnjallday/ori-agent/internal/modelinfo"
+	"github.com/johnjallday/ori-agent/internal/vault"
 )
 
 // mockProvider implements llm.Provider for testing
@@ -484,6 +487,80 @@ func TestExternalAgentsSettingsHandler_CodexToggleDoesNotUnregisterProvider(t *t
 
 	if _, err := llmFactory.GetProvider("codex"); err != nil {
 		t.Fatalf("Expected codex provider to remain registered, got error: %v", err)
+	}
+}
+
+func TestAPIKeyHandler_SecretStoreWritesDoNotPersistPlaintext(t *testing.T) {
+	tmpDir := t.TempDir()
+	tmpFile := filepath.Join(tmpDir, "settings.json")
+	configManager := config.NewManagerWithSecretStore(tmpFile, vault.NewMemorySecretStore())
+	_ = configManager.Load()
+
+	llmFactory := llm.NewFactory()
+	handler := NewHandler(nil, configManager, client.NewFactory(""), llmFactory)
+
+	body := []byte(`{
+		"openai_api_key":"sk-test1234567890abcdefghijklmnopqrstuvwxyz",
+		"anthropic_api_key":"sk-ant-test1234567890abcdefghijklmnopqrstuvwxyz",
+		"gemini_api_key":"gemini-secret"
+	}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/settings/api-key", bytes.NewReader(body))
+	rec := httptest.NewRecorder()
+
+	handler.APIKeyHandler(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("Expected status 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	raw, err := os.ReadFile(tmpFile)
+	if err != nil {
+		t.Fatalf("ReadFile() error = %v", err)
+	}
+	text := string(raw)
+	if strings.Contains(text, "sk-test1234567890abcdefghijklmnopqrstuvwxyz") || strings.Contains(text, "sk-ant-test1234567890abcdefghijklmnopqrstuvwxyz") || strings.Contains(text, "gemini-secret") {
+		t.Fatalf("settings.json should not contain plaintext API keys: %s", text)
+	}
+
+	if got := configManager.GetAPIKey(); got != "sk-test1234567890abcdefghijklmnopqrstuvwxyz" {
+		t.Fatalf("GetAPIKey() = %q", got)
+	}
+	if got := configManager.GetAnthropicAPIKey(); got != "sk-ant-test1234567890abcdefghijklmnopqrstuvwxyz" {
+		t.Fatalf("GetAnthropicAPIKey() = %q", got)
+	}
+	if got := configManager.GetGeminiAPIKey(); got != "gemini-secret" {
+		t.Fatalf("GetGeminiAPIKey() = %q", got)
+	}
+}
+
+func TestUtilitySettingsHandler_SecretStoreWritesDoNotPersistBravePlaintext(t *testing.T) {
+	tmpDir := t.TempDir()
+	tmpFile := filepath.Join(tmpDir, "settings.json")
+	configManager := config.NewManagerWithSecretStore(tmpFile, vault.NewMemorySecretStore())
+	_ = configManager.Load()
+
+	handler := NewHandler(nil, configManager, client.NewFactory(""), llm.NewFactory())
+	body := []byte(`{"search_provider":"brave","brave_api_key":"brave-secret-token"}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/settings/utility", bytes.NewReader(body))
+	rec := httptest.NewRecorder()
+
+	handler.UtilitySettingsHandler(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("Expected status 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	raw, err := os.ReadFile(tmpFile)
+	if err != nil {
+		t.Fatalf("ReadFile() error = %v", err)
+	}
+	if strings.Contains(string(raw), "brave-secret-token") {
+		t.Fatalf("settings.json should not contain plaintext Brave key: %s", string(raw))
+	}
+
+	cfg := configManager.Get()
+	if cfg.Utility.BraveAPIKey != "brave-secret-token" {
+		t.Fatalf("effective BraveAPIKey = %q", cfg.Utility.BraveAPIKey)
 	}
 }
 

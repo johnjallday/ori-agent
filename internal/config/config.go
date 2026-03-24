@@ -11,6 +11,7 @@ import (
 
 	"github.com/johnjallday/ori-agent/internal/authdiscovery"
 	"github.com/johnjallday/ori-agent/internal/platform"
+	"github.com/johnjallday/ori-agent/internal/vault"
 )
 
 // UtilitySettings controls native utility tool providers and runtime safeguards.
@@ -79,9 +80,10 @@ type Settings struct {
 
 // Manager handles configuration loading and saving
 type Manager struct {
-	mu       sync.RWMutex // Protects settings from concurrent access
-	filePath string
-	settings Settings
+	mu          sync.RWMutex // Protects settings from concurrent access
+	filePath    string
+	settings    Settings
+	secretStore vault.SecretStore
 }
 
 // NewManager creates a new configuration manager
@@ -92,6 +94,13 @@ func NewManager(filePath string) *Manager {
 	return &Manager{
 		filePath: filePath,
 	}
+}
+
+// NewManagerWithSecretStore creates a new manager with an attached secret store.
+func NewManagerWithSecretStore(filePath string, secretStore vault.SecretStore) *Manager {
+	manager := NewManager(filePath)
+	manager.secretStore = secretStore
+	return manager
 }
 
 // Load reads configuration from file with fallback to defaults
@@ -223,8 +232,14 @@ func (m *Manager) Save() error {
 		return fmt.Errorf("cannot save invalid configuration: %w", err)
 	}
 
-	data, err := json.MarshalIndent(m.settings, "", "  ")
+	settingsForDisk := m.settings
 	m.mu.RUnlock()
+
+	if m.hasWritableSecretStore() {
+		sanitizeSecretsForDisk(&settingsForDisk)
+	}
+
+	data, err := json.MarshalIndent(settingsForDisk, "", "  ")
 
 	if err != nil {
 		return fmt.Errorf("failed to marshal config: %w", err)
@@ -241,16 +256,56 @@ func (m *Manager) Save() error {
 // Get returns the current configuration
 func (m *Manager) Get() Settings {
 	m.mu.RLock()
-	defer m.mu.RUnlock()
-	return m.settings
+	settings := m.settings
+	secretStore := m.secretStore
+	m.mu.RUnlock()
+
+	applySecretsToSettings(&settings, secretStore)
+	return settings
 }
 
 // Update modifies the configuration
 func (m *Manager) Update(settings Settings) error {
+	if err := m.ingestSecretFields(&settings); err != nil {
+		return err
+	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.settings = settings
 	return m.validate()
+}
+
+// SetSecretStore attaches or replaces the secret store backing this manager.
+func (m *Manager) SetSecretStore(secretStore vault.SecretStore) {
+	m.mu.Lock()
+	m.secretStore = secretStore
+	m.mu.Unlock()
+}
+
+// SecretStoreStatus reports the configured secret store state.
+func (m *Manager) SecretStoreStatus() vault.StoreStatus {
+	m.mu.RLock()
+	secretStore := m.secretStore
+	m.mu.RUnlock()
+
+	if secretStore == nil {
+		return vault.StoreStatus{
+			Backend:   vault.BackendUnavailable,
+			Available: false,
+			Writable:  false,
+			Locked:    true,
+			Message:   "no secret store configured",
+		}
+	}
+	return secretStore.Status()
+}
+
+// SecretStore returns the attached secret store reference for subsystems that
+// need to share the same secure storage namespace.
+func (m *Manager) SecretStore() vault.SecretStore {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.secretStore
 }
 
 // GetWorkspaceRoot returns the explicitly configured workspace root, if any.
@@ -298,7 +353,12 @@ func (m *Manager) GetAPIKey() string {
 	m.mu.RLock()
 	apiKey := m.settings.OpenAIAPIKey
 	codexEnabled := m.settings.ExternalAgentsCodexEnabled
+	secretStore := m.secretStore
 	m.mu.RUnlock()
+
+	if secretValue, ok := getSecret(secretStore, vault.SecretKeyOpenAIAPIKey); ok {
+		return secretValue
+	}
 
 	// Check settings first
 	if apiKey != "" {
@@ -332,7 +392,12 @@ func isLikelyAnthropicAPIKey(token string) bool {
 func (m *Manager) GetAnthropicAPIKey() string {
 	m.mu.RLock()
 	apiKey := m.settings.AnthropicAPIKey
+	secretStore := m.secretStore
 	m.mu.RUnlock()
+
+	if secretValue, ok := getSecret(secretStore, vault.SecretKeyAnthropicAPIKey); ok {
+		return secretValue
+	}
 
 	// Check settings first
 	if apiKey != "" {
@@ -356,7 +421,12 @@ func (m *Manager) GetAnthropicAPIKey() string {
 func (m *Manager) GetGeminiAPIKey() string {
 	m.mu.RLock()
 	apiKey := m.settings.GeminiAPIKey
+	secretStore := m.secretStore
 	m.mu.RUnlock()
+
+	if secretValue, ok := getSecret(secretStore, vault.SecretKeyGeminiAPIKey); ok {
+		return secretValue
+	}
 
 	// Check settings first
 	if apiKey != "" {
@@ -373,8 +443,31 @@ func (m *Manager) SetAPIKey(apiKey string) error {
 	if err := m.validateAPIKey(apiKey); err != nil {
 		return err
 	}
+	if err := m.setManagedSecret(vault.SecretKeyOpenAIAPIKey, apiKey); err != nil {
+		return err
+	}
 	m.mu.Lock()
-	m.settings.OpenAIAPIKey = apiKey
+	if m.hasWritableSecretStoreLocked() {
+		m.settings.OpenAIAPIKey = ""
+	} else {
+		m.settings.OpenAIAPIKey = apiKey
+	}
+	m.mu.Unlock()
+	return nil
+}
+
+// SetAnthropicAPIKey updates the Anthropic API key in settings or secret storage.
+func (m *Manager) SetAnthropicAPIKey(apiKey string) error {
+	apiKey = strings.TrimSpace(apiKey)
+	if err := m.setManagedSecret(vault.SecretKeyAnthropicAPIKey, apiKey); err != nil {
+		return err
+	}
+	m.mu.Lock()
+	if m.hasWritableSecretStoreLocked() {
+		m.settings.AnthropicAPIKey = ""
+	} else {
+		m.settings.AnthropicAPIKey = apiKey
+	}
 	m.mu.Unlock()
 	return nil
 }
@@ -382,8 +475,47 @@ func (m *Manager) SetAPIKey(apiKey string) error {
 // SetGeminiAPIKey updates the Gemini API key in settings
 func (m *Manager) SetGeminiAPIKey(apiKey string) error {
 	apiKey = strings.TrimSpace(apiKey)
+	if err := m.setManagedSecret(vault.SecretKeyGeminiAPIKey, apiKey); err != nil {
+		return err
+	}
 	m.mu.Lock()
-	m.settings.GeminiAPIKey = apiKey
+	if m.hasWritableSecretStoreLocked() {
+		m.settings.GeminiAPIKey = ""
+	} else {
+		m.settings.GeminiAPIKey = apiKey
+	}
+	m.mu.Unlock()
+	return nil
+}
+
+// GetBraveAPIKey returns the Brave API key, checking secret storage first, then settings, then environment.
+func (m *Manager) GetBraveAPIKey() string {
+	m.mu.RLock()
+	braveAPIKey := strings.TrimSpace(m.settings.Utility.BraveAPIKey)
+	secretStore := m.secretStore
+	m.mu.RUnlock()
+
+	if secretValue, ok := getSecret(secretStore, vault.SecretKeyBraveAPIKey); ok {
+		return secretValue
+	}
+	if braveAPIKey != "" {
+		return braveAPIKey
+	}
+	return strings.TrimSpace(os.Getenv("BRAVE_API_KEY"))
+}
+
+// SetBraveAPIKey updates the Brave API key in settings or secret storage.
+func (m *Manager) SetBraveAPIKey(apiKey string) error {
+	apiKey = strings.TrimSpace(apiKey)
+	if err := m.setManagedSecret(vault.SecretKeyBraveAPIKey, apiKey); err != nil {
+		return err
+	}
+	m.mu.Lock()
+	if m.hasWritableSecretStoreLocked() {
+		m.settings.Utility.BraveAPIKey = ""
+	} else {
+		m.settings.Utility.BraveAPIKey = apiKey
+	}
 	m.mu.Unlock()
 	return nil
 }
@@ -590,6 +722,13 @@ func (m *Manager) validateAPIKey(apiKey string) error {
 
 // MaskAPIKey returns a masked version of the API key for display purposes
 func (m *Manager) MaskAPIKey() string {
+	if secretValue, ok := getSecret(m.secretStoreRef(), vault.SecretKeyOpenAIAPIKey); ok {
+		if len(secretValue) < 8 {
+			return "***"
+		}
+		return secretValue[:8] + "***..." + secretValue[len(secretValue)-4:]
+	}
+
 	m.mu.RLock()
 	apiKey := m.settings.OpenAIAPIKey
 	m.mu.RUnlock()
@@ -610,6 +749,117 @@ func (m *Manager) MaskAPIKey() string {
 
 	// No API key found anywhere
 	return "API key required"
+}
+
+func (m *Manager) secretStoreRef() vault.SecretStore {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.secretStore
+}
+
+func (m *Manager) hasWritableSecretStore() bool {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.hasWritableSecretStoreLocked()
+}
+
+func (m *Manager) hasWritableSecretStoreLocked() bool {
+	if m.secretStore == nil {
+		return false
+	}
+	status := m.secretStore.Status()
+	return status.Available && status.Writable && !status.Locked
+}
+
+func (m *Manager) setManagedSecret(key vault.SecretKey, value string) error {
+	m.mu.RLock()
+	secretStore := m.secretStore
+	m.mu.RUnlock()
+
+	if secretStore == nil {
+		return nil
+	}
+	status := secretStore.Status()
+	if !status.Available || !status.Writable || status.Locked {
+		return nil
+	}
+	if strings.TrimSpace(value) == "" {
+		return secretStore.Delete(key)
+	}
+	return secretStore.Set(key, value)
+}
+
+func (m *Manager) ingestSecretFields(settings *Settings) error {
+	if settings == nil {
+		return nil
+	}
+
+	if err := m.validateAPIKey(strings.TrimSpace(settings.OpenAIAPIKey)); err != nil {
+		return err
+	}
+	if err := m.setManagedSecret(vault.SecretKeyOpenAIAPIKey, settings.OpenAIAPIKey); err != nil {
+		return err
+	}
+	if err := m.setManagedSecret(vault.SecretKeyAnthropicAPIKey, settings.AnthropicAPIKey); err != nil {
+		return err
+	}
+	if err := m.setManagedSecret(vault.SecretKeyGeminiAPIKey, settings.GeminiAPIKey); err != nil {
+		return err
+	}
+	if err := m.setManagedSecret(vault.SecretKeyBraveAPIKey, settings.Utility.BraveAPIKey); err != nil {
+		return err
+	}
+
+	if m.hasWritableSecretStore() {
+		settings.OpenAIAPIKey = ""
+		settings.AnthropicAPIKey = ""
+		settings.GeminiAPIKey = ""
+		settings.Utility.BraveAPIKey = ""
+	}
+	return nil
+}
+
+func applySecretsToSettings(settings *Settings, secretStore vault.SecretStore) {
+	if settings == nil || secretStore == nil {
+		return
+	}
+	if secretValue, ok := getSecret(secretStore, vault.SecretKeyOpenAIAPIKey); ok {
+		settings.OpenAIAPIKey = secretValue
+	}
+	if secretValue, ok := getSecret(secretStore, vault.SecretKeyAnthropicAPIKey); ok {
+		settings.AnthropicAPIKey = secretValue
+	}
+	if secretValue, ok := getSecret(secretStore, vault.SecretKeyGeminiAPIKey); ok {
+		settings.GeminiAPIKey = secretValue
+	}
+	if secretValue, ok := getSecret(secretStore, vault.SecretKeyBraveAPIKey); ok {
+		settings.Utility.BraveAPIKey = secretValue
+	}
+}
+
+func sanitizeSecretsForDisk(settings *Settings) {
+	if settings == nil {
+		return
+	}
+	settings.OpenAIAPIKey = ""
+	settings.AnthropicAPIKey = ""
+	settings.GeminiAPIKey = ""
+	settings.Utility.BraveAPIKey = ""
+}
+
+func getSecret(secretStore vault.SecretStore, key vault.SecretKey) (string, bool) {
+	if secretStore == nil {
+		return "", false
+	}
+	value, err := secretStore.Get(key)
+	if err != nil {
+		return "", false
+	}
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return "", false
+	}
+	return value, true
 }
 
 // GetSessionCleanupEnabled returns whether automatic session cleanup is enabled
