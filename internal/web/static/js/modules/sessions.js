@@ -3157,7 +3157,11 @@ const sessionManager = {
 
     const createBtn = document.getElementById('createFolderBtn');
     if (createBtn && !this.isCreatingFolder) {
-      createBtn.textContent = this.importModeEnabled ? 'Import' : 'Create';
+      if (window.WorkspaceBootstrapReview && typeof window.WorkspaceBootstrapReview.refreshPrimaryActionLabel === 'function') {
+        window.WorkspaceBootstrapReview.refreshPrimaryActionLabel();
+      } else {
+        createBtn.textContent = this.importModeEnabled ? 'Import' : 'Create';
+      }
     }
 
     if (!this.importModeEnabled) {
@@ -3379,6 +3383,9 @@ const sessionManager = {
     this.setImportBrowseLoading(false);
     this.setImportModeEnabled(false);
     this.clearImportDuplicateWarning();
+    if (window.WorkspaceBootstrapReview && typeof window.WorkspaceBootstrapReview.reset === 'function') {
+      window.WorkspaceBootstrapReview.reset();
+    }
 
     this.updateWorkspaceSetupControlsState();
     this.renderWorkspaceSetupPreview();
@@ -3507,6 +3514,13 @@ const sessionManager = {
       this.showToast('Primary goal is required', 'warning');
       primaryGoalInput?.focus();
       return;
+    }
+
+    if (window.WorkspaceBootstrapReview && typeof window.WorkspaceBootstrapReview.ensureReviewed === 'function') {
+      const reviewOutcome = await window.WorkspaceBootstrapReview.ensureReviewed();
+      if (!reviewOutcome.ready) {
+        return;
+      }
     }
 
     const description = descriptionInput?.value.trim() || '';
@@ -3640,6 +3654,12 @@ const sessionManager = {
       }
       const bootstrapWorkspaceName = name || this.extractFolderNameFromPath(importPath) || 'New Workspace';
       const workspaceBriefNote = this.buildWorkspaceBootstrapSeedNote(workspaceBootstrap, bootstrapWorkspaceName);
+      let bootstrapApplyResult = {
+        invitedAgents: 0,
+        boundMCPs: 0,
+        attachedSkills: 0,
+        failures: []
+      };
 
       const askOriSeedResult = {
         notesCreated: 0,
@@ -3676,10 +3696,21 @@ const sessionManager = {
         }
       }
 
+      if (
+        createdWorkspaceId &&
+        window.WorkspaceBootstrapReview &&
+        typeof window.WorkspaceBootstrapReview.applyPlan === 'function'
+      ) {
+        bootstrapApplyResult = await window.WorkspaceBootstrapReview.applyPlan(createdWorkspaceId);
+      }
+
       if (setupConfig.enabled && createdWorkspaceId) {
         const setupWorkspaceName = name || this.extractFolderNameFromPath(importPath) || 'Imported Workspace';
         const setupResult = await this.applyWorkspaceSetup(createdWorkspaceId, setupWorkspaceName, setupConfig);
         const summaryParts = [];
+        if (bootstrapApplyResult.invitedAgents > 0) summaryParts.push(`${bootstrapApplyResult.invitedAgents} agents`);
+        if (bootstrapApplyResult.boundMCPs > 0) summaryParts.push(`${bootstrapApplyResult.boundMCPs} MCPs`);
+        if (bootstrapApplyResult.attachedSkills > 0) summaryParts.push(`${bootstrapApplyResult.attachedSkills} skills`);
         if (setupResult.tasksCreated > 0) summaryParts.push(`${setupResult.tasksCreated} tasks`);
         if (setupResult.notesCreated > 0) summaryParts.push(`${setupResult.notesCreated} notes`);
         if (setupResult.schedulesCreated > 0) summaryParts.push(`${setupResult.schedulesCreated} schedules`);
@@ -3687,18 +3718,37 @@ const sessionManager = {
         if (askOriSeedResult.notesCreated > 0) summaryParts.push(`${askOriSeedResult.notesCreated} Assistant note`);
         if (workspaceBriefResult.notesCreated > 0) summaryParts.push('workspace brief');
         const summaryText = summaryParts.length > 0 ? summaryParts.join(', ') : 'no setup items';
-        if (setupResult.errors.length > 0 || askOriSeedResult.errors.length > 0 || workspaceBriefResult.errors.length > 0) {
+        if (
+          setupResult.errors.length > 0 ||
+          askOriSeedResult.errors.length > 0 ||
+          workspaceBriefResult.errors.length > 0 ||
+          bootstrapApplyResult.failures.length > 0
+        ) {
           this.showToast(`${importEnabled ? 'Workspace imported' : 'Workspace created'} with partial setup (${summaryText}).`, 'warning');
         } else {
           this.showToast(`${importEnabled ? 'Workspace imported' : 'Workspace created'} with Ori setup (${summaryText}).`, 'success');
         }
-      } else if (askOriSeedResult.tasksCreated > 0 || askOriSeedResult.notesCreated > 0 || workspaceBriefResult.notesCreated > 0) {
+      } else if (
+        bootstrapApplyResult.invitedAgents > 0 ||
+        bootstrapApplyResult.boundMCPs > 0 ||
+        bootstrapApplyResult.attachedSkills > 0 ||
+        askOriSeedResult.tasksCreated > 0 ||
+        askOriSeedResult.notesCreated > 0 ||
+        workspaceBriefResult.notesCreated > 0
+      ) {
         const summaryParts = [];
+        if (bootstrapApplyResult.invitedAgents > 0) summaryParts.push(`${bootstrapApplyResult.invitedAgents} agents`);
+        if (bootstrapApplyResult.boundMCPs > 0) summaryParts.push(`${bootstrapApplyResult.boundMCPs} MCPs`);
+        if (bootstrapApplyResult.attachedSkills > 0) summaryParts.push(`${bootstrapApplyResult.attachedSkills} skills`);
         if (askOriSeedResult.tasksCreated > 0) summaryParts.push(`${askOriSeedResult.tasksCreated} Assistant task`);
         if (askOriSeedResult.notesCreated > 0) summaryParts.push(`${askOriSeedResult.notesCreated} Assistant note`);
         if (workspaceBriefResult.notesCreated > 0) summaryParts.push('workspace brief');
         const summaryText = summaryParts.join(', ');
-        if (askOriSeedResult.errors.length > 0 || workspaceBriefResult.errors.length > 0) {
+        if (
+          askOriSeedResult.errors.length > 0 ||
+          workspaceBriefResult.errors.length > 0 ||
+          bootstrapApplyResult.failures.length > 0
+        ) {
           this.showToast(`${importEnabled ? 'Workspace imported' : 'Workspace created'} with partial starter setup (${summaryText}).`, 'warning');
         } else {
           this.showToast(`${importEnabled ? 'Workspace imported' : 'Workspace created'} with starter setup (${summaryText}).`, 'success');
@@ -3712,9 +3762,9 @@ const sessionManager = {
       modal?.hide();
       this.resetAddWorkspaceModalForm();
 
-      // Navigate to the new workspace and open the Create Agent modal
+      // Navigate to the new workspace once the reviewed setup has been applied
       if (createdWorkspaceId) {
-        window.location.href = `/workspaces/${encodeURIComponent(createdWorkspaceId)}?addAgent=1`;
+        window.location.href = `/workspaces/${encodeURIComponent(createdWorkspaceId)}`;
         return;
       }
 

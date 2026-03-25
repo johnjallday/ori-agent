@@ -165,6 +165,10 @@ function setImportMode(enabled) {
   if (section) {
     section.hidden = !workspaceCreateState.importMode;
   }
+
+  if (window.WorkspaceBootstrapReview && typeof window.WorkspaceBootstrapReview.refreshPrimaryActionLabel === 'function') {
+    window.WorkspaceBootstrapReview.refreshPrimaryActionLabel();
+  }
 }
 
 async function checkFolderDuplicate(pathValue) {
@@ -344,6 +348,9 @@ function openCreateWorkspaceModal(options = {}) {
   if (importToggle) importToggle.checked = false;
   if (importPathInput) importPathInput.value = '';
   clearDuplicateWarning();
+  if (window.WorkspaceBootstrapReview && typeof window.WorkspaceBootstrapReview.reset === 'function') {
+    window.WorkspaceBootstrapReview.reset();
+  }
 
   const wantsImport = Boolean(options && options.importMode);
   if (options && typeof options.entryPoint === 'string' && options.entryPoint.trim()) {
@@ -452,6 +459,13 @@ async function createWorkspace() {
     return;
   }
 
+  if (window.WorkspaceBootstrapReview && typeof window.WorkspaceBootstrapReview.ensureReviewed === 'function') {
+    const reviewOutcome = await window.WorkspaceBootstrapReview.ensureReviewed();
+    if (!reviewOutcome.ready) {
+      return;
+    }
+  }
+
   try {
     let endpoint = '/api/workspaces';
     const payload = {
@@ -521,19 +535,20 @@ async function createWorkspace() {
       return;
     }
 
-    // Add selected agents to the workspace if any were selected
-    if (result.folder && window.selectedAgents.size > 0) {
-      const workspaceId = result.folder.id;
-      for (const agentName of window.selectedAgents) {
-        await fetch(`/api/workspaces/${workspaceId}/agents`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ agent_name: agentName })
-        });
-      }
-    }
-
     const workspaceId = result.folder && result.folder.id;
+    let bootstrapApplyResult = {
+      invitedAgents: 0,
+      boundMCPs: 0,
+      attachedSkills: 0,
+      failures: []
+    };
+    if (
+      workspaceId &&
+      window.WorkspaceBootstrapReview &&
+      typeof window.WorkspaceBootstrapReview.applyPlan === 'function'
+    ) {
+      bootstrapApplyResult = await window.WorkspaceBootstrapReview.applyPlan(workspaceId);
+    }
     const workspaceBriefNote = buildWorkspaceBootstrapSeedNote(
       workspaceBootstrap,
       name || extractFolderNameFromPath(importPath) || (result.folder && result.folder.name) || 'New Workspace'
@@ -566,9 +581,25 @@ async function createWorkspace() {
     window.selectedAgents.clear();
     resetImportState();
 
-    // Navigate to the new workspace and open the Create Agent modal
     if (workspaceId) {
-      window.location.href = `/workspaces/${encodeURIComponent(workspaceId)}?addAgent=1`;
+      const successMessageParts = [];
+      if (bootstrapApplyResult.invitedAgents > 0) successMessageParts.push(`${bootstrapApplyResult.invitedAgents} agents`);
+      if (bootstrapApplyResult.boundMCPs > 0) successMessageParts.push(`${bootstrapApplyResult.boundMCPs} MCPs`);
+      if (bootstrapApplyResult.attachedSkills > 0) successMessageParts.push(`${bootstrapApplyResult.attachedSkills} skills`);
+      if (typeof window.showToast === 'function') {
+        if (bootstrapApplyResult.failures.length > 0) {
+          window.showToast(
+            `${importEnabled ? 'Workspace imported' : 'Workspace created'} with partial setup${successMessageParts.length > 0 ? ` (${successMessageParts.join(', ')})` : ''}.`,
+            'warning'
+          );
+        } else if (successMessageParts.length > 0) {
+          window.showToast(
+            `${importEnabled ? 'Workspace imported' : 'Workspace created'} with ${successMessageParts.join(', ')}.`,
+            'success'
+          );
+        }
+      }
+      window.location.href = `/workspaces/${encodeURIComponent(workspaceId)}`;
       return;
     }
 
