@@ -71,124 +71,84 @@
           <div class="vault-modal-vault-shell-head">
             <div>
               <span class="vault-modal-section-kicker">Vault Spaces</span>
-              <h6 class="vault-modal-section-title">Switch, Manage, Or Create</h6>
+              <h6 class="vault-modal-section-title">Vault Controls</h6>
             </div>
             <div class="vault-modal-shell-actions">
-              <p class="vault-modal-section-description">Vault-level controls live here. Saving encrypted entries and browsing the folder view stay below.</p>
-              <button id="vaultModalOpenCreateVaultBtn" class="modern-btn modern-btn-secondary" type="button">New Vault</button>
+              <p class="vault-modal-section-description">Create vaults here. Once a vault exists, switch and management controls move into the workspace tabs below.</p>
+              <div class="vault-modal-shell-buttons">
+                <button id="vaultModalOpenEntryBtn" class="modern-btn modern-btn-primary" type="button">New Entry</button>
+                <button id="vaultModalOpenCreateVaultBtn" class="modern-btn modern-btn-secondary" type="button">New Vault</button>
+              </div>
             </div>
-          </div>
-
-          <div class="vault-modal-vault-grid">
-            <div id="vaultModalVaultSelectionStack" class="vault-modal-vault-stack">
-              <span class="vault-modal-vault-stack-title">Selected Vault</span>
-              <div class="vault-modal-field">
-                <label class="vault-modal-label" for="vaultModalVaultSelect">Active vault</label>
-                <select id="vaultModalVaultSelect" class="form-select vault-modal-select">
-                  <option value="">Loading vaults...</option>
-                </select>
-                <div id="vaultModalVaultMeta" class="vault-modal-help">Checking available vaults...</div>
-              </div>
-              <div id="vaultModalSelectedVaultState" class="vault-modal-selected-vault-state">Select a vault to continue.</div>
-              <div id="vaultModalVaultHint" class="vault-modal-help">Use the vault chip lock icon to unlock or lock the selected vault.</div>
-              <div id="vaultModalVaultRail" class="vault-modal-vault-rail" aria-label="Available vaults"></div>
-            </div>
-
-            <div id="vaultModalVaultManageStack" class="vault-modal-vault-stack">
-              <span class="vault-modal-vault-stack-title">Vault Details</span>
-              <div class="vault-modal-field">
-                <label class="vault-modal-label" for="vaultModalEditVaultName">Vault name</label>
-                <input id="vaultModalEditVaultName" type="text" class="form-control vault-modal-input" placeholder="Private Vault">
-              </div>
-              <div class="vault-modal-field">
-                <label class="vault-modal-label" for="vaultModalEditVaultDescription">Description</label>
-                <input id="vaultModalEditVaultDescription" type="text" class="form-control vault-modal-input" placeholder="What belongs in this vault">
-              </div>
-              <div class="vault-modal-actions">
-                <button id="vaultModalRenameVaultBtn" class="modern-btn modern-btn-secondary" type="button">Save Vault Details</button>
-                <button id="vaultModalDeleteVaultBtn" class="modern-btn modern-btn-secondary vault-modal-danger-btn" type="button">Delete Vault</button>
-              </div>
-              <div class="vault-modal-help">Deleting a vault permanently removes its encrypted records, grants, and explorer view.</div>
-            </div>
-
           </div>
         </section>
 
         <div id="vaultModalMainGrid" class="vault-modal-grid">
           <section class="vault-modal-panel">
             <div class="vault-modal-section-head">
-              <span class="vault-modal-section-kicker">Creation</span>
-              <h6 class="vault-modal-section-title">Save Encrypted Entry</h6>
-              <p class="vault-modal-section-description">Capture a new private entry. Ori maps it into the folder view by type and workspace while the payload remains encrypted at rest.</p>
-            </div>
-            <div class="vault-modal-field">
-              <label class="vault-modal-label" for="vaultModalEntryType">Entry type</label>
-              <select id="vaultModalEntryType" class="form-select vault-modal-select">
-                <option value="personal_note">Personal Note</option>
-                <option value="email_snippet">Email Snippet</option>
-                <option value="secret">Secret</option>
-              </select>
+              <span id="vaultModalWorkspaceKicker" class="vault-modal-section-kicker">Encrypted Folder</span>
+              <h6 id="vaultModalWorkspaceTitle" class="vault-modal-section-title">Folder View</h6>
+              <p id="vaultModalWorkspaceDescription" class="vault-modal-section-description">Browse the active vault like a protected folder. Use <strong>New Entry</strong> when you want to add something without leaving the explorer context.</p>
             </div>
 
-            <div class="vault-modal-field">
-              <label class="vault-modal-label" for="vaultModalEntryWorkspaceId">Workspace ID</label>
-              <input id="vaultModalEntryWorkspaceId" type="text" class="form-control vault-modal-input" placeholder="Optional workspace scope">
+            <div id="vaultModalWorkspaceTabs" class="vault-modal-workspace-tabs" role="tablist" aria-label="Vault workspace views">
+              <button id="vaultModalTabFolderBtn" class="vault-modal-tab is-active" type="button" role="tab" aria-selected="true" aria-controls="vaultModalFolderTabPanel" data-tab="folder">Folder View</button>
+              <button id="vaultModalTabSpacesBtn" class="vault-modal-tab" type="button" role="tab" aria-selected="false" aria-controls="vaultModalSpacesTabPanel" data-tab="spaces">Vault Spaces</button>
             </div>
 
-            <div class="vault-modal-field">
-              <label class="vault-modal-label" for="vaultModalEntryLabel">Label</label>
-              <input id="vaultModalEntryLabel" type="text" class="form-control vault-modal-input" placeholder="Passport copy, accountant email, family contacts">
-            </div>
-
-            <div class="vault-modal-field">
-              <label class="vault-modal-label" for="vaultModalEntryTags">Sensitive tags</label>
-              <input id="vaultModalEntryTags" type="text" class="form-control vault-modal-input" placeholder="Comma-separated tags">
-            </div>
-
-            <div class="vault-modal-field">
-              <label class="vault-modal-label" for="vaultModalEntrySource">Source</label>
-              <input id="vaultModalEntrySource" type="text" class="form-control vault-modal-input" placeholder="manual, connector, import">
-            </div>
-
-            <div class="vault-modal-field">
-              <label class="vault-modal-label" for="vaultModalEntryRetention">Retention policy</label>
-              <input id="vaultModalEntryRetention" type="text" class="form-control vault-modal-input" placeholder="keep_until_revoked">
-            </div>
-
-            <div class="vault-modal-field">
-              <label class="vault-modal-label" for="vaultModalEntryPayload">Payload JSON</label>
-              <textarea id="vaultModalEntryPayload" class="form-control vault-modal-textarea" rows="8" spellcheck="false" placeholder='{"note":"private"}'></textarea>
-            </div>
-
-            <div class="vault-modal-actions">
-              <button id="vaultModalSaveBtn" class="modern-btn modern-btn-primary" type="button">Save To Vault</button>
-              <button id="vaultModalResetBtn" class="modern-btn modern-btn-secondary" type="button">New Entry</button>
-            </div>
-
-            <div class="vault-modal-help">Use the full vault page for grants, exports, and broader administration.</div>
-          </section>
-
-          <section class="vault-modal-panel">
-            <div class="vault-modal-section-head">
-              <span class="vault-modal-section-kicker">Encrypted Folder</span>
-              <h6 class="vault-modal-section-title">Folder View</h6>
-              <p class="vault-modal-section-description">Browse the active vault like a protected folder. Metadata shapes the tree, while sensitive payloads stay hidden until explicitly revealed.</p>
-            </div>
-
-            <div class="vault-modal-records-toolbar">
-              <input id="vaultModalSearchInput" type="search" class="form-control vault-modal-search" placeholder="Search label, type, workspace, or tag">
-              <span id="vaultModalRecordsSummary" class="vault-modal-records-summary">Waiting for vault status...</span>
-            </div>
-
-            <div id="vaultModalFolderBreadcrumb" class="vault-modal-folder-breadcrumb" aria-label="Vault folder path"></div>
-
-            <div class="vault-modal-explorer-grid">
-              <div id="vaultModalFolderTree" class="vault-modal-folder-tree">
-                <div class="vault-modal-empty">Unlock the vault to browse the encrypted folder tree.</div>
+            <div id="vaultModalFolderTabPanel" class="vault-modal-workspace-panel" role="tabpanel" aria-labelledby="vaultModalTabFolderBtn">
+              <div class="vault-modal-records-toolbar">
+                <input id="vaultModalSearchInput" type="search" class="form-control vault-modal-search" placeholder="Search label, type, workspace, or tag">
+                <span id="vaultModalRecordsSummary" class="vault-modal-records-summary">Waiting for vault status...</span>
               </div>
 
-              <div id="vaultModalExplorerPreview" class="vault-modal-explorer-preview">
-                <div class="vault-modal-empty">Select a folder to inspect its encrypted contents.</div>
+              <div id="vaultModalFolderVaultTabs" class="vault-modal-folder-vault-tabs" role="tablist" aria-label="Vault folders"></div>
+
+              <div id="vaultModalFolderBreadcrumb" class="vault-modal-folder-breadcrumb" aria-label="Vault folder path" hidden></div>
+
+              <div class="vault-modal-explorer-grid">
+                <div id="vaultModalFolderTree" class="vault-modal-folder-tree">
+                  <div class="vault-modal-empty">Unlock the vault to browse the encrypted folder tree.</div>
+                </div>
+
+                <div id="vaultModalExplorerPreview" class="vault-modal-explorer-preview">
+                  <div class="vault-modal-empty">Select a folder to inspect its encrypted contents.</div>
+                </div>
+              </div>
+            </div>
+
+            <div id="vaultModalSpacesTabPanel" class="vault-modal-workspace-panel" role="tabpanel" aria-labelledby="vaultModalTabSpacesBtn" hidden>
+              <div class="vault-modal-vault-grid vault-modal-vault-grid-inline">
+                <div id="vaultModalVaultSelectionStack" class="vault-modal-vault-stack">
+                  <span class="vault-modal-vault-stack-title">Selected Vault</span>
+                  <div class="vault-modal-field">
+                    <label class="vault-modal-label" for="vaultModalVaultSelect">Active vault</label>
+                    <select id="vaultModalVaultSelect" class="form-select vault-modal-select">
+                      <option value="">Loading vaults...</option>
+                    </select>
+                    <div id="vaultModalVaultMeta" class="vault-modal-help">Checking available vaults...</div>
+                  </div>
+                  <div id="vaultModalSelectedVaultState" class="vault-modal-selected-vault-state">Select a vault to continue.</div>
+                  <div id="vaultModalVaultHint" class="vault-modal-help">Use the vault chip lock icon to unlock or lock the selected vault.</div>
+                  <div id="vaultModalVaultRail" class="vault-modal-vault-rail" aria-label="Available vaults"></div>
+                </div>
+
+                <div id="vaultModalVaultManageStack" class="vault-modal-vault-stack">
+                  <span class="vault-modal-vault-stack-title">Vault Details</span>
+                  <div class="vault-modal-field">
+                    <label class="vault-modal-label" for="vaultModalEditVaultName">Vault name</label>
+                    <input id="vaultModalEditVaultName" type="text" class="form-control vault-modal-input" placeholder="Private Vault">
+                  </div>
+                  <div class="vault-modal-field">
+                    <label class="vault-modal-label" for="vaultModalEditVaultDescription">Description</label>
+                    <input id="vaultModalEditVaultDescription" type="text" class="form-control vault-modal-input" placeholder="What belongs in this vault">
+                  </div>
+                  <div class="vault-modal-actions">
+                    <button id="vaultModalRenameVaultBtn" class="modern-btn modern-btn-secondary" type="button">Save Vault Details</button>
+                    <button id="vaultModalDeleteVaultBtn" class="modern-btn modern-btn-secondary vault-modal-danger-btn" type="button">Delete Vault</button>
+                  </div>
+                  <div class="vault-modal-help">Deleting a vault permanently removes its encrypted records, grants, and explorer view.</div>
+                </div>
               </div>
             </div>
           </section>
@@ -263,6 +223,64 @@
             <button id="vaultModalCreateCancelBtn" class="modern-btn modern-btn-secondary" type="button">Cancel</button>
           </div>
           <div class="vault-modal-help">Each vault has its own password. Keep it somewhere safe because Ori cannot recover it later.</div>
+        </div>
+      </div>
+
+      <div id="vaultModalEntryOverlay" class="vault-modal-unlock-overlay vault-modal-entry-overlay" hidden>
+        <button type="button" class="vault-modal-unlock-backdrop" data-action="dismiss-entry-dialog" aria-label="Close create entry dialog"></button>
+        <div class="vault-modal-unlock-dialog vault-modal-entry-dialog" role="dialog" aria-modal="true" aria-labelledby="vaultModalEntryDialogTitle">
+          <div class="vault-modal-section-head">
+            <span class="vault-modal-section-kicker">New Entry</span>
+            <h6 id="vaultModalEntryDialogTitle" class="vault-modal-section-title">Save Encrypted Entry</h6>
+            <p class="vault-modal-section-description">Capture a new private entry without leaving the folder view. Metadata shapes the explorer tree while the payload stays encrypted at rest.</p>
+          </div>
+
+          <div class="vault-modal-field">
+            <label class="vault-modal-label" for="vaultModalEntryType">Entry type</label>
+            <select id="vaultModalEntryType" class="form-select vault-modal-select">
+              <option value="personal_note">Personal Note</option>
+              <option value="email_snippet">Email Snippet</option>
+              <option value="secret">Secret</option>
+            </select>
+          </div>
+
+          <div class="vault-modal-field">
+            <label class="vault-modal-label" for="vaultModalEntryWorkspaceId">Workspace ID</label>
+            <input id="vaultModalEntryWorkspaceId" type="text" class="form-control vault-modal-input" placeholder="Optional workspace scope">
+          </div>
+
+          <div class="vault-modal-field">
+            <label class="vault-modal-label" for="vaultModalEntryLabel">Label</label>
+            <input id="vaultModalEntryLabel" type="text" class="form-control vault-modal-input" placeholder="Passport copy, accountant email, family contacts">
+          </div>
+
+          <div class="vault-modal-field">
+            <label class="vault-modal-label" for="vaultModalEntryTags">Sensitive tags</label>
+            <input id="vaultModalEntryTags" type="text" class="form-control vault-modal-input" placeholder="Comma-separated tags">
+          </div>
+
+          <div class="vault-modal-field">
+            <label class="vault-modal-label" for="vaultModalEntrySource">Source</label>
+            <input id="vaultModalEntrySource" type="text" class="form-control vault-modal-input" placeholder="manual, connector, import">
+          </div>
+
+          <div class="vault-modal-field">
+            <label class="vault-modal-label" for="vaultModalEntryRetention">Retention policy</label>
+            <input id="vaultModalEntryRetention" type="text" class="form-control vault-modal-input" placeholder="keep_until_revoked">
+          </div>
+
+          <div class="vault-modal-field">
+            <label class="vault-modal-label" for="vaultModalEntryPayload">Payload JSON</label>
+            <textarea id="vaultModalEntryPayload" class="form-control vault-modal-textarea" rows="8" spellcheck="false" placeholder='{"note":"private"}'></textarea>
+          </div>
+
+          <div class="vault-modal-actions">
+            <button id="vaultModalSaveBtn" class="modern-btn modern-btn-primary" type="button">Save To Vault</button>
+            <button id="vaultModalResetBtn" class="modern-btn modern-btn-secondary" type="button">Reset</button>
+            <button id="vaultModalEntryCancelBtn" class="modern-btn modern-btn-secondary" type="button">Cancel</button>
+          </div>
+
+          <div class="vault-modal-help">Use the full vault page for grants, exports, and broader administration.</div>
         </div>
       </div>
     </div>
