@@ -302,6 +302,15 @@
     }
   }
 
+  async function fetchMarketplaceInstalledSkills() {
+    try {
+      const data = await apiRequest('/api/skills/marketplace/installed');
+      return Array.isArray(data?.skills) ? data.skills : [];
+    } catch (_error) {
+      return [];
+    }
+  }
+
   async function searchMarketplaceSkills(query) {
     try {
       const data = await apiRequest('/api/skills/marketplace/search', {
@@ -736,7 +745,7 @@
       notes.push('Registry MCP suggestions will be installed globally before they are bound to the workspace.');
     }
     if (skills.some((item) => item.action === 'install_attach')) {
-      notes.push('Marketplace skills will be installed before they are attached to the workspace.');
+      notes.push('Marketplace skills will be installed globally before they are attached to the workspace.');
     }
     notes.push('Selected MCPs and skills will be shared with every agent Ori adds through this setup.');
     return notes;
@@ -835,7 +844,7 @@
             <span style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
               <span style="font-weight: 600; color: var(--text-primary);">${escapeHtml(item.name)}</span>
               <span class="workspace-detail-mcp-chip ${item.action.indexOf('install') >= 0 ? 'source' : 'status'}">
-                ${item.action.indexOf('install') >= 0 ? 'Install + Attach' : (kind === 'mcp' ? 'Bind' : 'Attach')}
+                ${item.action.indexOf('install') >= 0 ? (kind === 'mcp' ? 'Install Globally + Bind' : 'Install Globally + Attach') : (kind === 'mcp' ? 'Bind' : 'Attach')}
               </span>
               ${(
                 (kind === 'mcp' && item.source === 'configured') ||
@@ -1062,9 +1071,29 @@
     };
   }
 
+  function findConfiguredMCPServer(servers, candidate) {
+    const candidateName = normalizeText(candidate?.name);
+    return (Array.isArray(servers) ? servers : []).find((server) => {
+      const serverName = normalizeText(server?.name);
+      return serverName && serverName === candidateName;
+    }) || null;
+  }
+
   async function ensureGlobalMCPReady(candidate) {
-    if (!candidate || candidate.action !== 'install_bind') {
-      return String(candidate?.name || '').trim();
+    if (!candidate) {
+      return '';
+    }
+
+    let configured = findConfiguredMCPServer(await fetchConfiguredMCPServers(), candidate);
+    if (configured) {
+      if (configured.enabled === false) {
+        await apiRequest(`/api/mcp/servers/${encodeURIComponent(configured.name)}/enable`, { method: 'POST' });
+      }
+      return String(configured.name || candidate.name || '').trim();
+    }
+
+    if (candidate.action !== 'install_bind') {
+      throw new Error(`MCP ${candidate.name} is not installed globally`);
     }
 
     const payload = buildMCPInstallPayload(candidate);
@@ -1077,11 +1106,20 @@
       return payload.name;
     } catch (error) {
       const message = String(error?.message || '');
-      if (message.toLowerCase().includes('already exists')) {
-        return payload.name;
+      if (!message.toLowerCase().includes('already exists')) {
+        throw error;
       }
-      throw error;
     }
+
+    configured = findConfiguredMCPServer(await fetchConfiguredMCPServers(), candidate);
+    if (configured) {
+      if (configured.enabled === false) {
+        await apiRequest(`/api/mcp/servers/${encodeURIComponent(configured.name)}/enable`, { method: 'POST' });
+      }
+      return String(configured.name || payload.name).trim();
+    }
+
+    throw new Error(`MCP ${candidate.name} was not installed globally`);
   }
 
   async function ensureWorkspaceMCPBinding(workspaceId, workspaceState, candidate) {
@@ -1159,13 +1197,48 @@
     }
   }
 
+  function parseMarketplaceSkillPackage(packageName) {
+    const trimmed = String(packageName || '').trim();
+    if (!trimmed) {
+      return { skillName: '' };
+    }
+    const atIndex = trimmed.lastIndexOf('@');
+    if (atIndex <= 0 || atIndex >= trimmed.length - 1) {
+      return { skillName: '' };
+    }
+    return {
+      skillName: trimmed.slice(atIndex + 1).trim()
+    };
+  }
+
+  function resolveInstalledSkillName(installedSkills, candidate) {
+    const requestedName = normalizeText(candidate?.name);
+    const packageSkillName = normalizeText(parseMarketplaceSkillPackage(candidate?.packageName).skillName);
+    const match = (Array.isArray(installedSkills) ? installedSkills : []).find((skill) => {
+      const installedName = normalizeText(skill?.name);
+      if (!installedName) return false;
+      return installedName === requestedName || (packageSkillName && installedName === packageSkillName);
+    });
+    return String(match?.name || '').trim();
+  }
+
   async function ensureInstalledSkill(candidate) {
-    if (!candidate || candidate.action !== 'install_attach') {
+    if (!candidate) {
+      return '';
+    }
+
+    if (candidate.action !== 'install_attach') {
       return String(candidate?.name || '').trim();
     }
 
     if (!candidate.packageName) {
       throw new Error(`Skill ${candidate.name} is missing install details`);
+    }
+
+    const installedBefore = await fetchMarketplaceInstalledSkills();
+    const existingSkillName = resolveInstalledSkillName(installedBefore, candidate);
+    if (existingSkillName) {
+      return existingSkillName;
     }
 
     try {
@@ -1179,7 +1252,14 @@
         throw error;
       }
     }
-    return String(candidate.name || '').trim();
+
+    const installedAfter = await fetchMarketplaceInstalledSkills();
+    const installedSkillName = resolveInstalledSkillName(installedAfter, candidate);
+    if (installedSkillName) {
+      return installedSkillName;
+    }
+
+    throw new Error(`Skill ${candidate.name} was not installed globally`);
   }
 
   async function ensureWorkspaceSkillBinding(workspaceId, workspaceState, candidate) {

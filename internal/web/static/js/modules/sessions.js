@@ -3429,9 +3429,9 @@ const sessionManager = {
         workspaceBriefResult.notesCreated > 0
       ) {
         const summaryParts = [];
-        if (bootstrapApplyResult.invitedAgents > 0) summaryParts.push(`${bootstrapApplyResult.invitedAgents} agents`);
-        if (bootstrapApplyResult.boundMCPs > 0) summaryParts.push(`${bootstrapApplyResult.boundMCPs} MCPs`);
-        if (bootstrapApplyResult.attachedSkills > 0) summaryParts.push(`${bootstrapApplyResult.attachedSkills} skills`);
+        if (bootstrapApplyResult.invitedAgents > 0) summaryParts.push(`${bootstrapApplyResult.invitedAgents} agent${bootstrapApplyResult.invitedAgents === 1 ? '' : 's'} invited`);
+        if (bootstrapApplyResult.boundMCPs > 0) summaryParts.push(`${bootstrapApplyResult.boundMCPs} MCP${bootstrapApplyResult.boundMCPs === 1 ? '' : 's'} bound`);
+        if (bootstrapApplyResult.attachedSkills > 0) summaryParts.push(`${bootstrapApplyResult.attachedSkills} skill${bootstrapApplyResult.attachedSkills === 1 ? '' : 's'} attached`);
         if (askOriSeedResult.tasksCreated > 0) summaryParts.push(`${askOriSeedResult.tasksCreated} Assistant task`);
         if (askOriSeedResult.notesCreated > 0) summaryParts.push(`${askOriSeedResult.notesCreated} Assistant note`);
         if (workspaceBriefResult.notesCreated > 0) summaryParts.push('workspace brief');
@@ -3441,7 +3441,11 @@ const sessionManager = {
           workspaceBriefResult.errors.length > 0 ||
           bootstrapApplyResult.failures.length > 0
         ) {
-          this.showToast(`${importEnabled ? 'Workspace imported' : 'Workspace created'} with partial setup (${summaryText}).`, 'warning');
+          const firstFailure = bootstrapApplyResult.failures[0];
+          this.showToast(
+            `${importEnabled ? 'Workspace imported' : 'Workspace created'} with partial setup (${summaryText}).${firstFailure ? ` ${firstFailure}` : ''}`,
+            'warning'
+          );
         } else {
           this.showToast(`${importEnabled ? 'Workspace imported' : 'Workspace created'} with setup (${summaryText}).`, 'success');
         }

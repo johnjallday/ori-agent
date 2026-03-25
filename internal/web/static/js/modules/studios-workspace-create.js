@@ -583,13 +583,13 @@ async function createWorkspace() {
 
     if (workspaceId) {
       const successMessageParts = [];
-      if (bootstrapApplyResult.invitedAgents > 0) successMessageParts.push(`${bootstrapApplyResult.invitedAgents} agents`);
-      if (bootstrapApplyResult.boundMCPs > 0) successMessageParts.push(`${bootstrapApplyResult.boundMCPs} MCPs`);
-      if (bootstrapApplyResult.attachedSkills > 0) successMessageParts.push(`${bootstrapApplyResult.attachedSkills} skills`);
+      if (bootstrapApplyResult.invitedAgents > 0) successMessageParts.push(`${bootstrapApplyResult.invitedAgents} agent${bootstrapApplyResult.invitedAgents === 1 ? '' : 's'} invited`);
+      if (bootstrapApplyResult.boundMCPs > 0) successMessageParts.push(`${bootstrapApplyResult.boundMCPs} MCP${bootstrapApplyResult.boundMCPs === 1 ? '' : 's'} bound`);
+      if (bootstrapApplyResult.attachedSkills > 0) successMessageParts.push(`${bootstrapApplyResult.attachedSkills} skill${bootstrapApplyResult.attachedSkills === 1 ? '' : 's'} attached`);
       if (typeof window.showToast === 'function') {
         if (bootstrapApplyResult.failures.length > 0) {
           window.showToast(
-            `${importEnabled ? 'Workspace imported' : 'Workspace created'} with partial setup${successMessageParts.length > 0 ? ` (${successMessageParts.join(', ')})` : ''}.`,
+            `${importEnabled ? 'Workspace imported' : 'Workspace created'} with partial setup${successMessageParts.length > 0 ? ` (${successMessageParts.join(', ')})` : ''}.${bootstrapApplyResult.failures[0] ? ` ${bootstrapApplyResult.failures[0]}` : ''}`,
             'warning'
           );
         } else if (successMessageParts.length > 0) {
