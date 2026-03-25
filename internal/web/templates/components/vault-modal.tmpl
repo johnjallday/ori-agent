@@ -73,7 +73,10 @@
               <span class="vault-modal-section-kicker">Vault Spaces</span>
               <h6 class="vault-modal-section-title">Switch, Manage, Or Create</h6>
             </div>
-            <p class="vault-modal-section-description">Vault-level controls live here. Saving encrypted entries and browsing the folder view stay below.</p>
+            <div class="vault-modal-shell-actions">
+              <p class="vault-modal-section-description">Vault-level controls live here. Saving encrypted entries and browsing the folder view stay below.</p>
+              <button id="vaultModalOpenCreateVaultBtn" class="modern-btn modern-btn-secondary" type="button">New Vault</button>
+            </div>
           </div>
 
           <div class="vault-modal-vault-grid">
@@ -87,11 +90,7 @@
                 <div id="vaultModalVaultMeta" class="vault-modal-help">Checking available vaults...</div>
               </div>
               <div id="vaultModalSelectedVaultState" class="vault-modal-selected-vault-state">Select a vault to continue.</div>
-              <div class="vault-modal-actions vault-modal-vault-actions">
-                <button id="vaultModalSelectedVaultUnlockBtn" class="modern-btn modern-btn-primary" type="button">Unlock Vault</button>
-                <button id="vaultModalLockBtn" class="modern-btn modern-btn-secondary" type="button">Lock Vault</button>
-                <button id="vaultModalRefreshBtn" class="modern-btn modern-btn-secondary" type="button">Refresh</button>
-              </div>
+              <div id="vaultModalVaultHint" class="vault-modal-help">Use the vault chip lock icon to unlock or lock the selected vault.</div>
               <div id="vaultModalVaultRail" class="vault-modal-vault-rail" aria-label="Available vaults"></div>
             </div>
 
@@ -112,29 +111,6 @@
               <div class="vault-modal-help">Deleting a vault permanently removes its encrypted records, grants, and explorer view.</div>
             </div>
 
-            <div id="vaultModalVaultCreateStack" class="vault-modal-vault-stack">
-              <span id="vaultModalVaultCreateTitle" class="vault-modal-vault-stack-title">New Vault</span>
-              <div class="vault-modal-field">
-                <label class="vault-modal-label" for="vaultModalNewVaultName">New vault name</label>
-                <input id="vaultModalNewVaultName" type="text" class="form-control vault-modal-input" placeholder="Finance Vault, Travel Vault, Family Vault">
-              </div>
-              <div class="vault-modal-field">
-                <label class="vault-modal-label" for="vaultModalNewVaultDescription">Description</label>
-                <input id="vaultModalNewVaultDescription" type="text" class="form-control vault-modal-input" placeholder="Optional note about what belongs in this vault">
-              </div>
-              <div class="vault-modal-field">
-                <label class="vault-modal-label" for="vaultModalNewVaultPassword">Vault password</label>
-                <input id="vaultModalNewVaultPassword" type="password" class="form-control vault-modal-input" placeholder="Required for this vault">
-              </div>
-              <div class="vault-modal-field">
-                <label class="vault-modal-label" for="vaultModalConfirmVaultPassword">Confirm vault password</label>
-                <input id="vaultModalConfirmVaultPassword" type="password" class="form-control vault-modal-input" placeholder="Re-enter the vault password">
-              </div>
-              <div class="vault-modal-actions">
-                <button id="vaultModalCreateVaultBtn" class="modern-btn modern-btn-secondary" type="button">Create Vault</button>
-              </div>
-              <div class="vault-modal-help">Each vault has its own password. Keep it somewhere safe because Ori cannot recover it later.</div>
-            </div>
           </div>
         </section>
 
@@ -254,6 +230,39 @@
             <button id="vaultModalUnlockBtn" class="modern-btn modern-btn-primary" type="button">Unlock Vault</button>
             <button id="vaultModalUnlockCancelBtn" class="modern-btn modern-btn-secondary" type="button">Cancel</button>
           </div>
+        </div>
+      </div>
+
+      <div id="vaultModalCreateOverlay" class="vault-modal-unlock-overlay vault-modal-create-overlay" hidden>
+        <button type="button" class="vault-modal-unlock-backdrop" data-action="dismiss-create-dialog" aria-label="Close create vault dialog"></button>
+        <div class="vault-modal-unlock-dialog vault-modal-create-dialog" role="dialog" aria-modal="true" aria-labelledby="vaultModalCreateDialogTitle">
+          <div class="vault-modal-section-head">
+            <span class="vault-modal-section-kicker">New Vault</span>
+            <h6 id="vaultModalCreateDialogTitle" class="vault-modal-section-title">Create New Vault</h6>
+            <p id="vaultModalCreateDialogDescription" class="vault-modal-section-description">Create a separately encrypted vault with its own password.</p>
+          </div>
+
+          <div class="vault-modal-field">
+            <label class="vault-modal-label" for="vaultModalNewVaultName">New vault name</label>
+            <input id="vaultModalNewVaultName" type="text" class="form-control vault-modal-input" placeholder="Finance Vault, Travel Vault, Family Vault">
+          </div>
+          <div class="vault-modal-field">
+            <label class="vault-modal-label" for="vaultModalNewVaultDescription">Description</label>
+            <input id="vaultModalNewVaultDescription" type="text" class="form-control vault-modal-input" placeholder="Optional note about what belongs in this vault">
+          </div>
+          <div class="vault-modal-field">
+            <label class="vault-modal-label" for="vaultModalNewVaultPassword">Vault password</label>
+            <input id="vaultModalNewVaultPassword" type="password" class="form-control vault-modal-input" placeholder="Required for this vault">
+          </div>
+          <div class="vault-modal-field">
+            <label class="vault-modal-label" for="vaultModalConfirmVaultPassword">Confirm vault password</label>
+            <input id="vaultModalConfirmVaultPassword" type="password" class="form-control vault-modal-input" placeholder="Re-enter the vault password">
+          </div>
+          <div class="vault-modal-actions">
+            <button id="vaultModalCreateVaultBtn" class="modern-btn modern-btn-primary" type="button">Create Vault</button>
+            <button id="vaultModalCreateCancelBtn" class="modern-btn modern-btn-secondary" type="button">Cancel</button>
+          </div>
+          <div class="vault-modal-help">Each vault has its own password. Keep it somewhere safe because Ori cannot recover it later.</div>
         </div>
       </div>
     </div>

@@ -34,7 +34,8 @@
     selectedFolderPath: ROOT_FOLDER_PATH,
     hasHydrated: false,
     isHydrating: false,
-    unlockDialogOpen: false
+    unlockDialogOpen: false,
+    createDialogOpen: false
   };
 
   let alertTimeoutId = 0;
@@ -90,12 +91,9 @@
       vaultShell: document.getElementById('vaultModalVaultShell'),
       vaultSelectionStack: document.getElementById('vaultModalVaultSelectionStack'),
       selectedVaultState: document.getElementById('vaultModalSelectedVaultState'),
-      selectedVaultUnlockBtn: document.getElementById('vaultModalSelectedVaultUnlockBtn'),
-      lockBtn: document.getElementById('vaultModalLockBtn'),
-      refreshBtn: document.getElementById('vaultModalRefreshBtn'),
+      vaultHint: document.getElementById('vaultModalVaultHint'),
       vaultManageStack: document.getElementById('vaultModalVaultManageStack'),
-      vaultCreateStack: document.getElementById('vaultModalVaultCreateStack'),
-      vaultCreateTitle: document.getElementById('vaultModalVaultCreateTitle'),
+      openCreateVaultBtn: document.getElementById('vaultModalOpenCreateVaultBtn'),
       vaultSelect: document.getElementById('vaultModalVaultSelect'),
       vaultMeta: document.getElementById('vaultModalVaultMeta'),
       vaultRail: document.getElementById('vaultModalVaultRail'),
@@ -108,6 +106,10 @@
       newVaultPasswordInput: document.getElementById('vaultModalNewVaultPassword'),
       confirmVaultPasswordInput: document.getElementById('vaultModalConfirmVaultPassword'),
       createVaultBtn: document.getElementById('vaultModalCreateVaultBtn'),
+      createOverlay: document.getElementById('vaultModalCreateOverlay'),
+      createDialogTitle: document.getElementById('vaultModalCreateDialogTitle'),
+      createDialogDescription: document.getElementById('vaultModalCreateDialogDescription'),
+      createCancelBtn: document.getElementById('vaultModalCreateCancelBtn'),
       unlockOverlay: document.getElementById('vaultModalUnlockOverlay'),
       unlockDialogTitle: document.getElementById('vaultModalUnlockDialogTitle'),
       unlockDialogDescription: document.getElementById('vaultModalUnlockDialogDescription'),
@@ -407,6 +409,48 @@
     return String(vaultItem.name || 'Vault');
   }
 
+  function currentVaultActionButton() {
+    return elements?.vaultRail?.querySelector('[data-action="toggle-vault-access"]') || null;
+  }
+
+  function vaultLockIcon(locked) {
+    if (locked) {
+      return '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12,1A5,5 0 0,1 17,6V8H18A2,2 0 0,1 20,10V21A2,2 0 0,1 18,23H6A2,2 0 0,1 4,21V10A2,2 0 0,1 6,8H7V6A5,5 0 0,1 12,1M12,3A3,3 0 0,0 9,6V8H15V6A3,3 0 0,0 12,3M12,12A2,2 0 0,0 10,14A2,2 0 0,0 11,15.73V18H13V15.73A2,2 0 0,0 14,14A2,2 0 0,0 12,12Z"/></svg>';
+    }
+
+    return '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M18,8H17V6A5,5 0 0,0 7,6H9A3,3 0 0,1 15,6V8H6A2,2 0 0,0 4,10V21A2,2 0 0,0 6,23H18A2,2 0 0,0 20,21V10A2,2 0 0,0 18,8M12,17A2,2 0 0,1 10,15A2,2 0 0,1 12,13A2,2 0 0,1 14,15A2,2 0 0,1 12,17Z"/></svg>';
+  }
+
+  function syncCreateDialog() {
+    if (!elements?.createOverlay) {
+      return;
+    }
+
+    const showEmptyCreateMode = state.hasHydrated && state.vaults.length === 0;
+    const canShow = Boolean(state.createDialogOpen);
+
+    if (elements.createDialogTitle) {
+      elements.createDialogTitle.textContent = showEmptyCreateMode ? 'Create Your First Vault' : 'Create New Vault';
+    }
+
+    if (elements.createDialogDescription) {
+      elements.createDialogDescription.textContent = showEmptyCreateMode
+        ? 'Start with one encrypted vault. Each vault has its own password and protected record set.'
+        : 'Create a separately encrypted vault with its own password.';
+    }
+
+    if (elements.openCreateVaultBtn) {
+      elements.openCreateVaultBtn.textContent = showEmptyCreateMode ? 'Create First Vault' : 'New Vault';
+    }
+
+    if (elements.createVaultBtn && !elements.createVaultBtn.disabled) {
+      elements.createVaultBtn.textContent = showEmptyCreateMode ? 'Create First Vault' : 'Create Vault';
+    }
+
+    elements.createOverlay.hidden = !canShow;
+    elements.modal?.classList.toggle('has-create-dialog', canShow);
+  }
+
   function syncUnlockDialog() {
     if (!elements?.unlockOverlay) {
       return;
@@ -476,38 +520,18 @@
       elements.selectedVaultState.hidden = isInitialHydrate || showEmptyCreateMode || !hasVaults;
     }
 
-    if (elements.selectedVaultUnlockBtn) {
-      elements.selectedVaultUnlockBtn.hidden = isInitialHydrate || showEmptyCreateMode || !hasVaults || unlocked;
+    if (elements.vaultHint) {
+      elements.vaultHint.hidden = isInitialHydrate || showEmptyCreateMode || !hasVaults;
     }
 
     if (elements.vaultManageStack) {
       elements.vaultManageStack.hidden = isInitialHydrate || showEmptyCreateMode || !unlocked;
     }
 
-    if (elements.vaultCreateTitle) {
-      elements.vaultCreateTitle.textContent = showEmptyCreateMode ? 'Create A Vault' : 'New Vault';
-    }
-
-    if (elements.createVaultBtn && !elements.createVaultBtn.disabled) {
-      elements.createVaultBtn.textContent = showEmptyCreateMode ? 'Create First Vault' : 'Create Vault';
-    }
-
-    if (elements.vaultCreateStack) {
-      elements.vaultCreateStack.classList.toggle('is-primary', showEmptyCreateMode);
-    }
-
     if (elements.vaultShell) {
       elements.vaultShell.hidden = isInitialHydrate;
       elements.vaultShell.classList.toggle('is-empty', showEmptyCreateMode);
       elements.vaultShell.classList.toggle('is-compact', hasVaults && !unlocked);
-    }
-
-    if (elements.lockBtn) {
-      elements.lockBtn.hidden = isInitialHydrate || showEmptyCreateMode || !unlocked;
-    }
-
-    if (elements.refreshBtn) {
-      elements.refreshBtn.hidden = isInitialHydrate || showEmptyCreateMode || !hasVaults;
     }
 
     if (elements.mainGrid) {
@@ -522,6 +546,7 @@
       elements.footer.classList.toggle('is-empty', settingsHidden);
     }
 
+    syncCreateDialog();
     syncUnlockDialog();
   }
 
@@ -564,12 +589,26 @@
     }
 
     elements.vaultRail.innerHTML = state.vaults.map(function(item) {
-      const activeClass = item.id === activeVaultID() ? ' is-active' : '';
+      const isActive = item.id === activeVaultID();
+      const activeClass = isActive ? ' is-active' : '';
+      const canToggleAccess = isActive && Boolean(state.status?.available);
+      const locked = canToggleAccess ? Boolean(state.status?.locked) : true;
+      const actionButton = canToggleAccess
+        ? (
+          '<button type="button" class="vault-modal-vault-pill-icon" data-action="toggle-vault-access" data-vault-id="' + escapeHTML(item.id) + '" aria-label="' + escapeHTML((locked ? 'Unlock ' : 'Lock ') + item.name) + '" title="' + escapeHTML(locked ? 'Unlock vault' : 'Lock vault') + '">' +
+            vaultLockIcon(locked) +
+          '</button>'
+        )
+        : '';
+
       return (
-        '<button type="button" class="vault-modal-vault-pill' + activeClass + '" data-action="select-vault-chip" data-vault-id="' + escapeHTML(item.id) + '">' +
-          '<span class="vault-modal-vault-pill-label">' + escapeHTML(item.name) + '</span>' +
-          '<span class="vault-modal-vault-pill-count">' + String(vaultRecordCount(item)) + '</span>' +
-        '</button>'
+        '<div class="vault-modal-vault-pill' + activeClass + '">' +
+          '<button type="button" class="vault-modal-vault-pill-main" data-action="select-vault-chip" data-vault-id="' + escapeHTML(item.id) + '">' +
+            '<span class="vault-modal-vault-pill-label">' + escapeHTML(item.name) + '</span>' +
+            '<span class="vault-modal-vault-pill-count">' + String(vaultRecordCount(item)) + '</span>' +
+          '</button>' +
+          actionButton +
+        '</div>'
       );
     }).join('');
   }
@@ -618,13 +657,39 @@
     syncVaultEditor();
   }
 
+  function closeCreateDialog(options) {
+    state.createDialogOpen = false;
+    syncCreateDialog();
+    const restoreFocus = options?.restoreFocus !== false;
+    if (restoreFocus && elements?.modal?.classList.contains('show')) {
+      window.requestAnimationFrame(function() {
+        elements?.openCreateVaultBtn?.focus();
+      });
+    }
+  }
+
+  function openCreateDialog() {
+    state.unlockDialogOpen = false;
+    syncUnlockDialog();
+    state.createDialogOpen = true;
+    syncCreateDialog();
+    window.requestAnimationFrame(function() {
+      elements?.newVaultNameInput?.focus();
+    });
+  }
+
   function closeUnlockDialog(options) {
     state.unlockDialogOpen = false;
     syncUnlockDialog();
     const restoreFocus = options?.restoreFocus !== false;
     if (restoreFocus && elements?.modal?.classList.contains('show') && state.status?.locked) {
       window.requestAnimationFrame(function() {
-        elements?.selectedVaultUnlockBtn?.focus();
+        const actionButton = currentVaultActionButton();
+        if (actionButton) {
+          actionButton.focus();
+          return;
+        }
+        elements?.vaultSelect?.focus();
       });
     }
   }
@@ -644,6 +709,8 @@
       return;
     }
 
+    state.createDialogOpen = false;
+    syncCreateDialog();
     state.unlockDialogOpen = true;
     syncUnlockDialog();
     window.requestAnimationFrame(function() {
@@ -742,6 +809,7 @@
         writeStoredVaultID(state.selectedVaultID);
         renderVaultSelector();
       }
+      closeCreateDialog({ restoreFocus: false });
       clearSelection();
       state.selectedFolderPath = ROOT_FOLDER_PATH;
       notify('Vault created.', 'success');
@@ -848,18 +916,6 @@
       elements.resetBtn.disabled = false;
     }
 
-    if (elements.lockBtn) {
-      elements.lockBtn.disabled = !state.status || !state.status.available || Boolean(locked);
-    }
-
-    if (elements.refreshBtn) {
-      elements.refreshBtn.disabled = !state.status || !state.status.available;
-    }
-
-    if (elements.selectedVaultUnlockBtn) {
-      elements.selectedVaultUnlockBtn.disabled = !state.status || !state.status.available || !Boolean(locked);
-    }
-
     if (elements.unlockBtn) {
       elements.unlockBtn.disabled = !state.status || !state.status.available || !Boolean(locked);
     }
@@ -893,6 +949,10 @@
       if (elements.selectedVaultState) {
         elements.selectedVaultState.textContent = 'Create a vault to begin.';
       }
+      if (elements.vaultHint) {
+        elements.vaultHint.textContent = 'Use the vault chip lock icon to unlock or lock the selected vault.';
+      }
+      renderVaultRail();
       closeUnlockDialog({ restoreFocus: false });
       applyModalMode();
       updateLauncherCount(state.status);
@@ -946,6 +1006,12 @@
         ? vaultName + ' is locked. Unlock it to reveal the encrypted folder.'
         : vaultName + ' is loaded and ready for encrypted entry access.';
     }
+    if (elements.vaultHint) {
+      elements.vaultHint.textContent = locked
+        ? 'Use the lock icon on the selected vault chip to unlock it.'
+        : 'Use the open-lock icon on the selected vault chip to lock it again.';
+    }
+    renderVaultRail();
 
     applyModalMode();
     updateLauncherCount(state.status);
@@ -1504,6 +1570,11 @@
       return;
     }
 
+    if (state.createDialogOpen && !elements.createOverlay?.hidden) {
+      elements.newVaultNameInput?.focus();
+      return;
+    }
+
     if (state.unlockDialogOpen && !elements.unlockOverlay?.hidden) {
       elements.passwordInput?.focus();
       return;
@@ -1514,7 +1585,12 @@
       return;
     }
     if (state.status && state.status.locked) {
-      elements.selectedVaultUnlockBtn?.focus();
+      const actionButton = currentVaultActionButton();
+      if (actionButton) {
+        actionButton.focus();
+        return;
+      }
+      elements.vaultSelect?.focus();
       return;
     }
     elements.searchInput?.focus();
@@ -1578,8 +1654,10 @@
       return;
     }
 
+    const actionButton = currentVaultActionButton();
+
     try {
-      setButtonLoading(elements.lockBtn, true, 'Locking');
+      setButtonLoading(actionButton, true, 'Locking');
       await apiRequest(vaultURL('/api/vault/lock'), {
         method: 'POST',
         body: {}
@@ -1591,7 +1669,7 @@
       console.error('Failed to lock vault:', error);
       showAlert(error.message || 'Failed to lock vault.', 'error');
     } finally {
-      setButtonLoading(elements.lockBtn, false);
+      setButtonLoading(actionButton, false);
       setInteractiveState(Boolean(state.status?.locked));
     }
   }
@@ -1733,16 +1811,27 @@
       }
     });
 
-    elements.selectedVaultUnlockBtn?.addEventListener('click', function() {
-      openUnlockDialog();
+    elements.openCreateVaultBtn?.addEventListener('click', function() {
+      openCreateDialog();
     });
 
     elements.unlockBtn?.addEventListener('click', function() {
       unlockVault();
     });
 
+    elements.createCancelBtn?.addEventListener('click', function() {
+      closeCreateDialog();
+    });
+
     elements.unlockCancelBtn?.addEventListener('click', function() {
       closeUnlockDialog();
+    });
+
+    elements.createOverlay?.addEventListener('click', function(event) {
+      const dismissTrigger = event.target.closest('[data-action="dismiss-create-dialog"]');
+      if (dismissTrigger) {
+        closeCreateDialog();
+      }
     });
 
     elements.unlockOverlay?.addEventListener('click', function(event) {
@@ -1752,25 +1841,47 @@
       }
     });
 
-    elements.lockBtn?.addEventListener('click', function() {
-      lockVault();
-    });
-
-    elements.refreshBtn?.addEventListener('click', function() {
-      refreshVault();
-    });
-
     elements.vaultSelect?.addEventListener('change', function(event) {
       switchVault(event.target.value, { promptUnlock: true });
     });
 
     elements.vaultRail?.addEventListener('click', function(event) {
-      const trigger = event.target.closest('[data-action="select-vault-chip"]');
+      const trigger = event.target.closest('[data-action]');
       if (!trigger) {
         return;
       }
 
-      switchVault(trigger.getAttribute('data-vault-id'), { promptUnlock: true });
+      const action = trigger.getAttribute('data-action');
+      const vaultID = trigger.getAttribute('data-vault-id');
+      if (!vaultID) {
+        return;
+      }
+
+      if (action === 'toggle-vault-access') {
+        if (vaultID !== activeVaultID()) {
+          switchVault(vaultID, { promptUnlock: false }).then(function() {
+            if (state.status?.locked) {
+              openUnlockDialog();
+              return;
+            }
+            lockVault();
+          }).catch(function(error) {
+            console.error('Failed to switch vault before toggling access:', error);
+          });
+          return;
+        }
+
+        if (state.status?.locked) {
+          openUnlockDialog();
+        } else if (state.status?.available) {
+          lockVault();
+        }
+        return;
+      }
+
+      if (action === 'select-vault-chip') {
+        switchVault(vaultID, { promptUnlock: true });
+      }
     });
 
     elements.renameVaultBtn?.addEventListener('click', function() {
@@ -1824,6 +1935,12 @@
     bindBreadcrumbEvents();
 
     elements.modal?.addEventListener('keydown', function(event) {
+      if (event.key === 'Escape' && state.createDialogOpen) {
+        event.preventDefault();
+        event.stopPropagation();
+        closeCreateDialog();
+        return;
+      }
       if (event.key === 'Escape' && state.unlockDialogOpen) {
         event.preventDefault();
         event.stopPropagation();
@@ -1843,6 +1960,7 @@
 
       elements.modal.addEventListener('hidden.bs.modal', function() {
         setLauncherActive(false);
+        closeCreateDialog({ restoreFocus: false });
         closeUnlockDialog();
       });
 
