@@ -124,13 +124,33 @@ func TestHandlerRecordLifecycle(t *testing.T) {
 	}
 
 	updateRec := performJSONRequest(t, handler, http.MethodPatch, "/api/vault/records/"+created.Record.ID, map[string]any{
-		"label": "Passport Updated",
+		"type":             "secret",
+		"workspace_id":     "ws-secure",
+		"label":            "Passport Updated",
+		"tags":             []string{"Travel", "Docs"},
+		"source":           "import",
+		"retention_policy": "until_rotated",
 		"payload": map[string]any{
 			"number": "X7654321",
 		},
 	})
 	if updateRec.Code != http.StatusOK {
 		t.Fatalf("expected 200 from update, got %d: %s", updateRec.Code, updateRec.Body.String())
+	}
+	var updated struct {
+		Record vault.Record `json:"record"`
+	}
+	if err := json.Unmarshal(updateRec.Body.Bytes(), &updated); err != nil {
+		t.Fatalf("decode updated record: %v", err)
+	}
+	if updated.Record.Type != "secret" || updated.Record.WorkspaceID != "ws-secure" {
+		t.Fatalf("unexpected updated location: %#v", updated.Record)
+	}
+	if updated.Record.Source != "import" || updated.Record.RetentionPolicy != "until_rotated" {
+		t.Fatalf("unexpected updated metadata: %#v", updated.Record)
+	}
+	if len(updated.Record.Tags) != 2 || updated.Record.Tags[0] != "travel" || updated.Record.Tags[1] != "docs" {
+		t.Fatalf("unexpected updated tags: %#v", updated.Record.Tags)
 	}
 
 	deleteRec := performJSONRequest(t, handler, http.MethodDelete, "/api/vault/records/"+created.Record.ID, nil)

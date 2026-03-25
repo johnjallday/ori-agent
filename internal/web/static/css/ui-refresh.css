@@ -636,62 +636,10 @@ body::after {
   gap: 0.75rem;
 }
 
-.vault-modal-vault-shell {
-  margin-top: 1rem;
-  padding: 1rem;
-  border-radius: 22px;
-  border: 1px solid rgba(173, 129, 84, 0.22);
-  background:
-    radial-gradient(circle at top left, rgba(255, 222, 184, 0.15), transparent 30%),
-    linear-gradient(180deg, rgba(255, 249, 239, 0.8), rgba(244, 234, 216, 0.88));
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.38);
-}
-
-.vault-modal-vault-shell.is-empty {
-  margin-top: 0.45rem;
-  padding: 1.2rem;
-}
-
-.vault-modal-vault-shell-head {
-  display: flex;
-  align-items: flex-end;
-  justify-content: space-between;
-  gap: 1rem;
-  margin-bottom: 0;
-}
-
-.vault-modal-shell-actions {
-  display: flex;
-  align-items: flex-end;
-  justify-content: space-between;
-  gap: 1rem;
-  flex: 1 1 auto;
-}
-
-.vault-modal-shell-buttons {
-  display: inline-flex;
-  align-items: center;
-  justify-content: flex-end;
-  gap: 0.6rem;
-  flex: 0 0 auto;
-}
-
-.vault-modal-vault-shell-head .vault-modal-section-description,
-.vault-modal-shell-actions .vault-modal-section-description {
-  margin: 0;
-  max-width: 28rem;
-}
-
 .vault-modal-vault-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 0.85rem;
-}
-
-.vault-modal-vault-shell.is-empty .vault-modal-vault-grid {
-  grid-template-columns: minmax(0, 1fr);
-  max-width: 34rem;
-  margin: 0 auto;
 }
 
 .vault-modal-vault-copy {
@@ -892,6 +840,27 @@ body::after {
   margin-bottom: 0.9rem;
 }
 
+.vault-modal-folder-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.vault-modal-folder-head-copy {
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.vault-modal-folder-head-actions {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+  flex: 0 0 auto;
+}
+
 .vault-modal-section-title {
   font-size: 1.18rem;
 }
@@ -955,12 +924,41 @@ body::after {
   margin-top: 0.75rem;
 }
 
+.vault-modal-field-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.85rem;
+  margin-bottom: 0.35rem;
+}
+
 .vault-modal-label {
   display: block;
   margin-bottom: 0.35rem;
   font-size: 0.8rem;
   font-weight: 700;
   color: var(--text-primary);
+}
+
+.vault-modal-field-head .vault-modal-label {
+  margin-bottom: 0;
+}
+
+.vault-modal-mode-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  color: var(--text-secondary);
+  font-size: 0.78rem;
+  font-weight: 700;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.vault-modal-mode-toggle input {
+  width: 0.95rem;
+  height: 0.95rem;
+  accent-color: var(--primary-color);
 }
 
 .vault-modal-input,
@@ -1015,6 +1013,53 @@ body::after {
   line-height: 1.45;
 }
 
+.vault-modal-advanced-details {
+  margin-top: 0.9rem;
+  border: 1px solid rgba(169, 124, 78, 0.16);
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.44);
+  overflow: hidden;
+}
+
+.vault-modal-advanced-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.85rem;
+  padding: 0.88rem 1rem;
+  color: var(--text-primary);
+  font-size: 0.82rem;
+  font-weight: 700;
+  cursor: pointer;
+  list-style: none;
+}
+
+.vault-modal-advanced-summary::-webkit-details-marker {
+  display: none;
+}
+
+.vault-modal-advanced-summary::after {
+  content: "+";
+  color: var(--primary-color);
+  font-size: 1.05rem;
+  line-height: 1;
+  transition: transform 0.18s ease;
+}
+
+.vault-modal-advanced-details[open] .vault-modal-advanced-summary::after {
+  transform: rotate(45deg);
+}
+
+.vault-modal-advanced-body {
+  padding: 0 1rem 1rem;
+}
+
+.vault-modal-advanced-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.85rem;
+}
+
 .vault-modal-divider {
   height: 1px;
   margin: 1rem 0;
@@ -1061,31 +1106,47 @@ body::after {
   border-radius: 999px;
 }
 
-.vault-modal-folder-vault-tab {
+.vault-modal-folder-vault-tab-wrap {
   flex: 0 0 auto;
+  display: inline-flex;
+  align-items: stretch;
   border: 1px solid rgba(173, 132, 88, 0.2);
   border-bottom: none;
   border-radius: 14px 14px 0 0;
-  padding: 0.52rem 0.9rem 0.46rem;
   background:
     linear-gradient(180deg, rgba(255, 247, 232, 0.94), rgba(246, 231, 204, 0.9));
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.5);
+  transition: transform 0.16s ease, background 0.16s ease, border-color 0.16s ease;
+}
+
+.vault-modal-folder-vault-tab-wrap:hover {
+  transform: translateY(-1px);
+  border-color: rgba(191, 124, 67, 0.32);
+}
+
+.vault-modal-folder-vault-tab-wrap.is-active {
+  border-color: rgba(196, 128, 73, 0.34);
+  background:
+    linear-gradient(180deg, rgba(255, 250, 242, 0.98), rgba(255, 244, 222, 0.94));
+}
+
+.vault-modal-folder-vault-tab {
+  flex: 0 0 auto;
+  border: none;
+  border-radius: 14px 14px 0 0;
+  padding: 0.52rem 0.9rem 0.46rem;
+  background: transparent;
   color: var(--text-secondary);
   text-align: left;
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.5);
-  transition: transform 0.16s ease, color 0.16s ease, background 0.16s ease, border-color 0.16s ease;
+  transition: color 0.16s ease;
 }
 
 .vault-modal-folder-vault-tab:hover {
-  transform: translateY(-1px);
   color: var(--text-primary);
-  border-color: rgba(191, 124, 67, 0.32);
 }
 
 .vault-modal-folder-vault-tab.is-active {
   color: var(--text-primary);
-  border-color: rgba(196, 128, 73, 0.34);
-  background:
-    linear-gradient(180deg, rgba(255, 250, 242, 0.98), rgba(255, 244, 222, 0.94));
 }
 
 .vault-modal-folder-vault-tab-label {
@@ -1095,6 +1156,36 @@ body::after {
   font-size: 0.8rem;
   font-weight: 700;
   white-space: nowrap;
+}
+
+.vault-modal-folder-vault-tab-icon {
+  flex: 0 0 auto;
+  width: 2rem;
+  padding: 0;
+  margin-right: 0.18rem;
+  border: none;
+  border-left: 1px solid rgba(173, 132, 88, 0.18);
+  border-radius: 0 14px 0 0;
+  background: rgba(54, 43, 31, 0.05);
+  color: var(--primary-color);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.16s ease, color 0.16s ease;
+}
+
+.vault-modal-folder-vault-tab-icon:hover {
+  background: rgba(199, 92, 46, 0.14);
+}
+
+.vault-modal-folder-vault-tab-icon.is-unlocked {
+  background: rgba(73, 150, 105, 0.14);
+  color: #2c7a56;
+}
+
+.vault-modal-folder-vault-tab-icon.is-unlocked:hover {
+  background: rgba(73, 150, 105, 0.22);
+  color: #1f6445;
 }
 
 .vault-modal-folder-breadcrumb {
@@ -1473,6 +1564,14 @@ body::after {
   gap: 0.75rem;
 }
 
+.vault-modal-detail-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 0.55rem;
+}
+
 .vault-modal-detail-title {
   font-family: var(--font-display);
   font-size: 1.28rem;
@@ -1576,11 +1675,22 @@ body::after {
 }
 
 .vault-modal-entry-dialog {
-  width: min(42rem, calc(100% - 1.5rem));
+  width: min(38rem, calc(100% - 1.5rem));
 }
 
 .vault-modal-entry-dialog .vault-modal-textarea {
   min-height: 10rem;
+}
+
+.vault-modal-entry-dialog #vaultModalEntryContent {
+  min-height: 12rem;
+  font-family: var(--font-body);
+  font-size: 0.95rem;
+  line-height: 1.65;
+}
+
+.vault-modal-entry-dialog #vaultModalEntryPayload {
+  font-family: var(--font-mono);
 }
 
 [data-bs-theme="dark"] .vault-modal-content,
@@ -1613,7 +1723,6 @@ body::after {
 
 [data-bs-theme="dark"] .vault-modal-status-shell,
 [data-bs-theme="dark"] .vault-modal-loading-card,
-[data-bs-theme="dark"] .vault-modal-vault-shell,
 [data-bs-theme="dark"] .vault-modal-vault-stack,
 [data-bs-theme="dark"] .vault-modal-panel,
 [data-bs-theme="dark"] .vault-modal-stat-card,
@@ -1627,7 +1736,6 @@ body::after {
 [data-bs-theme="dark"] .vault-modal-payload-preview,
 .dark-mode .vault-modal-status-shell,
 .dark-mode .vault-modal-loading-card,
-.dark-mode .vault-modal-vault-shell,
 .dark-mode .vault-modal-vault-stack,
 .dark-mode .vault-modal-panel,
 .dark-mode .vault-modal-stat-card,
@@ -1648,6 +1756,22 @@ body::after {
 .dark-mode .vault-modal-loading-spinner {
   background: rgba(18, 24, 36, 0.76);
   border-color: rgba(209, 171, 126, 0.14);
+  color: #ffd39d;
+}
+
+[data-bs-theme="dark"] .vault-modal-mode-toggle,
+.dark-mode .vault-modal-mode-toggle {
+  color: #d5c2a5;
+}
+
+[data-bs-theme="dark"] .vault-modal-advanced-details,
+.dark-mode .vault-modal-advanced-details {
+  border-color: rgba(209, 171, 126, 0.14);
+  background: rgba(23, 29, 43, 0.52);
+}
+
+[data-bs-theme="dark"] .vault-modal-advanced-summary::after,
+.dark-mode .vault-modal-advanced-summary::after {
   color: #ffd39d;
 }
 
@@ -1716,27 +1840,63 @@ body::after {
   background: rgba(30, 37, 53, 0.76);
 }
 
-[data-bs-theme="dark"] .vault-modal-folder-vault-tab,
-.dark-mode .vault-modal-folder-vault-tab {
+[data-bs-theme="dark"] .vault-modal-folder-vault-tab-wrap,
+.dark-mode .vault-modal-folder-vault-tab-wrap {
   border-color: rgba(209, 171, 126, 0.18);
   background:
     linear-gradient(180deg, rgba(47, 56, 75, 0.95), rgba(34, 42, 60, 0.94));
-  color: #cdbb9b;
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+}
+
+[data-bs-theme="dark"] .vault-modal-folder-vault-tab,
+.dark-mode .vault-modal-folder-vault-tab {
+  color: #cdbb9b;
+}
+
+[data-bs-theme="dark"] .vault-modal-folder-vault-tab-wrap:hover,
+.dark-mode .vault-modal-folder-vault-tab-wrap:hover {
+  border-color: rgba(235, 166, 94, 0.28);
 }
 
 [data-bs-theme="dark"] .vault-modal-folder-vault-tab:hover,
 .dark-mode .vault-modal-folder-vault-tab:hover {
   color: #fff0da;
-  border-color: rgba(235, 166, 94, 0.28);
+}
+
+[data-bs-theme="dark"] .vault-modal-folder-vault-tab-wrap.is-active,
+.dark-mode .vault-modal-folder-vault-tab-wrap.is-active {
+  border-color: rgba(244, 188, 119, 0.34);
+  background:
+    linear-gradient(180deg, rgba(64, 75, 97, 0.98), rgba(43, 53, 73, 0.96));
 }
 
 [data-bs-theme="dark"] .vault-modal-folder-vault-tab.is-active,
 .dark-mode .vault-modal-folder-vault-tab.is-active {
   color: #fff1dc;
-  border-color: rgba(244, 188, 119, 0.34);
-  background:
-    linear-gradient(180deg, rgba(64, 75, 97, 0.98), rgba(43, 53, 73, 0.96));
+}
+
+[data-bs-theme="dark"] .vault-modal-folder-vault-tab-icon,
+.dark-mode .vault-modal-folder-vault-tab-icon {
+  border-left-color: rgba(209, 171, 126, 0.16);
+  background: rgba(255, 216, 168, 0.08);
+  color: #ffd39d;
+}
+
+[data-bs-theme="dark"] .vault-modal-folder-vault-tab-icon:hover,
+.dark-mode .vault-modal-folder-vault-tab-icon:hover {
+  background: rgba(235, 166, 94, 0.16);
+}
+
+[data-bs-theme="dark"] .vault-modal-folder-vault-tab-icon.is-unlocked,
+.dark-mode .vault-modal-folder-vault-tab-icon.is-unlocked {
+  background: rgba(94, 194, 138, 0.16);
+  color: #9ef0c0;
+}
+
+[data-bs-theme="dark"] .vault-modal-folder-vault-tab-icon.is-unlocked:hover,
+.dark-mode .vault-modal-folder-vault-tab-icon.is-unlocked:hover {
+  background: rgba(94, 194, 138, 0.22);
+  color: #c4ffd9;
 }
 
 [data-bs-theme="dark"] .vault-modal-tab,
@@ -2496,22 +2656,33 @@ textarea.form-control:focus {
   }
 
   .vault-modal-title-group,
-  .vault-modal-detail-header,
-  .vault-modal-vault-shell-head {
+  .vault-modal-detail-header {
     flex-direction: column;
     align-items: flex-start;
   }
 
-  .vault-modal-shell-actions {
-    width: 100%;
-    flex-direction: column;
-    align-items: flex-start;
-  }
-
-  .vault-modal-shell-buttons {
+  .vault-modal-detail-actions {
     width: 100%;
     justify-content: flex-start;
-    flex-wrap: wrap;
+  }
+
+  .vault-modal-folder-head {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .vault-modal-folder-head-actions {
+    width: 100%;
+    justify-content: flex-start;
+  }
+
+  .vault-modal-field-head {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .vault-modal-advanced-grid {
+    grid-template-columns: minmax(0, 1fr);
   }
 
   .vault-modal-detail-grid {

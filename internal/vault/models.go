@@ -76,6 +76,8 @@ type Record struct {
 }
 
 type RecordUpdate struct {
+	Type            *string          `json:"type,omitempty"`
+	WorkspaceID     *string          `json:"workspace_id,omitempty"`
 	Label           *string          `json:"label,omitempty"`
 	Tags            *[]string        `json:"tags,omitempty"`
 	Source          *string          `json:"source,omitempty"`

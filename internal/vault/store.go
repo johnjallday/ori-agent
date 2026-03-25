@@ -779,6 +779,12 @@ func (s *Store) UpdateRecord(ctx context.Context, id string, update RecordUpdate
 		return nil, err
 	}
 
+	if update.Type != nil {
+		record.Type = normalizeRecordType(*update.Type)
+	}
+	if update.WorkspaceID != nil {
+		record.WorkspaceID = strings.TrimSpace(*update.WorkspaceID)
+	}
 	if update.Label != nil {
 		record.Label = strings.TrimSpace(*update.Label)
 		if record.Label == "" {
@@ -800,6 +806,13 @@ func (s *Store) UpdateRecord(ctx context.Context, id string, update RecordUpdate
 			record.Payload = json.RawMessage(`{}`)
 		}
 	}
+
+	_, targetWriteCapability := capabilitiesForRecordType(record.Type)
+	if record.Type != row.Type || record.WorkspaceID != row.WorkspaceID {
+		if err := s.authorizeAccess(ctx, access, row.VaultID, record.WorkspaceID, targetWriteCapability, record.Type, "update", id); err != nil {
+			return nil, err
+		}
+	}
 	record.UpdatedAt = s.now()
 
 	metadataNonce, metadataCiphertext, err := encryptRecordMetadata(dek, encryptedRecordMetadata{
@@ -816,10 +829,10 @@ func (s *Store) UpdateRecord(ctx context.Context, id string, update RecordUpdate
 
 	result, err := s.db.ExecContext(ctx, `
 		UPDATE vault_records
-		SET source = ?, retention_policy = ?, metadata_nonce = ?, metadata_ciphertext = ?,
+		SET type = ?, workspace_id = ?, source = ?, retention_policy = ?, metadata_nonce = ?, metadata_ciphertext = ?,
 		    payload_nonce = ?, payload_ciphertext = ?, updated_at = ?
 		WHERE id = ?
-	`, record.Source, record.RetentionPolicy, metadataNonce, metadataCiphertext,
+	`, record.Type, record.WorkspaceID, record.Source, record.RetentionPolicy, metadataNonce, metadataCiphertext,
 		payloadNonce, payloadCiphertext, record.UpdatedAt, id)
 	if err != nil {
 		return nil, fmt.Errorf("update vault record: %w", err)

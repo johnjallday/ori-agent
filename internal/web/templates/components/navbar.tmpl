@@ -46,16 +46,17 @@
         <a href="/workspaces" class="nav-link-item {{if eq .CurrentPage "workspaces"}}active{{end}}" style="color: var(--text-primary); text-decoration: none; padding: 0.5rem 1rem; border-radius: var(--radius-md); transition: background 0.2s;">Workspaces</a>
         <span class="ori-navbar-divider" aria-hidden="true">|</span>
         <a
-          href="/settings#private-vault"
+          href="/vault"
           id="vaultLauncherButton"
-          class="nav-link-item ori-navbar-vault-launcher"
+          class="nav-link-item ori-navbar-vault-launcher {{if eq .CurrentPage "vault"}}active{{end}}"
           style="color: var(--text-primary); text-decoration: none; padding: 0.5rem 1rem; border-radius: var(--radius-md); transition: background 0.2s;"
-          data-bs-toggle="modal"
-          data-bs-target="#vaultModal"
-          aria-controls="vaultModal"
-          aria-haspopup="dialog"
+          {{if ne .CurrentPage "vault"}}data-bs-toggle="modal"{{end}}
+          {{if ne .CurrentPage "vault"}}data-bs-target="#vaultModal"{{end}}
+          {{if ne .CurrentPage "vault"}}aria-controls="vaultModal"{{end}}
+          {{if ne .CurrentPage "vault"}}aria-haspopup="dialog"{{end}}
           aria-expanded="false"
-          title="Open private vault">
+          {{if eq .CurrentPage "vault"}}aria-current="page"{{end}}
+          title="{{if eq .CurrentPage "vault"}}Open full vault settings{{else}}Open private vault{{end}}">
           <svg class="ori-navbar-vault-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
             <path d="M5 9.5V8.25C5 6.73 6.23 5.5 7.75 5.5H10L12 7.5L14 5.5H16.25C17.77 5.5 19 6.73 19 8.25V9.5" stroke="currentColor" stroke-width="1.85" stroke-linecap="round" stroke-linejoin="round"/>
             <path d="M4 9.5H20V17.25C20 18.77 18.77 20 17.25 20H6.75C5.23 20 4 18.77 4 17.25V9.5Z" fill="currentColor" fill-opacity="0.14" stroke="currentColor" stroke-width="1.85" stroke-linejoin="round"/>

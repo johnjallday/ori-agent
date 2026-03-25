@@ -100,16 +100,38 @@ func TestStoreRecordCRUDEncryptsPayload(t *testing.T) {
 	}
 
 	label := "Updated Inbox"
+	recordType := "secret"
+	workspaceID := "ws-secure"
+	tags := []string{"Credentials", "Personal"}
+	source := "import"
+	retention := "until_rotated"
 	payload := json.RawMessage(`{"email":"user@example.com","subject":"Filed"}`)
 	updated, err := store.UpdateRecord(ctx, record.ID, RecordUpdate{
-		Label:   &label,
-		Payload: &payload,
+		Type:            &recordType,
+		WorkspaceID:     &workspaceID,
+		Label:           &label,
+		Tags:            &tags,
+		Source:          &source,
+		RetentionPolicy: &retention,
+		Payload:         &payload,
 	}, AccessContext{})
 	if err != nil {
 		t.Fatalf("update record: %v", err)
 	}
+	if updated.Type != "secret" {
+		t.Fatalf("expected updated type, got %q", updated.Type)
+	}
+	if updated.WorkspaceID != "ws-secure" {
+		t.Fatalf("expected updated workspace, got %q", updated.WorkspaceID)
+	}
 	if updated.Label != "Updated Inbox" {
 		t.Fatalf("expected updated label, got %q", updated.Label)
+	}
+	if updated.Source != "import" || updated.RetentionPolicy != "until_rotated" {
+		t.Fatalf("unexpected updated metadata: source=%q retention=%q", updated.Source, updated.RetentionPolicy)
+	}
+	if len(updated.Tags) != 2 || updated.Tags[0] != "credentials" || updated.Tags[1] != "personal" {
+		t.Fatalf("unexpected updated tags: %#v", updated.Tags)
 	}
 	if string(updated.Payload) != `{"email":"user@example.com","subject":"Filed"}` {
 		t.Fatalf("unexpected updated payload: %s", updated.Payload)

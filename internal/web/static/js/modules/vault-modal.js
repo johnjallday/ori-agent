@@ -2,8 +2,6 @@
   const ROOT_FOLDER_PATH = 'vault';
   const TYPE_FOLDER_PATH = 'types';
   const WORKSPACE_FOLDER_PATH = 'workspaces';
-  const WORKSPACE_TAB_FOLDER = 'folder';
-  const WORKSPACE_TAB_SPACES = 'spaces';
   const DEFAULT_VAULT_ID = '';
   const VAULT_STORAGE_KEY = 'ori-selected-vault-id';
   const DEFAULT_EXPANDED_FOLDERS = new Set([ROOT_FOLDER_PATH, TYPE_FOLDER_PATH, WORKSPACE_FOLDER_PATH]);
@@ -34,12 +32,13 @@
     folderIndex: new Map(),
     expandedFolderPaths: new Set(DEFAULT_EXPANDED_FOLDERS),
     selectedFolderPath: ROOT_FOLDER_PATH,
-    workspaceTab: WORKSPACE_TAB_FOLDER,
     hasHydrated: false,
     isHydrating: false,
     unlockDialogOpen: false,
     createDialogOpen: false,
-    entryDialogOpen: false
+    entryDialogOpen: false,
+    entryDialogMode: 'create',
+    entryDialogRecord: null
   };
 
   let alertTimeoutId = 0;
@@ -52,6 +51,15 @@
       .replaceAll('>', '&gt;')
       .replaceAll('"', '&quot;')
       .replaceAll("'", '&#39;');
+  }
+
+  function escapeSelectorValue(value) {
+    const normalized = String(value || '');
+    if (window.CSS && typeof window.CSS.escape === 'function') {
+      return window.CSS.escape(normalized);
+    }
+
+    return normalized.replaceAll('\\', '\\\\').replaceAll('"', '\\"');
   }
 
   function notify(message, type) {
@@ -87,15 +95,6 @@
       workspaceTitle: document.getElementById('vaultModalWorkspaceTitle'),
       workspaceDescription: document.getElementById('vaultModalWorkspaceDescription'),
       loadingState: document.getElementById('vaultModalLoadingState'),
-      statusShell: document.getElementById('vaultModalStatusShell'),
-      statusIndicator: document.getElementById('vaultModalStatusIndicator'),
-      statusText: document.getElementById('vaultModalStatusText'),
-      statusDetails: document.getElementById('vaultModalStatusDetails'),
-      backendLabel: document.getElementById('vaultModalBackendLabel'),
-      recordCountLabel: document.getElementById('vaultModalRecordCount'),
-      writableLabel: document.getElementById('vaultModalWritableLabel'),
-      modeLabel: document.getElementById('vaultModalModeLabel'),
-      vaultShell: document.getElementById('vaultModalVaultShell'),
       vaultSelectionStack: document.getElementById('vaultModalVaultSelectionStack'),
       selectedVaultState: document.getElementById('vaultModalSelectedVaultState'),
       vaultHint: document.getElementById('vaultModalVaultHint'),
@@ -133,17 +132,20 @@
       entryTypeInput: document.getElementById('vaultModalEntryType'),
       entryWorkspaceInput: document.getElementById('vaultModalEntryWorkspaceId'),
       entryLabelInput: document.getElementById('vaultModalEntryLabel'),
+      entryAdvancedDetails: document.getElementById('vaultModalEntryAdvanced'),
+      entryContentField: document.getElementById('vaultModalEntryContentField'),
+      entryContentInput: document.getElementById('vaultModalEntryContent'),
+      entryContentHelp: document.getElementById('vaultModalEntryContentHelp'),
+      entryJsonModeInput: document.getElementById('vaultModalEntryJsonMode'),
       entryTagsInput: document.getElementById('vaultModalEntryTags'),
       entrySourceInput: document.getElementById('vaultModalEntrySource'),
       entryRetentionInput: document.getElementById('vaultModalEntryRetention'),
+      entryPayloadField: document.getElementById('vaultModalEntryPayloadField'),
       entryPayloadInput: document.getElementById('vaultModalEntryPayload'),
       saveBtn: document.getElementById('vaultModalSaveBtn'),
       resetBtn: document.getElementById('vaultModalResetBtn'),
       mainGrid: document.getElementById('vaultModalMainGrid'),
-      tabFolderBtn: document.getElementById('vaultModalTabFolderBtn'),
-      tabSpacesBtn: document.getElementById('vaultModalTabSpacesBtn'),
       folderTabPanel: document.getElementById('vaultModalFolderTabPanel'),
-      spacesTabPanel: document.getElementById('vaultModalSpacesTabPanel'),
       folderVaultTabs: document.getElementById('vaultModalFolderVaultTabs'),
       searchInput: document.getElementById('vaultModalSearchInput'),
       recordsSummary: document.getElementById('vaultModalRecordsSummary'),
@@ -299,7 +301,49 @@
     }
   }
 
+  function entrySimplePayload(type, content) {
+    const normalized = normalizeRecordType(type);
+    const value = String(content || '').trim();
+
+    if (!value) {
+      return {};
+    }
+
+    if (normalized === 'email_snippet') {
+      return { body: value };
+    }
+
+    if (normalized === 'secret') {
+      return { value: value };
+    }
+
+    return { note: value };
+  }
+
+  function entryContentFromPayload(type, payload) {
+    if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+      return '';
+    }
+
+    const normalized = normalizeRecordType(type);
+
+    if (normalized === 'email_snippet') {
+      return String(payload.body || '').trim();
+    }
+
+    if (normalized === 'secret') {
+      return String(payload.value || '').trim();
+    }
+
+    return String(payload.note || '').trim();
+  }
+
   function parsePayloadInput() {
+    const useJSON = Boolean(elements?.entryJsonModeInput?.checked);
+    if (!useJSON) {
+      return entrySimplePayload(elements?.entryTypeInput?.value, elements?.entryContentInput?.value);
+    }
+
     const raw = String(elements?.entryPayloadInput?.value || '').trim();
     if (!raw) {
       return {};
@@ -324,28 +368,25 @@
     }
   }
 
-  function backendLabelFor(status) {
-    const backend = String(status?.secret_store?.backend || 'unknown');
-    switch (backend) {
-      case 'vault_password':
-        return 'Vault Password';
-      case 'darwin_keychain':
-        return 'macOS Keychain';
-      case 'linux_secret_service':
-        return 'Linux Secret Service';
-      case 'windows_secure_store':
-        return 'Windows Secure Store';
-      case 'passphrase_fallback':
-        return 'Passphrase Fallback';
-      case 'unavailable':
-        return 'Unavailable';
-      default:
-        return backend.replaceAll('_', ' ');
+  function defaultPayloadValue(type) {
+    const normalized = normalizeRecordType(type);
+
+    if (normalized === 'email_snippet') {
+      return '{\n  "subject": "",\n  "body": ""\n}';
     }
+
+    if (normalized === 'secret') {
+      return '{\n  "value": ""\n}';
+    }
+
+    return '{\n  "note": ""\n}';
   }
 
-  function defaultPayloadValue() {
-    return '{\n  \n}';
+  function isDefaultPayloadTemplate(raw) {
+    const normalized = String(raw || '').trim();
+    return !normalized || ['personal_note', 'email_snippet', 'secret'].some(function(type) {
+      return normalized === defaultPayloadValue(type);
+    });
   }
 
   function normalizeRecordType(type) {
@@ -389,6 +430,162 @@
     return '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M10,4H4A2,2 0 0,0 2,6V18A2,2 0 0,0 4,20H20A2,2 0 0,0 22,18V8A2,2 0 0,0 20,6H12L10,4Z"/></svg>';
   }
 
+  function entryLabelPlaceholder(type) {
+    const normalized = normalizeRecordType(type);
+
+    if (normalized === 'email_snippet') {
+      return 'Tax reply, landlord update, important follow-up';
+    }
+
+    if (normalized === 'secret') {
+      return 'Bank login, Wi-Fi password, recovery code';
+    }
+
+    return 'Passport note, tax reminder, emergency contact';
+  }
+
+  function entryContentPlaceholder(type) {
+    const normalized = normalizeRecordType(type);
+
+    if (normalized === 'email_snippet') {
+      return 'Paste the email text or the key excerpt you want to keep.';
+    }
+
+    if (normalized === 'secret') {
+      return 'Paste the password, code, or secret text you want to store.';
+    }
+
+    return 'Write the private details you want to keep encrypted.';
+  }
+
+  function simplePayloadKey(type) {
+    const normalized = normalizeRecordType(type);
+
+    if (normalized === 'email_snippet') {
+      return 'body';
+    }
+
+    if (normalized === 'secret') {
+      return 'value';
+    }
+
+    return 'note';
+  }
+
+  function canUseSimpleEntryComposer(type, payload) {
+    if (payload === undefined || payload === null) {
+      return true;
+    }
+
+    if (typeof payload !== 'object' || Array.isArray(payload)) {
+      return false;
+    }
+
+    const keys = Object.keys(payload);
+    if (!keys.length) {
+      return true;
+    }
+
+    const key = simplePayloadKey(type);
+    return keys.length === 1 && keys[0] === key && typeof payload[key] === 'string';
+  }
+
+  function isEditingEntryDialog() {
+    return state.entryDialogMode === 'edit' && Boolean(state.entryDialogRecord?.id);
+  }
+
+  function resetEntryDialogState() {
+    state.entryDialogMode = 'create';
+    state.entryDialogRecord = null;
+  }
+
+  function populateEntryForm(record) {
+    if (!elements || !record) {
+      return;
+    }
+
+    const normalizedType = normalizeRecordType(record.type);
+    const payload = record.payload ?? {};
+    const useJSON = !canUseSimpleEntryComposer(normalizedType, payload);
+    const payloadValue = prettyPayload(payload);
+
+    elements.entryTypeInput.value = normalizedType;
+    elements.entryWorkspaceInput.value = String(record.workspace_id || '');
+    elements.entryLabelInput.value = String(record.label || '');
+    elements.entryContentInput.value = entryContentFromPayload(normalizedType, payload);
+    elements.entryJsonModeInput.checked = useJSON;
+    elements.entryTagsInput.value = Array.isArray(record.tags) ? record.tags.join(', ') : '';
+    elements.entrySourceInput.value = String(record.source || '');
+    elements.entryRetentionInput.value = String(record.retention_policy || '');
+    elements.entryPayloadInput.value = payloadValue === '{}' ? defaultPayloadValue(normalizedType) : payloadValue;
+
+    if (elements.entryAdvancedDetails) {
+      elements.entryAdvancedDetails.open = Boolean(
+        record.workspace_id ||
+        (Array.isArray(record.tags) && record.tags.length) ||
+        record.source ||
+        record.retention_policy
+      );
+    }
+
+    syncEntryComposerPresentation();
+  }
+
+  function syncEntryComposerPresentation() {
+    if (!elements) {
+      return;
+    }
+
+    const normalizedType = normalizeRecordType(elements.entryTypeInput?.value || 'personal_note');
+    const useJSON = Boolean(elements.entryJsonModeInput?.checked);
+
+    if (elements.entryLabelInput) {
+      elements.entryLabelInput.placeholder = entryLabelPlaceholder(normalizedType);
+    }
+
+    if (elements.entryContentInput) {
+      elements.entryContentInput.placeholder = entryContentPlaceholder(normalizedType);
+    }
+
+    if (elements.entryContentHelp) {
+      elements.entryContentHelp.textContent = useJSON
+        ? 'Use JSON only if you want named fields or nested data.'
+        : 'Write normal text here. Ori will turn it into an encrypted record for you.';
+    }
+
+    if (elements.entryContentField) {
+      elements.entryContentField.hidden = useJSON;
+    }
+
+    if (elements.entryPayloadField) {
+      elements.entryPayloadField.hidden = !useJSON;
+    }
+
+    if (useJSON && elements.entryPayloadInput) {
+      const rawPayload = String(elements.entryPayloadInput.value || '').trim();
+      if (isDefaultPayloadTemplate(rawPayload)) {
+        const content = String(elements.entryContentInput?.value || '').trim();
+        elements.entryPayloadInput.value = content
+          ? prettyPayload(entrySimplePayload(normalizedType, content))
+          : defaultPayloadValue(normalizedType);
+      }
+    } else if (!useJSON && elements.entryContentInput) {
+      const currentContent = String(elements.entryContentInput.value || '').trim();
+      const rawPayload = String(elements.entryPayloadInput?.value || '').trim();
+      if (!currentContent && rawPayload) {
+        try {
+          const payload = JSON.parse(rawPayload);
+          const extracted = entryContentFromPayload(normalizedType, payload);
+          if (extracted) {
+            elements.entryContentInput.value = extracted;
+          }
+        } catch (error) {
+          // Keep the user's content area blank if the payload is intentionally custom.
+        }
+      }
+    }
+  }
+
   function setLauncherActive(active) {
     if (!elements || !elements.launcher) {
       return;
@@ -426,7 +623,20 @@
   }
 
   function currentVaultActionButton() {
-    return elements?.vaultRail?.querySelector('[data-action="toggle-vault-access"]') || null;
+    return elements?.folderVaultTabs?.querySelector('[data-action="toggle-vault-access"]') ||
+      elements?.vaultRail?.querySelector('[data-action="toggle-vault-access"]') ||
+      null;
+  }
+
+  function currentVaultTabButton() {
+    const activeID = activeVaultID();
+    if (!activeID || !elements?.folderVaultTabs) {
+      return null;
+    }
+
+    return Array.from(elements.folderVaultTabs.querySelectorAll('[data-action="select-folder-vault-tab"]')).find(function(button) {
+      return button.getAttribute('data-vault-id') === activeID;
+    }) || null;
   }
 
   function vaultLockIcon(locked) {
@@ -434,7 +644,7 @@
       return '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12,1A5,5 0 0,1 17,6V8H18A2,2 0 0,1 20,10V21A2,2 0 0,1 18,23H6A2,2 0 0,1 4,21V10A2,2 0 0,1 6,8H7V6A5,5 0 0,1 12,1M12,3A3,3 0 0,0 9,6V8H15V6A3,3 0 0,0 12,3M12,12A2,2 0 0,0 10,14A2,2 0 0,0 11,15.73V18H13V15.73A2,2 0 0,0 14,14A2,2 0 0,0 12,12Z"/></svg>';
     }
 
-    return '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M18,8H17V6A5,5 0 0,0 7,6H9A3,3 0 0,1 15,6V8H6A2,2 0 0,0 4,10V21A2,2 0 0,0 6,23H18A2,2 0 0,0 20,21V10A2,2 0 0,0 18,8M12,17A2,2 0 0,1 10,15A2,2 0 0,1 12,13A2,2 0 0,1 14,15A2,2 0 0,1 12,17Z"/></svg>';
+    return '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4.5" y="10" width="15" height="10" rx="2.5"></rect><path d="M9 10V7.6A3.6 3.6 0 0 1 15.3 5.2"></path><path d="M15.2 5.2L18 7.8"></path><path d="M12 14.2V16.2"></path></svg>';
   }
 
   function syncCreateDialog() {
@@ -475,9 +685,18 @@
     const selectedVault = activeVault();
     const vaultLabel = vaultDisplayLabel(selectedVault);
     const canShow = Boolean(state.entryDialogOpen && state.status && state.status.available && !state.status.locked);
+    const editing = isEditingEntryDialog();
 
     if (elements.entryDialogTitle) {
-      elements.entryDialogTitle.textContent = 'Save Encrypted Entry';
+      elements.entryDialogTitle.textContent = editing ? 'Edit Vault Item' : 'New Vault Item';
+    }
+
+    if (elements.saveBtn && !elements.saveBtn.dataset.originalLabel) {
+      elements.saveBtn.textContent = editing ? 'Update Entry' : 'Save Entry';
+    }
+
+    if (elements.resetBtn) {
+      elements.resetBtn.textContent = editing ? 'Reset Changes' : 'Clear';
     }
 
     elements.entryOverlay.hidden = !canShow;
@@ -487,13 +706,11 @@
       return;
     }
 
+    syncEntryComposerPresentation();
+
     if (elements.entryLabelInput) {
       elements.entryLabelInput.setAttribute('aria-label', 'Label for ' + vaultLabel);
     }
-  }
-
-  function folderTabAvailable() {
-    return Boolean(state.status && state.status.available && !state.status.locked);
   }
 
   function syncWorkspaceTabs() {
@@ -501,65 +718,21 @@
       return;
     }
 
-    const folderAvailable = folderTabAvailable();
-    if (!folderAvailable) {
-      state.workspaceTab = WORKSPACE_TAB_SPACES;
-    } else if (state.workspaceTab !== WORKSPACE_TAB_FOLDER && state.workspaceTab !== WORKSPACE_TAB_SPACES) {
-      state.workspaceTab = WORKSPACE_TAB_FOLDER;
-    }
-
-    const activeTab = state.workspaceTab === WORKSPACE_TAB_SPACES ? WORKSPACE_TAB_SPACES : WORKSPACE_TAB_FOLDER;
-
-    if (elements.tabFolderBtn) {
-      elements.tabFolderBtn.disabled = !folderAvailable;
-      elements.tabFolderBtn.classList.toggle('is-active', activeTab === WORKSPACE_TAB_FOLDER);
-      elements.tabFolderBtn.setAttribute('aria-selected', activeTab === WORKSPACE_TAB_FOLDER ? 'true' : 'false');
-    }
-
-    if (elements.tabSpacesBtn) {
-      elements.tabSpacesBtn.classList.toggle('is-active', activeTab === WORKSPACE_TAB_SPACES);
-      elements.tabSpacesBtn.setAttribute('aria-selected', activeTab === WORKSPACE_TAB_SPACES ? 'true' : 'false');
-    }
-
-    if (elements.folderTabPanel) {
-      elements.folderTabPanel.hidden = activeTab !== WORKSPACE_TAB_FOLDER;
-    }
-
-    if (elements.spacesTabPanel) {
-      elements.spacesTabPanel.hidden = activeTab !== WORKSPACE_TAB_SPACES;
-    }
-
     if (elements.workspaceKicker) {
-      elements.workspaceKicker.textContent = activeTab === WORKSPACE_TAB_FOLDER ? 'Encrypted Folder' : 'Vault Spaces';
+      elements.workspaceKicker.textContent = 'Encrypted Folder';
     }
 
     if (elements.workspaceTitle) {
-      elements.workspaceTitle.textContent = activeTab === WORKSPACE_TAB_FOLDER ? 'Folder View' : 'Switch And Manage';
+      elements.workspaceTitle.textContent = 'Folder View';
     }
 
     if (elements.workspaceDescription) {
-      elements.workspaceDescription.innerHTML = activeTab === WORKSPACE_TAB_FOLDER
-        ? 'Browse the active vault like a protected folder. Use <strong>New Entry</strong> when you want to add something without leaving the explorer context.'
-        : 'Switch between vaults, unlock the selected vault, and adjust vault details without leaving the workspace surface.';
-    }
-  }
-
-  function setWorkspaceTab(nextTab, options) {
-    const requestedTab = nextTab === WORKSPACE_TAB_SPACES ? WORKSPACE_TAB_SPACES : WORKSPACE_TAB_FOLDER;
-    state.workspaceTab = requestedTab;
-    syncWorkspaceTabs();
-
-    if (options?.focus === false || !elements?.modal?.classList.contains('show')) {
-      return;
+      elements.workspaceDescription.innerHTML = 'Browse the active vault like a protected folder. The vault tabs switch spaces directly, and the active tab handles lock or unlock.';
     }
 
-    window.requestAnimationFrame(function() {
-      if (state.workspaceTab === WORKSPACE_TAB_FOLDER) {
-        elements?.searchInput?.focus();
-        return;
-      }
-      elements?.vaultSelect?.focus();
-    });
+    if (elements.folderTabPanel) {
+      elements.folderTabPanel.hidden = false;
+    }
   }
 
   function syncUnlockDialog() {
@@ -607,11 +780,11 @@
       if (isInitialHydrate) {
         elements.subtitle.textContent = 'Vault data is fetched on demand. Ori is loading your vault list and encrypted status now.';
       } else if (showEmptyCreateMode) {
-        elements.subtitle.textContent = 'Start with a single encrypted vault. Once it exists, unlock it to reveal entry tools and the protected folder view.';
+        elements.subtitle.textContent = 'Start with a single encrypted vault. The first-vault action now lives directly inside Folder View.';
       } else if (hasVaults && !unlocked) {
-        elements.subtitle.textContent = 'Choose a vault in Vault Spaces, then unlock it. Folder View becomes available after load, while switch controls stay accessible in the workspace tabs.';
+        elements.subtitle.textContent = 'Choose a vault from the folder tabs, then unlock it. New vault creation stays inside Folder View so the modal reads as one surface.';
       } else {
-        elements.subtitle.textContent = 'The loaded vault stays focused on folder browsing by default. Switch to Vault Spaces only when you need to change vaults or edit vault details.';
+        elements.subtitle.textContent = 'The loaded vault stays focused on folder browsing. Switch vaults from the folder tabs and use the header actions when you need a new vault or a new encrypted entry.';
       }
     }
 
@@ -619,38 +792,12 @@
       elements.loadingState.hidden = !isInitialHydrate;
     }
 
-    if (elements.statusShell) {
-      elements.statusShell.hidden = isInitialHydrate || showEmptyCreateMode || !unlocked;
-    }
-
-    if (elements.vaultSelectionStack) {
-      elements.vaultSelectionStack.hidden = isInitialHydrate || showEmptyCreateMode || !hasVaults;
-    }
-
-    if (elements.selectedVaultState) {
-      elements.selectedVaultState.hidden = isInitialHydrate || showEmptyCreateMode || !hasVaults;
-    }
-
-    if (elements.vaultHint) {
-      elements.vaultHint.hidden = isInitialHydrate || showEmptyCreateMode || !hasVaults;
-    }
-
-    if (elements.vaultManageStack) {
-      elements.vaultManageStack.hidden = isInitialHydrate || showEmptyCreateMode || !hasVaults || !unlocked;
-    }
-
     if (elements.openEntryBtn) {
       elements.openEntryBtn.hidden = isInitialHydrate || showEmptyCreateMode || !unlocked;
     }
 
-    if (elements.vaultShell) {
-      elements.vaultShell.hidden = isInitialHydrate;
-      elements.vaultShell.classList.toggle('is-empty', showEmptyCreateMode);
-      elements.vaultShell.classList.toggle('is-compact', hasVaults && !unlocked);
-    }
-
     if (elements.mainGrid) {
-      elements.mainGrid.hidden = isInitialHydrate || !hasVaults;
+      elements.mainGrid.hidden = isInitialHydrate;
     }
 
     if (elements.settingsLink) {
@@ -798,6 +945,7 @@
   }
 
   function closeEntryDialog(options) {
+    resetEntryDialogState();
     state.entryDialogOpen = false;
     syncEntryDialog();
     const restoreFocus = options?.restoreFocus !== false;
@@ -819,6 +967,8 @@
       return;
     }
 
+    resetEntryDialogState();
+    resetCreateForm();
     state.createDialogOpen = false;
     syncCreateDialog();
     state.unlockDialogOpen = false;
@@ -827,6 +977,51 @@
     syncEntryDialog();
     window.requestAnimationFrame(function() {
       elements?.entryLabelInput?.focus();
+    });
+  }
+
+  async function openEditEntryDialog(recordID) {
+    if (!recordID) {
+      showAlert('Select an entry before editing it.', 'warning');
+      return;
+    }
+
+    if (!activeVaultID()) {
+      showAlert('Create or select a vault before editing an entry.', 'warning');
+      return;
+    }
+
+    if (!state.status || !state.status.available || state.status.locked) {
+      showAlert('Unlock the selected vault before editing an entry.', 'warning');
+      return;
+    }
+
+    let record = state.selectedRecord && state.selectedRecord.id === recordID
+      ? state.selectedRecord
+      : null;
+
+    if (!record) {
+      try {
+        record = await apiRequest(vaultURL('/api/vault/records/' + encodeURIComponent(recordID)));
+      } catch (error) {
+        console.error('Failed to load entry for editing:', error);
+        showAlert(error.message || 'Failed to load entry for editing.', 'error');
+        return;
+      }
+    }
+
+    state.entryDialogMode = 'edit';
+    state.entryDialogRecord = record;
+    populateEntryForm(record);
+    state.createDialogOpen = false;
+    syncCreateDialog();
+    state.unlockDialogOpen = false;
+    syncUnlockDialog();
+    state.entryDialogOpen = true;
+    syncEntryDialog();
+    window.requestAnimationFrame(function() {
+      elements?.entryLabelInput?.focus();
+      elements?.entryLabelInput?.select();
     });
   }
 
@@ -841,7 +1036,7 @@
           actionButton.focus();
           return;
         }
-        elements?.vaultSelect?.focus();
+        currentVaultTabButton()?.focus();
       });
     }
   }
@@ -1050,6 +1245,8 @@
       elements.entryTypeInput,
       elements.entryWorkspaceInput,
       elements.entryLabelInput,
+      elements.entryContentInput,
+      elements.entryJsonModeInput,
       elements.entryTagsInput,
       elements.entrySourceInput,
       elements.entryRetentionInput,
@@ -1079,14 +1276,6 @@
     }
   }
 
-  function renderStatusIndicator(color) {
-    if (!elements || !elements.statusIndicator) {
-      return;
-    }
-
-    elements.statusIndicator.innerHTML = '<span class="vault-modal-status-dot" style="background:' + color + ';"></span>';
-  }
-
   function renderStatus(status) {
     state.status = status || null;
     if (!elements || !state.status) {
@@ -1094,14 +1283,6 @@
     }
 
     if (!state.status.available) {
-      state.workspaceTab = WORKSPACE_TAB_SPACES;
-      renderStatusIndicator('#94a3b8');
-      elements.statusText.textContent = 'No vault selected';
-      elements.statusDetails.textContent = state.status.message || 'Create a vault to begin storing encrypted records.';
-      elements.backendLabel.textContent = backendLabelFor(state.status);
-      elements.recordCountLabel.textContent = '0';
-      elements.writableLabel.textContent = 'Unavailable';
-      elements.modeLabel.textContent = 'Create a vault';
       if (elements.passwordHelp) {
         elements.passwordHelp.textContent = 'Per-vault passwords are required for new vaults. Legacy vaults may still unlock through secure system storage or the older fallback passphrase flow.';
       }
@@ -1126,39 +1307,6 @@
     const backend = String(state.status.secret_store?.backend || '');
     const selectedVault = activeVault();
     const vaultName = selectedVault?.name || state.status.vault_name || 'Vault';
-
-    if (locked) {
-      state.workspaceTab = WORKSPACE_TAB_SPACES;
-    }
-
-    renderStatusIndicator(locked ? '#f59e0b' : '#16a34a');
-    elements.statusText.textContent = vaultName + (locked ? ' locked' : ' available');
-
-    const detailParts = [];
-    if (selectedVault?.description) {
-      detailParts.push(selectedVault.description);
-    }
-    if (state.status.message) {
-      detailParts.push(state.status.message);
-    }
-    detailParts.push(String(state.status.record_count || 0) + ' stored ' + ((state.status.record_count || 0) === 1 ? 'entry' : 'entries'));
-    elements.statusDetails.textContent = detailParts.join(' • ');
-
-    elements.backendLabel.textContent = backendLabelFor(state.status);
-    elements.recordCountLabel.textContent = String(state.status.record_count || 0);
-    elements.writableLabel.textContent = state.status.writable ? 'Writable' : 'Read-only / locked';
-
-    if (passwordProtected && locked && requiresPassphrase) {
-      elements.modeLabel.textContent = 'Vault password required';
-    } else if (passwordProtected) {
-      elements.modeLabel.textContent = 'Per-vault password';
-    } else if (locked && requiresPassphrase) {
-      elements.modeLabel.textContent = 'Legacy passphrase required';
-    } else if (backend === 'passphrase_fallback') {
-      elements.modeLabel.textContent = 'Passphrase fallback';
-    } else {
-      elements.modeLabel.textContent = 'OS secure storage';
-    }
 
     if (elements.passwordHelp) {
       elements.passwordHelp.textContent = passwordProtected
@@ -1194,13 +1342,24 @@
       return;
     }
 
+    if (isEditingEntryDialog() && state.entryDialogRecord) {
+      populateEntryForm(state.entryDialogRecord);
+      return;
+    }
+
     elements.entryTypeInput.value = 'personal_note';
     elements.entryWorkspaceInput.value = '';
     elements.entryLabelInput.value = '';
+    elements.entryContentInput.value = '';
+    elements.entryJsonModeInput.checked = false;
     elements.entryTagsInput.value = '';
     elements.entrySourceInput.value = '';
     elements.entryRetentionInput.value = '';
-    elements.entryPayloadInput.value = defaultPayloadValue();
+    elements.entryPayloadInput.value = defaultPayloadValue(elements.entryTypeInput.value);
+    if (elements.entryAdvancedDetails) {
+      elements.entryAdvancedDetails.open = false;
+    }
+    syncEntryComposerPresentation();
   }
 
   function clearSelection() {
@@ -1460,7 +1619,7 @@
       return;
     }
 
-    if (!state.status || !state.status.available || state.status.locked || state.vaults.length === 0) {
+    if (!state.status || state.vaults.length === 0) {
       elements.folderVaultTabs.hidden = true;
       elements.folderVaultTabs.innerHTML = '';
       return;
@@ -1469,10 +1628,23 @@
     elements.folderVaultTabs.hidden = false;
     elements.folderVaultTabs.innerHTML = state.vaults.map(function(vaultItem) {
       const isActive = vaultItem.id === activeVaultID();
+      const canToggleAccess = isActive && Boolean(state.status?.available);
+      const locked = canToggleAccess ? Boolean(state.status?.locked) : true;
+      const actionButton = canToggleAccess
+        ? (
+          '<button type="button" class="vault-modal-folder-vault-tab-icon' + (locked ? ' is-locked' : ' is-unlocked') + '" data-action="toggle-vault-access" data-vault-id="' + escapeHTML(vaultItem.id) + '" aria-label="' + escapeHTML((locked ? 'Unlock ' : 'Lock ') + vaultDisplayLabel(vaultItem)) + '" title="' + escapeHTML(locked ? 'Unlock vault' : 'Lock vault') + '">' +
+            vaultLockIcon(locked) +
+          '</button>'
+        )
+        : '';
+
       return (
-        '<button type="button" class="vault-modal-folder-vault-tab' + (isActive ? ' is-active' : '') + '" role="tab" aria-selected="' + (isActive ? 'true' : 'false') + '" data-action="select-folder-vault-tab" data-vault-id="' + escapeHTML(vaultItem.id) + '">' +
-          '<span class="vault-modal-folder-vault-tab-label">' + escapeHTML(vaultDisplayLabel(vaultItem)) + '</span>' +
-        '</button>'
+        '<div class="vault-modal-folder-vault-tab-wrap' + (isActive ? ' is-active' : '') + '">' +
+          '<button type="button" class="vault-modal-folder-vault-tab' + (isActive ? ' is-active' : '') + '" role="tab" aria-selected="' + (isActive ? 'true' : 'false') + '" data-action="select-folder-vault-tab" data-vault-id="' + escapeHTML(vaultItem.id) + '">' +
+            '<span class="vault-modal-folder-vault-tab-label">' + escapeHTML(vaultDisplayLabel(vaultItem)) + '</span>' +
+          '</button>' +
+          actionButton +
+        '</div>'
       );
     }).join('');
   }
@@ -1539,7 +1711,11 @@
             '<div class="vault-modal-detail-title">' + escapeHTML(record.label || 'Untitled entry') + '</div>' +
             '<div class="vault-modal-detail-meta">' + escapeHTML([recordTypeLabel(record.type), record.workspace_id].filter(Boolean).join(' • ') || 'Vault file') + '</div>' +
           '</div>' +
-          '<button type="button" class="modern-btn modern-btn-secondary" data-action="toggle-payload">' + escapeHTML(revealLabel) + '</button>' +
+          '<div class="vault-modal-detail-actions">' +
+            '<button type="button" class="modern-btn modern-btn-secondary" data-action="edit-record" data-record-id="' + escapeHTML(record.id) + '">Edit Entry</button>' +
+            '<button type="button" class="modern-btn modern-btn-secondary" data-action="toggle-payload">' + escapeHTML(revealLabel) + '</button>' +
+            '<button type="button" class="modern-btn modern-btn-secondary vault-modal-danger-btn" data-action="delete-record" data-record-id="' + escapeHTML(record.id) + '">Delete</button>' +
+          '</div>' +
         '</div>' +
         '<div class="vault-modal-chip-row">' + tags + '</div>' +
         '<div class="vault-modal-detail-grid">' +
@@ -1791,12 +1967,7 @@
         actionButton.focus();
         return;
       }
-      elements.vaultSelect?.focus();
-      return;
-    }
-
-    if (elements.spacesTabPanel && !elements.spacesTabPanel.hidden) {
-      elements.vaultSelect?.focus();
+      currentVaultTabButton()?.focus();
       return;
     }
 
@@ -1844,7 +2015,6 @@
         elements.passwordInput.value = '';
       }
       notify('Vault unlocked.', 'success');
-      state.workspaceTab = WORKSPACE_TAB_FOLDER;
       closeUnlockDialog({ restoreFocus: false });
       await refreshVault(false);
     } catch (error) {
@@ -1882,17 +2052,7 @@
     }
   }
 
-  async function createRecord() {
-    if (!activeVaultID()) {
-      showAlert('Create or select a vault before saving an entry.', 'warning');
-      return;
-    }
-
-    if (!state.status || state.status.locked) {
-      showAlert('Unlock the vault before creating a new entry.', 'warning');
-      return;
-    }
-
+  function buildEntryRequestBody() {
     const body = {
       vault_id: activeVaultID(),
       type: String(elements.entryTypeInput?.value || ''),
@@ -1904,39 +2064,111 @@
     };
 
     if (!body.label) {
-      showAlert('Label is required before saving to the vault.', 'warning');
+      throw new Error('Title is required before saving to the vault.');
+    }
+
+    body.payload = parsePayloadInput();
+    return body;
+  }
+
+  async function saveRecord() {
+    const editing = isEditingEntryDialog();
+
+    if (!activeVaultID()) {
+      showAlert('Create or select a vault before saving an entry.', 'warning');
       return;
     }
 
+    if (!state.status || state.status.locked) {
+      showAlert(editing ? 'Unlock the vault before editing an entry.' : 'Unlock the vault before creating a new entry.', 'warning');
+      return;
+    }
+
+    const recordID = state.entryDialogRecord?.id || '';
+    if (editing && !recordID) {
+      showAlert('Select an entry before editing it.', 'warning');
+      return;
+    }
+
+    let body;
     try {
-      body.payload = parsePayloadInput();
+      body = buildEntryRequestBody();
     } catch (error) {
       showAlert(error.message || 'Payload must be valid JSON.', 'warning');
       return;
     }
 
     try {
-      setButtonLoading(elements.saveBtn, true, 'Saving entry');
-      const response = await apiRequest('/api/vault/records', {
-        method: 'POST',
+      setButtonLoading(elements.saveBtn, true, editing ? 'Updating entry' : 'Saving entry');
+      const response = await apiRequest(editing
+        ? vaultURL('/api/vault/records/' + encodeURIComponent(recordID))
+        : '/api/vault/records', {
+        method: editing ? 'PATCH' : 'POST',
         body: body
       });
 
-      resetCreateForm();
       closeEntryDialog({ restoreFocus: false });
-      state.selectedFolderPath = ROOT_FOLDER_PATH;
-      notify('Vault entry saved.', 'success');
-      await refreshVault(false);
 
-      const recordID = response?.record?.id;
-      if (recordID) {
-        await selectRecord(recordID);
+      if (editing) {
+        notify('Vault entry updated.', 'success');
+        await refreshVault();
+      } else {
+        resetCreateForm();
+        state.selectedFolderPath = ROOT_FOLDER_PATH;
+        notify('Vault entry saved.', 'success');
+        await refreshVault(false);
+
+        const createdRecordID = response?.record?.id;
+        if (createdRecordID) {
+          await selectRecord(createdRecordID);
+        }
       }
     } catch (error) {
       console.error('Failed to save vault entry:', error);
-      showAlert(error.message || 'Failed to save vault entry.', 'error');
+      showAlert(error.message || (editing ? 'Failed to update vault entry.' : 'Failed to save vault entry.'), 'error');
     } finally {
       setButtonLoading(elements.saveBtn, false);
+      setInteractiveState(Boolean(state.status?.locked));
+    }
+  }
+
+  async function deleteRecord(recordID) {
+    const targetRecord = (state.selectedRecord && state.selectedRecord.id === recordID)
+      ? state.selectedRecord
+      : state.recordIndex.get(recordID);
+
+    if (!recordID || !targetRecord) {
+      showAlert('Select an entry before deleting it.', 'warning');
+      return;
+    }
+
+    const confirmed = window.confirm('Delete "' + (targetRecord.label || 'Untitled entry') + '" from this vault? This cannot be undone.');
+    if (!confirmed) {
+      return;
+    }
+
+    const deleteButton = elements.preview?.querySelector('[data-action="delete-record"][data-record-id="' + escapeSelectorValue(recordID) + '"]');
+
+    try {
+      setButtonLoading(deleteButton, true, 'Deleting');
+      await apiRequest(vaultURL('/api/vault/records/' + encodeURIComponent(recordID)), {
+        method: 'DELETE'
+      });
+
+      if (state.entryDialogOpen && state.entryDialogRecord?.id === recordID) {
+        closeEntryDialog({ restoreFocus: false });
+      }
+      if (state.selectedRecord?.id === recordID) {
+        clearSelection();
+      }
+
+      notify('Vault entry deleted.', 'success');
+      await refreshVault(false);
+    } catch (error) {
+      console.error('Failed to delete vault entry:', error);
+      showAlert(error.message || 'Failed to delete vault entry.', 'error');
+    } finally {
+      setButtonLoading(deleteButton, false);
       setInteractiveState(Boolean(state.status?.locked));
     }
   }
@@ -1981,6 +2213,24 @@
 
       if (action === 'toggle-payload') {
         togglePayloadReveal();
+        return;
+      }
+
+      if (action === 'edit-record') {
+        const recordID = target.getAttribute('data-record-id');
+        if (recordID) {
+          openEditEntryDialog(recordID).catch(function(error) {
+            console.error('Failed to open edit entry dialog:', error);
+          });
+        }
+        return;
+      }
+
+      if (action === 'delete-record') {
+        const recordID = target.getAttribute('data-record-id');
+        if (recordID) {
+          deleteRecord(recordID);
+        }
       }
     });
   }
@@ -1999,19 +2249,44 @@
     });
 
     elements.folderVaultTabs?.addEventListener('click', function(event) {
-      const target = event.target.closest('[data-action="select-folder-vault-tab"]');
+      const target = event.target.closest('[data-action]');
       if (!target) {
         return;
       }
 
+      const action = target.getAttribute('data-action');
       const vaultID = target.getAttribute('data-vault-id');
       if (!vaultID) {
         return;
       }
 
-      switchVault(vaultID, { promptUnlock: true }).catch(function(error) {
-        console.error('Failed to switch vault from folder tabs:', error);
-      });
+      if (action === 'toggle-vault-access') {
+        if (vaultID !== activeVaultID()) {
+          switchVault(vaultID, { promptUnlock: false }).then(function() {
+            if (state.status?.locked) {
+              openUnlockDialog();
+              return;
+            }
+            lockVault();
+          }).catch(function(error) {
+            console.error('Failed to toggle folder vault tab access:', error);
+          });
+          return;
+        }
+
+        if (state.status?.locked) {
+          openUnlockDialog();
+        } else if (state.status?.available) {
+          lockVault();
+        }
+        return;
+      }
+
+      if (action === 'select-folder-vault-tab') {
+        switchVault(vaultID, { promptUnlock: true }).catch(function(error) {
+          console.error('Failed to switch vault from folder tabs:', error);
+        });
+      }
     });
   }
 
@@ -2042,14 +2317,6 @@
 
     elements.openEntryBtn?.addEventListener('click', function() {
       openEntryDialog();
-    });
-
-    elements.tabFolderBtn?.addEventListener('click', function() {
-      setWorkspaceTab(WORKSPACE_TAB_FOLDER);
-    });
-
-    elements.tabSpacesBtn?.addEventListener('click', function() {
-      setWorkspaceTab(WORKSPACE_TAB_SPACES);
     });
 
     elements.unlockBtn?.addEventListener('click', function() {
@@ -2165,13 +2432,21 @@
       }
     });
 
+    elements.entryTypeInput?.addEventListener('change', function() {
+      syncEntryComposerPresentation();
+    });
+
+    elements.entryJsonModeInput?.addEventListener('change', function() {
+      syncEntryComposerPresentation();
+    });
+
     elements.resetBtn?.addEventListener('click', function() {
       resetCreateForm();
       showAlert('');
     });
 
     elements.saveBtn?.addEventListener('click', function() {
-      createRecord();
+      saveRecord();
     });
 
     elements.searchInput?.addEventListener('input', function() {

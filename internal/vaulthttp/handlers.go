@@ -268,13 +268,14 @@ func (h *Handler) handleRecord(w http.ResponseWriter, r *http.Request, id string
 		orihttp.Success(w, record)
 	case http.MethodPatch, http.MethodPut:
 		var req struct {
+			Type            *string          `json:"type,omitempty"`
+			WorkspaceID     *string          `json:"workspace_id,omitempty"`
 			Label           *string          `json:"label,omitempty"`
 			Tags            *[]string        `json:"tags,omitempty"`
 			Source          *string          `json:"source,omitempty"`
 			RetentionPolicy *string          `json:"retention_policy,omitempty"`
 			Payload         *json.RawMessage `json:"payload,omitempty"`
 			VaultID         string           `json:"vault_id,omitempty"`
-			WorkspaceID     string           `json:"workspace_id,omitempty"`
 			ActorType       vault.ActorType  `json:"actor_type,omitempty"`
 			ActorID         string           `json:"actor_id,omitempty"`
 		}
@@ -283,6 +284,8 @@ func (h *Handler) handleRecord(w http.ResponseWriter, r *http.Request, id string
 		}
 
 		update := vault.RecordUpdate{
+			Type:            req.Type,
+			WorkspaceID:     req.WorkspaceID,
 			Label:           req.Label,
 			Tags:            req.Tags,
 			Source:          req.Source,
@@ -293,7 +296,7 @@ func (h *Handler) handleRecord(w http.ResponseWriter, r *http.Request, id string
 			update.Payload = &payload
 		}
 
-		workspaceID := firstNonEmpty(req.WorkspaceID, r.URL.Query().Get("workspace_id"), r.URL.Query().Get("studio_id"))
+		workspaceID := firstNonEmpty(stringValue(req.WorkspaceID), r.URL.Query().Get("workspace_id"), r.URL.Query().Get("studio_id"))
 		access := accessFromFields(workspaceID, req.ActorType, req.ActorID)
 		if access.ActorID == "" && access.ActorType == "" {
 			access = accessFromQuery(r)
@@ -425,6 +428,13 @@ func firstNonEmpty(values ...string) string {
 		}
 	}
 	return ""
+}
+
+func stringValue(value *string) string {
+	if value == nil {
+		return ""
+	}
+	return *value
 }
 
 func vaultIDFromRequest(r *http.Request, values ...string) string {
