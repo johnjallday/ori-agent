@@ -258,30 +258,6 @@ const sessionManager = {
       });
     });
 
-    const setupToggle = document.getElementById('folderEnableSetup');
-    setupToggle?.addEventListener('change', () => {
-      this.updateWorkspaceSetupControlsState();
-      this.renderWorkspaceSetupPreview();
-    });
-
-    document.querySelectorAll('#folderSetupTemplateGroup .workspace-setup-template').forEach((btn) => {
-      btn.addEventListener('click', () => {
-        document.querySelectorAll('#folderSetupTemplateGroup .workspace-setup-template').forEach((item) => {
-          item.classList.remove('is-active');
-          item.setAttribute('aria-checked', 'false');
-        });
-        btn.classList.add('is-active');
-        btn.setAttribute('aria-checked', 'true');
-        this.renderWorkspaceSetupPreview();
-      });
-    });
-
-    ['folderSetupTasks', 'folderSetupNotes', 'folderSetupSchedule'].forEach((id) => {
-      document.getElementById(id)?.addEventListener('change', () => this.renderWorkspaceSetupPreview());
-    });
-
-    document.getElementById('folderNameInput')?.addEventListener('input', () => this.renderWorkspaceSetupPreview());
-
     const addFolderModal = document.getElementById('addFolderModal');
     addFolderModal?.addEventListener('show.bs.modal', () => {
       this.resetAddWorkspaceModalForm({ preserveAskOri: true });
@@ -2896,155 +2872,6 @@ const sessionManager = {
     }
   },
 
-  getWorkspaceSetupTemplateDefinition(templateKey, workspaceName) {
-    const name = String(workspaceName || 'this workspace').trim() || 'this workspace';
-    const templates = {
-      feature: {
-        tasks: [
-          {
-            description: `Define scope and acceptance criteria for ${name}`,
-            details: 'Capture what is in/out of scope, success criteria, and known risks.',
-            priority: 2
-          },
-          {
-            description: `Implement first milestone for ${name}`,
-            details: 'Build the smallest end-to-end slice that proves the core workflow.',
-            priority: 2
-          },
-          {
-            description: `Add and verify tests for ${name}`,
-            details: 'Cover happy path, key edge cases, and regressions before release.',
-            priority: 2
-          },
-          {
-            description: `QA and rollout checklist for ${name}`,
-            details: 'Verify behavior in staging, note blockers, and define release steps.',
-            priority: 1
-          }
-        ],
-        notes: [
-          {
-            name: 'Requirements Brief',
-            content: '# Requirements Brief\n\n## Goal\n- \n\n## Success Criteria\n- \n\n## Scope\n- In scope:\n- Out of scope:\n\n## Risks\n- \n'
-          }
-        ],
-        scheduleTask: {
-          description: `Weekly review for ${name}`,
-          details: 'Review priorities, unblock tasks, and choose the next highest-impact milestone.',
-          to: 'ori',
-          priority: 1,
-          schedule_enabled: true,
-          schedule_name: 'Weekly workspace review',
-          schedule: {
-            type: 'weekly',
-            day_of_week: 1,
-            time: '09:00'
-          }
-        }
-      },
-      bug: {
-        tasks: [
-          {
-            description: `Reproduce and document the issue in ${name}`,
-            details: 'Capture exact steps, expected behavior, and actual behavior.',
-            priority: 3
-          },
-          {
-            description: `Identify root cause for ${name}`,
-            details: 'Trace logs, inspect recent changes, and isolate the failing path.',
-            priority: 3
-          },
-          {
-            description: `Implement and verify fix for ${name}`,
-            details: 'Ship a targeted fix and validate with focused tests.',
-            priority: 3
-          },
-          {
-            description: `Post-fix monitoring and follow-up for ${name}`,
-            details: 'Monitor recurrence signals and document preventative actions.',
-            priority: 2
-          }
-        ],
-        notes: [
-          {
-            name: 'Incident Log',
-            content: '# Incident Log\n\n## Summary\n- \n\n## Reproduction\n1. \n\n## Root Cause\n- \n\n## Fix Plan\n- \n\n## Validation\n- \n'
-          }
-        ],
-        scheduleTask: {
-          description: `Daily bug status check for ${name}`,
-          details: 'Summarize open bug status, blockers, and next fix action.',
-          to: 'ori',
-          priority: 2,
-          schedule_enabled: true,
-          schedule_name: 'Daily bug review',
-          schedule: {
-            type: 'daily',
-            time: '10:00'
-          }
-        }
-      },
-      research: {
-        tasks: [
-          {
-            description: `Define research questions for ${name}`,
-            details: 'Write the core questions and decision points this research must answer.',
-            priority: 2
-          },
-          {
-            description: `Collect sources and references for ${name}`,
-            details: 'Gather primary references and label confidence for each source.',
-            priority: 2
-          },
-          {
-            description: `Synthesize findings for ${name}`,
-            details: 'Identify patterns, contradictions, and opportunities.',
-            priority: 2
-          },
-          {
-            description: `Recommend next actions from ${name}`,
-            details: 'Translate findings into concrete actions with owner and impact.',
-            priority: 1
-          }
-        ],
-        notes: [
-          {
-            name: 'Research Notes',
-            content: '# Research Notes\n\n## Questions\n- \n\n## Sources\n- \n\n## Findings\n- \n\n## Open Questions\n- \n\n## Recommendations\n- \n'
-          }
-        ],
-        scheduleTask: {
-          description: `Weekly synthesis for ${name}`,
-          details: 'Compile notable findings and update recommendations.',
-          to: 'ori',
-          priority: 1,
-          schedule_enabled: true,
-          schedule_name: 'Weekly research synthesis',
-          schedule: {
-            type: 'weekly',
-            day_of_week: 5,
-            time: '16:00'
-          }
-        }
-      }
-    };
-
-    return templates[templateKey] || templates.feature;
-  },
-
-  getWorkspaceSetupConfigFromModal() {
-    const enabled = Boolean(document.getElementById('folderEnableSetup')?.checked);
-    const activeTemplate = document.querySelector('#folderSetupTemplateGroup .workspace-setup-template.is-active');
-
-    return {
-      enabled,
-      template: activeTemplate?.dataset?.template || 'feature',
-      includeTasks: Boolean(document.getElementById('folderSetupTasks')?.checked),
-      includeNotes: Boolean(document.getElementById('folderSetupNotes')?.checked),
-      includeSchedule: Boolean(document.getElementById('folderSetupSchedule')?.checked)
-    };
-  },
-
   getWorkspaceBootstrapFromModal() {
     const goal = String(document.getElementById('folderPrimaryGoalInput')?.value || '').trim();
     const systems = String(document.getElementById('folderSystemsInput')?.value || '').trim();
@@ -3084,46 +2911,6 @@ const sessionManager = {
       name: 'Workspace Brief',
       content: `# Workspace Brief\n\nCaptured during workspace creation for ${title}.\n\n## Primary Goal\n${goalSection}\n\n## Apps and Systems\n${systemsSection}\n\n## What Ori Should Help With\n${capabilitiesSection}\n\n## Key Files or Context\n${contextSection}\n`
     };
-  },
-
-  updateWorkspaceSetupControlsState() {
-    const enabled = Boolean(document.getElementById('folderEnableSetup')?.checked);
-    const controls = document.getElementById('folderSetupControls');
-    if (controls) {
-      controls.hidden = !enabled;
-    }
-  },
-
-  renderWorkspaceSetupPreview() {
-    const previewList = document.getElementById('folderSetupPreview');
-    if (!previewList) return;
-
-    const setup = this.getWorkspaceSetupConfigFromModal();
-    const workspaceName = document.getElementById('folderNameInput')?.value?.trim() || 'this workspace';
-    const template = this.getWorkspaceSetupTemplateDefinition(setup.template, workspaceName);
-
-    if (!setup.enabled) {
-      previewList.innerHTML = '<li>Setup is off. Workspace will be created empty.</li>';
-      return;
-    }
-
-    const lines = [];
-    if (setup.includeTasks) {
-      lines.push(`${template.tasks.length} starter tasks`);
-    }
-    if (setup.includeNotes) {
-      lines.push(`${template.notes.length} note template${template.notes.length === 1 ? '' : 's'}`);
-    }
-    if (setup.includeSchedule) {
-      lines.push(`${template.scheduleTask.schedule_name}`);
-    }
-    if (lines.length === 0) {
-      lines.push('No setup items selected.');
-    }
-
-    previewList.innerHTML = lines
-      .map((line) => `<li>${this.escapeHtml(line)}</li>`)
-      .join('');
   },
 
   extractFolderNameFromPath(pathValue) {
@@ -3354,26 +3141,6 @@ const sessionManager = {
       defaultColorBtn.classList.add('active');
     }
 
-    const setupToggle = document.getElementById('folderEnableSetup');
-    if (setupToggle) {
-      setupToggle.checked = false;
-    }
-    document.querySelectorAll('#folderSetupTemplateGroup .workspace-setup-template').forEach((btn) => {
-      btn.classList.remove('is-active');
-      btn.setAttribute('aria-checked', 'false');
-    });
-    const defaultTemplate = document.querySelector('#folderSetupTemplateGroup .workspace-setup-template[data-template="feature"]');
-    if (defaultTemplate) {
-      defaultTemplate.classList.add('is-active');
-      defaultTemplate.setAttribute('aria-checked', 'true');
-    }
-    const setupTasks = document.getElementById('folderSetupTasks');
-    const setupNotes = document.getElementById('folderSetupNotes');
-    const setupSchedule = document.getElementById('folderSetupSchedule');
-    if (setupTasks) setupTasks.checked = true;
-    if (setupNotes) setupNotes.checked = true;
-    if (setupSchedule) setupSchedule.checked = false;
-
     const importToggle = document.getElementById('folderImportToggle');
     const importPathInput = document.getElementById('folderImportPathInput');
     if (importToggle) importToggle.checked = false;
@@ -3386,9 +3153,6 @@ const sessionManager = {
     if (window.WorkspaceBootstrapReview && typeof window.WorkspaceBootstrapReview.reset === 'function') {
       window.WorkspaceBootstrapReview.reset();
     }
-
-    this.updateWorkspaceSetupControlsState();
-    this.renderWorkspaceSetupPreview();
   },
 
   async createWorkspaceSeedTask(workspaceId, taskConfig) {
@@ -3440,49 +3204,6 @@ const sessionManager = {
     }
   },
 
-  async applyWorkspaceSetup(workspaceId, workspaceName, setupConfig) {
-    const template = this.getWorkspaceSetupTemplateDefinition(setupConfig.template, workspaceName);
-    const result = {
-      tasksCreated: 0,
-      notesCreated: 0,
-      schedulesCreated: 0,
-      errors: []
-    };
-
-    if (setupConfig.includeTasks) {
-      for (const taskConfig of template.tasks) {
-        try {
-          await this.createWorkspaceSeedTask(workspaceId, taskConfig);
-          result.tasksCreated += 1;
-        } catch (error) {
-          result.errors.push(error);
-        }
-      }
-    }
-
-    if (setupConfig.includeSchedule) {
-      try {
-        await this.createWorkspaceSeedTask(workspaceId, template.scheduleTask);
-        result.schedulesCreated += 1;
-      } catch (error) {
-        result.errors.push(error);
-      }
-    }
-
-    if (setupConfig.includeNotes) {
-      for (const noteConfig of template.notes) {
-        try {
-          await this.createWorkspaceSeedNote(workspaceId, noteConfig);
-          result.notesCreated += 1;
-        } catch (error) {
-          result.errors.push(error);
-        }
-      }
-    }
-
-    return result;
-  },
-
   // Create folder
   async createFolder() {
     if (this.isCreatingFolder) return;
@@ -3495,7 +3216,6 @@ const sessionManager = {
     const createBtn = document.getElementById('createFolderBtn');
     const importToggle = document.getElementById('folderImportToggle');
     const importPathInput = document.getElementById('folderImportPathInput');
-    const setupConfig = this.getWorkspaceSetupConfigFromModal();
     const workspaceBootstrap = this.getWorkspaceBootstrapFromModal();
     const primaryGoalInput = document.getElementById('folderPrimaryGoalInput');
 
@@ -3531,11 +3251,7 @@ const sessionManager = {
     this.isCreatingFolder = true;
     if (createBtn) {
       createBtn.disabled = true;
-      if (importEnabled) {
-        createBtn.textContent = setupConfig.enabled ? 'Importing + Setup...' : 'Importing...';
-      } else {
-        createBtn.textContent = setupConfig.enabled ? 'Creating + Setup...' : 'Creating...';
-      }
+      createBtn.textContent = importEnabled ? 'Importing...' : 'Creating...';
     }
 
     try {
@@ -3704,31 +3420,7 @@ const sessionManager = {
         bootstrapApplyResult = await window.WorkspaceBootstrapReview.applyPlan(createdWorkspaceId);
       }
 
-      if (setupConfig.enabled && createdWorkspaceId) {
-        const setupWorkspaceName = name || this.extractFolderNameFromPath(importPath) || 'Imported Workspace';
-        const setupResult = await this.applyWorkspaceSetup(createdWorkspaceId, setupWorkspaceName, setupConfig);
-        const summaryParts = [];
-        if (bootstrapApplyResult.invitedAgents > 0) summaryParts.push(`${bootstrapApplyResult.invitedAgents} agents`);
-        if (bootstrapApplyResult.boundMCPs > 0) summaryParts.push(`${bootstrapApplyResult.boundMCPs} MCPs`);
-        if (bootstrapApplyResult.attachedSkills > 0) summaryParts.push(`${bootstrapApplyResult.attachedSkills} skills`);
-        if (setupResult.tasksCreated > 0) summaryParts.push(`${setupResult.tasksCreated} tasks`);
-        if (setupResult.notesCreated > 0) summaryParts.push(`${setupResult.notesCreated} notes`);
-        if (setupResult.schedulesCreated > 0) summaryParts.push(`${setupResult.schedulesCreated} schedules`);
-        if (askOriSeedResult.tasksCreated > 0) summaryParts.push(`${askOriSeedResult.tasksCreated} Assistant task`);
-        if (askOriSeedResult.notesCreated > 0) summaryParts.push(`${askOriSeedResult.notesCreated} Assistant note`);
-        if (workspaceBriefResult.notesCreated > 0) summaryParts.push('workspace brief');
-        const summaryText = summaryParts.length > 0 ? summaryParts.join(', ') : 'no setup items';
-        if (
-          setupResult.errors.length > 0 ||
-          askOriSeedResult.errors.length > 0 ||
-          workspaceBriefResult.errors.length > 0 ||
-          bootstrapApplyResult.failures.length > 0
-        ) {
-          this.showToast(`${importEnabled ? 'Workspace imported' : 'Workspace created'} with partial setup (${summaryText}).`, 'warning');
-        } else {
-          this.showToast(`${importEnabled ? 'Workspace imported' : 'Workspace created'} with Ori setup (${summaryText}).`, 'success');
-        }
-      } else if (
+      if (
         bootstrapApplyResult.invitedAgents > 0 ||
         bootstrapApplyResult.boundMCPs > 0 ||
         bootstrapApplyResult.attachedSkills > 0 ||
@@ -3749,9 +3441,9 @@ const sessionManager = {
           workspaceBriefResult.errors.length > 0 ||
           bootstrapApplyResult.failures.length > 0
         ) {
-          this.showToast(`${importEnabled ? 'Workspace imported' : 'Workspace created'} with partial starter setup (${summaryText}).`, 'warning');
+          this.showToast(`${importEnabled ? 'Workspace imported' : 'Workspace created'} with partial setup (${summaryText}).`, 'warning');
         } else {
-          this.showToast(`${importEnabled ? 'Workspace imported' : 'Workspace created'} with starter setup (${summaryText}).`, 'success');
+          this.showToast(`${importEnabled ? 'Workspace imported' : 'Workspace created'} with setup (${summaryText}).`, 'success');
         }
       } else {
         this.showToast(importEnabled ? 'Workspace imported successfully' : 'Workspace created successfully', 'success');

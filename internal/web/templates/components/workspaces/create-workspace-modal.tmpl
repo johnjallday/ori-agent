@@ -1,145 +1,108 @@
 {{define "components/workspaces/create-workspace-modal.tmpl"}}
 <!-- Create Workspace Modal -->
-<div class="modal fade" id="addFolderModal" tabindex="-1" aria-hidden="true">
-  <div class="modal-dialog modal-dialog-centered modal-dialog-scrollable">
+<div class="modal fade workspace-create-modal" id="addFolderModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered modal-dialog-scrollable workspace-create-modal-dialog">
     <div class="modal-content" style="background: var(--bg-primary); border: 1px solid var(--border-color);">
       <div class="modal-header" style="border-bottom: 1px solid var(--border-color);">
         <h6 class="modal-title" style="color: var(--text-primary);">Create Workspace</h6>
         <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
       </div>
-      <div class="modal-body">
-        <label for="folderNameInput" style="font-size: 12px; color: var(--text-secondary);">Workspace name</label>
-        <input type="text" id="folderNameInput" class="modern-input w-100 mb-2" placeholder="Workspace name">
-        <label for="folderDescriptionInput" style="font-size: 12px; color: var(--text-secondary);">Description <span style="opacity: 0.8;">(optional)</span></label>
-        <textarea id="folderDescriptionInput" class="modern-input w-100 mb-2" placeholder="Description (optional)" rows="2" style="resize: vertical;"></textarea>
+      <div class="modal-body workspace-create-modal-body">
+        <div class="workspace-create-layout">
+          <div class="workspace-create-main-fields">
+            <label for="folderNameInput" style="font-size: 12px; color: var(--text-secondary);">Workspace name</label>
+            <input type="text" id="folderNameInput" class="modern-input w-100 mb-2" placeholder="Workspace name">
+            <label for="folderDescriptionInput" style="font-size: 12px; color: var(--text-secondary);">Description <span style="opacity: 0.8;">(optional)</span></label>
+            <textarea id="folderDescriptionInput" class="modern-input w-100 mb-2" placeholder="Description (optional)" rows="2" style="resize: vertical;"></textarea>
 
-        <div class="workspace-setup-card mb-2">
-          <div class="workspace-setup-header" style="align-items: flex-start;">
-            <div>
-              <label for="folderPrimaryGoalInput" class="workspace-setup-title">Workspace Brief</label>
-              <p class="workspace-setup-help mb-0">Capture what this workspace is for so Ori can bootstrap it with the right context later.</p>
-            </div>
-          </div>
-
-          <label for="folderPrimaryGoalInput" style="font-size: 12px; color: var(--text-secondary);">Primary goal</label>
-          <textarea id="folderPrimaryGoalInput" class="modern-input w-100 mb-2" placeholder="What should this workspace accomplish?" rows="2" style="resize: vertical;"></textarea>
-
-          <label for="folderSystemsInput" style="font-size: 12px; color: var(--text-secondary);">Apps and systems <span style="opacity: 0.8;">(optional)</span></label>
-          <input type="text" id="folderSystemsInput" class="modern-input w-100 mb-2" placeholder="Keynote, Finder, Google Drive">
-
-          <label for="folderCapabilitiesInput" style="font-size: 12px; color: var(--text-secondary);">What Ori should help with <span style="opacity: 0.8;">(optional)</span></label>
-          <textarea id="folderCapabilitiesInput" class="modern-input w-100 mb-2" placeholder="Create decks, organize files, export assets, automate reviews" rows="2" style="resize: vertical;"></textarea>
-
-          <label for="folderContextInput" style="font-size: 12px; color: var(--text-secondary);">Key files or context <span style="opacity: 0.8;">(optional)</span></label>
-          <textarea id="folderContextInput" class="modern-input w-100" placeholder="Folder paths, source docs, launch notes, brand references" rows="2" style="resize: vertical;"></textarea>
-        </div>
-
-        <div class="workspace-setup-card mb-2">
-          <div class="workspace-setup-header">
-            <label for="folderImportToggle" class="workspace-setup-title">Import from Existing Folder</label>
-            <div class="form-check form-switch m-0">
-              <input class="form-check-input" type="checkbox" id="folderImportToggle" role="switch" aria-label="Import from existing folder">
-            </div>
-          </div>
-          <p class="workspace-setup-help mb-2">Link a local folder so this workspace starts with real project context.</p>
-
-          <div id="folderImportSection" hidden>
-            <label for="folderImportPathInput" style="font-size: 12px; color: var(--text-secondary);">Folder path</label>
-            <div class="d-flex flex-column flex-sm-row gap-2 mb-2">
-              <input type="text" id="folderImportPathInput" class="modern-input w-100" placeholder="/absolute/path/to/project" autocomplete="off">
-              <button type="button" id="folderImportBrowseBtn" class="modern-btn modern-btn-secondary" style="white-space: nowrap; min-width: 96px;" aria-label="Browse for folder path">
-                Browse
-              </button>
-            </div>
-            <div style="margin-top: -6px; margin-bottom: 8px; font-size: 12px; color: var(--text-secondary);">
-              Enter an absolute path to import. Workspace name defaults to the folder name, and you can edit it.
-            </div>
-
-            <div id="folderImportDuplicateWarning" class="modern-card p-2 mb-2" style="display: none; border: 1px solid #f59e0b; background: rgba(245, 158, 11, 0.08);">
-              <div id="folderImportDuplicateText" style="font-size: 12px; color: var(--text-primary); margin-bottom: 8px;" aria-live="polite"></div>
-              <div class="d-flex flex-column flex-sm-row gap-2">
-                <button type="button" id="folderImportOpenExistingBtn" class="modern-btn modern-btn-secondary" style="flex: 1;">Open Existing</button>
-                <button type="button" id="folderImportProceedDuplicateBtn" class="modern-btn modern-btn-primary" style="flex: 1;">Import Anyway</button>
+            <div class="workspace-setup-card mb-2">
+              <div class="workspace-setup-header" style="align-items: flex-start;">
+                <div>
+                  <label for="folderPrimaryGoalInput" class="workspace-setup-title">Workspace Brief</label>
+                  <p class="workspace-setup-help mb-0">Capture what this workspace is for so Ori can bootstrap it with the right context later.</p>
+                </div>
               </div>
+
+              <label for="folderPrimaryGoalInput" style="font-size: 12px; color: var(--text-secondary);">Primary goal</label>
+              <textarea id="folderPrimaryGoalInput" class="modern-input w-100 mb-2" placeholder="What should this workspace accomplish?" rows="2" style="resize: vertical;"></textarea>
+
+              <label for="folderSystemsInput" style="font-size: 12px; color: var(--text-secondary);">Apps and systems <span style="opacity: 0.8;">(optional)</span></label>
+              <input type="text" id="folderSystemsInput" class="modern-input w-100 mb-2" placeholder="Keynote, Finder, Google Drive">
+
+              <label for="folderCapabilitiesInput" style="font-size: 12px; color: var(--text-secondary);">What Ori should help with <span style="opacity: 0.8;">(optional)</span></label>
+              <textarea id="folderCapabilitiesInput" class="modern-input w-100 mb-2" placeholder="Create decks, organize files, export assets, automate reviews" rows="2" style="resize: vertical;"></textarea>
+
+              <label for="folderContextInput" style="font-size: 12px; color: var(--text-secondary);">Key files or context <span style="opacity: 0.8;">(optional)</span></label>
+              <textarea id="folderContextInput" class="modern-input w-100" placeholder="Folder paths, source docs, launch notes, brand references" rows="2" style="resize: vertical;"></textarea>
             </div>
-          </div>
-        </div>
 
-        <label for="folderParentSelect" style="font-size: 12px; color: var(--text-secondary);">Group (optional)</label>
-        <select id="folderParentSelect" class="modern-input w-100 mb-2" aria-label="Select parent workspace">
-          <option value="">No group</option>
-        </select>
-        <div style="margin-top: -6px; margin-bottom: 10px; font-size: 12px; color: var(--text-secondary);">
-          Optional. Choose a group (parent workspace).
-        </div>
+            <div class="workspace-setup-card mb-2">
+              <div class="workspace-setup-header">
+                <label for="folderImportToggle" class="workspace-setup-title">Import from Existing Folder</label>
+                <div class="form-check form-switch m-0">
+                  <input class="form-check-input" type="checkbox" id="folderImportToggle" role="switch" aria-label="Import from existing folder">
+                </div>
+              </div>
+              <p class="workspace-setup-help mb-2">Link a local folder so this workspace starts with real project context.</p>
 
-        <div class="folder-color-picker">
-          <label style="font-size: 12px; color: var(--text-secondary);">Color:</label>
-          <div id="folderColorOptions" class="folder-color-options mt-1">
-            <button type="button" class="folder-color-btn active" data-color="" title="Default" aria-label="Default color"></button>
-            <button type="button" class="folder-color-btn" data-color="#ef4444" title="Red" aria-label="Red color" style="background: #ef4444;"></button>
-            <button type="button" class="folder-color-btn" data-color="#f59e0b" title="Orange" aria-label="Orange color" style="background: #f59e0b;"></button>
-            <button type="button" class="folder-color-btn" data-color="#22c55e" title="Green" aria-label="Green color" style="background: #22c55e;"></button>
-            <button type="button" class="folder-color-btn" data-color="#3b82f6" title="Blue" aria-label="Blue color" style="background: #3b82f6;"></button>
-            <button type="button" class="folder-color-btn" data-color="#8b5cf6" title="Purple" aria-label="Purple color" style="background: #8b5cf6;"></button>
-            <button type="button" class="folder-color-btn" data-color="#ec4899" title="Pink" aria-label="Pink color" style="background: #ec4899;"></button>
-          </div>
-        </div>
+              <div id="folderImportSection" hidden>
+                <label for="folderImportPathInput" style="font-size: 12px; color: var(--text-secondary);">Folder path</label>
+                <div class="d-flex flex-column flex-sm-row gap-2 mb-2">
+                  <input type="text" id="folderImportPathInput" class="modern-input w-100" placeholder="/absolute/path/to/project" autocomplete="off">
+                  <button type="button" id="folderImportBrowseBtn" class="modern-btn modern-btn-secondary" style="white-space: nowrap; min-width: 96px;" aria-label="Browse for folder path">
+                    Browse
+                  </button>
+                </div>
+                <div style="margin-top: -6px; margin-bottom: 8px; font-size: 12px; color: var(--text-secondary);">
+                  Enter an absolute path to import. Workspace name defaults to the folder name, and you can edit it.
+                </div>
 
-        <div class="workspace-setup-card mt-3" id="folderSetupCard">
-          <div class="workspace-setup-header">
-            <label for="folderEnableSetup" class="workspace-setup-title">Set Up With Ori</label>
-            <div class="form-check form-switch m-0">
-              <input class="form-check-input" type="checkbox" id="folderEnableSetup" role="switch" aria-label="Enable setup with Ori">
-            </div>
-          </div>
-          <p class="workspace-setup-help">Create a starter kit so this workspace is ready to run immediately.</p>
-
-          <div id="folderSetupControls" class="workspace-setup-controls" hidden>
-            <div class="workspace-setup-section">
-              <span class="workspace-setup-label">Template</span>
-              <div class="workspace-setup-templates" id="folderSetupTemplateGroup" role="radiogroup" aria-label="Workspace setup template">
-                <button type="button" class="workspace-setup-template is-active" data-template="feature" role="radio" aria-checked="true">Feature Build</button>
-                <button type="button" class="workspace-setup-template" data-template="bug" role="radio" aria-checked="false">Bug Fix</button>
-                <button type="button" class="workspace-setup-template" data-template="research" role="radio" aria-checked="false">Research</button>
+                <div id="folderImportDuplicateWarning" class="modern-card p-2 mb-2" style="display: none; border: 1px solid #f59e0b; background: rgba(245, 158, 11, 0.08);">
+                  <div id="folderImportDuplicateText" style="font-size: 12px; color: var(--text-primary); margin-bottom: 8px;" aria-live="polite"></div>
+                  <div class="d-flex flex-column flex-sm-row gap-2">
+                    <button type="button" id="folderImportOpenExistingBtn" class="modern-btn modern-btn-secondary" style="flex: 1;">Open Existing</button>
+                    <button type="button" id="folderImportProceedDuplicateBtn" class="modern-btn modern-btn-primary" style="flex: 1;">Import Anyway</button>
+                  </div>
+                </div>
               </div>
             </div>
 
-            <div class="workspace-setup-section">
-              <span class="workspace-setup-label">Create</span>
-              <div class="workspace-setup-options">
-                <label class="workspace-setup-option">
-                  <input type="checkbox" id="folderSetupTasks" checked>
-                  <span>Starter tasks</span>
-                </label>
-                <label class="workspace-setup-option">
-                  <input type="checkbox" id="folderSetupNotes" checked>
-                  <span>Note templates</span>
-                </label>
-                <label class="workspace-setup-option">
-                  <input type="checkbox" id="folderSetupSchedule">
-                  <span>Weekly review schedule</span>
-                </label>
+            <label for="folderParentSelect" style="font-size: 12px; color: var(--text-secondary);">Group (optional)</label>
+            <select id="folderParentSelect" class="modern-input w-100 mb-2" aria-label="Select parent workspace">
+              <option value="">No group</option>
+            </select>
+            <div style="margin-top: -6px; margin-bottom: 10px; font-size: 12px; color: var(--text-secondary);">
+              Optional. Choose a group (parent workspace).
+            </div>
+
+            <div class="folder-color-picker">
+              <label style="font-size: 12px; color: var(--text-secondary);">Color:</label>
+              <div id="folderColorOptions" class="folder-color-options mt-1">
+                <button type="button" class="folder-color-btn active" data-color="" title="Default" aria-label="Default color"></button>
+                <button type="button" class="folder-color-btn" data-color="#ef4444" title="Red" aria-label="Red color" style="background: #ef4444;"></button>
+                <button type="button" class="folder-color-btn" data-color="#f59e0b" title="Orange" aria-label="Orange color" style="background: #f59e0b;"></button>
+                <button type="button" class="folder-color-btn" data-color="#22c55e" title="Green" aria-label="Green color" style="background: #22c55e;"></button>
+                <button type="button" class="folder-color-btn" data-color="#3b82f6" title="Blue" aria-label="Blue color" style="background: #3b82f6;"></button>
+                <button type="button" class="folder-color-btn" data-color="#8b5cf6" title="Purple" aria-label="Purple color" style="background: #8b5cf6;"></button>
+                <button type="button" class="folder-color-btn" data-color="#ec4899" title="Pink" aria-label="Pink color" style="background: #ec4899;"></button>
               </div>
             </div>
 
-            <div class="workspace-setup-preview">
-              <div class="workspace-setup-label">Preview</div>
-              <ul id="folderSetupPreview" class="workspace-setup-preview-list"></ul>
-            </div>
           </div>
-        </div>
 
-        <div class="workspace-setup-card mt-3" id="folderBootstrapReviewCard" hidden>
-          <div class="workspace-setup-header" style="align-items: flex-start;">
-            <div>
-              <div class="workspace-setup-title">Ori Setup Review</div>
-              <p id="folderBootstrapReviewSummary" class="workspace-setup-help mb-0">Ori can review this brief, recommend agents, and propose the MCPs and skills the workspace should start with.</p>
+          <div class="workspace-create-review-pane">
+            <div class="workspace-setup-card" id="folderBootstrapReviewCard" hidden>
+              <div class="workspace-setup-header" style="align-items: flex-start;">
+                <div>
+                  <div class="workspace-setup-title">Ori Setup Review</div>
+                  <p id="folderBootstrapReviewSummary" class="workspace-setup-help mb-0">Ori can review this brief, recommend agents, and propose the MCPs and skills the workspace should start with.</p>
+                </div>
+              </div>
+              <div id="folderBootstrapReviewMeta" class="workspace-setup-help mb-2" hidden></div>
+              <div id="folderBootstrapReviewLoading" class="workspace-setup-help" hidden>Reviewing the workspace brief and preparing a setup plan...</div>
+              <div id="folderBootstrapReviewContent" hidden></div>
             </div>
           </div>
-          <div id="folderBootstrapReviewMeta" class="workspace-setup-help mb-2" hidden></div>
-          <div id="folderBootstrapReviewLoading" class="workspace-setup-help" hidden>Reviewing the workspace brief and preparing a setup plan...</div>
-          <div id="folderBootstrapReviewContent" hidden></div>
         </div>
       </div>
       <div class="modal-footer" style="border-top: 1px solid var(--border-color);">

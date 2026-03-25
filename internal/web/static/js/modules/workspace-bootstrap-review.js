@@ -123,6 +123,10 @@
     return getElement('folderBootstrapReviewContent');
   }
 
+  function getModalElement() {
+    return getElement('addFolderModal');
+  }
+
   function getModalInput() {
     const workspaceName = String(getElement('folderNameInput')?.value || '').trim();
     const description = String(getElement('folderDescriptionInput')?.value || '').trim();
@@ -132,7 +136,6 @@
     const context = String(getElement('folderContextInput')?.value || '').trim();
     const importEnabled = Boolean(getElement('folderImportToggle')?.checked);
     const importPath = String(getElement('folderImportPathInput')?.value || '').trim();
-    const setupEnabled = Boolean(getElement('folderEnableSetup')?.checked);
     const systemsList = uniqueList(
       systems
         ? systems.split(/[\n,;]+/).map((value) => value.trim()).filter(Boolean)
@@ -148,8 +151,7 @@
       capabilities,
       context,
       importEnabled,
-      importPath,
-      setupEnabled
+      importPath
     };
   }
 
@@ -182,8 +184,12 @@
   function setReviewVisibility(visible) {
     const card = getReviewCard();
     const backBtn = getBackButton();
+    const modal = getModalElement();
     if (card) card.hidden = !visible;
     if (backBtn) backBtn.hidden = !visible;
+    if (modal) {
+      modal.classList.toggle('workspace-bootstrap-review-active', Boolean(visible));
+    }
   }
 
   function setReviewLoading(isLoading) {
@@ -584,6 +590,7 @@
     (Array.isArray(marketplaceResults) ? marketplaceResults : []).forEach((skill) => {
       const skillName = String(skill?.skill || skill?.name || '').trim();
       const packageName = String(skill?.package || '').trim();
+      const url = String(skill?.url || '').trim();
       const label = skillName || packageName;
       if (!label) return;
       const key = label.toLowerCase();
@@ -604,6 +611,7 @@
         selected: candidates.length === 0,
         trusted: true,
         packageName,
+        url,
         score
       });
     });
@@ -816,21 +824,37 @@
 
     const attribute = kind === 'mcp' ? 'data-workspace-bootstrap-mcp' : 'data-workspace-bootstrap-skill';
     return items.map((item) => `
-      <label class="workspace-setup-option modern-card p-3 d-flex align-items-start gap-2 mb-2" style="border: 1px solid var(--border-color);">
+      <div class="modern-card p-3 d-flex align-items-start gap-2 mb-2" style="border: 1px solid var(--border-color);">
         <input type="checkbox"
+               id="${escapeHtml(`workspace-bootstrap-${kind}-${item.id}`)}"
                ${attribute}="true"
                value="${escapeHtml(item.id)}"
                ${item.selected ? 'checked' : ''}>
-        <span style="display: block;">
-          <span style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
-            <span style="font-weight: 600; color: var(--text-primary);">${escapeHtml(item.name)}</span>
-            <span class="workspace-detail-mcp-chip ${item.action.indexOf('install') >= 0 ? 'source' : 'status'}">
-              ${item.action.indexOf('install') >= 0 ? 'Install + Attach' : (kind === 'mcp' ? 'Bind' : 'Attach')}
+        <div style="display: block; flex: 1; min-width: 0;">
+          <label for="${escapeHtml(`workspace-bootstrap-${kind}-${item.id}`)}" style="display: block; cursor: pointer;">
+            <span style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
+              <span style="font-weight: 600; color: var(--text-primary);">${escapeHtml(item.name)}</span>
+              <span class="workspace-detail-mcp-chip ${item.action.indexOf('install') >= 0 ? 'source' : 'status'}">
+                ${item.action.indexOf('install') >= 0 ? 'Install + Attach' : (kind === 'mcp' ? 'Bind' : 'Attach')}
+              </span>
+              ${(
+                (kind === 'mcp' && item.source === 'configured') ||
+                (kind === 'skill' && item.source !== 'marketplace')
+              ) ? '<span class="workspace-detail-mcp-chip local">Local</span>' : ''}
             </span>
-          </span>
-          <span style="display: block; margin-top: 4px; font-size: 12px; color: var(--text-secondary);">${escapeHtml(item.description || (kind === 'mcp' ? 'Suggested MCP connector.' : 'Suggested workspace skill.'))}</span>
-        </span>
-      </label>
+            <span style="display: block; margin-top: 4px; font-size: 12px; color: var(--text-secondary);">${escapeHtml(item.description || (kind === 'mcp' ? 'Suggested MCP connector.' : 'Suggested workspace skill.'))}</span>
+          </label>
+          ${kind === 'skill' && item.url ? `
+            <a href="${escapeHtml(item.url)}"
+               target="_blank"
+               rel="noopener noreferrer"
+               onclick="event.stopPropagation()"
+               style="display: inline-block; margin-top: 8px; font-size: 12px; color: var(--text-secondary); text-decoration: underline; word-break: break-all;">
+              ${escapeHtml(item.url)}
+            </a>
+          ` : ''}
+        </div>
+      </div>
     `).join('');
   }
 
@@ -847,20 +871,26 @@
     if (!content) return;
 
     content.innerHTML = `
-      ${renderAgentCards(plan.agents)}
-      <div class="workspace-setup-section mt-3">
-        <div class="workspace-setup-label">Workspace MCPs</div>
-        ${renderCapabilityCards(plan.mcps, 'mcp')}
-      </div>
-      <div class="workspace-setup-section mt-3">
-        <div class="workspace-setup-label">Workspace Skills</div>
-        ${renderCapabilityCards(plan.skills, 'skill')}
-      </div>
-      <div class="workspace-setup-preview mt-3">
-        <div class="workspace-setup-label">How Ori Will Apply This</div>
-        <ul class="workspace-setup-preview-list">
-          ${plan.notes.map((note) => `<li>${escapeHtml(note)}</li>`).join('')}
-        </ul>
+      <div class="workspace-bootstrap-review-layout">
+        <div class="workspace-bootstrap-review-column">
+          ${renderAgentCards(plan.agents)}
+          <div class="workspace-setup-section">
+            <div class="workspace-setup-label">Workspace MCPs</div>
+            ${renderCapabilityCards(plan.mcps, 'mcp')}
+          </div>
+        </div>
+        <div class="workspace-bootstrap-review-column">
+          <div class="workspace-setup-section">
+            <div class="workspace-setup-label">Workspace Skills</div>
+            ${renderCapabilityCards(plan.skills, 'skill')}
+          </div>
+        </div>
+        <div class="workspace-setup-preview">
+          <div class="workspace-setup-label">How Ori Will Apply This</div>
+          <ul class="workspace-setup-preview-list">
+            ${plan.notes.map((note) => `<li>${escapeHtml(note)}</li>`).join('')}
+          </ul>
+        </div>
       </div>
     `;
     content.hidden = false;
