@@ -46,6 +46,7 @@
               </div>
               <div class="vault-modal-folder-head-actions">
                 <button id="vaultModalOpenCreateVaultBtn" class="modern-btn modern-btn-secondary" type="button">New Vault</button>
+                <button id="vaultModalOpenExportBtn" class="modern-btn modern-btn-secondary" type="button">Export</button>
                 <button id="vaultModalOpenEntryBtn" class="modern-btn modern-btn-primary" type="button">New Entry</button>
               </div>
             </div>
@@ -145,6 +146,40 @@
         </div>
       </div>
 
+      <div id="vaultModalExportOverlay" class="vault-modal-unlock-overlay vault-modal-export-overlay" hidden>
+        <button type="button" class="vault-modal-unlock-backdrop" data-action="dismiss-export-dialog" aria-label="Close vault export dialog"></button>
+        <div class="vault-modal-unlock-dialog vault-modal-export-dialog" role="dialog" aria-modal="true" aria-labelledby="vaultModalExportDialogTitle">
+          <div class="vault-modal-section-head">
+            <span class="vault-modal-section-kicker">Portable Export</span>
+            <h6 id="vaultModalExportDialogTitle" class="vault-modal-section-title">Export <span id="vaultModalExportVaultName">Selected Vault</span></h6>
+            <p id="vaultModalExportDialogDescription" class="vault-modal-section-description">Create an encrypted bundle you can move or archive outside this device.</p>
+          </div>
+
+          <div class="vault-modal-field">
+            <label class="vault-modal-label" for="vaultModalExportWorkspaceId">Workspace filter</label>
+            <input id="vaultModalExportWorkspaceId" type="text" class="form-control vault-modal-input" placeholder="Optional workspace scope">
+            <div class="vault-modal-help">Leave blank to export the full selected vault.</div>
+          </div>
+
+          <div class="vault-modal-field">
+            <label class="vault-modal-label" for="vaultModalExportPassword">Export password</label>
+            <input id="vaultModalExportPassword" type="password" class="form-control vault-modal-input" placeholder="Used to encrypt the export bundle">
+          </div>
+
+          <label class="vault-modal-checkbox">
+            <input id="vaultModalExportConfirm" type="checkbox">
+            <span>I understand this export contains encrypted private data and should be handled carefully.</span>
+          </label>
+
+          <div class="vault-modal-actions">
+            <button id="vaultModalExportBtn" class="modern-btn modern-btn-primary" type="button">Export Bundle</button>
+            <button id="vaultModalExportCancelBtn" class="modern-btn modern-btn-secondary" type="button">Cancel</button>
+          </div>
+
+          <div class="vault-modal-help">The downloaded file stays encrypted with the export password you set here.</div>
+        </div>
+      </div>
+
       <div id="vaultModalEntryOverlay" class="vault-modal-unlock-overlay vault-modal-entry-overlay" hidden>
         <button type="button" class="vault-modal-unlock-backdrop" data-action="dismiss-entry-dialog" aria-label="Close create entry dialog"></button>
         <div class="vault-modal-unlock-dialog vault-modal-entry-dialog" role="dialog" aria-modal="true" aria-labelledby="vaultModalEntryDialogTitle">
@@ -231,7 +266,7 @@
             <button id="vaultModalEntryCancelBtn" class="modern-btn modern-btn-secondary" type="button">Cancel</button>
           </div>
 
-          <div class="vault-modal-help">Use the full vault page for grants, exports, and broader administration.</div>
+          <div class="vault-modal-help">Use the full vault page for grants and broader administration.</div>
         </div>
       </div>
     </div>

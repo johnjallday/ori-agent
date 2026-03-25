@@ -38,6 +38,7 @@
     isHydrating: false,
     unlockDialogOpen: false,
     createDialogOpen: false,
+    exportDialogOpen: false,
     entryDialogOpen: false,
     entryDialogMode: 'create',
     entryDialogRecord: null,
@@ -63,6 +64,14 @@
     }
 
     return normalized.replaceAll('\\', '\\\\').replaceAll('"', '\\"');
+  }
+
+  function slugifyFilename(value) {
+    return String(value || '')
+      .trim()
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, '') || 'vault';
   }
 
   function notify(message, type) {
@@ -104,6 +113,7 @@
       vaultManageStack: document.getElementById('vaultModalVaultManageStack'),
       openEntryBtn: document.getElementById('vaultModalOpenEntryBtn'),
       openCreateVaultBtn: document.getElementById('vaultModalOpenCreateVaultBtn'),
+      openExportBtn: document.getElementById('vaultModalOpenExportBtn'),
       vaultSelect: document.getElementById('vaultModalVaultSelect'),
       vaultMeta: document.getElementById('vaultModalVaultMeta'),
       vaultRail: document.getElementById('vaultModalVaultRail'),
@@ -120,6 +130,15 @@
       createDialogTitle: document.getElementById('vaultModalCreateDialogTitle'),
       createDialogDescription: document.getElementById('vaultModalCreateDialogDescription'),
       createCancelBtn: document.getElementById('vaultModalCreateCancelBtn'),
+      exportOverlay: document.getElementById('vaultModalExportOverlay'),
+      exportDialogTitle: document.getElementById('vaultModalExportDialogTitle'),
+      exportDialogDescription: document.getElementById('vaultModalExportDialogDescription'),
+      exportVaultName: document.getElementById('vaultModalExportVaultName'),
+      exportWorkspaceInput: document.getElementById('vaultModalExportWorkspaceId'),
+      exportPasswordInput: document.getElementById('vaultModalExportPassword'),
+      exportConfirmInput: document.getElementById('vaultModalExportConfirm'),
+      exportBtn: document.getElementById('vaultModalExportBtn'),
+      exportCancelBtn: document.getElementById('vaultModalExportCancelBtn'),
       entryOverlay: document.getElementById('vaultModalEntryOverlay'),
       entryDialogTitle: document.getElementById('vaultModalEntryDialogTitle'),
       entryCancelBtn: document.getElementById('vaultModalEntryCancelBtn'),
@@ -957,6 +976,47 @@
     elements.modal?.classList.toggle('has-create-dialog', canShow);
   }
 
+  function resetExportForm() {
+    if (!elements) {
+      return;
+    }
+
+    if (elements.exportWorkspaceInput) {
+      elements.exportWorkspaceInput.value = '';
+    }
+    if (elements.exportPasswordInput) {
+      elements.exportPasswordInput.value = '';
+    }
+    if (elements.exportConfirmInput) {
+      elements.exportConfirmInput.checked = false;
+    }
+  }
+
+  function syncExportDialog() {
+    if (!elements?.exportOverlay) {
+      return;
+    }
+
+    const selectedVault = activeVault();
+    const vaultLabel = vaultDisplayLabel(selectedVault);
+    const canShow = Boolean(state.exportDialogOpen && state.hasHydrated && activeVaultID());
+
+    if (elements.exportVaultName) {
+      elements.exportVaultName.textContent = vaultLabel;
+    }
+
+    if (elements.exportDialogDescription) {
+      elements.exportDialogDescription.textContent = 'Create a password-protected export bundle for ' + vaultLabel + ' so it can be moved or archived safely.';
+    }
+
+    elements.exportOverlay.hidden = !canShow;
+    elements.modal?.classList.toggle('has-export-dialog', canShow);
+
+    if (!canShow && elements.exportBtn && !elements.exportBtn.dataset.originalLabel) {
+      resetExportForm();
+    }
+  }
+
   function syncEntryDialog() {
     if (!elements?.entryOverlay) {
       return;
@@ -1076,6 +1136,11 @@
       elements.openEntryBtn.hidden = isInitialHydrate || showEmptyCreateMode || !unlocked;
     }
 
+    if (elements.openExportBtn) {
+      elements.openExportBtn.hidden = isInitialHydrate || showEmptyCreateMode || !unlocked;
+      elements.openExportBtn.disabled = isInitialHydrate || !hasVaults || !activeVaultID() || !unlocked;
+    }
+
     if (elements.mainGrid) {
       elements.mainGrid.hidden = isInitialHydrate;
     }
@@ -1089,6 +1154,7 @@
     }
 
     syncCreateDialog();
+    syncExportDialog();
     syncEntryDialog();
     syncWorkspaceTabs();
     syncUnlockDialog();
@@ -1215,6 +1281,8 @@
   function openCreateDialog() {
     state.entryDialogOpen = false;
     syncEntryDialog();
+    state.exportDialogOpen = false;
+    syncExportDialog();
     state.unlockDialogOpen = false;
     syncUnlockDialog();
     state.createDialogOpen = true;
@@ -1251,6 +1319,8 @@
     resetCreateForm();
     state.createDialogOpen = false;
     syncCreateDialog();
+    state.exportDialogOpen = false;
+    syncExportDialog();
     state.unlockDialogOpen = false;
     syncUnlockDialog();
     state.entryDialogOpen = true;
@@ -1295,6 +1365,8 @@
     populateEntryForm(record);
     state.createDialogOpen = false;
     syncCreateDialog();
+    state.exportDialogOpen = false;
+    syncExportDialog();
     state.unlockDialogOpen = false;
     syncUnlockDialog();
     state.entryDialogOpen = true;
@@ -1321,6 +1393,41 @@
     }
   }
 
+  function closeExportDialog(options) {
+    state.exportDialogOpen = false;
+    syncExportDialog();
+    const restoreFocus = options?.restoreFocus !== false;
+    if (restoreFocus && elements?.modal?.classList.contains('show')) {
+      window.requestAnimationFrame(function() {
+        elements?.openExportBtn?.focus();
+      });
+    }
+  }
+
+  function openExportDialog() {
+    if (!activeVaultID()) {
+      showAlert('Create or select a vault before exporting.', 'warning');
+      return;
+    }
+
+    if (!state.status || !state.status.available || state.status.locked) {
+      showAlert('Unlock the selected vault before exporting it.', 'warning');
+      return;
+    }
+
+    state.entryDialogOpen = false;
+    syncEntryDialog();
+    state.createDialogOpen = false;
+    syncCreateDialog();
+    state.unlockDialogOpen = false;
+    syncUnlockDialog();
+    state.exportDialogOpen = true;
+    syncExportDialog();
+    window.requestAnimationFrame(function() {
+      elements?.exportPasswordInput?.focus();
+    });
+  }
+
   function openUnlockDialog() {
     if (!activeVaultID()) {
       showAlert('Create or select a vault before unlocking storage access.', 'warning');
@@ -1340,6 +1447,8 @@
     syncEntryDialog();
     state.createDialogOpen = false;
     syncCreateDialog();
+    state.exportDialogOpen = false;
+    syncExportDialog();
     state.unlockDialogOpen = true;
     syncUnlockDialog();
     window.requestAnimationFrame(function() {
@@ -2271,6 +2380,11 @@
       return;
     }
 
+    if (state.exportDialogOpen && !elements.exportOverlay?.hidden) {
+      elements.exportPasswordInput?.focus();
+      return;
+    }
+
     if (state.createDialogOpen && !elements.createOverlay?.hidden) {
       elements.newVaultNameInput?.focus();
       return;
@@ -2497,6 +2611,64 @@
     }
   }
 
+  async function exportVaultBundle() {
+    if (!activeVaultID()) {
+      showAlert('Create or select a vault before exporting.', 'warning');
+      return;
+    }
+
+    if (!state.status || !state.status.available || state.status.locked) {
+      showAlert('Unlock the selected vault before exporting it.', 'warning');
+      return;
+    }
+
+    if (!elements?.exportConfirmInput?.checked) {
+      showAlert('Confirm the export warning before generating an export.', 'warning');
+      return;
+    }
+
+    const exportPassword = String(elements.exportPasswordInput?.value || '').trim();
+    if (!exportPassword) {
+      showAlert('Enter an export password before exporting.', 'warning');
+      return;
+    }
+
+    const selectedVault = activeVault();
+    const datePart = new Date().toISOString().slice(0, 10);
+    const fileName = 'ori-vault-export-' + slugifyFilename(selectedVault?.name || 'vault') + '-' + datePart + '.json';
+
+    try {
+      setButtonLoading(elements.exportBtn, true, 'Exporting');
+      const bundle = await apiRequest('/api/vault/export', {
+        method: 'POST',
+        body: {
+          vault_id: activeVaultID(),
+          workspace_id: String(elements.exportWorkspaceInput?.value || '').trim(),
+          vault_password: exportPassword,
+          confirm: true
+        }
+      });
+
+      const blob = new Blob([JSON.stringify(bundle, null, 2)], { type: 'application/json' });
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = fileName;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.URL.revokeObjectURL(url);
+
+      notify('Vault export generated.', 'success');
+      closeExportDialog({ restoreFocus: false });
+    } catch (error) {
+      console.error('Failed to export vault:', error);
+      showAlert(error.message || 'Failed to export vault.', 'error');
+    } finally {
+      setButtonLoading(elements.exportBtn, false);
+    }
+  }
+
   function bindFolderTreeEvents() {
     elements.folderTree?.addEventListener('click', function(event) {
       const target = event.target.closest('[data-action]');
@@ -2650,6 +2822,10 @@
       openCreateDialog();
     });
 
+    elements.openExportBtn?.addEventListener('click', function() {
+      openExportDialog();
+    });
+
     elements.openEntryBtn?.addEventListener('click', function() {
       openEntryDialog();
     });
@@ -2664,6 +2840,10 @@
 
     elements.entryCancelBtn?.addEventListener('click', function() {
       closeEntryDialog();
+    });
+
+    elements.exportCancelBtn?.addEventListener('click', function() {
+      closeExportDialog();
     });
 
     elements.unlockCancelBtn?.addEventListener('click', function() {
@@ -2681,6 +2861,13 @@
       const dismissTrigger = event.target.closest('[data-action="dismiss-entry-dialog"]');
       if (dismissTrigger) {
         closeEntryDialog();
+      }
+    });
+
+    elements.exportOverlay?.addEventListener('click', function(event) {
+      const dismissTrigger = event.target.closest('[data-action="dismiss-export-dialog"]');
+      if (dismissTrigger) {
+        closeExportDialog();
       }
     });
 
@@ -2767,6 +2954,13 @@
       }
     });
 
+    elements.exportPasswordInput?.addEventListener('keydown', function(event) {
+      if (event.key === 'Enter') {
+        event.preventDefault();
+        exportVaultBundle();
+      }
+    });
+
     elements.entryTypeInput?.addEventListener('change', function() {
       syncEntryComposerPresentation();
     });
@@ -2807,6 +3001,10 @@
       saveRecord();
     });
 
+    elements.exportBtn?.addEventListener('click', function() {
+      exportVaultBundle();
+    });
+
     elements.searchInput?.addEventListener('input', function() {
       renderExplorerPreview();
     });
@@ -2820,6 +3018,12 @@
         event.preventDefault();
         event.stopPropagation();
         closeEntryDialog();
+        return;
+      }
+      if (event.key === 'Escape' && state.exportDialogOpen) {
+        event.preventDefault();
+        event.stopPropagation();
+        closeExportDialog();
         return;
       }
       if (event.key === 'Escape' && state.createDialogOpen) {
@@ -2848,6 +3052,7 @@
       elements.modal.addEventListener('hidden.bs.modal', function() {
         setLauncherActive(false);
         closeEntryDialog({ restoreFocus: false });
+        closeExportDialog({ restoreFocus: false });
         closeCreateDialog({ restoreFocus: false });
         closeUnlockDialog();
       });

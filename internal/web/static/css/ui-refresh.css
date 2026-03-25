@@ -1786,8 +1786,28 @@ body::after {
   width: min(34rem, calc(100% - 1.5rem));
 }
 
+.vault-modal-export-dialog {
+  width: min(34rem, calc(100% - 1.5rem));
+}
+
 .vault-modal-entry-dialog {
   width: min(38rem, calc(100% - 1.5rem));
+}
+
+.vault-modal-checkbox {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.72rem;
+  margin-top: 0.35rem;
+  color: var(--text-primary);
+  font-size: 0.84rem;
+  line-height: 1.55;
+}
+
+.vault-modal-checkbox input {
+  flex: 0 0 auto;
+  margin-top: 0.18rem;
+  accent-color: var(--primary-color);
 }
 
 .vault-modal-entry-dialog .vault-modal-textarea {
@@ -1921,6 +1941,11 @@ body::after {
     radial-gradient(circle at top right, rgba(224, 161, 93, 0.16), transparent 34%),
     linear-gradient(180deg, rgba(33, 41, 57, 0.98), rgba(21, 27, 40, 0.98));
   box-shadow: 0 34px 84px rgba(0, 0, 0, 0.52);
+}
+
+[data-bs-theme="dark"] .vault-modal-checkbox,
+.dark-mode .vault-modal-checkbox {
+  color: rgba(241, 231, 214, 0.9);
 }
 
 [data-bs-theme="dark"] .vault-modal-vault-pill,
