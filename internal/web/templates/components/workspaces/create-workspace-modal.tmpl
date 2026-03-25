@@ -1,7 +1,7 @@
 {{define "components/workspaces/create-workspace-modal.tmpl"}}
 <!-- Create Workspace Modal -->
 <div class="modal fade" id="addFolderModal" tabindex="-1" aria-hidden="true">
-  <div class="modal-dialog modal-dialog-centered modal-sm">
+  <div class="modal-dialog modal-dialog-centered modal-dialog-scrollable">
     <div class="modal-content" style="background: var(--bg-primary); border: 1px solid var(--border-color);">
       <div class="modal-header" style="border-bottom: 1px solid var(--border-color);">
         <h6 class="modal-title" style="color: var(--text-primary);">Create Workspace</h6>
@@ -12,6 +12,27 @@
         <input type="text" id="folderNameInput" class="modern-input w-100 mb-2" placeholder="Workspace name">
         <label for="folderDescriptionInput" style="font-size: 12px; color: var(--text-secondary);">Description <span style="opacity: 0.8;">(optional)</span></label>
         <textarea id="folderDescriptionInput" class="modern-input w-100 mb-2" placeholder="Description (optional)" rows="2" style="resize: vertical;"></textarea>
+
+        <div class="workspace-setup-card mb-2">
+          <div class="workspace-setup-header" style="align-items: flex-start;">
+            <div>
+              <label for="folderPrimaryGoalInput" class="workspace-setup-title">Workspace Brief</label>
+              <p class="workspace-setup-help mb-0">Capture what this workspace is for so Ori can bootstrap it with the right context later.</p>
+            </div>
+          </div>
+
+          <label for="folderPrimaryGoalInput" style="font-size: 12px; color: var(--text-secondary);">Primary goal</label>
+          <textarea id="folderPrimaryGoalInput" class="modern-input w-100 mb-2" placeholder="What should this workspace accomplish?" rows="2" style="resize: vertical;"></textarea>
+
+          <label for="folderSystemsInput" style="font-size: 12px; color: var(--text-secondary);">Apps and systems <span style="opacity: 0.8;">(optional)</span></label>
+          <input type="text" id="folderSystemsInput" class="modern-input w-100 mb-2" placeholder="Keynote, Finder, Google Drive">
+
+          <label for="folderCapabilitiesInput" style="font-size: 12px; color: var(--text-secondary);">What Ori should help with <span style="opacity: 0.8;">(optional)</span></label>
+          <textarea id="folderCapabilitiesInput" class="modern-input w-100 mb-2" placeholder="Create decks, organize files, export assets, automate reviews" rows="2" style="resize: vertical;"></textarea>
+
+          <label for="folderContextInput" style="font-size: 12px; color: var(--text-secondary);">Key files or context <span style="opacity: 0.8;">(optional)</span></label>
+          <textarea id="folderContextInput" class="modern-input w-100" placeholder="Folder paths, source docs, launch notes, brand references" rows="2" style="resize: vertical;"></textarea>
+        </div>
 
         <div class="workspace-setup-card mb-2">
           <div class="workspace-setup-header">

@@ -96,18 +96,81 @@ func (h *Handler) handleWorkspace(w http.ResponseWriter, r *http.Request, id str
 	}
 }
 
+type workspaceBootstrapRequest struct {
+	Goal         string `json:"goal,omitempty"`
+	Systems      string `json:"systems,omitempty"`
+	Capabilities string `json:"capabilities,omitempty"`
+	Context      string `json:"context,omitempty"`
+}
+
+func normalizeWorkspaceBootstrap(input *workspaceBootstrapRequest) map[string]interface{} {
+	if input == nil {
+		return nil
+	}
+
+	goal := strings.TrimSpace(input.Goal)
+	systems := strings.TrimSpace(input.Systems)
+	capabilities := strings.TrimSpace(input.Capabilities)
+	contextValue := strings.TrimSpace(input.Context)
+	if goal == "" && systems == "" && capabilities == "" && contextValue == "" {
+		return nil
+	}
+
+	systemsList := splitWorkspaceBootstrapValues(systems)
+	if systemsList == nil {
+		systemsList = []string{}
+	}
+
+	return map[string]interface{}{
+		"version":      1,
+		"goal":         goal,
+		"systems":      systems,
+		"systems_list": systemsList,
+		"capabilities": capabilities,
+		"context":      contextValue,
+		"captured_at":  time.Now().UTC().Format(time.RFC3339),
+	}
+}
+
+func splitWorkspaceBootstrapValues(raw string) []string {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return nil
+	}
+
+	parts := strings.FieldsFunc(trimmed, func(r rune) bool {
+		return r == ',' || r == ';' || r == '\n' || r == '\r'
+	})
+
+	values := make([]string, 0, len(parts))
+	seen := make(map[string]struct{}, len(parts))
+	for _, part := range parts {
+		value := strings.TrimSpace(part)
+		if value == "" {
+			continue
+		}
+		if _, ok := seen[value]; ok {
+			continue
+		}
+		seen[value] = struct{}{}
+		values = append(values, value)
+	}
+	return values
+}
+
 // createWorkspace handles POST /api/workspaces.
 func (h *Handler) createWorkspace(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		Name           string `json:"name"`
-		Description    string `json:"description,omitempty"`
-		ParentID       string `json:"parent_id,omitempty"`
-		OrderIndex     *int   `json:"order_index,omitempty"`
-		Color          string `json:"color,omitempty"`
-		ProjectPath    string `json:"project_path,omitempty"`
-		FolderSlug     string `json:"folder_slug,omitempty"`
-		Location       string `json:"location,omitempty"`         // Optional custom directory for workspace folder (overrides default root)
-		EntryAgentName string `json:"entry_agent_name,omitempty"` // Optional existing agent name; otherwise a workspace manager is created automatically
+		Name               string                     `json:"name"`
+		Description        string                     `json:"description,omitempty"`
+		ParentID           string                     `json:"parent_id,omitempty"`
+		OrderIndex         *int                       `json:"order_index,omitempty"`
+		Color              string                     `json:"color,omitempty"`
+		ProjectPath        string                     `json:"project_path,omitempty"`
+		FolderSlug         string                     `json:"folder_slug,omitempty"`
+		Location           string                     `json:"location,omitempty"`         // Optional custom directory for workspace folder (overrides default root)
+		EntryAgentName     string                     `json:"entry_agent_name,omitempty"` // Optional existing agent name; otherwise a workspace manager is created automatically
+		WorkspaceBootstrap *workspaceBootstrapRequest `json:"workspace_bootstrap,omitempty"`
 	}
 
 	if !orihttp.ParseJSONBody(w, r, &req) {
@@ -132,6 +195,11 @@ func (h *Handler) createWorkspace(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.OrderIndex != nil {
 		ws.OrderIndex = *req.OrderIndex
+	}
+	if bootstrapData := normalizeWorkspaceBootstrap(req.WorkspaceBootstrap); bootstrapData != nil {
+		ws.SharedData = map[string]interface{}{
+			"workspace_bootstrap": bootstrapData,
+		}
 	}
 
 	// If an existing entry agent was specified, validate and set it.
@@ -562,15 +630,16 @@ func (h *Handler) handleWorkspaceRename(w http.ResponseWriter, r *http.Request, 
 // =============================================================================
 
 type createWorkspaceImportRequest struct {
-	Name           string `json:"name,omitempty"`
-	Description    string `json:"description,omitempty"`
-	ParentID       string `json:"parent_id,omitempty"`
-	OrderIndex     *int   `json:"order_index,omitempty"`
-	Color          string `json:"color,omitempty"`
-	Path           string `json:"path"`
-	AllowDuplicate bool   `json:"allow_duplicate,omitempty"`
-	EntryPoint     string `json:"entry_point,omitempty"`
-	EntryAgentName string `json:"entry_agent_name,omitempty"`
+	Name               string                     `json:"name,omitempty"`
+	Description        string                     `json:"description,omitempty"`
+	ParentID           string                     `json:"parent_id,omitempty"`
+	OrderIndex         *int                       `json:"order_index,omitempty"`
+	Color              string                     `json:"color,omitempty"`
+	Path               string                     `json:"path"`
+	AllowDuplicate     bool                       `json:"allow_duplicate,omitempty"`
+	EntryPoint         string                     `json:"entry_point,omitempty"`
+	EntryAgentName     string                     `json:"entry_agent_name,omitempty"`
+	WorkspaceBootstrap *workspaceBootstrapRequest `json:"workspace_bootstrap,omitempty"`
 }
 
 type workspaceImportDuplicate struct {
@@ -714,6 +783,9 @@ func (h *Handler) handleWorkspaceImport(w http.ResponseWriter, r *http.Request) 
 			"allow_duplicate": req.AllowDuplicate,
 			"imported_at":     time.Now().UTC().Format(time.RFC3339),
 		},
+	}
+	if bootstrapData := normalizeWorkspaceBootstrap(req.WorkspaceBootstrap); bootstrapData != nil {
+		workspace.SharedData["workspace_bootstrap"] = bootstrapData
 	}
 
 	// If an existing entry agent was specified, validate and set it.

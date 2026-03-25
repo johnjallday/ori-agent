@@ -2470,6 +2470,46 @@ function buildChatRequestRouteContext(overrideRouteContext) {
   return routeContext;
 }
 
+async function expandAttachedChatNotes(message, attachedNotes) {
+  if (!Array.isArray(attachedNotes) || attachedNotes.length === 0) {
+    return message;
+  }
+
+  const sections = [];
+  for (const note of attachedNotes) {
+    const noteId = String(note?.id || '').trim();
+    const noteName = String(note?.name || 'Untitled Note').trim() || 'Untitled Note';
+    let noteContent = '';
+
+    if (noteId) {
+      try {
+        const response = await fetch(`/api/notes/${encodeURIComponent(noteId)}`);
+        if (response.ok) {
+          const payload = await response.json().catch(() => null);
+          noteContent = String(payload?.content || '').trim();
+        }
+      } catch (error) {
+        appLog.warn('Failed to fetch attached note content', { noteId, error: error && error.message ? error.message : error });
+      }
+    }
+
+    if (!noteContent) {
+      noteContent = String(note?.preview || '').trim();
+    }
+    if (!noteContent) {
+      noteContent = '[Note content unavailable]';
+    }
+
+    sections.push(`---\n📝 **Attached Note: ${noteName}**\n\n${noteContent}\n---`);
+  }
+
+  if (sections.length === 0) {
+    return message;
+  }
+
+  return `${message}\n\n${sections.join('\n\n')}`;
+}
+
 // Send message to chat API
 async function sendMessage(message) {
   const routeContextOverride = pendingChatRouteContext;
@@ -2478,42 +2518,51 @@ async function sendMessage(message) {
   // Check if state machine is active (replaces isWaitingForResponse)
   if (chatStateMachine && chatStateMachine.isActive()) return;
 
-  let trimmedMessage = message.trim();
-  if (!trimmedMessage) return;
-
-  // Expand @notename references if sessionManager is available
-  if (window.sessionManager?.expandNoteReferences) {
-    trimmedMessage = await window.sessionManager.expandNoteReferences(trimmedMessage);
-  }
+  const rawMessage = String(message || '').trim();
+  if (!rawMessage) return;
 
   // Handle /task command
-  if (trimmedMessage.startsWith('/task')) {
-    await handleTaskCommand(trimmedMessage);
+  if (rawMessage.startsWith('/task')) {
+    await handleTaskCommand(rawMessage);
     return;
   }
 
   // Add to history
-  promptHistory.unshift(trimmedMessage);
+  promptHistory.unshift(rawMessage);
   historyIndex = -1;
 
   // Get uploaded files
   const uploadedFiles = window.getUploadedFiles ? window.getUploadedFiles() : [];
+  const attachedNotes = window.getAttachedChatNotes ? window.getAttachedChatNotes() : [];
   const activeSessionId = window.sessionManager?.getActiveSessionId?.();
   const activeSession = window.sessionManager?.getActiveSession?.();
   const activeWorkspaceId = activeSession?.folder_id;
   const filesToPersist = uploadedFiles.slice();
+  let requestMessage = rawMessage;
+
+  // Expand @notename references if sessionManager is available
+  if (window.sessionManager?.expandNoteReferences) {
+    requestMessage = await window.sessionManager.expandNoteReferences(requestMessage);
+  }
+  if (attachedNotes.length > 0) {
+    requestMessage = await expandAttachedChatNotes(requestMessage, attachedNotes);
+  }
 
   if (activeSessionId && filesToPersist.length > 0) {
     persistUploadedFilesToSession(activeSessionId, filesToPersist, activeWorkspaceId);
   }
 
   // Add user message to chat (including file info if any)
-  let displayMessage = trimmedMessage;
+  let displayMessage = rawMessage;
+  if (attachedNotes.length > 0) {
+    const noteNames = attachedNotes.map(note => note.name || 'Untitled Note').join(', ');
+    displayMessage += `\n\n📝 Notes: ${noteNames}`;
+  }
   if (uploadedFiles.length > 0) {
     const fileNames = uploadedFiles.map(f => f.name).join(', ');
     displayMessage += `\n\n📎 Attached: ${fileNames}`;
   }
-  const isSlashCommand = trimmedMessage.startsWith('/');
+  const isSlashCommand = rawMessage.startsWith('/');
   addMessageToChat(displayMessage, true, false, false, isSlashCommand);
 
   // Clear input
@@ -2534,7 +2583,7 @@ async function sendMessage(message) {
 
     // Prepare request body with files
     const requestBody = {
-      question: trimmedMessage,
+      question: requestMessage,
       route_context: routeContext
     };
 
@@ -2600,13 +2649,16 @@ async function sendMessage(message) {
     if (window.clearFilesAfterSend) {
       window.clearFilesAfterSend();
     }
+    if (window.clearAttachedNotesAfterSend) {
+      window.clearAttachedNotesAfterSend();
+    }
 
     // Transition to processing state while formatting response
     // Check isActive() to avoid race condition if user cancelled
     if (chatStateMachine && chatStateMachine.isActive()) {
       chatStateMachine.process();
     }
-    await handleChatResponsePayload(data, trimmedMessage, isSlashCommand);
+    await handleChatResponsePayload(data, rawMessage, isSlashCommand);
 
   } catch (error) {
     // Handle user cancellation gracefully

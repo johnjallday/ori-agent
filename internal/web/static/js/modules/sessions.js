@@ -3045,6 +3045,47 @@ const sessionManager = {
     };
   },
 
+  getWorkspaceBootstrapFromModal() {
+    const goal = String(document.getElementById('folderPrimaryGoalInput')?.value || '').trim();
+    const systems = String(document.getElementById('folderSystemsInput')?.value || '').trim();
+    const capabilities = String(document.getElementById('folderCapabilitiesInput')?.value || '').trim();
+    const context = String(document.getElementById('folderContextInput')?.value || '').trim();
+    const systemsList = systems
+      ? systems
+        .split(/[\n,;]+/)
+        .map((value) => value.trim())
+        .filter(Boolean)
+      : [];
+
+    return {
+      hasAny: Boolean(goal || systems || capabilities || context),
+      goal,
+      systems,
+      systemsList,
+      capabilities,
+      context
+    };
+  },
+
+  buildWorkspaceBootstrapSeedNote(workspaceBootstrap, workspaceName) {
+    if (!workspaceBootstrap || !workspaceBootstrap.hasAny) {
+      return null;
+    }
+
+    const systemsSection = workspaceBootstrap.systemsList.length > 0
+      ? workspaceBootstrap.systemsList.map((item) => `- ${item}`).join('\n')
+      : '_Not specified._';
+    const goalSection = workspaceBootstrap.goal || '_Not specified._';
+    const capabilitiesSection = workspaceBootstrap.capabilities || '_Not specified._';
+    const contextSection = workspaceBootstrap.context || '_Not specified._';
+    const title = String(workspaceName || '').trim() || 'this workspace';
+
+    return {
+      name: 'Workspace Brief',
+      content: `# Workspace Brief\n\nCaptured during workspace creation for ${title}.\n\n## Primary Goal\n${goalSection}\n\n## Apps and Systems\n${systemsSection}\n\n## What Ori Should Help With\n${capabilitiesSection}\n\n## Key Files or Context\n${contextSection}\n`
+    };
+  },
+
   updateWorkspaceSetupControlsState() {
     const enabled = Boolean(document.getElementById('folderEnableSetup')?.checked);
     const controls = document.getElementById('folderSetupControls');
@@ -3264,6 +3305,10 @@ const sessionManager = {
     const modalElement = document.getElementById('addFolderModal');
     const nameInput = document.getElementById('folderNameInput');
     const descriptionInput = document.getElementById('folderDescriptionInput');
+    const primaryGoalInput = document.getElementById('folderPrimaryGoalInput');
+    const systemsInput = document.getElementById('folderSystemsInput');
+    const capabilitiesInput = document.getElementById('folderCapabilitiesInput');
+    const contextInput = document.getElementById('folderContextInput');
     const parentSelect = document.getElementById('folderParentSelect');
     const keepSeedValues = Boolean(
       preserveAskOri &&
@@ -3275,6 +3320,10 @@ const sessionManager = {
       if (nameInput) nameInput.value = '';
       if (nameInput) nameInput.dataset.autofillName = '';
       if (descriptionInput) descriptionInput.value = '';
+      if (primaryGoalInput) primaryGoalInput.value = '';
+      if (systemsInput) systemsInput.value = '';
+      if (capabilitiesInput) capabilitiesInput.value = '';
+      if (contextInput) contextInput.value = '';
     }
     if (parentSelect) {
       const optionsHtml = ['<option value="">No group</option>'];
@@ -3440,6 +3489,8 @@ const sessionManager = {
     const importToggle = document.getElementById('folderImportToggle');
     const importPathInput = document.getElementById('folderImportPathInput');
     const setupConfig = this.getWorkspaceSetupConfigFromModal();
+    const workspaceBootstrap = this.getWorkspaceBootstrapFromModal();
+    const primaryGoalInput = document.getElementById('folderPrimaryGoalInput');
 
     const importEnabled = Boolean(importToggle?.checked);
     const importPath = importPathInput?.value?.trim() || '';
@@ -3450,6 +3501,11 @@ const sessionManager = {
     }
     if (importEnabled && !importPath) {
       this.showToast('Please enter or browse for a folder path to import', 'warning');
+      return;
+    }
+    if (!workspaceBootstrap.goal) {
+      this.showToast('Primary goal is required', 'warning');
+      primaryGoalInput?.focus();
       return;
     }
 
@@ -3475,6 +3531,14 @@ const sessionManager = {
         parent_id: parentId,
         color
       };
+      if (workspaceBootstrap.hasAny) {
+        payload.workspace_bootstrap = {
+          goal: workspaceBootstrap.goal,
+          systems: workspaceBootstrap.systems,
+          capabilities: workspaceBootstrap.capabilities,
+          context: workspaceBootstrap.context
+        };
+      }
       const buildSlugConflictMessage = (conflict) => {
         const requestedSlug = typeof conflict?.requested_slug === 'string' ? conflict.requested_slug.trim() : '';
         const suggestedSlug = typeof conflict?.suggested_slug === 'string' ? conflict.suggested_slug.trim() : '';
@@ -3574,10 +3638,16 @@ const sessionManager = {
           console.warn('Failed to parse Assistant seed task:', error);
         }
       }
+      const bootstrapWorkspaceName = name || this.extractFolderNameFromPath(importPath) || 'New Workspace';
+      const workspaceBriefNote = this.buildWorkspaceBootstrapSeedNote(workspaceBootstrap, bootstrapWorkspaceName);
 
       const askOriSeedResult = {
         notesCreated: 0,
         tasksCreated: 0,
+        errors: []
+      };
+      const workspaceBriefResult = {
+        notesCreated: 0,
         errors: []
       };
 
@@ -3587,6 +3657,14 @@ const sessionManager = {
           askOriSeedResult.notesCreated += 1;
         } catch (error) {
           askOriSeedResult.errors.push(error);
+        }
+      }
+      if (createdWorkspaceId && workspaceBriefNote && !askOriSeedNote) {
+        try {
+          await this.createWorkspaceSeedNote(createdWorkspaceId, workspaceBriefNote);
+          workspaceBriefResult.notesCreated += 1;
+        } catch (error) {
+          workspaceBriefResult.errors.push(error);
         }
       }
       if (createdWorkspaceId && askOriSeedTask) {
@@ -3607,21 +3685,23 @@ const sessionManager = {
         if (setupResult.schedulesCreated > 0) summaryParts.push(`${setupResult.schedulesCreated} schedules`);
         if (askOriSeedResult.tasksCreated > 0) summaryParts.push(`${askOriSeedResult.tasksCreated} Assistant task`);
         if (askOriSeedResult.notesCreated > 0) summaryParts.push(`${askOriSeedResult.notesCreated} Assistant note`);
+        if (workspaceBriefResult.notesCreated > 0) summaryParts.push('workspace brief');
         const summaryText = summaryParts.length > 0 ? summaryParts.join(', ') : 'no setup items';
-        if (setupResult.errors.length > 0 || askOriSeedResult.errors.length > 0) {
+        if (setupResult.errors.length > 0 || askOriSeedResult.errors.length > 0 || workspaceBriefResult.errors.length > 0) {
           this.showToast(`${importEnabled ? 'Workspace imported' : 'Workspace created'} with partial setup (${summaryText}).`, 'warning');
         } else {
           this.showToast(`${importEnabled ? 'Workspace imported' : 'Workspace created'} with Ori setup (${summaryText}).`, 'success');
         }
-      } else if (askOriSeedResult.tasksCreated > 0 || askOriSeedResult.notesCreated > 0) {
+      } else if (askOriSeedResult.tasksCreated > 0 || askOriSeedResult.notesCreated > 0 || workspaceBriefResult.notesCreated > 0) {
         const summaryParts = [];
         if (askOriSeedResult.tasksCreated > 0) summaryParts.push(`${askOriSeedResult.tasksCreated} Assistant task`);
         if (askOriSeedResult.notesCreated > 0) summaryParts.push(`${askOriSeedResult.notesCreated} Assistant note`);
+        if (workspaceBriefResult.notesCreated > 0) summaryParts.push('workspace brief');
         const summaryText = summaryParts.join(', ');
-        if (askOriSeedResult.errors.length > 0) {
-          this.showToast(`${importEnabled ? 'Workspace imported' : 'Workspace created'} with partial Assistant setup (${summaryText}).`, 'warning');
+        if (askOriSeedResult.errors.length > 0 || workspaceBriefResult.errors.length > 0) {
+          this.showToast(`${importEnabled ? 'Workspace imported' : 'Workspace created'} with partial starter setup (${summaryText}).`, 'warning');
         } else {
-          this.showToast(`${importEnabled ? 'Workspace imported' : 'Workspace created'} with Assistant setup (${summaryText}).`, 'success');
+          this.showToast(`${importEnabled ? 'Workspace imported' : 'Workspace created'} with starter setup (${summaryText}).`, 'success');
         }
       } else {
         this.showToast(importEnabled ? 'Workspace imported successfully' : 'Workspace created successfully', 'success');

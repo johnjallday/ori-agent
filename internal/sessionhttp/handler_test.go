@@ -868,6 +868,61 @@ func TestHandler_CreateWorkspaceWithoutEntryAgent(t *testing.T) {
 	}
 }
 
+func TestHandler_CreateWorkspacePersistsWorkspaceBootstrap(t *testing.T) {
+	handler, cleanup := createTestHandler(t)
+	defer cleanup()
+
+	body := `{"name":"Launch Ops","workspace_bootstrap":{"goal":"Ship the launch deck","systems":"Keynote, Finder, Google Drive","capabilities":"Create slides and collect source assets","context":"Brand guide lives in /Launch/Brand"}}`
+	req := httptest.NewRequest(http.MethodPost, "/api/workspaces", bytes.NewBufferString(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	handler.HandleWorkspaces(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp map[string]interface{}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+	workspacePayload := resp["folder"].(map[string]interface{})
+	workspaceID := workspacePayload["id"].(string)
+
+	ws, err := handler.store.GetWorkspace(context.Background(), workspaceID)
+	if err != nil {
+		t.Fatalf("failed to load created workspace: %v", err)
+	}
+
+	bootstrapRaw, ok := ws.SharedData["workspace_bootstrap"]
+	if !ok {
+		t.Fatalf("expected workspace_bootstrap in shared_data")
+	}
+	bootstrapMap, ok := bootstrapRaw.(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected workspace_bootstrap to be an object, got %T", bootstrapRaw)
+	}
+	if bootstrapMap["goal"] != "Ship the launch deck" {
+		t.Fatalf("expected goal to persist, got %#v", bootstrapMap["goal"])
+	}
+	if bootstrapMap["systems"] != "Keynote, Finder, Google Drive" {
+		t.Fatalf("expected systems to persist, got %#v", bootstrapMap["systems"])
+	}
+	if bootstrapMap["capabilities"] != "Create slides and collect source assets" {
+		t.Fatalf("expected capabilities to persist, got %#v", bootstrapMap["capabilities"])
+	}
+	if bootstrapMap["context"] != "Brand guide lives in /Launch/Brand" {
+		t.Fatalf("expected context to persist, got %#v", bootstrapMap["context"])
+	}
+	systemsList, ok := bootstrapMap["systems_list"].([]interface{})
+	if !ok {
+		t.Fatalf("expected systems_list to be a slice, got %T", bootstrapMap["systems_list"])
+	}
+	if len(systemsList) != 3 {
+		t.Fatalf("expected 3 systems hints, got %d (%#v)", len(systemsList), systemsList)
+	}
+}
+
 func TestHandler_CreateWorkspaceUsesExplicitEntryAgent(t *testing.T) {
 	handler, cleanup := createTestHandler(t)
 	defer cleanup()

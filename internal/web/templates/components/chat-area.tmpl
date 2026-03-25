@@ -89,6 +89,16 @@
         <div id="uploadedFilesList" class="d-flex flex-wrap gap-2"></div>
       </div>
 
+      <div id="attachedNotesArea" class="mb-3" style="display: none;">
+        <div class="d-flex align-items-center justify-content-between mb-2">
+          <label class="chat-label" style="font-size: 12px; margin: 0;">Attached Notes:</label>
+          <button id="clearAttachedNotesBtn" class="btn btn-sm btn-link clear-files-btn" style="padding: 0; font-size: 12px;" aria-label="Clear all attached notes">
+            Clear all
+          </button>
+        </div>
+        <div id="attachedNotesList" class="d-flex flex-wrap gap-2"></div>
+      </div>
+
       <div class="d-flex gap-3 align-items-end">
         <div class="flex-grow-1">
           <div id="inputWrapper" class="input-wrapper">
@@ -140,6 +150,13 @@
                 </svg>
                 Directory
               </button>
+              <button type="button" id="attachNotesBtn" class="btn btn-sm attach-notes-btn" style="margin: 0; padding: 4px 10px; background: var(--bg-secondary); color: var(--text-primary); border: 1px solid var(--border-color); font-size: 12px; border-radius: 6px; transition: all 0.2s ease;" aria-label="Attach workspace notes to message">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor" class="me-1" style="vertical-align: middle;" aria-hidden="true">
+                  <path d="M14,17H7V15H14M17,13H7V11H17M17,9H7V7H17M19,3A2,2 0 0,1 21,5V19A2,2 0 0,1 19,21H5A2,2 0 0,1 3,19V5A2,2 0 0,1 5,3H19Z"/>
+                </svg>
+                <span>Notes</span>
+                <span id="attachNotesBtnCount" style="display: none; margin-left: 6px; min-width: 18px; height: 18px; padding: 0 5px; align-items: center; justify-content: center; border-radius: 999px; background: rgba(255, 122, 68, 0.18); color: #ff9a6a; font-size: 10px; font-weight: 700;">0</span>
+              </button>
               <button
                 type="button"
                 id="chatVoiceBtn"
@@ -189,6 +206,38 @@
             <path d="M2,21L23,12L2,3V10L17,12L2,14V21Z"/>
           </svg>
         </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="modal fade" id="chatNotesModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered modal-dialog-scrollable">
+    <div class="modal-content" style="background: var(--bg-primary); border: 1px solid var(--border-color);">
+      <div class="modal-header" style="border-bottom: 1px solid var(--border-color);">
+        <h6 class="modal-title" style="color: var(--text-primary);">Attach Workspace Notes</h6>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body">
+        <p style="margin: 0 0 12px; color: var(--text-secondary); font-size: 13px;">
+          Attach workspace notes as context for this chat message. Selected notes are added to the prompt when you send.
+        </p>
+        <div class="d-flex gap-2 align-items-center mb-3">
+          <input
+            type="text"
+            id="chatNotesSearchInput"
+            class="modern-input w-100"
+            placeholder="Search workspace notes"
+            autocomplete="off"
+            aria-label="Search workspace notes"
+          >
+          <button type="button" id="chatNotesPickerRefreshBtn" class="modern-btn modern-btn-secondary" style="white-space: nowrap;">Refresh</button>
+        </div>
+        <div id="chatNotesPickerStatus" style="display: none; margin-bottom: 12px; padding: 10px 12px; border-radius: 10px; font-size: 12px; background: var(--bg-secondary); color: var(--text-secondary);"></div>
+        <div id="chatNotesPickerList" class="d-flex flex-column gap-2"></div>
+      </div>
+      <div class="modal-footer" style="border-top: 1px solid var(--border-color);">
+        <button type="button" class="modern-btn modern-btn-secondary" data-bs-dismiss="modal">Done</button>
       </div>
     </div>
   </div>

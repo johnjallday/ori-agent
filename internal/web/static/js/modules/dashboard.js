@@ -7458,10 +7458,25 @@
     return 'Created from Ask Ori task: "' + text + '"';
   }
 
+  function buildWorkspaceBootstrapFromPrompt(prompt) {
+    var text = truncateText(String(prompt || '').trim(), 420);
+    if (!text) return null;
+    return {
+      goal: text,
+      systems: '',
+      capabilities: '',
+      context: ''
+    };
+  }
+
   async function openCreateWorkspaceModalWithSeed(seedPayload) {
     var modalElement = document.getElementById('addFolderModal');
     var nameInput = document.getElementById('folderNameInput');
     var descriptionInput = document.getElementById('folderDescriptionInput');
+    var primaryGoalInput = document.getElementById('folderPrimaryGoalInput');
+    var systemsInput = document.getElementById('folderSystemsInput');
+    var capabilitiesInput = document.getElementById('folderCapabilitiesInput');
+    var contextInput = document.getElementById('folderContextInput');
     var parentSelect = document.getElementById('folderParentSelect');
     if (!modalElement || !nameInput || !descriptionInput || typeof bootstrap === 'undefined' || !bootstrap.Modal) {
       return { status: 'unavailable', reason: 'workspace_modal_prerequisites_missing' };
@@ -7469,6 +7484,18 @@
 
     nameInput.value = String(seedPayload && seedPayload.name || '').trim();
     descriptionInput.value = String(seedPayload && seedPayload.description || '').trim();
+    if (primaryGoalInput) {
+      primaryGoalInput.value = String(seedPayload && seedPayload.workspaceBootstrap && seedPayload.workspaceBootstrap.goal || '').trim();
+    }
+    if (systemsInput) {
+      systemsInput.value = String(seedPayload && seedPayload.workspaceBootstrap && seedPayload.workspaceBootstrap.systems || '').trim();
+    }
+    if (capabilitiesInput) {
+      capabilitiesInput.value = String(seedPayload && seedPayload.workspaceBootstrap && seedPayload.workspaceBootstrap.capabilities || '').trim();
+    }
+    if (contextInput) {
+      contextInput.value = String(seedPayload && seedPayload.workspaceBootstrap && seedPayload.workspaceBootstrap.context || '').trim();
+    }
     if (parentSelect) {
       parentSelect.value = '';
     }
@@ -7523,7 +7550,8 @@
     var sourcePrompt = String(prompt || '').trim();
     var payload = {
       name: name,
-      description: buildWorkspaceDescriptionFromPrompt(sourcePrompt || ('Create workspace: ' + name))
+      description: buildWorkspaceDescriptionFromPrompt(sourcePrompt || ('Create workspace: ' + name)),
+      workspaceBootstrap: buildWorkspaceBootstrapFromPrompt(sourcePrompt || ('Create workspace: ' + name))
     };
 
     setHomeAssistantBusy(true, 'Preparing Workspace...');
@@ -7577,6 +7605,7 @@
     var payload = {
       name: buildWorkspaceNameFromPrompt(text),
       description: buildWorkspaceDescriptionFromPrompt(text),
+      workspaceBootstrap: buildWorkspaceBootstrapFromPrompt(text),
       seedNote: options && options.seedNote ? options.seedNote : null,
       seedTask: options && options.seedTask ? options.seedTask : null
     };

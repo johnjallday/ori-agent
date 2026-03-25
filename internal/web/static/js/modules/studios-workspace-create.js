@@ -28,6 +28,75 @@ function extractFolderNameFromPath(pathValue) {
   return parts[parts.length - 1] || '';
 }
 
+function getWorkspaceBootstrapFromModal() {
+  const goal = String(document.getElementById('folderPrimaryGoalInput')?.value || '').trim();
+  const systems = String(document.getElementById('folderSystemsInput')?.value || '').trim();
+  const capabilities = String(document.getElementById('folderCapabilitiesInput')?.value || '').trim();
+  const context = String(document.getElementById('folderContextInput')?.value || '').trim();
+  const systemsList = systems
+    ? systems
+      .split(/[\n,;]+/)
+      .map((value) => value.trim())
+      .filter(Boolean)
+    : [];
+
+  return {
+    hasAny: Boolean(goal || systems || capabilities || context),
+    goal,
+    systems,
+    systemsList,
+    capabilities,
+    context
+  };
+}
+
+function resetWorkspaceBootstrapFields() {
+  const goalInput = document.getElementById('folderPrimaryGoalInput');
+  const systemsInput = document.getElementById('folderSystemsInput');
+  const capabilitiesInput = document.getElementById('folderCapabilitiesInput');
+  const contextInput = document.getElementById('folderContextInput');
+
+  if (goalInput) goalInput.value = '';
+  if (systemsInput) systemsInput.value = '';
+  if (capabilitiesInput) capabilitiesInput.value = '';
+  if (contextInput) contextInput.value = '';
+}
+
+function buildWorkspaceBootstrapSeedNote(workspaceBootstrap, workspaceName) {
+  if (!workspaceBootstrap || !workspaceBootstrap.hasAny) {
+    return null;
+  }
+
+  const systemsSection = workspaceBootstrap.systemsList.length > 0
+    ? workspaceBootstrap.systemsList.map((item) => `- ${item}`).join('\n')
+    : '_Not specified._';
+  const goalSection = workspaceBootstrap.goal || '_Not specified._';
+  const capabilitiesSection = workspaceBootstrap.capabilities || '_Not specified._';
+  const contextSection = workspaceBootstrap.context || '_Not specified._';
+  const title = String(workspaceName || '').trim() || 'this workspace';
+
+  return {
+    name: 'Workspace Brief',
+    content: `# Workspace Brief\n\nCaptured during workspace creation for ${title}.\n\n## Primary Goal\n${goalSection}\n\n## Apps and Systems\n${systemsSection}\n\n## What Ori Should Help With\n${capabilitiesSection}\n\n## Key Files or Context\n${contextSection}\n`
+  };
+}
+
+async function createWorkspaceBootstrapNote(workspaceId, noteConfig) {
+  const response = await fetch(`/api/workspaces/${encodeURIComponent(workspaceId)}/notes`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      name: noteConfig.name || 'Workspace Brief',
+      content: noteConfig.content || ''
+    })
+  });
+
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(text || 'Failed to create workspace brief note');
+  }
+}
+
 function clearDuplicateWarning() {
   const warning = document.getElementById('folderImportDuplicateWarning');
   const text = document.getElementById('folderImportDuplicateText');
@@ -270,6 +339,7 @@ function openCreateWorkspaceModal(options = {}) {
     nameInput.dataset.autofillName = '';
   }
   if (descriptionInput) descriptionInput.value = '';
+  resetWorkspaceBootstrapFields();
   if (parentSelect) parentSelect.value = '';
   if (importToggle) importToggle.checked = false;
   if (importPathInput) importPathInput.value = '';
@@ -358,6 +428,8 @@ async function createWorkspace() {
   const colorBtn = document.querySelector('#addFolderModal .folder-color-btn.active');
   const importToggle = document.getElementById('folderImportToggle');
   const importPathInput = document.getElementById('folderImportPathInput');
+  const primaryGoalInput = document.getElementById('folderPrimaryGoalInput');
+  const workspaceBootstrap = getWorkspaceBootstrapFromModal();
 
   const name = nameInput?.value.trim() || '';
   const description = descriptionInput?.value.trim() || '';
@@ -374,6 +446,11 @@ async function createWorkspace() {
     showError('Please enter a folder path to import');
     return;
   }
+  if (!workspaceBootstrap.goal) {
+    showError('Primary goal is required');
+    primaryGoalInput?.focus();
+    return;
+  }
 
   try {
     let endpoint = '/api/workspaces';
@@ -383,6 +460,14 @@ async function createWorkspace() {
       parent_id: parentId,
       color: color
     };
+    if (workspaceBootstrap.hasAny) {
+      payload.workspace_bootstrap = {
+        goal: workspaceBootstrap.goal,
+        systems: workspaceBootstrap.systems,
+        capabilities: workspaceBootstrap.capabilities,
+        context: workspaceBootstrap.context
+      };
+    }
     if (importEnabled) {
       endpoint = '/api/workspaces/import';
       payload.path = importPath;
@@ -448,6 +533,19 @@ async function createWorkspace() {
       }
     }
 
+    const workspaceId = result.folder && result.folder.id;
+    const workspaceBriefNote = buildWorkspaceBootstrapSeedNote(
+      workspaceBootstrap,
+      name || extractFolderNameFromPath(importPath) || (result.folder && result.folder.name) || 'New Workspace'
+    );
+    if (workspaceId && workspaceBriefNote) {
+      try {
+        await createWorkspaceBootstrapNote(workspaceId, workspaceBriefNote);
+      } catch (error) {
+        console.warn('Failed to create workspace brief note:', error);
+      }
+    }
+
     // Close modal
     const modalElement = document.getElementById('addFolderModal');
     const modal = bootstrap.Modal.getInstance(modalElement);
@@ -459,6 +557,7 @@ async function createWorkspace() {
     if (nameInput) nameInput.value = '';
     if (nameInput) nameInput.dataset.autofillName = '';
     if (descriptionInput) descriptionInput.value = '';
+    resetWorkspaceBootstrapFields();
     if (parentSelect) parentSelect.value = '';
     if (importToggle) importToggle.checked = false;
     if (importPathInput) importPathInput.value = '';
@@ -468,7 +567,6 @@ async function createWorkspace() {
     resetImportState();
 
     // Navigate to the new workspace and open the Create Agent modal
-    const workspaceId = result.folder && result.folder.id;
     if (workspaceId) {
       window.location.href = `/workspaces/${encodeURIComponent(workspaceId)}?addAgent=1`;
       return;
