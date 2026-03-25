@@ -38,6 +38,7 @@
     isHydrating: false,
     unlockDialogOpen: false,
     createDialogOpen: false,
+    importDialogOpen: false,
     exportDialogOpen: false,
     entryDialogOpen: false,
     entryDialogMode: 'create',
@@ -72,6 +73,10 @@
       .toLowerCase()
       .replace(/[^a-z0-9]+/g, '-')
       .replace(/^-+|-+$/g, '') || 'vault';
+  }
+
+  function canImportIntoCurrentVault() {
+    return Boolean(activeVaultID() && state.status?.available && !state.status?.locked);
   }
 
   function notify(message, type) {
@@ -113,6 +118,7 @@
       vaultManageStack: document.getElementById('vaultModalVaultManageStack'),
       openEntryBtn: document.getElementById('vaultModalOpenEntryBtn'),
       openCreateVaultBtn: document.getElementById('vaultModalOpenCreateVaultBtn'),
+      openImportBtn: document.getElementById('vaultModalOpenImportBtn'),
       openExportBtn: document.getElementById('vaultModalOpenExportBtn'),
       vaultSelect: document.getElementById('vaultModalVaultSelect'),
       vaultMeta: document.getElementById('vaultModalVaultMeta'),
@@ -130,6 +136,24 @@
       createDialogTitle: document.getElementById('vaultModalCreateDialogTitle'),
       createDialogDescription: document.getElementById('vaultModalCreateDialogDescription'),
       createCancelBtn: document.getElementById('vaultModalCreateCancelBtn'),
+      importOverlay: document.getElementById('vaultModalImportOverlay'),
+      importDialogTitle: document.getElementById('vaultModalImportDialogTitle'),
+      importDialogDescription: document.getElementById('vaultModalImportDialogDescription'),
+      importChooseFileBtn: document.getElementById('vaultModalImportChooseFileBtn'),
+      importFileInput: document.getElementById('vaultModalImportFileInput'),
+      importFileName: document.getElementById('vaultModalImportFileName'),
+      importPasswordInput: document.getElementById('vaultModalImportPassword'),
+      importModeInput: document.getElementById('vaultModalImportMode'),
+      importModeCurrentOption: document.getElementById('vaultModalImportModeCurrentOption'),
+      importCurrentHint: document.getElementById('vaultModalImportCurrentHint'),
+      importCreateFields: document.getElementById('vaultModalImportCreateFields'),
+      importVaultNameInput: document.getElementById('vaultModalImportVaultName'),
+      importVaultDescriptionInput: document.getElementById('vaultModalImportVaultDescription'),
+      importVaultPasswordInput: document.getElementById('vaultModalImportVaultPassword'),
+      importConfirmVaultPasswordInput: document.getElementById('vaultModalImportConfirmVaultPassword'),
+      importRestoreGrantsInput: document.getElementById('vaultModalImportRestoreGrants'),
+      importBtn: document.getElementById('vaultModalImportBtn'),
+      importCancelBtn: document.getElementById('vaultModalImportCancelBtn'),
       exportOverlay: document.getElementById('vaultModalExportOverlay'),
       exportDialogTitle: document.getElementById('vaultModalExportDialogTitle'),
       exportDialogDescription: document.getElementById('vaultModalExportDialogDescription'),
@@ -454,6 +478,22 @@
       };
 
       reader.readAsDataURL(file);
+    });
+  }
+
+  function readFileAsText(file) {
+    return new Promise(function(resolve, reject) {
+      const reader = new FileReader();
+
+      reader.onload = function() {
+        resolve(String(reader.result || ''));
+      };
+
+      reader.onerror = function() {
+        reject(new Error('Failed to read file "' + String(file?.name || 'import bundle') + '".'));
+      };
+
+      reader.readAsText(file);
     });
   }
 
@@ -976,6 +1016,85 @@
     elements.modal?.classList.toggle('has-create-dialog', canShow);
   }
 
+  function resetImportForm() {
+    if (!elements) {
+      return;
+    }
+
+    if (elements.importFileInput) {
+      elements.importFileInput.value = '';
+    }
+    if (elements.importFileName) {
+      elements.importFileName.textContent = 'No import file selected yet.';
+    }
+    if (elements.importPasswordInput) {
+      elements.importPasswordInput.value = '';
+    }
+    if (elements.importModeInput) {
+      elements.importModeInput.value = 'new';
+    }
+    if (elements.importVaultNameInput) {
+      elements.importVaultNameInput.value = '';
+    }
+    if (elements.importVaultDescriptionInput) {
+      elements.importVaultDescriptionInput.value = '';
+    }
+    if (elements.importVaultPasswordInput) {
+      elements.importVaultPasswordInput.value = '';
+    }
+    if (elements.importConfirmVaultPasswordInput) {
+      elements.importConfirmVaultPasswordInput.value = '';
+    }
+    if (elements.importRestoreGrantsInput) {
+      elements.importRestoreGrantsInput.checked = true;
+    }
+  }
+
+  function syncImportDialog() {
+    if (!elements?.importOverlay) {
+      return;
+    }
+
+    const canImportCurrent = canImportIntoCurrentVault();
+    const canShow = Boolean(state.importDialogOpen && state.hasHydrated);
+
+    if (elements.importModeCurrentOption) {
+      elements.importModeCurrentOption.disabled = !canImportCurrent;
+      elements.importModeCurrentOption.hidden = !canImportCurrent;
+    }
+
+    if (elements.importModeInput && (!canImportCurrent || elements.importModeInput.value !== 'current')) {
+      if (!elements.importModeInput.value || !canImportCurrent) {
+        elements.importModeInput.value = 'new';
+      }
+    }
+
+    const mode = elements.importModeInput?.value === 'current' && canImportCurrent ? 'current' : 'new';
+    const currentVaultName = vaultDisplayLabel(activeVault());
+
+    if (elements.importDialogDescription) {
+      elements.importDialogDescription.textContent = mode === 'current'
+        ? 'Import the encrypted bundle into ' + currentVaultName + '. The selected vault stays unlocked while Ori writes the restored records.'
+        : 'Import the encrypted bundle into a freshly created vault with its own Ori password.';
+    }
+
+    if (elements.importCurrentHint) {
+      elements.importCurrentHint.hidden = mode !== 'current';
+      elements.importCurrentHint.textContent = 'The selected vault "' + currentVaultName + '" is unlocked and ready for imported records.';
+    }
+
+    if (elements.importCreateFields) {
+      elements.importCreateFields.hidden = mode !== 'new';
+    }
+
+    elements.importOverlay.hidden = !canShow;
+    elements.modal?.classList.toggle('has-import-dialog', canShow);
+
+    if (!canShow && elements.importBtn && !elements.importBtn.dataset.originalLabel) {
+      resetImportForm();
+    }
+  }
+
   function resetExportForm() {
     if (!elements) {
       return;
@@ -1136,6 +1255,11 @@
       elements.openEntryBtn.hidden = isInitialHydrate || showEmptyCreateMode || !unlocked;
     }
 
+    if (elements.openImportBtn) {
+      elements.openImportBtn.hidden = isInitialHydrate;
+      elements.openImportBtn.disabled = isInitialHydrate;
+    }
+
     if (elements.openExportBtn) {
       elements.openExportBtn.hidden = isInitialHydrate || showEmptyCreateMode || !unlocked;
       elements.openExportBtn.disabled = isInitialHydrate || !hasVaults || !activeVaultID() || !unlocked;
@@ -1154,6 +1278,7 @@
     }
 
     syncCreateDialog();
+    syncImportDialog();
     syncExportDialog();
     syncEntryDialog();
     syncWorkspaceTabs();
@@ -1281,6 +1406,8 @@
   function openCreateDialog() {
     state.entryDialogOpen = false;
     syncEntryDialog();
+    state.importDialogOpen = false;
+    syncImportDialog();
     state.exportDialogOpen = false;
     syncExportDialog();
     state.unlockDialogOpen = false;
@@ -1289,6 +1416,33 @@
     syncCreateDialog();
     window.requestAnimationFrame(function() {
       elements?.newVaultNameInput?.focus();
+    });
+  }
+
+  function closeImportDialog(options) {
+    state.importDialogOpen = false;
+    syncImportDialog();
+    const restoreFocus = options?.restoreFocus !== false;
+    if (restoreFocus && elements?.modal?.classList.contains('show')) {
+      window.requestAnimationFrame(function() {
+        elements?.openImportBtn?.focus();
+      });
+    }
+  }
+
+  function openImportDialog() {
+    state.entryDialogOpen = false;
+    syncEntryDialog();
+    state.createDialogOpen = false;
+    syncCreateDialog();
+    state.exportDialogOpen = false;
+    syncExportDialog();
+    state.unlockDialogOpen = false;
+    syncUnlockDialog();
+    state.importDialogOpen = true;
+    syncImportDialog();
+    window.requestAnimationFrame(function() {
+      elements?.importChooseFileBtn?.focus();
     });
   }
 
@@ -1319,6 +1473,8 @@
     resetCreateForm();
     state.createDialogOpen = false;
     syncCreateDialog();
+    state.importDialogOpen = false;
+    syncImportDialog();
     state.exportDialogOpen = false;
     syncExportDialog();
     state.unlockDialogOpen = false;
@@ -1365,6 +1521,8 @@
     populateEntryForm(record);
     state.createDialogOpen = false;
     syncCreateDialog();
+    state.importDialogOpen = false;
+    syncImportDialog();
     state.exportDialogOpen = false;
     syncExportDialog();
     state.unlockDialogOpen = false;
@@ -1419,6 +1577,8 @@
     syncEntryDialog();
     state.createDialogOpen = false;
     syncCreateDialog();
+    state.importDialogOpen = false;
+    syncImportDialog();
     state.unlockDialogOpen = false;
     syncUnlockDialog();
     state.exportDialogOpen = true;
@@ -1447,6 +1607,8 @@
     syncEntryDialog();
     state.createDialogOpen = false;
     syncCreateDialog();
+    state.importDialogOpen = false;
+    syncImportDialog();
     state.exportDialogOpen = false;
     syncExportDialog();
     state.unlockDialogOpen = true;
@@ -2380,6 +2542,11 @@
       return;
     }
 
+    if (state.importDialogOpen && !elements.importOverlay?.hidden) {
+      elements.importChooseFileBtn?.focus();
+      return;
+    }
+
     if (state.exportDialogOpen && !elements.exportOverlay?.hidden) {
       elements.exportPasswordInput?.focus();
       return;
@@ -2611,6 +2778,85 @@
     }
   }
 
+  async function importVaultBundle() {
+    const file = elements?.importFileInput?.files?.[0] || null;
+    if (!file) {
+      showAlert('Choose an export bundle before importing.', 'warning');
+      return;
+    }
+
+    const importPassword = String(elements.importPasswordInput?.value || '').trim();
+    if (!importPassword) {
+      showAlert('Enter the import password before restoring a vault bundle.', 'warning');
+      return;
+    }
+
+    const mode = elements.importModeInput?.value === 'current' && canImportIntoCurrentVault() ? 'current' : 'new';
+    if (mode === 'current' && !canImportIntoCurrentVault()) {
+      showAlert('Unlock the selected vault before importing into it.', 'warning');
+      return;
+    }
+
+    let bundle = null;
+    try {
+      const raw = await readFileAsText(file);
+      bundle = JSON.parse(raw);
+    } catch (error) {
+      console.error('Failed to parse vault import bundle:', error);
+      showAlert(error.message || 'The selected import file is not valid JSON.', 'error');
+      return;
+    }
+
+    const requestBody = {
+      import_password: importPassword,
+      bundle: bundle,
+      restore_grants: Boolean(elements.importRestoreGrantsInput?.checked)
+    };
+
+    if (mode === 'current') {
+      requestBody.target_vault_id = activeVaultID();
+    } else {
+      const vaultPassword = String(elements.importVaultPasswordInput?.value || '').trim();
+      const confirmPassword = String(elements.importConfirmVaultPasswordInput?.value || '').trim();
+      if (!vaultPassword) {
+        showAlert('Set a password for the imported vault before continuing.', 'warning');
+        return;
+      }
+      if (vaultPassword !== confirmPassword) {
+        showAlert('The imported vault passwords do not match.', 'warning');
+        return;
+      }
+      requestBody.create_vault = {
+        name: String(elements.importVaultNameInput?.value || '').trim(),
+        description: String(elements.importVaultDescriptionInput?.value || '').trim(),
+        vault_password: vaultPassword
+      };
+    }
+
+    try {
+      setButtonLoading(elements.importBtn, true, 'Importing');
+      const response = await apiRequest('/api/vault/import', {
+        method: 'POST',
+        body: requestBody
+      });
+
+      const result = response?.result || {};
+      if (result?.vault?.id) {
+        state.selectedVaultID = String(result.vault.id);
+        writeStoredVaultID(state.selectedVaultID);
+      }
+
+      await refreshVault();
+      notify('Imported ' + String(result.record_count || 0) + ' encrypted ' + ((result.record_count || 0) === 1 ? 'entry' : 'entries') + ' into ' + vaultDisplayLabel(result.vault) + '.', 'success');
+      closeImportDialog({ restoreFocus: false });
+    } catch (error) {
+      console.error('Failed to import vault bundle:', error);
+      showAlert(error.message || 'Failed to import vault bundle.', 'error');
+    } finally {
+      setButtonLoading(elements.importBtn, false);
+    }
+  }
+
   async function exportVaultBundle() {
     if (!activeVaultID()) {
       showAlert('Create or select a vault before exporting.', 'warning');
@@ -2822,6 +3068,10 @@
       openCreateDialog();
     });
 
+    elements.openImportBtn?.addEventListener('click', function() {
+      openImportDialog();
+    });
+
     elements.openExportBtn?.addEventListener('click', function() {
       openExportDialog();
     });
@@ -2840,6 +3090,10 @@
 
     elements.entryCancelBtn?.addEventListener('click', function() {
       closeEntryDialog();
+    });
+
+    elements.importCancelBtn?.addEventListener('click', function() {
+      closeImportDialog();
     });
 
     elements.exportCancelBtn?.addEventListener('click', function() {
@@ -2861,6 +3115,13 @@
       const dismissTrigger = event.target.closest('[data-action="dismiss-entry-dialog"]');
       if (dismissTrigger) {
         closeEntryDialog();
+      }
+    });
+
+    elements.importOverlay?.addEventListener('click', function(event) {
+      const dismissTrigger = event.target.closest('[data-action="dismiss-import-dialog"]');
+      if (dismissTrigger) {
+        closeImportDialog();
       }
     });
 
@@ -2954,6 +3215,35 @@
       }
     });
 
+    elements.importChooseFileBtn?.addEventListener('click', function() {
+      elements.importFileInput?.click();
+    });
+
+    elements.importFileInput?.addEventListener('change', function() {
+      const file = elements.importFileInput?.files?.[0] || null;
+      if (elements.importFileName) {
+        elements.importFileName.textContent = file ? String(file.name || 'import-bundle.json') : 'No import file selected yet.';
+      }
+    });
+
+    elements.importModeInput?.addEventListener('change', function() {
+      syncImportDialog();
+    });
+
+    elements.importConfirmVaultPasswordInput?.addEventListener('keydown', function(event) {
+      if (event.key === 'Enter') {
+        event.preventDefault();
+        importVaultBundle();
+      }
+    });
+
+    elements.importPasswordInput?.addEventListener('keydown', function(event) {
+      if (event.key === 'Enter') {
+        event.preventDefault();
+        importVaultBundle();
+      }
+    });
+
     elements.exportPasswordInput?.addEventListener('keydown', function(event) {
       if (event.key === 'Enter') {
         event.preventDefault();
@@ -3001,6 +3291,10 @@
       saveRecord();
     });
 
+    elements.importBtn?.addEventListener('click', function() {
+      importVaultBundle();
+    });
+
     elements.exportBtn?.addEventListener('click', function() {
       exportVaultBundle();
     });
@@ -3018,6 +3312,12 @@
         event.preventDefault();
         event.stopPropagation();
         closeEntryDialog();
+        return;
+      }
+      if (event.key === 'Escape' && state.importDialogOpen) {
+        event.preventDefault();
+        event.stopPropagation();
+        closeImportDialog();
         return;
       }
       if (event.key === 'Escape' && state.exportDialogOpen) {
@@ -3052,6 +3352,7 @@
       elements.modal.addEventListener('hidden.bs.modal', function() {
         setLauncherActive(false);
         closeEntryDialog({ restoreFocus: false });
+        closeImportDialog({ restoreFocus: false });
         closeExportDialog({ restoreFocus: false });
         closeCreateDialog({ restoreFocus: false });
         closeUnlockDialog();

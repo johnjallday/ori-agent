@@ -308,6 +308,86 @@ func TestHandlerUnlockAndLockFallbackVault(t *testing.T) {
 	}
 }
 
+func TestHandlerImportCreatesVaultAndRestoresBundle(t *testing.T) {
+	handler, store, db := newTestHandler(t, vault.NewMemorySecretStore(), "")
+	defer func() { _ = db.Close() }()
+
+	sourceVault := createHandlerVault(t, store, "Finance Vault")
+
+	if err := store.CreateRecord(context.Background(), &vault.Record{
+		VaultID:     sourceVault.ID,
+		Type:        "secret",
+		WorkspaceID: "ws-import",
+		Label:       "Brokerage Login",
+		Payload:     json.RawMessage(`{"username":"jjdev"}`),
+	}, vault.AccessContext{}); err != nil {
+		t.Fatalf("create source record: %v", err)
+	}
+
+	if err := store.CreateGrant(context.Background(), &vault.Grant{
+		VaultID:     sourceVault.ID,
+		WorkspaceID: "ws-import",
+		ActorType:   vault.ActorTypeAgent,
+		ActorID:     "finance-agent",
+		Capability:  vault.CapabilitySecretsRead,
+		RecordType:  "secret",
+	}); err != nil {
+		t.Fatalf("create source grant: %v", err)
+	}
+
+	bundle, err := store.Export(context.Background(), vault.ExportRequest{
+		VaultID:  sourceVault.ID,
+		Password: "bundle-pass",
+	})
+	if err != nil {
+		t.Fatalf("export bundle: %v", err)
+	}
+
+	importRec := performJSONRequest(t, handler, http.MethodPost, "/api/vault/import", map[string]any{
+		"import_password": "bundle-pass",
+		"bundle":          bundle,
+		"create_vault": map[string]any{
+			"name":           "Imported Finance Vault",
+			"vault_password": "imported-vault-pass",
+		},
+	})
+	if importRec.Code != http.StatusOK {
+		t.Fatalf("expected 200 from import, got %d: %s", importRec.Code, importRec.Body.String())
+	}
+
+	var importBody struct {
+		Result vault.ImportResult `json:"result"`
+	}
+	decodeJSONBody(t, importRec, &importBody)
+	if !importBody.Result.CreatedVault || importBody.Result.RecordCount != 1 || importBody.Result.GrantCount != 1 {
+		t.Fatalf("unexpected import result: %+v", importBody.Result)
+	}
+
+	listRec := performJSONRequest(t, handler, http.MethodGet, "/api/vault/records?vault_id="+importBody.Result.Vault.ID, nil)
+	if listRec.Code != http.StatusOK {
+		t.Fatalf("expected 200 listing imported vault records, got %d: %s", listRec.Code, listRec.Body.String())
+	}
+	var listed struct {
+		Records []vault.RecordListItem `json:"records"`
+	}
+	decodeJSONBody(t, listRec, &listed)
+	if len(listed.Records) != 1 || listed.Records[0].Label != "Brokerage Login" {
+		t.Fatalf("unexpected imported records: %#v", listed.Records)
+	}
+
+	grantsRec := performJSONRequest(t, handler, http.MethodGet, "/api/vault/grants?vault_id="+importBody.Result.Vault.ID, nil)
+	if grantsRec.Code != http.StatusOK {
+		t.Fatalf("expected 200 listing imported vault grants, got %d: %s", grantsRec.Code, grantsRec.Body.String())
+	}
+	var importedGrants struct {
+		Grants []vault.Grant `json:"grants"`
+	}
+	decodeJSONBody(t, grantsRec, &importedGrants)
+	if len(importedGrants.Grants) != 1 || importedGrants.Grants[0].ActorID != "finance-agent" {
+		t.Fatalf("unexpected imported grants: %#v", importedGrants.Grants)
+	}
+}
+
 func TestHandlerSupportsNamedVaults(t *testing.T) {
 	handler, _, db := newTestHandler(t, vault.NewMemorySecretStore(), "")
 	defer func() { _ = db.Close() }()

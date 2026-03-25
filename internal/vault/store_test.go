@@ -235,6 +235,80 @@ func TestStoreExportRequiresPasswordAndEncryptsBundle(t *testing.T) {
 	}
 }
 
+func TestStoreImportCreatesVaultAndRestoresBundle(t *testing.T) {
+	ctx := context.Background()
+	store, db := newTestVaultStore(t)
+	defer func() { _ = db.Close() }()
+
+	sourceVault := createTestVault(t, ctx, store, "Travel Vault")
+
+	if err := store.CreateRecord(ctx, &Record{
+		VaultID:     sourceVault.ID,
+		Type:        "secret",
+		WorkspaceID: "ws-import",
+		Label:       "Flight backup code",
+		Source:      "manual",
+		Payload:     json.RawMessage(`{"code":"ZX-42"}`),
+	}, AccessContext{}); err != nil {
+		t.Fatalf("create source record: %v", err)
+	}
+
+	if err := store.CreateGrant(ctx, &Grant{
+		VaultID:     sourceVault.ID,
+		WorkspaceID: "ws-import",
+		ActorType:   ActorTypeAgent,
+		ActorID:     "travel-agent",
+		Capability:  CapabilitySecretsRead,
+		RecordType:  "secret",
+	}); err != nil {
+		t.Fatalf("create source grant: %v", err)
+	}
+
+	bundle, err := store.Export(ctx, ExportRequest{
+		VaultID:  sourceVault.ID,
+		Password: "bundle-import-pass",
+	})
+	if err != nil {
+		t.Fatalf("export source vault: %v", err)
+	}
+
+	result, err := store.Import(ctx, ImportRequest{
+		Password:         "bundle-import-pass",
+		Bundle:           *bundle,
+		NewVaultName:     "Imported Travel Vault",
+		NewVaultPassword: "imported-vault-pass",
+		RestoreGrants:    true,
+	})
+	if err != nil {
+		t.Fatalf("import vault bundle: %v", err)
+	}
+	if !result.CreatedVault {
+		t.Fatal("expected import to create a new vault")
+	}
+	if result.RecordCount != 1 || result.GrantCount != 1 {
+		t.Fatalf("unexpected import counts: %+v", result)
+	}
+	if result.Vault.Name != "Imported Travel Vault" {
+		t.Fatalf("unexpected imported vault name: %+v", result.Vault)
+	}
+
+	records, err := store.ListRecords(ctx, RecordFilter{VaultID: result.Vault.ID}, AccessContext{})
+	if err != nil {
+		t.Fatalf("list imported records: %v", err)
+	}
+	if len(records) != 1 || records[0].Label != "Flight backup code" {
+		t.Fatalf("unexpected imported records: %#v", records)
+	}
+
+	grants, err := store.ListGrants(ctx, result.Vault.ID, "")
+	if err != nil {
+		t.Fatalf("list imported grants: %v", err)
+	}
+	if len(grants) != 1 || grants[0].ActorID != "travel-agent" {
+		t.Fatalf("unexpected imported grants: %#v", grants)
+	}
+}
+
 func TestStoreRejectsMalformedEncryptedRecord(t *testing.T) {
 	ctx := context.Background()
 	store, db := newTestVaultStore(t)

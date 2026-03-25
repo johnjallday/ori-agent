@@ -260,4 +260,58 @@
       <button id="vaultExportBtn" class="modern-btn modern-btn-primary" type="button">Export Vault</button>
     </div>
   </div>
+
+  <div class="settings-info-box mt-4">
+    <div class="settings-info-row">
+      <span class="settings-info-label">Portable Import</span>
+      <span class="settings-info-value">Bundle password required</span>
+    </div>
+    <div class="settings-field mt-3">
+      <label class="settings-label" for="vaultImportFile">Export bundle</label>
+      <div class="settings-actions" style="justify-content: flex-start; margin-bottom: 0.65rem;">
+        <button id="vaultImportChooseFileBtn" class="modern-btn modern-btn-secondary" type="button">Choose File</button>
+      </div>
+      <input id="vaultImportFile" type="file" accept=".json,application/json" hidden>
+      <div id="vaultImportFileName" class="settings-help">No import file selected yet.</div>
+    </div>
+    <div class="settings-field">
+      <label class="settings-label" for="vaultImportPassword">Import password</label>
+      <input id="vaultImportPassword" type="password" class="form-control settings-input" placeholder="Used to decrypt the export bundle">
+    </div>
+    <div class="settings-field">
+      <label class="settings-label" for="vaultImportMode">Import target</label>
+      <select id="vaultImportMode" class="form-select settings-input">
+        <option value="new">Create a new vault</option>
+        <option id="vaultImportModeCurrentOption" value="current">Import into the selected vault</option>
+      </select>
+    </div>
+    <div id="vaultImportCurrentHint" class="settings-help mb-3">The selected vault must already be unlocked before Ori can import records into it.</div>
+    <div id="vaultImportCreateFields">
+      <div class="settings-field">
+        <label class="settings-label" for="vaultImportVaultName">New vault name</label>
+        <input id="vaultImportVaultName" type="text" class="form-control settings-input" placeholder="Leave blank to use the bundle vault name">
+      </div>
+      <div class="settings-field">
+        <label class="settings-label" for="vaultImportVaultDescription">Description</label>
+        <input id="vaultImportVaultDescription" type="text" class="form-control settings-input" placeholder="Optional note for the imported vault">
+      </div>
+      <div class="settings-field">
+        <label class="settings-label" for="vaultImportVaultPassword">New vault password</label>
+        <input id="vaultImportVaultPassword" type="password" class="form-control settings-input" placeholder="Required for the imported vault">
+      </div>
+      <div class="settings-field">
+        <label class="settings-label" for="vaultImportConfirmVaultPassword">Confirm vault password</label>
+        <input id="vaultImportConfirmVaultPassword" type="password" class="form-control settings-input" placeholder="Re-enter the vault password">
+      </div>
+    </div>
+    <div class="form-check mb-3">
+      <input class="form-check-input" type="checkbox" id="vaultImportRestoreGrants" checked>
+      <label class="form-check-label" for="vaultImportRestoreGrants" style="color: var(--text-primary);">
+        Restore workspace access grants from the bundle when they are available.
+      </label>
+    </div>
+    <div class="settings-actions">
+      <button id="vaultImportBtn" class="modern-btn modern-btn-primary" type="button">Import Vault</button>
+    </div>
+  </div>
 </section>

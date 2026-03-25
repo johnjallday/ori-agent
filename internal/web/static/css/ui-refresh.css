@@ -1790,8 +1790,30 @@ body::after {
   width: min(34rem, calc(100% - 1.5rem));
 }
 
+.vault-modal-import-dialog {
+  width: min(36rem, calc(100% - 1.5rem));
+}
+
 .vault-modal-entry-dialog {
   width: min(38rem, calc(100% - 1.5rem));
+}
+
+.vault-modal-stack {
+  display: grid;
+  gap: 0.8rem;
+}
+
+.vault-modal-file-name {
+  min-height: 2.9rem;
+  display: flex;
+  align-items: center;
+  padding: 0.85rem 1rem;
+  border-radius: 18px;
+  border: 1px dashed rgba(171, 126, 82, 0.3);
+  background: rgba(255, 255, 255, 0.45);
+  color: var(--text-secondary);
+  font-size: 0.88rem;
+  line-height: 1.45;
 }
 
 .vault-modal-checkbox {
@@ -1946,6 +1968,13 @@ body::after {
 [data-bs-theme="dark"] .vault-modal-checkbox,
 .dark-mode .vault-modal-checkbox {
   color: rgba(241, 231, 214, 0.9);
+}
+
+[data-bs-theme="dark"] .vault-modal-file-name,
+.dark-mode .vault-modal-file-name {
+  border-color: rgba(209, 171, 126, 0.22);
+  background: rgba(24, 31, 45, 0.72);
+  color: rgba(233, 223, 208, 0.88);
 }
 
 [data-bs-theme="dark"] .vault-modal-vault-pill,

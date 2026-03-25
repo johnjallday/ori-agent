@@ -1152,15 +1152,125 @@ func (s *Store) Export(ctx context.Context, req ExportRequest) (*ExportBundle, e
 func DecryptExportBundle(bundle ExportBundle, password string) ([]byte, error) {
 	password = strings.TrimSpace(password)
 	if password == "" {
-		return nil, ErrExportPasswordEmpty
+		return nil, ErrImportPasswordRequired
+	}
+	if strings.TrimSpace(bundle.Salt) == "" || strings.TrimSpace(bundle.Nonce) == "" || strings.TrimSpace(bundle.Ciphertext) == "" {
+		return nil, ErrImportBundleRequired
 	}
 
 	salt, err := base64.StdEncoding.DecodeString(bundle.Salt)
 	if err != nil {
-		return nil, fmt.Errorf("decode export salt: %w", err)
+		return nil, ErrImportBundleInvalid
 	}
 	derivedKey := derivePassphraseKey(password, salt)
-	return decryptBytes(derivedKey, bundle.Nonce, bundle.Ciphertext)
+	plaintext, err := decryptBytes(derivedKey, bundle.Nonce, bundle.Ciphertext)
+	if err != nil {
+		return nil, ErrImportPasswordInvalid
+	}
+	return plaintext, nil
+}
+
+func (s *Store) Import(ctx context.Context, req ImportRequest) (*ImportResult, error) {
+	if s.db == nil {
+		return nil, ErrSecretStoreUnavailable
+	}
+
+	req.Password = strings.TrimSpace(req.Password)
+	if req.Password == "" {
+		return nil, ErrImportPasswordRequired
+	}
+	if strings.TrimSpace(req.Bundle.Salt) == "" || strings.TrimSpace(req.Bundle.Nonce) == "" || strings.TrimSpace(req.Bundle.Ciphertext) == "" {
+		return nil, ErrImportBundleRequired
+	}
+
+	decrypted, err := DecryptExportBundle(req.Bundle, req.Password)
+	if err != nil {
+		return nil, err
+	}
+
+	var envelope exportEnvelope
+	if err := json.Unmarshal(decrypted, &envelope); err != nil {
+		return nil, ErrImportBundleInvalid
+	}
+
+	var targetVault Vault
+	createdVault := false
+
+	if strings.TrimSpace(req.TargetVaultID) != "" {
+		resolvedVaultID, err := s.resolveVaultID(ctx, req.TargetVaultID)
+		if err != nil {
+			return nil, err
+		}
+		targetVault, err = s.getVault(ctx, resolvedVaultID)
+		if err != nil {
+			return nil, err
+		}
+	} else {
+		name := strings.TrimSpace(req.NewVaultName)
+		if name == "" {
+			name = strings.TrimSpace(envelope.VaultName)
+		}
+		if name == "" {
+			name = "Imported Vault"
+		}
+
+		item := Vault{
+			Name:        name,
+			Description: strings.TrimSpace(req.NewVaultDescription),
+		}
+		if err := s.CreateVault(ctx, &item, req.NewVaultPassword); err != nil {
+			return nil, err
+		}
+		targetVault = item
+		createdVault = true
+	}
+
+	importedRecords := 0
+	for _, item := range envelope.Records {
+		record := item
+		record.ID = ""
+		record.VaultID = targetVault.ID
+		if strings.TrimSpace(record.Source) == "" {
+			record.Source = "import"
+		}
+		if err := s.CreateRecord(ctx, &record, AccessContext{}); err != nil {
+			return nil, err
+		}
+		importedRecords++
+	}
+
+	importedGrants := 0
+	if req.RestoreGrants {
+		for _, item := range envelope.Grants {
+			grant := item
+			grant.ID = ""
+			grant.VaultID = targetVault.ID
+			if err := s.CreateGrant(ctx, &grant); err != nil {
+				return nil, err
+			}
+			importedGrants++
+		}
+	}
+
+	targetVault, err = s.getVault(ctx, targetVault.ID)
+	if err != nil {
+		return nil, err
+	}
+
+	s.writeAuditBestEffort(ctx, AuditEvent{
+		VaultID: targetVault.ID,
+		Action:  "import",
+		Outcome: "allowed",
+		Details: fmt.Sprintf(`{"record_count":%d,"grant_count":%d,"created_vault":%t,"source_vault_name":%q}`, importedRecords, importedGrants, createdVault, envelope.VaultName),
+	})
+
+	return &ImportResult{
+		Vault:           targetVault,
+		CreatedVault:    createdVault,
+		SourceVaultName: strings.TrimSpace(envelope.VaultName),
+		RecordCount:     importedRecords,
+		GrantCount:      importedGrants,
+	}, nil
 }
 
 func (s *Store) currentSecretStore() SecretStore {

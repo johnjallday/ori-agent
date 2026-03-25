@@ -46,6 +46,7 @@
               </div>
               <div class="vault-modal-folder-head-actions">
                 <button id="vaultModalOpenCreateVaultBtn" class="modern-btn modern-btn-secondary" type="button">New Vault</button>
+                <button id="vaultModalOpenImportBtn" class="modern-btn modern-btn-secondary" type="button">Import</button>
                 <button id="vaultModalOpenExportBtn" class="modern-btn modern-btn-secondary" type="button">Export</button>
                 <button id="vaultModalOpenEntryBtn" class="modern-btn modern-btn-primary" type="button">New Entry</button>
               </div>
@@ -177,6 +178,71 @@
           </div>
 
           <div class="vault-modal-help">The downloaded file stays encrypted with the export password you set here.</div>
+        </div>
+      </div>
+
+      <div id="vaultModalImportOverlay" class="vault-modal-unlock-overlay vault-modal-import-overlay" hidden>
+        <button type="button" class="vault-modal-unlock-backdrop" data-action="dismiss-import-dialog" aria-label="Close vault import dialog"></button>
+        <div class="vault-modal-unlock-dialog vault-modal-import-dialog" role="dialog" aria-modal="true" aria-labelledby="vaultModalImportDialogTitle">
+          <div class="vault-modal-section-head">
+            <span class="vault-modal-section-kicker">Portable Import</span>
+            <h6 id="vaultModalImportDialogTitle" class="vault-modal-section-title">Import Vault Bundle</h6>
+            <p id="vaultModalImportDialogDescription" class="vault-modal-section-description">Bring an exported vault bundle back into Ori by creating a new vault or loading it into the current unlocked vault.</p>
+          </div>
+
+          <div class="vault-modal-field">
+            <div class="vault-modal-field-head">
+              <label class="vault-modal-label" for="vaultModalImportFileInput">Export bundle</label>
+              <button id="vaultModalImportChooseFileBtn" class="modern-btn modern-btn-secondary" type="button">Choose File</button>
+            </div>
+            <input id="vaultModalImportFileInput" type="file" accept=".json,application/json" hidden>
+            <div id="vaultModalImportFileName" class="vault-modal-file-name">No import file selected yet.</div>
+          </div>
+
+          <div class="vault-modal-field">
+            <label class="vault-modal-label" for="vaultModalImportPassword">Import password</label>
+            <input id="vaultModalImportPassword" type="password" class="form-control vault-modal-input" placeholder="Enter the password used during export">
+            <div class="vault-modal-help">This is the password that encrypts the portable bundle, not the vault password inside Ori.</div>
+          </div>
+
+          <div class="vault-modal-field">
+            <label class="vault-modal-label" for="vaultModalImportMode">Import target</label>
+            <select id="vaultModalImportMode" class="form-select vault-modal-select">
+              <option value="new">Create a new vault</option>
+              <option id="vaultModalImportModeCurrentOption" value="current">Import into the selected vault</option>
+            </select>
+          </div>
+
+          <div id="vaultModalImportCurrentHint" class="vault-modal-help">The currently selected vault must already be unlocked before Ori can import records into it.</div>
+
+          <div id="vaultModalImportCreateFields" class="vault-modal-stack">
+            <div class="vault-modal-field">
+              <label class="vault-modal-label" for="vaultModalImportVaultName">New vault name</label>
+              <input id="vaultModalImportVaultName" type="text" class="form-control vault-modal-input" placeholder="Leave blank to use the bundle vault name">
+            </div>
+            <div class="vault-modal-field">
+              <label class="vault-modal-label" for="vaultModalImportVaultDescription">Description</label>
+              <input id="vaultModalImportVaultDescription" type="text" class="form-control vault-modal-input" placeholder="Optional note for the imported vault">
+            </div>
+            <div class="vault-modal-field">
+              <label class="vault-modal-label" for="vaultModalImportVaultPassword">New vault password</label>
+              <input id="vaultModalImportVaultPassword" type="password" class="form-control vault-modal-input" placeholder="Required for the imported vault">
+            </div>
+            <div class="vault-modal-field">
+              <label class="vault-modal-label" for="vaultModalImportConfirmVaultPassword">Confirm vault password</label>
+              <input id="vaultModalImportConfirmVaultPassword" type="password" class="form-control vault-modal-input" placeholder="Re-enter the vault password">
+            </div>
+          </div>
+
+          <label class="vault-modal-checkbox">
+            <input id="vaultModalImportRestoreGrants" type="checkbox" checked>
+            <span>Restore workspace access grants from the bundle when they are available.</span>
+          </label>
+
+          <div class="vault-modal-actions">
+            <button id="vaultModalImportBtn" class="modern-btn modern-btn-primary" type="button">Import Bundle</button>
+            <button id="vaultModalImportCancelBtn" class="modern-btn modern-btn-secondary" type="button">Cancel</button>
+          </div>
         </div>
       </div>
 
