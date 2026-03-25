@@ -609,6 +609,7 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 	mux.HandleFunc("PUT /api/workspaces/{studioID}/mcp-bindings/{bindingID}", s.Handlers.Studio.UpdateMCPBinding)
 	mux.HandleFunc("PATCH /api/workspaces/{studioID}/mcp-bindings/{bindingID}", s.Handlers.Studio.UpdateMCPBinding)
 	mux.HandleFunc("DELETE /api/workspaces/{studioID}/mcp-bindings/{bindingID}", s.Handlers.Studio.DeleteMCPBinding)
+	mux.HandleFunc("POST /api/workspaces/{studioID}/dependency-actions", s.Handlers.Studio.ResolveDependencyAction)
 
 	// Agent MCP access routes
 	mux.HandleFunc("GET /api/workspaces/{studioID}/agent-mcp-access", s.Handlers.Studio.ListAgentMCPAccess)

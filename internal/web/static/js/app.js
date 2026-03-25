@@ -1566,6 +1566,378 @@ function renderSpecialistCreationControls(payload, originalMessage, isSlashComma
   });
 }
 
+let dependencyResolutionModalState = null;
+
+function normalizeDependencyResolution(payload) {
+  const raw = payload?.dependency_resolution || inferDependencyResolutionFromResponse(payload);
+  if (!raw || typeof raw !== 'object') return null;
+
+  const steps = Array.isArray(raw.steps)
+    ? raw.steps.filter((step) => step && typeof step === 'object')
+    : [];
+
+  return {
+    title: String(raw.title || 'Action required').trim() || 'Action required',
+    summary: String(raw.summary || '').trim(),
+    recommendedSurface: String(raw.recommended_surface || '').trim(),
+    retrySupported: Boolean(raw.retry_context?.supported),
+    steps
+  };
+}
+
+function inferDependencyResolutionFromResponse(payload) {
+  const responseText = typeof payload?.response === 'string' ? payload.response.trim() : '';
+  if (!responseText) return null;
+
+  const lower = responseText.toLowerCase();
+  if (!looksLikePermissionDeniedDependencyText(lower)) {
+    return null;
+  }
+
+  const target = inferDependencyResolutionTarget(responseText);
+  const title = target.displayName
+    ? `${target.displayName} permission required`
+    : 'Tool permission required';
+  const summary = target.displayName
+    ? `The current external agent blocked ${target.displayName} under its permission mode. Review agent permissions, then retry.`
+    : 'The current external agent blocked a required tool under its permission mode. Review agent permissions, then retry.';
+
+  const actions = [
+    {
+      type: 'open_url',
+      label: 'Open Agents',
+      description: 'Review external agent permissions and allow the required tool or MCP, then retry this request.',
+      variant: 'primary',
+      url: '/agents'
+    }
+  ];
+
+  if (target.serverName) {
+    actions.push({
+      type: 'open_url',
+      label: 'Open MCP Settings',
+      description: 'Confirm the required MCP connector is installed and available.',
+      variant: 'secondary',
+      url: '/mcp',
+      server_name: target.serverName
+    });
+  }
+
+  return {
+    version: 1,
+    title,
+    summary,
+    reason_code: 'provider_permission_denied',
+    recommended_surface: 'modal',
+    retry_context: {
+      supported: false,
+      strategy: 'repeat_request'
+    },
+    steps: [
+      {
+        id: 'external-tool-permission',
+        type: 'tool_permission',
+        display_name: target.displayName || 'Required tool',
+        summary,
+        risk_level: 'medium',
+        actions
+      }
+    ]
+  };
+}
+
+function looksLikePermissionDeniedDependencyText(lower) {
+  return (
+    lower.includes('denied permission') ||
+    lower.includes('permission mode') ||
+    lower.includes('permission settings') ||
+    lower.includes('permissions settings') ||
+    lower.includes("isn't enabled in the current permission mode") ||
+    lower.includes('is not enabled in the current permission mode') ||
+    lower.includes('enable the mcp__') ||
+    lower.includes('enable the `mcp__') ||
+    lower.includes("enable the 'mcp__") ||
+    lower.includes('enable the "mcp__')
+  ) && (lower.includes('tool') || lower.includes('mcp') || lower.includes('reaper'));
+}
+
+function inferDependencyResolutionTarget(responseText) {
+  const lower = responseText.toLowerCase();
+  if (lower.includes('mcp__ori-reaper') || lower.includes('ori-reaper') || lower.includes('reaper')) {
+    return { displayName: 'REAPER MCP tool', serverName: 'ori-reaper' };
+  }
+
+  const match = lower.match(/mcp__([a-z0-9._-]+)/);
+  if (match && match[1]) {
+    const serverName = String(match[1]).trim();
+    const displayName = humanizeDependencyResolutionServerName(serverName);
+    return {
+      displayName: displayName ? `${displayName} MCP tool` : 'MCP tool',
+      serverName
+    };
+  }
+
+  if (lower.includes('mcp tool')) {
+    return { displayName: 'MCP tool', serverName: '' };
+  }
+
+  return { displayName: 'Required tool', serverName: '' };
+}
+
+function humanizeDependencyResolutionServerName(serverName) {
+  const cleaned = String(serverName || '')
+    .replace(/^mcp__/, '')
+    .replace(/^ori-/, '')
+    .trim();
+  if (!cleaned) return '';
+  if (cleaned.toLowerCase() === 'reaper') return 'REAPER';
+  return cleaned
+    .split(/[-_.]+/)
+    .filter(Boolean)
+    .map((part) => part.length <= 3 ? part.toUpperCase() : `${part.charAt(0).toUpperCase()}${part.slice(1)}`)
+    .join(' ');
+}
+
+function ensureDependencyResolutionModal() {
+  if (dependencyResolutionModalState?.modalEl) {
+    return dependencyResolutionModalState;
+  }
+
+  const modalEl = document.createElement('div');
+  modalEl.className = 'modal fade';
+  modalEl.id = 'dependencyResolutionModal';
+  modalEl.tabIndex = -1;
+  modalEl.setAttribute('aria-hidden', 'true');
+
+  modalEl.innerHTML = `
+    <div class="modal-dialog modal-lg modal-dialog-scrollable">
+      <div class="modal-content" style="background: var(--bg-primary); border: 1px solid var(--border-color);">
+        <div class="modal-header" style="border-bottom: 1px solid var(--border-color);">
+          <div>
+            <div style="font-size: 12px; color: var(--text-muted); letter-spacing: 0.06em; text-transform: uppercase;">Dependency resolution</div>
+            <h5 class="modal-title" id="dependencyResolutionTitle" style="color: var(--text-primary); margin-top: 4px;"></h5>
+          </div>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close" style="filter: invert(1);"></button>
+        </div>
+        <div class="modal-body">
+          <p id="dependencyResolutionSummary" style="color: var(--text-secondary); margin-bottom: 1rem;"></p>
+          <div id="dependencyResolutionSteps" class="d-flex flex-column gap-3"></div>
+        </div>
+      </div>
+    </div>
+  `;
+
+  document.body.appendChild(modalEl);
+
+  dependencyResolutionModalState = {
+    modalEl,
+    titleEl: modalEl.querySelector('#dependencyResolutionTitle'),
+    summaryEl: modalEl.querySelector('#dependencyResolutionSummary'),
+    stepsEl: modalEl.querySelector('#dependencyResolutionSteps')
+  };
+
+  return dependencyResolutionModalState;
+}
+
+function hideDependencyResolutionModal() {
+  if (!dependencyResolutionModalState?.modalEl || !window.bootstrap) return;
+  const modal = typeof bootstrap.Modal.getOrCreateInstance === 'function'
+    ? bootstrap.Modal.getOrCreateInstance(dependencyResolutionModalState.modalEl)
+    : bootstrap.Modal.getInstance(dependencyResolutionModalState.modalEl);
+  modal?.hide();
+}
+
+function createDependencyActionButton(action, context) {
+  const button = document.createElement('button');
+  button.type = 'button';
+  const variant = String(action?.variant || 'secondary').trim().toLowerCase();
+  button.className = `btn btn-sm ${variant === 'primary' ? 'btn-primary' : variant === 'danger' ? 'btn-danger' : 'btn-outline-secondary'}`;
+  button.textContent = String(action?.label || 'Continue').trim() || 'Continue';
+  button.addEventListener('click', async () => {
+    const originalLabel = button.innerHTML;
+    button.disabled = true;
+    button.innerHTML = '<span class="spinner-border spinner-border-sm me-2" role="status"></span>Working...';
+    try {
+      await handleDependencyResolutionAction(action, context);
+    } catch (error) {
+      appLog.error('Dependency resolution action failed:', error);
+      if (window.Toast) {
+        Toast.error(error.message || 'Failed to resolve dependency');
+      }
+      button.innerHTML = originalLabel;
+      button.disabled = false;
+    }
+  });
+  return button;
+}
+
+function renderDependencyResolutionModal(resolution, payload, originalMessage, isSlashCommand, options = {}) {
+  const state = ensureDependencyResolutionModal();
+  if (!state || !window.bootstrap) return false;
+  const context = {
+    payload,
+    originalMessage,
+    isSlashCommand,
+    retry: typeof options.retry === 'function' ? options.retry : null
+  };
+
+  state.titleEl.textContent = resolution.title;
+  state.summaryEl.textContent = resolution.summary || 'This request needs setup before it can continue.';
+  state.stepsEl.innerHTML = '';
+
+  resolution.steps.forEach((step) => {
+    const card = document.createElement('section');
+    card.style.border = '1px solid var(--border-color)';
+    card.style.borderRadius = '14px';
+    card.style.padding = '0.9rem';
+    card.style.background = 'var(--bg-secondary)';
+
+    const heading = document.createElement('div');
+    heading.style.display = 'flex';
+    heading.style.justifyContent = 'space-between';
+    heading.style.alignItems = 'center';
+    heading.style.gap = '12px';
+
+    const titleWrap = document.createElement('div');
+    const title = document.createElement('div');
+    title.style.color = 'var(--text-primary)';
+    title.style.fontWeight = '600';
+    title.textContent = String(step.display_name || step.type || 'Dependency').trim();
+    titleWrap.appendChild(title);
+
+    const summary = document.createElement('div');
+    summary.style.color = 'var(--text-secondary)';
+    summary.style.fontSize = '0.92rem';
+    summary.style.marginTop = '4px';
+    summary.textContent = String(step.summary || '').trim();
+    titleWrap.appendChild(summary);
+
+    heading.appendChild(titleWrap);
+
+    if (step.risk_level) {
+      const risk = document.createElement('span');
+      risk.className = 'badge';
+      risk.style.background = step.risk_level === 'high' ? 'rgba(220, 53, 69, 0.18)' : 'rgba(13, 110, 253, 0.14)';
+      risk.style.color = step.risk_level === 'high' ? '#ffb3bd' : '#9ec5fe';
+      risk.textContent = `${String(step.risk_level).trim()} risk`;
+      heading.appendChild(risk);
+    }
+
+    card.appendChild(heading);
+
+    const actionsWrap = document.createElement('div');
+    actionsWrap.style.display = 'flex';
+    actionsWrap.style.flexWrap = 'wrap';
+    actionsWrap.style.gap = '8px';
+    actionsWrap.style.marginTop = '12px';
+
+    const actions = Array.isArray(step.actions) ? step.actions : [];
+    actions.forEach((action) => {
+      actionsWrap.appendChild(createDependencyActionButton(action, context));
+    });
+
+    card.appendChild(actionsWrap);
+    state.stepsEl.appendChild(card);
+  });
+
+  const modal = typeof bootstrap.Modal.getOrCreateInstance === 'function'
+    ? bootstrap.Modal.getOrCreateInstance(state.modalEl)
+    : (bootstrap.Modal.getInstance(state.modalEl) || new bootstrap.Modal(state.modalEl));
+  modal.show();
+  return true;
+}
+
+async function retryDependencyResolutionRequest(payload, originalMessage, isSlashCommand) {
+  const requestBody = payload?._requestBody ? { ...payload._requestBody } : { question: originalMessage };
+  const headers = payload?._requestHeaders ? { ...payload._requestHeaders } : { 'Content-Type': 'application/json' };
+
+  if (chatStateMachine) {
+    chatStateMachine.send();
+  }
+  updateSendButton();
+
+  try {
+    const response = await fetch('/api/chat', {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(requestBody),
+      signal: chatStateMachine ? chatStateMachine.getSignal() : undefined
+    });
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+    }
+
+    const data = await response.json();
+    data._requestBody = { ...requestBody };
+    data._requestHeaders = { ...headers };
+    updatePlannerIndicator(data?.planner_decision);
+    await handleChatResponsePayload(data, originalMessage, isSlashCommand);
+  } finally {
+    if (chatStateMachine) {
+      chatStateMachine.complete();
+    }
+    updateSendButton();
+  }
+}
+
+async function handleDependencyResolutionAction(action, context) {
+  const actionType = String(action?.type || '').trim();
+  if (!actionType) {
+    throw new Error('Missing dependency action type');
+  }
+
+  if (actionType === 'open_url') {
+    const url = String(action?.url || '').trim();
+    if (!url) throw new Error('Missing URL for dependency action');
+    hideDependencyResolutionModal();
+    window.open(url, '_blank', 'noopener');
+    if (window.Toast) {
+      Toast.info('Complete setup, then retry your request.');
+    }
+    return;
+  }
+
+  if (actionType === 'workspace_enable_mcp_binding' || actionType === 'suppress_dependency_prompt') {
+    const workspaceId = String(action?.workspace_id || '').trim();
+    if (!workspaceId) {
+      throw new Error('Dependency action requires a workspace');
+    }
+
+    const response = await fetch(`/api/workspaces/${encodeURIComponent(workspaceId)}/dependency-actions`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        type: actionType,
+        server_name: action?.server_name || '',
+        skill_name: action?.skill_name || '',
+        dependency_type: action?.dependency_type || '',
+        preference_key: action?.preference_key || ''
+      })
+    });
+    if (!response.ok) {
+      const text = await response.text();
+      throw new Error(text || 'Failed to resolve dependency');
+    }
+
+    const result = await response.json();
+    hideDependencyResolutionModal();
+    if (window.Toast) {
+      Toast.success(actionType === 'suppress_dependency_prompt' ? 'Prompt preference saved' : 'Dependency resolved');
+    }
+
+    if (action?.auto_retry && result?.retry_ready) {
+      if (typeof context?.retry === 'function') {
+        await context.retry(action, result, context);
+      } else {
+        await retryDependencyResolutionRequest(context?.payload, context?.originalMessage, context?.isSlashCommand);
+      }
+    }
+    return;
+  }
+
+  throw new Error(`Unsupported dependency action: ${actionType}`);
+}
+
 async function executeApprovedActionPlan(planId) {
   const context = pendingActionPlanContexts.get(planId);
   if (!context) {
@@ -1625,6 +1997,7 @@ async function executeApprovedActionPlan(planId) {
 async function handleChatResponsePayload(data, trimmedMessage, isSlashCommand) {
   const routeMeta = normalizeRouteMetadata(data);
   const specialistHandoff = normalizeSpecialistHandoff(data);
+  const dependencyResolution = normalizeDependencyResolution(data);
 
   if (specialistHandoff && specialistHandoff.matchedAgent && !specialistHandoff.requiresCreation) {
     try {
@@ -1703,6 +2076,19 @@ async function handleChatResponsePayload(data, trimmedMessage, isSlashCommand) {
     EventBus.emit('chat:message:sent', { message: trimmedMessage, isSlashCommand });
     renderPlannerPlanSummary(data);
     await handleDynamicAgentApprovals(data);
+    if (dependencyResolution) {
+      renderDependencyResolutionModal(dependencyResolution, data, trimmedMessage, isSlashCommand);
+    }
+    return;
+  }
+
+  if (dependencyResolution) {
+    addMessageToChat(dependencyResolution.summary || 'This request needs setup before it can continue.', false, false, false, isSlashCommand, routeMeta);
+    renderDependencyResolutionModal(dependencyResolution, data, trimmedMessage, isSlashCommand);
+    if (window.sessionManager && window.sessionManager.onMessageSent) {
+      window.sessionManager.onMessageSent();
+    }
+    EventBus.emit('chat:message:sent', { message: trimmedMessage, isSlashCommand });
     return;
   }
 

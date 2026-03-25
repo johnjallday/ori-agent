@@ -988,9 +988,9 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if !found {
-			orihttp.WriteJSON(w, map[string]any{
+			writeJSONResponse(w, attachDependencyResolution(map[string]any{
 				"response": fmt.Sprintf("❌ Skill '%s' not found. Use /skills to list available skills.", name),
-			})
+			}, buildSkillDependencyResolution(name, dependencyTypeSkillMissing)))
 			return
 		}
 		if len(skill.ValidationErrors) > 0 {
@@ -1000,15 +1000,15 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if !skill.Enabled {
-			orihttp.WriteJSON(w, map[string]any{
+			writeJSONResponse(w, attachDependencyResolution(map[string]any{
 				"response": fmt.Sprintf("❌ Skill '%s' is disabled.", skill.Name),
-			})
+			}, buildSkillDependencyResolution(skill.Name, dependencyTypeSkillDisabled)))
 			return
 		}
 		if skill.HasScripts && !skill.Trusted {
-			orihttp.WriteJSON(w, map[string]any{
+			writeJSONResponse(w, attachDependencyResolution(map[string]any{
 				"response": fmt.Sprintf("❌ Skill '%s' requires trust before it can run.", skill.Name),
-			})
+			}, buildSkillDependencyResolution(skill.Name, dependencyTypeSkillTrustRequired)))
 			return
 		}
 		invokedSkill = &skillInvocation{Skill: skill, Args: args, Explicit: true}
@@ -1037,15 +1037,15 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 					return
 				}
 				if !skill.Enabled {
-					orihttp.WriteJSON(w, map[string]any{
+					writeJSONResponse(w, attachDependencyResolution(map[string]any{
 						"response": fmt.Sprintf("❌ Skill '%s' is disabled.", skill.Name),
-					})
+					}, buildSkillDependencyResolution(skill.Name, dependencyTypeSkillDisabled)))
 					return
 				}
 				if skill.HasScripts && !skill.Trusted {
-					orihttp.WriteJSON(w, map[string]any{
+					writeJSONResponse(w, attachDependencyResolution(map[string]any{
 						"response": fmt.Sprintf("❌ Skill '%s' requires trust before it can run.", skill.Name),
-					})
+					}, buildSkillDependencyResolution(skill.Name, dependencyTypeSkillTrustRequired)))
 					return
 				}
 				invokedSkill = &skillInvocation{Skill: skill, Args: args, Explicit: false}
@@ -1210,21 +1210,46 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 		ag = updatedAgent
 	}
 	if preflight != nil && strings.TrimSpace(preflight.userMessage) != "" {
-		writeJSONResponse(w, attachRouteMetadata(map[string]any{
+		payload := attachRouteMetadata(map[string]any{
 			"response": preflight.userMessage,
 		}, chatRouteMetadata{
 			Mode:   routeModeAssistantChat,
 			Reason: "mcp preflight notice",
-		}))
+		})
+		writeJSONResponse(w, attachDependencyResolution(payload, preflight.dependencyResolution))
 		return
 	}
 
 	if invokedSkill != nil && len(invokedSkill.Skill.RequiredMCPServers) > 0 {
 		missing := missingMCPServers(ag.MCPServers, invokedSkill.Skill.RequiredMCPServers)
 		if len(missing) > 0 {
-			orihttp.WriteJSON(w, map[string]any{
+			primaryServer := missing[0]
+			preferenceKey := ""
+			workspaceID := strings.TrimSpace(normalizedRouteContext.WorkspaceID)
+			if workspaceID != "" {
+				preferenceKey = workspace.DependencyPreferenceKey(dependencyTypeWorkspaceMCP, primaryServer)
+			}
+			writeJSONResponse(w, attachDependencyResolution(map[string]any{
 				"response": fmt.Sprintf("❌ Skill '%s' requires MCP connectors: %s. Bind them from the target workspace.", invokedSkill.Skill.Name, strings.Join(missing, ", ")),
-			})
+			}, &dependencyResolution{
+				Version:            1,
+				Title:              "Required MCP connectors are not enabled",
+				Summary:            fmt.Sprintf("Enable the required connector for skill \"%s\" before retrying.", invokedSkill.Skill.Name),
+				ReasonCode:         "skill_required_mcp_missing",
+				RecommendedSurface: dependencyResolutionSurfaceModal,
+				RetryContext:       buildDefaultRetryContext(workspaceID != ""),
+				Steps: []dependencyResolutionStep{
+					{
+						ID:           "skill-required-mcp",
+						Type:         dependencyTypeWorkspaceMCP,
+						DisplayName:  primaryServer,
+						Summary:      fmt.Sprintf("Enable %s in the current workspace to run \"%s\".", primaryServer, invokedSkill.Skill.Name),
+						RiskLevel:    "low",
+						Suppressible: workspaceID != "",
+						Actions:      buildSkillRequiredMCPActions(workspaceID, primaryServer, preferenceKey),
+					},
+				},
+			}))
 			return
 		}
 	}
@@ -1453,7 +1478,7 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 	// Check if this is a Claude Code provider - route to Claude Code handler
 	if providerName == "claude_code" && h.llmFactory != nil {
 		runtimeSystemPrompt := h.buildRuntimeSystemPromptForToolCapability(ctx, normalizedRouteContext, false)
-		h.handleClaudeCodeChat(w, r, ag, q, current, base, llmImages, plannerDecision, runtimeSystemPrompt)
+		h.handleClaudeCodeChat(w, r, ag, q, current, base, llmImages, plannerDecision, runtimeSystemPrompt, normalizedRouteContext)
 		return
 	}
 
@@ -1476,7 +1501,7 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 
 	if providerName == "codex" && h.llmFactory != nil {
 		runtimeSystemPrompt := h.buildRuntimeSystemPromptForToolCapability(ctx, normalizedRouteContext, false)
-		h.handleCodexChat(w, r, ag, q, current, base, llmImages, plannerDecision, runtimeSystemPrompt)
+		h.handleCodexChat(w, r, ag, q, current, base, llmImages, plannerDecision, runtimeSystemPrompt, normalizedRouteContext)
 		return
 	}
 

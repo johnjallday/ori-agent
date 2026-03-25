@@ -5143,6 +5143,13 @@
           : 'The workspace manager replied inline. Reply in the box below or open chat.'
       );
     }
+    renderHomeAssistantDependencyResolution(
+      assistantSessionResult.responseData,
+      prompt,
+      routeContext,
+      intent,
+      options
+    );
     renderHomeAssistantActions([
       {
         label: 'Open Chat',
@@ -5155,6 +5162,29 @@
         onClick: function () { focusHomeAssistantInput(); }
       }
     ]);
+  }
+
+  function normalizeHomeAssistantDependencyResolution(data) {
+    if (typeof normalizeDependencyResolution !== 'function') return null;
+    try {
+      return normalizeDependencyResolution(data);
+    } catch (error) {
+      dashLog.debug('Failed to normalize dependency resolution payload', { error: error && error.message || error });
+      return null;
+    }
+  }
+
+  function renderHomeAssistantDependencyResolution(data, prompt, routeContext, intent, options) {
+    var resolution = normalizeHomeAssistantDependencyResolution(data);
+    if (!resolution || typeof renderDependencyResolutionModal !== 'function') {
+      return false;
+    }
+
+    return renderDependencyResolutionModal(resolution, data, prompt, false, {
+      retry: async function () {
+        await openWorkspaceAssistantForPrompt(prompt, routeContext, intent, options);
+      }
+    });
   }
 
   async function routePromptWithBackend(prompt, routeContext) {
