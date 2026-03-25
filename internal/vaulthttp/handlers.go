@@ -33,6 +33,10 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	switch {
 	case path == "/status":
 		h.handleStatus(w, r)
+	case path == "/vaults" || path == "/vaults/":
+		h.handleVaults(w, r)
+	case strings.HasPrefix(path, "/vaults/"):
+		h.handleVault(w, r, strings.TrimPrefix(path, "/vaults/"))
 	case path == "/unlock":
 		h.handleUnlock(w, r)
 	case path == "/lock":
@@ -57,12 +61,89 @@ func (h *Handler) handleStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	status, err := h.store.Status(r.Context())
+	status, err := h.store.Status(r.Context(), vaultIDFromRequest(r))
 	if err != nil {
 		respondVaultError(w, err)
 		return
 	}
 	orihttp.Success(w, status)
+}
+
+func (h *Handler) handleVaults(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodGet:
+		vaults, err := h.store.ListVaults(r.Context())
+		if err != nil {
+			respondVaultError(w, err)
+			return
+		}
+		orihttp.Success(w, map[string]any{
+			"vaults": vaults,
+			"count":  len(vaults),
+		})
+	case http.MethodPost:
+		var req struct {
+			Name        string `json:"name"`
+			Description string `json:"description,omitempty"`
+		}
+		if !orihttp.ParseJSONBody(w, r, &req) {
+			return
+		}
+
+		item := vault.Vault{
+			Name:        req.Name,
+			Description: req.Description,
+		}
+		if err := h.store.CreateVault(r.Context(), &item); err != nil {
+			respondVaultError(w, err)
+			return
+		}
+		orihttp.Created(w, map[string]any{
+			"success": true,
+			"vault":   item,
+		})
+	default:
+		_ = orihttp.RespondMethodNotAllowed(w)
+	}
+}
+
+func (h *Handler) handleVault(w http.ResponseWriter, r *http.Request, vaultID string) {
+	vaultID = strings.TrimSpace(vaultID)
+	if vaultID == "" || strings.Contains(vaultID, "/") {
+		_ = orihttp.RespondBadRequest(w, "vault id is required")
+		return
+	}
+
+	switch r.Method {
+	case http.MethodPatch, http.MethodPut:
+		var req struct {
+			Name        string `json:"name"`
+			Description string `json:"description,omitempty"`
+		}
+		if !orihttp.ParseJSONBody(w, r, &req) {
+			return
+		}
+
+		updatedVault, err := h.store.UpdateVault(r.Context(), vaultID, req.Name, req.Description)
+		if err != nil {
+			respondVaultError(w, err)
+			return
+		}
+		orihttp.Success(w, map[string]any{
+			"success": true,
+			"vault":   updatedVault,
+		})
+	case http.MethodDelete:
+		if err := h.store.DeleteVault(r.Context(), vaultID); err != nil {
+			respondVaultError(w, err)
+			return
+		}
+		orihttp.Success(w, map[string]any{
+			"success": true,
+		})
+	default:
+		_ = orihttp.RespondMethodNotAllowed(w)
+	}
 }
 
 func (h *Handler) handleUnlock(w http.ResponseWriter, r *http.Request) {
@@ -82,7 +163,7 @@ func (h *Handler) handleUnlock(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	status, err := h.store.Status(r.Context())
+	status, err := h.store.Status(r.Context(), vaultIDFromRequest(r))
 	if err != nil {
 		respondVaultError(w, err)
 		return
@@ -100,7 +181,7 @@ func (h *Handler) handleLock(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	status, err := h.store.Status(r.Context())
+	status, err := h.store.Status(r.Context(), vaultIDFromRequest(r))
 	if err != nil {
 		respondVaultError(w, err)
 		return
@@ -112,6 +193,7 @@ func (h *Handler) handleRecords(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodGet:
 		filter := vault.RecordFilter{
+			VaultID:     vaultIDFromRequest(r),
 			WorkspaceID: firstNonEmpty(r.URL.Query().Get("workspace_id"), r.URL.Query().Get("studio_id")),
 			Type:        r.URL.Query().Get("type"),
 		}
@@ -128,6 +210,7 @@ func (h *Handler) handleRecords(w http.ResponseWriter, r *http.Request) {
 	case http.MethodPost:
 		var req struct {
 			Type            string          `json:"type"`
+			VaultID         string          `json:"vault_id,omitempty"`
 			WorkspaceID     string          `json:"workspace_id,omitempty"`
 			Label           string          `json:"label"`
 			Tags            []string        `json:"tags,omitempty"`
@@ -142,6 +225,7 @@ func (h *Handler) handleRecords(w http.ResponseWriter, r *http.Request) {
 		}
 
 		record := &vault.Record{
+			VaultID:         vaultIDFromRequest(r, req.VaultID),
 			Type:            req.Type,
 			WorkspaceID:     firstNonEmpty(req.WorkspaceID, r.URL.Query().Get("workspace_id"), r.URL.Query().Get("studio_id")),
 			Label:           req.Label,
@@ -187,6 +271,7 @@ func (h *Handler) handleRecord(w http.ResponseWriter, r *http.Request, id string
 			Source          *string          `json:"source,omitempty"`
 			RetentionPolicy *string          `json:"retention_policy,omitempty"`
 			Payload         *json.RawMessage `json:"payload,omitempty"`
+			VaultID         string           `json:"vault_id,omitempty"`
 			WorkspaceID     string           `json:"workspace_id,omitempty"`
 			ActorType       vault.ActorType  `json:"actor_type,omitempty"`
 			ActorID         string           `json:"actor_id,omitempty"`
@@ -235,8 +320,9 @@ func (h *Handler) handleRecord(w http.ResponseWriter, r *http.Request, id string
 func (h *Handler) handleGrants(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodGet:
+		vaultID := vaultIDFromRequest(r)
 		workspaceID := firstNonEmpty(r.URL.Query().Get("workspace_id"), r.URL.Query().Get("studio_id"))
-		grants, err := h.store.ListGrants(r.Context(), workspaceID)
+		grants, err := h.store.ListGrants(r.Context(), vaultID, workspaceID)
 		if err != nil {
 			respondVaultError(w, err)
 			return
@@ -250,6 +336,7 @@ func (h *Handler) handleGrants(w http.ResponseWriter, r *http.Request) {
 		if !orihttp.ParseJSONBody(w, r, &grant) {
 			return
 		}
+		grant.VaultID = vaultIDFromRequest(r, grant.VaultID)
 		grant.WorkspaceID = firstNonEmpty(grant.WorkspaceID, r.URL.Query().Get("workspace_id"), r.URL.Query().Get("studio_id"))
 		if err := h.store.CreateGrant(r.Context(), &grant); err != nil {
 			respondVaultError(w, err)
@@ -286,6 +373,7 @@ func (h *Handler) handleExport(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req struct {
+		VaultID       string `json:"vault_id,omitempty"`
 		WorkspaceID   string `json:"workspace_id,omitempty"`
 		StudioID      string `json:"studio_id,omitempty"`
 		VaultPassword string `json:"vault_password"`
@@ -300,6 +388,7 @@ func (h *Handler) handleExport(w http.ResponseWriter, r *http.Request) {
 	}
 
 	bundle, err := h.store.Export(r.Context(), vault.ExportRequest{
+		VaultID:     vaultIDFromRequest(r, req.VaultID),
 		WorkspaceID: firstNonEmpty(req.WorkspaceID, req.StudioID),
 		Password:    req.VaultPassword,
 	})
@@ -336,17 +425,24 @@ func firstNonEmpty(values ...string) string {
 	return ""
 }
 
+func vaultIDFromRequest(r *http.Request, values ...string) string {
+	values = append(values, r.URL.Query().Get("vault_id"))
+	return firstNonEmpty(values...)
+}
+
 func respondVaultError(w http.ResponseWriter, err error) {
 	switch {
 	case err == nil:
 		return
-	case errors.Is(err, vault.ErrRecordNotFound), errors.Is(err, vault.ErrGrantNotFound):
+	case errors.Is(err, vault.ErrVaultNotFound), errors.Is(err, vault.ErrRecordNotFound), errors.Is(err, vault.ErrGrantNotFound):
 		_ = orihttp.RespondError(w, http.StatusNotFound, err.Error())
+	case errors.Is(err, vault.ErrVaultAlreadyExists):
+		_ = orihttp.RespondError(w, http.StatusConflict, err.Error())
 	case errors.Is(err, vault.ErrPermissionDenied):
 		_ = orihttp.RespondError(w, http.StatusForbidden, err.Error())
 	case errors.Is(err, vault.ErrVaultLocked):
 		_ = orihttp.RespondError(w, http.StatusLocked, err.Error())
-	case errors.Is(err, vault.ErrVaultPasswordRequired), errors.Is(err, vault.ErrExportPasswordEmpty):
+	case errors.Is(err, vault.ErrVaultRequired), errors.Is(err, vault.ErrVaultNameRequired), errors.Is(err, vault.ErrVaultPasswordRequired), errors.Is(err, vault.ErrExportPasswordEmpty):
 		_ = orihttp.RespondError(w, http.StatusBadRequest, err.Error())
 	case errors.Is(err, vault.ErrVaultKeyUnavailable), errors.Is(err, vault.ErrMalformedRecord):
 		_ = orihttp.RespondError(w, http.StatusInternalServerError, err.Error())

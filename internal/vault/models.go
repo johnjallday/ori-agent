@@ -8,6 +8,10 @@ import (
 )
 
 var (
+	ErrVaultRequired         = errors.New("vault: vault selection is required")
+	ErrVaultNotFound         = errors.New("vault: vault not found")
+	ErrVaultAlreadyExists    = errors.New("vault: vault already exists")
+	ErrVaultNameRequired     = errors.New("vault: vault name is required")
 	ErrRecordNotFound        = errors.New("vault: record not found")
 	ErrGrantNotFound         = errors.New("vault: grant not found")
 	ErrPermissionDenied      = errors.New("vault: permission denied")
@@ -17,6 +21,8 @@ var (
 	ErrVaultPasswordRequired = errors.New("vault: passphrase is required")
 	ErrExportPasswordEmpty   = errors.New("vault: export password is required")
 )
+
+const DefaultVaultID = "default"
 
 type ActorType string
 
@@ -43,8 +49,19 @@ type AccessContext struct {
 	ActorID     string    `json:"actor_id,omitempty"`
 }
 
+type Vault struct {
+	ID          string    `json:"id"`
+	Name        string    `json:"name"`
+	Description string    `json:"description,omitempty"`
+	IsDefault   bool      `json:"is_default"`
+	RecordCount int       `json:"record_count"`
+	CreatedAt   time.Time `json:"created_at"`
+	UpdatedAt   time.Time `json:"updated_at"`
+}
+
 type Record struct {
 	ID              string          `json:"id"`
+	VaultID         string          `json:"vault_id,omitempty"`
 	Type            string          `json:"type"`
 	WorkspaceID     string          `json:"workspace_id,omitempty"`
 	Label           string          `json:"label"`
@@ -66,6 +83,7 @@ type RecordUpdate struct {
 
 type RecordListItem struct {
 	ID              string    `json:"id"`
+	VaultID         string    `json:"vault_id,omitempty"`
 	Type            string    `json:"type"`
 	WorkspaceID     string    `json:"workspace_id,omitempty"`
 	Label           string    `json:"label"`
@@ -77,12 +95,14 @@ type RecordListItem struct {
 }
 
 type RecordFilter struct {
+	VaultID     string
 	WorkspaceID string
 	Type        string
 }
 
 type Grant struct {
 	ID          string     `json:"id"`
+	VaultID     string     `json:"vault_id,omitempty"`
 	WorkspaceID string     `json:"workspace_id"`
 	ActorType   ActorType  `json:"actor_type"`
 	ActorID     string     `json:"actor_id"`
@@ -94,6 +114,7 @@ type Grant struct {
 
 type AuditEvent struct {
 	ID          string    `json:"id"`
+	VaultID     string    `json:"vault_id,omitempty"`
 	WorkspaceID string    `json:"workspace_id,omitempty"`
 	ActorType   ActorType `json:"actor_type,omitempty"`
 	ActorID     string    `json:"actor_id,omitempty"`
@@ -106,6 +127,8 @@ type AuditEvent struct {
 }
 
 type VaultStatus struct {
+	VaultID            string      `json:"vault_id,omitempty"`
+	VaultName          string      `json:"vault_name,omitempty"`
 	Available          bool        `json:"available"`
 	Locked             bool        `json:"locked"`
 	Writable           bool        `json:"writable"`
@@ -116,12 +139,15 @@ type VaultStatus struct {
 }
 
 type ExportRequest struct {
+	VaultID     string
 	WorkspaceID string
 	Password    string
 }
 
 type ExportBundle struct {
 	Version     int       `json:"version"`
+	VaultID     string    `json:"vault_id,omitempty"`
+	VaultName   string    `json:"vault_name,omitempty"`
 	WorkspaceID string    `json:"workspace_id,omitempty"`
 	Salt        string    `json:"salt"`
 	Nonce       string    `json:"nonce"`
@@ -157,6 +183,10 @@ func normalizeActorType(actorType ActorType) ActorType {
 	default:
 		return ActorType(strings.ToLower(strings.TrimSpace(string(actorType))))
 	}
+}
+
+func normalizeVaultID(vaultID string) string {
+	return strings.TrimSpace(vaultID)
 }
 
 func normalizeCapability(cap Capability) Capability {

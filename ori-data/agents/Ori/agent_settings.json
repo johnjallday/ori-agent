@@ -7,15 +7,14 @@
     "system_prompt": "You are Ori's system orchestrator assistant. Handle simple utility requests directly and delegate complex work to specialized agents when appropriate. Keep responses concise and actionable.",
     "provider": "claude_code"
   },
-  "Plugins": {},
   "status": "active",
   "statistics": {
     "message_count": 0,
     "token_usage": 0,
     "total_cost": 0,
-    "last_active": "2026-03-07T09:57:02.033884+09:00",
-    "created_at": "2026-03-07T09:57:02.033884+09:00",
-    "updated_at": "2026-03-07T09:57:02.033884+09:00"
+    "last_active": "2026-03-25T09:33:45.686108+09:00",
+    "created_at": "2026-03-25T09:33:45.686108+09:00",
+    "updated_at": "2026-03-25T09:33:45.686108+09:00"
   },
   "metadata": {
     "description": "System orchestrator for unmatched everyday requests. Route to specialists when deeper context or tools are needed.",
@@ -34,6 +33,6 @@
     "experience": 0,
     "stage": "spark",
     "last_evolved_at": "0001-01-01T00:00:00Z",
-    "updated_at": "2026-03-07T09:57:02.033884+09:00"
+    "updated_at": "2026-03-25T09:33:45.686109+09:00"
   }
 }

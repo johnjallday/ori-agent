@@ -10,7 +10,7 @@ import (
 
 // schemaVersion is the current database schema version.
 // Increment this when adding new migrations.
-const schemaVersion = 3
+const schemaVersion = 5
 
 // migrate runs all pending migrations to bring the database up to the current schema.
 func (db *DB) migrate(ctx context.Context) error {
@@ -71,6 +71,10 @@ func (db *DB) runMigration(ctx context.Context, version int) error {
 		return db.migration002WorkspaceMCPState(ctx)
 	case 3:
 		return db.migration003VaultTables(ctx)
+	case 4:
+		return db.migration004NamedVaults(ctx)
+	case 5:
+		return db.migration005RemoveEmptyDefaultVault(ctx)
 	default:
 		return fmt.Errorf("unknown migration version: %d", version)
 	}
@@ -499,6 +503,103 @@ func (db *DB) migration003VaultTables(ctx context.Context) error {
 		if _, err := tx.ExecContext(ctx, stmt); err != nil {
 			return fmt.Errorf("failed to create vault index: %w", err)
 		}
+	}
+
+	return tx.Commit()
+}
+
+func (db *DB) migration004NamedVaults(ctx context.Context) error {
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("failed to begin transaction: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	if _, err := tx.ExecContext(ctx, `
+		CREATE TABLE IF NOT EXISTS vaults (
+			id TEXT PRIMARY KEY,
+			name TEXT NOT NULL,
+			description TEXT DEFAULT '',
+			created_at DATETIME NOT NULL,
+			updated_at DATETIME NOT NULL
+		)
+	`); err != nil {
+		return fmt.Errorf("failed to create vaults table: %w", err)
+	}
+
+	if _, err := tx.ExecContext(ctx, `
+		ALTER TABLE vault_records ADD COLUMN vault_id TEXT NOT NULL DEFAULT 'default'
+	`); err != nil && !isDuplicateColumnError(err) {
+		return fmt.Errorf("failed to add vault_id to vault_records: %w", err)
+	}
+
+	if _, err := tx.ExecContext(ctx, `
+		ALTER TABLE vault_grants ADD COLUMN vault_id TEXT NOT NULL DEFAULT 'default'
+	`); err != nil && !isDuplicateColumnError(err) {
+		return fmt.Errorf("failed to add vault_id to vault_grants: %w", err)
+	}
+
+	if _, err := tx.ExecContext(ctx, `
+		ALTER TABLE vault_audit_events ADD COLUMN vault_id TEXT NOT NULL DEFAULT 'default'
+	`); err != nil && !isDuplicateColumnError(err) {
+		return fmt.Errorf("failed to add vault_id to vault_audit_events: %w", err)
+	}
+
+	backfillStatements := []string{
+		`UPDATE vault_records SET vault_id = 'default' WHERE TRIM(COALESCE(vault_id, '')) = ''`,
+		`UPDATE vault_grants SET vault_id = 'default' WHERE TRIM(COALESCE(vault_id, '')) = ''`,
+		`UPDATE vault_audit_events SET vault_id = 'default' WHERE TRIM(COALESCE(vault_id, '')) = ''`,
+	}
+	for _, stmt := range backfillStatements {
+		if _, err := tx.ExecContext(ctx, stmt); err != nil {
+			return fmt.Errorf("failed to backfill named vault data: %w", err)
+		}
+	}
+
+	if _, err := tx.ExecContext(ctx, `
+		INSERT OR IGNORE INTO vaults (id, name, description, created_at, updated_at)
+		SELECT 'default', 'Private Vault', 'Default encrypted vault', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+		WHERE EXISTS (SELECT 1 FROM vault_records WHERE vault_id = 'default' LIMIT 1)
+		   OR EXISTS (SELECT 1 FROM vault_grants WHERE vault_id = 'default' LIMIT 1)
+		   OR EXISTS (SELECT 1 FROM vault_audit_events WHERE vault_id = 'default' LIMIT 1)
+	`); err != nil {
+		return fmt.Errorf("failed to seed legacy default vault: %w", err)
+	}
+
+	indexStatements := []string{
+		"DROP INDEX IF EXISTS idx_vault_grants_scope",
+		"CREATE UNIQUE INDEX IF NOT EXISTS idx_vaults_name ON vaults(name COLLATE NOCASE)",
+		"CREATE INDEX IF NOT EXISTS idx_vaults_updated_at ON vaults(updated_at DESC)",
+		"CREATE INDEX IF NOT EXISTS idx_vault_records_vault_id ON vault_records(vault_id)",
+		"CREATE INDEX IF NOT EXISTS idx_vault_records_vault_updated_at ON vault_records(vault_id, updated_at DESC)",
+		"CREATE UNIQUE INDEX IF NOT EXISTS idx_vault_grants_scope ON vault_grants(vault_id, workspace_id, actor_type, actor_id, capability, record_type)",
+		"CREATE INDEX IF NOT EXISTS idx_vault_grants_vault_id ON vault_grants(vault_id)",
+		"CREATE INDEX IF NOT EXISTS idx_vault_audit_vault_created_at ON vault_audit_events(vault_id, created_at DESC)",
+	}
+	for _, stmt := range indexStatements {
+		if _, err := tx.ExecContext(ctx, stmt); err != nil {
+			return fmt.Errorf("failed to update named vault index: %w", err)
+		}
+	}
+
+	return tx.Commit()
+}
+
+func (db *DB) migration005RemoveEmptyDefaultVault(ctx context.Context) error {
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("failed to begin transaction: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	if _, err := tx.ExecContext(ctx, `
+		DELETE FROM vaults
+		WHERE id = 'default'
+		  AND NOT EXISTS (SELECT 1 FROM vault_records WHERE vault_id = 'default')
+		  AND NOT EXISTS (SELECT 1 FROM vault_grants WHERE vault_id = 'default')
+		  AND NOT EXISTS (SELECT 1 FROM vault_audit_events WHERE vault_id = 'default')
+	`); err != nil {
+		return fmt.Errorf("failed to remove empty default vault: %w", err)
 	}
 
 	return tx.Commit()

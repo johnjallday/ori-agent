@@ -78,6 +78,7 @@ func (tr *TemplateRenderer) LoadTemplates() error {
 		"templates/components/task-modal.tmpl",
 		"templates/components/modals.tmpl",
 		"templates/components/navbar.tmpl",
+		"templates/components/vault-modal.tmpl",
 		"templates/components/file_dialog.tmpl",
 		"templates/components/studios/manage-agents-modal.tmpl",
 		"templates/components/workspaces/create-workspace-modal.tmpl",

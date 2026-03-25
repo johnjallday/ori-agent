@@ -1079,6 +1079,57 @@
               </div>
             </div>
 
+            <div class="settings-info-box mb-4">
+              <div class="settings-info-row" style="align-items: flex-start;">
+                <div>
+                  <span class="settings-info-label">Vault Spaces</span>
+                  <span class="settings-info-value">Choose or create a named vault</span>
+                </div>
+              </div>
+
+              <div class="settings-grid mt-3">
+                <div>
+                  <div class="settings-field">
+                    <label class="settings-label" for="vaultActiveVaultId">Active vault</label>
+                    <select id="vaultActiveVaultId" class="form-select settings-input">
+                      <option value="">Loading vaults...</option>
+                    </select>
+                  </div>
+                  <div id="vaultActiveVaultMeta" class="settings-help">Checking available vaults...</div>
+                </div>
+
+                <div>
+                  <h3 style="font-size: 1rem; font-weight: 600; color: var(--text-primary); margin-bottom: 1rem;">Manage Active Vault</h3>
+                  <div class="settings-field">
+                    <label class="settings-label" for="vaultEditVaultName">Vault name</label>
+                    <input id="vaultEditVaultName" type="text" class="form-control settings-input" placeholder="Private Vault">
+                  </div>
+                  <div class="settings-field">
+                    <label class="settings-label" for="vaultEditVaultDescription">Description</label>
+                    <input id="vaultEditVaultDescription" type="text" class="form-control settings-input" placeholder="What belongs in this vault">
+                  </div>
+                  <div class="settings-actions">
+                    <button id="vaultRenameVaultBtn" class="modern-btn modern-btn-secondary" type="button">Save Vault Details</button>
+                    <button id="vaultDeleteVaultBtn" class="btn btn-outline-danger" type="button">Delete Vault</button>
+                  </div>
+                  <span class="settings-help">Deleting a vault permanently removes its encrypted records, grants, and explorer view.</span>
+
+                  <h3 style="font-size: 1rem; font-weight: 600; color: var(--text-primary); margin: 1.5rem 0 1rem;">Create A New Vault</h3>
+                  <div class="settings-field">
+                    <label class="settings-label" for="vaultNewVaultName">New vault name</label>
+                    <input id="vaultNewVaultName" type="text" class="form-control settings-input" placeholder="Finance Vault, Travel Vault, Family Vault">
+                  </div>
+                  <div class="settings-field">
+                    <label class="settings-label" for="vaultNewVaultDescription">Description</label>
+                    <input id="vaultNewVaultDescription" type="text" class="form-control settings-input" placeholder="Optional note about what belongs in this vault">
+                  </div>
+                  <div class="settings-actions">
+                    <button id="vaultCreateVaultSpaceBtn" class="modern-btn modern-btn-secondary" type="button">Create Vault</button>
+                  </div>
+                </div>
+              </div>
+            </div>
+
             <div class="settings-field">
               <label class="settings-label" for="vaultUnlockPassword">Vault password</label>
               <div class="input-group">

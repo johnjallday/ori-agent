@@ -100,6 +100,7 @@ func TestMigrations(t *testing.T) {
 		"session_tags",
 		"sessions_fts",
 		"schema_migrations",
+		"vaults",
 		"vault_records",
 		"vault_grants",
 		"vault_audit_events",
@@ -149,6 +150,14 @@ func TestMigrations(t *testing.T) {
 		if !found {
 			t.Errorf("workspace column %s does not exist", name)
 		}
+	}
+
+	var vaultCount int
+	if err := db.QueryRowContext(ctx, "SELECT COUNT(*) FROM vaults").Scan(&vaultCount); err != nil {
+		t.Fatalf("Failed to count vaults: %v", err)
+	}
+	if vaultCount != 0 {
+		t.Errorf("expected no vaults in a fresh database, got %d", vaultCount)
 	}
 }
 

@@ -1516,6 +1516,8 @@ document.getElementById('systemDiagnosticsBtn')?.addEventListener('click', async
 
 // Private Vault Settings
 (function() {
+  const DEFAULT_VAULT_ID = '';
+  const VAULT_STORAGE_KEY = 'ori-selected-vault-id';
   const section = document.getElementById('private-vault');
   if (!section) {
     return;
@@ -1534,6 +1536,15 @@ document.getElementById('systemDiagnosticsBtn')?.addEventListener('click', async
   const refreshBtn = document.getElementById('vaultRefreshBtn');
   const toggleUnlockPasswordBtn = document.getElementById('toggleVaultUnlockPassword');
   const alertsEl = document.getElementById('vaultAlerts');
+  const activeVaultSelect = document.getElementById('vaultActiveVaultId');
+  const activeVaultMeta = document.getElementById('vaultActiveVaultMeta');
+  const editVaultNameInput = document.getElementById('vaultEditVaultName');
+  const editVaultDescriptionInput = document.getElementById('vaultEditVaultDescription');
+  const renameVaultBtn = document.getElementById('vaultRenameVaultBtn');
+  const deleteVaultBtn = document.getElementById('vaultDeleteVaultBtn');
+  const newVaultNameInput = document.getElementById('vaultNewVaultName');
+  const newVaultDescriptionInput = document.getElementById('vaultNewVaultDescription');
+  const createVaultSpaceBtn = document.getElementById('vaultCreateVaultSpaceBtn');
 
   const entryTypeInput = document.getElementById('vaultEntryType');
   const entryWorkspaceInput = document.getElementById('vaultEntryWorkspaceId');
@@ -1562,6 +1573,8 @@ document.getElementById('systemDiagnosticsBtn')?.addEventListener('click', async
   const exportBtn = document.getElementById('vaultExportBtn');
 
   let vaultStatus = null;
+  let vaults = [];
+  let selectedVaultID = DEFAULT_VAULT_ID;
   let records = [];
   let grants = [];
   let selectedRecord = null;
@@ -1589,6 +1602,56 @@ document.getElementById('systemDiagnosticsBtn')?.addEventListener('click', async
       .replaceAll('>', '&gt;')
       .replaceAll('"', '&quot;')
       .replaceAll("'", '&#39;');
+  }
+
+  function readStoredVaultID() {
+    try {
+      return String(window.localStorage.getItem(VAULT_STORAGE_KEY) || '').trim();
+    } catch (error) {
+      return '';
+    }
+  }
+
+  function writeStoredVaultID(vaultID) {
+    try {
+      if (vaultID) {
+        window.localStorage.setItem(VAULT_STORAGE_KEY, vaultID);
+      } else {
+        window.localStorage.removeItem(VAULT_STORAGE_KEY);
+      }
+    } catch (error) {
+      console.error('Failed to persist selected vault:', error);
+    }
+  }
+
+  function currentVaultID() {
+    return String(selectedVaultID || '').trim();
+  }
+
+  function currentVault() {
+    return vaults.find((item) => item.id === currentVaultID()) || null;
+  }
+
+  function vaultRecordCount(vaultItem) {
+    const count = Number(vaultItem?.record_count || 0);
+    return Number.isFinite(count) ? count : 0;
+  }
+
+  function vaultDisplayLabel(vaultItem) {
+    if (!vaultItem) {
+      return 'Vault';
+    }
+    return `${String(vaultItem.name || 'Vault')}`;
+  }
+
+  function vaultURL(path, vaultID = currentVaultID()) {
+    const normalizedVaultID = String(vaultID || '').trim();
+    if (!normalizedVaultID) {
+      return path;
+    }
+
+    const separator = path.includes('?') ? '&' : '?';
+    return `${path}${separator}vault_id=${encodeURIComponent(normalizedVaultID)}`;
   }
 
   async function apiRequest(url, options = {}) {
@@ -1701,19 +1764,208 @@ document.getElementById('systemDiagnosticsBtn')?.addEventListener('click', async
     }, 5000);
   }
 
+  function renderVaultSpaces() {
+    if (!activeVaultSelect || !activeVaultMeta) {
+      return;
+    }
+
+    if (!vaults.length) {
+      activeVaultSelect.innerHTML = '<option value="">No vaults available</option>';
+      activeVaultMeta.textContent = 'Create a vault to begin storing encrypted records.';
+      if (editVaultNameInput) editVaultNameInput.value = '';
+      if (editVaultDescriptionInput) editVaultDescriptionInput.value = '';
+      if (renameVaultBtn) renameVaultBtn.disabled = true;
+      if (deleteVaultBtn) deleteVaultBtn.disabled = true;
+      return;
+    }
+
+    activeVaultSelect.innerHTML = vaults.map((item) => {
+      const selected = item.id === currentVaultID() ? ' selected' : '';
+      const label = `${vaultDisplayLabel(item)} · ${vaultRecordCount(item)}`;
+      return `<option value="${escapeHTML(item.id)}"${selected}>${escapeHTML(label)}</option>`;
+    }).join('');
+
+    const selectedVault = currentVault();
+    if (!selectedVault) {
+      activeVaultMeta.textContent = 'Select a vault to continue.';
+      if (editVaultNameInput) editVaultNameInput.value = '';
+      if (editVaultDescriptionInput) editVaultDescriptionInput.value = '';
+      if (renameVaultBtn) renameVaultBtn.disabled = true;
+      if (deleteVaultBtn) deleteVaultBtn.disabled = true;
+      return;
+    }
+
+    const details = [];
+    if (selectedVault.description) {
+      details.push(selectedVault.description);
+    }
+    details.push(`${vaultRecordCount(selectedVault)} stored ${vaultRecordCount(selectedVault) === 1 ? 'entry' : 'entries'}`);
+    activeVaultMeta.textContent = details.join(' • ');
+
+    if (editVaultNameInput) {
+      editVaultNameInput.value = selectedVault.name || '';
+      editVaultNameInput.disabled = false;
+    }
+    if (editVaultDescriptionInput) {
+      editVaultDescriptionInput.value = selectedVault.description || '';
+      editVaultDescriptionInput.disabled = false;
+    }
+    if (renameVaultBtn) {
+      renameVaultBtn.disabled = false;
+    }
+    if (deleteVaultBtn) {
+      deleteVaultBtn.disabled = false;
+      deleteVaultBtn.title = '';
+    }
+  }
+
+  async function loadVaults() {
+    const data = await apiRequest('/api/vault/vaults');
+    vaults = Array.isArray(data.vaults) ? data.vaults : [];
+
+    const preferredVaultID = String(selectedVaultID || readStoredVaultID() || '').trim();
+    const nextVault = vaults.find((item) => item.id === preferredVaultID)
+      || vaults[0]
+      || null;
+
+    selectedVaultID = nextVault?.id || DEFAULT_VAULT_ID;
+    writeStoredVaultID(selectedVaultID);
+    renderVaultSpaces();
+  }
+
+  function switchVault(nextVaultID) {
+    nextVaultID = String(nextVaultID || '').trim();
+    if (!nextVaultID || nextVaultID === currentVaultID()) {
+      renderVaultSpaces();
+      return;
+    }
+
+    selectedVaultID = nextVaultID;
+    writeStoredVaultID(selectedVaultID);
+    clearRecordForm();
+    refreshVault();
+  }
+
+  async function createVaultSpace() {
+    const name = String(newVaultNameInput?.value || '').trim();
+    const description = String(newVaultDescriptionInput?.value || '').trim();
+
+    if (!name) {
+      showInlineAlert('New vault name is required before creating a vault.', 'warning');
+      return;
+    }
+
+    try {
+      setButtonLoading(createVaultSpaceBtn, true, 'Creating vault');
+      const response = await apiRequest('/api/vault/vaults', {
+        method: 'POST',
+        body: {
+          name,
+          description
+        }
+      });
+
+      if (newVaultNameInput) newVaultNameInput.value = '';
+      if (newVaultDescriptionInput) newVaultDescriptionInput.value = '';
+
+      await loadVaults();
+      if (response?.vault?.id) {
+        selectedVaultID = response.vault.id;
+        writeStoredVaultID(selectedVaultID);
+        renderVaultSpaces();
+      }
+      clearRecordForm();
+      notify('Vault created.', 'success');
+      await refreshVault();
+    } catch (error) {
+      console.error('Failed to create vault:', error);
+      showInlineAlert(error.message || 'Failed to create vault.', 'error');
+    } finally {
+      setButtonLoading(createVaultSpaceBtn, false);
+    }
+  }
+
+  async function updateVaultSpace() {
+    const selectedVault = currentVault();
+    if (!selectedVault) {
+      showInlineAlert('Select a vault before updating its details.', 'warning');
+      return;
+    }
+
+    const name = String(editVaultNameInput?.value || '').trim();
+    const description = String(editVaultDescriptionInput?.value || '').trim();
+
+    if (!name) {
+      showInlineAlert('Vault name is required before saving changes.', 'warning');
+      return;
+    }
+
+    try {
+      setButtonLoading(renameVaultBtn, true, 'Saving vault');
+      await apiRequest(`/api/vault/vaults/${encodeURIComponent(selectedVault.id)}`, {
+        method: 'PATCH',
+        body: {
+          name,
+          description
+        }
+      });
+      notify('Vault details updated.', 'success');
+      await refreshVault();
+    } catch (error) {
+      console.error('Failed to update vault:', error);
+      showInlineAlert(error.message || 'Failed to update vault.', 'error');
+    } finally {
+      setButtonLoading(renameVaultBtn, false);
+    }
+  }
+
+  async function deleteVaultSpace() {
+    const selectedVault = currentVault();
+    if (!selectedVault) {
+      showInlineAlert('Select a vault before deleting it.', 'warning');
+      return;
+    }
+    const recordCount = vaultRecordCount(selectedVault);
+    const confirmed = window.confirm(
+      `Delete vault "${selectedVault.name}"?${recordCount > 0 ? ` This will permanently remove ${recordCount} encrypted ${recordCount === 1 ? 'entry' : 'entries'}.` : ''}`
+    );
+    if (!confirmed) {
+      return;
+    }
+
+    try {
+      setButtonLoading(deleteVaultBtn, true, 'Deleting vault');
+      await apiRequest(`/api/vault/vaults/${encodeURIComponent(selectedVault.id)}`, {
+        method: 'DELETE'
+      });
+      selectedVaultID = DEFAULT_VAULT_ID;
+      writeStoredVaultID(selectedVaultID);
+      clearRecordForm();
+      notify('Vault deleted.', 'success');
+      await refreshVault();
+    } catch (error) {
+      console.error('Failed to delete vault:', error);
+      showInlineAlert(error.message || 'Failed to delete vault.', 'error');
+    } finally {
+      setButtonLoading(deleteVaultBtn, false);
+    }
+  }
+
   function setInteractiveState(locked) {
-    const disableVaultEditing = Boolean(locked);
+    const disableVaultEditing = !vaultStatus || !vaultStatus.available || Boolean(locked);
 
     saveEntryBtn.disabled = disableVaultEditing;
     resetEntryBtn.disabled = false;
     exportBtn.disabled = disableVaultEditing;
-    lockBtn.disabled = !vaultStatus || vaultStatus.locked;
-    unlockBtn.disabled = Boolean(vaultStatus && !vaultStatus.locked && !vaultStatus.requires_passphrase);
+    lockBtn.disabled = !vaultStatus || !vaultStatus.available || vaultStatus.locked;
+    unlockBtn.disabled = !vaultStatus || !vaultStatus.available || Boolean(vaultStatus && !vaultStatus.locked && !vaultStatus.requires_passphrase);
     revealPayloadBtn.disabled = disableVaultEditing || !selectedRecord;
     deleteEntryBtn.disabled = disableVaultEditing || !selectedRecord;
 
     if (disableVaultEditing) {
-      recordsListEl.innerHTML = '<div class="settings-help">Unlock the vault to browse saved entries.</div>';
+      recordsListEl.innerHTML = vaultStatus?.available
+        ? '<div class="settings-help">Unlock the vault to browse saved entries.</div>'
+        : '<div class="settings-help">Create a vault to begin storing encrypted entries.</div>';
       clearRecordForm({ preserveStatus: true });
     }
   }
@@ -1724,13 +1976,32 @@ document.getElementById('systemDiagnosticsBtn')?.addEventListener('click', async
       return;
     }
 
+    if (!vaultStatus.available) {
+      statusIndicator.innerHTML = statusDot('#94a3b8');
+      statusText.textContent = 'No vault selected';
+      statusDetails.textContent = vaultStatus.message || 'Create a vault to begin storing encrypted records.';
+      backendLabel.textContent = backendLabelFor(vaultStatus);
+      recordCountLabel.textContent = '0';
+      writableLabel.textContent = 'Unavailable';
+      modeLabel.textContent = 'Create a vault';
+      modeLabel.style.background = '#e2e8f0';
+      modeLabel.style.color = '#475569';
+      setInteractiveState(true);
+      return;
+    }
+
     const locked = Boolean(vaultStatus.locked);
     const requiresPassphrase = Boolean(vaultStatus.requires_passphrase);
     const dotColor = locked ? '#f59e0b' : '#10b981';
+    const selectedVault = currentVault();
+    const vaultName = selectedVault?.name || vaultStatus.vault_name || 'Vault';
     statusIndicator.innerHTML = statusDot(dotColor);
-    statusText.textContent = locked ? 'Vault locked' : 'Vault available';
+    statusText.textContent = locked ? `${vaultName} locked` : `${vaultName} available`;
 
     const detailParts = [];
+    if (selectedVault?.description) {
+      detailParts.push(selectedVault.description);
+    }
     if (vaultStatus.message) {
       detailParts.push(vaultStatus.message);
     }
@@ -1870,32 +2141,65 @@ document.getElementById('systemDiagnosticsBtn')?.addEventListener('click', async
   }
 
   async function loadVaultStatus() {
-    const status = await apiRequest('/api/vault/status');
+    if (!currentVaultID()) {
+      const status = {
+        available: false,
+        locked: true,
+        writable: false,
+        requires_passphrase: false,
+        message: 'Create a vault to begin storing encrypted records.',
+        record_count: 0,
+        secret_store: {
+          backend: 'unavailable',
+          available: false,
+          writable: false,
+          locked: true
+        }
+      };
+      renderStatus(status);
+      return status;
+    }
+
+    const status = await apiRequest(vaultURL('/api/vault/status'));
     renderStatus(status);
     return status;
   }
 
   async function loadVaultRecords() {
-    if (vaultStatus?.locked) {
+    if (!vaultStatus?.available || vaultStatus?.locked) {
       renderRecordsList([]);
       return;
     }
 
-    const data = await apiRequest('/api/vault/records');
+    const data = await apiRequest(vaultURL('/api/vault/records'));
     renderRecordsList(data.records || []);
   }
 
   async function loadVaultGrants() {
-    const data = await apiRequest('/api/vault/grants');
+    if (!currentVaultID()) {
+      renderGrantsList([]);
+      return;
+    }
+
+    const data = await apiRequest(vaultURL('/api/vault/grants'));
     renderGrantsList(data.grants || []);
   }
 
   async function refreshVault() {
     try {
+      await loadVaults();
       const status = await loadVaultStatus();
+      if (!status.available) {
+        renderVaultSpaces();
+        renderGrantsList([]);
+        renderRecordsList([]);
+        return;
+      }
       await loadVaultGrants();
       if (!status.locked) {
         await loadVaultRecords();
+      } else {
+        renderVaultSpaces();
       }
     } catch (error) {
       console.error('Failed to refresh vault:', error);
@@ -1905,7 +2209,7 @@ document.getElementById('systemDiagnosticsBtn')?.addEventListener('click', async
 
   async function selectRecord(recordID) {
     try {
-      const record = await apiRequest(`/api/vault/records/${encodeURIComponent(recordID)}`);
+      const record = await apiRequest(vaultURL(`/api/vault/records/${encodeURIComponent(recordID)}`));
       applyRecordToForm(record);
       renderRecordsList(records);
     } catch (error) {
@@ -1915,7 +2219,13 @@ document.getElementById('systemDiagnosticsBtn')?.addEventListener('click', async
   }
 
   async function saveRecord() {
+    if (!currentVaultID()) {
+      showInlineAlert('Create or select a vault before saving an entry.', 'warning');
+      return;
+    }
+
     const payloadBody = {
+      vault_id: currentVaultID(),
       type: entryTypeInput.value,
       workspace_id: entryWorkspaceInput.value.trim(),
       label: entryLabelInput.value.trim(),
@@ -1943,7 +2253,7 @@ document.getElementById('systemDiagnosticsBtn')?.addEventListener('click', async
 
       let response;
       if (selectedRecord) {
-        response = await apiRequest(`/api/vault/records/${encodeURIComponent(selectedRecord.id)}`, {
+        response = await apiRequest(vaultURL(`/api/vault/records/${encodeURIComponent(selectedRecord.id)}`), {
           method: 'PATCH',
           body: payloadBody
         });
@@ -1983,7 +2293,7 @@ document.getElementById('systemDiagnosticsBtn')?.addEventListener('click', async
 
     try {
       setButtonLoading(deleteEntryBtn, true, 'Deleting');
-      await apiRequest(`/api/vault/records/${encodeURIComponent(selectedRecord.id)}`, {
+      await apiRequest(vaultURL(`/api/vault/records/${encodeURIComponent(selectedRecord.id)}`), {
         method: 'DELETE'
       });
       notify('Vault entry deleted.', 'success');
@@ -1998,9 +2308,14 @@ document.getElementById('systemDiagnosticsBtn')?.addEventListener('click', async
   }
 
   async function unlockVault() {
+    if (!currentVaultID()) {
+      showInlineAlert('Create or select a vault before unlocking storage access.', 'warning');
+      return;
+    }
+
     try {
       setButtonLoading(unlockBtn, true, 'Unlocking');
-      await apiRequest('/api/vault/unlock', {
+      await apiRequest(vaultURL('/api/vault/unlock'), {
         method: 'POST',
         body: { vault_password: unlockPasswordInput.value }
       });
@@ -2016,9 +2331,14 @@ document.getElementById('systemDiagnosticsBtn')?.addEventListener('click', async
   }
 
   async function lockVault() {
+    if (!currentVaultID()) {
+      showInlineAlert('Create or select a vault before changing vault access.', 'warning');
+      return;
+    }
+
     try {
       setButtonLoading(lockBtn, true, 'Locking');
-      await apiRequest('/api/vault/lock', {
+      await apiRequest(vaultURL('/api/vault/lock'), {
         method: 'POST',
         body: {}
       });
@@ -2033,6 +2353,11 @@ document.getElementById('systemDiagnosticsBtn')?.addEventListener('click', async
   }
 
   async function createGrant() {
+    if (!currentVaultID()) {
+      showInlineAlert('Create or select a vault before configuring grants.', 'warning');
+      return;
+    }
+
     const workspaceID = grantWorkspaceInput.value.trim();
     const actorID = grantActorIDInput.value.trim();
 
@@ -2046,6 +2371,7 @@ document.getElementById('systemDiagnosticsBtn')?.addEventListener('click', async
       await apiRequest('/api/vault/grants', {
         method: 'POST',
         body: {
+          vault_id: currentVaultID(),
           workspace_id: workspaceID,
           actor_type: grantActorTypeInput.value,
           actor_id: actorID,
@@ -2070,7 +2396,7 @@ document.getElementById('systemDiagnosticsBtn')?.addEventListener('click', async
     }
 
     try {
-      await apiRequest(`/api/vault/grants/${encodeURIComponent(grantID)}`, {
+      await apiRequest(vaultURL(`/api/vault/grants/${encodeURIComponent(grantID)}`), {
         method: 'DELETE'
       });
       notify('Persistent grant revoked.', 'success');
@@ -2082,6 +2408,11 @@ document.getElementById('systemDiagnosticsBtn')?.addEventListener('click', async
   }
 
   async function exportVault() {
+    if (!currentVaultID()) {
+      showInlineAlert('Create or select a vault before exporting.', 'warning');
+      return;
+    }
+
     if (!exportConfirmInput.checked) {
       showInlineAlert('Confirm the export warning before generating an export.', 'warning');
       return;
@@ -2098,6 +2429,7 @@ document.getElementById('systemDiagnosticsBtn')?.addEventListener('click', async
       const bundle = await apiRequest('/api/vault/export', {
         method: 'POST',
         body: {
+          vault_id: currentVaultID(),
           workspace_id: exportWorkspaceInput.value.trim(),
           vault_password: vaultPassword,
           confirm: true
@@ -2137,6 +2469,36 @@ document.getElementById('systemDiagnosticsBtn')?.addEventListener('click', async
 
   refreshBtn?.addEventListener('click', () => {
     refreshVault();
+  });
+
+  activeVaultSelect?.addEventListener('change', (event) => {
+    switchVault(event.target.value);
+  });
+
+  renameVaultBtn?.addEventListener('click', () => {
+    updateVaultSpace();
+  });
+
+  deleteVaultBtn?.addEventListener('click', () => {
+    deleteVaultSpace();
+  });
+
+  createVaultSpaceBtn?.addEventListener('click', () => {
+    createVaultSpace();
+  });
+
+  editVaultNameInput?.addEventListener('keydown', (event) => {
+    if (event.key === 'Enter') {
+      event.preventDefault();
+      updateVaultSpace();
+    }
+  });
+
+  newVaultNameInput?.addEventListener('keydown', (event) => {
+    if (event.key === 'Enter') {
+      event.preventDefault();
+      createVaultSpace();
+    }
   });
 
   saveEntryBtn?.addEventListener('click', () => {

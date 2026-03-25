@@ -41,9 +41,31 @@
       <!-- Center: Navigation Links (optional) -->
       {{if ne .ShowNavLinks false}}
       <div class="ori-navbar-links">
-        <a href="/agents" class="nav-link-item" style="color: var(--text-primary); text-decoration: none; padding: 0.5rem 1rem; border-radius: var(--radius-md); transition: background 0.2s;">Agents</a>
+        <a href="/agents" class="nav-link-item {{if eq .CurrentPage "agents"}}active{{end}}" style="color: var(--text-primary); text-decoration: none; padding: 0.5rem 1rem; border-radius: var(--radius-md); transition: background 0.2s;">Agents</a>
         <span class="ori-navbar-divider" aria-hidden="true">|</span>
-        <a href="/workspaces" class="nav-link-item" style="color: var(--text-primary); text-decoration: none; padding: 0.5rem 1rem; border-radius: var(--radius-md); transition: background 0.2s;">Workspaces</a>
+        <a href="/workspaces" class="nav-link-item {{if eq .CurrentPage "workspaces"}}active{{end}}" style="color: var(--text-primary); text-decoration: none; padding: 0.5rem 1rem; border-radius: var(--radius-md); transition: background 0.2s;">Workspaces</a>
+        <span class="ori-navbar-divider" aria-hidden="true">|</span>
+        <a
+          href="/settings#private-vault"
+          id="vaultLauncherButton"
+          class="nav-link-item ori-navbar-vault-launcher"
+          style="color: var(--text-primary); text-decoration: none; padding: 0.5rem 1rem; border-radius: var(--radius-md); transition: background 0.2s;"
+          data-bs-toggle="modal"
+          data-bs-target="#vaultModal"
+          aria-controls="vaultModal"
+          aria-haspopup="dialog"
+          aria-expanded="false"
+          title="Open private vault">
+          <svg class="ori-navbar-vault-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <path d="M5 9.5V8.25C5 6.73 6.23 5.5 7.75 5.5H10L12 7.5L14 5.5H16.25C17.77 5.5 19 6.73 19 8.25V9.5" stroke="currentColor" stroke-width="1.85" stroke-linecap="round" stroke-linejoin="round"/>
+            <path d="M4 9.5H20V17.25C20 18.77 18.77 20 17.25 20H6.75C5.23 20 4 18.77 4 17.25V9.5Z" fill="currentColor" fill-opacity="0.14" stroke="currentColor" stroke-width="1.85" stroke-linejoin="round"/>
+            <path d="M4 12.5H20" stroke="currentColor" stroke-width="1.85" stroke-linecap="round"/>
+            <path d="M12 9.5V20" stroke="currentColor" stroke-width="1.85" stroke-linecap="round"/>
+            <path d="M11.1 13.6H12.9V15.9H11.1V13.6Z" fill="currentColor"/>
+          </svg>
+          <span>Vault</span>
+          <span id="vaultNavCount" class="ori-navbar-vault-count is-hidden" aria-label="Vault entry count">0</span>
+        </a>
       </div>
       {{end}}
 
@@ -120,3 +142,5 @@
     </div>
   </div>
 </nav>
+
+{{template "vault-modal.tmpl" .}}
