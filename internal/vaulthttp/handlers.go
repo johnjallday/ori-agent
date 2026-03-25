@@ -83,8 +83,9 @@ func (h *Handler) handleVaults(w http.ResponseWriter, r *http.Request) {
 		})
 	case http.MethodPost:
 		var req struct {
-			Name        string `json:"name"`
-			Description string `json:"description,omitempty"`
+			Name          string `json:"name"`
+			Description   string `json:"description,omitempty"`
+			VaultPassword string `json:"vault_password"`
 		}
 		if !orihttp.ParseJSONBody(w, r, &req) {
 			return
@@ -94,7 +95,7 @@ func (h *Handler) handleVaults(w http.ResponseWriter, r *http.Request) {
 			Name:        req.Name,
 			Description: req.Description,
 		}
-		if err := h.store.CreateVault(r.Context(), &item); err != nil {
+		if err := h.store.CreateVault(r.Context(), &item, req.VaultPassword); err != nil {
 			respondVaultError(w, err)
 			return
 		}
@@ -152,13 +153,14 @@ func (h *Handler) handleUnlock(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req struct {
+		VaultID       string `json:"vault_id,omitempty"`
 		VaultPassword string `json:"vault_password"`
 	}
 	if !orihttp.ParseJSONBody(w, r, &req) {
 		return
 	}
 
-	if err := h.store.Unlock(req.VaultPassword); err != nil {
+	if err := h.store.Unlock(r.Context(), vaultIDFromRequest(r, req.VaultID), req.VaultPassword); err != nil {
 		respondVaultError(w, err)
 		return
 	}
@@ -176,7 +178,7 @@ func (h *Handler) handleLock(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := h.store.Lock(); err != nil {
+	if err := h.store.Lock(r.Context(), vaultIDFromRequest(r)); err != nil {
 		respondVaultError(w, err)
 		return
 	}
@@ -440,6 +442,8 @@ func respondVaultError(w http.ResponseWriter, err error) {
 		_ = orihttp.RespondError(w, http.StatusConflict, err.Error())
 	case errors.Is(err, vault.ErrPermissionDenied):
 		_ = orihttp.RespondError(w, http.StatusForbidden, err.Error())
+	case errors.Is(err, vault.ErrVaultPasswordInvalid):
+		_ = orihttp.RespondError(w, http.StatusUnauthorized, err.Error())
 	case errors.Is(err, vault.ErrVaultLocked):
 		_ = orihttp.RespondError(w, http.StatusLocked, err.Error())
 	case errors.Is(err, vault.ErrVaultRequired), errors.Is(err, vault.ErrVaultNameRequired), errors.Is(err, vault.ErrVaultPasswordRequired), errors.Is(err, vault.ErrExportPasswordEmpty):

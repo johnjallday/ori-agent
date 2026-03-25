@@ -18,7 +18,8 @@ var (
 	ErrVaultLocked           = errors.New("vault: vault locked")
 	ErrVaultKeyUnavailable   = errors.New("vault: data encryption key unavailable")
 	ErrMalformedRecord       = errors.New("vault: malformed encrypted record")
-	ErrVaultPasswordRequired = errors.New("vault: passphrase is required")
+	ErrVaultPasswordRequired = errors.New("vault: vault password is required")
+	ErrVaultPasswordInvalid  = errors.New("vault: incorrect vault password")
 	ErrExportPasswordEmpty   = errors.New("vault: export password is required")
 )
 
@@ -50,13 +51,14 @@ type AccessContext struct {
 }
 
 type Vault struct {
-	ID          string    `json:"id"`
-	Name        string    `json:"name"`
-	Description string    `json:"description,omitempty"`
-	IsDefault   bool      `json:"is_default"`
-	RecordCount int       `json:"record_count"`
-	CreatedAt   time.Time `json:"created_at"`
-	UpdatedAt   time.Time `json:"updated_at"`
+	ID                string    `json:"id"`
+	Name              string    `json:"name"`
+	Description       string    `json:"description,omitempty"`
+	IsDefault         bool      `json:"is_default"`
+	PasswordProtected bool      `json:"password_protected"`
+	RecordCount       int       `json:"record_count"`
+	CreatedAt         time.Time `json:"created_at"`
+	UpdatedAt         time.Time `json:"updated_at"`
 }
 
 type Record struct {
@@ -132,6 +134,7 @@ type VaultStatus struct {
 	Available          bool        `json:"available"`
 	Locked             bool        `json:"locked"`
 	Writable           bool        `json:"writable"`
+	PasswordProtected  bool        `json:"password_protected"`
 	RequiresPassphrase bool        `json:"requires_passphrase"`
 	Message            string      `json:"message,omitempty"`
 	RecordCount        int         `json:"record_count"`

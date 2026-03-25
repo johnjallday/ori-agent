@@ -53,6 +53,13 @@ type recordRow struct {
 	UpdatedAt          time.Time
 }
 
+type vaultKeyMaterial struct {
+	Salt              string
+	Nonce             string
+	Ciphertext        string
+	PasswordProtected bool
+}
+
 type exportEnvelope struct {
 	VaultID     string    `json:"vault_id,omitempty"`
 	VaultName   string    `json:"vault_name,omitempty"`
@@ -88,10 +95,11 @@ func (s *Store) ListVaults(ctx context.Context) ([]Vault, error) {
 	}
 
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT v.id, v.name, v.description, v.created_at, v.updated_at, COUNT(r.id) AS record_count
+		SELECT v.id, v.name, v.description, v.created_at, v.updated_at, COUNT(r.id) AS record_count,
+		       CASE WHEN TRIM(COALESCE(v.key_ciphertext, '')) <> '' THEN 1 ELSE 0 END AS password_protected
 		FROM vaults v
 		LEFT JOIN vault_records r ON r.vault_id = v.id
-		GROUP BY v.id, v.name, v.description, v.created_at, v.updated_at
+		GROUP BY v.id, v.name, v.description, v.created_at, v.updated_at, v.key_ciphertext
 		ORDER BY LOWER(v.name) ASC, v.created_at ASC
 	`)
 	if err != nil {
@@ -102,6 +110,7 @@ func (s *Store) ListVaults(ctx context.Context) ([]Vault, error) {
 	vaults := make([]Vault, 0)
 	for rows.Next() {
 		var item Vault
+		var passwordProtected int
 		if err := rows.Scan(
 			&item.ID,
 			&item.Name,
@@ -109,11 +118,13 @@ func (s *Store) ListVaults(ctx context.Context) ([]Vault, error) {
 			&item.CreatedAt,
 			&item.UpdatedAt,
 			&item.RecordCount,
+			&passwordProtected,
 		); err != nil {
 			return nil, fmt.Errorf("scan vault: %w", err)
 		}
 		item.ID = normalizeVaultID(item.ID)
 		item.IsDefault = item.ID == DefaultVaultID
+		item.PasswordProtected = passwordProtected == 1
 		vaults = append(vaults, item)
 	}
 	if err := rows.Err(); err != nil {
@@ -122,7 +133,7 @@ func (s *Store) ListVaults(ctx context.Context) ([]Vault, error) {
 	return vaults, nil
 }
 
-func (s *Store) CreateVault(ctx context.Context, vault *Vault) error {
+func (s *Store) CreateVault(ctx context.Context, vault *Vault, password string) error {
 	if s.db == nil {
 		return ErrSecretStoreUnavailable
 	}
@@ -134,6 +145,9 @@ func (s *Store) CreateVault(ctx context.Context, vault *Vault) error {
 	vault.Description = strings.TrimSpace(vault.Description)
 	if vault.Name == "" {
 		return ErrVaultNameRequired
+	}
+	if err := validateVaultPassword(password); err != nil {
+		return err
 	}
 
 	var existingID string
@@ -157,16 +171,30 @@ func (s *Store) CreateVault(ctx context.Context, vault *Vault) error {
 	now := s.now()
 	vault.ID = normalizeVaultID(vault.ID)
 	vault.IsDefault = vault.ID == DefaultVaultID
+	vault.PasswordProtected = true
 	vault.CreatedAt = now
 	vault.UpdatedAt = now
 	vault.RecordCount = 0
 
+	dek, err := generateDataEncryptionKey()
+	if err != nil {
+		return fmt.Errorf("generate data encryption key: %w", err)
+	}
+	keySalt, keyNonce, keyCiphertext, err := wrapVaultDataEncryptionKey(password, dek)
+	if err != nil {
+		return err
+	}
+
 	if _, err := s.db.ExecContext(ctx, `
-		INSERT INTO vaults (id, name, description, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?)
-	`, vault.ID, vault.Name, vault.Description, vault.CreatedAt, vault.UpdatedAt); err != nil {
+		INSERT INTO vaults (id, name, description, key_salt, key_nonce, key_ciphertext, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+	`, vault.ID, vault.Name, vault.Description, keySalt, keyNonce, keyCiphertext, vault.CreatedAt, vault.UpdatedAt); err != nil {
 		return fmt.Errorf("insert vault: %w", err)
 	}
+
+	s.mu.Lock()
+	s.cachedDEKs[vault.ID] = append([]byte(nil), dek...)
+	s.mu.Unlock()
 
 	s.writeAuditBestEffort(ctx, AuditEvent{
 		VaultID: vault.ID,
@@ -269,14 +297,16 @@ func (s *Store) DeleteVault(ctx context.Context, vaultID string) error {
 	delete(s.cachedDEKs, vaultID)
 	s.mu.Unlock()
 
-	if secretStore := s.currentSecretStore(); secretStore != nil {
-		if err := secretStore.Delete(vaultDEKSecretKey(vaultID)); err != nil &&
-			!errors.Is(err, ErrSecretStoreUnavailable) &&
-			!errors.Is(err, ErrSecretStoreLocked) {
-			logger.Warn("Failed to delete vault secret key", logger.Fields{
-				"vault_id": vaultID,
-				"error":    err,
-			})
+	if !selectedVault.PasswordProtected {
+		if secretStore := s.currentSecretStore(); secretStore != nil {
+			if err := secretStore.Delete(vaultDEKSecretKey(vaultID)); err != nil &&
+				!errors.Is(err, ErrSecretStoreUnavailable) &&
+				!errors.Is(err, ErrSecretStoreLocked) {
+				logger.Warn("Failed to delete vault secret key", logger.Fields{
+					"vault_id": vaultID,
+					"error":    err,
+				})
+			}
 		}
 	}
 
@@ -337,10 +367,34 @@ func (s *Store) Status(ctx context.Context, vaultID string) (VaultStatus, error)
 	}
 
 	storeStatus := s.effectiveSecretStoreStatus()
-	locked := s.currentSecretStore() == nil
 	recordCount, err := s.recordCount(ctx, vaultID)
 	if err != nil {
 		return VaultStatus{}, fmt.Errorf("count vault records: %w", err)
+	}
+
+	locked := false
+	writable := false
+	requiresPassphrase := false
+	message := ""
+
+	if selectedVault.PasswordProtected {
+		locked = !s.hasCachedDEK(vaultID)
+		writable = !locked
+		requiresPassphrase = locked
+		storeStatus = passwordProtectedStoreStatus(locked)
+		if locked {
+			message = "vault locked until unlocked with its password"
+		} else {
+			message = "vault unlocked with its own password"
+		}
+	} else {
+		locked = s.currentSecretStore() == nil
+		writable = !locked && storeStatus.Writable
+		requiresPassphrase = locked && !storeStatus.Available
+		message = strings.TrimSpace(storeStatus.Message)
+		if requiresPassphrase {
+			message = "vault locked until unlocked with a passphrase"
+		}
 	}
 
 	status := VaultStatus{
@@ -348,55 +402,115 @@ func (s *Store) Status(ctx context.Context, vaultID string) (VaultStatus, error)
 		VaultName:          selectedVault.Name,
 		Available:          true,
 		Locked:             locked,
-		Writable:           !locked && storeStatus.Writable,
-		RequiresPassphrase: locked && !storeStatus.Available,
-		Message:            strings.TrimSpace(storeStatus.Message),
+		Writable:           writable,
+		PasswordProtected:  selectedVault.PasswordProtected,
+		RequiresPassphrase: requiresPassphrase,
+		Message:            message,
 		RecordCount:        recordCount,
 		SecretStore:        storeStatus,
-	}
-	if status.RequiresPassphrase {
-		status.Message = "vault locked until unlocked with a passphrase"
 	}
 	return status, nil
 }
 
-func (s *Store) Unlock(passphrase string) error {
+func (s *Store) Unlock(ctx context.Context, vaultID string, password string) error {
 	if s.db == nil {
 		return ErrSecretStoreUnavailable
 	}
 
-	if primary := s.primarySecretStore; primary != nil && primary.Status().Available {
-		s.mu.Lock()
-		s.cachedDEKs = make(map[string][]byte)
-		s.mu.Unlock()
-		return nil
+	vaultID, err := s.resolveVaultID(ctx, vaultID)
+	if err != nil {
+		return err
 	}
-
-	passphrase = strings.TrimSpace(passphrase)
-	if passphrase == "" {
-		return ErrVaultPasswordRequired
-	}
-
-	secretStore, err := NewPassphraseSecretStore(s.fallbackSecretPath, passphrase)
+	keyMaterial, err := s.getVaultKeyMaterial(ctx, vaultID)
 	if err != nil {
 		return err
 	}
 
-	if _, err := secretStore.Get(SecretKeyVaultDEK); err != nil && !errors.Is(err, ErrSecretNotFound) {
+	if keyMaterial.PasswordProtected {
+		if err := validateVaultPassword(password); err != nil {
+			return err
+		}
+
+		dek, err := unwrapVaultDataEncryptionKey(password, keyMaterial)
+		if err != nil {
+			return err
+		}
+
+		s.mu.Lock()
+		s.cachedDEKs[vaultID] = append([]byte(nil), dek...)
+		s.mu.Unlock()
+		return nil
+	}
+
+	if primary := s.primarySecretStore; primary != nil && primary.Status().Available {
+		return nil
+	}
+
+	if err := validateVaultPassword(password); err != nil {
+		return err
+	}
+
+	secretStore, err := NewPassphraseSecretStore(s.fallbackSecretPath, password)
+	if err != nil {
+		return err
+	}
+
+	if err := validateLegacySecretStore(secretStore, vaultDEKSecretKey(vaultID)); err != nil {
+		if errors.Is(err, ErrVaultPasswordInvalid) {
+			return err
+		}
 		return fmt.Errorf("unlock vault: %w", err)
+	}
+
+	legacyVaultIDs, err := s.listLegacyVaultIDs(ctx)
+	if err != nil {
+		return err
 	}
 
 	s.mu.Lock()
 	s.sessionSecretStore = secretStore
-	s.cachedDEKs = make(map[string][]byte)
+	for _, legacyVaultID := range legacyVaultIDs {
+		delete(s.cachedDEKs, legacyVaultID)
+	}
 	s.mu.Unlock()
 	return nil
 }
 
-func (s *Store) Lock() error {
+func (s *Store) Lock(ctx context.Context, vaultID string) error {
+	vaultID = normalizeVaultID(vaultID)
+
+	if s.db == nil {
+		return ErrSecretStoreUnavailable
+	}
+	if vaultID == "" {
+		s.mu.Lock()
+		s.cachedDEKs = make(map[string][]byte)
+		s.sessionSecretStore = nil
+		s.mu.Unlock()
+		return nil
+	}
+
+	selectedVault, err := s.getVault(ctx, vaultID)
+	if err != nil {
+		return err
+	}
+
+	legacyVaultIDs := []string(nil)
+	if !selectedVault.PasswordProtected {
+		legacyVaultIDs, err = s.listLegacyVaultIDs(ctx)
+		if err != nil {
+			return err
+		}
+	}
+
 	s.mu.Lock()
-	s.cachedDEKs = make(map[string][]byte)
-	s.sessionSecretStore = nil
+	delete(s.cachedDEKs, vaultID)
+	if !selectedVault.PasswordProtected {
+		s.sessionSecretStore = nil
+		for _, legacyVaultID := range legacyVaultIDs {
+			delete(s.cachedDEKs, legacyVaultID)
+		}
+	}
 	s.mu.Unlock()
 	return nil
 }
@@ -425,6 +539,29 @@ func (s *Store) ListRecords(ctx context.Context, filter RecordFilter, access Acc
 		return nil, err
 	}
 
+	items := make([]RecordListItem, 0)
+	hasRecords, err := s.hasMatchingRecords(ctx, filter)
+	if err != nil {
+		return nil, err
+	}
+	if !hasRecords {
+		s.writeAuditBestEffort(ctx, AuditEvent{
+			VaultID:     filter.VaultID,
+			WorkspaceID: access.WorkspaceID,
+			ActorType:   access.ActorType,
+			ActorID:     access.ActorID,
+			Action:      "list",
+			Outcome:     "allowed",
+			Details:     `{"count":0}`,
+		})
+		return items, nil
+	}
+
+	dek, err := s.ensureDataEncryptionKey(ctx, filter.VaultID, false)
+	if err != nil {
+		return nil, err
+	}
+
 	query := `
 		SELECT id, vault_id, type, workspace_id, source, retention_policy,
 		       metadata_nonce, metadata_ciphertext, payload_nonce, payload_ciphertext,
@@ -441,8 +578,6 @@ func (s *Store) ListRecords(ctx context.Context, filter RecordFilter, access Acc
 	}
 	defer func() { _ = rows.Close() }()
 
-	items := make([]RecordListItem, 0)
-	var dek []byte
 	for rows.Next() {
 		row, err := scanRecordRow(rows)
 		if err != nil {
@@ -451,13 +586,6 @@ func (s *Store) ListRecords(ctx context.Context, filter RecordFilter, access Acc
 		readCapability, _ := capabilitiesForRecordType(row.Type)
 		if access.requiresGrant() && !s.hasGrant(ctx, row.VaultID, access, row.WorkspaceID, readCapability, row.Type) {
 			continue
-		}
-
-		if len(dek) == 0 {
-			dek, err = s.ensureDataEncryptionKey(ctx, filter.VaultID, false)
-			if err != nil {
-				return nil, err
-			}
 		}
 
 		metadata, err := decryptRecordMetadata(dek, row.MetadataNonce, row.MetadataCiphertext)
@@ -1063,6 +1191,17 @@ func (s *Store) ensureDataEncryptionKey(ctx context.Context, vaultID string, all
 	}
 	s.mu.RUnlock()
 
+	keyMaterial, err := s.getVaultKeyMaterial(ctx, vaultID)
+	if err != nil {
+		return nil, err
+	}
+	if keyMaterial.PasswordProtected {
+		if !allowCreate {
+			return nil, ErrVaultLocked
+		}
+		return nil, ErrVaultLocked
+	}
+
 	secretStore := s.currentSecretStore()
 	if secretStore == nil {
 		return nil, ErrVaultLocked
@@ -1118,6 +1257,33 @@ func (s *Store) recordCount(ctx context.Context, vaultID string) (int, error) {
 	return count, nil
 }
 
+func (s *Store) hasMatchingRecords(ctx context.Context, filter RecordFilter) (bool, error) {
+	filter.VaultID = normalizeVaultID(filter.VaultID)
+	filter.WorkspaceID = strings.TrimSpace(filter.WorkspaceID)
+	filter.Type = normalizeRecordType(filter.Type)
+	if filter.Type == "*" {
+		filter.Type = ""
+	}
+
+	var exists int
+	err := s.db.QueryRowContext(ctx, `
+		SELECT 1
+		FROM vault_records
+		WHERE vault_id = ?
+		  AND (? = '' OR workspace_id = ?)
+		  AND (? = '' OR type = ?)
+		LIMIT 1
+	`, filter.VaultID, filter.WorkspaceID, filter.WorkspaceID, filter.Type, filter.Type).Scan(&exists)
+	switch {
+	case errors.Is(err, sql.ErrNoRows):
+		return false, nil
+	case err != nil:
+		return false, fmt.Errorf("query matching vault records: %w", err)
+	default:
+		return exists == 1, nil
+	}
+}
+
 func (s *Store) getVault(ctx context.Context, vaultID string) (Vault, error) {
 	vaultID = normalizeVaultID(vaultID)
 	if vaultID == "" {
@@ -1125,8 +1291,10 @@ func (s *Store) getVault(ctx context.Context, vaultID string) (Vault, error) {
 	}
 
 	var item Vault
+	var passwordProtected int
 	err := s.db.QueryRowContext(ctx, `
-		SELECT id, name, description, created_at, updated_at
+		SELECT id, name, description, created_at, updated_at,
+		       CASE WHEN TRIM(COALESCE(key_ciphertext, '')) <> '' THEN 1 ELSE 0 END AS password_protected
 		FROM vaults
 		WHERE id = ?
 	`, vaultID).Scan(
@@ -1135,6 +1303,7 @@ func (s *Store) getVault(ctx context.Context, vaultID string) (Vault, error) {
 		&item.Description,
 		&item.CreatedAt,
 		&item.UpdatedAt,
+		&passwordProtected,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Vault{}, ErrVaultNotFound
@@ -1145,6 +1314,7 @@ func (s *Store) getVault(ctx context.Context, vaultID string) (Vault, error) {
 
 	item.ID = normalizeVaultID(item.ID)
 	item.IsDefault = item.ID == DefaultVaultID
+	item.PasswordProtected = passwordProtected == 1
 	item.RecordCount, err = s.recordCount(ctx, item.ID)
 	if err != nil {
 		return Vault{}, err
@@ -1400,6 +1570,154 @@ func vaultDEKSecretKey(vaultID string) SecretKey {
 		return SecretKeyVaultDEK
 	}
 	return SecretKey("vault_dek:" + vaultID)
+}
+
+func (s *Store) hasCachedDEK(vaultID string) bool {
+	vaultID = normalizeVaultID(vaultID)
+	if vaultID == "" {
+		return false
+	}
+
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return len(s.cachedDEKs[vaultID]) > 0
+}
+
+func (s *Store) getVaultKeyMaterial(ctx context.Context, vaultID string) (vaultKeyMaterial, error) {
+	vaultID = normalizeVaultID(vaultID)
+	if vaultID == "" {
+		return vaultKeyMaterial{}, ErrVaultRequired
+	}
+
+	var material vaultKeyMaterial
+	err := s.db.QueryRowContext(ctx, `
+		SELECT COALESCE(key_salt, ''), COALESCE(key_nonce, ''), COALESCE(key_ciphertext, '')
+		FROM vaults
+		WHERE id = ?
+	`, vaultID).Scan(
+		&material.Salt,
+		&material.Nonce,
+		&material.Ciphertext,
+	)
+	if errors.Is(err, sql.ErrNoRows) {
+		return vaultKeyMaterial{}, ErrVaultNotFound
+	}
+	if err != nil {
+		return vaultKeyMaterial{}, fmt.Errorf("get vault key material: %w", err)
+	}
+
+	material.PasswordProtected = strings.TrimSpace(material.Ciphertext) != ""
+	return material, nil
+}
+
+func (s *Store) listLegacyVaultIDs(ctx context.Context) ([]string, error) {
+	vaults, err := s.ListVaults(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	legacyVaultIDs := make([]string, 0, len(vaults))
+	for _, item := range vaults {
+		if item.PasswordProtected {
+			continue
+		}
+		legacyVaultIDs = append(legacyVaultIDs, item.ID)
+	}
+	return legacyVaultIDs, nil
+}
+
+func passwordProtectedStoreStatus(locked bool) StoreStatus {
+	return StoreStatus{
+		Backend:   BackendVaultPassword,
+		Available: true,
+		Writable:  true,
+		Locked:    locked,
+		Message:   "using this vault's password-protected encryption key",
+	}
+}
+
+func validateVaultPassword(password string) error {
+	if strings.TrimSpace(password) == "" {
+		return ErrVaultPasswordRequired
+	}
+	return nil
+}
+
+func wrapVaultDataEncryptionKey(password string, dek []byte) (string, string, string, error) {
+	salt, err := randomBytes(16)
+	if err != nil {
+		return "", "", "", fmt.Errorf("generate vault password salt: %w", err)
+	}
+
+	derivedKey := derivePassphraseKey(password, salt)
+	nonce, ciphertext, err := encryptBytes(derivedKey, dek)
+	if err != nil {
+		return "", "", "", fmt.Errorf("encrypt vault data encryption key: %w", err)
+	}
+
+	return base64.StdEncoding.EncodeToString(salt), nonce, ciphertext, nil
+}
+
+func unwrapVaultDataEncryptionKey(password string, material vaultKeyMaterial) ([]byte, error) {
+	if !material.PasswordProtected {
+		return nil, ErrVaultKeyUnavailable
+	}
+
+	salt, err := base64.StdEncoding.DecodeString(material.Salt)
+	if err != nil {
+		return nil, ErrVaultKeyUnavailable
+	}
+	derivedKey := derivePassphraseKey(password, salt)
+	dek, err := decryptBytes(derivedKey, material.Nonce, material.Ciphertext)
+	if err != nil {
+		return nil, ErrVaultPasswordInvalid
+	}
+	if len(dek) != int(argonKeyLength) {
+		return nil, ErrVaultKeyUnavailable
+	}
+	return dek, nil
+}
+
+func validateLegacySecretStore(secretStore SecretStore, preferredKey SecretKey) error {
+	if secretStore == nil {
+		return ErrVaultLocked
+	}
+	if _, err := secretStore.Get(preferredKey); err == nil {
+		return nil
+	} else if !errors.Is(err, ErrSecretNotFound) {
+		return ErrVaultPasswordInvalid
+	}
+
+	fallbackStore, ok := secretStore.(*passphraseSecretStore)
+	if !ok {
+		return nil
+	}
+
+	fallbackStore.mu.Lock()
+	defer fallbackStore.mu.Unlock()
+
+	file, err := fallbackStore.loadFile(false)
+	switch {
+	case errors.Is(err, ErrSecretNotFound):
+		return nil
+	case err != nil:
+		return err
+	}
+
+	for key := range file.Secrets {
+		record := file.Secrets[key]
+		salt, err := base64.StdEncoding.DecodeString(file.Salt)
+		if err != nil {
+			return err
+		}
+		derivedKey := derivePassphraseKey(fallbackStore.passphrase, salt)
+		if _, err := decryptString(derivedKey, record.Nonce, record.Ciphertext); err != nil {
+			return ErrVaultPasswordInvalid
+		}
+		return nil
+	}
+
+	return nil
 }
 
 func (s *Store) resolveVaultID(ctx context.Context, vaultID string) (string, error) {

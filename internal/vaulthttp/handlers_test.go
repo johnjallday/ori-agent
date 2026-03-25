@@ -7,11 +7,14 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/johnjallday/ori-agent/internal/database"
 	"github.com/johnjallday/ori-agent/internal/vault"
 )
+
+const testVaultPassword = "test-vault-password"
 
 func newTestHandler(t *testing.T, secretStore vault.SecretStore, fallbackPath string) (*Handler, *vault.Store, *database.DB) {
 	t.Helper()
@@ -61,8 +64,24 @@ func createHandlerVault(t *testing.T, store *vault.Store, name string) vault.Vau
 	t.Helper()
 
 	item := vault.Vault{Name: name}
-	if err := store.CreateVault(context.Background(), &item); err != nil {
+	if err := store.CreateVault(context.Background(), &item, testVaultPassword); err != nil {
 		t.Fatalf("create handler vault %q: %v", name, err)
+	}
+	return item
+}
+
+func insertLegacyHandlerVault(t *testing.T, db *database.DB, name string) vault.Vault {
+	t.Helper()
+
+	item := vault.Vault{
+		ID:   "legacy-" + strings.ReplaceAll(strings.ToLower(name), " ", "-"),
+		Name: name,
+	}
+	if _, err := db.ExecContext(context.Background(), `
+		INSERT INTO vaults (id, name, description, key_salt, key_nonce, key_ciphertext, created_at, updated_at)
+		VALUES (?, ?, '', '', '', '', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+	`, item.ID, item.Name); err != nil {
+		t.Fatalf("insert legacy handler vault %q: %v", name, err)
 	}
 	return item
 }
@@ -223,9 +242,9 @@ func TestHandlerExportRequiresConfirmationAndPassword(t *testing.T) {
 func TestHandlerUnlockAndLockFallbackVault(t *testing.T) {
 	tempDir := t.TempDir()
 	secretStore := vault.NewAutoSecretStore(vault.AutoSecretStoreOptions{GOOS: "plan9"})
-	handler, store, db := newTestHandler(t, secretStore, filepath.Join(tempDir, "vault-secrets.json"))
+	handler, _, db := newTestHandler(t, secretStore, filepath.Join(tempDir, "vault-secrets.json"))
 	defer func() { _ = db.Close() }()
-	primaryVault := createHandlerVault(t, store, "Primary Vault")
+	primaryVault := insertLegacyHandlerVault(t, db, "Primary Vault")
 
 	statusRec := performJSONRequest(t, handler, http.MethodGet, "/api/vault/status?vault_id="+primaryVault.ID, nil)
 	if statusRec.Code != http.StatusOK {
@@ -238,6 +257,7 @@ func TestHandlerUnlockAndLockFallbackVault(t *testing.T) {
 	}
 
 	unlockRec := performJSONRequest(t, handler, http.MethodPost, "/api/vault/unlock", map[string]any{
+		"vault_id":       primaryVault.ID,
 		"vault_password": "fallback-pass",
 	})
 	if unlockRec.Code != http.StatusOK {
@@ -273,8 +293,9 @@ func TestHandlerSupportsNamedVaults(t *testing.T) {
 	defer func() { _ = db.Close() }()
 
 	createPrimaryVaultRec := performJSONRequest(t, handler, http.MethodPost, "/api/vault/vaults", map[string]any{
-		"name":        "Personal Vault",
-		"description": "Personal encrypted records",
+		"name":           "Personal Vault",
+		"description":    "Personal encrypted records",
+		"vault_password": "personal-vault-pass",
 	})
 	if createPrimaryVaultRec.Code != http.StatusCreated {
 		t.Fatalf("expected 201 creating primary vault, got %d: %s", createPrimaryVaultRec.Code, createPrimaryVaultRec.Body.String())
@@ -286,8 +307,9 @@ func TestHandlerSupportsNamedVaults(t *testing.T) {
 	decodeJSONBody(t, createPrimaryVaultRec, &primaryVault)
 
 	createVaultRec := performJSONRequest(t, handler, http.MethodPost, "/api/vault/vaults", map[string]any{
-		"name":        "Client Vault",
-		"description": "Per-client encrypted records",
+		"name":           "Client Vault",
+		"description":    "Per-client encrypted records",
+		"vault_password": "client-vault-pass",
 	})
 	if createVaultRec.Code != http.StatusCreated {
 		t.Fatalf("expected 201 creating vault, got %d: %s", createVaultRec.Code, createVaultRec.Body.String())
@@ -373,8 +395,9 @@ func TestHandlerRenamesAndDeletesNamedVaults(t *testing.T) {
 	defer func() { _ = db.Close() }()
 
 	createVaultRec := performJSONRequest(t, handler, http.MethodPost, "/api/vault/vaults", map[string]any{
-		"name":        "Client Vault",
-		"description": "Per-client encrypted records",
+		"name":           "Client Vault",
+		"description":    "Per-client encrypted records",
+		"vault_password": "client-vault-pass",
 	})
 	if createVaultRec.Code != http.StatusCreated {
 		t.Fatalf("expected 201 creating vault, got %d: %s", createVaultRec.Code, createVaultRec.Body.String())
@@ -461,5 +484,17 @@ func TestHandlerRequiresVaultWhenNoneExist(t *testing.T) {
 	})
 	if createRec.Code != http.StatusBadRequest {
 		t.Fatalf("expected 400 creating record without a vault, got %d: %s", createRec.Code, createRec.Body.String())
+	}
+}
+
+func TestHandlerCreateVaultRequiresPassword(t *testing.T) {
+	handler, _, db := newTestHandler(t, vault.NewMemorySecretStore(), "")
+	defer func() { _ = db.Close() }()
+
+	createVaultRec := performJSONRequest(t, handler, http.MethodPost, "/api/vault/vaults", map[string]any{
+		"name": "Passwordless Vault",
+	})
+	if createVaultRec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 creating vault without a password, got %d: %s", createVaultRec.Code, createVaultRec.Body.String())
 	}
 }

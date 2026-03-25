@@ -124,6 +124,11 @@ func TestMigrations(t *testing.T) {
 		"mcp_bindings_json":     false,
 		"agent_mcp_access_json": false,
 	}
+	vaultColumns := map[string]bool{
+		"key_salt":       false,
+		"key_nonce":      false,
+		"key_ciphertext": false,
+	}
 
 	rows, err := db.QueryContext(ctx, "PRAGMA table_info(workspaces)")
 	if err != nil {
@@ -149,6 +154,33 @@ func TestMigrations(t *testing.T) {
 	for name, found := range workspaceColumns {
 		if !found {
 			t.Errorf("workspace column %s does not exist", name)
+		}
+	}
+
+	vaultRows, err := db.QueryContext(ctx, "PRAGMA table_info(vaults)")
+	if err != nil {
+		t.Fatalf("Failed to inspect vaults columns: %v", err)
+	}
+	defer func() { _ = vaultRows.Close() }()
+
+	for vaultRows.Next() {
+		var cid int
+		var name string
+		var colType string
+		var notNull int
+		var defaultValue sql.NullString
+		var pk int
+		if err := vaultRows.Scan(&cid, &name, &colType, &notNull, &defaultValue, &pk); err != nil {
+			t.Fatalf("Failed to scan vaults column info: %v", err)
+		}
+		if _, ok := vaultColumns[name]; ok {
+			vaultColumns[name] = true
+		}
+	}
+
+	for name, found := range vaultColumns {
+		if !found {
+			t.Errorf("vault column %s does not exist", name)
 		}
 	}
 

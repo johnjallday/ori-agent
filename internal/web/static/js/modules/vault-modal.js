@@ -31,7 +31,10 @@
     payloadRevealed: false,
     folderIndex: new Map(),
     expandedFolderPaths: new Set(DEFAULT_EXPANDED_FOLDERS),
-    selectedFolderPath: ROOT_FOLDER_PATH
+    selectedFolderPath: ROOT_FOLDER_PATH,
+    hasHydrated: false,
+    isHydrating: false,
+    unlockDialogOpen: false
   };
 
   let alertTimeoutId = 0;
@@ -75,6 +78,7 @@
       title: document.getElementById('vaultModalLabel'),
       subtitle: document.getElementById('vaultModalSubtitle'),
       alert: document.getElementById('vaultModalAlert'),
+      loadingState: document.getElementById('vaultModalLoadingState'),
       statusShell: document.getElementById('vaultModalStatusShell'),
       statusIndicator: document.getElementById('vaultModalStatusIndicator'),
       statusText: document.getElementById('vaultModalStatusText'),
@@ -83,14 +87,12 @@
       recordCountLabel: document.getElementById('vaultModalRecordCount'),
       writableLabel: document.getElementById('vaultModalWritableLabel'),
       modeLabel: document.getElementById('vaultModalModeLabel'),
-      passwordInput: document.getElementById('vaultModalPassword'),
-      togglePasswordBtn: document.getElementById('vaultModalTogglePassword'),
-      unlockBtn: document.getElementById('vaultModalUnlockBtn'),
+      vaultShell: document.getElementById('vaultModalVaultShell'),
+      vaultSelectionStack: document.getElementById('vaultModalVaultSelectionStack'),
+      selectedVaultState: document.getElementById('vaultModalSelectedVaultState'),
+      selectedVaultUnlockBtn: document.getElementById('vaultModalSelectedVaultUnlockBtn'),
       lockBtn: document.getElementById('vaultModalLockBtn'),
       refreshBtn: document.getElementById('vaultModalRefreshBtn'),
-      vaultShell: document.getElementById('vaultModalVaultShell'),
-      vaultCopy: document.getElementById('vaultModalVaultCopy'),
-      vaultSelectionStack: document.getElementById('vaultModalVaultSelectionStack'),
       vaultManageStack: document.getElementById('vaultModalVaultManageStack'),
       vaultCreateStack: document.getElementById('vaultModalVaultCreateStack'),
       vaultCreateTitle: document.getElementById('vaultModalVaultCreateTitle'),
@@ -103,7 +105,18 @@
       deleteVaultBtn: document.getElementById('vaultModalDeleteVaultBtn'),
       newVaultNameInput: document.getElementById('vaultModalNewVaultName'),
       newVaultDescriptionInput: document.getElementById('vaultModalNewVaultDescription'),
+      newVaultPasswordInput: document.getElementById('vaultModalNewVaultPassword'),
+      confirmVaultPasswordInput: document.getElementById('vaultModalConfirmVaultPassword'),
       createVaultBtn: document.getElementById('vaultModalCreateVaultBtn'),
+      unlockOverlay: document.getElementById('vaultModalUnlockOverlay'),
+      unlockDialogTitle: document.getElementById('vaultModalUnlockDialogTitle'),
+      unlockDialogDescription: document.getElementById('vaultModalUnlockDialogDescription'),
+      unlockVaultName: document.getElementById('vaultModalUnlockVaultName'),
+      passwordInput: document.getElementById('vaultModalUnlockPassword'),
+      passwordHelp: document.getElementById('vaultModalUnlockPasswordHelp'),
+      togglePasswordBtn: document.getElementById('vaultModalUnlockTogglePassword'),
+      unlockBtn: document.getElementById('vaultModalUnlockBtn'),
+      unlockCancelBtn: document.getElementById('vaultModalUnlockCancelBtn'),
       entryTypeInput: document.getElementById('vaultModalEntryType'),
       entryWorkspaceInput: document.getElementById('vaultModalEntryWorkspaceId'),
       entryLabelInput: document.getElementById('vaultModalEntryLabel'),
@@ -296,6 +309,8 @@
   function backendLabelFor(status) {
     const backend = String(status?.secret_store?.backend || 'unknown');
     switch (backend) {
+      case 'vault_password':
+        return 'Vault Password';
       case 'darwin_keychain':
         return 'macOS Keychain';
       case 'linux_secret_service':
@@ -370,6 +385,12 @@
       return;
     }
 
+    if (!state.hasHydrated || !status?.available) {
+      elements.launcherCount.textContent = '0';
+      elements.launcherCount.classList.add('is-hidden');
+      return;
+    }
+
     elements.launcherCount.textContent = String(status?.record_count || 0);
     elements.launcherCount.classList.remove('is-hidden');
   }
@@ -386,66 +407,122 @@
     return String(vaultItem.name || 'Vault');
   }
 
+  function syncUnlockDialog() {
+    if (!elements?.unlockOverlay) {
+      return;
+    }
+
+    const selectedVault = activeVault();
+    const vaultLabel = vaultDisplayLabel(selectedVault);
+    const canShow = Boolean(state.unlockDialogOpen && state.status && state.status.available && state.status.locked);
+
+    if (elements.unlockVaultName) {
+      elements.unlockVaultName.textContent = vaultLabel;
+    }
+
+    if (elements.unlockDialogDescription) {
+      elements.unlockDialogDescription.textContent = 'Enter the password for ' + vaultLabel + ' to load it inside Ori.';
+    }
+
+    elements.unlockOverlay.hidden = !canShow;
+    elements.modal?.classList.toggle('has-unlock-dialog', canShow);
+
+    if (!canShow && elements.passwordInput) {
+      elements.passwordInput.value = '';
+      elements.passwordInput.type = 'password';
+    }
+  }
+
   function applyModalMode() {
     if (!elements) {
       return;
     }
 
-    const hasVaults = state.vaults.length > 0;
+    const isInitialHydrate = state.isHydrating && !state.hasHydrated;
+    const hasVaults = state.hasHydrated && state.vaults.length > 0;
+    const showEmptyCreateMode = state.hasHydrated && state.vaults.length === 0;
+    const unlocked = Boolean(state.status && state.status.available && !state.status.locked);
+    const settingsHidden = isInitialHydrate || showEmptyCreateMode || !unlocked;
 
     if (elements.title) {
-      elements.title.textContent = hasVaults ? 'Private Vault' : 'Create Your First Vault';
+      elements.title.textContent = showEmptyCreateMode ? 'Create Your First Vault' : 'Private Vault';
     }
 
     if (elements.subtitle) {
-      elements.subtitle.textContent = hasVaults
-        ? 'Vault Creation and Vault Viewing in one place. Seal new records, unlock access when needed, and inspect stored entries without leaving the current page.'
-        : 'Start with a single encrypted vault. Once it exists, this modal expands into access controls, saved-entry creation, and folder browsing.';
+      if (isInitialHydrate) {
+        elements.subtitle.textContent = 'Vault data is fetched on demand. Ori is loading your vault list and encrypted status now.';
+      } else if (showEmptyCreateMode) {
+        elements.subtitle.textContent = 'Start with a single encrypted vault. Once it exists, unlock it to reveal entry tools and the protected folder view.';
+      } else if (hasVaults && !unlocked) {
+        elements.subtitle.textContent = 'Choose or create a vault, then unlock it. Entry creation and folder browsing stay hidden until the selected vault is actually loaded.';
+      } else {
+        elements.subtitle.textContent = 'Vault creation, encrypted entry capture, and folder browsing stay grouped here, but only loaded after you unlock the active vault.';
+      }
+    }
+
+    if (elements.loadingState) {
+      elements.loadingState.hidden = !isInitialHydrate;
     }
 
     if (elements.statusShell) {
-      elements.statusShell.hidden = !hasVaults;
-    }
-
-    if (elements.vaultCopy) {
-      elements.vaultCopy.hidden = !hasVaults;
+      elements.statusShell.hidden = isInitialHydrate || showEmptyCreateMode || !unlocked;
     }
 
     if (elements.vaultSelectionStack) {
-      elements.vaultSelectionStack.hidden = !hasVaults;
+      elements.vaultSelectionStack.hidden = isInitialHydrate || showEmptyCreateMode;
+    }
+
+    if (elements.selectedVaultState) {
+      elements.selectedVaultState.hidden = isInitialHydrate || showEmptyCreateMode || !hasVaults;
+    }
+
+    if (elements.selectedVaultUnlockBtn) {
+      elements.selectedVaultUnlockBtn.hidden = isInitialHydrate || showEmptyCreateMode || !hasVaults || unlocked;
     }
 
     if (elements.vaultManageStack) {
-      elements.vaultManageStack.hidden = !hasVaults;
+      elements.vaultManageStack.hidden = isInitialHydrate || showEmptyCreateMode || !unlocked;
     }
 
     if (elements.vaultCreateTitle) {
-      elements.vaultCreateTitle.textContent = hasVaults ? 'Create A New Vault' : 'Create A Vault';
+      elements.vaultCreateTitle.textContent = showEmptyCreateMode ? 'Create A Vault' : 'New Vault';
     }
 
     if (elements.createVaultBtn && !elements.createVaultBtn.disabled) {
-      elements.createVaultBtn.textContent = hasVaults ? 'Create Vault' : 'Create First Vault';
+      elements.createVaultBtn.textContent = showEmptyCreateMode ? 'Create First Vault' : 'Create Vault';
     }
 
     if (elements.vaultCreateStack) {
-      elements.vaultCreateStack.classList.toggle('is-primary', !hasVaults);
+      elements.vaultCreateStack.classList.toggle('is-primary', showEmptyCreateMode);
     }
 
     if (elements.vaultShell) {
-      elements.vaultShell.classList.toggle('is-empty', !hasVaults);
+      elements.vaultShell.hidden = isInitialHydrate;
+      elements.vaultShell.classList.toggle('is-empty', showEmptyCreateMode);
+      elements.vaultShell.classList.toggle('is-compact', hasVaults && !unlocked);
+    }
+
+    if (elements.lockBtn) {
+      elements.lockBtn.hidden = isInitialHydrate || showEmptyCreateMode || !unlocked;
+    }
+
+    if (elements.refreshBtn) {
+      elements.refreshBtn.hidden = isInitialHydrate || showEmptyCreateMode || !hasVaults;
     }
 
     if (elements.mainGrid) {
-      elements.mainGrid.hidden = !hasVaults;
+      elements.mainGrid.hidden = isInitialHydrate || showEmptyCreateMode || !unlocked;
     }
 
     if (elements.settingsLink) {
-      elements.settingsLink.hidden = !hasVaults;
+      elements.settingsLink.hidden = settingsHidden;
     }
 
     if (elements.footer) {
-      elements.footer.classList.toggle('is-empty', !hasVaults);
+      elements.footer.classList.toggle('is-empty', settingsHidden);
     }
+
+    syncUnlockDialog();
   }
 
   function syncVaultEditor() {
@@ -505,6 +582,9 @@
     if (!state.vaults.length) {
       elements.vaultSelect.innerHTML = '<option value="">No vaults available</option>';
       elements.vaultMeta.textContent = 'Create a vault to begin storing encrypted records.';
+      if (elements.selectedVaultState) {
+        elements.selectedVaultState.textContent = 'No vault loaded yet.';
+      }
       renderVaultRail();
       syncVaultEditor();
       return;
@@ -519,6 +599,9 @@
     const selectedVault = activeVault();
     if (!selectedVault) {
       elements.vaultMeta.textContent = 'Select a vault to continue.';
+      if (elements.selectedVaultState) {
+        elements.selectedVaultState.textContent = 'Select a vault to continue.';
+      }
       renderVaultRail();
       syncVaultEditor();
       return;
@@ -528,10 +611,44 @@
     if (selectedVault.description) {
       metaParts.push(selectedVault.description);
     }
+    metaParts.push(selectedVault.password_protected ? 'Own password' : 'Legacy vault');
     metaParts.push(String(vaultRecordCount(selectedVault)) + ' stored ' + (vaultRecordCount(selectedVault) === 1 ? 'entry' : 'entries'));
     elements.vaultMeta.textContent = metaParts.join(' • ');
     renderVaultRail();
     syncVaultEditor();
+  }
+
+  function closeUnlockDialog(options) {
+    state.unlockDialogOpen = false;
+    syncUnlockDialog();
+    const restoreFocus = options?.restoreFocus !== false;
+    if (restoreFocus && elements?.modal?.classList.contains('show') && state.status?.locked) {
+      window.requestAnimationFrame(function() {
+        elements?.selectedVaultUnlockBtn?.focus();
+      });
+    }
+  }
+
+  function openUnlockDialog() {
+    if (!activeVaultID()) {
+      showAlert('Create or select a vault before unlocking storage access.', 'warning');
+      return;
+    }
+
+    if (!state.status || !state.status.available) {
+      showAlert('Select a vault before unlocking storage access.', 'warning');
+      return;
+    }
+
+    if (!state.status.locked) {
+      return;
+    }
+
+    state.unlockDialogOpen = true;
+    syncUnlockDialog();
+    window.requestAnimationFrame(function() {
+      elements?.passwordInput?.focus();
+    });
   }
 
   async function loadVaults(preserveSelection) {
@@ -550,10 +667,15 @@
     renderVaultSelector();
   }
 
-  function switchVault(nextVaultID) {
+  async function switchVault(nextVaultID, options) {
     nextVaultID = String(nextVaultID || '').trim();
+    const promptUnlock = Boolean(options?.promptUnlock);
+
     if (!nextVaultID || nextVaultID === activeVaultID()) {
       renderVaultSelector();
+      if (promptUnlock && state.status?.locked) {
+        openUnlockDialog();
+      }
       return;
     }
 
@@ -561,15 +683,32 @@
     writeStoredVaultID(state.selectedVaultID);
     clearSelection();
     state.selectedFolderPath = ROOT_FOLDER_PATH;
-    refreshVault(false);
+    await refreshVault(false);
+
+    if (promptUnlock && state.status?.locked) {
+      openUnlockDialog();
+      return;
+    }
+
+    closeUnlockDialog();
   }
 
   async function createVault() {
     const name = String(elements?.newVaultNameInput?.value || '').trim();
     const description = String(elements?.newVaultDescriptionInput?.value || '').trim();
+    const password = String(elements?.newVaultPasswordInput?.value || '');
+    const confirmPassword = String(elements?.confirmVaultPasswordInput?.value || '');
 
     if (!name) {
       showAlert('New vault name is required before creating a vault.', 'warning');
+      return;
+    }
+    if (!password.trim()) {
+      showAlert('A vault password is required before creating a vault.', 'warning');
+      return;
+    }
+    if (password !== confirmPassword) {
+      showAlert('Vault password confirmation does not match.', 'warning');
       return;
     }
 
@@ -579,7 +718,8 @@
         method: 'POST',
         body: {
           name: name,
-          description: description
+          description: description,
+          vault_password: password
         }
       });
 
@@ -588,6 +728,12 @@
       }
       if (elements.newVaultDescriptionInput) {
         elements.newVaultDescriptionInput.value = '';
+      }
+      if (elements.newVaultPasswordInput) {
+        elements.newVaultPasswordInput.value = '';
+      }
+      if (elements.confirmVaultPasswordInput) {
+        elements.confirmVaultPasswordInput.value = '';
       }
 
       await loadVaults(false);
@@ -706,8 +852,16 @@
       elements.lockBtn.disabled = !state.status || !state.status.available || Boolean(locked);
     }
 
+    if (elements.refreshBtn) {
+      elements.refreshBtn.disabled = !state.status || !state.status.available;
+    }
+
+    if (elements.selectedVaultUnlockBtn) {
+      elements.selectedVaultUnlockBtn.disabled = !state.status || !state.status.available || !Boolean(locked);
+    }
+
     if (elements.unlockBtn) {
-      elements.unlockBtn.disabled = !state.status || !state.status.available || (!locked && !state.status.requires_passphrase);
+      elements.unlockBtn.disabled = !state.status || !state.status.available || !Boolean(locked);
     }
   }
 
@@ -733,6 +887,14 @@
       elements.recordCountLabel.textContent = '0';
       elements.writableLabel.textContent = 'Unavailable';
       elements.modeLabel.textContent = 'Create a vault';
+      if (elements.passwordHelp) {
+        elements.passwordHelp.textContent = 'Per-vault passwords are required for new vaults. Legacy vaults may still unlock through secure system storage or the older fallback passphrase flow.';
+      }
+      if (elements.selectedVaultState) {
+        elements.selectedVaultState.textContent = 'Create a vault to begin.';
+      }
+      closeUnlockDialog({ restoreFocus: false });
+      applyModalMode();
       updateLauncherCount(state.status);
       setInteractiveState(true);
       return;
@@ -740,6 +902,7 @@
 
     const locked = Boolean(state.status.locked);
     const requiresPassphrase = Boolean(state.status.requires_passphrase);
+    const passwordProtected = Boolean(state.status.password_protected);
     const backend = String(state.status.secret_store?.backend || '');
     const selectedVault = activeVault();
     const vaultName = selectedVault?.name || state.status.vault_name || 'Vault';
@@ -761,16 +924,38 @@
     elements.recordCountLabel.textContent = String(state.status.record_count || 0);
     elements.writableLabel.textContent = state.status.writable ? 'Writable' : 'Read-only / locked';
 
-    if (locked && requiresPassphrase) {
-      elements.modeLabel.textContent = 'Passphrase required';
+    if (passwordProtected && locked && requiresPassphrase) {
+      elements.modeLabel.textContent = 'Vault password required';
+    } else if (passwordProtected) {
+      elements.modeLabel.textContent = 'Per-vault password';
+    } else if (locked && requiresPassphrase) {
+      elements.modeLabel.textContent = 'Legacy passphrase required';
     } else if (backend === 'passphrase_fallback') {
       elements.modeLabel.textContent = 'Passphrase fallback';
     } else {
       elements.modeLabel.textContent = 'OS secure storage';
     }
 
+    if (elements.passwordHelp) {
+      elements.passwordHelp.textContent = passwordProtected
+        ? 'Enter the password for the selected vault to unlock it.'
+        : 'This legacy vault may still unlock through secure system storage or the older fallback passphrase flow.';
+    }
+    if (elements.selectedVaultState) {
+      elements.selectedVaultState.textContent = locked
+        ? vaultName + ' is locked. Unlock it to reveal the encrypted folder.'
+        : vaultName + ' is loaded and ready for encrypted entry access.';
+    }
+
+    applyModalMode();
     updateLauncherCount(state.status);
     setInteractiveState(locked);
+
+    if (!locked) {
+      closeUnlockDialog({ restoreFocus: false });
+    } else {
+      syncUnlockDialog();
+    }
   }
 
   function resetCreateForm() {
@@ -1221,6 +1406,7 @@
         available: false,
         locked: true,
         writable: false,
+        password_protected: false,
         requires_passphrase: false,
         message: 'Create a vault to begin storing encrypted records.',
         record_count: 0,
@@ -1313,17 +1499,61 @@
     }
   }
 
+  function focusPrimaryControl() {
+    if (!elements || !elements.modal.classList.contains('show') || state.isHydrating || !state.hasHydrated) {
+      return;
+    }
+
+    if (state.unlockDialogOpen && !elements.unlockOverlay?.hidden) {
+      elements.passwordInput?.focus();
+      return;
+    }
+
+    if (!state.vaults.length) {
+      elements.newVaultNameInput?.focus();
+      return;
+    }
+    if (state.status && state.status.locked) {
+      elements.selectedVaultUnlockBtn?.focus();
+      return;
+    }
+    elements.searchInput?.focus();
+  }
+
+  async function hydrateModal() {
+    if (state.isHydrating) {
+      return;
+    }
+
+    state.isHydrating = true;
+    applyModalMode();
+    try {
+      await refreshVault();
+      state.hasHydrated = true;
+    } finally {
+      state.isHydrating = false;
+      applyModalMode();
+      focusPrimaryControl();
+    }
+  }
+
   async function unlockVault() {
     if (!activeVaultID()) {
       showAlert('Create or select a vault before unlocking storage access.', 'warning');
       return;
     }
 
+    if (!String(elements.passwordInput?.value || '').trim()) {
+      showAlert('Enter the selected vault password before unlocking.', 'warning');
+      return;
+    }
+
     try {
       setButtonLoading(elements.unlockBtn, true, 'Unlocking');
-      await apiRequest('/api/vault/unlock', {
+      await apiRequest(vaultURL('/api/vault/unlock'), {
         method: 'POST',
         body: {
+          vault_id: activeVaultID(),
           vault_password: String(elements.passwordInput?.value || '')
         }
       });
@@ -1331,6 +1561,7 @@
         elements.passwordInput.value = '';
       }
       notify('Vault unlocked.', 'success');
+      closeUnlockDialog({ restoreFocus: false });
       await refreshVault(false);
     } catch (error) {
       console.error('Failed to unlock vault:', error);
@@ -1349,11 +1580,12 @@
 
     try {
       setButtonLoading(elements.lockBtn, true, 'Locking');
-      await apiRequest('/api/vault/lock', {
+      await apiRequest(vaultURL('/api/vault/lock'), {
         method: 'POST',
         body: {}
       });
       notify('Vault locked.', 'success');
+      closeUnlockDialog({ restoreFocus: false });
       await refreshVault(false);
     } catch (error) {
       console.error('Failed to lock vault:', error);
@@ -1495,10 +1727,29 @@
         event.preventDefault();
         unlockVault();
       }
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        closeUnlockDialog();
+      }
+    });
+
+    elements.selectedVaultUnlockBtn?.addEventListener('click', function() {
+      openUnlockDialog();
     });
 
     elements.unlockBtn?.addEventListener('click', function() {
       unlockVault();
+    });
+
+    elements.unlockCancelBtn?.addEventListener('click', function() {
+      closeUnlockDialog();
+    });
+
+    elements.unlockOverlay?.addEventListener('click', function(event) {
+      const dismissTrigger = event.target.closest('[data-action="dismiss-unlock-dialog"]');
+      if (dismissTrigger) {
+        closeUnlockDialog();
+      }
     });
 
     elements.lockBtn?.addEventListener('click', function() {
@@ -1510,7 +1761,7 @@
     });
 
     elements.vaultSelect?.addEventListener('change', function(event) {
-      switchVault(event.target.value);
+      switchVault(event.target.value, { promptUnlock: true });
     });
 
     elements.vaultRail?.addEventListener('click', function(event) {
@@ -1519,7 +1770,7 @@
         return;
       }
 
-      switchVault(trigger.getAttribute('data-vault-id'));
+      switchVault(trigger.getAttribute('data-vault-id'), { promptUnlock: true });
     });
 
     elements.renameVaultBtn?.addEventListener('click', function() {
@@ -1548,6 +1799,13 @@
       }
     });
 
+    elements.confirmVaultPasswordInput?.addEventListener('keydown', function(event) {
+      if (event.key === 'Enter') {
+        event.preventDefault();
+        createVault();
+      }
+    });
+
     elements.resetBtn?.addEventListener('click', function() {
       resetCreateForm();
       showAlert('');
@@ -1565,26 +1823,31 @@
     bindPreviewEvents();
     bindBreadcrumbEvents();
 
+    elements.modal?.addEventListener('keydown', function(event) {
+      if (event.key === 'Escape' && state.unlockDialogOpen) {
+        event.preventDefault();
+        event.stopPropagation();
+        closeUnlockDialog();
+      }
+    });
+
     if (window.bootstrap && window.bootstrap.Modal) {
       elements.modal.addEventListener('show.bs.modal', function() {
         setLauncherActive(true);
+        if (!state.hasHydrated) {
+          hydrateModal();
+          return;
+        }
         refreshVault();
       });
 
       elements.modal.addEventListener('hidden.bs.modal', function() {
         setLauncherActive(false);
+        closeUnlockDialog();
       });
 
       elements.modal.addEventListener('shown.bs.modal', function() {
-        if (!state.vaults.length) {
-          elements.newVaultNameInput?.focus();
-          return;
-        }
-        if (state.status && state.status.locked) {
-          elements.passwordInput?.focus();
-          return;
-        }
-        elements.searchInput?.focus();
+        focusPrimaryControl();
       });
     }
   }
@@ -1600,15 +1863,7 @@
     applyModalMode();
     renderExplorer();
     bindEvents();
-
-    try {
-      await loadVaults(true);
-      await loadVaultStatus();
-      renderVaultSelector();
-      renderExplorer();
-    } catch (error) {
-      console.error('Failed to load vault launcher status:', error);
-    }
+    updateLauncherCount(null);
   }
 
   if (document.readyState === 'loading') {

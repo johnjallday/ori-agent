@@ -10,7 +10,7 @@ import (
 
 // schemaVersion is the current database schema version.
 // Increment this when adding new migrations.
-const schemaVersion = 5
+const schemaVersion = 6
 
 // migrate runs all pending migrations to bring the database up to the current schema.
 func (db *DB) migrate(ctx context.Context) error {
@@ -75,6 +75,8 @@ func (db *DB) runMigration(ctx context.Context, version int) error {
 		return db.migration004NamedVaults(ctx)
 	case 5:
 		return db.migration005RemoveEmptyDefaultVault(ctx)
+	case 6:
+		return db.migration006VaultPasswordKeys(ctx)
 	default:
 		return fmt.Errorf("unknown migration version: %d", version)
 	}
@@ -600,6 +602,27 @@ func (db *DB) migration005RemoveEmptyDefaultVault(ctx context.Context) error {
 		  AND NOT EXISTS (SELECT 1 FROM vault_audit_events WHERE vault_id = 'default')
 	`); err != nil {
 		return fmt.Errorf("failed to remove empty default vault: %w", err)
+	}
+
+	return tx.Commit()
+}
+
+func (db *DB) migration006VaultPasswordKeys(ctx context.Context) error {
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("failed to begin transaction: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	columnStatements := []string{
+		`ALTER TABLE vaults ADD COLUMN key_salt TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE vaults ADD COLUMN key_nonce TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE vaults ADD COLUMN key_ciphertext TEXT NOT NULL DEFAULT ''`,
+	}
+	for _, stmt := range columnStatements {
+		if _, err := tx.ExecContext(ctx, stmt); err != nil && !isDuplicateColumnError(err) {
+			return fmt.Errorf("failed to add vault password key column: %w", err)
+		}
 	}
 
 	return tx.Commit()

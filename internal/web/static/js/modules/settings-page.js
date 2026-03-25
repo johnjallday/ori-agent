@@ -1535,6 +1535,7 @@ document.getElementById('systemDiagnosticsBtn')?.addEventListener('click', async
   const lockBtn = document.getElementById('vaultLockBtn');
   const refreshBtn = document.getElementById('vaultRefreshBtn');
   const toggleUnlockPasswordBtn = document.getElementById('toggleVaultUnlockPassword');
+  const unlockPasswordHelp = document.getElementById('vaultUnlockPasswordHelp');
   const alertsEl = document.getElementById('vaultAlerts');
   const activeVaultSelect = document.getElementById('vaultActiveVaultId');
   const activeVaultMeta = document.getElementById('vaultActiveVaultMeta');
@@ -1544,6 +1545,8 @@ document.getElementById('systemDiagnosticsBtn')?.addEventListener('click', async
   const deleteVaultBtn = document.getElementById('vaultDeleteVaultBtn');
   const newVaultNameInput = document.getElementById('vaultNewVaultName');
   const newVaultDescriptionInput = document.getElementById('vaultNewVaultDescription');
+  const newVaultPasswordInput = document.getElementById('vaultNewVaultPassword');
+  const confirmVaultPasswordInput = document.getElementById('vaultConfirmVaultPassword');
   const createVaultSpaceBtn = document.getElementById('vaultCreateVaultSpaceBtn');
 
   const entryTypeInput = document.getElementById('vaultEntryType');
@@ -1570,6 +1573,7 @@ document.getElementById('systemDiagnosticsBtn')?.addEventListener('click', async
 
   const exportWorkspaceInput = document.getElementById('vaultExportWorkspaceId');
   const exportConfirmInput = document.getElementById('vaultExportConfirm');
+  const exportPasswordInput = document.getElementById('vaultExportPassword');
   const exportBtn = document.getElementById('vaultExportBtn');
 
   let vaultStatus = null;
@@ -1720,6 +1724,8 @@ document.getElementById('systemDiagnosticsBtn')?.addEventListener('click', async
   function backendLabelFor(status) {
     const backend = String(status?.secret_store?.backend || 'unknown');
     switch (backend) {
+      case 'vault_password':
+        return 'Vault Password';
       case 'darwin_keychain':
         return 'macOS Keychain';
       case 'linux_secret_service':
@@ -1799,6 +1805,7 @@ document.getElementById('systemDiagnosticsBtn')?.addEventListener('click', async
     if (selectedVault.description) {
       details.push(selectedVault.description);
     }
+    details.push(selectedVault.password_protected ? 'Own password' : 'Legacy vault');
     details.push(`${vaultRecordCount(selectedVault)} stored ${vaultRecordCount(selectedVault) === 1 ? 'entry' : 'entries'}`);
     activeVaultMeta.textContent = details.join(' • ');
 
@@ -1849,9 +1856,19 @@ document.getElementById('systemDiagnosticsBtn')?.addEventListener('click', async
   async function createVaultSpace() {
     const name = String(newVaultNameInput?.value || '').trim();
     const description = String(newVaultDescriptionInput?.value || '').trim();
+    const password = String(newVaultPasswordInput?.value || '');
+    const confirmPassword = String(confirmVaultPasswordInput?.value || '');
 
     if (!name) {
       showInlineAlert('New vault name is required before creating a vault.', 'warning');
+      return;
+    }
+    if (!password.trim()) {
+      showInlineAlert('A vault password is required before creating a vault.', 'warning');
+      return;
+    }
+    if (password !== confirmPassword) {
+      showInlineAlert('Vault password confirmation does not match.', 'warning');
       return;
     }
 
@@ -1861,12 +1878,15 @@ document.getElementById('systemDiagnosticsBtn')?.addEventListener('click', async
         method: 'POST',
         body: {
           name,
-          description
+          description,
+          vault_password: password
         }
       });
 
       if (newVaultNameInput) newVaultNameInput.value = '';
       if (newVaultDescriptionInput) newVaultDescriptionInput.value = '';
+      if (newVaultPasswordInput) newVaultPasswordInput.value = '';
+      if (confirmVaultPasswordInput) confirmVaultPasswordInput.value = '';
 
       await loadVaults();
       if (response?.vault?.id) {
@@ -1986,12 +2006,16 @@ document.getElementById('systemDiagnosticsBtn')?.addEventListener('click', async
       modeLabel.textContent = 'Create a vault';
       modeLabel.style.background = '#e2e8f0';
       modeLabel.style.color = '#475569';
+      if (unlockPasswordHelp) {
+        unlockPasswordHelp.textContent = 'Per-vault passwords are required for new vaults. Legacy vaults may still unlock through secure system storage or the older fallback passphrase flow.';
+      }
       setInteractiveState(true);
       return;
     }
 
     const locked = Boolean(vaultStatus.locked);
     const requiresPassphrase = Boolean(vaultStatus.requires_passphrase);
+    const passwordProtected = Boolean(vaultStatus.password_protected);
     const dotColor = locked ? '#f59e0b' : '#10b981';
     const selectedVault = currentVault();
     const vaultName = selectedVault?.name || vaultStatus.vault_name || 'Vault';
@@ -2012,8 +2036,16 @@ document.getElementById('systemDiagnosticsBtn')?.addEventListener('click', async
     recordCountLabel.textContent = String(vaultStatus.record_count ?? 0);
     writableLabel.textContent = vaultStatus.writable ? 'Writable' : 'Read-only / locked';
 
-    if (locked && requiresPassphrase) {
-      modeLabel.textContent = 'Passphrase unlock required';
+    if (passwordProtected && locked && requiresPassphrase) {
+      modeLabel.textContent = 'Vault password required';
+      modeLabel.style.background = '#fef3c7';
+      modeLabel.style.color = '#92400e';
+    } else if (passwordProtected) {
+      modeLabel.textContent = 'Per-vault password';
+      modeLabel.style.background = '#dcfce7';
+      modeLabel.style.color = '#166534';
+    } else if (locked && requiresPassphrase) {
+      modeLabel.textContent = 'Legacy passphrase required';
       modeLabel.style.background = '#fef3c7';
       modeLabel.style.color = '#92400e';
     } else if (String(vaultStatus.secret_store?.backend || '') === 'passphrase_fallback') {
@@ -2024,6 +2056,12 @@ document.getElementById('systemDiagnosticsBtn')?.addEventListener('click', async
       modeLabel.textContent = 'OS secure storage';
       modeLabel.style.background = '#dcfce7';
       modeLabel.style.color = '#166534';
+    }
+
+    if (unlockPasswordHelp) {
+      unlockPasswordHelp.textContent = passwordProtected
+        ? 'Enter the password for the selected vault to unlock it.'
+        : 'This legacy vault may still unlock through secure system storage or the older fallback passphrase flow.';
     }
 
     setInteractiveState(locked);
@@ -2146,6 +2184,7 @@ document.getElementById('systemDiagnosticsBtn')?.addEventListener('click', async
         available: false,
         locked: true,
         writable: false,
+        password_protected: false,
         requires_passphrase: false,
         message: 'Create a vault to begin storing encrypted records.',
         record_count: 0,
@@ -2317,7 +2356,10 @@ document.getElementById('systemDiagnosticsBtn')?.addEventListener('click', async
       setButtonLoading(unlockBtn, true, 'Unlocking');
       await apiRequest(vaultURL('/api/vault/unlock'), {
         method: 'POST',
-        body: { vault_password: unlockPasswordInput.value }
+        body: {
+          vault_id: currentVaultID(),
+          vault_password: unlockPasswordInput.value
+        }
       });
       unlockPasswordInput.value = '';
       notify('Vault unlocked.', 'success');
@@ -2418,9 +2460,9 @@ document.getElementById('systemDiagnosticsBtn')?.addEventListener('click', async
       return;
     }
 
-    const vaultPassword = unlockPasswordInput.value.trim();
-    if (!vaultPassword) {
-      showInlineAlert('Enter the vault password before exporting.', 'warning');
+    const exportPassword = String(exportPasswordInput?.value || '').trim();
+    if (!exportPassword) {
+      showInlineAlert('Enter an export password before exporting.', 'warning');
       return;
     }
 
@@ -2431,7 +2473,7 @@ document.getElementById('systemDiagnosticsBtn')?.addEventListener('click', async
         body: {
           vault_id: currentVaultID(),
           workspace_id: exportWorkspaceInput.value.trim(),
-          vault_password: vaultPassword,
+          vault_password: exportPassword,
           confirm: true
         }
       });
@@ -2495,6 +2537,13 @@ document.getElementById('systemDiagnosticsBtn')?.addEventListener('click', async
   });
 
   newVaultNameInput?.addEventListener('keydown', (event) => {
+    if (event.key === 'Enter') {
+      event.preventDefault();
+      createVaultSpace();
+    }
+  });
+
+  confirmVaultPasswordInput?.addEventListener('keydown', (event) => {
     if (event.key === 'Enter') {
       event.preventDefault();
       createVaultSpace();

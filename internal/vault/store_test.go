@@ -10,6 +10,8 @@ import (
 	"github.com/johnjallday/ori-agent/internal/database"
 )
 
+const testVaultPassword = "test-vault-password"
+
 func newTestVaultStore(t *testing.T) (*Store, *database.DB) {
 	t.Helper()
 
@@ -27,10 +29,14 @@ func newTestVaultStore(t *testing.T) (*Store, *database.DB) {
 }
 
 func createTestVault(t *testing.T, ctx context.Context, store *Store, name string) Vault {
+	return createTestVaultWithPassword(t, ctx, store, name, testVaultPassword)
+}
+
+func createTestVaultWithPassword(t *testing.T, ctx context.Context, store *Store, name string, password string) Vault {
 	t.Helper()
 
 	item := Vault{Name: name}
-	if err := store.CreateVault(ctx, &item); err != nil {
+	if err := store.CreateVault(ctx, &item, password); err != nil {
 		t.Fatalf("create test vault %q: %v", name, err)
 	}
 	return item
@@ -243,11 +249,11 @@ func TestStoreSupportsMultipleVaults(t *testing.T) {
 	store, db := newTestVaultStore(t)
 	defer func() { _ = db.Close() }()
 
-	personalVault := createTestVault(t, ctx, store, "Personal Vault")
+	personalVault := createTestVaultWithPassword(t, ctx, store, "Personal Vault", "personal-vault-pass")
 	if err := store.CreateVault(ctx, &Vault{
 		Name:        "Finance Vault",
 		Description: "Quarterly and tax records",
-	}); err != nil {
+	}, "finance-vault-pass"); err != nil {
 		t.Fatalf("create second vault: %v", err)
 	}
 
@@ -313,11 +319,30 @@ func TestStoreSupportsMultipleVaults(t *testing.T) {
 	if !ok {
 		t.Fatal("expected memory secret store")
 	}
-	if _, ok := memoryStore.secrets[vaultDEKSecretKey(personalVault.ID)]; !ok {
-		t.Fatal("expected personal vault DEK to be stored")
+	if _, ok := memoryStore.secrets[vaultDEKSecretKey(personalVault.ID)]; ok {
+		t.Fatal("did not expect personal vault DEK in the shared secret store")
 	}
-	if _, ok := memoryStore.secrets[vaultDEKSecretKey(financeVault.ID)]; !ok {
-		t.Fatal("expected finance vault DEK to be stored")
+	if _, ok := memoryStore.secrets[vaultDEKSecretKey(financeVault.ID)]; ok {
+		t.Fatal("did not expect finance vault DEK in the shared secret store")
+	}
+
+	if err := store.Lock(ctx, financeVault.ID); err != nil {
+		t.Fatalf("lock finance vault: %v", err)
+	}
+	if _, err := store.ListRecords(ctx, RecordFilter{VaultID: financeVault.ID}, AccessContext{}); !errors.Is(err, ErrVaultLocked) {
+		t.Fatalf("expected finance vault to be locked, got %v", err)
+	}
+	if _, err := store.ListRecords(ctx, RecordFilter{VaultID: personalVault.ID}, AccessContext{}); err != nil {
+		t.Fatalf("expected personal vault to remain available, got %v", err)
+	}
+	if err := store.Unlock(ctx, financeVault.ID, "personal-vault-pass"); !errors.Is(err, ErrVaultPasswordInvalid) {
+		t.Fatalf("expected ErrVaultPasswordInvalid unlocking with the wrong password, got %v", err)
+	}
+	if err := store.Unlock(ctx, financeVault.ID, "finance-vault-pass"); err != nil {
+		t.Fatalf("unlock finance vault: %v", err)
+	}
+	if _, err := store.ListRecords(ctx, RecordFilter{VaultID: financeVault.ID}, AccessContext{}); err != nil {
+		t.Fatalf("expected finance vault to unlock, got %v", err)
 	}
 }
 
@@ -329,7 +354,7 @@ func TestStoreRenamesAndDeletesVaults(t *testing.T) {
 	if err := store.CreateVault(ctx, &Vault{
 		Name:        "Finance Vault",
 		Description: "Quarterly and tax records",
-	}); err != nil {
+	}, testVaultPassword); err != nil {
 		t.Fatalf("create finance vault: %v", err)
 	}
 
@@ -405,7 +430,7 @@ func TestStoreRenamesAndDeletesVaults(t *testing.T) {
 		t.Fatal("expected memory secret store")
 	}
 	if _, ok := memoryStore.secrets[vaultDEKSecretKey(financeVault.ID)]; ok {
-		t.Fatal("expected deleted vault DEK to be removed")
+		t.Fatal("did not expect deleted password-protected vault to use a shared secret-store DEK")
 	}
 }
 
@@ -428,5 +453,15 @@ func TestStoreRequiresVaultWhenNoneExist(t *testing.T) {
 		Payload: json.RawMessage(`{"ok":true}`),
 	}, AccessContext{}); !errors.Is(err, ErrVaultRequired) {
 		t.Fatalf("expected ErrVaultRequired creating record without vaults, got %v", err)
+	}
+}
+
+func TestStoreCreateVaultRequiresPassword(t *testing.T) {
+	ctx := context.Background()
+	store, db := newTestVaultStore(t)
+	defer func() { _ = db.Close() }()
+
+	if err := store.CreateVault(ctx, &Vault{Name: "No Password Vault"}, ""); !errors.Is(err, ErrVaultPasswordRequired) {
+		t.Fatalf("expected ErrVaultPasswordRequired, got %v", err)
 	}
 }

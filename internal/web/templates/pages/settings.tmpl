@@ -1123,9 +1123,18 @@
                     <label class="settings-label" for="vaultNewVaultDescription">Description</label>
                     <input id="vaultNewVaultDescription" type="text" class="form-control settings-input" placeholder="Optional note about what belongs in this vault">
                   </div>
+                  <div class="settings-field">
+                    <label class="settings-label" for="vaultNewVaultPassword">Vault password</label>
+                    <input id="vaultNewVaultPassword" type="password" class="form-control settings-input" placeholder="Required for this vault">
+                  </div>
+                  <div class="settings-field">
+                    <label class="settings-label" for="vaultConfirmVaultPassword">Confirm vault password</label>
+                    <input id="vaultConfirmVaultPassword" type="password" class="form-control settings-input" placeholder="Re-enter the vault password">
+                  </div>
                   <div class="settings-actions">
                     <button id="vaultCreateVaultSpaceBtn" class="modern-btn modern-btn-secondary" type="button">Create Vault</button>
                   </div>
+                  <span class="settings-help">Each vault has its own password. Keep it somewhere safe because Ori cannot recover it later.</span>
                 </div>
               </div>
             </div>
@@ -1136,7 +1145,7 @@
                 <input id="vaultUnlockPassword"
                        type="password"
                        class="form-control settings-input"
-                       placeholder="Required for passphrase fallback unlock and export">
+                       placeholder="Enter the selected vault password">
                 <button class="btn btn-outline-secondary" type="button" id="toggleVaultUnlockPassword" aria-label="Toggle password visibility">
                   <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
                     <path d="M12,9A3,3 0 0,0 9,12A3,3 0 0,0 12,15A3,3 0 0,0 15,12A3,3 0 0,0 12,9M12,17A5,5 0 0,1 7,12A5,5 0 0,1 12,7A5,5 0 0,1 17,12A5,5 0 0,1 12,17M12,4.5C7,4.5 2.73,7.61 1,12C2.73,16.39 7,19.5 12,19.5C17,19.5 21.27,16.39 23,12C21.27,7.61 17,4.5 12,4.5Z"/>
@@ -1146,7 +1155,7 @@
                 <button id="vaultLockBtn" class="btn btn-outline-secondary" type="button">Lock Vault</button>
                 <button id="vaultRefreshBtn" class="btn btn-outline-secondary" type="button">Refresh</button>
               </div>
-              <span class="settings-help">Use a password when the vault is in passphrase fallback mode. OS-backed secure storage unlocks automatically, but export still requires a vault password.</span>
+              <span id="vaultUnlockPasswordHelp" class="settings-help">Per-vault passwords are required for new vaults. Legacy vaults may still unlock through secure system storage or the older fallback passphrase flow.</span>
             </div>
 
             <div class="settings-grid mb-4">
@@ -1265,6 +1274,10 @@
                 <label class="form-check-label" for="vaultExportConfirm" style="color: var(--text-primary);">
                   I understand this export contains encrypted private data and should be handled carefully.
                 </label>
+              </div>
+              <div class="settings-field">
+                <label class="settings-label" for="vaultExportPassword">Export password</label>
+                <input id="vaultExportPassword" type="password" class="form-control settings-input" placeholder="Used to encrypt the export bundle">
               </div>
               <div class="settings-actions">
                 <button id="vaultExportBtn" class="modern-btn modern-btn-primary" type="button">Export Vault</button>
