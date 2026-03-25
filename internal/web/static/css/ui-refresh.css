@@ -1013,6 +1013,73 @@ body::after {
   line-height: 1.45;
 }
 
+.vault-modal-attachments-list {
+  display: grid;
+  gap: 0.7rem;
+}
+
+.vault-modal-attachments-empty {
+  padding: 0.9rem 1rem;
+  border-radius: 16px;
+  border: 1px dashed rgba(173, 132, 88, 0.24);
+  background: rgba(255, 255, 255, 0.48);
+  color: var(--text-secondary);
+  font-size: 0.82rem;
+  line-height: 1.45;
+}
+
+.vault-modal-attachment-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.8rem;
+  padding: 0.8rem 0.9rem;
+  border-radius: 18px;
+  border: 1px solid rgba(170, 127, 81, 0.16);
+  background: rgba(255, 255, 255, 0.62);
+}
+
+.vault-modal-attachment-item-main {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.vault-modal-attachment-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.3rem;
+  height: 2.3rem;
+  border-radius: 14px;
+  background: rgba(199, 92, 46, 0.12);
+  color: var(--primary-color);
+  flex: 0 0 auto;
+}
+
+.vault-modal-attachment-copy {
+  min-width: 0;
+}
+
+.vault-modal-attachment-name {
+  color: var(--text-primary);
+  font-weight: 700;
+  word-break: break-word;
+}
+
+.vault-modal-attachment-meta {
+  margin-top: 0.15rem;
+  color: var(--text-secondary);
+  font-size: 0.8rem;
+}
+
+.vault-modal-attachment-remove,
+.vault-modal-attachment-download {
+  flex: 0 0 auto;
+}
+
 .vault-modal-advanced-details {
   margin-top: 0.9rem;
   border: 1px solid rgba(169, 124, 78, 0.16);
@@ -1598,6 +1665,51 @@ body::after {
   margin-top: 0.9rem;
 }
 
+.vault-modal-attachments-wrap {
+  margin-top: 0.9rem;
+}
+
+.vault-modal-attachment-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr));
+  gap: 0.75rem;
+  margin-top: 0.55rem;
+}
+
+.vault-modal-attachment-card {
+  display: grid;
+  grid-template-columns: 72px minmax(0, 1fr);
+  gap: 0.75rem;
+  padding: 0.8rem;
+  border-radius: 18px;
+  border: 1px solid rgba(170, 127, 81, 0.16);
+  background: rgba(255, 255, 255, 0.62);
+}
+
+.vault-modal-attachment-thumb {
+  width: 72px;
+  height: 72px;
+  object-fit: cover;
+  border-radius: 14px;
+  background: rgba(233, 224, 209, 0.7);
+  border: 1px solid rgba(173, 132, 88, 0.18);
+}
+
+.vault-modal-attachment-thumb.is-generic {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--primary-color);
+}
+
+.vault-modal-attachment-card-body {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 0.45rem;
+}
+
 .vault-modal-payload-preview {
   margin: 0;
   min-height: 12.5rem;
@@ -1757,6 +1869,22 @@ body::after {
   background: rgba(18, 24, 36, 0.76);
   border-color: rgba(209, 171, 126, 0.14);
   color: #ffd39d;
+}
+
+[data-bs-theme="dark"] .vault-modal-attachments-empty,
+[data-bs-theme="dark"] .vault-modal-attachment-item,
+[data-bs-theme="dark"] .vault-modal-attachment-card,
+.dark-mode .vault-modal-attachments-empty,
+.dark-mode .vault-modal-attachment-item,
+.dark-mode .vault-modal-attachment-card {
+  border-color: rgba(209, 171, 126, 0.16);
+  background: rgba(35, 43, 60, 0.72);
+}
+
+[data-bs-theme="dark"] .vault-modal-attachment-thumb,
+.dark-mode .vault-modal-attachment-thumb {
+  border-color: rgba(209, 171, 126, 0.14);
+  background: rgba(18, 24, 37, 0.74);
 }
 
 [data-bs-theme="dark"] .vault-modal-mode-toggle,
@@ -2681,6 +2809,15 @@ textarea.form-control:focus {
     flex-direction: column;
   }
 
+  .vault-modal-attachment-item {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .vault-modal-attachment-card {
+    grid-template-columns: 64px minmax(0, 1fr);
+  }
+
   .vault-modal-advanced-grid {
     grid-template-columns: minmax(0, 1fr);
   }
@@ -2742,6 +2879,10 @@ textarea.form-control:focus {
   .vault-modal-preview-file-name {
     white-space: normal;
     word-break: break-word;
+  }
+
+  .vault-modal-attachment-grid {
+    grid-template-columns: minmax(0, 1fr);
   }
 
   .vault-modal-folder-meta {

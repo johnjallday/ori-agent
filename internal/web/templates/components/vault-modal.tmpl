@@ -180,6 +180,18 @@
             <div id="vaultModalEntryContentHelp" class="vault-modal-help">Write normal text here. Ori will turn it into an encrypted record for you.</div>
           </div>
 
+          <div class="vault-modal-field">
+            <div class="vault-modal-field-head">
+              <label class="vault-modal-label" for="vaultModalEntryAttachmentsInput">Attachments</label>
+              <button id="vaultModalEntryAttachBtn" class="modern-btn modern-btn-secondary" type="button">Add Files</button>
+            </div>
+            <input id="vaultModalEntryAttachmentsInput" type="file" multiple accept="image/*,.pdf,.txt,.md,.doc,.docx,.csv,.json,.xml,.html,.zip,.png,.jpg,.jpeg,.gif,.webp" hidden>
+            <div id="vaultModalEntryAttachmentsList" class="vault-modal-attachments-list">
+              <div class="vault-modal-attachments-empty">No files or images attached yet.</div>
+            </div>
+            <div class="vault-modal-help">Files and images are sealed into the same encrypted entry as the rest of the payload.</div>
+          </div>
+
           <div id="vaultModalEntryPayloadField" class="vault-modal-field" hidden>
             <label class="vault-modal-label" for="vaultModalEntryPayload">Structured payload</label>
             <textarea id="vaultModalEntryPayload" class="form-control vault-modal-textarea" rows="8" spellcheck="false" placeholder='{"note":"private"}'></textarea>

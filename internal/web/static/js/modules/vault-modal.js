@@ -5,6 +5,8 @@
   const DEFAULT_VAULT_ID = '';
   const VAULT_STORAGE_KEY = 'ori-selected-vault-id';
   const DEFAULT_EXPANDED_FOLDERS = new Set([ROOT_FOLDER_PATH, TYPE_FOLDER_PATH, WORKSPACE_FOLDER_PATH]);
+  const MAX_ENTRY_ATTACHMENTS = 6;
+  const MAX_ENTRY_ATTACHMENT_BYTES = 10 * 1024 * 1024;
 
   const TYPE_META = {
     personal_note: {
@@ -38,7 +40,8 @@
     createDialogOpen: false,
     entryDialogOpen: false,
     entryDialogMode: 'create',
-    entryDialogRecord: null
+    entryDialogRecord: null,
+    entryAttachments: []
   };
 
   let alertTimeoutId = 0;
@@ -136,6 +139,9 @@
       entryContentField: document.getElementById('vaultModalEntryContentField'),
       entryContentInput: document.getElementById('vaultModalEntryContent'),
       entryContentHelp: document.getElementById('vaultModalEntryContentHelp'),
+      entryAttachBtn: document.getElementById('vaultModalEntryAttachBtn'),
+      entryAttachmentsInput: document.getElementById('vaultModalEntryAttachmentsInput'),
+      entryAttachmentsList: document.getElementById('vaultModalEntryAttachmentsList'),
       entryJsonModeInput: document.getElementById('vaultModalEntryJsonMode'),
       entryTagsInput: document.getElementById('vaultModalEntryTags'),
       entrySourceInput: document.getElementById('vaultModalEntrySource'),
@@ -299,6 +305,269 @@
       console.error('Failed to pretty-print vault payload:', error);
       return '{}';
     }
+  }
+
+  function formatBytes(value) {
+    const bytes = Number(value || 0);
+    if (!Number.isFinite(bytes) || bytes <= 0) {
+      return '0 B';
+    }
+
+    const units = ['B', 'KB', 'MB', 'GB'];
+    let size = bytes;
+    let unitIndex = 0;
+    while (size >= 1024 && unitIndex < units.length - 1) {
+      size /= 1024;
+      unitIndex += 1;
+    }
+
+    const digits = size >= 10 || unitIndex === 0 ? 0 : 1;
+    return size.toFixed(digits) + ' ' + units[unitIndex];
+  }
+
+  function attachmentKindForMimeType(mimeType) {
+    return String(mimeType || '').toLowerCase().startsWith('image/') ? 'image' : 'file';
+  }
+
+  function attachmentIcon(kind) {
+    if (kind === 'image') {
+      return '<svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M21,19V5A2,2 0 0,0 19,3H5A2,2 0 0,0 3,5V19A2,2 0 0,0 5,21H19A2,2 0 0,0 21,19M8.5,11A1.5,1.5 0 0,1 10,12.5A1.5,1.5 0 0,1 8.5,14A1.5,1.5 0 0,1 7,12.5A1.5,1.5 0 0,1 8.5,11M5,19L8,15L10.5,18L14,13.5L19,19H5Z"/></svg>';
+    }
+
+    return '<svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M14,2H6A2,2 0 0,0 4,4V20A2,2 0 0,0 6,22H18A2,2 0 0,0 20,20V8L14,2M13,9V3.5L18.5,9H13Z"/></svg>';
+  }
+
+  function generateAttachmentID() {
+    if (window.crypto && typeof window.crypto.randomUUID === 'function') {
+      return window.crypto.randomUUID();
+    }
+
+    return 'attachment-' + String(Date.now()) + '-' + String(Math.random()).slice(2, 8);
+  }
+
+  function normalizeEntryAttachment(item) {
+    if (!item || typeof item !== 'object') {
+      return null;
+    }
+
+    const name = String(item.name || '').trim();
+    const contentBase64 = String(item.content_base64 || item.base64_data || '').trim();
+    if (!name || !contentBase64) {
+      return null;
+    }
+
+    const mimeType = String(item.mime_type || item.mimeType || 'application/octet-stream').trim() || 'application/octet-stream';
+    const sizeBytes = Number(item.size_bytes ?? item.size ?? 0);
+
+    return {
+      id: String(item.id || generateAttachmentID()),
+      name: name,
+      mime_type: mimeType,
+      size_bytes: Number.isFinite(sizeBytes) && sizeBytes >= 0 ? sizeBytes : 0,
+      kind: String(item.kind || '').trim() || attachmentKindForMimeType(mimeType),
+      content_base64: contentBase64
+    };
+  }
+
+  function entryAttachmentsFromPayload(payload) {
+    if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+      return [];
+    }
+
+    return Array.isArray(payload.attachments)
+      ? payload.attachments.map(normalizeEntryAttachment).filter(Boolean)
+      : [];
+  }
+
+  function payloadWithoutAttachments(payload) {
+    if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+      return payload;
+    }
+
+    const next = {};
+    Object.keys(payload).forEach(function(key) {
+      if (key !== 'attachments') {
+        next[key] = payload[key];
+      }
+    });
+    return next;
+  }
+
+  function payloadForPreview(payload) {
+    if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+      return payload;
+    }
+
+    const next = payloadWithoutAttachments(payload);
+    const attachments = entryAttachmentsFromPayload(payload);
+    if (attachments.length) {
+      next.attachments = attachments.map(function(item) {
+        return {
+          id: item.id,
+          name: item.name,
+          mime_type: item.mime_type,
+          size_bytes: item.size_bytes,
+          kind: item.kind
+        };
+      });
+    }
+    return next;
+  }
+
+  function attachmentDataURL(attachment) {
+    const mimeType = String(attachment?.mime_type || 'application/octet-stream').trim() || 'application/octet-stream';
+    const contentBase64 = String(attachment?.content_base64 || '').trim();
+    return contentBase64 ? 'data:' + mimeType + ';base64,' + contentBase64 : '';
+  }
+
+  function readFileAsBase64(file) {
+    return new Promise(function(resolve, reject) {
+      const reader = new FileReader();
+
+      reader.onload = function() {
+        const result = String(reader.result || '');
+        const commaIndex = result.indexOf(',');
+        resolve(commaIndex >= 0 ? result.slice(commaIndex + 1) : result);
+      };
+
+      reader.onerror = function() {
+        reject(new Error('Failed to read file "' + String(file?.name || 'attachment') + '".'));
+      };
+
+      reader.readAsDataURL(file);
+    });
+  }
+
+  function totalAttachmentBytes(attachments) {
+    return (Array.isArray(attachments) ? attachments : []).reduce(function(total, attachment) {
+      return total + Number(attachment?.size_bytes || 0);
+    }, 0);
+  }
+
+  function renderEntryAttachments() {
+    if (!elements?.entryAttachmentsList) {
+      return;
+    }
+
+    if (!state.entryAttachments.length) {
+      elements.entryAttachmentsList.innerHTML = '<div class="vault-modal-attachments-empty">No files or images attached yet.</div>';
+      return;
+    }
+
+    elements.entryAttachmentsList.innerHTML = state.entryAttachments.map(function(attachment) {
+      return (
+        '<div class="vault-modal-attachment-item">' +
+          '<div class="vault-modal-attachment-item-main">' +
+            '<span class="vault-modal-attachment-icon">' + attachmentIcon(attachment.kind) + '</span>' +
+            '<div class="vault-modal-attachment-copy">' +
+              '<div class="vault-modal-attachment-name">' + escapeHTML(attachment.name) + '</div>' +
+              '<div class="vault-modal-attachment-meta">' + escapeHTML([attachment.kind === 'image' ? 'Image' : 'File', formatBytes(attachment.size_bytes)].join(' • ')) + '</div>' +
+            '</div>' +
+          '</div>' +
+          '<button type="button" class="modern-btn modern-btn-secondary vault-modal-attachment-remove" data-action="remove-entry-attachment" data-attachment-id="' + escapeHTML(attachment.id) + '">Remove</button>' +
+        '</div>'
+      );
+    }).join('');
+  }
+
+  function mergeEntryAttachments(payload, attachments) {
+    const normalizedAttachments = (Array.isArray(attachments) ? attachments : []).map(normalizeEntryAttachment).filter(Boolean);
+
+    if (!normalizedAttachments.length) {
+      return payloadWithoutAttachments(payload);
+    }
+
+    if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+      throw new Error('Structured payload must be a JSON object when files are attached.');
+    }
+
+    const next = payloadWithoutAttachments(payload);
+    next.attachments = normalizedAttachments.map(function(attachment) {
+      return {
+        id: attachment.id,
+        name: attachment.name,
+        mime_type: attachment.mime_type,
+        size_bytes: attachment.size_bytes,
+        kind: attachment.kind,
+        content_base64: attachment.content_base64
+      };
+    });
+    return next;
+  }
+
+  async function addEntryAttachments(fileList) {
+    const files = Array.from(fileList || []);
+    if (!files.length) {
+      return;
+    }
+
+    const nextAttachments = state.entryAttachments.slice();
+    const rejected = [];
+
+    if (nextAttachments.length >= MAX_ENTRY_ATTACHMENTS) {
+      showAlert('You can attach up to ' + String(MAX_ENTRY_ATTACHMENTS) + ' files per vault entry.', 'warning');
+      return;
+    }
+
+    for (const file of files) {
+      if (nextAttachments.length >= MAX_ENTRY_ATTACHMENTS) {
+        rejected.push(file.name);
+        continue;
+      }
+
+      const projectedBytes = totalAttachmentBytes(nextAttachments) + Number(file.size || 0);
+      if (projectedBytes > MAX_ENTRY_ATTACHMENT_BYTES) {
+        rejected.push(file.name);
+        continue;
+      }
+
+      const contentBase64 = await readFileAsBase64(file);
+      nextAttachments.push({
+        id: generateAttachmentID(),
+        name: String(file.name || 'attachment'),
+        mime_type: String(file.type || 'application/octet-stream'),
+        size_bytes: Number(file.size || 0),
+        kind: attachmentKindForMimeType(file.type),
+        content_base64: contentBase64
+      });
+    }
+
+    state.entryAttachments = nextAttachments;
+    renderEntryAttachments();
+
+    if (elements?.entryAttachmentsInput) {
+      elements.entryAttachmentsInput.value = '';
+    }
+
+    if (rejected.length) {
+      showAlert('Some attachments were skipped. Entries support up to ' + String(MAX_ENTRY_ATTACHMENTS) + ' files and ' + formatBytes(MAX_ENTRY_ATTACHMENT_BYTES) + ' total.', 'warning');
+      return;
+    }
+
+    showAlert('');
+  }
+
+  function removeEntryAttachment(attachmentID) {
+    state.entryAttachments = state.entryAttachments.filter(function(item) {
+      return item.id !== attachmentID;
+    });
+    renderEntryAttachments();
+  }
+
+  function downloadAttachment(attachment) {
+    const normalized = normalizeEntryAttachment(attachment);
+    if (!normalized) {
+      showAlert('That attachment could not be opened.', 'warning');
+      return;
+    }
+
+    const link = document.createElement('a');
+    link.href = attachmentDataURL(normalized);
+    link.download = normalized.name || 'vault-attachment';
+    link.style.display = 'none';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
   }
 
   function entrySimplePayload(type, content) {
@@ -487,7 +756,15 @@
     }
 
     const key = simplePayloadKey(type);
-    return keys.length === 1 && keys[0] === key && typeof payload[key] === 'string';
+    const dataKeys = keys.filter(function(item) {
+      return item !== 'attachments';
+    });
+
+    if (!dataKeys.length) {
+      return true;
+    }
+
+    return dataKeys.length === 1 && dataKeys[0] === key && typeof payload[key] === 'string';
   }
 
   function isEditingEntryDialog() {
@@ -506,8 +783,9 @@
 
     const normalizedType = normalizeRecordType(record.type);
     const payload = record.payload ?? {};
+    const payloadCore = payloadWithoutAttachments(payload) || {};
     const useJSON = !canUseSimpleEntryComposer(normalizedType, payload);
-    const payloadValue = prettyPayload(payload);
+    const payloadValue = prettyPayload(payloadCore);
 
     elements.entryTypeInput.value = normalizedType;
     elements.entryWorkspaceInput.value = String(record.workspace_id || '');
@@ -517,6 +795,7 @@
     elements.entryTagsInput.value = Array.isArray(record.tags) ? record.tags.join(', ') : '';
     elements.entrySourceInput.value = String(record.source || '');
     elements.entryRetentionInput.value = String(record.retention_policy || '');
+    state.entryAttachments = entryAttachmentsFromPayload(payload);
     elements.entryPayloadInput.value = payloadValue === '{}' ? defaultPayloadValue(normalizedType) : payloadValue;
 
     if (elements.entryAdvancedDetails) {
@@ -528,6 +807,7 @@
       );
     }
 
+    renderEntryAttachments();
     syncEntryComposerPresentation();
   }
 
@@ -1246,6 +1526,8 @@
       elements.entryWorkspaceInput,
       elements.entryLabelInput,
       elements.entryContentInput,
+      elements.entryAttachBtn,
+      elements.entryAttachmentsInput,
       elements.entryJsonModeInput,
       elements.entryTagsInput,
       elements.entrySourceInput,
@@ -1351,14 +1633,19 @@
     elements.entryWorkspaceInput.value = '';
     elements.entryLabelInput.value = '';
     elements.entryContentInput.value = '';
+    state.entryAttachments = [];
     elements.entryJsonModeInput.checked = false;
     elements.entryTagsInput.value = '';
     elements.entrySourceInput.value = '';
     elements.entryRetentionInput.value = '';
     elements.entryPayloadInput.value = defaultPayloadValue(elements.entryTypeInput.value);
+    if (elements.entryAttachmentsInput) {
+      elements.entryAttachmentsInput.value = '';
+    }
     if (elements.entryAdvancedDetails) {
       elements.entryAdvancedDetails.open = false;
     }
+    renderEntryAttachments();
     syncEntryComposerPresentation();
   }
 
@@ -1540,6 +1827,28 @@
     }).join(' / ');
   }
 
+  function renderRecordAttachmentCard(attachment) {
+    const normalized = normalizeEntryAttachment(attachment);
+    if (!normalized) {
+      return '';
+    }
+
+    const thumbnail = normalized.kind === 'image'
+      ? '<img class="vault-modal-attachment-thumb" src="' + escapeHTML(attachmentDataURL(normalized)) + '" alt="' + escapeHTML(normalized.name) + '">'
+      : '<div class="vault-modal-attachment-thumb is-generic">' + attachmentIcon(normalized.kind) + '</div>';
+
+    return (
+      '<div class="vault-modal-attachment-card">' +
+        thumbnail +
+        '<div class="vault-modal-attachment-card-body">' +
+          '<div class="vault-modal-attachment-name">' + escapeHTML(normalized.name) + '</div>' +
+          '<div class="vault-modal-attachment-meta">' + escapeHTML([normalized.kind === 'image' ? 'Image' : 'File', formatBytes(normalized.size_bytes)].join(' • ')) + '</div>' +
+          '<button type="button" class="modern-btn modern-btn-secondary vault-modal-attachment-download" data-action="download-attachment" data-attachment-id="' + escapeHTML(normalized.id) + '">Download</button>' +
+        '</div>' +
+      '</div>'
+    );
+  }
+
   function folderRowMeta(node) {
     const count = Array.isArray(node.recordIDs) ? node.recordIDs.length : 0;
     return String(count) + ' ' + (count === 1 ? 'file' : 'files');
@@ -1695,6 +2004,7 @@
     }
 
     const record = state.selectedRecord;
+    const attachments = entryAttachmentsFromPayload(record.payload);
     const tags = Array.isArray(record.tags) && record.tags.length > 0
       ? record.tags.map(function(tag) {
         return '<span class="vault-modal-chip">' + escapeHTML(tag) + '</span>';
@@ -1703,6 +2013,18 @@
 
     const revealLabel = state.payloadRevealed ? 'Hide Payload' : 'Reveal Payload';
     const payloadClass = 'vault-modal-payload-preview' + (state.payloadRevealed ? '' : ' is-concealed');
+    const attachmentsHTML = attachments.length
+      ? (
+        '<div class="vault-modal-attachments-wrap">' +
+          '<div class="vault-modal-payload-label">Encrypted attachments</div>' +
+          (
+            state.payloadRevealed
+              ? '<div class="vault-modal-attachment-grid">' + attachments.map(renderRecordAttachmentCard).join('') + '</div>'
+              : '<div class="vault-modal-preview-empty-inline">Reveal the payload to inspect or download attached files.</div>'
+          ) +
+        '</div>'
+      )
+      : '';
 
     return (
       '<div class="vault-modal-detail">' +
@@ -1723,11 +2045,13 @@
           '<div class="vault-modal-detail-item"><span>Workspace</span><strong>' + escapeHTML(record.workspace_id || 'Global') + '</strong></div>' +
           '<div class="vault-modal-detail-item"><span>Source</span><strong>' + escapeHTML(record.source || 'Not set') + '</strong></div>' +
           '<div class="vault-modal-detail-item"><span>Retention</span><strong>' + escapeHTML(record.retention_policy || 'Not set') + '</strong></div>' +
+          '<div class="vault-modal-detail-item"><span>Attachments</span><strong>' + String(attachments.length) + '</strong></div>' +
           '<div class="vault-modal-detail-item vault-modal-detail-item-wide"><span>Updated</span><strong>' + escapeHTML(prettyDate(record.updated_at || record.created_at)) + '</strong></div>' +
         '</div>' +
+        attachmentsHTML +
         '<div class="vault-modal-payload-wrap">' +
           '<div class="vault-modal-payload-label">Protected payload</div>' +
-          '<pre class="' + payloadClass + '">' + escapeHTML(prettyPayload(record.payload)) + '</pre>' +
+          '<pre class="' + payloadClass + '">' + escapeHTML(prettyPayload(payloadForPreview(record.payload))) + '</pre>' +
         '</div>' +
       '</div>'
     );
@@ -2067,7 +2391,7 @@
       throw new Error('Title is required before saving to the vault.');
     }
 
-    body.payload = parsePayloadInput();
+    body.payload = mergeEntryAttachments(parsePayloadInput(), state.entryAttachments);
     return body;
   }
 
@@ -2230,6 +2554,17 @@
         const recordID = target.getAttribute('data-record-id');
         if (recordID) {
           deleteRecord(recordID);
+        }
+        return;
+      }
+
+      if (action === 'download-attachment') {
+        const attachmentID = target.getAttribute('data-attachment-id');
+        const attachment = entryAttachmentsFromPayload(state.selectedRecord?.payload).find(function(item) {
+          return item.id === attachmentID;
+        });
+        if (attachment) {
+          downloadAttachment(attachment);
         }
       }
     });
@@ -2438,6 +2773,29 @@
 
     elements.entryJsonModeInput?.addEventListener('change', function() {
       syncEntryComposerPresentation();
+    });
+
+    elements.entryAttachBtn?.addEventListener('click', function() {
+      elements.entryAttachmentsInput?.click();
+    });
+
+    elements.entryAttachmentsInput?.addEventListener('change', function(event) {
+      addEntryAttachments(event.target.files).catch(function(error) {
+        console.error('Failed to add vault attachments:', error);
+        showAlert(error.message || 'Failed to add attachment.', 'error');
+      });
+    });
+
+    elements.entryAttachmentsList?.addEventListener('click', function(event) {
+      const target = event.target.closest('[data-action="remove-entry-attachment"]');
+      if (!target) {
+        return;
+      }
+
+      const attachmentID = target.getAttribute('data-attachment-id');
+      if (attachmentID) {
+        removeEntryAttachment(attachmentID);
+      }
     });
 
     elements.resetBtn?.addEventListener('click', function() {
