@@ -1,317 +1,409 @@
-<section id="private-vault" class="settings-section modern-card p-4">
-  <div class="settings-section-header">
-    <span class="settings-section-icon">
-      <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor">
-        <path d="M12,1A5,5 0 0,1 17,6V8H18A2,2 0 0,1 20,10V21A2,2 0 0,1 18,23H6A2,2 0 0,1 4,21V10A2,2 0 0,1 6,8H7V6A5,5 0 0,1 12,1M12,3A3,3 0 0,0 9,6V8H15V6A3,3 0 0,0 12,3M12,12A2,2 0 0,0 10,14A2,2 0 0,0 11,15.73V18H13V15.73A2,2 0 0,0 14,14A2,2 0 0,0 12,12Z"/>
-      </svg>
-    </span>
-    <h2 class="settings-section-title">Private Vault</h2>
-    <span class="settings-section-subtitle">(Encrypted local storage)</span>
-  </div>
+<section id="private-vault" class="vault-page-shell">
+  <div id="vaultAlerts" class="vault-page-alerts" aria-live="polite"></div>
 
-  <p class="settings-section-description">
-    Store private records outside normal session history. Vault entries stay encrypted at rest, tags are excluded from standard search, and workspace agents need explicit persistent grants before they can read saved data.
-  </p>
-
-  <div id="vaultAlerts" class="mb-3"></div>
-
-  <div id="vaultStatus" class="settings-status mb-4">
-    <div id="vaultStatusIndicator">
-      <span class="spinner-border spinner-border-sm" role="status" aria-label="Loading"></span>
-    </div>
-    <div class="settings-status-content">
-      <div id="vaultStatusText" class="settings-status-text">Loading vault status...</div>
-      <div id="vaultStatusDetails" class="settings-status-details"></div>
-    </div>
-  </div>
-
-  <div class="settings-grid mb-4">
-    <div class="settings-info-box">
-      <div class="settings-info-row">
-        <span class="settings-info-label">Backend</span>
-        <span id="vaultBackendLabel" class="settings-info-value">-</span>
+  <section class="vault-page-status modern-card">
+    <div class="vault-page-status-bar">
+      <div class="vault-page-status-main">
+        <div id="vaultStatusIndicator" class="vault-page-status-indicator">
+          <span class="spinner-border spinner-border-sm" role="status" aria-label="Loading"></span>
+        </div>
+        <div class="vault-page-status-copy">
+          <div class="vault-page-eyebrow">Vault Health</div>
+          <h2 id="vaultStatusText" class="vault-page-section-title">Loading vault status...</h2>
+          <p id="vaultStatusDetails" class="vault-page-status-summary">Checking encrypted storage status and active vault availability.</p>
+        </div>
       </div>
-      <div class="settings-info-row">
-        <span class="settings-info-label">Records</span>
-        <span id="vaultRecordCount" class="settings-info-value">-</span>
-      </div>
-      <div class="settings-info-row">
-        <span class="settings-info-label">Write Access</span>
-        <span id="vaultWritableLabel" class="settings-info-value">-</span>
-      </div>
-    </div>
-    <div class="settings-info-box">
-      <div class="settings-info-row">
-        <span class="settings-info-label">Current Mode</span>
-        <span id="vaultModeLabel" class="badge" style="background: var(--bg-tertiary); color: var(--text-primary);">-</span>
-      </div>
-      <div class="settings-info-row">
-        <span class="settings-info-label">Search Indexing</span>
-        <span class="settings-info-value">Excluded</span>
-      </div>
-      <div class="settings-info-row">
-        <span class="settings-info-label">Prompt Access</span>
-        <span class="settings-info-value">Grant Required</span>
-      </div>
-    </div>
-  </div>
-
-  <div class="settings-info-box mb-4">
-    <div class="settings-info-row" style="align-items: flex-start;">
-      <div>
-        <span class="settings-info-label">Vault Spaces</span>
-        <span class="settings-info-value">Choose or create a named vault</span>
-      </div>
+      <p class="vault-page-status-note">
+        Use this page for the full administrative workflow: choose vaults, unlock storage, review grants, and move encrypted bundles safely.
+      </p>
     </div>
 
-    <div class="settings-grid mt-3">
-      <div>
-        <div class="settings-field">
-          <label class="settings-label" for="vaultActiveVaultId">Active vault</label>
-          <select id="vaultActiveVaultId" class="form-select settings-input">
+    <div class="vault-page-metrics" aria-label="Vault metrics">
+      <div class="vault-page-metric">
+        <span class="vault-page-metric-label">Backend</span>
+        <strong id="vaultBackendLabel" class="vault-page-metric-value">-</strong>
+      </div>
+      <div class="vault-page-metric">
+        <span class="vault-page-metric-label">Records</span>
+        <strong id="vaultRecordCount" class="vault-page-metric-value">-</strong>
+      </div>
+      <div class="vault-page-metric">
+        <span class="vault-page-metric-label">Write Access</span>
+        <strong id="vaultWritableLabel" class="vault-page-metric-value">-</strong>
+      </div>
+      <div class="vault-page-metric">
+        <span class="vault-page-metric-label">Current Mode</span>
+        <span id="vaultModeLabel" class="vault-page-mode-badge">-</span>
+      </div>
+    </div>
+  </section>
+
+  <div class="vault-page-grid">
+    <aside class="vault-page-sidebar">
+      <section class="vault-page-card vault-page-card-highlight">
+        <div class="vault-page-card-head">
+          <div>
+            <div class="vault-page-eyebrow">Vault Spaces</div>
+            <h3 class="vault-page-card-title">Choose an active vault</h3>
+          </div>
+        </div>
+
+        <div class="vault-page-field">
+          <label class="vault-page-label" for="vaultActiveVaultId">Active vault</label>
+          <select id="vaultActiveVaultId" class="form-select settings-input vault-page-input">
             <option value="">Loading vaults...</option>
           </select>
         </div>
-        <div id="vaultActiveVaultMeta" class="settings-help">Checking available vaults...</div>
-      </div>
 
-      <div>
-        <h3 style="font-size: 1rem; font-weight: 600; color: var(--text-primary); margin-bottom: 1rem;">Manage Active Vault</h3>
-        <div class="settings-field">
-          <label class="settings-label" for="vaultEditVaultName">Vault name</label>
-          <input id="vaultEditVaultName" type="text" class="form-control settings-input" placeholder="Private Vault">
+        <div id="vaultActiveVaultMeta" class="vault-page-meta">Checking available vaults...</div>
+        <p class="vault-page-support">
+          Vaults stay excluded from standard search indexing, and workspace agents need explicit persistent grants before they can read saved data.
+        </p>
+      </section>
+
+      <section class="vault-page-card">
+        <div class="vault-page-card-head">
+          <div>
+            <div class="vault-page-eyebrow">Administration</div>
+            <h3 class="vault-page-card-title">Manage vault details</h3>
+          </div>
         </div>
-        <div class="settings-field">
-          <label class="settings-label" for="vaultEditVaultDescription">Description</label>
-          <input id="vaultEditVaultDescription" type="text" class="form-control settings-input" placeholder="What belongs in this vault">
+
+        <div class="vault-page-stack">
+          <div class="vault-page-subsection">
+            <h4 class="vault-page-subtitle">Selected vault</h4>
+            <div class="vault-page-field">
+              <label class="vault-page-label" for="vaultEditVaultName">Vault name</label>
+              <input id="vaultEditVaultName" type="text" class="form-control settings-input vault-page-input" placeholder="Private Vault">
+            </div>
+            <div class="vault-page-field">
+              <label class="vault-page-label" for="vaultEditVaultDescription">Description</label>
+              <input id="vaultEditVaultDescription" type="text" class="form-control settings-input vault-page-input" placeholder="What belongs in this vault">
+            </div>
+            <div class="vault-page-button-row">
+              <button id="vaultRenameVaultBtn" class="modern-btn modern-btn-secondary" type="button">Save Vault Details</button>
+              <button id="vaultDeleteVaultBtn" class="btn btn-outline-danger vault-page-danger-btn" type="button">Delete Vault</button>
+            </div>
+            <p class="vault-page-help">Deleting a vault permanently removes its encrypted records, grants, and explorer state.</p>
+          </div>
+
+          <div class="vault-page-divider"></div>
+
+          <div class="vault-page-subsection">
+            <h4 class="vault-page-subtitle">Create a new vault</h4>
+            <div class="vault-page-field">
+              <label class="vault-page-label" for="vaultNewVaultName">New vault name</label>
+              <input id="vaultNewVaultName" type="text" class="form-control settings-input vault-page-input" placeholder="Finance Vault, Travel Vault, Family Vault">
+            </div>
+            <div class="vault-page-field">
+              <label class="vault-page-label" for="vaultNewVaultDescription">Description</label>
+              <input id="vaultNewVaultDescription" type="text" class="form-control settings-input vault-page-input" placeholder="Optional note about what belongs in this vault">
+            </div>
+            <div class="vault-page-field">
+              <label class="vault-page-label" for="vaultNewVaultPassword">Vault password</label>
+              <input id="vaultNewVaultPassword" type="password" class="form-control settings-input vault-page-input" placeholder="Required for this vault">
+            </div>
+            <div class="vault-page-field">
+              <label class="vault-page-label" for="vaultConfirmVaultPassword">Confirm vault password</label>
+              <input id="vaultConfirmVaultPassword" type="password" class="form-control settings-input vault-page-input" placeholder="Re-enter the vault password">
+            </div>
+            <div class="vault-page-button-row">
+              <button id="vaultCreateVaultSpaceBtn" class="modern-btn modern-btn-primary" type="button">Create Vault</button>
+            </div>
+            <p class="vault-page-help">Each vault has its own password. Ori cannot recover it later.</p>
+          </div>
         </div>
-        <div class="settings-actions">
-          <button id="vaultRenameVaultBtn" class="modern-btn modern-btn-secondary" type="button">Save Vault Details</button>
-          <button id="vaultDeleteVaultBtn" class="btn btn-outline-danger" type="button">Delete Vault</button>
+      </section>
+
+      <section class="vault-page-card">
+        <div class="vault-page-card-head">
+          <div>
+            <div class="vault-page-eyebrow">Access Control</div>
+            <h3 class="vault-page-card-title">Unlock or seal the selected vault</h3>
+          </div>
         </div>
-        <span class="settings-help">Deleting a vault permanently removes its encrypted records, grants, and explorer view.</span>
 
-        <h3 style="font-size: 1rem; font-weight: 600; color: var(--text-primary); margin: 1.5rem 0 1rem;">Create A New Vault</h3>
-        <div class="settings-field">
-          <label class="settings-label" for="vaultNewVaultName">New vault name</label>
-          <input id="vaultNewVaultName" type="text" class="form-control settings-input" placeholder="Finance Vault, Travel Vault, Family Vault">
+        <div class="vault-page-field">
+          <label class="vault-page-label" for="vaultUnlockPassword">Vault password</label>
+          <div class="input-group vault-page-input-group">
+            <input
+              id="vaultUnlockPassword"
+              type="password"
+              class="form-control settings-input vault-page-input"
+              placeholder="Enter the selected vault password">
+            <button class="btn btn-outline-secondary" type="button" id="toggleVaultUnlockPassword" aria-label="Toggle password visibility">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                <path d="M12,9A3,3 0 0,0 9,12A3,3 0 0,0 12,15A3,3 0 0,0 15,12A3,3 0 0,0 12,9M12,17A5,5 0 0,1 7,12A5,5 0 0,1 12,7A5,5 0 0,1 17,12A5,5 0 0,1 12,17M12,4.5C7,4.5 2.73,7.61 1,12C2.73,16.39 7,19.5 12,19.5C17,19.5 21.27,16.39 23,12C21.27,7.61 17,4.5 12,4.5Z"/>
+              </svg>
+            </button>
+          </div>
+          <p id="vaultUnlockPasswordHelp" class="vault-page-help">
+            Per-vault passwords are required for new vaults. Legacy vaults may still unlock through secure system storage or the older fallback passphrase flow.
+          </p>
         </div>
-        <div class="settings-field">
-          <label class="settings-label" for="vaultNewVaultDescription">Description</label>
-          <input id="vaultNewVaultDescription" type="text" class="form-control settings-input" placeholder="Optional note about what belongs in this vault">
+
+        <div class="vault-page-button-row vault-page-button-row-stacked">
+          <button id="vaultUnlockBtn" class="modern-btn modern-btn-primary" type="button">Unlock Vault</button>
+          <button id="vaultLockBtn" class="btn btn-outline-secondary" type="button">Lock Vault</button>
+          <button id="vaultRefreshBtn" class="btn btn-outline-secondary" type="button">Refresh</button>
         </div>
-        <div class="settings-field">
-          <label class="settings-label" for="vaultNewVaultPassword">Vault password</label>
-          <input id="vaultNewVaultPassword" type="password" class="form-control settings-input" placeholder="Required for this vault">
+      </section>
+    </aside>
+
+    <div class="vault-page-main">
+      <section class="vault-page-card vault-page-card-primary">
+        <div class="vault-page-card-head vault-page-card-head-wide">
+          <div>
+            <div class="vault-page-eyebrow">Entries Workspace</div>
+            <h3 class="vault-page-card-title">Browse and edit encrypted entries</h3>
+            <p class="vault-page-card-copy">Browse the selected vault as a protected folder tree, then load a record into the editor when you need to modify it. Payloads stay concealed until you explicitly reveal them.</p>
+          </div>
+          <span id="vaultSelectionBadge" class="vault-page-selection-badge">No selection</span>
         </div>
-        <div class="settings-field">
-          <label class="settings-label" for="vaultConfirmVaultPassword">Confirm vault password</label>
-          <input id="vaultConfirmVaultPassword" type="password" class="form-control settings-input" placeholder="Re-enter the vault password">
+
+        <div class="vault-page-explorer">
+          <div class="vault-page-panel-copy">
+            <h4 class="vault-page-subtitle">Folder explorer</h4>
+            <p class="vault-page-help">Virtual folders group encrypted entries by type and workspace scope so the page matches the quick-access vault modal.</p>
+          </div>
+
+          <div class="vault-modal-records-toolbar vault-page-explorer-toolbar">
+            <input id="vaultPageSearchInput" type="search" class="form-control settings-input vault-page-input vault-modal-search" placeholder="Search label, type, workspace, or tag">
+            <span id="vaultPageRecordsSummary" class="vault-modal-records-summary">Waiting for vault status...</span>
+          </div>
+
+          <div id="vaultPageFolderVaultTabs" class="vault-modal-folder-vault-tabs" role="tablist" aria-label="Vault folders"></div>
+
+          <div id="vaultPageFolderBreadcrumb" class="vault-modal-folder-breadcrumb" aria-label="Vault folder path" hidden></div>
+
+          <div class="vault-modal-explorer-grid vault-page-explorer-grid">
+            <div id="vaultPageFolderTree" class="vault-modal-folder-tree">
+              <div class="vault-modal-empty">Unlock the vault to browse the encrypted folder tree.</div>
+            </div>
+
+            <div id="vaultPageExplorerPreview" class="vault-modal-explorer-preview">
+              <div class="vault-modal-empty">Select a folder to inspect its encrypted contents.</div>
+            </div>
+          </div>
         </div>
-        <div class="settings-actions">
-          <button id="vaultCreateVaultSpaceBtn" class="modern-btn modern-btn-secondary" type="button">Create Vault</button>
+
+        <div class="vault-page-divider"></div>
+
+        <div class="vault-page-entry-grid">
+          <div class="vault-page-list-panel">
+            <div class="vault-page-panel-copy">
+              <h4 class="vault-page-subtitle">Saved entries</h4>
+              <p class="vault-page-help">Flat list of unlocked records for quick selection, regardless of the active folder view.</p>
+            </div>
+            <div id="vaultRecordsList" class="vault-page-records-list">
+              <div class="vault-page-empty">Vault entries will appear here once the vault is unlocked.</div>
+            </div>
+          </div>
+
+          <div class="vault-page-editor-panel">
+            <div class="vault-page-panel-copy">
+              <h4 class="vault-page-subtitle">Entry editor</h4>
+              <p class="vault-page-help">Save sensitive notes, snippets, and secrets with structured metadata and a protected JSON payload.</p>
+            </div>
+
+            <div class="vault-page-field-grid">
+              <div class="vault-page-field">
+                <label class="vault-page-label" for="vaultEntryType">Entry type</label>
+                <select id="vaultEntryType" class="form-select settings-input vault-page-input">
+                  <option value="personal_note">Personal Note</option>
+                  <option value="email_snippet">Email Snippet</option>
+                  <option value="secret">Secret</option>
+                </select>
+              </div>
+
+              <div class="vault-page-field">
+                <label class="vault-page-label" for="vaultEntryWorkspaceId">Workspace ID</label>
+                <input id="vaultEntryWorkspaceId" type="text" class="form-control settings-input vault-page-input" placeholder="Optional workspace scope">
+              </div>
+            </div>
+
+            <div class="vault-page-field">
+              <label class="vault-page-label" for="vaultEntryLabel">Label</label>
+              <input id="vaultEntryLabel" type="text" class="form-control settings-input vault-page-input" placeholder="Passport copy, accountant email, family contacts">
+            </div>
+
+            <div class="vault-page-field-grid">
+              <div class="vault-page-field">
+                <label class="vault-page-label" for="vaultEntryTags">Sensitive tags</label>
+                <input id="vaultEntryTags" type="text" class="form-control settings-input vault-page-input" placeholder="Comma-separated tags">
+              </div>
+
+              <div class="vault-page-field">
+                <label class="vault-page-label" for="vaultEntrySource">Source</label>
+                <input id="vaultEntrySource" type="text" class="form-control settings-input vault-page-input" placeholder="manual, connector, import">
+              </div>
+            </div>
+
+            <div class="vault-page-field">
+              <label class="vault-page-label" for="vaultEntryRetention">Retention policy</label>
+              <input id="vaultEntryRetention" type="text" class="form-control settings-input vault-page-input" placeholder="keep_until_revoked">
+            </div>
+
+            <div class="vault-page-field">
+              <label class="vault-page-label" for="vaultEntryPayload">Payload JSON</label>
+              <textarea id="vaultEntryPayload" class="form-control settings-input vault-page-input vault-page-textarea" rows="10" spellcheck="false" placeholder='{"note":"private"}'></textarea>
+            </div>
+
+            <div class="vault-page-button-row">
+              <button id="vaultSaveEntryBtn" class="modern-btn modern-btn-primary" type="button">Save To Vault</button>
+              <button id="vaultResetEntryBtn" class="modern-btn modern-btn-secondary" type="button">New Entry</button>
+              <button id="vaultRevealPayloadBtn" class="modern-btn modern-btn-secondary d-none" type="button">Reveal Payload</button>
+              <button id="vaultDeleteEntryBtn" class="btn btn-outline-danger vault-page-danger-btn d-none" type="button">Delete Entry</button>
+            </div>
+
+            <p class="vault-page-help">Payloads stay hidden by default when you open an existing entry. Reveal the payload before editing its sensitive JSON body.</p>
+          </div>
         </div>
-        <span class="settings-help">Each vault has its own password. Keep it somewhere safe because Ori cannot recover it later.</span>
-      </div>
-    </div>
-  </div>
+      </section>
 
-  <div class="settings-field">
-    <label class="settings-label" for="vaultUnlockPassword">Vault password</label>
-    <div class="input-group">
-      <input id="vaultUnlockPassword"
-             type="password"
-             class="form-control settings-input"
-             placeholder="Enter the selected vault password">
-      <button class="btn btn-outline-secondary" type="button" id="toggleVaultUnlockPassword" aria-label="Toggle password visibility">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
-          <path d="M12,9A3,3 0 0,0 9,12A3,3 0 0,0 12,15A3,3 0 0,0 15,12A3,3 0 0,0 12,9M12,17A5,5 0 0,1 7,12A5,5 0 0,1 12,7A5,5 0 0,1 17,12A5,5 0 0,1 12,17M12,4.5C7,4.5 2.73,7.61 1,12C2.73,16.39 7,19.5 12,19.5C17,19.5 21.27,16.39 23,12C21.27,7.61 17,4.5 12,4.5Z"/>
-        </svg>
-      </button>
-      <button id="vaultUnlockBtn" class="btn btn-primary modern-btn-primary" type="button">Unlock Vault</button>
-      <button id="vaultLockBtn" class="btn btn-outline-secondary" type="button">Lock Vault</button>
-      <button id="vaultRefreshBtn" class="btn btn-outline-secondary" type="button">Refresh</button>
-    </div>
-    <span id="vaultUnlockPasswordHelp" class="settings-help">Per-vault passwords are required for new vaults. Legacy vaults may still unlock through secure system storage or the older fallback passphrase flow.</span>
-  </div>
+      <div class="vault-page-secondary-grid">
+        <section class="vault-page-card">
+          <div class="vault-page-card-head">
+            <div>
+              <div class="vault-page-eyebrow">Workspace Grants</div>
+              <h3 class="vault-page-card-title">Grant or revoke persistent access</h3>
+            </div>
+          </div>
 
-  <div class="settings-grid mb-4">
-    <div>
-      <h3 style="font-size: 1rem; font-weight: 600; color: var(--text-primary); margin-bottom: 1rem;">Save To Vault</h3>
-      <div class="settings-field">
-        <label class="settings-label" for="vaultEntryType">Entry type</label>
-        <select id="vaultEntryType" class="form-select settings-input">
-          <option value="personal_note">Personal Note</option>
-          <option value="email_snippet">Email Snippet</option>
-          <option value="secret">Secret</option>
-        </select>
-      </div>
-      <div class="settings-field">
-        <label class="settings-label" for="vaultEntryWorkspaceId">Workspace ID</label>
-        <input id="vaultEntryWorkspaceId" type="text" class="form-control settings-input" placeholder="Optional workspace scope">
-      </div>
-      <div class="settings-field">
-        <label class="settings-label" for="vaultEntryLabel">Label</label>
-        <input id="vaultEntryLabel" type="text" class="form-control settings-input" placeholder="Passport copy, accountant email, family contacts">
-      </div>
-      <div class="settings-field">
-        <label class="settings-label" for="vaultEntryTags">Sensitive tags</label>
-        <input id="vaultEntryTags" type="text" class="form-control settings-input" placeholder="Comma-separated tags">
-      </div>
-      <div class="settings-field">
-        <label class="settings-label" for="vaultEntrySource">Source</label>
-        <input id="vaultEntrySource" type="text" class="form-control settings-input" placeholder="manual, connector, import">
-      </div>
-      <div class="settings-field">
-        <label class="settings-label" for="vaultEntryRetention">Retention policy</label>
-        <input id="vaultEntryRetention" type="text" class="form-control settings-input" placeholder="keep_until_revoked">
-      </div>
-      <div class="settings-field">
-        <label class="settings-label" for="vaultEntryPayload">Payload JSON</label>
-        <textarea id="vaultEntryPayload" class="form-control settings-input" rows="8" spellcheck="false" placeholder='{"note":"private"}'></textarea>
-      </div>
-      <div class="settings-actions">
-        <button id="vaultSaveEntryBtn" class="modern-btn modern-btn-primary" type="button">Save To Vault</button>
-        <button id="vaultResetEntryBtn" class="modern-btn modern-btn-secondary" type="button">New Entry</button>
-        <button id="vaultRevealPayloadBtn" class="modern-btn modern-btn-secondary" type="button">Reveal Payload</button>
-        <button id="vaultDeleteEntryBtn" class="btn btn-outline-danger" type="button">Delete Entry</button>
-      </div>
-      <span class="settings-help">Payloads stay hidden by default when you open an existing entry. Use Reveal Payload to inspect or edit the sensitive JSON body.</span>
-    </div>
+          <div class="vault-page-split-grid">
+            <div>
+              <div class="vault-page-field">
+                <label class="vault-page-label" for="vaultGrantWorkspaceId">Workspace ID</label>
+                <input id="vaultGrantWorkspaceId" type="text" class="form-control settings-input vault-page-input" placeholder="workspace-123">
+              </div>
+              <div class="vault-page-field-grid">
+                <div class="vault-page-field">
+                  <label class="vault-page-label" for="vaultGrantActorType">Actor type</label>
+                  <select id="vaultGrantActorType" class="form-select settings-input vault-page-input">
+                    <option value="agent">Agent</option>
+                    <option value="plugin">Plugin</option>
+                  </select>
+                </div>
+                <div class="vault-page-field">
+                  <label class="vault-page-label" for="vaultGrantActorId">Actor ID</label>
+                  <input id="vaultGrantActorId" type="text" class="form-control settings-input vault-page-input" placeholder="finance-agent">
+                </div>
+              </div>
+              <div class="vault-page-field">
+                <label class="vault-page-label" for="vaultGrantCapability">Capability</label>
+                <select id="vaultGrantCapability" class="form-select settings-input vault-page-input">
+                  <option value="vault.personal.read">vault.personal.read</option>
+                  <option value="vault.personal.write">vault.personal.write</option>
+                  <option value="vault.email.read_saved">vault.email.read_saved</option>
+                  <option value="vault.email.write_saved">vault.email.write_saved</option>
+                  <option value="vault.secrets.read">vault.secrets.read</option>
+                  <option value="vault.secrets.write">vault.secrets.write</option>
+                </select>
+              </div>
+              <div class="vault-page-field">
+                <label class="vault-page-label" for="vaultGrantRecordType">Record type</label>
+                <input id="vaultGrantRecordType" type="text" class="form-control settings-input vault-page-input" placeholder="email_snippet or *">
+              </div>
+              <div class="vault-page-button-row">
+                <button id="vaultCreateGrantBtn" class="modern-btn modern-btn-primary" type="button">Add Persistent Grant</button>
+              </div>
+              <p class="vault-page-help">Persistent grants stay limited to one workspace. Leave record type blank to cover all entry types within that capability.</p>
+            </div>
 
-    <div>
-      <div class="d-flex justify-content-between align-items-center mb-3">
-        <h3 style="font-size: 1rem; font-weight: 600; color: var(--text-primary); margin: 0;">Saved Entries</h3>
-        <span id="vaultSelectionBadge" class="badge" style="background: var(--bg-tertiary); color: var(--text-primary);">No selection</span>
-      </div>
-      <div id="vaultRecordsList" class="d-flex flex-column gap-2">
-        <div class="settings-help">Vault entries will appear here once the vault is unlocked.</div>
-      </div>
-    </div>
-  </div>
+            <div>
+              <div class="vault-page-panel-copy">
+                <h4 class="vault-page-subtitle">Grant review</h4>
+                <p class="vault-page-help">Audit the actors that can read or write into the currently selected vault.</p>
+              </div>
+              <div id="vaultGrantsList" class="vault-page-grants-list">
+                <div class="vault-page-empty">No persistent grants loaded yet.</div>
+              </div>
+            </div>
+          </div>
+        </section>
 
-  <div class="settings-grid mb-4">
-    <div>
-      <h3 style="font-size: 1rem; font-weight: 600; color: var(--text-primary); margin-bottom: 1rem;">Workspace Grants</h3>
-      <div class="settings-field">
-        <label class="settings-label" for="vaultGrantWorkspaceId">Workspace ID</label>
-        <input id="vaultGrantWorkspaceId" type="text" class="form-control settings-input" placeholder="workspace-123">
-      </div>
-      <div class="settings-field">
-        <label class="settings-label" for="vaultGrantActorType">Actor type</label>
-        <select id="vaultGrantActorType" class="form-select settings-input">
-          <option value="agent">Agent</option>
-          <option value="plugin">Plugin</option>
-        </select>
-      </div>
-      <div class="settings-field">
-        <label class="settings-label" for="vaultGrantActorId">Actor ID</label>
-        <input id="vaultGrantActorId" type="text" class="form-control settings-input" placeholder="finance-agent">
-      </div>
-      <div class="settings-field">
-        <label class="settings-label" for="vaultGrantCapability">Capability</label>
-        <select id="vaultGrantCapability" class="form-select settings-input">
-          <option value="vault.personal.read">vault.personal.read</option>
-          <option value="vault.personal.write">vault.personal.write</option>
-          <option value="vault.email.read_saved">vault.email.read_saved</option>
-          <option value="vault.email.write_saved">vault.email.write_saved</option>
-          <option value="vault.secrets.read">vault.secrets.read</option>
-          <option value="vault.secrets.write">vault.secrets.write</option>
-        </select>
-      </div>
-      <div class="settings-field">
-        <label class="settings-label" for="vaultGrantRecordType">Record type</label>
-        <input id="vaultGrantRecordType" type="text" class="form-control settings-input" placeholder="email_snippet or *">
-      </div>
-      <div class="settings-actions">
-        <button id="vaultCreateGrantBtn" class="modern-btn modern-btn-primary" type="button">Add Persistent Grant</button>
-      </div>
-      <span class="settings-help">Persistent grants stay limited to one workspace. Leave record type blank to cover all entry types within that capability.</span>
-    </div>
+        <section class="vault-page-card">
+          <div class="vault-page-card-head">
+            <div>
+              <div class="vault-page-eyebrow">Portable Transfer</div>
+              <h3 class="vault-page-card-title">Export or restore encrypted bundles</h3>
+            </div>
+          </div>
 
-    <div>
-      <h3 style="font-size: 1rem; font-weight: 600; color: var(--text-primary); margin-bottom: 1rem;">Grant Review</h3>
-      <div id="vaultGrantsList" class="d-flex flex-column gap-2">
-        <div class="settings-help">No persistent grants loaded yet.</div>
-      </div>
-    </div>
-  </div>
+          <div class="vault-page-transfer-grid">
+            <div class="vault-page-transfer-block">
+              <h4 class="vault-page-subtitle">Encrypted export</h4>
+              <div class="vault-page-field">
+                <label class="vault-page-label" for="vaultExportWorkspaceId">Workspace filter</label>
+                <input id="vaultExportWorkspaceId" type="text" class="form-control settings-input vault-page-input" placeholder="Optional workspace scope">
+              </div>
+              <label class="vault-page-checkbox">
+                <input type="checkbox" id="vaultExportConfirm">
+                <span>I understand this export contains encrypted private data and should be handled carefully.</span>
+              </label>
+              <div class="vault-page-field">
+                <label class="vault-page-label" for="vaultExportPassword">Export password</label>
+                <input id="vaultExportPassword" type="password" class="form-control settings-input vault-page-input" placeholder="Used to encrypt the export bundle">
+              </div>
+              <div class="vault-page-button-row">
+                <button id="vaultExportBtn" class="modern-btn modern-btn-primary" type="button">Export Vault</button>
+              </div>
+              <p class="vault-page-help">Leave the workspace filter blank to export the full selected vault.</p>
+            </div>
 
-  <div class="settings-info-box">
-    <div class="settings-info-row">
-      <span class="settings-info-label">Encrypted Export</span>
-      <span class="settings-info-value">Password required</span>
-    </div>
-    <div class="settings-field mt-3">
-      <label class="settings-label" for="vaultExportWorkspaceId">Workspace filter</label>
-      <input id="vaultExportWorkspaceId" type="text" class="form-control settings-input" placeholder="Optional workspace scope">
-    </div>
-    <div class="form-check mb-3">
-      <input class="form-check-input" type="checkbox" id="vaultExportConfirm">
-      <label class="form-check-label" for="vaultExportConfirm" style="color: var(--text-primary);">
-        I understand this export contains encrypted private data and should be handled carefully.
-      </label>
-    </div>
-    <div class="settings-field">
-      <label class="settings-label" for="vaultExportPassword">Export password</label>
-      <input id="vaultExportPassword" type="password" class="form-control settings-input" placeholder="Used to encrypt the export bundle">
-    </div>
-    <div class="settings-actions">
-      <button id="vaultExportBtn" class="modern-btn modern-btn-primary" type="button">Export Vault</button>
-    </div>
-  </div>
-
-  <div class="settings-info-box mt-4">
-    <div class="settings-info-row">
-      <span class="settings-info-label">Portable Import</span>
-      <span class="settings-info-value">Bundle password required</span>
-    </div>
-    <div class="settings-field mt-3">
-      <label class="settings-label" for="vaultImportFile">Export bundle</label>
-      <div class="settings-actions" style="justify-content: flex-start; margin-bottom: 0.65rem;">
-        <button id="vaultImportChooseFileBtn" class="modern-btn modern-btn-secondary" type="button">Choose File</button>
+            <div class="vault-page-transfer-block">
+              <h4 class="vault-page-subtitle">Portable import</h4>
+              <div class="vault-page-field">
+                <label class="vault-page-label" for="vaultImportFile">Export bundle</label>
+                <div class="vault-page-button-row vault-page-button-row-left">
+                  <button id="vaultImportChooseFileBtn" class="modern-btn modern-btn-secondary" type="button">Choose File</button>
+                </div>
+                <input id="vaultImportFile" type="file" accept=".json,application/json" hidden>
+                <div id="vaultImportFileName" class="vault-page-meta">No import file selected yet.</div>
+              </div>
+              <div class="vault-page-field">
+                <label class="vault-page-label" for="vaultImportPassword">Import password</label>
+                <input id="vaultImportPassword" type="password" class="form-control settings-input vault-page-input" placeholder="Used to decrypt the export bundle">
+              </div>
+              <div class="vault-page-field">
+                <label class="vault-page-label" for="vaultImportMode">Import target</label>
+                <select id="vaultImportMode" class="form-select settings-input vault-page-input">
+                  <option value="new">Create a new vault</option>
+                  <option id="vaultImportModeCurrentOption" value="current">Import into the selected vault</option>
+                </select>
+              </div>
+              <div id="vaultImportCurrentHint" class="vault-page-help">The selected vault must already be unlocked before Ori can import records into it.</div>
+              <div id="vaultImportCreateFields" class="vault-page-stack vault-page-stack-tight">
+                <div class="vault-page-field">
+                  <label class="vault-page-label" for="vaultImportVaultName">New vault name</label>
+                  <input id="vaultImportVaultName" type="text" class="form-control settings-input vault-page-input" placeholder="Leave blank to use the bundle vault name">
+                </div>
+                <div class="vault-page-field">
+                  <label class="vault-page-label" for="vaultImportVaultDescription">Description</label>
+                  <input id="vaultImportVaultDescription" type="text" class="form-control settings-input vault-page-input" placeholder="Optional note for the imported vault">
+                </div>
+                <div class="vault-page-field-grid">
+                  <div class="vault-page-field">
+                    <label class="vault-page-label" for="vaultImportVaultPassword">New vault password</label>
+                    <input id="vaultImportVaultPassword" type="password" class="form-control settings-input vault-page-input" placeholder="Required for the imported vault">
+                  </div>
+                  <div class="vault-page-field">
+                    <label class="vault-page-label" for="vaultImportConfirmVaultPassword">Confirm vault password</label>
+                    <input id="vaultImportConfirmVaultPassword" type="password" class="form-control settings-input vault-page-input" placeholder="Re-enter the vault password">
+                  </div>
+                </div>
+              </div>
+              <label class="vault-page-checkbox">
+                <input type="checkbox" id="vaultImportRestoreGrants" checked>
+                <span>Restore workspace access grants from the bundle when they are available.</span>
+              </label>
+              <div class="vault-page-button-row">
+                <button id="vaultImportBtn" class="modern-btn modern-btn-primary" type="button">Import Vault</button>
+              </div>
+            </div>
+          </div>
+        </section>
       </div>
-      <input id="vaultImportFile" type="file" accept=".json,application/json" hidden>
-      <div id="vaultImportFileName" class="settings-help">No import file selected yet.</div>
-    </div>
-    <div class="settings-field">
-      <label class="settings-label" for="vaultImportPassword">Import password</label>
-      <input id="vaultImportPassword" type="password" class="form-control settings-input" placeholder="Used to decrypt the export bundle">
-    </div>
-    <div class="settings-field">
-      <label class="settings-label" for="vaultImportMode">Import target</label>
-      <select id="vaultImportMode" class="form-select settings-input">
-        <option value="new">Create a new vault</option>
-        <option id="vaultImportModeCurrentOption" value="current">Import into the selected vault</option>
-      </select>
-    </div>
-    <div id="vaultImportCurrentHint" class="settings-help mb-3">The selected vault must already be unlocked before Ori can import records into it.</div>
-    <div id="vaultImportCreateFields">
-      <div class="settings-field">
-        <label class="settings-label" for="vaultImportVaultName">New vault name</label>
-        <input id="vaultImportVaultName" type="text" class="form-control settings-input" placeholder="Leave blank to use the bundle vault name">
-      </div>
-      <div class="settings-field">
-        <label class="settings-label" for="vaultImportVaultDescription">Description</label>
-        <input id="vaultImportVaultDescription" type="text" class="form-control settings-input" placeholder="Optional note for the imported vault">
-      </div>
-      <div class="settings-field">
-        <label class="settings-label" for="vaultImportVaultPassword">New vault password</label>
-        <input id="vaultImportVaultPassword" type="password" class="form-control settings-input" placeholder="Required for the imported vault">
-      </div>
-      <div class="settings-field">
-        <label class="settings-label" for="vaultImportConfirmVaultPassword">Confirm vault password</label>
-        <input id="vaultImportConfirmVaultPassword" type="password" class="form-control settings-input" placeholder="Re-enter the vault password">
-      </div>
-    </div>
-    <div class="form-check mb-3">
-      <input class="form-check-input" type="checkbox" id="vaultImportRestoreGrants" checked>
-      <label class="form-check-label" for="vaultImportRestoreGrants" style="color: var(--text-primary);">
-        Restore workspace access grants from the bundle when they are available.
-      </label>
-    </div>
-    <div class="settings-actions">
-      <button id="vaultImportBtn" class="modern-btn modern-btn-primary" type="button">Import Vault</button>
     </div>
   </div>
 </section>
