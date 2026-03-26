@@ -2875,7 +2875,6 @@ const sessionManager = {
   getWorkspaceBootstrapFromModal() {
     const goal = String(document.getElementById('folderPrimaryGoalInput')?.value || '').trim();
     const systems = String(document.getElementById('folderSystemsInput')?.value || '').trim();
-    const capabilities = String(document.getElementById('folderCapabilitiesInput')?.value || '').trim();
     const context = String(document.getElementById('folderContextInput')?.value || '').trim();
     const systemsList = systems
       ? systems
@@ -2885,11 +2884,10 @@ const sessionManager = {
       : [];
 
     return {
-      hasAny: Boolean(goal || systems || capabilities || context),
+      hasAny: Boolean(goal || systems || context),
       goal,
       systems,
       systemsList,
-      capabilities,
       context
     };
   },
@@ -2903,13 +2901,12 @@ const sessionManager = {
       ? workspaceBootstrap.systemsList.map((item) => `- ${item}`).join('\n')
       : '_Not specified._';
     const goalSection = workspaceBootstrap.goal || '_Not specified._';
-    const capabilitiesSection = workspaceBootstrap.capabilities || '_Not specified._';
     const contextSection = workspaceBootstrap.context || '_Not specified._';
     const title = String(workspaceName || '').trim() || 'this workspace';
 
     return {
       name: 'Workspace Brief',
-      content: `# Workspace Brief\n\nCaptured during workspace creation for ${title}.\n\n## Primary Goal\n${goalSection}\n\n## Apps and Systems\n${systemsSection}\n\n## What Ori Should Help With\n${capabilitiesSection}\n\n## Key Files or Context\n${contextSection}\n`
+      content: `# Workspace Brief\n\nCaptured during workspace creation for ${title}.\n\n## Primary Goal\n${goalSection}\n\n## Apps and Systems\n${systemsSection}\n\n## Key Files or Context\n${contextSection}\n`
     };
   },
 
@@ -3098,7 +3095,6 @@ const sessionManager = {
     const descriptionInput = document.getElementById('folderDescriptionInput');
     const primaryGoalInput = document.getElementById('folderPrimaryGoalInput');
     const systemsInput = document.getElementById('folderSystemsInput');
-    const capabilitiesInput = document.getElementById('folderCapabilitiesInput');
     const contextInput = document.getElementById('folderContextInput');
     const parentSelect = document.getElementById('folderParentSelect');
     const keepSeedValues = Boolean(
@@ -3113,7 +3109,6 @@ const sessionManager = {
       if (descriptionInput) descriptionInput.value = '';
       if (primaryGoalInput) primaryGoalInput.value = '';
       if (systemsInput) systemsInput.value = '';
-      if (capabilitiesInput) capabilitiesInput.value = '';
       if (contextInput) contextInput.value = '';
     }
     if (parentSelect) {
@@ -3265,7 +3260,6 @@ const sessionManager = {
         payload.workspace_bootstrap = {
           goal: workspaceBootstrap.goal,
           systems: workspaceBootstrap.systems,
-          capabilities: workspaceBootstrap.capabilities,
           context: workspaceBootstrap.context
         };
       }

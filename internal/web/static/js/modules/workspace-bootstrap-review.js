@@ -132,7 +132,6 @@
     const description = String(getElement('folderDescriptionInput')?.value || '').trim();
     const goal = String(getElement('folderPrimaryGoalInput')?.value || '').trim();
     const systems = String(getElement('folderSystemsInput')?.value || '').trim();
-    const capabilities = String(getElement('folderCapabilitiesInput')?.value || '').trim();
     const context = String(getElement('folderContextInput')?.value || '').trim();
     const importEnabled = Boolean(getElement('folderImportToggle')?.checked);
     const importPath = String(getElement('folderImportPathInput')?.value || '').trim();
@@ -148,7 +147,6 @@
       goal,
       systems,
       systemsList,
-      capabilities,
       context,
       importEnabled,
       importPath
@@ -161,7 +159,6 @@
       description: input.description || '',
       goal: input.goal || '',
       systems: input.systems || '',
-      capabilities: input.capabilities || '',
       context: input.context || '',
       importEnabled: Boolean(input.importEnabled),
       importPath: input.importPath || ''
@@ -348,8 +345,7 @@
     });
 
     const fallbackChunks = [
-      input.goal,
-      input.capabilities
+      input.goal
     ]
       .map((value) => String(value || '').trim())
       .filter(Boolean)
@@ -377,7 +373,6 @@
       input.description,
       input.goal,
       input.systems,
-      input.capabilities,
       input.context
     ].join(' ');
   }
@@ -435,20 +430,16 @@
 
   function buildPrimaryAgentDescription(input) {
     const systems = input.systemsList.length > 0 ? `Primary systems: ${input.systemsList.join(', ')}.` : '';
-    const capabilities = input.capabilities ? `Focus areas: ${input.capabilities}.` : '';
     return uniqueList([
       `Lead the "${input.workspaceName || 'workspace'}" workspace and coordinate the work required to achieve: ${input.goal}.`,
-      systems,
-      capabilities
+      systems
     ]).join(' ');
   }
 
   function buildSpecialistDescription(input, system) {
-    const capabilities = input.capabilities ? `Focus on ${input.capabilities}.` : '';
     return uniqueList([
       `Handle ${system} work inside the "${input.workspaceName || 'workspace'}" workspace.`,
-      `Primary goal: ${input.goal}.`,
-      capabilities
+      `Primary goal: ${input.goal}.`
     ]).join(' ');
   }
 
@@ -703,13 +694,12 @@
     }));
 
     const planAgents = buildAgentPlan(input, agents);
-    const capabilitiesQueries = uniqueList([
+    const goalQueries = uniqueList([
       ...queries,
-      input.goal,
-      input.capabilities
+      input.goal
     ]).slice(0, 5);
-    const planSkills = normalizeSkillCandidates(installedSkills, marketplaceSkillResults, capabilitiesQueries);
-    const planMCPs = normalizeMCPCandidates(configuredMCPs, registryMCPResults, capabilitiesQueries);
+    const planSkills = normalizeSkillCandidates(installedSkills, marketplaceSkillResults, goalQueries);
+    const planMCPs = normalizeMCPCandidates(configuredMCPs, registryMCPResults, goalQueries);
 
     return {
       summary: buildPlanSummary(planAgents, planMCPs, planSkills),
@@ -1427,7 +1417,6 @@
       'folderNameInput',
       'folderPrimaryGoalInput',
       'folderSystemsInput',
-      'folderCapabilitiesInput',
       'folderContextInput',
       'folderImportToggle',
       'folderImportPathInput'

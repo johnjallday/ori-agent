@@ -7464,7 +7464,6 @@
     return {
       goal: text,
       systems: '',
-      capabilities: '',
       context: ''
     };
   }
@@ -7475,7 +7474,6 @@
     var descriptionInput = document.getElementById('folderDescriptionInput');
     var primaryGoalInput = document.getElementById('folderPrimaryGoalInput');
     var systemsInput = document.getElementById('folderSystemsInput');
-    var capabilitiesInput = document.getElementById('folderCapabilitiesInput');
     var contextInput = document.getElementById('folderContextInput');
     var parentSelect = document.getElementById('folderParentSelect');
     if (!modalElement || !nameInput || typeof bootstrap === 'undefined' || !bootstrap.Modal) {
@@ -7489,9 +7487,6 @@
     }
     if (systemsInput) {
       systemsInput.value = String(seedPayload && seedPayload.workspaceBootstrap && seedPayload.workspaceBootstrap.systems || '').trim();
-    }
-    if (capabilitiesInput) {
-      capabilitiesInput.value = String(seedPayload && seedPayload.workspaceBootstrap && seedPayload.workspaceBootstrap.capabilities || '').trim();
     }
     if (contextInput) {
       contextInput.value = String(seedPayload && seedPayload.workspaceBootstrap && seedPayload.workspaceBootstrap.context || '').trim();

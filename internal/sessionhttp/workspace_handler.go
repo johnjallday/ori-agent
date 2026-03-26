@@ -103,10 +103,9 @@ func (h *Handler) handleWorkspace(w http.ResponseWriter, r *http.Request, id str
 }
 
 type workspaceBootstrapRequest struct {
-	Goal         string `json:"goal,omitempty"`
-	Systems      string `json:"systems,omitempty"`
-	Capabilities string `json:"capabilities,omitempty"`
-	Context      string `json:"context,omitempty"`
+	Goal    string `json:"goal,omitempty"`
+	Systems string `json:"systems,omitempty"`
+	Context string `json:"context,omitempty"`
 }
 
 func normalizeWorkspaceBootstrap(input *workspaceBootstrapRequest) map[string]interface{} {
@@ -116,9 +115,8 @@ func normalizeWorkspaceBootstrap(input *workspaceBootstrapRequest) map[string]in
 
 	goal := strings.TrimSpace(input.Goal)
 	systems := strings.TrimSpace(input.Systems)
-	capabilities := strings.TrimSpace(input.Capabilities)
 	contextValue := strings.TrimSpace(input.Context)
-	if goal == "" && systems == "" && capabilities == "" && contextValue == "" {
+	if goal == "" && systems == "" && contextValue == "" {
 		return nil
 	}
 
@@ -132,7 +130,6 @@ func normalizeWorkspaceBootstrap(input *workspaceBootstrapRequest) map[string]in
 		"goal":         goal,
 		"systems":      systems,
 		"systems_list": systemsList,
-		"capabilities": capabilities,
 		"context":      contextValue,
 		"captured_at":  time.Now().UTC().Format(time.RFC3339),
 	}
