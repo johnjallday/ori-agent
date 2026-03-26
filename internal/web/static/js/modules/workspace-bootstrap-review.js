@@ -1425,7 +1425,6 @@
 
     const dirtyIds = [
       'folderNameInput',
-      'folderDescriptionInput',
       'folderPrimaryGoalInput',
       'folderSystemsInput',
       'folderCapabilitiesInput',

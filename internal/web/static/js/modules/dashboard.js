@@ -7478,12 +7478,12 @@
     var capabilitiesInput = document.getElementById('folderCapabilitiesInput');
     var contextInput = document.getElementById('folderContextInput');
     var parentSelect = document.getElementById('folderParentSelect');
-    if (!modalElement || !nameInput || !descriptionInput || typeof bootstrap === 'undefined' || !bootstrap.Modal) {
+    if (!modalElement || !nameInput || typeof bootstrap === 'undefined' || !bootstrap.Modal) {
       return { status: 'unavailable', reason: 'workspace_modal_prerequisites_missing' };
     }
 
     nameInput.value = String(seedPayload && seedPayload.name || '').trim();
-    descriptionInput.value = String(seedPayload && seedPayload.description || '').trim();
+    if (descriptionInput) descriptionInput.value = String(seedPayload && seedPayload.description || '').trim();
     if (primaryGoalInput) {
       primaryGoalInput.value = String(seedPayload && seedPayload.workspaceBootstrap && seedPayload.workspaceBootstrap.goal || '').trim();
     }

@@ -116,11 +116,14 @@ const SettingsNavigation = (function() {
   function setupNavClickListeners() {
     navItems.forEach(item => {
       item.addEventListener('click', function(e) {
-        e.preventDefault();
         const sectionId = this.getAttribute('data-section');
-        if (sectionId) {
-          scrollToSection(sectionId);
+        const isExternalLink = this.dataset.externalLink === 'true';
+        if (!sectionId || isExternalLink) {
+          return;
         }
+
+        e.preventDefault();
+        scrollToSection(sectionId);
       });
     });
   }

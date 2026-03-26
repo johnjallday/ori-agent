@@ -26,6 +26,7 @@ const (
 type BackendKind string
 
 const (
+	BackendVaultPassword      BackendKind = "vault_password"
 	BackendDarwinKeychain     BackendKind = "darwin_keychain"
 	BackendLinuxSecretService BackendKind = "linux_secret_service"
 	BackendWindowsSecureStore BackendKind = "windows_secure_store"

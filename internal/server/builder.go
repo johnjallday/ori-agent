@@ -105,6 +105,7 @@ type ServerBuilder struct {
 	templateRenderer      *web.TemplateRenderer
 	updateMgr             *updatemanager.Manager
 	workspaceStore        workspace.Store
+	workspaceFileStore    *workspace.FileStore
 	taskExecutor          *workspace.TaskExecutor
 	stepExecutor          *workspace.StepExecutor
 	taskScheduler         *workspace.TaskScheduler

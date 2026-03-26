@@ -68,11 +68,15 @@ func (b *ServerBuilder) initializeWorkspaceStore() error {
 			}
 		}
 
+		b.workspaceFileStore = fileStore
 		if b.sessionHandler != nil {
 			b.sessionHandler.SetWorkspaceStore(fileStore)
 		}
 		if b.chatHandler != nil {
 			b.chatHandler.SetFileStore(fileStore)
+		}
+		if b.resetHandler != nil {
+			b.resetHandler.SetWorkspaceStore(fileStore)
 		}
 		if verbose {
 			logger.Info("Folder-based workspace store initialized", logger.Fields{"dir": workspaceDir})

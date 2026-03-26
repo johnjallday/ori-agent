@@ -786,6 +786,21 @@ func copyDir(src, dst string) error {
 	})
 }
 
+// ClearAll removes all workspaces from the in-memory cache and index.
+// This is used during application reset to ensure stale data is not served
+// after the workspace directory has been deleted from disk.
+func (s *FileStore) ClearAll() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	s.cache = make(map[string]*Workspace)
+	s.idToPath = make(map[string]string)
+
+	if s.index != nil {
+		_ = s.index.Rebuild()
+	}
+}
+
 // Close releases resources held by the FileStore, including the index database.
 func (s *FileStore) Close() error {
 	if s.index != nil {
