@@ -83,6 +83,7 @@ func (tr *TemplateRenderer) LoadTemplates() error {
 		"templates/components/file_dialog.tmpl",
 		"templates/components/studios/manage-agents-modal.tmpl",
 		"templates/components/workspaces/create-workspace-modal.tmpl",
+		"templates/components/workspaces/sync-modal.tmpl",
 		"templates/components/studios/workspace-details-modal.tmpl",
 		"templates/pages/index.tmpl",
 		"templates/pages/agents.tmpl",

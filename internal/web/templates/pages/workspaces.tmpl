@@ -20,6 +20,7 @@
   </div>
 
   {{template "session-modals.tmpl" .}}
+  {{template "components/workspaces/sync-modal.tmpl" .}}
   {{template "chat-area.tmpl" .}}
 
   <!-- Ask Ori Thinking Modal -->
@@ -107,6 +108,7 @@
   <script src="/js/modules/workspace-hub-panels.js"></script>
   <script src="/js/modules/workspace-hub.js"></script>
   <script src="/js/modules/workspace-hub-board.js"></script>
+  <script src="/js/modules/workspace-sync.js"></script>
 </body>
 </html>
 {{end}}

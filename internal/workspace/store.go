@@ -786,6 +786,31 @@ func copyDir(src, dst string) error {
 	})
 }
 
+// SyncWorkspaceInfo is a lightweight workspace summary for sync display.
+type SyncWorkspaceInfo struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+	Path string `json:"path,omitempty"`
+}
+
+// SyncStatus holds the result of comparing disk state against the primary store.
+type SyncStatus struct {
+	InSync       bool                `json:"in_sync"`
+	Unregistered []SyncWorkspaceInfo `json:"unregistered"`
+	Orphaned     []SyncWorkspaceInfo `json:"orphaned"`
+}
+
+// CachedWorkspaces returns a copy of all workspaces currently in the FileStore cache.
+func (s *FileStore) CachedWorkspaces() map[string]*Workspace {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	result := make(map[string]*Workspace, len(s.cache))
+	for id, ws := range s.cache {
+		result[id] = ws
+	}
+	return result
+}
+
 // ClearAll removes all workspaces from the in-memory cache and index.
 // This is used during application reset to ensure stale data is not served
 // after the workspace directory has been deleted from disk.

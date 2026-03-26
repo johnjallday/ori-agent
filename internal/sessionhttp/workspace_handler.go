@@ -39,6 +39,12 @@ func (h *Handler) HandleWorkspaces(w http.ResponseWriter, r *http.Request) {
 	case "import/duplicate-action":
 		h.handleWorkspaceImportDuplicateAction(w, r)
 		return
+	case "sync-status":
+		h.handleWorkspaceSyncStatus(w, r)
+		return
+	case "sync":
+		h.handleWorkspaceSync(w, r)
+		return
 	}
 
 	// Handle sub-paths like {id}/agents, {id}/layout
@@ -1628,5 +1634,126 @@ func (h *Handler) saveWorkspaceLayout(w http.ResponseWriter, r *http.Request, wo
 	orihttp.WriteJSON(w, map[string]interface{}{
 		"success": true,
 		"layout":  layout,
+	})
+}
+
+// handleWorkspaceSyncStatus compares workspaces on disk (FileStore cache) against
+// the primary SQLite store and returns any mismatches.
+func (h *Handler) handleWorkspaceSyncStatus(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		_ = orihttp.RespondMethodNotAllowed(w)
+		return
+	}
+
+	if h.workspaceStore == nil {
+		orihttp.WriteJSON(w, agentworkspace.SyncStatus{InSync: true})
+		return
+	}
+
+	ctx := r.Context()
+
+	// Get all workspaces from the primary SQLite store.
+	sqliteWorkspaces, err := h.store.ListWorkspaces(ctx)
+	if err != nil {
+		logger.Error("Sync status: failed to list workspaces from store", logger.Fields{"error": err})
+		_ = orihttp.RespondInternalError(w, "Failed to list workspaces")
+		return
+	}
+
+	sqliteIDs := make(map[string]session.Workspace, len(sqliteWorkspaces))
+	for _, ws := range sqliteWorkspaces {
+		sqliteIDs[ws.ID] = ws
+	}
+
+	// Get all workspaces from the FileStore disk cache.
+	diskCache := h.workspaceStore.CachedWorkspaces()
+
+	var unregistered []agentworkspace.SyncWorkspaceInfo
+	var orphaned []agentworkspace.SyncWorkspaceInfo
+
+	// Disk → Store: on disk but not in SQLite.
+	for id, ws := range diskCache {
+		if _, exists := sqliteIDs[id]; !exists {
+			path, _ := h.workspaceStore.GetFolderPath(id)
+			unregistered = append(unregistered, agentworkspace.SyncWorkspaceInfo{
+				ID:   id,
+				Name: ws.Name,
+				Path: path,
+			})
+		}
+	}
+
+	// Store → Disk: in SQLite but not on disk.
+	for id, ws := range sqliteIDs {
+		if _, exists := diskCache[id]; !exists {
+			orphaned = append(orphaned, agentworkspace.SyncWorkspaceInfo{
+				ID:   id,
+				Name: ws.Name,
+			})
+		}
+	}
+
+	orihttp.WriteJSON(w, agentworkspace.SyncStatus{
+		InSync:       len(unregistered) == 0 && len(orphaned) == 0,
+		Unregistered: unregistered,
+		Orphaned:     orphaned,
+	})
+}
+
+// handleWorkspaceSync imports unregistered disk workspaces and/or cleans up orphaned entries.
+func (h *Handler) handleWorkspaceSync(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		_ = orihttp.RespondMethodNotAllowed(w)
+		return
+	}
+
+	var req struct {
+		Import  []string `json:"import"`
+		Cleanup []string `json:"cleanup"`
+	}
+	if !orihttp.ParseJSONBody(w, r, &req) {
+		return
+	}
+
+	ctx := r.Context()
+	var imported, cleaned int
+
+	// Import: read workspace from FileStore cache, create in SQLite.
+	if h.workspaceStore != nil {
+		for _, id := range req.Import {
+			diskWS, err := h.workspaceStore.Get(id)
+			if err != nil {
+				logger.Warn("Sync import: workspace not found on disk", logger.Fields{"id": id, "error": err})
+				continue
+			}
+			sessionWS := &session.Workspace{
+				ID:          diskWS.ID,
+				Name:        diskWS.Name,
+				Description: diskWS.Description,
+				FolderSlug:  diskWS.FolderSlug,
+				ParentID:    diskWS.ParentID,
+			}
+			if err := h.store.CreateWorkspace(ctx, sessionWS); err != nil {
+				logger.Warn("Sync import: failed to create workspace in store",
+					logger.Fields{"id": id, "name": diskWS.Name, "error": err})
+				continue
+			}
+			imported++
+		}
+	}
+
+	// Cleanup: delete orphaned entries from SQLite.
+	for _, id := range req.Cleanup {
+		if err := h.store.DeleteWorkspace(ctx, id); err != nil {
+			logger.Warn("Sync cleanup: failed to delete orphaned workspace",
+				logger.Fields{"id": id, "error": err})
+			continue
+		}
+		cleaned++
+	}
+
+	orihttp.WriteJSON(w, map[string]any{
+		"imported": imported,
+		"cleaned":  cleaned,
 	})
 }
