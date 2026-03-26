@@ -476,6 +476,11 @@ export class OnboardingManager {
         successAlert.textContent = `${aName} will use ${label} (${model}).`;
         successAlert.classList.remove('d-none');
       }
+
+      if (typeof EventBus !== 'undefined') {
+        EventBus.emit('systemModel:changed', { provider, model });
+      }
+
       return true;
     } catch (error) {
       console.error('Error saving system model:', error);
