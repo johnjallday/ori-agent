@@ -40,27 +40,6 @@
 
   <div class="vault-page-grid">
     <aside class="vault-page-sidebar">
-      <section class="vault-page-card vault-page-card-highlight">
-        <div class="vault-page-card-head">
-          <div>
-            <div class="vault-page-eyebrow">Vault Spaces</div>
-            <h3 class="vault-page-card-title">Choose an active vault</h3>
-          </div>
-        </div>
-
-        <div class="vault-page-field">
-          <label class="vault-page-label" for="vaultActiveVaultId">Active vault</label>
-          <select id="vaultActiveVaultId" class="form-select settings-input vault-page-input">
-            <option value="">Loading vaults...</option>
-          </select>
-        </div>
-
-        <div id="vaultActiveVaultMeta" class="vault-page-meta">Checking available vaults...</div>
-        <p class="vault-page-support">
-          Vaults stay excluded from standard search indexing, and workspace agents need explicit persistent grants before they can read saved data.
-        </p>
-      </section>
-
       <section class="vault-page-card">
         <div class="vault-page-card-head">
           <div>
@@ -91,26 +70,10 @@
 
           <div class="vault-page-subsection">
             <h4 class="vault-page-subtitle">Create a new vault</h4>
-            <div class="vault-page-field">
-              <label class="vault-page-label" for="vaultNewVaultName">New vault name</label>
-              <input id="vaultNewVaultName" type="text" class="form-control settings-input vault-page-input" placeholder="Finance Vault, Travel Vault, Family Vault">
+            <p class="vault-page-help">Create a separately encrypted vault with its own password, then return to this page once it is ready.</p>
+            <div class="vault-page-button-row vault-page-button-row-tight">
+              <button id="vaultOpenCreateDialogBtn" class="modern-btn modern-btn-primary" type="button">Open Create Vault Dialog</button>
             </div>
-            <div class="vault-page-field">
-              <label class="vault-page-label" for="vaultNewVaultDescription">Description</label>
-              <input id="vaultNewVaultDescription" type="text" class="form-control settings-input vault-page-input" placeholder="Optional note about what belongs in this vault">
-            </div>
-            <div class="vault-page-field">
-              <label class="vault-page-label" for="vaultNewVaultPassword">Vault password</label>
-              <input id="vaultNewVaultPassword" type="password" class="form-control settings-input vault-page-input" placeholder="Required for this vault">
-            </div>
-            <div class="vault-page-field">
-              <label class="vault-page-label" for="vaultConfirmVaultPassword">Confirm vault password</label>
-              <input id="vaultConfirmVaultPassword" type="password" class="form-control settings-input vault-page-input" placeholder="Re-enter the vault password">
-            </div>
-            <div class="vault-page-button-row">
-              <button id="vaultCreateVaultSpaceBtn" class="modern-btn modern-btn-primary" type="button">Create Vault</button>
-            </div>
-            <p class="vault-page-help">Each vault has its own password. Ori cannot recover it later.</p>
           </div>
         </div>
       </section>
@@ -123,31 +86,80 @@
           </div>
         </div>
 
-        <div class="vault-page-field">
-          <label class="vault-page-label" for="vaultUnlockPassword">Vault password</label>
-          <div class="input-group vault-page-input-group">
-            <input
-              id="vaultUnlockPassword"
-              type="password"
-              class="form-control settings-input vault-page-input"
-              placeholder="Enter the selected vault password">
-            <button class="btn btn-outline-secondary" type="button" id="toggleVaultUnlockPassword" aria-label="Toggle password visibility">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-                <path d="M12,9A3,3 0 0,0 9,12A3,3 0 0,0 12,15A3,3 0 0,0 15,12A3,3 0 0,0 12,9M12,17A5,5 0 0,1 7,12A5,5 0 0,1 12,7A5,5 0 0,1 17,12A5,5 0 0,1 12,17M12,4.5C7,4.5 2.73,7.61 1,12C2.73,16.39 7,19.5 12,19.5C17,19.5 21.27,16.39 23,12C21.27,7.61 17,4.5 12,4.5Z"/>
-              </svg>
-            </button>
-          </div>
-          <p id="vaultUnlockPasswordHelp" class="vault-page-help">
-            Per-vault passwords are required for new vaults. Legacy vaults may still unlock through secure system storage or the older fallback passphrase flow.
-          </p>
-        </div>
-
-        <div class="vault-page-button-row vault-page-button-row-stacked">
-          <button id="vaultUnlockBtn" class="modern-btn modern-btn-primary" type="button">Unlock Vault</button>
+        <div class="vault-page-button-row vault-page-button-row-stacked vault-page-button-row-tight">
+          <button id="vaultOpenUnlockBtn" class="modern-btn modern-btn-primary" type="button">Unlock Vault</button>
           <button id="vaultLockBtn" class="btn btn-outline-secondary" type="button">Lock Vault</button>
           <button id="vaultRefreshBtn" class="btn btn-outline-secondary" type="button">Refresh</button>
         </div>
       </section>
+
+      <div id="vaultUnlockOverlay" class="vault-modal-unlock-overlay vault-page-unlock-overlay" hidden>
+        <button type="button" class="vault-modal-unlock-backdrop" data-action="dismiss-page-unlock-dialog" aria-label="Close vault unlock dialog"></button>
+        <div class="vault-modal-unlock-dialog vault-page-unlock-dialog" role="dialog" aria-modal="true" aria-labelledby="vaultUnlockDialogTitle">
+          <div class="vault-modal-section-head">
+            <span class="vault-modal-section-kicker">Unlock Vault</span>
+            <h6 id="vaultUnlockDialogTitle" class="vault-modal-section-title">Unlock <span id="vaultUnlockDialogVaultName">Selected Vault</span></h6>
+            <p id="vaultUnlockDialogDescription" class="vault-modal-section-description">Enter the password for the selected vault to load it inside Ori.</p>
+          </div>
+
+          <div class="vault-modal-field">
+            <label class="vault-modal-label" for="vaultUnlockPassword">Vault password</label>
+            <div class="input-group vault-modal-input-group">
+              <input
+                id="vaultUnlockPassword"
+                type="password"
+                class="form-control vault-modal-input"
+                placeholder="Enter the selected vault password">
+              <button class="btn btn-outline-secondary" type="button" id="toggleVaultUnlockPassword" aria-label="Toggle vault password visibility">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                  <path d="M12,9A3,3 0 0,0 9,12A3,3 0 0,0 12,15A3,3 0 0,0 15,12A3,3 0 0,0 12,9M12,17A5,5 0 0,1 7,12A5,5 0 0,1 12,7A5,5 0 0,1 17,12A5,5 0 0,1 12,17M12,4.5C7,4.5 2.73,7.61 1,12C2.73,16.39 7,19.5 12,19.5C17,19.5 21.27,16.39 23,12C21.27,7.61 17,4.5 12,4.5Z"/>
+                </svg>
+              </button>
+            </div>
+            <div id="vaultUnlockPasswordHelp" class="vault-modal-help">
+              Enter the password for the selected vault to unlock it.
+            </div>
+          </div>
+
+          <div class="vault-modal-actions">
+            <button id="vaultUnlockBtn" class="modern-btn modern-btn-primary" type="button">Unlock Vault</button>
+            <button id="vaultUnlockCancelBtn" class="modern-btn modern-btn-secondary" type="button">Cancel</button>
+          </div>
+        </div>
+      </div>
+
+      <div id="vaultCreateOverlay" class="vault-modal-unlock-overlay vault-page-unlock-overlay" hidden>
+        <button type="button" class="vault-modal-unlock-backdrop" data-action="dismiss-page-create-dialog" aria-label="Close create vault dialog"></button>
+        <div class="vault-modal-unlock-dialog vault-modal-create-dialog vault-page-unlock-dialog" role="dialog" aria-modal="true" aria-labelledby="vaultCreateDialogTitle">
+          <div class="vault-modal-section-head">
+            <span class="vault-modal-section-kicker">New Vault</span>
+            <h6 id="vaultCreateDialogTitle" class="vault-modal-section-title">Create New Vault</h6>
+            <p id="vaultCreateDialogDescription" class="vault-modal-section-description">Create a separately encrypted vault with its own password.</p>
+          </div>
+
+          <div class="vault-modal-field">
+            <label class="vault-modal-label" for="vaultNewVaultName">New vault name</label>
+            <input id="vaultNewVaultName" type="text" class="form-control vault-modal-input" placeholder="Finance Vault, Travel Vault, Family Vault">
+          </div>
+          <div class="vault-modal-field">
+            <label class="vault-modal-label" for="vaultNewVaultDescription">Description</label>
+            <input id="vaultNewVaultDescription" type="text" class="form-control vault-modal-input" placeholder="Optional note about what belongs in this vault">
+          </div>
+          <div class="vault-modal-field">
+            <label class="vault-modal-label" for="vaultNewVaultPassword">Vault password</label>
+            <input id="vaultNewVaultPassword" type="password" class="form-control vault-modal-input" placeholder="Required for this vault">
+          </div>
+          <div class="vault-modal-field">
+            <label class="vault-modal-label" for="vaultConfirmVaultPassword">Confirm vault password</label>
+            <input id="vaultConfirmVaultPassword" type="password" class="form-control vault-modal-input" placeholder="Re-enter the vault password">
+          </div>
+          <div class="vault-modal-actions">
+            <button id="vaultCreateVaultSpaceBtn" class="modern-btn modern-btn-primary" type="button">Create Vault</button>
+            <button id="vaultCreateCancelBtn" class="modern-btn modern-btn-secondary" type="button">Cancel</button>
+          </div>
+          <div class="vault-modal-help">Each vault has its own password. Ori cannot recover it later.</div>
+        </div>
+      </div>
     </aside>
 
     <div class="vault-page-main">
@@ -162,9 +174,21 @@
         </div>
 
         <div class="vault-page-explorer">
-          <div class="vault-page-panel-copy">
-            <h4 class="vault-page-subtitle">Folder explorer</h4>
-            <p class="vault-page-help">Virtual folders group encrypted entries by type and workspace scope so the page matches the quick-access vault modal.</p>
+          <div class="vault-page-explorer-head">
+            <div class="vault-page-panel-copy">
+              <h4 class="vault-page-subtitle">Folder explorer</h4>
+              <p class="vault-page-help">Switch the active vault here, then browse its protected folder tree by type and workspace scope.</p>
+            </div>
+
+            <div class="vault-page-explorer-vault">
+              <div class="vault-page-field">
+                <label class="vault-page-label" for="vaultActiveVaultId">Active vault</label>
+                <select id="vaultActiveVaultId" class="form-select settings-input vault-page-input">
+                  <option value="">Loading vaults...</option>
+                </select>
+              </div>
+              <div id="vaultActiveVaultMeta" class="vault-page-meta vault-page-explorer-meta">Checking available vaults...</div>
+            </div>
           </div>
 
           <div class="vault-modal-records-toolbar vault-page-explorer-toolbar">
@@ -333,76 +357,120 @@
           <div class="vault-page-transfer-grid">
             <div class="vault-page-transfer-block">
               <h4 class="vault-page-subtitle">Encrypted export</h4>
-              <div class="vault-page-field">
-                <label class="vault-page-label" for="vaultExportWorkspaceId">Workspace filter</label>
-                <input id="vaultExportWorkspaceId" type="text" class="form-control settings-input vault-page-input" placeholder="Optional workspace scope">
+              <p class="vault-page-help">Create a password-protected export bundle for the selected vault or a single workspace scope.</p>
+              <div class="vault-page-button-row vault-page-button-row-tight">
+                <button id="vaultOpenExportDialogBtn" class="modern-btn modern-btn-primary" type="button">Open Export Dialog</button>
               </div>
-              <label class="vault-page-checkbox">
-                <input type="checkbox" id="vaultExportConfirm">
-                <span>I understand this export contains encrypted private data and should be handled carefully.</span>
-              </label>
-              <div class="vault-page-field">
-                <label class="vault-page-label" for="vaultExportPassword">Export password</label>
-                <input id="vaultExportPassword" type="password" class="form-control settings-input vault-page-input" placeholder="Used to encrypt the export bundle">
-              </div>
-              <div class="vault-page-button-row">
-                <button id="vaultExportBtn" class="modern-btn modern-btn-primary" type="button">Export Vault</button>
-              </div>
-              <p class="vault-page-help">Leave the workspace filter blank to export the full selected vault.</p>
             </div>
 
             <div class="vault-page-transfer-block">
               <h4 class="vault-page-subtitle">Portable import</h4>
-              <div class="vault-page-field">
-                <label class="vault-page-label" for="vaultImportFile">Export bundle</label>
-                <div class="vault-page-button-row vault-page-button-row-left">
-                  <button id="vaultImportChooseFileBtn" class="modern-btn modern-btn-secondary" type="button">Choose File</button>
-                </div>
-                <input id="vaultImportFile" type="file" accept=".json,application/json" hidden>
-                <div id="vaultImportFileName" class="vault-page-meta">No import file selected yet.</div>
-              </div>
-              <div class="vault-page-field">
-                <label class="vault-page-label" for="vaultImportPassword">Import password</label>
-                <input id="vaultImportPassword" type="password" class="form-control settings-input vault-page-input" placeholder="Used to decrypt the export bundle">
-              </div>
-              <div class="vault-page-field">
-                <label class="vault-page-label" for="vaultImportMode">Import target</label>
-                <select id="vaultImportMode" class="form-select settings-input vault-page-input">
-                  <option value="new">Create a new vault</option>
-                  <option id="vaultImportModeCurrentOption" value="current">Import into the selected vault</option>
-                </select>
-              </div>
-              <div id="vaultImportCurrentHint" class="vault-page-help">The selected vault must already be unlocked before Ori can import records into it.</div>
-              <div id="vaultImportCreateFields" class="vault-page-stack vault-page-stack-tight">
-                <div class="vault-page-field">
-                  <label class="vault-page-label" for="vaultImportVaultName">New vault name</label>
-                  <input id="vaultImportVaultName" type="text" class="form-control settings-input vault-page-input" placeholder="Leave blank to use the bundle vault name">
-                </div>
-                <div class="vault-page-field">
-                  <label class="vault-page-label" for="vaultImportVaultDescription">Description</label>
-                  <input id="vaultImportVaultDescription" type="text" class="form-control settings-input vault-page-input" placeholder="Optional note for the imported vault">
-                </div>
-                <div class="vault-page-field-grid">
-                  <div class="vault-page-field">
-                    <label class="vault-page-label" for="vaultImportVaultPassword">New vault password</label>
-                    <input id="vaultImportVaultPassword" type="password" class="form-control settings-input vault-page-input" placeholder="Required for the imported vault">
-                  </div>
-                  <div class="vault-page-field">
-                    <label class="vault-page-label" for="vaultImportConfirmVaultPassword">Confirm vault password</label>
-                    <input id="vaultImportConfirmVaultPassword" type="password" class="form-control settings-input vault-page-input" placeholder="Re-enter the vault password">
-                  </div>
-                </div>
-              </div>
-              <label class="vault-page-checkbox">
-                <input type="checkbox" id="vaultImportRestoreGrants" checked>
-                <span>Restore workspace access grants from the bundle when they are available.</span>
-              </label>
-              <div class="vault-page-button-row">
-                <button id="vaultImportBtn" class="modern-btn modern-btn-primary" type="button">Import Vault</button>
+              <p class="vault-page-help">Bring an exported vault bundle back into Ori by creating a new vault or restoring into the current unlocked vault.</p>
+              <div class="vault-page-button-row vault-page-button-row-tight">
+                <button id="vaultOpenImportDialogBtn" class="modern-btn modern-btn-secondary" type="button">Open Import Dialog</button>
               </div>
             </div>
           </div>
         </section>
+      </div>
+    </div>
+  </div>
+
+  <div id="vaultExportOverlay" class="vault-modal-unlock-overlay vault-page-unlock-overlay" hidden>
+    <button type="button" class="vault-modal-unlock-backdrop" data-action="dismiss-page-export-dialog" aria-label="Close vault export dialog"></button>
+    <div class="vault-modal-unlock-dialog vault-modal-export-dialog vault-page-unlock-dialog" role="dialog" aria-modal="true" aria-labelledby="vaultExportDialogTitle">
+      <div class="vault-modal-section-head">
+        <span class="vault-modal-section-kicker">Portable Export</span>
+        <h6 id="vaultExportDialogTitle" class="vault-modal-section-title">Export <span id="vaultExportDialogVaultName">Selected Vault</span></h6>
+        <p id="vaultExportDialogDescription" class="vault-modal-section-description">Create an encrypted bundle you can move or archive outside this device.</p>
+      </div>
+
+      <div class="vault-modal-field">
+        <label class="vault-modal-label" for="vaultExportWorkspaceId">Workspace filter</label>
+        <input id="vaultExportWorkspaceId" type="text" class="form-control vault-modal-input" placeholder="Optional workspace scope">
+        <div class="vault-modal-help">Leave blank to export the full selected vault.</div>
+      </div>
+
+      <div class="vault-modal-field">
+        <label class="vault-modal-label" for="vaultExportPassword">Export password</label>
+        <input id="vaultExportPassword" type="password" class="form-control vault-modal-input" placeholder="Used to encrypt the export bundle">
+      </div>
+
+      <label class="vault-modal-checkbox">
+        <input type="checkbox" id="vaultExportConfirm">
+        <span>I understand this export contains encrypted private data and should be handled carefully.</span>
+      </label>
+
+      <div class="vault-modal-actions">
+        <button id="vaultExportBtn" class="modern-btn modern-btn-primary" type="button">Export Vault</button>
+        <button id="vaultExportCancelBtn" class="modern-btn modern-btn-secondary" type="button">Cancel</button>
+      </div>
+
+      <div class="vault-modal-help">The downloaded file stays encrypted with the export password you set here.</div>
+    </div>
+  </div>
+
+  <div id="vaultImportOverlay" class="vault-modal-unlock-overlay vault-page-unlock-overlay" hidden>
+    <button type="button" class="vault-modal-unlock-backdrop" data-action="dismiss-page-import-dialog" aria-label="Close vault import dialog"></button>
+    <div class="vault-modal-unlock-dialog vault-modal-import-dialog vault-page-unlock-dialog" role="dialog" aria-modal="true" aria-labelledby="vaultImportDialogTitle">
+      <div class="vault-modal-section-head">
+        <span class="vault-modal-section-kicker">Portable Import</span>
+        <h6 id="vaultImportDialogTitle" class="vault-modal-section-title">Import Vault Bundle</h6>
+        <p id="vaultImportDialogDescription" class="vault-modal-section-description">Bring an exported vault bundle back into Ori by creating a new vault or loading it into the current unlocked vault.</p>
+      </div>
+
+      <div class="vault-modal-field">
+        <div class="vault-modal-field-head">
+          <label class="vault-modal-label" for="vaultImportFile">Export bundle</label>
+          <button id="vaultImportChooseFileBtn" class="modern-btn modern-btn-secondary" type="button">Choose File</button>
+        </div>
+        <input id="vaultImportFile" type="file" accept=".json,application/json" hidden>
+        <div id="vaultImportFileName" class="vault-modal-file-name">No import file selected yet.</div>
+      </div>
+
+      <div class="vault-modal-field">
+        <label class="vault-modal-label" for="vaultImportPassword">Import password</label>
+        <input id="vaultImportPassword" type="password" class="form-control vault-modal-input" placeholder="Used to decrypt the export bundle">
+        <div class="vault-modal-help">This is the password that encrypts the portable bundle, not the vault password inside Ori.</div>
+      </div>
+
+      <div class="vault-modal-field">
+        <label class="vault-modal-label" for="vaultImportMode">Import target</label>
+        <select id="vaultImportMode" class="form-select vault-modal-select">
+          <option value="new">Create a new vault</option>
+          <option id="vaultImportModeCurrentOption" value="current">Import into the selected vault</option>
+        </select>
+      </div>
+
+      <div id="vaultImportCurrentHint" class="vault-modal-help">The selected vault must already be unlocked before Ori can import records into it.</div>
+
+      <div id="vaultImportCreateFields" class="vault-modal-stack">
+        <div class="vault-modal-field">
+          <label class="vault-modal-label" for="vaultImportVaultName">New vault name</label>
+          <input id="vaultImportVaultName" type="text" class="form-control vault-modal-input" placeholder="Leave blank to use the bundle vault name">
+        </div>
+        <div class="vault-modal-field">
+          <label class="vault-modal-label" for="vaultImportVaultDescription">Description</label>
+          <input id="vaultImportVaultDescription" type="text" class="form-control vault-modal-input" placeholder="Optional note for the imported vault">
+        </div>
+        <div class="vault-modal-field">
+          <label class="vault-modal-label" for="vaultImportVaultPassword">New vault password</label>
+          <input id="vaultImportVaultPassword" type="password" class="form-control vault-modal-input" placeholder="Required for the imported vault">
+        </div>
+        <div class="vault-modal-field">
+          <label class="vault-modal-label" for="vaultImportConfirmVaultPassword">Confirm vault password</label>
+          <input id="vaultImportConfirmVaultPassword" type="password" class="form-control vault-modal-input" placeholder="Re-enter the vault password">
+        </div>
+      </div>
+
+      <label class="vault-modal-checkbox">
+        <input type="checkbox" id="vaultImportRestoreGrants" checked>
+        <span>Restore workspace access grants from the bundle when they are available.</span>
+      </label>
+
+      <div class="vault-modal-actions">
+        <button id="vaultImportBtn" class="modern-btn modern-btn-primary" type="button">Import Vault</button>
+        <button id="vaultImportCancelBtn" class="modern-btn modern-btn-secondary" type="button">Cancel</button>
       </div>
     </div>
   </div>

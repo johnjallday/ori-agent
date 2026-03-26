@@ -405,6 +405,10 @@
   margin-top: 0.55rem;
 }
 
+.vault-page-button-row-tight {
+  margin-top: 0.2rem;
+}
+
 .vault-page-button-row-stacked .modern-btn,
 .vault-page-button-row-stacked .btn {
   flex: 1 1 10rem;
@@ -416,12 +420,41 @@
   gap: 0.8rem;
 }
 
+.vault-page-explorer-head {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(18rem, 24rem);
+  gap: 1rem;
+  align-items: start;
+}
+
+.vault-page-explorer-vault {
+  min-width: 0;
+  padding: 0.9rem 1rem;
+  border-radius: 20px;
+  border: 1px solid var(--vault-page-soft-border);
+  background: var(--vault-page-meta-bg);
+}
+
+.vault-page-explorer-meta {
+  margin-top: 0.75rem;
+}
+
 .vault-page-explorer-toolbar {
   margin-bottom: 0;
 }
 
 .vault-page-explorer-grid {
   min-height: 30rem;
+}
+
+.vault-page-unlock-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1080;
+}
+
+.vault-page-unlock-dialog {
+  width: min(31rem, calc(100% - 1.5rem));
 }
 
 .vault-page-danger-btn {
@@ -574,6 +607,7 @@
 
   .vault-page-hero,
   .vault-page-status-bar,
+  .vault-page-explorer-head,
   .vault-page-entry-grid,
   .vault-page-split-grid,
   .vault-page-transfer-grid,
