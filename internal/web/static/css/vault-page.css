@@ -81,24 +81,71 @@
   background: var(--vault-page-hero-bg);
 }
 
-.vault-page-hero-kicker,
-.vault-page-eyebrow {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.35rem;
-  font-size: 0.7rem;
-  font-weight: 800;
-  letter-spacing: 0.18em;
-  text-transform: uppercase;
+.vault-page-tabs {
+  margin-bottom: 1.5rem;
+  border-bottom: 1px solid var(--vault-page-divider-color);
+  gap: 0.5rem;
+}
+
+.vault-page-tabs .nav-link {
+  border: none;
+  border-bottom: 2px solid transparent;
+  color: var(--text-secondary);
+  font-weight: 700;
+  font-size: 0.95rem;
+  padding: 0.75rem 1.25rem;
+  transition: all 0.2s ease;
+  background: transparent;
+}
+
+.vault-page-tabs .nav-link:hover {
+  color: var(--text-primary);
+  border-bottom-color: var(--vault-page-soft-border);
+}
+
+.vault-page-tabs .nav-link.active {
   color: var(--primary-color);
+  border-bottom-color: var(--primary-color);
+  background: transparent;
+}
+
+.vault-page-advanced-details summary {
+  padding: 0.5rem;
+  border-radius: 8px;
+  background: var(--vault-page-badge-bg);
+  transition: background 0.2s ease;
+}
+
+.vault-page-advanced-details summary:hover {
+  background: var(--vault-page-soft-border);
+}
+
+.vault-page-advanced-details[open] summary {
+  margin-bottom: 1rem;
 }
 
 .vault-page-hero-title {
   margin: 0.35rem 0 0;
   font-family: var(--font-display);
-  font-size: clamp(2.3rem, 4vw, 3.3rem);
-  line-height: 0.96;
+  font-size: clamp(1.8rem, 3vw, 2.5rem);
+  line-height: 1.1;
   color: var(--text-primary);
+}
+
+#vaultEditorPlaceholder {
+  transition: all 0.3s ease;
+  cursor: pointer;
+}
+
+#vaultEditorPlaceholder:hover {
+  border-color: var(--primary-color) !important;
+  background: var(--vault-page-badge-bg);
+  transform: translateY(-2px);
+}
+
+.modern-btn-sm {
+  padding: 0.35rem 0.75rem;
+  font-size: 0.8rem;
 }
 
 .vault-page-hero-subtitle {

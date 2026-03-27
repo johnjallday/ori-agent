@@ -73,6 +73,13 @@
   const deleteEntryBtn = document.getElementById('vaultDeleteEntryBtn');
   const recordsListEl = document.getElementById('vaultRecordsList');
   const selectionBadge = document.getElementById('vaultSelectionBadge');
+  
+  const editorPanel = document.getElementById('vaultEditorPanel');
+  const editorForm = document.getElementById('vaultEditorForm');
+  const editorCloseBtn = document.getElementById('vaultEditorCloseBtn');
+  const explorerAddBtn = document.getElementById('vaultExplorerAddBtn');
+  const entryGrid = document.getElementById('vaultEntryGrid');
+
   const searchInput = document.getElementById('vaultPageSearchInput');
   const recordsSummaryEl = document.getElementById('vaultPageRecordsSummary');
   const folderVaultTabsEl = document.getElementById('vaultPageFolderVaultTabs');
@@ -1048,6 +1055,9 @@
     if (openExportDialogBtn) {
       openExportDialogBtn.disabled = !vaultStatus?.available || Boolean(locked);
     }
+    if (explorerAddBtn) {
+      explorerAddBtn.disabled = disableVaultEditing;
+    }
     renderFolderVaultTabs();
 
     if (disableVaultEditing) {
@@ -1057,7 +1067,7 @@
       recordsListEl.innerHTML = vaultStatus?.available
         ? '<div class="vault-page-empty">Unlock the vault to browse saved entries.</div>'
         : '<div class="vault-page-empty">Create a vault to begin storing encrypted entries.</div>';
-      clearRecordForm({ preserveStatus: true, refreshList: false, refreshExplorer: false });
+      clearRecordForm({ preserveStatus: true, refreshList: false, refreshExplorer: false, hide: true });
       renderExplorer();
     }
   }
@@ -1143,14 +1153,42 @@
     syncPageDialogs();
   }
 
+  function showVaultEditor() {
+    if (editorPanel) {
+      editorPanel.hidden = false;
+      editorPanel.classList.remove('animate__fadeOut');
+      editorPanel.classList.add('animate__fadeIn');
+    }
+    if (entryGrid) {
+      entryGrid.classList.add('is-editor-active');
+    }
+    if (!selectedRecord && entryLabelInput) {
+      entryLabelInput.focus();
+    }
+  }
+
+  function hideVaultEditor(force = false) {
+    if (force && editorPanel) {
+      editorPanel.hidden = true;
+      if (entryGrid) {
+        entryGrid.classList.remove('is-editor-active');
+      }
+    }
+  }
+
   function clearRecordForm(options = {}) {
     const preserveStatus = Boolean(options.preserveStatus);
     const refreshList = options.refreshList !== false;
     const refreshExplorer = options.refreshExplorer !== false;
+    const hide = Boolean(options.hide);
 
     selectedRecord = null;
     payloadRevealed = false;
     selectionBadge.textContent = 'No selection';
+
+    if (hide) {
+      hideVaultEditor(true);
+    }
     entryTypeInput.value = 'personal_note';
     entryWorkspaceInput.value = '';
     entryLabelInput.value = '';
@@ -1180,6 +1218,7 @@
     selectedRecord = record;
     payloadRevealed = false;
     selectionBadge.textContent = record.label || record.type || 'Selected';
+    showVaultEditor();
     entryTypeInput.value = record.type || 'personal_note';
     entryWorkspaceInput.value = record.workspace_id || '';
     entryLabelInput.value = record.label || '';
@@ -2309,6 +2348,16 @@
 
   resetEntryBtn?.addEventListener('click', () => {
     clearRecordForm();
+    showVaultEditor();
+  });
+
+  explorerAddBtn?.addEventListener('click', () => {
+    clearRecordForm();
+    showVaultEditor();
+  });
+
+  editorCloseBtn?.addEventListener('click', () => {
+    clearRecordForm({ hide: true });
   });
 
   revealPayloadBtn?.addEventListener('click', () => {
@@ -2504,6 +2553,26 @@
       closeImportDialog();
     }
   });
+
+  // Tab Persistence
+  const STORAGE_KEY_TAB = 'ori-vault-active-tab';
+  const tabEls = document.querySelectorAll('#vaultTab button[data-bs-toggle="tab"]');
+  if (tabEls.length && typeof bootstrap !== 'undefined' && bootstrap.Tab) {
+    tabEls.forEach(tabEl => {
+      tabEl.addEventListener('shown.bs.tab', (event) => {
+        localStorage.setItem(STORAGE_KEY_TAB, event.target.id);
+      });
+    });
+
+    const activeTabId = localStorage.getItem(STORAGE_KEY_TAB);
+    if (activeTabId) {
+      const activeTab = document.getElementById(activeTabId);
+      if (activeTab) {
+        const tabInstance = bootstrap.Tab.getOrCreateInstance(activeTab);
+        tabInstance.show();
+      }
+    }
+  }
 
   clearRecordForm();
   syncImportControls();
