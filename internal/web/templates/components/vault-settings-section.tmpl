@@ -18,11 +18,6 @@
         Transfer
       </button>
     </li>
-    <li class="nav-item" role="presentation">
-      <button class="nav-link" id="metrics-tab" data-bs-toggle="tab" data-bs-target="#metrics-pane" type="button" role="tab" aria-controls="metrics-pane" aria-selected="false">
-        Metrics
-      </button>
-    </li>
   </ul>
 
   <div class="tab-content" id="vaultTabContent">
@@ -49,7 +44,7 @@
               <div class="vault-page-explorer-topbar">
                 <div class="vault-page-panel-copy">
                   <h4 class="vault-page-subtitle">Folder explorer</h4>
-                  <p class="vault-page-help">Switch vaults, unlock access, and browse the protected folder tree from one place.</p>
+                  <p class="vault-page-help">Switch vaults and browse the protected folder tree from one place.</p>
                 </div>
 
                 <div class="vault-page-vault-picker">
@@ -60,25 +55,22 @@
                 </div>
               </div>
 
-              <div class="vault-page-explorer-support">
-                <div id="vaultActiveVaultMeta" class="vault-page-meta vault-page-explorer-meta">Checking available vaults...</div>
-                <div class="vault-page-vault-status-row">
-                  <div class="vault-page-vault-status-copy">
-                    <div id="vaultStatusIndicator" class="vault-page-status-indicator">
-                      <span class="spinner-border spinner-border-sm" role="status"></span>
-                    </div>
-                    <div class="vault-page-vault-status-text">
-                      <div id="vaultStatusText" class="vault-page-vault-status-title">Loading...</div>
-                      <div id="vaultStatusDetails" class="vault-page-vault-status-detail">Checking status...</div>
-                    </div>
-                  </div>
-                  <div class="vault-page-vault-status-actions">
-                    <button id="vaultOpenUnlockBtn" class="modern-btn modern-btn-primary modern-btn-sm" type="button">Unlock</button>
-                    <button id="vaultLockBtn" class="modern-btn modern-btn-secondary modern-btn-sm" type="button">Lock</button>
-                    <button id="vaultRefreshBtn" class="modern-btn modern-btn-secondary modern-btn-sm" type="button">Refresh</button>
-                  </div>
-                </div>
+            </div>
 
+            <div class="vault-modal-records-toolbar vault-page-explorer-toolbar">
+              <input id="vaultPageSearchInput" type="search" class="form-control settings-input vault-page-input vault-modal-search" placeholder="Search label, type, workspace, or tag">
+              <span id="vaultPageRecordsSummary" class="vault-modal-records-summary">Waiting for vault status...</span>
+            </div>
+
+            <div id="vaultPageFolderVaultTabs" class="vault-modal-folder-vault-tabs" role="tablist" aria-label="Vault folders"></div>
+            <div id="vaultPageFolderBreadcrumb" class="vault-modal-folder-breadcrumb" aria-label="Vault folder path" hidden></div>
+
+            <div class="vault-modal-explorer-grid vault-page-explorer-grid">
+              <div id="vaultPageFolderTree" class="vault-modal-folder-tree">
+                <div class="vault-modal-empty">Unlock the vault to browse the encrypted folder tree.</div>
+              </div>
+
+              <div class="vault-page-explorer-side">
                 <details class="vault-page-advanced-details vault-page-explorer-details">
                   <summary class="vault-page-subtitle" style="cursor: pointer; font-size: 0.85rem;">Edit vault details</summary>
                   <div class="mt-2">
@@ -96,24 +88,10 @@
                     </div>
                   </div>
                 </details>
-              </div>
-            </div>
 
-            <div class="vault-modal-records-toolbar vault-page-explorer-toolbar">
-              <input id="vaultPageSearchInput" type="search" class="form-control settings-input vault-page-input vault-modal-search" placeholder="Search label, type, workspace, or tag">
-              <span id="vaultPageRecordsSummary" class="vault-modal-records-summary">Waiting for vault status...</span>
-            </div>
-
-            <div id="vaultPageFolderVaultTabs" class="vault-modal-folder-vault-tabs" role="tablist" aria-label="Vault folders"></div>
-            <div id="vaultPageFolderBreadcrumb" class="vault-modal-folder-breadcrumb" aria-label="Vault folder path" hidden></div>
-
-            <div class="vault-modal-explorer-grid vault-page-explorer-grid">
-              <div id="vaultPageFolderTree" class="vault-modal-folder-tree">
-                <div class="vault-modal-empty">Unlock the vault to browse the encrypted folder tree.</div>
-              </div>
-
-              <div id="vaultPageExplorerPreview" class="vault-modal-explorer-preview">
-                <div class="vault-modal-empty">Select a folder to inspect its encrypted contents.</div>
+                <div id="vaultPageExplorerPreview" class="vault-modal-explorer-preview">
+                  <div class="vault-modal-empty">Select a folder to inspect its encrypted contents.</div>
+                </div>
               </div>
             </div>
           </div>
@@ -287,36 +265,6 @@
       </section>
     </div>
 
-    <!-- Metrics Pane -->
-    <div class="tab-pane fade" id="metrics-pane" role="tabpanel" aria-labelledby="metrics-tab">
-      <section class="vault-page-card modern-card">
-        <div class="vault-page-card-head">
-          <div>
-            <div class="vault-page-eyebrow">Vault Metrics</div>
-            <h3 class="vault-page-card-title">Encrypted Storage Stats</h3>
-          </div>
-        </div>
-
-        <div class="vault-page-metrics" aria-label="Vault metrics" style="grid-template-columns: repeat(2, minmax(0, 1fr)); max-width: 600px;">
-          <div class="vault-page-metric">
-            <span class="vault-page-metric-label">Backend</span>
-            <strong id="vaultBackendLabel" class="vault-page-metric-value">-</strong>
-          </div>
-          <div class="vault-page-metric">
-            <span class="vault-page-metric-label">Records</span>
-            <strong id="vaultRecordCount" class="vault-page-metric-value">-</strong>
-          </div>
-          <div class="vault-page-metric">
-            <span class="vault-page-metric-label">Write Access</span>
-            <strong id="vaultWritableLabel" class="vault-page-metric-value">-</strong>
-          </div>
-          <div class="vault-page-metric">
-            <span class="vault-page-metric-label">Current Mode</span>
-            <span id="vaultModeLabel" class="vault-page-mode-badge">-</span>
-          </div>
-        </div>
-      </section>
-    </div>
   </div>
 
   <!-- Existing Modals/Overlays -->

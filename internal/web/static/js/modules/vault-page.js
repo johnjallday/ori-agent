@@ -24,14 +24,6 @@
     return;
   }
 
-  const statusIndicator = document.getElementById('vaultStatusIndicator');
-  const statusText = document.getElementById('vaultStatusText');
-  const statusDetails = document.getElementById('vaultStatusDetails');
-  const backendLabel = document.getElementById('vaultBackendLabel');
-  const recordCountLabel = document.getElementById('vaultRecordCount');
-  const writableLabel = document.getElementById('vaultWritableLabel');
-  const modeLabel = document.getElementById('vaultModeLabel');
-  const openUnlockBtn = document.getElementById('vaultOpenUnlockBtn');
   const heroCreateDialogBtn = document.getElementById('vaultHeroCreateDialogBtn');
   const unlockOverlay = document.getElementById('vaultUnlockOverlay');
   const unlockDialogVaultName = document.getElementById('vaultUnlockDialogVaultName');
@@ -39,13 +31,10 @@
   const unlockPasswordInput = document.getElementById('vaultUnlockPassword');
   const unlockBtn = document.getElementById('vaultUnlockBtn');
   const unlockCancelBtn = document.getElementById('vaultUnlockCancelBtn');
-  const lockBtn = document.getElementById('vaultLockBtn');
-  const refreshBtn = document.getElementById('vaultRefreshBtn');
   const toggleUnlockPasswordBtn = document.getElementById('toggleVaultUnlockPassword');
   const unlockPasswordHelp = document.getElementById('vaultUnlockPasswordHelp');
   const alertsEl = document.getElementById('vaultAlerts');
   const activeVaultSelect = document.getElementById('vaultActiveVaultId');
-  const activeVaultMeta = document.getElementById('vaultActiveVaultMeta');
   const editVaultNameInput = document.getElementById('vaultEditVaultName');
   const editVaultDescriptionInput = document.getElementById('vaultEditVaultDescription');
   const renameVaultBtn = document.getElementById('vaultRenameVaultBtn');
@@ -492,30 +481,6 @@
     }
   }
 
-  function backendLabelFor(status) {
-    const backend = String(status?.secret_store?.backend || 'unknown');
-    switch (backend) {
-      case 'vault_password':
-        return 'Vault Password';
-      case 'darwin_keychain':
-        return 'macOS Keychain';
-      case 'linux_secret_service':
-        return 'Linux Secret Service';
-      case 'windows_secure_store':
-        return 'Windows Secure Store';
-      case 'passphrase_fallback':
-        return 'Passphrase Fallback';
-      case 'unavailable':
-        return 'Unavailable';
-      default:
-        return backend.replaceAll('_', ' ');
-    }
-  }
-
-  function statusDot(color) {
-    return `<span style="display:inline-block;width:0.95rem;height:0.95rem;border-radius:999px;background:${color};box-shadow:0 0 0 6px rgba(255,255,255,0.82);"></span>`;
-  }
-
   function showInlineAlert(message, type = 'info') {
     if (!alertsEl) {
       notify(message, type);
@@ -606,7 +571,7 @@
 
     if (options.restoreFocus !== false) {
       window.requestAnimationFrame(() => {
-        openUnlockBtn?.focus();
+        activeVaultSelect?.focus();
       });
     }
   }
@@ -815,13 +780,12 @@
   }
 
   function renderVaultSpaces() {
-    if (!activeVaultSelect || !activeVaultMeta) {
+    if (!activeVaultSelect) {
       return;
     }
 
     if (!vaults.length) {
       activeVaultSelect.innerHTML = '<option value="">No vaults available</option>';
-      activeVaultMeta.textContent = 'Create a vault to begin storing encrypted records.';
       if (editVaultNameInput) editVaultNameInput.value = '';
       if (editVaultDescriptionInput) editVaultDescriptionInput.value = '';
       if (renameVaultBtn) renameVaultBtn.disabled = true;
@@ -839,7 +803,6 @@
 
     const selectedVault = currentVault();
     if (!selectedVault) {
-      activeVaultMeta.textContent = 'Select a vault to continue.';
       if (editVaultNameInput) editVaultNameInput.value = '';
       if (editVaultDescriptionInput) editVaultDescriptionInput.value = '';
       if (renameVaultBtn) renameVaultBtn.disabled = true;
@@ -848,14 +811,6 @@
       syncPageDialogs();
       return;
     }
-
-    const details = [];
-    if (selectedVault.description) {
-      details.push(selectedVault.description);
-    }
-    details.push(selectedVault.password_protected ? 'Own password' : 'Legacy vault');
-    details.push(`${vaultRecordCount(selectedVault)} stored ${vaultRecordCount(selectedVault) === 1 ? 'entry' : 'entries'}`);
-    activeVaultMeta.textContent = details.join(' • ');
 
     if (editVaultNameInput) {
       editVaultNameInput.value = selectedVault.name || '';
@@ -1040,10 +995,6 @@
     saveEntryBtn.disabled = disableVaultEditing;
     resetEntryBtn.disabled = false;
     exportBtn.disabled = disableVaultEditing;
-    lockBtn.disabled = !vaultStatus || !vaultStatus.available || vaultStatus.locked;
-    if (openUnlockBtn) {
-      openUnlockBtn.disabled = !vaultStatus || !vaultStatus.available || !vaultStatus.locked;
-    }
     if (unlockBtn) {
       unlockBtn.disabled = !vaultStatus || !vaultStatus.available || !vaultStatus.locked;
     }
@@ -1079,15 +1030,6 @@
     }
 
     if (!vaultStatus.available) {
-      statusIndicator.innerHTML = statusDot('#94a3b8');
-      statusText.textContent = 'No vault selected';
-      statusDetails.textContent = vaultStatus.message || 'Create a vault to begin storing encrypted records.';
-      backendLabel.textContent = backendLabelFor(vaultStatus);
-      recordCountLabel.textContent = '0';
-      writableLabel.textContent = 'Unavailable';
-      modeLabel.textContent = 'Create a vault';
-      modeLabel.style.background = '#e2e8f0';
-      modeLabel.style.color = '#475569';
       if (unlockPasswordHelp) {
         unlockPasswordHelp.textContent = 'Per-vault passwords are required for new vaults. Legacy vaults may still unlock through secure system storage or the older fallback passphrase flow.';
       }
@@ -1098,49 +1040,7 @@
     }
 
     const locked = Boolean(vaultStatus.locked);
-    const requiresPassphrase = Boolean(vaultStatus.requires_passphrase);
     const passwordProtected = Boolean(vaultStatus.password_protected);
-    const dotColor = locked ? '#f59e0b' : '#10b981';
-    const selectedVault = currentVault();
-    const vaultName = selectedVault?.name || vaultStatus.vault_name || 'Vault';
-    statusIndicator.innerHTML = statusDot(dotColor);
-    statusText.textContent = locked ? `${vaultName} locked` : `${vaultName} available`;
-
-    const detailParts = [];
-    if (selectedVault?.description) {
-      detailParts.push(selectedVault.description);
-    }
-    if (vaultStatus.message) {
-      detailParts.push(vaultStatus.message);
-    }
-    detailParts.push(`Record count: ${vaultStatus.record_count ?? 0}`);
-    statusDetails.textContent = detailParts.join(' • ');
-
-    backendLabel.textContent = backendLabelFor(vaultStatus);
-    recordCountLabel.textContent = String(vaultStatus.record_count ?? 0);
-    writableLabel.textContent = vaultStatus.writable ? 'Writable' : 'Read-only / locked';
-
-    if (passwordProtected && locked && requiresPassphrase) {
-      modeLabel.textContent = 'Vault password required';
-      modeLabel.style.background = '#fef3c7';
-      modeLabel.style.color = '#92400e';
-    } else if (passwordProtected) {
-      modeLabel.textContent = 'Per-vault password';
-      modeLabel.style.background = '#dcfce7';
-      modeLabel.style.color = '#166534';
-    } else if (locked && requiresPassphrase) {
-      modeLabel.textContent = 'Legacy passphrase required';
-      modeLabel.style.background = '#fef3c7';
-      modeLabel.style.color = '#92400e';
-    } else if (String(vaultStatus.secret_store?.backend || '') === 'passphrase_fallback') {
-      modeLabel.textContent = 'Passphrase fallback active';
-      modeLabel.style.background = '#dbeafe';
-      modeLabel.style.color = '#1d4ed8';
-    } else {
-      modeLabel.textContent = 'OS secure storage';
-      modeLabel.style.background = '#dcfce7';
-      modeLabel.style.color = '#166534';
-    }
 
     if (unlockPasswordHelp) {
       unlockPasswordHelp.textContent = passwordProtected
@@ -1513,7 +1413,7 @@
     }
 
     if (vaultStatus.locked) {
-      folderTreeEl.innerHTML = '<div class="vault-modal-empty">Unlock the vault to browse the encrypted folder tree.</div>';
+      folderTreeEl.innerHTML = '<div class="vault-modal-empty">Use the lock icon on the selected vault tab to unlock the vault and browse the encrypted folder tree.</div>';
       return;
     }
 
@@ -1661,7 +1561,7 @@
 
     if (vaultStatus.locked) {
       recordsSummaryEl.textContent = 'Vault is locked';
-      explorerPreviewEl.innerHTML = '<div class="vault-modal-empty">Unlock the vault to browse files inside the encrypted folder.</div>';
+      explorerPreviewEl.innerHTML = '<div class="vault-modal-empty">Use the lock icon on the selected vault tab to unlock the vault and browse files inside the encrypted folder.</div>';
       return;
     }
 
@@ -2030,7 +1930,7 @@
     }
 
     try {
-      setButtonLoading(lockBtn, true, 'Locking');
+      setButtonLoading(null, true, 'Locking');
       await apiRequest(vaultURL('/api/vault/lock'), {
         method: 'POST',
         body: {}
@@ -2042,7 +1942,7 @@
       console.error('Failed to lock vault:', error);
       showInlineAlert(error.message || 'Failed to lock vault.', 'error');
     } finally {
-      setButtonLoading(lockBtn, false);
+      setButtonLoading(null, false);
     }
   }
 
@@ -2244,10 +2144,6 @@
     unlockPasswordInput.type = unlockPasswordInput.type === 'password' ? 'text' : 'password';
   });
 
-  openUnlockBtn?.addEventListener('click', () => {
-    openUnlockDialog();
-  });
-
   openCreateDialogBtn?.addEventListener('click', () => {
     openCreateDialog();
   });
@@ -2295,14 +2191,6 @@
       event.preventDefault();
       unlockVault();
     }
-  });
-
-  lockBtn?.addEventListener('click', () => {
-    lockVault();
-  });
-
-  refreshBtn?.addEventListener('click', () => {
-    refreshVault();
   });
 
   activeVaultSelect?.addEventListener('change', (event) => {
