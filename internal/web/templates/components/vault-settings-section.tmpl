@@ -13,11 +13,6 @@
         Grants
       </button>
     </li>
-    <li class="nav-item" role="presentation">
-      <button class="nav-link" id="transfer-tab" data-bs-toggle="tab" data-bs-target="#transfer-pane" type="button" role="tab" aria-controls="transfer-pane" aria-selected="false">
-        Transfer
-      </button>
-    </li>
   </ul>
 
   <div class="tab-content" id="vaultTabContent">
@@ -25,41 +20,21 @@
     <div class="tab-pane fade show active" id="explorer-pane" role="tabpanel" aria-labelledby="explorer-tab">
       <div class="vault-page-main">
         <section class="vault-page-card vault-page-card-primary">
-          <div class="vault-page-card-head vault-page-card-head-wide">
-            <div>
-              <div class="vault-page-eyebrow">Entries Workspace</div>
-              <h3 class="vault-page-card-title">Browse and edit encrypted entries</h3>
-            </div>
-            <div class="d-flex align-items-center gap-2">
-              <button id="vaultExplorerAddBtn" class="modern-btn modern-btn-primary modern-btn-sm">
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" class="me-1"><path d="M19,13H13V19H11V13H5V11H11V5H13V11H19V13Z"/></svg>
-                Add Item
-              </button>
-              <span id="vaultSelectionBadge" class="vault-page-selection-badge">No selection</span>
-            </div>
-          </div>
-
           <div class="vault-page-explorer">
-            <div class="vault-page-explorer-head">
-              <div class="vault-page-explorer-topbar">
-                <div class="vault-page-panel-copy">
-                  <h4 class="vault-page-subtitle">Folder explorer</h4>
-                  <p class="vault-page-help">Switch vaults and browse the protected folder tree from one place.</p>
-                </div>
-
-                <div class="vault-page-vault-picker">
-                  <label class="vault-page-label" for="vaultActiveVaultId">Vault</label>
-                  <select id="vaultActiveVaultId" class="form-select settings-input vault-page-input">
-                    <option value="">Loading vaults...</option>
-                  </select>
-                </div>
-              </div>
-
-            </div>
-
             <div class="vault-modal-records-toolbar vault-page-explorer-toolbar">
               <input id="vaultPageSearchInput" type="search" class="form-control settings-input vault-page-input vault-modal-search" placeholder="Search label, type, workspace, or tag">
-              <span id="vaultPageRecordsSummary" class="vault-modal-records-summary">Waiting for vault status...</span>
+              <div class="vault-page-explorer-tools">
+                <span id="vaultPageRecordsSummary" class="vault-modal-records-summary">Waiting for vault status...</span>
+                <div class="vault-page-explorer-actions">
+                  <button id="vaultOpenCreateDialogBtn" class="modern-btn modern-btn-secondary modern-btn-sm" type="button">Create</button>
+                  <button id="vaultOpenExportDialogBtn" class="modern-btn modern-btn-secondary modern-btn-sm" type="button">Export</button>
+                  <button id="vaultOpenImportDialogBtn" class="modern-btn modern-btn-secondary modern-btn-sm" type="button">Import</button>
+                  <button id="vaultExplorerAddBtn" class="modern-btn modern-btn-primary modern-btn-sm" type="button">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" class="me-1"><path d="M19,13H13V19H11V13H5V11H11V5H13V11H19V13Z"/></svg>
+                    Add Item
+                  </button>
+                </div>
+              </div>
             </div>
 
             <div id="vaultPageFolderVaultTabs" class="vault-modal-folder-vault-tabs" role="tablist" aria-label="Vault folders"></div>
@@ -225,36 +200,6 @@
             </div>
             <div id="vaultGrantsList" class="vault-page-grants-list">
               <div class="vault-page-empty">No persistent grants loaded yet.</div>
-            </div>
-          </div>
-        </div>
-      </section>
-    </div>
-
-    <!-- Transfer Pane -->
-    <div class="tab-pane fade" id="transfer-pane" role="tabpanel" aria-labelledby="transfer-tab">
-      <section class="vault-page-card">
-        <div class="vault-page-card-head">
-          <div>
-            <div class="vault-page-eyebrow">Portable Transfer</div>
-            <h3 class="vault-page-card-title">Export or restore encrypted bundles</h3>
-          </div>
-        </div>
-
-        <div class="vault-page-transfer-grid">
-          <div class="vault-page-transfer-block">
-            <h4 class="vault-page-subtitle">Encrypted export</h4>
-            <p class="vault-page-help">Create a password-protected export bundle.</p>
-            <div class="vault-page-button-row vault-page-button-row-tight">
-              <button id="vaultOpenExportDialogBtn" class="modern-btn modern-btn-primary" type="button">Open Export Dialog</button>
-            </div>
-          </div>
-
-          <div class="vault-page-transfer-block">
-            <h4 class="vault-page-subtitle">Portable import</h4>
-            <p class="vault-page-help">Bring an exported vault bundle back into Ori.</p>
-            <div class="vault-page-button-row vault-page-button-row-tight">
-              <button id="vaultOpenImportDialogBtn" class="modern-btn modern-btn-secondary" type="button">Open Import Dialog</button>
             </div>
           </div>
         </div>

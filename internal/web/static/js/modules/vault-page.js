@@ -24,7 +24,6 @@
     return;
   }
 
-  const heroCreateDialogBtn = document.getElementById('vaultHeroCreateDialogBtn');
   const unlockOverlay = document.getElementById('vaultUnlockOverlay');
   const unlockDialogVaultName = document.getElementById('vaultUnlockDialogVaultName');
   const unlockDialogDescription = document.getElementById('vaultUnlockDialogDescription');
@@ -34,7 +33,6 @@
   const toggleUnlockPasswordBtn = document.getElementById('toggleVaultUnlockPassword');
   const unlockPasswordHelp = document.getElementById('vaultUnlockPasswordHelp');
   const alertsEl = document.getElementById('vaultAlerts');
-  const activeVaultSelect = document.getElementById('vaultActiveVaultId');
   const editVaultNameInput = document.getElementById('vaultEditVaultName');
   const editVaultDescriptionInput = document.getElementById('vaultEditVaultDescription');
   const renameVaultBtn = document.getElementById('vaultRenameVaultBtn');
@@ -60,7 +58,6 @@
   const revealPayloadBtn = document.getElementById('vaultRevealPayloadBtn');
   const deleteEntryBtn = document.getElementById('vaultDeleteEntryBtn');
   const recordsListEl = document.getElementById('vaultRecordsList');
-  const selectionBadge = document.getElementById('vaultSelectionBadge');
   
   const editorPanel = document.getElementById('vaultEditorPanel');
   const editorForm = document.getElementById('vaultEditorForm');
@@ -570,7 +567,10 @@
 
     if (options.restoreFocus !== false) {
       window.requestAnimationFrame(() => {
-        activeVaultSelect?.focus();
+        const focusTarget = folderVaultTabsEl?.querySelector('.vault-modal-folder-vault-tab-icon')
+          || folderVaultTabsEl?.querySelector('.vault-modal-folder-vault-tab.is-active')
+          || explorerAddBtn;
+        focusTarget?.focus();
       });
     }
   }
@@ -779,12 +779,7 @@
   }
 
   function renderVaultSpaces() {
-    if (!activeVaultSelect) {
-      return;
-    }
-
     if (!vaults.length) {
-      activeVaultSelect.innerHTML = '<option value="">No vaults available</option>';
       if (editVaultNameInput) editVaultNameInput.value = '';
       if (editVaultDescriptionInput) editVaultDescriptionInput.value = '';
       if (renameVaultBtn) renameVaultBtn.disabled = true;
@@ -793,12 +788,6 @@
       syncPageDialogs();
       return;
     }
-
-    activeVaultSelect.innerHTML = vaults.map((item) => {
-      const selected = item.id === currentVaultID() ? ' selected' : '';
-      const label = `${vaultDisplayLabel(item)} · ${vaultRecordCount(item)}`;
-      return `<option value="${escapeHTML(item.id)}"${selected}>${escapeHTML(label)}</option>`;
-    }).join('');
 
     const selectedVault = currentVault();
     if (!selectedVault) {
@@ -1083,7 +1072,6 @@
 
     selectedRecord = null;
     payloadRevealed = false;
-    selectionBadge.textContent = 'No selection';
 
     if (hide) {
       hideVaultEditor(true);
@@ -1115,7 +1103,6 @@
   function applyRecordToForm(record) {
     selectedRecord = record;
     payloadRevealed = false;
-    selectionBadge.textContent = record.label || record.type || 'Selected';
     showVaultEditor();
     entryTypeInput.value = record.type || 'personal_note';
     entryWorkspaceInput.value = record.workspace_id || '';
@@ -2142,10 +2129,6 @@
     openCreateDialog();
   });
 
-  heroCreateDialogBtn?.addEventListener('click', () => {
-    openCreateDialog();
-  });
-
   openExportDialogBtn?.addEventListener('click', () => {
     openExportDialog();
   });
@@ -2185,10 +2168,6 @@
       event.preventDefault();
       unlockVault();
     }
-  });
-
-  activeVaultSelect?.addEventListener('change', (event) => {
-    switchVault(event.target.value);
   });
 
   renameVaultBtn?.addEventListener('click', () => {

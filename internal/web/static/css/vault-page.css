@@ -69,10 +69,9 @@
 }
 
 .vault-page-hero {
-  display: grid;
-  grid-template-columns: minmax(0, 1.3fr) auto;
-  gap: 1.5rem;
-  align-items: end;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
   margin-bottom: 1.35rem;
   padding: 1.5rem;
   border: 1px solid var(--vault-page-hero-border);
@@ -173,13 +172,6 @@
   font-weight: 700;
 }
 
-.vault-page-hero-actions {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: flex-end;
-  gap: 0.7rem;
-}
-
 .vault-page-shell {
   display: flex;
   flex-direction: column;
@@ -224,8 +216,7 @@
 
 .vault-page-status-copy,
 .vault-page-list-panel,
-.vault-page-editor-panel,
-.vault-page-transfer-block {
+.vault-page-editor-panel {
   min-width: 0;
 }
 
@@ -267,8 +258,7 @@
   background: var(--vault-page-note-bg);
 }
 
-.vault-page-mode-badge,
-.vault-page-selection-badge {
+.vault-page-mode-badge {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -314,10 +304,6 @@
   justify-content: space-between;
   gap: 1rem;
   margin-bottom: 1rem;
-}
-
-.vault-page-card-head-wide {
-  align-items: end;
 }
 
 .vault-page-card-title,
@@ -433,23 +419,6 @@
   gap: 0.8rem;
 }
 
-.vault-page-explorer-head {
-  display: flex;
-  flex-direction: column;
-  gap: 0.85rem;
-}
-
-.vault-page-explorer-topbar {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(16rem, 22rem);
-  gap: 1rem;
-  align-items: end;
-}
-
-.vault-page-vault-picker {
-  min-width: 0;
-}
-
 .vault-page-explorer-side {
   min-width: 0;
   min-height: 0;
@@ -474,6 +443,22 @@
   margin-bottom: 0;
 }
 
+.vault-page-explorer-tools {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.75rem;
+  flex: 0 0 auto;
+  flex-wrap: wrap;
+}
+
+.vault-page-explorer-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.55rem;
+  flex-wrap: wrap;
+}
+
 .vault-page-explorer-grid {
   min-height: 30rem;
 }
@@ -494,7 +479,6 @@
 
 .vault-page-entry-grid,
 .vault-page-split-grid,
-.vault-page-transfer-grid,
 .vault-page-secondary-grid {
   display: grid;
   gap: 1rem;
@@ -505,7 +489,6 @@
 }
 
 .vault-page-split-grid,
-.vault-page-transfer-grid,
 .vault-page-secondary-grid {
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
@@ -599,13 +582,6 @@
   line-height: 1.6;
 }
 
-.vault-page-transfer-block {
-  padding: 1rem;
-  border-radius: 20px;
-  border: 1px solid var(--vault-page-soft-border);
-  background: var(--vault-page-meta-bg);
-}
-
 .vault-page-checkbox {
   display: flex;
   align-items: flex-start;
@@ -638,18 +614,21 @@
 
   .vault-page-hero,
   .vault-page-status-bar,
-  .vault-page-explorer-topbar,
   .vault-page-entry-grid,
   .vault-page-split-grid,
-  .vault-page-transfer-grid,
   .vault-page-secondary-grid,
   .vault-page-field-grid,
   .vault-page-sidebar {
     grid-template-columns: 1fr;
   }
 
-  .vault-page-hero-actions {
-    justify-content: flex-start;
+  .vault-page-explorer-tools {
+    width: 100%;
+    justify-content: space-between;
+  }
+
+  .vault-page-explorer-actions {
+    justify-content: flex-end;
   }
 
   .vault-page-explorer-grid {
@@ -670,7 +649,6 @@
   }
 
   .vault-page-card-head,
-  .vault-page-card-head-wide,
   .vault-page-record-row,
   .vault-page-grant-row {
     flex-direction: column;
@@ -678,8 +656,7 @@
   }
 
   .vault-page-button-row .modern-btn,
-  .vault-page-button-row .btn,
-  .vault-page-selection-badge {
+  .vault-page-button-row .btn {
     width: 100%;
     justify-content: center;
   }
