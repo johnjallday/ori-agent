@@ -1796,7 +1796,6 @@
       elements.entryAttachmentsInput,
       elements.entryJsonModeInput,
       elements.entryTagsInput,
-      elements.entrySourceInput,
       elements.entryRetentionInput,
       elements.entryPayloadInput
     ];
@@ -1902,7 +1901,6 @@
     state.entryAttachments = [];
     elements.entryJsonModeInput.checked = false;
     elements.entryTagsInput.value = '';
-    elements.entrySourceInput.value = '';
     elements.entryRetentionInput.value = '';
     elements.entryPayloadInput.value = defaultPayloadValue(elements.entryTypeInput.value);
     if (elements.entryAttachmentsInput) {

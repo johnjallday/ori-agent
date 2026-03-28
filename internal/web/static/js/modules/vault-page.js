@@ -1092,7 +1092,6 @@
     entryWorkspaceInput.value = '';
     entryLabelInput.value = '';
     entryTagsInput.value = '';
-    entrySourceInput.value = '';
     entryRetentionInput.value = '';
     entryPayloadInput.disabled = false;
     entryPayloadInput.value = '{\n  \n}';
