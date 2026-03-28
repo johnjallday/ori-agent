@@ -16,7 +16,27 @@
             <div id="launcherWorkspaceRootPath" class="launcher-workspace-root-path">Fetching current workspace location...</div>
             <div class="launcher-workspace-root-footer">
               <span id="launcherWorkspaceRootMeta" class="launcher-workspace-root-meta">New workspaces will be created here.</span>
-              <a href="/settings" class="launcher-workspace-root-link">Manage in Settings</a>
+              <div class="launcher-workspace-root-actions">
+                <button id="launcherWorkspaceRootEditBtn" class="modern-btn modern-btn-secondary modern-btn-sm" type="button" aria-expanded="false" aria-controls="launcherWorkspaceRootEditor">
+                  Edit
+                </button>
+                <a href="/settings" class="launcher-workspace-root-link">Manage in Settings</a>
+              </div>
+            </div>
+            <div id="launcherWorkspaceRootEditor" class="launcher-workspace-root-editor" hidden>
+              <label for="launcherWorkspaceRootInput" class="launcher-workspace-root-label">Workspace directory</label>
+              <div class="launcher-workspace-root-editor-row">
+                <input id="launcherWorkspaceRootInput" class="modern-input launcher-workspace-root-input" type="text" placeholder="/absolute/path/to/workspaces" autocomplete="off" spellcheck="false">
+                <button id="launcherWorkspaceRootBrowseBtn" class="modern-btn modern-btn-secondary" type="button">Browse</button>
+              </div>
+              <div class="launcher-workspace-root-editor-help">
+                This affects where new workspaces are created. Clearing the custom path falls back to <code>WORKSPACE_DIR</code> or the built-in default.
+              </div>
+              <div class="launcher-workspace-root-editor-actions">
+                <button id="launcherWorkspaceRootCancelBtn" class="modern-btn modern-btn-secondary modern-btn-sm" type="button">Cancel</button>
+                <button id="launcherWorkspaceRootResetBtn" class="modern-btn modern-btn-secondary modern-btn-sm" type="button" disabled>Clear Custom</button>
+                <button id="launcherWorkspaceRootSaveBtn" class="modern-btn modern-btn-primary modern-btn-sm" type="button">Save</button>
+              </div>
             </div>
           </div>
         </div>

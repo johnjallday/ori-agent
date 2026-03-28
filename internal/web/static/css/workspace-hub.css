@@ -1902,6 +1902,13 @@
   color: rgba(214, 214, 214, 0.76);
 }
 
+.launcher-workspace-root-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.65rem;
+  flex-wrap: wrap;
+}
+
 .launcher-workspace-root-link {
   color: #ffb089;
   text-decoration: none;
@@ -1913,6 +1920,59 @@
 .launcher-workspace-root-link:focus-visible {
   color: #ffd1b8;
   text-decoration: underline;
+}
+
+.launcher-workspace-root-editor {
+  margin-top: 0.9rem;
+  padding-top: 0.9rem;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.launcher-workspace-root-editor[hidden] {
+  display: none;
+}
+
+.launcher-workspace-root-label {
+  display: block;
+  margin-bottom: 0.45rem;
+  font-size: 0.76rem;
+  font-weight: 600;
+  color: rgba(236, 235, 232, 0.78);
+}
+
+.launcher-workspace-root-editor-row {
+  display: flex;
+  gap: 0.6rem;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.launcher-workspace-root-input {
+  flex: 1 1 26rem;
+  min-width: 0;
+}
+
+.launcher-workspace-root-editor-help {
+  margin-top: 0.55rem;
+  font-size: 0.78rem;
+  line-height: 1.45;
+  color: rgba(214, 214, 214, 0.72);
+}
+
+.launcher-workspace-root-editor-help code {
+  color: rgba(255, 219, 197, 0.92);
+  background: rgba(255, 255, 255, 0.06);
+  border-radius: 6px;
+  padding: 0.08rem 0.34rem;
+}
+
+.launcher-workspace-root-editor-actions {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  margin-top: 0.8rem;
 }
 
 .launcher-tabs {
@@ -2157,9 +2217,19 @@
   }
 
   .launcher-workspace-root-head,
-  .launcher-workspace-root-footer {
+  .launcher-workspace-root-footer,
+  .launcher-workspace-root-editor-row,
+  .launcher-workspace-root-editor-actions {
     flex-direction: column;
     align-items: flex-start;
+  }
+
+  .launcher-workspace-root-actions {
+    width: 100%;
+  }
+
+  .launcher-workspace-root-input {
+    width: 100%;
   }
 }
 
