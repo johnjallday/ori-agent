@@ -1553,7 +1553,6 @@ document.getElementById('systemDiagnosticsBtn')?.addEventListener('click', async
   const entryWorkspaceInput = document.getElementById('vaultEntryWorkspaceId');
   const entryLabelInput = document.getElementById('vaultEntryLabel');
   const entryTagsInput = document.getElementById('vaultEntryTags');
-  const entrySourceInput = document.getElementById('vaultEntrySource');
   const entryRetentionInput = document.getElementById('vaultEntryRetention');
   const entryPayloadInput = document.getElementById('vaultEntryPayload');
   const saveEntryBtn = document.getElementById('vaultSaveEntryBtn');
@@ -2146,7 +2145,6 @@ document.getElementById('systemDiagnosticsBtn')?.addEventListener('click', async
     entryWorkspaceInput.value = '';
     entryLabelInput.value = '';
     entryTagsInput.value = '';
-    entrySourceInput.value = '';
     entryRetentionInput.value = '';
     entryPayloadInput.disabled = false;
     entryPayloadInput.value = '{\n  \n}';
@@ -2168,7 +2166,6 @@ document.getElementById('systemDiagnosticsBtn')?.addEventListener('click', async
     entryWorkspaceInput.value = record.workspace_id || '';
     entryLabelInput.value = record.label || '';
     entryTagsInput.value = Array.isArray(record.tags) ? record.tags.join(', ') : '';
-    entrySourceInput.value = record.source || '';
     entryRetentionInput.value = record.retention_policy || '';
     entryPayloadInput.disabled = true;
     entryPayloadInput.style.filter = 'blur(6px)';
@@ -2338,7 +2335,6 @@ document.getElementById('systemDiagnosticsBtn')?.addEventListener('click', async
       workspace_id: entryWorkspaceInput.value.trim(),
       label: entryLabelInput.value.trim(),
       tags: parseTags(entryTagsInput.value),
-      source: entrySourceInput.value.trim(),
       retention_policy: entryRetentionInput.value.trim()
     };
 
