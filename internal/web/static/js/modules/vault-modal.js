@@ -187,7 +187,6 @@
       entryAttachmentsList: document.getElementById('vaultModalEntryAttachmentsList'),
       entryJsonModeInput: document.getElementById('vaultModalEntryJsonMode'),
       entryTagsInput: document.getElementById('vaultModalEntryTags'),
-      entrySourceInput: document.getElementById('vaultModalEntrySource'),
       entryRetentionInput: document.getElementById('vaultModalEntryRetention'),
       entryPayloadField: document.getElementById('vaultModalEntryPayloadField'),
       entryPayloadInput: document.getElementById('vaultModalEntryPayload'),
@@ -852,7 +851,6 @@
     elements.entryContentInput.value = entryContentFromPayload(normalizedType, payload);
     elements.entryJsonModeInput.checked = useJSON;
     elements.entryTagsInput.value = Array.isArray(record.tags) ? record.tags.join(', ') : '';
-    elements.entrySourceInput.value = String(record.source || '');
     elements.entryRetentionInput.value = String(record.retention_policy || '');
     state.entryAttachments = entryAttachmentsFromPayload(payload);
     elements.entryPayloadInput.value = payloadValue === '{}' ? defaultPayloadValue(normalizedType) : payloadValue;
@@ -861,7 +859,6 @@
       elements.entryAdvancedDetails.open = Boolean(
         record.workspace_id ||
         (Array.isArray(record.tags) && record.tags.length) ||
-        record.source ||
         record.retention_policy
       );
     }
@@ -2070,7 +2067,6 @@
         record.label,
         record.type,
         record.workspace_id,
-        record.source,
         Array.isArray(record.tags) ? record.tags.join(' ') : ''
       ].join(' ').toLowerCase();
 
@@ -2312,7 +2308,6 @@
         '<div class="vault-modal-detail-grid">' +
           '<div class="vault-modal-detail-item"><span>Type</span><strong>' + escapeHTML(recordTypeLabel(record.type)) + '</strong></div>' +
           '<div class="vault-modal-detail-item"><span>Workspace</span><strong>' + escapeHTML(record.workspace_id || 'Global') + '</strong></div>' +
-          '<div class="vault-modal-detail-item"><span>Source</span><strong>' + escapeHTML(record.source || 'Not set') + '</strong></div>' +
           '<div class="vault-modal-detail-item"><span>Retention</span><strong>' + escapeHTML(record.retention_policy || 'Not set') + '</strong></div>' +
           '<div class="vault-modal-detail-item"><span>Attachments</span><strong>' + String(attachments.length) + '</strong></div>' +
           '<div class="vault-modal-detail-item vault-modal-detail-item-wide"><span>Updated</span><strong>' + escapeHTML(prettyDate(record.updated_at || record.created_at)) + '</strong></div>' +
@@ -2662,7 +2657,6 @@
       workspace_id: String(elements.entryWorkspaceInput?.value || '').trim(),
       label: String(elements.entryLabelInput?.value || '').trim(),
       tags: parseTags(elements.entryTagsInput?.value),
-      source: String(elements.entrySourceInput?.value || '').trim(),
       retention_policy: String(elements.entryRetentionInput?.value || '').trim()
     };
 

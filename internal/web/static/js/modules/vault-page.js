@@ -53,7 +53,6 @@
   const entryWorkspaceInput = document.getElementById('vaultEntryWorkspaceId');
   const entryLabelInput = document.getElementById('vaultEntryLabel');
   const entryTagsInput = document.getElementById('vaultEntryTags');
-  const entrySourceInput = document.getElementById('vaultEntrySource');
   const entryRetentionInput = document.getElementById('vaultEntryRetention');
   const entryPayloadInput = document.getElementById('vaultEntryPayload');
   const saveEntryBtn = document.getElementById('vaultSaveEntryBtn');
@@ -1123,7 +1122,6 @@
     entryWorkspaceInput.value = record.workspace_id || '';
     entryLabelInput.value = record.label || '';
     entryTagsInput.value = Array.isArray(record.tags) ? record.tags.join(', ') : '';
-    entrySourceInput.value = record.source || '';
     entryRetentionInput.value = record.retention_policy || '';
     entryPayloadInput.disabled = true;
     entryPayloadInput.style.filter = 'blur(6px)';
@@ -1310,7 +1308,6 @@
         record.label,
         record.type,
         record.workspace_id,
-        record.source,
         Array.isArray(record.tags) ? record.tags.join(' ') : ''
       ].join(' ').toLowerCase();
 
@@ -1528,7 +1525,6 @@
         <div class="vault-modal-detail-grid">
           <div class="vault-modal-detail-item"><span>Type</span><strong>${escapeHTML(recordTypeLabel(record.type))}</strong></div>
           <div class="vault-modal-detail-item"><span>Workspace</span><strong>${escapeHTML(record.workspace_id || 'Global')}</strong></div>
-          <div class="vault-modal-detail-item"><span>Source</span><strong>${escapeHTML(record.source || 'Not set')}</strong></div>
           <div class="vault-modal-detail-item"><span>Retention</span><strong>${escapeHTML(record.retention_policy || 'Not set')}</strong></div>
           <div class="vault-modal-detail-item"><span>Attachments</span><strong>${String(attachments.length)}</strong></div>
           <div class="vault-modal-detail-item vault-modal-detail-item-wide"><span>Updated</span><strong>${escapeHTML(prettyDate(record.updated_at || record.created_at))}</strong></div>
@@ -1814,7 +1810,6 @@
       workspace_id: entryWorkspaceInput.value.trim(),
       label: entryLabelInput.value.trim(),
       tags: parseTags(entryTagsInput.value),
-      source: entrySourceInput.value.trim(),
       retention_policy: entryRetentionInput.value.trim()
     };
 
