@@ -63,6 +63,36 @@ func TestListSkills_DiscoveryPaths(t *testing.T) {
 	}
 }
 
+func TestListSkills_CompatSkillsFromParentOfOriData(t *testing.T) {
+	tmpDir := t.TempDir()
+	agentStorePath := filepath.Join(tmpDir, "ori-data", "agents.json")
+	if err := os.MkdirAll(filepath.Dir(agentStorePath), 0o755); err != nil {
+		t.Fatalf("mkdir ori-data: %v", err)
+	}
+	if err := os.WriteFile(agentStorePath, []byte(`{}`), 0o644); err != nil {
+		t.Fatalf("write agents.json: %v", err)
+	}
+
+	compatSkillDir := filepath.Join(tmpDir, ".agents", "skills", "compat-skill")
+	writeTestSkill(t, compatSkillDir, "compat-skill", "Compat skill", "Compat prompt")
+
+	manager := NewManager(ManagerConfig{AgentStorePath: agentStorePath})
+	skills, err := manager.ListSkills("default")
+	if err != nil {
+		t.Fatalf("ListSkills error: %v", err)
+	}
+
+	if len(skills) != 1 {
+		t.Fatalf("expected 1 skill, got %d", len(skills))
+	}
+	if skills[0].Name != "compat-skill" {
+		t.Fatalf("expected compat-skill, got %q", skills[0].Name)
+	}
+	if skills[0].Source != SourceAgentsCompat {
+		t.Fatalf("compat skill source = %q, want %q", skills[0].Source, SourceAgentsCompat)
+	}
+}
+
 func TestListSkills_Conflict(t *testing.T) {
 	tmpDir := t.TempDir()
 	agentStorePath := filepath.Join(tmpDir, "agents.json")
@@ -344,6 +374,42 @@ func TestUpdateSkillAtPath_PersonalSource(t *testing.T) {
 
 	if updated.Source != SourcePersonal {
 		t.Fatalf("updated source = %q, want %q", updated.Source, SourcePersonal)
+	}
+	if updated.Description != "New description" {
+		t.Fatalf("updated description = %q", updated.Description)
+	}
+	if updated.Prompt != "New prompt body" {
+		t.Fatalf("updated prompt = %q", updated.Prompt)
+	}
+}
+
+func TestUpdateSkillAtPath_CompatSourceFromParentOfOriData(t *testing.T) {
+	tmpDir := t.TempDir()
+	agentStorePath := filepath.Join(tmpDir, "ori-data", "agents.json")
+	if err := os.MkdirAll(filepath.Dir(agentStorePath), 0o755); err != nil {
+		t.Fatalf("mkdir ori-data: %v", err)
+	}
+	if err := os.WriteFile(agentStorePath, []byte(`{}`), 0o644); err != nil {
+		t.Fatalf("write agents.json: %v", err)
+	}
+
+	skillDir := filepath.Join(tmpDir, ".agents", "skills", "workspace-planning")
+	writeTestSkill(t, skillDir, "workspace-planning", "Old description", "Old prompt")
+
+	manager := NewManager(ManagerConfig{AgentStorePath: agentStorePath})
+
+	skillPath := filepath.Join(skillDir, "SKILL.md")
+	updated, err := manager.UpdateSkillAtPath(SourceAgentsCompat, skillPath, "workspace-planning", SkillInput{
+		Name:        "workspace-planning",
+		Description: "New description",
+		Prompt:      "New prompt body",
+	})
+	if err != nil {
+		t.Fatalf("UpdateSkillAtPath error: %v", err)
+	}
+
+	if updated.Source != SourceAgentsCompat {
+		t.Fatalf("updated source = %q, want %q", updated.Source, SourceAgentsCompat)
 	}
 	if updated.Description != "New description" {
 		t.Fatalf("updated description = %q", updated.Description)

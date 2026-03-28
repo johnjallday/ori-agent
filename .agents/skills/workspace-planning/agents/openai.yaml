@@ -1,0 +1,7 @@
+interface:
+  display_name: "Workspace Planning"
+  short_description: "Plan workspace work before execution"
+  default_prompt: "Use $workspace-planning to turn this workspace request into planning artifacts and an execution-ready plan."
+
+capabilities:
+  planning_profile: true

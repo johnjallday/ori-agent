@@ -1142,6 +1142,15 @@ export class WorkspaceDetailPage {
       skillNameHelp: document.getElementById('workspace-detail-skill-name-help'),
       skillEnabledInput: document.getElementById('workspace-detail-skill-enabled'),
       skillTrustedInput: document.getElementById('workspace-detail-skill-trusted'),
+      skillPlanningFields: document.getElementById('workspace-detail-skill-planning-fields'),
+      skillPlanningModeInput: document.getElementById('workspace-detail-skill-planning-mode'),
+      skillPlanningClarificationModeInput: document.getElementById('workspace-detail-skill-planning-clarification-mode'),
+      skillPlanningTasksDirInput: document.getElementById('workspace-detail-skill-planning-tasks-dir'),
+      skillPlanningDefaultExecutionInput: document.getElementById('workspace-detail-skill-planning-default-execution'),
+      skillPlanningWritePRDInput: document.getElementById('workspace-detail-skill-planning-write-prd'),
+      skillPlanningWriteTaskListInput: document.getElementById('workspace-detail-skill-planning-write-task-list'),
+      skillPlanningSyncTasksInput: document.getElementById('workspace-detail-skill-planning-sync-tasks'),
+      skillPlanningRequireBranchInput: document.getElementById('workspace-detail-skill-planning-require-branch'),
       skillAgentOptions: document.getElementById('workspace-detail-skill-agent-options'),
       skillAgentAccessSummary: document.getElementById('workspace-detail-skill-agent-access-summary'),
       skillSubmitBtn: document.getElementById('workspace-detail-skills-submit'),
@@ -1225,10 +1234,12 @@ export class WorkspaceDetailPage {
       event.preventDefault();
       this.submitWorkspaceSkillModal();
     });
+    this.elements.skillNameSelect?.addEventListener('change', () => this.handleWorkspaceSkillSelectionChange());
     this.elements.skillAgentOptions?.addEventListener('change', () => this.updateWorkspaceSkillAgentAccessSummary());
     this.elements.skillsModal?.addEventListener('hidden.bs.modal', () => this.resetWorkspaceSkillModal());
     this.elements.skillsModal?.addEventListener('shown.bs.modal', () => {
       this.applyTopBackdropLayer('workspace-detail-backdrop-skills');
+      this.handleWorkspaceSkillSelectionChange();
     });
 
     // Schedule buttons
@@ -1515,6 +1526,9 @@ export class WorkspaceDetailPage {
       if (!response.ok) throw new Error('Failed to load workspace');
 
       this.workspace = await response.json();
+      await this.loadAvailableSkills().catch((error) => {
+        console.warn('Failed to load skill catalog for workspace detail:', error);
+      });
       if (window.OriAskRouting && typeof window.OriAskRouting.refreshWorkspaceIdentity === 'function') {
         window.OriAskRouting.refreshWorkspaceIdentity({
           workspace_id: this.workspaceId,
@@ -5336,13 +5350,19 @@ export class WorkspaceDetailPage {
 
     const includeDisabled = options.includeDisabled === true;
     return this.workspace.skill_bindings
-      .map((binding) => ({
-        id: String(binding?.id || '').trim(),
-        skillName: String(binding?.skill_name || binding?.skillName || '').trim(),
-        enabled: binding?.enabled !== false,
-        trusted: binding?.trusted === true,
-        config: binding?.config && typeof binding.config === 'object' ? { ...binding.config } : {}
-      }))
+      .map((binding) => {
+        const skillName = String(binding?.skill_name || binding?.skillName || '').trim();
+        const config = binding?.config && typeof binding.config === 'object' ? { ...binding.config } : {};
+        const skillDefinition = this.getAvailableWorkspaceSkill(skillName);
+        return {
+          id: String(binding?.id || '').trim(),
+          skillName,
+          enabled: binding?.enabled !== false,
+          trusted: binding?.trusted === true,
+          config,
+          planningProfile: skillDefinition?.planningProfile === true || this.isWorkspacePlanningConfig(config)
+        };
+      })
       .filter((binding) => binding.id && binding.skillName)
       .filter((binding) => includeDisabled || binding.enabled);
   }
@@ -5353,6 +5373,85 @@ export class WorkspaceDetailPage {
     return this.getWorkspaceSkillBindings({ includeDisabled: true }).find(
       (binding) => String(binding?.id || '').trim().toLowerCase() === normalizedBindingId
     ) || null;
+  }
+
+  getAvailableWorkspaceSkill(skillName) {
+    const normalizedSkillName = String(skillName || '').trim().toLowerCase();
+    if (!normalizedSkillName || !Array.isArray(this.availableSkills)) {
+      return null;
+    }
+    return this.availableSkills.find(
+      (skill) => String(skill?.name || '').trim().toLowerCase() === normalizedSkillName
+    ) || null;
+  }
+
+  getDefaultWorkspacePlanningConfig() {
+    return {
+      profile_type: 'workspace_planning',
+      mode: 'feature',
+      write_prd: true,
+      write_task_list: true,
+      tasks_dir: 'tasks',
+      clarification_mode: 'standard',
+      sync_workspace_tasks: true,
+      default_execution_mode: 'step_through',
+      require_branch: true
+    };
+  }
+
+  isWorkspacePlanningConfig(config) {
+    if (!config || typeof config !== 'object' || Array.isArray(config)) {
+      return false;
+    }
+    if (String(config.profile_type || '').trim() === 'workspace_planning') {
+      return true;
+    }
+    const planningKeys = [
+      'mode',
+      'write_prd',
+      'write_task_list',
+      'tasks_dir',
+      'clarification_mode',
+      'sync_workspace_tasks',
+      'default_execution_mode',
+      'require_branch'
+    ];
+    return planningKeys.some((key) => Object.prototype.hasOwnProperty.call(config, key));
+  }
+
+  normalizeWorkspacePlanningConfig(config = {}) {
+    const defaults = this.getDefaultWorkspacePlanningConfig();
+    const normalized = {
+      ...defaults,
+      ...(config && typeof config === 'object' && !Array.isArray(config) ? config : {})
+    };
+
+    normalized.profile_type = 'workspace_planning';
+    normalized.mode = ['feature', 'bugfix', 'refactor', 'investigation'].includes(String(normalized.mode || '').trim())
+      ? String(normalized.mode).trim()
+      : defaults.mode;
+    normalized.tasks_dir = String(normalized.tasks_dir || '').trim() || defaults.tasks_dir;
+    normalized.clarification_mode = ['minimal', 'standard', 'deep'].includes(String(normalized.clarification_mode || '').trim())
+      ? String(normalized.clarification_mode).trim()
+      : defaults.clarification_mode;
+    normalized.default_execution_mode = ['auto', 'step_through'].includes(String(normalized.default_execution_mode || '').trim())
+      ? String(normalized.default_execution_mode).trim()
+      : defaults.default_execution_mode;
+    normalized.write_prd = normalized.write_prd !== false;
+    normalized.write_task_list = normalized.write_task_list !== false;
+    normalized.sync_workspace_tasks = normalized.sync_workspace_tasks !== false;
+    normalized.require_branch = normalized.require_branch !== false;
+    return normalized;
+  }
+
+  getWorkspacePlanningSummary(config = {}) {
+    if (!this.isWorkspacePlanningConfig(config)) return '';
+    const normalized = this.normalizeWorkspacePlanningConfig(config);
+    const outputs = [];
+    if (normalized.write_prd) outputs.push('PRD');
+    if (normalized.write_task_list) outputs.push('tasks');
+    if (outputs.length === 0) outputs.push('no files');
+    return `${normalized.mode} planning, ${outputs.join(' + ')}, ${normalized.default_execution_mode}, ${normalized.tasks_dir}`;
   }
 
   getWorkspaceSkillAgentAccessEntry(agentInstanceId) {
@@ -5457,7 +5556,8 @@ export class WorkspaceDetailPage {
         .map((skill) => ({
           name: String(skill?.name || '').trim(),
           description: String(skill?.description || '').trim(),
-          enabled: skill?.enabled !== false
+          enabled: skill?.enabled !== false,
+          planningProfile: skill?.planning_profile === true || skill?.openai_metadata?.planning_profile === true
         }))
         .filter((skill) => skill.name)
         .filter((skill) => {
@@ -5522,7 +5622,10 @@ export class WorkspaceDetailPage {
 
       const unavailable = skill?.unavailable === true;
       const selected = normalizedSelected && name.toLowerCase() === normalizedSelected.toLowerCase() ? ' selected' : '';
-      const label = unavailable ? `${name} (not currently available)` : name;
+      const planning = skill?.planningProfile === true;
+      const label = unavailable
+        ? `${name} (not currently available)`
+        : (planning ? `${name} (planning profile)` : name);
       options.push(`<option value="${this.escapeHtml(name)}"${selected}>${this.escapeHtml(label)}</option>`);
     });
 
@@ -5584,6 +5687,78 @@ export class WorkspaceDetailPage {
     this.elements.skillAgentAccessSummary.textContent = `${selectedCount} of ${checkboxes.length} selected`;
   }
 
+  populateWorkspacePlanningSettings(config = {}) {
+    const normalized = this.normalizeWorkspacePlanningConfig(config);
+    if (this.elements.skillPlanningModeInput) {
+      this.elements.skillPlanningModeInput.value = normalized.mode;
+    }
+    if (this.elements.skillPlanningClarificationModeInput) {
+      this.elements.skillPlanningClarificationModeInput.value = normalized.clarification_mode;
+    }
+    if (this.elements.skillPlanningTasksDirInput) {
+      this.elements.skillPlanningTasksDirInput.value = normalized.tasks_dir;
+    }
+    if (this.elements.skillPlanningDefaultExecutionInput) {
+      this.elements.skillPlanningDefaultExecutionInput.value = normalized.default_execution_mode;
+    }
+    if (this.elements.skillPlanningWritePRDInput) {
+      this.elements.skillPlanningWritePRDInput.checked = normalized.write_prd !== false;
+    }
+    if (this.elements.skillPlanningWriteTaskListInput) {
+      this.elements.skillPlanningWriteTaskListInput.checked = normalized.write_task_list !== false;
+    }
+    if (this.elements.skillPlanningSyncTasksInput) {
+      this.elements.skillPlanningSyncTasksInput.checked = normalized.sync_workspace_tasks !== false;
+    }
+    if (this.elements.skillPlanningRequireBranchInput) {
+      this.elements.skillPlanningRequireBranchInput.checked = normalized.require_branch !== false;
+    }
+  }
+
+  shouldShowWorkspacePlanningSettings(selectedSkillName = '', existingConfig = {}) {
+    const normalizedSkillName = String(selectedSkillName || '').trim();
+    if (normalizedSkillName) {
+      const selectedSkill = this.getAvailableWorkspaceSkill(normalizedSkillName);
+      if (selectedSkill) {
+        return selectedSkill.planningProfile === true;
+      }
+    }
+    return this.isWorkspacePlanningConfig(existingConfig);
+  }
+
+  handleWorkspaceSkillSelectionChange() {
+    const selectedSkillName = String(this.elements.skillNameSelect?.value || '').trim();
+    const existingBinding = this.activeWorkspaceSkillBindingId
+      ? this.getWorkspaceSkillBinding(this.activeWorkspaceSkillBindingId)
+      : null;
+    const shouldShowPlanning = this.shouldShowWorkspacePlanningSettings(selectedSkillName, existingBinding?.config || {});
+
+    if (this.elements.skillPlanningFields) {
+      this.elements.skillPlanningFields.classList.toggle('d-none', !shouldShowPlanning);
+    }
+
+    if (shouldShowPlanning) {
+      const sourceConfig = this.isWorkspacePlanningConfig(existingBinding?.config)
+        ? existingBinding.config
+        : this.getDefaultWorkspacePlanningConfig();
+      this.populateWorkspacePlanningSettings(sourceConfig);
+    }
+  }
+
+  buildWorkspacePlanningConfig() {
+    return this.normalizeWorkspacePlanningConfig({
+      profile_type: 'workspace_planning',
+      mode: String(this.elements.skillPlanningModeInput?.value || '').trim(),
+      write_prd: this.elements.skillPlanningWritePRDInput?.checked !== false,
+      write_task_list: this.elements.skillPlanningWriteTaskListInput?.checked !== false,
+      tasks_dir: String(this.elements.skillPlanningTasksDirInput?.value || '').trim(),
+      clarification_mode: String(this.elements.skillPlanningClarificationModeInput?.value || '').trim(),
+      sync_workspace_tasks: this.elements.skillPlanningSyncTasksInput?.checked !== false,
+      default_execution_mode: String(this.elements.skillPlanningDefaultExecutionInput?.value || '').trim(),
+      require_branch: this.elements.skillPlanningRequireBranchInput?.checked !== false
+    });
+  }
+
   resetWorkspaceSkillModal() {
     this.activeWorkspaceSkillBindingId = '';
     this.activeWorkspaceSkillMode = 'create';
@@ -5608,6 +5783,10 @@ export class WorkspaceDetailPage {
     }
     if (this.elements.skillTrustedInput) {
       this.elements.skillTrustedInput.checked = false;
+    }
+    this.populateWorkspacePlanningSettings(this.getDefaultWorkspacePlanningConfig());
+    if (this.elements.skillPlanningFields) {
+      this.elements.skillPlanningFields.classList.add('d-none');
     }
     if (this.elements.skillSubmitBtn) {
       this.elements.skillSubmitBtn.disabled = false;
@@ -5676,11 +5855,13 @@ export class WorkspaceDetailPage {
     if (this.elements.skillTrustedInput) {
       this.elements.skillTrustedInput.checked = existingBinding ? existingBinding.trusted === true : false;
     }
+    this.populateWorkspacePlanningSettings(existingBinding?.config || this.getDefaultWorkspacePlanningConfig());
     if (this.elements.skillSubmitBtn) {
       this.elements.skillSubmitBtn.textContent = existingBinding ? 'Save Changes' : 'Add Binding';
       this.elements.skillSubmitBtn.disabled = false;
     }
 
+    this.handleWorkspaceSkillSelectionChange();
     this.renderWorkspaceSkillAgentOptions(this.activeWorkspaceSkillBindingId);
     this.getWorkspaceSkillModalInstance()?.show();
   }
@@ -5808,6 +5989,8 @@ export class WorkspaceDetailPage {
     this.setWorkspaceSkillModalSubmitting(true);
 
     try {
+      const selectedSkill = this.getAvailableWorkspaceSkill(skillName);
+      const planningProfile = selectedSkill?.planningProfile === true || this.shouldShowWorkspacePlanningSettings(skillName);
       const enabled = this.elements.skillEnabledInput?.checked !== false;
       const trusted = this.elements.skillTrustedInput?.checked === true;
       const selectedAgentInstanceIds = this.getWorkspaceSkillSelectedAgentInstanceIDs();
@@ -5815,7 +5998,7 @@ export class WorkspaceDetailPage {
         skill_name: skillName,
         enabled,
         trusted,
-        config: {}
+        config: planningProfile ? this.buildWorkspacePlanningConfig() : {}
       };
 
       if (this.activeWorkspaceSkillMode !== 'edit') {
@@ -5894,7 +6077,9 @@ export class WorkspaceDetailPage {
       const skillName = String(binding?.skillName || '').trim() || 'unknown';
       const isDisabled = binding?.enabled === false;
       const isTrusted = binding?.trusted === true;
+      const isPlanning = binding?.planningProfile === true;
       const agentNames = this.getWorkspaceSkillAgentNamesForBinding(binding.id);
+      const planningSummary = this.getWorkspacePlanningSummary(binding?.config || {});
       const accessSummary = isDisabled
         ? 'Disabled for this workspace'
         : agentNames.length > 0
@@ -5910,7 +6095,9 @@ export class WorkspaceDetailPage {
 
       const chips = [
         `<span class="workspace-detail-mcp-chip status${isDisabled ? ' is-disabled' : ''}">${isDisabled ? 'Disabled' : 'Enabled'}</span>`,
+        isPlanning ? `<span class="workspace-detail-mcp-chip source">Planning</span>` : '',
         isTrusted ? `<span class="workspace-detail-mcp-chip source">Trusted</span>` : '',
+        planningSummary ? `<span class="workspace-detail-mcp-chip source">${this.escapeHtml(planningSummary)}</span>` : '',
         `<span class="workspace-detail-mcp-chip access">${this.escapeHtml(accessLabel)}</span>`
       ].filter(Boolean).join('');
 

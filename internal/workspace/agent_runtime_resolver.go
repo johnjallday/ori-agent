@@ -32,6 +32,8 @@ type ResolvedSkill struct {
 	AllowedTools       []string
 	DisallowedTools    []string
 	RequiredMCPServers []string
+	PlanningProfile    bool
+	Config             map[string]interface{}
 	Model              string
 	Color              string
 	Enabled            bool
@@ -637,6 +639,7 @@ func (r *AgentRuntimeResolver) resolveEffectiveSkills(ws *Workspace, instance *A
 		if binding, ok := bindingMap[key]; ok {
 			wsSkills[i].Trusted = binding.Trusted
 			wsSkills[i].Enabled = true
+			wsSkills[i].Config = cloneInterfaceMap(binding.Config)
 		}
 	}
 

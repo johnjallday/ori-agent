@@ -397,6 +397,63 @@ func TestResolveEffectiveSkills_WorkspaceOnly(t *testing.T) {
 	}
 }
 
+func TestResolveEffectiveSkills_PreservesPlanningConfig(t *testing.T) {
+	ws := &Workspace{
+		ID: "ws-skill-planning",
+		AgentInstances: []AgentInstance{
+			{ID: "inst-1", Name: "Workspace Manager", NodeID: "workspace-manager-1"},
+		},
+		SkillBindings: []WorkspaceSkillBinding{
+			{
+				ID:        "sb-planning",
+				SkillName: "workspace-planning",
+				Enabled:   true,
+				Config: map[string]interface{}{
+					"profile_type":           "workspace_planning",
+					"mode":                   "feature",
+					"tasks_dir":              "tasks",
+					"write_prd":              true,
+					"default_execution_mode": "step_through",
+				},
+			},
+		},
+	}
+
+	agentStore := &resolverAgentStoreStub{agents: map[string]*agent.Agent{
+		"Workspace Manager": {},
+	}}
+	workspaceStore := newTestWorkspaceStore(t, ws)
+	registry := &runtimeRegistryStub{}
+	templates := &templateLookupStub{servers: map[string]mcp.ServerConfig{}}
+	skillResolver := &stubSkillResolver{
+		skills: map[string]ResolvedSkill{
+			"workspace-planning": {
+				Name:            "workspace-planning",
+				Prompt:          "Plan work before execution.",
+				PlanningProfile: true,
+				Enabled:         true,
+			},
+		},
+	}
+
+	resolver := NewAgentRuntimeResolver(agentStore, workspaceStore, registry, templates)
+	resolver.SetSkillResolver(skillResolver)
+
+	resolved, err := resolver.ResolveAgentForWorkspace("Workspace Manager", ws.ID, "")
+	if err != nil {
+		t.Fatalf("ResolveAgentForWorkspace() error = %v", err)
+	}
+	if len(resolved.EffectiveSkills) != 1 {
+		t.Fatalf("expected 1 effective skill, got %d", len(resolved.EffectiveSkills))
+	}
+	if !resolved.EffectiveSkills[0].PlanningProfile {
+		t.Fatal("expected planning profile to be preserved")
+	}
+	if got := resolved.EffectiveSkills[0].Config["tasks_dir"]; got != "tasks" {
+		t.Fatalf("expected tasks_dir config to be preserved, got %#v", got)
+	}
+}
+
 func TestResolveEffectiveSkills_AgentOverridesWorkspace(t *testing.T) {
 	ws := &Workspace{
 		ID: "ws-skill-2",

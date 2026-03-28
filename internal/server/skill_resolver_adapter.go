@@ -47,6 +47,7 @@ func skillToResolvedSkill(s skills.Skill) workspace.ResolvedSkill {
 		AllowedTools:       s.AllowedTools,
 		DisallowedTools:    s.DisallowedTools,
 		RequiredMCPServers: s.RequiredMCPServers,
+		PlanningProfile:    s.PlanningProfile,
 		Model:              s.Model,
 		Color:              s.Color,
 		Enabled:            s.Enabled,

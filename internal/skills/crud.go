@@ -156,40 +156,47 @@ func (m *Manager) isEditableSkillPath(source, skillPath string) bool {
 	}
 
 	var root string
+	var roots []string
 	switch source {
 	case SourcePersonal:
 		root = strings.TrimSpace(m.personalSkillsDir)
-	case SourceAgentsCompat:
-		if m.agentStorePath == "" {
-			return false
+		if root != "" {
+			roots = append(roots, root)
 		}
-		repoRoot := filepath.Dir(m.agentStorePath)
-		root = filepath.Join(repoRoot, ".agents", "skills")
+	case SourceAgentsCompat:
+		roots = append(roots, resolveCompatSkillsDirs(m.agentStorePath)...)
 	default:
 		return false
 	}
 
-	if strings.TrimSpace(root) == "" {
+	if len(roots) == 0 {
 		return false
 	}
 
-	rootAbs, err := filepath.Abs(root)
-	if err != nil {
-		return false
-	}
 	pathAbs, err := filepath.Abs(skillPath)
 	if err != nil {
 		return false
 	}
 
-	rel, err := filepath.Rel(rootAbs, pathAbs)
-	if err != nil {
-		return false
+	for _, root := range roots {
+		rootAbs, err := filepath.Abs(root)
+		if err != nil {
+			continue
+		}
+
+		rel, err := filepath.Rel(rootAbs, pathAbs)
+		if err != nil {
+			continue
+		}
+		if rel == "." {
+			return true
+		}
+		if !strings.HasPrefix(rel, ".."+string(filepath.Separator)) && rel != ".." {
+			return true
+		}
 	}
-	if rel == "." {
-		return true
-	}
-	return !strings.HasPrefix(rel, ".."+string(filepath.Separator)) && rel != ".."
+
+	return false
 }
 
 func (m *Manager) DeleteSkill(agentName, skillName string) error {

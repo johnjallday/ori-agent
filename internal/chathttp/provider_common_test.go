@@ -8,6 +8,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/agent"
 	"github.com/johnjallday/ori-agent/internal/llm"
 	"github.com/johnjallday/ori-agent/internal/skills"
+	"github.com/johnjallday/ori-agent/internal/workspace"
 )
 
 type mockSkillsManager struct {
@@ -84,6 +85,46 @@ func TestBuildSystemPromptWithSkills_EmptyAgentName(t *testing.T) {
 	result := h.buildSystemPromptWithSkills(ag, "", "default prompt")
 	if result != "default prompt" {
 		t.Fatalf("expected default prompt when agentName is empty, got %q", result)
+	}
+}
+
+func TestBuildSystemPromptWithResolvedPlanningSkillSettings(t *testing.T) {
+	h := &Handler{}
+	ag := &resolvedChatAgent{
+		Agent: &agent.Agent{},
+		EffectiveSkills: []workspace.ResolvedSkill{
+			{
+				Name:            "workspace-planning",
+				Prompt:          "Plan work before executing it.",
+				PlanningProfile: true,
+				Config: map[string]interface{}{
+					"profile_type":           "workspace_planning",
+					"mode":                   "feature",
+					"write_prd":              true,
+					"write_task_list":        true,
+					"tasks_dir":              "tasks",
+					"clarification_mode":     "standard",
+					"sync_workspace_tasks":   true,
+					"default_execution_mode": "step_through",
+					"require_branch":         true,
+				},
+			},
+		},
+	}
+
+	result := h.buildSystemPromptWithSkills(ag, "workspace-manager", "default prompt")
+
+	if !strings.Contains(result, "## workspace-planning") {
+		t.Fatalf("expected workspace planning skill header, got %q", result)
+	}
+	if !strings.Contains(result, "### Workspace Binding Settings") {
+		t.Fatalf("expected workspace binding settings section, got %q", result)
+	}
+	if !strings.Contains(result, "Save planning files under: tasks") {
+		t.Fatalf("expected tasks dir hint, got %q", result)
+	}
+	if !strings.Contains(result, "Default workspace task execution mode: step_through") {
+		t.Fatalf("expected execution mode hint, got %q", result)
 	}
 }
 
