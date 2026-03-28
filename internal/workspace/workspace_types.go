@@ -43,6 +43,7 @@ type AgentInstance struct {
 type Workspace struct {
 	ID                   string                      `json:"id"`
 	Name                 string                      `json:"name"`
+	Kind                 string                      `json:"kind,omitempty"`
 	Description          string                      `json:"description,omitempty"`
 	FolderSlug           string                      `json:"folder_slug,omitempty"`     // Filesystem folder name (derived from Name via Slugify)
 	ProjectPath          string                      `json:"project_path,omitempty"`    // Relative path to associated project code directory

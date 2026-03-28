@@ -26,6 +26,7 @@ package session
 
 import (
 	"encoding/json"
+	"strings"
 	"time"
 )
 
@@ -140,6 +141,33 @@ const (
 	WorkspaceStatusCancelled WorkspaceStatus = "cancelled"
 )
 
+// WorkspaceKind describes whether a record is a real workspace or an
+// organization-only group container.
+type WorkspaceKind string
+
+const (
+	WorkspaceKindWorkspace WorkspaceKind = "workspace"
+	WorkspaceKindGroup     WorkspaceKind = "group"
+)
+
+// NormalizeWorkspaceKind returns a supported workspace kind, defaulting to a
+// real workspace when the input is empty or unknown.
+func NormalizeWorkspaceKind(value string) WorkspaceKind {
+	switch WorkspaceKind(strings.TrimSpace(value)) {
+	case WorkspaceKindGroup:
+		return WorkspaceKindGroup
+	case WorkspaceKindWorkspace:
+		return WorkspaceKindWorkspace
+	default:
+		return WorkspaceKindWorkspace
+	}
+}
+
+// IsGroup reports whether the workspace is an organization-only group.
+func (w Workspace) IsGroup() bool {
+	return NormalizeWorkspaceKind(string(w.Kind)) == WorkspaceKindGroup
+}
+
 // AgentInstance represents a specific instance of an agent in a workspace.
 // This allows multiple instances of the same agent type with stable IDs.
 type AgentInstance struct {
@@ -207,6 +235,10 @@ type Workspace struct {
 
 	// Name is the display name of the workspace.
 	Name string `json:"name"`
+
+	// Kind indicates whether this record is a real workspace or an
+	// organization-only group container.
+	Kind WorkspaceKind `json:"kind,omitempty"`
 
 	// Description is an optional short description of the workspace's purpose.
 	Description string `json:"description,omitempty"`

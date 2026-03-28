@@ -244,6 +244,7 @@ func (h *hybridStore) CreateWorkspace(ctx context.Context, workspace *Workspace)
 	if workspace.ID == "" {
 		workspace.ID = uuid.New().String()
 	}
+	workspace.Kind = NormalizeWorkspaceKind(string(workspace.Kind))
 
 	now := time.Now()
 	if workspace.CreatedAt.IsZero() {
@@ -261,6 +262,7 @@ func (h *hybridStore) GetWorkspace(ctx context.Context, id string) (*Workspace, 
 
 // UpdateWorkspace updates workspace metadata.
 func (h *hybridStore) UpdateWorkspace(ctx context.Context, workspace *Workspace) error {
+	workspace.Kind = NormalizeWorkspaceKind(string(workspace.Kind))
 	workspace.UpdatedAt = time.Now()
 	return h.sqlite.UpdateWorkspace(ctx, workspace)
 }

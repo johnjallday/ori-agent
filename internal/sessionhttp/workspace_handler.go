@@ -20,6 +20,11 @@ import (
 	agentworkspace "github.com/johnjallday/ori-agent/internal/workspace"
 )
 
+var (
+	errParentWorkspaceMustBeGroup  = errors.New("parent workspace must be a group")
+	errWorkspaceDisallowsDirectUse = errors.New("groups cannot hold sessions, notes, or direct work")
+)
+
 // HandleWorkspaces routes requests to /api/workspaces (also supports legacy /api/folders).
 func (h *Handler) HandleWorkspaces(w http.ResponseWriter, r *http.Request) {
 	// Normalize path for both /api/folders and /api/workspaces
@@ -103,9 +108,10 @@ func (h *Handler) handleWorkspace(w http.ResponseWriter, r *http.Request, id str
 }
 
 type workspaceBootstrapRequest struct {
-	Goal    string `json:"goal,omitempty"`
-	Systems string `json:"systems,omitempty"`
-	Context string `json:"context,omitempty"`
+	Goal         string `json:"goal,omitempty"`
+	Systems      string `json:"systems,omitempty"`
+	Capabilities string `json:"capabilities,omitempty"`
+	Context      string `json:"context,omitempty"`
 }
 
 func normalizeWorkspaceBootstrap(input *workspaceBootstrapRequest) map[string]interface{} {
@@ -115,8 +121,9 @@ func normalizeWorkspaceBootstrap(input *workspaceBootstrapRequest) map[string]in
 
 	goal := strings.TrimSpace(input.Goal)
 	systems := strings.TrimSpace(input.Systems)
+	capabilities := strings.TrimSpace(input.Capabilities)
 	contextValue := strings.TrimSpace(input.Context)
-	if goal == "" && systems == "" && contextValue == "" {
+	if goal == "" && systems == "" && capabilities == "" && contextValue == "" {
 		return nil
 	}
 
@@ -129,6 +136,7 @@ func normalizeWorkspaceBootstrap(input *workspaceBootstrapRequest) map[string]in
 		"version":      1,
 		"goal":         goal,
 		"systems":      systems,
+		"capabilities": capabilities,
 		"systems_list": systemsList,
 		"context":      contextValue,
 		"captured_at":  time.Now().UTC().Format(time.RFC3339),
@@ -165,6 +173,7 @@ func splitWorkspaceBootstrapValues(raw string) []string {
 func (h *Handler) createWorkspace(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Name               string                     `json:"name"`
+		Kind               string                     `json:"kind,omitempty"`
 		Description        string                     `json:"description,omitempty"`
 		ParentID           string                     `json:"parent_id,omitempty"`
 		OrderIndex         *int                       `json:"order_index,omitempty"`
@@ -185,8 +194,35 @@ func (h *Handler) createWorkspace(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	kind, err := parseWorkspaceKind(req.Kind)
+	if err != nil {
+		_ = orihttp.RespondBadRequest(w, err.Error())
+		return
+	}
+	if kind == session.WorkspaceKindGroup {
+		switch {
+		case strings.TrimSpace(req.ProjectPath) != "":
+			_ = orihttp.RespondBadRequest(w, "groups cannot have a project path")
+			return
+		case strings.TrimSpace(req.Location) != "":
+			_ = orihttp.RespondBadRequest(w, "groups cannot have a folder location")
+			return
+		case strings.TrimSpace(req.EntryAgentName) != "":
+			_ = orihttp.RespondBadRequest(w, "groups cannot have an entry agent")
+			return
+		case req.WorkspaceBootstrap != nil:
+			_ = orihttp.RespondBadRequest(w, "groups cannot have workspace bootstrap settings")
+			return
+		}
+	}
+	if _, err := h.requireGroupParent(r.Context(), req.ParentID); err != nil {
+		handleWorkspaceParentError(w, err)
+		return
+	}
+
 	ws := &session.Workspace{
 		Name:        req.Name,
+		Kind:        kind,
 		Description: req.Description,
 		ParentID:    req.ParentID,
 		Color:       req.Color,
@@ -225,10 +261,11 @@ func (h *Handler) createWorkspace(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Create workspace folder on disk if folder-based store is available
-	if h.workspaceStore != nil {
+	if h.workspaceStore != nil && ws.Kind != session.WorkspaceKindGroup {
 		folderWS := &agentworkspace.Workspace{
 			ID:             ws.ID,
 			Name:           ws.Name,
+			Kind:           string(ws.Kind),
 			Description:    ws.Description,
 			FolderSlug:     ws.FolderSlug,
 			ProjectPath:    ws.ProjectPath,
@@ -334,7 +371,7 @@ func (h *Handler) createWorkspace(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	logger.Info("Workspace created", logger.Fields{"id": ws.ID, "name": req.Name, "folder_slug": ws.FolderSlug})
+	logger.Info("Workspace created", logger.Fields{"id": ws.ID, "name": req.Name, "folder_slug": ws.FolderSlug, "kind": ws.Kind})
 
 	_ = orihttp.RespondCreated(w, map[string]interface{}{
 		"success": true,
@@ -361,6 +398,82 @@ func workspacePathsEqual(a, b string) bool {
 	}
 
 	return filepath.Clean(absA) == filepath.Clean(absB)
+}
+
+func parseWorkspaceKind(value string) (session.WorkspaceKind, error) {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		return session.WorkspaceKindWorkspace, nil
+	}
+
+	switch session.WorkspaceKind(trimmed) {
+	case session.WorkspaceKindWorkspace:
+		return session.WorkspaceKindWorkspace, nil
+	case session.WorkspaceKindGroup:
+		return session.WorkspaceKindGroup, nil
+	default:
+		return "", fmt.Errorf("invalid workspace kind %q", trimmed)
+	}
+}
+
+func (h *Handler) requireGroupParent(ctx context.Context, parentID string) (*session.Workspace, error) {
+	parentID = strings.TrimSpace(parentID)
+	if parentID == "" {
+		return nil, nil
+	}
+
+	parent, err := h.store.GetWorkspace(ctx, parentID)
+	if err != nil {
+		return nil, err
+	}
+	if !parent.IsGroup() {
+		return nil, errParentWorkspaceMustBeGroup
+	}
+	return parent, nil
+}
+
+func handleWorkspaceParentError(w http.ResponseWriter, err error) {
+	switch {
+	case err == nil:
+		return
+	case errors.Is(err, session.ErrWorkspaceNotFound):
+		_ = orihttp.RespondBadRequest(w, "Parent group not found")
+	case errors.Is(err, errParentWorkspaceMustBeGroup):
+		_ = orihttp.RespondBadRequest(w, err.Error())
+	default:
+		_ = orihttp.RespondInternalError(w, "Failed to validate parent group")
+	}
+}
+
+func filterConcreteWorkspaces(workspaces []session.Workspace) []session.Workspace {
+	if len(workspaces) == 0 {
+		return workspaces
+	}
+
+	filtered := make([]session.Workspace, 0, len(workspaces))
+	for _, ws := range workspaces {
+		if ws.IsGroup() {
+			continue
+		}
+		filtered = append(filtered, ws)
+	}
+	return filtered
+}
+
+func (h *Handler) requireConcreteWorkspace(ctx context.Context, workspaceID string) (*session.Workspace, error) {
+	workspaceID = strings.TrimSpace(workspaceID)
+	if workspaceID == "" {
+		return nil, nil
+	}
+
+	ws, err := h.store.GetWorkspace(ctx, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	if ws.IsGroup() {
+		return nil, errWorkspaceDisallowsDirectUse
+	}
+	return ws, nil
 }
 
 // getWorkspace handles GET /api/workspaces/{id}.
@@ -413,6 +526,10 @@ func (h *Handler) updateWorkspace(w http.ResponseWriter, r *http.Request, id str
 		workspace.Description = *req.Description
 	}
 	if req.ProjectPath != nil {
+		if workspace.IsGroup() && strings.TrimSpace(*req.ProjectPath) != "" {
+			_ = orihttp.RespondBadRequest(w, "groups cannot have a project path")
+			return
+		}
 		workspace.ProjectPath = *req.ProjectPath
 	}
 	if req.ParentID != nil {
@@ -434,6 +551,10 @@ func (h *Handler) updateWorkspace(w http.ResponseWriter, r *http.Request, id str
 					return
 				}
 			}
+		}
+		if _, err := h.requireGroupParent(r.Context(), *req.ParentID); err != nil {
+			handleWorkspaceParentError(w, err)
+			return
 		}
 		workspace.ParentID = *req.ParentID
 	}
@@ -519,7 +640,7 @@ func (h *Handler) deleteWorkspace(w http.ResponseWriter, r *http.Request, id str
 	}
 
 	// Also delete from folder-based store if available
-	if h.workspaceStore != nil {
+	if h.workspaceStore != nil && ws.Kind != session.WorkspaceKindGroup {
 		if err := h.workspaceStore.Delete(id); err != nil {
 			logger.Warn("Failed to delete workspace folder", logger.Fields{"id": id, "error": err})
 			// Non-fatal: SQLite deletion succeeded
@@ -564,6 +685,8 @@ func (h *Handler) listWorkspaces(w http.ResponseWriter, r *http.Request) {
 		_ = orihttp.RespondInternalError(w, "Failed to list workspaces")
 		return
 	}
+
+	workspaces = filterConcreteWorkspaces(workspaces)
 
 	orihttp.WriteJSON(w, map[string]interface{}{
 		"folders":    workspaces,
@@ -613,7 +736,7 @@ func (h *Handler) handleWorkspaceRename(w http.ResponseWriter, r *http.Request, 
 	}
 
 	// Rename the folder if folder-based store is available
-	if h.workspaceStore != nil {
+	if h.workspaceStore != nil && ws.Kind != session.WorkspaceKindGroup {
 		if err := h.workspaceStore.Rename(id, req.Name); err != nil {
 			logger.Warn("Failed to rename workspace folder", logger.Fields{"id": id, "error": err})
 			// Non-fatal: SQLite rename succeeded
@@ -767,9 +890,14 @@ func (h *Handler) handleWorkspaceImport(w http.ResponseWriter, r *http.Request) 
 	if workspaceName == "" {
 		workspaceName = filepath.Base(normalizedPath)
 	}
+	if _, err := h.requireGroupParent(r.Context(), req.ParentID); err != nil {
+		handleWorkspaceParentError(w, err)
+		return
+	}
 
 	workspace := &session.Workspace{
 		Name:        workspaceName,
+		Kind:        session.WorkspaceKindWorkspace,
 		Description: req.Description,
 		ParentID:    req.ParentID,
 		Color:       req.Color,
@@ -1338,6 +1466,7 @@ func buildWorkspaceAnalyticsView(workspace *session.Workspace) *agentworkspace.W
 	analyticsWorkspace := &agentworkspace.Workspace{
 		ID:          workspace.ID,
 		Name:        workspace.Name,
+		Kind:        string(workspace.Kind),
 		Description: workspace.Description,
 		FolderSlug:  workspace.FolderSlug,
 		ProjectPath: workspace.ProjectPath,

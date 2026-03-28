@@ -228,7 +228,7 @@ async function loadWorkspaces(options = {}) {
     }
 
     // Use unified workspace API (same as sessions sidebar)
-    const response = await fetch('/api/workspaces?tree=true', {
+    const response = await fetch('/api/workspaces', {
       signal: controller.signal
     });
 
@@ -248,7 +248,7 @@ async function loadWorkspaces(options = {}) {
 
     // Connection successful
     handleConnectionSuccess();
-    // API returns { folders: [...] } - map to workspaces for rendering
+    // Flat workspace list excludes organization-only groups.
     renderWorkspaces(data.folders || []);
     hasLoadedWorkspaces = true;
 

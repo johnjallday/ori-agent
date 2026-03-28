@@ -392,6 +392,7 @@ async function populateWorkspaceParentSelect() {
 
     const options = ['<option value="">No group</option>'];
     flattened.forEach((ws) => {
+      if (String(ws.kind || '').trim() !== 'group') return;
       const indent = ws.depth > 0 ? `${'--'.repeat(ws.depth)} ` : '';
       options.push(`<option value="${escapeHtml(ws.id)}">${escapeHtml(indent + ws.name)}</option>`);
     });

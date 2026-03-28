@@ -10,7 +10,7 @@ import (
 
 // schemaVersion is the current database schema version.
 // Increment this when adding new migrations.
-const schemaVersion = 6
+const schemaVersion = 7
 
 // migrate runs all pending migrations to bring the database up to the current schema.
 func (db *DB) migrate(ctx context.Context) error {
@@ -77,6 +77,8 @@ func (db *DB) runMigration(ctx context.Context, version int) error {
 		return db.migration005RemoveEmptyDefaultVault(ctx)
 	case 6:
 		return db.migration006VaultPasswordKeys(ctx)
+	case 7:
+		return db.migration007WorkspaceKinds(ctx)
 	default:
 		return fmt.Errorf("unknown migration version: %d", version)
 	}
@@ -89,6 +91,7 @@ func (db *DB) migration001Baseline(ctx context.Context) error {
 		CREATE TABLE IF NOT EXISTS workspaces (
 			id TEXT PRIMARY KEY,
 			name TEXT NOT NULL,
+			kind TEXT DEFAULT 'workspace',
 			description TEXT DEFAULT '',
 			parent_id TEXT,
 			color TEXT,
@@ -623,6 +626,30 @@ func (db *DB) migration006VaultPasswordKeys(ctx context.Context) error {
 		if _, err := tx.ExecContext(ctx, stmt); err != nil && !isDuplicateColumnError(err) {
 			return fmt.Errorf("failed to add vault password key column: %w", err)
 		}
+	}
+
+	return tx.Commit()
+}
+
+func (db *DB) migration007WorkspaceKinds(ctx context.Context) error {
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("failed to begin transaction: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	if _, err := tx.ExecContext(ctx, `
+		ALTER TABLE workspaces ADD COLUMN kind TEXT DEFAULT 'workspace'
+	`); err != nil && !isDuplicateColumnError(err) {
+		return fmt.Errorf("failed to add workspace kind column: %w", err)
+	}
+
+	if _, err := tx.ExecContext(ctx, `
+		UPDATE workspaces
+		SET kind = 'workspace'
+		WHERE kind IS NULL OR TRIM(kind) = ''
+	`); err != nil {
+		return fmt.Errorf("failed to backfill workspace kinds: %w", err)
 	}
 
 	return tx.Commit()

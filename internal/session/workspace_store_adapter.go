@@ -112,6 +112,7 @@ func (a *WorkspaceStoreAdapter) toSessionWorkspace(ws *workspace.Workspace) *Wor
 	sessionWS := &Workspace{
 		ID:          ws.ID,
 		Name:        ws.Name,
+		Kind:        NormalizeWorkspaceKind(ws.Kind),
 		Description: ws.Description,
 		FolderSlug:  ws.FolderSlug,
 		ProjectPath: ws.ProjectPath,
@@ -217,6 +218,7 @@ func (a *WorkspaceStoreAdapter) toAgentStudioWorkspace(ws *Workspace) *workspace
 	agentWS := &workspace.Workspace{
 		ID:          ws.ID,
 		Name:        ws.Name,
+		Kind:        string(NormalizeWorkspaceKind(string(ws.Kind))),
 		Description: ws.Description,
 		FolderSlug:  ws.FolderSlug,
 		ProjectPath: ws.ProjectPath,

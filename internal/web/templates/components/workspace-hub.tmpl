@@ -2,9 +2,23 @@
   <section class="workspace-launcher" id="workspaceLauncher" aria-live="polite">
     <div class="launcher-card modern-card">
       <div class="launcher-header">
-        <div>
+        <div class="launcher-header-copy">
           <h2 class="launcher-title">Choose a workspace</h2>
           <p class="launcher-subtitle">Start with tasks and schedules, then open chat when needed.</p>
+          <div id="launcherWorkspaceRootPanel" class="launcher-workspace-root" aria-live="polite">
+            <div class="launcher-workspace-root-head">
+              <div>
+                <div class="launcher-workspace-root-kicker">Default Workspace Directory</div>
+                <div id="launcherWorkspaceRootSummary" class="launcher-workspace-root-summary">Loading workspace directory...</div>
+              </div>
+              <span id="launcherWorkspaceRootBadge" class="launcher-workspace-root-badge is-loading">Loading</span>
+            </div>
+            <div id="launcherWorkspaceRootPath" class="launcher-workspace-root-path">Fetching current workspace location...</div>
+            <div class="launcher-workspace-root-footer">
+              <span id="launcherWorkspaceRootMeta" class="launcher-workspace-root-meta">New workspaces will be created here.</span>
+              <a href="/settings" class="launcher-workspace-root-link">Manage in Settings</a>
+            </div>
+          </div>
         </div>
         <div class="launcher-actions">
           <button id="launcherCreateWorkspaceBtn" class="modern-btn modern-btn-primary" type="button" data-bs-toggle="modal" data-bs-target="#addFolderModal">
@@ -153,10 +167,12 @@
           <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
         </div>
         <div class="modal-body">
-          <input id="launcherGroupNameInput" type="text" class="modern-input w-100 mb-2" placeholder="Group name" autocomplete="off">
-          <textarea id="launcherGroupDescriptionInput" class="modern-input w-100" placeholder="Description (optional)" rows="2" style="resize: vertical;"></textarea>
+          <label for="launcherGroupNameInput" style="display: block; margin-bottom: 6px; font-size: 12px; color: var(--text-secondary);">Group name</label>
+          <input id="launcherGroupNameInput" type="text" class="modern-input w-100 mb-2" placeholder="BK Nerds Group" autocomplete="off">
+          <label for="launcherGroupDescriptionInput" style="display: block; margin-bottom: 6px; font-size: 12px; color: var(--text-secondary);">What this group is for</label>
+          <textarea id="launcherGroupDescriptionInput" class="modern-input w-100" placeholder="Shared client, team, or initiative" rows="2" style="resize: vertical;"></textarea>
           <div style="margin-top: 8px; font-size: 12px; color: var(--text-secondary);">
-            Selected workspaces will be moved under this group.
+            Selected workspaces will be organized under this group. This does not create a workspace folder or shared workspace.
           </div>
         </div>
         <div class="modal-footer" style="border-top: 1px solid var(--border-color);">
@@ -867,7 +883,7 @@
             <option value="">No group</option>
           </select>
           <div style="margin-top: 6px; font-size: 12px; color: var(--text-secondary);">
-            Choose a group (parent workspace) to organize related work.
+            Choose an organization-only group for this workspace.
           </div>
         </div>
         <div class="modal-footer" style="border-top: 1px solid var(--border-color);">

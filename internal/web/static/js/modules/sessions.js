@@ -1171,9 +1171,17 @@ const sessionManager = {
       const workspaceSelect = document.getElementById('chatWorkspaceSelect');
       if (workspaceSelect) {
         workspaceSelect.innerHTML = '<option value="">No workspace (root)</option>';
-        this.folders.forEach(folder => {
-          workspaceSelect.innerHTML += `<option value="${folder.id}">${this.escapeHtml(folder.name)}</option>`;
-        });
+        const appendWorkspaceOptions = (folders, depth = 0) => {
+          (folders || []).forEach(folder => {
+            if (!folder || !folder.id) return;
+            const indent = depth > 0 ? `${'--'.repeat(depth)} ` : '';
+            if (String(folder.kind || '').trim() !== 'group') {
+              workspaceSelect.innerHTML += `<option value="${folder.id}">${this.escapeHtml(indent + (folder.name || 'Unnamed Workspace'))}</option>`;
+            }
+            appendWorkspaceOptions(folder.children || [], depth + 1);
+          });
+        };
+        appendWorkspaceOptions(this.folders);
       }
 
       this.updateAssistantModeText('');
@@ -1236,10 +1244,18 @@ const sessionManager = {
       const workspaceSelect = document.getElementById('chatWorkspaceSelect');
       if (workspaceSelect) {
         workspaceSelect.innerHTML = '<option value="">No workspace (root)</option>';
-        this.folders.forEach(folder => {
-          const selected = folder.id === workspaceId ? ' selected' : '';
-          workspaceSelect.innerHTML += `<option value="${folder.id}"${selected}>${this.escapeHtml(folder.name)}</option>`;
-        });
+        const appendWorkspaceOptions = (folders, depth = 0) => {
+          (folders || []).forEach(folder => {
+            if (!folder || !folder.id) return;
+            const indent = depth > 0 ? `${'--'.repeat(depth)} ` : '';
+            if (String(folder.kind || '').trim() !== 'group') {
+              const selected = folder.id === workspaceId ? ' selected' : '';
+              workspaceSelect.innerHTML += `<option value="${folder.id}"${selected}>${this.escapeHtml(indent + (folder.name || 'Unnamed Workspace'))}</option>`;
+            }
+            appendWorkspaceOptions(folder.children || [], depth + 1);
+          });
+        };
+        appendWorkspaceOptions(this.folders);
       }
 
       this.updateAssistantModeText(workspaceId);
@@ -3117,7 +3133,9 @@ const sessionManager = {
       const walk = (nodes, depth) => {
         (nodes || []).forEach((node) => {
           if (!node || !node.id) return;
-          flattened.push({ id: node.id, name: node.name || node.id, depth });
+          if (String(node.kind || '').trim() === 'group') {
+            flattened.push({ id: node.id, name: node.name || node.id, depth });
+          }
           walk(node.children || [], depth + 1);
         });
       };
@@ -3980,6 +3998,22 @@ const sessionManager = {
     // Find current folder
     const session = this.sessions.find(s => s.id === sessionId);
     const currentFolderId = session?.folder_id;
+    const assignableFolders = [];
+    const collectAssignableFolders = (folders, depth = 0) => {
+      (folders || []).forEach(folder => {
+        if (!folder || !folder.id) return;
+        if (String(folder.kind || '').trim() !== 'group') {
+          assignableFolders.push({
+            id: folder.id,
+            name: folder.name,
+            color: folder.color,
+            depth
+          });
+        }
+        collectAssignableFolders(folder.children || [], depth + 1);
+      });
+    };
+    collectAssignableFolders(this.folders);
 
     // Render folder options
     container.innerHTML = `
@@ -3989,12 +4023,12 @@ const sessionManager = {
         </svg>
         No Workspace
       </div>
-      ${this.folders.map(folder => `
+      ${assignableFolders.map(folder => `
         <div class="move-folder-item ${folder.id === currentFolderId ? 'selected' : ''}" data-folder-id="${folder.id}">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="${folder.color || 'currentColor'}" class="me-2">
             <path d="M10,4H4C2.89,4 2,4.89 2,6V18A2,2 0 0,0 4,20H20A2,2 0 0,0 22,18V8C22,6.89 21.1,6 20,6H12L10,4Z"/>
           </svg>
-          ${this.escapeHtml(folder.name)}
+          ${this.escapeHtml(`${folder.depth > 0 ? `${'--'.repeat(folder.depth)} ` : ''}${folder.name}`)}
         </div>
       `).join('')}
     `;
@@ -5401,10 +5435,13 @@ const sessionManager = {
     let options = '<option value="">-- Select a workspace --</option>';
     const appendOptions = (folders, depth = 0) => {
       (folders || []).forEach(folder => {
-        const indent = depth > 0 ? `${'-- '.repeat(depth)}` : '';
-        const label = `${indent}${folder.name || 'Unnamed Workspace'}`;
-        const selected = folder.id === this.noteModalWorkspaceId ? ' selected' : '';
-        options += `<option value="${this.escapeHtml(folder.id)}"${selected}>${this.escapeHtml(label)}</option>`;
+        if (!folder || !folder.id) return;
+        if (String(folder.kind || '').trim() !== 'group') {
+          const indent = depth > 0 ? `${'-- '.repeat(depth)}` : '';
+          const label = `${indent}${folder.name || 'Unnamed Workspace'}`;
+          const selected = folder.id === this.noteModalWorkspaceId ? ' selected' : '';
+          options += `<option value="${this.escapeHtml(folder.id)}"${selected}>${this.escapeHtml(label)}</option>`;
+        }
         if (folder.children && folder.children.length > 0) {
           appendOptions(folder.children, depth + 1);
         }
