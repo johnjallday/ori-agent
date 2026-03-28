@@ -205,7 +205,7 @@ func (s *Server) serveSettings(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) serveVault(w http.ResponseWriter, r *http.Request) {
 	data := s.prepareBasePageData("vault")
-	data.Title = "Private Vault - Ori Agent"
+	data.Title = "Private Vaults - Ori Agent"
 	data.BrandText = "Ori Agent"
 	data.ShowSidebarToggle = true
 	s.renderAndWritePage(w, "vault", data)

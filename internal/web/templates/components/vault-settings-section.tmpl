@@ -1,24 +1,6 @@
 <section id="private-vault" class="vault-page-shell">
   <div id="vaultAlerts" class="vault-page-alerts" aria-live="polite"></div>
 
-  <!-- Compact Status Bar -->
-  <div class="vault-page-status-compact modern-card mb-3 p-2 d-flex align-items-center justify-content-between">
-    <div class="d-flex align-items-center gap-3">
-      <div id="vaultStatusIndicator" class="vault-page-status-indicator" style="width: 2rem; height: 2rem;">
-        <span class="spinner-border spinner-border-sm" role="status"></span>
-      </div>
-      <div>
-        <h5 id="vaultStatusText" class="mb-0" style="font-size: 1rem; font-weight: 700;">Loading...</h5>
-        <small id="vaultStatusDetails" class="text-secondary" style="font-size: 0.8rem;">Checking status...</small>
-      </div>
-    </div>
-    <div class="d-flex gap-2">
-      <button id="vaultOpenUnlockBtn" class="modern-btn modern-btn-primary modern-btn-sm" type="button">Unlock</button>
-      <button id="vaultLockBtn" class="modern-btn modern-btn-secondary modern-btn-sm" type="button">Lock</button>
-      <button id="vaultRefreshBtn" class="modern-btn modern-btn-secondary modern-btn-sm" type="button">Refresh</button>
-    </div>
-  </div>
-
   <!-- Tab Navigation -->
   <ul class="nav nav-tabs vault-page-tabs" id="vaultTab" role="tablist">
     <li class="nav-item" role="presentation">
@@ -64,22 +46,41 @@
 
           <div class="vault-page-explorer">
             <div class="vault-page-explorer-head">
-              <div class="vault-page-panel-copy">
-                <h4 class="vault-page-subtitle">Folder explorer</h4>
-                <p class="vault-page-help">Switch the active vault and browse its protected folder tree.</p>
-              </div>
+              <div class="vault-page-explorer-topbar">
+                <div class="vault-page-panel-copy">
+                  <h4 class="vault-page-subtitle">Folder explorer</h4>
+                  <p class="vault-page-help">Switch vaults, unlock access, and browse the protected folder tree from one place.</p>
+                </div>
 
-              <div class="vault-page-explorer-vault">
-                <div class="vault-page-field">
-                  <label class="vault-page-label" for="vaultActiveVaultId">Active vault</label>
+                <div class="vault-page-vault-picker">
+                  <label class="vault-page-label" for="vaultActiveVaultId">Vault</label>
                   <select id="vaultActiveVaultId" class="form-select settings-input vault-page-input">
                     <option value="">Loading vaults...</option>
                   </select>
                 </div>
-                <div id="vaultActiveVaultMeta" class="vault-page-meta vault-page-explorer-meta">Checking available vaults...</div>
+              </div>
 
-                <details class="vault-page-advanced-details mt-3">
-                  <summary class="vault-page-subtitle" style="cursor: pointer; font-size: 0.85rem;">Edit Vault Details</summary>
+              <div class="vault-page-explorer-support">
+                <div id="vaultActiveVaultMeta" class="vault-page-meta vault-page-explorer-meta">Checking available vaults...</div>
+                <div class="vault-page-vault-status-row">
+                  <div class="vault-page-vault-status-copy">
+                    <div id="vaultStatusIndicator" class="vault-page-status-indicator">
+                      <span class="spinner-border spinner-border-sm" role="status"></span>
+                    </div>
+                    <div class="vault-page-vault-status-text">
+                      <div id="vaultStatusText" class="vault-page-vault-status-title">Loading...</div>
+                      <div id="vaultStatusDetails" class="vault-page-vault-status-detail">Checking status...</div>
+                    </div>
+                  </div>
+                  <div class="vault-page-vault-status-actions">
+                    <button id="vaultOpenUnlockBtn" class="modern-btn modern-btn-primary modern-btn-sm" type="button">Unlock</button>
+                    <button id="vaultLockBtn" class="modern-btn modern-btn-secondary modern-btn-sm" type="button">Lock</button>
+                    <button id="vaultRefreshBtn" class="modern-btn modern-btn-secondary modern-btn-sm" type="button">Refresh</button>
+                  </div>
+                </div>
+
+                <details class="vault-page-advanced-details vault-page-explorer-details">
+                  <summary class="vault-page-subtitle" style="cursor: pointer; font-size: 0.85rem;">Edit vault details</summary>
                   <div class="mt-2">
                     <div class="vault-page-field">
                       <label class="vault-page-label" for="vaultEditVaultName">Vault name</label>

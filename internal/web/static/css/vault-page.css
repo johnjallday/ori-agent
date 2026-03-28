@@ -468,13 +468,23 @@
 }
 
 .vault-page-explorer-head {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(18rem, 24rem);
-  gap: 1rem;
-  align-items: start;
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
 }
 
-.vault-page-explorer-vault {
+.vault-page-explorer-topbar {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(16rem, 22rem);
+  gap: 1rem;
+  align-items: end;
+}
+
+.vault-page-vault-picker {
+  min-width: 0;
+}
+
+.vault-page-explorer-support {
   min-width: 0;
   padding: 0.9rem 1rem;
   border-radius: 20px;
@@ -483,7 +493,59 @@
 }
 
 .vault-page-explorer-meta {
-  margin-top: 0.75rem;
+  margin-top: 0;
+}
+
+.vault-page-vault-status-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0.85rem;
+  align-items: center;
+  margin-top: 0.85rem;
+  padding-top: 0.85rem;
+  border-top: 1px solid var(--vault-page-soft-border);
+}
+
+.vault-page-vault-status-copy {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.75rem;
+  min-width: 0;
+}
+
+.vault-page-vault-status-row .vault-page-status-indicator {
+  width: 2.35rem;
+  height: 2.35rem;
+}
+
+.vault-page-vault-status-text {
+  min-width: 0;
+}
+
+.vault-page-vault-status-title {
+  margin: 0;
+  color: var(--text-primary);
+  font-size: 0.96rem;
+  font-weight: 700;
+  line-height: 1.3;
+}
+
+.vault-page-vault-status-detail {
+  margin-top: 0.18rem;
+  color: var(--text-secondary);
+  font-size: 0.8rem;
+  line-height: 1.45;
+}
+
+.vault-page-vault-status-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 0.55rem;
+}
+
+.vault-page-explorer-details {
+  margin-top: 0.85rem;
 }
 
 .vault-page-explorer-toolbar {
@@ -654,7 +716,7 @@
 
   .vault-page-hero,
   .vault-page-status-bar,
-  .vault-page-explorer-head,
+  .vault-page-explorer-topbar,
   .vault-page-entry-grid,
   .vault-page-split-grid,
   .vault-page-transfer-grid,
@@ -666,6 +728,14 @@
   }
 
   .vault-page-hero-actions {
+    justify-content: flex-start;
+  }
+
+  .vault-page-vault-status-row {
+    grid-template-columns: 1fr;
+  }
+
+  .vault-page-vault-status-actions {
     justify-content: flex-start;
   }
 
@@ -697,6 +767,11 @@
   .vault-page-button-row .modern-btn,
   .vault-page-button-row .btn,
   .vault-page-selection-badge {
+    width: 100%;
+    justify-content: center;
+  }
+
+  .vault-page-vault-status-actions .modern-btn {
     width: 100%;
     justify-content: center;
   }

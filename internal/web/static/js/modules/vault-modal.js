@@ -1229,10 +1229,8 @@
     const hasVaults = state.hasHydrated && state.vaults.length > 0;
     const showEmptyCreateMode = state.hasHydrated && state.vaults.length === 0;
     const unlocked = Boolean(state.status && state.status.available && !state.status.locked);
-    const settingsHidden = isInitialHydrate || showEmptyCreateMode || !unlocked;
-
     if (elements.title) {
-      elements.title.textContent = showEmptyCreateMode ? 'Create Your First Vault' : 'Private Vault';
+      elements.title.textContent = showEmptyCreateMode ? 'Create Your First Vault' : 'Private Vaults';
     }
 
     if (elements.subtitle) {
@@ -1270,11 +1268,11 @@
     }
 
     if (elements.settingsLink) {
-      elements.settingsLink.hidden = settingsHidden;
+      elements.settingsLink.hidden = false;
     }
 
     if (elements.footer) {
-      elements.footer.classList.toggle('is-empty', settingsHidden);
+      elements.footer.classList.remove('is-empty');
     }
 
     syncCreateDialog();
