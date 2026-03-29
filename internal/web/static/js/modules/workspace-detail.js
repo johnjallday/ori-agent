@@ -1718,6 +1718,27 @@ export class WorkspaceDetailPage {
     this.renderAgentGroups();
   }
 
+  renderAgentDetailLink(agentName, encodedAgentName) {
+    if (!agentName || !encodedAgentName) {
+      return `<span>${this.escapeHtml(agentName || '')}</span>`;
+    }
+
+    const safeAgentName = this.escapeHtml(agentName);
+    const safeHref = `/agents/${encodedAgentName}`;
+    return `
+      <a href="${safeHref}"
+         class="workspace-detail-agent-link"
+         title="Open ${safeAgentName} details"
+         aria-label="Open ${safeAgentName} details"
+         onclick="event.stopPropagation();">
+        <span class="workspace-detail-agent-link-label">${safeAgentName}</span>
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+          <path d="M14,3H21V10H19V6.41L12.41,13L11,11.59L17.59,5H14V3M5,5H10V7H7V17H17V14H19V19H5V5Z"/>
+        </svg>
+      </a>
+    `;
+  }
+
   renderAgentGroups() {
     if (!this.elements.agentsList) return;
 
@@ -1801,7 +1822,7 @@ export class WorkspaceDetailPage {
           <div class="workspace-detail-agent-card-face workspace-detail-agent-card-face-front">
             <div class="workspace-detail-agent-card-header">
               <div class="workspace-detail-agent-card-title">
-                <span>${this.escapeHtml(group.name)}</span>
+                ${group.isUnassigned ? `<span>${this.escapeHtml(group.name)}</span>` : this.renderAgentDetailLink(group.name, encodedAgentName)}
                 ${instanceChip}
                 ${capabilityBadges}
                 ${modelLabel}
@@ -1864,7 +1885,7 @@ export class WorkspaceDetailPage {
       <div class="workspace-detail-agent-card-face workspace-detail-agent-card-face-back">
         <div class="workspace-detail-agent-card-header">
           <div class="workspace-detail-agent-card-title">
-            <span>${this.escapeHtml(group.name)}</span>
+            ${this.renderAgentDetailLink(group.name, encodedAgentName)}
             <span class="workspace-detail-agent-info-tag">Agent Info</span>
           </div>
           <div class="workspace-detail-agent-card-meta-wrap">
