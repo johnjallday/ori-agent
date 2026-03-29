@@ -42,6 +42,7 @@
       }),
       cleanup: [],
       locate: [],
+      recreate: [],
       hasChanges: false,
       isValid: true
     };
@@ -54,6 +55,12 @@
       var action = actionEl.value;
       if (action === 'cleanup') {
         actions.cleanup.push(workspaceId);
+        actions.hasChanges = true;
+        return;
+      }
+
+      if (action === 'recreate') {
+        actions.recreate.push(workspaceId);
         actions.hasChanges = true;
         return;
       }
@@ -182,7 +189,7 @@
     if (data.orphaned && data.orphaned.length > 0) {
       html += '<div class="mb-3">';
       html += '<h6 style="color: var(--text-primary); margin-bottom: 4px;">Missing from Disk</h6>';
-      html += '<p style="color: var(--text-secondary); font-size: 13px; margin-bottom: 8px;">These workspaces are still in the database, but their folders are missing. Keep them as missing, locate the moved folder, or remove the database entry.</p>';
+      html += '<p style="color: var(--text-secondary); font-size: 13px; margin-bottom: 8px;">These workspaces are still in the database, but their folders are missing. Keep them as missing, locate the moved folder, recreate the workspace folder from the database, or remove the database entry.</p>';
       html += '<div class="list-group" style="gap: 8px;">';
       data.orphaned.forEach(function (ws) {
         html += '<div class="list-group-item sync-missing-row" data-workspace-id="' + escapeHtml(ws.id) + '" style="background: var(--bg-secondary); border-color: var(--border-color); padding: 10px 12px;">';
@@ -196,6 +203,7 @@
         html += '<select class="form-select form-select-sm sync-missing-action" style="max-width: 180px; background: var(--bg-tertiary); color: var(--text-primary); border-color: var(--border-color);">';
         html += '<option value="keep" selected>Keep Missing</option>';
         html += '<option value="locate">Locate Folder</option>';
+        html += '<option value="recreate">Recreate Folder</option>';
         html += '<option value="cleanup">Remove from DB</option>';
         html += '</select>';
         html += '</div>';
@@ -206,6 +214,7 @@
         html += '</div>';
         html += '<small class="d-block mt-1" style="color: var(--text-secondary);">If the folder exists but is missing <code>workspace.json</code>, Ori will recreate the workspace scaffold there.</small>';
         html += '</div>';
+        html += '<small class="d-block mt-2" style="color: var(--text-secondary);">Recreate Folder rebuilds <code>workspace.json</code>, <code>files/</code>, <code>notes/</code>, and note markdown files at the last known path. Uploaded file contents are not restored.</small>';
         html += '</div>';
       });
       html += '</div></div>';
@@ -273,7 +282,8 @@
         body: JSON.stringify({
           import: actions.import,
           cleanup: actions.cleanup,
-          locate: actions.locate
+          locate: actions.locate,
+          recreate: actions.recreate
         })
       });
 
@@ -282,7 +292,7 @@
         throw new Error(result.error || 'Sync failed');
       }
 
-      var changed = (result.imported || 0) > 0 || (result.cleaned || 0) > 0 || (result.located || 0) > 0;
+      var changed = (result.imported || 0) > 0 || (result.cleaned || 0) > 0 || (result.located || 0) > 0 || (result.recreated || 0) > 0;
       var warnings = Array.isArray(result.warnings) ? result.warnings : [];
 
       if (!changed && warnings.length > 0) {
@@ -305,6 +315,7 @@
       var parts = [];
       if ((result.imported || 0) > 0) parts.push(result.imported + ' imported');
       if ((result.located || 0) > 0) parts.push(result.located + ' relinked');
+      if ((result.recreated || 0) > 0) parts.push(result.recreated + ' recreated');
       if ((result.cleaned || 0) > 0) parts.push(result.cleaned + ' removed');
 
       if (window.Toast && typeof window.Toast.success === 'function' && parts.length > 0) {

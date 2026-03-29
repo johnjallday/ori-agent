@@ -1872,15 +1872,16 @@ func (h *Handler) handleWorkspaceSync(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req struct {
-		Import  []string                     `json:"import"`
-		Cleanup []string                     `json:"cleanup"`
-		Locate  []workspaceSyncLocateRequest `json:"locate"`
+		Import   []string                     `json:"import"`
+		Cleanup  []string                     `json:"cleanup"`
+		Locate   []workspaceSyncLocateRequest `json:"locate"`
+		Recreate []string                     `json:"recreate"`
 	}
 	if !orihttp.ParseJSONBody(w, r, &req) {
 		return
 	}
 
-	if h.workspaceStore == nil && len(req.Locate) > 0 {
+	if h.workspaceStore == nil && (len(req.Locate) > 0 || len(req.Recreate) > 0) {
 		_ = orihttp.RespondBadRequest(w, "workspace folder store is unavailable")
 		return
 	}
@@ -1918,8 +1919,19 @@ func (h *Handler) handleWorkspaceSync(w http.ResponseWriter, r *http.Request) {
 	}
 	req.Locate = validatedLocate
 
+	validatedRecreate := make([]string, 0, len(req.Recreate))
+	for _, id := range req.Recreate {
+		trimmedID := strings.TrimSpace(id)
+		if trimmedID == "" {
+			_ = orihttp.RespondBadRequest(w, "recreate action requires workspace id")
+			return
+		}
+		validatedRecreate = append(validatedRecreate, trimmedID)
+	}
+	req.Recreate = validatedRecreate
+
 	ctx := r.Context()
-	var imported, cleaned, located int
+	var imported, cleaned, located, recreated int
 	warnings := make([]string, 0)
 
 	if h.workspaceStore != nil {
@@ -1971,6 +1983,70 @@ func (h *Handler) handleWorkspaceSync(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	if h.workspaceStore != nil {
+		for _, id := range req.Recreate {
+			sessionWS, err := h.store.GetWorkspace(ctx, id)
+			if err == session.ErrWorkspaceNotFound {
+				warnings = append(warnings, fmt.Sprintf("Workspace %s was not found", id))
+				continue
+			}
+			if err != nil {
+				logger.Warn("Sync recreate: failed to load workspace", logger.Fields{"id": id, "error": err})
+				warnings = append(warnings, fmt.Sprintf("Failed to load workspace %s", id))
+				continue
+			}
+			if sessionWS.IsGroup() {
+				warnings = append(warnings, fmt.Sprintf("Workspace %s is a group and cannot be recreated", sessionWS.Name))
+				continue
+			}
+			if isFolderImportedWorkspace(*sessionWS) {
+				warnings = append(warnings, fmt.Sprintf("Workspace %s is a folder import and cannot be recreated", sessionWS.Name))
+				continue
+			}
+
+			targetPath, managed := h.syncManagedWorkspacePath(*sessionWS)
+			if !managed || strings.TrimSpace(targetPath) == "" {
+				warnings = append(warnings, fmt.Sprintf("Workspace %s does not have a recoverable folder path", sessionWS.Name))
+				continue
+			}
+
+			if err := updateManagedWorkspaceReferences(sessionWS, targetPath, targetPath); err != nil {
+				logger.Warn("Sync recreate: failed to update workspace folder references", logger.Fields{"id": id, "error": err})
+				warnings = append(warnings, fmt.Sprintf("Failed to update workspace references for %s", sessionWS.Name))
+				continue
+			}
+
+			sessionWS.UpdatedAt = time.Now()
+			folderWS, err := buildFileStoreWorkspace(sessionWS)
+			if err != nil {
+				logger.Warn("Sync recreate: failed to build workspace payload", logger.Fields{"id": id, "error": err})
+				warnings = append(warnings, fmt.Sprintf("Failed to rebuild workspace folder for %s", sessionWS.Name))
+				continue
+			}
+
+			if err := os.MkdirAll(targetPath, 0755); err != nil {
+				logger.Warn("Sync recreate: failed to create workspace folder", logger.Fields{"id": id, "path": targetPath, "error": err})
+				warnings = append(warnings, fmt.Sprintf("Failed to recreate folder for %s", sessionWS.Name))
+				continue
+			}
+			if err := h.workspaceStore.RebindExistingFolder(folderWS, targetPath); err != nil {
+				logger.Warn("Sync recreate: failed to rebuild workspace folder", logger.Fields{"id": id, "path": targetPath, "error": err})
+				warnings = append(warnings, fmt.Sprintf("Failed to recreate folder for %s", sessionWS.Name))
+				continue
+			}
+			if err := h.restoreWorkspaceNoteFiles(ctx, sessionWS.ID); err != nil {
+				logger.Warn("Sync recreate: failed to restore note files", logger.Fields{"id": id, "error": err})
+				warnings = append(warnings, fmt.Sprintf("Recreated %s but failed to restore note files", sessionWS.Name))
+			}
+			if err := h.store.UpdateWorkspace(ctx, sessionWS); err != nil {
+				logger.Warn("Sync recreate: failed to persist workspace metadata", logger.Fields{"id": id, "error": err})
+				warnings = append(warnings, fmt.Sprintf("Recreated %s but failed to save workspace metadata", sessionWS.Name))
+				continue
+			}
+			recreated++
+		}
+	}
+
 	// Import: read workspace from FileStore cache, create in SQLite.
 	if h.workspaceStore != nil {
 		for _, id := range req.Import {
@@ -2008,10 +2084,11 @@ func (h *Handler) handleWorkspaceSync(w http.ResponseWriter, r *http.Request) {
 	}
 
 	orihttp.WriteJSON(w, map[string]any{
-		"imported": imported,
-		"cleaned":  cleaned,
-		"located":  located,
-		"warnings": warnings,
+		"imported":  imported,
+		"cleaned":   cleaned,
+		"located":   located,
+		"recreated": recreated,
+		"warnings":  warnings,
 	})
 }
 
@@ -2180,6 +2257,27 @@ func updateManagedWorkspaceReferences(workspace *session.Workspace, oldPath stri
 		return fmt.Errorf("failed to encode workspace MCP bindings: %w", err)
 	}
 	workspace.MCPBindingsJSON = bindingData
+
+	return nil
+}
+
+func (h *Handler) restoreWorkspaceNoteFiles(ctx context.Context, workspaceID string) error {
+	if h == nil || h.workspaceStore == nil {
+		return nil
+	}
+
+	noteItems, err := h.store.ListNotesByWorkspace(ctx, workspaceID)
+	if err != nil {
+		return fmt.Errorf("list notes: %w", err)
+	}
+
+	for _, item := range noteItems {
+		note, err := h.store.GetNote(ctx, item.ID)
+		if err != nil {
+			return fmt.Errorf("get note %s: %w", item.ID, err)
+		}
+		h.syncNoteToFile(note)
+	}
 
 	return nil
 }

@@ -9,7 +9,9 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
+	"github.com/johnjallday/ori-agent/internal/session"
 	agentworkspace "github.com/johnjallday/ori-agent/internal/workspace"
 )
 
@@ -193,5 +195,82 @@ func TestHandleWorkspaceSyncStatusSkipsImportedWorkspaceFolders(t *testing.T) {
 	}
 	if len(status.Orphaned) != 0 {
 		t.Fatalf("expected imported workspace to be skipped, got %#v", status.Orphaned)
+	}
+}
+
+func TestHandleWorkspaceSyncRecreateMissingWorkspaceFolder(t *testing.T) {
+	handler, cleanup := createTestHandler(t)
+	defer cleanup()
+
+	baseDir := t.TempDir()
+	fileStore, err := agentworkspace.NewFileStore(baseDir)
+	if err != nil {
+		t.Fatalf("NewFileStore: %v", err)
+	}
+	defer fileStore.Close()
+	handler.SetWorkspaceStore(fileStore)
+
+	workspaceID := createTestWorkspace(t, handler, "Recreate Recover")
+
+	note := &session.WorkspaceNote{
+		ID:          "note-recreate-1",
+		WorkspaceID: workspaceID,
+		Name:        "Recovery Plan",
+		Content:     "restore from database",
+		CreatedAt:   time.Now(),
+		UpdatedAt:   time.Now(),
+	}
+	if err := handler.store.CreateNote(context.Background(), note); err != nil {
+		t.Fatalf("CreateNote: %v", err)
+	}
+
+	originalPath, err := fileStore.GetFolderPath(workspaceID)
+	if err != nil {
+		t.Fatalf("GetFolderPath: %v", err)
+	}
+	if err := os.RemoveAll(originalPath); err != nil {
+		t.Fatalf("RemoveAll workspace folder: %v", err)
+	}
+
+	payload, err := json.Marshal(map[string]interface{}{
+		"recreate": []string{workspaceID},
+	})
+	if err != nil {
+		t.Fatalf("marshal recreate payload: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/api/workspaces/sync", bytes.NewBuffer(payload))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	handler.HandleWorkspaces(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200 for sync recreate, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp map[string]interface{}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode recreate response: %v", err)
+	}
+	if got := int(resp["recreated"].(float64)); got != 1 {
+		t.Fatalf("expected recreated=1, got %d", got)
+	}
+
+	if _, err := os.Stat(filepath.Join(originalPath, agentworkspace.WorkspaceConfigFile)); err != nil {
+		t.Fatalf("expected recreated workspace.json, got error: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(originalPath, agentworkspace.FilesDir)); err != nil {
+		t.Fatalf("expected recreated files directory, got error: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(originalPath, agentworkspace.NotesDir)); err != nil {
+		t.Fatalf("expected recreated notes directory, got error: %v", err)
+	}
+
+	notePath := filepath.Join(originalPath, agentworkspace.NotesDir, agentworkspace.NoteFilename(note.Name, note.ID))
+	noteBytes, err := os.ReadFile(notePath)
+	if err != nil {
+		t.Fatalf("expected recreated note file, got error: %v", err)
+	}
+	if !bytes.Contains(noteBytes, []byte(note.Content)) {
+		t.Fatalf("expected recreated note file to contain note content, got %q", string(noteBytes))
 	}
 }
