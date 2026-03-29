@@ -286,6 +286,104 @@ func TestFileStore_SaveUpdatePreservesCustomLocation(t *testing.T) {
 	}
 }
 
+func TestFileStore_RebindExistingFolderPreservesUnmirroredFields(t *testing.T) {
+	baseDir := t.TempDir()
+	store, err := NewFileStore(baseDir)
+	if err != nil {
+		t.Fatalf("NewFileStore: %v", err)
+	}
+
+	reboundFolder := filepath.Join(t.TempDir(), "rebound-workspace")
+	if err := os.MkdirAll(filepath.Join(reboundFolder, FilesDir), 0755); err != nil {
+		t.Fatalf("mkdir files dir: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(reboundFolder, NotesDir), 0755); err != nil {
+		t.Fatalf("mkdir notes dir: %v", err)
+	}
+
+	diskWorkspace := newTestWorkspace("ws-rebind", "Disk Workspace")
+	diskWorkspace.FolderSlug = "disk-workspace"
+	diskWorkspace.AgentInstances = []AgentInstance{
+		{
+			ID:             "agent-1",
+			Name:           "Planner",
+			InstanceNumber: 1,
+			NodeID:         "planner-node-1",
+			CreatedAt:      time.Now(),
+		},
+	}
+	diskWorkspace.SkillBindings = []WorkspaceSkillBinding{
+		{
+			ID:        "binding-1",
+			SkillName: "workspace-planning",
+			Enabled:   true,
+			Trusted:   true,
+		},
+	}
+	diskWorkspace.AgentSkillAccess = []WorkspaceAgentSkillAccess{
+		{
+			AgentInstanceID:   "agent-1",
+			EnabledBindingIDs: []string{"binding-1"},
+		},
+	}
+
+	data, err := diskWorkspace.ToJSON()
+	if err != nil {
+		t.Fatalf("ToJSON: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(reboundFolder, WorkspaceConfigFile), data, 0644); err != nil {
+		t.Fatalf("write workspace.json: %v", err)
+	}
+
+	dbWorkspace := newTestWorkspace("ws-rebind", "Database Workspace")
+	dbWorkspace.Description = "fresh database copy"
+	dbWorkspace.FolderSlug = "database-workspace"
+
+	if err := store.RebindExistingFolder(dbWorkspace, reboundFolder); err != nil {
+		t.Fatalf("RebindExistingFolder: %v", err)
+	}
+
+	got, err := store.Get("ws-rebind")
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if got.Name != "Database Workspace" {
+		t.Fatalf("Name=%q, want %q", got.Name, "Database Workspace")
+	}
+	if got.Description != "fresh database copy" {
+		t.Fatalf("Description=%q, want %q", got.Description, "fresh database copy")
+	}
+	if len(got.SkillBindings) != 1 || got.SkillBindings[0].SkillName != "workspace-planning" {
+		t.Fatalf("expected preserved skill bindings, got %#v", got.SkillBindings)
+	}
+	if len(got.AgentSkillAccess) != 1 || got.AgentSkillAccess[0].AgentInstanceID != "agent-1" {
+		t.Fatalf("expected preserved agent skill access, got %#v", got.AgentSkillAccess)
+	}
+
+	gotPath, err := store.GetFolderPath("ws-rebind")
+	if err != nil {
+		t.Fatalf("GetFolderPath: %v", err)
+	}
+	if gotPath != reboundFolder {
+		t.Fatalf("GetFolderPath=%q, want %q", gotPath, reboundFolder)
+	}
+
+	rebuiltData, err := os.ReadFile(filepath.Join(reboundFolder, WorkspaceConfigFile))
+	if err != nil {
+		t.Fatalf("read rebound workspace.json: %v", err)
+	}
+	rebuilt, err := FromJSON(rebuiltData)
+	if err != nil {
+		t.Fatalf("FromJSON: %v", err)
+	}
+	if rebuilt.Description != "fresh database copy" {
+		t.Fatalf("rebuilt Description=%q, want %q", rebuilt.Description, "fresh database copy")
+	}
+	if len(rebuilt.SkillBindings) != 1 || rebuilt.SkillBindings[0].SkillName != "workspace-planning" {
+		t.Fatalf("expected preserved skill bindings in workspace.json, got %#v", rebuilt.SkillBindings)
+	}
+}
+
 func TestFileStore_SubWorkspace(t *testing.T) {
 	dir := t.TempDir()
 	store, err := NewFileStore(dir)

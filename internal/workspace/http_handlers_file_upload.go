@@ -3,7 +3,6 @@ package workspace
 import (
 	"encoding/json"
 	"fmt"
-	"io"
 	"mime"
 	"net/http"
 	"os"
@@ -82,39 +81,13 @@ func (h *HTTPHandler) UploadFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Create files directory for this workspace
 	filesPath := h.store.GetFilesPath(studioID)
-	if err := os.MkdirAll(filesPath, 0755); err != nil {
-		logger.Error("Failed to create files directory", logger.Fields{"error": err, "path": filesPath})
-		orihttp.InternalError(w, "Failed to create files directory")
-		return
-	}
-
-	// Generate unique file ID and destination path
-	fileID := uuid.New().String()
-	// Use fileID prefix to ensure uniqueness even with same filenames
-	destFilename := fileID[:8] + "_" + filename
-	destPath := filepath.Join(filesPath, destFilename)
-
-	// Save the file
-	destFile, err := os.Create(destPath)
+	storedFile, err := storeWorkspaceFile(filesPath, file, filename)
 	if err != nil {
-		logger.Error("Failed to create destination file", logger.Fields{"error": err, "path": destPath})
+		logger.Error("Failed to store workspace file", logger.Fields{"error": err, "path": filesPath})
 		orihttp.InternalError(w, "Failed to save file")
 		return
 	}
-	defer func() { _ = destFile.Close() }()
-
-	written, err := io.Copy(destFile, file)
-	if err != nil {
-		_ = os.Remove(destPath) // Cleanup on failure
-		logger.Error("Failed to write file", logger.Fields{"error": err})
-		orihttp.InternalError(w, "Failed to write file")
-		return
-	}
-
-	// Detect MIME type
-	mimeType := detectMimeType(filename)
 
 	// Create attachment with file metadata
 	attachment := Attachment{
@@ -122,30 +95,27 @@ func (h *HTTPHandler) UploadFile(w http.ResponseWriter, r *http.Request) {
 		WorkspaceID: studioID,
 		Title:       title,
 		Body:        notes,
-		Type:        inferTypeFromMime(mimeType),
-		File: &AttachmentFileMeta{
-			Name: filename,
-			Size: written,
-			Mime: mimeType,
-			URL:  fmt.Sprintf("/api/workspaces/%s/files/%s", studioID, destFilename),
-		},
-		X:         0,
-		Y:         0,
-		CreatedAt: time.Now(),
-		UpdatedAt: time.Now(),
+		Type:        inferTypeFromMime(storedFile.MimeType),
+		File:        buildWorkspaceOwnedAttachmentFileMeta(studioID, *storedFile, ""),
+		X:           0,
+		Y:           0,
+		CreatedAt:   time.Now(),
+		UpdatedAt:   time.Now(),
 	}
 
 	if err := studio.AddAttachment(attachment); err != nil {
-		_ = os.Remove(destPath) // Cleanup on failure
+		removeWorkspaceOwnedAttachmentFile(h.store, studioID, attachment.File, "")
 		orihttp.BadRequest(w, fmt.Sprintf("Failed to add attachment: %v", err))
 		return
 	}
 
 	if err := h.store.Save(studio); err != nil {
-		_ = os.Remove(destPath) // Cleanup on failure
+		removeWorkspaceOwnedAttachmentFile(h.store, studioID, attachment.File, "")
 		orihttp.InternalError(w, fmt.Sprintf("Failed to save workspace: %v", err))
 		return
 	}
+
+	hydratedAttachment := HydrateAttachment(attachment, h.store)
 
 	// Publish event for live updates
 	if h.eventBus != nil {
@@ -154,7 +124,7 @@ func (h *HTTPHandler) UploadFile(w http.ResponseWriter, r *http.Request) {
 			WorkspaceID: studioID,
 			Source:      "api",
 			Data: map[string]interface{}{
-				"attachment": attachment,
+				"attachment": hydratedAttachment,
 			},
 		})
 	}
@@ -163,14 +133,14 @@ func (h *HTTPHandler) UploadFile(w http.ResponseWriter, r *http.Request) {
 		"workspace_id":  studioID,
 		"attachment_id": attachment.ID,
 		"filename":      filename,
-		"size":          written,
+		"size":          storedFile.Size,
 	})
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
 	if encErr := json.NewEncoder(w).Encode(map[string]interface{}{
 		"message":    "File uploaded successfully",
-		"attachment": attachment,
+		"attachment": hydratedAttachment,
 		"studio":     studioID,
 	}); encErr != nil {
 		logger.Error("Failed to encode response", logger.Fields{"error": encErr})

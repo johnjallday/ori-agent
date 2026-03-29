@@ -1690,6 +1690,10 @@
   position: relative;
 }
 
+.hub-file-item {
+  padding-right: 4.5rem;
+}
+
 .hub-directory-item {
   padding-right: 2.2rem;
 }
@@ -1729,6 +1733,23 @@
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.hub-file-status-badge {
+  display: inline-flex;
+  align-items: center;
+  margin-right: 0.35rem;
+  padding: 0.08rem 0.38rem;
+  border-radius: 999px;
+  font-size: 0.58rem;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+
+.hub-file-status-badge.is-missing {
+  background: rgba(245, 158, 11, 0.14);
+  color: #d97706;
 }
 
 .hub-summary-row {
@@ -3267,6 +3288,29 @@ body.chat-panel-open .chat-panel-backdrop {
   z-index: 10;
 }
 
+.hub-item-secondary-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  position: absolute;
+  top: 0.4rem;
+  right: 2.7rem;
+  padding: 0.35rem;
+  border: 1px solid var(--border-color);
+  background: var(--bg-secondary);
+  color: var(--accent-primary, #c75a34);
+  cursor: pointer;
+  border-radius: var(--radius-sm, 4px);
+  transition: color 0.15s ease, background-color 0.15s ease, border-color 0.15s ease;
+  flex-shrink: 0;
+  z-index: 10;
+}
+
+.hub-item-secondary-btn:hover {
+  background: rgba(199, 90, 52, 0.12);
+  border-color: rgba(199, 90, 52, 0.45);
+}
+
 .hub-item-delete-btn:hover {
   color: #ef4444;
   background: rgba(239, 68, 68, 0.15);
@@ -3274,7 +3318,8 @@ body.chat-panel-open .chat-panel-backdrop {
 }
 
 /* Hide individual delete buttons in selection mode */
-.hub-panel.selection-mode .hub-item-delete-btn {
+.hub-panel.selection-mode .hub-item-delete-btn,
+.hub-panel.selection-mode .hub-item-secondary-btn {
   display: none !important;
 }
 

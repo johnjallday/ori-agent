@@ -107,7 +107,7 @@ func (h *HTTPHandler) CreateAttachment(w http.ResponseWriter, r *http.Request) {
 		Type:        attType,
 		Color:       req.Color,
 		LinkURL:     req.LinkURL,
-		File:        req.File,
+		File:        sanitizeAttachmentFileMeta(studioID, req.File),
 		X:           req.X,
 		Y:           req.Y,
 		CreatedAt:   time.Now(),
@@ -131,6 +131,11 @@ func (h *HTTPHandler) CreateAttachment(w http.ResponseWriter, r *http.Request) {
 		createdAttachment = &attachment
 	} else if createdAttachment == nil {
 		createdAttachment = &attachment
+	}
+
+	if createdAttachment != nil {
+		hydratedAttachment := HydrateAttachment(*createdAttachment, h.store)
+		createdAttachment = &hydratedAttachment
 	}
 
 	if h.eventBus != nil && createdAttachment != nil {
@@ -227,7 +232,7 @@ func (h *HTTPHandler) UpdateAttachment(w http.ResponseWriter, r *http.Request) {
 		attachment.LinkURL = *req.LinkURL
 	}
 	if req.File != nil {
-		attachment.File = req.File
+		attachment.File = sanitizeAttachmentFileMeta(studioID, req.File)
 	}
 	if req.X != nil {
 		attachment.X = *req.X
@@ -254,6 +259,11 @@ func (h *HTTPHandler) UpdateAttachment(w http.ResponseWriter, r *http.Request) {
 		updatedAttachment = attachment
 	}
 
+	if updatedAttachment != nil {
+		hydratedAttachment := HydrateAttachment(*updatedAttachment, h.store)
+		updatedAttachment = &hydratedAttachment
+	}
+
 	if h.eventBus != nil && updatedAttachment != nil {
 		h.eventBus.Publish(Event{
 			Type:        EventAttachmentUpdated,
@@ -269,6 +279,105 @@ func (h *HTTPHandler) UpdateAttachment(w http.ResponseWriter, r *http.Request) {
 	if encErr := json.NewEncoder(w).Encode(map[string]interface{}{
 		"message":    "Attachment updated successfully",
 		"attachment": updatedAttachment,
+		"studio":     studioID,
+	}); encErr != nil {
+		logger.Error("Failed to encode response", logger.Fields{"error": encErr})
+	}
+}
+
+// RelinkAttachmentFile handles POST /api/workspaces/:id/attachments/:attachment_id/relink
+// by copying a replacement file into the workspace-owned files directory.
+func (h *HTTPHandler) RelinkAttachmentFile(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		orihttp.MethodNotAllowed(w)
+		return
+	}
+
+	path := strings.TrimPrefix(r.URL.Path, "/api/workspaces/")
+	parts := strings.Split(path, "/")
+	if len(parts) < 4 {
+		orihttp.BadRequest(w, "Invalid URL format")
+		return
+	}
+	studioID := parts[0]
+	attachmentID := parts[2]
+
+	r.Body = http.MaxBytesReader(w, r.Body, MaxWorkspaceFileSize)
+	if err := r.ParseMultipartForm(MaxWorkspaceFileSize); err != nil {
+		if strings.Contains(err.Error(), "request body too large") {
+			orihttp.BadRequest(w, fmt.Sprintf("File too large. Maximum size is %d MB", MaxWorkspaceFileSize/(1<<20)))
+			return
+		}
+		orihttp.BadRequest(w, "Failed to parse upload: "+err.Error())
+		return
+	}
+
+	file, header, err := r.FormFile("file")
+	if err != nil {
+		orihttp.BadRequest(w, "File is required: "+err.Error())
+		return
+	}
+	defer func() { _ = file.Close() }()
+
+	filename, ok := orihttp.ValidateUploadFilename(w, header.Filename)
+	if !ok {
+		return
+	}
+
+	studio, err := h.store.Get(studioID)
+	if err != nil {
+		orihttp.NotFound(w, fmt.Sprintf("Studio not found: %v", err))
+		return
+	}
+
+	attachment, err := studio.GetAttachment(attachmentID)
+	if err != nil {
+		orihttp.NotFound(w, err.Error())
+		return
+	}
+
+	filesPath := h.store.GetFilesPath(studioID)
+	storedFile, err := storeWorkspaceFile(filesPath, file, filename)
+	if err != nil {
+		orihttp.InternalError(w, "Failed to save replacement file: "+err.Error())
+		return
+	}
+
+	oldFile := attachment.File
+	attachment.File = buildWorkspaceOwnedAttachmentFileMeta(studioID, *storedFile, "")
+	attachment.UpdatedAt = time.Now()
+
+	if err := studio.UpdateAttachment(*attachment); err != nil {
+		removeWorkspaceOwnedAttachmentFile(h.store, studioID, attachment.File, "")
+		orihttp.InternalError(w, fmt.Sprintf("Failed to update attachment: %v", err))
+		return
+	}
+
+	if err := h.store.Save(studio); err != nil {
+		removeWorkspaceOwnedAttachmentFile(h.store, studioID, attachment.File, "")
+		attachment.File = oldFile
+		orihttp.InternalError(w, fmt.Sprintf("Failed to save studio: %v", err))
+		return
+	}
+
+	removeWorkspaceOwnedAttachmentFile(h.store, studioID, oldFile, attachment.File.RelativePath)
+
+	hydratedAttachment := HydrateAttachment(*attachment, h.store)
+	if h.eventBus != nil {
+		h.eventBus.Publish(Event{
+			Type:        EventAttachmentUpdated,
+			WorkspaceID: studioID,
+			Source:      "api",
+			Data: map[string]interface{}{
+				"attachment": hydratedAttachment,
+			},
+		})
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	if encErr := json.NewEncoder(w).Encode(map[string]interface{}{
+		"message":    "Attachment file relinked successfully",
+		"attachment": hydratedAttachment,
 		"studio":     studioID,
 	}); encErr != nil {
 		logger.Error("Failed to encode response", logger.Fields{"error": encErr})

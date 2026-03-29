@@ -8100,16 +8100,74 @@ export class WorkspaceDetailPage {
     this.elements.filesList.innerHTML = this.files.map(file => {
       const title = file.title || (file.file_meta && file.file_meta.name) || 'Untitled File';
       const size = file.file_meta ? file.file_meta.size : null;
+      const isMissing = file.file_meta?.status === 'missing';
+      const metaParts = [];
+      if (size) metaParts.push(this.formatFileSize(size));
+      metaParts.push(formatDate(file.created_at));
       return `
         <div class="workspace-detail-item" data-file-id="${file.id}">
-          <div class="workspace-detail-item-title">${this.escapeHtml(title)}</div>
-          <div class="workspace-detail-item-meta">
-            ${size ? this.formatFileSize(size) + ' · ' : ''}
-            ${formatDate(file.created_at)}
+          ${isMissing ? `
+            <button type="button" class="workspace-detail-item-run" onclick="event.stopPropagation(); window.workspaceDetail?.promptRelinkWorkspaceFile('${file.id}')" title="Choose a replacement file" aria-label="Relink missing file ${this.escapeHtml(title)}">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M10.59,13.41C11,13.8 11,14.44 10.59,14.83C10.2,15.22 9.56,15.22 9.17,14.83C7.22,12.88 7.22,9.71 9.17,7.76L12.71,4.22C14.66,2.27 17.83,2.27 19.78,4.22C21.73,6.17 21.73,9.34 19.78,11.29L18.29,12.78C18.3,11.96 18.17,11.14 17.89,10.36L18.36,9.88C19.54,8.71 19.54,6.81 18.36,5.64C17.19,4.46 15.29,4.46 14.12,5.64L10.59,9.17C9.41,10.34 9.41,12.24 10.59,13.41Z"/>
+              </svg>
+            </button>
+          ` : ''}
+          <div>
+            <div class="workspace-detail-item-title">${this.escapeHtml(title)}</div>
+            <div class="workspace-detail-item-meta">
+              ${isMissing ? '<span class="workspace-detail-status-badge is-missing">Missing</span>' : ''}
+              ${this.escapeHtml(metaParts.join(' · '))}
+            </div>
           </div>
         </div>
       `;
     }).join('');
+  }
+
+  promptRelinkWorkspaceFile(fileId) {
+    if (!fileId) return;
+
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.style.display = 'none';
+    input.addEventListener('change', async () => {
+      const selected = input.files && input.files[0];
+      input.remove();
+      if (!selected) return;
+      await this.relinkWorkspaceFile(fileId, selected);
+    }, { once: true });
+
+    document.body.appendChild(input);
+    input.click();
+  }
+
+  async relinkWorkspaceFile(fileId, file) {
+    if (!fileId || !file) return;
+
+    const formData = new FormData();
+    formData.append('file', file);
+
+    try {
+      const response = await fetch(`/api/workspaces/${encodeURIComponent(this.workspaceId)}/attachments/${encodeURIComponent(fileId)}/relink`, {
+        method: 'POST',
+        body: formData
+      });
+      if (!response.ok) {
+        const payload = await response.json().catch(() => ({}));
+        throw new Error(payload.error || payload.message || 'Failed to relink file');
+      }
+
+      if (window.Toast) {
+        window.Toast.success('File relinked');
+      }
+      await this.loadFiles();
+    } catch (error) {
+      console.error('Failed to relink workspace file:', error);
+      if (window.Toast) {
+        window.Toast.error(error.message || 'Failed to relink file');
+      }
+    }
   }
 
   /**

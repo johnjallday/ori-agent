@@ -489,7 +489,7 @@ func (h *Handler) getWorkspace(w http.ResponseWriter, r *http.Request, id string
 		return
 	}
 
-	orihttp.WriteJSON(w, buildWorkspaceDetailResponse(workspace))
+	orihttp.WriteJSON(w, h.buildWorkspaceDetailResponse(workspace))
 }
 
 // updateWorkspace handles PUT/PATCH /api/workspaces/{id}.
@@ -781,6 +781,11 @@ type workspaceCreateConflict struct {
 	RequestedSlug string `json:"requested_slug,omitempty"`
 	SuggestedSlug string `json:"suggested_slug,omitempty"`
 	Location      string `json:"location,omitempty"`
+}
+
+type workspaceSyncLocateRequest struct {
+	ID   string `json:"id"`
+	Path string `json:"path"`
 }
 
 type workspaceDirectoryReference struct {
@@ -1440,7 +1445,7 @@ func (h *Handler) removeWorkspaceAgent(w http.ResponseWriter, r *http.Request, w
 	})
 }
 
-func buildWorkspaceDetailResponse(workspace *session.Workspace) map[string]interface{} {
+func (h *Handler) buildWorkspaceDetailResponse(workspace *session.Workspace) map[string]interface{} {
 	if workspace == nil {
 		return map[string]interface{}{}
 	}
@@ -1455,11 +1460,30 @@ func buildWorkspaceDetailResponse(workspace *session.Workspace) map[string]inter
 	}
 
 	analyticsWorkspace := buildWorkspaceAnalyticsView(workspace)
+	payload["attachments"] = h.buildWorkspaceResponseAttachments(workspace)
 	payload["entry_agent_name"] = currentWorkspaceEntryAgentName(workspace)
 	payload["agent_stats"] = analyticsWorkspace.GetAgentStats()
 	payload["workspace_progress"] = analyticsWorkspace.GetWorkspaceProgress()
 
 	return payload
+}
+
+func (h *Handler) buildWorkspaceResponseAttachments(workspace *session.Workspace) []agentworkspace.Attachment {
+	if workspace == nil || len(workspace.AttachmentsJSON) == 0 {
+		return []agentworkspace.Attachment{}
+	}
+
+	var attachments []agentworkspace.Attachment
+	if err := json.Unmarshal(workspace.AttachmentsJSON, &attachments); err != nil {
+		logger.Warn("Failed to decode workspace attachments for response", logger.Fields{"workspace_id": workspace.ID, "error": err})
+		return []agentworkspace.Attachment{}
+	}
+
+	for i := range attachments {
+		attachments[i] = agentworkspace.HydrateAttachment(attachments[i], h.workspaceStore)
+	}
+
+	return attachments
 }
 
 func buildWorkspaceAnalyticsView(workspace *session.Workspace) *agentworkspace.Workspace {
@@ -1799,8 +1823,15 @@ func (h *Handler) handleWorkspaceSyncStatus(w http.ResponseWriter, r *http.Reque
 
 	// Disk → Store: on disk but not in SQLite.
 	for id, ws := range diskCache {
+		path, err := h.workspaceStore.GetFolderPath(id)
+		if err != nil {
+			continue
+		}
+		existsOnDisk, err := workspaceFolderExists(path)
+		if err != nil || !existsOnDisk {
+			continue
+		}
 		if _, exists := sqliteIDs[id]; !exists {
-			path, _ := h.workspaceStore.GetFolderPath(id)
 			unregistered = append(unregistered, agentworkspace.SyncWorkspaceInfo{
 				ID:   id,
 				Name: ws.Name,
@@ -1811,12 +1842,19 @@ func (h *Handler) handleWorkspaceSyncStatus(w http.ResponseWriter, r *http.Reque
 
 	// Store → Disk: in SQLite but not on disk.
 	for id, ws := range sqliteIDs {
-		if _, exists := diskCache[id]; !exists {
-			orphaned = append(orphaned, agentworkspace.SyncWorkspaceInfo{
-				ID:   id,
-				Name: ws.Name,
-			})
+		path, managed := h.syncManagedWorkspacePath(ws)
+		if !managed {
+			continue
 		}
+		existsOnDisk, err := workspaceFolderExists(path)
+		if err != nil || existsOnDisk {
+			continue
+		}
+		orphaned = append(orphaned, agentworkspace.SyncWorkspaceInfo{
+			ID:   id,
+			Name: ws.Name,
+			Path: path,
+		})
 	}
 
 	orihttp.WriteJSON(w, agentworkspace.SyncStatus{
@@ -1834,15 +1872,104 @@ func (h *Handler) handleWorkspaceSync(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req struct {
-		Import  []string `json:"import"`
-		Cleanup []string `json:"cleanup"`
+		Import  []string                     `json:"import"`
+		Cleanup []string                     `json:"cleanup"`
+		Locate  []workspaceSyncLocateRequest `json:"locate"`
 	}
 	if !orihttp.ParseJSONBody(w, r, &req) {
 		return
 	}
 
+	if h.workspaceStore == nil && len(req.Locate) > 0 {
+		_ = orihttp.RespondBadRequest(w, "workspace folder store is unavailable")
+		return
+	}
+
+	validatedLocate := make([]workspaceSyncLocateRequest, 0, len(req.Locate))
+	for _, item := range req.Locate {
+		item.ID = strings.TrimSpace(item.ID)
+		item.Path = strings.TrimSpace(item.Path)
+		if item.ID == "" {
+			_ = orihttp.RespondBadRequest(w, "locate action requires workspace id")
+			return
+		}
+		if item.Path == "" {
+			_ = orihttp.RespondBadRequest(w, "locate action requires a folder path")
+			return
+		}
+
+		normalizedPath, err := normalizeImportPath(item.Path)
+		if err != nil {
+			_ = orihttp.RespondBadRequest(w, fmt.Sprintf("invalid locate path for workspace %s: %v", item.ID, err))
+			return
+		}
+		info, err := os.Stat(normalizedPath)
+		if err != nil {
+			_ = orihttp.RespondBadRequest(w, fmt.Sprintf("locate path is not accessible for workspace %s: %v", item.ID, err))
+			return
+		}
+		if !info.IsDir() {
+			_ = orihttp.RespondBadRequest(w, fmt.Sprintf("locate path must be a directory for workspace %s", item.ID))
+			return
+		}
+
+		item.Path = normalizedPath
+		validatedLocate = append(validatedLocate, item)
+	}
+	req.Locate = validatedLocate
+
 	ctx := r.Context()
-	var imported, cleaned int
+	var imported, cleaned, located int
+	warnings := make([]string, 0)
+
+	if h.workspaceStore != nil {
+		for _, item := range req.Locate {
+			sessionWS, err := h.store.GetWorkspace(ctx, item.ID)
+			if err == session.ErrWorkspaceNotFound {
+				warnings = append(warnings, fmt.Sprintf("Workspace %s was not found", item.ID))
+				continue
+			}
+			if err != nil {
+				logger.Warn("Sync locate: failed to load workspace", logger.Fields{"id": item.ID, "error": err})
+				warnings = append(warnings, fmt.Sprintf("Failed to load workspace %s", item.ID))
+				continue
+			}
+			if sessionWS.IsGroup() {
+				warnings = append(warnings, fmt.Sprintf("Workspace %s is a group and cannot be rebound", sessionWS.Name))
+				continue
+			}
+			if isFolderImportedWorkspace(*sessionWS) {
+				warnings = append(warnings, fmt.Sprintf("Workspace %s is a folder import and cannot be rebound", sessionWS.Name))
+				continue
+			}
+
+			oldPath, _ := h.syncManagedWorkspacePath(*sessionWS)
+			if err := updateManagedWorkspaceReferences(sessionWS, oldPath, item.Path); err != nil {
+				logger.Warn("Sync locate: failed to update workspace folder references", logger.Fields{"id": item.ID, "error": err})
+				warnings = append(warnings, fmt.Sprintf("Failed to update workspace references for %s", sessionWS.Name))
+				continue
+			}
+
+			sessionWS.UpdatedAt = time.Now()
+			folderWS, err := buildFileStoreWorkspace(sessionWS)
+			if err != nil {
+				logger.Warn("Sync locate: failed to build workspace payload", logger.Fields{"id": item.ID, "error": err})
+				warnings = append(warnings, fmt.Sprintf("Failed to rebuild workspace folder for %s", sessionWS.Name))
+				continue
+			}
+			if err := h.workspaceStore.RebindExistingFolder(folderWS, item.Path); err != nil {
+				logger.Warn("Sync locate: failed to rebind workspace folder", logger.Fields{"id": item.ID, "error": err})
+				warnings = append(warnings, fmt.Sprintf("Failed to locate folder for %s", sessionWS.Name))
+				continue
+			}
+			if err := h.store.UpdateWorkspace(ctx, sessionWS); err != nil {
+				logger.Warn("Sync locate: failed to persist workspace metadata", logger.Fields{"id": item.ID, "error": err})
+				warnings = append(warnings, fmt.Sprintf("Located %s but failed to save updated paths", sessionWS.Name))
+				continue
+			}
+			located++
+		}
+	}
 
 	// Import: read workspace from FileStore cache, create in SQLite.
 	if h.workspaceStore != nil {
@@ -1862,6 +1989,7 @@ func (h *Handler) handleWorkspaceSync(w http.ResponseWriter, r *http.Request) {
 			if err := h.store.CreateWorkspace(ctx, sessionWS); err != nil {
 				logger.Warn("Sync import: failed to create workspace in store",
 					logger.Fields{"id": id, "name": diskWS.Name, "error": err})
+				warnings = append(warnings, fmt.Sprintf("Failed to import %s", diskWS.Name))
 				continue
 			}
 			imported++
@@ -1873,6 +2001,7 @@ func (h *Handler) handleWorkspaceSync(w http.ResponseWriter, r *http.Request) {
 		if err := h.store.DeleteWorkspace(ctx, id); err != nil {
 			logger.Warn("Sync cleanup: failed to delete orphaned workspace",
 				logger.Fields{"id": id, "error": err})
+			warnings = append(warnings, fmt.Sprintf("Failed to remove workspace %s", id))
 			continue
 		}
 		cleaned++
@@ -1881,5 +2010,290 @@ func (h *Handler) handleWorkspaceSync(w http.ResponseWriter, r *http.Request) {
 	orihttp.WriteJSON(w, map[string]any{
 		"imported": imported,
 		"cleaned":  cleaned,
+		"located":  located,
+		"warnings": warnings,
 	})
+}
+
+func workspaceFolderExists(path string) (bool, error) {
+	info, err := os.Stat(strings.TrimSpace(path))
+	if err == nil {
+		return info.IsDir(), nil
+	}
+	if os.IsNotExist(err) {
+		return false, nil
+	}
+	return false, err
+}
+
+func isFolderImportedWorkspace(ws session.Workspace) bool {
+	if ws.SharedData == nil {
+		return false
+	}
+
+	raw, ok := ws.SharedData["folder_import"]
+	if !ok || raw == nil {
+		return false
+	}
+
+	meta, ok := raw.(map[string]interface{})
+	if !ok {
+		return false
+	}
+
+	if enabled, exists := meta["enabled"]; exists {
+		switch value := enabled.(type) {
+		case bool:
+			if value {
+				return true
+			}
+		case string:
+			if strings.EqualFold(strings.TrimSpace(value), "true") {
+				return true
+			}
+		}
+	}
+
+	return strings.TrimSpace(fmt.Sprint(meta["path"])) != ""
+}
+
+func cleanWorkspaceSyncPath(path string) string {
+	trimmed := strings.TrimSpace(path)
+	if trimmed == "" {
+		return ""
+	}
+	if absPath, err := filepath.Abs(trimmed); err == nil {
+		trimmed = absPath
+	}
+	return filepath.Clean(trimmed)
+}
+
+func (h *Handler) syncManagedWorkspacePath(ws session.Workspace) (string, bool) {
+	if h == nil || h.workspaceStore == nil || ws.IsGroup() || isFolderImportedWorkspace(ws) {
+		return "", false
+	}
+
+	if path, err := h.workspaceStore.GetFolderPath(ws.ID); err == nil {
+		if cleaned := cleanWorkspaceSyncPath(path); cleaned != "" {
+			return cleaned, true
+		}
+	}
+
+	refs, err := decodeDirectoryReferences(ws.DirectoryReferencesJSON)
+	if err != nil {
+		return "", false
+	}
+
+	folderSlug := strings.TrimSpace(ws.FolderSlug)
+	for _, ref := range refs {
+		if folderSlug != "" && strings.EqualFold(strings.TrimSpace(ref.Name), folderSlug) {
+			if cleaned := cleanWorkspaceSyncPath(ref.Path); cleaned != "" {
+				return cleaned, true
+			}
+		}
+	}
+
+	return "", false
+}
+
+func updateManagedWorkspaceReferences(workspace *session.Workspace, oldPath string, newPath string) error {
+	if workspace == nil {
+		return fmt.Errorf("workspace is required")
+	}
+
+	now := time.Now()
+	normalizedOld := cleanWorkspaceSyncPath(oldPath)
+	normalizedNew := cleanWorkspaceSyncPath(newPath)
+	if normalizedNew == "" {
+		return fmt.Errorf("new workspace folder path is required")
+	}
+
+	refs, err := decodeDirectoryReferences(workspace.DirectoryReferencesJSON)
+	if err != nil {
+		return fmt.Errorf("failed to decode directory references: %w", err)
+	}
+
+	matchedReference := false
+	for i := range refs {
+		refPath := cleanWorkspaceSyncPath(refs[i].Path)
+		if refPath == "" {
+			continue
+		}
+		if refPath == normalizedOld || (strings.TrimSpace(workspace.FolderSlug) != "" && strings.EqualFold(strings.TrimSpace(refs[i].Name), strings.TrimSpace(workspace.FolderSlug))) {
+			refs[i].Path = normalizedNew
+			refs[i].UpdatedAt = now
+			matchedReference = true
+		}
+	}
+	if !matchedReference {
+		refs = append(refs, workspaceDirectoryReference{
+			ID:          uuid.New().String(),
+			WorkspaceID: workspace.ID,
+			Name:        strings.TrimSpace(workspace.FolderSlug),
+			Path:        normalizedNew,
+			X:           400,
+			Y:           300,
+			CreatedAt:   now,
+			UpdatedAt:   now,
+		})
+	}
+
+	refData, err := json.Marshal(refs)
+	if err != nil {
+		return fmt.Errorf("failed to encode directory references: %w", err)
+	}
+	workspace.DirectoryReferencesJSON = refData
+
+	bindings, err := decodeWorkspaceMCPBindings(workspace.MCPBindingsJSON)
+	if err != nil {
+		return fmt.Errorf("failed to decode workspace MCP bindings: %w", err)
+	}
+
+	matchedBinding := false
+	for i := range bindings {
+		if strings.EqualFold(strings.TrimSpace(bindings[i].Alias), "workspace-files") || workspaceBindingHasRoot(bindings[i].Config, normalizedOld) {
+			if bindings[i].Config == nil {
+				bindings[i].Config = make(map[string]interface{})
+			}
+			bindings[i].Config["roots"] = []string{normalizedNew}
+			bindings[i].UpdatedAt = now
+			bindings[i].Enabled = true
+			matchedBinding = true
+		}
+	}
+	if !matchedBinding {
+		bindings = append(bindings, agentworkspace.WorkspaceMCPBinding{
+			ID:         uuid.New().String(),
+			ServerName: "filesystem",
+			Alias:      "workspace-files",
+			Enabled:    true,
+			Config: map[string]interface{}{
+				"roots": []string{normalizedNew},
+			},
+			CreatedAt: now,
+			UpdatedAt: now,
+		})
+	}
+
+	bindingData, err := json.Marshal(bindings)
+	if err != nil {
+		return fmt.Errorf("failed to encode workspace MCP bindings: %w", err)
+	}
+	workspace.MCPBindingsJSON = bindingData
+
+	return nil
+}
+
+func workspaceBindingHasRoot(config map[string]interface{}, path string) bool {
+	if len(config) == 0 || strings.TrimSpace(path) == "" {
+		return false
+	}
+
+	rawRoots, ok := config["roots"]
+	if !ok || rawRoots == nil {
+		return false
+	}
+
+	switch roots := rawRoots.(type) {
+	case []string:
+		for _, root := range roots {
+			if cleanWorkspaceSyncPath(root) == path {
+				return true
+			}
+		}
+	case []interface{}:
+		for _, root := range roots {
+			if cleanWorkspaceSyncPath(fmt.Sprint(root)) == path {
+				return true
+			}
+		}
+	}
+
+	return false
+}
+
+func decodeWorkspaceMCPBindings(raw json.RawMessage) ([]agentworkspace.WorkspaceMCPBinding, error) {
+	if len(raw) == 0 {
+		return []agentworkspace.WorkspaceMCPBinding{}, nil
+	}
+	var bindings []agentworkspace.WorkspaceMCPBinding
+	if err := json.Unmarshal(raw, &bindings); err != nil {
+		return nil, err
+	}
+	return bindings, nil
+}
+
+func buildFileStoreWorkspace(workspace *session.Workspace) (*agentworkspace.Workspace, error) {
+	if workspace == nil {
+		return nil, fmt.Errorf("workspace is required")
+	}
+
+	folderWS := &agentworkspace.Workspace{
+		ID:             workspace.ID,
+		Name:           workspace.Name,
+		Kind:           string(workspace.Kind),
+		Description:    workspace.Description,
+		FolderSlug:     workspace.FolderSlug,
+		ProjectPath:    workspace.ProjectPath,
+		ParentID:       workspace.ParentID,
+		Agents:         append([]string{}, workspace.Agents...),
+		AgentInstances: toWorkspaceAgentInstances(workspace.AgentInstances),
+		SharedData:     workspace.SharedData,
+		Status:         agentworkspace.WorkspaceStatus(workspace.Status),
+		CreatedAt:      workspace.CreatedAt,
+		UpdatedAt:      workspace.UpdatedAt,
+	}
+
+	if folderWS.Status == "" {
+		folderWS.Status = agentworkspace.StatusActive
+	}
+
+	if workspace.Layout != nil {
+		layoutData, err := json.Marshal(workspace.Layout)
+		if err != nil {
+			return nil, fmt.Errorf("failed to encode workspace layout: %w", err)
+		}
+		var layout agentworkspace.CanvasLayout
+		if err := json.Unmarshal(layoutData, &layout); err != nil {
+			return nil, fmt.Errorf("failed to decode workspace layout: %w", err)
+		}
+		folderWS.Layout = &layout
+	}
+
+	if err := decodeSessionWorkspaceJSONField(workspace.MessagesJSON, &folderWS.Messages); err != nil {
+		return nil, fmt.Errorf("failed to decode workspace messages: %w", err)
+	}
+	if err := decodeSessionWorkspaceJSONField(workspace.TasksJSON, &folderWS.Tasks); err != nil {
+		return nil, fmt.Errorf("failed to decode workspace tasks: %w", err)
+	}
+	if err := decodeSessionWorkspaceJSONField(workspace.AttachmentsJSON, &folderWS.Attachments); err != nil {
+		return nil, fmt.Errorf("failed to decode workspace attachments: %w", err)
+	}
+	if err := decodeSessionWorkspaceJSONField(workspace.ScheduledTasksJSON, &folderWS.ScheduledTasks); err != nil {
+		return nil, fmt.Errorf("failed to decode workspace schedules: %w", err)
+	}
+	if err := decodeSessionWorkspaceJSONField(workspace.StoreNodesJSON, &folderWS.StoreNodes); err != nil {
+		return nil, fmt.Errorf("failed to decode workspace store nodes: %w", err)
+	}
+	if err := decodeSessionWorkspaceJSONField(workspace.WorkflowsJSON, &folderWS.Workflows); err != nil {
+		return nil, fmt.Errorf("failed to decode workspace workflows: %w", err)
+	}
+	if err := decodeSessionWorkspaceJSONField(workspace.DirectoryReferencesJSON, &folderWS.DirectoryReferences); err != nil {
+		return nil, fmt.Errorf("failed to decode workspace directory references: %w", err)
+	}
+	if err := decodeSessionWorkspaceJSONField(workspace.MCPBindingsJSON, &folderWS.MCPBindings); err != nil {
+		return nil, fmt.Errorf("failed to decode workspace MCP bindings: %w", err)
+	}
+	if err := decodeSessionWorkspaceJSONField(workspace.AgentMCPAccessJSON, &folderWS.AgentMCPAccess); err != nil {
+		return nil, fmt.Errorf("failed to decode workspace agent MCP access: %w", err)
+	}
+
+	return folderWS, nil
+}
+
+func decodeSessionWorkspaceJSONField(raw json.RawMessage, target any) error {
+	if len(raw) == 0 {
+		return nil
+	}
+	return json.Unmarshal(raw, target)
 }

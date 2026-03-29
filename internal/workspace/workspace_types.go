@@ -115,10 +115,13 @@ const (
 
 // AttachmentFileMeta captures optional file information
 type AttachmentFileMeta struct {
-	Name string `json:"name,omitempty"`
-	Size int64  `json:"size,omitempty"`
-	Mime string `json:"mime,omitempty"`
-	URL  string `json:"url,omitempty"`
+	Name         string `json:"name,omitempty"`
+	Size         int64  `json:"size,omitempty"`
+	Mime         string `json:"mime,omitempty"`
+	URL          string `json:"url,omitempty"`
+	RelativePath string `json:"relative_path,omitempty"`
+	OriginalPath string `json:"original_path,omitempty"`
+	Status       string `json:"status,omitempty"`
 }
 
 // Attachment represents a note/file/link pinned to the workspace canvas

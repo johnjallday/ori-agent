@@ -2188,6 +2188,24 @@
       border-radius: 4px;
     }
 
+    .workspace-detail-status-badge {
+      display: inline-flex;
+      align-items: center;
+      padding: 0.08rem 0.42rem;
+      margin-right: 0.4rem;
+      border-radius: 999px;
+      font-size: 0.68rem;
+      font-weight: 700;
+      letter-spacing: 0.02em;
+      text-transform: uppercase;
+      vertical-align: middle;
+    }
+
+    .workspace-detail-status-badge.is-missing {
+      background: rgba(245, 158, 11, 0.14);
+      color: #d97706;
+    }
+
     .workspace-detail-item-content[role="button"]:focus-visible {
       outline: 2px solid var(--primary-color);
       outline-offset: 2px;
