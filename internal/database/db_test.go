@@ -121,8 +121,10 @@ func TestMigrations(t *testing.T) {
 	}
 
 	workspaceColumns := map[string]bool{
-		"mcp_bindings_json":     false,
-		"agent_mcp_access_json": false,
+		"mcp_bindings_json":       false,
+		"agent_mcp_access_json":   false,
+		"skill_bindings_json":     false,
+		"agent_skill_access_json": false,
 	}
 	vaultColumns := map[string]bool{
 		"key_salt":       false,

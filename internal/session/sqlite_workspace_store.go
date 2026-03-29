@@ -29,6 +29,8 @@ type workspaceJSONFields struct {
 	directoryReferences []byte
 	mcpBindings         []byte
 	agentMCPAccess      []byte
+	skillBindings       []byte
+	agentSkillAccess    []byte
 	status              WorkspaceStatus
 }
 
@@ -108,6 +110,14 @@ func serializeWorkspaceFields(workspace *Workspace) workspaceJSONFields {
 	if fields.agentMCPAccess == nil {
 		fields.agentMCPAccess = []byte("[]")
 	}
+	fields.skillBindings = workspace.SkillBindingsJSON
+	if fields.skillBindings == nil {
+		fields.skillBindings = []byte("[]")
+	}
+	fields.agentSkillAccess = workspace.AgentSkillAccessJSON
+	if fields.agentSkillAccess == nil {
+		fields.agentSkillAccess = []byte("[]")
+	}
 
 	// Default status
 	fields.status = workspace.Status
@@ -139,13 +149,13 @@ func (s *SQLiteStore) CreateWorkspace(ctx context.Context, workspace *Workspace)
 		INSERT INTO workspaces (id, name, kind, description, parent_id, order_index, color, session_count, created_at, updated_at,
 			agents, agent_instances, shared_data, status, layout,
 			messages_json, tasks_json, attachments_json, scheduled_tasks_json, store_nodes_json, workflows_json, directory_references_json,
-			mcp_bindings_json, agent_mcp_access_json)
-		VALUES (?, ?, ?, ?, NULLIF(?, ''), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			mcp_bindings_json, agent_mcp_access_json, skill_bindings_json, agent_skill_access_json)
+		VALUES (?, ?, ?, ?, NULLIF(?, ''), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`, workspace.ID, workspace.Name, NormalizeWorkspaceKind(string(workspace.Kind)), workspace.Description, workspace.ParentID, workspace.OrderIndex, workspace.Color,
 		workspace.SessionCount, workspace.CreatedAt, workspace.UpdatedAt,
 		string(f.agents), string(f.agentInstances), string(f.sharedData), string(f.status), f.layout,
 		string(f.messages), string(f.tasks), string(f.attachments), string(f.scheduledTasks), string(f.storeNodes), string(f.workflows), string(f.directoryReferences),
-		string(f.mcpBindings), string(f.agentMCPAccess))
+		string(f.mcpBindings), string(f.agentMCPAccess), string(f.skillBindings), string(f.agentSkillAccess))
 
 	if err != nil {
 		if strings.Contains(err.Error(), "UNIQUE constraint") {
@@ -198,18 +208,20 @@ func (s *SQLiteStore) GetWorkspace(ctx context.Context, id string) (*Workspace, 
 	var directoryReferencesJSON sql.NullString
 	var mcpBindingsJSON sql.NullString
 	var agentMCPAccessJSON sql.NullString
+	var skillBindingsJSON sql.NullString
+	var agentSkillAccessJSON sql.NullString
 
 	err := s.db.QueryRowContext(ctx, `
 		SELECT id, name, kind, description, parent_id, order_index, color, session_count, created_at, updated_at,
 			agents, agent_instances, shared_data, status, layout,
 			messages_json, tasks_json, attachments_json, scheduled_tasks_json, store_nodes_json, workflows_json, directory_references_json,
-			mcp_bindings_json, agent_mcp_access_json
+			mcp_bindings_json, agent_mcp_access_json, skill_bindings_json, agent_skill_access_json
 		FROM workspaces WHERE id = ?
 	`, id).Scan(&workspace.ID, &workspace.Name, &kind, &description, &parentID, &workspace.OrderIndex, &color,
 		&workspace.SessionCount, &workspace.CreatedAt, &workspace.UpdatedAt,
 		&agentsJSON, &agentInstancesJSON, &sharedDataJSON, &status, &layoutJSON,
 		&messagesJSON, &tasksJSON, &attachmentsJSON, &scheduledTasksJSON, &storeNodesJSON, &workflowsJSON, &directoryReferencesJSON,
-		&mcpBindingsJSON, &agentMCPAccessJSON)
+		&mcpBindingsJSON, &agentMCPAccessJSON, &skillBindingsJSON, &agentSkillAccessJSON)
 
 	if err == sql.ErrNoRows {
 		return nil, ErrWorkspaceNotFound
@@ -271,6 +283,12 @@ func (s *SQLiteStore) GetWorkspace(ctx context.Context, id string) (*Workspace, 
 	if agentMCPAccessJSON.Valid && agentMCPAccessJSON.String != "" {
 		workspace.AgentMCPAccessJSON = json.RawMessage(agentMCPAccessJSON.String)
 	}
+	if skillBindingsJSON.Valid && skillBindingsJSON.String != "" {
+		workspace.SkillBindingsJSON = json.RawMessage(skillBindingsJSON.String)
+	}
+	if agentSkillAccessJSON.Valid && agentSkillAccessJSON.String != "" {
+		workspace.AgentSkillAccessJSON = json.RawMessage(agentSkillAccessJSON.String)
+	}
 
 	return workspace, nil
 }
@@ -285,12 +303,12 @@ func (s *SQLiteStore) UpdateWorkspace(ctx context.Context, workspace *Workspace)
 		SET name = ?, kind = ?, description = ?, parent_id = NULLIF(?, ''), order_index = ?, color = ?, updated_at = ?,
 			agents = ?, agent_instances = ?, shared_data = ?, status = ?, layout = ?,
 			messages_json = ?, tasks_json = ?, attachments_json = ?, scheduled_tasks_json = ?, store_nodes_json = ?, workflows_json = ?, directory_references_json = ?,
-			mcp_bindings_json = ?, agent_mcp_access_json = ?
+			mcp_bindings_json = ?, agent_mcp_access_json = ?, skill_bindings_json = ?, agent_skill_access_json = ?
 		WHERE id = ?
 	`, workspace.Name, NormalizeWorkspaceKind(string(workspace.Kind)), workspace.Description, workspace.ParentID, workspace.OrderIndex, workspace.Color, workspace.UpdatedAt,
 		string(f.agents), string(f.agentInstances), string(f.sharedData), string(f.status), f.layout,
 		string(f.messages), string(f.tasks), string(f.attachments), string(f.scheduledTasks), string(f.storeNodes), string(f.workflows), string(f.directoryReferences),
-		string(f.mcpBindings), string(f.agentMCPAccess),
+		string(f.mcpBindings), string(f.agentMCPAccess), string(f.skillBindings), string(f.agentSkillAccess),
 		workspace.ID)
 
 	if err != nil {

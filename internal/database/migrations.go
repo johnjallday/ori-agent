@@ -10,7 +10,7 @@ import (
 
 // schemaVersion is the current database schema version.
 // Increment this when adding new migrations.
-const schemaVersion = 7
+const schemaVersion = 8
 
 // migrate runs all pending migrations to bring the database up to the current schema.
 func (db *DB) migrate(ctx context.Context) error {
@@ -79,6 +79,8 @@ func (db *DB) runMigration(ctx context.Context, version int) error {
 		return db.migration006VaultPasswordKeys(ctx)
 	case 7:
 		return db.migration007WorkspaceKinds(ctx)
+	case 8:
+		return db.migration008WorkspaceSkillState(ctx)
 	default:
 		return fmt.Errorf("unknown migration version: %d", version)
 	}
@@ -112,6 +114,8 @@ func (db *DB) migration001Baseline(ctx context.Context) error {
 			directory_references_json TEXT DEFAULT '[]',
 			mcp_bindings_json TEXT DEFAULT '[]',
 			agent_mcp_access_json TEXT DEFAULT '[]',
+			skill_bindings_json TEXT DEFAULT '[]',
+			agent_skill_access_json TEXT DEFAULT '[]',
 			order_index INTEGER DEFAULT 0,
 			FOREIGN KEY (parent_id) REFERENCES workspaces(id) ON DELETE SET NULL
 		)
@@ -650,6 +654,28 @@ func (db *DB) migration007WorkspaceKinds(ctx context.Context) error {
 		WHERE kind IS NULL OR TRIM(kind) = ''
 	`); err != nil {
 		return fmt.Errorf("failed to backfill workspace kinds: %w", err)
+	}
+
+	return tx.Commit()
+}
+
+func (db *DB) migration008WorkspaceSkillState(ctx context.Context) error {
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("failed to begin transaction: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	if _, err := tx.ExecContext(ctx, `
+		ALTER TABLE workspaces ADD COLUMN skill_bindings_json TEXT DEFAULT '[]'
+	`); err != nil && !isDuplicateColumnError(err) {
+		return fmt.Errorf("failed to add skill_bindings_json column: %w", err)
+	}
+
+	if _, err := tx.ExecContext(ctx, `
+		ALTER TABLE workspaces ADD COLUMN agent_skill_access_json TEXT DEFAULT '[]'
+	`); err != nil && !isDuplicateColumnError(err) {
+		return fmt.Errorf("failed to add agent_skill_access_json column: %w", err)
 	}
 
 	return tx.Commit()

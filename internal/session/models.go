@@ -324,6 +324,12 @@ type Workspace struct {
 
 	// AgentMCPAccessJSON contains serialized per-agent-instance MCP access rules.
 	AgentMCPAccessJSON json.RawMessage `json:"agent_mcp_access,omitempty"`
+
+	// SkillBindingsJSON contains serialized workspace-owned skill bindings.
+	SkillBindingsJSON json.RawMessage `json:"skill_bindings,omitempty"`
+
+	// AgentSkillAccessJSON contains serialized per-agent-instance skill access rules.
+	AgentSkillAccessJSON json.RawMessage `json:"agent_skill_access,omitempty"`
 }
 
 // Tag represents a unique tag used across sessions.

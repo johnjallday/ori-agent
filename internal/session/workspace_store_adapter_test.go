@@ -120,3 +120,61 @@ func TestWorkspaceStoreAdapter_AgentInstanceMetadataRoundTrip(t *testing.T) {
 		t.Fatal("expected entry_point to round-trip as true")
 	}
 }
+
+func TestWorkspaceStoreAdapter_SkillRoundTrip(t *testing.T) {
+	adapter := &WorkspaceStoreAdapter{}
+	now := time.Now().UTC().Round(time.Second)
+
+	input := &workspace.Workspace{
+		ID:        "workspace-skills",
+		Name:      "Workspace Skills",
+		CreatedAt: now,
+		UpdatedAt: now,
+		SkillBindings: []workspace.WorkspaceSkillBinding{
+			{
+				ID:        "binding-1",
+				SkillName: "workspace-planning",
+				Enabled:   true,
+				Trusted:   true,
+				Config: map[string]interface{}{
+					"profile_type":           "workspace_planning",
+					"default_execution_mode": "step_through",
+				},
+				CreatedAt: now,
+				UpdatedAt: now,
+			},
+		},
+		AgentSkillAccess: []workspace.WorkspaceAgentSkillAccess{
+			{
+				AgentInstanceID:   "agent-1",
+				EnabledBindingIDs: []string{"binding-1"},
+				UpdatedAt:         now,
+			},
+		},
+	}
+
+	sessionWS := adapter.toSessionWorkspace(input)
+	if len(sessionWS.SkillBindingsJSON) == 0 {
+		t.Fatalf("expected skill bindings JSON to be serialized")
+	}
+	if len(sessionWS.AgentSkillAccessJSON) == 0 {
+		t.Fatalf("expected agent skill access JSON to be serialized")
+	}
+
+	roundTripped := adapter.toAgentStudioWorkspace(sessionWS)
+	if len(roundTripped.SkillBindings) != 1 {
+		t.Fatalf("expected 1 round-tripped skill binding, got %d", len(roundTripped.SkillBindings))
+	}
+	if roundTripped.SkillBindings[0].SkillName != "workspace-planning" {
+		t.Fatalf("expected round-tripped skill_name workspace-planning, got %q", roundTripped.SkillBindings[0].SkillName)
+	}
+	if roundTripped.SkillBindings[0].Config == nil {
+		t.Fatalf("expected round-tripped skill config to be preserved")
+	}
+	if len(roundTripped.AgentSkillAccess) != 1 {
+		t.Fatalf("expected 1 round-tripped skill access rule, got %d", len(roundTripped.AgentSkillAccess))
+	}
+	if roundTripped.AgentSkillAccess[0].AgentInstanceID != "agent-1" {
+		t.Fatalf("expected round-tripped agent_instance_id agent-1, got %q", roundTripped.AgentSkillAccess[0].AgentInstanceID)
+	}
+}

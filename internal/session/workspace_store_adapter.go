@@ -209,6 +209,20 @@ func (a *WorkspaceStoreAdapter) toSessionWorkspace(ws *workspace.Workspace) *Wor
 			sessionWS.AgentMCPAccessJSON = data
 		}
 	}
+	if len(ws.SkillBindings) > 0 {
+		if data, err := json.Marshal(ws.SkillBindings); err != nil {
+			logger.Warn("Failed to marshal workspace skill bindings", logger.Fields{"workspace_id": ws.ID, "error": err})
+		} else {
+			sessionWS.SkillBindingsJSON = data
+		}
+	}
+	if len(ws.AgentSkillAccess) > 0 {
+		if data, err := json.Marshal(ws.AgentSkillAccess); err != nil {
+			logger.Warn("Failed to marshal workspace agent skill access", logger.Fields{"workspace_id": ws.ID, "error": err})
+		} else {
+			sessionWS.AgentSkillAccessJSON = data
+		}
+	}
 
 	return sessionWS
 }
@@ -327,6 +341,24 @@ func (a *WorkspaceStoreAdapter) toAgentStudioWorkspace(ws *Workspace) *workspace
 	}
 	if agentWS.AgentMCPAccess == nil {
 		agentWS.AgentMCPAccess = []workspace.WorkspaceAgentMCPAccess{}
+	}
+
+	if len(ws.SkillBindingsJSON) > 0 {
+		if err := json.Unmarshal(ws.SkillBindingsJSON, &agentWS.SkillBindings); err != nil {
+			logger.Warn("Failed to unmarshal workspace skill bindings", logger.Fields{"workspace_id": ws.ID, "error": err})
+		}
+	}
+	if agentWS.SkillBindings == nil {
+		agentWS.SkillBindings = []workspace.WorkspaceSkillBinding{}
+	}
+
+	if len(ws.AgentSkillAccessJSON) > 0 {
+		if err := json.Unmarshal(ws.AgentSkillAccessJSON, &agentWS.AgentSkillAccess); err != nil {
+			logger.Warn("Failed to unmarshal workspace agent skill access", logger.Fields{"workspace_id": ws.ID, "error": err})
+		}
+	}
+	if agentWS.AgentSkillAccess == nil {
+		agentWS.AgentSkillAccess = []workspace.WorkspaceAgentSkillAccess{}
 	}
 
 	if agentWS.SharedData == nil {

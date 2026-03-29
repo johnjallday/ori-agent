@@ -91,6 +91,8 @@ func (wh *WorkspaceHandler) handleGetWorkspace(w http.ResponseWriter, r *http.Re
 			"directory_references": ws.DirectoryReferences,
 			"mcp_bindings":         ws.MCPBindings,
 			"agent_mcp_access":     ws.AgentMCPAccess,
+			"skill_bindings":       ws.SkillBindings,
+			"agent_skill_access":   ws.AgentSkillAccess,
 			"workflows":            ws.Workflows,
 			"layout":               ws.Layout,
 			"status":               ws.Status,
