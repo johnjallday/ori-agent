@@ -240,3 +240,45 @@ func TestRunBoundedToolLoop_RepeatedFingerprintStop(t *testing.T) {
 		t.Fatalf("expected stop reason repeated_tool_call, got %q", result.StopReason)
 	}
 }
+
+func TestRunBoundedToolLoop_PlainJSONToolPayloadDoesNotShortCircuit(t *testing.T) {
+	h := &Handler{}
+	followUpRequested := false
+
+	result := h.runBoundedToolLoop(
+		"",
+		[]llm.ToolCall{{ID: "tc-1", Name: "workspace_sessions", Arguments: `{}`}},
+		boundedToolLoopConfig{
+			MaxTurns:                3,
+			MaxRepeatedFingerprints: 10,
+		},
+		boundedToolLoopCallbacks{
+			ExecuteToolCalls: func(toolCalls []llm.ToolCall) ExecuteToolCallsResult {
+				return ExecuteToolCallsResult{
+					Results: []ToolCallResult{
+						{
+							Function: toolCalls[0].Name,
+							Args:     toolCalls[0].Arguments,
+							Result:   `{"sessions":[{"id":"session-1","title":"Trip"}],"total":1}`,
+							Success:  true,
+						},
+					},
+				}
+			},
+			RequestNextResponse: func() (string, []llm.ToolCall, error) {
+				followUpRequested = true
+				return "What dates are you staying in San Sebastian?", nil, nil
+			},
+		},
+	)
+
+	if !followUpRequested {
+		t.Fatal("expected tool loop to request a follow-up model response")
+	}
+	if result.HasStructuredResult {
+		t.Fatal("expected plain JSON tool payload not to be marked as a structured result")
+	}
+	if result.FinalContent != "What dates are you staying in San Sebastian?" {
+		t.Fatalf("expected final follow-up response, got %q", result.FinalContent)
+	}
+}

@@ -1247,6 +1247,33 @@
     }
   }
 
+  function parseHomeAssistantJSON(text) {
+    var trimmed = String(text || '').trim();
+    if (!trimmed) return null;
+    if (trimmed.charAt(0) !== '{' && trimmed.charAt(0) !== '[') return null;
+    try {
+      return JSON.parse(trimmed);
+    } catch (error) {
+      return null;
+    }
+  }
+
+  function isLikelyHomeAssistantRawToolPayload(text, data) {
+    if (!data || !Array.isArray(data.toolCalls) || data.toolCalls.length === 0) return false;
+
+    var parsed = parseHomeAssistantJSON(text);
+    if (!parsed || Array.isArray(parsed) || typeof parsed !== 'object') return false;
+    if (parsed.displayType || parsed.data || parsed.title || parsed.description) return false;
+
+    var workspaceKeys = ['sessions', 'tasks', 'notes', 'files', 'directories', 'message', 'total'];
+    for (var i = 0; i < workspaceKeys.length; i++) {
+      if (Object.prototype.hasOwnProperty.call(parsed, workspaceKeys[i])) {
+        return true;
+      }
+    }
+    return false;
+  }
+
   function getPlanningQuestions(planningState) {
     if (!planningState || !planningState.schema || !Array.isArray(planningState.schema.questions)) {
       return [];
@@ -5114,7 +5141,15 @@
     var entryLabel = assistantSessionResult.entryAgentName ? assistantSessionResult.entryAgentName : getWorkspaceHomeAssistantDisplayName();
     var responseData = assistantSessionResult.responseData || null;
     var planningForm = responseData && responseData.planning_form ? responseData.planning_form : null;
-    if (planningForm) {
+    if (assistantSessionResult.rawToolPayload) {
+      clearHomeAssistantPlanning();
+      homeAssistantState.inlineReplyState = null;
+      renderHomeAssistantInlineReply();
+      setHomeAssistantRoutingSummary(
+        entryLabel,
+        'The workspace manager returned raw tool data instead of a reply. Retry or open chat.'
+      );
+    } else if (planningForm) {
       activateHomeAssistantPlanningForm(planningForm, {
         prompt: prompt,
         routeContext: routeContext,
@@ -5917,6 +5952,10 @@
     });
 
     var responseText = String(data && data.response || '').trim();
+    var rawToolPayload = isLikelyHomeAssistantRawToolPayload(responseText, data);
+    if (rawToolPayload) {
+      responseText = entryLabel + ' checked the workspace context but returned raw tool data instead of a reply. Please retry or open chat.';
+    }
     if (!responseText) {
       responseText = entryLabel + ' is ready for your next answer in chat.';
     }
@@ -5925,6 +5964,7 @@
     setHomeAssistantMode('continue_session');
     appendHomeAssistantMessage('assistant', responseText);
     result.responseData = data;
+    result.rawToolPayload = rawToolPayload;
 
     return result;
   }
