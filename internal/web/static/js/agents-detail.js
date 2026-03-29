@@ -16,6 +16,21 @@ function supportsCodexReasoning(providerName, modelName) {
   return provider === 'codex' || model.includes('codex');
 }
 
+function formatAgentTypeLabel(typeValue) {
+  const normalized = String(typeValue || '').trim().toLowerCase();
+  if (normalized === 'workspace-manager') return 'Workspace Manager';
+  return capitalize(typeValue || 'tool-calling');
+}
+
+function formatAgentRoleLabel(roleValue, typeValue) {
+  const normalizedType = String(typeValue || '').trim().toLowerCase();
+  const normalizedRole = String(roleValue || '').trim().toLowerCase();
+  if (normalizedType === 'workspace-manager' && (normalizedRole === 'orchestrator' || normalizedRole === 'general' || normalizedRole === '')) {
+    return 'Workspace Manager';
+  }
+  return capitalize(roleValue || 'general');
+}
+
 function updateEditReasoningVisibility() {
   const field = document.getElementById('editReasoningField');
   const select = document.getElementById('editReasoningEffort');
@@ -411,9 +426,9 @@ function renderAgentDetails() {
   const configTemp = document.getElementById('configTemp');
   if (configTemp) configTemp.textContent = currentAgent.temperature ?? 1.0;
   const configType = document.getElementById('configType');
-  if (configType) configType.textContent = capitalize(currentAgent.type || 'tool-calling');
+  if (configType) configType.textContent = formatAgentTypeLabel(currentAgent.type);
   const configRole = document.getElementById('configRole');
-  if (configRole) configRole.textContent = capitalize(currentAgent.role || 'general');
+  if (configRole) configRole.textContent = formatAgentRoleLabel(currentAgent.role, currentAgent.type);
 
   const systemPrompt = currentAgent.system_prompt || 'Default system prompt';
   const promptEl = document.getElementById('configPrompt');
@@ -505,7 +520,7 @@ function populateConfigForm() {
 
   // Set type and role first as they affect model filtering
   if (typeSelect) typeSelect.value = currentAgent.type || 'tool-calling';
-  if (roleSelect) roleSelect.value = currentAgent.role || 'general';
+  if (roleSelect) roleSelect.value = currentAgent.role || ((currentAgent.type || '') === 'workspace-manager' ? 'orchestrator' : 'general');
   if (reasoningSelect) reasoningSelect.value = currentAgent.reasoning_effort || 'medium';
   if (tempInput) tempInput.value = currentAgent.temperature ?? '';
   if (maxTokensInput) maxTokensInput.value = currentAgent.max_output_tokens || '';

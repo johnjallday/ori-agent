@@ -336,6 +336,14 @@ function normalizeAgentCapabilityName(value) {
   return String(value || '').trim().toLowerCase();
 }
 
+function deriveAgentRoleForType(agentType) {
+  const normalized = String(agentType || '').trim().toLowerCase();
+  if (normalized === 'workspace-manager' || normalized === 'orchestration') {
+    return 'orchestrator';
+  }
+  return '';
+}
+
 function getAgentCreationCapabilityElements() {
   return {
     title: document.getElementById('agentCreateCapabilitiesTitle'),
@@ -1097,6 +1105,10 @@ async function createNewAgent() {
     // Add agent type if provided
     if (agentTypeInput && agentTypeInput.value) {
       requestBody.type = agentTypeInput.value;
+      const inferredRole = deriveAgentRoleForType(agentTypeInput.value);
+      if (inferredRole) {
+        requestBody.role = inferredRole;
+      }
     }
 
     // Add model if provided

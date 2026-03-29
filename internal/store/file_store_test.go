@@ -391,3 +391,33 @@ func TestFileStore_CreateAgent_AppliesReasoningEffortOverride(t *testing.T) {
 		t.Fatalf("expected reasoning_effort xhigh, got %q", created.Settings.ReasoningEffort)
 	}
 }
+
+func TestFileStore_CreateAgent_WorkspaceManagerDefaultsToOrchestratorRole(t *testing.T) {
+	tempDir := t.TempDir()
+	indexPath := filepath.Join(tempDir, "agents_index.json")
+
+	fs, err := NewFileStore(indexPath, types.Settings{
+		Model:       "gpt-5",
+		Temperature: 0.5,
+	})
+	if err != nil {
+		t.Fatalf("NewFileStore() failed: %v", err)
+	}
+
+	if err := fs.CreateAgent("workspace-manager-agent", &CreateAgentConfig{
+		Type: "workspace-manager",
+	}); err != nil {
+		t.Fatalf("CreateAgent() failed: %v", err)
+	}
+
+	created, ok := fs.GetAgent("workspace-manager-agent")
+	if !ok || created == nil {
+		t.Fatalf("expected created agent to exist")
+	}
+	if created.Type != "workspace-manager" {
+		t.Fatalf("expected type workspace-manager, got %q", created.Type)
+	}
+	if created.Role != types.RoleOrchestrator {
+		t.Fatalf("expected role %q, got %q", types.RoleOrchestrator, created.Role)
+	}
+}

@@ -69,9 +69,13 @@ func (s *fileStore) CreateAgent(name string, config *CreateAgentConfig) error {
 
 		// Apply config overrides if provided
 		agentType := agent.TypeToolCalling // Default to cheapest tier
+		role := types.RoleGeneral
 		if config != nil {
 			if config.Type != "" {
 				agentType = config.Type
+			}
+			if config.Role != "" {
+				role = config.Role
 			}
 			if config.Model != "" {
 				defaultSettings.Model = config.Model
@@ -100,14 +104,20 @@ func (s *fileStore) CreateAgent(name string, config *CreateAgentConfig) error {
 				defaultSettings.AllowWebSearch = &allow
 			}
 		}
+		if role == "" {
+			role = defaultRoleForAgentType(agentType)
+		}
+		if role == types.RoleGeneral {
+			role = defaultRoleForAgentType(agentType)
+		}
 		if defaultSettings.EffectiveReasoningEffort(defaultSettings.Provider) == "" {
 			defaultSettings.ReasoningEffort = ""
 		}
 
 		newAgent := &agent.Agent{
 			Type:         agentType,
-			Role:         types.RoleGeneral, // Default role
-			Capabilities: []string{},        // Empty capabilities by default
+			Role:         role,
+			Capabilities: []string{}, // Empty capabilities by default
 			Settings:     defaultSettings,
 			Status:       types.AgentStatusActive, // New agents start as active
 		}
@@ -126,6 +136,15 @@ func (s *fileStore) CreateAgent(name string, config *CreateAgentConfig) error {
 	}
 
 	return s.saveUnlocked()
+}
+
+func defaultRoleForAgentType(agentType string) types.AgentRole {
+	switch strings.ToLower(strings.TrimSpace(agentType)) {
+	case "workspace-manager", "orchestration":
+		return types.RoleOrchestrator
+	default:
+		return types.RoleGeneral
+	}
 }
 
 func (s *fileStore) initializeNewAgentSkillsStateUnlocked(agentName string) error {
