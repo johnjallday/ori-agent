@@ -282,7 +282,7 @@ func (r *AgentRuntimeResolver) materializeRuntimeBinding(workspaceID string, bin
 	applyWorkspaceBindingRuntimeConfig(&runtimeConfig, binding.Config)
 
 	if strings.EqualFold(templateName, "filesystem") {
-		roots := extractFilesystemRoots(binding.Scope)
+		roots := extractFilesystemRootsFromBinding(binding)
 		if len(roots) == 0 {
 			return "", fmt.Errorf("filesystem binding %s has no workspace roots", binding.ID)
 		}
@@ -379,6 +379,13 @@ func extractFilesystemRoots(scope map[string]interface{}) []string {
 	}
 	sort.Strings(cleaned)
 	return cleaned
+}
+
+func extractFilesystemRootsFromBinding(binding WorkspaceMCPBinding) []string {
+	if roots := extractFilesystemRoots(binding.Config); len(roots) > 0 {
+		return roots
+	}
+	return extractFilesystemRoots(binding.Scope)
 }
 
 func rebuildFilesystemServerArgs(args []string, roots []string) []string {

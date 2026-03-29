@@ -240,6 +240,7 @@ func buildWorkspaceSnapshotPromptForToolCapability(
 			"- When the user asks to save, store, or remember something, emit a workspace_save_note tool_call immediately.",
 			"- When you generate useful content (lists, recommendations, plans, research), emit a workspace_save_note tool_call to save it, then tell the user you did after the call returns.",
 			"- When answering questions, check workspace_notes and workspace_sessions first for existing context.",
+			"- For travel, itinerary, booking, or trip-planning intake requests, do not get stuck repeatedly listing notes or sessions before replying. Use existing notes only when they materially answer the request; otherwise ask the intake questions or continue the planning flow.",
 			"- When the user confirms a suggestion you made (e.g. says 'yes', 'do it', 'go ahead'), execute the action immediately using the appropriate tool_call.",
 			"- NEVER claim you saved, created, or modified something without actually making the corresponding function call.",
 		)

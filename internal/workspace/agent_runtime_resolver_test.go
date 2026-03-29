@@ -336,6 +336,59 @@ func TestAgentRuntimeResolver_AppliesWorkspaceBindingConfigOverrides(t *testing.
 	}
 }
 
+func TestAgentRuntimeResolver_UsesFilesystemRootsFromBindingConfig(t *testing.T) {
+	agentStore := &resolverAgentStoreStub{
+		agents: map[string]*agent.Agent{
+			"Coder": {},
+		},
+	}
+	root := filepath.Join(t.TempDir(), "repo-config")
+	ws := &Workspace{
+		ID: "ws-config-roots",
+		AgentInstances: []AgentInstance{
+			{ID: "agent-1", Name: "Coder", NodeID: "coder-1"},
+		},
+		MCPBindings: []WorkspaceMCPBinding{
+			{
+				ID:         "binding-config-roots",
+				ServerName: "filesystem",
+				Enabled:    true,
+				Config: map[string]interface{}{
+					"roots": []interface{}{root},
+				},
+			},
+		},
+	}
+	workspaceStore := newTestWorkspaceStore(t, ws)
+	registry := &runtimeRegistryStub{}
+	templates := &templateLookupStub{
+		servers: map[string]mcp.ServerConfig{
+			"filesystem": {
+				Name: "filesystem",
+				Args: []string{"-y", "@modelcontextprotocol/server-filesystem", "/tmp/default-root"},
+			},
+		},
+	}
+
+	resolver := NewAgentRuntimeResolver(agentStore, workspaceStore, registry, templates)
+	resolved, err := resolver.ResolveAgentForTask("Coder", Task{WorkspaceID: ws.ID, AssignedNodeID: "coder-1"})
+	if err != nil {
+		t.Fatalf("ResolveAgentForTask() error = %v", err)
+	}
+
+	if len(resolved.MCPServers) != 1 {
+		t.Fatalf("expected one runtime MCP server, got %v", resolved.MCPServers)
+	}
+
+	config, ok := registry.configs[resolved.MCPServers[0]]
+	if !ok {
+		t.Fatalf("expected runtime config for %q to be materialized", resolved.MCPServers[0])
+	}
+	if got := config.Args[len(config.Args)-1]; got != root {
+		t.Fatalf("expected runtime filesystem root %q, got args=%v", root, config.Args)
+	}
+}
+
 // --- Skill resolution tests ---
 
 type stubSkillResolver struct {

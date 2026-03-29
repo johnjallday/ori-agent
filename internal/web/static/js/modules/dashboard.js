@@ -13,6 +13,7 @@
   const HOME_ASSISTANT_SESSION_STORAGE_KEY = 'ori.homeAssistant.recentSessions';
   const HOME_ASSISTANT_AUTOMATION_MODE_KEY = 'ori.homeAssistant.automationMode';
   const HOME_ASSISTANT_THINKING_MIN_VISIBLE_MS = 1400;
+  const HOME_ASSISTANT_WORKSPACE_INLINE_TIMEOUT_MS = 120000;
 
   const HOME_INTENTS = {
     utility_direct: {
@@ -1706,7 +1707,8 @@
         planningState.intent,
         {
           dispatchPrompt: planningState.dispatchPrompt,
-          preservePlanningReview: true
+          preservePlanningReview: true,
+          reuseExistingSession: true
         }
       );
     } catch (error) {
@@ -2258,7 +2260,9 @@
     setHomeAssistantRoutingSummary(replyState.agentLabel, 'Continuing inline with the workspace manager.');
 
     try {
-      await openWorkspaceAssistantForPrompt(text, replyState.routeContext, replyState.intent);
+      await openWorkspaceAssistantForPrompt(text, replyState.routeContext, replyState.intent, {
+        reuseExistingSession: true
+      });
     } catch (error) {
       dashLog.debug('Inline workspace reply failed', { error: error && error.message || error });
       if (homeAssistantState.inlineReplyState === replyState) {
@@ -5139,6 +5143,13 @@
     }
 
     var entryLabel = assistantSessionResult.entryAgentName ? assistantSessionResult.entryAgentName : getWorkspaceHomeAssistantDisplayName();
+    var sessionRouteContext = normalizeHomeRouteContext({
+      surface: routeContext && routeContext.surface,
+      page_path: routeContext && routeContext.page_path,
+      workspace_id: routeContext && routeContext.workspace_id,
+      session_id: assistantSessionResult.session && assistantSessionResult.session.id,
+      origin: routeContext && routeContext.origin
+    });
     var responseData = assistantSessionResult.responseData || null;
     var planningForm = responseData && responseData.planning_form ? responseData.planning_form : null;
     if (assistantSessionResult.rawToolPayload) {
@@ -5152,7 +5163,7 @@
     } else if (planningForm) {
       activateHomeAssistantPlanningForm(planningForm, {
         prompt: prompt,
-        routeContext: routeContext,
+        routeContext: sessionRouteContext,
         intent: intent,
         agentLabel: entryLabel
       });
@@ -5170,7 +5181,7 @@
       if (!keepPlanningReview) {
         clearHomeAssistantPlanning();
       }
-      enableHomeAssistantInlineReply(routeContext, intent, entryLabel);
+      enableHomeAssistantInlineReply(sessionRouteContext, intent, entryLabel);
       setHomeAssistantRoutingSummary(
         entryLabel,
         assistantSessionResult.reused
@@ -5181,7 +5192,7 @@
     renderHomeAssistantDependencyResolution(
       assistantSessionResult.responseData,
       prompt,
-      routeContext,
+      sessionRouteContext,
       intent,
       options
     );
@@ -5207,6 +5218,18 @@
       dashLog.debug('Failed to normalize dependency resolution payload', { error: error && error.message || error });
       return null;
     }
+  }
+
+  function isLikelyHomeAssistantRequestTimeout(error) {
+    if (!error) return false;
+    var message = String(error && error.message || '').toLowerCase();
+    var name = String(error && error.name || '').toLowerCase();
+    if (name.indexOf('abort') !== -1) return true;
+    if (message.indexOf('cancel') !== -1) return true;
+    if (message.indexOf('abort') !== -1) return true;
+    if (message.indexOf('timed out') !== -1) return true;
+    if (message.indexOf('timeout') !== -1) return true;
+    return false;
   }
 
   function renderHomeAssistantDependencyResolution(data, prompt, routeContext, intent, options) {
@@ -5828,26 +5851,33 @@
     ]);
   }
 
-  async function openOrCreateWorkspaceAssistantSession(routeContext, prompt) {
+  async function openOrCreateWorkspaceAssistantSession(routeContext, prompt, options) {
     var manager = window.sessionManager;
     if (!manager) return null;
 
-    var workspaceId = hasWorkspaceRouteContext(routeContext) ? String(routeContext.workspace_id).trim() : '';
+    var normalizedContext = normalizeHomeRouteContext(routeContext);
+    var workspaceId = hasWorkspaceRouteContext(normalizedContext) ? String(normalizedContext.workspace_id).trim() : '';
+    var reuseExistingSession = Boolean(options && options.reuseExistingSession);
+    var requestedSessionId = reuseExistingSession
+      ? String(normalizedContext.session_id || '').trim()
+      : '';
     var entryAgentName = workspaceId ? await fetchWorkspaceEntryAgentName(workspaceId) : '';
     if (entryAgentName) {
-      var currentEntrySession = findSessionById(getCurrentHomeSessionId());
-      if (currentEntrySession &&
-          normalizeToken(currentEntrySession.agent_name) === normalizeToken(entryAgentName) &&
-          String(currentEntrySession.folder_id || '').trim() === workspaceId) {
-        return { session: currentEntrySession, reused: true, entryAgentName: entryAgentName };
-      }
-
-      var existingEntrySession = findSessionForAgentInWorkspace(entryAgentName, workspaceId);
-      if (existingEntrySession && existingEntrySession.id) {
-        if (typeof manager.switchToSession === 'function') {
-          await manager.switchToSession(existingEntrySession.id, false);
+      if (reuseExistingSession) {
+        var currentEntrySession = findSessionById(requestedSessionId || getCurrentHomeSessionId());
+        if (currentEntrySession &&
+            normalizeToken(currentEntrySession.agent_name) === normalizeToken(entryAgentName) &&
+            String(currentEntrySession.folder_id || '').trim() === workspaceId) {
+          return { session: currentEntrySession, reused: true, entryAgentName: entryAgentName };
         }
-        return { session: existingEntrySession, reused: true, entryAgentName: entryAgentName };
+
+        var existingEntrySession = findSessionForAgentInWorkspace(entryAgentName, workspaceId);
+        if (existingEntrySession && existingEntrySession.id) {
+          if (typeof manager.switchToSession === 'function') {
+            await manager.switchToSession(existingEntrySession.id, false);
+          }
+          return { session: existingEntrySession, reused: true, entryAgentName: entryAgentName };
+        }
       }
 
       var entrySession = null;
@@ -5901,7 +5931,7 @@
   }
 
   async function dispatchPromptToWorkspaceAssistantSession(prompt, routeContext) {
-    var result = await openOrCreateWorkspaceAssistantSession(routeContext, prompt);
+    var result = await openOrCreateWorkspaceAssistantSession(routeContext, prompt, { reuseExistingSession: false });
     if (!result || !result.session) return null;
 
     openChatPanel();
@@ -5922,7 +5952,7 @@
   }
 
   async function runWorkspaceAssistantInline(prompt, routeContext, intent, options) {
-    var result = await openOrCreateWorkspaceAssistantSession(routeContext, prompt);
+    var result = await openOrCreateWorkspaceAssistantSession(routeContext, prompt, options);
     if (!result || !result.session || typeof API === 'undefined' || typeof API.post !== 'function') {
       return result;
     }
@@ -5945,6 +5975,7 @@
       agent_name: String(result.entryAgentName || session.agent_name || '').trim(),
       route_context: requestContext
     }, {
+      timeout: HOME_ASSISTANT_WORKSPACE_INLINE_TIMEOUT_MS,
       headers: {
         'Content-Type': 'application/json',
         'X-Session-ID': String(session.id)
@@ -7861,6 +7892,56 @@
 
     if (directWorkspaceCommand && directWorkspaceCommand.name) {
       await createWorkspaceByName(directWorkspaceCommand.name, text);
+      return;
+    }
+
+    if (inWorkspaceContext) {
+      var workspaceManagerLabel = getWorkspaceHomeAssistantDisplayName();
+      setHomeAssistantBusy(true, 'Asking...');
+      renderHomeAssistantActions([]);
+      setHomeAssistantRoutingSummary(
+        workspaceManagerLabel,
+        'Sending your request to the workspace manager...'
+      );
+
+      try {
+        await openWorkspaceAssistantForPrompt(text, routeContext, homeAssistantState.pendingIntent);
+      } catch (error) {
+        dashLog.debug('Workspace manager handoff failed', { error: error && error.message || error });
+        homeAssistantState.awaitingCreateConfirmation = false;
+        var workspaceManagerTimedOut = isLikelyHomeAssistantRequestTimeout(error);
+        appendHomeAssistantMessage(
+          'assistant',
+          workspaceManagerTimedOut
+            ? workspaceManagerLabel + ' is taking longer than usual. Retry or open chat to continue there.'
+            : 'I could not reach ' + workspaceManagerLabel + ' right now. Please retry or open chat.'
+        );
+        setHomeAssistantRoutingSummary(
+          workspaceManagerTimedOut ? workspaceManagerLabel + ' Delayed' : workspaceManagerLabel + ' Unavailable',
+          workspaceManagerTimedOut
+            ? 'The workspace manager took too long to respond inline.'
+            : 'Could not reach the workspace manager right now.'
+        );
+        renderHomeAssistantActions([
+          {
+            label: 'Retry',
+            variant: 'primary',
+            onClick: function () { handleHomeAssistantPrompt(text, { routeContext: routeContext }); }
+          },
+          {
+            label: 'Open Chat',
+            variant: 'secondary',
+            onClick: function () { openChatPanel(); }
+          },
+          {
+            label: 'Ask Another Task',
+            variant: 'secondary',
+            onClick: function () { focusHomeAssistantInput(); }
+          }
+        ]);
+      } finally {
+        setHomeAssistantBusy(false);
+      }
       return;
     }
 
