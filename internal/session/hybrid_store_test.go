@@ -236,6 +236,103 @@ func TestHybridStore_FlushToStorage(t *testing.T) {
 	// For now, just verify no error
 }
 
+func TestHybridStore_DeleteWorkspaceClearsCachedSessionWorkspace(t *testing.T) {
+	store, cleanup := setupHybridStore(t, 10)
+	defer cleanup()
+
+	ctx := context.Background()
+	hybrid := store.(*hybridStore)
+
+	workspace := &Workspace{
+		ID:   "workspace-delete",
+		Name: "Delete Target",
+	}
+	if err := store.CreateWorkspace(ctx, workspace); err != nil {
+		t.Fatalf("Failed to create workspace: %v", err)
+	}
+
+	session := &Session{
+		Title:     "Workspace Session",
+		AgentName: "assistant",
+		FolderID:  workspace.ID,
+	}
+	if err := store.CreateSession(ctx, session); err != nil {
+		t.Fatalf("Failed to create session: %v", err)
+	}
+
+	cached := hybrid.cache.Get(session.ID)
+	if cached == nil {
+		t.Fatal("Expected session to be cached")
+	}
+	if cached.FolderID != workspace.ID {
+		t.Fatalf("Expected cached workspace ID %q, got %q", workspace.ID, cached.FolderID)
+	}
+
+	if err := store.DeleteWorkspace(ctx, workspace.ID); err != nil {
+		t.Fatalf("Failed to delete workspace: %v", err)
+	}
+
+	cached = hybrid.cache.Get(session.ID)
+	if cached == nil {
+		t.Fatal("Expected session to remain cached after workspace delete")
+	}
+	if cached.FolderID != "" {
+		t.Fatalf("Expected cached workspace ID to be cleared, got %q", cached.FolderID)
+	}
+
+	if err := store.FlushToStorage(ctx); err != nil {
+		t.Fatalf("Failed to flush sessions: %v", err)
+	}
+
+	reloaded, err := hybrid.sqlite.GetSession(ctx, session.ID)
+	if err != nil {
+		t.Fatalf("Failed to reload session from SQLite: %v", err)
+	}
+	if reloaded.FolderID != "" {
+		t.Fatalf("Expected SQLite workspace ID to remain cleared, got %q", reloaded.FolderID)
+	}
+}
+
+func TestHybridStore_DeleteSessionsByWorkspaceEvictsCachedSessions(t *testing.T) {
+	store, cleanup := setupHybridStore(t, 10)
+	defer cleanup()
+
+	ctx := context.Background()
+
+	workspace := &Workspace{
+		ID:   "workspace-evict",
+		Name: "Evict Target",
+	}
+	if err := store.CreateWorkspace(ctx, workspace); err != nil {
+		t.Fatalf("Failed to create workspace: %v", err)
+	}
+
+	session := &Session{
+		Title:     "Workspace Session",
+		AgentName: "assistant",
+		FolderID:  workspace.ID,
+	}
+	if err := store.CreateSession(ctx, session); err != nil {
+		t.Fatalf("Failed to create session: %v", err)
+	}
+
+	if !store.IsSessionCached(session.ID) {
+		t.Fatal("Expected session to be cached")
+	}
+
+	if err := store.DeleteSessionsByWorkspace(ctx, workspace.ID); err != nil {
+		t.Fatalf("Failed to delete sessions by workspace: %v", err)
+	}
+
+	if store.IsSessionCached(session.ID) {
+		t.Fatal("Expected cached session to be evicted after workspace session delete")
+	}
+
+	if _, err := store.GetSession(ctx, session.ID); err != ErrSessionNotFound {
+		t.Fatalf("Expected session to be deleted from SQLite, got %v", err)
+	}
+}
+
 func TestHybridStore_CacheStats(t *testing.T) {
 	store, cleanup := setupHybridStore(t, 10)
 	defer cleanup()

@@ -153,16 +153,18 @@ IMPORTANT: All string values must be on a single line. Do not use literal newlin
 Required JSON fields:
 - agent_name: A short, descriptive name for the agent (e.g., "Weather Assistant", "Code Reviewer")
 - description: A short, polished 1-2 sentence description for the agent details field
-- agent_type: One of "tool-calling" (for tool/plugin tasks), "general" (balanced), or "research" (complex reasoning)
-- model: "gpt-4.1-nano" for tool-calling, "gpt-5" or "gpt-5.1-codex" for general/research, "claude-sonnet-4-20250514", or "gemini-2.5-flash"/"gemini-2.5-pro"
-- provider: "openai", "codex", "claude_code", "claude", or "gemini" based on model
+- agent_type: One of "tool-calling" (for tool/plugin tasks), "general" (balanced), "workspace-manager" (front-door lead for a workspace), "orchestration" (multi-agent coordination), or "research" (complex reasoning)
+- model: Choose a model that matches the requested role. For workspace-manager or orchestration agents, prefer the currently configured system model when it fits. Valid families include OpenAI, Codex, Claude Code, Claude, Gemini, and Ollama.
+- provider: One of "openai", "codex", "claude_code", "claude", "gemini", or "ollama" based on model
 - temperature: 0.0-0.3 for precise tasks, 0.4-0.7 for balanced, 0.7-1.0 for creative
 - system_prompt: A concise system prompt for this agent (single line, use \n for breaks)
 - recommended_plugins: Array of plugin keywords that would be useful (e.g., ["weather", "math", "file", "web", "calendar"])
 - reasoning: Brief explanation (single line)
 
 Example:
-{"agent_name":"Weather Assistant","description":"Provides current conditions, forecasts, and weather-related guidance with clear, reliable answers.","agent_type":"tool-calling","model":"gpt-4.1-nano","provider":"openai","temperature":0.2,"system_prompt":"You are a weather assistant that provides accurate weather information.","recommended_plugins":["weather"],"reasoning":"Tool-calling for API-based weather lookups."}`
+{"agent_name":"Weather Assistant","description":"Provides current conditions, forecasts, and weather-related guidance with clear, reliable answers.","agent_type":"tool-calling","model":"gpt-4.1-nano","provider":"openai","temperature":0.2,"system_prompt":"You are a weather assistant that provides accurate weather information.","recommended_plugins":["weather"],"reasoning":"Tool-calling for API-based weather lookups."}
+
+If the request describes the lead or front door for a workspace, return "workspace-manager" as the agent_type.`
 
 	userMessage := fmt.Sprintf("Configure an agent for the following purpose:\n\n%s", description)
 
@@ -231,10 +233,16 @@ func (h *AutoConfigHandler) validateAndSanitizeConfig(config AutoConfigResponse)
 		config.AgentType = "tool-calling"
 	}
 
+	systemProvider := ""
+	systemModel := ""
+	if h != nil && h.configManager != nil {
+		systemProvider, systemModel = h.configManager.GetSystemModel()
+	}
+
 	// Validate provider
 	validProviders := map[string]bool{"openai": true, "codex": true, "claude_code": true, "claude": true, "gemini": true, "ollama": true}
 	if !validProviders[config.Provider] {
-		config.Provider = "openai"
+		config.Provider = ""
 	}
 
 	// Validate temperature
@@ -253,13 +261,20 @@ func (h *AutoConfigHandler) validateAndSanitizeConfig(config AutoConfigResponse)
 			config.Model = "gpt-5"
 		case "workspace-manager":
 			// Default to the system model so the workspace manager matches the user's preferred setup
-			if h != nil && h.configManager != nil {
-				sysProvider, sysModel := h.configManager.GetSystemModel()
-				if sysModel != "" {
-					config.Model = sysModel
-					if config.Provider == "" && sysProvider != "" {
-						config.Provider = sysProvider
-					}
+			if systemModel != "" {
+				config.Model = systemModel
+				if config.Provider == "" && systemProvider != "" {
+					config.Provider = systemProvider
+				}
+			}
+			if config.Model == "" {
+				config.Model = "gpt-5"
+			}
+		case "orchestration":
+			if systemModel != "" {
+				config.Model = systemModel
+				if config.Provider == "" && systemProvider != "" {
+					config.Provider = systemProvider
 				}
 			}
 			if config.Model == "" {
@@ -268,6 +283,19 @@ func (h *AutoConfigHandler) validateAndSanitizeConfig(config AutoConfigResponse)
 		case "research":
 			config.Model = "gpt-5"
 		}
+	}
+
+	if config.Provider == "" {
+		switch config.AgentType {
+		case "workspace-manager", "orchestration":
+			if systemProvider != "" {
+				config.Provider = systemProvider
+			}
+		}
+	}
+
+	if config.Provider == "" {
+		config.Provider = "openai"
 	}
 
 	// Ensure system prompt is set

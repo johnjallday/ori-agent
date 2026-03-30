@@ -33,6 +33,7 @@
     applying: false,
     initialized: false
   };
+  let cachedSystemModel = null;
 
   function escapeHtml(value) {
     if (typeof window.escapeHtml === 'function') {
@@ -93,6 +94,19 @@
 
   function getElement(id) {
     return document.getElementById(id);
+  }
+
+  async function getSystemModelPreference() {
+    if (cachedSystemModel) {
+      return cachedSystemModel;
+    }
+
+    try {
+      cachedSystemModel = await apiRequest('/api/settings/system-model');
+    } catch (_error) {
+      cachedSystemModel = {};
+    }
+    return cachedSystemModel;
   }
 
   function getCreateButton() {
@@ -501,7 +515,7 @@
         role: 'lead',
         selected: true,
         locked: true,
-        type: input.systemsList.length > 0 ? 'tool-calling' : 'general',
+        type: 'workspace-manager',
         autoDescription: buildPrimaryAgentDescription(input)
       });
     }
@@ -1003,17 +1017,31 @@
     }
 
     const requestConfig = await maybeAutoConfigureAgent(agentPlan.autoDescription || agentPlan.summary || '', agentPlan.type);
+    const plannedType = String(agentPlan.type || '').trim();
+    const type = plannedType === 'workspace-manager'
+      ? 'workspace-manager'
+      : (requestConfig?.agent_type || plannedType || 'general');
     const payload = {
       name: agentPlan.name,
-      type: requestConfig?.agent_type || agentPlan.type || 'general',
+      type,
       description: agentPlan.summary || agentPlan.autoDescription || '',
       allow_web_search: true
     };
 
-    if (requestConfig?.model) {
+    if (type === 'workspace-manager') {
+      const systemModel = await getSystemModelPreference();
+      if (systemModel?.configured && systemModel.model) {
+        payload.model = systemModel.model;
+        if (systemModel.provider) {
+          payload.llm_provider = systemModel.provider;
+        }
+      }
+    }
+
+    if (!payload.model && requestConfig?.model) {
       payload.model = requestConfig.model;
     }
-    if (requestConfig?.provider) {
+    if (!payload.llm_provider && requestConfig?.provider) {
       payload.llm_provider = requestConfig.provider;
     }
     if (typeof requestConfig?.temperature === 'number') {
