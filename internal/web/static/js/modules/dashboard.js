@@ -1689,10 +1689,8 @@
     return lines.join('\n').trim();
   }
 
-  function buildPlanningReviewTaskDescription(planningState) {
-    if (!planningState) return 'Planning task';
-
-    var normalized = String(planningState.prompt || '').trim()
+  function buildPlanningTaskDescriptionFromPrompt(prompt, fallbackTitle) {
+    var normalized = String(prompt || '').trim()
       .replace(/^(please\s+)?help me\s+/i, '')
       .replace(/^(can|could|would|will)\s+you\s+/i, '')
       .replace(/^i (want|need)\s+(you\s+)?to\s+/i, '')
@@ -1701,7 +1699,7 @@
       .trim();
 
     if (!normalized) {
-      normalized = String(planningState.schema && planningState.schema.title || 'Planning task').trim();
+      normalized = String(fallbackTitle || 'Planning task').trim();
     }
     if (!normalized) {
       normalized = 'Planning task';
@@ -1710,29 +1708,44 @@
     return truncateText(normalized.charAt(0).toUpperCase() + normalized.slice(1), 140);
   }
 
-  function buildPlanningReviewTaskDetails(planningState) {
-    if (!planningState) return '';
-
+  function buildPlanningTaskDetails(prompt, summaryText, noteName) {
     var lines = [];
-    var prompt = String(planningState.prompt || '').trim();
-    if (prompt) {
+    var normalizedPrompt = String(prompt || '').trim();
+    if (normalizedPrompt) {
       lines.push('Original request:');
-      lines.push(prompt);
+      lines.push(normalizedPrompt);
     }
 
-    var summaryText = String(planningState.summaryText || '').trim();
-    if (summaryText) {
+    var normalizedSummary = String(summaryText || '').trim();
+    if (normalizedSummary) {
       if (lines.length > 0) lines.push('');
       lines.push('Planning intake:');
-      lines.push(summaryText);
+      lines.push(normalizedSummary);
     }
 
-    if (planningState.noteSaved && planningState.noteSaved.name) {
+    if (String(noteName || '').trim()) {
       if (lines.length > 0) lines.push('');
-      lines.push('Planning note: ' + planningState.noteSaved.name);
+      lines.push('Planning note: ' + String(noteName || '').trim());
     }
 
     return lines.join('\n').trim();
+  }
+
+  function buildPlanningReviewTaskDescription(planningState) {
+    if (!planningState) return 'Planning task';
+    return buildPlanningTaskDescriptionFromPrompt(
+      planningState.prompt,
+      planningState.schema && planningState.schema.title
+    );
+  }
+
+  function buildPlanningReviewTaskDetails(planningState) {
+    if (!planningState) return '';
+    return buildPlanningTaskDetails(
+      planningState.prompt,
+      planningState.summaryText,
+      planningState.noteSaved && planningState.noteSaved.name
+    );
   }
 
   function activateHomeAssistantPlanningReview(planningState) {
@@ -1784,40 +1797,70 @@
     return null;
   }
 
-  async function ensurePlanningReviewMainTask(planningState) {
-    if (!planningState) throw new Error('Missing planning review state');
-    if (planningState.mainTask && planningState.mainTask.id) {
-      return planningState.mainTask;
-    }
+  function normalizeCreatedPlanningTask(task) {
+    if (!task || !task.id) return null;
+    return {
+      id: String(task.id || '').trim(),
+      description: String(task.description || '').trim(),
+      details: String(task.details || '').trim(),
+      to: String(task.to || '').trim() || String(task.assigned_node_id || '')
+        .replace(/-node-\d+$/, '')
+        .trim()
+    };
+  }
 
-    var workspaceId = hasWorkspaceRouteContext(planningState.routeContext)
-      ? String(planningState.routeContext.workspace_id || '').trim()
+  async function ensureWorkspacePlanningTask(routeContext, prompt, agentLabel, options) {
+    var existingTask = options && options.existingTask && options.existingTask.id
+      ? normalizeCreatedPlanningTask(options.existingTask)
+      : null;
+    if (existingTask) return existingTask;
+
+    var workspaceId = hasWorkspaceRouteContext(routeContext)
+      ? String(routeContext.workspace_id || '').trim()
       : '';
     if (!workspaceId) {
       throw new Error('Workspace context is required to create the planning task');
     }
 
     var response = await createWorkspaceTaskRecord(workspaceId, {
-      description: buildPlanningReviewTaskDescription(planningState),
-      details: buildPlanningReviewTaskDetails(planningState),
-      to: String(planningState.agentLabel || '').trim()
+      description: buildPlanningTaskDescriptionFromPrompt(
+        prompt,
+        options && options.fallbackTitle ? options.fallbackTitle : 'Planning task'
+      ),
+      details: buildPlanningTaskDetails(
+        prompt,
+        options && options.summaryText ? options.summaryText : '',
+        options && options.noteName ? options.noteName : ''
+      ),
+      to: String(agentLabel || '').trim()
     });
     var createdTask = response && response.task ? response.task : response;
-    if (!createdTask || !createdTask.id) {
+    var normalizedTask = normalizeCreatedPlanningTask(createdTask);
+    if (!normalizedTask || !normalizedTask.id) {
       throw new Error('Failed to create the main workspace task');
     }
 
-    planningState.mainTask = {
-      id: String(createdTask.id || '').trim(),
-      description: String(createdTask.description || '').trim(),
-      details: String(createdTask.details || '').trim(),
-      to: String(createdTask.to || '').trim() || String(createdTask.assigned_node_id || '')
-        .replace(/-node-\d+$/, '')
-        .trim()
-    };
-
-    syncCreatedTaskIntoWorkspaceDetail(planningState.mainTask);
+    syncCreatedTaskIntoWorkspaceDetail(normalizedTask);
     await refreshWorkspaceDetailTaskPanels();
+    return normalizedTask;
+  }
+
+  async function ensurePlanningReviewMainTask(planningState) {
+    if (!planningState) throw new Error('Missing planning review state');
+    if (planningState.mainTask && planningState.mainTask.id) {
+      return planningState.mainTask;
+    }
+
+    planningState.mainTask = await ensureWorkspacePlanningTask(
+      planningState.routeContext,
+      planningState.prompt,
+      planningState.agentLabel,
+      {
+        summaryText: planningState.summaryText,
+        noteName: planningState.noteSaved && planningState.noteSaved.name,
+        fallbackTitle: planningState.schema && planningState.schema.title
+      }
+    );
     return planningState.mainTask;
   }
 
@@ -5917,6 +5960,30 @@
         workflowStep && String(workflowStep.step_type || '').trim() === 'ask_choice' ? workflowStep : null,
         options && options.linkedTask ? options.linkedTask : getActiveLinkedPlanningTask()
       );
+      if (inlineReplyState && (!inlineReplyState.linkedTask || !inlineReplyState.linkedTask.id)) {
+        try {
+          var createdInlineTask = await ensureWorkspacePlanningTask(
+            sessionRouteContext,
+            prompt,
+            entryLabel,
+            {
+              existingTask: inlineReplyState.linkedTask,
+              summaryText: assistantSessionResult.responseText || '',
+              fallbackTitle: workflowStep && String(workflowStep.title || '').trim()
+                ? String(workflowStep.title || '').trim()
+                : 'Planning task'
+            }
+          );
+          if (createdInlineTask && homeAssistantState.inlineReplyState === inlineReplyState) {
+            inlineReplyState.linkedTask = createdInlineTask;
+            renderHomeAssistantInlineReply();
+          }
+        } catch (taskError) {
+          dashLog.debug('Failed to create inline planning task', {
+            error: taskError && taskError.message || taskError
+          });
+        }
+      }
       var hasChoiceStep = inlineReplyState &&
         inlineReplyState.workflowStep &&
         String(inlineReplyState.workflowStep.step_type || '').trim() === 'ask_choice' &&
