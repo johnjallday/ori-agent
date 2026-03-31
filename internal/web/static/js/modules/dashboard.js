@@ -914,6 +914,10 @@
       els.thinkingModalLabel.textContent = label + ' has a planning subtask ready';
       return;
     }
+    if (hasVisibleHomeAssistantActions() && hasHomeAssistantConversation() && !homeAssistantState.busy) {
+      els.thinkingModalLabel.textContent = label + ' has an update ready';
+      return;
+    }
     els.thinkingModalLabel.textContent = label + ' is working';
   }
 
@@ -1014,7 +1018,7 @@
     } else if (hasVisibleHomeAssistantInlineReply()) {
       statusText = 'Answer the manager here or open full chat.';
     } else if (hasVisibleHomeAssistantActions()) {
-      statusText = 'Review the next steps or dismiss this window.';
+      statusText = 'Review the latest manager update, open full chat, or dismiss this window.';
     } else {
       statusText = 'Ready for your next task.';
     }
@@ -2085,13 +2089,28 @@
     var resolvedWorkflowStep = workflowStep && String(workflowStep.step_type || '').trim() === 'ask_choice'
       ? workflowStep
       : buildSyntheticInlineReplyWorkflowStep(normalizedReply, routeContext);
+    var questionPrompts = extractInlineReplyQuestions(normalizedReply);
+    var hasChoiceStep = resolvedWorkflowStep &&
+      String(resolvedWorkflowStep.step_type || '').trim() === 'ask_choice' &&
+      Array.isArray(resolvedWorkflowStep.choices) &&
+      resolvedWorkflowStep.choices.length > 0;
+
+    if (!hasChoiceStep && questionPrompts.length === 0) {
+      homeAssistantState.inlineReplyState = null;
+      if (!homeAssistantState.planningState) {
+        homeAssistantState.conversationCollapsed = false;
+      }
+      renderHomeAssistantInlineReply();
+      return null;
+    }
+
     homeAssistantState.inlineReplyState = {
       routeContext: normalizeHomeRouteContext(routeContext),
       intent: intent || HOME_INTENTS.general_task,
       agentLabel: String(agentLabel || getWorkspaceHomeAssistantDisplayName()).trim() || getWorkspaceHomeAssistantDisplayName(),
       latestReplyText: normalizedReply,
       workflowStep: resolvedWorkflowStep,
-      questionPrompts: extractInlineReplyQuestions(normalizedReply),
+      questionPrompts: questionPrompts,
       selectedChoiceId: '',
       selectedChoiceLabel: '',
       selectedChoiceNumber: '',
@@ -5758,9 +5777,13 @@
         entryLabel,
         hasChoiceStep
           ? 'The workspace manager created a planning subtask for this workspace. Complete it below, or open full chat.'
+          : inlineReplyState
+          ? assistantSessionResult.reused
+            ? 'The manager needs one more planning answer. Review the subtask below, or open full chat.'
+            : 'The workspace manager replied inline. Review the planning subtask below, or open full chat.'
           : assistantSessionResult.reused
-          ? 'The manager needs one more planning answer. Review the subtask below, or open full chat.'
-          : 'The workspace manager replied inline. Review the planning subtask below, or open full chat.'
+          ? 'The workspace manager updated the workspace. Review the latest update below, or open full chat if you want to continue.'
+          : 'The workspace manager replied with an update. Review the latest result below, or open full chat if you want to continue.'
       );
     }
     renderHomeAssistantDependencyResolution(
