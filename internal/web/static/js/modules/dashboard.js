@@ -244,6 +244,7 @@
     routingSummary: null,
     planningState: null,
     inlineReplyState: null,
+    conversationCollapsed: false,
     automationMode: 'semi_auto',
     workspaceEntryAgentName: '',
     workspaceEntryWorkspaceId: ''
@@ -783,7 +784,10 @@
       input: document.getElementById('homeAssistantInput'),
       identityName: document.getElementById('homeAssistantIdentityName'),
       sendBtn: document.getElementById('homeAssistantSendBtn'),
+      conversationSection: document.getElementById('homeAssistantConversationSection'),
       conversation: document.getElementById('homeAssistantConversation'),
+      conversationToggleBtn: document.getElementById('homeAssistantConversationToggleBtn'),
+      conversationSummary: document.getElementById('homeAssistantConversationSummary'),
       routingSummary: document.getElementById('homeAssistantRoutingSummary'),
       planning: document.getElementById('homeAssistantPlanning'),
       inlineReply: document.getElementById('homeAssistantInlineReply'),
@@ -861,6 +865,102 @@
     return false;
   }
 
+  function getHomeAssistantSummaryState() {
+    var summary = homeAssistantState.routingSummary;
+    if (!summary || !summary.text) return '';
+
+    var explicitState = normalizeToken(summary.state);
+    if (explicitState) return explicitState;
+
+    var title = normalizeToken(summary.title);
+    if (title.indexOf('delayed') >= 0 || title.indexOf('timeout') >= 0) return 'timeout';
+    if (title.indexOf('unavailable') >= 0 || title.indexOf('failed') >= 0) return 'error';
+    return 'info';
+  }
+
+  function hasHomeAssistantFailureState() {
+    var state = getHomeAssistantSummaryState();
+    return state === 'error' || state === 'timeout';
+  }
+
+  function getHomeAssistantActivityLabel() {
+    var els = getHomeAssistantElements();
+    var label = els.identityName ? String(els.identityName.textContent || '').trim() : '';
+    if (label) return label;
+    if (homeAssistantState.workspaceEntryAgentName) return getWorkspaceHomeAssistantDisplayName();
+    return 'Ori';
+  }
+
+  function syncHomeAssistantModalHeading() {
+    var els = getHomeAssistantElements();
+    if (!els.thinkingModalLabel) return;
+
+    var label = getHomeAssistantActivityLabel();
+    var summaryState = getHomeAssistantSummaryState();
+
+    if (summaryState === 'timeout') {
+      els.thinkingModalLabel.textContent = label + ' is delayed';
+      return;
+    }
+    if (summaryState === 'error') {
+      els.thinkingModalLabel.textContent = label + ' is unavailable';
+      return;
+    }
+    if (hasVisibleHomeAssistantPlanning()) {
+      els.thinkingModalLabel.textContent = label + ' needs your input';
+      return;
+    }
+    if (hasVisibleHomeAssistantInlineReply()) {
+      els.thinkingModalLabel.textContent = label + ' needs one more answer';
+      return;
+    }
+    els.thinkingModalLabel.textContent = label + ' is working';
+  }
+
+  function setHomeAssistantConversationCollapsed(collapsed) {
+    homeAssistantState.conversationCollapsed = Boolean(collapsed);
+    syncHomeAssistantConversationSection();
+  }
+
+  function syncHomeAssistantConversationSection() {
+    var els = getHomeAssistantElements();
+    var section = els.conversationSection;
+    if (!section) return;
+
+    var hasConversation = hasHomeAssistantConversation();
+    var hasStructuredStep = hasVisibleHomeAssistantPlanning() || hasVisibleHomeAssistantInlineReply();
+    var hasFailureState = hasHomeAssistantFailureState();
+    var canCollapse = hasConversation && (hasStructuredStep || hasFailureState);
+    var isCollapsed = canCollapse && homeAssistantState.conversationCollapsed;
+
+    section.classList.toggle('is-collapsible', canCollapse);
+    section.classList.toggle('is-collapsed', isCollapsed);
+    section.classList.toggle('is-empty', !hasConversation);
+
+    if (els.conversationToggleBtn) {
+      els.conversationToggleBtn.hidden = !canCollapse;
+      els.conversationToggleBtn.textContent = isCollapsed ? 'Show Conversation' : 'Hide Conversation';
+      if (!els.conversationToggleBtn.dataset.bound) {
+        els.conversationToggleBtn.dataset.bound = 'true';
+        els.conversationToggleBtn.addEventListener('click', function () {
+          setHomeAssistantConversationCollapsed(!homeAssistantState.conversationCollapsed);
+        });
+      }
+    }
+
+    if (els.conversationSummary) {
+      if (hasFailureState && hasConversation) {
+        els.conversationSummary.textContent = 'The request failed above. Expand this only if you want the original prompt and inline details.';
+      } else if (hasStructuredStep && hasConversation) {
+        els.conversationSummary.textContent = 'The active step is above. Expand this only if you want the full transcript and manager notes.';
+      } else if (hasConversation) {
+        els.conversationSummary.textContent = 'Messages, progress notes, and manager replies appear here.';
+      } else {
+        els.conversationSummary.textContent = 'Progress updates will appear here after you send a task.';
+      }
+    }
+  }
+
   function openHomeAssistantThinkingModal() {
     clearHomeAssistantThinkingCloseTimer();
     var modal = getHomeAssistantThinkingModalInstance();
@@ -901,14 +1001,20 @@
     if (!els.thinkingStatus) return;
 
     var statusText = '';
-    if (homeAssistantState.routingSummary && homeAssistantState.routingSummary.text) {
+    if (getHomeAssistantSummaryState() === 'timeout') {
+      statusText = 'The manager may still be working. Retry here or open full chat to continue there.';
+    } else if (getHomeAssistantSummaryState() === 'error') {
+      statusText = 'Retry here, open full chat, or start a different task.';
+    } else if (homeAssistantState.routingSummary && homeAssistantState.routingSummary.text) {
       statusText = homeAssistantState.routingSummary.text;
     } else if (homeAssistantState.busy) {
       statusText = 'Working...';
+    } else if (hasVisibleHomeAssistantPlanning()) {
+      statusText = 'Complete the active planning step below.';
+    } else if (hasVisibleHomeAssistantInlineReply()) {
+      statusText = 'Answer the manager here or open full chat.';
     } else if (hasVisibleHomeAssistantActions()) {
       statusText = 'Review the next steps or dismiss this window.';
-    } else if (hasVisibleHomeAssistantInlineReply()) {
-      statusText = 'Reply inline or open chat.';
     } else {
       statusText = 'Ready for your next task.';
     }
@@ -919,6 +1025,7 @@
       els.thinkingSpinner.classList.toggle('d-none', !homeAssistantState.busy);
     }
 
+    syncHomeAssistantModalHeading();
     syncHomeAssistantLauncher();
   }
 
@@ -956,6 +1063,9 @@
     if (label) {
       label.textContent = homeAssistantState.busy ? 'Live Activity' : 'Task Activity';
     }
+
+    syncHomeAssistantModalHeading();
+    syncHomeAssistantConversationSection();
   }
 
   function renderHomeAssistantRoutingSummary() {
@@ -985,7 +1095,7 @@
     syncHomeAssistantThinkingStatus();
   }
 
-  function setHomeAssistantRoutingSummary(title, text) {
+  function setHomeAssistantRoutingSummary(title, text, options) {
     if (!title || !text) {
       homeAssistantState.routingSummary = null;
       renderHomeAssistantRoutingSummary();
@@ -997,7 +1107,8 @@
     }
     homeAssistantState.routingSummary = {
       title: String(title),
-      text: String(text)
+      text: String(text),
+      state: options && options.state ? String(options.state) : ''
     };
     renderHomeAssistantRoutingSummary();
     if (homeAssistantState.busy || hasVisibleHomeAssistantActions()) {
@@ -1037,9 +1148,7 @@
       els.input.setAttribute('aria-label', displayName + ' prompt');
     }
 
-    if (els.thinkingModalLabel) {
-      els.thinkingModalLabel.textContent = displayName + ' is working';
-    }
+    syncHomeAssistantModalHeading();
   }
 
   async function refreshHomeAssistantWorkspaceIdentity(routeContext) {
@@ -1232,6 +1341,7 @@
       conversation.removeChild(conversation.firstChild);
     }
     conversation.scrollTop = conversation.scrollHeight;
+    syncHomeAssistantConversationSection();
     syncHomeAssistantLauncher();
     openHomeAssistantThinkingModal();
   }
@@ -1465,6 +1575,7 @@
       }
     }
 
+    homeAssistantState.conversationCollapsed = true;
     renderHomeAssistantPlanning();
   }
 
@@ -1510,6 +1621,7 @@
       continuing: false
     };
 
+    homeAssistantState.conversationCollapsed = true;
     renderHomeAssistantPlanning();
   }
 
@@ -1724,11 +1836,17 @@
 
   function clearHomeAssistantPlanning() {
     homeAssistantState.planningState = null;
+    if (!homeAssistantState.inlineReplyState) {
+      homeAssistantState.conversationCollapsed = false;
+    }
     renderHomeAssistantPlanning();
   }
 
   function clearHomeAssistantInlineReply() {
     homeAssistantState.inlineReplyState = null;
+    if (!homeAssistantState.planningState) {
+      homeAssistantState.conversationCollapsed = false;
+    }
     renderHomeAssistantInlineReply();
   }
 
@@ -1747,6 +1865,7 @@
       draft: '',
       submitting: false
     };
+    homeAssistantState.conversationCollapsed = true;
     renderHomeAssistantInlineReply();
   }
 
@@ -1982,24 +2101,39 @@
       }
     }
 
-    function buildSelect(question, selectedValue) {
-      var select = document.createElement('select');
-      select.className = 'home-assistant-planning-select';
-      select.name = question.id;
-      select.disabled = isSubmitting;
+    function buildChoiceGroup(question, selectedValue) {
+      var wrapper = document.createElement('div');
+      wrapper.className = 'home-assistant-planning-choice-group';
+      wrapper.setAttribute('data-planning-focus', question.id);
 
       var options = Array.isArray(question.options) ? question.options : [];
       for (var i = 0; i < options.length; i++) {
         var optionConfig = options[i] || {};
-        var option = document.createElement('option');
-        option.value = String(optionConfig.value || '');
-        option.textContent = optionConfig.label || option.value;
-        if (String(option.value) === String(selectedValue || '')) {
-          option.selected = true;
-        }
-        select.appendChild(option);
+        var optionValue = String(optionConfig.value || '');
+        if (!optionValue) continue;
+
+        var choice = document.createElement('button');
+        choice.type = 'button';
+        choice.className = 'home-assistant-planning-choice';
+        choice.disabled = isSubmitting;
+        choice.classList.toggle('is-selected', optionValue === String(selectedValue || ''));
+        choice.setAttribute('aria-pressed', optionValue === String(selectedValue || '') ? 'true' : 'false');
+        choice.addEventListener('click', function (event) {
+          if (!homeAssistantState.planningState) return;
+          homeAssistantState.planningState.formData[question.id] = event.currentTarget.dataset.value;
+          renderHomeAssistantPlanning();
+        });
+        choice.dataset.value = optionValue;
+
+        var choiceLabel = document.createElement('span');
+        choiceLabel.className = 'home-assistant-planning-choice-label';
+        choiceLabel.textContent = optionConfig.label || optionValue;
+        choice.appendChild(choiceLabel);
+
+        wrapper.appendChild(choice);
       }
-      return select;
+
+      return wrapper;
     }
 
     function buildQuestionField(question) {
@@ -2041,13 +2175,14 @@
       addFieldLabel(field, question);
 
       if (question.type === 'select') {
-        var select = buildSelect(question, formData[question.id]);
-        select.addEventListener('change', function (event) {
-          if (!homeAssistantState.planningState) return;
-          homeAssistantState.planningState.formData[question.id] = event.target.value;
-          renderHomeAssistantPlanning();
-        });
-        field.appendChild(select);
+        field.classList.add('is-choice-field');
+        field.appendChild(buildChoiceGroup(question, formData[question.id]));
+        if (!String(formData[question.id] || '').trim()) {
+          var choiceHint = document.createElement('div');
+          choiceHint.className = 'home-assistant-planning-choice-hint';
+          choiceHint.textContent = 'Choose one option to continue.';
+          field.appendChild(choiceHint);
+        }
         return field;
       }
 
@@ -2154,6 +2289,9 @@
       planningState.focusField = '';
       window.setTimeout(function () {
         var field = container.querySelector('[name="' + focusName + '"]');
+        if (!field) {
+          field = container.querySelector('[data-planning-focus="' + focusName + '"] .home-assistant-planning-choice:not([disabled])');
+        }
         if (field && typeof field.focus === 'function') {
           field.focus();
         }
@@ -2183,12 +2321,12 @@
 
     var header = document.createElement('div');
     header.className = 'home-assistant-inline-reply-header';
-    header.textContent = 'Reply Inline';
+    header.textContent = 'Next Response';
     card.appendChild(header);
 
     var copy = document.createElement('div');
     copy.className = 'home-assistant-inline-reply-copy';
-    copy.textContent = 'Continue with ' + replyState.agentLabel + ' without leaving this modal.';
+    copy.textContent = 'Review the latest manager note in the transcript if needed, then answer here or open full chat.';
     card.appendChild(copy);
 
     var form = document.createElement('form');
@@ -5170,8 +5308,8 @@
       setHomeAssistantRoutingSummary(
         entryLabel,
         assistantSessionResult.reused
-          ? 'Complete the planning step below or open chat.'
-          : 'The workspace manager replied with a planning step. Complete it below or open chat.'
+          ? 'Use the active planning step below, or open full chat if you want a longer back-and-forth.'
+          : 'The workspace manager switched this into a guided planning step. Complete it below or open full chat.'
       );
     } else {
       var keepPlanningReview = Boolean(options && options.preservePlanningReview);
@@ -5185,8 +5323,8 @@
       setHomeAssistantRoutingSummary(
         entryLabel,
         assistantSessionResult.reused
-          ? 'Reply in the box below or open chat.'
-          : 'The workspace manager replied inline. Reply in the box below or open chat.'
+          ? 'The manager needs one more answer. Use the response card below, or open full chat.'
+          : 'The workspace manager replied inline. Use the response card below, or open full chat.'
       );
     }
     renderHomeAssistantDependencyResolution(
@@ -7910,18 +8048,17 @@
         dashLog.debug('Workspace manager handoff failed', { error: error && error.message || error });
         homeAssistantState.awaitingCreateConfirmation = false;
         var workspaceManagerTimedOut = isLikelyHomeAssistantRequestTimeout(error);
-        appendHomeAssistantMessage(
-          'assistant',
-          workspaceManagerTimedOut
-            ? workspaceManagerLabel + ' is taking longer than usual. Retry or open chat to continue there.'
-            : 'I could not reach ' + workspaceManagerLabel + ' right now. Please retry or open chat.'
-        );
         setHomeAssistantRoutingSummary(
           workspaceManagerTimedOut ? workspaceManagerLabel + ' Delayed' : workspaceManagerLabel + ' Unavailable',
           workspaceManagerTimedOut
             ? 'The workspace manager took too long to respond inline.'
-            : 'Could not reach the workspace manager right now.'
+            : 'Could not reach the workspace manager right now.',
+          { state: workspaceManagerTimedOut ? 'timeout' : 'error' }
         );
+        if (hasHomeAssistantConversation()) {
+          homeAssistantState.conversationCollapsed = true;
+          syncHomeAssistantConversationSection();
+        }
         renderHomeAssistantActions([
           {
             label: 'Retry',

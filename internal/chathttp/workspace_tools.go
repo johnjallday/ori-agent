@@ -97,13 +97,13 @@ func (p *WorkspaceToolProvider) readNotesTool() toolapi.Tool {
 	return &nativeUtilityTool{
 		definition: toolapi.ToolDefinition{
 			Name:        "workspace_notes",
-			Description: "List and read notes in the current workspace. Use without arguments to list all notes. Provide a note_id to read the full content of a specific note.",
+			Description: "List and read notes in the current workspace. Use without arguments to list all notes. Provide the exact id field from the list output to read a specific note.",
 			Parameters: map[string]interface{}{
 				"type": "object",
 				"properties": map[string]interface{}{
 					"note_id": map[string]interface{}{
 						"type":        "string",
-						"description": "Optional. The ID of a specific note to read in full. Omit to list all notes.",
+						"description": "Optional. The exact note ID from the list output. If a note name is passed, the tool will only accept it when it uniquely matches one note in this workspace.",
 					},
 				},
 			},
@@ -120,12 +120,9 @@ func (p *WorkspaceToolProvider) readNotesTool() toolapi.Tool {
 
 			// Read a specific note
 			if req.NoteID != "" {
-				note, err := p.sessionStore.GetNote(ctx, req.NoteID)
+				note, err := p.resolveWorkspaceNoteReference(ctx, req.NoteID)
 				if err != nil {
-					return "", fmt.Errorf("note not found: %w", err)
-				}
-				if note.WorkspaceID != p.workspaceID {
-					return "", fmt.Errorf("note does not belong to this workspace")
+					return "", err
 				}
 				result := map[string]interface{}{
 					"id":         note.ID,
@@ -158,6 +155,47 @@ func (p *WorkspaceToolProvider) readNotesTool() toolapi.Tool {
 			return marshalToolResponse(map[string]interface{}{"notes": items})
 		},
 	}
+}
+
+func (p *WorkspaceToolProvider) resolveWorkspaceNoteReference(ctx context.Context, noteRef string) (*session.WorkspaceNote, error) {
+	noteRef = strings.TrimSpace(noteRef)
+	if noteRef == "" {
+		return nil, fmt.Errorf("note_id is required")
+	}
+
+	if note, err := p.sessionStore.GetNote(ctx, noteRef); err == nil {
+		if note.WorkspaceID != p.workspaceID {
+			return nil, fmt.Errorf("note does not belong to this workspace")
+		}
+		return note, nil
+	} else if err != session.ErrNoteNotFound {
+		return nil, fmt.Errorf("failed to load note: %w", err)
+	}
+
+	notes, err := p.sessionStore.ListNotesByWorkspace(ctx, p.workspaceID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list notes: %w", err)
+	}
+
+	var exactMatches []session.WorkspaceNoteListItem
+	for _, item := range notes {
+		if strings.EqualFold(strings.TrimSpace(item.Name), noteRef) {
+			exactMatches = append(exactMatches, item)
+		}
+	}
+
+	if len(exactMatches) == 1 {
+		note, err := p.sessionStore.GetNote(ctx, exactMatches[0].ID)
+		if err != nil {
+			return nil, fmt.Errorf("note matched by name but could not be loaded: %w", err)
+		}
+		return note, nil
+	}
+	if len(exactMatches) > 1 {
+		return nil, fmt.Errorf("multiple workspace notes share the name %q; use workspace_notes without arguments and pass the exact id field", noteRef)
+	}
+
+	return nil, fmt.Errorf("note not found in this workspace; use workspace_notes without arguments first and pass the exact id field, not the note name")
 }
 
 // --- workspace_save_note (write) ---
@@ -341,7 +379,7 @@ func (p *WorkspaceToolProvider) readSessionsTool() toolapi.Tool {
 	return &nativeUtilityTool{
 		definition: toolapi.ToolDefinition{
 			Name:        "workspace_sessions",
-			Description: "List chat sessions in the current workspace. Returns session titles, agents, and timestamps. Use workspace_session_detail to read a specific session's messages.",
+			Description: "List chat sessions in the current workspace. Returns each session's id, title, agent, and timestamps. Use the id field with workspace_session_detail.",
 			Parameters: map[string]interface{}{
 				"type":       "object",
 				"properties": map[string]interface{}{},
@@ -382,13 +420,13 @@ func (p *WorkspaceToolProvider) readSessionDetailTool() toolapi.Tool {
 	return &nativeUtilityTool{
 		definition: toolapi.ToolDefinition{
 			Name:        "workspace_session_detail",
-			Description: "Read the messages from a specific session in the workspace. Use workspace_sessions first to find the session ID.",
+			Description: "Read the messages from a specific session in the workspace. Use workspace_sessions first and pass the exact id field. Do not guess or invent session IDs.",
 			Parameters: map[string]interface{}{
 				"type": "object",
 				"properties": map[string]interface{}{
 					"session_id": map[string]interface{}{
 						"type":        "string",
-						"description": "The ID of the session to read.",
+						"description": "The exact session ID from workspace_sessions. If a title is passed, the tool will only accept it when it uniquely matches one session in this workspace.",
 					},
 				},
 				"required": []string{"session_id"},
@@ -405,17 +443,20 @@ func (p *WorkspaceToolProvider) readSessionDetailTool() toolapi.Tool {
 				return "", fmt.Errorf("session_id is required")
 			}
 
-			sess, err := p.sessionStore.GetSession(ctx, req.SessionID)
+			sess, guidance, err := p.resolveWorkspaceSessionReference(ctx, req.SessionID)
 			if err != nil {
-				return "", fmt.Errorf("session not found: %w", err)
+				return "", err
+			}
+			if guidance != nil {
+				return marshalToolResponse(map[string]interface{}{
+					"session_found":      false,
+					"requested_session":  req.SessionID,
+					"message":            guidance.Message,
+					"available_sessions": guidance.Sessions,
+				})
 			}
 
-			// Verify session belongs to this workspace
-			if sess.FolderID != p.workspaceID {
-				return "", fmt.Errorf("session does not belong to this workspace")
-			}
-
-			messages, err := p.sessionStore.GetMessages(ctx, req.SessionID)
+			messages, err := p.sessionStore.GetMessages(ctx, sess.ID)
 			if err != nil {
 				return "", fmt.Errorf("failed to load messages: %w", err)
 			}
@@ -440,6 +481,96 @@ func (p *WorkspaceToolProvider) readSessionDetailTool() toolapi.Tool {
 			})
 		},
 	}
+}
+
+type workspaceSessionReferenceGuidance struct {
+	Message  string
+	Sessions []map[string]interface{}
+}
+
+func (p *WorkspaceToolProvider) resolveWorkspaceSessionReference(ctx context.Context, sessionRef string) (*session.Session, *workspaceSessionReferenceGuidance, error) {
+	sessionRef = strings.TrimSpace(sessionRef)
+	if sessionRef == "" {
+		return nil, nil, fmt.Errorf("session_id is required")
+	}
+
+	if sess, err := p.sessionStore.GetSession(ctx, sessionRef); err == nil {
+		if sess.FolderID != p.workspaceID {
+			guidance, guidanceErr := p.buildWorkspaceSessionReferenceGuidance(ctx, fmt.Sprintf("Session %q does not belong to this workspace. Use one of the available workspace session ids instead.", sessionRef))
+			if guidanceErr != nil {
+				return nil, nil, guidanceErr
+			}
+			return nil, guidance, nil
+		}
+		return sess, nil, nil
+	} else if err != session.ErrSessionNotFound {
+		return nil, nil, fmt.Errorf("failed to load session: %w", err)
+	}
+
+	filter := &session.SessionFilter{FolderID: &p.workspaceID}
+	opts := &session.ListOptions{Limit: 100, Sort: session.SortByUpdatedDesc}
+	result, err := p.sessionStore.ListSessions(ctx, filter, opts)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to list sessions: %w", err)
+	}
+
+	var exactMatches []session.SessionListItem
+	refLower := strings.ToLower(sessionRef)
+	for _, item := range result.Sessions {
+		if strings.EqualFold(strings.TrimSpace(item.Title), sessionRef) || strings.ToLower(strings.TrimSpace(item.Title)) == refLower {
+			exactMatches = append(exactMatches, item)
+		}
+	}
+
+	if len(exactMatches) == 1 {
+		sess, err := p.sessionStore.GetSession(ctx, exactMatches[0].ID)
+		if err != nil {
+			return nil, nil, fmt.Errorf("session matched by title but could not be loaded: %w", err)
+		}
+		return sess, nil, nil
+	}
+	if len(exactMatches) > 1 {
+		guidance, guidanceErr := p.buildWorkspaceSessionReferenceGuidance(ctx, fmt.Sprintf("Multiple workspace sessions share the title %q. Use one of the exact ids below with workspace_session_detail.", sessionRef))
+		if guidanceErr != nil {
+			return nil, nil, guidanceErr
+		}
+		return nil, guidance, nil
+	}
+
+	guidance, guidanceErr := p.buildWorkspaceSessionReferenceGuidance(ctx, fmt.Sprintf("Session %q was not found in this workspace. Use one of the exact ids below from workspace_sessions instead of guessing.", sessionRef))
+	if guidanceErr != nil {
+		return nil, nil, guidanceErr
+	}
+	return nil, guidance, nil
+}
+
+func (p *WorkspaceToolProvider) buildWorkspaceSessionReferenceGuidance(ctx context.Context, message string) (*workspaceSessionReferenceGuidance, error) {
+	filter := &session.SessionFilter{FolderID: &p.workspaceID}
+	opts := &session.ListOptions{Limit: 10, Sort: session.SortByUpdatedDesc}
+	result, err := p.sessionStore.ListSessions(ctx, filter, opts)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list sessions: %w", err)
+	}
+
+	items := make([]map[string]interface{}, 0, len(result.Sessions))
+	for _, item := range result.Sessions {
+		items = append(items, map[string]interface{}{
+			"id":            item.ID,
+			"title":         item.Title,
+			"agent_name":    item.AgentName,
+			"message_count": item.MessageCount,
+			"updated_at":    item.UpdatedAt.Format(time.RFC3339),
+		})
+	}
+
+	if len(items) == 0 {
+		message = strings.TrimSpace(message) + " There are no sessions in this workspace yet."
+	}
+
+	return &workspaceSessionReferenceGuidance{
+		Message:  message,
+		Sessions: items,
+	}, nil
 }
 
 // --- workspace_files (read) ---

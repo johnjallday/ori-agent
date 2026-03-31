@@ -453,14 +453,27 @@
         </div>
         <div class="modal-body">
           <div id="homeAssistantRoutingSummary" class="home-assistant-routing-summary d-none"></div>
-          <div id="homeAssistantConversation" class="home-assistant-conversation home-assistant-conversation-modal p-3">
-            <div class="home-assistant-thinking-placeholder">
-              Progress updates will appear here after you send a message.
-            </div>
-          </div>
           <div id="homeAssistantPlanning" class="home-assistant-planning d-none mt-3"></div>
           <div id="homeAssistantInlineReply" class="home-assistant-inline-reply d-none mt-3"></div>
           <div id="homeAssistantActions" class="d-flex flex-wrap gap-2 mt-3 d-none"></div>
+          <section id="homeAssistantConversationSection" class="home-assistant-conversation-section mt-3">
+            <div class="home-assistant-conversation-section-header">
+              <div>
+                <div class="home-assistant-conversation-section-eyebrow">Conversation Context</div>
+                <div id="homeAssistantConversationSummary" class="home-assistant-conversation-section-copy">
+                  Progress updates and manager notes will appear here after you send a message.
+                </div>
+              </div>
+              <button id="homeAssistantConversationToggleBtn" type="button" class="modern-btn modern-btn-secondary modern-btn-sm" hidden>
+                Hide Conversation
+              </button>
+            </div>
+            <div id="homeAssistantConversation" class="home-assistant-conversation home-assistant-conversation-modal p-3">
+              <div class="home-assistant-thinking-placeholder">
+                Progress updates will appear here after you send a message.
+              </div>
+            </div>
+          </section>
         </div>
       </div>
     </div>

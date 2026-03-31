@@ -1852,7 +1852,44 @@ h3, .h3 {
     margin-top: 0.25rem;
 }
 
+.home-assistant-conversation-section {
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    background: linear-gradient(145deg, color-mix(in srgb, var(--bg-secondary) 92%, transparent) 0%, var(--bg-secondary) 100%);
+    padding: 0.95rem 1rem;
+}
+
+.home-assistant-conversation-section-header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 0.85rem;
+}
+
+.home-assistant-conversation-section-eyebrow {
+    color: var(--text-muted);
+    font-size: 0.76rem;
+    font-weight: 700;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    margin-bottom: 0.3rem;
+}
+
+.home-assistant-conversation-section-copy {
+    color: var(--text-secondary);
+    font-size: 0.82rem;
+    line-height: 1.45;
+}
+
+.home-assistant-conversation-section.is-collapsed .home-assistant-conversation {
+    display: none;
+}
+
 .home-assistant-conversation.home-assistant-conversation-modal {
+    margin-top: 0.8rem;
+    background: var(--bg-primary);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
     max-height: min(55vh, 560px);
 }
 
@@ -1921,6 +1958,10 @@ h3, .h3 {
     gap: 0.4rem;
 }
 
+.home-assistant-planning-field.is-choice-field {
+    gap: 0.55rem;
+}
+
 .home-assistant-planning-label {
     color: var(--text-primary);
     font-size: 0.82rem;
@@ -1956,6 +1997,55 @@ h3, .h3 {
 .home-assistant-planning-textarea {
     min-height: 96px;
     resize: vertical;
+}
+
+.home-assistant-planning-choice-group {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.6rem;
+}
+
+.home-assistant-planning-choice {
+    min-width: 140px;
+    padding: 0.7rem 0.85rem;
+    border-radius: var(--radius-md);
+    border: 1px solid var(--border-color);
+    background: var(--bg-primary);
+    color: var(--text-secondary);
+    text-align: left;
+    transition: border-color 0.18s ease, transform 0.18s ease, box-shadow 0.18s ease, color 0.18s ease, background 0.18s ease;
+}
+
+.home-assistant-planning-choice:hover {
+    border-color: color-mix(in srgb, var(--primary-color) 46%, var(--border-color));
+    color: var(--text-primary);
+    transform: translateY(-1px);
+}
+
+.home-assistant-planning-choice:focus {
+    border-color: color-mix(in srgb, var(--primary-color) 52%, var(--border-color));
+    box-shadow: 0 0 0 0.12rem color-mix(in srgb, var(--primary-color) 18%, transparent);
+    outline: none;
+}
+
+.home-assistant-planning-choice.is-selected {
+    border-color: color-mix(in srgb, var(--primary-color) 58%, var(--border-color));
+    background: color-mix(in srgb, var(--primary-color-light) 78%, var(--bg-primary));
+    color: var(--text-primary);
+    box-shadow: 0 0 0 0.12rem color-mix(in srgb, var(--primary-color) 12%, transparent);
+}
+
+.home-assistant-planning-choice-label {
+    display: block;
+    font-size: 0.85rem;
+    font-weight: 600;
+    line-height: 1.35;
+}
+
+.home-assistant-planning-choice-hint {
+    color: var(--text-muted);
+    font-size: 0.74rem;
+    line-height: 1.35;
 }
 
 .home-assistant-planning-upload {
@@ -2360,9 +2450,23 @@ h3, .h3 {
         padding: 0.9rem;
     }
 
+    .home-assistant-conversation-section {
+        padding: 0.85rem;
+    }
+
+    .home-assistant-conversation-section-header {
+        align-items: stretch;
+        flex-direction: column;
+    }
+
     .home-assistant-planning-upload {
         align-items: flex-start;
         flex-direction: column;
+    }
+
+    .home-assistant-planning-choice {
+        min-width: 0;
+        width: 100%;
     }
 
     .home-assistant-inline-reply-card {
