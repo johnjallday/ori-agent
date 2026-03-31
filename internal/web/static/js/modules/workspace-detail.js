@@ -9651,8 +9651,16 @@ export class WorkspaceDetailPage {
    */
   openTask(taskId) {
     // Use existing task modal controller
+    const task = this.tasks.find(t => t.id === taskId);
+    if (task) {
+      const statusInfo = this.getTaskStatusPresentation(task);
+      if (statusInfo.isBlocked) {
+        this.openTaskAssistModal(taskId);
+        return;
+      }
+    }
+
     if (window.taskModalController && typeof window.taskModalController.openForEdit === 'function') {
-      const task = this.tasks.find(t => t.id === taskId);
       if (task) {
         window.taskModalController.openForEdit(task, () => this.loadTasks());
       }

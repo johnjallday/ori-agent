@@ -5984,6 +5984,15 @@
           });
         }
       }
+      if (inlineReplyState && inlineReplyState.linkedTask && inlineReplyState.linkedTask.id) {
+        try {
+          await persistPlanningSubtaskToTask(inlineReplyState);
+        } catch (taskContextError) {
+          dashLog.debug('Failed to persist planning subtask onto task', {
+            error: taskContextError && taskContextError.message || taskContextError
+          });
+        }
+      }
       var hasChoiceStep = inlineReplyState &&
         inlineReplyState.workflowStep &&
         String(inlineReplyState.workflowStep.step_type || '').trim() === 'ask_choice' &&
@@ -7753,6 +7762,109 @@
     } else if (typeof detail.renderAgentGroups === 'function') {
       detail.renderAgentGroups();
     }
+  }
+
+  function syncUpdatedTaskIntoWorkspaceDetail(updatedTask) {
+    if (!window.workspaceDetail || !updatedTask || !updatedTask.id) return;
+
+    var detail = window.workspaceDetail;
+    if (!Array.isArray(detail.tasks)) {
+      detail.tasks = [];
+    }
+
+    var idx = detail.tasks.findIndex(function (task) {
+      return task && task.id === updatedTask.id;
+    });
+
+    if (idx >= 0) {
+      var existing = detail.tasks[idx] || {};
+      var nextContext = Object.assign({}, existing.context || {}, updatedTask.context || {});
+      detail.tasks[idx] = Object.assign({}, existing, updatedTask, { context: nextContext });
+    } else {
+      detail.tasks = [updatedTask].concat(detail.tasks);
+    }
+
+    detail.tasksLoading = false;
+    detail.tasksLoadFailed = false;
+    if (detail.elements && detail.elements.taskCount) {
+      detail.elements.taskCount.textContent = String(detail.tasks.length);
+    }
+    if (typeof detail.renderTasks === 'function') {
+      detail.renderTasks();
+    } else if (typeof detail.renderAgentGroups === 'function') {
+      detail.renderAgentGroups();
+    }
+  }
+
+  function buildPlanningTaskQuestion(replyState) {
+    if (!replyState) return 'How should I continue this planning task?';
+
+    if (replyState.workflowStep &&
+        String(replyState.workflowStep.step_type || '').trim() === 'ask_choice' &&
+        Array.isArray(replyState.workflowStep.choices) &&
+        replyState.workflowStep.choices.length > 0) {
+      var choiceLabels = replyState.workflowStep.choices.map(function (choice) {
+        var number = String(choice && choice.number || '').trim();
+        var label = String(choice && choice.label || '').trim();
+        return (number ? number + '. ' : '') + label;
+      }).filter(Boolean);
+      var prefix = String(replyState.workflowStep.summary || replyState.workflowStep.title || '').trim();
+      var prompt = prefix || 'Choose the next step for this planning task.';
+      if (choiceLabels.length > 0) {
+        prompt += '\n\nOptions:\n- ' + choiceLabels.join('\n- ');
+      }
+      return prompt;
+    }
+
+    if (Array.isArray(replyState.questionPrompts) && replyState.questionPrompts.length > 0) {
+      return replyState.questionPrompts.join('\n');
+    }
+
+    return 'How should I continue this planning task?';
+  }
+
+  async function persistPlanningSubtaskToTask(replyState) {
+    if (!replyState || !replyState.linkedTask || !replyState.linkedTask.id) return null;
+
+    var humanLoop = {
+      state: 'blocked',
+      block_id: 'planning:' + String(replyState.linkedTask.id || '').trim(),
+      reason_code: 'planning_input_required',
+      reason: 'This planning task needs your input before it can continue.',
+      question: buildPlanningTaskQuestion(replyState),
+      agent_response: String(replyState.latestReplyText || '').trim(),
+      suggested_actions: ['continue_with_instruction', 'mark_failed'],
+      updated_at: new Date().toISOString()
+    };
+
+    var payload = {
+      context: {
+        human_loop: humanLoop,
+        planning_latest_reply: String(replyState.latestReplyText || '').trim(),
+        planning_workflow_step: replyState.workflowStep || null,
+        planning_session_id: String(replyState.routeContext && replyState.routeContext.session_id || '').trim()
+      }
+    };
+
+    var response = await fetch('/api/orchestration/tasks/' + encodeURIComponent(replyState.linkedTask.id), {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    if (!response.ok) {
+      var text = '';
+      try {
+        text = await response.text();
+      } catch (_error) {
+        text = '';
+      }
+      throw new Error(text || 'Failed to update planning task');
+    }
+
+    var updatedTask = await response.json();
+    syncUpdatedTaskIntoWorkspaceDetail(updatedTask);
+    replyState.linkedTask = updatedTask;
+    return updatedTask;
   }
 
   async function createScheduledWorkspaceTask(workspaceId, description, agentName, scheduleConfig, scheduleName) {
