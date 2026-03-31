@@ -2098,6 +2098,71 @@ h3, .h3 {
     margin-bottom: 0.35rem;
 }
 
+.home-assistant-inline-reply-title {
+    color: var(--text-primary);
+    font-size: 1rem;
+    font-weight: 700;
+    line-height: 1.4;
+    margin-bottom: 0.85rem;
+}
+
+.home-assistant-inline-reply-preview {
+    background:
+        linear-gradient(180deg, color-mix(in srgb, var(--primary-color) 10%, transparent) 0%, transparent 36%),
+        var(--bg-primary);
+    border: 1px solid color-mix(in srgb, var(--primary-color) 28%, var(--border-color));
+    border-radius: calc(var(--radius-md) + 2px);
+    box-shadow: inset 0 1px 0 color-mix(in srgb, white 6%, transparent);
+    margin-bottom: 0.9rem;
+    overflow: hidden;
+}
+
+.home-assistant-inline-reply-preview-eyebrow {
+    color: var(--primary-color);
+    font-size: 0.73rem;
+    font-weight: 800;
+    letter-spacing: 0.08em;
+    padding: 0.8rem 0.95rem 0;
+    text-transform: uppercase;
+}
+
+.home-assistant-inline-reply-preview-body {
+    color: var(--text-primary);
+    font-size: 0.88rem;
+    line-height: 1.55;
+    max-height: min(34vh, 360px);
+    overflow: auto;
+    padding: 0.55rem 0.95rem 0.95rem;
+    white-space: pre-wrap;
+}
+
+.home-assistant-inline-reply-prompts {
+    background: color-mix(in srgb, var(--bg-secondary) 94%, transparent);
+    border: 1px dashed color-mix(in srgb, var(--primary-color) 32%, var(--border-color));
+    border-radius: var(--radius-md);
+    margin-bottom: 0.85rem;
+    padding: 0.8rem 0.9rem;
+}
+
+.home-assistant-inline-reply-prompts-title {
+    color: var(--text-primary);
+    font-size: 0.82rem;
+    font-weight: 700;
+    margin-bottom: 0.45rem;
+}
+
+.home-assistant-inline-reply-prompts-list {
+    color: var(--text-secondary);
+    display: grid;
+    gap: 0.45rem;
+    margin: 0;
+    padding-left: 1.05rem;
+}
+
+.home-assistant-inline-reply-prompts-list li {
+    line-height: 1.45;
+}
+
 .home-assistant-inline-reply-copy {
     color: var(--text-secondary);
     font-size: 0.84rem;
@@ -2108,6 +2173,12 @@ h3, .h3 {
     display: flex;
     flex-direction: column;
     gap: 0.7rem;
+}
+
+.home-assistant-inline-reply-input-label {
+    color: var(--text-primary);
+    font-size: 0.81rem;
+    font-weight: 700;
 }
 
 .home-assistant-inline-reply-textarea {

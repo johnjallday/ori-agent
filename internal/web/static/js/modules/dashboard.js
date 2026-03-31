@@ -911,7 +911,7 @@
       return;
     }
     if (hasVisibleHomeAssistantInlineReply()) {
-      els.thinkingModalLabel.textContent = label + ' needs one more answer';
+      els.thinkingModalLabel.textContent = label + ' has a next step ready';
       return;
     }
     els.thinkingModalLabel.textContent = label + ' is working';
@@ -952,9 +952,9 @@
       if (hasFailureState && hasConversation) {
         els.conversationSummary.textContent = 'The request failed above. Expand this only if you want the original prompt and inline details.';
       } else if (hasStructuredStep && hasConversation) {
-        els.conversationSummary.textContent = 'The active step is above. Expand this only if you want the full transcript and manager notes.';
+        els.conversationSummary.textContent = 'The active step is above. Open this only if you want the full transcript and manager notes.';
       } else if (hasConversation) {
-        els.conversationSummary.textContent = 'Messages, progress notes, and manager replies appear here.';
+        els.conversationSummary.textContent = 'Full transcript, progress notes, and manager replies appear here.';
       } else {
         els.conversationSummary.textContent = 'Progress updates will appear here after you send a task.';
       }
@@ -1857,11 +1857,42 @@
     return 'Reply to ' + (agentLabel || getWorkspaceHomeAssistantDisplayName()) + '...';
   }
 
-  function enableHomeAssistantInlineReply(routeContext, intent, agentLabel) {
+  function cleanInlineReplyQuestion(text) {
+    return String(text || '')
+      .replace(/^[\s>*-]+/, '')
+      .replace(/^\d+[\.)]\s*/, '')
+      .replace(/\*\*/g, '')
+      .trim();
+  }
+
+  function extractInlineReplyQuestions(text) {
+    var lines = String(text || '').split(/\r?\n/);
+    var questions = [];
+    var seen = Object.create(null);
+
+    for (var i = 0; i < lines.length; i++) {
+      var line = cleanInlineReplyQuestion(lines[i]);
+      if (!line || line.length < 8) continue;
+      if (line.charAt(line.length - 1) !== '?') continue;
+
+      var normalized = normalizeToken(line);
+      if (seen[normalized]) continue;
+      seen[normalized] = true;
+      questions.push(line);
+      if (questions.length >= 4) break;
+    }
+
+    return questions;
+  }
+
+  function enableHomeAssistantInlineReply(routeContext, intent, agentLabel, latestReplyText) {
+    var normalizedReply = String(latestReplyText || '').trim();
     homeAssistantState.inlineReplyState = {
       routeContext: normalizeHomeRouteContext(routeContext),
       intent: intent || HOME_INTENTS.general_task,
       agentLabel: String(agentLabel || getWorkspaceHomeAssistantDisplayName()).trim() || getWorkspaceHomeAssistantDisplayName(),
+      latestReplyText: normalizedReply,
+      questionPrompts: extractInlineReplyQuestions(normalizedReply),
       draft: '',
       submitting: false
     };
@@ -2321,19 +2352,71 @@
 
     var header = document.createElement('div');
     header.className = 'home-assistant-inline-reply-header';
-    header.textContent = 'Next Response';
+    header.textContent = 'Next Step';
     card.appendChild(header);
+
+    var title = document.createElement('div');
+    title.className = 'home-assistant-inline-reply-title';
+    title.textContent = 'Review the latest manager plan, then respond below.';
+    card.appendChild(title);
+
+    if (replyState.latestReplyText) {
+      var preview = document.createElement('section');
+      preview.className = 'home-assistant-inline-reply-preview';
+
+      var previewEyebrow = document.createElement('div');
+      previewEyebrow.className = 'home-assistant-inline-reply-preview-eyebrow';
+      previewEyebrow.textContent = replyState.agentLabel || getWorkspaceHomeAssistantDisplayName();
+      preview.appendChild(previewEyebrow);
+
+      var previewBody = document.createElement('div');
+      previewBody.className = 'home-assistant-inline-reply-preview-body';
+      previewBody.textContent = replyState.latestReplyText;
+      preview.appendChild(previewBody);
+      card.appendChild(preview);
+    }
+
+    if (replyState.questionPrompts && replyState.questionPrompts.length > 0) {
+      var prompts = document.createElement('section');
+      prompts.className = 'home-assistant-inline-reply-prompts';
+
+      var promptsTitle = document.createElement('div');
+      promptsTitle.className = 'home-assistant-inline-reply-prompts-title';
+      promptsTitle.textContent = 'What I Need From You';
+      prompts.appendChild(promptsTitle);
+
+      var promptsList = document.createElement('ul');
+      promptsList.className = 'home-assistant-inline-reply-prompts-list';
+
+      for (var i = 0; i < replyState.questionPrompts.length; i++) {
+        var item = document.createElement('li');
+        item.textContent = replyState.questionPrompts[i];
+        promptsList.appendChild(item);
+      }
+
+      prompts.appendChild(promptsList);
+      card.appendChild(prompts);
+    }
 
     var copy = document.createElement('div');
     copy.className = 'home-assistant-inline-reply-copy';
-    copy.textContent = 'Review the latest manager note in the transcript if needed, then answer here or open full chat.';
+    copy.textContent = replyState.questionPrompts && replyState.questionPrompts.length > 0
+      ? 'Answer the open questions below, or move this to full chat if you want a longer back-and-forth.'
+      : 'Add your next answer below, or move this to full chat if the task needs a longer back-and-forth.';
     card.appendChild(copy);
 
     var form = document.createElement('form');
     form.className = 'home-assistant-inline-reply-form';
     form.noValidate = true;
 
+    var label = document.createElement('label');
+    label.className = 'home-assistant-inline-reply-input-label';
+    label.setAttribute('for', 'homeAssistantInlineReplyMessage');
+    label.textContent = 'Your Answer';
+    form.appendChild(label);
+
     var textarea = document.createElement('textarea');
+    textarea.id = 'homeAssistantInlineReplyMessage';
     textarea.className = 'home-assistant-inline-reply-textarea';
     textarea.name = 'inlineReplyMessage';
     textarea.disabled = isSubmitting;
@@ -2352,7 +2435,7 @@
     sendButton.type = 'submit';
     sendButton.className = 'modern-btn modern-btn-primary';
     sendButton.disabled = isSubmitting;
-    sendButton.textContent = isSubmitting ? 'Sending...' : 'Send Reply';
+    sendButton.textContent = isSubmitting ? 'Sending...' : 'Send Answer';
     actions.appendChild(sendButton);
 
     var openChatButton = document.createElement('button');
@@ -5319,12 +5402,17 @@
       if (!keepPlanningReview) {
         clearHomeAssistantPlanning();
       }
-      enableHomeAssistantInlineReply(sessionRouteContext, intent, entryLabel);
+      enableHomeAssistantInlineReply(
+        sessionRouteContext,
+        intent,
+        entryLabel,
+        assistantSessionResult.responseText || ''
+      );
       setHomeAssistantRoutingSummary(
         entryLabel,
         assistantSessionResult.reused
-          ? 'The manager needs one more answer. Use the response card below, or open full chat.'
-          : 'The workspace manager replied inline. Use the response card below, or open full chat.'
+          ? 'The manager needs one more answer. Review the next step below, or open full chat.'
+          : 'The workspace manager replied inline. Review the next step below, or open full chat.'
       );
     }
     renderHomeAssistantDependencyResolution(
@@ -6133,6 +6221,7 @@
     setHomeAssistantMode('continue_session');
     appendHomeAssistantMessage('assistant', responseText);
     result.responseData = data;
+    result.responseText = responseText;
     result.rawToolPayload = rawToolPayload;
 
     return result;
