@@ -793,19 +793,28 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req struct {
-		Question             string            `json:"question"`
-		AgentName            string            `json:"agent_name,omitempty"` // Allow specifying target agent
-		Files                []UploadedFile    `json:"files,omitempty"`
-		RouteContext         *chatRouteContext `json:"route_context,omitempty"`
-		MultiAgentMode       string            `json:"multi_agent_mode,omitempty"`
-		MultiAgentThreshold  float64           `json:"multi_agent_threshold,omitempty"`
-		PlanBeforeAction     bool              `json:"plan_before_action,omitempty"`
-		ApprovedActionPlanID string            `json:"approved_action_plan_id,omitempty"`
+		Question             string                `json:"question"`
+		AgentName            string                `json:"agent_name,omitempty"` // Allow specifying target agent
+		Files                []UploadedFile        `json:"files,omitempty"`
+		RouteContext         *chatRouteContext     `json:"route_context,omitempty"`
+		WorkflowResponse     *WorkflowUserResponse `json:"workflow_response,omitempty"`
+		MultiAgentMode       string                `json:"multi_agent_mode,omitempty"`
+		MultiAgentThreshold  float64               `json:"multi_agent_threshold,omitempty"`
+		PlanBeforeAction     bool                  `json:"plan_before_action,omitempty"`
+		ApprovedActionPlanID string                `json:"approved_action_plan_id,omitempty"`
 	}
 	if !orihttp.ParseJSONBody(w, r, &req) {
 		return
 	}
 	q := strings.TrimSpace(req.Question)
+	if req.WorkflowResponse != nil {
+		workflowPrompt, err := buildPromptFromWorkflowResponse(req.WorkflowResponse)
+		if err != nil {
+			orihttp.BadRequest(w, err.Error())
+			return
+		}
+		q = workflowPrompt
+	}
 	if q == "" {
 		orihttp.BadRequest(w, "empty question")
 		return
@@ -1149,6 +1158,7 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 		writeJSONResponse(w, attachRouteMetadata(map[string]any{
 			"response":      responseText,
 			"planning_form": planningResp.Form,
+			"workflow_step": buildWorkflowStepFromPlanningForm(planningResp.Form, sessionID),
 		}, chatRouteMetadata{
 			Mode:   routeModeAssistantChat,
 			Reason: "workspace planning form required",

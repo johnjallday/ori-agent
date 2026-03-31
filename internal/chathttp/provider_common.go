@@ -46,10 +46,11 @@ type boundedToolLoopConfig struct {
 }
 
 type boundedToolLoopCallbacks struct {
-	AppendAssistantTurn func(content string, toolCalls []llm.ToolCall)
-	ExecuteToolCalls    func(toolCalls []llm.ToolCall) ExecuteToolCallsResult
-	AppendToolResults   func(toolCalls []llm.ToolCall, execResult ExecuteToolCallsResult)
-	RequestNextResponse func() (content string, toolCalls []llm.ToolCall, err error)
+	AppendAssistantTurn  func(content string, toolCalls []llm.ToolCall)
+	ExecuteToolCalls     func(toolCalls []llm.ToolCall) ExecuteToolCallsResult
+	AppendToolResults    func(toolCalls []llm.ToolCall, execResult ExecuteToolCallsResult)
+	RequestNextResponse  func() (content string, toolCalls []llm.ToolCall, err error)
+	RequestFinalResponse func() (content string, err error)
 }
 
 type boundedToolLoopResult struct {
@@ -108,6 +109,14 @@ func (h *Handler) runBoundedToolLoop(
 				"count":       count,
 				"max_allowed": maxRepeatedFingerprints,
 			})
+			if finalContent, ok := tryToolLoopFinalSynthesis(callbacks.RequestFinalResponse); ok {
+				return boundedToolLoopResult{
+					FinalContent: finalContent,
+					ToolCalls:    allToolCalls,
+					Receipts:     allReceipts,
+					StopReason:   "repeated_tool_call_synthesized",
+				}
+			}
 			return boundedToolLoopResult{
 				FinalContent:     fallbackToolLoopContent(allToolCalls, "tool loop repeated the same call"),
 				ToolCalls:        allToolCalls,
@@ -138,6 +147,14 @@ func (h *Handler) runBoundedToolLoop(
 			logger.Warn("Stopping tool loop after max turns reached", logger.Fields{
 				"max_turns": maxTurns,
 			})
+			if finalContent, ok := tryToolLoopFinalSynthesis(callbacks.RequestFinalResponse); ok {
+				return boundedToolLoopResult{
+					FinalContent: finalContent,
+					ToolCalls:    allToolCalls,
+					Receipts:     allReceipts,
+					StopReason:   "max_turns_synthesized",
+				}
+			}
 			return boundedToolLoopResult{
 				FinalContent:     fallbackToolLoopContent(allToolCalls, "tool loop reached max turns"),
 				ToolCalls:        allToolCalls,
@@ -171,6 +188,26 @@ func (h *Handler) runBoundedToolLoop(
 		UsedToolFallback: true,
 		StopReason:       "unexpected_stop",
 	}
+}
+
+func tryToolLoopFinalSynthesis(request func() (string, error)) (string, bool) {
+	if request == nil {
+		return "", false
+	}
+
+	content, err := request()
+	if err != nil {
+		logger.Warn("Final tool-loop synthesis request failed", logger.Fields{
+			"error": err,
+		})
+		return "", false
+	}
+
+	trimmed := strings.TrimSpace(content)
+	if trimmed == "" {
+		return "", false
+	}
+	return trimmed, true
 }
 
 func detectRepeatedToolFingerprint(toolCalls []llm.ToolCall, seen map[string]int, maxAllowed int) (bool, string, int) {
@@ -380,6 +417,10 @@ func writeErrorResponse(w http.ResponseWriter, message string) {
 // getFollowUpSystemPrompt returns the system prompt for follow-up requests after tool execution
 func getFollowUpSystemPrompt() string {
 	return "Use tool output as the source of truth. Do not invent data and do not hide requested details behind high-level summaries. If the user asks for names/items/files/paths, include the exact identifiers from the tool output. For file metadata responses, include filename or path with each metadata block. Keep the response concise and avoid unnecessary follow-up suggestions. For pure action tools (opening apps/projects), provide a brief confirmation."
+}
+
+func getFinalToolLoopSynthesisPrompt() string {
+	return "You have reached the tool budget for this turn. Do not call any more tools. Using only the tool results already gathered, provide the single best direct answer to the user now. If a tool failed, ignore that failure unless it blocks the answer. Do not return raw JSON or tool logs. Synthesize the answer in normal language."
 }
 
 // emptyResponseText is the default text when the model returns an empty response

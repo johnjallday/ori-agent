@@ -259,11 +259,81 @@ func TestWorkspaceNotesRejectsAmbiguousNameFallback(t *testing.T) {
 
 	provider := NewWorkspaceToolProvider(sessionStore, nil, workspaceID)
 	tool := provider.readNotesTool()
-	_, err := tool.Call(ctx, `{"note_id":"Workspace Brief"}`)
-	if err == nil {
-		t.Fatal("expected ambiguous note name fallback to fail")
+	result, err := tool.Call(ctx, `{"note_id":"Workspace Brief"}`)
+	if err != nil {
+		t.Fatalf("expected ambiguous note fallback to return guidance, got %v", err)
 	}
-	if !strings.Contains(err.Error(), "multiple workspace notes share the name") {
-		t.Fatalf("expected ambiguous note name error, got %v", err)
+
+	var payload struct {
+		NoteFound     bool                     `json:"note_found"`
+		RequestedNote string                   `json:"requested_note"`
+		Message       string                   `json:"message"`
+		Available     []map[string]interface{} `json:"available_notes"`
+	}
+	if err := json.Unmarshal([]byte(result), &payload); err != nil {
+		t.Fatalf("failed to decode result: %v", err)
+	}
+
+	if payload.NoteFound {
+		t.Fatal("expected ambiguous note guidance payload, got resolved note")
+	}
+	if !strings.Contains(payload.Message, "Multiple workspace notes share the name") {
+		t.Fatalf("expected ambiguous note guidance, got %q", payload.Message)
+	}
+	if len(payload.Available) != 2 {
+		t.Fatalf("expected 2 available notes, got %d", len(payload.Available))
+	}
+}
+
+func TestWorkspaceNotesReturnsGuidanceForMissingNoteID(t *testing.T) {
+	ctx := context.Background()
+	sessionStore, cleanup := setupWorkspaceToolSessionStore(t)
+	defer cleanup()
+
+	workspaceID := "workspace-notes-missing"
+	if err := sessionStore.CreateWorkspace(ctx, &session.Workspace{ID: workspaceID, Name: "Notes"}); err != nil {
+		t.Fatalf("failed to create workspace: %v", err)
+	}
+
+	note := &session.WorkspaceNote{
+		ID:          "note-1",
+		WorkspaceID: workspaceID,
+		Name:        "Workspace Brief",
+		Content:     "content",
+		CreatedAt:   time.Now(),
+		UpdatedAt:   time.Now(),
+	}
+	if err := sessionStore.CreateNote(ctx, note); err != nil {
+		t.Fatalf("failed to create note: %v", err)
+	}
+
+	provider := NewWorkspaceToolProvider(sessionStore, nil, workspaceID)
+	tool := provider.readNotesTool()
+	result, err := tool.Call(ctx, `{"note_id":"wrong-note-id"}`)
+	if err != nil {
+		t.Fatalf("expected missing note fallback to return guidance, got %v", err)
+	}
+
+	var payload struct {
+		NoteFound     bool                     `json:"note_found"`
+		RequestedNote string                   `json:"requested_note"`
+		Message       string                   `json:"message"`
+		Available     []map[string]interface{} `json:"available_notes"`
+	}
+	if err := json.Unmarshal([]byte(result), &payload); err != nil {
+		t.Fatalf("failed to decode result: %v", err)
+	}
+
+	if payload.NoteFound {
+		t.Fatal("expected missing note guidance payload, got resolved note")
+	}
+	if payload.RequestedNote != "wrong-note-id" {
+		t.Fatalf("unexpected requested note %q", payload.RequestedNote)
+	}
+	if !strings.Contains(payload.Message, "was not found in this workspace") {
+		t.Fatalf("expected missing note guidance, got %q", payload.Message)
+	}
+	if len(payload.Available) != 1 {
+		t.Fatalf("expected 1 available note, got %d", len(payload.Available))
 	}
 }

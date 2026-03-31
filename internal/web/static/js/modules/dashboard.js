@@ -1548,6 +1548,90 @@
     };
   }
 
+  function convertWorkflowFormToPlanningSchema(step) {
+    if (!step || String(step.step_type || '').trim() !== 'ask_form') return null;
+    var form = step.form;
+    if (!form || typeof form !== 'object') return null;
+
+    var fields = Array.isArray(form.fields) ? form.fields : [];
+    var questions = [];
+    for (var i = 0; i < fields.length; i++) {
+      var field = fields[i] || {};
+      questions.push({
+        id: String(field.id || '').trim(),
+        type: String(field.type || '').trim(),
+        label: String(field.label || '').trim(),
+        help_text: String(field.help_text || '').trim(),
+        placeholder: String(field.placeholder || '').trim(),
+        required: Boolean(field.required),
+        rows: Number(field.rows || 0),
+        options: Array.isArray(field.options) ? field.options : [],
+        visible_when: field.visible_when || null,
+        file_config: field.file_config || null
+      });
+    }
+
+    return normalizePlanningFormSchema({
+      id: String(form.id || step.step_id || '').trim(),
+      kind: String(form.kind || '').trim(),
+      title: String(form.title || step.title || 'Planning Step').trim(),
+      subtitle: String(form.subtitle || step.preview_markdown || '').trim(),
+      summary: String(form.summary || step.summary || '').trim(),
+      submit_label: String(form.submit_label || '').trim(),
+      submit_instructions: String(form.submit_instructions || '').trim(),
+      questions: questions
+    });
+  }
+
+  function buildWorkflowFormResponsePayload(planningState) {
+    if (!planningState || !planningState.schema || !planningState.workflowStep) return null;
+
+    var questions = getPlanningQuestions(planningState);
+    var formData = planningState.formData || {};
+    var uploads = planningState.uploads || {};
+    var answers = [];
+    var attachments = [];
+
+    for (var i = 0; i < questions.length; i++) {
+      var question = questions[i];
+      if (!shouldShowPlanningQuestion(question, planningState)) continue;
+
+      if (question.type === 'file') {
+        attachments.push({
+          id: question.id,
+          label: question.label,
+          attachment_kind: question.file_config && question.file_config.attachment_kind ? question.file_config.attachment_kind : question.id,
+          upload_modal_opened: Boolean(uploads[question.id])
+        });
+        continue;
+      }
+
+      var rawValue = formData[question.id];
+      answers.push({
+        id: question.id,
+        label: question.label,
+        type: question.type,
+        value: rawValue == null ? '' : rawValue,
+        display_value: getPlanningQuestionDisplayValue(question, rawValue),
+        required: Boolean(question.required)
+      });
+    }
+
+    return {
+      workflow_id: String(planningState.workflowStep.workflow_id || '').trim(),
+      step_id: String(planningState.workflowStep.step_id || '').trim(),
+      response_type: 'form',
+      form: {
+        form_id: planningState.schema.id || '',
+        form_kind: planningState.schema.kind || '',
+        form_title: planningState.schema.title || '',
+        original_request: String(planningState.prompt || '').trim(),
+        answers: answers,
+        attachments: attachments
+      }
+    };
+  }
+
   function activateHomeAssistantPlanningForm(schema, options) {
     var normalizedSchema = normalizePlanningFormSchema(schema);
     if (!normalizedSchema) return;
@@ -1559,6 +1643,7 @@
       routeContext: normalizeHomeRouteContext(options && options.routeContext),
       intent: options && options.intent ? options.intent : HOME_INTENTS.general_task,
       agentLabel: String(options && options.agentLabel || getWorkspaceHomeAssistantDisplayName()).trim() || getWorkspaceHomeAssistantDisplayName(),
+      workflowStep: options && options.workflowStep ? options.workflowStep : null,
       schema: normalizedSchema,
       formData: {},
       uploads: {},
@@ -1610,9 +1695,11 @@
       routeContext: normalizeHomeRouteContext(planningState.routeContext),
       intent: planningState.intent || HOME_INTENTS.general_task,
       agentLabel: planningState.agentLabel || getWorkspaceHomeAssistantDisplayName(),
+      workflowStep: planningState.workflowStep || null,
       schema: planningState.schema,
       summaryText: buildPlanningFormAnswerSummary(planningState),
       dispatchPrompt: buildStructuredPlanningFormPrompt(planningState),
+      workflowResponse: buildWorkflowFormResponsePayload(planningState),
       noteName: derivePlanningReviewNoteName(planningState),
       noteSaved: null,
       noteSaving: false,
@@ -1819,6 +1906,7 @@
         planningState.intent,
         {
           dispatchPrompt: planningState.dispatchPrompt,
+          workflowResponse: planningState.workflowResponse || null,
           preservePlanningReview: true,
           reuseExistingSession: true
         }
@@ -1865,6 +1953,23 @@
       .trim();
   }
 
+  function cleanInlineReplyChoiceText(text) {
+    return String(text || '')
+      .replace(/^\s*[-*]\s*/, '')
+      .replace(/^\s*\d+[\.)]\s*/, '')
+      .replace(/\*\*/g, '')
+      .replace(/`/g, '')
+      .replace(/\[(.*?)\]\((.*?)\)/g, '$1')
+      .replace(/\s+/g, ' ')
+      .trim();
+  }
+
+  function buildInlineReplyChoiceId(number, label) {
+    var normalized = normalizeToken(label).replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
+    if (!normalized) normalized = 'option';
+    return 'choice_' + String(number || 'x').trim() + '_' + normalized.slice(0, 48);
+  }
+
   function extractInlineReplyQuestions(text) {
     var lines = String(text || '').split(/\r?\n/);
     var questions = [];
@@ -1885,19 +1990,107 @@
     return questions;
   }
 
-  function enableHomeAssistantInlineReply(routeContext, intent, agentLabel, latestReplyText) {
+  function extractInlineReplyChoices(text) {
+    var lines = String(text || '').split(/\r?\n/);
+    var cueIndex = -1;
+    var cues = ['next steps', 'next step', 'reply with your preference', 'choose one', 'choose the next step'];
+
+    for (var i = 0; i < lines.length; i++) {
+      var cleaned = normalizeToken(cleanInlineReplyChoiceText(lines[i]));
+      for (var c = 0; c < cues.length; c++) {
+        if (cleaned.indexOf(cues[c]) !== -1) {
+          cueIndex = i;
+          break;
+        }
+      }
+      if (cueIndex !== -1) break;
+    }
+
+    if (cueIndex === -1) return [];
+
+    var choices = [];
+    var started = false;
+    for (var lineIndex = cueIndex + 1; lineIndex < lines.length; lineIndex++) {
+      var rawLine = String(lines[lineIndex] || '');
+      var match = rawLine.match(/^\s*(\d+)[\.)]\s*(.+)$/);
+      if (match) {
+        var choiceNumber = String(match[1] || '').trim();
+        var choiceLabel = cleanInlineReplyChoiceText(match[2]);
+        if (!choiceLabel) continue;
+        choices.push({
+          id: buildInlineReplyChoiceId(choiceNumber, choiceLabel),
+          label: choiceLabel,
+          number: choiceNumber
+        });
+        started = true;
+        if (choices.length >= 5) break;
+        continue;
+      }
+
+      if (!started) continue;
+      if (!rawLine.trim()) continue;
+      break;
+    }
+
+    return choices.length >= 2 ? choices : [];
+  }
+
+  function buildSyntheticInlineReplyWorkflowStep(latestReplyText, routeContext) {
+    var choices = extractInlineReplyChoices(latestReplyText);
+    if (!choices.length) return null;
+
+    var normalizedContext = normalizeHomeRouteContext(routeContext);
+    var sessionId = String(normalizedContext && normalizedContext.session_id || '').trim() || 'inline';
+    return {
+      workflow_id: 'workflow:' + sessionId + ':inline-choice',
+      step_id: 'step:inline-choice',
+      step_type: 'ask_choice',
+      title: 'Choose the next step',
+      summary: 'Pick one option below to continue the plan.',
+      choices: choices,
+      free_text_allowed: false
+    };
+  }
+
+  function buildInlineReplyWorkflowResponse(replyState, text) {
+    if (!replyState || !replyState.workflowStep) return null;
+
+    var step = replyState.workflowStep;
+    if (String(step.step_type || '').trim() !== 'ask_choice') return null;
+    if (!replyState.selectedChoiceId) return null;
+
+    return {
+      workflow_id: String(step.workflow_id || '').trim(),
+      step_id: String(step.step_id || '').trim(),
+      response_type: 'choice',
+      choice_id: String(replyState.selectedChoiceId || '').trim(),
+      choice_label: String(replyState.selectedChoiceLabel || '').trim(),
+      choice_number: String(replyState.selectedChoiceNumber || '').trim(),
+      text: String(text || '').trim()
+    };
+  }
+
+  function enableHomeAssistantInlineReply(routeContext, intent, agentLabel, latestReplyText, workflowStep) {
     var normalizedReply = String(latestReplyText || '').trim();
+    var resolvedWorkflowStep = workflowStep && String(workflowStep.step_type || '').trim() === 'ask_choice'
+      ? workflowStep
+      : buildSyntheticInlineReplyWorkflowStep(normalizedReply, routeContext);
     homeAssistantState.inlineReplyState = {
       routeContext: normalizeHomeRouteContext(routeContext),
       intent: intent || HOME_INTENTS.general_task,
       agentLabel: String(agentLabel || getWorkspaceHomeAssistantDisplayName()).trim() || getWorkspaceHomeAssistantDisplayName(),
       latestReplyText: normalizedReply,
+      workflowStep: resolvedWorkflowStep,
       questionPrompts: extractInlineReplyQuestions(normalizedReply),
+      selectedChoiceId: '',
+      selectedChoiceLabel: '',
+      selectedChoiceNumber: '',
       draft: '',
       submitting: false
     };
     homeAssistantState.conversationCollapsed = true;
     renderHomeAssistantInlineReply();
+    return homeAssistantState.inlineReplyState;
   }
 
   function openWorkspacePlanningFileUpload(questionId) {
@@ -2347,6 +2540,16 @@
     }
 
     var isSubmitting = Boolean(replyState.submitting || homeAssistantState.busy);
+    var workflowStep = replyState.workflowStep && typeof replyState.workflowStep === 'object'
+      ? replyState.workflowStep
+      : null;
+    var choiceStep = workflowStep &&
+      String(workflowStep.step_type || '').trim() === 'ask_choice' &&
+      Array.isArray(workflowStep.choices) &&
+      workflowStep.choices.length > 0
+      ? workflowStep
+      : null;
+    var choiceRequiresText = Boolean(choiceStep && choiceStep.free_text_allowed);
     var card = document.createElement('div');
     card.className = 'home-assistant-inline-reply-card';
 
@@ -2357,7 +2560,9 @@
 
     var title = document.createElement('div');
     title.className = 'home-assistant-inline-reply-title';
-    title.textContent = 'Review the latest manager plan, then respond below.';
+    title.textContent = choiceStep && String(choiceStep.title || '').trim()
+      ? String(choiceStep.title || '').trim()
+      : 'Review the latest manager plan, then respond below.';
     card.appendChild(title);
 
     if (replyState.latestReplyText) {
@@ -2376,7 +2581,23 @@
       card.appendChild(preview);
     }
 
-    if (replyState.questionPrompts && replyState.questionPrompts.length > 0) {
+    if (choiceStep) {
+      var choicePrompts = document.createElement('section');
+      choicePrompts.className = 'home-assistant-inline-reply-prompts';
+
+      var choicePromptsTitle = document.createElement('div');
+      choicePromptsTitle.className = 'home-assistant-inline-reply-prompts-title';
+      choicePromptsTitle.textContent = 'What I Need From You';
+      choicePrompts.appendChild(choicePromptsTitle);
+
+      var choicePromptsBody = document.createElement('div');
+      choicePromptsBody.className = 'home-assistant-inline-reply-copy';
+      choicePromptsBody.style.marginBottom = '0';
+      choicePromptsBody.textContent = String(choiceStep.summary || 'Choose one option below to continue this plan.').trim();
+      choicePrompts.appendChild(choicePromptsBody);
+
+      card.appendChild(choicePrompts);
+    } else if (replyState.questionPrompts && replyState.questionPrompts.length > 0) {
       var prompts = document.createElement('section');
       prompts.className = 'home-assistant-inline-reply-prompts';
 
@@ -2400,7 +2621,9 @@
 
     var copy = document.createElement('div');
     copy.className = 'home-assistant-inline-reply-copy';
-    copy.textContent = replyState.questionPrompts && replyState.questionPrompts.length > 0
+    copy.textContent = choiceStep
+      ? 'Choose one option below to continue. Open full chat instead if you want to explain in more detail.'
+      : replyState.questionPrompts && replyState.questionPrompts.length > 0
       ? 'Answer the open questions below, or move this to full chat if you want a longer back-and-forth.'
       : 'Add your next answer below, or move this to full chat if the task needs a longer back-and-forth.';
     card.appendChild(copy);
@@ -2409,24 +2632,66 @@
     form.className = 'home-assistant-inline-reply-form';
     form.noValidate = true;
 
-    var label = document.createElement('label');
-    label.className = 'home-assistant-inline-reply-input-label';
-    label.setAttribute('for', 'homeAssistantInlineReplyMessage');
-    label.textContent = 'Your Answer';
-    form.appendChild(label);
+    if (choiceStep) {
+      var choiceGroup = document.createElement('div');
+      choiceGroup.className = 'home-assistant-planning-choice-group';
 
-    var textarea = document.createElement('textarea');
-    textarea.id = 'homeAssistantInlineReplyMessage';
-    textarea.className = 'home-assistant-inline-reply-textarea';
-    textarea.name = 'inlineReplyMessage';
-    textarea.disabled = isSubmitting;
-    textarea.value = replyState.draft || '';
-    textarea.placeholder = buildHomeAssistantInlineReplyPlaceholder(replyState.intent, replyState.agentLabel);
-    textarea.addEventListener('input', function (event) {
-      if (!homeAssistantState.inlineReplyState) return;
-      homeAssistantState.inlineReplyState.draft = event.target.value;
-    });
-    form.appendChild(textarea);
+      for (var i = 0; i < choiceStep.choices.length; i++) {
+        (function (choice) {
+          var choiceButton = document.createElement('button');
+          choiceButton.type = 'button';
+          choiceButton.className = 'home-assistant-planning-choice' + (replyState.selectedChoiceId === choice.id ? ' is-selected' : '');
+          choiceButton.disabled = isSubmitting;
+          choiceButton.setAttribute('aria-pressed', replyState.selectedChoiceId === choice.id ? 'true' : 'false');
+          choiceButton.addEventListener('click', function () {
+            if (!homeAssistantState.inlineReplyState || isSubmitting) return;
+            homeAssistantState.inlineReplyState.selectedChoiceId = choice.id;
+            homeAssistantState.inlineReplyState.selectedChoiceLabel = choice.label || '';
+            homeAssistantState.inlineReplyState.selectedChoiceNumber = choice.number || '';
+            renderHomeAssistantInlineReply();
+          });
+
+          var choiceLabel = document.createElement('span');
+          choiceLabel.className = 'home-assistant-planning-choice-label';
+          choiceLabel.textContent = choice.number ? choice.number + '. ' + choice.label : choice.label;
+          choiceButton.appendChild(choiceLabel);
+
+          if (choice.description) {
+            var choiceHint = document.createElement('span');
+            choiceHint.className = 'home-assistant-planning-choice-hint';
+            choiceHint.textContent = choice.description;
+            choiceButton.appendChild(choiceHint);
+          }
+
+          choiceGroup.appendChild(choiceButton);
+        })(choiceStep.choices[i] || {});
+      }
+
+      form.appendChild(choiceGroup);
+    }
+
+    if (!choiceStep || choiceRequiresText) {
+      var label = document.createElement('label');
+      label.className = 'home-assistant-inline-reply-input-label';
+      label.setAttribute('for', 'homeAssistantInlineReplyMessage');
+      label.textContent = choiceStep ? 'Optional Note' : 'Your Answer';
+      form.appendChild(label);
+
+      var textarea = document.createElement('textarea');
+      textarea.id = 'homeAssistantInlineReplyMessage';
+      textarea.className = 'home-assistant-inline-reply-textarea';
+      textarea.name = 'inlineReplyMessage';
+      textarea.disabled = isSubmitting;
+      textarea.value = replyState.draft || '';
+      textarea.placeholder = choiceStep
+        ? 'Add extra context for this choice (optional)'
+        : buildHomeAssistantInlineReplyPlaceholder(replyState.intent, replyState.agentLabel);
+      textarea.addEventListener('input', function (event) {
+        if (!homeAssistantState.inlineReplyState) return;
+        homeAssistantState.inlineReplyState.draft = event.target.value;
+      });
+      form.appendChild(textarea);
+    }
 
     var actions = document.createElement('div');
     actions.className = 'home-assistant-inline-reply-actions';
@@ -2434,15 +2699,19 @@
     var sendButton = document.createElement('button');
     sendButton.type = 'submit';
     sendButton.className = 'modern-btn modern-btn-primary';
-    sendButton.disabled = isSubmitting;
-    sendButton.textContent = isSubmitting ? 'Sending...' : 'Send Answer';
+    sendButton.disabled = isSubmitting || (choiceStep ? !replyState.selectedChoiceId : false);
+    sendButton.textContent = isSubmitting
+      ? 'Sending...'
+      : choiceStep
+      ? 'Continue with Selected Choice'
+      : 'Send Answer';
     actions.appendChild(sendButton);
 
     var openChatButton = document.createElement('button');
     openChatButton.type = 'button';
     openChatButton.className = 'modern-btn modern-btn-secondary';
     openChatButton.disabled = isSubmitting;
-    openChatButton.textContent = 'Open Chat Instead';
+    openChatButton.textContent = choiceStep ? 'Explain in Full Chat' : 'Open Chat Instead';
     openChatButton.addEventListener('click', function () {
       openChatPanel();
     });
@@ -2465,8 +2734,28 @@
     var replyState = homeAssistantState.inlineReplyState;
     if (!replyState || replyState.submitting) return;
 
+    var workflowResponse = buildInlineReplyWorkflowResponse(replyState, replyState.draft || '');
+    var choiceStep = replyState.workflowStep &&
+      String(replyState.workflowStep.step_type || '').trim() === 'ask_choice' &&
+      Array.isArray(replyState.workflowStep.choices) &&
+      replyState.workflowStep.choices.length > 0;
     var text = String(replyState.draft || '').trim();
-    if (!text) {
+    var submittedText = text;
+    if (choiceStep) {
+      if (!workflowResponse) {
+        if (window.Toast) {
+          Toast.warning('Choose one next step before sending it to the workspace manager.');
+        }
+        renderHomeAssistantInlineReply();
+        return;
+      }
+      submittedText = String(replyState.selectedChoiceLabel || replyState.selectedChoiceId || '').trim();
+      if (text) {
+        submittedText += ': ' + text;
+      }
+    }
+
+    if (!submittedText) {
       if (window.Toast) {
         Toast.warning('Enter a reply before sending it to the workspace manager.');
       }
@@ -2476,13 +2765,14 @@
 
     replyState.submitting = true;
     renderHomeAssistantInlineReply();
-    appendHomeAssistantMessage('user', text);
+    appendHomeAssistantMessage('user', submittedText);
     setHomeAssistantBusy(true, 'Sending Reply...');
     setHomeAssistantRoutingSummary(replyState.agentLabel, 'Continuing inline with the workspace manager.');
 
     try {
-      await openWorkspaceAssistantForPrompt(text, replyState.routeContext, replyState.intent, {
-        reuseExistingSession: true
+      await openWorkspaceAssistantForPrompt(submittedText, replyState.routeContext, replyState.intent, {
+        reuseExistingSession: true,
+        workflowResponse: workflowResponse
       });
     } catch (error) {
       dashLog.debug('Inline workspace reply failed', { error: error && error.message || error });
@@ -5372,6 +5662,7 @@
       origin: routeContext && routeContext.origin
     });
     var responseData = assistantSessionResult.responseData || null;
+    var workflowStep = responseData && responseData.workflow_step ? responseData.workflow_step : null;
     var planningForm = responseData && responseData.planning_form ? responseData.planning_form : null;
     if (assistantSessionResult.rawToolPayload) {
       clearHomeAssistantPlanning();
@@ -5380,6 +5671,18 @@
       setHomeAssistantRoutingSummary(
         entryLabel,
         'The workspace manager returned raw tool data instead of a reply. Retry or open chat.'
+      );
+    } else if (workflowStep && String(workflowStep.step_type || '').trim() === 'ask_form' && workflowStep.form) {
+      activateHomeAssistantPlanningForm(convertWorkflowFormToPlanningSchema(workflowStep), {
+        prompt: prompt,
+        routeContext: sessionRouteContext,
+        intent: intent,
+        agentLabel: entryLabel,
+        workflowStep: workflowStep
+      });
+      setHomeAssistantRoutingSummary(
+        entryLabel,
+        'The workspace manager switched this into a guided planning step. Complete it below or open full chat.'
       );
     } else if (planningForm) {
       activateHomeAssistantPlanningForm(planningForm, {
@@ -5402,15 +5705,23 @@
       if (!keepPlanningReview) {
         clearHomeAssistantPlanning();
       }
-      enableHomeAssistantInlineReply(
+      var inlineReplyState = enableHomeAssistantInlineReply(
         sessionRouteContext,
         intent,
         entryLabel,
-        assistantSessionResult.responseText || ''
+        assistantSessionResult.responseText || '',
+        workflowStep && String(workflowStep.step_type || '').trim() === 'ask_choice' ? workflowStep : null
       );
+      var hasChoiceStep = inlineReplyState &&
+        inlineReplyState.workflowStep &&
+        String(inlineReplyState.workflowStep.step_type || '').trim() === 'ask_choice' &&
+        Array.isArray(inlineReplyState.workflowStep.choices) &&
+        inlineReplyState.workflowStep.choices.length > 0;
       setHomeAssistantRoutingSummary(
         entryLabel,
-        assistantSessionResult.reused
+        hasChoiceStep
+          ? 'The workspace manager has a structured next step ready. Choose an option below, or open full chat.'
+          : assistantSessionResult.reused
           ? 'The manager needs one more answer. Review the next step below, or open full chat.'
           : 'The workspace manager replied inline. Review the next step below, or open full chat.'
       );
@@ -6195,12 +6506,17 @@
       session_id: session.id,
       origin: routeContext && routeContext.origin
     });
-
-    var data = await API.post('/api/chat', {
-      question: dispatchMessage,
+    var workflowResponse = options && options.workflowResponse ? options.workflowResponse : null;
+    var payload = {
+      question: workflowResponse ? '' : dispatchMessage,
       agent_name: String(result.entryAgentName || session.agent_name || '').trim(),
       route_context: requestContext
-    }, {
+    };
+    if (workflowResponse) {
+      payload.workflow_response = workflowResponse;
+    }
+
+    var data = await API.post('/api/chat', payload, {
       timeout: HOME_ASSISTANT_WORKSPACE_INLINE_TIMEOUT_MS,
       headers: {
         'Content-Type': 'application/json',

@@ -138,6 +138,23 @@ func (h *Handler) handleClaudeToolCalls(
 				h.trackUsageCommon("claude", ag.Settings.Model, agentName, resp2.Usage, ag.Agent, userMessage)
 				return resp2.Content, resp2.ToolCalls, nil
 			},
+			RequestFinalResponse: func() (string, error) {
+				resp2, err := provider.Chat(ctx, llm.ChatRequest{
+					Model:        ag.Settings.Model,
+					Messages:     messages,
+					SystemPrompt: systemPrompt + "\n\n" + getFinalToolLoopSynthesisPrompt(),
+					Temperature:  ag.Settings.Temperature,
+					MaxTokens:    4000,
+				})
+				if err != nil {
+					return "", err
+				}
+				if resp2 == nil {
+					return "", fmt.Errorf("claude final synthesis returned no response")
+				}
+				h.trackUsageCommon("claude", ag.Settings.Model, agentName, resp2.Usage, ag.Agent, userMessage)
+				return resp2.Content, nil
+			},
 		},
 	)
 

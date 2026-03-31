@@ -202,6 +202,59 @@ func TestRunBoundedToolLoop_MaxTurnsFallback(t *testing.T) {
 	}
 }
 
+func TestRunBoundedToolLoop_MaxTurnsUsesFinalSynthesisWhenAvailable(t *testing.T) {
+	h := &Handler{}
+	executions := 0
+	finalSynthesisRequested := false
+
+	result := h.runBoundedToolLoop(
+		"",
+		[]llm.ToolCall{{ID: "tc-1", Name: "echo", Arguments: `{"value":1}`}},
+		boundedToolLoopConfig{
+			MaxTurns:                2,
+			MaxRepeatedFingerprints: 10,
+		},
+		boundedToolLoopCallbacks{
+			ExecuteToolCalls: func(toolCalls []llm.ToolCall) ExecuteToolCallsResult {
+				executions++
+				return ExecuteToolCallsResult{
+					Results: []ToolCallResult{
+						{
+							Function: toolCalls[0].Name,
+							Args:     toolCalls[0].Arguments,
+							Result:   fmt.Sprintf("result-%d", executions),
+							Success:  true,
+						},
+					},
+				}
+			},
+			RequestNextResponse: func() (string, []llm.ToolCall, error) {
+				return "", []llm.ToolCall{{ID: "tc-next", Name: "echo", Arguments: `{"value":1}`}}, nil
+			},
+			RequestFinalResponse: func() (string, error) {
+				finalSynthesisRequested = true
+				return "Here is the synthesized final answer.", nil
+			},
+		},
+	)
+
+	if executions != 2 {
+		t.Fatalf("expected 2 executions before max-turn stop, got %d", executions)
+	}
+	if !finalSynthesisRequested {
+		t.Fatal("expected final synthesis to be requested")
+	}
+	if result.StopReason != "max_turns_synthesized" {
+		t.Fatalf("expected stop reason max_turns_synthesized, got %q", result.StopReason)
+	}
+	if result.UsedToolFallback {
+		t.Fatal("expected synthesized final answer instead of tool fallback")
+	}
+	if result.FinalContent != "Here is the synthesized final answer." {
+		t.Fatalf("unexpected final content %q", result.FinalContent)
+	}
+}
+
 func TestRunBoundedToolLoop_RepeatedFingerprintStop(t *testing.T) {
 	h := &Handler{}
 	executions := 0

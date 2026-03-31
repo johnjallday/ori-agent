@@ -251,6 +251,39 @@ func (h *Handler) handleOpenAIToolCalls(
 				next := resp2.Choices[0].Message
 				return next.Content, convertOpenAIToolCallsToLLM(next.ToolCalls), nil
 			},
+			RequestFinalResponse: func() (string, error) {
+				messages := injectRuntimeSystemPrompt(
+					prependOpenAISystemPrompt(conversation, systemPrompt),
+					runtimeSystemPrompt,
+				)
+				params := openai.ChatCompletionNewParams{
+					Model: openai.ChatModel(ag.Settings.Model),
+					Messages: append(messages,
+						openai.SystemMessage(getFinalToolLoopSynthesisPrompt()),
+					),
+				}
+				setOpenAIChatTemperature(&params, ag.Settings.Model, ag.Settings.Temperature)
+				resp2, err := requestOpenAICompletionWithRetry(ctx, agentClient, params)
+				if err != nil {
+					return "", err
+				}
+				if resp2 == nil || len(resp2.Choices) == 0 {
+					return "", fmt.Errorf("openai final synthesis returned no choices")
+				}
+
+				if h.costTracker != nil && resp2.Usage.TotalTokens > 0 {
+					usage := llm.Usage{
+						PromptTokens:     int(resp2.Usage.PromptTokens),
+						CompletionTokens: int(resp2.Usage.CompletionTokens),
+						TotalTokens:      int(resp2.Usage.TotalTokens),
+					}
+					if err := h.costTracker.TrackUsage("openai", string(ag.Settings.Model), agentName, usage, ""); err != nil {
+						logger.Warn("Failed to track usage for tool synthesis response", logger.Fields{"error": err})
+					}
+				}
+
+				return resp2.Choices[0].Message.Content, nil
+			},
 		},
 	)
 

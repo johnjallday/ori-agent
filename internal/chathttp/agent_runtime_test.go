@@ -132,4 +132,9 @@ func TestChatHandler_WorkspaceEntryGeneralAgent_UsesPlanningForm(t *testing.T) {
 	if _, ok := resp["planning_form"].(map[string]any); !ok {
 		t.Fatalf("expected planning_form object, got %T", resp["planning_form"])
 	}
+	if workflowStep, ok := resp["workflow_step"].(map[string]any); !ok {
+		t.Fatalf("expected workflow_step object, got %T", resp["workflow_step"])
+	} else if got, _ := workflowStep["step_type"].(string); got != string(WorkflowStepAskForm) {
+		t.Fatalf("expected ask_form workflow step, got %q", got)
+	}
 }

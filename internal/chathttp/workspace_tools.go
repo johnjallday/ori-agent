@@ -120,9 +120,17 @@ func (p *WorkspaceToolProvider) readNotesTool() toolapi.Tool {
 
 			// Read a specific note
 			if req.NoteID != "" {
-				note, err := p.resolveWorkspaceNoteReference(ctx, req.NoteID)
+				note, guidance, err := p.resolveWorkspaceNoteReference(ctx, req.NoteID)
 				if err != nil {
 					return "", err
+				}
+				if guidance != nil {
+					return marshalToolResponse(map[string]interface{}{
+						"note_found":      false,
+						"requested_note":  req.NoteID,
+						"message":         guidance.Message,
+						"available_notes": guidance.Notes,
+					})
 				}
 				result := map[string]interface{}{
 					"id":         note.ID,
@@ -157,24 +165,33 @@ func (p *WorkspaceToolProvider) readNotesTool() toolapi.Tool {
 	}
 }
 
-func (p *WorkspaceToolProvider) resolveWorkspaceNoteReference(ctx context.Context, noteRef string) (*session.WorkspaceNote, error) {
+type workspaceNoteReferenceGuidance struct {
+	Message string
+	Notes   []map[string]interface{}
+}
+
+func (p *WorkspaceToolProvider) resolveWorkspaceNoteReference(ctx context.Context, noteRef string) (*session.WorkspaceNote, *workspaceNoteReferenceGuidance, error) {
 	noteRef = strings.TrimSpace(noteRef)
 	if noteRef == "" {
-		return nil, fmt.Errorf("note_id is required")
+		return nil, nil, fmt.Errorf("note_id is required")
 	}
 
 	if note, err := p.sessionStore.GetNote(ctx, noteRef); err == nil {
 		if note.WorkspaceID != p.workspaceID {
-			return nil, fmt.Errorf("note does not belong to this workspace")
+			guidance, guidanceErr := p.buildWorkspaceNoteReferenceGuidance(ctx, fmt.Sprintf("Note %q does not belong to this workspace. Use one of the available workspace note ids instead.", noteRef))
+			if guidanceErr != nil {
+				return nil, nil, guidanceErr
+			}
+			return nil, guidance, nil
 		}
-		return note, nil
+		return note, nil, nil
 	} else if err != session.ErrNoteNotFound {
-		return nil, fmt.Errorf("failed to load note: %w", err)
+		return nil, nil, fmt.Errorf("failed to load note: %w", err)
 	}
 
 	notes, err := p.sessionStore.ListNotesByWorkspace(ctx, p.workspaceID)
 	if err != nil {
-		return nil, fmt.Errorf("failed to list notes: %w", err)
+		return nil, nil, fmt.Errorf("failed to list notes: %w", err)
 	}
 
 	var exactMatches []session.WorkspaceNoteListItem
@@ -187,15 +204,49 @@ func (p *WorkspaceToolProvider) resolveWorkspaceNoteReference(ctx context.Contex
 	if len(exactMatches) == 1 {
 		note, err := p.sessionStore.GetNote(ctx, exactMatches[0].ID)
 		if err != nil {
-			return nil, fmt.Errorf("note matched by name but could not be loaded: %w", err)
+			return nil, nil, fmt.Errorf("note matched by name but could not be loaded: %w", err)
 		}
-		return note, nil
+		return note, nil, nil
 	}
 	if len(exactMatches) > 1 {
-		return nil, fmt.Errorf("multiple workspace notes share the name %q; use workspace_notes without arguments and pass the exact id field", noteRef)
+		guidance, guidanceErr := p.buildWorkspaceNoteReferenceGuidance(ctx, fmt.Sprintf("Multiple workspace notes share the name %q. Use one of the exact ids below with workspace_notes.", noteRef))
+		if guidanceErr != nil {
+			return nil, nil, guidanceErr
+		}
+		return nil, guidance, nil
 	}
 
-	return nil, fmt.Errorf("note not found in this workspace; use workspace_notes without arguments first and pass the exact id field, not the note name")
+	guidance, guidanceErr := p.buildWorkspaceNoteReferenceGuidance(ctx, fmt.Sprintf("Note %q was not found in this workspace. Use one of the exact ids below from workspace_notes instead of guessing.", noteRef))
+	if guidanceErr != nil {
+		return nil, nil, guidanceErr
+	}
+	return nil, guidance, nil
+}
+
+func (p *WorkspaceToolProvider) buildWorkspaceNoteReferenceGuidance(ctx context.Context, message string) (*workspaceNoteReferenceGuidance, error) {
+	notes, err := p.sessionStore.ListNotesByWorkspace(ctx, p.workspaceID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list notes: %w", err)
+	}
+
+	items := make([]map[string]interface{}, 0, len(notes))
+	for _, item := range notes {
+		items = append(items, map[string]interface{}{
+			"id":         item.ID,
+			"name":       item.Name,
+			"preview":    item.Preview,
+			"updated_at": item.UpdatedAt.Format(time.RFC3339),
+		})
+	}
+
+	if len(items) == 0 {
+		message = strings.TrimSpace(message) + " There are no notes in this workspace yet."
+	}
+
+	return &workspaceNoteReferenceGuidance{
+		Message: message,
+		Notes:   items,
+	}, nil
 }
 
 // --- workspace_save_note (write) ---
