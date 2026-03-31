@@ -911,7 +911,7 @@
       return;
     }
     if (hasVisibleHomeAssistantInlineReply()) {
-      els.thinkingModalLabel.textContent = label + ' has a next step ready';
+      els.thinkingModalLabel.textContent = label + ' has a planning subtask ready';
       return;
     }
     els.thinkingModalLabel.textContent = label + ' is working';
@@ -1945,6 +1945,16 @@
     return 'Reply to ' + (agentLabel || getWorkspaceHomeAssistantDisplayName()) + '...';
   }
 
+  function getInlineReplyWorkspaceName(routeContext) {
+    var workspaceId = String(routeContext && routeContext.workspace_id || '').trim();
+    var detailWorkspace = window.workspaceDetail && window.workspaceDetail.workspace;
+    if (detailWorkspace && String(detailWorkspace.id || '').trim() === workspaceId) {
+      return String(detailWorkspace.name || '').trim();
+    }
+    var crumb = document.getElementById('workspace-breadcrumb-name');
+    return crumb ? String(crumb.textContent || '').trim() : '';
+  }
+
   function cleanInlineReplyQuestion(text) {
     return String(text || '')
       .replace(/^[\s>*-]+/, '')
@@ -2555,14 +2565,36 @@
 
     var header = document.createElement('div');
     header.className = 'home-assistant-inline-reply-header';
-    header.textContent = 'Next Step';
+    header.textContent = 'Planning Subtask';
     card.appendChild(header);
+
+    var meta = document.createElement('div');
+    meta.className = 'home-assistant-inline-reply-meta';
+
+    var statusChip = document.createElement('span');
+    statusChip.className = 'home-assistant-inline-reply-chip is-waiting';
+    statusChip.textContent = isSubmitting ? 'Submitting' : 'Waiting on you';
+    meta.appendChild(statusChip);
+
+    var workspaceName = getInlineReplyWorkspaceName(replyState.routeContext);
+    if (workspaceName) {
+      var workspaceChip = document.createElement('span');
+      workspaceChip.className = 'home-assistant-inline-reply-chip';
+      workspaceChip.textContent = workspaceName;
+      meta.appendChild(workspaceChip);
+    }
+
+    var planChip = document.createElement('span');
+    planChip.className = 'home-assistant-inline-reply-chip';
+    planChip.textContent = 'Linked to workspace plan';
+    meta.appendChild(planChip);
+    card.appendChild(meta);
 
     var title = document.createElement('div');
     title.className = 'home-assistant-inline-reply-title';
     title.textContent = choiceStep && String(choiceStep.title || '').trim()
       ? String(choiceStep.title || '').trim()
-      : 'Review the latest manager plan, then respond below.';
+      : 'Review the current plan, then complete this subtask.';
     card.appendChild(title);
 
     if (replyState.latestReplyText) {
@@ -2571,8 +2603,13 @@
 
       var previewEyebrow = document.createElement('div');
       previewEyebrow.className = 'home-assistant-inline-reply-preview-eyebrow';
-      previewEyebrow.textContent = replyState.agentLabel || getWorkspaceHomeAssistantDisplayName();
+      previewEyebrow.textContent = 'Current Plan';
       preview.appendChild(previewEyebrow);
+
+      var previewMeta = document.createElement('div');
+      previewMeta.className = 'home-assistant-inline-reply-preview-meta';
+      previewMeta.textContent = (replyState.agentLabel || getWorkspaceHomeAssistantDisplayName()) + ' is carrying this planning thread.';
+      preview.appendChild(previewMeta);
 
       var previewBody = document.createElement('div');
       previewBody.className = 'home-assistant-inline-reply-preview-body';
@@ -2587,7 +2624,7 @@
 
       var choicePromptsTitle = document.createElement('div');
       choicePromptsTitle.className = 'home-assistant-inline-reply-prompts-title';
-      choicePromptsTitle.textContent = 'What I Need From You';
+      choicePromptsTitle.textContent = 'Complete This Subtask';
       choicePrompts.appendChild(choicePromptsTitle);
 
       var choicePromptsBody = document.createElement('div');
@@ -2603,7 +2640,7 @@
 
       var promptsTitle = document.createElement('div');
       promptsTitle.className = 'home-assistant-inline-reply-prompts-title';
-      promptsTitle.textContent = 'What I Need From You';
+      promptsTitle.textContent = 'Complete This Subtask';
       prompts.appendChild(promptsTitle);
 
       var promptsList = document.createElement('ul');
@@ -2622,10 +2659,10 @@
     var copy = document.createElement('div');
     copy.className = 'home-assistant-inline-reply-copy';
     copy.textContent = choiceStep
-      ? 'Choose one option below to continue. Open full chat instead if you want to explain in more detail.'
+      ? 'Choose one option to move the workspace plan forward. Open full chat instead if this subtask needs more explanation.'
       : replyState.questionPrompts && replyState.questionPrompts.length > 0
-      ? 'Answer the open questions below, or move this to full chat if you want a longer back-and-forth.'
-      : 'Add your next answer below, or move this to full chat if the task needs a longer back-and-forth.';
+      ? 'Answer the open planning questions below, or move this to full chat if you want a longer back-and-forth.'
+      : 'Complete this subtask below, or move this to full chat if the plan needs a longer back-and-forth.';
     card.appendChild(copy);
 
     var form = document.createElement('form');
@@ -2674,7 +2711,7 @@
       var label = document.createElement('label');
       label.className = 'home-assistant-inline-reply-input-label';
       label.setAttribute('for', 'homeAssistantInlineReplyMessage');
-      label.textContent = choiceStep ? 'Optional Note' : 'Your Answer';
+      label.textContent = choiceStep ? 'Optional Planning Note' : 'Subtask Response';
       form.appendChild(label);
 
       var textarea = document.createElement('textarea');
@@ -2684,7 +2721,7 @@
       textarea.disabled = isSubmitting;
       textarea.value = replyState.draft || '';
       textarea.placeholder = choiceStep
-        ? 'Add extra context for this choice (optional)'
+        ? 'Add extra planning context for this selected choice (optional)'
         : buildHomeAssistantInlineReplyPlaceholder(replyState.intent, replyState.agentLabel);
       textarea.addEventListener('input', function (event) {
         if (!homeAssistantState.inlineReplyState) return;
@@ -2703,15 +2740,15 @@
     sendButton.textContent = isSubmitting
       ? 'Sending...'
       : choiceStep
-      ? 'Continue with Selected Choice'
-      : 'Send Answer';
+      ? 'Complete Subtask'
+      : 'Submit Subtask';
     actions.appendChild(sendButton);
 
     var openChatButton = document.createElement('button');
     openChatButton.type = 'button';
     openChatButton.className = 'modern-btn modern-btn-secondary';
     openChatButton.disabled = isSubmitting;
-    openChatButton.textContent = choiceStep ? 'Explain in Full Chat' : 'Open Chat Instead';
+    openChatButton.textContent = choiceStep ? 'Move to Full Chat' : 'Open Chat Instead';
     openChatButton.addEventListener('click', function () {
       openChatPanel();
     });
@@ -5720,10 +5757,10 @@
       setHomeAssistantRoutingSummary(
         entryLabel,
         hasChoiceStep
-          ? 'The workspace manager has a structured next step ready. Choose an option below, or open full chat.'
+          ? 'The workspace manager created a planning subtask for this workspace. Complete it below, or open full chat.'
           : assistantSessionResult.reused
-          ? 'The manager needs one more answer. Review the next step below, or open full chat.'
-          : 'The workspace manager replied inline. Review the next step below, or open full chat.'
+          ? 'The manager needs one more planning answer. Review the subtask below, or open full chat.'
+          : 'The workspace manager replied inline. Review the planning subtask below, or open full chat.'
       );
     }
     renderHomeAssistantDependencyResolution(

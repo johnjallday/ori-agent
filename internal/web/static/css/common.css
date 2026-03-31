@@ -2106,6 +2106,33 @@ h3, .h3 {
     margin-bottom: 0.85rem;
 }
 
+.home-assistant-inline-reply-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    margin-bottom: 0.85rem;
+}
+
+.home-assistant-inline-reply-chip {
+    align-items: center;
+    background: color-mix(in srgb, var(--bg-primary) 84%, transparent);
+    border: 1px solid color-mix(in srgb, var(--border-color) 82%, transparent);
+    border-radius: 999px;
+    color: var(--text-secondary);
+    display: inline-flex;
+    font-size: 0.72rem;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    padding: 0.3rem 0.68rem;
+    text-transform: uppercase;
+}
+
+.home-assistant-inline-reply-chip.is-waiting {
+    background: color-mix(in srgb, var(--primary-color-light) 72%, var(--bg-primary));
+    border-color: color-mix(in srgb, var(--primary-color) 42%, var(--border-color));
+    color: var(--primary-color);
+}
+
 .home-assistant-inline-reply-preview {
     background:
         linear-gradient(180deg, color-mix(in srgb, var(--primary-color) 10%, transparent) 0%, transparent 36%),
@@ -2124,6 +2151,13 @@ h3, .h3 {
     letter-spacing: 0.08em;
     padding: 0.8rem 0.95rem 0;
     text-transform: uppercase;
+}
+
+.home-assistant-inline-reply-preview-meta {
+    color: var(--text-muted);
+    font-size: 0.77rem;
+    line-height: 1.4;
+    padding: 0.3rem 0.95rem 0;
 }
 
 .home-assistant-inline-reply-preview-body {
