@@ -826,6 +826,13 @@
         <div class="modal-body">
           <div id="workspace-detail-task-result-breakdown" class="workspace-detail-task-result-breakdown"></div>
           <pre id="workspace-detail-task-result-body" class="workspace-detail-task-result-body"></pre>
+          <section id="workspace-detail-task-result-next-steps" class="workspace-detail-task-result-next-steps d-none">
+            <div class="workspace-detail-task-result-next-steps-header">
+              <div class="workspace-detail-task-result-next-steps-eyebrow">Continue This Work</div>
+              <div id="workspace-detail-task-result-next-steps-copy" class="workspace-detail-task-result-next-steps-copy"></div>
+            </div>
+            <div id="workspace-detail-task-result-next-steps-actions" class="workspace-detail-task-result-next-steps-actions"></div>
+          </section>
         </div>
         <div class="modal-footer">
           <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
@@ -2461,6 +2468,102 @@
       color: var(--text-primary);
       font-size: 0.8rem;
       line-height: 1.45;
+    }
+
+    .workspace-detail-task-result-next-steps {
+      margin-top: 0.8rem;
+      border: 1px solid color-mix(in srgb, var(--border-color) 72%, var(--primary-color) 28%);
+      border-radius: 14px;
+      background: color-mix(in srgb, var(--bg-secondary) 90%, rgba(var(--primary-color-rgb, 255, 138, 86), 0.06));
+      padding: 0.85rem;
+      display: grid;
+      gap: 0.75rem;
+    }
+
+    .workspace-detail-task-result-next-steps-header {
+      display: grid;
+      gap: 0.28rem;
+    }
+
+    .workspace-detail-task-result-next-steps-eyebrow {
+      font-size: 0.72rem;
+      font-weight: 700;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      color: var(--text-secondary);
+    }
+
+    .workspace-detail-task-result-next-steps-copy {
+      font-size: 0.82rem;
+      line-height: 1.5;
+      color: var(--text-primary);
+    }
+
+    .workspace-detail-task-result-next-steps-actions {
+      display: grid;
+      gap: 0.6rem;
+    }
+
+    .workspace-detail-task-result-next-step-btn {
+      width: 100%;
+      display: flex;
+      align-items: flex-start;
+      gap: 0.75rem;
+      padding: 0.8rem 0.9rem;
+      border-radius: 12px;
+      border: 1px solid color-mix(in srgb, var(--border-color) 70%, var(--primary-color) 30%);
+      background: color-mix(in srgb, var(--bg-primary) 86%, rgba(var(--primary-color-rgb, 255, 138, 86), 0.08));
+      color: var(--text-primary);
+      text-align: left;
+      transition: border-color 0.18s ease, transform 0.18s ease, background 0.18s ease;
+    }
+
+    .workspace-detail-task-result-next-step-btn:hover:not(:disabled) {
+      border-color: color-mix(in srgb, var(--primary-color) 54%, var(--border-color));
+      background: color-mix(in srgb, var(--bg-primary) 78%, rgba(var(--primary-color-rgb, 255, 138, 86), 0.14));
+      transform: translateY(-1px);
+    }
+
+    .workspace-detail-task-result-next-step-btn:disabled {
+      opacity: 0.7;
+      cursor: wait;
+    }
+
+    .workspace-detail-task-result-next-step-index {
+      width: 1.7rem;
+      height: 1.7rem;
+      border-radius: 999px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      background: rgba(var(--primary-color-rgb, 255, 138, 86), 0.16);
+      color: var(--primary-color);
+      font-size: 0.74rem;
+      font-weight: 700;
+      line-height: 1;
+      flex-shrink: 0;
+      margin-top: 0.08rem;
+    }
+
+    .workspace-detail-task-result-next-step-copy {
+      display: grid;
+      gap: 0.18rem;
+      min-width: 0;
+      flex: 1;
+    }
+
+    .workspace-detail-task-result-next-step-title {
+      font-size: 0.84rem;
+      font-weight: 600;
+      line-height: 1.4;
+      color: var(--text-primary);
+      white-space: normal;
+    }
+
+    .workspace-detail-task-result-next-step-meta {
+      font-size: 0.74rem;
+      line-height: 1.4;
+      color: var(--text-secondary);
     }
 
     .workspace-detail-task-confirm-dialog {

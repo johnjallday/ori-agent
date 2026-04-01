@@ -122,6 +122,10 @@ export class WorkspaceDetailPage {
     this.flippedAgentCards = new Set();
     this.boardDidDrag = false;
     this.currentTaskResultText = '';
+    this.currentTaskResultTaskId = '';
+    this.currentTaskResultSourceTaskId = '';
+    this.currentTaskResultNextSteps = [];
+    this.currentTaskResultFollowUpPending = false;
     this.currentBlockedTask = null;
     this.currentAssistRecommendation = null;
     this.currentExecutionTaskId = null;
@@ -1074,6 +1078,9 @@ export class WorkspaceDetailPage {
       taskResultMeta: document.getElementById('workspace-detail-task-result-meta'),
       taskResultBreakdown: document.getElementById('workspace-detail-task-result-breakdown'),
       taskResultBody: document.getElementById('workspace-detail-task-result-body'),
+      taskResultNextSteps: document.getElementById('workspace-detail-task-result-next-steps'),
+      taskResultNextStepsCopy: document.getElementById('workspace-detail-task-result-next-steps-copy'),
+      taskResultNextStepsActions: document.getElementById('workspace-detail-task-result-next-steps-actions'),
       taskResultCopyBtn: document.getElementById('workspace-detail-task-result-copy'),
       taskExecutionModal: document.getElementById('workspace-detail-task-execution-modal'),
       taskExecutionTitle: document.getElementById('workspace-detail-task-execution-title'),
@@ -3761,6 +3768,10 @@ export class WorkspaceDetailPage {
       this.elements.taskResultBody.textContent = String(resultData.text || '');
     }
     this.currentTaskResultText = String(resultData.text || '');
+    this.currentTaskResultTaskId = String(task.id || '').trim();
+    this.currentTaskResultSourceTaskId = String(resultData.sourceTask?.id || task.id || '').trim();
+    this.currentTaskResultFollowUpPending = false;
+    this.renderTaskResultNextSteps(task, resultData);
 
     const openResultModal = () => {
       if (!this.elements.taskResultModal || !window.bootstrap) return;
@@ -3785,6 +3796,205 @@ export class WorkspaceDetailPage {
     }
 
     openResultModal();
+  }
+
+  renderTaskResultNextSteps(task, resultData) {
+    const container = this.elements.taskResultNextSteps;
+    const copyEl = this.elements.taskResultNextStepsCopy;
+    const actionsEl = this.elements.taskResultNextStepsActions;
+    if (!container || !copyEl || !actionsEl) return;
+
+    const text = String(resultData?.text || '').trim();
+    const sourceTask = resultData?.sourceTask && typeof resultData.sourceTask === 'object'
+      ? resultData.sourceTask
+      : task;
+    const shouldShow = String(task?.status || '').trim().toLowerCase() === 'completed' && text;
+    if (!shouldShow) {
+      this.currentTaskResultNextSteps = [];
+      container.classList.add('d-none');
+      copyEl.textContent = '';
+      actionsEl.innerHTML = '';
+      return;
+    }
+
+    const nextSteps = this.extractTaskResultNextSteps(text);
+    this.currentTaskResultNextSteps = nextSteps;
+
+    if (!nextSteps.length) {
+      container.classList.add('d-none');
+      copyEl.textContent = '';
+      actionsEl.innerHTML = '';
+      return;
+    }
+
+    copyEl.textContent = 'Choose the next step to create and run a follow-up task linked to this result.';
+    actionsEl.innerHTML = nextSteps.map((step) => {
+      const buttonLabel = this.currentTaskResultFollowUpPending
+        ? 'Creating follow-up task...'
+        : 'Create follow-up task';
+      return `
+        <button type="button"
+                class="workspace-detail-task-result-next-step-btn"
+                data-next-step-id="${this.escapeHtml(step.id)}"
+                ${this.currentTaskResultFollowUpPending ? 'disabled' : ''}>
+          <span class="workspace-detail-task-result-next-step-index">${this.escapeHtml(step.number || '•')}</span>
+          <span class="workspace-detail-task-result-next-step-copy">
+            <span class="workspace-detail-task-result-next-step-title">${this.escapeHtml(step.label)}</span>
+            <span class="workspace-detail-task-result-next-step-meta">${this.escapeHtml(buttonLabel)}</span>
+          </span>
+        </button>
+      `;
+    }).join('');
+
+    actionsEl.querySelectorAll('[data-next-step-id]').forEach((button) => {
+      button.addEventListener('click', () => {
+        const nextStepId = String(button.getAttribute('data-next-step-id') || '').trim();
+        if (!nextStepId) return;
+        void this.continueTaskFromResult(task.id, sourceTask.id, nextStepId);
+      });
+    });
+
+    container.classList.remove('d-none');
+  }
+
+  cleanTaskResultNextStepText(value) {
+    return String(value || '')
+      .replace(/\[(.*?)\]\((.*?)\)/g, '$1')
+      .replace(/[*_`#>]+/g, '')
+      .replace(/\s+/g, ' ')
+      .trim();
+  }
+
+  normalizeTaskResultNextStepToken(value) {
+    return this.cleanTaskResultNextStepText(value)
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, ' ')
+      .trim();
+  }
+
+  buildTaskResultNextStepId(number, label) {
+    const base = this.normalizeTaskResultNextStepToken(label)
+      .replace(/\s+/g, '-')
+      .slice(0, 48) || 'next-step';
+    return `result-step-${String(number || '').trim() || 'x'}-${base}`;
+  }
+
+  extractTaskResultNextSteps(text) {
+    const lines = String(text || '').split(/\r?\n/);
+    const cues = ['next steps', 'next step', 'would you like me to', 'let me know'];
+    let cueIndex = -1;
+
+    for (let i = 0; i < lines.length; i += 1) {
+      const normalized = this.normalizeTaskResultNextStepToken(lines[i]);
+      if (cues.some((cue) => normalized.includes(cue))) {
+        cueIndex = i;
+        break;
+      }
+    }
+
+    if (cueIndex === -1) return [];
+
+    const choices = [];
+    let started = false;
+    for (let i = cueIndex + 1; i < lines.length; i += 1) {
+      const rawLine = String(lines[i] || '');
+      const match = rawLine.match(/^\s*(\d+)[\.)]\s*(.+)$/);
+      if (match) {
+        const number = String(match[1] || '').trim();
+        const label = this.cleanTaskResultNextStepText(match[2]);
+        if (!label) continue;
+        choices.push({
+          id: this.buildTaskResultNextStepId(number, label),
+          number,
+          label
+        });
+        started = true;
+        if (choices.length >= 5) break;
+        continue;
+      }
+
+      if (!started) continue;
+      if (!rawLine.trim()) continue;
+      break;
+    }
+
+    return choices;
+  }
+
+  buildTaskResultFollowUpTitle(task, step) {
+    const baseTitle = String(task?.description || task?.name || 'Follow-up task').trim() || 'Follow-up task';
+    const stepLabel = this.cleanTaskResultNextStepText(step?.label || '');
+    if (!stepLabel) return baseTitle;
+    const combined = `${baseTitle} - ${stepLabel}`;
+    return combined.length > 160 ? `${combined.slice(0, 157).trim()}...` : combined;
+  }
+
+  buildTaskResultFollowUpDetails(task, sourceTask, step) {
+    const parts = [];
+    const baseTitle = String(task?.description || task?.name || task?.id || 'Completed task').trim();
+    const sourceTitle = String(sourceTask?.description || sourceTask?.name || sourceTask?.id || '').trim();
+    const stepNumber = String(step?.number || '').trim();
+    const stepLabel = this.cleanTaskResultNextStepText(step?.label || '');
+
+    parts.push(`Follow-up created from completed task: ${baseTitle}`);
+    if (sourceTitle && sourceTitle !== baseTitle) {
+      parts.push(`Source result: ${sourceTitle}`);
+    }
+    if (stepLabel) {
+      parts.push(`Selected next step: ${stepNumber ? `${stepNumber}. ` : ''}${stepLabel}`);
+    }
+    parts.push('Use the linked input task result as the starting context and continue from there.');
+
+    return parts.join('\n');
+  }
+
+  async continueTaskFromResult(taskId, sourceTaskId, nextStepId) {
+    if (this.currentTaskResultFollowUpPending) return;
+
+    const task = this.tasks.find((item) => item.id === taskId);
+    const sourceTask = this.tasks.find((item) => item.id === sourceTaskId) || task;
+    const nextStep = this.currentTaskResultNextSteps.find((item) => item.id === nextStepId);
+    if (!task || !sourceTask || !nextStep) return;
+
+    this.currentTaskResultFollowUpPending = true;
+    this.renderTaskResultNextSteps(task, { text: this.currentTaskResultText, sourceTask });
+
+    try {
+      const createdTask = await this.createTask(
+        this.buildTaskResultFollowUpTitle(task, nextStep),
+        this.buildTaskResultFollowUpDetails(task, sourceTask, nextStep),
+        '',
+        {
+          assignee: String(sourceTask.to || task.to || '').trim(),
+          assignedNodeId: String(sourceTask.assigned_node_id || task.assigned_node_id || '').trim(),
+          inputTaskIDs: [sourceTask.id],
+          successToast: false
+        }
+      );
+
+      if (!createdTask?.id) {
+        throw new Error('Failed to create follow-up task');
+      }
+
+      if (window.Toast) {
+        window.Toast.success('Follow-up task created');
+      }
+
+      if (this.elements.taskResultModal && window.bootstrap) {
+        const modal = bootstrap.Modal.getInstance(this.elements.taskResultModal);
+        modal?.hide();
+      }
+
+      await this.executeTask(createdTask.id, { skipConfirm: true });
+    } catch (error) {
+      console.error('Failed to continue task from result:', error);
+      if (window.Toast) {
+        window.Toast.error(error?.message || 'Failed to continue task');
+      }
+    } finally {
+      this.currentTaskResultFollowUpPending = false;
+      this.renderTaskResultNextSteps(task, { text: this.currentTaskResultText, sourceTask });
+    }
   }
 
   renderTaskResultBreakdown(task, subtasks = []) {
@@ -9600,7 +9810,12 @@ export class WorkspaceDetailPage {
           studio_id: this.workspaceId,
           description: normalizedName, // Task API uses description as the main field
           details: normalizedDescription,
-          status: 'pending'
+          status: 'pending',
+          to: String(options.assignee || '').trim() || undefined,
+          assigned_node_id: String(options.assignedNodeId || '').trim() || undefined,
+          input_task_ids: Array.isArray(options.inputTaskIDs) ? options.inputTaskIDs.filter(Boolean) : undefined,
+          parent_task_id: String(options.parentTaskID || '').trim() || undefined,
+          subtask_index: Number.isFinite(Number(options.subtaskIndex)) ? Number(options.subtaskIndex) : undefined
         })
       });
 
