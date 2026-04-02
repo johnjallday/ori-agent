@@ -6,6 +6,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/johnjallday/ori-agent/internal/database"
 )
@@ -190,6 +191,76 @@ func TestStoreGrantEnforcement(t *testing.T) {
 	}
 	if got.Label != "Tax Email" {
 		t.Fatalf("expected decrypted record after grant, got %q", got.Label)
+	}
+}
+
+func TestStoreCreateGrantRefreshPreservesCreatedAt(t *testing.T) {
+	ctx := context.Background()
+	db, err := database.Open(ctx, &database.Config{
+		InMemory: true,
+		WALMode:  false,
+	})
+	if err != nil {
+		t.Fatalf("open database: %v", err)
+	}
+	defer func() { _ = db.Close() }()
+
+	currentTime := time.Date(2026, time.April, 3, 9, 0, 0, 0, time.UTC)
+	store := NewStore(db, StoreOptions{
+		SecretStore: NewMemorySecretStore(),
+		Clock: func() time.Time {
+			return currentTime
+		},
+	})
+
+	primaryVault := createTestVault(t, ctx, store, "Primary Vault")
+
+	original := &Grant{
+		VaultID:     primaryVault.ID,
+		WorkspaceID: "ws-finance",
+		ActorType:   ActorTypeAgent,
+		ActorID:     "finance-agent",
+		Capability:  CapabilityEmailRead,
+		RecordType:  "email_snippet",
+	}
+	if err := store.CreateGrant(ctx, original); err != nil {
+		t.Fatalf("create original grant: %v", err)
+	}
+
+	currentTime = currentTime.Add(2 * time.Hour)
+	refreshed := &Grant{
+		VaultID:     primaryVault.ID,
+		WorkspaceID: "ws-finance",
+		ActorType:   ActorTypeAgent,
+		ActorID:     "finance-agent",
+		Capability:  CapabilityEmailRead,
+		RecordType:  "email_snippet",
+	}
+	if err := store.CreateGrant(ctx, refreshed); err != nil {
+		t.Fatalf("refresh grant: %v", err)
+	}
+
+	if !refreshed.CreatedAt.Equal(original.CreatedAt) {
+		t.Fatalf("expected refreshed grant created_at %v, got %v", original.CreatedAt, refreshed.CreatedAt)
+	}
+	if !refreshed.UpdatedAt.Equal(currentTime) {
+		t.Fatalf("expected refreshed grant updated_at %v, got %v", currentTime, refreshed.UpdatedAt)
+	}
+
+	var createdAt time.Time
+	var updatedAt time.Time
+	if err := db.QueryRowContext(ctx, `
+		SELECT created_at, updated_at
+		FROM vault_grants
+		WHERE id = ?
+	`, refreshed.ID).Scan(&createdAt, &updatedAt); err != nil {
+		t.Fatalf("query refreshed grant timestamps: %v", err)
+	}
+	if !createdAt.Equal(original.CreatedAt) {
+		t.Fatalf("expected persisted created_at %v, got %v", original.CreatedAt, createdAt)
+	}
+	if !updatedAt.Equal(currentTime) {
+		t.Fatalf("expected persisted updated_at %v, got %v", currentTime, updatedAt)
 	}
 }
 

@@ -971,15 +971,16 @@ func (s *Store) CreateGrant(ctx context.Context, grant *Grant) error {
 	now := s.now()
 
 	var existingID string
+	var existingCreatedAt time.Time
 	err = s.db.QueryRowContext(ctx, `
-		SELECT id
+		SELECT id, created_at
 		FROM vault_grants
 		WHERE vault_id = ? AND workspace_id = ? AND actor_type = ? AND actor_id = ? AND capability = ? AND record_type = ?
-	`, grant.VaultID, grant.WorkspaceID, grant.ActorType, grant.ActorID, grant.Capability, grant.RecordType).Scan(&existingID)
+	`, grant.VaultID, grant.WorkspaceID, grant.ActorType, grant.ActorID, grant.Capability, grant.RecordType).Scan(&existingID, &existingCreatedAt)
 	switch {
 	case err == nil:
 		grant.ID = existingID
-		grant.CreatedAt = now
+		grant.CreatedAt = existingCreatedAt
 		grant.UpdatedAt = now
 		_, err = s.db.ExecContext(ctx, `
 			UPDATE vault_grants

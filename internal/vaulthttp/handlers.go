@@ -162,12 +162,13 @@ func (h *Handler) handleUnlock(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := h.store.Unlock(r.Context(), vaultIDFromRequest(r, req.VaultID), req.VaultPassword); err != nil {
+	vaultID := vaultIDFromRequest(r, req.VaultID)
+	if err := h.store.Unlock(r.Context(), vaultID, req.VaultPassword); err != nil {
 		respondVaultError(w, err)
 		return
 	}
 
-	status, err := h.store.Status(r.Context(), vaultIDFromRequest(r))
+	status, err := h.store.Status(r.Context(), vaultID)
 	if err != nil {
 		respondVaultError(w, err)
 		return

@@ -265,6 +265,7 @@ func TestHandlerUnlockAndLockFallbackVault(t *testing.T) {
 	handler, _, db := newTestHandler(t, secretStore, filepath.Join(tempDir, "vault-secrets.json"))
 	defer func() { _ = db.Close() }()
 	primaryVault := insertLegacyHandlerVault(t, db, "Primary Vault")
+	_ = insertLegacyHandlerVault(t, db, "Archive Vault")
 
 	statusRec := performJSONRequest(t, handler, http.MethodGet, "/api/vault/status?vault_id="+primaryVault.ID, nil)
 	if statusRec.Code != http.StatusOK {
@@ -283,6 +284,14 @@ func TestHandlerUnlockAndLockFallbackVault(t *testing.T) {
 	if unlockRec.Code != http.StatusOK {
 		t.Fatalf("expected 200 from unlock, got %d: %s", unlockRec.Code, unlockRec.Body.String())
 	}
+	var unlocked vault.VaultStatus
+	decodeJSONBody(t, unlockRec, &unlocked)
+	if unlocked.VaultID != primaryVault.ID {
+		t.Fatalf("expected unlock response for vault %q, got %q", primaryVault.ID, unlocked.VaultID)
+	}
+	if unlocked.Locked {
+		t.Fatalf("expected unlocked status after unlock, got %+v", unlocked)
+	}
 
 	createRec := performJSONRequest(t, handler, http.MethodPost, "/api/vault/records", map[string]any{
 		"vault_id":     primaryVault.ID,
@@ -297,7 +306,7 @@ func TestHandlerUnlockAndLockFallbackVault(t *testing.T) {
 		t.Fatalf("expected 201 after unlock, got %d: %s", createRec.Code, createRec.Body.String())
 	}
 
-	lockRec := performJSONRequest(t, handler, http.MethodPost, "/api/vault/lock", map[string]any{})
+	lockRec := performJSONRequest(t, handler, http.MethodPost, "/api/vault/lock?vault_id="+primaryVault.ID, map[string]any{})
 	if lockRec.Code != http.StatusOK {
 		t.Fatalf("expected 200 from lock, got %d: %s", lockRec.Code, lockRec.Body.String())
 	}

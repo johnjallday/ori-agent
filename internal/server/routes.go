@@ -537,32 +537,8 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 		mux.HandleFunc("/api/folders", s.Handlers.Session.HandleWorkspaces)
 
 		// Workspace routes (unified workspace API)
-		mux.HandleFunc("/api/workspaces", s.Handlers.Session.HandleWorkspaces)
-		mux.HandleFunc("/api/workspaces/", func(w http.ResponseWriter, r *http.Request) {
-			path := r.URL.Path
-			// Check if this is a workspace notes request
-			if strings.Contains(path, "/notes") {
-				s.Handlers.Session.HandleWorkspaceNotes(w, r)
-				return
-			}
-			// Workspace runtime subresources are now served under the canonical
-			// /api/workspaces surface rather than the legacy /api/studios paths.
-			if s.routeWorkspaceRuntimeRequest(w, r) {
-				return
-			}
-			// Handle agent management (POST /api/workspaces/{id}/agents, DELETE /api/workspaces/{id}/agents/{name})
-			if strings.Contains(path, "/agents") {
-				s.Handlers.Session.HandleWorkspaces(w, r)
-				return
-			}
-			// Handle layout management (GET/PUT /api/workspaces/{id}/layout)
-			if strings.Contains(path, "/layout") {
-				s.Handlers.Session.HandleWorkspaces(w, r)
-				return
-			}
-			// Otherwise, handle as regular workspace request
-			s.Handlers.Session.HandleWorkspaces(w, r)
-		})
+		mux.HandleFunc("/api/workspaces", s.handleWorkspaceCollectionAPI)
+		mux.HandleFunc("/api/workspaces/", s.handleWorkspaceAPI)
 
 		mux.HandleFunc("/api/tags", s.Handlers.Session.HandleTags)
 		mux.HandleFunc("/api/session-cache/stats", s.Handlers.Session.HandleCacheStats)
@@ -636,6 +612,37 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 	mux.HandleFunc("PUT /api/workspaces/{studioID}/agent-skill-access/{agentInstanceID}", s.Handlers.Studio.UpdateAgentSkillAccess)
 	mux.HandleFunc("PATCH /api/workspaces/{studioID}/agent-skill-access/{agentInstanceID}", s.Handlers.Studio.UpdateAgentSkillAccess)
 	mux.HandleFunc("DELETE /api/workspaces/{studioID}/agent-skill-access/{agentInstanceID}", s.Handlers.Studio.DeleteAgentSkillAccess)
+}
+
+func (s *Server) handleWorkspaceCollectionAPI(w http.ResponseWriter, r *http.Request) {
+	s.Handlers.Session.HandleWorkspaces(w, r)
+}
+
+func (s *Server) handleWorkspaceAPI(w http.ResponseWriter, r *http.Request) {
+	path := r.URL.Path
+
+	// Check if this is a workspace notes request.
+	if strings.Contains(path, "/notes") {
+		s.Handlers.Session.HandleWorkspaceNotes(w, r)
+		return
+	}
+	// Workspace runtime subresources are served only under the canonical
+	// /api/workspaces surface.
+	if s.routeWorkspaceRuntimeRequest(w, r) {
+		return
+	}
+	// Handle agent management (POST /api/workspaces/{id}/agents, DELETE /api/workspaces/{id}/agents/{name}).
+	if strings.Contains(path, "/agents") {
+		s.Handlers.Session.HandleWorkspaces(w, r)
+		return
+	}
+	// Handle layout management (GET/PUT /api/workspaces/{id}/layout).
+	if strings.Contains(path, "/layout") {
+		s.Handlers.Session.HandleWorkspaces(w, r)
+		return
+	}
+	// Otherwise, handle as a regular workspace request.
+	s.Handlers.Session.HandleWorkspaces(w, r)
 }
 
 func (s *Server) routeWorkspaceRuntimeRequest(w http.ResponseWriter, r *http.Request) bool {
