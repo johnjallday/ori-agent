@@ -1,5 +1,6 @@
 // Dashboard Module
 // Fetches and renders Ori dashboard data: assistant progress, stats, and agent list
+/* global renderDependencyResolutionModal, normalizeDependencyResolution */
 
 (function () {
   'use strict';
@@ -1731,7 +1732,7 @@
     return lines.join('\n').trim();
   }
 
-  function buildPlanningReviewTaskDescription(planningState) {
+  function buildPlanningReviewTaskDescription(planningState) { // eslint-disable-line no-unused-vars
     if (!planningState) return 'Planning task';
     return buildPlanningTaskDescriptionFromPrompt(
       planningState.prompt,
@@ -1739,7 +1740,7 @@
     );
   }
 
-  function buildPlanningReviewTaskDetails(planningState) {
+  function buildPlanningReviewTaskDetails(planningState) { // eslint-disable-line no-unused-vars
     if (!planningState) return '';
     return buildPlanningTaskDetails(
       planningState.prompt,
@@ -2131,7 +2132,7 @@
   function cleanInlineReplyQuestion(text) {
     return String(text || '')
       .replace(/^[\s>*-]+/, '')
-      .replace(/^\d+[\.)]\s*/, '')
+      .replace(/^\d+[.)]\s*/, '')
       .replace(/\*\*/g, '')
       .trim();
   }
@@ -2139,7 +2140,7 @@
   function cleanInlineReplyChoiceText(text) {
     return String(text || '')
       .replace(/^\s*[-*]\s*/, '')
-      .replace(/^\s*\d+[\.)]\s*/, '')
+      .replace(/^\s*\d+[.)]\s*/, '')
       .replace(/\*\*/g, '')
       .replace(/`/g, '')
       .replace(/\[(.*?)\]\((.*?)\)/g, '$1')
@@ -2195,7 +2196,7 @@
     var started = false;
     for (var lineIndex = cueIndex + 1; lineIndex < lines.length; lineIndex++) {
       var rawLine = String(lines[lineIndex] || '');
-      var match = rawLine.match(/^\s*(\d+)[\.)]\s*(.+)$/);
+      var match = rawLine.match(/^\s*(\d+)[.)]\s*(.+)$/);
       if (match) {
         var choiceNumber = String(match[1] || '').trim();
         var choiceLabel = cleanInlineReplyChoiceText(match[2]);
@@ -2883,7 +2884,7 @@
       var choiceGroup = document.createElement('div');
       choiceGroup.className = 'home-assistant-planning-choice-group';
 
-      for (var i = 0; i < choiceStep.choices.length; i++) {
+      for (var i = 0; i < choiceStep.choices.length; i++) { // eslint-disable-line no-redeclare
         (function (choice) {
           var choiceButton = document.createElement('button');
           choiceButton.type = 'button';

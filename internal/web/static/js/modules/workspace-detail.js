@@ -4,6 +4,7 @@
  *
  * @module workspace-detail
  */
+/* global escapeHtml */
 
 /**
  * Format a date for display
@@ -3898,7 +3899,7 @@ export class WorkspaceDetailPage {
     let started = false;
     for (let i = cueIndex + 1; i < lines.length; i += 1) {
       const rawLine = String(lines[i] || '');
-      const match = rawLine.match(/^\s*(\d+)[\.)]\s*(.+)$/);
+      const match = rawLine.match(/^\s*(\d+)[.)]\s*(.+)$/);
       if (match) {
         const number = String(match[1] || '').trim();
         const label = this.cleanTaskResultNextStepText(match[2]);

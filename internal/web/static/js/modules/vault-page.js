@@ -60,7 +60,7 @@
   const recordsListEl = document.getElementById('vaultRecordsList');
   
   const editorPanel = document.getElementById('vaultEditorPanel');
-  const editorForm = document.getElementById('vaultEditorForm');
+  const _editorForm = document.getElementById('vaultEditorForm');
   const editorCloseBtn = document.getElementById('vaultEditorCloseBtn');
   const explorerAddBtn = document.getElementById('vaultExplorerAddBtn');
   const entryGrid = document.getElementById('vaultEntryGrid');

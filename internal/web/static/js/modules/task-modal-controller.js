@@ -788,7 +788,7 @@ class TaskModalController {
     let started = false;
     for (let i = cueIndex + 1; i < lines.length; i += 1) {
       const rawLine = String(lines[i] || '');
-      const match = rawLine.match(/^\s*(\d+)[\.)]\s*(.+)$/);
+      const match = rawLine.match(/^\s*(\d+)[.)]\s*(.+)$/);
       if (match) {
         const number = String(match[1] || '').trim();
         const label = this.cleanResultNextStepText(match[2]);
@@ -838,7 +838,7 @@ class TaskModalController {
     this.renderResultNextStepActions(task);
   }
 
-  renderResultNextStepActions(task) {
+  renderResultNextStepActions(/* task */) {
     const elements = this.getResultSectionElements();
     if (!elements.nextSteps || !elements.nextStepsCopy || !elements.nextStepsActions) return;
 

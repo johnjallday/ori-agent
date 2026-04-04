@@ -2,6 +2,7 @@
  * Workspace Management Module
  * Handles workspace CRUD operations, agent management, and UI interactions for the Workspaces page
  */
+/* global loadCanvasWorkspace */
 
 // Global state - use window object for shared state with other modules
 // These are initialized in workspaces-hub.tmpl inline script

@@ -1613,7 +1613,7 @@
     });
   }
 
-  async function loadVaults(preserveSelection) {
+  async function loadVaults(/* preserveSelection */) {
     const data = await apiRequest('/api/vault/vaults');
     state.vaults = Array.isArray(data.vaults) ? data.vaults : [];
 
@@ -1819,7 +1819,7 @@
     }
 
     if (elements.unlockBtn) {
-      elements.unlockBtn.disabled = !state.status || !state.status.available || !Boolean(locked);
+      elements.unlockBtn.disabled = !state.status || !state.status.available || !locked;
     }
   }
 
@@ -1849,9 +1849,9 @@
     }
 
     const locked = Boolean(state.status.locked);
-    const requiresPassphrase = Boolean(state.status.requires_passphrase);
+    const _requiresPassphrase = Boolean(state.status.requires_passphrase);
     const passwordProtected = Boolean(state.status.password_protected);
-    const backend = String(state.status.secret_store?.backend || '');
+    const _backend = String(state.status.secret_store?.backend || '');
     const selectedVault = activeVault();
     const vaultName = selectedVault?.name || state.status.vault_name || 'Vault';
 

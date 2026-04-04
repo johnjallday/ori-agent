@@ -4,7 +4,7 @@
  */
 
 // State for agent management (using shared variable from workspace-listing.js)
-// workspaceSystemAgents is declared in workspace-listing.js
+/* global workspaceSystemAgents:writable */
 let workspaceAvailableProviders = [];
 let workspaceLLMAvailable = false;
 let workspaceSystemModelConfigured = false;
