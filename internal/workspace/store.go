@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/types"
@@ -402,7 +403,8 @@ func nextAvailableWorkspaceSlug(parentDir, baseSlug string) string {
 		baseSlug = "untitled"
 	}
 
-	for suffix := 2; ; suffix++ {
+	const maxAttempts = 1000
+	for suffix := 2; suffix < 2+maxAttempts; suffix++ {
 		candidate := appendWorkspaceSlugSuffix(baseSlug, suffix)
 		existsOnDisk, err := pathExists(filepath.Join(parentDir, candidate))
 		if err != nil {
@@ -414,6 +416,9 @@ func nextAvailableWorkspaceSlug(parentDir, baseSlug string) string {
 			return candidate
 		}
 	}
+
+	// All numeric suffixes exhausted; use a timestamp-based fallback.
+	return appendWorkspaceSlugSuffix(baseSlug, int(time.Now().UnixNano()))
 }
 
 func appendWorkspaceSlugSuffix(baseSlug string, suffix int) string {
@@ -931,13 +936,19 @@ type SyncStatus struct {
 	Orphaned     []SyncWorkspaceInfo `json:"orphaned"`
 }
 
-// CachedWorkspaces returns a copy of all workspaces currently in the FileStore cache.
+// CachedWorkspaces returns deep copies of all workspaces currently in the FileStore cache.
+// Callers may safely mutate the returned workspaces without affecting the cache.
 func (s *FileStore) CachedWorkspaces() map[string]*Workspace {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	result := make(map[string]*Workspace, len(s.cache))
 	for id, ws := range s.cache {
-		result[id] = ws
+		clone, err := cloneWorkspaceForRebind(ws)
+		if err != nil {
+			logger.Warn("failed to clone cached workspace", logger.Fields{"id": id, "error": err})
+			continue
+		}
+		result[id] = clone
 	}
 	return result
 }

@@ -373,7 +373,7 @@
     }
 
     try {
-      const response = await fetch(`/api/orchestration/tasks?studio_id=${encodeURIComponent(workspaceId)}`, {
+      const response = await fetch(`/api/orchestration/tasks?workspace_id=${encodeURIComponent(workspaceId)}`, {
         signal: controller.signal
       });
       if (!response.ok) throw new Error('Failed to load tasks');

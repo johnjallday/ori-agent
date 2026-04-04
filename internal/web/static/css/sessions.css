@@ -1379,7 +1379,7 @@ body.workspace-page .workspace-setup-card {
   font-size: 11px;
 }
 
-/* Hide navbar agent display when session sidebar is present (Studio page) */
+/* Hide navbar agent display when session sidebar is present (Workspace page) */
 .session-sidebar ~ .main-content #currentAgentDisplay,
 body:has(.session-sidebar) #currentAgentDisplay,
 body:has(.chat-info-bar) #currentAgentDisplay {

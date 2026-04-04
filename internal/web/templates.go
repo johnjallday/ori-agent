@@ -81,10 +81,10 @@ func (tr *TemplateRenderer) LoadTemplates() error {
 		"templates/components/vault-modal.tmpl",
 		"templates/components/vault-settings-section.tmpl",
 		"templates/components/file_dialog.tmpl",
-		"templates/components/studios/manage-agents-modal.tmpl",
+		"templates/components/workspaces/manage-agents-modal.tmpl",
 		"templates/components/workspaces/create-workspace-modal.tmpl",
 		"templates/components/workspaces/sync-modal.tmpl",
-		"templates/components/studios/workspace-details-modal.tmpl",
+		"templates/components/workspaces/workspace-details-modal.tmpl",
 		"templates/pages/index.tmpl",
 		"templates/pages/agents.tmpl",
 		"templates/pages/agents-detail.tmpl",
@@ -93,7 +93,7 @@ func (tr *TemplateRenderer) LoadTemplates() error {
 		"templates/pages/settings.tmpl",
 		"templates/pages/vault.tmpl",
 		"templates/pages/workflows.tmpl",
-		"templates/pages/studios.tmpl",
+		"templates/pages/workspaces-hub.tmpl",
 		"templates/pages/workspace-canvas.tmpl",
 		"templates/pages/workspace-detail.tmpl",
 		"templates/pages/usage.tmpl",
@@ -130,7 +130,7 @@ func (tr *TemplateRenderer) LoadTemplates() error {
 	tr.templates["settings"] = tmpl
 	tr.templates["vault"] = tmpl
 	tr.templates["workflows"] = tmpl
-	tr.templates["studios"] = tmpl
+	tr.templates["workspaces-hub"] = tmpl
 	tr.templates["workspace-canvas"] = tmpl
 	tr.templates["workspace-detail"] = tmpl
 	tr.templates["usage"] = tmpl
@@ -161,7 +161,7 @@ func (tr *TemplateRenderer) RenderTemplate(name string, data TemplateData) (stri
 	switch name {
 	case "index":
 		templateName = "base.tmpl"
-	case "settings", "vault", "workflows", "studios", "workspace-canvas", "workspace-detail", "usage", "mcp", "models", "review", "agents-detail", "agents-edit", "agents-create", "skills", "workspaces", "personalize":
+	case "settings", "vault", "workflows", "workspaces-hub", "workspace-canvas", "workspace-detail", "usage", "mcp", "models", "review", "agents-detail", "agents-edit", "agents-create", "skills", "workspaces", "personalize":
 		// These templates use {{define "name"}}, so execute by defined name
 		templateName = name
 	case "agents":

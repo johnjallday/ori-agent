@@ -20,7 +20,7 @@ import { AgentCanvasInitialization } from './agent-canvas-init.js';
  * Displays agents as nodes with tasks flowing between them
  */
 class AgentCanvas {
-  constructor(canvasId, studioId) {
+  constructor(canvasId, workspaceId) {
     // Initialize state module (centralized state management)
     this.state = new AgentCanvasState();
 
@@ -28,12 +28,12 @@ class AgentCanvas {
     const canvas = document.getElementById(canvasId);
     const ctx = canvas.getContext('2d');
     this.state.setCanvas(canvas, ctx);
-    this.state.setStudioId(studioId);
+    this.state.setWorkspaceId(workspaceId);
 
     // Keep canvas and ctx as direct properties for backward compatibility
     this.canvas = canvas;
     this.ctx = ctx;
-    this.studioId = studioId;
+    this.workspaceId = workspaceId;
 
     // Initialize forms module
     this.state.forms = new AgentCanvasForms(this);
@@ -119,10 +119,6 @@ class AgentCanvas {
 
   // ==================== PROPERTY ACCESSORS (Backward Compatibility) ====================
   // These getters/setters delegate to the state module for backward compatibility
-
-  // Studio and data
-  get studio() { return this.state.studio; }
-  set studio(value) { this.state.setStudio(value); }
 
   get agents() { return this.state.agents; }
   set agents(value) { this.state.setAgents(value); }
@@ -730,8 +726,8 @@ class AgentCanvas {
 
     try {
       const params = new URLSearchParams({ id: task.id });
-      if (this.studioId) {
-        params.append('workspace_id', this.studioId);
+      if (this.workspaceId) {
+        params.append('workspace_id', this.workspaceId);
       }
 
       await apiDelete(`/api/orchestration/tasks?${params.toString()}`);
@@ -761,20 +757,20 @@ class AgentCanvas {
   }
 
   /**
-   * Remove an agent from the studio
+   * Remove an agent from the workspace
    */
-  async removeAgentFromStudio(nodeId, instanceNumber) {
+  async removeAgentFromWorkspace(nodeId, instanceNumber) {
     // Extract agent name from nodeId (e.g., "default-node-2" -> "default")
     const agentName = nodeId.split('-node-')[0];
 
-    if (!confirm(`Remove agent "${agentName} #${instanceNumber}" from this studio?\n\nThis will only remove it from the canvas, not delete the agent.`)) {
+    if (!confirm(`Remove agent "${agentName} #${instanceNumber}" from this workspace?\n\nThis will only remove it from the canvas, not delete the agent.`)) {
       return;
     }
 
     try {
       // Use name:instanceNumber format for specific instance removal
       const agentIdentifier = `${agentName}:${instanceNumber}`;
-      const response = await fetch(`/api/workspaces/${this.studioId}/agents/${agentIdentifier}`, {
+      const response = await fetch(`/api/workspaces/${this.workspaceId}/agents/${agentIdentifier}`, {
         method: 'DELETE'
       });
 
@@ -835,7 +831,7 @@ class AgentCanvas {
         // Reload to ensure consistency
         setTimeout(() => this.init(), 500);
       } else {
-        alert('Failed to remove agent from studio');
+        alert('Failed to remove agent from workspace');
       }
     } catch (error) {
       console.error('❌ Error removing agent:', error);
@@ -874,12 +870,12 @@ class AgentCanvas {
    * Delete an attachment node
    */
   async deleteAttachment(attachment) {
-    if (!attachment || !attachment.id || !this.studioId) {
+    if (!attachment || !attachment.id || !this.workspaceId) {
       alert('Cannot delete attachment: missing ID or workspace');
       return;
     }
     try {
-      await apiDelete(`/api/workspaces/${this.studioId}/attachments/${attachment.id}`);
+      await apiDelete(`/api/workspaces/${this.workspaceId}/attachments/${attachment.id}`);
       this.state.removeAttachment(attachment.id);
       this.saveLayout();
       this.draw();
@@ -895,12 +891,12 @@ class AgentCanvas {
    */
   async deleteStoreNode(storeNode) {
     const nodeId = storeNode?.canvas_node_id;
-    if (!storeNode || !nodeId || !this.studioId) {
+    if (!storeNode || !nodeId || !this.workspaceId) {
       alert('Cannot delete store node: missing ID or workspace');
       return;
     }
     try {
-      await apiDelete(`/api/workspaces/${this.studioId}/canvas/store-nodes/${nodeId}`);
+      await apiDelete(`/api/workspaces/${this.workspaceId}/canvas/store-nodes/${nodeId}`);
       this.state.removeStoreNode(storeNode.id);
       this.saveLayout();
       this.draw();
@@ -941,7 +937,7 @@ class AgentCanvas {
 
     try {
       // Update the store node's agent_node_id
-      await apiPatch(`/api/workspaces/${this.studioId}/canvas/store-nodes/${storeNode.canvas_node_id}`, {
+      await apiPatch(`/api/workspaces/${this.workspaceId}/canvas/store-nodes/${storeNode.canvas_node_id}`, {
         agent_node_id: agent.nodeId || agent.id
       });
 
@@ -1063,7 +1059,7 @@ class AgentCanvas {
 
     // Create backend task for this combiner
     try {
-      const response = await apiPost(`/api/workspaces/${this.studioId}/tasks`, {
+      const response = await apiPost(`/api/workspaces/${this.workspaceId}/tasks`, {
         description: `${combinerType.name}: ${combinerType.description}`,
         from: '',
         to: '',
@@ -1275,7 +1271,7 @@ class AgentCanvas {
    */
   async createWorkflowTaskNode(node, x, y) {
     const config = node.config || {};
-    const response = await apiPost(`/api/workspaces/${this.studioId}/tasks`, {
+    const response = await apiPost(`/api/workspaces/${this.workspaceId}/tasks`, {
       description: config.description || 'New Task',
       to: config.to || 'unassigned',
       from: config.from || 'user',
@@ -1305,7 +1301,7 @@ class AgentCanvas {
     const agentName = config.name || node.id;
 
     const response = await apiPost('/api/orchestration/workspace/agents', {
-      studio_id: this.studioId,
+      workspace_id: this.workspaceId,
       agent_name: agentName
     });
 
@@ -1328,7 +1324,7 @@ class AgentCanvas {
   async createWorkflowStoreNode(node, x, y) {
     const config = node.config || {};
 
-    const response = await apiPost(`/api/workspaces/${this.studioId}/canvas/store-nodes`, {
+    const response = await apiPost(`/api/workspaces/${this.workspaceId}/canvas/store-nodes`, {
       name: config.name || 'New Store',
       base_dir: config.base_dir || config.file_path || '',
       format: config.format || 'json',
@@ -1351,7 +1347,7 @@ class AgentCanvas {
   async createWorkflowAttachmentNode(node, x, y) {
     const config = node.config || {};
 
-    const response = await apiPost(`/api/workspaces/${this.studioId}/attachments`, {
+    const response = await apiPost(`/api/workspaces/${this.workspaceId}/attachments`, {
       title: config.title || 'New Attachment',
       type: config.type || 'note',
       body: config.body || '',

@@ -8,7 +8,7 @@ import (
 )
 
 // OrchestrationSessionStore implements the orchestrationhttp.SessionStore interface
-// to provide session and task data for the Studios dashboard.
+// to provide session and task data for the Workspaces dashboard.
 type OrchestrationSessionStore struct {
 	store HybridStore
 }

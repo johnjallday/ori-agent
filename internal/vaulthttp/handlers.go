@@ -199,7 +199,7 @@ func (h *Handler) handleRecords(w http.ResponseWriter, r *http.Request) {
 	case http.MethodGet:
 		filter := vault.RecordFilter{
 			VaultID:     vaultIDFromRequest(r),
-			WorkspaceID: firstNonEmpty(r.URL.Query().Get("workspace_id"), r.URL.Query().Get("studio_id")),
+			WorkspaceID: r.URL.Query().Get("workspace_id"),
 			Type:        r.URL.Query().Get("type"),
 		}
 		access := accessFromQuery(r)
@@ -232,7 +232,7 @@ func (h *Handler) handleRecords(w http.ResponseWriter, r *http.Request) {
 		record := &vault.Record{
 			VaultID:         vaultIDFromRequest(r, req.VaultID),
 			Type:            req.Type,
-			WorkspaceID:     firstNonEmpty(req.WorkspaceID, r.URL.Query().Get("workspace_id"), r.URL.Query().Get("studio_id")),
+			WorkspaceID:     firstNonEmpty(req.WorkspaceID, r.URL.Query().Get("workspace_id")),
 			Label:           req.Label,
 			Tags:            req.Tags,
 			Source:          req.Source,
@@ -299,7 +299,7 @@ func (h *Handler) handleRecord(w http.ResponseWriter, r *http.Request, id string
 			update.Payload = &payload
 		}
 
-		workspaceID := firstNonEmpty(stringValue(req.WorkspaceID), r.URL.Query().Get("workspace_id"), r.URL.Query().Get("studio_id"))
+		workspaceID := firstNonEmpty(stringValue(req.WorkspaceID), r.URL.Query().Get("workspace_id"))
 		access := accessFromFields(workspaceID, req.ActorType, req.ActorID)
 		if access.ActorID == "" && access.ActorType == "" {
 			access = accessFromQuery(r)
@@ -329,7 +329,7 @@ func (h *Handler) handleGrants(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodGet:
 		vaultID := vaultIDFromRequest(r)
-		workspaceID := firstNonEmpty(r.URL.Query().Get("workspace_id"), r.URL.Query().Get("studio_id"))
+		workspaceID := r.URL.Query().Get("workspace_id")
 		grants, err := h.store.ListGrants(r.Context(), vaultID, workspaceID)
 		if err != nil {
 			respondVaultError(w, err)
@@ -345,7 +345,7 @@ func (h *Handler) handleGrants(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		grant.VaultID = vaultIDFromRequest(r, grant.VaultID)
-		grant.WorkspaceID = firstNonEmpty(grant.WorkspaceID, r.URL.Query().Get("workspace_id"), r.URL.Query().Get("studio_id"))
+		grant.WorkspaceID = firstNonEmpty(grant.WorkspaceID, r.URL.Query().Get("workspace_id"))
 		if err := h.store.CreateGrant(r.Context(), &grant); err != nil {
 			respondVaultError(w, err)
 			return
@@ -383,7 +383,6 @@ func (h *Handler) handleExport(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		VaultID       string `json:"vault_id,omitempty"`
 		WorkspaceID   string `json:"workspace_id,omitempty"`
-		StudioID      string `json:"studio_id,omitempty"`
 		VaultPassword string `json:"vault_password"`
 		Confirm       bool   `json:"confirm"`
 	}
@@ -397,7 +396,7 @@ func (h *Handler) handleExport(w http.ResponseWriter, r *http.Request) {
 
 	bundle, err := h.store.Export(r.Context(), vault.ExportRequest{
 		VaultID:     vaultIDFromRequest(r, req.VaultID),
-		WorkspaceID: firstNonEmpty(req.WorkspaceID, req.StudioID),
+		WorkspaceID: req.WorkspaceID,
 		Password:    req.VaultPassword,
 	})
 	if err != nil {
@@ -457,7 +456,7 @@ func (h *Handler) handleImport(w http.ResponseWriter, r *http.Request) {
 
 func accessFromQuery(r *http.Request) vault.AccessContext {
 	return accessFromFields(
-		firstNonEmpty(r.URL.Query().Get("workspace_id"), r.URL.Query().Get("studio_id")),
+		r.URL.Query().Get("workspace_id"),
 		vault.ActorType(r.URL.Query().Get("actor_type")),
 		r.URL.Query().Get("actor_id"),
 	)

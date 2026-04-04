@@ -103,7 +103,7 @@ func enrichPromptWithWorkspaceContext(prompt string, ws *workspace.Workspace, mo
 	}
 
 	return fmt.Sprintf(
-		"%s\nWorkspace context:\n- studio_id: %s\n- workspace_name: %s\n- route_mode: %s\n\nUser request:\n%s",
+		"%s\nWorkspace context:\n- workspace_id: %s\n- workspace_name: %s\n- route_mode: %s\n\nUser request:\n%s",
 		action,
 		ws.ID,
 		ws.Name,

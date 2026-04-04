@@ -60,14 +60,14 @@ export class AgentCanvasForms {
       return;
     }
 
-    if (!this.canvas.studioId) {
+    if (!this.canvas.workspaceId) {
       alert('Error: Workspace ID not found. Please refresh the page and try again.');
-      console.error('Canvas studioId is not set:', this.canvas.studioId);
+      console.error('Canvas workspaceId is not set:', this.canvas.workspaceId);
       return;
     }
 
     const requestBody = {
-      studio_id: this.canvas.studioId,
+      workspace_id: this.canvas.workspaceId,
       from: 'user',
       description: this.createTaskDescription.trim(),
       priority: 0
@@ -347,13 +347,13 @@ export class AgentCanvasForms {
       return;
     }
 
-    if (!this.canvas.studioId) {
+    if (!this.canvas.workspaceId) {
       alert('Error: Workspace ID not found');
       return;
     }
 
     try {
-      const response = await fetch(`/api/workspaces/${this.canvas.studioId}/agents`, {
+      const response = await fetch(`/api/workspaces/${this.canvas.workspaceId}/agents`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ agent_name: this.selectedAgentToAdd })
@@ -428,7 +428,7 @@ export class AgentCanvasForms {
     // Description
     ctx.fillStyle = '#6b7280';
     ctx.font = '14px system-ui';
-    ctx.fillText('Select an agent to add to this studio:', formX + padding, currentY);
+    ctx.fillText('Select an agent to add to this workspace:', formX + padding, currentY);
     currentY += 30;
 
     // Agent list

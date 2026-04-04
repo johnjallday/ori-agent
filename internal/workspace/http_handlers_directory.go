@@ -33,7 +33,7 @@ func (h *HTTPHandler) CreateDirectory(w http.ResponseWriter, r *http.Request) {
 		orihttp.BadRequest(w, "Invalid URL format")
 		return
 	}
-	studioID := parts[0]
+	workspaceID := parts[0]
 
 	var req CreateDirectoryRequest
 	if !orihttp.ParseJSONBody(w, r, &req) {
@@ -49,15 +49,15 @@ func (h *HTTPHandler) CreateDirectory(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	studio, err := h.store.Get(studioID)
+	workspace, err := h.store.Get(workspaceID)
 	if err != nil {
-		orihttp.NotFound(w, fmt.Sprintf("Studio not found: %v", err))
+		orihttp.NotFound(w, fmt.Sprintf("Workspace not found: %v", err))
 		return
 	}
 
 	dir := DirectoryReference{
 		ID:          uuid.New().String(),
-		WorkspaceID: studioID,
+		WorkspaceID: workspaceID,
 		Name:        req.Name,
 		Path:        req.Path,
 		X:           req.X,
@@ -66,17 +66,17 @@ func (h *HTTPHandler) CreateDirectory(w http.ResponseWriter, r *http.Request) {
 		UpdatedAt:   time.Now(),
 	}
 
-	if err := studio.AddDirectoryReference(dir); err != nil {
+	if err := workspace.AddDirectoryReference(dir); err != nil {
 		orihttp.BadRequest(w, fmt.Sprintf("Failed to add directory: %v", err))
 		return
 	}
 
-	if err := h.store.Save(studio); err != nil {
-		orihttp.InternalError(w, fmt.Sprintf("Failed to save studio: %v", err))
+	if err := h.store.Save(workspace); err != nil {
+		orihttp.InternalError(w, fmt.Sprintf("Failed to save workspace: %v", err))
 		return
 	}
 
-	createdDir, err := studio.GetDirectoryReference(dir.ID)
+	createdDir, err := workspace.GetDirectoryReference(dir.ID)
 	if err != nil {
 		logger.Debug("Could not retrieve created directory, using original", logger.Fields{"directory_id": dir.ID, "error": err})
 		createdDir = &dir
@@ -85,7 +85,7 @@ func (h *HTTPHandler) CreateDirectory(w http.ResponseWriter, r *http.Request) {
 	if h.eventBus != nil {
 		h.eventBus.Publish(Event{
 			Type:        EventWorkspaceUpdated,
-			WorkspaceID: studioID,
+			WorkspaceID: workspaceID,
 			Source:      "api",
 			Data: map[string]interface{}{
 				"action":    "directory_created",
@@ -99,7 +99,7 @@ func (h *HTTPHandler) CreateDirectory(w http.ResponseWriter, r *http.Request) {
 	if encErr := json.NewEncoder(w).Encode(map[string]interface{}{
 		"message":   "Directory reference created successfully",
 		"directory": createdDir,
-		"studio":    studioID,
+		"workspace": workspaceID,
 	}); encErr != nil {
 		logger.Error("Failed to encode response", logger.Fields{"error": encErr})
 	}
@@ -118,19 +118,19 @@ func (h *HTTPHandler) ListDirectories(w http.ResponseWriter, r *http.Request) {
 		orihttp.BadRequest(w, "Invalid URL format")
 		return
 	}
-	studioID := parts[0]
+	workspaceID := parts[0]
 
-	studio, err := h.store.Get(studioID)
+	workspace, err := h.store.Get(workspaceID)
 	if err != nil {
-		orihttp.NotFound(w, fmt.Sprintf("Studio not found: %v", err))
+		orihttp.NotFound(w, fmt.Sprintf("Workspace not found: %v", err))
 		return
 	}
 
 	w.Header().Set("Content-Type", "application/json")
 	if encErr := json.NewEncoder(w).Encode(map[string]interface{}{
-		"directories": studio.DirectoryReferences,
-		"count":       len(studio.DirectoryReferences),
-		"studio":      studioID,
+		"directories": workspace.DirectoryReferences,
+		"count":       len(workspace.DirectoryReferences),
+		"workspace":   workspaceID,
 	}); encErr != nil {
 		logger.Error("Failed to encode response", logger.Fields{"error": encErr})
 	}
@@ -149,16 +149,16 @@ func (h *HTTPHandler) GetDirectory(w http.ResponseWriter, r *http.Request) {
 		orihttp.BadRequest(w, "Invalid URL format")
 		return
 	}
-	studioID := parts[0]
+	workspaceID := parts[0]
 	dirID := parts[2]
 
-	studio, err := h.store.Get(studioID)
+	workspace, err := h.store.Get(workspaceID)
 	if err != nil {
-		orihttp.NotFound(w, fmt.Sprintf("Studio not found: %v", err))
+		orihttp.NotFound(w, fmt.Sprintf("Workspace not found: %v", err))
 		return
 	}
 
-	dir, err := studio.GetDirectoryReference(dirID)
+	dir, err := workspace.GetDirectoryReference(dirID)
 	if err != nil {
 		orihttp.NotFound(w, err.Error())
 		return
@@ -167,7 +167,7 @@ func (h *HTTPHandler) GetDirectory(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	if encErr := json.NewEncoder(w).Encode(map[string]interface{}{
 		"directory": dir,
-		"studio":    studioID,
+		"workspace": workspaceID,
 	}); encErr != nil {
 		logger.Error("Failed to encode response", logger.Fields{"error": encErr})
 	}
@@ -186,7 +186,7 @@ func (h *HTTPHandler) UpdateDirectory(w http.ResponseWriter, r *http.Request) {
 		orihttp.BadRequest(w, "Invalid URL format")
 		return
 	}
-	studioID := parts[0]
+	workspaceID := parts[0]
 	dirID := parts[2]
 
 	var req struct {
@@ -200,13 +200,13 @@ func (h *HTTPHandler) UpdateDirectory(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	studio, err := h.store.Get(studioID)
+	workspace, err := h.store.Get(workspaceID)
 	if err != nil {
-		orihttp.NotFound(w, fmt.Sprintf("Studio not found: %v", err))
+		orihttp.NotFound(w, fmt.Sprintf("Workspace not found: %v", err))
 		return
 	}
 
-	dir, err := studio.GetDirectoryReference(dirID)
+	dir, err := workspace.GetDirectoryReference(dirID)
 	if err != nil {
 		orihttp.NotFound(w, err.Error())
 		return
@@ -226,17 +226,17 @@ func (h *HTTPHandler) UpdateDirectory(w http.ResponseWriter, r *http.Request) {
 		dir.Y = *req.Y
 	}
 
-	if err := studio.UpdateDirectoryReference(*dir); err != nil {
+	if err := workspace.UpdateDirectoryReference(*dir); err != nil {
 		orihttp.BadRequest(w, fmt.Sprintf("Failed to update directory: %v", err))
 		return
 	}
 
-	if err := h.store.Save(studio); err != nil {
-		orihttp.InternalError(w, fmt.Sprintf("Failed to save studio: %v", err))
+	if err := h.store.Save(workspace); err != nil {
+		orihttp.InternalError(w, fmt.Sprintf("Failed to save workspace: %v", err))
 		return
 	}
 
-	updatedDir, err := studio.GetDirectoryReference(dirID)
+	updatedDir, err := workspace.GetDirectoryReference(dirID)
 	if err != nil {
 		logger.Debug("Could not retrieve updated directory, using original", logger.Fields{"directory_id": dirID, "error": err})
 		updatedDir = dir
@@ -245,7 +245,7 @@ func (h *HTTPHandler) UpdateDirectory(w http.ResponseWriter, r *http.Request) {
 	if h.eventBus != nil {
 		h.eventBus.Publish(Event{
 			Type:        EventWorkspaceUpdated,
-			WorkspaceID: studioID,
+			WorkspaceID: workspaceID,
 			Source:      "api",
 			Data: map[string]interface{}{
 				"action":    "directory_updated",
@@ -258,7 +258,7 @@ func (h *HTTPHandler) UpdateDirectory(w http.ResponseWriter, r *http.Request) {
 	if encErr := json.NewEncoder(w).Encode(map[string]interface{}{
 		"message":   "Directory reference updated successfully",
 		"directory": updatedDir,
-		"studio":    studioID,
+		"workspace": workspaceID,
 	}); encErr != nil {
 		logger.Error("Failed to encode response", logger.Fields{"error": encErr})
 	}
@@ -277,29 +277,29 @@ func (h *HTTPHandler) DeleteDirectory(w http.ResponseWriter, r *http.Request) {
 		orihttp.BadRequest(w, "Invalid URL format")
 		return
 	}
-	studioID := parts[0]
+	workspaceID := parts[0]
 	dirID := parts[2]
 
-	studio, err := h.store.Get(studioID)
+	workspace, err := h.store.Get(workspaceID)
 	if err != nil {
-		orihttp.NotFound(w, fmt.Sprintf("Studio not found: %v", err))
+		orihttp.NotFound(w, fmt.Sprintf("Workspace not found: %v", err))
 		return
 	}
 
-	if err := studio.DeleteDirectoryReference(dirID); err != nil {
+	if err := workspace.DeleteDirectoryReference(dirID); err != nil {
 		orihttp.NotFound(w, err.Error())
 		return
 	}
 
-	if err := h.store.Save(studio); err != nil {
-		orihttp.InternalError(w, fmt.Sprintf("Failed to save studio: %v", err))
+	if err := h.store.Save(workspace); err != nil {
+		orihttp.InternalError(w, fmt.Sprintf("Failed to save workspace: %v", err))
 		return
 	}
 
 	if h.eventBus != nil {
 		h.eventBus.Publish(Event{
 			Type:        EventWorkspaceUpdated,
-			WorkspaceID: studioID,
+			WorkspaceID: workspaceID,
 			Source:      "api",
 			Data: map[string]interface{}{
 				"action":       "directory_deleted",
@@ -312,7 +312,7 @@ func (h *HTTPHandler) DeleteDirectory(w http.ResponseWriter, r *http.Request) {
 	if encErr := json.NewEncoder(w).Encode(map[string]interface{}{
 		"message":      "Directory reference deleted successfully",
 		"directory_id": dirID,
-		"studio":       studioID,
+		"workspace":    workspaceID,
 	}); encErr != nil {
 		logger.Error("Failed to encode response", logger.Fields{"error": encErr})
 	}
@@ -331,16 +331,16 @@ func (h *HTTPHandler) ListDirectoryFiles(w http.ResponseWriter, r *http.Request)
 		orihttp.BadRequest(w, "Invalid URL format")
 		return
 	}
-	studioID := parts[0]
+	workspaceID := parts[0]
 	dirID := parts[2]
 
-	studio, err := h.store.Get(studioID)
+	workspace, err := h.store.Get(workspaceID)
 	if err != nil {
-		orihttp.NotFound(w, fmt.Sprintf("Studio not found: %v", err))
+		orihttp.NotFound(w, fmt.Sprintf("Workspace not found: %v", err))
 		return
 	}
 
-	files, err := studio.ListDirectoryFiles(dirID)
+	files, err := workspace.ListDirectoryFiles(dirID)
 	if err != nil {
 		orihttp.BadRequest(w, fmt.Sprintf("Failed to list files: %v", err))
 		return
@@ -351,7 +351,7 @@ func (h *HTTPHandler) ListDirectoryFiles(w http.ResponseWriter, r *http.Request)
 		"files":        files,
 		"count":        len(files),
 		"directory_id": dirID,
-		"studio":       studioID,
+		"workspace":    workspaceID,
 	}); encErr != nil {
 		logger.Error("Failed to encode response", logger.Fields{"error": encErr})
 	}
@@ -371,7 +371,7 @@ func (h *HTTPHandler) ReadDirectoryFile(w http.ResponseWriter, r *http.Request) 
 		orihttp.BadRequest(w, "Invalid URL format - file path required")
 		return
 	}
-	studioID := parts[0]
+	workspaceID := parts[0]
 	dirID := parts[2]
 	// Everything after "files/" is the relative file path
 	filePath := strings.Join(parts[4:], "/")
@@ -381,13 +381,13 @@ func (h *HTTPHandler) ReadDirectoryFile(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	studio, err := h.store.Get(studioID)
+	workspace, err := h.store.Get(workspaceID)
 	if err != nil {
-		orihttp.NotFound(w, fmt.Sprintf("Studio not found: %v", err))
+		orihttp.NotFound(w, fmt.Sprintf("Workspace not found: %v", err))
 		return
 	}
 
-	content, err := studio.ReadDirectoryFile(dirID, filePath)
+	content, err := workspace.ReadDirectoryFile(dirID, filePath)
 	if err != nil {
 		if strings.Contains(err.Error(), "not found") {
 			orihttp.NotFound(w, err.Error())

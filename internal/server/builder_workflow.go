@@ -1,5 +1,5 @@
 // Package server provides workflow initialization methods for the ServerBuilder.
-// This file contains methods for workspace, events, task execution, orchestration, and studio.
+// This file contains methods for workspace, events, task execution, and orchestration.
 package server
 
 import (
@@ -20,7 +20,7 @@ import (
 
 // initializeWorkspaceStore creates the workspace storage system.
 // Uses the session HybridStore as the underlying storage via an adapter,
-// which unifies workspace data between the Sessions sidebar and Studios page.
+// which unifies workspace data between the Sessions sidebar and Workspaces page.
 // A SyncStore wrapper ensures every Save also writes workspace.json to disk.
 func (b *ServerBuilder) initializeWorkspaceStore() error {
 	var ws workspace.Store
@@ -211,19 +211,19 @@ func (b *ServerBuilder) initializeOrchestration() error {
 	return nil
 }
 
-// initializeStudioOrchestrator creates the autonomous agent studio orchestrator.
-func (b *ServerBuilder) initializeStudioOrchestrator() error {
+// initializeWorkspaceOrchestrator creates the workspace orchestrator.
+func (b *ServerBuilder) initializeWorkspaceOrchestrator() error {
 	verbose := os.Getenv("ORI_VERBOSE") == "true"
 
 	llmAdapter := workspace.NewLLMFactoryAdapter(b.llmFactory, "openai")
-	b.studioOrchestrator = workspace.NewOrchestrator(b.workspaceStore, b.st, llmAdapter, b.eventBus)
+	b.workspaceOrchestrator = workspace.NewOrchestrator(b.workspaceStore, b.st, llmAdapter, b.eventBus)
 	if verbose {
-		logger.Info("Agent Studio orchestrator initialized", logger.Fields{})
+		logger.Info("Workspace orchestrator initialized", logger.Fields{})
 	}
 
-	b.studioHandler = workspace.NewHTTPHandler(b.workspaceStore, b.studioOrchestrator, b.eventBus)
+	b.workspaceHandler = workspace.NewHTTPHandler(b.workspaceStore, b.workspaceOrchestrator, b.eventBus)
 	if verbose {
-		logger.Info("Agent Studio HTTP handler initialized", logger.Fields{})
+		logger.Info("Workspace HTTP handler initialized", logger.Fields{})
 	}
 
 	return nil

@@ -210,7 +210,7 @@ func (nh *NotificationHandler) EventHistoryHandler(w http.ResponseWriter, r *htt
 		return
 	}
 
-	workspaceID := r.URL.Query().Get("studio_id")
+	workspaceID := r.URL.Query().Get("workspace_id")
 	sinceStr := r.URL.Query().Get("since")
 	limit := 100 // Default limit
 

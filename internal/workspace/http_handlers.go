@@ -13,7 +13,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/logger"
 )
 
-// HTTPHandler handles HTTP requests for Agent Studio
+// HTTPHandler handles HTTP requests for Agent Workspaces
 type HTTPHandler struct {
 	store        Store
 	orchestrator *Orchestrator
@@ -29,29 +29,29 @@ func NewHTTPHandler(store Store, orchestrator *Orchestrator, eventBus *EventBus)
 	}
 }
 
-// CreateStudioRequest represents the request to create a new studio
-type CreateStudioRequest struct {
+// CreateWorkspaceRequest represents the request to create a new workspace
+type CreateWorkspaceRequest struct {
 	Name           string   `json:"name"`
 	Description    string   `json:"description"`
 	Agents         []string `json:"agents"`
 	EntryAgentName string   `json:"entry_agent_name,omitempty"`
 }
 
-// CreateStudio handles POST /api/workspaces
-func (h *HTTPHandler) CreateStudio(w http.ResponseWriter, r *http.Request) {
+// CreateWorkspace handles POST /api/workspaces
+func (h *HTTPHandler) CreateWorkspace(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		orihttp.MethodNotAllowed(w)
 		return
 	}
 
-	var req CreateStudioRequest
+	var req CreateWorkspaceRequest
 	if !orihttp.ParseJSONBody(w, r, &req) {
 		return
 	}
 
 	// Validate request
 	if req.Name == "" {
-		orihttp.BadRequest(w, "Studio name is required")
+		orihttp.BadRequest(w, "Workspace name is required")
 		return
 	}
 	if len(req.Agents) == 0 {
@@ -59,8 +59,8 @@ func (h *HTTPHandler) CreateStudio(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Create studio
-	studio := &Workspace{
+	// Create workspace
+	workspace := &Workspace{
 		ID:          uuid.New().String(),
 		Name:        req.Name,
 		Description: req.Description,
@@ -74,12 +74,12 @@ func (h *HTTPHandler) CreateStudio(w http.ResponseWriter, r *http.Request) {
 	}
 
 	for _, agentName := range req.Agents {
-		if err := studio.AddAgent(agentName); err != nil {
+		if err := workspace.AddAgent(agentName); err != nil {
 			if strings.TrimSpace(agentName) == "" || errors.Is(err, ErrAgentAlreadyInWorkspace) {
-				orihttp.BadRequest(w, fmt.Sprintf("Invalid studio agents: %v", err))
+				orihttp.BadRequest(w, fmt.Sprintf("Invalid workspace agents: %v", err))
 				return
 			}
-			orihttp.InternalError(w, fmt.Sprintf("Failed to configure studio agents: %v", err))
+			orihttp.InternalError(w, fmt.Sprintf("Failed to configure workspace agents: %v", err))
 			return
 		}
 	}
@@ -88,156 +88,156 @@ func (h *HTTPHandler) CreateStudio(w http.ResponseWriter, r *http.Request) {
 	if entryAgentName == "" {
 		entryAgentName = strings.TrimSpace(req.Agents[0])
 	}
-	if err := studio.SetEntryAgentName(entryAgentName); err != nil {
+	if err := workspace.SetEntryAgentName(entryAgentName); err != nil {
 		orihttp.BadRequest(w, fmt.Sprintf("Invalid entry agent: %v", err))
 		return
 	}
 
-	// Save studio
-	if err := h.store.Save(studio); err != nil {
-		logger.Error("Failed to save studio", logger.Fields{"error": err})
-		orihttp.InternalError(w, "Failed to create studio")
+	// Save workspace
+	if err := h.store.Save(workspace); err != nil {
+		logger.Error("Failed to save workspace", logger.Fields{"error": err})
+		orihttp.InternalError(w, "Failed to create workspace")
 		return
 	}
 
-	logger.Info("Created studio: (ID: ) with agents", logger.Fields{"workspace_id": studio.Name, "id": studio.ID, "agents": studio.Agents})
+	logger.Info("Created workspace: (ID: ) with agents", logger.Fields{"workspace_id": workspace.Name, "id": workspace.ID, "agents": workspace.Agents})
 
-	// Return created studio
+	// Return created workspace
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
 	if encErr := json.NewEncoder(w).Encode(map[string]interface{}{
-		"id":               studio.ID,
-		"name":             studio.Name,
-		"agents":           studio.Agents,
-		"agent_instances":  studio.AgentInstances,
-		"entry_agent_name": studio.EntryAgentName(),
-		"status":           studio.Status,
-		"message":          "Studio created successfully",
+		"id":               workspace.ID,
+		"name":             workspace.Name,
+		"agents":           workspace.Agents,
+		"agent_instances":  workspace.AgentInstances,
+		"entry_agent_name": workspace.EntryAgentName(),
+		"status":           workspace.Status,
+		"message":          "Workspace created successfully",
 	}); encErr != nil {
 		logger.Error("Failed to encode response", logger.Fields{"error": encErr})
 	}
 }
 
-// GetStudio handles GET /api/workspaces/:id
-func (h *HTTPHandler) GetStudio(w http.ResponseWriter, r *http.Request) {
+// GetWorkspace handles GET /api/workspaces/:id
+func (h *HTTPHandler) GetWorkspace(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		orihttp.MethodNotAllowed(w)
 		return
 	}
 
-	// Extract studio ID from URL path
+	// Extract workspace ID from URL path
 	path := strings.TrimPrefix(r.URL.Path, "/api/workspaces/")
-	studioID := strings.TrimSuffix(path, "/")
+	workspaceID := strings.TrimSuffix(path, "/")
 
-	// Get studio
-	studio, err := h.store.Get(studioID)
+	// Get workspace
+	workspace, err := h.store.Get(workspaceID)
 	if err != nil {
-		orihttp.NotFound(w, fmt.Sprintf("Studio not found: %v", err))
+		orihttp.NotFound(w, fmt.Sprintf("Workspace not found: %v", err))
 		return
 	}
 
 	// Sync agents from tasks (handles legacy tasks assigned before auto-add feature)
-	if added := studio.SyncAgentsFromTasks(); added > 0 {
-		if saveErr := h.store.Save(studio); saveErr != nil {
+	if added := workspace.SyncAgentsFromTasks(); added > 0 {
+		if saveErr := h.store.Save(workspace); saveErr != nil {
 			logger.Warn("Failed to save workspace after syncing agents", logger.Fields{"error": saveErr})
 		}
 	}
 
 	// Get agent statistics
-	agentStats := studio.GetAgentStats()
+	agentStats := workspace.GetAgentStats()
 
 	// Get workspace progress
-	workspaceProgress := studio.GetWorkspaceProgress()
+	workspaceProgress := workspace.GetWorkspaceProgress()
 
-	// Return studio details
+	// Return workspace details
 	w.Header().Set("Content-Type", "application/json")
 	if encErr := json.NewEncoder(w).Encode(map[string]interface{}{
-		"id":                   studio.ID,
-		"name":                 studio.Name,
-		"description":          studio.Description,
-		"entry_agent_name":     studio.EntryAgentName(),
-		"agents":               studio.Agents,
-		"agent_instances":      studio.AgentInstances, // NEW: Stable agent instances
+		"id":                   workspace.ID,
+		"name":                 workspace.Name,
+		"description":          workspace.Description,
+		"entry_agent_name":     workspace.EntryAgentName(),
+		"agents":               workspace.Agents,
+		"agent_instances":      workspace.AgentInstances, // NEW: Stable agent instances
 		"agent_stats":          agentStats,
 		"workspace_progress":   workspaceProgress,
-		"status":               studio.Status,
-		"tasks":                studio.Tasks,
-		"attachments":          studio.Attachments,
-		"scheduled_tasks":      studio.ScheduledTasks, // Include scheduled tasks for scheduler nodes
-		"store_nodes":          studio.StoreNodes,     // Include store nodes
-		"directory_references": studio.DirectoryReferences,
-		"mcp_bindings":         studio.MCPBindings,
-		"agent_mcp_access":     studio.AgentMCPAccess,
-		"messages":             studio.Messages,
-		"shared_data":          studio.SharedData,
-		"layout":               studio.Layout,
-		"created_at":           studio.CreatedAt,
-		"updated_at":           studio.UpdatedAt,
+		"status":               workspace.Status,
+		"tasks":                workspace.Tasks,
+		"attachments":          workspace.Attachments,
+		"scheduled_tasks":      workspace.ScheduledTasks, // Include scheduled tasks for scheduler nodes
+		"store_nodes":          workspace.StoreNodes,     // Include store nodes
+		"directory_references": workspace.DirectoryReferences,
+		"mcp_bindings":         workspace.MCPBindings,
+		"agent_mcp_access":     workspace.AgentMCPAccess,
+		"messages":             workspace.Messages,
+		"shared_data":          workspace.SharedData,
+		"layout":               workspace.Layout,
+		"created_at":           workspace.CreatedAt,
+		"updated_at":           workspace.UpdatedAt,
 	}); encErr != nil {
 		logger.Error("Failed to encode response", logger.Fields{"error": encErr})
 	}
 }
 
-// ListStudios handles GET /api/workspaces
-func (h *HTTPHandler) ListStudios(w http.ResponseWriter, r *http.Request) {
+// ListWorkspaces handles GET /api/workspaces
+func (h *HTTPHandler) ListWorkspaces(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		orihttp.MethodNotAllowed(w)
 		return
 	}
 
-	// Get all studio IDs
+	// Get all workspace IDs
 	ids, err := h.store.List()
 	if err != nil {
-		orihttp.InternalError(w, fmt.Sprintf("Failed to list studios: %v", err))
-		// Get studio details
+		orihttp.InternalError(w, fmt.Sprintf("Failed to list workspaces: %v", err))
+		// Get workspace details
 		return
 	}
 
-	studios := make([]map[string]interface{}, 0, len(ids))
+	workspaces := make([]map[string]interface{}, 0, len(ids))
 	for _, id := range ids {
-		studio, err := h.store.Get(id)
+		workspace, err := h.store.Get(id)
 		if err != nil {
-			logger.Error("Failed to get studio", logger.Fields{"workspace_id": id, "err": err})
+			logger.Error("Failed to get workspace", logger.Fields{"workspace_id": id, "err": err})
 			continue
 		}
 
-		studios = append(studios, map[string]interface{}{
-			"id":               studio.ID,
-			"name":             studio.Name,
-			"description":      studio.Description,
-			"entry_agent_name": studio.EntryAgentName(),
-			"agents":           studio.Agents,
-			"status":           studio.Status,
-			"created_at":       studio.CreatedAt,
-			"task_count":       len(studio.Tasks),
+		workspaces = append(workspaces, map[string]interface{}{
+			"id":               workspace.ID,
+			"name":             workspace.Name,
+			"description":      workspace.Description,
+			"entry_agent_name": workspace.EntryAgentName(),
+			"agents":           workspace.Agents,
+			"status":           workspace.Status,
+			"created_at":       workspace.CreatedAt,
+			"task_count":       len(workspace.Tasks),
 		})
 	}
 
-	// Return studios
+	// Return workspaces
 	w.Header().Set("Content-Type", "application/json")
 	if encErr := json.NewEncoder(w).Encode(map[string]interface{}{
-		"studios": studios,
-		"count":   len(studios),
+		"workspaces": workspaces,
+		"count":      len(workspaces),
 	}); encErr != nil {
 		logger.Error("Failed to encode response", logger.Fields{"error": encErr})
 	}
 }
 
-// GetStudioEvents handles GET /api/workspaces/:id/events (Server-Sent Events)
-func (h *HTTPHandler) GetStudioEvents(w http.ResponseWriter, r *http.Request) {
-	// Extract studio ID
+// GetWorkspaceEvents handles GET /api/workspaces/:id/events (Server-Sent Events)
+func (h *HTTPHandler) GetWorkspaceEvents(w http.ResponseWriter, r *http.Request) {
+	// Extract workspace ID
 	path := strings.TrimPrefix(r.URL.Path, "/api/workspaces/")
 	parts := strings.Split(path, "/")
 	if len(parts) < 2 {
 		orihttp.BadRequest(w, "Invalid URL format")
 		return
 	}
-	studioID := parts[0]
+	workspaceID := parts[0]
 
-	// Verify studio exists
+	// Verify workspace exists
 
-	if _, err := h.store.Get(studioID); err != nil {
-		orihttp.NotFound(w, "Studio not found")
+	if _, err := h.store.Get(workspaceID); err != nil {
+		orihttp.NotFound(w, "Workspace not found")
 		// Set SSE headers
 		return
 	}
@@ -249,16 +249,16 @@ func (h *HTTPHandler) GetStudioEvents(w http.ResponseWriter, r *http.Request) {
 	// Create event channel
 	events := make(chan Event, 10)
 
-	// Subscribe to events for this studio.
+	// Subscribe to events for this workspace.
 	// Note: Currently sends a test event. To implement real event filtering:
-	// - Subscribe to EventBus with a filter for workspace ID matching studioID
+	// - Subscribe to EventBus with a filter for workspace ID matching workspaceID
 	// - Forward matching events to this channel
 	go func() {
 		time.Sleep(1 * time.Second)
 		events <- Event{
 			ID:          uuid.New().String(),
 			Type:        EventType("info"),
-			WorkspaceID: studioID,
+			WorkspaceID: workspaceID,
 			Timestamp:   time.Now(),
 			Source:      "system",
 			Data: map[string]interface{}{

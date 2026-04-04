@@ -511,7 +511,7 @@ class TaskModalController {
   async openForEdit(task, onSave = null) {
     this.init();
     this.editingTaskId = task.id;
-    this.workspaceId = task.workspace_id || task.studio_id;
+    this.workspaceId = task.workspace_id;
     this.onSaveCallback = onSave;
     this.currentTask = task; // Store for auto edit mode
     this.currentResultFollowUpPending = false;
@@ -954,7 +954,7 @@ class TaskModalController {
 
     try {
       const payload = {
-        studio_id: this.workspaceId,
+        workspace_id: this.workspaceId,
         description: this.buildFollowUpTitle(task, nextStep),
         details: this.buildFollowUpDetails(task, this.currentResultSourceTaskId || task.id, nextStep),
         to: String(task.to || '').trim() || undefined,
@@ -1128,7 +1128,7 @@ class TaskModalController {
 
       const deleteTask = async (taskId) => {
         if (!taskId) return;
-        const response = await fetch(`/api/orchestration/tasks?id=${encodeURIComponent(taskId)}&studio_id=${encodeURIComponent(this.workspaceId)}`, {
+        const response = await fetch(`/api/orchestration/tasks?id=${encodeURIComponent(taskId)}&workspace_id=${encodeURIComponent(this.workspaceId)}`, {
           method: 'DELETE'
         });
         if (!response.ok) {
@@ -1207,7 +1207,7 @@ class TaskModalController {
               });
             } else {
               const createdSubtask = await createTask({
-                studio_id: this.workspaceId,
+                workspace_id: this.workspaceId,
                 description: subtask.description,
                 details: subtask.details,
                 priority,
@@ -1264,7 +1264,7 @@ class TaskModalController {
         }
       } else if (subtasks.length > 0) {
         const parentTask = await createTask({
-          studio_id: this.workspaceId,
+          workspace_id: this.workspaceId,
           description,
           details,
           priority,
@@ -1282,7 +1282,7 @@ class TaskModalController {
           const subtask = subtasks[i];
           const inputTaskIds = this.resolveInputRefs(subtask.input_task_ids, stepIdsByIndex);
           const createdSubtask = await createTask({
-            studio_id: this.workspaceId,
+            workspace_id: this.workspaceId,
             description: subtask.description,
             details: subtask.details,
             priority,
@@ -1310,7 +1310,7 @@ class TaskModalController {
         this.showToast('Workflow created', 'success');
       } else {
         const createdTask = await createTask({
-          studio_id: this.workspaceId,
+          workspace_id: this.workspaceId,
           description,
           details,
           priority,
@@ -1453,7 +1453,7 @@ class TaskModalController {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            studio_id: this.workspaceId,
+            workspace_id: this.workspaceId,
             description: parentTitle,
             details: parentDetails,
             priority: parentPriority
@@ -1504,7 +1504,7 @@ class TaskModalController {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-              studio_id: this.workspaceId,
+              workspace_id: this.workspaceId,
               description: stepTitle,
               details: stepDetails,
               priority: stepPriority,
@@ -1573,7 +1573,7 @@ class TaskModalController {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          studio_id: this.workspaceId,
+          workspace_id: this.workspaceId,
           description: parsed.title,
           details: parsed.details || '',
           priority: parsed.priority || 3,
@@ -2093,7 +2093,7 @@ class TaskModalController {
     }
 
     try {
-      const response = await fetch(`/api/orchestration/tasks?studio_id=${encodeURIComponent(this.workspaceId)}`);
+      const response = await fetch(`/api/orchestration/tasks?workspace_id=${encodeURIComponent(this.workspaceId)}`);
       if (!response.ok) {
         throw new Error('Failed to load tasks');
       }

@@ -155,7 +155,7 @@ type AgentMessage struct {
 // Task represents a delegated task within a workspace
 type Task struct {
 	ID             string                 `json:"id"`
-	WorkspaceID    string                 `json:"studio_id"`
+	WorkspaceID    string                 `json:"workspace_id"`
 	From           string                 `json:"from"`
 	To             string                 `json:"to"`
 	AssignedNodeID string                 `json:"assigned_node_id,omitempty"` // Specific agent instance (node) when multiple share a name
@@ -312,7 +312,7 @@ type TaskExecution struct {
 // ScheduledTask represents a recurring or one-time scheduled task template
 type ScheduledTask struct {
 	ID           string                 `json:"id"`
-	WorkspaceID  string                 `json:"studio_id"`
+	WorkspaceID  string                 `json:"workspace_id"`
 	CanvasNodeID string                 `json:"canvas_node_id,omitempty"` // Links to canvas scheduler node (empty for dashboard-created tasks)
 	TargetTaskID string                 `json:"target_task_id,omitempty"` // Links to a canvas task node to execute on schedule
 	Name         string                 `json:"name"`

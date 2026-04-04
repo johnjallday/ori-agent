@@ -1,4 +1,4 @@
-{{define "studios"}}
+{{define "workspaces-hub"}}
 <!DOCTYPE html>
 <html data-bs-theme="light">
 {{template "head.tmpl" .}}
@@ -53,9 +53,9 @@
 
 
   <!-- Modal Templates -->
-  {{template "components/studios/manage-agents-modal.tmpl" .}}
+  {{template "components/workspaces/manage-agents-modal.tmpl" .}}
   {{template "components/workspaces/create-workspace-modal.tmpl" .}}
-  {{template "components/studios/workspace-details-modal.tmpl" .}}
+  {{template "components/workspaces/workspace-details-modal.tmpl" .}}
 
   <!-- Shared Modals (Add Agent, Marketplace, etc.) -->
   {{template "modals.tmpl" .}}
@@ -78,19 +78,19 @@
   <script src="/js/modules/sidebar.js"></script>
   <script src="/js/modules/file-upload.js"></script>
   <script src="/js/modules/workspace-bootstrap-review.js"></script>
-  <!-- Studios workspace management -->
-  <link rel="stylesheet" href="/css/studio.css">
-  <script src="/js/modules/studios-workspace.js?v=1732920000"></script>
-  <script src="/js/modules/studios-agent-modals.js?v=1764212000"></script>
-  <script src="/js/modules/studios-workspace-create.js?v=1764212000"></script>
+  <!-- Workspace management -->
+  <link rel="stylesheet" href="/css/workspace.css">
+  <script src="/js/modules/workspace-listing.js?v=1732920000"></script>
+  <script src="/js/modules/workspace-agent-modals.js?v=1764212000"></script>
+  <script src="/js/modules/workspace-create.js?v=1764212000"></script>
 
 
   <script>
     // NOTE: Most JavaScript has been extracted to external modules:
-    // - studios-workspace.js: Core workspace CRUD & polling
-    // - studios-agent-modals.js: Agent management modals
-    // - studios-workspace-create.js: Workspace creation
-    // - studios-canvas-helpers.js: Canvas visualization & interactions
+    // - workspace-listing.js: Core workspace CRUD & polling
+    // - workspace-agent-modals.js: Agent management modals
+    // - workspace-create.js: Workspace creation
+    // - workspace-canvas-helpers.js: Canvas visualization & interactions
 
     // Shared state (accessed by modules via window object)
     window.availableAgents = [];

@@ -1,9 +1,9 @@
 /**
- * Studios Canvas Helper Functions
+ * Workspace Canvas Helper Functions
  * Handles canvas view, agent management, task creation, and mission execution
  */
 
-let currentStudioId = null;
+let currentWorkspaceId = null;
 const currentWorkspaceDashboard = null;
 
 /**
@@ -641,7 +641,7 @@ function hideCombinerDetails() {
  */
 function showAddTaskModal() {
   // Get workspace ID from canvas (multiple possible sources)
-  const workspaceId = window.currentStudioId || window.agentCanvas?.workspaceId || window.canvasWorkspaceId;
+  const workspaceId = window.currentWorkspaceId || window.agentCanvas?.workspaceId || window.canvasWorkspaceId;
   if (!workspaceId) {
     console.error('No workspace ID available for creating task');
     alert('Unable to create task: workspace not loaded');
@@ -726,7 +726,7 @@ async function editAttachment(attachmentId) {
   const fileMeta = filePath ? { name: getFileNameFromPath(filePath), url: filePath } : (existing.file || existing.file_meta || null);
 
   try {
-    const resp = await fetch(`/api/workspaces/${window.agentCanvas.studioId}/attachments/${attachmentId}`, {
+    const resp = await fetch(`/api/workspaces/${window.agentCanvas.workspaceId}/attachments/${attachmentId}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -858,7 +858,7 @@ async function updateAttachmentColor(attachmentId, color) {
   if (!attachmentId || !window.agentCanvas) return;
 
   try {
-    const resp = await fetch(`/api/workspaces/${window.agentCanvas.studioId}/attachments/${attachmentId}`, {
+    const resp = await fetch(`/api/workspaces/${window.agentCanvas.workspaceId}/attachments/${attachmentId}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -904,7 +904,7 @@ async function deleteCurrentTask() {
   }
 
   try {
-    const response = await fetch(`/api/workspaces/${currentStudioId}/tasks/${task.id}`, {
+    const response = await fetch(`/api/workspaces/${currentWorkspaceId}/tasks/${task.id}`, {
       method: 'DELETE'
     });
 
@@ -958,7 +958,7 @@ async function editCurrentTask() {
   const assignedNodeId = task.assigned_node_id || '';
 
   try {
-    const response = await fetch(`/api/workspaces/${currentStudioId}/tasks/${task.id}`, {
+    const response = await fetch(`/api/workspaces/${currentWorkspaceId}/tasks/${task.id}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -1232,7 +1232,7 @@ function showStoreDetails(storeNode) {
  */
 async function saveStoreDetails(storeNode) {
   const canvas = window.agentCanvas;
-  if (!canvas || !canvas.studioId) {
+  if (!canvas || !canvas.workspaceId) {
     alert('Canvas not available');
     return;
   }
@@ -1248,7 +1248,7 @@ async function saveStoreDetails(storeNode) {
   const nodeId = storeNode.canvas_node_id || storeNode.id;
 
   try {
-    const response = await fetch(`/api/agentstudio/canvas/store-nodes/${nodeId}?studio_id=${canvas.studioId}`, {
+    const response = await fetch(`/api/workspaces/${canvas.workspaceId}/canvas/store-nodes/${nodeId}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -1364,7 +1364,7 @@ async function addCombinerInput(combinerTaskId) {
   const newInputs = [...currentInputs, selectedTask.id];
 
   try {
-    const response = await fetch(`/api/workspaces/${currentStudioId}/tasks/${combinerTaskId}`, {
+    const response = await fetch(`/api/workspaces/${currentWorkspaceId}/tasks/${combinerTaskId}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -1455,7 +1455,7 @@ async function addTaskInput(taskId) {
   const newInputs = [...currentInputs, selectedTask.id];
 
   try {
-    const response = await fetch(`/api/workspaces/${currentStudioId}/tasks/${taskId}`, {
+    const response = await fetch(`/api/workspaces/${currentWorkspaceId}/tasks/${taskId}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -1503,8 +1503,8 @@ window.addTaskInput = addTaskInput;
  * Remove an input task from a task's input_task_ids array
  */
 async function removeTaskInput(taskId, inputTaskIdToRemove) {
-  if (!currentStudioId) {
-    alert('No studio selected');
+  if (!currentWorkspaceId) {
+    alert('No workspace selected');
     return;
   }
 
@@ -1536,7 +1536,7 @@ async function removeTaskInput(taskId, inputTaskIdToRemove) {
   const newInputs = currentInputs.filter(id => id !== inputTaskIdToRemove);
 
   try {
-    const response = await fetch(`/api/workspaces/${currentStudioId}/tasks/${taskId}`, {
+    const response = await fetch(`/api/workspaces/${currentWorkspaceId}/tasks/${taskId}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -1685,10 +1685,10 @@ function openWorkspaceCanvas(workspaceId) {
 
   // Wait a bit for the select to be populated, then select and load the workspace
   setTimeout(() => {
-    const select = document.getElementById('canvas-studio-select');
+    const select = document.getElementById('canvas-workspace-select');
     if (select) {
       select.value = workspaceId;
-      loadCanvasStudio(workspaceId);
+      loadCanvasWorkspace(workspaceId);
     }
   }, 100);
 }
@@ -1703,7 +1703,7 @@ function switchView(view) {
   if (view === 'canvas') {
     gridView.style.display = 'none';
     canvasView.style.display = 'block';
-    populateCanvasStudioSelect();
+    populateCanvasWorkspaceSelect();
   } else {
     gridView.style.display = 'block';
     canvasView.style.display = 'none';
@@ -1711,43 +1711,43 @@ function switchView(view) {
 }
 
 /**
- * Populate canvas studio select dropdown
+ * Populate canvas workspace select dropdown
  */
-function populateCanvasStudioSelect() {
-  const select = document.getElementById('canvas-studio-select');
+function populateCanvasWorkspaceSelect() {
+  const select = document.getElementById('canvas-workspace-select');
   if (!select) return;
 
   fetch('/api/orchestration/workspace')
     .then(res => res.json())
     .then(data => {
       const workspaces = data.workspaces || [];
-      select.innerHTML = '<option value="">Choose a studio...</option>' +
+      select.innerHTML = '<option value="">Choose a workspace...</option>' +
                 workspaces.map(ws => `<option value="${ws.id}">${escapeHtml(ws.name || ws.id)}</option>`).join('');
     })
-    .catch(err => console.error('Error loading studios:', err));
+    .catch(err => console.error('Error loading workspaces:', err));
 }
 
 /**
- * Load a canvas studio
+ * Load a canvas workspace
  */
-function loadCanvasStudio(studioId) {
-  if (!studioId) {
-    document.getElementById('canvas-info').textContent = 'No studio selected';
-    // Show the label when no studio is selected
-    const label = document.getElementById('canvas-studio-label');
+function loadCanvasWorkspace(workspaceId) {
+  if (!workspaceId) {
+    document.getElementById('canvas-info').textContent = 'No workspace selected';
+    // Show the label when no workspace is selected
+    const label = document.getElementById('canvas-workspace-label');
     if (label) {
       label.style.display = '';
     }
     return;
   }
 
-  // Hide the "Select Studio:" label once a studio is loaded
-  const label = document.getElementById('canvas-studio-label');
+  // Hide the "Select Workspace:" label once a workspace is loaded
+  const label = document.getElementById('canvas-workspace-label');
   if (label) {
     label.style.display = 'none';
   }
 
-  currentStudioId = studioId;
+  currentWorkspaceId = workspaceId;
 
   // Initialize canvas visualization
   if (window.agentCanvas) {
@@ -1755,7 +1755,7 @@ function loadCanvasStudio(studioId) {
   }
 
   if (typeof AgentCanvas !== 'undefined') {
-    window.agentCanvas = new AgentCanvas('agent-canvas', studioId);
+    window.agentCanvas = new AgentCanvas('agent-canvas', workspaceId);
     window.agentCanvas.init();
 
     // Load saved background color
@@ -1780,8 +1780,8 @@ function loadCanvasStudio(studioId) {
  * Execute mission
  */
 async function executeMission() {
-  if (!currentStudioId) {
-    alert('Please select a studio first');
+  if (!currentWorkspaceId) {
+    alert('Please select a workspace first');
     return;
   }
 
@@ -1796,7 +1796,7 @@ async function executeMission() {
   btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Executing...';
 
   try {
-    const response = await fetch(`/api/workspaces/${currentStudioId}/mission`, {
+    const response = await fetch(`/api/workspaces/${currentWorkspaceId}/mission`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ mission })
@@ -1862,13 +1862,13 @@ async function addAgentToCanvas() {
     return;
   }
 
-  if (!currentStudioId) {
-    alert('Please select a studio first');
+  if (!currentWorkspaceId) {
+    alert('Please select a workspace first');
     return;
   }
 
   try {
-    const response = await fetch(`/api/workspaces/${currentStudioId}/agents`, {
+    const response = await fetch(`/api/workspaces/${currentWorkspaceId}/agents`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ agent_name: agentName })
@@ -1876,7 +1876,7 @@ async function addAgentToCanvas() {
 
     if (response.ok) {
       // Reload the canvas to show new agent
-      loadCanvasStudio(currentStudioId);
+      loadCanvasWorkspace(currentWorkspaceId);
       select.value = '';
     } else {
       alert('Failed to add agent');
@@ -1895,18 +1895,18 @@ async function removeAgentFromCanvas(agentName) {
     return;
   }
 
-  if (!currentStudioId) {
+  if (!currentWorkspaceId) {
     return;
   }
 
   try {
-    const response = await fetch(`/api/workspaces/${currentStudioId}/agents/${agentName}`, {
+    const response = await fetch(`/api/workspaces/${currentWorkspaceId}/agents/${agentName}`, {
       method: 'DELETE'
     });
 
     if (response.ok) {
       // Reload the canvas to update
-      loadCanvasStudio(currentStudioId);
+      loadCanvasWorkspace(currentWorkspaceId);
     } else {
       alert('Failed to remove agent');
     }
@@ -2000,13 +2000,13 @@ async function createTask() {
     return;
   }
 
-  if (!currentStudioId) {
-    alert('Please select a studio first');
+  if (!currentWorkspaceId) {
+    alert('Please select a workspace first');
     return;
   }
 
   try {
-    const response = await fetch(`/api/workspaces/${currentStudioId}/tasks`, {
+    const response = await fetch(`/api/workspaces/${currentWorkspaceId}/tasks`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -2023,7 +2023,7 @@ async function createTask() {
       document.getElementById('task-to-agent').value = '';
 
       // Reload canvas to show new task
-      loadCanvasStudio(currentStudioId);
+      loadCanvasWorkspace(currentWorkspaceId);
     } else {
       const error = await response.text();
       alert('Failed to create task: ' + error);
@@ -2616,7 +2616,7 @@ async function saveAgentSettings(agentName) {
   }
 }
 
-window.loadCanvasStudio = loadCanvasStudio;
+window.loadCanvasWorkspace = loadCanvasWorkspace;
 window.executeMission = executeMission;
 window.addAgentToCanvas = addAgentToCanvas;
 window.removeAgentFromCanvas = removeAgentFromCanvas;
@@ -2814,9 +2814,9 @@ async function submitStoreNode() {
     return;
   }
 
-  const studioId = window.currentStudioId || (window.agentCanvas && window.agentCanvas.studioId);
+  const workspaceId = window.currentWorkspaceId || (window.agentCanvas && window.agentCanvas.workspaceId);
 
-  if (!studioId) {
+  if (!workspaceId) {
     alert('Error: Workspace ID not found. Please refresh the page.');
     return;
   }
@@ -2835,7 +2835,7 @@ async function submitStoreNode() {
       y = (height / 2 - offsetY) / scale + (Math.random() - 0.5) * 100;
     }
 
-    const response = await fetch(`/api/workspaces/${studioId}/canvas/store-nodes`, {
+    const response = await fetch(`/api/workspaces/${workspaceId}/canvas/store-nodes`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -2899,9 +2899,9 @@ async function submitDirectory() {
     return;
   }
 
-  const studioId = window.currentStudioId || (window.agentCanvas && window.agentCanvas.studioId);
+  const workspaceId = window.currentWorkspaceId || (window.agentCanvas && window.agentCanvas.workspaceId);
 
-  if (!studioId) {
+  if (!workspaceId) {
     alert('Error: Workspace ID not found. Please refresh the page.');
     return;
   }
@@ -2920,7 +2920,7 @@ async function submitDirectory() {
       y = (height / 2 - offsetY) / scale + (Math.random() - 0.5) * 100;
     }
 
-    const response = await fetch(`/api/workspaces/${studioId}/directories`, {
+    const response = await fetch(`/api/workspaces/${workspaceId}/directories`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -2961,7 +2961,7 @@ async function submitDirectory() {
  * Launch the folder picker helper app
  */
 async function launchFolderPicker() {
-  const workspaceId = window.currentStudioId || window.agentCanvas?.workspaceId || window.canvasWorkspaceId;
+  const workspaceId = window.currentWorkspaceId || window.agentCanvas?.workspaceId || window.canvasWorkspaceId;
   
   try {
     const response = await fetch('/api/launch-folder-picker', {

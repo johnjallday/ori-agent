@@ -11,21 +11,21 @@ import (
 
 // Communicator handles inter-agent communication and task delegation
 type Communicator struct {
-	studioStore workspace.Store
-	// Note: tasks are now stored in studio files, not in memory
+	workspaceStore workspace.Store
+	// Note: tasks are now stored in workspace files, not in memory
 }
 
 // NewCommunicator creates a new agent communicator
-func NewCommunicator(studioStore workspace.Store) *Communicator {
+func NewCommunicator(workspaceStore workspace.Store) *Communicator {
 	return &Communicator{
-		studioStore: studioStore,
+		workspaceStore: workspaceStore,
 	}
 }
 
 // SendMessage sends a message to a workspace
 func (c *Communicator) SendMessage(req MessageRequest) error {
 	// Get workspace
-	ws, err := c.studioStore.Get(req.WorkspaceID)
+	ws, err := c.workspaceStore.Get(req.WorkspaceID)
 	if err != nil {
 		return fmt.Errorf("workspace not found: %w", err)
 	}
@@ -45,7 +45,7 @@ func (c *Communicator) SendMessage(req MessageRequest) error {
 	}
 
 	// Save workspace
-	if err := c.studioStore.Save(ws); err != nil {
+	if err := c.workspaceStore.Save(ws); err != nil {
 		return fmt.Errorf("failed to save workspace: %w", err)
 	}
 
@@ -55,7 +55,7 @@ func (c *Communicator) SendMessage(req MessageRequest) error {
 
 // GetMessages retrieves messages for a specific agent from a workspace
 func (c *Communicator) GetMessages(workspaceID, agentName string) ([]workspace.AgentMessage, error) {
-	ws, err := c.studioStore.Get(workspaceID)
+	ws, err := c.workspaceStore.Get(workspaceID)
 	if err != nil {
 		return nil, fmt.Errorf("workspace not found: %w", err)
 	}
@@ -66,7 +66,7 @@ func (c *Communicator) GetMessages(workspaceID, agentName string) ([]workspace.A
 
 // GetMessagesSince retrieves messages added after a specific time
 func (c *Communicator) GetMessagesSince(workspaceID string, since time.Time) ([]workspace.AgentMessage, error) {
-	ws, err := c.studioStore.Get(workspaceID)
+	ws, err := c.workspaceStore.Get(workspaceID)
 	if err != nil {
 		return nil, fmt.Errorf("workspace not found: %w", err)
 	}
@@ -89,7 +89,7 @@ func (c *Communicator) BroadcastToWorkspace(workspaceID, from, content string, m
 // DelegateTask delegates a task to another agent
 func (c *Communicator) DelegateTask(req DelegationRequest) (*workspace.Task, error) {
 	// Validate workspace exists
-	ws, err := c.studioStore.Get(req.WorkspaceID)
+	ws, err := c.workspaceStore.Get(req.WorkspaceID)
 	if err != nil {
 		return nil, fmt.Errorf("workspace not found: %w", err)
 	}
@@ -123,7 +123,7 @@ func (c *Communicator) DelegateTask(req DelegationRequest) (*workspace.Task, err
 	}
 
 	// Save workspace
-	if err := c.studioStore.Save(ws); err != nil {
+	if err := c.workspaceStore.Save(ws); err != nil {
 		return nil, fmt.Errorf("failed to save workspace: %w", err)
 	}
 
@@ -164,13 +164,13 @@ func (c *Communicator) DelegateTask(req DelegationRequest) (*workspace.Task, err
 func (c *Communicator) GetTask(taskID string) (*workspace.Task, error) {
 	// We need to search through all workspaces
 	// This is less efficient but necessary without in-memory cache
-	workspaceIDs, err := c.studioStore.List()
+	workspaceIDs, err := c.workspaceStore.List()
 	if err != nil {
 		return nil, fmt.Errorf("failed to list workspaces: %w", err)
 	}
 
 	for _, wsID := range workspaceIDs {
-		ws, err := c.studioStore.Get(wsID)
+		ws, err := c.workspaceStore.Get(wsID)
 		if err != nil {
 			continue
 		}
@@ -187,13 +187,13 @@ func (c *Communicator) GetTask(taskID string) (*workspace.Task, error) {
 // UpdateTaskStatus updates the status of a task
 func (c *Communicator) UpdateTaskStatus(taskID string, status workspace.TaskStatus, result string, errorMsg string) error {
 	// Find the workspace containing this task
-	workspaceIDs, err := c.studioStore.List()
+	workspaceIDs, err := c.workspaceStore.List()
 	if err != nil {
 		return fmt.Errorf("failed to list workspaces: %w", err)
 	}
 
 	for _, wsID := range workspaceIDs {
-		ws, err := c.studioStore.Get(wsID)
+		ws, err := c.workspaceStore.Get(wsID)
 		if err != nil {
 			continue
 		}
@@ -239,7 +239,7 @@ func (c *Communicator) UpdateTaskStatus(taskID string, status workspace.TaskStat
 		}
 
 		// Save workspace
-		if err := c.studioStore.Save(ws); err != nil {
+		if err := c.workspaceStore.Save(ws); err != nil {
 			return fmt.Errorf("failed to save workspace: %w", err)
 		}
 
@@ -280,7 +280,7 @@ func (c *Communicator) sendTaskResult(task *workspace.Task, result string, error
 
 // ListTasks returns all tasks for a workspace
 func (c *Communicator) ListTasks(workspaceID string) []workspace.Task {
-	ws, err := c.studioStore.Get(workspaceID)
+	ws, err := c.workspaceStore.Get(workspaceID)
 	if err != nil {
 		logger.Error("Failed to get workspace", logger.Fields{"err": err, "workspace_id": workspaceID})
 		return []workspace.Task{}
@@ -293,14 +293,14 @@ func (c *Communicator) ListTasks(workspaceID string) []workspace.Task {
 func (c *Communicator) ListTasksForAgent(agentName string) []workspace.Task {
 	var allTasks []workspace.Task
 
-	workspaceIDs, err := c.studioStore.List()
+	workspaceIDs, err := c.workspaceStore.List()
 	if err != nil {
 		logger.Error("Failed to list workspaces", logger.Fields{"error": err})
 		return allTasks
 	}
 
 	for _, wsID := range workspaceIDs {
-		ws, err := c.studioStore.Get(wsID)
+		ws, err := c.workspaceStore.Get(wsID)
 		if err != nil {
 			continue
 		}
@@ -320,14 +320,14 @@ func (c *Communicator) CleanupCompletedTasks(olderThan time.Duration) int {
 	cutoff := time.Now().Add(-olderThan)
 	removed := 0
 
-	workspaceIDs, err := c.studioStore.List()
+	workspaceIDs, err := c.workspaceStore.List()
 	if err != nil {
 		logger.Error("Failed to list workspaces for cleanup", logger.Fields{"error": err})
 		return 0
 	}
 
 	for _, wsID := range workspaceIDs {
-		ws, err := c.studioStore.Get(wsID)
+		ws, err := c.workspaceStore.Get(wsID)
 		if err != nil {
 			continue
 		}
@@ -351,7 +351,7 @@ func (c *Communicator) CleanupCompletedTasks(olderThan time.Duration) int {
 		if len(newTasks) < len(ws.Tasks) {
 			ws.Tasks = newTasks
 			ws.UpdatedAt = time.Now()
-			if err := c.studioStore.Save(ws); err != nil {
+			if err := c.workspaceStore.Save(ws); err != nil {
 				logger.Error("Failed to save workspace after cleanup", logger.Fields{"error": err})
 			}
 		}
@@ -369,14 +369,14 @@ func (c *Communicator) CheckTimeouts() []workspace.Task {
 	var timedOut []workspace.Task
 	now := time.Now()
 
-	workspaceIDs, err := c.studioStore.List()
+	workspaceIDs, err := c.workspaceStore.List()
 	if err != nil {
 		logger.Error("Failed to list workspaces for timeout check", logger.Fields{"duration": err})
 		return timedOut
 	}
 
 	for _, wsID := range workspaceIDs {
-		ws, err := c.studioStore.Get(wsID)
+		ws, err := c.workspaceStore.Get(wsID)
 		if err != nil {
 			continue
 		}
@@ -399,7 +399,7 @@ func (c *Communicator) CheckTimeouts() []workspace.Task {
 		// Save workspace if tasks were modified
 		if modified {
 			ws.UpdatedAt = now
-			if err := c.studioStore.Save(ws); err != nil {
+			if err := c.workspaceStore.Save(ws); err != nil {
 				logger.Error("Failed to save workspace after timeout check", logger.Fields{"error": err})
 			}
 		}
@@ -410,7 +410,7 @@ func (c *Communicator) CheckTimeouts() []workspace.Task {
 
 // GetTaskStats returns statistics about tasks
 func (c *Communicator) GetTaskStats(workspaceID string) map[string]int {
-	ws, err := c.studioStore.Get(workspaceID)
+	ws, err := c.workspaceStore.Get(workspaceID)
 	if err != nil {
 		logger.Error("Failed to get workspace", logger.Fields{"err": err, "workspace_id": workspaceID})
 		return map[string]int{
@@ -432,13 +432,13 @@ func (c *Communicator) GetTaskStats(workspaceID string) map[string]int {
 // DeleteTask removes a task from its workspace
 func (c *Communicator) DeleteTask(taskID string) error {
 	// Find the workspace containing this task
-	workspaceIDs, err := c.studioStore.List()
+	workspaceIDs, err := c.workspaceStore.List()
 	if err != nil {
 		return fmt.Errorf("failed to list workspaces: %w", err)
 	}
 
 	for _, wsID := range workspaceIDs {
-		ws, err := c.studioStore.Get(wsID)
+		ws, err := c.workspaceStore.Get(wsID)
 		if err != nil {
 			continue
 		}
@@ -453,7 +453,7 @@ func (c *Communicator) DeleteTask(taskID string) error {
 		}
 
 		// Save workspace
-		if err := c.studioStore.Save(ws); err != nil {
+		if err := c.workspaceStore.Save(ws); err != nil {
 			return fmt.Errorf("failed to save workspace: %w", err)
 		}
 

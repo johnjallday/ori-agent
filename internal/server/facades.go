@@ -54,15 +54,15 @@ type StorageSystemFacade struct {
 	LocationManager *location.Manager
 }
 
-// WorkflowSystemFacade manages agent studio and orchestration dependencies
+// WorkflowSystemFacade manages workspace orchestration dependencies
 type WorkflowSystemFacade struct {
-	TaskExecutor        *workspace.TaskExecutor
-	StepExecutor        *workspace.StepExecutor
-	TaskScheduler       *workspace.TaskScheduler
-	EventBus            *workspace.EventBus
-	NotificationService *workspace.NotificationService
-	DirectorySync       *workspace.DirectorySyncManager
-	StudioOrchestrator  *workspace.Orchestrator
+	TaskExecutor          *workspace.TaskExecutor
+	StepExecutor          *workspace.StepExecutor
+	TaskScheduler         *workspace.TaskScheduler
+	EventBus              *workspace.EventBus
+	NotificationService   *workspace.NotificationService
+	DirectorySync         *workspace.DirectorySyncManager
+	WorkspaceOrchestrator *workspace.Orchestrator
 }
 
 // IntegrationSystemFacade manages external integrations (MCP, updates)
@@ -87,7 +87,7 @@ type HandlerFacade struct {
 	Device          *devicehttp.Handler
 	Orchestration   *orchestrationhttp.Handler
 	AutoTask        *orchestrationhttp.AutoTaskHandler
-	Studio          *workspace.HTTPHandler
+	Workspace       *workspace.HTTPHandler
 	Usage           *usagehttp.Handler
 	MCP             *mcphttp.Handler
 	Location        *locationhttp.Handler
@@ -152,16 +152,16 @@ func NewWorkflowSystemFacade(
 	eventBus *workspace.EventBus,
 	notificationService *workspace.NotificationService,
 	directorySync *workspace.DirectorySyncManager,
-	studioOrchestrator *workspace.Orchestrator,
+	workspaceOrchestrator *workspace.Orchestrator,
 ) *WorkflowSystemFacade {
 	return &WorkflowSystemFacade{
-		TaskExecutor:        taskExecutor,
-		StepExecutor:        stepExecutor,
-		TaskScheduler:       taskScheduler,
-		EventBus:            eventBus,
-		NotificationService: notificationService,
-		DirectorySync:       directorySync,
-		StudioOrchestrator:  studioOrchestrator,
+		TaskExecutor:          taskExecutor,
+		StepExecutor:          stepExecutor,
+		TaskScheduler:         taskScheduler,
+		EventBus:              eventBus,
+		NotificationService:   notificationService,
+		DirectorySync:         directorySync,
+		WorkspaceOrchestrator: workspaceOrchestrator,
 	}
 }
 
@@ -196,7 +196,7 @@ func NewHandlerFacade(
 	device *devicehttp.Handler,
 	orchestration *orchestrationhttp.Handler,
 	autoTask *orchestrationhttp.AutoTaskHandler,
-	studio *workspace.HTTPHandler,
+	workspaceHandler *workspace.HTTPHandler,
 	usage *usagehttp.Handler,
 	mcp *mcphttp.Handler,
 	location *locationhttp.Handler,
@@ -226,7 +226,7 @@ func NewHandlerFacade(
 		Device:          device,
 		Orchestration:   orchestration,
 		AutoTask:        autoTask,
-		Studio:          studio,
+		Workspace:       workspaceHandler,
 		Usage:           usage,
 		MCP:             mcp,
 		Location:        location,

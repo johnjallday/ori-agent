@@ -64,7 +64,7 @@ func (a *WorkspaceStoreAdapter) Get(id string) (*workspace.Workspace, error) {
 		return nil, err
 	}
 
-	return a.toAgentStudioWorkspace(sessionWS), nil
+	return a.toAgentWorkspace(sessionWS), nil
 }
 
 // List returns all workspace IDs.
@@ -101,7 +101,7 @@ func (a *WorkspaceStoreAdapter) ListActive() ([]*workspace.Workspace, error) {
 	active := make([]*workspace.Workspace, 0)
 	for _, ws := range workspaces {
 		if ws.Status == WorkspaceStatusActive || ws.Status == "" {
-			active = append(active, a.toAgentStudioWorkspace(&ws))
+			active = append(active, a.toAgentWorkspace(&ws))
 		}
 	}
 	return active, nil
@@ -227,8 +227,8 @@ func (a *WorkspaceStoreAdapter) toSessionWorkspace(ws *workspace.Workspace) *Wor
 	return sessionWS
 }
 
-// toAgentStudioWorkspace converts session.Workspace to workspace.Workspace.
-func (a *WorkspaceStoreAdapter) toAgentStudioWorkspace(ws *Workspace) *workspace.Workspace {
+// toAgentWorkspace converts session.Workspace to workspace.Workspace.
+func (a *WorkspaceStoreAdapter) toAgentWorkspace(ws *Workspace) *workspace.Workspace {
 	agentWS := &workspace.Workspace{
 		ID:          ws.ID,
 		Name:        ws.Name,
@@ -267,7 +267,7 @@ func (a *WorkspaceStoreAdapter) toAgentStudioWorkspace(ws *Workspace) *workspace
 
 	// Convert Layout
 	if ws.Layout != nil {
-		agentWS.Layout = convertToAgentStudioLayout(ws.Layout)
+		agentWS.Layout = convertToAgentWorkspaceLayout(ws.Layout)
 	}
 
 	// Deserialize orchestration data from JSON with error logging
@@ -433,8 +433,8 @@ func convertToSessionLayout(layout *workspace.CanvasLayout) *CanvasLayout {
 	return sessionLayout
 }
 
-// convertToAgentStudioLayout converts session.CanvasLayout to workspace.CanvasLayout.
-func convertToAgentStudioLayout(layout *CanvasLayout) *workspace.CanvasLayout {
+// convertToAgentWorkspaceLayout converts session.CanvasLayout to workspace.CanvasLayout.
+func convertToAgentWorkspaceLayout(layout *CanvasLayout) *workspace.CanvasLayout {
 	if layout == nil {
 		return nil
 	}

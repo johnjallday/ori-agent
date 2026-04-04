@@ -14,10 +14,10 @@ type EventType string
 
 const (
 	// Workspace lifecycle events
-	EventWorkspaceCreated   EventType = "studio.created"
-	EventWorkspaceUpdated   EventType = "studio.updated"
-	EventWorkspaceCompleted EventType = "studio.completed"
-	EventWorkspaceDeleted   EventType = "studio.deleted"
+	EventWorkspaceCreated   EventType = "workspace.created"
+	EventWorkspaceUpdated   EventType = "workspace.updated"
+	EventWorkspaceCompleted EventType = "workspace.completed"
+	EventWorkspaceDeleted   EventType = "workspace.deleted"
 
 	// Task events
 	EventTaskCreated    EventType = "task.created"
@@ -84,7 +84,7 @@ const (
 type Event struct {
 	ID          string                 `json:"id"`
 	Type        EventType              `json:"type"`
-	WorkspaceID string                 `json:"studio_id"`
+	WorkspaceID string                 `json:"workspace_id"`
 	Timestamp   time.Time              `json:"timestamp"`
 	Source      string                 `json:"source"`   // Agent or system component that generated event
 	Data        map[string]interface{} `json:"data"`     // Event-specific payload

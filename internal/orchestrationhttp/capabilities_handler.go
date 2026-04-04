@@ -105,7 +105,7 @@ func (ch *CapabilitiesHandler) DelegateHandler(w http.ResponseWriter, r *http.Re
 	}
 
 	var req struct {
-		WorkspaceID string                 `json:"studio_id"`
+		WorkspaceID string                 `json:"workspace_id"`
 		From        string                 `json:"from"`
 		To          string                 `json:"to"`
 		Description string                 `json:"description"`

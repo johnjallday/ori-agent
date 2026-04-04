@@ -295,7 +295,7 @@ type Workspace struct {
 	// ==========================================================================
 	// Orchestration Data (stored as JSON in SQLite)
 	// These fields store raw JSON that is deserialized by the adapter to
-	// agentstudio types. This avoids circular imports and type duplication.
+	// workspace types. This avoids circular imports and type duplication.
 	// ==========================================================================
 
 	// MessagesJSON contains serialized inter-agent messages.
@@ -518,7 +518,7 @@ const (
 )
 
 // ScheduledTaskReminder represents a recurring or one-time reminder.
-// Unlike agentstudio scheduled tasks, these are reminders only (no agent execution).
+// Unlike workspace scheduled tasks, these are reminders only (no agent execution).
 type ScheduledTaskReminder struct {
 	// ID is a unique identifier for the reminder (UUID format).
 	ID string `json:"id"`

@@ -69,7 +69,7 @@ class TaskQueue {
         const response = await fetch('/api/workspaces');
         if (response.ok) {
           const data = await response.json();
-          const workspaces = data.workspaces || data.folders || data.studios || (Array.isArray(data) ? data : []);
+          const workspaces = data.workspaces || data.folders || (Array.isArray(data) ? data : []);
           if (workspaces.length > 0) {
             this.currentWorkspaceId = workspaces[0].id;
             sessionStorage.setItem('currentWorkspaceId', this.currentWorkspaceId);
@@ -106,7 +106,7 @@ class TaskQueue {
 
     try {
       const params = new URLSearchParams();
-      params.set('studio_id', this.currentWorkspaceId);
+      params.set('workspace_id', this.currentWorkspaceId);
 
       if (this.currentFilter !== 'all') {
         params.set('status', this.currentFilter);

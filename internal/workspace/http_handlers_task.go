@@ -29,14 +29,14 @@ func (h *HTTPHandler) CreateTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Extract studio ID from URL path
+	// Extract workspace ID from URL path
 	path := strings.TrimPrefix(r.URL.Path, "/api/workspaces/")
 	parts := strings.Split(path, "/")
 	if len(parts) < 2 {
 		orihttp.BadRequest(w, "Invalid URL format")
 		return
 	}
-	studioID := parts[0]
+	workspaceID := parts[0]
 
 	// Parse request body
 
@@ -51,20 +51,20 @@ func (h *HTTPHandler) CreateTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Get studio
-	studio, err := h.store.Get(studioID)
+	// Get workspace
+	workspace, err := h.store.Get(workspaceID)
 	if err != nil {
-		orihttp.NotFound(w, fmt.Sprintf("Studio not found: %v", err))
+		orihttp.NotFound(w, fmt.Sprintf("Workspace not found: %v", err))
 		return
 	}
 
-	logger.Debug("CreateTask - Studio and agents", logger.Fields{"studio_id": studioID, "agents": studio.Agents})
+	logger.Debug("CreateTask - Workspace and agents", logger.Fields{"workspace_id": workspaceID, "agents": workspace.Agents})
 	logger.Debug("CreateTask - Request routing", logger.Fields{"from": req.From, "to": req.To})
 
 	// Create task
 	task := Task{
 		ID:           uuid.New().String(),
-		WorkspaceID:  studioID,
+		WorkspaceID:  workspaceID,
 		From:         req.From,
 		To:           req.To,
 		Description:  req.Description,
@@ -76,29 +76,29 @@ func (h *HTTPHandler) CreateTask(w http.ResponseWriter, r *http.Request) {
 		CreatedAt:    time.Now(),
 	}
 
-	// Add task to studio
-	if err := studio.AddTask(task); err != nil {
+	// Add task to workspace
+	if err := workspace.AddTask(task); err != nil {
 		logger.Error("[DEBUG] CreateTask - AddTask failed", logger.Fields{"task_id": err})
 		orihttp.InternalError(w, fmt.Sprintf("Failed to add task: %v", err))
 		return
 	}
 
-	// Save updated studio
-	if err := h.store.Save(studio); err != nil {
-		orihttp.InternalError(w, fmt.Sprintf("Failed to save studio: %v", err))
+	// Save updated workspace
+	if err := h.store.Save(workspace); err != nil {
+		orihttp.InternalError(w, fmt.Sprintf("Failed to save workspace: %v", err))
 		return
 	}
 
-	logger.Info("Created task in studio", logger.Fields{"description": req.Description, "task_id": task.ID, "studioID": studioID})
+	logger.Info("Created task in workspace", logger.Fields{"description": req.Description, "task_id": task.ID, "workspaceID": workspaceID})
 
 	// Return success
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
 	if encErr := json.NewEncoder(w).Encode(map[string]interface{}{
-		"message": "Task created successfully",
-		"task_id": task.ID,
-		"task":    task,
-		"studio":  studioID,
+		"message":   "Task created successfully",
+		"task_id":   task.ID,
+		"task":      task,
+		"workspace": workspaceID,
 	}); encErr != nil {
 		logger.Error("Failed to encode response", logger.Fields{"error": encErr})
 	}
@@ -111,15 +111,15 @@ func (h *HTTPHandler) UpdateTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Extract studio ID and task ID from URL path
-	// URL format: /api/workspaces/{studio_id}/tasks/{task_id}
+	// Extract workspace ID and task ID from URL path
+	// URL format: /api/workspaces/{workspace_id}/tasks/{task_id}
 	path := strings.TrimPrefix(r.URL.Path, "/api/workspaces/")
 	parts := strings.Split(path, "/")
 	if len(parts) < 3 {
 		orihttp.BadRequest(w, "Invalid URL format")
 		return
 	}
-	studioID := parts[0]
+	workspaceID := parts[0]
 	taskID := parts[2]
 
 	// Parse request body
@@ -137,41 +137,41 @@ func (h *HTTPHandler) UpdateTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Get studio
-	studio, err := h.store.Get(studioID)
+	// Get workspace
+	workspace, err := h.store.Get(workspaceID)
 	if err != nil {
-		orihttp.NotFound(w, fmt.Sprintf("Studio not found: %v", err))
+		orihttp.NotFound(w, fmt.Sprintf("Workspace not found: %v", err))
 		return
 	}
 
 	// Find and update task
 	found := false
-	for i, task := range studio.Tasks {
+	for i, task := range workspace.Tasks {
 		if task.ID == taskID {
 			// Update only provided fields (allowing explicit empty values)
 			if req.Description != nil {
-				studio.Tasks[i].Description = *req.Description
+				workspace.Tasks[i].Description = *req.Description
 			}
 			if req.To != nil {
-				studio.Tasks[i].To = *req.To
+				workspace.Tasks[i].To = *req.To
 			}
 			if req.From != nil {
-				studio.Tasks[i].From = *req.From
+				workspace.Tasks[i].From = *req.From
 			}
 			if req.AssignedNodeID != nil {
-				studio.Tasks[i].AssignedNodeID = *req.AssignedNodeID
+				workspace.Tasks[i].AssignedNodeID = *req.AssignedNodeID
 			}
 			if req.InputTaskIDs != nil {
-				studio.Tasks[i].InputTaskIDs = *req.InputTaskIDs
+				workspace.Tasks[i].InputTaskIDs = *req.InputTaskIDs
 			}
 			if req.ParentTaskID != nil {
-				studio.Tasks[i].ParentTaskID = strings.TrimSpace(*req.ParentTaskID)
-				if studio.Tasks[i].ParentTaskID == "" {
-					studio.Tasks[i].SubtaskIndex = 0
+				workspace.Tasks[i].ParentTaskID = strings.TrimSpace(*req.ParentTaskID)
+				if workspace.Tasks[i].ParentTaskID == "" {
+					workspace.Tasks[i].SubtaskIndex = 0
 				}
 			}
 			if req.SubtaskIndex != nil {
-				studio.Tasks[i].SubtaskIndex = *req.SubtaskIndex
+				workspace.Tasks[i].SubtaskIndex = *req.SubtaskIndex
 			}
 			found = true
 			break
@@ -183,20 +183,20 @@ func (h *HTTPHandler) UpdateTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Save updated studio
-	if err := h.store.Save(studio); err != nil {
-		orihttp.InternalError(w, fmt.Sprintf("Failed to save studio: %v", err))
+	// Save updated workspace
+	if err := h.store.Save(workspace); err != nil {
+		orihttp.InternalError(w, fmt.Sprintf("Failed to save workspace: %v", err))
 		return
 	}
 
-	logger.Debug("Updated task in studio", logger.Fields{"task_id": taskID, "studioID": studioID})
+	logger.Debug("Updated task in workspace", logger.Fields{"task_id": taskID, "workspaceID": workspaceID})
 
 	// Return success
 	w.Header().Set("Content-Type", "application/json")
 	if encErr := json.NewEncoder(w).Encode(map[string]interface{}{
-		"message": "Task updated successfully",
-		"task_id": taskID,
-		"studio":  studioID,
+		"message":   "Task updated successfully",
+		"task_id":   taskID,
+		"workspace": workspaceID,
 	}); encErr != nil {
 		logger.Error("Failed to encode response", logger.Fields{"error": encErr})
 	}
@@ -209,42 +209,42 @@ func (h *HTTPHandler) DeleteTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Extract studio ID and task ID from URL path
-	// URL format: /api/workspaces/{studio_id}/tasks/{task_id}
+	// Extract workspace ID and task ID from URL path
+	// URL format: /api/workspaces/{workspace_id}/tasks/{task_id}
 	path := strings.TrimPrefix(r.URL.Path, "/api/workspaces/")
 	parts := strings.Split(path, "/")
 	if len(parts) < 3 {
 		orihttp.BadRequest(w, "Invalid URL format")
 		return
 	}
-	studioID := parts[0]
+	workspaceID := parts[0]
 	taskID := parts[2]
 
-	// Get studio
-	studio, err := h.store.Get(studioID)
+	// Get workspace
+	workspace, err := h.store.Get(workspaceID)
 	if err != nil {
-		orihttp.NotFound(w, fmt.Sprintf("Studio not found: %v", err))
+		orihttp.NotFound(w, fmt.Sprintf("Workspace not found: %v", err))
 		return
 	}
 
-	if err := studio.DeleteTask(taskID); err != nil {
+	if err := workspace.DeleteTask(taskID); err != nil {
 		orihttp.NotFound(w, "Task not found")
 		return
 	}
 
-	if err := h.store.Save(studio); err != nil {
-		orihttp.InternalError(w, fmt.Sprintf("Failed to update studio: %v", err))
+	if err := h.store.Save(workspace); err != nil {
+		orihttp.InternalError(w, fmt.Sprintf("Failed to update workspace: %v", err))
 		return
 	}
 
-	logger.Debug("Deleted task from studio", logger.Fields{"workspace_id": taskID, "studioID": studioID})
+	logger.Debug("Deleted task from workspace", logger.Fields{"workspace_id": taskID, "workspaceID": workspaceID})
 
 	// Return success
 	w.Header().Set("Content-Type", "application/json")
 	if encErr := json.NewEncoder(w).Encode(map[string]interface{}{
-		"message": "Task deleted successfully",
-		"task_id": taskID,
-		"studio":  studioID,
+		"message":   "Task deleted successfully",
+		"task_id":   taskID,
+		"workspace": workspaceID,
 	}); encErr != nil {
 		logger.Error("Failed to encode response", logger.Fields{"error": encErr})
 	}
@@ -257,29 +257,29 @@ func (h *HTTPHandler) ExecuteTaskManually(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	// Extract studio ID and task ID from URL path
-	// URL format: /api/workspaces/{studio_id}/tasks/{task_id}/execute
+	// Extract workspace ID and task ID from URL path
+	// URL format: /api/workspaces/{workspace_id}/tasks/{task_id}/execute
 	path := strings.TrimPrefix(r.URL.Path, "/api/workspaces/")
 	parts := strings.Split(path, "/")
 	if len(parts) < 4 {
 		orihttp.BadRequest(w, "Invalid URL format")
 		return
 	}
-	studioID := parts[0]
+	workspaceID := parts[0]
 	taskID := parts[2]
 
-	// Get studio
-	studio, err := h.store.Get(studioID)
+	// Get workspace
+	workspace, err := h.store.Get(workspaceID)
 	if err != nil {
-		orihttp.NotFound(w, fmt.Sprintf("Studio not found: %v", err))
+		orihttp.NotFound(w, fmt.Sprintf("Workspace not found: %v", err))
 		return
 	}
 
 	// Find the task
 	var targetTask *Task
-	for i := range studio.Tasks {
-		if studio.Tasks[i].ID == taskID {
-			targetTask = &studio.Tasks[i]
+	for i := range workspace.Tasks {
+		if workspace.Tasks[i].ID == taskID {
+			targetTask = &workspace.Tasks[i]
 			break
 		}
 	}
@@ -289,12 +289,12 @@ func (h *HTTPHandler) ExecuteTaskManually(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	logger.Debug("Manually executing task in studio", logger.Fields{"studioID": studioID, "workspace_id": taskID})
+	logger.Debug("Manually executing task in workspace", logger.Fields{"workspaceID": workspaceID, "workspace_id": taskID})
 
 	// Execute task asynchronously
 	go func() {
 		ctx := r.Context()
-		if err := h.orchestrator.ExecuteTask(ctx, studioID, *targetTask); err != nil {
+		if err := h.orchestrator.ExecuteTask(ctx, workspaceID, *targetTask); err != nil {
 			logger.Error("Failed to execute task", logger.Fields{"task_id": taskID, "err": err})
 		}
 	}()
@@ -302,9 +302,9 @@ func (h *HTTPHandler) ExecuteTaskManually(w http.ResponseWriter, r *http.Request
 	// Return success
 	w.Header().Set("Content-Type", "application/json")
 	if encErr := json.NewEncoder(w).Encode(map[string]interface{}{
-		"message": "Task execution started",
-		"task_id": taskID,
-		"studio":  studioID,
+		"message":   "Task execution started",
+		"task_id":   taskID,
+		"workspace": workspaceID,
 	}); encErr != nil {
 		logger.Error("Failed to encode response", logger.Fields{"error": encErr})
 	}

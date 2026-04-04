@@ -286,7 +286,7 @@ export class AgentCanvasLayoutManager {
    * Save the current layout (positions and zoom) to the server
    */
   async saveLayout() {
-    if (!this.state.studioId) {
+    if (!this.state.workspaceId) {
       return;
     }
 
@@ -353,7 +353,7 @@ export class AgentCanvasLayoutManager {
       }));
 
       await apiPut('/api/orchestration/workspace/layout', {
-        workspace_id: this.state.studioId,
+        workspace_id: this.state.workspaceId,
         task_positions: taskPositions,
         agent_positions: agentPositions,
         attachment_positions: attachmentPositions,
@@ -373,15 +373,15 @@ export class AgentCanvasLayoutManager {
    * Load the saved layout from the server
    */
   loadLayout() {
-    if (!this.state.studio) {
+    if (!this.state.workspace) {
       return;
     }
 
-    if (!this.state.studio.layout) {
+    if (!this.state.workspace.layout) {
       return;
     }
 
-    const layout = this.state.studio.layout;
+    const layout = this.state.workspace.layout;
 
     let _tasksRestored = 0;
     let _agentsRestored = 0;

@@ -625,10 +625,10 @@ export class AgentCanvasInteractionHandler {
         const deleteBtn = agent.deleteButton;
         if (x >= deleteBtn.x && x <= deleteBtn.x + deleteBtn.width &&
             y >= deleteBtn.y && y <= deleteBtn.y + deleteBtn.height) {
-          // Remove agent from studio
+          // Remove agent from workspace
           e.stopPropagation();
           e.preventDefault();
-          this.parent.removeAgentFromStudio(agent.nodeId, agent.instanceNumber);
+          this.parent.removeAgentFromWorkspace(agent.nodeId, agent.instanceNumber);
           return;
         }
       }

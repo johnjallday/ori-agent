@@ -1,10 +1,10 @@
 /**
- * Studios Workspace Management Module
- * Handles workspace CRUD operations, agent management, and UI interactions for the Studios page
+ * Workspace Management Module
+ * Handles workspace CRUD operations, agent management, and UI interactions for the Workspaces page
  */
 
 // Global state - use window object for shared state with other modules
-// These are initialized in studios.tmpl inline script
+// These are initialized in workspaces-hub.tmpl inline script
 let workspaceRefreshInterval = null;
 let hasLoadedWorkspaces = false;
 
@@ -16,15 +16,15 @@ const MAX_RETRY_DELAY = 60000; // Max 60 seconds between retries
 const MAX_CONSECUTIVE_FAILURES = 3; // After 3 failures, show offline notification
 let serverOfflineNotification = null;
 
-// Studios-specific state for agent management
-// Note: Using let instead of const so studios-agent-modals.js can reassign this array
-let studiosSystemAgents = [];
-// studiosAvailableProviders is declared in studios-agent-modals.js
+// Workspace-specific state for agent management
+// Note: Using let instead of const so workspace-agent-modals.js can reassign this array
+let workspaceSystemAgents = [];
+// workspaceAvailableProviders is declared in workspace-agent-modals.js
 
 /**
- * Initialize the studios page
+ * Initialize the workspaces page
  */
-function initializeStudiosPage() {
+function initializeWorkspacesPage() {
   loadWorkspaces({ showLoading: true });
   loadWorkspaceAgents();
 
@@ -37,20 +37,20 @@ function initializeStudiosPage() {
     // Switch to canvas view
     switchView('canvas');
 
-    // If workspace ID is provided, select it after studios are loaded
+    // If workspace ID is provided, select it after workspaces are loaded
     if (workspaceId) {
-      // Hide the "Select Studio:" label since studio is already selected
-      const label = document.getElementById('canvas-studio-label');
+      // Hide the "Select Workspace:" label since workspace is already selected
+      const label = document.getElementById('canvas-workspace-label');
       if (label) {
         label.style.display = 'none';
       }
 
       // Wait a bit for the select to be populated
       setTimeout(() => {
-        const select = document.getElementById('canvas-studio-select');
+        const select = document.getElementById('canvas-workspace-select');
         if (select) {
           select.value = workspaceId;
-          loadCanvasStudio(workspaceId);
+          loadCanvasWorkspace(workspaceId);
         }
       }, 500);
     }
@@ -63,7 +63,7 @@ function initializeStudiosPage() {
 /**
  * Cleanup on page unload
  */
-function cleanupStudiosPage() {
+function cleanupWorkspacesPage() {
   stopWorkspacePolling();
 }
 
@@ -573,7 +573,7 @@ function switchView(view) {
   if (view === 'canvas') {
     gridView.style.display = 'none';
     canvasView.style.display = 'block';
-    populateCanvasStudioSelect();
+    populateCanvasWorkspaceSelect();
   } else {
     gridView.style.display = 'block';
     canvasView.style.display = 'none';
@@ -581,10 +581,10 @@ function switchView(view) {
 }
 
 /**
- * Populate canvas studio select dropdown
+ * Populate canvas workspace select dropdown
  */
-function populateCanvasStudioSelect() {
-  const select = document.getElementById('canvas-studio-select');
+function populateCanvasWorkspaceSelect() {
+  const select = document.getElementById('canvas-workspace-select');
   if (!select) return;
 
   // Use unified workspace API
@@ -593,10 +593,10 @@ function populateCanvasStudioSelect() {
     .then(data => {
       // API returns { folders: [...] } - map to workspaces
       const workspaces = data.folders || [];
-      select.innerHTML = '<option value="">Choose a studio...</option>' +
+      select.innerHTML = '<option value="">Choose a workspace...</option>' +
                 workspaces.map(ws => `<option value="${ws.id}">${escapeHtml(ws.name || ws.id)}</option>`).join('');
     })
-    .catch(err => console.error('Error loading studios:', err));
+    .catch(err => console.error('Error loading workspaces:', err));
 }
 
 /**
@@ -607,8 +607,8 @@ async function viewWorkspace(workspaceId) {
 }
 
 // Export functions for global access
-// openManageAgentsModal is exported from studios-agent-modals.js
-// openCreateWorkspaceModal is exported from studios-workspace-create.js
+// openManageAgentsModal is exported from workspace-agent-modals.js
+// openCreateWorkspaceModal is exported from workspace-create.js
 window.viewWorkspace = viewWorkspace;
 window.deleteWorkspace = deleteWorkspace;
 window.openWorkspaceCanvas = openWorkspaceCanvas;
@@ -616,5 +616,5 @@ window.switchView = switchView;
 // Note: escapeHtml is provided by dom-utils.js which should be loaded before this script
 
 // Initialize on DOM ready
-document.addEventListener('DOMContentLoaded', initializeStudiosPage);
-window.addEventListener('beforeunload', cleanupStudiosPage);
+document.addEventListener('DOMContentLoaded', initializeWorkspacesPage);
+window.addEventListener('beforeunload', cleanupWorkspacesPage);

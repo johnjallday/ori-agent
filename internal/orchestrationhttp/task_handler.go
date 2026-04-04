@@ -184,7 +184,7 @@ func (th *TaskHandler) TasksHandler(w http.ResponseWriter, r *http.Request) {
 
 func (th *TaskHandler) handleGetTasks(w http.ResponseWriter, r *http.Request) {
 	taskID := r.URL.Query().Get("id")
-	workspaceID := r.URL.Query().Get("studio_id")
+	workspaceID := r.URL.Query().Get("workspace_id")
 	agentName := r.URL.Query().Get("agent")
 
 	if taskID != "" {
@@ -226,7 +226,7 @@ func (th *TaskHandler) handleGetTasks(w http.ResponseWriter, r *http.Request) {
 
 func (th *TaskHandler) handleCreateTask(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		WorkspaceID            string                         `json:"studio_id"`
+		WorkspaceID            string                         `json:"workspace_id"`
 		From                   string                         `json:"from"`
 		To                     string                         `json:"to"`
 		AssignedNodeID         string                         `json:"assigned_node_id"`
@@ -783,9 +783,6 @@ func (th *TaskHandler) handleDeleteTask(w http.ResponseWriter, r *http.Request) 
 	}
 
 	workspaceID := r.URL.Query().Get("workspace_id")
-	if workspaceID == "" {
-		workspaceID = r.URL.Query().Get("studio_id")
-	}
 
 	if workspaceID != "" {
 		ws, err := th.workspaceStore.Get(workspaceID)

@@ -1,4 +1,4 @@
-{{define "components/studios/manage-agents-modal.tmpl"}}
+{{define "components/workspaces/manage-agents-modal.tmpl"}}
 <!-- Manage Agents Modal -->
 <div class="modal fade" id="manageAgentsModal" tabindex="-1" aria-hidden="true">
   <div class="modal-dialog modal-lg">
@@ -17,7 +17,7 @@
         <!-- Create Agent Section -->
         <div class="mb-4">
           <h6 style="color: var(--text-primary);">Create New Agent</h6>
-          <form id="studiosCreateAgentForm" class="modern-card p-3">
+          <form id="workspaceCreateAgentForm" class="modern-card p-3">
             <!-- Config Mode Toggle -->
             <div class="mb-3">
               <div class="d-flex align-items-center gap-3">
@@ -41,7 +41,7 @@
             <!-- Auto-config Description (shown when Auto mode selected) -->
             <div id="autoConfigSection" class="mb-3 d-none">
               <label class="form-label" style="color: var(--text-primary);">Describe Your Agent</label>
-              <textarea id="studios-auto-config-description" class="form-control" rows="3"
+              <textarea id="workspace-auto-config-description" class="form-control" rows="3"
                         style="background: var(--bg-tertiary); border: 1px solid var(--border-color); color: var(--text-primary); font-size: 0.9em; resize: vertical;"
                         placeholder="Example: An agent that helps with file management tasks like organizing documents, searching for files, and creating backups..."></textarea>
               <div class="d-flex justify-content-between align-items-center mt-2">
@@ -75,11 +75,11 @@
             <div class="row">
               <div class="col-md-6 mb-3">
                 <label class="form-label" style="color: var(--text-primary);">Agent Name</label>
-                <input type="text" id="studios-new-agent-name" class="modern-input w-100" placeholder="Enter agent name..." required>
+                <input type="text" id="workspace-new-agent-name" class="modern-input w-100" placeholder="Enter agent name..." required>
               </div>
               <div class="col-md-6 mb-3">
                 <label class="form-label" style="color: var(--text-primary);">Agent Type</label>
-                <select id="studios-new-agent-type" class="modern-input w-100">
+                <select id="workspace-new-agent-type" class="modern-input w-100">
                   <option value="tool-calling">Tool Calling (Cheapest - Optimized for tool use)</option>
                   <option value="general">General Purpose (Mid-tier - Balanced capability)</option>
                   <option value="workspace-manager">Workspace Manager (Coordinates workspace agents)</option>
@@ -90,15 +90,15 @@
             </div>
             <div class="mb-3">
               <label class="form-label" style="color: var(--text-primary);">Model</label>
-              <select id="studios-new-agent-model" class="modern-input w-100">
+              <select id="workspace-new-agent-model" class="modern-input w-100">
                 <option value="">Loading models...</option>
               </select>
             </div>
             <div class="mb-3">
               <label class="form-label" style="color: var(--text-primary);">
-                Temperature: <span id="studios-new-agent-temperature-value">1.0</span>
+                Temperature: <span id="workspace-new-agent-temperature-value">1.0</span>
               </label>
-              <input type="range" id="studios-new-agent-temperature" class="form-range" min="0" max="2" step="0.1" value="1.0"
+              <input type="range" id="workspace-new-agent-temperature" class="form-range" min="0" max="2" step="0.1" value="1.0"
                      style="cursor: pointer;">
               <div class="d-flex justify-content-between" style="font-size: 0.75rem; color: var(--text-muted); font-weight: 500;">
                 <span>Focused (0)</span>
@@ -108,13 +108,13 @@
             </div>
             <div class="mb-3">
               <label class="form-label" style="color: var(--text-primary);">System Prompt</label>
-              <textarea id="studios-new-agent-prompt" class="form-control" rows="4"
+              <textarea id="workspace-new-agent-prompt" class="form-control" rows="4"
                         style="background: var(--bg-tertiary); border: 1px solid var(--border-color); color: var(--text-primary); font-size: 0.9em; resize: vertical;"
                         placeholder="You are a helpful assistant with access to various tools. When a user request can be fulfilled by using an available tool, use the tool instead of providing general information. Be concise and direct in your responses."></textarea>
             </div>
             <div class="mb-3 form-check">
-              <input class="form-check-input" type="checkbox" id="studios-new-agent-allow-web-search" checked>
-              <label class="form-check-label" for="studios-new-agent-allow-web-search" style="color: var(--text-primary);">Allow Web Tools</label>
+              <input class="form-check-input" type="checkbox" id="workspace-new-agent-allow-web-search" checked>
+              <label class="form-check-label" for="workspace-new-agent-allow-web-search" style="color: var(--text-primary);">Allow Web Tools</label>
               <div class="form-helper mt-1">If enabled, this agent can use <code>web_search</code>, <code>web_fetch</code>, and <code>browser</code>.</div>
             </div>
             <button type="submit" class="modern-btn modern-btn-primary">
@@ -132,7 +132,7 @@
           <div class="modern-card p-3">
             <div class="mb-3">
               <label class="form-label" style="color: var(--text-primary);">Select Workspace</label>
-              <select id="studios-workspace-select" class="modern-input w-100">
+              <select id="workspace-agent-workspace-select" class="modern-input w-100">
                 <option value="">Loading workspaces...</option>
               </select>
             </div>
@@ -148,7 +148,7 @@
         <!-- Existing Agents Section -->
         <div>
           <h6 style="color: var(--text-primary);">Existing Agents</h6>
-          <div id="studios-agents-list-modal" class="modern-card p-3">
+          <div id="workspace-agents-list-modal" class="modern-card p-3">
             <div class="text-center py-3">
               <div class="spinner-border text-primary" role="status"></div>
               <p class="mt-2" style="color: var(--text-muted);">Loading agents...</p>

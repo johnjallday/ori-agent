@@ -175,7 +175,7 @@
   }
 
   async function fetchTasksForWorkspace(workspaceId) {
-    const response = await fetch(`/api/orchestration/tasks?studio_id=${encodeURIComponent(workspaceId)}`);
+    const response = await fetch(`/api/orchestration/tasks?workspace_id=${encodeURIComponent(workspaceId)}`);
     if (!response.ok) {
       throw new Error('Failed to load tasks');
     }
@@ -350,7 +350,7 @@
       .join('');
 
     return `
-      <div class="hub-board-card" draggable="true" data-task-id="${escapeHtml(task.id)}" data-column-id="${escapeHtml(columnId)}" data-workspace-id="${escapeHtml(task.__workspace_id || task.studio_id || task.workspace_id || '')}">
+      <div class="hub-board-card" draggable="true" data-task-id="${escapeHtml(task.id)}" data-column-id="${escapeHtml(columnId)}" data-workspace-id="${escapeHtml(task.__workspace_id || task.workspace_id || '')}">
         <span class="hub-card-priority priority-${escapeHtml(priority)}"></span>
         <div class="hub-card-view">
           <div class="hub-card-header">

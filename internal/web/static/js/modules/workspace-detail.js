@@ -1694,7 +1694,7 @@ export class WorkspaceDetailPage {
     this.renderAgentGroups();
 
     try {
-      const response = await fetch(`/api/orchestration/tasks?studio_id=${encodeURIComponent(this.workspaceId)}`);
+      const response = await fetch(`/api/orchestration/tasks?workspace_id=${encodeURIComponent(this.workspaceId)}`);
       if (!response.ok) throw new Error('Failed to load tasks');
 
       const data = await response.json();
@@ -4214,7 +4214,7 @@ export class WorkspaceDetailPage {
   async fetchLatestSubtasksForParent(parentTaskID) {
     if (!parentTaskID || !this.workspaceId) return [];
     try {
-      const response = await fetch(`/api/orchestration/tasks?studio_id=${encodeURIComponent(this.workspaceId)}`);
+      const response = await fetch(`/api/orchestration/tasks?workspace_id=${encodeURIComponent(this.workspaceId)}`);
       if (!response.ok) return [];
       const payload = await response.json();
       const tasks = Array.isArray(payload?.tasks) ? payload.tasks : [];
@@ -9542,7 +9542,7 @@ export class WorkspaceDetailPage {
 
     try {
       // Schedules are stored as tasks with schedule field
-      const response = await fetch(`/api/orchestration/tasks?studio_id=${encodeURIComponent(this.workspaceId)}`);
+      const response = await fetch(`/api/orchestration/tasks?workspace_id=${encodeURIComponent(this.workspaceId)}`);
       if (!response.ok) {
         this.schedules = [];
         this.renderSchedules();
@@ -9807,7 +9807,7 @@ export class WorkspaceDetailPage {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          studio_id: this.workspaceId,
+          workspace_id: this.workspaceId,
           description: normalizedName, // Task API uses description as the main field
           details: normalizedDescription,
           status: 'pending',

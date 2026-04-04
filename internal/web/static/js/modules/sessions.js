@@ -409,7 +409,7 @@ const sessionManager = {
     // Fetch stats for each unique workspace
     const fetchPromises = workspaceIds.map(async (workspaceId) => {
       try {
-        const response = await fetch(`/api/orchestration/tasks?studio_id=${workspaceId}`);
+        const response = await fetch(`/api/orchestration/tasks?workspace_id=${workspaceId}`);
         if (response.ok) {
           const data = await response.json();
           workspaceStats.set(workspaceId, data.stats || { total: 0, pending: 0, completed: 0 });
@@ -3170,7 +3170,7 @@ const sessionManager = {
 
   async createWorkspaceSeedTask(workspaceId, taskConfig) {
     const payload = {
-      studio_id: workspaceId,
+      workspace_id: workspaceId,
       description: taskConfig.description,
       details: taskConfig.details || '',
       priority: Number(taskConfig.priority) || 1
@@ -6045,7 +6045,7 @@ const sessionManager = {
       }
 
       const workspaceId = activeSession.folder_id;
-      const response = await fetch(`/api/orchestration/tasks?studio_id=${workspaceId}`);
+      const response = await fetch(`/api/orchestration/tasks?workspace_id=${workspaceId}`);
       if (!response.ok) throw new Error('Failed to load tasks');
 
       const data = await response.json();
@@ -6076,7 +6076,7 @@ const sessionManager = {
   // Load tasks for a workspace (folder) using orchestration API
   async loadWorkspaceTasks(workspaceId) {
     try {
-      const response = await fetch(`/api/orchestration/tasks?studio_id=${workspaceId}`);
+      const response = await fetch(`/api/orchestration/tasks?workspace_id=${workspaceId}`);
       if (!response.ok) throw new Error('Failed to load workspace tasks');
       const data = await response.json();
       this.tasksByWorkspace.set(workspaceId, data.tasks || []);
@@ -6101,7 +6101,7 @@ const sessionManager = {
   // Now returns tasks that have schedules (not legacy ScheduledTask entities)
   async loadWorkspaceScheduledTasks(workspaceId) {
     try {
-      const response = await fetch(`/api/orchestration/tasks?studio_id=${workspaceId}`);
+      const response = await fetch(`/api/orchestration/tasks?workspace_id=${workspaceId}`);
       if (!response.ok) throw new Error('Failed to load workspace tasks');
       const data = await response.json();
       const allTasks = data.tasks || [];
@@ -6153,7 +6153,7 @@ const sessionManager = {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          studio_id: workspaceId,
+          workspace_id: workspaceId,
           description: description.trim(),
           priority: 3
         })
@@ -6203,7 +6203,7 @@ const sessionManager = {
       if (this.activeSessionId) {
         await this.loadSessionTasks();
       } else if (this.currentTaskWorkspaceId) {
-        const tasksResponse = await fetch(`/api/orchestration/tasks?studio_id=${this.currentTaskWorkspaceId}`);
+        const tasksResponse = await fetch(`/api/orchestration/tasks?workspace_id=${this.currentTaskWorkspaceId}`);
         if (tasksResponse.ok) {
           const data = await tasksResponse.json();
           this.workspaceTasks = data.tasks || [];
@@ -6359,7 +6359,7 @@ const sessionManager = {
   async openWorkspaceTaskPanel(workspaceId) {
     try {
       // Load tasks directly from workspace using orchestration API
-      const response = await fetch(`/api/orchestration/tasks?studio_id=${workspaceId}`);
+      const response = await fetch(`/api/orchestration/tasks?workspace_id=${workspaceId}`);
       if (!response.ok) throw new Error('Failed to load workspace tasks');
 
       const data = await response.json();
@@ -6758,7 +6758,7 @@ const sessionManager = {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          studio_id: workspaceId,
+          workspace_id: workspaceId,
           description,
           priority: 3
         })
@@ -6769,7 +6769,7 @@ const sessionManager = {
       input.value = '';
 
       // Reload tasks for the workspace
-      const tasksResponse = await fetch(`/api/orchestration/tasks?studio_id=${workspaceId}`);
+      const tasksResponse = await fetch(`/api/orchestration/tasks?workspace_id=${workspaceId}`);
       if (tasksResponse.ok) {
         const data = await tasksResponse.json();
         this.workspaceTasks = data.tasks || [];
@@ -6904,7 +6904,7 @@ const sessionManager = {
       if (this.activeSessionId) {
         await this.loadSessionTasks();
       } else if (this.currentTaskWorkspaceId) {
-        const tasksResponse = await fetch(`/api/orchestration/tasks?studio_id=${this.currentTaskWorkspaceId}`);
+        const tasksResponse = await fetch(`/api/orchestration/tasks?workspace_id=${this.currentTaskWorkspaceId}`);
         if (tasksResponse.ok) {
           const data = await tasksResponse.json();
           this.workspaceTasks = data.tasks || [];
@@ -6976,7 +6976,7 @@ const sessionManager = {
       if (this.activeSessionId) {
         await this.loadSessionTasks();
       } else if (workspaceId) {
-        const tasksResponse = await fetch(`/api/orchestration/tasks?studio_id=${workspaceId}`);
+        const tasksResponse = await fetch(`/api/orchestration/tasks?workspace_id=${workspaceId}`);
         if (tasksResponse.ok) {
           const data = await tasksResponse.json();
           this.workspaceTasks = data.tasks || [];
@@ -7304,7 +7304,7 @@ const sessionManager = {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            studio_id: workspaceId,
+            workspace_id: workspaceId,
             description,
             details,
             priority: 3,

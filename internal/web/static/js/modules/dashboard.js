@@ -5768,7 +5768,7 @@
 
   function extractWorkspaceIdFromPath(pathname) {
     var path = String(pathname || '').trim();
-    var match = path.match(/^\/(?:workspaces|studios)\/([^/]+)/i);
+    var match = path.match(/^\/workspaces\/([^/]+)/i);
     if (!match || !match[1]) return '';
     try {
       return decodeURIComponent(match[1]);
@@ -7028,7 +7028,7 @@
     setHomeAssistantRoutingSummary('Workspace Schedule', 'Loading scheduled tasks for this workspace.');
 
     try {
-      var data = await API.get('/api/orchestration/tasks?studio_id=' + encodeURIComponent(workspaceId));
+      var data = await API.get('/api/orchestration/tasks?workspace_id=' + encodeURIComponent(workspaceId));
       var tasks = Array.isArray(data && data.tasks) ? data.tasks : [];
       var scheduledTasks = tasks.filter(function (task) {
         return Boolean(task && (task.schedule_enabled || task.schedule || task.next_run || task.schedule_type || task.schedule_expression));
@@ -7680,7 +7680,7 @@
 
   async function createWorkspaceTaskRecord(workspaceId, payload) {
     var body = Object.assign({
-      studio_id: workspaceId,
+      workspace_id: workspaceId,
       details: '',
       status: 'pending'
     }, payload || {});
@@ -8234,7 +8234,7 @@
             return true;
           }
           await API.post('/api/orchestration/tasks', {
-            studio_id: workspaceId,
+            workspace_id: workspaceId,
             description: content,
             details: '',
             status: 'pending'
@@ -8257,7 +8257,7 @@
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-              studio_id: workspaceId,
+              workspace_id: workspaceId,
               description: content,
               details: '',
               status: 'pending'

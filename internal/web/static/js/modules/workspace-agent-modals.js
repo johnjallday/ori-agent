@@ -1,28 +1,28 @@
 /**
- * Studios Agent Modal Management Module
+ * Workspace Agent Modal Management Module
  * Handles agent creation, deletion, and workspace assignment via modals
  */
 
-// State for agent management (using shared variable from studios-workspace.js)
-// studiosSystemAgents is declared in studios-workspace.js
-let studiosAvailableProviders = [];
-let studiosLLMAvailable = false;
-let studiosSystemModelConfigured = false;
-let studiosAutoConfigApplied = false;
+// State for agent management (using shared variable from workspace-listing.js)
+// workspaceSystemAgents is declared in workspace-listing.js
+let workspaceAvailableProviders = [];
+let workspaceLLMAvailable = false;
+let workspaceSystemModelConfigured = false;
+let workspaceAutoConfigApplied = false;
 
-function isStudiosAutoConfigFallback(config) {
+function isWorkspaceAutoConfigFallback(config) {
   return Boolean(config && typeof config.reasoning === 'string' && config.reasoning.startsWith('Auto-config failed'));
 }
 
 /**
  * Load providers from API
  */
-async function loadStudiosProviders() {
+async function loadWorkspaceProviders() {
   try {
     const response = await fetch('/api/providers');
     const data = await response.json();
-    studiosAvailableProviders = data.providers || [];
-    return studiosAvailableProviders;
+    workspaceAvailableProviders = data.providers || [];
+    return workspaceAvailableProviders;
   } catch (error) {
     console.error('Failed to load providers:', error);
     return [];
@@ -32,15 +32,15 @@ async function loadStudiosProviders() {
 /**
  * Populate model select dropdown based on agent type
  */
-function populateStudiosModelSelect(modelSelect, selectedType = 'tool-calling') {
-  if (!modelSelect || studiosAvailableProviders.length === 0) {
+function populateWorkspaceModelSelect(modelSelect, selectedType = 'tool-calling') {
+  if (!modelSelect || workspaceAvailableProviders.length === 0) {
     console.warn('Cannot populate models: modelSelect or providers missing');
     return;
   }
 
   modelSelect.innerHTML = '';
 
-  studiosAvailableProviders.forEach(provider => {
+  workspaceAvailableProviders.forEach(provider => {
     const providerGroup = document.createElement('optgroup');
     providerGroup.label = provider.display_name;
 
@@ -79,18 +79,18 @@ async function openManageAgentsModal() {
   modal.show();
 
   // Load agents when modal opens
-  await loadStudiosSystemAgents();
+  await loadWorkspaceSystemAgents();
 
   // Load workspaces for the dropdown
   await loadWorkspacesForAgentManagement();
 
   // Load and populate available models
   try {
-    await loadStudiosProviders();
-    const modelSelect = document.getElementById('studios-new-agent-model');
-    const typeSelect = document.getElementById('studios-new-agent-type');
+    await loadWorkspaceProviders();
+    const modelSelect = document.getElementById('workspace-new-agent-model');
+    const typeSelect = document.getElementById('workspace-new-agent-type');
     if (modelSelect && typeSelect) {
-      populateStudiosModelSelect(modelSelect, typeSelect.value);
+      populateWorkspaceModelSelect(modelSelect, typeSelect.value);
     }
   } catch (error) {
     console.error('Error loading providers:', error);
@@ -100,16 +100,16 @@ async function openManageAgentsModal() {
 /**
  * Load system agents from API
  */
-async function loadStudiosSystemAgents() {
+async function loadWorkspaceSystemAgents() {
   try {
     const response = await fetch('/api/agents');
     const data = await response.json();
 
-    studiosSystemAgents = data.agents || [];
-    renderStudiosAgentsListModal();
+    workspaceSystemAgents = data.agents || [];
+    renderWorkspaceAgentsListModal();
   } catch (error) {
     console.error('Error loading agents:', error);
-    document.getElementById('studios-agents-list-modal').innerHTML = `
+    document.getElementById('workspace-agents-list-modal').innerHTML = `
             <div class="alert alert-danger">Failed to load agents: ${escapeHtml(error.message)}</div>
         `;
   }
@@ -118,10 +118,10 @@ async function loadStudiosSystemAgents() {
 /**
  * Render agents list in modal
  */
-function renderStudiosAgentsListModal() {
-  const container = document.getElementById('studios-agents-list-modal');
+function renderWorkspaceAgentsListModal() {
+  const container = document.getElementById('workspace-agents-list-modal');
 
-  if (studiosSystemAgents.length === 0) {
+  if (workspaceSystemAgents.length === 0) {
     container.innerHTML = `
             <div class="text-center py-3">
                 <p style="color: var(--text-muted);">No agents found</p>
@@ -130,7 +130,7 @@ function renderStudiosAgentsListModal() {
     return;
   }
 
-  container.innerHTML = studiosSystemAgents.map(agent => `
+  container.innerHTML = workspaceSystemAgents.map(agent => `
         <div class="d-flex align-items-center justify-content-between p-2 mb-2" style="border-left: 3px solid var(--primary-color); background: var(--bg-secondary); border-radius: var(--radius-sm);">
             <div class="d-flex align-items-center gap-3">
                 <div class="status-indicator status-online" style="width: 8px; height: 8px; border-radius: 50%; background: var(--success-color);"></div>
@@ -146,7 +146,7 @@ function renderStudiosAgentsListModal() {
                     </svg>
                     Add to Workspace
                 </button>
-                <button class="btn btn-sm btn-outline-danger" onclick="deleteStudiosSystemAgent('${escapeHtml(agent.name)}')" title="Delete agent">
+                <button class="btn btn-sm btn-outline-danger" onclick="deleteWorkspaceSystemAgent('${escapeHtml(agent.name)}')" title="Delete agent">
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
                         <path d="M19,4H15.5L14.5,3H9.5L8.5,4H5V6H19M6,19A2,2 0 0,0 8,21H16A2,2 0 0,0 18,19V7H6V19Z"/>
                     </svg>
@@ -159,7 +159,7 @@ function renderStudiosAgentsListModal() {
 /**
  * Delete a system agent
  */
-async function deleteStudiosSystemAgent(agentName) {
+async function deleteWorkspaceSystemAgent(agentName) {
   if (!confirm(`Are you sure you want to delete agent "${agentName}"? This action cannot be undone.`)) {
     return;
   }
@@ -174,7 +174,7 @@ async function deleteStudiosSystemAgent(agentName) {
       throw new Error(error || 'Failed to delete agent');
     }
 
-    await loadStudiosSystemAgents();
+    await loadWorkspaceSystemAgents();
 
     // Also refresh workspace agents list if the function exists
     if (typeof loadWorkspaceAgents === 'function') {
@@ -197,7 +197,7 @@ async function loadWorkspacesForAgentManagement() {
     const data = await response.json();
 
     const workspaces = data.workspaces || [];
-    const select = document.getElementById('studios-workspace-select');
+    const select = document.getElementById('workspace-agent-workspace-select');
 
     if (workspaces.length === 0) {
       select.innerHTML = '<option value="">No workspaces available</option>';
@@ -210,7 +210,7 @@ async function loadWorkspacesForAgentManagement() {
             ).join('');
   } catch (error) {
     console.error('Error loading workspaces:', error);
-    const select = document.getElementById('studios-workspace-select');
+    const select = document.getElementById('workspace-agent-workspace-select');
     select.innerHTML = '<option value="">Error loading workspaces</option>';
   }
 }
@@ -219,7 +219,7 @@ async function loadWorkspacesForAgentManagement() {
  * Add an agent to the selected workspace
  */
 async function addAgentToSelectedWorkspace(agentName) {
-  const workspaceSelect = document.getElementById('studios-workspace-select');
+  const workspaceSelect = document.getElementById('workspace-agent-workspace-select');
   const workspaceId = workspaceSelect.value;
 
   if (!workspaceId) {
@@ -265,13 +265,13 @@ async function checkLLMAvailability() {
   try {
     const response = await fetch('/api/agents/auto-config/availability');
     const data = await response.json();
-    studiosLLMAvailable = data.available;
-    studiosSystemModelConfigured = data.system_model_configured || false;
+    workspaceLLMAvailable = data.available;
+    workspaceSystemModelConfigured = data.system_model_configured || false;
     return data;
   } catch (error) {
     console.error('Failed to check LLM availability:', error);
-    studiosLLMAvailable = false;
-    studiosSystemModelConfigured = false;
+    workspaceLLMAvailable = false;
+    workspaceSystemModelConfigured = false;
     return { available: false, system_model_configured: false, message: 'Failed to check LLM availability' };
   }
 }
@@ -289,7 +289,7 @@ function handleConfigModeChange(mode) {
   if (mode === 'auto') {
     configModeHelp.classList.remove('d-none');
 
-    if (studiosLLMAvailable) {
+    if (workspaceLLMAvailable) {
       autoConfigSection.classList.remove('d-none');
       llmWarning.classList.add('d-none');
     } else {
@@ -297,7 +297,7 @@ function handleConfigModeChange(mode) {
       llmWarning.classList.remove('d-none');
       // Update warning message based on what's missing
       if (llmWarningMessage) {
-        if (!studiosSystemModelConfigured) {
+        if (!workspaceSystemModelConfigured) {
           llmWarningMessage.textContent = 'Auto-config requires a System Model to be configured.';
         } else {
           llmWarningMessage.textContent = 'Auto-config requires an LLM provider. Please set up an API key or install Ollama.';
@@ -310,7 +310,7 @@ function handleConfigModeChange(mode) {
     llmWarning.classList.add('d-none');
     configModeHelp.classList.add('d-none');
     autoSelectedIndicator.classList.add('d-none');
-    studiosAutoConfigApplied = false;
+    workspaceAutoConfigApplied = false;
   }
 }
 
@@ -318,7 +318,7 @@ function handleConfigModeChange(mode) {
  * Generate auto-config from description
  */
 async function generateAutoConfig() {
-  const description = document.getElementById('studios-auto-config-description').value.trim();
+  const description = document.getElementById('workspace-auto-config-description').value.trim();
   const generateBtn = document.getElementById('generateAutoConfigBtn');
   const autoConfigStatus = document.getElementById('autoConfigStatus');
 
@@ -354,7 +354,7 @@ async function generateAutoConfig() {
     // Apply the configuration to form fields
     applyAutoConfig(config);
 
-    const fallback = isStudiosAutoConfigFallback(config);
+    const fallback = isWorkspaceAutoConfigFallback(config);
     // Show success status
     autoConfigStatus.textContent = fallback ? 'Applied (defaults)' : 'Applied!';
     autoConfigStatus.classList.remove('bg-secondary', 'bg-success', 'bg-danger', 'bg-warning');
@@ -362,7 +362,7 @@ async function generateAutoConfig() {
 
     // Show the auto-selected indicator
     document.getElementById('autoSelectedIndicator').classList.remove('d-none');
-    studiosAutoConfigApplied = true;
+    workspaceAutoConfigApplied = true;
 
     // Log reasoning if available
     if (fallback) {
@@ -392,7 +392,7 @@ async function generateAutoConfig() {
  */
 function applyAutoConfig(config) {
   // Apply agent type
-  const typeSelect = document.getElementById('studios-new-agent-type');
+  const typeSelect = document.getElementById('workspace-new-agent-type');
   if (typeSelect && config.agent_type) {
     typeSelect.value = config.agent_type;
     // Trigger change to update model list
@@ -401,7 +401,7 @@ function applyAutoConfig(config) {
 
   // Apply model (need to wait a moment for model list to repopulate)
   setTimeout(() => {
-    const modelSelect = document.getElementById('studios-new-agent-model');
+    const modelSelect = document.getElementById('workspace-new-agent-model');
     if (modelSelect && config.model) {
       // Try to find and select the model
       for (let i = 0; i < modelSelect.options.length; i++) {
@@ -414,8 +414,8 @@ function applyAutoConfig(config) {
   }, 100);
 
   // Apply temperature
-  const tempSlider = document.getElementById('studios-new-agent-temperature');
-  const tempValue = document.getElementById('studios-new-agent-temperature-value');
+  const tempSlider = document.getElementById('workspace-new-agent-temperature');
+  const tempValue = document.getElementById('workspace-new-agent-temperature-value');
   if (tempSlider && config.temperature !== undefined) {
     tempSlider.value = config.temperature;
     if (tempValue) {
@@ -424,7 +424,7 @@ function applyAutoConfig(config) {
   }
 
   // Apply system prompt
-  const promptTextarea = document.getElementById('studios-new-agent-prompt');
+  const promptTextarea = document.getElementById('workspace-new-agent-prompt');
   if (promptTextarea && config.system_prompt) {
     promptTextarea.value = config.system_prompt;
   }
@@ -438,10 +438,10 @@ function applyAutoConfig(config) {
  */
 function highlightAutoConfiguredFields() {
   const fields = [
-    'studios-new-agent-type',
-    'studios-new-agent-model',
-    'studios-new-agent-temperature',
-    'studios-new-agent-prompt'
+    'workspace-new-agent-type',
+    'workspace-new-agent-model',
+    'workspace-new-agent-temperature',
+    'workspace-new-agent-prompt'
   ];
 
   fields.forEach(id => {
@@ -487,21 +487,21 @@ function initializeAgentModalListeners() {
   }
 
   // Update model dropdown when agent type changes
-  const typeSelect = document.getElementById('studios-new-agent-type');
+  const typeSelect = document.getElementById('workspace-new-agent-type');
   if (typeSelect) {
     typeSelect.addEventListener('change', function(e) {
-      const modelSelect = document.getElementById('studios-new-agent-model');
-      if (modelSelect && studiosAvailableProviders.length > 0) {
-        populateStudiosModelSelect(modelSelect, e.target.value);
+      const modelSelect = document.getElementById('workspace-new-agent-model');
+      if (modelSelect && workspaceAvailableProviders.length > 0) {
+        populateWorkspaceModelSelect(modelSelect, e.target.value);
       }
     });
   }
 
   // Update temperature value display when slider changes
-  const tempSlider = document.getElementById('studios-new-agent-temperature');
+  const tempSlider = document.getElementById('workspace-new-agent-temperature');
   if (tempSlider) {
     tempSlider.addEventListener('input', function(e) {
-      const valueDisplay = document.getElementById('studios-new-agent-temperature-value');
+      const valueDisplay = document.getElementById('workspace-new-agent-temperature-value');
       if (valueDisplay) {
         valueDisplay.textContent = e.target.value;
       }
@@ -509,18 +509,18 @@ function initializeAgentModalListeners() {
   }
 
   // Create agent form submission
-  const createAgentForm = document.getElementById('studiosCreateAgentForm');
+  const createAgentForm = document.getElementById('workspaceCreateAgentForm');
   if (createAgentForm) {
     createAgentForm.addEventListener('submit', async function(e) {
       e.preventDefault();
 
-      const name = document.getElementById('studios-new-agent-name').value.trim();
-      const type = document.getElementById('studios-new-agent-type').value;
-      const modelSelectEl = document.getElementById('studios-new-agent-model');
+      const name = document.getElementById('workspace-new-agent-name').value.trim();
+      const type = document.getElementById('workspace-new-agent-type').value;
+      const modelSelectEl = document.getElementById('workspace-new-agent-model');
       const model = modelSelectEl?.value?.trim() || '';
-      const temperature = document.getElementById('studios-new-agent-temperature').value;
-      const systemPrompt = document.getElementById('studios-new-agent-prompt').value.trim();
-      const allowWebSearchInput = document.getElementById('studios-new-agent-allow-web-search');
+      const temperature = document.getElementById('workspace-new-agent-temperature').value;
+      const systemPrompt = document.getElementById('workspace-new-agent-prompt').value.trim();
+      const allowWebSearchInput = document.getElementById('workspace-new-agent-allow-web-search');
 
       if (!name) {
         alert('Please enter an agent name');
@@ -528,7 +528,7 @@ function initializeAgentModalListeners() {
       }
 
       // Check if agent already exists
-      if (studiosSystemAgents.some(a => a.name === name)) {
+      if (workspaceSystemAgents.some(a => a.name === name)) {
         alert('An agent with this name already exists');
         return;
       }
@@ -562,7 +562,7 @@ function initializeAgentModalListeners() {
         // Clear form and reload
         createAgentForm.reset();
         resetAutoConfigState();
-        await loadStudiosSystemAgents();
+        await loadWorkspaceSystemAgents();
 
         // Refresh workspace agents if function exists
         if (typeof loadWorkspaceAgents === 'function') {
@@ -584,7 +584,7 @@ function initializeAgentModalListeners() {
  * Reset auto-config state (called when form is reset or modal closed)
  */
 function resetAutoConfigState() {
-  studiosAutoConfigApplied = false;
+  workspaceAutoConfigApplied = false;
 
   const configModeManual = document.getElementById('configModeManual');
   if (configModeManual) {
@@ -596,8 +596,8 @@ function resetAutoConfigState() {
   const configModeHelp = document.getElementById('configModeHelp');
   const autoSelectedIndicator = document.getElementById('autoSelectedIndicator');
   const autoConfigStatus = document.getElementById('autoConfigStatus');
-  const descriptionTextarea = document.getElementById('studios-auto-config-description');
-  const allowWebSearchInput = document.getElementById('studios-new-agent-allow-web-search');
+  const descriptionTextarea = document.getElementById('workspace-auto-config-description');
+  const allowWebSearchInput = document.getElementById('workspace-new-agent-allow-web-search');
 
   if (autoConfigSection) autoConfigSection.classList.add('d-none');
   if (llmWarning) llmWarning.classList.add('d-none');
@@ -610,11 +610,11 @@ function resetAutoConfigState() {
 
 // Export functions for global access
 window.openManageAgentsModal = openManageAgentsModal;
-window.loadStudiosSystemAgents = loadStudiosSystemAgents;
-window.deleteStudiosSystemAgent = deleteStudiosSystemAgent;
+window.loadWorkspaceSystemAgents = loadWorkspaceSystemAgents;
+window.deleteWorkspaceSystemAgent = deleteWorkspaceSystemAgent;
 window.addAgentToSelectedWorkspace = addAgentToSelectedWorkspace;
-window.loadStudiosProviders = loadStudiosProviders;
-window.populateStudiosModelSelect = populateStudiosModelSelect;
+window.loadWorkspaceProviders = loadWorkspaceProviders;
+window.populateWorkspaceModelSelect = populateWorkspaceModelSelect;
 window.checkLLMAvailability = checkLLMAvailability;
 window.generateAutoConfig = generateAutoConfig;
 window.resetAutoConfigState = resetAutoConfigState;

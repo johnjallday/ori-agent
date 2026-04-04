@@ -1100,7 +1100,6 @@ async function createSpecialistSessionForHandoff(agentName, requestBody) {
 
   const workspaceId = String(
     requestBody?.route_context?.workspace_id ||
-    requestBody?.route_context?.studio_id ||
     manager.getActiveSession?.()?.folder_id ||
     ''
   ).trim();
@@ -2136,7 +2135,7 @@ async function handleDynamicAgentApprovals(data) {
   if (!data || !Array.isArray(data.dynamic_agent_requests) || data.dynamic_agent_requests.length === 0) {
     return;
   }
-  const workspaceId = data.studio_id;
+  const workspaceId = data.workspace_id;
   if (!workspaceId) return;
 
   const summary = data.dynamic_agent_requests
@@ -2415,7 +2414,7 @@ async function persistUploadedFilesToSession(sessionId, files, workspaceId) {
 
 function extractWorkspaceIdFromPath(pathname) {
   const path = String(pathname || '').trim();
-  const match = path.match(/^\/(?:workspaces|studios)\/([^/]+)/i);
+  const match = path.match(/^\/workspaces\/([^/]+)/i);
   if (!match || !match[1]) return '';
   try {
     return decodeURIComponent(match[1]);
@@ -2427,11 +2426,11 @@ function extractWorkspaceIdFromPath(pathname) {
 function inferChatRouteSurface(pathname, workspaceId) {
   const path = String(pathname || '').trim().toLowerCase();
   if (!path) return workspaceId ? 'workspace_detail' : 'dashboard';
-  if (path.startsWith('/workspaces/') || path.startsWith('/studios/')) {
+  if (path.startsWith('/workspaces/')) {
     if (path.includes('/canvas')) return 'workspace_canvas';
     return 'workspace_detail';
   }
-  if (path.startsWith('/workspaces') || path.startsWith('/studios')) return 'workspace_hub';
+  if (path.startsWith('/workspaces')) return 'workspace_hub';
   if (path.startsWith('/chat')) return workspaceId ? 'workspace_chat' : 'chat';
   if (path.startsWith('/dashboard') || path === '/') return 'dashboard';
   return workspaceId ? 'workspace_detail' : 'dashboard';

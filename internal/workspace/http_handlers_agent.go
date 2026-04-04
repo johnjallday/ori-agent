@@ -21,7 +21,7 @@ type AddAgentRequest struct {
 func (h *HTTPHandler) AddAgent(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		orihttp.MethodNotAllowed(w)
-		// Extract studio ID from URL path
+		// Extract workspace ID from URL path
 		return
 	}
 
@@ -31,7 +31,7 @@ func (h *HTTPHandler) AddAgent(w http.ResponseWriter, r *http.Request) {
 		orihttp.BadRequest(w, "Invalid URL format")
 		return
 	}
-	studioID := parts[0]
+	workspaceID := parts[0]
 
 	// Parse request body
 
@@ -42,40 +42,40 @@ func (h *HTTPHandler) AddAgent(w http.ResponseWriter, r *http.Request) {
 
 	if req.AgentName == "" {
 		orihttp.BadRequest(w, "Agent name is required")
-		// Get studio
+		// Get workspace
 		return
 	}
 
-	studio, err := h.store.Get(studioID)
+	ws, err := h.store.Get(workspaceID)
 	if err != nil {
-		orihttp.NotFound(w, fmt.Sprintf("Studio not found: %v", err))
+		orihttp.NotFound(w, fmt.Sprintf("Workspace not found: %v", err))
 		// Add agent using workspace method (creates stable AgentInstance)
 		return
 	}
 
-	if err := studio.AddAgent(req.AgentName); err != nil {
+	if err := ws.AddAgent(req.AgentName); err != nil {
 		if errors.Is(err, ErrAgentAlreadyInWorkspace) {
 			orihttp.RespondError(w, http.StatusConflict, err.Error())
 			return
 		}
 		orihttp.InternalError(w, fmt.Sprintf("Failed to add agent: %v", err))
-		// Save updated studio
+		// Save updated workspace
 		return
 	}
 
-	if err := h.store.Save(studio); err != nil {
-		orihttp.InternalError(w, fmt.Sprintf("Failed to update studio: %v", err))
+	if err := h.store.Save(ws); err != nil {
+		orihttp.InternalError(w, fmt.Sprintf("Failed to update workspace: %v", err))
 		return
 	}
 
-	logger.Debug("Added agent to studio", logger.Fields{"agent": req.AgentName, "studioID": studioID})
+	logger.Debug("Added agent to workspace", logger.Fields{"agent": req.AgentName, "workspaceID": workspaceID})
 
 	// Return success
 	w.Header().Set("Content-Type", "application/json")
 	if encErr := json.NewEncoder(w).Encode(map[string]interface{}{
-		"message": "Agent added successfully",
-		"agent":   req.AgentName,
-		"studio":  studioID,
+		"message":   "Agent added successfully",
+		"agent":     req.AgentName,
+		"workspace": workspaceID,
 	}); encErr != nil {
 		logger.Error("Failed to encode response", logger.Fields{"error": encErr})
 	}
@@ -85,7 +85,7 @@ func (h *HTTPHandler) AddAgent(w http.ResponseWriter, r *http.Request) {
 func (h *HTTPHandler) RemoveAgent(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodDelete {
 		orihttp.MethodNotAllowed(w)
-		// Extract studio ID and agent identifier from URL path
+		// Extract workspace ID and agent identifier from URL path
 		return
 	}
 
@@ -95,13 +95,13 @@ func (h *HTTPHandler) RemoveAgent(w http.ResponseWriter, r *http.Request) {
 		orihttp.BadRequest(w, "Invalid URL format")
 		return
 	}
-	studioID := parts[0]
+	workspaceID := parts[0]
 	agentIdentifier := parts[2]
 
-	// Get studio
-	studio, err := h.store.Get(studioID)
+	// Get workspace
+	ws, err := h.store.Get(workspaceID)
 	if err != nil {
-		orihttp.NotFound(w, fmt.Sprintf("Studio not found: %v", err))
+		orihttp.NotFound(w, fmt.Sprintf("Workspace not found: %v", err))
 		// Parse agent identifier to extract name and instance number
 		return
 	}
@@ -125,10 +125,10 @@ func (h *HTTPHandler) RemoveAgent(w http.ResponseWriter, r *http.Request) {
 	var targetInstanceID string
 
 	// If we have AgentInstances, always use them (even if no instance number provided)
-	if len(studio.AgentInstances) > 0 {
+	if len(ws.AgentInstances) > 0 {
 		if instanceNumber > 0 {
 			// Find by name and instance number
-			for _, inst := range studio.AgentInstances {
+			for _, inst := range ws.AgentInstances {
 				if inst.Name == agentName && inst.InstanceNumber == instanceNumber {
 					targetInstanceID = inst.ID
 					break
@@ -136,7 +136,7 @@ func (h *HTTPHandler) RemoveAgent(w http.ResponseWriter, r *http.Request) {
 			}
 		} else {
 			// No instance number provided - find first matching agent by name
-			for _, inst := range studio.AgentInstances {
+			for _, inst := range ws.AgentInstances {
 				if inst.Name == agentName {
 					targetInstanceID = inst.ID
 					instanceNumber = inst.InstanceNumber // For logging
@@ -150,7 +150,7 @@ func (h *HTTPHandler) RemoveAgent(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		if err := studio.RemoveAgentInstance(targetInstanceID); err != nil {
+		if err := ws.RemoveAgentInstance(targetInstanceID); err != nil {
 			if errors.Is(err, ErrWorkspaceEntryAgentRequired) {
 				orihttp.BadRequest(w, err.Error())
 				return
@@ -160,7 +160,7 @@ func (h *HTTPHandler) RemoveAgent(w http.ResponseWriter, r *http.Request) {
 		}
 	} else {
 
-		if err := studio.RemoveAgent(agentName); err != nil {
+		if err := ws.RemoveAgent(agentName); err != nil {
 			if errors.Is(err, ErrWorkspaceEntryAgentRequired) {
 				orihttp.BadRequest(w, err.Error())
 				return
@@ -170,23 +170,23 @@ func (h *HTTPHandler) RemoveAgent(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	if err := h.store.Save(studio); err != nil {
-		orihttp.InternalError(w, fmt.Sprintf("Failed to save studio: %v", err))
+	if err := h.store.Save(ws); err != nil {
+		orihttp.InternalError(w, fmt.Sprintf("Failed to save workspace: %v", err))
 		return
 	}
 
 	if instanceNumber > 0 {
-		logger.Debug("Removed agent instance # from studio", logger.Fields{"instanceNumber": instanceNumber, "studioID": studioID, "workspace_id": agentName})
+		logger.Debug("Removed agent instance from workspace", logger.Fields{"instanceNumber": instanceNumber, "workspaceID": workspaceID, "workspace_id": agentName})
 	} else {
-		logger.Debug("Removed agent from studio", logger.Fields{"agent": agentName, "studioID": studioID})
+		logger.Debug("Removed agent from workspace", logger.Fields{"agent": agentName, "workspaceID": workspaceID})
 	}
 
 	// Return success
 	w.Header().Set("Content-Type", "application/json")
 	if encErr := json.NewEncoder(w).Encode(map[string]interface{}{
-		"message": "Agent removed successfully",
-		"agent":   agentName,
-		"studio":  studioID,
+		"message":   "Agent removed successfully",
+		"agent":     agentName,
+		"workspace": workspaceID,
 	}); encErr != nil {
 		logger.Error("Failed to encode response", logger.Fields{"error": encErr})
 	}

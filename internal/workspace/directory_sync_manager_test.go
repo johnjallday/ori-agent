@@ -51,7 +51,7 @@ func (s *directorySyncTestStore) GetFilesPath(workspaceID string) string {
 	return filepath.Join("workspaces", workspaceID, "files")
 }
 
-func TestDirectorySyncManagerEmitsStudioUpdatedEvent(t *testing.T) {
+func TestDirectorySyncManagerEmitsWorkspaceUpdatedEvent(t *testing.T) {
 	dir := t.TempDir()
 	ws := &Workspace{
 		ID:     "ws-sync-test",

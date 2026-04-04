@@ -61,7 +61,7 @@ func TestWorkspaceStoreAdapter_MCPRoundTrip(t *testing.T) {
 		t.Fatalf("expected 1 serialized MCP binding, got %d", len(rawBindings))
 	}
 
-	roundTripped := adapter.toAgentStudioWorkspace(sessionWS)
+	roundTripped := adapter.toAgentWorkspace(sessionWS)
 	if len(roundTripped.MCPBindings) != 1 {
 		t.Fatalf("expected 1 round-tripped MCP binding, got %d", len(roundTripped.MCPBindings))
 	}
@@ -103,7 +103,7 @@ func TestWorkspaceStoreAdapter_AgentInstanceMetadataRoundTrip(t *testing.T) {
 	}
 
 	sessionWS := adapter.toSessionWorkspace(input)
-	roundTripped := adapter.toAgentStudioWorkspace(sessionWS)
+	roundTripped := adapter.toAgentWorkspace(sessionWS)
 
 	if len(roundTripped.AgentInstances) != 1 {
 		t.Fatalf("expected 1 round-tripped agent instance, got %d", len(roundTripped.AgentInstances))
@@ -161,7 +161,7 @@ func TestWorkspaceStoreAdapter_SkillRoundTrip(t *testing.T) {
 		t.Fatalf("expected agent skill access JSON to be serialized")
 	}
 
-	roundTripped := adapter.toAgentStudioWorkspace(sessionWS)
+	roundTripped := adapter.toAgentWorkspace(sessionWS)
 	if len(roundTripped.SkillBindings) != 1 {
 		t.Fatalf("expected 1 round-tripped skill binding, got %d", len(roundTripped.SkillBindings))
 	}

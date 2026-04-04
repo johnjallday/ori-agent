@@ -361,7 +361,7 @@
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          studio_id: state.selectedId,
+          workspace_id: state.selectedId,
           description: input,
           details: '',
           priority: 3
@@ -463,7 +463,7 @@
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          studio_id: state.selectedId,
+          workspace_id: state.selectedId,
           description: parentTitle,
           details: parentDetails,
           priority: parentPriority
@@ -513,7 +513,7 @@
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            studio_id: state.selectedId,
+            workspace_id: state.selectedId,
             description: stepTitle,
             details: stepDetails,
             priority: stepPriority,
@@ -571,7 +571,7 @@
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        studio_id: state.selectedId,
+        workspace_id: state.selectedId,
         description: parsed.title || input,
         details: parsed.details || '',
         priority: parsed.priority || 3,

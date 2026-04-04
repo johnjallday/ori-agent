@@ -52,7 +52,7 @@ class WorkspaceRealtime {
    * Connect to workspace event stream
    */
   connectToWorkspace(workspaceId) {
-    const url = `/api/orchestration/workflow/stream?studio_id=${encodeURIComponent(workspaceId)}`;
+    const url = `/api/orchestration/workflow/stream?workspace_id=${encodeURIComponent(workspaceId)}`;
     const eventSource = new EventSource(url);
 
     eventSource.addEventListener('open', () => {
@@ -151,7 +151,7 @@ class WorkspaceRealtime {
       this.handleWorkspaceEvent(workspaceId, 'workspace.updated', e);
     });
 
-    eventSource.addEventListener('studio.updated', (e) => {
+    eventSource.addEventListener('workspace.updated', (e) => {
       this.handleWorkspaceEvent(workspaceId, 'workspace.updated', e);
     });
 

@@ -1,10 +1,10 @@
 /**
- * Studios Workspace Creation Module
+ * Workspace Creation Module
  * Handles workspace creation modal and agent selection
  */
 
 // State for workspace creation (using shared variables from window object)
-// window.selectedAgents and window.availableAgents are declared in studios.tmpl
+// window.selectedAgents and window.availableAgents are declared in workspaces-hub.tmpl
 const workspaceCreateState = {
   importMode: false,
   allowDuplicateImport: false,

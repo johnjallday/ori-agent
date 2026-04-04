@@ -724,7 +724,7 @@ console.log('[workspace-hub.js] FILE LOADED');
     }
 
     const [taskResponse, sessionResponse] = await Promise.allSettled([
-      fetch(`/api/orchestration/tasks?studio_id=${encodeURIComponent(safeWorkspaceId)}`),
+      fetch(`/api/orchestration/tasks?workspace_id=${encodeURIComponent(safeWorkspaceId)}`),
       fetch(`/api/sessions?folder_id=${encodeURIComponent(safeWorkspaceId)}&sort=updated_desc&limit=50`)
     ]);
 

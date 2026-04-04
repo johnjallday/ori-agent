@@ -1332,7 +1332,7 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 						orihttp.WriteJSON(w, attachActionReceipts(attachRouteMetadata(map[string]any{
 							"response":               responseText,
 							"orchestrated":           true,
-							"studio_id":              result.WorkspaceID,
+							"workspace_id":           result.WorkspaceID,
 							"status":                 result.Status,
 							"pending_plan_id":        result.PendingPlanID,
 							"planner_decision":       result.PlannerDecision,

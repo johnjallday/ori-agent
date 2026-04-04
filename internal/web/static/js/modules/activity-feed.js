@@ -54,7 +54,7 @@ class ActivityFeed {
         const response = await fetch('/api/workspaces');
         if (response.ok) {
           const data = await response.json();
-          const workspaces = data.workspaces || data.folders || data.studios || (Array.isArray(data) ? data : []);
+          const workspaces = data.workspaces || data.folders || (Array.isArray(data) ? data : []);
           if (workspaces.length > 0) {
             this.currentWorkspaceId = workspaces[0].id;
             sessionStorage.setItem('currentWorkspaceId', this.currentWorkspaceId);
@@ -94,7 +94,7 @@ class ActivityFeed {
     this.updateStatus('connecting');
 
     try {
-      const url = `/api/orchestration/progress/stream?studio_id=${encodeURIComponent(this.currentWorkspaceId)}`;
+      const url = `/api/orchestration/progress/stream?workspace_id=${encodeURIComponent(this.currentWorkspaceId)}`;
       this.eventSource = new EventSource(url);
 
       this.eventSource.onopen = () => {
