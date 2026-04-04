@@ -93,7 +93,18 @@ func TestMigrations(t *testing.T) {
 	}
 
 	// Verify tables exist
-	tables := []string{"sessions", "messages", "workspaces", "session_tags", "sessions_fts", "schema_migrations"}
+	tables := []string{
+		"sessions",
+		"messages",
+		"workspaces",
+		"session_tags",
+		"sessions_fts",
+		"schema_migrations",
+		"vaults",
+		"vault_records",
+		"vault_grants",
+		"vault_audit_events",
+	}
 	for _, table := range tables {
 		var name string
 		err := db.QueryRowContext(ctx, "SELECT name FROM sqlite_master WHERE type='table' AND name=?", table).Scan(&name)
@@ -110,8 +121,15 @@ func TestMigrations(t *testing.T) {
 	}
 
 	workspaceColumns := map[string]bool{
-		"mcp_bindings_json":     false,
-		"agent_mcp_access_json": false,
+		"mcp_bindings_json":       false,
+		"agent_mcp_access_json":   false,
+		"skill_bindings_json":     false,
+		"agent_skill_access_json": false,
+	}
+	vaultColumns := map[string]bool{
+		"key_salt":       false,
+		"key_nonce":      false,
+		"key_ciphertext": false,
 	}
 
 	rows, err := db.QueryContext(ctx, "PRAGMA table_info(workspaces)")
@@ -139,6 +157,41 @@ func TestMigrations(t *testing.T) {
 		if !found {
 			t.Errorf("workspace column %s does not exist", name)
 		}
+	}
+
+	vaultRows, err := db.QueryContext(ctx, "PRAGMA table_info(vaults)")
+	if err != nil {
+		t.Fatalf("Failed to inspect vaults columns: %v", err)
+	}
+	defer func() { _ = vaultRows.Close() }()
+
+	for vaultRows.Next() {
+		var cid int
+		var name string
+		var colType string
+		var notNull int
+		var defaultValue sql.NullString
+		var pk int
+		if err := vaultRows.Scan(&cid, &name, &colType, &notNull, &defaultValue, &pk); err != nil {
+			t.Fatalf("Failed to scan vaults column info: %v", err)
+		}
+		if _, ok := vaultColumns[name]; ok {
+			vaultColumns[name] = true
+		}
+	}
+
+	for name, found := range vaultColumns {
+		if !found {
+			t.Errorf("vault column %s does not exist", name)
+		}
+	}
+
+	var vaultCount int
+	if err := db.QueryRowContext(ctx, "SELECT COUNT(*) FROM vaults").Scan(&vaultCount); err != nil {
+		t.Fatalf("Failed to count vaults: %v", err)
+	}
+	if vaultCount != 0 {
+		t.Errorf("expected no vaults in a fresh database, got %d", vaultCount)
 	}
 }
 

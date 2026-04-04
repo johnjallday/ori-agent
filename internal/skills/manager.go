@@ -309,13 +309,20 @@ func (m *Manager) loadRepoSkills(includePrompt bool) ([]Skill, error) {
 }
 
 func (m *Manager) loadCompatSkills(includePrompt bool) ([]Skill, error) {
-	if m.agentStorePath == "" {
+	compatRoots := resolveCompatSkillsDirs(m.agentStorePath)
+	if len(compatRoots) == 0 {
 		return []Skill{}, nil
 	}
 
-	repoRoot := filepath.Dir(m.agentStorePath)
-	skillsDir := filepath.Join(repoRoot, ".agents", "skills")
-	return m.loadSkillsFromDir(skillsDir, SourceAgentsCompat, includePrompt, false, true)
+	var allSkills []Skill
+	for _, skillsDir := range compatRoots {
+		loaded, err := m.loadSkillsFromDir(skillsDir, SourceAgentsCompat, includePrompt, false, true)
+		if err != nil {
+			return nil, err
+		}
+		allSkills = append(allSkills, loaded...)
+	}
+	return allSkills, nil
 }
 
 func (m *Manager) loadPersonalSkills(includePrompt bool) ([]Skill, error) {
@@ -400,6 +407,7 @@ func (m *Manager) loadSkillEntry(skillPath, defaultName, source, skillDir string
 			skill.ValidationErrors = append(skill.ValidationErrors, fmt.Sprintf("openai.yaml: %v", err))
 		} else if meta != nil {
 			skill.OpenAIMetadata = meta
+			skill.PlanningProfile = meta.PlanningProfile
 			if len(skill.AllowedTools) == 0 && len(meta.Tools) > 0 {
 				skill.AllowedTools = meta.Tools
 			}
@@ -614,4 +622,34 @@ func resolveAgentsDir(agentStorePath string) (string, error) {
 	}
 
 	return filepath.Join(baseDir, "agents"), nil
+}
+
+func resolveCompatSkillsDirs(agentStorePath string) []string {
+	if strings.TrimSpace(agentStorePath) == "" {
+		return nil
+	}
+
+	repoRoot := filepath.Dir(agentStorePath)
+	candidates := []string{
+		filepath.Join(repoRoot, ".agents", "skills"),
+	}
+
+	if strings.EqualFold(filepath.Base(repoRoot), "ori-data") {
+		candidates = append(candidates, filepath.Join(filepath.Dir(repoRoot), ".agents", "skills"))
+	}
+
+	seen := make(map[string]struct{}, len(candidates))
+	result := make([]string, 0, len(candidates))
+	for _, candidate := range candidates {
+		cleaned := filepath.Clean(strings.TrimSpace(candidate))
+		if cleaned == "." || cleaned == "" {
+			continue
+		}
+		if _, exists := seen[cleaned]; exists {
+			continue
+		}
+		seen[cleaned] = struct{}{}
+		result = append(result, cleaned)
+	}
+	return result
 }

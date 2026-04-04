@@ -184,7 +184,7 @@ func (th *TaskHandler) TasksHandler(w http.ResponseWriter, r *http.Request) {
 
 func (th *TaskHandler) handleGetTasks(w http.ResponseWriter, r *http.Request) {
 	taskID := r.URL.Query().Get("id")
-	workspaceID := r.URL.Query().Get("studio_id")
+	workspaceID := r.URL.Query().Get("workspace_id")
 	agentName := r.URL.Query().Get("agent")
 
 	if taskID != "" {
@@ -226,7 +226,7 @@ func (th *TaskHandler) handleGetTasks(w http.ResponseWriter, r *http.Request) {
 
 func (th *TaskHandler) handleCreateTask(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		WorkspaceID            string                         `json:"studio_id"`
+		WorkspaceID            string                         `json:"workspace_id"`
 		From                   string                         `json:"from"`
 		To                     string                         `json:"to"`
 		AssignedNodeID         string                         `json:"assigned_node_id"`
@@ -386,6 +386,7 @@ type taskUpdateRequest struct {
 	Error                  string                         `json:"error"`
 	Description            *string                        `json:"description"`
 	Details                *string                        `json:"details"`
+	Context                map[string]interface{}         `json:"context"`
 	To                     *string                        `json:"to"`
 	AssignedNodeID         *string                        `json:"assigned_node_id"`
 	InputTaskIDs           []string                       `json:"input_task_ids"`
@@ -404,7 +405,7 @@ type taskUpdateRequest struct {
 
 // hasFieldUpdates returns true if the request contains any field updates
 func (r *taskUpdateRequest) hasFieldUpdates() bool {
-	return r.Description != nil || r.Details != nil || r.InputTaskIDs != nil ||
+	return r.Description != nil || r.Details != nil || r.Context != nil || r.InputTaskIDs != nil ||
 		r.To != nil || r.ParentTaskID != nil || r.SubtaskIndex != nil ||
 		r.ResultCombinationMode != nil || r.ResultStorage != nil || r.KanbanColumnID != nil ||
 		r.KanbanLabels != nil || r.KanbanDueDate != nil
@@ -424,6 +425,19 @@ func (th *TaskHandler) applyBasicFieldUpdates(task *workspace.Task, req *taskUpd
 	if req.Details != nil {
 		task.Details = *req.Details
 		logger.Debug("Updated task details", logger.Fields{"task_id": req.TaskID})
+	}
+	if req.Context != nil {
+		if task.Context == nil {
+			task.Context = map[string]interface{}{}
+		}
+		for key, value := range req.Context {
+			if value == nil {
+				delete(task.Context, key)
+				continue
+			}
+			task.Context[key] = value
+		}
+		logger.Debug("Updated task context", logger.Fields{"task_id": req.TaskID, "context_keys": len(req.Context)})
 	}
 	if req.InputTaskIDs != nil {
 		task.InputTaskIDs = req.InputTaskIDs
@@ -769,9 +783,6 @@ func (th *TaskHandler) handleDeleteTask(w http.ResponseWriter, r *http.Request) 
 	}
 
 	workspaceID := r.URL.Query().Get("workspace_id")
-	if workspaceID == "" {
-		workspaceID = r.URL.Query().Get("studio_id")
-	}
 
 	if workspaceID != "" {
 		ws, err := th.workspaceStore.Get(workspaceID)

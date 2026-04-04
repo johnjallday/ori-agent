@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"strings"
 	"time"
 
@@ -151,6 +152,69 @@ func (h *Handler) SessionSettingsHandler(w http.ResponseWriter, r *http.Request)
 			"session_cleanup_enabled": enabled,
 			"session_cleanup_days":    days,
 			"session_max_count":       maxCount,
+		})
+
+	default:
+		w.WriteHeader(http.StatusMethodNotAllowed)
+	}
+}
+
+// WorkspaceRootResponse describes the configured and effective workspace directory.
+type WorkspaceRootResponse struct {
+	WorkspaceRoot          string `json:"workspace_root,omitempty"`
+	EffectiveWorkspaceRoot string `json:"effective_workspace_root"`
+	DefaultWorkspaceRoot   string `json:"default_workspace_root"`
+	Source                 string `json:"source"`
+}
+
+// WorkspaceRootSettingsHandler handles default workspace directory persistence.
+func (h *Handler) WorkspaceRootSettingsHandler(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodGet:
+		configured := h.configManager.GetWorkspaceRoot()
+		orihttp.WriteJSON(w, WorkspaceRootResponse{
+			WorkspaceRoot:          configured,
+			EffectiveWorkspaceRoot: config.ResolveWorkspaceRoot(configured),
+			DefaultWorkspaceRoot:   config.DefaultWorkspaceRoot(),
+			Source:                 config.WorkspaceRootSource(configured),
+		})
+
+	case http.MethodPost:
+		var req struct {
+			WorkspaceRoot string `json:"workspace_root"`
+		}
+		if !orihttp.ParseJSONBody(w, r, &req) {
+			return
+		}
+
+		configured, err := config.NormalizeWorkspaceRoot(req.WorkspaceRoot)
+		if err != nil {
+			orihttp.RespondErrorWithErr(w, http.StatusBadRequest, "Invalid workspace directory", err)
+			return
+		}
+
+		effectiveRoot := config.ResolveWorkspaceRoot(configured)
+		if err := os.MkdirAll(effectiveRoot, 0755); err != nil {
+			orihttp.RespondErrorWithErr(w, http.StatusBadRequest, "Unable to use workspace directory", err)
+			return
+		}
+
+		if err := h.configManager.SetWorkspaceRoot(configured); err != nil {
+			orihttp.RespondErrorWithErr(w, http.StatusBadRequest, "Invalid workspace directory", err)
+			return
+		}
+
+		if err := h.configManager.Save(); err != nil {
+			orihttp.InternalError(w, err.Error())
+			return
+		}
+
+		orihttp.WriteJSON(w, map[string]any{
+			"success":                  true,
+			"workspace_root":           configured,
+			"effective_workspace_root": effectiveRoot,
+			"default_workspace_root":   config.DefaultWorkspaceRoot(),
+			"source":                   config.WorkspaceRootSource(configured),
 		})
 
 	default:
@@ -684,22 +748,22 @@ func getModelCategories(provider, modelName string) []string {
 	case "openai":
 		// Flagship models (gpt-5, gpt-4.1) appear in orchestration and research
 		if modelName == "gpt-5" || modelName == "gpt-4.1" {
-			return []string{"orchestration", "research"}
+			return []string{"workspace-manager", "orchestration", "research"}
 		}
 		// O-series models (reasoning models) are perfect for orchestration
 		if strings.HasPrefix(modelName, "o1") || strings.HasPrefix(modelName, "o3") {
-			return []string{"orchestration", "research"}
+			return []string{"workspace-manager", "orchestration", "research"}
 		}
 		// General tier models can do orchestration too
 		if modelName == "gpt-5-mini" || modelName == "gpt-4.1-mini" {
-			return []string{"general", "orchestration"}
+			return []string{"general", "workspace-manager", "orchestration"}
 		}
 		return []string{categorizeModel(provider, modelName)}
 
 	case "claude", "claude_code":
 		// Sonnet and Opus are great for orchestration
 		if strings.Contains(modelName, "sonnet") || strings.Contains(modelName, "opus") {
-			return []string{categorizeModel(provider, modelName), "orchestration"}
+			return []string{categorizeModel(provider, modelName), "workspace-manager", "orchestration"}
 		}
 		return []string{categorizeModel(provider, modelName)}
 
@@ -708,12 +772,12 @@ func getModelCategories(provider, modelName string) []string {
 
 		// llama3 models appear in all categories (they're versatile local models)
 		if strings.Contains(lowerName, "llama3") {
-			return []string{"tool-calling", "general", "orchestration", "research"}
+			return []string{"tool-calling", "general", "workspace-manager", "orchestration", "research"}
 		}
 
 		// Larger models can do orchestration
 		if strings.Contains(lowerName, "70b") || strings.Contains(lowerName, "mixtral") {
-			return []string{"general", "orchestration", "research"}
+			return []string{"general", "workspace-manager", "orchestration", "research"}
 		}
 
 		// Other models get their single category
@@ -721,7 +785,7 @@ func getModelCategories(provider, modelName string) []string {
 	case "gemini":
 		lowerName := strings.ToLower(modelName)
 		if strings.Contains(lowerName, "pro") {
-			return []string{"research", "orchestration"}
+			return []string{"research", "workspace-manager", "orchestration"}
 		}
 		if strings.Contains(lowerName, "flash") {
 			return []string{"tool-calling", "general"}
@@ -735,9 +799,9 @@ func getModelCategories(provider, modelName string) []string {
 		case "general":
 			// Treat Codex mini as both tool-calling and general so it can be used
 			// for lightweight agents while remaining available in general flows.
-			return []string{"tool-calling", "general", "orchestration"}
+			return []string{"tool-calling", "general", "workspace-manager", "orchestration"}
 		default:
-			return []string{"research", "orchestration"}
+			return []string{"research", "workspace-manager", "orchestration"}
 		}
 
 	default:

@@ -336,6 +336,59 @@ func TestAgentRuntimeResolver_AppliesWorkspaceBindingConfigOverrides(t *testing.
 	}
 }
 
+func TestAgentRuntimeResolver_UsesFilesystemRootsFromBindingConfig(t *testing.T) {
+	agentStore := &resolverAgentStoreStub{
+		agents: map[string]*agent.Agent{
+			"Coder": {},
+		},
+	}
+	root := filepath.Join(t.TempDir(), "repo-config")
+	ws := &Workspace{
+		ID: "ws-config-roots",
+		AgentInstances: []AgentInstance{
+			{ID: "agent-1", Name: "Coder", NodeID: "coder-1"},
+		},
+		MCPBindings: []WorkspaceMCPBinding{
+			{
+				ID:         "binding-config-roots",
+				ServerName: "filesystem",
+				Enabled:    true,
+				Config: map[string]interface{}{
+					"roots": []interface{}{root},
+				},
+			},
+		},
+	}
+	workspaceStore := newTestWorkspaceStore(t, ws)
+	registry := &runtimeRegistryStub{}
+	templates := &templateLookupStub{
+		servers: map[string]mcp.ServerConfig{
+			"filesystem": {
+				Name: "filesystem",
+				Args: []string{"-y", "@modelcontextprotocol/server-filesystem", "/tmp/default-root"},
+			},
+		},
+	}
+
+	resolver := NewAgentRuntimeResolver(agentStore, workspaceStore, registry, templates)
+	resolved, err := resolver.ResolveAgentForTask("Coder", Task{WorkspaceID: ws.ID, AssignedNodeID: "coder-1"})
+	if err != nil {
+		t.Fatalf("ResolveAgentForTask() error = %v", err)
+	}
+
+	if len(resolved.MCPServers) != 1 {
+		t.Fatalf("expected one runtime MCP server, got %v", resolved.MCPServers)
+	}
+
+	config, ok := registry.configs[resolved.MCPServers[0]]
+	if !ok {
+		t.Fatalf("expected runtime config for %q to be materialized", resolved.MCPServers[0])
+	}
+	if got := config.Args[len(config.Args)-1]; got != root {
+		t.Fatalf("expected runtime filesystem root %q, got args=%v", root, config.Args)
+	}
+}
+
 // --- Skill resolution tests ---
 
 type stubSkillResolver struct {
@@ -394,6 +447,63 @@ func TestResolveEffectiveSkills_WorkspaceOnly(t *testing.T) {
 	}
 	if len(resolved.EffectiveSkills) != 2 {
 		t.Fatalf("expected 2 effective skills, got %d", len(resolved.EffectiveSkills))
+	}
+}
+
+func TestResolveEffectiveSkills_PreservesPlanningConfig(t *testing.T) {
+	ws := &Workspace{
+		ID: "ws-skill-planning",
+		AgentInstances: []AgentInstance{
+			{ID: "inst-1", Name: "Workspace Manager", NodeID: "workspace-manager-1"},
+		},
+		SkillBindings: []WorkspaceSkillBinding{
+			{
+				ID:        "sb-planning",
+				SkillName: "workspace-planning",
+				Enabled:   true,
+				Config: map[string]interface{}{
+					"profile_type":           "workspace_planning",
+					"mode":                   "feature",
+					"tasks_dir":              "tasks",
+					"write_prd":              true,
+					"default_execution_mode": "step_through",
+				},
+			},
+		},
+	}
+
+	agentStore := &resolverAgentStoreStub{agents: map[string]*agent.Agent{
+		"Workspace Manager": {},
+	}}
+	workspaceStore := newTestWorkspaceStore(t, ws)
+	registry := &runtimeRegistryStub{}
+	templates := &templateLookupStub{servers: map[string]mcp.ServerConfig{}}
+	skillResolver := &stubSkillResolver{
+		skills: map[string]ResolvedSkill{
+			"workspace-planning": {
+				Name:            "workspace-planning",
+				Prompt:          "Plan work before execution.",
+				PlanningProfile: true,
+				Enabled:         true,
+			},
+		},
+	}
+
+	resolver := NewAgentRuntimeResolver(agentStore, workspaceStore, registry, templates)
+	resolver.SetSkillResolver(skillResolver)
+
+	resolved, err := resolver.ResolveAgentForWorkspace("Workspace Manager", ws.ID, "")
+	if err != nil {
+		t.Fatalf("ResolveAgentForWorkspace() error = %v", err)
+	}
+	if len(resolved.EffectiveSkills) != 1 {
+		t.Fatalf("expected 1 effective skill, got %d", len(resolved.EffectiveSkills))
+	}
+	if !resolved.EffectiveSkills[0].PlanningProfile {
+		t.Fatal("expected planning profile to be preserved")
+	}
+	if got := resolved.EffectiveSkills[0].Config["tasks_dir"]; got != "tasks" {
+		t.Fatalf("expected tasks_dir config to be preserved, got %#v", got)
 	}
 }
 

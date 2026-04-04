@@ -79,6 +79,7 @@ func (wh *WorkspaceHandler) handleGetWorkspace(w http.ResponseWriter, r *http.Re
 			"id":                   ws.ID,
 			"name":                 ws.Name,
 			"description":          ws.Description,
+			"entry_agent_name":     ws.EntryAgentName(),
 			"agents":               ws.Agents,
 			"agent_instances":      ws.AgentInstances,
 			"shared_data":          ws.SharedData,
@@ -90,6 +91,8 @@ func (wh *WorkspaceHandler) handleGetWorkspace(w http.ResponseWriter, r *http.Re
 			"directory_references": ws.DirectoryReferences,
 			"mcp_bindings":         ws.MCPBindings,
 			"agent_mcp_access":     ws.AgentMCPAccess,
+			"skill_bindings":       ws.SkillBindings,
+			"agent_skill_access":   ws.AgentSkillAccess,
 			"workflows":            ws.Workflows,
 			"layout":               ws.Layout,
 			"status":               ws.Status,
@@ -247,9 +250,9 @@ func (wh *WorkspaceHandler) handleCreateWorkspace(w http.ResponseWriter, r *http
 
 	w.WriteHeader(http.StatusOK)
 	orihttp.WriteJSON(w, map[string]interface{}{
-		"studio_id":  ws.ID,
-		"status":     ws.Status,
-		"created_at": ws.CreatedAt,
+		"workspace_id": ws.ID,
+		"status":       ws.Status,
+		"created_at":   ws.CreatedAt,
 	})
 }
 
@@ -360,7 +363,7 @@ func (wh *WorkspaceHandler) WorkspaceAgentsHandler(w http.ResponseWriter, r *htt
 
 func (wh *WorkspaceHandler) handleAddAgentToWorkspace(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		WorkspaceID string `json:"studio_id"`
+		WorkspaceID string `json:"workspace_id"`
 		AgentName   string `json:"agent_name"`
 	}
 
@@ -433,7 +436,7 @@ func (wh *WorkspaceHandler) handleAddAgentToWorkspace(w http.ResponseWriter, r *
 
 // handleRemoveAgentFromWorkspace removes an agent from a workspace
 func (wh *WorkspaceHandler) handleRemoveAgentFromWorkspace(w http.ResponseWriter, r *http.Request) {
-	workspaceID := r.URL.Query().Get("studio_id")
+	workspaceID := r.URL.Query().Get("workspace_id")
 	agentName := r.URL.Query().Get("agent_name")
 
 	if workspaceID == "" {

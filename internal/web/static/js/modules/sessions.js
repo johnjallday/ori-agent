@@ -258,30 +258,6 @@ const sessionManager = {
       });
     });
 
-    const setupToggle = document.getElementById('folderEnableSetup');
-    setupToggle?.addEventListener('change', () => {
-      this.updateWorkspaceSetupControlsState();
-      this.renderWorkspaceSetupPreview();
-    });
-
-    document.querySelectorAll('#folderSetupTemplateGroup .workspace-setup-template').forEach((btn) => {
-      btn.addEventListener('click', () => {
-        document.querySelectorAll('#folderSetupTemplateGroup .workspace-setup-template').forEach((item) => {
-          item.classList.remove('is-active');
-          item.setAttribute('aria-checked', 'false');
-        });
-        btn.classList.add('is-active');
-        btn.setAttribute('aria-checked', 'true');
-        this.renderWorkspaceSetupPreview();
-      });
-    });
-
-    ['folderSetupTasks', 'folderSetupNotes', 'folderSetupSchedule'].forEach((id) => {
-      document.getElementById(id)?.addEventListener('change', () => this.renderWorkspaceSetupPreview());
-    });
-
-    document.getElementById('folderNameInput')?.addEventListener('input', () => this.renderWorkspaceSetupPreview());
-
     const addFolderModal = document.getElementById('addFolderModal');
     addFolderModal?.addEventListener('show.bs.modal', () => {
       this.resetAddWorkspaceModalForm({ preserveAskOri: true });
@@ -433,7 +409,7 @@ const sessionManager = {
     // Fetch stats for each unique workspace
     const fetchPromises = workspaceIds.map(async (workspaceId) => {
       try {
-        const response = await fetch(`/api/orchestration/tasks?studio_id=${workspaceId}`);
+        const response = await fetch(`/api/orchestration/tasks?workspace_id=${workspaceId}`);
         if (response.ok) {
           const data = await response.json();
           workspaceStats.set(workspaceId, data.stats || { total: 0, pending: 0, completed: 0 });
@@ -1195,9 +1171,17 @@ const sessionManager = {
       const workspaceSelect = document.getElementById('chatWorkspaceSelect');
       if (workspaceSelect) {
         workspaceSelect.innerHTML = '<option value="">No workspace (root)</option>';
-        this.folders.forEach(folder => {
-          workspaceSelect.innerHTML += `<option value="${folder.id}">${this.escapeHtml(folder.name)}</option>`;
-        });
+        const appendWorkspaceOptions = (folders, depth = 0) => {
+          (folders || []).forEach(folder => {
+            if (!folder || !folder.id) return;
+            const indent = depth > 0 ? `${'--'.repeat(depth)} ` : '';
+            if (String(folder.kind || '').trim() !== 'group') {
+              workspaceSelect.innerHTML += `<option value="${folder.id}">${this.escapeHtml(indent + (folder.name || 'Unnamed Workspace'))}</option>`;
+            }
+            appendWorkspaceOptions(folder.children || [], depth + 1);
+          });
+        };
+        appendWorkspaceOptions(this.folders);
       }
 
       this.updateAssistantModeText('');
@@ -1260,10 +1244,18 @@ const sessionManager = {
       const workspaceSelect = document.getElementById('chatWorkspaceSelect');
       if (workspaceSelect) {
         workspaceSelect.innerHTML = '<option value="">No workspace (root)</option>';
-        this.folders.forEach(folder => {
-          const selected = folder.id === workspaceId ? ' selected' : '';
-          workspaceSelect.innerHTML += `<option value="${folder.id}"${selected}>${this.escapeHtml(folder.name)}</option>`;
-        });
+        const appendWorkspaceOptions = (folders, depth = 0) => {
+          (folders || []).forEach(folder => {
+            if (!folder || !folder.id) return;
+            const indent = depth > 0 ? `${'--'.repeat(depth)} ` : '';
+            if (String(folder.kind || '').trim() !== 'group') {
+              const selected = folder.id === workspaceId ? ' selected' : '';
+              workspaceSelect.innerHTML += `<option value="${folder.id}"${selected}>${this.escapeHtml(indent + (folder.name || 'Unnamed Workspace'))}</option>`;
+            }
+            appendWorkspaceOptions(folder.children || [], depth + 1);
+          });
+        };
+        appendWorkspaceOptions(this.folders);
       }
 
       this.updateAssistantModeText(workspaceId);
@@ -1596,6 +1588,14 @@ const sessionManager = {
     }
   },
 
+  populateWorkspaceEntryAgentSelect() {
+    // Entry agent is always auto-created as workspace manager — no UI needed.
+  },
+
+  async populateWorkspaceEntryAgentSelectFromAgents() {
+    // Entry agent is always auto-created as workspace manager — no UI needed.
+  },
+
   // Fetch agents scoped to a workspace; falls back to global agents
   async fetchWorkspaceAgents(workspaceId) {
     const globalAgents = await this.fetchAgents();
@@ -1703,7 +1703,7 @@ const sessionManager = {
   },
 
   // Create session with specific agent
-  async createSessionWithAgent(agentName) {
+  async createSessionWithAgent(agentName, openChat = true) {
     try {
       const response = await fetch('/api/sessions', {
         method: 'POST',
@@ -1733,7 +1733,7 @@ const sessionManager = {
           clearChatHistory();
         }
 
-        this.openChatPanelIfAvailable();
+        if (openChat) this.openChatPanelIfAvailable();
 
         // Emit event for workspace hub to refresh
         if (window.EventBus) {
@@ -1749,7 +1749,7 @@ const sessionManager = {
     }
   },
 
-  async createAssistantSession(folderId = '', title = 'Assistant') {
+  async createAssistantSession(folderId = '', title = 'Assistant', openChat = true) {
     try {
       const payload = {
         title: title || 'Assistant'
@@ -1773,13 +1773,13 @@ const sessionManager = {
         this.saveActiveSession();
         this.renderSessions();
 
-        this.updateCurrentAgent('');
+        this.updateCurrentAgent(data.session.agent_name || '');
 
         if (typeof clearChatHistory === 'function') {
           clearChatHistory();
         }
 
-        this.openChatPanelIfAvailable();
+        if (openChat) this.openChatPanelIfAvailable();
 
         if (window.EventBus) {
           EventBus.emit('session:created', { session: data.session, folderId: folderId || null });
@@ -1850,7 +1850,7 @@ const sessionManager = {
   },
 
   // Create session with agent in a specific folder
-  async createSessionWithAgentInFolder(agentName, folderId) {
+  async createSessionWithAgentInFolder(agentName, folderId, openChat = true) {
     try {
       const response = await fetch('/api/sessions', {
         method: 'POST',
@@ -1881,7 +1881,7 @@ const sessionManager = {
           clearChatHistory();
         }
 
-        this.openChatPanelIfAvailable();
+        if (openChat) this.openChatPanelIfAvailable();
 
         // Emit event for workspace hub to refresh
         if (window.EventBus) {
@@ -2888,193 +2888,42 @@ const sessionManager = {
     }
   },
 
-  getWorkspaceSetupTemplateDefinition(templateKey, workspaceName) {
-    const name = String(workspaceName || 'this workspace').trim() || 'this workspace';
-    const templates = {
-      feature: {
-        tasks: [
-          {
-            description: `Define scope and acceptance criteria for ${name}`,
-            details: 'Capture what is in/out of scope, success criteria, and known risks.',
-            priority: 2
-          },
-          {
-            description: `Implement first milestone for ${name}`,
-            details: 'Build the smallest end-to-end slice that proves the core workflow.',
-            priority: 2
-          },
-          {
-            description: `Add and verify tests for ${name}`,
-            details: 'Cover happy path, key edge cases, and regressions before release.',
-            priority: 2
-          },
-          {
-            description: `QA and rollout checklist for ${name}`,
-            details: 'Verify behavior in staging, note blockers, and define release steps.',
-            priority: 1
-          }
-        ],
-        notes: [
-          {
-            name: 'Requirements Brief',
-            content: '# Requirements Brief\n\n## Goal\n- \n\n## Success Criteria\n- \n\n## Scope\n- In scope:\n- Out of scope:\n\n## Risks\n- \n'
-          }
-        ],
-        scheduleTask: {
-          description: `Weekly review for ${name}`,
-          details: 'Review priorities, unblock tasks, and choose the next highest-impact milestone.',
-          to: 'ori',
-          priority: 1,
-          schedule_enabled: true,
-          schedule_name: 'Weekly workspace review',
-          schedule: {
-            type: 'weekly',
-            day_of_week: 1,
-            time: '09:00'
-          }
-        }
-      },
-      bug: {
-        tasks: [
-          {
-            description: `Reproduce and document the issue in ${name}`,
-            details: 'Capture exact steps, expected behavior, and actual behavior.',
-            priority: 3
-          },
-          {
-            description: `Identify root cause for ${name}`,
-            details: 'Trace logs, inspect recent changes, and isolate the failing path.',
-            priority: 3
-          },
-          {
-            description: `Implement and verify fix for ${name}`,
-            details: 'Ship a targeted fix and validate with focused tests.',
-            priority: 3
-          },
-          {
-            description: `Post-fix monitoring and follow-up for ${name}`,
-            details: 'Monitor recurrence signals and document preventative actions.',
-            priority: 2
-          }
-        ],
-        notes: [
-          {
-            name: 'Incident Log',
-            content: '# Incident Log\n\n## Summary\n- \n\n## Reproduction\n1. \n\n## Root Cause\n- \n\n## Fix Plan\n- \n\n## Validation\n- \n'
-          }
-        ],
-        scheduleTask: {
-          description: `Daily bug status check for ${name}`,
-          details: 'Summarize open bug status, blockers, and next fix action.',
-          to: 'ori',
-          priority: 2,
-          schedule_enabled: true,
-          schedule_name: 'Daily bug review',
-          schedule: {
-            type: 'daily',
-            time: '10:00'
-          }
-        }
-      },
-      research: {
-        tasks: [
-          {
-            description: `Define research questions for ${name}`,
-            details: 'Write the core questions and decision points this research must answer.',
-            priority: 2
-          },
-          {
-            description: `Collect sources and references for ${name}`,
-            details: 'Gather primary references and label confidence for each source.',
-            priority: 2
-          },
-          {
-            description: `Synthesize findings for ${name}`,
-            details: 'Identify patterns, contradictions, and opportunities.',
-            priority: 2
-          },
-          {
-            description: `Recommend next actions from ${name}`,
-            details: 'Translate findings into concrete actions with owner and impact.',
-            priority: 1
-          }
-        ],
-        notes: [
-          {
-            name: 'Research Notes',
-            content: '# Research Notes\n\n## Questions\n- \n\n## Sources\n- \n\n## Findings\n- \n\n## Open Questions\n- \n\n## Recommendations\n- \n'
-          }
-        ],
-        scheduleTask: {
-          description: `Weekly synthesis for ${name}`,
-          details: 'Compile notable findings and update recommendations.',
-          to: 'ori',
-          priority: 1,
-          schedule_enabled: true,
-          schedule_name: 'Weekly research synthesis',
-          schedule: {
-            type: 'weekly',
-            day_of_week: 5,
-            time: '16:00'
-          }
-        }
-      }
-    };
-
-    return templates[templateKey] || templates.feature;
-  },
-
-  getWorkspaceSetupConfigFromModal() {
-    const enabled = Boolean(document.getElementById('folderEnableSetup')?.checked);
-    const activeTemplate = document.querySelector('#folderSetupTemplateGroup .workspace-setup-template.is-active');
+  getWorkspaceBootstrapFromModal() {
+    const goal = String(document.getElementById('folderPrimaryGoalInput')?.value || '').trim();
+    const systems = String(document.getElementById('folderSystemsInput')?.value || '').trim();
+    const context = String(document.getElementById('folderContextInput')?.value || '').trim();
+    const systemsList = systems
+      ? systems
+        .split(/[\n,;]+/)
+        .map((value) => value.trim())
+        .filter(Boolean)
+      : [];
 
     return {
-      enabled,
-      template: activeTemplate?.dataset?.template || 'feature',
-      includeTasks: Boolean(document.getElementById('folderSetupTasks')?.checked),
-      includeNotes: Boolean(document.getElementById('folderSetupNotes')?.checked),
-      includeSchedule: Boolean(document.getElementById('folderSetupSchedule')?.checked)
+      hasAny: Boolean(goal || systems || context),
+      goal,
+      systems,
+      systemsList,
+      context
     };
   },
 
-  updateWorkspaceSetupControlsState() {
-    const enabled = Boolean(document.getElementById('folderEnableSetup')?.checked);
-    const controls = document.getElementById('folderSetupControls');
-    if (controls) {
-      controls.hidden = !enabled;
-    }
-  },
-
-  renderWorkspaceSetupPreview() {
-    const previewList = document.getElementById('folderSetupPreview');
-    if (!previewList) return;
-
-    const setup = this.getWorkspaceSetupConfigFromModal();
-    const workspaceName = document.getElementById('folderNameInput')?.value?.trim() || 'this workspace';
-    const template = this.getWorkspaceSetupTemplateDefinition(setup.template, workspaceName);
-
-    if (!setup.enabled) {
-      previewList.innerHTML = '<li>Setup is off. Workspace will be created empty.</li>';
-      return;
+  buildWorkspaceBootstrapSeedNote(workspaceBootstrap, workspaceName) {
+    if (!workspaceBootstrap || !workspaceBootstrap.hasAny) {
+      return null;
     }
 
-    const lines = [];
-    if (setup.includeTasks) {
-      lines.push(`${template.tasks.length} starter tasks`);
-    }
-    if (setup.includeNotes) {
-      lines.push(`${template.notes.length} note template${template.notes.length === 1 ? '' : 's'}`);
-    }
-    if (setup.includeSchedule) {
-      lines.push(`${template.scheduleTask.schedule_name}`);
-    }
-    if (lines.length === 0) {
-      lines.push('No setup items selected.');
-    }
+    const systemsSection = workspaceBootstrap.systemsList.length > 0
+      ? workspaceBootstrap.systemsList.map((item) => `- ${item}`).join('\n')
+      : '_Not specified._';
+    const goalSection = workspaceBootstrap.goal || '_Not specified._';
+    const contextSection = workspaceBootstrap.context || '_Not specified._';
+    const title = String(workspaceName || '').trim() || 'this workspace';
 
-    previewList.innerHTML = lines
-      .map((line) => `<li>${this.escapeHtml(line)}</li>`)
-      .join('');
+    return {
+      name: 'Workspace Brief',
+      content: `# Workspace Brief\n\nCaptured during workspace creation for ${title}.\n\n## Primary Goal\n${goalSection}\n\n## Apps and Systems\n${systemsSection}\n\n## Key Files or Context\n${contextSection}\n`
+    };
   },
 
   extractFolderNameFromPath(pathValue) {
@@ -3108,7 +2957,11 @@ const sessionManager = {
 
     const createBtn = document.getElementById('createFolderBtn');
     if (createBtn && !this.isCreatingFolder) {
-      createBtn.textContent = this.importModeEnabled ? 'Import' : 'Create';
+      if (window.WorkspaceBootstrapReview && typeof window.WorkspaceBootstrapReview.refreshPrimaryActionLabel === 'function') {
+        window.WorkspaceBootstrapReview.refreshPrimaryActionLabel();
+      } else {
+        createBtn.textContent = this.importModeEnabled ? 'Import' : 'Create';
+      }
     }
 
     if (!this.importModeEnabled) {
@@ -3256,6 +3109,9 @@ const sessionManager = {
     const modalElement = document.getElementById('addFolderModal');
     const nameInput = document.getElementById('folderNameInput');
     const descriptionInput = document.getElementById('folderDescriptionInput');
+    const primaryGoalInput = document.getElementById('folderPrimaryGoalInput');
+    const systemsInput = document.getElementById('folderSystemsInput');
+    const contextInput = document.getElementById('folderContextInput');
     const parentSelect = document.getElementById('folderParentSelect');
     const keepSeedValues = Boolean(
       preserveAskOri &&
@@ -3267,6 +3123,9 @@ const sessionManager = {
       if (nameInput) nameInput.value = '';
       if (nameInput) nameInput.dataset.autofillName = '';
       if (descriptionInput) descriptionInput.value = '';
+      if (primaryGoalInput) primaryGoalInput.value = '';
+      if (systemsInput) systemsInput.value = '';
+      if (contextInput) contextInput.value = '';
     }
     if (parentSelect) {
       const optionsHtml = ['<option value="">No group</option>'];
@@ -3274,7 +3133,9 @@ const sessionManager = {
       const walk = (nodes, depth) => {
         (nodes || []).forEach((node) => {
           if (!node || !node.id) return;
-          flattened.push({ id: node.id, name: node.name || node.id, depth });
+          if (String(node.kind || '').trim() === 'group') {
+            flattened.push({ id: node.id, name: node.name || node.id, depth });
+          }
           walk(node.children || [], depth + 1);
         });
       };
@@ -3286,33 +3147,12 @@ const sessionManager = {
       parentSelect.innerHTML = optionsHtml.join('');
       parentSelect.value = '';
     }
-
     document.querySelectorAll('#addFolderModal .folder-color-btn').forEach((btn) => btn.classList.remove('active'));
     const defaultColorBtn = document.querySelector('#addFolderModal .folder-color-btn[data-color=""]')
       || document.querySelector('#addFolderModal .folder-color-btn');
     if (defaultColorBtn) {
       defaultColorBtn.classList.add('active');
     }
-
-    const setupToggle = document.getElementById('folderEnableSetup');
-    if (setupToggle) {
-      setupToggle.checked = false;
-    }
-    document.querySelectorAll('#folderSetupTemplateGroup .workspace-setup-template').forEach((btn) => {
-      btn.classList.remove('is-active');
-      btn.setAttribute('aria-checked', 'false');
-    });
-    const defaultTemplate = document.querySelector('#folderSetupTemplateGroup .workspace-setup-template[data-template="feature"]');
-    if (defaultTemplate) {
-      defaultTemplate.classList.add('is-active');
-      defaultTemplate.setAttribute('aria-checked', 'true');
-    }
-    const setupTasks = document.getElementById('folderSetupTasks');
-    const setupNotes = document.getElementById('folderSetupNotes');
-    const setupSchedule = document.getElementById('folderSetupSchedule');
-    if (setupTasks) setupTasks.checked = true;
-    if (setupNotes) setupNotes.checked = true;
-    if (setupSchedule) setupSchedule.checked = false;
 
     const importToggle = document.getElementById('folderImportToggle');
     const importPathInput = document.getElementById('folderImportPathInput');
@@ -3323,14 +3163,14 @@ const sessionManager = {
     this.setImportBrowseLoading(false);
     this.setImportModeEnabled(false);
     this.clearImportDuplicateWarning();
-
-    this.updateWorkspaceSetupControlsState();
-    this.renderWorkspaceSetupPreview();
+    if (window.WorkspaceBootstrapReview && typeof window.WorkspaceBootstrapReview.reset === 'function') {
+      window.WorkspaceBootstrapReview.reset();
+    }
   },
 
   async createWorkspaceSeedTask(workspaceId, taskConfig) {
     const payload = {
-      studio_id: workspaceId,
+      workspace_id: workspaceId,
       description: taskConfig.description,
       details: taskConfig.details || '',
       priority: Number(taskConfig.priority) || 1
@@ -3377,49 +3217,6 @@ const sessionManager = {
     }
   },
 
-  async applyWorkspaceSetup(workspaceId, workspaceName, setupConfig) {
-    const template = this.getWorkspaceSetupTemplateDefinition(setupConfig.template, workspaceName);
-    const result = {
-      tasksCreated: 0,
-      notesCreated: 0,
-      schedulesCreated: 0,
-      errors: []
-    };
-
-    if (setupConfig.includeTasks) {
-      for (const taskConfig of template.tasks) {
-        try {
-          await this.createWorkspaceSeedTask(workspaceId, taskConfig);
-          result.tasksCreated += 1;
-        } catch (error) {
-          result.errors.push(error);
-        }
-      }
-    }
-
-    if (setupConfig.includeSchedule) {
-      try {
-        await this.createWorkspaceSeedTask(workspaceId, template.scheduleTask);
-        result.schedulesCreated += 1;
-      } catch (error) {
-        result.errors.push(error);
-      }
-    }
-
-    if (setupConfig.includeNotes) {
-      for (const noteConfig of template.notes) {
-        try {
-          await this.createWorkspaceSeedNote(workspaceId, noteConfig);
-          result.notesCreated += 1;
-        } catch (error) {
-          result.errors.push(error);
-        }
-      }
-    }
-
-    return result;
-  },
-
   // Create folder
   async createFolder() {
     if (this.isCreatingFolder) return;
@@ -3432,7 +3229,8 @@ const sessionManager = {
     const createBtn = document.getElementById('createFolderBtn');
     const importToggle = document.getElementById('folderImportToggle');
     const importPathInput = document.getElementById('folderImportPathInput');
-    const setupConfig = this.getWorkspaceSetupConfigFromModal();
+    const workspaceBootstrap = this.getWorkspaceBootstrapFromModal();
+    const primaryGoalInput = document.getElementById('folderPrimaryGoalInput');
 
     const importEnabled = Boolean(importToggle?.checked);
     const importPath = importPathInput?.value?.trim() || '';
@@ -3445,6 +3243,18 @@ const sessionManager = {
       this.showToast('Please enter or browse for a folder path to import', 'warning');
       return;
     }
+    if (!workspaceBootstrap.goal) {
+      this.showToast('Primary goal is required', 'warning');
+      primaryGoalInput?.focus();
+      return;
+    }
+
+    if (window.WorkspaceBootstrapReview && typeof window.WorkspaceBootstrapReview.ensureReviewed === 'function') {
+      const reviewOutcome = await window.WorkspaceBootstrapReview.ensureReviewed();
+      if (!reviewOutcome.ready) {
+        return;
+      }
+    }
 
     const description = descriptionInput?.value.trim() || '';
     const parentId = parentSelect?.value?.trim() || '';
@@ -3454,11 +3264,7 @@ const sessionManager = {
     this.isCreatingFolder = true;
     if (createBtn) {
       createBtn.disabled = true;
-      if (importEnabled) {
-        createBtn.textContent = setupConfig.enabled ? 'Importing + Setup...' : 'Importing...';
-      } else {
-        createBtn.textContent = setupConfig.enabled ? 'Creating + Setup...' : 'Creating...';
-      }
+      createBtn.textContent = importEnabled ? 'Importing...' : 'Creating...';
     }
 
     try {
@@ -3468,6 +3274,29 @@ const sessionManager = {
         parent_id: parentId,
         color
       };
+      if (workspaceBootstrap.hasAny) {
+        payload.workspace_bootstrap = {
+          goal: workspaceBootstrap.goal,
+          systems: workspaceBootstrap.systems,
+          context: workspaceBootstrap.context
+        };
+      }
+      const buildSlugConflictMessage = (conflict) => {
+        const requestedSlug = typeof conflict?.requested_slug === 'string' ? conflict.requested_slug.trim() : '';
+        const suggestedSlug = typeof conflict?.suggested_slug === 'string' ? conflict.suggested_slug.trim() : '';
+        const location = typeof conflict?.location === 'string' ? conflict.location.trim().replace(/[\\/]+$/, '') : '';
+        const suggestedPath = location && suggestedSlug ? `${location}/${suggestedSlug}` : '';
+        const parts = [
+          `A workspace folder named "${requestedSlug || 'this workspace'}" already exists on disk.`
+        ];
+        if (suggestedSlug) {
+          parts.push(`Create this workspace with the folder name "${suggestedSlug}" instead?`);
+        }
+        if (suggestedPath) {
+          parts.push(`Folder: ${suggestedPath}`);
+        }
+        return parts.join('\n\n');
+      };
       let endpoint = '/api/workspaces';
       if (importEnabled) {
         endpoint = '/api/workspaces/import';
@@ -3476,23 +3305,47 @@ const sessionManager = {
         payload.entry_point = this.importEntryPoint || 'workspace_hub_create';
       }
 
-      const response = await fetch(endpoint, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
-      });
-
+      const requestPayload = { ...payload };
+      let response;
       let result = {};
-      try {
-        result = await response.json();
-      } catch (parseErr) {
-        result = {};
-      }
 
-      if (response.status === 409 && importEnabled && result.duplicate) {
-        this.showImportDuplicateWarning(result.duplicate);
-        this.showToast('This folder is already imported. Open the existing workspace or click "Import Anyway".', 'warning');
-        return;
+      while (true) {
+        response = await fetch(endpoint, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(requestPayload)
+        });
+
+        try {
+          result = await response.json();
+        } catch (parseErr) {
+          result = {};
+        }
+
+        if (response.status === 409 && importEnabled && result.duplicate) {
+          this.showImportDuplicateWarning(result.duplicate);
+          this.showToast('This folder is already imported. Open the existing workspace or click "Import Anyway".', 'warning');
+          return;
+        }
+
+        if (response.status === 409 && !importEnabled && result.conflict?.type === 'folder_slug') {
+          const suggestedSlug = typeof result.conflict.suggested_slug === 'string'
+            ? result.conflict.suggested_slug.trim()
+            : '';
+          if (!suggestedSlug) {
+            throw new Error(result.error || 'Failed to create workspace');
+          }
+
+          const confirmed = window.confirm(buildSlugConflictMessage(result.conflict));
+          if (!confirmed) {
+            return;
+          }
+
+          requestPayload.folder_slug = suggestedSlug;
+          continue;
+        }
+
+        break;
       }
 
       if (!response.ok || result.error) {
@@ -3503,7 +3356,6 @@ const sessionManager = {
       const createdWorkspaceId = result && result.folder && result.folder.id
         ? String(result.folder.id)
         : '';
-      const askOriPostCreate = modalElement ? String(modalElement.dataset.askOriPostCreate || '') : '';
       const askOriSeedNoteRaw = modalElement ? String(modalElement.dataset.askOriSeedNote || '') : '';
       const askOriSeedTaskRaw = modalElement ? String(modalElement.dataset.askOriSeedTask || '') : '';
       if (modalElement) {
@@ -3528,10 +3380,22 @@ const sessionManager = {
           console.warn('Failed to parse Assistant seed task:', error);
         }
       }
+      const bootstrapWorkspaceName = name || this.extractFolderNameFromPath(importPath) || 'New Workspace';
+      const workspaceBriefNote = this.buildWorkspaceBootstrapSeedNote(workspaceBootstrap, bootstrapWorkspaceName);
+      let bootstrapApplyResult = {
+        invitedAgents: 0,
+        boundMCPs: 0,
+        attachedSkills: 0,
+        failures: []
+      };
 
       const askOriSeedResult = {
         notesCreated: 0,
         tasksCreated: 0,
+        errors: []
+      };
+      const workspaceBriefResult = {
+        notesCreated: 0,
         errors: []
       };
 
@@ -3543,6 +3407,14 @@ const sessionManager = {
           askOriSeedResult.errors.push(error);
         }
       }
+      if (createdWorkspaceId && workspaceBriefNote && !askOriSeedNote) {
+        try {
+          await this.createWorkspaceSeedNote(createdWorkspaceId, workspaceBriefNote);
+          workspaceBriefResult.notesCreated += 1;
+        } catch (error) {
+          workspaceBriefResult.errors.push(error);
+        }
+      }
       if (createdWorkspaceId && askOriSeedTask) {
         try {
           await this.createWorkspaceSeedTask(createdWorkspaceId, askOriSeedTask);
@@ -3552,30 +3424,42 @@ const sessionManager = {
         }
       }
 
-      if (setupConfig.enabled && createdWorkspaceId) {
-        const setupWorkspaceName = name || this.extractFolderNameFromPath(importPath) || 'Imported Workspace';
-        const setupResult = await this.applyWorkspaceSetup(createdWorkspaceId, setupWorkspaceName, setupConfig);
+      if (
+        createdWorkspaceId &&
+        window.WorkspaceBootstrapReview &&
+        typeof window.WorkspaceBootstrapReview.applyPlan === 'function'
+      ) {
+        bootstrapApplyResult = await window.WorkspaceBootstrapReview.applyPlan(createdWorkspaceId);
+      }
+
+      if (
+        bootstrapApplyResult.invitedAgents > 0 ||
+        bootstrapApplyResult.boundMCPs > 0 ||
+        bootstrapApplyResult.attachedSkills > 0 ||
+        askOriSeedResult.tasksCreated > 0 ||
+        askOriSeedResult.notesCreated > 0 ||
+        workspaceBriefResult.notesCreated > 0
+      ) {
         const summaryParts = [];
-        if (setupResult.tasksCreated > 0) summaryParts.push(`${setupResult.tasksCreated} tasks`);
-        if (setupResult.notesCreated > 0) summaryParts.push(`${setupResult.notesCreated} notes`);
-        if (setupResult.schedulesCreated > 0) summaryParts.push(`${setupResult.schedulesCreated} schedules`);
+        if (bootstrapApplyResult.invitedAgents > 0) summaryParts.push(`${bootstrapApplyResult.invitedAgents} agent${bootstrapApplyResult.invitedAgents === 1 ? '' : 's'} invited`);
+        if (bootstrapApplyResult.boundMCPs > 0) summaryParts.push(`${bootstrapApplyResult.boundMCPs} MCP${bootstrapApplyResult.boundMCPs === 1 ? '' : 's'} bound`);
+        if (bootstrapApplyResult.attachedSkills > 0) summaryParts.push(`${bootstrapApplyResult.attachedSkills} skill${bootstrapApplyResult.attachedSkills === 1 ? '' : 's'} attached`);
         if (askOriSeedResult.tasksCreated > 0) summaryParts.push(`${askOriSeedResult.tasksCreated} Assistant task`);
         if (askOriSeedResult.notesCreated > 0) summaryParts.push(`${askOriSeedResult.notesCreated} Assistant note`);
-        const summaryText = summaryParts.length > 0 ? summaryParts.join(', ') : 'no setup items';
-        if (setupResult.errors.length > 0 || askOriSeedResult.errors.length > 0) {
-          this.showToast(`${importEnabled ? 'Workspace imported' : 'Workspace created'} with partial setup (${summaryText}).`, 'warning');
-        } else {
-          this.showToast(`${importEnabled ? 'Workspace imported' : 'Workspace created'} with Ori setup (${summaryText}).`, 'success');
-        }
-      } else if (askOriSeedResult.tasksCreated > 0 || askOriSeedResult.notesCreated > 0) {
-        const summaryParts = [];
-        if (askOriSeedResult.tasksCreated > 0) summaryParts.push(`${askOriSeedResult.tasksCreated} Assistant task`);
-        if (askOriSeedResult.notesCreated > 0) summaryParts.push(`${askOriSeedResult.notesCreated} Assistant note`);
+        if (workspaceBriefResult.notesCreated > 0) summaryParts.push('workspace brief');
         const summaryText = summaryParts.join(', ');
-        if (askOriSeedResult.errors.length > 0) {
-          this.showToast(`${importEnabled ? 'Workspace imported' : 'Workspace created'} with partial Assistant setup (${summaryText}).`, 'warning');
+        if (
+          askOriSeedResult.errors.length > 0 ||
+          workspaceBriefResult.errors.length > 0 ||
+          bootstrapApplyResult.failures.length > 0
+        ) {
+          const firstFailure = bootstrapApplyResult.failures[0];
+          this.showToast(
+            `${importEnabled ? 'Workspace imported' : 'Workspace created'} with partial setup (${summaryText}).${firstFailure ? ` ${firstFailure}` : ''}`,
+            'warning'
+          );
         } else {
-          this.showToast(`${importEnabled ? 'Workspace imported' : 'Workspace created'} with Assistant setup (${summaryText}).`, 'success');
+          this.showToast(`${importEnabled ? 'Workspace imported' : 'Workspace created'} with setup (${summaryText}).`, 'success');
         }
       } else {
         this.showToast(importEnabled ? 'Workspace imported successfully' : 'Workspace created successfully', 'success');
@@ -3586,7 +3470,8 @@ const sessionManager = {
       modal?.hide();
       this.resetAddWorkspaceModalForm();
 
-      if (askOriPostCreate === 'open_workspace_dashboard' && createdWorkspaceId) {
+      // Navigate to the new workspace once the reviewed setup has been applied
+      if (createdWorkspaceId) {
         window.location.href = `/workspaces/${encodeURIComponent(createdWorkspaceId)}`;
         return;
       }
@@ -4113,6 +3998,22 @@ const sessionManager = {
     // Find current folder
     const session = this.sessions.find(s => s.id === sessionId);
     const currentFolderId = session?.folder_id;
+    const assignableFolders = [];
+    const collectAssignableFolders = (folders, depth = 0) => {
+      (folders || []).forEach(folder => {
+        if (!folder || !folder.id) return;
+        if (String(folder.kind || '').trim() !== 'group') {
+          assignableFolders.push({
+            id: folder.id,
+            name: folder.name,
+            color: folder.color,
+            depth
+          });
+        }
+        collectAssignableFolders(folder.children || [], depth + 1);
+      });
+    };
+    collectAssignableFolders(this.folders);
 
     // Render folder options
     container.innerHTML = `
@@ -4122,12 +4023,12 @@ const sessionManager = {
         </svg>
         No Workspace
       </div>
-      ${this.folders.map(folder => `
+      ${assignableFolders.map(folder => `
         <div class="move-folder-item ${folder.id === currentFolderId ? 'selected' : ''}" data-folder-id="${folder.id}">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="${folder.color || 'currentColor'}" class="me-2">
             <path d="M10,4H4C2.89,4 2,4.89 2,6V18A2,2 0 0,0 4,20H20A2,2 0 0,0 22,18V8C22,6.89 21.1,6 20,6H12L10,4Z"/>
           </svg>
-          ${this.escapeHtml(folder.name)}
+          ${this.escapeHtml(`${folder.depth > 0 ? `${'--'.repeat(folder.depth)} ` : ''}${folder.name}`)}
         </div>
       `).join('')}
     `;
@@ -5534,10 +5435,13 @@ const sessionManager = {
     let options = '<option value="">-- Select a workspace --</option>';
     const appendOptions = (folders, depth = 0) => {
       (folders || []).forEach(folder => {
-        const indent = depth > 0 ? `${'-- '.repeat(depth)}` : '';
-        const label = `${indent}${folder.name || 'Unnamed Workspace'}`;
-        const selected = folder.id === this.noteModalWorkspaceId ? ' selected' : '';
-        options += `<option value="${this.escapeHtml(folder.id)}"${selected}>${this.escapeHtml(label)}</option>`;
+        if (!folder || !folder.id) return;
+        if (String(folder.kind || '').trim() !== 'group') {
+          const indent = depth > 0 ? `${'-- '.repeat(depth)}` : '';
+          const label = `${indent}${folder.name || 'Unnamed Workspace'}`;
+          const selected = folder.id === this.noteModalWorkspaceId ? ' selected' : '';
+          options += `<option value="${this.escapeHtml(folder.id)}"${selected}>${this.escapeHtml(label)}</option>`;
+        }
         if (folder.children && folder.children.length > 0) {
           appendOptions(folder.children, depth + 1);
         }
@@ -6141,7 +6045,7 @@ const sessionManager = {
       }
 
       const workspaceId = activeSession.folder_id;
-      const response = await fetch(`/api/orchestration/tasks?studio_id=${workspaceId}`);
+      const response = await fetch(`/api/orchestration/tasks?workspace_id=${workspaceId}`);
       if (!response.ok) throw new Error('Failed to load tasks');
 
       const data = await response.json();
@@ -6172,7 +6076,7 @@ const sessionManager = {
   // Load tasks for a workspace (folder) using orchestration API
   async loadWorkspaceTasks(workspaceId) {
     try {
-      const response = await fetch(`/api/orchestration/tasks?studio_id=${workspaceId}`);
+      const response = await fetch(`/api/orchestration/tasks?workspace_id=${workspaceId}`);
       if (!response.ok) throw new Error('Failed to load workspace tasks');
       const data = await response.json();
       this.tasksByWorkspace.set(workspaceId, data.tasks || []);
@@ -6197,7 +6101,7 @@ const sessionManager = {
   // Now returns tasks that have schedules (not legacy ScheduledTask entities)
   async loadWorkspaceScheduledTasks(workspaceId) {
     try {
-      const response = await fetch(`/api/orchestration/tasks?studio_id=${workspaceId}`);
+      const response = await fetch(`/api/orchestration/tasks?workspace_id=${workspaceId}`);
       if (!response.ok) throw new Error('Failed to load workspace tasks');
       const data = await response.json();
       const allTasks = data.tasks || [];
@@ -6249,7 +6153,7 @@ const sessionManager = {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          studio_id: workspaceId,
+          workspace_id: workspaceId,
           description: description.trim(),
           priority: 3
         })
@@ -6299,7 +6203,7 @@ const sessionManager = {
       if (this.activeSessionId) {
         await this.loadSessionTasks();
       } else if (this.currentTaskWorkspaceId) {
-        const tasksResponse = await fetch(`/api/orchestration/tasks?studio_id=${this.currentTaskWorkspaceId}`);
+        const tasksResponse = await fetch(`/api/orchestration/tasks?workspace_id=${this.currentTaskWorkspaceId}`);
         if (tasksResponse.ok) {
           const data = await tasksResponse.json();
           this.workspaceTasks = data.tasks || [];
@@ -6455,7 +6359,7 @@ const sessionManager = {
   async openWorkspaceTaskPanel(workspaceId) {
     try {
       // Load tasks directly from workspace using orchestration API
-      const response = await fetch(`/api/orchestration/tasks?studio_id=${workspaceId}`);
+      const response = await fetch(`/api/orchestration/tasks?workspace_id=${workspaceId}`);
       if (!response.ok) throw new Error('Failed to load workspace tasks');
 
       const data = await response.json();
@@ -6854,7 +6758,7 @@ const sessionManager = {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          studio_id: workspaceId,
+          workspace_id: workspaceId,
           description,
           priority: 3
         })
@@ -6865,7 +6769,7 @@ const sessionManager = {
       input.value = '';
 
       // Reload tasks for the workspace
-      const tasksResponse = await fetch(`/api/orchestration/tasks?studio_id=${workspaceId}`);
+      const tasksResponse = await fetch(`/api/orchestration/tasks?workspace_id=${workspaceId}`);
       if (tasksResponse.ok) {
         const data = await tasksResponse.json();
         this.workspaceTasks = data.tasks || [];
@@ -7000,7 +6904,7 @@ const sessionManager = {
       if (this.activeSessionId) {
         await this.loadSessionTasks();
       } else if (this.currentTaskWorkspaceId) {
-        const tasksResponse = await fetch(`/api/orchestration/tasks?studio_id=${this.currentTaskWorkspaceId}`);
+        const tasksResponse = await fetch(`/api/orchestration/tasks?workspace_id=${this.currentTaskWorkspaceId}`);
         if (tasksResponse.ok) {
           const data = await tasksResponse.json();
           this.workspaceTasks = data.tasks || [];
@@ -7072,7 +6976,7 @@ const sessionManager = {
       if (this.activeSessionId) {
         await this.loadSessionTasks();
       } else if (workspaceId) {
-        const tasksResponse = await fetch(`/api/orchestration/tasks?studio_id=${workspaceId}`);
+        const tasksResponse = await fetch(`/api/orchestration/tasks?workspace_id=${workspaceId}`);
         if (tasksResponse.ok) {
           const data = await tasksResponse.json();
           this.workspaceTasks = data.tasks || [];
@@ -7400,7 +7304,7 @@ const sessionManager = {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            studio_id: workspaceId,
+            workspace_id: workspaceId,
             description,
             details,
             priority: 3,

@@ -1,5 +1,6 @@
 // Dashboard Module
 // Fetches and renders Ori dashboard data: assistant progress, stats, and agent list
+/* global renderDependencyResolutionModal, normalizeDependencyResolution */
 
 (function () {
   'use strict';
@@ -13,6 +14,7 @@
   const HOME_ASSISTANT_SESSION_STORAGE_KEY = 'ori.homeAssistant.recentSessions';
   const HOME_ASSISTANT_AUTOMATION_MODE_KEY = 'ori.homeAssistant.automationMode';
   const HOME_ASSISTANT_THINKING_MIN_VISIBLE_MS = 1400;
+  const HOME_ASSISTANT_WORKSPACE_INLINE_TIMEOUT_MS = 120000;
 
   const HOME_INTENTS = {
     utility_direct: {
@@ -74,6 +76,36 @@
       defaultType: 'general',
       suggestedName: 'Task Assistant',
       tags: ['tasks', 'assistant']
+    }
+  };
+
+  const HOME_PLANNING_SPECIALISTS = {
+    travel_itinerary: {
+      key: 'travel_itinerary',
+      agentName: 'Travel Itinerary Planner',
+      label: 'Travel Itinerary Planner',
+      type: 'research',
+      tags: ['travel', 'itinerary', 'planning', 'workspace-specialist'],
+      description: 'Plans multi-city trips with day-by-day pacing, neighborhood suggestions, food highlights, local logistics, and route-aware recommendations.',
+      systemPrompt: 'You are a travel itinerary planner. Build practical, day-by-day trip plans with realistic pacing, local food and neighborhood recommendations, transit notes, and concise options. Ask clarifying questions when key details are missing and avoid inventing bookings or confirmed reservations.'
+    },
+    hotel_booking: {
+      key: 'hotel_booking',
+      agentName: 'Hotel Booking Agent',
+      label: 'Hotel Booking Agent',
+      type: 'research',
+      tags: ['travel', 'hotels', 'lodging', 'workspace-specialist'],
+      description: 'Finds and compares hotels by neighborhood, budget, amenities, and travel constraints.',
+      systemPrompt: 'You are a hotel booking assistant. Help compare neighborhoods, lodging tradeoffs, budget fit, and stay logistics. Be explicit about assumptions, keep recommendations concise, and ask for missing constraints before making suggestions.'
+    },
+    flight_booking: {
+      key: 'flight_booking',
+      agentName: 'Flight Booking Agent',
+      label: 'Flight Booking Agent',
+      type: 'research',
+      tags: ['travel', 'flights', 'transport', 'workspace-specialist'],
+      description: 'Helps fill booking gaps for flights and longer-distance travel legs with schedule and transfer considerations.',
+      systemPrompt: 'You are a flight booking assistant. Help identify missing flight or long-distance travel legs, compare route options, call out tradeoffs, and confirm timing constraints before recommending bookings.'
     }
   };
 
@@ -211,7 +243,12 @@
     recentSessions: [],
     mode: 'new_task',
     routingSummary: null,
-    automationMode: 'semi_auto'
+    planningState: null,
+    inlineReplyState: null,
+    conversationCollapsed: false,
+    automationMode: 'semi_auto',
+    workspaceEntryAgentName: '',
+    workspaceEntryWorkspaceId: ''
   };
 
   var homeAssistantThinkingModalInstance = null;
@@ -688,6 +725,10 @@
     return lines.join('\n');
   }
 
+  function buildWorkspaceManagerDispatchMessage(prompt) {
+    return String(prompt || '').trim();
+  }
+
   function buildAskOriDispatchMessage(prompt, appLaunchRequest, intent, routeContext) {
     if (intent && intent.key === 'email_check') {
       return buildEmailDispatchMessage(prompt, routeContext);
@@ -742,10 +783,17 @@
       card: document.getElementById('homeAssistantCard'),
       form: document.getElementById('homeAssistantForm'),
       input: document.getElementById('homeAssistantInput'),
+      identityName: document.getElementById('homeAssistantIdentityName'),
       sendBtn: document.getElementById('homeAssistantSendBtn'),
+      conversationSection: document.getElementById('homeAssistantConversationSection'),
       conversation: document.getElementById('homeAssistantConversation'),
+      conversationToggleBtn: document.getElementById('homeAssistantConversationToggleBtn'),
+      conversationSummary: document.getElementById('homeAssistantConversationSummary'),
       routingSummary: document.getElementById('homeAssistantRoutingSummary'),
+      planning: document.getElementById('homeAssistantPlanning'),
+      inlineReply: document.getElementById('homeAssistantInlineReply'),
       thinkingModal: document.getElementById('homeAssistantThinkingModal'),
+      thinkingModalLabel: document.getElementById('homeAssistantThinkingModalLabel'),
       thinkingStatus: document.getElementById('homeAssistantThinkingStatus'),
       thinkingSpinner: document.getElementById('homeAssistantThinkingSpinner'),
       quickPrompts: document.getElementById('homeAssistantQuickPrompts'),
@@ -794,6 +842,16 @@
     return Boolean(els.actions && !els.actions.classList.contains('d-none') && els.actions.children.length > 0);
   }
 
+  function hasVisibleHomeAssistantPlanning() {
+    var els = getHomeAssistantElements();
+    return Boolean(els.planning && !els.planning.classList.contains('d-none') && els.planning.children.length > 0);
+  }
+
+  function hasVisibleHomeAssistantInlineReply() {
+    var els = getHomeAssistantElements();
+    return Boolean(els.inlineReply && !els.inlineReply.classList.contains('d-none') && els.inlineReply.children.length > 0);
+  }
+
   function hasHomeAssistantConversation() {
     var els = getHomeAssistantElements();
     return Boolean(els.conversation && els.conversation.dataset.initialized === 'true' && els.conversation.children.length > 0);
@@ -802,8 +860,110 @@
   function shouldKeepHomeAssistantThinkingModalOpen() {
     if (homeAssistantState.busy) return true;
     if (homeAssistantState.routingSummary && homeAssistantState.routingSummary.text) return true;
+    if (hasVisibleHomeAssistantPlanning()) return true;
+    if (hasVisibleHomeAssistantInlineReply()) return true;
     if (hasVisibleHomeAssistantActions()) return true;
     return false;
+  }
+
+  function getHomeAssistantSummaryState() {
+    var summary = homeAssistantState.routingSummary;
+    if (!summary || !summary.text) return '';
+
+    var explicitState = normalizeToken(summary.state);
+    if (explicitState) return explicitState;
+
+    var title = normalizeToken(summary.title);
+    if (title.indexOf('delayed') >= 0 || title.indexOf('timeout') >= 0) return 'timeout';
+    if (title.indexOf('unavailable') >= 0 || title.indexOf('failed') >= 0) return 'error';
+    return 'info';
+  }
+
+  function hasHomeAssistantFailureState() {
+    var state = getHomeAssistantSummaryState();
+    return state === 'error' || state === 'timeout';
+  }
+
+  function getHomeAssistantActivityLabel() {
+    var els = getHomeAssistantElements();
+    var label = els.identityName ? String(els.identityName.textContent || '').trim() : '';
+    if (label) return label;
+    if (homeAssistantState.workspaceEntryAgentName) return getWorkspaceHomeAssistantDisplayName();
+    return 'Ori';
+  }
+
+  function syncHomeAssistantModalHeading() {
+    var els = getHomeAssistantElements();
+    if (!els.thinkingModalLabel) return;
+
+    var label = getHomeAssistantActivityLabel();
+    var summaryState = getHomeAssistantSummaryState();
+
+    if (summaryState === 'timeout') {
+      els.thinkingModalLabel.textContent = label + ' is delayed';
+      return;
+    }
+    if (summaryState === 'error') {
+      els.thinkingModalLabel.textContent = label + ' is unavailable';
+      return;
+    }
+    if (hasVisibleHomeAssistantPlanning()) {
+      els.thinkingModalLabel.textContent = label + ' needs your input';
+      return;
+    }
+    if (hasVisibleHomeAssistantInlineReply()) {
+      els.thinkingModalLabel.textContent = label + ' has a planning subtask ready';
+      return;
+    }
+    if (hasVisibleHomeAssistantActions() && hasHomeAssistantConversation() && !homeAssistantState.busy) {
+      els.thinkingModalLabel.textContent = label + ' has an update ready';
+      return;
+    }
+    els.thinkingModalLabel.textContent = label + ' is working';
+  }
+
+  function setHomeAssistantConversationCollapsed(collapsed) {
+    homeAssistantState.conversationCollapsed = Boolean(collapsed);
+    syncHomeAssistantConversationSection();
+  }
+
+  function syncHomeAssistantConversationSection() {
+    var els = getHomeAssistantElements();
+    var section = els.conversationSection;
+    if (!section) return;
+
+    var hasConversation = hasHomeAssistantConversation();
+    var hasStructuredStep = hasVisibleHomeAssistantPlanning() || hasVisibleHomeAssistantInlineReply();
+    var hasFailureState = hasHomeAssistantFailureState();
+    var canCollapse = hasConversation && (hasStructuredStep || hasFailureState);
+    var isCollapsed = canCollapse && homeAssistantState.conversationCollapsed;
+
+    section.classList.toggle('is-collapsible', canCollapse);
+    section.classList.toggle('is-collapsed', isCollapsed);
+    section.classList.toggle('is-empty', !hasConversation);
+
+    if (els.conversationToggleBtn) {
+      els.conversationToggleBtn.hidden = !canCollapse;
+      els.conversationToggleBtn.textContent = isCollapsed ? 'Show Conversation' : 'Hide Conversation';
+      if (!els.conversationToggleBtn.dataset.bound) {
+        els.conversationToggleBtn.dataset.bound = 'true';
+        els.conversationToggleBtn.addEventListener('click', function () {
+          setHomeAssistantConversationCollapsed(!homeAssistantState.conversationCollapsed);
+        });
+      }
+    }
+
+    if (els.conversationSummary) {
+      if (hasFailureState && hasConversation) {
+        els.conversationSummary.textContent = 'The request failed above. Expand this only if you want the original prompt and inline details.';
+      } else if (hasStructuredStep && hasConversation) {
+        els.conversationSummary.textContent = 'The active step is above. Open this only if you want the full transcript and manager notes.';
+      } else if (hasConversation) {
+        els.conversationSummary.textContent = 'Full transcript, progress notes, and manager replies appear here.';
+      } else {
+        els.conversationSummary.textContent = 'Progress updates will appear here after you send a task.';
+      }
+    }
   }
 
   function openHomeAssistantThinkingModal() {
@@ -846,12 +1006,20 @@
     if (!els.thinkingStatus) return;
 
     var statusText = '';
-    if (homeAssistantState.routingSummary && homeAssistantState.routingSummary.text) {
+    if (getHomeAssistantSummaryState() === 'timeout') {
+      statusText = 'The manager may still be working. Retry here or open full chat to continue there.';
+    } else if (getHomeAssistantSummaryState() === 'error') {
+      statusText = 'Retry here, open full chat, or start a different task.';
+    } else if (homeAssistantState.routingSummary && homeAssistantState.routingSummary.text) {
       statusText = homeAssistantState.routingSummary.text;
     } else if (homeAssistantState.busy) {
       statusText = 'Working...';
+    } else if (hasVisibleHomeAssistantPlanning()) {
+      statusText = 'Complete the active planning step below.';
+    } else if (hasVisibleHomeAssistantInlineReply()) {
+      statusText = 'Answer the manager here or open full chat.';
     } else if (hasVisibleHomeAssistantActions()) {
-      statusText = 'Review the next steps or dismiss this window.';
+      statusText = 'Review the latest manager update, open full chat, or dismiss this window.';
     } else {
       statusText = 'Ready for your next task.';
     }
@@ -862,6 +1030,7 @@
       els.thinkingSpinner.classList.toggle('d-none', !homeAssistantState.busy);
     }
 
+    syncHomeAssistantModalHeading();
     syncHomeAssistantLauncher();
   }
 
@@ -884,6 +1053,8 @@
     var active = Boolean(
       homeAssistantState.busy ||
       (homeAssistantState.routingSummary && homeAssistantState.routingSummary.text) ||
+      hasVisibleHomeAssistantPlanning() ||
+      hasVisibleHomeAssistantInlineReply() ||
       hasVisibleHomeAssistantActions() ||
       hasHomeAssistantConversation()
     );
@@ -897,6 +1068,9 @@
     if (label) {
       label.textContent = homeAssistantState.busy ? 'Live Activity' : 'Task Activity';
     }
+
+    syncHomeAssistantModalHeading();
+    syncHomeAssistantConversationSection();
   }
 
   function renderHomeAssistantRoutingSummary() {
@@ -926,7 +1100,7 @@
     syncHomeAssistantThinkingStatus();
   }
 
-  function setHomeAssistantRoutingSummary(title, text) {
+  function setHomeAssistantRoutingSummary(title, text, options) {
     if (!title || !text) {
       homeAssistantState.routingSummary = null;
       renderHomeAssistantRoutingSummary();
@@ -938,12 +1112,71 @@
     }
     homeAssistantState.routingSummary = {
       title: String(title),
-      text: String(text)
+      text: String(text),
+      state: options && options.state ? String(options.state) : ''
     };
     renderHomeAssistantRoutingSummary();
     if (homeAssistantState.busy || hasVisibleHomeAssistantActions()) {
       openHomeAssistantThinkingModal();
     }
+  }
+
+  function getWorkspaceHomeAssistantDisplayName() {
+    return String(homeAssistantState.workspaceEntryAgentName || '').trim() || 'Workspace Manager';
+  }
+
+  function buildHomeAssistantPlaceholder(routeContext) {
+    if (!routeContext) return 'Ask Ori to do something...';
+    if (routeContext.surface === 'workspace_canvas') {
+      return 'Message ' + getWorkspaceHomeAssistantDisplayName() + ' about this workspace canvas...';
+    }
+    if (hasWorkspaceRouteContext(routeContext)) {
+      return 'Ask ' + getWorkspaceHomeAssistantDisplayName() + ' about this workspace... (or use /task, /note, /directory, /file, /chat)';
+    }
+    return 'Ask Ori to do something...';
+  }
+
+  function renderHomeAssistantWorkspaceIdentity(routeContext) {
+    var normalizedContext = normalizeHomeRouteContext(routeContext);
+    if (!hasWorkspaceRouteContext(normalizedContext)) return;
+
+    var els = getHomeAssistantElements();
+    var displayName = getWorkspaceHomeAssistantDisplayName();
+
+    if (els.identityName) {
+      els.identityName.textContent = displayName;
+      els.identityName.setAttribute('title', displayName);
+    }
+
+    if (els.input) {
+      els.input.placeholder = buildHomeAssistantPlaceholder(normalizedContext);
+      els.input.setAttribute('aria-label', displayName + ' prompt');
+    }
+
+    syncHomeAssistantModalHeading();
+  }
+
+  async function refreshHomeAssistantWorkspaceIdentity(routeContext) {
+    var normalizedContext = normalizeHomeRouteContext(routeContext);
+    if (!hasWorkspaceRouteContext(normalizedContext)) {
+      homeAssistantState.workspaceEntryAgentName = '';
+      homeAssistantState.workspaceEntryWorkspaceId = '';
+      return;
+    }
+
+    var workspaceId = String(normalizedContext.workspace_id || '').trim();
+    homeAssistantState.workspaceEntryWorkspaceId = workspaceId;
+    homeAssistantState.workspaceEntryAgentName = '';
+    renderHomeAssistantWorkspaceIdentity(normalizedContext);
+
+    if (!workspaceId) return;
+
+    var entryAgentName = await fetchWorkspaceEntryAgentName(workspaceId);
+    if (homeAssistantState.workspaceEntryWorkspaceId !== workspaceId) return;
+    if (!entryAgentName) return;
+
+    homeAssistantState.workspaceEntryAgentName = entryAgentName;
+    renderHomeAssistantWorkspaceIdentity(normalizedContext);
   }
 
   function setHomeAssistantMode(mode) {
@@ -970,13 +1203,10 @@
       els.conversation.classList.toggle('d-none', nextMode === 'continue_session');
     }
     if (els.input) {
-      if (routeContext.surface === 'workspace_canvas') {
-        els.input.placeholder = 'Ask Assistant about this workspace canvas... (or use /task, /note, /directory, /file, /chat)';
-      } else if (hasWorkspaceRouteContext(routeContext)) {
-        els.input.placeholder = 'Ask Assistant about this workspace... (or use /task, /note, /directory, /file, /chat)';
-      } else {
-        els.input.placeholder = 'Ask Ori to do something...';
-      }
+      els.input.placeholder = buildHomeAssistantPlaceholder(routeContext);
+    }
+    if (hasWorkspaceRouteContext(routeContext)) {
+      renderHomeAssistantWorkspaceIdentity(routeContext);
     }
 
     renderHomeAssistantRecentSessions();
@@ -1016,6 +1246,8 @@
   }
 
   function focusHomeAssistantInput() {
+    clearHomeAssistantPlanning();
+    clearHomeAssistantInlineReply();
     setHomeAssistantMode('new_task');
     var els = getHomeAssistantElements();
     if (!els.input) return;
@@ -1053,6 +1285,8 @@
       closeHomeAssistantThinkingModal();
     }
     syncHomeAssistantThinkingStatus();
+    renderHomeAssistantPlanning();
+    renderHomeAssistantInlineReply();
   }
 
   function appendHomeAssistantMessage(role, text) {
@@ -1070,17 +1304,40 @@
     row.style.marginBottom = '0.65rem';
     row.style.justifyContent = role === 'user' ? 'flex-end' : 'flex-start';
 
+    var messageText = typeof text === 'string' ? text : String(text == null ? '' : text);
+    var structuredText = formatHomeAssistantStructuredMessage(messageText);
     var bubble = document.createElement('div');
     bubble.style.maxWidth = '85%';
     bubble.style.padding = '0.55rem 0.75rem';
     bubble.style.borderRadius = '10px';
     bubble.style.whiteSpace = 'pre-wrap';
+    bubble.style.overflowWrap = 'anywhere';
+    bubble.style.wordBreak = 'break-word';
+    bubble.style.minWidth = '0';
     bubble.style.fontSize = '0.85rem';
     bubble.style.lineHeight = '1.4';
     bubble.style.border = '1px solid var(--border-color)';
     bubble.style.color = 'var(--text-primary)';
     bubble.style.background = role === 'user' ? 'var(--primary-color-light)' : 'var(--bg-primary)';
-    bubble.textContent = text;
+
+    if (structuredText) {
+      bubble.style.padding = '0.65rem 0.8rem';
+      bubble.style.maxHeight = '320px';
+      bubble.style.overflow = 'auto';
+
+      var pre = document.createElement('pre');
+      pre.style.margin = '0';
+      pre.style.whiteSpace = 'pre-wrap';
+      pre.style.overflowWrap = 'anywhere';
+      pre.style.wordBreak = 'break-word';
+      pre.style.fontSize = '0.8rem';
+      pre.style.lineHeight = '1.45';
+      pre.style.fontFamily = 'var(--font-family-mono, ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace)';
+      pre.textContent = structuredText;
+      bubble.appendChild(pre);
+    } else {
+      bubble.textContent = messageText;
+    }
 
     row.appendChild(bubble);
     conversation.appendChild(row);
@@ -1089,8 +1346,1697 @@
       conversation.removeChild(conversation.firstChild);
     }
     conversation.scrollTop = conversation.scrollHeight;
+    syncHomeAssistantConversationSection();
     syncHomeAssistantLauncher();
     openHomeAssistantThinkingModal();
+  }
+
+  function formatHomeAssistantStructuredMessage(text) {
+    var trimmed = String(text || '').trim();
+    if (!trimmed) return '';
+    if (trimmed.charAt(0) !== '{' && trimmed.charAt(0) !== '[') return '';
+
+    try {
+      return JSON.stringify(JSON.parse(trimmed), null, 2);
+    } catch (error) {
+      return '';
+    }
+  }
+
+  function parseHomeAssistantJSON(text) {
+    var trimmed = String(text || '').trim();
+    if (!trimmed) return null;
+    if (trimmed.charAt(0) !== '{' && trimmed.charAt(0) !== '[') return null;
+    try {
+      return JSON.parse(trimmed);
+    } catch (error) {
+      return null;
+    }
+  }
+
+  function isLikelyHomeAssistantRawToolPayload(text, data) {
+    if (!data || !Array.isArray(data.toolCalls) || data.toolCalls.length === 0) return false;
+
+    var parsed = parseHomeAssistantJSON(text);
+    if (!parsed || Array.isArray(parsed) || typeof parsed !== 'object') return false;
+    if (parsed.displayType || parsed.data || parsed.title || parsed.description) return false;
+
+    var workspaceKeys = ['sessions', 'tasks', 'notes', 'files', 'directories', 'message', 'total'];
+    for (var i = 0; i < workspaceKeys.length; i++) {
+      if (Object.prototype.hasOwnProperty.call(parsed, workspaceKeys[i])) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  function getPlanningQuestions(planningState) {
+    if (!planningState || !planningState.schema || !Array.isArray(planningState.schema.questions)) {
+      return [];
+    }
+    return planningState.schema.questions;
+  }
+
+  function findPlanningQuestionById(planningState, questionId) {
+    var questions = getPlanningQuestions(planningState);
+    var target = String(questionId || '').trim();
+    if (!target) return null;
+    for (var i = 0; i < questions.length; i++) {
+      var question = questions[i];
+      if (String(question && question.id || '').trim() === target) {
+        return question;
+      }
+    }
+    return null;
+  }
+
+  function shouldShowPlanningQuestion(question, planningState) {
+    if (!question) return false;
+    var visibility = question.visible_when;
+    if (!visibility || !visibility.question_id) return true;
+
+    var formData = planningState && planningState.formData ? planningState.formData : {};
+    var sourceValue = formData[visibility.question_id];
+    var normalizedSource = normalizeToken(sourceValue);
+    if (visibility.not_empty) {
+      return Boolean(String(sourceValue || '').trim());
+    }
+
+    var anyOf = Array.isArray(visibility.any_of) ? visibility.any_of : [];
+    if (anyOf.length > 0) {
+      for (var i = 0; i < anyOf.length; i++) {
+        if (normalizedSource === normalizeToken(anyOf[i])) {
+          return true;
+        }
+      }
+      return false;
+    }
+
+    return true;
+  }
+
+  function getPlanningOptionLabel(question, value) {
+    var options = question && Array.isArray(question.options) ? question.options : [];
+    var raw = String(value || '');
+    for (var i = 0; i < options.length; i++) {
+      var option = options[i] || {};
+      if (String(option.value || '') === raw) {
+        return String(option.label || raw).trim();
+      }
+    }
+    return raw;
+  }
+
+  function getPlanningQuestionDisplayValue(question, value) {
+    if (!question) return String(value || '').trim();
+    if (question.type === 'select') {
+      return getPlanningOptionLabel(question, value);
+    }
+    return String(value || '').trim();
+  }
+
+  function buildPlanningFormAnswerSummary(planningState) {
+    if (!planningState || !planningState.schema) return '';
+
+    var questions = getPlanningQuestions(planningState);
+    var formData = planningState.formData || {};
+    var uploads = planningState.uploads || {};
+    var lines = [String(planningState.schema.title || 'Planning update').trim() + ':'];
+
+    for (var i = 0; i < questions.length; i++) {
+      var question = questions[i];
+      if (!shouldShowPlanningQuestion(question, planningState)) continue;
+
+      if (question.type === 'file') {
+        if (uploads[question.id]) {
+          lines.push('- ' + question.label + ': upload modal opened in this workspace');
+        }
+        continue;
+      }
+
+      var rawValue = formData[question.id];
+      var displayValue = getPlanningQuestionDisplayValue(question, rawValue);
+      if (displayValue) {
+        lines.push('- ' + question.label + ': ' + displayValue);
+      } else if (question.required) {
+        lines.push('- ' + question.label + ': not answered yet');
+      }
+    }
+
+    return lines.join('\n');
+  }
+
+  function buildStructuredPlanningFormPrompt(planningState) {
+    if (!planningState || !planningState.schema) return '';
+
+    var questions = getPlanningQuestions(planningState);
+    var formData = planningState.formData || {};
+    var uploads = planningState.uploads || {};
+    var answers = [];
+    var attachments = [];
+
+    for (var i = 0; i < questions.length; i++) {
+      var question = questions[i];
+      if (!shouldShowPlanningQuestion(question, planningState)) continue;
+
+      if (question.type === 'file') {
+        attachments.push({
+          id: question.id,
+          label: question.label,
+          attachment_kind: question.file_config && question.file_config.attachment_kind ? question.file_config.attachment_kind : question.id,
+          upload_modal_opened: Boolean(uploads[question.id])
+        });
+        continue;
+      }
+
+      var rawValue = formData[question.id];
+      answers.push({
+        id: question.id,
+        label: question.label,
+        type: question.type,
+        value: rawValue == null ? '' : rawValue,
+        display_value: getPlanningQuestionDisplayValue(question, rawValue),
+        required: Boolean(question.required)
+      });
+    }
+
+    var payload = {
+      form_id: planningState.schema.id || '',
+      form_kind: planningState.schema.kind || '',
+      form_title: planningState.schema.title || '',
+      original_request: String(planningState.prompt || '').trim(),
+      answers: answers,
+      attachments: attachments
+    };
+
+    return [
+      'Structured planning form submission:',
+      JSON.stringify(payload, null, 2),
+      '',
+      'Follow-up instructions:',
+      String(planningState.schema.submit_instructions || 'Use this structured planning intake to continue the conversation.').trim()
+    ].join('\n');
+  }
+
+  function normalizePlanningFormSchema(schema) {
+    if (!schema || typeof schema !== 'object') return null;
+
+    return {
+      id: String(schema.id || '').trim(),
+      kind: String(schema.kind || '').trim(),
+      title: String(schema.title || 'Planning Step').trim(),
+      subtitle: String(schema.subtitle || '').trim(),
+      summary: String(schema.summary || '').trim(),
+      submit_label: String(schema.submit_label || '').trim(),
+      submit_instructions: String(schema.submit_instructions || '').trim(),
+      questions: Array.isArray(schema.questions) ? schema.questions : []
+    };
+  }
+
+  function convertWorkflowFormToPlanningSchema(step) {
+    if (!step || String(step.step_type || '').trim() !== 'ask_form') return null;
+    var form = step.form;
+    if (!form || typeof form !== 'object') return null;
+
+    var fields = Array.isArray(form.fields) ? form.fields : [];
+    var questions = [];
+    for (var i = 0; i < fields.length; i++) {
+      var field = fields[i] || {};
+      questions.push({
+        id: String(field.id || '').trim(),
+        type: String(field.type || '').trim(),
+        label: String(field.label || '').trim(),
+        help_text: String(field.help_text || '').trim(),
+        placeholder: String(field.placeholder || '').trim(),
+        required: Boolean(field.required),
+        rows: Number(field.rows || 0),
+        options: Array.isArray(field.options) ? field.options : [],
+        visible_when: field.visible_when || null,
+        file_config: field.file_config || null
+      });
+    }
+
+    return normalizePlanningFormSchema({
+      id: String(form.id || step.step_id || '').trim(),
+      kind: String(form.kind || '').trim(),
+      title: String(form.title || step.title || 'Planning Step').trim(),
+      subtitle: String(form.subtitle || step.preview_markdown || '').trim(),
+      summary: String(form.summary || step.summary || '').trim(),
+      submit_label: String(form.submit_label || '').trim(),
+      submit_instructions: String(form.submit_instructions || '').trim(),
+      questions: questions
+    });
+  }
+
+  function buildWorkflowFormResponsePayload(planningState) {
+    if (!planningState || !planningState.schema || !planningState.workflowStep) return null;
+
+    var questions = getPlanningQuestions(planningState);
+    var formData = planningState.formData || {};
+    var uploads = planningState.uploads || {};
+    var answers = [];
+    var attachments = [];
+
+    for (var i = 0; i < questions.length; i++) {
+      var question = questions[i];
+      if (!shouldShowPlanningQuestion(question, planningState)) continue;
+
+      if (question.type === 'file') {
+        attachments.push({
+          id: question.id,
+          label: question.label,
+          attachment_kind: question.file_config && question.file_config.attachment_kind ? question.file_config.attachment_kind : question.id,
+          upload_modal_opened: Boolean(uploads[question.id])
+        });
+        continue;
+      }
+
+      var rawValue = formData[question.id];
+      answers.push({
+        id: question.id,
+        label: question.label,
+        type: question.type,
+        value: rawValue == null ? '' : rawValue,
+        display_value: getPlanningQuestionDisplayValue(question, rawValue),
+        required: Boolean(question.required)
+      });
+    }
+
+    return {
+      workflow_id: String(planningState.workflowStep.workflow_id || '').trim(),
+      step_id: String(planningState.workflowStep.step_id || '').trim(),
+      response_type: 'form',
+      form: {
+        form_id: planningState.schema.id || '',
+        form_kind: planningState.schema.kind || '',
+        form_title: planningState.schema.title || '',
+        original_request: String(planningState.prompt || '').trim(),
+        answers: answers,
+        attachments: attachments
+      }
+    };
+  }
+
+  function activateHomeAssistantPlanningForm(schema, options) {
+    var normalizedSchema = normalizePlanningFormSchema(schema);
+    if (!normalizedSchema) return;
+
+    clearHomeAssistantInlineReply();
+    homeAssistantState.planningState = {
+      kind: 'planning_form',
+      prompt: String(options && options.prompt || '').trim(),
+      routeContext: normalizeHomeRouteContext(options && options.routeContext),
+      intent: options && options.intent ? options.intent : HOME_INTENTS.general_task,
+      agentLabel: String(options && options.agentLabel || getWorkspaceHomeAssistantDisplayName()).trim() || getWorkspaceHomeAssistantDisplayName(),
+      workflowStep: options && options.workflowStep ? options.workflowStep : null,
+      schema: normalizedSchema,
+      formData: {},
+      uploads: {},
+      submitting: false,
+      focusField: ''
+    };
+
+    var questions = getPlanningQuestions(homeAssistantState.planningState);
+    for (var i = 0; i < questions.length; i++) {
+      var question = questions[i];
+      homeAssistantState.planningState.formData[question.id] = question.default_value || '';
+      if (!homeAssistantState.planningState.focusField && question.required) {
+        homeAssistantState.planningState.focusField = question.id;
+      }
+    }
+
+    homeAssistantState.conversationCollapsed = true;
+    renderHomeAssistantPlanning();
+  }
+
+  function derivePlanningReviewNoteName(planningState) {
+    var prompt = String(planningState && planningState.prompt || '').trim();
+    if (/\bspain\b/i.test(prompt)) return 'Spain Trip Intake';
+    if (planningState && planningState.schema && planningState.schema.kind === 'travel_intake') {
+      return 'Travel Intake Summary';
+    }
+    return truncateText((planningState && planningState.schema && planningState.schema.title) || 'Planning Summary', 60);
+  }
+
+  function buildPlanningReviewNoteContent(planningState) {
+    var lines = [
+      '# ' + derivePlanningReviewNoteName(planningState),
+      '',
+      'Original request:',
+      String(planningState && planningState.prompt || '').trim(),
+      '',
+      buildPlanningFormAnswerSummary(planningState)
+    ];
+    return lines.join('\n').trim();
+  }
+
+  function buildPlanningTaskDescriptionFromPrompt(prompt, fallbackTitle) {
+    var normalized = String(prompt || '').trim()
+      .replace(/^(please\s+)?help me\s+/i, '')
+      .replace(/^(can|could|would|will)\s+you\s+/i, '')
+      .replace(/^i (want|need)\s+(you\s+)?to\s+/i, '')
+      .replace(/^please\s+/i, '')
+      .replace(/\s+/g, ' ')
+      .trim();
+
+    if (!normalized) {
+      normalized = String(fallbackTitle || 'Planning task').trim();
+    }
+    if (!normalized) {
+      normalized = 'Planning task';
+    }
+
+    return truncateText(normalized.charAt(0).toUpperCase() + normalized.slice(1), 140);
+  }
+
+  function buildPlanningTaskDetails(prompt, summaryText, noteName) {
+    var lines = [];
+    var normalizedPrompt = String(prompt || '').trim();
+    if (normalizedPrompt) {
+      lines.push('Original request:');
+      lines.push(normalizedPrompt);
+    }
+
+    var normalizedSummary = String(summaryText || '').trim();
+    if (normalizedSummary) {
+      if (lines.length > 0) lines.push('');
+      lines.push('Planning intake:');
+      lines.push(normalizedSummary);
+    }
+
+    if (String(noteName || '').trim()) {
+      if (lines.length > 0) lines.push('');
+      lines.push('Planning note: ' + String(noteName || '').trim());
+    }
+
+    return lines.join('\n').trim();
+  }
+
+  function buildPlanningReviewTaskDescription(planningState) { // eslint-disable-line no-unused-vars
+    if (!planningState) return 'Planning task';
+    return buildPlanningTaskDescriptionFromPrompt(
+      planningState.prompt,
+      planningState.schema && planningState.schema.title
+    );
+  }
+
+  function buildPlanningReviewTaskDetails(planningState) { // eslint-disable-line no-unused-vars
+    if (!planningState) return '';
+    return buildPlanningTaskDetails(
+      planningState.prompt,
+      planningState.summaryText,
+      planningState.noteSaved && planningState.noteSaved.name
+    );
+  }
+
+  function activateHomeAssistantPlanningReview(planningState) {
+    if (!planningState || planningState.kind !== 'planning_form' || !planningState.schema) return;
+
+    clearHomeAssistantInlineReply();
+    homeAssistantState.planningState = {
+      kind: 'planning_review',
+      prompt: planningState.prompt,
+      routeContext: normalizeHomeRouteContext(planningState.routeContext),
+      intent: planningState.intent || HOME_INTENTS.general_task,
+      agentLabel: planningState.agentLabel || getWorkspaceHomeAssistantDisplayName(),
+      workflowStep: planningState.workflowStep || null,
+      schema: planningState.schema,
+      summaryText: buildPlanningFormAnswerSummary(planningState),
+      dispatchPrompt: buildStructuredPlanningFormPrompt(planningState),
+      workflowResponse: buildWorkflowFormResponsePayload(planningState),
+      noteName: derivePlanningReviewNoteName(planningState),
+      noteSaved: null,
+      noteSaving: false,
+      mainTask: null,
+      mainTaskCreating: false,
+      specialistStatuses: {},
+      specialistBusy: '',
+      continuing: false
+    };
+
+    homeAssistantState.conversationCollapsed = true;
+    renderHomeAssistantPlanning();
+  }
+
+  function getPlanningReviewState() {
+    var planningState = homeAssistantState.planningState;
+    if (!planningState || planningState.kind !== 'planning_review') return null;
+    return planningState;
+  }
+
+  function getActiveLinkedPlanningTask() {
+    if (homeAssistantState.inlineReplyState &&
+        homeAssistantState.inlineReplyState.linkedTask &&
+        homeAssistantState.inlineReplyState.linkedTask.id) {
+      return homeAssistantState.inlineReplyState.linkedTask;
+    }
+    if (homeAssistantState.planningState &&
+        homeAssistantState.planningState.mainTask &&
+        homeAssistantState.planningState.mainTask.id) {
+      return homeAssistantState.planningState.mainTask;
+    }
+    return null;
+  }
+
+  function normalizeCreatedPlanningTask(task) {
+    if (!task || !task.id) return null;
+    return {
+      id: String(task.id || '').trim(),
+      description: String(task.description || '').trim(),
+      details: String(task.details || '').trim(),
+      to: String(task.to || '').trim() || String(task.assigned_node_id || '')
+        .replace(/-node-\d+$/, '')
+        .trim()
+    };
+  }
+
+  async function ensureWorkspacePlanningTask(routeContext, prompt, agentLabel, options) {
+    var existingTask = options && options.existingTask && options.existingTask.id
+      ? normalizeCreatedPlanningTask(options.existingTask)
+      : null;
+    if (existingTask) return existingTask;
+
+    var workspaceId = hasWorkspaceRouteContext(routeContext)
+      ? String(routeContext.workspace_id || '').trim()
+      : '';
+    if (!workspaceId) {
+      throw new Error('Workspace context is required to create the planning task');
+    }
+
+    var response = await createWorkspaceTaskRecord(workspaceId, {
+      description: buildPlanningTaskDescriptionFromPrompt(
+        prompt,
+        options && options.fallbackTitle ? options.fallbackTitle : 'Planning task'
+      ),
+      details: buildPlanningTaskDetails(
+        prompt,
+        options && options.summaryText ? options.summaryText : '',
+        options && options.noteName ? options.noteName : ''
+      ),
+      to: String(agentLabel || '').trim()
+    });
+    var createdTask = response && response.task ? response.task : response;
+    var normalizedTask = normalizeCreatedPlanningTask(createdTask);
+    if (!normalizedTask || !normalizedTask.id) {
+      throw new Error('Failed to create the main workspace task');
+    }
+
+    syncCreatedTaskIntoWorkspaceDetail(normalizedTask);
+    await refreshWorkspaceDetailTaskPanels();
+    return normalizedTask;
+  }
+
+  async function ensurePlanningReviewMainTask(planningState) {
+    if (!planningState) throw new Error('Missing planning review state');
+    if (planningState.mainTask && planningState.mainTask.id) {
+      return planningState.mainTask;
+    }
+
+    planningState.mainTask = await ensureWorkspacePlanningTask(
+      planningState.routeContext,
+      planningState.prompt,
+      planningState.agentLabel,
+      {
+        summaryText: planningState.summaryText,
+        noteName: planningState.noteSaved && planningState.noteSaved.name,
+        fallbackTitle: planningState.schema && planningState.schema.title
+      }
+    );
+    return planningState.mainTask;
+  }
+
+  async function savePlanningReviewToNote() {
+    var planningState = getPlanningReviewState();
+    if (!planningState || planningState.noteSaving || planningState.noteSaved) return;
+
+    var workspaceId = hasWorkspaceRouteContext(planningState.routeContext)
+      ? String(planningState.routeContext.workspace_id || '').trim()
+      : '';
+    if (!workspaceId) {
+      if (window.Toast) Toast.warning('Open this flow from a workspace before saving a note.');
+      return;
+    }
+
+    planningState.noteSaving = true;
+    renderHomeAssistantPlanning();
+
+    try {
+      var notePayload = {
+        name: planningState.noteName || 'Planning Summary',
+        content: buildPlanningReviewNoteContent(planningState)
+      };
+      var data = null;
+      if (typeof API !== 'undefined' && typeof API.post === 'function') {
+        data = await API.post('/api/workspaces/' + encodeURIComponent(workspaceId) + '/notes', notePayload);
+      } else {
+        var response = await fetch('/api/workspaces/' + encodeURIComponent(workspaceId) + '/notes', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(notePayload)
+        });
+        if (!response.ok) throw new Error('Failed to create note');
+        data = await response.json();
+      }
+
+      var savedName = data && data.note && data.note.name
+        ? String(data.note.name).trim()
+        : notePayload.name;
+      planningState.noteSaved = {
+        id: data && data.note && data.note.id ? String(data.note.id).trim() : '',
+        name: savedName
+      };
+
+      if (window.workspaceDetail &&
+          String(window.workspaceDetail.workspaceId || '').trim() === workspaceId &&
+          typeof window.workspaceDetail.loadWorkspace === 'function') {
+        window.workspaceDetail.loadWorkspace();
+      }
+
+      appendHomeAssistantMessage('assistant', 'Saved the intake summary to note "' + savedName + '".');
+      setHomeAssistantRoutingSummary('Planning Review', 'Intake summary saved to this workspace.');
+    } catch (error) {
+      dashLog.debug('Failed to save planning review note', { error: error && error.message || error });
+      appendHomeAssistantMessage('assistant', 'I could not save the intake summary to a note right now.');
+      setHomeAssistantRoutingSummary('Planning Review', 'Could not save the intake summary to a note.');
+      if (window.Toast) Toast.error('Failed to save note');
+    } finally {
+      planningState.noteSaving = false;
+      renderHomeAssistantPlanning();
+    }
+  }
+
+  function findExactAgentByName(agents, agentName) {
+    var target = normalizeToken(agentName);
+    if (!target || !Array.isArray(agents)) return null;
+    for (var i = 0; i < agents.length; i++) {
+      var agentInfo = agents[i];
+      var name = typeof agentInfo === 'string' ? agentInfo : agentInfo && agentInfo.name;
+      if (normalizeToken(name) === target) return agentInfo;
+    }
+    return null;
+  }
+
+  async function createPlanningSpecialistAgent(config, planningState) {
+    if (!config) throw new Error('Missing specialist configuration');
+    if (typeof API === 'undefined' || typeof API.post !== 'function' || typeof API.get !== 'function') {
+      throw new Error('Agent API unavailable');
+    }
+
+    var listData = await API.get('/api/agents');
+    var existing = (listData && listData.agents) || [];
+    var existingNames = [];
+    for (var i = 0; i < existing.length; i++) {
+      var agentInfo = existing[i];
+      existingNames.push(typeof agentInfo === 'string' ? agentInfo : agentInfo.name);
+    }
+
+    var agentName = buildUniqueAgentName(config.agentName, existingNames);
+    var payload = {
+      name: agentName,
+      type: config.type,
+      system_prompt: config.systemPrompt,
+      description: config.description + ' Workspace context: "' + truncateText(String(planningState.summaryText || '').trim(), 180) + '".',
+      tags: uniqueValues((config.tags || []).concat(['workspace-specialist', 'planning-review']))
+    };
+
+    var selectedModel = await resolveAutoSelectedModel(payload.type, '');
+    if (selectedModel) payload.model = selectedModel;
+
+    if (isSemiAutoMode() || !payload.model) {
+      var confirmation = await confirmAgentCreationWithModal(payload);
+      if (!confirmation || confirmation.status !== 'created') {
+        if (confirmation && confirmation.status === 'unavailable') {
+          throw new Error('Create Agent modal unavailable');
+        }
+        throw new Error('Agent creation canceled');
+      }
+      return confirmation.agentName;
+    }
+
+    await API.post('/api/agents', payload);
+    return agentName;
+  }
+
+  async function openWorkspaceSpecialistChat(agentName, routeContext) {
+    if (!agentName) return;
+    var session = await openOrCreateChatSession(agentName, routeContext);
+    if (!session) throw new Error('Failed to open agent chat');
+    openChatPanel();
+  }
+
+  async function addPlanningReviewSpecialist(specialistKey) {
+    var planningState = getPlanningReviewState();
+    var config = HOME_PLANNING_SPECIALISTS[specialistKey];
+    if (!planningState || !config) return;
+
+    var existingStatus = planningState.specialistStatuses[specialistKey];
+    if (existingStatus && existingStatus.status === 'added' && existingStatus.agentName) {
+      await openWorkspaceSpecialistChat(existingStatus.agentName, planningState.routeContext);
+      return;
+    }
+    if (planningState.specialistBusy) return;
+
+    planningState.specialistBusy = specialistKey;
+    renderHomeAssistantPlanning();
+
+    try {
+      var agents = await fetchAgentsForMatching();
+      var existingAgent = findExactAgentByName(agents, config.agentName);
+      var agentName = existingAgent
+        ? (typeof existingAgent === 'string' ? existingAgent : existingAgent.name)
+        : await createPlanningSpecialistAgent(config, planningState);
+
+      var addedToWorkspace = await addAgentToWorkspaceIfNeeded(agentName, planningState.routeContext);
+      if (!addedToWorkspace) {
+        throw new Error('Failed to attach specialist to workspace');
+      }
+      planningState.specialistStatuses[specialistKey] = {
+        status: 'added',
+        agentName: agentName,
+        created: !existingAgent
+      };
+
+      appendHomeAssistantMessage(
+        'assistant',
+        (existingAgent ? 'Added ' : 'Created and added ') + '"' + agentName + '" to this workspace.'
+      );
+      setHomeAssistantRoutingSummary(config.label, '"' + agentName + '" is now available in this workspace.');
+    } catch (error) {
+      dashLog.debug('Failed to add planning specialist', {
+        specialistKey: specialistKey,
+        error: error && error.message || error
+      });
+      appendHomeAssistantMessage('assistant', 'I could not add "' + config.label + '" right now.');
+      setHomeAssistantRoutingSummary(config.label, 'Could not add this specialist right now.');
+    } finally {
+      planningState.specialistBusy = '';
+      renderHomeAssistantPlanning();
+    }
+  }
+
+  async function continuePlanningReviewWithManager() {
+    var planningState = getPlanningReviewState();
+    if (!planningState || planningState.continuing) return;
+
+    planningState.continuing = true;
+    planningState.mainTaskCreating = false;
+    renderHomeAssistantPlanning();
+
+    try {
+      if (!planningState.mainTask || !planningState.mainTask.id) {
+        planningState.mainTaskCreating = true;
+        renderHomeAssistantPlanning();
+        setHomeAssistantBusy(true, 'Adding Main Task...');
+        setHomeAssistantRoutingSummary(
+          'Planning Review',
+          'Adding the main task to this workspace before the planning subtasks continue.'
+        );
+
+        var createdTask = await ensurePlanningReviewMainTask(planningState);
+        if (createdTask && createdTask.description) {
+          appendHomeAssistantMessage('assistant', 'Added main workspace task "' + createdTask.description + '".');
+        }
+      }
+
+      planningState.mainTaskCreating = false;
+      renderHomeAssistantPlanning();
+      setHomeAssistantBusy(true, 'Sending Plan...');
+      setHomeAssistantRoutingSummary(
+        planningState.agentLabel,
+        'Continuing with the workspace manager using the reviewed intake summary.'
+      );
+
+      await openWorkspaceAssistantForPrompt(
+        planningState.prompt,
+        planningState.routeContext,
+        planningState.intent,
+        {
+          dispatchPrompt: planningState.dispatchPrompt,
+          workflowResponse: planningState.workflowResponse || null,
+          linkedTask: planningState.mainTask || null,
+          preservePlanningReview: true,
+          reuseExistingSession: true
+        }
+      );
+    } catch (error) {
+      dashLog.debug('Planning review handoff failed', { error: error && error.message || error });
+      planningState.mainTaskCreating = false;
+      if (planningState.mainTask && planningState.mainTask.id) {
+        appendHomeAssistantMessage('assistant', 'I could not continue with the workspace manager right now.');
+        setHomeAssistantRoutingSummary('Planning Review', 'Could not continue with the workspace manager right now.');
+      } else {
+        appendHomeAssistantMessage('assistant', 'I could not add the main workspace task right now.');
+        setHomeAssistantRoutingSummary('Planning Review', 'Could not add the main workspace task right now.');
+      }
+    } finally {
+      planningState.mainTaskCreating = false;
+      planningState.continuing = false;
+      setHomeAssistantBusy(false);
+      renderHomeAssistantPlanning();
+    }
+  }
+
+  function clearHomeAssistantPlanning() {
+    homeAssistantState.planningState = null;
+    if (!homeAssistantState.inlineReplyState) {
+      homeAssistantState.conversationCollapsed = false;
+    }
+    renderHomeAssistantPlanning();
+  }
+
+  function clearHomeAssistantInlineReply() {
+    homeAssistantState.inlineReplyState = null;
+    if (!homeAssistantState.planningState) {
+      homeAssistantState.conversationCollapsed = false;
+    }
+    renderHomeAssistantInlineReply();
+  }
+
+  function buildHomeAssistantInlineReplyPlaceholder(intent, agentLabel) {
+    if (intent && intent.key === 'travel_planning') {
+      return 'Example: 1A, 2C, 3B, 4B, and I care about food and museums.';
+    }
+    return 'Reply to ' + (agentLabel || getWorkspaceHomeAssistantDisplayName()) + '...';
+  }
+
+  function getInlineReplyWorkspaceName(routeContext) {
+    var workspaceId = String(routeContext && routeContext.workspace_id || '').trim();
+    var detailWorkspace = window.workspaceDetail && window.workspaceDetail.workspace;
+    if (detailWorkspace && String(detailWorkspace.id || '').trim() === workspaceId) {
+      return String(detailWorkspace.name || '').trim();
+    }
+    var crumb = document.getElementById('workspace-breadcrumb-name');
+    return crumb ? String(crumb.textContent || '').trim() : '';
+  }
+
+  function cleanInlineReplyQuestion(text) {
+    return String(text || '')
+      .replace(/^[\s>*-]+/, '')
+      .replace(/^\d+[.)]\s*/, '')
+      .replace(/\*\*/g, '')
+      .trim();
+  }
+
+  function cleanInlineReplyChoiceText(text) {
+    return String(text || '')
+      .replace(/^\s*[-*]\s*/, '')
+      .replace(/^\s*\d+[.)]\s*/, '')
+      .replace(/\*\*/g, '')
+      .replace(/`/g, '')
+      .replace(/\[(.*?)\]\((.*?)\)/g, '$1')
+      .replace(/\s+/g, ' ')
+      .trim();
+  }
+
+  function buildInlineReplyChoiceId(number, label) {
+    var normalized = normalizeToken(label).replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
+    if (!normalized) normalized = 'option';
+    return 'choice_' + String(number || 'x').trim() + '_' + normalized.slice(0, 48);
+  }
+
+  function extractInlineReplyQuestions(text) {
+    var lines = String(text || '').split(/\r?\n/);
+    var questions = [];
+    var seen = Object.create(null);
+
+    for (var i = 0; i < lines.length; i++) {
+      var line = cleanInlineReplyQuestion(lines[i]);
+      if (!line || line.length < 8) continue;
+      if (line.charAt(line.length - 1) !== '?') continue;
+
+      var normalized = normalizeToken(line);
+      if (seen[normalized]) continue;
+      seen[normalized] = true;
+      questions.push(line);
+      if (questions.length >= 4) break;
+    }
+
+    return questions;
+  }
+
+  function extractInlineReplyChoices(text) {
+    var lines = String(text || '').split(/\r?\n/);
+    var cueIndex = -1;
+    var cues = ['next steps', 'next step', 'reply with your preference', 'choose one', 'choose the next step'];
+
+    for (var i = 0; i < lines.length; i++) {
+      var cleaned = normalizeToken(cleanInlineReplyChoiceText(lines[i]));
+      for (var c = 0; c < cues.length; c++) {
+        if (cleaned.indexOf(cues[c]) !== -1) {
+          cueIndex = i;
+          break;
+        }
+      }
+      if (cueIndex !== -1) break;
+    }
+
+    if (cueIndex === -1) return [];
+
+    var choices = [];
+    var started = false;
+    for (var lineIndex = cueIndex + 1; lineIndex < lines.length; lineIndex++) {
+      var rawLine = String(lines[lineIndex] || '');
+      var match = rawLine.match(/^\s*(\d+)[.)]\s*(.+)$/);
+      if (match) {
+        var choiceNumber = String(match[1] || '').trim();
+        var choiceLabel = cleanInlineReplyChoiceText(match[2]);
+        if (!choiceLabel) continue;
+        choices.push({
+          id: buildInlineReplyChoiceId(choiceNumber, choiceLabel),
+          label: choiceLabel,
+          number: choiceNumber
+        });
+        started = true;
+        if (choices.length >= 5) break;
+        continue;
+      }
+
+      if (!started) continue;
+      if (!rawLine.trim()) continue;
+      break;
+    }
+
+    return choices.length >= 2 ? choices : [];
+  }
+
+  function buildSyntheticInlineReplyWorkflowStep(latestReplyText, routeContext) {
+    var choices = extractInlineReplyChoices(latestReplyText);
+    if (!choices.length) return null;
+
+    var normalizedContext = normalizeHomeRouteContext(routeContext);
+    var sessionId = String(normalizedContext && normalizedContext.session_id || '').trim() || 'inline';
+    return {
+      workflow_id: 'workflow:' + sessionId + ':inline-choice',
+      step_id: 'step:inline-choice',
+      step_type: 'ask_choice',
+      title: 'Choose the next step',
+      summary: 'Pick one option below to continue the plan.',
+      choices: choices,
+      free_text_allowed: false
+    };
+  }
+
+  function buildInlineReplyWorkflowResponse(replyState, text) {
+    if (!replyState || !replyState.workflowStep) return null;
+
+    var step = replyState.workflowStep;
+    if (String(step.step_type || '').trim() !== 'ask_choice') return null;
+    if (!replyState.selectedChoiceId) return null;
+
+    return {
+      workflow_id: String(step.workflow_id || '').trim(),
+      step_id: String(step.step_id || '').trim(),
+      response_type: 'choice',
+      choice_id: String(replyState.selectedChoiceId || '').trim(),
+      choice_label: String(replyState.selectedChoiceLabel || '').trim(),
+      choice_number: String(replyState.selectedChoiceNumber || '').trim(),
+      text: String(text || '').trim()
+    };
+  }
+
+  function enableHomeAssistantInlineReply(routeContext, intent, agentLabel, latestReplyText, workflowStep, linkedTask) {
+    var normalizedReply = String(latestReplyText || '').trim();
+    var resolvedWorkflowStep = workflowStep && String(workflowStep.step_type || '').trim() === 'ask_choice'
+      ? workflowStep
+      : buildSyntheticInlineReplyWorkflowStep(normalizedReply, routeContext);
+    var questionPrompts = extractInlineReplyQuestions(normalizedReply);
+    var hasChoiceStep = resolvedWorkflowStep &&
+      String(resolvedWorkflowStep.step_type || '').trim() === 'ask_choice' &&
+      Array.isArray(resolvedWorkflowStep.choices) &&
+      resolvedWorkflowStep.choices.length > 0;
+
+    if (!hasChoiceStep && questionPrompts.length === 0) {
+      homeAssistantState.inlineReplyState = null;
+      if (!homeAssistantState.planningState) {
+        homeAssistantState.conversationCollapsed = false;
+      }
+      renderHomeAssistantInlineReply();
+      return null;
+    }
+
+    homeAssistantState.inlineReplyState = {
+      routeContext: normalizeHomeRouteContext(routeContext),
+      intent: intent || HOME_INTENTS.general_task,
+      agentLabel: String(agentLabel || getWorkspaceHomeAssistantDisplayName()).trim() || getWorkspaceHomeAssistantDisplayName(),
+      latestReplyText: normalizedReply,
+      workflowStep: resolvedWorkflowStep,
+      questionPrompts: questionPrompts,
+      linkedTask: linkedTask && linkedTask.id ? linkedTask : getActiveLinkedPlanningTask(),
+      selectedChoiceId: '',
+      selectedChoiceLabel: '',
+      selectedChoiceNumber: '',
+      draft: '',
+      submitting: false
+    };
+    homeAssistantState.conversationCollapsed = true;
+    renderHomeAssistantInlineReply();
+    return homeAssistantState.inlineReplyState;
+  }
+
+  function openWorkspacePlanningFileUpload(questionId) {
+    var planningState = homeAssistantState.planningState;
+    if (!planningState || planningState.kind !== 'planning_form') return;
+
+    var question = findPlanningQuestionById(planningState, questionId);
+    if (!question || question.type !== 'file') return;
+
+    var statusText = question.file_config && question.file_config.opened_status
+      ? String(question.file_config.opened_status).trim()
+      : 'Upload modal opened for this planning step.';
+
+    try {
+      if (window.workspaceDetail && typeof window.workspaceDetail.showFileModal === 'function') {
+        window.workspaceDetail.showFileModal();
+      } else if (window.WorkspaceHubFiles && typeof window.WorkspaceHubFiles.openAddFileModal === 'function') {
+        window.WorkspaceHubFiles.openAddFileModal();
+      } else {
+        throw new Error('File upload modal unavailable');
+      }
+
+      planningState.uploads[question.id] = true;
+      setHomeAssistantRoutingSummary(planningState.schema.title || 'Planning Step', statusText);
+      renderHomeAssistantPlanning();
+    } catch (error) {
+      dashLog.debug('Failed to open workspace planning upload modal', {
+        questionId: questionId,
+        error: error && error.message || error
+      });
+      if (window.Toast) {
+        Toast.error('File upload modal is unavailable right now.');
+      }
+      setHomeAssistantRoutingSummary(planningState.schema.title || 'Planning Step', 'Could not open the upload modal right now.');
+    }
+  }
+
+  function validatePlanningFormState(planningState) {
+    var questions = getPlanningQuestions(planningState);
+    var formData = planningState && planningState.formData ? planningState.formData : {};
+
+    for (var i = 0; i < questions.length; i++) {
+      var question = questions[i];
+      if (!question || !question.required || !shouldShowPlanningQuestion(question, planningState)) continue;
+      if (question.type === 'file') continue;
+
+      var value = formData[question.id];
+      if (!String(value || '').trim()) {
+        return question;
+      }
+    }
+
+    return null;
+  }
+
+  function renderHomeAssistantPlanning() {
+    var els = getHomeAssistantElements();
+    var container = els.planning;
+    if (!container) return;
+
+    var planningState = homeAssistantState.planningState;
+    container.innerHTML = '';
+    if (!planningState || !planningState.schema || (planningState.kind !== 'planning_form' && planningState.kind !== 'planning_review')) {
+      container.classList.add('d-none');
+      syncHomeAssistantLauncher();
+      if (!homeAssistantState.busy) {
+        closeHomeAssistantThinkingModal();
+      }
+      return;
+    }
+
+    if (planningState.kind === 'planning_review') {
+      var isReviewBusy = Boolean(
+        homeAssistantState.busy ||
+        planningState.noteSaving ||
+        planningState.mainTaskCreating ||
+        planningState.specialistBusy ||
+        planningState.continuing
+      );
+
+      var reviewCard = document.createElement('div');
+      reviewCard.className = 'home-assistant-planning-card';
+
+      var reviewEyebrow = document.createElement('div');
+      reviewEyebrow.className = 'home-assistant-planning-eyebrow';
+      reviewEyebrow.textContent = 'Planning Review';
+      reviewCard.appendChild(reviewEyebrow);
+
+      var reviewTitle = document.createElement('div');
+      reviewTitle.className = 'home-assistant-planning-title';
+      reviewTitle.textContent = planningState.schema.title || 'Review Intake Summary';
+      reviewCard.appendChild(reviewTitle);
+
+      var reviewSubtitle = document.createElement('p');
+      reviewSubtitle.className = 'home-assistant-planning-subtitle';
+      reviewSubtitle.textContent = planningState.mainTask && planningState.mainTask.description
+        ? 'Review the summary, save it to a note if you want, and continue when you are ready. The main task is already in the workspace.'
+        : 'Review the summary, save it to a note if you want, and continue when you are ready. The main task will be added to the workspace before subtasks begin.';
+      reviewCard.appendChild(reviewSubtitle);
+
+      var reviewSummary = document.createElement('div');
+      reviewSummary.className = 'home-assistant-planning-summary';
+      reviewSummary.textContent = planningState.summaryText || 'No planning summary available.';
+      reviewCard.appendChild(reviewSummary);
+
+      if (planningState.noteSaved && planningState.noteSaved.name) {
+        var noteStatus = document.createElement('div');
+        noteStatus.className = 'home-assistant-planning-help';
+        noteStatus.textContent = 'Saved to workspace note "' + planningState.noteSaved.name + '".';
+        reviewCard.appendChild(noteStatus);
+      }
+
+      if (planningState.mainTask && planningState.mainTask.description) {
+        var taskStatus = document.createElement('div');
+        taskStatus.className = 'home-assistant-planning-help';
+        taskStatus.textContent = 'Added main workspace task "' + planningState.mainTask.description + '".';
+        reviewCard.appendChild(taskStatus);
+      }
+
+      var noteActions = document.createElement('div');
+      noteActions.className = 'home-assistant-planning-actions';
+
+      var saveNoteButton = document.createElement('button');
+      saveNoteButton.type = 'button';
+      saveNoteButton.className = 'modern-btn modern-btn-secondary';
+      saveNoteButton.disabled = isReviewBusy || Boolean(planningState.noteSaved);
+      saveNoteButton.textContent = planningState.noteSaving
+        ? 'Saving Note...'
+        : (planningState.noteSaved && planningState.noteSaved.name
+            ? 'Saved To "' + planningState.noteSaved.name + '"'
+            : 'Save Summary To Note');
+      saveNoteButton.addEventListener('click', function () {
+        savePlanningReviewToNote();
+      });
+      noteActions.appendChild(saveNoteButton);
+
+      var continueButton = document.createElement('button');
+      continueButton.type = 'button';
+      continueButton.className = 'modern-btn modern-btn-primary';
+      continueButton.disabled = isReviewBusy;
+      continueButton.textContent = planningState.mainTaskCreating
+        ? 'Adding Main Task...'
+        : planningState.continuing
+        ? 'Continuing...'
+        : ('Continue With ' + planningState.agentLabel);
+      continueButton.addEventListener('click', function () {
+        continuePlanningReviewWithManager();
+      });
+      noteActions.appendChild(continueButton);
+      reviewCard.appendChild(noteActions);
+
+      var specialistHelp = document.createElement('div');
+      specialistHelp.className = 'home-assistant-planning-help';
+      specialistHelp.style.marginTop = '0.35rem';
+      specialistHelp.textContent = 'Add specialists to the workspace now, or open them after they are added.';
+      reviewCard.appendChild(specialistHelp);
+
+      var specialistActions = document.createElement('div');
+      specialistActions.className = 'home-assistant-planning-actions';
+
+      Object.keys(HOME_PLANNING_SPECIALISTS).forEach(function (specialistKey) {
+        var config = HOME_PLANNING_SPECIALISTS[specialistKey];
+        var status = planningState.specialistStatuses[specialistKey] || null;
+        var specialistButton = document.createElement('button');
+        specialistButton.type = 'button';
+        specialistButton.className = 'modern-btn modern-btn-secondary';
+        specialistButton.disabled = isReviewBusy && planningState.specialistBusy !== specialistKey;
+        if (planningState.specialistBusy === specialistKey) {
+          specialistButton.disabled = true;
+          specialistButton.textContent = 'Adding ' + config.label + '...';
+        } else if (status && status.status === 'added' && status.agentName) {
+          specialistButton.textContent = 'Open ' + status.agentName;
+        } else {
+          specialistButton.textContent = 'Add ' + config.label;
+        }
+        specialistButton.addEventListener('click', function () {
+          addPlanningReviewSpecialist(specialistKey);
+        });
+        specialistActions.appendChild(specialistButton);
+      });
+
+      var askAnotherButton = document.createElement('button');
+      askAnotherButton.type = 'button';
+      askAnotherButton.className = 'modern-btn modern-btn-secondary';
+      askAnotherButton.disabled = isReviewBusy;
+      askAnotherButton.textContent = 'Ask Another Task';
+      askAnotherButton.addEventListener('click', function () {
+        focusHomeAssistantInput();
+      });
+      specialistActions.appendChild(askAnotherButton);
+
+      reviewCard.appendChild(specialistActions);
+      container.appendChild(reviewCard);
+      container.classList.remove('d-none');
+      syncHomeAssistantLauncher();
+      openHomeAssistantThinkingModal();
+      return;
+    }
+
+    var formData = planningState.formData || {};
+    var uploads = planningState.uploads || {};
+    var isSubmitting = Boolean(planningState.submitting || homeAssistantState.busy);
+    var card = document.createElement('div');
+    card.className = 'home-assistant-planning-card';
+
+    var eyebrow = document.createElement('div');
+    eyebrow.className = 'home-assistant-planning-eyebrow';
+    eyebrow.textContent = 'Planning Step';
+    card.appendChild(eyebrow);
+
+    var title = document.createElement('div');
+    title.className = 'home-assistant-planning-title';
+    title.textContent = planningState.schema.title || 'Planning Step';
+    card.appendChild(title);
+
+    if (planningState.schema.subtitle) {
+      var subtitle = document.createElement('p');
+      subtitle.className = 'home-assistant-planning-subtitle';
+      subtitle.textContent = planningState.schema.subtitle;
+      card.appendChild(subtitle);
+    }
+
+    if (planningState.schema.summary) {
+      var summary = document.createElement('div');
+      summary.className = 'home-assistant-planning-summary';
+      summary.textContent = planningState.schema.summary;
+      card.appendChild(summary);
+    }
+
+    var form = document.createElement('form');
+    form.className = 'home-assistant-planning-form';
+    form.noValidate = true;
+
+    function addFieldLabel(field, question) {
+      var label = document.createElement('label');
+      label.className = 'home-assistant-planning-label';
+      label.textContent = question.label || '';
+      field.appendChild(label);
+      if (question.help_text) {
+        var help = document.createElement('div');
+        help.className = 'home-assistant-planning-help';
+        help.textContent = question.help_text;
+        field.appendChild(help);
+      }
+    }
+
+    function buildChoiceGroup(question, selectedValue) {
+      var wrapper = document.createElement('div');
+      wrapper.className = 'home-assistant-planning-choice-group';
+      wrapper.setAttribute('data-planning-focus', question.id);
+
+      var options = Array.isArray(question.options) ? question.options : [];
+      for (var i = 0; i < options.length; i++) {
+        var optionConfig = options[i] || {};
+        var optionValue = String(optionConfig.value || '');
+        if (!optionValue) continue;
+
+        var choice = document.createElement('button');
+        choice.type = 'button';
+        choice.className = 'home-assistant-planning-choice';
+        choice.disabled = isSubmitting;
+        choice.classList.toggle('is-selected', optionValue === String(selectedValue || ''));
+        choice.setAttribute('aria-pressed', optionValue === String(selectedValue || '') ? 'true' : 'false');
+        choice.addEventListener('click', function (event) {
+          if (!homeAssistantState.planningState) return;
+          homeAssistantState.planningState.formData[question.id] = event.currentTarget.dataset.value;
+          renderHomeAssistantPlanning();
+        });
+        choice.dataset.value = optionValue;
+
+        var choiceLabel = document.createElement('span');
+        choiceLabel.className = 'home-assistant-planning-choice-label';
+        choiceLabel.textContent = optionConfig.label || optionValue;
+        choice.appendChild(choiceLabel);
+
+        wrapper.appendChild(choice);
+      }
+
+      return wrapper;
+    }
+
+    function buildQuestionField(question) {
+      var field = document.createElement('div');
+      field.className = question.type === 'file'
+        ? 'home-assistant-planning-upload'
+        : 'home-assistant-planning-field';
+
+      if (question.type === 'file') {
+        var uploadText = document.createElement('p');
+        uploadText.className = 'home-assistant-planning-upload-text';
+        uploadText.textContent = question.help_text || question.label || '';
+        if (uploads[question.id]) {
+          var uploadStatus = document.createElement('span');
+          uploadStatus.className = 'home-assistant-planning-upload-status';
+          uploadStatus.textContent = question.file_config && question.file_config.opened_status
+            ? question.file_config.opened_status
+            : 'Upload modal opened for this file.';
+          uploadText.appendChild(document.createElement('br'));
+          uploadText.appendChild(uploadStatus);
+        }
+
+        var uploadButton = document.createElement('button');
+        uploadButton.type = 'button';
+        uploadButton.className = 'modern-btn modern-btn-secondary';
+        uploadButton.textContent = question.file_config && question.file_config.button_label
+          ? question.file_config.button_label
+          : (question.label || 'Attach File');
+        uploadButton.disabled = isSubmitting;
+        uploadButton.addEventListener('click', function () {
+          openWorkspacePlanningFileUpload(question.id);
+        });
+
+        field.appendChild(uploadText);
+        field.appendChild(uploadButton);
+        return field;
+      }
+
+      addFieldLabel(field, question);
+
+      if (question.type === 'select') {
+        field.classList.add('is-choice-field');
+        field.appendChild(buildChoiceGroup(question, formData[question.id]));
+        if (!String(formData[question.id] || '').trim()) {
+          var choiceHint = document.createElement('div');
+          choiceHint.className = 'home-assistant-planning-choice-hint';
+          choiceHint.textContent = 'Choose one option to continue.';
+          field.appendChild(choiceHint);
+        }
+        return field;
+      }
+
+      if (question.type === 'textarea') {
+        var textarea = document.createElement('textarea');
+        textarea.className = 'home-assistant-planning-textarea';
+        textarea.name = question.id;
+        textarea.disabled = isSubmitting;
+        textarea.required = Boolean(question.required);
+        textarea.rows = question.rows > 0 ? question.rows : 3;
+        textarea.value = formData[question.id] || '';
+        textarea.placeholder = question.placeholder || '';
+        textarea.addEventListener('input', function (event) {
+          if (!homeAssistantState.planningState) return;
+          homeAssistantState.planningState.formData[question.id] = event.target.value;
+        });
+        field.appendChild(textarea);
+        return field;
+      }
+
+      var input = document.createElement('input');
+      input.type = 'text';
+      input.className = 'home-assistant-planning-input';
+      input.name = question.id;
+      input.disabled = isSubmitting;
+      input.required = Boolean(question.required);
+      input.value = formData[question.id] || '';
+      input.placeholder = question.placeholder || '';
+      input.addEventListener('input', function (event) {
+        if (!homeAssistantState.planningState) return;
+        homeAssistantState.planningState.formData[question.id] = event.target.value;
+      });
+      field.appendChild(input);
+      return field;
+    }
+
+    var visibleQuestions = [];
+    var questions = getPlanningQuestions(planningState);
+    for (var i = 0; i < questions.length; i++) {
+      if (shouldShowPlanningQuestion(questions[i], planningState)) {
+        visibleQuestions.push(questions[i]);
+      }
+    }
+
+    var grid = null;
+    for (var qIndex = 0; qIndex < visibleQuestions.length; qIndex++) {
+      var question = visibleQuestions[qIndex];
+      var field = buildQuestionField(question);
+      if (question.type === 'select') {
+        if (!grid) {
+          grid = document.createElement('div');
+          grid.className = 'home-assistant-planning-grid';
+        }
+        grid.appendChild(field);
+        continue;
+      }
+
+      if (grid && grid.children.length > 0) {
+        form.appendChild(grid);
+        grid = null;
+      }
+      form.appendChild(field);
+    }
+    if (grid && grid.children.length > 0) {
+      form.appendChild(grid);
+    }
+
+    var actions = document.createElement('div');
+    actions.className = 'home-assistant-planning-actions';
+
+    var submitButton = document.createElement('button');
+    submitButton.type = 'submit';
+    submitButton.className = 'modern-btn modern-btn-primary';
+    submitButton.textContent = isSubmitting
+      ? 'Sending...'
+      : (planningState.schema.submit_label || ('Continue With ' + planningState.agentLabel));
+    submitButton.disabled = isSubmitting;
+    actions.appendChild(submitButton);
+
+    var resetButton = document.createElement('button');
+    resetButton.type = 'button';
+    resetButton.className = 'modern-btn modern-btn-secondary';
+    resetButton.textContent = 'Ask Another Task';
+    resetButton.disabled = isSubmitting;
+    resetButton.addEventListener('click', function () {
+      focusHomeAssistantInput();
+    });
+    actions.appendChild(resetButton);
+
+    form.appendChild(actions);
+    form.addEventListener('submit', function (event) {
+      event.preventDefault();
+      submitHomeAssistantPlanningForm();
+    });
+
+    card.appendChild(form);
+    container.appendChild(card);
+    container.classList.remove('d-none');
+    syncHomeAssistantLauncher();
+    openHomeAssistantThinkingModal();
+
+    if (planningState.focusField) {
+      var focusName = planningState.focusField;
+      planningState.focusField = '';
+      window.setTimeout(function () {
+        var field = container.querySelector('[name="' + focusName + '"]');
+        if (!field) {
+          field = container.querySelector('[data-planning-focus="' + focusName + '"] .home-assistant-planning-choice:not([disabled])');
+        }
+        if (field && typeof field.focus === 'function') {
+          field.focus();
+        }
+      }, 80);
+    }
+  }
+
+  function renderHomeAssistantInlineReply() {
+    var els = getHomeAssistantElements();
+    var container = els.inlineReply;
+    if (!container) return;
+
+    var replyState = homeAssistantState.inlineReplyState;
+    container.innerHTML = '';
+    if (!replyState) {
+      container.classList.add('d-none');
+      syncHomeAssistantLauncher();
+      if (!homeAssistantState.busy) {
+        closeHomeAssistantThinkingModal();
+      }
+      return;
+    }
+
+    var isSubmitting = Boolean(replyState.submitting || homeAssistantState.busy);
+    var workflowStep = replyState.workflowStep && typeof replyState.workflowStep === 'object'
+      ? replyState.workflowStep
+      : null;
+    var choiceStep = workflowStep &&
+      String(workflowStep.step_type || '').trim() === 'ask_choice' &&
+      Array.isArray(workflowStep.choices) &&
+      workflowStep.choices.length > 0
+      ? workflowStep
+      : null;
+    var choiceRequiresText = Boolean(choiceStep && choiceStep.free_text_allowed);
+    var card = document.createElement('div');
+    card.className = 'home-assistant-inline-reply-card';
+
+    var header = document.createElement('div');
+    header.className = 'home-assistant-inline-reply-header';
+    header.textContent = 'Planning Subtask';
+    card.appendChild(header);
+
+    var meta = document.createElement('div');
+    meta.className = 'home-assistant-inline-reply-meta';
+
+    var statusChip = document.createElement('span');
+    statusChip.className = 'home-assistant-inline-reply-chip is-waiting';
+    statusChip.textContent = isSubmitting ? 'Submitting' : 'Waiting on you';
+    meta.appendChild(statusChip);
+
+    var workspaceName = getInlineReplyWorkspaceName(replyState.routeContext);
+    if (workspaceName) {
+      var workspaceChip = document.createElement('span');
+      workspaceChip.className = 'home-assistant-inline-reply-chip';
+      workspaceChip.textContent = workspaceName;
+      meta.appendChild(workspaceChip);
+    }
+
+    var planChip = document.createElement('span');
+    planChip.className = 'home-assistant-inline-reply-chip';
+    planChip.textContent = replyState.linkedTask && replyState.linkedTask.id
+      ? 'Main task added'
+      : 'Linked to workspace plan';
+    meta.appendChild(planChip);
+    card.appendChild(meta);
+
+    if (replyState.linkedTask && replyState.linkedTask.description) {
+      var linkedTaskMeta = document.createElement('div');
+      linkedTaskMeta.className = 'home-assistant-inline-reply-preview-meta';
+      linkedTaskMeta.textContent = 'Main workspace task: ' + replyState.linkedTask.description;
+      card.appendChild(linkedTaskMeta);
+    }
+
+    var title = document.createElement('div');
+    title.className = 'home-assistant-inline-reply-title';
+    title.textContent = choiceStep && String(choiceStep.title || '').trim()
+      ? String(choiceStep.title || '').trim()
+      : 'Review the current plan, then complete this subtask.';
+    card.appendChild(title);
+
+    if (replyState.latestReplyText) {
+      var preview = document.createElement('section');
+      preview.className = 'home-assistant-inline-reply-preview';
+
+      var previewEyebrow = document.createElement('div');
+      previewEyebrow.className = 'home-assistant-inline-reply-preview-eyebrow';
+      previewEyebrow.textContent = 'Current Plan';
+      preview.appendChild(previewEyebrow);
+
+      var previewMeta = document.createElement('div');
+      previewMeta.className = 'home-assistant-inline-reply-preview-meta';
+      previewMeta.textContent = (replyState.agentLabel || getWorkspaceHomeAssistantDisplayName()) + ' is carrying this planning thread.';
+      preview.appendChild(previewMeta);
+
+      var previewBody = document.createElement('div');
+      previewBody.className = 'home-assistant-inline-reply-preview-body';
+      previewBody.textContent = replyState.latestReplyText;
+      preview.appendChild(previewBody);
+      card.appendChild(preview);
+    }
+
+    if (choiceStep) {
+      var choicePrompts = document.createElement('section');
+      choicePrompts.className = 'home-assistant-inline-reply-prompts';
+
+      var choicePromptsTitle = document.createElement('div');
+      choicePromptsTitle.className = 'home-assistant-inline-reply-prompts-title';
+      choicePromptsTitle.textContent = 'Complete This Subtask';
+      choicePrompts.appendChild(choicePromptsTitle);
+
+      var choicePromptsBody = document.createElement('div');
+      choicePromptsBody.className = 'home-assistant-inline-reply-copy';
+      choicePromptsBody.style.marginBottom = '0';
+      choicePromptsBody.textContent = String(choiceStep.summary || 'Choose one option below to continue this plan.').trim();
+      choicePrompts.appendChild(choicePromptsBody);
+
+      card.appendChild(choicePrompts);
+    } else if (replyState.questionPrompts && replyState.questionPrompts.length > 0) {
+      var prompts = document.createElement('section');
+      prompts.className = 'home-assistant-inline-reply-prompts';
+
+      var promptsTitle = document.createElement('div');
+      promptsTitle.className = 'home-assistant-inline-reply-prompts-title';
+      promptsTitle.textContent = 'Complete This Subtask';
+      prompts.appendChild(promptsTitle);
+
+      var promptsList = document.createElement('ul');
+      promptsList.className = 'home-assistant-inline-reply-prompts-list';
+
+      for (var i = 0; i < replyState.questionPrompts.length; i++) {
+        var item = document.createElement('li');
+        item.textContent = replyState.questionPrompts[i];
+        promptsList.appendChild(item);
+      }
+
+      prompts.appendChild(promptsList);
+      card.appendChild(prompts);
+    }
+
+    var copy = document.createElement('div');
+    copy.className = 'home-assistant-inline-reply-copy';
+    copy.textContent = choiceStep
+      ? 'Choose one option to move the workspace plan forward. Open full chat instead if this subtask needs more explanation.'
+      : replyState.questionPrompts && replyState.questionPrompts.length > 0
+      ? 'Answer the open planning questions below, or move this to full chat if you want a longer back-and-forth.'
+      : 'Complete this subtask below, or move this to full chat if the plan needs a longer back-and-forth.';
+    card.appendChild(copy);
+
+    var form = document.createElement('form');
+    form.className = 'home-assistant-inline-reply-form';
+    form.noValidate = true;
+
+    if (choiceStep) {
+      var choiceGroup = document.createElement('div');
+      choiceGroup.className = 'home-assistant-planning-choice-group';
+
+      for (var i = 0; i < choiceStep.choices.length; i++) { // eslint-disable-line no-redeclare
+        (function (choice) {
+          var choiceButton = document.createElement('button');
+          choiceButton.type = 'button';
+          choiceButton.className = 'home-assistant-planning-choice' + (replyState.selectedChoiceId === choice.id ? ' is-selected' : '');
+          choiceButton.disabled = isSubmitting;
+          choiceButton.setAttribute('aria-pressed', replyState.selectedChoiceId === choice.id ? 'true' : 'false');
+          choiceButton.addEventListener('click', function () {
+            if (!homeAssistantState.inlineReplyState || isSubmitting) return;
+            homeAssistantState.inlineReplyState.selectedChoiceId = choice.id;
+            homeAssistantState.inlineReplyState.selectedChoiceLabel = choice.label || '';
+            homeAssistantState.inlineReplyState.selectedChoiceNumber = choice.number || '';
+            renderHomeAssistantInlineReply();
+          });
+
+          var choiceLabel = document.createElement('span');
+          choiceLabel.className = 'home-assistant-planning-choice-label';
+          choiceLabel.textContent = choice.number ? choice.number + '. ' + choice.label : choice.label;
+          choiceButton.appendChild(choiceLabel);
+
+          if (choice.description) {
+            var choiceHint = document.createElement('span');
+            choiceHint.className = 'home-assistant-planning-choice-hint';
+            choiceHint.textContent = choice.description;
+            choiceButton.appendChild(choiceHint);
+          }
+
+          choiceGroup.appendChild(choiceButton);
+        })(choiceStep.choices[i] || {});
+      }
+
+      form.appendChild(choiceGroup);
+    }
+
+    if (!choiceStep || choiceRequiresText) {
+      var label = document.createElement('label');
+      label.className = 'home-assistant-inline-reply-input-label';
+      label.setAttribute('for', 'homeAssistantInlineReplyMessage');
+      label.textContent = choiceStep ? 'Optional Planning Note' : 'Subtask Response';
+      form.appendChild(label);
+
+      var textarea = document.createElement('textarea');
+      textarea.id = 'homeAssistantInlineReplyMessage';
+      textarea.className = 'home-assistant-inline-reply-textarea';
+      textarea.name = 'inlineReplyMessage';
+      textarea.disabled = isSubmitting;
+      textarea.value = replyState.draft || '';
+      textarea.placeholder = choiceStep
+        ? 'Add extra planning context for this selected choice (optional)'
+        : buildHomeAssistantInlineReplyPlaceholder(replyState.intent, replyState.agentLabel);
+      textarea.addEventListener('input', function (event) {
+        if (!homeAssistantState.inlineReplyState) return;
+        homeAssistantState.inlineReplyState.draft = event.target.value;
+      });
+      form.appendChild(textarea);
+    }
+
+    var actions = document.createElement('div');
+    actions.className = 'home-assistant-inline-reply-actions';
+
+    var sendButton = document.createElement('button');
+    sendButton.type = 'submit';
+    sendButton.className = 'modern-btn modern-btn-primary';
+    sendButton.disabled = isSubmitting || (choiceStep ? !replyState.selectedChoiceId : false);
+    sendButton.textContent = isSubmitting
+      ? 'Sending...'
+      : choiceStep
+      ? 'Complete Subtask'
+      : 'Submit Subtask';
+    actions.appendChild(sendButton);
+
+    var openChatButton = document.createElement('button');
+    openChatButton.type = 'button';
+    openChatButton.className = 'modern-btn modern-btn-secondary';
+    openChatButton.disabled = isSubmitting;
+    openChatButton.textContent = choiceStep ? 'Move to Full Chat' : 'Open Chat Instead';
+    openChatButton.addEventListener('click', function () {
+      openChatPanel();
+    });
+    actions.appendChild(openChatButton);
+
+    form.appendChild(actions);
+    form.addEventListener('submit', function (event) {
+      event.preventDefault();
+      submitHomeAssistantInlineReply();
+    });
+
+    card.appendChild(form);
+    container.appendChild(card);
+    container.classList.remove('d-none');
+    syncHomeAssistantLauncher();
+    openHomeAssistantThinkingModal();
+  }
+
+  async function submitHomeAssistantInlineReply() {
+    var replyState = homeAssistantState.inlineReplyState;
+    if (!replyState || replyState.submitting) return;
+
+    var workflowResponse = buildInlineReplyWorkflowResponse(replyState, replyState.draft || '');
+    var choiceStep = replyState.workflowStep &&
+      String(replyState.workflowStep.step_type || '').trim() === 'ask_choice' &&
+      Array.isArray(replyState.workflowStep.choices) &&
+      replyState.workflowStep.choices.length > 0;
+    var text = String(replyState.draft || '').trim();
+    var submittedText = text;
+    if (choiceStep) {
+      if (!workflowResponse) {
+        if (window.Toast) {
+          Toast.warning('Choose one next step before sending it to the workspace manager.');
+        }
+        renderHomeAssistantInlineReply();
+        return;
+      }
+      submittedText = String(replyState.selectedChoiceLabel || replyState.selectedChoiceId || '').trim();
+      if (text) {
+        submittedText += ': ' + text;
+      }
+    }
+
+    if (!submittedText) {
+      if (window.Toast) {
+        Toast.warning('Enter a reply before sending it to the workspace manager.');
+      }
+      renderHomeAssistantInlineReply();
+      return;
+    }
+
+    replyState.submitting = true;
+    renderHomeAssistantInlineReply();
+    appendHomeAssistantMessage('user', submittedText);
+    setHomeAssistantBusy(true, 'Sending Reply...');
+    setHomeAssistantRoutingSummary(replyState.agentLabel, 'Continuing inline with the workspace manager.');
+
+    try {
+      await openWorkspaceAssistantForPrompt(submittedText, replyState.routeContext, replyState.intent, {
+        reuseExistingSession: true,
+        workflowResponse: workflowResponse
+      });
+    } catch (error) {
+      dashLog.debug('Inline workspace reply failed', { error: error && error.message || error });
+      if (homeAssistantState.inlineReplyState === replyState) {
+        replyState.submitting = false;
+        renderHomeAssistantInlineReply();
+      }
+      appendHomeAssistantMessage('assistant', 'I could not send that reply right now. Please try again or open chat.');
+      setHomeAssistantRoutingSummary('Inline Reply Failed', 'Could not continue with the workspace manager right now.');
+    } finally {
+      if (homeAssistantState.inlineReplyState === replyState) {
+        replyState.submitting = false;
+      }
+      setHomeAssistantBusy(false);
+      renderHomeAssistantInlineReply();
+    }
   }
 
   function renderHomeAssistantActions(actions) {
@@ -1692,11 +3638,66 @@
   async function fetchWorkspaceMCPState(workspaceId) {
     if (!workspaceId || typeof API === 'undefined' || typeof API.get !== 'function') return null;
     try {
-      return await API.get('/api/studios/' + encodeURIComponent(workspaceId));
+      return await API.get('/api/workspaces/' + encodeURIComponent(workspaceId));
     } catch (error) {
       dashLog.debug('Failed to fetch workspace MCP state', { workspaceId: workspaceId, error: error && error.message || error });
       return null;
     }
+  }
+
+  async function fetchWorkspaceEntryAgentName(workspaceId) {
+    if (!workspaceId) return '';
+
+    var cached = getLoadedWorkspaceEntryAgentName(workspaceId);
+    if (cached) return cached;
+
+    if (typeof API === 'undefined' || typeof API.get !== 'function') return '';
+    try {
+      var data = await API.get('/api/workspaces/' + encodeURIComponent(workspaceId));
+      return inferWorkspaceEntryAgentNameFromData(data);
+    } catch (error) {
+      dashLog.debug('Failed to fetch workspace entry agent', { workspaceId: workspaceId, error: error && error.message || error });
+      return '';
+    }
+  }
+
+  function inferWorkspaceEntryAgentNameFromData(workspaceData) {
+    if (!workspaceData || typeof workspaceData !== 'object') return '';
+
+    var direct = String(workspaceData.entry_agent_name || '').trim();
+    if (direct) return direct;
+
+    var instances = Array.isArray(workspaceData.agent_instances) ? workspaceData.agent_instances : [];
+    for (var i = 0; i < instances.length; i++) {
+      var instance = instances[i];
+      if (instance && instance.entry_point && String(instance.name || '').trim()) {
+        return String(instance.name || '').trim();
+      }
+    }
+    for (var j = 0; j < instances.length; j++) {
+      var fallbackInstance = String(instances[j] && instances[j].name || '').trim();
+      if (fallbackInstance) return fallbackInstance;
+    }
+
+    var agents = Array.isArray(workspaceData.agents) ? workspaceData.agents : [];
+    for (var k = 0; k < agents.length; k++) {
+      var fallbackAgent = String(agents[k] || '').trim();
+      if (fallbackAgent) return fallbackAgent;
+    }
+
+    return '';
+  }
+
+  function getLoadedWorkspaceEntryAgentName(workspaceId) {
+    var targetWorkspace = String(workspaceId || '').trim();
+    if (!targetWorkspace) return '';
+
+    var detailWorkspace = window.workspaceDetail && window.workspaceDetail.workspace;
+    if (detailWorkspace && String(detailWorkspace.id || '').trim() === targetWorkspace) {
+      return inferWorkspaceEntryAgentNameFromData(detailWorkspace);
+    }
+
+    return '';
   }
 
   function getWorkspaceAgentInstanceByName(workspaceData, agentName) {
@@ -1855,7 +3856,7 @@
 
     try {
       if (!binding) {
-        var createResult = await API.post('/api/studios/' + encodeURIComponent(normalizedWorkspaceId) + '/mcp-bindings', {
+        var createResult = await API.post('/api/workspaces/' + encodeURIComponent(normalizedWorkspaceId) + '/mcp-bindings', {
           server_name: normalizedServerName,
           enabled: true
         });
@@ -1866,7 +3867,7 @@
         };
         createdBinding = true;
       } else if (binding.enabled === false) {
-        var updateResult = await API.put('/api/studios/' + encodeURIComponent(normalizedWorkspaceId) + '/mcp-bindings/' + encodeURIComponent(binding.id), {
+        var updateResult = await API.put('/api/workspaces/' + encodeURIComponent(normalizedWorkspaceId) + '/mcp-bindings/' + encodeURIComponent(binding.id), {
           enabled: true
         });
         binding = updateResult && updateResult.binding ? updateResult.binding : Object.assign({}, binding, { enabled: true });
@@ -1892,7 +3893,7 @@
           if (nextIds.length !== (Array.isArray(access.enabled_binding_ids) ? access.enabled_binding_ids.length : 0)
             || nextIds.indexOf(String(binding.id || '').trim()) < 0) {
             try {
-              await API.put('/api/studios/' + encodeURIComponent(normalizedWorkspaceId) + '/agent-mcp-access/' + encodeURIComponent(instance.id), {
+              await API.put('/api/workspaces/' + encodeURIComponent(normalizedWorkspaceId) + '/agent-mcp-access/' + encodeURIComponent(instance.id), {
                 enabled_binding_ids: nextIds
               });
               accessUpdated = true;
@@ -3768,7 +5769,7 @@
 
   function extractWorkspaceIdFromPath(pathname) {
     var path = String(pathname || '').trim();
-    var match = path.match(/^\/(?:workspaces|studios)\/([^/]+)/i);
+    var match = path.match(/^\/workspaces\/([^/]+)/i);
     if (!match || !match[1]) return '';
     try {
       return decodeURIComponent(match[1]);
@@ -3848,33 +5849,175 @@
     return normalizeToken(routeData && routeData.routing_policy) === 'specialist_required';
   }
 
+  function isWorkspaceSpecialistIntent(routeData) {
+    var intentKey = normalizeToken(routeData && routeData.intent);
+    var intentVariant = normalizeToken(routeData && routeData.intent_variant);
+    var routeMode = normalizeToken(routeData && routeData.route_mode);
+
+    if (routeMode === 'utility_direct' || intentKey === 'utility_direct') {
+      return true;
+    }
+
+    switch (intentKey) {
+      case 'email_check':
+      case 'app_launch':
+        return true;
+      case 'calendar_check':
+        return intentVariant !== 'workspace_schedule';
+      default:
+        return false;
+    }
+  }
+
+  function routeMatchesSystemAssistant(routeData) {
+    var matchedAgent = normalizeToken(routeData && routeData.matched_agent);
+    return matchedAgent === 'ori' || matchedAgent === 'system assistant';
+  }
+
+  function routeMatchesWorkspaceEntryAgent(routeData) {
+    var matchedAgent = normalizeToken(routeData && routeData.matched_agent);
+    var entryAgent = normalizeToken(homeAssistantState.workspaceEntryAgentName);
+    if (!matchedAgent || !entryAgent) return false;
+    return matchedAgent === entryAgent;
+  }
+
   function shouldOpenWorkspaceAssistantForRoute(routeData, routeContext) {
     if (!hasWorkspaceRouteContext(routeContext)) return false;
     if (!routeData) return true;
-    return !routePolicyRequiresSpecialist(routeData);
+    if (routeContextTargetsCurrentWorkspace(routeData, routeContext)) return true;
+    if (isWorkspaceSpecialistIntent(routeData)) return false;
+    if (routePolicyRequiresSpecialist(routeData)) return false;
+    if (shouldAcceptBackendRouteMatch(routeData) &&
+        !routeMatchesWorkspaceEntryAgent(routeData) &&
+        !routeMatchesSystemAssistant(routeData)) {
+      return false;
+    }
+    return true;
   }
 
-  async function openWorkspaceAssistantForPrompt(prompt, routeContext) {
-    setHomeAssistantRoutingSummary('Assistant', 'Opening the workspace Assistant session.');
-
-    var assistantSessionResult = await dispatchPromptToWorkspaceAssistantSession(prompt, routeContext);
+  async function openWorkspaceAssistantForPrompt(prompt, routeContext, intent, options) {
+    var assistantSessionResult = await runWorkspaceAssistantInline(prompt, routeContext, intent, options);
     if (!assistantSessionResult || !assistantSessionResult.session) {
-      throw new Error('Failed to open workspace Assistant session');
+      throw new Error('Failed to run workspace manager');
     }
 
-    trackHomeAssistantSession(assistantSessionResult.session, prompt, 'Assistant');
-    setHomeAssistantMode('continue_session');
-    appendHomeAssistantMessage(
-      'assistant',
-      assistantSessionResult.reused
-        ? 'Continuing the workspace Assistant session in chat.'
-        : 'Started a new workspace Assistant session in chat.'
-    );
-    setHomeAssistantRoutingSummary(
-      assistantSessionResult.reused ? 'Assistant Continued' : 'Assistant Session Started',
-      assistantSessionResult.reused
-        ? 'Your message was sent to the current workspace Assistant session.'
-        : 'A new workspace Assistant session is ready in chat.'
+    var entryLabel = assistantSessionResult.entryAgentName ? assistantSessionResult.entryAgentName : getWorkspaceHomeAssistantDisplayName();
+    var sessionRouteContext = normalizeHomeRouteContext({
+      surface: routeContext && routeContext.surface,
+      page_path: routeContext && routeContext.page_path,
+      workspace_id: routeContext && routeContext.workspace_id,
+      session_id: assistantSessionResult.session && assistantSessionResult.session.id,
+      origin: routeContext && routeContext.origin
+    });
+    var responseData = assistantSessionResult.responseData || null;
+    var workflowStep = responseData && responseData.workflow_step ? responseData.workflow_step : null;
+    var planningForm = responseData && responseData.planning_form ? responseData.planning_form : null;
+    if (assistantSessionResult.rawToolPayload) {
+      clearHomeAssistantPlanning();
+      homeAssistantState.inlineReplyState = null;
+      renderHomeAssistantInlineReply();
+      setHomeAssistantRoutingSummary(
+        entryLabel,
+        'The workspace manager returned raw tool data instead of a reply. Retry or open chat.'
+      );
+    } else if (workflowStep && String(workflowStep.step_type || '').trim() === 'ask_form' && workflowStep.form) {
+      activateHomeAssistantPlanningForm(convertWorkflowFormToPlanningSchema(workflowStep), {
+        prompt: prompt,
+        routeContext: sessionRouteContext,
+        intent: intent,
+        agentLabel: entryLabel,
+        workflowStep: workflowStep
+      });
+      setHomeAssistantRoutingSummary(
+        entryLabel,
+        'The workspace manager switched this into a guided planning step. Complete it below or open full chat.'
+      );
+    } else if (planningForm) {
+      activateHomeAssistantPlanningForm(planningForm, {
+        prompt: prompt,
+        routeContext: sessionRouteContext,
+        intent: intent,
+        agentLabel: entryLabel
+      });
+      setHomeAssistantRoutingSummary(
+        entryLabel,
+        assistantSessionResult.reused
+          ? 'Use the active planning step below, or open full chat if you want a longer back-and-forth.'
+          : 'The workspace manager switched this into a guided planning step. Complete it below or open full chat.'
+      );
+    } else {
+      var keepPlanningReview = Boolean(options && options.preservePlanningReview);
+      if (!keepPlanningReview && homeAssistantState.planningState && homeAssistantState.planningState.kind === 'planning_review') {
+        keepPlanningReview = true;
+      }
+      if (!keepPlanningReview) {
+        clearHomeAssistantPlanning();
+      }
+      var inlineReplyState = enableHomeAssistantInlineReply(
+        sessionRouteContext,
+        intent,
+        entryLabel,
+        assistantSessionResult.responseText || '',
+        workflowStep && String(workflowStep.step_type || '').trim() === 'ask_choice' ? workflowStep : null,
+        options && options.linkedTask ? options.linkedTask : getActiveLinkedPlanningTask()
+      );
+      if (inlineReplyState && (!inlineReplyState.linkedTask || !inlineReplyState.linkedTask.id)) {
+        try {
+          var createdInlineTask = await ensureWorkspacePlanningTask(
+            sessionRouteContext,
+            prompt,
+            entryLabel,
+            {
+              existingTask: inlineReplyState.linkedTask,
+              summaryText: assistantSessionResult.responseText || '',
+              fallbackTitle: workflowStep && String(workflowStep.title || '').trim()
+                ? String(workflowStep.title || '').trim()
+                : 'Planning task'
+            }
+          );
+          if (createdInlineTask && homeAssistantState.inlineReplyState === inlineReplyState) {
+            inlineReplyState.linkedTask = createdInlineTask;
+            renderHomeAssistantInlineReply();
+          }
+        } catch (taskError) {
+          dashLog.debug('Failed to create inline planning task', {
+            error: taskError && taskError.message || taskError
+          });
+        }
+      }
+      if (inlineReplyState && inlineReplyState.linkedTask && inlineReplyState.linkedTask.id) {
+        try {
+          await persistPlanningSubtaskToTask(inlineReplyState);
+        } catch (taskContextError) {
+          dashLog.debug('Failed to persist planning subtask onto task', {
+            error: taskContextError && taskContextError.message || taskContextError
+          });
+        }
+      }
+      var hasChoiceStep = inlineReplyState &&
+        inlineReplyState.workflowStep &&
+        String(inlineReplyState.workflowStep.step_type || '').trim() === 'ask_choice' &&
+        Array.isArray(inlineReplyState.workflowStep.choices) &&
+        inlineReplyState.workflowStep.choices.length > 0;
+      setHomeAssistantRoutingSummary(
+        entryLabel,
+        hasChoiceStep
+          ? 'The workspace manager created a planning subtask for this workspace. Complete it below, or open full chat.'
+          : inlineReplyState
+          ? assistantSessionResult.reused
+            ? 'The manager needs one more planning answer. Review the subtask below, or open full chat.'
+            : 'The workspace manager replied inline. Review the planning subtask below, or open full chat.'
+          : assistantSessionResult.reused
+          ? 'The workspace manager updated the workspace. Review the latest update below, or open full chat if you want to continue.'
+          : 'The workspace manager replied with an update. Review the latest result below, or open full chat if you want to continue.'
+      );
+    }
+    renderHomeAssistantDependencyResolution(
+      assistantSessionResult.responseData,
+      prompt,
+      sessionRouteContext,
+      intent,
+      options
     );
     renderHomeAssistantActions([
       {
@@ -3888,6 +6031,41 @@
         onClick: function () { focusHomeAssistantInput(); }
       }
     ]);
+  }
+
+  function normalizeHomeAssistantDependencyResolution(data) {
+    if (typeof normalizeDependencyResolution !== 'function') return null;
+    try {
+      return normalizeDependencyResolution(data);
+    } catch (error) {
+      dashLog.debug('Failed to normalize dependency resolution payload', { error: error && error.message || error });
+      return null;
+    }
+  }
+
+  function isLikelyHomeAssistantRequestTimeout(error) {
+    if (!error) return false;
+    var message = String(error && error.message || '').toLowerCase();
+    var name = String(error && error.name || '').toLowerCase();
+    if (name.indexOf('abort') !== -1) return true;
+    if (message.indexOf('cancel') !== -1) return true;
+    if (message.indexOf('abort') !== -1) return true;
+    if (message.indexOf('timed out') !== -1) return true;
+    if (message.indexOf('timeout') !== -1) return true;
+    return false;
+  }
+
+  function renderHomeAssistantDependencyResolution(data, prompt, routeContext, intent, options) {
+    var resolution = normalizeHomeAssistantDependencyResolution(data);
+    if (!resolution || typeof renderDependencyResolutionModal !== 'function') {
+      return false;
+    }
+
+    return renderDependencyResolutionModal(resolution, data, prompt, false, {
+      retry: async function () {
+        await openWorkspaceAssistantForPrompt(prompt, routeContext, intent, options);
+      }
+    });
   }
 
   async function routePromptWithBackend(prompt, routeContext) {
@@ -4361,6 +6539,10 @@
           'Email idea: connect Gmail/Outlook via OAuth, start with read-only scopes, summarize unread first, and require explicit approval before sending replies.');
       }
       var routeContext = buildHomeRouteContext();
+      var addedToWorkspace = await addAgentToWorkspaceIfNeeded(agentName, routeContext);
+      if (addedToWorkspace) {
+        appendHomeAssistantMessage('assistant', 'Added "' + agentName + '" to this workspace.');
+      }
 
       var createdAgentMCP = await ensureMCPForTask(
         agentName,
@@ -4429,6 +6611,22 @@
     return null;
   }
 
+  function findSessionForAgentInWorkspace(agentName, workspaceId) {
+    var manager = window.sessionManager;
+    if (!manager || !Array.isArray(manager.sessions) || !agentName) return null;
+
+    var targetAgent = normalizeToken(agentName);
+    var targetWorkspace = String(workspaceId || '').trim();
+    for (var i = 0; i < manager.sessions.length; i++) {
+      var session = manager.sessions[i];
+      if (normalizeToken(session && session.agent_name) !== targetAgent) continue;
+      if (String(session && session.folder_id || '').trim() === targetWorkspace) {
+        return session;
+      }
+    }
+    return null;
+  }
+
   function findSessionById(sessionId) {
     var manager = window.sessionManager;
     if (!manager || !Array.isArray(manager.sessions) || !sessionId) return null;
@@ -4439,48 +6637,102 @@
     return null;
   }
 
-  function isAssistantSession(session, workspaceId) {
-    if (!session || session.agent_name) return false;
-    if (!workspaceId) return !String(session.folder_id || '').trim();
-    return String(session.folder_id || '').trim() === String(workspaceId).trim();
-  }
+  async function submitHomeAssistantPlanningForm() {
+    var planningState = homeAssistantState.planningState;
+    if (!planningState || planningState.kind !== 'planning_form' || planningState.submitting) return;
 
-  function findWorkspaceAssistantSession(workspaceId) {
-    var manager = window.sessionManager;
-    if (!manager || !Array.isArray(manager.sessions)) return null;
-
-    var active = findSessionById(getCurrentHomeSessionId());
-    if (isAssistantSession(active, workspaceId)) {
-      return active;
-    }
-
-    for (var i = 0; i < manager.sessions.length; i++) {
-      var session = manager.sessions[i];
-      if (isAssistantSession(session, workspaceId)) {
-        return session;
+    var missingQuestion = validatePlanningFormState(planningState);
+    if (missingQuestion) {
+      planningState.focusField = missingQuestion.id;
+      renderHomeAssistantPlanning();
+      if (window.Toast) {
+        Toast.warning('Answer "' + missingQuestion.label + '" before continuing.');
       }
+      return;
     }
 
-    return null;
+    var submittingState = planningState;
+    submittingState.submitting = true;
+    renderHomeAssistantPlanning();
+    appendHomeAssistantMessage('user', buildPlanningFormAnswerSummary(submittingState));
+    activateHomeAssistantPlanningReview(submittingState);
+    setHomeAssistantRoutingSummary(
+      'Planning Review',
+      'Review the intake summary, save it to a note if needed, and choose the next step.'
+    );
+    renderHomeAssistantActions([
+      {
+        label: 'Open Chat',
+        variant: 'primary',
+        onClick: function () { openChatPanel(); }
+      },
+      {
+        label: 'Ask Another Task',
+        variant: 'secondary',
+        onClick: function () { focusHomeAssistantInput(); }
+      }
+    ]);
   }
 
-  async function openOrCreateWorkspaceAssistantSession(routeContext, prompt) {
+  async function openOrCreateWorkspaceAssistantSession(routeContext, prompt, options) {
     var manager = window.sessionManager;
     if (!manager) return null;
 
-    var workspaceId = hasWorkspaceRouteContext(routeContext) ? String(routeContext.workspace_id).trim() : '';
-    var existing = findWorkspaceAssistantSession(workspaceId);
-    if (existing && existing.id && typeof manager.switchToSession === 'function') {
-      await manager.switchToSession(existing.id, true);
-      return { session: existing, reused: true };
+    var normalizedContext = normalizeHomeRouteContext(routeContext);
+    var workspaceId = hasWorkspaceRouteContext(normalizedContext) ? String(normalizedContext.workspace_id).trim() : '';
+    var reuseExistingSession = Boolean(options && options.reuseExistingSession);
+    var requestedSessionId = reuseExistingSession
+      ? String(normalizedContext.session_id || '').trim()
+      : '';
+    var entryAgentName = workspaceId ? await fetchWorkspaceEntryAgentName(workspaceId) : '';
+    if (entryAgentName) {
+      if (reuseExistingSession) {
+        var currentEntrySession = findSessionById(requestedSessionId || getCurrentHomeSessionId());
+        if (currentEntrySession &&
+            normalizeToken(currentEntrySession.agent_name) === normalizeToken(entryAgentName) &&
+            String(currentEntrySession.folder_id || '').trim() === workspaceId) {
+          return { session: currentEntrySession, reused: true, entryAgentName: entryAgentName };
+        }
+
+        var existingEntrySession = findSessionForAgentInWorkspace(entryAgentName, workspaceId);
+        if (existingEntrySession && existingEntrySession.id) {
+          if (typeof manager.switchToSession === 'function') {
+            await manager.switchToSession(existingEntrySession.id, false);
+          }
+          return { session: existingEntrySession, reused: true, entryAgentName: entryAgentName };
+        }
+      }
+
+      var entrySession = null;
+      if (typeof manager.createSessionWithAgentInFolder === 'function') {
+        entrySession = await manager.createSessionWithAgentInFolder(entryAgentName, workspaceId, false);
+      } else {
+        var entryResponse = await fetch('/api/sessions', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            folder_id: workspaceId,
+            title: truncateText(String(prompt || '').trim(), 50) || 'Workspace',
+            agent_name: entryAgentName
+          })
+        });
+        if (!entryResponse.ok) throw new Error('Failed to create workspace entry session');
+        entrySession = await entryResponse.json();
+        if (entrySession && entrySession.id && manager && typeof manager.switchToSession === 'function') {
+          await manager.switchToSession(entrySession.id, false);
+        }
+      }
+
+      if (!entrySession) return null;
+      return { session: entrySession.session || entrySession, reused: false, entryAgentName: entryAgentName };
     }
 
     var title = truncateText(String(prompt || '').trim(), 50) || 'Assistant';
     var created = null;
     if (typeof manager.createAssistantSession === 'function') {
-      created = await manager.createAssistantSession(workspaceId, title);
+      created = await manager.createAssistantSession(workspaceId, title, false);
     } else if (window.workspaceDetail && typeof window.workspaceDetail.createSimpleSession === 'function' && workspaceId) {
-      created = await window.workspaceDetail.createSimpleSession();
+      created = await window.workspaceDetail.createSimpleSession(false);
     } else {
       var response = await fetch('/api/sessions', {
         method: 'POST',
@@ -4493,7 +6745,7 @@
       if (!response.ok) throw new Error('Failed to create assistant session');
       created = await response.json();
       if (created && created.id && manager && typeof manager.switchToSession === 'function') {
-        await manager.switchToSession(created.id, true);
+        await manager.switchToSession(created.id, false);
       }
     }
 
@@ -4502,7 +6754,7 @@
   }
 
   async function dispatchPromptToWorkspaceAssistantSession(prompt, routeContext) {
-    var result = await openOrCreateWorkspaceAssistantSession(routeContext, prompt);
+    var result = await openOrCreateWorkspaceAssistantSession(routeContext, prompt, { reuseExistingSession: false });
     if (!result || !result.session) return null;
 
     openChatPanel();
@@ -4518,6 +6770,61 @@
         })
       });
     }
+
+    return result;
+  }
+
+  async function runWorkspaceAssistantInline(prompt, routeContext, intent, options) {
+    var result = await openOrCreateWorkspaceAssistantSession(routeContext, prompt, options);
+    if (!result || !result.session || typeof API === 'undefined' || typeof API.post !== 'function') {
+      return result;
+    }
+
+    var session = result.session;
+    var entryLabel = result.entryAgentName ? result.entryAgentName : getWorkspaceHomeAssistantDisplayName();
+    var dispatchMessage = options && typeof options.dispatchPrompt === 'string'
+      ? String(options.dispatchPrompt || '').trim()
+      : buildWorkspaceManagerDispatchMessage(prompt, routeContext, intent);
+    var requestContext = normalizeHomeRouteContext({
+      surface: routeContext && routeContext.surface,
+      page_path: routeContext && routeContext.page_path,
+      workspace_id: routeContext && routeContext.workspace_id,
+      session_id: session.id,
+      origin: routeContext && routeContext.origin
+    });
+    var workflowResponse = options && options.workflowResponse ? options.workflowResponse : null;
+    var payload = {
+      question: workflowResponse ? '' : dispatchMessage,
+      agent_name: String(result.entryAgentName || session.agent_name || '').trim(),
+      route_context: requestContext
+    };
+    if (workflowResponse) {
+      payload.workflow_response = workflowResponse;
+    }
+
+    var data = await API.post('/api/chat', payload, {
+      timeout: HOME_ASSISTANT_WORKSPACE_INLINE_TIMEOUT_MS,
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Session-ID': String(session.id)
+      }
+    });
+
+    var responseText = String(data && data.response || '').trim();
+    var rawToolPayload = isLikelyHomeAssistantRawToolPayload(responseText, data);
+    if (rawToolPayload) {
+      responseText = entryLabel + ' checked the workspace context but returned raw tool data instead of a reply. Please retry or open chat.';
+    }
+    if (!responseText) {
+      responseText = entryLabel + ' is ready for your next answer in chat.';
+    }
+
+    trackHomeAssistantSession(session, prompt, entryLabel);
+    setHomeAssistantMode('continue_session');
+    appendHomeAssistantMessage('assistant', responseText);
+    result.responseData = data;
+    result.responseText = responseText;
+    result.rawToolPayload = rawToolPayload;
 
     return result;
   }
@@ -4550,6 +6857,34 @@
     }
 
     return null;
+  }
+
+  async function addAgentToWorkspaceIfNeeded(agentName, routeContext) {
+    var workspaceId = hasWorkspaceRouteContext(routeContext) ? String(routeContext.workspace_id).trim() : '';
+    if (!workspaceId || !agentName || typeof API === 'undefined' || typeof API.post !== 'function') {
+      return false;
+    }
+
+    try {
+      await API.post('/api/workspaces/' + encodeURIComponent(workspaceId) + '/agents', {
+        agent_name: agentName
+      });
+
+      if (window.workspaceDetail &&
+          String(window.workspaceDetail.workspaceId || '').trim() === workspaceId &&
+          typeof window.workspaceDetail.loadWorkspace === 'function') {
+        window.workspaceDetail.loadWorkspace();
+      }
+
+      return true;
+    } catch (error) {
+      dashLog.debug('Failed to attach created agent to workspace', {
+        workspaceId: workspaceId,
+        agentName: agentName,
+        error: error && error.message || error
+      });
+      return false;
+    }
   }
 
   async function dispatchPromptToChatSession(prompt, agentName, routeContext) {
@@ -4694,7 +7029,7 @@
     setHomeAssistantRoutingSummary('Workspace Schedule', 'Loading scheduled tasks for this workspace.');
 
     try {
-      var data = await API.get('/api/orchestration/tasks?studio_id=' + encodeURIComponent(workspaceId));
+      var data = await API.get('/api/orchestration/tasks?workspace_id=' + encodeURIComponent(workspaceId));
       var tasks = Array.isArray(data && data.tasks) ? data.tasks : [];
       var scheduledTasks = tasks.filter(function (task) {
         return Boolean(task && (task.schedule_enabled || task.schedule || task.next_run || task.schedule_type || task.schedule_expression));
@@ -5346,7 +7681,7 @@
 
   async function createWorkspaceTaskRecord(workspaceId, payload) {
     var body = Object.assign({
-      studio_id: workspaceId,
+      workspace_id: workspaceId,
       details: '',
       status: 'pending'
     }, payload || {});
@@ -5390,6 +7725,147 @@
     if (typeof window.workspaceDetail.renderAgentGroups === 'function') {
       window.workspaceDetail.renderAgentGroups();
     }
+  }
+
+  function syncCreatedTaskIntoWorkspaceDetail(createdTask) {
+    if (!window.workspaceDetail || !createdTask || !createdTask.id) return;
+
+    var detail = window.workspaceDetail;
+    if (!Array.isArray(detail.tasks)) {
+      detail.tasks = [];
+    }
+
+    var normalizedTask = Object.assign({}, createdTask);
+    if (!normalizedTask.to && normalizedTask.assigned_node_id) {
+      normalizedTask.to = String(normalizedTask.assigned_node_id || '')
+        .replace(/-node-\d+$/, '')
+        .trim();
+    }
+
+    var existingIndex = detail.tasks.findIndex(function (task) {
+      return task && task.id === normalizedTask.id;
+    });
+    if (existingIndex >= 0) {
+      detail.tasks[existingIndex] = Object.assign({}, detail.tasks[existingIndex], normalizedTask);
+    } else {
+      detail.tasks = [normalizedTask].concat(detail.tasks);
+    }
+
+    detail.tasksLoading = false;
+    detail.tasksLoadFailed = false;
+
+    if (detail.elements && detail.elements.taskCount) {
+      detail.elements.taskCount.textContent = String(detail.tasks.length);
+    }
+
+    if (typeof detail.renderTasks === 'function') {
+      detail.renderTasks();
+    } else if (typeof detail.renderAgentGroups === 'function') {
+      detail.renderAgentGroups();
+    }
+  }
+
+  function syncUpdatedTaskIntoWorkspaceDetail(updatedTask) {
+    if (!window.workspaceDetail || !updatedTask || !updatedTask.id) return;
+
+    var detail = window.workspaceDetail;
+    if (!Array.isArray(detail.tasks)) {
+      detail.tasks = [];
+    }
+
+    var idx = detail.tasks.findIndex(function (task) {
+      return task && task.id === updatedTask.id;
+    });
+
+    if (idx >= 0) {
+      var existing = detail.tasks[idx] || {};
+      var nextContext = Object.assign({}, existing.context || {}, updatedTask.context || {});
+      detail.tasks[idx] = Object.assign({}, existing, updatedTask, { context: nextContext });
+    } else {
+      detail.tasks = [updatedTask].concat(detail.tasks);
+    }
+
+    detail.tasksLoading = false;
+    detail.tasksLoadFailed = false;
+    if (detail.elements && detail.elements.taskCount) {
+      detail.elements.taskCount.textContent = String(detail.tasks.length);
+    }
+    if (typeof detail.renderTasks === 'function') {
+      detail.renderTasks();
+    } else if (typeof detail.renderAgentGroups === 'function') {
+      detail.renderAgentGroups();
+    }
+  }
+
+  function buildPlanningTaskQuestion(replyState) {
+    if (!replyState) return 'How should I continue this planning task?';
+
+    if (replyState.workflowStep &&
+        String(replyState.workflowStep.step_type || '').trim() === 'ask_choice' &&
+        Array.isArray(replyState.workflowStep.choices) &&
+        replyState.workflowStep.choices.length > 0) {
+      var choiceLabels = replyState.workflowStep.choices.map(function (choice) {
+        var number = String(choice && choice.number || '').trim();
+        var label = String(choice && choice.label || '').trim();
+        return (number ? number + '. ' : '') + label;
+      }).filter(Boolean);
+      var prefix = String(replyState.workflowStep.summary || replyState.workflowStep.title || '').trim();
+      var prompt = prefix || 'Choose the next step for this planning task.';
+      if (choiceLabels.length > 0) {
+        prompt += '\n\nOptions:\n- ' + choiceLabels.join('\n- ');
+      }
+      return prompt;
+    }
+
+    if (Array.isArray(replyState.questionPrompts) && replyState.questionPrompts.length > 0) {
+      return replyState.questionPrompts.join('\n');
+    }
+
+    return 'How should I continue this planning task?';
+  }
+
+  async function persistPlanningSubtaskToTask(replyState) {
+    if (!replyState || !replyState.linkedTask || !replyState.linkedTask.id) return null;
+
+    var humanLoop = {
+      state: 'blocked',
+      block_id: 'planning:' + String(replyState.linkedTask.id || '').trim(),
+      reason_code: 'planning_input_required',
+      reason: 'This planning task needs your input before it can continue.',
+      question: buildPlanningTaskQuestion(replyState),
+      agent_response: String(replyState.latestReplyText || '').trim(),
+      suggested_actions: ['continue_with_instruction', 'mark_failed'],
+      updated_at: new Date().toISOString()
+    };
+
+    var payload = {
+      context: {
+        human_loop: humanLoop,
+        planning_latest_reply: String(replyState.latestReplyText || '').trim(),
+        planning_workflow_step: replyState.workflowStep || null,
+        planning_session_id: String(replyState.routeContext && replyState.routeContext.session_id || '').trim()
+      }
+    };
+
+    var response = await fetch('/api/orchestration/tasks/' + encodeURIComponent(replyState.linkedTask.id), {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    if (!response.ok) {
+      var text = '';
+      try {
+        text = await response.text();
+      } catch (_error) {
+        text = '';
+      }
+      throw new Error(text || 'Failed to update planning task');
+    }
+
+    var updatedTask = await response.json();
+    syncUpdatedTaskIntoWorkspaceDetail(updatedTask);
+    replyState.linkedTask = updatedTask;
+    return updatedTask;
   }
 
   async function createScheduledWorkspaceTask(workspaceId, description, agentName, scheduleConfig, scheduleName) {
@@ -5759,7 +8235,7 @@
             return true;
           }
           await API.post('/api/orchestration/tasks', {
-            studio_id: workspaceId,
+            workspace_id: workspaceId,
             description: content,
             details: '',
             status: 'pending'
@@ -5782,7 +8258,7 @@
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-              studio_id: workspaceId,
+              workspace_id: workspaceId,
               description: content,
               details: '',
               status: 'pending'
@@ -5876,7 +8352,7 @@
         } else if (directoryPath) {
           var directorySegments = String(directoryPath).split(/[\\/]/).filter(Boolean);
           var directoryTitle = directorySegments.length > 0 ? directorySegments[directorySegments.length - 1] : directoryPath;
-          var directoryResponse = await fetch(`/api/studios/${encodeURIComponent(workspaceId)}/attachments`, {
+          var directoryResponse = await fetch(`/api/workspaces/${encodeURIComponent(workspaceId)}/attachments`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -6023,17 +8499,39 @@
     return 'Created from Ask Ori task: "' + text + '"';
   }
 
+  function buildWorkspaceBootstrapFromPrompt(prompt) {
+    var text = truncateText(String(prompt || '').trim(), 420);
+    if (!text) return null;
+    return {
+      goal: text,
+      systems: '',
+      context: ''
+    };
+  }
+
   async function openCreateWorkspaceModalWithSeed(seedPayload) {
     var modalElement = document.getElementById('addFolderModal');
     var nameInput = document.getElementById('folderNameInput');
     var descriptionInput = document.getElementById('folderDescriptionInput');
+    var primaryGoalInput = document.getElementById('folderPrimaryGoalInput');
+    var systemsInput = document.getElementById('folderSystemsInput');
+    var contextInput = document.getElementById('folderContextInput');
     var parentSelect = document.getElementById('folderParentSelect');
-    if (!modalElement || !nameInput || !descriptionInput || typeof bootstrap === 'undefined' || !bootstrap.Modal) {
+    if (!modalElement || !nameInput || typeof bootstrap === 'undefined' || !bootstrap.Modal) {
       return { status: 'unavailable', reason: 'workspace_modal_prerequisites_missing' };
     }
 
     nameInput.value = String(seedPayload && seedPayload.name || '').trim();
-    descriptionInput.value = String(seedPayload && seedPayload.description || '').trim();
+    if (descriptionInput) descriptionInput.value = String(seedPayload && seedPayload.description || '').trim();
+    if (primaryGoalInput) {
+      primaryGoalInput.value = String(seedPayload && seedPayload.workspaceBootstrap && seedPayload.workspaceBootstrap.goal || '').trim();
+    }
+    if (systemsInput) {
+      systemsInput.value = String(seedPayload && seedPayload.workspaceBootstrap && seedPayload.workspaceBootstrap.systems || '').trim();
+    }
+    if (contextInput) {
+      contextInput.value = String(seedPayload && seedPayload.workspaceBootstrap && seedPayload.workspaceBootstrap.context || '').trim();
+    }
     if (parentSelect) {
       parentSelect.value = '';
     }
@@ -6088,7 +8586,8 @@
     var sourcePrompt = String(prompt || '').trim();
     var payload = {
       name: name,
-      description: buildWorkspaceDescriptionFromPrompt(sourcePrompt || ('Create workspace: ' + name))
+      description: buildWorkspaceDescriptionFromPrompt(sourcePrompt || ('Create workspace: ' + name)),
+      workspaceBootstrap: buildWorkspaceBootstrapFromPrompt(sourcePrompt || ('Create workspace: ' + name))
     };
 
     setHomeAssistantBusy(true, 'Preparing Workspace...');
@@ -6142,6 +8641,7 @@
     var payload = {
       name: buildWorkspaceNameFromPrompt(text),
       description: buildWorkspaceDescriptionFromPrompt(text),
+      workspaceBootstrap: buildWorkspaceBootstrapFromPrompt(text),
       seedNote: options && options.seedNote ? options.seedNote : null,
       seedTask: options && options.seedTask ? options.seedTask : null
     };
@@ -6261,9 +8761,58 @@
     }
   }
 
+  function shouldConfirmMatchedAgentBeforeHandoff(routeContext) {
+    return hasWorkspaceRouteContext(routeContext) || isSemiAutoMode();
+  }
+
+  function promptForMatchedAgentSelection(prompt, agentName, options) {
+    if (!prompt || !agentName) return;
+    var routeContext = options && options.routeContext ? options.routeContext : buildHomeRouteContext();
+    var appLaunchRequest = options && options.appLaunchRequest ? options.appLaunchRequest : null;
+    var inWorkspaceContext = hasWorkspaceRouteContext(routeContext);
+    var shortAgentName = truncateText(agentName, 32);
+
+    appendHomeAssistantMessage(
+      'assistant',
+      inWorkspaceContext
+        ? 'I found "' + agentName + '" for this workspace task. Do you want to use this agent, or create a new one before I continue?'
+        : 'I found "' + agentName + '" for this task. Do you want to use this agent, or create a new one before I continue?'
+    );
+    setHomeAssistantRoutingSummary(
+      'Confirmation Required',
+      inWorkspaceContext
+        ? 'Choose an existing agent or create a new one for this workspace task.'
+        : 'Choose an existing agent or create a new one before handoff.'
+    );
+    renderHomeAssistantActions([
+      {
+        label: 'Use ' + shortAgentName,
+        variant: 'primary',
+        onClick: function () {
+          runPendingTaskWithAgent(prompt, agentName, {
+            appLaunchRequest: appLaunchRequest,
+            routeContext: routeContext
+          });
+        }
+      },
+      {
+        label: 'Create New Agent',
+        variant: 'secondary',
+        onClick: function () { createAgentForPendingTask(); }
+      },
+      {
+        label: 'Ask Another Task',
+        variant: 'secondary',
+        onClick: function () { focusHomeAssistantInput(); }
+      }
+    ]);
+  }
+
   async function handleHomeAssistantPrompt(prompt, options) {
     var text = String(prompt || '').trim();
     if (!text) return;
+    clearHomeAssistantPlanning();
+    clearHomeAssistantInlineReply();
     setHomeAssistantMode('new_task');
     var appLaunchRequest = parseAppLaunchRequest(text);
     var routeContext = normalizeHomeRouteContext(options && options.routeContext);
@@ -6316,6 +8865,55 @@
       return;
     }
 
+    if (inWorkspaceContext) {
+      var workspaceManagerLabel = getWorkspaceHomeAssistantDisplayName();
+      setHomeAssistantBusy(true, 'Asking...');
+      renderHomeAssistantActions([]);
+      setHomeAssistantRoutingSummary(
+        workspaceManagerLabel,
+        'Sending your request to the workspace manager...'
+      );
+
+      try {
+        await openWorkspaceAssistantForPrompt(text, routeContext, homeAssistantState.pendingIntent);
+      } catch (error) {
+        dashLog.debug('Workspace manager handoff failed', { error: error && error.message || error });
+        homeAssistantState.awaitingCreateConfirmation = false;
+        var workspaceManagerTimedOut = isLikelyHomeAssistantRequestTimeout(error);
+        setHomeAssistantRoutingSummary(
+          workspaceManagerTimedOut ? workspaceManagerLabel + ' Delayed' : workspaceManagerLabel + ' Unavailable',
+          workspaceManagerTimedOut
+            ? 'The workspace manager took too long to respond inline.'
+            : 'Could not reach the workspace manager right now.',
+          { state: workspaceManagerTimedOut ? 'timeout' : 'error' }
+        );
+        if (hasHomeAssistantConversation()) {
+          homeAssistantState.conversationCollapsed = true;
+          syncHomeAssistantConversationSection();
+        }
+        renderHomeAssistantActions([
+          {
+            label: 'Retry',
+            variant: 'primary',
+            onClick: function () { handleHomeAssistantPrompt(text, { routeContext: routeContext }); }
+          },
+          {
+            label: 'Open Chat',
+            variant: 'secondary',
+            onClick: function () { openChatPanel(); }
+          },
+          {
+            label: 'Ask Another Task',
+            variant: 'secondary',
+            onClick: function () { focusHomeAssistantInput(); }
+          }
+        ]);
+      } finally {
+        setHomeAssistantBusy(false);
+      }
+      return;
+    }
+
     setHomeAssistantBusy(true, 'Routing...');
     renderHomeAssistantActions([]);
     setHomeAssistantRoutingSummary('Routing', 'Analyzing task and selecting the best agent...');
@@ -6356,7 +8954,7 @@
         }
 
         if (inWorkspaceContext && shouldOpenWorkspaceAssistantForRoute(routeData, routeContext)) {
-          await openWorkspaceAssistantForPrompt(text, routeContext);
+          await openWorkspaceAssistantForPrompt(text, routeContext, homeAssistantState.pendingIntent);
           return;
         }
 
@@ -6372,7 +8970,7 @@
       }
 
       if (inWorkspaceContext && shouldOpenWorkspaceAssistantForRoute(routeData, routeContext)) {
-        await openWorkspaceAssistantForPrompt(text, routeContext);
+        await openWorkspaceAssistantForPrompt(text, routeContext, homeAssistantState.pendingIntent);
         return;
       }
 
@@ -6453,9 +9051,12 @@
           ]);
           return;
         }
-        if (isSemiAutoMode()) {
-          appendHomeAssistantMessage('assistant', 'Match found. Handing off to "' + match.agent.name + '" now.');
-          setHomeAssistantRoutingSummary('Semi-auto', 'Match found. Handing off to "' + match.agent.name + '".');
+        if (shouldConfirmMatchedAgentBeforeHandoff(routeContext)) {
+          promptForMatchedAgentSelection(text, match.agent.name, {
+            appLaunchRequest: appLaunchRequest,
+            routeContext: routeContext
+          });
+          return;
         }
         await runPendingTaskWithAgent(text, match.agent.name, { appLaunchRequest: appLaunchRequest, routeContext: routeContext });
       } else {
@@ -6549,6 +9150,7 @@
   function initHomeAssistant() {
     var els = getHomeAssistantElements();
     var supportsRecentSessions = Boolean(els.recentSection || els.recentSessions || els.viewAllBtn || els.clearRecentBtn);
+    var routeContext = buildHomeRouteContext();
 
     homeAssistantState.automationMode = loadHomeAssistantAutomationMode();
     homeAssistantState.recentSessions = supportsRecentSessions ? loadHomeAssistantRecentSessions() : [];
@@ -6558,6 +9160,9 @@
       hydrateHomeAssistantRecentSessions();
     }
     setHomeAssistantMode(homeAssistantState.mode);
+    if (hasWorkspaceRouteContext(routeContext)) {
+      refreshHomeAssistantWorkspaceIdentity(routeContext);
+    }
     setHomeAssistantAutomationMode(homeAssistantState.automationMode);
     syncHomeAssistantThinkingStatus();
     syncHomeAssistantLauncher();
@@ -6762,6 +9367,7 @@
   window.OriAskRouting = window.OriAskRouting || {};
   window.OriAskRouting.submit = submitPromptViaAskOri;
   window.OriAskRouting.buildRouteContext = normalizeHomeRouteContext;
+  window.OriAskRouting.refreshWorkspaceIdentity = refreshHomeAssistantWorkspaceIdentity;
 
   function initDashboard() {
     initHomeAssistant();

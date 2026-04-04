@@ -100,6 +100,7 @@
               <select id="agentType" class="modern-input w-100">
                 <option value="tool-calling">Tool Calling (Cheapest - Optimized for tool use)</option>
                 <option value="general">General Purpose (Mid-tier - Balanced capability)</option>
+                <option value="workspace-manager">Workspace Manager (Coordinates workspace agents)</option>
                 <option value="orchestration">Orchestration (Advanced - Multi-agent coordination)</option>
                 <option value="research">Research (Expensive - Complex thinking)</option>
               </select>
@@ -110,6 +111,7 @@
                 <!-- Models will be loaded dynamically from /api/providers -->
                 <option value="">Loading models...</option>
               </select>
+              <small id="agentModelRecommendation" class="form-helper d-none"></small>
             </div>
             <div class="mb-3">
               <label for="agentTemperature" class="form-label" style="color: var(--text-primary);">
@@ -185,6 +187,7 @@
                   <select id="editAgentTypeSelect" class="modern-input w-100">
                     <option value="tool-calling">Tool Calling</option>
                     <option value="general">General Purpose</option>
+                    <option value="workspace-manager">Workspace Manager</option>
                     <option value="orchestration">Orchestration</option>
                     <option value="research">Research</option>
                   </select>
@@ -326,13 +329,14 @@
   <script src="/js/modules/file-upload.js"></script>
   <script src="/js/modules/location.js"></script>
   <script src="/js/modules/task-modal-controller.js"></script>
+  <script src="/js/modules/workspace-bootstrap-review.js"></script>
   <script src="/js/modules/sessions.js"></script>
   <script src="/js/modules/toast.js"></script>
   <script src="/js/modules/voice-input.js"></script>
   <script src="/js/modules/form-validation.js"></script>
   <script src="/js/file-manager.js"></script>
   <script src="/js/app.js?v=1694538177"></script>
-  <script src="/js/modules/studio-realtime.js"></script>
+  <script src="/js/modules/workspace-realtime.js"></script>
   <script src="/js/modules/dashboard.js"></script>
 </body>
 </html>

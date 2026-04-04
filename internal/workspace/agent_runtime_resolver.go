@@ -32,6 +32,8 @@ type ResolvedSkill struct {
 	AllowedTools       []string
 	DisallowedTools    []string
 	RequiredMCPServers []string
+	PlanningProfile    bool
+	Config             map[string]interface{}
 	Model              string
 	Color              string
 	Enabled            bool
@@ -280,7 +282,7 @@ func (r *AgentRuntimeResolver) materializeRuntimeBinding(workspaceID string, bin
 	applyWorkspaceBindingRuntimeConfig(&runtimeConfig, binding.Config)
 
 	if strings.EqualFold(templateName, "filesystem") {
-		roots := extractFilesystemRoots(binding.Scope)
+		roots := extractFilesystemRootsFromBinding(binding)
 		if len(roots) == 0 {
 			return "", fmt.Errorf("filesystem binding %s has no workspace roots", binding.ID)
 		}
@@ -377,6 +379,13 @@ func extractFilesystemRoots(scope map[string]interface{}) []string {
 	}
 	sort.Strings(cleaned)
 	return cleaned
+}
+
+func extractFilesystemRootsFromBinding(binding WorkspaceMCPBinding) []string {
+	if roots := extractFilesystemRoots(binding.Config); len(roots) > 0 {
+		return roots
+	}
+	return extractFilesystemRoots(binding.Scope)
 }
 
 func rebuildFilesystemServerArgs(args []string, roots []string) []string {
@@ -637,6 +646,7 @@ func (r *AgentRuntimeResolver) resolveEffectiveSkills(ws *Workspace, instance *A
 		if binding, ok := bindingMap[key]; ok {
 			wsSkills[i].Trusted = binding.Trusted
 			wsSkills[i].Enabled = true
+			wsSkills[i].Config = cloneInterfaceMap(binding.Config)
 		}
 	}
 

@@ -29,7 +29,7 @@ func NewMessageHandler(workspaceStore workspace.Store, eventBus *workspace.Event
 func (mh *MessageHandler) MessagesHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 
-	wsID := r.URL.Query().Get("studio_id")
+	wsID := r.URL.Query().Get("workspace_id")
 	if wsID == "" {
 		orihttp.BadRequest(w, "workspace_id parameter required")
 		return

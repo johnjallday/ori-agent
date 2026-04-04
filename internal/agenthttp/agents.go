@@ -146,6 +146,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		var req struct {
 			Name            string                     `json:"name"`
 			Type            string                     `json:"type,omitempty"`
+			Role            string                     `json:"role,omitempty"`
 			Model           string                     `json:"model,omitempty"`
 			Temperature     float64                    `json:"temperature,omitempty"`
 			SystemPrompt    string                     `json:"system_prompt,omitempty"`
@@ -187,6 +188,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		// Build config from request
 		config := &store.CreateAgentConfig{
 			Type:            req.Type,
+			Role:            types.AgentRole(req.Role),
 			Model:           req.Model,
 			Temperature:     req.Temperature,
 			SystemPrompt:    req.SystemPrompt,

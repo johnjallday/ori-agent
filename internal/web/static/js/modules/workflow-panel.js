@@ -2,11 +2,11 @@
  * WorkflowPanel - Collapsible sidebar panel for workflow templates
  *
  * Provides a UI for browsing, searching, and instantiating saved workflows
- * in a studio canvas. Workflows can be custom (user-created) or built-in.
+ * in a workspace canvas. Workflows can be custom (user-created) or built-in.
  *
  * @class WorkflowPanel
  * @example
- * const panel = new WorkflowPanel('workflow-panel-container', 'studio-123');
+ * const panel = new WorkflowPanel('workflow-panel-container', 'workspace-123');
  * await panel.init();
  */
 
@@ -14,13 +14,13 @@ class WorkflowPanel {
   /**
    * Create a new WorkflowPanel instance
    * @param {string} containerId - DOM element ID where the panel will be rendered
-   * @param {string} studioId - ID of the studio this panel belongs to
+   * @param {string} workspaceId - ID of the workspace this panel belongs to
    */
-  constructor(containerId, studioId) {
+  constructor(containerId, workspaceId) {
     /** @type {string} */
     this.containerId = containerId;
     /** @type {string} */
-    this.studioId = studioId;
+    this.workspaceId = workspaceId;
     /** @type {Array<Object>} */
     this.workflows = [];
     /** @type {Array<Object>} */
@@ -76,7 +76,7 @@ class WorkflowPanel {
   }
 
   /**
-   * Check agent availability for all workflows against the current studio
+   * Check agent availability for all workflows against the current workspace
    * Updates each workflow's missingAgents and allAgentsAvailable properties
    * @returns {Promise<void>}
    * @private
@@ -87,7 +87,7 @@ class WorkflowPanel {
         const response = await fetch(`/api/workflows/${workflow.id}/check-agents`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ studio_id: this.studioId })
+          body: JSON.stringify({ workspace_id: this.workspaceId })
         });
 
         if (response.ok) {
@@ -349,7 +349,7 @@ class WorkflowPanel {
       // Check for missing agents
       if (workflow.missingAgents && workflow.missingAgents.length > 0) {
         const proceed = confirm(
-          `This workflow requires agents that are not in this studio:\n${workflow.missingAgents.join(', ')}\n\nDo you want to proceed anyway? (Nodes will be created but may not work correctly)`
+          `This workflow requires agents that are not in this workspace:\n${workflow.missingAgents.join(', ')}\n\nDo you want to proceed anyway? (Nodes will be created but may not work correctly)`
         );
         if (!proceed) return;
       }
@@ -432,7 +432,7 @@ class WorkflowPanel {
    */
   async createTaskNode(node, x, y) {
     const config = node.config || {};
-    const response = await fetch(`/api/studios/${this.studioId}/tasks`, {
+    const response = await fetch(`/api/workspaces/${this.workspaceId}/tasks`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -466,7 +466,7 @@ class WorkflowPanel {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        studio_id: this.studioId,
+        workspace_id: this.workspaceId,
         agent_name: config.name || node.id
       })
     });
@@ -488,7 +488,7 @@ class WorkflowPanel {
    */
   async createStoreNode(node, x, y) {
     const config = node.config || {};
-    const response = await fetch(`/api/studios/${this.studioId}/stores`, {
+    const response = await fetch(`/api/workspaces/${this.workspaceId}/stores`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -517,7 +517,7 @@ class WorkflowPanel {
    */
   async createAttachmentNode(node, x, y) {
     const config = node.config || {};
-    const response = await fetch(`/api/studios/${this.studioId}/attachments`, {
+    const response = await fetch(`/api/workspaces/${this.workspaceId}/attachments`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({

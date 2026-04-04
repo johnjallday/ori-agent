@@ -88,6 +88,17 @@ console.log('[workspace-hub.js] FILE LOADED');
     launcher: document.getElementById('workspaceLauncher'),
     launcherGrid: document.getElementById('launcherGrid'),
     launcherEmpty: document.getElementById('launcherEmptyState'),
+    launcherWorkspaceRootPath: document.getElementById('launcherWorkspaceRootPath'),
+    launcherWorkspaceRootSummary: document.getElementById('launcherWorkspaceRootSummary'),
+    launcherWorkspaceRootMeta: document.getElementById('launcherWorkspaceRootMeta'),
+    launcherWorkspaceRootBadge: document.getElementById('launcherWorkspaceRootBadge'),
+    launcherWorkspaceRootEditBtn: document.getElementById('launcherWorkspaceRootEditBtn'),
+    launcherWorkspaceRootEditor: document.getElementById('launcherWorkspaceRootEditor'),
+    launcherWorkspaceRootInput: document.getElementById('launcherWorkspaceRootInput'),
+    launcherWorkspaceRootBrowseBtn: document.getElementById('launcherWorkspaceRootBrowseBtn'),
+    launcherWorkspaceRootSaveBtn: document.getElementById('launcherWorkspaceRootSaveBtn'),
+    launcherWorkspaceRootResetBtn: document.getElementById('launcherWorkspaceRootResetBtn'),
+    launcherWorkspaceRootCancelBtn: document.getElementById('launcherWorkspaceRootCancelBtn'),
     launcherRefreshBtn: document.getElementById('launcherRefreshBtn'),
     launcherSelectModeBtn: document.getElementById('launcherSelectModeBtn'),
     launcherGroupSelectedBtn: document.getElementById('launcherGroupSelectedBtn'),
@@ -204,6 +215,8 @@ console.log('[workspace-hub.js] FILE LOADED');
   let launcherOverviewRefreshTimer = null;
   let launcherTaskBadgeByWorkspace = new Map();
   let launcherActiveTab = 'workspaces';
+  let launcherWorkspaceRootState = null;
+  let launcherWorkspaceRootEditorOpen = false;
 
   /**
    * Schedule a workspace tasks refresh (debounced)
@@ -312,6 +325,210 @@ console.log('[workspace-hub.js] FILE LOADED');
     return `<span class="${badgeClass}" title="${escapeHtml(title)}" aria-label="${escapeHtml(title)}">${escapeHtml(String(counts.open))}</span>`;
   }
 
+  function setLauncherWorkspaceRootDisplay(data) {
+    if (!elements.launcherWorkspaceRootPath || !elements.launcherWorkspaceRootSummary || !elements.launcherWorkspaceRootMeta || !elements.launcherWorkspaceRootBadge) {
+      return;
+    }
+
+    elements.launcherWorkspaceRootPath.textContent = data.path;
+    elements.launcherWorkspaceRootPath.title = data.path;
+    elements.launcherWorkspaceRootSummary.textContent = data.summary;
+    elements.launcherWorkspaceRootMeta.textContent = data.meta;
+    elements.launcherWorkspaceRootBadge.textContent = data.badgeLabel;
+    elements.launcherWorkspaceRootBadge.className = `launcher-workspace-root-badge ${data.badgeClass || 'is-loading'}`;
+  }
+
+  function getLauncherWorkspaceRootDraftValue() {
+    const configuredRoot = String(launcherWorkspaceRootState?.workspace_root || '').trim();
+    const effectiveRoot = String(launcherWorkspaceRootState?.effective_workspace_root || '').trim();
+    return configuredRoot || effectiveRoot;
+  }
+
+  function setLauncherWorkspaceRootButtonLoading(button, isLoading, loadingLabel) {
+    if (!button) return;
+
+    if (isLoading) {
+      button.dataset.originalLabel = button.textContent || '';
+      button.disabled = true;
+      button.textContent = loadingLabel;
+      return;
+    }
+
+    button.disabled = false;
+    if (button.dataset.originalLabel) {
+      button.textContent = button.dataset.originalLabel;
+    }
+  }
+
+  function syncLauncherWorkspaceRootEditorControls() {
+    const hasCustomRoot = Boolean(String(launcherWorkspaceRootState?.workspace_root || '').trim());
+    const defaultRoot = String(launcherWorkspaceRootState?.default_workspace_root || '').trim();
+
+    if (elements.launcherWorkspaceRootEditBtn) {
+      elements.launcherWorkspaceRootEditBtn.textContent = launcherWorkspaceRootEditorOpen ? 'Close' : 'Edit';
+      elements.launcherWorkspaceRootEditBtn.setAttribute('aria-expanded', launcherWorkspaceRootEditorOpen ? 'true' : 'false');
+    }
+
+    if (elements.launcherWorkspaceRootInput) {
+      elements.launcherWorkspaceRootInput.placeholder = defaultRoot || '/absolute/path/to/workspaces';
+    }
+
+    if (elements.launcherWorkspaceRootResetBtn) {
+      elements.launcherWorkspaceRootResetBtn.disabled = !hasCustomRoot;
+      elements.launcherWorkspaceRootResetBtn.textContent = hasCustomRoot ? 'Clear Custom' : 'Using Default';
+    }
+  }
+
+  function setLauncherWorkspaceRootEditorOpen(isOpen, options = {}) {
+    launcherWorkspaceRootEditorOpen = !!isOpen;
+
+    if (elements.launcherWorkspaceRootEditor) {
+      elements.launcherWorkspaceRootEditor.hidden = !launcherWorkspaceRootEditorOpen;
+    }
+
+    if (launcherWorkspaceRootEditorOpen && elements.launcherWorkspaceRootInput && options.preserveDraft !== true) {
+      elements.launcherWorkspaceRootInput.value = getLauncherWorkspaceRootDraftValue();
+    }
+
+    syncLauncherWorkspaceRootEditorControls();
+
+    if (launcherWorkspaceRootEditorOpen && options.focusInput && elements.launcherWorkspaceRootInput) {
+      elements.launcherWorkspaceRootInput.focus();
+      elements.launcherWorkspaceRootInput.select();
+    }
+  }
+
+  function renderLauncherWorkspaceRootLoading() {
+    launcherWorkspaceRootState = null;
+    setLauncherWorkspaceRootDisplay({
+      path: 'Fetching current workspace location...',
+      summary: 'Loading workspace directory...',
+      meta: 'New workspaces will be created here.',
+      badgeLabel: 'Loading',
+      badgeClass: 'is-loading'
+    });
+    if (!launcherWorkspaceRootEditorOpen && elements.launcherWorkspaceRootInput) {
+      elements.launcherWorkspaceRootInput.value = '';
+    }
+    syncLauncherWorkspaceRootEditorControls();
+  }
+
+  function renderLauncherWorkspaceRootError() {
+    launcherWorkspaceRootState = null;
+    setLauncherWorkspaceRootDisplay({
+      path: 'Workspace directory unavailable',
+      summary: 'Unable to load the default workspace directory right now.',
+      meta: 'Open Settings to confirm the configured workspace location.',
+      badgeLabel: 'Unavailable',
+      badgeClass: 'is-error'
+    });
+    syncLauncherWorkspaceRootEditorControls();
+  }
+
+  function applyLauncherWorkspaceRootState(workspaceRootState) {
+    launcherWorkspaceRootState = workspaceRootState || {};
+    const source = String(workspaceRootState?.source || 'default').trim().toLowerCase();
+    const effectiveRoot = String(workspaceRootState?.effective_workspace_root || '').trim();
+    const fallbackRoot = String(workspaceRootState?.default_workspace_root || '').trim();
+    const visiblePath = effectiveRoot || fallbackRoot || 'Workspace directory unavailable';
+
+    let badgeLabel = 'Built-in default';
+    let badgeClass = 'is-default';
+    let summary = 'Using the built-in workspace location for new workspaces.';
+    let meta = 'This is where new workspaces will be created unless you override it.';
+
+    if (source === 'settings') {
+      badgeLabel = 'Custom';
+      badgeClass = 'is-settings';
+      summary = 'A custom workspace directory is active.';
+      meta = 'New workspaces will be created in the location saved in Settings.';
+    } else if (source === 'environment') {
+      badgeLabel = 'WORKSPACE_DIR';
+      badgeClass = 'is-environment';
+      summary = 'Using the workspace directory from WORKSPACE_DIR.';
+      meta = 'Save a custom directory in Settings if you want to override the environment default.';
+    }
+
+    setLauncherWorkspaceRootDisplay({
+      path: visiblePath,
+      summary,
+      meta,
+      badgeLabel,
+      badgeClass
+    });
+
+    if (!launcherWorkspaceRootEditorOpen && elements.launcherWorkspaceRootInput) {
+      elements.launcherWorkspaceRootInput.value = getLauncherWorkspaceRootDraftValue();
+    }
+    syncLauncherWorkspaceRootEditorControls();
+  }
+
+  async function saveLauncherWorkspaceRoot(workspaceRoot) {
+    const response = await fetch('/api/settings/workspace-root', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({ workspace_root: workspaceRoot })
+    });
+
+    if (!response.ok) {
+      throw new Error(await response.text() || 'Failed to save workspace directory');
+    }
+
+    const data = await response.json();
+    applyLauncherWorkspaceRootState(data);
+    return data;
+  }
+
+  async function browseLauncherWorkspaceRoot() {
+    const response = await fetch('/api/folder-picker/select-path', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        title: 'Select Default Workspace Directory'
+      })
+    });
+
+    const result = await response.json().catch(() => ({}));
+    if (!response.ok || !result.success) {
+      throw new Error(result.error || 'Failed to open folder picker');
+    }
+
+    if (result.selected && result.path && elements.launcherWorkspaceRootInput) {
+      elements.launcherWorkspaceRootInput.value = result.path;
+      elements.launcherWorkspaceRootInput.focus();
+    }
+  }
+
+  async function loadLauncherWorkspaceRoot() {
+    if (!elements.launcherWorkspaceRootPath) {
+      return;
+    }
+
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 8000);
+
+    try {
+      const response = await fetch('/api/settings/workspace-root', {
+        signal: controller.signal
+      });
+
+      clearTimeout(timeoutId);
+
+      if (!response.ok) {
+        throw new Error(`Failed to load workspace directory (${response.status})`);
+      }
+
+      const data = await response.json();
+      applyLauncherWorkspaceRootState(data);
+    } catch (error) {
+      clearTimeout(timeoutId);
+      console.error('Failed to load launcher workspace directory:', error);
+      renderLauncherWorkspaceRootError();
+    }
+  }
+
   function setLauncherOverviewExpanded(expanded) {
     if (!elements.launcherOverviewDetails || !elements.launcherOverviewToggleBtn) return;
 
@@ -381,7 +598,7 @@ console.log('[workspace-hub.js] FILE LOADED');
         setLauncherOverviewExpanded(true);
       }
       if (refreshSummary && (tabChanged || force)) {
-        const flattened = flattenWorkspaces(state.workspaces || []);
+        const flattened = flattenWorkspaces(state.workspaces || []).filter(isConcreteWorkspace);
         void refreshLauncherTaskOverview(flattened);
       }
     }
@@ -400,6 +617,18 @@ console.log('[workspace-hub.js] FILE LOADED');
   function navigateToWorkspace(workspaceId) {
     if (!workspaceId) return;
     window.location.href = `/workspaces/${encodeURIComponent(workspaceId)}`;
+  }
+
+  function normalizeWorkspaceKind(value) {
+    return String(value || '').trim() === 'group' ? 'group' : 'workspace';
+  }
+
+  function isGroupWorkspace(workspace) {
+    return normalizeWorkspaceKind(workspace && workspace.kind) === 'group';
+  }
+
+  function isConcreteWorkspace(workspace) {
+    return !isGroupWorkspace(workspace);
   }
 
   function navigateToSession(sessionId) {
@@ -495,7 +724,7 @@ console.log('[workspace-hub.js] FILE LOADED');
     }
 
     const [taskResponse, sessionResponse] = await Promise.allSettled([
-      fetch(`/api/orchestration/tasks?studio_id=${encodeURIComponent(safeWorkspaceId)}`),
+      fetch(`/api/orchestration/tasks?workspace_id=${encodeURIComponent(safeWorkspaceId)}`),
       fetch(`/api/sessions?folder_id=${encodeURIComponent(safeWorkspaceId)}&sort=updated_desc&limit=50`)
     ]);
 
@@ -869,7 +1098,7 @@ console.log('[workspace-hub.js] FILE LOADED');
     launcherOverviewRefreshTimer = setTimeout(() => {
       launcherOverviewRefreshTimer = null;
       const state = window.WorkspaceHubState.getState();
-      const flattened = flattenWorkspaces(state.workspaces || []);
+      const flattened = flattenWorkspaces(state.workspaces || []).filter(isConcreteWorkspace);
       void refreshLauncherTaskOverview(flattened);
     }, delayMs);
   }
@@ -882,7 +1111,7 @@ console.log('[workspace-hub.js] FILE LOADED');
     if (!elements.workspaceSelect) return;
 
     const options = ['<option value="">Select a workspace...</option>'];
-    flattened.forEach((workspace) => {
+    flattened.filter(isConcreteWorkspace).forEach((workspace) => {
       const indent = workspace.depth > 0 ? `${'--'.repeat(workspace.depth)} ` : '';
       const label = `${indent}${escapeHtml(workspace.name || 'Untitled Workspace')}`;
       options.push(`<option value="${escapeHtml(workspace.id)}">${label}</option>`);
@@ -923,6 +1152,10 @@ console.log('[workspace-hub.js] FILE LOADED');
       const hasChildren = Array.isArray(row.children) && row.children.length > 0;
       const deleteTitle = hasChildren ? 'Delete group' : 'Delete workspace';
       const taskBadge = renderLauncherTaskBadge(row.id);
+      const parentGroup = row.parent_id ? flattenedMap.get(row.parent_id) : null;
+      const parentGroupChip = parentGroup && isGroupWorkspace(parentGroup)
+        ? `<span class="launcher-card-parent-chip">In ${escapeHtml(parentGroup.name || 'Group')}</span>`
+        : '';
 
       const checked = selectedSet.has(row.id);
       const checkbox = selectionMode ? `
@@ -941,13 +1174,14 @@ console.log('[workspace-hub.js] FILE LOADED');
       `;
 
       return `
-        <div class="launcher-card-item" role="button" tabindex="0" draggable="true" data-workspace-id="${escapeHtml(row.id)}" data-select-mode="${selectionMode ? '1' : '0'}" ${accentStyle} aria-label="Open workspace ${escapeHtml(row.name || 'Untitled Workspace')}">
+        <div class="launcher-card-item" role="button" tabindex="0" draggable="true" data-workspace-id="${escapeHtml(row.id)}" data-workspace-kind="workspace" data-select-mode="${selectionMode ? '1' : '0'}" ${accentStyle} aria-label="Open workspace ${escapeHtml(row.name || 'Untitled Workspace')}">
           ${checkbox}
           ${deleteButton}
           <div class="launcher-card-title-row">
             <div class="launcher-card-title">${escapeHtml(row.name || 'Untitled Workspace')}</div>
             ${taskBadge}
           </div>
+          ${parentGroupChip}
           <div class="launcher-card-path">${pathText}</div>
           <div class="launcher-card-description">${escapeHtml(description)}</div>
           <div class="launcher-card-meta">
@@ -963,7 +1197,12 @@ console.log('[workspace-hub.js] FILE LOADED');
       const childCount = Array.isArray(workspace.children) ? workspace.children.length : 0;
       const isCollapsed = state.launcherCollapsedGroups && state.launcherCollapsedGroups.has(row.id);
       const hasChildren = Array.isArray(workspace.children) && workspace.children.length > 0;
-      const taskBadge = renderLauncherTaskBadge(row.id);
+      const previewNames = (workspace.children || [])
+        .slice(0, 3)
+        .map((child) => escapeHtml(child && (child.name || child.id) || 'Untitled Workspace'))
+        .join(' · ');
+      const previewSuffix = childCount > 3 ? ` +${childCount - 3} more` : '';
+      const groupDescription = row.description || 'Organization-only group';
 
       const toggleBtn = `
         <button class="launcher-group-toggle ${isCollapsed ? 'is-collapsed' : ''}" type="button" data-group-toggle="${escapeHtml(row.id)}" aria-label="${isCollapsed ? 'Expand' : 'Collapse'} group" aria-expanded="${isCollapsed ? 'false' : 'true'}" title="${isCollapsed ? 'Expand' : 'Collapse'}">
@@ -974,13 +1213,7 @@ console.log('[workspace-hub.js] FILE LOADED');
       `;
 
       const groupHeader = `
-        <div class="launcher-card-item launcher-group-header" role="button" tabindex="0" draggable="true" data-workspace-id="${escapeHtml(row.id)}" data-select-mode="${selectionMode ? '1' : '0'}" aria-label="Open group ${escapeHtml(row.name || 'Group')}">
-          ${selectionMode ? `
-            <label class="launcher-card-checkbox" aria-label="Select workspace ${escapeHtml(row.name || row.id)}">
-              <input type="checkbox" data-workspace-checkbox="${escapeHtml(row.id)}" ${selectedSet.has(row.id) ? 'checked' : ''} />
-              <span class="launcher-card-checkmark" aria-hidden="true"></span>
-            </label>
-          ` : ''}
+        <div class="launcher-card-item launcher-group-header" role="button" tabindex="0" draggable="true" data-workspace-id="${escapeHtml(row.id)}" data-workspace-kind="group" data-select-mode="${selectionMode ? '1' : '0'}" aria-label="${isCollapsed ? 'Expand' : 'Collapse'} group ${escapeHtml(row.name || 'Group')}" aria-expanded="${isCollapsed ? 'false' : 'true'}">
           <button class="launcher-card-delete" type="button" draggable="false" data-workspace-delete="${escapeHtml(row.id)}" title="Delete group" aria-label="Delete group">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
               <path d="M19,4H15.5L14.5,3H9.5L8.5,4H5V6H19M6,19A2,2 0 0,0 8,21H16A2,2 0 0,0 18,19V7H6V19Z"/>
@@ -989,16 +1222,17 @@ console.log('[workspace-hub.js] FILE LOADED');
           ${toggleBtn}
           <div class="launcher-card-title-row">
             <div class="launcher-card-title">${escapeHtml(row.name || 'Group')}</div>
-            ${taskBadge}
+            <span class="launcher-group-kind-pill">Group</span>
           </div>
-          <div class="launcher-card-path">Group · ${childCount} workspace${childCount === 1 ? '' : 's'}</div>
-          <div class="launcher-card-description">${escapeHtml(row.description || 'Group workspace')}</div>
+          <div class="launcher-card-path">Contains ${childCount} workspace${childCount === 1 ? '' : 's'}</div>
+          <div class="launcher-card-description">${escapeHtml(groupDescription)}</div>
+          <div class="launcher-group-preview">${previewNames ? `${previewNames}${escapeHtml(previewSuffix)}` : 'Drop workspaces here to organize related work.'}</div>
         </div>
       `;
 
       const childrenHtml = (workspace.children || []).map((child) => {
         // child is already a tree node; ensure we render nested cards.
-        if (child && Array.isArray(child.children) && child.children.length > 0) {
+        if (child && (isGroupWorkspace(child) || (Array.isArray(child.children) && child.children.length > 0))) {
           return renderGroupSection(child);
         }
         return renderWorkspaceCard(child);
@@ -1017,7 +1251,7 @@ console.log('[workspace-hub.js] FILE LOADED');
 
     const tree = Array.isArray(state.workspaces) ? state.workspaces : [];
     const html = tree.map((ws) => {
-      if (ws && Array.isArray(ws.children) && ws.children.length > 0) {
+      if (ws && (isGroupWorkspace(ws) || (Array.isArray(ws.children) && ws.children.length > 0))) {
         return renderGroupSection(ws);
       }
       return renderWorkspaceCard(ws);
@@ -1028,10 +1262,16 @@ console.log('[workspace-hub.js] FILE LOADED');
     elements.launcherGrid.querySelectorAll('[data-workspace-id]').forEach((card) => {
       card.addEventListener('click', (e) => {
         const workspaceId = card.dataset.workspaceId;
+        const workspaceKind = normalizeWorkspaceKind(card.dataset.workspaceKind);
         const isSelectMode = card.dataset.selectMode === '1';
 
         // Cmd/Ctrl+click for quick multi-select (even outside selection mode)
         if (e.metaKey || e.ctrlKey) {
+          if (workspaceKind === 'group') {
+            e.preventDefault();
+            toggleGroupCollapsed(workspaceId);
+            return;
+          }
           e.preventDefault();
           // Auto-enable selection mode if not already enabled
           if (!window.WorkspaceHubState.getState().launcherSelectionMode) {
@@ -1042,13 +1282,23 @@ console.log('[workspace-hub.js] FILE LOADED');
         }
 
         if (isSelectMode) {
+          if (workspaceKind === 'group') {
+            e.preventDefault();
+            toggleGroupCollapsed(workspaceId);
+            return;
+          }
           e.preventDefault();
           toggleLauncherWorkspaceSelection(workspaceId);
           return;
         }
 
-        // Navigate to workspace detail page
-        window.location.href = `/workspaces/${workspaceId}`;
+        if (workspaceKind === 'group') {
+          e.preventDefault();
+          toggleGroupCollapsed(workspaceId);
+          return;
+        }
+
+        navigateToWorkspace(workspaceId);
       });
 
       card.addEventListener('keydown', (e) => {
@@ -1456,6 +1706,11 @@ console.log('[workspace-hub.js] FILE LOADED');
     return Array.isArray(workspace?.children) && workspace.children.length > 0;
   }
 
+  function workspaceIsGroup(workspaceId) {
+    const state = window.WorkspaceHubState.getState();
+    return isGroupWorkspace(state.workspaceMap.get(workspaceId));
+  }
+
   async function deleteWorkspacesByIds(ids) {
     const state = window.WorkspaceHubState.getState();
     if (!ids || ids.length === 0) return;
@@ -1535,7 +1790,7 @@ console.log('[workspace-hub.js] FILE LOADED');
   function confirmDeleteWorkspace(workspaceId) {
     if (!workspaceId) return;
 
-    if (workspaceHasChildren(workspaceId)) {
+    if (workspaceHasChildren(workspaceId) || workspaceIsGroup(workspaceId)) {
       openDeleteGroupModal(workspaceId);
       return;
     }
@@ -1574,7 +1829,7 @@ console.log('[workspace-hub.js] FILE LOADED');
       const createRes = await fetch('/api/workspaces', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name, description })
+        body: JSON.stringify({ name, description, kind: 'group' })
       });
       if (!createRes.ok) {
         const text = await createRes.text();
@@ -1596,13 +1851,15 @@ console.log('[workspace-hub.js] FILE LOADED');
         throw new Error(text || 'Failed to move one or more workspaces');
       }
 
-      if (window.Toast) window.Toast.success('Group created');
+      if (window.Toast) window.Toast.success('Group created. No workspace folder was created.');
 
       // Close modal
       if (elements.launcherGroupModal && typeof bootstrap !== 'undefined' && bootstrap.Modal) {
         const modal = bootstrap.Modal.getInstance(elements.launcherGroupModal);
         if (modal) modal.hide();
       }
+      if (elements.launcherGroupNameInput) elements.launcherGroupNameInput.value = '';
+      if (elements.launcherGroupDescriptionInput) elements.launcherGroupDescriptionInput.value = '';
 
       // Reset selection + refresh
       setLauncherSelectionMode(false);
@@ -1807,6 +2064,7 @@ console.log('[workspace-hub.js] FILE LOADED');
     flattened.forEach((ws) => {
       if (!ws || !ws.id) return;
       if (excluded.has(ws.id)) return;
+      if (!isGroupWorkspace(ws)) return;
 
       const indent = ws.depth > 0 ? `${'--'.repeat(ws.depth)} ` : '';
       const label = `${indent}${escapeHtml(ws.name || ws.id)}`;
@@ -1978,7 +2236,7 @@ console.log('[workspace-hub.js] FILE LOADED');
       elements.directoriesList.innerHTML = '<div class="hub-empty">Select a workspace to view directories.</div>';
     }
 
-    const flattened = flattenWorkspaces(state.workspaces || []);
+    const flattened = flattenWorkspaces(state.workspaces || []).filter(isConcreteWorkspace);
     setLauncherTab(launcherActiveTab, { refreshSummary: false, force: true });
     void refreshLauncherTaskOverview(flattened);
   }
@@ -1990,6 +2248,8 @@ console.log('[workspace-hub.js] FILE LOADED');
     const state = window.WorkspaceHubState.getState();
 
     window.WorkspaceHubState.setUIState('loading');
+    renderLauncherWorkspaceRootLoading();
+    void loadLauncherWorkspaceRoot();
 
     try {
       const response = await fetch('/api/workspaces?tree=true');
@@ -2264,6 +2524,81 @@ console.log('[workspace-hub.js] FILE LOADED');
       elements.launcherRefreshBtn.addEventListener('click', () => loadWorkspaces());
     }
 
+    if (elements.launcherWorkspaceRootEditBtn) {
+      elements.launcherWorkspaceRootEditBtn.addEventListener('click', () => {
+        setLauncherWorkspaceRootEditorOpen(!launcherWorkspaceRootEditorOpen, { focusInput: !launcherWorkspaceRootEditorOpen });
+      });
+    }
+
+    if (elements.launcherWorkspaceRootCancelBtn) {
+      elements.launcherWorkspaceRootCancelBtn.addEventListener('click', () => {
+        setLauncherWorkspaceRootEditorOpen(false);
+      });
+    }
+
+    if (elements.launcherWorkspaceRootBrowseBtn) {
+      elements.launcherWorkspaceRootBrowseBtn.addEventListener('click', async () => {
+        setLauncherWorkspaceRootButtonLoading(elements.launcherWorkspaceRootBrowseBtn, true, 'Selecting...');
+        try {
+          await browseLauncherWorkspaceRoot();
+        } catch (error) {
+          console.error('Failed to browse workspace directory:', error);
+          if (window.Toast) window.Toast.error('Failed to open folder picker: ' + error.message);
+        } finally {
+          setLauncherWorkspaceRootButtonLoading(elements.launcherWorkspaceRootBrowseBtn, false);
+        }
+      });
+    }
+
+    const handleWorkspaceRootSave = async () => {
+      const nextValue = String(elements.launcherWorkspaceRootInput?.value || '').trim();
+      setLauncherWorkspaceRootButtonLoading(elements.launcherWorkspaceRootSaveBtn, true, 'Saving...');
+      try {
+        await saveLauncherWorkspaceRoot(nextValue);
+        setLauncherWorkspaceRootEditorOpen(false);
+        if (window.Toast) window.Toast.success('Workspace directory saved.');
+      } catch (error) {
+        console.error('Failed to save workspace directory:', error);
+        if (window.Toast) window.Toast.error('Failed to save workspace directory: ' + error.message);
+      } finally {
+        setLauncherWorkspaceRootButtonLoading(elements.launcherWorkspaceRootSaveBtn, false);
+      }
+    };
+
+    if (elements.launcherWorkspaceRootSaveBtn) {
+      elements.launcherWorkspaceRootSaveBtn.addEventListener('click', handleWorkspaceRootSave);
+    }
+
+    if (elements.launcherWorkspaceRootInput) {
+      elements.launcherWorkspaceRootInput.addEventListener('keydown', (event) => {
+        if (event.key === 'Enter') {
+          event.preventDefault();
+          void handleWorkspaceRootSave();
+        }
+      });
+    }
+
+    if (elements.launcherWorkspaceRootResetBtn) {
+      elements.launcherWorkspaceRootResetBtn.addEventListener('click', async () => {
+        if (!String(launcherWorkspaceRootState?.workspace_root || '').trim()) {
+          return;
+        }
+
+        setLauncherWorkspaceRootButtonLoading(elements.launcherWorkspaceRootResetBtn, true, 'Clearing...');
+        try {
+          await saveLauncherWorkspaceRoot('');
+          setLauncherWorkspaceRootEditorOpen(false);
+          if (window.Toast) window.Toast.success('Custom workspace directory cleared.');
+        } catch (error) {
+          console.error('Failed to clear workspace directory:', error);
+          if (window.Toast) window.Toast.error('Failed to clear workspace directory: ' + error.message);
+        } finally {
+          setLauncherWorkspaceRootButtonLoading(elements.launcherWorkspaceRootResetBtn, false);
+          syncLauncherWorkspaceRootEditorControls();
+        }
+      });
+    }
+
     if (elements.launcherOverviewToggleBtn && elements.launcherOverviewDetails) {
       elements.launcherOverviewToggleBtn.addEventListener('click', () => {
         setLauncherOverviewExpanded(elements.launcherOverviewDetails.hidden);
@@ -2453,6 +2788,7 @@ console.log('[workspace-hub.js] FILE LOADED');
 
   // Initialize
   bindEvents();
+  setLauncherWorkspaceRootEditorOpen(false);
   initLauncherOverviewExpandedState();
   initLauncherTabState();
 

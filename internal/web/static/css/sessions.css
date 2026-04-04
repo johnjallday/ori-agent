@@ -1019,8 +1019,80 @@
   background: rgba(255, 255, 255, 0.03);
 }
 
+.workspace-create-modal .workspace-setup-card {
+  display: block;
+}
+
 body.workspace-page .workspace-setup-card {
   display: block;
+}
+
+.workspace-create-modal-dialog {
+  width: min(760px, calc(100vw - 1.5rem));
+  max-width: min(760px, calc(100vw - 1.5rem));
+}
+
+.workspace-create-modal-body {
+  overflow-x: hidden;
+}
+
+.workspace-create-layout {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.workspace-create-main-fields,
+.workspace-create-review-pane {
+  min-width: 0;
+}
+
+.workspace-create-review-pane .workspace-setup-card {
+  margin-top: 0;
+}
+
+.workspace-create-modal .workspace-detail-mcp-chip-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
+.workspace-create-modal .workspace-detail-mcp-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.18rem 0.45rem;
+  border-radius: 999px;
+  font-size: 0.66rem;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  border: 1px solid rgba(255,255,255,0.08);
+  background: rgba(255,255,255,0.04);
+  color: rgba(236, 240, 255, 0.88);
+}
+
+.workspace-create-modal .workspace-detail-mcp-chip.source {
+  background: rgba(109, 213, 237, 0.12);
+  border-color: rgba(109, 213, 237, 0.22);
+  color: #a7eefc;
+}
+
+.workspace-create-modal .workspace-detail-mcp-chip.access {
+  background: rgba(76, 211, 153, 0.1);
+  border-color: rgba(76, 211, 153, 0.18);
+  color: #aef2d2;
+}
+
+.workspace-create-modal .workspace-detail-mcp-chip.status {
+  background: rgba(59, 130, 246, 0.12);
+  border-color: rgba(59, 130, 246, 0.2);
+  color: #bfdbfe;
+}
+
+.workspace-create-modal .workspace-detail-mcp-chip.local {
+  background: rgba(255, 214, 102, 0.14);
+  border-color: rgba(255, 214, 102, 0.28);
+  color: #ffe39a;
 }
 
 .workspace-setup-header {
@@ -1125,6 +1197,45 @@ body.workspace-page .workspace-setup-card {
 
 .workspace-setup-preview-list li + li {
   margin-top: 2px;
+}
+
+.workspace-bootstrap-review-layout {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.workspace-bootstrap-review-column {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+}
+
+@media (min-width: 1200px) {
+  #addFolderModal.workspace-bootstrap-review-active .workspace-create-modal-dialog {
+    width: min(1180px, calc(100vw - 2rem));
+    max-width: min(1180px, calc(100vw - 2rem));
+  }
+
+  #addFolderModal.workspace-bootstrap-review-active .workspace-create-layout {
+    display: grid;
+    grid-template-columns: minmax(0, 1.05fr) minmax(360px, 0.95fr);
+    align-items: start;
+    gap: 18px;
+  }
+}
+
+@media (min-width: 1400px) {
+  #addFolderModal.workspace-bootstrap-review-active .workspace-bootstrap-review-layout {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 14px;
+  }
+
+  #addFolderModal.workspace-bootstrap-review-active .workspace-bootstrap-review-layout .workspace-setup-preview {
+    grid-column: 1 / -1;
+  }
 }
 
 /* Main content adjustment when session sidebar is visible */
@@ -1268,7 +1379,7 @@ body.workspace-page .workspace-setup-card {
   font-size: 11px;
 }
 
-/* Hide navbar agent display when session sidebar is present (Studio page) */
+/* Hide navbar agent display when session sidebar is present (Workspace page) */
 .session-sidebar ~ .main-content #currentAgentDisplay,
 body:has(.session-sidebar) #currentAgentDisplay,
 body:has(.chat-info-bar) #currentAgentDisplay {

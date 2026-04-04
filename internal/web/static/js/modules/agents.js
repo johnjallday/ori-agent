@@ -9,6 +9,8 @@ let allAgents = [];
 let currentAgentName = '';
 let visibleAgentCount = 3;
 let availableProviders = []; // Cache for available providers and models
+let systemModelPreferencePromise = null;
+let cachedSystemModelPreference = null;
 const AGENT_CREATION_SKILL_CATALOG_AGENT = '__ori_agent_create_catalog__';
 const agentCreationCapabilityState = {
   mcpServers: [],
@@ -38,6 +40,15 @@ function createDefaultAgentCreationFlowState() {
 
 let pendingAgentCreationFlow = createDefaultAgentCreationFlowState();
 
+const WORKSPACE_MANAGER_MODEL_FALLBACKS = [
+  { provider: 'claude_code', models: ['sonnet'] },
+  { provider: 'codex', models: ['gpt-5.3-codex', 'gpt-5.4', 'gpt-5.2-codex', 'gpt-5.2'] },
+  { provider: 'openai', models: ['gpt-5', 'gpt-4.1', 'gpt-5-mini', 'o3', 'o1'] },
+  { provider: 'claude', patterns: ['sonnet', 'opus'] },
+  { provider: 'gemini', models: ['gemini-2.5-pro'], patterns: ['pro'] },
+  { provider: 'ollama', models: ['llama3.1:latest'], patterns: ['llama3.1', 'llama3', 'mixtral'] }
+];
+
 function isWorkspaceGeneratedMCPServer(server) {
   const name = String(server?.name || '').trim();
   return /^ws:[^:]+:mcp:/i.test(name);
@@ -47,6 +58,227 @@ function supportsCodexReasoning(providerName, modelName) {
   const provider = String(providerName || '').trim().toLowerCase();
   const model = String(modelName || '').trim().toLowerCase();
   return provider === 'codex' || model.includes('codex');
+}
+
+function normalizeProviderName(value) {
+  return String(value || '').trim().toLowerCase();
+}
+
+function getProviderDisplayName(providerName) {
+  const normalized = normalizeProviderName(providerName);
+  const provider = availableProviders.find((item) => normalizeProviderName(item?.name) === normalized);
+  return String(provider?.display_name || providerName || '').trim();
+}
+
+function formatProviderModelLabel(providerName, modelName) {
+  const providerLabel = getProviderDisplayName(providerName) || providerName;
+  const modelLabel = String(modelName || '').trim();
+  if (!providerLabel) return modelLabel;
+  if (!modelLabel) return providerLabel;
+  return `${providerLabel} / ${modelLabel}`;
+}
+
+function setAgentModelRecommendationMessage(message) {
+  const helper = document.getElementById('agentModelRecommendation');
+  if (!helper) return;
+
+  const text = String(message || '').trim();
+  helper.textContent = text;
+  helper.classList.toggle('d-none', text === '');
+}
+
+async function loadSystemModelPreference(forceRefresh = false) {
+  if (forceRefresh) {
+    systemModelPreferencePromise = null;
+    cachedSystemModelPreference = null;
+  }
+  if (cachedSystemModelPreference) {
+    return cachedSystemModelPreference;
+  }
+  if (!systemModelPreferencePromise) {
+    systemModelPreferencePromise = API.get('/api/settings/system-model')
+      .then((data) => {
+        cachedSystemModelPreference = data || {};
+        return cachedSystemModelPreference;
+      })
+      .catch((error) => {
+        agentsLog.debug('Failed to load system model preference', {
+          error: error && error.message ? error.message : error
+        });
+        cachedSystemModelPreference = {};
+        return cachedSystemModelPreference;
+      });
+  }
+  return systemModelPreferencePromise;
+}
+
+function getWorkspaceManagerModelCandidates() {
+  const candidates = [];
+  availableProviders.forEach((provider) => {
+    const providerName = normalizeProviderName(provider?.name);
+    const providerLabel = String(provider?.display_name || provider?.name || '').trim();
+    (provider?.models || []).forEach((model) => {
+      if (String(model?.type || '').trim() !== 'workspace-manager') {
+        return;
+      }
+      const modelName = String(model?.value || '').trim();
+      if (!providerName || !modelName) return;
+      candidates.push({
+        provider: providerName,
+        providerLabel,
+        model: modelName,
+        label: String(model?.label || modelName).trim() || modelName
+      });
+    });
+  });
+  return candidates;
+}
+
+function findWorkspaceManagerCandidateByExact(providerName, modelName, candidates) {
+  const provider = normalizeProviderName(providerName);
+  const model = String(modelName || '').trim().toLowerCase();
+  return (candidates || []).find((candidate) =>
+    candidate.provider === provider && candidate.model.toLowerCase() === model
+  ) || null;
+}
+
+function findWorkspaceManagerCandidateByPattern(providerName, patterns, candidates) {
+  const provider = normalizeProviderName(providerName);
+  const normalizedPatterns = Array.isArray(patterns)
+    ? patterns.map((pattern) => String(pattern || '').trim().toLowerCase()).filter(Boolean)
+    : [];
+  if (!provider || normalizedPatterns.length === 0) return null;
+
+  return (candidates || []).find((candidate) =>
+    candidate.provider === provider
+      && normalizedPatterns.some((pattern) => candidate.model.toLowerCase().includes(pattern))
+  ) || null;
+}
+
+function selectModelOption(modelSelect, providerName, modelName) {
+  if (!modelSelect) return false;
+
+  const normalizedProvider = normalizeProviderName(providerName);
+  const normalizedModel = String(modelName || '').trim();
+  if (!normalizedModel) return false;
+
+  for (let index = 0; index < modelSelect.options.length; index += 1) {
+    const option = modelSelect.options[index];
+    const optionProvider = normalizeProviderName(option.getAttribute('data-provider'));
+    if (option.disabled) continue;
+    if (option.value === normalizedModel && optionProvider === normalizedProvider) {
+      modelSelect.selectedIndex = index;
+      return true;
+    }
+  }
+
+  for (let index = 0; index < modelSelect.options.length; index += 1) {
+    const option = modelSelect.options[index];
+    if (option.disabled) continue;
+    if (option.value === normalizedModel) {
+      modelSelect.selectedIndex = index;
+      return true;
+    }
+  }
+
+  return false;
+}
+
+async function applyWorkspaceManagerRecommendation(options = {}) {
+  const modelSelect = document.getElementById('agentModel');
+  const typeInput = document.getElementById('agentType');
+  const reasoningInput = document.getElementById('agentReasoning');
+  if (!modelSelect || !typeInput) return null;
+
+  const force = Boolean(options && options.force);
+  const currentType = String(typeInput.value || '').trim().toLowerCase();
+  if (currentType !== 'workspace-manager') {
+    setAgentModelRecommendationMessage('');
+    return null;
+  }
+
+  if (availableProviders.length === 0) {
+    await loadAvailableProviders();
+    populateModelSelect(modelSelect, 'workspace-manager');
+  }
+
+  const systemModel = await loadSystemModelPreference(Boolean(options && options.refreshSystemModel));
+  const candidates = getWorkspaceManagerModelCandidates();
+  if (candidates.length === 0) {
+    setAgentModelRecommendationMessage('');
+    return null;
+  }
+
+  let chosen = null;
+  let recommendationMessage = '';
+  const systemCandidate = systemModel?.configured
+    ? findWorkspaceManagerCandidateByExact(systemModel.provider, systemModel.model, candidates)
+    : null;
+
+  if (systemCandidate) {
+    chosen = {
+      provider: systemCandidate.provider,
+      model: systemCandidate.model,
+      reasoningEffort: systemModel.reasoning_effort || '',
+      reason: 'system'
+    };
+    recommendationMessage = `Recommended: use your current system model ${formatProviderModelLabel(systemCandidate.provider, systemCandidate.model)} for this workspace manager. You can keep it or choose another model.`;
+  } else {
+    for (let index = 0; index < WORKSPACE_MANAGER_MODEL_FALLBACKS.length && !chosen; index += 1) {
+      const fallback = WORKSPACE_MANAGER_MODEL_FALLBACKS[index];
+      const exactModels = Array.isArray(fallback.models) ? fallback.models : [];
+      for (let modelIndex = 0; modelIndex < exactModels.length && !chosen; modelIndex += 1) {
+        const match = findWorkspaceManagerCandidateByExact(fallback.provider, exactModels[modelIndex], candidates);
+        if (match) {
+          chosen = {
+            provider: match.provider,
+            model: match.model,
+            reasoningEffort: '',
+            reason: 'fallback'
+          };
+        }
+      }
+
+      if (!chosen && Array.isArray(fallback.patterns) && fallback.patterns.length > 0) {
+        const patternMatch = findWorkspaceManagerCandidateByPattern(fallback.provider, fallback.patterns, candidates);
+        if (patternMatch) {
+          chosen = {
+            provider: patternMatch.provider,
+            model: patternMatch.model,
+            reasoningEffort: '',
+            reason: 'fallback'
+          };
+        }
+      }
+    }
+
+    if (!chosen) {
+      chosen = {
+        provider: candidates[0].provider,
+        model: candidates[0].model,
+        reasoningEffort: '',
+        reason: 'fallback'
+      };
+    }
+
+    const fallbackLabel = formatProviderModelLabel(chosen.provider, chosen.model);
+    if (systemModel?.configured && systemModel.provider && systemModel.model) {
+      recommendationMessage = `Your current system model ${formatProviderModelLabel(systemModel.provider, systemModel.model)} is not available as a workspace-manager default. Preselected fallback: ${fallbackLabel}. You can keep it or choose another model.`;
+    } else {
+      recommendationMessage = `Preselected workspace-manager default: ${fallbackLabel}. You can keep it or choose another model.`;
+    }
+  }
+
+  if (chosen && (force || !String(modelSelect.value || '').trim())) {
+    selectModelOption(modelSelect, chosen.provider, chosen.model);
+    if (reasoningInput && supportsCodexReasoning(chosen.provider, chosen.model)) {
+      reasoningInput.value = String(chosen.reasoningEffort || 'medium').trim() || 'medium';
+    }
+  }
+
+  setAgentModelRecommendationMessage(recommendationMessage);
+  updateAgentReasoningVisibility();
+  return chosen;
 }
 
 function updateAgentReasoningVisibility() {
@@ -187,6 +419,8 @@ function selectAgent(agentName) {
 // Show add agent modal
 function showAddAgentModal(options = {}) {
   pendingAgentCreationFlow = normalizeAgentCreationFlowOptions(options);
+  systemModelPreferencePromise = null;
+  cachedSystemModelPreference = null;
   const modalElement = document.getElementById('addAgentModal');
   if (!modalElement) {
     agentsLog.debug('addAgentModal not available on this page');
@@ -215,6 +449,7 @@ function showAddAgentModal(options = {}) {
     // Re-filter models based on default type (models already loaded on page init)
     populateModelSelect(agentModelInput, 'tool-calling');
   }
+  setAgentModelRecommendationMessage('');
   const agentReasoningInput = document.getElementById('agentReasoning');
   if (agentReasoningInput) {
     agentReasoningInput.value = 'medium';
@@ -274,6 +509,10 @@ function normalizeAgentCreationFlowOptions(options = {}) {
   return {
     seedName: String(options?.seedName || '').trim(),
     seedType: String(options?.seedType || '').trim(),
+    seedModel: String(options?.seedModel || '').trim(),
+    seedProvider: String(options?.seedProvider || '').trim(),
+    seedReasoningEffort: String(options?.seedReasoningEffort || '').trim(),
+    seedSystemPrompt: String(options?.seedSystemPrompt || '').trim(),
     autoDescription: String(options?.autoDescription || '').trim(),
     preferAutoConfig: Boolean(options?.preferAutoConfig),
     workspaceId: String(options?.workspaceId || '').trim(),
@@ -294,6 +533,8 @@ async function applyPendingAgentCreationFlowToModal() {
 
   const agentNameInput = document.getElementById('agentName');
   const agentTypeInput = document.getElementById('agentType');
+  const agentModelInput = document.getElementById('agentModel');
+  const agentReasoningInput = document.getElementById('agentReasoning');
   const descriptionTextarea = document.getElementById('baseAutoConfigDescription');
   const autoModeInput = document.getElementById('baseConfigModeAuto');
   const manualModeInput = document.getElementById('baseConfigModeManual');
@@ -305,6 +546,22 @@ async function applyPendingAgentCreationFlowToModal() {
   if (options.seedType && agentTypeInput) {
     agentTypeInput.value = options.seedType;
     agentTypeInput.dispatchEvent(new Event('change'));
+  }
+
+  if (options.seedModel && agentModelInput) {
+    selectModelOption(agentModelInput, options.seedProvider, options.seedModel);
+    if (agentReasoningInput && supportsCodexReasoning(options.seedProvider, options.seedModel)) {
+      agentReasoningInput.value = options.seedReasoningEffort || 'medium';
+    }
+  } else if (String(options.seedType || '').trim().toLowerCase() === 'workspace-manager') {
+    await applyWorkspaceManagerRecommendation({ force: true, refreshSystemModel: true });
+  }
+
+  if (options.seedSystemPrompt) {
+    const systemPromptInput = document.getElementById('agentSystemPrompt');
+    if (systemPromptInput) {
+      systemPromptInput.value = options.seedSystemPrompt;
+    }
   }
 
   if (options.autoDescription && descriptionTextarea) {
@@ -326,6 +583,14 @@ async function applyPendingAgentCreationFlowToModal() {
 
 function normalizeAgentCapabilityName(value) {
   return String(value || '').trim().toLowerCase();
+}
+
+function deriveAgentRoleForType(agentType) {
+  const normalized = String(agentType || '').trim().toLowerCase();
+  if (normalized === 'workspace-manager' || normalized === 'orchestration') {
+    return 'orchestrator';
+  }
+  return '';
 }
 
 function getAgentCreationCapabilityElements() {
@@ -356,36 +621,39 @@ function updateAgentCreationCapabilityCopy() {
     mcpSubtitle,
     capabilitiesNote
   } = getAgentCreationCapabilityElements();
-  const selectionEnabled = isAgentCreationMCPSelectionEnabled();
+  const hasWorkspace = isAgentCreationMCPSelectionEnabled();
 
+  // When creating from a workspace context, hide the entire MCP/Skills section.
+  // MCP connectors and skills are managed from the workspace detail panels instead.
+  const section = document.getElementById('agentCreateCapabilitiesSection');
+  if (section) {
+    section.hidden = hasWorkspace;
+  }
+  if (hasWorkspace) return;
+
+  // Standalone agent creation (no workspace) — show skills only
   if (title) {
-    title.textContent = selectionEnabled ? 'Review MCP Connectors and Skills' : 'Review Skills';
+    title.textContent = 'Review Skills';
   }
 
   if (mcpPanel) {
-    mcpPanel.hidden = !selectionEnabled;
+    mcpPanel.hidden = true;
   }
 
   if (grid) {
-    grid.classList.toggle('is-single-column', !selectionEnabled);
+    grid.classList.add('is-single-column');
   }
 
   if (capabilitiesIntro) {
-    capabilitiesIntro.textContent = selectionEnabled
-      ? 'Optional. Select global MCP connectors now and they will be bound into this workspace after the agent is created. Workspace-generated bindings stay hidden here.'
-      : 'Optional. Skills attach to the agent here. If a skill needs MCP connectors, you will bind them after adding the agent to a workspace.'
+    capabilitiesIntro.textContent = 'Optional. Skills attach to the agent here. If a skill needs MCP connectors, you will bind them after adding the agent to a workspace.';
   }
 
   if (mcpSubtitle) {
-    mcpSubtitle.textContent = selectionEnabled
-      ? 'Select global connectors to bind into this workspace'
-      : 'Global connectors shown for reference until a workspace is selected'
+    mcpSubtitle.textContent = 'Global connectors shown for reference until a workspace is selected';
   }
 
   if (capabilitiesNote) {
-    capabilitiesNote.textContent = selectionEnabled
-      ? 'Skills with scripts are trusted for this agent when selected. Required MCP connectors are bound into this workspace automatically after the agent is created.'
-      : 'Skills with scripts are trusted for this agent when selected. MCP connector access is configured later from the target workspace.'
+    capabilitiesNote.textContent = 'Skills with scripts are trusted for this agent when selected. MCP connector access is configured later from the target workspace.';
   }
 }
 
@@ -912,7 +1180,7 @@ async function bindAgentCreationMCPServersForWorkspace(workspaceId, agentInstanc
 
     try {
       if (!binding) {
-        const created = await API.post(`/api/studios/${encodeURIComponent(normalizedWorkspaceId)}/mcp-bindings`, {
+        const created = await API.post(`/api/workspaces/${encodeURIComponent(normalizedWorkspaceId)}/mcp-bindings`, {
           server_name: serverName,
           enabled: true
         });
@@ -923,7 +1191,7 @@ async function bindAgentCreationMCPServersForWorkspace(workspaceId, agentInstanc
         };
       } else if (binding.enabled === false) {
         const updated = await API.put(
-          `/api/studios/${encodeURIComponent(normalizedWorkspaceId)}/mcp-bindings/${encodeURIComponent(binding.id)}`,
+          `/api/workspaces/${encodeURIComponent(normalizedWorkspaceId)}/mcp-bindings/${encodeURIComponent(binding.id)}`,
           { enabled: true }
         );
         binding = updated?.binding || { ...binding, enabled: true };
@@ -949,7 +1217,7 @@ async function bindAgentCreationMCPServersForWorkspace(workspaceId, agentInstanc
 
     try {
       await API.put(
-        `/api/studios/${encodeURIComponent(normalizedWorkspaceId)}/agent-mcp-access/${encodeURIComponent(normalizedAgentInstanceId)}`,
+        `/api/workspaces/${encodeURIComponent(normalizedWorkspaceId)}/agent-mcp-access/${encodeURIComponent(normalizedAgentInstanceId)}`,
         { enabled_binding_ids: nextBindingIDs }
       );
       upsertAgentCreationWorkspaceAccessEntry(localWorkspaceData, {
@@ -1086,6 +1354,10 @@ async function createNewAgent() {
     // Add agent type if provided
     if (agentTypeInput && agentTypeInput.value) {
       requestBody.type = agentTypeInput.value;
+      const inferredRole = deriveAgentRoleForType(agentTypeInput.value);
+      if (inferredRole) {
+        requestBody.role = inferredRole;
+      }
     }
 
     // Add model if provided
@@ -1773,8 +2045,13 @@ function setupAgentManagement() {
   const agentTypeInput = document.getElementById('agentType');
   const agentModelInput = document.getElementById('agentModel');
   if (agentTypeInput && agentModelInput) {
-    agentTypeInput.addEventListener('change', (e) => {
+    agentTypeInput.addEventListener('change', async (e) => {
       filterModelsByType(e.target.value, agentModelInput);
+      if (String(e?.target?.value || '').trim().toLowerCase() === 'workspace-manager') {
+        await applyWorkspaceManagerRecommendation({ force: true });
+      } else {
+        setAgentModelRecommendationMessage('');
+      }
       updateAgentReasoningVisibility();
     });
   }

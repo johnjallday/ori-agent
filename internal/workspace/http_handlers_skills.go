@@ -12,11 +12,11 @@ import (
 	"github.com/johnjallday/ori-agent/internal/logger"
 )
 
-// CreateSkillBinding handles POST /api/studios/{studioID}/skill-bindings
+// CreateSkillBinding handles POST /api/workspaces/{workspaceID}/skill-bindings
 func (h *HTTPHandler) CreateSkillBinding(w http.ResponseWriter, r *http.Request) {
-	studioID := r.PathValue("studioID")
-	if studioID == "" {
-		orihttp.BadRequest(w, "studio ID is required")
+	workspaceID := r.PathValue("workspaceID")
+	if workspaceID == "" {
+		orihttp.BadRequest(w, "workspace ID is required")
 		return
 	}
 
@@ -35,9 +35,9 @@ func (h *HTTPHandler) CreateSkillBinding(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	studio, err := h.store.Get(studioID)
+	workspace, err := h.store.Get(workspaceID)
 	if err != nil {
-		orihttp.NotFound(w, fmt.Sprintf("Studio not found: %v", err))
+		orihttp.NotFound(w, fmt.Sprintf("Workspace not found: %v", err))
 		return
 	}
 
@@ -45,7 +45,7 @@ func (h *HTTPHandler) CreateSkillBinding(w http.ResponseWriter, r *http.Request)
 	if bindingID == "" {
 		bindingID = uuid.New().String()
 	}
-	if _, exists := studio.GetSkillBinding(bindingID); exists {
+	if _, exists := workspace.GetSkillBinding(bindingID); exists {
 		orihttp.BadRequest(w, fmt.Sprintf("skill binding %s already exists", bindingID))
 		return
 	}
@@ -69,73 +69,73 @@ func (h *HTTPHandler) CreateSkillBinding(w http.ResponseWriter, r *http.Request)
 		UpdatedAt: time.Now(),
 	}
 
-	if err := studio.UpsertSkillBinding(binding); err != nil {
+	if err := workspace.UpsertSkillBinding(binding); err != nil {
 		orihttp.BadRequest(w, err.Error())
 		return
 	}
-	if err := h.store.Save(studio); err != nil {
-		orihttp.InternalError(w, fmt.Sprintf("Failed to save studio: %v", err))
+	if err := h.store.Save(workspace); err != nil {
+		orihttp.InternalError(w, fmt.Sprintf("Failed to save workspace: %v", err))
 		return
 	}
 
-	created, _ := studio.GetSkillBinding(binding.ID)
+	created, _ := workspace.GetSkillBinding(binding.ID)
 	if created == nil {
 		created = &binding
 	}
-	h.publishWorkspaceSkillEvent(studioID, "skill_binding_created", map[string]interface{}{"binding": created})
+	h.publishWorkspaceSkillEvent(workspaceID, "skill_binding_created", map[string]interface{}{"binding": created})
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
 	if encErr := json.NewEncoder(w).Encode(map[string]interface{}{
-		"message": "Skill binding created successfully",
-		"binding": created,
-		"studio":  studioID,
+		"message":   "Skill binding created successfully",
+		"binding":   created,
+		"workspace": workspaceID,
 	}); encErr != nil {
 		logger.Error("Failed to encode response", logger.Fields{"error": encErr})
 	}
 }
 
-// ListSkillBindings handles GET /api/studios/{studioID}/skill-bindings
+// ListSkillBindings handles GET /api/workspaces/{workspaceID}/skill-bindings
 func (h *HTTPHandler) ListSkillBindings(w http.ResponseWriter, r *http.Request) {
-	studioID := r.PathValue("studioID")
-	if studioID == "" {
-		orihttp.BadRequest(w, "studio ID is required")
+	workspaceID := r.PathValue("workspaceID")
+	if workspaceID == "" {
+		orihttp.BadRequest(w, "workspace ID is required")
 		return
 	}
 
-	studio, err := h.store.Get(studioID)
+	workspace, err := h.store.Get(workspaceID)
 	if err != nil {
-		orihttp.NotFound(w, fmt.Sprintf("Studio not found: %v", err))
+		orihttp.NotFound(w, fmt.Sprintf("Workspace not found: %v", err))
 		return
 	}
 
-	bindings := studio.GetSkillBindings()
+	bindings := workspace.GetSkillBindings()
 	w.Header().Set("Content-Type", "application/json")
 	if encErr := json.NewEncoder(w).Encode(map[string]interface{}{
-		"bindings": bindings,
-		"count":    len(bindings),
-		"studio":   studioID,
+		"bindings":  bindings,
+		"count":     len(bindings),
+		"workspace": workspaceID,
 	}); encErr != nil {
 		logger.Error("Failed to encode response", logger.Fields{"error": encErr})
 	}
 }
 
-// GetSkillBindingByID handles GET /api/studios/{studioID}/skill-bindings/{bindingID}
+// GetSkillBindingByID handles GET /api/workspaces/{workspaceID}/skill-bindings/{bindingID}
 func (h *HTTPHandler) GetSkillBindingByID(w http.ResponseWriter, r *http.Request) {
-	studioID := r.PathValue("studioID")
+	workspaceID := r.PathValue("workspaceID")
 	bindingID := r.PathValue("bindingID")
-	if studioID == "" || bindingID == "" {
-		orihttp.BadRequest(w, "studio ID and binding ID are required")
+	if workspaceID == "" || bindingID == "" {
+		orihttp.BadRequest(w, "workspace ID and binding ID are required")
 		return
 	}
 
-	studio, err := h.store.Get(studioID)
+	workspace, err := h.store.Get(workspaceID)
 	if err != nil {
-		orihttp.NotFound(w, fmt.Sprintf("Studio not found: %v", err))
+		orihttp.NotFound(w, fmt.Sprintf("Workspace not found: %v", err))
 		return
 	}
 
-	binding, exists := studio.GetSkillBinding(bindingID)
+	binding, exists := workspace.GetSkillBinding(bindingID)
 	if !exists {
 		orihttp.NotFound(w, fmt.Sprintf("skill binding %s not found", bindingID))
 		return
@@ -143,19 +143,19 @@ func (h *HTTPHandler) GetSkillBindingByID(w http.ResponseWriter, r *http.Request
 
 	w.Header().Set("Content-Type", "application/json")
 	if encErr := json.NewEncoder(w).Encode(map[string]interface{}{
-		"binding": binding,
-		"studio":  studioID,
+		"binding":   binding,
+		"workspace": workspaceID,
 	}); encErr != nil {
 		logger.Error("Failed to encode response", logger.Fields{"error": encErr})
 	}
 }
 
-// UpdateSkillBinding handles PUT/PATCH /api/studios/{studioID}/skill-bindings/{bindingID}
+// UpdateSkillBinding handles PUT/PATCH /api/workspaces/{workspaceID}/skill-bindings/{bindingID}
 func (h *HTTPHandler) UpdateSkillBinding(w http.ResponseWriter, r *http.Request) {
-	studioID := r.PathValue("studioID")
+	workspaceID := r.PathValue("workspaceID")
 	bindingID := r.PathValue("bindingID")
-	if studioID == "" || bindingID == "" {
-		orihttp.BadRequest(w, "studio ID and binding ID are required")
+	if workspaceID == "" || bindingID == "" {
+		orihttp.BadRequest(w, "workspace ID and binding ID are required")
 		return
 	}
 
@@ -169,13 +169,13 @@ func (h *HTTPHandler) UpdateSkillBinding(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	studio, err := h.store.Get(studioID)
+	workspace, err := h.store.Get(workspaceID)
 	if err != nil {
-		orihttp.NotFound(w, fmt.Sprintf("Studio not found: %v", err))
+		orihttp.NotFound(w, fmt.Sprintf("Workspace not found: %v", err))
 		return
 	}
 
-	binding, exists := studio.GetSkillBinding(bindingID)
+	binding, exists := workspace.GetSkillBinding(bindingID)
 	if !exists {
 		orihttp.NotFound(w, fmt.Sprintf("skill binding %s not found", bindingID))
 		return
@@ -194,108 +194,108 @@ func (h *HTTPHandler) UpdateSkillBinding(w http.ResponseWriter, r *http.Request)
 		binding.Config = req.Config
 	}
 
-	if err := studio.UpsertSkillBinding(*binding); err != nil {
+	if err := workspace.UpsertSkillBinding(*binding); err != nil {
 		orihttp.BadRequest(w, err.Error())
 		return
 	}
-	if err := h.store.Save(studio); err != nil {
-		orihttp.InternalError(w, fmt.Sprintf("Failed to save studio: %v", err))
+	if err := h.store.Save(workspace); err != nil {
+		orihttp.InternalError(w, fmt.Sprintf("Failed to save workspace: %v", err))
 		return
 	}
 
-	updated, _ := studio.GetSkillBinding(bindingID)
+	updated, _ := workspace.GetSkillBinding(bindingID)
 	if updated == nil {
 		updated = binding
 	}
-	h.publishWorkspaceSkillEvent(studioID, "skill_binding_updated", map[string]interface{}{"binding": updated})
+	h.publishWorkspaceSkillEvent(workspaceID, "skill_binding_updated", map[string]interface{}{"binding": updated})
 
 	w.Header().Set("Content-Type", "application/json")
 	if encErr := json.NewEncoder(w).Encode(map[string]interface{}{
-		"message": "Skill binding updated successfully",
-		"binding": updated,
-		"studio":  studioID,
+		"message":   "Skill binding updated successfully",
+		"binding":   updated,
+		"workspace": workspaceID,
 	}); encErr != nil {
 		logger.Error("Failed to encode response", logger.Fields{"error": encErr})
 	}
 }
 
-// DeleteSkillBinding handles DELETE /api/studios/{studioID}/skill-bindings/{bindingID}
+// DeleteSkillBinding handles DELETE /api/workspaces/{workspaceID}/skill-bindings/{bindingID}
 func (h *HTTPHandler) DeleteSkillBinding(w http.ResponseWriter, r *http.Request) {
-	studioID := r.PathValue("studioID")
+	workspaceID := r.PathValue("workspaceID")
 	bindingID := r.PathValue("bindingID")
-	if studioID == "" || bindingID == "" {
-		orihttp.BadRequest(w, "studio ID and binding ID are required")
+	if workspaceID == "" || bindingID == "" {
+		orihttp.BadRequest(w, "workspace ID and binding ID are required")
 		return
 	}
 
-	studio, err := h.store.Get(studioID)
+	workspace, err := h.store.Get(workspaceID)
 	if err != nil {
-		orihttp.NotFound(w, fmt.Sprintf("Studio not found: %v", err))
+		orihttp.NotFound(w, fmt.Sprintf("Workspace not found: %v", err))
 		return
 	}
 
-	if err := studio.DeleteSkillBinding(bindingID); err != nil {
+	if err := workspace.DeleteSkillBinding(bindingID); err != nil {
 		orihttp.NotFound(w, err.Error())
 		return
 	}
-	if err := h.store.Save(studio); err != nil {
-		orihttp.InternalError(w, fmt.Sprintf("Failed to save studio: %v", err))
+	if err := h.store.Save(workspace); err != nil {
+		orihttp.InternalError(w, fmt.Sprintf("Failed to save workspace: %v", err))
 		return
 	}
 
-	h.publishWorkspaceSkillEvent(studioID, "skill_binding_deleted", map[string]interface{}{"binding_id": bindingID})
+	h.publishWorkspaceSkillEvent(workspaceID, "skill_binding_deleted", map[string]interface{}{"binding_id": bindingID})
 
 	w.Header().Set("Content-Type", "application/json")
 	if encErr := json.NewEncoder(w).Encode(map[string]interface{}{
 		"message":    "Skill binding deleted successfully",
 		"binding_id": bindingID,
-		"studio":     studioID,
+		"workspace":  workspaceID,
 	}); encErr != nil {
 		logger.Error("Failed to encode response", logger.Fields{"error": encErr})
 	}
 }
 
-// ListAgentSkillAccess handles GET /api/studios/{studioID}/agent-skill-access
+// ListAgentSkillAccess handles GET /api/workspaces/{workspaceID}/agent-skill-access
 func (h *HTTPHandler) ListAgentSkillAccess(w http.ResponseWriter, r *http.Request) {
-	studioID := r.PathValue("studioID")
-	if studioID == "" {
-		orihttp.BadRequest(w, "studio ID is required")
+	workspaceID := r.PathValue("workspaceID")
+	if workspaceID == "" {
+		orihttp.BadRequest(w, "workspace ID is required")
 		return
 	}
 
-	studio, err := h.store.Get(studioID)
+	workspace, err := h.store.Get(workspaceID)
 	if err != nil {
-		orihttp.NotFound(w, fmt.Sprintf("Studio not found: %v", err))
+		orihttp.NotFound(w, fmt.Sprintf("Workspace not found: %v", err))
 		return
 	}
 
-	entries := studio.ListAgentSkillAccess()
+	entries := workspace.ListAgentSkillAccess()
 	w.Header().Set("Content-Type", "application/json")
 	if encErr := json.NewEncoder(w).Encode(map[string]interface{}{
-		"access": entries,
-		"count":  len(entries),
-		"studio": studioID,
+		"access":    entries,
+		"count":     len(entries),
+		"workspace": workspaceID,
 	}); encErr != nil {
 		logger.Error("Failed to encode response", logger.Fields{"error": encErr})
 	}
 }
 
-// GetAgentSkillAccessEntry handles GET /api/studios/{studioID}/agent-skill-access/{agentInstanceID}
+// GetAgentSkillAccessEntry handles GET /api/workspaces/{workspaceID}/agent-skill-access/{agentInstanceID}
 func (h *HTTPHandler) GetAgentSkillAccessEntry(w http.ResponseWriter, r *http.Request) {
-	studioID := r.PathValue("studioID")
+	workspaceID := r.PathValue("workspaceID")
 	agentInstanceID := r.PathValue("agentInstanceID")
-	if studioID == "" || agentInstanceID == "" {
-		orihttp.BadRequest(w, "studio ID and agent instance ID are required")
+	if workspaceID == "" || agentInstanceID == "" {
+		orihttp.BadRequest(w, "workspace ID and agent instance ID are required")
 		return
 	}
 
-	studio, err := h.store.Get(studioID)
+	workspace, err := h.store.Get(workspaceID)
 	if err != nil {
-		orihttp.NotFound(w, fmt.Sprintf("Studio not found: %v", err))
+		orihttp.NotFound(w, fmt.Sprintf("Workspace not found: %v", err))
 		return
 	}
 
-	entry, exists := studio.GetAgentSkillAccess(agentInstanceID)
+	entry, exists := workspace.GetAgentSkillAccess(agentInstanceID)
 	if !exists {
 		orihttp.NotFound(w, fmt.Sprintf("agent skill access %s not found", agentInstanceID))
 		return
@@ -303,19 +303,19 @@ func (h *HTTPHandler) GetAgentSkillAccessEntry(w http.ResponseWriter, r *http.Re
 
 	w.Header().Set("Content-Type", "application/json")
 	if encErr := json.NewEncoder(w).Encode(map[string]interface{}{
-		"access": entry,
-		"studio": studioID,
+		"access":    entry,
+		"workspace": workspaceID,
 	}); encErr != nil {
 		logger.Error("Failed to encode response", logger.Fields{"error": encErr})
 	}
 }
 
-// UpdateAgentSkillAccess handles PUT/PATCH /api/studios/{studioID}/agent-skill-access/{agentInstanceID}
+// UpdateAgentSkillAccess handles PUT/PATCH /api/workspaces/{workspaceID}/agent-skill-access/{agentInstanceID}
 func (h *HTTPHandler) UpdateAgentSkillAccess(w http.ResponseWriter, r *http.Request) {
-	studioID := r.PathValue("studioID")
+	workspaceID := r.PathValue("workspaceID")
 	agentInstanceID := r.PathValue("agentInstanceID")
-	if studioID == "" || agentInstanceID == "" {
-		orihttp.BadRequest(w, "studio ID and agent instance ID are required")
+	if workspaceID == "" || agentInstanceID == "" {
+		orihttp.BadRequest(w, "workspace ID and agent instance ID are required")
 		return
 	}
 
@@ -326,15 +326,15 @@ func (h *HTTPHandler) UpdateAgentSkillAccess(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	studio, err := h.store.Get(studioID)
+	workspace, err := h.store.Get(workspaceID)
 	if err != nil {
-		orihttp.NotFound(w, fmt.Sprintf("Studio not found: %v", err))
+		orihttp.NotFound(w, fmt.Sprintf("Workspace not found: %v", err))
 		return
 	}
 
 	// Validate that all referenced binding IDs exist in the workspace
 	if len(req.EnabledBindingIDs) > 0 {
-		bindings := studio.GetSkillBindings()
+		bindings := workspace.GetSkillBindings()
 		bindingIDSet := make(map[string]bool, len(bindings))
 		for _, b := range bindings {
 			bindingIDSet[strings.ToLower(strings.TrimSpace(b.ID))] = true
@@ -356,68 +356,68 @@ func (h *HTTPHandler) UpdateAgentSkillAccess(w http.ResponseWriter, r *http.Requ
 		EnabledBindingIDs: req.EnabledBindingIDs,
 		UpdatedAt:         time.Now(),
 	}
-	if err := studio.SetAgentSkillAccess(entry); err != nil {
+	if err := workspace.SetAgentSkillAccess(entry); err != nil {
 		orihttp.BadRequest(w, err.Error())
 		return
 	}
-	if err := h.store.Save(studio); err != nil {
-		orihttp.InternalError(w, fmt.Sprintf("Failed to save studio: %v", err))
+	if err := h.store.Save(workspace); err != nil {
+		orihttp.InternalError(w, fmt.Sprintf("Failed to save workspace: %v", err))
 		return
 	}
 
-	updated, _ := studio.GetAgentSkillAccess(agentInstanceID)
+	updated, _ := workspace.GetAgentSkillAccess(agentInstanceID)
 	if updated == nil {
 		updated = &entry
 	}
-	h.publishWorkspaceSkillEvent(studioID, "agent_skill_access_updated", map[string]interface{}{"access": updated})
+	h.publishWorkspaceSkillEvent(workspaceID, "agent_skill_access_updated", map[string]interface{}{"access": updated})
 
 	w.Header().Set("Content-Type", "application/json")
 	if encErr := json.NewEncoder(w).Encode(map[string]interface{}{
-		"message": "Agent skill access updated successfully",
-		"access":  updated,
-		"studio":  studioID,
+		"message":   "Agent skill access updated successfully",
+		"access":    updated,
+		"workspace": workspaceID,
 	}); encErr != nil {
 		logger.Error("Failed to encode response", logger.Fields{"error": encErr})
 	}
 }
 
-// DeleteAgentSkillAccess handles DELETE /api/studios/{studioID}/agent-skill-access/{agentInstanceID}
+// DeleteAgentSkillAccess handles DELETE /api/workspaces/{workspaceID}/agent-skill-access/{agentInstanceID}
 func (h *HTTPHandler) DeleteAgentSkillAccess(w http.ResponseWriter, r *http.Request) {
-	studioID := r.PathValue("studioID")
+	workspaceID := r.PathValue("workspaceID")
 	agentInstanceID := r.PathValue("agentInstanceID")
-	if studioID == "" || agentInstanceID == "" {
-		orihttp.BadRequest(w, "studio ID and agent instance ID are required")
+	if workspaceID == "" || agentInstanceID == "" {
+		orihttp.BadRequest(w, "workspace ID and agent instance ID are required")
 		return
 	}
 
-	studio, err := h.store.Get(studioID)
+	workspace, err := h.store.Get(workspaceID)
 	if err != nil {
-		orihttp.NotFound(w, fmt.Sprintf("Studio not found: %v", err))
+		orihttp.NotFound(w, fmt.Sprintf("Workspace not found: %v", err))
 		return
 	}
 
-	if err := studio.DeleteAgentSkillAccess(agentInstanceID); err != nil {
+	if err := workspace.DeleteAgentSkillAccess(agentInstanceID); err != nil {
 		orihttp.NotFound(w, err.Error())
 		return
 	}
-	if err := h.store.Save(studio); err != nil {
-		orihttp.InternalError(w, fmt.Sprintf("Failed to save studio: %v", err))
+	if err := h.store.Save(workspace); err != nil {
+		orihttp.InternalError(w, fmt.Sprintf("Failed to save workspace: %v", err))
 		return
 	}
 
-	h.publishWorkspaceSkillEvent(studioID, "agent_skill_access_deleted", map[string]interface{}{"agent_instance_id": agentInstanceID})
+	h.publishWorkspaceSkillEvent(workspaceID, "agent_skill_access_deleted", map[string]interface{}{"agent_instance_id": agentInstanceID})
 
 	w.Header().Set("Content-Type", "application/json")
 	if encErr := json.NewEncoder(w).Encode(map[string]interface{}{
 		"message":           "Agent skill access deleted successfully",
 		"agent_instance_id": agentInstanceID,
-		"studio":            studioID,
+		"workspace":         workspaceID,
 	}); encErr != nil {
 		logger.Error("Failed to encode response", logger.Fields{"error": encErr})
 	}
 }
 
-func (h *HTTPHandler) publishWorkspaceSkillEvent(studioID, action string, data map[string]interface{}) {
+func (h *HTTPHandler) publishWorkspaceSkillEvent(workspaceID, action string, data map[string]interface{}) {
 	if h == nil || h.eventBus == nil {
 		return
 	}
@@ -429,7 +429,7 @@ func (h *HTTPHandler) publishWorkspaceSkillEvent(studioID, action string, data m
 
 	h.eventBus.Publish(Event{
 		Type:        EventWorkspaceUpdated,
-		WorkspaceID: studioID,
+		WorkspaceID: workspaceID,
 		Source:      "api",
 		Data:        payload,
 	})

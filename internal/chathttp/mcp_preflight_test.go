@@ -192,7 +192,7 @@ func (s *preflightWorkspaceStore) GetFilesPath(workspaceID string) string {
 	return "/tmp/" + workspaceID
 }
 
-func TestMaybeAutoEnableMCPForPrompt_EnablesWebSearchForOri(t *testing.T) {
+func TestMaybeAutoEnableMCPForPrompt_ReturnsWorkspaceResolutionForWebSearch(t *testing.T) {
 	st := newPreflightStore("Ori", &agent.Agent{})
 	ag, _ := st.GetAgent("Ori")
 	runtimeAgent := &resolvedChatAgent{Agent: ag}
@@ -234,8 +234,11 @@ func TestMaybeAutoEnableMCPForPrompt_EnablesWebSearchForOri(t *testing.T) {
 	if result.serverName != "brave-search" {
 		t.Fatalf("expected result server brave-search, got %q", result.serverName)
 	}
-	if result.userMessage != "" {
-		t.Fatalf("expected empty user message, got %q", result.userMessage)
+	if result.userMessage == "" {
+		t.Fatalf("expected preflight notice, got empty user message")
+	}
+	if result.dependencyResolution == nil {
+		t.Fatal("expected dependency resolution payload")
 	}
 
 	ws, err := wsStore.Get("ws-1")
@@ -243,20 +246,21 @@ func TestMaybeAutoEnableMCPForPrompt_EnablesWebSearchForOri(t *testing.T) {
 		t.Fatalf("expected workspace to exist: %v", err)
 	}
 	bindings := ws.GetMCPBindings()
-	if len(bindings) != 1 {
-		t.Fatalf("expected 1 workspace MCP binding, got %d", len(bindings))
+	if len(bindings) != 0 {
+		t.Fatalf("expected no workspace mutation before approval, got %d bindings", len(bindings))
 	}
-	if bindings[0].ServerName != "brave-search" {
-		t.Fatalf("expected workspace binding brave-search, got %q", bindings[0].ServerName)
-	}
-	if updatedAgent == nil || !hasAnyMCPServer(updatedAgent.MCPServers, []string{"brave-search"}) {
-		t.Fatalf("expected resolved agent to include brave-search, got %v", updatedAgent)
+	if updatedAgent != nil {
+		t.Fatalf("expected no resolved agent override before approval, got %v", updatedAgent)
 	}
 	if len(cfg.enabled) != 0 {
 		t.Fatalf("expected no agent-scoped enable calls, got %v", cfg.enabled)
 	}
 	if len(reg.started) != 0 {
 		t.Fatalf("expected no eager server start, got %v", reg.started)
+	}
+	actions := result.dependencyResolution.Steps[0].Actions
+	if len(actions) == 0 || actions[0].Type != dependencyActionTypeEnableWorkspaceMCP {
+		t.Fatalf("expected first action to enable workspace MCP, got %#v", actions)
 	}
 }
 

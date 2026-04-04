@@ -203,6 +203,14 @@ func (s *Server) serveSettings(w http.ResponseWriter, r *http.Request) {
 	s.renderAndWritePage(w, "settings", data)
 }
 
+func (s *Server) serveVault(w http.ResponseWriter, r *http.Request) {
+	data := s.prepareBasePageData("vault")
+	data.Title = "Private Vaults - Ori Agent"
+	data.BrandText = "Ori Agent"
+	data.ShowSidebarToggle = true
+	s.renderAndWritePage(w, "vault", data)
+}
+
 func (s *Server) serveMCP(w http.ResponseWriter, r *http.Request) {
 	data := s.prepareBasePageData("mcp")
 	s.renderAndWritePage(w, "mcp", data)

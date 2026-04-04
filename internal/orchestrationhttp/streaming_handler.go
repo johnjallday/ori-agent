@@ -48,7 +48,7 @@ func (sh *StreamingHandler) WorkflowStatusHandler(w http.ResponseWriter, r *http
 		return
 	}
 
-	workspaceID := r.URL.Query().Get("studio_id")
+	workspaceID := r.URL.Query().Get("workspace_id")
 	if workspaceID == "" {
 		orihttp.BadRequest(w, "workspace_id is required")
 		return
@@ -71,7 +71,7 @@ func (sh *StreamingHandler) WorkflowStatusStreamHandler(w http.ResponseWriter, r
 		return
 	}
 
-	workspaceID := r.URL.Query().Get("studio_id")
+	workspaceID := r.URL.Query().Get("workspace_id")
 	if workspaceID == "" {
 		orihttp.BadRequest(w, "workspace_id is required")
 		return
@@ -136,11 +136,11 @@ func (sh *StreamingHandler) streamEventsFromBus(ctx context.Context, w http.Resp
 		case event := <-eventChan:
 			// Send event to client
 			eventData := map[string]interface{}{
-				"type":      event.Type,
-				"studio_id": event.WorkspaceID,
-				"timestamp": event.Timestamp,
-				"source":    event.Source,
-				"data":      event.Data,
+				"type":         event.Type,
+				"workspace_id": event.WorkspaceID,
+				"timestamp":    event.Timestamp,
+				"source":       event.Source,
+				"data":         event.Data,
 			}
 
 			data, err := json.Marshal(eventData)
@@ -242,9 +242,9 @@ func (sh *StreamingHandler) sendWorkspaceStatus(w http.ResponseWriter, flusher h
 	}
 
 	statusData := map[string]interface{}{
-		"studio_id":  ws.ID,
-		"status":     ws.Status,
-		"updated_at": ws.UpdatedAt,
+		"workspace_id": ws.ID,
+		"status":       ws.Status,
+		"updated_at":   ws.UpdatedAt,
 	}
 
 	// Add workflow status if orchestrator is available

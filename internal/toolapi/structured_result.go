@@ -32,10 +32,27 @@ type StructuredResult struct {
 func ParseStructuredResult(result string) (*StructuredResult, error) {
 	var sr StructuredResult
 	if err := json.Unmarshal([]byte(result), &sr); err == nil {
-		return &sr, nil
+		if isValidStructuredResult(&sr) {
+			return &sr, nil
+		}
 	}
 	if err := yaml.Unmarshal([]byte(result), &sr); err == nil {
-		return &sr, nil
+		if isValidStructuredResult(&sr) {
+			return &sr, nil
+		}
 	}
 	return nil, fmt.Errorf("result is not a valid structured result (neither JSON nor YAML)")
+}
+
+func isValidStructuredResult(sr *StructuredResult) bool {
+	if sr == nil || sr.Data == nil {
+		return false
+	}
+
+	switch sr.DisplayType {
+	case DisplayTypeText, DisplayTypeTable, DisplayTypeModal, DisplayTypeCard, DisplayTypeList, DisplayTypeJSON:
+		return true
+	default:
+		return false
+	}
 }

@@ -23,6 +23,12 @@ func TestHandleWorkspaceImportCreatesWorkspaceWithDirectoryReference(t *testing.
 	body := map[string]interface{}{
 		"path":        importDir,
 		"entry_point": "create_modal",
+		"workspace_bootstrap": map[string]interface{}{
+			"goal":         "Build the Q2 presentation",
+			"systems":      "Keynote, Finder",
+			"capabilities": "Create slides and organize imported assets",
+			"context":      "Source files live in the imported folder",
+		},
 	}
 	payload, _ := json.Marshal(body)
 
@@ -75,6 +81,20 @@ func TestHandleWorkspaceImportCreatesWorkspaceWithDirectoryReference(t *testing.
 	}
 	if _, ok := ws.SharedData["folder_import"]; !ok {
 		t.Fatalf("expected folder_import metadata in shared_data")
+	}
+	bootstrapRaw, ok := ws.SharedData["workspace_bootstrap"]
+	if !ok {
+		t.Fatalf("expected workspace_bootstrap metadata in shared_data")
+	}
+	bootstrapMap, ok := bootstrapRaw.(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected workspace_bootstrap to be an object, got %T", bootstrapRaw)
+	}
+	if bootstrapMap["goal"] != "Build the Q2 presentation" {
+		t.Fatalf("expected workspace_bootstrap.goal to persist, got %#v", bootstrapMap["goal"])
+	}
+	if bootstrapMap["systems"] != "Keynote, Finder" {
+		t.Fatalf("expected workspace_bootstrap.systems to persist, got %#v", bootstrapMap["systems"])
 	}
 }
 

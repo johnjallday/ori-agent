@@ -189,6 +189,32 @@ func TestCreateAgent_WithAllowWebSearchSetting(t *testing.T) {
 	}
 }
 
+func TestCreateAgent_WorkspaceManagerDefaultsToOrchestratorRole(t *testing.T) {
+	ts := setupTestServer(t)
+	defer ts.cleanup()
+
+	reqBody := map[string]interface{}{
+		"name":  "Workspace Manager Agent",
+		"type":  "workspace-manager",
+		"model": "gpt-5",
+	}
+
+	rr := ts.doRequest(t, http.MethodPost, "/api/agents", reqBody)
+	assertStatus(t, rr, http.StatusOK)
+
+	rr = ts.doRequest(t, http.MethodGet, "/api/agents?name=Workspace%20Manager%20Agent", nil)
+	assertStatus(t, rr, http.StatusOK)
+	var detail map[string]interface{}
+	decodeResponse(t, rr, &detail)
+
+	if got := detail["type"]; got != "workspace-manager" {
+		t.Fatalf("expected type workspace-manager, got %#v", got)
+	}
+	if got := detail["role"]; got != "orchestrator" {
+		t.Fatalf("expected role orchestrator, got %#v", got)
+	}
+}
+
 func TestCreateAgent_WithCodexReasoningEffort(t *testing.T) {
 	ts := setupTestServer(t)
 	defer ts.cleanup()

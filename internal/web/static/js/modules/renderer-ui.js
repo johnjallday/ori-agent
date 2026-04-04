@@ -31,8 +31,8 @@ export class RendererUI {
 
     const panelWidth = Math.min(600, this.state.width * 0.8);
     const panelHeight = 95;
-    const panelX = 100; // Move right to avoid overlapping with studio title
-    const panelY = 100; // Move down to avoid studio title overlay
+    const panelX = 100; // Move right to avoid overlapping with workspace title
+    const panelY = 100; // Move down to avoid workspace title overlay
     const padding = 15;
 
     this.ctx.save();

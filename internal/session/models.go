@@ -26,6 +26,7 @@ package session
 
 import (
 	"encoding/json"
+	"strings"
 	"time"
 )
 
@@ -140,6 +141,33 @@ const (
 	WorkspaceStatusCancelled WorkspaceStatus = "cancelled"
 )
 
+// WorkspaceKind describes whether a record is a real workspace or an
+// organization-only group container.
+type WorkspaceKind string
+
+const (
+	WorkspaceKindWorkspace WorkspaceKind = "workspace"
+	WorkspaceKindGroup     WorkspaceKind = "group"
+)
+
+// NormalizeWorkspaceKind returns a supported workspace kind, defaulting to a
+// real workspace when the input is empty or unknown.
+func NormalizeWorkspaceKind(value string) WorkspaceKind {
+	switch WorkspaceKind(strings.TrimSpace(value)) {
+	case WorkspaceKindGroup:
+		return WorkspaceKindGroup
+	case WorkspaceKindWorkspace:
+		return WorkspaceKindWorkspace
+	default:
+		return WorkspaceKindWorkspace
+	}
+}
+
+// IsGroup reports whether the workspace is an organization-only group.
+func (w Workspace) IsGroup() bool {
+	return NormalizeWorkspaceKind(string(w.Kind)) == WorkspaceKindGroup
+}
+
 // AgentInstance represents a specific instance of an agent in a workspace.
 // This allows multiple instances of the same agent type with stable IDs.
 type AgentInstance struct {
@@ -154,6 +182,15 @@ type AgentInstance struct {
 
 	// NodeID is a stable node ID (e.g., "default-node-1").
 	NodeID string `json:"node_id"`
+
+	// Role is a workspace-specific responsibility label for the instance.
+	Role string `json:"role,omitempty"`
+
+	// Description is optional guidance about this instance's responsibility.
+	Description string `json:"description,omitempty"`
+
+	// EntryPoint marks the instance as the default workspace entry node.
+	EntryPoint bool `json:"entry_point,omitempty"`
 
 	// CreatedAt is when this instance was added.
 	CreatedAt time.Time `json:"created_at"`
@@ -198,6 +235,10 @@ type Workspace struct {
 
 	// Name is the display name of the workspace.
 	Name string `json:"name"`
+
+	// Kind indicates whether this record is a real workspace or an
+	// organization-only group container.
+	Kind WorkspaceKind `json:"kind,omitempty"`
 
 	// Description is an optional short description of the workspace's purpose.
 	Description string `json:"description,omitempty"`
@@ -254,7 +295,7 @@ type Workspace struct {
 	// ==========================================================================
 	// Orchestration Data (stored as JSON in SQLite)
 	// These fields store raw JSON that is deserialized by the adapter to
-	// agentstudio types. This avoids circular imports and type duplication.
+	// workspace types. This avoids circular imports and type duplication.
 	// ==========================================================================
 
 	// MessagesJSON contains serialized inter-agent messages.
@@ -283,6 +324,12 @@ type Workspace struct {
 
 	// AgentMCPAccessJSON contains serialized per-agent-instance MCP access rules.
 	AgentMCPAccessJSON json.RawMessage `json:"agent_mcp_access,omitempty"`
+
+	// SkillBindingsJSON contains serialized workspace-owned skill bindings.
+	SkillBindingsJSON json.RawMessage `json:"skill_bindings,omitempty"`
+
+	// AgentSkillAccessJSON contains serialized per-agent-instance skill access rules.
+	AgentSkillAccessJSON json.RawMessage `json:"agent_skill_access,omitempty"`
 }
 
 // Tag represents a unique tag used across sessions.
@@ -471,7 +518,7 @@ const (
 )
 
 // ScheduledTaskReminder represents a recurring or one-time reminder.
-// Unlike agentstudio scheduled tasks, these are reminders only (no agent execution).
+// Unlike workspace scheduled tasks, these are reminders only (no agent execution).
 type ScheduledTaskReminder struct {
 	// ID is a unique identifier for the reminder (UUID format).
 	ID string `json:"id"`

@@ -202,7 +202,7 @@ type CollaborativeTask struct {
 
 // CollaborativeResult represents the result of a collaborative task
 type CollaborativeResult struct {
-	WorkspaceID          string                      `json:"studio_id"`
+	WorkspaceID          string                      `json:"workspace_id"`
 	FinalOutput          string                      `json:"final_output"`
 	SubResults           map[string]interface{}      `json:"sub_results"`
 	Duration             time.Duration               `json:"duration"`

@@ -167,7 +167,7 @@ type DirectoryResult struct {
 func (a *App) GetWorkspaces() ([]Workspace, error) {
 	client := &http.Client{Timeout: 5 * time.Second}
 
-	resp, err := client.Get(a.baseURL + "/api/studios")
+	resp, err := client.Get(a.baseURL + "/api/workspaces")
 	if err != nil {
 		return nil, fmt.Errorf("failed to connect to ori-agent server: %w", err)
 	}
@@ -183,13 +183,17 @@ func (a *App) GetWorkspaces() ([]Workspace, error) {
 	}
 
 	var result struct {
-		Studios []Workspace `json:"studios"`
+		Workspaces []Workspace `json:"workspaces"`
+		Folders    []Workspace `json:"folders"`
 	}
 	if err := json.Unmarshal(body, &result); err != nil {
 		return nil, fmt.Errorf("failed to parse response: %w", err)
 	}
 
-	return result.Studios, nil
+	if len(result.Workspaces) > 0 {
+		return result.Workspaces, nil
+	}
+	return result.Folders, nil
 }
 
 // OpenFolderDialog opens a native folder picker dialog
@@ -250,7 +254,7 @@ func (a *App) AddDirectory(workspaceID, name, path string) DirectoryResult {
 	}
 
 	client := &http.Client{Timeout: 10 * time.Second}
-	url := fmt.Sprintf("%s/api/studios/%s/directories", a.baseURL, workspaceID)
+	url := fmt.Sprintf("%s/api/workspaces/%s/directories", a.baseURL, workspaceID)
 
 	resp, err := client.Post(url, "application/json", bytes.NewBuffer(jsonData))
 	if err != nil {

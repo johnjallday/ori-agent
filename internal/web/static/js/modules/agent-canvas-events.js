@@ -2,8 +2,8 @@
  * EventSource and polling utilities for AgentCanvas.
  */
 
-export function createEventStream(studioId, handlers) {
-  const source = new EventSource(`/api/orchestration/progress/stream?workspace_id=${studioId}`);
+export function createEventStream(workspaceId, handlers) {
+  const source = new EventSource(`/api/orchestration/progress/stream?workspace_id=${workspaceId}`);
 
   const safe = (fn) => (...args) => {
     if (typeof fn === 'function') {
@@ -43,7 +43,7 @@ export function createEventStream(studioId, handlers) {
  * Helper to connect and parse events, then forward parsed data to callbacks.
  * Handlers receive already-parsed payloads.
  */
-export function connectProgressStream(studioId, handlers) {
+export function connectProgressStream(workspaceId, handlers) {
   const parseJSON = (event) => {
     try {
       return JSON.parse(event.data);
@@ -53,7 +53,7 @@ export function connectProgressStream(studioId, handlers) {
     }
   };
 
-  return createEventStream(studioId, {
+  return createEventStream(workspaceId, {
     onInitial: (event) => {
       const data = parseJSON(event);
       if (data && handlers.onInitial) handlers.onInitial(data);

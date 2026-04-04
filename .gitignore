@@ -159,6 +159,7 @@ ori-data/**
 !ori-data/agents/Ori/**
 !ori-data/agents/default/
 !ori-data/agents/default/**
+ori-data/agents/*/agent_settings.json
 
 # User uploads and custom templates
 uploads/

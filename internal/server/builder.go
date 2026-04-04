@@ -42,6 +42,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/store"
 	"github.com/johnjallday/ori-agent/internal/updatemanager"
 	"github.com/johnjallday/ori-agent/internal/usagehttp"
+	"github.com/johnjallday/ori-agent/internal/vaulthttp"
 	web "github.com/johnjallday/ori-agent/internal/web"
 	"github.com/johnjallday/ori-agent/internal/workflowhttp"
 	"github.com/johnjallday/ori-agent/internal/workspace"
@@ -71,7 +72,7 @@ import (
 //	  - Depends on: Core, Storage, Services
 //
 //	GROUP 5: ORCHESTRATION (Phases 18-23)
-//	  - Workspace, Events, Tasks, Orchestration, Studio, Templates
+//	  - Workspace, Events, Tasks, Orchestration, Templates
 //	  - Depends on: Handlers, Services
 //
 //	GROUP 6: FINALIZATION (Phases 24-25)
@@ -104,13 +105,14 @@ type ServerBuilder struct {
 	templateRenderer      *web.TemplateRenderer
 	updateMgr             *updatemanager.Manager
 	workspaceStore        workspace.Store
+	workspaceFileStore    *workspace.FileStore
 	taskExecutor          *workspace.TaskExecutor
 	stepExecutor          *workspace.StepExecutor
 	taskScheduler         *workspace.TaskScheduler
 	eventBus              *workspace.EventBus
 	notificationService   *workspace.NotificationService
 	directorySyncManager  *workspace.DirectorySyncManager
-	studioOrchestrator    *workspace.Orchestrator
+	workspaceOrchestrator *workspace.Orchestrator
 	costTracker           *llm.CostTracker
 	mcpRegistry           *mcp.Registry
 	mcpConfigManager      *mcp.ConfigManager
@@ -127,7 +129,7 @@ type ServerBuilder struct {
 	deviceHandler          *devicehttp.Handler
 	orchestrationHandler   *orchestrationhttp.Handler
 	autoTaskHandler        *orchestrationhttp.AutoTaskHandler
-	studioHandler          *workspace.HTTPHandler
+	workspaceHandler       *workspace.HTTPHandler
 	usageHandler           *usagehttp.Handler
 	mcpHandler             *mcphttp.Handler
 	locationHandler        *locationhttp.Handler
@@ -157,6 +159,7 @@ type ServerBuilder struct {
 	// Review system
 	reviewHandler    *reviewhttp.Handler
 	evolutionHandler *evolutionhttp.Handler
+	vaultHandler     *vaulthttp.Handler
 
 	// External agents (Claude Code, Codex)
 	externalAgentsCache   *externalagents.Cache
@@ -262,8 +265,8 @@ func (b *ServerBuilder) Build() (*Server, error) {
 	if err := b.initializeOrchestration(); err != nil { // Phase 21
 		return nil, fmt.Errorf("orchestration phase failed: %w", err)
 	}
-	if err := b.initializeStudioOrchestrator(); err != nil { // Phase 22
-		return nil, fmt.Errorf("studio orchestrator phase failed: %w", err)
+	if err := b.initializeWorkspaceOrchestrator(); err != nil { // Phase 22
+		return nil, fmt.Errorf("workspace orchestrator phase failed: %w", err)
 	}
 	if err := b.initializeTemplateManager(); err != nil { // Phase 23
 		return nil, fmt.Errorf("template manager phase failed: %w", err)
@@ -313,7 +316,7 @@ func (b *ServerBuilder) createDomainFacades() error {
 		b.eventBus,
 		b.notificationService,
 		b.directorySyncManager,
-		b.studioOrchestrator,
+		b.workspaceOrchestrator,
 	)
 
 	// Integration System Facade
@@ -338,7 +341,7 @@ func (b *ServerBuilder) createDomainFacades() error {
 		b.deviceHandler,
 		b.orchestrationHandler,
 		b.autoTaskHandler,
-		b.studioHandler,
+		b.workspaceHandler,
 		b.usageHandler,
 		b.mcpHandler,
 		b.locationHandler,
@@ -356,6 +359,7 @@ func (b *ServerBuilder) createDomainFacades() error {
 		b.sessionFilesHandler,
 		b.reviewHandler,
 		b.evolutionHandler,
+		b.vaultHandler,
 		b.externalAgentsHandler,
 		b.skillsHandler,
 	)

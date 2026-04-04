@@ -75,13 +75,13 @@ func inferChatRouteSurface(pathname, workspaceID string) string {
 		}
 		return "dashboard"
 	}
-	if strings.HasPrefix(path, "/workspaces/") || strings.HasPrefix(path, "/studios/") {
+	if strings.HasPrefix(path, "/workspaces/") {
 		if strings.Contains(path, "/canvas") {
 			return "workspace_canvas"
 		}
 		return "workspace_detail"
 	}
-	if strings.HasPrefix(path, "/workspaces") || strings.HasPrefix(path, "/studios") {
+	if strings.HasPrefix(path, "/workspaces") {
 		return "workspace_hub"
 	}
 	if strings.HasPrefix(path, "/chat") {
@@ -105,18 +105,15 @@ func extractWorkspaceIDFromPagePath(pathname string) string {
 		return ""
 	}
 	lower := strings.ToLower(path)
-	prefixes := []string{"/workspaces/", "/studios/"}
-	for _, prefix := range prefixes {
-		if !strings.HasPrefix(lower, prefix) {
-			continue
-		}
-		rest := path[len(prefix):]
-		if idx := strings.Index(rest, "/"); idx >= 0 {
-			rest = rest[:idx]
-		}
-		return strings.TrimSpace(rest)
+	prefix := "/workspaces/"
+	if !strings.HasPrefix(lower, prefix) {
+		return ""
 	}
-	return ""
+	rest := path[len(prefix):]
+	if idx := strings.Index(rest, "/"); idx >= 0 {
+		rest = rest[:idx]
+	}
+	return strings.TrimSpace(rest)
 }
 
 func buildRouteContextSystemPrompt(ctx normalizedChatRouteContext) string {

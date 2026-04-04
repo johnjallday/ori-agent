@@ -19,6 +19,7 @@ http://localhost:8765/api
 - [Plugins API](#plugins-api)
 - [Plugin Registry API](#plugin-registry-api)
 - [Settings API](#settings-api)
+- [Vault API](#vault-api)
 - [Chat API](#chat-api)
 - [Updates API](#updates-api)
 - [Scheduler Nodes API](#scheduler-nodes-api)
@@ -27,7 +28,7 @@ http://localhost:8765/api
 
 ## Authentication
 
-Currently, Ori Agent does not require authentication for local development. API keys are managed through the settings endpoints and stored locally.
+Currently, Ori Agent does not require authentication for local development. API keys are managed through the settings endpoints and stored locally, with new writes preferring the configured secure secret store over plaintext settings files when available.
 
 ## Response Formats
 
@@ -936,6 +937,200 @@ Set or update the OpenAI API key.
 {
   "success": true,
   "message": "API key updated successfully"
+}
+```
+
+## Vault API
+
+Vault endpoints manage encrypted private records, workspace-scoped persistent grants, and password-protected exports.
+
+### Get Vault Status
+
+Return the current vault status, secure-storage backend, lock state, and record count.
+
+**Endpoint:** `GET /api/vault/status`
+
+**Response:**
+```json
+{
+  "available": true,
+  "locked": false,
+  "writable": true,
+  "requires_passphrase": false,
+  "message": "using passphrase-protected fallback secret store",
+  "record_count": 3,
+  "secret_store": {
+    "backend": "passphrase_fallback",
+    "available": true,
+    "writable": true,
+    "locked": false
+  }
+}
+```
+
+### Unlock Vault
+
+Unlock the vault when passphrase fallback mode is active.
+
+**Endpoint:** `POST /api/vault/unlock`
+
+**Request Body:**
+```json
+{
+  "vault_password": "my-vault-password"
+}
+```
+
+### Lock Vault
+
+Clear the current in-memory vault unlock state.
+
+**Endpoint:** `POST /api/vault/lock`
+
+### List Vault Records
+
+List saved vault entries. Results include decrypted metadata such as label and tags, but not the sensitive payload body.
+
+**Endpoint:** `GET /api/vault/records`
+
+**Optional Query Parameters:**
+- `workspace_id` or `studio_id`: Restrict records to one workspace
+- `type`: Restrict records to a single record type
+- `actor_type`, `actor_id`: Apply workspace-grant enforcement for a specific agent or plugin actor
+
+**Response:**
+```json
+{
+  "records": [
+    {
+      "id": "record-123",
+      "type": "email_snippet",
+      "workspace_id": "ws-finance",
+      "label": "Tax Email",
+      "tags": ["email", "private"],
+      "source": "manual",
+      "retention_policy": "keep_until_revoked",
+      "created_at": "2026-03-24T10:30:00Z",
+      "updated_at": "2026-03-24T10:30:00Z"
+    }
+  ],
+  "count": 1
+}
+```
+
+### Create Vault Record
+
+Create a new encrypted vault entry.
+
+**Endpoint:** `POST /api/vault/records`
+
+**Request Body:**
+```json
+{
+  "type": "personal_note",
+  "workspace_id": "ws-1",
+  "label": "Passport",
+  "tags": ["travel", "private"],
+  "source": "manual",
+  "retention_policy": "keep_until_revoked",
+  "payload": {
+    "number": "X1234567"
+  }
+}
+```
+
+### Get Vault Record
+
+Fetch a single vault record, including the decrypted payload.
+
+**Endpoint:** `GET /api/vault/records/{id}`
+
+**Optional Query Parameters:**
+- `workspace_id` or `studio_id`
+- `actor_type`
+- `actor_id`
+
+### Update Vault Record
+
+Update encrypted record metadata and, optionally, the payload body.
+
+**Endpoint:** `PATCH /api/vault/records/{id}`
+
+**Request Body Example:**
+```json
+{
+  "label": "Passport Updated",
+  "tags": ["travel", "private"],
+  "payload": {
+    "number": "X7654321"
+  }
+}
+```
+
+### Delete Vault Record
+
+Delete a saved vault record.
+
+**Endpoint:** `DELETE /api/vault/records/{id}`
+
+### List Persistent Grants
+
+List workspace-scoped persistent grants.
+
+**Endpoint:** `GET /api/vault/grants`
+
+**Optional Query Parameters:**
+- `workspace_id` or `studio_id`
+
+### Create Persistent Grant
+
+Grant a workspace agent or plugin persistent access to a vault capability.
+
+**Endpoint:** `POST /api/vault/grants`
+
+**Request Body:**
+```json
+{
+  "workspace_id": "ws-finance",
+  "actor_type": "agent",
+  "actor_id": "finance-agent",
+  "capability": "vault.email.read_saved",
+  "record_type": "email_snippet"
+}
+```
+
+### Delete Persistent Grant
+
+Revoke a persistent grant by ID.
+
+**Endpoint:** `DELETE /api/vault/grants/{id}`
+
+### Export Vault
+
+Create an encrypted export bundle. Exports require explicit confirmation and a vault password.
+
+**Endpoint:** `POST /api/vault/export`
+
+**Request Body:**
+```json
+{
+  "workspace_id": "ws-finance",
+  "vault_password": "my-vault-password",
+  "confirm": true
+}
+```
+
+**Response:**
+```json
+{
+  "version": 1,
+  "workspace_id": "ws-finance",
+  "salt": "base64-salt",
+  "nonce": "base64-nonce",
+  "ciphertext": "base64-ciphertext",
+  "exported_at": "2026-03-24T10:45:00Z",
+  "record_count": 1,
+  "grant_count": 1
 }
 ```
 

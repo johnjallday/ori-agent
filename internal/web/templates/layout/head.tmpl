@@ -4,6 +4,7 @@
   <title>{{.Title}}</title>
   <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
   <script defer src="/js/modules/update-checker.js"></script>
+  <script defer src="/js/modules/vault-modal.js"></script>
   <script>
     // Apply visual preferences immediately from localStorage to prevent flash (FOUC)
     (function() {
@@ -52,4 +53,5 @@
   <link href="/css/workspace-hub.css" rel="stylesheet">
   <link href="/css/settings.css" rel="stylesheet">
   <link href="/css/ui-refresh.css" rel="stylesheet">
+  {{if eq .CurrentPage "vault"}}<link href="/css/vault-page.css" rel="stylesheet">{{end}}
 </head>

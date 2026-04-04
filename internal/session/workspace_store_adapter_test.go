@@ -61,7 +61,7 @@ func TestWorkspaceStoreAdapter_MCPRoundTrip(t *testing.T) {
 		t.Fatalf("expected 1 serialized MCP binding, got %d", len(rawBindings))
 	}
 
-	roundTripped := adapter.toAgentStudioWorkspace(sessionWS)
+	roundTripped := adapter.toAgentWorkspace(sessionWS)
 	if len(roundTripped.MCPBindings) != 1 {
 		t.Fatalf("expected 1 round-tripped MCP binding, got %d", len(roundTripped.MCPBindings))
 	}
@@ -76,5 +76,105 @@ func TestWorkspaceStoreAdapter_MCPRoundTrip(t *testing.T) {
 	}
 	if roundTripped.AgentMCPAccess[0].AgentInstanceID != "agent-1" {
 		t.Fatalf("expected round-tripped agent_instance_id agent-1, got %q", roundTripped.AgentMCPAccess[0].AgentInstanceID)
+	}
+}
+
+func TestWorkspaceStoreAdapter_AgentInstanceMetadataRoundTrip(t *testing.T) {
+	adapter := &WorkspaceStoreAdapter{}
+	now := time.Now().UTC().Round(time.Second)
+
+	input := &workspace.Workspace{
+		ID:        "workspace-roles",
+		Name:      "Workspace Roles",
+		CreatedAt: now,
+		UpdatedAt: now,
+		AgentInstances: []workspace.AgentInstance{
+			{
+				ID:             "agent-manager",
+				Name:           "Trip Planning Manager",
+				InstanceNumber: 1,
+				NodeID:         "trip-manager-node",
+				Role:           "Manager",
+				Description:    "Default entry point for workspace requests.",
+				EntryPoint:     true,
+				CreatedAt:      now,
+			},
+		},
+	}
+
+	sessionWS := adapter.toSessionWorkspace(input)
+	roundTripped := adapter.toAgentWorkspace(sessionWS)
+
+	if len(roundTripped.AgentInstances) != 1 {
+		t.Fatalf("expected 1 round-tripped agent instance, got %d", len(roundTripped.AgentInstances))
+	}
+
+	got := roundTripped.AgentInstances[0]
+	if got.Role != "Manager" {
+		t.Fatalf("expected role to round-trip, got %q", got.Role)
+	}
+	if got.Description != "Default entry point for workspace requests." {
+		t.Fatalf("expected description to round-trip, got %q", got.Description)
+	}
+	if !got.EntryPoint {
+		t.Fatal("expected entry_point to round-trip as true")
+	}
+}
+
+func TestWorkspaceStoreAdapter_SkillRoundTrip(t *testing.T) {
+	adapter := &WorkspaceStoreAdapter{}
+	now := time.Now().UTC().Round(time.Second)
+
+	input := &workspace.Workspace{
+		ID:        "workspace-skills",
+		Name:      "Workspace Skills",
+		CreatedAt: now,
+		UpdatedAt: now,
+		SkillBindings: []workspace.WorkspaceSkillBinding{
+			{
+				ID:        "binding-1",
+				SkillName: "workspace-planning",
+				Enabled:   true,
+				Trusted:   true,
+				Config: map[string]interface{}{
+					"profile_type":           "workspace_planning",
+					"default_execution_mode": "step_through",
+				},
+				CreatedAt: now,
+				UpdatedAt: now,
+			},
+		},
+		AgentSkillAccess: []workspace.WorkspaceAgentSkillAccess{
+			{
+				AgentInstanceID:   "agent-1",
+				EnabledBindingIDs: []string{"binding-1"},
+				UpdatedAt:         now,
+			},
+		},
+	}
+
+	sessionWS := adapter.toSessionWorkspace(input)
+	if len(sessionWS.SkillBindingsJSON) == 0 {
+		t.Fatalf("expected skill bindings JSON to be serialized")
+	}
+	if len(sessionWS.AgentSkillAccessJSON) == 0 {
+		t.Fatalf("expected agent skill access JSON to be serialized")
+	}
+
+	roundTripped := adapter.toAgentWorkspace(sessionWS)
+	if len(roundTripped.SkillBindings) != 1 {
+		t.Fatalf("expected 1 round-tripped skill binding, got %d", len(roundTripped.SkillBindings))
+	}
+	if roundTripped.SkillBindings[0].SkillName != "workspace-planning" {
+		t.Fatalf("expected round-tripped skill_name workspace-planning, got %q", roundTripped.SkillBindings[0].SkillName)
+	}
+	if roundTripped.SkillBindings[0].Config == nil {
+		t.Fatalf("expected round-tripped skill config to be preserved")
+	}
+	if len(roundTripped.AgentSkillAccess) != 1 {
+		t.Fatalf("expected 1 round-tripped skill access rule, got %d", len(roundTripped.AgentSkillAccess))
+	}
+	if roundTripped.AgentSkillAccess[0].AgentInstanceID != "agent-1" {
+		t.Fatalf("expected round-tripped agent_instance_id agent-1, got %q", roundTripped.AgentSkillAccess[0].AgentInstanceID)
 	}
 }

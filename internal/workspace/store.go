@@ -1,12 +1,16 @@
 package workspace
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
+	"time"
 
 	"github.com/johnjallday/ori-agent/internal/logger"
+	"github.com/johnjallday/ori-agent/internal/types"
 )
 
 // Store manages workspace persistence and retrieval
@@ -38,6 +42,30 @@ type FileStore struct {
 	idToPath map[string]string // maps workspace ID → relative folder path from basePath
 	index    *Index            // optional global index (nil if not configured)
 	mu       sync.RWMutex
+}
+
+var ErrWorkspaceFolderSlugConflict = errors.New("workspace folder slug conflict")
+
+// FolderSlugConflictError indicates that the requested workspace folder slug is
+// already in use on disk and includes a safe alternative suggestion.
+type FolderSlugConflictError struct {
+	Slug          string
+	SuggestedSlug string
+	ParentDir     string
+}
+
+func (e *FolderSlugConflictError) Error() string {
+	if e == nil {
+		return ErrWorkspaceFolderSlugConflict.Error()
+	}
+	if e.SuggestedSlug != "" {
+		return fmt.Sprintf("a workspace folder named %q already exists, suggested slug %q", e.Slug, e.SuggestedSlug)
+	}
+	return fmt.Sprintf("a workspace folder named %q already exists", e.Slug)
+}
+
+func (e *FolderSlugConflictError) Unwrap() error {
+	return ErrWorkspaceFolderSlugConflict
 }
 
 // NewFileStore creates a new file-based workspace store
@@ -103,17 +131,44 @@ func (s *FileStore) Save(ws *Workspace) error {
 		}
 	}
 
-	// Check for folder name conflict (only for new workspaces, not updates)
+	existingPath, exists := s.idToPath[ws.ID]
+	existingFolderPath := ""
+	if exists {
+		existingFolderPath = s.resolveFolder(existingPath)
+	}
+
+	// Default folder target is derived from the current base path and slug.
 	folderPath := filepath.Join(parentDir, ws.FolderSlug)
-	if existingPath, exists := s.idToPath[ws.ID]; !exists {
+
+	// Workspaces originally created with SaveAt are tracked by absolute paths.
+	// Preserve that absolute location for normal metadata/content saves so we do
+	// not accidentally recreate the workspace under the current base path.
+	if exists && filepath.IsAbs(existingPath) {
+		folderPath = existingFolderPath
+	}
+
+	// Check for folder name conflict (only for new workspaces or path changes).
+	if !exists {
 		// New workspace — check if folder already exists
-		if _, err := os.Stat(folderPath); err == nil {
-			return fmt.Errorf("a workspace folder named %q already exists, choose a different name", ws.FolderSlug)
+		if existsOnDisk, err := pathExists(folderPath); err != nil {
+			return fmt.Errorf("failed to check workspace folder path: %w", err)
+		} else if existsOnDisk {
+			return &FolderSlugConflictError{
+				Slug:          ws.FolderSlug,
+				SuggestedSlug: nextAvailableWorkspaceSlug(parentDir, ws.FolderSlug),
+				ParentDir:     parentDir,
+			}
 		}
-	} else if filepath.Join(s.basePath, existingPath) != folderPath {
+	} else if filepath.Clean(existingFolderPath) != filepath.Clean(folderPath) {
 		// Existing workspace with changed path — check new folder doesn't exist
-		if _, err := os.Stat(folderPath); err == nil {
-			return fmt.Errorf("a workspace folder named %q already exists, choose a different name", ws.FolderSlug)
+		if existsOnDisk, err := pathExists(folderPath); err != nil {
+			return fmt.Errorf("failed to check workspace folder path: %w", err)
+		} else if existsOnDisk {
+			return &FolderSlugConflictError{
+				Slug:          ws.FolderSlug,
+				SuggestedSlug: nextAvailableWorkspaceSlug(parentDir, ws.FolderSlug),
+				ParentDir:     parentDir,
+			}
 		}
 	}
 
@@ -144,8 +199,14 @@ func (s *FileStore) Save(ws *Workspace) error {
 	}
 
 	// Compute relative path from basePath
-	relPath, err := filepath.Rel(s.basePath, folderPath)
-	if err != nil {
+	relPath := folderPath
+	if !filepath.IsAbs(folderPath) {
+		relPath = folderPath
+	} else if filepath.IsAbs(existingPath) {
+		relPath = folderPath
+	} else if computedRelPath, err := filepath.Rel(s.basePath, folderPath); err == nil {
+		relPath = computedRelPath
+	} else {
 		relPath = ws.FolderSlug
 	}
 
@@ -177,8 +238,14 @@ func (s *FileStore) SaveAt(ws *Workspace, location string) error {
 	folderPath := filepath.Join(location, ws.FolderSlug)
 
 	// Check for conflict
-	if _, err := os.Stat(folderPath); err == nil {
-		return fmt.Errorf("a workspace folder named %q already exists at %s, choose a different name", ws.FolderSlug, location)
+	if existsOnDisk, err := pathExists(folderPath); err != nil {
+		return fmt.Errorf("failed to check workspace folder path: %w", err)
+	} else if existsOnDisk {
+		return &FolderSlugConflictError{
+			Slug:          ws.FolderSlug,
+			SuggestedSlug: nextAvailableWorkspaceSlug(location, ws.FolderSlug),
+			ParentDir:     location,
+		}
 	}
 
 	// Create workspace folder with files and notes subdirectories
@@ -224,6 +291,195 @@ func (s *FileStore) SaveAt(ws *Workspace, location string) error {
 	}
 
 	return nil
+}
+
+// RebindExistingFolder attaches an existing folder path to a workspace ID.
+// If the folder already contains a workspace.json for the same workspace, the
+// disk copy is used as a source for fields that are not mirrored into SQLite.
+func (s *FileStore) RebindExistingFolder(ws *Workspace, folderPath string) error {
+	if ws == nil {
+		return fmt.Errorf("workspace is required")
+	}
+	if strings.TrimSpace(ws.ID) == "" {
+		return fmt.Errorf("workspace id is required")
+	}
+
+	normalizedPath, err := filepath.Abs(strings.TrimSpace(folderPath))
+	if err != nil {
+		return fmt.Errorf("failed to normalize folder path: %w", err)
+	}
+
+	info, err := os.Stat(normalizedPath)
+	if err != nil {
+		return fmt.Errorf("failed to access workspace folder: %w", err)
+	}
+	if !info.IsDir() {
+		return fmt.Errorf("workspace folder must be a directory")
+	}
+
+	merged, err := cloneWorkspaceForRebind(ws)
+	if err != nil {
+		return err
+	}
+
+	configPath := filepath.Join(normalizedPath, WorkspaceConfigFile)
+	if data, readErr := os.ReadFile(configPath); readErr == nil {
+		diskWorkspace, parseErr := FromJSON(data)
+		if parseErr != nil {
+			return fmt.Errorf("failed to read existing workspace file: %w", parseErr)
+		}
+		if strings.TrimSpace(diskWorkspace.ID) != "" && diskWorkspace.ID != merged.ID {
+			return fmt.Errorf("folder belongs to a different workspace (%s)", diskWorkspace.ID)
+		}
+		preserveUnmirroredWorkspaceFields(merged, diskWorkspace)
+	} else if !os.IsNotExist(readErr) {
+		return fmt.Errorf("failed to read existing workspace file: %w", readErr)
+	}
+
+	if strings.TrimSpace(merged.FolderSlug) == "" {
+		merged.FolderSlug = Slugify(filepath.Base(normalizedPath))
+	}
+
+	if err := os.MkdirAll(filepath.Join(normalizedPath, FilesDir), 0755); err != nil {
+		return fmt.Errorf("failed to create workspace files folder: %w", err)
+	}
+	if err := os.MkdirAll(filepath.Join(normalizedPath, NotesDir), 0755); err != nil {
+		return fmt.Errorf("failed to create workspace notes folder: %w", err)
+	}
+
+	data, err := merged.ToJSON()
+	if err != nil {
+		return fmt.Errorf("failed to serialize workspace: %w", err)
+	}
+	if err := os.WriteFile(configPath, data, 0644); err != nil {
+		return fmt.Errorf("failed to write workspace file: %w", err)
+	}
+
+	freshWS, err := FromJSON(data)
+	if err != nil {
+		return fmt.Errorf("failed to reload workspace after rebind: %w", err)
+	}
+
+	storedPath := normalizedPath
+	if s.isInsideRoot(normalizedPath) {
+		if relPath, relErr := filepath.Rel(s.basePath, normalizedPath); relErr == nil {
+			storedPath = relPath
+		}
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	s.cache[ws.ID] = freshWS
+	s.idToPath[ws.ID] = storedPath
+
+	if s.index != nil {
+		s.index.Register(IndexEntry{
+			ID:         freshWS.ID,
+			Name:       freshWS.Name,
+			FolderPath: storedPath,
+			ParentID:   freshWS.ParentID,
+			UpdatedAt:  freshWS.UpdatedAt,
+		})
+	}
+
+	return nil
+}
+
+func pathExists(path string) (bool, error) {
+	_, err := os.Stat(path)
+	if err == nil {
+		return true, nil
+	}
+	if errors.Is(err, os.ErrNotExist) {
+		return false, nil
+	}
+	return false, err
+}
+
+func nextAvailableWorkspaceSlug(parentDir, baseSlug string) string {
+	baseSlug = Slugify(baseSlug)
+	if baseSlug == "" {
+		baseSlug = "untitled"
+	}
+
+	const maxAttempts = 1000
+	for suffix := 2; suffix < 2+maxAttempts; suffix++ {
+		candidate := appendWorkspaceSlugSuffix(baseSlug, suffix)
+		existsOnDisk, err := pathExists(filepath.Join(parentDir, candidate))
+		if err != nil {
+			// Fall back to the candidate even if stat fails; the create path will
+			// validate it again before writing to disk.
+			return candidate
+		}
+		if !existsOnDisk {
+			return candidate
+		}
+	}
+
+	// All numeric suffixes exhausted; use a timestamp-based fallback.
+	return appendWorkspaceSlugSuffix(baseSlug, int(time.Now().UnixNano()))
+}
+
+func appendWorkspaceSlugSuffix(baseSlug string, suffix int) string {
+	suffixText := fmt.Sprintf("-%d", suffix)
+	maxBaseLen := MaxSlugLength - len(suffixText)
+	if maxBaseLen < 1 {
+		maxBaseLen = 1
+	}
+
+	trimmedBase := strings.Trim(strings.TrimSpace(baseSlug), "-")
+	if len(trimmedBase) > maxBaseLen {
+		trimmedBase = strings.TrimRight(trimmedBase[:maxBaseLen], "-")
+	}
+	if trimmedBase == "" {
+		trimmedBase = "untitled"
+		if len(trimmedBase) > maxBaseLen {
+			trimmedBase = strings.TrimRight(trimmedBase[:maxBaseLen], "-")
+		}
+		if trimmedBase == "" {
+			trimmedBase = "w"
+		}
+	}
+
+	return trimmedBase + suffixText
+}
+
+func cloneWorkspaceForRebind(ws *Workspace) (*Workspace, error) {
+	data, err := ws.ToJSON()
+	if err != nil {
+		return nil, fmt.Errorf("failed to clone workspace for rebind: %w", err)
+	}
+	clone, err := FromJSON(data)
+	if err != nil {
+		return nil, fmt.Errorf("failed to decode cloned workspace for rebind: %w", err)
+	}
+	return clone, nil
+}
+
+func preserveUnmirroredWorkspaceFields(target *Workspace, existing *Workspace) {
+	if target == nil || existing == nil {
+		return
+	}
+
+	if len(target.AgentInstances) == 0 && len(existing.AgentInstances) > 0 {
+		target.AgentInstances = append([]AgentInstance(nil), existing.AgentInstances...)
+	}
+	if len(target.Agents) == 0 && len(existing.Agents) > 0 {
+		target.Agents = append([]string(nil), existing.Agents...)
+	}
+	target.PlannerDecision = existing.PlannerDecision
+	target.PendingPlan = existing.PendingPlan
+
+	if len(existing.DynamicAgentRequests) > 0 {
+		target.DynamicAgentRequests = append([]types.DynamicAgentRequest(nil), existing.DynamicAgentRequests...)
+	}
+	if len(existing.SkillBindings) > 0 {
+		target.SkillBindings = append([]WorkspaceSkillBinding(nil), existing.SkillBindings...)
+	}
+	if len(existing.AgentSkillAccess) > 0 {
+		target.AgentSkillAccess = append([]WorkspaceAgentSkillAccess(nil), existing.AgentSkillAccess...)
+	}
 }
 
 // BasePath returns the default workspace root directory.
@@ -664,6 +920,52 @@ func copyDir(src, dst string) error {
 		}
 		return os.WriteFile(target, data, info.Mode())
 	})
+}
+
+// SyncWorkspaceInfo is a lightweight workspace summary for sync display.
+type SyncWorkspaceInfo struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+	Path string `json:"path,omitempty"`
+}
+
+// SyncStatus holds the result of comparing disk state against the primary store.
+type SyncStatus struct {
+	InSync       bool                `json:"in_sync"`
+	Unregistered []SyncWorkspaceInfo `json:"unregistered"`
+	Orphaned     []SyncWorkspaceInfo `json:"orphaned"`
+}
+
+// CachedWorkspaces returns deep copies of all workspaces currently in the FileStore cache.
+// Callers may safely mutate the returned workspaces without affecting the cache.
+func (s *FileStore) CachedWorkspaces() map[string]*Workspace {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	result := make(map[string]*Workspace, len(s.cache))
+	for id, ws := range s.cache {
+		clone, err := cloneWorkspaceForRebind(ws)
+		if err != nil {
+			logger.Warn("failed to clone cached workspace", logger.Fields{"id": id, "error": err})
+			continue
+		}
+		result[id] = clone
+	}
+	return result
+}
+
+// ClearAll removes all workspaces from the in-memory cache and index.
+// This is used during application reset to ensure stale data is not served
+// after the workspace directory has been deleted from disk.
+func (s *FileStore) ClearAll() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	s.cache = make(map[string]*Workspace)
+	s.idToPath = make(map[string]string)
+
+	if s.index != nil {
+		_ = s.index.Rebuild()
+	}
 }
 
 // Close releases resources held by the FileStore, including the index database.

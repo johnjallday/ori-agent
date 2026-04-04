@@ -51,11 +51,12 @@ class ActivityFeed {
       this.currentWorkspaceId = urlParams.get('workspace') || sessionStorage.getItem('currentWorkspaceId');
 
       if (!this.currentWorkspaceId) {
-        const response = await fetch('/api/studios');
+        const response = await fetch('/api/workspaces');
         if (response.ok) {
-          const studios = await response.json();
-          if (studios && studios.length > 0) {
-            this.currentWorkspaceId = studios[0].id;
+          const data = await response.json();
+          const workspaces = data.workspaces || data.folders || (Array.isArray(data) ? data : []);
+          if (workspaces.length > 0) {
+            this.currentWorkspaceId = workspaces[0].id;
             sessionStorage.setItem('currentWorkspaceId', this.currentWorkspaceId);
           }
         }
@@ -93,7 +94,7 @@ class ActivityFeed {
     this.updateStatus('connecting');
 
     try {
-      const url = `/api/orchestration/progress/stream?studio_id=${encodeURIComponent(this.currentWorkspaceId)}`;
+      const url = `/api/orchestration/progress/stream?workspace_id=${encodeURIComponent(this.currentWorkspaceId)}`;
       this.eventSource = new EventSource(url);
 
       this.eventSource.onopen = () => {

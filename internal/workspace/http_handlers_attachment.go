@@ -62,20 +62,20 @@ func inferAttachmentType(req *CreateAttachmentRequest) AttachmentType {
 	return AttachmentTypeDoc
 }
 
-// CreateAttachment handles POST /api/studios/:id/attachments
+// CreateAttachment handles POST /api/workspaces/:id/attachments
 func (h *HTTPHandler) CreateAttachment(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		orihttp.MethodNotAllowed(w)
 		return
 	}
 
-	path := strings.TrimPrefix(r.URL.Path, "/api/studios/")
+	path := strings.TrimPrefix(r.URL.Path, "/api/workspaces/")
 	parts := strings.Split(path, "/")
 	if len(parts) < 2 {
 		orihttp.BadRequest(w, "Invalid URL format")
 		return
 	}
-	studioID := parts[0]
+	workspaceID := parts[0]
 
 	var req CreateAttachmentRequest
 	if !orihttp.ParseJSONBody(w, r, &req) {
@@ -93,39 +93,39 @@ func (h *HTTPHandler) CreateAttachment(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	studio, err := h.store.Get(studioID)
+	workspace, err := h.store.Get(workspaceID)
 	if err != nil {
-		orihttp.NotFound(w, fmt.Sprintf("Studio not found: %v", err))
+		orihttp.NotFound(w, fmt.Sprintf("Workspace not found: %v", err))
 		return
 	}
 
 	attachment := Attachment{
 		ID:          uuid.New().String(),
-		WorkspaceID: studioID,
+		WorkspaceID: workspaceID,
 		Title:       req.Title,
 		Body:        req.Body,
 		Type:        attType,
 		Color:       req.Color,
 		LinkURL:     req.LinkURL,
-		File:        req.File,
+		File:        sanitizeAttachmentFileMeta(workspaceID, req.File),
 		X:           req.X,
 		Y:           req.Y,
 		CreatedAt:   time.Now(),
 		UpdatedAt:   time.Now(),
 	}
 
-	if err := studio.AddAttachment(attachment); err != nil {
+	if err := workspace.AddAttachment(attachment); err != nil {
 		orihttp.BadRequest(w, fmt.Sprintf("Failed to add attachment: %v", err))
 		return
 	}
 
-	if err := h.store.Save(studio); err != nil {
-		orihttp.InternalError(w, fmt.Sprintf("Failed to save studio: %v", err))
+	if err := h.store.Save(workspace); err != nil {
+		orihttp.InternalError(w, fmt.Sprintf("Failed to save workspace: %v", err))
 		return
 	}
 
 	// Publish event for live updates
-	createdAttachment, err := studio.GetAttachment(attachment.ID)
+	createdAttachment, err := workspace.GetAttachment(attachment.ID)
 	if err != nil {
 		logger.Debug("Could not retrieve created attachment, using original", logger.Fields{"attachment_id": attachment.ID, "error": err})
 		createdAttachment = &attachment
@@ -133,10 +133,15 @@ func (h *HTTPHandler) CreateAttachment(w http.ResponseWriter, r *http.Request) {
 		createdAttachment = &attachment
 	}
 
+	if createdAttachment != nil {
+		hydratedAttachment := HydrateAttachment(*createdAttachment, h.store)
+		createdAttachment = &hydratedAttachment
+	}
+
 	if h.eventBus != nil && createdAttachment != nil {
 		h.eventBus.Publish(Event{
 			Type:        EventAttachmentCreated,
-			WorkspaceID: studioID,
+			WorkspaceID: workspaceID,
 			Source:      "api",
 			Data: map[string]interface{}{
 				"attachment": createdAttachment,
@@ -149,26 +154,26 @@ func (h *HTTPHandler) CreateAttachment(w http.ResponseWriter, r *http.Request) {
 	if encErr := json.NewEncoder(w).Encode(map[string]interface{}{
 		"message":    "Attachment created successfully",
 		"attachment": createdAttachment,
-		"studio":     studioID,
+		"workspace":  workspaceID,
 	}); encErr != nil {
 		logger.Error("Failed to encode response", logger.Fields{"error": encErr})
 	}
 }
 
-// UpdateAttachment handles PATCH /api/studios/:id/attachments/:attachment_id
+// UpdateAttachment handles PATCH /api/workspaces/:id/attachments/:attachment_id
 func (h *HTTPHandler) UpdateAttachment(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPatch {
 		orihttp.MethodNotAllowed(w)
 		return
 	}
 
-	path := strings.TrimPrefix(r.URL.Path, "/api/studios/")
+	path := strings.TrimPrefix(r.URL.Path, "/api/workspaces/")
 	parts := strings.Split(path, "/")
 	if len(parts) < 3 {
 		orihttp.BadRequest(w, "Invalid URL format")
 		return
 	}
-	studioID := parts[0]
+	workspaceID := parts[0]
 	attachmentID := parts[2]
 
 	var req struct {
@@ -186,13 +191,13 @@ func (h *HTTPHandler) UpdateAttachment(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	studio, err := h.store.Get(studioID)
+	workspace, err := h.store.Get(workspaceID)
 	if err != nil {
-		orihttp.NotFound(w, fmt.Sprintf("Studio not found: %v", err))
+		orihttp.NotFound(w, fmt.Sprintf("Workspace not found: %v", err))
 		return
 	}
 
-	attachment, err := studio.GetAttachment(attachmentID)
+	attachment, err := workspace.GetAttachment(attachmentID)
 	if err != nil {
 		orihttp.NotFound(w, err.Error())
 		return
@@ -227,7 +232,7 @@ func (h *HTTPHandler) UpdateAttachment(w http.ResponseWriter, r *http.Request) {
 		attachment.LinkURL = *req.LinkURL
 	}
 	if req.File != nil {
-		attachment.File = req.File
+		attachment.File = sanitizeAttachmentFileMeta(workspaceID, req.File)
 	}
 	if req.X != nil {
 		attachment.X = *req.X
@@ -236,17 +241,17 @@ func (h *HTTPHandler) UpdateAttachment(w http.ResponseWriter, r *http.Request) {
 		attachment.Y = *req.Y
 	}
 
-	if err := studio.UpdateAttachment(*attachment); err != nil {
+	if err := workspace.UpdateAttachment(*attachment); err != nil {
 		orihttp.InternalError(w, fmt.Sprintf("Failed to update attachment: %v", err))
 		return
 	}
 
-	if err := h.store.Save(studio); err != nil {
-		orihttp.InternalError(w, fmt.Sprintf("Failed to save studio: %v", err))
+	if err := h.store.Save(workspace); err != nil {
+		orihttp.InternalError(w, fmt.Sprintf("Failed to save workspace: %v", err))
 		return
 	}
 
-	updatedAttachment, err := studio.GetAttachment(attachmentID)
+	updatedAttachment, err := workspace.GetAttachment(attachmentID)
 	if err != nil {
 		logger.Debug("Could not retrieve updated attachment, using original", logger.Fields{"attachment_id": attachmentID, "error": err})
 		updatedAttachment = attachment
@@ -254,10 +259,15 @@ func (h *HTTPHandler) UpdateAttachment(w http.ResponseWriter, r *http.Request) {
 		updatedAttachment = attachment
 	}
 
+	if updatedAttachment != nil {
+		hydratedAttachment := HydrateAttachment(*updatedAttachment, h.store)
+		updatedAttachment = &hydratedAttachment
+	}
+
 	if h.eventBus != nil && updatedAttachment != nil {
 		h.eventBus.Publish(Event{
 			Type:        EventAttachmentUpdated,
-			WorkspaceID: studioID,
+			WorkspaceID: workspaceID,
 			Source:      "api",
 			Data: map[string]interface{}{
 				"attachment": updatedAttachment,
@@ -269,48 +279,147 @@ func (h *HTTPHandler) UpdateAttachment(w http.ResponseWriter, r *http.Request) {
 	if encErr := json.NewEncoder(w).Encode(map[string]interface{}{
 		"message":    "Attachment updated successfully",
 		"attachment": updatedAttachment,
-		"studio":     studioID,
+		"workspace":  workspaceID,
 	}); encErr != nil {
 		logger.Error("Failed to encode response", logger.Fields{"error": encErr})
 	}
 }
 
-// DeleteAttachment handles DELETE /api/studios/:id/attachments/:attachment_id
+// RelinkAttachmentFile handles POST /api/workspaces/:id/attachments/:attachment_id/relink
+// by copying a replacement file into the workspace-owned files directory.
+func (h *HTTPHandler) RelinkAttachmentFile(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		orihttp.MethodNotAllowed(w)
+		return
+	}
+
+	path := strings.TrimPrefix(r.URL.Path, "/api/workspaces/")
+	parts := strings.Split(path, "/")
+	if len(parts) < 4 {
+		orihttp.BadRequest(w, "Invalid URL format")
+		return
+	}
+	workspaceID := parts[0]
+	attachmentID := parts[2]
+
+	r.Body = http.MaxBytesReader(w, r.Body, MaxWorkspaceFileSize)
+	if err := r.ParseMultipartForm(MaxWorkspaceFileSize); err != nil {
+		if strings.Contains(err.Error(), "request body too large") {
+			orihttp.BadRequest(w, fmt.Sprintf("File too large. Maximum size is %d MB", MaxWorkspaceFileSize/(1<<20)))
+			return
+		}
+		orihttp.BadRequest(w, "Failed to parse upload: "+err.Error())
+		return
+	}
+
+	file, header, err := r.FormFile("file")
+	if err != nil {
+		orihttp.BadRequest(w, "File is required: "+err.Error())
+		return
+	}
+	defer func() { _ = file.Close() }()
+
+	filename, ok := orihttp.ValidateUploadFilename(w, header.Filename)
+	if !ok {
+		return
+	}
+
+	workspace, err := h.store.Get(workspaceID)
+	if err != nil {
+		orihttp.NotFound(w, fmt.Sprintf("Workspace not found: %v", err))
+		return
+	}
+
+	attachment, err := workspace.GetAttachment(attachmentID)
+	if err != nil {
+		orihttp.NotFound(w, err.Error())
+		return
+	}
+
+	filesPath := h.store.GetFilesPath(workspaceID)
+	storedFile, err := storeWorkspaceFile(filesPath, file, filename)
+	if err != nil {
+		orihttp.InternalError(w, "Failed to save replacement file: "+err.Error())
+		return
+	}
+
+	oldFile := attachment.File
+	attachment.File = buildWorkspaceOwnedAttachmentFileMeta(workspaceID, *storedFile, "")
+	attachment.UpdatedAt = time.Now()
+
+	if err := workspace.UpdateAttachment(*attachment); err != nil {
+		removeWorkspaceOwnedAttachmentFile(h.store, workspaceID, attachment.File, "")
+		orihttp.InternalError(w, fmt.Sprintf("Failed to update attachment: %v", err))
+		return
+	}
+
+	if err := h.store.Save(workspace); err != nil {
+		removeWorkspaceOwnedAttachmentFile(h.store, workspaceID, attachment.File, "")
+		attachment.File = oldFile
+		orihttp.InternalError(w, fmt.Sprintf("Failed to save workspace: %v", err))
+		return
+	}
+
+	removeWorkspaceOwnedAttachmentFile(h.store, workspaceID, oldFile, attachment.File.RelativePath)
+
+	hydratedAttachment := HydrateAttachment(*attachment, h.store)
+	if h.eventBus != nil {
+		h.eventBus.Publish(Event{
+			Type:        EventAttachmentUpdated,
+			WorkspaceID: workspaceID,
+			Source:      "api",
+			Data: map[string]interface{}{
+				"attachment": hydratedAttachment,
+			},
+		})
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	if encErr := json.NewEncoder(w).Encode(map[string]interface{}{
+		"message":    "Attachment file relinked successfully",
+		"attachment": hydratedAttachment,
+		"workspace":  workspaceID,
+	}); encErr != nil {
+		logger.Error("Failed to encode response", logger.Fields{"error": encErr})
+	}
+}
+
+// DeleteAttachment handles DELETE /api/workspaces/:id/attachments/:attachment_id
 func (h *HTTPHandler) DeleteAttachment(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodDelete {
 		orihttp.MethodNotAllowed(w)
 		return
 	}
 
-	path := strings.TrimPrefix(r.URL.Path, "/api/studios/")
+	path := strings.TrimPrefix(r.URL.Path, "/api/workspaces/")
 	parts := strings.Split(path, "/")
 	if len(parts) < 3 {
 		orihttp.BadRequest(w, "Invalid URL format")
 		return
 	}
-	studioID := parts[0]
+	workspaceID := parts[0]
 	attachmentID := parts[2]
 
-	studio, err := h.store.Get(studioID)
+	workspace, err := h.store.Get(workspaceID)
 	if err != nil {
-		orihttp.NotFound(w, fmt.Sprintf("Studio not found: %v", err))
+		orihttp.NotFound(w, fmt.Sprintf("Workspace not found: %v", err))
 		return
 	}
 
-	if err := studio.DeleteAttachment(attachmentID); err != nil {
+	if err := workspace.DeleteAttachment(attachmentID); err != nil {
 		orihttp.NotFound(w, err.Error())
 		return
 	}
 
-	if err := h.store.Save(studio); err != nil {
-		orihttp.InternalError(w, fmt.Sprintf("Failed to save studio: %v", err))
+	if err := h.store.Save(workspace); err != nil {
+		orihttp.InternalError(w, fmt.Sprintf("Failed to save workspace: %v", err))
 		return
 	}
 
 	if h.eventBus != nil {
 		h.eventBus.Publish(Event{
 			Type:        EventAttachmentDeleted,
-			WorkspaceID: studioID,
+			WorkspaceID: workspaceID,
 			Source:      "api",
 			Data: map[string]interface{}{
 				"attachment_id": attachmentID,
@@ -322,13 +431,13 @@ func (h *HTTPHandler) DeleteAttachment(w http.ResponseWriter, r *http.Request) {
 	if encErr := json.NewEncoder(w).Encode(map[string]interface{}{
 		"message":       "Attachment deleted successfully",
 		"attachment_id": attachmentID,
-		"studio":        studioID,
+		"workspace":     workspaceID,
 	}); encErr != nil {
 		logger.Error("Failed to encode response", logger.Fields{"error": encErr})
 	}
 }
 
-// MoveToTrash handles PATCH /api/studios/:id/attachments/:attachment_id/trash
+// MoveToTrash handles PATCH /api/workspaces/:id/attachments/:attachment_id/trash
 // Soft-deletes an attachment by setting its DeletedAt timestamp
 func (h *HTTPHandler) MoveToTrash(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPatch {
@@ -336,22 +445,22 @@ func (h *HTTPHandler) MoveToTrash(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	path := strings.TrimPrefix(r.URL.Path, "/api/studios/")
+	path := strings.TrimPrefix(r.URL.Path, "/api/workspaces/")
 	parts := strings.Split(path, "/")
 	if len(parts) < 4 {
 		orihttp.BadRequest(w, "Invalid URL format")
 		return
 	}
-	studioID := parts[0]
+	workspaceID := parts[0]
 	attachmentID := parts[2]
 
-	studio, err := h.store.Get(studioID)
+	workspace, err := h.store.Get(workspaceID)
 	if err != nil {
-		orihttp.NotFound(w, fmt.Sprintf("Studio not found: %v", err))
+		orihttp.NotFound(w, fmt.Sprintf("Workspace not found: %v", err))
 		return
 	}
 
-	attachment, err := studio.GetAttachment(attachmentID)
+	attachment, err := workspace.GetAttachment(attachmentID)
 	if err != nil {
 		orihttp.NotFound(w, err.Error())
 		return
@@ -362,20 +471,20 @@ func (h *HTTPHandler) MoveToTrash(w http.ResponseWriter, r *http.Request) {
 	attachment.DeletedAt = &now
 	attachment.UpdatedAt = now
 
-	if err := studio.UpdateAttachment(*attachment); err != nil {
+	if err := workspace.UpdateAttachment(*attachment); err != nil {
 		orihttp.InternalError(w, fmt.Sprintf("Failed to move attachment to trash: %v", err))
 		return
 	}
 
-	if err := h.store.Save(studio); err != nil {
-		orihttp.InternalError(w, fmt.Sprintf("Failed to save studio: %v", err))
+	if err := h.store.Save(workspace); err != nil {
+		orihttp.InternalError(w, fmt.Sprintf("Failed to save workspace: %v", err))
 		return
 	}
 
 	if h.eventBus != nil {
 		h.eventBus.Publish(Event{
 			Type:        EventAttachmentUpdated,
-			WorkspaceID: studioID,
+			WorkspaceID: workspaceID,
 			Source:      "api",
 			Data: map[string]interface{}{
 				"attachment":    attachment,
@@ -385,19 +494,19 @@ func (h *HTTPHandler) MoveToTrash(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 
-	logger.Info("Attachment moved to trash", logger.Fields{"attachment_id": attachmentID, "studio_id": studioID})
+	logger.Info("Attachment moved to trash", logger.Fields{"attachment_id": attachmentID, "workspace_id": workspaceID})
 
 	w.Header().Set("Content-Type", "application/json")
 	if encErr := json.NewEncoder(w).Encode(map[string]interface{}{
 		"message":       "Attachment moved to trash",
 		"attachment_id": attachmentID,
-		"studio":        studioID,
+		"workspace":     workspaceID,
 	}); encErr != nil {
 		logger.Error("Failed to encode response", logger.Fields{"error": encErr})
 	}
 }
 
-// RestoreFromTrash handles PATCH /api/studios/:id/attachments/:attachment_id/restore
+// RestoreFromTrash handles PATCH /api/workspaces/:id/attachments/:attachment_id/restore
 // Restores a soft-deleted attachment by clearing its DeletedAt timestamp
 func (h *HTTPHandler) RestoreFromTrash(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPatch {
@@ -405,22 +514,22 @@ func (h *HTTPHandler) RestoreFromTrash(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	path := strings.TrimPrefix(r.URL.Path, "/api/studios/")
+	path := strings.TrimPrefix(r.URL.Path, "/api/workspaces/")
 	parts := strings.Split(path, "/")
 	if len(parts) < 4 {
 		orihttp.BadRequest(w, "Invalid URL format")
 		return
 	}
-	studioID := parts[0]
+	workspaceID := parts[0]
 	attachmentID := parts[2]
 
-	studio, err := h.store.Get(studioID)
+	workspace, err := h.store.Get(workspaceID)
 	if err != nil {
-		orihttp.NotFound(w, fmt.Sprintf("Studio not found: %v", err))
+		orihttp.NotFound(w, fmt.Sprintf("Workspace not found: %v", err))
 		return
 	}
 
-	attachment, err := studio.GetAttachment(attachmentID)
+	attachment, err := workspace.GetAttachment(attachmentID)
 	if err != nil {
 		orihttp.NotFound(w, err.Error())
 		return
@@ -435,20 +544,20 @@ func (h *HTTPHandler) RestoreFromTrash(w http.ResponseWriter, r *http.Request) {
 	attachment.DeletedAt = nil
 	attachment.UpdatedAt = time.Now()
 
-	if err := studio.UpdateAttachment(*attachment); err != nil {
+	if err := workspace.UpdateAttachment(*attachment); err != nil {
 		orihttp.InternalError(w, fmt.Sprintf("Failed to restore attachment: %v", err))
 		return
 	}
 
-	if err := h.store.Save(studio); err != nil {
-		orihttp.InternalError(w, fmt.Sprintf("Failed to save studio: %v", err))
+	if err := h.store.Save(workspace); err != nil {
+		orihttp.InternalError(w, fmt.Sprintf("Failed to save workspace: %v", err))
 		return
 	}
 
 	if h.eventBus != nil {
 		h.eventBus.Publish(Event{
 			Type:        EventAttachmentUpdated,
-			WorkspaceID: studioID,
+			WorkspaceID: workspaceID,
 			Source:      "api",
 			Data: map[string]interface{}{
 				"attachment":    attachment,
@@ -458,20 +567,20 @@ func (h *HTTPHandler) RestoreFromTrash(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 
-	logger.Info("Attachment restored from trash", logger.Fields{"attachment_id": attachmentID, "studio_id": studioID})
+	logger.Info("Attachment restored from trash", logger.Fields{"attachment_id": attachmentID, "workspace_id": workspaceID})
 
 	w.Header().Set("Content-Type", "application/json")
 	if encErr := json.NewEncoder(w).Encode(map[string]interface{}{
 		"message":       "Attachment restored from trash",
 		"attachment_id": attachmentID,
 		"attachment":    attachment,
-		"studio":        studioID,
+		"workspace":     workspaceID,
 	}); encErr != nil {
 		logger.Error("Failed to encode response", logger.Fields{"error": encErr})
 	}
 }
 
-// ListTrash handles GET /api/studios/:id/trash
+// ListTrash handles GET /api/workspaces/:id/trash
 // Returns all soft-deleted attachments for a workspace
 func (h *HTTPHandler) ListTrash(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
@@ -479,23 +588,23 @@ func (h *HTTPHandler) ListTrash(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	path := strings.TrimPrefix(r.URL.Path, "/api/studios/")
+	path := strings.TrimPrefix(r.URL.Path, "/api/workspaces/")
 	parts := strings.Split(path, "/")
 	if len(parts) < 2 {
 		orihttp.BadRequest(w, "Invalid URL format")
 		return
 	}
-	studioID := parts[0]
+	workspaceID := parts[0]
 
-	studio, err := h.store.Get(studioID)
+	workspace, err := h.store.Get(workspaceID)
 	if err != nil {
-		orihttp.NotFound(w, fmt.Sprintf("Studio not found: %v", err))
+		orihttp.NotFound(w, fmt.Sprintf("Workspace not found: %v", err))
 		return
 	}
 
 	// Filter for trashed attachments
 	trashedAttachments := []Attachment{}
-	for _, attachment := range studio.Attachments {
+	for _, attachment := range workspace.Attachments {
 		if attachment.DeletedAt != nil {
 			trashedAttachments = append(trashedAttachments, attachment)
 		}
@@ -505,13 +614,13 @@ func (h *HTTPHandler) ListTrash(w http.ResponseWriter, r *http.Request) {
 	if encErr := json.NewEncoder(w).Encode(map[string]interface{}{
 		"attachments": trashedAttachments,
 		"count":       len(trashedAttachments),
-		"studio":      studioID,
+		"workspace":   workspaceID,
 	}); encErr != nil {
 		logger.Error("Failed to encode response", logger.Fields{"error": encErr})
 	}
 }
 
-// EmptyTrash handles DELETE /api/studios/:id/trash/:attachment_id
+// EmptyTrash handles DELETE /api/workspaces/:id/trash/:attachment_id
 // Permanently deletes a single attachment from trash
 func (h *HTTPHandler) EmptyTrash(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodDelete {
@@ -519,23 +628,23 @@ func (h *HTTPHandler) EmptyTrash(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	path := strings.TrimPrefix(r.URL.Path, "/api/studios/")
+	path := strings.TrimPrefix(r.URL.Path, "/api/workspaces/")
 	parts := strings.Split(path, "/")
 	if len(parts) < 3 {
 		orihttp.BadRequest(w, "Invalid URL format")
 		return
 	}
-	studioID := parts[0]
+	workspaceID := parts[0]
 	attachmentID := parts[2]
 
-	studio, err := h.store.Get(studioID)
+	workspace, err := h.store.Get(workspaceID)
 	if err != nil {
-		orihttp.NotFound(w, fmt.Sprintf("Studio not found: %v", err))
+		orihttp.NotFound(w, fmt.Sprintf("Workspace not found: %v", err))
 		return
 	}
 
 	// Verify the attachment exists and is in trash
-	attachment, err := studio.GetAttachment(attachmentID)
+	attachment, err := workspace.GetAttachment(attachmentID)
 	if err != nil {
 		orihttp.NotFound(w, err.Error())
 		return
@@ -547,20 +656,20 @@ func (h *HTTPHandler) EmptyTrash(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Permanently delete
-	if err := studio.DeleteAttachment(attachmentID); err != nil {
+	if err := workspace.DeleteAttachment(attachmentID); err != nil {
 		orihttp.InternalError(w, fmt.Sprintf("Failed to permanently delete attachment: %v", err))
 		return
 	}
 
-	if err := h.store.Save(studio); err != nil {
-		orihttp.InternalError(w, fmt.Sprintf("Failed to save studio: %v", err))
+	if err := h.store.Save(workspace); err != nil {
+		orihttp.InternalError(w, fmt.Sprintf("Failed to save workspace: %v", err))
 		return
 	}
 
 	if h.eventBus != nil {
 		h.eventBus.Publish(Event{
 			Type:        EventAttachmentDeleted,
-			WorkspaceID: studioID,
+			WorkspaceID: workspaceID,
 			Source:      "api",
 			Data: map[string]interface{}{
 				"attachment_id": attachmentID,
@@ -569,19 +678,19 @@ func (h *HTTPHandler) EmptyTrash(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 
-	logger.Info("Attachment permanently deleted from trash", logger.Fields{"attachment_id": attachmentID, "studio_id": studioID})
+	logger.Info("Attachment permanently deleted from trash", logger.Fields{"attachment_id": attachmentID, "workspace_id": workspaceID})
 
 	w.Header().Set("Content-Type", "application/json")
 	if encErr := json.NewEncoder(w).Encode(map[string]interface{}{
 		"message":       "Attachment permanently deleted",
 		"attachment_id": attachmentID,
-		"studio":        studioID,
+		"workspace":     workspaceID,
 	}); encErr != nil {
 		logger.Error("Failed to encode response", logger.Fields{"error": encErr})
 	}
 }
 
-// BulkMoveToTrash handles POST /api/studios/:id/attachments/bulk-trash
+// BulkMoveToTrash handles POST /api/workspaces/:id/attachments/bulk-trash
 // Moves multiple attachments to trash at once
 func (h *HTTPHandler) BulkMoveToTrash(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
@@ -589,13 +698,13 @@ func (h *HTTPHandler) BulkMoveToTrash(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	path := strings.TrimPrefix(r.URL.Path, "/api/studios/")
+	path := strings.TrimPrefix(r.URL.Path, "/api/workspaces/")
 	parts := strings.Split(path, "/")
 	if len(parts) < 3 {
 		orihttp.BadRequest(w, "Invalid URL format")
 		return
 	}
-	studioID := parts[0]
+	workspaceID := parts[0]
 
 	var req struct {
 		AttachmentIDs []string `json:"attachment_ids"`
@@ -609,9 +718,9 @@ func (h *HTTPHandler) BulkMoveToTrash(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	studio, err := h.store.Get(studioID)
+	workspace, err := h.store.Get(workspaceID)
 	if err != nil {
-		orihttp.NotFound(w, fmt.Sprintf("Studio not found: %v", err))
+		orihttp.NotFound(w, fmt.Sprintf("Workspace not found: %v", err))
 		return
 	}
 
@@ -621,7 +730,7 @@ func (h *HTTPHandler) BulkMoveToTrash(w http.ResponseWriter, r *http.Request) {
 	var errors []string
 
 	for _, attachmentID := range req.AttachmentIDs {
-		attachment, err := studio.GetAttachment(attachmentID)
+		attachment, err := workspace.GetAttachment(attachmentID)
 		if err != nil {
 			failedCount++
 			errors = append(errors, fmt.Sprintf("%s: %v", attachmentID, err))
@@ -631,7 +740,7 @@ func (h *HTTPHandler) BulkMoveToTrash(w http.ResponseWriter, r *http.Request) {
 		attachment.DeletedAt = &now
 		attachment.UpdatedAt = now
 
-		if err := studio.UpdateAttachment(*attachment); err != nil {
+		if err := workspace.UpdateAttachment(*attachment); err != nil {
 			failedCount++
 			errors = append(errors, fmt.Sprintf("%s: %v", attachmentID, err))
 			continue
@@ -640,15 +749,15 @@ func (h *HTTPHandler) BulkMoveToTrash(w http.ResponseWriter, r *http.Request) {
 		successCount++
 	}
 
-	if err := h.store.Save(studio); err != nil {
-		orihttp.InternalError(w, fmt.Sprintf("Failed to save studio: %v", err))
+	if err := h.store.Save(workspace); err != nil {
+		orihttp.InternalError(w, fmt.Sprintf("Failed to save workspace: %v", err))
 		return
 	}
 
 	if h.eventBus != nil {
 		h.eventBus.Publish(Event{
 			Type:        EventWorkspaceUpdated,
-			WorkspaceID: studioID,
+			WorkspaceID: workspaceID,
 			Source:      "api",
 			Data: map[string]interface{}{
 				"action":        "bulk_moved_to_trash",
@@ -659,7 +768,7 @@ func (h *HTTPHandler) BulkMoveToTrash(w http.ResponseWriter, r *http.Request) {
 	}
 
 	logger.Info("Bulk move to trash completed", logger.Fields{
-		"studio_id":     studioID,
+		"workspace_id":  workspaceID,
 		"success_count": successCount,
 		"failed_count":  failedCount,
 	})
@@ -670,7 +779,7 @@ func (h *HTTPHandler) BulkMoveToTrash(w http.ResponseWriter, r *http.Request) {
 		"success_count": successCount,
 		"failed_count":  failedCount,
 		"errors":        errors,
-		"studio":        studioID,
+		"workspace":     workspaceID,
 	}); encErr != nil {
 		logger.Error("Failed to encode response", logger.Fields{"error": encErr})
 	}

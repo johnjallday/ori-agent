@@ -52,16 +52,16 @@
             </div>
           </div>
 
-          <!-- Assistant Prompt Bar -->
+          <!-- Workspace Entry Prompt Bar -->
           <div id="homeAssistantCard" class="modern-card p-2 mb-3">
             <form id="homeAssistantForm" class="d-flex align-items-center gap-2">
               <div class="d-none d-md-flex align-items-center gap-2 px-2" style="color: var(--text-secondary); font-size: 0.82rem; white-space: nowrap;">
-                <span style="font-weight: 600; color: var(--text-primary);">Assistant</span>
+                <span id="homeAssistantIdentityName" style="font-weight: 600; color: var(--text-primary); display: inline-block; max-width: 180px; overflow: hidden; text-overflow: ellipsis;" title="Workspace Manager">Workspace Manager</span>
                 <span style="opacity: 0.6;">Workspace</span>
               </div>
               <input id="homeAssistantInput" type="text" class="modern-input flex-grow-1" maxlength="800"
-                     placeholder="Ask Assistant about this workspace... (or use /task, /note, /directory, /file, /chat)"
-                     aria-label="Assistant prompt"
+                     placeholder="Ask Workspace Manager about this workspace... (or use /task, /note, /directory, /file, /chat)"
+                     aria-label="Workspace manager prompt"
                      style="min-height: 42px;">
               <button id="homeAssistantSendBtn" type="submit" class="modern-btn modern-btn-primary home-assistant-send-btn">Send</button>
             </form>
@@ -436,14 +436,14 @@
   <!-- Shared modals (includes Add Agent modal used by Assistant) -->
   {{template "modals.tmpl" .}}
 
-  <!-- Assistant Thinking Modal -->
+  <!-- Workspace Entry Thinking Modal -->
   <div class="modal fade" id="homeAssistantThinkingModal" tabindex="-1"
        aria-labelledby="homeAssistantThinkingModalLabel" aria-hidden="true">
     <div class="modal-dialog modal-lg modal-dialog-centered modal-dialog-scrollable">
       <div class="modal-content home-thinking-modal-content">
         <div class="modal-header home-thinking-modal-header">
           <div>
-            <h5 id="homeAssistantThinkingModalLabel" class="modal-title">Assistant is working</h5>
+            <h5 id="homeAssistantThinkingModalLabel" class="modal-title">Workspace Manager is working</h5>
             <div id="homeAssistantThinkingStatus" class="home-thinking-modal-status" role="status" aria-live="polite">
               <span id="homeAssistantThinkingSpinner" class="spinner-border spinner-border-sm me-2" aria-hidden="true"></span>
               <span>Analyzing your request...</span>
@@ -453,12 +453,27 @@
         </div>
         <div class="modal-body">
           <div id="homeAssistantRoutingSummary" class="home-assistant-routing-summary d-none"></div>
-          <div id="homeAssistantConversation" class="home-assistant-conversation home-assistant-conversation-modal p-3">
-            <div class="home-assistant-thinking-placeholder">
-              Progress updates will appear here after you send a message.
-            </div>
-          </div>
+          <div id="homeAssistantPlanning" class="home-assistant-planning d-none mt-3"></div>
+          <div id="homeAssistantInlineReply" class="home-assistant-inline-reply d-none mt-3"></div>
           <div id="homeAssistantActions" class="d-flex flex-wrap gap-2 mt-3 d-none"></div>
+          <section id="homeAssistantConversationSection" class="home-assistant-conversation-section mt-3">
+            <div class="home-assistant-conversation-section-header">
+              <div>
+                <div class="home-assistant-conversation-section-eyebrow">Conversation History</div>
+                <div id="homeAssistantConversationSummary" class="home-assistant-conversation-section-copy">
+                  Progress updates and manager notes will appear here after you send a message.
+                </div>
+              </div>
+              <button id="homeAssistantConversationToggleBtn" type="button" class="modern-btn modern-btn-secondary modern-btn-sm" hidden>
+                Hide Conversation
+              </button>
+            </div>
+            <div id="homeAssistantConversation" class="home-assistant-conversation home-assistant-conversation-modal p-3">
+              <div class="home-assistant-thinking-placeholder">
+                Progress updates will appear here after you send a message.
+              </div>
+            </div>
+          </section>
         </div>
       </div>
     </div>
@@ -479,14 +494,54 @@
         </div>
         <div class="modal-body">
           <form id="hubAddFileForm">
-            <div id="hubFileDropZone" class="hub-file-drop-zone mb-3">
-              <div class="hub-file-drop-zone-content">
-                <svg width="48" height="48" viewBox="0 0 24 24" fill="currentColor" class="mb-2" style="color: var(--text-secondary); opacity: 0.6;">
-                  <path d="M14,2H6A2,2 0 0,0 4,4V20A2,2 0 0,0 6,22H18A2,2 0 0,0 20,20V8L14,2M13.5,16V19H10.5V16H8L12,12L16,16H13.5M13,9V3.5L18.5,9H13Z"/>
-                </svg>
-                <p style="color: var(--text-primary); margin-bottom: 4px;">Drag & drop files here</p>
-                <p style="color: var(--text-secondary); font-size: 0.875rem; margin-bottom: 12px;">or click to browse</p>
-                <input type="file" id="hubFileInput" multiple style="display: none;">
+            <div id="hubFileSourceSwitch" class="hub-file-source-switch mb-3" role="tablist" aria-label="Choose a file source">
+              <button type="button" id="hubFileSourceDeviceBtn" class="hub-file-source-btn is-active" data-source="device" aria-pressed="true">From Device</button>
+              <button type="button" id="hubFileSourceVaultBtn" class="hub-file-source-btn" data-source="vault" aria-pressed="false">From Vault</button>
+            </div>
+
+            <div id="hubFileDevicePane">
+              <div id="hubFileDropZone" class="hub-file-drop-zone mb-3">
+                <div class="hub-file-drop-zone-content">
+                  <svg width="48" height="48" viewBox="0 0 24 24" fill="currentColor" class="mb-2" style="color: var(--text-secondary); opacity: 0.6;">
+                    <path d="M14,2H6A2,2 0 0,0 4,4V20A2,2 0 0,0 6,22H18A2,2 0 0,0 20,20V8L14,2M13.5,16V19H10.5V16H8L12,12L16,16H13.5M13,9V3.5L18.5,9H13Z"/>
+                  </svg>
+                  <p style="color: var(--text-primary); margin-bottom: 4px;">Drag & drop files here</p>
+                  <p style="color: var(--text-secondary); font-size: 0.875rem; margin-bottom: 12px;">or click to browse</p>
+                  <input type="file" id="hubFileInput" multiple style="display: none;">
+                </div>
+              </div>
+            </div>
+
+            <div id="hubFileVaultPane" class="hub-file-vault-pane" hidden>
+              <div class="hub-file-vault-shell mb-3">
+                <div class="hub-file-vault-toolbar">
+                  <div class="hub-file-vault-field">
+                    <label for="hubVaultSelect" class="form-label hub-file-vault-label">Vault</label>
+                    <select id="hubVaultSelect" class="form-select">
+                      <option value="">Loading vaults...</option>
+                    </select>
+                  </div>
+                  <button type="button" id="hubVaultRefreshBtn" class="modern-btn modern-btn-secondary modern-btn-sm">Refresh</button>
+                </div>
+
+                <div class="hub-file-vault-search-wrap">
+                  <input type="search" id="hubVaultSearchInput" class="form-control" placeholder="Search by entry title or filename">
+                </div>
+
+                <div id="hubVaultLockedState" class="hub-file-vault-locked" hidden>
+                  <div class="hub-file-vault-locked-title">Vault is locked</div>
+                  <p class="hub-file-vault-locked-copy">Unlock the selected vault to browse the files stored inside its entries.</p>
+                  <div class="hub-file-vault-unlock-row">
+                    <input type="password" id="hubVaultUnlockPassword" class="form-control" placeholder="Enter vault password">
+                    <button type="button" id="hubVaultUnlockBtn" class="modern-btn modern-btn-primary modern-btn-sm">Unlock</button>
+                  </div>
+                </div>
+
+                <div id="hubVaultAttachmentList" class="hub-file-vault-list">
+                  <div class="hub-file-vault-empty">Choose an unlocked vault to browse its attached files.</div>
+                </div>
+
+                <div class="hub-file-vault-help">Vault files are copied into this workspace as regular workspace files. The encrypted originals stay in the vault.</div>
               </div>
             </div>
             <div id="hubSelectedFilesPreview" class="hub-selected-files-preview" style="display: none;">
@@ -519,7 +574,7 @@
             <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" class="me-1">
               <path d="M9,16V10H5L12,3L19,10H15V16H9M5,20V18H19V20H5Z"/>
             </svg>
-            Upload
+            Add to Workspace
           </button>
         </div>
       </div>
@@ -648,6 +703,86 @@
                   <label class="form-check-label" for="workspace-detail-skill-trusted">Trusted (allow tool use without confirmation)</label>
                 </div>
               </div>
+              <div class="col-12 d-none" id="workspace-detail-skill-planning-fields">
+                <div class="workspace-detail-mcp-agent-access-card">
+                  <div class="workspace-detail-mcp-agent-access-header">
+                    <div>
+                      <div class="workspace-detail-mcp-agent-access-title">Planning Settings</div>
+                      <div class="workspace-detail-mcp-agent-access-subtitle">These workspace-level settings shape how Ask Ori plans work before creating tasks or starting implementation.</div>
+                    </div>
+                  </div>
+                  <div class="row g-3 mt-0">
+                    <div class="col-md-6">
+                      <label for="workspace-detail-skill-planning-mode" class="form-label">Planning mode</label>
+                      <select id="workspace-detail-skill-planning-mode" class="form-select">
+                        <option value="feature">Feature</option>
+                        <option value="bugfix">Bugfix</option>
+                        <option value="refactor">Refactor</option>
+                        <option value="investigation">Investigation</option>
+                      </select>
+                      <div class="workspace-detail-mcp-field-help">Use this to bias the planning shape and task language for this workspace.</div>
+                    </div>
+                    <div class="col-md-6">
+                      <label for="workspace-detail-skill-planning-clarification-mode" class="form-label">Clarification depth</label>
+                      <select id="workspace-detail-skill-planning-clarification-mode" class="form-select">
+                        <option value="minimal">Minimal</option>
+                        <option value="standard">Standard</option>
+                        <option value="deep">Deep</option>
+                      </select>
+                      <div class="workspace-detail-mcp-field-help">Controls how aggressively the planner should ask follow-up questions before drafting artifacts.</div>
+                    </div>
+                    <div class="col-md-6">
+                      <label for="workspace-detail-skill-planning-tasks-dir" class="form-label">Planning output directory</label>
+                      <input id="workspace-detail-skill-planning-tasks-dir" type="text" class="form-control" maxlength="120" placeholder="tasks">
+                      <div class="workspace-detail-mcp-field-help">Relative workspace path where PRDs and task lists should be written.</div>
+                    </div>
+                    <div class="col-md-6">
+                      <label for="workspace-detail-skill-planning-default-execution" class="form-label">Default execution mode</label>
+                      <select id="workspace-detail-skill-planning-default-execution" class="form-select">
+                        <option value="step_through">Step-through</option>
+                        <option value="auto">Auto</option>
+                      </select>
+                      <div class="workspace-detail-mcp-field-help">Default mode to use when planning creates executable workspace tasks.</div>
+                    </div>
+                    <div class="col-12">
+                      <div class="workspace-detail-mcp-agent-access-card">
+                        <div class="workspace-detail-mcp-agent-access-header">
+                          <div>
+                            <div class="workspace-detail-mcp-agent-access-title">Planning outputs</div>
+                            <div class="workspace-detail-mcp-agent-access-subtitle">Choose which formal artifacts the planner should prefer when the request calls for planning.</div>
+                          </div>
+                        </div>
+                        <div class="row g-3 mt-0">
+                          <div class="col-md-6">
+                            <div class="form-check form-switch workspace-detail-mcp-toggle">
+                              <input class="form-check-input" type="checkbox" role="switch" id="workspace-detail-skill-planning-write-prd" checked>
+                              <label class="form-check-label" for="workspace-detail-skill-planning-write-prd">Write PRD files</label>
+                            </div>
+                          </div>
+                          <div class="col-md-6">
+                            <div class="form-check form-switch workspace-detail-mcp-toggle">
+                              <input class="form-check-input" type="checkbox" role="switch" id="workspace-detail-skill-planning-write-task-list" checked>
+                              <label class="form-check-label" for="workspace-detail-skill-planning-write-task-list">Write task list files</label>
+                            </div>
+                          </div>
+                          <div class="col-md-6">
+                            <div class="form-check form-switch workspace-detail-mcp-toggle">
+                              <input class="form-check-input" type="checkbox" role="switch" id="workspace-detail-skill-planning-sync-tasks" checked>
+                              <label class="form-check-label" for="workspace-detail-skill-planning-sync-tasks">Sync approved plans into workspace tasks</label>
+                            </div>
+                          </div>
+                          <div class="col-md-6">
+                            <div class="form-check form-switch workspace-detail-mcp-toggle">
+                              <input class="form-check-input" type="checkbox" role="switch" id="workspace-detail-skill-planning-require-branch" checked>
+                              <label class="form-check-label" for="workspace-detail-skill-planning-require-branch">Require a feature branch before implementation</label>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
               <div class="col-12">
                 <div class="workspace-detail-mcp-agent-access-card">
                   <div class="workspace-detail-mcp-agent-access-header">
@@ -691,6 +826,13 @@
         <div class="modal-body">
           <div id="workspace-detail-task-result-breakdown" class="workspace-detail-task-result-breakdown"></div>
           <pre id="workspace-detail-task-result-body" class="workspace-detail-task-result-body"></pre>
+          <section id="workspace-detail-task-result-next-steps" class="workspace-detail-task-result-next-steps d-none">
+            <div class="workspace-detail-task-result-next-steps-header">
+              <div class="workspace-detail-task-result-next-steps-eyebrow">Continue This Work</div>
+              <div id="workspace-detail-task-result-next-steps-copy" class="workspace-detail-task-result-next-steps-copy"></div>
+            </div>
+            <div id="workspace-detail-task-result-next-steps-actions" class="workspace-detail-task-result-next-steps-actions"></div>
+          </section>
         </div>
         <div class="modal-footer">
           <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
@@ -907,6 +1049,233 @@
 
   <!-- Styles for workspace detail page -->
   <style>
+    .hub-file-source-switch {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.35rem;
+      padding: 0.25rem;
+      border-radius: 999px;
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      background: rgba(13, 22, 38, 0.62);
+    }
+
+    .hub-file-source-btn {
+      border: none;
+      background: transparent;
+      color: var(--text-secondary);
+      border-radius: 999px;
+      padding: 0.48rem 0.85rem;
+      font-size: 0.78rem;
+      font-weight: 600;
+      transition: background 0.15s ease, color 0.15s ease, transform 0.15s ease;
+    }
+
+    .hub-file-source-btn:hover {
+      color: var(--text-primary);
+    }
+
+    .hub-file-source-btn.is-active {
+      background: rgba(255, 166, 110, 0.18);
+      color: var(--text-primary);
+      box-shadow: inset 0 0 0 1px rgba(255, 166, 110, 0.26);
+    }
+
+    .hub-file-vault-shell {
+      display: grid;
+      gap: 0.85rem;
+      padding: 0.95rem;
+      border-radius: 18px;
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      background: linear-gradient(180deg, rgba(17, 26, 42, 0.92), rgba(12, 20, 34, 0.9));
+    }
+
+    .hub-file-vault-toolbar {
+      display: flex;
+      align-items: end;
+      gap: 0.65rem;
+    }
+
+    .hub-file-vault-field {
+      flex: 1;
+      min-width: 0;
+    }
+
+    .hub-file-vault-label {
+      color: var(--text-primary);
+      font-weight: 600;
+      margin-bottom: 0.35rem;
+    }
+
+    .hub-file-vault-search-wrap input,
+    .hub-file-vault-field select,
+    .hub-file-vault-unlock-row input {
+      background: rgba(8, 14, 24, 0.72);
+      border-color: rgba(255, 255, 255, 0.12);
+      color: var(--text-primary);
+    }
+
+    .hub-file-vault-search-wrap input::placeholder,
+    .hub-file-vault-unlock-row input::placeholder {
+      color: var(--text-secondary);
+    }
+
+    .hub-file-vault-locked {
+      display: grid;
+      gap: 0.55rem;
+      padding: 0.95rem;
+      border-radius: 14px;
+      border: 1px dashed rgba(255, 166, 110, 0.24);
+      background: rgba(255, 166, 110, 0.08);
+    }
+
+    .hub-file-vault-locked-title {
+      color: var(--text-primary);
+      font-weight: 700;
+    }
+
+    .hub-file-vault-locked-copy,
+    .hub-file-vault-help {
+      margin: 0;
+      color: var(--text-secondary);
+      font-size: 0.8rem;
+      line-height: 1.55;
+    }
+
+    .hub-file-vault-unlock-row {
+      display: flex;
+      gap: 0.55rem;
+    }
+
+    .hub-file-vault-list {
+      display: grid;
+      gap: 0.55rem;
+      max-height: 280px;
+      overflow: auto;
+      padding-right: 0.2rem;
+    }
+
+    .hub-file-vault-empty {
+      padding: 1rem;
+      border-radius: 14px;
+      border: 1px dashed rgba(255, 255, 255, 0.12);
+      color: var(--text-secondary);
+      text-align: center;
+      background: rgba(9, 17, 28, 0.5);
+      font-size: 0.84rem;
+    }
+
+    .hub-file-vault-item {
+      display: flex;
+      align-items: flex-start;
+      gap: 0.7rem;
+      width: 100%;
+      padding: 0.85rem 0.95rem;
+      border-radius: 14px;
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      background: rgba(8, 14, 24, 0.76);
+      color: inherit;
+      text-align: left;
+      transition: border-color 0.15s ease, background 0.15s ease, transform 0.15s ease;
+    }
+
+    .hub-file-vault-item:hover {
+      border-color: rgba(255, 166, 110, 0.36);
+      background: rgba(20, 31, 51, 0.88);
+      transform: translateY(-1px);
+    }
+
+    .hub-file-vault-item.is-selected {
+      border-color: rgba(255, 166, 110, 0.5);
+      background: rgba(255, 166, 110, 0.12);
+    }
+
+    .hub-file-vault-item-icon {
+      flex: 0 0 auto;
+      width: 34px;
+      height: 34px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      border-radius: 10px;
+      background: rgba(255, 166, 110, 0.12);
+      color: rgb(255, 190, 142);
+    }
+
+    .hub-file-vault-item-main {
+      flex: 1;
+      min-width: 0;
+    }
+
+    .hub-file-vault-item-name {
+      color: var(--text-primary);
+      font-weight: 600;
+      font-size: 0.9rem;
+      line-height: 1.35;
+      word-break: break-word;
+    }
+
+    .hub-file-vault-item-meta,
+    .hub-file-vault-item-detail {
+      color: var(--text-secondary);
+      font-size: 0.78rem;
+      line-height: 1.45;
+      margin-top: 0.18rem;
+    }
+
+    .hub-file-vault-item-check {
+      flex: 0 0 auto;
+      width: 20px;
+      height: 20px;
+      border-radius: 999px;
+      border: 1px solid rgba(255, 255, 255, 0.2);
+      background: rgba(255, 255, 255, 0.02);
+      margin-top: 0.15rem;
+      position: relative;
+    }
+
+    .hub-file-vault-item.is-selected .hub-file-vault-item-check {
+      border-color: rgba(255, 166, 110, 0.8);
+      background: rgba(255, 166, 110, 0.22);
+    }
+
+    .hub-file-vault-item.is-selected .hub-file-vault-item-check::after {
+      content: "";
+      position: absolute;
+      inset: 4px;
+      border-radius: 999px;
+      background: rgb(255, 190, 142);
+    }
+
+    .hub-selected-files-source {
+      display: inline-flex;
+      align-items: center;
+      margin-left: 0.4rem;
+      padding: 0.12rem 0.42rem;
+      border-radius: 999px;
+      background: rgba(255, 166, 110, 0.14);
+      color: var(--text-secondary);
+      font-size: 0.68rem;
+      font-weight: 700;
+      letter-spacing: 0.02em;
+      text-transform: uppercase;
+    }
+
+    @media (max-width: 640px) {
+      .hub-file-vault-toolbar,
+      .hub-file-vault-unlock-row {
+        flex-direction: column;
+        align-items: stretch;
+      }
+
+      .hub-file-source-switch {
+        width: 100%;
+      }
+
+      .hub-file-source-btn {
+        flex: 1;
+      }
+    }
+
     /* Bento Grid Layout */
     .workspace-detail-bento {
       display: grid;
@@ -1203,6 +1572,37 @@
       gap: 0.35rem;
     }
 
+    .workspace-detail-agent-link {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.28rem;
+      color: inherit;
+      text-decoration: none;
+      border-bottom: 1px solid transparent;
+      transition: color 0.15s ease, border-color 0.15s ease, opacity 0.15s ease;
+      min-width: 0;
+    }
+
+    .workspace-detail-agent-link:hover {
+      color: #7dd3fc;
+      border-color: rgba(125, 211, 252, 0.45);
+    }
+
+    .workspace-detail-agent-link:focus-visible {
+      outline: 2px solid rgba(56, 189, 248, 0.9);
+      outline-offset: 2px;
+      border-radius: 4px;
+    }
+
+    .workspace-detail-agent-link svg {
+      flex-shrink: 0;
+      opacity: 0.78;
+    }
+
+    .workspace-detail-agent-link-label {
+      min-width: 0;
+    }
+
     .workspace-detail-agent-card-meta {
       font-size: 0.68rem;
       color: var(--text-secondary);
@@ -1279,6 +1679,20 @@
       font-weight: 700;
       letter-spacing: 0.04em;
       text-transform: uppercase;
+      padding: 0.08rem 0.36rem;
+      line-height: 1.2;
+    }
+
+    .workspace-detail-agent-model-badge {
+      display: inline-flex;
+      align-items: center;
+      border-radius: 999px;
+      border: 1px solid rgba(148, 163, 184, 0.25);
+      background: rgba(148, 163, 184, 0.10);
+      color: var(--text-secondary);
+      font-size: 0.56rem;
+      font-weight: 600;
+      letter-spacing: 0.02em;
       padding: 0.08rem 0.36rem;
       line-height: 1.2;
     }
@@ -1825,6 +2239,24 @@
       border-radius: 4px;
     }
 
+    .workspace-detail-status-badge {
+      display: inline-flex;
+      align-items: center;
+      padding: 0.08rem 0.42rem;
+      margin-right: 0.4rem;
+      border-radius: 999px;
+      font-size: 0.68rem;
+      font-weight: 700;
+      letter-spacing: 0.02em;
+      text-transform: uppercase;
+      vertical-align: middle;
+    }
+
+    .workspace-detail-status-badge.is-missing {
+      background: rgba(245, 158, 11, 0.14);
+      color: #d97706;
+    }
+
     .workspace-detail-item-content[role="button"]:focus-visible {
       outline: 2px solid var(--primary-color);
       outline-offset: 2px;
@@ -2036,6 +2468,102 @@
       color: var(--text-primary);
       font-size: 0.8rem;
       line-height: 1.45;
+    }
+
+    .workspace-detail-task-result-next-steps {
+      margin-top: 0.8rem;
+      border: 1px solid color-mix(in srgb, var(--border-color) 72%, var(--primary-color) 28%);
+      border-radius: 14px;
+      background: color-mix(in srgb, var(--bg-secondary) 90%, rgba(var(--primary-color-rgb, 255, 138, 86), 0.06));
+      padding: 0.85rem;
+      display: grid;
+      gap: 0.75rem;
+    }
+
+    .workspace-detail-task-result-next-steps-header {
+      display: grid;
+      gap: 0.28rem;
+    }
+
+    .workspace-detail-task-result-next-steps-eyebrow {
+      font-size: 0.72rem;
+      font-weight: 700;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      color: var(--text-secondary);
+    }
+
+    .workspace-detail-task-result-next-steps-copy {
+      font-size: 0.82rem;
+      line-height: 1.5;
+      color: var(--text-primary);
+    }
+
+    .workspace-detail-task-result-next-steps-actions {
+      display: grid;
+      gap: 0.6rem;
+    }
+
+    .workspace-detail-task-result-next-step-btn {
+      width: 100%;
+      display: flex;
+      align-items: flex-start;
+      gap: 0.75rem;
+      padding: 0.8rem 0.9rem;
+      border-radius: 12px;
+      border: 1px solid color-mix(in srgb, var(--border-color) 70%, var(--primary-color) 30%);
+      background: color-mix(in srgb, var(--bg-primary) 86%, rgba(var(--primary-color-rgb, 255, 138, 86), 0.08));
+      color: var(--text-primary);
+      text-align: left;
+      transition: border-color 0.18s ease, transform 0.18s ease, background 0.18s ease;
+    }
+
+    .workspace-detail-task-result-next-step-btn:hover:not(:disabled) {
+      border-color: color-mix(in srgb, var(--primary-color) 54%, var(--border-color));
+      background: color-mix(in srgb, var(--bg-primary) 78%, rgba(var(--primary-color-rgb, 255, 138, 86), 0.14));
+      transform: translateY(-1px);
+    }
+
+    .workspace-detail-task-result-next-step-btn:disabled {
+      opacity: 0.7;
+      cursor: wait;
+    }
+
+    .workspace-detail-task-result-next-step-index {
+      width: 1.7rem;
+      height: 1.7rem;
+      border-radius: 999px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      background: rgba(var(--primary-color-rgb, 255, 138, 86), 0.16);
+      color: var(--primary-color);
+      font-size: 0.74rem;
+      font-weight: 700;
+      line-height: 1;
+      flex-shrink: 0;
+      margin-top: 0.08rem;
+    }
+
+    .workspace-detail-task-result-next-step-copy {
+      display: grid;
+      gap: 0.18rem;
+      min-width: 0;
+      flex: 1;
+    }
+
+    .workspace-detail-task-result-next-step-title {
+      font-size: 0.84rem;
+      font-weight: 600;
+      line-height: 1.4;
+      color: var(--text-primary);
+      white-space: normal;
+    }
+
+    .workspace-detail-task-result-next-step-meta {
+      font-size: 0.74rem;
+      line-height: 1.4;
+      color: var(--text-secondary);
     }
 
     .workspace-detail-task-confirm-dialog {
@@ -3981,6 +4509,7 @@
   <script src="/js/modules/file-upload.js"></script>
   <script src="/js/modules/location.js"></script>
   <script src="/js/modules/task-modal-controller.js"></script>
+  <script src="/js/modules/workspace-bootstrap-review.js"></script>
   <script src="/js/modules/sessions.js"></script>
   <script src="/js/modules/dashboard.js"></script>
   <script src="/js/modules/toast.js"></script>
@@ -3988,7 +4517,7 @@
   <script src="/js/modules/form-validation.js"></script>
   <script src="/js/file-manager.js"></script>
   <script src="/js/app.js"></script>
-  <script src="/js/modules/studio-realtime.js"></script>
+  <script src="/js/modules/workspace-realtime.js"></script>
 
   <!-- Workspace Hub Modules (for task/session/file/note management) -->
   <script src="/js/modules/workspace-hub-utils.js"></script>

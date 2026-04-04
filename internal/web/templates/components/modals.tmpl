@@ -71,6 +71,7 @@
             <select id="agentType" class="modern-input w-100">
               <option value="tool-calling">Tool Calling (Cheapest - Optimized for tool use)</option>
               <option value="general">General Purpose (Mid-tier - Balanced capability)</option>
+              <option value="workspace-manager">Workspace Manager (Coordinates workspace agents)</option>
               <option value="orchestration">Orchestration (Advanced - Multi-agent coordination)</option>
               <option value="research">Research (Expensive - Complex thinking)</option>
             </select>
@@ -80,6 +81,7 @@
             <select id="agentModel" class="modern-input w-100">
               <option value="">Loading models...</option>
             </select>
+            <small id="agentModelRecommendation" class="form-helper d-none"></small>
           </div>
           <div class="mb-3 d-none" id="agentReasoningField">
             <label for="agentReasoning" class="form-label" style="color: var(--text-primary);">Reasoning Level</label>
@@ -782,6 +784,16 @@
           <div class="mb-4 ori-hatch-reveal" id="welcomeAssistantReveal">
             <label for="onboardingAssistantName" class="form-label" style="font-size: 0.85rem; font-weight: 500; color: var(--text-secondary);">Assistant name</label>
             <input type="text" class="form-control" id="onboardingAssistantName" placeholder="Assistant" value="Assistant" style="font-size: 1rem; padding: 10px 14px;">
+          </div>
+
+          <div class="mb-4 ori-hatch-reveal" id="welcomeWorkspaceRootReveal">
+            <label for="onboardingWorkspaceRoot" class="form-label" style="font-size: 0.85rem; font-weight: 500; color: var(--text-secondary);">Workspace directory</label>
+            <div class="input-group">
+              <input type="text" class="form-control" id="onboardingWorkspaceRoot" placeholder="Loading workspace directory..." style="font-size: 1rem; padding: 10px 14px;">
+              <button type="button" class="btn btn-outline-secondary" id="onboardingWorkspaceRootBrowseBtn">Browse</button>
+            </div>
+            <small class="text-muted d-block mt-2" id="onboardingWorkspaceRootHelp">New workspaces will be created inside this folder by default.</small>
+            <div class="alert alert-danger d-none mt-2 mb-0 py-2" id="onboardingWorkspaceRootError"></div>
           </div>
 
           <div class="d-flex justify-content-end ori-hatch-reveal" id="welcomeBtnReveal">

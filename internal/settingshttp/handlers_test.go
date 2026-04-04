@@ -8,11 +8,14 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
+	"github.com/johnjallday/ori-agent/internal/client"
 	"github.com/johnjallday/ori-agent/internal/config"
 	"github.com/johnjallday/ori-agent/internal/llm"
 	"github.com/johnjallday/ori-agent/internal/modelinfo"
+	"github.com/johnjallday/ori-agent/internal/vault"
 )
 
 // mockProvider implements llm.Provider for testing
@@ -487,6 +490,211 @@ func TestExternalAgentsSettingsHandler_CodexToggleDoesNotUnregisterProvider(t *t
 	}
 }
 
+func TestAPIKeyHandler_SecretStoreWritesDoNotPersistPlaintext(t *testing.T) {
+	tmpDir := t.TempDir()
+	tmpFile := filepath.Join(tmpDir, "settings.json")
+	configManager := config.NewManagerWithSecretStore(tmpFile, vault.NewMemorySecretStore())
+	_ = configManager.Load()
+
+	llmFactory := llm.NewFactory()
+	handler := NewHandler(nil, configManager, client.NewFactory(""), llmFactory)
+
+	body := []byte(`{
+		"openai_api_key":"sk-test1234567890abcdefghijklmnopqrstuvwxyz",
+		"anthropic_api_key":"sk-ant-test1234567890abcdefghijklmnopqrstuvwxyz",
+		"gemini_api_key":"gemini-secret"
+	}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/settings/api-key", bytes.NewReader(body))
+	rec := httptest.NewRecorder()
+
+	handler.APIKeyHandler(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("Expected status 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	raw, err := os.ReadFile(tmpFile)
+	if err != nil {
+		t.Fatalf("ReadFile() error = %v", err)
+	}
+	text := string(raw)
+	if strings.Contains(text, "sk-test1234567890abcdefghijklmnopqrstuvwxyz") || strings.Contains(text, "sk-ant-test1234567890abcdefghijklmnopqrstuvwxyz") || strings.Contains(text, "gemini-secret") {
+		t.Fatalf("settings.json should not contain plaintext API keys: %s", text)
+	}
+
+	if got := configManager.GetAPIKey(); got != "sk-test1234567890abcdefghijklmnopqrstuvwxyz" {
+		t.Fatalf("GetAPIKey() = %q", got)
+	}
+	if got := configManager.GetAnthropicAPIKey(); got != "sk-ant-test1234567890abcdefghijklmnopqrstuvwxyz" {
+		t.Fatalf("GetAnthropicAPIKey() = %q", got)
+	}
+	if got := configManager.GetGeminiAPIKey(); got != "gemini-secret" {
+		t.Fatalf("GetGeminiAPIKey() = %q", got)
+	}
+}
+
+func TestUtilitySettingsHandler_SecretStoreWritesDoNotPersistBravePlaintext(t *testing.T) {
+	tmpDir := t.TempDir()
+	tmpFile := filepath.Join(tmpDir, "settings.json")
+	configManager := config.NewManagerWithSecretStore(tmpFile, vault.NewMemorySecretStore())
+	_ = configManager.Load()
+
+	handler := NewHandler(nil, configManager, client.NewFactory(""), llm.NewFactory())
+	body := []byte(`{"search_provider":"brave","brave_api_key":"brave-secret-token"}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/settings/utility", bytes.NewReader(body))
+	rec := httptest.NewRecorder()
+
+	handler.UtilitySettingsHandler(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("Expected status 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	raw, err := os.ReadFile(tmpFile)
+	if err != nil {
+		t.Fatalf("ReadFile() error = %v", err)
+	}
+	if strings.Contains(string(raw), "brave-secret-token") {
+		t.Fatalf("settings.json should not contain plaintext Brave key: %s", string(raw))
+	}
+
+	cfg := configManager.Get()
+	if cfg.Utility.BraveAPIKey != "brave-secret-token" {
+		t.Fatalf("effective BraveAPIKey = %q", cfg.Utility.BraveAPIKey)
+	}
+}
+
+func TestWorkspaceRootSettingsHandler_Get_EnvironmentFallback(t *testing.T) {
+	tmpDir := t.TempDir()
+	tmpFile := filepath.Join(tmpDir, "settings.json")
+	configManager := config.NewManager(tmpFile)
+	_ = configManager.Load()
+
+	envRoot := filepath.Join(tmpDir, "env-workspaces")
+	t.Setenv("WORKSPACE_DIR", envRoot)
+
+	handler := NewHandler(nil, configManager, nil, llm.NewFactory())
+
+	req := httptest.NewRequest(http.MethodGet, "/api/settings/workspace-root", nil)
+	rec := httptest.NewRecorder()
+	handler.WorkspaceRootSettingsHandler(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("Expected status 200, got %d", rec.Code)
+	}
+
+	var resp WorkspaceRootResponse
+	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+		t.Fatalf("Failed to decode response: %v", err)
+	}
+
+	if resp.WorkspaceRoot != "" {
+		t.Fatalf("Expected no configured workspace_root, got %q", resp.WorkspaceRoot)
+	}
+	if resp.Source != "environment" {
+		t.Fatalf("Expected source environment, got %q", resp.Source)
+	}
+	if resp.EffectiveWorkspaceRoot != envRoot {
+		t.Fatalf("Expected effective root %q, got %q", envRoot, resp.EffectiveWorkspaceRoot)
+	}
+}
+
+func TestWorkspaceRootSettingsHandler_Post(t *testing.T) {
+	tmpDir := t.TempDir()
+	tmpFile := filepath.Join(tmpDir, "settings.json")
+	configManager := config.NewManager(tmpFile)
+	_ = configManager.Load()
+
+	handler := NewHandler(nil, configManager, nil, llm.NewFactory())
+
+	customRoot := filepath.Join(tmpDir, "custom-workspaces")
+	body, _ := json.Marshal(map[string]string{
+		"workspace_root": customRoot,
+	})
+
+	req := httptest.NewRequest(http.MethodPost, "/api/settings/workspace-root", bytes.NewReader(body))
+	rec := httptest.NewRecorder()
+	handler.WorkspaceRootSettingsHandler(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("Expected status 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	var resp struct {
+		Success                bool   `json:"success"`
+		WorkspaceRoot          string `json:"workspace_root"`
+		EffectiveWorkspaceRoot string `json:"effective_workspace_root"`
+		Source                 string `json:"source"`
+	}
+	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+		t.Fatalf("Failed to decode response: %v", err)
+	}
+
+	if !resp.Success {
+		t.Fatal("Expected success=true")
+	}
+	if resp.WorkspaceRoot != customRoot {
+		t.Fatalf("Expected workspace_root %q, got %q", customRoot, resp.WorkspaceRoot)
+	}
+	if resp.EffectiveWorkspaceRoot != customRoot {
+		t.Fatalf("Expected effective root %q, got %q", customRoot, resp.EffectiveWorkspaceRoot)
+	}
+	if resp.Source != "settings" {
+		t.Fatalf("Expected source settings, got %q", resp.Source)
+	}
+	if _, err := os.Stat(customRoot); err != nil {
+		t.Fatalf("Expected workspace root directory to exist: %v", err)
+	}
+
+	configManager2 := config.NewManager(tmpFile)
+	_ = configManager2.Load()
+	if got := configManager2.GetWorkspaceRoot(); got != customRoot {
+		t.Fatalf("Expected persisted workspace root %q, got %q", customRoot, got)
+	}
+}
+
+func TestWorkspaceRootSettingsHandler_Post_ClearFallsBackToDefault(t *testing.T) {
+	tmpDir := t.TempDir()
+	tmpFile := filepath.Join(tmpDir, "settings.json")
+	configManager := config.NewManager(tmpFile)
+	_ = configManager.Load()
+	if err := configManager.SetWorkspaceRoot(filepath.Join(tmpDir, "custom-workspaces")); err != nil {
+		t.Fatalf("SetWorkspaceRoot: %v", err)
+	}
+	if err := configManager.Save(); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+
+	handler := NewHandler(nil, configManager, nil, llm.NewFactory())
+
+	req := httptest.NewRequest(http.MethodPost, "/api/settings/workspace-root", bytes.NewReader([]byte(`{"workspace_root":""}`)))
+	rec := httptest.NewRecorder()
+	handler.WorkspaceRootSettingsHandler(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("Expected status 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	var resp struct {
+		WorkspaceRoot          string `json:"workspace_root"`
+		EffectiveWorkspaceRoot string `json:"effective_workspace_root"`
+		Source                 string `json:"source"`
+	}
+	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+		t.Fatalf("Failed to decode response: %v", err)
+	}
+
+	if resp.WorkspaceRoot != "" {
+		t.Fatalf("Expected cleared workspace_root, got %q", resp.WorkspaceRoot)
+	}
+	if resp.Source != "default" {
+		t.Fatalf("Expected source default, got %q", resp.Source)
+	}
+	if resp.EffectiveWorkspaceRoot != config.DefaultWorkspaceRoot() {
+		t.Fatalf("Expected default effective root %q, got %q", config.DefaultWorkspaceRoot(), resp.EffectiveWorkspaceRoot)
+	}
+}
+
 func TestSessionSettingsHandler_Get(t *testing.T) {
 	tmpDir := t.TempDir()
 	tmpFile := filepath.Join(tmpDir, "settings.json")
@@ -587,8 +795,8 @@ func TestGetModelCategories_Codex(t *testing.T) {
 		expected []string
 	}{
 		{name: "codex nano has tool-calling and general", model: "gpt-5-codex-nano", expected: []string{"tool-calling", "general"}},
-		{name: "codex mini has tool-calling, general, and orchestration", model: "gpt-5.1-codex-mini", expected: []string{"tool-calling", "general", "orchestration"}},
-		{name: "codex standard has research and orchestration", model: "gpt-5.3-codex", expected: []string{"research", "orchestration"}},
+		{name: "codex mini has tool-calling, general, workspace-manager, and orchestration", model: "gpt-5.1-codex-mini", expected: []string{"tool-calling", "general", "workspace-manager", "orchestration"}},
+		{name: "codex standard has research, workspace-manager, and orchestration", model: "gpt-5.3-codex", expected: []string{"research", "workspace-manager", "orchestration"}},
 	}
 
 	for _, tt := range tests {

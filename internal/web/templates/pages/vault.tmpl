@@ -1,0 +1,48 @@
+{{define "vault"}}
+<!DOCTYPE html>
+<html data-bs-theme="light">
+{{template "head.tmpl" .}}
+
+<body class="bg-light vault-page-body">
+  {{template "navbar.tmpl" .}}
+
+  <div class="main-content-wrapper">
+    {{template "sidebar.tmpl" .}}
+
+    <div class="main-content">
+      <div class="container-fluid vault-page-container">
+        <section class="vault-page-hero modern-card">
+          <div class="vault-page-hero-copy">
+            <h1 class="vault-page-hero-title">
+              <span class="vault-page-hero-kicker">Encrypted</span>
+              Private Vault
+            </h1>
+            <p class="vault-page-hero-subtitle">
+              Manage named vaults, passwords, and encrypted transfers. Use the explorer for entries and the settings for administrative tasks.
+            </p>
+          </div>
+        </section>
+
+        {{template "vault-settings-section.tmpl" .}}
+      </div>
+    </div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+  <script src="/js/utils/logger.js"></script>
+  <script src="/js/utils/event-bus.js"></script>
+  <script src="/js/utils/api-client.js"></script>
+  <script src="/js/utils/dom-utils.js"></script>
+  <script src="/js/app.js?v=1694538177"></script>
+  <script src="/js/modules/sidebar.js"></script>
+  <script src="/js/modules/themeManager.js"></script>
+  <script src="/js/modules/toast.js"></script>
+  <script>
+    document.addEventListener('DOMContentLoaded', function() {
+      themeManager.initialize();
+    });
+  </script>
+  <script src="/js/modules/vault-page.js"></script>
+</body>
+</html>
+{{end}}

@@ -3,7 +3,6 @@ package workspace
 import (
 	"encoding/json"
 	"fmt"
-	"io"
 	"mime"
 	"net/http"
 	"os"
@@ -21,7 +20,7 @@ const (
 	MaxWorkspaceFileSize = 100 << 20 // 100 MB
 )
 
-// UploadFile handles POST /api/studios/:id/files
+// UploadFile handles POST /api/workspaces/:id/files
 // Accepts multipart form data with a file and creates an attachment with file metadata.
 func (h *HTTPHandler) UploadFile(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
@@ -29,16 +28,16 @@ func (h *HTTPHandler) UploadFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Extract studio ID from path
-	path := strings.TrimPrefix(r.URL.Path, "/api/studios/")
+	// Extract workspace ID from path
+	path := strings.TrimPrefix(r.URL.Path, "/api/workspaces/")
 	parts := strings.Split(path, "/")
 	if len(parts) < 2 {
 		orihttp.BadRequest(w, "Invalid URL format")
 		return
 	}
-	studioID := parts[0]
+	workspaceID := parts[0]
 
-	logger.Debug("Processing workspace file upload", logger.Fields{"workspace_id": studioID})
+	logger.Debug("Processing workspace file upload", logger.Fields{"workspace_id": workspaceID})
 
 	// Limit upload size
 	r.Body = http.MaxBytesReader(w, r.Body, MaxWorkspaceFileSize)
@@ -76,108 +75,79 @@ func (h *HTTPHandler) UploadFile(w http.ResponseWriter, r *http.Request) {
 	notes := r.FormValue("notes")
 
 	// Get the workspace
-	studio, err := h.store.Get(studioID)
+	workspace, err := h.store.Get(workspaceID)
 	if err != nil {
 		orihttp.NotFound(w, fmt.Sprintf("Workspace not found: %v", err))
 		return
 	}
 
-	// Create files directory for this workspace
-	filesPath := h.store.GetFilesPath(studioID)
-	if err := os.MkdirAll(filesPath, 0755); err != nil {
-		logger.Error("Failed to create files directory", logger.Fields{"error": err, "path": filesPath})
-		orihttp.InternalError(w, "Failed to create files directory")
-		return
-	}
-
-	// Generate unique file ID and destination path
-	fileID := uuid.New().String()
-	// Use fileID prefix to ensure uniqueness even with same filenames
-	destFilename := fileID[:8] + "_" + filename
-	destPath := filepath.Join(filesPath, destFilename)
-
-	// Save the file
-	destFile, err := os.Create(destPath)
+	filesPath := h.store.GetFilesPath(workspaceID)
+	storedFile, err := storeWorkspaceFile(filesPath, file, filename)
 	if err != nil {
-		logger.Error("Failed to create destination file", logger.Fields{"error": err, "path": destPath})
+		logger.Error("Failed to store workspace file", logger.Fields{"error": err, "path": filesPath})
 		orihttp.InternalError(w, "Failed to save file")
 		return
 	}
-	defer func() { _ = destFile.Close() }()
-
-	written, err := io.Copy(destFile, file)
-	if err != nil {
-		_ = os.Remove(destPath) // Cleanup on failure
-		logger.Error("Failed to write file", logger.Fields{"error": err})
-		orihttp.InternalError(w, "Failed to write file")
-		return
-	}
-
-	// Detect MIME type
-	mimeType := detectMimeType(filename)
 
 	// Create attachment with file metadata
 	attachment := Attachment{
 		ID:          uuid.New().String(),
-		WorkspaceID: studioID,
+		WorkspaceID: workspaceID,
 		Title:       title,
 		Body:        notes,
-		Type:        inferTypeFromMime(mimeType),
-		File: &AttachmentFileMeta{
-			Name: filename,
-			Size: written,
-			Mime: mimeType,
-			URL:  fmt.Sprintf("/api/studios/%s/files/%s", studioID, destFilename),
-		},
-		X:         0,
-		Y:         0,
-		CreatedAt: time.Now(),
-		UpdatedAt: time.Now(),
+		Type:        inferTypeFromMime(storedFile.MimeType),
+		File:        buildWorkspaceOwnedAttachmentFileMeta(workspaceID, *storedFile, ""),
+		X:           0,
+		Y:           0,
+		CreatedAt:   time.Now(),
+		UpdatedAt:   time.Now(),
 	}
 
-	if err := studio.AddAttachment(attachment); err != nil {
-		_ = os.Remove(destPath) // Cleanup on failure
+	if err := workspace.AddAttachment(attachment); err != nil {
+		removeWorkspaceOwnedAttachmentFile(h.store, workspaceID, attachment.File, "")
 		orihttp.BadRequest(w, fmt.Sprintf("Failed to add attachment: %v", err))
 		return
 	}
 
-	if err := h.store.Save(studio); err != nil {
-		_ = os.Remove(destPath) // Cleanup on failure
+	if err := h.store.Save(workspace); err != nil {
+		removeWorkspaceOwnedAttachmentFile(h.store, workspaceID, attachment.File, "")
 		orihttp.InternalError(w, fmt.Sprintf("Failed to save workspace: %v", err))
 		return
 	}
+
+	hydratedAttachment := HydrateAttachment(attachment, h.store)
 
 	// Publish event for live updates
 	if h.eventBus != nil {
 		h.eventBus.Publish(Event{
 			Type:        EventAttachmentCreated,
-			WorkspaceID: studioID,
+			WorkspaceID: workspaceID,
 			Source:      "api",
 			Data: map[string]interface{}{
-				"attachment": attachment,
+				"attachment": hydratedAttachment,
 			},
 		})
 	}
 
 	logger.Info("File uploaded to workspace", logger.Fields{
-		"workspace_id":  studioID,
+		"workspace_id":  workspaceID,
 		"attachment_id": attachment.ID,
 		"filename":      filename,
-		"size":          written,
+		"size":          storedFile.Size,
 	})
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
 	if encErr := json.NewEncoder(w).Encode(map[string]interface{}{
 		"message":    "File uploaded successfully",
-		"attachment": attachment,
-		"studio":     studioID,
+		"attachment": hydratedAttachment,
+		"workspace":  workspaceID,
 	}); encErr != nil {
 		logger.Error("Failed to encode response", logger.Fields{"error": encErr})
 	}
 }
 
-// ServeFile handles GET /api/studios/:id/files/:filename
+// ServeFile handles GET /api/workspaces/:id/files/:filename
 // Serves uploaded files from the workspace files directory.
 func (h *HTTPHandler) ServeFile(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
@@ -185,25 +155,25 @@ func (h *HTTPHandler) ServeFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Extract studio ID and filename from path
-	path := strings.TrimPrefix(r.URL.Path, "/api/studios/")
+	// Extract workspace ID and filename from path
+	path := strings.TrimPrefix(r.URL.Path, "/api/workspaces/")
 	parts := strings.Split(path, "/")
 	if len(parts) < 3 {
 		orihttp.BadRequest(w, "Invalid URL format")
 		return
 	}
-	studioID := parts[0]
+	workspaceID := parts[0]
 	filename := parts[2]
 
 	// Validate the workspace exists
-	_, err := h.store.Get(studioID)
+	_, err := h.store.Get(workspaceID)
 	if err != nil {
 		orihttp.NotFound(w, "Workspace not found")
 		return
 	}
 
 	// Construct file path
-	filesPath := h.store.GetFilesPath(studioID)
+	filesPath := h.store.GetFilesPath(workspaceID)
 	filePath := filepath.Join(filesPath, filename)
 
 	// Security: Ensure the resolved path is within the files directory

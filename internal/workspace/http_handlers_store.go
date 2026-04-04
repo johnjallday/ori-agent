@@ -25,20 +25,20 @@ type CreateStoreNodeRequest struct {
 	Y             float64 `json:"y"`
 }
 
-// CreateStoreNode handles POST /api/studios/:id/store-nodes
+// CreateStoreNode handles POST /api/workspaces/:id/store-nodes
 func (h *HTTPHandler) CreateStoreNode(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		orihttp.MethodNotAllowed(w)
 		return
 	}
 
-	path := strings.TrimPrefix(r.URL.Path, "/api/studios/")
+	path := strings.TrimPrefix(r.URL.Path, "/api/workspaces/")
 	parts := strings.Split(path, "/")
 	if len(parts) < 2 {
 		orihttp.BadRequest(w, "Invalid URL format")
 		return
 	}
-	studioID := parts[0]
+	workspaceID := parts[0]
 
 	var req CreateStoreNodeRequest
 	if !orihttp.ParseJSONBody(w, r, &req) {
@@ -83,20 +83,20 @@ func (h *HTTPHandler) CreateStoreNode(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	studio, err := h.store.Get(studioID)
+	workspace, err := h.store.Get(workspaceID)
 	if err != nil {
-		orihttp.NotFound(w, fmt.Sprintf("Studio not found: %v", err))
+		orihttp.NotFound(w, fmt.Sprintf("Workspace not found: %v", err))
 		return
 	}
 
 	// Generate unique canvas node ID
 
-	canvasNodeID := fmt.Sprintf("store-node-%d", len(studio.StoreNodes)+1)
+	canvasNodeID := fmt.Sprintf("store-node-%d", len(workspace.StoreNodes)+1)
 
 	storeNode := StoreNode{
 		ID:            uuid.New().String(),
 		CanvasNodeID:  canvasNodeID,
-		WorkspaceID:   studioID,
+		WorkspaceID:   workspaceID,
 		Name:          req.Name,
 		BaseDir:       req.BaseDir,
 		Format:        req.Format,
@@ -114,34 +114,34 @@ func (h *HTTPHandler) CreateStoreNode(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Add to workspace
-	studio.StoreNodes = append(studio.StoreNodes, storeNode)
+	workspace.StoreNodes = append(workspace.StoreNodes, storeNode)
 
 	// Initialize layout if needed
-	if studio.Layout == nil {
-		studio.Layout = &CanvasLayout{
+	if workspace.Layout == nil {
+		workspace.Layout = &CanvasLayout{
 			StorePositions: make(map[string]Position),
 		}
 	}
-	if studio.Layout.StorePositions == nil {
-		studio.Layout.StorePositions = make(map[string]Position)
+	if workspace.Layout.StorePositions == nil {
+		workspace.Layout.StorePositions = make(map[string]Position)
 	}
 
 	// Set position in layout
-	studio.Layout.StorePositions[storeNode.CanvasNodeID] = Position{X: req.X, Y: req.Y}
+	workspace.Layout.StorePositions[storeNode.CanvasNodeID] = Position{X: req.X, Y: req.Y}
 
-	// Save studio
-	if err := h.store.Save(studio); err != nil {
-		orihttp.InternalError(w, fmt.Sprintf("Failed to save studio: %v", err))
+	// Save workspace
+	if err := h.store.Save(workspace); err != nil {
+		orihttp.InternalError(w, fmt.Sprintf("Failed to save workspace: %v", err))
 		return
 	}
 
-	logger.Info("Created store node in studio", logger.Fields{"store_node_id": storeNode.ID, "studioID": studioID, "name": storeNode.Name})
+	logger.Info("Created store node in workspace", logger.Fields{"store_node_id": storeNode.ID, "workspaceID": workspaceID, "name": storeNode.Name})
 
 	// Publish event
 	if h.eventBus != nil {
 		h.eventBus.Publish(Event{
 			Type:        "store_node.created",
-			WorkspaceID: studioID,
+			WorkspaceID: workspaceID,
 			Source:      "api",
 			Data: map[string]interface{}{
 				"store_node_id": storeNode.ID,
@@ -158,29 +158,29 @@ func (h *HTTPHandler) CreateStoreNode(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// GetStoreNodes handles GET /api/studios/:id/store-nodes
+// GetStoreNodes handles GET /api/workspaces/:id/store-nodes
 func (h *HTTPHandler) GetStoreNodes(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		orihttp.MethodNotAllowed(w)
 		return
 	}
 
-	path := strings.TrimPrefix(r.URL.Path, "/api/studios/")
+	path := strings.TrimPrefix(r.URL.Path, "/api/workspaces/")
 	parts := strings.Split(path, "/")
 	if len(parts) < 1 {
 		orihttp.BadRequest(w, "Invalid URL format")
 		return
 	}
-	studioID := parts[0]
+	workspaceID := parts[0]
 
-	studio, err := h.store.Get(studioID)
+	workspace, err := h.store.Get(workspaceID)
 	if err != nil {
-		orihttp.NotFound(w, fmt.Sprintf("Studio not found: %v", err))
+		orihttp.NotFound(w, fmt.Sprintf("Workspace not found: %v", err))
 		return
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	if encErr := json.NewEncoder(w).Encode(studio.StoreNodes); encErr != nil {
+	if encErr := json.NewEncoder(w).Encode(workspace.StoreNodes); encErr != nil {
 		logger.Error("Failed to encode response", logger.Fields{"error": encErr})
 	}
 }
@@ -198,20 +198,20 @@ type UpdateStoreNodeRequest struct {
 	Y             *float64 `json:"y"`
 }
 
-// UpdateStoreNode handles PUT /api/studios/:id/store-nodes/:node_id
+// UpdateStoreNode handles PUT /api/workspaces/:id/store-nodes/:node_id
 func (h *HTTPHandler) UpdateStoreNode(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPut && r.Method != http.MethodPatch {
 		orihttp.MethodNotAllowed(w)
 		return
 	}
 
-	path := strings.TrimPrefix(r.URL.Path, "/api/studios/")
+	path := strings.TrimPrefix(r.URL.Path, "/api/workspaces/")
 	parts := strings.Split(path, "/")
 	if len(parts) < 3 {
 		orihttp.BadRequest(w, "Invalid URL format")
 		return
 	}
-	studioID := parts[0]
+	workspaceID := parts[0]
 
 	// Handle both /store-nodes/{id} and /canvas/store-nodes/{id} patterns
 
@@ -227,17 +227,17 @@ func (h *HTTPHandler) UpdateStoreNode(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	studio, err := h.store.Get(studioID)
+	workspace, err := h.store.Get(workspaceID)
 	if err != nil {
-		orihttp.NotFound(w, fmt.Sprintf("Studio not found: %v", err))
+		orihttp.NotFound(w, fmt.Sprintf("Workspace not found: %v", err))
 		return
 	}
 
 	// Find store node by ID or CanvasNodeID
 	var storeNode *StoreNode
-	for i := range studio.StoreNodes {
-		if studio.StoreNodes[i].ID == nodeID || studio.StoreNodes[i].CanvasNodeID == nodeID {
-			storeNode = &studio.StoreNodes[i]
+	for i := range workspace.StoreNodes {
+		if workspace.StoreNodes[i].ID == nodeID || workspace.StoreNodes[i].CanvasNodeID == nodeID {
+			storeNode = &workspace.StoreNodes[i]
 			break
 		}
 	}
@@ -289,14 +289,14 @@ func (h *HTTPHandler) UpdateStoreNode(w http.ResponseWriter, r *http.Request) {
 
 	// Update position if provided
 	if req.X != nil || req.Y != nil {
-		if studio.Layout == nil {
-			studio.Layout = &CanvasLayout{StorePositions: make(map[string]Position)}
+		if workspace.Layout == nil {
+			workspace.Layout = &CanvasLayout{StorePositions: make(map[string]Position)}
 		}
-		if studio.Layout.StorePositions == nil {
-			studio.Layout.StorePositions = make(map[string]Position)
+		if workspace.Layout.StorePositions == nil {
+			workspace.Layout.StorePositions = make(map[string]Position)
 		}
 
-		currentPos := studio.Layout.StorePositions[storeNode.CanvasNodeID]
+		currentPos := workspace.Layout.StorePositions[storeNode.CanvasNodeID]
 		if req.X != nil {
 			currentPos.X = *req.X
 			storeNode.X = *req.X
@@ -305,24 +305,24 @@ func (h *HTTPHandler) UpdateStoreNode(w http.ResponseWriter, r *http.Request) {
 			currentPos.Y = *req.Y
 			storeNode.Y = *req.Y
 		}
-		studio.Layout.StorePositions[storeNode.CanvasNodeID] = currentPos
+		workspace.Layout.StorePositions[storeNode.CanvasNodeID] = currentPos
 	}
 
 	storeNode.UpdatedAt = time.Now()
 
-	// Save studio
-	if err := h.store.Save(studio); err != nil {
-		orihttp.InternalError(w, fmt.Sprintf("Failed to save studio: %v", err))
+	// Save workspace
+	if err := h.store.Save(workspace); err != nil {
+		orihttp.InternalError(w, fmt.Sprintf("Failed to save workspace: %v", err))
 		return
 	}
 
-	logger.Debug("Updated store node", logger.Fields{"store_node_id": nodeID, "studioID": studioID})
+	logger.Debug("Updated store node", logger.Fields{"store_node_id": nodeID, "workspaceID": workspaceID})
 
 	// Publish event
 	if h.eventBus != nil {
 		h.eventBus.Publish(Event{
 			Type:        "store_node.updated",
-			WorkspaceID: studioID,
+			WorkspaceID: workspaceID,
 			Source:      "api",
 			Data: map[string]interface{}{
 				"store_node_id": nodeID,
@@ -336,35 +336,35 @@ func (h *HTTPHandler) UpdateStoreNode(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// DeleteStoreNode handles DELETE /api/studios/:id/store-nodes/:node_id
+// DeleteStoreNode handles DELETE /api/workspaces/:id/store-nodes/:node_id
 func (h *HTTPHandler) DeleteStoreNode(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodDelete {
 		orihttp.MethodNotAllowed(w)
 		return
 	}
 
-	path := strings.TrimPrefix(r.URL.Path, "/api/studios/")
+	path := strings.TrimPrefix(r.URL.Path, "/api/workspaces/")
 	parts := strings.Split(path, "/")
 	if len(parts) < 3 {
 		orihttp.BadRequest(w, "Invalid URL format")
 		return
 	}
-	studioID := parts[0]
+	workspaceID := parts[0]
 	nodeID := parts[2]
 
-	studio, err := h.store.Get(studioID)
+	workspace, err := h.store.Get(workspaceID)
 	if err != nil {
-		orihttp.NotFound(w, fmt.Sprintf("Studio not found: %v", err))
+		orihttp.NotFound(w, fmt.Sprintf("Workspace not found: %v", err))
 		return
 	}
 
 	// Find and remove store node
 	found := false
 	var canvasNodeID string
-	for i := range studio.StoreNodes {
-		if studio.StoreNodes[i].ID == nodeID {
-			canvasNodeID = studio.StoreNodes[i].CanvasNodeID
-			studio.StoreNodes = append(studio.StoreNodes[:i], studio.StoreNodes[i+1:]...)
+	for i := range workspace.StoreNodes {
+		if workspace.StoreNodes[i].ID == nodeID {
+			canvasNodeID = workspace.StoreNodes[i].CanvasNodeID
+			workspace.StoreNodes = append(workspace.StoreNodes[:i], workspace.StoreNodes[i+1:]...)
 			found = true
 			break
 		}
@@ -376,23 +376,23 @@ func (h *HTTPHandler) DeleteStoreNode(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Remove from layout
-	if studio.Layout != nil && studio.Layout.StorePositions != nil {
-		delete(studio.Layout.StorePositions, canvasNodeID)
+	if workspace.Layout != nil && workspace.Layout.StorePositions != nil {
+		delete(workspace.Layout.StorePositions, canvasNodeID)
 	}
 
-	// Save studio
-	if err := h.store.Save(studio); err != nil {
-		orihttp.InternalError(w, fmt.Sprintf("Failed to save studio: %v", err))
+	// Save workspace
+	if err := h.store.Save(workspace); err != nil {
+		orihttp.InternalError(w, fmt.Sprintf("Failed to save workspace: %v", err))
 		return
 	}
 
-	logger.Debug("Deleted store node", logger.Fields{"store_node_id": nodeID, "studioID": studioID})
+	logger.Debug("Deleted store node", logger.Fields{"store_node_id": nodeID, "workspaceID": workspaceID})
 
 	// Publish event
 	if h.eventBus != nil {
 		h.eventBus.Publish(Event{
 			Type:        "store_node.deleted",
-			WorkspaceID: studioID,
+			WorkspaceID: workspaceID,
 			Source:      "api",
 			Data: map[string]interface{}{
 				"store_node_id": nodeID,
@@ -404,39 +404,39 @@ func (h *HTTPHandler) DeleteStoreNode(w http.ResponseWriter, r *http.Request) {
 	if encErr := json.NewEncoder(w).Encode(map[string]interface{}{
 		"message":       "Store node deleted successfully",
 		"store_node_id": nodeID,
-		"studio":        studioID,
+		"workspace":     workspaceID,
 	}); encErr != nil {
 		logger.Error("Failed to encode response", logger.Fields{"error": encErr})
 	}
 }
 
-// GetStoreNodeStatus handles GET /api/studios/:id/store-nodes/:node_id/status
+// GetStoreNodeStatus handles GET /api/workspaces/:id/store-nodes/:node_id/status
 func (h *HTTPHandler) GetStoreNodeStatus(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		orihttp.MethodNotAllowed(w)
 		return
 	}
 
-	path := strings.TrimPrefix(r.URL.Path, "/api/studios/")
+	path := strings.TrimPrefix(r.URL.Path, "/api/workspaces/")
 	parts := strings.Split(path, "/")
 	if len(parts) < 4 {
 		orihttp.BadRequest(w, "Invalid URL format")
 		return
 	}
-	studioID := parts[0]
+	workspaceID := parts[0]
 	nodeID := parts[2]
 
-	studio, err := h.store.Get(studioID)
+	workspace, err := h.store.Get(workspaceID)
 	if err != nil {
-		orihttp.NotFound(w, fmt.Sprintf("Studio not found: %v", err))
+		orihttp.NotFound(w, fmt.Sprintf("Workspace not found: %v", err))
 		return
 	}
 
 	// Find store node
 	var storeNode *StoreNode
-	for i := range studio.StoreNodes {
-		if studio.StoreNodes[i].ID == nodeID {
-			storeNode = &studio.StoreNodes[i]
+	for i := range workspace.StoreNodes {
+		if workspace.StoreNodes[i].ID == nodeID {
+			storeNode = &workspace.StoreNodes[i]
 			break
 		}
 	}
@@ -473,7 +473,7 @@ func (h *HTTPHandler) GetWorkspaceOutputDir(w http.ResponseWriter, r *http.Reque
 	}
 	workspaceID := parts[0]
 
-	studio, err := h.store.Get(workspaceID)
+	workspace, err := h.store.Get(workspaceID)
 	if err != nil {
 		orihttp.NotFound(w, fmt.Sprintf("Workspace not found: %v", err))
 		return
@@ -486,7 +486,7 @@ func (h *HTTPHandler) GetWorkspaceOutputDir(w http.ResponseWriter, r *http.Reque
 		baseOutputDir = "outputs"
 		logger.Warn("Failed to get default output dir, using fallback", logger.Fields{"error": err})
 	}
-	outputDir := filepath.Join(baseOutputDir, studio.Name)
+	outputDir := filepath.Join(baseOutputDir, workspace.Name)
 
 	w.Header().Set("Content-Type", "application/json")
 	if encErr := json.NewEncoder(w).Encode(map[string]interface{}{

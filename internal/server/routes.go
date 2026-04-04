@@ -35,6 +35,10 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 	// =============================================================================
 	mux.HandleFunc("/", s.serveIndex)
 	mux.HandleFunc("/settings", s.serveSettings)
+	mux.HandleFunc("/vaults", s.serveVault)
+	mux.HandleFunc("/vault", func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "/vaults", http.StatusMovedPermanently)
+	})
 	mux.HandleFunc("/skills", s.serveSkills)
 	mux.HandleFunc("/workflows", s.serveWorkflows)
 	mux.HandleFunc("/mcp", s.serveMCP)
@@ -53,15 +57,6 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 	// Workspaces page routes (primary)
 	mux.HandleFunc("/workspaces/", s.handleWorkspacesRoutes) // Dynamic route handler for /workspaces/{id}
 	mux.HandleFunc("/workspaces", s.serveWorkspaces)
-	// Legacy /studios routes (redirect to /workspaces)
-	mux.HandleFunc("/studios/", func(w http.ResponseWriter, r *http.Request) {
-		// Redirect /studios/{path} to /workspaces/{path}
-		newPath := strings.Replace(r.URL.Path, "/studios/", "/workspaces/", 1)
-		http.Redirect(w, r, newPath, http.StatusMovedPermanently)
-	})
-	mux.HandleFunc("/studios", func(w http.ResponseWriter, r *http.Request) {
-		http.Redirect(w, r, "/workspaces", http.StatusMovedPermanently)
-	})
 	mux.HandleFunc("/usage", s.serveUsage)
 	mux.HandleFunc("/review", s.serveReview)
 	mux.HandleFunc("/personalize", s.servePersonalize)
@@ -170,6 +165,7 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 	// =============================================================================
 	mux.HandleFunc("/api/settings", s.Handlers.Settings.SettingsHandler)
 	mux.HandleFunc("/api/settings/session", s.Handlers.Settings.SessionSettingsHandler)
+	mux.HandleFunc("/api/settings/workspace-root", s.Handlers.Settings.WorkspaceRootSettingsHandler)
 	mux.HandleFunc("/api/api-key", s.Handlers.Settings.APIKeyHandler)
 	mux.HandleFunc("/api/providers", s.Handlers.Settings.ProvidersHandler)
 	mux.HandleFunc("/api/settings/system-model", s.Handlers.Settings.SystemModelHandler)
@@ -179,6 +175,10 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 	mux.HandleFunc("/api/settings/speech", s.Handlers.Settings.SpeechSettingsHandler)
 	mux.HandleFunc("/api/settings/utility", s.Handlers.Settings.UtilitySettingsHandler)
 	mux.HandleFunc("/api/transcribe", s.Handlers.Speech.Transcribe)
+	if s.Handlers.Vault != nil {
+		mux.Handle("/api/vault", s.Handlers.Vault)
+		mux.Handle("/api/vault/", s.Handlers.Vault)
+	}
 
 	// Web3 Wallet endpoints
 	if caps.Web3Wallet {
@@ -528,27 +528,8 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 		mux.HandleFunc("/api/folders", s.Handlers.Session.HandleWorkspaces)
 
 		// Workspace routes (unified workspace API)
-		mux.HandleFunc("/api/workspaces", s.Handlers.Session.HandleWorkspaces)
-		mux.HandleFunc("/api/workspaces/", func(w http.ResponseWriter, r *http.Request) {
-			path := r.URL.Path
-			// Check if this is a workspace notes request
-			if strings.Contains(path, "/notes") {
-				s.Handlers.Session.HandleWorkspaceNotes(w, r)
-				return
-			}
-			// Handle agent management (POST /api/workspaces/{id}/agents, DELETE /api/workspaces/{id}/agents/{name})
-			if strings.Contains(path, "/agents") {
-				s.Handlers.Session.HandleWorkspaces(w, r)
-				return
-			}
-			// Handle layout management (GET/PUT /api/workspaces/{id}/layout)
-			if strings.Contains(path, "/layout") {
-				s.Handlers.Session.HandleWorkspaces(w, r)
-				return
-			}
-			// Otherwise, handle as regular workspace request
-			s.Handlers.Session.HandleWorkspaces(w, r)
-		})
+		mux.HandleFunc("/api/workspaces", s.handleWorkspaceCollectionAPI)
+		mux.HandleFunc("/api/workspaces/", s.handleWorkspaceAPI)
 
 		mux.HandleFunc("/api/tags", s.Handlers.Session.HandleTags)
 		mux.HandleFunc("/api/session-cache/stats", s.Handlers.Session.HandleCacheStats)
@@ -586,185 +567,210 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 	// =============================================================================
 	// Folder Picker Launcher
 	// =============================================================================
-	mux.HandleFunc("/api/launch-folder-picker", s.Handlers.Studio.LaunchFolderPicker)
-	mux.HandleFunc("/api/folder-picker/select-path", s.Handlers.Studio.SelectFolderPath)
+	mux.HandleFunc("/api/launch-folder-picker", s.Handlers.Workspace.LaunchFolderPicker)
+	mux.HandleFunc("/api/folder-picker/select-path", s.Handlers.Workspace.SelectFolderPath)
 
 	// =============================================================================
-	// Agent Studio API Endpoints
+	// Workspace Runtime API Endpoints
 	// =============================================================================
-	mux.HandleFunc("/api/studios", func(w http.ResponseWriter, r *http.Request) {
-		switch r.Method {
-		case http.MethodPost:
-			s.Handlers.Studio.CreateStudio(w, r)
-		case http.MethodGet:
-			s.Handlers.Studio.ListStudios(w, r)
-		default:
-			orihttp.MethodNotAllowed(w)
-			// Handle routes with studio ID
-		}
-	})
-
 	// MCP binding routes (Go 1.22+ method patterns)
-	mux.HandleFunc("POST /api/studios/{studioID}/mcp-bindings", s.Handlers.Studio.CreateMCPBinding)
-	mux.HandleFunc("GET /api/studios/{studioID}/mcp-bindings", s.Handlers.Studio.ListMCPBindings)
-	mux.HandleFunc("GET /api/studios/{studioID}/mcp-bindings/{bindingID}", s.Handlers.Studio.GetMCPBinding)
-	mux.HandleFunc("PUT /api/studios/{studioID}/mcp-bindings/{bindingID}", s.Handlers.Studio.UpdateMCPBinding)
-	mux.HandleFunc("PATCH /api/studios/{studioID}/mcp-bindings/{bindingID}", s.Handlers.Studio.UpdateMCPBinding)
-	mux.HandleFunc("DELETE /api/studios/{studioID}/mcp-bindings/{bindingID}", s.Handlers.Studio.DeleteMCPBinding)
+	mux.HandleFunc("POST /api/workspaces/{workspaceID}/mcp-bindings", s.Handlers.Workspace.CreateMCPBinding)
+	mux.HandleFunc("GET /api/workspaces/{workspaceID}/mcp-bindings", s.Handlers.Workspace.ListMCPBindings)
+	mux.HandleFunc("GET /api/workspaces/{workspaceID}/mcp-bindings/{bindingID}", s.Handlers.Workspace.GetMCPBinding)
+	mux.HandleFunc("PUT /api/workspaces/{workspaceID}/mcp-bindings/{bindingID}", s.Handlers.Workspace.UpdateMCPBinding)
+	mux.HandleFunc("PATCH /api/workspaces/{workspaceID}/mcp-bindings/{bindingID}", s.Handlers.Workspace.UpdateMCPBinding)
+	mux.HandleFunc("DELETE /api/workspaces/{workspaceID}/mcp-bindings/{bindingID}", s.Handlers.Workspace.DeleteMCPBinding)
+	mux.HandleFunc("POST /api/workspaces/{workspaceID}/dependency-actions", s.Handlers.Workspace.ResolveDependencyAction)
 
 	// Agent MCP access routes
-	mux.HandleFunc("GET /api/studios/{studioID}/agent-mcp-access", s.Handlers.Studio.ListAgentMCPAccess)
-	mux.HandleFunc("GET /api/studios/{studioID}/agent-mcp-access/{agentInstanceID}", s.Handlers.Studio.GetAgentMCPAccessEntry)
-	mux.HandleFunc("PUT /api/studios/{studioID}/agent-mcp-access/{agentInstanceID}", s.Handlers.Studio.UpdateAgentMCPAccess)
-	mux.HandleFunc("PATCH /api/studios/{studioID}/agent-mcp-access/{agentInstanceID}", s.Handlers.Studio.UpdateAgentMCPAccess)
-	mux.HandleFunc("DELETE /api/studios/{studioID}/agent-mcp-access/{agentInstanceID}", s.Handlers.Studio.DeleteAgentMCPAccess)
+	mux.HandleFunc("GET /api/workspaces/{workspaceID}/agent-mcp-access", s.Handlers.Workspace.ListAgentMCPAccess)
+	mux.HandleFunc("GET /api/workspaces/{workspaceID}/agent-mcp-access/{agentInstanceID}", s.Handlers.Workspace.GetAgentMCPAccessEntry)
+	mux.HandleFunc("PUT /api/workspaces/{workspaceID}/agent-mcp-access/{agentInstanceID}", s.Handlers.Workspace.UpdateAgentMCPAccess)
+	mux.HandleFunc("PATCH /api/workspaces/{workspaceID}/agent-mcp-access/{agentInstanceID}", s.Handlers.Workspace.UpdateAgentMCPAccess)
+	mux.HandleFunc("DELETE /api/workspaces/{workspaceID}/agent-mcp-access/{agentInstanceID}", s.Handlers.Workspace.DeleteAgentMCPAccess)
 
 	// Skill binding routes
-	mux.HandleFunc("POST /api/studios/{studioID}/skill-bindings", s.Handlers.Studio.CreateSkillBinding)
-	mux.HandleFunc("GET /api/studios/{studioID}/skill-bindings", s.Handlers.Studio.ListSkillBindings)
-	mux.HandleFunc("GET /api/studios/{studioID}/skill-bindings/{bindingID}", s.Handlers.Studio.GetSkillBindingByID)
-	mux.HandleFunc("PUT /api/studios/{studioID}/skill-bindings/{bindingID}", s.Handlers.Studio.UpdateSkillBinding)
-	mux.HandleFunc("PATCH /api/studios/{studioID}/skill-bindings/{bindingID}", s.Handlers.Studio.UpdateSkillBinding)
-	mux.HandleFunc("DELETE /api/studios/{studioID}/skill-bindings/{bindingID}", s.Handlers.Studio.DeleteSkillBinding)
+	mux.HandleFunc("POST /api/workspaces/{workspaceID}/skill-bindings", s.Handlers.Workspace.CreateSkillBinding)
+	mux.HandleFunc("GET /api/workspaces/{workspaceID}/skill-bindings", s.Handlers.Workspace.ListSkillBindings)
+	mux.HandleFunc("GET /api/workspaces/{workspaceID}/skill-bindings/{bindingID}", s.Handlers.Workspace.GetSkillBindingByID)
+	mux.HandleFunc("PUT /api/workspaces/{workspaceID}/skill-bindings/{bindingID}", s.Handlers.Workspace.UpdateSkillBinding)
+	mux.HandleFunc("PATCH /api/workspaces/{workspaceID}/skill-bindings/{bindingID}", s.Handlers.Workspace.UpdateSkillBinding)
+	mux.HandleFunc("DELETE /api/workspaces/{workspaceID}/skill-bindings/{bindingID}", s.Handlers.Workspace.DeleteSkillBinding)
 
 	// Agent skill access routes
-	mux.HandleFunc("GET /api/studios/{studioID}/agent-skill-access", s.Handlers.Studio.ListAgentSkillAccess)
-	mux.HandleFunc("GET /api/studios/{studioID}/agent-skill-access/{agentInstanceID}", s.Handlers.Studio.GetAgentSkillAccessEntry)
-	mux.HandleFunc("PUT /api/studios/{studioID}/agent-skill-access/{agentInstanceID}", s.Handlers.Studio.UpdateAgentSkillAccess)
-	mux.HandleFunc("PATCH /api/studios/{studioID}/agent-skill-access/{agentInstanceID}", s.Handlers.Studio.UpdateAgentSkillAccess)
-	mux.HandleFunc("DELETE /api/studios/{studioID}/agent-skill-access/{agentInstanceID}", s.Handlers.Studio.DeleteAgentSkillAccess)
+	mux.HandleFunc("GET /api/workspaces/{workspaceID}/agent-skill-access", s.Handlers.Workspace.ListAgentSkillAccess)
+	mux.HandleFunc("GET /api/workspaces/{workspaceID}/agent-skill-access/{agentInstanceID}", s.Handlers.Workspace.GetAgentSkillAccessEntry)
+	mux.HandleFunc("PUT /api/workspaces/{workspaceID}/agent-skill-access/{agentInstanceID}", s.Handlers.Workspace.UpdateAgentSkillAccess)
+	mux.HandleFunc("PATCH /api/workspaces/{workspaceID}/agent-skill-access/{agentInstanceID}", s.Handlers.Workspace.UpdateAgentSkillAccess)
+	mux.HandleFunc("DELETE /api/workspaces/{workspaceID}/agent-skill-access/{agentInstanceID}", s.Handlers.Workspace.DeleteAgentSkillAccess)
+}
 
-	mux.HandleFunc("/api/studios/", func(w http.ResponseWriter, r *http.Request) {
-		// Parse the path to determine which handler to use
-		if strings.HasSuffix(r.URL.Path, "/events") {
-			s.Handlers.Studio.GetStudioEvents(w, r)
-		} else if strings.Contains(r.URL.Path, "/tasks") {
-			// Handle task operations
-			if strings.HasSuffix(r.URL.Path, "/execute") && r.Method == http.MethodPost {
-				s.Handlers.Studio.ExecuteTaskManually(w, r)
-			} else if r.Method == http.MethodPost {
-				s.Handlers.Studio.CreateTask(w, r)
-			} else if r.Method == http.MethodPatch {
-				s.Handlers.Studio.UpdateTask(w, r)
-			} else if r.Method == http.MethodDelete {
-				s.Handlers.Studio.DeleteTask(w, r)
-			} else {
-				orihttp.MethodNotAllowed(w)
-			}
-		} else if strings.Contains(r.URL.Path, "/trash") {
-			// Handle trash operations
-			if strings.HasSuffix(r.URL.Path, "/trash") && r.Method == http.MethodGet {
-				s.Handlers.Studio.ListTrash(w, r)
-			} else if r.Method == http.MethodDelete {
-				s.Handlers.Studio.EmptyTrash(w, r)
-			} else {
-				orihttp.MethodNotAllowed(w)
-			}
-		} else if strings.Contains(r.URL.Path, "/attachments") {
-			// Handle attachment trash operations
-			if strings.HasSuffix(r.URL.Path, "/trash") && r.Method == http.MethodPatch {
-				s.Handlers.Studio.MoveToTrash(w, r)
-			} else if strings.HasSuffix(r.URL.Path, "/restore") && r.Method == http.MethodPatch {
-				s.Handlers.Studio.RestoreFromTrash(w, r)
-			} else if strings.HasSuffix(r.URL.Path, "/bulk-trash") && r.Method == http.MethodPost {
-				s.Handlers.Studio.BulkMoveToTrash(w, r)
-			} else {
-				switch r.Method {
-				case http.MethodPost:
-					s.Handlers.Studio.CreateAttachment(w, r)
-				case http.MethodPatch:
-					s.Handlers.Studio.UpdateAttachment(w, r)
-				case http.MethodDelete:
-					s.Handlers.Studio.DeleteAttachment(w, r)
-				default:
-					orihttp.MethodNotAllowed(w)
-				}
-			}
-			// Handle canvas store node operations (must be before /store-nodes check)
-		} else if strings.Contains(r.URL.Path, "/canvas/store-nodes") {
+func (s *Server) handleWorkspaceCollectionAPI(w http.ResponseWriter, r *http.Request) {
+	s.Handlers.Session.HandleWorkspaces(w, r)
+}
 
-			if strings.HasSuffix(r.URL.Path, "/status") && r.Method == http.MethodGet {
-				s.Handlers.Studio.GetStoreNodeStatus(w, r)
-			} else if r.Method == http.MethodPost {
-				s.Handlers.Studio.CreateStoreNode(w, r)
-			} else if r.Method == http.MethodGet {
-				s.Handlers.Studio.GetStoreNodes(w, r)
-			} else if r.Method == http.MethodPatch {
-				s.Handlers.Studio.UpdateStoreNode(w, r)
-			} else if r.Method == http.MethodDelete {
-				s.Handlers.Studio.DeleteStoreNode(w, r)
-			} else {
-				orihttp.MethodNotAllowed(w)
-			}
-		} else if strings.Contains(r.URL.Path, "/store-nodes") {
+func (s *Server) handleWorkspaceAPI(w http.ResponseWriter, r *http.Request) {
+	path := r.URL.Path
 
-			if strings.HasSuffix(r.URL.Path, "/status") && r.Method == http.MethodGet {
-				s.Handlers.Studio.GetStoreNodeStatus(w, r)
-			} else if r.Method == http.MethodPost {
-				s.Handlers.Studio.CreateStoreNode(w, r)
-			} else if r.Method == http.MethodGet {
-				s.Handlers.Studio.GetStoreNodes(w, r)
-			} else if r.Method == http.MethodPut || r.Method == http.MethodPatch {
-				s.Handlers.Studio.UpdateStoreNode(w, r)
-			} else if r.Method == http.MethodDelete {
-				s.Handlers.Studio.DeleteStoreNode(w, r)
-			} else {
-				orihttp.MethodNotAllowed(w)
-			}
-			// Handle workspace file upload/serving (must be before /directories which has its own /files)
-		} else if strings.Contains(r.URL.Path, "/files") && !strings.Contains(r.URL.Path, "/directories") {
-			// /api/studios/:id/files - file upload or /api/studios/:id/files/:filename - file serving
+	// Check if this is a workspace notes request.
+	if strings.Contains(path, "/notes") {
+		s.Handlers.Session.HandleWorkspaceNotes(w, r)
+		return
+	}
+	// Workspace runtime subresources are served only under the canonical
+	// /api/workspaces surface.
+	if s.routeWorkspaceRuntimeRequest(w, r) {
+		return
+	}
+	// Handle agent management (POST /api/workspaces/{id}/agents, DELETE /api/workspaces/{id}/agents/{name}).
+	if strings.Contains(path, "/agents") {
+		s.Handlers.Session.HandleWorkspaces(w, r)
+		return
+	}
+	// Handle layout management (GET/PUT /api/workspaces/{id}/layout).
+	if strings.Contains(path, "/layout") {
+		s.Handlers.Session.HandleWorkspaces(w, r)
+		return
+	}
+	// Otherwise, handle as a regular workspace request.
+	s.Handlers.Session.HandleWorkspaces(w, r)
+}
+
+func (s *Server) routeWorkspaceRuntimeRequest(w http.ResponseWriter, r *http.Request) bool {
+	path := r.URL.Path
+	if !strings.HasPrefix(path, "/api/workspaces/") {
+		return false
+	}
+
+	if strings.HasSuffix(path, "/events") {
+		s.Handlers.Workspace.GetWorkspaceEvents(w, r)
+		return true
+	}
+
+	if strings.Contains(path, "/tasks") {
+		if strings.HasSuffix(path, "/execute") && r.Method == http.MethodPost {
+			s.Handlers.Workspace.ExecuteTaskManually(w, r)
+		} else if r.Method == http.MethodPost {
+			s.Handlers.Workspace.CreateTask(w, r)
+		} else if r.Method == http.MethodPatch {
+			s.Handlers.Workspace.UpdateTask(w, r)
+		} else if r.Method == http.MethodDelete {
+			s.Handlers.Workspace.DeleteTask(w, r)
+		} else {
+			orihttp.MethodNotAllowed(w)
+		}
+		return true
+	}
+
+	if strings.Contains(path, "/attachments") {
+		if strings.HasSuffix(path, "/trash") && r.Method == http.MethodPatch {
+			s.Handlers.Workspace.MoveToTrash(w, r)
+		} else if strings.HasSuffix(path, "/restore") && r.Method == http.MethodPatch {
+			s.Handlers.Workspace.RestoreFromTrash(w, r)
+		} else if strings.HasSuffix(path, "/relink") && r.Method == http.MethodPost {
+			s.Handlers.Workspace.RelinkAttachmentFile(w, r)
+		} else if strings.HasSuffix(path, "/bulk-trash") && r.Method == http.MethodPost {
+			s.Handlers.Workspace.BulkMoveToTrash(w, r)
+		} else {
 			switch r.Method {
 			case http.MethodPost:
-				s.Handlers.Studio.UploadFile(w, r)
-			case http.MethodGet:
-				s.Handlers.Studio.ServeFile(w, r)
+				s.Handlers.Workspace.CreateAttachment(w, r)
+			case http.MethodPatch:
+				s.Handlers.Workspace.UpdateAttachment(w, r)
+			case http.MethodDelete:
+				s.Handlers.Workspace.DeleteAttachment(w, r)
 			default:
 				orihttp.MethodNotAllowed(w)
 			}
-			// Handle directory reference operations
-		} else if strings.Contains(r.URL.Path, "/directories") {
-			// Check for /files/ path to read file content
-			if strings.Contains(r.URL.Path, "/files/") {
-				s.Handlers.Studio.ReadDirectoryFile(w, r)
-			} else if strings.HasSuffix(r.URL.Path, "/files") && r.Method == http.MethodGet {
-				s.Handlers.Studio.ListDirectoryFiles(w, r)
-			} else if strings.HasSuffix(r.URL.Path, "/directories") {
-				// /api/studios/:id/directories
-				switch r.Method {
-				case http.MethodPost:
-					s.Handlers.Studio.CreateDirectory(w, r)
-				case http.MethodGet:
-					s.Handlers.Studio.ListDirectories(w, r)
-				default:
-					orihttp.MethodNotAllowed(w)
-				}
-			} else {
-				// /api/studios/:id/directories/:dir_id
-				switch r.Method {
-				case http.MethodGet:
-					s.Handlers.Studio.GetDirectory(w, r)
-				case http.MethodPut, http.MethodPatch:
-					s.Handlers.Studio.UpdateDirectory(w, r)
-				case http.MethodDelete:
-					s.Handlers.Studio.DeleteDirectory(w, r)
-				default:
-					orihttp.MethodNotAllowed(w)
-				}
-			}
-			// MCP binding and agent-mcp-access routes are registered as specific patterns above.
-		} else if strings.Contains(r.URL.Path, "/agents") {
+		}
+		return true
+	}
 
+	if strings.Contains(path, "/trash") {
+		if strings.HasSuffix(path, "/trash") && r.Method == http.MethodGet {
+			s.Handlers.Workspace.ListTrash(w, r)
+		} else if r.Method == http.MethodDelete {
+			s.Handlers.Workspace.EmptyTrash(w, r)
+		} else {
+			orihttp.MethodNotAllowed(w)
+		}
+		return true
+	}
+
+	if strings.Contains(path, "/canvas/store-nodes") {
+		if strings.HasSuffix(path, "/status") && r.Method == http.MethodGet {
+			s.Handlers.Workspace.GetStoreNodeStatus(w, r)
+		} else if r.Method == http.MethodPost {
+			s.Handlers.Workspace.CreateStoreNode(w, r)
+		} else if r.Method == http.MethodGet {
+			s.Handlers.Workspace.GetStoreNodes(w, r)
+		} else if r.Method == http.MethodPatch {
+			s.Handlers.Workspace.UpdateStoreNode(w, r)
+		} else if r.Method == http.MethodDelete {
+			s.Handlers.Workspace.DeleteStoreNode(w, r)
+		} else {
+			orihttp.MethodNotAllowed(w)
+		}
+		return true
+	}
+
+	if strings.Contains(path, "/store-nodes") {
+		if strings.HasSuffix(path, "/status") && r.Method == http.MethodGet {
+			s.Handlers.Workspace.GetStoreNodeStatus(w, r)
+		} else if r.Method == http.MethodPost {
+			s.Handlers.Workspace.CreateStoreNode(w, r)
+		} else if r.Method == http.MethodGet {
+			s.Handlers.Workspace.GetStoreNodes(w, r)
+		} else if r.Method == http.MethodPut || r.Method == http.MethodPatch {
+			s.Handlers.Workspace.UpdateStoreNode(w, r)
+		} else if r.Method == http.MethodDelete {
+			s.Handlers.Workspace.DeleteStoreNode(w, r)
+		} else {
+			orihttp.MethodNotAllowed(w)
+		}
+		return true
+	}
+
+	if strings.Contains(path, "/files") && !strings.Contains(path, "/directories") {
+		switch r.Method {
+		case http.MethodPost:
+			s.Handlers.Workspace.UploadFile(w, r)
+		case http.MethodGet:
+			s.Handlers.Workspace.ServeFile(w, r)
+		default:
+			orihttp.MethodNotAllowed(w)
+		}
+		return true
+	}
+
+	if strings.Contains(path, "/directories") {
+		if strings.Contains(path, "/files/") {
+			s.Handlers.Workspace.ReadDirectoryFile(w, r)
+		} else if strings.HasSuffix(path, "/files") && r.Method == http.MethodGet {
+			s.Handlers.Workspace.ListDirectoryFiles(w, r)
+		} else if strings.HasSuffix(path, "/directories") {
 			switch r.Method {
 			case http.MethodPost:
-				s.Handlers.Studio.AddAgent(w, r)
-			case http.MethodDelete:
-				s.Handlers.Studio.RemoveAgent(w, r)
+				s.Handlers.Workspace.CreateDirectory(w, r)
+			case http.MethodGet:
+				s.Handlers.Workspace.ListDirectories(w, r)
 			default:
 				orihttp.MethodNotAllowed(w)
 			}
 		} else {
-			s.Handlers.Studio.GetStudio(w, r)
+			switch r.Method {
+			case http.MethodGet:
+				s.Handlers.Workspace.GetDirectory(w, r)
+			case http.MethodPut, http.MethodPatch:
+				s.Handlers.Workspace.UpdateDirectory(w, r)
+			case http.MethodDelete:
+				s.Handlers.Workspace.DeleteDirectory(w, r)
+			default:
+				orihttp.MethodNotAllowed(w)
+			}
 		}
-	})
+		return true
+	}
+
+	return false
 }

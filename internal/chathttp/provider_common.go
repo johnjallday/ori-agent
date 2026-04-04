@@ -46,10 +46,11 @@ type boundedToolLoopConfig struct {
 }
 
 type boundedToolLoopCallbacks struct {
-	AppendAssistantTurn func(content string, toolCalls []llm.ToolCall)
-	ExecuteToolCalls    func(toolCalls []llm.ToolCall) ExecuteToolCallsResult
-	AppendToolResults   func(toolCalls []llm.ToolCall, execResult ExecuteToolCallsResult)
-	RequestNextResponse func() (content string, toolCalls []llm.ToolCall, err error)
+	AppendAssistantTurn  func(content string, toolCalls []llm.ToolCall)
+	ExecuteToolCalls     func(toolCalls []llm.ToolCall) ExecuteToolCallsResult
+	AppendToolResults    func(toolCalls []llm.ToolCall, execResult ExecuteToolCallsResult)
+	RequestNextResponse  func() (content string, toolCalls []llm.ToolCall, err error)
+	RequestFinalResponse func() (content string, err error)
 }
 
 type boundedToolLoopResult struct {
@@ -108,6 +109,14 @@ func (h *Handler) runBoundedToolLoop(
 				"count":       count,
 				"max_allowed": maxRepeatedFingerprints,
 			})
+			if finalContent, ok := tryToolLoopFinalSynthesis(callbacks.RequestFinalResponse); ok {
+				return boundedToolLoopResult{
+					FinalContent: finalContent,
+					ToolCalls:    allToolCalls,
+					Receipts:     allReceipts,
+					StopReason:   "repeated_tool_call_synthesized",
+				}
+			}
 			return boundedToolLoopResult{
 				FinalContent:     fallbackToolLoopContent(allToolCalls, "tool loop repeated the same call"),
 				ToolCalls:        allToolCalls,
@@ -138,6 +147,14 @@ func (h *Handler) runBoundedToolLoop(
 			logger.Warn("Stopping tool loop after max turns reached", logger.Fields{
 				"max_turns": maxTurns,
 			})
+			if finalContent, ok := tryToolLoopFinalSynthesis(callbacks.RequestFinalResponse); ok {
+				return boundedToolLoopResult{
+					FinalContent: finalContent,
+					ToolCalls:    allToolCalls,
+					Receipts:     allReceipts,
+					StopReason:   "max_turns_synthesized",
+				}
+			}
 			return boundedToolLoopResult{
 				FinalContent:     fallbackToolLoopContent(allToolCalls, "tool loop reached max turns"),
 				ToolCalls:        allToolCalls,
@@ -171,6 +188,26 @@ func (h *Handler) runBoundedToolLoop(
 		UsedToolFallback: true,
 		StopReason:       "unexpected_stop",
 	}
+}
+
+func tryToolLoopFinalSynthesis(request func() (string, error)) (string, bool) {
+	if request == nil {
+		return "", false
+	}
+
+	content, err := request()
+	if err != nil {
+		logger.Warn("Final tool-loop synthesis request failed", logger.Fields{
+			"error": err,
+		})
+		return "", false
+	}
+
+	trimmed := strings.TrimSpace(content)
+	if trimmed == "" {
+		return "", false
+	}
+	return trimmed, true
 }
 
 func detectRepeatedToolFingerprint(toolCalls []llm.ToolCall, seen map[string]int, maxAllowed int) (bool, string, int) {
@@ -382,6 +419,10 @@ func getFollowUpSystemPrompt() string {
 	return "Use tool output as the source of truth. Do not invent data and do not hide requested details behind high-level summaries. If the user asks for names/items/files/paths, include the exact identifiers from the tool output. For file metadata responses, include filename or path with each metadata block. Keep the response concise and avoid unnecessary follow-up suggestions. For pure action tools (opening apps/projects), provide a brief confirmation."
 }
 
+func getFinalToolLoopSynthesisPrompt() string {
+	return "You have reached the tool budget for this turn. Do not call any more tools. Using only the tool results already gathered, provide the single best direct answer to the user now. If a tool failed, ignore that failure unless it blocks the answer. Do not return raw JSON or tool logs. Synthesize the answer in normal language."
+}
+
 // emptyResponseText is the default text when the model returns an empty response
 const emptyResponseText = "I couldn't generate a reply just now. Please try again."
 
@@ -457,7 +498,7 @@ func (h *Handler) buildSystemPromptWithSkills(ag *resolvedChatAgent, agentName, 
 func appendSkillPromptsFromResolved(base string, skills []workspace.ResolvedSkill) string {
 	var hasPrompt bool
 	for _, s := range skills {
-		if strings.TrimSpace(s.Prompt) != "" {
+		if strings.TrimSpace(s.Prompt) != "" || strings.TrimSpace(formatResolvedSkillRuntimeSettings(s)) != "" {
 			hasPrompt = true
 			break
 		}
@@ -470,16 +511,143 @@ func appendSkillPromptsFromResolved(base string, skills []workspace.ResolvedSkil
 	sb.WriteString("\n\n---\n# Active Skills\n")
 	for _, s := range skills {
 		prompt := strings.TrimSpace(s.Prompt)
-		if prompt == "" {
+		settings := strings.TrimSpace(formatResolvedSkillRuntimeSettings(s))
+		if prompt == "" && settings == "" {
 			continue
 		}
 		sb.WriteString("\n## ")
 		sb.WriteString(s.Name)
 		sb.WriteString("\n")
-		sb.WriteString(prompt)
-		sb.WriteString("\n")
+		if prompt != "" {
+			sb.WriteString(prompt)
+			sb.WriteString("\n")
+		}
+		if settings != "" {
+			sb.WriteString("\n### Workspace Binding Settings\n")
+			sb.WriteString(settings)
+			sb.WriteString("\n")
+		}
 	}
 	return sb.String()
+}
+
+func formatResolvedSkillRuntimeSettings(skill workspace.ResolvedSkill) string {
+	if !skill.PlanningProfile || len(skill.Config) == 0 {
+		return ""
+	}
+
+	type planningSettings struct {
+		ProfileType          string `json:"profile_type,omitempty"`
+		Mode                 string `json:"mode,omitempty"`
+		WritePRD             bool   `json:"write_prd,omitempty"`
+		WriteTaskList        bool   `json:"write_task_list,omitempty"`
+		TasksDir             string `json:"tasks_dir,omitempty"`
+		ClarificationMode    string `json:"clarification_mode,omitempty"`
+		SyncWorkspaceTasks   bool   `json:"sync_workspace_tasks,omitempty"`
+		DefaultExecutionMode string `json:"default_execution_mode,omitempty"`
+		RequireBranch        bool   `json:"require_branch,omitempty"`
+	}
+
+	settings := planningSettings{
+		ProfileType:          "workspace_planning",
+		Mode:                 "feature",
+		WritePRD:             true,
+		WriteTaskList:        true,
+		TasksDir:             "tasks",
+		ClarificationMode:    "standard",
+		SyncWorkspaceTasks:   true,
+		DefaultExecutionMode: "step_through",
+		RequireBranch:        true,
+	}
+	if value := strings.TrimSpace(stringConfigValue(skill.Config, "profile_type")); value != "" {
+		settings.ProfileType = value
+	}
+	if value := strings.TrimSpace(stringConfigValue(skill.Config, "mode")); value != "" {
+		settings.Mode = value
+	}
+	if value := strings.TrimSpace(stringConfigValue(skill.Config, "tasks_dir")); value != "" {
+		settings.TasksDir = value
+	}
+	if value := strings.TrimSpace(stringConfigValue(skill.Config, "clarification_mode")); value != "" {
+		settings.ClarificationMode = value
+	}
+	if value := strings.TrimSpace(stringConfigValue(skill.Config, "default_execution_mode")); value != "" {
+		settings.DefaultExecutionMode = value
+	}
+	settings.WritePRD = boolConfigValue(skill.Config, "write_prd", settings.WritePRD)
+	settings.WriteTaskList = boolConfigValue(skill.Config, "write_task_list", settings.WriteTaskList)
+	settings.SyncWorkspaceTasks = boolConfigValue(skill.Config, "sync_workspace_tasks", settings.SyncWorkspaceTasks)
+	settings.RequireBranch = boolConfigValue(skill.Config, "require_branch", settings.RequireBranch)
+
+	artifacts := make([]string, 0, 2)
+	if settings.WritePRD {
+		artifacts = append(artifacts, "PRD")
+	}
+	if settings.WriteTaskList {
+		artifacts = append(artifacts, "task list")
+	}
+	if len(artifacts) == 0 {
+		artifacts = append(artifacts, "none by default")
+	}
+
+	lines := []string{
+		"Use these workspace-level planning defaults unless the user explicitly asks for something different.",
+		fmt.Sprintf("- Planning mode: %s", settings.Mode),
+		fmt.Sprintf("- Preferred planning artifacts: %s", strings.Join(artifacts, ", ")),
+		fmt.Sprintf("- Save planning files under: %s", settings.TasksDir),
+		fmt.Sprintf("- Clarification depth: %s", settings.ClarificationMode),
+		fmt.Sprintf("- Sync approved plans into workspace tasks: %t", settings.SyncWorkspaceTasks),
+		fmt.Sprintf("- Default workspace task execution mode: %s", settings.DefaultExecutionMode),
+		fmt.Sprintf("- Require feature branch before implementation: %t", settings.RequireBranch),
+	}
+
+	if payload, err := json.MarshalIndent(settings, "", "  "); err == nil {
+		lines = append(lines, "- Normalized config JSON:", string(payload))
+	}
+
+	return strings.Join(lines, "\n")
+}
+
+func stringConfigValue(config map[string]interface{}, key string) string {
+	if len(config) == 0 {
+		return ""
+	}
+	value, ok := config[key]
+	if !ok {
+		return ""
+	}
+	switch typed := value.(type) {
+	case string:
+		return typed
+	default:
+		return fmt.Sprintf("%v", value)
+	}
+}
+
+func boolConfigValue(config map[string]interface{}, key string, fallback bool) bool {
+	if len(config) == 0 {
+		return fallback
+	}
+	value, ok := config[key]
+	if !ok {
+		return fallback
+	}
+	switch typed := value.(type) {
+	case bool:
+		return typed
+	case string:
+		normalized := strings.TrimSpace(strings.ToLower(typed))
+		switch normalized {
+		case "true", "yes", "1":
+			return true
+		case "false", "no", "0":
+			return false
+		default:
+			return fallback
+		}
+	default:
+		return fallback
+	}
 }
 
 func composeRuntimeSystemPrompt(basePrompt, runtimePrompt string) string {

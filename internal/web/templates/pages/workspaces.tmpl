@@ -20,6 +20,7 @@
   </div>
 
   {{template "session-modals.tmpl" .}}
+  {{template "components/workspaces/sync-modal.tmpl" .}}
   {{template "chat-area.tmpl" .}}
 
   <!-- Ask Ori Thinking Modal -->
@@ -39,12 +40,27 @@
         </div>
         <div class="modal-body">
           <div id="homeAssistantRoutingSummary" class="home-assistant-routing-summary d-none"></div>
-          <div id="homeAssistantConversation" class="home-assistant-conversation home-assistant-conversation-modal p-3">
-            <div class="home-assistant-thinking-placeholder">
-              Progress updates will appear here after you send a task.
-            </div>
-          </div>
+          <div id="homeAssistantPlanning" class="home-assistant-planning d-none mt-3"></div>
+          <div id="homeAssistantInlineReply" class="home-assistant-inline-reply d-none mt-3"></div>
           <div id="homeAssistantActions" class="d-flex flex-wrap gap-2 mt-3 d-none"></div>
+          <section id="homeAssistantConversationSection" class="home-assistant-conversation-section mt-3">
+            <div class="home-assistant-conversation-section-header">
+              <div>
+                <div class="home-assistant-conversation-section-eyebrow">Conversation History</div>
+                <div id="homeAssistantConversationSummary" class="home-assistant-conversation-section-copy">
+                  Progress updates and manager notes will appear here after you send a task.
+                </div>
+              </div>
+              <button id="homeAssistantConversationToggleBtn" type="button" class="modern-btn modern-btn-secondary modern-btn-sm" hidden>
+                Hide Conversation
+              </button>
+            </div>
+            <div id="homeAssistantConversation" class="home-assistant-conversation home-assistant-conversation-modal p-3">
+              <div class="home-assistant-thinking-placeholder">
+                Progress updates will appear here after you send a task.
+              </div>
+            </div>
+          </section>
         </div>
       </div>
     </div>
@@ -82,6 +98,7 @@
   <script src="/js/modules/file-upload.js"></script>
   <script src="/js/modules/location.js"></script>
   <script src="/js/modules/task-modal-controller.js"></script>
+  <script src="/js/modules/workspace-bootstrap-review.js"></script>
   <script src="/js/modules/sessions.js"></script>
   <script src="/js/modules/dashboard.js"></script>
   <script src="/js/modules/toast.js"></script>
@@ -89,7 +106,7 @@
   <script src="/js/modules/form-validation.js"></script>
   <script src="/js/file-manager.js"></script>
   <script src="/js/app.js"></script>
-  <script src="/js/modules/studio-realtime.js"></script>
+  <script src="/js/modules/workspace-realtime.js"></script>
   <!-- Workspace Hub modules -->
   <script src="/js/modules/workspace-hub-utils.js"></script>
   <script src="/js/modules/workspace-hub-state.js"></script>
@@ -104,6 +121,7 @@
   <script src="/js/modules/workspace-hub-panels.js"></script>
   <script src="/js/modules/workspace-hub.js"></script>
   <script src="/js/modules/workspace-hub-board.js"></script>
+  <script src="/js/modules/workspace-sync.js"></script>
 </body>
 </html>
 {{end}}

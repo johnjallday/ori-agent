@@ -4,11 +4,13 @@ import (
 	"strings"
 
 	"github.com/johnjallday/ori-agent/internal/agent"
+	"github.com/johnjallday/ori-agent/internal/types"
 )
 
 // CreateAgentConfig holds optional configuration for creating a new agent
 type CreateAgentConfig struct {
-	Type            string  // Agent type: "tool-calling", "general", "research"
+	Type            string // Agent type: "tool-calling", "general", "research"
+	Role            types.AgentRole
 	Model           string  // Model to use
 	Temperature     float64 // Temperature (0.0-2.0)
 	SystemPrompt    string  // Custom system prompt

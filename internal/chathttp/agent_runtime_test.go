@@ -1,6 +1,10 @@
 package chathttp
 
 import (
+	"bytes"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 
 	"github.com/johnjallday/ori-agent/internal/agent"
@@ -55,5 +59,82 @@ func TestResolveEffectiveAgent_UsesWorkspaceRuntimeResolver(t *testing.T) {
 	}
 	if len(resolved.MCPServers) != 1 || resolved.MCPServers[0] != "ws:workspace-1:mcp:filesystem:workspace-filesystem" {
 		t.Fatalf("expected workspace runtime MCP server, got %v", resolved.MCPServers)
+	}
+}
+
+func TestResolveEffectiveAgent_PromotesWorkspaceEntryAgentToWorkspaceManager(t *testing.T) {
+	st := newPreflightStore("Espana Manager", &agent.Agent{Type: "general"})
+	h := NewHandler(st, nil)
+	h.workspaceStore = &preflightWorkspaceStore{
+		workspaces: map[string]*workspace.Workspace{
+			"workspace-espana": {
+				ID:         "workspace-espana",
+				Name:       "Espana",
+				SharedData: map[string]interface{}{"entry_agent_name": "Espana Manager"},
+				AgentInstances: []workspace.AgentInstance{
+					{ID: "agent-1", Name: "Espana Manager", EntryPoint: true},
+				},
+			},
+		},
+	}
+
+	resolved, err := h.resolveEffectiveAgent("Espana Manager", normalizedChatRouteContext{WorkspaceID: "workspace-espana"})
+	if err != nil {
+		t.Fatalf("resolveEffectiveAgent returned error: %v", err)
+	}
+	if resolved == nil || resolved.Agent == nil {
+		t.Fatal("expected resolved agent")
+	}
+	if resolved.Type != "workspace-manager" {
+		t.Fatalf("expected workspace entry agent to be promoted to workspace-manager, got %q", resolved.Type)
+	}
+}
+
+func TestChatHandler_WorkspaceEntryGeneralAgent_UsesPlanningForm(t *testing.T) {
+	h := NewHandler(newPreflightStore("Spain Manager", &agent.Agent{Type: "general"}), nil)
+	h.workspaceStore = &preflightWorkspaceStore{
+		workspaces: map[string]*workspace.Workspace{
+			"workspace-spain": {
+				ID:         "workspace-spain",
+				Name:       "Spain",
+				SharedData: map[string]interface{}{"entry_agent_name": "Spain Manager"},
+				AgentInstances: []workspace.AgentInstance{
+					{ID: "agent-1", Name: "Spain Manager", EntryPoint: true},
+				},
+			},
+		},
+	}
+
+	body, _ := json.Marshal(map[string]any{
+		"question":   "let's plan a trip to Spain",
+		"agent_name": "Spain Manager",
+		"route_context": map[string]any{
+			"workspace_id": "workspace-spain",
+			"surface":      "workspace_detail",
+			"page_path":    "/workspaces/workspace-spain",
+			"origin":       "ask_ori",
+		},
+	})
+
+	req := httptest.NewRequest(http.MethodPost, "/api/chat", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+
+	h.ChatHandler(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d body=%s", rr.Code, rr.Body.String())
+	}
+
+	var resp map[string]any
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+	if _, ok := resp["planning_form"].(map[string]any); !ok {
+		t.Fatalf("expected planning_form object, got %T", resp["planning_form"])
+	}
+	if workflowStep, ok := resp["workflow_step"].(map[string]any); !ok {
+		t.Fatalf("expected workflow_step object, got %T", resp["workflow_step"])
+	} else if got, _ := workflowStep["step_type"].(string); got != string(WorkflowStepAskForm) {
+		t.Fatalf("expected ask_form workflow step, got %q", got)
 	}
 }

@@ -362,7 +362,7 @@ func (h *LLMTaskHandler) buildTaskPrompt(ctx context.Context, task Task, ag *age
 	var prompt strings.Builder
 
 	prompt.WriteString("# Task Assignment\n\n")
-	prompt.WriteString("You have been assigned a task in a collaborative studio.\n\n")
+	prompt.WriteString("You have been assigned a task in a collaborative workspace.\n\n")
 	prompt.WriteString(fmt.Sprintf("**Task ID**: %s\n", task.ID))
 	prompt.WriteString(fmt.Sprintf("**From**: %s\n", task.From))
 	prompt.WriteString(fmt.Sprintf("**Priority**: %d/5\n\n", task.Priority))

@@ -1,8 +1,6 @@
 // Agent Creation Form JavaScript
 
 let availablePlugins = [];
-let availableMCPServers = [];
-let availableMCPServerStats = {};
 let selectedTags = [];
 let availableProviders = []; // Cache for available providers and models from API
 const createValidatedFields = [
@@ -12,11 +10,6 @@ const createValidatedFields = [
   'agentRole',
   'llmModel'
 ];
-
-function isWorkspaceGeneratedMCPServer(server) {
-  const name = String(server?.name || '').trim();
-  return /^ws:[^:]+:mcp:/i.test(name);
-}
 
 function supportsCodexReasoning(providerName, modelName) {
   const provider = String(providerName || '').trim().toLowerCase();
@@ -76,7 +69,6 @@ function updateCreateReasoningVisibility() {
 document.addEventListener('DOMContentLoaded', () => {
   ensureCreateReasoningField();
   loadPlugins();
-  loadMCPServers();
   setupTagsInput();
   loadAvailableProviders();
   setupAutoConfigListeners();
@@ -208,30 +200,6 @@ async function loadPlugins() {
   }
 }
 
-// Load available MCP servers
-async function loadMCPServers() {
-  try {
-    const response = await fetch('/api/mcp/servers');
-
-    if (!response.ok) {
-      throw new Error('Failed to load MCP servers');
-    }
-
-    const data = await response.json();
-    availableMCPServers = Array.isArray(data.servers)
-      ? data.servers.filter((server) => !isWorkspaceGeneratedMCPServer(server))
-      : [];
-    availableMCPServerStats = data?.stats && typeof data.stats === 'object' ? data.stats : {};
-    renderMCPServers();
-  } catch (error) {
-    console.error('Error loading MCP servers:', error);
-    availableMCPServerStats = {};
-    const container = document.getElementById('mcpServersList');
-    if (container) {
-      container.innerHTML = '<div style="text-align: center; padding: 20px; color: var(--text-muted, #666);">Failed to load MCP connectors</div>';
-    }
-  }
-}
 
 // Render plugins list
 function renderPlugins() {
@@ -256,59 +224,6 @@ function renderPlugins() {
         `;
     container.appendChild(item);
   });
-}
-
-// Render MCP servers list
-function renderMCPServers() {
-  const container = document.getElementById('mcpServersList');
-  if (!container) return;
-
-  if (availableMCPServers.length === 0) {
-    container.innerHTML = `
-      <div style="text-align: center; padding: 20px; color: var(--text-muted, #666);">
-        No MCP connectors are configured globally yet.
-        <div style="margin-top: 8px;">
-          <a href="/mcp" style="color: var(--primary-color); text-decoration: none;">Open MCP settings</a>
-        </div>
-      </div>
-    `;
-    return;
-  }
-
-  container.innerHTML = '';
-  availableMCPServers
-    .slice()
-    .sort((a, b) => String(a?.name || '').localeCompare(String(b?.name || ''), undefined, { sensitivity: 'base' }))
-    .forEach((server, index) => {
-      const serverName = String(server?.name || '').trim();
-      if (!serverName) return;
-
-      const stat = availableMCPServerStats[serverName] || {};
-      const status = String(stat?.status || 'configured').toLowerCase();
-      const statusClass = status === 'running'
-        ? 'ready'
-        : (status === 'starting' || status === 'restarting' ? 'warming' : 'stopped');
-      const toolCount = Number(stat?.tool_count ?? stat?.toolCount ?? 0);
-      const args = Array.isArray(server?.args) && server.args.length > 0
-        ? server.args.join(' ')
-        : '';
-      const commandSummary = [server?.command, args].filter(Boolean).join(' ');
-
-      const item = document.createElement('div');
-      item.className = 'plugin-item';
-      item.innerHTML = `
-            <div class="plugin-info">
-                <div class="plugin-name">${escapeHtml(serverName)}</div>
-                <div class="plugin-description">Configured globally and available to bind from a workspace after the agent is created.</div>
-                <div class="mcp-meta">
-                  <span class="mcp-status-badge ${statusClass}">${escapeHtml(status)}</span>
-                  ${toolCount > 0 ? `<span class="mcp-command">${toolCount} tool${toolCount === 1 ? '' : 's'}</span>` : ''}
-                  ${commandSummary ? `<span class="mcp-command">${escapeHtml(commandSummary)}</span>` : ''}
-                </div>
-            </div>
-        `;
-      container.appendChild(item);
-    });
 }
 
 // Setup tags input

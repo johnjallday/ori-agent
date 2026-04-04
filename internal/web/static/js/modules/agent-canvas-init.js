@@ -28,18 +28,18 @@ export class AgentCanvasInitialization {
   }
 
   /**
-   * Initialize canvas with studio data
+   * Initialize canvas with workspace data
    */
   async init() {
     try {
       // First, resize canvas to set width/height properties
       this.resize();
 
-      // Load studio data
-      this.parent.studio = await apiGet(`/api/studios/${this.parent.studioId}`);
+      // Load workspace data
+      this.parent.workspace = await apiGet(`/api/workspaces/${this.parent.workspaceId}`);
 
       // Load workspace progress
-      this.parent.workspaceProgress = this.parent.studio.workspace_progress || {
+      this.parent.workspaceProgress = this.parent.workspace.workspace_progress || {
         total_tasks: 0,
         completed_tasks: 0,
         in_progress_tasks: 0,
@@ -52,15 +52,15 @@ export class AgentCanvasInitialization {
       };
 
       // Load mission from shared data if it exists
-      if (this.parent.studio.shared_data && this.parent.studio.shared_data.mission) {
-        this.parent.mission = this.parent.studio.shared_data.mission;
+      if (this.parent.workspace.shared_data && this.parent.workspace.shared_data.mission) {
+        this.parent.mission = this.parent.workspace.shared_data.mission;
       }
 
-      // Load tasks from studio (store all tasks, filter for display)
-      if (this.parent.studio.tasks) {
+      // Load tasks from workspace (store all tasks, filter for display)
+      if (this.parent.workspace.tasks) {
         // Store all tasks in state (unfiltered) for workflow detection
-        this.parent.allTasks = this.parent.studio.tasks;
-        this.state.setAllTasks(this.parent.studio.tasks);
+        this.parent.allTasks = this.parent.workspace.tasks;
+        this.state.setAllTasks(this.parent.workspace.tasks);
 
         // Check for workflow filter parameter and set in state
         const urlParams = new URLSearchParams(window.location.search);
@@ -70,7 +70,7 @@ export class AgentCanvasInitialization {
         }
 
         // Filter tasks based on selected workflow (or show all if none selected)
-        let tasksToProcess = this.state.filterTasksByWorkflow(this.parent.studio.tasks);
+        let tasksToProcess = this.state.filterTasksByWorkflow(this.parent.workspace.tasks);
 
         if (this.state.selectedWorkflowId) {
           // Store workflow mode flag for UI adjustments
@@ -117,9 +117,9 @@ export class AgentCanvasInitialization {
         }
       }
 
-      // Load attachments from studio
-      if (this.parent.studio.attachments) {
-        const attachments = this.parent.studio.attachments.map(att => ({
+      // Load attachments from workspace
+      if (this.parent.workspace.attachments) {
+        const attachments = this.parent.workspace.attachments.map(att => ({
           ...att,
           file: att.file || att.file_meta,
           x: att.x ?? null,
@@ -134,16 +134,16 @@ export class AgentCanvasInitialization {
         this.state.setAttachments(attachments);
       }
 
-      // Load store nodes from studio
-      if (this.parent.studio.store_nodes) {
-        const storeNodes = this.parent.studio.store_nodes.map(node => {
+      // Load store nodes from workspace
+      if (this.parent.workspace.store_nodes) {
+        const storeNodes = this.parent.workspace.store_nodes.map(node => {
           // Use position from node (API), then layout, then defaults
           let x = node.x ?? 400;
           let y = node.y ?? 400;
 
           // Override with layout position if available
-          if (this.parent.studio.layout && this.parent.studio.layout.store_positions) {
-            const pos = this.parent.studio.layout.store_positions[node.canvas_node_id];
+          if (this.parent.workspace.layout && this.parent.workspace.layout.store_positions) {
+            const pos = this.parent.workspace.layout.store_positions[node.canvas_node_id];
             if (pos) {
               x = pos.x;
               y = pos.y;
@@ -160,16 +160,16 @@ export class AgentCanvasInitialization {
         this.state.setStoreNodes(storeNodes);
       }
 
-      // Load directory references from studio
-      if (this.parent.studio.directory_references) {
-        const directories = this.parent.studio.directory_references.map(dir => {
+      // Load directory references from workspace
+      if (this.parent.workspace.directory_references) {
+        const directories = this.parent.workspace.directory_references.map(dir => {
           // Use position from dir (API), then layout, then defaults
           let x = dir.x ?? 400;
           let y = dir.y ?? 400;
 
           // Override with layout position if available
-          if (this.parent.studio.layout && this.parent.studio.layout.directory_positions) {
-            const pos = this.parent.studio.layout.directory_positions[dir.id];
+          if (this.parent.workspace.layout && this.parent.workspace.layout.directory_positions) {
+            const pos = this.parent.workspace.layout.directory_positions[dir.id];
             if (pos) {
               x = pos.x;
               y = pos.y;
@@ -218,27 +218,27 @@ export class AgentCanvasInitialization {
 
     } catch (error) {
       console.error('Failed to initialize canvas:', error);
-      document.getElementById('canvas-info').textContent = 'Error loading studio';
+      document.getElementById('canvas-info').textContent = 'Error loading workspace';
     }
   }
 
   /**
-   * Initialize agent positions and stats from studio data
+   * Initialize agent positions and stats from workspace data
    */
   initializeAgents() {
-    if (!this.parent.studio) return;
+    if (!this.parent.workspace) return;
 
-    const agentStats = this.parent.studio.agent_stats || {};
+    const agentStats = this.parent.workspace.agent_stats || {};
 
     // Use AgentInstances if available (new stable system)
-    if (this.parent.studio.agent_instances && this.parent.studio.agent_instances.length > 0) {
-      const agentCount = this.parent.studio.agent_instances.length;
+    if (this.parent.workspace.agent_instances && this.parent.workspace.agent_instances.length > 0) {
+      const agentCount = this.parent.workspace.agent_instances.length;
       const centerY = this.parent.height * 0.6;
       const spacing = Math.min(150, (this.parent.width * 0.8) / Math.max(agentCount - 1, 1));
       const totalWidth = spacing * (agentCount - 1);
       const startX = (this.parent.width - totalWidth) / 2;
 
-      const agents = this.parent.studio.agent_instances.map((instance, index) => {
+      const agents = this.parent.workspace.agent_instances.map((instance, index) => {
         const stats = agentStats[instance.name] || {
           status: 'idle',
           current_tasks: [],
@@ -273,9 +273,9 @@ export class AgentCanvasInitialization {
     }
 
     // FALLBACK: Legacy system (agent names only, no stable instances)
-    if (!this.parent.studio.agents || this.parent.studio.agents.length === 0) return;
+    if (!this.parent.workspace.agents || this.parent.workspace.agents.length === 0) return;
 
-    const agentCount = this.parent.studio.agents.length;
+    const agentCount = this.parent.workspace.agents.length;
     const centerY = this.parent.height * 0.6;
     const spacing = Math.min(150, (this.parent.width * 0.8) / Math.max(agentCount - 1, 1));
     const totalWidth = spacing * (agentCount - 1);
@@ -283,7 +283,7 @@ export class AgentCanvasInitialization {
 
     const instanceCounters = {};
 
-    const agents = this.parent.studio.agents.map((agentName, index) => {
+    const agents = this.parent.workspace.agents.map((agentName, index) => {
       if (!instanceCounters[agentName]) {
         instanceCounters[agentName] = 0;
       }
@@ -322,7 +322,7 @@ export class AgentCanvasInitialization {
     this.state.setAgents(agents);
 
     // Load tasks if available
-    if (this.parent.studio.tasks) {
+    if (this.parent.workspace.tasks) {
       // Preserve existing positions when updating tasks
       const existingPositions = {};
       this.state.tasks.forEach(t => {
@@ -331,7 +331,7 @@ export class AgentCanvasInitialization {
         }
       });
 
-      const tasks = this.parent.studio.tasks.map(task => {
+      const tasks = this.parent.workspace.tasks.map(task => {
         const existing = existingPositions[task.id];
         return {
           id: task.id,
@@ -383,8 +383,8 @@ export class AgentCanvasInitialization {
    * Re-filters tasks and redraws the canvas
    */
   handleWorkflowSelected({ workflowId }) {
-    // Use all tasks from the original studio data
-    const allTasks = this.parent.allTasks || this.parent.studio?.tasks || [];
+    // Use all tasks from the original workspace data
+    const allTasks = this.parent.allTasks || this.parent.workspace?.tasks || [];
 
     // Filter tasks based on the new selection
     const filteredTasks = this.state.filterTasksByWorkflow(allTasks);
@@ -454,7 +454,7 @@ export class AgentCanvasInitialization {
 
     const workflowLabel = this.state.selectedWorkflowId ? ' (filtered)' : '';
     infoEl.textContent =
-      `Studio: ${this.parent.studio?.name || this.parent.studioId} | Agents: ${this.state.agents.length} | Tasks: ${this.state.tasks.length}${workflowLabel} | Attachments: ${this.state.attachments.length} | Stores: ${this.state.storeNodes.length}`;
+      `Workspace: ${this.parent.workspace?.name || this.parent.workspaceId} | Agents: ${this.state.agents.length} | Tasks: ${this.state.tasks.length}${workflowLabel} | Attachments: ${this.state.attachments.length} | Stores: ${this.state.storeNodes.length}`;
   }
 
   /**
@@ -463,8 +463,8 @@ export class AgentCanvasInitialization {
    */
   async fetchInitialProgressData() {
     try {
-      // Fetch fresh studio data with progress
-      const response = await fetch(`/api/studios/${this.parent.studioId}`, {
+      // Fetch fresh workspace data with progress
+      const response = await fetch(`/api/workspaces/${this.parent.workspaceId}`, {
         method: 'GET',
         headers: { 'Content-Type': 'application/json' }
       });

@@ -22,7 +22,7 @@
                 </svg>
                 My Workflows
               </h2>
-              <p class="mb-0" style="color: var(--text-secondary);">Custom workflow templates saved from studio canvas selections.</p>
+              <p class="mb-0" style="color: var(--text-secondary);">Custom workflow templates saved from workspace canvas selections.</p>
             </div>
             <div class="d-flex gap-2">
               <select id="category-filter" class="form-select form-select-sm" style="width: auto;" onchange="filterWorkflows()">
@@ -58,22 +58,22 @@
     </div>
   </div>
 
-  <!-- Studio Selector Modal -->
-  <div class="modal fade" id="studioSelectorModal" tabindex="-1" aria-labelledby="studioSelectorModalLabel" aria-hidden="true">
+  <!-- Workspace Selector Modal -->
+  <div class="modal fade" id="workspaceSelectorModal" tabindex="-1" aria-labelledby="workspaceSelectorModalLabel" aria-hidden="true">
     <div class="modal-dialog">
       <div class="modal-content">
         <div class="modal-header">
-          <h5 class="modal-title" id="studioSelectorModalLabel" style="color: var(--text-primary);">
+          <h5 class="modal-title" id="workspaceSelectorModalLabel" style="color: var(--text-primary);">
             <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" class="me-2">
               <path d="M19,13H13V19H11V13H5V11H11V5H13V11H19V13Z"/>
             </svg>
-            Add Workflow to Studio
+            Add Workflow to Workspace
           </h5>
           <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
         </div>
         <div class="modal-body">
-          <p style="color: var(--text-secondary);">Select a studio to add this workflow to:</p>
-          <div id="studio-list" style="max-height: 300px; overflow-y: auto;">
+          <p style="color: var(--text-secondary);">Select a workspace to add this workflow to:</p>
+          <div id="workspace-list" style="max-height: 300px; overflow-y: auto;">
             <div class="text-center py-3">
               <div class="spinner-border spinner-border-sm text-primary" role="status">
                 <span class="visually-hidden">Loading...</span>
@@ -89,11 +89,11 @@
         </div>
         <div class="modal-footer">
           <button type="button" class="modern-btn modern-btn-secondary" data-bs-dismiss="modal">Cancel</button>
-          <button type="button" id="addToStudioBtn" class="modern-btn modern-btn-primary" disabled>
+          <button type="button" id="addToWorkspaceBtn" class="modern-btn modern-btn-primary" disabled>
             <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" class="me-1">
               <path d="M19,13H13V19H11V13H5V11H11V5H13V11H19V13Z"/>
             </svg>
-            Add to Studio
+            Add to Workspace
           </button>
         </div>
       </div>
@@ -118,11 +118,11 @@
         </div>
         <div class="modal-footer">
           <button type="button" class="modern-btn modern-btn-secondary" data-bs-dismiss="modal">Close</button>
-          <button type="button" id="detailsAddToStudioBtn" class="modern-btn modern-btn-primary">
+          <button type="button" id="detailsAddToWorkspaceBtn" class="modern-btn modern-btn-primary">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" class="me-1">
               <path d="M19,13H13V19H11V13H5V11H11V5H13V11H19V13Z"/>
             </svg>
-            Add to Studio
+            Add to Workspace
           </button>
         </div>
       </div>
@@ -215,7 +215,7 @@
 
   <script>
     let allWorkflows = [];
-    let selectedStudioId = null;
+    let selectedWorkspaceId = null;
     let selectedWorkflow = null;
     let workflowToDelete = null;
 
@@ -283,7 +283,7 @@
             </svg>
             <p style="color: var(--text-muted);">No workflows yet</p>
             <p class="small" style="color: var(--text-muted);">
-              Create workflows by selecting nodes on a studio canvas and choosing "Save as Workflow" from the context menu.
+              Create workflows by selecting nodes on a workspace canvas and choosing "Save as Workflow" from the context menu.
             </p>
           </div>
         `;
@@ -328,11 +328,11 @@
             </div>
 
             <div class="mt-auto">
-              <button class="modern-btn modern-btn-primary w-100" onclick="event.stopPropagation(); openStudioSelector('${workflow.id}')">
+              <button class="modern-btn modern-btn-primary w-100" onclick="event.stopPropagation(); openWorkspaceSelector('${workflow.id}')">
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" class="me-1">
                   <path d="M19,13H13V19H11V13H5V11H11V5H13V11H19V13Z"/>
                 </svg>
-                Add to Studio
+                Add to Workspace
               </button>
             </div>
           </div>
@@ -440,14 +440,14 @@
       return colors[type] || '#6b7280';
     }
 
-    document.getElementById('detailsAddToStudioBtn').addEventListener('click', function() {
+    document.getElementById('detailsAddToWorkspaceBtn').addEventListener('click', function() {
       if (!detailsWorkflow) return;
       bootstrap.Modal.getInstance(document.getElementById('workflowDetailsModal')).hide();
-      openStudioSelector(detailsWorkflow.id);
+      openWorkspaceSelector(detailsWorkflow.id);
     });
 
-    // Studio selector
-    async function openStudioSelector(workflowId) {
+    // Workspace selector
+    async function openWorkspaceSelector(workflowId) {
       selectedWorkflow = allWorkflows.find(w => w.id === workflowId);
 
       if (!selectedWorkflow) {
@@ -455,15 +455,15 @@
         return;
       }
 
-      const modal = new bootstrap.Modal(document.getElementById('studioSelectorModal'));
-      const studioList = document.getElementById('studio-list');
-      const addBtn = document.getElementById('addToStudioBtn');
+      const modal = new bootstrap.Modal(document.getElementById('workspaceSelectorModal'));
+      const workspaceList = document.getElementById('workspace-list');
+      const addBtn = document.getElementById('addToWorkspaceBtn');
 
       addBtn.disabled = true;
-      selectedStudioId = null;
+      selectedWorkspaceId = null;
 
       // Show loading
-      studioList.innerHTML = `
+      workspaceList.innerHTML = `
         <div class="text-center py-3">
           <div class="spinner-border spinner-border-sm text-primary" role="status">
             <span class="visually-hidden">Loading...</span>
@@ -473,62 +473,62 @@
 
       modal.show();
 
-      // Load studios
+      // Load workspaces
       try {
-        const response = await fetch('/api/studios');
+        const response = await fetch('/api/workspaces');
         const data = await response.json();
-        const studios = data.studios || [];
+        const workspaces = data.workspaces || data.folders || [];
 
-        if (studios.length === 0) {
-          studioList.innerHTML = `
+        if (workspaces.length === 0) {
+          workspaceList.innerHTML = `
             <div class="text-center py-3">
-              <p style="color: var(--text-muted);">No studios available.</p>
+              <p style="color: var(--text-muted);">No workspaces available.</p>
               <a href="/workspaces" class="modern-btn modern-btn-primary mt-2">Create Workspace</a>
             </div>
           `;
           return;
         }
 
-        studioList.innerHTML = studios.map(studio => `
-          <div class="studio-option p-3 mb-2" style="background: var(--bg-secondary); border-radius: 6px; border: 2px solid transparent; cursor: pointer;"
-               onclick="selectStudio('${studio.id}', this)"
-               data-studio-id="${studio.id}">
+        workspaceList.innerHTML = workspaces.map(ws => `
+          <div class="workspace-option p-3 mb-2" style="background: var(--bg-secondary); border-radius: 6px; border: 2px solid transparent; cursor: pointer;"
+               onclick="selectWorkspace('${ws.id}', this)"
+               data-workspace-id="${ws.id}">
             <div class="d-flex align-items-center gap-2">
               <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" style="color: var(--primary-color);">
                 <path d="M12,5.5A3.5,3.5 0 0,1 15.5,9A3.5,3.5 0 0,1 12,12.5A3.5,3.5 0 0,1 8.5,9A3.5,3.5 0 0,1 12,5.5M5,8C5.56,8 6.08,8.15 6.53,8.42C6.38,9.85 6.8,11.27 7.66,12.38C7.16,13.34 6.16,14 5,14A3,3 0 0,1 2,11A3,3 0 0,1 5,8M19,8A3,3 0 0,1 22,11A3,3 0 0,1 19,14C17.84,14 16.84,13.34 16.34,12.38C17.2,11.27 17.62,9.85 17.47,8.42C17.92,8.15 18.44,8 19,8Z"/>
               </svg>
               <div>
-                <strong style="color: var(--text-primary);">${escapeHtml(studio.name)}</strong>
-                <div class="small" style="color: var(--text-muted);">${studio.agents?.length || 0} agents</div>
+                <strong style="color: var(--text-primary);">${escapeHtml(ws.name)}</strong>
+                <div class="small" style="color: var(--text-muted);">${ws.agents?.length || 0} agents</div>
               </div>
             </div>
           </div>
         `).join('');
 
       } catch (error) {
-        console.error('Error loading studios:', error);
-        studioList.innerHTML = `<div class="alert alert-danger">Failed to load studios</div>`;
+        console.error('Error loading workspaces:', error);
+        workspaceList.innerHTML = `<div class="alert alert-danger">Failed to load workspaces</div>`;
       }
     }
 
-    function selectStudio(studioId, element) {
+    function selectWorkspace(workspaceId, element) {
       // Remove selection from all
-      document.querySelectorAll('.studio-option').forEach(el => {
+      document.querySelectorAll('.workspace-option').forEach(el => {
         el.style.borderColor = 'transparent';
       });
 
       // Select this one
       element.style.borderColor = 'var(--primary-color)';
-      selectedStudioId = studioId;
+      selectedWorkspaceId = workspaceId;
 
       // Enable add button
-      document.getElementById('addToStudioBtn').disabled = false;
+      document.getElementById('addToWorkspaceBtn').disabled = false;
 
       // Check for missing agents
-      checkMissingAgents(studioId);
+      checkMissingAgents(workspaceId);
     }
 
-    async function checkMissingAgents(studioId) {
+    async function checkMissingAgents(workspaceId) {
       if (!selectedWorkflow || !selectedWorkflow.id) return;
 
       const warningEl = document.getElementById('missing-agents-warning');
@@ -538,7 +538,7 @@
         const response = await fetch(`/api/workflows/${selectedWorkflow.id}/check-agents`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ studio_id: studioId })
+          body: JSON.stringify({ workspace_id: workspaceId })
         });
 
         if (response.ok) {
@@ -555,14 +555,14 @@
       }
     }
 
-    document.getElementById('addToStudioBtn').addEventListener('click', async function() {
-      if (!selectedStudioId || !selectedWorkflow) return;
+    document.getElementById('addToWorkspaceBtn').addEventListener('click', async function() {
+      if (!selectedWorkspaceId || !selectedWorkflow) return;
 
       this.disabled = true;
       this.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span> Adding...';
 
-      // Redirect to the studio canvas page where the workflow panel can instantiate it
-      window.location.href = `/studios/${selectedStudioId}/canvas?add_workflow=${selectedWorkflow.id}`;
+      // Redirect to the workspace canvas page where the workflow panel can instantiate it
+      window.location.href = `/workspaces/${selectedWorkspaceId}/canvas?add_workflow=${selectedWorkflow.id}`;
     });
 
     // Delete workflow

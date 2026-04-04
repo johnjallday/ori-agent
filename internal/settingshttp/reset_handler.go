@@ -11,6 +11,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/onboarding"
 	"github.com/johnjallday/ori-agent/internal/store"
+	"github.com/johnjallday/ori-agent/internal/workspace"
 )
 
 const (
@@ -37,9 +38,10 @@ type ResetResponse struct {
 
 // ResetHandler handles application reset operations
 type ResetHandler struct {
-	onboardingMgr *onboarding.Manager
-	store         store.Store
-	dataDir       string
+	onboardingMgr  *onboarding.Manager
+	store          store.Store
+	workspaceStore *workspace.FileStore
+	dataDir        string
 }
 
 // NewResetHandler creates a new ResetHandler
@@ -49,6 +51,11 @@ func NewResetHandler(onboardingMgr *onboarding.Manager, st store.Store, dataDir 
 		store:         st,
 		dataDir:       dataDir,
 	}
+}
+
+// SetWorkspaceStore sets the workspace store used to clear in-memory state during reset.
+func (h *ResetHandler) SetWorkspaceStore(ws *workspace.FileStore) {
+	h.workspaceStore = ws
 }
 
 // HandleReset handles POST /api/reset for selective app reset.
@@ -246,6 +253,11 @@ func (h *ResetHandler) resetSessions() error {
 	}
 	if err := os.RemoveAll(workspacesDir); err != nil && !os.IsNotExist(err) {
 		logger.Debug("workspaces directory may be in use", logger.Fields{"path": workspacesDir, "error": err})
+	}
+
+	// Clear in-memory workspace state so stale data is not served
+	if h.workspaceStore != nil {
+		h.workspaceStore.ClearAll()
 	}
 
 	return nil

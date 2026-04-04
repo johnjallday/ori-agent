@@ -24,7 +24,7 @@
     if (!confirmed) return;
 
     try {
-      const response = await fetch(`/api/studios/${encodeURIComponent(state.selectedId)}/attachments/${encodeURIComponent(fileId)}/trash`, {
+      const response = await fetch(`/api/workspaces/${encodeURIComponent(state.selectedId)}/attachments/${encodeURIComponent(fileId)}/trash`, {
         method: 'PATCH'
       });
       if (!response.ok) throw new Error('Failed to move file to trash');
@@ -53,7 +53,7 @@
     if (!confirmed) return;
 
     try {
-      const response = await fetch(`/api/studios/${encodeURIComponent(state.selectedId)}/attachments/bulk-trash`, {
+      const response = await fetch(`/api/workspaces/${encodeURIComponent(state.selectedId)}/attachments/bulk-trash`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ attachment_ids: ids })
@@ -70,6 +70,57 @@
     } catch (error) {
       console.error('Failed to bulk move files to trash:', error);
       if (window.Toast) window.Toast.error('Failed to move files to trash');
+    }
+  }
+
+  /**
+   * Prompt for a replacement file and relink the missing workspace attachment.
+   * @param {string} fileId
+   */
+  function promptRelinkFile(fileId) {
+    if (!fileId) return;
+
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.style.display = 'none';
+    input.addEventListener('change', async () => {
+      const selected = input.files && input.files[0];
+      input.remove();
+      if (!selected) return;
+      await relinkFile(fileId, selected);
+    }, { once: true });
+
+    document.body.appendChild(input);
+    input.click();
+  }
+
+  /**
+   * Relink a missing workspace file to a freshly selected replacement.
+   * @param {string} fileId
+   * @param {File} file
+   */
+  async function relinkFile(fileId, file) {
+    const state = window.WorkspaceHubState.getState();
+    if (!state.selectedId || !fileId || !file) return;
+
+    const formData = new FormData();
+    formData.append('file', file);
+
+    try {
+      const response = await fetch(`/api/workspaces/${encodeURIComponent(state.selectedId)}/attachments/${encodeURIComponent(fileId)}/relink`, {
+        method: 'POST',
+        body: formData
+      });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(result.error || result.message || 'Failed to relink file');
+      }
+
+      if (window.Toast) window.Toast.success('File relinked');
+      await loadFiles(state.selectedId);
+    } catch (error) {
+      console.error('Failed to relink workspace file:', error);
+      if (window.Toast) window.Toast.error(error.message || 'Failed to relink file');
     }
   }
 
@@ -102,7 +153,7 @@
     }
 
     try {
-      const response = await fetch(`/api/studios/${encodeURIComponent(workspaceId)}`);
+      const response = await fetch(`/api/workspaces/${encodeURIComponent(workspaceId)}`);
       if (!response.ok) throw new Error('Failed to load workspace');
 
       const workspace = await response.json();
@@ -144,6 +195,8 @@
       const size = file.file_meta ? formatFileSize(file.file_meta.size) : '';
       const icon = getFileIcon(file.type, file.file_meta?.mime);
       const isSelected = selectedSet.has(file.id);
+      const isMissing = file.file_meta?.status === 'missing';
+      const metaText = [isMissing ? 'Missing from disk' : '', size].filter(Boolean).join(' · ');
 
       return `
         <div class="hub-file-item${isSelected ? ' selected' : ''}" data-file-id="${escapeHtml(file.id)}">
@@ -153,8 +206,15 @@
           <div class="hub-file-icon">${icon}</div>
           <div class="hub-file-info">
             <div class="hub-file-title">${escapeHtml(title)}</div>
-            ${size ? `<div class="hub-file-meta">${escapeHtml(size)}</div>` : ''}
+            ${metaText ? `<div class="hub-file-meta">${isMissing ? '<span class="hub-file-status-badge is-missing">Missing</span>' : ''}${escapeHtml(size)}</div>` : ''}
           </div>
+          ${isMissing ? `
+            <button class="hub-item-secondary-btn" data-action="relink" title="Relink missing file">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M10.59,13.41C11,13.8 11,14.44 10.59,14.83C10.2,15.22 9.56,15.22 9.17,14.83C7.22,12.88 7.22,9.71 9.17,7.76L12.71,4.22C14.66,2.27 17.83,2.27 19.78,4.22C21.73,6.17 21.73,9.34 19.78,11.29L18.29,12.78C18.3,11.96 18.17,11.14 17.89,10.36L18.36,9.88C19.54,8.71 19.54,6.81 18.36,5.64C17.19,4.46 15.29,4.46 14.12,5.64L10.59,9.17C9.41,10.34 9.41,12.24 10.59,13.41Z"/>
+              </svg>
+            </button>
+          ` : ''}
           <button class="hub-item-delete-btn" data-action="trash" title="Move to trash">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
               <path d="M19,4H15.5L14.5,3H9.5L8.5,4H5V6H19M6,19A2,2 0 0,0 8,21H16A2,2 0 0,0 18,19V7H6V19Z"/>
@@ -232,6 +292,11 @@
         moveFileToTrash(fileId);
       });
 
+      item.querySelector('[data-action="relink"]')?.addEventListener('click', (event) => {
+        event.stopPropagation();
+        promptRelinkFile(fileId);
+      });
+
       item.addEventListener('click', (event) => {
         if (inSelectionMode && !event.target.closest('button') && !event.target.closest('input')) {
           window.WorkspaceHubSelection.toggleItemSelection('files', fileId);
@@ -257,7 +322,7 @@
     if (!confirmed) return;
 
     try {
-      const response = await fetch(`/api/studios/${encodeURIComponent(state.selectedId)}/directories/${encodeURIComponent(directoryId)}`, {
+      const response = await fetch(`/api/workspaces/${encodeURIComponent(state.selectedId)}/directories/${encodeURIComponent(directoryId)}`, {
         method: 'DELETE'
       });
       if (!response.ok) throw new Error('Failed to remove directory reference');
@@ -585,7 +650,7 @@
             }
           };
 
-          const response = await fetch(`/api/studios/${encodeURIComponent(state.selectedId)}/attachments`, {
+          const response = await fetch(`/api/workspaces/${encodeURIComponent(state.selectedId)}/attachments`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(attachment)

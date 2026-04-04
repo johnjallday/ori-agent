@@ -10,7 +10,7 @@ import (
 
 // schemaVersion is the current database schema version.
 // Increment this when adding new migrations.
-const schemaVersion = 2
+const schemaVersion = 8
 
 // migrate runs all pending migrations to bring the database up to the current schema.
 func (db *DB) migrate(ctx context.Context) error {
@@ -69,6 +69,18 @@ func (db *DB) runMigration(ctx context.Context, version int) error {
 		return db.migration001Baseline(ctx)
 	case 2:
 		return db.migration002WorkspaceMCPState(ctx)
+	case 3:
+		return db.migration003VaultTables(ctx)
+	case 4:
+		return db.migration004NamedVaults(ctx)
+	case 5:
+		return db.migration005RemoveEmptyDefaultVault(ctx)
+	case 6:
+		return db.migration006VaultPasswordKeys(ctx)
+	case 7:
+		return db.migration007WorkspaceKinds(ctx)
+	case 8:
+		return db.migration008WorkspaceSkillState(ctx)
 	default:
 		return fmt.Errorf("unknown migration version: %d", version)
 	}
@@ -81,6 +93,7 @@ func (db *DB) migration001Baseline(ctx context.Context) error {
 		CREATE TABLE IF NOT EXISTS workspaces (
 			id TEXT PRIMARY KEY,
 			name TEXT NOT NULL,
+			kind TEXT DEFAULT 'workspace',
 			description TEXT DEFAULT '',
 			parent_id TEXT,
 			color TEXT,
@@ -101,6 +114,8 @@ func (db *DB) migration001Baseline(ctx context.Context) error {
 			directory_references_json TEXT DEFAULT '[]',
 			mcp_bindings_json TEXT DEFAULT '[]',
 			agent_mcp_access_json TEXT DEFAULT '[]',
+			skill_bindings_json TEXT DEFAULT '[]',
+			agent_skill_access_json TEXT DEFAULT '[]',
 			order_index INTEGER DEFAULT 0,
 			FOREIGN KEY (parent_id) REFERENCES workspaces(id) ON DELETE SET NULL
 		)
@@ -421,6 +436,246 @@ func (db *DB) migration002WorkspaceMCPState(ctx context.Context) error {
 		ALTER TABLE workspaces ADD COLUMN agent_mcp_access_json TEXT DEFAULT '[]'
 	`); err != nil && !isDuplicateColumnError(err) {
 		return fmt.Errorf("failed to add agent_mcp_access_json column: %w", err)
+	}
+
+	return tx.Commit()
+}
+
+func (db *DB) migration003VaultTables(ctx context.Context) error {
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("failed to begin transaction: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	if _, err := tx.ExecContext(ctx, `
+		CREATE TABLE IF NOT EXISTS vault_records (
+			id TEXT PRIMARY KEY,
+			type TEXT NOT NULL,
+			workspace_id TEXT DEFAULT '',
+			source TEXT DEFAULT '',
+			retention_policy TEXT DEFAULT '',
+			metadata_nonce TEXT NOT NULL,
+			metadata_ciphertext TEXT NOT NULL,
+			payload_nonce TEXT NOT NULL,
+			payload_ciphertext TEXT NOT NULL,
+			created_at DATETIME NOT NULL,
+			updated_at DATETIME NOT NULL
+		)
+	`); err != nil {
+		return fmt.Errorf("failed to create vault_records table: %w", err)
+	}
+
+	if _, err := tx.ExecContext(ctx, `
+		CREATE TABLE IF NOT EXISTS vault_grants (
+			id TEXT PRIMARY KEY,
+			workspace_id TEXT NOT NULL,
+			actor_type TEXT NOT NULL,
+			actor_id TEXT NOT NULL,
+			capability TEXT NOT NULL,
+			record_type TEXT NOT NULL DEFAULT '*',
+			created_at DATETIME NOT NULL,
+			updated_at DATETIME NOT NULL
+		)
+	`); err != nil {
+		return fmt.Errorf("failed to create vault_grants table: %w", err)
+	}
+
+	if _, err := tx.ExecContext(ctx, `
+		CREATE TABLE IF NOT EXISTS vault_audit_events (
+			id TEXT PRIMARY KEY,
+			workspace_id TEXT DEFAULT '',
+			actor_type TEXT DEFAULT '',
+			actor_id TEXT DEFAULT '',
+			action TEXT NOT NULL,
+			record_id TEXT DEFAULT '',
+			record_type TEXT DEFAULT '',
+			outcome TEXT NOT NULL,
+			details TEXT DEFAULT '',
+			created_at DATETIME NOT NULL
+		)
+	`); err != nil {
+		return fmt.Errorf("failed to create vault_audit_events table: %w", err)
+	}
+
+	indexes := []string{
+		"CREATE INDEX IF NOT EXISTS idx_vault_records_workspace_id ON vault_records(workspace_id)",
+		"CREATE INDEX IF NOT EXISTS idx_vault_records_type ON vault_records(type)",
+		"CREATE INDEX IF NOT EXISTS idx_vault_records_updated_at ON vault_records(updated_at DESC)",
+		"CREATE UNIQUE INDEX IF NOT EXISTS idx_vault_grants_scope ON vault_grants(workspace_id, actor_type, actor_id, capability, record_type)",
+		"CREATE INDEX IF NOT EXISTS idx_vault_grants_workspace_id ON vault_grants(workspace_id)",
+		"CREATE INDEX IF NOT EXISTS idx_vault_audit_workspace_created_at ON vault_audit_events(workspace_id, created_at DESC)",
+		"CREATE INDEX IF NOT EXISTS idx_vault_audit_actor_created_at ON vault_audit_events(actor_type, actor_id, created_at DESC)",
+	}
+
+	for _, stmt := range indexes {
+		if _, err := tx.ExecContext(ctx, stmt); err != nil {
+			return fmt.Errorf("failed to create vault index: %w", err)
+		}
+	}
+
+	return tx.Commit()
+}
+
+func (db *DB) migration004NamedVaults(ctx context.Context) error {
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("failed to begin transaction: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	if _, err := tx.ExecContext(ctx, `
+		CREATE TABLE IF NOT EXISTS vaults (
+			id TEXT PRIMARY KEY,
+			name TEXT NOT NULL,
+			description TEXT DEFAULT '',
+			created_at DATETIME NOT NULL,
+			updated_at DATETIME NOT NULL
+		)
+	`); err != nil {
+		return fmt.Errorf("failed to create vaults table: %w", err)
+	}
+
+	if _, err := tx.ExecContext(ctx, `
+		ALTER TABLE vault_records ADD COLUMN vault_id TEXT NOT NULL DEFAULT 'default'
+	`); err != nil && !isDuplicateColumnError(err) {
+		return fmt.Errorf("failed to add vault_id to vault_records: %w", err)
+	}
+
+	if _, err := tx.ExecContext(ctx, `
+		ALTER TABLE vault_grants ADD COLUMN vault_id TEXT NOT NULL DEFAULT 'default'
+	`); err != nil && !isDuplicateColumnError(err) {
+		return fmt.Errorf("failed to add vault_id to vault_grants: %w", err)
+	}
+
+	if _, err := tx.ExecContext(ctx, `
+		ALTER TABLE vault_audit_events ADD COLUMN vault_id TEXT NOT NULL DEFAULT 'default'
+	`); err != nil && !isDuplicateColumnError(err) {
+		return fmt.Errorf("failed to add vault_id to vault_audit_events: %w", err)
+	}
+
+	backfillStatements := []string{
+		`UPDATE vault_records SET vault_id = 'default' WHERE TRIM(COALESCE(vault_id, '')) = ''`,
+		`UPDATE vault_grants SET vault_id = 'default' WHERE TRIM(COALESCE(vault_id, '')) = ''`,
+		`UPDATE vault_audit_events SET vault_id = 'default' WHERE TRIM(COALESCE(vault_id, '')) = ''`,
+	}
+	for _, stmt := range backfillStatements {
+		if _, err := tx.ExecContext(ctx, stmt); err != nil {
+			return fmt.Errorf("failed to backfill named vault data: %w", err)
+		}
+	}
+
+	if _, err := tx.ExecContext(ctx, `
+		INSERT OR IGNORE INTO vaults (id, name, description, created_at, updated_at)
+		SELECT 'default', 'Private Vault', 'Default encrypted vault', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+		WHERE EXISTS (SELECT 1 FROM vault_records WHERE vault_id = 'default' LIMIT 1)
+		   OR EXISTS (SELECT 1 FROM vault_grants WHERE vault_id = 'default' LIMIT 1)
+		   OR EXISTS (SELECT 1 FROM vault_audit_events WHERE vault_id = 'default' LIMIT 1)
+	`); err != nil {
+		return fmt.Errorf("failed to seed legacy default vault: %w", err)
+	}
+
+	indexStatements := []string{
+		"DROP INDEX IF EXISTS idx_vault_grants_scope",
+		"CREATE UNIQUE INDEX IF NOT EXISTS idx_vaults_name ON vaults(name COLLATE NOCASE)",
+		"CREATE INDEX IF NOT EXISTS idx_vaults_updated_at ON vaults(updated_at DESC)",
+		"CREATE INDEX IF NOT EXISTS idx_vault_records_vault_id ON vault_records(vault_id)",
+		"CREATE INDEX IF NOT EXISTS idx_vault_records_vault_updated_at ON vault_records(vault_id, updated_at DESC)",
+		"CREATE UNIQUE INDEX IF NOT EXISTS idx_vault_grants_scope ON vault_grants(vault_id, workspace_id, actor_type, actor_id, capability, record_type)",
+		"CREATE INDEX IF NOT EXISTS idx_vault_grants_vault_id ON vault_grants(vault_id)",
+		"CREATE INDEX IF NOT EXISTS idx_vault_audit_vault_created_at ON vault_audit_events(vault_id, created_at DESC)",
+	}
+	for _, stmt := range indexStatements {
+		if _, err := tx.ExecContext(ctx, stmt); err != nil {
+			return fmt.Errorf("failed to update named vault index: %w", err)
+		}
+	}
+
+	return tx.Commit()
+}
+
+func (db *DB) migration005RemoveEmptyDefaultVault(ctx context.Context) error {
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("failed to begin transaction: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	if _, err := tx.ExecContext(ctx, `
+		DELETE FROM vaults
+		WHERE id = 'default'
+		  AND NOT EXISTS (SELECT 1 FROM vault_records WHERE vault_id = 'default')
+		  AND NOT EXISTS (SELECT 1 FROM vault_grants WHERE vault_id = 'default')
+		  AND NOT EXISTS (SELECT 1 FROM vault_audit_events WHERE vault_id = 'default')
+	`); err != nil {
+		return fmt.Errorf("failed to remove empty default vault: %w", err)
+	}
+
+	return tx.Commit()
+}
+
+func (db *DB) migration006VaultPasswordKeys(ctx context.Context) error {
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("failed to begin transaction: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	columnStatements := []string{
+		`ALTER TABLE vaults ADD COLUMN key_salt TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE vaults ADD COLUMN key_nonce TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE vaults ADD COLUMN key_ciphertext TEXT NOT NULL DEFAULT ''`,
+	}
+	for _, stmt := range columnStatements {
+		if _, err := tx.ExecContext(ctx, stmt); err != nil && !isDuplicateColumnError(err) {
+			return fmt.Errorf("failed to add vault password key column: %w", err)
+		}
+	}
+
+	return tx.Commit()
+}
+
+func (db *DB) migration007WorkspaceKinds(ctx context.Context) error {
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("failed to begin transaction: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	if _, err := tx.ExecContext(ctx, `
+		ALTER TABLE workspaces ADD COLUMN kind TEXT DEFAULT 'workspace'
+	`); err != nil && !isDuplicateColumnError(err) {
+		return fmt.Errorf("failed to add workspace kind column: %w", err)
+	}
+
+	if _, err := tx.ExecContext(ctx, `
+		UPDATE workspaces
+		SET kind = 'workspace'
+		WHERE kind IS NULL OR TRIM(kind) = ''
+	`); err != nil {
+		return fmt.Errorf("failed to backfill workspace kinds: %w", err)
+	}
+
+	return tx.Commit()
+}
+
+func (db *DB) migration008WorkspaceSkillState(ctx context.Context) error {
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("failed to begin transaction: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	if _, err := tx.ExecContext(ctx, `
+		ALTER TABLE workspaces ADD COLUMN skill_bindings_json TEXT DEFAULT '[]'
+	`); err != nil && !isDuplicateColumnError(err) {
+		return fmt.Errorf("failed to add skill_bindings_json column: %w", err)
+	}
+
+	if _, err := tx.ExecContext(ctx, `
+		ALTER TABLE workspaces ADD COLUMN agent_skill_access_json TEXT DEFAULT '[]'
+	`); err != nil && !isDuplicateColumnError(err) {
+		return fmt.Errorf("failed to add agent_skill_access_json column: %w", err)
 	}
 
 	return tx.Commit()

@@ -26,7 +26,7 @@ func (th *TaskHandler) ScheduledTasksHandler(w http.ResponseWriter, r *http.Requ
 }
 
 func (th *TaskHandler) handleListScheduledTasks(w http.ResponseWriter, r *http.Request) {
-	workspaceID := r.URL.Query().Get("studio_id")
+	workspaceID := r.URL.Query().Get("workspace_id")
 	if workspaceID == "" {
 		orihttp.BadRequest(w, "workspace_id is required")
 		return
@@ -48,7 +48,7 @@ func (th *TaskHandler) handleListScheduledTasks(w http.ResponseWriter, r *http.R
 // handleCreateScheduledTask creates a new scheduled task
 func (th *TaskHandler) handleCreateScheduledTask(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		WorkspaceID string                   `json:"studio_id"`
+		WorkspaceID string                   `json:"workspace_id"`
 		Name        string                   `json:"name"`
 		Description string                   `json:"description"`
 		From        string                   `json:"from"`
@@ -550,7 +550,7 @@ func calculateInitialNextRun(config workspace.ScheduleConfig, now time.Time) *ti
 			return nil
 		}
 
-		// Validate and parse cron expression using agentstudio's validator
+		// Validate and parse cron expression using workspace's validator
 		if err := workspace.ValidateCronExpression(config.CronExpr); err != nil {
 			return nil
 		}

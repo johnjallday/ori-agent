@@ -10,6 +10,7 @@ type Skill struct {
 	AllowedTools       []string        `json:"allowed_tools,omitempty"`
 	DisallowedTools    []string        `json:"disallowed_tools,omitempty"`
 	RequiredMCPServers []string        `json:"required_mcp_servers,omitempty"`
+	PlanningProfile    bool            `json:"planning_profile,omitempty"`
 	Model              string          `json:"model,omitempty"`
 	Color              string          `json:"color,omitempty"`
 	Enabled            bool            `json:"enabled"`

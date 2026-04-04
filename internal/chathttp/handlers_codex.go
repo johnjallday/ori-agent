@@ -13,7 +13,7 @@ import (
 
 // handleCodexChat handles chat requests routed through the Codex CLI provider.
 // Codex provider currently does not support tool calling, so this path is request/response only.
-func (h *Handler) handleCodexChat(w http.ResponseWriter, r *http.Request, ag *resolvedChatAgent, userMessage string, agentName string, baseCtx context.Context, images []llm.ImageAttachment, plannerDecision *types.PlannerDecision, runtimeSystemPrompt string) {
+func (h *Handler) handleCodexChat(w http.ResponseWriter, r *http.Request, ag *resolvedChatAgent, userMessage string, agentName string, baseCtx context.Context, images []llm.ImageAttachment, plannerDecision *types.PlannerDecision, runtimeSystemPrompt string, routeCtx normalizedChatRouteContext) {
 	sessionID := h.getSessionID(r)
 	ctx, cancel := context.WithTimeout(baseCtx, ChatRequestTimeout)
 	defer cancel()
@@ -59,9 +59,10 @@ func (h *Handler) handleCodexChat(w http.ResponseWriter, r *http.Request, ag *re
 	h.storeMessageInSession(baseCtx, sessionID, "assistant", text)
 	h.trackUsageCommon("codex", ag.Settings.Model, agentName, resp.Usage, ag.Agent, userMessage)
 
-	writeJSONResponse(w, attachPlannerDecision(attachRouteMetadata(map[string]any{
+	payload := attachRouteMetadata(map[string]any{
 		"response": text,
 	}, chatRouteMetadata{
 		Mode: routeModeAssistantChat,
-	}), plannerDecision))
+	})
+	writeJSONResponse(w, attachPlannerDecision(attachDependencyResolution(payload, inferDependencyResolutionFromText(text, routeCtx, "codex")), plannerDecision))
 }

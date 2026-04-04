@@ -33,13 +33,17 @@ type AgentInstance struct {
 	Name           string    `json:"name"`            // Agent type name (e.g., "default", "writer")
 	InstanceNumber int       `json:"instance_number"` // Instance number for display (e.g., 1, 2, 3)
 	NodeID         string    `json:"node_id"`         // Stable node ID (e.g., "default-node-1")
-	CreatedAt      time.Time `json:"created_at"`      // When this instance was added
+	Role           string    `json:"role,omitempty"`  // Workspace-specific responsibility label (e.g., "Project Manager")
+	Description    string    `json:"description,omitempty"`
+	EntryPoint     bool      `json:"entry_point,omitempty"` // Marks the default entry node for workspace-level requests
+	CreatedAt      time.Time `json:"created_at"`            // When this instance was added
 }
 
 // Workspace stores shared context between collaborating agents
 type Workspace struct {
 	ID                   string                      `json:"id"`
 	Name                 string                      `json:"name"`
+	Kind                 string                      `json:"kind,omitempty"`
 	Description          string                      `json:"description,omitempty"`
 	FolderSlug           string                      `json:"folder_slug,omitempty"`     // Filesystem folder name (derived from Name via Slugify)
 	ProjectPath          string                      `json:"project_path,omitempty"`    // Relative path to associated project code directory
@@ -111,10 +115,13 @@ const (
 
 // AttachmentFileMeta captures optional file information
 type AttachmentFileMeta struct {
-	Name string `json:"name,omitempty"`
-	Size int64  `json:"size,omitempty"`
-	Mime string `json:"mime,omitempty"`
-	URL  string `json:"url,omitempty"`
+	Name         string `json:"name,omitempty"`
+	Size         int64  `json:"size,omitempty"`
+	Mime         string `json:"mime,omitempty"`
+	URL          string `json:"url,omitempty"`
+	RelativePath string `json:"relative_path,omitempty"`
+	OriginalPath string `json:"original_path,omitempty"`
+	Status       string `json:"status,omitempty"`
 }
 
 // Attachment represents a note/file/link pinned to the workspace canvas
@@ -148,7 +155,7 @@ type AgentMessage struct {
 // Task represents a delegated task within a workspace
 type Task struct {
 	ID             string                 `json:"id"`
-	WorkspaceID    string                 `json:"studio_id"`
+	WorkspaceID    string                 `json:"workspace_id"`
 	From           string                 `json:"from"`
 	To             string                 `json:"to"`
 	AssignedNodeID string                 `json:"assigned_node_id,omitempty"` // Specific agent instance (node) when multiple share a name
@@ -305,7 +312,7 @@ type TaskExecution struct {
 // ScheduledTask represents a recurring or one-time scheduled task template
 type ScheduledTask struct {
 	ID           string                 `json:"id"`
-	WorkspaceID  string                 `json:"studio_id"`
+	WorkspaceID  string                 `json:"workspace_id"`
 	CanvasNodeID string                 `json:"canvas_node_id,omitempty"` // Links to canvas scheduler node (empty for dashboard-created tasks)
 	TargetTaskID string                 `json:"target_task_id,omitempty"` // Links to a canvas task node to execute on schedule
 	Name         string                 `json:"name"`

@@ -40,7 +40,7 @@ export class WorkspaceManager {
      */
   async fetchWorkflowStatus(workspaceId) {
     try {
-      const response = await fetch(`/api/orchestration/workflow/status?studio_id=${workspaceId}`);
+      const response = await fetch(`/api/orchestration/workflow/status?workspace_id=${workspaceId}`);
       if (!response.ok) {
         throw new Error(`HTTP error! status: ${response.status}`);
       }
@@ -56,7 +56,7 @@ export class WorkspaceManager {
      */
   async fetchTasks(workspaceId) {
     try {
-      const response = await fetch(`/api/orchestration/tasks?studio_id=${workspaceId}`);
+      const response = await fetch(`/api/orchestration/tasks?workspace_id=${workspaceId}`);
       if (!response.ok) {
         throw new Error(`HTTP error! status: ${response.status}`);
       }
@@ -109,7 +109,7 @@ export class WorkspaceManager {
     this.currentWorkspaceId = workspaceId;
     this.stopMonitoring(); // Stop any existing monitoring
 
-    const url = `/api/orchestration/workflow/stream?studio_id=${workspaceId}`;
+    const url = `/api/orchestration/workflow/stream?workspace_id=${workspaceId}`;
     this.eventSource = new EventSource(url);
 
     this.eventSource.onmessage = (event) => {

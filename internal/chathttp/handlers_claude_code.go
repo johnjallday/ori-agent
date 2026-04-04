@@ -13,7 +13,7 @@ import (
 
 // handleClaudeCodeChat handles chat requests routed through the Claude Code CLI provider.
 // This provider does not support tool calling, so the flow is a simple request/response.
-func (h *Handler) handleClaudeCodeChat(w http.ResponseWriter, r *http.Request, ag *resolvedChatAgent, userMessage string, agentName string, baseCtx context.Context, images []llm.ImageAttachment, plannerDecision *types.PlannerDecision, runtimeSystemPrompt string) {
+func (h *Handler) handleClaudeCodeChat(w http.ResponseWriter, r *http.Request, ag *resolvedChatAgent, userMessage string, agentName string, baseCtx context.Context, images []llm.ImageAttachment, plannerDecision *types.PlannerDecision, runtimeSystemPrompt string, routeCtx normalizedChatRouteContext) {
 	sessionID := h.getSessionID(r)
 	ctx, cancel := context.WithTimeout(baseCtx, ChatRequestTimeout)
 	defer cancel()
@@ -55,9 +55,10 @@ func (h *Handler) handleClaudeCodeChat(w http.ResponseWriter, r *http.Request, a
 
 	h.trackUsageCommon("claude_code", ag.Settings.Model, agentName, resp.Usage, ag.Agent, userMessage)
 
-	writeJSONResponse(w, attachPlannerDecision(attachRouteMetadata(map[string]any{
+	payload := attachRouteMetadata(map[string]any{
 		"response": text,
 	}, chatRouteMetadata{
 		Mode: routeModeAssistantChat,
-	}), plannerDecision))
+	})
+	writeJSONResponse(w, attachPlannerDecision(attachDependencyResolution(payload, inferDependencyResolutionFromText(text, routeCtx, "claude_code")), plannerDecision))
 }

@@ -106,6 +106,32 @@ func TestRegisterLLMProviders(t *testing.T) {
 	// but we can at least verify it doesn't error
 }
 
+func TestRegisterLLMProviders_LegacySettingsJSONStillWorksWithSecretStoreAttached(t *testing.T) {
+	tempDir := t.TempDir()
+	configPath := filepath.Join(tempDir, "legacy_settings.json")
+	configContent := `{"openai_api_key": "sk-test1234567890abcdefghijklmnopqrstuvwxyz"}`
+	if err := os.WriteFile(configPath, []byte(configContent), 0644); err != nil {
+		t.Fatalf("Failed to create test config: %v", err)
+	}
+
+	configMgr, err := createConfigManager(configPath)
+	if err != nil {
+		t.Fatalf("Failed to create config manager: %v", err)
+	}
+	if configMgr.SecretStore() == nil {
+		t.Fatal("expected secret store to be attached")
+	}
+
+	if got := configMgr.GetAPIKey(); got != "sk-test1234567890abcdefghijklmnopqrstuvwxyz" {
+		t.Fatalf("expected legacy settings API key to remain readable, got %q", got)
+	}
+
+	factory := createLLMFactory()
+	if err := registerLLMProviders(factory, configMgr); err != nil {
+		t.Fatalf("registerLLMProviders failed for legacy settings: %v", err)
+	}
+}
+
 func TestRegisterLLMProviders_NoAPIKeys(t *testing.T) {
 	// Test with empty config (no API keys)
 	tempDir := t.TempDir()

@@ -1,0 +1,20 @@
+{{define "components/workspaces/sync-modal.tmpl"}}
+<!-- Workspace Sync Modal -->
+<div class="modal fade" id="workspaceSyncModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered modal-dialog-scrollable">
+    <div class="modal-content" style="background: var(--bg-primary); border: 1px solid var(--border-color);">
+      <div class="modal-header" style="border-bottom: 1px solid var(--border-color);">
+        <h6 class="modal-title" style="color: var(--text-primary);">Workspace Directory Sync</h6>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body" id="syncModalBody" style="max-height: 60vh; overflow-y: auto;">
+        <!-- Dynamically populated by workspace-sync.js -->
+      </div>
+      <div class="modal-footer" style="border-top: 1px solid var(--border-color);">
+        <button type="button" class="modern-btn modern-btn-secondary" data-bs-dismiss="modal" id="syncDismissBtn">Dismiss</button>
+        <button type="button" class="modern-btn modern-btn-primary" id="syncApplyBtn" disabled>Apply Changes</button>
+      </div>
+    </div>
+  </div>
+</div>
+{{end}}

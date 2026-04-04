@@ -244,6 +244,7 @@ func (h *hybridStore) CreateWorkspace(ctx context.Context, workspace *Workspace)
 	if workspace.ID == "" {
 		workspace.ID = uuid.New().String()
 	}
+	workspace.Kind = NormalizeWorkspaceKind(string(workspace.Kind))
 
 	now := time.Now()
 	if workspace.CreatedAt.IsZero() {
@@ -261,23 +262,39 @@ func (h *hybridStore) GetWorkspace(ctx context.Context, id string) (*Workspace, 
 
 // UpdateWorkspace updates workspace metadata.
 func (h *hybridStore) UpdateWorkspace(ctx context.Context, workspace *Workspace) error {
+	workspace.Kind = NormalizeWorkspaceKind(string(workspace.Kind))
 	workspace.UpdatedAt = time.Now()
 	return h.sqlite.UpdateWorkspace(ctx, workspace)
 }
 
 // DeleteWorkspace removes a workspace.
 func (h *hybridStore) DeleteWorkspace(ctx context.Context, id string) error {
-	return h.sqlite.DeleteWorkspace(ctx, id)
+	if err := h.sqlite.DeleteWorkspace(ctx, id); err != nil {
+		return err
+	}
+
+	h.clearCachedWorkspaceReference(id)
+	return nil
 }
 
 // DeleteSessionsByWorkspace deletes all sessions belonging to a workspace.
 func (h *hybridStore) DeleteSessionsByWorkspace(ctx context.Context, workspaceID string) error {
-	return h.sqlite.DeleteSessionsByWorkspace(ctx, workspaceID)
+	if err := h.sqlite.DeleteSessionsByWorkspace(ctx, workspaceID); err != nil {
+		return err
+	}
+
+	h.evictCachedSessionsByWorkspace(workspaceID)
+	return nil
 }
 
 // UnlinkSessionsFromWorkspace sets workspace_id to NULL for all sessions in a workspace.
 func (h *hybridStore) UnlinkSessionsFromWorkspace(ctx context.Context, workspaceID string) error {
-	return h.sqlite.UnlinkSessionsFromWorkspace(ctx, workspaceID)
+	if err := h.sqlite.UnlinkSessionsFromWorkspace(ctx, workspaceID); err != nil {
+		return err
+	}
+
+	h.clearCachedWorkspaceReference(workspaceID)
+	return nil
 }
 
 // ListWorkspaces returns all workspaces.
@@ -334,6 +351,37 @@ func (h *hybridStore) FlushToStorage(ctx context.Context) error {
 
 	logger.Debug("Flushed sessions to storage", logger.Fields{"count": len(sessions)})
 	return nil
+}
+
+func (h *hybridStore) clearCachedWorkspaceReference(workspaceID string) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+
+	now := time.Now()
+	for _, session := range h.cache.GetAll() {
+		if session == nil || session.FolderID != workspaceID {
+			continue
+		}
+		session.FolderID = ""
+		session.UpdatedAt = now
+	}
+}
+
+func (h *hybridStore) evictCachedSessionsByWorkspace(workspaceID string) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+
+	sessionIDs := make([]string, 0)
+	for _, session := range h.cache.GetAll() {
+		if session == nil || session.FolderID != workspaceID {
+			continue
+		}
+		sessionIDs = append(sessionIDs, session.ID)
+	}
+
+	for _, id := range sessionIDs {
+		h.cache.Remove(id)
+	}
 }
 
 // Close releases resources.

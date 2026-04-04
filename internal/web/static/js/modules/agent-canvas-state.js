@@ -148,8 +148,8 @@ export class AgentCanvasState {
     // Core Canvas State
     this.canvas = null;
     this.ctx = null;
-    this.studioId = null;
-    this.studio = null;
+    this.workspaceId = null;
+    this.workspace = null;
     this.agents = [];
     this.tasks = [];
     this.attachments = [];
@@ -328,18 +328,18 @@ export class AgentCanvasState {
   }
 
   /**
-   * Set studio ID
+   * Set workspace ID
    */
-  setStudioId(studioId) {
-    this.studioId = studioId;
+  setWorkspaceId(workspaceId) {
+    this.workspaceId = workspaceId;
   }
 
   /**
-   * Set studio data
+   * Set workspace data
    */
-  setStudio(studio) {
-    this.studio = studio;
-    this.eventBus.emit(EVENT_TYPES.DATA_LOADED, { studio });
+  setWorkspace(workspace) {
+    this.workspace = workspace;
+    this.eventBus.emit(EVENT_TYPES.DATA_LOADED, { workspace });
   }
 
   // ==================== AGENTS ====================

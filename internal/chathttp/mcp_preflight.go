@@ -5,7 +5,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/workspace"
 )
 
@@ -16,9 +15,10 @@ type mcpAutoRequirement struct {
 }
 
 type mcpPreflightResult struct {
-	requirementLabel string
-	serverName       string
-	userMessage      string
+	requirementLabel     string
+	serverName           string
+	userMessage          string
+	dependencyResolution *dependencyResolution
 }
 
 var mcpAutoRequirements = []mcpAutoRequirement{
@@ -73,48 +73,49 @@ func (h *Handler) maybeAutoEnableMCPForPrompt(
 		}, nil
 	}
 
+	workspaceID := strings.TrimSpace(routeCtx.WorkspaceID)
+
 	serverName := h.selectAvailableMCPServer(requirement.candidateServers)
 	if serverName == "" {
+		if workspaceID != "" && h.isDependencyPromptSuppressed(workspaceID, dependencyTypeMCPMissing, firstCandidateServer(requirement)) {
+			return &mcpPreflightResult{
+				requirementLabel: requirement.label,
+				userMessage:      buildMissingMCPMessage(requirement),
+			}, nil
+		}
+		return &mcpPreflightResult{
+			requirementLabel:     requirement.label,
+			userMessage:          buildMissingMCPMessage(requirement),
+			dependencyResolution: buildMissingMCPDependencyResolution(requirement, workspaceID),
+		}, nil
+	}
+	if workspaceID != "" && h.isDependencyPromptSuppressed(workspaceID, dependencyTypeWorkspaceMCP, serverName) {
 		return &mcpPreflightResult{
 			requirementLabel: requirement.label,
-			userMessage:      buildMissingMCPMessage(requirement),
+			serverName:       serverName,
+			userMessage:      buildWorkspaceEnableMCPMessage(requirement, serverName),
 		}, nil
 	}
 
-	workspaceID := strings.TrimSpace(routeCtx.WorkspaceID)
 	if workspaceID == "" || h.workspaceStore == nil {
 		return &mcpPreflightResult{
-			requirementLabel: requirement.label,
-			serverName:       serverName,
-			userMessage:      buildWorkspaceRequiredMCPMessage(requirement),
+			requirementLabel:     requirement.label,
+			serverName:           serverName,
+			userMessage:          buildWorkspaceRequiredMCPMessage(requirement),
+			dependencyResolution: buildWorkspaceRequiredDependencyResolution(requirement, serverName),
 		}, nil
 	}
 
-	updatedAgent, err := h.attachWorkspaceMCPBindingForPrompt(agentName, workspaceID, serverName)
-	if err != nil {
-		logger.Warn("Failed to auto-attach workspace MCP binding for prompt", logger.Fields{
-			"agent":        agentName,
-			"workspace_id": workspaceID,
-			"server":       serverName,
-			"error":        err,
-		})
-		return &mcpPreflightResult{
-			requirementLabel: requirement.label,
-			serverName:       serverName,
-			userMessage:      buildWorkspaceAttachMCPFailureMessage(serverName),
-		}, nil
-	}
-
-	logger.Info("Auto-attached workspace MCP binding for assistant prompt", logger.Fields{
-		"agent":        agentName,
-		"workspace_id": workspaceID,
-		"server":       serverName,
-		"requirement":  requirement.label,
-	})
 	return &mcpPreflightResult{
 		requirementLabel: requirement.label,
 		serverName:       serverName,
-	}, updatedAgent
+		userMessage:      buildWorkspaceEnableMCPMessage(requirement, serverName),
+		dependencyResolution: buildWorkspaceEnableMCPDependencyResolution(
+			requirement,
+			workspaceID,
+			serverName,
+		),
+	}, nil
 }
 
 func isSystemAssistantForPreflight(agentName string) bool {
@@ -361,6 +362,13 @@ func buildWorkspaceRequiredMCPMessage(requirement *mcpAutoRequirement) string {
 	return fmt.Sprintf("This request needs %s tools, but they require a workspace. Please open a workspace first, then try again.", requirement.label)
 }
 
+func buildWorkspaceEnableMCPMessage(requirement *mcpAutoRequirement, serverName string) string {
+	if requirement == nil {
+		return fmt.Sprintf("This request needs the %s MCP connector enabled in the current workspace before I can continue.", strings.TrimSpace(serverName))
+	}
+	return fmt.Sprintf("This request needs %s tools. Enable the %s MCP connector for this workspace to continue.", requirement.label, strings.TrimSpace(serverName))
+}
+
 func buildWorkspaceAttachMCPFailureMessage(serverName string) string {
 	trimmed := strings.TrimSpace(serverName)
 	if trimmed == "" {
@@ -410,4 +418,176 @@ func buildMissingMCPMessage(requirement *mcpAutoRequirement) string {
 	default:
 		return "I cannot run this tool request because no suitable MCP server is configured."
 	}
+}
+
+func (h *Handler) isDependencyPromptSuppressed(workspaceID, dependencyType, target string) bool {
+	if h == nil || h.workspaceStore == nil {
+		return false
+	}
+	ws, err := h.workspaceStore.Get(strings.TrimSpace(workspaceID))
+	if err != nil || ws == nil {
+		return false
+	}
+	preferenceKey := workspace.DependencyPreferenceKey(dependencyType, target)
+	pref, ok := ws.GetDependencyPreference(preferenceKey)
+	if !ok {
+		return false
+	}
+	return strings.EqualFold(strings.TrimSpace(pref.Value), "suppressed")
+}
+
+func buildMissingMCPDependencyResolution(requirement *mcpAutoRequirement, workspaceID string) *dependencyResolution {
+	if requirement == nil {
+		return nil
+	}
+
+	title := "Required MCP connector is not configured"
+	summary := "This request needs a compatible MCP connector before it can continue."
+	switch strings.ToLower(strings.TrimSpace(requirement.label)) {
+	case "web research":
+		title = "Web search MCP is not configured"
+		summary = "Set up a web-search MCP connector, then retry this request."
+	case "browser automation":
+		title = "Browser automation MCP is not configured"
+		summary = "Set up a browser automation MCP connector, then retry this request."
+	}
+
+	actions := []dependencyResolutionAction{
+		{
+			Type:        dependencyActionTypeOpenURL,
+			Label:       "Open MCP Settings",
+			Description: "Configure or install the required MCP connector.",
+			Variant:     "primary",
+			URL:         "/mcp",
+		},
+	}
+
+	if strings.TrimSpace(workspaceID) != "" {
+		serverName := firstCandidateServer(requirement)
+		preferenceKey := workspace.DependencyPreferenceKey(dependencyTypeMCPMissing, serverName)
+		actions = append(actions, dependencyResolutionAction{
+			Type:           dependencyActionTypeSuppressWorkspaceAsk,
+			Label:          "Don't ask again in this workspace",
+			Description:    "Suppress this low-risk prompt for the current workspace.",
+			Variant:        "secondary",
+			WorkspaceID:    workspaceID,
+			ServerName:     serverName,
+			DependencyType: dependencyTypeMCPMissing,
+			PreferenceKey:  preferenceKey,
+		})
+	}
+
+	return &dependencyResolution{
+		Version:            1,
+		Title:              title,
+		Summary:            summary,
+		ReasonCode:         "mcp_missing",
+		RecommendedSurface: dependencyResolutionSurfaceSetupFlow,
+		RetryContext:       buildDefaultRetryContext(false),
+		Steps: []dependencyResolutionStep{
+			{
+				ID:           "missing-mcp",
+				Type:         dependencyTypeMCPMissing,
+				DisplayName:  strings.TrimSpace(requirement.label),
+				Summary:      summary,
+				RiskLevel:    "low",
+				Suppressible: strings.TrimSpace(workspaceID) != "",
+				Actions:      actions,
+			},
+		},
+	}
+}
+
+func buildWorkspaceRequiredDependencyResolution(requirement *mcpAutoRequirement, serverName string) *dependencyResolution {
+	summary := "Open or create a workspace before enabling the connector and retrying."
+	return &dependencyResolution{
+		Version:            1,
+		Title:              "Workspace required",
+		Summary:            summary,
+		ReasonCode:         "workspace_required",
+		RecommendedSurface: dependencyResolutionSurfaceSetupFlow,
+		RetryContext:       buildDefaultRetryContext(false),
+		Steps: []dependencyResolutionStep{
+			{
+				ID:          "workspace-required",
+				Type:        dependencyTypeWorkspaceRequired,
+				DisplayName: strings.TrimSpace(requirement.label),
+				Summary:     summary,
+				RiskLevel:   "low",
+				Actions: []dependencyResolutionAction{
+					{
+						Type:        dependencyActionTypeOpenURL,
+						Label:       "Open Workspaces",
+						Description: "Choose a workspace, then retry this request.",
+						Variant:     "primary",
+						URL:         "/workspaces",
+						ServerName:  serverName,
+					},
+				},
+			},
+		},
+	}
+}
+
+func buildWorkspaceEnableMCPDependencyResolution(requirement *mcpAutoRequirement, workspaceID, serverName string) *dependencyResolution {
+	serverName = strings.TrimSpace(serverName)
+	summary := fmt.Sprintf("Enable the %s MCP connector in this workspace to continue automatically.", serverName)
+	preferenceKey := workspace.DependencyPreferenceKey(dependencyTypeWorkspaceMCP, serverName)
+
+	return &dependencyResolution{
+		Version:            1,
+		Title:              "Enable MCP connector for this workspace",
+		Summary:            summary,
+		ReasonCode:         "workspace_mcp_binding_missing",
+		RecommendedSurface: dependencyResolutionSurfaceModal,
+		RetryContext:       buildDefaultRetryContext(true),
+		Steps: []dependencyResolutionStep{
+			{
+				ID:           "enable-workspace-mcp",
+				Type:         dependencyTypeWorkspaceMCP,
+				DisplayName:  serverName,
+				Summary:      summary,
+				RiskLevel:    "low",
+				Suppressible: true,
+				Actions: []dependencyResolutionAction{
+					{
+						Type:           dependencyActionTypeEnableWorkspaceMCP,
+						Label:          normalizeDependencyActionLabel("Enable in workspace", "Enable in workspace"),
+						Description:    fmt.Sprintf("Attach %s to workspace %s and retry automatically.", serverName, workspaceID),
+						Variant:        "primary",
+						WorkspaceID:    workspaceID,
+						ServerName:     serverName,
+						DependencyType: dependencyTypeWorkspaceMCP,
+						AutoRetry:      true,
+					},
+					{
+						Type:           dependencyActionTypeSuppressWorkspaceAsk,
+						Label:          "Don't ask again in this workspace",
+						Description:    "Suppress this low-risk prompt for the current workspace.",
+						Variant:        "secondary",
+						WorkspaceID:    workspaceID,
+						ServerName:     serverName,
+						DependencyType: dependencyTypeWorkspaceMCP,
+						PreferenceKey:  preferenceKey,
+					},
+					{
+						Type:        dependencyActionTypeOpenURL,
+						Label:       "Open MCP Settings",
+						Description: "Review or change the connector setup manually.",
+						Variant:     "secondary",
+						URL:         "/mcp",
+						WorkspaceID: workspaceID,
+						ServerName:  serverName,
+					},
+				},
+			},
+		},
+	}
+}
+
+func firstCandidateServer(requirement *mcpAutoRequirement) string {
+	if requirement == nil || len(requirement.candidateServers) == 0 {
+		return ""
+	}
+	return strings.TrimSpace(requirement.candidateServers[0])
 }

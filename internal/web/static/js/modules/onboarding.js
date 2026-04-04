@@ -7,6 +7,7 @@ export class OnboardingManager {
     this.modal = null;
     this.modalInstance = null;
     this.availableProviders = [];
+    this.workspaceRootState = null;
     this.userName = '';
     this.assistantName = 'Ori';
   }
@@ -25,6 +26,7 @@ export class OnboardingManager {
     this.setupEventListeners();
 
     const status = await this.checkOnboardingStatus();
+    await this.loadWorkspaceRoot();
     this.userName = status.user_name || '';
     this.assistantName = status.assistant_name || 'Ori';
     if (status.needs_onboarding) {
@@ -97,9 +99,29 @@ export class OnboardingManager {
       assistantNameInput.addEventListener('keydown', (e) => {
         if (e.key === 'Enter') {
           e.preventDefault();
+          const workspaceRootInput = document.getElementById('onboardingWorkspaceRoot');
+          if (workspaceRootInput) {
+            workspaceRootInput.focus();
+          } else {
+            this.advanceFromWelcome();
+          }
+        }
+      });
+    }
+
+    const workspaceRootInput = document.getElementById('onboardingWorkspaceRoot');
+    if (workspaceRootInput) {
+      workspaceRootInput.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+          e.preventDefault();
           this.advanceFromWelcome();
         }
       });
+    }
+
+    const workspaceRootBrowseBtn = document.getElementById('onboardingWorkspaceRootBrowseBtn');
+    if (workspaceRootBrowseBtn) {
+      workspaceRootBrowseBtn.addEventListener('click', () => this.browseWorkspaceRoot());
     }
   }
 
@@ -146,6 +168,139 @@ export class OnboardingManager {
       return true;
     } catch (error) {
       console.error('Error saving names:', error);
+      return false;
+    }
+  }
+
+  async loadWorkspaceRoot() {
+    try {
+      const response = await fetch('/api/settings/workspace-root');
+      if (!response.ok) throw new Error('Failed to fetch workspace directory');
+      const data = await response.json();
+      this.applyWorkspaceRootState(data);
+    } catch (error) {
+      console.error('Error loading workspace directory:', error);
+    }
+  }
+
+  applyWorkspaceRootState(state) {
+    this.workspaceRootState = state || {};
+
+    const input = document.getElementById('onboardingWorkspaceRoot');
+    const help = document.getElementById('onboardingWorkspaceRootHelp');
+    const configuredRoot = String(this.workspaceRootState.workspace_root || '').trim();
+    const effectiveRoot = String(this.workspaceRootState.effective_workspace_root || '').trim();
+    const source = String(this.workspaceRootState.source || 'default');
+
+    if (input) {
+      input.value = configuredRoot || effectiveRoot;
+      input.placeholder = effectiveRoot || 'Choose a workspace directory';
+    }
+
+    if (help) {
+      if (source === 'settings') {
+        help.textContent = effectiveRoot
+          ? `New workspaces will be created in ${effectiveRoot}.`
+          : 'New workspaces will be created inside this folder by default.';
+      } else if (source === 'environment') {
+        help.textContent = effectiveRoot
+          ? `Currently using WORKSPACE_DIR at ${effectiveRoot}. Pick a new folder if you want to override it now.`
+          : 'Currently using WORKSPACE_DIR. Pick a new folder if you want to override it now.';
+      } else {
+        help.textContent = effectiveRoot
+          ? `Currently using the default directory at ${effectiveRoot}. Pick a new folder if you want a custom workspace location.`
+          : 'New workspaces will be created inside this folder by default.';
+      }
+    }
+  }
+
+  clearWorkspaceRootError() {
+    const errorEl = document.getElementById('onboardingWorkspaceRootError');
+    if (errorEl) {
+      errorEl.textContent = '';
+      errorEl.classList.add('d-none');
+    }
+  }
+
+  showWorkspaceRootError(message) {
+    const errorEl = document.getElementById('onboardingWorkspaceRootError');
+    if (errorEl) {
+      errorEl.textContent = message;
+      errorEl.classList.remove('d-none');
+    }
+  }
+
+  async browseWorkspaceRoot() {
+    const browseBtn = document.getElementById('onboardingWorkspaceRootBrowseBtn');
+    const input = document.getElementById('onboardingWorkspaceRoot');
+    if (!browseBtn || !input) return;
+
+    this.clearWorkspaceRootError();
+    const originalText = browseBtn.textContent || 'Browse';
+    browseBtn.disabled = true;
+    browseBtn.textContent = 'Selecting...';
+
+    try {
+      const response = await fetch('/api/folder-picker/select-path', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          title: 'Select Default Workspace Directory'
+        })
+      });
+
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok || !result.success) {
+        throw new Error(result.error || 'Failed to open folder picker');
+      }
+
+      if (result.selected && result.path) {
+        input.value = result.path;
+        input.focus();
+      }
+    } catch (error) {
+      console.error('Error browsing workspace directory:', error);
+      this.showWorkspaceRootError(error.message || 'Failed to open folder picker.');
+    } finally {
+      browseBtn.disabled = false;
+      browseBtn.textContent = originalText;
+    }
+  }
+
+  async saveWorkspaceRoot() {
+    const input = document.getElementById('onboardingWorkspaceRoot');
+    if (!input) return true;
+
+    this.clearWorkspaceRootError();
+
+    const desiredRoot = input.value.trim();
+    const configuredRoot = String(this.workspaceRootState?.workspace_root || '').trim();
+    const effectiveRoot = String(this.workspaceRootState?.effective_workspace_root || '').trim();
+
+    if (!configuredRoot && desiredRoot === effectiveRoot) {
+      return true;
+    }
+    if (configuredRoot && desiredRoot === configuredRoot) {
+      return true;
+    }
+
+    try {
+      const response = await fetch('/api/settings/workspace-root', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ workspace_root: desiredRoot })
+      });
+
+      const data = await response.json().catch(() => null);
+      if (!response.ok || !data) {
+        throw new Error((data && data.error) || 'Failed to save workspace directory');
+      }
+
+      this.applyWorkspaceRootState(data);
+      return true;
+    } catch (error) {
+      console.error('Error saving workspace directory:', error);
+      this.showWorkspaceRootError(error.message || 'Failed to save workspace directory.');
       return false;
     }
   }
@@ -321,6 +476,11 @@ export class OnboardingManager {
         successAlert.textContent = `${aName} will use ${label} (${model}).`;
         successAlert.classList.remove('d-none');
       }
+
+      if (typeof EventBus !== 'undefined') {
+        EventBus.emit('systemModel:changed', { provider, model });
+      }
+
       return true;
     } catch (error) {
       console.error('Error saving system model:', error);
@@ -466,6 +626,11 @@ export class OnboardingManager {
   }
 
   async advanceFromWelcome() {
+    const workspaceRootSaved = await this.saveWorkspaceRoot();
+    if (!workspaceRootSaved) {
+      return;
+    }
+
     await this.saveNames();
     await this.completeStep('step-welcome');
 

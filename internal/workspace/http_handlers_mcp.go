@@ -12,11 +12,11 @@ import (
 	"github.com/johnjallday/ori-agent/internal/logger"
 )
 
-// CreateMCPBinding handles POST /api/studios/{studioID}/mcp-bindings
+// CreateMCPBinding handles POST /api/workspaces/{workspaceID}/mcp-bindings
 func (h *HTTPHandler) CreateMCPBinding(w http.ResponseWriter, r *http.Request) {
-	studioID := r.PathValue("studioID")
-	if studioID == "" {
-		orihttp.BadRequest(w, "studio ID is required")
+	workspaceID := r.PathValue("workspaceID")
+	if workspaceID == "" {
+		orihttp.BadRequest(w, "workspace ID is required")
 		return
 	}
 
@@ -36,9 +36,9 @@ func (h *HTTPHandler) CreateMCPBinding(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	studio, err := h.store.Get(studioID)
+	workspace, err := h.store.Get(workspaceID)
 	if err != nil {
-		orihttp.NotFound(w, fmt.Sprintf("Studio not found: %v", err))
+		orihttp.NotFound(w, fmt.Sprintf("Workspace not found: %v", err))
 		return
 	}
 
@@ -46,7 +46,7 @@ func (h *HTTPHandler) CreateMCPBinding(w http.ResponseWriter, r *http.Request) {
 	if bindingID == "" {
 		bindingID = uuid.New().String()
 	}
-	if _, exists := studio.GetMCPBinding(bindingID); exists {
+	if _, exists := workspace.GetMCPBinding(bindingID); exists {
 		orihttp.BadRequest(w, fmt.Sprintf("MCP binding %s already exists", bindingID))
 		return
 	}
@@ -67,73 +67,73 @@ func (h *HTTPHandler) CreateMCPBinding(w http.ResponseWriter, r *http.Request) {
 		UpdatedAt:  time.Now(),
 	}
 
-	if err := studio.UpsertMCPBinding(binding); err != nil {
+	if err := workspace.UpsertMCPBinding(binding); err != nil {
 		orihttp.BadRequest(w, err.Error())
 		return
 	}
-	if err := h.store.Save(studio); err != nil {
-		orihttp.InternalError(w, fmt.Sprintf("Failed to save studio: %v", err))
+	if err := h.store.Save(workspace); err != nil {
+		orihttp.InternalError(w, fmt.Sprintf("Failed to save workspace: %v", err))
 		return
 	}
 
-	created, _ := studio.GetMCPBinding(binding.ID)
+	created, _ := workspace.GetMCPBinding(binding.ID)
 	if created == nil {
 		created = &binding
 	}
-	h.publishWorkspaceMCPEvent(studioID, "mcp_binding_created", map[string]interface{}{"binding": created})
+	h.publishWorkspaceMCPEvent(workspaceID, "mcp_binding_created", map[string]interface{}{"binding": created})
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
 	if encErr := json.NewEncoder(w).Encode(map[string]interface{}{
-		"message": "MCP binding created successfully",
-		"binding": created,
-		"studio":  studioID,
+		"message":   "MCP binding created successfully",
+		"binding":   created,
+		"workspace": workspaceID,
 	}); encErr != nil {
 		logger.Error("Failed to encode response", logger.Fields{"error": encErr})
 	}
 }
 
-// ListMCPBindings handles GET /api/studios/{studioID}/mcp-bindings
+// ListMCPBindings handles GET /api/workspaces/{workspaceID}/mcp-bindings
 func (h *HTTPHandler) ListMCPBindings(w http.ResponseWriter, r *http.Request) {
-	studioID := r.PathValue("studioID")
-	if studioID == "" {
-		orihttp.BadRequest(w, "studio ID is required")
+	workspaceID := r.PathValue("workspaceID")
+	if workspaceID == "" {
+		orihttp.BadRequest(w, "workspace ID is required")
 		return
 	}
 
-	studio, err := h.store.Get(studioID)
+	workspace, err := h.store.Get(workspaceID)
 	if err != nil {
-		orihttp.NotFound(w, fmt.Sprintf("Studio not found: %v", err))
+		orihttp.NotFound(w, fmt.Sprintf("Workspace not found: %v", err))
 		return
 	}
 
-	bindings := studio.GetMCPBindings()
+	bindings := workspace.GetMCPBindings()
 	w.Header().Set("Content-Type", "application/json")
 	if encErr := json.NewEncoder(w).Encode(map[string]interface{}{
-		"bindings": bindings,
-		"count":    len(bindings),
-		"studio":   studioID,
+		"bindings":  bindings,
+		"count":     len(bindings),
+		"workspace": workspaceID,
 	}); encErr != nil {
 		logger.Error("Failed to encode response", logger.Fields{"error": encErr})
 	}
 }
 
-// GetMCPBinding handles GET /api/studios/{studioID}/mcp-bindings/{bindingID}
+// GetMCPBinding handles GET /api/workspaces/{workspaceID}/mcp-bindings/{bindingID}
 func (h *HTTPHandler) GetMCPBinding(w http.ResponseWriter, r *http.Request) {
-	studioID := r.PathValue("studioID")
+	workspaceID := r.PathValue("workspaceID")
 	bindingID := r.PathValue("bindingID")
-	if studioID == "" || bindingID == "" {
-		orihttp.BadRequest(w, "studio ID and binding ID are required")
+	if workspaceID == "" || bindingID == "" {
+		orihttp.BadRequest(w, "workspace ID and binding ID are required")
 		return
 	}
 
-	studio, err := h.store.Get(studioID)
+	workspace, err := h.store.Get(workspaceID)
 	if err != nil {
-		orihttp.NotFound(w, fmt.Sprintf("Studio not found: %v", err))
+		orihttp.NotFound(w, fmt.Sprintf("Workspace not found: %v", err))
 		return
 	}
 
-	binding, exists := studio.GetMCPBinding(bindingID)
+	binding, exists := workspace.GetMCPBinding(bindingID)
 	if !exists {
 		orihttp.NotFound(w, fmt.Sprintf("MCP binding %s not found", bindingID))
 		return
@@ -141,19 +141,19 @@ func (h *HTTPHandler) GetMCPBinding(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	if encErr := json.NewEncoder(w).Encode(map[string]interface{}{
-		"binding": binding,
-		"studio":  studioID,
+		"binding":   binding,
+		"workspace": workspaceID,
 	}); encErr != nil {
 		logger.Error("Failed to encode response", logger.Fields{"error": encErr})
 	}
 }
 
-// UpdateMCPBinding handles PUT/PATCH /api/studios/{studioID}/mcp-bindings/{bindingID}
+// UpdateMCPBinding handles PUT/PATCH /api/workspaces/{workspaceID}/mcp-bindings/{bindingID}
 func (h *HTTPHandler) UpdateMCPBinding(w http.ResponseWriter, r *http.Request) {
-	studioID := r.PathValue("studioID")
+	workspaceID := r.PathValue("workspaceID")
 	bindingID := r.PathValue("bindingID")
-	if studioID == "" || bindingID == "" {
-		orihttp.BadRequest(w, "studio ID and binding ID are required")
+	if workspaceID == "" || bindingID == "" {
+		orihttp.BadRequest(w, "workspace ID and binding ID are required")
 		return
 	}
 
@@ -168,13 +168,13 @@ func (h *HTTPHandler) UpdateMCPBinding(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	studio, err := h.store.Get(studioID)
+	workspace, err := h.store.Get(workspaceID)
 	if err != nil {
-		orihttp.NotFound(w, fmt.Sprintf("Studio not found: %v", err))
+		orihttp.NotFound(w, fmt.Sprintf("Workspace not found: %v", err))
 		return
 	}
 
-	binding, exists := studio.GetMCPBinding(bindingID)
+	binding, exists := workspace.GetMCPBinding(bindingID)
 	if !exists {
 		orihttp.NotFound(w, fmt.Sprintf("MCP binding %s not found", bindingID))
 		return
@@ -196,108 +196,108 @@ func (h *HTTPHandler) UpdateMCPBinding(w http.ResponseWriter, r *http.Request) {
 		binding.Config = req.Config
 	}
 
-	if err := studio.UpsertMCPBinding(*binding); err != nil {
+	if err := workspace.UpsertMCPBinding(*binding); err != nil {
 		orihttp.BadRequest(w, err.Error())
 		return
 	}
-	if err := h.store.Save(studio); err != nil {
-		orihttp.InternalError(w, fmt.Sprintf("Failed to save studio: %v", err))
+	if err := h.store.Save(workspace); err != nil {
+		orihttp.InternalError(w, fmt.Sprintf("Failed to save workspace: %v", err))
 		return
 	}
 
-	updated, _ := studio.GetMCPBinding(bindingID)
+	updated, _ := workspace.GetMCPBinding(bindingID)
 	if updated == nil {
 		updated = binding
 	}
-	h.publishWorkspaceMCPEvent(studioID, "mcp_binding_updated", map[string]interface{}{"binding": updated})
+	h.publishWorkspaceMCPEvent(workspaceID, "mcp_binding_updated", map[string]interface{}{"binding": updated})
 
 	w.Header().Set("Content-Type", "application/json")
 	if encErr := json.NewEncoder(w).Encode(map[string]interface{}{
-		"message": "MCP binding updated successfully",
-		"binding": updated,
-		"studio":  studioID,
+		"message":   "MCP binding updated successfully",
+		"binding":   updated,
+		"workspace": workspaceID,
 	}); encErr != nil {
 		logger.Error("Failed to encode response", logger.Fields{"error": encErr})
 	}
 }
 
-// DeleteMCPBinding handles DELETE /api/studios/{studioID}/mcp-bindings/{bindingID}
+// DeleteMCPBinding handles DELETE /api/workspaces/{workspaceID}/mcp-bindings/{bindingID}
 func (h *HTTPHandler) DeleteMCPBinding(w http.ResponseWriter, r *http.Request) {
-	studioID := r.PathValue("studioID")
+	workspaceID := r.PathValue("workspaceID")
 	bindingID := r.PathValue("bindingID")
-	if studioID == "" || bindingID == "" {
-		orihttp.BadRequest(w, "studio ID and binding ID are required")
+	if workspaceID == "" || bindingID == "" {
+		orihttp.BadRequest(w, "workspace ID and binding ID are required")
 		return
 	}
 
-	studio, err := h.store.Get(studioID)
+	workspace, err := h.store.Get(workspaceID)
 	if err != nil {
-		orihttp.NotFound(w, fmt.Sprintf("Studio not found: %v", err))
+		orihttp.NotFound(w, fmt.Sprintf("Workspace not found: %v", err))
 		return
 	}
 
-	if err := studio.DeleteMCPBinding(bindingID); err != nil {
+	if err := workspace.DeleteMCPBinding(bindingID); err != nil {
 		orihttp.NotFound(w, err.Error())
 		return
 	}
-	if err := h.store.Save(studio); err != nil {
-		orihttp.InternalError(w, fmt.Sprintf("Failed to save studio: %v", err))
+	if err := h.store.Save(workspace); err != nil {
+		orihttp.InternalError(w, fmt.Sprintf("Failed to save workspace: %v", err))
 		return
 	}
 
-	h.publishWorkspaceMCPEvent(studioID, "mcp_binding_deleted", map[string]interface{}{"binding_id": bindingID})
+	h.publishWorkspaceMCPEvent(workspaceID, "mcp_binding_deleted", map[string]interface{}{"binding_id": bindingID})
 
 	w.Header().Set("Content-Type", "application/json")
 	if encErr := json.NewEncoder(w).Encode(map[string]interface{}{
 		"message":    "MCP binding deleted successfully",
 		"binding_id": bindingID,
-		"studio":     studioID,
+		"workspace":  workspaceID,
 	}); encErr != nil {
 		logger.Error("Failed to encode response", logger.Fields{"error": encErr})
 	}
 }
 
-// ListAgentMCPAccess handles GET /api/studios/{studioID}/agent-mcp-access
+// ListAgentMCPAccess handles GET /api/workspaces/{workspaceID}/agent-mcp-access
 func (h *HTTPHandler) ListAgentMCPAccess(w http.ResponseWriter, r *http.Request) {
-	studioID := r.PathValue("studioID")
-	if studioID == "" {
-		orihttp.BadRequest(w, "studio ID is required")
+	workspaceID := r.PathValue("workspaceID")
+	if workspaceID == "" {
+		orihttp.BadRequest(w, "workspace ID is required")
 		return
 	}
 
-	studio, err := h.store.Get(studioID)
+	workspace, err := h.store.Get(workspaceID)
 	if err != nil {
-		orihttp.NotFound(w, fmt.Sprintf("Studio not found: %v", err))
+		orihttp.NotFound(w, fmt.Sprintf("Workspace not found: %v", err))
 		return
 	}
 
-	entries := studio.ListAgentMCPAccess()
+	entries := workspace.ListAgentMCPAccess()
 	w.Header().Set("Content-Type", "application/json")
 	if encErr := json.NewEncoder(w).Encode(map[string]interface{}{
-		"access": entries,
-		"count":  len(entries),
-		"studio": studioID,
+		"access":    entries,
+		"count":     len(entries),
+		"workspace": workspaceID,
 	}); encErr != nil {
 		logger.Error("Failed to encode response", logger.Fields{"error": encErr})
 	}
 }
 
-// GetAgentMCPAccessEntry handles GET /api/studios/{studioID}/agent-mcp-access/{agentInstanceID}
+// GetAgentMCPAccessEntry handles GET /api/workspaces/{workspaceID}/agent-mcp-access/{agentInstanceID}
 func (h *HTTPHandler) GetAgentMCPAccessEntry(w http.ResponseWriter, r *http.Request) {
-	studioID := r.PathValue("studioID")
+	workspaceID := r.PathValue("workspaceID")
 	agentInstanceID := r.PathValue("agentInstanceID")
-	if studioID == "" || agentInstanceID == "" {
-		orihttp.BadRequest(w, "studio ID and agent instance ID are required")
+	if workspaceID == "" || agentInstanceID == "" {
+		orihttp.BadRequest(w, "workspace ID and agent instance ID are required")
 		return
 	}
 
-	studio, err := h.store.Get(studioID)
+	workspace, err := h.store.Get(workspaceID)
 	if err != nil {
-		orihttp.NotFound(w, fmt.Sprintf("Studio not found: %v", err))
+		orihttp.NotFound(w, fmt.Sprintf("Workspace not found: %v", err))
 		return
 	}
 
-	entry, exists := studio.GetAgentMCPAccess(agentInstanceID)
+	entry, exists := workspace.GetAgentMCPAccess(agentInstanceID)
 	if !exists {
 		orihttp.NotFound(w, fmt.Sprintf("agent MCP access %s not found", agentInstanceID))
 		return
@@ -305,19 +305,19 @@ func (h *HTTPHandler) GetAgentMCPAccessEntry(w http.ResponseWriter, r *http.Requ
 
 	w.Header().Set("Content-Type", "application/json")
 	if encErr := json.NewEncoder(w).Encode(map[string]interface{}{
-		"access": entry,
-		"studio": studioID,
+		"access":    entry,
+		"workspace": workspaceID,
 	}); encErr != nil {
 		logger.Error("Failed to encode response", logger.Fields{"error": encErr})
 	}
 }
 
-// UpdateAgentMCPAccess handles PUT/PATCH /api/studios/{studioID}/agent-mcp-access/{agentInstanceID}
+// UpdateAgentMCPAccess handles PUT/PATCH /api/workspaces/{workspaceID}/agent-mcp-access/{agentInstanceID}
 func (h *HTTPHandler) UpdateAgentMCPAccess(w http.ResponseWriter, r *http.Request) {
-	studioID := r.PathValue("studioID")
+	workspaceID := r.PathValue("workspaceID")
 	agentInstanceID := r.PathValue("agentInstanceID")
-	if studioID == "" || agentInstanceID == "" {
-		orihttp.BadRequest(w, "studio ID and agent instance ID are required")
+	if workspaceID == "" || agentInstanceID == "" {
+		orihttp.BadRequest(w, "workspace ID and agent instance ID are required")
 		return
 	}
 
@@ -328,15 +328,15 @@ func (h *HTTPHandler) UpdateAgentMCPAccess(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	studio, err := h.store.Get(studioID)
+	workspace, err := h.store.Get(workspaceID)
 	if err != nil {
-		orihttp.NotFound(w, fmt.Sprintf("Studio not found: %v", err))
+		orihttp.NotFound(w, fmt.Sprintf("Workspace not found: %v", err))
 		return
 	}
 
 	// Validate that all referenced binding IDs exist in the workspace
 	if len(req.EnabledBindingIDs) > 0 {
-		bindings := studio.GetMCPBindings()
+		bindings := workspace.GetMCPBindings()
 		bindingIDSet := make(map[string]bool, len(bindings))
 		for _, b := range bindings {
 			bindingIDSet[strings.ToLower(strings.TrimSpace(b.ID))] = true
@@ -358,68 +358,68 @@ func (h *HTTPHandler) UpdateAgentMCPAccess(w http.ResponseWriter, r *http.Reques
 		EnabledBindingIDs: req.EnabledBindingIDs,
 		UpdatedAt:         time.Now(),
 	}
-	if err := studio.SetAgentMCPAccess(entry); err != nil {
+	if err := workspace.SetAgentMCPAccess(entry); err != nil {
 		orihttp.BadRequest(w, err.Error())
 		return
 	}
-	if err := h.store.Save(studio); err != nil {
-		orihttp.InternalError(w, fmt.Sprintf("Failed to save studio: %v", err))
+	if err := h.store.Save(workspace); err != nil {
+		orihttp.InternalError(w, fmt.Sprintf("Failed to save workspace: %v", err))
 		return
 	}
 
-	updated, _ := studio.GetAgentMCPAccess(agentInstanceID)
+	updated, _ := workspace.GetAgentMCPAccess(agentInstanceID)
 	if updated == nil {
 		updated = &entry
 	}
-	h.publishWorkspaceMCPEvent(studioID, "agent_mcp_access_updated", map[string]interface{}{"access": updated})
+	h.publishWorkspaceMCPEvent(workspaceID, "agent_mcp_access_updated", map[string]interface{}{"access": updated})
 
 	w.Header().Set("Content-Type", "application/json")
 	if encErr := json.NewEncoder(w).Encode(map[string]interface{}{
-		"message": "Agent MCP access updated successfully",
-		"access":  updated,
-		"studio":  studioID,
+		"message":   "Agent MCP access updated successfully",
+		"access":    updated,
+		"workspace": workspaceID,
 	}); encErr != nil {
 		logger.Error("Failed to encode response", logger.Fields{"error": encErr})
 	}
 }
 
-// DeleteAgentMCPAccess handles DELETE /api/studios/{studioID}/agent-mcp-access/{agentInstanceID}
+// DeleteAgentMCPAccess handles DELETE /api/workspaces/{workspaceID}/agent-mcp-access/{agentInstanceID}
 func (h *HTTPHandler) DeleteAgentMCPAccess(w http.ResponseWriter, r *http.Request) {
-	studioID := r.PathValue("studioID")
+	workspaceID := r.PathValue("workspaceID")
 	agentInstanceID := r.PathValue("agentInstanceID")
-	if studioID == "" || agentInstanceID == "" {
-		orihttp.BadRequest(w, "studio ID and agent instance ID are required")
+	if workspaceID == "" || agentInstanceID == "" {
+		orihttp.BadRequest(w, "workspace ID and agent instance ID are required")
 		return
 	}
 
-	studio, err := h.store.Get(studioID)
+	workspace, err := h.store.Get(workspaceID)
 	if err != nil {
-		orihttp.NotFound(w, fmt.Sprintf("Studio not found: %v", err))
+		orihttp.NotFound(w, fmt.Sprintf("Workspace not found: %v", err))
 		return
 	}
 
-	if err := studio.DeleteAgentMCPAccess(agentInstanceID); err != nil {
+	if err := workspace.DeleteAgentMCPAccess(agentInstanceID); err != nil {
 		orihttp.NotFound(w, err.Error())
 		return
 	}
-	if err := h.store.Save(studio); err != nil {
-		orihttp.InternalError(w, fmt.Sprintf("Failed to save studio: %v", err))
+	if err := h.store.Save(workspace); err != nil {
+		orihttp.InternalError(w, fmt.Sprintf("Failed to save workspace: %v", err))
 		return
 	}
 
-	h.publishWorkspaceMCPEvent(studioID, "agent_mcp_access_deleted", map[string]interface{}{"agent_instance_id": agentInstanceID})
+	h.publishWorkspaceMCPEvent(workspaceID, "agent_mcp_access_deleted", map[string]interface{}{"agent_instance_id": agentInstanceID})
 
 	w.Header().Set("Content-Type", "application/json")
 	if encErr := json.NewEncoder(w).Encode(map[string]interface{}{
 		"message":           "Agent MCP access deleted successfully",
 		"agent_instance_id": agentInstanceID,
-		"studio":            studioID,
+		"workspace":         workspaceID,
 	}); encErr != nil {
 		logger.Error("Failed to encode response", logger.Fields{"error": encErr})
 	}
 }
 
-func (h *HTTPHandler) publishWorkspaceMCPEvent(studioID, action string, data map[string]interface{}) {
+func (h *HTTPHandler) publishWorkspaceMCPEvent(workspaceID, action string, data map[string]interface{}) {
 	if h == nil || h.eventBus == nil {
 		return
 	}
@@ -431,7 +431,7 @@ func (h *HTTPHandler) publishWorkspaceMCPEvent(studioID, action string, data map
 
 	h.eventBus.Publish(Event{
 		Type:        EventWorkspaceUpdated,
-		WorkspaceID: studioID,
+		WorkspaceID: workspaceID,
 		Source:      "api",
 		Data:        payload,
 	})

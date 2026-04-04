@@ -793,19 +793,28 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req struct {
-		Question             string            `json:"question"`
-		AgentName            string            `json:"agent_name,omitempty"` // Allow specifying target agent
-		Files                []UploadedFile    `json:"files,omitempty"`
-		RouteContext         *chatRouteContext `json:"route_context,omitempty"`
-		MultiAgentMode       string            `json:"multi_agent_mode,omitempty"`
-		MultiAgentThreshold  float64           `json:"multi_agent_threshold,omitempty"`
-		PlanBeforeAction     bool              `json:"plan_before_action,omitempty"`
-		ApprovedActionPlanID string            `json:"approved_action_plan_id,omitempty"`
+		Question             string                `json:"question"`
+		AgentName            string                `json:"agent_name,omitempty"` // Allow specifying target agent
+		Files                []UploadedFile        `json:"files,omitempty"`
+		RouteContext         *chatRouteContext     `json:"route_context,omitempty"`
+		WorkflowResponse     *WorkflowUserResponse `json:"workflow_response,omitempty"`
+		MultiAgentMode       string                `json:"multi_agent_mode,omitempty"`
+		MultiAgentThreshold  float64               `json:"multi_agent_threshold,omitempty"`
+		PlanBeforeAction     bool                  `json:"plan_before_action,omitempty"`
+		ApprovedActionPlanID string                `json:"approved_action_plan_id,omitempty"`
 	}
 	if !orihttp.ParseJSONBody(w, r, &req) {
 		return
 	}
 	q := strings.TrimSpace(req.Question)
+	if req.WorkflowResponse != nil {
+		workflowPrompt, err := buildPromptFromWorkflowResponse(req.WorkflowResponse)
+		if err != nil {
+			orihttp.BadRequest(w, err.Error())
+			return
+		}
+		q = workflowPrompt
+	}
 	if q == "" {
 		orihttp.BadRequest(w, "empty question")
 		return
@@ -988,9 +997,9 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if !found {
-			orihttp.WriteJSON(w, map[string]any{
+			writeJSONResponse(w, attachDependencyResolution(map[string]any{
 				"response": fmt.Sprintf("❌ Skill '%s' not found. Use /skills to list available skills.", name),
-			})
+			}, buildSkillDependencyResolution(name, dependencyTypeSkillMissing)))
 			return
 		}
 		if len(skill.ValidationErrors) > 0 {
@@ -1000,15 +1009,15 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if !skill.Enabled {
-			orihttp.WriteJSON(w, map[string]any{
+			writeJSONResponse(w, attachDependencyResolution(map[string]any{
 				"response": fmt.Sprintf("❌ Skill '%s' is disabled.", skill.Name),
-			})
+			}, buildSkillDependencyResolution(skill.Name, dependencyTypeSkillDisabled)))
 			return
 		}
 		if skill.HasScripts && !skill.Trusted {
-			orihttp.WriteJSON(w, map[string]any{
+			writeJSONResponse(w, attachDependencyResolution(map[string]any{
 				"response": fmt.Sprintf("❌ Skill '%s' requires trust before it can run.", skill.Name),
-			})
+			}, buildSkillDependencyResolution(skill.Name, dependencyTypeSkillTrustRequired)))
 			return
 		}
 		invokedSkill = &skillInvocation{Skill: skill, Args: args, Explicit: true}
@@ -1037,15 +1046,15 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 					return
 				}
 				if !skill.Enabled {
-					orihttp.WriteJSON(w, map[string]any{
+					writeJSONResponse(w, attachDependencyResolution(map[string]any{
 						"response": fmt.Sprintf("❌ Skill '%s' is disabled.", skill.Name),
-					})
+					}, buildSkillDependencyResolution(skill.Name, dependencyTypeSkillDisabled)))
 					return
 				}
 				if skill.HasScripts && !skill.Trusted {
-					orihttp.WriteJSON(w, map[string]any{
+					writeJSONResponse(w, attachDependencyResolution(map[string]any{
 						"response": fmt.Sprintf("❌ Skill '%s' requires trust before it can run.", skill.Name),
-					})
+					}, buildSkillDependencyResolution(skill.Name, dependencyTypeSkillTrustRequired)))
 					return
 				}
 				invokedSkill = &skillInvocation{Skill: skill, Args: args, Explicit: false}
@@ -1133,6 +1142,30 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 	// full context across page reloads and server restarts.
 	h.rehydrateSessionHistory(r.Context(), sessionID, ag)
 
+	if planningResp := maybeBuildWorkspacePlanningFormResponse(ag, originalQuery, normalizedRouteContext); planningResp != nil && planningResp.Form != nil {
+		responseText := strings.TrimSpace(planningResp.ResponseText)
+		if responseText == "" {
+			responseText = "Complete the planning step below."
+		}
+
+		ag.Messages = append(ag.Messages, openai.UserMessage(originalQuery))
+		ag.Messages = append(ag.Messages, openai.AssistantMessage(responseText))
+		_ = h.persistAgent(current, ag.Agent)
+
+		h.storeMessageInSession(base, sessionID, "user", originalQuery)
+		h.storeMessageInSession(base, sessionID, "assistant", responseText)
+
+		writeJSONResponse(w, attachRouteMetadata(map[string]any{
+			"response":      responseText,
+			"planning_form": planningResp.Form,
+			"workflow_step": buildWorkflowStepFromPlanningForm(planningResp.Form, sessionID),
+		}, chatRouteMetadata{
+			Mode:   routeModeAssistantChat,
+			Reason: "workspace planning form required",
+		}))
+		return
+	}
+
 	routeDecision := classifyUtilityRoute(originalQuery)
 
 	if req.PlanBeforeAction && approvedActionPlanID == "" {
@@ -1187,21 +1220,46 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 		ag = updatedAgent
 	}
 	if preflight != nil && strings.TrimSpace(preflight.userMessage) != "" {
-		writeJSONResponse(w, attachRouteMetadata(map[string]any{
+		payload := attachRouteMetadata(map[string]any{
 			"response": preflight.userMessage,
 		}, chatRouteMetadata{
 			Mode:   routeModeAssistantChat,
 			Reason: "mcp preflight notice",
-		}))
+		})
+		writeJSONResponse(w, attachDependencyResolution(payload, preflight.dependencyResolution))
 		return
 	}
 
 	if invokedSkill != nil && len(invokedSkill.Skill.RequiredMCPServers) > 0 {
 		missing := missingMCPServers(ag.MCPServers, invokedSkill.Skill.RequiredMCPServers)
 		if len(missing) > 0 {
-			orihttp.WriteJSON(w, map[string]any{
+			primaryServer := missing[0]
+			preferenceKey := ""
+			workspaceID := strings.TrimSpace(normalizedRouteContext.WorkspaceID)
+			if workspaceID != "" {
+				preferenceKey = workspace.DependencyPreferenceKey(dependencyTypeWorkspaceMCP, primaryServer)
+			}
+			writeJSONResponse(w, attachDependencyResolution(map[string]any{
 				"response": fmt.Sprintf("❌ Skill '%s' requires MCP connectors: %s. Bind them from the target workspace.", invokedSkill.Skill.Name, strings.Join(missing, ", ")),
-			})
+			}, &dependencyResolution{
+				Version:            1,
+				Title:              "Required MCP connectors are not enabled",
+				Summary:            fmt.Sprintf("Enable the required connector for skill \"%s\" before retrying.", invokedSkill.Skill.Name),
+				ReasonCode:         "skill_required_mcp_missing",
+				RecommendedSurface: dependencyResolutionSurfaceModal,
+				RetryContext:       buildDefaultRetryContext(workspaceID != ""),
+				Steps: []dependencyResolutionStep{
+					{
+						ID:           "skill-required-mcp",
+						Type:         dependencyTypeWorkspaceMCP,
+						DisplayName:  primaryServer,
+						Summary:      fmt.Sprintf("Enable %s in the current workspace to run \"%s\".", primaryServer, invokedSkill.Skill.Name),
+						RiskLevel:    "low",
+						Suppressible: workspaceID != "",
+						Actions:      buildSkillRequiredMCPActions(workspaceID, primaryServer, preferenceKey),
+					},
+				},
+			}))
 			return
 		}
 	}
@@ -1274,7 +1332,7 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 						orihttp.WriteJSON(w, attachActionReceipts(attachRouteMetadata(map[string]any{
 							"response":               responseText,
 							"orchestrated":           true,
-							"studio_id":              result.WorkspaceID,
+							"workspace_id":           result.WorkspaceID,
 							"status":                 result.Status,
 							"pending_plan_id":        result.PendingPlanID,
 							"planner_decision":       result.PlannerDecision,
@@ -1430,7 +1488,7 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 	// Check if this is a Claude Code provider - route to Claude Code handler
 	if providerName == "claude_code" && h.llmFactory != nil {
 		runtimeSystemPrompt := h.buildRuntimeSystemPromptForToolCapability(ctx, normalizedRouteContext, false)
-		h.handleClaudeCodeChat(w, r, ag, q, current, base, llmImages, plannerDecision, runtimeSystemPrompt)
+		h.handleClaudeCodeChat(w, r, ag, q, current, base, llmImages, plannerDecision, runtimeSystemPrompt, normalizedRouteContext)
 		return
 	}
 
@@ -1453,7 +1511,7 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 
 	if providerName == "codex" && h.llmFactory != nil {
 		runtimeSystemPrompt := h.buildRuntimeSystemPromptForToolCapability(ctx, normalizedRouteContext, false)
-		h.handleCodexChat(w, r, ag, q, current, base, llmImages, plannerDecision, runtimeSystemPrompt)
+		h.handleCodexChat(w, r, ag, q, current, base, llmImages, plannerDecision, runtimeSystemPrompt, normalizedRouteContext)
 		return
 	}
 

@@ -1852,13 +1852,391 @@ h3, .h3 {
     margin-top: 0.25rem;
 }
 
+.home-assistant-conversation-section {
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    background: linear-gradient(145deg, color-mix(in srgb, var(--bg-secondary) 92%, transparent) 0%, var(--bg-secondary) 100%);
+    padding: 0.95rem 1rem;
+}
+
+.home-assistant-conversation-section-header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 0.85rem;
+}
+
+.home-assistant-conversation-section-eyebrow {
+    color: var(--text-muted);
+    font-size: 0.76rem;
+    font-weight: 700;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    margin-bottom: 0.3rem;
+}
+
+.home-assistant-conversation-section-copy {
+    color: var(--text-secondary);
+    font-size: 0.82rem;
+    line-height: 1.45;
+}
+
+.home-assistant-conversation-section.is-collapsed .home-assistant-conversation {
+    display: none;
+}
+
 .home-assistant-conversation.home-assistant-conversation-modal {
+    margin-top: 0.8rem;
+    background: var(--bg-primary);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
     max-height: min(55vh, 560px);
 }
 
 .home-assistant-thinking-placeholder {
     color: var(--text-muted);
     font-size: 0.85rem;
+}
+
+.home-assistant-planning-card {
+    background: linear-gradient(145deg, color-mix(in srgb, var(--bg-secondary) 92%, transparent) 0%, var(--bg-secondary) 100%);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    padding: 1rem;
+}
+
+.home-assistant-planning-eyebrow {
+    display: inline-block;
+    color: var(--text-muted);
+    font-size: 0.76rem;
+    font-weight: 700;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    margin-bottom: 0.35rem;
+}
+
+.home-assistant-planning-title {
+    color: var(--text-primary);
+    font-size: 1.05rem;
+    font-weight: 700;
+    margin-bottom: 0.25rem;
+}
+
+.home-assistant-planning-subtitle {
+    color: var(--text-secondary);
+    font-size: 0.88rem;
+    margin-bottom: 0.9rem;
+}
+
+.home-assistant-planning-summary {
+    background: var(--bg-primary);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    color: var(--text-secondary);
+    font-size: 0.84rem;
+    line-height: 1.45;
+    margin-bottom: 0.9rem;
+    padding: 0.75rem 0.85rem;
+    white-space: pre-wrap;
+}
+
+.home-assistant-planning-form {
+    display: flex;
+    flex-direction: column;
+    gap: 0.9rem;
+}
+
+.home-assistant-planning-grid {
+    display: grid;
+    gap: 0.8rem;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+}
+
+.home-assistant-planning-field {
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+}
+
+.home-assistant-planning-field.is-choice-field {
+    gap: 0.55rem;
+}
+
+.home-assistant-planning-label {
+    color: var(--text-primary);
+    font-size: 0.82rem;
+    font-weight: 600;
+}
+
+.home-assistant-planning-help {
+    color: var(--text-muted);
+    font-size: 0.76rem;
+    line-height: 1.4;
+}
+
+.home-assistant-planning-input,
+.home-assistant-planning-select,
+.home-assistant-planning-textarea {
+    width: 100%;
+    background: var(--bg-primary);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    color: var(--text-primary);
+    font-size: 0.86rem;
+    padding: 0.65rem 0.75rem;
+}
+
+.home-assistant-planning-input:focus,
+.home-assistant-planning-select:focus,
+.home-assistant-planning-textarea:focus {
+    border-color: color-mix(in srgb, var(--primary-color) 52%, var(--border-color));
+    box-shadow: 0 0 0 0.12rem color-mix(in srgb, var(--primary-color) 18%, transparent);
+    outline: none;
+}
+
+.home-assistant-planning-textarea {
+    min-height: 96px;
+    resize: vertical;
+}
+
+.home-assistant-planning-choice-group {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.6rem;
+}
+
+.home-assistant-planning-choice {
+    min-width: 140px;
+    padding: 0.7rem 0.85rem;
+    border-radius: var(--radius-md);
+    border: 1px solid var(--border-color);
+    background: var(--bg-primary);
+    color: var(--text-secondary);
+    text-align: left;
+    transition: border-color 0.18s ease, transform 0.18s ease, box-shadow 0.18s ease, color 0.18s ease, background 0.18s ease;
+}
+
+.home-assistant-planning-choice:hover {
+    border-color: color-mix(in srgb, var(--primary-color) 46%, var(--border-color));
+    color: var(--text-primary);
+    transform: translateY(-1px);
+}
+
+.home-assistant-planning-choice:focus {
+    border-color: color-mix(in srgb, var(--primary-color) 52%, var(--border-color));
+    box-shadow: 0 0 0 0.12rem color-mix(in srgb, var(--primary-color) 18%, transparent);
+    outline: none;
+}
+
+.home-assistant-planning-choice.is-selected {
+    border-color: color-mix(in srgb, var(--primary-color) 58%, var(--border-color));
+    background: color-mix(in srgb, var(--primary-color-light) 78%, var(--bg-primary));
+    color: var(--text-primary);
+    box-shadow: 0 0 0 0.12rem color-mix(in srgb, var(--primary-color) 12%, transparent);
+}
+
+.home-assistant-planning-choice-label {
+    display: block;
+    font-size: 0.85rem;
+    font-weight: 600;
+    line-height: 1.35;
+}
+
+.home-assistant-planning-choice-hint {
+    color: var(--text-muted);
+    font-size: 0.74rem;
+    line-height: 1.35;
+}
+
+.home-assistant-planning-upload {
+    align-items: center;
+    background: var(--bg-primary);
+    border: 1px dashed color-mix(in srgb, var(--primary-color) 35%, var(--border-color));
+    border-radius: var(--radius-md);
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.6rem;
+    justify-content: space-between;
+    padding: 0.75rem 0.85rem;
+}
+
+.home-assistant-planning-upload-text {
+    color: var(--text-secondary);
+    font-size: 0.82rem;
+    line-height: 1.45;
+    margin: 0;
+}
+
+.home-assistant-planning-upload-status {
+    color: var(--primary-color);
+    display: block;
+    font-size: 0.74rem;
+    font-weight: 600;
+    margin-top: 0.3rem;
+}
+
+.home-assistant-planning-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.65rem;
+    margin-top: 0.25rem;
+}
+
+.home-assistant-inline-reply-card {
+    background: linear-gradient(145deg, color-mix(in srgb, var(--bg-secondary) 92%, transparent) 0%, var(--bg-secondary) 100%);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    padding: 0.95rem 1rem;
+}
+
+.home-assistant-inline-reply-header {
+    color: var(--text-muted);
+    font-size: 0.76rem;
+    font-weight: 700;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    margin-bottom: 0.35rem;
+}
+
+.home-assistant-inline-reply-title {
+    color: var(--text-primary);
+    font-size: 1rem;
+    font-weight: 700;
+    line-height: 1.4;
+    margin-bottom: 0.85rem;
+}
+
+.home-assistant-inline-reply-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    margin-bottom: 0.85rem;
+}
+
+.home-assistant-inline-reply-chip {
+    align-items: center;
+    background: color-mix(in srgb, var(--bg-primary) 84%, transparent);
+    border: 1px solid color-mix(in srgb, var(--border-color) 82%, transparent);
+    border-radius: 999px;
+    color: var(--text-secondary);
+    display: inline-flex;
+    font-size: 0.72rem;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    padding: 0.3rem 0.68rem;
+    text-transform: uppercase;
+}
+
+.home-assistant-inline-reply-chip.is-waiting {
+    background: color-mix(in srgb, var(--primary-color-light) 72%, var(--bg-primary));
+    border-color: color-mix(in srgb, var(--primary-color) 42%, var(--border-color));
+    color: var(--primary-color);
+}
+
+.home-assistant-inline-reply-preview {
+    background:
+        linear-gradient(180deg, color-mix(in srgb, var(--primary-color) 10%, transparent) 0%, transparent 36%),
+        var(--bg-primary);
+    border: 1px solid color-mix(in srgb, var(--primary-color) 28%, var(--border-color));
+    border-radius: calc(var(--radius-md) + 2px);
+    box-shadow: inset 0 1px 0 color-mix(in srgb, white 6%, transparent);
+    margin-bottom: 0.9rem;
+    overflow: hidden;
+}
+
+.home-assistant-inline-reply-preview-eyebrow {
+    color: var(--primary-color);
+    font-size: 0.73rem;
+    font-weight: 800;
+    letter-spacing: 0.08em;
+    padding: 0.8rem 0.95rem 0;
+    text-transform: uppercase;
+}
+
+.home-assistant-inline-reply-preview-meta {
+    color: var(--text-muted);
+    font-size: 0.77rem;
+    line-height: 1.4;
+    padding: 0.3rem 0.95rem 0;
+}
+
+.home-assistant-inline-reply-preview-body {
+    color: var(--text-primary);
+    font-size: 0.88rem;
+    line-height: 1.55;
+    max-height: min(34vh, 360px);
+    overflow: auto;
+    padding: 0.55rem 0.95rem 0.95rem;
+    white-space: pre-wrap;
+}
+
+.home-assistant-inline-reply-prompts {
+    background: color-mix(in srgb, var(--bg-secondary) 94%, transparent);
+    border: 1px dashed color-mix(in srgb, var(--primary-color) 32%, var(--border-color));
+    border-radius: var(--radius-md);
+    margin-bottom: 0.85rem;
+    padding: 0.8rem 0.9rem;
+}
+
+.home-assistant-inline-reply-prompts-title {
+    color: var(--text-primary);
+    font-size: 0.82rem;
+    font-weight: 700;
+    margin-bottom: 0.45rem;
+}
+
+.home-assistant-inline-reply-prompts-list {
+    color: var(--text-secondary);
+    display: grid;
+    gap: 0.45rem;
+    margin: 0;
+    padding-left: 1.05rem;
+}
+
+.home-assistant-inline-reply-prompts-list li {
+    line-height: 1.45;
+}
+
+.home-assistant-inline-reply-copy {
+    color: var(--text-secondary);
+    font-size: 0.84rem;
+    margin-bottom: 0.75rem;
+}
+
+.home-assistant-inline-reply-form {
+    display: flex;
+    flex-direction: column;
+    gap: 0.7rem;
+}
+
+.home-assistant-inline-reply-input-label {
+    color: var(--text-primary);
+    font-size: 0.81rem;
+    font-weight: 700;
+}
+
+.home-assistant-inline-reply-textarea {
+    width: 100%;
+    min-height: 92px;
+    resize: vertical;
+    background: var(--bg-primary);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    color: var(--text-primary);
+    font-size: 0.86rem;
+    padding: 0.7rem 0.8rem;
+}
+
+.home-assistant-inline-reply-textarea:focus {
+    border-color: color-mix(in srgb, var(--primary-color) 52%, var(--border-color));
+    box-shadow: 0 0 0 0.12rem color-mix(in srgb, var(--primary-color) 18%, transparent);
+    outline: none;
+}
+
+.home-assistant-inline-reply-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.65rem;
 }
 
 .dashboard-greeting-card {
@@ -2171,6 +2549,33 @@ h3, .h3 {
 
     .home-assistant-auto-btn {
         min-width: 92px;
+    }
+
+    .home-assistant-planning-card {
+        padding: 0.9rem;
+    }
+
+    .home-assistant-conversation-section {
+        padding: 0.85rem;
+    }
+
+    .home-assistant-conversation-section-header {
+        align-items: stretch;
+        flex-direction: column;
+    }
+
+    .home-assistant-planning-upload {
+        align-items: flex-start;
+        flex-direction: column;
+    }
+
+    .home-assistant-planning-choice {
+        min-width: 0;
+        width: 100%;
+    }
+
+    .home-assistant-inline-reply-card {
+        padding: 0.9rem;
     }
 
     .home-assistant-session-row {

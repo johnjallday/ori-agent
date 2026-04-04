@@ -38,6 +38,8 @@ import (
 	"github.com/johnjallday/ori-agent/internal/speechhttp"
 	"github.com/johnjallday/ori-agent/internal/store"
 	"github.com/johnjallday/ori-agent/internal/usagehttp"
+	"github.com/johnjallday/ori-agent/internal/vault"
+	"github.com/johnjallday/ori-agent/internal/vaulthttp"
 )
 
 // initializeHandlers creates all HTTP handlers and wires up dependencies.
@@ -118,6 +120,10 @@ func (b *ServerBuilder) initializeHandlers() error {
 	} else {
 		b.sessionStore = sessionStore
 		b.sessionHandler = sessionhttp.New(sessionStore)
+		b.sessionHandler.SetWorkspaceRootResolver(func() string {
+			return resolveWorkspaceRoot(b.configManager)
+		})
+		b.sessionHandler.SetAgentStore(b.st)
 		// Initialize auto-classify handler for session classification
 		b.autoClassifyHandler = sessionhttp.NewAutoClassifyHandler(sessionStore, b.st, b.llmFactory, b.configManager)
 		// Initialize smart input handler for Workspace Hub classification
@@ -168,6 +174,12 @@ func (b *ServerBuilder) initializeHandlers() error {
 		}
 		b.reviewHandler = reviewhttp.NewHandler(reviewRunner, reviewStore)
 		logger.Info("Review system initialized", logger.Fields{})
+
+		vaultStore := vault.NewStore(b.sessionStore.DB(), vault.StoreOptions{
+			SecretStore: b.configManager.SecretStore(),
+		})
+		b.vaultHandler = vaulthttp.NewHandler(vaultStore)
+		logger.Info("Vault system initialized", logger.Fields{})
 	}
 
 	// Initialize external agents (Claude Code, Codex)

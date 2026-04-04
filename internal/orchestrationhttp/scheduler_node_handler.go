@@ -31,9 +31,9 @@ func (th *TaskHandler) SchedulerNodesHandler(w http.ResponseWriter, r *http.Requ
 // This includes both canvas-created schedulers (with CanvasNodeID) and dashboard-created schedulers (without CanvasNodeID)
 // Dashboard-created schedulers are automatically assigned a canvas_node_id when loaded
 func (th *TaskHandler) handleListSchedulerNodes(w http.ResponseWriter, r *http.Request) {
-	workspaceID := r.URL.Query().Get("studio_id")
+	workspaceID := r.URL.Query().Get("workspace_id")
 	if workspaceID == "" {
-		orihttp.BadRequest(w, "studio_id parameter is required")
+		orihttp.BadRequest(w, "workspace_id parameter is required")
 		return
 	}
 
@@ -132,7 +132,7 @@ func (th *TaskHandler) handleCreateSchedulerNode(w http.ResponseWriter, r *http.
 
 	// Fallback: try getting from query param if not in path
 	if workspaceID == "" {
-		workspaceID = r.URL.Query().Get("studio_id")
+		workspaceID = r.URL.Query().Get("workspace_id")
 	}
 
 	if workspaceID == "" {
@@ -302,9 +302,9 @@ func (th *TaskHandler) SchedulerNodeHandler(w http.ResponseWriter, r *http.Reque
 }
 
 func (th *TaskHandler) handleGetSchedulerNode(w http.ResponseWriter, r *http.Request, nodeID string) {
-	workspaceID := r.URL.Query().Get("studio_id")
+	workspaceID := r.URL.Query().Get("workspace_id")
 	if workspaceID == "" {
-		orihttp.BadRequest(w, "studio_id parameter is required")
+		orihttp.BadRequest(w, "workspace_id parameter is required")
 		return
 	}
 
@@ -347,7 +347,7 @@ func (th *TaskHandler) handleGetSchedulerNode(w http.ResponseWriter, r *http.Req
 // handleUpdateSchedulerNode updates a scheduler node
 func (th *TaskHandler) handleUpdateSchedulerNode(w http.ResponseWriter, r *http.Request, nodeID string) {
 	var req struct {
-		WorkspaceID  string                    `json:"studio_id"`
+		WorkspaceID  string                    `json:"workspace_id"`
 		To           *string                   `json:"to,omitempty"`
 		TargetTaskID *string                   `json:"target_task_id,omitempty"`
 		Name         *string                   `json:"name,omitempty"`
@@ -365,13 +365,13 @@ func (th *TaskHandler) handleUpdateSchedulerNode(w http.ResponseWriter, r *http.
 	}
 
 	// Get workspace_id from query parameter or request body
-	workspaceID := r.URL.Query().Get("studio_id")
+	workspaceID := r.URL.Query().Get("workspace_id")
 	if workspaceID == "" {
 		workspaceID = req.WorkspaceID
 	}
 
 	if workspaceID == "" {
-		orihttp.BadRequest(w, "studio_id is required")
+		orihttp.BadRequest(w, "workspace_id is required")
 		return
 	}
 
@@ -490,9 +490,9 @@ func (th *TaskHandler) handleUpdateSchedulerNode(w http.ResponseWriter, r *http.
 
 // handleDeleteSchedulerNode deletes a scheduler node
 func (th *TaskHandler) handleDeleteSchedulerNode(w http.ResponseWriter, r *http.Request, nodeID string) {
-	workspaceID := r.URL.Query().Get("studio_id")
+	workspaceID := r.URL.Query().Get("workspace_id")
 	if workspaceID == "" {
-		orihttp.BadRequest(w, "studio_id parameter is required")
+		orihttp.BadRequest(w, "workspace_id parameter is required")
 		return
 	}
 
@@ -560,9 +560,9 @@ func (th *TaskHandler) SchedulerNodeTriggerHandler(w http.ResponseWriter, r *htt
 	// node ID is before "trigger"
 	nodeID := parts[len(parts)-2]
 
-	workspaceID := r.URL.Query().Get("studio_id")
+	workspaceID := r.URL.Query().Get("workspace_id")
 	if workspaceID == "" {
-		orihttp.BadRequest(w, "studio_id parameter is required")
+		orihttp.BadRequest(w, "workspace_id parameter is required")
 		return
 	}
 

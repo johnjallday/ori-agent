@@ -161,7 +161,7 @@ func (o *Orchestrator) executeResearchPipeline(ctx context.Context, ws *workspac
 
 // WorkflowStatus represents the status of a workflow execution
 type WorkflowStatus struct {
-	WorkspaceID string                 `json:"studio_id"`
+	WorkspaceID string                 `json:"workspace_id"`
 	Phase       string                 `json:"phase"`
 	Progress    float64                `json:"progress"` // 0.0 to 1.0
 	Tasks       map[string]TaskSummary `json:"tasks"`

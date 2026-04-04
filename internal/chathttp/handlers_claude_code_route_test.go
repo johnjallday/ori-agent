@@ -18,13 +18,18 @@ import (
 )
 
 type mockClaudeCodeProvider struct {
-	called bool
+	called  bool
+	content string
 }
 
 func (m *mockClaudeCodeProvider) Chat(_ context.Context, _ llm.ChatRequest) (*llm.ChatResponse, error) {
 	m.called = true
+	content := m.content
+	if strings.TrimSpace(content) == "" {
+		content = "claude-code-ok"
+	}
 	return &llm.ChatResponse{
-		Content:  "claude-code-ok",
+		Content:  content,
 		Model:    "sonnet",
 		Provider: "claude_code",
 	}, nil
@@ -165,6 +170,78 @@ func TestChatHandler_RoutesAssistantModeToOriWithoutCurrentAgent(t *testing.T) {
 	}
 	if !mockProvider.called {
 		t.Fatal("expected Assistant runtime provider to be called")
+	}
+}
+
+func TestChatHandler_ClaudeCodePermissionDenialEmitsDependencyResolution(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "agents_index.json")
+	st, err := store.NewFileStore(path, types.Settings{
+		Model:       "gpt-5-nano",
+		Temperature: 1.0,
+	})
+	if err != nil {
+		t.Fatalf("failed to create store: %v", err)
+	}
+
+	if err := st.CreateAgent("claude-agent", &store.CreateAgentConfig{
+		Type:         "general",
+		Model:        "sonnet",
+		LLMProvider:  "claude_code",
+		Temperature:  1.0,
+		SystemPrompt: "You are helpful.",
+	}); err != nil {
+		t.Fatalf("failed to create agent: %v", err)
+	}
+	ag, ok := st.GetAgent("claude-agent")
+	if !ok || ag == nil {
+		t.Fatalf("expected claude-agent")
+	}
+	ag.Settings.Provider = "claude_code"
+	ag.Settings.Model = "sonnet"
+	ag.Settings.APIKey = ""
+	if err := st.SetAgent("claude-agent", ag); err != nil {
+		t.Fatalf("failed to update agent: %v", err)
+	}
+
+	h := NewHandler(st, client.NewFactory(""))
+	factory := llm.NewFactory()
+	mockProvider := &mockClaudeCodeProvider{
+		content: "The REAPER MCP tool isn't enabled in the current permission mode. Please enable the `mcp__ori-reaper` tool in your permission settings and try again.",
+	}
+	factory.Register("claude_code", mockProvider)
+	h.SetLLMFactory(factory)
+
+	body, _ := json.Marshal(map[string]any{
+		"question":   "create a REAPER project named Test123 at 123 BPM",
+		"agent_name": "claude-agent",
+		"route_context": map[string]any{
+			"workspace_id": "workspace-123",
+		},
+	})
+	req := httptest.NewRequest(http.MethodPost, "/api/chat", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+
+	h.ChatHandler(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d body=%s", rr.Code, rr.Body.String())
+	}
+
+	var resp map[string]any
+	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+
+	dependency, ok := resp["dependency_resolution"].(map[string]any)
+	if !ok || dependency == nil {
+		t.Fatalf("expected dependency_resolution payload, got %#v resp=%#v body=%s", resp["dependency_resolution"], resp, rr.Body.String())
+	}
+	if got, _ := dependency["reason_code"].(string); got != "provider_permission_denied" {
+		t.Fatalf("expected provider_permission_denied reason, got %q", got)
+	}
+	if title, _ := dependency["title"].(string); !strings.Contains(strings.ToLower(title), "reaper") {
+		t.Fatalf("expected REAPER-specific title, got %q", title)
 	}
 }
 

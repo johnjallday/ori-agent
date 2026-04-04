@@ -57,7 +57,7 @@ function initNavbar() {
     activePage = 'agents';
   } else if (path.includes('/marketplace')) {
     activePage = 'marketplace';
-  } else if (path.includes('/workspaces') || path.includes('/studios')) {
+  } else if (path.includes('/workspaces')) {
     activePage = 'workspaces';
   }
 

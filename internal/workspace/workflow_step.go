@@ -75,7 +75,7 @@ type Workflow struct {
 	ID          string                 `json:"id"`
 	Name        string                 `json:"name"`
 	Description string                 `json:"description"`
-	WorkspaceID string                 `json:"studio_id"`
+	WorkspaceID string                 `json:"workspace_id"`
 	Steps       []WorkflowStep         `json:"steps"`
 	Status      WorkflowStatus         `json:"status"`
 	Context     map[string]interface{} `json:"context"`

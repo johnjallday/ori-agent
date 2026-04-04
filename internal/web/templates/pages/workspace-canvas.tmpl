@@ -24,11 +24,11 @@
                   </svg>
                   Workspace
                 </a>
-                <div id="canvas-studio-info" class="d-flex align-items-center gap-2">
+                <div id="canvas-workspace-info" class="d-flex align-items-center gap-2">
                   <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" style="color: var(--text-secondary);">
                     <path d="M12,5.5A3.5,3.5 0 0,1 15.5,9A3.5,3.5 0 0,1 12,12.5A3.5,3.5 0 0,1 8.5,9A3.5,3.5 0 0,1 12,5.5M5,8C5.56,8 6.08,8.15 6.53,8.42C6.38,9.85 6.8,11.27 7.66,12.38C7.16,13.34 6.16,14 5,14A3,3 0 0,1 2,11A3,3 0 0,1 5,8M19,8A3,3 0 0,1 22,11A3,3 0 0,1 19,14C17.84,14 16.84,13.34 16.34,12.38C17.2,11.27 17.62,9.85 17.47,8.42C17.92,8.15 18.44,8 19,8M5.5,18.25C5.5,16.18 8.41,14.5 12,14.5C15.59,14.5 18.5,16.18 18.5,18.25V20H5.5V18.25M0,20V18.5C0,17.11 1.89,15.94 4.45,15.6C3.86,16.28 3.5,17.22 3.5,18.25V20H0M24,20H20.5V18.25C20.5,17.22 20.14,16.28 19.55,15.6C22.11,15.94 24,17.11 24,18.5V20Z"/>
                   </svg>
-                  <span id="canvas-studio-name" style="color: var(--text-primary); font-weight: 500;">Loading...</span>
+                  <span id="canvas-workspace-name" style="color: var(--text-primary); font-weight: 500;">Loading...</span>
                   <span id="canvas-workflow-title" style="color: var(--primary-color); font-weight: 600; display: none;">
                     <span style="color: var(--text-muted); margin: 0 8px;">/</span>
                     <span id="canvas-workflow-name"></span>
@@ -81,16 +81,16 @@
             </div>
           </div>
 
-          <!-- Assistant Prompt Bar -->
+          <!-- Workspace Entry Prompt Bar -->
           <div id="homeAssistantCard" class="modern-card p-2 mb-3">
             <form id="homeAssistantForm" class="d-flex align-items-center gap-2">
               <div class="d-none d-md-flex align-items-center gap-2 px-2" style="color: var(--text-secondary); font-size: 0.82rem; white-space: nowrap;">
-                <span style="font-weight: 600; color: var(--text-primary);">Assistant</span>
+                <span id="homeAssistantIdentityName" style="font-weight: 600; color: var(--text-primary); display: inline-block; max-width: 180px; overflow: hidden; text-overflow: ellipsis;" title="Workspace Manager">Workspace Manager</span>
                 <span style="opacity: 0.6;">Canvas</span>
               </div>
               <input id="homeAssistantInput" type="text" class="modern-input flex-grow-1" maxlength="800"
-                     placeholder="Message Assistant about this workspace canvas..."
-                     aria-label="Assistant prompt"
+                     placeholder="Message Workspace Manager about this workspace canvas..."
+                     aria-label="Workspace manager prompt"
                      style="min-height: 42px;">
               <button id="homeAssistantSendBtn" type="submit" class="modern-btn modern-btn-primary home-assistant-send-btn">Send</button>
             </form>
@@ -297,6 +297,7 @@
               <select id="canvasAgentType" class="modern-input w-100">
                 <option value="tool-calling">Tool Calling (Cheapest - Optimized for tool use)</option>
                 <option value="general">General Purpose (Mid-tier - Balanced capability)</option>
+                <option value="workspace-manager">Workspace Manager (Coordinates workspace agents)</option>
                 <option value="orchestration">Orchestration (Advanced - Multi-agent coordination)</option>
                 <option value="research">Research (Expensive - Complex thinking)</option>
               </select>
@@ -626,14 +627,14 @@
   <!-- Include chat area (required for chat handoff from Ask Ori) -->
   {{template "chat-area.tmpl" .}}
 
-  <!-- Assistant Thinking Modal -->
+  <!-- Workspace Entry Thinking Modal -->
   <div class="modal fade" id="homeAssistantThinkingModal" tabindex="-1"
        aria-labelledby="homeAssistantThinkingModalLabel" aria-hidden="true">
     <div class="modal-dialog modal-lg modal-dialog-centered modal-dialog-scrollable">
       <div class="modal-content home-thinking-modal-content">
         <div class="modal-header home-thinking-modal-header">
           <div>
-            <h5 id="homeAssistantThinkingModalLabel" class="modal-title">Assistant is working</h5>
+            <h5 id="homeAssistantThinkingModalLabel" class="modal-title">Workspace Manager is working</h5>
             <div id="homeAssistantThinkingStatus" class="home-thinking-modal-status" role="status" aria-live="polite">
               <span id="homeAssistantThinkingSpinner" class="spinner-border spinner-border-sm me-2" aria-hidden="true"></span>
               <span>Analyzing your request...</span>
@@ -643,12 +644,27 @@
         </div>
         <div class="modal-body">
           <div id="homeAssistantRoutingSummary" class="home-assistant-routing-summary d-none"></div>
-          <div id="homeAssistantConversation" class="home-assistant-conversation home-assistant-conversation-modal p-3">
-            <div class="home-assistant-thinking-placeholder">
-              Progress updates will appear here after you send a message.
-            </div>
-          </div>
+          <div id="homeAssistantPlanning" class="home-assistant-planning d-none mt-3"></div>
+          <div id="homeAssistantInlineReply" class="home-assistant-inline-reply d-none mt-3"></div>
           <div id="homeAssistantActions" class="d-flex flex-wrap gap-2 mt-3 d-none"></div>
+          <section id="homeAssistantConversationSection" class="home-assistant-conversation-section mt-3">
+            <div class="home-assistant-conversation-section-header">
+              <div>
+                <div class="home-assistant-conversation-section-eyebrow">Conversation History</div>
+                <div id="homeAssistantConversationSummary" class="home-assistant-conversation-section-copy">
+                  Progress updates and manager notes will appear here after you send a message.
+                </div>
+              </div>
+              <button id="homeAssistantConversationToggleBtn" type="button" class="modern-btn modern-btn-secondary modern-btn-sm" hidden>
+                Hide Conversation
+              </button>
+            </div>
+            <div id="homeAssistantConversation" class="home-assistant-conversation home-assistant-conversation-modal p-3">
+              <div class="home-assistant-thinking-placeholder">
+                Progress updates will appear here after you send a message.
+              </div>
+            </div>
+          </section>
         </div>
       </div>
     </div>
@@ -670,28 +686,29 @@
   <script src="/js/modules/agents.js"></script>
   <script src="/js/modules/apikey.js"></script>
   <script src="/js/app.js"></script>
+  <script src="/js/modules/workspace-bootstrap-review.js"></script>
   <script src="/js/modules/sessions.js"></script>
   <script src="/js/modules/dashboard.js"></script>
   <script src="/js/modules/sidebar.js"></script>
   <script src="/js/modules/file-upload.js"></script>
   <script src="/js/modules/toast.js"></script>
-  <!-- Real-time studio modules -->
-  <script src="/js/modules/studio-realtime.js"></script>
+  <!-- Real-time workspace modules -->
+  <script src="/js/modules/workspace-realtime.js"></script>
   <script src="/js/modules/message-timeline.js"></script>
   <script type="module" src="/js/modules/agent-canvas.js?v=1733603000"></script>
-  <!-- Studios workspace management -->
-  <link rel="stylesheet" href="/css/studio.css">
-  <script src="/js/modules/studios-canvas-helpers.js?v=1733602000"></script>
+  <!-- Workspace management -->
+  <link rel="stylesheet" href="/css/workspace.css">
+  <script src="/js/modules/workspace-canvas-helpers.js?v=1733602000"></script>
   <script src="/js/modules/workflow-panel.js"></script>
 
   <script>
     // Workspace-specific canvas initialization
     const workspaceId = '{{.Extra.WorkspaceID}}';
-    // Set global studio id for helper scripts that rely on currentStudioId
-    if (typeof currentStudioId !== 'undefined') {
-      currentStudioId = workspaceId;
+    // Set global workspace id for helper scripts that rely on currentWorkspaceId
+    if (typeof currentWorkspaceId !== 'undefined') {
+      currentWorkspaceId = workspaceId;
     }
-    window.currentStudioId = workspaceId;
+    window.currentWorkspaceId = workspaceId;
 
     // Initialize canvas directly with this workspace
     document.addEventListener('DOMContentLoaded', async function() {
@@ -702,7 +719,7 @@
         const response = await fetch(`/api/orchestration/workspace?id=${workspaceId}`);
         if (response.ok) {
           const workspace = await response.json();
-          document.getElementById('canvas-studio-name').textContent = workspace.name || 'Unnamed Workspace';
+          document.getElementById('canvas-workspace-name').textContent = workspace.name || 'Unnamed Workspace';
         }
       } catch (error) {
         console.error('Failed to load workspace info:', error);
@@ -994,7 +1011,7 @@
       addBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-2" role="status"></span>Adding...';
 
       try {
-        const response = await fetch(`/api/studios/${workspaceId}/agents`, {
+        const response = await fetch(`/api/workspaces/${workspaceId}/agents`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ agent_name: selectedAgentToAdd })
@@ -1078,7 +1095,7 @@
       };
 
       try {
-        const response = await fetch(`/api/studios/${workspaceId}/attachments`, {
+        const response = await fetch(`/api/workspaces/${workspaceId}/attachments`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(attachment)
@@ -1264,7 +1281,7 @@
         console.log('Agent created successfully:', agentName);
 
         // Also add the new agent to the canvas
-        const addResponse = await fetch(`/api/studios/${workspaceId}/agents`, {
+        const addResponse = await fetch(`/api/workspaces/${workspaceId}/agents`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ agent_name: agentName })
@@ -1304,7 +1321,7 @@
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            studio_id: workspaceId,
+            workspace_id: workspaceId,
             agent_name: agentName
           })
         });

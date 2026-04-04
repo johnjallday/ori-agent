@@ -12,13 +12,16 @@ import (
 	orihttp "github.com/johnjallday/ori-agent/internal/http"
 	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/session"
+	"github.com/johnjallday/ori-agent/internal/store"
 	"github.com/johnjallday/ori-agent/internal/workspace"
 )
 
 // Handler handles session-related HTTP requests.
 type Handler struct {
-	store          session.HybridStore
-	workspaceStore *workspace.FileStore // optional folder-based workspace store
+	store                 session.HybridStore
+	workspaceStore        *workspace.FileStore // optional folder-based workspace store
+	workspaceRootResolver func() string
+	agentStore            store.Store
 }
 
 // New creates a new session handler.
@@ -29,6 +32,17 @@ func New(store session.HybridStore) *Handler {
 // SetWorkspaceStore sets the folder-based workspace store for enhanced workspace operations.
 func (h *Handler) SetWorkspaceStore(ws *workspace.FileStore) {
 	h.workspaceStore = ws
+}
+
+// SetWorkspaceRootResolver sets the resolver used to determine the default
+// directory for newly created workspace folders.
+func (h *Handler) SetWorkspaceRootResolver(fn func() string) {
+	h.workspaceRootResolver = fn
+}
+
+// SetAgentStore sets the agent store used for workspace entry-agent provisioning.
+func (h *Handler) SetAgentStore(agentStore store.Store) {
+	h.agentStore = agentStore
 }
 
 // handleSessions routes requests to /api/sessions.
@@ -106,6 +120,21 @@ func (h *Handler) createSession(w http.ResponseWriter, r *http.Request) {
 	if req.Title == "" {
 		req.Title = "New Session"
 	}
+	if _, err := h.requireConcreteWorkspace(r.Context(), req.FolderID); err != nil {
+		switch {
+		case errors.Is(err, session.ErrWorkspaceNotFound):
+			_ = orihttp.RespondNotFound(w, "Workspace not found")
+		case errors.Is(err, errWorkspaceDisallowsDirectUse):
+			_ = orihttp.RespondBadRequest(w, err.Error())
+		default:
+			_ = orihttp.RespondInternalError(w, "Failed to validate workspace")
+		}
+		return
+	}
+
+	if strings.TrimSpace(req.AgentName) == "" && strings.TrimSpace(req.FolderID) != "" {
+		req.AgentName = h.defaultSessionAgentNameForWorkspace(r.Context(), req.FolderID)
+	}
 
 	sess := &session.Session{
 		Title:     req.Title,
@@ -172,6 +201,17 @@ func (h *Handler) updateSession(w http.ResponseWriter, r *http.Request, id strin
 		sess.Title = *req.Title
 	}
 	if req.FolderID != nil {
+		if _, err := h.requireConcreteWorkspace(r.Context(), *req.FolderID); err != nil {
+			switch {
+			case errors.Is(err, session.ErrWorkspaceNotFound):
+				_ = orihttp.RespondNotFound(w, "Workspace not found")
+			case errors.Is(err, errWorkspaceDisallowsDirectUse):
+				_ = orihttp.RespondBadRequest(w, err.Error())
+			default:
+				_ = orihttp.RespondInternalError(w, "Failed to validate workspace")
+			}
+			return
+		}
 		sess.FolderID = *req.FolderID
 	}
 	if req.Tags != nil {

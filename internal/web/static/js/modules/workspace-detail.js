@@ -4,6 +4,7 @@
  *
  * @module workspace-detail
  */
+/* global escapeHtml */
 
 /**
  * Format a date for display
@@ -122,6 +123,10 @@ export class WorkspaceDetailPage {
     this.flippedAgentCards = new Set();
     this.boardDidDrag = false;
     this.currentTaskResultText = '';
+    this.currentTaskResultTaskId = '';
+    this.currentTaskResultSourceTaskId = '';
+    this.currentTaskResultNextSteps = [];
+    this.currentTaskResultFollowUpPending = false;
     this.currentBlockedTask = null;
     this.currentAssistRecommendation = null;
     this.currentExecutionTaskId = null;
@@ -133,6 +138,18 @@ export class WorkspaceDetailPage {
 
     // DOM elements
     this.elements = {};
+    this.fileModalElements = {};
+    this.fileModalState = {
+      source: 'device',
+      selectedItems: [],
+      vaults: [],
+      selectedVaultId: '',
+      vaultStatus: null,
+      vaultAttachments: [],
+      searchQuery: '',
+      loadingVaults: false,
+      loadingAttachments: false
+    };
   }
 
   /**
@@ -156,6 +173,7 @@ export class WorkspaceDetailPage {
     ]);
     this.activateWorkspace();
     this.setupRealtime();
+    this.checkAutoOpenCreateAgent();
   }
 
   ensureScrollablePanelAccessibility() {
@@ -258,22 +276,71 @@ export class WorkspaceDetailPage {
    * Setup file modal handlers
    */
   setupFileModal() {
+    const modal = document.getElementById('hubAddFileModal');
     const dropZone = document.getElementById('hubFileDropZone');
     const fileInput = document.getElementById('hubFileInput');
     const submitBtn = document.getElementById('hubAddFileSubmitBtn');
     const selectedFilesPreview = document.getElementById('hubSelectedFilesPreview');
     const selectedFilesList = document.getElementById('hubSelectedFilesList');
+    const titleInput = document.getElementById('hubFileTitle');
+    const notesInput = document.getElementById('hubFileNotes');
+    const devicePane = document.getElementById('hubFileDevicePane');
+    const vaultPane = document.getElementById('hubFileVaultPane');
+    const deviceBtn = document.getElementById('hubFileSourceDeviceBtn');
+    const vaultBtn = document.getElementById('hubFileSourceVaultBtn');
+    const vaultSelect = document.getElementById('hubVaultSelect');
+    const vaultRefreshBtn = document.getElementById('hubVaultRefreshBtn');
+    const vaultSearchInput = document.getElementById('hubVaultSearchInput');
+    const vaultLockedState = document.getElementById('hubVaultLockedState');
+    const vaultUnlockPassword = document.getElementById('hubVaultUnlockPassword');
+    const vaultUnlockBtn = document.getElementById('hubVaultUnlockBtn');
+    const vaultAttachmentList = document.getElementById('hubVaultAttachmentList');
 
-    if (!dropZone || !fileInput) return;
+    if (!modal || !dropZone || !fileInput || !submitBtn || !selectedFilesPreview || !selectedFilesList || !devicePane || !vaultPane) {
+      return;
+    }
 
-    let selectedFiles = [];
+    this.fileModalElements = {
+      modal,
+      dropZone,
+      fileInput,
+      submitBtn,
+      selectedFilesPreview,
+      selectedFilesList,
+      titleInput,
+      notesInput,
+      devicePane,
+      vaultPane,
+      deviceBtn,
+      vaultBtn,
+      vaultSelect,
+      vaultRefreshBtn,
+      vaultSearchInput,
+      vaultLockedState,
+      vaultUnlockPassword,
+      vaultUnlockBtn,
+      vaultAttachmentList
+    };
 
-    // Click to select files
-    dropZone.addEventListener('click', () => fileInput.click());
+    deviceBtn?.addEventListener('click', () => {
+      this.setFileModalSource('device');
+    });
 
-    // Drag and drop handlers
-    dropZone.addEventListener('dragover', (e) => {
-      e.preventDefault();
+    vaultBtn?.addEventListener('click', async () => {
+      await this.setFileModalSource('vault');
+    });
+
+    dropZone.addEventListener('click', () => {
+      if (this.fileModalState.source === 'device') {
+        fileInput.click();
+      }
+    });
+
+    dropZone.addEventListener('dragover', (event) => {
+      if (this.fileModalState.source !== 'device') {
+        return;
+      }
+      event.preventDefault();
       dropZone.classList.add('drag-active');
     });
 
@@ -281,102 +348,662 @@ export class WorkspaceDetailPage {
       dropZone.classList.remove('drag-active');
     });
 
-    dropZone.addEventListener('drop', (e) => {
-      e.preventDefault();
+    dropZone.addEventListener('drop', (event) => {
+      if (this.fileModalState.source !== 'device') {
+        return;
+      }
+      event.preventDefault();
       dropZone.classList.remove('drag-active');
-      if (e.dataTransfer.files.length > 0) {
-        selectedFiles = Array.from(e.dataTransfer.files);
-        updateFilesPreview();
+      if (event.dataTransfer.files.length > 0) {
+        this.fileModalState.selectedItems = Array.from(event.dataTransfer.files).map((file) => ({
+          source: 'device',
+          name: file.name,
+          size: Number(file.size || 0),
+          file
+        }));
+        this.renderFileModalSelectionPreview();
       }
     });
 
-    // File input change
     fileInput.addEventListener('change', () => {
       if (fileInput.files.length > 0) {
-        selectedFiles = Array.from(fileInput.files);
-        updateFilesPreview();
+        this.fileModalState.selectedItems = Array.from(fileInput.files).map((file) => ({
+          source: 'device',
+          name: file.name,
+          size: Number(file.size || 0),
+          file
+        }));
+        this.renderFileModalSelectionPreview();
       }
     });
 
-    // Update files preview
-    const updateFilesPreview = () => {
-      if (selectedFiles.length === 0) {
-        selectedFilesPreview.style.display = 'none';
-        submitBtn.disabled = true;
+    vaultSelect?.addEventListener('change', async () => {
+      this.fileModalState.selectedVaultId = String(vaultSelect.value || '').trim();
+      this.fileModalState.selectedItems = [];
+      this.renderFileModalSelectionPreview();
+      await this.loadFileModalVaultAttachments();
+    });
+
+    vaultSearchInput?.addEventListener('input', () => {
+      this.fileModalState.searchQuery = String(vaultSearchInput.value || '').trim().toLowerCase();
+      this.renderFileModalVaultAttachments();
+    });
+
+    vaultRefreshBtn?.addEventListener('click', async () => {
+      await this.loadFileModalVaults(true);
+    });
+
+    vaultUnlockBtn?.addEventListener('click', async () => {
+      await this.unlockSelectedVaultForFileModal();
+    });
+
+    vaultUnlockPassword?.addEventListener('keydown', async (event) => {
+      if (event.key === 'Enter') {
+        event.preventDefault();
+        await this.unlockSelectedVaultForFileModal();
+      }
+    });
+
+    vaultAttachmentList?.addEventListener('click', (event) => {
+      const trigger = event.target.closest('[data-vault-attachment-id]');
+      if (!trigger) {
         return;
       }
 
-      selectedFilesPreview.style.display = 'block';
-      submitBtn.disabled = false;
-
-      selectedFilesList.innerHTML = selectedFiles.map((file, i) => `
-        <div class="d-flex justify-content-between align-items-center p-2" style="background: var(--bg-secondary); border-radius: 4px;">
-          <span style="color: var(--text-primary);">${this.escapeHtml(file.name)}</span>
-          <button type="button" class="btn-close btn-sm" onclick="window.workspaceDetail?.removeFile(${i})"></button>
-        </div>
-      `).join('');
-    };
-
-    // Remove file from selection
-    this.removeFile = (index) => {
-      selectedFiles.splice(index, 1);
-      updateFilesPreview();
-    };
-
-    // Submit upload
-    submitBtn?.addEventListener('click', async () => {
-      if (selectedFiles.length === 0) return;
-
-      const title = document.getElementById('hubFileTitle')?.value || '';
-      const notes = document.getElementById('hubFileNotes')?.value || '';
-
-      submitBtn.disabled = true;
-      submitBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span> Uploading...';
-
-      try {
-        for (const file of selectedFiles) {
-          const formData = new FormData();
-          formData.append('file', file);
-          formData.append('workspace_id', this.workspaceId);
-          if (title) formData.append('title', title);
-          if (notes) formData.append('notes', notes);
-
-          const response = await fetch(`/api/studios/${encodeURIComponent(this.workspaceId)}/files`, {
-            method: 'POST',
-            body: formData
-          });
-
-          if (!response.ok) throw new Error(`Failed to upload ${file.name}`);
-        }
-
-        if (window.Toast) window.Toast.success('File(s) uploaded successfully');
-        await this.loadFiles();
-
-        // Close modal and reset
-        const modal = bootstrap.Modal.getInstance(document.getElementById('hubAddFileModal'));
-        modal?.hide();
-        selectedFiles = [];
-        updateFilesPreview();
-        document.getElementById('hubFileTitle').value = '';
-        document.getElementById('hubFileNotes').value = '';
-        fileInput.value = '';
-      } catch (error) {
-        console.error('Upload failed:', error);
-        if (window.Toast) window.Toast.error(error.message || 'Upload failed');
-      } finally {
-        submitBtn.disabled = false;
-        submitBtn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" class="me-1"><path d="M9,16V10H5L12,3L19,10H15V16H9M5,20V18H19V20H5Z"/></svg> Upload';
+      const attachmentId = String(trigger.getAttribute('data-vault-attachment-id') || '').trim();
+      if (attachmentId) {
+        this.toggleVaultAttachmentSelection(attachmentId);
       }
     });
 
-    // Reset on modal close
-    document.getElementById('hubAddFileModal')?.addEventListener('hidden.bs.modal', () => {
-      selectedFiles = [];
-      updateFilesPreview();
-      document.getElementById('hubFileTitle').value = '';
-      document.getElementById('hubFileNotes').value = '';
-      fileInput.value = '';
+    submitBtn.addEventListener('click', async () => {
+      await this.uploadSelectedFileModalItems();
     });
+
+    modal.addEventListener('show.bs.modal', async () => {
+      this.resetFileModalState();
+      this.renderFileModalSource();
+      this.renderFileModalSelectionPreview();
+    });
+
+    modal.addEventListener('hidden.bs.modal', () => {
+      this.resetFileModalState();
+    });
+  }
+
+  resetFileModalState() {
+    this.fileModalState = {
+      source: 'device',
+      selectedItems: [],
+      vaults: [],
+      selectedVaultId: '',
+      vaultStatus: null,
+      vaultAttachments: [],
+      searchQuery: '',
+      loadingVaults: false,
+      loadingAttachments: false
+    };
+
+    const {
+      fileInput,
+      titleInput,
+      notesInput,
+      vaultSelect,
+      vaultSearchInput,
+      vaultUnlockPassword
+    } = this.fileModalElements;
+
+    if (fileInput) {
+      fileInput.value = '';
+    }
+    if (titleInput) {
+      titleInput.value = '';
+    }
+    if (notesInput) {
+      notesInput.value = '';
+    }
+    if (vaultSelect) {
+      vaultSelect.innerHTML = '<option value="">Loading vaults...</option>';
+    }
+    if (vaultSearchInput) {
+      vaultSearchInput.value = '';
+      vaultSearchInput.disabled = false;
+    }
+    if (vaultUnlockPassword) {
+      vaultUnlockPassword.value = '';
+    }
+
+    this.renderFileModalSource();
+    this.renderFileModalSelectionPreview();
+    this.renderFileModalVaultAttachments();
+  }
+
+  async setFileModalSource(source) {
+    const normalized = source === 'vault' ? 'vault' : 'device';
+    if (this.fileModalState.source !== normalized) {
+      this.fileModalState.source = normalized;
+      this.fileModalState.selectedItems = [];
+      if (this.fileModalElements.fileInput) {
+        this.fileModalElements.fileInput.value = '';
+      }
+    }
+
+    this.renderFileModalSource();
+    this.renderFileModalSelectionPreview();
+
+    if (normalized === 'vault') {
+      await this.loadFileModalVaults(false);
+    }
+  }
+
+  renderFileModalSource() {
+    const {
+      devicePane,
+      vaultPane,
+      deviceBtn,
+      vaultBtn
+    } = this.fileModalElements;
+
+    const usingVault = this.fileModalState.source === 'vault';
+
+    if (devicePane) {
+      devicePane.hidden = usingVault;
+    }
+    if (vaultPane) {
+      vaultPane.hidden = !usingVault;
+    }
+
+    if (deviceBtn) {
+      deviceBtn.classList.toggle('is-active', !usingVault);
+      deviceBtn.setAttribute('aria-pressed', usingVault ? 'false' : 'true');
+    }
+    if (vaultBtn) {
+      vaultBtn.classList.toggle('is-active', usingVault);
+      vaultBtn.setAttribute('aria-pressed', usingVault ? 'true' : 'false');
+    }
+  }
+
+  renderFileModalSelectionPreview() {
+    const { selectedFilesPreview, selectedFilesList, submitBtn } = this.fileModalElements;
+    const items = Array.isArray(this.fileModalState.selectedItems) ? this.fileModalState.selectedItems : [];
+
+    if (!selectedFilesPreview || !selectedFilesList || !submitBtn) {
+      return;
+    }
+
+    if (!items.length) {
+      selectedFilesPreview.style.display = 'none';
+      submitBtn.disabled = true;
+      return;
+    }
+
+    selectedFilesPreview.style.display = 'block';
+    submitBtn.disabled = false;
+
+    selectedFilesList.innerHTML = items.map((item, index) => {
+      const meta = [];
+      if (Number.isFinite(item.size) && item.size > 0) {
+        meta.push(this.formatFileSize(item.size));
+      }
+      if (item.source === 'vault') {
+        meta.push(item.recordLabel || 'Vault entry');
+      }
+
+      return `
+        <div class="d-flex justify-content-between align-items-center p-2" style="background: var(--bg-secondary); border-radius: 8px; gap: 0.75rem;">
+          <div style="min-width: 0;">
+            <div style="color: var(--text-primary); font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
+              ${this.escapeHtml(item.name || 'Untitled file')}
+              <span class="hub-selected-files-source">${item.source === 'vault' ? 'Vault' : 'Device'}</span>
+            </div>
+            <div style="color: var(--text-secondary); font-size: 0.76rem; margin-top: 2px;">
+              ${this.escapeHtml(meta.join(' • '))}
+            </div>
+          </div>
+          <button type="button" class="btn-close btn-sm" onclick="window.workspaceDetail?.removeFileModalSelection(${index})"></button>
+        </div>
+      `;
+    }).join('');
+  }
+
+  removeFileModalSelection(index) {
+    if (!Array.isArray(this.fileModalState.selectedItems)) {
+      return;
+    }
+
+    this.fileModalState.selectedItems.splice(index, 1);
+    this.renderFileModalSelectionPreview();
+    if (this.fileModalState.source === 'vault') {
+      this.renderFileModalVaultAttachments();
+    }
+  }
+
+  async loadFileModalVaults(force = false) {
+    const { vaultSelect } = this.fileModalElements;
+    if (this.fileModalState.loadingVaults) {
+      return;
+    }
+
+    if (!force && this.fileModalState.vaults.length) {
+      if (!this.fileModalState.selectedVaultId) {
+        const storedVaultId = String(window.localStorage?.getItem('ori-selected-vault-id') || '').trim();
+        this.fileModalState.selectedVaultId = this.fileModalState.vaults.find((item) => item.id === storedVaultId)?.id || this.fileModalState.vaults[0]?.id || '';
+        if (vaultSelect) {
+          vaultSelect.value = this.fileModalState.selectedVaultId;
+        }
+      }
+      await this.loadFileModalVaultAttachments();
+      return;
+    }
+
+    this.fileModalState.loadingVaults = true;
+    if (vaultSelect) {
+      vaultSelect.innerHTML = '<option value="">Loading vaults...</option>';
+      vaultSelect.disabled = true;
+    }
+    this.renderFileModalVaultAttachments();
+
+    try {
+      const response = await fetch('/api/vault/vaults');
+      if (!response.ok) {
+        throw new Error('Failed to load vaults');
+      }
+
+      const data = await response.json();
+      this.fileModalState.vaults = Array.isArray(data?.vaults) ? data.vaults : [];
+
+      const storedVaultId = String(window.localStorage?.getItem('ori-selected-vault-id') || '').trim();
+      const preferredVaultId = this.fileModalState.selectedVaultId || storedVaultId;
+      this.fileModalState.selectedVaultId = this.fileModalState.vaults.find((item) => item.id === preferredVaultId)?.id || this.fileModalState.vaults[0]?.id || '';
+
+      if (vaultSelect) {
+        if (!this.fileModalState.vaults.length) {
+          vaultSelect.innerHTML = '<option value="">No vaults available</option>';
+        } else {
+          vaultSelect.innerHTML = this.fileModalState.vaults.map((vault) => {
+            const label = `${vault.name || 'Vault'} · ${Number(vault.record_count || 0)} ${Number(vault.record_count || 0) === 1 ? 'entry' : 'entries'}`;
+            const selected = vault.id === this.fileModalState.selectedVaultId ? ' selected' : '';
+            return `<option value="${this.escapeHtml(vault.id)}"${selected}>${this.escapeHtml(label)}</option>`;
+          }).join('');
+        }
+        vaultSelect.disabled = !this.fileModalState.vaults.length;
+      }
+
+      this.fileModalState.loadingVaults = false;
+      await this.loadFileModalVaultAttachments();
+    } catch (error) {
+      console.error('Failed to load vaults for file modal:', error);
+      this.fileModalState.vaults = [];
+      this.fileModalState.selectedVaultId = '';
+      this.fileModalState.vaultStatus = null;
+      this.fileModalState.vaultAttachments = [];
+      if (vaultSelect) {
+        vaultSelect.innerHTML = '<option value="">No vaults available</option>';
+        vaultSelect.disabled = true;
+      }
+      this.renderFileModalVaultAttachments('No vaults available yet. Create and unlock a vault first.');
+    } finally {
+      this.fileModalState.loadingVaults = false;
+    }
+  }
+
+  async loadFileModalVaultAttachments() {
+    const selectedVaultId = String(this.fileModalState.selectedVaultId || '').trim();
+    const { vaultUnlockPassword } = this.fileModalElements;
+
+    this.fileModalState.vaultAttachments = [];
+    this.fileModalState.vaultStatus = null;
+
+    if (vaultUnlockPassword) {
+      vaultUnlockPassword.value = '';
+    }
+
+    if (!selectedVaultId) {
+      this.renderFileModalVaultAttachments();
+      return;
+    }
+
+    this.fileModalState.loadingAttachments = true;
+    this.renderFileModalVaultAttachments();
+
+    try {
+      const statusResponse = await fetch(`/api/vault/status?vault_id=${encodeURIComponent(selectedVaultId)}`);
+      if (!statusResponse.ok) {
+        throw new Error('Failed to load vault status');
+      }
+
+      const status = await statusResponse.json();
+      this.fileModalState.vaultStatus = status;
+
+      if (!status?.available || status?.locked) {
+        this.renderFileModalVaultAttachments();
+        return;
+      }
+
+      const listResponse = await fetch(`/api/vault/records?vault_id=${encodeURIComponent(selectedVaultId)}`);
+      if (!listResponse.ok) {
+        throw new Error('Failed to load vault records');
+      }
+
+      const listData = await listResponse.json();
+      const records = Array.isArray(listData?.records) ? listData.records : [];
+      const selectedVault = this.getFileModalSelectedVault();
+      const recordDetails = await Promise.all(records.map(async (record) => {
+        try {
+          const response = await fetch(`/api/vault/records/${encodeURIComponent(record.id)}?vault_id=${encodeURIComponent(selectedVaultId)}`);
+          if (!response.ok) {
+            return null;
+          }
+          return await response.json();
+        } catch (error) {
+          console.warn('Failed to load vault record for workspace import:', record?.id, error);
+          return null;
+        }
+      }));
+
+      this.fileModalState.vaultAttachments = recordDetails
+        .filter(Boolean)
+        .flatMap((record) => this.extractVaultAttachmentsForWorkspaceModal(record, selectedVault?.name || 'Vault'))
+        .sort((left, right) => new Date(right.updatedAt || 0) - new Date(left.updatedAt || 0));
+    } catch (error) {
+      console.error('Failed to load vault attachments for workspace modal:', error);
+      this.fileModalState.vaultAttachments = [];
+      this.renderFileModalVaultAttachments('Failed to load files from the selected vault.');
+      return;
+    } finally {
+      this.fileModalState.loadingAttachments = false;
+    }
+
+    this.renderFileModalVaultAttachments();
+  }
+
+  getFileModalSelectedVault() {
+    const selectedVaultId = String(this.fileModalState.selectedVaultId || '').trim();
+    return this.fileModalState.vaults.find((vault) => vault.id === selectedVaultId) || null;
+  }
+
+  extractVaultAttachmentsForWorkspaceModal(record, vaultName) {
+    const payload = record?.payload;
+    if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+      return [];
+    }
+
+    const attachments = Array.isArray(payload.attachments) ? payload.attachments : [];
+    return attachments
+      .filter((attachment) => attachment && String(attachment.content_base64 || '').trim())
+      .map((attachment, index) => ({
+        source: 'vault',
+        id: `${record.id}:${attachment.id || index}:${attachment.name || 'attachment'}`,
+        name: String(attachment.name || `attachment-${index + 1}`),
+        size: Number(attachment.size_bytes || 0),
+        mimeType: String(attachment.mime_type || 'application/octet-stream'),
+        kind: String(attachment.kind || ''),
+        contentBase64: String(attachment.content_base64 || ''),
+        recordId: String(record.id || ''),
+        recordLabel: String(record.label || 'Untitled vault entry'),
+        recordType: String(record.type || ''),
+        workspaceId: String(record.workspace_id || ''),
+        vaultId: String(record.vault_id || this.fileModalState.selectedVaultId || ''),
+        vaultName: String(vaultName || 'Vault'),
+        updatedAt: record.updated_at || record.created_at || ''
+      }));
+  }
+
+  renderFileModalVaultAttachments(overrideMessage = '') {
+    const { vaultAttachmentList, vaultLockedState, vaultUnlockBtn, vaultSearchInput } = this.fileModalElements;
+    if (!vaultAttachmentList || !vaultLockedState) {
+      return;
+    }
+
+    const state = this.fileModalState;
+    const selectedIds = new Set((state.selectedItems || []).map((item) => item.id));
+
+    if (vaultUnlockBtn) {
+      vaultUnlockBtn.disabled = !state.selectedVaultId;
+    }
+
+    if (vaultSearchInput) {
+      vaultSearchInput.disabled = state.loadingVaults || state.loadingAttachments || !state.selectedVaultId || Boolean(state.vaultStatus?.locked);
+    }
+
+    vaultLockedState.hidden = true;
+
+    if (overrideMessage) {
+      vaultAttachmentList.innerHTML = `<div class="hub-file-vault-empty">${this.escapeHtml(overrideMessage)}</div>`;
+      return;
+    }
+
+    if (state.loadingVaults) {
+      vaultAttachmentList.innerHTML = '<div class="hub-file-vault-empty">Loading vaults...</div>';
+      return;
+    }
+
+    if (!state.vaults.length) {
+      vaultAttachmentList.innerHTML = '<div class="hub-file-vault-empty">No vaults available yet. Create one in Vault first.</div>';
+      return;
+    }
+
+    if (state.loadingAttachments) {
+      vaultAttachmentList.innerHTML = '<div class="hub-file-vault-empty">Loading files from the selected vault...</div>';
+      return;
+    }
+
+    if (!state.selectedVaultId) {
+      vaultAttachmentList.innerHTML = '<div class="hub-file-vault-empty">Select a vault to browse its attached files.</div>';
+      return;
+    }
+
+    if (!state.vaultStatus?.available) {
+      vaultAttachmentList.innerHTML = '<div class="hub-file-vault-empty">That vault is not available right now.</div>';
+      return;
+    }
+
+    if (state.vaultStatus?.locked) {
+      vaultLockedState.hidden = false;
+      if (vaultSearchInput) {
+        vaultSearchInput.disabled = true;
+      }
+      vaultAttachmentList.innerHTML = '<div class="hub-file-vault-empty">Unlock the selected vault to browse attached files.</div>';
+      return;
+    }
+
+    const query = String(state.searchQuery || '').trim();
+    const filteredAttachments = state.vaultAttachments.filter((item) => {
+      if (!query) {
+        return true;
+      }
+
+      const haystack = [
+        item.name,
+        item.recordLabel,
+        item.workspaceId,
+        item.vaultName
+      ].join(' ').toLowerCase();
+      return haystack.includes(query);
+    });
+
+    if (!filteredAttachments.length) {
+      vaultAttachmentList.innerHTML = state.vaultAttachments.length
+        ? '<div class="hub-file-vault-empty">No vault files match this search.</div>'
+        : '<div class="hub-file-vault-empty">No attached files were found in this vault yet. Add files to a vault entry first.</div>';
+      return;
+    }
+
+    vaultAttachmentList.innerHTML = filteredAttachments.map((item) => {
+      const isSelected = selectedIds.has(item.id);
+      const workspaceMeta = item.workspaceId ? `Workspace ${item.workspaceId}` : 'Global entry';
+      return `
+        <button type="button" class="hub-file-vault-item${isSelected ? ' is-selected' : ''}" data-vault-attachment-id="${this.escapeHtml(item.id)}">
+          <span class="hub-file-vault-item-icon">${this.renderFileModalVaultIcon(item)}</span>
+          <span class="hub-file-vault-item-main">
+            <span class="hub-file-vault-item-name">${this.escapeHtml(item.name)}</span>
+            <span class="hub-file-vault-item-meta">${this.escapeHtml(`${item.recordLabel} • ${this.formatFileSize(item.size || 0)}`)}</span>
+            <span class="hub-file-vault-item-detail">${this.escapeHtml(`${item.vaultName} • ${workspaceMeta}`)}</span>
+          </span>
+          <span class="hub-file-vault-item-check" aria-hidden="true"></span>
+        </button>
+      `;
+    }).join('');
+  }
+
+  renderFileModalVaultIcon(item) {
+    const mimeType = String(item?.mimeType || '');
+    const kind = String(item?.kind || '');
+
+    if (kind === 'image' || mimeType.startsWith('image/')) {
+      return '<svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M21,19V5A2,2 0 0,0 19,3H5A2,2 0 0,0 3,5V19A2,2 0 0,0 5,21H19A2,2 0 0,0 21,19M8.5,11A1.5,1.5 0 0,1 10,12.5A1.5,1.5 0 0,1 8.5,14A1.5,1.5 0 0,1 7,12.5A1.5,1.5 0 0,1 8.5,11M5,19L8.5,14.5L11,17.5L14.5,13L19,19H5Z"/></svg>';
+    }
+
+    return '<svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M14,2H6A2,2 0 0,0 4,4V20A2,2 0 0,0 6,22H18A2,2 0 0,0 20,20V8L14,2M13,9V3.5L18.5,9H13Z"/></svg>';
+  }
+
+  toggleVaultAttachmentSelection(attachmentId) {
+    const index = this.fileModalState.selectedItems.findIndex((item) => item.id === attachmentId);
+    if (index >= 0) {
+      this.fileModalState.selectedItems.splice(index, 1);
+    } else {
+      const attachment = this.fileModalState.vaultAttachments.find((item) => item.id === attachmentId);
+      if (!attachment) {
+        return;
+      }
+      this.fileModalState.selectedItems.push({ ...attachment });
+    }
+
+    this.renderFileModalSelectionPreview();
+    this.renderFileModalVaultAttachments();
+  }
+
+  async unlockSelectedVaultForFileModal() {
+    const selectedVaultId = String(this.fileModalState.selectedVaultId || '').trim();
+    const { vaultUnlockPassword, vaultUnlockBtn } = this.fileModalElements;
+    const password = String(vaultUnlockPassword?.value || '').trim();
+
+    if (!selectedVaultId) {
+      if (window.Toast) window.Toast.error('Select a vault first');
+      return;
+    }
+
+    if (!password) {
+      if (window.Toast) window.Toast.error('Enter the vault password first');
+      return;
+    }
+
+    if (vaultUnlockBtn) {
+      vaultUnlockBtn.disabled = true;
+      vaultUnlockBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span> Unlocking';
+    }
+
+    try {
+      const response = await fetch(`/api/vault/unlock?vault_id=${encodeURIComponent(selectedVaultId)}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          vault_id: selectedVaultId,
+          vault_password: password
+        })
+      });
+
+      const contentType = response.headers.get('content-type') || '';
+      const data = contentType.includes('application/json') ? await response.json() : null;
+      if (!response.ok) {
+        throw new Error(data?.error || 'Failed to unlock vault');
+      }
+
+      if (vaultUnlockPassword) {
+        vaultUnlockPassword.value = '';
+      }
+
+      if (window.Toast) window.Toast.success('Vault unlocked');
+      await this.loadFileModalVaultAttachments();
+    } catch (error) {
+      console.error('Failed to unlock vault for workspace file modal:', error);
+      if (window.Toast) window.Toast.error(error.message || 'Failed to unlock vault');
+    } finally {
+      if (vaultUnlockBtn) {
+        vaultUnlockBtn.disabled = false;
+        vaultUnlockBtn.textContent = 'Unlock';
+      }
+    }
+  }
+
+  base64ToBytes(base64Value) {
+    const binary = window.atob(String(base64Value || '').trim());
+    const length = binary.length;
+    const bytes = new Uint8Array(length);
+    for (let index = 0; index < length; index += 1) {
+      bytes[index] = binary.charCodeAt(index);
+    }
+    return bytes;
+  }
+
+  buildWorkspaceFileFromVaultAttachment(item) {
+    const bytes = this.base64ToBytes(item.contentBase64);
+    return new File([bytes], item.name || 'vault-file', {
+      type: item.mimeType || 'application/octet-stream',
+      lastModified: item.updatedAt ? new Date(item.updatedAt).getTime() : Date.now()
+    });
+  }
+
+  async uploadSelectedFileModalItems() {
+    const { submitBtn, titleInput, notesInput } = this.fileModalElements;
+    const items = Array.isArray(this.fileModalState.selectedItems) ? this.fileModalState.selectedItems : [];
+
+    if (!items.length) {
+      return;
+    }
+
+    const title = String(titleInput?.value || '').trim();
+    const notes = String(notesInput?.value || '').trim();
+
+    if (submitBtn) {
+      submitBtn.disabled = true;
+      submitBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span> Adding...';
+    }
+
+    try {
+      for (const item of items) {
+        const file = item.source === 'vault'
+          ? this.buildWorkspaceFileFromVaultAttachment(item)
+          : item.file;
+
+        if (!file) {
+          throw new Error(`Missing file data for ${item.name || 'selected item'}`);
+        }
+
+        const formData = new FormData();
+        formData.append('file', file);
+        formData.append('workspace_id', this.workspaceId);
+        if (title) formData.append('title', title);
+        if (notes) formData.append('notes', notes);
+
+        const response = await fetch(`/api/workspaces/${encodeURIComponent(this.workspaceId)}/files`, {
+          method: 'POST',
+          body: formData
+        });
+
+        if (!response.ok) {
+          throw new Error(`Failed to add ${item.name || 'file'} to the workspace`);
+        }
+      }
+
+      if (window.Toast) {
+        window.Toast.success(items.length === 1 ? 'File added to workspace' : 'Files added to workspace');
+      }
+      await this.loadFiles();
+
+      const modal = typeof bootstrap !== 'undefined' ? bootstrap.Modal.getInstance(this.fileModalElements.modal) : null;
+      modal?.hide();
+    } catch (error) {
+      console.error('Workspace file modal upload failed:', error);
+      if (window.Toast) {
+        window.Toast.error(error.message || 'Failed to add file to workspace');
+      }
+    } finally {
+      if (submitBtn) {
+        submitBtn.disabled = this.fileModalState.selectedItems.length === 0;
+        submitBtn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" class="me-1"><path d="M9,16V10H5L12,3L19,10H15V16H9M5,20V18H19V20H5Z"/></svg> Add to Workspace';
+      }
+    }
   }
 
   /**
@@ -452,6 +1079,9 @@ export class WorkspaceDetailPage {
       taskResultMeta: document.getElementById('workspace-detail-task-result-meta'),
       taskResultBreakdown: document.getElementById('workspace-detail-task-result-breakdown'),
       taskResultBody: document.getElementById('workspace-detail-task-result-body'),
+      taskResultNextSteps: document.getElementById('workspace-detail-task-result-next-steps'),
+      taskResultNextStepsCopy: document.getElementById('workspace-detail-task-result-next-steps-copy'),
+      taskResultNextStepsActions: document.getElementById('workspace-detail-task-result-next-steps-actions'),
       taskResultCopyBtn: document.getElementById('workspace-detail-task-result-copy'),
       taskExecutionModal: document.getElementById('workspace-detail-task-execution-modal'),
       taskExecutionTitle: document.getElementById('workspace-detail-task-execution-title'),
@@ -520,6 +1150,15 @@ export class WorkspaceDetailPage {
       skillNameHelp: document.getElementById('workspace-detail-skill-name-help'),
       skillEnabledInput: document.getElementById('workspace-detail-skill-enabled'),
       skillTrustedInput: document.getElementById('workspace-detail-skill-trusted'),
+      skillPlanningFields: document.getElementById('workspace-detail-skill-planning-fields'),
+      skillPlanningModeInput: document.getElementById('workspace-detail-skill-planning-mode'),
+      skillPlanningClarificationModeInput: document.getElementById('workspace-detail-skill-planning-clarification-mode'),
+      skillPlanningTasksDirInput: document.getElementById('workspace-detail-skill-planning-tasks-dir'),
+      skillPlanningDefaultExecutionInput: document.getElementById('workspace-detail-skill-planning-default-execution'),
+      skillPlanningWritePRDInput: document.getElementById('workspace-detail-skill-planning-write-prd'),
+      skillPlanningWriteTaskListInput: document.getElementById('workspace-detail-skill-planning-write-task-list'),
+      skillPlanningSyncTasksInput: document.getElementById('workspace-detail-skill-planning-sync-tasks'),
+      skillPlanningRequireBranchInput: document.getElementById('workspace-detail-skill-planning-require-branch'),
       skillAgentOptions: document.getElementById('workspace-detail-skill-agent-options'),
       skillAgentAccessSummary: document.getElementById('workspace-detail-skill-agent-access-summary'),
       skillSubmitBtn: document.getElementById('workspace-detail-skills-submit'),
@@ -603,10 +1242,12 @@ export class WorkspaceDetailPage {
       event.preventDefault();
       this.submitWorkspaceSkillModal();
     });
+    this.elements.skillNameSelect?.addEventListener('change', () => this.handleWorkspaceSkillSelectionChange());
     this.elements.skillAgentOptions?.addEventListener('change', () => this.updateWorkspaceSkillAgentAccessSummary());
     this.elements.skillsModal?.addEventListener('hidden.bs.modal', () => this.resetWorkspaceSkillModal());
     this.elements.skillsModal?.addEventListener('shown.bs.modal', () => {
       this.applyTopBackdropLayer('workspace-detail-backdrop-skills');
+      this.handleWorkspaceSkillSelectionChange();
     });
 
     // Schedule buttons
@@ -893,6 +1534,17 @@ export class WorkspaceDetailPage {
       if (!response.ok) throw new Error('Failed to load workspace');
 
       this.workspace = await response.json();
+      await this.loadAvailableSkills().catch((error) => {
+        console.warn('Failed to load skill catalog for workspace detail:', error);
+      });
+      if (window.OriAskRouting && typeof window.OriAskRouting.refreshWorkspaceIdentity === 'function') {
+        window.OriAskRouting.refreshWorkspaceIdentity({
+          workspace_id: this.workspaceId,
+          page_path: window.location?.pathname || '',
+          surface: window.location?.pathname?.includes('/canvas') ? 'workspace_canvas' : 'workspace_detail',
+          origin: 'ask_ori'
+        });
+      }
       await this.renderWorkspaceInfo();
       this.renderWorkspaceMCPBindings();
       this.renderWorkspaceSkillBindings();
@@ -1043,7 +1695,7 @@ export class WorkspaceDetailPage {
     this.renderAgentGroups();
 
     try {
-      const response = await fetch(`/api/orchestration/tasks?studio_id=${encodeURIComponent(this.workspaceId)}`);
+      const response = await fetch(`/api/orchestration/tasks?workspace_id=${encodeURIComponent(this.workspaceId)}`);
       if (!response.ok) throw new Error('Failed to load tasks');
 
       const data = await response.json();
@@ -1074,6 +1726,27 @@ export class WorkspaceDetailPage {
     this.renderAgentGroups();
   }
 
+  renderAgentDetailLink(agentName, encodedAgentName) {
+    if (!agentName || !encodedAgentName) {
+      return `<span>${this.escapeHtml(agentName || '')}</span>`;
+    }
+
+    const safeAgentName = this.escapeHtml(agentName);
+    const safeHref = `/agents/${encodedAgentName}`;
+    return `
+      <a href="${safeHref}"
+         class="workspace-detail-agent-link"
+         title="Open ${safeAgentName} details"
+         aria-label="Open ${safeAgentName} details"
+         onclick="event.stopPropagation();">
+        <span class="workspace-detail-agent-link-label">${safeAgentName}</span>
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+          <path d="M14,3H21V10H19V6.41L12.41,13L11,11.59L17.59,5H14V3M5,5H10V7H7V17H17V14H19V19H5V5Z"/>
+        </svg>
+      </a>
+    `;
+  }
+
   renderAgentGroups() {
     if (!this.elements.agentsList) return;
 
@@ -1100,6 +1773,10 @@ export class WorkspaceDetailPage {
       const instanceLabel = group.instanceCount > 1 ? `${group.instanceCount} instances` : '';
       const cardMeta = [instanceLabel, taskLabel].filter(Boolean).join(' · ');
       const capabilityBadges = group.isUnassigned ? '' : this.renderAgentCapabilityBadges(group.name);
+      const agentProfile = group.isUnassigned ? null : this.getAgentProfile(group.name);
+      const modelLabel = agentProfile?.model
+        ? `<span class="workspace-detail-agent-model-badge">${this.escapeHtml(agentProfile.model)}</span>`
+        : '';
       const encodedAgentName = encodeURIComponent(group.name);
       const canFlip = !group.isUnassigned;
       const isFlipped = canFlip && this.flippedAgentCards.has(group.key);
@@ -1153,9 +1830,10 @@ export class WorkspaceDetailPage {
           <div class="workspace-detail-agent-card-face workspace-detail-agent-card-face-front">
             <div class="workspace-detail-agent-card-header">
               <div class="workspace-detail-agent-card-title">
-                <span>${this.escapeHtml(group.name)}</span>
+                ${group.isUnassigned ? `<span>${this.escapeHtml(group.name)}</span>` : this.renderAgentDetailLink(group.name, encodedAgentName)}
                 ${instanceChip}
                 ${capabilityBadges}
+                ${modelLabel}
               </div>
               <div class="workspace-detail-agent-card-meta-wrap">
                 <div class="workspace-detail-agent-card-meta">${cardMeta}</div>
@@ -1215,7 +1893,7 @@ export class WorkspaceDetailPage {
       <div class="workspace-detail-agent-card-face workspace-detail-agent-card-face-back">
         <div class="workspace-detail-agent-card-header">
           <div class="workspace-detail-agent-card-title">
-            <span>${this.escapeHtml(group.name)}</span>
+            ${this.renderAgentDetailLink(group.name, encodedAgentName)}
             <span class="workspace-detail-agent-info-tag">Agent Info</span>
           </div>
           <div class="workspace-detail-agent-card-meta-wrap">
@@ -1698,6 +2376,37 @@ export class WorkspaceDetailPage {
         </div>
       </div>
     `;
+  }
+
+  /**
+   * Check for ?addAgent=1 query param and open the Create Agent modal
+   * pre-filled with workspace manager defaults so the user picks model/provider.
+   */
+  checkAutoOpenCreateAgent() {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('addAgent') !== '1') return;
+
+    // Clean the URL so refresh won't re-trigger
+    window.history.replaceState({}, '', window.location.pathname);
+
+    const workspaceName = String(this.workspace?.name || '').trim();
+    const agentName = workspaceName
+      ? (workspaceName.toLowerCase().endsWith(' manager') ? workspaceName : workspaceName + ' Manager')
+      : 'Workspace Manager';
+    const systemPrompt = `You are the workspace manager for "${workspaceName || 'this workspace'}". `
+      + 'Act as the default front door for the workspace: clarify user intent, answer directly when '
+      + 'the request only needs shared context, and break work into tasks for specialists when needed.';
+
+    setTimeout(() => {
+      if (typeof window.showAddAgentModal === 'function') {
+        window.showAddAgentModal({
+          workspaceId: this.workspaceId,
+          seedName: agentName,
+          seedType: 'workspace-manager',
+          seedSystemPrompt: systemPrompt
+        });
+      }
+    }, 300);
   }
 
   async openAddAgentModal() {
@@ -3060,6 +3769,10 @@ export class WorkspaceDetailPage {
       this.elements.taskResultBody.textContent = String(resultData.text || '');
     }
     this.currentTaskResultText = String(resultData.text || '');
+    this.currentTaskResultTaskId = String(task.id || '').trim();
+    this.currentTaskResultSourceTaskId = String(resultData.sourceTask?.id || task.id || '').trim();
+    this.currentTaskResultFollowUpPending = false;
+    this.renderTaskResultNextSteps(task, resultData);
 
     const openResultModal = () => {
       if (!this.elements.taskResultModal || !window.bootstrap) return;
@@ -3084,6 +3797,205 @@ export class WorkspaceDetailPage {
     }
 
     openResultModal();
+  }
+
+  renderTaskResultNextSteps(task, resultData) {
+    const container = this.elements.taskResultNextSteps;
+    const copyEl = this.elements.taskResultNextStepsCopy;
+    const actionsEl = this.elements.taskResultNextStepsActions;
+    if (!container || !copyEl || !actionsEl) return;
+
+    const text = String(resultData?.text || '').trim();
+    const sourceTask = resultData?.sourceTask && typeof resultData.sourceTask === 'object'
+      ? resultData.sourceTask
+      : task;
+    const shouldShow = String(task?.status || '').trim().toLowerCase() === 'completed' && text;
+    if (!shouldShow) {
+      this.currentTaskResultNextSteps = [];
+      container.classList.add('d-none');
+      copyEl.textContent = '';
+      actionsEl.innerHTML = '';
+      return;
+    }
+
+    const nextSteps = this.extractTaskResultNextSteps(text);
+    this.currentTaskResultNextSteps = nextSteps;
+
+    if (!nextSteps.length) {
+      container.classList.add('d-none');
+      copyEl.textContent = '';
+      actionsEl.innerHTML = '';
+      return;
+    }
+
+    copyEl.textContent = 'Choose the next step to create and run a follow-up task linked to this result.';
+    actionsEl.innerHTML = nextSteps.map((step) => {
+      const buttonLabel = this.currentTaskResultFollowUpPending
+        ? 'Creating follow-up task...'
+        : 'Create follow-up task';
+      return `
+        <button type="button"
+                class="workspace-detail-task-result-next-step-btn"
+                data-next-step-id="${this.escapeHtml(step.id)}"
+                ${this.currentTaskResultFollowUpPending ? 'disabled' : ''}>
+          <span class="workspace-detail-task-result-next-step-index">${this.escapeHtml(step.number || '•')}</span>
+          <span class="workspace-detail-task-result-next-step-copy">
+            <span class="workspace-detail-task-result-next-step-title">${this.escapeHtml(step.label)}</span>
+            <span class="workspace-detail-task-result-next-step-meta">${this.escapeHtml(buttonLabel)}</span>
+          </span>
+        </button>
+      `;
+    }).join('');
+
+    actionsEl.querySelectorAll('[data-next-step-id]').forEach((button) => {
+      button.addEventListener('click', () => {
+        const nextStepId = String(button.getAttribute('data-next-step-id') || '').trim();
+        if (!nextStepId) return;
+        void this.continueTaskFromResult(task.id, sourceTask.id, nextStepId);
+      });
+    });
+
+    container.classList.remove('d-none');
+  }
+
+  cleanTaskResultNextStepText(value) {
+    return String(value || '')
+      .replace(/\[(.*?)\]\((.*?)\)/g, '$1')
+      .replace(/[*_`#>]+/g, '')
+      .replace(/\s+/g, ' ')
+      .trim();
+  }
+
+  normalizeTaskResultNextStepToken(value) {
+    return this.cleanTaskResultNextStepText(value)
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, ' ')
+      .trim();
+  }
+
+  buildTaskResultNextStepId(number, label) {
+    const base = this.normalizeTaskResultNextStepToken(label)
+      .replace(/\s+/g, '-')
+      .slice(0, 48) || 'next-step';
+    return `result-step-${String(number || '').trim() || 'x'}-${base}`;
+  }
+
+  extractTaskResultNextSteps(text) {
+    const lines = String(text || '').split(/\r?\n/);
+    const cues = ['next steps', 'next step', 'would you like me to', 'let me know'];
+    let cueIndex = -1;
+
+    for (let i = 0; i < lines.length; i += 1) {
+      const normalized = this.normalizeTaskResultNextStepToken(lines[i]);
+      if (cues.some((cue) => normalized.includes(cue))) {
+        cueIndex = i;
+        break;
+      }
+    }
+
+    if (cueIndex === -1) return [];
+
+    const choices = [];
+    let started = false;
+    for (let i = cueIndex + 1; i < lines.length; i += 1) {
+      const rawLine = String(lines[i] || '');
+      const match = rawLine.match(/^\s*(\d+)[.)]\s*(.+)$/);
+      if (match) {
+        const number = String(match[1] || '').trim();
+        const label = this.cleanTaskResultNextStepText(match[2]);
+        if (!label) continue;
+        choices.push({
+          id: this.buildTaskResultNextStepId(number, label),
+          number,
+          label
+        });
+        started = true;
+        if (choices.length >= 5) break;
+        continue;
+      }
+
+      if (!started) continue;
+      if (!rawLine.trim()) continue;
+      break;
+    }
+
+    return choices;
+  }
+
+  buildTaskResultFollowUpTitle(task, step) {
+    const baseTitle = String(task?.description || task?.name || 'Follow-up task').trim() || 'Follow-up task';
+    const stepLabel = this.cleanTaskResultNextStepText(step?.label || '');
+    if (!stepLabel) return baseTitle;
+    const combined = `${baseTitle} - ${stepLabel}`;
+    return combined.length > 160 ? `${combined.slice(0, 157).trim()}...` : combined;
+  }
+
+  buildTaskResultFollowUpDetails(task, sourceTask, step) {
+    const parts = [];
+    const baseTitle = String(task?.description || task?.name || task?.id || 'Completed task').trim();
+    const sourceTitle = String(sourceTask?.description || sourceTask?.name || sourceTask?.id || '').trim();
+    const stepNumber = String(step?.number || '').trim();
+    const stepLabel = this.cleanTaskResultNextStepText(step?.label || '');
+
+    parts.push(`Follow-up created from completed task: ${baseTitle}`);
+    if (sourceTitle && sourceTitle !== baseTitle) {
+      parts.push(`Source result: ${sourceTitle}`);
+    }
+    if (stepLabel) {
+      parts.push(`Selected next step: ${stepNumber ? `${stepNumber}. ` : ''}${stepLabel}`);
+    }
+    parts.push('Use the linked input task result as the starting context and continue from there.');
+
+    return parts.join('\n');
+  }
+
+  async continueTaskFromResult(taskId, sourceTaskId, nextStepId) {
+    if (this.currentTaskResultFollowUpPending) return;
+
+    const task = this.tasks.find((item) => item.id === taskId);
+    const sourceTask = this.tasks.find((item) => item.id === sourceTaskId) || task;
+    const nextStep = this.currentTaskResultNextSteps.find((item) => item.id === nextStepId);
+    if (!task || !sourceTask || !nextStep) return;
+
+    this.currentTaskResultFollowUpPending = true;
+    this.renderTaskResultNextSteps(task, { text: this.currentTaskResultText, sourceTask });
+
+    try {
+      const createdTask = await this.createTask(
+        this.buildTaskResultFollowUpTitle(task, nextStep),
+        this.buildTaskResultFollowUpDetails(task, sourceTask, nextStep),
+        '',
+        {
+          assignee: String(sourceTask.to || task.to || '').trim(),
+          assignedNodeId: String(sourceTask.assigned_node_id || task.assigned_node_id || '').trim(),
+          inputTaskIDs: [sourceTask.id],
+          successToast: false
+        }
+      );
+
+      if (!createdTask?.id) {
+        throw new Error('Failed to create follow-up task');
+      }
+
+      if (window.Toast) {
+        window.Toast.success('Follow-up task created');
+      }
+
+      if (this.elements.taskResultModal && window.bootstrap) {
+        const modal = bootstrap.Modal.getInstance(this.elements.taskResultModal);
+        modal?.hide();
+      }
+
+      await this.executeTask(createdTask.id, { skipConfirm: true });
+    } catch (error) {
+      console.error('Failed to continue task from result:', error);
+      if (window.Toast) {
+        window.Toast.error(error?.message || 'Failed to continue task');
+      }
+    } finally {
+      this.currentTaskResultFollowUpPending = false;
+      this.renderTaskResultNextSteps(task, { text: this.currentTaskResultText, sourceTask });
+    }
   }
 
   renderTaskResultBreakdown(task, subtasks = []) {
@@ -3303,7 +4215,7 @@ export class WorkspaceDetailPage {
   async fetchLatestSubtasksForParent(parentTaskID) {
     if (!parentTaskID || !this.workspaceId) return [];
     try {
-      const response = await fetch(`/api/orchestration/tasks?studio_id=${encodeURIComponent(this.workspaceId)}`);
+      const response = await fetch(`/api/orchestration/tasks?workspace_id=${encodeURIComponent(this.workspaceId)}`);
       if (!response.ok) return [];
       const payload = await response.json();
       const tasks = Array.isArray(payload?.tasks) ? payload.tasks : [];
@@ -4379,8 +5291,8 @@ export class WorkspaceDetailPage {
   async saveWorkspaceMCPBinding(payload) {
     const isEditing = this.activeWorkspaceMCPMode === 'edit';
     const endpoint = isEditing
-      ? `/api/studios/${encodeURIComponent(this.workspaceId)}/mcp-bindings/${encodeURIComponent(this.activeWorkspaceMCPBindingId)}`
-      : `/api/studios/${encodeURIComponent(this.workspaceId)}/mcp-bindings`;
+      ? `/api/workspaces/${encodeURIComponent(this.workspaceId)}/mcp-bindings/${encodeURIComponent(this.activeWorkspaceMCPBindingId)}`
+      : `/api/workspaces/${encodeURIComponent(this.workspaceId)}/mcp-bindings`;
 
     const response = await fetch(endpoint, {
       method: isEditing ? 'PUT' : 'POST',
@@ -4438,7 +5350,7 @@ export class WorkspaceDetailPage {
 
       if (entry && arraysEqual(enabledBindingIDs, defaultBindingIds)) {
         const response = await fetch(
-          `/api/studios/${encodeURIComponent(this.workspaceId)}/agent-mcp-access/${encodeURIComponent(instanceId)}`,
+          `/api/workspaces/${encodeURIComponent(this.workspaceId)}/agent-mcp-access/${encodeURIComponent(instanceId)}`,
           { method: 'DELETE' }
         );
 
@@ -4454,7 +5366,7 @@ export class WorkspaceDetailPage {
       }
 
       const response = await fetch(
-        `/api/studios/${encodeURIComponent(this.workspaceId)}/agent-mcp-access/${encodeURIComponent(instanceId)}`,
+        `/api/workspaces/${encodeURIComponent(this.workspaceId)}/agent-mcp-access/${encodeURIComponent(instanceId)}`,
         {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
@@ -4554,7 +5466,7 @@ export class WorkspaceDetailPage {
 
     try {
       const response = await fetch(
-        `/api/studios/${encodeURIComponent(this.workspaceId)}/mcp-bindings/${encodeURIComponent(bindingId)}`,
+        `/api/workspaces/${encodeURIComponent(this.workspaceId)}/mcp-bindings/${encodeURIComponent(bindingId)}`,
         { method: 'DELETE' }
       );
 
@@ -4670,13 +5582,19 @@ export class WorkspaceDetailPage {
 
     const includeDisabled = options.includeDisabled === true;
     return this.workspace.skill_bindings
-      .map((binding) => ({
-        id: String(binding?.id || '').trim(),
-        skillName: String(binding?.skill_name || binding?.skillName || '').trim(),
-        enabled: binding?.enabled !== false,
-        trusted: binding?.trusted === true,
-        config: binding?.config && typeof binding.config === 'object' ? { ...binding.config } : {}
-      }))
+      .map((binding) => {
+        const skillName = String(binding?.skill_name || binding?.skillName || '').trim();
+        const config = binding?.config && typeof binding.config === 'object' ? { ...binding.config } : {};
+        const skillDefinition = this.getAvailableWorkspaceSkill(skillName);
+        return {
+          id: String(binding?.id || '').trim(),
+          skillName,
+          enabled: binding?.enabled !== false,
+          trusted: binding?.trusted === true,
+          config,
+          planningProfile: skillDefinition?.planningProfile === true || this.isWorkspacePlanningConfig(config)
+        };
+      })
       .filter((binding) => binding.id && binding.skillName)
       .filter((binding) => includeDisabled || binding.enabled);
   }
@@ -4687,6 +5605,85 @@ export class WorkspaceDetailPage {
     return this.getWorkspaceSkillBindings({ includeDisabled: true }).find(
       (binding) => String(binding?.id || '').trim().toLowerCase() === normalizedBindingId
     ) || null;
+  }
+
+  getAvailableWorkspaceSkill(skillName) {
+    const normalizedSkillName = String(skillName || '').trim().toLowerCase();
+    if (!normalizedSkillName || !Array.isArray(this.availableSkills)) {
+      return null;
+    }
+    return this.availableSkills.find(
+      (skill) => String(skill?.name || '').trim().toLowerCase() === normalizedSkillName
+    ) || null;
+  }
+
+  getDefaultWorkspacePlanningConfig() {
+    return {
+      profile_type: 'workspace_planning',
+      mode: 'feature',
+      write_prd: true,
+      write_task_list: true,
+      tasks_dir: 'tasks',
+      clarification_mode: 'standard',
+      sync_workspace_tasks: true,
+      default_execution_mode: 'step_through',
+      require_branch: true
+    };
+  }
+
+  isWorkspacePlanningConfig(config) {
+    if (!config || typeof config !== 'object' || Array.isArray(config)) {
+      return false;
+    }
+    if (String(config.profile_type || '').trim() === 'workspace_planning') {
+      return true;
+    }
+    const planningKeys = [
+      'mode',
+      'write_prd',
+      'write_task_list',
+      'tasks_dir',
+      'clarification_mode',
+      'sync_workspace_tasks',
+      'default_execution_mode',
+      'require_branch'
+    ];
+    return planningKeys.some((key) => Object.prototype.hasOwnProperty.call(config, key));
+  }
+
+  normalizeWorkspacePlanningConfig(config = {}) {
+    const defaults = this.getDefaultWorkspacePlanningConfig();
+    const normalized = {
+      ...defaults,
+      ...(config && typeof config === 'object' && !Array.isArray(config) ? config : {})
+    };
+
+    normalized.profile_type = 'workspace_planning';
+    normalized.mode = ['feature', 'bugfix', 'refactor', 'investigation'].includes(String(normalized.mode || '').trim())
+      ? String(normalized.mode).trim()
+      : defaults.mode;
+    normalized.tasks_dir = String(normalized.tasks_dir || '').trim() || defaults.tasks_dir;
+    normalized.clarification_mode = ['minimal', 'standard', 'deep'].includes(String(normalized.clarification_mode || '').trim())
+      ? String(normalized.clarification_mode).trim()
+      : defaults.clarification_mode;
+    normalized.default_execution_mode = ['auto', 'step_through'].includes(String(normalized.default_execution_mode || '').trim())
+      ? String(normalized.default_execution_mode).trim()
+      : defaults.default_execution_mode;
+    normalized.write_prd = normalized.write_prd !== false;
+    normalized.write_task_list = normalized.write_task_list !== false;
+    normalized.sync_workspace_tasks = normalized.sync_workspace_tasks !== false;
+    normalized.require_branch = normalized.require_branch !== false;
+    return normalized;
+  }
+
+  getWorkspacePlanningSummary(config = {}) {
+    if (!this.isWorkspacePlanningConfig(config)) return '';
+    const normalized = this.normalizeWorkspacePlanningConfig(config);
+    const outputs = [];
+    if (normalized.write_prd) outputs.push('PRD');
+    if (normalized.write_task_list) outputs.push('tasks');
+    if (outputs.length === 0) outputs.push('no files');
+    return `${normalized.mode} planning, ${outputs.join(' + ')}, ${normalized.default_execution_mode}, ${normalized.tasks_dir}`;
   }
 
   getWorkspaceSkillAgentAccessEntry(agentInstanceId) {
@@ -4791,7 +5788,8 @@ export class WorkspaceDetailPage {
         .map((skill) => ({
           name: String(skill?.name || '').trim(),
           description: String(skill?.description || '').trim(),
-          enabled: skill?.enabled !== false
+          enabled: skill?.enabled !== false,
+          planningProfile: skill?.planning_profile === true || skill?.openai_metadata?.planning_profile === true
         }))
         .filter((skill) => skill.name)
         .filter((skill) => {
@@ -4856,7 +5854,10 @@ export class WorkspaceDetailPage {
 
       const unavailable = skill?.unavailable === true;
       const selected = normalizedSelected && name.toLowerCase() === normalizedSelected.toLowerCase() ? ' selected' : '';
-      const label = unavailable ? `${name} (not currently available)` : name;
+      const planning = skill?.planningProfile === true;
+      const label = unavailable
+        ? `${name} (not currently available)`
+        : (planning ? `${name} (planning profile)` : name);
       options.push(`<option value="${this.escapeHtml(name)}"${selected}>${this.escapeHtml(label)}</option>`);
     });
 
@@ -4918,6 +5919,78 @@ export class WorkspaceDetailPage {
     this.elements.skillAgentAccessSummary.textContent = `${selectedCount} of ${checkboxes.length} selected`;
   }
 
+  populateWorkspacePlanningSettings(config = {}) {
+    const normalized = this.normalizeWorkspacePlanningConfig(config);
+    if (this.elements.skillPlanningModeInput) {
+      this.elements.skillPlanningModeInput.value = normalized.mode;
+    }
+    if (this.elements.skillPlanningClarificationModeInput) {
+      this.elements.skillPlanningClarificationModeInput.value = normalized.clarification_mode;
+    }
+    if (this.elements.skillPlanningTasksDirInput) {
+      this.elements.skillPlanningTasksDirInput.value = normalized.tasks_dir;
+    }
+    if (this.elements.skillPlanningDefaultExecutionInput) {
+      this.elements.skillPlanningDefaultExecutionInput.value = normalized.default_execution_mode;
+    }
+    if (this.elements.skillPlanningWritePRDInput) {
+      this.elements.skillPlanningWritePRDInput.checked = normalized.write_prd !== false;
+    }
+    if (this.elements.skillPlanningWriteTaskListInput) {
+      this.elements.skillPlanningWriteTaskListInput.checked = normalized.write_task_list !== false;
+    }
+    if (this.elements.skillPlanningSyncTasksInput) {
+      this.elements.skillPlanningSyncTasksInput.checked = normalized.sync_workspace_tasks !== false;
+    }
+    if (this.elements.skillPlanningRequireBranchInput) {
+      this.elements.skillPlanningRequireBranchInput.checked = normalized.require_branch !== false;
+    }
+  }
+
+  shouldShowWorkspacePlanningSettings(selectedSkillName = '', existingConfig = {}) {
+    const normalizedSkillName = String(selectedSkillName || '').trim();
+    if (normalizedSkillName) {
+      const selectedSkill = this.getAvailableWorkspaceSkill(normalizedSkillName);
+      if (selectedSkill) {
+        return selectedSkill.planningProfile === true;
+      }
+    }
+    return this.isWorkspacePlanningConfig(existingConfig);
+  }
+
+  handleWorkspaceSkillSelectionChange() {
+    const selectedSkillName = String(this.elements.skillNameSelect?.value || '').trim();
+    const existingBinding = this.activeWorkspaceSkillBindingId
+      ? this.getWorkspaceSkillBinding(this.activeWorkspaceSkillBindingId)
+      : null;
+    const shouldShowPlanning = this.shouldShowWorkspacePlanningSettings(selectedSkillName, existingBinding?.config || {});
+
+    if (this.elements.skillPlanningFields) {
+      this.elements.skillPlanningFields.classList.toggle('d-none', !shouldShowPlanning);
+    }
+
+    if (shouldShowPlanning) {
+      const sourceConfig = this.isWorkspacePlanningConfig(existingBinding?.config)
+        ? existingBinding.config
+        : this.getDefaultWorkspacePlanningConfig();
+      this.populateWorkspacePlanningSettings(sourceConfig);
+    }
+  }
+
+  buildWorkspacePlanningConfig() {
+    return this.normalizeWorkspacePlanningConfig({
+      profile_type: 'workspace_planning',
+      mode: String(this.elements.skillPlanningModeInput?.value || '').trim(),
+      write_prd: this.elements.skillPlanningWritePRDInput?.checked !== false,
+      write_task_list: this.elements.skillPlanningWriteTaskListInput?.checked !== false,
+      tasks_dir: String(this.elements.skillPlanningTasksDirInput?.value || '').trim(),
+      clarification_mode: String(this.elements.skillPlanningClarificationModeInput?.value || '').trim(),
+      sync_workspace_tasks: this.elements.skillPlanningSyncTasksInput?.checked !== false,
+      default_execution_mode: String(this.elements.skillPlanningDefaultExecutionInput?.value || '').trim(),
+      require_branch: this.elements.skillPlanningRequireBranchInput?.checked !== false
+    });
+  }
+
   resetWorkspaceSkillModal() {
     this.activeWorkspaceSkillBindingId = '';
     this.activeWorkspaceSkillMode = 'create';
@@ -4942,6 +6015,10 @@ export class WorkspaceDetailPage {
     }
     if (this.elements.skillTrustedInput) {
       this.elements.skillTrustedInput.checked = false;
+    }
+    this.populateWorkspacePlanningSettings(this.getDefaultWorkspacePlanningConfig());
+    if (this.elements.skillPlanningFields) {
+      this.elements.skillPlanningFields.classList.add('d-none');
     }
     if (this.elements.skillSubmitBtn) {
       this.elements.skillSubmitBtn.disabled = false;
@@ -5010,11 +6087,13 @@ export class WorkspaceDetailPage {
     if (this.elements.skillTrustedInput) {
       this.elements.skillTrustedInput.checked = existingBinding ? existingBinding.trusted === true : false;
     }
+    this.populateWorkspacePlanningSettings(existingBinding?.config || this.getDefaultWorkspacePlanningConfig());
     if (this.elements.skillSubmitBtn) {
       this.elements.skillSubmitBtn.textContent = existingBinding ? 'Save Changes' : 'Add Binding';
       this.elements.skillSubmitBtn.disabled = false;
     }
 
+    this.handleWorkspaceSkillSelectionChange();
     this.renderWorkspaceSkillAgentOptions(this.activeWorkspaceSkillBindingId);
     this.getWorkspaceSkillModalInstance()?.show();
   }
@@ -5037,8 +6116,8 @@ export class WorkspaceDetailPage {
   async saveWorkspaceSkillBinding(payload) {
     const isEditing = this.activeWorkspaceSkillMode === 'edit';
     const endpoint = isEditing
-      ? `/api/studios/${encodeURIComponent(this.workspaceId)}/skill-bindings/${encodeURIComponent(this.activeWorkspaceSkillBindingId)}`
-      : `/api/studios/${encodeURIComponent(this.workspaceId)}/skill-bindings`;
+      ? `/api/workspaces/${encodeURIComponent(this.workspaceId)}/skill-bindings/${encodeURIComponent(this.activeWorkspaceSkillBindingId)}`
+      : `/api/workspaces/${encodeURIComponent(this.workspaceId)}/skill-bindings`;
 
     const response = await fetch(endpoint, {
       method: isEditing ? 'PUT' : 'POST',
@@ -5096,7 +6175,7 @@ export class WorkspaceDetailPage {
 
       if (entry && arraysEqual(enabledBindingIDs, defaultBindingIds)) {
         const response = await fetch(
-          `/api/studios/${encodeURIComponent(this.workspaceId)}/agent-skill-access/${encodeURIComponent(instanceId)}`,
+          `/api/workspaces/${encodeURIComponent(this.workspaceId)}/agent-skill-access/${encodeURIComponent(instanceId)}`,
           { method: 'DELETE' }
         );
 
@@ -5112,7 +6191,7 @@ export class WorkspaceDetailPage {
       }
 
       const response = await fetch(
-        `/api/studios/${encodeURIComponent(this.workspaceId)}/agent-skill-access/${encodeURIComponent(instanceId)}`,
+        `/api/workspaces/${encodeURIComponent(this.workspaceId)}/agent-skill-access/${encodeURIComponent(instanceId)}`,
         {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
@@ -5142,6 +6221,8 @@ export class WorkspaceDetailPage {
     this.setWorkspaceSkillModalSubmitting(true);
 
     try {
+      const selectedSkill = this.getAvailableWorkspaceSkill(skillName);
+      const planningProfile = selectedSkill?.planningProfile === true || this.shouldShowWorkspacePlanningSettings(skillName);
       const enabled = this.elements.skillEnabledInput?.checked !== false;
       const trusted = this.elements.skillTrustedInput?.checked === true;
       const selectedAgentInstanceIds = this.getWorkspaceSkillSelectedAgentInstanceIDs();
@@ -5149,7 +6230,7 @@ export class WorkspaceDetailPage {
         skill_name: skillName,
         enabled,
         trusted,
-        config: {}
+        config: planningProfile ? this.buildWorkspacePlanningConfig() : {}
       };
 
       if (this.activeWorkspaceSkillMode !== 'edit') {
@@ -5193,7 +6274,7 @@ export class WorkspaceDetailPage {
 
     try {
       const response = await fetch(
-        `/api/studios/${encodeURIComponent(this.workspaceId)}/skill-bindings/${encodeURIComponent(bindingId)}`,
+        `/api/workspaces/${encodeURIComponent(this.workspaceId)}/skill-bindings/${encodeURIComponent(bindingId)}`,
         { method: 'DELETE' }
       );
 
@@ -5228,7 +6309,9 @@ export class WorkspaceDetailPage {
       const skillName = String(binding?.skillName || '').trim() || 'unknown';
       const isDisabled = binding?.enabled === false;
       const isTrusted = binding?.trusted === true;
+      const isPlanning = binding?.planningProfile === true;
       const agentNames = this.getWorkspaceSkillAgentNamesForBinding(binding.id);
+      const planningSummary = this.getWorkspacePlanningSummary(binding?.config || {});
       const accessSummary = isDisabled
         ? 'Disabled for this workspace'
         : agentNames.length > 0
@@ -5244,7 +6327,9 @@ export class WorkspaceDetailPage {
 
       const chips = [
         `<span class="workspace-detail-mcp-chip status${isDisabled ? ' is-disabled' : ''}">${isDisabled ? 'Disabled' : 'Enabled'}</span>`,
+        isPlanning ? `<span class="workspace-detail-mcp-chip source">Planning</span>` : '',
         isTrusted ? `<span class="workspace-detail-mcp-chip source">Trusted</span>` : '',
+        planningSummary ? `<span class="workspace-detail-mcp-chip source">${this.escapeHtml(planningSummary)}</span>` : '',
         `<span class="workspace-detail-mcp-chip access">${this.escapeHtml(accessLabel)}</span>`
       ].filter(Boolean).join('');
 
@@ -5378,6 +6463,7 @@ export class WorkspaceDetailPage {
 
           const profile = {
             name,
+            model: String(agent?.model || '').trim(),
             status: String(agent?.status || '').trim().toLowerCase(),
             capabilities: Array.isArray(agent?.capabilities) ? agent.capabilities.map((value) => String(value || '').trim()).filter(Boolean) : [],
             allowWebSearch: Boolean(agent?.allow_web_search),
@@ -7211,7 +8297,7 @@ export class WorkspaceDetailPage {
     }
 
     try {
-      const response = await fetch(`/api/studios/${encodeURIComponent(this.workspaceId)}`);
+      const response = await fetch(`/api/workspaces/${encodeURIComponent(this.workspaceId)}`);
       if (!response.ok) {
         this.files = [];
         this.renderFiles();
@@ -7246,16 +8332,74 @@ export class WorkspaceDetailPage {
     this.elements.filesList.innerHTML = this.files.map(file => {
       const title = file.title || (file.file_meta && file.file_meta.name) || 'Untitled File';
       const size = file.file_meta ? file.file_meta.size : null;
+      const isMissing = file.file_meta?.status === 'missing';
+      const metaParts = [];
+      if (size) metaParts.push(this.formatFileSize(size));
+      metaParts.push(formatDate(file.created_at));
       return `
         <div class="workspace-detail-item" data-file-id="${file.id}">
-          <div class="workspace-detail-item-title">${this.escapeHtml(title)}</div>
-          <div class="workspace-detail-item-meta">
-            ${size ? this.formatFileSize(size) + ' · ' : ''}
-            ${formatDate(file.created_at)}
+          ${isMissing ? `
+            <button type="button" class="workspace-detail-item-run" onclick="event.stopPropagation(); window.workspaceDetail?.promptRelinkWorkspaceFile('${file.id}')" title="Choose a replacement file" aria-label="Relink missing file ${this.escapeHtml(title)}">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M10.59,13.41C11,13.8 11,14.44 10.59,14.83C10.2,15.22 9.56,15.22 9.17,14.83C7.22,12.88 7.22,9.71 9.17,7.76L12.71,4.22C14.66,2.27 17.83,2.27 19.78,4.22C21.73,6.17 21.73,9.34 19.78,11.29L18.29,12.78C18.3,11.96 18.17,11.14 17.89,10.36L18.36,9.88C19.54,8.71 19.54,6.81 18.36,5.64C17.19,4.46 15.29,4.46 14.12,5.64L10.59,9.17C9.41,10.34 9.41,12.24 10.59,13.41Z"/>
+              </svg>
+            </button>
+          ` : ''}
+          <div>
+            <div class="workspace-detail-item-title">${this.escapeHtml(title)}</div>
+            <div class="workspace-detail-item-meta">
+              ${isMissing ? '<span class="workspace-detail-status-badge is-missing">Missing</span>' : ''}
+              ${this.escapeHtml(metaParts.join(' · '))}
+            </div>
           </div>
         </div>
       `;
     }).join('');
+  }
+
+  promptRelinkWorkspaceFile(fileId) {
+    if (!fileId) return;
+
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.style.display = 'none';
+    input.addEventListener('change', async () => {
+      const selected = input.files && input.files[0];
+      input.remove();
+      if (!selected) return;
+      await this.relinkWorkspaceFile(fileId, selected);
+    }, { once: true });
+
+    document.body.appendChild(input);
+    input.click();
+  }
+
+  async relinkWorkspaceFile(fileId, file) {
+    if (!fileId || !file) return;
+
+    const formData = new FormData();
+    formData.append('file', file);
+
+    try {
+      const response = await fetch(`/api/workspaces/${encodeURIComponent(this.workspaceId)}/attachments/${encodeURIComponent(fileId)}/relink`, {
+        method: 'POST',
+        body: formData
+      });
+      if (!response.ok) {
+        const payload = await response.json().catch(() => ({}));
+        throw new Error(payload.error || payload.message || 'Failed to relink file');
+      }
+
+      if (window.Toast) {
+        window.Toast.success('File relinked');
+      }
+      await this.loadFiles();
+    } catch (error) {
+      console.error('Failed to relink workspace file:', error);
+      if (window.Toast) {
+        window.Toast.error(error.message || 'Failed to relink file');
+      }
+    }
   }
 
   /**
@@ -7350,7 +8494,7 @@ export class WorkspaceDetailPage {
       // Directories may come from:
       // 1) directory_references (workspace imports / folder picker)
       // 2) legacy attachments with type "directory"
-      const response = await fetch(`/api/studios/${encodeURIComponent(this.workspaceId)}`);
+      const response = await fetch(`/api/workspaces/${encodeURIComponent(this.workspaceId)}`);
       if (!response.ok) {
         this.directories = [];
         this.renderDirectories();
@@ -7474,8 +8618,8 @@ export class WorkspaceDetailPage {
 
     const normalizedSource = source === 'attachment' ? 'attachment' : 'reference';
     const endpoint = normalizedSource === 'attachment'
-      ? `/api/studios/${encodeURIComponent(this.workspaceId)}/attachments/${encodeURIComponent(directoryId)}`
-      : `/api/studios/${encodeURIComponent(this.workspaceId)}/directories/${encodeURIComponent(directoryId)}`;
+      ? `/api/workspaces/${encodeURIComponent(this.workspaceId)}/attachments/${encodeURIComponent(directoryId)}`
+      : `/api/workspaces/${encodeURIComponent(this.workspaceId)}/directories/${encodeURIComponent(directoryId)}`;
 
     try {
       const response = await fetch(endpoint, { method: 'DELETE' });
@@ -7597,7 +8741,7 @@ export class WorkspaceDetailPage {
     this.renderDirectoryExplorerLoading(force ? 'Refreshing directory...' : 'Scanning directory...');
 
     try {
-      const endpoint = `/api/studios/${encodeURIComponent(this.workspaceId)}/directories/${encodeURIComponent(currentDirectory.id)}/files`;
+      const endpoint = `/api/workspaces/${encodeURIComponent(this.workspaceId)}/directories/${encodeURIComponent(currentDirectory.id)}/files`;
       const response = await fetch(endpoint);
       if (!response.ok) {
         const errorText = await response.text();
@@ -8244,7 +9388,7 @@ export class WorkspaceDetailPage {
       .map((part) => encodeURIComponent(part))
       .join('/');
 
-    return `/api/studios/${encodeURIComponent(this.workspaceId)}/directories/${encodeURIComponent(directoryId)}/files/${encodedPath}`;
+    return `/api/workspaces/${encodeURIComponent(this.workspaceId)}/directories/${encodeURIComponent(directoryId)}/files/${encodedPath}`;
   }
 
   normalizeRelativePath(path) {
@@ -8368,7 +9512,7 @@ export class WorkspaceDetailPage {
    */
   async addDirectory(path) {
     try {
-      const response = await fetch(`/api/studios/${encodeURIComponent(this.workspaceId)}/attachments`, {
+      const response = await fetch(`/api/workspaces/${encodeURIComponent(this.workspaceId)}/attachments`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -8399,7 +9543,7 @@ export class WorkspaceDetailPage {
 
     try {
       // Schedules are stored as tasks with schedule field
-      const response = await fetch(`/api/orchestration/tasks?studio_id=${encodeURIComponent(this.workspaceId)}`);
+      const response = await fetch(`/api/orchestration/tasks?workspace_id=${encodeURIComponent(this.workspaceId)}`);
       if (!response.ok) {
         this.schedules = [];
         this.renderSchedules();
@@ -8664,10 +9808,15 @@ export class WorkspaceDetailPage {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          studio_id: this.workspaceId,
+          workspace_id: this.workspaceId,
           description: normalizedName, // Task API uses description as the main field
           details: normalizedDescription,
-          status: 'pending'
+          status: 'pending',
+          to: String(options.assignee || '').trim() || undefined,
+          assigned_node_id: String(options.assignedNodeId || '').trim() || undefined,
+          input_task_ids: Array.isArray(options.inputTaskIDs) ? options.inputTaskIDs.filter(Boolean) : undefined,
+          parent_task_id: String(options.parentTaskID || '').trim() || undefined,
+          subtask_index: Number.isFinite(Number(options.subtaskIndex)) ? Number(options.subtaskIndex) : undefined
         })
       });
 
@@ -8718,8 +9867,16 @@ export class WorkspaceDetailPage {
    */
   openTask(taskId) {
     // Use existing task modal controller
+    const task = this.tasks.find(t => t.id === taskId);
+    if (task) {
+      const statusInfo = this.getTaskStatusPresentation(task);
+      if (statusInfo.isBlocked) {
+        this.openTaskAssistModal(taskId);
+        return;
+      }
+    }
+
     if (window.taskModalController && typeof window.taskModalController.openForEdit === 'function') {
-      const task = this.tasks.find(t => t.id === taskId);
       if (task) {
         window.taskModalController.openForEdit(task, () => this.loadTasks());
       }
@@ -8815,7 +9972,7 @@ export class WorkspaceDetailPage {
   /**
    * Fallback simple session creation
    */
-  async createSimpleSession() {
+  async createSimpleSession(openChat = true) {
     try {
       const response = await fetch('/api/sessions', {
         method: 'POST',
@@ -8835,7 +9992,7 @@ export class WorkspaceDetailPage {
       await this.loadSessions();
 
       // Open the session
-      this.openSession(session.id);
+      this.openSession(session.id, openChat);
       return session;
     } catch (error) {
       console.error('Failed to create session:', error);
@@ -8879,13 +10036,13 @@ export class WorkspaceDetailPage {
   /**
    * Open a session
    */
-  openSession(sessionId) {
+  openSession(sessionId, openChat = true) {
     // Open chat panel if available
-    if (window.chatPanel && typeof window.chatPanel.open === 'function') {
+    if (openChat && window.chatPanel && typeof window.chatPanel.open === 'function') {
       window.chatPanel.open();
     }
     if (window.sessionManager && typeof window.sessionManager.switchToSession === 'function') {
-      window.sessionManager.switchToSession(sessionId);
+      window.sessionManager.switchToSession(sessionId, openChat);
     }
   }
 
@@ -8922,7 +10079,7 @@ export class WorkspaceDetailPage {
       formData.append('workspace_id', this.workspaceId);
 
       try {
-        const response = await fetch(`/api/studios/${encodeURIComponent(this.workspaceId)}/files`, {
+        const response = await fetch(`/api/workspaces/${encodeURIComponent(this.workspaceId)}/files`, {
           method: 'POST',
           body: formData
         });

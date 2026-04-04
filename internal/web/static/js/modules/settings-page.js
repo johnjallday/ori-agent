@@ -512,6 +512,188 @@ document.getElementById('systemDiagnosticsBtn')?.addEventListener('click', async
   loadUtilitySettings();
 })();
 
+// Workspace Directory Settings
+(function() {
+  const input = document.getElementById('workspaceRootInput');
+  const browseBtn = document.getElementById('browseWorkspaceRootBtn');
+  const saveBtn = document.getElementById('saveWorkspaceRootBtn');
+  const resetBtn = document.getElementById('resetWorkspaceRootBtn');
+  const statusIndicator = document.getElementById('workspaceRootStatusIndicator');
+  const statusText = document.getElementById('workspaceRootStatusText');
+  const statusDetails = document.getElementById('workspaceRootStatusDetails');
+
+  if (!input) {
+    return;
+  }
+
+  let workspaceRootState = null;
+
+  function setButtonLoading(btn, loading, loadingLabel) {
+    if (!btn) return;
+    if (loading) {
+      btn.dataset.originalLabel = btn.innerHTML;
+      btn.disabled = true;
+      btn.innerHTML = `<span class="spinner-border spinner-border-sm me-2"></span>${loadingLabel}`;
+      return;
+    }
+
+    btn.disabled = false;
+    if (btn.dataset.originalLabel) {
+      btn.innerHTML = btn.dataset.originalLabel;
+    }
+  }
+
+  function updateStatus(state) {
+    if (!statusIndicator || !statusText || !statusDetails) return;
+
+    const source = String(state?.source || 'default');
+    const effectiveRoot = String(state?.effective_workspace_root || '').trim();
+
+    if (source === 'settings') {
+      statusIndicator.innerHTML = `
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="#28a745">
+          <path d="M12,2A10,10 0 0,1 22,12A10,10 0 0,1 12,22A10,10 0 0,1 2,12A10,10 0 0,1 12,2M11,16.5L6.5,12L7.91,10.59L11,13.67L16.59,8.09L18,9.5L11,16.5Z"/>
+        </svg>
+      `;
+      statusText.textContent = 'Custom workspace directory active';
+      statusDetails.textContent = effectiveRoot ? `New workspaces will be created in ${effectiveRoot}.` : '';
+      return;
+    }
+
+    if (source === 'environment') {
+      statusIndicator.innerHTML = `
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="#3b82f6">
+          <path d="M12,2A10,10 0 0,1 22,12A10,10 0 0,1 12,22A10,10 0 0,1 2,12A10,10 0 0,1 12,2M13,17H11V11H13V17M13,9H11V7H13V9Z"/>
+        </svg>
+      `;
+      statusText.textContent = 'Using workspace directory from WORKSPACE_DIR';
+      statusDetails.textContent = effectiveRoot ? `${effectiveRoot} is active until you save a custom directory.` : '';
+      return;
+    }
+
+    statusIndicator.innerHTML = `
+      <svg width="24" height="24" viewBox="0 0 24 24" fill="#3b82f6">
+        <path d="M12,2A10,10 0 0,1 22,12A10,10 0 0,1 12,22A10,10 0 0,1 2,12A10,10 0 0,1 12,2M13,17H11V11H13V17M13,9H11V7H13V9Z"/>
+      </svg>
+    `;
+    statusText.textContent = 'Using built-in workspace directory';
+    statusDetails.textContent = effectiveRoot ? `${effectiveRoot} is the current default until you save a custom directory.` : '';
+  }
+
+  function applyWorkspaceRootState(state) {
+    workspaceRootState = state || {};
+    const configuredRoot = String(workspaceRootState.workspace_root || '').trim();
+    const effectiveRoot = String(workspaceRootState.effective_workspace_root || '').trim();
+    input.value = configuredRoot || effectiveRoot;
+    if (resetBtn) {
+      resetBtn.disabled = !configuredRoot;
+    }
+    updateStatus(workspaceRootState);
+  }
+
+  async function loadWorkspaceRoot() {
+    const response = await fetch('/api/settings/workspace-root');
+    if (!response.ok) {
+      throw new Error(await response.text() || 'Failed to load workspace directory');
+    }
+    const data = await response.json();
+    applyWorkspaceRootState(data);
+  }
+
+  async function saveWorkspaceRoot(workspaceRoot) {
+    const response = await fetch('/api/settings/workspace-root', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({ workspace_root: workspaceRoot })
+    });
+
+    if (!response.ok) {
+      throw new Error(await response.text() || 'Failed to save workspace directory');
+    }
+
+    const data = await response.json();
+    applyWorkspaceRootState(data);
+    return data;
+  }
+
+  browseBtn?.addEventListener('click', async function() {
+    setButtonLoading(browseBtn, true, 'Selecting...');
+    try {
+      const response = await fetch('/api/folder-picker/select-path', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          title: 'Select Default Workspace Directory'
+        })
+      });
+
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok || !result.success) {
+        throw new Error(result.error || 'Failed to open folder picker');
+      }
+
+      if (result.selected && result.path) {
+        input.value = result.path;
+        input.focus();
+      }
+    } catch (error) {
+      console.error('Failed to browse workspace directory:', error);
+      notify('Failed to open folder picker: ' + error.message, 'error');
+    } finally {
+      setButtonLoading(browseBtn, false);
+    }
+  });
+
+  saveBtn?.addEventListener('click', async function() {
+    setButtonLoading(saveBtn, true, 'Saving...');
+    try {
+      await saveWorkspaceRoot(input.value.trim());
+      notify('Workspace directory saved.', 'success');
+    } catch (error) {
+      console.error('Failed to save workspace directory:', error);
+      notify('Failed to save workspace directory: ' + error.message, 'error');
+    } finally {
+      setButtonLoading(saveBtn, false);
+    }
+  });
+
+  resetBtn?.addEventListener('click', async function() {
+    if (!workspaceRootState?.workspace_root) {
+      return;
+    }
+
+    setButtonLoading(resetBtn, true, 'Clearing...');
+    try {
+      await saveWorkspaceRoot('');
+      notify('Custom workspace directory cleared.', 'success');
+    } catch (error) {
+      console.error('Failed to clear workspace directory:', error);
+      notify('Failed to clear workspace directory: ' + error.message, 'error');
+    } finally {
+      setButtonLoading(resetBtn, false);
+    }
+  });
+
+  loadWorkspaceRoot().catch((error) => {
+    console.error('Failed to load workspace directory:', error);
+    if (statusIndicator) {
+      statusIndicator.innerHTML = `
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="#ef4444">
+          <path d="M13,13H11V7H13M13,17H11V15H13M12,2A10,10 0 0,0 2,12A10,10 0 0,0 12,22A10,10 0 0,0 22,12A10,10 0 0,0 12,2Z"/>
+        </svg>
+      `;
+    }
+    if (statusText) {
+      statusText.textContent = 'Failed to load workspace directory';
+    }
+    if (statusDetails) {
+      statusDetails.textContent = error.message || '';
+    }
+  });
+})();
+
 // Session Management Settings
 (function() {
   const sessionCleanupEnabled = document.getElementById('sessionCleanupEnabled');
@@ -1330,6 +1512,1274 @@ document.getElementById('systemDiagnosticsBtn')?.addEventListener('click', async
   });
 
   loadSettings();
+})();
+
+// Private Vault Settings
+(function() {
+  const DEFAULT_VAULT_ID = '';
+  const VAULT_STORAGE_KEY = 'ori-selected-vault-id';
+  const section = document.getElementById('private-vault');
+  if (!section) {
+    return;
+  }
+
+  const statusIndicator = document.getElementById('vaultStatusIndicator');
+  const statusText = document.getElementById('vaultStatusText');
+  const statusDetails = document.getElementById('vaultStatusDetails');
+  const backendLabel = document.getElementById('vaultBackendLabel');
+  const recordCountLabel = document.getElementById('vaultRecordCount');
+  const writableLabel = document.getElementById('vaultWritableLabel');
+  const modeLabel = document.getElementById('vaultModeLabel');
+  const unlockPasswordInput = document.getElementById('vaultUnlockPassword');
+  const unlockBtn = document.getElementById('vaultUnlockBtn');
+  const lockBtn = document.getElementById('vaultLockBtn');
+  const refreshBtn = document.getElementById('vaultRefreshBtn');
+  const toggleUnlockPasswordBtn = document.getElementById('toggleVaultUnlockPassword');
+  const unlockPasswordHelp = document.getElementById('vaultUnlockPasswordHelp');
+  const alertsEl = document.getElementById('vaultAlerts');
+  const activeVaultSelect = document.getElementById('vaultActiveVaultId');
+  const activeVaultMeta = document.getElementById('vaultActiveVaultMeta');
+  const editVaultNameInput = document.getElementById('vaultEditVaultName');
+  const editVaultDescriptionInput = document.getElementById('vaultEditVaultDescription');
+  const renameVaultBtn = document.getElementById('vaultRenameVaultBtn');
+  const deleteVaultBtn = document.getElementById('vaultDeleteVaultBtn');
+  const newVaultNameInput = document.getElementById('vaultNewVaultName');
+  const newVaultDescriptionInput = document.getElementById('vaultNewVaultDescription');
+  const newVaultPasswordInput = document.getElementById('vaultNewVaultPassword');
+  const confirmVaultPasswordInput = document.getElementById('vaultConfirmVaultPassword');
+  const createVaultSpaceBtn = document.getElementById('vaultCreateVaultSpaceBtn');
+
+  const entryTypeInput = document.getElementById('vaultEntryType');
+  const entryWorkspaceInput = document.getElementById('vaultEntryWorkspaceId');
+  const entryLabelInput = document.getElementById('vaultEntryLabel');
+  const entryTagsInput = document.getElementById('vaultEntryTags');
+  const entryRetentionInput = document.getElementById('vaultEntryRetention');
+  const entryPayloadInput = document.getElementById('vaultEntryPayload');
+  const saveEntryBtn = document.getElementById('vaultSaveEntryBtn');
+  const resetEntryBtn = document.getElementById('vaultResetEntryBtn');
+  const revealPayloadBtn = document.getElementById('vaultRevealPayloadBtn');
+  const deleteEntryBtn = document.getElementById('vaultDeleteEntryBtn');
+  const recordsListEl = document.getElementById('vaultRecordsList');
+  const selectionBadge = document.getElementById('vaultSelectionBadge');
+
+  const grantWorkspaceInput = document.getElementById('vaultGrantWorkspaceId');
+  const grantActorTypeInput = document.getElementById('vaultGrantActorType');
+  const grantActorIDInput = document.getElementById('vaultGrantActorId');
+  const grantCapabilityInput = document.getElementById('vaultGrantCapability');
+  const grantRecordTypeInput = document.getElementById('vaultGrantRecordType');
+  const createGrantBtn = document.getElementById('vaultCreateGrantBtn');
+  const grantsListEl = document.getElementById('vaultGrantsList');
+
+  const exportWorkspaceInput = document.getElementById('vaultExportWorkspaceId');
+  const exportConfirmInput = document.getElementById('vaultExportConfirm');
+  const exportPasswordInput = document.getElementById('vaultExportPassword');
+  const exportBtn = document.getElementById('vaultExportBtn');
+  const importChooseFileBtn = document.getElementById('vaultImportChooseFileBtn');
+  const importFileInput = document.getElementById('vaultImportFile');
+  const importFileName = document.getElementById('vaultImportFileName');
+  const importPasswordInput = document.getElementById('vaultImportPassword');
+  const importModeInput = document.getElementById('vaultImportMode');
+  const importModeCurrentOption = document.getElementById('vaultImportModeCurrentOption');
+  const importCurrentHint = document.getElementById('vaultImportCurrentHint');
+  const importCreateFields = document.getElementById('vaultImportCreateFields');
+  const importVaultNameInput = document.getElementById('vaultImportVaultName');
+  const importVaultDescriptionInput = document.getElementById('vaultImportVaultDescription');
+  const importVaultPasswordInput = document.getElementById('vaultImportVaultPassword');
+  const importConfirmVaultPasswordInput = document.getElementById('vaultImportConfirmVaultPassword');
+  const importRestoreGrantsInput = document.getElementById('vaultImportRestoreGrants');
+  const importBtn = document.getElementById('vaultImportBtn');
+
+  let vaultStatus = null;
+  let vaults = [];
+  let selectedVaultID = DEFAULT_VAULT_ID;
+  let records = [];
+  let grants = [];
+  let selectedRecord = null;
+  let payloadRevealed = false;
+
+  function setButtonLoading(button, loading, loadingLabel) {
+    if (!button) return;
+    if (loading) {
+      button.dataset.originalLabel = button.innerHTML;
+      button.disabled = true;
+      button.innerHTML = `<span class="spinner-border spinner-border-sm me-2"></span>${loadingLabel}`;
+      return;
+    }
+
+    button.disabled = false;
+    if (button.dataset.originalLabel) {
+      button.innerHTML = button.dataset.originalLabel;
+    }
+  }
+
+  function escapeHTML(value) {
+    return String(value || '')
+      .replaceAll('&', '&amp;')
+      .replaceAll('<', '&lt;')
+      .replaceAll('>', '&gt;')
+      .replaceAll('"', '&quot;')
+      .replaceAll("'", '&#39;');
+  }
+
+  function readStoredVaultID() {
+    try {
+      return String(window.localStorage.getItem(VAULT_STORAGE_KEY) || '').trim();
+    } catch (error) {
+      return '';
+    }
+  }
+
+  function writeStoredVaultID(vaultID) {
+    try {
+      if (vaultID) {
+        window.localStorage.setItem(VAULT_STORAGE_KEY, vaultID);
+      } else {
+        window.localStorage.removeItem(VAULT_STORAGE_KEY);
+      }
+    } catch (error) {
+      console.error('Failed to persist selected vault:', error);
+    }
+  }
+
+  function currentVaultID() {
+    return String(selectedVaultID || '').trim();
+  }
+
+  function currentVault() {
+    return vaults.find((item) => item.id === currentVaultID()) || null;
+  }
+
+  function vaultRecordCount(vaultItem) {
+    const count = Number(vaultItem?.record_count || 0);
+    return Number.isFinite(count) ? count : 0;
+  }
+
+  function vaultDisplayLabel(vaultItem) {
+    if (!vaultItem) {
+      return 'Vault';
+    }
+    return `${String(vaultItem.name || 'Vault')}`;
+  }
+
+  function canImportIntoCurrentVault() {
+    return Boolean(currentVaultID() && vaultStatus?.available && !vaultStatus?.locked);
+  }
+
+  function vaultURL(path, vaultID = currentVaultID()) {
+    const normalizedVaultID = String(vaultID || '').trim();
+    if (!normalizedVaultID) {
+      return path;
+    }
+
+    const separator = path.includes('?') ? '&' : '?';
+    return `${path}${separator}vault_id=${encodeURIComponent(normalizedVaultID)}`;
+  }
+
+  async function apiRequest(url, options = {}) {
+    const config = {
+      method: options.method || 'GET',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(options.headers || {})
+      }
+    };
+
+    if (options.body !== undefined && config.method !== 'GET') {
+      config.body = JSON.stringify(options.body);
+    }
+
+    const response = await fetch(url, config);
+    const contentType = response.headers.get('content-type') || '';
+    let data = null;
+
+    if (contentType.includes('application/json')) {
+      data = await response.json();
+    } else {
+      const text = await response.text();
+      data = text ? { error: text } : {};
+    }
+
+    if (!response.ok) {
+      throw new Error(data?.error || response.statusText || 'Request failed');
+    }
+
+    return data;
+  }
+
+  function readFileAsText(file) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+
+      reader.onload = () => {
+        resolve(String(reader.result || ''));
+      };
+
+      reader.onerror = () => {
+        reject(new Error(`Failed to read file "${String(file?.name || 'import bundle')}".`));
+      };
+
+      reader.readAsText(file);
+    });
+  }
+
+  function parseTags(rawValue) {
+    return String(rawValue || '')
+      .split(',')
+      .map((tag) => tag.trim())
+      .filter(Boolean);
+  }
+
+  function prettyPayload(payload) {
+    if (payload === undefined || payload === null) {
+      return '{}';
+    }
+    try {
+      return JSON.stringify(payload, null, 2);
+    } catch (error) {
+      console.error('Failed to pretty-print vault payload:', error);
+      return '{}';
+    }
+  }
+
+  function parsePayloadInput() {
+    const raw = String(entryPayloadInput?.value || '').trim();
+    if (!raw) {
+      return {};
+    }
+
+    try {
+      return JSON.parse(raw);
+    } catch (error) {
+      throw new Error('Payload must be valid JSON');
+    }
+  }
+
+  function backendLabelFor(status) {
+    const backend = String(status?.secret_store?.backend || 'unknown');
+    switch (backend) {
+      case 'vault_password':
+        return 'Vault Password';
+      case 'darwin_keychain':
+        return 'macOS Keychain';
+      case 'linux_secret_service':
+        return 'Linux Secret Service';
+      case 'windows_secure_store':
+        return 'Windows Secure Store';
+      case 'passphrase_fallback':
+        return 'Passphrase Fallback';
+      case 'unavailable':
+        return 'Unavailable';
+      default:
+        return backend.replaceAll('_', ' ');
+    }
+  }
+
+  function statusDot(color) {
+    return `<span style="display:inline-block;width:12px;height:12px;border-radius:999px;background:${color};"></span>`;
+  }
+
+  function showInlineAlert(message, type = 'info') {
+    if (!alertsEl) {
+      notify(message, type);
+      return;
+    }
+
+    const classes = {
+      success: 'alert-success',
+      error: 'alert-danger',
+      warning: 'alert-warning',
+      info: 'alert-info'
+    };
+
+    alertsEl.innerHTML = `
+      <div class="alert ${classes[type] || classes.info} mb-0" role="alert">
+        ${escapeHTML(message)}
+      </div>
+    `;
+
+    window.clearTimeout(showInlineAlert.timeoutId);
+    showInlineAlert.timeoutId = window.setTimeout(() => {
+      alertsEl.innerHTML = '';
+    }, 5000);
+  }
+
+  function syncImportControls() {
+    const canImportCurrent = canImportIntoCurrentVault();
+
+    if (importModeCurrentOption) {
+      importModeCurrentOption.disabled = !canImportCurrent;
+      importModeCurrentOption.hidden = !canImportCurrent;
+    }
+
+    if (importModeInput) {
+      if (!canImportCurrent && importModeInput.value === 'current') {
+        importModeInput.value = 'new';
+      }
+      if (!importModeInput.value) {
+        importModeInput.value = 'new';
+      }
+    }
+
+    const mode = importModeInput?.value === 'current' && canImportCurrent ? 'current' : 'new';
+    if (importCurrentHint) {
+      importCurrentHint.hidden = mode !== 'current';
+      importCurrentHint.textContent = mode === 'current'
+        ? `The selected vault "${vaultDisplayLabel(currentVault())}" is unlocked and ready for imported records.`
+        : 'The selected vault must already be unlocked before Ori can import records into it.';
+    }
+
+    if (importCreateFields) {
+      importCreateFields.hidden = mode !== 'new';
+    }
+  }
+
+  function renderVaultSpaces() {
+    if (!activeVaultSelect || !activeVaultMeta) {
+      return;
+    }
+
+    if (!vaults.length) {
+      activeVaultSelect.innerHTML = '<option value="">No vaults available</option>';
+      activeVaultMeta.textContent = 'Create a vault to begin storing encrypted records.';
+      if (editVaultNameInput) editVaultNameInput.value = '';
+      if (editVaultDescriptionInput) editVaultDescriptionInput.value = '';
+      if (renameVaultBtn) renameVaultBtn.disabled = true;
+      if (deleteVaultBtn) deleteVaultBtn.disabled = true;
+      syncImportControls();
+      return;
+    }
+
+    activeVaultSelect.innerHTML = vaults.map((item) => {
+      const selected = item.id === currentVaultID() ? ' selected' : '';
+      const label = `${vaultDisplayLabel(item)} · ${vaultRecordCount(item)}`;
+      return `<option value="${escapeHTML(item.id)}"${selected}>${escapeHTML(label)}</option>`;
+    }).join('');
+
+    const selectedVault = currentVault();
+    if (!selectedVault) {
+      activeVaultMeta.textContent = 'Select a vault to continue.';
+      if (editVaultNameInput) editVaultNameInput.value = '';
+      if (editVaultDescriptionInput) editVaultDescriptionInput.value = '';
+      if (renameVaultBtn) renameVaultBtn.disabled = true;
+      if (deleteVaultBtn) deleteVaultBtn.disabled = true;
+      syncImportControls();
+      return;
+    }
+
+    const details = [];
+    if (selectedVault.description) {
+      details.push(selectedVault.description);
+    }
+    details.push(selectedVault.password_protected ? 'Own password' : 'Legacy vault');
+    details.push(`${vaultRecordCount(selectedVault)} stored ${vaultRecordCount(selectedVault) === 1 ? 'entry' : 'entries'}`);
+    activeVaultMeta.textContent = details.join(' • ');
+
+    if (editVaultNameInput) {
+      editVaultNameInput.value = selectedVault.name || '';
+      editVaultNameInput.disabled = false;
+    }
+    if (editVaultDescriptionInput) {
+      editVaultDescriptionInput.value = selectedVault.description || '';
+      editVaultDescriptionInput.disabled = false;
+    }
+    if (renameVaultBtn) {
+      renameVaultBtn.disabled = false;
+    }
+    if (deleteVaultBtn) {
+      deleteVaultBtn.disabled = false;
+      deleteVaultBtn.title = '';
+    }
+    syncImportControls();
+  }
+
+  async function loadVaults() {
+    const data = await apiRequest('/api/vault/vaults');
+    vaults = Array.isArray(data.vaults) ? data.vaults : [];
+
+    const preferredVaultID = String(selectedVaultID || readStoredVaultID() || '').trim();
+    const nextVault = vaults.find((item) => item.id === preferredVaultID)
+      || vaults[0]
+      || null;
+
+    selectedVaultID = nextVault?.id || DEFAULT_VAULT_ID;
+    writeStoredVaultID(selectedVaultID);
+    renderVaultSpaces();
+  }
+
+  function switchVault(nextVaultID) {
+    nextVaultID = String(nextVaultID || '').trim();
+    if (!nextVaultID || nextVaultID === currentVaultID()) {
+      renderVaultSpaces();
+      return;
+    }
+
+    selectedVaultID = nextVaultID;
+    writeStoredVaultID(selectedVaultID);
+    clearRecordForm();
+    refreshVault();
+  }
+
+  async function createVaultSpace() {
+    const name = String(newVaultNameInput?.value || '').trim();
+    const description = String(newVaultDescriptionInput?.value || '').trim();
+    const password = String(newVaultPasswordInput?.value || '');
+    const confirmPassword = String(confirmVaultPasswordInput?.value || '');
+
+    if (!name) {
+      showInlineAlert('New vault name is required before creating a vault.', 'warning');
+      return;
+    }
+    if (!password.trim()) {
+      showInlineAlert('A vault password is required before creating a vault.', 'warning');
+      return;
+    }
+    if (password !== confirmPassword) {
+      showInlineAlert('Vault password confirmation does not match.', 'warning');
+      return;
+    }
+
+    try {
+      setButtonLoading(createVaultSpaceBtn, true, 'Creating vault');
+      const response = await apiRequest('/api/vault/vaults', {
+        method: 'POST',
+        body: {
+          name,
+          description,
+          vault_password: password
+        }
+      });
+
+      if (newVaultNameInput) newVaultNameInput.value = '';
+      if (newVaultDescriptionInput) newVaultDescriptionInput.value = '';
+      if (newVaultPasswordInput) newVaultPasswordInput.value = '';
+      if (confirmVaultPasswordInput) confirmVaultPasswordInput.value = '';
+
+      await loadVaults();
+      if (response?.vault?.id) {
+        selectedVaultID = response.vault.id;
+        writeStoredVaultID(selectedVaultID);
+        renderVaultSpaces();
+      }
+      clearRecordForm();
+      notify('Vault created.', 'success');
+      await refreshVault();
+    } catch (error) {
+      console.error('Failed to create vault:', error);
+      showInlineAlert(error.message || 'Failed to create vault.', 'error');
+    } finally {
+      setButtonLoading(createVaultSpaceBtn, false);
+    }
+  }
+
+  async function updateVaultSpace() {
+    const selectedVault = currentVault();
+    if (!selectedVault) {
+      showInlineAlert('Select a vault before updating its details.', 'warning');
+      return;
+    }
+
+    const name = String(editVaultNameInput?.value || '').trim();
+    const description = String(editVaultDescriptionInput?.value || '').trim();
+
+    if (!name) {
+      showInlineAlert('Vault name is required before saving changes.', 'warning');
+      return;
+    }
+
+    try {
+      setButtonLoading(renameVaultBtn, true, 'Saving vault');
+      await apiRequest(`/api/vault/vaults/${encodeURIComponent(selectedVault.id)}`, {
+        method: 'PATCH',
+        body: {
+          name,
+          description
+        }
+      });
+      notify('Vault details updated.', 'success');
+      await refreshVault();
+    } catch (error) {
+      console.error('Failed to update vault:', error);
+      showInlineAlert(error.message || 'Failed to update vault.', 'error');
+    } finally {
+      setButtonLoading(renameVaultBtn, false);
+    }
+  }
+
+  async function deleteVaultSpace() {
+    const selectedVault = currentVault();
+    if (!selectedVault) {
+      showInlineAlert('Select a vault before deleting it.', 'warning');
+      return;
+    }
+    const recordCount = vaultRecordCount(selectedVault);
+    const confirmed = window.confirm(
+      `Delete vault "${selectedVault.name}"?${recordCount > 0 ? ` This will permanently remove ${recordCount} encrypted ${recordCount === 1 ? 'entry' : 'entries'}.` : ''}`
+    );
+    if (!confirmed) {
+      return;
+    }
+
+    try {
+      setButtonLoading(deleteVaultBtn, true, 'Deleting vault');
+      await apiRequest(`/api/vault/vaults/${encodeURIComponent(selectedVault.id)}`, {
+        method: 'DELETE'
+      });
+      selectedVaultID = DEFAULT_VAULT_ID;
+      writeStoredVaultID(selectedVaultID);
+      clearRecordForm();
+      notify('Vault deleted.', 'success');
+      await refreshVault();
+    } catch (error) {
+      console.error('Failed to delete vault:', error);
+      showInlineAlert(error.message || 'Failed to delete vault.', 'error');
+    } finally {
+      setButtonLoading(deleteVaultBtn, false);
+    }
+  }
+
+  function setInteractiveState(locked) {
+    const disableVaultEditing = !vaultStatus || !vaultStatus.available || Boolean(locked);
+
+    saveEntryBtn.disabled = disableVaultEditing;
+    resetEntryBtn.disabled = false;
+    exportBtn.disabled = disableVaultEditing;
+    lockBtn.disabled = !vaultStatus || !vaultStatus.available || vaultStatus.locked;
+    unlockBtn.disabled = !vaultStatus || !vaultStatus.available || Boolean(vaultStatus && !vaultStatus.locked && !vaultStatus.requires_passphrase);
+    revealPayloadBtn.disabled = disableVaultEditing || !selectedRecord;
+    deleteEntryBtn.disabled = disableVaultEditing || !selectedRecord;
+
+    if (disableVaultEditing) {
+      recordsListEl.innerHTML = vaultStatus?.available
+        ? '<div class="settings-help">Unlock the vault to browse saved entries.</div>'
+        : '<div class="settings-help">Create a vault to begin storing encrypted entries.</div>';
+      clearRecordForm({ preserveStatus: true });
+    }
+  }
+
+  function renderStatus(state) {
+    vaultStatus = state || null;
+    if (!vaultStatus) {
+      return;
+    }
+
+    if (!vaultStatus.available) {
+      statusIndicator.innerHTML = statusDot('#94a3b8');
+      statusText.textContent = 'No vault selected';
+      statusDetails.textContent = vaultStatus.message || 'Create a vault to begin storing encrypted records.';
+      backendLabel.textContent = backendLabelFor(vaultStatus);
+      recordCountLabel.textContent = '0';
+      writableLabel.textContent = 'Unavailable';
+      modeLabel.textContent = 'Create a vault';
+      modeLabel.style.background = '#e2e8f0';
+      modeLabel.style.color = '#475569';
+      if (unlockPasswordHelp) {
+        unlockPasswordHelp.textContent = 'Per-vault passwords are required for new vaults. Legacy vaults may still unlock through secure system storage or the older fallback passphrase flow.';
+      }
+      setInteractiveState(true);
+      syncImportControls();
+      return;
+    }
+
+    const locked = Boolean(vaultStatus.locked);
+    const requiresPassphrase = Boolean(vaultStatus.requires_passphrase);
+    const passwordProtected = Boolean(vaultStatus.password_protected);
+    const dotColor = locked ? '#f59e0b' : '#10b981';
+    const selectedVault = currentVault();
+    const vaultName = selectedVault?.name || vaultStatus.vault_name || 'Vault';
+    statusIndicator.innerHTML = statusDot(dotColor);
+    statusText.textContent = locked ? `${vaultName} locked` : `${vaultName} available`;
+
+    const detailParts = [];
+    if (selectedVault?.description) {
+      detailParts.push(selectedVault.description);
+    }
+    if (vaultStatus.message) {
+      detailParts.push(vaultStatus.message);
+    }
+    detailParts.push(`Record count: ${vaultStatus.record_count ?? 0}`);
+    statusDetails.textContent = detailParts.join(' • ');
+
+    backendLabel.textContent = backendLabelFor(vaultStatus);
+    recordCountLabel.textContent = String(vaultStatus.record_count ?? 0);
+    writableLabel.textContent = vaultStatus.writable ? 'Writable' : 'Read-only / locked';
+
+    if (passwordProtected && locked && requiresPassphrase) {
+      modeLabel.textContent = 'Vault password required';
+      modeLabel.style.background = '#fef3c7';
+      modeLabel.style.color = '#92400e';
+    } else if (passwordProtected) {
+      modeLabel.textContent = 'Per-vault password';
+      modeLabel.style.background = '#dcfce7';
+      modeLabel.style.color = '#166534';
+    } else if (locked && requiresPassphrase) {
+      modeLabel.textContent = 'Legacy passphrase required';
+      modeLabel.style.background = '#fef3c7';
+      modeLabel.style.color = '#92400e';
+    } else if (String(vaultStatus.secret_store?.backend || '') === 'passphrase_fallback') {
+      modeLabel.textContent = 'Passphrase fallback active';
+      modeLabel.style.background = '#dbeafe';
+      modeLabel.style.color = '#1d4ed8';
+    } else {
+      modeLabel.textContent = 'OS secure storage';
+      modeLabel.style.background = '#dcfce7';
+      modeLabel.style.color = '#166534';
+    }
+
+    if (unlockPasswordHelp) {
+      unlockPasswordHelp.textContent = passwordProtected
+        ? 'Enter the password for the selected vault to unlock it.'
+        : 'This legacy vault may still unlock through secure system storage or the older fallback passphrase flow.';
+    }
+
+    setInteractiveState(locked);
+    syncImportControls();
+  }
+
+  function clearRecordForm(options = {}) {
+    const preserveStatus = Boolean(options.preserveStatus);
+
+    selectedRecord = null;
+    payloadRevealed = false;
+    selectionBadge.textContent = 'No selection';
+    entryTypeInput.value = 'personal_note';
+    entryWorkspaceInput.value = '';
+    entryLabelInput.value = '';
+    entryTagsInput.value = '';
+    entryRetentionInput.value = '';
+    entryPayloadInput.disabled = false;
+    entryPayloadInput.value = '{\n  \n}';
+    entryPayloadInput.style.filter = 'none';
+    saveEntryBtn.textContent = 'Save To Vault';
+    revealPayloadBtn.classList.add('d-none');
+    deleteEntryBtn.classList.add('d-none');
+
+    if (!preserveStatus && vaultStatus) {
+      setInteractiveState(vaultStatus.locked);
+    }
+  }
+
+  function applyRecordToForm(record) {
+    selectedRecord = record;
+    payloadRevealed = false;
+    selectionBadge.textContent = record.label || record.type || 'Selected';
+    entryTypeInput.value = record.type || 'personal_note';
+    entryWorkspaceInput.value = record.workspace_id || '';
+    entryLabelInput.value = record.label || '';
+    entryTagsInput.value = Array.isArray(record.tags) ? record.tags.join(', ') : '';
+    entryRetentionInput.value = record.retention_policy || '';
+    entryPayloadInput.disabled = true;
+    entryPayloadInput.style.filter = 'blur(6px)';
+    entryPayloadInput.value = '{\n  "locked": true\n}';
+    saveEntryBtn.textContent = 'Save Changes';
+    revealPayloadBtn.textContent = 'Reveal Payload';
+    revealPayloadBtn.classList.remove('d-none');
+    deleteEntryBtn.classList.remove('d-none');
+    setInteractiveState(Boolean(vaultStatus?.locked));
+  }
+
+  function togglePayloadReveal() {
+    if (!selectedRecord) {
+      return;
+    }
+
+    payloadRevealed = !payloadRevealed;
+    if (payloadRevealed) {
+      entryPayloadInput.disabled = false;
+      entryPayloadInput.style.filter = 'none';
+      entryPayloadInput.value = prettyPayload(selectedRecord.payload);
+      revealPayloadBtn.textContent = 'Hide Payload';
+      return;
+    }
+
+    entryPayloadInput.disabled = true;
+    entryPayloadInput.style.filter = 'blur(6px)';
+    entryPayloadInput.value = '{\n  "locked": true\n}';
+    revealPayloadBtn.textContent = 'Reveal Payload';
+  }
+
+  function renderRecordsList(items) {
+    records = Array.isArray(items) ? items : [];
+
+    if (!records.length) {
+      recordsListEl.innerHTML = '<div class="settings-help">No vault entries saved yet.</div>';
+      return;
+    }
+
+    recordsListEl.innerHTML = records.map((record) => `
+      <button
+        type="button"
+        class="btn btn-outline-secondary text-start"
+        data-record-id="${escapeHTML(record.id)}"
+        style="border-radius: 12px; padding: 0.9rem 1rem; background: ${selectedRecord?.id === record.id ? 'var(--bg-tertiary)' : 'transparent'};"
+      >
+        <div class="d-flex justify-content-between align-items-start gap-2">
+          <div>
+            <div style="color: var(--text-primary); font-weight: 600;">${escapeHTML(record.label || record.type || 'Untitled')}</div>
+            <div style="color: var(--text-secondary); font-size: 0.85rem;">${escapeHTML(record.type)}${record.workspace_id ? ` • ${escapeHTML(record.workspace_id)}` : ''}</div>
+          </div>
+          <span class="badge" style="background: var(--bg-tertiary); color: var(--text-primary);">${(record.tags || []).length} tags</span>
+        </div>
+      </button>
+    `).join('');
+  }
+
+  function renderGrantsList(items) {
+    grants = Array.isArray(items) ? items : [];
+
+    if (!grants.length) {
+      grantsListEl.innerHTML = '<div class="settings-help">No persistent grants configured.</div>';
+      return;
+    }
+
+    grantsListEl.innerHTML = grants.map((grant) => `
+      <div class="settings-info-box">
+        <div class="settings-info-row" style="align-items: flex-start;">
+          <div>
+            <div style="color: var(--text-primary); font-weight: 600;">${escapeHTML(grant.actor_type)}:${escapeHTML(grant.actor_id)}</div>
+            <div style="color: var(--text-secondary); font-size: 0.85rem;">${escapeHTML(grant.workspace_id)} • ${escapeHTML(grant.capability)} • ${escapeHTML(grant.record_type || '*')}</div>
+          </div>
+          <button type="button" class="btn btn-sm btn-outline-danger" data-grant-id="${escapeHTML(grant.id)}">Revoke</button>
+        </div>
+      </div>
+    `).join('');
+  }
+
+  async function loadVaultStatus() {
+    if (!currentVaultID()) {
+      const status = {
+        available: false,
+        locked: true,
+        writable: false,
+        password_protected: false,
+        requires_passphrase: false,
+        message: 'Create a vault to begin storing encrypted records.',
+        record_count: 0,
+        secret_store: {
+          backend: 'unavailable',
+          available: false,
+          writable: false,
+          locked: true
+        }
+      };
+      renderStatus(status);
+      return status;
+    }
+
+    const status = await apiRequest(vaultURL('/api/vault/status'));
+    renderStatus(status);
+    return status;
+  }
+
+  async function loadVaultRecords() {
+    if (!vaultStatus?.available || vaultStatus?.locked) {
+      renderRecordsList([]);
+      return;
+    }
+
+    const data = await apiRequest(vaultURL('/api/vault/records'));
+    renderRecordsList(data.records || []);
+  }
+
+  async function loadVaultGrants() {
+    if (!currentVaultID()) {
+      renderGrantsList([]);
+      return;
+    }
+
+    const data = await apiRequest(vaultURL('/api/vault/grants'));
+    renderGrantsList(data.grants || []);
+  }
+
+  async function refreshVault() {
+    try {
+      await loadVaults();
+      const status = await loadVaultStatus();
+      if (!status.available) {
+        renderVaultSpaces();
+        renderGrantsList([]);
+        renderRecordsList([]);
+        return;
+      }
+      await loadVaultGrants();
+      if (!status.locked) {
+        await loadVaultRecords();
+      } else {
+        renderVaultSpaces();
+      }
+    } catch (error) {
+      console.error('Failed to refresh vault:', error);
+      showInlineAlert(error.message || 'Failed to refresh vault.', 'error');
+    }
+  }
+
+  async function selectRecord(recordID) {
+    try {
+      const record = await apiRequest(vaultURL(`/api/vault/records/${encodeURIComponent(recordID)}`));
+      applyRecordToForm(record);
+      renderRecordsList(records);
+    } catch (error) {
+      console.error('Failed to load vault record:', error);
+      showInlineAlert(error.message || 'Failed to load vault record.', 'error');
+    }
+  }
+
+  async function saveRecord() {
+    if (!currentVaultID()) {
+      showInlineAlert('Create or select a vault before saving an entry.', 'warning');
+      return;
+    }
+
+    const payloadBody = {
+      vault_id: currentVaultID(),
+      type: entryTypeInput.value,
+      workspace_id: entryWorkspaceInput.value.trim(),
+      label: entryLabelInput.value.trim(),
+      tags: parseTags(entryTagsInput.value),
+      retention_policy: entryRetentionInput.value.trim()
+    };
+
+    if (!payloadBody.label) {
+      showInlineAlert('Label is required before saving to the vault.', 'warning');
+      return;
+    }
+
+    try {
+      if (!selectedRecord || payloadRevealed) {
+        payloadBody.payload = parsePayloadInput();
+      }
+    } catch (error) {
+      showInlineAlert(error.message || 'Payload must be valid JSON.', 'warning');
+      return;
+    }
+
+    try {
+      setButtonLoading(saveEntryBtn, true, selectedRecord ? 'Saving changes' : 'Saving entry');
+
+      let response;
+      if (selectedRecord) {
+        response = await apiRequest(vaultURL(`/api/vault/records/${encodeURIComponent(selectedRecord.id)}`), {
+          method: 'PATCH',
+          body: payloadBody
+        });
+      } else {
+        response = await apiRequest('/api/vault/records', {
+          method: 'POST',
+          body: payloadBody
+        });
+      }
+
+      notify(selectedRecord ? 'Vault entry updated.' : 'Vault entry saved.', 'success');
+      await refreshVault();
+
+      const nextRecordID = response?.record?.id;
+      if (nextRecordID) {
+        await selectRecord(nextRecordID);
+      } else {
+        clearRecordForm();
+      }
+    } catch (error) {
+      console.error('Failed to save vault entry:', error);
+      showInlineAlert(error.message || 'Failed to save vault entry.', 'error');
+    } finally {
+      setButtonLoading(saveEntryBtn, false);
+    }
+  }
+
+  async function deleteRecord() {
+    if (!selectedRecord) {
+      return;
+    }
+
+    const confirmed = window.confirm(`Delete vault entry "${selectedRecord.label || selectedRecord.id}"?`);
+    if (!confirmed) {
+      return;
+    }
+
+    try {
+      setButtonLoading(deleteEntryBtn, true, 'Deleting');
+      await apiRequest(vaultURL(`/api/vault/records/${encodeURIComponent(selectedRecord.id)}`), {
+        method: 'DELETE'
+      });
+      notify('Vault entry deleted.', 'success');
+      clearRecordForm();
+      await refreshVault();
+    } catch (error) {
+      console.error('Failed to delete vault entry:', error);
+      showInlineAlert(error.message || 'Failed to delete vault entry.', 'error');
+    } finally {
+      setButtonLoading(deleteEntryBtn, false);
+    }
+  }
+
+  async function unlockVault() {
+    if (!currentVaultID()) {
+      showInlineAlert('Create or select a vault before unlocking storage access.', 'warning');
+      return;
+    }
+
+    try {
+      setButtonLoading(unlockBtn, true, 'Unlocking');
+      await apiRequest(vaultURL('/api/vault/unlock'), {
+        method: 'POST',
+        body: {
+          vault_id: currentVaultID(),
+          vault_password: unlockPasswordInput.value
+        }
+      });
+      unlockPasswordInput.value = '';
+      notify('Vault unlocked.', 'success');
+      await refreshVault();
+    } catch (error) {
+      console.error('Failed to unlock vault:', error);
+      showInlineAlert(error.message || 'Failed to unlock vault.', 'error');
+    } finally {
+      setButtonLoading(unlockBtn, false);
+    }
+  }
+
+  async function lockVault() {
+    if (!currentVaultID()) {
+      showInlineAlert('Create or select a vault before changing vault access.', 'warning');
+      return;
+    }
+
+    try {
+      setButtonLoading(lockBtn, true, 'Locking');
+      await apiRequest(vaultURL('/api/vault/lock'), {
+        method: 'POST',
+        body: {}
+      });
+      notify('Vault locked.', 'success');
+      await refreshVault();
+    } catch (error) {
+      console.error('Failed to lock vault:', error);
+      showInlineAlert(error.message || 'Failed to lock vault.', 'error');
+    } finally {
+      setButtonLoading(lockBtn, false);
+    }
+  }
+
+  async function createGrant() {
+    if (!currentVaultID()) {
+      showInlineAlert('Create or select a vault before configuring grants.', 'warning');
+      return;
+    }
+
+    const workspaceID = grantWorkspaceInput.value.trim();
+    const actorID = grantActorIDInput.value.trim();
+
+    if (!workspaceID || !actorID) {
+      showInlineAlert('Workspace ID and actor ID are required for persistent grants.', 'warning');
+      return;
+    }
+
+    try {
+      setButtonLoading(createGrantBtn, true, 'Saving grant');
+      await apiRequest('/api/vault/grants', {
+        method: 'POST',
+        body: {
+          vault_id: currentVaultID(),
+          workspace_id: workspaceID,
+          actor_type: grantActorTypeInput.value,
+          actor_id: actorID,
+          capability: grantCapabilityInput.value,
+          record_type: grantRecordTypeInput.value.trim()
+        }
+      });
+      notify('Persistent grant saved.', 'success');
+      await loadVaultGrants();
+    } catch (error) {
+      console.error('Failed to save grant:', error);
+      showInlineAlert(error.message || 'Failed to save grant.', 'error');
+    } finally {
+      setButtonLoading(createGrantBtn, false);
+    }
+  }
+
+  async function revokeGrant(grantID) {
+    const confirmed = window.confirm('Revoke this persistent vault grant?');
+    if (!confirmed) {
+      return;
+    }
+
+    try {
+      await apiRequest(vaultURL(`/api/vault/grants/${encodeURIComponent(grantID)}`), {
+        method: 'DELETE'
+      });
+      notify('Persistent grant revoked.', 'success');
+      await loadVaultGrants();
+    } catch (error) {
+      console.error('Failed to revoke grant:', error);
+      showInlineAlert(error.message || 'Failed to revoke grant.', 'error');
+    }
+  }
+
+  async function exportVault() {
+    if (!currentVaultID()) {
+      showInlineAlert('Create or select a vault before exporting.', 'warning');
+      return;
+    }
+
+    if (!exportConfirmInput.checked) {
+      showInlineAlert('Confirm the export warning before generating an export.', 'warning');
+      return;
+    }
+
+    const exportPassword = String(exportPasswordInput?.value || '').trim();
+    if (!exportPassword) {
+      showInlineAlert('Enter an export password before exporting.', 'warning');
+      return;
+    }
+
+    try {
+      setButtonLoading(exportBtn, true, 'Exporting');
+      const bundle = await apiRequest('/api/vault/export', {
+        method: 'POST',
+        body: {
+          vault_id: currentVaultID(),
+          workspace_id: exportWorkspaceInput.value.trim(),
+          vault_password: exportPassword,
+          confirm: true
+        }
+      });
+
+      const blob = new Blob([JSON.stringify(bundle, null, 2)], { type: 'application/json' });
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `ori-vault-export-${new Date().toISOString().slice(0, 10)}.json`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.URL.revokeObjectURL(url);
+      notify('Vault export generated.', 'success');
+    } catch (error) {
+      console.error('Failed to export vault:', error);
+      showInlineAlert(error.message || 'Failed to export vault.', 'error');
+    } finally {
+      setButtonLoading(exportBtn, false);
+    }
+  }
+
+  async function importVault() {
+    const file = importFileInput?.files?.[0] || null;
+    if (!file) {
+      showInlineAlert('Choose an export bundle before importing.', 'warning');
+      return;
+    }
+
+    const importPassword = String(importPasswordInput?.value || '').trim();
+    if (!importPassword) {
+      showInlineAlert('Enter the import password before restoring a vault bundle.', 'warning');
+      return;
+    }
+
+    const mode = importModeInput?.value === 'current' && canImportIntoCurrentVault() ? 'current' : 'new';
+    if (mode === 'current' && !canImportIntoCurrentVault()) {
+      showInlineAlert('Unlock the selected vault before importing into it.', 'warning');
+      return;
+    }
+
+    let bundle = null;
+    try {
+      const raw = await readFileAsText(file);
+      bundle = JSON.parse(raw);
+    } catch (error) {
+      console.error('Failed to parse vault import bundle:', error);
+      showInlineAlert(error.message || 'The selected import file is not valid JSON.', 'error');
+      return;
+    }
+
+    const requestBody = {
+      import_password: importPassword,
+      bundle,
+      restore_grants: Boolean(importRestoreGrantsInput?.checked)
+    };
+
+    if (mode === 'current') {
+      requestBody.target_vault_id = currentVaultID();
+    } else {
+      const vaultPassword = String(importVaultPasswordInput?.value || '').trim();
+      const confirmPassword = String(importConfirmVaultPasswordInput?.value || '').trim();
+      if (!vaultPassword) {
+        showInlineAlert('Set a password for the imported vault before continuing.', 'warning');
+        return;
+      }
+      if (vaultPassword !== confirmPassword) {
+        showInlineAlert('The imported vault passwords do not match.', 'warning');
+        return;
+      }
+      requestBody.create_vault = {
+        name: String(importVaultNameInput?.value || '').trim(),
+        description: String(importVaultDescriptionInput?.value || '').trim(),
+        vault_password: vaultPassword
+      };
+    }
+
+    try {
+      setButtonLoading(importBtn, true, 'Importing');
+      const response = await apiRequest('/api/vault/import', {
+        method: 'POST',
+        body: requestBody
+      });
+
+      const result = response?.result || {};
+      if (result?.vault?.id) {
+        selectedVaultID = result.vault.id;
+        writeStoredVaultID(selectedVaultID);
+      }
+
+      if (importFileInput) importFileInput.value = '';
+      if (importFileName) importFileName.textContent = 'No import file selected yet.';
+      if (importPasswordInput) importPasswordInput.value = '';
+      if (importVaultNameInput) importVaultNameInput.value = '';
+      if (importVaultDescriptionInput) importVaultDescriptionInput.value = '';
+      if (importVaultPasswordInput) importVaultPasswordInput.value = '';
+      if (importConfirmVaultPasswordInput) importConfirmVaultPasswordInput.value = '';
+      if (importRestoreGrantsInput) importRestoreGrantsInput.checked = true;
+      if (importModeInput) importModeInput.value = 'new';
+
+      notify(`Imported ${String(result.record_count || 0)} encrypted ${(result.record_count || 0) === 1 ? 'entry' : 'entries'} into ${vaultDisplayLabel(result.vault)}.`, 'success');
+      await refreshVault();
+    } catch (error) {
+      console.error('Failed to import vault bundle:', error);
+      showInlineAlert(error.message || 'Failed to import vault bundle.', 'error');
+    } finally {
+      setButtonLoading(importBtn, false);
+      syncImportControls();
+    }
+  }
+
+  toggleUnlockPasswordBtn?.addEventListener('click', () => {
+    if (!unlockPasswordInput) return;
+    unlockPasswordInput.type = unlockPasswordInput.type === 'password' ? 'text' : 'password';
+  });
+
+  unlockBtn?.addEventListener('click', () => {
+    unlockVault();
+  });
+
+  lockBtn?.addEventListener('click', () => {
+    lockVault();
+  });
+
+  refreshBtn?.addEventListener('click', () => {
+    refreshVault();
+  });
+
+  activeVaultSelect?.addEventListener('change', (event) => {
+    switchVault(event.target.value);
+  });
+
+  renameVaultBtn?.addEventListener('click', () => {
+    updateVaultSpace();
+  });
+
+  deleteVaultBtn?.addEventListener('click', () => {
+    deleteVaultSpace();
+  });
+
+  createVaultSpaceBtn?.addEventListener('click', () => {
+    createVaultSpace();
+  });
+
+  editVaultNameInput?.addEventListener('keydown', (event) => {
+    if (event.key === 'Enter') {
+      event.preventDefault();
+      updateVaultSpace();
+    }
+  });
+
+  newVaultNameInput?.addEventListener('keydown', (event) => {
+    if (event.key === 'Enter') {
+      event.preventDefault();
+      createVaultSpace();
+    }
+  });
+
+  confirmVaultPasswordInput?.addEventListener('keydown', (event) => {
+    if (event.key === 'Enter') {
+      event.preventDefault();
+      createVaultSpace();
+    }
+  });
+
+  saveEntryBtn?.addEventListener('click', () => {
+    saveRecord();
+  });
+
+  resetEntryBtn?.addEventListener('click', () => {
+    clearRecordForm();
+  });
+
+  revealPayloadBtn?.addEventListener('click', () => {
+    togglePayloadReveal();
+  });
+
+  deleteEntryBtn?.addEventListener('click', () => {
+    deleteRecord();
+  });
+
+  recordsListEl?.addEventListener('click', (event) => {
+    const trigger = event.target.closest('[data-record-id]');
+    if (!trigger) {
+      return;
+    }
+    selectRecord(trigger.getAttribute('data-record-id'));
+  });
+
+  createGrantBtn?.addEventListener('click', () => {
+    createGrant();
+  });
+
+  grantsListEl?.addEventListener('click', (event) => {
+    const trigger = event.target.closest('[data-grant-id]');
+    if (!trigger) {
+      return;
+    }
+    revokeGrant(trigger.getAttribute('data-grant-id'));
+  });
+
+  exportBtn?.addEventListener('click', () => {
+    exportVault();
+  });
+
+  importChooseFileBtn?.addEventListener('click', () => {
+    importFileInput?.click();
+  });
+
+  importFileInput?.addEventListener('change', () => {
+    const file = importFileInput?.files?.[0] || null;
+    if (importFileName) {
+      importFileName.textContent = file ? String(file.name || 'import-bundle.json') : 'No import file selected yet.';
+    }
+  });
+
+  importModeInput?.addEventListener('change', () => {
+    syncImportControls();
+  });
+
+  importConfirmVaultPasswordInput?.addEventListener('keydown', (event) => {
+    if (event.key === 'Enter') {
+      event.preventDefault();
+      importVault();
+    }
+  });
+
+  importPasswordInput?.addEventListener('keydown', (event) => {
+    if (event.key === 'Enter') {
+      event.preventDefault();
+      importVault();
+    }
+  });
+
+  importBtn?.addEventListener('click', () => {
+    importVault();
+  });
+
+  clearRecordForm();
+  syncImportControls();
+  refreshVault();
 })();
 
 // Display Density Settings (local storage)

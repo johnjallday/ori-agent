@@ -30,6 +30,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/store"
 	"github.com/johnjallday/ori-agent/internal/updatemanager"
 	"github.com/johnjallday/ori-agent/internal/usagehttp"
+	"github.com/johnjallday/ori-agent/internal/vaulthttp"
 	web "github.com/johnjallday/ori-agent/internal/web"
 	"github.com/johnjallday/ori-agent/internal/workflowhttp"
 	"github.com/johnjallday/ori-agent/internal/workspace"
@@ -53,15 +54,15 @@ type StorageSystemFacade struct {
 	LocationManager *location.Manager
 }
 
-// WorkflowSystemFacade manages agent studio and orchestration dependencies
+// WorkflowSystemFacade manages workspace orchestration dependencies
 type WorkflowSystemFacade struct {
-	TaskExecutor        *workspace.TaskExecutor
-	StepExecutor        *workspace.StepExecutor
-	TaskScheduler       *workspace.TaskScheduler
-	EventBus            *workspace.EventBus
-	NotificationService *workspace.NotificationService
-	DirectorySync       *workspace.DirectorySyncManager
-	StudioOrchestrator  *workspace.Orchestrator
+	TaskExecutor          *workspace.TaskExecutor
+	StepExecutor          *workspace.StepExecutor
+	TaskScheduler         *workspace.TaskScheduler
+	EventBus              *workspace.EventBus
+	NotificationService   *workspace.NotificationService
+	DirectorySync         *workspace.DirectorySyncManager
+	WorkspaceOrchestrator *workspace.Orchestrator
 }
 
 // IntegrationSystemFacade manages external integrations (MCP, updates)
@@ -86,7 +87,7 @@ type HandlerFacade struct {
 	Device          *devicehttp.Handler
 	Orchestration   *orchestrationhttp.Handler
 	AutoTask        *orchestrationhttp.AutoTaskHandler
-	Studio          *workspace.HTTPHandler
+	Workspace       *workspace.HTTPHandler
 	Usage           *usagehttp.Handler
 	MCP             *mcphttp.Handler
 	Location        *locationhttp.Handler
@@ -104,6 +105,7 @@ type HandlerFacade struct {
 	SessionFiles    *fileshttp.Handler
 	Review          *reviewhttp.Handler
 	Evolution       *evolutionhttp.Handler
+	Vault           *vaulthttp.Handler
 	ExternalAgents  *externalagentshttp.Handler
 	Skills          *skillshttp.Handler
 }
@@ -150,16 +152,16 @@ func NewWorkflowSystemFacade(
 	eventBus *workspace.EventBus,
 	notificationService *workspace.NotificationService,
 	directorySync *workspace.DirectorySyncManager,
-	studioOrchestrator *workspace.Orchestrator,
+	workspaceOrchestrator *workspace.Orchestrator,
 ) *WorkflowSystemFacade {
 	return &WorkflowSystemFacade{
-		TaskExecutor:        taskExecutor,
-		StepExecutor:        stepExecutor,
-		TaskScheduler:       taskScheduler,
-		EventBus:            eventBus,
-		NotificationService: notificationService,
-		DirectorySync:       directorySync,
-		StudioOrchestrator:  studioOrchestrator,
+		TaskExecutor:          taskExecutor,
+		StepExecutor:          stepExecutor,
+		TaskScheduler:         taskScheduler,
+		EventBus:              eventBus,
+		NotificationService:   notificationService,
+		DirectorySync:         directorySync,
+		WorkspaceOrchestrator: workspaceOrchestrator,
 	}
 }
 
@@ -194,7 +196,7 @@ func NewHandlerFacade(
 	device *devicehttp.Handler,
 	orchestration *orchestrationhttp.Handler,
 	autoTask *orchestrationhttp.AutoTaskHandler,
-	studio *workspace.HTTPHandler,
+	workspaceHandler *workspace.HTTPHandler,
 	usage *usagehttp.Handler,
 	mcp *mcphttp.Handler,
 	location *locationhttp.Handler,
@@ -212,6 +214,7 @@ func NewHandlerFacade(
 	sessionFiles *fileshttp.Handler,
 	review *reviewhttp.Handler,
 	evolutionHandler *evolutionhttp.Handler,
+	vaultHandler *vaulthttp.Handler,
 	externalAgents *externalagentshttp.Handler,
 	skills *skillshttp.Handler,
 ) *HandlerFacade {
@@ -223,7 +226,7 @@ func NewHandlerFacade(
 		Device:          device,
 		Orchestration:   orchestration,
 		AutoTask:        autoTask,
-		Studio:          studio,
+		Workspace:       workspaceHandler,
 		Usage:           usage,
 		MCP:             mcp,
 		Location:        location,
@@ -241,6 +244,7 @@ func NewHandlerFacade(
 		SessionFiles:    sessionFiles,
 		Review:          review,
 		Evolution:       evolutionHandler,
+		Vault:           vaultHandler,
 		ExternalAgents:  externalAgents,
 		Skills:          skills,
 	}

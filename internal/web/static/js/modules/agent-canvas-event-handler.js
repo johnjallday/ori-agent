@@ -21,7 +21,7 @@ export class AgentCanvasEventHandler {
     // Toast notifications array
     this.parent.notifications_array = this.parent.notifications_array || [];
 
-    this.parent.eventSource = connectProgressStream(this.parent.studioId, {
+    this.parent.eventSource = connectProgressStream(this.parent.workspaceId, {
       onInitial: (data) => {
         this.processWorkspacePayload(data, { setTasks: true, source: 'initial' });
       },
@@ -216,9 +216,9 @@ export class AgentCanvasEventHandler {
   emitImmediateWorkspaceProgress() {
     const snapshot = {
       type: 'workspace.progress',
-      workspace_id: this.parent.studioId,
+      workspace_id: this.parent.workspaceId,
       workspace_progress: this.parent.workspaceProgress || null,
-      agent_stats: (this.parent.studio && this.parent.studio.agent_stats) || null,
+      agent_stats: (this.parent.workspace && this.parent.workspace.agent_stats) || null,
       tasks: this.state.tasks,
       attachments: this.state.attachments
     };

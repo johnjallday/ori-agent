@@ -40,7 +40,7 @@ type CreateWorkflowRequest struct {
 
 // CheckAgentsRequest represents the request to check agent availability
 type CheckAgentsRequest struct {
-	StudioID string `json:"studio_id"`
+	WorkspaceID string `json:"workspace_id"`
 }
 
 // CheckAgentsResponse represents the response for agent availability check
@@ -355,7 +355,7 @@ func (h *Handler) handleImportWorkflow(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// handleCheckAgents checks if all agents required by a workflow are available in a studio
+// handleCheckAgents checks if all agents required by a workflow are available in a workspace
 func (h *Handler) handleCheckAgents(w http.ResponseWriter, r *http.Request, workflowID string) {
 	if r.Method != http.MethodPost {
 		orihttp.MethodNotAllowed(w)
@@ -380,22 +380,22 @@ func (h *Handler) handleCheckAgents(w http.ResponseWriter, r *http.Request, work
 		return
 	}
 
-	if req.StudioID == "" {
-		orihttp.BadRequest(w, "Studio ID is required")
+	if req.WorkspaceID == "" {
+		orihttp.BadRequest(w, "Workspace ID is required")
 		return
 	}
 
-	// Get studio agents
-	studio, err := h.workspaceStore.Get(req.StudioID)
+	// Get workspace agents
+	ws, err := h.workspaceStore.Get(req.WorkspaceID)
 	if err != nil {
-		orihttp.NotFound(w, fmt.Sprintf("Studio not found: %v", err))
+		orihttp.NotFound(w, fmt.Sprintf("Workspace not found: %v", err))
 		return
 	}
 
 	// Check agent availability
 
 	requiredAgents := workflow.GetAgentNames()
-	missingAgents := h.workflowManager.CheckAgentAvailability(workflow, studio.Agents)
+	missingAgents := h.workflowManager.CheckAgentAvailability(workflow, ws.Agents)
 
 	response := CheckAgentsResponse{
 		Available:      len(missingAgents) == 0,

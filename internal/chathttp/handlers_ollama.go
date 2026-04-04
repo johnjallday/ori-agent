@@ -138,6 +138,23 @@ func (h *Handler) handleOllamaToolCalls(
 				h.trackUsageCommon("ollama", ag.Settings.Model, agentName, finalResp.Usage, ag.Agent, userMessage)
 				return finalResp.Content, finalResp.ToolCalls, nil
 			},
+			RequestFinalResponse: func() (string, error) {
+				finalResp, err := provider.Chat(ctx, llm.ChatRequest{
+					Model:        ag.Settings.Model,
+					Messages:     messages,
+					SystemPrompt: systemPrompt + "\n\n" + getFinalToolLoopSynthesisPrompt(),
+					Temperature:  ag.Settings.Temperature,
+					MaxTokens:    4000,
+				})
+				if err != nil {
+					return "", err
+				}
+				if finalResp == nil {
+					return "", fmt.Errorf("ollama final synthesis returned no response")
+				}
+				h.trackUsageCommon("ollama", ag.Settings.Model, agentName, finalResp.Usage, ag.Agent, userMessage)
+				return finalResp.Content, nil
+			},
 		},
 	)
 
