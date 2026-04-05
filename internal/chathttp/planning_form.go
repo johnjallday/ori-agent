@@ -65,7 +65,7 @@ func maybeBuildWorkspacePlanningFormResponse(ag *resolvedChatAgent, query string
 	if trimmedQuery == "" || isPlanningFormSubmissionPrompt(trimmedQuery) {
 		return nil
 	}
-	if planningFormAlreadyCompleted(ag.Messages) {
+	if planningFormAlreadyCompleted(ag.Messages, trimmedQuery) {
 		return nil
 	}
 
@@ -100,7 +100,11 @@ func isPlanningFormSubmissionPrompt(query string) bool {
 		strings.HasPrefix(trimmed, "structured travel intake for the workspace manager:")
 }
 
-func planningFormAlreadyCompleted(messages []openai.ChatCompletionMessageParamUnion) bool {
+func planningFormAlreadyCompleted(messages []openai.ChatCompletionMessageParamUnion, currentQuery string) bool {
+	if looksLikeFreshTravelPlanningRequest(currentQuery) {
+		return false
+	}
+
 	for i := len(messages) - 1; i >= 0; i-- {
 		msg := messages[i]
 		if msg.OfUser == nil {
@@ -111,6 +115,27 @@ func planningFormAlreadyCompleted(messages []openai.ChatCompletionMessageParamUn
 		}
 	}
 	return false
+}
+
+func looksLikeFreshTravelPlanningRequest(query string) bool {
+	lower := strings.ToLower(strings.TrimSpace(query))
+	if lower == "" {
+		return false
+	}
+
+	return containsAnyPhrase(lower, []string{
+		"let's plan",
+		"plan a trip",
+		"plan my trip",
+		"help me plan",
+		"travel itinerary",
+		"trip itinerary",
+		"travel planning",
+		"trip planning",
+		"replan",
+		"start over",
+		"new trip",
+	})
 }
 
 func looksLikeTravelPlanningRequest(query string) bool {

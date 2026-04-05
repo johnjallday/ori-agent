@@ -1131,6 +1131,25 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 
 	// Load the execution agent for this chat turn.
 	current := executionAgent.Name
+	routeDecision := classifyUtilityRoute(originalQuery)
+
+	if invokedSkill == nil && routeNeedsWorkspace(routeDecision.Mode) {
+		hadWorkspaceContext := strings.TrimSpace(normalizedRouteContext.WorkspaceID) != ""
+		autoWorkspace, created, wsErr := h.ensureWorkspaceForRoute(current, originalQuery, routeDecision, normalizedRouteContext)
+		if wsErr != nil {
+			logger.Warn("Failed to ensure workspace for routed chat request", logger.Fields{
+				"agent":        current,
+				"route_mode":   routeDecision.Mode,
+				"workspace_id": normalizedRouteContext.WorkspaceID,
+				"error":        wsErr,
+			})
+		} else if autoWorkspace != nil {
+			normalizedRouteContext = applyWorkspaceRouteContext(normalizedRouteContext, autoWorkspace)
+			if created || !hadWorkspaceContext {
+				q = enrichPromptWithWorkspaceContext(q, autoWorkspace, routeDecision.Mode, created)
+			}
+		}
+	}
 
 	ag, err := h.resolveEffectiveAgent(current, normalizedRouteContext)
 	if err != nil {
@@ -1166,8 +1185,6 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	routeDecision := classifyUtilityRoute(originalQuery)
-
 	if req.PlanBeforeAction && approvedActionPlanID == "" {
 		actionPlan, planDecision := h.buildChatActionPlan(ctx, q, routeDecision, req.MultiAgentMode, req.MultiAgentThreshold)
 		response := attachPlannerDecision(attachRouteMetadata(map[string]any{
@@ -1183,19 +1200,6 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 		}), planDecision)
 		writeJSONResponse(w, response)
 		return
-	}
-
-	if invokedSkill == nil && routeNeedsWorkspace(routeDecision.Mode) {
-		autoWorkspace, created, wsErr := h.ensureWorkspaceForRoute(current, originalQuery, routeDecision)
-		if wsErr != nil {
-			logger.Warn("Failed to ensure workspace for routed chat request", logger.Fields{
-				"agent":      current,
-				"route_mode": routeDecision.Mode,
-				"error":      wsErr,
-			})
-		} else if autoWorkspace != nil {
-			q = enrichPromptWithWorkspaceContext(q, autoWorkspace, routeDecision.Mode, created)
-		}
 	}
 
 	// Utility-direct requests bypass planner/delegation and execute native tools immediately.

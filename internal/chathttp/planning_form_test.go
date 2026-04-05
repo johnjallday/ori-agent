@@ -98,6 +98,27 @@ func TestMaybeBuildWorkspacePlanningFormResponse_SkipsAfterPriorPlanningSubmissi
 	}
 }
 
+func TestMaybeBuildWorkspacePlanningFormResponse_AllowsFreshPlanningRequestAfterPriorSubmission(t *testing.T) {
+	resp := maybeBuildWorkspacePlanningFormResponse(
+		&resolvedChatAgent{
+			Agent: &agent.Agent{
+				Type: "workspace-manager",
+				Messages: []openai.ChatCompletionMessageParamUnion{
+					openai.UserMessage("let's plan a trip to Spain"),
+					openai.AssistantMessage("Complete the planning step below."),
+					openai.UserMessage("Structured planning form submission:\n{\"form_id\":\"travel_intake\"}"),
+					openai.AssistantMessage("Thanks. I have enough to continue."),
+				},
+			},
+		},
+		"let's plan a trip to Italy instead",
+		normalizedChatRouteContext{WorkspaceID: "workspace-italy"},
+	)
+	if resp == nil || resp.Form == nil {
+		t.Fatalf("expected planning form response for fresh planning request, got %#v", resp)
+	}
+}
+
 func TestBuildPromptFromWorkflowResponse_Form(t *testing.T) {
 	prompt, err := buildPromptFromWorkflowResponse(&WorkflowUserResponse{
 		WorkflowID:   "workflow:test",

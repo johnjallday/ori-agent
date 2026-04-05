@@ -19,12 +19,23 @@ func routeNeedsWorkspace(mode UtilityRouteMode) bool {
 }
 
 // ensureWorkspaceForRoute returns an active workspace for the agent, creating one when needed.
-func (h *Handler) ensureWorkspaceForRoute(agentName, request string, decision UtilityRouteDecision) (*workspace.Workspace, bool, error) {
+func (h *Handler) ensureWorkspaceForRoute(agentName, request string, decision UtilityRouteDecision, routeCtx normalizedChatRouteContext) (*workspace.Workspace, bool, error) {
 	if h == nil || h.commandHandler == nil || h.commandHandler.workspaceStore == nil {
 		return nil, false, nil
 	}
 	if strings.TrimSpace(agentName) == "" || !routeNeedsWorkspace(decision.Mode) {
 		return nil, false, nil
+	}
+
+	if workspaceID := strings.TrimSpace(routeCtx.WorkspaceID); workspaceID != "" {
+		ws, err := h.commandHandler.workspaceStore.Get(workspaceID)
+		if err != nil {
+			return nil, false, fmt.Errorf("get route workspace %q: %w", workspaceID, err)
+		}
+		if ws == nil {
+			return nil, false, fmt.Errorf("route workspace %q was not found", workspaceID)
+		}
+		return ws, false, nil
 	}
 
 	active, err := h.commandHandler.workspaceStore.ListActive()
@@ -62,6 +73,38 @@ func (h *Handler) ensureWorkspaceForRoute(agentName, request string, decision Ut
 	})
 
 	return ws, true, nil
+}
+
+func applyWorkspaceRouteContext(routeCtx normalizedChatRouteContext, ws *workspace.Workspace) normalizedChatRouteContext {
+	if ws == nil {
+		return routeCtx
+	}
+
+	updated := routeCtx
+	updated.WorkspaceID = strings.TrimSpace(ws.ID)
+	if updated.WorkspaceID == "" {
+		return routeCtx
+	}
+
+	if !strings.HasPrefix(strings.ToLower(strings.TrimSpace(updated.PagePath)), "/workspaces/") {
+		updated.PagePath = "/workspaces/" + updated.WorkspaceID
+	}
+	if !isWorkspaceChatSurface(updated.Surface) {
+		updated.Surface = "workspace_chat"
+	}
+	if strings.TrimSpace(updated.Origin) == "" {
+		updated.Origin = "chat_auto_workspace"
+	}
+	return updated
+}
+
+func isWorkspaceChatSurface(surface string) bool {
+	switch strings.TrimSpace(surface) {
+	case "workspace_detail", "workspace_canvas", "workspace_chat":
+		return true
+	default:
+		return false
+	}
 }
 
 func newestWorkspacesFirst(items []*workspace.Workspace) []*workspace.Workspace {
