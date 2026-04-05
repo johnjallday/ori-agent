@@ -41,6 +41,9 @@ jobs:
       - name: Build folder picker app
         run: ./scripts/build-folder-picker.sh
 
+      - name: Reset Wails-generated file changes
+        run: git checkout -- cmd/folder-picker/frontend/wailsjs/runtime/ go.mod go.sum 2>/dev/null || true
+
       - name: Run GoReleaser
         uses: goreleaser/goreleaser-action@v6
         with:
@@ -71,6 +74,9 @@ jobs:
 
       - name: Build folder picker app
         run: ./scripts/build-folder-picker.sh
+
+      - name: Reset Wails-generated file changes
+        run: git checkout -- cmd/folder-picker/frontend/wailsjs/runtime/ go.mod go.sum 2>/dev/null || true
 
       - name: Install GoReleaser
         uses: goreleaser/goreleaser-action@v6
