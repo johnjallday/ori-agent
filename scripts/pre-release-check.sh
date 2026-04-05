@@ -414,6 +414,42 @@ else
   skip_check "Build Menubar" "not on macOS"
 fi
 
+# Build folder picker (Wails app) — mirrors CI release workflow
+if [ -f "./scripts/build-folder-picker.sh" ]; then
+  if command -v wails &> /dev/null || [ -x "$HOME/go/bin/wails" ]; then
+    # Save git state before build
+    PRE_BUILD_STATUS=$(git status --porcelain)
+
+    run_check "Build Folder Picker" "./scripts/build-folder-picker.sh" || true
+
+    # Check if the build dirtied the tree (this is what breaks GoReleaser in CI)
+    POST_BUILD_STATUS=$(git status --porcelain)
+    if [ "$PRE_BUILD_STATUS" != "$POST_BUILD_STATUS" ]; then
+      DIRTY_FILES=$(diff <(echo "$PRE_BUILD_STATUS") <(echo "$POST_BUILD_STATUS") | grep '^>' | sed 's/^> //')
+      echo -e "${YELLOW}⚠️  Folder picker build modified files:${NC}"
+      echo "$DIRTY_FILES"
+      echo ""
+      echo -e "${YELLOW}   These files must be reset in .github/workflows/release.yml${NC}"
+      echo -e "${YELLOW}   before GoReleaser runs, or CI will fail with 'git is in a dirty state'.${NC}"
+      echo ""
+
+      # Verify the release workflow has the reset step
+      if grep -q "Reset Wails-generated file changes" .github/workflows/release.yml 2>/dev/null; then
+        echo -e "${GREEN}✅ Release workflow has Wails reset step${NC}"
+        # Reset the files locally too
+        git checkout -- . 2>/dev/null || true
+      else
+        echo -e "${RED}❌ Release workflow is MISSING the Wails reset step — CI will fail${NC}"
+        FAILED_CHECKS+=("CI Dirty Tree Protection")
+      fi
+    fi
+  else
+    skip_check "Build Folder Picker" "wails CLI not installed"
+  fi
+else
+  skip_check "Build Folder Picker" "build script not found"
+fi
+
 # Cross-platform builds
 if [ -f "./scripts/check-cross-platform.sh" ]; then
   run_check "Cross-Platform Builds" "./scripts/check-cross-platform.sh" || true
