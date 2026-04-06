@@ -28,7 +28,7 @@ func TestResolveExecutionAgentName_PrefersSessionBinding(t *testing.T) {
 			"sess-1": {AgentName: "Session Agent"},
 		},
 	}
-	agentStore := newPreflightStore("Fallback Agent", nil)
+	agentStore := newPreflightStore("Session Agent", nil)
 
 	resolution := resolveExecutionAgentName(context.Background(), sessionLookup, agentStore, "sess-1", "Requested Agent")
 
@@ -44,7 +44,7 @@ func TestResolveExecutionAgentName_PrefersSessionBinding(t *testing.T) {
 }
 
 func TestResolveExecutionAgentName_UsesRequestOverrideBeforeCompatibilityFallback(t *testing.T) {
-	agentStore := newPreflightStore("Fallback Agent", nil)
+	agentStore := newPreflightStore("Requested Agent", nil)
 
 	resolution := resolveExecutionAgentName(context.Background(), nil, agentStore, "", "Requested Agent")
 
@@ -56,6 +56,71 @@ func TestResolveExecutionAgentName_UsesRequestOverrideBeforeCompatibilityFallbac
 	}
 	if resolution.usesCompatibilityFallback() {
 		t.Fatal("did not expect compatibility fallback for request override")
+	}
+}
+
+func TestResolveExecutionAgentName_SkipsMissingSessionBindingAndUsesRequestOverride(t *testing.T) {
+	sessionLookup := &executionAgentSessionLookupStub{
+		sessions: map[string]*session.Session{
+			"sess-1": {AgentName: "Missing Agent"},
+		},
+	}
+	agentStore := &preflightStore{
+		agents: map[string]*agent.Agent{
+			"Requested Agent":           {},
+			assistantExecutionAgentName: {},
+		},
+		names: []string{"Requested Agent", assistantExecutionAgentName},
+	}
+
+	resolution := resolveExecutionAgentName(context.Background(), sessionLookup, agentStore, "sess-1", "Requested Agent")
+
+	if resolution.Name != "Requested Agent" {
+		t.Fatalf("expected request override after stale session binding, got %q", resolution.Name)
+	}
+	if resolution.Source != executionAgentSourceRequestOverride {
+		t.Fatalf("expected source %q, got %q", executionAgentSourceRequestOverride, resolution.Source)
+	}
+}
+
+func TestResolveExecutionAgentName_SkipsMissingSessionBindingAndFallsBackToAssistant(t *testing.T) {
+	sessionLookup := &executionAgentSessionLookupStub{
+		sessions: map[string]*session.Session{
+			"sess-1": {AgentName: "Missing Agent"},
+		},
+	}
+	agentStore := &preflightStore{
+		agents: map[string]*agent.Agent{
+			assistantExecutionAgentName: {},
+		},
+		names: []string{assistantExecutionAgentName},
+	}
+
+	resolution := resolveExecutionAgentName(context.Background(), sessionLookup, agentStore, "sess-1", "")
+
+	if resolution.Name != assistantExecutionAgentName {
+		t.Fatalf("expected assistant fallback after stale session binding, got %q", resolution.Name)
+	}
+	if resolution.Source != executionAgentSourceAssistantDefault {
+		t.Fatalf("expected source %q, got %q", executionAgentSourceAssistantDefault, resolution.Source)
+	}
+}
+
+func TestResolveExecutionAgentName_SkipsMissingRequestOverrideAndFallsBackToAssistant(t *testing.T) {
+	agentStore := &preflightStore{
+		agents: map[string]*agent.Agent{
+			assistantExecutionAgentName: {},
+		},
+		names: []string{assistantExecutionAgentName},
+	}
+
+	resolution := resolveExecutionAgentName(context.Background(), nil, agentStore, "", "Missing Agent")
+
+	if resolution.Name != assistantExecutionAgentName {
+		t.Fatalf("expected assistant fallback after stale request override, got %q", resolution.Name)
+	}
+	if resolution.Source != executionAgentSourceAssistantDefault {
+		t.Fatalf("expected source %q, got %q", executionAgentSourceAssistantDefault, resolution.Source)
 	}
 }
 

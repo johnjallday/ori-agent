@@ -113,6 +113,42 @@ func TestExtractClarificationQuestion(t *testing.T) {
 	}
 }
 
+func TestExtractClarificationWorkflowStep_NumberedOptions(t *testing.T) {
+	response := "I can continue in two ways:\n1. Save this as a note in your Spain workspace\n2. Drill into a specific day or activity"
+
+	got := extractClarificationWorkflowStep(response)
+	if got == nil {
+		t.Fatalf("expected workflow step, got nil")
+	}
+	if got.StepType != "ask_choice" {
+		t.Fatalf("expected ask_choice step, got %q", got.StepType)
+	}
+	if len(got.Choices) != 2 {
+		t.Fatalf("expected 2 choices, got %d", len(got.Choices))
+	}
+	if got.Choices[0].Label != "Save this as a note in your Spain workspace" {
+		t.Fatalf("unexpected first choice label %q", got.Choices[0].Label)
+	}
+}
+
+func TestExtractClarificationWorkflowStep_InlineQuestion(t *testing.T) {
+	response := "Want me to save this as a note in your **spain** workspace, or drill into any specific day/activity?"
+
+	got := extractClarificationWorkflowStep(response)
+	if got == nil {
+		t.Fatalf("expected workflow step, got nil")
+	}
+	if len(got.Choices) != 2 {
+		t.Fatalf("expected 2 choices, got %d", len(got.Choices))
+	}
+	if got.Choices[0].Label != "save this as a note in your spain workspace" {
+		t.Fatalf("unexpected first choice label %q", got.Choices[0].Label)
+	}
+	if got.Choices[1].Label != "drill into any specific day/activity" {
+		t.Fatalf("unexpected second choice label %q", got.Choices[1].Label)
+	}
+}
+
 func TestApplyIterationContext_RequiresFilesystemVerificationAfterUnverifiedListing(t *testing.T) {
 	task := &workspace.Task{
 		Description: "Get list of files in DNM folder",

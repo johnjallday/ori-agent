@@ -1112,6 +1112,9 @@ export class WorkspaceDetailPage {
       taskAssistQuestion: document.getElementById('workspace-detail-task-assist-question'),
       taskAssistRecommendationWrap: document.getElementById('workspace-detail-task-assist-recommendation-wrap'),
       taskAssistRecommendation: document.getElementById('workspace-detail-task-assist-recommendation'),
+      taskAssistChoiceWrap: document.getElementById('workspace-detail-task-assist-choice-wrap'),
+      taskAssistChoiceSummary: document.getElementById('workspace-detail-task-assist-choice-summary'),
+      taskAssistChoiceList: document.getElementById('workspace-detail-task-assist-choice-list'),
       taskAssistAgent: document.getElementById('workspace-detail-task-assist-agent'),
       taskAssistMessage: document.getElementById('workspace-detail-task-assist-message'),
       taskAssistResponseWrap: document.getElementById('workspace-detail-task-assist-response-wrap'),
@@ -4469,6 +4472,199 @@ export class WorkspaceDetailPage {
     return [];
   }
 
+  cleanAssistChoiceText(value) {
+    return this.cleanTaskResultNextStepText(value).replace(/[?!.,;:]+$/g, '').trim();
+  }
+
+  buildAssistChoiceId(number, label) {
+    const base = this.normalizeTaskResultNextStepToken(label)
+      .replace(/\s+/g, '-')
+      .slice(0, 48) || 'choice';
+    return `assist-choice-${String(number || '').trim() || 'x'}-${base}`;
+  }
+
+  normalizeAssistWorkflowStep(value) {
+    if (!value || typeof value !== 'object') return null;
+
+    const stepType = String(value.step_type || value.stepType || '').trim().toLowerCase();
+    const rawChoices = Array.isArray(value.choices) ? value.choices : [];
+    const choices = rawChoices.map((item, index) => {
+      const label = this.cleanAssistChoiceText(item?.label || '');
+      if (!label) return null;
+      const number = String(item?.number || index + 1).trim();
+      return {
+        id: String(item?.id || this.buildAssistChoiceId(number, label)).trim(),
+        label,
+        number,
+        description: this.cleanAssistChoiceText(item?.description || '')
+      };
+    }).filter(Boolean);
+
+    if (stepType !== 'ask_choice' || choices.length === 0) return null;
+
+    let freeTextAllowed = true;
+    if (typeof value.free_text_allowed === 'boolean') {
+      freeTextAllowed = value.free_text_allowed;
+    } else if (typeof value.freeTextAllowed === 'boolean') {
+      freeTextAllowed = value.freeTextAllowed;
+    }
+
+    return {
+      stepType: 'ask_choice',
+      title: String(value.title || '').trim() || 'Choose the next step',
+      summary: String(value.summary || '').trim(),
+      freeTextAllowed,
+      choices
+    };
+  }
+
+  extractAssistEnumeratedChoices(text) {
+    const lines = String(text || '').split(/\r?\n/);
+    const choices = [];
+    let started = false;
+
+    for (let i = 0; i < lines.length; i += 1) {
+      const rawLine = String(lines[i] || '');
+      const match = rawLine.match(/^\s*(?:[-*]\s*)?(\d+)[.)]\s*(.+)$/);
+      if (match) {
+        const number = String(match[1] || '').trim();
+        const label = this.cleanAssistChoiceText(match[2]);
+        if (!label) continue;
+        choices.push({
+          id: this.buildAssistChoiceId(number, label),
+          label,
+          number,
+          description: ''
+        });
+        started = true;
+        if (choices.length >= 5) break;
+        continue;
+      }
+
+      if (!started) continue;
+      if (!rawLine.trim()) continue;
+      break;
+    }
+
+    return choices.length >= 2 ? choices : [];
+  }
+
+  extractAssistInlineChoices(text) {
+    const lines = String(text || '').split(/\r?\n/);
+    const patterns = [
+      /^(?:want me to|would you like me to|do you want me to|should i)\s+(.+?)(?:,\s*|\s+)or\s+(.+?)\?\s*$/i
+    ];
+
+    for (let i = lines.length - 1; i >= 0; i -= 1) {
+      const rawLine = this.cleanTaskResultNextStepText(lines[i]);
+      if (!rawLine.includes('?')) continue;
+      for (const pattern of patterns) {
+        const match = rawLine.match(pattern);
+        if (!match) continue;
+
+        const first = this.cleanAssistChoiceText(match[1]);
+        const second = this.cleanAssistChoiceText(match[2]);
+        if (!first || !second || this.normalizeTaskResultNextStepToken(first) === this.normalizeTaskResultNextStepToken(second)) {
+          continue;
+        }
+
+        return [
+          {
+            id: this.buildAssistChoiceId('1', first),
+            label: first,
+            number: '1',
+            description: ''
+          },
+          {
+            id: this.buildAssistChoiceId('2', second),
+            label: second,
+            number: '2',
+            description: ''
+          }
+        ];
+      }
+    }
+
+    return [];
+  }
+
+  buildAssistWorkflowStepFromText(...values) {
+    for (const value of values) {
+      const enumeratedChoices = this.extractAssistEnumeratedChoices(value);
+      if (enumeratedChoices.length > 0) {
+        return {
+          stepType: 'ask_choice',
+          title: 'Choose the next step',
+          summary: 'Pick one option below to continue this task.',
+          freeTextAllowed: true,
+          choices: enumeratedChoices
+        };
+      }
+
+      const inlineChoices = this.extractAssistInlineChoices(value);
+      if (inlineChoices.length > 0) {
+        return {
+          stepType: 'ask_choice',
+          title: 'Choose the next step',
+          summary: 'Pick one option below to continue this task.',
+          freeTextAllowed: true,
+          choices: inlineChoices
+        };
+      }
+    }
+    return null;
+  }
+
+  setAssistWorkflowStepUI(workflowStep) {
+    if (!this.elements.taskAssistChoiceWrap || !this.elements.taskAssistChoiceList) return;
+
+    const normalizedStep = this.normalizeAssistWorkflowStep(workflowStep);
+    if (!normalizedStep || normalizedStep.stepType !== 'ask_choice' || normalizedStep.choices.length === 0) {
+      this.elements.taskAssistChoiceList.innerHTML = '';
+      if (this.elements.taskAssistChoiceSummary) {
+        this.elements.taskAssistChoiceSummary.textContent = '';
+        this.elements.taskAssistChoiceSummary.classList.add('d-none');
+      }
+      this.elements.taskAssistChoiceWrap.classList.add('d-none');
+      return;
+    }
+
+    const selectedChoiceId = String(this.currentBlockedTask?.selectedChoiceId || '').trim();
+    this.elements.taskAssistChoiceList.innerHTML = normalizedStep.choices.map((choice) => `
+      <button
+        type="button"
+        class="home-assistant-planning-choice${selectedChoiceId === choice.id ? ' is-selected' : ''}"
+        data-assist-choice-id="${this.escapeHtml(choice.id)}"
+        aria-pressed="${selectedChoiceId === choice.id ? 'true' : 'false'}"
+      >
+        <span class="home-assistant-planning-choice-label">${this.escapeHtml(choice.number ? `${choice.number}. ${choice.label}` : choice.label)}</span>
+        ${choice.description ? `<span class="home-assistant-planning-choice-hint">${this.escapeHtml(choice.description)}</span>` : ''}
+      </button>
+    `).join('');
+
+    this.elements.taskAssistChoiceList.querySelectorAll('[data-assist-choice-id]').forEach((button) => {
+      button.addEventListener('click', () => {
+        const choiceId = String(button.getAttribute('data-assist-choice-id') || '').trim();
+        if (!choiceId || !this.currentBlockedTask) return;
+        const selectedChoice = normalizedStep.choices.find((choice) => choice.id === choiceId);
+        if (!selectedChoice) return;
+        this.currentBlockedTask.selectedChoiceId = selectedChoice.id;
+        this.currentBlockedTask.selectedChoiceLabel = selectedChoice.label;
+        this.currentBlockedTask.selectedChoiceNumber = selectedChoice.number || '';
+        this.currentBlockedTask.workflowStep = normalizedStep;
+        this.setAssistWorkflowStepUI(normalizedStep);
+      });
+    });
+
+    if (this.elements.taskAssistChoiceSummary) {
+      const summary = String(normalizedStep.summary || '').trim();
+      this.elements.taskAssistChoiceSummary.textContent = summary;
+      this.elements.taskAssistChoiceSummary.classList.toggle('d-none', !summary);
+    }
+
+    this.elements.taskAssistChoiceWrap.classList.remove('d-none');
+  }
+
   getAssistActionButton(action) {
     if (action === 'retry') return this.elements.taskAssistRetryBtn;
     if (action === 'continue_with_instruction') return this.elements.taskAssistContinueBtn;
@@ -4521,7 +4717,7 @@ export class WorkspaceDetailPage {
     this.updateAssistSwitchButtonState();
   }
 
-  determineAssistRecommendation(reasonCode, suggestedActions, currentAgent) {
+  determineAssistRecommendation(reasonCode, suggestedActions, currentAgent, workflowStep = null) {
     const normalizedCode = String(reasonCode || '').trim().toLowerCase();
     const actions = this.parseAssistActions(suggestedActions);
     const allows = (action) => actions.length === 0 || actions.includes(action);
@@ -4529,6 +4725,14 @@ export class WorkspaceDetailPage {
       normalizedCode === 'capability_refusal' ||
       normalizedCode.includes('capability');
     const browserAgent = browserRelated ? this.findBestBrowserCapableAgent(currentAgent) : '';
+
+    if (workflowStep?.stepType === 'ask_choice' && Array.isArray(workflowStep.choices) && workflowStep.choices.length > 0 &&
+        allows('continue_with_instruction')) {
+      return {
+        action: 'continue_with_instruction',
+        text: 'Recommended: Choose one of the suggested next steps below or add your own guidance.'
+      };
+    }
 
     if (browserRelated && browserAgent && allows('switch_agent_retry')) {
       return {
@@ -4589,12 +4793,21 @@ export class WorkspaceDetailPage {
     const timestamp = formatDate(task.updated_at || task.created_at);
 
     const currentAgent = String(task.to || '').trim();
+    const workflowStep = this.normalizeAssistWorkflowStep(payload.workflow_step)
+      || this.normalizeAssistWorkflowStep(payloadHumanLoop.workflow_step)
+      || this.normalizeAssistWorkflowStep(humanLoop.workflow_step)
+      || this.normalizeAssistWorkflowStep(task?.context?.planning_workflow_step)
+      || this.buildAssistWorkflowStepFromText(question, response);
     this.currentBlockedTask = {
       taskId,
       blockId,
       currentAgent,
       reasonCode,
-      suggestedActions: this.parseAssistActions(suggestedActions)
+      suggestedActions: this.parseAssistActions(suggestedActions),
+      workflowStep,
+      selectedChoiceId: '',
+      selectedChoiceLabel: '',
+      selectedChoiceNumber: ''
     };
 
     this.setTaskModalHeaderId(this.elements.taskAssistId, task.id);
@@ -4621,7 +4834,8 @@ export class WorkspaceDetailPage {
     }
 
     this.populateAssistAgents(currentAgent);
-    const recommendation = this.determineAssistRecommendation(reasonCode, suggestedActions, currentAgent);
+    this.setAssistWorkflowStepUI(workflowStep);
+    const recommendation = this.determineAssistRecommendation(reasonCode, suggestedActions, currentAgent, workflowStep);
     this.setAssistRecommendationUI(recommendation);
 
     if (this.elements.taskAssistModal && window.bootstrap) {
@@ -4637,6 +4851,9 @@ export class WorkspaceDetailPage {
 
     const selectedAgent = String(this.elements.taskAssistAgent?.value || '').trim();
     const message = String(this.elements.taskAssistMessage?.value || '').trim();
+    const selectedChoiceId = String(this.currentBlockedTask?.selectedChoiceId || '').trim();
+    const selectedChoiceLabel = String(this.currentBlockedTask?.selectedChoiceLabel || '').trim();
+    const selectedChoiceNumber = String(this.currentBlockedTask?.selectedChoiceNumber || '').trim();
     if (action === 'switch_agent_retry' && !selectedAgent) {
       if (window.Toast) window.Toast.error('Select an agent to switch before retrying.');
       return;
@@ -4646,12 +4863,22 @@ export class WorkspaceDetailPage {
       if (window.Toast) window.Toast.error('Select a different agent before switching.');
       return;
     }
+    if (action === 'continue_with_instruction' &&
+        this.currentBlockedTask.workflowStep?.stepType === 'ask_choice' &&
+        !selectedChoiceId &&
+        !message) {
+      if (window.Toast) window.Toast.warning('Choose a next step or add guidance before continuing.');
+      return;
+    }
 
     const payload = {
       action,
       block_id: this.currentBlockedTask.blockId || undefined,
       message: message || undefined,
-      agent: selectedAgent || undefined
+      agent: selectedAgent || undefined,
+      choice_id: selectedChoiceId || undefined,
+      choice_label: selectedChoiceLabel || undefined,
+      choice_number: selectedChoiceNumber || undefined
     };
 
     try {

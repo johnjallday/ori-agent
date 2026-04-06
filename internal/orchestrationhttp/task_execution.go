@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -18,6 +19,14 @@ import (
 const (
 	defaultTaskExecutionAttempts = 3
 	maxTaskExecutionAttempts     = 6
+)
+
+var (
+	blockedEnumeratedChoicePattern = regexp.MustCompile(`^\s*(?:[-*]\s*)?(\d+)[.)]\s*(.+)$`)
+	blockedMarkdownLinkPattern     = regexp.MustCompile(`\[(.*?)\]\((.*?)\)`)
+	blockedInlineChoicePatterns    = []*regexp.Regexp{
+		regexp.MustCompile(`(?i)^(?:want me to|would you like me to|do you want me to|should i)\s+(.+?)(?:,\s*|\s+)or\s+(.+?)\?\s*$`),
+	}
 )
 
 // TaskResultsHandler retrieves results from one or more tasks
@@ -284,10 +293,13 @@ func (th *TaskHandler) handleAssistTask(w http.ResponseWriter, r *http.Request) 
 	taskID := strings.TrimSpace(pathParts[0])
 
 	var req struct {
-		BlockID string `json:"block_id"`
-		Action  string `json:"action"`
-		Agent   string `json:"agent"`
-		Message string `json:"message"`
+		BlockID      string `json:"block_id"`
+		Action       string `json:"action"`
+		Agent        string `json:"agent"`
+		Message      string `json:"message"`
+		ChoiceID     string `json:"choice_id"`
+		ChoiceLabel  string `json:"choice_label"`
+		ChoiceNumber string `json:"choice_number"`
 	}
 	if !orihttp.ParseJSONBody(w, r, &req) {
 		return
@@ -324,24 +336,41 @@ func (th *TaskHandler) handleAssistTask(w http.ResponseWriter, r *http.Request) 
 		blockID = fmt.Sprintf("blk_%d", time.Now().UnixNano())
 	}
 
+	selectedChoice := normalizeTaskAssistChoice(req.ChoiceID, req.ChoiceLabel, req.ChoiceNumber)
 	history := make([]interface{}, 0, 4)
 	if existingHistory, ok := humanLoop["history"].([]interface{}); ok {
 		history = append(history, existingHistory...)
 	}
-	history = append(history, map[string]interface{}{
+	historyEntry := map[string]interface{}{
 		"at":      time.Now().UTC().Format(time.RFC3339),
 		"action":  action,
 		"agent":   strings.TrimSpace(req.Agent),
 		"message": strings.TrimSpace(req.Message),
-	})
+	}
+	if selectedChoice != nil {
+		historyEntry["choice_id"] = selectedChoice.ID
+		historyEntry["choice_label"] = selectedChoice.Label
+		historyEntry["choice_number"] = selectedChoice.Number
+	}
+	history = append(history, historyEntry)
 
 	humanLoop["block_id"] = blockID
 	humanLoop["history"] = history
 	humanLoop["updated_at"] = time.Now().UTC().Format(time.RFC3339)
 	humanLoop["last_action"] = action
 
-	if msg := strings.TrimSpace(req.Message); msg != "" {
+	if selectedChoice != nil {
+		humanLoop["selected_choice"] = selectedChoice
+		task.Context["user_assist_choice"] = selectedChoice
+	} else {
+		delete(humanLoop, "selected_choice")
+		delete(task.Context, "user_assist_choice")
+	}
+
+	if msg := buildUserAssistMessage(strings.TrimSpace(req.Message), selectedChoice); msg != "" {
 		task.Context["user_assist_message"] = msg
+	} else {
+		delete(task.Context, "user_assist_message")
 	}
 
 	switch action {
@@ -926,6 +955,9 @@ func buildTaskBlockedContext(task *workspace.Task, blockedErr *workspace.TaskBlo
 		if raw := strings.TrimSpace(blockedErr.RawResponse); raw != "" {
 			humanLoop["agent_response"] = raw
 		}
+		if blockedErr.WorkflowStep != nil && len(blockedErr.WorkflowStep.Choices) > 0 {
+			humanLoop["workflow_step"] = blockedErr.WorkflowStep
+		}
 	}
 	for key, value := range extra {
 		humanLoop[key] = value
@@ -933,6 +965,42 @@ func buildTaskBlockedContext(task *workspace.Task, blockedErr *workspace.TaskBlo
 
 	task.Context["human_loop"] = humanLoop
 	return humanLoop
+}
+
+func normalizeTaskAssistChoice(choiceID, choiceLabel, choiceNumber string) *workspace.TaskBlockedChoice {
+	id := strings.TrimSpace(choiceID)
+	label := cleanBlockedChoiceText(choiceLabel)
+	number := strings.TrimSpace(choiceNumber)
+	if id == "" && label == "" {
+		return nil
+	}
+	if label == "" {
+		label = id
+	}
+	if id == "" {
+		id = buildBlockedChoiceID(number, label)
+	}
+	return &workspace.TaskBlockedChoice{
+		ID:     id,
+		Label:  label,
+		Number: number,
+	}
+}
+
+func buildUserAssistMessage(message string, selectedChoice *workspace.TaskBlockedChoice) string {
+	trimmedMessage := strings.TrimSpace(message)
+	if selectedChoice == nil {
+		return trimmedMessage
+	}
+
+	selectedLabel := cleanBlockedChoiceText(selectedChoice.Label)
+	if selectedLabel == "" {
+		selectedLabel = strings.TrimSpace(selectedChoice.ID)
+	}
+	if trimmedMessage == "" {
+		return fmt.Sprintf("Selected next step: %s.", selectedLabel)
+	}
+	return fmt.Sprintf("Selected next step: %s.\nAdditional guidance: %s", selectedLabel, trimmedMessage)
 }
 
 func (th *TaskHandler) executeTaskIteratively(ctx context.Context, ws *workspace.Workspace, persistedTask *workspace.Task, taskForExecution workspace.Task, manual bool) (string, error) {
@@ -1017,7 +1085,8 @@ func (th *TaskHandler) executeTaskIteratively(ctx context.Context, ws *workspace
 					"switch_agent_retry",
 					"mark_failed",
 				},
-				RawResponse: result,
+				RawResponse:  result,
+				WorkflowStep: extractClarificationWorkflowStep(result),
 			}
 		}
 
@@ -1635,6 +1704,145 @@ func extractClarificationQuestion(result string) string {
 		}
 	}
 	return "I still need confirmation to continue. Should I retry, switch agents, or proceed with your guidance?"
+}
+
+func extractClarificationWorkflowStep(result string) *workspace.TaskBlockedWorkflowStep {
+	if step := extractEnumeratedClarificationWorkflowStep(result); step != nil {
+		return step
+	}
+	if step := extractInlineClarificationWorkflowStep(result); step != nil {
+		return step
+	}
+	return nil
+}
+
+func extractEnumeratedClarificationWorkflowStep(result string) *workspace.TaskBlockedWorkflowStep {
+	lines := strings.Split(result, "\n")
+	choices := make([]workspace.TaskBlockedChoice, 0, 4)
+	started := false
+
+	for _, line := range lines {
+		match := blockedEnumeratedChoicePattern.FindStringSubmatch(line)
+		if len(match) == 3 {
+			number := strings.TrimSpace(match[1])
+			label := cleanBlockedChoiceText(match[2])
+			if label == "" {
+				continue
+			}
+			choices = append(choices, workspace.TaskBlockedChoice{
+				ID:     buildBlockedChoiceID(number, label),
+				Label:  label,
+				Number: number,
+			})
+			started = true
+			if len(choices) >= 5 {
+				break
+			}
+			continue
+		}
+
+		if !started {
+			continue
+		}
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		break
+	}
+
+	if len(choices) < 2 {
+		return nil
+	}
+
+	return &workspace.TaskBlockedWorkflowStep{
+		StepType:        "ask_choice",
+		Title:           "Choose the next step",
+		Summary:         "Pick one option below to continue this task.",
+		Choices:         choices,
+		FreeTextAllowed: true,
+	}
+}
+
+func extractInlineClarificationWorkflowStep(result string) *workspace.TaskBlockedWorkflowStep {
+	lines := strings.Split(result, "\n")
+	for i := len(lines) - 1; i >= 0; i-- {
+		line := strings.TrimSpace(lines[i])
+		if !strings.Contains(line, "?") {
+			continue
+		}
+		for _, pattern := range blockedInlineChoicePatterns {
+			match := pattern.FindStringSubmatch(line)
+			if len(match) != 3 {
+				continue
+			}
+
+			first := cleanBlockedChoiceText(match[1])
+			second := cleanBlockedChoiceText(match[2])
+			if first == "" || second == "" || strings.EqualFold(first, second) {
+				continue
+			}
+
+			return &workspace.TaskBlockedWorkflowStep{
+				StepType: "ask_choice",
+				Title:    "Choose the next step",
+				Summary:  "Pick one option below to continue this task.",
+				Choices: []workspace.TaskBlockedChoice{
+					{
+						ID:     buildBlockedChoiceID("1", first),
+						Label:  first,
+						Number: "1",
+					},
+					{
+						ID:     buildBlockedChoiceID("2", second),
+						Label:  second,
+						Number: "2",
+					},
+				},
+				FreeTextAllowed: true,
+			}
+		}
+	}
+	return nil
+}
+
+func cleanBlockedChoiceText(value string) string {
+	cleaned := strings.TrimSpace(value)
+	cleaned = blockedMarkdownLinkPattern.ReplaceAllString(cleaned, "$1")
+	cleaned = strings.NewReplacer("**", "", "__", "", "`", "", "*", "", "_", "", "#", "", ">", "").Replace(cleaned)
+	cleaned = strings.Join(strings.Fields(cleaned), " ")
+	cleaned = strings.Trim(cleaned, " \t\r\n,;:.!?")
+	return cleaned
+}
+
+func buildBlockedChoiceID(number, label string) string {
+	normalized := normalizeBlockedChoiceToken(label)
+	if normalized == "" {
+		normalized = "choice"
+	}
+	if trimmedNumber := strings.TrimSpace(number); trimmedNumber != "" {
+		return fmt.Sprintf("choice-%s-%s", trimmedNumber, normalized)
+	}
+	return "choice-" + normalized
+}
+
+func normalizeBlockedChoiceToken(value string) string {
+	cleaned := strings.ToLower(cleanBlockedChoiceText(value))
+	var builder strings.Builder
+	lastHyphen := false
+	for _, r := range cleaned {
+		isAlphaNum := (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9')
+		if isAlphaNum {
+			builder.WriteRune(r)
+			lastHyphen = false
+			continue
+		}
+		if builder.Len() == 0 || lastHyphen {
+			continue
+		}
+		builder.WriteRune('-')
+		lastHyphen = true
+	}
+	return strings.Trim(builder.String(), "-")
 }
 
 // executeInputTasksIfNeeded recursively executes any pending/unassigned input tasks

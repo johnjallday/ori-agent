@@ -898,6 +898,12 @@
 
     var label = getHomeAssistantActivityLabel();
     var summaryState = getHomeAssistantSummaryState();
+    var summary = homeAssistantState.routingSummary;
+
+    if (summary && summary.heading) {
+      els.thinkingModalLabel.textContent = String(summary.heading);
+      return;
+    }
 
     if (summaryState === 'timeout') {
       els.thinkingModalLabel.textContent = label + ' is delayed';
@@ -955,7 +961,9 @@
 
     if (els.conversationSummary) {
       if (hasFailureState && hasConversation) {
-        els.conversationSummary.textContent = 'The request failed above. Expand this only if you want the original prompt and inline details.';
+        els.conversationSummary.textContent = homeAssistantState.routingSummary && homeAssistantState.routingSummary.conversationSummary
+          ? String(homeAssistantState.routingSummary.conversationSummary)
+          : 'Open this only if you want the original prompt, failing step, and error details.';
       } else if (hasStructuredStep && hasConversation) {
         els.conversationSummary.textContent = 'The active step is above. Open this only if you want the full transcript and manager notes.';
       } else if (hasConversation) {
@@ -1009,7 +1017,9 @@
     if (getHomeAssistantSummaryState() === 'timeout') {
       statusText = 'The manager may still be working. Retry here or open full chat to continue there.';
     } else if (getHomeAssistantSummaryState() === 'error') {
-      statusText = 'Retry here, open full chat, or start a different task.';
+      statusText = homeAssistantState.routingSummary && homeAssistantState.routingSummary.text
+        ? String(homeAssistantState.routingSummary.text)
+        : 'Review the failure details, retry here, or open full chat.';
     } else if (homeAssistantState.routingSummary && homeAssistantState.routingSummary.text) {
       statusText = homeAssistantState.routingSummary.text;
     } else if (homeAssistantState.busy) {
@@ -1094,8 +1104,18 @@
     text.className = 'home-assistant-routing-text';
     text.textContent = summary.text;
 
-    container.appendChild(title);
-    container.appendChild(text);
+    var detailText = String(summary.detail || '').trim();
+    if (detailText) {
+      var detail = document.createElement('span');
+      detail.className = 'home-assistant-routing-detail';
+      detail.textContent = detailText;
+      container.appendChild(title);
+      container.appendChild(text);
+      container.appendChild(detail);
+    } else {
+      container.appendChild(title);
+      container.appendChild(text);
+    }
     container.classList.remove('d-none');
     syncHomeAssistantThinkingStatus();
   }
@@ -1113,7 +1133,10 @@
     homeAssistantState.routingSummary = {
       title: String(title),
       text: String(text),
-      state: options && options.state ? String(options.state) : ''
+      state: options && options.state ? String(options.state) : '',
+      detail: options && options.detail ? String(options.detail) : '',
+      heading: options && options.heading ? String(options.heading) : '',
+      conversationSummary: options && options.conversationSummary ? String(options.conversationSummary) : ''
     };
     renderHomeAssistantRoutingSummary();
     if (homeAssistantState.busy || hasVisibleHomeAssistantActions()) {
@@ -3667,24 +3690,6 @@
     var direct = String(workspaceData.entry_agent_name || '').trim();
     if (direct) return direct;
 
-    var instances = Array.isArray(workspaceData.agent_instances) ? workspaceData.agent_instances : [];
-    for (var i = 0; i < instances.length; i++) {
-      var instance = instances[i];
-      if (instance && instance.entry_point && String(instance.name || '').trim()) {
-        return String(instance.name || '').trim();
-      }
-    }
-    for (var j = 0; j < instances.length; j++) {
-      var fallbackInstance = String(instances[j] && instances[j].name || '').trim();
-      if (fallbackInstance) return fallbackInstance;
-    }
-
-    var agents = Array.isArray(workspaceData.agents) ? workspaceData.agents : [];
-    for (var k = 0; k < agents.length; k++) {
-      var fallbackAgent = String(agents[k] || '').trim();
-      if (fallbackAgent) return fallbackAgent;
-    }
-
     return '';
   }
 
@@ -6055,6 +6060,185 @@
     return false;
   }
 
+  function normalizeWorkspaceManagerErrorMessage(error) {
+    if (!error) return '';
+    var direct = String(error && error.message || '').trim();
+    if (direct) return direct;
+    var fallback = String(error && error.error || '').trim();
+    return fallback;
+  }
+
+  function buildWorkspaceManagerError(error, metadata) {
+    var wrapped = error instanceof Error
+      ? error
+      : new Error(String(error || (metadata && metadata.message) || 'Workspace manager request failed'));
+    if (metadata && metadata.stage) wrapped.homeAssistantStage = String(metadata.stage);
+    if (metadata && metadata.message) wrapped.homeAssistantUserMessage = String(metadata.message);
+    if (metadata && metadata.requestUrl && !wrapped.url) wrapped.url = String(metadata.requestUrl);
+    return wrapped;
+  }
+
+  async function buildWorkspaceManagerResponseError(response, stage, message) {
+    var detail = '';
+    try {
+      detail = await response.text();
+    } catch (_error) {
+      detail = '';
+    }
+    var err = new Error(detail || response.statusText || message || 'Request failed');
+    err.status = Number(response && response.status || 0);
+    err.url = String(response && response.url || '').trim();
+    return buildWorkspaceManagerError(err, {
+      stage: stage,
+      message: message,
+      requestUrl: err.url
+    });
+  }
+
+  function formatWorkspaceManagerFailure(error, workspaceManagerLabel) {
+    var label = String(workspaceManagerLabel || 'Workspace Manager').trim() || 'Workspace Manager';
+    var stage = normalizeToken(error && error.homeAssistantStage || error && error.stage);
+    var status = Number(error && error.status || 0);
+    var url = String(error && error.url || '').trim();
+    var rawMessage = normalizeWorkspaceManagerErrorMessage(error);
+    var lowerMessage = rawMessage.toLowerCase();
+    var browserOffline = typeof navigator !== 'undefined' && navigator.onLine === false;
+    var networkFailure = browserOffline ||
+      status === 0 ||
+      lowerMessage.indexOf('network error') !== -1 ||
+      lowerMessage.indexOf('failed to fetch') !== -1 ||
+      lowerMessage.indexOf('load failed') !== -1;
+    var detailParts = [];
+    if (status > 0) {
+      detailParts.push('HTTP ' + status + (url ? ' from ' + url : ''));
+    } else if (url) {
+      detailParts.push(url);
+    }
+    if (rawMessage) {
+      detailParts.push(rawMessage);
+    }
+    var detail = detailParts.join(' — ');
+
+    if (stage === 'client_session_manager_missing') {
+      return {
+        heading: label + ' Session UI Unavailable',
+        title: 'Session UI Unavailable',
+        text: 'This page could not open a workspace session in the browser.',
+        detail: detail || 'Session manager was not initialized in this view.',
+        conversationSummary: 'Open this only if you want the original prompt and browser-side error details.',
+        state: 'error'
+      };
+    }
+
+    if (stage === 'workspace_entry_session_create_failed' || stage === 'workspace_session_missing') {
+      return {
+        heading: label + ' Session Failed',
+        title: 'Workspace Session Failed',
+        text: 'Could not create or reuse the workspace manager session for this workspace.',
+        detail: detail || 'The browser did not get a usable workspace session back.',
+        conversationSummary: 'Open this only if you want the original prompt and session-creation error details.',
+        state: 'error'
+      };
+    }
+
+    if (stage === 'assistant_session_create_failed') {
+      return {
+        heading: 'Assistant Session Failed',
+        title: 'Assistant Session Failed',
+        text: 'Could not create the fallback assistant session for this workspace request.',
+        detail: detail || 'The browser did not get a usable assistant session back.',
+        conversationSummary: 'Open this only if you want the original prompt and assistant-session error details.',
+        state: 'error'
+      };
+    }
+
+    if (stage === 'inline_api_unavailable') {
+      return {
+        heading: label + ' Inline API Unavailable',
+        title: 'Inline API Unavailable',
+        text: 'This browser view could not send the inline workspace-manager request.',
+        detail: detail || 'The shared API client was not available in this page context.',
+        conversationSummary: 'Open this only if you want the original prompt and client-side availability details.',
+        state: 'error'
+      };
+    }
+
+    if (networkFailure) {
+      return {
+        heading: 'Connection Failed',
+        title: 'Connection Failed',
+        text: 'Your browser could not reach the server while sending the workspace-manager request.',
+        detail: detail || (browserOffline ? 'Browser appears to be offline.' : 'Network request failed before the server replied.'),
+        conversationSummary: 'Open this only if you want the original prompt and connection error details.',
+        state: 'error'
+      };
+    }
+
+    if (stage === 'inline_chat_failed' && status >= 500) {
+      return {
+        heading: label + ' Server Error',
+        title: 'Server Error',
+        text: 'The server returned an error while running the workspace manager inline.',
+        detail: detail || 'The inline /api/chat request failed on the server.',
+        conversationSummary: 'Open this only if you want the original prompt and server error details.',
+        state: 'error'
+      };
+    }
+
+    if (stage === 'inline_chat_failed' && status >= 400) {
+      return {
+        heading: label + ' Request Rejected',
+        title: 'Request Rejected',
+        text: 'The server rejected the inline workspace-manager request.',
+        detail: detail || 'The inline /api/chat request returned a client error.',
+        conversationSummary: 'Open this only if you want the original prompt and request error details.',
+        state: 'error'
+      };
+    }
+
+    if (stage === 'inline_chat_failed') {
+      return {
+        heading: label + ' Inline Request Failed',
+        title: 'Inline Request Failed',
+        text: 'The workspace session opened, but the inline manager request did not complete.',
+        detail: detail || 'The inline /api/chat request failed before a usable reply arrived.',
+        conversationSummary: 'Open this only if you want the original prompt and inline-request error details.',
+        state: 'error'
+      };
+    }
+
+    if (status >= 500) {
+      return {
+        heading: label + ' Server Error',
+        title: 'Server Error',
+        text: 'The server returned an error before the workspace-manager flow completed.',
+        detail: detail || 'A server-side error interrupted the request.',
+        conversationSummary: 'Open this only if you want the original prompt and server error details.',
+        state: 'error'
+      };
+    }
+
+    if (status >= 400) {
+      return {
+        heading: label + ' Request Failed',
+        title: 'Request Failed',
+        text: 'The request was rejected before the workspace-manager flow completed.',
+        detail: detail || 'A client-side request error interrupted the flow.',
+        conversationSummary: 'Open this only if you want the original prompt and request error details.',
+        state: 'error'
+      };
+    }
+
+    return {
+      heading: label + ' Request Failed',
+      title: 'Request Failed',
+      text: 'The workspace-manager flow did not complete.',
+      detail: detail || 'An unexpected error interrupted the inline handoff.',
+      conversationSummary: 'Open this only if you want the original prompt and error details.',
+      state: 'error'
+    };
+  }
+
   function renderHomeAssistantDependencyResolution(data, prompt, routeContext, intent, options) {
     var resolution = normalizeHomeAssistantDependencyResolution(data);
     if (!resolution || typeof renderDependencyResolutionModal !== 'function') {
@@ -6676,7 +6860,12 @@
 
   async function openOrCreateWorkspaceAssistantSession(routeContext, prompt, options) {
     var manager = window.sessionManager;
-    if (!manager) return null;
+    if (!manager) {
+      throw buildWorkspaceManagerError(
+        new Error('Session manager is unavailable in this browser view.'),
+        { stage: 'client_session_manager_missing' }
+      );
+    }
 
     var normalizedContext = normalizeHomeRouteContext(routeContext);
     var workspaceId = hasWorkspaceRouteContext(normalizedContext) ? String(normalizedContext.workspace_id).trim() : '';
@@ -6705,7 +6894,14 @@
 
       var entrySession = null;
       if (typeof manager.createSessionWithAgentInFolder === 'function') {
-        entrySession = await manager.createSessionWithAgentInFolder(entryAgentName, workspaceId, false);
+        try {
+          entrySession = await manager.createSessionWithAgentInFolder(entryAgentName, workspaceId, false);
+        } catch (error) {
+          throw buildWorkspaceManagerError(error, {
+            stage: 'workspace_entry_session_create_failed',
+            message: 'Could not create a workspace manager session.'
+          });
+        }
       } else {
         var entryResponse = await fetch('/api/sessions', {
           method: 'POST',
@@ -6716,23 +6912,51 @@
             agent_name: entryAgentName
           })
         });
-        if (!entryResponse.ok) throw new Error('Failed to create workspace entry session');
+        if (!entryResponse.ok) {
+          throw await buildWorkspaceManagerResponseError(
+            entryResponse,
+            'workspace_entry_session_create_failed',
+            'Could not create a workspace manager session.'
+          );
+        }
         entrySession = await entryResponse.json();
         if (entrySession && entrySession.id && manager && typeof manager.switchToSession === 'function') {
           await manager.switchToSession(entrySession.id, false);
         }
       }
 
-      if (!entrySession) return null;
+      if (!entrySession) {
+        throw buildWorkspaceManagerError(
+          new Error('Workspace manager session returned no session object.'),
+          {
+            stage: 'workspace_entry_session_create_failed',
+            message: 'Could not create a workspace manager session.'
+          }
+        );
+      }
       return { session: entrySession.session || entrySession, reused: false, entryAgentName: entryAgentName };
     }
 
     var title = truncateText(String(prompt || '').trim(), 50) || 'Assistant';
     var created = null;
     if (typeof manager.createAssistantSession === 'function') {
-      created = await manager.createAssistantSession(workspaceId, title, false);
+      try {
+        created = await manager.createAssistantSession(workspaceId, title, false);
+      } catch (error) {
+        throw buildWorkspaceManagerError(error, {
+          stage: 'assistant_session_create_failed',
+          message: 'Could not create the fallback workspace assistant session.'
+        });
+      }
     } else if (window.workspaceDetail && typeof window.workspaceDetail.createSimpleSession === 'function' && workspaceId) {
-      created = await window.workspaceDetail.createSimpleSession(false);
+      try {
+        created = await window.workspaceDetail.createSimpleSession(false);
+      } catch (error) {
+        throw buildWorkspaceManagerError(error, {
+          stage: 'assistant_session_create_failed',
+          message: 'Could not create the fallback workspace assistant session.'
+        });
+      }
     } else {
       var response = await fetch('/api/sessions', {
         method: 'POST',
@@ -6742,14 +6966,28 @@
           title: title
         })
       });
-      if (!response.ok) throw new Error('Failed to create assistant session');
+      if (!response.ok) {
+        throw await buildWorkspaceManagerResponseError(
+          response,
+          'assistant_session_create_failed',
+          'Could not create the fallback workspace assistant session.'
+        );
+      }
       created = await response.json();
       if (created && created.id && manager && typeof manager.switchToSession === 'function') {
         await manager.switchToSession(created.id, false);
       }
     }
 
-    if (!created) return null;
+    if (!created) {
+      throw buildWorkspaceManagerError(
+        new Error('Assistant session returned no session object.'),
+        {
+          stage: 'assistant_session_create_failed',
+          message: 'Could not create the fallback workspace assistant session.'
+        }
+      );
+    }
     return { session: created.session || created, reused: false };
   }
 
@@ -6776,8 +7014,17 @@
 
   async function runWorkspaceAssistantInline(prompt, routeContext, intent, options) {
     var result = await openOrCreateWorkspaceAssistantSession(routeContext, prompt, options);
-    if (!result || !result.session || typeof API === 'undefined' || typeof API.post !== 'function') {
-      return result;
+    if (!result || !result.session) {
+      throw buildWorkspaceManagerError(
+        new Error('Workspace manager session could not be opened.'),
+        { stage: 'workspace_session_missing' }
+      );
+    }
+    if (typeof API === 'undefined' || typeof API.post !== 'function') {
+      throw buildWorkspaceManagerError(
+        new Error('Inline chat API is unavailable in this browser view.'),
+        { stage: 'inline_api_unavailable' }
+      );
     }
 
     var session = result.session;
@@ -6802,13 +7049,22 @@
       payload.workflow_response = workflowResponse;
     }
 
-    var data = await API.post('/api/chat', payload, {
-      timeout: HOME_ASSISTANT_WORKSPACE_INLINE_TIMEOUT_MS,
-      headers: {
-        'Content-Type': 'application/json',
-        'X-Session-ID': String(session.id)
-      }
-    });
+    var data;
+    try {
+      data = await API.post('/api/chat', payload, {
+        timeout: HOME_ASSISTANT_WORKSPACE_INLINE_TIMEOUT_MS,
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Session-ID': String(session.id)
+        }
+      });
+    } catch (error) {
+      throw buildWorkspaceManagerError(error, {
+        stage: 'inline_chat_failed',
+        message: 'The workspace manager session opened, but the inline request failed.',
+        requestUrl: '/api/chat'
+      });
+    }
 
     var responseText = String(data && data.response || '').trim();
     var rawToolPayload = isLikelyHomeAssistantRawToolPayload(responseText, data);
@@ -7834,6 +8090,7 @@
       reason: 'This planning task needs your input before it can continue.',
       question: buildPlanningTaskQuestion(replyState),
       agent_response: String(replyState.latestReplyText || '').trim(),
+      workflow_step: replyState.workflowStep || null,
       suggested_actions: ['continue_with_instruction', 'mark_failed'],
       updated_at: new Date().toISOString()
     };
@@ -8880,12 +9137,22 @@
         dashLog.debug('Workspace manager handoff failed', { error: error && error.message || error });
         homeAssistantState.awaitingCreateConfirmation = false;
         var workspaceManagerTimedOut = isLikelyHomeAssistantRequestTimeout(error);
+        var failureSummary = workspaceManagerTimedOut
+          ? null
+          : formatWorkspaceManagerFailure(error, workspaceManagerLabel);
         setHomeAssistantRoutingSummary(
-          workspaceManagerTimedOut ? workspaceManagerLabel + ' Delayed' : workspaceManagerLabel + ' Unavailable',
+          workspaceManagerTimedOut ? workspaceManagerLabel + ' Delayed' : failureSummary.title,
           workspaceManagerTimedOut
             ? 'The workspace manager took too long to respond inline.'
-            : 'Could not reach the workspace manager right now.',
-          { state: workspaceManagerTimedOut ? 'timeout' : 'error' }
+            : failureSummary.text,
+          workspaceManagerTimedOut
+            ? { state: 'timeout' }
+            : {
+              state: failureSummary.state,
+              detail: failureSummary.detail,
+              heading: failureSummary.heading,
+              conversationSummary: failureSummary.conversationSummary
+            }
         );
         if (hasHomeAssistantConversation()) {
           homeAssistantState.conversationCollapsed = true;
@@ -8898,7 +9165,7 @@
             onClick: function () { handleHomeAssistantPrompt(text, { routeContext: routeContext }); }
           },
           {
-            label: 'Open Chat',
+            label: 'Open Full Chat',
             variant: 'secondary',
             onClick: function () { openChatPanel(); }
           },

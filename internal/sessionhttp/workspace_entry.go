@@ -16,6 +16,31 @@ import (
 
 const workspaceEntryAgentNameKey = "entry_agent_name"
 
+func workspaceHasAgentName(workspace *session.Workspace, agentName string) bool {
+	if workspace == nil {
+		return false
+	}
+
+	target := strings.TrimSpace(agentName)
+	if target == "" {
+		return false
+	}
+
+	for _, inst := range workspace.AgentInstances {
+		if strings.EqualFold(strings.TrimSpace(inst.Name), target) {
+			return true
+		}
+	}
+
+	for _, name := range workspace.Agents {
+		if strings.EqualFold(strings.TrimSpace(name), target) {
+			return true
+		}
+	}
+
+	return false
+}
+
 func currentWorkspaceEntryAgentName(workspace *session.Workspace) string {
 	if workspace == nil {
 		return ""
@@ -23,7 +48,7 @@ func currentWorkspaceEntryAgentName(workspace *session.Workspace) string {
 
 	if workspace.SharedData != nil {
 		if raw, ok := workspace.SharedData[workspaceEntryAgentNameKey]; ok {
-			if name := strings.TrimSpace(fmt.Sprint(raw)); name != "" {
+			if name := strings.TrimSpace(fmt.Sprint(raw)); name != "" && workspaceHasAgentName(workspace, name) {
 				return name
 			}
 		}
@@ -48,6 +73,20 @@ func currentWorkspaceEntryAgentName(workspace *session.Workspace) string {
 	}
 
 	return ""
+}
+
+func availableWorkspaceEntryAgentName(workspace *session.Workspace, agentStore store.Store) string {
+	name := strings.TrimSpace(currentWorkspaceEntryAgentName(workspace))
+	if name == "" || agentStore == nil {
+		return name
+	}
+
+	ag, ok := agentStore.GetAgent(name)
+	if !ok || ag == nil {
+		return ""
+	}
+
+	return name
 }
 
 func setWorkspaceEntryAgent(workspace *session.Workspace, agentName string) {
@@ -188,7 +227,7 @@ func (h *Handler) defaultSessionAgentNameForWorkspace(ctx context.Context, works
 		return ""
 	}
 
-	return currentWorkspaceEntryAgentName(ws)
+	return availableWorkspaceEntryAgentName(ws, h.agentStore)
 }
 
 // deleteWorkspaceManagerAgent removes the auto-created workspace manager agent

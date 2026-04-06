@@ -1461,7 +1461,7 @@ func (h *Handler) buildWorkspaceDetailResponse(workspace *session.Workspace) map
 
 	analyticsWorkspace := buildWorkspaceAnalyticsView(workspace)
 	payload["attachments"] = h.buildWorkspaceResponseAttachments(workspace)
-	payload["entry_agent_name"] = currentWorkspaceEntryAgentName(workspace)
+	payload["entry_agent_name"] = availableWorkspaceEntryAgentName(workspace, h.agentStore)
 	payload["agent_stats"] = analyticsWorkspace.GetAgentStats()
 	payload["workspace_progress"] = analyticsWorkspace.GetWorkspaceProgress()
 
