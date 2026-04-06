@@ -4615,6 +4615,43 @@ export class WorkspaceDetailPage {
     return null;
   }
 
+  getAssistResponseDisplayText(response, question) {
+    const rawResponse = String(response || '').trim();
+    const rawQuestion = String(question || '').trim();
+    if (!rawResponse) return '';
+    if (!rawQuestion) return rawResponse;
+
+    const normalize = (value) => this.cleanTaskResultNextStepText(value)
+      .replace(/[?!.,;:]+$/g, '')
+      .toLowerCase();
+
+    const normalizedQuestion = normalize(rawQuestion);
+    if (!normalizedQuestion) return rawResponse;
+
+    const paragraphs = rawResponse
+      .split(/\n\s*\n/)
+      .map((part) => String(part || '').trim())
+      .filter(Boolean);
+    if (paragraphs.length > 0 && normalize(paragraphs[paragraphs.length - 1]) === normalizedQuestion) {
+      paragraphs.pop();
+      return paragraphs.join('\n\n').trim();
+    }
+
+    const lines = rawResponse.split(/\r?\n/);
+    while (lines.length > 0 && !String(lines[lines.length - 1] || '').trim()) {
+      lines.pop();
+    }
+    if (lines.length > 0 && normalize(lines[lines.length - 1]) === normalizedQuestion) {
+      lines.pop();
+      while (lines.length > 0 && !String(lines[lines.length - 1] || '').trim()) {
+        lines.pop();
+      }
+      return lines.join('\n').trim();
+    }
+
+    return rawResponse;
+  }
+
   setAssistWorkflowStepUI(workflowStep) {
     if (!this.elements.taskAssistChoiceWrap || !this.elements.taskAssistChoiceList) return;
 
@@ -4789,6 +4826,7 @@ export class WorkspaceDetailPage {
     const reason = String(payload.reason || payloadHumanLoop.reason || humanLoop.reason || 'The assigned agent needs guidance before it can continue.').trim();
     const question = String(payload.question || payloadHumanLoop.question || humanLoop.question || 'How should I proceed?').trim();
     const response = String(payload.agent_response || payloadHumanLoop.agent_response || humanLoop.agent_response || '').trim();
+    const displayResponse = this.getAssistResponseDisplayText(response, question);
     const statusText = getDisplayStatus(task.status);
     const timestamp = formatDate(task.updated_at || task.created_at);
 
@@ -4824,8 +4862,8 @@ export class WorkspaceDetailPage {
       this.elements.taskAssistMessage.value = '';
     }
     if (this.elements.taskAssistResponse && this.elements.taskAssistResponseWrap) {
-      if (response) {
-        this.elements.taskAssistResponse.textContent = response;
+      if (displayResponse) {
+        this.elements.taskAssistResponse.textContent = displayResponse;
         this.elements.taskAssistResponseWrap.classList.remove('d-none');
       } else {
         this.elements.taskAssistResponse.textContent = '';

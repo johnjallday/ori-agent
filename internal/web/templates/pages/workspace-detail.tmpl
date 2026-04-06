@@ -933,6 +933,10 @@
             <div class="workspace-detail-task-assist-label">Why it paused</div>
             <div id="workspace-detail-task-assist-reason">The assigned agent needs guidance before it can continue.</div>
           </div>
+          <div id="workspace-detail-task-assist-response-wrap" class="mt-3 d-none">
+            <div class="workspace-detail-task-assist-label">Last agent response</div>
+            <pre id="workspace-detail-task-assist-response" class="workspace-detail-task-result-body"></pre>
+          </div>
           <div class="workspace-detail-task-assist-question mt-3">
             <div class="workspace-detail-task-assist-label">Agent question</div>
             <div id="workspace-detail-task-assist-question">How should I proceed?</div>
@@ -955,10 +959,6 @@
           <div class="mt-3">
             <label class="form-label" for="workspace-detail-task-assist-message">Guidance for the agent (optional)</label>
             <textarea id="workspace-detail-task-assist-message" class="form-control" rows="4" placeholder="Example: Use the browser tool to open instagram.com and confirm the page title."></textarea>
-          </div>
-          <div id="workspace-detail-task-assist-response-wrap" class="mt-3 d-none">
-            <div class="workspace-detail-task-assist-label">Last agent response</div>
-            <pre id="workspace-detail-task-assist-response" class="workspace-detail-task-result-body"></pre>
           </div>
         </div>
         <div class="modal-footer d-flex justify-content-between">

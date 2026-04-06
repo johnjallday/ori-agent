@@ -5917,6 +5917,7 @@
     var responseData = assistantSessionResult.responseData || null;
     var workflowStep = responseData && responseData.workflow_step ? responseData.workflow_step : null;
     var planningForm = responseData && responseData.planning_form ? responseData.planning_form : null;
+    var taskAssistHandoffTask = null;
     if (assistantSessionResult.rawToolPayload) {
       clearHomeAssistantPlanning();
       homeAssistantState.inlineReplyState = null;
@@ -5992,7 +5993,7 @@
       }
       if (inlineReplyState && inlineReplyState.linkedTask && inlineReplyState.linkedTask.id) {
         try {
-          await persistPlanningSubtaskToTask(inlineReplyState);
+          taskAssistHandoffTask = await persistPlanningSubtaskToTask(inlineReplyState);
         } catch (taskContextError) {
           dashLog.debug('Failed to persist planning subtask onto task', {
             error: taskContextError && taskContextError.message || taskContextError
@@ -6036,6 +6037,9 @@
         onClick: function () { focusHomeAssistantInput(); }
       }
     ]);
+    if (taskAssistHandoffTask) {
+      handoffPlanningSubtaskToWorkspaceTaskModal(taskAssistHandoffTask, sessionRouteContext);
+    }
   }
 
   function normalizeHomeAssistantDependencyResolution(data) {
@@ -8051,6 +8055,75 @@
     } else if (typeof detail.renderAgentGroups === 'function') {
       detail.renderAgentGroups();
     }
+  }
+
+  function handoffPlanningSubtaskToWorkspaceTaskModal(updatedTask, routeContext) {
+    if (!window.workspaceDetail || !updatedTask || !updatedTask.id) return false;
+
+    var detail = window.workspaceDetail;
+    if (typeof detail.openTaskAssistModal !== 'function') return false;
+
+    var targetWorkspaceId = String(
+      routeContext && routeContext.workspace_id ||
+      updatedTask.workspace_id ||
+      updatedTask.folder_id ||
+      ''
+    ).trim();
+    var detailWorkspaceId = String(detail.workspaceId || detail.workspace && detail.workspace.id || '').trim();
+    if (targetWorkspaceId && detailWorkspaceId && targetWorkspaceId !== detailWorkspaceId) {
+      return false;
+    }
+
+    var humanLoop = updatedTask.context &&
+      typeof updatedTask.context === 'object' &&
+      updatedTask.context.human_loop &&
+      typeof updatedTask.context.human_loop === 'object'
+      ? Object.assign({}, updatedTask.context.human_loop)
+      : null;
+    var eventData = humanLoop
+      ? Object.assign({ task_id: String(updatedTask.id), human_loop: humanLoop }, humanLoop)
+      : { task_id: String(updatedTask.id) };
+
+    function openTaskAssist() {
+      try {
+        detail.openTaskAssistModal(updatedTask.id, eventData);
+      } catch (error) {
+        dashLog.debug('Failed to hand off planning subtask to task assist modal', {
+          taskId: updatedTask.id,
+          error: error && error.message || error
+        });
+      }
+    }
+
+    var els = getHomeAssistantElements();
+    var modalElement = els.thinkingModal;
+    if (!modalElement || !isHomeAssistantThinkingModalVisible()) {
+      openTaskAssist();
+      return true;
+    }
+
+    var settled = false;
+    var fallbackTimer = null;
+
+    function finalizeOpen() {
+      if (settled) return;
+      settled = true;
+      if (fallbackTimer) {
+        window.clearTimeout(fallbackTimer);
+        fallbackTimer = null;
+      }
+      modalElement.removeEventListener('hidden.bs.modal', onHidden, true);
+      openTaskAssist();
+    }
+
+    function onHidden() {
+      finalizeOpen();
+    }
+
+    modalElement.addEventListener('hidden.bs.modal', onHidden, true);
+    fallbackTimer = window.setTimeout(finalizeOpen, 500);
+    closeHomeAssistantThinkingModal({ force: true });
+    return true;
   }
 
   function buildPlanningTaskQuestion(replyState) {
