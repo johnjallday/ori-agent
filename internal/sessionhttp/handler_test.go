@@ -1058,6 +1058,9 @@ func TestEnsureWorkspaceEntryAgent_CreatesWorkspaceManagerAgent(t *testing.T) {
 	if !strings.Contains(ag.Settings.SystemPrompt, "do not generate an itinerary or recommendations on the first reply") {
 		t.Fatalf("expected strict travel intake guidance in prompt, got %q", ag.Settings.SystemPrompt)
 	}
+	if !strings.Contains(ag.Settings.SystemPrompt, "default to orchestration for full travel-planning work") {
+		t.Fatalf("expected specialist-first travel orchestration guidance in prompt, got %q", ag.Settings.SystemPrompt)
+	}
 }
 
 // TestHandler_CreateNote tests creating a note via POST /api/notes.

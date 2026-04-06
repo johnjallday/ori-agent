@@ -58,12 +58,26 @@ func TestChatHandler_WorkspaceManagerTravelRequest_ReturnsPlanningForm(t *testin
 	if kind, _ := form["kind"].(string); kind != "travel_intake" {
 		t.Fatalf("expected travel_intake planning form, got %q", kind)
 	}
+	if title, _ := form["title"].(string); title != "Collect trip details before specialist handoff" {
+		t.Fatalf("expected specialist-first planning form title, got %q", title)
+	}
+	if subtitle, _ := form["subtitle"].(string); !strings.Contains(subtitle, "recommend the right travel specialist") {
+		t.Fatalf("expected specialist guidance in subtitle, got %q", subtitle)
+	}
+	if submitLabel, _ := form["submit_label"].(string); submitLabel != "Review Intake And Choose Next Agent" {
+		t.Fatalf("expected specialist-focused submit label, got %q", submitLabel)
+	}
+	if submitInstructions, _ := form["submit_instructions"].(string); !strings.Contains(submitInstructions, "recommend the right specialist handoff first") {
+		t.Fatalf("expected specialist-first submit instructions, got %q", submitInstructions)
+	}
 	questions, ok := form["questions"].([]any)
 	if !ok || len(questions) < 4 {
 		t.Fatalf("expected planning form questions, got %#v", form["questions"])
 	}
 	if responseText, _ := resp["response"].(string); responseText == "" {
 		t.Fatal("expected non-empty assistant response")
+	} else if !strings.Contains(responseText, "recommend the right specialist") {
+		t.Fatalf("expected specialist-first response text, got %q", responseText)
 	}
 }
 

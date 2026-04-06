@@ -79,7 +79,7 @@ func maybeBuildWorkspacePlanningFormResponse(ag *resolvedChatAgent, query string
 	}
 
 	return &planningFormResponse{
-		ResponseText: "I can collect the key trip details first. Complete the planning step below, then I'll decide whether to continue myself or suggest a specialist.",
+		ResponseText: "I can collect the key trip details first. Complete the planning step below, then I'll recommend the right specialist or keep it with the workspace manager only if the follow-up stays lightweight.",
 		Form:         form,
 	}
 }
@@ -298,14 +298,17 @@ func buildWorkspaceTravelPlanningForm(query string) *PlanningForm {
 	return &PlanningForm{
 		ID:          "travel_intake",
 		Kind:        "travel_intake",
-		Title:       "Collect trip details before handoff",
-		Subtitle:    "The workspace manager will use these answers to decide what to ask next or which specialist to invite.",
+		Title:       "Collect trip details before specialist handoff",
+		Subtitle:    "The workspace manager will review these answers, recommend the right travel specialist, and only keep the work at the manager level for lightweight follow-ups.",
 		Summary:     summary,
-		SubmitLabel: "Continue With Workspace Manager",
+		SubmitLabel: "Review Intake And Choose Next Agent",
 		SubmitInstructions: strings.Join([]string{
 			"Treat this as planning intake context, not a request for a full itinerary.",
 			"Ask only the remaining missing questions.",
-			"If the intake is sufficient, summarize the next step and ask whether to invite or create travel itinerary, hotel booking, or flight booking specialists.",
+			"If the intake is sufficient, recommend the right specialist handoff first.",
+			"For itinerary, day-by-day, or multi-city planning, default to asking permission to invite or create the travel itinerary specialist.",
+			"For hotel-only or flight-only gaps, default to asking permission to invite or create the matching specialist.",
+			"Only continue as the workspace manager when the next step is a lightweight clarification or the user explicitly says to keep it with the manager.",
 		}, " "),
 		Questions: questions,
 	}

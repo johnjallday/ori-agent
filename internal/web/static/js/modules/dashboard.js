@@ -1807,6 +1807,12 @@
     return planningState;
   }
 
+  function isTravelPlanningReviewState(planningState) {
+    if (!planningState || planningState.kind !== 'planning_review' || !planningState.schema) return false;
+    return String(planningState.schema.kind || '').trim() === 'travel_intake' ||
+      String(planningState.intent && planningState.intent.key || '').trim() === 'travel_planning';
+  }
+
   function getActiveLinkedPlanningTask() {
     if (homeAssistantState.inlineReplyState &&
         homeAssistantState.inlineReplyState.linkedTask &&
@@ -2086,7 +2092,9 @@
       setHomeAssistantBusy(true, 'Sending Plan...');
       setHomeAssistantRoutingSummary(
         planningState.agentLabel,
-        'Continuing with the workspace manager using the reviewed intake summary.'
+        isTravelPlanningReviewState(planningState)
+          ? 'Keeping this with the workspace manager using the reviewed intake summary.'
+          : 'Continuing with the workspace manager using the reviewed intake summary.'
       );
 
       await openWorkspaceAssistantForPrompt(
@@ -2386,6 +2394,7 @@
     }
 
     if (planningState.kind === 'planning_review') {
+      var specialistFirstReview = isTravelPlanningReviewState(planningState);
       var isReviewBusy = Boolean(
         homeAssistantState.busy ||
         planningState.noteSaving ||
@@ -2409,9 +2418,15 @@
 
       var reviewSubtitle = document.createElement('p');
       reviewSubtitle.className = 'home-assistant-planning-subtitle';
-      reviewSubtitle.textContent = planningState.mainTask && planningState.mainTask.description
-        ? 'Review the summary, save it to a note if you want, and continue when you are ready. The main task is already in the workspace.'
-        : 'Review the summary, save it to a note if you want, and continue when you are ready. The main task will be added to the workspace before subtasks begin.';
+      if (specialistFirstReview) {
+        reviewSubtitle.textContent = planningState.mainTask && planningState.mainTask.description
+          ? 'Review the intake summary, then add the right specialist to the workspace. Keep it with the workspace manager only if you want a lightweight follow-up.'
+          : 'Review the intake summary, then add the right specialist to the workspace. The main task will be added before specialist work begins.';
+      } else {
+        reviewSubtitle.textContent = planningState.mainTask && planningState.mainTask.description
+          ? 'Review the summary, save it to a note if you want, and continue when you are ready. The main task is already in the workspace.'
+          : 'Review the summary, save it to a note if you want, and continue when you are ready. The main task will be added to the workspace before subtasks begin.';
+      }
       reviewCard.appendChild(reviewSubtitle);
 
       var reviewSummary = document.createElement('div');
@@ -2452,12 +2467,16 @@
 
       var continueButton = document.createElement('button');
       continueButton.type = 'button';
-      continueButton.className = 'modern-btn modern-btn-primary';
+      continueButton.className = specialistFirstReview
+        ? 'modern-btn modern-btn-secondary'
+        : 'modern-btn modern-btn-primary';
       continueButton.disabled = isReviewBusy;
       continueButton.textContent = planningState.mainTaskCreating
         ? 'Adding Main Task...'
         : planningState.continuing
         ? 'Continuing...'
+        : specialistFirstReview
+        ? ('Keep With ' + planningState.agentLabel)
         : ('Continue With ' + planningState.agentLabel);
       continueButton.addEventListener('click', function () {
         continuePlanningReviewWithManager();
@@ -2468,7 +2487,9 @@
       var specialistHelp = document.createElement('div');
       specialistHelp.className = 'home-assistant-planning-help';
       specialistHelp.style.marginTop = '0.35rem';
-      specialistHelp.textContent = 'Add specialists to the workspace now, or open them after they are added.';
+      specialistHelp.textContent = specialistFirstReview
+        ? 'Recommended: hand off full planning to a specialist now. Use the workspace manager only for lighter follow-ups.'
+        : 'Add specialists to the workspace now, or open them after they are added.';
       reviewCard.appendChild(specialistHelp);
 
       var specialistActions = document.createElement('div');
@@ -2479,7 +2500,9 @@
         var status = planningState.specialistStatuses[specialistKey] || null;
         var specialistButton = document.createElement('button');
         specialistButton.type = 'button';
-        specialistButton.className = 'modern-btn modern-btn-secondary';
+        specialistButton.className = specialistFirstReview && specialistKey === 'travel_itinerary'
+          ? 'modern-btn modern-btn-primary'
+          : 'modern-btn modern-btn-secondary';
         specialistButton.disabled = isReviewBusy && planningState.specialistBusy !== specialistKey;
         if (planningState.specialistBusy === specialistKey) {
           specialistButton.disabled = true;
