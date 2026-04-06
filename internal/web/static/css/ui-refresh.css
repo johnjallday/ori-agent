@@ -177,6 +177,12 @@ body::after {
   }
 }
 
+@media (prefers-reduced-motion: reduce) {
+  body::before {
+    animation: none;
+  }
+}
+
 .main-content {
   padding: 1.25rem;
 }

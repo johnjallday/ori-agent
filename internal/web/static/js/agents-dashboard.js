@@ -6,6 +6,13 @@ let dashboardMode = 'operations';
 let selectedAgentName = '';
 let selectedAgentDetail = null;
 let selectedAgentSkills = null;
+let lastFocusedElement = null;
+
+const absoluteDateFormatter = new Intl.DateTimeFormat(undefined, {
+  month: 'short',
+  day: 'numeric',
+  year: 'numeric'
+});
 
 const safeEscapeHtml = typeof escapeHtml === 'function'
   ? escapeHtml
@@ -33,7 +40,7 @@ function notifySuccess(message) {
 
 function initializeDashboard() {
   setupEventListeners();
-  setMode('operations');
+  applyDashboardStateFromUrl();
   loadAgents();
 }
 
@@ -43,12 +50,16 @@ function setupEventListeners() {
   const modeConfigBtn = document.getElementById('modeConfigBtn');
   const closeDrawerBtn = document.getElementById('closeDrawerBtn');
   const drawerBackdrop = document.getElementById('agentDrawerBackdrop');
-  const drawerOpenFullBtn = document.getElementById('drawerOpenFullBtn');
+  const emptyStateClearBtn = document.getElementById('emptyStateClearBtn');
 
   if (searchInput) {
-    searchInput.addEventListener('input', () => {
+    const handleSearchChange = () => {
+      syncDashboardStateToUrl();
       applyFiltersAndRender();
-    });
+    };
+
+    searchInput.addEventListener('input', handleSearchChange);
+    searchInput.addEventListener('search', handleSearchChange);
   }
 
   if (modeOperationsBtn) {
@@ -67,30 +78,62 @@ function setupEventListeners() {
     drawerBackdrop.addEventListener('click', closeAgentDrawer);
   }
 
-  if (drawerOpenFullBtn) {
-    drawerOpenFullBtn.addEventListener('click', () => {
-      if (!selectedAgentName) {
-        return;
-      }
-      window.location.href = `/agents/${encodeURIComponent(selectedAgentName)}`;
-    });
+  if (emptyStateClearBtn) {
+    emptyStateClearBtn.addEventListener('click', clearDashboardSearch);
   }
 
   document.querySelectorAll('.ops-drawer-tab').forEach((button) => {
     button.addEventListener('click', () => {
       const tab = button.dataset.tab || 'overview';
-      setDrawerTab(tab);
+      setDrawerTab(tab, { focusPanel: true });
     });
+
+    button.addEventListener('keydown', handleDrawerTabKeydown);
   });
 
-  document.addEventListener('keydown', (event) => {
-    if (event.key === 'Escape') {
-      closeAgentDrawer();
-    }
+  document.addEventListener('keydown', handleGlobalKeydown);
+  window.addEventListener('popstate', () => {
+    applyDashboardStateFromUrl();
+    applyFiltersAndRender();
   });
 }
 
-function setMode(mode) {
+function applyDashboardStateFromUrl() {
+  const params = new URLSearchParams(window.location.search);
+  const searchInput = document.getElementById('searchInput');
+  const searchTerm = params.get('q') || '';
+  const mode = params.get('mode') || 'operations';
+
+  if (searchInput && searchInput.value !== searchTerm) {
+    searchInput.value = searchTerm;
+  }
+
+  setMode(mode, { syncUrl: false });
+}
+
+function syncDashboardStateToUrl() {
+  const params = new URLSearchParams(window.location.search);
+  const searchTerm = String(document.getElementById('searchInput')?.value || '').trim();
+
+  if (searchTerm) {
+    params.set('q', searchTerm);
+  } else {
+    params.delete('q');
+  }
+
+  if (dashboardMode !== 'operations') {
+    params.set('mode', dashboardMode);
+  } else {
+    params.delete('mode');
+  }
+
+  const query = params.toString();
+  const nextUrl = query ? `${window.location.pathname}?${query}` : window.location.pathname;
+  window.history.replaceState(null, '', nextUrl);
+}
+
+function setMode(mode, options = {}) {
+  const { syncUrl = true } = options;
   dashboardMode = mode === 'config' ? 'config' : 'operations';
 
   const shell = document.querySelector('.ops-shell');
@@ -103,10 +146,16 @@ function setMode(mode) {
 
   if (modeOperationsBtn) {
     modeOperationsBtn.classList.toggle('active', dashboardMode === 'operations');
+    modeOperationsBtn.setAttribute('aria-pressed', String(dashboardMode === 'operations'));
   }
 
   if (modeConfigBtn) {
     modeConfigBtn.classList.toggle('active', dashboardMode === 'config');
+    modeConfigBtn.setAttribute('aria-pressed', String(dashboardMode === 'config'));
+  }
+
+  if (syncUrl) {
+    syncDashboardStateToUrl();
   }
 }
 
@@ -135,7 +184,8 @@ async function loadAgents() {
 }
 
 function applyFiltersAndRender() {
-  const searchTerm = String(document.getElementById('searchInput')?.value || '').trim().toLowerCase();
+  const rawSearchTerm = String(document.getElementById('searchInput')?.value || '').trim();
+  const searchTerm = rawSearchTerm.toLowerCase();
 
   dashboardFilteredAgents = dashboardAgents.filter((agent) => {
     const name = String(agent?.name || '').toLowerCase();
@@ -146,7 +196,10 @@ function applyFiltersAndRender() {
   if (dashboardFilteredAgents.length === 0) {
     renderSummary({ needsAttention: 0, ready: 0, paused: 0, total: 0 });
     renderHealthMessage(0, 0);
-    showEmptyState();
+    showEmptyState({
+      searchTerm: rawSearchTerm,
+      hasAgents: dashboardAgents.length > 0
+    });
     return;
   }
 
@@ -286,21 +339,18 @@ function createAgentCard(agent) {
 
   const name = String(agent?.name || 'Untitled Agent');
   const description = String(agent?.metadata?.description || 'No purpose written yet.');
-  const model = String(agent?.model || '-');
+  const model = String(agent?.model || '').trim();
   const pluginsCount = Array.isArray(agent?.enabled_plugins) ? agent.enabled_plugins.length : 0;
   const typeLabel = toTitleCase(String(agent?.type || 'tool-calling'));
   const health = getHealthState(agent);
   const chatDisabled = health.kind === 'needs-setup';
+  const primaryAction = chatDisabled ? 'setup' : 'chat';
+  const primaryLabel = chatDisabled ? 'Setup' : 'Chat';
   const pauseLabel = health.kind === 'paused' ? 'Resume' : 'Pause';
   const isSystemAgent = isSystemAssistantAgentName(name);
   const deleteDisabledAttr = isSystemAgent
     ? 'disabled title="System assistant cannot be deleted."'
     : '';
-
-  card.tabIndex = 0;
-  card.setAttribute('role', 'button');
-  card.setAttribute('aria-haspopup', 'dialog');
-  card.setAttribute('aria-label', `Open details for ${name}`);
 
   card.innerHTML = `
     <div class="ops-card-top">
@@ -315,42 +365,55 @@ function createAgentCard(agent) {
       </div>
     </div>
     <div class="ops-card-actions">
-      <button class="ops-action-btn primary" data-action="chat" ${chatDisabled ? 'disabled' : ''}>Chat</button>
-      <button class="ops-action-btn" data-action="pause">${safeEscapeHtml(pauseLabel)}</button>
+      <button class="ops-action-btn primary" data-action="primary" type="button">${safeEscapeHtml(primaryLabel)}</button>
+      <button class="ops-action-btn" data-action="details" type="button" aria-haspopup="dialog" aria-controls="agentDrawer">Details</button>
+      <button class="ops-action-btn" data-action="pause" type="button">${safeEscapeHtml(pauseLabel)}</button>
       <button class="ops-action-btn danger" data-action="delete" ${deleteDisabledAttr}>Delete</button>
     </div>
     <div class="config-only">
       <div>Type: ${safeEscapeHtml(typeLabel)}</div>
-      <div>Model: ${safeEscapeHtml(model)}</div>
+      <div>Model: ${safeEscapeHtml(model || 'Not configured')}</div>
       <div>Tools: ${pluginsCount} plugins</div>
       <div>Total cost: $${Number(agent?.statistics?.total_cost || 0).toFixed(2)}</div>
     </div>
   `;
 
-  const chatButton = card.querySelector('[data-action="chat"]');
+  const primaryButton = card.querySelector('[data-action="primary"]');
+  const detailsButton = card.querySelector('[data-action="details"]');
   const pauseButton = card.querySelector('[data-action="pause"]');
   const deleteButton = card.querySelector('[data-action="delete"]');
 
-  if (chatButton) {
-    chatButton.addEventListener('click', async (event) => {
-      event.stopPropagation();
-      if (chatDisabled) {
+  if (primaryButton) {
+    primaryButton.setAttribute(
+      'aria-label',
+      primaryAction === 'setup' ? `Set up ${name}` : `Chat with ${name}`
+    );
+    primaryButton.addEventListener('click', async () => {
+      if (primaryAction === 'setup') {
+        openAgentEditor(name);
         return;
       }
-      await openChatWithAgent(name, chatButton);
+
+      await openChatWithAgent(name, primaryButton);
+    });
+  }
+
+  if (detailsButton) {
+    detailsButton.setAttribute('aria-label', `Open details for ${name}`);
+    detailsButton.addEventListener('click', () => {
+      openAgentDrawer(name);
     });
   }
 
   if (pauseButton) {
-    pauseButton.addEventListener('click', async (event) => {
-      event.stopPropagation();
+    pauseButton.addEventListener('click', async () => {
       await togglePauseAgent(name, pauseButton);
     });
   }
 
   if (deleteButton) {
-    deleteButton.addEventListener('click', async (event) => {
-      event.stopPropagation();
+    deleteButton.setAttribute('type', 'button');
+    deleteButton.addEventListener('click', async () => {
       if (isSystemAgent) {
         notifyError('System assistant cannot be deleted.');
         return;
@@ -359,26 +422,18 @@ function createAgentCard(agent) {
     });
   }
 
-  card.addEventListener('click', () => {
-    openAgentDrawer(name);
-  });
-
-  card.addEventListener('keydown', (event) => {
-    if (event.key !== 'Enter' && event.key !== ' ') {
-      return;
-    }
-    event.preventDefault();
-    openAgentDrawer(name);
-  });
-
   return card;
+}
+
+function openAgentEditor(agentName) {
+  window.location.href = `/agents-edit.html?name=${encodeURIComponent(agentName)}`;
 }
 
 async function openChatWithAgent(agentName, button) {
   const originalText = button?.textContent || 'Chat';
   if (button) {
     button.disabled = true;
-    button.textContent = 'Opening...';
+    button.textContent = 'Opening…';
   }
 
   try {
@@ -454,7 +509,7 @@ async function togglePauseAgent(agentName, button) {
   const originalText = button.textContent;
 
   button.disabled = true;
-  button.textContent = currentlyPaused ? 'Resuming...' : 'Pausing...';
+  button.textContent = currentlyPaused ? 'Resuming…' : 'Pausing…';
 
   try {
     await updateAgentStatus(agentName, nextStatus);
@@ -513,7 +568,7 @@ async function deleteAgentFromDashboard(agentName, button) {
   const originalText = button?.textContent || 'Delete';
   if (button) {
     button.disabled = true;
-    button.textContent = 'Deleting...';
+    button.textContent = 'Deleting…';
   }
 
   try {
@@ -553,10 +608,13 @@ async function openAgentDrawer(agentName) {
   const backdrop = document.getElementById('agentDrawerBackdrop');
   const drawerAgentName = document.getElementById('drawerAgentName');
   const closeDrawerBtn = document.getElementById('closeDrawerBtn');
+  lastFocusedElement = document.activeElement instanceof HTMLElement ? document.activeElement : null;
 
   if (drawerAgentName) {
     drawerAgentName.textContent = agentName;
   }
+
+  syncDrawerActionLinks(agentName);
 
   if (drawer) {
     drawer.classList.add('open');
@@ -565,8 +623,10 @@ async function openAgentDrawer(agentName) {
 
   if (backdrop) {
     backdrop.classList.remove('hidden');
+    backdrop.setAttribute('aria-hidden', 'false');
   }
 
+  setBackgroundInteractivity(false);
   document.body.classList.add('ops-modal-open');
   requestAnimationFrame(() => closeDrawerBtn?.focus());
 
@@ -600,6 +660,7 @@ async function openAgentDrawer(agentName) {
 function closeAgentDrawer() {
   const drawer = document.getElementById('agentDrawer');
   const backdrop = document.getElementById('agentDrawerBackdrop');
+  const focusTarget = lastFocusedElement;
 
   if (drawer) {
     drawer.classList.remove('open');
@@ -608,33 +669,47 @@ function closeAgentDrawer() {
 
   if (backdrop) {
     backdrop.classList.add('hidden');
+    backdrop.setAttribute('aria-hidden', 'true');
   }
 
+  setBackgroundInteractivity(true);
   document.body.classList.remove('ops-modal-open');
   selectedAgentName = '';
   selectedAgentDetail = null;
   selectedAgentSkills = null;
+  syncDrawerActionLinks('');
+  lastFocusedElement = null;
+
+  if (focusTarget && document.contains(focusTarget)) {
+    requestAnimationFrame(() => focusTarget.focus());
+  }
 }
 
-function setDrawerTab(tabName) {
+function setDrawerTab(tabName, options = {}) {
+  const { focusPanel = false } = options;
   const normalized = tabName === 'tools' || tabName === 'advanced' ? tabName : 'overview';
 
   document.querySelectorAll('.ops-drawer-tab').forEach((button) => {
-    button.classList.toggle('active', button.dataset.tab === normalized);
+    const isActive = button.dataset.tab === normalized;
+    button.classList.toggle('active', isActive);
+    button.setAttribute('aria-selected', String(isActive));
+    button.tabIndex = isActive ? 0 : -1;
   });
 
   document.querySelectorAll('.ops-drawer-panel').forEach((panel) => {
-    panel.classList.remove('active');
+    const isActive = panel.id === `drawer${toTitleCase(normalized)}Tab`;
+    panel.classList.toggle('active', isActive);
+    panel.hidden = !isActive;
   });
 
   const panel = document.getElementById(`drawer${toTitleCase(normalized)}Tab`);
-  if (panel) {
-    panel.classList.add('active');
+  if (panel && focusPanel) {
+    panel.focus();
   }
 }
 
 function setDrawerLoadingState() {
-  const loadingHtml = '<div class="ops-data-card"><span class="ops-data-label">Loading</span><div class="ops-data-value">Fetching latest agent details...</div></div>';
+  const loadingHtml = '<div class="ops-data-card"><span class="ops-data-label">Loading</span><div class="ops-data-value">Fetching latest agent details…</div></div>';
 
   const overview = document.getElementById('drawerOverviewContent');
   const tools = document.getElementById('drawerToolsContent');
@@ -694,6 +769,13 @@ function renderDrawerContent() {
     : [];
   const skillCount = Number(selectedAgentSkills?.total || 0);
   const enabledSkillCount = Number(selectedAgentSkills?.enabled || 0);
+  let skillSummary = `${enabledSkillCount}/${skillCount} enabled`;
+
+  if (selectedAgentSkills?.conflict) {
+    skillSummary = 'Unavailable while another skills source is active.';
+  } else if (selectedAgentSkills?.error) {
+    skillSummary = 'Unable to load skills right now.';
+  }
 
   if (tools) {
     tools.innerHTML = `
@@ -703,7 +785,7 @@ function renderDrawerContent() {
       </div>
       <div class="ops-data-card">
         <span class="ops-data-label">Skills</span>
-        <div class="ops-data-value">${safeEscapeHtml(`${enabledSkillCount}/${skillCount} enabled`)}</div>
+        <div class="ops-data-value">${safeEscapeHtml(skillSummary)}</div>
       </div>
       <div class="ops-data-card">
         <span class="ops-data-label">MCP Access</span>
@@ -822,7 +904,7 @@ function getAvatarHtml(agent, className) {
   const name = String(agent?.name || 'Agent');
 
   if (image) {
-    return `<div class="${safeEscapeHtml(className)}" style="padding:0;overflow:hidden;"><img src="/avatars/${safeEscapeHtml(image)}" alt="${safeEscapeHtml(name)}" style="width:100%;height:100%;object-fit:cover;"></div>`;
+    return `<div class="${safeEscapeHtml(className)}" style="padding:0;overflow:hidden;"><img src="/avatars/${safeEscapeHtml(image)}" alt="${safeEscapeHtml(name)}" loading="lazy" decoding="async" width="36" height="36" style="width:100%;height:100%;object-fit:cover;"></div>`;
   }
 
   return `<div class="${safeEscapeHtml(className)}" style="background:${safeEscapeHtml(getAgentColor(agent))};">${safeEscapeHtml(getAgentInitials(name))}</div>`;
@@ -869,12 +951,13 @@ function formatDate(value) {
     return `${Math.floor(diff / day)}d ago`;
   }
 
-  return date.toLocaleDateString();
+  return absoluteDateFormatter.format(date);
 }
 
 function showLoading(show) {
   const loadingState = document.getElementById('loadingState');
   const board = document.getElementById('opsBoard');
+  const emptyState = document.getElementById('emptyState');
 
   if (loadingState) {
     loadingState.classList.toggle('hidden', !show);
@@ -882,6 +965,10 @@ function showLoading(show) {
 
   if (board) {
     board.classList.toggle('hidden', show);
+  }
+
+  if (show && emptyState) {
+    emptyState.classList.add('hidden');
   }
 }
 
@@ -898,12 +985,38 @@ function showBoard() {
   }
 }
 
-function showEmptyState() {
+function showEmptyState(options = {}) {
+  const {
+    searchTerm = '',
+    hasAgents = dashboardAgents.length > 0
+  } = options;
   const board = document.getElementById('opsBoard');
   const emptyState = document.getElementById('emptyState');
+  const emptyStateTitle = document.getElementById('emptyStateTitle');
+  const emptyStateMessage = document.getElementById('emptyStateMessage');
+  const emptyStateClearBtn = document.getElementById('emptyStateClearBtn');
+  const emptyStateCreateLink = document.getElementById('emptyStateCreateLink');
 
   if (board) {
     board.classList.add('hidden');
+  }
+
+  if (emptyStateTitle) {
+    emptyStateTitle.textContent = searchTerm && hasAgents ? 'No matching agents' : 'No agents found';
+  }
+
+  if (emptyStateMessage) {
+    emptyStateMessage.textContent = searchTerm && hasAgents
+      ? `No agents match "${searchTerm}". Clear your search to see all agents.`
+      : 'Create your first agent to get started.';
+  }
+
+  if (emptyStateClearBtn) {
+    emptyStateClearBtn.classList.toggle('hidden', !(searchTerm && hasAgents));
+  }
+
+  if (emptyStateCreateLink) {
+    emptyStateCreateLink.classList.toggle('hidden', searchTerm && hasAgents);
   }
 
   if (emptyState) {
@@ -911,12 +1024,160 @@ function showEmptyState() {
   }
 }
 
-function createAgent() {
-  window.location.href = '/agents/create';
+function clearDashboardSearch() {
+  const searchInput = document.getElementById('searchInput');
+  if (!searchInput) {
+    return;
+  }
+
+  searchInput.value = '';
+  syncDashboardStateToUrl();
+  applyFiltersAndRender();
+  searchInput.focus();
 }
 
-window.createAgent = createAgent;
 window.closeAgentDrawer = closeAgentDrawer;
+
+function syncDrawerActionLinks(agentName) {
+  const detailLink = document.getElementById('drawerOpenFullLink');
+  const editLink = document.getElementById('drawerEditLink');
+
+  if (detailLink) {
+    detailLink.href = agentName ? `/agents/${encodeURIComponent(agentName)}` : '/agents';
+  }
+
+  if (editLink) {
+    editLink.href = agentName
+      ? `/agents-edit.html?name=${encodeURIComponent(agentName)}`
+      : '/agents-edit.html';
+  }
+}
+
+function setBackgroundInteractivity(enabled) {
+  document.querySelectorAll('.navbar, .main-content-wrapper, .skip-link').forEach((element) => {
+    if (!element) {
+      return;
+    }
+
+    if ('inert' in element) {
+      element.inert = !enabled;
+    }
+
+    if (!enabled) {
+      element.setAttribute('aria-hidden', 'true');
+    } else {
+      element.removeAttribute('aria-hidden');
+    }
+  });
+}
+
+function getFocusableElements(root) {
+  if (!root) {
+    return [];
+  }
+
+  return Array.from(
+    root.querySelectorAll(
+      'a[href], button:not([disabled]), textarea:not([disabled]), input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])'
+    )
+  ).filter((element) => {
+    if (!(element instanceof HTMLElement)) {
+      return false;
+    }
+
+    if (element.hidden || element.closest('[hidden]')) {
+      return false;
+    }
+
+    return element.offsetParent !== null || getComputedStyle(element).position === 'fixed';
+  });
+}
+
+function trapDrawerFocus(event) {
+  const drawer = document.getElementById('agentDrawer');
+  if (!drawer || !drawer.classList.contains('open')) {
+    return;
+  }
+
+  const focusableElements = getFocusableElements(drawer);
+  if (focusableElements.length === 0) {
+    event.preventDefault();
+    drawer.focus();
+    return;
+  }
+
+  const firstElement = focusableElements[0];
+  const lastElement = focusableElements[focusableElements.length - 1];
+  const activeElement = document.activeElement;
+
+  if (!drawer.contains(activeElement)) {
+    event.preventDefault();
+    firstElement.focus();
+    return;
+  }
+
+  if (event.shiftKey && activeElement === firstElement) {
+    event.preventDefault();
+    lastElement.focus();
+    return;
+  }
+
+  if (!event.shiftKey && activeElement === lastElement) {
+    event.preventDefault();
+    firstElement.focus();
+  }
+}
+
+function handleGlobalKeydown(event) {
+  const drawer = document.getElementById('agentDrawer');
+  if (!drawer || !drawer.classList.contains('open')) {
+    return;
+  }
+
+  if (event.key === 'Escape') {
+    event.preventDefault();
+    closeAgentDrawer();
+    return;
+  }
+
+  if (event.key === 'Tab') {
+    trapDrawerFocus(event);
+  }
+}
+
+function handleDrawerTabKeydown(event) {
+  const tabs = Array.from(document.querySelectorAll('.ops-drawer-tab'));
+  const currentIndex = tabs.indexOf(event.currentTarget);
+  if (currentIndex === -1) {
+    return;
+  }
+
+  let nextIndex = currentIndex;
+
+  switch (event.key) {
+    case 'ArrowRight':
+    case 'ArrowDown':
+      nextIndex = (currentIndex + 1) % tabs.length;
+      break;
+    case 'ArrowLeft':
+    case 'ArrowUp':
+      nextIndex = (currentIndex - 1 + tabs.length) % tabs.length;
+      break;
+    case 'Home':
+      nextIndex = 0;
+      break;
+    case 'End':
+      nextIndex = tabs.length - 1;
+      break;
+    default:
+      return;
+  }
+
+  event.preventDefault();
+  const nextTab = tabs[nextIndex];
+  nextTab.focus();
+  setDrawerTab(nextTab.dataset.tab || 'overview');
+}
 
 if (document.readyState === 'loading') {
   document.addEventListener('DOMContentLoaded', initializeDashboard);
