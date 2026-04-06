@@ -63,6 +63,31 @@ func TestResolveEffectiveAgent_UsesWorkspaceRuntimeResolver(t *testing.T) {
 	}
 }
 
+func TestResolveEffectiveAgent_UsesRuntimeResolverWhenBaseAgentIsMissing(t *testing.T) {
+	st := &preflightStore{agents: map[string]*agent.Agent{}, names: nil}
+	h := NewHandler(st, nil)
+	resolver := &stubChatRuntimeResolver{
+		resolved: &workspace.ResolvedAgentRuntime{
+			Agent: &agent.Agent{Type: "workspace-manager"},
+		},
+	}
+	h.SetRuntimeResolver(resolver)
+
+	resolved, err := h.resolveEffectiveAgent("Workspace Manager", normalizedChatRouteContext{WorkspaceID: "workspace-1"})
+	if err != nil {
+		t.Fatalf("resolveEffectiveAgent returned error: %v", err)
+	}
+	if resolved == nil || resolved.Agent == nil {
+		t.Fatal("expected resolved agent")
+	}
+	if resolved.Type != "workspace-manager" {
+		t.Fatalf("expected workspace-manager type, got %q", resolved.Type)
+	}
+	if len(resolver.calls) != 1 {
+		t.Fatalf("expected runtime resolver to be called once, got %d", len(resolver.calls))
+	}
+}
+
 func TestResolveEffectiveAgent_PromotesWorkspaceEntryAgentToWorkspaceManager(t *testing.T) {
 	st := newPreflightStore("Espana Manager", &agent.Agent{Type: "general"})
 	h := NewHandler(st, nil)
