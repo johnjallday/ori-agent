@@ -174,8 +174,8 @@ func TestMaybeBuildWorkspacePlanningFormResponse_UsesWorkspaceBootstrapDates(t *
 	if strings.Contains(resp.Form.Summary, "not clearly detected") {
 		t.Fatalf("expected workspace bootstrap dates to avoid missing-dates summary, got %q", resp.Form.Summary)
 	}
-	if !strings.Contains(resp.Form.Summary, "workspace brief") {
-		t.Fatalf("expected summary to mention existing workspace brief context, got %q", resp.Form.Summary)
+	if !strings.Contains(resp.Form.Summary, "workspace context") {
+		t.Fatalf("expected summary to mention existing workspace context, got %q", resp.Form.Summary)
 	}
 	if !strings.Contains(resp.Form.Summary, "5/11 Lisbon arrival") {
 		t.Fatalf("expected summary to include detected route details, got %q", resp.Form.Summary)
@@ -244,8 +244,89 @@ func TestMaybeBuildWorkspacePlanningFormResponse_UsesWorkspaceBriefNoteDates(t *
 	if !strings.Contains(resp.Form.Summary, "5/11 Lisbon arrival") {
 		t.Fatalf("expected summary to reuse workspace brief dates, got %q", resp.Form.Summary)
 	}
+	if !strings.Contains(resp.Form.Summary, `workspace note "Workspace Brief"`) {
+		t.Fatalf("expected summary to mention workspace brief note, got %q", resp.Form.Summary)
+	}
 	if resp.Form.Questions[0].Required {
 		t.Fatalf("expected date field to be optional when workspace brief has dates, got %#v", resp.Form.Questions[0])
+	}
+}
+
+func TestMaybeBuildWorkspacePlanningFormResponse_UsesTripIntakeNoteDates(t *testing.T) {
+	ctx := context.Background()
+	db, err := database.Open(ctx, &database.Config{InMemory: true})
+	if err != nil {
+		t.Fatalf("failed to open test database: %v", err)
+	}
+	defer func() { _ = db.Close() }()
+
+	sessionStore := session.NewHybridStoreWithDB(db, 10)
+	now := time.Now()
+	if err := sessionStore.CreateWorkspace(ctx, &session.Workspace{
+		ID:        "workspace-spain",
+		Name:      "Spain",
+		CreatedAt: now,
+		UpdatedAt: now,
+	}); err != nil {
+		t.Fatalf("failed to create session workspace: %v", err)
+	}
+	if err := sessionStore.CreateNote(ctx, &session.WorkspaceNote{
+		ID:          "spain-trip-intake",
+		WorkspaceID: "workspace-spain",
+		Name:        "Spain Trip Intake",
+		Content: `# Spain Trip Intake
+
+Original request:
+help me plan my trip 5/11 Lisbon Arrival 5/14 San Sebastian Arrival 5/17 Madrid Arrival 5/23 Leave Spain
+
+Collect trip details before specialist handoff:
+- Are flights already booked?: Choose one
+- Are hotels already booked?: Choose one
+- What pace do you want?: Choose one
+- What budget level fits best?: Choose one
+`,
+		CreatedAt: now,
+		UpdatedAt: now,
+	}); err != nil {
+		t.Fatalf("failed to create trip intake note: %v", err)
+	}
+
+	wsStore := &preflightWorkspaceStore{
+		workspaces: map[string]*workspace.Workspace{
+			"workspace-spain": {
+				ID:   "workspace-spain",
+				Name: "Spain",
+			},
+		},
+	}
+
+	resp := maybeBuildWorkspacePlanningFormResponse(
+		&resolvedChatAgent{Agent: &agent.Agent{Type: "workspace-manager"}},
+		"plan my trip",
+		normalizedChatRouteContext{WorkspaceID: "workspace-spain"},
+		wsStore,
+		sessionStore,
+	)
+	if resp == nil || resp.Form == nil {
+		t.Fatalf("expected planning form response, got %#v", resp)
+	}
+	if strings.Contains(resp.Form.Summary, "not clearly detected") {
+		t.Fatalf("expected trip intake note dates to avoid missing-dates summary, got %q", resp.Form.Summary)
+	}
+	if !strings.Contains(resp.Form.Summary, `workspace note "Spain Trip Intake"`) {
+		t.Fatalf("expected summary to mention Spain Trip Intake note, got %q", resp.Form.Summary)
+	}
+	if !strings.Contains(resp.Form.Summary, "5/11 Lisbon Arrival") {
+		t.Fatalf("expected summary to reuse trip intake note dates, got %q", resp.Form.Summary)
+	}
+	if len(resp.Form.Questions) == 0 {
+		t.Fatalf("expected planning form questions")
+	}
+	if resp.Form.Questions[0].Required {
+		t.Fatalf("expected date field to be optional when trip intake note has dates, got %#v", resp.Form.Questions[0])
+	}
+	if !strings.Contains(resp.Form.Questions[0].HelpText, `workspace note "Spain Trip Intake"`) {
+		t.Fatalf("expected date question help text to mention the trip intake note, got %q", resp.Form.Questions[0].HelpText)
 	}
 }
 

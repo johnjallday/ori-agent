@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+	"unicode"
 
 	"github.com/openai/openai-go/v3"
 
@@ -221,7 +222,7 @@ func buildWorkspaceTravelPlanningForm(query string, detectionContext travelPlann
 		dateQuestion.Type = "text"
 		if usingWorkspaceKnownDates {
 			dateQuestion.Label = "Confirm travel dates and route"
-			dateQuestion.HelpText = "Known dates were detected from the workspace brief. Leave this blank if they are correct, or add corrections."
+			dateQuestion.HelpText = fmt.Sprintf("Known dates were detected from %s. Leave this blank if they are correct, or add corrections.", travelPlanningSourceLabel(detectionContext.SourceLabel))
 			dateQuestion.Placeholder = "Optional corrections to the known dates or city order"
 		} else {
 			dateQuestion.Label = "Date or route changes (optional)"
@@ -325,7 +326,7 @@ func buildWorkspaceTravelPlanningForm(query string, detectionContext travelPlann
 		summary += "\n\nTravel dates were not clearly detected. Add the missing dates or route details below."
 	} else {
 		if usingWorkspaceKnownDates {
-			summary += "\n\nKnown dates and route were detected from the existing workspace brief."
+			summary += fmt.Sprintf("\n\nKnown dates and route were detected from %s.", travelPlanningSourceLabel(detectionContext.SourceLabel))
 			if details := strings.TrimSpace(detectionContext.Summary); details != "" {
 				summary += "\n" + details
 			}
@@ -371,7 +372,7 @@ func loadTravelPlanningDetectionContext(
 
 	var texts []string
 	var summaries []string
-	sourceLabel := "workspace brief"
+	sourceLabel := "workspace context"
 
 	if bootstrapText := workspaceBootstrapPlanningText(ws); bootstrapText != "" {
 		texts = append(texts, bootstrapText)
@@ -380,12 +381,12 @@ func loadTravelPlanningDetectionContext(
 		}
 	}
 
-	if briefText := workspaceBriefPlanningText(context.Background(), sessionStore, workspaceID); briefText != "" {
-		texts = append(texts, briefText)
-		if summary := extractTravelDateContextSummary(briefText); summary != "" {
+	if noteText, noteSource := workspaceTravelPlanningNoteText(context.Background(), sessionStore, workspaceID); noteText != "" {
+		texts = append(texts, noteText)
+		if summary := extractTravelDateContextSummary(noteText); summary != "" {
 			summaries = append(summaries, summary)
 		}
-		sourceLabel = "workspace brief"
+		sourceLabel = noteSource
 	}
 
 	combinedText := strings.TrimSpace(strings.Join(uniquePlanningContextParts(texts), "\n"))
@@ -431,28 +432,85 @@ func workspaceBootstrapFieldText(bootstrap map[string]interface{}, key string) s
 	return strings.TrimSpace(fmt.Sprint(value))
 }
 
-func workspaceBriefPlanningText(ctx context.Context, sessionStore planningFormSessionStore, workspaceID string) string {
+func workspaceTravelPlanningNoteText(ctx context.Context, sessionStore planningFormSessionStore, workspaceID string) (string, string) {
 	if sessionStore == nil || strings.TrimSpace(workspaceID) == "" {
-		return ""
+		return "", ""
 	}
 
 	notes, err := sessionStore.ListNotesByWorkspace(ctx, workspaceID)
 	if err != nil {
-		return ""
+		return "", ""
 	}
 
+	bestName := ""
+	bestID := ""
+	bestScore := 0
 	for _, item := range notes {
-		if !strings.EqualFold(strings.TrimSpace(item.Name), "Workspace Brief") {
+		score := travelPlanningNoteScore(item.Name)
+		if score <= 0 {
 			continue
 		}
-		note, err := sessionStore.GetNote(ctx, item.ID)
-		if err != nil || note == nil {
-			return ""
+		if score > bestScore {
+			bestScore = score
+			bestName = strings.TrimSpace(item.Name)
+			bestID = item.ID
 		}
-		return strings.TrimSpace(note.Content)
 	}
 
-	return ""
+	if bestID == "" {
+		return "", ""
+	}
+
+	note, err := sessionStore.GetNote(ctx, bestID)
+	if err != nil || note == nil {
+		return "", ""
+	}
+	content := strings.TrimSpace(note.Content)
+	if content == "" {
+		return "", ""
+	}
+	return content, fmt.Sprintf("workspace note %q", bestName)
+}
+
+func travelPlanningNoteScore(name string) int {
+	normalized := normalizePlanningNoteToken(name)
+	if normalized == "" {
+		return 0
+	}
+	switch {
+	case normalized == "workspacebrief":
+		return 400
+	case strings.Contains(normalized, "tripintake"):
+		return 350
+	case strings.Contains(normalized, "travelintake"):
+		return 350
+	case strings.Contains(normalized, "tripbrief"):
+		return 300
+	case strings.Contains(normalized, "travelbrief"):
+		return 300
+	case strings.Contains(normalized, "itinerarybrief"):
+		return 200
+	default:
+		return 0
+	}
+}
+
+func travelPlanningSourceLabel(sourceLabel string) string {
+	if strings.TrimSpace(sourceLabel) == "" {
+		return "workspace context"
+	}
+	return strings.TrimSpace(sourceLabel)
+}
+
+func normalizePlanningNoteToken(value string) string {
+	var builder strings.Builder
+	builder.Grow(len(value))
+	for _, r := range strings.TrimSpace(value) {
+		if unicode.IsLetter(r) || unicode.IsNumber(r) {
+			builder.WriteRune(unicode.ToLower(r))
+		}
+	}
+	return builder.String()
 }
 
 func extractTravelDateContextSummary(text string) string {
