@@ -2,15 +2,20 @@ package chathttp
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/openai/openai-go/v3"
 
 	"github.com/johnjallday/ori-agent/internal/agent"
+	"github.com/johnjallday/ori-agent/internal/database"
+	"github.com/johnjallday/ori-agent/internal/session"
+	"github.com/johnjallday/ori-agent/internal/workspace"
 )
 
 func TestChatHandler_WorkspaceManagerTravelRequest_ReturnsPlanningForm(t *testing.T) {
@@ -86,6 +91,8 @@ func TestMaybeBuildWorkspacePlanningFormResponse_SkipsPlanningSubmissionPrompt(t
 		&resolvedChatAgent{Agent: &agent.Agent{Type: "workspace-manager"}},
 		"Structured planning form submission:\n{\"form_id\":\"travel_intake\"}",
 		normalizedChatRouteContext{WorkspaceID: "workspace-spain"},
+		nil,
+		nil,
 	)
 	if resp != nil {
 		t.Fatalf("expected no planning form response for a structured submission prompt, got %#v", resp)
@@ -106,6 +113,8 @@ func TestMaybeBuildWorkspacePlanningFormResponse_SkipsAfterPriorPlanningSubmissi
 		},
 		"2 people, flights are booked, include Lisbon too",
 		normalizedChatRouteContext{WorkspaceID: "workspace-spain"},
+		nil,
+		nil,
 	)
 	if resp != nil {
 		t.Fatalf("expected no planning form response after prior structured submission, got %#v", resp)
@@ -127,9 +136,116 @@ func TestMaybeBuildWorkspacePlanningFormResponse_AllowsFreshPlanningRequestAfter
 		},
 		"let's plan a trip to Italy instead",
 		normalizedChatRouteContext{WorkspaceID: "workspace-italy"},
+		nil,
+		nil,
 	)
 	if resp == nil || resp.Form == nil {
 		t.Fatalf("expected planning form response for fresh planning request, got %#v", resp)
+	}
+}
+
+func TestMaybeBuildWorkspacePlanningFormResponse_UsesWorkspaceBootstrapDates(t *testing.T) {
+	wsStore := &preflightWorkspaceStore{
+		workspaces: map[string]*workspace.Workspace{
+			"workspace-portugal": {
+				ID:   "workspace-portugal",
+				Name: "Portugal",
+				SharedData: map[string]interface{}{
+					"workspace_bootstrap": map[string]interface{}{
+						"goal":    "Plan 5/11 Lisbon arrival, 5/14 Porto transfer, 5/18 depart Portugal",
+						"context": "May trip with a relaxed pace",
+					},
+				},
+			},
+		},
+	}
+
+	resp := maybeBuildWorkspacePlanningFormResponse(
+		&resolvedChatAgent{Agent: &agent.Agent{Type: "workspace-manager"}},
+		"plan a trip in Lisbon",
+		normalizedChatRouteContext{WorkspaceID: "workspace-portugal"},
+		wsStore,
+		nil,
+	)
+	if resp == nil || resp.Form == nil {
+		t.Fatalf("expected planning form response, got %#v", resp)
+	}
+
+	if strings.Contains(resp.Form.Summary, "not clearly detected") {
+		t.Fatalf("expected workspace bootstrap dates to avoid missing-dates summary, got %q", resp.Form.Summary)
+	}
+	if !strings.Contains(resp.Form.Summary, "workspace brief") {
+		t.Fatalf("expected summary to mention existing workspace brief context, got %q", resp.Form.Summary)
+	}
+	if !strings.Contains(resp.Form.Summary, "5/11 Lisbon arrival") {
+		t.Fatalf("expected summary to include detected route details, got %q", resp.Form.Summary)
+	}
+
+	if len(resp.Form.Questions) == 0 {
+		t.Fatalf("expected planning form questions")
+	}
+	dateQuestion := resp.Form.Questions[0]
+	if dateQuestion.Required {
+		t.Fatalf("expected date confirmation question to be optional, got %#v", dateQuestion)
+	}
+	if dateQuestion.Label != "Confirm travel dates and route" {
+		t.Fatalf("expected confirm label, got %q", dateQuestion.Label)
+	}
+}
+
+func TestMaybeBuildWorkspacePlanningFormResponse_UsesWorkspaceBriefNoteDates(t *testing.T) {
+	ctx := context.Background()
+	db, err := database.Open(ctx, &database.Config{InMemory: true})
+	if err != nil {
+		t.Fatalf("failed to open test database: %v", err)
+	}
+	defer func() { _ = db.Close() }()
+
+	sessionStore := session.NewHybridStoreWithDB(db, 10)
+	now := time.Now()
+	if err := sessionStore.CreateWorkspace(ctx, &session.Workspace{
+		ID:        "workspace-portugal",
+		Name:      "Portugal",
+		CreatedAt: now,
+		UpdatedAt: now,
+	}); err != nil {
+		t.Fatalf("failed to create session workspace: %v", err)
+	}
+	if err := sessionStore.CreateNote(ctx, &session.WorkspaceNote{
+		ID:          "workspace-brief-portugal",
+		WorkspaceID: "workspace-portugal",
+		Name:        "Workspace Brief",
+		Content:     "# Workspace Brief\n\n## Primary Goal\nPlan Portugal trip\n\n## Key Files or Context\n5/11 Lisbon arrival, 5/14 Porto transfer, 5/18 depart Portugal\n",
+		CreatedAt:   now,
+		UpdatedAt:   now,
+	}); err != nil {
+		t.Fatalf("failed to create workspace brief note: %v", err)
+	}
+
+	wsStore := &preflightWorkspaceStore{
+		workspaces: map[string]*workspace.Workspace{
+			"workspace-portugal": {
+				ID:   "workspace-portugal",
+				Name: "Portugal",
+			},
+		},
+	}
+
+	resp := maybeBuildWorkspacePlanningFormResponse(
+		&resolvedChatAgent{Agent: &agent.Agent{Type: "workspace-manager"}},
+		"plan a trip in Lisbon",
+		normalizedChatRouteContext{WorkspaceID: "workspace-portugal"},
+		wsStore,
+		sessionStore,
+	)
+	if resp == nil || resp.Form == nil {
+		t.Fatalf("expected planning form response, got %#v", resp)
+	}
+	if !strings.Contains(resp.Form.Summary, "5/11 Lisbon arrival") {
+		t.Fatalf("expected summary to reuse workspace brief dates, got %q", resp.Form.Summary)
+	}
+	if resp.Form.Questions[0].Required {
+		t.Fatalf("expected date field to be optional when workspace brief has dates, got %#v", resp.Form.Questions[0])
 	}
 }
 
