@@ -3563,6 +3563,17 @@ export class WorkspaceDetailPage {
 
     const taskLabel = String(task.description || task.name || task.id || 'this task').trim() || 'this task';
     const prompt = this.getTaskAgentSuggestionPrompt(task);
+    const specialistAction = this.maybeBuildTravelAssistSpecialistAction({
+      task,
+      currentAgent: String(task.to || '').trim()
+    });
+    if (specialistAction) {
+      const specialistSuggestion = await this.suggestTravelSpecialistSetupForTask(task, specialistAction);
+      if (specialistSuggestion.handled) {
+        return specialistSuggestion.agentName || '';
+      }
+    }
+
     const requirements = this.inferTaskExecutionRequirements(prompt);
     if (requirements.length > 0) {
       const capabilitySuggestion = await this.suggestCapabilityAwareAgentSetup(task, requirements);
@@ -4613,11 +4624,23 @@ export class WorkspaceDetailPage {
     return '';
   }
 
+  isWorkspaceManagerMetaActionText(text = '') {
+    const normalized = this.normalizeTaskResultNextStepToken(text);
+    if (!normalized) return false;
+
+    const actionMatch = /\b(save|create|add|attach|upload|import|export|move|rename|delete|remove|switch|assign|list|show|open|bind)\b/.test(normalized);
+    if (!actionMatch) return false;
+
+    return /\b(note|notes|task|tasks|subtask|subtasks|file|files|pdf|folder|folders|directory|directories|workspace|agent|agents|binding|bindings|canvas)\b/.test(normalized);
+  }
+
   maybeBuildTravelAssistSpecialistAction(assistContext = {}) {
     const currentAgent = String(assistContext.currentAgent || '').trim();
     const parts = [];
     const taskText = String(assistContext.task?.description || assistContext.task?.name || '').trim();
     if (taskText) parts.push(taskText);
+    const taskDetails = String(assistContext.task?.details || '').trim();
+    if (taskDetails) parts.push(taskDetails);
     const question = String(assistContext.question || '').trim();
     if (question) parts.push(question);
     const response = String(assistContext.response || '').trim();
@@ -4635,6 +4658,7 @@ export class WorkspaceDetailPage {
 
     const combined = this.normalizeTaskResultNextStepToken(parts.join(' '));
     if (!combined) return null;
+    if (this.isWorkspaceManagerMetaActionText(combined)) return null;
 
     const travelSignals = ['travel', 'trip', 'itinerary', 'hotel', 'flight', 'vacation', 'day trip', 'day trips', 'museum', 'museums', 'restaurant', 'restaurants', 'nightlife', 'accommodation', 'lodging'];
     const isTravelContext = travelSignals.some((signal) => combined.includes(this.normalizeTaskResultNextStepToken(signal)));
@@ -4664,13 +4688,17 @@ export class WorkspaceDetailPage {
     if (!best?.config) return null;
 
     const config = best.config;
-    const workspaceAgent = this.findAssistSpecialistAgentName(config, this.getWorkspaceAgentNames(), {
+    const workspaceAgentName = this.findAssistSpecialistAgentName(config, this.getWorkspaceAgentNames(), {
       excludeAgent: currentAgent
     });
     const catalogNames = Array.isArray(this.agentCatalog) ? this.agentCatalog.map((agent) => String(agent?.name || '').trim()).filter(Boolean) : [];
-    const catalogAgent = workspaceAgent || this.findAssistSpecialistAgentName(config, catalogNames, {
+    const catalogAgent = this.findAssistSpecialistAgentName(config, catalogNames, {
       excludeAgent: currentAgent
     });
+    const workspaceAgent = workspaceAgentName && catalogAgent &&
+      this.normalizeAgentName(workspaceAgentName) === this.normalizeAgentName(catalogAgent)
+      ? workspaceAgentName
+      : '';
     if (catalogAgent && this.normalizeAgentName(catalogAgent) === this.normalizeAgentName(currentAgent)) {
       return null;
     }
@@ -4693,6 +4721,94 @@ export class WorkspaceDetailPage {
         ? `Add And Switch To ${agentName}`
         : `Create ${agentName}`
     };
+  }
+
+  async suggestTravelSpecialistSetupForTask(task, specialistAction) {
+    if (!task || !specialistAction?.agentName) {
+      return { handled: false, agentName: '' };
+    }
+
+    const taskLabel = this.getTaskDisplayLabel(task);
+    const previewSequence = this.getPredictedTaskExecutionSequence(task, [], {
+      assignedAgent: specialistAction.agentName
+    });
+
+    if (specialistAction.kind === 'switch' || specialistAction.kind === 'add_and_switch') {
+      const addToWorkspace = specialistAction.kind === 'add_and_switch';
+      const confirmed = await this.showTaskConfirmDialog({
+        eyebrow: 'Specialist Match',
+        title: addToWorkspace
+          ? `Add "${specialistAction.agentName}" and assign it?`
+          : `Assign "${specialistAction.agentName}" to this task?`,
+        message: specialistAction.copy || this.buildAssistSpecialistActionText(specialistAction),
+        confirmLabel: addToWorkspace ? 'Add and Assign' : 'Assign Specialist',
+        metaItems: [taskLabel, specialistAction.agentName, addToWorkspace ? 'Add to workspace' : 'Travel specialist'],
+        details: [
+          String(specialistAction.description || '').trim(),
+          'Substantive travel work should start with the specialist rather than the workspace manager.'
+        ].filter(Boolean),
+        sequenceItems: previewSequence
+      });
+
+      if (!confirmed) {
+        return { handled: true, agentName: '' };
+      }
+
+      try {
+        if (addToWorkspace) {
+          await this.addAgentToWorkspace(specialistAction.agentName, { toast: false });
+        }
+        await this.assignTaskToAgent(task.id, specialistAction.agentName);
+        task.to = specialistAction.agentName;
+        this.renderTasks();
+        if (window.Toast) {
+          window.Toast.success(addToWorkspace
+            ? `Added "${specialistAction.agentName}" and assigned it to this task.`
+            : `Assigned "${specialistAction.agentName}" to this task.`);
+        }
+        return { handled: true, agentName: specialistAction.agentName };
+      } catch (error) {
+        console.error('Failed to apply travel specialist setup:', error);
+        if (window.Toast) {
+          window.Toast.error(error.message || 'Failed to assign travel specialist');
+        }
+        return { handled: true, agentName: '' };
+      }
+    }
+
+    if (specialistAction.kind === 'create') {
+      const confirmed = await this.showTaskConfirmDialog({
+        eyebrow: 'Specialist Match',
+        title: `Create "${specialistAction.agentName}" for this task?`,
+        message: specialistAction.copy || this.buildAssistSpecialistActionText(specialistAction),
+        confirmLabel: 'Create Agent',
+        cancelLabel: 'Cancel',
+        metaItems: [taskLabel, specialistAction.agentName, 'New travel specialist'],
+        details: [
+          String(specialistAction.description || '').trim(),
+          'After creation, Ori will assign this task to the new specialist.'
+        ].filter(Boolean),
+        sequenceItems: previewSequence
+      });
+
+      if (!confirmed) {
+        return { handled: true, agentName: '' };
+      }
+
+      this.openCreateAgentFlow({
+        seedName: specialistAction.agentName,
+        seedType: specialistAction.agentType || 'tool-calling',
+        seedSystemPrompt: String(specialistAction.systemPrompt || '').trim(),
+        autoDescription: String(specialistAction.description || '').trim(),
+        preferAutoConfig: true,
+        workspaceId: this.workspaceId,
+        taskId: task.id,
+        assignTask: true
+      });
+      return { handled: true, agentName: '' };
+    }
+
+    return { handled: false, agentName: '' };
   }
 
   applyAssistWorkflowSpecialistOverrides(workflowStep, specialistAction) {
@@ -7248,6 +7364,44 @@ export class WorkspaceDetailPage {
 
   async getTaskExecutionPreflight(task, assignedAgent) {
     const description = String(task?.description || task?.name || '').trim();
+    const specialistAction = this.maybeBuildTravelAssistSpecialistAction({
+      task,
+      currentAgent: assignedAgent
+    });
+    if (specialistAction) {
+      if (specialistAction.kind === 'switch' || specialistAction.kind === 'add_and_switch') {
+        return {
+          kind: 'switch_recommended',
+          recommendedAgent: specialistAction.agentName,
+          addToWorkspace: specialistAction.kind === 'add_and_switch',
+          eyebrow: 'Specialist Handoff',
+          confirmLabel: specialistAction.kind === 'add_and_switch' ? 'Add and Switch' : 'Switch Agent',
+          message: specialistAction.copy || this.buildAssistSpecialistActionText(specialistAction),
+          details: [
+            String(specialistAction.description || '').trim(),
+            'Substantive travel work should start with the specialist rather than the workspace manager.'
+          ].filter(Boolean)
+        };
+      }
+      if (specialistAction.kind === 'create') {
+        return {
+          kind: 'create_recommended',
+          eyebrow: 'Specialist Handoff',
+          title: `Create "${specialistAction.agentName}" before running?`,
+          confirmLabel: 'Create Agent',
+          message: specialistAction.copy || this.buildAssistSpecialistActionText(specialistAction),
+          details: [
+            String(specialistAction.description || '').trim(),
+            'Create the travel specialist first, then assign this task there.'
+          ].filter(Boolean),
+          seedName: specialistAction.agentName,
+          seedType: specialistAction.agentType || 'tool-calling',
+          seedSystemPrompt: String(specialistAction.systemPrompt || '').trim(),
+          autoDescription: String(specialistAction.description || '').trim()
+        };
+      }
+    }
+
     const requirements = this.inferTaskExecutionRequirements(description);
     if (requirements.length === 0) {
       return { kind: 'none' };
@@ -7723,10 +7877,10 @@ export class WorkspaceDetailPage {
       const preflight = await this.getTaskExecutionPreflight(task, assignedAgent);
       if (preflight.kind === 'switch_recommended' && preflight.recommendedAgent) {
         const switchNow = await this.showTaskConfirmDialog({
-          eyebrow: 'Capability Check',
+          eyebrow: preflight.eyebrow || 'Capability Check',
           title: `Switch to "${preflight.recommendedAgent}" before running?`,
           message: preflight.message,
-          confirmLabel: 'Switch Agent',
+          confirmLabel: preflight.confirmLabel || 'Switch Agent',
           metaItems: [this.getTaskDisplayLabel(task), preflight.recommendedAgent, 'Recommended agent'],
           details: Array.isArray(preflight.details) && preflight.details.length > 0
             ? preflight.details
@@ -7735,6 +7889,9 @@ export class WorkspaceDetailPage {
         });
         if (switchNow) {
           try {
+            if (preflight.addToWorkspace === true) {
+              await this.addAgentToWorkspace(preflight.recommendedAgent, { toast: false });
+            }
             await this.assignTaskToAgent(taskId, preflight.recommendedAgent);
             assignedAgent = preflight.recommendedAgent;
             task.to = preflight.recommendedAgent;
@@ -7749,10 +7906,10 @@ export class WorkspaceDetailPage {
         }
       } else if (preflight.kind === 'create_recommended') {
         const createAgent = await this.showTaskConfirmDialog({
-          eyebrow: 'Capability Check',
-          title: 'Create a capable agent before running?',
+          eyebrow: preflight.eyebrow || 'Capability Check',
+          title: preflight.title || 'Create a capable agent before running?',
           message: preflight.message,
-          confirmLabel: 'Create Agent',
+          confirmLabel: preflight.confirmLabel || 'Create Agent',
           cancelLabel: 'Continue Anyway',
           metaItems: [this.getTaskDisplayLabel(task), assignedAgent, 'Current assignment'],
           details: Array.isArray(preflight.details) ? preflight.details : [],
@@ -7762,6 +7919,7 @@ export class WorkspaceDetailPage {
           this.openCreateAgentFlow({
             seedName: String(preflight.seedName || '').trim(),
             seedType: String(preflight.seedType || '').trim(),
+            seedSystemPrompt: String(preflight.seedSystemPrompt || '').trim(),
             autoDescription: String(preflight.autoDescription || '').trim(),
             preferAutoConfig: true,
             workspaceId: this.workspaceId,

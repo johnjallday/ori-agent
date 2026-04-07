@@ -87,6 +87,7 @@
       type: 'research',
       subtaskIndex: 1,
       taskTitle: 'Build the day-by-day itinerary',
+      scorePhrases: ['day by day', 'day-by-day', 'itinerary', 'trip plan', 'travel plan', 'restaurant', 'restaurants', 'food', 'museum', 'museums', 'nightlife', 'day trip', 'day trips', 'budget breakdown', 'budget', 'accommodation', 'accommodation areas', 'neighborhood', 'neighbourhood'],
       tags: ['travel', 'itinerary', 'planning', 'workspace-specialist'],
       description: 'Plans multi-city trips with day-by-day pacing, neighborhood suggestions, food highlights, local logistics, and route-aware recommendations.',
       systemPrompt: 'You are a travel itinerary planner. Build practical, day-by-day trip plans with realistic pacing, local food and neighborhood recommendations, transit notes, and concise options. Ask clarifying questions when key details are missing and avoid inventing bookings or confirmed reservations.',
@@ -99,6 +100,7 @@
       type: 'research',
       subtaskIndex: 2,
       taskTitle: 'Recommend hotels and neighborhoods',
+      scorePhrases: ['hotel', 'hotels', 'stay', 'stays', 'lodging', 'accommodation', 'where to stay', 'book hotel', 'book hotels'],
       tags: ['travel', 'hotels', 'lodging', 'workspace-specialist'],
       description: 'Finds and compares hotels by neighborhood, budget, amenities, and travel constraints.',
       systemPrompt: 'You are a hotel booking assistant. Help compare neighborhoods, lodging tradeoffs, budget fit, and stay logistics. Be explicit about assumptions, keep recommendations concise, and ask for missing constraints before making suggestions.',
@@ -111,6 +113,7 @@
       type: 'research',
       subtaskIndex: 3,
       taskTitle: 'Fill the booking gaps for flights and transfers',
+      scorePhrases: ['flight', 'flights', 'airfare', 'airport', 'route option', 'route options', 'connection', 'connections', 'transfer', 'transfer timing'],
       tags: ['travel', 'flights', 'transport', 'workspace-specialist'],
       description: 'Helps fill booking gaps for flights and longer-distance travel legs with schedule and transfer considerations.',
       systemPrompt: 'You are a flight booking assistant. Help identify missing flight or long-distance travel legs, compare route options, call out tradeoffs, and confirm timing constraints before recommending bookings.',
@@ -1862,6 +1865,51 @@
       String(planningState.intent && planningState.intent.key || '').trim() === 'travel_planning';
   }
 
+  function isWorkspaceManagerMetaActionPrompt(prompt) {
+    var normalized = normalizeToken(prompt);
+    if (!normalized) return false;
+
+    var actionMatch = /\b(save|create|add|attach|upload|import|export|move|rename|delete|remove|switch|assign|list|show|open|bind)\b/.test(normalized);
+    if (!actionMatch) return false;
+
+    return /\b(note|notes|task|tasks|subtask|subtasks|file|files|pdf|folder|folders|directory|directories|workspace|agent|agents|binding|bindings|canvas)\b/.test(normalized);
+  }
+
+  function detectWorkspacePlanningSpecialist(prompt, intent) {
+    var normalized = normalizeToken(prompt);
+    if (!normalized || isWorkspaceManagerMetaActionPrompt(normalized)) {
+      return null;
+    }
+
+    var travelSignals = ['travel', 'trip', 'itinerary', 'hotel', 'flight', 'vacation', 'restaurant', 'restaurants', 'museum', 'museums', 'nightlife', 'day trip', 'day trips', 'accommodation', 'lodging', 'neighborhood', 'neighbourhood', 'budget'];
+    var looksLikeTravel = travelSignals.some(function (signal) {
+      return normalized.indexOf(normalizeToken(signal)) >= 0;
+    });
+    if (!looksLikeTravel && String(intent && intent.key || '').trim() !== 'travel_planning') {
+      return null;
+    }
+
+    var bestConfig = null;
+    var bestScore = 0;
+    Object.keys(HOME_PLANNING_SPECIALISTS).forEach(function (specialistKey) {
+      var config = HOME_PLANNING_SPECIALISTS[specialistKey];
+      var score = 0;
+      var phrases = Array.isArray(config && config.scorePhrases) ? config.scorePhrases : [];
+      for (var i = 0; i < phrases.length; i++) {
+        var phrase = normalizeToken(phrases[i]);
+        if (!phrase || normalized.indexOf(phrase) === -1) continue;
+        score += phrase.indexOf(' ') >= 0 ? 3 : 1;
+      }
+      if (score > bestScore) {
+        bestScore = score;
+        bestConfig = config;
+      }
+    });
+
+    if (bestConfig) return bestConfig;
+    return looksLikeTravel ? HOME_PLANNING_SPECIALISTS.travel_itinerary : null;
+  }
+
   function getActiveLinkedPlanningTask() {
     if (homeAssistantState.inlineReplyState &&
         homeAssistantState.inlineReplyState.linkedTask &&
@@ -2053,6 +2101,46 @@
 
     await API.post('/api/agents', payload);
     return agentName;
+  }
+
+  function buildWorkspaceSpecialistTaskDetails(prompt, managerLabel, config, agentName) {
+    var sections = [];
+    var normalizedPrompt = String(prompt || '').trim();
+    var normalizedManager = String(managerLabel || getWorkspaceHomeAssistantDisplayName()).trim() || getWorkspaceHomeAssistantDisplayName();
+    var normalizedAgent = String(agentName || config && config.label || '').trim();
+    var handoffInstruction = String(config && config.handoffInstruction || '').trim();
+
+    sections.push([
+      'Workspace manager handoff:',
+      normalizedManager + ' routed this workspace task to ' + normalizedAgent + '.'
+    ].join('\n'));
+
+    if (normalizedPrompt) {
+      sections.push([
+        'Original request:',
+        normalizedPrompt
+      ].join('\n'));
+    }
+
+    if (handoffInstruction) {
+      sections.push([
+        'Specialist goal:',
+        handoffInstruction
+      ].join('\n'));
+    }
+
+    return sections.join('\n\n').trim();
+  }
+
+  function buildWorkspaceSpecialistTaskContext(config, managerLabel) {
+    return {
+      planning_specialist_key: String(config && config.key || '').trim() || null,
+      planning_specialist_label: String(config && config.label || '').trim() || null,
+      planning_specialist_agent_name: String(config && config.agentName || '').trim() || null,
+      planning_handoff_source: String(managerLabel || '').trim() || null,
+      workspace_specialist_handoff: true,
+      workspace_specialist_handoff_at: new Date().toISOString()
+    };
   }
 
   function buildPlanningSpecialistTaskDescription(planningState, config) {
@@ -2442,7 +2530,7 @@
       );
 
       var preparedTask = await preparePlanningReviewMainTaskForExecution(planningState);
-      await launchPlanningReviewTaskExecution(preparedTask, planningState.routeContext);
+      await launchWorkspaceTaskExecutionFromHomeAssistant(preparedTask, planningState.routeContext);
       clearHomeAssistantTaskLaunchState();
     } catch (error) {
       dashLog.debug('Planning review handoff failed', { error: error && error.message || error });
@@ -8524,9 +8612,9 @@
     return updatedTask;
   }
 
-  async function launchPlanningReviewTaskExecution(task, routeContext) {
+  async function launchWorkspaceTaskExecutionFromHomeAssistant(task, routeContext) {
     if (!task || !task.id) {
-      throw new Error('Planning task is missing');
+      throw new Error('Workspace task is missing');
     }
 
     var detail = window.workspaceDetail;
@@ -8554,6 +8642,149 @@
     } catch (error) {
       openHomeAssistantThinkingModal();
       throw error;
+    }
+  }
+
+  function showWorkspaceSpecialistCreationPrompt(prompt, routeContext, intent, config) {
+    if (!config) return;
+
+    appendHomeAssistantMessage(
+      'assistant',
+      '"' + config.label + '" should own this travel-planning task. Create it first, then hand the task off there?'
+    );
+    setHomeAssistantRoutingSummary(
+      config.label,
+      'Create the travel specialist, then start the workspace task there.'
+    );
+    renderHomeAssistantActions([
+      {
+        label: 'Create ' + config.label + ' + Handoff',
+        variant: 'primary',
+        onClick: function () {
+          routeWorkspacePromptToPlanningSpecialist(prompt, routeContext, intent, {
+            config: config,
+            allowCreate: true
+          });
+        }
+      },
+      {
+        label: 'Keep With ' + getWorkspaceHomeAssistantDisplayName(),
+        variant: 'secondary',
+        onClick: function () { openWorkspaceAssistantForPrompt(prompt, routeContext, intent); }
+      },
+      {
+        label: 'Ask Another Task',
+        variant: 'secondary',
+        onClick: function () { focusHomeAssistantInput(); }
+      }
+    ]);
+  }
+
+  async function routeWorkspacePromptToPlanningSpecialist(prompt, routeContext, intent, options) {
+    var normalizedContext = normalizeHomeRouteContext(routeContext);
+    var workspaceId = hasWorkspaceRouteContext(normalizedContext) ? String(normalizedContext.workspace_id || '').trim() : '';
+    if (!workspaceId) return false;
+
+    var config = options && options.config ? options.config : detectWorkspacePlanningSpecialist(prompt, intent);
+    if (!config) return false;
+
+    var allowCreate = options && options.allowCreate === true;
+    var managerLabel = getWorkspaceHomeAssistantDisplayName();
+
+    setHomeAssistantBusy(true, allowCreate ? 'Creating Specialist...' : 'Routing Task...');
+    renderHomeAssistantActions([]);
+    appendHomeAssistantMessage(
+      'assistant',
+      allowCreate
+        ? 'Creating "' + config.label + '" and handing this task off there.'
+        : 'This looks like specialist-owned travel work. Routing it to "' + config.label + '" before execution starts.'
+    );
+    setHomeAssistantRoutingSummary(config.label, 'Preparing a specialist-owned workspace task.');
+
+    try {
+      var inventory = await fetchWorkspaceTaskAgentInventory(workspaceId);
+      var globalAgent = findExactAgentByName(inventory && inventory.allAgents, config.agentName);
+      if (!globalAgent && !allowCreate) {
+        showWorkspaceSpecialistCreationPrompt(prompt, normalizedContext, intent, config);
+        return true;
+      }
+
+      var agentName = globalAgent
+        ? (typeof globalAgent === 'string' ? globalAgent : globalAgent.name)
+        : await createPlanningSpecialistAgent(config, {
+          summaryText: String(prompt || '').trim(),
+          agentLabel: managerLabel
+        });
+
+      var workspaceAgent = findExactAgentByName(inventory && inventory.workspaceAgents, agentName);
+      if (!workspaceAgent) {
+        var added = await addAgentToWorkspaceIfNeeded(agentName, normalizedContext);
+        if (!added) {
+          throw new Error('Failed to attach specialist to workspace');
+        }
+      }
+
+      var createdResponse = await createWorkspaceTaskRecord(workspaceId, {
+        from: managerLabel,
+        to: String(agentName || '').trim(),
+        description: buildPlanningTaskDescriptionFromPrompt(prompt, config.taskTitle || config.label),
+        details: buildWorkspaceSpecialistTaskDetails(prompt, managerLabel, config, agentName)
+      });
+      var createdTask = createdResponse && createdResponse.task ? createdResponse.task : createdResponse;
+      if (!createdTask || !createdTask.id) {
+        throw new Error('Failed to create the specialist task');
+      }
+
+      syncCreatedTaskIntoWorkspaceDetail(createdTask);
+      var updatedTask = await updateWorkspaceTaskRecord(createdTask.id, {
+        context: buildWorkspaceSpecialistTaskContext(Object.assign({}, config, {
+          agentName: agentName
+        }), managerLabel)
+      });
+      syncUpdatedTaskIntoWorkspaceDetail(updatedTask);
+      await refreshWorkspaceDetailTaskPanels();
+
+      appendHomeAssistantMessage(
+        'assistant',
+        '"' + agentName + '" is handling this workspace task now.'
+      );
+      setHomeAssistantRoutingSummary(config.label, 'Task handed off to "' + agentName + '".');
+      await launchWorkspaceTaskExecutionFromHomeAssistant(updatedTask, normalizedContext);
+      clearHomeAssistantTaskLaunchState();
+      return true;
+    } catch (error) {
+      dashLog.debug('Failed to hand off workspace travel task to specialist', {
+        prompt: prompt,
+        specialist: config && config.key,
+        error: error && error.message || error
+      });
+      appendHomeAssistantMessage('assistant', 'I could not hand off this task to "' + config.label + '" right now.');
+      setHomeAssistantRoutingSummary(config.label, 'Could not create the specialist handoff right now.');
+      renderHomeAssistantActions([
+        {
+          label: 'Retry Specialist Handoff',
+          variant: 'primary',
+          onClick: function () {
+            routeWorkspacePromptToPlanningSpecialist(prompt, normalizedContext, intent, {
+              config: config,
+              allowCreate: allowCreate
+            });
+          }
+        },
+        {
+          label: 'Keep With ' + managerLabel,
+          variant: 'secondary',
+          onClick: function () { openWorkspaceAssistantForPrompt(prompt, normalizedContext, intent); }
+        },
+        {
+          label: 'Ask Another Task',
+          variant: 'secondary',
+          onClick: function () { focusHomeAssistantInput(); }
+        }
+      ]);
+      return true;
+    } finally {
+      setHomeAssistantBusy(false);
     }
   }
 
@@ -9696,6 +9927,15 @@
     }
 
     if (inWorkspaceContext) {
+      var specialistHandoffHandled = await routeWorkspacePromptToPlanningSpecialist(
+        text,
+        routeContext,
+        homeAssistantState.pendingIntent
+      );
+      if (specialistHandoffHandled) {
+        return;
+      }
+
       var workspaceManagerLabel = getWorkspaceHomeAssistantDisplayName();
       setHomeAssistantBusy(true, 'Asking...');
       renderHomeAssistantActions([]);
