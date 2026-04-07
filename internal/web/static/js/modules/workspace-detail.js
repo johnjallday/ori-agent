@@ -1792,6 +1792,17 @@ export class WorkspaceDetailPage {
     `;
   }
 
+  isWorkspaceEntryAgent(agentName) {
+    const entryAgentName = String(this.workspace?.entry_agent_name || '').trim();
+    if (!entryAgentName || !agentName) return false;
+    return this.normalizeAgentName(entryAgentName) === this.normalizeAgentName(agentName);
+  }
+
+  renderWorkspaceAgentRoleBadge(agentName) {
+    if (!this.isWorkspaceEntryAgent(agentName)) return '';
+    return '<span class="workspace-detail-agent-role-badge workspace-manager">Workspace Manager</span>';
+  }
+
   renderAgentGroups() {
     if (!this.elements.agentsList) return;
 
@@ -1825,6 +1836,7 @@ export class WorkspaceDetailPage {
       const encodedAgentName = encodeURIComponent(group.name);
       const canFlip = !group.isUnassigned;
       const isFlipped = canFlip && this.flippedAgentCards.has(group.key);
+      const roleBadge = group.isUnassigned ? '' : this.renderWorkspaceAgentRoleBadge(group.name);
       const removeLabel = group.instanceCount > 1
         ? `Remove all ${group.instanceCount} ${group.name} instances from workspace`
         : `Remove ${group.name} from workspace`;
@@ -1876,6 +1888,7 @@ export class WorkspaceDetailPage {
             <div class="workspace-detail-agent-card-header">
               <div class="workspace-detail-agent-card-title">
                 ${group.isUnassigned ? `<span>${this.escapeHtml(group.name)}</span>` : this.renderAgentDetailLink(group.name, encodedAgentName)}
+                ${roleBadge}
                 ${instanceChip}
                 ${capabilityBadges}
                 ${modelLabel}
@@ -1911,6 +1924,7 @@ export class WorkspaceDetailPage {
     const level = Number.isFinite(levelValue) ? Math.max(0, Math.floor(levelValue)) : 0;
     const stage = String(profile?.evolution?.stage || profile?.stage || '').trim();
     const levelLabel = stage ? `Lv ${level} · ${stage}` : `Lv ${level}`;
+    const roleBadge = this.renderWorkspaceAgentRoleBadge(group.name);
 
     const skillsState = this.getAgentSkillsState(group.name);
     const skillsMarkup = this.renderAgentSkillsChips(skillsState, profile);
@@ -1939,6 +1953,7 @@ export class WorkspaceDetailPage {
         <div class="workspace-detail-agent-card-header">
           <div class="workspace-detail-agent-card-title">
             ${this.renderAgentDetailLink(group.name, encodedAgentName)}
+            ${roleBadge}
             <span class="workspace-detail-agent-info-tag">Agent Info</span>
           </div>
           <div class="workspace-detail-agent-card-meta-wrap">
