@@ -37,6 +37,10 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		h.handleVaults(w, r)
 	case strings.HasPrefix(path, "/vaults/"):
 		h.handleVault(w, r, strings.TrimPrefix(path, "/vaults/"))
+	case path == "/email-accounts" || path == "/email-accounts/":
+		h.handleEmailAccounts(w, r)
+	case strings.HasPrefix(path, "/email-accounts/"):
+		h.handleEmailAccount(w, r, strings.TrimPrefix(path, "/email-accounts/"))
 	case path == "/unlock":
 		h.handleUnlock(w, r)
 	case path == "/lock":
@@ -55,6 +59,82 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		h.handleGrant(w, r, strings.TrimPrefix(path, "/grants/"))
 	default:
 		_ = orihttp.RespondNotFound(w, "vault endpoint not found")
+	}
+}
+
+func (h *Handler) handleEmailAccounts(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodGet:
+		accounts, err := h.store.ListEmailAccounts(r.Context(), vaultIDFromRequest(r), r.URL.Query().Get("workspace_id"))
+		if err != nil {
+			respondVaultError(w, err)
+			return
+		}
+		orihttp.Success(w, map[string]any{
+			"accounts": accounts,
+			"count":    len(accounts),
+		})
+	case http.MethodPost:
+		var req vault.EmailAccountInput
+		if !orihttp.ParseJSONBody(w, r, &req) {
+			return
+		}
+		req.VaultID = vaultIDFromRequest(r, req.VaultID)
+		req.WorkspaceID = firstNonEmpty(req.WorkspaceID, r.URL.Query().Get("workspace_id"))
+
+		account, err := h.store.CreateEmailAccount(r.Context(), req)
+		if err != nil {
+			respondVaultError(w, err)
+			return
+		}
+		orihttp.Created(w, map[string]any{
+			"success": true,
+			"account": account,
+		})
+	default:
+		_ = orihttp.RespondMethodNotAllowed(w)
+	}
+}
+
+func (h *Handler) handleEmailAccount(w http.ResponseWriter, r *http.Request, id string) {
+	id = strings.TrimSpace(id)
+	if id == "" || strings.Contains(id, "/") {
+		_ = orihttp.RespondBadRequest(w, "email account id is required")
+		return
+	}
+
+	switch r.Method {
+	case http.MethodGet:
+		account, err := h.store.GetEmailAccount(r.Context(), id)
+		if err != nil {
+			respondVaultError(w, err)
+			return
+		}
+		orihttp.Success(w, map[string]any{
+			"account": account,
+		})
+	case http.MethodPatch, http.MethodPut:
+		var req vault.EmailAccountUpdate
+		if !orihttp.ParseJSONBody(w, r, &req) {
+			return
+		}
+		account, err := h.store.UpdateEmailAccount(r.Context(), id, req)
+		if err != nil {
+			respondVaultError(w, err)
+			return
+		}
+		orihttp.Success(w, map[string]any{
+			"success": true,
+			"account": account,
+		})
+	case http.MethodDelete:
+		if err := h.store.DeleteEmailAccount(r.Context(), id); err != nil {
+			respondVaultError(w, err)
+			return
+		}
+		orihttp.Success(w, map[string]any{"success": true})
+	default:
+		_ = orihttp.RespondMethodNotAllowed(w)
 	}
 }
 
@@ -506,7 +586,7 @@ func respondVaultError(w http.ResponseWriter, err error) {
 		_ = orihttp.RespondError(w, http.StatusUnauthorized, err.Error())
 	case errors.Is(err, vault.ErrVaultLocked):
 		_ = orihttp.RespondError(w, http.StatusLocked, err.Error())
-	case errors.Is(err, vault.ErrVaultRequired), errors.Is(err, vault.ErrVaultNameRequired), errors.Is(err, vault.ErrVaultPasswordRequired), errors.Is(err, vault.ErrExportPasswordEmpty), errors.Is(err, vault.ErrImportPasswordRequired), errors.Is(err, vault.ErrImportBundleRequired), errors.Is(err, vault.ErrImportBundleInvalid), errors.Is(err, vault.ErrImportTargetRequired):
+	case errors.Is(err, vault.ErrVaultRequired), errors.Is(err, vault.ErrVaultNameRequired), errors.Is(err, vault.ErrVaultPasswordRequired), errors.Is(err, vault.ErrExportPasswordEmpty), errors.Is(err, vault.ErrImportPasswordRequired), errors.Is(err, vault.ErrImportBundleRequired), errors.Is(err, vault.ErrImportBundleInvalid), errors.Is(err, vault.ErrImportTargetRequired), errors.Is(err, vault.ErrInvalidEmailAccount):
 		_ = orihttp.RespondError(w, http.StatusBadRequest, err.Error())
 	case errors.Is(err, vault.ErrImportPasswordInvalid):
 		_ = orihttp.RespondError(w, http.StatusUnauthorized, err.Error())

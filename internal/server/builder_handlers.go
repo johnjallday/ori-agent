@@ -179,6 +179,9 @@ func (b *ServerBuilder) initializeHandlers() error {
 			SecretStore: b.configManager.SecretStore(),
 		})
 		b.vaultHandler = vaulthttp.NewHandler(vaultStore)
+		if b.workspaceHandler != nil {
+			b.workspaceHandler.SetEmailAccountStore(vaultStore)
+		}
 		logger.Info("Vault system initialized", logger.Fields{})
 	}
 

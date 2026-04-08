@@ -159,6 +159,80 @@ func TestHandlerRecordLifecycle(t *testing.T) {
 	}
 }
 
+func TestHandlerEmailAccountLifecycle(t *testing.T) {
+	handler, store, db := newTestHandler(t, vault.NewMemorySecretStore(), "")
+	defer func() { _ = db.Close() }()
+	primaryVault := createHandlerVault(t, store, "Primary Vault")
+
+	createRec := performJSONRequest(t, handler, http.MethodPost, "/api/vault/email-accounts", map[string]any{
+		"vault_id":      primaryVault.ID,
+		"label":         "Support Inbox",
+		"provider":      "gmail",
+		"email_address": "support@example.com",
+		"display_name":  "Support",
+		"auth_type":     "oauth2",
+		"credentials": map[string]any{
+			"refresh_token": "refresh-token",
+			"client_id":     "client-id",
+			"client_secret": "client-secret",
+		},
+	})
+	if createRec.Code != http.StatusCreated {
+		t.Fatalf("expected 201 from create email account, got %d: %s", createRec.Code, createRec.Body.String())
+	}
+	if strings.Contains(createRec.Body.String(), "refresh-token") || strings.Contains(createRec.Body.String(), "client-secret") {
+		t.Fatalf("expected create response to redact credentials, got %s", createRec.Body.String())
+	}
+
+	var created struct {
+		Account vault.EmailAccount `json:"account"`
+	}
+	decodeJSONBody(t, createRec, &created)
+	if created.Account.ID == "" {
+		t.Fatal("expected created email account id")
+	}
+	if created.Account.Provider != vault.EmailProviderGmail {
+		t.Fatalf("expected gmail provider, got %q", created.Account.Provider)
+	}
+	if !created.Account.CredentialsStatus.HasRefreshToken || !created.Account.CredentialsStatus.HasClientSecret {
+		t.Fatalf("expected credential state to be surfaced, got %#v", created.Account.CredentialsStatus)
+	}
+
+	listRec := performJSONRequest(t, handler, http.MethodGet, "/api/vault/email-accounts?vault_id="+primaryVault.ID, nil)
+	if listRec.Code != http.StatusOK {
+		t.Fatalf("expected 200 from list email accounts, got %d: %s", listRec.Code, listRec.Body.String())
+	}
+
+	getRec := performJSONRequest(t, handler, http.MethodGet, "/api/vault/email-accounts/"+created.Account.ID, nil)
+	if getRec.Code != http.StatusOK {
+		t.Fatalf("expected 200 from get email account, got %d: %s", getRec.Code, getRec.Body.String())
+	}
+
+	updateRec := performJSONRequest(t, handler, http.MethodPatch, "/api/vault/email-accounts/"+created.Account.ID, map[string]any{
+		"display_name": "Support Team",
+		"access_token": "access-token",
+	})
+	if updateRec.Code != http.StatusOK {
+		t.Fatalf("expected 200 from update email account, got %d: %s", updateRec.Code, updateRec.Body.String())
+	}
+
+	var updated struct {
+		Account vault.EmailAccount `json:"account"`
+	}
+	decodeJSONBody(t, updateRec, &updated)
+	if updated.Account.DisplayName != "Support Team" {
+		t.Fatalf("expected updated display name, got %#v", updated.Account)
+	}
+	if !updated.Account.CredentialsStatus.HasAccessToken {
+		t.Fatalf("expected access token state after update, got %#v", updated.Account.CredentialsStatus)
+	}
+
+	deleteRec := performJSONRequest(t, handler, http.MethodDelete, "/api/vault/email-accounts/"+created.Account.ID, nil)
+	if deleteRec.Code != http.StatusOK {
+		t.Fatalf("expected 200 from delete email account, got %d: %s", deleteRec.Code, deleteRec.Body.String())
+	}
+}
+
 func TestHandlerDeniesActorWithoutGrant(t *testing.T) {
 	handler, store, db := newTestHandler(t, vault.NewMemorySecretStore(), "")
 	defer func() { _ = db.Close() }()

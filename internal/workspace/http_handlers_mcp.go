@@ -66,6 +66,11 @@ func (h *HTTPHandler) CreateMCPBinding(w http.ResponseWriter, r *http.Request) {
 		CreatedAt:  time.Now(),
 		UpdatedAt:  time.Now(),
 	}
+	binding, _, err = h.normalizeBindingForPersistence(r.Context(), workspaceID, binding)
+	if err != nil {
+		orihttp.BadRequest(w, err.Error())
+		return
+	}
 
 	if err := workspace.UpsertMCPBinding(binding); err != nil {
 		orihttp.BadRequest(w, err.Error())
@@ -86,7 +91,7 @@ func (h *HTTPHandler) CreateMCPBinding(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusCreated)
 	if encErr := json.NewEncoder(w).Encode(map[string]interface{}{
 		"message":   "MCP binding created successfully",
-		"binding":   created,
+		"binding":   h.mcpBindingResponse(r.Context(), *created),
 		"workspace": workspaceID,
 	}); encErr != nil {
 		logger.Error("Failed to encode response", logger.Fields{"error": encErr})
@@ -110,7 +115,7 @@ func (h *HTTPHandler) ListMCPBindings(w http.ResponseWriter, r *http.Request) {
 	bindings := workspace.GetMCPBindings()
 	w.Header().Set("Content-Type", "application/json")
 	if encErr := json.NewEncoder(w).Encode(map[string]interface{}{
-		"bindings":  bindings,
+		"bindings":  h.mcpBindingResponses(r.Context(), bindings),
 		"count":     len(bindings),
 		"workspace": workspaceID,
 	}); encErr != nil {
@@ -141,7 +146,7 @@ func (h *HTTPHandler) GetMCPBinding(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	if encErr := json.NewEncoder(w).Encode(map[string]interface{}{
-		"binding":   binding,
+		"binding":   h.mcpBindingResponse(r.Context(), *binding),
 		"workspace": workspaceID,
 	}); encErr != nil {
 		logger.Error("Failed to encode response", logger.Fields{"error": encErr})
@@ -195,6 +200,11 @@ func (h *HTTPHandler) UpdateMCPBinding(w http.ResponseWriter, r *http.Request) {
 	if req.Config != nil {
 		binding.Config = req.Config
 	}
+	*binding, _, err = h.normalizeBindingForPersistence(r.Context(), workspaceID, *binding)
+	if err != nil {
+		orihttp.BadRequest(w, err.Error())
+		return
+	}
 
 	if err := workspace.UpsertMCPBinding(*binding); err != nil {
 		orihttp.BadRequest(w, err.Error())
@@ -214,7 +224,7 @@ func (h *HTTPHandler) UpdateMCPBinding(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	if encErr := json.NewEncoder(w).Encode(map[string]interface{}{
 		"message":   "MCP binding updated successfully",
-		"binding":   updated,
+		"binding":   h.mcpBindingResponse(r.Context(), *updated),
 		"workspace": workspaceID,
 	}); encErr != nil {
 		logger.Error("Failed to encode response", logger.Fields{"error": encErr})

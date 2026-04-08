@@ -15,6 +15,7 @@ var (
 	ErrRecordNotFound         = errors.New("vault: record not found")
 	ErrGrantNotFound          = errors.New("vault: grant not found")
 	ErrPermissionDenied       = errors.New("vault: permission denied")
+	ErrInvalidEmailAccount    = errors.New("vault: invalid email account")
 	ErrVaultLocked            = errors.New("vault: vault locked")
 	ErrVaultKeyUnavailable    = errors.New("vault: data encryption key unavailable")
 	ErrMalformedRecord        = errors.New("vault: malformed encrypted record")
@@ -29,6 +30,7 @@ var (
 )
 
 const DefaultVaultID = "default"
+const RecordTypeEmailAccount = "email_account"
 
 type ActorType string
 
@@ -101,6 +103,106 @@ type RecordListItem struct {
 	RetentionPolicy string    `json:"retention_policy,omitempty"`
 	CreatedAt       time.Time `json:"created_at"`
 	UpdatedAt       time.Time `json:"updated_at"`
+}
+
+type EmailProvider string
+
+const (
+	EmailProviderGmail     EmailProvider = "gmail"
+	EmailProviderMicrosoft EmailProvider = "microsoft"
+	EmailProviderIMAPSMTP  EmailProvider = "imap_smtp"
+)
+
+type EmailAuthType string
+
+const (
+	EmailAuthTypeOAuth2      EmailAuthType = "oauth2"
+	EmailAuthTypePassword    EmailAuthType = "password"
+	EmailAuthTypeAppPassword EmailAuthType = "app_password"
+)
+
+type EmailAccountCredentials struct {
+	AccessToken   string `json:"access_token,omitempty"`
+	RefreshToken  string `json:"refresh_token,omitempty"`
+	Password      string `json:"password,omitempty"`
+	ClientID      string `json:"client_id,omitempty"`
+	ClientSecret  string `json:"client_secret,omitempty"`
+	TokenEndpoint string `json:"token_endpoint,omitempty"`
+}
+
+type EmailAccount struct {
+	ID                string                  `json:"id"`
+	VaultID           string                  `json:"vault_id,omitempty"`
+	WorkspaceID       string                  `json:"workspace_id,omitempty"`
+	Label             string                  `json:"label"`
+	Tags              []string                `json:"tags,omitempty"`
+	Source            string                  `json:"source,omitempty"`
+	RetentionPolicy   string                  `json:"retention_policy,omitempty"`
+	Provider          EmailProvider           `json:"provider"`
+	EmailAddress      string                  `json:"email_address"`
+	DisplayName       string                  `json:"display_name,omitempty"`
+	Username          string                  `json:"username,omitempty"`
+	AuthType          EmailAuthType           `json:"auth_type"`
+	IMAPHost          string                  `json:"imap_host,omitempty"`
+	IMAPPort          int                     `json:"imap_port,omitempty"`
+	SMTPHost          string                  `json:"smtp_host,omitempty"`
+	SMTPPort          int                     `json:"smtp_port,omitempty"`
+	HasAccessToken    bool                    `json:"has_access_token,omitempty"`
+	HasRefreshToken   bool                    `json:"has_refresh_token,omitempty"`
+	HasPassword       bool                    `json:"has_password,omitempty"`
+	CreatedAt         time.Time               `json:"created_at"`
+	UpdatedAt         time.Time               `json:"updated_at"`
+	CredentialsStatus EmailAccountSecretState `json:"credentials_status"`
+}
+
+type EmailAccountSecretState struct {
+	HasAccessToken  bool `json:"has_access_token,omitempty"`
+	HasRefreshToken bool `json:"has_refresh_token,omitempty"`
+	HasPassword     bool `json:"has_password,omitempty"`
+	HasClientID     bool `json:"has_client_id,omitempty"`
+	HasClientSecret bool `json:"has_client_secret,omitempty"`
+}
+
+type EmailAccountInput struct {
+	VaultID         string                  `json:"vault_id,omitempty"`
+	WorkspaceID     string                  `json:"workspace_id,omitempty"`
+	Label           string                  `json:"label,omitempty"`
+	Tags            []string                `json:"tags,omitempty"`
+	Source          string                  `json:"source,omitempty"`
+	RetentionPolicy string                  `json:"retention_policy,omitempty"`
+	Provider        EmailProvider           `json:"provider"`
+	EmailAddress    string                  `json:"email_address"`
+	DisplayName     string                  `json:"display_name,omitempty"`
+	Username        string                  `json:"username,omitempty"`
+	AuthType        EmailAuthType           `json:"auth_type"`
+	IMAPHost        string                  `json:"imap_host,omitempty"`
+	IMAPPort        int                     `json:"imap_port,omitempty"`
+	SMTPHost        string                  `json:"smtp_host,omitempty"`
+	SMTPPort        int                     `json:"smtp_port,omitempty"`
+	Credentials     EmailAccountCredentials `json:"credentials"`
+}
+
+type EmailAccountUpdate struct {
+	WorkspaceID     *string        `json:"workspace_id,omitempty"`
+	Label           *string        `json:"label,omitempty"`
+	Tags            *[]string      `json:"tags,omitempty"`
+	Source          *string        `json:"source,omitempty"`
+	RetentionPolicy *string        `json:"retention_policy,omitempty"`
+	Provider        *EmailProvider `json:"provider,omitempty"`
+	EmailAddress    *string        `json:"email_address,omitempty"`
+	DisplayName     *string        `json:"display_name,omitempty"`
+	Username        *string        `json:"username,omitempty"`
+	AuthType        *EmailAuthType `json:"auth_type,omitempty"`
+	IMAPHost        *string        `json:"imap_host,omitempty"`
+	IMAPPort        *int           `json:"imap_port,omitempty"`
+	SMTPHost        *string        `json:"smtp_host,omitempty"`
+	SMTPPort        *int           `json:"smtp_port,omitempty"`
+	AccessToken     *string        `json:"access_token,omitempty"`
+	RefreshToken    *string        `json:"refresh_token,omitempty"`
+	Password        *string        `json:"password,omitempty"`
+	ClientID        *string        `json:"client_id,omitempty"`
+	ClientSecret    *string        `json:"client_secret,omitempty"`
+	TokenEndpoint   *string        `json:"token_endpoint,omitempty"`
 }
 
 type RecordFilter struct {
@@ -256,7 +358,7 @@ func normalizeTags(tags []string) []string {
 
 func capabilitiesForRecordType(recordType string) (Capability, Capability) {
 	switch normalizeRecordType(recordType) {
-	case "secret", "credential", "credentials", "token", "api_key", "oauth_token":
+	case "secret", "credential", "credentials", "token", "api_key", "oauth_token", RecordTypeEmailAccount:
 		return CapabilitySecretsRead, CapabilitySecretsWrite
 	case "email", "email_snippet", "email_address":
 		return CapabilityEmailRead, CapabilityEmailWrite
