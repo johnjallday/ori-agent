@@ -497,6 +497,15 @@
   margin-bottom: 0.9rem;
 }
 
+.vault-page-email-summary {
+  max-width: 24rem;
+  margin: 0;
+}
+
+.vault-page-email-grid {
+  align-items: start;
+}
+
 .vault-page-records-list,
 .vault-page-grants-list {
   display: flex;
@@ -567,6 +576,45 @@
   color: var(--text-primary);
   font-size: 0.78rem;
   font-weight: 700;
+}
+
+.vault-page-email-account-main {
+  min-width: 0;
+}
+
+.vault-page-email-list .vault-page-record-updated {
+  max-width: 11rem;
+  text-align: center;
+  white-space: nowrap;
+}
+
+.vault-page-email-chip-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+  margin-top: 0.55rem;
+}
+
+.vault-page-email-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  min-height: 1.7rem;
+  padding: 0.2rem 0.6rem;
+  border-radius: 999px;
+  border: 1px solid var(--vault-page-soft-border);
+  background: var(--vault-page-badge-bg);
+  color: var(--text-primary);
+  font-size: 0.76rem;
+  font-weight: 700;
+}
+
+.vault-page-email-secret-state {
+  margin-top: 0.5rem;
+}
+
+.vault-page-subtitle-sm {
+  font-size: 0.94rem;
 }
 
 .vault-page-grant {
@@ -653,6 +701,11 @@
   .vault-page-grant-row {
     flex-direction: column;
     align-items: flex-start;
+  }
+
+  .vault-page-email-list .vault-page-record-updated {
+    max-width: none;
+    white-space: normal;
   }
 
   .vault-page-button-row .modern-btn,

@@ -13,6 +13,11 @@
         Grants
       </button>
     </li>
+    <li class="nav-item" role="presentation">
+      <button class="nav-link" id="email-accounts-tab" data-bs-toggle="tab" data-bs-target="#email-accounts-pane" type="button" role="tab" aria-controls="email-accounts-pane" aria-selected="false">
+        Email Accounts
+      </button>
+    </li>
   </ul>
 
   <div class="tab-content" id="vaultTabContent">
@@ -200,6 +205,188 @@
             </div>
             <div id="vaultGrantsList" class="vault-page-grants-list">
               <div class="vault-page-empty">No persistent grants loaded yet.</div>
+            </div>
+          </div>
+        </div>
+      </section>
+    </div>
+
+    <!-- Email Accounts Pane -->
+    <div class="tab-pane fade" id="email-accounts-pane" role="tabpanel" aria-labelledby="email-accounts-tab">
+      <section class="vault-page-card vault-page-card-highlight">
+        <div class="vault-page-card-head">
+          <div>
+            <div class="vault-page-eyebrow">Vault-backed Accounts</div>
+            <h3 class="vault-page-card-title">Reusable email identities</h3>
+            <p class="vault-page-help">
+              Store mailbox credentials inside the selected vault, then bind those accounts to workspaces through email MCP connectors.
+            </p>
+          </div>
+          <div id="vaultEmailAccountsSummary" class="vault-page-meta vault-page-email-summary">
+            Select and unlock a vault to manage email accounts.
+          </div>
+        </div>
+
+        <div class="vault-page-entry-grid vault-page-email-grid">
+          <div class="vault-page-list-panel">
+            <div class="vault-page-panel-copy">
+              <h4 class="vault-page-subtitle">Accounts in this vault</h4>
+              <p class="vault-page-help">Each account can be reused across one or more workspaces with tighter workspace-level policy.</p>
+            </div>
+            <div id="vaultEmailAccountsList" class="vault-page-records-list vault-page-email-list">
+              <div class="vault-page-empty">Unlock a vault to review saved email accounts.</div>
+            </div>
+          </div>
+
+          <div class="vault-page-editor-panel modern-card p-4">
+            <div class="vault-page-panel-copy d-flex justify-content-between align-items-center mb-4">
+              <div>
+                <h4 class="vault-page-subtitle">Email account editor</h4>
+                <p class="vault-page-help mb-0">Credentials are write-only. Ori only shows whether a secret is stored.</p>
+              </div>
+              <span id="vaultEmailAccountModeBadge" class="vault-page-record-tag">New account</span>
+            </div>
+
+            <div class="vault-page-field-grid">
+              <div class="vault-page-field">
+                <label class="vault-page-label" for="vaultEmailAccountLabel">Label</label>
+                <input id="vaultEmailAccountLabel" type="text" class="form-control settings-input vault-page-input" placeholder="Support Inbox">
+              </div>
+              <div class="vault-page-field">
+                <label class="vault-page-label" for="vaultEmailAccountAddress">Email address</label>
+                <input id="vaultEmailAccountAddress" type="email" class="form-control settings-input vault-page-input" placeholder="support@example.com">
+              </div>
+            </div>
+
+            <div class="vault-page-field-grid">
+              <div class="vault-page-field">
+                <label class="vault-page-label" for="vaultEmailAccountProvider">Provider</label>
+                <select id="vaultEmailAccountProvider" class="form-select settings-input vault-page-input">
+                  <option value="gmail">Gmail / Google Workspace</option>
+                  <option value="microsoft">Microsoft 365 / Outlook</option>
+                  <option value="imap_smtp">Custom IMAP / SMTP</option>
+                </select>
+              </div>
+              <div class="vault-page-field">
+                <label class="vault-page-label" for="vaultEmailAccountAuthType">Auth type</label>
+                <select id="vaultEmailAccountAuthType" class="form-select settings-input vault-page-input">
+                  <option value="oauth2">OAuth 2</option>
+                  <option value="app_password">App Password</option>
+                  <option value="password">Password</option>
+                </select>
+              </div>
+            </div>
+
+            <div class="vault-page-field-grid">
+              <div class="vault-page-field">
+                <label class="vault-page-label" for="vaultEmailAccountDisplayName">Display name</label>
+                <input id="vaultEmailAccountDisplayName" type="text" class="form-control settings-input vault-page-input" placeholder="Support Team">
+              </div>
+              <div class="vault-page-field">
+                <label class="vault-page-label" for="vaultEmailAccountUsername">Username</label>
+                <input id="vaultEmailAccountUsername" type="text" class="form-control settings-input vault-page-input" placeholder="Defaults to the email address">
+              </div>
+            </div>
+
+            <div id="vaultEmailAccountImapFields" class="vault-page-subsection" hidden>
+              <div class="vault-page-meta mb-3">
+                Custom IMAP/SMTP providers need explicit server settings. Gmail and Microsoft use sensible defaults automatically.
+              </div>
+              <div class="vault-page-field-grid">
+                <div class="vault-page-field">
+                  <label class="vault-page-label" for="vaultEmailAccountImapHost">IMAP host</label>
+                  <input id="vaultEmailAccountImapHost" type="text" class="form-control settings-input vault-page-input" placeholder="imap.example.com">
+                </div>
+                <div class="vault-page-field">
+                  <label class="vault-page-label" for="vaultEmailAccountImapPort">IMAP port</label>
+                  <input id="vaultEmailAccountImapPort" type="number" class="form-control settings-input vault-page-input" min="1" step="1" placeholder="993">
+                </div>
+              </div>
+              <div class="vault-page-field-grid mt-2">
+                <div class="vault-page-field">
+                  <label class="vault-page-label" for="vaultEmailAccountSmtpHost">SMTP host</label>
+                  <input id="vaultEmailAccountSmtpHost" type="text" class="form-control settings-input vault-page-input" placeholder="smtp.example.com">
+                </div>
+                <div class="vault-page-field">
+                  <label class="vault-page-label" for="vaultEmailAccountSmtpPort">SMTP port</label>
+                  <input id="vaultEmailAccountSmtpPort" type="number" class="form-control settings-input vault-page-input" min="1" step="1" placeholder="465">
+                </div>
+              </div>
+            </div>
+
+            <div class="vault-page-subsection">
+              <div class="vault-page-panel-copy">
+                <h5 class="vault-page-subtitle vault-page-subtitle-sm">Credentials</h5>
+                <p class="vault-page-help mb-0">Leave fields blank when editing unless you want to replace the stored secret.</p>
+              </div>
+
+              <div id="vaultEmailAccountOauthFields">
+                <div class="vault-page-field-grid">
+                  <div class="vault-page-field">
+                    <label class="vault-page-label" for="vaultEmailAccountRefreshToken">Refresh token</label>
+                    <input id="vaultEmailAccountRefreshToken" type="password" class="form-control settings-input vault-page-input" autocomplete="new-password" placeholder="Stored in vault only">
+                  </div>
+                  <div class="vault-page-field">
+                    <label class="vault-page-label" for="vaultEmailAccountAccessToken">Access token</label>
+                    <input id="vaultEmailAccountAccessToken" type="password" class="form-control settings-input vault-page-input" autocomplete="new-password" placeholder="Optional cached access token">
+                  </div>
+                </div>
+                <div class="vault-page-field-grid mt-2">
+                  <div class="vault-page-field">
+                    <label class="vault-page-label" for="vaultEmailAccountClientId">Client ID</label>
+                    <input id="vaultEmailAccountClientId" type="text" class="form-control settings-input vault-page-input" placeholder="OAuth client id">
+                  </div>
+                  <div class="vault-page-field">
+                    <label class="vault-page-label" for="vaultEmailAccountClientSecret">Client secret</label>
+                    <input id="vaultEmailAccountClientSecret" type="password" class="form-control settings-input vault-page-input" autocomplete="new-password" placeholder="Stored in vault only">
+                  </div>
+                </div>
+                <div class="vault-page-field mt-2">
+                  <label class="vault-page-label" for="vaultEmailAccountTokenEndpoint">Token endpoint</label>
+                  <input id="vaultEmailAccountTokenEndpoint" type="text" class="form-control settings-input vault-page-input" placeholder="Optional custom OAuth token endpoint">
+                </div>
+              </div>
+
+              <div id="vaultEmailAccountPasswordFields" hidden>
+                <div class="vault-page-field">
+                  <label class="vault-page-label" for="vaultEmailAccountPassword">Password or app password</label>
+                  <input id="vaultEmailAccountPassword" type="password" class="form-control settings-input vault-page-input" autocomplete="new-password" placeholder="Stored in vault only">
+                </div>
+              </div>
+
+              <div id="vaultEmailAccountCredentialStatus" class="vault-page-meta vault-page-email-secret-state mt-3">
+                No credentials stored yet.
+              </div>
+            </div>
+
+            <details class="vault-page-advanced-details mt-3">
+              <summary class="vault-page-subtitle" style="cursor: pointer; font-size: 0.9rem;">Advanced metadata</summary>
+              <div class="vault-page-field-grid mt-2">
+                <div class="vault-page-field">
+                  <label class="vault-page-label" for="vaultEmailAccountWorkspaceId">Workspace scope</label>
+                  <input id="vaultEmailAccountWorkspaceId" type="text" class="form-control settings-input vault-page-input" placeholder="Optional workspace lock">
+                </div>
+                <div class="vault-page-field">
+                  <label class="vault-page-label" for="vaultEmailAccountTags">Tags</label>
+                  <input id="vaultEmailAccountTags" type="text" class="form-control settings-input vault-page-input" placeholder="finance, customer-support">
+                </div>
+              </div>
+              <div class="vault-page-field-grid mt-2">
+                <div class="vault-page-field">
+                  <label class="vault-page-label" for="vaultEmailAccountSource">Source</label>
+                  <input id="vaultEmailAccountSource" type="text" class="form-control settings-input vault-page-input" placeholder="google-oauth">
+                </div>
+                <div class="vault-page-field">
+                  <label class="vault-page-label" for="vaultEmailAccountRetention">Retention policy</label>
+                  <input id="vaultEmailAccountRetention" type="text" class="form-control settings-input vault-page-input" placeholder="keep_until_revoked">
+                </div>
+              </div>
+            </details>
+
+            <div class="vault-page-button-row mt-4">
+              <button id="vaultSaveEmailAccountBtn" class="modern-btn modern-btn-primary" type="button">Save Email Account</button>
+              <button id="vaultResetEmailAccountBtn" class="modern-btn modern-btn-secondary" type="button">New Account</button>
+              <button id="vaultDeleteEmailAccountBtn" class="btn btn-outline-danger vault-page-danger-btn d-none" type="button">Delete Account</button>
             </div>
           </div>
         </div>

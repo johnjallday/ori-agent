@@ -630,12 +630,88 @@
                   Optional JSON object for workspace-specific scope like <code>roots</code>, <code>repos</code>, or <code>channels</code>.
                 </div>
               </div>
-              <div class="col-12">
-                <label for="workspace-detail-mcp-config" class="form-label">Config JSON</label>
-                <textarea id="workspace-detail-mcp-config" class="form-control workspace-detail-mcp-scope-input" rows="7" spellcheck="false" placeholder="{&#10;  &quot;args&quot;: [&quot;playwright-mcp&quot;, &quot;--headless&quot;],&#10;  &quot;env&quot;: { &quot;BROWSER_CONTEXT&quot;: &quot;workspace&quot; }&#10;}"></textarea>
-                <div class="workspace-detail-mcp-field-help">
-                  Optional runtime overrides for this workspace binding. Supported keys today are <code>command</code>, <code>args</code>, <code>env</code>, and <code>transport</code>.
+              <div id="workspace-detail-mcp-email-fields" class="col-12 d-none">
+                <div class="workspace-detail-mcp-agent-access-card workspace-detail-mcp-email-card">
+                  <div class="workspace-detail-mcp-agent-access-header">
+                    <div>
+                      <div class="workspace-detail-mcp-agent-access-title">Email policy</div>
+                      <div class="workspace-detail-mcp-agent-access-subtitle">Choose a vault-backed email account, then limit what agents in this workspace may do with it.</div>
+                    </div>
+                  </div>
+                  <div class="row g-3 mt-0">
+                    <div class="col-md-6">
+                      <label for="workspace-detail-mcp-email-account" class="form-label">Email account</label>
+                      <select id="workspace-detail-mcp-email-account" class="form-select">
+                        <option value="">Select an email account</option>
+                      </select>
+                      <div id="workspace-detail-mcp-email-account-help" class="workspace-detail-mcp-field-help">
+                        Email accounts come from Vault > Email Accounts.
+                      </div>
+                    </div>
+                    <div class="col-md-6">
+                      <label for="workspace-detail-mcp-email-mailboxes" class="form-label">Mailbox scope</label>
+                      <input id="workspace-detail-mcp-email-mailboxes" type="text" class="form-control" placeholder="INBOX, support, billing">
+                      <div class="workspace-detail-mcp-field-help">
+                        Optional comma-separated labels, folders, or mailboxes to narrow this binding.
+                      </div>
+                    </div>
+                    <div class="col-12">
+                      <div class="workspace-detail-mcp-email-actions-grid">
+                        <label class="workspace-detail-mcp-email-action">
+                          <input id="workspace-detail-mcp-email-action-read" type="checkbox" class="form-check-input" data-email-action="read">
+                          <span>
+                            <strong>Read</strong>
+                            <small>Open individual messages.</small>
+                          </span>
+                        </label>
+                        <label class="workspace-detail-mcp-email-action">
+                          <input id="workspace-detail-mcp-email-action-search" type="checkbox" class="form-check-input" data-email-action="search">
+                          <span>
+                            <strong>Search</strong>
+                            <small>Search across inboxes and labels.</small>
+                          </span>
+                        </label>
+                        <label class="workspace-detail-mcp-email-action">
+                          <input id="workspace-detail-mcp-email-action-draft" type="checkbox" class="form-check-input" data-email-action="draft">
+                          <span>
+                            <strong>Draft</strong>
+                            <small>Prepare replies without sending.</small>
+                          </span>
+                        </label>
+                        <label class="workspace-detail-mcp-email-action">
+                          <input id="workspace-detail-mcp-email-action-send" type="checkbox" class="form-check-input" data-email-action="send">
+                          <span>
+                            <strong>Send</strong>
+                            <small>Allow outbound email.</small>
+                          </span>
+                        </label>
+                      </div>
+                    </div>
+                    <div id="workspace-detail-mcp-email-send-confirm-wrap" class="col-12">
+                      <div class="form-check form-switch workspace-detail-mcp-toggle">
+                        <input class="form-check-input" type="checkbox" role="switch" id="workspace-detail-mcp-email-send-confirm" checked>
+                        <label class="form-check-label" for="workspace-detail-mcp-email-send-confirm">Require confirmation before send</label>
+                      </div>
+                    </div>
+                    <div class="col-12">
+                      <div id="workspace-detail-mcp-email-account-summary" class="workspace-detail-mcp-email-summary">
+                        Select an email account to review its provider, address, and stored credential status.
+                      </div>
+                    </div>
+                  </div>
                 </div>
+              </div>
+              <div id="workspace-detail-mcp-config-field" class="col-12">
+                <details id="workspace-detail-mcp-config-details" class="workspace-detail-mcp-advanced-details" open>
+                  <summary class="workspace-detail-mcp-advanced-summary">Advanced Config JSON</summary>
+                  <div class="workspace-detail-mcp-advanced-body">
+                    <label for="workspace-detail-mcp-config" class="form-label">Config JSON</label>
+                    <textarea id="workspace-detail-mcp-config" class="form-control workspace-detail-mcp-scope-input" rows="7" spellcheck="false" placeholder="{&#10;  &quot;args&quot;: [&quot;playwright-mcp&quot;, &quot;--headless&quot;],&#10;  &quot;env&quot;: { &quot;BROWSER_CONTEXT&quot;: &quot;workspace&quot; }&#10;}"></textarea>
+                    <div class="workspace-detail-mcp-field-help">
+                      Optional runtime overrides for this workspace binding. Supported keys today are <code>command</code>, <code>args</code>, <code>env</code>, and <code>transport</code>.
+                    </div>
+                  </div>
+                </details>
               </div>
               <div class="col-12">
                 <div class="workspace-detail-mcp-agent-access-card">
@@ -1963,6 +2039,30 @@
       color: #cdd4ff;
     }
 
+    .workspace-detail-mcp-chip.provider {
+      background: rgba(251, 191, 36, 0.12);
+      border-color: rgba(251, 191, 36, 0.22);
+      color: #fde68a;
+    }
+
+    .workspace-detail-mcp-chip.email {
+      background: rgba(147, 197, 253, 0.12);
+      border-color: rgba(147, 197, 253, 0.22);
+      color: #dbeafe;
+    }
+
+    .workspace-detail-mcp-chip.policy {
+      background: rgba(134, 239, 172, 0.12);
+      border-color: rgba(134, 239, 172, 0.2);
+      color: #dcfce7;
+    }
+
+    .workspace-detail-mcp-chip.warning {
+      background: rgba(251, 113, 133, 0.12);
+      border-color: rgba(251, 113, 133, 0.22);
+      color: #fecdd3;
+    }
+
     .workspace-detail-mcp-chip.access {
       background: rgba(76, 211, 153, 0.1);
       border-color: rgba(76, 211, 153, 0.18);
@@ -2070,6 +2170,30 @@
       line-height: 1.55;
     }
 
+    .workspace-detail-mcp-advanced-details {
+      border-radius: 14px;
+      border: 1px solid rgba(255,255,255,0.08);
+      background: rgba(255,255,255,0.025);
+      overflow: hidden;
+    }
+
+    .workspace-detail-mcp-advanced-summary {
+      list-style: none;
+      cursor: pointer;
+      padding: 0.82rem 0.95rem;
+      font-size: 0.8rem;
+      font-weight: 600;
+      color: var(--text-primary);
+    }
+
+    .workspace-detail-mcp-advanced-summary::-webkit-details-marker {
+      display: none;
+    }
+
+    .workspace-detail-mcp-advanced-body {
+      padding: 0 0.95rem 0.95rem;
+    }
+
     .workspace-detail-mcp-agent-access-card {
       padding: 0.9rem;
       border-radius: 14px;
@@ -2159,6 +2283,62 @@
       background: rgba(255,255,255,0.02);
       font-size: 0.76rem;
       color: rgba(219, 228, 255, 0.6);
+    }
+
+    .workspace-detail-mcp-email-card {
+      background:
+        radial-gradient(circle at top right, rgba(56, 189, 248, 0.1), transparent 42%),
+        linear-gradient(180deg, rgba(255,255,255,0.04), rgba(255,255,255,0.015)),
+        rgba(6, 12, 28, 0.74);
+    }
+
+    .workspace-detail-mcp-email-actions-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+      gap: 0.55rem;
+    }
+
+    .workspace-detail-mcp-email-action {
+      display: flex;
+      align-items: flex-start;
+      gap: 0.65rem;
+      padding: 0.72rem 0.78rem;
+      border-radius: 12px;
+      border: 1px solid rgba(255,255,255,0.08);
+      background: rgba(255,255,255,0.025);
+      cursor: pointer;
+    }
+
+    .workspace-detail-mcp-email-action input {
+      margin-top: 0.12rem;
+    }
+
+    .workspace-detail-mcp-email-action span {
+      display: flex;
+      flex-direction: column;
+      gap: 0.14rem;
+      min-width: 0;
+    }
+
+    .workspace-detail-mcp-email-action strong {
+      font-size: 0.78rem;
+      color: var(--text-primary);
+    }
+
+    .workspace-detail-mcp-email-action small {
+      font-size: 0.7rem;
+      line-height: 1.4;
+      color: rgba(219, 228, 255, 0.62);
+    }
+
+    .workspace-detail-mcp-email-summary {
+      padding: 0.8rem 0.9rem;
+      border-radius: 12px;
+      border: 1px solid rgba(255,255,255,0.08);
+      background: rgba(255,255,255,0.03);
+      color: rgba(234, 246, 255, 0.86);
+      font-size: 0.76rem;
+      line-height: 1.55;
     }
 
     .workspace-detail-mcp-empty-note {

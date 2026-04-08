@@ -147,6 +147,8 @@ export class WorkspaceDetailPage {
     this.agentSkillsPromises = new Map();
     this.availableMCPServers = [];
     this.availableMCPServersPromise = null;
+    this.availableEmailAccounts = [];
+    this.availableEmailAccountsPromise = null;
     this.activeWorkspaceMCPBindingId = '';
     this.activeWorkspaceMCPMode = 'create';
     this.availableSkills = [];
@@ -1182,7 +1184,20 @@ export class WorkspaceDetailPage {
       mcpAliasInput: document.getElementById('workspace-detail-mcp-alias'),
       mcpEnabledInput: document.getElementById('workspace-detail-mcp-enabled'),
       mcpScopeInput: document.getElementById('workspace-detail-mcp-scope'),
+      mcpConfigField: document.getElementById('workspace-detail-mcp-config-field'),
+      mcpConfigDetails: document.getElementById('workspace-detail-mcp-config-details'),
       mcpConfigInput: document.getElementById('workspace-detail-mcp-config'),
+      mcpEmailFields: document.getElementById('workspace-detail-mcp-email-fields'),
+      mcpEmailAccountSelect: document.getElementById('workspace-detail-mcp-email-account'),
+      mcpEmailAccountHelp: document.getElementById('workspace-detail-mcp-email-account-help'),
+      mcpEmailAccountSummary: document.getElementById('workspace-detail-mcp-email-account-summary'),
+      mcpEmailMailboxInput: document.getElementById('workspace-detail-mcp-email-mailboxes'),
+      mcpEmailActionRead: document.getElementById('workspace-detail-mcp-email-action-read'),
+      mcpEmailActionSearch: document.getElementById('workspace-detail-mcp-email-action-search'),
+      mcpEmailActionDraft: document.getElementById('workspace-detail-mcp-email-action-draft'),
+      mcpEmailActionSend: document.getElementById('workspace-detail-mcp-email-action-send'),
+      mcpEmailSendConfirmWrap: document.getElementById('workspace-detail-mcp-email-send-confirm-wrap'),
+      mcpEmailSendConfirmInput: document.getElementById('workspace-detail-mcp-email-send-confirm'),
       mcpAgentOptions: document.getElementById('workspace-detail-mcp-agent-options'),
       mcpAgentAccessSummary: document.getElementById('workspace-detail-mcp-agent-access-summary'),
       mcpSubmitBtn: document.getElementById('workspace-detail-mcp-submit'),
@@ -1269,7 +1284,18 @@ export class WorkspaceDetailPage {
       event.preventDefault();
       this.submitWorkspaceMCPModal();
     });
-    this.elements.mcpServerSelect?.addEventListener('change', () => this.handleWorkspaceMCPServerChange());
+    this.elements.mcpServerSelect?.addEventListener('change', () => {
+      this.handleWorkspaceMCPServerChange();
+    });
+    [
+      this.elements.mcpEmailActionRead,
+      this.elements.mcpEmailActionSearch,
+      this.elements.mcpEmailActionDraft,
+      this.elements.mcpEmailActionSend
+    ].forEach((checkbox) => {
+      checkbox?.addEventListener('change', () => this.handleWorkspaceMCPEmailActionChange());
+    });
+    this.elements.mcpEmailAccountSelect?.addEventListener('change', () => this.updateWorkspaceMCPEmailAccountSummary());
     this.elements.mcpAgentOptions?.addEventListener('change', () => this.updateWorkspaceMCPAgentAccessSummary());
     this.elements.mcpModal?.addEventListener('hidden.bs.modal', () => this.resetWorkspaceMCPModal());
 
@@ -5519,6 +5545,10 @@ export class WorkspaceDetailPage {
   }
 
   normalizeWorkspaceMCPBinding(binding, source = 'workspace') {
+    const emailAccount = binding?.email_account && typeof binding.email_account === 'object'
+      ? { ...binding.email_account }
+      : null;
+
     return {
       id: String(binding?.id || '').trim(),
       serverName: String(binding?.server_name || binding?.serverName || '').trim(),
@@ -5526,6 +5556,8 @@ export class WorkspaceDetailPage {
       enabled: binding?.enabled !== false,
       scope: binding?.scope && typeof binding.scope === 'object' ? { ...binding.scope } : {},
       config: binding?.config && typeof binding.config === 'object' ? { ...binding.config } : {},
+      emailAccount,
+      emailAccountMissing: binding?.email_account_missing === true || binding?.emailAccountMissing === true,
       source
     };
   }
@@ -5638,6 +5670,261 @@ export class WorkspaceDetailPage {
     }
   }
 
+  isEmailWorkspaceMCPServerName(serverName) {
+    switch (String(serverName || '').trim().toLowerCase()) {
+      case 'email':
+      case 'gmail':
+      case 'microsoft-mail':
+      case 'microsoft':
+      case 'outlook-mail':
+      case 'imap-smtp':
+      case 'imap_smtp':
+        return true;
+      default:
+        return false;
+    }
+  }
+
+  normalizeWorkspaceEmailAccount(account) {
+    if (!account || typeof account !== 'object') {
+      return null;
+    }
+
+    return {
+      id: String(account.id || '').trim(),
+      vaultId: String(account.vault_id || account.vaultId || '').trim(),
+      workspaceId: String(account.workspace_id || account.workspaceId || '').trim(),
+      label: String(account.label || '').trim(),
+      provider: String(account.provider || '').trim(),
+      emailAddress: String(account.email_address || account.emailAddress || '').trim(),
+      displayName: String(account.display_name || account.displayName || '').trim(),
+      authType: String(account.auth_type || account.authType || '').trim(),
+      credentials: account.credentials && typeof account.credentials === 'object'
+        ? { ...account.credentials }
+        : (account.credentials_status && typeof account.credentials_status === 'object'
+          ? { ...account.credentials_status }
+          : {})
+    };
+  }
+
+  async loadAvailableEmailAccounts(force = false) {
+    if (!force && Array.isArray(this.availableEmailAccounts) && this.availableEmailAccounts.length > 0) {
+      return this.availableEmailAccounts;
+    }
+    if (!force && this.availableEmailAccountsPromise) {
+      return this.availableEmailAccountsPromise;
+    }
+
+    this.availableEmailAccountsPromise = (async () => {
+      const response = await fetch('/api/vault/email-accounts');
+      if (!response.ok) {
+        const text = await response.text();
+        throw new Error(text || 'Failed to load email accounts');
+      }
+
+      const data = await response.json();
+      const seen = new Set();
+      const accounts = (Array.isArray(data?.accounts) ? data.accounts : [])
+        .map((account) => this.normalizeWorkspaceEmailAccount(account))
+        .filter((account) => account && account.id)
+        .filter((account) => {
+          const key = account.id.toLowerCase();
+          if (seen.has(key)) return false;
+          seen.add(key);
+          return true;
+        })
+        .sort((left, right) => {
+          const leftLabel = left.label || left.emailAddress || left.id;
+          const rightLabel = right.label || right.emailAddress || right.id;
+          return leftLabel.localeCompare(rightLabel);
+        });
+
+      this.availableEmailAccounts = accounts;
+      return accounts;
+    })();
+
+    try {
+      return await this.availableEmailAccountsPromise;
+    } finally {
+      this.availableEmailAccountsPromise = null;
+    }
+  }
+
+  getVisibleWorkspaceEmailAccounts(existingBinding = null) {
+    const workspaceID = String(this.workspaceId || '').trim().toLowerCase();
+    const existingAccount = this.normalizeWorkspaceEmailAccount(existingBinding?.emailAccount);
+    const existingAccountID = String(existingBinding?.config?.account_id || existingAccount?.id || '').trim().toLowerCase();
+    const accounts = Array.isArray(this.availableEmailAccounts) ? [...this.availableEmailAccounts] : [];
+    const filtered = accounts.filter((account) => {
+      const accountWorkspaceID = String(account.workspaceId || '').trim().toLowerCase();
+      return !accountWorkspaceID || accountWorkspaceID === workspaceID;
+    });
+
+    if (existingAccount && existingAccount.id && !filtered.some((account) => account.id.toLowerCase() === existingAccount.id.toLowerCase())) {
+      filtered.unshift(existingAccount);
+    } else if (existingAccountID && !filtered.some((account) => account.id.toLowerCase() === existingAccountID)) {
+      filtered.unshift({
+        id: String(existingBinding?.config?.account_id || '').trim(),
+        label: String(existingBinding?.config?.account_id || 'Unavailable email account'),
+        provider: '',
+        emailAddress: '',
+        authType: '',
+        workspaceId: ''
+      });
+    }
+
+    return filtered;
+  }
+
+  setWorkspaceMCPEmailAccountHelp(message, isError = false) {
+    if (!this.elements.mcpEmailAccountHelp) return;
+    this.elements.mcpEmailAccountHelp.textContent = message;
+    this.elements.mcpEmailAccountHelp.classList.toggle('is-error', !!isError);
+  }
+
+  populateWorkspaceMCPEmailAccountOptions(selectedAccountID = '', existingBinding = null) {
+    if (!this.elements.mcpEmailAccountSelect) return;
+
+    const normalizedSelected = String(selectedAccountID || '').trim();
+    const accounts = this.getVisibleWorkspaceEmailAccounts(existingBinding);
+    const options = ['<option value="">Select an email account</option>'];
+
+    accounts.forEach((account) => {
+      const id = String(account?.id || '').trim();
+      if (!id) return;
+
+      const selected = normalizedSelected && id.toLowerCase() === normalizedSelected.toLowerCase() ? ' selected' : '';
+      const accountLabel = account.label || account.emailAddress || id;
+      const details = [account.provider, account.emailAddress].filter(Boolean).join(' • ');
+      const text = details ? `${accountLabel} (${details})` : accountLabel;
+      options.push(`<option value="${this.escapeHtml(id)}"${selected}>${this.escapeHtml(text)}</option>`);
+    });
+
+    this.elements.mcpEmailAccountSelect.innerHTML = options.join('');
+    if (normalizedSelected) {
+      this.elements.mcpEmailAccountSelect.value = normalizedSelected;
+    }
+
+    if (accounts.length === 0) {
+      this.setWorkspaceMCPEmailAccountHelp('No unlocked email accounts are available. Create one in Vault > Email Accounts.', true);
+      return;
+    }
+
+    this.setWorkspaceMCPEmailAccountHelp('Email accounts come from Vault > Email Accounts. Workspace-scoped accounts must match this workspace.', false);
+  }
+
+  getWorkspaceMCPSelectedEmailActions() {
+    const mapping = [
+      ['read', this.elements.mcpEmailActionRead],
+      ['search', this.elements.mcpEmailActionSearch],
+      ['draft', this.elements.mcpEmailActionDraft],
+      ['send', this.elements.mcpEmailActionSend]
+    ];
+
+    return mapping
+      .filter(([, element]) => element?.checked)
+      .map(([action]) => action);
+  }
+
+  setWorkspaceMCPEmailActions(actions = []) {
+    const selected = new Set(
+      (Array.isArray(actions) ? actions : [])
+        .map((action) => String(action || '').trim().toLowerCase())
+        .filter(Boolean)
+    );
+
+    if (this.elements.mcpEmailActionRead) this.elements.mcpEmailActionRead.checked = selected.has('read');
+    if (this.elements.mcpEmailActionSearch) this.elements.mcpEmailActionSearch.checked = selected.has('search');
+    if (this.elements.mcpEmailActionDraft) this.elements.mcpEmailActionDraft.checked = selected.has('draft');
+    if (this.elements.mcpEmailActionSend) this.elements.mcpEmailActionSend.checked = selected.has('send');
+    this.handleWorkspaceMCPEmailActionChange();
+  }
+
+  handleWorkspaceMCPEmailActionChange() {
+    const selected = this.getWorkspaceMCPSelectedEmailActions();
+    const canSend = selected.includes('send');
+
+    if (this.elements.mcpEmailSendConfirmWrap) {
+      this.elements.mcpEmailSendConfirmWrap.classList.toggle('d-none', !canSend);
+    }
+    if (this.elements.mcpEmailSendConfirmInput && canSend && !this.elements.mcpEmailSendConfirmInput.checked) {
+      this.elements.mcpEmailSendConfirmInput.checked = true;
+    }
+  }
+
+  updateWorkspaceMCPEmailAccountSummary(existingBinding = null) {
+    if (!this.elements.mcpEmailAccountSummary) return;
+
+    const selectedAccountID = String(this.elements.mcpEmailAccountSelect?.value || '').trim();
+    const accounts = this.getVisibleWorkspaceEmailAccounts(existingBinding);
+    const account = accounts.find((item) => String(item?.id || '').trim() === selectedAccountID) || this.normalizeWorkspaceEmailAccount(existingBinding?.emailAccount);
+
+    if (!selectedAccountID && !account) {
+      this.elements.mcpEmailAccountSummary.textContent = 'Select an email account to review its provider, address, and stored credential status.';
+      return;
+    }
+
+    if (!account) {
+      this.elements.mcpEmailAccountSummary.textContent = 'The saved email account is currently unavailable. Unlock the correct vault or choose another account.';
+      return;
+    }
+
+    const credentialState = account.credentials || {};
+    const stored = [];
+    if (credentialState.has_refresh_token) stored.push('refresh token');
+    if (credentialState.has_access_token) stored.push('access token');
+    if (credentialState.has_password) stored.push(account.authType === 'app_password' ? 'app password' : 'password');
+    if (credentialState.has_client_id) stored.push('client id');
+    if (credentialState.has_client_secret) stored.push('client secret');
+
+    const summary = [
+      account.label || account.emailAddress || account.id,
+      account.emailAddress,
+      account.provider,
+      account.authType
+    ].filter(Boolean).join(' • ');
+
+    this.elements.mcpEmailAccountSummary.textContent = stored.length > 0
+      ? `${summary}. Stored in vault: ${stored.join(', ')}.`
+      : `${summary}. No credential status is currently available.`;
+  }
+
+  async syncWorkspaceMCPEmailFields(existingBinding = null) {
+    const serverName = String(this.elements.mcpServerSelect?.value || '').trim();
+    const isEmailServer = this.isEmailWorkspaceMCPServerName(serverName);
+
+    if (this.elements.mcpEmailFields) {
+      this.elements.mcpEmailFields.classList.toggle('d-none', !isEmailServer);
+    }
+    if (this.elements.mcpConfigDetails) {
+      this.elements.mcpConfigDetails.open = !isEmailServer;
+    }
+
+    if (!isEmailServer) {
+      this.updateWorkspaceMCPEmailAccountSummary();
+      return;
+    }
+
+    try {
+      await this.loadAvailableEmailAccounts(true);
+      this.populateWorkspaceMCPEmailAccountOptions(
+        existingBinding?.config?.account_id || this.elements.mcpEmailAccountSelect?.value || '',
+        existingBinding
+      );
+    } catch (error) {
+      console.error('Failed to load email accounts for MCP modal:', error);
+      this.availableEmailAccounts = [];
+      this.populateWorkspaceMCPEmailAccountOptions(
+        existingBinding?.config?.account_id || this.elements.mcpEmailAccountSelect?.value || '',
+        existingBinding
+      );
+      this.setWorkspaceMCPEmailAccountHelp(error.message || 'Failed to load email accounts', true);
+    }
+
+    this.updateWorkspaceMCPEmailAccountSummary(existingBinding);
+    this.handleWorkspaceMCPEmailActionChange();
+  }
+
   getWorkspaceAgentAccessEntry(agentInstanceId) {
     const normalizedAgentInstanceId = String(agentInstanceId || '').trim();
     if (!normalizedAgentInstanceId || !this.workspace || !Array.isArray(this.workspace.agent_mcp_access)) {
@@ -5748,6 +6035,27 @@ export class WorkspaceDetailPage {
 
   summarizeWorkspaceMCPBindingConfig(binding) {
     const config = binding?.config && typeof binding.config === 'object' ? binding.config : {};
+    const serverName = String(binding?.serverName || '').trim().toLowerCase();
+
+    if (this.isEmailWorkspaceMCPServerName(serverName)) {
+      const actions = Array.isArray(config.allowed_actions)
+        ? config.allowed_actions.map((action) => String(action || '').trim()).filter(Boolean)
+        : [];
+      const mailboxes = Array.isArray(config.mailboxes)
+        ? config.mailboxes.map((value) => String(value || '').trim()).filter(Boolean)
+        : [];
+      const parts = [];
+      if (actions.length > 0) {
+        parts.push(actions.join(', '));
+      }
+      if (mailboxes.length > 0) {
+        parts.push(mailboxes.length === 1 ? `1 mailbox` : `${mailboxes.length} mailboxes`);
+      }
+      if (parts.length > 0) {
+        return parts.join(' • ');
+      }
+    }
+
     const entries = Object.entries(config)
       .filter(([key, value]) => String(key || '').trim() && value !== null && value !== undefined);
     if (entries.length === 0) return '';
@@ -5766,6 +6074,12 @@ export class WorkspaceDetailPage {
     const serverName = String(binding?.serverName || '').trim().toLowerCase();
     if (binding?.enabled === false) {
       return 'Saved on this workspace but currently disabled. Re-enable it to materialize at runtime for agent instances.';
+    }
+    if (this.isEmailWorkspaceMCPServerName(serverName) && binding?.emailAccountMissing) {
+      return 'Workspace-scoped email access is configured here, but the referenced vault account is currently unavailable or still locked.';
+    }
+    if (this.isEmailWorkspaceMCPServerName(serverName)) {
+      return 'Workspace-scoped email access backed by a vault account. Policy on this binding limits which mailbox actions agents may perform.';
     }
     if (serverName === 'filesystem' && binding?.source === 'synthesized') {
       return 'Derived from imported workspace directories so filesystem access follows this workspace automatically.';
@@ -5917,9 +6231,28 @@ export class WorkspaceDetailPage {
     if (this.elements.mcpConfigInput) {
       this.elements.mcpConfigInput.value = '';
     }
+    if (this.elements.mcpConfigDetails) {
+      this.elements.mcpConfigDetails.open = true;
+    }
     if (this.elements.mcpAliasInput) {
       this.elements.mcpAliasInput.value = '';
     }
+    if (this.elements.mcpEmailFields) {
+      this.elements.mcpEmailFields.classList.add('d-none');
+    }
+    if (this.elements.mcpEmailAccountSelect) {
+      this.elements.mcpEmailAccountSelect.innerHTML = '<option value="">Select an email account</option>';
+      this.elements.mcpEmailAccountSelect.value = '';
+    }
+    if (this.elements.mcpEmailMailboxInput) {
+      this.elements.mcpEmailMailboxInput.value = '';
+    }
+    this.setWorkspaceMCPEmailActions(['read', 'search']);
+    if (this.elements.mcpEmailSendConfirmInput) {
+      this.elements.mcpEmailSendConfirmInput.checked = true;
+    }
+    this.setWorkspaceMCPEmailAccountHelp('Email accounts come from Vault > Email Accounts.');
+    this.updateWorkspaceMCPEmailAccountSummary();
     if (this.elements.mcpSubmitBtn) {
       this.elements.mcpSubmitBtn.disabled = false;
       this.elements.mcpSubmitBtn.textContent = 'Add Binding';
@@ -5928,13 +6261,19 @@ export class WorkspaceDetailPage {
     this.updateWorkspaceMCPAgentAccessSummary();
   }
 
-  handleWorkspaceMCPServerChange() {
+  async handleWorkspaceMCPServerChange() {
     const serverName = String(this.elements.mcpServerSelect?.value || '').trim();
-    if (!serverName || !this.elements.mcpAliasInput) return;
+    if (!serverName) {
+      await this.syncWorkspaceMCPEmailFields();
+      return;
+    }
+    if (!this.elements.mcpAliasInput) return;
 
     if (!this.elements.mcpAliasInput.value.trim()) {
       this.elements.mcpAliasInput.value = this.slugifyWorkspaceMCPAlias(serverName);
     }
+
+    await this.syncWorkspaceMCPEmailFields();
   }
 
   handleWorkspaceMCPListClick(event) {
@@ -6012,6 +6351,23 @@ export class WorkspaceDetailPage {
         : '';
       this.elements.mcpConfigInput.value = config;
     }
+    const emailConfig = existingBinding?.config && typeof existingBinding.config === 'object'
+      ? existingBinding.config
+      : {};
+    if (this.elements.mcpEmailMailboxInput) {
+      const mailboxes = Array.isArray(emailConfig.mailboxes)
+        ? emailConfig.mailboxes.map((item) => String(item || '').trim()).filter(Boolean)
+        : [];
+      this.elements.mcpEmailMailboxInput.value = mailboxes.join(', ');
+    }
+    this.setWorkspaceMCPEmailActions(
+      Array.isArray(emailConfig.allowed_actions) && emailConfig.allowed_actions.length > 0
+        ? emailConfig.allowed_actions
+        : ['read', 'search']
+    );
+    if (this.elements.mcpEmailSendConfirmInput) {
+      this.elements.mcpEmailSendConfirmInput.checked = emailConfig.require_send_confirmation !== false;
+    }
     if (this.elements.mcpSubmitBtn) {
       this.elements.mcpSubmitBtn.textContent = explicitBinding
         ? 'Save Changes'
@@ -6019,6 +6375,7 @@ export class WorkspaceDetailPage {
       this.elements.mcpSubmitBtn.disabled = false;
     }
 
+    await this.syncWorkspaceMCPEmailFields(existingBinding);
     this.renderWorkspaceMCPAgentOptions(this.activeWorkspaceMCPBindingId);
     this.getWorkspaceMCPModalInstance()?.show();
   }
@@ -6057,6 +6414,45 @@ export class WorkspaceDetailPage {
     }
 
     return parsed;
+  }
+
+  parseWorkspaceMCPEmailMailboxes() {
+    return String(this.elements.mcpEmailMailboxInput?.value || '')
+      .split(/[\n,]+/)
+      .map((value) => String(value || '').trim())
+      .filter(Boolean);
+  }
+
+  buildWorkspaceMCPEmailConfig(baseConfig = {}) {
+    const config = baseConfig && typeof baseConfig === 'object' ? { ...baseConfig } : {};
+    const accountID = String(this.elements.mcpEmailAccountSelect?.value || '').trim();
+    const allowedActions = this.getWorkspaceMCPSelectedEmailActions();
+
+    if (!accountID) {
+      throw new Error('Choose an email account');
+    }
+    if (allowedActions.length === 0) {
+      throw new Error('Select at least one email action');
+    }
+
+    config.account_id = accountID;
+    delete config.account_vault_record_id;
+    config.allowed_actions = allowedActions;
+
+    const mailboxes = this.parseWorkspaceMCPEmailMailboxes();
+    if (mailboxes.length > 0) {
+      config.mailboxes = mailboxes;
+    } else {
+      delete config.mailboxes;
+    }
+
+    if (allowedActions.includes('send')) {
+      config.require_send_confirmation = this.elements.mcpEmailSendConfirmInput?.checked !== false;
+    } else {
+      delete config.require_send_confirmation;
+    }
+
+    return config;
   }
 
   getWorkspaceMCPSelectedAgentInstanceIDs() {
@@ -6201,6 +6597,17 @@ export class WorkspaceDetailPage {
       return;
     }
 
+    if (this.isEmailWorkspaceMCPServerName(serverName)) {
+      try {
+        config = this.buildWorkspaceMCPEmailConfig(config);
+        this.setWorkspaceMCPEmailAccountHelp('Email accounts come from Vault > Email Accounts. Workspace-scoped accounts must match this workspace.', false);
+      } catch (error) {
+        this.setWorkspaceMCPEmailAccountHelp(error.message || 'Email configuration is invalid', true);
+        if (window.Toast) window.Toast.error(error.message || 'Email configuration is invalid');
+        return;
+      }
+    }
+
     this.setWorkspaceMCPServerHelp('Only globally enabled connectors can be added here.');
     this.setWorkspaceMCPModalSubmitting(true);
 
@@ -6289,11 +6696,16 @@ export class WorkspaceDetailPage {
 
     this.elements.mcpList.innerHTML = bindings.map((binding) => {
       const serverName = String(binding?.serverName || '').trim() || 'unknown';
+      const emailServer = this.isEmailWorkspaceMCPServerName(serverName);
+      const emailAccount = this.normalizeWorkspaceEmailAccount(binding?.emailAccount);
       const alias = String(binding?.alias || '').trim();
       const source = binding?.source === 'synthesized' ? 'Synthesized' : 'Explicit';
       const isDisabled = binding?.enabled === false;
       const scopeSummary = this.summarizeWorkspaceMCPBindingScope(binding);
       const configSummary = this.summarizeWorkspaceMCPBindingConfig(binding);
+      const emailActions = Array.isArray(binding?.config?.allowed_actions)
+        ? binding.config.allowed_actions.map((action) => String(action || '').trim()).filter(Boolean)
+        : [];
       const agentNames = this.getWorkspaceMCPAgentNamesForBinding(binding.id);
       const accessSummary = isDisabled
         ? 'Disabled for this workspace'
@@ -6339,6 +6751,11 @@ export class WorkspaceDetailPage {
         `<span class="workspace-detail-mcp-chip source">${this.escapeHtml(source)}</span>`,
         `<span class="workspace-detail-mcp-chip status${isDisabled ? ' is-disabled' : ''}">${isDisabled ? 'Disabled' : 'Enabled'}</span>`,
         alias ? `<span class="workspace-detail-mcp-chip alias">Alias: ${this.escapeHtml(alias)}</span>` : '',
+        emailServer && emailAccount?.provider ? `<span class="workspace-detail-mcp-chip provider">${this.escapeHtml(emailAccount.provider)}</span>` : '',
+        emailServer && emailAccount?.emailAddress ? `<span class="workspace-detail-mcp-chip email">${this.escapeHtml(emailAccount.emailAddress)}</span>` : '',
+        emailServer && emailActions.length > 0 ? `<span class="workspace-detail-mcp-chip policy">${this.escapeHtml(`Actions: ${emailActions.join(', ')}`)}</span>` : '',
+        emailServer && binding?.config?.require_send_confirmation === true ? '<span class="workspace-detail-mcp-chip policy">Send confirm</span>' : '',
+        emailServer && binding?.emailAccountMissing ? '<span class="workspace-detail-mcp-chip warning">Account unavailable</span>' : '',
         scopeSummary ? `<span class="workspace-detail-mcp-chip scope">${this.escapeHtml(scopeSummary)}</span>` : '',
         configSummary ? `<span class="workspace-detail-mcp-chip scope">Config: ${this.escapeHtml(configSummary)}</span>` : '',
         `<span class="workspace-detail-mcp-chip access">${this.escapeHtml(accessLabel)}</span>`

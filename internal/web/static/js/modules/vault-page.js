@@ -19,6 +19,16 @@
       folderName: 'Secrets'
     }
   };
+  const EMAIL_PROVIDER_META = {
+    gmail: 'Gmail / Google Workspace',
+    microsoft: 'Microsoft 365 / Outlook',
+    imap_smtp: 'Custom IMAP / SMTP'
+  };
+  const EMAIL_AUTH_TYPE_META = {
+    oauth2: 'OAuth 2',
+    password: 'Password',
+    app_password: 'App Password'
+  };
   const section = document.getElementById('private-vault');
   if (!section) {
     return;
@@ -80,6 +90,37 @@
   const createGrantBtn = document.getElementById('vaultCreateGrantBtn');
   const grantsListEl = document.getElementById('vaultGrantsList');
 
+  const emailAccountsSummaryEl = document.getElementById('vaultEmailAccountsSummary');
+  const emailAccountsListEl = document.getElementById('vaultEmailAccountsList');
+  const emailAccountModeBadgeEl = document.getElementById('vaultEmailAccountModeBadge');
+  const emailAccountLabelInput = document.getElementById('vaultEmailAccountLabel');
+  const emailAccountAddressInput = document.getElementById('vaultEmailAccountAddress');
+  const emailAccountProviderInput = document.getElementById('vaultEmailAccountProvider');
+  const emailAccountAuthTypeInput = document.getElementById('vaultEmailAccountAuthType');
+  const emailAccountDisplayNameInput = document.getElementById('vaultEmailAccountDisplayName');
+  const emailAccountUsernameInput = document.getElementById('vaultEmailAccountUsername');
+  const emailAccountWorkspaceInput = document.getElementById('vaultEmailAccountWorkspaceId');
+  const emailAccountTagsInput = document.getElementById('vaultEmailAccountTags');
+  const emailAccountSourceInput = document.getElementById('vaultEmailAccountSource');
+  const emailAccountRetentionInput = document.getElementById('vaultEmailAccountRetention');
+  const emailAccountImapFields = document.getElementById('vaultEmailAccountImapFields');
+  const emailAccountImapHostInput = document.getElementById('vaultEmailAccountImapHost');
+  const emailAccountImapPortInput = document.getElementById('vaultEmailAccountImapPort');
+  const emailAccountSmtpHostInput = document.getElementById('vaultEmailAccountSmtpHost');
+  const emailAccountSmtpPortInput = document.getElementById('vaultEmailAccountSmtpPort');
+  const emailAccountOauthFields = document.getElementById('vaultEmailAccountOauthFields');
+  const emailAccountPasswordFields = document.getElementById('vaultEmailAccountPasswordFields');
+  const emailAccountRefreshTokenInput = document.getElementById('vaultEmailAccountRefreshToken');
+  const emailAccountAccessTokenInput = document.getElementById('vaultEmailAccountAccessToken');
+  const emailAccountClientIdInput = document.getElementById('vaultEmailAccountClientId');
+  const emailAccountClientSecretInput = document.getElementById('vaultEmailAccountClientSecret');
+  const emailAccountTokenEndpointInput = document.getElementById('vaultEmailAccountTokenEndpoint');
+  const emailAccountPasswordInput = document.getElementById('vaultEmailAccountPassword');
+  const emailAccountCredentialStatusEl = document.getElementById('vaultEmailAccountCredentialStatus');
+  const saveEmailAccountBtn = document.getElementById('vaultSaveEmailAccountBtn');
+  const resetEmailAccountBtn = document.getElementById('vaultResetEmailAccountBtn');
+  const deleteEmailAccountBtn = document.getElementById('vaultDeleteEmailAccountBtn');
+
   const openExportDialogBtn = document.getElementById('vaultOpenExportDialogBtn');
   const exportOverlay = document.getElementById('vaultExportOverlay');
   const exportDialogVaultName = document.getElementById('vaultExportDialogVaultName');
@@ -113,7 +154,9 @@
   let selectedVaultID = DEFAULT_VAULT_ID;
   let records = [];
   let grants = [];
+  let emailAccounts = [];
   let selectedRecord = null;
+  let selectedEmailAccount = null;
   let payloadRevealed = false;
   let recordIndex = new Map();
   let folderIndex = new Map();
@@ -430,6 +473,29 @@
   function recordTypeLabel(type) {
     const normalized = normalizeRecordType(type);
     return TYPE_META[normalized]?.label || normalized.replaceAll('_', ' ');
+  }
+
+  function normalizeEmailProvider(provider) {
+    return String(provider || '').trim().toLowerCase().replaceAll('-', '_');
+  }
+
+  function emailProviderLabel(provider) {
+    const normalized = normalizeEmailProvider(provider);
+    return EMAIL_PROVIDER_META[normalized] || normalized.replaceAll('_', ' ');
+  }
+
+  function normalizeEmailAuthType(authType) {
+    return String(authType || '').trim().toLowerCase();
+  }
+
+  function emailAuthTypeLabel(authType) {
+    const normalized = normalizeEmailAuthType(authType);
+    return EMAIL_AUTH_TYPE_META[normalized] || normalized.replaceAll('_', ' ');
+  }
+
+  function parseOptionalPort(value) {
+    const parsed = Number.parseInt(String(value || '').trim(), 10);
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
   }
 
   function recordTypeFolderName(type) {
@@ -997,15 +1063,20 @@
     if (explorerAddBtn) {
       explorerAddBtn.disabled = disableVaultEditing;
     }
+    setEmailAccountFormDisabled(disableVaultEditing);
     renderFolderVaultTabs();
 
     if (disableVaultEditing) {
       records = [];
       recordIndex = new Map();
+      emailAccounts = [];
       rebuildFolderTree();
       recordsListEl.innerHTML = vaultStatus?.available
         ? '<div class="vault-page-empty">Unlock the vault to browse saved entries.</div>'
         : '<div class="vault-page-empty">Create a vault to begin storing encrypted entries.</div>';
+      renderEmailAccountsList([]);
+      clearEmailAccountForm({ refreshList: false });
+      renderEmailAccountsSummary();
       clearRecordForm({ preserveStatus: true, refreshList: false, refreshExplorer: false, hide: true });
       renderExplorer();
     }
@@ -1650,6 +1721,420 @@
     `).join('');
   }
 
+  function currentEmailAccountSecretState(account) {
+    if (!account || typeof account !== 'object') {
+      return {};
+    }
+
+    if (account.credentials_status && typeof account.credentials_status === 'object') {
+      return account.credentials_status;
+    }
+    if (account.credentials && typeof account.credentials === 'object') {
+      return account.credentials;
+    }
+    return {};
+  }
+
+  function emailAccountSecretsSummary(account) {
+    const state = currentEmailAccountSecretState(account);
+    const stored = [];
+
+    if (state.has_refresh_token) stored.push('Refresh token');
+    if (state.has_access_token) stored.push('Access token');
+    if (state.has_password) stored.push(normalizeEmailAuthType(account?.auth_type) === 'app_password' ? 'App password' : 'Password');
+    if (state.has_client_id) stored.push('Client ID');
+    if (state.has_client_secret) stored.push('Client secret');
+
+    if (stored.length === 0) {
+      return 'No credentials stored yet.';
+    }
+
+    return `Stored in vault: ${stored.join(', ')}.`;
+  }
+
+  function renderEmailAccountCredentialState(account) {
+    if (!emailAccountCredentialStatusEl) {
+      return;
+    }
+
+    const message = emailAccountSecretsSummary(account);
+    emailAccountCredentialStatusEl.textContent = message;
+  }
+
+  function renderEmailAccountsSummary() {
+    if (!emailAccountsSummaryEl) {
+      return;
+    }
+
+    if (!currentVaultID()) {
+      emailAccountsSummaryEl.textContent = 'Select a vault to manage email accounts.';
+      return;
+    }
+
+    if (!vaultStatus?.available) {
+      emailAccountsSummaryEl.textContent = 'Create a vault before saving reusable email identities.';
+      return;
+    }
+
+    if (vaultStatus.locked) {
+      emailAccountsSummaryEl.textContent = 'Unlock the selected vault to review or edit email accounts.';
+      return;
+    }
+
+    const vaultLabel = vaultDisplayLabel(currentVault());
+    if (!emailAccounts.length) {
+      emailAccountsSummaryEl.textContent = `No email accounts saved in ${vaultLabel} yet.`;
+      return;
+    }
+
+    emailAccountsSummaryEl.textContent = `${emailAccounts.length} email account${emailAccounts.length === 1 ? '' : 's'} stored in ${vaultLabel}.`;
+  }
+
+  function setEmailAccountFormDisabled(disabled) {
+    [
+      emailAccountLabelInput,
+      emailAccountAddressInput,
+      emailAccountProviderInput,
+      emailAccountAuthTypeInput,
+      emailAccountDisplayNameInput,
+      emailAccountUsernameInput,
+      emailAccountWorkspaceInput,
+      emailAccountTagsInput,
+      emailAccountSourceInput,
+      emailAccountRetentionInput,
+      emailAccountImapHostInput,
+      emailAccountImapPortInput,
+      emailAccountSmtpHostInput,
+      emailAccountSmtpPortInput,
+      emailAccountRefreshTokenInput,
+      emailAccountAccessTokenInput,
+      emailAccountClientIdInput,
+      emailAccountClientSecretInput,
+      emailAccountTokenEndpointInput,
+      emailAccountPasswordInput,
+      saveEmailAccountBtn,
+      deleteEmailAccountBtn
+    ].forEach((element) => {
+      if (element) {
+        element.disabled = Boolean(disabled);
+      }
+    });
+
+    if (resetEmailAccountBtn) {
+      resetEmailAccountBtn.disabled = false;
+    }
+  }
+
+  function resetEmailCredentialInputs() {
+    if (emailAccountRefreshTokenInput) emailAccountRefreshTokenInput.value = '';
+    if (emailAccountAccessTokenInput) emailAccountAccessTokenInput.value = '';
+    if (emailAccountClientIdInput) emailAccountClientIdInput.value = '';
+    if (emailAccountClientSecretInput) emailAccountClientSecretInput.value = '';
+    if (emailAccountTokenEndpointInput) emailAccountTokenEndpointInput.value = '';
+    if (emailAccountPasswordInput) emailAccountPasswordInput.value = '';
+  }
+
+  function syncEmailAccountProviderFields() {
+    const provider = normalizeEmailProvider(emailAccountProviderInput?.value);
+    if (emailAccountImapFields) {
+      emailAccountImapFields.hidden = provider !== 'imap_smtp';
+    }
+  }
+
+  function syncEmailAccountAuthFields() {
+    const authType = normalizeEmailAuthType(emailAccountAuthTypeInput?.value);
+    if (emailAccountOauthFields) {
+      emailAccountOauthFields.hidden = authType !== 'oauth2';
+    }
+    if (emailAccountPasswordFields) {
+      emailAccountPasswordFields.hidden = authType === 'oauth2';
+    }
+  }
+
+  function renderEmailAccountsList(items = emailAccounts) {
+    emailAccounts = Array.isArray(items) ? items : [];
+
+    if (!emailAccountsListEl) {
+      return;
+    }
+
+    if (!currentVaultID()) {
+      emailAccountsListEl.innerHTML = '<div class="vault-page-empty">Select a vault to manage reusable email identities.</div>';
+      return;
+    }
+
+    if (!vaultStatus?.available) {
+      emailAccountsListEl.innerHTML = '<div class="vault-page-empty">Create a vault before adding reusable email identities.</div>';
+      return;
+    }
+
+    if (vaultStatus.locked) {
+      emailAccountsListEl.innerHTML = '<div class="vault-page-empty">Unlock the selected vault to review stored email accounts.</div>';
+      return;
+    }
+
+    if (!emailAccounts.length) {
+      emailAccountsListEl.innerHTML = '<div class="vault-page-empty">No email accounts stored in this vault yet.</div>';
+      return;
+    }
+
+    emailAccountsListEl.innerHTML = emailAccounts.map((account) => {
+      const isSelected = selectedEmailAccount?.id === account.id ? ' is-selected' : '';
+      const subtitle = [account.email_address, emailProviderLabel(account.provider)].filter(Boolean).join(' • ');
+      const chips = [
+        `<span class="vault-page-email-chip">${escapeHTML(emailAuthTypeLabel(account.auth_type))}</span>`,
+        account.workspace_id ? `<span class="vault-page-email-chip">Workspace: ${escapeHTML(account.workspace_id)}</span>` : '<span class="vault-page-email-chip">Global</span>'
+      ].filter(Boolean).join('');
+
+      return `
+        <button type="button" class="vault-page-record vault-page-email-account${isSelected}" data-email-account-id="${escapeHTML(account.id)}">
+          <div class="vault-page-record-row">
+            <div class="vault-page-email-account-main">
+              <div class="vault-page-record-title">${escapeHTML(account.label || account.email_address || 'Untitled account')}</div>
+              <span class="vault-page-record-meta">${escapeHTML(subtitle)}</span>
+              <div class="vault-page-email-chip-row">${chips}</div>
+            </div>
+            <span class="vault-page-record-updated">${escapeHTML(prettyDate(account.updated_at || account.created_at))}</span>
+          </div>
+        </button>
+      `;
+    }).join('');
+  }
+
+  function clearEmailAccountForm(options = {}) {
+    selectedEmailAccount = null;
+
+    if (emailAccountLabelInput) emailAccountLabelInput.value = '';
+    if (emailAccountAddressInput) emailAccountAddressInput.value = '';
+    if (emailAccountProviderInput) emailAccountProviderInput.value = 'gmail';
+    if (emailAccountAuthTypeInput) emailAccountAuthTypeInput.value = 'oauth2';
+    if (emailAccountDisplayNameInput) emailAccountDisplayNameInput.value = '';
+    if (emailAccountUsernameInput) emailAccountUsernameInput.value = '';
+    if (emailAccountWorkspaceInput) emailAccountWorkspaceInput.value = '';
+    if (emailAccountTagsInput) emailAccountTagsInput.value = '';
+    if (emailAccountSourceInput) emailAccountSourceInput.value = '';
+    if (emailAccountRetentionInput) emailAccountRetentionInput.value = '';
+    if (emailAccountImapHostInput) emailAccountImapHostInput.value = '';
+    if (emailAccountImapPortInput) emailAccountImapPortInput.value = '';
+    if (emailAccountSmtpHostInput) emailAccountSmtpHostInput.value = '';
+    if (emailAccountSmtpPortInput) emailAccountSmtpPortInput.value = '';
+    resetEmailCredentialInputs();
+    syncEmailAccountProviderFields();
+    syncEmailAccountAuthFields();
+
+    if (emailAccountModeBadgeEl) {
+      emailAccountModeBadgeEl.textContent = 'New account';
+    }
+    if (saveEmailAccountBtn) {
+      saveEmailAccountBtn.textContent = 'Save Email Account';
+    }
+    if (deleteEmailAccountBtn) {
+      deleteEmailAccountBtn.classList.add('d-none');
+    }
+
+    renderEmailAccountCredentialState(null);
+    if (options.refreshList !== false) {
+      renderEmailAccountsList(emailAccounts);
+    }
+    renderEmailAccountsSummary();
+  }
+
+  function applyEmailAccountToForm(account) {
+    if (!account || typeof account !== 'object') {
+      clearEmailAccountForm();
+      return;
+    }
+
+    selectedEmailAccount = account;
+    if (emailAccountLabelInput) emailAccountLabelInput.value = account.label || '';
+    if (emailAccountAddressInput) emailAccountAddressInput.value = account.email_address || '';
+    if (emailAccountProviderInput) emailAccountProviderInput.value = normalizeEmailProvider(account.provider || 'gmail') || 'gmail';
+    if (emailAccountAuthTypeInput) emailAccountAuthTypeInput.value = normalizeEmailAuthType(account.auth_type || 'oauth2') || 'oauth2';
+    if (emailAccountDisplayNameInput) emailAccountDisplayNameInput.value = account.display_name || '';
+    if (emailAccountUsernameInput) emailAccountUsernameInput.value = account.username || '';
+    if (emailAccountWorkspaceInput) emailAccountWorkspaceInput.value = account.workspace_id || '';
+    if (emailAccountTagsInput) emailAccountTagsInput.value = Array.isArray(account.tags) ? account.tags.join(', ') : '';
+    if (emailAccountSourceInput) emailAccountSourceInput.value = account.source || '';
+    if (emailAccountRetentionInput) emailAccountRetentionInput.value = account.retention_policy || '';
+    if (emailAccountImapHostInput) emailAccountImapHostInput.value = account.imap_host || '';
+    if (emailAccountImapPortInput) emailAccountImapPortInput.value = account.imap_port ? String(account.imap_port) : '';
+    if (emailAccountSmtpHostInput) emailAccountSmtpHostInput.value = account.smtp_host || '';
+    if (emailAccountSmtpPortInput) emailAccountSmtpPortInput.value = account.smtp_port ? String(account.smtp_port) : '';
+    resetEmailCredentialInputs();
+    syncEmailAccountProviderFields();
+    syncEmailAccountAuthFields();
+
+    if (emailAccountModeBadgeEl) {
+      emailAccountModeBadgeEl.textContent = 'Editing account';
+    }
+    if (saveEmailAccountBtn) {
+      saveEmailAccountBtn.textContent = 'Save Changes';
+    }
+    if (deleteEmailAccountBtn) {
+      deleteEmailAccountBtn.classList.remove('d-none');
+    }
+
+    renderEmailAccountCredentialState(account);
+    renderEmailAccountsList(emailAccounts);
+    renderEmailAccountsSummary();
+  }
+
+  function selectEmailAccount(accountID) {
+    const match = emailAccounts.find((account) => account.id === accountID) || null;
+    if (!match) {
+      clearEmailAccountForm();
+      return;
+    }
+    applyEmailAccountToForm(match);
+  }
+
+  async function loadEmailAccounts(preferredAccountID = '') {
+    if (!vaultStatus?.available || vaultStatus?.locked || !currentVaultID()) {
+      emailAccounts = [];
+      renderEmailAccountsList([]);
+      clearEmailAccountForm({ refreshList: false });
+      renderEmailAccountsSummary();
+      return;
+    }
+
+    const data = await apiRequest(vaultURL('/api/vault/email-accounts'));
+    emailAccounts = Array.isArray(data.accounts) ? data.accounts : [];
+    renderEmailAccountsList(emailAccounts);
+
+    const selectedID = String(preferredAccountID || selectedEmailAccount?.id || '').trim();
+    if (selectedID) {
+      const match = emailAccounts.find((account) => account.id === selectedID) || null;
+      if (match) {
+        applyEmailAccountToForm(match);
+      } else {
+        clearEmailAccountForm({ refreshList: false });
+      }
+    } else {
+      clearEmailAccountForm({ refreshList: false });
+    }
+
+    renderEmailAccountsSummary();
+  }
+
+  function buildEmailAccountBasePayload() {
+    return {
+      label: String(emailAccountLabelInput?.value || '').trim(),
+      workspace_id: String(emailAccountWorkspaceInput?.value || '').trim(),
+      tags: parseTags(emailAccountTagsInput?.value || ''),
+      source: String(emailAccountSourceInput?.value || '').trim(),
+      retention_policy: String(emailAccountRetentionInput?.value || '').trim(),
+      provider: normalizeEmailProvider(emailAccountProviderInput?.value),
+      email_address: String(emailAccountAddressInput?.value || '').trim(),
+      display_name: String(emailAccountDisplayNameInput?.value || '').trim(),
+      username: String(emailAccountUsernameInput?.value || '').trim(),
+      auth_type: normalizeEmailAuthType(emailAccountAuthTypeInput?.value),
+      imap_host: String(emailAccountImapHostInput?.value || '').trim(),
+      imap_port: parseOptionalPort(emailAccountImapPortInput?.value),
+      smtp_host: String(emailAccountSmtpHostInput?.value || '').trim(),
+      smtp_port: parseOptionalPort(emailAccountSmtpPortInput?.value)
+    };
+  }
+
+  async function saveEmailAccount() {
+    if (!currentVaultID()) {
+      showInlineAlert('Create or select a vault before saving an email account.', 'warning');
+      return;
+    }
+    if (!vaultStatus?.available || vaultStatus?.locked) {
+      showInlineAlert('Unlock the selected vault before saving an email account.', 'warning');
+      return;
+    }
+
+    const basePayload = buildEmailAccountBasePayload();
+    if (!basePayload.email_address) {
+      showInlineAlert('Email address is required before saving the account.', 'warning');
+      return;
+    }
+
+    try {
+      setButtonLoading(saveEmailAccountBtn, true, selectedEmailAccount ? 'Saving account' : 'Saving account');
+
+      let response;
+      if (selectedEmailAccount?.id) {
+        const updatePayload = { ...basePayload };
+        const accessToken = String(emailAccountAccessTokenInput?.value || '').trim();
+        const refreshToken = String(emailAccountRefreshTokenInput?.value || '').trim();
+        const password = String(emailAccountPasswordInput?.value || '').trim();
+        const clientID = String(emailAccountClientIdInput?.value || '').trim();
+        const clientSecret = String(emailAccountClientSecretInput?.value || '').trim();
+        const tokenEndpoint = String(emailAccountTokenEndpointInput?.value || '').trim();
+
+        if (accessToken) updatePayload.access_token = accessToken;
+        if (refreshToken) updatePayload.refresh_token = refreshToken;
+        if (password) updatePayload.password = password;
+        if (clientID) updatePayload.client_id = clientID;
+        if (clientSecret) updatePayload.client_secret = clientSecret;
+        if (tokenEndpoint) updatePayload.token_endpoint = tokenEndpoint;
+
+        response = await apiRequest(`/api/vault/email-accounts/${encodeURIComponent(selectedEmailAccount.id)}`, {
+          method: 'PATCH',
+          body: updatePayload
+        });
+      } else {
+        response = await apiRequest('/api/vault/email-accounts', {
+          method: 'POST',
+          body: {
+            ...basePayload,
+            vault_id: currentVaultID(),
+            credentials: {
+              access_token: String(emailAccountAccessTokenInput?.value || '').trim(),
+              refresh_token: String(emailAccountRefreshTokenInput?.value || '').trim(),
+              password: String(emailAccountPasswordInput?.value || '').trim(),
+              client_id: String(emailAccountClientIdInput?.value || '').trim(),
+              client_secret: String(emailAccountClientSecretInput?.value || '').trim(),
+              token_endpoint: String(emailAccountTokenEndpointInput?.value || '').trim()
+            }
+          }
+        });
+      }
+
+      notify(selectedEmailAccount ? 'Email account updated.' : 'Email account saved.', 'success');
+      const nextAccountID = String(response?.account?.id || '').trim();
+      await refreshVault();
+      if (nextAccountID) {
+        selectEmailAccount(nextAccountID);
+      }
+    } catch (error) {
+      console.error('Failed to save email account:', error);
+      showInlineAlert(error.message || 'Failed to save email account.', 'error');
+    } finally {
+      setButtonLoading(saveEmailAccountBtn, false);
+    }
+  }
+
+  async function deleteEmailAccount() {
+    if (!selectedEmailAccount?.id) {
+      showInlineAlert('Select an email account before deleting it.', 'warning');
+      return;
+    }
+
+    const confirmed = window.confirm(
+      `Delete email account "${selectedEmailAccount.label || selectedEmailAccount.email_address}" from ${vaultDisplayLabel(currentVault())}?`
+    );
+    if (!confirmed) {
+      return;
+    }
+
+    try {
+      setButtonLoading(deleteEmailAccountBtn, true, 'Deleting');
+      await apiRequest(`/api/vault/email-accounts/${encodeURIComponent(selectedEmailAccount.id)}`, {
+        method: 'DELETE'
+      });
+      notify('Email account deleted.', 'success');
+      await refreshVault();
+    } catch (error) {
+      console.error('Failed to delete email account:', error);
+      showInlineAlert(error.message || 'Failed to delete email account.', 'error');
+    } finally {
+      setButtonLoading(deleteEmailAccountBtn, false);
+    }
+  }
+
   async function loadVaultStatus() {
     if (!currentVaultID()) {
       const status = {
@@ -1706,6 +2191,7 @@
 
   async function refreshVault() {
     const selectedRecordID = selectedRecord?.id || '';
+    const selectedEmailAccountID = selectedEmailAccount?.id || '';
 
     try {
       await loadVaults();
@@ -1714,6 +2200,9 @@
         renderVaultSpaces();
         renderGrantsList([]);
         renderRecordsList([]);
+        renderEmailAccountsList([]);
+        clearEmailAccountForm({ refreshList: false });
+        renderEmailAccountsSummary();
         rebuildFolderTree();
         renderExplorer();
         return;
@@ -1721,6 +2210,7 @@
       await loadVaultGrants();
       if (!status.locked) {
         await loadVaultRecords();
+        await loadEmailAccounts(selectedEmailAccountID);
         if (selectedRecordID && recordIndex.has(selectedRecordID)) {
           await selectRecord(selectedRecordID, { keepFolder: true });
         } else {
@@ -1728,6 +2218,7 @@
         }
       } else {
         renderVaultSpaces();
+        renderEmailAccountsSummary();
       }
     } catch (error) {
       console.error('Failed to refresh vault:', error);
@@ -2331,6 +2822,34 @@
     revokeGrant(trigger.getAttribute('data-grant-id'));
   });
 
+  emailAccountProviderInput?.addEventListener('change', () => {
+    syncEmailAccountProviderFields();
+  });
+
+  emailAccountAuthTypeInput?.addEventListener('change', () => {
+    syncEmailAccountAuthFields();
+  });
+
+  saveEmailAccountBtn?.addEventListener('click', () => {
+    saveEmailAccount();
+  });
+
+  resetEmailAccountBtn?.addEventListener('click', () => {
+    clearEmailAccountForm();
+  });
+
+  deleteEmailAccountBtn?.addEventListener('click', () => {
+    deleteEmailAccount();
+  });
+
+  emailAccountsListEl?.addEventListener('click', (event) => {
+    const trigger = event.target.closest('[data-email-account-id]');
+    if (!trigger) {
+      return;
+    }
+    selectEmailAccount(trigger.getAttribute('data-email-account-id'));
+  });
+
   exportBtn?.addEventListener('click', () => {
     exportVault();
   });
@@ -2436,6 +2955,9 @@
   }
 
   clearRecordForm();
+  clearEmailAccountForm({ refreshList: false });
+  syncEmailAccountProviderFields();
+  syncEmailAccountAuthFields();
   syncImportControls();
   syncPageDialogs();
   refreshVault();
