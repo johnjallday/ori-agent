@@ -70,6 +70,41 @@ const TASK_REQUIREMENT_KEYS = Object.freeze({
   FILESYSTEM: 'filesystem'
 });
 
+const TASK_ASSIST_PENDING_SPECIALIST_STORAGE_KEY = 'workspace-detail-task-assist-specialist';
+
+const TASK_ASSIST_TRAVEL_SPECIALISTS = Object.freeze({
+  travel_itinerary: Object.freeze({
+    key: 'travel_itinerary',
+    label: 'Travel Itinerary Planner',
+    agentName: 'Travel Itinerary Planner',
+    agentType: 'tool-calling',
+    description: 'Plans day-by-day travel itineraries with neighborhood guidance, food picks, museum ideas, budget notes, and pacing.',
+    systemPrompt: 'You are a travel itinerary planner. Build practical, day-by-day trip plans with realistic pacing, local food and neighborhood recommendations, transit notes, and concise options. Ask clarifying questions when key details are missing and avoid inventing bookings or confirmed reservations.',
+    nameTokens: ['travel', 'trip', 'itinerary'],
+    scorePhrases: ['day by day', 'day-by-day', 'itinerary', 'trip plan', 'travel plan', 'restaurant', 'restaurants', 'food', 'museum', 'museums', 'nightlife', 'day trip', 'day trips', 'budget breakdown', 'budget', 'accommodation', 'accommodation areas', 'neighborhood', 'neighbourhood']
+  }),
+  hotel_booking: Object.freeze({
+    key: 'hotel_booking',
+    label: 'Hotel Booking Agent',
+    agentName: 'Hotel Booking Agent',
+    agentType: 'tool-calling',
+    description: 'Finds and compares hotels by neighborhood, budget, amenities, and travel constraints.',
+    systemPrompt: 'You are a hotel booking assistant. Help compare hotel options by neighborhood, budget, amenities, and transport tradeoffs. Ask for missing constraints before recommending stays, and do not invent live prices or confirmed bookings.',
+    nameTokens: ['hotel', 'lodging', 'accommodation'],
+    scorePhrases: ['hotel', 'hotels', 'stay', 'stays', 'lodging', 'accommodation', 'where to stay', 'book hotel', 'book hotels']
+  }),
+  flight_booking: Object.freeze({
+    key: 'flight_booking',
+    label: 'Flight Booking Agent',
+    agentName: 'Flight Booking Agent',
+    agentType: 'tool-calling',
+    description: 'Helps fill booking gaps for flights and longer-distance travel legs with schedule and transfer considerations.',
+    systemPrompt: 'You are a flight booking assistant. Help identify missing flight or long-distance travel legs, compare route options, call out tradeoffs, and confirm timing constraints before recommending bookings.',
+    nameTokens: ['flight', 'airfare', 'airport'],
+    scorePhrases: ['flight', 'flights', 'airfare', 'airport', 'route option', 'route options', 'connection', 'connections', 'transfer', 'transfer timing']
+  })
+});
+
 export class WorkspaceDetailPage {
   constructor(workspaceId) {
     this.workspaceId = workspaceId;
@@ -129,12 +164,14 @@ export class WorkspaceDetailPage {
     this.currentTaskResultFollowUpPending = false;
     this.currentBlockedTask = null;
     this.currentAssistRecommendation = null;
+    this.currentAssistSpecialistAction = null;
     this.currentExecutionTaskId = null;
     this.executionMonitorTimer = null;
     this.executionLogKeys = new Set();
     this.executionLastStatus = '';
     this.pendingTaskConfirm = null;
     this.pendingTaskConfirmSelection = { stepThrough: false };
+    this.pendingAssistSpecialistResumeChecked = false;
 
     // DOM elements
     this.elements = {};
@@ -171,6 +208,7 @@ export class WorkspaceDetailPage {
       this.loadDirectories(),
       this.loadSchedules()
     ]);
+    this.maybeResumePendingAssistSpecialistHandoff();
     this.activateWorkspace();
     this.setupRealtime();
     this.checkAutoOpenCreateAgent();
@@ -1112,6 +1150,12 @@ export class WorkspaceDetailPage {
       taskAssistQuestion: document.getElementById('workspace-detail-task-assist-question'),
       taskAssistRecommendationWrap: document.getElementById('workspace-detail-task-assist-recommendation-wrap'),
       taskAssistRecommendation: document.getElementById('workspace-detail-task-assist-recommendation'),
+      taskAssistChoiceWrap: document.getElementById('workspace-detail-task-assist-choice-wrap'),
+      taskAssistChoiceSummary: document.getElementById('workspace-detail-task-assist-choice-summary'),
+      taskAssistChoiceList: document.getElementById('workspace-detail-task-assist-choice-list'),
+      taskAssistSpecialistWrap: document.getElementById('workspace-detail-task-assist-specialist-wrap'),
+      taskAssistSpecialistCopy: document.getElementById('workspace-detail-task-assist-specialist-copy'),
+      taskAssistSpecialistActionBtn: document.getElementById('workspace-detail-task-assist-specialist-action'),
       taskAssistAgent: document.getElementById('workspace-detail-task-assist-agent'),
       taskAssistMessage: document.getElementById('workspace-detail-task-assist-message'),
       taskAssistResponseWrap: document.getElementById('workspace-detail-task-assist-response-wrap'),
@@ -1281,6 +1325,7 @@ export class WorkspaceDetailPage {
     this.elements.taskAssistContinueBtn?.addEventListener('click', () => this.submitTaskAssist('continue_with_instruction'));
     this.elements.taskAssistSwitchBtn?.addEventListener('click', () => this.submitTaskAssist('switch_agent_retry'));
     this.elements.taskAssistFailBtn?.addEventListener('click', () => this.submitTaskAssist('mark_failed'));
+    this.elements.taskAssistSpecialistActionBtn?.addEventListener('click', () => this.handleAssistSpecialistAction());
     this.elements.taskAssistAgent?.addEventListener('change', () => this.updateAssistSwitchButtonState());
     this.elements.addAgentSubmitBtn?.addEventListener('click', () => this.addSelectedAgentToWorkspace());
     this.elements.createAgentBtn?.addEventListener('click', () => this.openCreateAgentFlow());
@@ -1747,6 +1792,17 @@ export class WorkspaceDetailPage {
     `;
   }
 
+  isWorkspaceEntryAgent(agentName) {
+    const entryAgentName = String(this.workspace?.entry_agent_name || '').trim();
+    if (!entryAgentName || !agentName) return false;
+    return this.normalizeAgentName(entryAgentName) === this.normalizeAgentName(agentName);
+  }
+
+  renderWorkspaceAgentRoleBadge(agentName) {
+    if (!this.isWorkspaceEntryAgent(agentName)) return '';
+    return '<span class="workspace-detail-agent-role-badge workspace-manager">Workspace Manager</span>';
+  }
+
   renderAgentGroups() {
     if (!this.elements.agentsList) return;
 
@@ -1780,6 +1836,7 @@ export class WorkspaceDetailPage {
       const encodedAgentName = encodeURIComponent(group.name);
       const canFlip = !group.isUnassigned;
       const isFlipped = canFlip && this.flippedAgentCards.has(group.key);
+      const roleBadge = group.isUnassigned ? '' : this.renderWorkspaceAgentRoleBadge(group.name);
       const removeLabel = group.instanceCount > 1
         ? `Remove all ${group.instanceCount} ${group.name} instances from workspace`
         : `Remove ${group.name} from workspace`;
@@ -1831,6 +1888,7 @@ export class WorkspaceDetailPage {
             <div class="workspace-detail-agent-card-header">
               <div class="workspace-detail-agent-card-title">
                 ${group.isUnassigned ? `<span>${this.escapeHtml(group.name)}</span>` : this.renderAgentDetailLink(group.name, encodedAgentName)}
+                ${roleBadge}
                 ${instanceChip}
                 ${capabilityBadges}
                 ${modelLabel}
@@ -1866,6 +1924,7 @@ export class WorkspaceDetailPage {
     const level = Number.isFinite(levelValue) ? Math.max(0, Math.floor(levelValue)) : 0;
     const stage = String(profile?.evolution?.stage || profile?.stage || '').trim();
     const levelLabel = stage ? `Lv ${level} · ${stage}` : `Lv ${level}`;
+    const roleBadge = this.renderWorkspaceAgentRoleBadge(group.name);
 
     const skillsState = this.getAgentSkillsState(group.name);
     const skillsMarkup = this.renderAgentSkillsChips(skillsState, profile);
@@ -1894,6 +1953,7 @@ export class WorkspaceDetailPage {
         <div class="workspace-detail-agent-card-header">
           <div class="workspace-detail-agent-card-title">
             ${this.renderAgentDetailLink(group.name, encodedAgentName)}
+            ${roleBadge}
             <span class="workspace-detail-agent-info-tag">Agent Info</span>
           </div>
           <div class="workspace-detail-agent-card-meta-wrap">
@@ -3518,6 +3578,17 @@ export class WorkspaceDetailPage {
 
     const taskLabel = String(task.description || task.name || task.id || 'this task').trim() || 'this task';
     const prompt = this.getTaskAgentSuggestionPrompt(task);
+    const specialistAction = this.maybeBuildTravelAssistSpecialistAction({
+      task,
+      currentAgent: String(task.to || '').trim()
+    });
+    if (specialistAction) {
+      const specialistSuggestion = await this.suggestTravelSpecialistSetupForTask(task, specialistAction);
+      if (specialistSuggestion.handled) {
+        return specialistSuggestion.agentName || '';
+      }
+    }
+
     const requirements = this.inferTaskExecutionRequirements(prompt);
     if (requirements.length > 0) {
       const capabilitySuggestion = await this.suggestCapabilityAwareAgentSetup(task, requirements);
@@ -4437,6 +4508,351 @@ export class WorkspaceDetailPage {
     return Array.from({ length: count }, () => 'pending');
   }
 
+  getAssistStorage() {
+    try {
+      return window.sessionStorage;
+    } catch (_error) {
+      return null;
+    }
+  }
+
+  clearPendingAssistSpecialistHandoff() {
+    const storage = this.getAssistStorage();
+    if (!storage) return;
+    storage.removeItem(TASK_ASSIST_PENDING_SPECIALIST_STORAGE_KEY);
+  }
+
+  storePendingAssistSpecialistHandoff(action) {
+    const storage = this.getAssistStorage();
+    const taskId = String(this.currentBlockedTask?.taskId || '').trim();
+    const agentName = String(action?.agentName || '').trim();
+    if (!storage || !this.workspaceId || !taskId || !agentName) return;
+
+    storage.setItem(TASK_ASSIST_PENDING_SPECIALIST_STORAGE_KEY, JSON.stringify({
+      workspaceId: this.workspaceId,
+      taskId,
+      agentName,
+      createdAt: Date.now()
+    }));
+  }
+
+  maybeResumePendingAssistSpecialistHandoff() {
+    if (this.pendingAssistSpecialistResumeChecked) return;
+    this.pendingAssistSpecialistResumeChecked = true;
+
+    const storage = this.getAssistStorage();
+    if (!storage) return;
+
+    let payload = null;
+    try {
+      payload = JSON.parse(storage.getItem(TASK_ASSIST_PENDING_SPECIALIST_STORAGE_KEY) || 'null');
+    } catch (_error) {
+      payload = null;
+    }
+
+    const workspaceId = String(payload?.workspaceId || '').trim();
+    const taskId = String(payload?.taskId || '').trim();
+    const agentName = String(payload?.agentName || '').trim();
+    const createdAt = Number(payload?.createdAt || 0);
+    const isExpired = !createdAt || (Date.now() - createdAt) > (15 * 60 * 1000);
+
+    if (!workspaceId || !taskId || !agentName || workspaceId !== this.workspaceId || isExpired) {
+      this.clearPendingAssistSpecialistHandoff();
+      return;
+    }
+
+    const task = this.tasks.find((item) => item?.id === taskId);
+    const inWorkspace = this.getWorkspaceAgentNames()
+      .some((name) => this.normalizeAgentName(name) === this.normalizeAgentName(agentName));
+    if (!task || !inWorkspace) {
+      this.clearPendingAssistSpecialistHandoff();
+      return;
+    }
+
+    this.clearPendingAssistSpecialistHandoff();
+    this.openTaskAssistModal(taskId);
+    if (this.elements.taskAssistAgent) {
+      const hasOption = Array.from(this.elements.taskAssistAgent.options || [])
+        .some((option) => this.normalizeAgentName(option?.value || '') === this.normalizeAgentName(agentName));
+      if (hasOption) {
+        this.elements.taskAssistAgent.value = agentName;
+        this.updateAssistSwitchButtonState();
+      }
+    }
+    if (window.Toast) {
+      window.Toast.info(`"${agentName}" is ready. Switch this task to it and retry.`);
+    }
+  }
+
+  findAssistSpecialistAgentName(config, sourceNames, options = {}) {
+    if (!config || !Array.isArray(sourceNames)) return '';
+
+    const exactTarget = this.normalizeAgentName(config.agentName);
+    const exclude = this.normalizeAgentName(options.excludeAgent || '');
+    for (const sourceName of sourceNames) {
+      const name = String(sourceName || '').trim();
+      if (!name) continue;
+      const normalized = this.normalizeAgentName(name);
+      if (!normalized || normalized === exclude) continue;
+      if (normalized === exactTarget) return name;
+    }
+
+    let bestName = '';
+    let bestScore = 0;
+    sourceNames.forEach((sourceName) => {
+      const name = String(sourceName || '').trim();
+      if (!name) return;
+      const normalized = this.normalizeAgentName(name);
+      if (!normalized || normalized === exclude) return;
+
+      let score = 0;
+      (config.nameTokens || []).forEach((token) => {
+        const normalizedToken = this.normalizeAgentName(token);
+        if (normalizedToken && normalized.includes(normalizedToken)) {
+          score += normalizedToken.length >= 6 ? 3 : 2;
+        }
+      });
+
+      if (score > bestScore) {
+        bestScore = score;
+        bestName = name;
+      }
+    });
+
+    return bestScore >= 3 ? bestName : '';
+  }
+
+  buildAssistSpecialistActionText(action) {
+    const agentName = String(action?.agentName || action?.label || '').trim();
+    const currentAgent = String(action?.currentAgent || '').trim();
+    const currentLabel = currentAgent ? `"${currentAgent}"` : 'the current agent';
+    if (!agentName) return '';
+    if (action?.kind === 'switch') {
+      return `Recommended: Hand this off to "${agentName}" instead of keeping it with ${currentLabel}.`;
+    }
+    if (action?.kind === 'add_and_switch') {
+      return `Recommended: Add "${agentName}" to this workspace and hand the task off there.`;
+    }
+    if (action?.kind === 'create') {
+      return `Recommended: Create "${agentName}" for this workspace, then hand the task off there.`;
+    }
+    return '';
+  }
+
+  isWorkspaceManagerMetaActionText(text = '') {
+    const normalized = this.normalizeTaskResultNextStepToken(text);
+    if (!normalized) return false;
+
+    const actionMatch = /\b(save|create|add|attach|upload|import|export|move|rename|delete|remove|switch|assign|list|show|open|bind)\b/.test(normalized);
+    if (!actionMatch) return false;
+
+    return /\b(note|notes|task|tasks|subtask|subtasks|file|files|pdf|folder|folders|directory|directories|workspace|agent|agents|binding|bindings|canvas)\b/.test(normalized);
+  }
+
+  maybeBuildTravelAssistSpecialistAction(assistContext = {}) {
+    const currentAgent = String(assistContext.currentAgent || '').trim();
+    const parts = [];
+    const taskText = String(assistContext.task?.description || assistContext.task?.name || '').trim();
+    if (taskText) parts.push(taskText);
+    const taskDetails = String(assistContext.task?.details || '').trim();
+    if (taskDetails) parts.push(taskDetails);
+    const question = String(assistContext.question || '').trim();
+    if (question) parts.push(question);
+    const response = String(assistContext.response || '').trim();
+    if (response) parts.push(response);
+
+    const workflowStep = assistContext.workflowStep;
+    if (workflowStep?.stepType === 'ask_choice' && Array.isArray(workflowStep.choices)) {
+      workflowStep.choices.forEach((choice) => {
+        const label = String(choice?.label || '').trim();
+        if (label) parts.push(label);
+        const description = String(choice?.description || '').trim();
+        if (description) parts.push(description);
+      });
+    }
+
+    const combined = this.normalizeTaskResultNextStepToken(parts.join(' '));
+    if (!combined) return null;
+    if (this.isWorkspaceManagerMetaActionText(combined)) return null;
+
+    const travelSignals = ['travel', 'trip', 'itinerary', 'hotel', 'flight', 'vacation', 'day trip', 'day trips', 'museum', 'museums', 'restaurant', 'restaurants', 'nightlife', 'accommodation', 'lodging'];
+    const isTravelContext = travelSignals.some((signal) => combined.includes(this.normalizeTaskResultNextStepToken(signal)));
+    if (!isTravelContext) return null;
+
+    const scoreConfig = (config) => {
+      let score = 0;
+      (config.scorePhrases || []).forEach((phrase) => {
+        const normalizedPhrase = this.normalizeTaskResultNextStepToken(phrase);
+        if (!normalizedPhrase || !combined.includes(normalizedPhrase)) return;
+        score += normalizedPhrase.includes(' ') ? 3 : 1;
+      });
+      return score;
+    };
+
+    const configs = Object.values(TASK_ASSIST_TRAVEL_SPECIALISTS);
+    const ranked = configs
+      .map((config) => ({ config, score: scoreConfig(config) }))
+      .filter((entry) => entry.score > 0)
+      .sort((a, b) => {
+        if (b.score !== a.score) return b.score - a.score;
+        const order = ['travel_itinerary', 'hotel_booking', 'flight_booking'];
+        return order.indexOf(a.config.key) - order.indexOf(b.config.key);
+      });
+
+    const best = ranked[0];
+    if (!best?.config) return null;
+
+    const config = best.config;
+    const workspaceAgentName = this.findAssistSpecialistAgentName(config, this.getWorkspaceAgentNames(), {
+      excludeAgent: currentAgent
+    });
+    const catalogNames = Array.isArray(this.agentCatalog) ? this.agentCatalog.map((agent) => String(agent?.name || '').trim()).filter(Boolean) : [];
+    const catalogAgent = this.findAssistSpecialistAgentName(config, catalogNames, {
+      excludeAgent: currentAgent
+    });
+    const workspaceAgent = workspaceAgentName && catalogAgent &&
+      this.normalizeAgentName(workspaceAgentName) === this.normalizeAgentName(catalogAgent)
+      ? workspaceAgentName
+      : '';
+    if (catalogAgent && this.normalizeAgentName(catalogAgent) === this.normalizeAgentName(currentAgent)) {
+      return null;
+    }
+
+    const agentName = workspaceAgent || catalogAgent || config.agentName;
+    const kind = workspaceAgent ? 'switch' : (catalogAgent ? 'add_and_switch' : 'create');
+    return {
+      ...config,
+      kind,
+      currentAgent,
+      agentName,
+      copy: kind === 'switch'
+        ? `"${agentName}" already fits this travel-planning follow-up better than ${currentAgent ? `"${currentAgent}"` : 'the current agent'}.`
+        : kind === 'add_and_switch'
+        ? `"${agentName}" exists already. Add it to this workspace and hand the task off there.`
+        : `This workspace does not have a dedicated travel specialist yet. Create "${agentName}" and use it for this follow-up.`,
+      buttonLabel: kind === 'switch'
+        ? `Switch To ${agentName}`
+        : kind === 'add_and_switch'
+        ? `Add And Switch To ${agentName}`
+        : `Create ${agentName}`
+    };
+  }
+
+  async suggestTravelSpecialistSetupForTask(task, specialistAction) {
+    if (!task || !specialistAction?.agentName) {
+      return { handled: false, agentName: '' };
+    }
+
+    const taskLabel = this.getTaskDisplayLabel(task);
+    const previewSequence = this.getPredictedTaskExecutionSequence(task, [], {
+      assignedAgent: specialistAction.agentName
+    });
+
+    if (specialistAction.kind === 'switch' || specialistAction.kind === 'add_and_switch') {
+      const addToWorkspace = specialistAction.kind === 'add_and_switch';
+      const confirmed = await this.showTaskConfirmDialog({
+        eyebrow: 'Specialist Match',
+        title: addToWorkspace
+          ? `Add "${specialistAction.agentName}" and assign it?`
+          : `Assign "${specialistAction.agentName}" to this task?`,
+        message: specialistAction.copy || this.buildAssistSpecialistActionText(specialistAction),
+        confirmLabel: addToWorkspace ? 'Add and Assign' : 'Assign Specialist',
+        metaItems: [taskLabel, specialistAction.agentName, addToWorkspace ? 'Add to workspace' : 'Travel specialist'],
+        details: [
+          String(specialistAction.description || '').trim(),
+          'Substantive travel work should start with the specialist rather than the workspace manager.'
+        ].filter(Boolean),
+        sequenceItems: previewSequence
+      });
+
+      if (!confirmed) {
+        return { handled: true, agentName: '' };
+      }
+
+      try {
+        if (addToWorkspace) {
+          await this.addAgentToWorkspace(specialistAction.agentName, { toast: false });
+        }
+        await this.assignTaskToAgent(task.id, specialistAction.agentName);
+        task.to = specialistAction.agentName;
+        this.renderTasks();
+        if (window.Toast) {
+          window.Toast.success(addToWorkspace
+            ? `Added "${specialistAction.agentName}" and assigned it to this task.`
+            : `Assigned "${specialistAction.agentName}" to this task.`);
+        }
+        return { handled: true, agentName: specialistAction.agentName };
+      } catch (error) {
+        console.error('Failed to apply travel specialist setup:', error);
+        if (window.Toast) {
+          window.Toast.error(error.message || 'Failed to assign travel specialist');
+        }
+        return { handled: true, agentName: '' };
+      }
+    }
+
+    if (specialistAction.kind === 'create') {
+      const confirmed = await this.showTaskConfirmDialog({
+        eyebrow: 'Specialist Match',
+        title: `Create "${specialistAction.agentName}" for this task?`,
+        message: specialistAction.copy || this.buildAssistSpecialistActionText(specialistAction),
+        confirmLabel: 'Create Agent',
+        cancelLabel: 'Cancel',
+        metaItems: [taskLabel, specialistAction.agentName, 'New travel specialist'],
+        details: [
+          String(specialistAction.description || '').trim(),
+          'After creation, Ori will assign this task to the new specialist.'
+        ].filter(Boolean),
+        sequenceItems: previewSequence
+      });
+
+      if (!confirmed) {
+        return { handled: true, agentName: '' };
+      }
+
+      this.openCreateAgentFlow({
+        seedName: specialistAction.agentName,
+        seedType: specialistAction.agentType || 'tool-calling',
+        seedSystemPrompt: String(specialistAction.systemPrompt || '').trim(),
+        autoDescription: String(specialistAction.description || '').trim(),
+        preferAutoConfig: true,
+        workspaceId: this.workspaceId,
+        taskId: task.id,
+        assignTask: true
+      });
+      return { handled: true, agentName: '' };
+    }
+
+    return { handled: false, agentName: '' };
+  }
+
+  applyAssistWorkflowSpecialistOverrides(workflowStep, specialistAction) {
+    const normalizedStep = this.normalizeAssistWorkflowStep(workflowStep);
+    if (!normalizedStep || !specialistAction?.agentName) return normalizedStep;
+
+    const replacementName = String(specialistAction.agentName || '').trim();
+    if (!replacementName) return normalizedStep;
+
+    const rewriteLabel = (label) => {
+      const rawLabel = String(label || '').trim();
+      if (!rawLabel) return rawLabel;
+      if (!/\bworkspace manager\b/i.test(rawLabel)) return rawLabel;
+      if (!/\b(delegate|hand off|handoff|assign|planning task)\b/i.test(rawLabel)) return rawLabel;
+      return rawLabel
+        .replace(/\bthe workspace manager\b/ig, replacementName)
+        .replace(/\bworkspace manager\b/ig, replacementName);
+    };
+
+    return {
+      ...normalizedStep,
+      choices: normalizedStep.choices.map((choice) => ({
+        ...choice,
+        label: rewriteLabel(choice.label),
+        description: rewriteLabel(choice.description)
+      }))
+    };
+  }
+
   populateAssistAgents(currentAgent = '') {
     if (!this.elements.taskAssistAgent) return;
 
@@ -4469,6 +4885,236 @@ export class WorkspaceDetailPage {
     return [];
   }
 
+  cleanAssistChoiceText(value) {
+    return this.cleanTaskResultNextStepText(value).replace(/[?!.,;:]+$/g, '').trim();
+  }
+
+  buildAssistChoiceId(number, label) {
+    const base = this.normalizeTaskResultNextStepToken(label)
+      .replace(/\s+/g, '-')
+      .slice(0, 48) || 'choice';
+    return `assist-choice-${String(number || '').trim() || 'x'}-${base}`;
+  }
+
+  normalizeAssistWorkflowStep(value) {
+    if (!value || typeof value !== 'object') return null;
+
+    const stepType = String(value.step_type || value.stepType || '').trim().toLowerCase();
+    const rawChoices = Array.isArray(value.choices) ? value.choices : [];
+    const choices = rawChoices.map((item, index) => {
+      const label = this.cleanAssistChoiceText(item?.label || '');
+      if (!label) return null;
+      const number = String(item?.number || index + 1).trim();
+      return {
+        id: String(item?.id || this.buildAssistChoiceId(number, label)).trim(),
+        label,
+        number,
+        description: this.cleanAssistChoiceText(item?.description || '')
+      };
+    }).filter(Boolean);
+
+    if (stepType !== 'ask_choice' || choices.length === 0) return null;
+
+    let freeTextAllowed = true;
+    if (typeof value.free_text_allowed === 'boolean') {
+      freeTextAllowed = value.free_text_allowed;
+    } else if (typeof value.freeTextAllowed === 'boolean') {
+      freeTextAllowed = value.freeTextAllowed;
+    }
+
+    return {
+      stepType: 'ask_choice',
+      title: String(value.title || '').trim() || 'Choose the next step',
+      summary: String(value.summary || '').trim(),
+      freeTextAllowed,
+      choices
+    };
+  }
+
+  extractAssistEnumeratedChoices(text) {
+    const lines = String(text || '').split(/\r?\n/);
+    const choices = [];
+    let started = false;
+
+    for (let i = 0; i < lines.length; i += 1) {
+      const rawLine = String(lines[i] || '');
+      const match = rawLine.match(/^\s*(?:[-*]\s*)?(\d+)[.)]\s*(.+)$/);
+      if (match) {
+        const number = String(match[1] || '').trim();
+        const label = this.cleanAssistChoiceText(match[2]);
+        if (!label) continue;
+        choices.push({
+          id: this.buildAssistChoiceId(number, label),
+          label,
+          number,
+          description: ''
+        });
+        started = true;
+        if (choices.length >= 5) break;
+        continue;
+      }
+
+      if (!started) continue;
+      if (!rawLine.trim()) continue;
+      break;
+    }
+
+    return choices.length >= 2 ? choices : [];
+  }
+
+  extractAssistInlineChoices(text) {
+    const lines = String(text || '').split(/\r?\n/);
+    const patterns = [
+      /^(?:want me to|would you like me to|do you want me to|should i)\s+(.+?)(?:,\s*|\s+)or\s+(.+?)\?\s*$/i
+    ];
+
+    for (let i = lines.length - 1; i >= 0; i -= 1) {
+      const rawLine = this.cleanTaskResultNextStepText(lines[i]);
+      if (!rawLine.includes('?')) continue;
+      for (const pattern of patterns) {
+        const match = rawLine.match(pattern);
+        if (!match) continue;
+
+        const first = this.cleanAssistChoiceText(match[1]);
+        const second = this.cleanAssistChoiceText(match[2]);
+        if (!first || !second || this.normalizeTaskResultNextStepToken(first) === this.normalizeTaskResultNextStepToken(second)) {
+          continue;
+        }
+
+        return [
+          {
+            id: this.buildAssistChoiceId('1', first),
+            label: first,
+            number: '1',
+            description: ''
+          },
+          {
+            id: this.buildAssistChoiceId('2', second),
+            label: second,
+            number: '2',
+            description: ''
+          }
+        ];
+      }
+    }
+
+    return [];
+  }
+
+  buildAssistWorkflowStepFromText(...values) {
+    for (const value of values) {
+      const enumeratedChoices = this.extractAssistEnumeratedChoices(value);
+      if (enumeratedChoices.length > 0) {
+        return {
+          stepType: 'ask_choice',
+          title: 'Choose the next step',
+          summary: 'Pick one option below to continue this task.',
+          freeTextAllowed: true,
+          choices: enumeratedChoices
+        };
+      }
+
+      const inlineChoices = this.extractAssistInlineChoices(value);
+      if (inlineChoices.length > 0) {
+        return {
+          stepType: 'ask_choice',
+          title: 'Choose the next step',
+          summary: 'Pick one option below to continue this task.',
+          freeTextAllowed: true,
+          choices: inlineChoices
+        };
+      }
+    }
+    return null;
+  }
+
+  getAssistResponseDisplayText(response, question) {
+    const rawResponse = String(response || '').trim();
+    const rawQuestion = String(question || '').trim();
+    if (!rawResponse) return '';
+    if (!rawQuestion) return rawResponse;
+
+    const normalize = (value) => this.cleanTaskResultNextStepText(value)
+      .replace(/[?!.,;:]+$/g, '')
+      .toLowerCase();
+
+    const normalizedQuestion = normalize(rawQuestion);
+    if (!normalizedQuestion) return rawResponse;
+
+    const paragraphs = rawResponse
+      .split(/\n\s*\n/)
+      .map((part) => String(part || '').trim())
+      .filter(Boolean);
+    if (paragraphs.length > 0 && normalize(paragraphs[paragraphs.length - 1]) === normalizedQuestion) {
+      paragraphs.pop();
+      return paragraphs.join('\n\n').trim();
+    }
+
+    const lines = rawResponse.split(/\r?\n/);
+    while (lines.length > 0 && !String(lines[lines.length - 1] || '').trim()) {
+      lines.pop();
+    }
+    if (lines.length > 0 && normalize(lines[lines.length - 1]) === normalizedQuestion) {
+      lines.pop();
+      while (lines.length > 0 && !String(lines[lines.length - 1] || '').trim()) {
+        lines.pop();
+      }
+      return lines.join('\n').trim();
+    }
+
+    return rawResponse;
+  }
+
+  setAssistWorkflowStepUI(workflowStep) {
+    if (!this.elements.taskAssistChoiceWrap || !this.elements.taskAssistChoiceList) return;
+
+    const normalizedStep = this.normalizeAssistWorkflowStep(workflowStep);
+    if (!normalizedStep || normalizedStep.stepType !== 'ask_choice' || normalizedStep.choices.length === 0) {
+      this.elements.taskAssistChoiceList.innerHTML = '';
+      if (this.elements.taskAssistChoiceSummary) {
+        this.elements.taskAssistChoiceSummary.textContent = '';
+        this.elements.taskAssistChoiceSummary.classList.add('d-none');
+      }
+      this.elements.taskAssistChoiceWrap.classList.add('d-none');
+      return;
+    }
+
+    const selectedChoiceId = String(this.currentBlockedTask?.selectedChoiceId || '').trim();
+    this.elements.taskAssistChoiceList.innerHTML = normalizedStep.choices.map((choice) => `
+      <button
+        type="button"
+        class="home-assistant-planning-choice${selectedChoiceId === choice.id ? ' is-selected' : ''}"
+        data-assist-choice-id="${this.escapeHtml(choice.id)}"
+        aria-pressed="${selectedChoiceId === choice.id ? 'true' : 'false'}"
+      >
+        <span class="home-assistant-planning-choice-label">${this.escapeHtml(choice.number ? `${choice.number}. ${choice.label}` : choice.label)}</span>
+        ${choice.description ? `<span class="home-assistant-planning-choice-hint">${this.escapeHtml(choice.description)}</span>` : ''}
+      </button>
+    `).join('');
+
+    this.elements.taskAssistChoiceList.querySelectorAll('[data-assist-choice-id]').forEach((button) => {
+      button.addEventListener('click', () => {
+        const choiceId = String(button.getAttribute('data-assist-choice-id') || '').trim();
+        if (!choiceId || !this.currentBlockedTask) return;
+        const selectedChoice = normalizedStep.choices.find((choice) => choice.id === choiceId);
+        if (!selectedChoice) return;
+        this.currentBlockedTask.selectedChoiceId = selectedChoice.id;
+        this.currentBlockedTask.selectedChoiceLabel = selectedChoice.label;
+        this.currentBlockedTask.selectedChoiceNumber = selectedChoice.number || '';
+        this.currentBlockedTask.workflowStep = normalizedStep;
+        this.setAssistWorkflowStepUI(normalizedStep);
+      });
+    });
+
+    if (this.elements.taskAssistChoiceSummary) {
+      const summary = String(normalizedStep.summary || '').trim();
+      this.elements.taskAssistChoiceSummary.textContent = summary;
+      this.elements.taskAssistChoiceSummary.classList.toggle('d-none', !summary);
+    }
+
+    this.elements.taskAssistChoiceWrap.classList.remove('d-none');
+  }
+
   getAssistActionButton(action) {
     if (action === 'retry') return this.elements.taskAssistRetryBtn;
     if (action === 'continue_with_instruction') return this.elements.taskAssistContinueBtn;
@@ -4481,6 +5127,89 @@ export class WorkspaceDetailPage {
     if (!this.elements.taskAssistSwitchBtn) return;
     const selectedAgent = String(this.elements.taskAssistAgent?.value || '').trim();
     this.elements.taskAssistSwitchBtn.disabled = selectedAgent === '';
+  }
+
+  setAssistSpecialistActionUI(action) {
+    this.currentAssistSpecialistAction = action || null;
+
+    const wrap = this.elements.taskAssistSpecialistWrap;
+    const copy = this.elements.taskAssistSpecialistCopy;
+    const button = this.elements.taskAssistSpecialistActionBtn;
+    if (!wrap || !copy || !button) return;
+
+    if (!action || !action.buttonLabel) {
+      copy.textContent = '';
+      copy.classList.add('d-none');
+      button.textContent = '';
+      wrap.classList.add('d-none');
+      return;
+    }
+
+    const detail = String(action.copy || '').trim();
+    copy.textContent = detail;
+    copy.classList.toggle('d-none', !detail);
+    button.textContent = action.buttonLabel;
+    wrap.classList.remove('d-none');
+  }
+
+  async handleAssistSpecialistAction() {
+    const action = this.currentAssistSpecialistAction;
+    const button = this.elements.taskAssistSpecialistActionBtn;
+    if (!action || !button) return;
+
+    const originalText = button.textContent;
+    button.disabled = true;
+
+    try {
+      if (action.kind === 'switch') {
+        if (this.elements.taskAssistAgent) {
+          this.elements.taskAssistAgent.value = action.agentName;
+          this.updateAssistSwitchButtonState();
+        }
+        await this.submitTaskAssist('switch_agent_retry');
+        return;
+      }
+
+      if (action.kind === 'add_and_switch') {
+        button.textContent = `Adding ${action.agentName}...`;
+        await this.addAgentToWorkspace(action.agentName, {
+          toast: false,
+          closeModal: false
+        });
+        this.populateAssistAgents(this.currentBlockedTask?.currentAgent || '');
+        if (this.elements.taskAssistAgent) {
+          this.elements.taskAssistAgent.value = action.agentName;
+          this.updateAssistSwitchButtonState();
+        }
+        if (window.Toast) {
+          window.Toast.success(`Added "${action.agentName}" to this workspace.`);
+        }
+        await this.submitTaskAssist('switch_agent_retry');
+        return;
+      }
+
+      if (action.kind === 'create') {
+        this.storePendingAssistSpecialistHandoff(action);
+        this.openCreateAgentFlow({
+          seedName: action.agentName,
+          seedType: action.agentType || 'tool-calling',
+          seedSystemPrompt: String(action.systemPrompt || '').trim(),
+          autoDescription: String(action.description || '').trim(),
+          preferAutoConfig: true,
+          workspaceId: this.workspaceId
+        });
+        return;
+      }
+    } catch (error) {
+      console.error('Failed to apply assist specialist action:', error);
+      this.clearPendingAssistSpecialistHandoff();
+      if (window.Toast) {
+        window.Toast.error(error?.message || 'Failed to apply specialist handoff');
+      }
+    } finally {
+      button.disabled = false;
+      button.textContent = originalText;
+    }
   }
 
   setAssistRecommendationUI(recommendation) {
@@ -4505,6 +5234,8 @@ export class WorkspaceDetailPage {
       }
     }
 
+    this.setAssistSpecialistActionUI(recommendation?.specialistAction || null);
+
     if (recommendation?.suggestedAgent && this.elements.taskAssistAgent) {
       const hasOption = Array.from(this.elements.taskAssistAgent.options || [])
         .some((option) => String(option?.value || '') === recommendation.suggestedAgent);
@@ -4521,7 +5252,7 @@ export class WorkspaceDetailPage {
     this.updateAssistSwitchButtonState();
   }
 
-  determineAssistRecommendation(reasonCode, suggestedActions, currentAgent) {
+  determineAssistRecommendation(reasonCode, suggestedActions, currentAgent, workflowStep = null, assistContext = {}) {
     const normalizedCode = String(reasonCode || '').trim().toLowerCase();
     const actions = this.parseAssistActions(suggestedActions);
     const allows = (action) => actions.length === 0 || actions.includes(action);
@@ -4529,6 +5260,28 @@ export class WorkspaceDetailPage {
       normalizedCode === 'capability_refusal' ||
       normalizedCode.includes('capability');
     const browserAgent = browserRelated ? this.findBestBrowserCapableAgent(currentAgent) : '';
+    const specialistAction = this.maybeBuildTravelAssistSpecialistAction({
+      ...assistContext,
+      currentAgent,
+      workflowStep
+    });
+
+    if (specialistAction) {
+      return {
+        action: specialistAction.kind === 'switch' && allows('switch_agent_retry') ? 'switch_agent_retry' : '',
+        suggestedAgent: specialistAction.kind === 'switch' ? specialistAction.agentName : '',
+        text: this.buildAssistSpecialistActionText(specialistAction),
+        specialistAction
+      };
+    }
+
+    if (workflowStep?.stepType === 'ask_choice' && Array.isArray(workflowStep.choices) && workflowStep.choices.length > 0 &&
+        allows('continue_with_instruction')) {
+      return {
+        action: 'continue_with_instruction',
+        text: 'Recommended: Choose one of the suggested next steps below or add your own guidance.'
+      };
+    }
 
     if (browserRelated && browserAgent && allows('switch_agent_retry')) {
       return {
@@ -4585,16 +5338,40 @@ export class WorkspaceDetailPage {
     const reason = String(payload.reason || payloadHumanLoop.reason || humanLoop.reason || 'The assigned agent needs guidance before it can continue.').trim();
     const question = String(payload.question || payloadHumanLoop.question || humanLoop.question || 'How should I proceed?').trim();
     const response = String(payload.agent_response || payloadHumanLoop.agent_response || humanLoop.agent_response || '').trim();
+    const displayResponse = this.getAssistResponseDisplayText(response, question);
     const statusText = getDisplayStatus(task.status);
     const timestamp = formatDate(task.updated_at || task.created_at);
 
     const currentAgent = String(task.to || '').trim();
+    const baseWorkflowStep = this.normalizeAssistWorkflowStep(payload.workflow_step)
+      || this.normalizeAssistWorkflowStep(payloadHumanLoop.workflow_step)
+      || this.normalizeAssistWorkflowStep(humanLoop.workflow_step)
+      || this.normalizeAssistWorkflowStep(task?.context?.planning_workflow_step)
+      || this.buildAssistWorkflowStepFromText(question, response);
+    const recommendation = this.determineAssistRecommendation(
+      reasonCode,
+      suggestedActions,
+      currentAgent,
+      baseWorkflowStep,
+      {
+        task,
+        reason,
+        question,
+        response
+      }
+    );
+    const workflowStep = this.applyAssistWorkflowSpecialistOverrides(baseWorkflowStep, recommendation?.specialistAction);
     this.currentBlockedTask = {
       taskId,
       blockId,
       currentAgent,
       reasonCode,
-      suggestedActions: this.parseAssistActions(suggestedActions)
+      suggestedActions: this.parseAssistActions(suggestedActions),
+      workflowStep,
+      specialistAction: recommendation?.specialistAction || null,
+      selectedChoiceId: '',
+      selectedChoiceLabel: '',
+      selectedChoiceNumber: ''
     };
 
     this.setTaskModalHeaderId(this.elements.taskAssistId, task.id);
@@ -4611,8 +5388,8 @@ export class WorkspaceDetailPage {
       this.elements.taskAssistMessage.value = '';
     }
     if (this.elements.taskAssistResponse && this.elements.taskAssistResponseWrap) {
-      if (response) {
-        this.elements.taskAssistResponse.textContent = response;
+      if (displayResponse) {
+        this.elements.taskAssistResponse.textContent = displayResponse;
         this.elements.taskAssistResponseWrap.classList.remove('d-none');
       } else {
         this.elements.taskAssistResponse.textContent = '';
@@ -4621,7 +5398,7 @@ export class WorkspaceDetailPage {
     }
 
     this.populateAssistAgents(currentAgent);
-    const recommendation = this.determineAssistRecommendation(reasonCode, suggestedActions, currentAgent);
+    this.setAssistWorkflowStepUI(workflowStep);
     this.setAssistRecommendationUI(recommendation);
 
     if (this.elements.taskAssistModal && window.bootstrap) {
@@ -4637,6 +5414,9 @@ export class WorkspaceDetailPage {
 
     const selectedAgent = String(this.elements.taskAssistAgent?.value || '').trim();
     const message = String(this.elements.taskAssistMessage?.value || '').trim();
+    const selectedChoiceId = String(this.currentBlockedTask?.selectedChoiceId || '').trim();
+    const selectedChoiceLabel = String(this.currentBlockedTask?.selectedChoiceLabel || '').trim();
+    const selectedChoiceNumber = String(this.currentBlockedTask?.selectedChoiceNumber || '').trim();
     if (action === 'switch_agent_retry' && !selectedAgent) {
       if (window.Toast) window.Toast.error('Select an agent to switch before retrying.');
       return;
@@ -4646,12 +5426,22 @@ export class WorkspaceDetailPage {
       if (window.Toast) window.Toast.error('Select a different agent before switching.');
       return;
     }
+    if (action === 'continue_with_instruction' &&
+        this.currentBlockedTask.workflowStep?.stepType === 'ask_choice' &&
+        !selectedChoiceId &&
+        !message) {
+      if (window.Toast) window.Toast.warning('Choose a next step or add guidance before continuing.');
+      return;
+    }
 
     const payload = {
       action,
       block_id: this.currentBlockedTask.blockId || undefined,
       message: message || undefined,
-      agent: selectedAgent || undefined
+      agent: selectedAgent || undefined,
+      choice_id: selectedChoiceId || undefined,
+      choice_label: selectedChoiceLabel || undefined,
+      choice_number: selectedChoiceNumber || undefined
     };
 
     try {
@@ -6589,6 +7379,44 @@ export class WorkspaceDetailPage {
 
   async getTaskExecutionPreflight(task, assignedAgent) {
     const description = String(task?.description || task?.name || '').trim();
+    const specialistAction = this.maybeBuildTravelAssistSpecialistAction({
+      task,
+      currentAgent: assignedAgent
+    });
+    if (specialistAction) {
+      if (specialistAction.kind === 'switch' || specialistAction.kind === 'add_and_switch') {
+        return {
+          kind: 'switch_recommended',
+          recommendedAgent: specialistAction.agentName,
+          addToWorkspace: specialistAction.kind === 'add_and_switch',
+          eyebrow: 'Specialist Handoff',
+          confirmLabel: specialistAction.kind === 'add_and_switch' ? 'Add and Switch' : 'Switch Agent',
+          message: specialistAction.copy || this.buildAssistSpecialistActionText(specialistAction),
+          details: [
+            String(specialistAction.description || '').trim(),
+            'Substantive travel work should start with the specialist rather than the workspace manager.'
+          ].filter(Boolean)
+        };
+      }
+      if (specialistAction.kind === 'create') {
+        return {
+          kind: 'create_recommended',
+          eyebrow: 'Specialist Handoff',
+          title: `Create "${specialistAction.agentName}" before running?`,
+          confirmLabel: 'Create Agent',
+          message: specialistAction.copy || this.buildAssistSpecialistActionText(specialistAction),
+          details: [
+            String(specialistAction.description || '').trim(),
+            'Create the travel specialist first, then assign this task there.'
+          ].filter(Boolean),
+          seedName: specialistAction.agentName,
+          seedType: specialistAction.agentType || 'tool-calling',
+          seedSystemPrompt: String(specialistAction.systemPrompt || '').trim(),
+          autoDescription: String(specialistAction.description || '').trim()
+        };
+      }
+    }
+
     const requirements = this.inferTaskExecutionRequirements(description);
     if (requirements.length === 0) {
       return { kind: 'none' };
@@ -7064,10 +7892,10 @@ export class WorkspaceDetailPage {
       const preflight = await this.getTaskExecutionPreflight(task, assignedAgent);
       if (preflight.kind === 'switch_recommended' && preflight.recommendedAgent) {
         const switchNow = await this.showTaskConfirmDialog({
-          eyebrow: 'Capability Check',
+          eyebrow: preflight.eyebrow || 'Capability Check',
           title: `Switch to "${preflight.recommendedAgent}" before running?`,
           message: preflight.message,
-          confirmLabel: 'Switch Agent',
+          confirmLabel: preflight.confirmLabel || 'Switch Agent',
           metaItems: [this.getTaskDisplayLabel(task), preflight.recommendedAgent, 'Recommended agent'],
           details: Array.isArray(preflight.details) && preflight.details.length > 0
             ? preflight.details
@@ -7076,6 +7904,9 @@ export class WorkspaceDetailPage {
         });
         if (switchNow) {
           try {
+            if (preflight.addToWorkspace === true) {
+              await this.addAgentToWorkspace(preflight.recommendedAgent, { toast: false });
+            }
             await this.assignTaskToAgent(taskId, preflight.recommendedAgent);
             assignedAgent = preflight.recommendedAgent;
             task.to = preflight.recommendedAgent;
@@ -7090,10 +7921,10 @@ export class WorkspaceDetailPage {
         }
       } else if (preflight.kind === 'create_recommended') {
         const createAgent = await this.showTaskConfirmDialog({
-          eyebrow: 'Capability Check',
-          title: 'Create a capable agent before running?',
+          eyebrow: preflight.eyebrow || 'Capability Check',
+          title: preflight.title || 'Create a capable agent before running?',
           message: preflight.message,
-          confirmLabel: 'Create Agent',
+          confirmLabel: preflight.confirmLabel || 'Create Agent',
           cancelLabel: 'Continue Anyway',
           metaItems: [this.getTaskDisplayLabel(task), assignedAgent, 'Current assignment'],
           details: Array.isArray(preflight.details) ? preflight.details : [],
@@ -7103,6 +7934,7 @@ export class WorkspaceDetailPage {
           this.openCreateAgentFlow({
             seedName: String(preflight.seedName || '').trim(),
             seedType: String(preflight.seedType || '').trim(),
+            seedSystemPrompt: String(preflight.seedSystemPrompt || '').trim(),
             autoDescription: String(preflight.autoDescription || '').trim(),
             preferAutoConfig: true,
             workspaceId: this.workspaceId,

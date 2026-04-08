@@ -46,6 +46,15 @@ func (r executionAgentResolution) isAssistantMode() bool {
 	return strings.EqualFold(strings.TrimSpace(r.Name), assistantExecutionAgentName)
 }
 
+func agentExists(agentStore store.Store, agentName string) bool {
+	if agentStore == nil {
+		return true
+	}
+
+	ag, ok := agentStore.GetAgent(strings.TrimSpace(agentName))
+	return ok && ag != nil
+}
+
 func resolveExecutionAgentName(
 	ctx context.Context,
 	sessionLookup chatSessionLookup,
@@ -56,18 +65,22 @@ func resolveExecutionAgentName(
 	if sessionLookup != nil && strings.TrimSpace(sessionID) != "" {
 		if sess, err := sessionLookup.GetSession(ctx, sessionID); err == nil && sess != nil {
 			if sessionAgent := strings.TrimSpace(sess.AgentName); sessionAgent != "" {
-				return executionAgentResolution{
-					Name:   sessionAgent,
-					Source: executionAgentSourceSessionBinding,
+				if agentExists(agentStore, sessionAgent) {
+					return executionAgentResolution{
+						Name:   sessionAgent,
+						Source: executionAgentSourceSessionBinding,
+					}
 				}
 			}
 		}
 	}
 
 	if requested := strings.TrimSpace(requestedAgentName); requested != "" {
-		return executionAgentResolution{
-			Name:   requested,
-			Source: executionAgentSourceRequestOverride,
+		if agentExists(agentStore, requested) {
+			return executionAgentResolution{
+				Name:   requested,
+				Source: executionAgentSourceRequestOverride,
+			}
 		}
 	}
 

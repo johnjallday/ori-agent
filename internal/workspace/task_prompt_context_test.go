@@ -136,6 +136,31 @@ func TestBuildTaskPrompt_WithoutWorkspaceSnapshotWhenWorkspaceUnavailable(t *tes
 	}
 }
 
+func TestBuildTaskPrompt_IncludesTaskDetails(t *testing.T) {
+	handler := &LLMTaskHandler{}
+
+	prompt := handler.buildTaskPrompt(context.Background(), Task{
+		ID:          "task-2",
+		From:        "jj",
+		Description: "plan the trip",
+		Details:     "Original request:\nplan a trip in Lisbon\n\nPlanning intake:\n- Travel dates: 5/11 arrival, 5/14 departure",
+		Priority:    1,
+	}, nil)
+
+	for _, want := range []string{
+		"## Task Description",
+		"plan the trip",
+		"## Task Details",
+		"Original request:",
+		"Planning intake:",
+		"5/11 arrival",
+	} {
+		if !strings.Contains(prompt, want) {
+			t.Fatalf("expected prompt to contain %q, got %q", want, prompt)
+		}
+	}
+}
+
 func TestBuildTaskSystemPrompt_DisambiguatesWorkspaceFromRepository(t *testing.T) {
 	handler := &LLMTaskHandler{}
 	prompt := handler.buildTaskSystemPrompt()

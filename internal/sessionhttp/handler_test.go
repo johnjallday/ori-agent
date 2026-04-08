@@ -124,6 +124,10 @@ func TestHandler_CreateSessionInWorkspaceUsesEntryAgent(t *testing.T) {
 	handler, cleanup := createTestHandler(t)
 	defer cleanup()
 
+	if err := handler.agentStore.CreateAgent("Spain Manager", &agentstore.CreateAgentConfig{Type: agent.TypeGeneral}); err != nil {
+		t.Fatalf("failed to create workspace agent: %v", err)
+	}
+
 	now := time.Now()
 	ws := &session.Workspace{
 		ID:     "workspace-spain",
@@ -167,6 +171,56 @@ func TestHandler_CreateSessionInWorkspaceUsesEntryAgent(t *testing.T) {
 	sess := resp["session"].(map[string]interface{})
 	if got := sess["agent_name"]; got != "Spain Manager" {
 		t.Fatalf("expected workspace entry agent binding, got %#v", got)
+	}
+}
+
+func TestHandler_CreateSessionInWorkspaceSkipsMissingEntryAgent(t *testing.T) {
+	handler, cleanup := createTestHandler(t)
+	defer cleanup()
+
+	now := time.Now()
+	ws := &session.Workspace{
+		ID:     "workspace-stale-entry",
+		Name:   "Spain",
+		Agents: []string{"Workspace Manager"},
+		AgentInstances: []session.AgentInstance{
+			{
+				ID:             "workspace-manager-1",
+				Name:           "Workspace Manager",
+				InstanceNumber: 1,
+				NodeID:         "workspace-manager-node-1",
+				EntryPoint:     true,
+				CreatedAt:      now,
+			},
+		},
+		SharedData: map[string]interface{}{
+			workspaceEntryAgentNameKey: "Workspace Manager",
+		},
+		CreatedAt: now,
+		UpdatedAt: now,
+	}
+	if err := handler.store.CreateWorkspace(context.Background(), ws); err != nil {
+		t.Fatalf("failed to create workspace: %v", err)
+	}
+
+	body := `{"title":"Spain Session","folder_id":"workspace-stale-entry"}`
+	req := httptest.NewRequest(http.MethodPost, "/api/sessions", bytes.NewBufferString(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	handler.HandleSessions(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp map[string]interface{}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("failed to parse response: %v", err)
+	}
+
+	sess := resp["session"].(map[string]interface{})
+	if got := sess["agent_name"]; got != "" {
+		t.Fatalf("expected missing workspace entry agent to be ignored, got %#v", got)
 	}
 }
 
@@ -1003,6 +1057,9 @@ func TestEnsureWorkspaceEntryAgent_CreatesWorkspaceManagerAgent(t *testing.T) {
 	}
 	if !strings.Contains(ag.Settings.SystemPrompt, "do not generate an itinerary or recommendations on the first reply") {
 		t.Fatalf("expected strict travel intake guidance in prompt, got %q", ag.Settings.SystemPrompt)
+	}
+	if !strings.Contains(ag.Settings.SystemPrompt, "default to orchestration for full travel-planning work") {
+		t.Fatalf("expected specialist-first travel orchestration guidance in prompt, got %q", ag.Settings.SystemPrompt)
 	}
 }
 

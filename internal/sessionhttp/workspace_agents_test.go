@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/johnjallday/ori-agent/internal/session"
+	agentstore "github.com/johnjallday/ori-agent/internal/store"
 	agentworkspace "github.com/johnjallday/ori-agent/internal/workspace"
 )
 
@@ -298,6 +299,10 @@ func TestHandleWorkspaceAgents_DeleteSupportsNameInstanceIdentifier(t *testing.T
 func TestGetWorkspaceIncludesEntryAgentMetadata(t *testing.T) {
 	handler, cleanup := createTestHandler(t)
 	defer cleanup()
+
+	if err := handler.agentStore.CreateAgent("Writer", &agentstore.CreateAgentConfig{}); err != nil {
+		t.Fatalf("failed to create workspace agent: %v", err)
+	}
 
 	now := time.Now()
 	tasks := []agentworkspace.Task{

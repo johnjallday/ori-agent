@@ -1161,7 +1161,7 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 	// full context across page reloads and server restarts.
 	h.rehydrateSessionHistory(r.Context(), sessionID, ag)
 
-	if planningResp := maybeBuildWorkspacePlanningFormResponse(ag, originalQuery, normalizedRouteContext); planningResp != nil && planningResp.Form != nil {
+	if planningResp := maybeBuildWorkspacePlanningFormResponse(ag, originalQuery, normalizedRouteContext, h.workspaceStore, h.sessionStore); planningResp != nil && planningResp.Form != nil {
 		responseText := strings.TrimSpace(planningResp.ResponseText)
 		if responseText == "" {
 			responseText = "Complete the planning step below."

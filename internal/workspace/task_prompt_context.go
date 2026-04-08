@@ -371,6 +371,12 @@ func (h *LLMTaskHandler) buildTaskPrompt(ctx context.Context, task Task, ag *age
 	processedDescription := h.substitutePlaceholders(task)
 	prompt.WriteString(fmt.Sprintf("## Task Description\n\n%s\n\n", processedDescription))
 
+	if details := strings.TrimSpace(task.Details); details != "" {
+		prompt.WriteString("## Task Details\n\n")
+		prompt.WriteString(details)
+		prompt.WriteString("\n\n")
+	}
+
 	if workspaceSnapshot := h.buildTaskWorkspaceSnapshot(ctx, task); workspaceSnapshot != "" {
 		prompt.WriteString(workspaceSnapshot)
 		prompt.WriteString("\n\n")

@@ -2422,6 +2422,15 @@ h3, .h3 {
     color: var(--text-primary);
 }
 
+.home-assistant-routing-detail {
+    display: block;
+    margin-top: 0.45rem;
+    color: var(--text-secondary);
+    font-size: 0.8rem;
+    line-height: 1.45;
+    word-break: break-word;
+}
+
 .home-assistant-conversation {
     background: var(--bg-secondary);
     border: 1px solid var(--border-color);

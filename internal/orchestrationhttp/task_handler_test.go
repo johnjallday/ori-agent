@@ -1,9 +1,12 @@
 package orchestrationhttp
 
 import (
+	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
+	"github.com/johnjallday/ori-agent/internal/agentcomm"
 	"github.com/johnjallday/ori-agent/internal/workspace"
 )
 
@@ -241,4 +244,67 @@ func TestExtractTaskIDForDelete(t *testing.T) {
 			t.Fatalf("expected task-query-3, got %q", got)
 		}
 	})
+}
+
+func TestHandleAssistTask_PersistsSelectedChoice(t *testing.T) {
+	store := workspace.NewInMemoryStore()
+	ws := workspace.NewWorkspace(workspace.CreateWorkspaceParams{Name: "Spain"})
+	ws.ID = "workspace-choice"
+
+	task := workspace.Task{
+		ID:          "task-choice",
+		WorkspaceID: ws.ID,
+		Description: "Plan Lisbon trip",
+		To:          "Ori",
+		Status:      workspace.TaskStatusPending,
+		Context: map[string]interface{}{
+			"human_loop": map[string]interface{}{
+				"state": "blocked",
+			},
+		},
+	}
+	if err := ws.AddTask(task); err != nil {
+		t.Fatalf("failed to add task: %v", err)
+	}
+	if err := store.Save(ws); err != nil {
+		t.Fatalf("failed to save workspace: %v", err)
+	}
+
+	handler := &TaskHandler{
+		workspaceStore: store,
+		communicator:   agentcomm.NewCommunicator(store),
+	}
+
+	body := `{"action":"mark_failed","choice_id":"save-note","choice_label":"Save as Note","choice_number":"1","message":"Use the spain workspace note"}`
+	req := httptest.NewRequest(http.MethodPost, "/api/orchestration/tasks/task-choice/assist", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	handler.handleAssistTask(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d", rec.Code)
+	}
+
+	savedWS, err := store.Get(ws.ID)
+	if err != nil {
+		t.Fatalf("failed to reload workspace: %v", err)
+	}
+	savedTask, err := savedWS.GetTask(task.ID)
+	if err != nil {
+		t.Fatalf("failed to reload task: %v", err)
+	}
+
+	userAssistMessage, _ := savedTask.Context["user_assist_message"].(string)
+	if !strings.Contains(userAssistMessage, "Selected next step: Save as Note.") {
+		t.Fatalf("expected user assist message to include selected choice, got %q", userAssistMessage)
+	}
+
+	userAssistChoice, ok := savedTask.Context["user_assist_choice"].(*workspace.TaskBlockedChoice)
+	if !ok {
+		t.Fatalf("expected user_assist_choice to be stored as *workspace.TaskBlockedChoice, got %T", savedTask.Context["user_assist_choice"])
+	}
+	if userAssistChoice.ID != "save-note" {
+		t.Fatalf("expected saved choice id save-note, got %q", userAssistChoice.ID)
+	}
 }
