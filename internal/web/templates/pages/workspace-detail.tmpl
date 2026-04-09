@@ -138,6 +138,281 @@
             </div>
           </div>
 
+          <!-- Workspace Configuration -->
+          <div class="modern-card workspace-detail-config-card mb-4" id="workspace-detail-settings-panel">
+            <div class="workspace-detail-config-header">
+              <div>
+                <div class="workspace-detail-config-kicker">Workspace Configuration</div>
+                <h2 class="workspace-detail-config-title">Manager behavior, connections, and skill policy</h2>
+                <div class="workspace-detail-config-summary" id="workspace-detail-config-summary">
+                  <span class="workspace-detail-config-chip" id="workspace-detail-config-preset-chip">Preset: Guided</span>
+                  <span class="workspace-detail-config-chip" id="workspace-detail-config-connections-chip">Connections: 0</span>
+                  <span class="workspace-detail-config-chip" id="workspace-detail-config-skills-chip">Skills: 0</span>
+                </div>
+              </div>
+              <button
+                class="workspace-detail-config-toggle"
+                id="workspace-detail-config-toggle"
+                type="button"
+                aria-expanded="true"
+                aria-controls="workspace-detail-config-content">
+                <span id="workspace-detail-config-toggle-label">Hide Configuration</span>
+                <svg class="workspace-detail-config-toggle-icon" width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                  <path d="M7.41,8.59L12,13.17L16.59,8.59L18,10L12,16L6,10L7.41,8.59Z"/>
+                </svg>
+              </button>
+            </div>
+            <div class="workspace-detail-config-content" id="workspace-detail-config-content">
+              <div class="nav nav-tabs workspace-detail-config-nav" role="tablist" aria-label="Workspace configuration sections">
+                <button
+                  class="nav-link workspace-detail-config-tab active"
+                  id="workspace-detail-config-settings-tab"
+                  data-bs-toggle="tab"
+                  data-bs-target="#workspace-detail-config-settings-pane"
+                  type="button"
+                  role="tab"
+                  aria-controls="workspace-detail-config-settings-pane"
+                  aria-selected="true">
+                  Manager Settings
+                </button>
+                <button
+                  class="nav-link workspace-detail-config-tab"
+                  id="workspace-detail-config-mcp-tab"
+                  data-bs-toggle="tab"
+                  data-bs-target="#workspace-detail-config-mcp-pane"
+                  type="button"
+                  role="tab"
+                  aria-controls="workspace-detail-config-mcp-pane"
+                  aria-selected="false">
+                  Connections
+                </button>
+                <button
+                  class="nav-link workspace-detail-config-tab"
+                  id="workspace-detail-config-skills-tab"
+                  data-bs-toggle="tab"
+                  data-bs-target="#workspace-detail-config-skills-pane"
+                  type="button"
+                  role="tab"
+                  aria-controls="workspace-detail-config-skills-pane"
+                  aria-selected="false">
+                  Workspace Skills
+                </button>
+              </div>
+              <div class="tab-content workspace-detail-config-body">
+                <div
+                  class="tab-pane fade show active workspace-detail-config-pane"
+                  id="workspace-detail-config-settings-pane"
+                  role="tabpanel"
+                  aria-labelledby="workspace-detail-config-settings-tab"
+                  tabindex="0">
+                  <div class="workspace-detail-config-pane-header">
+                    <div class="workspace-detail-config-pane-copy">
+                      Define how the workspace manager plans, confirms, and turns work into tasks and notes.
+                    </div>
+                    <div class="workspace-detail-config-pane-actions">
+                      <button id="workspace-detail-refresh-settings" class="workspace-detail-panel-btn" type="button" title="Refresh workspace settings">
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
+                          <path d="M17.65,6.35C16.2,4.9 14.21,4 12,4A8,8 0 0,0 4,12A8,8 0 0,0 12,20C15.73,20 18.84,17.45 19.73,14H17.65C16.83,16.33 14.61,18 12,18A6,6 0 0,1 6,12A6,6 0 0,1 12,6C13.66,6 15.14,6.69 16.22,7.78L13,11H20V4L17.65,6.35Z"/>
+                        </svg>
+                      </button>
+                    </div>
+                  </div>
+                  <form id="workspace-detail-settings-form" class="workspace-detail-settings-form">
+                    <div class="workspace-detail-settings-intro">
+                      Use presets for a quick starting point, then fine-tune how the workspace manager should plan and execute work here.
+                    </div>
+                    <div class="row g-3">
+                      <div class="col-md-6">
+                        <label for="workspace-detail-settings-preset" class="form-label">Preset</label>
+                        <select id="workspace-detail-settings-preset" class="form-select">
+                          <option value="minimal">Minimal</option>
+                          <option value="guided" selected>Guided</option>
+                          <option value="planner">Planner</option>
+                          <option value="autonomous">Autonomous</option>
+                          <option value="custom">Custom</option>
+                        </select>
+                      </div>
+                      <div class="col-md-6">
+                        <label for="workspace-detail-settings-mode" class="form-label">Interaction mode</label>
+                        <select id="workspace-detail-settings-mode" class="form-select">
+                          <option value="direct">Direct</option>
+                          <option value="guided" selected>Guided</option>
+                          <option value="plan_then_execute">Plan Then Execute</option>
+                        </select>
+                      </div>
+                      <div class="col-md-6">
+                        <label for="workspace-detail-settings-confirmation" class="form-label">Confirmation mode</label>
+                        <select id="workspace-detail-settings-confirmation" class="form-select">
+                          <option value="destructive_only" selected>Destructive Only</option>
+                          <option value="always">Always</option>
+                          <option value="none">None</option>
+                        </select>
+                      </div>
+                      <div class="col-md-6">
+                        <div class="workspace-detail-settings-summary-card">
+                          <div class="workspace-detail-settings-summary-title">Effective Behavior</div>
+                          <div id="workspace-detail-settings-summary" class="workspace-detail-settings-summary-copy">Loading workspace settings...</div>
+                        </div>
+                      </div>
+                      <div class="col-sm-6">
+                        <div class="form-check form-switch">
+                          <input class="form-check-input" type="checkbox" role="switch" id="workspace-detail-settings-plan-enabled">
+                          <label class="form-check-label" for="workspace-detail-settings-plan-enabled">Plan before execution</label>
+                        </div>
+                      </div>
+                      <div class="col-sm-6">
+                        <div class="form-check form-switch">
+                          <input class="form-check-input" type="checkbox" role="switch" id="workspace-detail-settings-require-scan">
+                          <label class="form-check-label" for="workspace-detail-settings-require-scan">Require repo scan for code work</label>
+                        </div>
+                      </div>
+                      <div class="col-sm-6">
+                        <div class="form-check form-switch">
+                          <input class="form-check-input" type="checkbox" role="switch" id="workspace-detail-settings-save-notes">
+                          <label class="form-check-label" for="workspace-detail-settings-save-notes">Auto-save useful outputs as notes</label>
+                        </div>
+                      </div>
+                      <div class="col-sm-6">
+                        <div class="form-check form-switch">
+                          <input class="form-check-input" type="checkbox" role="switch" id="workspace-detail-settings-sync-tasks">
+                          <label class="form-check-label" for="workspace-detail-settings-sync-tasks">Sync approved plans into tasks</label>
+                        </div>
+                      </div>
+                      <div class="col-sm-6">
+                        <div class="form-check form-switch">
+                          <input class="form-check-input" type="checkbox" role="switch" id="workspace-detail-settings-ask-handoff">
+                          <label class="form-check-label" for="workspace-detail-settings-ask-handoff">Ask before specialist handoff</label>
+                        </div>
+                      </div>
+                      <div class="col-12 d-none" id="workspace-detail-settings-planning-fields">
+                        <div class="workspace-detail-settings-advanced">
+                          <div class="workspace-detail-settings-advanced-title">Planning Defaults</div>
+                          <div class="row g-3">
+                            <div class="col-md-6">
+                              <label for="workspace-detail-settings-planning-mode" class="form-label">Planning mode</label>
+                              <select id="workspace-detail-settings-planning-mode" class="form-select">
+                                <option value="feature" selected>Feature</option>
+                                <option value="bugfix">Bugfix</option>
+                                <option value="refactor">Refactor</option>
+                                <option value="investigation">Investigation</option>
+                              </select>
+                            </div>
+                            <div class="col-md-6">
+                              <label for="workspace-detail-settings-clarification-mode" class="form-label">Clarification depth</label>
+                              <select id="workspace-detail-settings-clarification-mode" class="form-select">
+                                <option value="minimal">Minimal</option>
+                                <option value="standard" selected>Standard</option>
+                                <option value="deep">Deep</option>
+                              </select>
+                            </div>
+                            <div class="col-md-6">
+                              <label for="workspace-detail-settings-tasks-dir" class="form-label">Planning output directory</label>
+                              <input id="workspace-detail-settings-tasks-dir" type="text" class="form-control" maxlength="120" placeholder="tasks">
+                            </div>
+                            <div class="col-md-6">
+                              <label for="workspace-detail-settings-execution-mode" class="form-label">Default execution mode</label>
+                              <select id="workspace-detail-settings-execution-mode" class="form-select">
+                                <option value="step_through" selected>Step Through</option>
+                                <option value="auto">Auto</option>
+                              </select>
+                            </div>
+                            <div class="col-sm-6">
+                              <div class="form-check form-switch">
+                                <input class="form-check-input" type="checkbox" role="switch" id="workspace-detail-settings-write-prd" checked>
+                                <label class="form-check-label" for="workspace-detail-settings-write-prd">Write PRD files</label>
+                              </div>
+                            </div>
+                            <div class="col-sm-6">
+                              <div class="form-check form-switch">
+                                <input class="form-check-input" type="checkbox" role="switch" id="workspace-detail-settings-write-task-list" checked>
+                                <label class="form-check-label" for="workspace-detail-settings-write-task-list">Write task list files</label>
+                              </div>
+                            </div>
+                            <div class="col-sm-6">
+                              <div class="form-check form-switch">
+                                <input class="form-check-input" type="checkbox" role="switch" id="workspace-detail-settings-require-branch" checked>
+                                <label class="form-check-label" for="workspace-detail-settings-require-branch">Require a feature branch before implementation</label>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                      <div class="col-12">
+                        <div class="workspace-detail-settings-managed-card">
+                          <div class="workspace-detail-settings-summary-title">Managed Skills</div>
+                          <div id="workspace-detail-settings-managed-skills" class="workspace-detail-settings-summary-copy">No settings-managed skills active.</div>
+                        </div>
+                      </div>
+                    </div>
+                    <div class="workspace-detail-settings-actions">
+                      <button type="submit" class="btn btn-primary" id="workspace-detail-settings-save">Save Settings</button>
+                    </div>
+                  </form>
+                </div>
+                <div
+                  class="tab-pane fade workspace-detail-config-pane"
+                  id="workspace-detail-config-mcp-pane"
+                  role="tabpanel"
+                  aria-labelledby="workspace-detail-config-mcp-tab"
+                  tabindex="0">
+                  <div class="workspace-detail-config-pane-header">
+                    <div>
+                      <div class="workspace-detail-config-pane-title">Workspace Connections</div>
+                      <div class="workspace-detail-config-pane-copy">
+                        Manage the MCP connectors and workspace-scoped integrations that agents can use in this workspace.
+                      </div>
+                    </div>
+                    <div class="workspace-detail-config-pane-actions">
+                      <button id="workspace-detail-refresh-mcp" class="workspace-detail-panel-btn" type="button" title="Refresh MCP bindings">
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
+                          <path d="M17.65,6.35C16.2,4.9 14.21,4 12,4A8,8 0 0,0 4,12A8,8 0 0,0 12,20C15.73,20 18.84,17.45 19.73,14H17.65C16.83,16.33 14.61,18 12,18A6,6 0 0,1 6,12A6,6 0 0,1 12,6C13.66,6 15.14,6.69 16.22,7.78L13,11H20V4L17.65,6.35Z"/>
+                        </svg>
+                      </button>
+                      <button id="workspace-detail-add-mcp" class="workspace-detail-panel-btn workspace-detail-panel-btn-primary" type="button" title="Add workspace MCP binding">
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
+                          <path d="M19,13H13V19H11V13H5V11H11V5H13V11H19V13Z"/>
+                        </svg>
+                      </button>
+                    </div>
+                  </div>
+                  <div id="workspace-detail-mcp-list" class="workspace-detail-mcp-list">
+                    <div class="workspace-detail-empty">Loading workspace MCP bindings...</div>
+                  </div>
+                </div>
+                <div
+                  class="tab-pane fade workspace-detail-config-pane"
+                  id="workspace-detail-config-skills-pane"
+                  role="tabpanel"
+                  aria-labelledby="workspace-detail-config-skills-tab"
+                  tabindex="0">
+                  <div class="workspace-detail-config-pane-header">
+                    <div>
+                      <div class="workspace-detail-config-pane-title">Workspace Skills</div>
+                      <div class="workspace-detail-config-pane-copy">
+                        Bind reusable skills to this workspace and control which agent instances can use them.
+                      </div>
+                    </div>
+                    <div class="workspace-detail-config-pane-actions">
+                      <button id="workspace-detail-refresh-skills" class="workspace-detail-panel-btn" type="button" title="Refresh skill bindings">
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
+                          <path d="M17.65,6.35C16.2,4.9 14.21,4 12,4A8,8 0 0,0 4,12A8,8 0 0,0 12,20C15.73,20 18.84,17.45 19.73,14H17.65C16.83,16.33 14.61,18 12,18A6,6 0 0,1 6,12A6,6 0 0,1 12,6C13.66,6 15.14,6.69 16.22,7.78L13,11H20V4L17.65,6.35Z"/>
+                        </svg>
+                      </button>
+                      <button id="workspace-detail-add-skill" class="workspace-detail-panel-btn workspace-detail-panel-btn-primary" type="button" title="Add workspace skill binding">
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
+                          <path d="M19,13H13V19H11V13H5V11H11V5H13V11H19V13Z"/>
+                        </svg>
+                      </button>
+                    </div>
+                  </div>
+                  <div id="workspace-detail-skills-list" class="workspace-detail-mcp-list">
+                    <div class="workspace-detail-empty">Loading workspace skill bindings...</div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
           <!-- Bento Grid Panels -->
           <div class="workspace-detail-bento">
             <!-- Agents Panel - Left column (rows 1-4) -->
@@ -318,231 +593,6 @@
               <div class="workspace-detail-panel-body" role="region" tabindex="0" aria-label="Directories panel content">
                 <div id="workspace-detail-directories-list" class="workspace-detail-list">
                   <div class="workspace-detail-empty">No directories yet.</div>
-                </div>
-              </div>
-            </div>
-
-            <!-- Workspace MCP Panel - Right column row 4 -->
-            <div class="modern-card workspace-detail-panel workspace-detail-panel-mcp is-expandable" id="workspace-detail-mcp-panel">
-              <button class="workspace-detail-panel-close" type="button" title="Close" aria-label="Close expanded panel">
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
-                  <path d="M19,6.41L17.59,5L12,10.59L6.41,5L5,6.41L10.59,12L5,17.59L6.41,19L12,13.41L17.59,19L19,17.59L13.41,12L19,6.41Z"/>
-                </svg>
-              </button>
-              <div class="workspace-detail-panel-header">
-                <h2 class="workspace-detail-panel-title">
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
-                    <path d="M4,6A2,2 0 0,1 6,4H10A2,2 0 0,1 12,6V8A2,2 0 0,1 10,10H6A2,2 0 0,1 4,8V6M14,6A2,2 0 0,1 16,4H18A2,2 0 0,1 20,6V8A2,2 0 0,1 18,10H16A2,2 0 0,1 14,8V6M4,16A2,2 0 0,1 6,14H8A2,2 0 0,1 10,16V18A2,2 0 0,1 8,20H6A2,2 0 0,1 4,18V16M12,17H14V15H12V17M10,7H14V9H10V7M8,17H12V15H8V17M16,17H18V15H16V17Z"/>
-                  </svg>
-                  Workspace MCP
-                </h2>
-                <div class="workspace-detail-panel-actions">
-                  <button id="workspace-detail-refresh-mcp" class="workspace-detail-panel-btn" type="button" title="Refresh MCP bindings">
-                    <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
-                      <path d="M17.65,6.35C16.2,4.9 14.21,4 12,4A8,8 0 0,0 4,12A8,8 0 0,0 12,20C15.73,20 18.84,17.45 19.73,14H17.65C16.83,16.33 14.61,18 12,18A6,6 0 0,1 6,12A6,6 0 0,1 12,6C13.66,6 15.14,6.69 16.22,7.78L13,11H20V4L17.65,6.35Z"/>
-                    </svg>
-                  </button>
-                  <button id="workspace-detail-add-mcp" class="workspace-detail-panel-btn workspace-detail-panel-btn-primary" type="button" title="Add workspace MCP binding">
-                    <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
-                      <path d="M19,13H13V19H11V13H5V11H11V5H13V11H19V13Z"/>
-                    </svg>
-                  </button>
-                </div>
-              </div>
-              <div class="workspace-detail-panel-body" role="region" tabindex="0" aria-label="Workspace MCP panel content">
-                <div id="workspace-detail-mcp-list" class="workspace-detail-mcp-list">
-                  <div class="workspace-detail-empty">Loading workspace MCP bindings...</div>
-                </div>
-              </div>
-            </div>
-
-            <!-- Workspace Settings Panel -->
-            <div class="modern-card workspace-detail-panel workspace-detail-panel-settings is-expandable" id="workspace-detail-settings-panel">
-              <button class="workspace-detail-panel-close" type="button" title="Close" aria-label="Close expanded panel">
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
-                  <path d="M19,6.41L17.59,5L12,10.59L6.41,5L5,6.41L10.59,12L5,17.59L6.41,19L12,13.41L17.59,19L19,17.59L13.41,12L19,6.41Z"/>
-                </svg>
-              </button>
-              <div class="workspace-detail-panel-header">
-                <h2 class="workspace-detail-panel-title">
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
-                    <path d="M3,17V19H9V17H3M3,5V7H13V5H3M13,21V19H21V17H13V15H11V21H13M7,9V11H3V13H7V15H9V9H7M21,13V11H11V13H21M15,9H17V7H21V5H17V3H15V9Z"/>
-                  </svg>
-                  Workspace Settings
-                </h2>
-                <div class="workspace-detail-panel-actions">
-                  <button id="workspace-detail-refresh-settings" class="workspace-detail-panel-btn" type="button" title="Refresh workspace settings">
-                    <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
-                      <path d="M17.65,6.35C16.2,4.9 14.21,4 12,4A8,8 0 0,0 4,12A8,8 0 0,0 12,20C15.73,20 18.84,17.45 19.73,14H17.65C16.83,16.33 14.61,18 12,18A6,6 0 0,1 6,12A6,6 0 0,1 12,6C13.66,6 15.14,6.69 16.22,7.78L13,11H20V4L17.65,6.35Z"/>
-                    </svg>
-                  </button>
-                </div>
-              </div>
-              <div class="workspace-detail-panel-body" role="region" tabindex="0" aria-label="Workspace settings panel content">
-                <form id="workspace-detail-settings-form" class="workspace-detail-settings-form">
-                  <div class="workspace-detail-settings-intro">
-                    Use presets for a quick starting point, then fine-tune how the workspace manager should plan and execute work here.
-                  </div>
-                  <div class="row g-3">
-                    <div class="col-md-6">
-                      <label for="workspace-detail-settings-preset" class="form-label">Preset</label>
-                      <select id="workspace-detail-settings-preset" class="form-select">
-                        <option value="minimal">Minimal</option>
-                        <option value="guided" selected>Guided</option>
-                        <option value="planner">Planner</option>
-                        <option value="autonomous">Autonomous</option>
-                        <option value="custom">Custom</option>
-                      </select>
-                    </div>
-                    <div class="col-md-6">
-                      <label for="workspace-detail-settings-mode" class="form-label">Interaction mode</label>
-                      <select id="workspace-detail-settings-mode" class="form-select">
-                        <option value="direct">Direct</option>
-                        <option value="guided" selected>Guided</option>
-                        <option value="plan_then_execute">Plan Then Execute</option>
-                      </select>
-                    </div>
-                    <div class="col-md-6">
-                      <label for="workspace-detail-settings-confirmation" class="form-label">Confirmation mode</label>
-                      <select id="workspace-detail-settings-confirmation" class="form-select">
-                        <option value="destructive_only" selected>Destructive Only</option>
-                        <option value="always">Always</option>
-                        <option value="none">None</option>
-                      </select>
-                    </div>
-                    <div class="col-md-6">
-                      <div class="workspace-detail-settings-summary-card">
-                        <div class="workspace-detail-settings-summary-title">Effective Behavior</div>
-                        <div id="workspace-detail-settings-summary" class="workspace-detail-settings-summary-copy">Loading workspace settings...</div>
-                      </div>
-                    </div>
-                    <div class="col-sm-6">
-                      <div class="form-check form-switch">
-                        <input class="form-check-input" type="checkbox" role="switch" id="workspace-detail-settings-plan-enabled">
-                        <label class="form-check-label" for="workspace-detail-settings-plan-enabled">Plan before execution</label>
-                      </div>
-                    </div>
-                    <div class="col-sm-6">
-                      <div class="form-check form-switch">
-                        <input class="form-check-input" type="checkbox" role="switch" id="workspace-detail-settings-require-scan">
-                        <label class="form-check-label" for="workspace-detail-settings-require-scan">Require repo scan for code work</label>
-                      </div>
-                    </div>
-                    <div class="col-sm-6">
-                      <div class="form-check form-switch">
-                        <input class="form-check-input" type="checkbox" role="switch" id="workspace-detail-settings-save-notes">
-                        <label class="form-check-label" for="workspace-detail-settings-save-notes">Auto-save useful outputs as notes</label>
-                      </div>
-                    </div>
-                    <div class="col-sm-6">
-                      <div class="form-check form-switch">
-                        <input class="form-check-input" type="checkbox" role="switch" id="workspace-detail-settings-sync-tasks">
-                        <label class="form-check-label" for="workspace-detail-settings-sync-tasks">Sync approved plans into tasks</label>
-                      </div>
-                    </div>
-                    <div class="col-sm-6">
-                      <div class="form-check form-switch">
-                        <input class="form-check-input" type="checkbox" role="switch" id="workspace-detail-settings-ask-handoff">
-                        <label class="form-check-label" for="workspace-detail-settings-ask-handoff">Ask before specialist handoff</label>
-                      </div>
-                    </div>
-                    <div class="col-12 d-none" id="workspace-detail-settings-planning-fields">
-                      <div class="workspace-detail-settings-advanced">
-                        <div class="workspace-detail-settings-advanced-title">Planning Defaults</div>
-                        <div class="row g-3">
-                          <div class="col-md-6">
-                            <label for="workspace-detail-settings-planning-mode" class="form-label">Planning mode</label>
-                            <select id="workspace-detail-settings-planning-mode" class="form-select">
-                              <option value="feature" selected>Feature</option>
-                              <option value="bugfix">Bugfix</option>
-                              <option value="refactor">Refactor</option>
-                              <option value="investigation">Investigation</option>
-                            </select>
-                          </div>
-                          <div class="col-md-6">
-                            <label for="workspace-detail-settings-clarification-mode" class="form-label">Clarification depth</label>
-                            <select id="workspace-detail-settings-clarification-mode" class="form-select">
-                              <option value="minimal">Minimal</option>
-                              <option value="standard" selected>Standard</option>
-                              <option value="deep">Deep</option>
-                            </select>
-                          </div>
-                          <div class="col-md-6">
-                            <label for="workspace-detail-settings-tasks-dir" class="form-label">Planning output directory</label>
-                            <input id="workspace-detail-settings-tasks-dir" type="text" class="form-control" maxlength="120" placeholder="tasks">
-                          </div>
-                          <div class="col-md-6">
-                            <label for="workspace-detail-settings-execution-mode" class="form-label">Default execution mode</label>
-                            <select id="workspace-detail-settings-execution-mode" class="form-select">
-                              <option value="step_through" selected>Step Through</option>
-                              <option value="auto">Auto</option>
-                            </select>
-                          </div>
-                          <div class="col-sm-6">
-                            <div class="form-check form-switch">
-                              <input class="form-check-input" type="checkbox" role="switch" id="workspace-detail-settings-write-prd" checked>
-                              <label class="form-check-label" for="workspace-detail-settings-write-prd">Write PRD files</label>
-                            </div>
-                          </div>
-                          <div class="col-sm-6">
-                            <div class="form-check form-switch">
-                              <input class="form-check-input" type="checkbox" role="switch" id="workspace-detail-settings-write-task-list" checked>
-                              <label class="form-check-label" for="workspace-detail-settings-write-task-list">Write task list files</label>
-                            </div>
-                          </div>
-                          <div class="col-sm-6">
-                            <div class="form-check form-switch">
-                              <input class="form-check-input" type="checkbox" role="switch" id="workspace-detail-settings-require-branch" checked>
-                              <label class="form-check-label" for="workspace-detail-settings-require-branch">Require a feature branch before implementation</label>
-                            </div>
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-                    <div class="col-12">
-                      <div class="workspace-detail-settings-managed-card">
-                        <div class="workspace-detail-settings-summary-title">Managed Skills</div>
-                        <div id="workspace-detail-settings-managed-skills" class="workspace-detail-settings-summary-copy">No settings-managed skills active.</div>
-                      </div>
-                    </div>
-                  </div>
-                  <div class="workspace-detail-settings-actions">
-                    <button type="submit" class="btn btn-primary" id="workspace-detail-settings-save">Save Settings</button>
-                  </div>
-                </form>
-              </div>
-            </div>
-
-            <!-- Workspace Skills Panel -->
-            <div class="modern-card workspace-detail-panel workspace-detail-panel-skills is-expandable" id="workspace-detail-skills-panel">
-              <button class="workspace-detail-panel-close" type="button" title="Close" aria-label="Close expanded panel">
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
-                  <path d="M19,6.41L17.59,5L12,10.59L6.41,5L5,6.41L10.59,12L5,17.59L6.41,19L12,13.41L17.59,19L19,17.59L13.41,12L19,6.41Z"/>
-                </svg>
-              </button>
-              <div class="workspace-detail-panel-header">
-                <h2 class="workspace-detail-panel-title">
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
-                    <path d="M7,2V13H10V22L17,10H13L17,2H7Z"/>
-                  </svg>
-                  Workspace Skills
-                </h2>
-                <div class="workspace-detail-panel-actions">
-                  <button id="workspace-detail-refresh-skills" class="workspace-detail-panel-btn" type="button" title="Refresh skill bindings">
-                    <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
-                      <path d="M17.65,6.35C16.2,4.9 14.21,4 12,4A8,8 0 0,0 4,12A8,8 0 0,0 12,20C15.73,20 18.84,17.45 19.73,14H17.65C16.83,16.33 14.61,18 12,18A6,6 0 0,1 6,12A6,6 0 0,1 12,6C13.66,6 15.14,6.69 16.22,7.78L13,11H20V4L17.65,6.35Z"/>
-                    </svg>
-                  </button>
-                  <button id="workspace-detail-add-skill" class="workspace-detail-panel-btn workspace-detail-panel-btn-primary" type="button" title="Add workspace skill binding">
-                    <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
-                      <path d="M19,13H13V19H11V13H5V11H11V5H13V11H19V13Z"/>
-                    </svg>
-                  </button>
-                </div>
-              </div>
-              <div class="workspace-detail-panel-body" role="region" tabindex="0" aria-label="Workspace Skills panel content">
-                <div id="workspace-detail-skills-list" class="workspace-detail-mcp-list">
-                  <div class="workspace-detail-empty">Loading workspace skill bindings...</div>
                 </div>
               </div>
             </div>
@@ -1521,11 +1571,154 @@
       }
     }
 
+    .workspace-detail-config-card {
+      padding: 0;
+      overflow: hidden;
+    }
+
+    .workspace-detail-config-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-end;
+      gap: 1rem;
+      padding: 1rem 1.25rem 0.8rem;
+    }
+
+    .workspace-detail-config-kicker {
+      font-size: 0.68rem;
+      font-weight: 700;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+      color: #9cc6ff;
+    }
+
+    .workspace-detail-config-title {
+      margin: 0.2rem 0 0;
+      font-size: 1.02rem;
+      font-weight: 600;
+      color: var(--text-primary);
+    }
+
+    .workspace-detail-config-summary {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.45rem;
+      margin-top: 0.75rem;
+    }
+
+    .workspace-detail-config-chip {
+      display: inline-flex;
+      align-items: center;
+      padding: 0.36rem 0.62rem;
+      border-radius: 999px;
+      border: 1px solid rgba(255,255,255,0.08);
+      background: rgba(255,255,255,0.04);
+      color: rgba(226, 232, 240, 0.82);
+      font-size: 0.74rem;
+      line-height: 1;
+      white-space: nowrap;
+    }
+
+    .workspace-detail-config-toggle {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.45rem;
+      align-self: center;
+      border: 1px solid rgba(255,255,255,0.1);
+      border-radius: 999px;
+      background: rgba(255,255,255,0.04);
+      color: var(--text-primary);
+      font-size: 0.78rem;
+      font-weight: 600;
+      padding: 0.58rem 0.82rem;
+      transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+    }
+
+    .workspace-detail-config-toggle:hover {
+      background: rgba(255,255,255,0.08);
+      border-color: rgba(255,255,255,0.16);
+    }
+
+    .workspace-detail-config-toggle-icon {
+      transition: transform 0.18s ease;
+    }
+
+    .workspace-detail-config-card:not(.is-collapsed) .workspace-detail-config-toggle-icon {
+      transform: rotate(180deg);
+    }
+
+    .workspace-detail-config-content[hidden] {
+      display: none !important;
+    }
+
+    .workspace-detail-config-nav {
+      gap: 0.35rem;
+      padding: 0 1rem;
+      border-bottom: 1px solid var(--border-color);
+    }
+
+    .workspace-detail-config-tab {
+      margin-bottom: -1px;
+      border: 1px solid transparent !important;
+      border-bottom: none !important;
+      border-radius: 12px 12px 0 0 !important;
+      background: transparent !important;
+      color: var(--text-secondary) !important;
+      font-size: 0.82rem;
+      font-weight: 600;
+      padding: 0.72rem 0.95rem;
+    }
+
+    .workspace-detail-config-tab:hover {
+      color: var(--text-primary) !important;
+    }
+
+    .workspace-detail-config-tab.active {
+      background: var(--bg-secondary) !important;
+      border-color: var(--border-color) !important;
+      color: var(--text-primary) !important;
+    }
+
+    .workspace-detail-config-body {
+      padding: 1rem 1.25rem 1.25rem;
+    }
+
+    .workspace-detail-config-pane {
+      outline: none;
+    }
+
+    .workspace-detail-config-pane-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 1rem;
+      margin-bottom: 1rem;
+    }
+
+    .workspace-detail-config-pane-title {
+      font-size: 0.9rem;
+      font-weight: 600;
+      color: var(--text-primary);
+    }
+
+    .workspace-detail-config-pane-copy {
+      max-width: 64ch;
+      font-size: 0.82rem;
+      line-height: 1.5;
+      color: var(--text-secondary);
+    }
+
+    .workspace-detail-config-pane-actions {
+      display: flex;
+      gap: 0.35rem;
+      flex-shrink: 0;
+    }
+
     /* Bento Grid Layout */
     .workspace-detail-bento {
       display: grid;
       grid-template-columns: 3fr 1fr 1fr;
-      grid-template-rows: repeat(8, 1fr);
+      grid-template-rows: repeat(6, 1fr);
       gap: 0.5rem;
       height: calc(100vh - 280px);
       min-height: 400px;
@@ -1539,12 +1732,12 @@
     /* Panel positioning */
     .workspace-detail-panel-agents {
       grid-column: 1;
-      grid-row: 1 / 6;
+      grid-row: 1 / 5;
     }
 
     .workspace-detail-panel-sessions {
       grid-column: 1;
-      grid-row: 6 / 9;
+      grid-row: 5 / 7;
     }
 
     .workspace-detail-panel-notes {
@@ -1559,34 +1752,33 @@
 
     .workspace-detail-panel-directories {
       grid-column: 2;
-      grid-row: 5 / 9;
-    }
-
-    .workspace-detail-panel-mcp {
-      grid-column: 3;
-      grid-row: 1 / 3;
-    }
-
-    .workspace-detail-panel-settings {
-      grid-column: 3;
-      grid-row: 3 / 5;
-    }
-
-    .workspace-detail-panel-skills {
-      grid-column: 3;
       grid-row: 5 / 7;
     }
 
     .workspace-detail-panel-schedules {
       grid-column: 3;
-      grid-row: 7 / 9;
+      grid-row: 1 / 7;
     }
 
     /* Responsive layout */
     @media (max-width: 1200px) {
+      .workspace-detail-config-header,
+      .workspace-detail-config-pane-header {
+        flex-direction: column;
+        align-items: stretch;
+      }
+
+      .workspace-detail-config-toggle {
+        align-self: flex-start;
+      }
+
+      .workspace-detail-config-pane-actions {
+        justify-content: flex-start;
+      }
+
       .workspace-detail-bento {
         grid-template-columns: 1fr;
-        grid-template-rows: auto auto auto auto auto auto auto auto auto;
+        grid-template-rows: auto auto auto auto auto auto;
         height: auto;
         min-height: auto;
         max-height: none;
@@ -1617,24 +1809,9 @@
         grid-row: 5;
       }
 
-      .workspace-detail-panel-mcp {
-        grid-column: 1 / -1;
-        grid-row: 6;
-      }
-
-      .workspace-detail-panel-settings {
-        grid-column: 1 / -1;
-        grid-row: 7;
-      }
-
-      .workspace-detail-panel-skills {
-        grid-column: 1 / -1;
-        grid-row: 8;
-      }
-
       .workspace-detail-panel-schedules {
         grid-column: 1 / -1;
-        grid-row: 9;
+        grid-row: 6;
       }
 
       .workspace-detail-bento .workspace-detail-panel-body {

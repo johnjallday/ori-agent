@@ -157,6 +157,8 @@ export class WorkspaceDetailPage {
     this.activeWorkspaceSkillMode = 'create';
     this.workspaceSettings = null;
     this.workspaceSettingsEffectiveBehavior = null;
+    this.workspaceConfigExpanded = true;
+    this.workspaceConfigPreferenceLoaded = false;
     this.capabilitySuggestionCatalog = null;
     this.capabilitySuggestionCatalogPromise = null;
     this.flippedAgentCards = new Set();
@@ -224,8 +226,6 @@ export class WorkspaceDetailPage {
       { id: 'workspace-detail-notes-panel', label: 'Notes panel content' },
       { id: 'workspace-detail-files-panel', label: 'Files panel content' },
       { id: 'workspace-detail-directories-panel', label: 'Directories panel content' },
-      { id: 'workspace-detail-mcp-panel', label: 'Workspace MCP panel content' },
-      { id: 'workspace-detail-settings-panel', label: 'Workspace settings panel content' },
       { id: 'workspace-detail-schedules-panel', label: 'Schedules panel content' }
     ];
 
@@ -1083,6 +1083,13 @@ export class WorkspaceDetailPage {
       childrenList: document.getElementById('workspace-detail-children-list'),
 
       // Panels
+      configPanel: document.getElementById('workspace-detail-settings-panel'),
+      configContent: document.getElementById('workspace-detail-config-content'),
+      configToggleBtn: document.getElementById('workspace-detail-config-toggle'),
+      configToggleLabel: document.getElementById('workspace-detail-config-toggle-label'),
+      configPresetChip: document.getElementById('workspace-detail-config-preset-chip'),
+      configConnectionsChip: document.getElementById('workspace-detail-config-connections-chip'),
+      configSkillsChip: document.getElementById('workspace-detail-config-skills-chip'),
       childrenPanel: document.getElementById('workspace-detail-children-panel'),
       childrenCount: document.getElementById('workspace-detail-children-count'),
 
@@ -1324,6 +1331,7 @@ export class WorkspaceDetailPage {
     this.elements.mcpModal?.addEventListener('hidden.bs.modal', () => this.resetWorkspaceMCPModal());
 
     // Workspace settings
+    this.elements.configToggleBtn?.addEventListener('click', () => this.toggleWorkspaceConfigExpanded());
     this.elements.refreshSettingsBtn?.addEventListener('click', () => this.loadWorkspace());
     this.elements.settingsForm?.addEventListener('submit', (event) => {
       event.preventDefault();
@@ -6749,6 +6757,7 @@ export class WorkspaceDetailPage {
           <div class="workspace-detail-mcp-empty-note">Import directories to synthesize <code>filesystem</code>, or add an explicit binding with the <strong>+</strong> button.</div>
         </div>
       `;
+      this.renderWorkspaceConfigSummary();
       return;
     }
 
@@ -6836,6 +6845,128 @@ export class WorkspaceDetailPage {
         </div>
       `;
     }).join('');
+    this.renderWorkspaceConfigSummary();
+  }
+
+  // ── Workspace Configuration Methods ─────────────────────────────────
+
+  getWorkspaceConfigStorageKey() {
+    return `workspace-detail-config-expanded:${this.workspaceId}`;
+  }
+
+  readWorkspaceConfigExpandedPreference() {
+    if (typeof window === 'undefined' || !window.localStorage) {
+      return null;
+    }
+
+    try {
+      const stored = window.localStorage.getItem(this.getWorkspaceConfigStorageKey());
+      if (stored === 'true') return true;
+      if (stored === 'false') return false;
+    } catch (error) {
+      console.warn('Failed to read workspace configuration preference:', error);
+    }
+    return null;
+  }
+
+  writeWorkspaceConfigExpandedPreference(expanded) {
+    if (typeof window === 'undefined' || !window.localStorage) {
+      return;
+    }
+
+    try {
+      window.localStorage.setItem(this.getWorkspaceConfigStorageKey(), expanded ? 'true' : 'false');
+    } catch (error) {
+      console.warn('Failed to persist workspace configuration preference:', error);
+    }
+  }
+
+  formatWorkspaceConfigPresetLabel(preset) {
+    const value = String(preset || '').trim();
+    if (!value) return 'Guided';
+    return value
+      .split('_')
+      .filter(Boolean)
+      .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+      .join(' ');
+  }
+
+  hasNonDefaultWorkspaceSettings() {
+    const current = this.normalizeWorkspaceSettings(this.workspaceSettings || this.getDefaultWorkspaceSettings());
+    const defaults = this.normalizeWorkspaceSettings(this.getDefaultWorkspaceSettings());
+    return JSON.stringify({
+      workflow: current.workflow,
+      planning: current.planning
+    }) !== JSON.stringify({
+      workflow: defaults.workflow,
+      planning: defaults.planning
+    });
+  }
+
+  shouldDefaultExpandWorkspaceConfig() {
+    const connectionCount = this.getWorkspaceMCPBindings({ includeDisabled: true }).length;
+    const skillCount = this.getWorkspaceSkillBindings({ includeDisabled: true }).length;
+    return connectionCount === 0 && skillCount === 0 && !this.hasNonDefaultWorkspaceSettings();
+  }
+
+  setWorkspaceConfigExpanded(expanded, options = {}) {
+    const nextExpanded = expanded !== false;
+    this.workspaceConfigExpanded = nextExpanded;
+
+    if (this.elements.configPanel) {
+      this.elements.configPanel.classList.toggle('is-collapsed', !nextExpanded);
+    }
+    if (this.elements.configContent) {
+      this.elements.configContent.hidden = !nextExpanded;
+    }
+    if (this.elements.configToggleBtn) {
+      this.elements.configToggleBtn.setAttribute('aria-expanded', nextExpanded ? 'true' : 'false');
+    }
+    if (this.elements.configToggleLabel) {
+      this.elements.configToggleLabel.textContent = nextExpanded ? 'Hide Configuration' : 'Show Configuration';
+    }
+
+    if (options.persist !== false) {
+      this.writeWorkspaceConfigExpandedPreference(nextExpanded);
+    }
+  }
+
+  initializeWorkspaceConfigExpansion() {
+    if (this.workspaceConfigPreferenceLoaded) {
+      this.setWorkspaceConfigExpanded(this.workspaceConfigExpanded, { persist: false });
+      return;
+    }
+
+    const storedPreference = this.readWorkspaceConfigExpandedPreference();
+    const nextExpanded = storedPreference === null
+      ? this.shouldDefaultExpandWorkspaceConfig()
+      : storedPreference;
+
+    this.workspaceConfigPreferenceLoaded = true;
+    this.setWorkspaceConfigExpanded(nextExpanded, { persist: false });
+  }
+
+  toggleWorkspaceConfigExpanded() {
+    this.setWorkspaceConfigExpanded(!this.workspaceConfigExpanded);
+  }
+
+  renderWorkspaceConfigSummary() {
+    const settings = this.normalizeWorkspaceSettings(this.workspaceSettings || this.getDefaultWorkspaceSettings());
+    const preset = this.deriveWorkspaceSettingsPreset(settings);
+    const connectionCount = this.getWorkspaceMCPBindings({ includeDisabled: true }).length;
+    const skillCount = this.getWorkspaceSkillBindings({ includeDisabled: true }).length;
+
+    if (this.elements.configPresetChip) {
+      this.elements.configPresetChip.textContent = `Preset: ${this.formatWorkspaceConfigPresetLabel(preset)}`;
+    }
+    if (this.elements.configConnectionsChip) {
+      this.elements.configConnectionsChip.textContent = `Connections: ${connectionCount}`;
+    }
+    if (this.elements.configSkillsChip) {
+      this.elements.configSkillsChip.textContent = `Skills: ${skillCount}`;
+    }
+
+    this.initializeWorkspaceConfigExpansion();
   }
 
   // ── Workspace Settings Methods ───────────────────────────────────────
@@ -7171,6 +7302,7 @@ export class WorkspaceDetailPage {
     this.workspaceSettingsEffectiveBehavior = effective;
     this.populateWorkspaceSettingsForm(settings);
     this.renderWorkspaceSettingsSummary(settings, effective);
+    this.renderWorkspaceConfigSummary();
   }
 
   handleWorkspaceSettingsPresetChange() {
@@ -7965,6 +8097,7 @@ export class WorkspaceDetailPage {
           <div class="workspace-detail-mcp-empty-note">Add a skill with the <strong>+</strong> button to make it available to agents in this workspace.</div>
         </div>
       `;
+      this.renderWorkspaceConfigSummary();
       return;
     }
 
@@ -8023,6 +8156,7 @@ export class WorkspaceDetailPage {
         </div>
       `;
     }).join('');
+    this.renderWorkspaceConfigSummary();
   }
 
   getAgentInstanceIdsForName(agentName) {
