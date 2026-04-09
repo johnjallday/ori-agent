@@ -4,14 +4,17 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/johnjallday/ori-agent/internal/database"
 	"github.com/johnjallday/ori-agent/internal/vault"
+	"golang.org/x/oauth2"
 )
 
 const testVaultPassword = "test-vault-password"
@@ -84,6 +87,24 @@ func insertLegacyHandlerVault(t *testing.T, db *database.DB, name string) vault.
 		t.Fatalf("insert legacy handler vault %q: %v", name, err)
 	}
 	return item
+}
+
+func configureTestGoogleOAuth(t *testing.T, tokenURL string) string {
+	t.Helper()
+
+	authURL := "https://accounts.google.test/o/oauth2/v2/auth"
+	t.Setenv("ORI_EMAIL_GOOGLE_CLIENT_ID", "google-client-id")
+	t.Setenv("ORI_EMAIL_GOOGLE_CLIENT_SECRET", "google-client-secret")
+	t.Setenv("ORI_EMAIL_GOOGLE_AUTH_URL", authURL)
+	t.Setenv("ORI_EMAIL_GOOGLE_TOKEN_URL", tokenURL)
+	t.Setenv("ORI_EMAIL_OAUTH_BASE_URL", "http://ori.test")
+	return authURL
+}
+
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (fn roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
+	return fn(req)
 }
 
 func TestHandlerRecordLifecycle(t *testing.T) {
@@ -230,6 +251,210 @@ func TestHandlerEmailAccountLifecycle(t *testing.T) {
 	deleteRec := performJSONRequest(t, handler, http.MethodDelete, "/api/vault/email-accounts/"+created.Account.ID, nil)
 	if deleteRec.Code != http.StatusOK {
 		t.Fatalf("expected 200 from delete email account, got %d: %s", deleteRec.Code, deleteRec.Body.String())
+	}
+}
+
+func TestHandlerEmailOAuthProviders(t *testing.T) {
+	handler, _, db := newTestHandler(t, vault.NewMemorySecretStore(), "")
+	defer func() { _ = db.Close() }()
+
+	t.Setenv("ORI_EMAIL_GOOGLE_CLIENT_ID", "google-client-id")
+	t.Setenv("ORI_EMAIL_GOOGLE_CLIENT_SECRET", "google-client-secret")
+
+	rec := performJSONRequest(t, handler, http.MethodGet, "/api/vault/email-oauth/providers", nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200 from provider status, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	var response struct {
+		Providers []struct {
+			Provider         string `json:"provider"`
+			ConnectSupported bool   `json:"connect_supported"`
+			Enabled          bool   `json:"enabled"`
+			Reason           string `json:"reason"`
+		} `json:"providers"`
+	}
+	decodeJSONBody(t, rec, &response)
+	if len(response.Providers) != 3 {
+		t.Fatalf("expected 3 provider entries, got %d", len(response.Providers))
+	}
+
+	if response.Providers[0].Provider != "gmail" || !response.Providers[0].Enabled {
+		t.Fatalf("expected gmail provider to be enabled, got %#v", response.Providers[0])
+	}
+	if response.Providers[1].Provider != "microsoft" || response.Providers[1].Enabled {
+		t.Fatalf("expected microsoft provider to be disabled without env, got %#v", response.Providers[1])
+	}
+	if response.Providers[2].Provider != "imap_smtp" || response.Providers[2].ConnectSupported {
+		t.Fatalf("expected imap_smtp to be manual only, got %#v", response.Providers[2])
+	}
+}
+
+func TestHandlerEmailOAuthConnectCreatesAccount(t *testing.T) {
+	handler, store, db := newTestHandler(t, vault.NewMemorySecretStore(), "")
+	defer func() { _ = db.Close() }()
+	primaryVault := createHandlerVault(t, store, "Primary Vault")
+
+	tokenCalls := 0
+	tokenClient := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		tokenCalls++
+		if r.Method != http.MethodPost {
+			t.Fatalf("expected token endpoint POST, got %s", r.Method)
+		}
+		if err := r.ParseForm(); err != nil {
+			t.Fatalf("parse token form: %v", err)
+		}
+		if r.Form.Get("code") != "oauth-code-1" {
+			t.Fatalf("expected code oauth-code-1, got %q", r.Form.Get("code"))
+		}
+		if r.Form.Get("grant_type") != "authorization_code" {
+			t.Fatalf("expected authorization_code grant, got %q", r.Form.Get("grant_type"))
+		}
+		if r.Form.Get("redirect_uri") != "http://ori.test/api/vault/email-oauth/callback" {
+			t.Fatalf("unexpected redirect URI %q", r.Form.Get("redirect_uri"))
+		}
+		if strings.TrimSpace(r.Form.Get("code_verifier")) == "" {
+			t.Fatal("expected PKCE code verifier on token exchange")
+		}
+
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Body:       io.NopCloser(strings.NewReader(`{"access_token":"access-token-1","refresh_token":"refresh-token-1","token_type":"Bearer","expires_in":3600}`)),
+		}, nil
+	})}
+
+	authURL := configureTestGoogleOAuth(t, "https://oauth.google.test/token")
+
+	startRec := performJSONRequest(t, handler, http.MethodGet, "/api/vault/email-oauth/start?vault_id="+url.QueryEscape(primaryVault.ID)+"&provider=gmail&label=Support%20Inbox&email_address=support@example.com&display_name=Support%20Team&tags=finance,priority", nil)
+	if startRec.Code != http.StatusFound {
+		t.Fatalf("expected 302 from oauth start, got %d: %s", startRec.Code, startRec.Body.String())
+	}
+
+	redirectLocation := startRec.Header().Get("Location")
+	if !strings.HasPrefix(redirectLocation, authURL) {
+		t.Fatalf("expected redirect to auth URL %q, got %q", authURL, redirectLocation)
+	}
+
+	redirectURL, err := url.Parse(redirectLocation)
+	if err != nil {
+		t.Fatalf("parse redirect location: %v", err)
+	}
+	state := strings.TrimSpace(redirectURL.Query().Get("state"))
+	if state == "" {
+		t.Fatal("expected oauth state in redirect URL")
+	}
+	if redirectURL.Query().Get("login_hint") != "support@example.com" {
+		t.Fatalf("expected login_hint, got %q", redirectURL.Query().Get("login_hint"))
+	}
+
+	callbackReq := httptest.NewRequest(http.MethodGet, "/api/vault/email-oauth/callback?state="+url.QueryEscape(state)+"&code=oauth-code-1", nil)
+	callbackReq.Host = "ori.test"
+	callbackReq = callbackReq.WithContext(context.WithValue(callbackReq.Context(), oauth2.HTTPClient, tokenClient))
+	callbackRec := httptest.NewRecorder()
+	handler.ServeHTTP(callbackRec, callbackReq)
+
+	if callbackRec.Code != http.StatusOK {
+		t.Fatalf("expected 200 from oauth callback, got %d: %s", callbackRec.Code, callbackRec.Body.String())
+	}
+	if !strings.Contains(callbackRec.Body.String(), emailOAuthPopupEventType) {
+		t.Fatalf("expected popup event payload in callback HTML, got %s", callbackRec.Body.String())
+	}
+	if strings.Contains(callbackRec.Body.String(), "google-client-secret") {
+		t.Fatalf("expected callback HTML to avoid leaking client secret, got %s", callbackRec.Body.String())
+	}
+	if tokenCalls != 1 {
+		t.Fatalf("expected one token exchange, got %d", tokenCalls)
+	}
+
+	accounts, err := store.ListEmailAccounts(context.Background(), primaryVault.ID, "")
+	if err != nil {
+		t.Fatalf("list email accounts: %v", err)
+	}
+	if len(accounts) != 1 {
+		t.Fatalf("expected one email account after oauth connect, got %d", len(accounts))
+	}
+
+	account := accounts[0]
+	if account.Label != "Support Inbox" || account.EmailAddress != "support@example.com" {
+		t.Fatalf("unexpected created account: %#v", account)
+	}
+	if account.AuthType != vault.EmailAuthTypeOAuth2 || account.Provider != vault.EmailProviderGmail {
+		t.Fatalf("expected gmail oauth account, got %#v", account)
+	}
+	if !account.CredentialsStatus.HasRefreshToken || !account.CredentialsStatus.HasClientSecret {
+		t.Fatalf("expected stored oauth credentials, got %#v", account.CredentialsStatus)
+	}
+}
+
+func TestHandlerEmailOAuthReconnectReplacesPasswordAuth(t *testing.T) {
+	handler, store, db := newTestHandler(t, vault.NewMemorySecretStore(), "")
+	defer func() { _ = db.Close() }()
+	primaryVault := createHandlerVault(t, store, "Primary Vault")
+
+	account, err := store.CreateEmailAccount(context.Background(), vault.EmailAccountInput{
+		VaultID:      primaryVault.ID,
+		Label:        "Support Inbox",
+		Provider:     vault.EmailProviderGmail,
+		EmailAddress: "support@example.com",
+		AuthType:     vault.EmailAuthTypeAppPassword,
+		Credentials: vault.EmailAccountCredentials{
+			Password: "old-app-password",
+		},
+	})
+	if err != nil {
+		t.Fatalf("create seed email account: %v", err)
+	}
+
+	tokenClient := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		if err := r.ParseForm(); err != nil {
+			t.Fatalf("parse token form: %v", err)
+		}
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Body:       io.NopCloser(strings.NewReader(`{"access_token":"access-token-2","refresh_token":"refresh-token-2","token_type":"Bearer","expires_in":3600}`)),
+		}, nil
+	})}
+
+	configureTestGoogleOAuth(t, "https://oauth.google.test/token")
+
+	startRec := performJSONRequest(t, handler, http.MethodGet, "/api/vault/email-oauth/start?vault_id="+url.QueryEscape(primaryVault.ID)+"&provider=gmail&account_id="+url.QueryEscape(account.ID), nil)
+	if startRec.Code != http.StatusFound {
+		t.Fatalf("expected 302 from reconnect start, got %d: %s", startRec.Code, startRec.Body.String())
+	}
+
+	redirectURL, err := url.Parse(startRec.Header().Get("Location"))
+	if err != nil {
+		t.Fatalf("parse reconnect redirect URL: %v", err)
+	}
+	state := strings.TrimSpace(redirectURL.Query().Get("state"))
+	if state == "" {
+		t.Fatal("expected reconnect state")
+	}
+
+	callbackReq := httptest.NewRequest(http.MethodGet, "/api/vault/email-oauth/callback?state="+url.QueryEscape(state)+"&code=oauth-code-2", nil)
+	callbackReq.Host = "ori.test"
+	callbackReq = callbackReq.WithContext(context.WithValue(callbackReq.Context(), oauth2.HTTPClient, tokenClient))
+	callbackRec := httptest.NewRecorder()
+	handler.ServeHTTP(callbackRec, callbackReq)
+
+	if callbackRec.Code != http.StatusOK {
+		t.Fatalf("expected 200 from reconnect callback, got %d: %s", callbackRec.Code, callbackRec.Body.String())
+	}
+
+	updatedAccount, err := store.GetEmailAccount(context.Background(), account.ID)
+	if err != nil {
+		t.Fatalf("get updated email account: %v", err)
+	}
+	if updatedAccount.AuthType != vault.EmailAuthTypeOAuth2 {
+		t.Fatalf("expected oauth2 auth after reconnect, got %#v", updatedAccount)
+	}
+	if updatedAccount.CredentialsStatus.HasPassword {
+		t.Fatalf("expected password credential to be cleared after reconnect, got %#v", updatedAccount.CredentialsStatus)
+	}
+	if !updatedAccount.CredentialsStatus.HasRefreshToken {
+		t.Fatalf("expected refresh token after reconnect, got %#v", updatedAccount.CredentialsStatus)
 	}
 }
 

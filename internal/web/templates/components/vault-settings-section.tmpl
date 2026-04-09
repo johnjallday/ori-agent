@@ -268,7 +268,7 @@
                 </select>
               </div>
               <div class="vault-page-field">
-                <label class="vault-page-label" for="vaultEmailAccountAuthType">Auth type</label>
+                <label class="vault-page-label" for="vaultEmailAccountAuthType">Connection method</label>
                 <select id="vaultEmailAccountAuthType" class="form-select settings-input vault-page-input">
                   <option value="oauth2">OAuth 2</option>
                   <option value="app_password">App Password</option>
@@ -285,6 +285,22 @@
               <div class="vault-page-field">
                 <label class="vault-page-label" for="vaultEmailAccountUsername">Username</label>
                 <input id="vaultEmailAccountUsername" type="text" class="form-control settings-input vault-page-input" placeholder="Defaults to the email address">
+              </div>
+            </div>
+
+            <div id="vaultEmailAccountConnectPanel" class="vault-page-email-connect-panel" hidden>
+              <div class="vault-page-email-connect-copy">
+                <div class="vault-page-email-connect-kicker">Guided OAuth</div>
+                <h5 class="vault-page-subtitle vault-page-subtitle-sm">Connect this mailbox without pasting tokens</h5>
+                <p id="vaultEmailOauthHelp" class="vault-page-help mb-0">
+                  Ori opens the provider sign-in window, then stores the returned mailbox credentials in this vault after approval.
+                </p>
+              </div>
+              <div class="vault-page-email-connect-actions">
+                <button id="vaultConnectEmailAccountBtn" class="modern-btn modern-btn-primary" type="button">Connect account</button>
+              </div>
+              <div id="vaultEmailOauthProviderStatus" class="vault-page-meta vault-page-email-connect-status">
+                Checking provider availability...
               </div>
             </div>
 
@@ -316,36 +332,42 @@
 
             <div class="vault-page-subsection">
               <div class="vault-page-panel-copy">
-                <h5 class="vault-page-subtitle vault-page-subtitle-sm">Credentials</h5>
-                <p class="vault-page-help mb-0">Leave fields blank when editing unless you want to replace the stored secret.</p>
+                <h5 class="vault-page-subtitle vault-page-subtitle-sm">Stored secrets</h5>
+                <p id="vaultEmailAccountCredentialHelp" class="vault-page-help mb-0">Ori only shows whether a secret is stored. Secret values stay write-only.</p>
               </div>
 
-              <div id="vaultEmailAccountOauthFields">
-                <div class="vault-page-field-grid">
-                  <div class="vault-page-field">
-                    <label class="vault-page-label" for="vaultEmailAccountRefreshToken">Refresh token</label>
-                    <input id="vaultEmailAccountRefreshToken" type="password" class="form-control settings-input vault-page-input" autocomplete="new-password" placeholder="Stored in vault only">
+              <details id="vaultEmailAccountOauthAdvanced" class="vault-page-advanced-details mt-3">
+                <summary class="vault-page-subtitle" style="cursor: pointer; font-size: 0.9rem;">Advanced OAuth import</summary>
+                <div id="vaultEmailAccountOauthFields" class="mt-2">
+                  <div class="vault-page-meta mb-3">
+                    Use this only if you already have OAuth tokens or custom client credentials. Most users should use the guided connect button instead.
                   </div>
-                  <div class="vault-page-field">
-                    <label class="vault-page-label" for="vaultEmailAccountAccessToken">Access token</label>
-                    <input id="vaultEmailAccountAccessToken" type="password" class="form-control settings-input vault-page-input" autocomplete="new-password" placeholder="Optional cached access token">
+                  <div class="vault-page-field-grid">
+                    <div class="vault-page-field">
+                      <label class="vault-page-label" for="vaultEmailAccountRefreshToken">Refresh token</label>
+                      <input id="vaultEmailAccountRefreshToken" type="password" class="form-control settings-input vault-page-input" autocomplete="new-password" placeholder="Stored in vault only">
+                    </div>
+                    <div class="vault-page-field">
+                      <label class="vault-page-label" for="vaultEmailAccountAccessToken">Access token</label>
+                      <input id="vaultEmailAccountAccessToken" type="password" class="form-control settings-input vault-page-input" autocomplete="new-password" placeholder="Optional cached access token">
+                    </div>
+                  </div>
+                  <div class="vault-page-field-grid mt-2">
+                    <div class="vault-page-field">
+                      <label class="vault-page-label" for="vaultEmailAccountClientId">Client ID</label>
+                      <input id="vaultEmailAccountClientId" type="text" class="form-control settings-input vault-page-input" placeholder="OAuth client id">
+                    </div>
+                    <div class="vault-page-field">
+                      <label class="vault-page-label" for="vaultEmailAccountClientSecret">Client secret</label>
+                      <input id="vaultEmailAccountClientSecret" type="password" class="form-control settings-input vault-page-input" autocomplete="new-password" placeholder="Stored in vault only">
+                    </div>
+                  </div>
+                  <div class="vault-page-field mt-2">
+                    <label class="vault-page-label" for="vaultEmailAccountTokenEndpoint">Token endpoint</label>
+                    <input id="vaultEmailAccountTokenEndpoint" type="text" class="form-control settings-input vault-page-input" placeholder="Optional custom OAuth token endpoint">
                   </div>
                 </div>
-                <div class="vault-page-field-grid mt-2">
-                  <div class="vault-page-field">
-                    <label class="vault-page-label" for="vaultEmailAccountClientId">Client ID</label>
-                    <input id="vaultEmailAccountClientId" type="text" class="form-control settings-input vault-page-input" placeholder="OAuth client id">
-                  </div>
-                  <div class="vault-page-field">
-                    <label class="vault-page-label" for="vaultEmailAccountClientSecret">Client secret</label>
-                    <input id="vaultEmailAccountClientSecret" type="password" class="form-control settings-input vault-page-input" autocomplete="new-password" placeholder="Stored in vault only">
-                  </div>
-                </div>
-                <div class="vault-page-field mt-2">
-                  <label class="vault-page-label" for="vaultEmailAccountTokenEndpoint">Token endpoint</label>
-                  <input id="vaultEmailAccountTokenEndpoint" type="text" class="form-control settings-input vault-page-input" placeholder="Optional custom OAuth token endpoint">
-                </div>
-              </div>
+              </details>
 
               <div id="vaultEmailAccountPasswordFields" hidden>
                 <div class="vault-page-field">

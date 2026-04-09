@@ -5,17 +5,22 @@ import (
 	"errors"
 	"net/http"
 	"strings"
+	"time"
 
 	orihttp "github.com/johnjallday/ori-agent/internal/http"
 	"github.com/johnjallday/ori-agent/internal/vault"
 )
 
 type Handler struct {
-	store *vault.Store
+	store      *vault.Store
+	oauthFlows *emailOAuthFlowStore
 }
 
 func NewHandler(store *vault.Store) *Handler {
-	return &Handler{store: store}
+	return &Handler{
+		store:      store,
+		oauthFlows: newEmailOAuthFlowStore(nil, 10*time.Minute),
+	}
 }
 
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -33,6 +38,12 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	switch {
 	case path == "/status":
 		h.handleStatus(w, r)
+	case path == "/email-oauth/providers":
+		h.handleEmailOAuthProviders(w, r)
+	case path == "/email-oauth/start":
+		h.handleEmailOAuthStart(w, r)
+	case path == "/email-oauth/callback":
+		h.handleEmailOAuthCallback(w, r)
 	case path == "/vaults" || path == "/vaults/":
 		h.handleVaults(w, r)
 	case strings.HasPrefix(path, "/vaults/"):

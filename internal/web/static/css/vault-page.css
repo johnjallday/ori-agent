@@ -506,6 +506,60 @@
   align-items: start;
 }
 
+.vault-page-email-connect-panel {
+  display: grid;
+  gap: 0.9rem;
+  margin-top: 0.15rem;
+  padding: 1rem 1.05rem;
+  border-radius: 22px;
+  border: 1px solid var(--vault-page-soft-border);
+  background:
+    radial-gradient(circle at top right, rgba(255, 218, 171, 0.16), transparent 34%),
+    linear-gradient(180deg, rgba(255, 251, 244, 0.88), rgba(246, 237, 222, 0.8));
+}
+
+[data-bs-theme="dark"] .vault-page-email-connect-panel,
+.dark-mode .vault-page-email-connect-panel {
+  background:
+    radial-gradient(circle at top right, rgba(240, 161, 93, 0.12), transparent 34%),
+    linear-gradient(180deg, rgba(34, 42, 58, 0.92), rgba(24, 31, 45, 0.88));
+}
+
+.vault-page-email-connect-copy {
+  min-width: 0;
+}
+
+.vault-page-email-connect-kicker {
+  display: inline-flex;
+  align-items: center;
+  min-height: 1.8rem;
+  padding: 0.18rem 0.62rem;
+  border-radius: 999px;
+  background: var(--vault-page-badge-bg);
+  color: var(--text-primary);
+  font-size: 0.74rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.vault-page-email-connect-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.65rem;
+}
+
+.vault-page-email-connect-status[data-state="ready"],
+.vault-page-email-connect-status[data-state="connected"] {
+  border-color: rgba(83, 144, 98, 0.28);
+  background: rgba(104, 168, 116, 0.1);
+}
+
+.vault-page-email-connect-status[data-state="warning"] {
+  border-color: rgba(191, 124, 67, 0.28);
+  background: rgba(191, 124, 67, 0.1);
+}
+
 .vault-page-records-list,
 .vault-page-grants-list {
   display: flex;
@@ -607,6 +661,16 @@
   color: var(--text-primary);
   font-size: 0.76rem;
   font-weight: 700;
+}
+
+.vault-page-email-chip.is-success {
+  border-color: rgba(83, 144, 98, 0.26);
+  background: rgba(104, 168, 116, 0.12);
+}
+
+.vault-page-email-chip.is-warning {
+  border-color: rgba(191, 124, 67, 0.26);
+  background: rgba(191, 124, 67, 0.12);
 }
 
 .vault-page-email-secret-state {

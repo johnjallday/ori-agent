@@ -108,6 +108,12 @@
   const emailAccountImapPortInput = document.getElementById('vaultEmailAccountImapPort');
   const emailAccountSmtpHostInput = document.getElementById('vaultEmailAccountSmtpHost');
   const emailAccountSmtpPortInput = document.getElementById('vaultEmailAccountSmtpPort');
+  const emailAccountConnectPanelEl = document.getElementById('vaultEmailAccountConnectPanel');
+  const emailAccountConnectBtn = document.getElementById('vaultConnectEmailAccountBtn');
+  const emailAccountOauthHelpEl = document.getElementById('vaultEmailOauthHelp');
+  const emailAccountOauthProviderStatusEl = document.getElementById('vaultEmailOauthProviderStatus');
+  const emailAccountCredentialHelpEl = document.getElementById('vaultEmailAccountCredentialHelp');
+  const emailAccountOauthAdvancedEl = document.getElementById('vaultEmailAccountOauthAdvanced');
   const emailAccountOauthFields = document.getElementById('vaultEmailAccountOauthFields');
   const emailAccountPasswordFields = document.getElementById('vaultEmailAccountPasswordFields');
   const emailAccountRefreshTokenInput = document.getElementById('vaultEmailAccountRefreshToken');
@@ -155,8 +161,13 @@
   let records = [];
   let grants = [];
   let emailAccounts = [];
+  let emailOAuthProviders = {};
+  let emailOAuthProviderLoadError = '';
   let selectedRecord = null;
   let selectedEmailAccount = null;
+  let emailOAuthPopup = null;
+  let emailOAuthPopupPollID = 0;
+  let emailOAuthPending = false;
   let payloadRevealed = false;
   let recordIndex = new Map();
   let folderIndex = new Map();
@@ -491,6 +502,81 @@
   function emailAuthTypeLabel(authType) {
     const normalized = normalizeEmailAuthType(authType);
     return EMAIL_AUTH_TYPE_META[normalized] || normalized.replaceAll('_', ' ');
+  }
+
+  function isNativeOAuthProvider(provider) {
+    const normalized = normalizeEmailProvider(provider);
+    return normalized === 'gmail' || normalized === 'microsoft';
+  }
+
+  function oauthProviderButtonLabel(provider) {
+    const normalized = normalizeEmailProvider(provider);
+    if (normalized === 'gmail') {
+      return 'Google';
+    }
+    if (normalized === 'microsoft') {
+      return 'Microsoft';
+    }
+    return emailProviderLabel(normalized);
+  }
+
+  function currentEmailOAuthProviderStatus(provider = emailAccountProviderInput?.value) {
+    const normalized = normalizeEmailProvider(provider);
+    const fallbackReason = emailOAuthProviderLoadError
+      ? emailOAuthProviderLoadError
+      : isNativeOAuthProvider(normalized)
+        ? `Checking ${oauthProviderButtonLabel(normalized)} OAuth availability...`
+        : 'This provider uses manual credentials or advanced token import.';
+
+    return emailOAuthProviders[normalized] || {
+      provider: normalized,
+      label: oauthProviderButtonLabel(normalized),
+      connect_supported: isNativeOAuthProvider(normalized),
+      enabled: false,
+      reason: fallbackReason
+    };
+  }
+
+  function currentEmailOAuthConnectMode() {
+    return normalizeEmailAuthType(emailAccountAuthTypeInput?.value) === 'oauth2'
+      && isNativeOAuthProvider(emailAccountProviderInput?.value);
+  }
+
+  function emailAccountHasStoredConnection(account) {
+    const state = currentEmailAccountSecretState(account);
+    const authType = normalizeEmailAuthType(account?.auth_type);
+    if (authType === 'oauth2') {
+      return Boolean(state.has_refresh_token || state.has_access_token);
+    }
+    if (authType === 'password' || authType === 'app_password') {
+      return Boolean(state.has_password);
+    }
+    return false;
+  }
+
+  function emailAccountConnectionChip(account) {
+    const authType = normalizeEmailAuthType(account?.auth_type);
+    const isConnected = emailAccountHasStoredConnection(account);
+
+    if (authType === 'oauth2') {
+      return isConnected
+        ? '<span class="vault-page-email-chip is-success">Connected</span>'
+        : '<span class="vault-page-email-chip is-warning">Needs connection</span>';
+    }
+
+    if (authType === 'app_password') {
+      return isConnected
+        ? '<span class="vault-page-email-chip is-success">App password stored</span>'
+        : '<span class="vault-page-email-chip is-warning">Needs app password</span>';
+    }
+
+    if (authType === 'password') {
+      return isConnected
+        ? '<span class="vault-page-email-chip is-success">Password stored</span>'
+        : '<span class="vault-page-email-chip is-warning">Needs password</span>';
+    }
+
+    return '';
   }
 
   function parseOptionalPort(value) {
@@ -1738,6 +1824,8 @@
   function emailAccountSecretsSummary(account) {
     const state = currentEmailAccountSecretState(account);
     const stored = [];
+    const provider = normalizeEmailProvider(account?.provider || emailAccountProviderInput?.value);
+    const connectMode = currentEmailOAuthConnectMode();
 
     if (state.has_refresh_token) stored.push('Refresh token');
     if (state.has_access_token) stored.push('Access token');
@@ -1746,9 +1834,15 @@
     if (state.has_client_secret) stored.push('Client secret');
 
     if (stored.length === 0) {
+      if (connectMode) {
+        return `This account is not connected yet. Use Connect with ${oauthProviderButtonLabel(provider)} to continue.`;
+      }
       return 'No credentials stored yet.';
     }
 
+    if (normalizeEmailAuthType(account?.auth_type || emailAccountAuthTypeInput?.value) === 'oauth2') {
+      return `Connected through OAuth. Stored in vault: ${stored.join(', ')}.`;
+    }
     return `Stored in vault: ${stored.join(', ')}.`;
   }
 
@@ -1759,6 +1853,112 @@
 
     const message = emailAccountSecretsSummary(account);
     emailAccountCredentialStatusEl.textContent = message;
+  }
+
+  function renderEmailAccountActionButtons() {
+    if (!saveEmailAccountBtn) {
+      return;
+    }
+
+    const connectMode = currentEmailOAuthConnectMode();
+    const editingExisting = Boolean(selectedEmailAccount?.id);
+
+    saveEmailAccountBtn.classList.toggle('modern-btn-primary', !connectMode);
+    saveEmailAccountBtn.classList.toggle('modern-btn-secondary', connectMode);
+
+    if (connectMode) {
+      saveEmailAccountBtn.textContent = editingExisting ? 'Save Metadata' : 'Save Manual Setup';
+      return;
+    }
+
+    saveEmailAccountBtn.textContent = editingExisting ? 'Save Changes' : 'Save Email Account';
+  }
+
+  function clearEmailOAuthPopupState(options = {}) {
+    if (emailOAuthPopupPollID) {
+      window.clearInterval(emailOAuthPopupPollID);
+      emailOAuthPopupPollID = 0;
+    }
+
+    if (options.close && emailOAuthPopup && !emailOAuthPopup.closed) {
+      emailOAuthPopup.close();
+    }
+
+    emailOAuthPopup = null;
+    emailOAuthPending = false;
+    setButtonLoading(emailAccountConnectBtn, false);
+  }
+
+  function renderEmailOAuthConnectPanel() {
+    const provider = normalizeEmailProvider(emailAccountProviderInput?.value);
+    const authType = normalizeEmailAuthType(emailAccountAuthTypeInput?.value);
+    const connectMode = authType === 'oauth2' && isNativeOAuthProvider(provider);
+    const providerStatus = currentEmailOAuthProviderStatus(provider);
+    const buttonProviderLabel = oauthProviderButtonLabel(provider);
+    const accountMatchesProvider = normalizeEmailProvider(selectedEmailAccount?.provider) === provider;
+    const hasConnectedAccount = accountMatchesProvider && emailAccountHasStoredConnection(selectedEmailAccount);
+
+    if (emailAccountConnectPanelEl) {
+      emailAccountConnectPanelEl.hidden = !connectMode;
+    }
+    if (emailAccountOauthAdvancedEl) {
+      emailAccountOauthAdvancedEl.hidden = authType !== 'oauth2';
+    }
+    if (emailAccountPasswordFields) {
+      emailAccountPasswordFields.hidden = authType === 'oauth2';
+    }
+
+    if (emailAccountCredentialHelpEl) {
+      if (connectMode) {
+        emailAccountCredentialHelpEl.textContent = hasConnectedAccount
+          ? 'Ori keeps the OAuth tokens write-only. You can reconnect to rotate them, or save metadata changes without reconnecting.'
+          : `Ori will save the OAuth tokens only after ${buttonProviderLabel} approves access.`;
+      } else if (authType === 'oauth2') {
+        emailAccountCredentialHelpEl.textContent = 'Paste existing OAuth tokens or custom client credentials only if you already manage this provider outside Ori.';
+      } else {
+        emailAccountCredentialHelpEl.textContent = 'Leave password fields blank when editing unless you want to replace the stored secret.';
+      }
+    }
+
+    if (!connectMode) {
+      renderEmailAccountActionButtons();
+      return;
+    }
+
+    const readyToConnect = Boolean(
+      providerStatus.enabled
+        && currentVaultID()
+        && vaultStatus?.available
+        && !vaultStatus?.locked
+    );
+
+    if (emailAccountOauthHelpEl) {
+      emailAccountOauthHelpEl.textContent = hasConnectedAccount
+        ? `Reconnect through ${buttonProviderLabel} if you want Ori to replace the stored refresh token.`
+        : `Use the ${buttonProviderLabel} sign-in window. Ori will create the account only after the provider returns a token.`;
+    }
+
+    if (emailAccountOauthProviderStatusEl) {
+      let state = 'warning';
+      let message = providerStatus.reason || 'OAuth is unavailable for this provider.';
+
+      if (readyToConnect) {
+        state = hasConnectedAccount ? 'connected' : 'ready';
+        message = hasConnectedAccount
+          ? 'Connected. You can reconnect any time to refresh mailbox access.'
+          : 'Ready. No account record is saved until the provider approves access.';
+      }
+
+      emailAccountOauthProviderStatusEl.dataset.state = state;
+      emailAccountOauthProviderStatusEl.textContent = message;
+    }
+
+    if (emailAccountConnectBtn) {
+      emailAccountConnectBtn.textContent = `${hasConnectedAccount ? 'Reconnect with' : 'Connect with'} ${buttonProviderLabel}`;
+      emailAccountConnectBtn.disabled = !readyToConnect;
+    }
+
+    renderEmailAccountActionButtons();
   }
 
   function renderEmailAccountsSummary() {
@@ -1812,6 +2012,7 @@
       emailAccountClientSecretInput,
       emailAccountTokenEndpointInput,
       emailAccountPasswordInput,
+      emailAccountConnectBtn,
       saveEmailAccountBtn,
       deleteEmailAccountBtn
     ].forEach((element) => {
@@ -1839,16 +2040,18 @@
     if (emailAccountImapFields) {
       emailAccountImapFields.hidden = provider !== 'imap_smtp';
     }
+    renderEmailOAuthConnectPanel();
   }
 
   function syncEmailAccountAuthFields() {
     const authType = normalizeEmailAuthType(emailAccountAuthTypeInput?.value);
-    if (emailAccountOauthFields) {
-      emailAccountOauthFields.hidden = authType !== 'oauth2';
+    if (emailAccountOauthAdvancedEl) {
+      emailAccountOauthAdvancedEl.hidden = authType !== 'oauth2';
     }
     if (emailAccountPasswordFields) {
       emailAccountPasswordFields.hidden = authType === 'oauth2';
     }
+    renderEmailOAuthConnectPanel();
   }
 
   function renderEmailAccountsList(items = emailAccounts) {
@@ -1882,6 +2085,7 @@
       const isSelected = selectedEmailAccount?.id === account.id ? ' is-selected' : '';
       const subtitle = [account.email_address, emailProviderLabel(account.provider)].filter(Boolean).join(' • ');
       const chips = [
+        emailAccountConnectionChip(account),
         `<span class="vault-page-email-chip">${escapeHTML(emailAuthTypeLabel(account.auth_type))}</span>`,
         account.workspace_id ? `<span class="vault-page-email-chip">Workspace: ${escapeHTML(account.workspace_id)}</span>` : '<span class="vault-page-email-chip">Global</span>'
       ].filter(Boolean).join('');
@@ -1918,6 +2122,7 @@
     if (emailAccountImapPortInput) emailAccountImapPortInput.value = '';
     if (emailAccountSmtpHostInput) emailAccountSmtpHostInput.value = '';
     if (emailAccountSmtpPortInput) emailAccountSmtpPortInput.value = '';
+    if (emailAccountOauthAdvancedEl) emailAccountOauthAdvancedEl.open = false;
     resetEmailCredentialInputs();
     syncEmailAccountProviderFields();
     syncEmailAccountAuthFields();
@@ -1925,14 +2130,12 @@
     if (emailAccountModeBadgeEl) {
       emailAccountModeBadgeEl.textContent = 'New account';
     }
-    if (saveEmailAccountBtn) {
-      saveEmailAccountBtn.textContent = 'Save Email Account';
-    }
     if (deleteEmailAccountBtn) {
       deleteEmailAccountBtn.classList.add('d-none');
     }
 
     renderEmailAccountCredentialState(null);
+    renderEmailOAuthConnectPanel();
     if (options.refreshList !== false) {
       renderEmailAccountsList(emailAccounts);
     }
@@ -1960,21 +2163,20 @@
     if (emailAccountImapPortInput) emailAccountImapPortInput.value = account.imap_port ? String(account.imap_port) : '';
     if (emailAccountSmtpHostInput) emailAccountSmtpHostInput.value = account.smtp_host || '';
     if (emailAccountSmtpPortInput) emailAccountSmtpPortInput.value = account.smtp_port ? String(account.smtp_port) : '';
+    if (emailAccountOauthAdvancedEl) emailAccountOauthAdvancedEl.open = false;
     resetEmailCredentialInputs();
     syncEmailAccountProviderFields();
     syncEmailAccountAuthFields();
 
     if (emailAccountModeBadgeEl) {
-      emailAccountModeBadgeEl.textContent = 'Editing account';
-    }
-    if (saveEmailAccountBtn) {
-      saveEmailAccountBtn.textContent = 'Save Changes';
+      emailAccountModeBadgeEl.textContent = emailAccountHasStoredConnection(account) ? 'Connected account' : 'Editing account';
     }
     if (deleteEmailAccountBtn) {
       deleteEmailAccountBtn.classList.remove('d-none');
     }
 
     renderEmailAccountCredentialState(account);
+    renderEmailOAuthConnectPanel();
     renderEmailAccountsList(emailAccounts);
     renderEmailAccountsSummary();
   }
@@ -2016,6 +2218,29 @@
     renderEmailAccountsSummary();
   }
 
+  async function loadEmailOAuthProviders() {
+    try {
+      const data = await apiRequest('/api/vault/email-oauth/providers');
+      const nextProviders = {};
+      const items = Array.isArray(data.providers) ? data.providers : [];
+      items.forEach((item) => {
+        const key = normalizeEmailProvider(item.provider);
+        if (key) {
+          nextProviders[key] = item;
+        }
+      });
+      emailOAuthProviders = nextProviders;
+      emailOAuthProviderLoadError = '';
+    } catch (error) {
+      console.error('Failed to load email OAuth providers:', error);
+      emailOAuthProviders = {};
+      emailOAuthProviderLoadError = error.message || 'Ori could not load OAuth provider status.';
+    }
+
+    renderEmailOAuthConnectPanel();
+    renderEmailAccountsList(emailAccounts);
+  }
+
   function buildEmailAccountBasePayload() {
     return {
       label: String(emailAccountLabelInput?.value || '').trim(),
@@ -2035,6 +2260,82 @@
     };
   }
 
+  function buildEmailOAuthStartURL() {
+    const provider = normalizeEmailProvider(emailAccountProviderInput?.value);
+    const providerStatus = currentEmailOAuthProviderStatus(provider);
+    const basePayload = buildEmailAccountBasePayload();
+
+    if (!currentVaultID()) {
+      throw new Error('Create or select a vault before connecting an email account.');
+    }
+    if (!vaultStatus?.available || vaultStatus?.locked) {
+      throw new Error('Unlock the selected vault before connecting an email account.');
+    }
+    if (!currentEmailOAuthConnectMode()) {
+      throw new Error('Choose OAuth 2 for Google or Microsoft before starting the connect flow.');
+    }
+    if (!providerStatus.enabled) {
+      throw new Error(providerStatus.reason || 'OAuth is not configured for this provider.');
+    }
+    if (!basePayload.email_address) {
+      throw new Error('Email address is required before connecting the account.');
+    }
+
+    const params = new URLSearchParams();
+    params.set('vault_id', currentVaultID());
+    params.set('provider', provider);
+    params.set('email_address', basePayload.email_address);
+
+    if (basePayload.label) params.set('label', basePayload.label);
+    if (basePayload.display_name) params.set('display_name', basePayload.display_name);
+    if (basePayload.username) params.set('username', basePayload.username);
+    if (basePayload.workspace_id) params.set('workspace_id', basePayload.workspace_id);
+    if (Array.isArray(basePayload.tags) && basePayload.tags.length) params.set('tags', basePayload.tags.join(','));
+    if (basePayload.source) params.set('source', basePayload.source);
+    if (basePayload.retention_policy) params.set('retention_policy', basePayload.retention_policy);
+    if (selectedEmailAccount?.id && normalizeEmailProvider(selectedEmailAccount.provider) === provider) {
+      params.set('account_id', selectedEmailAccount.id);
+    }
+
+    return {
+      url: `/api/vault/email-oauth/start?${params.toString()}`,
+      providerLabel: oauthProviderButtonLabel(provider)
+    };
+  }
+
+  async function startEmailOAuthFlow() {
+    try {
+      const start = buildEmailOAuthStartURL();
+      clearEmailOAuthPopupState();
+      setButtonLoading(emailAccountConnectBtn, true, `Opening ${start.providerLabel}`);
+      emailOAuthPending = true;
+
+      const popup = window.open(start.url, 'ori-email-oauth', 'popup=yes,width=560,height=760');
+      if (!popup) {
+        clearEmailOAuthPopupState();
+        showInlineAlert('Ori could not open the connection window. Allow popups and try again.', 'warning');
+        return;
+      }
+
+      emailOAuthPopup = popup;
+      popup.focus();
+
+      emailOAuthPopupPollID = window.setInterval(() => {
+        if (!emailOAuthPopup || emailOAuthPopup.closed) {
+          const wasPending = emailOAuthPending;
+          clearEmailOAuthPopupState();
+          renderEmailOAuthConnectPanel();
+          if (wasPending) {
+            showInlineAlert('Connection window closed before the account was connected.', 'warning');
+          }
+        }
+      }, 400);
+    } catch (error) {
+      clearEmailOAuthPopupState();
+      showInlineAlert(error.message || 'Failed to start the email connection flow.', 'error');
+    }
+  }
+
   async function saveEmailAccount() {
     if (!currentVaultID()) {
       showInlineAlert('Create or select a vault before saving an email account.', 'warning');
@@ -2048,6 +2349,16 @@
     const basePayload = buildEmailAccountBasePayload();
     if (!basePayload.email_address) {
       showInlineAlert('Email address is required before saving the account.', 'warning');
+      return;
+    }
+
+    const connectMode = currentEmailOAuthConnectMode();
+    const manualTokenProvided = Boolean(
+      String(emailAccountAccessTokenInput?.value || '').trim()
+      || String(emailAccountRefreshTokenInput?.value || '').trim()
+    );
+    if (connectMode && !selectedEmailAccount?.id && !manualTokenProvided) {
+      showInlineAlert(`This account is not connected yet. Use Connect with ${oauthProviderButtonLabel(basePayload.provider)} or open Advanced OAuth import to paste existing tokens.`, 'warning');
       return;
     }
 
@@ -2194,7 +2505,7 @@
     const selectedEmailAccountID = selectedEmailAccount?.id || '';
 
     try {
-      await loadVaults();
+      await Promise.all([loadVaults(), loadEmailOAuthProviders()]);
       const status = await loadVaultStatus();
       if (!status.available) {
         renderVaultSpaces();
@@ -2822,12 +3133,43 @@
     revokeGrant(trigger.getAttribute('data-grant-id'));
   });
 
+  window.addEventListener('message', async (event) => {
+    if (event.origin !== window.location.origin) {
+      return;
+    }
+
+    const payload = event.data;
+    if (!payload || payload.type !== 'ori:vault-email-oauth') {
+      return;
+    }
+
+    clearEmailOAuthPopupState();
+    renderEmailOAuthConnectPanel();
+
+    if (!payload.success) {
+      showInlineAlert(payload.error || 'Ori could not connect the email account.', 'error');
+      return;
+    }
+
+    notify(payload.message || 'Email account connected.', 'success');
+    await refreshVault();
+
+    const accountID = String(payload.account?.id || '').trim();
+    if (accountID) {
+      selectEmailAccount(accountID);
+    }
+  });
+
   emailAccountProviderInput?.addEventListener('change', () => {
     syncEmailAccountProviderFields();
   });
 
   emailAccountAuthTypeInput?.addEventListener('change', () => {
     syncEmailAccountAuthFields();
+  });
+
+  emailAccountConnectBtn?.addEventListener('click', () => {
+    startEmailOAuthFlow();
   });
 
   saveEmailAccountBtn?.addEventListener('click', () => {
