@@ -227,7 +227,64 @@ func (h *Handler) defaultSessionAgentNameForWorkspace(ctx context.Context, works
 		return ""
 	}
 
+	if _, _, err := h.ensureWorkspaceManagerForWorkspace(ctx, ws); err != nil {
+		logger.Warn("Failed to auto-provision workspace manager for session", logger.Fields{
+			"workspace_id": trimmedWorkspaceID,
+			"error":        err,
+		})
+	}
+
 	return availableWorkspaceEntryAgentName(ws, h.agentStore)
+}
+
+func (h *Handler) ensureWorkspaceManagerForWorkspace(ctx context.Context, workspace *session.Workspace) (string, bool, error) {
+	if h == nil || workspace == nil || workspace.IsGroup() {
+		return "", false, nil
+	}
+
+	if existing := availableWorkspaceEntryAgentName(workspace, h.agentStore); existing != "" {
+		return existing, false, nil
+	}
+
+	if h.store == nil || h.agentStore == nil {
+		return "", false, nil
+	}
+
+	agentName, created, err := h.ensureWorkspaceEntryAgent(workspace.Name, "")
+	if err != nil {
+		return "", false, fmt.Errorf("create workspace manager: %w", err)
+	}
+
+	setWorkspaceEntryAgent(workspace, agentName)
+	workspace.UpdatedAt = time.Now()
+
+	if err := h.store.UpdateWorkspace(ctx, workspace); err != nil {
+		h.rollbackWorkspaceEntryAgent(agentName, created)
+		return "", false, fmt.Errorf("persist workspace manager for %s: %w", workspace.ID, err)
+	}
+
+	if h.workspaceStore != nil {
+		folderWS, buildErr := buildFileStoreWorkspace(workspace)
+		if buildErr != nil {
+			logger.Warn("Failed to build workspace manager file-store snapshot", logger.Fields{
+				"workspace_id": workspace.ID,
+				"error":        buildErr,
+			})
+		} else if saveErr := h.workspaceStore.Save(folderWS); saveErr != nil {
+			logger.Warn("Failed to sync auto-provisioned workspace manager to file store", logger.Fields{
+				"workspace_id": workspace.ID,
+				"error":        saveErr,
+			})
+		}
+	}
+
+	logger.Info("Auto-provisioned workspace manager for workspace", logger.Fields{
+		"workspace_id": workspace.ID,
+		"workspace":    workspace.Name,
+		"agent":        agentName,
+	})
+
+	return agentName, true, nil
 }
 
 // deleteWorkspaceManagerAgent removes the auto-created workspace manager agent

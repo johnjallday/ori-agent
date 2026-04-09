@@ -65,4 +65,20 @@ func TestHandleGetWorkspaceIncludesSkillBindings(t *testing.T) {
 	if !ok || len(agentSkillAccess) != 1 {
 		t.Fatalf("expected one agent skill access rule in response, got %#v", response["agent_skill_access"])
 	}
+
+	settings, ok := response["workspace_settings"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected workspace_settings object in response, got %#v", response["workspace_settings"])
+	}
+	if got := settings["preset"]; got != "guided" {
+		t.Fatalf("expected default guided settings preset, got %#v", got)
+	}
+
+	effective, ok := response["workspace_settings_effective_behavior"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected workspace_settings_effective_behavior object, got %#v", response["workspace_settings_effective_behavior"])
+	}
+	if _, ok := effective["summary"].([]interface{}); !ok {
+		t.Fatalf("expected summary array in effective behavior, got %#v", effective["summary"])
+	}
 }

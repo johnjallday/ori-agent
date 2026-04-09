@@ -11,9 +11,11 @@ import (
 	"github.com/johnjallday/ori-agent/internal/mcp"
 	"github.com/johnjallday/ori-agent/internal/store"
 	"github.com/johnjallday/ori-agent/internal/types"
+	"github.com/johnjallday/ori-agent/internal/workspacesettings"
 )
 
 const synthesizedFilesystemBindingID = "workspace-filesystem"
+const synthesizedWorkspaceSettingsSkillBindingPrefix = "workspace-settings-"
 
 type runtimeMCPRegistry interface {
 	UpsertServer(config mcp.ServerConfig) error
@@ -669,6 +671,39 @@ func (r *AgentRuntimeResolver) resolveWorkspaceSkillBindings(ws *Workspace, inst
 	return filtered
 }
 
+func (r *AgentRuntimeResolver) resolveSettingsManagedSkillBindings(ws *Workspace, agentName string) []WorkspaceSkillBinding {
+	if ws == nil {
+		return nil
+	}
+
+	entryAgentName := strings.TrimSpace(ws.EntryAgentName())
+	if entryAgentName == "" || !strings.EqualFold(entryAgentName, strings.TrimSpace(agentName)) {
+		return nil
+	}
+
+	effective := workspacesettings.BuildEffectiveBehavior(workspacesettings.Extract(ws.SharedData))
+	if len(effective.ManagedSkills) == 0 {
+		return nil
+	}
+
+	bindings := make([]WorkspaceSkillBinding, 0, len(effective.ManagedSkills))
+	for _, managed := range effective.ManagedSkills {
+		skillName := strings.TrimSpace(managed.SkillName)
+		if skillName == "" || !managed.Active {
+			continue
+		}
+		bindings = append(bindings, WorkspaceSkillBinding{
+			ID:        synthesizedWorkspaceSettingsSkillBindingPrefix + strings.ToLower(skillName),
+			SkillName: skillName,
+			Enabled:   true,
+			Trusted:   false,
+			Config:    cloneInterfaceMap(managed.Config),
+		})
+	}
+
+	return bindings
+}
+
 // resolveEffectiveSkills merges workspace skill bindings with agent-specific skills.
 // Agent-specific skills take priority on name collision.
 func (r *AgentRuntimeResolver) resolveEffectiveSkills(ws *Workspace, instance *AgentInstance, agentName string) []ResolvedSkill {
@@ -694,6 +729,23 @@ func (r *AgentRuntimeResolver) resolveEffectiveSkills(ws *Workspace, instance *A
 
 	// Resolve workspace skill bindings
 	allowedBindings := r.resolveWorkspaceSkillBindings(ws, instance)
+	if managedBindings := r.resolveSettingsManagedSkillBindings(ws, agentName); len(managedBindings) > 0 {
+		existingNames := make(map[string]struct{}, len(allowedBindings))
+		for _, binding := range allowedBindings {
+			existingNames[strings.ToLower(strings.TrimSpace(binding.SkillName))] = struct{}{}
+		}
+		for _, binding := range managedBindings {
+			key := strings.ToLower(strings.TrimSpace(binding.SkillName))
+			if key == "" {
+				continue
+			}
+			if _, exists := existingNames[key]; exists {
+				continue
+			}
+			existingNames[key] = struct{}{}
+			allowedBindings = append(allowedBindings, binding)
+		}
+	}
 	if len(allowedBindings) == 0 {
 		return agentSkills
 	}

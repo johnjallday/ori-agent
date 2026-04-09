@@ -18,6 +18,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/session"
 	agentworkspace "github.com/johnjallday/ori-agent/internal/workspace"
+	"github.com/johnjallday/ori-agent/internal/workspacesettings"
 )
 
 var (
@@ -59,6 +60,9 @@ func (h *Handler) HandleWorkspaces(w http.ResponseWriter, r *http.Request) {
 		subPath := parts[1]
 
 		switch subPath {
+		case "settings":
+			h.handleWorkspaceSettings(w, r, id)
+			return
 		case "agents":
 			h.handleWorkspaceAgents(w, r, id, parts)
 			return
@@ -487,6 +491,13 @@ func (h *Handler) getWorkspace(w http.ResponseWriter, r *http.Request, id string
 		logger.Error("Failed to get workspace", logger.Fields{"id": id, "error": err})
 		_ = orihttp.RespondInternalError(w, "Failed to get workspace")
 		return
+	}
+
+	if _, _, err := h.ensureWorkspaceManagerForWorkspace(r.Context(), workspace); err != nil {
+		logger.Warn("Failed to auto-provision workspace manager on workspace load", logger.Fields{
+			"workspace_id": id,
+			"error":        err,
+		})
 	}
 
 	orihttp.WriteJSON(w, h.buildWorkspaceDetailResponse(workspace))
@@ -1667,10 +1678,13 @@ func (h *Handler) buildWorkspaceDetailResponse(workspace *session.Workspace) map
 	}
 
 	analyticsWorkspace := buildWorkspaceAnalyticsView(workspace)
+	settings := workspacesettings.Extract(workspace.SharedData)
 	payload["attachments"] = h.buildWorkspaceResponseAttachments(workspace)
 	payload["entry_agent_name"] = availableWorkspaceEntryAgentName(workspace, h.agentStore)
 	payload["agent_stats"] = analyticsWorkspace.GetAgentStats()
 	payload["workspace_progress"] = analyticsWorkspace.GetWorkspaceProgress()
+	payload["workspace_settings"] = settings
+	payload["workspace_settings_effective_behavior"] = workspacesettings.BuildEffectiveBehavior(settings)
 
 	return payload
 }

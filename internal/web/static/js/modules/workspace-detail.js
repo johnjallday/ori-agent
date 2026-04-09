@@ -155,6 +155,8 @@ export class WorkspaceDetailPage {
     this.availableSkillsPromise = null;
     this.activeWorkspaceSkillBindingId = '';
     this.activeWorkspaceSkillMode = 'create';
+    this.workspaceSettings = null;
+    this.workspaceSettingsEffectiveBehavior = null;
     this.capabilitySuggestionCatalog = null;
     this.capabilitySuggestionCatalogPromise = null;
     this.flippedAgentCards = new Set();
@@ -223,6 +225,7 @@ export class WorkspaceDetailPage {
       { id: 'workspace-detail-files-panel', label: 'Files panel content' },
       { id: 'workspace-detail-directories-panel', label: 'Directories panel content' },
       { id: 'workspace-detail-mcp-panel', label: 'Workspace MCP panel content' },
+      { id: 'workspace-detail-settings-panel', label: 'Workspace settings panel content' },
       { id: 'workspace-detail-schedules-panel', label: 'Schedules panel content' }
     ];
 
@@ -1073,6 +1076,8 @@ export class WorkspaceDetailPage {
       notesList: document.getElementById('workspace-detail-notes-list'),
       directoriesList: document.getElementById('workspace-detail-directories-list'),
       mcpList: document.getElementById('workspace-detail-mcp-list'),
+      settingsSummary: document.getElementById('workspace-detail-settings-summary'),
+      settingsManagedSkills: document.getElementById('workspace-detail-settings-managed-skills'),
       skillsList: document.getElementById('workspace-detail-skills-list'),
       schedulesList: document.getElementById('workspace-detail-schedules-list'),
       childrenList: document.getElementById('workspace-detail-children-list'),
@@ -1093,6 +1098,7 @@ export class WorkspaceDetailPage {
       addDirectoryBtn: document.getElementById('workspace-detail-add-directory'),
       addMcpBtn: document.getElementById('workspace-detail-add-mcp'),
       refreshMcpBtn: document.getElementById('workspace-detail-refresh-mcp'),
+      refreshSettingsBtn: document.getElementById('workspace-detail-refresh-settings'),
       addSkillBtn: document.getElementById('workspace-detail-add-skill'),
       refreshSkillsBtn: document.getElementById('workspace-detail-refresh-skills'),
       viewSchedulesBtn: document.getElementById('workspace-detail-view-schedules'),
@@ -1201,6 +1207,24 @@ export class WorkspaceDetailPage {
       mcpAgentOptions: document.getElementById('workspace-detail-mcp-agent-options'),
       mcpAgentAccessSummary: document.getElementById('workspace-detail-mcp-agent-access-summary'),
       mcpSubmitBtn: document.getElementById('workspace-detail-mcp-submit'),
+      settingsForm: document.getElementById('workspace-detail-settings-form'),
+      settingsPresetInput: document.getElementById('workspace-detail-settings-preset'),
+      settingsModeInput: document.getElementById('workspace-detail-settings-mode'),
+      settingsConfirmationInput: document.getElementById('workspace-detail-settings-confirmation'),
+      settingsPlanEnabledInput: document.getElementById('workspace-detail-settings-plan-enabled'),
+      settingsRequireScanInput: document.getElementById('workspace-detail-settings-require-scan'),
+      settingsSaveNotesInput: document.getElementById('workspace-detail-settings-save-notes'),
+      settingsSyncTasksInput: document.getElementById('workspace-detail-settings-sync-tasks'),
+      settingsAskHandoffInput: document.getElementById('workspace-detail-settings-ask-handoff'),
+      settingsPlanningFields: document.getElementById('workspace-detail-settings-planning-fields'),
+      settingsPlanningModeInput: document.getElementById('workspace-detail-settings-planning-mode'),
+      settingsClarificationModeInput: document.getElementById('workspace-detail-settings-clarification-mode'),
+      settingsTasksDirInput: document.getElementById('workspace-detail-settings-tasks-dir'),
+      settingsExecutionModeInput: document.getElementById('workspace-detail-settings-execution-mode'),
+      settingsWritePRDInput: document.getElementById('workspace-detail-settings-write-prd'),
+      settingsWriteTaskListInput: document.getElementById('workspace-detail-settings-write-task-list'),
+      settingsRequireBranchInput: document.getElementById('workspace-detail-settings-require-branch'),
+      settingsSaveBtn: document.getElementById('workspace-detail-settings-save'),
       skillsModal: document.getElementById('workspace-detail-skills-modal'),
       skillsForm: document.getElementById('workspace-detail-skills-form'),
       skillsModalTitle: document.getElementById('workspace-detail-skills-modal-title'),
@@ -1298,6 +1322,32 @@ export class WorkspaceDetailPage {
     this.elements.mcpEmailAccountSelect?.addEventListener('change', () => this.updateWorkspaceMCPEmailAccountSummary());
     this.elements.mcpAgentOptions?.addEventListener('change', () => this.updateWorkspaceMCPAgentAccessSummary());
     this.elements.mcpModal?.addEventListener('hidden.bs.modal', () => this.resetWorkspaceMCPModal());
+
+    // Workspace settings
+    this.elements.refreshSettingsBtn?.addEventListener('click', () => this.loadWorkspace());
+    this.elements.settingsForm?.addEventListener('submit', (event) => {
+      event.preventDefault();
+      this.saveWorkspaceSettings();
+    });
+    this.elements.settingsPresetInput?.addEventListener('change', () => this.handleWorkspaceSettingsPresetChange());
+    [
+      this.elements.settingsModeInput,
+      this.elements.settingsConfirmationInput,
+      this.elements.settingsPlanEnabledInput,
+      this.elements.settingsRequireScanInput,
+      this.elements.settingsSaveNotesInput,
+      this.elements.settingsSyncTasksInput,
+      this.elements.settingsAskHandoffInput,
+      this.elements.settingsPlanningModeInput,
+      this.elements.settingsClarificationModeInput,
+      this.elements.settingsTasksDirInput,
+      this.elements.settingsExecutionModeInput,
+      this.elements.settingsWritePRDInput,
+      this.elements.settingsWriteTaskListInput,
+      this.elements.settingsRequireBranchInput
+    ].forEach((input) => {
+      input?.addEventListener('change', () => this.handleWorkspaceSettingsFieldChange());
+    });
 
     // Skill buttons
     this.elements.addSkillBtn?.addEventListener('click', () => this.openWorkspaceSkillModal());
@@ -1608,6 +1658,13 @@ export class WorkspaceDetailPage {
       await this.loadAvailableSkills().catch((error) => {
         console.warn('Failed to load skill catalog for workspace detail:', error);
       });
+      this.workspaceSettings = this.normalizeWorkspaceSettings(
+        this.workspace?.workspace_settings || this.workspace?.shared_data?.workspace_settings || {}
+      );
+      this.workspaceSettingsEffectiveBehavior = this.normalizeWorkspaceSettingsEffectiveBehavior(
+        this.workspace?.workspace_settings_effective_behavior,
+        this.workspaceSettings
+      );
       if (window.OriAskRouting && typeof window.OriAskRouting.refreshWorkspaceIdentity === 'function') {
         window.OriAskRouting.refreshWorkspaceIdentity({
           workspace_id: this.workspaceId,
@@ -1618,6 +1675,7 @@ export class WorkspaceDetailPage {
       }
       await this.renderWorkspaceInfo();
       this.renderWorkspaceMCPBindings();
+      this.renderWorkspaceSettings();
       this.renderWorkspaceSkillBindings();
       this.renderAgentGroups();
       this.refreshHomeAssistantQuickPrompts();
@@ -6778,6 +6836,404 @@ export class WorkspaceDetailPage {
         </div>
       `;
     }).join('');
+  }
+
+  // ── Workspace Settings Methods ───────────────────────────────────────
+
+  getWorkspaceSettingsPresets() {
+    return ['minimal', 'guided', 'planner', 'autonomous'];
+  }
+
+  buildWorkspaceSettingsPreset(preset = 'guided') {
+    const normalizedPreset = this.normalizeWorkspaceSettingsPreset(preset);
+    const settings = {
+      version: 1,
+      preset: normalizedPreset,
+      workflow: {
+        mode: 'guided',
+        require_repo_scan: false,
+        save_outputs_as_notes: true,
+        sync_plans_to_tasks: false,
+        ask_before_specialist_handoff: true,
+        confirmation_mode: 'destructive_only'
+      },
+      planning: {
+        enabled: false,
+        mode: 'feature',
+        write_prd: true,
+        write_task_list: true,
+        tasks_dir: 'tasks',
+        clarification_mode: 'standard',
+        default_execution_mode: 'step_through',
+        require_branch: true
+      }
+    };
+
+    switch (normalizedPreset) {
+      case 'minimal':
+        settings.workflow.mode = 'direct';
+        settings.workflow.save_outputs_as_notes = false;
+        settings.workflow.ask_before_specialist_handoff = false;
+        settings.planning.write_prd = false;
+        settings.planning.write_task_list = false;
+        break;
+      case 'planner':
+        settings.workflow.mode = 'plan_then_execute';
+        settings.workflow.require_repo_scan = true;
+        settings.workflow.sync_plans_to_tasks = true;
+        settings.planning.enabled = true;
+        break;
+      case 'autonomous':
+        settings.workflow.mode = 'plan_then_execute';
+        settings.workflow.require_repo_scan = true;
+        settings.workflow.sync_plans_to_tasks = true;
+        settings.workflow.ask_before_specialist_handoff = false;
+        settings.workflow.confirmation_mode = 'none';
+        settings.planning.enabled = true;
+        settings.planning.default_execution_mode = 'auto';
+        break;
+      default:
+        break;
+    }
+
+    return settings;
+  }
+
+  getDefaultWorkspaceSettings() {
+    return this.buildWorkspaceSettingsPreset('guided');
+  }
+
+  normalizeWorkspaceSettingsPreset(value) {
+    const normalized = String(value || '').trim().toLowerCase();
+    if (['minimal', 'guided', 'planner', 'autonomous', 'custom'].includes(normalized)) {
+      return normalized;
+    }
+    return 'guided';
+  }
+
+  normalizeWorkspaceSettingsMode(value) {
+    const normalized = String(value || '').trim().toLowerCase();
+    if (['direct', 'guided', 'plan_then_execute'].includes(normalized)) {
+      return normalized;
+    }
+    return 'guided';
+  }
+
+  normalizeWorkspaceSettingsConfirmationMode(value) {
+    const normalized = String(value || '').trim().toLowerCase();
+    if (['none', 'always', 'destructive_only'].includes(normalized)) {
+      return normalized;
+    }
+    return 'destructive_only';
+  }
+
+  normalizeWorkspaceSettings(settings = {}) {
+    const raw = settings && typeof settings === 'object' && !Array.isArray(settings) ? settings : {};
+    const preset = this.normalizeWorkspaceSettingsPreset(raw.preset);
+    const base = this.buildWorkspaceSettingsPreset(preset === 'custom' ? 'guided' : preset);
+    const workflow = raw.workflow && typeof raw.workflow === 'object' && !Array.isArray(raw.workflow) ? raw.workflow : {};
+    const planning = raw.planning && typeof raw.planning === 'object' && !Array.isArray(raw.planning) ? raw.planning : {};
+    const boolOrDefault = (value, fallback) => (typeof value === 'boolean' ? value : fallback);
+
+    return {
+      version: Number.isFinite(Number(raw.version)) && Number(raw.version) > 0 ? Number(raw.version) : 1,
+      preset,
+      workflow: {
+        mode: this.normalizeWorkspaceSettingsMode(workflow.mode || base.workflow.mode),
+        require_repo_scan: boolOrDefault(workflow.require_repo_scan, base.workflow.require_repo_scan),
+        save_outputs_as_notes: boolOrDefault(workflow.save_outputs_as_notes, base.workflow.save_outputs_as_notes),
+        sync_plans_to_tasks: boolOrDefault(workflow.sync_plans_to_tasks, base.workflow.sync_plans_to_tasks),
+        ask_before_specialist_handoff: boolOrDefault(workflow.ask_before_specialist_handoff, base.workflow.ask_before_specialist_handoff),
+        confirmation_mode: this.normalizeWorkspaceSettingsConfirmationMode(workflow.confirmation_mode || base.workflow.confirmation_mode)
+      },
+      planning: {
+        enabled: boolOrDefault(planning.enabled, base.planning.enabled),
+        mode: this.normalizeWorkspacePlanningConfig({ mode: planning.mode || base.planning.mode }).mode,
+        write_prd: boolOrDefault(planning.write_prd, base.planning.write_prd),
+        write_task_list: boolOrDefault(planning.write_task_list, base.planning.write_task_list),
+        tasks_dir: String(planning.tasks_dir || base.planning.tasks_dir || '').trim() || 'tasks',
+        clarification_mode: this.normalizeWorkspacePlanningConfig({ clarification_mode: planning.clarification_mode || base.planning.clarification_mode }).clarification_mode,
+        default_execution_mode: this.normalizeWorkspacePlanningConfig({ default_execution_mode: planning.default_execution_mode || base.planning.default_execution_mode }).default_execution_mode,
+        require_branch: boolOrDefault(planning.require_branch, base.planning.require_branch)
+      },
+      updated_at: typeof raw.updated_at === 'string' ? raw.updated_at : ''
+    };
+  }
+
+  deriveWorkspaceSettingsPreset(settings = {}) {
+    const normalized = this.normalizeWorkspaceSettings(settings);
+    const normalizedSignature = JSON.stringify({
+      workflow: normalized.workflow,
+      planning: normalized.planning
+    });
+
+    const matchingPreset = this.getWorkspaceSettingsPresets().find((preset) => {
+      const candidate = this.buildWorkspaceSettingsPreset(preset);
+      return JSON.stringify({
+        workflow: candidate.workflow,
+        planning: candidate.planning
+      }) === normalizedSignature;
+    });
+
+    return matchingPreset || 'custom';
+  }
+
+  toWorkspacePlanningSkillConfig(settings = {}) {
+    const normalized = this.normalizeWorkspaceSettings(settings);
+    return {
+      profile_type: 'workspace_planning',
+      mode: normalized.planning.mode,
+      write_prd: normalized.planning.write_prd,
+      write_task_list: normalized.planning.write_task_list,
+      tasks_dir: normalized.planning.tasks_dir,
+      clarification_mode: normalized.planning.clarification_mode,
+      sync_workspace_tasks: normalized.workflow.sync_plans_to_tasks,
+      default_execution_mode: normalized.planning.default_execution_mode,
+      require_branch: normalized.planning.require_branch
+    };
+  }
+
+  buildWorkspaceSettingsEffectiveBehavior(settings = {}) {
+    const normalized = this.normalizeWorkspaceSettings(settings);
+    const effective = {
+      workflow: { ...normalized.workflow },
+      planning: { ...normalized.planning },
+      summary: [
+        `Interaction mode: ${normalized.workflow.mode}`,
+        `Require repo scan before code work: ${normalized.workflow.require_repo_scan}`,
+        `Save useful outputs as workspace notes: ${normalized.workflow.save_outputs_as_notes}`,
+        `Sync approved plans to workspace tasks: ${normalized.workflow.sync_plans_to_tasks}`,
+        `Ask before specialist handoff: ${normalized.workflow.ask_before_specialist_handoff}`,
+        `Confirmation mode: ${normalized.workflow.confirmation_mode}`,
+        `Planning profile enabled: ${normalized.planning.enabled}`
+      ],
+      managed_skills: []
+    };
+
+    if (normalized.planning.enabled) {
+      effective.managed_skills = [
+        {
+          skill_name: 'workspace-planning',
+          source: 'settings',
+          active: true,
+          reason: 'planning.enabled',
+          config: this.toWorkspacePlanningSkillConfig(normalized)
+        }
+      ];
+    }
+
+    return effective;
+  }
+
+  normalizeWorkspaceSettingsEffectiveBehavior(effectiveBehavior, settings = {}) {
+    const raw = effectiveBehavior && typeof effectiveBehavior === 'object' && !Array.isArray(effectiveBehavior)
+      ? effectiveBehavior
+      : null;
+    const fallback = this.buildWorkspaceSettingsEffectiveBehavior(settings);
+    if (!raw) {
+      return fallback;
+    }
+
+    return {
+      workflow: raw.workflow && typeof raw.workflow === 'object' ? { ...fallback.workflow, ...raw.workflow } : fallback.workflow,
+      planning: raw.planning && typeof raw.planning === 'object' ? { ...fallback.planning, ...raw.planning } : fallback.planning,
+      summary: Array.isArray(raw.summary) ? raw.summary.map((item) => String(item || '').trim()).filter(Boolean) : fallback.summary,
+      managed_skills: Array.isArray(raw.managed_skills) ? raw.managed_skills : fallback.managed_skills
+    };
+  }
+
+  populateWorkspaceSettingsForm(settings = {}) {
+    const normalized = this.normalizeWorkspaceSettings(settings);
+
+    if (this.elements.settingsPresetInput) {
+      this.elements.settingsPresetInput.value = normalized.preset;
+    }
+    if (this.elements.settingsModeInput) {
+      this.elements.settingsModeInput.value = normalized.workflow.mode;
+    }
+    if (this.elements.settingsConfirmationInput) {
+      this.elements.settingsConfirmationInput.value = normalized.workflow.confirmation_mode;
+    }
+    if (this.elements.settingsPlanEnabledInput) {
+      this.elements.settingsPlanEnabledInput.checked = normalized.planning.enabled === true;
+    }
+    if (this.elements.settingsRequireScanInput) {
+      this.elements.settingsRequireScanInput.checked = normalized.workflow.require_repo_scan === true;
+    }
+    if (this.elements.settingsSaveNotesInput) {
+      this.elements.settingsSaveNotesInput.checked = normalized.workflow.save_outputs_as_notes !== false;
+    }
+    if (this.elements.settingsSyncTasksInput) {
+      this.elements.settingsSyncTasksInput.checked = normalized.workflow.sync_plans_to_tasks === true;
+    }
+    if (this.elements.settingsAskHandoffInput) {
+      this.elements.settingsAskHandoffInput.checked = normalized.workflow.ask_before_specialist_handoff === true;
+    }
+    if (this.elements.settingsPlanningModeInput) {
+      this.elements.settingsPlanningModeInput.value = normalized.planning.mode;
+    }
+    if (this.elements.settingsClarificationModeInput) {
+      this.elements.settingsClarificationModeInput.value = normalized.planning.clarification_mode;
+    }
+    if (this.elements.settingsTasksDirInput) {
+      this.elements.settingsTasksDirInput.value = normalized.planning.tasks_dir;
+    }
+    if (this.elements.settingsExecutionModeInput) {
+      this.elements.settingsExecutionModeInput.value = normalized.planning.default_execution_mode;
+    }
+    if (this.elements.settingsWritePRDInput) {
+      this.elements.settingsWritePRDInput.checked = normalized.planning.write_prd !== false;
+    }
+    if (this.elements.settingsWriteTaskListInput) {
+      this.elements.settingsWriteTaskListInput.checked = normalized.planning.write_task_list !== false;
+    }
+    if (this.elements.settingsRequireBranchInput) {
+      this.elements.settingsRequireBranchInput.checked = normalized.planning.require_branch !== false;
+    }
+    if (this.elements.settingsPlanningFields) {
+      this.elements.settingsPlanningFields.classList.toggle('d-none', normalized.planning.enabled !== true);
+    }
+  }
+
+  buildWorkspaceSettingsFromForm() {
+    const settings = this.normalizeWorkspaceSettings({
+      version: this.workspaceSettings?.version || 1,
+      preset: String(this.elements.settingsPresetInput?.value || this.workspaceSettings?.preset || 'guided').trim(),
+      workflow: {
+        mode: String(this.elements.settingsModeInput?.value || '').trim(),
+        require_repo_scan: this.elements.settingsRequireScanInput?.checked === true,
+        save_outputs_as_notes: this.elements.settingsSaveNotesInput?.checked !== false,
+        sync_plans_to_tasks: this.elements.settingsSyncTasksInput?.checked === true,
+        ask_before_specialist_handoff: this.elements.settingsAskHandoffInput?.checked === true,
+        confirmation_mode: String(this.elements.settingsConfirmationInput?.value || '').trim()
+      },
+      planning: {
+        enabled: this.elements.settingsPlanEnabledInput?.checked === true,
+        mode: String(this.elements.settingsPlanningModeInput?.value || '').trim(),
+        write_prd: this.elements.settingsWritePRDInput?.checked !== false,
+        write_task_list: this.elements.settingsWriteTaskListInput?.checked !== false,
+        tasks_dir: String(this.elements.settingsTasksDirInput?.value || '').trim(),
+        clarification_mode: String(this.elements.settingsClarificationModeInput?.value || '').trim(),
+        default_execution_mode: String(this.elements.settingsExecutionModeInput?.value || '').trim(),
+        require_branch: this.elements.settingsRequireBranchInput?.checked !== false
+      }
+    });
+
+    settings.preset = this.deriveWorkspaceSettingsPreset(settings);
+    return settings;
+  }
+
+  renderWorkspaceSettingsSummary(settings = {}, effectiveBehavior = null) {
+    const normalized = this.normalizeWorkspaceSettings(settings);
+    const effective = this.normalizeWorkspaceSettingsEffectiveBehavior(effectiveBehavior, normalized);
+
+    if (this.elements.settingsSummary) {
+      if (effective.summary.length === 0) {
+        this.elements.settingsSummary.textContent = 'No effective behavior summary available.';
+      } else {
+        this.elements.settingsSummary.innerHTML = `
+          <ul class="workspace-detail-settings-summary-list">
+            ${effective.summary.map((item) => `<li>${this.escapeHtml(item)}</li>`).join('')}
+          </ul>
+        `;
+      }
+    }
+
+    if (this.elements.settingsManagedSkills) {
+      if (!Array.isArray(effective.managed_skills) || effective.managed_skills.length === 0) {
+        this.elements.settingsManagedSkills.textContent = 'No settings-managed skills active.';
+      } else {
+        this.elements.settingsManagedSkills.innerHTML = effective.managed_skills.map((skill) => {
+          const skillName = String(skill?.skill_name || skill?.skillName || '').trim() || 'unknown-skill';
+          const source = String(skill?.source || '').trim() || 'settings';
+          const reason = String(skill?.reason || '').trim();
+          const planningSummary = skillName === 'workspace-planning'
+            ? this.getWorkspacePlanningSummary(skill?.config || this.toWorkspacePlanningSkillConfig(normalized))
+            : '';
+          const detail = [source, reason, planningSummary].filter(Boolean).join(' • ');
+
+          return `
+            <div class="workspace-detail-settings-managed-entry">
+              <div class="workspace-detail-settings-managed-name">${this.escapeHtml(skillName)}</div>
+              <div class="workspace-detail-settings-managed-meta">${this.escapeHtml(detail || 'Managed by workspace settings')}</div>
+            </div>
+          `;
+        }).join('');
+      }
+    }
+  }
+
+  renderWorkspaceSettings() {
+    const settings = this.normalizeWorkspaceSettings(this.workspaceSettings || this.getDefaultWorkspaceSettings());
+    const effective = this.normalizeWorkspaceSettingsEffectiveBehavior(this.workspaceSettingsEffectiveBehavior, settings);
+
+    this.workspaceSettings = settings;
+    this.workspaceSettingsEffectiveBehavior = effective;
+    this.populateWorkspaceSettingsForm(settings);
+    this.renderWorkspaceSettingsSummary(settings, effective);
+  }
+
+  handleWorkspaceSettingsPresetChange() {
+    const preset = this.normalizeWorkspaceSettingsPreset(this.elements.settingsPresetInput?.value || 'guided');
+    if (preset === 'custom') {
+      this.handleWorkspaceSettingsFieldChange();
+      return;
+    }
+
+    this.workspaceSettings = this.buildWorkspaceSettingsPreset(preset);
+    this.workspaceSettingsEffectiveBehavior = this.buildWorkspaceSettingsEffectiveBehavior(this.workspaceSettings);
+    this.renderWorkspaceSettings();
+  }
+
+  handleWorkspaceSettingsFieldChange() {
+    const settings = this.buildWorkspaceSettingsFromForm();
+    this.workspaceSettings = settings;
+    this.workspaceSettingsEffectiveBehavior = this.buildWorkspaceSettingsEffectiveBehavior(settings);
+    this.renderWorkspaceSettings();
+  }
+
+  setWorkspaceSettingsSubmitting(isSubmitting) {
+    if (!this.elements.settingsSaveBtn) return;
+    this.elements.settingsSaveBtn.disabled = isSubmitting;
+    this.elements.settingsSaveBtn.textContent = isSubmitting ? 'Saving...' : 'Save Settings';
+  }
+
+  async saveWorkspaceSettings() {
+    const payload = this.buildWorkspaceSettingsFromForm();
+    this.setWorkspaceSettingsSubmitting(true);
+
+    try {
+      const response = await fetch(`/api/workspaces/${encodeURIComponent(this.workspaceId)}/settings`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+
+      if (!response.ok) {
+        const text = await response.text();
+        throw new Error(text || 'Failed to save workspace settings');
+      }
+
+      const data = await response.json();
+      this.workspaceSettings = this.normalizeWorkspaceSettings(data?.settings || payload);
+      this.workspaceSettingsEffectiveBehavior = this.normalizeWorkspaceSettingsEffectiveBehavior(
+        data?.effective_behavior,
+        this.workspaceSettings
+      );
+      this.renderWorkspaceSettings();
+      await this.loadWorkspace();
+
+      if (window.Toast) {
+        window.Toast.success('Workspace settings saved');
+      }
+    } catch (error) {
+      console.error('Failed to save workspace settings:', error);
+      if (window.Toast) {
+        window.Toast.error(error.message || 'Failed to save workspace settings');
+      }
+    } finally {
+      this.setWorkspaceSettingsSubmitting(false);
+    }
   }
 
   // ── Workspace Skill Binding Methods ──────────────────────────────────

@@ -174,7 +174,7 @@ func TestHandler_CreateSessionInWorkspaceUsesEntryAgent(t *testing.T) {
 	}
 }
 
-func TestHandler_CreateSessionInWorkspaceSkipsMissingEntryAgent(t *testing.T) {
+func TestHandler_CreateSessionInWorkspaceAutoCreatesWorkspaceManagerWhenMissing(t *testing.T) {
 	handler, cleanup := createTestHandler(t)
 	defer cleanup()
 
@@ -219,8 +219,82 @@ func TestHandler_CreateSessionInWorkspaceSkipsMissingEntryAgent(t *testing.T) {
 	}
 
 	sess := resp["session"].(map[string]interface{})
-	if got := sess["agent_name"]; got != "" {
-		t.Fatalf("expected missing workspace entry agent to be ignored, got %#v", got)
+	if got := sess["agent_name"]; got != "Spain Manager" {
+		t.Fatalf("expected missing workspace manager to be auto-created, got %#v", got)
+	}
+
+	updated, err := handler.store.GetWorkspace(context.Background(), ws.ID)
+	if err != nil {
+		t.Fatalf("failed to reload workspace: %v", err)
+	}
+	if got := currentWorkspaceEntryAgentName(updated); got != "Spain Manager" {
+		t.Fatalf("expected workspace entry agent to be auto-created, got %q", got)
+	}
+	if len(updated.AgentInstances) != 2 {
+		t.Fatalf("expected stale workspace agent plus auto-created manager, got %#v", updated.AgentInstances)
+	}
+
+	ag, ok := handler.agentStore.GetAgent("Spain Manager")
+	if !ok || ag == nil {
+		t.Fatal("expected Spain Manager agent to be created")
+	}
+	if ag.Type != "workspace-manager" {
+		t.Fatalf("expected Spain Manager to be a workspace-manager, got %q", ag.Type)
+	}
+}
+
+func TestHandler_GetWorkspaceAutoCreatesWorkspaceManagerWhenMissing(t *testing.T) {
+	handler, cleanup := createTestHandler(t)
+	defer cleanup()
+
+	now := time.Now()
+	ws := &session.Workspace{
+		ID:        "workspace-no-entry",
+		Name:      "Brooklyn Nerds",
+		Status:    session.WorkspaceStatusActive,
+		CreatedAt: now,
+		UpdatedAt: now,
+	}
+	if err := handler.store.CreateWorkspace(context.Background(), ws); err != nil {
+		t.Fatalf("failed to create workspace: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/workspaces/workspace-no-entry", nil)
+	w := httptest.NewRecorder()
+
+	handler.HandleWorkspaces(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp map[string]interface{}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("failed to parse response: %v", err)
+	}
+	if got := resp["entry_agent_name"]; got != "Brooklyn Nerds Manager" {
+		t.Fatalf("expected response entry agent to be auto-created, got %#v", got)
+	}
+
+	updated, err := handler.store.GetWorkspace(context.Background(), ws.ID)
+	if err != nil {
+		t.Fatalf("failed to reload workspace: %v", err)
+	}
+	if got := currentWorkspaceEntryAgentName(updated); got != "Brooklyn Nerds Manager" {
+		t.Fatalf("expected workspace entry agent to be auto-created, got %q", got)
+	}
+	if len(updated.Agents) != 1 || updated.Agents[0] != "Brooklyn Nerds Manager" {
+		t.Fatalf("expected workspace agents to include auto-created manager, got %#v", updated.Agents)
+	}
+	if len(updated.AgentInstances) != 1 || !updated.AgentInstances[0].EntryPoint {
+		t.Fatalf("expected a single entry-point manager instance, got %#v", updated.AgentInstances)
+	}
+
+	ag, ok := handler.agentStore.GetAgent("Brooklyn Nerds Manager")
+	if !ok || ag == nil {
+		t.Fatal("expected Brooklyn Nerds Manager agent to be created")
+	}
+	if ag.Type != "workspace-manager" {
+		t.Fatalf("expected Brooklyn Nerds Manager to be a workspace-manager, got %q", ag.Type)
 	}
 }
 

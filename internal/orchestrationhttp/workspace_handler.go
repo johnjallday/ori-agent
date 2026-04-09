@@ -12,6 +12,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/store"
 	"github.com/johnjallday/ori-agent/internal/workspace"
+	"github.com/johnjallday/ori-agent/internal/workspacesettings"
 )
 
 // WorkspaceHandler manages workspace-related operations
@@ -98,6 +99,10 @@ func (wh *WorkspaceHandler) handleGetWorkspace(w http.ResponseWriter, r *http.Re
 			"status":               ws.Status,
 			"created_at":           ws.CreatedAt,
 			"updated_at":           ws.UpdatedAt,
+			"workspace_settings":   workspacesettings.Extract(ws.SharedData),
+			"workspace_settings_effective_behavior": workspacesettings.BuildEffectiveBehavior(
+				workspacesettings.Extract(ws.SharedData),
+			),
 		}
 
 		// Add sessions if session store is available

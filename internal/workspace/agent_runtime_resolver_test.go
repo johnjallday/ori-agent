@@ -545,6 +545,118 @@ func TestResolveEffectiveSkills_PreservesPlanningConfig(t *testing.T) {
 	}
 }
 
+func TestResolveEffectiveSkills_UsesWorkspaceSettingsManagedPlanningSkill(t *testing.T) {
+	ws := &Workspace{
+		ID: "ws-managed-planning",
+		SharedData: map[string]interface{}{
+			"entry_agent_name": "Workspace Manager",
+			"workspace_settings": map[string]interface{}{
+				"preset": "planner",
+				"planning": map[string]interface{}{
+					"tasks_dir": "plans",
+				},
+			},
+		},
+		AgentInstances: []AgentInstance{
+			{ID: "inst-1", Name: "Workspace Manager", NodeID: "workspace-manager-1", EntryPoint: true},
+		},
+	}
+
+	agentStore := &resolverAgentStoreStub{agents: map[string]*agent.Agent{
+		"Workspace Manager": {},
+	}}
+	workspaceStore := newTestWorkspaceStore(t, ws)
+	registry := &runtimeRegistryStub{}
+	templates := &templateLookupStub{servers: map[string]mcp.ServerConfig{}}
+	skillResolver := &stubSkillResolver{
+		skills: map[string]ResolvedSkill{
+			"workspace-planning": {
+				Name:            "workspace-planning",
+				Prompt:          "Plan work before execution.",
+				PlanningProfile: true,
+				Enabled:         true,
+			},
+		},
+	}
+
+	resolver := NewAgentRuntimeResolver(agentStore, workspaceStore, registry, templates)
+	resolver.SetSkillResolver(skillResolver)
+
+	resolved, err := resolver.ResolveAgentForWorkspace("Workspace Manager", ws.ID, "")
+	if err != nil {
+		t.Fatalf("ResolveAgentForWorkspace() error = %v", err)
+	}
+	if len(resolved.EffectiveSkills) != 1 {
+		t.Fatalf("expected one settings-managed planning skill, got %d", len(resolved.EffectiveSkills))
+	}
+	if resolved.EffectiveSkills[0].Name != "workspace-planning" {
+		t.Fatalf("expected workspace-planning, got %#v", resolved.EffectiveSkills[0])
+	}
+	if got := resolved.EffectiveSkills[0].Config["tasks_dir"]; got != "plans" {
+		t.Fatalf("expected tasks_dir plans from workspace settings, got %#v", got)
+	}
+}
+
+func TestResolveEffectiveSkills_ManualBindingOverridesWorkspaceSettingsManagedSkill(t *testing.T) {
+	ws := &Workspace{
+		ID: "ws-managed-planning-override",
+		SharedData: map[string]interface{}{
+			"entry_agent_name": "Workspace Manager",
+			"workspace_settings": map[string]interface{}{
+				"preset": "planner",
+				"planning": map[string]interface{}{
+					"tasks_dir": "managed-plans",
+				},
+			},
+		},
+		AgentInstances: []AgentInstance{
+			{ID: "inst-1", Name: "Workspace Manager", NodeID: "workspace-manager-1", EntryPoint: true},
+		},
+		SkillBindings: []WorkspaceSkillBinding{
+			{
+				ID:        "sb-planning",
+				SkillName: "workspace-planning",
+				Enabled:   true,
+				Config: map[string]interface{}{
+					"profile_type": "workspace_planning",
+					"tasks_dir":    "manual-plans",
+				},
+			},
+		},
+	}
+
+	agentStore := &resolverAgentStoreStub{agents: map[string]*agent.Agent{
+		"Workspace Manager": {},
+	}}
+	workspaceStore := newTestWorkspaceStore(t, ws)
+	registry := &runtimeRegistryStub{}
+	templates := &templateLookupStub{servers: map[string]mcp.ServerConfig{}}
+	skillResolver := &stubSkillResolver{
+		skills: map[string]ResolvedSkill{
+			"workspace-planning": {
+				Name:            "workspace-planning",
+				Prompt:          "Plan work before execution.",
+				PlanningProfile: true,
+				Enabled:         true,
+			},
+		},
+	}
+
+	resolver := NewAgentRuntimeResolver(agentStore, workspaceStore, registry, templates)
+	resolver.SetSkillResolver(skillResolver)
+
+	resolved, err := resolver.ResolveAgentForWorkspace("Workspace Manager", ws.ID, "")
+	if err != nil {
+		t.Fatalf("ResolveAgentForWorkspace() error = %v", err)
+	}
+	if len(resolved.EffectiveSkills) != 1 {
+		t.Fatalf("expected one planning skill, got %d", len(resolved.EffectiveSkills))
+	}
+	if got := resolved.EffectiveSkills[0].Config["tasks_dir"]; got != "manual-plans" {
+		t.Fatalf("expected manual workspace binding config to win, got %#v", got)
+	}
+}
+
 func TestResolveAgentForWorkspace_AutoCreatesMissingEntryAgent(t *testing.T) {
 	ws := &Workspace{
 		ID:   "ws-entry-missing",
