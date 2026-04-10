@@ -157,7 +157,7 @@ export class WorkspaceDetailPage {
     this.activeWorkspaceSkillMode = 'create';
     this.workspaceSettings = null;
     this.workspaceSettingsEffectiveBehavior = null;
-    this.workspaceConfigExpanded = true;
+    this.workspaceConfigExpanded = false;
     this.workspaceConfigPreferenceLoaded = false;
     this.capabilitySuggestionCatalog = null;
     this.capabilitySuggestionCatalogPromise = null;
@@ -6904,9 +6904,7 @@ export class WorkspaceDetailPage {
   }
 
   shouldDefaultExpandWorkspaceConfig() {
-    const connectionCount = this.getWorkspaceMCPBindings({ includeDisabled: true }).length;
-    const skillCount = this.getWorkspaceSkillBindings({ includeDisabled: true }).length;
-    return connectionCount === 0 && skillCount === 0 && !this.hasNonDefaultWorkspaceSettings();
+    return false;
   }
 
   setWorkspaceConfigExpanded(expanded, options = {}) {

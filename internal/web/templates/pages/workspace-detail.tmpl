@@ -139,7 +139,7 @@
           </div>
 
           <!-- Workspace Configuration -->
-          <div class="modern-card workspace-detail-config-card mb-4" id="workspace-detail-settings-panel">
+          <div class="modern-card workspace-detail-config-card is-collapsed mb-4" id="workspace-detail-settings-panel">
             <div class="workspace-detail-config-header">
               <div>
                 <div class="workspace-detail-config-kicker">Workspace Configuration</div>
@@ -154,15 +154,15 @@
                 class="workspace-detail-config-toggle"
                 id="workspace-detail-config-toggle"
                 type="button"
-                aria-expanded="true"
+                aria-expanded="false"
                 aria-controls="workspace-detail-config-content">
-                <span id="workspace-detail-config-toggle-label">Hide Configuration</span>
+                <span id="workspace-detail-config-toggle-label">Show Configuration</span>
                 <svg class="workspace-detail-config-toggle-icon" width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
                   <path d="M7.41,8.59L12,13.17L16.59,8.59L18,10L12,16L6,10L7.41,8.59Z"/>
                 </svg>
               </button>
             </div>
-            <div class="workspace-detail-config-content" id="workspace-detail-config-content">
+            <div class="workspace-detail-config-content" id="workspace-detail-config-content" hidden>
               <div class="nav nav-tabs workspace-detail-config-nav" role="tablist" aria-label="Workspace configuration sections">
                 <button
                   class="nav-link workspace-detail-config-tab active"
