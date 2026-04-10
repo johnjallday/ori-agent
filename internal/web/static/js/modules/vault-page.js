@@ -79,6 +79,7 @@
   const editorCloseBtn = document.getElementById('vaultEditorCloseBtn');
   const explorerAddBtn = document.getElementById('vaultExplorerAddBtn');
   const entryAdvancedDetails = document.getElementById('vaultEntryAdvanced');
+  const entryComposerLabel = document.getElementById('vaultEntryComposerLabel');
   const entryContentField = document.getElementById('vaultEntryContentField');
   const entryContentInput = document.getElementById('vaultEntryContent');
   const entryContentHelp = document.getElementById('vaultEntryContentHelp');
@@ -167,6 +168,24 @@
   const importRestoreGrantsInput = document.getElementById('vaultImportRestoreGrants');
   const importBtn = document.getElementById('vaultImportBtn');
   const importCancelBtn = document.getElementById('vaultImportCancelBtn');
+
+  function mountPageDialogOverlays() {
+    const overlays = [
+      unlockOverlay,
+      createOverlay,
+      exportOverlay,
+      importOverlay,
+      editorOverlay
+    ];
+
+    overlays.forEach((overlay) => {
+      if (overlay && overlay.parentElement !== document.body) {
+        document.body.appendChild(overlay);
+      }
+    });
+  }
+
+  mountPageDialogOverlays();
 
   let vaultStatus = null;
   let vaults = [];
@@ -731,6 +750,11 @@
   function syncEntryComposerPresentation() {
     const normalizedType = normalizeRecordType(entryTypeInput?.value || 'personal_note');
     const useJSON = Boolean(entryJsonModeInput?.checked);
+
+    if (entryComposerLabel) {
+      entryComposerLabel.textContent = useJSON ? 'Structured payload' : 'Private content';
+      entryComposerLabel.setAttribute('for', useJSON ? 'vaultEntryPayload' : 'vaultEntryContent');
+    }
 
     if (entryLabelInput) {
       entryLabelInput.placeholder = entryLabelPlaceholder(normalizedType);

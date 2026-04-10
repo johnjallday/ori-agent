@@ -703,7 +703,19 @@ body.vault-page-dialog-open {
 }
 
 .vault-page-entry-overlay {
-  padding: 1rem;
+  align-items: flex-start;
+  justify-content: center;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: clamp(1rem, 4vh, 2.25rem) 1rem;
+}
+
+.vault-page-entry-overlay .vault-modal-entry-dialog {
+  width: min(38rem, 100%);
+  max-height: calc(100vh - 2rem);
+  max-height: calc(100dvh - 2rem);
+  margin: 0;
+  overflow-y: auto;
 }
 
 .vault-page-checkbox {
@@ -792,6 +804,11 @@ body.vault-page-dialog-open {
   }
 
   .vault-page-entry-overlay {
-    padding: 0.5rem;
+    padding: 0.75rem;
+  }
+
+  .vault-page-entry-overlay .vault-modal-entry-dialog {
+    max-height: calc(100vh - 1.5rem);
+    max-height: calc(100dvh - 1.5rem);
   }
 }

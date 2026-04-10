@@ -179,6 +179,7 @@
       entryWorkspaceInput: document.getElementById('vaultModalEntryWorkspaceId'),
       entryLabelInput: document.getElementById('vaultModalEntryLabel'),
       entryAdvancedDetails: document.getElementById('vaultModalEntryAdvanced'),
+      entryComposerLabel: document.getElementById('vaultModalEntryComposerLabel'),
       entryContentField: document.getElementById('vaultModalEntryContentField'),
       entryContentInput: document.getElementById('vaultModalEntryContent'),
       entryContentHelp: document.getElementById('vaultModalEntryContentHelp'),
@@ -203,6 +204,24 @@
       settingsLink: document.getElementById('vaultModalSettingsLink'),
       footer: modal.querySelector('.vault-modal-footer')
     };
+  }
+
+  function mountDialogOverlaysToModalRoot() {
+    if (!elements?.modal) {
+      return;
+    }
+
+    [
+      elements.unlockOverlay,
+      elements.createOverlay,
+      elements.exportOverlay,
+      elements.importOverlay,
+      elements.entryOverlay
+    ].forEach(function(overlay) {
+      if (overlay && overlay.parentElement !== elements.modal) {
+        elements.modal.appendChild(overlay);
+      }
+    });
   }
 
   function readStoredVaultID() {
@@ -874,6 +893,11 @@
 
     const normalizedType = normalizeRecordType(elements.entryTypeInput?.value || 'personal_note');
     const useJSON = Boolean(elements.entryJsonModeInput?.checked);
+
+    if (elements.entryComposerLabel) {
+      elements.entryComposerLabel.textContent = useJSON ? 'Structured payload' : 'Private content';
+      elements.entryComposerLabel.setAttribute('for', useJSON ? 'vaultModalEntryPayload' : 'vaultModalEntryContent');
+    }
 
     if (elements.entryLabelInput) {
       elements.entryLabelInput.placeholder = entryLabelPlaceholder(normalizedType);
@@ -3360,6 +3384,7 @@
       return;
     }
 
+    mountDialogOverlaysToModalRoot();
     resetCreateForm();
     rebuildFolderTree();
     applyModalMode();

@@ -269,16 +269,23 @@
             <input id="vaultModalEntryLabel" type="text" class="form-control vault-modal-input" placeholder="Passport note, tax reminder, emergency contact">
           </div>
 
-          <div id="vaultModalEntryContentField" class="vault-modal-field">
+          <div class="vault-modal-field">
             <div class="vault-modal-field-head">
-              <label class="vault-modal-label" for="vaultModalEntryContent">Private content</label>
+              <label id="vaultModalEntryComposerLabel" class="vault-modal-label" for="vaultModalEntryContent">Private content</label>
               <label class="vault-modal-mode-toggle" for="vaultModalEntryJsonMode">
                 <input id="vaultModalEntryJsonMode" type="checkbox">
                 <span>Use structured JSON</span>
               </label>
             </div>
-            <textarea id="vaultModalEntryContent" class="form-control vault-modal-textarea" rows="7" spellcheck="false" placeholder="Write the private details you want to keep encrypted."></textarea>
-            <div id="vaultModalEntryContentHelp" class="vault-modal-help">Write normal text here. Ori will turn it into an encrypted record for you.</div>
+            <div id="vaultModalEntryContentField">
+              <textarea id="vaultModalEntryContent" class="form-control vault-modal-textarea" rows="7" spellcheck="false" placeholder="Write the private details you want to keep encrypted."></textarea>
+              <div id="vaultModalEntryContentHelp" class="vault-modal-help">Write normal text here. Ori will turn it into an encrypted record for you.</div>
+            </div>
+
+            <div id="vaultModalEntryPayloadField" hidden>
+              <textarea id="vaultModalEntryPayload" class="form-control vault-modal-textarea" rows="8" spellcheck="false" placeholder='{"note":"private"}'></textarea>
+              <div class="vault-modal-help">Use JSON only if you want named fields or nested data.</div>
+            </div>
           </div>
 
           <div class="vault-modal-field">
@@ -291,12 +298,6 @@
               <div class="vault-modal-attachments-empty">No files or images attached yet.</div>
             </div>
             <div class="vault-modal-help">Files and images are sealed into the same encrypted entry as the rest of the payload.</div>
-          </div>
-
-          <div id="vaultModalEntryPayloadField" class="vault-modal-field" hidden>
-            <label class="vault-modal-label" for="vaultModalEntryPayload">Structured payload</label>
-            <textarea id="vaultModalEntryPayload" class="form-control vault-modal-textarea" rows="8" spellcheck="false" placeholder='{"note":"private"}'></textarea>
-            <div class="vault-modal-help">Use JSON only if you want named fields or nested data.</div>
           </div>
 
           <details id="vaultModalEntryAdvanced" class="vault-modal-advanced-details">
