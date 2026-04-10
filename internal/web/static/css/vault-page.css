@@ -466,7 +466,11 @@
 .vault-page-unlock-overlay {
   position: fixed;
   inset: 0;
-  z-index: 1080;
+  z-index: 10020;
+}
+
+body.vault-page-dialog-open {
+  overflow: hidden;
 }
 
 .vault-page-unlock-dialog {
@@ -486,6 +490,10 @@
 
 .vault-page-entry-grid {
   grid-template-columns: minmax(17rem, 0.85fr) minmax(0, 1.15fr);
+}
+
+#vaultEntryGrid {
+  grid-template-columns: minmax(0, 1fr);
 }
 
 .vault-page-split-grid,
@@ -694,6 +702,10 @@
   line-height: 1.6;
 }
 
+.vault-page-entry-overlay {
+  padding: 1rem;
+}
+
 .vault-page-checkbox {
   display: flex;
   align-items: flex-start;
@@ -746,6 +758,7 @@
   .vault-page-explorer-grid {
     min-height: 0;
   }
+
 }
 
 @media (max-width: 640px) {
@@ -778,4 +791,7 @@
     justify-content: center;
   }
 
+  .vault-page-entry-overlay {
+    padding: 0.5rem;
+  }
 }
