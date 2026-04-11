@@ -3,8 +3,11 @@ package vaulthttp
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"io"
+	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -51,6 +54,39 @@ func performJSONRequest(t *testing.T, handler http.Handler, method string, path 
 
 	req := httptest.NewRequest(method, path, bytes.NewReader(payload))
 	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	return rec
+}
+
+func performMultipartRequest(t *testing.T, handler http.Handler, method string, path string, fields map[string]string, fileField string, fileName string, fileContent []byte) *httptest.ResponseRecorder {
+	t.Helper()
+
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+
+	for key, value := range fields {
+		if err := writer.WriteField(key, value); err != nil {
+			t.Fatalf("write field %q: %v", key, err)
+		}
+	}
+
+	if fileField != "" {
+		part, err := writer.CreateFormFile(fileField, fileName)
+		if err != nil {
+			t.Fatalf("create form file %q: %v", fileField, err)
+		}
+		if _, err := part.Write(fileContent); err != nil {
+			t.Fatalf("write form file %q: %v", fileField, err)
+		}
+	}
+
+	if err := writer.Close(); err != nil {
+		t.Fatalf("close multipart writer: %v", err)
+	}
+
+	req := httptest.NewRequest(method, path, &body)
+	req.Header.Set("Content-Type", writer.FormDataContentType())
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 	return rec
@@ -177,6 +213,89 @@ func TestHandlerRecordLifecycle(t *testing.T) {
 	deleteRec := performJSONRequest(t, handler, http.MethodDelete, "/api/vault/records/"+created.Record.ID, nil)
 	if deleteRec.Code != http.StatusOK {
 		t.Fatalf("expected 200 from delete, got %d: %s", deleteRec.Code, deleteRec.Body.String())
+	}
+}
+
+func TestHandlerRecordAttachmentLifecycle(t *testing.T) {
+	handler, store, db := newTestHandler(t, vault.NewMemorySecretStore(), "")
+	defer func() { _ = db.Close() }()
+	primaryVault := createHandlerVault(t, store, "Primary Vault")
+
+	createRec := performJSONRequest(t, handler, http.MethodPost, "/api/vault/records", map[string]any{
+		"vault_id": primaryVault.ID,
+		"type":     "personal_note",
+		"label":    "Passport",
+		"payload": map[string]any{
+			"note": "Emergency contact",
+		},
+	})
+	if createRec.Code != http.StatusCreated {
+		t.Fatalf("expected 201 from create, got %d: %s", createRec.Code, createRec.Body.String())
+	}
+
+	var created struct {
+		Record vault.Record `json:"record"`
+	}
+	decodeJSONBody(t, createRec, &created)
+
+	uploadRec := performMultipartRequest(t, handler, http.MethodPost, "/api/vault/records/"+created.Record.ID+"/attachments", nil, "file", "passport.txt", []byte("scan-data"))
+	if uploadRec.Code != http.StatusCreated {
+		t.Fatalf("expected 201 from attachment upload, got %d: %s", uploadRec.Code, uploadRec.Body.String())
+	}
+
+	var uploaded struct {
+		Attachment vault.RecordAttachment `json:"attachment"`
+	}
+	decodeJSONBody(t, uploadRec, &uploaded)
+	if uploaded.Attachment.ID == "" {
+		t.Fatal("expected created attachment id")
+	}
+	if uploaded.Attachment.DownloadURL == "" {
+		t.Fatalf("expected attachment download URL, got %+v", uploaded.Attachment)
+	}
+
+	getRec := performJSONRequest(t, handler, http.MethodGet, "/api/vault/records/"+created.Record.ID, nil)
+	if getRec.Code != http.StatusOK {
+		t.Fatalf("expected 200 from record get, got %d: %s", getRec.Code, getRec.Body.String())
+	}
+
+	var record vault.Record
+	decodeJSONBody(t, getRec, &record)
+	var payload map[string]any
+	if err := json.Unmarshal(record.Payload, &payload); err != nil {
+		t.Fatalf("unmarshal record payload: %v", err)
+	}
+	attachments, _ := payload["attachments"].([]any)
+	if len(attachments) != 1 {
+		t.Fatalf("expected 1 payload attachment, got %#v", payload["attachments"])
+	}
+	attachmentPayload, _ := attachments[0].(map[string]any)
+	if strings.TrimSpace(fmt.Sprintf("%v", attachmentPayload["download_url"])) == "" {
+		t.Fatalf("expected payload attachment download URL, got %#v", attachmentPayload)
+	}
+
+	downloadReq := httptest.NewRequest(http.MethodGet, uploaded.Attachment.DownloadURL, nil)
+	downloadRec := httptest.NewRecorder()
+	handler.ServeHTTP(downloadRec, downloadReq)
+	if downloadRec.Code != http.StatusOK {
+		t.Fatalf("expected 200 downloading attachment, got %d: %s", downloadRec.Code, downloadRec.Body.String())
+	}
+	if got := downloadRec.Body.String(); got != "scan-data" {
+		t.Fatalf("unexpected attachment bytes %q", got)
+	}
+
+	deleteReq := httptest.NewRequest(http.MethodDelete, uploaded.Attachment.DownloadURL, nil)
+	deleteRec := httptest.NewRecorder()
+	handler.ServeHTTP(deleteRec, deleteReq)
+	if deleteRec.Code != http.StatusOK {
+		t.Fatalf("expected 200 deleting attachment, got %d: %s", deleteRec.Code, deleteRec.Body.String())
+	}
+
+	missingReq := httptest.NewRequest(http.MethodGet, uploaded.Attachment.DownloadURL, nil)
+	missingRec := httptest.NewRecorder()
+	handler.ServeHTTP(missingRec, missingReq)
+	if missingRec.Code != http.StatusNotFound {
+		t.Fatalf("expected 404 after attachment delete, got %d: %s", missingRec.Code, missingRec.Body.String())
 	}
 }
 
@@ -693,6 +812,85 @@ func TestHandlerImportCreatesVaultAndRestoresBundle(t *testing.T) {
 	decodeJSONBody(t, grantsRec, &importedGrants)
 	if len(importedGrants.Grants) != 1 || importedGrants.Grants[0].ActorID != "finance-agent" {
 		t.Fatalf("unexpected imported grants: %#v", importedGrants.Grants)
+	}
+}
+
+func TestHandlerImportAcceptsMultipartBundleUpload(t *testing.T) {
+	handler, store, db := newTestHandler(t, vault.NewMemorySecretStore(), "")
+	defer func() { _ = db.Close() }()
+
+	sourceVault := createHandlerVault(t, store, "Travel Vault")
+
+	if err := store.CreateRecord(context.Background(), &vault.Record{
+		VaultID: sourceVault.ID,
+		Type:    "personal_note",
+		Label:   "Passport copy",
+		Payload: json.RawMessage(fmt.Sprintf(`{
+			"note":"Scan attached",
+			"attachments":[{"name":"passport.txt","mime_type":"text/plain","size_bytes":9,"content_base64":"%s"}]
+		}`, base64.StdEncoding.EncodeToString([]byte("scan-data")))),
+	}, vault.AccessContext{}); err != nil {
+		t.Fatalf("create source record with attachment: %v", err)
+	}
+
+	bundle, err := store.Export(context.Background(), vault.ExportRequest{
+		VaultID:  sourceVault.ID,
+		Password: "bundle-pass",
+	})
+	if err != nil {
+		t.Fatalf("export bundle: %v", err)
+	}
+
+	bundleJSON, err := json.Marshal(bundle)
+	if err != nil {
+		t.Fatalf("marshal bundle: %v", err)
+	}
+
+	importRec := performMultipartRequest(t, handler, http.MethodPost, "/api/vault/import", map[string]string{
+		"import_password":       "bundle-pass",
+		"restore_grants":        "false",
+		"create_vault_name":     "Imported Travel Vault",
+		"create_vault_password": "imported-vault-pass",
+	}, "file", "vault-export.json", bundleJSON)
+	if importRec.Code != http.StatusOK {
+		t.Fatalf("expected 200 from multipart import, got %d: %s", importRec.Code, importRec.Body.String())
+	}
+
+	var importBody struct {
+		Result vault.ImportResult `json:"result"`
+	}
+	decodeJSONBody(t, importRec, &importBody)
+	if !importBody.Result.CreatedVault || importBody.Result.RecordCount != 1 {
+		t.Fatalf("unexpected multipart import result: %+v", importBody.Result)
+	}
+
+	listRec := performJSONRequest(t, handler, http.MethodGet, "/api/vault/records?vault_id="+importBody.Result.Vault.ID, nil)
+	if listRec.Code != http.StatusOK {
+		t.Fatalf("expected 200 listing imported records, got %d: %s", listRec.Code, listRec.Body.String())
+	}
+
+	var listed struct {
+		Records []vault.RecordListItem `json:"records"`
+	}
+	decodeJSONBody(t, listRec, &listed)
+	if len(listed.Records) != 1 {
+		t.Fatalf("unexpected imported record count: %#v", listed.Records)
+	}
+
+	getRec := performJSONRequest(t, handler, http.MethodGet, "/api/vault/records/"+listed.Records[0].ID, nil)
+	if getRec.Code != http.StatusOK {
+		t.Fatalf("expected 200 loading imported record, got %d: %s", getRec.Code, getRec.Body.String())
+	}
+
+	var importedRecord vault.Record
+	decodeJSONBody(t, getRec, &importedRecord)
+	var payload map[string]any
+	if err := json.Unmarshal(importedRecord.Payload, &payload); err != nil {
+		t.Fatalf("unmarshal imported payload: %v", err)
+	}
+	attachments, _ := payload["attachments"].([]any)
+	if len(attachments) != 1 {
+		t.Fatalf("expected imported attachment metadata, got %#v", payload["attachments"])
 	}
 }
 

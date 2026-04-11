@@ -211,6 +211,7 @@
   let importDialogOpen = false;
   let editorDialogOpen = false;
   let entryAttachments = [];
+  let entryAttachmentSnapshot = [];
 
   function notify(message, type = 'info', options = {}) {
     if (typeof window.notifyToast === 'function') {
@@ -317,16 +318,21 @@
   }
 
   async function apiRequest(url, options = {}) {
+    const isFormData = options.body instanceof window.FormData;
     const config = {
       method: options.method || 'GET',
       headers: {
-        'Content-Type': 'application/json',
         ...(options.headers || {})
       }
     };
 
     if (options.body !== undefined && config.method !== 'GET') {
-      config.body = JSON.stringify(options.body);
+      if (isFormData) {
+        config.body = options.body;
+      } else {
+        config.headers['Content-Type'] = 'application/json';
+        config.body = JSON.stringify(options.body);
+      }
     }
 
     const response = await fetch(url, config);
@@ -425,14 +431,16 @@
       return null;
     }
 
-    const name = String(item.name || '').trim();
+    const file = item.file instanceof File ? item.file : null;
+    const name = String(item.name || file?.name || '').trim();
     const contentBase64 = String(item.content_base64 || item.base64_data || '').trim();
-    if (!name || !contentBase64) {
+    const downloadURL = String(item.download_url || item.downloadURL || '').trim();
+    if (!name || (!file && !contentBase64 && !downloadURL)) {
       return null;
     }
 
-    const mimeType = String(item.mime_type || item.mimeType || 'application/octet-stream').trim() || 'application/octet-stream';
-    const sizeBytes = Number(item.size_bytes ?? item.size ?? 0);
+    const mimeType = String(item.mime_type || item.mimeType || file?.type || 'application/octet-stream').trim() || 'application/octet-stream';
+    const sizeBytes = Number(item.size_bytes ?? item.size ?? file?.size ?? base64ByteLength(contentBase64));
 
     return {
       id: String(item.id || generateAttachmentID()),
@@ -440,8 +448,19 @@
       mime_type: mimeType,
       size_bytes: Number.isFinite(sizeBytes) && sizeBytes >= 0 ? sizeBytes : 0,
       kind: String(item.kind || '').trim() || attachmentKindForMimeType(mimeType),
-      content_base64: contentBase64
+      content_base64: contentBase64 || undefined,
+      download_url: downloadURL || undefined,
+      file: file || undefined
     };
+  }
+
+  function cloneEntryAttachment(item) {
+    const normalized = normalizeEntryAttachment(item);
+    return normalized ? { ...normalized } : null;
+  }
+
+  function cloneEntryAttachments(items) {
+    return (Array.isArray(items) ? items : []).map(cloneEntryAttachment).filter(Boolean);
   }
 
   function entryAttachmentsFromPayload(payload) {
@@ -488,9 +507,55 @@
   }
 
   function attachmentDataURL(attachment) {
+    const downloadURL = String(attachment?.download_url || '').trim();
+    if (downloadURL) {
+      return downloadURL;
+    }
+
     const mimeType = String(attachment?.mime_type || 'application/octet-stream').trim() || 'application/octet-stream';
     const contentBase64 = String(attachment?.content_base64 || '').trim();
     return contentBase64 ? `data:${mimeType};base64,${contentBase64}` : '';
+  }
+
+  function base64ByteLength(value) {
+    const normalized = String(value || '').trim().replace(/\s+/g, '');
+    if (!normalized) {
+      return 0;
+    }
+
+    const paddingMatch = normalized.match(/=+$/);
+    const padding = paddingMatch ? paddingMatch[0].length : 0;
+    return Math.max(0, Math.floor((normalized.length * 3) / 4) - padding);
+  }
+
+  function attachmentBlob(attachment) {
+    const normalized = normalizeEntryAttachment(attachment);
+    if (!normalized) {
+      throw new Error('That attachment could not be prepared.');
+    }
+
+    if (normalized.file instanceof File) {
+      return normalized.file;
+    }
+
+    const contentBase64 = String(normalized.content_base64 || '').trim();
+    if (!contentBase64) {
+      throw new Error('That attachment is missing file content.');
+    }
+
+    const binary = window.atob(contentBase64);
+    const bytes = new Uint8Array(binary.length);
+    for (let index = 0; index < binary.length; index += 1) {
+      bytes[index] = binary.charCodeAt(index);
+    }
+
+    return new Blob([bytes], {
+      type: normalized.mime_type || 'application/octet-stream'
+    });
+  }
+
+  function hasStoredAttachment(attachment) {
+    return Boolean(String(attachment?.download_url || '').trim());
   }
 
   function readFileAsBase64(file) {
@@ -543,29 +608,6 @@
     }).join('');
   }
 
-  function mergeEntryAttachments(payload, attachments) {
-    const normalizedAttachments = (Array.isArray(attachments) ? attachments : []).map(normalizeEntryAttachment).filter(Boolean);
-
-    if (!normalizedAttachments.length) {
-      return payloadWithoutAttachments(payload);
-    }
-
-    if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
-      throw new Error('Structured payload must be a JSON object when files are attached.');
-    }
-
-    const next = payloadWithoutAttachments(payload);
-    next.attachments = normalizedAttachments.map((attachment) => ({
-      id: attachment.id,
-      name: attachment.name,
-      mime_type: attachment.mime_type,
-      size_bytes: attachment.size_bytes,
-      kind: attachment.kind,
-      content_base64: attachment.content_base64
-    }));
-    return next;
-  }
-
   async function addEntryAttachments(fileList) {
     const files = Array.from(fileList || []);
     if (!files.length) {
@@ -592,14 +634,13 @@
         continue;
       }
 
-      const contentBase64 = await readFileAsBase64(file);
       nextAttachments.push({
         id: generateAttachmentID(),
         name: String(file.name || 'attachment'),
         mime_type: String(file.type || 'application/octet-stream'),
         size_bytes: Number(file.size || 0),
         kind: attachmentKindForMimeType(file.type),
-        content_base64: contentBase64
+        file
       });
     }
 
@@ -811,12 +852,20 @@
     }
 
     const link = document.createElement('a');
-    link.href = attachmentDataURL(normalized);
+    const objectURL = normalized.file instanceof File
+      ? window.URL.createObjectURL(normalized.file)
+      : '';
+    link.href = objectURL || attachmentDataURL(normalized);
     link.download = normalized.name || 'vault-attachment';
     link.style.display = 'none';
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
+    if (objectURL) {
+      window.setTimeout(() => {
+        window.URL.revokeObjectURL(objectURL);
+      }, 0);
+    }
   }
 
   function prettyDate(value) {
@@ -1685,6 +1734,7 @@
       entryContentInput.value = '';
     }
     entryAttachments = [];
+    entryAttachmentSnapshot = [];
     if (entryJsonModeInput) {
       entryJsonModeInput.checked = false;
     }
@@ -1735,6 +1785,7 @@
     entryTagsInput.value = Array.isArray(record.tags) ? record.tags.join(', ') : '';
     entryRetentionInput.value = record.retention_policy || '';
     entryAttachments = entryAttachmentsFromPayload(payload);
+    entryAttachmentSnapshot = cloneEntryAttachments(entryAttachments);
     entryPayloadInput.value = payloadValue === '{}' ? defaultPayloadValue(normalizedType) : payloadValue;
     if (entryAdvancedDetails) {
       entryAdvancedDetails.open = Boolean(
@@ -3072,6 +3123,52 @@
     await lockVault();
   }
 
+  async function uploadRecordAttachment(recordID, attachment) {
+    const normalized = normalizeEntryAttachment(attachment);
+    if (!normalized) {
+      throw new Error('One of the attachments is invalid.');
+    }
+
+    const formData = new window.FormData();
+    formData.append('file', attachmentBlob(normalized), normalized.name || 'attachment');
+    if (normalized.kind) {
+      formData.append('kind', normalized.kind);
+    }
+
+    return apiRequest(vaultURL(`/api/vault/records/${encodeURIComponent(recordID)}/attachments`), {
+      method: 'POST',
+      body: formData
+    });
+  }
+
+  async function syncRecordAttachments(recordID, previousAttachments, nextAttachments) {
+    if (!recordID) {
+      return;
+    }
+
+    const previous = cloneEntryAttachments(previousAttachments);
+    const next = cloneEntryAttachments(nextAttachments);
+    const nextStoredIDs = new Set(next.filter(hasStoredAttachment).map((attachment) => attachment.id));
+
+    for (const attachment of next) {
+      if (hasStoredAttachment(attachment)) {
+        continue;
+      }
+
+      await uploadRecordAttachment(recordID, attachment);
+    }
+
+    for (const attachment of previous) {
+      if (!hasStoredAttachment(attachment) || nextStoredIDs.has(attachment.id)) {
+        continue;
+      }
+
+      await apiRequest(vaultURL(`/api/vault/records/${encodeURIComponent(recordID)}/attachments/${encodeURIComponent(attachment.id)}`), {
+        method: 'DELETE'
+      });
+    }
+  }
+
   async function saveRecord() {
     const editing = Boolean(selectedRecord?.id);
 
@@ -3100,11 +3197,14 @@
     }
 
     try {
-      payloadBody.payload = mergeEntryAttachments(parsePayloadInput(), entryAttachments);
+      payloadBody.payload = payloadWithoutAttachments(parsePayloadInput());
     } catch (error) {
       showInlineAlert(error.message || 'Payload must be valid JSON.', 'warning');
       return;
     }
+
+    let persistedRecordID = selectedRecord?.id || '';
+    let recordPersisted = false;
 
     try {
       setButtonLoading(saveEntryBtn, true, editing ? 'Updating entry' : 'Saving entry');
@@ -3121,6 +3221,10 @@
           body: payloadBody
         });
       }
+      persistedRecordID = persistedRecordID || String(response?.record?.id || '').trim();
+      recordPersisted = true;
+
+      await syncRecordAttachments(persistedRecordID, entryAttachmentSnapshot, entryAttachments);
 
       closeVaultEditor({ restoreFocus: false });
 
@@ -3140,6 +3244,20 @@
       }
     } catch (error) {
       console.error('Failed to save vault entry:', error);
+      if (recordPersisted) {
+        closeVaultEditor({ restoreFocus: false });
+        notify(editing ? 'Vault entry updated, but attachments need attention.' : 'Vault entry saved, but attachments need attention.', 'warning');
+        if (editing) {
+          await refreshVault();
+        } else {
+          await refreshVault();
+          if (persistedRecordID) {
+            await selectRecord(persistedRecordID, { openEditor: false });
+          }
+        }
+        showInlineAlert(error.message || 'The entry was saved, but attachments failed to sync.', 'error');
+        return;
+      }
       showInlineAlert(error.message || (editing ? 'Failed to update vault entry.' : 'Failed to save vault entry.'), 'error');
     } finally {
       setButtonLoading(saveEntryBtn, false);
@@ -3349,24 +3467,13 @@
       return;
     }
 
-    let bundle = null;
-    try {
-      const raw = await readFileAsText(file);
-      bundle = JSON.parse(raw);
-    } catch (error) {
-      console.error('Failed to parse vault import bundle:', error);
-      showInlineAlert(error.message || 'The selected import file is not valid JSON.', 'error');
-      return;
-    }
-
-    const requestBody = {
-      import_password: importPassword,
-      bundle,
-      restore_grants: Boolean(importRestoreGrantsInput?.checked)
-    };
+    const requestBody = new window.FormData();
+    requestBody.append('file', file, String(file.name || 'vault-export.json'));
+    requestBody.append('import_password', importPassword);
+    requestBody.append('restore_grants', String(Boolean(importRestoreGrantsInput?.checked)));
 
     if (mode === 'current') {
-      requestBody.target_vault_id = currentVaultID();
+      requestBody.append('target_vault_id', currentVaultID());
     } else {
       const vaultPassword = String(importVaultPasswordInput?.value || '').trim();
       const confirmPassword = String(importConfirmVaultPasswordInput?.value || '').trim();
@@ -3378,11 +3485,9 @@
         showInlineAlert('The imported vault passwords do not match.', 'warning');
         return;
       }
-      requestBody.create_vault = {
-        name: String(importVaultNameInput?.value || '').trim(),
-        description: String(importVaultDescriptionInput?.value || '').trim(),
-        vault_password: vaultPassword
-      };
+      requestBody.append('create_vault_name', String(importVaultNameInput?.value || '').trim());
+      requestBody.append('create_vault_description', String(importVaultDescriptionInput?.value || '').trim());
+      requestBody.append('create_vault_password', vaultPassword);
     }
 
     try {

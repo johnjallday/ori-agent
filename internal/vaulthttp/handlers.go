@@ -62,6 +62,8 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		h.handleImport(w, r)
 	case path == "/records" || path == "/records/":
 		h.handleRecords(w, r)
+	case strings.HasPrefix(path, "/records/") && strings.Contains(strings.TrimPrefix(path, "/records/"), "/attachments"):
+		h.handleRecordAttachments(w, r, strings.TrimPrefix(path, "/records/"))
 	case strings.HasPrefix(path, "/records/"):
 		h.handleRecord(w, r, strings.TrimPrefix(path, "/records/"))
 	case path == "/grants" || path == "/grants/":
@@ -359,6 +361,7 @@ func (h *Handler) handleRecord(w http.ResponseWriter, r *http.Request, id string
 			respondVaultError(w, err)
 			return
 		}
+		decorateRecordAttachmentURLs(record, r)
 		orihttp.Success(w, record)
 	case http.MethodPatch, http.MethodPut:
 		var req struct {
@@ -401,6 +404,7 @@ func (h *Handler) handleRecord(w http.ResponseWriter, r *http.Request, id string
 			respondVaultError(w, err)
 			return
 		}
+		decorateRecordAttachmentURLs(record, r)
 		orihttp.Success(w, map[string]any{
 			"success": true,
 			"record":  record,
@@ -502,36 +506,9 @@ func (h *Handler) handleImport(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var req struct {
-		TargetVaultID  string             `json:"target_vault_id,omitempty"`
-		ImportPassword string             `json:"import_password"`
-		RestoreGrants  *bool              `json:"restore_grants,omitempty"`
-		Bundle         vault.ExportBundle `json:"bundle"`
-		CreateVault    *struct {
-			Name          string `json:"name,omitempty"`
-			Description   string `json:"description,omitempty"`
-			VaultPassword string `json:"vault_password"`
-		} `json:"create_vault,omitempty"`
-	}
-	if !orihttp.ParseJSONBody(w, r, &req) {
+	importReq, ok := parseImportRequest(w, r)
+	if !ok {
 		return
-	}
-
-	restoreGrants := true
-	if req.RestoreGrants != nil {
-		restoreGrants = *req.RestoreGrants
-	}
-
-	importReq := vault.ImportRequest{
-		TargetVaultID: vaultIDFromRequest(r, req.TargetVaultID),
-		Password:      req.ImportPassword,
-		Bundle:        req.Bundle,
-		RestoreGrants: restoreGrants,
-	}
-	if req.CreateVault != nil {
-		importReq.NewVaultName = req.CreateVault.Name
-		importReq.NewVaultDescription = req.CreateVault.Description
-		importReq.NewVaultPassword = req.CreateVault.VaultPassword
 	}
 
 	result, err := h.store.Import(r.Context(), importReq)
@@ -587,7 +564,7 @@ func respondVaultError(w http.ResponseWriter, err error) {
 	switch {
 	case err == nil:
 		return
-	case errors.Is(err, vault.ErrVaultNotFound), errors.Is(err, vault.ErrRecordNotFound), errors.Is(err, vault.ErrGrantNotFound):
+	case errors.Is(err, vault.ErrVaultNotFound), errors.Is(err, vault.ErrRecordNotFound), errors.Is(err, vault.ErrGrantNotFound), errors.Is(err, vault.ErrRecordAttachmentNotFound):
 		_ = orihttp.RespondError(w, http.StatusNotFound, err.Error())
 	case errors.Is(err, vault.ErrVaultAlreadyExists):
 		_ = orihttp.RespondError(w, http.StatusConflict, err.Error())
@@ -597,7 +574,9 @@ func respondVaultError(w http.ResponseWriter, err error) {
 		_ = orihttp.RespondError(w, http.StatusUnauthorized, err.Error())
 	case errors.Is(err, vault.ErrVaultLocked):
 		_ = orihttp.RespondError(w, http.StatusLocked, err.Error())
-	case errors.Is(err, vault.ErrVaultRequired), errors.Is(err, vault.ErrVaultNameRequired), errors.Is(err, vault.ErrVaultPasswordRequired), errors.Is(err, vault.ErrExportPasswordEmpty), errors.Is(err, vault.ErrImportPasswordRequired), errors.Is(err, vault.ErrImportBundleRequired), errors.Is(err, vault.ErrImportBundleInvalid), errors.Is(err, vault.ErrImportTargetRequired), errors.Is(err, vault.ErrInvalidEmailAccount):
+	case errors.Is(err, vault.ErrRecordAttachmentTooLarge):
+		_ = orihttp.RespondError(w, http.StatusRequestEntityTooLarge, err.Error())
+	case errors.Is(err, vault.ErrVaultRequired), errors.Is(err, vault.ErrVaultNameRequired), errors.Is(err, vault.ErrVaultPasswordRequired), errors.Is(err, vault.ErrExportPasswordEmpty), errors.Is(err, vault.ErrImportPasswordRequired), errors.Is(err, vault.ErrImportBundleRequired), errors.Is(err, vault.ErrImportBundleInvalid), errors.Is(err, vault.ErrImportTargetRequired), errors.Is(err, vault.ErrInvalidEmailAccount), errors.Is(err, vault.ErrRecordAttachmentRequired):
 		_ = orihttp.RespondError(w, http.StatusBadRequest, err.Error())
 	case errors.Is(err, vault.ErrImportPasswordInvalid):
 		_ = orihttp.RespondError(w, http.StatusUnauthorized, err.Error())

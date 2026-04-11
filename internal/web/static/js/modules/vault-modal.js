@@ -43,7 +43,8 @@
     entryDialogOpen: false,
     entryDialogMode: 'create',
     entryDialogRecord: null,
-    entryAttachments: []
+    entryAttachments: [],
+    entryAttachmentSnapshot: []
   };
 
   let alertTimeoutId = 0;
@@ -265,16 +266,21 @@
   }
 
   async function apiRequest(url, options) {
+    const isFormData = options?.body instanceof window.FormData;
     const request = {
       method: options?.method || 'GET',
       headers: {
-        'Content-Type': 'application/json',
         ...(options?.headers || {})
       }
     };
 
     if (options && Object.prototype.hasOwnProperty.call(options, 'body') && request.method !== 'GET') {
-      request.body = JSON.stringify(options.body);
+      if (isFormData) {
+        request.body = options.body;
+      } else {
+        request.headers['Content-Type'] = 'application/json';
+        request.body = JSON.stringify(options.body);
+      }
     }
 
     const response = await fetch(url, request);
@@ -411,14 +417,16 @@
       return null;
     }
 
-    const name = String(item.name || '').trim();
+    const file = item.file instanceof File ? item.file : null;
+    const name = String(item.name || file?.name || '').trim();
     const contentBase64 = String(item.content_base64 || item.base64_data || '').trim();
-    if (!name || !contentBase64) {
+    const downloadURL = String(item.download_url || item.downloadURL || '').trim();
+    if (!name || (!file && !contentBase64 && !downloadURL)) {
       return null;
     }
 
-    const mimeType = String(item.mime_type || item.mimeType || 'application/octet-stream').trim() || 'application/octet-stream';
-    const sizeBytes = Number(item.size_bytes ?? item.size ?? 0);
+    const mimeType = String(item.mime_type || item.mimeType || file?.type || 'application/octet-stream').trim() || 'application/octet-stream';
+    const sizeBytes = Number(item.size_bytes ?? item.size ?? file?.size ?? base64ByteLength(contentBase64));
 
     return {
       id: String(item.id || generateAttachmentID()),
@@ -426,8 +434,19 @@
       mime_type: mimeType,
       size_bytes: Number.isFinite(sizeBytes) && sizeBytes >= 0 ? sizeBytes : 0,
       kind: String(item.kind || '').trim() || attachmentKindForMimeType(mimeType),
-      content_base64: contentBase64
+      content_base64: contentBase64 || undefined,
+      download_url: downloadURL || undefined,
+      file: file || undefined
     };
+  }
+
+  function cloneEntryAttachment(item) {
+    const normalized = normalizeEntryAttachment(item);
+    return normalized ? { ...normalized } : null;
+  }
+
+  function cloneEntryAttachments(items) {
+    return (Array.isArray(items) ? items : []).map(cloneEntryAttachment).filter(Boolean);
   }
 
   function entryAttachmentsFromPayload(payload) {
@@ -476,9 +495,55 @@
   }
 
   function attachmentDataURL(attachment) {
+    const downloadURL = String(attachment?.download_url || '').trim();
+    if (downloadURL) {
+      return downloadURL;
+    }
+
     const mimeType = String(attachment?.mime_type || 'application/octet-stream').trim() || 'application/octet-stream';
     const contentBase64 = String(attachment?.content_base64 || '').trim();
     return contentBase64 ? 'data:' + mimeType + ';base64,' + contentBase64 : '';
+  }
+
+  function base64ByteLength(value) {
+    const normalized = String(value || '').trim().replace(/\s+/g, '');
+    if (!normalized) {
+      return 0;
+    }
+
+    const paddingMatch = normalized.match(/=+$/);
+    const padding = paddingMatch ? paddingMatch[0].length : 0;
+    return Math.max(0, Math.floor((normalized.length * 3) / 4) - padding);
+  }
+
+  function attachmentBlob(attachment) {
+    const normalized = normalizeEntryAttachment(attachment);
+    if (!normalized) {
+      throw new Error('That attachment could not be prepared.');
+    }
+
+    if (normalized.file instanceof File) {
+      return normalized.file;
+    }
+
+    const contentBase64 = String(normalized.content_base64 || '').trim();
+    if (!contentBase64) {
+      throw new Error('That attachment is missing file content.');
+    }
+
+    const binary = window.atob(contentBase64);
+    const bytes = new Uint8Array(binary.length);
+    for (let index = 0; index < binary.length; index += 1) {
+      bytes[index] = binary.charCodeAt(index);
+    }
+
+    return new Blob([bytes], {
+      type: normalized.mime_type || 'application/octet-stream'
+    });
+  }
+
+  function hasStoredAttachment(attachment) {
+    return Boolean(String(attachment?.download_url || '').trim());
   }
 
   function readFileAsBase64(file) {
@@ -547,31 +612,6 @@
     }).join('');
   }
 
-  function mergeEntryAttachments(payload, attachments) {
-    const normalizedAttachments = (Array.isArray(attachments) ? attachments : []).map(normalizeEntryAttachment).filter(Boolean);
-
-    if (!normalizedAttachments.length) {
-      return payloadWithoutAttachments(payload);
-    }
-
-    if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
-      throw new Error('Structured payload must be a JSON object when files are attached.');
-    }
-
-    const next = payloadWithoutAttachments(payload);
-    next.attachments = normalizedAttachments.map(function(attachment) {
-      return {
-        id: attachment.id,
-        name: attachment.name,
-        mime_type: attachment.mime_type,
-        size_bytes: attachment.size_bytes,
-        kind: attachment.kind,
-        content_base64: attachment.content_base64
-      };
-    });
-    return next;
-  }
-
   async function addEntryAttachments(fileList) {
     const files = Array.from(fileList || []);
     if (!files.length) {
@@ -598,14 +638,13 @@
         continue;
       }
 
-      const contentBase64 = await readFileAsBase64(file);
       nextAttachments.push({
         id: generateAttachmentID(),
         name: String(file.name || 'attachment'),
         mime_type: String(file.type || 'application/octet-stream'),
         size_bytes: Number(file.size || 0),
         kind: attachmentKindForMimeType(file.type),
-        content_base64: contentBase64
+        file: file
       });
     }
 
@@ -639,12 +678,20 @@
     }
 
     const link = document.createElement('a');
-    link.href = attachmentDataURL(normalized);
+    const objectURL = normalized.file instanceof File
+      ? window.URL.createObjectURL(normalized.file)
+      : '';
+    link.href = objectURL || attachmentDataURL(normalized);
     link.download = normalized.name || 'vault-attachment';
     link.style.display = 'none';
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
+    if (objectURL) {
+      window.setTimeout(function() {
+        window.URL.revokeObjectURL(objectURL);
+      }, 0);
+    }
   }
 
   function entrySimplePayload(type, content) {
@@ -851,6 +898,7 @@
   function resetEntryDialogState() {
     state.entryDialogMode = 'create';
     state.entryDialogRecord = null;
+    state.entryAttachmentSnapshot = [];
   }
 
   function populateEntryForm(record) {
@@ -872,6 +920,7 @@
     elements.entryTagsInput.value = Array.isArray(record.tags) ? record.tags.join(', ') : '';
     elements.entryRetentionInput.value = String(record.retention_policy || '');
     state.entryAttachments = entryAttachmentsFromPayload(payload);
+    state.entryAttachmentSnapshot = cloneEntryAttachments(state.entryAttachments);
     elements.entryPayloadInput.value = payloadValue === '{}' ? defaultPayloadValue(normalizedType) : payloadValue;
 
     if (elements.entryAdvancedDetails) {
@@ -1923,6 +1972,7 @@
     elements.entryLabelInput.value = '';
     elements.entryContentInput.value = '';
     state.entryAttachments = [];
+    state.entryAttachmentSnapshot = [];
     elements.entryJsonModeInput.checked = false;
     elements.entryTagsInput.value = '';
     elements.entryRetentionInput.value = '';
@@ -2686,8 +2736,56 @@
       throw new Error('Title is required before saving to the vault.');
     }
 
-    body.payload = mergeEntryAttachments(parsePayloadInput(), state.entryAttachments);
+    body.payload = payloadWithoutAttachments(parsePayloadInput());
     return body;
+  }
+
+  async function uploadRecordAttachment(recordID, attachment) {
+    const normalized = normalizeEntryAttachment(attachment);
+    if (!normalized) {
+      throw new Error('One of the attachments is invalid.');
+    }
+
+    const formData = new window.FormData();
+    formData.append('file', attachmentBlob(normalized), normalized.name || 'attachment');
+    if (normalized.kind) {
+      formData.append('kind', normalized.kind);
+    }
+
+    return apiRequest(vaultURL('/api/vault/records/' + encodeURIComponent(recordID) + '/attachments'), {
+      method: 'POST',
+      body: formData
+    });
+  }
+
+  async function syncRecordAttachments(recordID, previousAttachments, nextAttachments) {
+    if (!recordID) {
+      return;
+    }
+
+    const previous = cloneEntryAttachments(previousAttachments);
+    const next = cloneEntryAttachments(nextAttachments);
+    const nextStoredIDs = new Set(next.filter(hasStoredAttachment).map(function(attachment) {
+      return attachment.id;
+    }));
+
+    for (const attachment of next) {
+      if (hasStoredAttachment(attachment)) {
+        continue;
+      }
+
+      await uploadRecordAttachment(recordID, attachment);
+    }
+
+    for (const attachment of previous) {
+      if (!hasStoredAttachment(attachment) || nextStoredIDs.has(attachment.id)) {
+        continue;
+      }
+
+      await apiRequest(vaultURL('/api/vault/records/' + encodeURIComponent(recordID) + '/attachments/' + encodeURIComponent(attachment.id)), {
+        method: 'DELETE'
+      });
+    }
   }
 
   async function saveRecord() {
@@ -2717,6 +2815,9 @@
       return;
     }
 
+    let persistedRecordID = recordID;
+    let recordPersisted = false;
+
     try {
       setButtonLoading(elements.saveBtn, true, editing ? 'Updating entry' : 'Saving entry');
       const response = await apiRequest(editing
@@ -2725,6 +2826,10 @@
         method: editing ? 'PATCH' : 'POST',
         body: body
       });
+      persistedRecordID = persistedRecordID || String(response?.record?.id || '').trim();
+      recordPersisted = true;
+
+      await syncRecordAttachments(persistedRecordID, state.entryAttachmentSnapshot, state.entryAttachments);
 
       closeEntryDialog({ restoreFocus: false });
 
@@ -2744,6 +2849,20 @@
       }
     } catch (error) {
       console.error('Failed to save vault entry:', error);
+      if (recordPersisted) {
+        closeEntryDialog({ restoreFocus: false });
+        notify(editing ? 'Vault entry updated, but attachments need attention.' : 'Vault entry saved, but attachments need attention.', 'warning');
+        if (editing) {
+          await refreshVault();
+        } else {
+          await refreshVault(false);
+          if (persistedRecordID) {
+            await selectRecord(persistedRecordID);
+          }
+        }
+        showAlert(error.message || 'The entry was saved, but attachments failed to sync.', 'error');
+        return;
+      }
       showAlert(error.message || (editing ? 'Failed to update vault entry.' : 'Failed to save vault entry.'), 'error');
     } finally {
       setButtonLoading(elements.saveBtn, false);
@@ -2811,24 +2930,13 @@
       return;
     }
 
-    let bundle = null;
-    try {
-      const raw = await readFileAsText(file);
-      bundle = JSON.parse(raw);
-    } catch (error) {
-      console.error('Failed to parse vault import bundle:', error);
-      showAlert(error.message || 'The selected import file is not valid JSON.', 'error');
-      return;
-    }
-
-    const requestBody = {
-      import_password: importPassword,
-      bundle: bundle,
-      restore_grants: Boolean(elements.importRestoreGrantsInput?.checked)
-    };
+    const requestBody = new window.FormData();
+    requestBody.append('file', file, String(file.name || 'vault-export.json'));
+    requestBody.append('import_password', importPassword);
+    requestBody.append('restore_grants', String(Boolean(elements.importRestoreGrantsInput?.checked)));
 
     if (mode === 'current') {
-      requestBody.target_vault_id = activeVaultID();
+      requestBody.append('target_vault_id', activeVaultID());
     } else {
       const vaultPassword = String(elements.importVaultPasswordInput?.value || '').trim();
       const confirmPassword = String(elements.importConfirmVaultPasswordInput?.value || '').trim();
@@ -2840,11 +2948,9 @@
         showAlert('The imported vault passwords do not match.', 'warning');
         return;
       }
-      requestBody.create_vault = {
-        name: String(elements.importVaultNameInput?.value || '').trim(),
-        description: String(elements.importVaultDescriptionInput?.value || '').trim(),
-        vault_password: vaultPassword
-      };
+      requestBody.append('create_vault_name', String(elements.importVaultNameInput?.value || '').trim());
+      requestBody.append('create_vault_description', String(elements.importVaultDescriptionInput?.value || '').trim());
+      requestBody.append('create_vault_password', vaultPassword);
     }
 
     try {
