@@ -1645,6 +1645,23 @@ body::after {
   gap: 0.55rem;
 }
 
+.vault-modal-inline-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+}
+
+.vault-modal-inline-head-copy {
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.vault-modal-inline-head .vault-modal-preview-empty-inline {
+  padding: 0;
+}
+
 .vault-modal-detail-title {
   font-family: var(--font-display);
   font-size: 1.28rem;

@@ -2350,14 +2350,25 @@
 
     const revealLabel = state.payloadRevealed ? 'Hide Payload' : 'Reveal Payload';
     const payloadClass = 'vault-modal-payload-preview' + (state.payloadRevealed ? '' : ' is-concealed');
+    const payloadToggleButton = '<button type="button" class="modern-btn modern-btn-secondary" data-action="toggle-payload">' + escapeHTML(revealLabel) + '</button>';
     const attachmentsHTML = attachments.length
       ? (
         '<div class="vault-modal-attachments-wrap">' +
-          '<div class="vault-modal-payload-label">Encrypted attachments</div>' +
+          '<div class="vault-modal-inline-head">' +
+            '<div class="vault-modal-inline-head-copy">' +
+              '<div class="vault-modal-payload-label">Encrypted attachments</div>' +
+              (
+                state.payloadRevealed
+                  ? ''
+                  : '<div class="vault-modal-preview-empty-inline">Reveal the payload to inspect or download attached files.</div>'
+              ) +
+            '</div>' +
+            payloadToggleButton +
+          '</div>' +
           (
             state.payloadRevealed
               ? '<div class="vault-modal-attachment-grid">' + attachments.map(renderRecordAttachmentCard).join('') + '</div>'
-              : '<div class="vault-modal-preview-empty-inline">Reveal the payload to inspect or download attached files.</div>'
+              : ''
           ) +
         '</div>'
       )
@@ -2372,7 +2383,6 @@
           '</div>' +
           '<div class="vault-modal-detail-actions">' +
             '<button type="button" class="modern-btn modern-btn-secondary" data-action="edit-record" data-record-id="' + escapeHTML(record.id) + '">Edit Entry</button>' +
-            '<button type="button" class="modern-btn modern-btn-secondary" data-action="toggle-payload">' + escapeHTML(revealLabel) + '</button>' +
             '<button type="button" class="modern-btn modern-btn-secondary vault-modal-danger-btn" data-action="delete-record" data-record-id="' + escapeHTML(record.id) + '">Delete</button>' +
           '</div>' +
         '</div>' +
@@ -2386,7 +2396,18 @@
         '</div>' +
         attachmentsHTML +
         '<div class="vault-modal-payload-wrap">' +
-          '<div class="vault-modal-payload-label">Protected payload</div>' +
+          (
+            attachments.length
+              ? '<div class="vault-modal-payload-label">Protected payload</div>'
+              : (
+                '<div class="vault-modal-inline-head">' +
+                  '<div class="vault-modal-inline-head-copy">' +
+                    '<div class="vault-modal-payload-label">Protected payload</div>' +
+                  '</div>' +
+                  payloadToggleButton +
+                '</div>'
+              )
+          ) +
           '<pre class="' + payloadClass + '">' + escapeHTML(prettyPayload(payloadForPreview(record.payload))) + '</pre>' +
         '</div>' +
       '</div>'
