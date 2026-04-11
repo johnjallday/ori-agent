@@ -4,6 +4,9 @@ import "testing"
 
 func TestExtractReturnsDefaultsWhenMissing(t *testing.T) {
 	settings := Extract(nil)
+	if settings.Profile != "general" {
+		t.Fatalf("expected general profile, got %q", settings.Profile)
+	}
 	if settings.Preset != "guided" {
 		t.Fatalf("expected guided preset, got %q", settings.Preset)
 	}
@@ -15,10 +18,24 @@ func TestExtractReturnsDefaultsWhenMissing(t *testing.T) {
 	}
 }
 
+func TestProfileDefaultsForSoftwareProjectUsePlannerPreset(t *testing.T) {
+	settings := ProfileDefaults("software_project")
+	if settings.Profile != "software_project" {
+		t.Fatalf("expected software_project profile, got %q", settings.Profile)
+	}
+	if settings.Preset != "planner" {
+		t.Fatalf("expected planner preset, got %q", settings.Preset)
+	}
+	if !settings.Planning.Enabled {
+		t.Fatal("expected software_project profile to enable planning by default")
+	}
+}
+
 func TestApplyPatchUsesPresetAsNewBase(t *testing.T) {
 	sharedData := map[string]interface{}{
 		SharedDataKey: map[string]interface{}{
-			"preset": "guided",
+			"profile": "software_project",
+			"preset":  "guided",
 			"workflow": map[string]interface{}{
 				"require_repo_scan": false,
 			},
@@ -35,6 +52,9 @@ func TestApplyPatchUsesPresetAsNewBase(t *testing.T) {
 	if settings.Preset != "planner" {
 		t.Fatalf("expected planner preset, got %q", settings.Preset)
 	}
+	if settings.Profile != "software_project" {
+		t.Fatalf("expected software_project profile to be preserved, got %q", settings.Profile)
+	}
 	if !settings.Workflow.RequireRepoScan {
 		t.Fatal("expected planner preset to enable repo scan")
 	}
@@ -49,7 +69,7 @@ func TestApplyPatchUsesPresetAsNewBase(t *testing.T) {
 }
 
 func TestBuildEffectiveBehaviorIncludesPlanningManagedSkill(t *testing.T) {
-	settings := PresetDefaults("planner")
+	settings := PresetDefaultsForProfile("software_project", "planner")
 	effective := BuildEffectiveBehavior(settings)
 	if len(effective.ManagedSkills) != 1 {
 		t.Fatalf("expected one managed skill, got %#v", effective.ManagedSkills)

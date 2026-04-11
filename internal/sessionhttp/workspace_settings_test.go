@@ -34,6 +34,9 @@ func TestHandleWorkspaceSettings_GetReturnsNormalizedDefaults(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected settings object, got %#v", response["settings"])
 	}
+	if got := settings["profile"]; got != "general" {
+		t.Fatalf("expected general profile, got %#v", got)
+	}
 	if got := settings["preset"]; got != "guided" {
 		t.Fatalf("expected guided preset, got %#v", got)
 	}
@@ -54,6 +57,7 @@ func TestHandleWorkspaceSettings_PatchPersistsSettings(t *testing.T) {
 	workspaceID := createTestWorkspace(t, handler, "Planner Workspace")
 
 	body := `{
+		"profile": "software_project",
 		"preset": "planner",
 		"workflow": {
 			"confirmation_mode": "always"
@@ -77,6 +81,9 @@ func TestHandleWorkspaceSettings_PatchPersistsSettings(t *testing.T) {
 	}
 
 	settings := workspacesettings.Extract(workspace.SharedData)
+	if settings.Profile != "software_project" {
+		t.Fatalf("expected software_project profile, got %q", settings.Profile)
+	}
 	if settings.Preset != "planner" {
 		t.Fatalf("expected planner preset, got %q", settings.Preset)
 	}

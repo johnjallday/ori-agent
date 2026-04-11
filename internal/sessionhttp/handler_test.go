@@ -16,6 +16,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/session"
 	agentstore "github.com/johnjallday/ori-agent/internal/store"
 	"github.com/johnjallday/ori-agent/internal/types"
+	"github.com/johnjallday/ori-agent/internal/workspacesettings"
 )
 
 // createTestHandler creates a handler with an in-memory store for testing.
@@ -1048,6 +1049,41 @@ func TestHandler_CreateWorkspacePersistsWorkspaceBootstrap(t *testing.T) {
 	}
 	if len(systemsList) != 3 {
 		t.Fatalf("expected 3 systems hints, got %d (%#v)", len(systemsList), systemsList)
+	}
+}
+
+func TestHandler_CreateWorkspaceSeedsWorkspacePresetSettings(t *testing.T) {
+	handler, cleanup := createTestHandler(t)
+	defer cleanup()
+
+	body := `{"name":"Dev Workspace","workspace_preset":"software_project"}`
+	req := httptest.NewRequest(http.MethodPost, "/api/workspaces", bytes.NewBufferString(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	handler.HandleWorkspaces(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp map[string]interface{}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+	workspacePayload := resp["folder"].(map[string]interface{})
+	workspaceID := workspacePayload["id"].(string)
+
+	ws, err := handler.store.GetWorkspace(context.Background(), workspaceID)
+	if err != nil {
+		t.Fatalf("failed to load created workspace: %v", err)
+	}
+
+	settings := workspacesettings.Extract(ws.SharedData)
+	if settings.Profile != "software_project" {
+		t.Fatalf("expected software_project profile, got %q", settings.Profile)
+	}
+	if settings.Preset != "planner" {
+		t.Fatalf("expected planner preset, got %q", settings.Preset)
 	}
 }
 

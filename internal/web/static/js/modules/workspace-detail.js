@@ -1215,6 +1215,7 @@ export class WorkspaceDetailPage {
       mcpAgentAccessSummary: document.getElementById('workspace-detail-mcp-agent-access-summary'),
       mcpSubmitBtn: document.getElementById('workspace-detail-mcp-submit'),
       settingsForm: document.getElementById('workspace-detail-settings-form'),
+      settingsProfileInput: document.getElementById('workspace-detail-settings-profile'),
       settingsPresetInput: document.getElementById('workspace-detail-settings-preset'),
       settingsModeInput: document.getElementById('workspace-detail-settings-mode'),
       settingsConfirmationInput: document.getElementById('workspace-detail-settings-confirmation'),
@@ -1337,6 +1338,7 @@ export class WorkspaceDetailPage {
       event.preventDefault();
       this.saveWorkspaceSettings();
     });
+    this.elements.settingsProfileInput?.addEventListener('change', () => this.handleWorkspaceSettingsProfileChange());
     this.elements.settingsPresetInput?.addEventListener('change', () => this.handleWorkspaceSettingsPresetChange());
     [
       this.elements.settingsModeInput,
@@ -6891,6 +6893,19 @@ export class WorkspaceDetailPage {
       .join(' ');
   }
 
+  formatWorkspaceSettingsProfileLabel(profile) {
+    const normalized = String(profile || '').trim().toLowerCase();
+    switch (normalized) {
+      case 'research':
+        return 'Research';
+      case 'software_project':
+        return 'Software Project';
+      case 'general':
+      default:
+        return 'General';
+    }
+  }
+
   hasNonDefaultWorkspaceSettings() {
     const current = this.normalizeWorkspaceSettings(this.workspaceSettings || this.getDefaultWorkspaceSettings());
     const defaults = this.normalizeWorkspaceSettings(this.getDefaultWorkspaceSettings());
@@ -6950,12 +6965,13 @@ export class WorkspaceDetailPage {
 
   renderWorkspaceConfigSummary() {
     const settings = this.normalizeWorkspaceSettings(this.workspaceSettings || this.getDefaultWorkspaceSettings());
+    const profile = this.normalizeWorkspaceSettingsProfile(settings.profile);
     const preset = this.deriveWorkspaceSettingsPreset(settings);
     const connectionCount = this.getWorkspaceMCPBindings({ includeDisabled: true }).length;
     const skillCount = this.getWorkspaceSkillBindings({ includeDisabled: true }).length;
 
     if (this.elements.configPresetChip) {
-      this.elements.configPresetChip.textContent = `Preset: ${this.formatWorkspaceConfigPresetLabel(preset)}`;
+      this.elements.configPresetChip.textContent = `Workspace: ${this.formatWorkspaceSettingsProfileLabel(profile)} · ${this.formatWorkspaceConfigPresetLabel(preset)}`;
     }
     if (this.elements.configConnectionsChip) {
       this.elements.configConnectionsChip.textContent = `Connections: ${connectionCount}`;
@@ -6973,10 +6989,34 @@ export class WorkspaceDetailPage {
     return ['minimal', 'guided', 'planner', 'autonomous'];
   }
 
-  buildWorkspaceSettingsPreset(preset = 'guided') {
-    const normalizedPreset = this.normalizeWorkspaceSettingsPreset(preset);
+  getWorkspaceSettingsProfiles() {
+    return ['general', 'research', 'software_project'];
+  }
+
+  getDefaultWorkspaceSettingsPresetForProfile(profile = 'general') {
+    switch (this.normalizeWorkspaceSettingsProfile(profile)) {
+      case 'software_project':
+        return 'planner';
+      case 'research':
+        return 'guided';
+      case 'general':
+      default:
+        return 'guided';
+    }
+  }
+
+  buildWorkspaceSettingsPreset(preset = '', profile = 'general') {
+    const normalizedProfile = this.normalizeWorkspaceSettingsProfile(profile);
+    const requestedPreset = String(preset || '').trim().toLowerCase();
+    const normalizedPreset = requestedPreset
+      ? this.normalizeWorkspaceSettingsPreset(requestedPreset)
+      : this.getDefaultWorkspaceSettingsPresetForProfile(normalizedProfile);
+    const basePreset = normalizedPreset === 'custom'
+      ? this.getDefaultWorkspaceSettingsPresetForProfile(normalizedProfile)
+      : normalizedPreset;
     const settings = {
       version: 1,
+      profile: normalizedProfile,
       preset: normalizedPreset,
       workflow: {
         mode: 'guided',
@@ -6998,7 +7038,7 @@ export class WorkspaceDetailPage {
       }
     };
 
-    switch (normalizedPreset) {
+    switch (basePreset) {
       case 'minimal':
         settings.workflow.mode = 'direct';
         settings.workflow.save_outputs_as_notes = false;
@@ -7025,11 +7065,30 @@ export class WorkspaceDetailPage {
         break;
     }
 
+    switch (normalizedProfile) {
+      case 'research':
+        settings.planning.mode = 'investigation';
+        settings.planning.write_prd = false;
+        settings.planning.write_task_list = false;
+        settings.planning.clarification_mode = 'deep';
+        settings.planning.require_branch = false;
+        break;
+      case 'software_project':
+        settings.planning.mode = 'feature';
+        settings.planning.write_prd = true;
+        settings.planning.write_task_list = true;
+        settings.planning.clarification_mode = 'standard';
+        settings.planning.require_branch = true;
+        break;
+      default:
+        break;
+    }
+
     return settings;
   }
 
   getDefaultWorkspaceSettings() {
-    return this.buildWorkspaceSettingsPreset('guided');
+    return this.buildWorkspaceSettingsPreset('', 'general');
   }
 
   normalizeWorkspaceSettingsPreset(value) {
@@ -7038,6 +7097,36 @@ export class WorkspaceDetailPage {
       return normalized;
     }
     return 'guided';
+  }
+
+  normalizeWorkspaceSettingsProfile(value) {
+    const normalized = String(value || '').trim().toLowerCase();
+    if (this.getWorkspaceSettingsProfiles().includes(normalized)) {
+      return normalized;
+    }
+    return 'general';
+  }
+
+  inferWorkspaceSettingsProfile(settings = {}) {
+    const raw = settings && typeof settings === 'object' && !Array.isArray(settings) ? settings : {};
+    const explicit = String(raw.profile || '').trim().toLowerCase();
+    if (this.getWorkspaceSettingsProfiles().includes(explicit)) {
+      return explicit;
+    }
+
+    const preset = this.normalizeWorkspaceSettingsPreset(raw.preset || '');
+    if (preset === 'planner' || preset === 'autonomous') {
+      return 'software_project';
+    }
+
+    const planning = raw.planning && typeof raw.planning === 'object' && !Array.isArray(raw.planning) ? raw.planning : {};
+    const planningMode = String(planning.mode || '').trim().toLowerCase();
+    const clarificationMode = String(planning.clarification_mode || '').trim().toLowerCase();
+    if (planningMode === 'investigation' || clarificationMode === 'deep') {
+      return 'research';
+    }
+
+    return 'general';
   }
 
   normalizeWorkspaceSettingsMode(value) {
@@ -7058,14 +7147,22 @@ export class WorkspaceDetailPage {
 
   normalizeWorkspaceSettings(settings = {}) {
     const raw = settings && typeof settings === 'object' && !Array.isArray(settings) ? settings : {};
-    const preset = this.normalizeWorkspaceSettingsPreset(raw.preset);
-    const base = this.buildWorkspaceSettingsPreset(preset === 'custom' ? 'guided' : preset);
+    const profile = this.inferWorkspaceSettingsProfile(raw);
+    const rawPreset = String(raw.preset || '').trim();
+    const preset = rawPreset
+      ? this.normalizeWorkspaceSettingsPreset(rawPreset)
+      : this.getDefaultWorkspaceSettingsPresetForProfile(profile);
+    const base = this.buildWorkspaceSettingsPreset(
+      preset === 'custom' ? this.getDefaultWorkspaceSettingsPresetForProfile(profile) : preset,
+      profile
+    );
     const workflow = raw.workflow && typeof raw.workflow === 'object' && !Array.isArray(raw.workflow) ? raw.workflow : {};
     const planning = raw.planning && typeof raw.planning === 'object' && !Array.isArray(raw.planning) ? raw.planning : {};
     const boolOrDefault = (value, fallback) => (typeof value === 'boolean' ? value : fallback);
 
     return {
       version: Number.isFinite(Number(raw.version)) && Number(raw.version) > 0 ? Number(raw.version) : 1,
+      profile,
       preset,
       workflow: {
         mode: this.normalizeWorkspaceSettingsMode(workflow.mode || base.workflow.mode),
@@ -7097,7 +7194,7 @@ export class WorkspaceDetailPage {
     });
 
     const matchingPreset = this.getWorkspaceSettingsPresets().find((preset) => {
-      const candidate = this.buildWorkspaceSettingsPreset(preset);
+      const candidate = this.buildWorkspaceSettingsPreset(preset, normalized.profile);
       return JSON.stringify({
         workflow: candidate.workflow,
         planning: candidate.planning
@@ -7149,6 +7246,8 @@ export class WorkspaceDetailPage {
   getWorkspaceSettingsSummaryItems(settings = {}) {
     const normalized = this.normalizeWorkspaceSettings(settings);
     const summary = [
+      `Workspace preset: ${this.formatWorkspaceSettingsProfileLabel(normalized.profile)}`,
+      `Workflow style: ${this.formatWorkspaceConfigPresetLabel(normalized.preset)}`,
       `Interaction mode: ${normalized.workflow.mode}`,
       `Confirmation mode: ${normalized.workflow.confirmation_mode}`,
       `Save useful outputs as workspace notes: ${normalized.workflow.save_outputs_as_notes}`,
@@ -7182,6 +7281,8 @@ export class WorkspaceDetailPage {
       workflow: raw.workflow && typeof raw.workflow === 'object' ? { ...fallback.workflow, ...raw.workflow } : fallback.workflow,
       planning: raw.planning && typeof raw.planning === 'object' ? { ...fallback.planning, ...raw.planning } : fallback.planning,
       summary: this.getWorkspaceSettingsSummaryItems({
+        profile: this.normalizeWorkspaceSettingsProfile(raw.profile || settings.profile || fallback.profile),
+        preset: this.normalizeWorkspaceSettingsPreset(raw.preset || settings.preset || fallback.preset),
         workflow: raw.workflow && typeof raw.workflow === 'object' ? { ...fallback.workflow, ...raw.workflow } : fallback.workflow,
         planning: raw.planning && typeof raw.planning === 'object' ? { ...fallback.planning, ...raw.planning } : fallback.planning
       }),
@@ -7192,6 +7293,9 @@ export class WorkspaceDetailPage {
   populateWorkspaceSettingsForm(settings = {}) {
     const normalized = this.normalizeWorkspaceSettings(settings);
 
+    if (this.elements.settingsProfileInput) {
+      this.elements.settingsProfileInput.value = normalized.profile;
+    }
     if (this.elements.settingsPresetInput) {
       this.elements.settingsPresetInput.value = normalized.preset;
     }
@@ -7240,9 +7344,15 @@ export class WorkspaceDetailPage {
   }
 
   buildWorkspaceSettingsFromForm() {
+    const selectedProfile = String(this.elements.settingsProfileInput?.value || this.workspaceSettings?.profile || 'general').trim();
     const settings = this.normalizeWorkspaceSettings({
       version: this.workspaceSettings?.version || 1,
-      preset: String(this.elements.settingsPresetInput?.value || this.workspaceSettings?.preset || 'guided').trim(),
+      profile: selectedProfile,
+      preset: String(
+        this.elements.settingsPresetInput?.value
+        || this.workspaceSettings?.preset
+        || this.getDefaultWorkspaceSettingsPresetForProfile(selectedProfile)
+      ).trim(),
       workflow: {
         mode: String(this.elements.settingsModeInput?.value || '').trim(),
         require_repo_scan: this.elements.settingsRequireScanInput?.checked === true,
@@ -7323,12 +7433,22 @@ export class WorkspaceDetailPage {
 
   handleWorkspaceSettingsPresetChange() {
     const preset = this.normalizeWorkspaceSettingsPreset(this.elements.settingsPresetInput?.value || 'guided');
+    const profile = this.normalizeWorkspaceSettingsProfile(this.elements.settingsProfileInput?.value || this.workspaceSettings?.profile || 'general');
     if (preset === 'custom') {
       this.handleWorkspaceSettingsFieldChange();
       return;
     }
 
-    this.workspaceSettings = this.buildWorkspaceSettingsPreset(preset);
+    this.workspaceSettings = this.buildWorkspaceSettingsPreset(preset, profile);
+    this.workspaceSettingsEffectiveBehavior = this.buildWorkspaceSettingsEffectiveBehavior(this.workspaceSettings);
+    this.renderWorkspaceSettings();
+  }
+
+  handleWorkspaceSettingsProfileChange() {
+    const profile = this.normalizeWorkspaceSettingsProfile(this.elements.settingsProfileInput?.value || 'general');
+    const preset = this.getDefaultWorkspaceSettingsPresetForProfile(profile);
+
+    this.workspaceSettings = this.buildWorkspaceSettingsPreset(preset, profile);
     this.workspaceSettingsEffectiveBehavior = this.buildWorkspaceSettingsEffectiveBehavior(this.workspaceSettings);
     this.renderWorkspaceSettings();
   }

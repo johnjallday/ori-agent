@@ -145,7 +145,7 @@
                 <div class="workspace-detail-config-kicker">Workspace Configuration</div>
                 <h2 class="workspace-detail-config-title">Manager behavior, connections, and skill policy</h2>
                 <div class="workspace-detail-config-summary" id="workspace-detail-config-summary">
-                  <span class="workspace-detail-config-chip" id="workspace-detail-config-preset-chip">Preset: Guided</span>
+                  <span class="workspace-detail-config-chip" id="workspace-detail-config-preset-chip">Workspace: General · Guided</span>
                   <span class="workspace-detail-config-chip" id="workspace-detail-config-connections-chip">Connections: 0</span>
                   <span class="workspace-detail-config-chip" id="workspace-detail-config-skills-chip">Skills: 0</span>
                 </div>
@@ -223,7 +223,18 @@
                     </div>
                     <div class="row g-3">
                       <div class="col-md-6">
-                        <label for="workspace-detail-settings-preset" class="form-label">Preset</label>
+                        <label for="workspace-detail-settings-profile" class="form-label">Workspace preset</label>
+                        <select id="workspace-detail-settings-profile" class="form-select">
+                          <option value="general" selected>General</option>
+                          <option value="research">Research</option>
+                          <option value="software_project">Software Project</option>
+                        </select>
+                        <div class="workspace-detail-settings-field-hint">
+                          Defines the overall operating mode for this workspace and applies recommended defaults for its workflow.
+                        </div>
+                      </div>
+                      <div class="col-md-6">
+                        <label for="workspace-detail-settings-preset" class="form-label">Workflow style</label>
                         <select id="workspace-detail-settings-preset" class="form-select">
                           <option value="minimal">Minimal</option>
                           <option value="guided" selected>Guided</option>
@@ -248,12 +259,6 @@
                           <option value="none">None</option>
                         </select>
                       </div>
-                      <div class="col-md-6">
-                        <div class="workspace-detail-settings-summary-card">
-                          <div class="workspace-detail-settings-summary-title">Current Behavior</div>
-                          <div id="workspace-detail-settings-summary" class="workspace-detail-settings-summary-copy">Loading workspace settings...</div>
-                        </div>
-                      </div>
                       <div class="col-sm-6">
                         <div class="form-check form-switch">
                           <input class="form-check-input" type="checkbox" role="switch" id="workspace-detail-settings-plan-enabled">
@@ -273,6 +278,12 @@
                         <div class="form-check form-switch">
                           <input class="form-check-input" type="checkbox" role="switch" id="workspace-detail-settings-ask-handoff">
                           <label class="form-check-label" for="workspace-detail-settings-ask-handoff">Ask before specialist handoff</label>
+                        </div>
+                      </div>
+                      <div class="col-12">
+                        <div class="workspace-detail-settings-summary-card">
+                          <div class="workspace-detail-settings-summary-title">Current Behavior</div>
+                          <div id="workspace-detail-settings-summary" class="workspace-detail-settings-summary-copy">Loading workspace settings...</div>
                         </div>
                       </div>
                       <div class="col-12" id="workspace-detail-settings-planning-fields">

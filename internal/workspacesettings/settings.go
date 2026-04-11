@@ -11,6 +11,7 @@ const SharedDataKey = "workspace_settings"
 
 type Settings struct {
 	Version   int              `json:"version"`
+	Profile   string           `json:"profile,omitempty"`
 	Preset    string           `json:"preset,omitempty"`
 	Workflow  WorkflowSettings `json:"workflow"`
 	Planning  PlanningSettings `json:"planning"`
@@ -53,14 +54,29 @@ type ManagedSkill struct {
 }
 
 func DefaultSettings() Settings {
-	return PresetDefaults("guided")
+	return ProfileDefaults("general")
 }
 
 func PresetDefaults(preset string) Settings {
-	normalizedPreset := normalizePreset(preset)
+	return PresetDefaultsForProfile("general", preset)
+}
+
+func ProfileDefaults(profile string) Settings {
+	return PresetDefaultsForProfile(profile, "")
+}
+
+func PresetDefaultsForProfile(profile, preset string) Settings {
+	normalizedProfile := normalizeProfile(profile)
+	requestedPreset := strings.TrimSpace(preset)
+	normalizedPreset := normalizePreset(requestedPreset)
+	basePreset := normalizedPreset
+	if requestedPreset == "" || normalizedPreset == "custom" {
+		basePreset = defaultPresetForProfile(normalizedProfile)
+	}
 
 	settings := Settings{
 		Version: 1,
+		Profile: normalizedProfile,
 		Preset:  normalizedPreset,
 		Workflow: WorkflowSettings{
 			Mode:                       "guided",
@@ -82,7 +98,7 @@ func PresetDefaults(preset string) Settings {
 		},
 	}
 
-	switch normalizedPreset {
+	switch basePreset {
 	case "minimal":
 		settings.Workflow.Mode = "direct"
 		settings.Workflow.SaveOutputsAsNotes = false
@@ -109,6 +125,28 @@ func PresetDefaults(preset string) Settings {
 		settings.Planning.Enabled = true
 		settings.Planning.DefaultExecutionMode = "auto"
 	case "custom":
+		settings.Preset = "custom"
+	}
+
+	switch normalizedProfile {
+	case "research":
+		settings.Planning.Mode = "investigation"
+		settings.Planning.WritePRD = false
+		settings.Planning.WriteTaskList = false
+		settings.Planning.ClarificationMode = "deep"
+		settings.Planning.RequireBranch = false
+	case "software_project":
+		settings.Planning.Mode = "feature"
+		settings.Planning.WritePRD = true
+		settings.Planning.WriteTaskList = true
+		settings.Planning.ClarificationMode = "standard"
+		settings.Planning.RequireBranch = true
+	}
+
+	if requestedPreset == "" {
+		settings.Preset = defaultPresetForProfile(normalizedProfile)
+	}
+	if normalizedPreset == "custom" {
 		settings.Preset = "custom"
 	}
 
@@ -159,8 +197,15 @@ func Store(sharedData map[string]interface{}, settings Settings) map[string]inte
 
 func ApplyPatch(sharedData map[string]interface{}, patch map[string]interface{}) (map[string]interface{}, Settings) {
 	base := ExtractRaw(sharedData)
+	rawProfileValue := strings.TrimSpace(stringValue(patch["profile"]))
+	profileValue := ""
+	if rawProfileValue != "" {
+		profileValue = normalizeProfile(rawProfileValue)
+	} else {
+		profileValue = inferProfile(base)
+	}
 	if presetValue := strings.TrimSpace(stringValue(patch["preset"])); presetValue != "" {
-		base = toMap(PresetDefaults(presetValue))
+		base = toMap(PresetDefaultsForProfile(profileValue, presetValue))
 	}
 	merged := mergeMaps(base, patch)
 	settings := decode(merged)
@@ -171,6 +216,8 @@ func ApplyPatch(sharedData map[string]interface{}, patch map[string]interface{})
 func BuildEffectiveBehavior(settings Settings) EffectiveBehavior {
 	settings = Normalize(settings)
 	summary := []string{
+		fmt.Sprintf("Workspace preset: %s", formatLabel(settings.Profile)),
+		fmt.Sprintf("Workflow style: %s", formatLabel(settings.Preset)),
 		fmt.Sprintf("Interaction mode: %s", settings.Workflow.Mode),
 		fmt.Sprintf("Confirmation mode: %s", settings.Workflow.ConfirmationMode),
 		fmt.Sprintf("Save useful outputs as workspace notes: %t", settings.Workflow.SaveOutputsAsNotes),
@@ -229,8 +276,10 @@ func ToPlanningSkillConfig(settings Settings) map[string]interface{} {
 }
 
 func decode(raw interface{}) Settings {
-	decoded := PresetDefaults(stringValue(mapValue(raw)["preset"]))
 	rawMap := mapValue(raw)
+	profile := inferProfile(rawMap)
+	preset := strings.TrimSpace(stringValue(rawMap["preset"]))
+	decoded := PresetDefaultsForProfile(profile, preset)
 
 	if version := intValue(rawMap["version"]); version > 0 {
 		decoded.Version = version
@@ -289,6 +338,7 @@ func decode(raw interface{}) Settings {
 		}
 	}
 
+	decoded.Profile = normalizeProfile(decoded.Profile)
 	decoded.Preset = normalizePreset(decoded.Preset)
 	if decoded.Version <= 0 {
 		decoded.Version = 1
@@ -412,6 +462,8 @@ func timeValue(value interface{}) time.Time {
 
 func normalizePreset(value string) string {
 	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "":
+		return "guided"
 	case "minimal":
 		return "minimal"
 	case "planner":
@@ -425,6 +477,73 @@ func normalizePreset(value string) string {
 	default:
 		return "guided"
 	}
+}
+
+func normalizeProfile(value string) string {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "research":
+		return "research"
+	case "software_project":
+		return "software_project"
+	case "general":
+		fallthrough
+	default:
+		return "general"
+	}
+}
+
+func defaultPresetForProfile(profile string) string {
+	switch normalizeProfile(profile) {
+	case "software_project":
+		return "planner"
+	case "research":
+		return "guided"
+	case "general":
+		fallthrough
+	default:
+		return "guided"
+	}
+}
+
+func inferProfile(raw map[string]interface{}) string {
+	if value := strings.TrimSpace(stringValue(raw["profile"])); value != "" {
+		return normalizeProfile(value)
+	}
+
+	preset := normalizePreset(stringValue(raw["preset"]))
+	if preset == "planner" || preset == "autonomous" {
+		return "software_project"
+	}
+
+	planningMap := mapValue(raw["planning"])
+	if value := normalizePlanningMode(stringValue(planningMap["mode"])); value == "investigation" {
+		return "research"
+	}
+	if value := normalizeClarificationMode(stringValue(planningMap["clarification_mode"])); value == "deep" {
+		return "research"
+	}
+
+	return "general"
+}
+
+func formatLabel(value string) string {
+	normalized := strings.TrimSpace(value)
+	if normalized == "" {
+		return "General"
+	}
+	parts := strings.Split(normalized, "_")
+	out := make([]string, 0, len(parts))
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+		out = append(out, strings.ToUpper(part[:1])+part[1:])
+	}
+	if len(out) == 0 {
+		return "General"
+	}
+	return strings.Join(out, " ")
 }
 
 func normalizeWorkflowMode(value string) string {

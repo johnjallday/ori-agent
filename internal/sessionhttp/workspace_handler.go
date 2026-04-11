@@ -178,6 +178,7 @@ func (h *Handler) createWorkspace(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Name               string                     `json:"name"`
 		Kind               string                     `json:"kind,omitempty"`
+		WorkspacePreset    string                     `json:"workspace_preset,omitempty"`
 		Description        string                     `json:"description,omitempty"`
 		ParentID           string                     `json:"parent_id,omitempty"`
 		OrderIndex         *int                       `json:"order_index,omitempty"`
@@ -239,10 +240,14 @@ func (h *Handler) createWorkspace(w http.ResponseWriter, r *http.Request) {
 	if req.OrderIndex != nil {
 		ws.OrderIndex = *req.OrderIndex
 	}
+	if kind != session.WorkspaceKindGroup {
+		ws.SharedData = workspacesettings.Store(ws.SharedData, workspacesettings.ProfileDefaults(req.WorkspacePreset))
+	}
 	if bootstrapData := normalizeWorkspaceBootstrap(req.WorkspaceBootstrap); bootstrapData != nil {
-		ws.SharedData = map[string]interface{}{
-			"workspace_bootstrap": bootstrapData,
+		if ws.SharedData == nil {
+			ws.SharedData = make(map[string]interface{})
 		}
+		ws.SharedData["workspace_bootstrap"] = bootstrapData
 	}
 
 	// If an existing entry agent was specified, validate and set it.
@@ -768,6 +773,7 @@ func (h *Handler) handleWorkspaceRename(w http.ResponseWriter, r *http.Request, 
 
 type createWorkspaceImportRequest struct {
 	Name               string                     `json:"name,omitempty"`
+	WorkspacePreset    string                     `json:"workspace_preset,omitempty"`
 	Description        string                     `json:"description,omitempty"`
 	ParentID           string                     `json:"parent_id,omitempty"`
 	OrderIndex         *int                       `json:"order_index,omitempty"`
@@ -978,6 +984,7 @@ func (h *Handler) handleWorkspaceImport(w http.ResponseWriter, r *http.Request) 
 			"imported_at":     time.Now().UTC().Format(time.RFC3339),
 		},
 	}
+	workspace.SharedData = workspacesettings.Store(workspace.SharedData, workspacesettings.ProfileDefaults(req.WorkspacePreset))
 	if bootstrapData := normalizeWorkspaceBootstrap(req.WorkspaceBootstrap); bootstrapData != nil {
 		workspace.SharedData["workspace_bootstrap"] = bootstrapData
 	}
@@ -1105,6 +1112,9 @@ func (h *Handler) restoreImportedWorkspace(ctx context.Context, folderPath strin
 	}
 	if trimmedDescription := strings.TrimSpace(req.Description); trimmedDescription != "" {
 		rootWorkspace.Description = trimmedDescription
+	}
+	if _, ok := rootWorkspace.SharedData[workspacesettings.SharedDataKey]; !ok {
+		rootWorkspace.SharedData = workspacesettings.Store(rootWorkspace.SharedData, workspacesettings.ProfileDefaults(req.WorkspacePreset))
 	}
 	if bootstrapData := normalizeWorkspaceBootstrap(req.WorkspaceBootstrap); bootstrapData != nil {
 		if rootWorkspace.SharedData == nil {
