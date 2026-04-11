@@ -170,18 +170,27 @@ func ApplyPatch(sharedData map[string]interface{}, patch map[string]interface{})
 
 func BuildEffectiveBehavior(settings Settings) EffectiveBehavior {
 	settings = Normalize(settings)
+	summary := []string{
+		fmt.Sprintf("Interaction mode: %s", settings.Workflow.Mode),
+		fmt.Sprintf("Confirmation mode: %s", settings.Workflow.ConfirmationMode),
+		fmt.Sprintf("Save useful outputs as workspace notes: %t", settings.Workflow.SaveOutputsAsNotes),
+		fmt.Sprintf("Ask before specialist handoff: %t", settings.Workflow.AskBeforeSpecialistHandoff),
+		fmt.Sprintf("Structured planning workflow: %s", boolLabel(settings.Planning.Enabled)),
+	}
+	if settings.Planning.Enabled {
+		summary = append(summary, fmt.Sprintf("Planning style: %s", settings.Planning.Mode))
+	}
+	if settings.Workflow.SyncPlansToTasks {
+		summary = append(summary, "Approved plans sync into workspace tasks")
+	}
+	if settings.Workflow.RequireRepoScan {
+		summary = append(summary, "Repo scan required before code work")
+	}
+
 	behavior := EffectiveBehavior{
 		Workflow: settings.Workflow,
 		Planning: settings.Planning,
-		Summary: []string{
-			fmt.Sprintf("Interaction mode: %s", settings.Workflow.Mode),
-			fmt.Sprintf("Require repo scan before code work: %t", settings.Workflow.RequireRepoScan),
-			fmt.Sprintf("Save useful outputs as workspace notes: %t", settings.Workflow.SaveOutputsAsNotes),
-			fmt.Sprintf("Sync approved plans to workspace tasks: %t", settings.Workflow.SyncPlansToTasks),
-			fmt.Sprintf("Ask before specialist handoff: %t", settings.Workflow.AskBeforeSpecialistHandoff),
-			fmt.Sprintf("Confirmation mode: %s", settings.Workflow.ConfirmationMode),
-			fmt.Sprintf("Planning profile enabled: %t", settings.Planning.Enabled),
-		},
+		Summary:  summary,
 	}
 	if settings.Planning.Enabled {
 		behavior.ManagedSkills = []ManagedSkill{
@@ -195,6 +204,13 @@ func BuildEffectiveBehavior(settings Settings) EffectiveBehavior {
 		}
 	}
 	return behavior
+}
+
+func boolLabel(value bool) string {
+	if value {
+		return "enabled"
+	}
+	return "disabled"
 }
 
 func ToPlanningSkillConfig(settings Settings) map[string]interface{} {

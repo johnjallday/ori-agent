@@ -7127,15 +7127,7 @@ export class WorkspaceDetailPage {
     const effective = {
       workflow: { ...normalized.workflow },
       planning: { ...normalized.planning },
-      summary: [
-        `Interaction mode: ${normalized.workflow.mode}`,
-        `Require repo scan before code work: ${normalized.workflow.require_repo_scan}`,
-        `Save useful outputs as workspace notes: ${normalized.workflow.save_outputs_as_notes}`,
-        `Sync approved plans to workspace tasks: ${normalized.workflow.sync_plans_to_tasks}`,
-        `Ask before specialist handoff: ${normalized.workflow.ask_before_specialist_handoff}`,
-        `Confirmation mode: ${normalized.workflow.confirmation_mode}`,
-        `Planning profile enabled: ${normalized.planning.enabled}`
-      ],
+      summary: this.getWorkspaceSettingsSummaryItems(normalized),
       managed_skills: []
     };
 
@@ -7154,6 +7146,29 @@ export class WorkspaceDetailPage {
     return effective;
   }
 
+  getWorkspaceSettingsSummaryItems(settings = {}) {
+    const normalized = this.normalizeWorkspaceSettings(settings);
+    const summary = [
+      `Interaction mode: ${normalized.workflow.mode}`,
+      `Confirmation mode: ${normalized.workflow.confirmation_mode}`,
+      `Save useful outputs as workspace notes: ${normalized.workflow.save_outputs_as_notes}`,
+      `Ask before specialist handoff: ${normalized.workflow.ask_before_specialist_handoff}`,
+      `Structured planning workflow: ${normalized.planning.enabled ? 'enabled' : 'disabled'}`
+    ];
+
+    if (normalized.planning.enabled) {
+      summary.push(`Planning style: ${normalized.planning.mode}`);
+    }
+    if (normalized.workflow.sync_plans_to_tasks) {
+      summary.push('Approved plans sync into workspace tasks');
+    }
+    if (normalized.workflow.require_repo_scan) {
+      summary.push('Repo scan required before code work');
+    }
+
+    return summary;
+  }
+
   normalizeWorkspaceSettingsEffectiveBehavior(effectiveBehavior, settings = {}) {
     const raw = effectiveBehavior && typeof effectiveBehavior === 'object' && !Array.isArray(effectiveBehavior)
       ? effectiveBehavior
@@ -7166,7 +7181,10 @@ export class WorkspaceDetailPage {
     return {
       workflow: raw.workflow && typeof raw.workflow === 'object' ? { ...fallback.workflow, ...raw.workflow } : fallback.workflow,
       planning: raw.planning && typeof raw.planning === 'object' ? { ...fallback.planning, ...raw.planning } : fallback.planning,
-      summary: Array.isArray(raw.summary) ? raw.summary.map((item) => String(item || '').trim()).filter(Boolean) : fallback.summary,
+      summary: this.getWorkspaceSettingsSummaryItems({
+        workflow: raw.workflow && typeof raw.workflow === 'object' ? { ...fallback.workflow, ...raw.workflow } : fallback.workflow,
+        planning: raw.planning && typeof raw.planning === 'object' ? { ...fallback.planning, ...raw.planning } : fallback.planning
+      }),
       managed_skills: Array.isArray(raw.managed_skills) ? raw.managed_skills : fallback.managed_skills
     };
   }
@@ -7219,9 +7237,6 @@ export class WorkspaceDetailPage {
     if (this.elements.settingsRequireBranchInput) {
       this.elements.settingsRequireBranchInput.checked = normalized.planning.require_branch !== false;
     }
-    if (this.elements.settingsPlanningFields) {
-      this.elements.settingsPlanningFields.classList.toggle('d-none', normalized.planning.enabled !== true);
-    }
   }
 
   buildWorkspaceSettingsFromForm() {
@@ -7270,20 +7285,23 @@ export class WorkspaceDetailPage {
 
     if (this.elements.settingsManagedSkills) {
       if (!Array.isArray(effective.managed_skills) || effective.managed_skills.length === 0) {
-        this.elements.settingsManagedSkills.textContent = 'No settings-managed skills active.';
+        this.elements.settingsManagedSkills.textContent = 'No settings-managed workflows active.';
       } else {
         this.elements.settingsManagedSkills.innerHTML = effective.managed_skills.map((skill) => {
           const skillName = String(skill?.skill_name || skill?.skillName || '').trim() || 'unknown-skill';
+          const displayName = skillName === 'workspace-planning' ? 'Structured planning' : skillName;
           const source = String(skill?.source || '').trim() || 'settings';
           const reason = String(skill?.reason || '').trim();
           const planningSummary = skillName === 'workspace-planning'
             ? this.getWorkspacePlanningSummary(skill?.config || this.toWorkspacePlanningSkillConfig(normalized))
             : '';
-          const detail = [source, reason, planningSummary].filter(Boolean).join(' • ');
+          const detail = skillName === 'workspace-planning'
+            ? planningSummary || 'Controlled by workspace settings'
+            : [source, reason].filter(Boolean).join(' • ');
 
           return `
             <div class="workspace-detail-settings-managed-entry">
-              <div class="workspace-detail-settings-managed-name">${this.escapeHtml(skillName)}</div>
+              <div class="workspace-detail-settings-managed-name">${this.escapeHtml(displayName)}</div>
               <div class="workspace-detail-settings-managed-meta">${this.escapeHtml(detail || 'Managed by workspace settings')}</div>
             </div>
           `;

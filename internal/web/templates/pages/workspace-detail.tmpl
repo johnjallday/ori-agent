@@ -219,7 +219,7 @@
                   </div>
                   <form id="workspace-detail-settings-form" class="workspace-detail-settings-form">
                     <div class="workspace-detail-settings-intro">
-                      Use presets for a quick starting point, then fine-tune how the workspace manager should plan and execute work here.
+                      Use presets for a quick starting point, then fine-tune how the workspace manager should respond, coordinate, and save useful outputs in this workspace.
                     </div>
                     <div class="row g-3">
                       <div class="col-md-6">
@@ -250,20 +250,17 @@
                       </div>
                       <div class="col-md-6">
                         <div class="workspace-detail-settings-summary-card">
-                          <div class="workspace-detail-settings-summary-title">Effective Behavior</div>
+                          <div class="workspace-detail-settings-summary-title">Current Behavior</div>
                           <div id="workspace-detail-settings-summary" class="workspace-detail-settings-summary-copy">Loading workspace settings...</div>
                         </div>
                       </div>
                       <div class="col-sm-6">
                         <div class="form-check form-switch">
                           <input class="form-check-input" type="checkbox" role="switch" id="workspace-detail-settings-plan-enabled">
-                          <label class="form-check-label" for="workspace-detail-settings-plan-enabled">Plan before execution</label>
+                          <label class="form-check-label" for="workspace-detail-settings-plan-enabled">Enable structured planning</label>
                         </div>
-                      </div>
-                      <div class="col-sm-6">
-                        <div class="form-check form-switch">
-                          <input class="form-check-input" type="checkbox" role="switch" id="workspace-detail-settings-require-scan">
-                          <label class="form-check-label" for="workspace-detail-settings-require-scan">Require repo scan for code work</label>
+                        <div class="workspace-detail-settings-field-hint">
+                          Turn this on when you want the workspace manager to create a more formal plan or staged workflow before moving into execution.
                         </div>
                       </div>
                       <div class="col-sm-6">
@@ -274,20 +271,29 @@
                       </div>
                       <div class="col-sm-6">
                         <div class="form-check form-switch">
-                          <input class="form-check-input" type="checkbox" role="switch" id="workspace-detail-settings-sync-tasks">
-                          <label class="form-check-label" for="workspace-detail-settings-sync-tasks">Sync approved plans into tasks</label>
-                        </div>
-                      </div>
-                      <div class="col-sm-6">
-                        <div class="form-check form-switch">
                           <input class="form-check-input" type="checkbox" role="switch" id="workspace-detail-settings-ask-handoff">
                           <label class="form-check-label" for="workspace-detail-settings-ask-handoff">Ask before specialist handoff</label>
                         </div>
                       </div>
-                      <div class="col-12 d-none" id="workspace-detail-settings-planning-fields">
+                      <div class="col-12" id="workspace-detail-settings-planning-fields">
                         <div class="workspace-detail-settings-advanced">
-                          <div class="workspace-detail-settings-advanced-title">Planning Defaults</div>
+                          <div class="workspace-detail-settings-advanced-title">Planning &amp; Implementation Defaults</div>
+                          <div class="workspace-detail-settings-advanced-copy">
+                            These options are mainly useful when the workspace is being used like a software project with implementation steps and tracked planning artifacts, but they remain available here for any workspace that needs a more structured process.
+                          </div>
                           <div class="row g-3">
+                            <div class="col-sm-6">
+                              <div class="form-check form-switch">
+                                <input class="form-check-input" type="checkbox" role="switch" id="workspace-detail-settings-require-scan">
+                                <label class="form-check-label" for="workspace-detail-settings-require-scan">Require repo scan for code work</label>
+                              </div>
+                            </div>
+                            <div class="col-sm-6">
+                              <div class="form-check form-switch">
+                                <input class="form-check-input" type="checkbox" role="switch" id="workspace-detail-settings-sync-tasks">
+                                <label class="form-check-label" for="workspace-detail-settings-sync-tasks">Sync approved plans into workspace tasks</label>
+                              </div>
+                            </div>
                             <div class="col-md-6">
                               <label for="workspace-detail-settings-planning-mode" class="form-label">Planning mode</label>
                               <select id="workspace-detail-settings-planning-mode" class="form-select">
@@ -339,8 +345,8 @@
                       </div>
                       <div class="col-12">
                         <div class="workspace-detail-settings-managed-card">
-                          <div class="workspace-detail-settings-summary-title">Managed Skills</div>
-                          <div id="workspace-detail-settings-managed-skills" class="workspace-detail-settings-summary-copy">No settings-managed skills active.</div>
+                          <div class="workspace-detail-settings-summary-title">Structured Workflows</div>
+                          <div id="workspace-detail-settings-managed-skills" class="workspace-detail-settings-summary-copy">No settings-managed workflows active.</div>
                         </div>
                       </div>
                     </div>
@@ -2469,6 +2475,14 @@
       color: rgba(226, 232, 240, 0.82);
       font-size: 0.78rem;
       line-height: 1.5;
+    }
+
+    .workspace-detail-settings-field-hint,
+    .workspace-detail-settings-advanced-copy {
+      margin-top: 0.38rem;
+      color: rgba(219, 228, 255, 0.66);
+      font-size: 0.73rem;
+      line-height: 1.45;
     }
 
     .workspace-detail-settings-summary-list {
