@@ -215,6 +215,9 @@
   let editorDialogOpen = false;
   let entryAttachments = [];
   let entryAttachmentSnapshot = [];
+  let draggedRecordID = '';
+  let draggedRecordElement = null;
+  let activeDropFolderButton = null;
 
   function notify(message, type = 'info', options = {}) {
     if (typeof window.notifyToast === 'function') {
@@ -2201,6 +2204,115 @@
     return `${itemLabel} • ${childCount} ${childCount === 1 ? 'folder' : 'folders'}`;
   }
 
+  function clearFolderDropTarget() {
+    if (!activeDropFolderButton) {
+      return;
+    }
+
+    activeDropFolderButton.classList.remove('is-drop-target');
+    activeDropFolderButton = null;
+  }
+
+  function setFolderDropTarget(button) {
+    if (activeDropFolderButton === button) {
+      return;
+    }
+
+    clearFolderDropTarget();
+    if (!button) {
+      return;
+    }
+
+    button.classList.add('is-drop-target');
+    activeDropFolderButton = button;
+  }
+
+  function dragRecordButtonFromTarget(target) {
+    if (!(target instanceof Element)) {
+      return null;
+    }
+
+    return target.closest('[data-drag-record="true"][data-record-id]');
+  }
+
+  function folderDropButtonFromTarget(target) {
+    if (!(target instanceof Element)) {
+      return null;
+    }
+
+    return target.closest('.vault-modal-folder-main[data-action="select-folder"]')
+      || target.closest('.vault-modal-folder-node')?.querySelector('.vault-modal-folder-main[data-action="select-folder"]')
+      || null;
+  }
+
+  function beginRecordDrag(button, event) {
+    if (!(button instanceof HTMLElement)) {
+      return;
+    }
+
+    const recordID = String(button.getAttribute('data-record-id') || '').trim();
+    if (!recordID) {
+      return;
+    }
+
+    if (draggedRecordElement && draggedRecordElement !== button) {
+      draggedRecordElement.classList.remove('is-dragging');
+    }
+
+    draggedRecordID = recordID;
+    draggedRecordElement = button;
+    draggedRecordElement.classList.add('is-dragging');
+
+    if (event.dataTransfer) {
+      event.dataTransfer.effectAllowed = 'move';
+      event.dataTransfer.setData('text/plain', recordID);
+    }
+  }
+
+  function clearRecordDrag() {
+    if (draggedRecordElement) {
+      draggedRecordElement.classList.remove('is-dragging');
+    }
+
+    draggedRecordID = '';
+    draggedRecordElement = null;
+    clearFolderDropTarget();
+  }
+
+  async function moveRecordToFolder(recordID, folderPath) {
+    const record = recordByID(recordID);
+    if (!record) {
+      return;
+    }
+
+    const currentFolderPath = normalizeFolderPathInput(record.folder_path || '');
+    const nextFolderPath = normalizeFolderPathInput(folderPath);
+    if (currentFolderPath === nextFolderPath) {
+      return;
+    }
+
+    try {
+      await apiRequest(vaultURL(`/api/vault/records/${encodeURIComponent(recordID)}`), {
+        method: 'PATCH',
+        body: {
+          folder_path: nextFolderPath
+        }
+      });
+
+      [ROOT_FOLDER_PATH, ...folderPathAncestors(nextFolderPath).map(folderNodePath)].forEach((path) => {
+        expandedFolderPaths.add(path);
+      });
+      selectedFolderPath = folderNodePath(nextFolderPath);
+      selectedRecord = record;
+      payloadRevealed = false;
+      notify('Item moved.', 'success');
+      await refreshVault();
+    } catch (error) {
+      console.error('Failed to move vault item:', error);
+      showInlineAlert(error.message || 'Failed to move item.', 'error');
+    }
+  }
+
   function renderFolderTreeRecord(recordID, folderPath, depth) {
     const record = recordByID(recordID);
     if (!record) {
@@ -2217,7 +2329,7 @@
       <div class="vault-modal-tree-record${isSelected ? ' is-selected' : ''}">
         <div class="vault-modal-folder-row vault-modal-tree-record-row" style="--vault-tree-depth:${String(depth)};">
           <span class="vault-modal-folder-spacer"></span>
-          <button type="button" class="vault-modal-tree-record-main" data-action="select-tree-record" data-folder-path="${escapeHTML(folderPath)}" data-record-id="${escapeHTML(record.id)}">
+          <button type="button" class="vault-modal-tree-record-main" draggable="true" data-action="select-tree-record" data-drag-record="true" data-folder-path="${escapeHTML(folderPath)}" data-record-id="${escapeHTML(record.id)}">
             <span class="vault-modal-tree-record-icon">${fileTypeIcon(record.type)}</span>
             <span class="vault-modal-tree-record-label">${escapeHTML(record.label || 'Untitled entry')}</span>
             <span class="vault-modal-tree-record-meta">${escapeHTML(metaParts.join(' • '))}</span>
@@ -2497,7 +2609,7 @@
         const tags = Array.isArray(record.tags) ? record.tags.length : 0;
 
         return `
-          <button type="button" class="vault-modal-preview-file${selectedClass}" data-action="select-record" data-record-id="${escapeHTML(record.id)}">
+          <button type="button" class="vault-modal-preview-file${selectedClass}" draggable="true" data-action="select-record" data-drag-record="true" data-record-id="${escapeHTML(record.id)}">
             <span class="vault-modal-preview-file-icon">${fileTypeIcon(record.type)}</span>
             <span class="vault-modal-preview-file-main">
               <span class="vault-modal-preview-file-name">${escapeHTML(record.label || 'Untitled entry')}</span>
@@ -4027,6 +4139,67 @@
     createFolderFromComposer();
   });
 
+  folderTreeEl?.addEventListener('dragstart', (event) => {
+    const button = dragRecordButtonFromTarget(event.target);
+    if (!button) {
+      return;
+    }
+
+    beginRecordDrag(button, event);
+  });
+
+  folderTreeEl?.addEventListener('dragend', () => {
+    clearRecordDrag();
+  });
+
+  folderTreeEl?.addEventListener('dragover', (event) => {
+    if (!draggedRecordID) {
+      return;
+    }
+
+    const folderButton = folderDropButtonFromTarget(event.target);
+    if (!folderButton) {
+      clearFolderDropTarget();
+      return;
+    }
+
+    event.preventDefault();
+    if (event.dataTransfer) {
+      event.dataTransfer.dropEffect = 'move';
+    }
+    setFolderDropTarget(folderButton);
+  });
+
+  folderTreeEl?.addEventListener('dragleave', (event) => {
+    if (!draggedRecordID) {
+      return;
+    }
+
+    const nextTarget = event.relatedTarget;
+    if (nextTarget instanceof Node && folderTreeEl.contains(nextTarget)) {
+      return;
+    }
+
+    clearFolderDropTarget();
+  });
+
+  folderTreeEl?.addEventListener('drop', async (event) => {
+    if (!draggedRecordID) {
+      return;
+    }
+
+    const folderButton = folderDropButtonFromTarget(event.target);
+    const recordID = draggedRecordID;
+    clearRecordDrag();
+
+    if (!folderButton) {
+      return;
+    }
+
+    event.preventDefault();
+    await moveRecordToFolder(recordID, folderPathFromNodePath(folderButton.getAttribute('data-folder-path')));
+  });
+
   folderBreadcrumbEl?.addEventListener('click', (event) => {
     const trigger = event.target.closest('[data-action="select-folder"]');
     if (!trigger) {
@@ -4069,6 +4242,19 @@
         downloadAttachment(attachment);
       }
     }
+  });
+
+  explorerPreviewEl?.addEventListener('dragstart', (event) => {
+    const button = dragRecordButtonFromTarget(event.target);
+    if (!button) {
+      return;
+    }
+
+    beginRecordDrag(button, event);
+  });
+
+  explorerPreviewEl?.addEventListener('dragend', () => {
+    clearRecordDrag();
   });
 
   createGrantBtn?.addEventListener('click', () => {

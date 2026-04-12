@@ -1394,6 +1394,12 @@ body::after {
   background: rgba(214, 149, 83, 0.12);
 }
 
+.vault-modal-folder-main.is-drop-target {
+  background: linear-gradient(90deg, rgba(214, 149, 83, 0.22), rgba(247, 226, 186, 0.24));
+  border: 1px solid rgba(196, 128, 73, 0.42);
+  box-shadow: 0 0 0 1px rgba(255, 227, 183, 0.24);
+}
+
 .vault-modal-folder-icon {
   display: inline-flex;
   align-items: center;
@@ -1484,6 +1490,14 @@ body::after {
   padding: 0.24rem 0.46rem;
 }
 
+.vault-modal-tree-record-main[draggable="true"] {
+  cursor: grab;
+}
+
+.vault-modal-tree-record-main.is-dragging {
+  opacity: 0.58;
+}
+
 .vault-modal-tree-record-main:hover {
   background: rgba(214, 149, 83, 0.09);
   color: var(--text-primary);
@@ -1571,6 +1585,15 @@ body::after {
   text-align: left;
   padding: 0.55rem 0.65rem;
   transition: border-color 0.16s ease, background 0.16s ease, transform 0.16s ease;
+}
+
+.vault-modal-preview-file[draggable="true"] {
+  cursor: grab;
+}
+
+.vault-modal-preview-file.is-dragging {
+  opacity: 0.62;
+  transform: scale(0.985);
 }
 
 .vault-modal-preview-file:hover {
@@ -2259,6 +2282,13 @@ body::after {
 [data-bs-theme="dark"] .vault-modal-folder-main:hover,
 .dark-mode .vault-modal-folder-main:hover {
   background: rgba(215, 155, 89, 0.12);
+}
+
+[data-bs-theme="dark"] .vault-modal-folder-main.is-drop-target,
+.dark-mode .vault-modal-folder-main.is-drop-target {
+  background: linear-gradient(90deg, rgba(215, 155, 89, 0.24), rgba(72, 88, 114, 0.28));
+  border-color: rgba(220, 173, 115, 0.36);
+  box-shadow: 0 0 0 1px rgba(220, 173, 115, 0.16);
 }
 
 [data-bs-theme="dark"] .vault-modal-tree-record-main:hover,
