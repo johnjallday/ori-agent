@@ -20,7 +20,7 @@ func TestHandleWorkspaceMarksMissingAttachmentFiles(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewFileStore: %v", err)
 	}
-	defer fileStore.Close()
+	defer func() { _ = fileStore.Close() }()
 	handler.SetWorkspaceStore(fileStore)
 
 	workspaceID := createTestWorkspace(t, handler, "Attachment Status")

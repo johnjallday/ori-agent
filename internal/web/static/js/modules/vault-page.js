@@ -129,7 +129,7 @@
   const emailAccountOauthProviderStatusEl = document.getElementById('vaultEmailOauthProviderStatus');
   const emailAccountCredentialHelpEl = document.getElementById('vaultEmailAccountCredentialHelp');
   const emailAccountOauthAdvancedEl = document.getElementById('vaultEmailAccountOauthAdvanced');
-  const emailAccountOauthFields = document.getElementById('vaultEmailAccountOauthFields');
+  const _emailAccountOauthFields = document.getElementById('vaultEmailAccountOauthFields');
   const emailAccountPasswordFields = document.getElementById('vaultEmailAccountPasswordFields');
   const emailAccountRefreshTokenInput = document.getElementById('vaultEmailAccountRefreshToken');
   const emailAccountAccessTokenInput = document.getElementById('vaultEmailAccountAccessToken');
@@ -359,7 +359,7 @@
     return data;
   }
 
-  function readFileAsText(file) {
+  function _readFileAsText(file) {
     return new Promise((resolve, reject) => {
       const reader = new FileReader();
 
@@ -564,7 +564,7 @@
     return Boolean(String(attachment?.download_url || '').trim());
   }
 
-  function readFileAsBase64(file) {
+  function _readFileAsBase64(file) {
     return new Promise((resolve, reject) => {
       const reader = new FileReader();
 
@@ -993,7 +993,7 @@
     return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
   }
 
-  function recordTypeFolderName(type) {
+  function _recordTypeFolderName(type) {
     const normalized = normalizeRecordType(type);
     return TYPE_META[normalized]?.folderName || recordTypeLabel(normalized);
   }

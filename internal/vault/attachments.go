@@ -227,19 +227,6 @@ func decryptRecordAttachmentMetadata(dek []byte, nonceB64 string, ciphertextB64 
 	return metadata, nil
 }
 
-func (s *Store) getRecordAttachmentRow(ctx context.Context, recordID string, attachmentID string) (recordAttachmentRow, error) {
-	row, err := s.getRecordRow(ctx, recordID)
-	if err != nil {
-		return recordAttachmentRow{}, err
-	}
-	_, vaultDB, err := s.openVaultContentDB(ctx, row.VaultID)
-	if err != nil {
-		return recordAttachmentRow{}, err
-	}
-	defer func() { _ = vaultDB.Close() }()
-	return getRecordAttachmentRowWithExecutor(ctx, vaultDB, recordID, attachmentID)
-}
-
 func getRecordAttachmentRowWithExecutor(ctx context.Context, executor attachmentSQLExecutor, recordID string, attachmentID string) (recordAttachmentRow, error) {
 	var row recordAttachmentRow
 	err := executor.QueryRowContext(ctx, `
@@ -264,25 +251,6 @@ func getRecordAttachmentRowWithExecutor(ctx context.Context, executor attachment
 		return recordAttachmentRow{}, ErrRecordAttachmentNotFound
 	}
 	return recordAttachmentRow{}, fmt.Errorf("get vault record attachment: %w", err)
-}
-
-func (s *Store) listRecordAttachments(ctx context.Context, recordID string, includeContent bool) ([]RecordAttachment, error) {
-	row, err := s.getRecordRow(ctx, recordID)
-	if err != nil {
-		return nil, err
-	}
-	_, vaultDB, err := s.openVaultContentDB(ctx, row.VaultID)
-	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = vaultDB.Close() }()
-
-	dek, err := s.ensureDataEncryptionKey(ctx, row.VaultID, false)
-	if err != nil {
-		return nil, err
-	}
-
-	return listRecordAttachmentsWithExecutor(ctx, vaultDB, dek, recordID, row.VaultID, includeContent)
 }
 
 func listRecordAttachmentsWithExecutor(ctx context.Context, executor attachmentSQLExecutor, dek []byte, recordID string, vaultID string, includeContent bool) ([]RecordAttachment, error) {

@@ -41,21 +41,3 @@ func (ch *CommandHandler) SetSkillsManager(manager interface {
 }) {
 	ch.skillsManager = manager
 }
-
-// interfaceSliceToStrings converts an interface slice to a string slice
-func interfaceSliceToStrings(value interface{}) []string {
-	switch v := value.(type) {
-	case []string:
-		return v
-	case []interface{}:
-		result := make([]string, 0, len(v))
-		for _, item := range v {
-			if str, ok := item.(string); ok {
-				result = append(result, str)
-			}
-		}
-		return result
-	default:
-		return nil
-	}
-}

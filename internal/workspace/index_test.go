@@ -13,7 +13,7 @@ func TestIndex_RegisterAndList(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewIndex: %v", err)
 	}
-	defer idx.Close()
+	defer func() { _ = idx.Close() }()
 
 	now := time.Now().Truncate(time.Second)
 
@@ -50,9 +50,9 @@ func TestIndex_Get(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewIndex: %v", err)
 	}
-	defer idx.Close()
+	defer func() { _ = idx.Close() }()
 
-	idx.Register(IndexEntry{
+	_ = idx.Register(IndexEntry{
 		ID: "ws-1", Name: "Alpha", FolderPath: "alpha", UpdatedAt: time.Now(),
 	})
 
@@ -76,9 +76,9 @@ func TestIndex_Unregister(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewIndex: %v", err)
 	}
-	defer idx.Close()
+	defer func() { _ = idx.Close() }()
 
-	idx.Register(IndexEntry{
+	_ = idx.Register(IndexEntry{
 		ID: "ws-1", Name: "Alpha", FolderPath: "alpha", UpdatedAt: time.Now(),
 	})
 
@@ -101,14 +101,14 @@ func TestIndex_RegisterUpsert(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewIndex: %v", err)
 	}
-	defer idx.Close()
+	defer func() { _ = idx.Close() }()
 
-	idx.Register(IndexEntry{
+	_ = idx.Register(IndexEntry{
 		ID: "ws-1", Name: "Old Name", FolderPath: "old-name", UpdatedAt: time.Now(),
 	})
 
 	// Re-register with updated name
-	idx.Register(IndexEntry{
+	_ = idx.Register(IndexEntry{
 		ID: "ws-1", Name: "New Name", FolderPath: "new-name", UpdatedAt: time.Now(),
 	})
 
@@ -129,25 +129,25 @@ func TestIndex_Rebuild(t *testing.T) {
 
 	// Create workspace folders on disk manually
 	ws1Dir := filepath.Join(dir, "alpha")
-	os.MkdirAll(ws1Dir, 0755)
+	_ = os.MkdirAll(ws1Dir, 0755)
 	ws1 := newTestWorkspace("ws-1", "Alpha")
 	ws1.FolderSlug = "alpha"
 	data1, _ := ws1.ToJSON()
-	os.WriteFile(filepath.Join(ws1Dir, WorkspaceConfigFile), data1, 0644)
+	_ = os.WriteFile(filepath.Join(ws1Dir, WorkspaceConfigFile), data1, 0644)
 
 	ws2Dir := filepath.Join(dir, "beta")
-	os.MkdirAll(ws2Dir, 0755)
+	_ = os.MkdirAll(ws2Dir, 0755)
 	ws2 := newTestWorkspace("ws-2", "Beta")
 	ws2.FolderSlug = "beta"
 	data2, _ := ws2.ToJSON()
-	os.WriteFile(filepath.Join(ws2Dir, WorkspaceConfigFile), data2, 0644)
+	_ = os.WriteFile(filepath.Join(ws2Dir, WorkspaceConfigFile), data2, 0644)
 
 	// Create index (starts empty)
 	idx, err := NewIndex(dir)
 	if err != nil {
 		t.Fatalf("NewIndex: %v", err)
 	}
-	defer idx.Close()
+	defer func() { _ = idx.Close() }()
 
 	// Rebuild should discover both workspaces
 	if err := idx.Rebuild(); err != nil {
@@ -168,25 +168,25 @@ func TestIndex_RebuildWithSubWorkspaces(t *testing.T) {
 
 	// Create parent workspace
 	parentDir := filepath.Join(dir, "parent")
-	os.MkdirAll(parentDir, 0755)
+	_ = os.MkdirAll(parentDir, 0755)
 	parent := newTestWorkspace("ws-parent", "Parent")
 	parent.FolderSlug = "parent"
 	parentData, _ := parent.ToJSON()
-	os.WriteFile(filepath.Join(parentDir, WorkspaceConfigFile), parentData, 0644)
+	_ = os.WriteFile(filepath.Join(parentDir, WorkspaceConfigFile), parentData, 0644)
 
 	// Create child workspace inside sub-workspaces/
 	childDir := filepath.Join(parentDir, SubWorkspacesDir, "child")
-	os.MkdirAll(childDir, 0755)
+	_ = os.MkdirAll(childDir, 0755)
 	child := newTestWorkspace("ws-child", "Child")
 	child.FolderSlug = "child"
 	childData, _ := child.ToJSON()
-	os.WriteFile(filepath.Join(childDir, WorkspaceConfigFile), childData, 0644)
+	_ = os.WriteFile(filepath.Join(childDir, WorkspaceConfigFile), childData, 0644)
 
 	idx, err := NewIndex(dir)
 	if err != nil {
 		t.Fatalf("NewIndex: %v", err)
 	}
-	defer idx.Close()
+	defer func() { _ = idx.Close() }()
 
 	if err := idx.Rebuild(); err != nil {
 		t.Fatalf("Rebuild: %v", err)
@@ -216,12 +216,12 @@ func TestIndex_ParentID(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewIndex: %v", err)
 	}
-	defer idx.Close()
+	defer func() { _ = idx.Close() }()
 
-	idx.Register(IndexEntry{
+	_ = idx.Register(IndexEntry{
 		ID: "ws-parent", Name: "Parent", FolderPath: "parent", UpdatedAt: time.Now(),
 	})
-	idx.Register(IndexEntry{
+	_ = idx.Register(IndexEntry{
 		ID: "ws-child", Name: "Child", FolderPath: "parent/sub-workspaces/child",
 		ParentID: "ws-parent", UpdatedAt: time.Now(),
 	})

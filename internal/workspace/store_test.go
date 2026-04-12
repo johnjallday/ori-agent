@@ -62,8 +62,8 @@ func TestFileStore_List(t *testing.T) {
 	}
 
 	// Save two workspaces
-	store.Save(newTestWorkspace("ws-1", "Alpha"))
-	store.Save(newTestWorkspace("ws-2", "Beta"))
+	_ = store.Save(newTestWorkspace("ws-1", "Alpha"))
+	_ = store.Save(newTestWorkspace("ws-2", "Beta"))
 
 	ids, err := store.List()
 	if err != nil {
@@ -82,7 +82,7 @@ func TestFileStore_Delete(t *testing.T) {
 	}
 
 	ws := newTestWorkspace("ws-1", "To Delete")
-	store.Save(ws)
+	_ = store.Save(ws)
 
 	if err := store.Delete("ws-1"); err != nil {
 		t.Fatalf("Delete: %v", err)
@@ -120,7 +120,7 @@ func TestFileStore_GetFilesPath(t *testing.T) {
 	}
 
 	ws := newTestWorkspace("ws-1", "My Project")
-	store.Save(ws)
+	_ = store.Save(ws)
 
 	got := store.GetFilesPath("ws-1")
 	want := filepath.Join(dir, "my-project", FilesDir)
@@ -137,7 +137,7 @@ func TestFileStore_Rename(t *testing.T) {
 	}
 
 	ws := newTestWorkspace("ws-1", "Old Name")
-	store.Save(ws)
+	_ = store.Save(ws)
 
 	if err := store.Rename("ws-1", "New Name"); err != nil {
 		t.Fatalf("Rename: %v", err)
@@ -173,8 +173,8 @@ func TestFileStore_RenameConflict(t *testing.T) {
 		t.Fatalf("NewFileStore: %v", err)
 	}
 
-	store.Save(newTestWorkspace("ws-1", "Alpha"))
-	store.Save(newTestWorkspace("ws-2", "Beta"))
+	_ = store.Save(newTestWorkspace("ws-1", "Alpha"))
+	_ = store.Save(newTestWorkspace("ws-2", "Beta"))
 
 	// Rename Alpha to Beta should fail
 	if err := store.Rename("ws-1", "Beta"); err == nil {
@@ -191,7 +191,7 @@ func TestFileStore_LoadCacheOnStartup(t *testing.T) {
 		t.Fatalf("NewFileStore: %v", err)
 	}
 	ws := newTestWorkspace("ws-1", "Persistent")
-	store1.Save(ws)
+	_ = store1.Save(ws)
 
 	// Create a new store instance — it should discover the workspace on disk
 	store2, err := NewFileStore(dir)
@@ -215,7 +215,7 @@ func TestFileStore_SaveConflict(t *testing.T) {
 		t.Fatalf("NewFileStore: %v", err)
 	}
 
-	store.Save(newTestWorkspace("ws-1", "My Project"))
+	_ = store.Save(newTestWorkspace("ws-1", "My Project"))
 
 	// Saving a different workspace with the same name should fail
 	ws2 := newTestWorkspace("ws-2", "My Project")
@@ -232,7 +232,7 @@ func TestFileStore_SaveUpdate(t *testing.T) {
 	}
 
 	ws := newTestWorkspace("ws-1", "My Project")
-	store.Save(ws)
+	_ = store.Save(ws)
 
 	// Saving the same workspace again (update) should succeed
 	ws.Description = "updated"
@@ -476,12 +476,12 @@ func TestFileStore_Import(t *testing.T) {
 	// Create a workspace folder externally (simulating an exported workspace)
 	extDir := t.TempDir()
 	wsDir := filepath.Join(extDir, "imported-project")
-	os.MkdirAll(filepath.Join(wsDir, FilesDir), 0755)
+	_ = os.MkdirAll(filepath.Join(wsDir, FilesDir), 0755)
 
 	ws := newTestWorkspace("ws-imported", "Imported Project")
 	ws.FolderSlug = "imported-project"
 	data, _ := ws.ToJSON()
-	os.WriteFile(filepath.Join(wsDir, WorkspaceConfigFile), data, 0644)
+	_ = os.WriteFile(filepath.Join(wsDir, WorkspaceConfigFile), data, 0644)
 
 	// Import it
 	imported, warning, err := store.Import(wsDir)
@@ -519,16 +519,16 @@ func TestFileStore_ImportConflict(t *testing.T) {
 	}
 
 	// Create an existing workspace
-	store.Save(newTestWorkspace("ws-existing", "My Project"))
+	_ = store.Save(newTestWorkspace("ws-existing", "My Project"))
 
 	// Create an external workspace with the same slug
 	extDir := t.TempDir()
 	wsDir := filepath.Join(extDir, "my-project")
-	os.MkdirAll(wsDir, 0755)
+	_ = os.MkdirAll(wsDir, 0755)
 	ws := newTestWorkspace("ws-other", "My Project")
 	ws.FolderSlug = "my-project"
 	data, _ := ws.ToJSON()
-	os.WriteFile(filepath.Join(wsDir, WorkspaceConfigFile), data, 0644)
+	_ = os.WriteFile(filepath.Join(wsDir, WorkspaceConfigFile), data, 0644)
 
 	// Import should fail due to conflict
 	_, _, err = store.Import(wsDir)
@@ -562,12 +562,12 @@ func TestFileStore_ImportProjectPathWarning(t *testing.T) {
 	// Create a workspace with an unresolvable project_path
 	extDir := t.TempDir()
 	wsDir := filepath.Join(extDir, "with-path")
-	os.MkdirAll(wsDir, 0755)
+	_ = os.MkdirAll(wsDir, 0755)
 	ws := newTestWorkspace("ws-path", "With Path")
 	ws.FolderSlug = "with-path"
 	ws.ProjectPath = "../../nonexistent-project"
 	data, _ := ws.ToJSON()
-	os.WriteFile(filepath.Join(wsDir, WorkspaceConfigFile), data, 0644)
+	_ = os.WriteFile(filepath.Join(wsDir, WorkspaceConfigFile), data, 0644)
 
 	_, warning, err := store.Import(wsDir)
 	if err != nil {
@@ -586,7 +586,7 @@ func TestFileStore_GetFolderPath(t *testing.T) {
 	}
 
 	ws := newTestWorkspace("ws-1", "Test Project")
-	store.Save(ws)
+	_ = store.Save(ws)
 
 	got, err := store.GetFolderPath("ws-1")
 	if err != nil {

@@ -552,7 +552,7 @@
     return Boolean(String(attachment?.download_url || '').trim());
   }
 
-  function readFileAsBase64(file) {
+  function _readFileAsBase64(file) {
     return new Promise(function(resolve, reject) {
       const reader = new FileReader();
 
@@ -570,7 +570,7 @@
     });
   }
 
-  function readFileAsText(file) {
+  function _readFileAsText(file) {
     return new Promise(function(resolve, reject) {
       const reader = new FileReader();
 
@@ -797,7 +797,7 @@
     return TYPE_META[normalized]?.label || normalized.replaceAll('_', ' ');
   }
 
-  function recordTypeFolderName(type) {
+  function _recordTypeFolderName(type) {
     const normalized = normalizeRecordType(type);
     return TYPE_META[normalized]?.folderName || recordTypeLabel(normalized);
   }
@@ -2071,7 +2071,7 @@
     state.payloadRevealed = false;
   }
 
-  function renderSelection(record) {
+  function _renderSelection(record) {
     state.selectedRecord = record || null;
     state.payloadRevealed = false;
     renderExplorerPreview();

@@ -1391,9 +1391,13 @@ func writeWorkspaceImportConflict(w http.ResponseWriter, message string, duplica
 }
 
 func writeWorkspaceCreateSlugConflict(w http.ResponseWriter, workspaceName string, conflict *agentworkspace.FolderSlugConflictError) {
-	message := fmt.Sprintf("A workspace folder named %q already exists.", conflict.Slug)
+	var message string
 	if conflict != nil && conflict.SuggestedSlug != "" {
 		message = fmt.Sprintf("A workspace folder named %q already exists. Create %q instead?", conflict.Slug, conflict.SuggestedSlug)
+	} else if conflict != nil {
+		message = fmt.Sprintf("A workspace folder named %q already exists.", conflict.Slug)
+	} else {
+		message = "A workspace folder with that name already exists."
 	}
 
 	w.Header().Set("Content-Type", "application/json")

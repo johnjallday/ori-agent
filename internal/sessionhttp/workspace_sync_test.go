@@ -24,7 +24,7 @@ func TestHandleWorkspaceSyncStatusAndLocateMissingWorkspaceFolder(t *testing.T) 
 	if err != nil {
 		t.Fatalf("NewFileStore: %v", err)
 	}
-	defer fileStore.Close()
+	defer func() { _ = fileStore.Close() }()
 	handler.SetWorkspaceStore(fileStore)
 
 	workspaceID := createTestWorkspace(t, handler, "Sync Recover")
@@ -159,7 +159,7 @@ func TestHandleWorkspaceSyncStatusSkipsImportedWorkspaceFolders(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewFileStore: %v", err)
 	}
-	defer fileStore.Close()
+	defer func() { _ = fileStore.Close() }()
 	handler.SetWorkspaceStore(fileStore)
 
 	importDir := filepath.Join(t.TempDir(), "import-target")
@@ -207,7 +207,7 @@ func TestHandleWorkspaceSyncRecreateMissingWorkspaceFolder(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewFileStore: %v", err)
 	}
-	defer fileStore.Close()
+	defer func() { _ = fileStore.Close() }()
 	handler.SetWorkspaceStore(fileStore)
 
 	workspaceID := createTestWorkspace(t, handler, "Recreate Recover")

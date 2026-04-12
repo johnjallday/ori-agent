@@ -18,7 +18,7 @@ func TestHydrateAttachmentFileMetaTracksWorkspaceOwnedFileStatus(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewFileStore: %v", err)
 	}
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	ws := newTestWorkspace("ws-files", "Workspace Files")
 	if err := store.Save(ws); err != nil {
@@ -67,7 +67,7 @@ func TestHTTPHandlerRelinkAttachmentFileCopiesReplacementIntoWorkspace(t *testin
 	if err != nil {
 		t.Fatalf("NewFileStore: %v", err)
 	}
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	ws := newTestWorkspace("ws-relink", "Relink Workspace")
 	attachment := Attachment{

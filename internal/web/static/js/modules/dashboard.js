@@ -1775,7 +1775,7 @@
     );
   }
 
-  function buildPlanningReviewTaskDetails(planningState) { // eslint-disable-line no-unused-vars
+  function buildPlanningReviewTaskDetails(planningState) {
     if (!planningState) return '';
     return buildPlanningTaskDetails(
       planningState.prompt,
@@ -2920,7 +2920,6 @@
 
       Object.keys(HOME_PLANNING_SPECIALISTS).forEach(function (specialistKey) {
         var config = HOME_PLANNING_SPECIALISTS[specialistKey];
-        var status = planningState.specialistStatuses[specialistKey] || null;
         var specialistButton = document.createElement('button');
         specialistButton.type = 'button';
         specialistButton.className = specialistFirstReview && specialistKey === 'travel_itinerary'

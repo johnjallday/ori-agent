@@ -11,9 +11,9 @@ func TestResolveProjectPath(t *testing.T) {
 
 	// Create a workspace folder with a project subdirectory
 	wsDir := filepath.Join(dir, "workspaces", "my-workspace")
-	os.MkdirAll(wsDir, 0755)
+	_ = os.MkdirAll(wsDir, 0755)
 	projectDir := filepath.Join(wsDir, "my-project")
-	os.MkdirAll(projectDir, 0755)
+	_ = os.MkdirAll(projectDir, 0755)
 
 	// Relative path within the workspace folder
 	absPath, resolved := ResolveProjectPath(wsDir, "my-project")
@@ -42,10 +42,10 @@ func TestResolveProjectPath_Traversal(t *testing.T) {
 
 	// Create a target outside the workspace folder
 	outsideDir := filepath.Join(dir, "outside")
-	os.MkdirAll(outsideDir, 0755)
+	_ = os.MkdirAll(outsideDir, 0755)
 
 	wsDir := filepath.Join(dir, "workspaces", "my-workspace")
-	os.MkdirAll(wsDir, 0755)
+	_ = os.MkdirAll(wsDir, 0755)
 
 	// Attempt to traverse outside the workspace folder
 	absPath, resolved := ResolveProjectPath(wsDir, "../../outside")
@@ -76,11 +76,11 @@ func TestFileStore_GetProjectPathInfo(t *testing.T) {
 
 	ws := newTestWorkspace("ws-1", "My Workspace")
 	ws.ProjectPath = "src"
-	store.Save(ws)
+	_ = store.Save(ws)
 
 	// Create the project directory inside the workspace folder
 	wsFolder, _ := store.GetFolderPath("ws-1")
-	os.MkdirAll(filepath.Join(wsFolder, "src"), 0755)
+	_ = os.MkdirAll(filepath.Join(wsFolder, "src"), 0755)
 
 	info, err := store.GetProjectPathInfo("ws-1")
 	if err != nil {
@@ -102,7 +102,7 @@ func TestFileStore_GetProjectPathInfo_NoPath(t *testing.T) {
 	}
 
 	ws := newTestWorkspace("ws-1", "No Path")
-	store.Save(ws)
+	_ = store.Save(ws)
 
 	info, err := store.GetProjectPathInfo("ws-1")
 	if err != nil {

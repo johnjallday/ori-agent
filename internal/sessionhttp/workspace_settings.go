@@ -23,8 +23,8 @@ func (h *Handler) handleWorkspaceSettings(w http.ResponseWriter, r *http.Request
 func (h *Handler) getWorkspaceSettings(w http.ResponseWriter, r *http.Request, id string) {
 	workspace, err := h.requireConcreteWorkspace(r.Context(), id)
 	if err != nil {
-		switch {
-		case err == errWorkspaceDisallowsDirectUse:
+		switch err {
+		case errWorkspaceDisallowsDirectUse:
 			_ = orihttp.RespondBadRequest(w, err.Error())
 		default:
 			_ = orihttp.RespondNotFound(w, "Workspace not found")
@@ -44,8 +44,8 @@ func (h *Handler) getWorkspaceSettings(w http.ResponseWriter, r *http.Request, i
 func (h *Handler) updateWorkspaceSettings(w http.ResponseWriter, r *http.Request, id string) {
 	workspace, err := h.requireConcreteWorkspace(r.Context(), id)
 	if err != nil {
-		switch {
-		case err == errWorkspaceDisallowsDirectUse:
+		switch err {
+		case errWorkspaceDisallowsDirectUse:
 			_ = orihttp.RespondBadRequest(w, err.Error())
 		default:
 			_ = orihttp.RespondNotFound(w, "Workspace not found")

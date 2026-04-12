@@ -131,10 +131,7 @@ func buildWorkflowStepFromPlanningForm(form *PlanningForm, sessionID string) *Wo
 		if len(question.Options) > 0 {
 			field.Options = make([]WorkflowFormOption, 0, len(question.Options))
 			for _, option := range question.Options {
-				field.Options = append(field.Options, WorkflowFormOption{
-					Value: option.Value,
-					Label: option.Label,
-				})
+				field.Options = append(field.Options, WorkflowFormOption(option))
 			}
 		}
 		fields = append(fields, field)
