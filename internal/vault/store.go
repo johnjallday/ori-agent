@@ -34,8 +34,9 @@ type Store struct {
 }
 
 type encryptedRecordMetadata struct {
-	Label string   `json:"label"`
-	Tags  []string `json:"tags,omitempty"`
+	Label      string   `json:"label"`
+	FolderPath string   `json:"folder_path,omitempty"`
+	Tags       []string `json:"tags,omitempty"`
 }
 
 type recordRow struct {
@@ -65,6 +66,7 @@ type exportEnvelope struct {
 	VaultName   string    `json:"vault_name,omitempty"`
 	ExportedAt  time.Time `json:"exported_at"`
 	WorkspaceID string    `json:"workspace_id,omitempty"`
+	Folders     []Folder  `json:"folders,omitempty"`
 	Records     []Record  `json:"records"`
 	Grants      []Grant   `json:"grants"`
 }
@@ -278,6 +280,8 @@ func (s *Store) DeleteVault(ctx context.Context, vaultID string) error {
 	defer func() { _ = tx.Rollback() }()
 
 	deleteStatements := []string{
+		`DELETE FROM vault_record_attachments WHERE vault_id = ?`,
+		`DELETE FROM vault_folders WHERE vault_id = ?`,
 		`DELETE FROM vault_records WHERE vault_id = ?`,
 		`DELETE FROM vault_grants WHERE vault_id = ?`,
 		`DELETE FROM vault_audit_events WHERE vault_id = ?`,
@@ -598,6 +602,7 @@ func (s *Store) ListRecords(ctx context.Context, filter RecordFilter, access Acc
 			VaultID:         row.VaultID,
 			Type:            row.Type,
 			WorkspaceID:     row.WorkspaceID,
+			FolderPath:      metadata.FolderPath,
 			Label:           metadata.Label,
 			Tags:            metadata.Tags,
 			Source:          row.Source,
@@ -624,6 +629,10 @@ func (s *Store) ListRecords(ctx context.Context, filter RecordFilter, access Acc
 }
 
 func (s *Store) GetRecord(ctx context.Context, id string, access AccessContext) (*Record, error) {
+	return s.getRecord(ctx, id, access, false)
+}
+
+func (s *Store) getRecord(ctx context.Context, id string, access AccessContext, includeAttachmentContent bool) (*Record, error) {
 	if s.db == nil {
 		return nil, ErrSecretStoreUnavailable
 	}
@@ -653,6 +662,12 @@ func (s *Store) GetRecord(ctx context.Context, id string, access AccessContext) 
 	if err != nil {
 		return nil, err
 	}
+
+	attachments, err := listRecordAttachmentsWithExecutor(ctx, s.db, dek, row.ID, row.VaultID, includeAttachmentContent)
+	if err != nil {
+		return nil, err
+	}
+	record.Payload = mergeRecordPayloadAttachments(record.Payload, attachments, includeAttachmentContent)
 
 	s.writeAuditBestEffort(ctx, AuditEvent{
 		VaultID:     row.VaultID,
@@ -684,6 +699,10 @@ func (s *Store) CreateRecord(ctx context.Context, record *Record, access AccessC
 	record.VaultID = resolvedVaultID
 	record.Type = normalizeRecordType(record.Type)
 	record.WorkspaceID = strings.TrimSpace(record.WorkspaceID)
+	record.FolderPath, err = normalizeFolderPath(record.FolderPath)
+	if err != nil {
+		return err
+	}
 	record.Label = strings.TrimSpace(record.Label)
 	record.Source = strings.TrimSpace(record.Source)
 	record.RetentionPolicy = strings.TrimSpace(record.RetentionPolicy)
@@ -697,6 +716,11 @@ func (s *Store) CreateRecord(ctx context.Context, record *Record, access AccessC
 	if len(record.Payload) == 0 {
 		record.Payload = json.RawMessage(`{}`)
 	}
+	cleanPayload, inlineAttachments, _, err := extractInlineRecordAttachments(record.Payload)
+	if err != nil {
+		return err
+	}
+	record.Payload = cleanPayload
 	if _, err := s.getVault(ctx, record.VaultID); err != nil {
 		return err
 	}
@@ -716,8 +740,9 @@ func (s *Store) CreateRecord(ctx context.Context, record *Record, access AccessC
 	record.UpdatedAt = now
 
 	metadataNonce, metadataCiphertext, err := encryptRecordMetadata(dek, encryptedRecordMetadata{
-		Label: record.Label,
-		Tags:  record.Tags,
+		Label:      record.Label,
+		FolderPath: record.FolderPath,
+		Tags:       record.Tags,
 	})
 	if err != nil {
 		return err
@@ -727,16 +752,35 @@ func (s *Store) CreateRecord(ctx context.Context, record *Record, access AccessC
 		return fmt.Errorf("encrypt record payload: %w", err)
 	}
 
-	_, err = s.db.ExecContext(ctx, `
-		INSERT INTO vault_records (
-			id, vault_id, type, workspace_id, source, retention_policy,
-			metadata_nonce, metadata_ciphertext, payload_nonce, payload_ciphertext,
-			created_at, updated_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-	`, record.ID, record.VaultID, record.Type, record.WorkspaceID, record.Source, record.RetentionPolicy,
-		metadataNonce, metadataCiphertext, payloadNonce, payloadCiphertext, record.CreatedAt, record.UpdatedAt)
+	err = s.db.InTransaction(ctx, func(tx *sql.Tx) error {
+		if _, err := tx.ExecContext(ctx, `
+			INSERT INTO vault_records (
+				id, vault_id, type, workspace_id, source, retention_policy,
+				metadata_nonce, metadata_ciphertext, payload_nonce, payload_ciphertext,
+				created_at, updated_at
+			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		`, record.ID, record.VaultID, record.Type, record.WorkspaceID, record.Source, record.RetentionPolicy,
+			metadataNonce, metadataCiphertext, payloadNonce, payloadCiphertext, record.CreatedAt, record.UpdatedAt); err != nil {
+			return fmt.Errorf("insert vault record: %w", err)
+		}
+
+		if err := ensureFolderPathWithExecutor(ctx, tx, dek, record.VaultID, record.FolderPath, record.CreatedAt); err != nil {
+			return err
+		}
+
+		if len(inlineAttachments) > 0 {
+			for index := range inlineAttachments {
+				inlineAttachments[index].Attachment.CreatedAt = record.CreatedAt
+			}
+			if err := replaceRecordAttachmentsWithExecutor(ctx, tx, dek, record, inlineAttachments); err != nil {
+				return err
+			}
+		}
+
+		return nil
+	})
 	if err != nil {
-		return fmt.Errorf("insert vault record: %w", err)
+		return err
 	}
 
 	s.writeAuditBestEffort(ctx, AuditEvent{
@@ -785,6 +829,12 @@ func (s *Store) UpdateRecord(ctx context.Context, id string, update RecordUpdate
 	if update.WorkspaceID != nil {
 		record.WorkspaceID = strings.TrimSpace(*update.WorkspaceID)
 	}
+	if update.FolderPath != nil {
+		record.FolderPath, err = normalizeFolderPath(*update.FolderPath)
+		if err != nil {
+			return nil, err
+		}
+	}
 	if update.Label != nil {
 		record.Label = strings.TrimSpace(*update.Label)
 		if record.Label == "" {
@@ -806,6 +856,11 @@ func (s *Store) UpdateRecord(ctx context.Context, id string, update RecordUpdate
 			record.Payload = json.RawMessage(`{}`)
 		}
 	}
+	cleanPayload, inlineAttachments, attachmentsFieldPresent, err := extractInlineRecordAttachments(record.Payload)
+	if err != nil {
+		return nil, err
+	}
+	record.Payload = cleanPayload
 
 	_, targetWriteCapability := capabilitiesForRecordType(record.Type)
 	if record.Type != row.Type || record.WorkspaceID != row.WorkspaceID {
@@ -816,8 +871,9 @@ func (s *Store) UpdateRecord(ctx context.Context, id string, update RecordUpdate
 	record.UpdatedAt = s.now()
 
 	metadataNonce, metadataCiphertext, err := encryptRecordMetadata(dek, encryptedRecordMetadata{
-		Label: record.Label,
-		Tags:  record.Tags,
+		Label:      record.Label,
+		FolderPath: record.FolderPath,
+		Tags:       record.Tags,
 	})
 	if err != nil {
 		return nil, err
@@ -827,17 +883,37 @@ func (s *Store) UpdateRecord(ctx context.Context, id string, update RecordUpdate
 		return nil, fmt.Errorf("encrypt record payload: %w", err)
 	}
 
-	result, err := s.db.ExecContext(ctx, `
-		UPDATE vault_records
-		SET type = ?, workspace_id = ?, source = ?, retention_policy = ?, metadata_nonce = ?, metadata_ciphertext = ?,
-		    payload_nonce = ?, payload_ciphertext = ?, updated_at = ?
-		WHERE id = ?
-	`, record.Type, record.WorkspaceID, record.Source, record.RetentionPolicy, metadataNonce, metadataCiphertext,
-		payloadNonce, payloadCiphertext, record.UpdatedAt, id)
+	err = s.db.InTransaction(ctx, func(tx *sql.Tx) error {
+		result, err := tx.ExecContext(ctx, `
+			UPDATE vault_records
+			SET type = ?, workspace_id = ?, source = ?, retention_policy = ?, metadata_nonce = ?, metadata_ciphertext = ?,
+			    payload_nonce = ?, payload_ciphertext = ?, updated_at = ?
+			WHERE id = ?
+		`, record.Type, record.WorkspaceID, record.Source, record.RetentionPolicy, metadataNonce, metadataCiphertext,
+			payloadNonce, payloadCiphertext, record.UpdatedAt, id)
+		if err != nil {
+			return fmt.Errorf("update vault record: %w", err)
+		}
+		if err := database.CheckRowsAffectedWithError(result, "vault_record", ErrRecordNotFound); err != nil {
+			return err
+		}
+
+		if err := ensureFolderPathWithExecutor(ctx, tx, dek, record.VaultID, record.FolderPath, record.UpdatedAt); err != nil {
+			return err
+		}
+
+		if attachmentsFieldPresent {
+			for index := range inlineAttachments {
+				inlineAttachments[index].Attachment.CreatedAt = record.UpdatedAt
+			}
+			if err := replaceRecordAttachmentsWithExecutor(ctx, tx, dek, record, inlineAttachments); err != nil {
+				return err
+			}
+		}
+
+		return nil
+	})
 	if err != nil {
-		return nil, fmt.Errorf("update vault record: %w", err)
-	}
-	if err := database.CheckRowsAffectedWithError(result, "vault_record", ErrRecordNotFound); err != nil {
 		return nil, err
 	}
 
@@ -871,11 +947,18 @@ func (s *Store) DeleteRecord(ctx context.Context, id string, access AccessContex
 		return err
 	}
 
-	result, err := s.db.ExecContext(ctx, `DELETE FROM vault_records WHERE id = ?`, id)
+	err = s.db.InTransaction(ctx, func(tx *sql.Tx) error {
+		if _, err := tx.ExecContext(ctx, `DELETE FROM vault_record_attachments WHERE record_id = ?`, id); err != nil {
+			return fmt.Errorf("delete vault record attachments: %w", err)
+		}
+
+		result, err := tx.ExecContext(ctx, `DELETE FROM vault_records WHERE id = ?`, id)
+		if err != nil {
+			return fmt.Errorf("delete vault record: %w", err)
+		}
+		return database.CheckRowsAffectedWithError(result, "vault_record", ErrRecordNotFound)
+	})
 	if err != nil {
-		return fmt.Errorf("delete vault record: %w", err)
-	}
-	if err := database.CheckRowsAffectedWithError(result, "vault_record", ErrRecordNotFound); err != nil {
 		return err
 	}
 
@@ -1095,7 +1178,7 @@ func (s *Store) Export(ctx context.Context, req ExportRequest) (*ExportBundle, e
 
 	fullRecords := make([]Record, 0, len(records))
 	for _, item := range records {
-		record, err := s.GetRecord(ctx, item.ID, AccessContext{})
+		record, err := s.getRecord(ctx, item.ID, AccessContext{}, true)
 		if err != nil {
 			return nil, err
 		}
@@ -1107,11 +1190,17 @@ func (s *Store) Export(ctx context.Context, req ExportRequest) (*ExportBundle, e
 		return nil, err
 	}
 
+	folders, err := s.ListFolders(ctx, req.VaultID)
+	if err != nil {
+		return nil, err
+	}
+
 	envelope := exportEnvelope{
 		VaultID:     req.VaultID,
 		VaultName:   selectedVault.Name,
 		ExportedAt:  s.now(),
 		WorkspaceID: req.WorkspaceID,
+		Folders:     folders,
 		Records:     fullRecords,
 		Grants:      grants,
 	}
@@ -1227,6 +1316,15 @@ func (s *Store) Import(ctx context.Context, req ImportRequest) (*ImportResult, e
 	}
 
 	importedRecords := 0
+	for _, item := range envelope.Folders {
+		folder := item
+		folder.ID = ""
+		folder.VaultID = targetVault.ID
+		if _, err := s.CreateFolder(ctx, &folder); err != nil {
+			return nil, err
+		}
+	}
+
 	for _, item := range envelope.Records {
 		record := item
 		record.ID = ""
@@ -1656,6 +1754,7 @@ func decryptRecordRow(dek []byte, row recordRow) (*Record, error) {
 		VaultID:         row.VaultID,
 		Type:            row.Type,
 		WorkspaceID:     row.WorkspaceID,
+		FolderPath:      metadata.FolderPath,
 		Label:           metadata.Label,
 		Tags:            metadata.Tags,
 		Source:          row.Source,
@@ -1667,6 +1766,11 @@ func decryptRecordRow(dek []byte, row recordRow) (*Record, error) {
 }
 
 func encryptRecordMetadata(dek []byte, metadata encryptedRecordMetadata) (string, string, error) {
+	normalizedFolderPath, err := normalizeFolderPath(metadata.FolderPath)
+	if err != nil {
+		return "", "", err
+	}
+	metadata.FolderPath = normalizedFolderPath
 	metadata.Tags = normalizeTags(metadata.Tags)
 	return encryptJSON(dek, metadata)
 }
@@ -1676,6 +1780,11 @@ func decryptRecordMetadata(dek []byte, nonceB64 string, ciphertextB64 string) (e
 	if err := decryptJSON(dek, nonceB64, ciphertextB64, &metadata); err != nil {
 		return encryptedRecordMetadata{}, ErrMalformedRecord
 	}
+	normalizedFolderPath, err := normalizeFolderPath(metadata.FolderPath)
+	if err != nil {
+		return encryptedRecordMetadata{}, ErrMalformedRecord
+	}
+	metadata.FolderPath = normalizedFolderPath
 	metadata.Tags = normalizeTags(metadata.Tags)
 	return metadata, nil
 }

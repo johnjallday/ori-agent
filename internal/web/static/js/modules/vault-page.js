@@ -2,9 +2,9 @@
   const DEFAULT_VAULT_ID = '';
   const VAULT_STORAGE_KEY = 'ori-selected-vault-id';
   const ROOT_FOLDER_PATH = 'vault';
-  const TYPE_FOLDER_PATH = 'types';
-  const WORKSPACE_FOLDER_PATH = 'workspaces';
-  const DEFAULT_EXPANDED_FOLDERS = new Set([ROOT_FOLDER_PATH, TYPE_FOLDER_PATH, WORKSPACE_FOLDER_PATH]);
+  const DEFAULT_EXPANDED_FOLDERS = new Set([ROOT_FOLDER_PATH]);
+  const MAX_ENTRY_ATTACHMENTS = 6;
+  const MAX_ENTRY_ATTACHMENT_BYTES = 10 * 1024 * 1024;
   const TYPE_META = {
     personal_note: {
       label: 'Personal Note',
@@ -60,6 +60,8 @@
   const entryTypeInput = document.getElementById('vaultEntryType');
   const entryWorkspaceInput = document.getElementById('vaultEntryWorkspaceId');
   const entryLabelInput = document.getElementById('vaultEntryLabel');
+  const entryFolderPathInput = document.getElementById('vaultEntryFolderPath');
+  const entryUseSelectedFolderBtn = document.getElementById('vaultEntryUseSelectedFolderBtn');
   const entryTagsInput = document.getElementById('vaultEntryTags');
   const entryRetentionInput = document.getElementById('vaultEntryRetention');
   const entryPayloadInput = document.getElementById('vaultEntryPayload');
@@ -68,12 +70,24 @@
   const revealPayloadBtn = document.getElementById('vaultRevealPayloadBtn');
   const deleteEntryBtn = document.getElementById('vaultDeleteEntryBtn');
   const recordsListEl = document.getElementById('vaultRecordsList');
-  
+
+  const editorOverlay = document.getElementById('vaultEntryOverlay');
   const editorPanel = document.getElementById('vaultEditorPanel');
+  const editorTitleEl = document.getElementById('vaultEditorTitle');
+  const editorDescriptionEl = document.getElementById('vaultEditorDescription');
   const _editorForm = document.getElementById('vaultEditorForm');
   const editorCloseBtn = document.getElementById('vaultEditorCloseBtn');
   const explorerAddBtn = document.getElementById('vaultExplorerAddBtn');
-  const entryGrid = document.getElementById('vaultEntryGrid');
+  const entryAdvancedDetails = document.getElementById('vaultEntryAdvanced');
+  const entryComposerLabel = document.getElementById('vaultEntryComposerLabel');
+  const entryContentField = document.getElementById('vaultEntryContentField');
+  const entryContentInput = document.getElementById('vaultEntryContent');
+  const entryContentHelp = document.getElementById('vaultEntryContentHelp');
+  const entryAttachBtn = document.getElementById('vaultEntryAttachBtn');
+  const entryAttachmentsInput = document.getElementById('vaultEntryAttachmentsInput');
+  const entryAttachmentsList = document.getElementById('vaultEntryAttachmentsList');
+  const entryJsonModeInput = document.getElementById('vaultEntryJsonMode');
+  const entryPayloadField = document.getElementById('vaultEntryPayloadField');
 
   const searchInput = document.getElementById('vaultPageSearchInput');
   const recordsSummaryEl = document.getElementById('vaultPageRecordsSummary');
@@ -81,6 +95,7 @@
   const folderBreadcrumbEl = document.getElementById('vaultPageFolderBreadcrumb');
   const folderTreeEl = document.getElementById('vaultPageFolderTree');
   const explorerPreviewEl = document.getElementById('vaultPageExplorerPreview');
+  const explorerNewFolderBtn = document.getElementById('vaultExplorerNewFolderBtn');
 
   const grantWorkspaceInput = document.getElementById('vaultGrantWorkspaceId');
   const grantActorTypeInput = document.getElementById('vaultGrantActorType');
@@ -155,10 +170,29 @@
   const importBtn = document.getElementById('vaultImportBtn');
   const importCancelBtn = document.getElementById('vaultImportCancelBtn');
 
+  function mountPageDialogOverlays() {
+    const overlays = [
+      unlockOverlay,
+      createOverlay,
+      exportOverlay,
+      importOverlay,
+      editorOverlay
+    ];
+
+    overlays.forEach((overlay) => {
+      if (overlay && overlay.parentElement !== document.body) {
+        document.body.appendChild(overlay);
+      }
+    });
+  }
+
+  mountPageDialogOverlays();
+
   let vaultStatus = null;
   let vaults = [];
   let selectedVaultID = DEFAULT_VAULT_ID;
   let records = [];
+  let folders = [];
   let grants = [];
   let emailAccounts = [];
   let emailOAuthProviders = {};
@@ -173,10 +207,17 @@
   let folderIndex = new Map();
   let expandedFolderPaths = new Set(DEFAULT_EXPANDED_FOLDERS);
   let selectedFolderPath = ROOT_FOLDER_PATH;
+  let folderComposerOpen = false;
   let unlockDialogOpen = false;
   let createDialogOpen = false;
   let exportDialogOpen = false;
   let importDialogOpen = false;
+  let editorDialogOpen = false;
+  let entryAttachments = [];
+  let entryAttachmentSnapshot = [];
+  let draggedRecordID = '';
+  let draggedRecordElement = null;
+  let activeDropFolderButton = null;
 
   function notify(message, type = 'info', options = {}) {
     if (typeof window.notifyToast === 'function') {
@@ -246,6 +287,16 @@
     return vaults.find((item) => item.id === currentVaultID()) || null;
   }
 
+  function syncDialogBodyState() {
+    document.body.classList.toggle('vault-page-dialog-open', Boolean(
+      unlockDialogOpen
+      || createDialogOpen
+      || exportDialogOpen
+      || importDialogOpen
+      || editorDialogOpen
+    ));
+  }
+
   function vaultRecordCount(vaultItem) {
     const count = Number(vaultItem?.record_count || 0);
     return Number.isFinite(count) ? count : 0;
@@ -273,16 +324,21 @@
   }
 
   async function apiRequest(url, options = {}) {
+    const isFormData = options.body instanceof window.FormData;
     const config = {
       method: options.method || 'GET',
       headers: {
-        'Content-Type': 'application/json',
         ...(options.headers || {})
       }
     };
 
     if (options.body !== undefined && config.method !== 'GET') {
-      config.body = JSON.stringify(options.body);
+      if (isFormData) {
+        config.body = options.body;
+      } else {
+        config.headers['Content-Type'] = 'application/json';
+        config.body = JSON.stringify(options.body);
+      }
     }
 
     const response = await fetch(url, config);
@@ -381,14 +437,16 @@
       return null;
     }
 
-    const name = String(item.name || '').trim();
+    const file = item.file instanceof File ? item.file : null;
+    const name = String(item.name || file?.name || '').trim();
     const contentBase64 = String(item.content_base64 || item.base64_data || '').trim();
-    if (!name || !contentBase64) {
+    const downloadURL = String(item.download_url || item.downloadURL || '').trim();
+    if (!name || (!file && !contentBase64 && !downloadURL)) {
       return null;
     }
 
-    const mimeType = String(item.mime_type || item.mimeType || 'application/octet-stream').trim() || 'application/octet-stream';
-    const sizeBytes = Number(item.size_bytes ?? item.size ?? 0);
+    const mimeType = String(item.mime_type || item.mimeType || file?.type || 'application/octet-stream').trim() || 'application/octet-stream';
+    const sizeBytes = Number(item.size_bytes ?? item.size ?? file?.size ?? base64ByteLength(contentBase64));
 
     return {
       id: String(item.id || generateAttachmentID()),
@@ -396,8 +454,19 @@
       mime_type: mimeType,
       size_bytes: Number.isFinite(sizeBytes) && sizeBytes >= 0 ? sizeBytes : 0,
       kind: String(item.kind || '').trim() || attachmentKindForMimeType(mimeType),
-      content_base64: contentBase64
+      content_base64: contentBase64 || undefined,
+      download_url: downloadURL || undefined,
+      file: file || undefined
     };
+  }
+
+  function cloneEntryAttachment(item) {
+    const normalized = normalizeEntryAttachment(item);
+    return normalized ? { ...normalized } : null;
+  }
+
+  function cloneEntryAttachments(items) {
+    return (Array.isArray(items) ? items : []).map(cloneEntryAttachment).filter(Boolean);
   }
 
   function entryAttachmentsFromPayload(payload) {
@@ -444,9 +513,341 @@
   }
 
   function attachmentDataURL(attachment) {
+    const downloadURL = String(attachment?.download_url || '').trim();
+    if (downloadURL) {
+      return downloadURL;
+    }
+
     const mimeType = String(attachment?.mime_type || 'application/octet-stream').trim() || 'application/octet-stream';
     const contentBase64 = String(attachment?.content_base64 || '').trim();
     return contentBase64 ? `data:${mimeType};base64,${contentBase64}` : '';
+  }
+
+  function base64ByteLength(value) {
+    const normalized = String(value || '').trim().replace(/\s+/g, '');
+    if (!normalized) {
+      return 0;
+    }
+
+    const paddingMatch = normalized.match(/=+$/);
+    const padding = paddingMatch ? paddingMatch[0].length : 0;
+    return Math.max(0, Math.floor((normalized.length * 3) / 4) - padding);
+  }
+
+  function attachmentBlob(attachment) {
+    const normalized = normalizeEntryAttachment(attachment);
+    if (!normalized) {
+      throw new Error('That attachment could not be prepared.');
+    }
+
+    if (normalized.file instanceof File) {
+      return normalized.file;
+    }
+
+    const contentBase64 = String(normalized.content_base64 || '').trim();
+    if (!contentBase64) {
+      throw new Error('That attachment is missing file content.');
+    }
+
+    const binary = window.atob(contentBase64);
+    const bytes = new Uint8Array(binary.length);
+    for (let index = 0; index < binary.length; index += 1) {
+      bytes[index] = binary.charCodeAt(index);
+    }
+
+    return new Blob([bytes], {
+      type: normalized.mime_type || 'application/octet-stream'
+    });
+  }
+
+  function hasStoredAttachment(attachment) {
+    return Boolean(String(attachment?.download_url || '').trim());
+  }
+
+  function readFileAsBase64(file) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+
+      reader.onload = () => {
+        const result = String(reader.result || '');
+        const commaIndex = result.indexOf(',');
+        resolve(commaIndex >= 0 ? result.slice(commaIndex + 1) : result);
+      };
+
+      reader.onerror = () => {
+        reject(new Error(`Failed to read file "${String(file?.name || 'attachment')}".`));
+      };
+
+      reader.readAsDataURL(file);
+    });
+  }
+
+  function totalAttachmentBytes(attachments) {
+    return (Array.isArray(attachments) ? attachments : []).reduce((total, attachment) => {
+      return total + Number(attachment?.size_bytes || 0);
+    }, 0);
+  }
+
+  function renderEntryAttachments() {
+    if (!entryAttachmentsList) {
+      return;
+    }
+
+    if (!entryAttachments.length) {
+      entryAttachmentsList.innerHTML = '<div class="vault-modal-attachments-empty">No files or images attached yet.</div>';
+      return;
+    }
+
+    entryAttachmentsList.innerHTML = entryAttachments.map((attachment) => {
+      return `
+        <div class="vault-modal-attachment-item">
+          <div class="vault-modal-attachment-item-main">
+            <span class="vault-modal-attachment-icon">${attachmentIcon(attachment.kind)}</span>
+            <div class="vault-modal-attachment-copy">
+              <div class="vault-modal-attachment-name">${escapeHTML(attachment.name)}</div>
+              <div class="vault-modal-attachment-meta">${escapeHTML([attachment.kind === 'image' ? 'Image' : 'File', formatBytes(attachment.size_bytes)].join(' • '))}</div>
+            </div>
+          </div>
+          <button type="button" class="modern-btn modern-btn-secondary vault-modal-attachment-remove" data-action="remove-entry-attachment" data-attachment-id="${escapeHTML(attachment.id)}">Remove</button>
+        </div>
+      `;
+    }).join('');
+  }
+
+  async function addEntryAttachments(fileList) {
+    const files = Array.from(fileList || []);
+    if (!files.length) {
+      return;
+    }
+
+    const nextAttachments = entryAttachments.slice();
+    const rejected = [];
+
+    if (nextAttachments.length >= MAX_ENTRY_ATTACHMENTS) {
+      showInlineAlert(`You can attach up to ${String(MAX_ENTRY_ATTACHMENTS)} files per vault entry.`, 'warning');
+      return;
+    }
+
+    for (const file of files) {
+      if (nextAttachments.length >= MAX_ENTRY_ATTACHMENTS) {
+        rejected.push(file.name);
+        continue;
+      }
+
+      const projectedBytes = totalAttachmentBytes(nextAttachments) + Number(file.size || 0);
+      if (projectedBytes > MAX_ENTRY_ATTACHMENT_BYTES) {
+        rejected.push(file.name);
+        continue;
+      }
+
+      nextAttachments.push({
+        id: generateAttachmentID(),
+        name: String(file.name || 'attachment'),
+        mime_type: String(file.type || 'application/octet-stream'),
+        size_bytes: Number(file.size || 0),
+        kind: attachmentKindForMimeType(file.type),
+        file
+      });
+    }
+
+    entryAttachments = nextAttachments;
+    renderEntryAttachments();
+
+    if (entryAttachmentsInput) {
+      entryAttachmentsInput.value = '';
+    }
+
+    if (rejected.length) {
+      showInlineAlert(`Some attachments were skipped. Entries support up to ${String(MAX_ENTRY_ATTACHMENTS)} files and ${formatBytes(MAX_ENTRY_ATTACHMENT_BYTES)} total.`, 'warning');
+      return;
+    }
+
+    showInlineAlert('');
+  }
+
+  function removeEntryAttachment(attachmentID) {
+    entryAttachments = entryAttachments.filter((item) => item.id !== attachmentID);
+    renderEntryAttachments();
+  }
+
+  function entrySimplePayload(type, content) {
+    const normalized = normalizeRecordType(type);
+    const value = String(content || '').trim();
+
+    if (!value) {
+      return {};
+    }
+
+    if (normalized === 'email_snippet') {
+      return { body: value };
+    }
+
+    if (normalized === 'secret') {
+      return { value: value };
+    }
+
+    return { note: value };
+  }
+
+  function entryContentFromPayload(type, payload) {
+    if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+      return '';
+    }
+
+    const normalized = normalizeRecordType(type);
+
+    if (normalized === 'email_snippet') {
+      return String(payload.body || '').trim();
+    }
+
+    if (normalized === 'secret') {
+      return String(payload.value || '').trim();
+    }
+
+    return String(payload.note || '').trim();
+  }
+
+  function defaultPayloadValue(type) {
+    const normalized = normalizeRecordType(type);
+
+    if (normalized === 'email_snippet') {
+      return '{\n  "subject": "",\n  "body": ""\n}';
+    }
+
+    if (normalized === 'secret') {
+      return '{\n  "value": ""\n}';
+    }
+
+    return '{\n  "note": ""\n}';
+  }
+
+  function isDefaultPayloadTemplate(raw) {
+    const normalized = String(raw || '').trim();
+    return !normalized || ['personal_note', 'email_snippet', 'secret'].some((type) => {
+      return normalized === defaultPayloadValue(type);
+    });
+  }
+
+  function entryLabelPlaceholder(type) {
+    const normalized = normalizeRecordType(type);
+
+    if (normalized === 'email_snippet') {
+      return 'Tax reply, landlord update, important follow-up';
+    }
+
+    if (normalized === 'secret') {
+      return 'Bank login, Wi-Fi password, recovery code';
+    }
+
+    return 'Passport note, tax reminder, emergency contact';
+  }
+
+  function entryContentPlaceholder(type) {
+    const normalized = normalizeRecordType(type);
+
+    if (normalized === 'email_snippet') {
+      return 'Paste the email text or the key excerpt you want to keep.';
+    }
+
+    if (normalized === 'secret') {
+      return 'Paste the password, code, or secret text you want to store.';
+    }
+
+    return 'Write the private details you want to keep encrypted.';
+  }
+
+  function simplePayloadKey(type) {
+    const normalized = normalizeRecordType(type);
+
+    if (normalized === 'email_snippet') {
+      return 'body';
+    }
+
+    if (normalized === 'secret') {
+      return 'value';
+    }
+
+    return 'note';
+  }
+
+  function canUseSimpleEntryComposer(type, payload) {
+    if (payload === undefined || payload === null) {
+      return true;
+    }
+
+    if (typeof payload !== 'object' || Array.isArray(payload)) {
+      return false;
+    }
+
+    const keys = Object.keys(payload);
+    if (!keys.length) {
+      return true;
+    }
+
+    const key = simplePayloadKey(type);
+    const dataKeys = keys.filter((item) => item !== 'attachments');
+
+    if (!dataKeys.length) {
+      return true;
+    }
+
+    return dataKeys.length === 1 && dataKeys[0] === key && typeof payload[key] === 'string';
+  }
+
+  function syncEntryComposerPresentation() {
+    const normalizedType = normalizeRecordType(entryTypeInput?.value || 'personal_note');
+    const useJSON = Boolean(entryJsonModeInput?.checked);
+
+    if (entryComposerLabel) {
+      entryComposerLabel.textContent = useJSON ? 'Structured payload' : 'Private content';
+      entryComposerLabel.setAttribute('for', useJSON ? 'vaultEntryPayload' : 'vaultEntryContent');
+    }
+
+    if (entryLabelInput) {
+      entryLabelInput.placeholder = entryLabelPlaceholder(normalizedType);
+    }
+
+    if (entryContentInput) {
+      entryContentInput.placeholder = entryContentPlaceholder(normalizedType);
+    }
+
+    if (entryContentHelp) {
+      entryContentHelp.textContent = useJSON
+        ? 'Use JSON only if you want named fields or nested data.'
+        : 'Write normal text here. Ori will turn it into an encrypted record for you.';
+    }
+
+    if (entryContentField) {
+      entryContentField.hidden = useJSON;
+    }
+
+    if (entryPayloadField) {
+      entryPayloadField.hidden = !useJSON;
+    }
+
+    if (useJSON && entryPayloadInput) {
+      const rawPayload = String(entryPayloadInput.value || '').trim();
+      if (isDefaultPayloadTemplate(rawPayload)) {
+        const content = String(entryContentInput?.value || '').trim();
+        entryPayloadInput.value = content
+          ? prettyPayload(entrySimplePayload(normalizedType, content))
+          : defaultPayloadValue(normalizedType);
+      }
+    } else if (!useJSON && entryContentInput) {
+      const currentContent = String(entryContentInput.value || '').trim();
+      const rawPayload = String(entryPayloadInput?.value || '').trim();
+      if (!currentContent && rawPayload) {
+        try {
+          const payload = JSON.parse(rawPayload);
+          const extracted = entryContentFromPayload(normalizedType, payload);
+          if (extracted) {
+            entryContentInput.value = extracted;
+          }
+        } catch (error) {
+          // Leave the plain-text composer blank when the payload is intentionally custom.
+        }
+      }
+    }
   }
 
   function downloadAttachment(attachment) {
@@ -457,12 +858,20 @@
     }
 
     const link = document.createElement('a');
-    link.href = attachmentDataURL(normalized);
+    const objectURL = normalized.file instanceof File
+      ? window.URL.createObjectURL(normalized.file)
+      : '';
+    link.href = objectURL || attachmentDataURL(normalized);
     link.download = normalized.name || 'vault-attachment';
     link.style.display = 'none';
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
+    if (objectURL) {
+      window.setTimeout(() => {
+        window.URL.revokeObjectURL(objectURL);
+      }, 0);
+    }
   }
 
   function prettyDate(value) {
@@ -589,13 +998,64 @@
     return TYPE_META[normalized]?.folderName || recordTypeLabel(normalized);
   }
 
-  function folderPathForType(type) {
-    return `type::${normalizeRecordType(type)}`;
+  function normalizeFolderPathInput(value) {
+    const rawSegments = String(value || '')
+      .replaceAll('\\', '/')
+      .split('/');
+    const segments = rawSegments
+      .map((segment) => segment.trim())
+      .filter(Boolean);
+
+    if (segments.some((segment) => segment === '.' || segment === '..')) {
+      throw new Error('Folder paths cannot contain "." or "..".');
+    }
+
+    return segments.join('/');
   }
 
-  function folderPathForWorkspace(workspaceID) {
-    const normalized = String(workspaceID || '').trim();
-    return normalized ? `workspace::${normalized}` : 'workspace::global';
+  function folderNodePath(folderPath) {
+    const normalized = normalizeFolderPathInput(folderPath);
+    return normalized ? `folder:${normalized}` : ROOT_FOLDER_PATH;
+  }
+
+  function folderPathFromNodePath(nodePath) {
+    const normalized = String(nodePath || '').trim();
+    if (!normalized || normalized === ROOT_FOLDER_PATH) {
+      return '';
+    }
+    return normalized.startsWith('folder:') ? normalized.slice('folder:'.length) : normalized;
+  }
+
+  function folderPathSegments(folderPath) {
+    const normalized = normalizeFolderPathInput(folderPath);
+    return normalized ? normalized.split('/') : [];
+  }
+
+  function folderPathAncestors(folderPath) {
+    const segments = folderPathSegments(folderPath);
+    return segments.map((_, index) => segments.slice(0, index + 1).join('/'));
+  }
+
+  function folderNameFromPath(folderPath) {
+    const segments = folderPathSegments(folderPath);
+    return segments[segments.length - 1] || vaultDisplayLabel(currentVault()) || 'Vault Root';
+  }
+
+  function selectedFolderRelativePath() {
+    return folderPathFromNodePath(selectedFolderPath);
+  }
+
+  function joinFolderPath(basePath, nextPath) {
+    const normalizedBase = normalizeFolderPathInput(basePath);
+    const normalizedNext = normalizeFolderPathInput(nextPath);
+
+    if (!normalizedBase) {
+      return normalizedNext;
+    }
+    if (!normalizedNext) {
+      return normalizedBase;
+    }
+    return `${normalizedBase}/${normalizedNext}`;
   }
 
   function fileTypeIcon(type) {
@@ -617,6 +1077,11 @@
   }
 
   function parsePayloadInput() {
+    const useJSON = Boolean(entryJsonModeInput?.checked);
+    if (!useJSON) {
+      return entrySimplePayload(entryTypeInput?.value, entryContentInput?.value);
+    }
+
     const raw = String(entryPayloadInput?.value || '').trim();
     if (!raw) {
       return {};
@@ -625,11 +1090,19 @@
     try {
       return JSON.parse(raw);
     } catch (error) {
-      throw new Error('Payload must be valid JSON');
+      throw new Error('Payload must be valid JSON.');
     }
   }
 
   function showInlineAlert(message, type = 'info') {
+    if (!message) {
+      if (alertsEl) {
+        alertsEl.innerHTML = '';
+      }
+      window.clearTimeout(showInlineAlert.timeoutId);
+      return;
+    }
+
     if (!alertsEl) {
       notify(message, type);
       return;
@@ -711,6 +1184,8 @@
       unlockPasswordInput.value = '';
       unlockPasswordInput.type = 'password';
     }
+
+    syncDialogBodyState();
   }
 
   function closeUnlockDialog(options = {}) {
@@ -745,6 +1220,7 @@
     closeCreateDialog({ restoreFocus: false });
     closeExportDialog({ restoreFocus: false });
     closeImportDialog({ restoreFocus: false });
+    closeVaultEditor({ restoreFocus: false });
     unlockDialogOpen = true;
     syncUnlockDialog();
     window.requestAnimationFrame(() => {
@@ -778,6 +1254,8 @@
     if (!canShow && createVaultSpaceBtn && !createVaultSpaceBtn.dataset.originalLabel) {
       resetCreateForm();
     }
+
+    syncDialogBodyState();
   }
 
   function closeCreateDialog(options = {}) {
@@ -795,6 +1273,7 @@
     closeUnlockDialog({ restoreFocus: false });
     closeExportDialog({ restoreFocus: false });
     closeImportDialog({ restoreFocus: false });
+    closeVaultEditor({ restoreFocus: false });
     createDialogOpen = true;
     syncCreateDialog();
     window.requestAnimationFrame(() => {
@@ -830,6 +1309,8 @@
     if (!canShow && exportBtn && !exportBtn.dataset.originalLabel) {
       resetExportForm();
     }
+
+    syncDialogBodyState();
   }
 
   function closeExportDialog(options = {}) {
@@ -857,6 +1338,7 @@
     closeUnlockDialog({ restoreFocus: false });
     closeCreateDialog({ restoreFocus: false });
     closeImportDialog({ restoreFocus: false });
+    closeVaultEditor({ restoreFocus: false });
     exportDialogOpen = true;
     syncExportDialog();
     window.requestAnimationFrame(() => {
@@ -899,6 +1381,8 @@
       resetImportForm();
       syncImportControls();
     }
+
+    syncDialogBodyState();
   }
 
   function closeImportDialog(options = {}) {
@@ -916,6 +1400,7 @@
     closeUnlockDialog({ restoreFocus: false });
     closeCreateDialog({ restoreFocus: false });
     closeExportDialog({ restoreFocus: false });
+    closeVaultEditor({ restoreFocus: false });
     importDialogOpen = true;
     syncImportDialog();
     window.requestAnimationFrame(() => {
@@ -923,11 +1408,68 @@
     });
   }
 
+  function syncEditorDialog() {
+    if (!editorOverlay || !editorPanel) {
+      return;
+    }
+
+    const vaultLabel = vaultDisplayLabel(currentVault());
+    const editing = Boolean(selectedRecord?.id);
+    const recordLabel = String(selectedRecord?.label || '').trim();
+    const canShow = Boolean(editorDialogOpen && vaultStatus?.available && !vaultStatus?.locked && currentVaultID());
+
+    if (editorTitleEl) {
+      editorTitleEl.textContent = editing ? 'Edit Vault Item' : 'New Vault Item';
+    }
+
+    if (editorDescriptionEl) {
+      editorDescriptionEl.textContent = editing
+        ? `Update ${recordLabel || 'this vault item'} in ${vaultLabel}.`
+        : 'Add a private item, choose the folder it belongs in, and only open advanced details if you need them.';
+    }
+
+    if (saveEntryBtn && !saveEntryBtn.dataset.originalLabel) {
+      saveEntryBtn.textContent = editing ? 'Update Entry' : 'Save Entry';
+    }
+
+    if (resetEntryBtn) {
+      resetEntryBtn.textContent = editing ? 'Reset Changes' : 'Clear';
+    }
+
+    if (!canShow) {
+      editorDialogOpen = false;
+    }
+
+    editorOverlay.hidden = !canShow;
+    editorPanel.hidden = !canShow;
+    if (canShow) {
+      syncEntryComposerPresentation();
+      renderEntryAttachments();
+      if (entryLabelInput) {
+        entryLabelInput.setAttribute('aria-label', `Label for ${vaultLabel}`);
+      }
+    }
+    syncDialogBodyState();
+  }
+
+  function closeVaultEditor(options = {}) {
+    editorDialogOpen = false;
+    syncEditorDialog();
+
+    if (options.restoreFocus !== false) {
+      window.requestAnimationFrame(() => {
+        const focusTarget = recordsListEl?.querySelector('.vault-page-record.is-selected') || explorerAddBtn;
+        focusTarget?.focus();
+      });
+    }
+  }
+
   function syncPageDialogs() {
     syncUnlockDialog();
     syncCreateDialog();
     syncExportDialog();
     syncImportDialog();
+    syncEditorDialog();
   }
 
   function renderVaultSpaces() {
@@ -997,6 +1539,7 @@
     closeCreateDialog({ restoreFocus: false });
     closeExportDialog({ restoreFocus: false });
     closeImportDialog({ restoreFocus: false });
+    folderComposerOpen = false;
     selectedVaultID = nextVaultID;
     writeStoredVaultID(selectedVaultID);
     selectedFolderPath = ROOT_FOLDER_PATH;
@@ -1045,6 +1588,7 @@
         writeStoredVaultID(selectedVaultID);
         renderVaultSpaces();
       }
+      folderComposerOpen = false;
       closeCreateDialog({ restoreFocus: false });
       selectedFolderPath = ROOT_FOLDER_PATH;
       clearRecordForm({ refreshList: false, refreshExplorer: false });
@@ -1117,6 +1661,7 @@
       closeCreateDialog({ restoreFocus: false });
       closeExportDialog({ restoreFocus: false });
       closeImportDialog({ restoreFocus: false });
+      folderComposerOpen = false;
       selectedFolderPath = ROOT_FOLDER_PATH;
       clearRecordForm({ refreshList: false, refreshExplorer: false });
       notify('Vault deleted.', 'success');
@@ -1132,14 +1677,22 @@
   function setInteractiveState(locked) {
     const disableVaultEditing = !vaultStatus || !vaultStatus.available || Boolean(locked);
 
-    saveEntryBtn.disabled = disableVaultEditing;
-    resetEntryBtn.disabled = false;
+    if (saveEntryBtn) {
+      saveEntryBtn.disabled = disableVaultEditing;
+    }
+    if (resetEntryBtn) {
+      resetEntryBtn.disabled = false;
+    }
     exportBtn.disabled = disableVaultEditing;
     if (unlockBtn) {
       unlockBtn.disabled = !vaultStatus || !vaultStatus.available || !vaultStatus.locked;
     }
-    revealPayloadBtn.disabled = disableVaultEditing || !selectedRecord;
-    deleteEntryBtn.disabled = disableVaultEditing || !selectedRecord;
+    if (revealPayloadBtn) {
+      revealPayloadBtn.disabled = disableVaultEditing || !selectedRecord;
+    }
+    if (deleteEntryBtn) {
+      deleteEntryBtn.disabled = disableVaultEditing || !selectedRecord;
+    }
     if (searchInput) {
       searchInput.disabled = !vaultStatus?.available || Boolean(locked);
     }
@@ -1149,17 +1702,22 @@
     if (explorerAddBtn) {
       explorerAddBtn.disabled = disableVaultEditing;
     }
+    if (explorerNewFolderBtn) {
+      explorerNewFolderBtn.disabled = disableVaultEditing;
+    }
     setEmailAccountFormDisabled(disableVaultEditing);
     renderFolderVaultTabs();
 
     if (disableVaultEditing) {
+      folderComposerOpen = false;
       records = [];
+      folders = [];
       recordIndex = new Map();
       emailAccounts = [];
       rebuildFolderTree();
       recordsListEl.innerHTML = vaultStatus?.available
-        ? '<div class="vault-page-empty">Unlock the vault to browse saved entries.</div>'
-        : '<div class="vault-page-empty">Create a vault to begin storing encrypted entries.</div>';
+        ? '<div class="vault-page-empty">Unlock the vault to browse saved items.</div>'
+        : '<div class="vault-page-empty">Create a vault to begin storing encrypted items.</div>';
       renderEmailAccountsList([]);
       clearEmailAccountForm({ refreshList: false });
       renderEmailAccountsSummary();
@@ -1199,25 +1757,26 @@
   }
 
   function showVaultEditor() {
+    closeUnlockDialog({ restoreFocus: false });
+    closeCreateDialog({ restoreFocus: false });
+    closeExportDialog({ restoreFocus: false });
+    closeImportDialog({ restoreFocus: false });
+    editorDialogOpen = true;
+    syncEditorDialog();
+
     if (editorPanel) {
-      editorPanel.hidden = false;
       editorPanel.classList.remove('animate__fadeOut');
       editorPanel.classList.add('animate__fadeIn');
     }
-    if (entryGrid) {
-      entryGrid.classList.add('is-editor-active');
-    }
+
     if (!selectedRecord && entryLabelInput) {
       entryLabelInput.focus();
     }
   }
 
   function hideVaultEditor(force = false) {
-    if (force && editorPanel) {
-      editorPanel.hidden = true;
-      if (entryGrid) {
-        entryGrid.classList.remove('is-editor-active');
-      }
+    if (force) {
+      closeVaultEditor({ restoreFocus: false });
     }
   }
 
@@ -1236,14 +1795,29 @@
     entryTypeInput.value = 'personal_note';
     entryWorkspaceInput.value = '';
     entryLabelInput.value = '';
+    if (entryFolderPathInput) {
+      entryFolderPathInput.value = selectedFolderRelativePath();
+    }
+    if (entryContentInput) {
+      entryContentInput.value = '';
+    }
+    entryAttachments = [];
+    entryAttachmentSnapshot = [];
+    if (entryJsonModeInput) {
+      entryJsonModeInput.checked = false;
+    }
     entryTagsInput.value = '';
     entryRetentionInput.value = '';
-    entryPayloadInput.disabled = false;
-    entryPayloadInput.value = '{\n  \n}';
-    entryPayloadInput.style.filter = 'none';
-    saveEntryBtn.textContent = 'Save To Vault';
-    revealPayloadBtn.classList.add('d-none');
-    deleteEntryBtn.classList.add('d-none');
+    entryPayloadInput.value = defaultPayloadValue(entryTypeInput.value);
+    if (entryAttachmentsInput) {
+      entryAttachmentsInput.value = '';
+    }
+    if (entryAdvancedDetails) {
+      entryAdvancedDetails.open = false;
+    }
+    renderEntryAttachments();
+    syncEntryComposerPresentation();
+    syncEditorDialog();
 
     if (!preserveStatus && vaultStatus) {
       setInteractiveState(vaultStatus.locked);
@@ -1261,21 +1835,47 @@
     selectedRecord = record;
     payloadRevealed = false;
     showVaultEditor();
-    entryTypeInput.value = record.type || 'personal_note';
+    const normalizedType = normalizeRecordType(record.type);
+    const payload = record.payload ?? {};
+    const payloadCore = payloadWithoutAttachments(payload) || {};
+    const useJSON = !canUseSimpleEntryComposer(normalizedType, payload);
+    const payloadValue = prettyPayload(payloadCore);
+
+    entryTypeInput.value = normalizedType;
     entryWorkspaceInput.value = record.workspace_id || '';
     entryLabelInput.value = record.label || '';
+    if (entryFolderPathInput) {
+      entryFolderPathInput.value = record.folder_path || '';
+    }
+    if (entryContentInput) {
+      entryContentInput.value = entryContentFromPayload(normalizedType, payload);
+    }
+    if (entryJsonModeInput) {
+      entryJsonModeInput.checked = useJSON;
+    }
     entryTagsInput.value = Array.isArray(record.tags) ? record.tags.join(', ') : '';
     entryRetentionInput.value = record.retention_policy || '';
-    entryPayloadInput.disabled = true;
-    entryPayloadInput.style.filter = 'blur(6px)';
-    entryPayloadInput.value = '{\n  "locked": true\n}';
-    saveEntryBtn.textContent = 'Save Changes';
-    revealPayloadBtn.textContent = 'Reveal Payload';
-    revealPayloadBtn.classList.remove('d-none');
-    deleteEntryBtn.classList.remove('d-none');
+    entryAttachments = entryAttachmentsFromPayload(payload);
+    entryAttachmentSnapshot = cloneEntryAttachments(entryAttachments);
+    entryPayloadInput.value = payloadValue === '{}' ? defaultPayloadValue(normalizedType) : payloadValue;
+    if (entryAdvancedDetails) {
+      entryAdvancedDetails.open = Boolean(
+        record.workspace_id ||
+        (Array.isArray(record.tags) && record.tags.length) ||
+        record.retention_policy
+      );
+    }
+
+    renderEntryAttachments();
+    syncEntryComposerPresentation();
     setInteractiveState(Boolean(vaultStatus?.locked));
+    syncEditorDialog();
     renderRecordsList(records);
     renderExplorerPreview();
+    window.requestAnimationFrame(() => {
+      entryLabelInput?.focus();
+      entryLabelInput?.select();
+    });
   }
 
   function togglePayloadReveal() {
@@ -1304,13 +1904,20 @@
     records = Array.isArray(items) ? items : [];
 
     if (!records.length) {
-      recordsListEl.innerHTML = '<div class="vault-page-empty">No vault entries saved yet.</div>';
+      recordsListEl.innerHTML = '<div class="vault-page-empty">No vault items saved yet.</div>';
       return;
     }
 
     recordsListEl.innerHTML = records.map((record) => {
       const isSelected = selectedRecord?.id === record.id ? ' is-selected' : '';
-      const subtitle = `${escapeHTML(recordTypeLabel(record.type))}${record.workspace_id ? ` • ${escapeHTML(record.workspace_id)}` : ''}`;
+      const subtitleParts = [recordTypeLabel(record.type)];
+      if (record.folder_path) {
+        subtitleParts.push(record.folder_path);
+      }
+      if (record.workspace_id) {
+        subtitleParts.push(record.workspace_id);
+      }
+      const subtitle = escapeHTML(subtitleParts.join(' • '));
       const tagCount = Array.isArray(record.tags) ? record.tags.length : 0;
       return `
         <button type="button" class="vault-page-record${isSelected}" data-record-id="${escapeHTML(record.id)}">
@@ -1337,9 +1944,11 @@
   function createFolderNode(path, name, parentPath, recordIDs, options) {
     return {
       path,
+      folderPath: String(options?.folderPath || ''),
       name,
       parentPath: parentPath || '',
       recordIDs: Array.isArray(recordIDs) ? recordIDs.slice() : [],
+      directRecordIDs: Array.isArray(options?.directRecordIDs) ? options.directRecordIDs.slice() : [],
       children: [],
       description: String(options?.description || ''),
       meta: String(options?.meta || '')
@@ -1359,55 +1968,75 @@
 
   function buildFolderTree(items) {
     const index = new Map();
-    const activeVault = currentVault();
-    const allRecordIDs = items.map((record) => record.id);
+    const activeVaultItem = currentVault();
+    const rootLabel = vaultDisplayLabel(activeVaultItem) || 'Vault Root';
+    const folderPaths = new Set();
+    const itemsByID = new Map(items.map((record) => [record.id, record]));
 
-    addFolderNode(index, createFolderNode(ROOT_FOLDER_PATH, activeVault?.name || 'Vault', '', allRecordIDs, {
-      description: activeVault?.description || 'Encrypted folder root'
+    addFolderNode(index, createFolderNode(ROOT_FOLDER_PATH, rootLabel, '', [], {
+      folderPath: '',
+      description: 'Everything in the active vault, including nested folders.',
+      meta: 'Vault root'
     }));
 
-    addFolderNode(index, createFolderNode(TYPE_FOLDER_PATH, 'Types', ROOT_FOLDER_PATH, allRecordIDs, {
-      description: 'Virtual folders derived from vault entry types'
-    }));
-
-    addFolderNode(index, createFolderNode(WORKSPACE_FOLDER_PATH, 'Workspaces', ROOT_FOLDER_PATH, allRecordIDs, {
-      description: 'Virtual folders derived from workspace scope'
-    }));
-
-    const standardTypes = ['personal_note', 'email_snippet', 'secret'];
-    const discoveredTypes = Array.from(new Set(items.map((record) => normalizeRecordType(record.type))))
-      .filter((type) => !standardTypes.includes(type))
-      .sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
-
-    standardTypes.concat(discoveredTypes).forEach((type) => {
-      const recordIDs = items
-        .filter((record) => normalizeRecordType(record.type) === type)
-        .map((record) => record.id);
-
-      addFolderNode(index, createFolderNode(folderPathForType(type), recordTypeFolderName(type), TYPE_FOLDER_PATH, recordIDs, {
-        description: `Encrypted ${recordTypeFolderName(type).toLowerCase()} folder`
-      }));
+    folders.forEach((folder) => {
+      folderPathAncestors(folder.path).forEach((path) => folderPaths.add(path));
+    });
+    items.forEach((record) => {
+      folderPathAncestors(record.folder_path || '').forEach((path) => folderPaths.add(path));
     });
 
-    const globalRecordIDs = items
-      .filter((record) => !String(record.workspace_id || '').trim())
-      .map((record) => record.id);
+    Array.from(folderPaths)
+      .sort((left, right) => {
+        const leftDepth = folderPathSegments(left).length;
+        const rightDepth = folderPathSegments(right).length;
+        if (leftDepth !== rightDepth) {
+          return leftDepth - rightDepth;
+        }
+        return left.localeCompare(right, undefined, { sensitivity: 'base' });
+      })
+      .forEach((folderPath) => {
+        const parentSegments = folderPathSegments(folderPath);
+        parentSegments.pop();
+        const parentPath = parentSegments.join('/');
+        addFolderNode(index, createFolderNode(
+          folderNodePath(folderPath),
+          folderNameFromPath(folderPath),
+          folderNodePath(parentPath),
+          [],
+          {
+            folderPath,
+            description: folderPath,
+            meta: 'Encrypted folder'
+          }
+        ));
+      });
 
-    addFolderNode(index, createFolderNode(folderPathForWorkspace(''), 'Global', WORKSPACE_FOLDER_PATH, globalRecordIDs, {
-      description: 'Entries without workspace scope'
-    }));
+    items.forEach((record) => {
+      [ROOT_FOLDER_PATH, ...folderPathAncestors(record.folder_path || '').map(folderNodePath)].forEach((nodePath) => {
+        const node = index.get(nodePath);
+        if (node) {
+          node.recordIDs.push(record.id);
+        }
+      });
 
-    const workspaceIDs = Array.from(new Set(items.map((record) => String(record.workspace_id || '').trim()).filter(Boolean)))
-      .sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
+      const directNode = index.get(folderNodePath(record.folder_path || ''));
+      if (directNode) {
+        directNode.directRecordIDs.push(record.id);
+      }
+    });
 
-    workspaceIDs.forEach((workspaceID) => {
-      const recordIDs = items
-        .filter((record) => String(record.workspace_id || '').trim() === workspaceID)
-        .map((record) => record.id);
-
-      addFolderNode(index, createFolderNode(folderPathForWorkspace(workspaceID), workspaceID, WORKSPACE_FOLDER_PATH, recordIDs, {
-        description: `Entries scoped to workspace ${workspaceID}`
-      }));
+    index.forEach((node) => {
+      node.children.sort((left, right) => {
+        const leftNode = index.get(left);
+        const rightNode = index.get(right);
+        return String(leftNode?.name || '').localeCompare(String(rightNode?.name || ''), undefined, { sensitivity: 'base' });
+      });
+      node.directRecordIDs.sort((leftID, rightID) => {
+        const leftRecord = itemsByID.get(leftID);
+        const rightRecord = itemsByID.get(rightID);
+        return String(leftRecord?.label || leftRecord?.id || '').localeCompare(String(rightRecord?.label || rightRecord?.id || ''), undefined, { sensitivity: 'base' });
+      });
     });
 
     return index;
@@ -1416,8 +2045,6 @@
   function rebuildFolderTree() {
     folderIndex = buildFolderTree(records);
     expandedFolderPaths.add(ROOT_FOLDER_PATH);
-    expandedFolderPaths.add(TYPE_FOLDER_PATH);
-    expandedFolderPaths.add(WORKSPACE_FOLDER_PATH);
 
     if (!folderIndex.has(selectedFolderPath)) {
       selectedFolderPath = ROOT_FOLDER_PATH;
@@ -1440,6 +2067,14 @@
     return folder.recordIDs.map(recordByID).filter(Boolean);
   }
 
+  function directRecordsForFolder(folder) {
+    if (!folder || !Array.isArray(folder.directRecordIDs)) {
+      return [];
+    }
+
+    return folder.directRecordIDs.map(recordByID).filter(Boolean);
+  }
+
   function filteredRecords(items) {
     const query = String(searchInput?.value || '').trim().toLowerCase();
     if (!query) {
@@ -1449,6 +2084,7 @@
     return items.filter((record) => {
       const haystack = [
         record.label,
+        record.folder_path,
         record.type,
         record.workspace_id,
         Array.isArray(record.tags) ? record.tags.join(' ') : ''
@@ -1472,6 +2108,142 @@
 
   function folderPathLabel(folder) {
     return folderAncestorChain(folder?.path || ROOT_FOLDER_PATH).map((node) => node.name).join(' / ');
+  }
+
+  function isRootFolderPath(nodePath) {
+    return String(nodePath || '') === ROOT_FOLDER_PATH;
+  }
+
+  function openFolderComposer() {
+    if (!currentVaultID()) {
+      showInlineAlert('Create or select a vault before creating a folder.', 'warning');
+      return;
+    }
+    if (!vaultStatus?.available || vaultStatus?.locked) {
+      showInlineAlert('Unlock the selected vault before creating a folder.', 'warning');
+      return;
+    }
+
+    folderComposerOpen = true;
+    renderFolderTree();
+    window.requestAnimationFrame(() => {
+      folderTreeEl?.querySelector('[data-folder-create-input]')?.focus();
+    });
+  }
+
+  function closeFolderComposer() {
+    folderComposerOpen = false;
+    renderFolderTree();
+  }
+
+  async function createFolderFromComposer() {
+    const input = folderTreeEl?.querySelector('[data-folder-create-input]');
+    const relativePath = String(input?.value || '').trim();
+    const basePath = selectedFolderRelativePath();
+
+    let nextPath = '';
+    try {
+      nextPath = joinFolderPath(basePath, relativePath);
+    } catch (error) {
+      showInlineAlert(error.message || 'Folder path is invalid.', 'warning');
+      return;
+    }
+
+    if (!nextPath) {
+      showInlineAlert('Folder name is required.', 'warning');
+      return;
+    }
+
+    try {
+      await apiRequest(vaultURL('/api/vault/folders'), {
+        method: 'POST',
+        body: {
+          vault_id: currentVaultID(),
+          path: nextPath
+        }
+      });
+      folderComposerOpen = false;
+      selectedFolderPath = folderNodePath(nextPath);
+      notify('Folder created.', 'success');
+      await refreshVault();
+    } catch (error) {
+      console.error('Failed to create folder:', error);
+      showInlineAlert(error.message || 'Failed to create folder.', 'error');
+    }
+  }
+
+  async function deleteFolder(folderPath, triggerButton) {
+    const normalizedFolderPath = normalizeFolderPathInput(folderPathFromNodePath(folderPath) || folderPath);
+    if (!normalizedFolderPath) {
+      showInlineAlert('Select a folder before deleting it.', 'warning');
+      return;
+    }
+
+    const folder = folderIndex.get(folderNodePath(normalizedFolderPath));
+    const folderLabel = folder?.name || normalizedFolderPath;
+    const itemCount = Array.isArray(folder?.recordIDs) ? folder.recordIDs.length : 0;
+    const nestedFolderCount = (() => {
+      if (!folder || !Array.isArray(folder.children) || folder.children.length < 1) {
+        return 0;
+      }
+
+      let count = 0;
+      const queue = folder.children.slice();
+      while (queue.length) {
+        const childPath = queue.pop();
+        const childNode = folderIndex.get(childPath);
+        if (!childNode) {
+          continue;
+        }
+        count += 1;
+        if (Array.isArray(childNode.children) && childNode.children.length > 0) {
+          queue.push(...childNode.children);
+        }
+      }
+      return count;
+    })();
+    const recursive = itemCount > 0 || nestedFolderCount > 0;
+    const affectedParts = [];
+    if (itemCount > 0) {
+      affectedParts.push(`${itemCount} ${itemCount === 1 ? 'item' : 'items'}`);
+    }
+    if (nestedFolderCount > 0) {
+      affectedParts.push(`${nestedFolderCount} nested ${nestedFolderCount === 1 ? 'folder' : 'folders'}`);
+    }
+    const confirmed = window.confirm(
+      recursive
+        ? `Delete folder "${folderLabel}" and everything inside it? This will remove ${affectedParts.join(' and ')}. This cannot be undone.`
+        : `Delete empty folder "${folderLabel}"?`
+    );
+    if (!confirmed) {
+      return;
+    }
+
+    try {
+      setButtonLoading(triggerButton, true, 'Deleting');
+      await apiRequest(vaultURL('/api/vault/folders'), {
+        method: 'DELETE',
+        body: {
+          vault_id: currentVaultID(),
+          path: normalizedFolderPath,
+          recursive
+        }
+      });
+
+      if (selectedFolderPath === folderNodePath(normalizedFolderPath)) {
+        const parentPath = folderPathSegments(normalizedFolderPath);
+        parentPath.pop();
+        selectedFolderPath = folderNodePath(parentPath.join('/'));
+      }
+
+      notify('Folder deleted.', 'success');
+      await refreshVault();
+    } catch (error) {
+      console.error('Failed to delete folder:', error);
+      showInlineAlert(error.message || 'Failed to delete folder.', 'error');
+    } finally {
+      setButtonLoading(triggerButton, false);
+    }
   }
 
   function renderRecordAttachmentCard(attachment) {
@@ -1498,7 +2270,148 @@
 
   function folderRowMeta(node) {
     const count = Array.isArray(node.recordIDs) ? node.recordIDs.length : 0;
-    return `${count} ${count === 1 ? 'file' : 'files'}`;
+    const childCount = Array.isArray(node.children) ? node.children.length : 0;
+    const itemLabel = `${count} ${count === 1 ? 'item' : 'items'}`;
+    if (childCount < 1) {
+      return itemLabel;
+    }
+    return `${itemLabel} • ${childCount} ${childCount === 1 ? 'folder' : 'folders'}`;
+  }
+
+  function clearFolderDropTarget() {
+    if (!activeDropFolderButton) {
+      return;
+    }
+
+    activeDropFolderButton.classList.remove('is-drop-target');
+    activeDropFolderButton = null;
+  }
+
+  function setFolderDropTarget(button) {
+    if (activeDropFolderButton === button) {
+      return;
+    }
+
+    clearFolderDropTarget();
+    if (!button) {
+      return;
+    }
+
+    button.classList.add('is-drop-target');
+    activeDropFolderButton = button;
+  }
+
+  function dragRecordButtonFromTarget(target) {
+    if (!(target instanceof Element)) {
+      return null;
+    }
+
+    return target.closest('[data-drag-record="true"][data-record-id]');
+  }
+
+  function folderDropButtonFromTarget(target) {
+    if (!(target instanceof Element)) {
+      return null;
+    }
+
+    return target.closest('.vault-modal-folder-main[data-action="select-folder"]')
+      || target.closest('.vault-modal-folder-node')?.querySelector('.vault-modal-folder-main[data-action="select-folder"]')
+      || null;
+  }
+
+  function beginRecordDrag(button, event) {
+    if (!(button instanceof HTMLElement)) {
+      return;
+    }
+
+    const recordID = String(button.getAttribute('data-record-id') || '').trim();
+    if (!recordID) {
+      return;
+    }
+
+    if (draggedRecordElement && draggedRecordElement !== button) {
+      draggedRecordElement.classList.remove('is-dragging');
+    }
+
+    draggedRecordID = recordID;
+    draggedRecordElement = button;
+    draggedRecordElement.classList.add('is-dragging');
+
+    if (event.dataTransfer) {
+      event.dataTransfer.effectAllowed = 'move';
+      event.dataTransfer.setData('text/plain', recordID);
+    }
+  }
+
+  function clearRecordDrag() {
+    if (draggedRecordElement) {
+      draggedRecordElement.classList.remove('is-dragging');
+    }
+
+    draggedRecordID = '';
+    draggedRecordElement = null;
+    clearFolderDropTarget();
+  }
+
+  async function moveRecordToFolder(recordID, folderPath) {
+    const record = recordByID(recordID);
+    if (!record) {
+      return;
+    }
+
+    const currentFolderPath = normalizeFolderPathInput(record.folder_path || '');
+    const nextFolderPath = normalizeFolderPathInput(folderPath);
+    if (currentFolderPath === nextFolderPath) {
+      return;
+    }
+
+    try {
+      await apiRequest(vaultURL(`/api/vault/records/${encodeURIComponent(recordID)}`), {
+        method: 'PATCH',
+        body: {
+          folder_path: nextFolderPath
+        }
+      });
+
+      [ROOT_FOLDER_PATH, ...folderPathAncestors(nextFolderPath).map(folderNodePath)].forEach((path) => {
+        expandedFolderPaths.add(path);
+      });
+      selectedFolderPath = folderNodePath(nextFolderPath);
+      selectedRecord = record;
+      payloadRevealed = false;
+      notify('Item moved.', 'success');
+      await refreshVault();
+    } catch (error) {
+      console.error('Failed to move vault item:', error);
+      showInlineAlert(error.message || 'Failed to move item.', 'error');
+    }
+  }
+
+  function renderFolderTreeRecord(recordID, folderPath, depth) {
+    const record = recordByID(recordID);
+    if (!record) {
+      return '';
+    }
+
+    const isSelected = selectedRecord?.id === record.id;
+    const metaParts = [recordTypeLabel(record.type)];
+    if (record.workspace_id) {
+      metaParts.push(record.workspace_id);
+    }
+
+    return `
+      <div class="vault-modal-tree-record${isSelected ? ' is-selected' : ''}">
+        <div class="vault-modal-folder-row vault-modal-tree-record-row" style="--vault-tree-depth:${String(depth)};">
+          <span class="vault-modal-folder-spacer"></span>
+          <button type="button" class="vault-modal-tree-record-main" draggable="true" data-action="select-tree-record" data-drag-record="true" data-folder-path="${escapeHTML(folderPath)}" data-record-id="${escapeHTML(record.id)}">
+            <span class="vault-modal-tree-record-icon">${fileTypeIcon(record.type)}</span>
+            <span class="vault-modal-tree-record-label">${escapeHTML(record.label || 'Untitled entry')}</span>
+            <span class="vault-modal-tree-record-meta">${escapeHTML(metaParts.join(' • '))}</span>
+          </button>
+          <button type="button" class="vault-modal-tree-row-action" data-action="delete-tree-record" data-record-id="${escapeHTML(record.id)}">Delete</button>
+        </div>
+      </div>
+    `;
   }
 
   function renderFolderTreeNode(nodePath, depth, forceExpanded) {
@@ -1507,8 +2420,10 @@
       return '';
     }
 
-    const hasChildren = Array.isArray(node.children) && node.children.length > 0;
-    const canToggle = hasChildren && node.path !== ROOT_FOLDER_PATH;
+    const hasFolderChildren = Array.isArray(node.children) && node.children.length > 0;
+    const hasRecordChildren = Array.isArray(node.directRecordIDs) && node.directRecordIDs.length > 0;
+    const hasChildren = hasFolderChildren || hasRecordChildren;
+    const canToggle = hasChildren;
     const isExpanded = hasChildren && (forceExpanded || expandedFolderPaths.has(node.path));
     const isSelected = selectedFolderPath === node.path;
 
@@ -1518,8 +2433,14 @@
         </button>`
       : '<span class="vault-modal-folder-spacer"></span>';
 
-    const childrenHTML = hasChildren && isExpanded
-      ? `<div class="vault-modal-folder-children">${node.children.map((childPath) => renderFolderTreeNode(childPath, depth + 1, false)).join('')}</div>`
+    const childFoldersHTML = hasChildren && isExpanded
+      ? node.children.map((childPath) => renderFolderTreeNode(childPath, depth + 1, false)).join('')
+      : '';
+    const recordChildrenHTML = isExpanded
+      ? directRecordsForFolder(node).map((record) => renderFolderTreeRecord(record.id, node.path, depth + 1)).join('')
+      : '';
+    const childrenHTML = childFoldersHTML || recordChildrenHTML
+      ? `<div class="vault-modal-folder-children">${childFoldersHTML}${recordChildrenHTML}</div>`
       : '';
 
     return `
@@ -1531,6 +2452,7 @@
             <span class="vault-modal-folder-label">${escapeHTML(node.name)}</span>
             <span class="vault-modal-folder-meta">${escapeHTML(folderRowMeta(node))}</span>
           </button>
+          ${node.path === ROOT_FOLDER_PATH ? '' : `<button type="button" class="vault-modal-tree-row-action" data-action="delete-folder" data-folder-path="${escapeHTML(node.folderPath)}">Delete</button>`}
         </div>
         ${childrenHTML}
       </div>
@@ -1548,22 +2470,40 @@
     }
 
     if (!vaultStatus.available) {
-      folderTreeEl.innerHTML = '<div class="vault-modal-empty">No vault exists yet. Create your first encrypted vault to unlock the folder explorer.</div>';
+      folderTreeEl.innerHTML = '<div class="vault-modal-empty">No vault exists yet. Create your first encrypted vault to start saving private items.</div>';
       return;
     }
 
     if (vaultStatus.locked) {
-      folderTreeEl.innerHTML = '<div class="vault-modal-empty">Use the lock icon on the selected vault tab to unlock the vault and browse the encrypted folder tree.</div>';
+      folderTreeEl.innerHTML = '<div class="vault-modal-empty">Use the lock icon on the selected vault tab to unlock the vault and browse saved items.</div>';
       return;
     }
 
     const root = folderIndex.get(ROOT_FOLDER_PATH);
     if (!root) {
-      folderTreeEl.innerHTML = '<div class="vault-modal-empty">No vault folders available yet.</div>';
+      folderTreeEl.innerHTML = '<div class="vault-modal-empty">No saved items available yet.</div>';
       return;
     }
 
-    folderTreeEl.innerHTML = `<div class="vault-modal-folder-tree-scroll">${renderFolderTreeNode(ROOT_FOLDER_PATH, 0, true)}</div>`;
+    const destinationLabel = isRootFolderPath(selectedFolderPath) ? 'vault root' : selectedFolder()?.name || 'selected folder';
+
+    folderTreeEl.innerHTML = `
+      <div class="vault-modal-folder-tree-scroll">
+        ${folderComposerOpen
+          ? `
+            <div class="vault-modal-folder-create-card">
+              <div class="vault-modal-folder-create-copy">Create a folder inside ${escapeHTML(destinationLabel)}.</div>
+              <div class="vault-modal-folder-create-row">
+                <input type="text" class="form-control vault-modal-input" data-folder-create-input placeholder="Folder name or nested path">
+                <button type="button" class="modern-btn modern-btn-primary modern-btn-sm" data-action="save-folder-composer">Save</button>
+                <button type="button" class="modern-btn modern-btn-secondary modern-btn-sm" data-action="cancel-folder-composer">Cancel</button>
+              </div>
+            </div>
+          `
+          : ''}
+        ${renderFolderTreeNode(ROOT_FOLDER_PATH, 0, true)}
+      </div>
+    `;
   }
 
   function renderFolderVaultTabs() {
@@ -1630,7 +2570,7 @@
 
   function renderSelectedRecordDetail() {
     if (!selectedRecord) {
-      return '<div class="vault-modal-preview-detail-empty">Select a file in this encrypted folder to inspect its metadata and reveal its protected payload.</div>';
+      return '<div class="vault-modal-preview-detail-empty">Select an item to inspect its metadata and reveal its protected payload.</div>';
     }
 
     const record = selectedRecord;
@@ -1640,13 +2580,22 @@
       : '<span class="vault-modal-chip is-muted">No tags</span>';
     const revealLabel = payloadRevealed ? 'Hide Payload' : 'Reveal Payload';
     const payloadClass = `vault-modal-payload-preview${payloadRevealed ? '' : ' is-concealed'}`;
+    const payloadToggleButton = `<button type="button" class="modern-btn modern-btn-secondary" data-action="toggle-payload">${escapeHTML(revealLabel)}</button>`;
     const attachmentsHTML = attachments.length
       ? `
         <div class="vault-modal-attachments-wrap">
-          <div class="vault-modal-payload-label">Encrypted attachments</div>
+          <div class="vault-modal-inline-head">
+            <div class="vault-modal-inline-head-copy">
+              <div class="vault-modal-payload-label">Encrypted attachments</div>
+              ${payloadRevealed
+                ? ''
+                : '<div class="vault-modal-preview-empty-inline">Reveal the payload to inspect or download attached files.</div>'}
+            </div>
+            ${payloadToggleButton}
+          </div>
           ${payloadRevealed
             ? `<div class="vault-modal-attachment-grid">${attachments.map(renderRecordAttachmentCard).join('')}</div>`
-            : '<div class="vault-modal-preview-empty-inline">Reveal the payload to inspect or download attached files.</div>'}
+            : ''}
         </div>
       `
       : '';
@@ -1656,17 +2605,17 @@
         <div class="vault-modal-detail-header">
           <div>
             <div class="vault-modal-detail-title">${escapeHTML(record.label || 'Untitled entry')}</div>
-            <div class="vault-modal-detail-meta">${escapeHTML([recordTypeLabel(record.type), record.workspace_id].filter(Boolean).join(' • ') || 'Vault file')}</div>
+            <div class="vault-modal-detail-meta">${escapeHTML([recordTypeLabel(record.type), record.workspace_id].filter(Boolean).join(' • ') || 'Vault item')}</div>
           </div>
           <div class="vault-modal-detail-actions">
-            <button type="button" class="modern-btn modern-btn-secondary" data-action="focus-editor">Focus Editor</button>
-            <button type="button" class="modern-btn modern-btn-secondary" data-action="toggle-payload">${escapeHTML(revealLabel)}</button>
-            <button type="button" class="modern-btn modern-btn-secondary vault-modal-danger-btn" data-action="delete-record" data-record-id="${escapeHTML(record.id)}">Delete</button>
+            <button type="button" class="modern-btn modern-btn-secondary" data-action="focus-editor">Edit Item</button>
+            <button type="button" class="modern-btn modern-btn-secondary vault-modal-danger-btn" data-action="delete-record" data-record-id="${escapeHTML(record.id)}">Delete Item</button>
           </div>
         </div>
         <div class="vault-modal-chip-row">${tags}</div>
         <div class="vault-modal-detail-grid">
           <div class="vault-modal-detail-item"><span>Type</span><strong>${escapeHTML(recordTypeLabel(record.type))}</strong></div>
+          <div class="vault-modal-detail-item"><span>Folder</span><strong>${escapeHTML(record.folder_path || 'Vault root')}</strong></div>
           <div class="vault-modal-detail-item"><span>Workspace</span><strong>${escapeHTML(record.workspace_id || 'Global')}</strong></div>
           <div class="vault-modal-detail-item"><span>Retention</span><strong>${escapeHTML(record.retention_policy || 'Not set')}</strong></div>
           <div class="vault-modal-detail-item"><span>Attachments</span><strong>${String(attachments.length)}</strong></div>
@@ -1674,7 +2623,16 @@
         </div>
         ${attachmentsHTML}
         <div class="vault-modal-payload-wrap">
-          <div class="vault-modal-payload-label">Protected payload</div>
+          ${attachments.length
+            ? '<div class="vault-modal-payload-label">Protected payload</div>'
+            : `
+              <div class="vault-modal-inline-head">
+                <div class="vault-modal-inline-head-copy">
+                  <div class="vault-modal-payload-label">Protected payload</div>
+                </div>
+                ${payloadToggleButton}
+              </div>
+            `}
           <pre class="${payloadClass}">${escapeHTML(prettyPayload(payloadForPreview(record.payload)))}</pre>
         </div>
       </div>
@@ -1694,19 +2652,19 @@
 
     if (!vaultStatus.available) {
       recordsSummaryEl.textContent = 'No vault selected';
-      explorerPreviewEl.innerHTML = '<div class="vault-modal-empty">Create a vault to start saving encrypted files and browsing them in the folder explorer.</div>';
+      explorerPreviewEl.innerHTML = '<div class="vault-modal-empty">Create a vault to start saving encrypted items in your private library.</div>';
       return;
     }
 
     if (vaultStatus.locked) {
       recordsSummaryEl.textContent = 'Vault is locked';
-      explorerPreviewEl.innerHTML = '<div class="vault-modal-empty">Use the lock icon on the selected vault tab to unlock the vault and browse files inside the encrypted folder.</div>';
+      explorerPreviewEl.innerHTML = '<div class="vault-modal-empty">Use the lock icon on the selected vault tab to unlock the vault and browse saved items.</div>';
       return;
     }
 
     const folder = selectedFolder();
     if (!folder) {
-      recordsSummaryEl.textContent = 'No folder selected';
+      recordsSummaryEl.textContent = 'No view selected';
       explorerPreviewEl.innerHTML = '<div class="vault-modal-empty">Select a folder to continue.</div>';
       return;
     }
@@ -1718,7 +2676,7 @@
       clearRecordForm({ preserveStatus: true, refreshExplorer: false });
     }
 
-    recordsSummaryEl.textContent = `${visibleRecords.length} of ${folderRecords.length} ${folderRecords.length === 1 ? 'file' : 'files'} in ${folder.name}`;
+    recordsSummaryEl.textContent = `${visibleRecords.length} of ${folderRecords.length} ${folderRecords.length === 1 ? 'item' : 'items'} in ${folder.name}`;
 
     const filesHTML = visibleRecords.length > 0
       ? visibleRecords.map((record) => {
@@ -1727,7 +2685,7 @@
         const tags = Array.isArray(record.tags) ? record.tags.length : 0;
 
         return `
-          <button type="button" class="vault-modal-preview-file${selectedClass}" data-action="select-record" data-record-id="${escapeHTML(record.id)}">
+          <button type="button" class="vault-modal-preview-file${selectedClass}" draggable="true" data-action="select-record" data-drag-record="true" data-record-id="${escapeHTML(record.id)}">
             <span class="vault-modal-preview-file-icon">${fileTypeIcon(record.type)}</span>
             <span class="vault-modal-preview-file-main">
               <span class="vault-modal-preview-file-name">${escapeHTML(record.label || 'Untitled entry')}</span>
@@ -1740,16 +2698,28 @@
           </button>
         `;
       }).join('')
-      : '<div class="vault-modal-preview-empty-inline">No files match this folder and search combination yet.</div>';
+      : '<div class="vault-modal-preview-empty-inline">No items match this view and search combination yet.</div>';
+
+    const previewSubtitle = folder.path === ROOT_FOLDER_PATH
+      ? 'Vault root'
+      : folderPathLabel(folder);
+    const folderDeleteAction = folder.path === ROOT_FOLDER_PATH
+      ? ''
+      : `<button type="button" class="modern-btn modern-btn-secondary vault-modal-danger-btn" data-action="delete-folder" data-folder-path="${escapeHTML(folder.folderPath)}">Delete Folder</button>`;
 
     explorerPreviewEl.innerHTML = `
       <div class="vault-modal-preview-header">
-        <div class="vault-modal-preview-title">${escapeHTML(folder.name)}</div>
-        <div class="vault-modal-preview-subtitle">${escapeHTML(folderPathLabel(folder))}</div>
+        <div class="vault-modal-inline-head">
+          <div class="vault-modal-inline-head-copy">
+            <div class="vault-modal-preview-title">${escapeHTML(folder.name)}</div>
+            <div class="vault-modal-preview-subtitle">${escapeHTML(previewSubtitle)}</div>
+          </div>
+          ${folderDeleteAction}
+        </div>
       </div>
       <div class="vault-modal-preview-stats">
-        <span class="vault-modal-chip">${String(folderRecords.length)} ${folderRecords.length === 1 ? 'file' : 'files'}</span>
-        <span class="vault-modal-chip is-muted">${escapeHTML(folder.description || 'Encrypted folder view')}</span>
+        <span class="vault-modal-chip">${String(folderRecords.length)} ${folderRecords.length === 1 ? 'item' : 'items'}</span>
+        <span class="vault-modal-chip is-muted">${escapeHTML(folder.description || 'Encrypted folder')}</span>
       </div>
       <div class="vault-modal-preview-file-list">${filesHTML}</div>
       ${renderSelectedRecordDetail()}
@@ -1784,6 +2754,16 @@
     }
 
     renderFolderTree();
+  }
+
+  function folderCanToggle(folderPath) {
+    const folder = folderIndex.get(folderPath);
+    if (!folder) {
+      return false;
+    }
+
+    return (Array.isArray(folder.children) && folder.children.length > 0)
+      || (Array.isArray(folder.directRecordIDs) && folder.directRecordIDs.length > 0);
   }
 
   function renderGrantsList(items) {
@@ -2472,9 +3452,24 @@
     return status;
   }
 
+  async function loadVaultFolders() {
+    if (!vaultStatus?.available || vaultStatus?.locked) {
+      folders = [];
+      rebuildFolderTree();
+      renderExplorer();
+      return;
+    }
+
+    const data = await apiRequest(vaultURL('/api/vault/folders'));
+    folders = Array.isArray(data.folders) ? data.folders : [];
+    rebuildFolderTree();
+    renderExplorer();
+  }
+
   async function loadVaultRecords() {
     if (!vaultStatus?.available || vaultStatus?.locked) {
       records = [];
+      folders = [];
       recordIndex = new Map();
       rebuildFolderTree();
       renderRecordsList([]);
@@ -2509,6 +3504,7 @@
       const status = await loadVaultStatus();
       if (!status.available) {
         renderVaultSpaces();
+        folders = [];
         renderGrantsList([]);
         renderRecordsList([]);
         renderEmailAccountsList([]);
@@ -2520,10 +3516,10 @@
       }
       await loadVaultGrants();
       if (!status.locked) {
-        await loadVaultRecords();
+        await Promise.all([loadVaultFolders(), loadVaultRecords()]);
         await loadEmailAccounts(selectedEmailAccountID);
         if (selectedRecordID && recordIndex.has(selectedRecordID)) {
-          await selectRecord(selectedRecordID, { keepFolder: true });
+          await selectRecord(selectedRecordID, { keepFolder: true, openEditor: editorDialogOpen });
         } else {
           clearRecordForm({ preserveStatus: true, refreshList: true, refreshExplorer: true });
         }
@@ -2546,14 +3542,21 @@
     try {
       const record = await apiRequest(vaultURL(`/api/vault/records/${encodeURIComponent(recordID)}`));
       const keepFolder = Boolean(options.keepFolder);
+      const openEditor = options.openEditor !== false;
       if (!keepFolder) {
         const activeFolder = selectedFolder();
         const folderHasRecord = activeFolder && Array.isArray(activeFolder.recordIDs) && activeFolder.recordIDs.includes(record.id);
         if (!folderHasRecord) {
-          selectedFolderPath = ROOT_FOLDER_PATH;
+          selectedFolderPath = folderNodePath(record.folder_path || '');
         }
       }
-      applyRecordToForm(record);
+      if (openEditor) {
+        applyRecordToForm(record);
+      } else {
+        selectedRecord = record;
+        payloadRevealed = false;
+        renderRecordsList(records);
+      }
       renderExplorer();
     } catch (error) {
       console.error('Failed to load vault record:', error);
@@ -2562,6 +3565,7 @@
   }
 
   function focusEditor() {
+    showVaultEditor();
     window.requestAnimationFrame(() => {
       entryLabelInput?.focus();
       entryLabelInput?.select();
@@ -2586,9 +3590,62 @@
     await lockVault();
   }
 
+  async function uploadRecordAttachment(recordID, attachment) {
+    const normalized = normalizeEntryAttachment(attachment);
+    if (!normalized) {
+      throw new Error('One of the attachments is invalid.');
+    }
+
+    const formData = new window.FormData();
+    formData.append('file', attachmentBlob(normalized), normalized.name || 'attachment');
+    if (normalized.kind) {
+      formData.append('kind', normalized.kind);
+    }
+
+    return apiRequest(vaultURL(`/api/vault/records/${encodeURIComponent(recordID)}/attachments`), {
+      method: 'POST',
+      body: formData
+    });
+  }
+
+  async function syncRecordAttachments(recordID, previousAttachments, nextAttachments) {
+    if (!recordID) {
+      return;
+    }
+
+    const previous = cloneEntryAttachments(previousAttachments);
+    const next = cloneEntryAttachments(nextAttachments);
+    const nextStoredIDs = new Set(next.filter(hasStoredAttachment).map((attachment) => attachment.id));
+
+    for (const attachment of next) {
+      if (hasStoredAttachment(attachment)) {
+        continue;
+      }
+
+      await uploadRecordAttachment(recordID, attachment);
+    }
+
+    for (const attachment of previous) {
+      if (!hasStoredAttachment(attachment) || nextStoredIDs.has(attachment.id)) {
+        continue;
+      }
+
+      await apiRequest(vaultURL(`/api/vault/records/${encodeURIComponent(recordID)}/attachments/${encodeURIComponent(attachment.id)}`), {
+        method: 'DELETE'
+      });
+    }
+  }
+
   async function saveRecord() {
+    const editing = Boolean(selectedRecord?.id);
+
     if (!currentVaultID()) {
       showInlineAlert('Create or select a vault before saving an entry.', 'warning');
+      return;
+    }
+
+    if (!vaultStatus?.available || vaultStatus?.locked) {
+      showInlineAlert(editing ? 'Unlock the selected vault before editing an entry.' : 'Unlock the selected vault before creating a new entry.', 'warning');
       return;
     }
 
@@ -2602,24 +3659,26 @@
     };
 
     if (!payloadBody.label) {
-      showInlineAlert('Label is required before saving to the vault.', 'warning');
+      showInlineAlert('Title is required before saving to the vault.', 'warning');
       return;
     }
 
     try {
-      if (!selectedRecord || payloadRevealed) {
-        payloadBody.payload = parsePayloadInput();
-      }
+      payloadBody.folder_path = normalizeFolderPathInput(entryFolderPathInput?.value);
+      payloadBody.payload = payloadWithoutAttachments(parsePayloadInput());
     } catch (error) {
       showInlineAlert(error.message || 'Payload must be valid JSON.', 'warning');
       return;
     }
 
+    let persistedRecordID = selectedRecord?.id || '';
+    let recordPersisted = false;
+
     try {
-      setButtonLoading(saveEntryBtn, true, selectedRecord ? 'Saving changes' : 'Saving entry');
+      setButtonLoading(saveEntryBtn, true, editing ? 'Updating entry' : 'Saving entry');
 
       let response;
-      if (selectedRecord) {
+      if (editing) {
         response = await apiRequest(vaultURL(`/api/vault/records/${encodeURIComponent(selectedRecord.id)}`), {
           method: 'PATCH',
           body: payloadBody
@@ -2630,47 +3689,77 @@
           body: payloadBody
         });
       }
+      persistedRecordID = persistedRecordID || String(response?.record?.id || '').trim();
+      recordPersisted = true;
 
-      notify(selectedRecord ? 'Vault entry updated.' : 'Vault entry saved.', 'success');
-      await refreshVault();
+      await syncRecordAttachments(persistedRecordID, entryAttachmentSnapshot, entryAttachments);
 
-      const nextRecordID = response?.record?.id;
-      if (nextRecordID) {
-        await selectRecord(nextRecordID);
+      closeVaultEditor({ restoreFocus: false });
+
+      if (editing) {
+        notify('Vault entry updated.', 'success');
+        await refreshVault();
       } else {
-        clearRecordForm();
+        clearRecordForm({ hide: true, refreshList: false, refreshExplorer: false });
+        selectedFolderPath = folderNodePath(payloadBody.folder_path);
+        notify('Vault entry saved.', 'success');
+        await refreshVault();
+
+        const createdRecordID = response?.record?.id;
+        if (createdRecordID) {
+          await selectRecord(createdRecordID, { openEditor: false });
+        }
       }
     } catch (error) {
       console.error('Failed to save vault entry:', error);
-      showInlineAlert(error.message || 'Failed to save vault entry.', 'error');
+      if (recordPersisted) {
+        closeVaultEditor({ restoreFocus: false });
+        notify(editing ? 'Vault entry updated, but attachments need attention.' : 'Vault entry saved, but attachments need attention.', 'warning');
+        if (editing) {
+          await refreshVault();
+        } else {
+          await refreshVault();
+          if (persistedRecordID) {
+            await selectRecord(persistedRecordID, { openEditor: false });
+          }
+        }
+        showInlineAlert(error.message || 'The entry was saved, but attachments failed to sync.', 'error');
+        return;
+      }
+      showInlineAlert(error.message || (editing ? 'Failed to update vault entry.' : 'Failed to save vault entry.'), 'error');
     } finally {
       setButtonLoading(saveEntryBtn, false);
     }
   }
 
-  async function deleteRecord() {
-    if (!selectedRecord) {
+  async function deleteRecord(recordID = selectedRecord?.id || '', triggerButton = null) {
+    const targetRecord = recordID ? recordIndex.get(recordID) || (selectedRecord?.id === recordID ? selectedRecord : null) : selectedRecord;
+    if (!recordID || !targetRecord) {
       return;
     }
 
-    const confirmed = window.confirm(`Delete vault entry "${selectedRecord.label || selectedRecord.id}"?`);
+    const confirmed = window.confirm(`Delete vault item "${targetRecord.label || targetRecord.id}"?`);
     if (!confirmed) {
       return;
     }
 
+    const deleteButton = triggerButton || (selectedRecord?.id === recordID ? deleteEntryBtn : null);
+
     try {
-      setButtonLoading(deleteEntryBtn, true, 'Deleting');
-      await apiRequest(vaultURL(`/api/vault/records/${encodeURIComponent(selectedRecord.id)}`), {
+      setButtonLoading(deleteButton, true, 'Deleting');
+      await apiRequest(vaultURL(`/api/vault/records/${encodeURIComponent(recordID)}`), {
         method: 'DELETE'
       });
-      notify('Vault entry deleted.', 'success');
-      clearRecordForm();
+      notify('Vault item deleted.', 'success');
+      if (selectedRecord?.id === recordID) {
+        clearRecordForm({ hide: true });
+      }
       await refreshVault();
     } catch (error) {
-      console.error('Failed to delete vault entry:', error);
-      showInlineAlert(error.message || 'Failed to delete vault entry.', 'error');
+      console.error('Failed to delete vault item:', error);
+      showInlineAlert(error.message || 'Failed to delete vault item.', 'error');
     } finally {
-      setButtonLoading(deleteEntryBtn, false);
+      setButtonLoading(deleteButton, false);
     }
   }
 
@@ -2851,24 +3940,13 @@
       return;
     }
 
-    let bundle = null;
-    try {
-      const raw = await readFileAsText(file);
-      bundle = JSON.parse(raw);
-    } catch (error) {
-      console.error('Failed to parse vault import bundle:', error);
-      showInlineAlert(error.message || 'The selected import file is not valid JSON.', 'error');
-      return;
-    }
-
-    const requestBody = {
-      import_password: importPassword,
-      bundle,
-      restore_grants: Boolean(importRestoreGrantsInput?.checked)
-    };
+    const requestBody = new window.FormData();
+    requestBody.append('file', file, String(file.name || 'vault-export.json'));
+    requestBody.append('import_password', importPassword);
+    requestBody.append('restore_grants', String(Boolean(importRestoreGrantsInput?.checked)));
 
     if (mode === 'current') {
-      requestBody.target_vault_id = currentVaultID();
+      requestBody.append('target_vault_id', currentVaultID());
     } else {
       const vaultPassword = String(importVaultPasswordInput?.value || '').trim();
       const confirmPassword = String(importConfirmVaultPasswordInput?.value || '').trim();
@@ -2880,11 +3958,9 @@
         showInlineAlert('The imported vault passwords do not match.', 'warning');
         return;
       }
-      requestBody.create_vault = {
-        name: String(importVaultNameInput?.value || '').trim(),
-        description: String(importVaultDescriptionInput?.value || '').trim(),
-        vault_password: vaultPassword
-      };
+      requestBody.append('create_vault_name', String(importVaultNameInput?.value || '').trim());
+      requestBody.append('create_vault_description', String(importVaultDescriptionInput?.value || '').trim());
+      requestBody.append('create_vault_password', vaultPassword);
     }
 
     try {
@@ -3010,6 +4086,10 @@
   });
 
   resetEntryBtn?.addEventListener('click', () => {
+    if (selectedRecord) {
+      applyRecordToForm(selectedRecord);
+      return;
+    }
     clearRecordForm();
     showVaultEditor();
   });
@@ -3019,8 +4099,19 @@
     showVaultEditor();
   });
 
+  explorerNewFolderBtn?.addEventListener('click', () => {
+    openFolderComposer();
+  });
+
   editorCloseBtn?.addEventListener('click', () => {
-    clearRecordForm({ hide: true });
+    closeVaultEditor();
+  });
+
+  editorOverlay?.addEventListener('click', (event) => {
+    const dismissTrigger = event.target.closest('[data-action="dismiss-page-entry-dialog"]');
+    if (dismissTrigger) {
+      closeVaultEditor();
+    }
   });
 
   revealPayloadBtn?.addEventListener('click', () => {
@@ -3029,6 +4120,43 @@
 
   deleteEntryBtn?.addEventListener('click', () => {
     deleteRecord();
+  });
+
+  entryTypeInput?.addEventListener('change', () => {
+    syncEntryComposerPresentation();
+  });
+
+  entryJsonModeInput?.addEventListener('change', () => {
+    syncEntryComposerPresentation();
+  });
+
+  entryUseSelectedFolderBtn?.addEventListener('click', () => {
+    if (entryFolderPathInput) {
+      entryFolderPathInput.value = selectedFolderRelativePath();
+    }
+  });
+
+  entryAttachBtn?.addEventListener('click', () => {
+    entryAttachmentsInput?.click();
+  });
+
+  entryAttachmentsInput?.addEventListener('change', (event) => {
+    addEntryAttachments(event.target.files).catch((error) => {
+      console.error('Failed to add vault attachments:', error);
+      showInlineAlert(error.message || 'Failed to add attachment.', 'error');
+    });
+  });
+
+  entryAttachmentsList?.addEventListener('click', (event) => {
+    const target = event.target.closest('[data-action="remove-entry-attachment"]');
+    if (!target) {
+      return;
+    }
+
+    const attachmentID = target.getAttribute('data-attachment-id');
+    if (attachmentID) {
+      removeEntryAttachment(attachmentID);
+    }
   });
 
   recordsListEl?.addEventListener('click', (event) => {
@@ -3067,14 +4195,121 @@
     }
 
     const folderPath = action.getAttribute('data-folder-path');
+    if (action.getAttribute('data-action') === 'delete-folder') {
+      deleteFolder(folderPath, action);
+      return;
+    }
+
+    if (action.getAttribute('data-action') === 'delete-tree-record') {
+      deleteRecord(action.getAttribute('data-record-id'), action);
+      return;
+    }
+
     if (action.getAttribute('data-action') === 'toggle-folder') {
       toggleFolderNode(folderPath);
       return;
     }
 
     if (action.getAttribute('data-action') === 'select-folder') {
+      if (folderCanToggle(folderPath)) {
+        toggleFolderNode(folderPath);
+      }
       selectFolder(folderPath);
+      return;
     }
+
+    if (action.getAttribute('data-action') === 'select-tree-record') {
+      selectedFolderPath = folderPath || ROOT_FOLDER_PATH;
+      selectRecord(action.getAttribute('data-record-id'), { keepFolder: true, openEditor: false });
+      return;
+    }
+
+    if (action.getAttribute('data-action') === 'open-folder-composer') {
+      openFolderComposer();
+      return;
+    }
+
+    if (action.getAttribute('data-action') === 'save-folder-composer') {
+      createFolderFromComposer();
+      return;
+    }
+
+    if (action.getAttribute('data-action') === 'cancel-folder-composer') {
+      closeFolderComposer();
+    }
+  });
+
+  folderTreeEl?.addEventListener('keydown', (event) => {
+    if (event.key !== 'Enter') {
+      return;
+    }
+    const target = event.target;
+    if (!(target instanceof HTMLInputElement) || !target.matches('[data-folder-create-input]')) {
+      return;
+    }
+    event.preventDefault();
+    createFolderFromComposer();
+  });
+
+  folderTreeEl?.addEventListener('dragstart', (event) => {
+    const button = dragRecordButtonFromTarget(event.target);
+    if (!button) {
+      return;
+    }
+
+    beginRecordDrag(button, event);
+  });
+
+  folderTreeEl?.addEventListener('dragend', () => {
+    clearRecordDrag();
+  });
+
+  folderTreeEl?.addEventListener('dragover', (event) => {
+    if (!draggedRecordID) {
+      return;
+    }
+
+    const folderButton = folderDropButtonFromTarget(event.target);
+    if (!folderButton) {
+      clearFolderDropTarget();
+      return;
+    }
+
+    event.preventDefault();
+    if (event.dataTransfer) {
+      event.dataTransfer.dropEffect = 'move';
+    }
+    setFolderDropTarget(folderButton);
+  });
+
+  folderTreeEl?.addEventListener('dragleave', (event) => {
+    if (!draggedRecordID) {
+      return;
+    }
+
+    const nextTarget = event.relatedTarget;
+    if (nextTarget instanceof Node && folderTreeEl.contains(nextTarget)) {
+      return;
+    }
+
+    clearFolderDropTarget();
+  });
+
+  folderTreeEl?.addEventListener('drop', async (event) => {
+    if (!draggedRecordID) {
+      return;
+    }
+
+    const folderButton = folderDropButtonFromTarget(event.target);
+    const recordID = draggedRecordID;
+    clearRecordDrag();
+
+    if (!folderButton) {
+      return;
+    }
+
+    event.preventDefault();
+    await moveRecordToFolder(recordID, folderPathFromNodePath(folderButton.getAttribute('data-folder-path')));
   });
 
   folderBreadcrumbEl?.addEventListener('click', (event) => {
@@ -3108,7 +4343,12 @@
     }
 
     if (actionName === 'delete-record') {
-      deleteRecord();
+      deleteRecord(action.getAttribute('data-record-id'), action);
+      return;
+    }
+
+    if (actionName === 'delete-folder') {
+      deleteFolder(action.getAttribute('data-folder-path'), action);
       return;
     }
 
@@ -3119,6 +4359,19 @@
         downloadAttachment(attachment);
       }
     }
+  });
+
+  explorerPreviewEl?.addEventListener('dragstart', (event) => {
+    const button = dragRecordButtonFromTarget(event.target);
+    if (!button) {
+      return;
+    }
+
+    beginRecordDrag(button, event);
+  });
+
+  explorerPreviewEl?.addEventListener('dragend', () => {
+    clearRecordDrag();
   });
 
   createGrantBtn?.addEventListener('click', () => {
@@ -3253,6 +4506,11 @@
 
   document.addEventListener('keydown', (event) => {
     if (event.key !== 'Escape') {
+      return;
+    }
+
+    if (editorDialogOpen) {
+      closeVaultEditor();
       return;
     }
 

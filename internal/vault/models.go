@@ -8,25 +8,30 @@ import (
 )
 
 var (
-	ErrVaultRequired          = errors.New("vault: vault selection is required")
-	ErrVaultNotFound          = errors.New("vault: vault not found")
-	ErrVaultAlreadyExists     = errors.New("vault: vault already exists")
-	ErrVaultNameRequired      = errors.New("vault: vault name is required")
-	ErrRecordNotFound         = errors.New("vault: record not found")
-	ErrGrantNotFound          = errors.New("vault: grant not found")
-	ErrPermissionDenied       = errors.New("vault: permission denied")
-	ErrInvalidEmailAccount    = errors.New("vault: invalid email account")
-	ErrVaultLocked            = errors.New("vault: vault locked")
-	ErrVaultKeyUnavailable    = errors.New("vault: data encryption key unavailable")
-	ErrMalformedRecord        = errors.New("vault: malformed encrypted record")
-	ErrVaultPasswordRequired  = errors.New("vault: vault password is required")
-	ErrVaultPasswordInvalid   = errors.New("vault: incorrect vault password")
-	ErrExportPasswordEmpty    = errors.New("vault: export password is required")
-	ErrImportPasswordRequired = errors.New("vault: import password is required")
-	ErrImportPasswordInvalid  = errors.New("vault: incorrect import password or corrupted bundle")
-	ErrImportBundleRequired   = errors.New("vault: import bundle is required")
-	ErrImportBundleInvalid    = errors.New("vault: import bundle is invalid")
-	ErrImportTargetRequired   = errors.New("vault: import target is required")
+	ErrVaultRequired            = errors.New("vault: vault selection is required")
+	ErrVaultNotFound            = errors.New("vault: vault not found")
+	ErrVaultAlreadyExists       = errors.New("vault: vault already exists")
+	ErrVaultNameRequired        = errors.New("vault: vault name is required")
+	ErrRecordNotFound           = errors.New("vault: record not found")
+	ErrGrantNotFound            = errors.New("vault: grant not found")
+	ErrPermissionDenied         = errors.New("vault: permission denied")
+	ErrInvalidEmailAccount      = errors.New("vault: invalid email account")
+	ErrVaultLocked              = errors.New("vault: vault locked")
+	ErrVaultKeyUnavailable      = errors.New("vault: data encryption key unavailable")
+	ErrMalformedRecord          = errors.New("vault: malformed encrypted record")
+	ErrVaultPasswordRequired    = errors.New("vault: vault password is required")
+	ErrVaultPasswordInvalid     = errors.New("vault: incorrect vault password")
+	ErrExportPasswordEmpty      = errors.New("vault: export password is required")
+	ErrImportPasswordRequired   = errors.New("vault: import password is required")
+	ErrImportPasswordInvalid    = errors.New("vault: incorrect import password or corrupted bundle")
+	ErrImportBundleRequired     = errors.New("vault: import bundle is required")
+	ErrImportBundleInvalid      = errors.New("vault: import bundle is invalid")
+	ErrImportTargetRequired     = errors.New("vault: import target is required")
+	ErrFolderPathInvalid        = errors.New("vault: folder path is invalid")
+	ErrFolderNotEmpty           = errors.New("vault: folder is not empty")
+	ErrRecordAttachmentNotFound = errors.New("vault: record attachment not found")
+	ErrRecordAttachmentRequired = errors.New("vault: attachment content is required")
+	ErrRecordAttachmentTooLarge = errors.New("vault: attachment exceeds maximum size")
 )
 
 const DefaultVaultID = "default"
@@ -73,6 +78,7 @@ type Record struct {
 	VaultID         string          `json:"vault_id,omitempty"`
 	Type            string          `json:"type"`
 	WorkspaceID     string          `json:"workspace_id,omitempty"`
+	FolderPath      string          `json:"folder_path,omitempty"`
 	Label           string          `json:"label"`
 	Tags            []string        `json:"tags,omitempty"`
 	Source          string          `json:"source,omitempty"`
@@ -85,6 +91,7 @@ type Record struct {
 type RecordUpdate struct {
 	Type            *string          `json:"type,omitempty"`
 	WorkspaceID     *string          `json:"workspace_id,omitempty"`
+	FolderPath      *string          `json:"folder_path,omitempty"`
 	Label           *string          `json:"label,omitempty"`
 	Tags            *[]string        `json:"tags,omitempty"`
 	Source          *string          `json:"source,omitempty"`
@@ -92,17 +99,40 @@ type RecordUpdate struct {
 	Payload         *json.RawMessage `json:"payload,omitempty"`
 }
 
+type RecordAttachment struct {
+	ID            string    `json:"id"`
+	RecordID      string    `json:"record_id,omitempty"`
+	VaultID       string    `json:"vault_id,omitempty"`
+	Name          string    `json:"name"`
+	MimeType      string    `json:"mime_type"`
+	SizeBytes     int64     `json:"size_bytes"`
+	Kind          string    `json:"kind,omitempty"`
+	DownloadURL   string    `json:"download_url,omitempty"`
+	ContentBase64 string    `json:"content_base64,omitempty"`
+	CreatedAt     time.Time `json:"created_at,omitempty"`
+	UpdatedAt     time.Time `json:"updated_at,omitempty"`
+}
+
 type RecordListItem struct {
 	ID              string    `json:"id"`
 	VaultID         string    `json:"vault_id,omitempty"`
 	Type            string    `json:"type"`
 	WorkspaceID     string    `json:"workspace_id,omitempty"`
+	FolderPath      string    `json:"folder_path,omitempty"`
 	Label           string    `json:"label"`
 	Tags            []string  `json:"tags,omitempty"`
 	Source          string    `json:"source,omitempty"`
 	RetentionPolicy string    `json:"retention_policy,omitempty"`
 	CreatedAt       time.Time `json:"created_at"`
 	UpdatedAt       time.Time `json:"updated_at"`
+}
+
+type Folder struct {
+	ID        string    `json:"id"`
+	VaultID   string    `json:"vault_id,omitempty"`
+	Path      string    `json:"path"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
 }
 
 type EmailProvider string
