@@ -60,6 +60,8 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		h.handleExport(w, r)
 	case path == "/import":
 		h.handleImport(w, r)
+	case path == "/folders" || path == "/folders/":
+		h.handleFolders(w, r)
 	case path == "/records" || path == "/records/":
 		h.handleRecords(w, r)
 	case strings.HasPrefix(path, "/records/") && strings.Contains(strings.TrimPrefix(path, "/records/"), "/attachments"):
@@ -310,6 +312,7 @@ func (h *Handler) handleRecords(w http.ResponseWriter, r *http.Request) {
 			Type            string          `json:"type"`
 			VaultID         string          `json:"vault_id,omitempty"`
 			WorkspaceID     string          `json:"workspace_id,omitempty"`
+			FolderPath      string          `json:"folder_path,omitempty"`
 			Label           string          `json:"label"`
 			Tags            []string        `json:"tags,omitempty"`
 			Source          string          `json:"source,omitempty"`
@@ -326,6 +329,7 @@ func (h *Handler) handleRecords(w http.ResponseWriter, r *http.Request) {
 			VaultID:         vaultIDFromRequest(r, req.VaultID),
 			Type:            req.Type,
 			WorkspaceID:     firstNonEmpty(req.WorkspaceID, r.URL.Query().Get("workspace_id")),
+			FolderPath:      req.FolderPath,
 			Label:           req.Label,
 			Tags:            req.Tags,
 			Source:          req.Source,
@@ -367,6 +371,7 @@ func (h *Handler) handleRecord(w http.ResponseWriter, r *http.Request, id string
 		var req struct {
 			Type            *string          `json:"type,omitempty"`
 			WorkspaceID     *string          `json:"workspace_id,omitempty"`
+			FolderPath      *string          `json:"folder_path,omitempty"`
 			Label           *string          `json:"label,omitempty"`
 			Tags            *[]string        `json:"tags,omitempty"`
 			Source          *string          `json:"source,omitempty"`
@@ -383,6 +388,7 @@ func (h *Handler) handleRecord(w http.ResponseWriter, r *http.Request, id string
 		update := vault.RecordUpdate{
 			Type:            req.Type,
 			WorkspaceID:     req.WorkspaceID,
+			FolderPath:      req.FolderPath,
 			Label:           req.Label,
 			Tags:            req.Tags,
 			Source:          req.Source,
@@ -576,7 +582,7 @@ func respondVaultError(w http.ResponseWriter, err error) {
 		_ = orihttp.RespondError(w, http.StatusLocked, err.Error())
 	case errors.Is(err, vault.ErrRecordAttachmentTooLarge):
 		_ = orihttp.RespondError(w, http.StatusRequestEntityTooLarge, err.Error())
-	case errors.Is(err, vault.ErrVaultRequired), errors.Is(err, vault.ErrVaultNameRequired), errors.Is(err, vault.ErrVaultPasswordRequired), errors.Is(err, vault.ErrExportPasswordEmpty), errors.Is(err, vault.ErrImportPasswordRequired), errors.Is(err, vault.ErrImportBundleRequired), errors.Is(err, vault.ErrImportBundleInvalid), errors.Is(err, vault.ErrImportTargetRequired), errors.Is(err, vault.ErrInvalidEmailAccount), errors.Is(err, vault.ErrRecordAttachmentRequired):
+	case errors.Is(err, vault.ErrVaultRequired), errors.Is(err, vault.ErrVaultNameRequired), errors.Is(err, vault.ErrVaultPasswordRequired), errors.Is(err, vault.ErrExportPasswordEmpty), errors.Is(err, vault.ErrImportPasswordRequired), errors.Is(err, vault.ErrImportBundleRequired), errors.Is(err, vault.ErrImportBundleInvalid), errors.Is(err, vault.ErrImportTargetRequired), errors.Is(err, vault.ErrInvalidEmailAccount), errors.Is(err, vault.ErrFolderPathInvalid), errors.Is(err, vault.ErrRecordAttachmentRequired):
 		_ = orihttp.RespondError(w, http.StatusBadRequest, err.Error())
 	case errors.Is(err, vault.ErrImportPasswordInvalid):
 		_ = orihttp.RespondError(w, http.StatusUnauthorized, err.Error())

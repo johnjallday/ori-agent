@@ -27,6 +27,7 @@ var (
 	ErrImportBundleRequired     = errors.New("vault: import bundle is required")
 	ErrImportBundleInvalid      = errors.New("vault: import bundle is invalid")
 	ErrImportTargetRequired     = errors.New("vault: import target is required")
+	ErrFolderPathInvalid        = errors.New("vault: folder path is invalid")
 	ErrRecordAttachmentNotFound = errors.New("vault: record attachment not found")
 	ErrRecordAttachmentRequired = errors.New("vault: attachment content is required")
 	ErrRecordAttachmentTooLarge = errors.New("vault: attachment exceeds maximum size")
@@ -76,6 +77,7 @@ type Record struct {
 	VaultID         string          `json:"vault_id,omitempty"`
 	Type            string          `json:"type"`
 	WorkspaceID     string          `json:"workspace_id,omitempty"`
+	FolderPath      string          `json:"folder_path,omitempty"`
 	Label           string          `json:"label"`
 	Tags            []string        `json:"tags,omitempty"`
 	Source          string          `json:"source,omitempty"`
@@ -88,6 +90,7 @@ type Record struct {
 type RecordUpdate struct {
 	Type            *string          `json:"type,omitempty"`
 	WorkspaceID     *string          `json:"workspace_id,omitempty"`
+	FolderPath      *string          `json:"folder_path,omitempty"`
 	Label           *string          `json:"label,omitempty"`
 	Tags            *[]string        `json:"tags,omitempty"`
 	Source          *string          `json:"source,omitempty"`
@@ -114,12 +117,21 @@ type RecordListItem struct {
 	VaultID         string    `json:"vault_id,omitempty"`
 	Type            string    `json:"type"`
 	WorkspaceID     string    `json:"workspace_id,omitempty"`
+	FolderPath      string    `json:"folder_path,omitempty"`
 	Label           string    `json:"label"`
 	Tags            []string  `json:"tags,omitempty"`
 	Source          string    `json:"source,omitempty"`
 	RetentionPolicy string    `json:"retention_policy,omitempty"`
 	CreatedAt       time.Time `json:"created_at"`
 	UpdatedAt       time.Time `json:"updated_at"`
+}
+
+type Folder struct {
+	ID        string    `json:"id"`
+	VaultID   string    `json:"vault_id,omitempty"`
+	Path      string    `json:"path"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
 }
 
 type EmailProvider string

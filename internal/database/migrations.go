@@ -10,7 +10,7 @@ import (
 
 // schemaVersion is the current database schema version.
 // Increment this when adding new migrations.
-const schemaVersion = 9
+const schemaVersion = 10
 
 // migrate runs all pending migrations to bring the database up to the current schema.
 func (db *DB) migrate(ctx context.Context) error {
@@ -83,6 +83,8 @@ func (db *DB) runMigration(ctx context.Context, version int) error {
 		return db.migration008WorkspaceSkillState(ctx)
 	case 9:
 		return db.migration009VaultRecordAttachments(ctx)
+	case 10:
+		return db.migration010VaultFolders(ctx)
 	default:
 		return fmt.Errorf("unknown migration version: %d", version)
 	}
@@ -716,6 +718,42 @@ func (db *DB) migration009VaultRecordAttachments(ctx context.Context) error {
 	for _, stmt := range indexStatements {
 		if _, err := tx.ExecContext(ctx, stmt); err != nil {
 			return fmt.Errorf("failed to create vault attachment index: %w", err)
+		}
+	}
+
+	return tx.Commit()
+}
+
+func (db *DB) migration010VaultFolders(ctx context.Context) error {
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("failed to begin transaction: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	if _, err := tx.ExecContext(ctx, `
+		CREATE TABLE IF NOT EXISTS vault_folders (
+			id TEXT PRIMARY KEY,
+			vault_id TEXT NOT NULL,
+			path_hash TEXT NOT NULL,
+			path_nonce TEXT NOT NULL,
+			path_ciphertext TEXT NOT NULL,
+			created_at DATETIME NOT NULL,
+			updated_at DATETIME NOT NULL,
+			UNIQUE(vault_id, path_hash),
+			FOREIGN KEY (vault_id) REFERENCES vaults(id) ON DELETE CASCADE
+		)
+	`); err != nil {
+		return fmt.Errorf("failed to create vault_folders table: %w", err)
+	}
+
+	indexStatements := []string{
+		"CREATE INDEX IF NOT EXISTS idx_vault_folders_vault_id ON vault_folders(vault_id)",
+		"CREATE INDEX IF NOT EXISTS idx_vault_folders_vault_created_at ON vault_folders(vault_id, created_at ASC)",
+	}
+	for _, stmt := range indexStatements {
+		if _, err := tx.ExecContext(ctx, stmt); err != nil {
+			return fmt.Errorf("failed to create vault folder index: %w", err)
 		}
 	}
 

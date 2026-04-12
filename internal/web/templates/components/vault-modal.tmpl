@@ -40,31 +40,32 @@
           <section class="vault-modal-panel">
             <div class="vault-modal-section-head vault-modal-folder-head">
               <div class="vault-modal-folder-head-copy">
-                <span id="vaultModalWorkspaceKicker" class="vault-modal-section-kicker">Encrypted Folder</span>
-                <h6 id="vaultModalWorkspaceTitle" class="vault-modal-section-title">Folder View</h6>
-                <p id="vaultModalWorkspaceDescription" class="vault-modal-section-description">Browse the active vault like a protected folder. The vault tabs switch spaces directly, and the active tab handles lock or unlock.</p>
+                <span id="vaultModalWorkspaceKicker" class="vault-modal-section-kicker">Encrypted Library</span>
+                <h6 id="vaultModalWorkspaceTitle" class="vault-modal-section-title">Saved Items</h6>
+                <p id="vaultModalWorkspaceDescription" class="vault-modal-section-description">Browse the active vault like a private folder tree. Create your own folders, keep encrypted items where they belong, and use search for type, workspace, or tag metadata.</p>
               </div>
               <div class="vault-modal-folder-head-actions">
                 <button id="vaultModalOpenCreateVaultBtn" class="modern-btn modern-btn-secondary" type="button">New Vault</button>
                 <button id="vaultModalOpenImportBtn" class="modern-btn modern-btn-secondary" type="button">Import</button>
                 <button id="vaultModalOpenExportBtn" class="modern-btn modern-btn-secondary" type="button">Export</button>
+                <button id="vaultModalNewFolderBtn" class="modern-btn modern-btn-secondary" type="button">New Folder</button>
                 <button id="vaultModalOpenEntryBtn" class="modern-btn modern-btn-primary" type="button">New Entry</button>
               </div>
             </div>
 
-            <div id="vaultModalFolderTabPanel" class="vault-modal-workspace-panel" role="region" aria-label="Folder view">
+            <div id="vaultModalFolderTabPanel" class="vault-modal-workspace-panel" role="region" aria-label="Saved items view">
               <div class="vault-modal-records-toolbar">
-                <input id="vaultModalSearchInput" type="search" class="form-control vault-modal-search" placeholder="Search label, type, workspace, or tag">
+                <input id="vaultModalSearchInput" type="search" class="form-control vault-modal-search" placeholder="Search label, folder, type, workspace, or tag">
                 <span id="vaultModalRecordsSummary" class="vault-modal-records-summary">Waiting for vault status...</span>
               </div>
 
-              <div id="vaultModalFolderVaultTabs" class="vault-modal-folder-vault-tabs" role="tablist" aria-label="Vault folders"></div>
+              <div id="vaultModalFolderVaultTabs" class="vault-modal-folder-vault-tabs" role="tablist" aria-label="Vaults"></div>
 
               <div id="vaultModalFolderBreadcrumb" class="vault-modal-folder-breadcrumb" aria-label="Vault folder path" hidden></div>
 
               <div class="vault-modal-explorer-grid">
                 <div id="vaultModalFolderTree" class="vault-modal-folder-tree">
-                  <div class="vault-modal-empty">Unlock the vault to browse the encrypted folder tree.</div>
+                  <div class="vault-modal-empty">Unlock the vault to browse saved items.</div>
                 </div>
 
                 <div id="vaultModalExplorerPreview" class="vault-modal-explorer-preview">
@@ -267,6 +268,15 @@
           <div class="vault-modal-field">
             <label class="vault-modal-label" for="vaultModalEntryLabel">Title</label>
             <input id="vaultModalEntryLabel" type="text" class="form-control vault-modal-input" placeholder="Passport note, tax reminder, emergency contact">
+          </div>
+
+          <div class="vault-modal-field">
+            <div class="vault-modal-field-head">
+              <label class="vault-modal-label" for="vaultModalEntryFolderPath">Folder</label>
+              <button id="vaultModalEntryUseSelectedFolderBtn" class="modern-btn modern-btn-secondary modern-btn-sm" type="button">Use Selected</button>
+            </div>
+            <input id="vaultModalEntryFolderPath" type="text" class="form-control vault-modal-input" placeholder="Optional folder path like Travel/Passports">
+            <div class="vault-modal-help">Use "/" to create nested folders. Leave blank to keep the item at the vault root.</div>
           </div>
 
           <div class="vault-modal-field">

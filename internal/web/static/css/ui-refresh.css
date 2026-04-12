@@ -1426,8 +1426,100 @@ body::after {
   border: 1px solid rgba(196, 128, 73, 0.4);
 }
 
+.vault-modal-folder-tree-actions {
+  display: flex;
+  justify-content: flex-end;
+  padding: 0.75rem 0.75rem 0;
+}
+
+.vault-modal-folder-create-card {
+  margin: 0.7rem 0.75rem 0.85rem;
+  padding: 0.85rem 0.9rem;
+  border-radius: 16px;
+  border: 1px solid rgba(173, 132, 88, 0.2);
+  background: linear-gradient(180deg, rgba(255, 249, 239, 0.92), rgba(247, 238, 222, 0.82));
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.4);
+}
+
+.vault-modal-folder-create-copy {
+  font-size: 0.72rem;
+  line-height: 1.45;
+  color: var(--text-secondary);
+}
+
+.vault-modal-folder-create-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  gap: 0.55rem;
+  margin-top: 0.65rem;
+  align-items: center;
+}
+
+[data-bs-theme="dark"] .vault-modal-folder-create-card,
+.dark-mode .vault-modal-folder-create-card {
+  border-color: rgba(209, 171, 126, 0.22);
+  background: linear-gradient(180deg, rgba(41, 49, 66, 0.96), rgba(31, 38, 52, 0.96));
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.03);
+}
+
 .vault-modal-folder-children {
   position: relative;
+}
+
+.vault-modal-tree-record-row {
+  border-top: 1px dashed rgba(173, 132, 88, 0.08);
+}
+
+.vault-modal-tree-record-main {
+  display: flex;
+  align-items: center;
+  gap: 0.46rem;
+  width: 100%;
+  min-width: 0;
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  text-align: left;
+  border-radius: 8px;
+  padding: 0.24rem 0.46rem;
+}
+
+.vault-modal-tree-record-main:hover {
+  background: rgba(214, 149, 83, 0.09);
+  color: var(--text-primary);
+}
+
+.vault-modal-tree-record-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: rgba(214, 149, 83, 0.9);
+  flex: 0 0 auto;
+}
+
+.vault-modal-tree-record-label {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: 0.74rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.vault-modal-tree-record-meta {
+  color: var(--text-muted);
+  font-size: 0.61rem;
+  flex: 0 0 auto;
+  max-width: 34%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.vault-modal-tree-record.is-selected .vault-modal-tree-record-main {
+  background: rgba(214, 149, 83, 0.16);
+  border: 1px solid rgba(196, 128, 73, 0.28);
+  color: var(--text-primary);
 }
 
 .vault-modal-preview-header {
@@ -2169,10 +2261,20 @@ body::after {
   background: rgba(215, 155, 89, 0.12);
 }
 
+[data-bs-theme="dark"] .vault-modal-tree-record-main:hover,
+.dark-mode .vault-modal-tree-record-main:hover {
+  background: rgba(215, 155, 89, 0.12);
+}
+
 [data-bs-theme="dark"] .vault-modal-folder-node.is-selected > .vault-modal-folder-row .vault-modal-folder-main,
 .dark-mode .vault-modal-folder-node.is-selected > .vault-modal-folder-row .vault-modal-folder-main {
   background: linear-gradient(90deg, rgba(215, 155, 89, 0.18), rgba(70, 86, 114, 0.18));
   border-color: rgba(220, 173, 115, 0.28);
+}
+
+[data-bs-theme="dark"] .vault-modal-tree-record.is-selected .vault-modal-tree-record-main,
+.dark-mode .vault-modal-tree-record.is-selected .vault-modal-tree-record-main {
+  border-color: rgba(220, 173, 115, 0.32);
 }
 
 [data-bs-theme="dark"] .vault-modal-preview-header,
@@ -2962,6 +3064,7 @@ textarea.form-control:focus {
   }
 
   .vault-modal-folder-label,
+  .vault-modal-tree-record-label,
   .vault-modal-preview-file-name {
     white-space: normal;
     word-break: break-word;
@@ -2971,7 +3074,15 @@ textarea.form-control:focus {
     grid-template-columns: minmax(0, 1fr);
   }
 
+  .vault-modal-folder-create-row {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
   .vault-modal-folder-meta {
+    display: none;
+  }
+
+  .vault-modal-tree-record-meta {
     display: none;
   }
 }

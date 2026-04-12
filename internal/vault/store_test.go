@@ -54,6 +54,7 @@ func TestStoreRecordCRUDEncryptsPayload(t *testing.T) {
 		VaultID:     primaryVault.ID,
 		Type:        "email_snippet",
 		WorkspaceID: "ws-1",
+		FolderPath:  "Travel",
 		Label:       "Primary Inbox",
 		Tags:        []string{"Email", "Private"},
 		Source:      "manual",
@@ -85,6 +86,9 @@ func TestStoreRecordCRUDEncryptsPayload(t *testing.T) {
 	if len(items) != 1 {
 		t.Fatalf("expected 1 record, got %d", len(items))
 	}
+	if items[0].FolderPath != "Travel" {
+		t.Fatalf("expected decrypted folder path, got %q", items[0].FolderPath)
+	}
 	if items[0].Label != "Primary Inbox" {
 		t.Fatalf("expected decrypted label, got %q", items[0].Label)
 	}
@@ -103,6 +107,7 @@ func TestStoreRecordCRUDEncryptsPayload(t *testing.T) {
 	label := "Updated Inbox"
 	recordType := "secret"
 	workspaceID := "ws-secure"
+	folderPath := "Travel/Passports"
 	tags := []string{"Credentials", "Personal"}
 	source := "import"
 	retention := "until_rotated"
@@ -110,6 +115,7 @@ func TestStoreRecordCRUDEncryptsPayload(t *testing.T) {
 	updated, err := store.UpdateRecord(ctx, record.ID, RecordUpdate{
 		Type:            &recordType,
 		WorkspaceID:     &workspaceID,
+		FolderPath:      &folderPath,
 		Label:           &label,
 		Tags:            &tags,
 		Source:          &source,
@@ -125,6 +131,9 @@ func TestStoreRecordCRUDEncryptsPayload(t *testing.T) {
 	if updated.WorkspaceID != "ws-secure" {
 		t.Fatalf("expected updated workspace, got %q", updated.WorkspaceID)
 	}
+	if updated.FolderPath != "Travel/Passports" {
+		t.Fatalf("expected updated folder path, got %q", updated.FolderPath)
+	}
 	if updated.Label != "Updated Inbox" {
 		t.Fatalf("expected updated label, got %q", updated.Label)
 	}
@@ -136,6 +145,14 @@ func TestStoreRecordCRUDEncryptsPayload(t *testing.T) {
 	}
 	if string(updated.Payload) != `{"email":"user@example.com","subject":"Filed"}` {
 		t.Fatalf("unexpected updated payload: %s", updated.Payload)
+	}
+
+	folders, err := store.ListFolders(ctx, primaryVault.ID)
+	if err != nil {
+		t.Fatalf("list folders: %v", err)
+	}
+	if len(folders) != 2 || folders[0].Path != "Travel" || folders[1].Path != "Travel/Passports" {
+		t.Fatalf("unexpected folders: %#v", folders)
 	}
 
 	if err := store.DeleteRecord(ctx, record.ID, AccessContext{}); err != nil {
@@ -191,6 +208,36 @@ func TestStoreGrantEnforcement(t *testing.T) {
 	}
 	if got.Label != "Tax Email" {
 		t.Fatalf("expected decrypted record after grant, got %q", got.Label)
+	}
+}
+
+func TestStoreCreateFolderPersistsEmptyFolders(t *testing.T) {
+	ctx := context.Background()
+	store, db := newTestVaultStore(t)
+	defer func() { _ = db.Close() }()
+
+	primaryVault := createTestVault(t, ctx, store, "Primary Vault")
+
+	created, err := store.CreateFolder(ctx, &Folder{
+		VaultID: primaryVault.ID,
+		Path:    "Family/Passports",
+	})
+	if err != nil {
+		t.Fatalf("create folder: %v", err)
+	}
+	if created.Path != "Family/Passports" {
+		t.Fatalf("unexpected created folder path: %q", created.Path)
+	}
+
+	folders, err := store.ListFolders(ctx, primaryVault.ID)
+	if err != nil {
+		t.Fatalf("list folders: %v", err)
+	}
+	if len(folders) != 2 {
+		t.Fatalf("expected 2 persisted folders including ancestor, got %d", len(folders))
+	}
+	if folders[0].Path != "Family" || folders[1].Path != "Family/Passports" {
+		t.Fatalf("unexpected folders: %#v", folders)
 	}
 }
 

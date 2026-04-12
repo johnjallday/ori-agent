@@ -27,13 +27,14 @@
         <section class="vault-page-card vault-page-card-primary">
           <div class="vault-page-explorer">
             <div class="vault-modal-records-toolbar vault-page-explorer-toolbar">
-              <input id="vaultPageSearchInput" type="search" class="form-control settings-input vault-page-input vault-modal-search" placeholder="Search label, type, workspace, or tag">
+              <input id="vaultPageSearchInput" type="search" class="form-control settings-input vault-page-input vault-modal-search" placeholder="Search label, folder, type, workspace, or tag">
               <div class="vault-page-explorer-tools">
                 <span id="vaultPageRecordsSummary" class="vault-modal-records-summary">Waiting for vault status...</span>
                 <div class="vault-page-explorer-actions">
                   <button id="vaultOpenCreateDialogBtn" class="modern-btn modern-btn-secondary modern-btn-sm" type="button">Create</button>
                   <button id="vaultOpenExportDialogBtn" class="modern-btn modern-btn-secondary modern-btn-sm" type="button">Export</button>
                   <button id="vaultOpenImportDialogBtn" class="modern-btn modern-btn-secondary modern-btn-sm" type="button">Import</button>
+                  <button id="vaultExplorerNewFolderBtn" class="modern-btn modern-btn-secondary modern-btn-sm" type="button">New Folder</button>
                   <button id="vaultExplorerAddBtn" class="modern-btn modern-btn-primary modern-btn-sm" type="button">
                     <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" class="me-1"><path d="M19,13H13V19H11V13H5V11H11V5H13V11H19V13Z"/></svg>
                     Add Item
@@ -42,12 +43,12 @@
               </div>
             </div>
 
-            <div id="vaultPageFolderVaultTabs" class="vault-modal-folder-vault-tabs" role="tablist" aria-label="Vault folders"></div>
+            <div id="vaultPageFolderVaultTabs" class="vault-modal-folder-vault-tabs" role="tablist" aria-label="Vaults"></div>
             <div id="vaultPageFolderBreadcrumb" class="vault-modal-folder-breadcrumb" aria-label="Vault folder path" hidden></div>
 
             <div class="vault-modal-explorer-grid vault-page-explorer-grid">
               <div id="vaultPageFolderTree" class="vault-modal-folder-tree">
-                <div class="vault-modal-empty">Unlock the vault to browse the encrypted folder tree.</div>
+                <div class="vault-modal-empty">Unlock the vault to browse saved items.</div>
               </div>
 
               <div class="vault-page-explorer-side">
@@ -523,6 +524,15 @@
         <div class="vault-modal-field">
           <label class="vault-modal-label" for="vaultEntryLabel">Title</label>
           <input id="vaultEntryLabel" type="text" class="form-control vault-modal-input" placeholder="Passport note, tax reminder, emergency contact">
+        </div>
+
+        <div class="vault-modal-field">
+          <div class="vault-modal-field-head">
+            <label class="vault-modal-label" for="vaultEntryFolderPath">Folder</label>
+            <button id="vaultEntryUseSelectedFolderBtn" class="modern-btn modern-btn-secondary modern-btn-sm" type="button">Use Selected</button>
+          </div>
+          <input id="vaultEntryFolderPath" type="text" class="form-control vault-modal-input" placeholder="Optional folder path like Travel/Passports">
+          <div class="vault-modal-help">Use "/" to create nested folders. Leave blank to keep the item at the vault root.</div>
         </div>
 
         <div class="vault-modal-field">

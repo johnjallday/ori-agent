@@ -152,6 +152,7 @@ func TestHandlerRecordLifecycle(t *testing.T) {
 		"vault_id":     primaryVault.ID,
 		"type":         "personal_note",
 		"workspace_id": "ws-1",
+		"folder_path":  "Travel",
 		"label":        "Passport",
 		"tags":         []string{"Travel", "Personal"},
 		"payload": map[string]any{
@@ -183,6 +184,7 @@ func TestHandlerRecordLifecycle(t *testing.T) {
 	updateRec := performJSONRequest(t, handler, http.MethodPatch, "/api/vault/records/"+created.Record.ID, map[string]any{
 		"type":             "secret",
 		"workspace_id":     "ws-secure",
+		"folder_path":      "Travel/Passports",
 		"label":            "Passport Updated",
 		"tags":             []string{"Travel", "Docs"},
 		"source":           "import",
@@ -203,6 +205,9 @@ func TestHandlerRecordLifecycle(t *testing.T) {
 	if updated.Record.Type != "secret" || updated.Record.WorkspaceID != "ws-secure" {
 		t.Fatalf("unexpected updated location: %#v", updated.Record)
 	}
+	if updated.Record.FolderPath != "Travel/Passports" {
+		t.Fatalf("unexpected updated folder path: %#v", updated.Record)
+	}
 	if updated.Record.Source != "import" || updated.Record.RetentionPolicy != "until_rotated" {
 		t.Fatalf("unexpected updated metadata: %#v", updated.Record)
 	}
@@ -210,9 +215,47 @@ func TestHandlerRecordLifecycle(t *testing.T) {
 		t.Fatalf("unexpected updated tags: %#v", updated.Record.Tags)
 	}
 
+	var listed struct {
+		Records []vault.RecordListItem `json:"records"`
+	}
+	decodeJSONBody(t, listRec, &listed)
+	if len(listed.Records) != 1 || listed.Records[0].FolderPath != "Travel" {
+		t.Fatalf("unexpected listed records: %#v", listed.Records)
+	}
+
 	deleteRec := performJSONRequest(t, handler, http.MethodDelete, "/api/vault/records/"+created.Record.ID, nil)
 	if deleteRec.Code != http.StatusOK {
 		t.Fatalf("expected 200 from delete, got %d: %s", deleteRec.Code, deleteRec.Body.String())
+	}
+}
+
+func TestHandlerFolderLifecycle(t *testing.T) {
+	handler, store, db := newTestHandler(t, vault.NewMemorySecretStore(), "")
+	defer func() { _ = db.Close() }()
+	primaryVault := createHandlerVault(t, store, "Primary Vault")
+
+	createRec := performJSONRequest(t, handler, http.MethodPost, "/api/vault/folders", map[string]any{
+		"vault_id": primaryVault.ID,
+		"path":     "Family/Passports",
+	})
+	if createRec.Code != http.StatusCreated {
+		t.Fatalf("expected 201 from folder create, got %d: %s", createRec.Code, createRec.Body.String())
+	}
+
+	listRec := performJSONRequest(t, handler, http.MethodGet, "/api/vault/folders?vault_id="+primaryVault.ID, nil)
+	if listRec.Code != http.StatusOK {
+		t.Fatalf("expected 200 from folder list, got %d: %s", listRec.Code, listRec.Body.String())
+	}
+
+	var listed struct {
+		Folders []vault.Folder `json:"folders"`
+	}
+	decodeJSONBody(t, listRec, &listed)
+	if len(listed.Folders) != 2 {
+		t.Fatalf("expected persisted folder plus ancestor, got %#v", listed.Folders)
+	}
+	if listed.Folders[0].Path != "Family" || listed.Folders[1].Path != "Family/Passports" {
+		t.Fatalf("unexpected folder paths: %#v", listed.Folders)
 	}
 }
 

@@ -1,10 +1,8 @@
 (function() {
   const ROOT_FOLDER_PATH = 'vault';
-  const TYPE_FOLDER_PATH = 'types';
-  const WORKSPACE_FOLDER_PATH = 'workspaces';
   const DEFAULT_VAULT_ID = '';
   const VAULT_STORAGE_KEY = 'ori-selected-vault-id';
-  const DEFAULT_EXPANDED_FOLDERS = new Set([ROOT_FOLDER_PATH, TYPE_FOLDER_PATH, WORKSPACE_FOLDER_PATH]);
+  const DEFAULT_EXPANDED_FOLDERS = new Set([ROOT_FOLDER_PATH]);
   const MAX_ENTRY_ATTACHMENTS = 6;
   const MAX_ENTRY_ATTACHMENT_BYTES = 10 * 1024 * 1024;
 
@@ -28,12 +26,14 @@
     selectedVaultID: DEFAULT_VAULT_ID,
     status: null,
     records: [],
+    folders: [],
     recordIndex: new Map(),
     selectedRecord: null,
     payloadRevealed: false,
     folderIndex: new Map(),
     expandedFolderPaths: new Set(DEFAULT_EXPANDED_FOLDERS),
     selectedFolderPath: ROOT_FOLDER_PATH,
+    folderComposerOpen: false,
     hasHydrated: false,
     isHydrating: false,
     unlockDialogOpen: false,
@@ -118,6 +118,7 @@
       vaultHint: document.getElementById('vaultModalVaultHint'),
       vaultManageStack: document.getElementById('vaultModalVaultManageStack'),
       openEntryBtn: document.getElementById('vaultModalOpenEntryBtn'),
+      newFolderBtn: document.getElementById('vaultModalNewFolderBtn'),
       openCreateVaultBtn: document.getElementById('vaultModalOpenCreateVaultBtn'),
       openImportBtn: document.getElementById('vaultModalOpenImportBtn'),
       openExportBtn: document.getElementById('vaultModalOpenExportBtn'),
@@ -179,6 +180,8 @@
       entryTypeInput: document.getElementById('vaultModalEntryType'),
       entryWorkspaceInput: document.getElementById('vaultModalEntryWorkspaceId'),
       entryLabelInput: document.getElementById('vaultModalEntryLabel'),
+      entryFolderPathInput: document.getElementById('vaultModalEntryFolderPath'),
+      entryUseSelectedFolderBtn: document.getElementById('vaultModalEntryUseSelectedFolderBtn'),
       entryAdvancedDetails: document.getElementById('vaultModalEntryAdvanced'),
       entryComposerLabel: document.getElementById('vaultModalEntryComposerLabel'),
       entryContentField: document.getElementById('vaultModalEntryContentField'),
@@ -796,13 +799,67 @@
     return TYPE_META[normalized]?.folderName || recordTypeLabel(normalized);
   }
 
-  function folderPathForType(type) {
-    return 'type::' + normalizeRecordType(type);
+  function normalizeFolderPathInput(value) {
+    const rawSegments = String(value || '')
+      .replaceAll('\\', '/')
+      .split('/');
+    const segments = rawSegments
+      .map(function(segment) {
+        return segment.trim();
+      })
+      .filter(Boolean);
+
+    if (segments.some(function(segment) { return segment === '.' || segment === '..'; })) {
+      throw new Error('Folder paths cannot contain "." or "..".');
+    }
+
+    return segments.join('/');
   }
 
-  function folderPathForWorkspace(workspaceID) {
-    const normalized = String(workspaceID || '').trim();
-    return normalized ? 'workspace::' + normalized : 'workspace::global';
+  function folderNodePath(folderPath) {
+    const normalized = normalizeFolderPathInput(folderPath);
+    return normalized ? 'folder:' + normalized : ROOT_FOLDER_PATH;
+  }
+
+  function folderPathFromNodePath(nodePath) {
+    const normalized = String(nodePath || '').trim();
+    if (!normalized || normalized === ROOT_FOLDER_PATH) {
+      return '';
+    }
+    return normalized.startsWith('folder:') ? normalized.slice('folder:'.length) : normalized;
+  }
+
+  function folderPathSegments(folderPath) {
+    const normalized = normalizeFolderPathInput(folderPath);
+    return normalized ? normalized.split('/') : [];
+  }
+
+  function folderPathAncestors(folderPath) {
+    return folderPathSegments(folderPath).map(function(_, index, segments) {
+      return segments.slice(0, index + 1).join('/');
+    });
+  }
+
+  function folderNameFromPath(folderPath) {
+    const segments = folderPathSegments(folderPath);
+    return segments[segments.length - 1] || vaultDisplayLabel(activeVault()) || 'Vault Root';
+  }
+
+  function selectedFolderRelativePath() {
+    return folderPathFromNodePath(state.selectedFolderPath);
+  }
+
+  function joinFolderPath(basePath, nextPath) {
+    const normalizedBase = normalizeFolderPathInput(basePath);
+    const normalizedNext = normalizeFolderPathInput(nextPath);
+
+    if (!normalizedBase) {
+      return normalizedNext;
+    }
+    if (!normalizedNext) {
+      return normalizedBase;
+    }
+    return normalizedBase + '/' + normalizedNext;
   }
 
   function fileTypeIcon(type) {
@@ -915,6 +972,9 @@
     elements.entryTypeInput.value = normalizedType;
     elements.entryWorkspaceInput.value = String(record.workspace_id || '');
     elements.entryLabelInput.value = String(record.label || '');
+    if (elements.entryFolderPathInput) {
+      elements.entryFolderPathInput.value = String(record.folder_path || '');
+    }
     elements.entryContentInput.value = entryContentFromPayload(normalizedType, payload);
     elements.entryJsonModeInput.checked = useJSON;
     elements.entryTagsInput.value = Array.isArray(record.tags) ? record.tags.join(', ') : '';
@@ -1248,15 +1308,15 @@
     }
 
     if (elements.workspaceKicker) {
-      elements.workspaceKicker.textContent = 'Encrypted Folder';
+      elements.workspaceKicker.textContent = 'Encrypted Library';
     }
 
     if (elements.workspaceTitle) {
-      elements.workspaceTitle.textContent = 'Folder View';
+      elements.workspaceTitle.textContent = 'Saved Items';
     }
 
     if (elements.workspaceDescription) {
-      elements.workspaceDescription.innerHTML = 'Browse the active vault like a protected folder. The vault tabs switch spaces directly, and the active tab handles lock or unlock.';
+      elements.workspaceDescription.innerHTML = 'Browse the active vault like a private folder tree. Create your own folders, keep encrypted items where they belong, and use search for type, workspace, or tag metadata.';
     }
 
     if (elements.folderTabPanel) {
@@ -1307,11 +1367,11 @@
       if (isInitialHydrate) {
         elements.subtitle.textContent = 'Vault data is fetched on demand. Ori is loading your vault list and encrypted status now.';
       } else if (showEmptyCreateMode) {
-        elements.subtitle.textContent = 'Start with a single encrypted vault. The first-vault action now lives directly inside Folder View.';
+        elements.subtitle.textContent = 'Start with a single encrypted vault. Once it is created, you can organize items into your own folders.';
       } else if (hasVaults && !unlocked) {
-        elements.subtitle.textContent = 'Choose a vault from the folder tabs, then unlock it. New vault creation stays inside Folder View so the modal reads as one surface.';
+        elements.subtitle.textContent = 'Choose a vault from the tabs, unlock it, and then browse or organize items without leaving this surface.';
       } else {
-        elements.subtitle.textContent = 'The loaded vault stays focused on folder browsing. Switch vaults from the folder tabs and use the header actions when you need a new vault or a new encrypted entry.';
+        elements.subtitle.textContent = 'The loaded vault stays focused on folder browsing. Switch vaults from the tabs and use the header actions when you need a new vault, folder, or encrypted item.';
       }
     }
 
@@ -1321,6 +1381,11 @@
 
     if (elements.openEntryBtn) {
       elements.openEntryBtn.hidden = isInitialHydrate || showEmptyCreateMode || !unlocked;
+    }
+
+    if (elements.newFolderBtn) {
+      elements.newFolderBtn.hidden = isInitialHydrate || showEmptyCreateMode || !unlocked;
+      elements.newFolderBtn.disabled = isInitialHydrate || !hasVaults || !activeVaultID() || !unlocked;
     }
 
     if (elements.openImportBtn) {
@@ -1716,6 +1781,7 @@
 
     state.selectedVaultID = nextVaultID;
     writeStoredVaultID(state.selectedVaultID);
+    state.folderComposerOpen = false;
     clearSelection();
     state.selectedFolderPath = ROOT_FOLDER_PATH;
     await refreshVault(false);
@@ -1777,6 +1843,7 @@
         writeStoredVaultID(state.selectedVaultID);
         renderVaultSelector();
       }
+      state.folderComposerOpen = false;
       closeCreateDialog({ restoreFocus: false });
       clearSelection();
       state.selectedFolderPath = ROOT_FOLDER_PATH;
@@ -1846,6 +1913,7 @@
       });
       state.selectedVaultID = DEFAULT_VAULT_ID;
       writeStoredVaultID(state.selectedVaultID);
+      state.folderComposerOpen = false;
       clearSelection();
       state.selectedFolderPath = ROOT_FOLDER_PATH;
       notify('Vault deleted.', 'success');
@@ -1870,7 +1938,10 @@
       elements.entryJsonModeInput,
       elements.entryTagsInput,
       elements.entryRetentionInput,
-      elements.entryPayloadInput
+      elements.entryPayloadInput,
+      elements.entryFolderPathInput,
+      elements.entryUseSelectedFolderBtn,
+      elements.newFolderBtn
     ];
 
     createFields.forEach(function(field) {
@@ -1903,6 +1974,7 @@
     }
 
     if (!state.status.available) {
+      state.folderComposerOpen = false;
       if (elements.passwordHelp) {
         elements.passwordHelp.textContent = 'Per-vault passwords are required for new vaults. Legacy vaults may still unlock through secure system storage or the older fallback passphrase flow.';
       }
@@ -1935,8 +2007,8 @@
     }
     if (elements.selectedVaultState) {
       elements.selectedVaultState.textContent = locked
-        ? vaultName + ' is locked. Unlock it to reveal the encrypted folder.'
-        : vaultName + ' is loaded and ready for folder browsing.';
+        ? vaultName + ' is locked. Unlock it to reveal saved items.'
+        : vaultName + ' is loaded and ready for item browsing.';
     }
     if (elements.vaultHint) {
       elements.vaultHint.textContent = locked
@@ -1952,6 +2024,7 @@
     if (!locked) {
       closeUnlockDialog({ restoreFocus: false });
     } else {
+      state.folderComposerOpen = false;
       closeEntryDialog({ restoreFocus: false });
       syncUnlockDialog();
     }
@@ -1970,6 +2043,9 @@
     elements.entryTypeInput.value = 'personal_note';
     elements.entryWorkspaceInput.value = '';
     elements.entryLabelInput.value = '';
+    if (elements.entryFolderPathInput) {
+      elements.entryFolderPathInput.value = selectedFolderRelativePath();
+    }
     elements.entryContentInput.value = '';
     state.entryAttachments = [];
     state.entryAttachmentSnapshot = [];
@@ -2010,9 +2086,11 @@
   function createFolderNode(path, name, parentPath, recordIDs, options) {
     return {
       path: path,
+      folderPath: String(options?.folderPath || ''),
       name: name,
       parentPath: parentPath || '',
       recordIDs: Array.isArray(recordIDs) ? recordIDs.slice() : [],
+      directRecordIDs: Array.isArray(options?.directRecordIDs) ? options.directRecordIDs.slice() : [],
       children: [],
       description: String(options?.description || ''),
       meta: String(options?.meta || '')
@@ -2033,69 +2111,79 @@
   function buildFolderTree(records) {
     const index = new Map();
     const selectedVault = activeVault();
-    const allRecordIDs = records.map(function(record) {
-      return record.id;
+    const folderPaths = new Set();
+    const recordsByID = new Map(records.map(function(record) {
+      return [record.id, record];
+    }));
+
+    addFolderNode(index, createFolderNode(ROOT_FOLDER_PATH, vaultDisplayLabel(selectedVault) || 'Vault Root', '', [], {
+      folderPath: '',
+      description: 'Everything in the active vault, including nested folders.',
+      meta: 'Vault root'
+    }));
+
+    state.folders.forEach(function(folder) {
+      folderPathAncestors(folder.path).forEach(function(path) {
+        folderPaths.add(path);
+      });
+    });
+    records.forEach(function(record) {
+      folderPathAncestors(record.folder_path || '').forEach(function(path) {
+        folderPaths.add(path);
+      });
     });
 
-    addFolderNode(index, createFolderNode(ROOT_FOLDER_PATH, selectedVault?.name || 'Vault', '', allRecordIDs, {
-      description: selectedVault?.description || 'Encrypted folder root'
-    }));
-
-    addFolderNode(index, createFolderNode(TYPE_FOLDER_PATH, 'Types', ROOT_FOLDER_PATH, allRecordIDs, {
-      description: 'Virtual folders derived from vault entry types'
-    }));
-
-    addFolderNode(index, createFolderNode(WORKSPACE_FOLDER_PATH, 'Workspaces', ROOT_FOLDER_PATH, allRecordIDs, {
-      description: 'Virtual folders derived from workspace scope'
-    }));
-
-    const standardTypes = ['personal_note', 'email_snippet', 'secret'];
-    const discoveredTypes = Array.from(new Set(records.map(function(record) {
-      return normalizeRecordType(record.type);
-    }))).filter(function(type) {
-      return standardTypes.indexOf(type) === -1;
-    }).sort(function(a, b) {
-      return a.localeCompare(b, undefined, { sensitivity: 'base' });
-    });
-
-    standardTypes.concat(discoveredTypes).forEach(function(type) {
-      const recordIDs = records.filter(function(record) {
-        return normalizeRecordType(record.type) === type;
-      }).map(function(record) {
-        return record.id;
+    Array.from(folderPaths)
+      .sort(function(left, right) {
+        const leftDepth = folderPathSegments(left).length;
+        const rightDepth = folderPathSegments(right).length;
+        if (leftDepth !== rightDepth) {
+          return leftDepth - rightDepth;
+        }
+        return left.localeCompare(right, undefined, { sensitivity: 'base' });
+      })
+      .forEach(function(folderPath) {
+        const parentSegments = folderPathSegments(folderPath);
+        parentSegments.pop();
+        const parentPath = parentSegments.join('/');
+        addFolderNode(index, createFolderNode(
+          folderNodePath(folderPath),
+          folderNameFromPath(folderPath),
+          folderNodePath(parentPath),
+          [],
+          {
+            folderPath: folderPath,
+            description: folderPath,
+            meta: 'Encrypted folder'
+          }
+        ));
       });
 
-      addFolderNode(index, createFolderNode(folderPathForType(type), recordTypeFolderName(type), TYPE_FOLDER_PATH, recordIDs, {
-        description: 'Encrypted ' + recordTypeFolderName(type).toLowerCase() + ' folder'
-      }));
-    });
-
-    const globalRecordIDs = records.filter(function(record) {
-      return !String(record.workspace_id || '').trim();
-    }).map(function(record) {
-      return record.id;
-    });
-
-    addFolderNode(index, createFolderNode(folderPathForWorkspace(''), 'Global', WORKSPACE_FOLDER_PATH, globalRecordIDs, {
-      description: 'Entries without workspace scope'
-    }));
-
-    const workspaceIDs = Array.from(new Set(records.map(function(record) {
-      return String(record.workspace_id || '').trim();
-    }).filter(Boolean))).sort(function(a, b) {
-      return a.localeCompare(b, undefined, { sensitivity: 'base' });
-    });
-
-    workspaceIDs.forEach(function(workspaceID) {
-      const recordIDs = records.filter(function(record) {
-        return String(record.workspace_id || '').trim() === workspaceID;
-      }).map(function(record) {
-        return record.id;
+    records.forEach(function(record) {
+      [ROOT_FOLDER_PATH].concat(folderPathAncestors(record.folder_path || '').map(folderNodePath)).forEach(function(nodePath) {
+        const node = index.get(nodePath);
+        if (node) {
+          node.recordIDs.push(record.id);
+        }
       });
 
-      addFolderNode(index, createFolderNode(folderPathForWorkspace(workspaceID), workspaceID, WORKSPACE_FOLDER_PATH, recordIDs, {
-        description: 'Entries scoped to workspace ' + workspaceID
-      }));
+      const directNode = index.get(folderNodePath(record.folder_path || ''));
+      if (directNode) {
+        directNode.directRecordIDs.push(record.id);
+      }
+    });
+
+    index.forEach(function(node) {
+      node.children.sort(function(left, right) {
+        const leftNode = index.get(left);
+        const rightNode = index.get(right);
+        return String(leftNode?.name || '').localeCompare(String(rightNode?.name || ''), undefined, { sensitivity: 'base' });
+      });
+      node.directRecordIDs.sort(function(leftID, rightID) {
+        const leftRecord = recordsByID.get(leftID);
+        const rightRecord = recordsByID.get(rightID);
+        return String(leftRecord?.label || leftRecord?.id || '').localeCompare(String(rightRecord?.label || rightRecord?.id || ''), undefined, { sensitivity: 'base' });
+      });
     });
 
     return index;
@@ -2104,8 +2192,6 @@
   function rebuildFolderTree() {
     state.folderIndex = buildFolderTree(state.records);
     state.expandedFolderPaths.add(ROOT_FOLDER_PATH);
-    state.expandedFolderPaths.add(TYPE_FOLDER_PATH);
-    state.expandedFolderPaths.add(WORKSPACE_FOLDER_PATH);
 
     if (!state.folderIndex.has(state.selectedFolderPath)) {
       state.selectedFolderPath = ROOT_FOLDER_PATH;
@@ -2128,6 +2214,14 @@
     return folder.recordIDs.map(recordByID).filter(Boolean);
   }
 
+  function directRecordsForFolder(folder) {
+    if (!folder || !Array.isArray(folder.directRecordIDs)) {
+      return [];
+    }
+
+    return folder.directRecordIDs.map(recordByID).filter(Boolean);
+  }
+
   function filteredRecords(records) {
     const query = String(elements?.searchInput?.value || '').trim().toLowerCase();
     if (!query) {
@@ -2137,6 +2231,7 @@
     return records.filter(function(record) {
       const haystack = [
         record.label,
+        record.folder_path,
         record.type,
         record.workspace_id,
         Array.isArray(record.tags) ? record.tags.join(' ') : ''
@@ -2164,6 +2259,69 @@
     }).join(' / ');
   }
 
+  function isRootFolderPath(nodePath) {
+    return String(nodePath || '') === ROOT_FOLDER_PATH;
+  }
+
+  function openFolderComposer() {
+    if (!activeVaultID()) {
+      showAlert('Create or select a vault before creating a folder.', 'warning');
+      return;
+    }
+
+    if (!state.status || !state.status.available || state.status.locked) {
+      showAlert('Unlock the selected vault before creating a folder.', 'warning');
+      return;
+    }
+
+    state.folderComposerOpen = true;
+    renderFolderTree();
+    window.requestAnimationFrame(function() {
+      elements?.folderTree?.querySelector('[data-folder-create-input]')?.focus();
+    });
+  }
+
+  function closeFolderComposer() {
+    state.folderComposerOpen = false;
+    renderFolderTree();
+  }
+
+  async function createFolderFromComposer() {
+    const input = elements?.folderTree?.querySelector('[data-folder-create-input]');
+    const relativePath = String(input?.value || '').trim();
+    const basePath = selectedFolderRelativePath();
+
+    let nextPath = '';
+    try {
+      nextPath = joinFolderPath(basePath, relativePath);
+    } catch (error) {
+      showAlert(error.message || 'Folder path is invalid.', 'warning');
+      return;
+    }
+
+    if (!nextPath) {
+      showAlert('Folder name is required.', 'warning');
+      return;
+    }
+
+    try {
+      await apiRequest(vaultURL('/api/vault/folders'), {
+        method: 'POST',
+        body: {
+          vault_id: activeVaultID(),
+          path: nextPath
+        }
+      });
+      state.folderComposerOpen = false;
+      state.selectedFolderPath = folderNodePath(nextPath);
+      notify('Folder created.', 'success');
+      await refreshVault(false);
+    } catch (error) {
+      console.error('Failed to create folder:', error);
+      showAlert(error.message || 'Failed to create folder.', 'error');
+    }
+  }
+
   function renderRecordAttachmentCard(attachment) {
     const normalized = normalizeEntryAttachment(attachment);
     if (!normalized) {
@@ -2188,7 +2346,38 @@
 
   function folderRowMeta(node) {
     const count = Array.isArray(node.recordIDs) ? node.recordIDs.length : 0;
-    return String(count) + ' ' + (count === 1 ? 'file' : 'files');
+    const childCount = Array.isArray(node.children) ? node.children.length : 0;
+    const itemLabel = String(count) + ' ' + (count === 1 ? 'item' : 'items');
+    if (childCount < 1) {
+      return itemLabel;
+    }
+    return itemLabel + ' • ' + String(childCount) + ' ' + (childCount === 1 ? 'folder' : 'folders');
+  }
+
+  function renderFolderTreeRecord(recordID, folderPath, depth) {
+    const record = recordByID(recordID);
+    if (!record) {
+      return '';
+    }
+
+    const isSelected = state.selectedRecord?.id === record.id;
+    const metaParts = [recordTypeLabel(record.type)];
+    if (record.workspace_id) {
+      metaParts.push(record.workspace_id);
+    }
+
+    return (
+      '<div class="vault-modal-tree-record' + (isSelected ? ' is-selected' : '') + '">' +
+        '<div class="vault-modal-folder-row vault-modal-tree-record-row" style="--vault-tree-depth:' + String(depth) + ';">' +
+          '<span class="vault-modal-folder-spacer"></span>' +
+          '<button type="button" class="vault-modal-tree-record-main" data-action="select-tree-record" data-folder-path="' + escapeHTML(folderPath) + '" data-record-id="' + escapeHTML(record.id) + '">' +
+            '<span class="vault-modal-tree-record-icon">' + fileTypeIcon(record.type) + '</span>' +
+            '<span class="vault-modal-tree-record-label">' + escapeHTML(record.label || 'Untitled entry') + '</span>' +
+            '<span class="vault-modal-tree-record-meta">' + escapeHTML(metaParts.join(' • ')) + '</span>' +
+          '</button>' +
+        '</div>' +
+      '</div>'
+    );
   }
 
   function renderFolderTreeNode(nodePath, depth, forceExpanded) {
@@ -2197,8 +2386,10 @@
       return '';
     }
 
-    const hasChildren = Array.isArray(node.children) && node.children.length > 0;
-    const canToggle = hasChildren && node.path !== ROOT_FOLDER_PATH;
+    const hasFolderChildren = Array.isArray(node.children) && node.children.length > 0;
+    const hasRecordChildren = Array.isArray(node.directRecordIDs) && node.directRecordIDs.length > 0;
+    const hasChildren = hasFolderChildren || hasRecordChildren;
+    const canToggle = hasChildren;
     const isExpanded = hasChildren && (forceExpanded || state.expandedFolderPaths.has(node.path));
     const isSelected = state.selectedFolderPath === node.path;
 
@@ -2210,10 +2401,18 @@
       )
       : '<span class="vault-modal-folder-spacer"></span>';
 
-    const childrenHTML = hasChildren && isExpanded
-      ? '<div class="vault-modal-folder-children">' + node.children.map(function(childPath) {
+    const childFoldersHTML = hasChildren && isExpanded
+      ? node.children.map(function(childPath) {
         return renderFolderTreeNode(childPath, depth + 1, false);
-      }).join('') + '</div>'
+      }).join('')
+      : '';
+    const recordChildrenHTML = isExpanded
+      ? directRecordsForFolder(node).map(function(record) {
+        return renderFolderTreeRecord(record.id, node.path, depth + 1);
+      }).join('')
+      : '';
+    const childrenHTML = childFoldersHTML || recordChildrenHTML
+      ? '<div class="vault-modal-folder-children">' + childFoldersHTML + recordChildrenHTML + '</div>'
       : '';
 
     return (
@@ -2242,22 +2441,42 @@
     }
 
     if (!state.status.available) {
-      elements.folderTree.innerHTML = '<div class="vault-modal-empty">No vault exists yet. Create your first encrypted vault to unlock the folder explorer.</div>';
+      elements.folderTree.innerHTML = '<div class="vault-modal-empty">No vault exists yet. Create your first encrypted vault to start saving private items.</div>';
       return;
     }
 
     if (state.status.locked) {
-      elements.folderTree.innerHTML = '<div class="vault-modal-empty">Unlock the vault to browse the encrypted folder tree.</div>';
+      elements.folderTree.innerHTML = '<div class="vault-modal-empty">Unlock the vault to browse saved items.</div>';
       return;
     }
 
     const root = state.folderIndex.get(ROOT_FOLDER_PATH);
     if (!root) {
-      elements.folderTree.innerHTML = '<div class="vault-modal-empty">No vault folders available yet.</div>';
+      elements.folderTree.innerHTML = '<div class="vault-modal-empty">No saved items available yet.</div>';
       return;
     }
 
-    elements.folderTree.innerHTML = '<div class="vault-modal-folder-tree-scroll">' + renderFolderTreeNode(ROOT_FOLDER_PATH, 0, true) + '</div>';
+    const destinationLabel = isRootFolderPath(state.selectedFolderPath) ? 'vault root' : selectedFolder()?.name || 'selected folder';
+
+    elements.folderTree.innerHTML = (
+      '<div class="vault-modal-folder-tree-scroll">' +
+        (
+          state.folderComposerOpen
+            ? (
+              '<div class="vault-modal-folder-create-card">' +
+                '<div class="vault-modal-folder-create-copy">Create a folder inside ' + escapeHTML(destinationLabel) + '.</div>' +
+                '<div class="vault-modal-folder-create-row">' +
+                  '<input type="text" class="form-control vault-modal-input" data-folder-create-input placeholder="Folder name or nested path">' +
+                  '<button type="button" class="modern-btn modern-btn-primary modern-btn-sm" data-action="save-folder-composer">Save</button>' +
+                  '<button type="button" class="modern-btn modern-btn-secondary modern-btn-sm" data-action="cancel-folder-composer">Cancel</button>' +
+                '</div>' +
+              '</div>'
+            )
+            : ''
+        ) +
+        renderFolderTreeNode(ROOT_FOLDER_PATH, 0, true) +
+      '</div>'
+    );
   }
 
   function renderFolderVaultTabs() {
@@ -2335,7 +2554,7 @@
     if (!state.selectedRecord) {
       return (
         '<div class="vault-modal-preview-detail-empty">' +
-          'Select a file in this encrypted folder to inspect its metadata and reveal its protected payload.' +
+          'Select an item to inspect its metadata and reveal its protected payload.' +
         '</div>'
       );
     }
@@ -2379,7 +2598,7 @@
         '<div class="vault-modal-detail-header">' +
           '<div>' +
             '<div class="vault-modal-detail-title">' + escapeHTML(record.label || 'Untitled entry') + '</div>' +
-            '<div class="vault-modal-detail-meta">' + escapeHTML([recordTypeLabel(record.type), record.workspace_id].filter(Boolean).join(' • ') || 'Vault file') + '</div>' +
+            '<div class="vault-modal-detail-meta">' + escapeHTML([recordTypeLabel(record.type), record.workspace_id].filter(Boolean).join(' • ') || 'Vault item') + '</div>' +
           '</div>' +
           '<div class="vault-modal-detail-actions">' +
             '<button type="button" class="modern-btn modern-btn-secondary" data-action="edit-record" data-record-id="' + escapeHTML(record.id) + '">Edit Entry</button>' +
@@ -2389,6 +2608,7 @@
         '<div class="vault-modal-chip-row">' + tags + '</div>' +
         '<div class="vault-modal-detail-grid">' +
           '<div class="vault-modal-detail-item"><span>Type</span><strong>' + escapeHTML(recordTypeLabel(record.type)) + '</strong></div>' +
+          '<div class="vault-modal-detail-item"><span>Folder</span><strong>' + escapeHTML(record.folder_path || 'Vault root') + '</strong></div>' +
           '<div class="vault-modal-detail-item"><span>Workspace</span><strong>' + escapeHTML(record.workspace_id || 'Global') + '</strong></div>' +
           '<div class="vault-modal-detail-item"><span>Retention</span><strong>' + escapeHTML(record.retention_policy || 'Not set') + '</strong></div>' +
           '<div class="vault-modal-detail-item"><span>Attachments</span><strong>' + String(attachments.length) + '</strong></div>' +
@@ -2427,19 +2647,19 @@
 
     if (!state.status.available) {
       elements.recordsSummary.textContent = 'No vault selected';
-      elements.preview.innerHTML = '<div class="vault-modal-empty">Create a vault to start saving encrypted files and browsing them in the folder explorer.</div>';
+      elements.preview.innerHTML = '<div class="vault-modal-empty">Create a vault to start saving encrypted items in your private library.</div>';
       return;
     }
 
     if (state.status.locked) {
       elements.recordsSummary.textContent = 'Vault is locked';
-      elements.preview.innerHTML = '<div class="vault-modal-empty">Unlock the vault to browse files inside the encrypted folder.</div>';
+      elements.preview.innerHTML = '<div class="vault-modal-empty">Unlock the vault to browse saved items.</div>';
       return;
     }
 
     const folder = selectedFolder();
     if (!folder) {
-      elements.recordsSummary.textContent = 'No folder selected';
+      elements.recordsSummary.textContent = 'No view selected';
       elements.preview.innerHTML = '<div class="vault-modal-empty">Select a folder to continue.</div>';
       return;
     }
@@ -2451,7 +2671,7 @@
       clearSelection();
     }
 
-    elements.recordsSummary.textContent = String(visibleRecords.length) + ' of ' + String(folderRecords.length) + ' ' + (folderRecords.length === 1 ? 'file' : 'files') + ' in ' + folder.name;
+    elements.recordsSummary.textContent = String(visibleRecords.length) + ' of ' + String(folderRecords.length) + ' ' + (folderRecords.length === 1 ? 'item' : 'items') + ' in ' + folder.name;
 
     const filesHTML = visibleRecords.length > 0
       ? visibleRecords.map(function(record) {
@@ -2473,16 +2693,20 @@
           '</button>'
         );
       }).join('')
-      : '<div class="vault-modal-preview-empty-inline">No files match this folder and search combination yet.</div>';
+      : '<div class="vault-modal-preview-empty-inline">No items match this view and search combination yet.</div>';
+
+    const previewSubtitle = folder.path === ROOT_FOLDER_PATH
+      ? 'Vault root'
+      : folderPathLabel(folder);
 
     elements.preview.innerHTML = (
       '<div class="vault-modal-preview-header">' +
         '<div class="vault-modal-preview-title">' + escapeHTML(folder.name) + '</div>' +
-        '<div class="vault-modal-preview-subtitle">' + escapeHTML(folderPathLabel(folder)) + '</div>' +
+        '<div class="vault-modal-preview-subtitle">' + escapeHTML(previewSubtitle) + '</div>' +
       '</div>' +
       '<div class="vault-modal-preview-stats">' +
-        '<span class="vault-modal-chip">' + String(folderRecords.length) + ' ' + (folderRecords.length === 1 ? 'file' : 'files') + '</span>' +
-        '<span class="vault-modal-chip is-muted">' + escapeHTML(folder.description || 'Encrypted folder view') + '</span>' +
+        '<span class="vault-modal-chip">' + String(folderRecords.length) + ' ' + (folderRecords.length === 1 ? 'item' : 'items') + '</span>' +
+        '<span class="vault-modal-chip is-muted">' + escapeHTML(folder.description || 'Encrypted folder') + '</span>' +
       '</div>' +
       '<div class="vault-modal-preview-file-list">' + filesHTML + '</div>' +
       renderSelectedRecordDetail()
@@ -2548,6 +2772,7 @@
   async function loadVaultRecords() {
     if (!state.status || !state.status.available || state.status.locked) {
       state.records = [];
+      state.folders = [];
       state.recordIndex = new Map();
       rebuildFolderTree();
       renderExplorer();
@@ -2563,6 +2788,20 @@
     renderExplorer();
   }
 
+  async function loadVaultFolders() {
+    if (!state.status || !state.status.available || state.status.locked) {
+      state.folders = [];
+      rebuildFolderTree();
+      renderExplorer();
+      return;
+    }
+
+    const data = await apiRequest(vaultURL('/api/vault/folders'));
+    state.folders = Array.isArray(data.folders) ? data.folders : [];
+    rebuildFolderTree();
+    renderExplorer();
+  }
+
   async function selectRecord(recordID) {
     if (!recordID) {
       clearSelection();
@@ -2572,7 +2811,14 @@
 
     try {
       const record = await apiRequest(vaultURL('/api/vault/records/' + encodeURIComponent(recordID)));
-      renderSelection(record);
+      const activeFolder = selectedFolder();
+      const folderHasRecord = activeFolder && Array.isArray(activeFolder.recordIDs) && activeFolder.recordIDs.includes(record.id);
+      if (!folderHasRecord) {
+        state.selectedFolderPath = folderNodePath(record.folder_path || '');
+      }
+      state.selectedRecord = record;
+      state.payloadRevealed = false;
+      renderExplorer();
     } catch (error) {
       console.error('Failed to load vault record:', error);
       showAlert(error.message || 'Failed to load vault record.', 'error');
@@ -2587,6 +2833,7 @@
       await loadVaults(preserveSelection);
       const status = await loadVaultStatus();
       if (!status.available) {
+        state.folders = [];
         state.records = [];
         state.recordIndex = new Map();
         rebuildFolderTree();
@@ -2597,7 +2844,7 @@
       }
 
       if (!status.locked) {
-        await loadVaultRecords();
+        await Promise.all([loadVaultFolders(), loadVaultRecords()]);
         if (selectedID && state.recordIndex.has(selectedID)) {
           await selectRecord(selectedID);
         } else {
@@ -2605,6 +2852,7 @@
           renderExplorerPreview();
         }
       } else {
+        state.folders = [];
         state.records = [];
         state.recordIndex = new Map();
         rebuildFolderTree();
@@ -2645,6 +2893,11 @@
 
     if (state.unlockDialogOpen && !elements.unlockOverlay?.hidden) {
       elements.passwordInput?.focus();
+      return;
+    }
+
+    if (state.folderComposerOpen) {
+      elements.folderTree?.querySelector('[data-folder-create-input]')?.focus();
       return;
     }
 
@@ -2757,6 +3010,7 @@
       throw new Error('Title is required before saving to the vault.');
     }
 
+    body.folder_path = normalizeFolderPathInput(elements.entryFolderPathInput?.value);
     body.payload = payloadWithoutAttachments(parsePayloadInput());
     return body;
   }
@@ -2859,7 +3113,7 @@
         await refreshVault();
       } else {
         resetCreateForm();
-        state.selectedFolderPath = ROOT_FOLDER_PATH;
+        state.selectedFolderPath = folderNodePath(body.folder_path);
         notify('Vault entry saved.', 'success');
         await refreshVault(false);
 
@@ -3073,7 +3327,45 @@
 
       if (action === 'select-folder' && folderPath) {
         selectFolder(folderPath);
+        return;
       }
+
+      if (action === 'select-tree-record') {
+        state.selectedFolderPath = folderPath || ROOT_FOLDER_PATH;
+        const recordID = target.getAttribute('data-record-id');
+        if (recordID) {
+          selectRecord(recordID);
+        }
+        return;
+      }
+
+      if (action === 'open-folder-composer') {
+        openFolderComposer();
+        return;
+      }
+
+      if (action === 'save-folder-composer') {
+        createFolderFromComposer();
+        return;
+      }
+
+      if (action === 'cancel-folder-composer') {
+        closeFolderComposer();
+      }
+    });
+
+    elements.folderTree?.addEventListener('keydown', function(event) {
+      if (event.key !== 'Enter') {
+        return;
+      }
+
+      const target = event.target;
+      if (!(target instanceof HTMLInputElement) || !target.matches('[data-folder-create-input]')) {
+        return;
+      }
+
+      event.preventDefault();
+      createFolderFromComposer();
     });
   }
 
@@ -3215,6 +3507,10 @@
 
     elements.openExportBtn?.addEventListener('click', function() {
       openExportDialog();
+    });
+
+    elements.newFolderBtn?.addEventListener('click', function() {
+      openFolderComposer();
     });
 
     elements.openEntryBtn?.addEventListener('click', function() {
@@ -3398,6 +3694,12 @@
 
     elements.entryJsonModeInput?.addEventListener('change', function() {
       syncEntryComposerPresentation();
+    });
+
+    elements.entryUseSelectedFolderBtn?.addEventListener('click', function() {
+      if (elements.entryFolderPathInput) {
+        elements.entryFolderPathInput.value = selectedFolderRelativePath();
+      }
     });
 
     elements.entryAttachBtn?.addEventListener('click', function() {
