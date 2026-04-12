@@ -586,7 +586,7 @@ func respondVaultError(w http.ResponseWriter, err error) {
 		_ = orihttp.RespondError(w, http.StatusBadRequest, err.Error())
 	case errors.Is(err, vault.ErrImportPasswordInvalid):
 		_ = orihttp.RespondError(w, http.StatusUnauthorized, err.Error())
-	case errors.Is(err, vault.ErrVaultKeyUnavailable), errors.Is(err, vault.ErrMalformedRecord):
+	case errors.Is(err, vault.ErrVaultKeyUnavailable), errors.Is(err, vault.ErrMalformedRecord), errors.Is(err, vault.ErrVaultFileMissing), errors.Is(err, vault.ErrVaultFileCorrupt):
 		_ = orihttp.RespondError(w, http.StatusInternalServerError, err.Error())
 	case errors.Is(err, vault.ErrSecretStoreUnavailable), errors.Is(err, vault.ErrSecretStoreLocked):
 		_ = orihttp.RespondError(w, http.StatusServiceUnavailable, err.Error())

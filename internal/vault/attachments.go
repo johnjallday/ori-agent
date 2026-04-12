@@ -228,7 +228,16 @@ func decryptRecordAttachmentMetadata(dek []byte, nonceB64 string, ciphertextB64 
 }
 
 func (s *Store) getRecordAttachmentRow(ctx context.Context, recordID string, attachmentID string) (recordAttachmentRow, error) {
-	return getRecordAttachmentRowWithExecutor(ctx, s.db, recordID, attachmentID)
+	row, err := s.getRecordRow(ctx, recordID)
+	if err != nil {
+		return recordAttachmentRow{}, err
+	}
+	_, vaultDB, err := s.openVaultContentDB(ctx, row.VaultID)
+	if err != nil {
+		return recordAttachmentRow{}, err
+	}
+	defer func() { _ = vaultDB.Close() }()
+	return getRecordAttachmentRowWithExecutor(ctx, vaultDB, recordID, attachmentID)
 }
 
 func getRecordAttachmentRowWithExecutor(ctx context.Context, executor attachmentSQLExecutor, recordID string, attachmentID string) (recordAttachmentRow, error) {
@@ -262,13 +271,18 @@ func (s *Store) listRecordAttachments(ctx context.Context, recordID string, incl
 	if err != nil {
 		return nil, err
 	}
+	_, vaultDB, err := s.openVaultContentDB(ctx, row.VaultID)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = vaultDB.Close() }()
 
 	dek, err := s.ensureDataEncryptionKey(ctx, row.VaultID, false)
 	if err != nil {
 		return nil, err
 	}
 
-	return listRecordAttachmentsWithExecutor(ctx, s.db, dek, recordID, row.VaultID, includeContent)
+	return listRecordAttachmentsWithExecutor(ctx, vaultDB, dek, recordID, row.VaultID, includeContent)
 }
 
 func listRecordAttachmentsWithExecutor(ctx context.Context, executor attachmentSQLExecutor, dek []byte, recordID string, vaultID string, includeContent bool) ([]RecordAttachment, error) {
@@ -421,6 +435,11 @@ func (s *Store) AddRecordAttachment(ctx context.Context, recordID string, attach
 	if err != nil {
 		return nil, err
 	}
+	_, vaultDB, err := s.openVaultContentDB(ctx, row.VaultID)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = vaultDB.Close() }()
 
 	access = access.normalized()
 	_, writeCapability := capabilitiesForRecordType(row.Type)
@@ -435,7 +454,7 @@ func (s *Store) AddRecordAttachment(ctx context.Context, recordID string, attach
 
 	attachment.RecordID = row.ID
 	attachment.VaultID = row.VaultID
-	created, err := insertRecordAttachmentWithExecutor(ctx, s.db, dek, attachment, content)
+	created, err := insertRecordAttachmentWithExecutor(ctx, vaultDB, dek, attachment, content)
 	if err != nil {
 		return nil, err
 	}
@@ -464,7 +483,13 @@ func (s *Store) DeleteRecordAttachment(ctx context.Context, recordID string, att
 	if err != nil {
 		return err
 	}
-	attachmentRow, err := s.getRecordAttachmentRow(ctx, row.ID, attachmentID)
+	_, vaultDB, err := s.openVaultContentDB(ctx, row.VaultID)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = vaultDB.Close() }()
+
+	attachmentRow, err := getRecordAttachmentRowWithExecutor(ctx, vaultDB, row.ID, attachmentID)
 	if err != nil {
 		return err
 	}
@@ -475,7 +500,7 @@ func (s *Store) DeleteRecordAttachment(ctx context.Context, recordID string, att
 		return err
 	}
 
-	result, err := s.db.ExecContext(ctx, `DELETE FROM vault_record_attachments WHERE id = ? AND record_id = ?`, attachmentRow.ID, row.ID)
+	result, err := vaultDB.ExecContext(ctx, `DELETE FROM vault_record_attachments WHERE id = ? AND record_id = ?`, attachmentRow.ID, row.ID)
 	if err != nil {
 		return fmt.Errorf("delete vault record attachment: %w", err)
 	}
@@ -507,7 +532,13 @@ func (s *Store) GetRecordAttachmentContent(ctx context.Context, recordID string,
 	if err != nil {
 		return nil, nil, err
 	}
-	attachmentRow, err := s.getRecordAttachmentRow(ctx, row.ID, attachmentID)
+	_, vaultDB, err := s.openVaultContentDB(ctx, row.VaultID)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer func() { _ = vaultDB.Close() }()
+
+	attachmentRow, err := getRecordAttachmentRowWithExecutor(ctx, vaultDB, row.ID, attachmentID)
 	if err != nil {
 		return nil, nil, err
 	}

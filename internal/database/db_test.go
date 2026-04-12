@@ -101,9 +101,6 @@ func TestMigrations(t *testing.T) {
 		"sessions_fts",
 		"schema_migrations",
 		"vaults",
-		"vault_records",
-		"vault_grants",
-		"vault_audit_events",
 	}
 	for _, table := range tables {
 		var name string
@@ -127,9 +124,11 @@ func TestMigrations(t *testing.T) {
 		"agent_skill_access_json": false,
 	}
 	vaultColumns := map[string]bool{
-		"key_salt":       false,
-		"key_nonce":      false,
-		"key_ciphertext": false,
+		"name":        false,
+		"description": false,
+		"file_path":   false,
+		"created_at":  false,
+		"updated_at":  false,
 	}
 
 	rows, err := db.QueryContext(ctx, "PRAGMA table_info(workspaces)")
@@ -218,6 +217,82 @@ func TestForeignKeys(t *testing.T) {
 
 	if fkEnabled != 1 {
 		t.Errorf("Foreign keys should be enabled, got %d", fkEnabled)
+	}
+}
+
+func TestMigration013RemovesLegacyVaultCatalogRowsWithoutFilePath(t *testing.T) {
+	ctx := context.Background()
+
+	tmpDir, err := os.MkdirTemp("", "ori-db-migration-*")
+	if err != nil {
+		t.Fatalf("Failed to create temp directory: %v", err)
+	}
+	defer func() { _ = os.RemoveAll(tmpDir) }()
+
+	dbPath := filepath.Join(tmpDir, "test.db")
+	legacyDB, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatalf("Failed to open legacy database: %v", err)
+	}
+
+	if _, err := legacyDB.ExecContext(ctx, `
+		CREATE TABLE schema_migrations (
+			version INTEGER PRIMARY KEY,
+			applied_at DATETIME DEFAULT CURRENT_TIMESTAMP
+		)
+	`); err != nil {
+		t.Fatalf("Failed to create schema_migrations: %v", err)
+	}
+	if _, err := legacyDB.ExecContext(ctx, `INSERT INTO schema_migrations (version) VALUES (12)`); err != nil {
+		t.Fatalf("Failed to seed schema version 12: %v", err)
+	}
+	if _, err := legacyDB.ExecContext(ctx, `
+		CREATE TABLE vaults (
+			id TEXT PRIMARY KEY,
+			name TEXT NOT NULL,
+			description TEXT DEFAULT '',
+			file_path TEXT NOT NULL DEFAULT '',
+			created_at DATETIME NOT NULL,
+			updated_at DATETIME NOT NULL
+		)
+	`); err != nil {
+		t.Fatalf("Failed to create legacy vaults table: %v", err)
+	}
+	if _, err := legacyDB.ExecContext(ctx, `
+		INSERT INTO vaults (id, name, description, file_path, created_at, updated_at)
+		VALUES
+			('legacy-row', 'Legacy Row', 'blank file path', '', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
+			('file-backed-row', 'File Backed Row', 'valid file path', 'vaults/file-backed.db', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+	`); err != nil {
+		t.Fatalf("Failed to seed legacy vault rows: %v", err)
+	}
+	if err := legacyDB.Close(); err != nil {
+		t.Fatalf("Failed to close legacy database: %v", err)
+	}
+
+	db, err := Open(ctx, &Config{
+		Path:    dbPath,
+		WALMode: false,
+	})
+	if err != nil {
+		t.Fatalf("Failed to reopen migrated database: %v", err)
+	}
+	defer func() { _ = db.Close() }()
+
+	var legacyCount int
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM vaults WHERE TRIM(COALESCE(file_path, '')) = ''`).Scan(&legacyCount); err != nil {
+		t.Fatalf("Failed to count legacy vault rows: %v", err)
+	}
+	if legacyCount != 0 {
+		t.Fatalf("expected blank-file-path vault rows to be removed, got %d", legacyCount)
+	}
+
+	var fileBackedCount int
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM vaults WHERE id = 'file-backed-row'`).Scan(&fileBackedCount); err != nil {
+		t.Fatalf("Failed to count preserved file-backed vault rows: %v", err)
+	}
+	if fileBackedCount != 1 {
+		t.Fatalf("expected valid file-backed vault row to survive migration, got %d", fileBackedCount)
 	}
 }
 

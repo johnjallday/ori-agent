@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -23,7 +24,14 @@ import (
 const testVaultPassword = "test-vault-password"
 
 func newTestHandler(t *testing.T, secretStore vault.SecretStore, fallbackPath string) (*Handler, *vault.Store, *database.DB) {
+	handler, store, db, _ := newTestHandlerWithVaultFilesDir(t, secretStore, fallbackPath)
+	return handler, store, db
+}
+
+func newTestHandlerWithVaultFilesDir(t *testing.T, secretStore vault.SecretStore, fallbackPath string) (*Handler, *vault.Store, *database.DB, string) {
 	t.Helper()
+	_ = secretStore
+	_ = fallbackPath
 
 	db, err := database.Open(context.Background(), &database.Config{
 		InMemory: true,
@@ -33,11 +41,11 @@ func newTestHandler(t *testing.T, secretStore vault.SecretStore, fallbackPath st
 		t.Fatalf("open database: %v", err)
 	}
 
+	vaultFilesBaseDir := t.TempDir()
 	store := vault.NewStore(db, vault.StoreOptions{
-		SecretStore:        secretStore,
-		FallbackSecretPath: fallbackPath,
+		VaultFilesBaseDir: vaultFilesBaseDir,
 	})
-	return NewHandler(store), store, db
+	return NewHandler(store), store, db, vaultFilesBaseDir
 }
 
 func performJSONRequest(t *testing.T, handler http.Handler, method string, path string, body any) *httptest.ResponseRecorder {
@@ -105,22 +113,6 @@ func createHandlerVault(t *testing.T, store *vault.Store, name string) vault.Vau
 	item := vault.Vault{Name: name}
 	if err := store.CreateVault(context.Background(), &item, testVaultPassword); err != nil {
 		t.Fatalf("create handler vault %q: %v", name, err)
-	}
-	return item
-}
-
-func insertLegacyHandlerVault(t *testing.T, db *database.DB, name string) vault.Vault {
-	t.Helper()
-
-	item := vault.Vault{
-		ID:   "legacy-" + strings.ReplaceAll(strings.ToLower(name), " ", "-"),
-		Name: name,
-	}
-	if _, err := db.ExecContext(context.Background(), `
-		INSERT INTO vaults (id, name, description, key_salt, key_nonce, key_ciphertext, created_at, updated_at)
-		VALUES (?, ?, '', '', '', '', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-	`, item.ID, item.Name); err != nil {
-		t.Fatalf("insert legacy handler vault %q: %v", name, err)
 	}
 	return item
 }
@@ -779,13 +771,14 @@ func TestHandlerExportRequiresConfirmationAndPassword(t *testing.T) {
 	}
 }
 
-func TestHandlerUnlockAndLockFallbackVault(t *testing.T) {
-	tempDir := t.TempDir()
-	secretStore := vault.NewAutoSecretStore(vault.AutoSecretStoreOptions{GOOS: "plan9"})
-	handler, _, db := newTestHandler(t, secretStore, filepath.Join(tempDir, "vault-secrets.json"))
+func TestHandlerUnlockAndLockPasswordProtectedVault(t *testing.T) {
+	handler, store, db := newTestHandler(t, vault.NewMemorySecretStore(), "")
 	defer func() { _ = db.Close() }()
-	primaryVault := insertLegacyHandlerVault(t, db, "Primary Vault")
-	_ = insertLegacyHandlerVault(t, db, "Archive Vault")
+	primaryVault := createHandlerVault(t, store, "Primary Vault")
+
+	if err := store.Lock(context.Background(), primaryVault.ID); err != nil {
+		t.Fatalf("lock primary vault: %v", err)
+	}
 
 	statusRec := performJSONRequest(t, handler, http.MethodGet, "/api/vault/status?vault_id="+primaryVault.ID, nil)
 	if statusRec.Code != http.StatusOK {
@@ -794,12 +787,12 @@ func TestHandlerUnlockAndLockFallbackVault(t *testing.T) {
 	var status vault.VaultStatus
 	decodeJSONBody(t, statusRec, &status)
 	if !status.Locked || !status.RequiresPassphrase {
-		t.Fatalf("expected locked fallback vault, got %+v", status)
+		t.Fatalf("expected locked password-protected vault, got %+v", status)
 	}
 
 	unlockRec := performJSONRequest(t, handler, http.MethodPost, "/api/vault/unlock", map[string]any{
 		"vault_id":       primaryVault.ID,
-		"vault_password": "fallback-pass",
+		"vault_password": testVaultPassword,
 	})
 	if unlockRec.Code != http.StatusOK {
 		t.Fatalf("expected 200 from unlock, got %d: %s", unlockRec.Code, unlockRec.Body.String())
@@ -834,6 +827,24 @@ func TestHandlerUnlockAndLockFallbackVault(t *testing.T) {
 	listRec := performJSONRequest(t, handler, http.MethodGet, "/api/vault/records?vault_id="+primaryVault.ID+"&workspace_id=ws-1", nil)
 	if listRec.Code != http.StatusLocked {
 		t.Fatalf("expected 423 after lock, got %d: %s", listRec.Code, listRec.Body.String())
+	}
+}
+
+func TestHandlerListRecordsReturnsExplicitErrorForMissingVaultFile(t *testing.T) {
+	handler, store, db, vaultFilesBaseDir := newTestHandlerWithVaultFilesDir(t, vault.NewMemorySecretStore(), "")
+	defer func() { _ = db.Close() }()
+
+	item := createHandlerVault(t, store, "Broken Vault")
+	if err := os.Remove(filepath.Join(vaultFilesBaseDir, item.FilePath)); err != nil {
+		t.Fatalf("remove vault file: %v", err)
+	}
+
+	rec := performJSONRequest(t, handler, http.MethodGet, "/api/vault/records?vault_id="+url.QueryEscape(item.ID), nil)
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("expected 500 from list records with missing vault file, got %d: %s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), vault.ErrVaultFileMissing.Error()) {
+		t.Fatalf("expected explicit missing vault file error, got body=%s", rec.Body.String())
 	}
 }
 
