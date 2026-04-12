@@ -572,7 +572,7 @@ func respondVaultError(w http.ResponseWriter, err error) {
 		return
 	case errors.Is(err, vault.ErrVaultNotFound), errors.Is(err, vault.ErrRecordNotFound), errors.Is(err, vault.ErrGrantNotFound), errors.Is(err, vault.ErrRecordAttachmentNotFound):
 		_ = orihttp.RespondError(w, http.StatusNotFound, err.Error())
-	case errors.Is(err, vault.ErrVaultAlreadyExists):
+	case errors.Is(err, vault.ErrVaultAlreadyExists), errors.Is(err, vault.ErrFolderNotEmpty):
 		_ = orihttp.RespondError(w, http.StatusConflict, err.Error())
 	case errors.Is(err, vault.ErrPermissionDenied):
 		_ = orihttp.RespondError(w, http.StatusForbidden, err.Error())

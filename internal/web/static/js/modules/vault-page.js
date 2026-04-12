@@ -2172,6 +2172,46 @@
     }
   }
 
+  async function deleteFolder(folderPath, triggerButton) {
+    const normalizedFolderPath = normalizeFolderPathInput(folderPathFromNodePath(folderPath) || folderPath);
+    if (!normalizedFolderPath) {
+      showInlineAlert('Select a folder before deleting it.', 'warning');
+      return;
+    }
+
+    const folder = folderIndex.get(folderNodePath(normalizedFolderPath));
+    const folderLabel = folder?.name || normalizedFolderPath;
+    const confirmed = window.confirm(`Delete folder "${folderLabel}"? Only empty folders can be removed.`);
+    if (!confirmed) {
+      return;
+    }
+
+    try {
+      setButtonLoading(triggerButton, true, 'Deleting');
+      await apiRequest(vaultURL('/api/vault/folders'), {
+        method: 'DELETE',
+        body: {
+          vault_id: currentVaultID(),
+          path: normalizedFolderPath
+        }
+      });
+
+      if (selectedFolderPath === folderNodePath(normalizedFolderPath)) {
+        const parentPath = folderPathSegments(normalizedFolderPath);
+        parentPath.pop();
+        selectedFolderPath = folderNodePath(parentPath.join('/'));
+      }
+
+      notify('Folder deleted.', 'success');
+      await refreshVault();
+    } catch (error) {
+      console.error('Failed to delete folder:', error);
+      showInlineAlert(error.message || 'Failed to delete folder.', 'error');
+    } finally {
+      setButtonLoading(triggerButton, false);
+    }
+  }
+
   function renderRecordAttachmentCard(attachment) {
     const normalized = normalizeEntryAttachment(attachment);
     if (!normalized) {
@@ -2334,6 +2374,7 @@
             <span class="vault-modal-tree-record-label">${escapeHTML(record.label || 'Untitled entry')}</span>
             <span class="vault-modal-tree-record-meta">${escapeHTML(metaParts.join(' • '))}</span>
           </button>
+          <button type="button" class="vault-modal-tree-row-action" data-action="delete-tree-record" data-record-id="${escapeHTML(record.id)}">Delete</button>
         </div>
       </div>
     `;
@@ -2377,6 +2418,7 @@
             <span class="vault-modal-folder-label">${escapeHTML(node.name)}</span>
             <span class="vault-modal-folder-meta">${escapeHTML(folderRowMeta(node))}</span>
           </button>
+          ${node.path === ROOT_FOLDER_PATH ? '' : `<button type="button" class="vault-modal-tree-row-action" data-action="delete-folder" data-folder-path="${escapeHTML(node.folderPath)}">Delete</button>`}
         </div>
         ${childrenHTML}
       </div>
@@ -2627,11 +2669,19 @@
     const previewSubtitle = folder.path === ROOT_FOLDER_PATH
       ? 'Vault root'
       : folderPathLabel(folder);
+    const folderDeleteAction = folder.path === ROOT_FOLDER_PATH
+      ? ''
+      : `<button type="button" class="modern-btn modern-btn-secondary vault-modal-danger-btn" data-action="delete-folder" data-folder-path="${escapeHTML(folder.folderPath)}">Delete Folder</button>`;
 
     explorerPreviewEl.innerHTML = `
       <div class="vault-modal-preview-header">
-        <div class="vault-modal-preview-title">${escapeHTML(folder.name)}</div>
-        <div class="vault-modal-preview-subtitle">${escapeHTML(previewSubtitle)}</div>
+        <div class="vault-modal-inline-head">
+          <div class="vault-modal-inline-head-copy">
+            <div class="vault-modal-preview-title">${escapeHTML(folder.name)}</div>
+            <div class="vault-modal-preview-subtitle">${escapeHTML(previewSubtitle)}</div>
+          </div>
+          ${folderDeleteAction}
+        </div>
       </div>
       <div class="vault-modal-preview-stats">
         <span class="vault-modal-chip">${String(folderRecords.length)} ${folderRecords.length === 1 ? 'item' : 'items'}</span>
@@ -3638,29 +3688,34 @@
     }
   }
 
-  async function deleteRecord() {
-    if (!selectedRecord) {
+  async function deleteRecord(recordID = selectedRecord?.id || '', triggerButton = null) {
+    const targetRecord = recordID ? recordIndex.get(recordID) || (selectedRecord?.id === recordID ? selectedRecord : null) : selectedRecord;
+    if (!recordID || !targetRecord) {
       return;
     }
 
-    const confirmed = window.confirm(`Delete vault item "${selectedRecord.label || selectedRecord.id}"?`);
+    const confirmed = window.confirm(`Delete vault item "${targetRecord.label || targetRecord.id}"?`);
     if (!confirmed) {
       return;
     }
 
+    const deleteButton = triggerButton || (selectedRecord?.id === recordID ? deleteEntryBtn : null);
+
     try {
-      setButtonLoading(deleteEntryBtn, true, 'Deleting');
-      await apiRequest(vaultURL(`/api/vault/records/${encodeURIComponent(selectedRecord.id)}`), {
+      setButtonLoading(deleteButton, true, 'Deleting');
+      await apiRequest(vaultURL(`/api/vault/records/${encodeURIComponent(recordID)}`), {
         method: 'DELETE'
       });
       notify('Vault item deleted.', 'success');
-      clearRecordForm({ hide: true });
+      if (selectedRecord?.id === recordID) {
+        clearRecordForm({ hide: true });
+      }
       await refreshVault();
     } catch (error) {
       console.error('Failed to delete vault item:', error);
       showInlineAlert(error.message || 'Failed to delete vault item.', 'error');
     } finally {
-      setButtonLoading(deleteEntryBtn, false);
+      setButtonLoading(deleteButton, false);
     }
   }
 
@@ -4096,6 +4151,16 @@
     }
 
     const folderPath = action.getAttribute('data-folder-path');
+    if (action.getAttribute('data-action') === 'delete-folder') {
+      deleteFolder(folderPath, action);
+      return;
+    }
+
+    if (action.getAttribute('data-action') === 'delete-tree-record') {
+      deleteRecord(action.getAttribute('data-record-id'), action);
+      return;
+    }
+
     if (action.getAttribute('data-action') === 'toggle-folder') {
       toggleFolderNode(folderPath);
       return;
@@ -4231,7 +4296,12 @@
     }
 
     if (actionName === 'delete-record') {
-      deleteRecord();
+      deleteRecord(action.getAttribute('data-record-id'), action);
+      return;
+    }
+
+    if (actionName === 'delete-folder') {
+      deleteFolder(action.getAttribute('data-folder-path'), action);
       return;
     }
 

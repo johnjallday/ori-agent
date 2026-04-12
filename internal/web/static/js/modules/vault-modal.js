@@ -2325,6 +2325,46 @@
     }
   }
 
+  async function deleteFolder(folderPath, triggerButton) {
+    const normalizedFolderPath = normalizeFolderPathInput(folderPathFromNodePath(folderPath) || folderPath);
+    if (!normalizedFolderPath) {
+      showAlert('Select a folder before deleting it.', 'warning');
+      return;
+    }
+
+    const folder = state.folderIndex.get(folderNodePath(normalizedFolderPath));
+    const folderLabel = folder?.name || normalizedFolderPath;
+    const confirmed = window.confirm('Delete folder "' + folderLabel + '"? Only empty folders can be removed.');
+    if (!confirmed) {
+      return;
+    }
+
+    try {
+      setButtonLoading(triggerButton, true, 'Deleting');
+      await apiRequest(vaultURL('/api/vault/folders'), {
+        method: 'DELETE',
+        body: {
+          vault_id: activeVaultID(),
+          path: normalizedFolderPath
+        }
+      });
+
+      if (state.selectedFolderPath === folderNodePath(normalizedFolderPath)) {
+        const parentPath = folderPathSegments(normalizedFolderPath);
+        parentPath.pop();
+        state.selectedFolderPath = folderNodePath(parentPath.join('/'));
+      }
+
+      notify('Folder deleted.', 'success');
+      await refreshVault();
+    } catch (error) {
+      console.error('Failed to delete folder:', error);
+      showAlert(error.message || 'Failed to delete folder.', 'error');
+    } finally {
+      setButtonLoading(triggerButton, false);
+    }
+  }
+
   function renderRecordAttachmentCard(attachment) {
     const normalized = normalizeEntryAttachment(attachment);
     if (!normalized) {
@@ -2487,6 +2527,7 @@
             '<span class="vault-modal-tree-record-label">' + escapeHTML(record.label || 'Untitled entry') + '</span>' +
             '<span class="vault-modal-tree-record-meta">' + escapeHTML(metaParts.join(' • ')) + '</span>' +
           '</button>' +
+          '<button type="button" class="vault-modal-tree-row-action" data-action="delete-tree-record" data-record-id="' + escapeHTML(record.id) + '">Delete</button>' +
         '</div>' +
       '</div>'
     );
@@ -2536,6 +2577,7 @@
             '<span class="vault-modal-folder-label">' + escapeHTML(node.name) + '</span>' +
             '<span class="vault-modal-folder-meta">' + escapeHTML(folderRowMeta(node)) + '</span>' +
           '</button>' +
+          (node.path === ROOT_FOLDER_PATH ? '' : '<button type="button" class="vault-modal-tree-row-action" data-action="delete-folder" data-folder-path="' + escapeHTML(node.folderPath) + '">Delete</button>') +
         '</div>' +
         childrenHTML +
       '</div>'
@@ -2810,11 +2852,19 @@
     const previewSubtitle = folder.path === ROOT_FOLDER_PATH
       ? 'Vault root'
       : folderPathLabel(folder);
+    const folderDeleteAction = folder.path === ROOT_FOLDER_PATH
+      ? ''
+      : '<button type="button" class="modern-btn modern-btn-secondary vault-modal-danger-btn" data-action="delete-folder" data-folder-path="' + escapeHTML(folder.folderPath) + '">Delete Folder</button>';
 
     elements.preview.innerHTML = (
       '<div class="vault-modal-preview-header">' +
-        '<div class="vault-modal-preview-title">' + escapeHTML(folder.name) + '</div>' +
-        '<div class="vault-modal-preview-subtitle">' + escapeHTML(previewSubtitle) + '</div>' +
+        '<div class="vault-modal-inline-head">' +
+          '<div class="vault-modal-inline-head-copy">' +
+            '<div class="vault-modal-preview-title">' + escapeHTML(folder.name) + '</div>' +
+            '<div class="vault-modal-preview-subtitle">' + escapeHTML(previewSubtitle) + '</div>' +
+          '</div>' +
+          folderDeleteAction +
+        '</div>' +
       '</div>' +
       '<div class="vault-modal-preview-stats">' +
         '<span class="vault-modal-chip">' + String(folderRecords.length) + ' ' + (folderRecords.length === 1 ? 'item' : 'items') + '</span>' +
@@ -3257,7 +3307,7 @@
     }
   }
 
-  async function deleteRecord(recordID) {
+  async function deleteRecord(recordID, triggerButton) {
     const targetRecord = (state.selectedRecord && state.selectedRecord.id === recordID)
       ? state.selectedRecord
       : state.recordIndex.get(recordID);
@@ -3272,7 +3322,7 @@
       return;
     }
 
-    const deleteButton = elements.preview?.querySelector('[data-action="delete-record"][data-record-id="' + escapeSelectorValue(recordID) + '"]');
+    const deleteButton = triggerButton || elements.preview?.querySelector('[data-action="delete-record"][data-record-id="' + escapeSelectorValue(recordID) + '"]');
 
     try {
       setButtonLoading(deleteButton, true, 'Deleting');
@@ -3432,6 +3482,19 @@
       const action = target.getAttribute('data-action');
       const folderPath = target.getAttribute('data-folder-path');
 
+      if (action === 'delete-folder' && folderPath) {
+        deleteFolder(folderPath, target);
+        return;
+      }
+
+      if (action === 'delete-tree-record') {
+        const recordID = target.getAttribute('data-record-id');
+        if (recordID) {
+          deleteRecord(recordID, target);
+        }
+        return;
+      }
+
       if (action === 'toggle-folder' && folderPath) {
         toggleFolder(folderPath);
         return;
@@ -3577,7 +3640,15 @@
       if (action === 'delete-record') {
         const recordID = target.getAttribute('data-record-id');
         if (recordID) {
-          deleteRecord(recordID);
+          deleteRecord(recordID, target);
+        }
+        return;
+      }
+
+      if (action === 'delete-folder') {
+        const folderPath = target.getAttribute('data-folder-path');
+        if (folderPath) {
+          deleteFolder(folderPath, target);
         }
         return;
       }

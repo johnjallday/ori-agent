@@ -301,3 +301,75 @@ func (s *Store) CreateFolder(ctx context.Context, folder *Folder) (*Folder, erro
 
 	return created, nil
 }
+
+func (s *Store) DeleteFolder(ctx context.Context, vaultID string, path string) error {
+	if s.db == nil {
+		return ErrSecretStoreUnavailable
+	}
+
+	resolvedVaultID, err := s.resolveVaultID(ctx, vaultID)
+	if err != nil {
+		return err
+	}
+	vaultID = resolvedVaultID
+
+	path, err = normalizeFolderPath(path)
+	if err != nil {
+		return err
+	}
+	if path == "" {
+		return ErrFolderPathInvalid
+	}
+
+	if _, err := s.getVault(ctx, vaultID); err != nil {
+		return err
+	}
+	if _, err := s.getFolderByPath(ctx, vaultID, path, false); err != nil {
+		return err
+	}
+
+	folders, err := s.ListFolders(ctx, vaultID)
+	if err != nil {
+		return err
+	}
+	for _, folder := range folders {
+		if folder.Path != path && strings.HasPrefix(folder.Path, path+"/") {
+			return ErrFolderNotEmpty
+		}
+	}
+
+	records, err := s.ListRecords(ctx, RecordFilter{VaultID: vaultID}, AccessContext{})
+	if err != nil {
+		return err
+	}
+	for _, record := range records {
+		if record.FolderPath == path || strings.HasPrefix(record.FolderPath, path+"/") {
+			return ErrFolderNotEmpty
+		}
+	}
+
+	result, err := s.db.ExecContext(ctx, `
+		DELETE FROM vault_folders
+		WHERE vault_id = ? AND path_hash = ?
+	`, vaultID, folderPathHash(path))
+	if err != nil {
+		return fmt.Errorf("delete vault folder: %w", err)
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("delete vault folder rows affected: %w", err)
+	}
+	if rowsAffected == 0 {
+		return ErrRecordNotFound
+	}
+
+	s.writeAuditBestEffort(ctx, AuditEvent{
+		VaultID: vaultID,
+		Action:  "folder.delete",
+		Outcome: "allowed",
+		Details: fmt.Sprintf(`{"path":%q}`, path),
+	})
+
+	return nil
+}

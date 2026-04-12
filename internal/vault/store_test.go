@@ -241,6 +241,67 @@ func TestStoreCreateFolderPersistsEmptyFolders(t *testing.T) {
 	}
 }
 
+func TestStoreDeleteFolderRequiresEmptyFolder(t *testing.T) {
+	ctx := context.Background()
+	store, db := newTestVaultStore(t)
+	defer func() { _ = db.Close() }()
+
+	primaryVault := createTestVault(t, ctx, store, "Primary Vault")
+
+	if _, err := store.CreateFolder(ctx, &Folder{
+		VaultID: primaryVault.ID,
+		Path:    "Family/Passports",
+	}); err != nil {
+		t.Fatalf("create folder: %v", err)
+	}
+
+	if err := store.DeleteFolder(ctx, primaryVault.ID, "Family"); !errors.Is(err, ErrFolderNotEmpty) {
+		t.Fatalf("expected ErrFolderNotEmpty for parent folder, got %v", err)
+	}
+
+	if err := store.DeleteFolder(ctx, primaryVault.ID, "Family/Passports"); err != nil {
+		t.Fatalf("delete leaf folder: %v", err)
+	}
+
+	folders, err := store.ListFolders(ctx, primaryVault.ID)
+	if err != nil {
+		t.Fatalf("list folders after leaf delete: %v", err)
+	}
+	if len(folders) != 1 || folders[0].Path != "Family" {
+		t.Fatalf("unexpected folders after leaf delete: %#v", folders)
+	}
+
+	record := &Record{
+		VaultID:    primaryVault.ID,
+		Type:       "personal_note",
+		FolderPath: "Family",
+		Label:      "Passport",
+		Payload:    json.RawMessage(`{"note":"Emergency contact"}`),
+	}
+	if err := store.CreateRecord(ctx, record, AccessContext{}); err != nil {
+		t.Fatalf("create record: %v", err)
+	}
+
+	if err := store.DeleteFolder(ctx, primaryVault.ID, "Family"); !errors.Is(err, ErrFolderNotEmpty) {
+		t.Fatalf("expected ErrFolderNotEmpty for folder containing a record, got %v", err)
+	}
+
+	if err := store.DeleteRecord(ctx, record.ID, AccessContext{}); err != nil {
+		t.Fatalf("delete record: %v", err)
+	}
+	if err := store.DeleteFolder(ctx, primaryVault.ID, "Family"); err != nil {
+		t.Fatalf("delete now-empty folder: %v", err)
+	}
+
+	folders, err = store.ListFolders(ctx, primaryVault.ID)
+	if err != nil {
+		t.Fatalf("list folders after delete: %v", err)
+	}
+	if len(folders) != 0 {
+		t.Fatalf("expected no folders after delete, got %#v", folders)
+	}
+}
+
 func TestStoreCreateGrantRefreshPreservesCreatedAt(t *testing.T) {
 	ctx := context.Background()
 	db, err := database.Open(ctx, &database.Config{

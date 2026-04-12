@@ -41,6 +41,30 @@ func (h *Handler) handleFolders(w http.ResponseWriter, r *http.Request) {
 			"success": true,
 			"folder":  folder,
 		})
+	case http.MethodDelete:
+		var req struct {
+			VaultID string `json:"vault_id,omitempty"`
+			Path    string `json:"path,omitempty"`
+		}
+		if r.ContentLength > 0 {
+			if !orihttp.ParseJSONBody(w, r, &req) {
+				return
+			}
+		}
+
+		path := req.Path
+		if path == "" {
+			path = r.URL.Query().Get("path")
+		}
+
+		if err := h.store.DeleteFolder(r.Context(), vaultIDFromRequest(r, req.VaultID), path); err != nil {
+			respondVaultError(w, err)
+			return
+		}
+
+		orihttp.Success(w, map[string]any{
+			"success": true,
+		})
 	default:
 		_ = orihttp.RespondMethodNotAllowed(w)
 	}

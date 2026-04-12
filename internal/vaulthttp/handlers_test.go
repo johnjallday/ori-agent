@@ -257,6 +257,32 @@ func TestHandlerFolderLifecycle(t *testing.T) {
 	if listed.Folders[0].Path != "Family" || listed.Folders[1].Path != "Family/Passports" {
 		t.Fatalf("unexpected folder paths: %#v", listed.Folders)
 	}
+
+	deleteParentRec := performJSONRequest(t, handler, http.MethodDelete, "/api/vault/folders", map[string]any{
+		"vault_id": primaryVault.ID,
+		"path":     "Family",
+	})
+	if deleteParentRec.Code != http.StatusConflict {
+		t.Fatalf("expected 409 from parent folder delete, got %d: %s", deleteParentRec.Code, deleteParentRec.Body.String())
+	}
+
+	deleteLeafRec := performJSONRequest(t, handler, http.MethodDelete, "/api/vault/folders", map[string]any{
+		"vault_id": primaryVault.ID,
+		"path":     "Family/Passports",
+	})
+	if deleteLeafRec.Code != http.StatusOK {
+		t.Fatalf("expected 200 from leaf folder delete, got %d: %s", deleteLeafRec.Code, deleteLeafRec.Body.String())
+	}
+
+	finalListRec := performJSONRequest(t, handler, http.MethodGet, "/api/vault/folders?vault_id="+primaryVault.ID, nil)
+	if finalListRec.Code != http.StatusOK {
+		t.Fatalf("expected 200 from folder list after delete, got %d: %s", finalListRec.Code, finalListRec.Body.String())
+	}
+
+	decodeJSONBody(t, finalListRec, &listed)
+	if len(listed.Folders) != 1 || listed.Folders[0].Path != "Family" {
+		t.Fatalf("unexpected folders after delete: %#v", listed.Folders)
+	}
 }
 
 func TestHandlerRecordAttachmentLifecycle(t *testing.T) {

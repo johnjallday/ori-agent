@@ -28,6 +28,7 @@ var (
 	ErrImportBundleInvalid      = errors.New("vault: import bundle is invalid")
 	ErrImportTargetRequired     = errors.New("vault: import target is required")
 	ErrFolderPathInvalid        = errors.New("vault: folder path is invalid")
+	ErrFolderNotEmpty           = errors.New("vault: folder is not empty")
 	ErrRecordAttachmentNotFound = errors.New("vault: record attachment not found")
 	ErrRecordAttachmentRequired = errors.New("vault: attachment content is required")
 	ErrRecordAttachmentTooLarge = errors.New("vault: attachment exceeds maximum size")

@@ -1343,7 +1343,7 @@ body::after {
 
 .vault-modal-folder-row {
   display: grid;
-  grid-template-columns: 18px minmax(0, 1fr);
+  grid-template-columns: 18px minmax(0, 1fr) auto;
   align-items: center;
   gap: 0.16rem;
   padding-left: calc(var(--vault-tree-depth, 0) * 15px + 0.3rem);
@@ -1430,6 +1430,36 @@ body::after {
 .vault-modal-folder-node.is-selected > .vault-modal-folder-row .vault-modal-folder-main {
   background: linear-gradient(90deg, rgba(214, 149, 83, 0.22), rgba(238, 205, 158, 0.2));
   border: 1px solid rgba(196, 128, 73, 0.4);
+}
+
+.vault-modal-tree-row-action {
+  border: 1px solid rgba(183, 120, 70, 0.24);
+  background: rgba(255, 255, 255, 0.42);
+  color: var(--text-secondary);
+  border-radius: 999px;
+  font-size: 0.64rem;
+  line-height: 1;
+  padding: 0.22rem 0.48rem;
+  white-space: nowrap;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.16s ease, border-color 0.16s ease, background 0.16s ease, color 0.16s ease;
+  margin-right: 0.18rem;
+}
+
+.vault-modal-folder-row:hover .vault-modal-tree-row-action,
+.vault-modal-folder-row:focus-within .vault-modal-tree-row-action,
+.vault-modal-folder-node.is-selected > .vault-modal-folder-row .vault-modal-tree-row-action,
+.vault-modal-tree-record.is-selected .vault-modal-tree-row-action {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.vault-modal-tree-row-action:hover,
+.vault-modal-tree-row-action:focus-visible {
+  border-color: rgba(210, 96, 70, 0.32);
+  background: rgba(214, 91, 65, 0.12);
+  color: #a94632;
 }
 
 .vault-modal-folder-tree-actions {
@@ -2300,6 +2330,22 @@ body::after {
 .dark-mode .vault-modal-folder-node.is-selected > .vault-modal-folder-row .vault-modal-folder-main {
   background: linear-gradient(90deg, rgba(215, 155, 89, 0.18), rgba(70, 86, 114, 0.18));
   border-color: rgba(220, 173, 115, 0.28);
+}
+
+[data-bs-theme="dark"] .vault-modal-tree-row-action,
+.dark-mode .vault-modal-tree-row-action {
+  border-color: rgba(220, 173, 115, 0.18);
+  background: rgba(25, 33, 48, 0.78);
+  color: #c4d0de;
+}
+
+[data-bs-theme="dark"] .vault-modal-tree-row-action:hover,
+[data-bs-theme="dark"] .vault-modal-tree-row-action:focus-visible,
+.dark-mode .vault-modal-tree-row-action:hover,
+.dark-mode .vault-modal-tree-row-action:focus-visible {
+  border-color: rgba(233, 126, 112, 0.34);
+  background: rgba(213, 84, 66, 0.14);
+  color: #ffd0ca;
 }
 
 [data-bs-theme="dark"] .vault-modal-tree-record.is-selected .vault-modal-tree-record-main,
