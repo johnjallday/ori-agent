@@ -302,7 +302,7 @@ func (s *Store) CreateFolder(ctx context.Context, folder *Folder) (*Folder, erro
 	return created, nil
 }
 
-func (s *Store) DeleteFolder(ctx context.Context, vaultID string, path string) error {
+func (s *Store) DeleteFolder(ctx context.Context, vaultID string, path string, recursive bool) error {
 	if s.db == nil {
 		return ErrSecretStoreUnavailable
 	}
@@ -332,34 +332,74 @@ func (s *Store) DeleteFolder(ctx context.Context, vaultID string, path string) e
 	if err != nil {
 		return err
 	}
-	for _, folder := range folders {
-		if folder.Path != path && strings.HasPrefix(folder.Path, path+"/") {
-			return ErrFolderNotEmpty
-		}
-	}
-
 	records, err := s.ListRecords(ctx, RecordFilter{VaultID: vaultID}, AccessContext{})
 	if err != nil {
 		return err
 	}
-	for _, record := range records {
-		if record.FolderPath == path || strings.HasPrefix(record.FolderPath, path+"/") {
-			return ErrFolderNotEmpty
+
+	folderPathsToDelete := make([]string, 0, len(folders))
+	for _, folder := range folders {
+		if folder.Path == path || strings.HasPrefix(folder.Path, path+"/") {
+			folderPathsToDelete = append(folderPathsToDelete, folder.Path)
 		}
 	}
 
-	result, err := s.db.ExecContext(ctx, `
-		DELETE FROM vault_folders
-		WHERE vault_id = ? AND path_hash = ?
-	`, vaultID, folderPathHash(path))
-	if err != nil {
-		return fmt.Errorf("delete vault folder: %w", err)
+	recordIDsToDelete := make([]string, 0)
+	for _, record := range records {
+		if record.FolderPath == path || strings.HasPrefix(record.FolderPath, path+"/") {
+			recordIDsToDelete = append(recordIDsToDelete, record.ID)
+		}
 	}
 
-	rowsAffected, err := result.RowsAffected()
-	if err != nil {
-		return fmt.Errorf("delete vault folder rows affected: %w", err)
+	nestedFolderCount := 0
+	if len(folderPathsToDelete) > 0 {
+		nestedFolderCount = len(folderPathsToDelete) - 1
 	}
+	if !recursive && (nestedFolderCount > 0 || len(recordIDsToDelete) > 0) {
+		return ErrFolderNotEmpty
+	}
+
+	rowsAffected := int64(0)
+	err = s.db.InTransaction(ctx, func(tx *sql.Tx) error {
+		for _, recordID := range recordIDsToDelete {
+			if _, err := tx.ExecContext(ctx, `DELETE FROM vault_record_attachments WHERE record_id = ?`, recordID); err != nil {
+				return fmt.Errorf("delete vault record attachments: %w", err)
+			}
+
+			result, err := tx.ExecContext(ctx, `DELETE FROM vault_records WHERE id = ?`, recordID)
+			if err != nil {
+				return fmt.Errorf("delete vault record: %w", err)
+			}
+			recordRowsAffected, err := result.RowsAffected()
+			if err != nil {
+				return fmt.Errorf("delete vault record rows affected: %w", err)
+			}
+			if recordRowsAffected == 0 {
+				return ErrRecordNotFound
+			}
+		}
+
+		for _, folderPath := range folderPathsToDelete {
+			result, err := tx.ExecContext(ctx, `
+				DELETE FROM vault_folders
+				WHERE vault_id = ? AND path_hash = ?
+			`, vaultID, folderPathHash(folderPath))
+			if err != nil {
+				return fmt.Errorf("delete vault folder: %w", err)
+			}
+			folderRowsAffected, err := result.RowsAffected()
+			if err != nil {
+				return fmt.Errorf("delete vault folder rows affected: %w", err)
+			}
+			rowsAffected += folderRowsAffected
+		}
+
+		return nil
+	})
+	if err != nil {
+		return err
+	}
+
 	if rowsAffected == 0 {
 		return ErrRecordNotFound
 	}
@@ -368,7 +408,7 @@ func (s *Store) DeleteFolder(ctx context.Context, vaultID string, path string) e
 		VaultID: vaultID,
 		Action:  "folder.delete",
 		Outcome: "allowed",
-		Details: fmt.Sprintf(`{"path":%q}`, path),
+		Details: fmt.Sprintf(`{"path":%q,"recursive":%t,"deleted_record_count":%d,"deleted_folder_count":%d}`, path, recursive, len(recordIDsToDelete), len(folderPathsToDelete)),
 	})
 
 	return nil

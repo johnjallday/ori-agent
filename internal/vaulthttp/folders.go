@@ -43,8 +43,9 @@ func (h *Handler) handleFolders(w http.ResponseWriter, r *http.Request) {
 		})
 	case http.MethodDelete:
 		var req struct {
-			VaultID string `json:"vault_id,omitempty"`
-			Path    string `json:"path,omitempty"`
+			VaultID   string `json:"vault_id,omitempty"`
+			Path      string `json:"path,omitempty"`
+			Recursive bool   `json:"recursive,omitempty"`
 		}
 		if r.ContentLength > 0 {
 			if !orihttp.ParseJSONBody(w, r, &req) {
@@ -56,8 +57,9 @@ func (h *Handler) handleFolders(w http.ResponseWriter, r *http.Request) {
 		if path == "" {
 			path = r.URL.Query().Get("path")
 		}
+		recursive := req.Recursive || r.URL.Query().Get("recursive") == "true"
 
-		if err := h.store.DeleteFolder(r.Context(), vaultIDFromRequest(r, req.VaultID), path); err != nil {
+		if err := h.store.DeleteFolder(r.Context(), vaultIDFromRequest(r, req.VaultID), path, recursive); err != nil {
 			respondVaultError(w, err)
 			return
 		}

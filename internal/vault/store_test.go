@@ -241,7 +241,7 @@ func TestStoreCreateFolderPersistsEmptyFolders(t *testing.T) {
 	}
 }
 
-func TestStoreDeleteFolderRequiresEmptyFolder(t *testing.T) {
+func TestStoreDeleteFolderSupportsRecursiveDelete(t *testing.T) {
 	ctx := context.Background()
 	store, db := newTestVaultStore(t)
 	defer func() { _ = db.Close() }()
@@ -255,11 +255,11 @@ func TestStoreDeleteFolderRequiresEmptyFolder(t *testing.T) {
 		t.Fatalf("create folder: %v", err)
 	}
 
-	if err := store.DeleteFolder(ctx, primaryVault.ID, "Family"); !errors.Is(err, ErrFolderNotEmpty) {
+	if err := store.DeleteFolder(ctx, primaryVault.ID, "Family", false); !errors.Is(err, ErrFolderNotEmpty) {
 		t.Fatalf("expected ErrFolderNotEmpty for parent folder, got %v", err)
 	}
 
-	if err := store.DeleteFolder(ctx, primaryVault.ID, "Family/Passports"); err != nil {
+	if err := store.DeleteFolder(ctx, primaryVault.ID, "Family/Passports", false); err != nil {
 		t.Fatalf("delete leaf folder: %v", err)
 	}
 
@@ -282,15 +282,12 @@ func TestStoreDeleteFolderRequiresEmptyFolder(t *testing.T) {
 		t.Fatalf("create record: %v", err)
 	}
 
-	if err := store.DeleteFolder(ctx, primaryVault.ID, "Family"); !errors.Is(err, ErrFolderNotEmpty) {
+	if err := store.DeleteFolder(ctx, primaryVault.ID, "Family", false); !errors.Is(err, ErrFolderNotEmpty) {
 		t.Fatalf("expected ErrFolderNotEmpty for folder containing a record, got %v", err)
 	}
 
-	if err := store.DeleteRecord(ctx, record.ID, AccessContext{}); err != nil {
-		t.Fatalf("delete record: %v", err)
-	}
-	if err := store.DeleteFolder(ctx, primaryVault.ID, "Family"); err != nil {
-		t.Fatalf("delete now-empty folder: %v", err)
+	if err := store.DeleteFolder(ctx, primaryVault.ID, "Family", true); err != nil {
+		t.Fatalf("delete folder recursively: %v", err)
 	}
 
 	folders, err = store.ListFolders(ctx, primaryVault.ID)
@@ -299,6 +296,9 @@ func TestStoreDeleteFolderRequiresEmptyFolder(t *testing.T) {
 	}
 	if len(folders) != 0 {
 		t.Fatalf("expected no folders after delete, got %#v", folders)
+	}
+	if _, err := store.GetRecord(ctx, record.ID, AccessContext{}); !errors.Is(err, ErrRecordNotFound) {
+		t.Fatalf("expected ErrRecordNotFound after recursive folder delete, got %v", err)
 	}
 }
 

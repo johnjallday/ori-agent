@@ -2181,7 +2181,40 @@
 
     const folder = folderIndex.get(folderNodePath(normalizedFolderPath));
     const folderLabel = folder?.name || normalizedFolderPath;
-    const confirmed = window.confirm(`Delete folder "${folderLabel}"? Only empty folders can be removed.`);
+    const itemCount = Array.isArray(folder?.recordIDs) ? folder.recordIDs.length : 0;
+    const nestedFolderCount = (() => {
+      if (!folder || !Array.isArray(folder.children) || folder.children.length < 1) {
+        return 0;
+      }
+
+      let count = 0;
+      const queue = folder.children.slice();
+      while (queue.length) {
+        const childPath = queue.pop();
+        const childNode = folderIndex.get(childPath);
+        if (!childNode) {
+          continue;
+        }
+        count += 1;
+        if (Array.isArray(childNode.children) && childNode.children.length > 0) {
+          queue.push(...childNode.children);
+        }
+      }
+      return count;
+    })();
+    const recursive = itemCount > 0 || nestedFolderCount > 0;
+    const affectedParts = [];
+    if (itemCount > 0) {
+      affectedParts.push(`${itemCount} ${itemCount === 1 ? 'item' : 'items'}`);
+    }
+    if (nestedFolderCount > 0) {
+      affectedParts.push(`${nestedFolderCount} nested ${nestedFolderCount === 1 ? 'folder' : 'folders'}`);
+    }
+    const confirmed = window.confirm(
+      recursive
+        ? `Delete folder "${folderLabel}" and everything inside it? This will remove ${affectedParts.join(' and ')}. This cannot be undone.`
+        : `Delete empty folder "${folderLabel}"?`
+    );
     if (!confirmed) {
       return;
     }
@@ -2192,7 +2225,8 @@
         method: 'DELETE',
         body: {
           vault_id: currentVaultID(),
-          path: normalizedFolderPath
+          path: normalizedFolderPath,
+          recursive
         }
       });
 
@@ -2720,6 +2754,16 @@
     }
 
     renderFolderTree();
+  }
+
+  function folderCanToggle(folderPath) {
+    const folder = folderIndex.get(folderPath);
+    if (!folder) {
+      return false;
+    }
+
+    return (Array.isArray(folder.children) && folder.children.length > 0)
+      || (Array.isArray(folder.directRecordIDs) && folder.directRecordIDs.length > 0);
   }
 
   function renderGrantsList(items) {
@@ -4167,6 +4211,9 @@
     }
 
     if (action.getAttribute('data-action') === 'select-folder') {
+      if (folderCanToggle(folderPath)) {
+        toggleFolderNode(folderPath);
+      }
       selectFolder(folderPath);
       return;
     }

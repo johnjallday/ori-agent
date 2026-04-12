@@ -266,6 +266,17 @@ func TestHandlerFolderLifecycle(t *testing.T) {
 		t.Fatalf("expected 409 from parent folder delete, got %d: %s", deleteParentRec.Code, deleteParentRec.Body.String())
 	}
 
+	createItemRec := performJSONRequest(t, handler, http.MethodPost, "/api/vault/records", map[string]any{
+		"vault_id":    primaryVault.ID,
+		"type":        "personal_note",
+		"folder_path": "Family",
+		"label":       "Passport",
+		"payload":     map[string]any{"note": "Emergency contact"},
+	})
+	if createItemRec.Code != http.StatusCreated {
+		t.Fatalf("expected 201 from record create, got %d: %s", createItemRec.Code, createItemRec.Body.String())
+	}
+
 	deleteLeafRec := performJSONRequest(t, handler, http.MethodDelete, "/api/vault/folders", map[string]any{
 		"vault_id": primaryVault.ID,
 		"path":     "Family/Passports",
@@ -274,14 +285,36 @@ func TestHandlerFolderLifecycle(t *testing.T) {
 		t.Fatalf("expected 200 from leaf folder delete, got %d: %s", deleteLeafRec.Code, deleteLeafRec.Body.String())
 	}
 
+	deleteFamilyRec := performJSONRequest(t, handler, http.MethodDelete, "/api/vault/folders", map[string]any{
+		"vault_id":  primaryVault.ID,
+		"path":      "Family",
+		"recursive": true,
+	})
+	if deleteFamilyRec.Code != http.StatusOK {
+		t.Fatalf("expected 200 from recursive folder delete, got %d: %s", deleteFamilyRec.Code, deleteFamilyRec.Body.String())
+	}
+
 	finalListRec := performJSONRequest(t, handler, http.MethodGet, "/api/vault/folders?vault_id="+primaryVault.ID, nil)
 	if finalListRec.Code != http.StatusOK {
 		t.Fatalf("expected 200 from folder list after delete, got %d: %s", finalListRec.Code, finalListRec.Body.String())
 	}
 
 	decodeJSONBody(t, finalListRec, &listed)
-	if len(listed.Folders) != 1 || listed.Folders[0].Path != "Family" {
+	if len(listed.Folders) != 0 {
 		t.Fatalf("unexpected folders after delete: %#v", listed.Folders)
+	}
+
+	listRecordsRec := performJSONRequest(t, handler, http.MethodGet, "/api/vault/records?vault_id="+primaryVault.ID, nil)
+	if listRecordsRec.Code != http.StatusOK {
+		t.Fatalf("expected 200 from record list after recursive delete, got %d: %s", listRecordsRec.Code, listRecordsRec.Body.String())
+	}
+
+	var listedRecords struct {
+		Records []vault.RecordListItem `json:"records"`
+	}
+	decodeJSONBody(t, listRecordsRec, &listedRecords)
+	if len(listedRecords.Records) != 0 {
+		t.Fatalf("expected no records after recursive folder delete, got %#v", listedRecords.Records)
 	}
 }
 
