@@ -161,8 +161,13 @@ func (s *Store) getFolderByPath(ctx context.Context, vaultID string, path string
 	if path == "" {
 		return nil, ErrFolderPathInvalid
 	}
+	_, vaultDB, err := s.openVaultContentDB(ctx, vaultID)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = vaultDB.Close() }()
 
-	row := s.db.QueryRowContext(ctx, `
+	row := vaultDB.QueryRowContext(ctx, `
 		SELECT id, vault_id, path_hash, path_nonce, path_ciphertext, created_at, updated_at
 		FROM vault_folders
 		WHERE vault_id = ? AND path_hash = ?
@@ -197,8 +202,13 @@ func (s *Store) ListFolders(ctx context.Context, vaultID string) ([]Folder, erro
 	if _, err := s.getVault(ctx, vaultID); err != nil {
 		return nil, err
 	}
+	_, vaultDB, err := s.openVaultContentDB(ctx, vaultID)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = vaultDB.Close() }()
 
-	rows, err := s.db.QueryContext(ctx, `
+	rows, err := vaultDB.QueryContext(ctx, `
 		SELECT id, vault_id, path_hash, path_nonce, path_ciphertext, created_at, updated_at
 		FROM vault_folders
 		WHERE vault_id = ?
@@ -273,6 +283,11 @@ func (s *Store) CreateFolder(ctx context.Context, folder *Folder) (*Folder, erro
 	if _, err := s.getVault(ctx, folder.VaultID); err != nil {
 		return nil, err
 	}
+	_, vaultDB, err := s.openVaultContentDB(ctx, folder.VaultID)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = vaultDB.Close() }()
 
 	dek, err := s.ensureDataEncryptionKey(ctx, folder.VaultID, true)
 	if err != nil {
@@ -280,11 +295,17 @@ func (s *Store) CreateFolder(ctx context.Context, folder *Folder) (*Folder, erro
 	}
 
 	now := s.now()
-	err = s.db.InTransaction(ctx, func(tx *sql.Tx) error {
-		return ensureFolderPathWithExecutor(ctx, tx, dek, folder.VaultID, folder.Path, now)
-	})
+	tx, err := vaultDB.BeginTx(ctx, nil)
 	if err != nil {
+		return nil, fmt.Errorf("begin vault folder transaction: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	if err := ensureFolderPathWithExecutor(ctx, tx, dek, folder.VaultID, folder.Path, now); err != nil {
 		return nil, err
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, fmt.Errorf("commit vault folder transaction: %w", err)
 	}
 
 	created, err := s.getFolderByPath(ctx, folder.VaultID, folder.Path, false)
@@ -324,6 +345,11 @@ func (s *Store) DeleteFolder(ctx context.Context, vaultID string, path string, r
 	if _, err := s.getVault(ctx, vaultID); err != nil {
 		return err
 	}
+	_, vaultDB, err := s.openVaultContentDB(ctx, vaultID)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = vaultDB.Close() }()
 	if _, err := s.getFolderByPath(ctx, vaultID, path, false); err != nil {
 		return err
 	}
@@ -360,44 +386,47 @@ func (s *Store) DeleteFolder(ctx context.Context, vaultID string, path string, r
 	}
 
 	rowsAffected := int64(0)
-	err = s.db.InTransaction(ctx, func(tx *sql.Tx) error {
-		for _, recordID := range recordIDsToDelete {
-			if _, err := tx.ExecContext(ctx, `DELETE FROM vault_record_attachments WHERE record_id = ?`, recordID); err != nil {
-				return fmt.Errorf("delete vault record attachments: %w", err)
-			}
-
-			result, err := tx.ExecContext(ctx, `DELETE FROM vault_records WHERE id = ?`, recordID)
-			if err != nil {
-				return fmt.Errorf("delete vault record: %w", err)
-			}
-			recordRowsAffected, err := result.RowsAffected()
-			if err != nil {
-				return fmt.Errorf("delete vault record rows affected: %w", err)
-			}
-			if recordRowsAffected == 0 {
-				return ErrRecordNotFound
-			}
-		}
-
-		for _, folderPath := range folderPathsToDelete {
-			result, err := tx.ExecContext(ctx, `
-				DELETE FROM vault_folders
-				WHERE vault_id = ? AND path_hash = ?
-			`, vaultID, folderPathHash(folderPath))
-			if err != nil {
-				return fmt.Errorf("delete vault folder: %w", err)
-			}
-			folderRowsAffected, err := result.RowsAffected()
-			if err != nil {
-				return fmt.Errorf("delete vault folder rows affected: %w", err)
-			}
-			rowsAffected += folderRowsAffected
-		}
-
-		return nil
-	})
+	tx, err := vaultDB.BeginTx(ctx, nil)
 	if err != nil {
-		return err
+		return fmt.Errorf("begin vault folder delete transaction: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	for _, recordID := range recordIDsToDelete {
+		if _, err := tx.ExecContext(ctx, `DELETE FROM vault_record_attachments WHERE record_id = ?`, recordID); err != nil {
+			return fmt.Errorf("delete vault record attachments: %w", err)
+		}
+
+		result, err := tx.ExecContext(ctx, `DELETE FROM vault_records WHERE id = ?`, recordID)
+		if err != nil {
+			return fmt.Errorf("delete vault record: %w", err)
+		}
+		recordRowsAffected, err := result.RowsAffected()
+		if err != nil {
+			return fmt.Errorf("delete vault record rows affected: %w", err)
+		}
+		if recordRowsAffected == 0 {
+			return ErrRecordNotFound
+		}
+	}
+
+	for _, folderPath := range folderPathsToDelete {
+		result, err := tx.ExecContext(ctx, `
+			DELETE FROM vault_folders
+			WHERE vault_id = ? AND path_hash = ?
+		`, vaultID, folderPathHash(folderPath))
+		if err != nil {
+			return fmt.Errorf("delete vault folder: %w", err)
+		}
+		folderRowsAffected, err := result.RowsAffected()
+		if err != nil {
+			return fmt.Errorf("delete vault folder rows affected: %w", err)
+		}
+		rowsAffected += folderRowsAffected
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit vault folder delete transaction: %w", err)
 	}
 
 	if rowsAffected == 0 {

@@ -19,6 +19,8 @@ var (
 	ErrVaultLocked              = errors.New("vault: vault locked")
 	ErrVaultKeyUnavailable      = errors.New("vault: data encryption key unavailable")
 	ErrMalformedRecord          = errors.New("vault: malformed encrypted record")
+	ErrVaultFileMissing         = errors.New("vault: vault file is missing")
+	ErrVaultFileCorrupt         = errors.New("vault: vault file is corrupt")
 	ErrVaultPasswordRequired    = errors.New("vault: vault password is required")
 	ErrVaultPasswordInvalid     = errors.New("vault: incorrect vault password")
 	ErrExportPasswordEmpty      = errors.New("vault: export password is required")
@@ -66,6 +68,7 @@ type Vault struct {
 	ID                string    `json:"id"`
 	Name              string    `json:"name"`
 	Description       string    `json:"description,omitempty"`
+	FilePath          string    `json:"file_path,omitempty"`
 	IsDefault         bool      `json:"is_default"`
 	PasswordProtected bool      `json:"password_protected"`
 	RecordCount       int       `json:"record_count"`
