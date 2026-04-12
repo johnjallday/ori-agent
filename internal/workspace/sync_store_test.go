@@ -15,7 +15,7 @@ func TestSyncStore_SaveSyncsToDisk(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer fileSync.Close()
+	defer func() { _ = fileSync.Close() }()
 
 	store := NewSyncStore(primary, fileSync)
 
@@ -68,7 +68,7 @@ func TestSyncStore_SaveUpdatesWorkspaceJSON(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer fileSync.Close()
+	defer func() { _ = fileSync.Close() }()
 
 	store := NewSyncStore(primary, fileSync)
 
@@ -123,7 +123,7 @@ func TestSyncStore_DeleteRemovesFromBoth(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer fileSync.Close()
+	defer func() { _ = fileSync.Close() }()
 
 	store := NewSyncStore(primary, fileSync)
 
@@ -173,7 +173,7 @@ func TestSyncStore_GetDelegatesToPrimary(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer fileSync.Close()
+	defer func() { _ = fileSync.Close() }()
 
 	store := NewSyncStore(primary, fileSync)
 
@@ -207,7 +207,7 @@ func TestSyncStore_GetFilesPathUsesFileStore(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer fileSync.Close()
+	defer func() { _ = fileSync.Close() }()
 
 	store := NewSyncStore(primary, fileSync)
 
@@ -239,7 +239,7 @@ func TestSyncStore_FileStoreAccessor(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer fileSync.Close()
+	defer func() { _ = fileSync.Close() }()
 
 	store := NewSyncStore(primary, fileSync)
 

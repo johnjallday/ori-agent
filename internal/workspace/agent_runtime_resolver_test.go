@@ -2,6 +2,7 @@ package workspace
 
 import (
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -11,7 +12,8 @@ import (
 )
 
 type resolverAgentStoreStub struct {
-	agents map[string]*agent.Agent
+	agents        map[string]*agent.Agent
+	createConfigs map[string]*store.CreateAgentConfig
 }
 
 func (s *resolverAgentStoreStub) ListAgents() []string {
@@ -22,7 +24,28 @@ func (s *resolverAgentStoreStub) ListAgents() []string {
 	return names
 }
 
-func (s *resolverAgentStoreStub) CreateAgent(string, *store.CreateAgentConfig) error { return nil }
+func (s *resolverAgentStoreStub) CreateAgent(name string, cfg *store.CreateAgentConfig) error {
+	if s.agents == nil {
+		s.agents = make(map[string]*agent.Agent)
+	}
+	if s.createConfigs == nil {
+		s.createConfigs = make(map[string]*store.CreateAgentConfig)
+	}
+	if cfg != nil {
+		copyCfg := *cfg
+		s.createConfigs[name] = &copyCfg
+	} else {
+		s.createConfigs[name] = nil
+	}
+	created := &agent.Agent{}
+	if cfg != nil {
+		created.Type = cfg.Type
+		created.Role = cfg.Role
+		created.Settings.SystemPrompt = cfg.SystemPrompt
+	}
+	s.agents[name] = created
+	return nil
+}
 
 func (s *resolverAgentStoreStub) DeleteAgent(string) error { return nil }
 
@@ -31,7 +54,13 @@ func (s *resolverAgentStoreStub) GetAgent(name string) (*agent.Agent, bool) {
 	return ag, ok
 }
 
-func (s *resolverAgentStoreStub) SetAgent(string, *agent.Agent) error { return nil }
+func (s *resolverAgentStoreStub) SetAgent(name string, ag *agent.Agent) error {
+	if s.agents == nil {
+		s.agents = make(map[string]*agent.Agent)
+	}
+	s.agents[name] = ag
+	return nil
+}
 
 func (s *resolverAgentStoreStub) UpdateAgent(name string, updateFn func(*agent.Agent) error) error {
 	return nil
@@ -42,6 +71,15 @@ func (s *resolverAgentStoreStub) ClearAgents() error { return nil }
 func (s *resolverAgentStoreStub) Save() error { return nil }
 
 var _ store.Store = (*resolverAgentStoreStub)(nil)
+
+func containsRuntimeTag(tags []string, target string) bool {
+	for _, tag := range tags {
+		if strings.EqualFold(strings.TrimSpace(tag), strings.TrimSpace(target)) {
+			return true
+		}
+	}
+	return false
+}
 
 func newTestWorkspaceStore(t *testing.T, workspaces ...*Workspace) Store {
 	t.Helper()
@@ -504,6 +542,172 @@ func TestResolveEffectiveSkills_PreservesPlanningConfig(t *testing.T) {
 	}
 	if got := resolved.EffectiveSkills[0].Config["tasks_dir"]; got != "tasks" {
 		t.Fatalf("expected tasks_dir config to be preserved, got %#v", got)
+	}
+}
+
+func TestResolveEffectiveSkills_UsesWorkspaceSettingsManagedPlanningSkill(t *testing.T) {
+	ws := &Workspace{
+		ID: "ws-managed-planning",
+		SharedData: map[string]interface{}{
+			"entry_agent_name": "Workspace Manager",
+			"workspace_settings": map[string]interface{}{
+				"preset": "planner",
+				"planning": map[string]interface{}{
+					"tasks_dir": "plans",
+				},
+			},
+		},
+		AgentInstances: []AgentInstance{
+			{ID: "inst-1", Name: "Workspace Manager", NodeID: "workspace-manager-1", EntryPoint: true},
+		},
+	}
+
+	agentStore := &resolverAgentStoreStub{agents: map[string]*agent.Agent{
+		"Workspace Manager": {},
+	}}
+	workspaceStore := newTestWorkspaceStore(t, ws)
+	registry := &runtimeRegistryStub{}
+	templates := &templateLookupStub{servers: map[string]mcp.ServerConfig{}}
+	skillResolver := &stubSkillResolver{
+		skills: map[string]ResolvedSkill{
+			"workspace-planning": {
+				Name:            "workspace-planning",
+				Prompt:          "Plan work before execution.",
+				PlanningProfile: true,
+				Enabled:         true,
+			},
+		},
+	}
+
+	resolver := NewAgentRuntimeResolver(agentStore, workspaceStore, registry, templates)
+	resolver.SetSkillResolver(skillResolver)
+
+	resolved, err := resolver.ResolveAgentForWorkspace("Workspace Manager", ws.ID, "")
+	if err != nil {
+		t.Fatalf("ResolveAgentForWorkspace() error = %v", err)
+	}
+	if len(resolved.EffectiveSkills) != 1 {
+		t.Fatalf("expected one settings-managed planning skill, got %d", len(resolved.EffectiveSkills))
+	}
+	if resolved.EffectiveSkills[0].Name != "workspace-planning" {
+		t.Fatalf("expected workspace-planning, got %#v", resolved.EffectiveSkills[0])
+	}
+	if got := resolved.EffectiveSkills[0].Config["tasks_dir"]; got != "plans" {
+		t.Fatalf("expected tasks_dir plans from workspace settings, got %#v", got)
+	}
+}
+
+func TestResolveEffectiveSkills_ManualBindingOverridesWorkspaceSettingsManagedSkill(t *testing.T) {
+	ws := &Workspace{
+		ID: "ws-managed-planning-override",
+		SharedData: map[string]interface{}{
+			"entry_agent_name": "Workspace Manager",
+			"workspace_settings": map[string]interface{}{
+				"preset": "planner",
+				"planning": map[string]interface{}{
+					"tasks_dir": "managed-plans",
+				},
+			},
+		},
+		AgentInstances: []AgentInstance{
+			{ID: "inst-1", Name: "Workspace Manager", NodeID: "workspace-manager-1", EntryPoint: true},
+		},
+		SkillBindings: []WorkspaceSkillBinding{
+			{
+				ID:        "sb-planning",
+				SkillName: "workspace-planning",
+				Enabled:   true,
+				Config: map[string]interface{}{
+					"profile_type": "workspace_planning",
+					"tasks_dir":    "manual-plans",
+				},
+			},
+		},
+	}
+
+	agentStore := &resolverAgentStoreStub{agents: map[string]*agent.Agent{
+		"Workspace Manager": {},
+	}}
+	workspaceStore := newTestWorkspaceStore(t, ws)
+	registry := &runtimeRegistryStub{}
+	templates := &templateLookupStub{servers: map[string]mcp.ServerConfig{}}
+	skillResolver := &stubSkillResolver{
+		skills: map[string]ResolvedSkill{
+			"workspace-planning": {
+				Name:            "workspace-planning",
+				Prompt:          "Plan work before execution.",
+				PlanningProfile: true,
+				Enabled:         true,
+			},
+		},
+	}
+
+	resolver := NewAgentRuntimeResolver(agentStore, workspaceStore, registry, templates)
+	resolver.SetSkillResolver(skillResolver)
+
+	resolved, err := resolver.ResolveAgentForWorkspace("Workspace Manager", ws.ID, "")
+	if err != nil {
+		t.Fatalf("ResolveAgentForWorkspace() error = %v", err)
+	}
+	if len(resolved.EffectiveSkills) != 1 {
+		t.Fatalf("expected one planning skill, got %d", len(resolved.EffectiveSkills))
+	}
+	if got := resolved.EffectiveSkills[0].Config["tasks_dir"]; got != "manual-plans" {
+		t.Fatalf("expected manual workspace binding config to win, got %#v", got)
+	}
+}
+
+func TestResolveAgentForWorkspace_AutoCreatesMissingEntryAgent(t *testing.T) {
+	ws := &Workspace{
+		ID:   "ws-entry-missing",
+		Name: "Spain",
+		SharedData: map[string]interface{}{
+			"entry_agent_name": "Workspace Manager",
+		},
+		Agents: []string{"Workspace Manager"},
+		AgentInstances: []AgentInstance{
+			{ID: "inst-1", Name: "Workspace Manager", NodeID: "workspace-manager-1", EntryPoint: true},
+		},
+	}
+
+	agentStore := &resolverAgentStoreStub{
+		agents: map[string]*agent.Agent{},
+	}
+	workspaceStore := newTestWorkspaceStore(t, ws)
+	registry := &runtimeRegistryStub{}
+	templates := &templateLookupStub{servers: map[string]mcp.ServerConfig{}}
+
+	resolver := NewAgentRuntimeResolver(agentStore, workspaceStore, registry, templates)
+
+	resolved, err := resolver.ResolveAgentForWorkspace("Workspace Manager", ws.ID, "")
+	if err != nil {
+		t.Fatalf("ResolveAgentForWorkspace() error = %v", err)
+	}
+	if resolved == nil || resolved.Agent == nil {
+		t.Fatal("expected resolved agent")
+	}
+
+	cfg := agentStore.createConfigs["Workspace Manager"]
+	if cfg == nil {
+		t.Fatal("expected missing entry agent to be auto-created")
+	}
+	if cfg.Type != "workspace-manager" {
+		t.Fatalf("expected workspace-manager type, got %q", cfg.Type)
+	}
+	if resolved.Agent.Type != "workspace-manager" {
+		t.Fatalf("expected resolved agent type workspace-manager, got %q", resolved.Agent.Type)
+	}
+	if resolved.Agent.Role != "orchestrator" {
+		t.Fatalf("expected orchestrator role, got %q", resolved.Agent.Role)
+	}
+	if resolved.Agent.Metadata == nil {
+		t.Fatal("expected metadata for auto-created workspace manager")
+	}
+	if !containsRuntimeTag(resolved.Agent.Metadata.Tags, "workspace-manager") {
+		t.Fatalf("expected workspace-manager tag, got %#v", resolved.Agent.Metadata.Tags)
+	}
+	if got := resolved.Agent.Settings.SystemPrompt; !strings.Contains(strings.ToLower(got), "workspace manager") {
+		t.Fatalf("expected workspace manager prompt, got %q", got)
 	}
 }
 

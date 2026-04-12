@@ -16,6 +16,31 @@ import (
 
 const workspaceEntryAgentNameKey = "entry_agent_name"
 
+func workspaceHasAgentName(workspace *session.Workspace, agentName string) bool {
+	if workspace == nil {
+		return false
+	}
+
+	target := strings.TrimSpace(agentName)
+	if target == "" {
+		return false
+	}
+
+	for _, inst := range workspace.AgentInstances {
+		if strings.EqualFold(strings.TrimSpace(inst.Name), target) {
+			return true
+		}
+	}
+
+	for _, name := range workspace.Agents {
+		if strings.EqualFold(strings.TrimSpace(name), target) {
+			return true
+		}
+	}
+
+	return false
+}
+
 func currentWorkspaceEntryAgentName(workspace *session.Workspace) string {
 	if workspace == nil {
 		return ""
@@ -23,7 +48,7 @@ func currentWorkspaceEntryAgentName(workspace *session.Workspace) string {
 
 	if workspace.SharedData != nil {
 		if raw, ok := workspace.SharedData[workspaceEntryAgentNameKey]; ok {
-			if name := strings.TrimSpace(fmt.Sprint(raw)); name != "" {
+			if name := strings.TrimSpace(fmt.Sprint(raw)); name != "" && workspaceHasAgentName(workspace, name) {
 				return name
 			}
 		}
@@ -48,6 +73,20 @@ func currentWorkspaceEntryAgentName(workspace *session.Workspace) string {
 	}
 
 	return ""
+}
+
+func availableWorkspaceEntryAgentName(workspace *session.Workspace, agentStore store.Store) string {
+	name := strings.TrimSpace(currentWorkspaceEntryAgentName(workspace))
+	if name == "" || agentStore == nil {
+		return name
+	}
+
+	ag, ok := agentStore.GetAgent(name)
+	if !ok || ag == nil {
+		return ""
+	}
+
+	return name
 }
 
 func setWorkspaceEntryAgent(workspace *session.Workspace, agentName string) {
@@ -188,7 +227,64 @@ func (h *Handler) defaultSessionAgentNameForWorkspace(ctx context.Context, works
 		return ""
 	}
 
-	return currentWorkspaceEntryAgentName(ws)
+	if _, _, err := h.ensureWorkspaceManagerForWorkspace(ctx, ws); err != nil {
+		logger.Warn("Failed to auto-provision workspace manager for session", logger.Fields{
+			"workspace_id": trimmedWorkspaceID,
+			"error":        err,
+		})
+	}
+
+	return availableWorkspaceEntryAgentName(ws, h.agentStore)
+}
+
+func (h *Handler) ensureWorkspaceManagerForWorkspace(ctx context.Context, workspace *session.Workspace) (string, bool, error) {
+	if h == nil || workspace == nil || workspace.IsGroup() {
+		return "", false, nil
+	}
+
+	if existing := availableWorkspaceEntryAgentName(workspace, h.agentStore); existing != "" {
+		return existing, false, nil
+	}
+
+	if h.store == nil || h.agentStore == nil {
+		return "", false, nil
+	}
+
+	agentName, created, err := h.ensureWorkspaceEntryAgent(workspace.Name, "")
+	if err != nil {
+		return "", false, fmt.Errorf("create workspace manager: %w", err)
+	}
+
+	setWorkspaceEntryAgent(workspace, agentName)
+	workspace.UpdatedAt = time.Now()
+
+	if err := h.store.UpdateWorkspace(ctx, workspace); err != nil {
+		h.rollbackWorkspaceEntryAgent(agentName, created)
+		return "", false, fmt.Errorf("persist workspace manager for %s: %w", workspace.ID, err)
+	}
+
+	if h.workspaceStore != nil {
+		folderWS, buildErr := buildFileStoreWorkspace(workspace)
+		if buildErr != nil {
+			logger.Warn("Failed to build workspace manager file-store snapshot", logger.Fields{
+				"workspace_id": workspace.ID,
+				"error":        buildErr,
+			})
+		} else if saveErr := h.workspaceStore.Save(folderWS); saveErr != nil {
+			logger.Warn("Failed to sync auto-provisioned workspace manager to file store", logger.Fields{
+				"workspace_id": workspace.ID,
+				"error":        saveErr,
+			})
+		}
+	}
+
+	logger.Info("Auto-provisioned workspace manager for workspace", logger.Fields{
+		"workspace_id": workspace.ID,
+		"workspace":    workspace.Name,
+		"agent":        agentName,
+	})
+
+	return agentName, true, nil
 }
 
 // deleteWorkspaceManagerAgent removes the auto-created workspace manager agent
@@ -277,7 +373,7 @@ func workspaceEntryAgentSystemPrompt(workspaceName string) string {
 		name = "this workspace"
 	}
 	return fmt.Sprintf(
-		"You are the workspace manager for %q. Stay focused on this workspace: tasks, notes, files, directories, sessions, and agent coordination. Act as the workspace front door: first understand the user's goal, ask only the minimum clarifying questions, and propose or confirm a short plan when the request is ambiguous or multi-step. Answer directly when shared workspace context is enough. When specialist help might be useful, do not hand off immediately just because a matching agent exists. Decide whether specialist help is actually needed, inspect current or available workspace agents, and ask the user before adding or switching to a specialist unless the user already explicitly requested that handoff. Use workspace agent management tools to invite an existing specialist into the workspace when appropriate. For travel, itinerary, booking, or trip-planning requests, always do an intake pass before planning: do not generate an itinerary or recommendations on the first reply, even if dates and cities are already present. Instead, ask for missing information such as travel dates, flight status, hotel status, preferences, pace, budget, constraints, and must-do activities. If the user says flights or hotels are already booked, ask them to attach the confirmation or travel file to this workspace before planning around it. Prefer 2-4 short multiple-choice questions when helpful. After the user answers, decide whether to continue yourself or ask permission to invite or create specialists such as itinerary, hotel, or flight agents. Do not behave like a generic global assistant outside this workspace.",
+		"You are the workspace manager for %q. Stay focused on this workspace: tasks, notes, files, directories, sessions, and agent coordination. Act as the workspace front door: first understand the user's goal, ask only the minimum clarifying questions, and propose or confirm a short plan when the request is ambiguous or multi-step. Answer directly when shared workspace context is enough. When specialist help might be useful, do not hand off immediately just because a matching agent exists. Decide whether specialist help is actually needed, inspect current or available workspace agents, and ask the user before adding or switching to a specialist unless the user already explicitly requested that handoff. Use workspace agent management tools to invite an existing specialist into the workspace when appropriate. For travel, itinerary, booking, or trip-planning requests, always do an intake pass before planning: do not generate an itinerary or recommendations on the first reply, even if dates and cities are already present. Instead, ask for missing information such as travel dates, flight status, hotel status, preferences, pace, budget, constraints, and must-do activities. If the user says flights or hotels are already booked, ask them to attach the confirmation or travel file to this workspace before planning around it. Prefer 2-4 short multiple-choice questions when helpful. Once the intake is sufficient, default to orchestration for full travel-planning work: for itinerary, day-by-day, or multi-city planning, do not keep acting like the planner by default. Summarize the intake, recommend the right specialist, and ask permission to invite or create specialists such as itinerary, hotel, or flight agents. Only continue yourself for narrow follow-up questions, lightweight clarifications, or when the user explicitly asks to keep planning with the workspace manager. Do not behave like a generic global assistant outside this workspace.",
 		name,
 	)
 }

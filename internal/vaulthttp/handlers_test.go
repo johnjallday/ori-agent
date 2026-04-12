@@ -3,21 +3,35 @@ package vaulthttp
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
+	"fmt"
+	"io"
+	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/johnjallday/ori-agent/internal/database"
 	"github.com/johnjallday/ori-agent/internal/vault"
+	"golang.org/x/oauth2"
 )
 
 const testVaultPassword = "test-vault-password"
 
 func newTestHandler(t *testing.T, secretStore vault.SecretStore, fallbackPath string) (*Handler, *vault.Store, *database.DB) {
+	handler, store, db, _ := newTestHandlerWithVaultFilesDir(t, secretStore, fallbackPath)
+	return handler, store, db
+}
+
+func newTestHandlerWithVaultFilesDir(t *testing.T, secretStore vault.SecretStore, fallbackPath string) (*Handler, *vault.Store, *database.DB, string) {
 	t.Helper()
+	_ = secretStore
+	_ = fallbackPath
 
 	db, err := database.Open(context.Background(), &database.Config{
 		InMemory: true,
@@ -27,11 +41,11 @@ func newTestHandler(t *testing.T, secretStore vault.SecretStore, fallbackPath st
 		t.Fatalf("open database: %v", err)
 	}
 
+	vaultFilesBaseDir := t.TempDir()
 	store := vault.NewStore(db, vault.StoreOptions{
-		SecretStore:        secretStore,
-		FallbackSecretPath: fallbackPath,
+		VaultFilesBaseDir: vaultFilesBaseDir,
 	})
-	return NewHandler(store), store, db
+	return NewHandler(store), store, db, vaultFilesBaseDir
 }
 
 func performJSONRequest(t *testing.T, handler http.Handler, method string, path string, body any) *httptest.ResponseRecorder {
@@ -48,6 +62,39 @@ func performJSONRequest(t *testing.T, handler http.Handler, method string, path 
 
 	req := httptest.NewRequest(method, path, bytes.NewReader(payload))
 	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	return rec
+}
+
+func performMultipartRequest(t *testing.T, handler http.Handler, method string, path string, fields map[string]string, fileField string, fileName string, fileContent []byte) *httptest.ResponseRecorder {
+	t.Helper()
+
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+
+	for key, value := range fields {
+		if err := writer.WriteField(key, value); err != nil {
+			t.Fatalf("write field %q: %v", key, err)
+		}
+	}
+
+	if fileField != "" {
+		part, err := writer.CreateFormFile(fileField, fileName)
+		if err != nil {
+			t.Fatalf("create form file %q: %v", fileField, err)
+		}
+		if _, err := part.Write(fileContent); err != nil {
+			t.Fatalf("write form file %q: %v", fileField, err)
+		}
+	}
+
+	if err := writer.Close(); err != nil {
+		t.Fatalf("close multipart writer: %v", err)
+	}
+
+	req := httptest.NewRequest(method, path, &body)
+	req.Header.Set("Content-Type", writer.FormDataContentType())
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 	return rec
@@ -70,20 +117,22 @@ func createHandlerVault(t *testing.T, store *vault.Store, name string) vault.Vau
 	return item
 }
 
-func insertLegacyHandlerVault(t *testing.T, db *database.DB, name string) vault.Vault {
+func configureTestGoogleOAuth(t *testing.T, tokenURL string) string {
 	t.Helper()
 
-	item := vault.Vault{
-		ID:   "legacy-" + strings.ReplaceAll(strings.ToLower(name), " ", "-"),
-		Name: name,
-	}
-	if _, err := db.ExecContext(context.Background(), `
-		INSERT INTO vaults (id, name, description, key_salt, key_nonce, key_ciphertext, created_at, updated_at)
-		VALUES (?, ?, '', '', '', '', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-	`, item.ID, item.Name); err != nil {
-		t.Fatalf("insert legacy handler vault %q: %v", name, err)
-	}
-	return item
+	authURL := "https://accounts.google.test/o/oauth2/v2/auth"
+	t.Setenv("ORI_EMAIL_GOOGLE_CLIENT_ID", "google-client-id")
+	t.Setenv("ORI_EMAIL_GOOGLE_CLIENT_SECRET", "google-client-secret")
+	t.Setenv("ORI_EMAIL_GOOGLE_AUTH_URL", authURL)
+	t.Setenv("ORI_EMAIL_GOOGLE_TOKEN_URL", tokenURL)
+	t.Setenv("ORI_EMAIL_OAUTH_BASE_URL", "http://ori.test")
+	return authURL
+}
+
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (fn roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
+	return fn(req)
 }
 
 func TestHandlerRecordLifecycle(t *testing.T) {
@@ -95,6 +144,7 @@ func TestHandlerRecordLifecycle(t *testing.T) {
 		"vault_id":     primaryVault.ID,
 		"type":         "personal_note",
 		"workspace_id": "ws-1",
+		"folder_path":  "Travel",
 		"label":        "Passport",
 		"tags":         []string{"Travel", "Personal"},
 		"payload": map[string]any{
@@ -126,6 +176,7 @@ func TestHandlerRecordLifecycle(t *testing.T) {
 	updateRec := performJSONRequest(t, handler, http.MethodPatch, "/api/vault/records/"+created.Record.ID, map[string]any{
 		"type":             "secret",
 		"workspace_id":     "ws-secure",
+		"folder_path":      "Travel/Passports",
 		"label":            "Passport Updated",
 		"tags":             []string{"Travel", "Docs"},
 		"source":           "import",
@@ -146,6 +197,9 @@ func TestHandlerRecordLifecycle(t *testing.T) {
 	if updated.Record.Type != "secret" || updated.Record.WorkspaceID != "ws-secure" {
 		t.Fatalf("unexpected updated location: %#v", updated.Record)
 	}
+	if updated.Record.FolderPath != "Travel/Passports" {
+		t.Fatalf("unexpected updated folder path: %#v", updated.Record)
+	}
 	if updated.Record.Source != "import" || updated.Record.RetentionPolicy != "until_rotated" {
 		t.Fatalf("unexpected updated metadata: %#v", updated.Record)
 	}
@@ -153,9 +207,467 @@ func TestHandlerRecordLifecycle(t *testing.T) {
 		t.Fatalf("unexpected updated tags: %#v", updated.Record.Tags)
 	}
 
+	var listed struct {
+		Records []vault.RecordListItem `json:"records"`
+	}
+	decodeJSONBody(t, listRec, &listed)
+	if len(listed.Records) != 1 || listed.Records[0].FolderPath != "Travel" {
+		t.Fatalf("unexpected listed records: %#v", listed.Records)
+	}
+
 	deleteRec := performJSONRequest(t, handler, http.MethodDelete, "/api/vault/records/"+created.Record.ID, nil)
 	if deleteRec.Code != http.StatusOK {
 		t.Fatalf("expected 200 from delete, got %d: %s", deleteRec.Code, deleteRec.Body.String())
+	}
+}
+
+func TestHandlerFolderLifecycle(t *testing.T) {
+	handler, store, db := newTestHandler(t, vault.NewMemorySecretStore(), "")
+	defer func() { _ = db.Close() }()
+	primaryVault := createHandlerVault(t, store, "Primary Vault")
+
+	createRec := performJSONRequest(t, handler, http.MethodPost, "/api/vault/folders", map[string]any{
+		"vault_id": primaryVault.ID,
+		"path":     "Family/Passports",
+	})
+	if createRec.Code != http.StatusCreated {
+		t.Fatalf("expected 201 from folder create, got %d: %s", createRec.Code, createRec.Body.String())
+	}
+
+	listRec := performJSONRequest(t, handler, http.MethodGet, "/api/vault/folders?vault_id="+primaryVault.ID, nil)
+	if listRec.Code != http.StatusOK {
+		t.Fatalf("expected 200 from folder list, got %d: %s", listRec.Code, listRec.Body.String())
+	}
+
+	var listed struct {
+		Folders []vault.Folder `json:"folders"`
+	}
+	decodeJSONBody(t, listRec, &listed)
+	if len(listed.Folders) != 2 {
+		t.Fatalf("expected persisted folder plus ancestor, got %#v", listed.Folders)
+	}
+	if listed.Folders[0].Path != "Family" || listed.Folders[1].Path != "Family/Passports" {
+		t.Fatalf("unexpected folder paths: %#v", listed.Folders)
+	}
+
+	deleteParentRec := performJSONRequest(t, handler, http.MethodDelete, "/api/vault/folders", map[string]any{
+		"vault_id": primaryVault.ID,
+		"path":     "Family",
+	})
+	if deleteParentRec.Code != http.StatusConflict {
+		t.Fatalf("expected 409 from parent folder delete, got %d: %s", deleteParentRec.Code, deleteParentRec.Body.String())
+	}
+
+	createItemRec := performJSONRequest(t, handler, http.MethodPost, "/api/vault/records", map[string]any{
+		"vault_id":    primaryVault.ID,
+		"type":        "personal_note",
+		"folder_path": "Family",
+		"label":       "Passport",
+		"payload":     map[string]any{"note": "Emergency contact"},
+	})
+	if createItemRec.Code != http.StatusCreated {
+		t.Fatalf("expected 201 from record create, got %d: %s", createItemRec.Code, createItemRec.Body.String())
+	}
+
+	deleteLeafRec := performJSONRequest(t, handler, http.MethodDelete, "/api/vault/folders", map[string]any{
+		"vault_id": primaryVault.ID,
+		"path":     "Family/Passports",
+	})
+	if deleteLeafRec.Code != http.StatusOK {
+		t.Fatalf("expected 200 from leaf folder delete, got %d: %s", deleteLeafRec.Code, deleteLeafRec.Body.String())
+	}
+
+	deleteFamilyRec := performJSONRequest(t, handler, http.MethodDelete, "/api/vault/folders", map[string]any{
+		"vault_id":  primaryVault.ID,
+		"path":      "Family",
+		"recursive": true,
+	})
+	if deleteFamilyRec.Code != http.StatusOK {
+		t.Fatalf("expected 200 from recursive folder delete, got %d: %s", deleteFamilyRec.Code, deleteFamilyRec.Body.String())
+	}
+
+	finalListRec := performJSONRequest(t, handler, http.MethodGet, "/api/vault/folders?vault_id="+primaryVault.ID, nil)
+	if finalListRec.Code != http.StatusOK {
+		t.Fatalf("expected 200 from folder list after delete, got %d: %s", finalListRec.Code, finalListRec.Body.String())
+	}
+
+	decodeJSONBody(t, finalListRec, &listed)
+	if len(listed.Folders) != 0 {
+		t.Fatalf("unexpected folders after delete: %#v", listed.Folders)
+	}
+
+	listRecordsRec := performJSONRequest(t, handler, http.MethodGet, "/api/vault/records?vault_id="+primaryVault.ID, nil)
+	if listRecordsRec.Code != http.StatusOK {
+		t.Fatalf("expected 200 from record list after recursive delete, got %d: %s", listRecordsRec.Code, listRecordsRec.Body.String())
+	}
+
+	var listedRecords struct {
+		Records []vault.RecordListItem `json:"records"`
+	}
+	decodeJSONBody(t, listRecordsRec, &listedRecords)
+	if len(listedRecords.Records) != 0 {
+		t.Fatalf("expected no records after recursive folder delete, got %#v", listedRecords.Records)
+	}
+}
+
+func TestHandlerRecordAttachmentLifecycle(t *testing.T) {
+	handler, store, db := newTestHandler(t, vault.NewMemorySecretStore(), "")
+	defer func() { _ = db.Close() }()
+	primaryVault := createHandlerVault(t, store, "Primary Vault")
+
+	createRec := performJSONRequest(t, handler, http.MethodPost, "/api/vault/records", map[string]any{
+		"vault_id": primaryVault.ID,
+		"type":     "personal_note",
+		"label":    "Passport",
+		"payload": map[string]any{
+			"note": "Emergency contact",
+		},
+	})
+	if createRec.Code != http.StatusCreated {
+		t.Fatalf("expected 201 from create, got %d: %s", createRec.Code, createRec.Body.String())
+	}
+
+	var created struct {
+		Record vault.Record `json:"record"`
+	}
+	decodeJSONBody(t, createRec, &created)
+
+	uploadRec := performMultipartRequest(t, handler, http.MethodPost, "/api/vault/records/"+created.Record.ID+"/attachments", nil, "file", "passport.txt", []byte("scan-data"))
+	if uploadRec.Code != http.StatusCreated {
+		t.Fatalf("expected 201 from attachment upload, got %d: %s", uploadRec.Code, uploadRec.Body.String())
+	}
+
+	var uploaded struct {
+		Attachment vault.RecordAttachment `json:"attachment"`
+	}
+	decodeJSONBody(t, uploadRec, &uploaded)
+	if uploaded.Attachment.ID == "" {
+		t.Fatal("expected created attachment id")
+	}
+	if uploaded.Attachment.DownloadURL == "" {
+		t.Fatalf("expected attachment download URL, got %+v", uploaded.Attachment)
+	}
+
+	getRec := performJSONRequest(t, handler, http.MethodGet, "/api/vault/records/"+created.Record.ID, nil)
+	if getRec.Code != http.StatusOK {
+		t.Fatalf("expected 200 from record get, got %d: %s", getRec.Code, getRec.Body.String())
+	}
+
+	var record vault.Record
+	decodeJSONBody(t, getRec, &record)
+	var payload map[string]any
+	if err := json.Unmarshal(record.Payload, &payload); err != nil {
+		t.Fatalf("unmarshal record payload: %v", err)
+	}
+	attachments, _ := payload["attachments"].([]any)
+	if len(attachments) != 1 {
+		t.Fatalf("expected 1 payload attachment, got %#v", payload["attachments"])
+	}
+	attachmentPayload, _ := attachments[0].(map[string]any)
+	if strings.TrimSpace(fmt.Sprintf("%v", attachmentPayload["download_url"])) == "" {
+		t.Fatalf("expected payload attachment download URL, got %#v", attachmentPayload)
+	}
+
+	downloadReq := httptest.NewRequest(http.MethodGet, uploaded.Attachment.DownloadURL, nil)
+	downloadRec := httptest.NewRecorder()
+	handler.ServeHTTP(downloadRec, downloadReq)
+	if downloadRec.Code != http.StatusOK {
+		t.Fatalf("expected 200 downloading attachment, got %d: %s", downloadRec.Code, downloadRec.Body.String())
+	}
+	if got := downloadRec.Body.String(); got != "scan-data" {
+		t.Fatalf("unexpected attachment bytes %q", got)
+	}
+
+	deleteReq := httptest.NewRequest(http.MethodDelete, uploaded.Attachment.DownloadURL, nil)
+	deleteRec := httptest.NewRecorder()
+	handler.ServeHTTP(deleteRec, deleteReq)
+	if deleteRec.Code != http.StatusOK {
+		t.Fatalf("expected 200 deleting attachment, got %d: %s", deleteRec.Code, deleteRec.Body.String())
+	}
+
+	missingReq := httptest.NewRequest(http.MethodGet, uploaded.Attachment.DownloadURL, nil)
+	missingRec := httptest.NewRecorder()
+	handler.ServeHTTP(missingRec, missingReq)
+	if missingRec.Code != http.StatusNotFound {
+		t.Fatalf("expected 404 after attachment delete, got %d: %s", missingRec.Code, missingRec.Body.String())
+	}
+}
+
+func TestHandlerEmailAccountLifecycle(t *testing.T) {
+	handler, store, db := newTestHandler(t, vault.NewMemorySecretStore(), "")
+	defer func() { _ = db.Close() }()
+	primaryVault := createHandlerVault(t, store, "Primary Vault")
+
+	createRec := performJSONRequest(t, handler, http.MethodPost, "/api/vault/email-accounts", map[string]any{
+		"vault_id":      primaryVault.ID,
+		"label":         "Support Inbox",
+		"provider":      "gmail",
+		"email_address": "support@example.com",
+		"display_name":  "Support",
+		"auth_type":     "oauth2",
+		"credentials": map[string]any{
+			"refresh_token": "refresh-token",
+			"client_id":     "client-id",
+			"client_secret": "client-secret",
+		},
+	})
+	if createRec.Code != http.StatusCreated {
+		t.Fatalf("expected 201 from create email account, got %d: %s", createRec.Code, createRec.Body.String())
+	}
+	if strings.Contains(createRec.Body.String(), "refresh-token") || strings.Contains(createRec.Body.String(), "client-secret") {
+		t.Fatalf("expected create response to redact credentials, got %s", createRec.Body.String())
+	}
+
+	var created struct {
+		Account vault.EmailAccount `json:"account"`
+	}
+	decodeJSONBody(t, createRec, &created)
+	if created.Account.ID == "" {
+		t.Fatal("expected created email account id")
+	}
+	if created.Account.Provider != vault.EmailProviderGmail {
+		t.Fatalf("expected gmail provider, got %q", created.Account.Provider)
+	}
+	if !created.Account.CredentialsStatus.HasRefreshToken || !created.Account.CredentialsStatus.HasClientSecret {
+		t.Fatalf("expected credential state to be surfaced, got %#v", created.Account.CredentialsStatus)
+	}
+
+	listRec := performJSONRequest(t, handler, http.MethodGet, "/api/vault/email-accounts?vault_id="+primaryVault.ID, nil)
+	if listRec.Code != http.StatusOK {
+		t.Fatalf("expected 200 from list email accounts, got %d: %s", listRec.Code, listRec.Body.String())
+	}
+
+	getRec := performJSONRequest(t, handler, http.MethodGet, "/api/vault/email-accounts/"+created.Account.ID, nil)
+	if getRec.Code != http.StatusOK {
+		t.Fatalf("expected 200 from get email account, got %d: %s", getRec.Code, getRec.Body.String())
+	}
+
+	updateRec := performJSONRequest(t, handler, http.MethodPatch, "/api/vault/email-accounts/"+created.Account.ID, map[string]any{
+		"display_name": "Support Team",
+		"access_token": "access-token",
+	})
+	if updateRec.Code != http.StatusOK {
+		t.Fatalf("expected 200 from update email account, got %d: %s", updateRec.Code, updateRec.Body.String())
+	}
+
+	var updated struct {
+		Account vault.EmailAccount `json:"account"`
+	}
+	decodeJSONBody(t, updateRec, &updated)
+	if updated.Account.DisplayName != "Support Team" {
+		t.Fatalf("expected updated display name, got %#v", updated.Account)
+	}
+	if !updated.Account.CredentialsStatus.HasAccessToken {
+		t.Fatalf("expected access token state after update, got %#v", updated.Account.CredentialsStatus)
+	}
+
+	deleteRec := performJSONRequest(t, handler, http.MethodDelete, "/api/vault/email-accounts/"+created.Account.ID, nil)
+	if deleteRec.Code != http.StatusOK {
+		t.Fatalf("expected 200 from delete email account, got %d: %s", deleteRec.Code, deleteRec.Body.String())
+	}
+}
+
+func TestHandlerEmailOAuthProviders(t *testing.T) {
+	handler, _, db := newTestHandler(t, vault.NewMemorySecretStore(), "")
+	defer func() { _ = db.Close() }()
+
+	t.Setenv("ORI_EMAIL_GOOGLE_CLIENT_ID", "google-client-id")
+	t.Setenv("ORI_EMAIL_GOOGLE_CLIENT_SECRET", "google-client-secret")
+
+	rec := performJSONRequest(t, handler, http.MethodGet, "/api/vault/email-oauth/providers", nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200 from provider status, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	var response struct {
+		Providers []struct {
+			Provider         string `json:"provider"`
+			ConnectSupported bool   `json:"connect_supported"`
+			Enabled          bool   `json:"enabled"`
+			Reason           string `json:"reason"`
+		} `json:"providers"`
+	}
+	decodeJSONBody(t, rec, &response)
+	if len(response.Providers) != 3 {
+		t.Fatalf("expected 3 provider entries, got %d", len(response.Providers))
+	}
+
+	if response.Providers[0].Provider != "gmail" || !response.Providers[0].Enabled {
+		t.Fatalf("expected gmail provider to be enabled, got %#v", response.Providers[0])
+	}
+	if response.Providers[1].Provider != "microsoft" || response.Providers[1].Enabled {
+		t.Fatalf("expected microsoft provider to be disabled without env, got %#v", response.Providers[1])
+	}
+	if response.Providers[2].Provider != "imap_smtp" || response.Providers[2].ConnectSupported {
+		t.Fatalf("expected imap_smtp to be manual only, got %#v", response.Providers[2])
+	}
+}
+
+func TestHandlerEmailOAuthConnectCreatesAccount(t *testing.T) {
+	handler, store, db := newTestHandler(t, vault.NewMemorySecretStore(), "")
+	defer func() { _ = db.Close() }()
+	primaryVault := createHandlerVault(t, store, "Primary Vault")
+
+	tokenCalls := 0
+	tokenClient := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		tokenCalls++
+		if r.Method != http.MethodPost {
+			t.Fatalf("expected token endpoint POST, got %s", r.Method)
+		}
+		if err := r.ParseForm(); err != nil {
+			t.Fatalf("parse token form: %v", err)
+		}
+		if r.Form.Get("code") != "oauth-code-1" {
+			t.Fatalf("expected code oauth-code-1, got %q", r.Form.Get("code"))
+		}
+		if r.Form.Get("grant_type") != "authorization_code" {
+			t.Fatalf("expected authorization_code grant, got %q", r.Form.Get("grant_type"))
+		}
+		if r.Form.Get("redirect_uri") != "http://ori.test/api/vault/email-oauth/callback" {
+			t.Fatalf("unexpected redirect URI %q", r.Form.Get("redirect_uri"))
+		}
+		if strings.TrimSpace(r.Form.Get("code_verifier")) == "" {
+			t.Fatal("expected PKCE code verifier on token exchange")
+		}
+
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Body:       io.NopCloser(strings.NewReader(`{"access_token":"access-token-1","refresh_token":"refresh-token-1","token_type":"Bearer","expires_in":3600}`)),
+		}, nil
+	})}
+
+	authURL := configureTestGoogleOAuth(t, "https://oauth.google.test/token")
+
+	startRec := performJSONRequest(t, handler, http.MethodGet, "/api/vault/email-oauth/start?vault_id="+url.QueryEscape(primaryVault.ID)+"&provider=gmail&label=Support%20Inbox&email_address=support@example.com&display_name=Support%20Team&tags=finance,priority", nil)
+	if startRec.Code != http.StatusFound {
+		t.Fatalf("expected 302 from oauth start, got %d: %s", startRec.Code, startRec.Body.String())
+	}
+
+	redirectLocation := startRec.Header().Get("Location")
+	if !strings.HasPrefix(redirectLocation, authURL) {
+		t.Fatalf("expected redirect to auth URL %q, got %q", authURL, redirectLocation)
+	}
+
+	redirectURL, err := url.Parse(redirectLocation)
+	if err != nil {
+		t.Fatalf("parse redirect location: %v", err)
+	}
+	state := strings.TrimSpace(redirectURL.Query().Get("state"))
+	if state == "" {
+		t.Fatal("expected oauth state in redirect URL")
+	}
+	if redirectURL.Query().Get("login_hint") != "support@example.com" {
+		t.Fatalf("expected login_hint, got %q", redirectURL.Query().Get("login_hint"))
+	}
+
+	callbackReq := httptest.NewRequest(http.MethodGet, "/api/vault/email-oauth/callback?state="+url.QueryEscape(state)+"&code=oauth-code-1", nil)
+	callbackReq.Host = "ori.test"
+	callbackReq = callbackReq.WithContext(context.WithValue(callbackReq.Context(), oauth2.HTTPClient, tokenClient))
+	callbackRec := httptest.NewRecorder()
+	handler.ServeHTTP(callbackRec, callbackReq)
+
+	if callbackRec.Code != http.StatusOK {
+		t.Fatalf("expected 200 from oauth callback, got %d: %s", callbackRec.Code, callbackRec.Body.String())
+	}
+	if !strings.Contains(callbackRec.Body.String(), emailOAuthPopupEventType) {
+		t.Fatalf("expected popup event payload in callback HTML, got %s", callbackRec.Body.String())
+	}
+	if strings.Contains(callbackRec.Body.String(), "google-client-secret") {
+		t.Fatalf("expected callback HTML to avoid leaking client secret, got %s", callbackRec.Body.String())
+	}
+	if tokenCalls != 1 {
+		t.Fatalf("expected one token exchange, got %d", tokenCalls)
+	}
+
+	accounts, err := store.ListEmailAccounts(context.Background(), primaryVault.ID, "")
+	if err != nil {
+		t.Fatalf("list email accounts: %v", err)
+	}
+	if len(accounts) != 1 {
+		t.Fatalf("expected one email account after oauth connect, got %d", len(accounts))
+	}
+
+	account := accounts[0]
+	if account.Label != "Support Inbox" || account.EmailAddress != "support@example.com" {
+		t.Fatalf("unexpected created account: %#v", account)
+	}
+	if account.AuthType != vault.EmailAuthTypeOAuth2 || account.Provider != vault.EmailProviderGmail {
+		t.Fatalf("expected gmail oauth account, got %#v", account)
+	}
+	if !account.CredentialsStatus.HasRefreshToken || !account.CredentialsStatus.HasClientSecret {
+		t.Fatalf("expected stored oauth credentials, got %#v", account.CredentialsStatus)
+	}
+}
+
+func TestHandlerEmailOAuthReconnectReplacesPasswordAuth(t *testing.T) {
+	handler, store, db := newTestHandler(t, vault.NewMemorySecretStore(), "")
+	defer func() { _ = db.Close() }()
+	primaryVault := createHandlerVault(t, store, "Primary Vault")
+
+	account, err := store.CreateEmailAccount(context.Background(), vault.EmailAccountInput{
+		VaultID:      primaryVault.ID,
+		Label:        "Support Inbox",
+		Provider:     vault.EmailProviderGmail,
+		EmailAddress: "support@example.com",
+		AuthType:     vault.EmailAuthTypeAppPassword,
+		Credentials: vault.EmailAccountCredentials{
+			Password: "old-app-password",
+		},
+	})
+	if err != nil {
+		t.Fatalf("create seed email account: %v", err)
+	}
+
+	tokenClient := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		if err := r.ParseForm(); err != nil {
+			t.Fatalf("parse token form: %v", err)
+		}
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Body:       io.NopCloser(strings.NewReader(`{"access_token":"access-token-2","refresh_token":"refresh-token-2","token_type":"Bearer","expires_in":3600}`)),
+		}, nil
+	})}
+
+	configureTestGoogleOAuth(t, "https://oauth.google.test/token")
+
+	startRec := performJSONRequest(t, handler, http.MethodGet, "/api/vault/email-oauth/start?vault_id="+url.QueryEscape(primaryVault.ID)+"&provider=gmail&account_id="+url.QueryEscape(account.ID), nil)
+	if startRec.Code != http.StatusFound {
+		t.Fatalf("expected 302 from reconnect start, got %d: %s", startRec.Code, startRec.Body.String())
+	}
+
+	redirectURL, err := url.Parse(startRec.Header().Get("Location"))
+	if err != nil {
+		t.Fatalf("parse reconnect redirect URL: %v", err)
+	}
+	state := strings.TrimSpace(redirectURL.Query().Get("state"))
+	if state == "" {
+		t.Fatal("expected reconnect state")
+	}
+
+	callbackReq := httptest.NewRequest(http.MethodGet, "/api/vault/email-oauth/callback?state="+url.QueryEscape(state)+"&code=oauth-code-2", nil)
+	callbackReq.Host = "ori.test"
+	callbackReq = callbackReq.WithContext(context.WithValue(callbackReq.Context(), oauth2.HTTPClient, tokenClient))
+	callbackRec := httptest.NewRecorder()
+	handler.ServeHTTP(callbackRec, callbackReq)
+
+	if callbackRec.Code != http.StatusOK {
+		t.Fatalf("expected 200 from reconnect callback, got %d: %s", callbackRec.Code, callbackRec.Body.String())
+	}
+
+	updatedAccount, err := store.GetEmailAccount(context.Background(), account.ID)
+	if err != nil {
+		t.Fatalf("get updated email account: %v", err)
+	}
+	if updatedAccount.AuthType != vault.EmailAuthTypeOAuth2 {
+		t.Fatalf("expected oauth2 auth after reconnect, got %#v", updatedAccount)
+	}
+	if updatedAccount.CredentialsStatus.HasPassword {
+		t.Fatalf("expected password credential to be cleared after reconnect, got %#v", updatedAccount.CredentialsStatus)
+	}
+	if !updatedAccount.CredentialsStatus.HasRefreshToken {
+		t.Fatalf("expected refresh token after reconnect, got %#v", updatedAccount.CredentialsStatus)
 	}
 }
 
@@ -259,13 +771,14 @@ func TestHandlerExportRequiresConfirmationAndPassword(t *testing.T) {
 	}
 }
 
-func TestHandlerUnlockAndLockFallbackVault(t *testing.T) {
-	tempDir := t.TempDir()
-	secretStore := vault.NewAutoSecretStore(vault.AutoSecretStoreOptions{GOOS: "plan9"})
-	handler, _, db := newTestHandler(t, secretStore, filepath.Join(tempDir, "vault-secrets.json"))
+func TestHandlerUnlockAndLockPasswordProtectedVault(t *testing.T) {
+	handler, store, db := newTestHandler(t, vault.NewMemorySecretStore(), "")
 	defer func() { _ = db.Close() }()
-	primaryVault := insertLegacyHandlerVault(t, db, "Primary Vault")
-	_ = insertLegacyHandlerVault(t, db, "Archive Vault")
+	primaryVault := createHandlerVault(t, store, "Primary Vault")
+
+	if err := store.Lock(context.Background(), primaryVault.ID); err != nil {
+		t.Fatalf("lock primary vault: %v", err)
+	}
 
 	statusRec := performJSONRequest(t, handler, http.MethodGet, "/api/vault/status?vault_id="+primaryVault.ID, nil)
 	if statusRec.Code != http.StatusOK {
@@ -274,12 +787,12 @@ func TestHandlerUnlockAndLockFallbackVault(t *testing.T) {
 	var status vault.VaultStatus
 	decodeJSONBody(t, statusRec, &status)
 	if !status.Locked || !status.RequiresPassphrase {
-		t.Fatalf("expected locked fallback vault, got %+v", status)
+		t.Fatalf("expected locked password-protected vault, got %+v", status)
 	}
 
 	unlockRec := performJSONRequest(t, handler, http.MethodPost, "/api/vault/unlock", map[string]any{
 		"vault_id":       primaryVault.ID,
-		"vault_password": "fallback-pass",
+		"vault_password": testVaultPassword,
 	})
 	if unlockRec.Code != http.StatusOK {
 		t.Fatalf("expected 200 from unlock, got %d: %s", unlockRec.Code, unlockRec.Body.String())
@@ -314,6 +827,24 @@ func TestHandlerUnlockAndLockFallbackVault(t *testing.T) {
 	listRec := performJSONRequest(t, handler, http.MethodGet, "/api/vault/records?vault_id="+primaryVault.ID+"&workspace_id=ws-1", nil)
 	if listRec.Code != http.StatusLocked {
 		t.Fatalf("expected 423 after lock, got %d: %s", listRec.Code, listRec.Body.String())
+	}
+}
+
+func TestHandlerListRecordsReturnsExplicitErrorForMissingVaultFile(t *testing.T) {
+	handler, store, db, vaultFilesBaseDir := newTestHandlerWithVaultFilesDir(t, vault.NewMemorySecretStore(), "")
+	defer func() { _ = db.Close() }()
+
+	item := createHandlerVault(t, store, "Broken Vault")
+	if err := os.Remove(filepath.Join(vaultFilesBaseDir, item.FilePath)); err != nil {
+		t.Fatalf("remove vault file: %v", err)
+	}
+
+	rec := performJSONRequest(t, handler, http.MethodGet, "/api/vault/records?vault_id="+url.QueryEscape(item.ID), nil)
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("expected 500 from list records with missing vault file, got %d: %s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), vault.ErrVaultFileMissing.Error()) {
+		t.Fatalf("expected explicit missing vault file error, got body=%s", rec.Body.String())
 	}
 }
 
@@ -394,6 +925,85 @@ func TestHandlerImportCreatesVaultAndRestoresBundle(t *testing.T) {
 	decodeJSONBody(t, grantsRec, &importedGrants)
 	if len(importedGrants.Grants) != 1 || importedGrants.Grants[0].ActorID != "finance-agent" {
 		t.Fatalf("unexpected imported grants: %#v", importedGrants.Grants)
+	}
+}
+
+func TestHandlerImportAcceptsMultipartBundleUpload(t *testing.T) {
+	handler, store, db := newTestHandler(t, vault.NewMemorySecretStore(), "")
+	defer func() { _ = db.Close() }()
+
+	sourceVault := createHandlerVault(t, store, "Travel Vault")
+
+	if err := store.CreateRecord(context.Background(), &vault.Record{
+		VaultID: sourceVault.ID,
+		Type:    "personal_note",
+		Label:   "Passport copy",
+		Payload: json.RawMessage(fmt.Sprintf(`{
+			"note":"Scan attached",
+			"attachments":[{"name":"passport.txt","mime_type":"text/plain","size_bytes":9,"content_base64":"%s"}]
+		}`, base64.StdEncoding.EncodeToString([]byte("scan-data")))),
+	}, vault.AccessContext{}); err != nil {
+		t.Fatalf("create source record with attachment: %v", err)
+	}
+
+	bundle, err := store.Export(context.Background(), vault.ExportRequest{
+		VaultID:  sourceVault.ID,
+		Password: "bundle-pass",
+	})
+	if err != nil {
+		t.Fatalf("export bundle: %v", err)
+	}
+
+	bundleJSON, err := json.Marshal(bundle)
+	if err != nil {
+		t.Fatalf("marshal bundle: %v", err)
+	}
+
+	importRec := performMultipartRequest(t, handler, http.MethodPost, "/api/vault/import", map[string]string{
+		"import_password":       "bundle-pass",
+		"restore_grants":        "false",
+		"create_vault_name":     "Imported Travel Vault",
+		"create_vault_password": "imported-vault-pass",
+	}, "file", "vault-export.json", bundleJSON)
+	if importRec.Code != http.StatusOK {
+		t.Fatalf("expected 200 from multipart import, got %d: %s", importRec.Code, importRec.Body.String())
+	}
+
+	var importBody struct {
+		Result vault.ImportResult `json:"result"`
+	}
+	decodeJSONBody(t, importRec, &importBody)
+	if !importBody.Result.CreatedVault || importBody.Result.RecordCount != 1 {
+		t.Fatalf("unexpected multipart import result: %+v", importBody.Result)
+	}
+
+	listRec := performJSONRequest(t, handler, http.MethodGet, "/api/vault/records?vault_id="+importBody.Result.Vault.ID, nil)
+	if listRec.Code != http.StatusOK {
+		t.Fatalf("expected 200 listing imported records, got %d: %s", listRec.Code, listRec.Body.String())
+	}
+
+	var listed struct {
+		Records []vault.RecordListItem `json:"records"`
+	}
+	decodeJSONBody(t, listRec, &listed)
+	if len(listed.Records) != 1 {
+		t.Fatalf("unexpected imported record count: %#v", listed.Records)
+	}
+
+	getRec := performJSONRequest(t, handler, http.MethodGet, "/api/vault/records/"+listed.Records[0].ID, nil)
+	if getRec.Code != http.StatusOK {
+		t.Fatalf("expected 200 loading imported record, got %d: %s", getRec.Code, getRec.Body.String())
+	}
+
+	var importedRecord vault.Record
+	decodeJSONBody(t, getRec, &importedRecord)
+	var payload map[string]any
+	if err := json.Unmarshal(importedRecord.Payload, &payload); err != nil {
+		t.Fatalf("unmarshal imported payload: %v", err)
+	}
+	attachments, _ := payload["attachments"].([]any)
+	if len(attachments) != 1 {
+		t.Fatalf("expected imported attachment metadata, got %#v", payload["attachments"])
 	}
 }
 

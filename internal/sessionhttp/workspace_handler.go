@@ -18,6 +18,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/session"
 	agentworkspace "github.com/johnjallday/ori-agent/internal/workspace"
+	"github.com/johnjallday/ori-agent/internal/workspacesettings"
 )
 
 var (
@@ -59,6 +60,9 @@ func (h *Handler) HandleWorkspaces(w http.ResponseWriter, r *http.Request) {
 		subPath := parts[1]
 
 		switch subPath {
+		case "settings":
+			h.handleWorkspaceSettings(w, r, id)
+			return
 		case "agents":
 			h.handleWorkspaceAgents(w, r, id, parts)
 			return
@@ -174,6 +178,7 @@ func (h *Handler) createWorkspace(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Name               string                     `json:"name"`
 		Kind               string                     `json:"kind,omitempty"`
+		WorkspacePreset    string                     `json:"workspace_preset,omitempty"`
 		Description        string                     `json:"description,omitempty"`
 		ParentID           string                     `json:"parent_id,omitempty"`
 		OrderIndex         *int                       `json:"order_index,omitempty"`
@@ -235,10 +240,14 @@ func (h *Handler) createWorkspace(w http.ResponseWriter, r *http.Request) {
 	if req.OrderIndex != nil {
 		ws.OrderIndex = *req.OrderIndex
 	}
+	if kind != session.WorkspaceKindGroup {
+		ws.SharedData = workspacesettings.Store(ws.SharedData, workspacesettings.ProfileDefaults(req.WorkspacePreset))
+	}
 	if bootstrapData := normalizeWorkspaceBootstrap(req.WorkspaceBootstrap); bootstrapData != nil {
-		ws.SharedData = map[string]interface{}{
-			"workspace_bootstrap": bootstrapData,
+		if ws.SharedData == nil {
+			ws.SharedData = make(map[string]interface{})
 		}
+		ws.SharedData["workspace_bootstrap"] = bootstrapData
 	}
 
 	// If an existing entry agent was specified, validate and set it.
@@ -487,6 +496,13 @@ func (h *Handler) getWorkspace(w http.ResponseWriter, r *http.Request, id string
 		logger.Error("Failed to get workspace", logger.Fields{"id": id, "error": err})
 		_ = orihttp.RespondInternalError(w, "Failed to get workspace")
 		return
+	}
+
+	if _, _, err := h.ensureWorkspaceManagerForWorkspace(r.Context(), workspace); err != nil {
+		logger.Warn("Failed to auto-provision workspace manager on workspace load", logger.Fields{
+			"workspace_id": id,
+			"error":        err,
+		})
 	}
 
 	orihttp.WriteJSON(w, h.buildWorkspaceDetailResponse(workspace))
@@ -757,6 +773,7 @@ func (h *Handler) handleWorkspaceRename(w http.ResponseWriter, r *http.Request, 
 
 type createWorkspaceImportRequest struct {
 	Name               string                     `json:"name,omitempty"`
+	WorkspacePreset    string                     `json:"workspace_preset,omitempty"`
 	Description        string                     `json:"description,omitempty"`
 	ParentID           string                     `json:"parent_id,omitempty"`
 	OrderIndex         *int                       `json:"order_index,omitempty"`
@@ -900,6 +917,53 @@ func (h *Handler) handleWorkspaceImport(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
+	if h.workspaceStore != nil && workspaceImportHasConfig(normalizedPath) {
+		workspace, warning, err := h.restoreImportedWorkspace(r.Context(), normalizedPath, req)
+		if err != nil {
+			logger.Error("Failed to restore exported workspace", logger.Fields{
+				"path_hash": hashPathForTelemetry(normalizedPath),
+				"error":     err,
+			})
+			recordWorkspaceImportTelemetry("import_failed", logger.Fields{
+				"path_hash":   hashPathForTelemetry(normalizedPath),
+				"entry_point": req.EntryPoint,
+				"reason":      "workspace_restore_failed",
+			})
+			if strings.Contains(strings.ToLower(err.Error()), "already exists") {
+				_ = orihttp.RespondConflict(w, err.Error())
+				return
+			}
+			_ = orihttp.RespondInternalError(w, "Failed to restore exported workspace")
+			return
+		}
+
+		logger.Info("Workspace restored from exported folder", logger.Fields{
+			"workspace_id": workspace.ID,
+			"name":         workspace.Name,
+			"path_hash":    hashPathForTelemetry(normalizedPath),
+			"entry_point":  req.EntryPoint,
+		})
+		recordWorkspaceImportTelemetry("import_success", logger.Fields{
+			"workspace_id": workspace.ID,
+			"path_hash":    hashPathForTelemetry(normalizedPath),
+			"entry_point":  req.EntryPoint,
+			"mode":         "workspace_restore",
+		})
+
+		response := map[string]interface{}{
+			"success":              true,
+			"folder":               workspace,
+			"duplicate":            workspaceImportDuplicate{Found: false},
+			"restored_from_config": true,
+		}
+		if strings.TrimSpace(warning) != "" {
+			response["warning"] = warning
+		}
+
+		_ = orihttp.RespondCreated(w, response)
+		return
+	}
+
 	workspace := &session.Workspace{
 		Name:        workspaceName,
 		Kind:        session.WorkspaceKindWorkspace,
@@ -920,6 +984,7 @@ func (h *Handler) handleWorkspaceImport(w http.ResponseWriter, r *http.Request) 
 			"imported_at":     time.Now().UTC().Format(time.RFC3339),
 		},
 	}
+	workspace.SharedData = workspacesettings.Store(workspace.SharedData, workspacesettings.ProfileDefaults(req.WorkspacePreset))
 	if bootstrapData := normalizeWorkspaceBootstrap(req.WorkspaceBootstrap); bootstrapData != nil {
 		workspace.SharedData["workspace_bootstrap"] = bootstrapData
 	}
@@ -1025,6 +1090,169 @@ func (h *Handler) handleWorkspaceImport(w http.ResponseWriter, r *http.Request) 
 		},
 		"duplicate": workspaceImportDuplicate{Found: false},
 	})
+}
+
+func workspaceImportHasConfig(folderPath string) bool {
+	info, err := os.Stat(filepath.Join(folderPath, agentworkspace.WorkspaceConfigFile))
+	return err == nil && !info.IsDir()
+}
+
+func (h *Handler) restoreImportedWorkspace(ctx context.Context, folderPath string, req createWorkspaceImportRequest) (*session.Workspace, string, error) {
+	importTree, err := loadWorkspaceImportTree(folderPath, strings.TrimSpace(req.ParentID))
+	if err != nil {
+		return nil, "", err
+	}
+	if len(importTree) == 0 {
+		return nil, "", fmt.Errorf("no workspace configuration found in %s", folderPath)
+	}
+
+	rootWorkspace := importTree[0]
+	if trimmedName := strings.TrimSpace(req.Name); trimmedName != "" {
+		rootWorkspace.Name = trimmedName
+	}
+	if trimmedDescription := strings.TrimSpace(req.Description); trimmedDescription != "" {
+		rootWorkspace.Description = trimmedDescription
+	}
+	if _, ok := rootWorkspace.SharedData[workspacesettings.SharedDataKey]; !ok {
+		rootWorkspace.SharedData = workspacesettings.Store(rootWorkspace.SharedData, workspacesettings.ProfileDefaults(req.WorkspacePreset))
+	}
+	if bootstrapData := normalizeWorkspaceBootstrap(req.WorkspaceBootstrap); bootstrapData != nil {
+		if rootWorkspace.SharedData == nil {
+			rootWorkspace.SharedData = make(map[string]interface{})
+		}
+		rootWorkspace.SharedData["workspace_bootstrap"] = bootstrapData
+	}
+
+	ensuredEntryAgentName := ""
+	if strings.TrimSpace(req.EntryAgentName) != "" {
+		agentName, _, err := h.ensureWorkspaceEntryAgent(rootWorkspace.Name, req.EntryAgentName)
+		if err != nil {
+			return nil, "", err
+		}
+		if err := ensureImportedWorkspaceEntryAgent(rootWorkspace, agentName); err != nil {
+			return nil, "", err
+		}
+		ensuredEntryAgentName = agentName
+	}
+
+	_, warning, err := h.workspaceStore.Import(folderPath)
+	if err != nil {
+		return nil, "", err
+	}
+
+	adapter := session.NewWorkspaceStoreAdapter(h.store)
+	for _, item := range importTree {
+		if item.Status == "" {
+			item.Status = agentworkspace.StatusActive
+		}
+
+		if err := h.workspaceStore.Save(item); err != nil {
+			return nil, warning, fmt.Errorf("persist imported workspace %s: %w", item.ID, err)
+		}
+		if err := adapter.Save(item); err != nil {
+			return nil, warning, fmt.Errorf("sync imported workspace %s: %w", item.ID, err)
+		}
+
+		sessionWorkspace, err := h.store.GetWorkspace(ctx, item.ID)
+		if err != nil {
+			return nil, warning, fmt.Errorf("load imported workspace %s: %w", item.ID, err)
+		}
+
+		needsUpdate := false
+		if sessionWorkspace.ParentID != item.ParentID {
+			sessionWorkspace.ParentID = item.ParentID
+			needsUpdate = true
+		}
+
+		if item.ID == rootWorkspace.ID {
+			if req.OrderIndex != nil && sessionWorkspace.OrderIndex != *req.OrderIndex {
+				sessionWorkspace.OrderIndex = *req.OrderIndex
+				needsUpdate = true
+			}
+			if trimmedColor := strings.TrimSpace(req.Color); trimmedColor != "" && sessionWorkspace.Color != trimmedColor {
+				sessionWorkspace.Color = trimmedColor
+				needsUpdate = true
+			}
+			if ensuredEntryAgentName != "" {
+				setWorkspaceEntryAgent(sessionWorkspace, ensuredEntryAgentName)
+				needsUpdate = true
+			}
+		}
+
+		if needsUpdate {
+			sessionWorkspace.UpdatedAt = time.Now()
+			if err := h.store.UpdateWorkspace(ctx, sessionWorkspace); err != nil {
+				return nil, warning, fmt.Errorf("update imported workspace %s: %w", item.ID, err)
+			}
+		}
+	}
+
+	rootSessionWorkspace, err := h.store.GetWorkspace(ctx, rootWorkspace.ID)
+	if err != nil {
+		return nil, warning, fmt.Errorf("load restored root workspace %s: %w", rootWorkspace.ID, err)
+	}
+	return rootSessionWorkspace, warning, nil
+}
+
+func loadWorkspaceImportTree(folderPath string, parentID string) ([]*agentworkspace.Workspace, error) {
+	result := make([]*agentworkspace.Workspace, 0, 1)
+	if err := appendWorkspaceImportTree(&result, folderPath, parentID); err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
+func appendWorkspaceImportTree(result *[]*agentworkspace.Workspace, folderPath string, parentID string) error {
+	configPath := filepath.Join(folderPath, agentworkspace.WorkspaceConfigFile)
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		return fmt.Errorf("read %s: %w", configPath, err)
+	}
+
+	ws, err := agentworkspace.FromJSON(data)
+	if err != nil {
+		return fmt.Errorf("decode %s: %w", configPath, err)
+	}
+	if strings.TrimSpace(ws.FolderSlug) == "" {
+		ws.FolderSlug = filepath.Base(folderPath)
+	}
+	ws.ParentID = strings.TrimSpace(parentID)
+	*result = append(*result, ws)
+
+	subDir := filepath.Join(folderPath, agentworkspace.SubWorkspacesDir)
+	entries, err := os.ReadDir(subDir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return fmt.Errorf("read sub-workspaces for %s: %w", folderPath, err)
+	}
+
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		if err := appendWorkspaceImportTree(result, filepath.Join(subDir, entry.Name()), ws.ID); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func ensureImportedWorkspaceEntryAgent(ws *agentworkspace.Workspace, agentName string) error {
+	if ws == nil {
+		return fmt.Errorf("workspace is required")
+	}
+
+	if err := ws.SetEntryAgentName(agentName); err == nil {
+		return nil
+	}
+
+	if err := ws.AddAgent(agentName); err != nil && !errors.Is(err, agentworkspace.ErrAgentAlreadyInWorkspace) {
+		return err
+	}
+	return ws.SetEntryAgentName(agentName)
 }
 
 func (h *Handler) handleWorkspaceImportDuplicateAction(w http.ResponseWriter, r *http.Request) {
@@ -1163,9 +1391,13 @@ func writeWorkspaceImportConflict(w http.ResponseWriter, message string, duplica
 }
 
 func writeWorkspaceCreateSlugConflict(w http.ResponseWriter, workspaceName string, conflict *agentworkspace.FolderSlugConflictError) {
-	message := fmt.Sprintf("A workspace folder named %q already exists.", conflict.Slug)
+	var message string
 	if conflict != nil && conflict.SuggestedSlug != "" {
 		message = fmt.Sprintf("A workspace folder named %q already exists. Create %q instead?", conflict.Slug, conflict.SuggestedSlug)
+	} else if conflict != nil {
+		message = fmt.Sprintf("A workspace folder named %q already exists.", conflict.Slug)
+	} else {
+		message = "A workspace folder with that name already exists."
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -1460,10 +1692,13 @@ func (h *Handler) buildWorkspaceDetailResponse(workspace *session.Workspace) map
 	}
 
 	analyticsWorkspace := buildWorkspaceAnalyticsView(workspace)
+	settings := workspacesettings.Extract(workspace.SharedData)
 	payload["attachments"] = h.buildWorkspaceResponseAttachments(workspace)
-	payload["entry_agent_name"] = currentWorkspaceEntryAgentName(workspace)
+	payload["entry_agent_name"] = availableWorkspaceEntryAgentName(workspace, h.agentStore)
 	payload["agent_stats"] = analyticsWorkspace.GetAgentStats()
 	payload["workspace_progress"] = analyticsWorkspace.GetWorkspaceProgress()
+	payload["workspace_settings"] = settings
+	payload["workspace_settings_effective_behavior"] = workspacesettings.BuildEffectiveBehavior(settings)
 
 	return payload
 }

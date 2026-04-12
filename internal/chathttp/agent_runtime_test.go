@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/johnjallday/ori-agent/internal/agent"
@@ -59,6 +60,31 @@ func TestResolveEffectiveAgent_UsesWorkspaceRuntimeResolver(t *testing.T) {
 	}
 	if len(resolved.MCPServers) != 1 || resolved.MCPServers[0] != "ws:workspace-1:mcp:filesystem:workspace-filesystem" {
 		t.Fatalf("expected workspace runtime MCP server, got %v", resolved.MCPServers)
+	}
+}
+
+func TestResolveEffectiveAgent_UsesRuntimeResolverWhenBaseAgentIsMissing(t *testing.T) {
+	st := &preflightStore{agents: map[string]*agent.Agent{}, names: nil}
+	h := NewHandler(st, nil)
+	resolver := &stubChatRuntimeResolver{
+		resolved: &workspace.ResolvedAgentRuntime{
+			Agent: &agent.Agent{Type: "workspace-manager"},
+		},
+	}
+	h.SetRuntimeResolver(resolver)
+
+	resolved, err := h.resolveEffectiveAgent("Workspace Manager", normalizedChatRouteContext{WorkspaceID: "workspace-1"})
+	if err != nil {
+		t.Fatalf("resolveEffectiveAgent returned error: %v", err)
+	}
+	if resolved == nil || resolved.Agent == nil {
+		t.Fatal("expected resolved agent")
+	}
+	if resolved.Type != "workspace-manager" {
+		t.Fatalf("expected workspace-manager type, got %q", resolved.Type)
+	}
+	if len(resolver.calls) != 1 {
+		t.Fatalf("expected runtime resolver to be called once, got %d", len(resolver.calls))
 	}
 }
 
@@ -136,5 +162,64 @@ func TestChatHandler_WorkspaceEntryGeneralAgent_UsesPlanningForm(t *testing.T) {
 		t.Fatalf("expected workflow_step object, got %T", resp["workflow_step"])
 	} else if got, _ := workflowStep["step_type"].(string); got != string(WorkflowStepAskForm) {
 		t.Fatalf("expected ask_form workflow step, got %q", got)
+	}
+}
+
+func TestChatHandler_AutoWorkspaceContextIsAppliedBeforeRuntimeResolution(t *testing.T) {
+	st := newPreflightStore("Ori", &agent.Agent{})
+	h := NewHandler(st, nil)
+	wsStore := workspace.NewInMemoryStore()
+	h.SetWorkspaceStore(wsStore)
+
+	resolver := &stubChatRuntimeResolver{
+		resolved: &workspace.ResolvedAgentRuntime{
+			Agent: &agent.Agent{},
+		},
+	}
+	h.SetRuntimeResolver(resolver)
+
+	body, _ := json.Marshal(map[string]any{
+		"question":   "review code in this repository",
+		"agent_name": "Ori",
+		"route_context": map[string]any{
+			"surface":   "dashboard",
+			"page_path": "/dashboard",
+			"origin":    "ask_ori",
+		},
+	})
+
+	req := httptest.NewRequest(http.MethodPost, "/api/chat", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+
+	h.ChatHandler(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d body=%s", rr.Code, rr.Body.String())
+	}
+
+	if len(resolver.calls) != 1 {
+		t.Fatalf("expected runtime resolver to be called once, got %d body=%s", len(resolver.calls), rr.Body.String())
+	}
+
+	parts := strings.Split(resolver.calls[0], "|")
+	if len(parts) != 3 {
+		t.Fatalf("expected resolver call format agent|workspace|node, got %q", resolver.calls[0])
+	}
+	if parts[0] != "Ori" {
+		t.Fatalf("expected resolver to target agent Ori, got %q", parts[0])
+	}
+	if strings.TrimSpace(parts[1]) == "" {
+		t.Fatalf("expected resolver to receive an auto-selected workspace id, got %q", resolver.calls[0])
+	}
+
+	allIDs, err := wsStore.List()
+	if err != nil {
+		t.Fatalf("failed to list workspaces: %v", err)
+	}
+	if len(allIDs) != 1 {
+		t.Fatalf("expected one auto-created workspace, got %d", len(allIDs))
+	}
+	if parts[1] != allIDs[0] {
+		t.Fatalf("expected resolver workspace id %q to match created workspace %q", parts[1], allIDs[0])
 	}
 }

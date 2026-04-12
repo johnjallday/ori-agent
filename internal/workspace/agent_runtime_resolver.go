@@ -10,9 +10,12 @@ import (
 	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/mcp"
 	"github.com/johnjallday/ori-agent/internal/store"
+	"github.com/johnjallday/ori-agent/internal/types"
+	"github.com/johnjallday/ori-agent/internal/workspacesettings"
 )
 
 const synthesizedFilesystemBindingID = "workspace-filesystem"
+const synthesizedWorkspaceSettingsSkillBindingPrefix = "workspace-settings-"
 
 type runtimeMCPRegistry interface {
 	UpsertServer(config mcp.ServerConfig) error
@@ -101,6 +104,16 @@ func (r *AgentRuntimeResolver) resolveAgentRuntime(agentName, workspaceID, nodeI
 	}
 
 	baseAgent, ok := r.agentStore.GetAgent(agentName)
+	if (!ok || baseAgent == nil) && strings.TrimSpace(workspaceID) != "" && r.workspaceStore != nil {
+		ws, err := r.workspaceStore.Get(workspaceID)
+		if err != nil {
+			return nil, fmt.Errorf("load workspace %s for runtime resolution: %w", workspaceID, err)
+		}
+		baseAgent, ok, err = r.ensureWorkspaceEntryAgentRuntime(ws, agentName)
+		if err != nil {
+			return nil, err
+		}
+	}
 	if !ok || baseAgent == nil {
 		return nil, fmt.Errorf("agent %s not found", agentName)
 	}
@@ -142,6 +155,82 @@ func (r *AgentRuntimeResolver) resolveAgentRuntime(agentName, workspaceID, nodeI
 
 	resolved.MCPServers = dedupeStringsPreserveOrder(effectiveServers)
 	return resolved, nil
+}
+
+func (r *AgentRuntimeResolver) ensureWorkspaceEntryAgentRuntime(ws *Workspace, agentName string) (*agent.Agent, bool, error) {
+	if r == nil || r.agentStore == nil || ws == nil {
+		return nil, false, nil
+	}
+
+	requestedName := strings.TrimSpace(agentName)
+	entryName := strings.TrimSpace(ws.EntryAgentName())
+	if requestedName == "" || entryName == "" || !strings.EqualFold(requestedName, entryName) {
+		return nil, false, nil
+	}
+
+	if existing, ok := r.agentStore.GetAgent(entryName); ok && existing != nil {
+		return existing, true, nil
+	}
+
+	cfg := &store.CreateAgentConfig{
+		Type:         "workspace-manager",
+		Role:         types.RoleOrchestrator,
+		SystemPrompt: runtimeWorkspaceEntryAgentSystemPrompt(ws.Name),
+	}
+	if err := r.agentStore.CreateAgent(entryName, cfg); err != nil {
+		return nil, false, fmt.Errorf("create missing workspace entry agent %s: %w", entryName, err)
+	}
+
+	created, ok := r.agentStore.GetAgent(entryName)
+	if !ok || created == nil {
+		return nil, false, fmt.Errorf("agent %s not found after creation", entryName)
+	}
+	created.Type = "workspace-manager"
+	created.Role = types.RoleOrchestrator
+	if created.Metadata == nil {
+		created.Metadata = &types.AgentMetadata{}
+	}
+	created.Metadata.Description = fmt.Sprintf("Workspace manager for %q. Coordinate workspace tasks, notes, files, directories, and delegate to specialists when appropriate.", strings.TrimSpace(ws.Name))
+	created.Metadata.Tags = dedupeRuntimeAgentMetadataTags(append(created.Metadata.Tags, "workspace-entry", "workspace-manager", "orchestrator"))
+	if err := r.agentStore.SetAgent(entryName, created); err != nil {
+		return nil, false, fmt.Errorf("persist workspace entry agent %s: %w", entryName, err)
+	}
+
+	logger.Info("Auto-created missing workspace entry agent for runtime resolution", logger.Fields{
+		"workspace_id": ws.ID,
+		"agent":        entryName,
+	})
+
+	return created, true, nil
+}
+
+func runtimeWorkspaceEntryAgentSystemPrompt(workspaceName string) string {
+	name := strings.TrimSpace(workspaceName)
+	if name == "" {
+		name = "this workspace"
+	}
+	return fmt.Sprintf(
+		"You are the workspace manager for %q. Stay focused on this workspace: tasks, notes, files, directories, sessions, and agent coordination. Act as the workspace front door: first understand the user's goal, ask only the minimum clarifying questions, and propose or confirm a short plan when the request is ambiguous or multi-step. Answer directly when shared workspace context is enough. When specialist help might be useful, do not hand off immediately just because a matching agent exists. Decide whether specialist help is actually needed, inspect current or available workspace agents, and ask the user before adding or switching to a specialist unless the user already explicitly requested that handoff. Use workspace agent management tools to invite an existing specialist into the workspace when appropriate. For travel, itinerary, booking, or trip-planning requests, always do an intake pass before planning: do not generate an itinerary or recommendations on the first reply, even if dates and cities are already present. Instead, ask for missing information such as travel dates, flight status, hotel status, preferences, pace, budget, constraints, and must-do activities. If the user says flights or hotels are already booked, ask them to attach the confirmation or travel file to this workspace before planning around it. Prefer 2-4 short multiple-choice questions when helpful. Once the intake is sufficient, default to orchestration for full travel-planning work: for itinerary, day-by-day, or multi-city planning, do not keep acting like the planner by default. Summarize the intake, recommend the right specialist, and ask permission to invite or create specialists such as itinerary, hotel, or flight agents. Only continue yourself for narrow follow-up questions, lightweight clarifications, or when the user explicitly asks to keep planning with the workspace manager. Do not behave like a generic global assistant outside this workspace.",
+		name,
+	)
+}
+
+func dedupeRuntimeAgentMetadataTags(tags []string) []string {
+	seen := make(map[string]struct{}, len(tags))
+	out := make([]string, 0, len(tags))
+	for _, tag := range tags {
+		trimmed := strings.TrimSpace(tag)
+		if trimmed == "" {
+			continue
+		}
+		key := strings.ToLower(trimmed)
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		out = append(out, trimmed)
+	}
+	return out
 }
 
 func (r *AgentRuntimeResolver) resolveWorkspaceBindings(ws *Workspace, instance *AgentInstance) ([]WorkspaceMCPBinding, []string) {
@@ -582,6 +671,39 @@ func (r *AgentRuntimeResolver) resolveWorkspaceSkillBindings(ws *Workspace, inst
 	return filtered
 }
 
+func (r *AgentRuntimeResolver) resolveSettingsManagedSkillBindings(ws *Workspace, agentName string) []WorkspaceSkillBinding {
+	if ws == nil {
+		return nil
+	}
+
+	entryAgentName := strings.TrimSpace(ws.EntryAgentName())
+	if entryAgentName == "" || !strings.EqualFold(entryAgentName, strings.TrimSpace(agentName)) {
+		return nil
+	}
+
+	effective := workspacesettings.BuildEffectiveBehavior(workspacesettings.Extract(ws.SharedData))
+	if len(effective.ManagedSkills) == 0 {
+		return nil
+	}
+
+	bindings := make([]WorkspaceSkillBinding, 0, len(effective.ManagedSkills))
+	for _, managed := range effective.ManagedSkills {
+		skillName := strings.TrimSpace(managed.SkillName)
+		if skillName == "" || !managed.Active {
+			continue
+		}
+		bindings = append(bindings, WorkspaceSkillBinding{
+			ID:        synthesizedWorkspaceSettingsSkillBindingPrefix + strings.ToLower(skillName),
+			SkillName: skillName,
+			Enabled:   true,
+			Trusted:   false,
+			Config:    cloneInterfaceMap(managed.Config),
+		})
+	}
+
+	return bindings
+}
+
 // resolveEffectiveSkills merges workspace skill bindings with agent-specific skills.
 // Agent-specific skills take priority on name collision.
 func (r *AgentRuntimeResolver) resolveEffectiveSkills(ws *Workspace, instance *AgentInstance, agentName string) []ResolvedSkill {
@@ -607,6 +729,23 @@ func (r *AgentRuntimeResolver) resolveEffectiveSkills(ws *Workspace, instance *A
 
 	// Resolve workspace skill bindings
 	allowedBindings := r.resolveWorkspaceSkillBindings(ws, instance)
+	if managedBindings := r.resolveSettingsManagedSkillBindings(ws, agentName); len(managedBindings) > 0 {
+		existingNames := make(map[string]struct{}, len(allowedBindings))
+		for _, binding := range allowedBindings {
+			existingNames[strings.ToLower(strings.TrimSpace(binding.SkillName))] = struct{}{}
+		}
+		for _, binding := range managedBindings {
+			key := strings.ToLower(strings.TrimSpace(binding.SkillName))
+			if key == "" {
+				continue
+			}
+			if _, exists := existingNames[key]; exists {
+				continue
+			}
+			existingNames[key] = struct{}{}
+			allowedBindings = append(allowedBindings, binding)
+		}
+	}
 	if len(allowedBindings) == 0 {
 		return agentSkills
 	}

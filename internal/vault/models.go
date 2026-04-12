@@ -8,27 +8,36 @@ import (
 )
 
 var (
-	ErrVaultRequired          = errors.New("vault: vault selection is required")
-	ErrVaultNotFound          = errors.New("vault: vault not found")
-	ErrVaultAlreadyExists     = errors.New("vault: vault already exists")
-	ErrVaultNameRequired      = errors.New("vault: vault name is required")
-	ErrRecordNotFound         = errors.New("vault: record not found")
-	ErrGrantNotFound          = errors.New("vault: grant not found")
-	ErrPermissionDenied       = errors.New("vault: permission denied")
-	ErrVaultLocked            = errors.New("vault: vault locked")
-	ErrVaultKeyUnavailable    = errors.New("vault: data encryption key unavailable")
-	ErrMalformedRecord        = errors.New("vault: malformed encrypted record")
-	ErrVaultPasswordRequired  = errors.New("vault: vault password is required")
-	ErrVaultPasswordInvalid   = errors.New("vault: incorrect vault password")
-	ErrExportPasswordEmpty    = errors.New("vault: export password is required")
-	ErrImportPasswordRequired = errors.New("vault: import password is required")
-	ErrImportPasswordInvalid  = errors.New("vault: incorrect import password or corrupted bundle")
-	ErrImportBundleRequired   = errors.New("vault: import bundle is required")
-	ErrImportBundleInvalid    = errors.New("vault: import bundle is invalid")
-	ErrImportTargetRequired   = errors.New("vault: import target is required")
+	ErrVaultRequired            = errors.New("vault: vault selection is required")
+	ErrVaultNotFound            = errors.New("vault: vault not found")
+	ErrVaultAlreadyExists       = errors.New("vault: vault already exists")
+	ErrVaultNameRequired        = errors.New("vault: vault name is required")
+	ErrRecordNotFound           = errors.New("vault: record not found")
+	ErrGrantNotFound            = errors.New("vault: grant not found")
+	ErrPermissionDenied         = errors.New("vault: permission denied")
+	ErrInvalidEmailAccount      = errors.New("vault: invalid email account")
+	ErrVaultLocked              = errors.New("vault: vault locked")
+	ErrVaultKeyUnavailable      = errors.New("vault: data encryption key unavailable")
+	ErrMalformedRecord          = errors.New("vault: malformed encrypted record")
+	ErrVaultFileMissing         = errors.New("vault: vault file is missing")
+	ErrVaultFileCorrupt         = errors.New("vault: vault file is corrupt")
+	ErrVaultPasswordRequired    = errors.New("vault: vault password is required")
+	ErrVaultPasswordInvalid     = errors.New("vault: incorrect vault password")
+	ErrExportPasswordEmpty      = errors.New("vault: export password is required")
+	ErrImportPasswordRequired   = errors.New("vault: import password is required")
+	ErrImportPasswordInvalid    = errors.New("vault: incorrect import password or corrupted bundle")
+	ErrImportBundleRequired     = errors.New("vault: import bundle is required")
+	ErrImportBundleInvalid      = errors.New("vault: import bundle is invalid")
+	ErrImportTargetRequired     = errors.New("vault: import target is required")
+	ErrFolderPathInvalid        = errors.New("vault: folder path is invalid")
+	ErrFolderNotEmpty           = errors.New("vault: folder is not empty")
+	ErrRecordAttachmentNotFound = errors.New("vault: record attachment not found")
+	ErrRecordAttachmentRequired = errors.New("vault: attachment content is required")
+	ErrRecordAttachmentTooLarge = errors.New("vault: attachment exceeds maximum size")
 )
 
 const DefaultVaultID = "default"
+const RecordTypeEmailAccount = "email_account"
 
 type ActorType string
 
@@ -59,6 +68,7 @@ type Vault struct {
 	ID                string    `json:"id"`
 	Name              string    `json:"name"`
 	Description       string    `json:"description,omitempty"`
+	FilePath          string    `json:"file_path,omitempty"`
 	IsDefault         bool      `json:"is_default"`
 	PasswordProtected bool      `json:"password_protected"`
 	RecordCount       int       `json:"record_count"`
@@ -71,6 +81,7 @@ type Record struct {
 	VaultID         string          `json:"vault_id,omitempty"`
 	Type            string          `json:"type"`
 	WorkspaceID     string          `json:"workspace_id,omitempty"`
+	FolderPath      string          `json:"folder_path,omitempty"`
 	Label           string          `json:"label"`
 	Tags            []string        `json:"tags,omitempty"`
 	Source          string          `json:"source,omitempty"`
@@ -83,6 +94,7 @@ type Record struct {
 type RecordUpdate struct {
 	Type            *string          `json:"type,omitempty"`
 	WorkspaceID     *string          `json:"workspace_id,omitempty"`
+	FolderPath      *string          `json:"folder_path,omitempty"`
 	Label           *string          `json:"label,omitempty"`
 	Tags            *[]string        `json:"tags,omitempty"`
 	Source          *string          `json:"source,omitempty"`
@@ -90,17 +102,140 @@ type RecordUpdate struct {
 	Payload         *json.RawMessage `json:"payload,omitempty"`
 }
 
+type RecordAttachment struct {
+	ID            string    `json:"id"`
+	RecordID      string    `json:"record_id,omitempty"`
+	VaultID       string    `json:"vault_id,omitempty"`
+	Name          string    `json:"name"`
+	MimeType      string    `json:"mime_type"`
+	SizeBytes     int64     `json:"size_bytes"`
+	Kind          string    `json:"kind,omitempty"`
+	DownloadURL   string    `json:"download_url,omitempty"`
+	ContentBase64 string    `json:"content_base64,omitempty"`
+	CreatedAt     time.Time `json:"created_at,omitempty"`
+	UpdatedAt     time.Time `json:"updated_at,omitempty"`
+}
+
 type RecordListItem struct {
 	ID              string    `json:"id"`
 	VaultID         string    `json:"vault_id,omitempty"`
 	Type            string    `json:"type"`
 	WorkspaceID     string    `json:"workspace_id,omitempty"`
+	FolderPath      string    `json:"folder_path,omitempty"`
 	Label           string    `json:"label"`
 	Tags            []string  `json:"tags,omitempty"`
 	Source          string    `json:"source,omitempty"`
 	RetentionPolicy string    `json:"retention_policy,omitempty"`
 	CreatedAt       time.Time `json:"created_at"`
 	UpdatedAt       time.Time `json:"updated_at"`
+}
+
+type Folder struct {
+	ID        string    `json:"id"`
+	VaultID   string    `json:"vault_id,omitempty"`
+	Path      string    `json:"path"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
+type EmailProvider string
+
+const (
+	EmailProviderGmail     EmailProvider = "gmail"
+	EmailProviderMicrosoft EmailProvider = "microsoft"
+	EmailProviderIMAPSMTP  EmailProvider = "imap_smtp"
+)
+
+type EmailAuthType string
+
+const (
+	EmailAuthTypeOAuth2      EmailAuthType = "oauth2"
+	EmailAuthTypePassword    EmailAuthType = "password"
+	EmailAuthTypeAppPassword EmailAuthType = "app_password"
+)
+
+type EmailAccountCredentials struct {
+	AccessToken   string `json:"access_token,omitempty"`
+	RefreshToken  string `json:"refresh_token,omitempty"`
+	Password      string `json:"password,omitempty"`
+	ClientID      string `json:"client_id,omitempty"`
+	ClientSecret  string `json:"client_secret,omitempty"`
+	TokenEndpoint string `json:"token_endpoint,omitempty"`
+}
+
+type EmailAccount struct {
+	ID                string                  `json:"id"`
+	VaultID           string                  `json:"vault_id,omitempty"`
+	WorkspaceID       string                  `json:"workspace_id,omitempty"`
+	Label             string                  `json:"label"`
+	Tags              []string                `json:"tags,omitempty"`
+	Source            string                  `json:"source,omitempty"`
+	RetentionPolicy   string                  `json:"retention_policy,omitempty"`
+	Provider          EmailProvider           `json:"provider"`
+	EmailAddress      string                  `json:"email_address"`
+	DisplayName       string                  `json:"display_name,omitempty"`
+	Username          string                  `json:"username,omitempty"`
+	AuthType          EmailAuthType           `json:"auth_type"`
+	IMAPHost          string                  `json:"imap_host,omitempty"`
+	IMAPPort          int                     `json:"imap_port,omitempty"`
+	SMTPHost          string                  `json:"smtp_host,omitempty"`
+	SMTPPort          int                     `json:"smtp_port,omitempty"`
+	HasAccessToken    bool                    `json:"has_access_token,omitempty"`
+	HasRefreshToken   bool                    `json:"has_refresh_token,omitempty"`
+	HasPassword       bool                    `json:"has_password,omitempty"`
+	CreatedAt         time.Time               `json:"created_at"`
+	UpdatedAt         time.Time               `json:"updated_at"`
+	CredentialsStatus EmailAccountSecretState `json:"credentials_status"`
+}
+
+type EmailAccountSecretState struct {
+	HasAccessToken  bool `json:"has_access_token,omitempty"`
+	HasRefreshToken bool `json:"has_refresh_token,omitempty"`
+	HasPassword     bool `json:"has_password,omitempty"`
+	HasClientID     bool `json:"has_client_id,omitempty"`
+	HasClientSecret bool `json:"has_client_secret,omitempty"`
+}
+
+type EmailAccountInput struct {
+	VaultID         string                  `json:"vault_id,omitempty"`
+	WorkspaceID     string                  `json:"workspace_id,omitempty"`
+	Label           string                  `json:"label,omitempty"`
+	Tags            []string                `json:"tags,omitempty"`
+	Source          string                  `json:"source,omitempty"`
+	RetentionPolicy string                  `json:"retention_policy,omitempty"`
+	Provider        EmailProvider           `json:"provider"`
+	EmailAddress    string                  `json:"email_address"`
+	DisplayName     string                  `json:"display_name,omitempty"`
+	Username        string                  `json:"username,omitempty"`
+	AuthType        EmailAuthType           `json:"auth_type"`
+	IMAPHost        string                  `json:"imap_host,omitempty"`
+	IMAPPort        int                     `json:"imap_port,omitempty"`
+	SMTPHost        string                  `json:"smtp_host,omitempty"`
+	SMTPPort        int                     `json:"smtp_port,omitempty"`
+	Credentials     EmailAccountCredentials `json:"credentials"`
+}
+
+type EmailAccountUpdate struct {
+	WorkspaceID     *string        `json:"workspace_id,omitempty"`
+	Label           *string        `json:"label,omitempty"`
+	Tags            *[]string      `json:"tags,omitempty"`
+	Source          *string        `json:"source,omitempty"`
+	RetentionPolicy *string        `json:"retention_policy,omitempty"`
+	Provider        *EmailProvider `json:"provider,omitempty"`
+	EmailAddress    *string        `json:"email_address,omitempty"`
+	DisplayName     *string        `json:"display_name,omitempty"`
+	Username        *string        `json:"username,omitempty"`
+	AuthType        *EmailAuthType `json:"auth_type,omitempty"`
+	IMAPHost        *string        `json:"imap_host,omitempty"`
+	IMAPPort        *int           `json:"imap_port,omitempty"`
+	SMTPHost        *string        `json:"smtp_host,omitempty"`
+	SMTPPort        *int           `json:"smtp_port,omitempty"`
+	AccessToken     *string        `json:"access_token,omitempty"`
+	RefreshToken    *string        `json:"refresh_token,omitempty"`
+	Password        *string        `json:"password,omitempty"`
+	ClientID        *string        `json:"client_id,omitempty"`
+	ClientSecret    *string        `json:"client_secret,omitempty"`
+	TokenEndpoint   *string        `json:"token_endpoint,omitempty"`
 }
 
 type RecordFilter struct {
@@ -256,7 +391,7 @@ func normalizeTags(tags []string) []string {
 
 func capabilitiesForRecordType(recordType string) (Capability, Capability) {
 	switch normalizeRecordType(recordType) {
-	case "secret", "credential", "credentials", "token", "api_key", "oauth_token":
+	case "secret", "credential", "credentials", "token", "api_key", "oauth_token", RecordTypeEmailAccount:
 		return CapabilitySecretsRead, CapabilitySecretsWrite
 	case "email", "email_snippet", "email_address":
 		return CapabilityEmailRead, CapabilityEmailWrite

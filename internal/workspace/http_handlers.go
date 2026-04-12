@@ -15,9 +15,10 @@ import (
 
 // HTTPHandler handles HTTP requests for Agent Workspaces
 type HTTPHandler struct {
-	store        Store
-	orchestrator *Orchestrator
-	eventBus     *EventBus
+	store         Store
+	orchestrator  *Orchestrator
+	eventBus      *EventBus
+	emailAccounts emailAccountStore
 }
 
 // NewHTTPHandler creates a new HTTP handler

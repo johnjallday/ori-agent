@@ -329,6 +329,7 @@ function openCreateWorkspaceModal(options = {}) {
 
   const nameInput = document.getElementById('folderNameInput');
   const descriptionInput = document.getElementById('folderDescriptionInput');
+  const presetSelect = document.getElementById('folderPresetSelect');
   const parentSelect = document.getElementById('folderParentSelect');
   const importToggle = document.getElementById('folderImportToggle');
   const importPathInput = document.getElementById('folderImportPathInput');
@@ -338,6 +339,7 @@ function openCreateWorkspaceModal(options = {}) {
     nameInput.dataset.autofillName = '';
   }
   if (descriptionInput) descriptionInput.value = '';
+  if (presetSelect) presetSelect.value = 'general';
   resetWorkspaceBootstrapFields();
   if (parentSelect) parentSelect.value = '';
   if (importToggle) importToggle.checked = false;
@@ -427,6 +429,7 @@ function toggleAgent(agentName) {
 async function createWorkspace() {
   const nameInput = document.getElementById('folderNameInput');
   const descriptionInput = document.getElementById('folderDescriptionInput');
+  const presetSelect = document.getElementById('folderPresetSelect');
   const parentSelect = document.getElementById('folderParentSelect');
   const colorBtn = document.querySelector('#addFolderModal .folder-color-btn.active');
   const importToggle = document.getElementById('folderImportToggle');
@@ -436,6 +439,7 @@ async function createWorkspace() {
 
   const name = nameInput?.value.trim() || '';
   const description = descriptionInput?.value.trim() || '';
+  const workspacePreset = presetSelect?.value?.trim() || 'general';
   const parentId = parentSelect?.value?.trim() || '';
   const color = colorBtn?.dataset.color || '';
   const importEnabled = Boolean(importToggle?.checked);
@@ -466,6 +470,7 @@ async function createWorkspace() {
     let endpoint = '/api/workspaces';
     const payload = {
       name: name,
+      workspace_preset: workspacePreset,
       description: description,
       parent_id: parentId,
       color: color

@@ -2,8 +2,10 @@ package vault
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -24,9 +26,7 @@ func newTestVaultStore(t *testing.T) (*Store, *database.DB) {
 		t.Fatalf("open database: %v", err)
 	}
 
-	return NewStore(db, StoreOptions{
-		SecretStore: NewMemorySecretStore(),
-	}), db
+	return NewStore(db, StoreOptions{}), db
 }
 
 func createTestVault(t *testing.T, ctx context.Context, store *Store, name string) Vault {
@@ -43,6 +43,21 @@ func createTestVaultWithPassword(t *testing.T, ctx context.Context, store *Store
 	return item
 }
 
+func openTestVaultFileDB(t *testing.T, ctx context.Context, store *Store, vaultID string) *sql.DB {
+	t.Helper()
+
+	vaultItem, err := store.getVault(ctx, vaultID)
+	if err != nil {
+		t.Fatalf("get vault %q: %v", vaultID, err)
+	}
+
+	vaultDB, err := openVaultFile(ctx, store.resolveVaultFileAbsolutePath(vaultItem.FilePath))
+	if err != nil {
+		t.Fatalf("open vault file for %q: %v", vaultID, err)
+	}
+	return vaultDB
+}
+
 func TestStoreRecordCRUDEncryptsPayload(t *testing.T) {
 	ctx := context.Background()
 	store, db := newTestVaultStore(t)
@@ -54,6 +69,7 @@ func TestStoreRecordCRUDEncryptsPayload(t *testing.T) {
 		VaultID:     primaryVault.ID,
 		Type:        "email_snippet",
 		WorkspaceID: "ws-1",
+		FolderPath:  "Travel",
 		Label:       "Primary Inbox",
 		Tags:        []string{"Email", "Private"},
 		Source:      "manual",
@@ -62,9 +78,11 @@ func TestStoreRecordCRUDEncryptsPayload(t *testing.T) {
 	if err := store.CreateRecord(ctx, record, AccessContext{}); err != nil {
 		t.Fatalf("create record: %v", err)
 	}
+	vaultDB := openTestVaultFileDB(t, ctx, store, primaryVault.ID)
+	defer func() { _ = vaultDB.Close() }()
 
 	var metadataCiphertext, payloadCiphertext string
-	if err := db.QueryRowContext(ctx, `
+	if err := vaultDB.QueryRowContext(ctx, `
 		SELECT metadata_ciphertext, payload_ciphertext
 		FROM vault_records
 		WHERE id = ?
@@ -85,6 +103,9 @@ func TestStoreRecordCRUDEncryptsPayload(t *testing.T) {
 	if len(items) != 1 {
 		t.Fatalf("expected 1 record, got %d", len(items))
 	}
+	if items[0].FolderPath != "Travel" {
+		t.Fatalf("expected decrypted folder path, got %q", items[0].FolderPath)
+	}
 	if items[0].Label != "Primary Inbox" {
 		t.Fatalf("expected decrypted label, got %q", items[0].Label)
 	}
@@ -103,6 +124,7 @@ func TestStoreRecordCRUDEncryptsPayload(t *testing.T) {
 	label := "Updated Inbox"
 	recordType := "secret"
 	workspaceID := "ws-secure"
+	folderPath := "Travel/Passports"
 	tags := []string{"Credentials", "Personal"}
 	source := "import"
 	retention := "until_rotated"
@@ -110,6 +132,7 @@ func TestStoreRecordCRUDEncryptsPayload(t *testing.T) {
 	updated, err := store.UpdateRecord(ctx, record.ID, RecordUpdate{
 		Type:            &recordType,
 		WorkspaceID:     &workspaceID,
+		FolderPath:      &folderPath,
 		Label:           &label,
 		Tags:            &tags,
 		Source:          &source,
@@ -125,6 +148,9 @@ func TestStoreRecordCRUDEncryptsPayload(t *testing.T) {
 	if updated.WorkspaceID != "ws-secure" {
 		t.Fatalf("expected updated workspace, got %q", updated.WorkspaceID)
 	}
+	if updated.FolderPath != "Travel/Passports" {
+		t.Fatalf("expected updated folder path, got %q", updated.FolderPath)
+	}
 	if updated.Label != "Updated Inbox" {
 		t.Fatalf("expected updated label, got %q", updated.Label)
 	}
@@ -136,6 +162,14 @@ func TestStoreRecordCRUDEncryptsPayload(t *testing.T) {
 	}
 	if string(updated.Payload) != `{"email":"user@example.com","subject":"Filed"}` {
 		t.Fatalf("unexpected updated payload: %s", updated.Payload)
+	}
+
+	folders, err := store.ListFolders(ctx, primaryVault.ID)
+	if err != nil {
+		t.Fatalf("list folders: %v", err)
+	}
+	if len(folders) != 2 || folders[0].Path != "Travel" || folders[1].Path != "Travel/Passports" {
+		t.Fatalf("unexpected folders: %#v", folders)
 	}
 
 	if err := store.DeleteRecord(ctx, record.ID, AccessContext{}); err != nil {
@@ -194,6 +228,97 @@ func TestStoreGrantEnforcement(t *testing.T) {
 	}
 }
 
+func TestStoreCreateFolderPersistsEmptyFolders(t *testing.T) {
+	ctx := context.Background()
+	store, db := newTestVaultStore(t)
+	defer func() { _ = db.Close() }()
+
+	primaryVault := createTestVault(t, ctx, store, "Primary Vault")
+
+	created, err := store.CreateFolder(ctx, &Folder{
+		VaultID: primaryVault.ID,
+		Path:    "Family/Passports",
+	})
+	if err != nil {
+		t.Fatalf("create folder: %v", err)
+	}
+	if created.Path != "Family/Passports" {
+		t.Fatalf("unexpected created folder path: %q", created.Path)
+	}
+
+	folders, err := store.ListFolders(ctx, primaryVault.ID)
+	if err != nil {
+		t.Fatalf("list folders: %v", err)
+	}
+	if len(folders) != 2 {
+		t.Fatalf("expected 2 persisted folders including ancestor, got %d", len(folders))
+	}
+	if folders[0].Path != "Family" || folders[1].Path != "Family/Passports" {
+		t.Fatalf("unexpected folders: %#v", folders)
+	}
+}
+
+func TestStoreDeleteFolderSupportsRecursiveDelete(t *testing.T) {
+	ctx := context.Background()
+	store, db := newTestVaultStore(t)
+	defer func() { _ = db.Close() }()
+
+	primaryVault := createTestVault(t, ctx, store, "Primary Vault")
+
+	if _, err := store.CreateFolder(ctx, &Folder{
+		VaultID: primaryVault.ID,
+		Path:    "Family/Passports",
+	}); err != nil {
+		t.Fatalf("create folder: %v", err)
+	}
+
+	if err := store.DeleteFolder(ctx, primaryVault.ID, "Family", false); !errors.Is(err, ErrFolderNotEmpty) {
+		t.Fatalf("expected ErrFolderNotEmpty for parent folder, got %v", err)
+	}
+
+	if err := store.DeleteFolder(ctx, primaryVault.ID, "Family/Passports", false); err != nil {
+		t.Fatalf("delete leaf folder: %v", err)
+	}
+
+	folders, err := store.ListFolders(ctx, primaryVault.ID)
+	if err != nil {
+		t.Fatalf("list folders after leaf delete: %v", err)
+	}
+	if len(folders) != 1 || folders[0].Path != "Family" {
+		t.Fatalf("unexpected folders after leaf delete: %#v", folders)
+	}
+
+	record := &Record{
+		VaultID:    primaryVault.ID,
+		Type:       "personal_note",
+		FolderPath: "Family",
+		Label:      "Passport",
+		Payload:    json.RawMessage(`{"note":"Emergency contact"}`),
+	}
+	if err := store.CreateRecord(ctx, record, AccessContext{}); err != nil {
+		t.Fatalf("create record: %v", err)
+	}
+
+	if err := store.DeleteFolder(ctx, primaryVault.ID, "Family", false); !errors.Is(err, ErrFolderNotEmpty) {
+		t.Fatalf("expected ErrFolderNotEmpty for folder containing a record, got %v", err)
+	}
+
+	if err := store.DeleteFolder(ctx, primaryVault.ID, "Family", true); err != nil {
+		t.Fatalf("delete folder recursively: %v", err)
+	}
+
+	folders, err = store.ListFolders(ctx, primaryVault.ID)
+	if err != nil {
+		t.Fatalf("list folders after delete: %v", err)
+	}
+	if len(folders) != 0 {
+		t.Fatalf("expected no folders after delete, got %#v", folders)
+	}
+	if _, err := store.GetRecord(ctx, record.ID, AccessContext{}); !errors.Is(err, ErrRecordNotFound) {
+		t.Fatalf("expected ErrRecordNotFound after recursive folder delete, got %v", err)
+	}
+}
+
 func TestStoreCreateGrantRefreshPreservesCreatedAt(t *testing.T) {
 	ctx := context.Background()
 	db, err := database.Open(ctx, &database.Config{
@@ -207,7 +332,6 @@ func TestStoreCreateGrantRefreshPreservesCreatedAt(t *testing.T) {
 
 	currentTime := time.Date(2026, time.April, 3, 9, 0, 0, 0, time.UTC)
 	store := NewStore(db, StoreOptions{
-		SecretStore: NewMemorySecretStore(),
 		Clock: func() time.Time {
 			return currentTime
 		},
@@ -239,6 +363,8 @@ func TestStoreCreateGrantRefreshPreservesCreatedAt(t *testing.T) {
 	if err := store.CreateGrant(ctx, refreshed); err != nil {
 		t.Fatalf("refresh grant: %v", err)
 	}
+	vaultDB := openTestVaultFileDB(t, ctx, store, primaryVault.ID)
+	defer func() { _ = vaultDB.Close() }()
 
 	if !refreshed.CreatedAt.Equal(original.CreatedAt) {
 		t.Fatalf("expected refreshed grant created_at %v, got %v", original.CreatedAt, refreshed.CreatedAt)
@@ -249,7 +375,7 @@ func TestStoreCreateGrantRefreshPreservesCreatedAt(t *testing.T) {
 
 	var createdAt time.Time
 	var updatedAt time.Time
-	if err := db.QueryRowContext(ctx, `
+	if err := vaultDB.QueryRowContext(ctx, `
 		SELECT created_at, updated_at
 		FROM vault_grants
 		WHERE id = ?
@@ -397,8 +523,10 @@ func TestStoreRejectsMalformedEncryptedRecord(t *testing.T) {
 	if err := store.CreateRecord(ctx, record, AccessContext{}); err != nil {
 		t.Fatalf("create record: %v", err)
 	}
+	vaultDB := openTestVaultFileDB(t, ctx, store, primaryVault.ID)
+	defer func() { _ = vaultDB.Close() }()
 
-	if _, err := db.ExecContext(ctx, `
+	if _, err := vaultDB.ExecContext(ctx, `
 		UPDATE vault_records
 		SET payload_ciphertext = 'not-base64'
 		WHERE id = ?
@@ -482,17 +610,6 @@ func TestStoreSupportsMultipleVaults(t *testing.T) {
 		t.Fatalf("expected finance record vault id %q, got %q", financeVault.ID, financeRecords[0].VaultID)
 	}
 
-	memoryStore, ok := store.primarySecretStore.(*MemorySecretStore)
-	if !ok {
-		t.Fatal("expected memory secret store")
-	}
-	if _, ok := memoryStore.secrets[vaultDEKSecretKey(personalVault.ID)]; ok {
-		t.Fatal("did not expect personal vault DEK in the shared secret store")
-	}
-	if _, ok := memoryStore.secrets[vaultDEKSecretKey(financeVault.ID)]; ok {
-		t.Fatal("did not expect finance vault DEK in the shared secret store")
-	}
-
 	if err := store.Lock(ctx, financeVault.ID); err != nil {
 		t.Fatalf("lock finance vault: %v", err)
 	}
@@ -510,6 +627,164 @@ func TestStoreSupportsMultipleVaults(t *testing.T) {
 	}
 	if _, err := store.ListRecords(ctx, RecordFilter{VaultID: financeVault.ID}, AccessContext{}); err != nil {
 		t.Fatalf("expected finance vault to unlock, got %v", err)
+	}
+}
+
+func TestStorePersistsVaultFilePathAndKeyMaterial(t *testing.T) {
+	ctx := context.Background()
+	store, db := newTestVaultStore(t)
+	defer func() { _ = db.Close() }()
+
+	item := Vault{
+		Name:        "Archive Vault",
+		Description: "Records that will move to their own SQLite file",
+		FilePath:    "vaults/archive-vault.db",
+	}
+	if err := store.CreateVault(ctx, &item, testVaultPassword); err != nil {
+		t.Fatalf("create vault: %v", err)
+	}
+
+	vaults, err := store.ListVaults(ctx)
+	if err != nil {
+		t.Fatalf("list vaults: %v", err)
+	}
+	if len(vaults) != 1 {
+		t.Fatalf("expected 1 vault, got %d", len(vaults))
+	}
+	if vaults[0].FilePath != item.FilePath {
+		t.Fatalf("expected file path %q, got %q", item.FilePath, vaults[0].FilePath)
+	}
+
+	stored, err := store.getVault(ctx, item.ID)
+	if err != nil {
+		t.Fatalf("get vault: %v", err)
+	}
+	if stored.FilePath != item.FilePath {
+		t.Fatalf("expected stored file path %q, got %q", item.FilePath, stored.FilePath)
+	}
+
+	rows, err := db.QueryContext(ctx, "PRAGMA table_info(vaults)")
+	if err != nil {
+		t.Fatalf("inspect main-db vault columns: %v", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	hasKeyColumns := false
+	for rows.Next() {
+		var cid int
+		var name string
+		var columnType string
+		var notNull int
+		var defaultValue sql.NullString
+		var pk int
+		if err := rows.Scan(&cid, &name, &columnType, &notNull, &defaultValue, &pk); err != nil {
+			t.Fatalf("scan main-db vault column: %v", err)
+		}
+		if name == "key_salt" || name == "key_nonce" || name == "key_ciphertext" {
+			hasKeyColumns = true
+		}
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("iterate main-db vault columns: %v", err)
+	}
+	if hasKeyColumns {
+		t.Fatalf("expected main-db vault catalog to drop wrapped key columns")
+	}
+
+	vaultFileDB, err := openVaultFile(ctx, store.resolveVaultFileAbsolutePath(item.FilePath))
+	if err != nil {
+		t.Fatalf("open vault file: %v", err)
+	}
+	defer func() { _ = vaultFileDB.Close() }()
+
+	metadata, err := loadVaultFileMetadata(ctx, vaultFileDB, item.ID)
+	if err != nil {
+		t.Fatalf("load vault file metadata: %v", err)
+	}
+	if metadata.VaultID != item.ID {
+		t.Fatalf("expected vault metadata id %q, got %q", item.ID, metadata.VaultID)
+	}
+	if metadata.Name != item.Name || metadata.Description != item.Description {
+		t.Fatalf("unexpected vault metadata: %+v", metadata)
+	}
+	if metadata.KeySalt == "" || metadata.KeyNonce == "" || metadata.KeyCiphertext == "" {
+		t.Fatalf("expected wrapped key material in vault file metadata, got %+v", metadata)
+	}
+}
+
+func TestStoreListRecordsFailsWhenVaultFileIsMissing(t *testing.T) {
+	ctx := context.Background()
+	store, db := newTestVaultStore(t)
+	defer func() { _ = db.Close() }()
+
+	item := createTestVault(t, ctx, store, "Missing File Vault")
+	if err := os.Remove(store.resolveVaultFileAbsolutePath(item.FilePath)); err != nil {
+		t.Fatalf("remove vault file: %v", err)
+	}
+
+	_, err := store.ListRecords(ctx, RecordFilter{VaultID: item.ID}, AccessContext{})
+	if !errors.Is(err, ErrVaultFileMissing) {
+		t.Fatalf("expected ErrVaultFileMissing, got %v", err)
+	}
+}
+
+func TestStoreListRecordsFailsWhenVaultFileIsCorrupt(t *testing.T) {
+	ctx := context.Background()
+	store, db := newTestVaultStore(t)
+	defer func() { _ = db.Close() }()
+
+	item := createTestVault(t, ctx, store, "Corrupt File Vault")
+	if err := os.WriteFile(store.resolveVaultFileAbsolutePath(item.FilePath), []byte("not a sqlite database"), 0o644); err != nil {
+		t.Fatalf("corrupt vault file: %v", err)
+	}
+
+	_, err := store.ListRecords(ctx, RecordFilter{VaultID: item.ID}, AccessContext{})
+	if !errors.Is(err, ErrVaultFileCorrupt) {
+		t.Fatalf("expected ErrVaultFileCorrupt, got %v", err)
+	}
+}
+
+func TestStoreListVaultsIgnoresLegacyCatalogRowsWithoutFilePath(t *testing.T) {
+	ctx := context.Background()
+	store, db := newTestVaultStore(t)
+	defer func() { _ = db.Close() }()
+
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO vaults (id, name, description, file_path, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?)
+	`, "legacy-vault", "Legacy Vault", "unsupported shared-db vault", "", time.Now(), time.Now()); err != nil {
+		t.Fatalf("insert legacy vault row: %v", err)
+	}
+
+	vaults, err := store.ListVaults(ctx)
+	if err != nil {
+		t.Fatalf("list vaults: %v", err)
+	}
+	if len(vaults) != 0 {
+		t.Fatalf("expected legacy blank-file-path vault row to be ignored, got %#v", vaults)
+	}
+}
+
+func TestStoreListVaultsSkipsMissingVaultFiles(t *testing.T) {
+	ctx := context.Background()
+	store, db := newTestVaultStore(t)
+	defer func() { _ = db.Close() }()
+
+	validVault := createTestVault(t, ctx, store, "Valid Vault")
+	missingVault := createTestVault(t, ctx, store, "Missing Vault")
+	if err := os.Remove(store.resolveVaultFileAbsolutePath(missingVault.FilePath)); err != nil {
+		t.Fatalf("remove missing vault file: %v", err)
+	}
+
+	vaults, err := store.ListVaults(ctx)
+	if err != nil {
+		t.Fatalf("list vaults: %v", err)
+	}
+	if len(vaults) != 1 {
+		t.Fatalf("expected only the valid vault to remain in the list, got %#v", vaults)
+	}
+	if vaults[0].ID != validVault.ID {
+		t.Fatalf("expected valid vault %q, got %#v", validVault.ID, vaults)
 	}
 }
 
@@ -577,27 +852,8 @@ func TestStoreRenamesAndDeletesVaults(t *testing.T) {
 		t.Fatalf("expected ErrVaultNotFound after delete, got %v", err)
 	}
 
-	var count int
-	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM vault_records WHERE vault_id = ?`, financeVault.ID).Scan(&count); err != nil {
-		t.Fatalf("count deleted vault records: %v", err)
-	}
-	if count != 0 {
-		t.Fatalf("expected deleted vault records to be removed, got %d", count)
-	}
-
-	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM vault_grants WHERE vault_id = ?`, financeVault.ID).Scan(&count); err != nil {
-		t.Fatalf("count deleted vault grants: %v", err)
-	}
-	if count != 0 {
-		t.Fatalf("expected deleted vault grants to be removed, got %d", count)
-	}
-
-	memoryStore, ok := store.primarySecretStore.(*MemorySecretStore)
-	if !ok {
-		t.Fatal("expected memory secret store")
-	}
-	if _, ok := memoryStore.secrets[vaultDEKSecretKey(financeVault.ID)]; ok {
-		t.Fatal("did not expect deleted password-protected vault to use a shared secret-store DEK")
+	if _, err := os.Stat(store.resolveVaultFileAbsolutePath(financeVault.FilePath)); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("expected vault file to be removed, got err=%v", err)
 	}
 }
 

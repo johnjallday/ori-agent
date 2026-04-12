@@ -35,21 +35,6 @@ func generateDataEncryptionKey() ([]byte, error) {
 	return randomBytes(int(argonKeyLength))
 }
 
-func encodeDataEncryptionKey(key []byte) string {
-	return base64.StdEncoding.EncodeToString(key)
-}
-
-func decodeDataEncryptionKey(encoded string) ([]byte, error) {
-	key, err := base64.StdEncoding.DecodeString(encoded)
-	if err != nil {
-		return nil, fmt.Errorf("decode data encryption key: %w", err)
-	}
-	if len(key) != int(argonKeyLength) {
-		return nil, fmt.Errorf("decode data encryption key: unexpected length %d", len(key))
-	}
-	return key, nil
-}
-
 func encryptBytes(key []byte, plaintext []byte) (nonceB64 string, ciphertextB64 string, err error) {
 	block, err := aes.NewCipher(key)
 	if err != nil {

@@ -2,37 +2,11 @@ package chathttp
 
 import (
 	"context"
-	"fmt"
 	"testing"
 
 	"github.com/johnjallday/ori-agent/internal/agent"
 	"github.com/johnjallday/ori-agent/internal/toolapi"
 )
-
-// mockTool is a mock implementation of toolapi.Tool for testing
-type mockTool struct {
-	name        string
-	description string
-	callFunc    func(ctx context.Context, args string) (string, error)
-}
-
-func (m *mockTool) Definition() toolapi.ToolDefinition {
-	return toolapi.ToolDefinition{
-		Name:        m.name,
-		Description: m.description,
-		Parameters: map[string]interface{}{
-			"type":       "object",
-			"properties": map[string]interface{}{},
-		},
-	}
-}
-
-func (m *mockTool) Call(ctx context.Context, args string) (string, error) {
-	if m.callFunc != nil {
-		return m.callFunc(ctx, args)
-	}
-	return "mock result", nil
-}
 
 // TestParseDirectToolCommand tests the parsing of direct tool commands
 func TestParseDirectToolCommand(t *testing.T) {
@@ -261,24 +235,6 @@ func TestFormatDirectToolResponse(t *testing.T) {
 			}
 		})
 	}
-}
-
-// mockFileAttachmentTool implements both Tool and FileAttachmentHandler
-type mockFileAttachmentTool struct {
-	mockTool
-	acceptedTypes []string
-	callWithFiles func(ctx context.Context, args string, files []toolapi.FileAttachment) (string, error)
-}
-
-func (m *mockFileAttachmentTool) AcceptsFiles() []string {
-	return m.acceptedTypes
-}
-
-func (m *mockFileAttachmentTool) CallWithFiles(ctx context.Context, args string, files []toolapi.FileAttachment) (string, error) {
-	if m.callWithFiles != nil {
-		return m.callWithFiles(ctx, args, files)
-	}
-	return fmt.Sprintf("received %d files", len(files)), nil
 }
 
 // TestConvertUploadedFilesToAttachments tests the file conversion function

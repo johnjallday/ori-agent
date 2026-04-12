@@ -222,6 +222,11 @@ func ensureDataDirectory() error {
 		logger.Info("Using existing data directory", logger.Fields{"dataDir": dataDir})
 	}
 
+	vaultsDir := filepath.Join(dataDir, "vaults")
+	if err := os.MkdirAll(vaultsDir, 0755); err != nil {
+		return err
+	}
+
 	// Change working directory to the data directory
 	if err := os.Chdir(dataDir); err != nil {
 		return err

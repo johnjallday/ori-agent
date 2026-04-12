@@ -1,18 +1,31 @@
 <!DOCTYPE html>
 <html lang="en">
 {{template "head.tmpl" .}}
-<script>
-// Apply theme immediately to prevent flash
-(function() {
-  const savedTheme = localStorage.getItem('ori-theme') || 'light';
-  document.documentElement.setAttribute('data-bs-theme', savedTheme);
-})();
-</script>
 
 <style>
     body {
         margin: 0;
         padding: 0;
+    }
+
+    .skip-link {
+        position: absolute;
+        left: 20px;
+        top: 18px;
+        z-index: 1100;
+        padding: 10px 14px;
+        border-radius: 999px;
+        background: var(--bg-primary);
+        color: var(--text-primary);
+        border: 1px solid color-mix(in srgb, var(--border-color) 76%, var(--primary-color) 24%);
+        box-shadow: 0 10px 22px rgba(0, 0, 0, 0.18);
+        text-decoration: none;
+        transform: translateY(-180%);
+        transition: transform 0.2s ease;
+    }
+
+    .skip-link:focus-visible {
+        transform: translateY(0);
     }
 
     .agents-container {
@@ -60,10 +73,16 @@
         font-size: 14px;
         font-weight: 500;
         cursor: pointer;
-        transition: all 0.2s ease;
+        transition: background-color 0.2s ease, opacity 0.2s ease, transform 0.2s ease;
         display: inline-flex;
         align-items: center;
         gap: 8px;
+        text-decoration: none;
+    }
+
+    .header-actions .btn:focus-visible {
+        outline: 2px solid color-mix(in srgb, var(--primary-color) 68%, white 32%);
+        outline-offset: 2px;
     }
 
     .header-actions .btn-primary {
@@ -187,7 +206,7 @@
         color: var(--text-primary);
         border-radius: 6px;
         cursor: pointer;
-        transition: all 0.2s ease;
+        transition: background-color 0.2s ease, color 0.2s ease, border-color 0.2s ease;
     }
 
     .view-btn.active {
@@ -308,7 +327,7 @@
         border-radius: 4px;
         cursor: pointer;
         font-size: 12px;
-        transition: all 0.2s ease;
+        transition: background-color 0.2s ease, color 0.2s ease, border-color 0.2s ease;
         color: var(--text-primary);
     }
 
@@ -333,7 +352,7 @@
         border: 1px solid var(--border-color);
         border-radius: 12px;
         padding: 20px;
-        transition: all 0.2s ease;
+        transition: border-color 0.2s ease, box-shadow 0.2s ease, transform 0.2s ease;
         cursor: pointer;
     }
 
@@ -460,7 +479,7 @@
         border-radius: 20px;
         cursor: pointer;
         font-size: 14px;
-        transition: all 0.2s ease;
+        transition: background-color 0.2s ease, color 0.2s ease, border-color 0.2s ease;
     }
 
     .source-filter-btn:hover {
@@ -830,6 +849,12 @@
         flex: 1;
     }
 
+    .ops-search-help {
+        margin: 8px 0 0;
+        font-size: 12px;
+        color: var(--text-muted);
+    }
+
     .ops-search {
         width: 100%;
         border-radius: 10px;
@@ -840,8 +865,7 @@
         font-size: 14px;
     }
 
-    .ops-search:focus {
-        outline: none;
+    .ops-search:focus-visible {
         border-color: #f97316;
         box-shadow: 0 0 0 3px color-mix(in srgb, #f97316 20%, transparent);
     }
@@ -862,12 +886,21 @@
         font-size: 13px;
         font-weight: 600;
         cursor: pointer;
-        transition: all 0.2s ease;
+        transition: background-color 0.2s ease, color 0.2s ease;
     }
 
     .ops-mode-btn.active {
         background: #f97316;
         color: #fff;
+    }
+
+    .ops-mode-btn:focus-visible,
+    .ops-action-btn:focus-visible,
+    .ops-drawer-tab:focus-visible,
+    .ops-drawer-close:focus-visible,
+    .empty-state-clear-btn:focus-visible {
+        outline: 2px solid #f97316;
+        outline-offset: 2px;
     }
 
     .ops-summary {
@@ -898,6 +931,7 @@
         font-size: 20px;
         font-weight: 700;
         color: var(--text-primary);
+        font-variant-numeric: tabular-nums;
     }
 
     .ops-health-message {
@@ -959,6 +993,7 @@
         font-weight: 700;
         background: var(--bg-tertiary);
         color: var(--text-secondary);
+        font-variant-numeric: tabular-nums;
     }
 
     .ops-column-alert .ops-column-header {
@@ -999,7 +1034,6 @@
         display: flex;
         flex-direction: column;
         gap: 10px;
-        cursor: pointer;
         transition: border-color 0.2s ease, transform 0.2s ease;
     }
 
@@ -1009,7 +1043,7 @@
         box-shadow: 0 18px 38px rgba(15, 23, 42, 0.12);
     }
 
-    .ops-agent-card:focus-visible {
+    .ops-agent-card:focus-within {
         outline: 2px solid #f97316;
         outline-offset: 2px;
         border-color: #f97316;
@@ -1133,7 +1167,7 @@
 
     .ops-card-actions {
         display: grid;
-        grid-template-columns: repeat(3, minmax(0, 1fr));
+        grid-template-columns: repeat(2, minmax(0, 1fr));
         gap: 8px;
     }
 
@@ -1146,6 +1180,7 @@
         font-size: 12px;
         font-weight: 600;
         cursor: pointer;
+        text-align: center;
     }
 
     .ops-action-btn.primary {
@@ -1285,9 +1320,14 @@
         min-height: 0;
         overflow-y: auto;
         padding: 18px 20px;
+        overscroll-behavior: contain;
     }
 
     .ops-drawer-panel {
+        display: none;
+    }
+
+    .ops-drawer-panel[hidden] {
         display: none;
     }
 
@@ -1330,10 +1370,25 @@
         padding: 14px 20px 18px;
         display: flex;
         justify-content: flex-end;
+        gap: 10px;
+        flex-wrap: wrap;
     }
 
     body.ops-modal-open {
         overflow: hidden;
+    }
+
+    .empty-state-actions {
+        display: flex;
+        justify-content: center;
+        gap: 12px;
+        flex-wrap: wrap;
+    }
+
+    .empty-state-clear-btn {
+        border: 1px solid var(--border-color);
+        background: var(--bg-secondary);
+        color: var(--text-primary);
     }
 
     @media (max-width: 1100px) {
@@ -1352,10 +1407,6 @@
             grid-template-columns: repeat(2, minmax(0, 1fr));
         }
 
-        .ops-card-actions {
-            grid-template-columns: repeat(2, minmax(0, 1fr));
-        }
-
         .ops-drawer {
             width: calc(100vw - 1rem);
             max-height: calc(100vh - 1rem);
@@ -1371,33 +1422,57 @@
             padding-right: 16px;
         }
     }
+
+    @media (prefers-reduced-motion: reduce) {
+        .skip-link,
+        .header-actions .btn,
+        .view-btn,
+        .action-btn,
+        .agent-card,
+        .source-filter-btn,
+        .ops-mode-btn,
+        .ops-agent-card,
+        .ops-drawer {
+            transition: none !important;
+        }
+
+        .ops-agent-card:hover,
+        .agent-card:hover {
+            transform: none;
+        }
+    }
 </style>
 
 <body class="bg-light agents-page">
+    <a class="skip-link" href="#agents-main">Skip to Main Content</a>
+    <div id="toastContainer" class="toast-container" aria-live="polite" aria-atomic="true"></div>
+
     <!-- Navigation -->
     {{template "navbar.tmpl" .}}
 
     <div class="main-content-wrapper">
         {{template "sidebar.tmpl" .}}
 
-        <div class="main-content">
+        <main class="main-content" id="agents-main" role="main" aria-labelledby="agents-title">
     <div class="agents-container">
         <div class="page-header">
             <div class="page-title">
-                <h1>Agents Dashboard</h1>
-                <p>Manage and monitor your AI agents</p>
+                <h1 id="agents-title">Agents Dashboard</h1>
+                <p>Monitor health, start chats, and fix configuration issues.</p>
             </div>
             <div class="header-actions">
-                <button class="btn btn-primary" onclick="createAgent()">
+                <a class="btn btn-primary" href="/agents/create">
                     <span>+</span> New Agent
-                </button>
+                </a>
             </div>
         </div>
 
         <div class="ops-shell">
             <div class="ops-toolbar modern-card">
                 <div class="ops-search-wrap">
-                    <input type="text" id="searchInput" class="ops-search" placeholder="Search by name or purpose">
+                    <label for="searchInput" class="visually-hidden">Search agents</label>
+                    <input type="search" id="searchInput" name="agent_search" class="ops-search" placeholder="Search by name or purpose…" autocomplete="off" spellcheck="false" aria-describedby="searchInputHelp">
+                    <p id="searchInputHelp" class="ops-search-help">Filter by agent name or stated purpose.</p>
                 </div>
                 <div class="ops-mode" role="group" aria-label="View mode">
                     <button id="modeOperationsBtn" class="ops-mode-btn active" type="button">Operations</button>
@@ -1424,10 +1499,10 @@
                 </div>
             </div>
 
-            <div id="healthMessage" class="ops-health-message hidden"></div>
+            <div id="healthMessage" class="ops-health-message hidden" role="status" aria-live="polite"></div>
 
-            <div id="loadingState" class="loading">
-                <p>Loading agents...</p>
+            <div id="loadingState" class="loading" role="status" aria-live="polite">
+                <p>Loading agents…</p>
             </div>
 
             <div id="opsBoard" class="ops-board hidden">
@@ -1457,17 +1532,20 @@
             </div>
 
             <div id="emptyState" class="empty-state hidden">
-                <h3>No agents found</h3>
-                <p>Create your first agent to get started</p>
-                <button class="btn btn-primary" onclick="createAgent()">Create Agent</button>
+                <h3 id="emptyStateTitle">No agents found</h3>
+                <p id="emptyStateMessage">Create your first agent to get started.</p>
+                <div class="empty-state-actions">
+                    <button id="emptyStateClearBtn" type="button" class="btn empty-state-clear-btn hidden">Clear Search</button>
+                    <a id="emptyStateCreateLink" class="btn btn-primary" href="/agents/create">Create Agent</a>
+                </div>
             </div>
         </div>
     </div>
-        </div>
+        </main>
     </div>
 
-    <div id="agentDrawerBackdrop" class="ops-drawer-backdrop hidden"></div>
-    <section id="agentDrawer" class="ops-drawer" aria-hidden="true" role="dialog" aria-modal="true" aria-labelledby="drawerAgentName">
+    <div id="agentDrawerBackdrop" class="ops-drawer-backdrop hidden" aria-hidden="true"></div>
+    <section id="agentDrawer" class="ops-drawer" aria-hidden="true" role="dialog" aria-modal="true" aria-labelledby="drawerAgentName" tabindex="-1">
         <div class="ops-drawer-header">
             <div>
                 <p class="ops-drawer-kicker">Agent Details</p>
@@ -1475,24 +1553,25 @@
             </div>
             <button id="closeDrawerBtn" class="ops-drawer-close" type="button" aria-label="Close details modal">×</button>
         </div>
-        <div class="ops-drawer-tabs">
-            <button class="ops-drawer-tab active" type="button" data-tab="overview">Overview</button>
-            <button class="ops-drawer-tab" type="button" data-tab="tools">Tools</button>
-            <button class="ops-drawer-tab" type="button" data-tab="advanced">Advanced</button>
+        <div class="ops-drawer-tabs" role="tablist" aria-label="Agent detail sections">
+            <button id="drawerOverviewTabBtn" class="ops-drawer-tab active" type="button" role="tab" aria-selected="true" aria-controls="drawerOverviewTab" data-tab="overview">Overview</button>
+            <button id="drawerToolsTabBtn" class="ops-drawer-tab" type="button" role="tab" aria-selected="false" aria-controls="drawerToolsTab" data-tab="tools" tabindex="-1">Tools</button>
+            <button id="drawerAdvancedTabBtn" class="ops-drawer-tab" type="button" role="tab" aria-selected="false" aria-controls="drawerAdvancedTab" data-tab="advanced" tabindex="-1">Advanced</button>
         </div>
         <div class="ops-drawer-body">
-            <section id="drawerOverviewTab" class="ops-drawer-panel active">
+            <section id="drawerOverviewTab" class="ops-drawer-panel active" role="tabpanel" aria-labelledby="drawerOverviewTabBtn" tabindex="0">
                 <div id="drawerOverviewContent" class="ops-drawer-content"></div>
             </section>
-            <section id="drawerToolsTab" class="ops-drawer-panel">
+            <section id="drawerToolsTab" class="ops-drawer-panel" role="tabpanel" aria-labelledby="drawerToolsTabBtn" tabindex="0" hidden>
                 <div id="drawerToolsContent" class="ops-drawer-content"></div>
             </section>
-            <section id="drawerAdvancedTab" class="ops-drawer-panel">
+            <section id="drawerAdvancedTab" class="ops-drawer-panel" role="tabpanel" aria-labelledby="drawerAdvancedTabBtn" tabindex="0" hidden>
                 <div id="drawerAdvancedContent" class="ops-drawer-content"></div>
             </section>
         </div>
         <div class="ops-drawer-footer">
-            <button id="drawerOpenFullBtn" type="button" class="modern-btn modern-btn-secondary">Open Full Page</button>
+            <a id="drawerEditLink" class="modern-btn modern-btn-primary" href="/agents-edit.html">Edit Agent</a>
+            <a id="drawerOpenFullLink" class="modern-btn modern-btn-secondary" href="/agents">Open Full Page</a>
         </div>
     </section>
 
@@ -1507,6 +1586,7 @@
     <script src="/js/utils/event-bus.js"></script>
     <script src="/js/utils/api-client.js"></script>
     <script src="/js/utils/dom-utils.js"></script>
+    <script src="/js/modules/toast.js"></script>
     <script src="/js/modules/workspace-bootstrap-review.js"></script>
     <script src="/js/modules/sessions.js"></script>
     <script src="/js/app.js"></script>

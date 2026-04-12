@@ -13,6 +13,11 @@
         Grants
       </button>
     </li>
+    <li class="nav-item" role="presentation">
+      <button class="nav-link" id="email-accounts-tab" data-bs-toggle="tab" data-bs-target="#email-accounts-pane" type="button" role="tab" aria-controls="email-accounts-pane" aria-selected="false">
+        Email Accounts
+      </button>
+    </li>
   </ul>
 
   <div class="tab-content" id="vaultTabContent">
@@ -22,13 +27,14 @@
         <section class="vault-page-card vault-page-card-primary">
           <div class="vault-page-explorer">
             <div class="vault-modal-records-toolbar vault-page-explorer-toolbar">
-              <input id="vaultPageSearchInput" type="search" class="form-control settings-input vault-page-input vault-modal-search" placeholder="Search label, type, workspace, or tag">
+              <input id="vaultPageSearchInput" type="search" class="form-control settings-input vault-page-input vault-modal-search" placeholder="Search label, folder, type, workspace, or tag">
               <div class="vault-page-explorer-tools">
                 <span id="vaultPageRecordsSummary" class="vault-modal-records-summary">Waiting for vault status...</span>
                 <div class="vault-page-explorer-actions">
                   <button id="vaultOpenCreateDialogBtn" class="modern-btn modern-btn-secondary modern-btn-sm" type="button">Create</button>
                   <button id="vaultOpenExportDialogBtn" class="modern-btn modern-btn-secondary modern-btn-sm" type="button">Export</button>
                   <button id="vaultOpenImportDialogBtn" class="modern-btn modern-btn-secondary modern-btn-sm" type="button">Import</button>
+                  <button id="vaultExplorerNewFolderBtn" class="modern-btn modern-btn-secondary modern-btn-sm" type="button">New Folder</button>
                   <button id="vaultExplorerAddBtn" class="modern-btn modern-btn-primary modern-btn-sm" type="button">
                     <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" class="me-1"><path d="M19,13H13V19H11V13H5V11H11V5H13V11H19V13Z"/></svg>
                     Add Item
@@ -37,12 +43,12 @@
               </div>
             </div>
 
-            <div id="vaultPageFolderVaultTabs" class="vault-modal-folder-vault-tabs" role="tablist" aria-label="Vault folders"></div>
+            <div id="vaultPageFolderVaultTabs" class="vault-modal-folder-vault-tabs" role="tablist" aria-label="Vaults"></div>
             <div id="vaultPageFolderBreadcrumb" class="vault-modal-folder-breadcrumb" aria-label="Vault folder path" hidden></div>
 
             <div class="vault-modal-explorer-grid vault-page-explorer-grid">
               <div id="vaultPageFolderTree" class="vault-modal-folder-tree">
-                <div class="vault-modal-empty">Unlock the vault to browse the encrypted folder tree.</div>
+                <div class="vault-modal-empty">Unlock the vault to browse saved items.</div>
               </div>
 
               <div class="vault-page-explorer-side">
@@ -76,67 +82,11 @@
           <div class="vault-page-entry-grid" id="vaultEntryGrid">
             <div class="vault-page-list-panel" id="vaultListPanel">
               <div class="vault-page-panel-copy">
-                <h4 class="vault-page-subtitle">Saved entries</h4>
-                <p class="vault-page-help">Flat list of unlocked records.</p>
+                <h4 class="vault-page-subtitle">Saved items</h4>
+                <p class="vault-page-help">Flat list of unlocked items.</p>
               </div>
               <div id="vaultRecordsList" class="vault-page-records-list">
-                <div class="vault-page-empty">Vault entries will appear here once the vault is unlocked.</div>
-              </div>
-            </div>
-
-            <div class="vault-page-editor-panel modern-card p-4 animate__animated" id="vaultEditorPanel" hidden>
-              <div id="vaultEditorForm">
-                <div class="vault-page-panel-copy d-flex justify-content-between align-items-center mb-4">
-                  <h4 class="vault-page-subtitle">Entry editor</h4>
-                  <button id="vaultEditorCloseBtn" class="btn-close" aria-label="Close editor"></button>
-                </div>
-
-                <div class="vault-page-field-grid">
-                  <div class="vault-page-field">
-                    <label class="vault-page-label" for="vaultEntryType">Entry type</label>
-                    <select id="vaultEntryType" class="form-select settings-input vault-page-input">
-                      <option value="personal_note">Personal Note</option>
-                      <option value="email_snippet">Email Snippet</option>
-                      <option value="secret">Secret</option>
-                    </select>
-                  </div>
-                  <div class="vault-page-field">
-                    <label class="vault-page-label" for="vaultEntryLabel">Label</label>
-                    <input id="vaultEntryLabel" type="text" class="form-control settings-input vault-page-input" placeholder="e.g. Passport, Tax ID">
-                  </div>
-                </div>
-
-                <div class="vault-page-field">
-                  <label class="vault-page-label" for="vaultEntryPayload">Payload JSON</label>
-                  <textarea id="vaultEntryPayload" class="form-control settings-input vault-page-input vault-page-textarea" rows="8" spellcheck="false" placeholder='{"note":"private"}'></textarea>
-                </div>
-
-                <details class="vault-page-advanced-details mt-3">
-                  <summary class="vault-page-subtitle" style="cursor: pointer; font-size: 0.9rem;">Advanced Metadata</summary>
-                  <div class="vault-page-field-grid mt-2">
-                    <div class="vault-page-field">
-                      <label class="vault-page-label" for="vaultEntryWorkspaceId">Workspace ID</label>
-                      <input id="vaultEntryWorkspaceId" type="text" class="form-control settings-input vault-page-input" placeholder="Optional scope">
-                    </div>
-                    <div class="vault-page-field">
-                      <label class="vault-page-label" for="vaultEntryTags">Sensitive tags</label>
-                      <input id="vaultEntryTags" type="text" class="form-control settings-input vault-page-input" placeholder="Comma-separated">
-                    </div>
-                  </div>
-                  <div class="vault-page-field-grid mt-2">
-                    <div class="vault-page-field">
-                      <label class="vault-page-label" for="vaultEntryRetention">Retention policy</label>
-                      <input id="vaultEntryRetention" type="text" class="form-control settings-input vault-page-input" placeholder="keep_until_revoked">
-                    </div>
-                  </div>
-                </details>
-
-                <div class="vault-page-button-row mt-4">
-                  <button id="vaultSaveEntryBtn" class="modern-btn modern-btn-primary" type="button">Save To Vault</button>
-                  <button id="vaultResetEntryBtn" class="modern-btn modern-btn-secondary" type="button">New Entry</button>
-                  <button id="vaultRevealPayloadBtn" class="modern-btn modern-btn-secondary d-none" type="button">Reveal Payload</button>
-                  <button id="vaultDeleteEntryBtn" class="btn btn-outline-danger vault-page-danger-btn d-none" type="button">Delete Entry</button>
-                </div>
+                <div class="vault-page-empty">Vault items will appear here once the vault is unlocked.</div>
               </div>
             </div>
           </div>
@@ -200,6 +150,210 @@
             </div>
             <div id="vaultGrantsList" class="vault-page-grants-list">
               <div class="vault-page-empty">No persistent grants loaded yet.</div>
+            </div>
+          </div>
+        </div>
+      </section>
+    </div>
+
+    <!-- Email Accounts Pane -->
+    <div class="tab-pane fade" id="email-accounts-pane" role="tabpanel" aria-labelledby="email-accounts-tab">
+      <section class="vault-page-card vault-page-card-highlight">
+        <div class="vault-page-card-head">
+          <div>
+            <div class="vault-page-eyebrow">Vault-backed Accounts</div>
+            <h3 class="vault-page-card-title">Reusable email identities</h3>
+            <p class="vault-page-help">
+              Store mailbox credentials inside the selected vault, then bind those accounts to workspaces through email MCP connectors.
+            </p>
+          </div>
+          <div id="vaultEmailAccountsSummary" class="vault-page-meta vault-page-email-summary">
+            Select and unlock a vault to manage email accounts.
+          </div>
+        </div>
+
+        <div class="vault-page-entry-grid vault-page-email-grid">
+          <div class="vault-page-list-panel">
+            <div class="vault-page-panel-copy">
+              <h4 class="vault-page-subtitle">Accounts in this vault</h4>
+              <p class="vault-page-help">Each account can be reused across one or more workspaces with tighter workspace-level policy.</p>
+            </div>
+            <div id="vaultEmailAccountsList" class="vault-page-records-list vault-page-email-list">
+              <div class="vault-page-empty">Unlock a vault to review saved email accounts.</div>
+            </div>
+          </div>
+
+          <div class="vault-page-editor-panel modern-card p-4">
+            <div class="vault-page-panel-copy d-flex justify-content-between align-items-center mb-4">
+              <div>
+                <h4 class="vault-page-subtitle">Email account editor</h4>
+                <p class="vault-page-help mb-0">Credentials are write-only. Ori only shows whether a secret is stored.</p>
+              </div>
+              <span id="vaultEmailAccountModeBadge" class="vault-page-record-tag">New account</span>
+            </div>
+
+            <div class="vault-page-field-grid">
+              <div class="vault-page-field">
+                <label class="vault-page-label" for="vaultEmailAccountLabel">Label</label>
+                <input id="vaultEmailAccountLabel" type="text" class="form-control settings-input vault-page-input" placeholder="Support Inbox">
+              </div>
+              <div class="vault-page-field">
+                <label class="vault-page-label" for="vaultEmailAccountAddress">Email address</label>
+                <input id="vaultEmailAccountAddress" type="email" class="form-control settings-input vault-page-input" placeholder="support@example.com">
+              </div>
+            </div>
+
+            <div class="vault-page-field-grid">
+              <div class="vault-page-field">
+                <label class="vault-page-label" for="vaultEmailAccountProvider">Provider</label>
+                <select id="vaultEmailAccountProvider" class="form-select settings-input vault-page-input">
+                  <option value="gmail">Gmail / Google Workspace</option>
+                  <option value="microsoft">Microsoft 365 / Outlook</option>
+                  <option value="imap_smtp">Custom IMAP / SMTP</option>
+                </select>
+              </div>
+              <div class="vault-page-field">
+                <label class="vault-page-label" for="vaultEmailAccountAuthType">Connection method</label>
+                <select id="vaultEmailAccountAuthType" class="form-select settings-input vault-page-input">
+                  <option value="oauth2">OAuth 2</option>
+                  <option value="app_password">App Password</option>
+                  <option value="password">Password</option>
+                </select>
+              </div>
+            </div>
+
+            <div class="vault-page-field-grid">
+              <div class="vault-page-field">
+                <label class="vault-page-label" for="vaultEmailAccountDisplayName">Display name</label>
+                <input id="vaultEmailAccountDisplayName" type="text" class="form-control settings-input vault-page-input" placeholder="Support Team">
+              </div>
+              <div class="vault-page-field">
+                <label class="vault-page-label" for="vaultEmailAccountUsername">Username</label>
+                <input id="vaultEmailAccountUsername" type="text" class="form-control settings-input vault-page-input" placeholder="Defaults to the email address">
+              </div>
+            </div>
+
+            <div id="vaultEmailAccountConnectPanel" class="vault-page-email-connect-panel" hidden>
+              <div class="vault-page-email-connect-copy">
+                <div class="vault-page-email-connect-kicker">Guided OAuth</div>
+                <h5 class="vault-page-subtitle vault-page-subtitle-sm">Connect this mailbox without pasting tokens</h5>
+                <p id="vaultEmailOauthHelp" class="vault-page-help mb-0">
+                  Ori opens the provider sign-in window, then stores the returned mailbox credentials in this vault after approval.
+                </p>
+              </div>
+              <div class="vault-page-email-connect-actions">
+                <button id="vaultConnectEmailAccountBtn" class="modern-btn modern-btn-primary" type="button">Connect account</button>
+              </div>
+              <div id="vaultEmailOauthProviderStatus" class="vault-page-meta vault-page-email-connect-status">
+                Checking provider availability...
+              </div>
+            </div>
+
+            <div id="vaultEmailAccountImapFields" class="vault-page-subsection" hidden>
+              <div class="vault-page-meta mb-3">
+                Custom IMAP/SMTP providers need explicit server settings. Gmail and Microsoft use sensible defaults automatically.
+              </div>
+              <div class="vault-page-field-grid">
+                <div class="vault-page-field">
+                  <label class="vault-page-label" for="vaultEmailAccountImapHost">IMAP host</label>
+                  <input id="vaultEmailAccountImapHost" type="text" class="form-control settings-input vault-page-input" placeholder="imap.example.com">
+                </div>
+                <div class="vault-page-field">
+                  <label class="vault-page-label" for="vaultEmailAccountImapPort">IMAP port</label>
+                  <input id="vaultEmailAccountImapPort" type="number" class="form-control settings-input vault-page-input" min="1" step="1" placeholder="993">
+                </div>
+              </div>
+              <div class="vault-page-field-grid mt-2">
+                <div class="vault-page-field">
+                  <label class="vault-page-label" for="vaultEmailAccountSmtpHost">SMTP host</label>
+                  <input id="vaultEmailAccountSmtpHost" type="text" class="form-control settings-input vault-page-input" placeholder="smtp.example.com">
+                </div>
+                <div class="vault-page-field">
+                  <label class="vault-page-label" for="vaultEmailAccountSmtpPort">SMTP port</label>
+                  <input id="vaultEmailAccountSmtpPort" type="number" class="form-control settings-input vault-page-input" min="1" step="1" placeholder="465">
+                </div>
+              </div>
+            </div>
+
+            <div class="vault-page-subsection">
+              <div class="vault-page-panel-copy">
+                <h5 class="vault-page-subtitle vault-page-subtitle-sm">Stored secrets</h5>
+                <p id="vaultEmailAccountCredentialHelp" class="vault-page-help mb-0">Ori only shows whether a secret is stored. Secret values stay write-only.</p>
+              </div>
+
+              <details id="vaultEmailAccountOauthAdvanced" class="vault-page-advanced-details mt-3">
+                <summary class="vault-page-subtitle" style="cursor: pointer; font-size: 0.9rem;">Advanced OAuth import</summary>
+                <div id="vaultEmailAccountOauthFields" class="mt-2">
+                  <div class="vault-page-meta mb-3">
+                    Use this only if you already have OAuth tokens or custom client credentials. Most users should use the guided connect button instead.
+                  </div>
+                  <div class="vault-page-field-grid">
+                    <div class="vault-page-field">
+                      <label class="vault-page-label" for="vaultEmailAccountRefreshToken">Refresh token</label>
+                      <input id="vaultEmailAccountRefreshToken" type="password" class="form-control settings-input vault-page-input" autocomplete="new-password" placeholder="Stored in vault only">
+                    </div>
+                    <div class="vault-page-field">
+                      <label class="vault-page-label" for="vaultEmailAccountAccessToken">Access token</label>
+                      <input id="vaultEmailAccountAccessToken" type="password" class="form-control settings-input vault-page-input" autocomplete="new-password" placeholder="Optional cached access token">
+                    </div>
+                  </div>
+                  <div class="vault-page-field-grid mt-2">
+                    <div class="vault-page-field">
+                      <label class="vault-page-label" for="vaultEmailAccountClientId">Client ID</label>
+                      <input id="vaultEmailAccountClientId" type="text" class="form-control settings-input vault-page-input" placeholder="OAuth client id">
+                    </div>
+                    <div class="vault-page-field">
+                      <label class="vault-page-label" for="vaultEmailAccountClientSecret">Client secret</label>
+                      <input id="vaultEmailAccountClientSecret" type="password" class="form-control settings-input vault-page-input" autocomplete="new-password" placeholder="Stored in vault only">
+                    </div>
+                  </div>
+                  <div class="vault-page-field mt-2">
+                    <label class="vault-page-label" for="vaultEmailAccountTokenEndpoint">Token endpoint</label>
+                    <input id="vaultEmailAccountTokenEndpoint" type="text" class="form-control settings-input vault-page-input" placeholder="Optional custom OAuth token endpoint">
+                  </div>
+                </div>
+              </details>
+
+              <div id="vaultEmailAccountPasswordFields" hidden>
+                <div class="vault-page-field">
+                  <label class="vault-page-label" for="vaultEmailAccountPassword">Password or app password</label>
+                  <input id="vaultEmailAccountPassword" type="password" class="form-control settings-input vault-page-input" autocomplete="new-password" placeholder="Stored in vault only">
+                </div>
+              </div>
+
+              <div id="vaultEmailAccountCredentialStatus" class="vault-page-meta vault-page-email-secret-state mt-3">
+                No credentials stored yet.
+              </div>
+            </div>
+
+            <details class="vault-page-advanced-details mt-3">
+              <summary class="vault-page-subtitle" style="cursor: pointer; font-size: 0.9rem;">Advanced metadata</summary>
+              <div class="vault-page-field-grid mt-2">
+                <div class="vault-page-field">
+                  <label class="vault-page-label" for="vaultEmailAccountWorkspaceId">Workspace scope</label>
+                  <input id="vaultEmailAccountWorkspaceId" type="text" class="form-control settings-input vault-page-input" placeholder="Optional workspace lock">
+                </div>
+                <div class="vault-page-field">
+                  <label class="vault-page-label" for="vaultEmailAccountTags">Tags</label>
+                  <input id="vaultEmailAccountTags" type="text" class="form-control settings-input vault-page-input" placeholder="finance, customer-support">
+                </div>
+              </div>
+              <div class="vault-page-field-grid mt-2">
+                <div class="vault-page-field">
+                  <label class="vault-page-label" for="vaultEmailAccountSource">Source</label>
+                  <input id="vaultEmailAccountSource" type="text" class="form-control settings-input vault-page-input" placeholder="google-oauth">
+                </div>
+                <div class="vault-page-field">
+                  <label class="vault-page-label" for="vaultEmailAccountRetention">Retention policy</label>
+                  <input id="vaultEmailAccountRetention" type="text" class="form-control settings-input vault-page-input" placeholder="keep_until_revoked">
+                </div>
+              </div>
+            </details>
+
+            <div class="vault-page-button-row mt-4">
+              <button id="vaultSaveEmailAccountBtn" class="modern-btn modern-btn-primary" type="button">Save Email Account</button>
+              <button id="vaultResetEmailAccountBtn" class="modern-btn modern-btn-secondary" type="button">New Account</button>
+              <button id="vaultDeleteEmailAccountBtn" class="btn btn-outline-danger vault-page-danger-btn d-none" type="button">Delete Account</button>
             </div>
           </div>
         </div>
@@ -344,6 +498,104 @@
       <div class="vault-modal-actions">
         <button id="vaultImportBtn" class="modern-btn modern-btn-primary" type="button">Import Vault</button>
         <button id="vaultImportCancelBtn" class="modern-btn modern-btn-secondary" type="button">Cancel</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="vaultEntryOverlay" class="vault-modal-unlock-overlay vault-page-unlock-overlay vault-page-entry-overlay" hidden>
+    <button type="button" class="vault-modal-unlock-backdrop" data-action="dismiss-page-entry-dialog" aria-label="Close vault item dialog"></button>
+    <div id="vaultEditorPanel" class="vault-modal-unlock-dialog vault-modal-entry-dialog animate__animated" role="dialog" aria-modal="true" aria-labelledby="vaultEditorTitle" aria-describedby="vaultEditorDescription" hidden>
+      <div id="vaultEditorForm">
+        <div class="vault-modal-section-head">
+          <span class="vault-modal-section-kicker">New Entry</span>
+          <h6 id="vaultEditorTitle" class="vault-modal-section-title">New Vault Item</h6>
+          <p id="vaultEditorDescription" class="vault-modal-section-description">Add a private item without leaving the folder view. Give it a name, write what it contains, and only open advanced details if you need them.</p>
+        </div>
+
+        <div class="vault-modal-field">
+          <label class="vault-modal-label" for="vaultEntryType">Entry type</label>
+          <select id="vaultEntryType" class="form-select vault-modal-select">
+            <option value="personal_note">Personal Note</option>
+            <option value="email_snippet">Email Snippet</option>
+            <option value="secret">Secret</option>
+          </select>
+        </div>
+
+        <div class="vault-modal-field">
+          <label class="vault-modal-label" for="vaultEntryLabel">Title</label>
+          <input id="vaultEntryLabel" type="text" class="form-control vault-modal-input" placeholder="Passport note, tax reminder, emergency contact">
+        </div>
+
+        <div class="vault-modal-field">
+          <div class="vault-modal-field-head">
+            <label class="vault-modal-label" for="vaultEntryFolderPath">Folder</label>
+            <button id="vaultEntryUseSelectedFolderBtn" class="modern-btn modern-btn-secondary modern-btn-sm" type="button">Use Selected</button>
+          </div>
+          <input id="vaultEntryFolderPath" type="text" class="form-control vault-modal-input" placeholder="Optional folder path like Travel/Passports">
+          <div class="vault-modal-help">Use "/" to create nested folders. Leave blank to keep the item at the vault root.</div>
+        </div>
+
+        <div class="vault-modal-field">
+          <div class="vault-modal-field-head">
+            <label id="vaultEntryComposerLabel" class="vault-modal-label" for="vaultEntryContent">Private content</label>
+            <label class="vault-modal-mode-toggle" for="vaultEntryJsonMode">
+              <input id="vaultEntryJsonMode" type="checkbox">
+              <span>Use structured JSON</span>
+            </label>
+          </div>
+          <div id="vaultEntryContentField">
+            <textarea id="vaultEntryContent" class="form-control vault-modal-textarea" rows="7" spellcheck="false" placeholder="Write the private details you want to keep encrypted."></textarea>
+            <div id="vaultEntryContentHelp" class="vault-modal-help">Write normal text here. Ori will turn it into an encrypted record for you.</div>
+          </div>
+
+          <div id="vaultEntryPayloadField" hidden>
+            <textarea id="vaultEntryPayload" class="form-control vault-modal-textarea" rows="8" spellcheck="false" placeholder='{"note":"private"}'></textarea>
+            <div class="vault-modal-help">Use JSON only if you want named fields or nested data.</div>
+          </div>
+        </div>
+
+        <div class="vault-modal-field">
+          <div class="vault-modal-field-head">
+            <label class="vault-modal-label" for="vaultEntryAttachmentsInput">Attachments</label>
+            <button id="vaultEntryAttachBtn" class="modern-btn modern-btn-secondary" type="button">Add Files</button>
+          </div>
+          <input id="vaultEntryAttachmentsInput" type="file" multiple accept="image/*,.pdf,.txt,.md,.doc,.docx,.csv,.json,.xml,.html,.zip,.png,.jpg,.jpeg,.gif,.webp" hidden>
+          <div id="vaultEntryAttachmentsList" class="vault-modal-attachments-list">
+            <div class="vault-modal-attachments-empty">No files or images attached yet.</div>
+          </div>
+          <div class="vault-modal-help">Files and images are sealed into the same encrypted entry as the rest of the payload.</div>
+        </div>
+
+        <details id="vaultEntryAdvanced" class="vault-modal-advanced-details">
+          <summary class="vault-modal-advanced-summary">Advanced details</summary>
+          <div class="vault-modal-advanced-body">
+            <div class="vault-modal-advanced-grid">
+              <div class="vault-modal-field">
+                <label class="vault-modal-label" for="vaultEntryWorkspaceId">Workspace ID</label>
+                <input id="vaultEntryWorkspaceId" type="text" class="form-control vault-modal-input" placeholder="Optional workspace scope">
+              </div>
+
+              <div class="vault-modal-field">
+                <label class="vault-modal-label" for="vaultEntryTags">Sensitive tags</label>
+                <input id="vaultEntryTags" type="text" class="form-control vault-modal-input" placeholder="Comma-separated tags">
+              </div>
+
+              <div class="vault-modal-field">
+                <label class="vault-modal-label" for="vaultEntryRetention">Retention policy</label>
+                <input id="vaultEntryRetention" type="text" class="form-control vault-modal-input" placeholder="keep_until_revoked">
+              </div>
+            </div>
+          </div>
+        </details>
+
+        <div class="vault-modal-actions">
+          <button id="vaultSaveEntryBtn" class="modern-btn modern-btn-primary" type="button">Save Entry</button>
+          <button id="vaultResetEntryBtn" class="modern-btn modern-btn-secondary" type="button">Clear</button>
+          <button id="vaultEditorCloseBtn" class="modern-btn modern-btn-secondary" type="button">Cancel</button>
+        </div>
+
+        <button id="vaultRevealPayloadBtn" class="modern-btn modern-btn-secondary d-none" type="button" hidden>Reveal Payload</button>
+        <button id="vaultDeleteEntryBtn" class="btn btn-outline-danger vault-page-danger-btn d-none" type="button" hidden>Delete Entry</button>
       </div>
     </div>
   </div>

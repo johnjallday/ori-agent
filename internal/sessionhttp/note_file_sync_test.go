@@ -37,7 +37,7 @@ func TestSyncNoteToFile(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	// Create a workspace
 	now := time.Now()
@@ -105,7 +105,7 @@ func TestSyncNoteToFileAfterRename(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	now := time.Now()
 	ws := &workspace.Workspace{
@@ -164,7 +164,7 @@ func TestDeleteNoteFile(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	now := time.Now()
 	ws := &workspace.Workspace{

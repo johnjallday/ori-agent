@@ -55,7 +55,7 @@ func (h *HTTPHandler) AddAgent(w http.ResponseWriter, r *http.Request) {
 
 	if err := ws.AddAgent(req.AgentName); err != nil {
 		if errors.Is(err, ErrAgentAlreadyInWorkspace) {
-			orihttp.RespondError(w, http.StatusConflict, err.Error())
+			_ = orihttp.RespondError(w, http.StatusConflict, err.Error())
 			return
 		}
 		orihttp.InternalError(w, fmt.Sprintf("Failed to add agent: %v", err))

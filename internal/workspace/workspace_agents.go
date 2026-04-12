@@ -264,15 +264,12 @@ func (w *Workspace) NormalizeAgentInstances() bool {
 		if canonical, exists := keptByName[key]; exists {
 			if strings.TrimSpace(canonical.Role) == "" && strings.TrimSpace(inst.Role) != "" {
 				canonical.Role = strings.TrimSpace(inst.Role)
-				changed = true
 			}
 			if strings.TrimSpace(canonical.Description) == "" && strings.TrimSpace(inst.Description) != "" {
 				canonical.Description = strings.TrimSpace(inst.Description)
-				changed = true
 			}
 			if inst.EntryPoint && !canonical.EntryPoint {
 				canonical.EntryPoint = true
-				changed = true
 			}
 			keptByName[key] = canonical
 			for idx := range normalizedInstances {

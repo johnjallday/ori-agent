@@ -3,7 +3,6 @@ package chathttp
 import (
 	"fmt"
 	"strings"
-	"time"
 
 	"github.com/johnjallday/ori-agent/internal/workspace"
 )
@@ -249,112 +248,6 @@ func hasAnyMCPServer(enabledServers, candidates []string) bool {
 	return false
 }
 
-func (h *Handler) attachWorkspaceMCPBindingForPrompt(agentName, workspaceID, serverName string) (*resolvedChatAgent, error) {
-	if h == nil || h.workspaceStore == nil {
-		return nil, fmt.Errorf("workspace store is not configured")
-	}
-
-	ws, err := h.workspaceStore.Get(workspaceID)
-	if err != nil {
-		return nil, fmt.Errorf("load workspace: %w", err)
-	}
-
-	binding := findWorkspaceMCPBindingByServerName(ws.GetMCPBindings(), serverName)
-	if binding == nil {
-		binding = &workspace.WorkspaceMCPBinding{
-			ID:         autoWorkspaceMCPBindingID(serverName),
-			ServerName: serverName,
-			Alias:      autoWorkspaceMCPBindingAlias(serverName),
-			Enabled:    true,
-			CreatedAt:  time.Now(),
-			UpdatedAt:  time.Now(),
-		}
-	} else {
-		binding.Enabled = true
-	}
-
-	if err := ws.UpsertMCPBinding(*binding); err != nil {
-		return nil, fmt.Errorf("upsert workspace MCP binding: %w", err)
-	}
-
-	if instance, ok := ws.FindAgentInstance(agentName, ""); ok {
-		if access, exists := ws.GetAgentMCPAccess(instance.ID); exists {
-			alreadyEnabled := false
-			normalizedNewID := strings.ToLower(strings.TrimSpace(binding.ID))
-			for _, id := range access.EnabledBindingIDs {
-				if strings.ToLower(strings.TrimSpace(id)) == normalizedNewID {
-					alreadyEnabled = true
-					break
-				}
-			}
-			if !alreadyEnabled {
-				access.EnabledBindingIDs = append(access.EnabledBindingIDs, binding.ID)
-				if err := ws.SetAgentMCPAccess(*access); err != nil {
-					return nil, fmt.Errorf("update agent MCP access: %w", err)
-				}
-			}
-		}
-	}
-
-	if err := h.workspaceStore.Save(ws); err != nil {
-		return nil, fmt.Errorf("save workspace: %w", err)
-	}
-
-	if h.runtimeResolver == nil {
-		return nil, nil
-	}
-
-	resolved, err := h.runtimeResolver.ResolveAgentForWorkspace(agentName, workspaceID, "")
-	if err != nil {
-		return nil, fmt.Errorf("resolve workspace runtime: %w", err)
-	}
-	if resolved == nil {
-		return nil, nil
-	}
-	return &resolvedChatAgent{
-		Agent:      resolved.Agent,
-		MCPServers: append([]string{}, resolved.MCPServers...),
-	}, nil
-}
-
-func findWorkspaceMCPBindingByServerName(bindings []workspace.WorkspaceMCPBinding, serverName string) *workspace.WorkspaceMCPBinding {
-	target := strings.ToLower(strings.TrimSpace(serverName))
-	for i := range bindings {
-		if strings.ToLower(strings.TrimSpace(bindings[i].ServerName)) == target {
-			copy := bindings[i]
-			return &copy
-		}
-	}
-	return nil
-}
-
-func autoWorkspaceMCPBindingID(serverName string) string {
-	return "auto-" + sanitizeWorkspaceMCPToken(serverName)
-}
-
-func autoWorkspaceMCPBindingAlias(serverName string) string {
-	return sanitizeWorkspaceMCPToken(serverName)
-}
-
-func sanitizeWorkspaceMCPToken(value string) string {
-	trimmed := strings.ToLower(strings.TrimSpace(value))
-	if trimmed == "" {
-		return "mcp"
-	}
-	var b strings.Builder
-	for _, r := range trimmed {
-		switch {
-		case (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9'):
-			b.WriteRune(r)
-		case r == '-' || r == '_':
-			b.WriteRune(r)
-		default:
-			b.WriteRune('-')
-		}
-	}
-	return strings.Trim(strings.ReplaceAll(b.String(), "--", "-"), "-")
-}
-
 func buildWorkspaceRequiredMCPMessage(requirement *mcpAutoRequirement) string {
 	if requirement == nil {
 		return "This request needs an MCP binding in a workspace."
@@ -367,14 +260,6 @@ func buildWorkspaceEnableMCPMessage(requirement *mcpAutoRequirement, serverName 
 		return fmt.Sprintf("This request needs the %s MCP connector enabled in the current workspace before I can continue.", strings.TrimSpace(serverName))
 	}
 	return fmt.Sprintf("This request needs %s tools. Enable the %s MCP connector for this workspace to continue.", requirement.label, strings.TrimSpace(serverName))
-}
-
-func buildWorkspaceAttachMCPFailureMessage(serverName string) string {
-	trimmed := strings.TrimSpace(serverName)
-	if trimmed == "" {
-		return "I couldn't attach the required MCP binding to the active workspace."
-	}
-	return fmt.Sprintf("I couldn't attach the %s MCP binding to the active workspace.", trimmed)
 }
 
 func findMCPAutoRequirementByLabel(label string) *mcpAutoRequirement {

@@ -85,27 +85,39 @@
       agentName: 'Travel Itinerary Planner',
       label: 'Travel Itinerary Planner',
       type: 'research',
+      subtaskIndex: 1,
+      taskTitle: 'Build the day-by-day itinerary',
+      scorePhrases: ['day by day', 'day-by-day', 'itinerary', 'trip plan', 'travel plan', 'restaurant', 'restaurants', 'food', 'museum', 'museums', 'nightlife', 'day trip', 'day trips', 'budget breakdown', 'budget', 'accommodation', 'accommodation areas', 'neighborhood', 'neighbourhood'],
       tags: ['travel', 'itinerary', 'planning', 'workspace-specialist'],
       description: 'Plans multi-city trips with day-by-day pacing, neighborhood suggestions, food highlights, local logistics, and route-aware recommendations.',
-      systemPrompt: 'You are a travel itinerary planner. Build practical, day-by-day trip plans with realistic pacing, local food and neighborhood recommendations, transit notes, and concise options. Ask clarifying questions when key details are missing and avoid inventing bookings or confirmed reservations.'
+      systemPrompt: 'You are a travel itinerary planner. Build practical, day-by-day trip plans with realistic pacing, local food and neighborhood recommendations, transit notes, and concise options. Ask clarifying questions when key details are missing and avoid inventing bookings or confirmed reservations.',
+      handoffInstruction: 'Use the reviewed intake to build a practical day-by-day itinerary. Keep the pacing realistic, include local logistics, and ask only the minimum follow-up needed if a critical detail is still missing.'
     },
     hotel_booking: {
       key: 'hotel_booking',
       agentName: 'Hotel Booking Agent',
       label: 'Hotel Booking Agent',
       type: 'research',
+      subtaskIndex: 2,
+      taskTitle: 'Recommend hotels and neighborhoods',
+      scorePhrases: ['hotel', 'hotels', 'stay', 'stays', 'lodging', 'accommodation', 'where to stay', 'book hotel', 'book hotels'],
       tags: ['travel', 'hotels', 'lodging', 'workspace-specialist'],
       description: 'Finds and compares hotels by neighborhood, budget, amenities, and travel constraints.',
-      systemPrompt: 'You are a hotel booking assistant. Help compare neighborhoods, lodging tradeoffs, budget fit, and stay logistics. Be explicit about assumptions, keep recommendations concise, and ask for missing constraints before making suggestions.'
+      systemPrompt: 'You are a hotel booking assistant. Help compare neighborhoods, lodging tradeoffs, budget fit, and stay logistics. Be explicit about assumptions, keep recommendations concise, and ask for missing constraints before making suggestions.',
+      handoffInstruction: 'Use the reviewed intake to compare lodging areas, hotel tradeoffs, and budget fit. Focus on neighborhoods, stay logistics, and the strongest shortlist.'
     },
     flight_booking: {
       key: 'flight_booking',
       agentName: 'Flight Booking Agent',
       label: 'Flight Booking Agent',
       type: 'research',
+      subtaskIndex: 3,
+      taskTitle: 'Fill the booking gaps for flights and transfers',
+      scorePhrases: ['flight', 'flights', 'airfare', 'airport', 'route option', 'route options', 'connection', 'connections', 'transfer', 'transfer timing'],
       tags: ['travel', 'flights', 'transport', 'workspace-specialist'],
       description: 'Helps fill booking gaps for flights and longer-distance travel legs with schedule and transfer considerations.',
-      systemPrompt: 'You are a flight booking assistant. Help identify missing flight or long-distance travel legs, compare route options, call out tradeoffs, and confirm timing constraints before recommending bookings.'
+      systemPrompt: 'You are a flight booking assistant. Help identify missing flight or long-distance travel legs, compare route options, call out tradeoffs, and confirm timing constraints before recommending bookings.',
+      handoffInstruction: 'Use the reviewed intake to identify missing flights or long-distance travel legs, compare route options, and call out timing or transfer tradeoffs.'
     }
   };
 
@@ -898,6 +910,12 @@
 
     var label = getHomeAssistantActivityLabel();
     var summaryState = getHomeAssistantSummaryState();
+    var summary = homeAssistantState.routingSummary;
+
+    if (summary && summary.heading) {
+      els.thinkingModalLabel.textContent = String(summary.heading);
+      return;
+    }
 
     if (summaryState === 'timeout') {
       els.thinkingModalLabel.textContent = label + ' is delayed';
@@ -955,7 +973,9 @@
 
     if (els.conversationSummary) {
       if (hasFailureState && hasConversation) {
-        els.conversationSummary.textContent = 'The request failed above. Expand this only if you want the original prompt and inline details.';
+        els.conversationSummary.textContent = homeAssistantState.routingSummary && homeAssistantState.routingSummary.conversationSummary
+          ? String(homeAssistantState.routingSummary.conversationSummary)
+          : 'Open this only if you want the original prompt, failing step, and error details.';
       } else if (hasStructuredStep && hasConversation) {
         els.conversationSummary.textContent = 'The active step is above. Open this only if you want the full transcript and manager notes.';
       } else if (hasConversation) {
@@ -1009,7 +1029,9 @@
     if (getHomeAssistantSummaryState() === 'timeout') {
       statusText = 'The manager may still be working. Retry here or open full chat to continue there.';
     } else if (getHomeAssistantSummaryState() === 'error') {
-      statusText = 'Retry here, open full chat, or start a different task.';
+      statusText = homeAssistantState.routingSummary && homeAssistantState.routingSummary.text
+        ? String(homeAssistantState.routingSummary.text)
+        : 'Review the failure details, retry here, or open full chat.';
     } else if (homeAssistantState.routingSummary && homeAssistantState.routingSummary.text) {
       statusText = homeAssistantState.routingSummary.text;
     } else if (homeAssistantState.busy) {
@@ -1094,8 +1116,18 @@
     text.className = 'home-assistant-routing-text';
     text.textContent = summary.text;
 
-    container.appendChild(title);
-    container.appendChild(text);
+    var detailText = String(summary.detail || '').trim();
+    if (detailText) {
+      var detail = document.createElement('span');
+      detail.className = 'home-assistant-routing-detail';
+      detail.textContent = detailText;
+      container.appendChild(title);
+      container.appendChild(text);
+      container.appendChild(detail);
+    } else {
+      container.appendChild(title);
+      container.appendChild(text);
+    }
     container.classList.remove('d-none');
     syncHomeAssistantThinkingStatus();
   }
@@ -1113,7 +1145,10 @@
     homeAssistantState.routingSummary = {
       title: String(title),
       text: String(text),
-      state: options && options.state ? String(options.state) : ''
+      state: options && options.state ? String(options.state) : '',
+      detail: options && options.detail ? String(options.detail) : '',
+      heading: options && options.heading ? String(options.heading) : '',
+      conversationSummary: options && options.conversationSummary ? String(options.conversationSummary) : ''
     };
     renderHomeAssistantRoutingSummary();
     if (homeAssistantState.busy || hasVisibleHomeAssistantActions()) {
@@ -1740,13 +1775,53 @@
     );
   }
 
-  function buildPlanningReviewTaskDetails(planningState) { // eslint-disable-line no-unused-vars
+  function buildPlanningReviewTaskDetails(planningState) {
     if (!planningState) return '';
     return buildPlanningTaskDetails(
       planningState.prompt,
       planningState.summaryText,
       planningState.noteSaved && planningState.noteSaved.name
     );
+  }
+
+  function buildPlanningTaskExecutionDetails(planningState) {
+    if (!planningState) return '';
+
+    var details = buildPlanningReviewTaskDetails(planningState);
+    var structuredSubmission = String(planningState.dispatchPrompt || '').trim();
+    if (!structuredSubmission) return details;
+
+    return [details, structuredSubmission].filter(Boolean).join('\n\n').trim();
+  }
+
+  function buildPlanningReviewTaskContext(planningState) {
+    if (!planningState) return {};
+
+    var context = {
+      planning_review_kind: String(planningState.schema && planningState.schema.kind || '').trim() || null,
+      planning_review_title: String(planningState.schema && planningState.schema.title || '').trim() || null,
+      planning_review_summary: String(planningState.summaryText || '').trim() || null,
+      planning_note_name: String(planningState.noteSaved && planningState.noteSaved.name || '').trim() || null,
+      planning_review_completed_at: new Date().toISOString(),
+      human_loop: null,
+      planning_latest_reply: null,
+      planning_workflow_step: null,
+      planning_session_id: null,
+      user_assist_message: null,
+      user_assist_choice: null
+    };
+
+    if (planningState.workflowResponse) {
+      try {
+        context.planning_workflow_response = JSON.stringify(planningState.workflowResponse, null, 2);
+      } catch (_error) {
+        context.planning_workflow_response = String(planningState.workflowResponse);
+      }
+    } else {
+      context.planning_workflow_response = null;
+    }
+
+    return context;
   }
 
   function activateHomeAssistantPlanningReview(planningState) {
@@ -1782,6 +1857,57 @@
     var planningState = homeAssistantState.planningState;
     if (!planningState || planningState.kind !== 'planning_review') return null;
     return planningState;
+  }
+
+  function isTravelPlanningReviewState(planningState) {
+    if (!planningState || planningState.kind !== 'planning_review' || !planningState.schema) return false;
+    return String(planningState.schema.kind || '').trim() === 'travel_intake' ||
+      String(planningState.intent && planningState.intent.key || '').trim() === 'travel_planning';
+  }
+
+  function isWorkspaceManagerMetaActionPrompt(prompt) {
+    var normalized = normalizeToken(prompt);
+    if (!normalized) return false;
+
+    var actionMatch = /\b(save|create|add|attach|upload|import|export|move|rename|delete|remove|switch|assign|list|show|open|bind)\b/.test(normalized);
+    if (!actionMatch) return false;
+
+    return /\b(note|notes|task|tasks|subtask|subtasks|file|files|pdf|folder|folders|directory|directories|workspace|agent|agents|binding|bindings|canvas)\b/.test(normalized);
+  }
+
+  function detectWorkspacePlanningSpecialist(prompt, intent) {
+    var normalized = normalizeToken(prompt);
+    if (!normalized || isWorkspaceManagerMetaActionPrompt(normalized)) {
+      return null;
+    }
+
+    var travelSignals = ['travel', 'trip', 'itinerary', 'hotel', 'flight', 'vacation', 'restaurant', 'restaurants', 'museum', 'museums', 'nightlife', 'day trip', 'day trips', 'accommodation', 'lodging', 'neighborhood', 'neighbourhood', 'budget'];
+    var looksLikeTravel = travelSignals.some(function (signal) {
+      return normalized.indexOf(normalizeToken(signal)) >= 0;
+    });
+    if (!looksLikeTravel && String(intent && intent.key || '').trim() !== 'travel_planning') {
+      return null;
+    }
+
+    var bestConfig = null;
+    var bestScore = 0;
+    Object.keys(HOME_PLANNING_SPECIALISTS).forEach(function (specialistKey) {
+      var config = HOME_PLANNING_SPECIALISTS[specialistKey];
+      var score = 0;
+      var phrases = Array.isArray(config && config.scorePhrases) ? config.scorePhrases : [];
+      for (var i = 0; i < phrases.length; i++) {
+        var phrase = normalizeToken(phrases[i]);
+        if (!phrase || normalized.indexOf(phrase) === -1) continue;
+        score += phrase.indexOf(' ') >= 0 ? 3 : 1;
+      }
+      if (score > bestScore) {
+        bestScore = score;
+        bestConfig = config;
+      }
+    });
+
+    if (bestConfig) return bestConfig;
+    return looksLikeTravel ? HOME_PLANNING_SPECIALISTS.travel_itinerary : null;
   }
 
   function getActiveLinkedPlanningTask() {
@@ -1977,11 +2103,329 @@
     return agentName;
   }
 
-  async function openWorkspaceSpecialistChat(agentName, routeContext) {
-    if (!agentName) return;
-    var session = await openOrCreateChatSession(agentName, routeContext);
-    if (!session) throw new Error('Failed to open agent chat');
-    openChatPanel();
+  function buildWorkspaceSpecialistTaskDetails(prompt, managerLabel, config, agentName) {
+    var sections = [];
+    var normalizedPrompt = String(prompt || '').trim();
+    var normalizedManager = String(managerLabel || getWorkspaceHomeAssistantDisplayName()).trim() || getWorkspaceHomeAssistantDisplayName();
+    var normalizedAgent = String(agentName || config && config.label || '').trim();
+    var handoffInstruction = String(config && config.handoffInstruction || '').trim();
+
+    sections.push([
+      'Workspace manager handoff:',
+      normalizedManager + ' routed this workspace task to ' + normalizedAgent + '.'
+    ].join('\n'));
+
+    if (normalizedPrompt) {
+      sections.push([
+        'Original request:',
+        normalizedPrompt
+      ].join('\n'));
+    }
+
+    if (handoffInstruction) {
+      sections.push([
+        'Specialist goal:',
+        handoffInstruction
+      ].join('\n'));
+    }
+
+    return sections.join('\n\n').trim();
+  }
+
+  function buildWorkspaceSpecialistTaskContext(config, managerLabel) {
+    return {
+      planning_specialist_key: String(config && config.key || '').trim() || null,
+      planning_specialist_label: String(config && config.label || '').trim() || null,
+      planning_specialist_agent_name: String(config && config.agentName || '').trim() || null,
+      planning_handoff_source: String(managerLabel || '').trim() || null,
+      workspace_specialist_handoff: true,
+      workspace_specialist_handoff_at: new Date().toISOString()
+    };
+  }
+
+  function buildPlanningSpecialistTaskDescription(planningState, config) {
+    var prefix = String(config && (config.taskTitle || config.label) || '').trim();
+    var base = buildPlanningTaskDescriptionFromPrompt(
+      planningState && planningState.prompt,
+      prefix || (config && config.label) || 'Specialist task'
+    );
+    if (!prefix) return base;
+    if (normalizeToken(base).indexOf(normalizeToken(prefix)) === 0) {
+      return base;
+    }
+    return truncateText(prefix + ': ' + base, 140);
+  }
+
+  function buildPlanningSpecialistTaskDetails(planningState, config, agentName) {
+    var sections = [];
+    var assignee = String(agentName || config && config.label || '').trim();
+    var managerLabel = String(planningState && planningState.agentLabel || getWorkspaceHomeAssistantDisplayName()).trim();
+    var handoffInstruction = String(config && config.handoffInstruction || '').trim();
+    var planningDetails = buildPlanningTaskExecutionDetails(planningState);
+
+    sections.push([
+      'Workspace manager handoff:',
+      managerLabel + ' handed this travel-planning task to ' + assignee + '.'
+    ].join('\n'));
+
+    if (handoffInstruction) {
+      sections.push([
+        'Specialist goal:',
+        handoffInstruction
+      ].join('\n'));
+    }
+
+    if (planningDetails) {
+      sections.push(planningDetails);
+    }
+
+    return sections.join('\n\n').trim();
+  }
+
+  function buildPlanningSpecialistTaskContext(planningState, specialistKey, config, agentName, parentTaskID) {
+    var context = buildPlanningReviewTaskContext(planningState);
+    context.planning_specialist_key = String(specialistKey || '').trim() || null;
+    context.planning_specialist_label = String(config && config.label || '').trim() || null;
+    context.planning_specialist_agent_name = String(agentName || '').trim() || null;
+    context.planning_parent_task_id = String(parentTaskID || '').trim() || null;
+    context.planning_handoff_source = String(planningState && planningState.agentLabel || '').trim() || null;
+    return context;
+  }
+
+  function findWorkspaceDetailTaskById(taskId) {
+    var normalizedTaskId = String(taskId || '').trim();
+    if (!normalizedTaskId || !window.workspaceDetail || !Array.isArray(window.workspaceDetail.tasks)) {
+      return null;
+    }
+
+    for (var i = 0; i < window.workspaceDetail.tasks.length; i++) {
+      var task = window.workspaceDetail.tasks[i];
+      if (task && String(task.id || '').trim() === normalizedTaskId) {
+        return task;
+      }
+    }
+    return null;
+  }
+
+  async function fetchWorkspaceTaskRecord(taskId) {
+    var normalizedTaskId = String(taskId || '').trim();
+    if (!normalizedTaskId) {
+      throw new Error('Task ID is required');
+    }
+
+    if (typeof API !== 'undefined' && typeof API.get === 'function') {
+      return await API.get('/api/orchestration/tasks?id=' + encodeURIComponent(normalizedTaskId));
+    }
+
+    var response = await fetch('/api/orchestration/tasks?id=' + encodeURIComponent(normalizedTaskId));
+    if (!response.ok) {
+      var text = '';
+      try {
+        text = await response.text();
+      } catch (_error) {
+        text = '';
+      }
+      throw new Error(text || 'Failed to load task');
+    }
+    return await response.json();
+  }
+
+  function updatePlanningSpecialistStatus(planningState, specialistKey, updates) {
+    if (!planningState || !specialistKey) return null;
+    var current = planningState.specialistStatuses[specialistKey] || {};
+    planningState.specialistStatuses[specialistKey] = Object.assign({}, current, updates || {});
+    return planningState.specialistStatuses[specialistKey];
+  }
+
+  function getPlanningSpecialistButtonLabel(planningState, specialistKey, config) {
+    var status = planningState && planningState.specialistStatuses
+      ? planningState.specialistStatuses[specialistKey] || null
+      : null;
+
+    if (planningState && planningState.specialistBusy === specialistKey) {
+      if (status && status.taskId) {
+        return 'Opening ' + config.label + ' Task...';
+      }
+      if (status && status.agentName) {
+        return 'Handing Off To ' + status.agentName + '...';
+      }
+      return 'Creating ' + config.label + '...';
+    }
+
+    if (status && status.taskId) {
+      return 'Open ' + config.label + ' Task';
+    }
+    if (status && status.agentName) {
+      return 'Handoff To ' + status.agentName;
+    }
+    return 'Create ' + config.label + ' + Handoff';
+  }
+
+  async function findPlanningSpecialistTask(planningState, specialistKey, agentName) {
+    if (!planningState || !specialistKey) return null;
+
+    var status = planningState.specialistStatuses[specialistKey] || null;
+    if (status && status.taskId) {
+      var statusTask = findWorkspaceDetailTaskById(status.taskId);
+      if (statusTask) return statusTask;
+      try {
+        var fetchedStatusTask = await fetchWorkspaceTaskRecord(status.taskId);
+        if (fetchedStatusTask && fetchedStatusTask.id) {
+          syncUpdatedTaskIntoWorkspaceDetail(fetchedStatusTask);
+          return fetchedStatusTask;
+        }
+      } catch (_error) {
+        // fall through to workspace search
+      }
+    }
+
+    var mainTaskId = String(planningState.mainTask && planningState.mainTask.id || '').trim();
+    if (!mainTaskId || !window.workspaceDetail || !Array.isArray(window.workspaceDetail.tasks)) {
+      return null;
+    }
+
+    var targetAgent = normalizeToken(agentName || status && status.agentName || '');
+    for (var i = 0; i < window.workspaceDetail.tasks.length; i++) {
+      var task = window.workspaceDetail.tasks[i];
+      if (!task || String(task.parent_task_id || '').trim() !== mainTaskId) continue;
+
+      var contextKey = normalizeToken(task.context && task.context.planning_specialist_key);
+      if (contextKey && contextKey === normalizeToken(specialistKey)) {
+        return task;
+      }
+      if (targetAgent && normalizeToken(task.to) === targetAgent) {
+        return task;
+      }
+    }
+
+    return null;
+  }
+
+  async function ensurePlanningReviewSpecialistTask(planningState, mainTask, specialistKey, config, agentName) {
+    if (!planningState || !mainTask || !mainTask.id || !config || !agentName) {
+      throw new Error('Missing specialist task context');
+    }
+
+    var existingTask = await findPlanningSpecialistTask(planningState, specialistKey, agentName);
+    if (existingTask && existingTask.id) {
+      updatePlanningSpecialistStatus(planningState, specialistKey, {
+        status: 'task_ready',
+        agentName: agentName,
+        taskId: String(existingTask.id || '').trim(),
+        taskStatus: String(existingTask.status || '').trim(),
+        taskDescription: String(existingTask.description || '').trim()
+      });
+      return existingTask;
+    }
+
+    var workspaceId = hasWorkspaceRouteContext(planningState.routeContext)
+      ? String(planningState.routeContext.workspace_id || '').trim()
+      : '';
+    if (!workspaceId) {
+      throw new Error('Workspace context is required to hand off to a specialist');
+    }
+
+    var createdResponse = await createWorkspaceTaskRecord(workspaceId, {
+      from: String(planningState.agentLabel || '').trim(),
+      to: String(agentName || '').trim(),
+      description: buildPlanningSpecialistTaskDescription(planningState, config),
+      details: buildPlanningSpecialistTaskDetails(planningState, config, agentName),
+      parent_task_id: String(mainTask.id || '').trim(),
+      subtask_index: Number.isFinite(Number(config.subtaskIndex)) ? Number(config.subtaskIndex) : undefined
+    });
+    var createdTask = createdResponse && createdResponse.task ? createdResponse.task : createdResponse;
+    if (!createdTask || !createdTask.id) {
+      throw new Error('Failed to create the specialist task');
+    }
+
+    syncCreatedTaskIntoWorkspaceDetail(createdTask);
+
+    var updatedTask = await updateWorkspaceTaskRecord(createdTask.id, {
+      context: buildPlanningSpecialistTaskContext(planningState, specialistKey, config, agentName, mainTask.id)
+    });
+    syncUpdatedTaskIntoWorkspaceDetail(updatedTask);
+    await refreshWorkspaceDetailTaskPanels();
+
+    updatePlanningSpecialistStatus(planningState, specialistKey, {
+      status: 'task_ready',
+      agentName: agentName,
+      taskId: String(updatedTask.id || '').trim(),
+      taskStatus: String(updatedTask.status || '').trim(),
+      taskDescription: String(updatedTask.description || '').trim()
+    });
+
+    return updatedTask;
+  }
+
+  async function openPlanningSpecialistTask(task, routeContext) {
+    if (!task || !task.id) {
+      throw new Error('Specialist task is missing');
+    }
+
+    var latestTask = task;
+    try {
+      var fetchedTask = await fetchWorkspaceTaskRecord(task.id);
+      if (fetchedTask && fetchedTask.id) {
+        latestTask = fetchedTask;
+        syncUpdatedTaskIntoWorkspaceDetail(fetchedTask);
+      }
+    } catch (_error) {
+      // Keep the local task object if the refresh fails.
+    }
+
+    var detail = window.workspaceDetail;
+    var targetWorkspaceId = String(
+      routeContext && routeContext.workspace_id ||
+      latestTask.workspace_id ||
+      latestTask.folder_id ||
+      ''
+    ).trim();
+    var detailWorkspaceId = String(detail && (detail.workspaceId || detail.workspace && detail.workspace.id) || '').trim();
+    var canUseWorkspaceDetail = Boolean(
+      detail &&
+      (!targetWorkspaceId || !detailWorkspaceId || targetWorkspaceId === detailWorkspaceId)
+    );
+
+    await dismissHomeAssistantThinkingModalForTaskLaunch();
+
+    try {
+      if (canUseWorkspaceDetail) {
+        var detailTask = findWorkspaceDetailTaskById(latestTask.id) || latestTask;
+        var humanLoop = detailTask.context && detailTask.context.human_loop;
+        var blocked = humanLoop && String(humanLoop.state || '').trim().toLowerCase() === 'blocked';
+        var normalizedStatus = String(detailTask.status || '').trim().toLowerCase();
+
+        if (blocked && typeof detail.openTaskAssistModal === 'function') {
+          detail.openTaskAssistModal(detailTask.id);
+          return detailTask;
+        }
+        if ((normalizedStatus === 'completed' || normalizedStatus === 'failed' || normalizedStatus === 'cancelled' || normalizedStatus === 'timeout') &&
+            typeof detail.showTaskResult === 'function') {
+          detail.showTaskResult(detailTask.id);
+          return detailTask;
+        }
+        if (normalizedStatus === 'in_progress' && typeof detail.openTaskExecutionModal === 'function') {
+          detail.openTaskExecutionModal(detailTask);
+          if (typeof detail.startExecutionMonitor === 'function') {
+            detail.startExecutionMonitor(detailTask.id);
+          }
+          return detailTask;
+        }
+        if (typeof detail.executeTask === 'function') {
+          await detail.executeTask(detailTask.id, { skipConfirm: true });
+          return findWorkspaceDetailTaskById(detailTask.id) || detailTask;
+        }
+      }
+
+      var fallbackStatus = String(latestTask.status || '').trim().toLowerCase();
+      if (!fallbackStatus || fallbackStatus === 'pending' || fallbackStatus === 'assigned') {
+        await executeWorkspaceTaskRecord(latestTask.id);
+      }
+      return latestTask;
+    } catch (error) {
+      openHomeAssistantThinkingModal();
+      throw error;
+    }
   }
 
   async function addPlanningReviewSpecialist(specialistKey) {
@@ -1990,16 +2434,21 @@
     if (!planningState || !config) return;
 
     var existingStatus = planningState.specialistStatuses[specialistKey];
-    if (existingStatus && existingStatus.status === 'added' && existingStatus.agentName) {
-      await openWorkspaceSpecialistChat(existingStatus.agentName, planningState.routeContext);
-      return;
-    }
     if (planningState.specialistBusy) return;
 
     planningState.specialistBusy = specialistKey;
     renderHomeAssistantPlanning();
 
     try {
+      if (existingStatus && existingStatus.taskId) {
+        var existingTask = await findPlanningSpecialistTask(planningState, specialistKey, existingStatus.agentName);
+        if (existingTask && existingTask.id) {
+          await openPlanningSpecialistTask(existingTask, planningState.routeContext);
+          clearHomeAssistantTaskLaunchState();
+          return;
+        }
+      }
+
       var agents = await fetchAgentsForMatching();
       var existingAgent = findExactAgentByName(agents, config.agentName);
       var agentName = existingAgent
@@ -2010,24 +2459,36 @@
       if (!addedToWorkspace) {
         throw new Error('Failed to attach specialist to workspace');
       }
-      planningState.specialistStatuses[specialistKey] = {
-        status: 'added',
+
+      updatePlanningSpecialistStatus(planningState, specialistKey, {
+        status: 'ready',
         agentName: agentName,
         created: !existingAgent
-      };
+      });
+
+      var mainTask = await preparePlanningReviewMainTaskForExecution(planningState);
+      var specialistTask = await ensurePlanningReviewSpecialistTask(
+        planningState,
+        mainTask,
+        specialistKey,
+        config,
+        agentName
+      );
 
       appendHomeAssistantMessage(
         'assistant',
-        (existingAgent ? 'Added ' : 'Created and added ') + '"' + agentName + '" to this workspace.'
+        (existingAgent ? 'Added ' : 'Created and added ') + '"' + agentName + '" to this workspace, then handed off a specialist task.'
       );
-      setHomeAssistantRoutingSummary(config.label, '"' + agentName + '" is now available in this workspace.');
+      setHomeAssistantRoutingSummary(config.label, '"' + agentName + '" is handling a workspace task now.');
+      await openPlanningSpecialistTask(specialistTask, planningState.routeContext);
+      clearHomeAssistantTaskLaunchState();
     } catch (error) {
       dashLog.debug('Failed to add planning specialist', {
         specialistKey: specialistKey,
         error: error && error.message || error
       });
-      appendHomeAssistantMessage('assistant', 'I could not add "' + config.label + '" right now.');
-      setHomeAssistantRoutingSummary(config.label, 'Could not add this specialist right now.');
+      appendHomeAssistantMessage('assistant', 'I could not hand off to "' + config.label + '" right now.');
+      setHomeAssistantRoutingSummary(config.label, 'Could not create the specialist handoff task right now.');
     } finally {
       planningState.specialistBusy = '';
       renderHomeAssistantPlanning();
@@ -2060,30 +2521,23 @@
 
       planningState.mainTaskCreating = false;
       renderHomeAssistantPlanning();
-      setHomeAssistantBusy(true, 'Sending Plan...');
+      setHomeAssistantBusy(true, 'Starting Task...');
       setHomeAssistantRoutingSummary(
         planningState.agentLabel,
-        'Continuing with the workspace manager using the reviewed intake summary.'
+        isTravelPlanningReviewState(planningState)
+          ? 'Starting the workspace task with the workspace manager using the reviewed intake summary.'
+          : 'Starting the workspace task using the reviewed intake summary.'
       );
 
-      await openWorkspaceAssistantForPrompt(
-        planningState.prompt,
-        planningState.routeContext,
-        planningState.intent,
-        {
-          dispatchPrompt: planningState.dispatchPrompt,
-          workflowResponse: planningState.workflowResponse || null,
-          linkedTask: planningState.mainTask || null,
-          preservePlanningReview: true,
-          reuseExistingSession: true
-        }
-      );
+      var preparedTask = await preparePlanningReviewMainTaskForExecution(planningState);
+      await launchWorkspaceTaskExecutionFromHomeAssistant(preparedTask, planningState.routeContext);
+      clearHomeAssistantTaskLaunchState();
     } catch (error) {
       dashLog.debug('Planning review handoff failed', { error: error && error.message || error });
       planningState.mainTaskCreating = false;
       if (planningState.mainTask && planningState.mainTask.id) {
-        appendHomeAssistantMessage('assistant', 'I could not continue with the workspace manager right now.');
-        setHomeAssistantRoutingSummary('Planning Review', 'Could not continue with the workspace manager right now.');
+        appendHomeAssistantMessage('assistant', 'I could not start the workspace task right now.');
+        setHomeAssistantRoutingSummary('Planning Review', 'Could not start the workspace task right now.');
       } else {
         appendHomeAssistantMessage('assistant', 'I could not add the main workspace task right now.');
         setHomeAssistantRoutingSummary('Planning Review', 'Could not add the main workspace task right now.');
@@ -2363,6 +2817,7 @@
     }
 
     if (planningState.kind === 'planning_review') {
+      var specialistFirstReview = isTravelPlanningReviewState(planningState);
       var isReviewBusy = Boolean(
         homeAssistantState.busy ||
         planningState.noteSaving ||
@@ -2386,9 +2841,15 @@
 
       var reviewSubtitle = document.createElement('p');
       reviewSubtitle.className = 'home-assistant-planning-subtitle';
-      reviewSubtitle.textContent = planningState.mainTask && planningState.mainTask.description
-        ? 'Review the summary, save it to a note if you want, and continue when you are ready. The main task is already in the workspace.'
-        : 'Review the summary, save it to a note if you want, and continue when you are ready. The main task will be added to the workspace before subtasks begin.';
+      if (specialistFirstReview) {
+        reviewSubtitle.textContent = planningState.mainTask && planningState.mainTask.description
+          ? 'Review the intake summary, then add the right specialist to the workspace. Keep it with the workspace manager only if you want a lightweight follow-up.'
+          : 'Review the intake summary, then add the right specialist to the workspace. The main task will be added before specialist work begins.';
+      } else {
+        reviewSubtitle.textContent = planningState.mainTask && planningState.mainTask.description
+          ? 'Review the summary, save it to a note if you want, and continue when you are ready. The main task is already in the workspace.'
+          : 'Review the summary, save it to a note if you want, and continue when you are ready. The main task will be added to the workspace before subtasks begin.';
+      }
       reviewCard.appendChild(reviewSubtitle);
 
       var reviewSummary = document.createElement('div');
@@ -2429,13 +2890,17 @@
 
       var continueButton = document.createElement('button');
       continueButton.type = 'button';
-      continueButton.className = 'modern-btn modern-btn-primary';
+      continueButton.className = specialistFirstReview
+        ? 'modern-btn modern-btn-secondary'
+        : 'modern-btn modern-btn-primary';
       continueButton.disabled = isReviewBusy;
       continueButton.textContent = planningState.mainTaskCreating
         ? 'Adding Main Task...'
         : planningState.continuing
         ? 'Continuing...'
-        : ('Continue With ' + planningState.agentLabel);
+        : specialistFirstReview
+        ? ('Keep Task With ' + planningState.agentLabel)
+        : ('Start Task With ' + planningState.agentLabel);
       continueButton.addEventListener('click', function () {
         continuePlanningReviewWithManager();
       });
@@ -2445,7 +2910,9 @@
       var specialistHelp = document.createElement('div');
       specialistHelp.className = 'home-assistant-planning-help';
       specialistHelp.style.marginTop = '0.35rem';
-      specialistHelp.textContent = 'Add specialists to the workspace now, or open them after they are added.';
+      specialistHelp.textContent = specialistFirstReview
+        ? 'Recommended: hand off full planning to a specialist task now. Use the workspace manager only for lighter follow-ups.'
+        : 'Create specialist tasks now, or open an existing specialist task.';
       reviewCard.appendChild(specialistHelp);
 
       var specialistActions = document.createElement('div');
@@ -2453,19 +2920,16 @@
 
       Object.keys(HOME_PLANNING_SPECIALISTS).forEach(function (specialistKey) {
         var config = HOME_PLANNING_SPECIALISTS[specialistKey];
-        var status = planningState.specialistStatuses[specialistKey] || null;
         var specialistButton = document.createElement('button');
         specialistButton.type = 'button';
-        specialistButton.className = 'modern-btn modern-btn-secondary';
+        specialistButton.className = specialistFirstReview && specialistKey === 'travel_itinerary'
+          ? 'modern-btn modern-btn-primary'
+          : 'modern-btn modern-btn-secondary';
         specialistButton.disabled = isReviewBusy && planningState.specialistBusy !== specialistKey;
         if (planningState.specialistBusy === specialistKey) {
           specialistButton.disabled = true;
-          specialistButton.textContent = 'Adding ' + config.label + '...';
-        } else if (status && status.status === 'added' && status.agentName) {
-          specialistButton.textContent = 'Open ' + status.agentName;
-        } else {
-          specialistButton.textContent = 'Add ' + config.label;
         }
+        specialistButton.textContent = getPlanningSpecialistButtonLabel(planningState, specialistKey, config);
         specialistButton.addEventListener('click', function () {
           addPlanningReviewSpecialist(specialistKey);
         });
@@ -3666,24 +4130,6 @@
 
     var direct = String(workspaceData.entry_agent_name || '').trim();
     if (direct) return direct;
-
-    var instances = Array.isArray(workspaceData.agent_instances) ? workspaceData.agent_instances : [];
-    for (var i = 0; i < instances.length; i++) {
-      var instance = instances[i];
-      if (instance && instance.entry_point && String(instance.name || '').trim()) {
-        return String(instance.name || '').trim();
-      }
-    }
-    for (var j = 0; j < instances.length; j++) {
-      var fallbackInstance = String(instances[j] && instances[j].name || '').trim();
-      if (fallbackInstance) return fallbackInstance;
-    }
-
-    var agents = Array.isArray(workspaceData.agents) ? workspaceData.agents : [];
-    for (var k = 0; k < agents.length; k++) {
-      var fallbackAgent = String(agents[k] || '').trim();
-      if (fallbackAgent) return fallbackAgent;
-    }
 
     return '';
   }
@@ -5912,6 +6358,7 @@
     var responseData = assistantSessionResult.responseData || null;
     var workflowStep = responseData && responseData.workflow_step ? responseData.workflow_step : null;
     var planningForm = responseData && responseData.planning_form ? responseData.planning_form : null;
+    var taskAssistHandoffTask = null;
     if (assistantSessionResult.rawToolPayload) {
       clearHomeAssistantPlanning();
       homeAssistantState.inlineReplyState = null;
@@ -5987,7 +6434,7 @@
       }
       if (inlineReplyState && inlineReplyState.linkedTask && inlineReplyState.linkedTask.id) {
         try {
-          await persistPlanningSubtaskToTask(inlineReplyState);
+          taskAssistHandoffTask = await persistPlanningSubtaskToTask(inlineReplyState);
         } catch (taskContextError) {
           dashLog.debug('Failed to persist planning subtask onto task', {
             error: taskContextError && taskContextError.message || taskContextError
@@ -6031,6 +6478,9 @@
         onClick: function () { focusHomeAssistantInput(); }
       }
     ]);
+    if (taskAssistHandoffTask) {
+      handoffPlanningSubtaskToWorkspaceTaskModal(taskAssistHandoffTask, sessionRouteContext);
+    }
   }
 
   function normalizeHomeAssistantDependencyResolution(data) {
@@ -6053,6 +6503,185 @@
     if (message.indexOf('timed out') !== -1) return true;
     if (message.indexOf('timeout') !== -1) return true;
     return false;
+  }
+
+  function normalizeWorkspaceManagerErrorMessage(error) {
+    if (!error) return '';
+    var direct = String(error && error.message || '').trim();
+    if (direct) return direct;
+    var fallback = String(error && error.error || '').trim();
+    return fallback;
+  }
+
+  function buildWorkspaceManagerError(error, metadata) {
+    var wrapped = error instanceof Error
+      ? error
+      : new Error(String(error || (metadata && metadata.message) || 'Workspace manager request failed'));
+    if (metadata && metadata.stage) wrapped.homeAssistantStage = String(metadata.stage);
+    if (metadata && metadata.message) wrapped.homeAssistantUserMessage = String(metadata.message);
+    if (metadata && metadata.requestUrl && !wrapped.url) wrapped.url = String(metadata.requestUrl);
+    return wrapped;
+  }
+
+  async function buildWorkspaceManagerResponseError(response, stage, message) {
+    var detail = '';
+    try {
+      detail = await response.text();
+    } catch (_error) {
+      detail = '';
+    }
+    var err = new Error(detail || response.statusText || message || 'Request failed');
+    err.status = Number(response && response.status || 0);
+    err.url = String(response && response.url || '').trim();
+    return buildWorkspaceManagerError(err, {
+      stage: stage,
+      message: message,
+      requestUrl: err.url
+    });
+  }
+
+  function formatWorkspaceManagerFailure(error, workspaceManagerLabel) {
+    var label = String(workspaceManagerLabel || 'Workspace Manager').trim() || 'Workspace Manager';
+    var stage = normalizeToken(error && error.homeAssistantStage || error && error.stage);
+    var status = Number(error && error.status || 0);
+    var url = String(error && error.url || '').trim();
+    var rawMessage = normalizeWorkspaceManagerErrorMessage(error);
+    var lowerMessage = rawMessage.toLowerCase();
+    var browserOffline = typeof navigator !== 'undefined' && navigator.onLine === false;
+    var networkFailure = browserOffline ||
+      status === 0 ||
+      lowerMessage.indexOf('network error') !== -1 ||
+      lowerMessage.indexOf('failed to fetch') !== -1 ||
+      lowerMessage.indexOf('load failed') !== -1;
+    var detailParts = [];
+    if (status > 0) {
+      detailParts.push('HTTP ' + status + (url ? ' from ' + url : ''));
+    } else if (url) {
+      detailParts.push(url);
+    }
+    if (rawMessage) {
+      detailParts.push(rawMessage);
+    }
+    var detail = detailParts.join(' — ');
+
+    if (stage === 'client_session_manager_missing') {
+      return {
+        heading: label + ' Session UI Unavailable',
+        title: 'Session UI Unavailable',
+        text: 'This page could not open a workspace session in the browser.',
+        detail: detail || 'Session manager was not initialized in this view.',
+        conversationSummary: 'Open this only if you want the original prompt and browser-side error details.',
+        state: 'error'
+      };
+    }
+
+    if (stage === 'workspace_entry_session_create_failed' || stage === 'workspace_session_missing') {
+      return {
+        heading: label + ' Session Failed',
+        title: 'Workspace Session Failed',
+        text: 'Could not create or reuse the workspace manager session for this workspace.',
+        detail: detail || 'The browser did not get a usable workspace session back.',
+        conversationSummary: 'Open this only if you want the original prompt and session-creation error details.',
+        state: 'error'
+      };
+    }
+
+    if (stage === 'assistant_session_create_failed') {
+      return {
+        heading: 'Assistant Session Failed',
+        title: 'Assistant Session Failed',
+        text: 'Could not create the fallback assistant session for this workspace request.',
+        detail: detail || 'The browser did not get a usable assistant session back.',
+        conversationSummary: 'Open this only if you want the original prompt and assistant-session error details.',
+        state: 'error'
+      };
+    }
+
+    if (stage === 'inline_api_unavailable') {
+      return {
+        heading: label + ' Inline API Unavailable',
+        title: 'Inline API Unavailable',
+        text: 'This browser view could not send the inline workspace-manager request.',
+        detail: detail || 'The shared API client was not available in this page context.',
+        conversationSummary: 'Open this only if you want the original prompt and client-side availability details.',
+        state: 'error'
+      };
+    }
+
+    if (networkFailure) {
+      return {
+        heading: 'Connection Failed',
+        title: 'Connection Failed',
+        text: 'Your browser could not reach the server while sending the workspace-manager request.',
+        detail: detail || (browserOffline ? 'Browser appears to be offline.' : 'Network request failed before the server replied.'),
+        conversationSummary: 'Open this only if you want the original prompt and connection error details.',
+        state: 'error'
+      };
+    }
+
+    if (stage === 'inline_chat_failed' && status >= 500) {
+      return {
+        heading: label + ' Server Error',
+        title: 'Server Error',
+        text: 'The server returned an error while running the workspace manager inline.',
+        detail: detail || 'The inline /api/chat request failed on the server.',
+        conversationSummary: 'Open this only if you want the original prompt and server error details.',
+        state: 'error'
+      };
+    }
+
+    if (stage === 'inline_chat_failed' && status >= 400) {
+      return {
+        heading: label + ' Request Rejected',
+        title: 'Request Rejected',
+        text: 'The server rejected the inline workspace-manager request.',
+        detail: detail || 'The inline /api/chat request returned a client error.',
+        conversationSummary: 'Open this only if you want the original prompt and request error details.',
+        state: 'error'
+      };
+    }
+
+    if (stage === 'inline_chat_failed') {
+      return {
+        heading: label + ' Inline Request Failed',
+        title: 'Inline Request Failed',
+        text: 'The workspace session opened, but the inline manager request did not complete.',
+        detail: detail || 'The inline /api/chat request failed before a usable reply arrived.',
+        conversationSummary: 'Open this only if you want the original prompt and inline-request error details.',
+        state: 'error'
+      };
+    }
+
+    if (status >= 500) {
+      return {
+        heading: label + ' Server Error',
+        title: 'Server Error',
+        text: 'The server returned an error before the workspace-manager flow completed.',
+        detail: detail || 'A server-side error interrupted the request.',
+        conversationSummary: 'Open this only if you want the original prompt and server error details.',
+        state: 'error'
+      };
+    }
+
+    if (status >= 400) {
+      return {
+        heading: label + ' Request Failed',
+        title: 'Request Failed',
+        text: 'The request was rejected before the workspace-manager flow completed.',
+        detail: detail || 'A client-side request error interrupted the flow.',
+        conversationSummary: 'Open this only if you want the original prompt and request error details.',
+        state: 'error'
+      };
+    }
+
+    return {
+      heading: label + ' Request Failed',
+      title: 'Request Failed',
+      text: 'The workspace-manager flow did not complete.',
+      detail: detail || 'An unexpected error interrupted the inline handoff.',
+      conversationSummary: 'Open this only if you want the original prompt and error details.',
+      state: 'error'
+    };
   }
 
   function renderHomeAssistantDependencyResolution(data, prompt, routeContext, intent, options) {
@@ -6676,7 +7305,12 @@
 
   async function openOrCreateWorkspaceAssistantSession(routeContext, prompt, options) {
     var manager = window.sessionManager;
-    if (!manager) return null;
+    if (!manager) {
+      throw buildWorkspaceManagerError(
+        new Error('Session manager is unavailable in this browser view.'),
+        { stage: 'client_session_manager_missing' }
+      );
+    }
 
     var normalizedContext = normalizeHomeRouteContext(routeContext);
     var workspaceId = hasWorkspaceRouteContext(normalizedContext) ? String(normalizedContext.workspace_id).trim() : '';
@@ -6705,7 +7339,14 @@
 
       var entrySession = null;
       if (typeof manager.createSessionWithAgentInFolder === 'function') {
-        entrySession = await manager.createSessionWithAgentInFolder(entryAgentName, workspaceId, false);
+        try {
+          entrySession = await manager.createSessionWithAgentInFolder(entryAgentName, workspaceId, false);
+        } catch (error) {
+          throw buildWorkspaceManagerError(error, {
+            stage: 'workspace_entry_session_create_failed',
+            message: 'Could not create a workspace manager session.'
+          });
+        }
       } else {
         var entryResponse = await fetch('/api/sessions', {
           method: 'POST',
@@ -6716,23 +7357,51 @@
             agent_name: entryAgentName
           })
         });
-        if (!entryResponse.ok) throw new Error('Failed to create workspace entry session');
+        if (!entryResponse.ok) {
+          throw await buildWorkspaceManagerResponseError(
+            entryResponse,
+            'workspace_entry_session_create_failed',
+            'Could not create a workspace manager session.'
+          );
+        }
         entrySession = await entryResponse.json();
         if (entrySession && entrySession.id && manager && typeof manager.switchToSession === 'function') {
           await manager.switchToSession(entrySession.id, false);
         }
       }
 
-      if (!entrySession) return null;
+      if (!entrySession) {
+        throw buildWorkspaceManagerError(
+          new Error('Workspace manager session returned no session object.'),
+          {
+            stage: 'workspace_entry_session_create_failed',
+            message: 'Could not create a workspace manager session.'
+          }
+        );
+      }
       return { session: entrySession.session || entrySession, reused: false, entryAgentName: entryAgentName };
     }
 
     var title = truncateText(String(prompt || '').trim(), 50) || 'Assistant';
     var created = null;
     if (typeof manager.createAssistantSession === 'function') {
-      created = await manager.createAssistantSession(workspaceId, title, false);
+      try {
+        created = await manager.createAssistantSession(workspaceId, title, false);
+      } catch (error) {
+        throw buildWorkspaceManagerError(error, {
+          stage: 'assistant_session_create_failed',
+          message: 'Could not create the fallback workspace assistant session.'
+        });
+      }
     } else if (window.workspaceDetail && typeof window.workspaceDetail.createSimpleSession === 'function' && workspaceId) {
-      created = await window.workspaceDetail.createSimpleSession(false);
+      try {
+        created = await window.workspaceDetail.createSimpleSession(false);
+      } catch (error) {
+        throw buildWorkspaceManagerError(error, {
+          stage: 'assistant_session_create_failed',
+          message: 'Could not create the fallback workspace assistant session.'
+        });
+      }
     } else {
       var response = await fetch('/api/sessions', {
         method: 'POST',
@@ -6742,14 +7411,28 @@
           title: title
         })
       });
-      if (!response.ok) throw new Error('Failed to create assistant session');
+      if (!response.ok) {
+        throw await buildWorkspaceManagerResponseError(
+          response,
+          'assistant_session_create_failed',
+          'Could not create the fallback workspace assistant session.'
+        );
+      }
       created = await response.json();
       if (created && created.id && manager && typeof manager.switchToSession === 'function') {
         await manager.switchToSession(created.id, false);
       }
     }
 
-    if (!created) return null;
+    if (!created) {
+      throw buildWorkspaceManagerError(
+        new Error('Assistant session returned no session object.'),
+        {
+          stage: 'assistant_session_create_failed',
+          message: 'Could not create the fallback workspace assistant session.'
+        }
+      );
+    }
     return { session: created.session || created, reused: false };
   }
 
@@ -6776,8 +7459,17 @@
 
   async function runWorkspaceAssistantInline(prompt, routeContext, intent, options) {
     var result = await openOrCreateWorkspaceAssistantSession(routeContext, prompt, options);
-    if (!result || !result.session || typeof API === 'undefined' || typeof API.post !== 'function') {
-      return result;
+    if (!result || !result.session) {
+      throw buildWorkspaceManagerError(
+        new Error('Workspace manager session could not be opened.'),
+        { stage: 'workspace_session_missing' }
+      );
+    }
+    if (typeof API === 'undefined' || typeof API.post !== 'function') {
+      throw buildWorkspaceManagerError(
+        new Error('Inline chat API is unavailable in this browser view.'),
+        { stage: 'inline_api_unavailable' }
+      );
     }
 
     var session = result.session;
@@ -6802,13 +7494,22 @@
       payload.workflow_response = workflowResponse;
     }
 
-    var data = await API.post('/api/chat', payload, {
-      timeout: HOME_ASSISTANT_WORKSPACE_INLINE_TIMEOUT_MS,
-      headers: {
-        'Content-Type': 'application/json',
-        'X-Session-ID': String(session.id)
-      }
-    });
+    var data;
+    try {
+      data = await API.post('/api/chat', payload, {
+        timeout: HOME_ASSISTANT_WORKSPACE_INLINE_TIMEOUT_MS,
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Session-ID': String(session.id)
+        }
+      });
+    } catch (error) {
+      throw buildWorkspaceManagerError(error, {
+        stage: 'inline_chat_failed',
+        message: 'The workspace manager session opened, but the inline request failed.',
+        requestUrl: '/api/chat'
+      });
+    }
 
     var responseText = String(data && data.response || '').trim();
     var rawToolPayload = isLikelyHomeAssistantRawToolPayload(responseText, data);
@@ -7707,6 +8408,64 @@
     return await response.json();
   }
 
+  async function updateWorkspaceTaskRecord(taskId, payload) {
+    var normalizedTaskId = String(taskId || '').trim();
+    if (!normalizedTaskId) {
+      throw new Error('Task ID is required');
+    }
+
+    if (typeof API !== 'undefined' && typeof API.put === 'function') {
+      return await API.put('/api/orchestration/tasks/' + encodeURIComponent(normalizedTaskId), payload || {});
+    }
+
+    var response = await fetch('/api/orchestration/tasks/' + encodeURIComponent(normalizedTaskId), {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload || {})
+    });
+    if (!response.ok) {
+      var text = '';
+      try {
+        text = await response.text();
+      } catch (_error) {
+        text = '';
+      }
+      throw new Error(text || 'Failed to update task');
+    }
+    return await response.json();
+  }
+
+  async function executeWorkspaceTaskRecord(taskId) {
+    var normalizedTaskId = String(taskId || '').trim();
+    if (!normalizedTaskId) {
+      throw new Error('Task ID is required');
+    }
+
+    if (typeof API !== 'undefined' && typeof API.post === 'function') {
+      return await API.post('/api/orchestration/tasks/execute', {
+        task_id: normalizedTaskId
+      });
+    }
+
+    var response = await fetch('/api/orchestration/tasks/execute', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        task_id: normalizedTaskId
+      })
+    });
+    if (!response.ok) {
+      var text = '';
+      try {
+        text = await response.text();
+      } catch (_error) {
+        text = '';
+      }
+      throw new Error(text || 'Failed to execute task');
+    }
+    return await response.json();
+  }
+
   async function refreshWorkspaceDetailTaskPanels() {
     if (!window.workspaceDetail) return;
     var refreshCalls = [];
@@ -7797,6 +8556,306 @@
     }
   }
 
+  function dismissHomeAssistantThinkingModalForTaskLaunch() {
+    var els = getHomeAssistantElements();
+    var modalElement = els.thinkingModal;
+    if (!modalElement || !isHomeAssistantThinkingModalVisible()) {
+      return Promise.resolve();
+    }
+
+    return new Promise(function (resolve) {
+      var settled = false;
+      var fallbackTimer = null;
+
+      function finalize() {
+        if (settled) return;
+        settled = true;
+        if (fallbackTimer) {
+          window.clearTimeout(fallbackTimer);
+          fallbackTimer = null;
+        }
+        modalElement.removeEventListener('hidden.bs.modal', onHidden, true);
+        resolve();
+      }
+
+      function onHidden() {
+        finalize();
+      }
+
+      modalElement.addEventListener('hidden.bs.modal', onHidden, true);
+      fallbackTimer = window.setTimeout(finalize, 500);
+      closeHomeAssistantThinkingModal({ force: true });
+    });
+  }
+
+  function clearHomeAssistantTaskLaunchState() {
+    setHomeAssistantBusy(false);
+    renderHomeAssistantActions([]);
+    clearHomeAssistantInlineReply();
+    clearHomeAssistantPlanning();
+    setHomeAssistantRoutingSummary('', '');
+  }
+
+  async function preparePlanningReviewMainTaskForExecution(planningState) {
+    var mainTask = await ensurePlanningReviewMainTask(planningState);
+    if (!mainTask || !mainTask.id) {
+      throw new Error('Failed to create the main workspace task');
+    }
+
+    var updatedTask = await updateWorkspaceTaskRecord(mainTask.id, {
+      details: buildPlanningTaskExecutionDetails(planningState),
+      context: buildPlanningReviewTaskContext(planningState)
+    });
+    syncUpdatedTaskIntoWorkspaceDetail(updatedTask);
+    planningState.mainTask = updatedTask;
+    return updatedTask;
+  }
+
+  async function launchWorkspaceTaskExecutionFromHomeAssistant(task, routeContext) {
+    if (!task || !task.id) {
+      throw new Error('Workspace task is missing');
+    }
+
+    var detail = window.workspaceDetail;
+    var targetWorkspaceId = String(
+      routeContext && routeContext.workspace_id ||
+      task.workspace_id ||
+      task.folder_id ||
+      ''
+    ).trim();
+    var detailWorkspaceId = String(detail && (detail.workspaceId || detail.workspace && detail.workspace.id) || '').trim();
+    var canUseWorkspaceDetail = Boolean(
+      detail &&
+      typeof detail.executeTask === 'function' &&
+      (!targetWorkspaceId || !detailWorkspaceId || targetWorkspaceId === detailWorkspaceId)
+    );
+
+    await dismissHomeAssistantThinkingModalForTaskLaunch();
+
+    try {
+      if (canUseWorkspaceDetail) {
+        await detail.executeTask(task.id, { skipConfirm: true });
+        return;
+      }
+      await executeWorkspaceTaskRecord(task.id);
+    } catch (error) {
+      openHomeAssistantThinkingModal();
+      throw error;
+    }
+  }
+
+  function showWorkspaceSpecialistCreationPrompt(prompt, routeContext, intent, config) {
+    if (!config) return;
+
+    appendHomeAssistantMessage(
+      'assistant',
+      '"' + config.label + '" should own this travel-planning task. Create it first, then hand the task off there?'
+    );
+    setHomeAssistantRoutingSummary(
+      config.label,
+      'Create the travel specialist, then start the workspace task there.'
+    );
+    renderHomeAssistantActions([
+      {
+        label: 'Create ' + config.label + ' + Handoff',
+        variant: 'primary',
+        onClick: function () {
+          routeWorkspacePromptToPlanningSpecialist(prompt, routeContext, intent, {
+            config: config,
+            allowCreate: true
+          });
+        }
+      },
+      {
+        label: 'Keep With ' + getWorkspaceHomeAssistantDisplayName(),
+        variant: 'secondary',
+        onClick: function () { openWorkspaceAssistantForPrompt(prompt, routeContext, intent); }
+      },
+      {
+        label: 'Ask Another Task',
+        variant: 'secondary',
+        onClick: function () { focusHomeAssistantInput(); }
+      }
+    ]);
+  }
+
+  async function routeWorkspacePromptToPlanningSpecialist(prompt, routeContext, intent, options) {
+    var normalizedContext = normalizeHomeRouteContext(routeContext);
+    var workspaceId = hasWorkspaceRouteContext(normalizedContext) ? String(normalizedContext.workspace_id || '').trim() : '';
+    if (!workspaceId) return false;
+
+    var config = options && options.config ? options.config : detectWorkspacePlanningSpecialist(prompt, intent);
+    if (!config) return false;
+
+    var allowCreate = options && options.allowCreate === true;
+    var managerLabel = getWorkspaceHomeAssistantDisplayName();
+
+    setHomeAssistantBusy(true, allowCreate ? 'Creating Specialist...' : 'Routing Task...');
+    renderHomeAssistantActions([]);
+    appendHomeAssistantMessage(
+      'assistant',
+      allowCreate
+        ? 'Creating "' + config.label + '" and handing this task off there.'
+        : 'This looks like specialist-owned travel work. Routing it to "' + config.label + '" before execution starts.'
+    );
+    setHomeAssistantRoutingSummary(config.label, 'Preparing a specialist-owned workspace task.');
+
+    try {
+      var inventory = await fetchWorkspaceTaskAgentInventory(workspaceId);
+      var globalAgent = findExactAgentByName(inventory && inventory.allAgents, config.agentName);
+      if (!globalAgent && !allowCreate) {
+        showWorkspaceSpecialistCreationPrompt(prompt, normalizedContext, intent, config);
+        return true;
+      }
+
+      var agentName = globalAgent
+        ? (typeof globalAgent === 'string' ? globalAgent : globalAgent.name)
+        : await createPlanningSpecialistAgent(config, {
+          summaryText: String(prompt || '').trim(),
+          agentLabel: managerLabel
+        });
+
+      var workspaceAgent = findExactAgentByName(inventory && inventory.workspaceAgents, agentName);
+      if (!workspaceAgent) {
+        var added = await addAgentToWorkspaceIfNeeded(agentName, normalizedContext);
+        if (!added) {
+          throw new Error('Failed to attach specialist to workspace');
+        }
+      }
+
+      var createdResponse = await createWorkspaceTaskRecord(workspaceId, {
+        from: managerLabel,
+        to: String(agentName || '').trim(),
+        description: buildPlanningTaskDescriptionFromPrompt(prompt, config.taskTitle || config.label),
+        details: buildWorkspaceSpecialistTaskDetails(prompt, managerLabel, config, agentName)
+      });
+      var createdTask = createdResponse && createdResponse.task ? createdResponse.task : createdResponse;
+      if (!createdTask || !createdTask.id) {
+        throw new Error('Failed to create the specialist task');
+      }
+
+      syncCreatedTaskIntoWorkspaceDetail(createdTask);
+      var updatedTask = await updateWorkspaceTaskRecord(createdTask.id, {
+        context: buildWorkspaceSpecialistTaskContext(Object.assign({}, config, {
+          agentName: agentName
+        }), managerLabel)
+      });
+      syncUpdatedTaskIntoWorkspaceDetail(updatedTask);
+      await refreshWorkspaceDetailTaskPanels();
+
+      appendHomeAssistantMessage(
+        'assistant',
+        '"' + agentName + '" is handling this workspace task now.'
+      );
+      setHomeAssistantRoutingSummary(config.label, 'Task handed off to "' + agentName + '".');
+      await launchWorkspaceTaskExecutionFromHomeAssistant(updatedTask, normalizedContext);
+      clearHomeAssistantTaskLaunchState();
+      return true;
+    } catch (error) {
+      dashLog.debug('Failed to hand off workspace travel task to specialist', {
+        prompt: prompt,
+        specialist: config && config.key,
+        error: error && error.message || error
+      });
+      appendHomeAssistantMessage('assistant', 'I could not hand off this task to "' + config.label + '" right now.');
+      setHomeAssistantRoutingSummary(config.label, 'Could not create the specialist handoff right now.');
+      renderHomeAssistantActions([
+        {
+          label: 'Retry Specialist Handoff',
+          variant: 'primary',
+          onClick: function () {
+            routeWorkspacePromptToPlanningSpecialist(prompt, normalizedContext, intent, {
+              config: config,
+              allowCreate: allowCreate
+            });
+          }
+        },
+        {
+          label: 'Keep With ' + managerLabel,
+          variant: 'secondary',
+          onClick: function () { openWorkspaceAssistantForPrompt(prompt, normalizedContext, intent); }
+        },
+        {
+          label: 'Ask Another Task',
+          variant: 'secondary',
+          onClick: function () { focusHomeAssistantInput(); }
+        }
+      ]);
+      return true;
+    } finally {
+      setHomeAssistantBusy(false);
+    }
+  }
+
+  function handoffPlanningSubtaskToWorkspaceTaskModal(updatedTask, routeContext) {
+    if (!window.workspaceDetail || !updatedTask || !updatedTask.id) return false;
+
+    var detail = window.workspaceDetail;
+    if (typeof detail.openTaskAssistModal !== 'function') return false;
+
+    var targetWorkspaceId = String(
+      routeContext && routeContext.workspace_id ||
+      updatedTask.workspace_id ||
+      updatedTask.folder_id ||
+      ''
+    ).trim();
+    var detailWorkspaceId = String(detail.workspaceId || detail.workspace && detail.workspace.id || '').trim();
+    if (targetWorkspaceId && detailWorkspaceId && targetWorkspaceId !== detailWorkspaceId) {
+      return false;
+    }
+
+    var humanLoop = updatedTask.context &&
+      typeof updatedTask.context === 'object' &&
+      updatedTask.context.human_loop &&
+      typeof updatedTask.context.human_loop === 'object'
+      ? Object.assign({}, updatedTask.context.human_loop)
+      : null;
+    var eventData = humanLoop
+      ? Object.assign({ task_id: String(updatedTask.id), human_loop: humanLoop }, humanLoop)
+      : { task_id: String(updatedTask.id) };
+
+    function openTaskAssist() {
+      try {
+        detail.openTaskAssistModal(updatedTask.id, eventData);
+      } catch (error) {
+        dashLog.debug('Failed to hand off planning subtask to task assist modal', {
+          taskId: updatedTask.id,
+          error: error && error.message || error
+        });
+      }
+    }
+
+    var els = getHomeAssistantElements();
+    var modalElement = els.thinkingModal;
+    if (!modalElement || !isHomeAssistantThinkingModalVisible()) {
+      openTaskAssist();
+      return true;
+    }
+
+    var settled = false;
+    var fallbackTimer = null;
+
+    function finalizeOpen() {
+      if (settled) return;
+      settled = true;
+      if (fallbackTimer) {
+        window.clearTimeout(fallbackTimer);
+        fallbackTimer = null;
+      }
+      modalElement.removeEventListener('hidden.bs.modal', onHidden, true);
+      openTaskAssist();
+    }
+
+    function onHidden() {
+      finalizeOpen();
+    }
+
+    modalElement.addEventListener('hidden.bs.modal', onHidden, true);
+    fallbackTimer = window.setTimeout(finalizeOpen, 500);
+    closeHomeAssistantThinkingModal({ force: true });
+    return true;
+  }
+
   function buildPlanningTaskQuestion(replyState) {
     if (!replyState) return 'How should I continue this planning task?';
 
@@ -7834,6 +8893,7 @@
       reason: 'This planning task needs your input before it can continue.',
       question: buildPlanningTaskQuestion(replyState),
       agent_response: String(replyState.latestReplyText || '').trim(),
+      workflow_step: replyState.workflowStep || null,
       suggested_actions: ['continue_with_instruction', 'mark_failed'],
       updated_at: new Date().toISOString()
     };
@@ -8866,6 +9926,15 @@
     }
 
     if (inWorkspaceContext) {
+      var specialistHandoffHandled = await routeWorkspacePromptToPlanningSpecialist(
+        text,
+        routeContext,
+        homeAssistantState.pendingIntent
+      );
+      if (specialistHandoffHandled) {
+        return;
+      }
+
       var workspaceManagerLabel = getWorkspaceHomeAssistantDisplayName();
       setHomeAssistantBusy(true, 'Asking...');
       renderHomeAssistantActions([]);
@@ -8880,12 +9949,22 @@
         dashLog.debug('Workspace manager handoff failed', { error: error && error.message || error });
         homeAssistantState.awaitingCreateConfirmation = false;
         var workspaceManagerTimedOut = isLikelyHomeAssistantRequestTimeout(error);
+        var failureSummary = workspaceManagerTimedOut
+          ? null
+          : formatWorkspaceManagerFailure(error, workspaceManagerLabel);
         setHomeAssistantRoutingSummary(
-          workspaceManagerTimedOut ? workspaceManagerLabel + ' Delayed' : workspaceManagerLabel + ' Unavailable',
+          workspaceManagerTimedOut ? workspaceManagerLabel + ' Delayed' : failureSummary.title,
           workspaceManagerTimedOut
             ? 'The workspace manager took too long to respond inline.'
-            : 'Could not reach the workspace manager right now.',
-          { state: workspaceManagerTimedOut ? 'timeout' : 'error' }
+            : failureSummary.text,
+          workspaceManagerTimedOut
+            ? { state: 'timeout' }
+            : {
+              state: failureSummary.state,
+              detail: failureSummary.detail,
+              heading: failureSummary.heading,
+              conversationSummary: failureSummary.conversationSummary
+            }
         );
         if (hasHomeAssistantConversation()) {
           homeAssistantState.conversationCollapsed = true;
@@ -8898,7 +9977,7 @@
             onClick: function () { handleHomeAssistantPrompt(text, { routeContext: routeContext }); }
           },
           {
-            label: 'Open Chat',
+            label: 'Open Full Chat',
             variant: 'secondary',
             onClick: function () { openChatPanel(); }
           },

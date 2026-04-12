@@ -48,7 +48,7 @@ func NewIndex(basePath string) (*Index, error) {
 	idx := &Index{db: db, basePath: basePath}
 
 	if err := idx.init(); err != nil {
-		db.Close()
+		_ = db.Close()
 		return nil, err
 	}
 
@@ -115,7 +115,7 @@ func (idx *Index) List() ([]IndexEntry, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to list workspaces from index: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var entries []IndexEntry
 	for rows.Next() {
@@ -155,13 +155,13 @@ func (idx *Index) Rebuild() error {
 
 	// Clear existing entries
 	if _, err := tx.Exec(`DELETE FROM workspaces`); err != nil {
-		tx.Rollback()
+		_ = tx.Rollback()
 		return fmt.Errorf("failed to clear index for rebuild: %w", err)
 	}
 
 	// Scan and register all workspaces
 	if err := idx.scanDir(tx, idx.basePath, "", 0); err != nil {
-		tx.Rollback()
+		_ = tx.Rollback()
 		return fmt.Errorf("failed to scan workspaces for rebuild: %w", err)
 	}
 

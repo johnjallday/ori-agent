@@ -70,6 +70,41 @@ const TASK_REQUIREMENT_KEYS = Object.freeze({
   FILESYSTEM: 'filesystem'
 });
 
+const TASK_ASSIST_PENDING_SPECIALIST_STORAGE_KEY = 'workspace-detail-task-assist-specialist';
+
+const TASK_ASSIST_TRAVEL_SPECIALISTS = Object.freeze({
+  travel_itinerary: Object.freeze({
+    key: 'travel_itinerary',
+    label: 'Travel Itinerary Planner',
+    agentName: 'Travel Itinerary Planner',
+    agentType: 'tool-calling',
+    description: 'Plans day-by-day travel itineraries with neighborhood guidance, food picks, museum ideas, budget notes, and pacing.',
+    systemPrompt: 'You are a travel itinerary planner. Build practical, day-by-day trip plans with realistic pacing, local food and neighborhood recommendations, transit notes, and concise options. Ask clarifying questions when key details are missing and avoid inventing bookings or confirmed reservations.',
+    nameTokens: ['travel', 'trip', 'itinerary'],
+    scorePhrases: ['day by day', 'day-by-day', 'itinerary', 'trip plan', 'travel plan', 'restaurant', 'restaurants', 'food', 'museum', 'museums', 'nightlife', 'day trip', 'day trips', 'budget breakdown', 'budget', 'accommodation', 'accommodation areas', 'neighborhood', 'neighbourhood']
+  }),
+  hotel_booking: Object.freeze({
+    key: 'hotel_booking',
+    label: 'Hotel Booking Agent',
+    agentName: 'Hotel Booking Agent',
+    agentType: 'tool-calling',
+    description: 'Finds and compares hotels by neighborhood, budget, amenities, and travel constraints.',
+    systemPrompt: 'You are a hotel booking assistant. Help compare hotel options by neighborhood, budget, amenities, and transport tradeoffs. Ask for missing constraints before recommending stays, and do not invent live prices or confirmed bookings.',
+    nameTokens: ['hotel', 'lodging', 'accommodation'],
+    scorePhrases: ['hotel', 'hotels', 'stay', 'stays', 'lodging', 'accommodation', 'where to stay', 'book hotel', 'book hotels']
+  }),
+  flight_booking: Object.freeze({
+    key: 'flight_booking',
+    label: 'Flight Booking Agent',
+    agentName: 'Flight Booking Agent',
+    agentType: 'tool-calling',
+    description: 'Helps fill booking gaps for flights and longer-distance travel legs with schedule and transfer considerations.',
+    systemPrompt: 'You are a flight booking assistant. Help identify missing flight or long-distance travel legs, compare route options, call out tradeoffs, and confirm timing constraints before recommending bookings.',
+    nameTokens: ['flight', 'airfare', 'airport'],
+    scorePhrases: ['flight', 'flights', 'airfare', 'airport', 'route option', 'route options', 'connection', 'connections', 'transfer', 'transfer timing']
+  })
+});
+
 export class WorkspaceDetailPage {
   constructor(workspaceId) {
     this.workspaceId = workspaceId;
@@ -112,12 +147,18 @@ export class WorkspaceDetailPage {
     this.agentSkillsPromises = new Map();
     this.availableMCPServers = [];
     this.availableMCPServersPromise = null;
+    this.availableEmailAccounts = [];
+    this.availableEmailAccountsPromise = null;
     this.activeWorkspaceMCPBindingId = '';
     this.activeWorkspaceMCPMode = 'create';
     this.availableSkills = [];
     this.availableSkillsPromise = null;
     this.activeWorkspaceSkillBindingId = '';
     this.activeWorkspaceSkillMode = 'create';
+    this.workspaceSettings = null;
+    this.workspaceSettingsEffectiveBehavior = null;
+    this.workspaceConfigExpanded = false;
+    this.workspaceConfigPreferenceLoaded = false;
     this.capabilitySuggestionCatalog = null;
     this.capabilitySuggestionCatalogPromise = null;
     this.flippedAgentCards = new Set();
@@ -129,12 +170,14 @@ export class WorkspaceDetailPage {
     this.currentTaskResultFollowUpPending = false;
     this.currentBlockedTask = null;
     this.currentAssistRecommendation = null;
+    this.currentAssistSpecialistAction = null;
     this.currentExecutionTaskId = null;
     this.executionMonitorTimer = null;
     this.executionLogKeys = new Set();
     this.executionLastStatus = '';
     this.pendingTaskConfirm = null;
     this.pendingTaskConfirmSelection = { stepThrough: false };
+    this.pendingAssistSpecialistResumeChecked = false;
 
     // DOM elements
     this.elements = {};
@@ -171,6 +214,7 @@ export class WorkspaceDetailPage {
       this.loadDirectories(),
       this.loadSchedules()
     ]);
+    this.maybeResumePendingAssistSpecialistHandoff();
     this.activateWorkspace();
     this.setupRealtime();
     this.checkAutoOpenCreateAgent();
@@ -182,7 +226,6 @@ export class WorkspaceDetailPage {
       { id: 'workspace-detail-notes-panel', label: 'Notes panel content' },
       { id: 'workspace-detail-files-panel', label: 'Files panel content' },
       { id: 'workspace-detail-directories-panel', label: 'Directories panel content' },
-      { id: 'workspace-detail-mcp-panel', label: 'Workspace MCP panel content' },
       { id: 'workspace-detail-schedules-panel', label: 'Schedules panel content' }
     ];
 
@@ -1033,11 +1076,20 @@ export class WorkspaceDetailPage {
       notesList: document.getElementById('workspace-detail-notes-list'),
       directoriesList: document.getElementById('workspace-detail-directories-list'),
       mcpList: document.getElementById('workspace-detail-mcp-list'),
+      settingsSummary: document.getElementById('workspace-detail-settings-summary'),
+      settingsManagedSkills: document.getElementById('workspace-detail-settings-managed-skills'),
       skillsList: document.getElementById('workspace-detail-skills-list'),
       schedulesList: document.getElementById('workspace-detail-schedules-list'),
       childrenList: document.getElementById('workspace-detail-children-list'),
 
       // Panels
+      configPanel: document.getElementById('workspace-detail-settings-panel'),
+      configContent: document.getElementById('workspace-detail-config-content'),
+      configToggleBtn: document.getElementById('workspace-detail-config-toggle'),
+      configToggleLabel: document.getElementById('workspace-detail-config-toggle-label'),
+      configPresetChip: document.getElementById('workspace-detail-config-preset-chip'),
+      configConnectionsChip: document.getElementById('workspace-detail-config-connections-chip'),
+      configSkillsChip: document.getElementById('workspace-detail-config-skills-chip'),
       childrenPanel: document.getElementById('workspace-detail-children-panel'),
       childrenCount: document.getElementById('workspace-detail-children-count'),
 
@@ -1053,6 +1105,7 @@ export class WorkspaceDetailPage {
       addDirectoryBtn: document.getElementById('workspace-detail-add-directory'),
       addMcpBtn: document.getElementById('workspace-detail-add-mcp'),
       refreshMcpBtn: document.getElementById('workspace-detail-refresh-mcp'),
+      refreshSettingsBtn: document.getElementById('workspace-detail-refresh-settings'),
       addSkillBtn: document.getElementById('workspace-detail-add-skill'),
       refreshSkillsBtn: document.getElementById('workspace-detail-refresh-skills'),
       viewSchedulesBtn: document.getElementById('workspace-detail-view-schedules'),
@@ -1112,6 +1165,12 @@ export class WorkspaceDetailPage {
       taskAssistQuestion: document.getElementById('workspace-detail-task-assist-question'),
       taskAssistRecommendationWrap: document.getElementById('workspace-detail-task-assist-recommendation-wrap'),
       taskAssistRecommendation: document.getElementById('workspace-detail-task-assist-recommendation'),
+      taskAssistChoiceWrap: document.getElementById('workspace-detail-task-assist-choice-wrap'),
+      taskAssistChoiceSummary: document.getElementById('workspace-detail-task-assist-choice-summary'),
+      taskAssistChoiceList: document.getElementById('workspace-detail-task-assist-choice-list'),
+      taskAssistSpecialistWrap: document.getElementById('workspace-detail-task-assist-specialist-wrap'),
+      taskAssistSpecialistCopy: document.getElementById('workspace-detail-task-assist-specialist-copy'),
+      taskAssistSpecialistActionBtn: document.getElementById('workspace-detail-task-assist-specialist-action'),
       taskAssistAgent: document.getElementById('workspace-detail-task-assist-agent'),
       taskAssistMessage: document.getElementById('workspace-detail-task-assist-message'),
       taskAssistResponseWrap: document.getElementById('workspace-detail-task-assist-response-wrap'),
@@ -1138,10 +1197,42 @@ export class WorkspaceDetailPage {
       mcpAliasInput: document.getElementById('workspace-detail-mcp-alias'),
       mcpEnabledInput: document.getElementById('workspace-detail-mcp-enabled'),
       mcpScopeInput: document.getElementById('workspace-detail-mcp-scope'),
+      mcpConfigField: document.getElementById('workspace-detail-mcp-config-field'),
+      mcpConfigDetails: document.getElementById('workspace-detail-mcp-config-details'),
       mcpConfigInput: document.getElementById('workspace-detail-mcp-config'),
+      mcpEmailFields: document.getElementById('workspace-detail-mcp-email-fields'),
+      mcpEmailAccountSelect: document.getElementById('workspace-detail-mcp-email-account'),
+      mcpEmailAccountHelp: document.getElementById('workspace-detail-mcp-email-account-help'),
+      mcpEmailAccountSummary: document.getElementById('workspace-detail-mcp-email-account-summary'),
+      mcpEmailMailboxInput: document.getElementById('workspace-detail-mcp-email-mailboxes'),
+      mcpEmailActionRead: document.getElementById('workspace-detail-mcp-email-action-read'),
+      mcpEmailActionSearch: document.getElementById('workspace-detail-mcp-email-action-search'),
+      mcpEmailActionDraft: document.getElementById('workspace-detail-mcp-email-action-draft'),
+      mcpEmailActionSend: document.getElementById('workspace-detail-mcp-email-action-send'),
+      mcpEmailSendConfirmWrap: document.getElementById('workspace-detail-mcp-email-send-confirm-wrap'),
+      mcpEmailSendConfirmInput: document.getElementById('workspace-detail-mcp-email-send-confirm'),
       mcpAgentOptions: document.getElementById('workspace-detail-mcp-agent-options'),
       mcpAgentAccessSummary: document.getElementById('workspace-detail-mcp-agent-access-summary'),
       mcpSubmitBtn: document.getElementById('workspace-detail-mcp-submit'),
+      settingsForm: document.getElementById('workspace-detail-settings-form'),
+      settingsProfileInput: document.getElementById('workspace-detail-settings-profile'),
+      settingsPresetInput: document.getElementById('workspace-detail-settings-preset'),
+      settingsModeInput: document.getElementById('workspace-detail-settings-mode'),
+      settingsConfirmationInput: document.getElementById('workspace-detail-settings-confirmation'),
+      settingsPlanEnabledInput: document.getElementById('workspace-detail-settings-plan-enabled'),
+      settingsRequireScanInput: document.getElementById('workspace-detail-settings-require-scan'),
+      settingsSaveNotesInput: document.getElementById('workspace-detail-settings-save-notes'),
+      settingsSyncTasksInput: document.getElementById('workspace-detail-settings-sync-tasks'),
+      settingsAskHandoffInput: document.getElementById('workspace-detail-settings-ask-handoff'),
+      settingsPlanningFields: document.getElementById('workspace-detail-settings-planning-fields'),
+      settingsPlanningModeInput: document.getElementById('workspace-detail-settings-planning-mode'),
+      settingsClarificationModeInput: document.getElementById('workspace-detail-settings-clarification-mode'),
+      settingsTasksDirInput: document.getElementById('workspace-detail-settings-tasks-dir'),
+      settingsExecutionModeInput: document.getElementById('workspace-detail-settings-execution-mode'),
+      settingsWritePRDInput: document.getElementById('workspace-detail-settings-write-prd'),
+      settingsWriteTaskListInput: document.getElementById('workspace-detail-settings-write-task-list'),
+      settingsRequireBranchInput: document.getElementById('workspace-detail-settings-require-branch'),
+      settingsSaveBtn: document.getElementById('workspace-detail-settings-save'),
       skillsModal: document.getElementById('workspace-detail-skills-modal'),
       skillsForm: document.getElementById('workspace-detail-skills-form'),
       skillsModalTitle: document.getElementById('workspace-detail-skills-modal-title'),
@@ -1225,9 +1316,48 @@ export class WorkspaceDetailPage {
       event.preventDefault();
       this.submitWorkspaceMCPModal();
     });
-    this.elements.mcpServerSelect?.addEventListener('change', () => this.handleWorkspaceMCPServerChange());
+    this.elements.mcpServerSelect?.addEventListener('change', () => {
+      this.handleWorkspaceMCPServerChange();
+    });
+    [
+      this.elements.mcpEmailActionRead,
+      this.elements.mcpEmailActionSearch,
+      this.elements.mcpEmailActionDraft,
+      this.elements.mcpEmailActionSend
+    ].forEach((checkbox) => {
+      checkbox?.addEventListener('change', () => this.handleWorkspaceMCPEmailActionChange());
+    });
+    this.elements.mcpEmailAccountSelect?.addEventListener('change', () => this.updateWorkspaceMCPEmailAccountSummary());
     this.elements.mcpAgentOptions?.addEventListener('change', () => this.updateWorkspaceMCPAgentAccessSummary());
     this.elements.mcpModal?.addEventListener('hidden.bs.modal', () => this.resetWorkspaceMCPModal());
+
+    // Workspace settings
+    this.elements.configToggleBtn?.addEventListener('click', () => this.toggleWorkspaceConfigExpanded());
+    this.elements.refreshSettingsBtn?.addEventListener('click', () => this.loadWorkspace());
+    this.elements.settingsForm?.addEventListener('submit', (event) => {
+      event.preventDefault();
+      this.saveWorkspaceSettings();
+    });
+    this.elements.settingsProfileInput?.addEventListener('change', () => this.handleWorkspaceSettingsProfileChange());
+    this.elements.settingsPresetInput?.addEventListener('change', () => this.handleWorkspaceSettingsPresetChange());
+    [
+      this.elements.settingsModeInput,
+      this.elements.settingsConfirmationInput,
+      this.elements.settingsPlanEnabledInput,
+      this.elements.settingsRequireScanInput,
+      this.elements.settingsSaveNotesInput,
+      this.elements.settingsSyncTasksInput,
+      this.elements.settingsAskHandoffInput,
+      this.elements.settingsPlanningModeInput,
+      this.elements.settingsClarificationModeInput,
+      this.elements.settingsTasksDirInput,
+      this.elements.settingsExecutionModeInput,
+      this.elements.settingsWritePRDInput,
+      this.elements.settingsWriteTaskListInput,
+      this.elements.settingsRequireBranchInput
+    ].forEach((input) => {
+      input?.addEventListener('change', () => this.handleWorkspaceSettingsFieldChange());
+    });
 
     // Skill buttons
     this.elements.addSkillBtn?.addEventListener('click', () => this.openWorkspaceSkillModal());
@@ -1281,6 +1411,7 @@ export class WorkspaceDetailPage {
     this.elements.taskAssistContinueBtn?.addEventListener('click', () => this.submitTaskAssist('continue_with_instruction'));
     this.elements.taskAssistSwitchBtn?.addEventListener('click', () => this.submitTaskAssist('switch_agent_retry'));
     this.elements.taskAssistFailBtn?.addEventListener('click', () => this.submitTaskAssist('mark_failed'));
+    this.elements.taskAssistSpecialistActionBtn?.addEventListener('click', () => this.handleAssistSpecialistAction());
     this.elements.taskAssistAgent?.addEventListener('change', () => this.updateAssistSwitchButtonState());
     this.elements.addAgentSubmitBtn?.addEventListener('click', () => this.addSelectedAgentToWorkspace());
     this.elements.createAgentBtn?.addEventListener('click', () => this.openCreateAgentFlow());
@@ -1537,6 +1668,13 @@ export class WorkspaceDetailPage {
       await this.loadAvailableSkills().catch((error) => {
         console.warn('Failed to load skill catalog for workspace detail:', error);
       });
+      this.workspaceSettings = this.normalizeWorkspaceSettings(
+        this.workspace?.workspace_settings || this.workspace?.shared_data?.workspace_settings || {}
+      );
+      this.workspaceSettingsEffectiveBehavior = this.normalizeWorkspaceSettingsEffectiveBehavior(
+        this.workspace?.workspace_settings_effective_behavior,
+        this.workspaceSettings
+      );
       if (window.OriAskRouting && typeof window.OriAskRouting.refreshWorkspaceIdentity === 'function') {
         window.OriAskRouting.refreshWorkspaceIdentity({
           workspace_id: this.workspaceId,
@@ -1547,6 +1685,7 @@ export class WorkspaceDetailPage {
       }
       await this.renderWorkspaceInfo();
       this.renderWorkspaceMCPBindings();
+      this.renderWorkspaceSettings();
       this.renderWorkspaceSkillBindings();
       this.renderAgentGroups();
       this.refreshHomeAssistantQuickPrompts();
@@ -1747,6 +1886,17 @@ export class WorkspaceDetailPage {
     `;
   }
 
+  isWorkspaceEntryAgent(agentName) {
+    const entryAgentName = String(this.workspace?.entry_agent_name || '').trim();
+    if (!entryAgentName || !agentName) return false;
+    return this.normalizeAgentName(entryAgentName) === this.normalizeAgentName(agentName);
+  }
+
+  renderWorkspaceAgentRoleBadge(agentName) {
+    if (!this.isWorkspaceEntryAgent(agentName)) return '';
+    return '<span class="workspace-detail-agent-role-badge workspace-manager">Workspace Manager</span>';
+  }
+
   renderAgentGroups() {
     if (!this.elements.agentsList) return;
 
@@ -1780,6 +1930,7 @@ export class WorkspaceDetailPage {
       const encodedAgentName = encodeURIComponent(group.name);
       const canFlip = !group.isUnassigned;
       const isFlipped = canFlip && this.flippedAgentCards.has(group.key);
+      const roleBadge = group.isUnassigned ? '' : this.renderWorkspaceAgentRoleBadge(group.name);
       const removeLabel = group.instanceCount > 1
         ? `Remove all ${group.instanceCount} ${group.name} instances from workspace`
         : `Remove ${group.name} from workspace`;
@@ -1831,6 +1982,7 @@ export class WorkspaceDetailPage {
             <div class="workspace-detail-agent-card-header">
               <div class="workspace-detail-agent-card-title">
                 ${group.isUnassigned ? `<span>${this.escapeHtml(group.name)}</span>` : this.renderAgentDetailLink(group.name, encodedAgentName)}
+                ${roleBadge}
                 ${instanceChip}
                 ${capabilityBadges}
                 ${modelLabel}
@@ -1866,6 +2018,7 @@ export class WorkspaceDetailPage {
     const level = Number.isFinite(levelValue) ? Math.max(0, Math.floor(levelValue)) : 0;
     const stage = String(profile?.evolution?.stage || profile?.stage || '').trim();
     const levelLabel = stage ? `Lv ${level} · ${stage}` : `Lv ${level}`;
+    const roleBadge = this.renderWorkspaceAgentRoleBadge(group.name);
 
     const skillsState = this.getAgentSkillsState(group.name);
     const skillsMarkup = this.renderAgentSkillsChips(skillsState, profile);
@@ -1894,6 +2047,7 @@ export class WorkspaceDetailPage {
         <div class="workspace-detail-agent-card-header">
           <div class="workspace-detail-agent-card-title">
             ${this.renderAgentDetailLink(group.name, encodedAgentName)}
+            ${roleBadge}
             <span class="workspace-detail-agent-info-tag">Agent Info</span>
           </div>
           <div class="workspace-detail-agent-card-meta-wrap">
@@ -3518,6 +3672,17 @@ export class WorkspaceDetailPage {
 
     const taskLabel = String(task.description || task.name || task.id || 'this task').trim() || 'this task';
     const prompt = this.getTaskAgentSuggestionPrompt(task);
+    const specialistAction = this.maybeBuildTravelAssistSpecialistAction({
+      task,
+      currentAgent: String(task.to || '').trim()
+    });
+    if (specialistAction) {
+      const specialistSuggestion = await this.suggestTravelSpecialistSetupForTask(task, specialistAction);
+      if (specialistSuggestion.handled) {
+        return specialistSuggestion.agentName || '';
+      }
+    }
+
     const requirements = this.inferTaskExecutionRequirements(prompt);
     if (requirements.length > 0) {
       const capabilitySuggestion = await this.suggestCapabilityAwareAgentSetup(task, requirements);
@@ -4437,6 +4602,351 @@ export class WorkspaceDetailPage {
     return Array.from({ length: count }, () => 'pending');
   }
 
+  getAssistStorage() {
+    try {
+      return window.sessionStorage;
+    } catch (_error) {
+      return null;
+    }
+  }
+
+  clearPendingAssistSpecialistHandoff() {
+    const storage = this.getAssistStorage();
+    if (!storage) return;
+    storage.removeItem(TASK_ASSIST_PENDING_SPECIALIST_STORAGE_KEY);
+  }
+
+  storePendingAssistSpecialistHandoff(action) {
+    const storage = this.getAssistStorage();
+    const taskId = String(this.currentBlockedTask?.taskId || '').trim();
+    const agentName = String(action?.agentName || '').trim();
+    if (!storage || !this.workspaceId || !taskId || !agentName) return;
+
+    storage.setItem(TASK_ASSIST_PENDING_SPECIALIST_STORAGE_KEY, JSON.stringify({
+      workspaceId: this.workspaceId,
+      taskId,
+      agentName,
+      createdAt: Date.now()
+    }));
+  }
+
+  maybeResumePendingAssistSpecialistHandoff() {
+    if (this.pendingAssistSpecialistResumeChecked) return;
+    this.pendingAssistSpecialistResumeChecked = true;
+
+    const storage = this.getAssistStorage();
+    if (!storage) return;
+
+    let payload = null;
+    try {
+      payload = JSON.parse(storage.getItem(TASK_ASSIST_PENDING_SPECIALIST_STORAGE_KEY) || 'null');
+    } catch (_error) {
+      payload = null;
+    }
+
+    const workspaceId = String(payload?.workspaceId || '').trim();
+    const taskId = String(payload?.taskId || '').trim();
+    const agentName = String(payload?.agentName || '').trim();
+    const createdAt = Number(payload?.createdAt || 0);
+    const isExpired = !createdAt || (Date.now() - createdAt) > (15 * 60 * 1000);
+
+    if (!workspaceId || !taskId || !agentName || workspaceId !== this.workspaceId || isExpired) {
+      this.clearPendingAssistSpecialistHandoff();
+      return;
+    }
+
+    const task = this.tasks.find((item) => item?.id === taskId);
+    const inWorkspace = this.getWorkspaceAgentNames()
+      .some((name) => this.normalizeAgentName(name) === this.normalizeAgentName(agentName));
+    if (!task || !inWorkspace) {
+      this.clearPendingAssistSpecialistHandoff();
+      return;
+    }
+
+    this.clearPendingAssistSpecialistHandoff();
+    this.openTaskAssistModal(taskId);
+    if (this.elements.taskAssistAgent) {
+      const hasOption = Array.from(this.elements.taskAssistAgent.options || [])
+        .some((option) => this.normalizeAgentName(option?.value || '') === this.normalizeAgentName(agentName));
+      if (hasOption) {
+        this.elements.taskAssistAgent.value = agentName;
+        this.updateAssistSwitchButtonState();
+      }
+    }
+    if (window.Toast) {
+      window.Toast.info(`"${agentName}" is ready. Switch this task to it and retry.`);
+    }
+  }
+
+  findAssistSpecialistAgentName(config, sourceNames, options = {}) {
+    if (!config || !Array.isArray(sourceNames)) return '';
+
+    const exactTarget = this.normalizeAgentName(config.agentName);
+    const exclude = this.normalizeAgentName(options.excludeAgent || '');
+    for (const sourceName of sourceNames) {
+      const name = String(sourceName || '').trim();
+      if (!name) continue;
+      const normalized = this.normalizeAgentName(name);
+      if (!normalized || normalized === exclude) continue;
+      if (normalized === exactTarget) return name;
+    }
+
+    let bestName = '';
+    let bestScore = 0;
+    sourceNames.forEach((sourceName) => {
+      const name = String(sourceName || '').trim();
+      if (!name) return;
+      const normalized = this.normalizeAgentName(name);
+      if (!normalized || normalized === exclude) return;
+
+      let score = 0;
+      (config.nameTokens || []).forEach((token) => {
+        const normalizedToken = this.normalizeAgentName(token);
+        if (normalizedToken && normalized.includes(normalizedToken)) {
+          score += normalizedToken.length >= 6 ? 3 : 2;
+        }
+      });
+
+      if (score > bestScore) {
+        bestScore = score;
+        bestName = name;
+      }
+    });
+
+    return bestScore >= 3 ? bestName : '';
+  }
+
+  buildAssistSpecialistActionText(action) {
+    const agentName = String(action?.agentName || action?.label || '').trim();
+    const currentAgent = String(action?.currentAgent || '').trim();
+    const currentLabel = currentAgent ? `"${currentAgent}"` : 'the current agent';
+    if (!agentName) return '';
+    if (action?.kind === 'switch') {
+      return `Recommended: Hand this off to "${agentName}" instead of keeping it with ${currentLabel}.`;
+    }
+    if (action?.kind === 'add_and_switch') {
+      return `Recommended: Add "${agentName}" to this workspace and hand the task off there.`;
+    }
+    if (action?.kind === 'create') {
+      return `Recommended: Create "${agentName}" for this workspace, then hand the task off there.`;
+    }
+    return '';
+  }
+
+  isWorkspaceManagerMetaActionText(text = '') {
+    const normalized = this.normalizeTaskResultNextStepToken(text);
+    if (!normalized) return false;
+
+    const actionMatch = /\b(save|create|add|attach|upload|import|export|move|rename|delete|remove|switch|assign|list|show|open|bind)\b/.test(normalized);
+    if (!actionMatch) return false;
+
+    return /\b(note|notes|task|tasks|subtask|subtasks|file|files|pdf|folder|folders|directory|directories|workspace|agent|agents|binding|bindings|canvas)\b/.test(normalized);
+  }
+
+  maybeBuildTravelAssistSpecialistAction(assistContext = {}) {
+    const currentAgent = String(assistContext.currentAgent || '').trim();
+    const parts = [];
+    const taskText = String(assistContext.task?.description || assistContext.task?.name || '').trim();
+    if (taskText) parts.push(taskText);
+    const taskDetails = String(assistContext.task?.details || '').trim();
+    if (taskDetails) parts.push(taskDetails);
+    const question = String(assistContext.question || '').trim();
+    if (question) parts.push(question);
+    const response = String(assistContext.response || '').trim();
+    if (response) parts.push(response);
+
+    const workflowStep = assistContext.workflowStep;
+    if (workflowStep?.stepType === 'ask_choice' && Array.isArray(workflowStep.choices)) {
+      workflowStep.choices.forEach((choice) => {
+        const label = String(choice?.label || '').trim();
+        if (label) parts.push(label);
+        const description = String(choice?.description || '').trim();
+        if (description) parts.push(description);
+      });
+    }
+
+    const combined = this.normalizeTaskResultNextStepToken(parts.join(' '));
+    if (!combined) return null;
+    if (this.isWorkspaceManagerMetaActionText(combined)) return null;
+
+    const travelSignals = ['travel', 'trip', 'itinerary', 'hotel', 'flight', 'vacation', 'day trip', 'day trips', 'museum', 'museums', 'restaurant', 'restaurants', 'nightlife', 'accommodation', 'lodging'];
+    const isTravelContext = travelSignals.some((signal) => combined.includes(this.normalizeTaskResultNextStepToken(signal)));
+    if (!isTravelContext) return null;
+
+    const scoreConfig = (config) => {
+      let score = 0;
+      (config.scorePhrases || []).forEach((phrase) => {
+        const normalizedPhrase = this.normalizeTaskResultNextStepToken(phrase);
+        if (!normalizedPhrase || !combined.includes(normalizedPhrase)) return;
+        score += normalizedPhrase.includes(' ') ? 3 : 1;
+      });
+      return score;
+    };
+
+    const configs = Object.values(TASK_ASSIST_TRAVEL_SPECIALISTS);
+    const ranked = configs
+      .map((config) => ({ config, score: scoreConfig(config) }))
+      .filter((entry) => entry.score > 0)
+      .sort((a, b) => {
+        if (b.score !== a.score) return b.score - a.score;
+        const order = ['travel_itinerary', 'hotel_booking', 'flight_booking'];
+        return order.indexOf(a.config.key) - order.indexOf(b.config.key);
+      });
+
+    const best = ranked[0];
+    if (!best?.config) return null;
+
+    const config = best.config;
+    const workspaceAgentName = this.findAssistSpecialistAgentName(config, this.getWorkspaceAgentNames(), {
+      excludeAgent: currentAgent
+    });
+    const catalogNames = Array.isArray(this.agentCatalog) ? this.agentCatalog.map((agent) => String(agent?.name || '').trim()).filter(Boolean) : [];
+    const catalogAgent = this.findAssistSpecialistAgentName(config, catalogNames, {
+      excludeAgent: currentAgent
+    });
+    const workspaceAgent = workspaceAgentName && catalogAgent &&
+      this.normalizeAgentName(workspaceAgentName) === this.normalizeAgentName(catalogAgent)
+      ? workspaceAgentName
+      : '';
+    if (catalogAgent && this.normalizeAgentName(catalogAgent) === this.normalizeAgentName(currentAgent)) {
+      return null;
+    }
+
+    const agentName = workspaceAgent || catalogAgent || config.agentName;
+    const kind = workspaceAgent ? 'switch' : (catalogAgent ? 'add_and_switch' : 'create');
+    return {
+      ...config,
+      kind,
+      currentAgent,
+      agentName,
+      copy: kind === 'switch'
+        ? `"${agentName}" already fits this travel-planning follow-up better than ${currentAgent ? `"${currentAgent}"` : 'the current agent'}.`
+        : kind === 'add_and_switch'
+        ? `"${agentName}" exists already. Add it to this workspace and hand the task off there.`
+        : `This workspace does not have a dedicated travel specialist yet. Create "${agentName}" and use it for this follow-up.`,
+      buttonLabel: kind === 'switch'
+        ? `Switch To ${agentName}`
+        : kind === 'add_and_switch'
+        ? `Add And Switch To ${agentName}`
+        : `Create ${agentName}`
+    };
+  }
+
+  async suggestTravelSpecialistSetupForTask(task, specialistAction) {
+    if (!task || !specialistAction?.agentName) {
+      return { handled: false, agentName: '' };
+    }
+
+    const taskLabel = this.getTaskDisplayLabel(task);
+    const previewSequence = this.getPredictedTaskExecutionSequence(task, [], {
+      assignedAgent: specialistAction.agentName
+    });
+
+    if (specialistAction.kind === 'switch' || specialistAction.kind === 'add_and_switch') {
+      const addToWorkspace = specialistAction.kind === 'add_and_switch';
+      const confirmed = await this.showTaskConfirmDialog({
+        eyebrow: 'Specialist Match',
+        title: addToWorkspace
+          ? `Add "${specialistAction.agentName}" and assign it?`
+          : `Assign "${specialistAction.agentName}" to this task?`,
+        message: specialistAction.copy || this.buildAssistSpecialistActionText(specialistAction),
+        confirmLabel: addToWorkspace ? 'Add and Assign' : 'Assign Specialist',
+        metaItems: [taskLabel, specialistAction.agentName, addToWorkspace ? 'Add to workspace' : 'Travel specialist'],
+        details: [
+          String(specialistAction.description || '').trim(),
+          'Substantive travel work should start with the specialist rather than the workspace manager.'
+        ].filter(Boolean),
+        sequenceItems: previewSequence
+      });
+
+      if (!confirmed) {
+        return { handled: true, agentName: '' };
+      }
+
+      try {
+        if (addToWorkspace) {
+          await this.addAgentToWorkspace(specialistAction.agentName, { toast: false });
+        }
+        await this.assignTaskToAgent(task.id, specialistAction.agentName);
+        task.to = specialistAction.agentName;
+        this.renderTasks();
+        if (window.Toast) {
+          window.Toast.success(addToWorkspace
+            ? `Added "${specialistAction.agentName}" and assigned it to this task.`
+            : `Assigned "${specialistAction.agentName}" to this task.`);
+        }
+        return { handled: true, agentName: specialistAction.agentName };
+      } catch (error) {
+        console.error('Failed to apply travel specialist setup:', error);
+        if (window.Toast) {
+          window.Toast.error(error.message || 'Failed to assign travel specialist');
+        }
+        return { handled: true, agentName: '' };
+      }
+    }
+
+    if (specialistAction.kind === 'create') {
+      const confirmed = await this.showTaskConfirmDialog({
+        eyebrow: 'Specialist Match',
+        title: `Create "${specialistAction.agentName}" for this task?`,
+        message: specialistAction.copy || this.buildAssistSpecialistActionText(specialistAction),
+        confirmLabel: 'Create Agent',
+        cancelLabel: 'Cancel',
+        metaItems: [taskLabel, specialistAction.agentName, 'New travel specialist'],
+        details: [
+          String(specialistAction.description || '').trim(),
+          'After creation, Ori will assign this task to the new specialist.'
+        ].filter(Boolean),
+        sequenceItems: previewSequence
+      });
+
+      if (!confirmed) {
+        return { handled: true, agentName: '' };
+      }
+
+      this.openCreateAgentFlow({
+        seedName: specialistAction.agentName,
+        seedType: specialistAction.agentType || 'tool-calling',
+        seedSystemPrompt: String(specialistAction.systemPrompt || '').trim(),
+        autoDescription: String(specialistAction.description || '').trim(),
+        preferAutoConfig: true,
+        workspaceId: this.workspaceId,
+        taskId: task.id,
+        assignTask: true
+      });
+      return { handled: true, agentName: '' };
+    }
+
+    return { handled: false, agentName: '' };
+  }
+
+  applyAssistWorkflowSpecialistOverrides(workflowStep, specialistAction) {
+    const normalizedStep = this.normalizeAssistWorkflowStep(workflowStep);
+    if (!normalizedStep || !specialistAction?.agentName) return normalizedStep;
+
+    const replacementName = String(specialistAction.agentName || '').trim();
+    if (!replacementName) return normalizedStep;
+
+    const rewriteLabel = (label) => {
+      const rawLabel = String(label || '').trim();
+      if (!rawLabel) return rawLabel;
+      if (!/\bworkspace manager\b/i.test(rawLabel)) return rawLabel;
+      if (!/\b(delegate|hand off|handoff|assign|planning task)\b/i.test(rawLabel)) return rawLabel;
+      return rawLabel
+        .replace(/\bthe workspace manager\b/ig, replacementName)
+        .replace(/\bworkspace manager\b/ig, replacementName);
+    };
+
+    return {
+      ...normalizedStep,
+      choices: normalizedStep.choices.map((choice) => ({
+        ...choice,
+        label: rewriteLabel(choice.label),
+        description: rewriteLabel(choice.description)
+      }))
+    };
+  }
+
   populateAssistAgents(currentAgent = '') {
     if (!this.elements.taskAssistAgent) return;
 
@@ -4469,6 +4979,236 @@ export class WorkspaceDetailPage {
     return [];
   }
 
+  cleanAssistChoiceText(value) {
+    return this.cleanTaskResultNextStepText(value).replace(/[?!.,;:]+$/g, '').trim();
+  }
+
+  buildAssistChoiceId(number, label) {
+    const base = this.normalizeTaskResultNextStepToken(label)
+      .replace(/\s+/g, '-')
+      .slice(0, 48) || 'choice';
+    return `assist-choice-${String(number || '').trim() || 'x'}-${base}`;
+  }
+
+  normalizeAssistWorkflowStep(value) {
+    if (!value || typeof value !== 'object') return null;
+
+    const stepType = String(value.step_type || value.stepType || '').trim().toLowerCase();
+    const rawChoices = Array.isArray(value.choices) ? value.choices : [];
+    const choices = rawChoices.map((item, index) => {
+      const label = this.cleanAssistChoiceText(item?.label || '');
+      if (!label) return null;
+      const number = String(item?.number || index + 1).trim();
+      return {
+        id: String(item?.id || this.buildAssistChoiceId(number, label)).trim(),
+        label,
+        number,
+        description: this.cleanAssistChoiceText(item?.description || '')
+      };
+    }).filter(Boolean);
+
+    if (stepType !== 'ask_choice' || choices.length === 0) return null;
+
+    let freeTextAllowed = true;
+    if (typeof value.free_text_allowed === 'boolean') {
+      freeTextAllowed = value.free_text_allowed;
+    } else if (typeof value.freeTextAllowed === 'boolean') {
+      freeTextAllowed = value.freeTextAllowed;
+    }
+
+    return {
+      stepType: 'ask_choice',
+      title: String(value.title || '').trim() || 'Choose the next step',
+      summary: String(value.summary || '').trim(),
+      freeTextAllowed,
+      choices
+    };
+  }
+
+  extractAssistEnumeratedChoices(text) {
+    const lines = String(text || '').split(/\r?\n/);
+    const choices = [];
+    let started = false;
+
+    for (let i = 0; i < lines.length; i += 1) {
+      const rawLine = String(lines[i] || '');
+      const match = rawLine.match(/^\s*(?:[-*]\s*)?(\d+)[.)]\s*(.+)$/);
+      if (match) {
+        const number = String(match[1] || '').trim();
+        const label = this.cleanAssistChoiceText(match[2]);
+        if (!label) continue;
+        choices.push({
+          id: this.buildAssistChoiceId(number, label),
+          label,
+          number,
+          description: ''
+        });
+        started = true;
+        if (choices.length >= 5) break;
+        continue;
+      }
+
+      if (!started) continue;
+      if (!rawLine.trim()) continue;
+      break;
+    }
+
+    return choices.length >= 2 ? choices : [];
+  }
+
+  extractAssistInlineChoices(text) {
+    const lines = String(text || '').split(/\r?\n/);
+    const patterns = [
+      /^(?:want me to|would you like me to|do you want me to|should i)\s+(.+?)(?:,\s*|\s+)or\s+(.+?)\?\s*$/i
+    ];
+
+    for (let i = lines.length - 1; i >= 0; i -= 1) {
+      const rawLine = this.cleanTaskResultNextStepText(lines[i]);
+      if (!rawLine.includes('?')) continue;
+      for (const pattern of patterns) {
+        const match = rawLine.match(pattern);
+        if (!match) continue;
+
+        const first = this.cleanAssistChoiceText(match[1]);
+        const second = this.cleanAssistChoiceText(match[2]);
+        if (!first || !second || this.normalizeTaskResultNextStepToken(first) === this.normalizeTaskResultNextStepToken(second)) {
+          continue;
+        }
+
+        return [
+          {
+            id: this.buildAssistChoiceId('1', first),
+            label: first,
+            number: '1',
+            description: ''
+          },
+          {
+            id: this.buildAssistChoiceId('2', second),
+            label: second,
+            number: '2',
+            description: ''
+          }
+        ];
+      }
+    }
+
+    return [];
+  }
+
+  buildAssistWorkflowStepFromText(...values) {
+    for (const value of values) {
+      const enumeratedChoices = this.extractAssistEnumeratedChoices(value);
+      if (enumeratedChoices.length > 0) {
+        return {
+          stepType: 'ask_choice',
+          title: 'Choose the next step',
+          summary: 'Pick one option below to continue this task.',
+          freeTextAllowed: true,
+          choices: enumeratedChoices
+        };
+      }
+
+      const inlineChoices = this.extractAssistInlineChoices(value);
+      if (inlineChoices.length > 0) {
+        return {
+          stepType: 'ask_choice',
+          title: 'Choose the next step',
+          summary: 'Pick one option below to continue this task.',
+          freeTextAllowed: true,
+          choices: inlineChoices
+        };
+      }
+    }
+    return null;
+  }
+
+  getAssistResponseDisplayText(response, question) {
+    const rawResponse = String(response || '').trim();
+    const rawQuestion = String(question || '').trim();
+    if (!rawResponse) return '';
+    if (!rawQuestion) return rawResponse;
+
+    const normalize = (value) => this.cleanTaskResultNextStepText(value)
+      .replace(/[?!.,;:]+$/g, '')
+      .toLowerCase();
+
+    const normalizedQuestion = normalize(rawQuestion);
+    if (!normalizedQuestion) return rawResponse;
+
+    const paragraphs = rawResponse
+      .split(/\n\s*\n/)
+      .map((part) => String(part || '').trim())
+      .filter(Boolean);
+    if (paragraphs.length > 0 && normalize(paragraphs[paragraphs.length - 1]) === normalizedQuestion) {
+      paragraphs.pop();
+      return paragraphs.join('\n\n').trim();
+    }
+
+    const lines = rawResponse.split(/\r?\n/);
+    while (lines.length > 0 && !String(lines[lines.length - 1] || '').trim()) {
+      lines.pop();
+    }
+    if (lines.length > 0 && normalize(lines[lines.length - 1]) === normalizedQuestion) {
+      lines.pop();
+      while (lines.length > 0 && !String(lines[lines.length - 1] || '').trim()) {
+        lines.pop();
+      }
+      return lines.join('\n').trim();
+    }
+
+    return rawResponse;
+  }
+
+  setAssistWorkflowStepUI(workflowStep) {
+    if (!this.elements.taskAssistChoiceWrap || !this.elements.taskAssistChoiceList) return;
+
+    const normalizedStep = this.normalizeAssistWorkflowStep(workflowStep);
+    if (!normalizedStep || normalizedStep.stepType !== 'ask_choice' || normalizedStep.choices.length === 0) {
+      this.elements.taskAssistChoiceList.innerHTML = '';
+      if (this.elements.taskAssistChoiceSummary) {
+        this.elements.taskAssistChoiceSummary.textContent = '';
+        this.elements.taskAssistChoiceSummary.classList.add('d-none');
+      }
+      this.elements.taskAssistChoiceWrap.classList.add('d-none');
+      return;
+    }
+
+    const selectedChoiceId = String(this.currentBlockedTask?.selectedChoiceId || '').trim();
+    this.elements.taskAssistChoiceList.innerHTML = normalizedStep.choices.map((choice) => `
+      <button
+        type="button"
+        class="home-assistant-planning-choice${selectedChoiceId === choice.id ? ' is-selected' : ''}"
+        data-assist-choice-id="${this.escapeHtml(choice.id)}"
+        aria-pressed="${selectedChoiceId === choice.id ? 'true' : 'false'}"
+      >
+        <span class="home-assistant-planning-choice-label">${this.escapeHtml(choice.number ? `${choice.number}. ${choice.label}` : choice.label)}</span>
+        ${choice.description ? `<span class="home-assistant-planning-choice-hint">${this.escapeHtml(choice.description)}</span>` : ''}
+      </button>
+    `).join('');
+
+    this.elements.taskAssistChoiceList.querySelectorAll('[data-assist-choice-id]').forEach((button) => {
+      button.addEventListener('click', () => {
+        const choiceId = String(button.getAttribute('data-assist-choice-id') || '').trim();
+        if (!choiceId || !this.currentBlockedTask) return;
+        const selectedChoice = normalizedStep.choices.find((choice) => choice.id === choiceId);
+        if (!selectedChoice) return;
+        this.currentBlockedTask.selectedChoiceId = selectedChoice.id;
+        this.currentBlockedTask.selectedChoiceLabel = selectedChoice.label;
+        this.currentBlockedTask.selectedChoiceNumber = selectedChoice.number || '';
+        this.currentBlockedTask.workflowStep = normalizedStep;
+        this.setAssistWorkflowStepUI(normalizedStep);
+      });
+    });
+
+    if (this.elements.taskAssistChoiceSummary) {
+      const summary = String(normalizedStep.summary || '').trim();
+      this.elements.taskAssistChoiceSummary.textContent = summary;
+      this.elements.taskAssistChoiceSummary.classList.toggle('d-none', !summary);
+    }
+
+    this.elements.taskAssistChoiceWrap.classList.remove('d-none');
+  }
+
   getAssistActionButton(action) {
     if (action === 'retry') return this.elements.taskAssistRetryBtn;
     if (action === 'continue_with_instruction') return this.elements.taskAssistContinueBtn;
@@ -4481,6 +5221,89 @@ export class WorkspaceDetailPage {
     if (!this.elements.taskAssistSwitchBtn) return;
     const selectedAgent = String(this.elements.taskAssistAgent?.value || '').trim();
     this.elements.taskAssistSwitchBtn.disabled = selectedAgent === '';
+  }
+
+  setAssistSpecialistActionUI(action) {
+    this.currentAssistSpecialistAction = action || null;
+
+    const wrap = this.elements.taskAssistSpecialistWrap;
+    const copy = this.elements.taskAssistSpecialistCopy;
+    const button = this.elements.taskAssistSpecialistActionBtn;
+    if (!wrap || !copy || !button) return;
+
+    if (!action || !action.buttonLabel) {
+      copy.textContent = '';
+      copy.classList.add('d-none');
+      button.textContent = '';
+      wrap.classList.add('d-none');
+      return;
+    }
+
+    const detail = String(action.copy || '').trim();
+    copy.textContent = detail;
+    copy.classList.toggle('d-none', !detail);
+    button.textContent = action.buttonLabel;
+    wrap.classList.remove('d-none');
+  }
+
+  async handleAssistSpecialistAction() {
+    const action = this.currentAssistSpecialistAction;
+    const button = this.elements.taskAssistSpecialistActionBtn;
+    if (!action || !button) return;
+
+    const originalText = button.textContent;
+    button.disabled = true;
+
+    try {
+      if (action.kind === 'switch') {
+        if (this.elements.taskAssistAgent) {
+          this.elements.taskAssistAgent.value = action.agentName;
+          this.updateAssistSwitchButtonState();
+        }
+        await this.submitTaskAssist('switch_agent_retry');
+        return;
+      }
+
+      if (action.kind === 'add_and_switch') {
+        button.textContent = `Adding ${action.agentName}...`;
+        await this.addAgentToWorkspace(action.agentName, {
+          toast: false,
+          closeModal: false
+        });
+        this.populateAssistAgents(this.currentBlockedTask?.currentAgent || '');
+        if (this.elements.taskAssistAgent) {
+          this.elements.taskAssistAgent.value = action.agentName;
+          this.updateAssistSwitchButtonState();
+        }
+        if (window.Toast) {
+          window.Toast.success(`Added "${action.agentName}" to this workspace.`);
+        }
+        await this.submitTaskAssist('switch_agent_retry');
+        return;
+      }
+
+      if (action.kind === 'create') {
+        this.storePendingAssistSpecialistHandoff(action);
+        this.openCreateAgentFlow({
+          seedName: action.agentName,
+          seedType: action.agentType || 'tool-calling',
+          seedSystemPrompt: String(action.systemPrompt || '').trim(),
+          autoDescription: String(action.description || '').trim(),
+          preferAutoConfig: true,
+          workspaceId: this.workspaceId
+        });
+        return;
+      }
+    } catch (error) {
+      console.error('Failed to apply assist specialist action:', error);
+      this.clearPendingAssistSpecialistHandoff();
+      if (window.Toast) {
+        window.Toast.error(error?.message || 'Failed to apply specialist handoff');
+      }
+    } finally {
+      button.disabled = false;
+      button.textContent = originalText;
+    }
   }
 
   setAssistRecommendationUI(recommendation) {
@@ -4505,6 +5328,8 @@ export class WorkspaceDetailPage {
       }
     }
 
+    this.setAssistSpecialistActionUI(recommendation?.specialistAction || null);
+
     if (recommendation?.suggestedAgent && this.elements.taskAssistAgent) {
       const hasOption = Array.from(this.elements.taskAssistAgent.options || [])
         .some((option) => String(option?.value || '') === recommendation.suggestedAgent);
@@ -4521,7 +5346,7 @@ export class WorkspaceDetailPage {
     this.updateAssistSwitchButtonState();
   }
 
-  determineAssistRecommendation(reasonCode, suggestedActions, currentAgent) {
+  determineAssistRecommendation(reasonCode, suggestedActions, currentAgent, workflowStep = null, assistContext = {}) {
     const normalizedCode = String(reasonCode || '').trim().toLowerCase();
     const actions = this.parseAssistActions(suggestedActions);
     const allows = (action) => actions.length === 0 || actions.includes(action);
@@ -4529,6 +5354,28 @@ export class WorkspaceDetailPage {
       normalizedCode === 'capability_refusal' ||
       normalizedCode.includes('capability');
     const browserAgent = browserRelated ? this.findBestBrowserCapableAgent(currentAgent) : '';
+    const specialistAction = this.maybeBuildTravelAssistSpecialistAction({
+      ...assistContext,
+      currentAgent,
+      workflowStep
+    });
+
+    if (specialistAction) {
+      return {
+        action: specialistAction.kind === 'switch' && allows('switch_agent_retry') ? 'switch_agent_retry' : '',
+        suggestedAgent: specialistAction.kind === 'switch' ? specialistAction.agentName : '',
+        text: this.buildAssistSpecialistActionText(specialistAction),
+        specialistAction
+      };
+    }
+
+    if (workflowStep?.stepType === 'ask_choice' && Array.isArray(workflowStep.choices) && workflowStep.choices.length > 0 &&
+        allows('continue_with_instruction')) {
+      return {
+        action: 'continue_with_instruction',
+        text: 'Recommended: Choose one of the suggested next steps below or add your own guidance.'
+      };
+    }
 
     if (browserRelated && browserAgent && allows('switch_agent_retry')) {
       return {
@@ -4585,16 +5432,40 @@ export class WorkspaceDetailPage {
     const reason = String(payload.reason || payloadHumanLoop.reason || humanLoop.reason || 'The assigned agent needs guidance before it can continue.').trim();
     const question = String(payload.question || payloadHumanLoop.question || humanLoop.question || 'How should I proceed?').trim();
     const response = String(payload.agent_response || payloadHumanLoop.agent_response || humanLoop.agent_response || '').trim();
+    const displayResponse = this.getAssistResponseDisplayText(response, question);
     const statusText = getDisplayStatus(task.status);
     const timestamp = formatDate(task.updated_at || task.created_at);
 
     const currentAgent = String(task.to || '').trim();
+    const baseWorkflowStep = this.normalizeAssistWorkflowStep(payload.workflow_step)
+      || this.normalizeAssistWorkflowStep(payloadHumanLoop.workflow_step)
+      || this.normalizeAssistWorkflowStep(humanLoop.workflow_step)
+      || this.normalizeAssistWorkflowStep(task?.context?.planning_workflow_step)
+      || this.buildAssistWorkflowStepFromText(question, response);
+    const recommendation = this.determineAssistRecommendation(
+      reasonCode,
+      suggestedActions,
+      currentAgent,
+      baseWorkflowStep,
+      {
+        task,
+        reason,
+        question,
+        response
+      }
+    );
+    const workflowStep = this.applyAssistWorkflowSpecialistOverrides(baseWorkflowStep, recommendation?.specialistAction);
     this.currentBlockedTask = {
       taskId,
       blockId,
       currentAgent,
       reasonCode,
-      suggestedActions: this.parseAssistActions(suggestedActions)
+      suggestedActions: this.parseAssistActions(suggestedActions),
+      workflowStep,
+      specialistAction: recommendation?.specialistAction || null,
+      selectedChoiceId: '',
+      selectedChoiceLabel: '',
+      selectedChoiceNumber: ''
     };
 
     this.setTaskModalHeaderId(this.elements.taskAssistId, task.id);
@@ -4611,8 +5482,8 @@ export class WorkspaceDetailPage {
       this.elements.taskAssistMessage.value = '';
     }
     if (this.elements.taskAssistResponse && this.elements.taskAssistResponseWrap) {
-      if (response) {
-        this.elements.taskAssistResponse.textContent = response;
+      if (displayResponse) {
+        this.elements.taskAssistResponse.textContent = displayResponse;
         this.elements.taskAssistResponseWrap.classList.remove('d-none');
       } else {
         this.elements.taskAssistResponse.textContent = '';
@@ -4621,7 +5492,7 @@ export class WorkspaceDetailPage {
     }
 
     this.populateAssistAgents(currentAgent);
-    const recommendation = this.determineAssistRecommendation(reasonCode, suggestedActions, currentAgent);
+    this.setAssistWorkflowStepUI(workflowStep);
     this.setAssistRecommendationUI(recommendation);
 
     if (this.elements.taskAssistModal && window.bootstrap) {
@@ -4637,6 +5508,9 @@ export class WorkspaceDetailPage {
 
     const selectedAgent = String(this.elements.taskAssistAgent?.value || '').trim();
     const message = String(this.elements.taskAssistMessage?.value || '').trim();
+    const selectedChoiceId = String(this.currentBlockedTask?.selectedChoiceId || '').trim();
+    const selectedChoiceLabel = String(this.currentBlockedTask?.selectedChoiceLabel || '').trim();
+    const selectedChoiceNumber = String(this.currentBlockedTask?.selectedChoiceNumber || '').trim();
     if (action === 'switch_agent_retry' && !selectedAgent) {
       if (window.Toast) window.Toast.error('Select an agent to switch before retrying.');
       return;
@@ -4646,12 +5520,22 @@ export class WorkspaceDetailPage {
       if (window.Toast) window.Toast.error('Select a different agent before switching.');
       return;
     }
+    if (action === 'continue_with_instruction' &&
+        this.currentBlockedTask.workflowStep?.stepType === 'ask_choice' &&
+        !selectedChoiceId &&
+        !message) {
+      if (window.Toast) window.Toast.warning('Choose a next step or add guidance before continuing.');
+      return;
+    }
 
     const payload = {
       action,
       block_id: this.currentBlockedTask.blockId || undefined,
       message: message || undefined,
-      agent: selectedAgent || undefined
+      agent: selectedAgent || undefined,
+      choice_id: selectedChoiceId || undefined,
+      choice_label: selectedChoiceLabel || undefined,
+      choice_number: selectedChoiceNumber || undefined
     };
 
     try {
@@ -4729,6 +5613,10 @@ export class WorkspaceDetailPage {
   }
 
   normalizeWorkspaceMCPBinding(binding, source = 'workspace') {
+    const emailAccount = binding?.email_account && typeof binding.email_account === 'object'
+      ? { ...binding.email_account }
+      : null;
+
     return {
       id: String(binding?.id || '').trim(),
       serverName: String(binding?.server_name || binding?.serverName || '').trim(),
@@ -4736,6 +5624,8 @@ export class WorkspaceDetailPage {
       enabled: binding?.enabled !== false,
       scope: binding?.scope && typeof binding.scope === 'object' ? { ...binding.scope } : {},
       config: binding?.config && typeof binding.config === 'object' ? { ...binding.config } : {},
+      emailAccount,
+      emailAccountMissing: binding?.email_account_missing === true || binding?.emailAccountMissing === true,
       source
     };
   }
@@ -4848,6 +5738,261 @@ export class WorkspaceDetailPage {
     }
   }
 
+  isEmailWorkspaceMCPServerName(serverName) {
+    switch (String(serverName || '').trim().toLowerCase()) {
+      case 'email':
+      case 'gmail':
+      case 'microsoft-mail':
+      case 'microsoft':
+      case 'outlook-mail':
+      case 'imap-smtp':
+      case 'imap_smtp':
+        return true;
+      default:
+        return false;
+    }
+  }
+
+  normalizeWorkspaceEmailAccount(account) {
+    if (!account || typeof account !== 'object') {
+      return null;
+    }
+
+    return {
+      id: String(account.id || '').trim(),
+      vaultId: String(account.vault_id || account.vaultId || '').trim(),
+      workspaceId: String(account.workspace_id || account.workspaceId || '').trim(),
+      label: String(account.label || '').trim(),
+      provider: String(account.provider || '').trim(),
+      emailAddress: String(account.email_address || account.emailAddress || '').trim(),
+      displayName: String(account.display_name || account.displayName || '').trim(),
+      authType: String(account.auth_type || account.authType || '').trim(),
+      credentials: account.credentials && typeof account.credentials === 'object'
+        ? { ...account.credentials }
+        : (account.credentials_status && typeof account.credentials_status === 'object'
+          ? { ...account.credentials_status }
+          : {})
+    };
+  }
+
+  async loadAvailableEmailAccounts(force = false) {
+    if (!force && Array.isArray(this.availableEmailAccounts) && this.availableEmailAccounts.length > 0) {
+      return this.availableEmailAccounts;
+    }
+    if (!force && this.availableEmailAccountsPromise) {
+      return this.availableEmailAccountsPromise;
+    }
+
+    this.availableEmailAccountsPromise = (async () => {
+      const response = await fetch('/api/vault/email-accounts');
+      if (!response.ok) {
+        const text = await response.text();
+        throw new Error(text || 'Failed to load email accounts');
+      }
+
+      const data = await response.json();
+      const seen = new Set();
+      const accounts = (Array.isArray(data?.accounts) ? data.accounts : [])
+        .map((account) => this.normalizeWorkspaceEmailAccount(account))
+        .filter((account) => account && account.id)
+        .filter((account) => {
+          const key = account.id.toLowerCase();
+          if (seen.has(key)) return false;
+          seen.add(key);
+          return true;
+        })
+        .sort((left, right) => {
+          const leftLabel = left.label || left.emailAddress || left.id;
+          const rightLabel = right.label || right.emailAddress || right.id;
+          return leftLabel.localeCompare(rightLabel);
+        });
+
+      this.availableEmailAccounts = accounts;
+      return accounts;
+    })();
+
+    try {
+      return await this.availableEmailAccountsPromise;
+    } finally {
+      this.availableEmailAccountsPromise = null;
+    }
+  }
+
+  getVisibleWorkspaceEmailAccounts(existingBinding = null) {
+    const workspaceID = String(this.workspaceId || '').trim().toLowerCase();
+    const existingAccount = this.normalizeWorkspaceEmailAccount(existingBinding?.emailAccount);
+    const existingAccountID = String(existingBinding?.config?.account_id || existingAccount?.id || '').trim().toLowerCase();
+    const accounts = Array.isArray(this.availableEmailAccounts) ? [...this.availableEmailAccounts] : [];
+    const filtered = accounts.filter((account) => {
+      const accountWorkspaceID = String(account.workspaceId || '').trim().toLowerCase();
+      return !accountWorkspaceID || accountWorkspaceID === workspaceID;
+    });
+
+    if (existingAccount && existingAccount.id && !filtered.some((account) => account.id.toLowerCase() === existingAccount.id.toLowerCase())) {
+      filtered.unshift(existingAccount);
+    } else if (existingAccountID && !filtered.some((account) => account.id.toLowerCase() === existingAccountID)) {
+      filtered.unshift({
+        id: String(existingBinding?.config?.account_id || '').trim(),
+        label: String(existingBinding?.config?.account_id || 'Unavailable email account'),
+        provider: '',
+        emailAddress: '',
+        authType: '',
+        workspaceId: ''
+      });
+    }
+
+    return filtered;
+  }
+
+  setWorkspaceMCPEmailAccountHelp(message, isError = false) {
+    if (!this.elements.mcpEmailAccountHelp) return;
+    this.elements.mcpEmailAccountHelp.textContent = message;
+    this.elements.mcpEmailAccountHelp.classList.toggle('is-error', !!isError);
+  }
+
+  populateWorkspaceMCPEmailAccountOptions(selectedAccountID = '', existingBinding = null) {
+    if (!this.elements.mcpEmailAccountSelect) return;
+
+    const normalizedSelected = String(selectedAccountID || '').trim();
+    const accounts = this.getVisibleWorkspaceEmailAccounts(existingBinding);
+    const options = ['<option value="">Select an email account</option>'];
+
+    accounts.forEach((account) => {
+      const id = String(account?.id || '').trim();
+      if (!id) return;
+
+      const selected = normalizedSelected && id.toLowerCase() === normalizedSelected.toLowerCase() ? ' selected' : '';
+      const accountLabel = account.label || account.emailAddress || id;
+      const details = [account.provider, account.emailAddress].filter(Boolean).join(' • ');
+      const text = details ? `${accountLabel} (${details})` : accountLabel;
+      options.push(`<option value="${this.escapeHtml(id)}"${selected}>${this.escapeHtml(text)}</option>`);
+    });
+
+    this.elements.mcpEmailAccountSelect.innerHTML = options.join('');
+    if (normalizedSelected) {
+      this.elements.mcpEmailAccountSelect.value = normalizedSelected;
+    }
+
+    if (accounts.length === 0) {
+      this.setWorkspaceMCPEmailAccountHelp('No unlocked email accounts are available. Create one in Vault > Email Accounts.', true);
+      return;
+    }
+
+    this.setWorkspaceMCPEmailAccountHelp('Email accounts come from Vault > Email Accounts. Workspace-scoped accounts must match this workspace.', false);
+  }
+
+  getWorkspaceMCPSelectedEmailActions() {
+    const mapping = [
+      ['read', this.elements.mcpEmailActionRead],
+      ['search', this.elements.mcpEmailActionSearch],
+      ['draft', this.elements.mcpEmailActionDraft],
+      ['send', this.elements.mcpEmailActionSend]
+    ];
+
+    return mapping
+      .filter(([, element]) => element?.checked)
+      .map(([action]) => action);
+  }
+
+  setWorkspaceMCPEmailActions(actions = []) {
+    const selected = new Set(
+      (Array.isArray(actions) ? actions : [])
+        .map((action) => String(action || '').trim().toLowerCase())
+        .filter(Boolean)
+    );
+
+    if (this.elements.mcpEmailActionRead) this.elements.mcpEmailActionRead.checked = selected.has('read');
+    if (this.elements.mcpEmailActionSearch) this.elements.mcpEmailActionSearch.checked = selected.has('search');
+    if (this.elements.mcpEmailActionDraft) this.elements.mcpEmailActionDraft.checked = selected.has('draft');
+    if (this.elements.mcpEmailActionSend) this.elements.mcpEmailActionSend.checked = selected.has('send');
+    this.handleWorkspaceMCPEmailActionChange();
+  }
+
+  handleWorkspaceMCPEmailActionChange() {
+    const selected = this.getWorkspaceMCPSelectedEmailActions();
+    const canSend = selected.includes('send');
+
+    if (this.elements.mcpEmailSendConfirmWrap) {
+      this.elements.mcpEmailSendConfirmWrap.classList.toggle('d-none', !canSend);
+    }
+    if (this.elements.mcpEmailSendConfirmInput && canSend && !this.elements.mcpEmailSendConfirmInput.checked) {
+      this.elements.mcpEmailSendConfirmInput.checked = true;
+    }
+  }
+
+  updateWorkspaceMCPEmailAccountSummary(existingBinding = null) {
+    if (!this.elements.mcpEmailAccountSummary) return;
+
+    const selectedAccountID = String(this.elements.mcpEmailAccountSelect?.value || '').trim();
+    const accounts = this.getVisibleWorkspaceEmailAccounts(existingBinding);
+    const account = accounts.find((item) => String(item?.id || '').trim() === selectedAccountID) || this.normalizeWorkspaceEmailAccount(existingBinding?.emailAccount);
+
+    if (!selectedAccountID && !account) {
+      this.elements.mcpEmailAccountSummary.textContent = 'Select an email account to review its provider, address, and stored credential status.';
+      return;
+    }
+
+    if (!account) {
+      this.elements.mcpEmailAccountSummary.textContent = 'The saved email account is currently unavailable. Unlock the correct vault or choose another account.';
+      return;
+    }
+
+    const credentialState = account.credentials || {};
+    const stored = [];
+    if (credentialState.has_refresh_token) stored.push('refresh token');
+    if (credentialState.has_access_token) stored.push('access token');
+    if (credentialState.has_password) stored.push(account.authType === 'app_password' ? 'app password' : 'password');
+    if (credentialState.has_client_id) stored.push('client id');
+    if (credentialState.has_client_secret) stored.push('client secret');
+
+    const summary = [
+      account.label || account.emailAddress || account.id,
+      account.emailAddress,
+      account.provider,
+      account.authType
+    ].filter(Boolean).join(' • ');
+
+    this.elements.mcpEmailAccountSummary.textContent = stored.length > 0
+      ? `${summary}. Stored in vault: ${stored.join(', ')}.`
+      : `${summary}. No credential status is currently available.`;
+  }
+
+  async syncWorkspaceMCPEmailFields(existingBinding = null) {
+    const serverName = String(this.elements.mcpServerSelect?.value || '').trim();
+    const isEmailServer = this.isEmailWorkspaceMCPServerName(serverName);
+
+    if (this.elements.mcpEmailFields) {
+      this.elements.mcpEmailFields.classList.toggle('d-none', !isEmailServer);
+    }
+    if (this.elements.mcpConfigDetails) {
+      this.elements.mcpConfigDetails.open = !isEmailServer;
+    }
+
+    if (!isEmailServer) {
+      this.updateWorkspaceMCPEmailAccountSummary();
+      return;
+    }
+
+    try {
+      await this.loadAvailableEmailAccounts(true);
+      this.populateWorkspaceMCPEmailAccountOptions(
+        existingBinding?.config?.account_id || this.elements.mcpEmailAccountSelect?.value || '',
+        existingBinding
+      );
+    } catch (error) {
+      console.error('Failed to load email accounts for MCP modal:', error);
+      this.availableEmailAccounts = [];
+      this.populateWorkspaceMCPEmailAccountOptions(
+        existingBinding?.config?.account_id || this.elements.mcpEmailAccountSelect?.value || '',
+        existingBinding
+      );
+      this.setWorkspaceMCPEmailAccountHelp(error.message || 'Failed to load email accounts', true);
+    }
+
+    this.updateWorkspaceMCPEmailAccountSummary(existingBinding);
+    this.handleWorkspaceMCPEmailActionChange();
+  }
+
   getWorkspaceAgentAccessEntry(agentInstanceId) {
     const normalizedAgentInstanceId = String(agentInstanceId || '').trim();
     if (!normalizedAgentInstanceId || !this.workspace || !Array.isArray(this.workspace.agent_mcp_access)) {
@@ -4958,6 +6103,27 @@ export class WorkspaceDetailPage {
 
   summarizeWorkspaceMCPBindingConfig(binding) {
     const config = binding?.config && typeof binding.config === 'object' ? binding.config : {};
+    const serverName = String(binding?.serverName || '').trim().toLowerCase();
+
+    if (this.isEmailWorkspaceMCPServerName(serverName)) {
+      const actions = Array.isArray(config.allowed_actions)
+        ? config.allowed_actions.map((action) => String(action || '').trim()).filter(Boolean)
+        : [];
+      const mailboxes = Array.isArray(config.mailboxes)
+        ? config.mailboxes.map((value) => String(value || '').trim()).filter(Boolean)
+        : [];
+      const parts = [];
+      if (actions.length > 0) {
+        parts.push(actions.join(', '));
+      }
+      if (mailboxes.length > 0) {
+        parts.push(mailboxes.length === 1 ? `1 mailbox` : `${mailboxes.length} mailboxes`);
+      }
+      if (parts.length > 0) {
+        return parts.join(' • ');
+      }
+    }
+
     const entries = Object.entries(config)
       .filter(([key, value]) => String(key || '').trim() && value !== null && value !== undefined);
     if (entries.length === 0) return '';
@@ -4976,6 +6142,12 @@ export class WorkspaceDetailPage {
     const serverName = String(binding?.serverName || '').trim().toLowerCase();
     if (binding?.enabled === false) {
       return 'Saved on this workspace but currently disabled. Re-enable it to materialize at runtime for agent instances.';
+    }
+    if (this.isEmailWorkspaceMCPServerName(serverName) && binding?.emailAccountMissing) {
+      return 'Workspace-scoped email access is configured here, but the referenced vault account is currently unavailable or still locked.';
+    }
+    if (this.isEmailWorkspaceMCPServerName(serverName)) {
+      return 'Workspace-scoped email access backed by a vault account. Policy on this binding limits which mailbox actions agents may perform.';
     }
     if (serverName === 'filesystem' && binding?.source === 'synthesized') {
       return 'Derived from imported workspace directories so filesystem access follows this workspace automatically.';
@@ -5127,9 +6299,28 @@ export class WorkspaceDetailPage {
     if (this.elements.mcpConfigInput) {
       this.elements.mcpConfigInput.value = '';
     }
+    if (this.elements.mcpConfigDetails) {
+      this.elements.mcpConfigDetails.open = true;
+    }
     if (this.elements.mcpAliasInput) {
       this.elements.mcpAliasInput.value = '';
     }
+    if (this.elements.mcpEmailFields) {
+      this.elements.mcpEmailFields.classList.add('d-none');
+    }
+    if (this.elements.mcpEmailAccountSelect) {
+      this.elements.mcpEmailAccountSelect.innerHTML = '<option value="">Select an email account</option>';
+      this.elements.mcpEmailAccountSelect.value = '';
+    }
+    if (this.elements.mcpEmailMailboxInput) {
+      this.elements.mcpEmailMailboxInput.value = '';
+    }
+    this.setWorkspaceMCPEmailActions(['read', 'search']);
+    if (this.elements.mcpEmailSendConfirmInput) {
+      this.elements.mcpEmailSendConfirmInput.checked = true;
+    }
+    this.setWorkspaceMCPEmailAccountHelp('Email accounts come from Vault > Email Accounts.');
+    this.updateWorkspaceMCPEmailAccountSummary();
     if (this.elements.mcpSubmitBtn) {
       this.elements.mcpSubmitBtn.disabled = false;
       this.elements.mcpSubmitBtn.textContent = 'Add Binding';
@@ -5138,13 +6329,19 @@ export class WorkspaceDetailPage {
     this.updateWorkspaceMCPAgentAccessSummary();
   }
 
-  handleWorkspaceMCPServerChange() {
+  async handleWorkspaceMCPServerChange() {
     const serverName = String(this.elements.mcpServerSelect?.value || '').trim();
-    if (!serverName || !this.elements.mcpAliasInput) return;
+    if (!serverName) {
+      await this.syncWorkspaceMCPEmailFields();
+      return;
+    }
+    if (!this.elements.mcpAliasInput) return;
 
     if (!this.elements.mcpAliasInput.value.trim()) {
       this.elements.mcpAliasInput.value = this.slugifyWorkspaceMCPAlias(serverName);
     }
+
+    await this.syncWorkspaceMCPEmailFields();
   }
 
   handleWorkspaceMCPListClick(event) {
@@ -5222,6 +6419,23 @@ export class WorkspaceDetailPage {
         : '';
       this.elements.mcpConfigInput.value = config;
     }
+    const emailConfig = existingBinding?.config && typeof existingBinding.config === 'object'
+      ? existingBinding.config
+      : {};
+    if (this.elements.mcpEmailMailboxInput) {
+      const mailboxes = Array.isArray(emailConfig.mailboxes)
+        ? emailConfig.mailboxes.map((item) => String(item || '').trim()).filter(Boolean)
+        : [];
+      this.elements.mcpEmailMailboxInput.value = mailboxes.join(', ');
+    }
+    this.setWorkspaceMCPEmailActions(
+      Array.isArray(emailConfig.allowed_actions) && emailConfig.allowed_actions.length > 0
+        ? emailConfig.allowed_actions
+        : ['read', 'search']
+    );
+    if (this.elements.mcpEmailSendConfirmInput) {
+      this.elements.mcpEmailSendConfirmInput.checked = emailConfig.require_send_confirmation !== false;
+    }
     if (this.elements.mcpSubmitBtn) {
       this.elements.mcpSubmitBtn.textContent = explicitBinding
         ? 'Save Changes'
@@ -5229,6 +6443,7 @@ export class WorkspaceDetailPage {
       this.elements.mcpSubmitBtn.disabled = false;
     }
 
+    await this.syncWorkspaceMCPEmailFields(existingBinding);
     this.renderWorkspaceMCPAgentOptions(this.activeWorkspaceMCPBindingId);
     this.getWorkspaceMCPModalInstance()?.show();
   }
@@ -5267,6 +6482,45 @@ export class WorkspaceDetailPage {
     }
 
     return parsed;
+  }
+
+  parseWorkspaceMCPEmailMailboxes() {
+    return String(this.elements.mcpEmailMailboxInput?.value || '')
+      .split(/[\n,]+/)
+      .map((value) => String(value || '').trim())
+      .filter(Boolean);
+  }
+
+  buildWorkspaceMCPEmailConfig(baseConfig = {}) {
+    const config = baseConfig && typeof baseConfig === 'object' ? { ...baseConfig } : {};
+    const accountID = String(this.elements.mcpEmailAccountSelect?.value || '').trim();
+    const allowedActions = this.getWorkspaceMCPSelectedEmailActions();
+
+    if (!accountID) {
+      throw new Error('Choose an email account');
+    }
+    if (allowedActions.length === 0) {
+      throw new Error('Select at least one email action');
+    }
+
+    config.account_id = accountID;
+    delete config.account_vault_record_id;
+    config.allowed_actions = allowedActions;
+
+    const mailboxes = this.parseWorkspaceMCPEmailMailboxes();
+    if (mailboxes.length > 0) {
+      config.mailboxes = mailboxes;
+    } else {
+      delete config.mailboxes;
+    }
+
+    if (allowedActions.includes('send')) {
+      config.require_send_confirmation = this.elements.mcpEmailSendConfirmInput?.checked !== false;
+    } else {
+      delete config.require_send_confirmation;
+    }
+
+    return config;
   }
 
   getWorkspaceMCPSelectedAgentInstanceIDs() {
@@ -5411,6 +6665,17 @@ export class WorkspaceDetailPage {
       return;
     }
 
+    if (this.isEmailWorkspaceMCPServerName(serverName)) {
+      try {
+        config = this.buildWorkspaceMCPEmailConfig(config);
+        this.setWorkspaceMCPEmailAccountHelp('Email accounts come from Vault > Email Accounts. Workspace-scoped accounts must match this workspace.', false);
+      } catch (error) {
+        this.setWorkspaceMCPEmailAccountHelp(error.message || 'Email configuration is invalid', true);
+        if (window.Toast) window.Toast.error(error.message || 'Email configuration is invalid');
+        return;
+      }
+    }
+
     this.setWorkspaceMCPServerHelp('Only globally enabled connectors can be added here.');
     this.setWorkspaceMCPModalSubmitting(true);
 
@@ -5494,16 +6759,22 @@ export class WorkspaceDetailPage {
           <div class="workspace-detail-mcp-empty-note">Import directories to synthesize <code>filesystem</code>, or add an explicit binding with the <strong>+</strong> button.</div>
         </div>
       `;
+      this.renderWorkspaceConfigSummary();
       return;
     }
 
     this.elements.mcpList.innerHTML = bindings.map((binding) => {
       const serverName = String(binding?.serverName || '').trim() || 'unknown';
+      const emailServer = this.isEmailWorkspaceMCPServerName(serverName);
+      const emailAccount = this.normalizeWorkspaceEmailAccount(binding?.emailAccount);
       const alias = String(binding?.alias || '').trim();
       const source = binding?.source === 'synthesized' ? 'Synthesized' : 'Explicit';
       const isDisabled = binding?.enabled === false;
       const scopeSummary = this.summarizeWorkspaceMCPBindingScope(binding);
       const configSummary = this.summarizeWorkspaceMCPBindingConfig(binding);
+      const emailActions = Array.isArray(binding?.config?.allowed_actions)
+        ? binding.config.allowed_actions.map((action) => String(action || '').trim()).filter(Boolean)
+        : [];
       const agentNames = this.getWorkspaceMCPAgentNamesForBinding(binding.id);
       const accessSummary = isDisabled
         ? 'Disabled for this workspace'
@@ -5549,6 +6820,11 @@ export class WorkspaceDetailPage {
         `<span class="workspace-detail-mcp-chip source">${this.escapeHtml(source)}</span>`,
         `<span class="workspace-detail-mcp-chip status${isDisabled ? ' is-disabled' : ''}">${isDisabled ? 'Disabled' : 'Enabled'}</span>`,
         alias ? `<span class="workspace-detail-mcp-chip alias">Alias: ${this.escapeHtml(alias)}</span>` : '',
+        emailServer && emailAccount?.provider ? `<span class="workspace-detail-mcp-chip provider">${this.escapeHtml(emailAccount.provider)}</span>` : '',
+        emailServer && emailAccount?.emailAddress ? `<span class="workspace-detail-mcp-chip email">${this.escapeHtml(emailAccount.emailAddress)}</span>` : '',
+        emailServer && emailActions.length > 0 ? `<span class="workspace-detail-mcp-chip policy">${this.escapeHtml(`Actions: ${emailActions.join(', ')}`)}</span>` : '',
+        emailServer && binding?.config?.require_send_confirmation === true ? '<span class="workspace-detail-mcp-chip policy">Send confirm</span>' : '',
+        emailServer && binding?.emailAccountMissing ? '<span class="workspace-detail-mcp-chip warning">Account unavailable</span>' : '',
         scopeSummary ? `<span class="workspace-detail-mcp-chip scope">${this.escapeHtml(scopeSummary)}</span>` : '',
         configSummary ? `<span class="workspace-detail-mcp-chip scope">Config: ${this.escapeHtml(configSummary)}</span>` : '',
         `<span class="workspace-detail-mcp-chip access">${this.escapeHtml(accessLabel)}</span>`
@@ -5571,6 +6847,661 @@ export class WorkspaceDetailPage {
         </div>
       `;
     }).join('');
+    this.renderWorkspaceConfigSummary();
+  }
+
+  // ── Workspace Configuration Methods ─────────────────────────────────
+
+  getWorkspaceConfigStorageKey() {
+    return `workspace-detail-config-expanded:${this.workspaceId}`;
+  }
+
+  readWorkspaceConfigExpandedPreference() {
+    if (typeof window === 'undefined' || !window.localStorage) {
+      return null;
+    }
+
+    try {
+      const stored = window.localStorage.getItem(this.getWorkspaceConfigStorageKey());
+      if (stored === 'true') return true;
+      if (stored === 'false') return false;
+    } catch (error) {
+      console.warn('Failed to read workspace configuration preference:', error);
+    }
+    return null;
+  }
+
+  writeWorkspaceConfigExpandedPreference(expanded) {
+    if (typeof window === 'undefined' || !window.localStorage) {
+      return;
+    }
+
+    try {
+      window.localStorage.setItem(this.getWorkspaceConfigStorageKey(), expanded ? 'true' : 'false');
+    } catch (error) {
+      console.warn('Failed to persist workspace configuration preference:', error);
+    }
+  }
+
+  formatWorkspaceConfigPresetLabel(preset) {
+    const value = String(preset || '').trim();
+    if (!value) return 'Guided';
+    return value
+      .split('_')
+      .filter(Boolean)
+      .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+      .join(' ');
+  }
+
+  formatWorkspaceSettingsProfileLabel(profile) {
+    const normalized = String(profile || '').trim().toLowerCase();
+    switch (normalized) {
+      case 'research':
+        return 'Research';
+      case 'software_project':
+        return 'Software Project';
+      case 'general':
+      default:
+        return 'General';
+    }
+  }
+
+  hasNonDefaultWorkspaceSettings() {
+    const current = this.normalizeWorkspaceSettings(this.workspaceSettings || this.getDefaultWorkspaceSettings());
+    const defaults = this.normalizeWorkspaceSettings(this.getDefaultWorkspaceSettings());
+    return JSON.stringify({
+      workflow: current.workflow,
+      planning: current.planning
+    }) !== JSON.stringify({
+      workflow: defaults.workflow,
+      planning: defaults.planning
+    });
+  }
+
+  shouldDefaultExpandWorkspaceConfig() {
+    return false;
+  }
+
+  setWorkspaceConfigExpanded(expanded, options = {}) {
+    const nextExpanded = expanded !== false;
+    this.workspaceConfigExpanded = nextExpanded;
+
+    if (this.elements.configPanel) {
+      this.elements.configPanel.classList.toggle('is-collapsed', !nextExpanded);
+    }
+    if (this.elements.configContent) {
+      this.elements.configContent.hidden = !nextExpanded;
+    }
+    if (this.elements.configToggleBtn) {
+      this.elements.configToggleBtn.setAttribute('aria-expanded', nextExpanded ? 'true' : 'false');
+    }
+    if (this.elements.configToggleLabel) {
+      this.elements.configToggleLabel.textContent = nextExpanded ? 'Hide Configuration' : 'Show Configuration';
+    }
+
+    if (options.persist !== false) {
+      this.writeWorkspaceConfigExpandedPreference(nextExpanded);
+    }
+  }
+
+  initializeWorkspaceConfigExpansion() {
+    if (this.workspaceConfigPreferenceLoaded) {
+      this.setWorkspaceConfigExpanded(this.workspaceConfigExpanded, { persist: false });
+      return;
+    }
+
+    const storedPreference = this.readWorkspaceConfigExpandedPreference();
+    const nextExpanded = storedPreference === null
+      ? this.shouldDefaultExpandWorkspaceConfig()
+      : storedPreference;
+
+    this.workspaceConfigPreferenceLoaded = true;
+    this.setWorkspaceConfigExpanded(nextExpanded, { persist: false });
+  }
+
+  toggleWorkspaceConfigExpanded() {
+    this.setWorkspaceConfigExpanded(!this.workspaceConfigExpanded);
+  }
+
+  renderWorkspaceConfigSummary() {
+    const settings = this.normalizeWorkspaceSettings(this.workspaceSettings || this.getDefaultWorkspaceSettings());
+    const profile = this.normalizeWorkspaceSettingsProfile(settings.profile);
+    const preset = this.deriveWorkspaceSettingsPreset(settings);
+    const connectionCount = this.getWorkspaceMCPBindings({ includeDisabled: true }).length;
+    const skillCount = this.getWorkspaceSkillBindings({ includeDisabled: true }).length;
+
+    if (this.elements.configPresetChip) {
+      this.elements.configPresetChip.textContent = `Workspace: ${this.formatWorkspaceSettingsProfileLabel(profile)} · ${this.formatWorkspaceConfigPresetLabel(preset)}`;
+    }
+    if (this.elements.configConnectionsChip) {
+      this.elements.configConnectionsChip.textContent = `Connections: ${connectionCount}`;
+    }
+    if (this.elements.configSkillsChip) {
+      this.elements.configSkillsChip.textContent = `Skills: ${skillCount}`;
+    }
+
+    this.initializeWorkspaceConfigExpansion();
+  }
+
+  // ── Workspace Settings Methods ───────────────────────────────────────
+
+  getWorkspaceSettingsPresets() {
+    return ['minimal', 'guided', 'planner', 'autonomous'];
+  }
+
+  getWorkspaceSettingsProfiles() {
+    return ['general', 'research', 'software_project'];
+  }
+
+  getDefaultWorkspaceSettingsPresetForProfile(profile = 'general') {
+    switch (this.normalizeWorkspaceSettingsProfile(profile)) {
+      case 'software_project':
+        return 'planner';
+      case 'research':
+        return 'guided';
+      case 'general':
+      default:
+        return 'guided';
+    }
+  }
+
+  buildWorkspaceSettingsPreset(preset = '', profile = 'general') {
+    const normalizedProfile = this.normalizeWorkspaceSettingsProfile(profile);
+    const requestedPreset = String(preset || '').trim().toLowerCase();
+    const normalizedPreset = requestedPreset
+      ? this.normalizeWorkspaceSettingsPreset(requestedPreset)
+      : this.getDefaultWorkspaceSettingsPresetForProfile(normalizedProfile);
+    const basePreset = normalizedPreset === 'custom'
+      ? this.getDefaultWorkspaceSettingsPresetForProfile(normalizedProfile)
+      : normalizedPreset;
+    const settings = {
+      version: 1,
+      profile: normalizedProfile,
+      preset: normalizedPreset,
+      workflow: {
+        mode: 'guided',
+        require_repo_scan: false,
+        save_outputs_as_notes: true,
+        sync_plans_to_tasks: false,
+        ask_before_specialist_handoff: true,
+        confirmation_mode: 'destructive_only'
+      },
+      planning: {
+        enabled: false,
+        mode: 'feature',
+        write_prd: true,
+        write_task_list: true,
+        tasks_dir: 'tasks',
+        clarification_mode: 'standard',
+        default_execution_mode: 'step_through',
+        require_branch: true
+      }
+    };
+
+    switch (basePreset) {
+      case 'minimal':
+        settings.workflow.mode = 'direct';
+        settings.workflow.save_outputs_as_notes = false;
+        settings.workflow.ask_before_specialist_handoff = false;
+        settings.planning.write_prd = false;
+        settings.planning.write_task_list = false;
+        break;
+      case 'planner':
+        settings.workflow.mode = 'plan_then_execute';
+        settings.workflow.require_repo_scan = true;
+        settings.workflow.sync_plans_to_tasks = true;
+        settings.planning.enabled = true;
+        break;
+      case 'autonomous':
+        settings.workflow.mode = 'plan_then_execute';
+        settings.workflow.require_repo_scan = true;
+        settings.workflow.sync_plans_to_tasks = true;
+        settings.workflow.ask_before_specialist_handoff = false;
+        settings.workflow.confirmation_mode = 'none';
+        settings.planning.enabled = true;
+        settings.planning.default_execution_mode = 'auto';
+        break;
+      default:
+        break;
+    }
+
+    switch (normalizedProfile) {
+      case 'research':
+        settings.planning.mode = 'investigation';
+        settings.planning.write_prd = false;
+        settings.planning.write_task_list = false;
+        settings.planning.clarification_mode = 'deep';
+        settings.planning.require_branch = false;
+        break;
+      case 'software_project':
+        settings.planning.mode = 'feature';
+        settings.planning.write_prd = true;
+        settings.planning.write_task_list = true;
+        settings.planning.clarification_mode = 'standard';
+        settings.planning.require_branch = true;
+        break;
+      default:
+        break;
+    }
+
+    return settings;
+  }
+
+  getDefaultWorkspaceSettings() {
+    return this.buildWorkspaceSettingsPreset('', 'general');
+  }
+
+  normalizeWorkspaceSettingsPreset(value) {
+    const normalized = String(value || '').trim().toLowerCase();
+    if (['minimal', 'guided', 'planner', 'autonomous', 'custom'].includes(normalized)) {
+      return normalized;
+    }
+    return 'guided';
+  }
+
+  normalizeWorkspaceSettingsProfile(value) {
+    const normalized = String(value || '').trim().toLowerCase();
+    if (this.getWorkspaceSettingsProfiles().includes(normalized)) {
+      return normalized;
+    }
+    return 'general';
+  }
+
+  inferWorkspaceSettingsProfile(settings = {}) {
+    const raw = settings && typeof settings === 'object' && !Array.isArray(settings) ? settings : {};
+    const explicit = String(raw.profile || '').trim().toLowerCase();
+    if (this.getWorkspaceSettingsProfiles().includes(explicit)) {
+      return explicit;
+    }
+
+    const preset = this.normalizeWorkspaceSettingsPreset(raw.preset || '');
+    if (preset === 'planner' || preset === 'autonomous') {
+      return 'software_project';
+    }
+
+    const planning = raw.planning && typeof raw.planning === 'object' && !Array.isArray(raw.planning) ? raw.planning : {};
+    const planningMode = String(planning.mode || '').trim().toLowerCase();
+    const clarificationMode = String(planning.clarification_mode || '').trim().toLowerCase();
+    if (planningMode === 'investigation' || clarificationMode === 'deep') {
+      return 'research';
+    }
+
+    return 'general';
+  }
+
+  normalizeWorkspaceSettingsMode(value) {
+    const normalized = String(value || '').trim().toLowerCase();
+    if (['direct', 'guided', 'plan_then_execute'].includes(normalized)) {
+      return normalized;
+    }
+    return 'guided';
+  }
+
+  normalizeWorkspaceSettingsConfirmationMode(value) {
+    const normalized = String(value || '').trim().toLowerCase();
+    if (['none', 'always', 'destructive_only'].includes(normalized)) {
+      return normalized;
+    }
+    return 'destructive_only';
+  }
+
+  normalizeWorkspaceSettings(settings = {}) {
+    const raw = settings && typeof settings === 'object' && !Array.isArray(settings) ? settings : {};
+    const profile = this.inferWorkspaceSettingsProfile(raw);
+    const rawPreset = String(raw.preset || '').trim();
+    const preset = rawPreset
+      ? this.normalizeWorkspaceSettingsPreset(rawPreset)
+      : this.getDefaultWorkspaceSettingsPresetForProfile(profile);
+    const base = this.buildWorkspaceSettingsPreset(
+      preset === 'custom' ? this.getDefaultWorkspaceSettingsPresetForProfile(profile) : preset,
+      profile
+    );
+    const workflow = raw.workflow && typeof raw.workflow === 'object' && !Array.isArray(raw.workflow) ? raw.workflow : {};
+    const planning = raw.planning && typeof raw.planning === 'object' && !Array.isArray(raw.planning) ? raw.planning : {};
+    const boolOrDefault = (value, fallback) => (typeof value === 'boolean' ? value : fallback);
+
+    return {
+      version: Number.isFinite(Number(raw.version)) && Number(raw.version) > 0 ? Number(raw.version) : 1,
+      profile,
+      preset,
+      workflow: {
+        mode: this.normalizeWorkspaceSettingsMode(workflow.mode || base.workflow.mode),
+        require_repo_scan: boolOrDefault(workflow.require_repo_scan, base.workflow.require_repo_scan),
+        save_outputs_as_notes: boolOrDefault(workflow.save_outputs_as_notes, base.workflow.save_outputs_as_notes),
+        sync_plans_to_tasks: boolOrDefault(workflow.sync_plans_to_tasks, base.workflow.sync_plans_to_tasks),
+        ask_before_specialist_handoff: boolOrDefault(workflow.ask_before_specialist_handoff, base.workflow.ask_before_specialist_handoff),
+        confirmation_mode: this.normalizeWorkspaceSettingsConfirmationMode(workflow.confirmation_mode || base.workflow.confirmation_mode)
+      },
+      planning: {
+        enabled: boolOrDefault(planning.enabled, base.planning.enabled),
+        mode: this.normalizeWorkspacePlanningConfig({ mode: planning.mode || base.planning.mode }).mode,
+        write_prd: boolOrDefault(planning.write_prd, base.planning.write_prd),
+        write_task_list: boolOrDefault(planning.write_task_list, base.planning.write_task_list),
+        tasks_dir: String(planning.tasks_dir || base.planning.tasks_dir || '').trim() || 'tasks',
+        clarification_mode: this.normalizeWorkspacePlanningConfig({ clarification_mode: planning.clarification_mode || base.planning.clarification_mode }).clarification_mode,
+        default_execution_mode: this.normalizeWorkspacePlanningConfig({ default_execution_mode: planning.default_execution_mode || base.planning.default_execution_mode }).default_execution_mode,
+        require_branch: boolOrDefault(planning.require_branch, base.planning.require_branch)
+      },
+      updated_at: typeof raw.updated_at === 'string' ? raw.updated_at : ''
+    };
+  }
+
+  deriveWorkspaceSettingsPreset(settings = {}) {
+    const normalized = this.normalizeWorkspaceSettings(settings);
+    const normalizedSignature = JSON.stringify({
+      workflow: normalized.workflow,
+      planning: normalized.planning
+    });
+
+    const matchingPreset = this.getWorkspaceSettingsPresets().find((preset) => {
+      const candidate = this.buildWorkspaceSettingsPreset(preset, normalized.profile);
+      return JSON.stringify({
+        workflow: candidate.workflow,
+        planning: candidate.planning
+      }) === normalizedSignature;
+    });
+
+    return matchingPreset || 'custom';
+  }
+
+  toWorkspacePlanningSkillConfig(settings = {}) {
+    const normalized = this.normalizeWorkspaceSettings(settings);
+    return {
+      profile_type: 'workspace_planning',
+      mode: normalized.planning.mode,
+      write_prd: normalized.planning.write_prd,
+      write_task_list: normalized.planning.write_task_list,
+      tasks_dir: normalized.planning.tasks_dir,
+      clarification_mode: normalized.planning.clarification_mode,
+      sync_workspace_tasks: normalized.workflow.sync_plans_to_tasks,
+      default_execution_mode: normalized.planning.default_execution_mode,
+      require_branch: normalized.planning.require_branch
+    };
+  }
+
+  buildWorkspaceSettingsEffectiveBehavior(settings = {}) {
+    const normalized = this.normalizeWorkspaceSettings(settings);
+    const effective = {
+      workflow: { ...normalized.workflow },
+      planning: { ...normalized.planning },
+      summary: this.getWorkspaceSettingsSummaryItems(normalized),
+      managed_skills: []
+    };
+
+    if (normalized.planning.enabled) {
+      effective.managed_skills = [
+        {
+          skill_name: 'workspace-planning',
+          source: 'settings',
+          active: true,
+          reason: 'planning.enabled',
+          config: this.toWorkspacePlanningSkillConfig(normalized)
+        }
+      ];
+    }
+
+    return effective;
+  }
+
+  getWorkspaceSettingsSummaryItems(settings = {}) {
+    const normalized = this.normalizeWorkspaceSettings(settings);
+    const summary = [
+      `Workspace preset: ${this.formatWorkspaceSettingsProfileLabel(normalized.profile)}`,
+      `Workflow style: ${this.formatWorkspaceConfigPresetLabel(normalized.preset)}`,
+      `Interaction mode: ${normalized.workflow.mode}`,
+      `Confirmation mode: ${normalized.workflow.confirmation_mode}`,
+      `Save useful outputs as workspace notes: ${normalized.workflow.save_outputs_as_notes}`,
+      `Ask before specialist handoff: ${normalized.workflow.ask_before_specialist_handoff}`,
+      `Structured planning workflow: ${normalized.planning.enabled ? 'enabled' : 'disabled'}`
+    ];
+
+    if (normalized.planning.enabled) {
+      summary.push(`Planning style: ${normalized.planning.mode}`);
+    }
+    if (normalized.workflow.sync_plans_to_tasks) {
+      summary.push('Approved plans sync into workspace tasks');
+    }
+    if (normalized.workflow.require_repo_scan) {
+      summary.push('Repo scan required before code work');
+    }
+
+    return summary;
+  }
+
+  normalizeWorkspaceSettingsEffectiveBehavior(effectiveBehavior, settings = {}) {
+    const raw = effectiveBehavior && typeof effectiveBehavior === 'object' && !Array.isArray(effectiveBehavior)
+      ? effectiveBehavior
+      : null;
+    const fallback = this.buildWorkspaceSettingsEffectiveBehavior(settings);
+    if (!raw) {
+      return fallback;
+    }
+
+    return {
+      workflow: raw.workflow && typeof raw.workflow === 'object' ? { ...fallback.workflow, ...raw.workflow } : fallback.workflow,
+      planning: raw.planning && typeof raw.planning === 'object' ? { ...fallback.planning, ...raw.planning } : fallback.planning,
+      summary: this.getWorkspaceSettingsSummaryItems({
+        profile: this.normalizeWorkspaceSettingsProfile(raw.profile || settings.profile || fallback.profile),
+        preset: this.normalizeWorkspaceSettingsPreset(raw.preset || settings.preset || fallback.preset),
+        workflow: raw.workflow && typeof raw.workflow === 'object' ? { ...fallback.workflow, ...raw.workflow } : fallback.workflow,
+        planning: raw.planning && typeof raw.planning === 'object' ? { ...fallback.planning, ...raw.planning } : fallback.planning
+      }),
+      managed_skills: Array.isArray(raw.managed_skills) ? raw.managed_skills : fallback.managed_skills
+    };
+  }
+
+  populateWorkspaceSettingsForm(settings = {}) {
+    const normalized = this.normalizeWorkspaceSettings(settings);
+
+    if (this.elements.settingsProfileInput) {
+      this.elements.settingsProfileInput.value = normalized.profile;
+    }
+    if (this.elements.settingsPresetInput) {
+      this.elements.settingsPresetInput.value = normalized.preset;
+    }
+    if (this.elements.settingsModeInput) {
+      this.elements.settingsModeInput.value = normalized.workflow.mode;
+    }
+    if (this.elements.settingsConfirmationInput) {
+      this.elements.settingsConfirmationInput.value = normalized.workflow.confirmation_mode;
+    }
+    if (this.elements.settingsPlanEnabledInput) {
+      this.elements.settingsPlanEnabledInput.checked = normalized.planning.enabled === true;
+    }
+    if (this.elements.settingsRequireScanInput) {
+      this.elements.settingsRequireScanInput.checked = normalized.workflow.require_repo_scan === true;
+    }
+    if (this.elements.settingsSaveNotesInput) {
+      this.elements.settingsSaveNotesInput.checked = normalized.workflow.save_outputs_as_notes !== false;
+    }
+    if (this.elements.settingsSyncTasksInput) {
+      this.elements.settingsSyncTasksInput.checked = normalized.workflow.sync_plans_to_tasks === true;
+    }
+    if (this.elements.settingsAskHandoffInput) {
+      this.elements.settingsAskHandoffInput.checked = normalized.workflow.ask_before_specialist_handoff === true;
+    }
+    if (this.elements.settingsPlanningModeInput) {
+      this.elements.settingsPlanningModeInput.value = normalized.planning.mode;
+    }
+    if (this.elements.settingsClarificationModeInput) {
+      this.elements.settingsClarificationModeInput.value = normalized.planning.clarification_mode;
+    }
+    if (this.elements.settingsTasksDirInput) {
+      this.elements.settingsTasksDirInput.value = normalized.planning.tasks_dir;
+    }
+    if (this.elements.settingsExecutionModeInput) {
+      this.elements.settingsExecutionModeInput.value = normalized.planning.default_execution_mode;
+    }
+    if (this.elements.settingsWritePRDInput) {
+      this.elements.settingsWritePRDInput.checked = normalized.planning.write_prd !== false;
+    }
+    if (this.elements.settingsWriteTaskListInput) {
+      this.elements.settingsWriteTaskListInput.checked = normalized.planning.write_task_list !== false;
+    }
+    if (this.elements.settingsRequireBranchInput) {
+      this.elements.settingsRequireBranchInput.checked = normalized.planning.require_branch !== false;
+    }
+  }
+
+  buildWorkspaceSettingsFromForm() {
+    const selectedProfile = String(this.elements.settingsProfileInput?.value || this.workspaceSettings?.profile || 'general').trim();
+    const settings = this.normalizeWorkspaceSettings({
+      version: this.workspaceSettings?.version || 1,
+      profile: selectedProfile,
+      preset: String(
+        this.elements.settingsPresetInput?.value
+        || this.workspaceSettings?.preset
+        || this.getDefaultWorkspaceSettingsPresetForProfile(selectedProfile)
+      ).trim(),
+      workflow: {
+        mode: String(this.elements.settingsModeInput?.value || '').trim(),
+        require_repo_scan: this.elements.settingsRequireScanInput?.checked === true,
+        save_outputs_as_notes: this.elements.settingsSaveNotesInput?.checked !== false,
+        sync_plans_to_tasks: this.elements.settingsSyncTasksInput?.checked === true,
+        ask_before_specialist_handoff: this.elements.settingsAskHandoffInput?.checked === true,
+        confirmation_mode: String(this.elements.settingsConfirmationInput?.value || '').trim()
+      },
+      planning: {
+        enabled: this.elements.settingsPlanEnabledInput?.checked === true,
+        mode: String(this.elements.settingsPlanningModeInput?.value || '').trim(),
+        write_prd: this.elements.settingsWritePRDInput?.checked !== false,
+        write_task_list: this.elements.settingsWriteTaskListInput?.checked !== false,
+        tasks_dir: String(this.elements.settingsTasksDirInput?.value || '').trim(),
+        clarification_mode: String(this.elements.settingsClarificationModeInput?.value || '').trim(),
+        default_execution_mode: String(this.elements.settingsExecutionModeInput?.value || '').trim(),
+        require_branch: this.elements.settingsRequireBranchInput?.checked !== false
+      }
+    });
+
+    settings.preset = this.deriveWorkspaceSettingsPreset(settings);
+    return settings;
+  }
+
+  renderWorkspaceSettingsSummary(settings = {}, effectiveBehavior = null) {
+    const normalized = this.normalizeWorkspaceSettings(settings);
+    const effective = this.normalizeWorkspaceSettingsEffectiveBehavior(effectiveBehavior, normalized);
+
+    if (this.elements.settingsSummary) {
+      if (effective.summary.length === 0) {
+        this.elements.settingsSummary.textContent = 'No effective behavior summary available.';
+      } else {
+        this.elements.settingsSummary.innerHTML = `
+          <ul class="workspace-detail-settings-summary-list">
+            ${effective.summary.map((item) => `<li>${this.escapeHtml(item)}</li>`).join('')}
+          </ul>
+        `;
+      }
+    }
+
+    if (this.elements.settingsManagedSkills) {
+      if (!Array.isArray(effective.managed_skills) || effective.managed_skills.length === 0) {
+        this.elements.settingsManagedSkills.textContent = 'No settings-managed workflows active.';
+      } else {
+        this.elements.settingsManagedSkills.innerHTML = effective.managed_skills.map((skill) => {
+          const skillName = String(skill?.skill_name || skill?.skillName || '').trim() || 'unknown-skill';
+          const displayName = skillName === 'workspace-planning' ? 'Structured planning' : skillName;
+          const source = String(skill?.source || '').trim() || 'settings';
+          const reason = String(skill?.reason || '').trim();
+          const planningSummary = skillName === 'workspace-planning'
+            ? this.getWorkspacePlanningSummary(skill?.config || this.toWorkspacePlanningSkillConfig(normalized))
+            : '';
+          const detail = skillName === 'workspace-planning'
+            ? planningSummary || 'Controlled by workspace settings'
+            : [source, reason].filter(Boolean).join(' • ');
+
+          return `
+            <div class="workspace-detail-settings-managed-entry">
+              <div class="workspace-detail-settings-managed-name">${this.escapeHtml(displayName)}</div>
+              <div class="workspace-detail-settings-managed-meta">${this.escapeHtml(detail || 'Managed by workspace settings')}</div>
+            </div>
+          `;
+        }).join('');
+      }
+    }
+  }
+
+  renderWorkspaceSettings() {
+    const settings = this.normalizeWorkspaceSettings(this.workspaceSettings || this.getDefaultWorkspaceSettings());
+    const effective = this.normalizeWorkspaceSettingsEffectiveBehavior(this.workspaceSettingsEffectiveBehavior, settings);
+
+    this.workspaceSettings = settings;
+    this.workspaceSettingsEffectiveBehavior = effective;
+    this.populateWorkspaceSettingsForm(settings);
+    this.renderWorkspaceSettingsSummary(settings, effective);
+    this.renderWorkspaceConfigSummary();
+  }
+
+  handleWorkspaceSettingsPresetChange() {
+    const preset = this.normalizeWorkspaceSettingsPreset(this.elements.settingsPresetInput?.value || 'guided');
+    const profile = this.normalizeWorkspaceSettingsProfile(this.elements.settingsProfileInput?.value || this.workspaceSettings?.profile || 'general');
+    if (preset === 'custom') {
+      this.handleWorkspaceSettingsFieldChange();
+      return;
+    }
+
+    this.workspaceSettings = this.buildWorkspaceSettingsPreset(preset, profile);
+    this.workspaceSettingsEffectiveBehavior = this.buildWorkspaceSettingsEffectiveBehavior(this.workspaceSettings);
+    this.renderWorkspaceSettings();
+  }
+
+  handleWorkspaceSettingsProfileChange() {
+    const profile = this.normalizeWorkspaceSettingsProfile(this.elements.settingsProfileInput?.value || 'general');
+    const preset = this.getDefaultWorkspaceSettingsPresetForProfile(profile);
+
+    this.workspaceSettings = this.buildWorkspaceSettingsPreset(preset, profile);
+    this.workspaceSettingsEffectiveBehavior = this.buildWorkspaceSettingsEffectiveBehavior(this.workspaceSettings);
+    this.renderWorkspaceSettings();
+  }
+
+  handleWorkspaceSettingsFieldChange() {
+    const settings = this.buildWorkspaceSettingsFromForm();
+    this.workspaceSettings = settings;
+    this.workspaceSettingsEffectiveBehavior = this.buildWorkspaceSettingsEffectiveBehavior(settings);
+    this.renderWorkspaceSettings();
+  }
+
+  setWorkspaceSettingsSubmitting(isSubmitting) {
+    if (!this.elements.settingsSaveBtn) return;
+    this.elements.settingsSaveBtn.disabled = isSubmitting;
+    this.elements.settingsSaveBtn.textContent = isSubmitting ? 'Saving...' : 'Save Settings';
+  }
+
+  async saveWorkspaceSettings() {
+    const payload = this.buildWorkspaceSettingsFromForm();
+    this.setWorkspaceSettingsSubmitting(true);
+
+    try {
+      const response = await fetch(`/api/workspaces/${encodeURIComponent(this.workspaceId)}/settings`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+
+      if (!response.ok) {
+        const text = await response.text();
+        throw new Error(text || 'Failed to save workspace settings');
+      }
+
+      const data = await response.json();
+      this.workspaceSettings = this.normalizeWorkspaceSettings(data?.settings || payload);
+      this.workspaceSettingsEffectiveBehavior = this.normalizeWorkspaceSettingsEffectiveBehavior(
+        data?.effective_behavior,
+        this.workspaceSettings
+      );
+      this.renderWorkspaceSettings();
+      await this.loadWorkspace();
+
+      if (window.Toast) {
+        window.Toast.success('Workspace settings saved');
+      }
+    } catch (error) {
+      console.error('Failed to save workspace settings:', error);
+      if (window.Toast) {
+        window.Toast.error(error.message || 'Failed to save workspace settings');
+      }
+    } finally {
+      this.setWorkspaceSettingsSubmitting(false);
+    }
   }
 
   // ── Workspace Skill Binding Methods ──────────────────────────────────
@@ -6302,6 +8233,7 @@ export class WorkspaceDetailPage {
           <div class="workspace-detail-mcp-empty-note">Add a skill with the <strong>+</strong> button to make it available to agents in this workspace.</div>
         </div>
       `;
+      this.renderWorkspaceConfigSummary();
       return;
     }
 
@@ -6360,6 +8292,7 @@ export class WorkspaceDetailPage {
         </div>
       `;
     }).join('');
+    this.renderWorkspaceConfigSummary();
   }
 
   getAgentInstanceIdsForName(agentName) {
@@ -6589,6 +8522,44 @@ export class WorkspaceDetailPage {
 
   async getTaskExecutionPreflight(task, assignedAgent) {
     const description = String(task?.description || task?.name || '').trim();
+    const specialistAction = this.maybeBuildTravelAssistSpecialistAction({
+      task,
+      currentAgent: assignedAgent
+    });
+    if (specialistAction) {
+      if (specialistAction.kind === 'switch' || specialistAction.kind === 'add_and_switch') {
+        return {
+          kind: 'switch_recommended',
+          recommendedAgent: specialistAction.agentName,
+          addToWorkspace: specialistAction.kind === 'add_and_switch',
+          eyebrow: 'Specialist Handoff',
+          confirmLabel: specialistAction.kind === 'add_and_switch' ? 'Add and Switch' : 'Switch Agent',
+          message: specialistAction.copy || this.buildAssistSpecialistActionText(specialistAction),
+          details: [
+            String(specialistAction.description || '').trim(),
+            'Substantive travel work should start with the specialist rather than the workspace manager.'
+          ].filter(Boolean)
+        };
+      }
+      if (specialistAction.kind === 'create') {
+        return {
+          kind: 'create_recommended',
+          eyebrow: 'Specialist Handoff',
+          title: `Create "${specialistAction.agentName}" before running?`,
+          confirmLabel: 'Create Agent',
+          message: specialistAction.copy || this.buildAssistSpecialistActionText(specialistAction),
+          details: [
+            String(specialistAction.description || '').trim(),
+            'Create the travel specialist first, then assign this task there.'
+          ].filter(Boolean),
+          seedName: specialistAction.agentName,
+          seedType: specialistAction.agentType || 'tool-calling',
+          seedSystemPrompt: String(specialistAction.systemPrompt || '').trim(),
+          autoDescription: String(specialistAction.description || '').trim()
+        };
+      }
+    }
+
     const requirements = this.inferTaskExecutionRequirements(description);
     if (requirements.length === 0) {
       return { kind: 'none' };
@@ -7064,10 +9035,10 @@ export class WorkspaceDetailPage {
       const preflight = await this.getTaskExecutionPreflight(task, assignedAgent);
       if (preflight.kind === 'switch_recommended' && preflight.recommendedAgent) {
         const switchNow = await this.showTaskConfirmDialog({
-          eyebrow: 'Capability Check',
+          eyebrow: preflight.eyebrow || 'Capability Check',
           title: `Switch to "${preflight.recommendedAgent}" before running?`,
           message: preflight.message,
-          confirmLabel: 'Switch Agent',
+          confirmLabel: preflight.confirmLabel || 'Switch Agent',
           metaItems: [this.getTaskDisplayLabel(task), preflight.recommendedAgent, 'Recommended agent'],
           details: Array.isArray(preflight.details) && preflight.details.length > 0
             ? preflight.details
@@ -7076,6 +9047,9 @@ export class WorkspaceDetailPage {
         });
         if (switchNow) {
           try {
+            if (preflight.addToWorkspace === true) {
+              await this.addAgentToWorkspace(preflight.recommendedAgent, { toast: false });
+            }
             await this.assignTaskToAgent(taskId, preflight.recommendedAgent);
             assignedAgent = preflight.recommendedAgent;
             task.to = preflight.recommendedAgent;
@@ -7090,10 +9064,10 @@ export class WorkspaceDetailPage {
         }
       } else if (preflight.kind === 'create_recommended') {
         const createAgent = await this.showTaskConfirmDialog({
-          eyebrow: 'Capability Check',
-          title: 'Create a capable agent before running?',
+          eyebrow: preflight.eyebrow || 'Capability Check',
+          title: preflight.title || 'Create a capable agent before running?',
           message: preflight.message,
-          confirmLabel: 'Create Agent',
+          confirmLabel: preflight.confirmLabel || 'Create Agent',
           cancelLabel: 'Continue Anyway',
           metaItems: [this.getTaskDisplayLabel(task), assignedAgent, 'Current assignment'],
           details: Array.isArray(preflight.details) ? preflight.details : [],
@@ -7103,6 +9077,7 @@ export class WorkspaceDetailPage {
           this.openCreateAgentFlow({
             seedName: String(preflight.seedName || '').trim(),
             seedType: String(preflight.seedType || '').trim(),
+            seedSystemPrompt: String(preflight.seedSystemPrompt || '').trim(),
             autoDescription: String(preflight.autoDescription || '').trim(),
             preferAutoConfig: true,
             workspaceId: this.workspaceId,

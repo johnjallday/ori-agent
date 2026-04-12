@@ -11,8 +11,41 @@
 
 WORKTREE_DIR="../"
 BASE_BRANCH="dev"
+PROTECTED_WORKTREES=("ori-agent" "ori-agent-dev")
 
 unalias wt 2>/dev/null
+
+function wt_is_protected_worktree {
+  local candidate="$1"
+  local candidate_name="${candidate:t}"
+  local protected_name
+
+  for protected_name in "${PROTECTED_WORKTREES[@]}"; do
+    if [[ "$candidate_name" == "$protected_name" ]]; then
+      return 0
+    fi
+  done
+
+  return 1
+}
+
+function wt_resolve_worktree_path {
+  local name="$1"
+  local absolute_name="${name:A}"
+  local line
+  local worktree_path
+
+  while IFS= read -r line; do
+    [[ "$line" == worktree\ * ]] || continue
+    worktree_path="${line#worktree }"
+    if [[ "${worktree_path:t}" == "$name" || "$worktree_path" == "$name" || "$worktree_path" == "$absolute_name" ]]; then
+      print -r -- "$worktree_path"
+      return 0
+    fi
+  done < <(git worktree list --porcelain)
+
+  print -r -- "${WORKTREE_DIR}${name}"
+}
 
 function wt {
   local script_dir="${0:A:h}"
@@ -29,11 +62,17 @@ function wt {
     ;;
   rm)
     local name="$2"
+    local target_path
     if [[ -z "$name" ]]; then
       echo "Usage: wt rm <name>"
       return 1
     fi
-    git worktree remove "$WORKTREE_DIR$name" --force
+    target_path="$(wt_resolve_worktree_path "$name")"
+    if wt_is_protected_worktree "$target_path"; then
+      echo "Refusing to remove protected worktree: ${target_path:t}"
+      return 1
+    fi
+    git worktree remove "$target_path" --force
     git branch -D "feature/$name" 2>/dev/null
     echo "Removed worktree and branch: $name"
     ;;

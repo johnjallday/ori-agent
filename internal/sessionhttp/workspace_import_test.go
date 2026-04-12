@@ -9,6 +9,9 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
+
+	agentworkspace "github.com/johnjallday/ori-agent/internal/workspace"
 )
 
 func TestHandleWorkspaceImportCreatesWorkspaceWithDirectoryReference(t *testing.T) {
@@ -95,6 +98,140 @@ func TestHandleWorkspaceImportCreatesWorkspaceWithDirectoryReference(t *testing.
 	}
 	if bootstrapMap["systems"] != "Keynote, Finder" {
 		t.Fatalf("expected workspace_bootstrap.systems to persist, got %#v", bootstrapMap["systems"])
+	}
+}
+
+func TestHandleWorkspaceImportRestoresExportedWorkspaceAgents(t *testing.T) {
+	handler, cleanup := createTestHandler(t)
+	defer cleanup()
+
+	storeDir := t.TempDir()
+	fileStore, err := agentworkspace.NewFileStore(storeDir)
+	if err != nil {
+		t.Fatalf("NewFileStore: %v", err)
+	}
+	defer func() { _ = fileStore.Close() }()
+	handler.SetWorkspaceStore(fileStore)
+
+	exportRoot := filepath.Join(t.TempDir(), "spain-export")
+	childDir := filepath.Join(exportRoot, agentworkspace.SubWorkspacesDir, "madrid")
+	if err := os.MkdirAll(childDir, 0755); err != nil {
+		t.Fatalf("failed to create exported workspace folders: %v", err)
+	}
+
+	now := time.Now()
+	rootWorkspace := &agentworkspace.Workspace{
+		ID:         "ws-imported-spain",
+		Name:       "Spain",
+		FolderSlug: "spain-export",
+		Agents:     []string{"Trip Manager"},
+		SharedData: map[string]interface{}{"entry_agent_name": "Trip Manager"},
+		Status:     agentworkspace.StatusActive,
+		CreatedAt:  now,
+		UpdatedAt:  now,
+		AgentInstances: []agentworkspace.AgentInstance{
+			{
+				ID:             "trip-manager-1",
+				Name:           "Trip Manager",
+				InstanceNumber: 1,
+				NodeID:         "trip-manager-node-1",
+				EntryPoint:     true,
+				CreatedAt:      now,
+			},
+		},
+	}
+	rootData, err := rootWorkspace.ToJSON()
+	if err != nil {
+		t.Fatalf("failed to encode root workspace: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(exportRoot, agentworkspace.WorkspaceConfigFile), rootData, 0644); err != nil {
+		t.Fatalf("failed to write root workspace.json: %v", err)
+	}
+
+	childWorkspace := &agentworkspace.Workspace{
+		ID:         "ws-imported-madrid",
+		Name:       "Madrid",
+		FolderSlug: "madrid",
+		Agents:     []string{"Madrid Planner"},
+		SharedData: map[string]interface{}{"entry_agent_name": "Madrid Planner"},
+		Status:     agentworkspace.StatusActive,
+		CreatedAt:  now,
+		UpdatedAt:  now,
+		AgentInstances: []agentworkspace.AgentInstance{
+			{
+				ID:             "madrid-planner-1",
+				Name:           "Madrid Planner",
+				InstanceNumber: 1,
+				NodeID:         "madrid-planner-node-1",
+				EntryPoint:     true,
+				CreatedAt:      now,
+			},
+		},
+	}
+	childData, err := childWorkspace.ToJSON()
+	if err != nil {
+		t.Fatalf("failed to encode child workspace: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(childDir, agentworkspace.WorkspaceConfigFile), childData, 0644); err != nil {
+		t.Fatalf("failed to write child workspace.json: %v", err)
+	}
+
+	payload, _ := json.Marshal(map[string]interface{}{
+		"path": exportRoot,
+	})
+	req := httptest.NewRequest(http.MethodPost, "/api/workspaces/import", bytes.NewBuffer(payload))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	handler.HandleWorkspaces(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("expected 201 for exported workspace restore, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp map[string]interface{}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+	folder, ok := resp["folder"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected folder object in response")
+	}
+	if got := folder["id"]; got != rootWorkspace.ID {
+		t.Fatalf("expected restored workspace id %q, got %#v", rootWorkspace.ID, got)
+	}
+
+	restoredRoot, err := handler.store.GetWorkspace(context.Background(), rootWorkspace.ID)
+	if err != nil {
+		t.Fatalf("failed to fetch restored root workspace: %v", err)
+	}
+	if len(restoredRoot.AgentInstances) != 1 {
+		t.Fatalf("expected 1 root agent instance, got %d", len(restoredRoot.AgentInstances))
+	}
+	if restoredRoot.AgentInstances[0].Name != "Trip Manager" {
+		t.Fatalf("expected root agent Trip Manager, got %#v", restoredRoot.AgentInstances[0].Name)
+	}
+	if got := currentWorkspaceEntryAgentName(restoredRoot); got != "Trip Manager" {
+		t.Fatalf("expected restored root entry agent Trip Manager, got %q", got)
+	}
+	if _, ok := restoredRoot.SharedData["folder_import"]; ok {
+		t.Fatalf("expected restored workspace to avoid folder_import metadata, got %#v", restoredRoot.SharedData["folder_import"])
+	}
+
+	restoredChild, err := handler.store.GetWorkspace(context.Background(), childWorkspace.ID)
+	if err != nil {
+		t.Fatalf("failed to fetch restored child workspace: %v", err)
+	}
+	if restoredChild.ParentID != rootWorkspace.ID {
+		t.Fatalf("expected restored child parent %q, got %q", rootWorkspace.ID, restoredChild.ParentID)
+	}
+	if len(restoredChild.AgentInstances) != 1 {
+		t.Fatalf("expected 1 child agent instance, got %d", len(restoredChild.AgentInstances))
+	}
+	if restoredChild.AgentInstances[0].Name != "Madrid Planner" {
+		t.Fatalf("expected child agent Madrid Planner, got %#v", restoredChild.AgentInstances[0].Name)
+	}
+	if got := currentWorkspaceEntryAgentName(restoredChild); got != "Madrid Planner" {
+		t.Fatalf("expected restored child entry agent Madrid Planner, got %q", got)
 	}
 }
 

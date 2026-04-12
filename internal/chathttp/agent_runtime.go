@@ -38,12 +38,11 @@ func (h *Handler) resolveEffectiveAgent(agentName string, routeCtx normalizedCha
 	}
 
 	baseAgent, ok := h.store.GetAgent(agentName)
-	if !ok || baseAgent == nil {
-		return nil, fmt.Errorf("agent '%s' not found", agentName)
-	}
-	baseAgent = cloneAgentForChat(baseAgent)
-
 	if h.runtimeResolver == nil || strings.TrimSpace(routeCtx.WorkspaceID) == "" {
+		if !ok || baseAgent == nil {
+			return nil, fmt.Errorf("agent '%s' not found", agentName)
+		}
+		baseAgent = cloneAgentForChat(baseAgent)
 		result := &resolvedChatAgent{Agent: baseAgent}
 		h.promoteWorkspaceEntryAgentRuntime(result, agentName, routeCtx.WorkspaceID)
 		h.attachWorkspaceTools(result, routeCtx.WorkspaceID)
@@ -51,30 +50,33 @@ func (h *Handler) resolveEffectiveAgent(agentName string, routeCtx normalizedCha
 	}
 
 	resolved, err := h.runtimeResolver.ResolveAgentForWorkspace(agentName, routeCtx.WorkspaceID, "")
+	if resolved != nil && resolved.Agent != nil {
+		result := &resolvedChatAgent{
+			Agent:      cloneAgentForChat(resolved.Agent),
+			MCPServers: append([]string{}, resolved.MCPServers...),
+		}
+		if len(resolved.EffectiveSkills) > 0 {
+			result.EffectiveSkills = append([]workspace.ResolvedSkill{}, resolved.EffectiveSkills...)
+		}
+		h.promoteWorkspaceEntryAgentRuntime(result, agentName, routeCtx.WorkspaceID)
+		h.attachWorkspaceTools(result, routeCtx.WorkspaceID)
+		return result, nil
+	}
+
 	if err != nil {
 		logger.Warn("Failed to resolve workspace runtime MCP configuration for chat; falling back to base agent", logger.Fields{
 			"agent":        agentName,
 			"workspace_id": routeCtx.WorkspaceID,
 			"error":        err,
 		})
-		result := &resolvedChatAgent{Agent: baseAgent}
-		h.promoteWorkspaceEntryAgentRuntime(result, agentName, routeCtx.WorkspaceID)
-		h.attachWorkspaceTools(result, routeCtx.WorkspaceID)
-		return result, nil
 	}
-	if resolved == nil || resolved.Agent == nil {
-		result := &resolvedChatAgent{Agent: baseAgent}
-		h.promoteWorkspaceEntryAgentRuntime(result, agentName, routeCtx.WorkspaceID)
-		h.attachWorkspaceTools(result, routeCtx.WorkspaceID)
-		return result, nil
+
+	if !ok || baseAgent == nil {
+		return nil, fmt.Errorf("agent '%s' not found", agentName)
 	}
-	result := &resolvedChatAgent{
-		Agent:      cloneAgentForChat(resolved.Agent),
-		MCPServers: append([]string{}, resolved.MCPServers...),
-	}
-	if len(resolved.EffectiveSkills) > 0 {
-		result.EffectiveSkills = append([]workspace.ResolvedSkill{}, resolved.EffectiveSkills...)
-	}
+	baseAgent = cloneAgentForChat(baseAgent)
+
+	result := &resolvedChatAgent{Agent: baseAgent}
 	h.promoteWorkspaceEntryAgentRuntime(result, agentName, routeCtx.WorkspaceID)
 	h.attachWorkspaceTools(result, routeCtx.WorkspaceID)
 	return result, nil

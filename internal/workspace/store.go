@@ -199,10 +199,8 @@ func (s *FileStore) Save(ws *Workspace) error {
 	}
 
 	// Compute relative path from basePath
-	relPath := folderPath
-	if !filepath.IsAbs(folderPath) {
-		relPath = folderPath
-	} else if filepath.IsAbs(existingPath) {
+	var relPath string
+	if !filepath.IsAbs(folderPath) || filepath.IsAbs(existingPath) {
 		relPath = folderPath
 	} else if computedRelPath, err := filepath.Rel(s.basePath, folderPath); err == nil {
 		relPath = computedRelPath
@@ -216,7 +214,7 @@ func (s *FileStore) Save(ws *Workspace) error {
 
 	// Update the global index
 	if s.index != nil {
-		s.index.Register(IndexEntry{
+		_ = s.index.Register(IndexEntry{
 			ID:         ws.ID,
 			Name:       ws.Name,
 			FolderPath: relPath,
@@ -281,7 +279,7 @@ func (s *FileStore) SaveAt(ws *Workspace, location string) error {
 
 	// Register in global index
 	if s.index != nil {
-		s.index.Register(IndexEntry{
+		_ = s.index.Register(IndexEntry{
 			ID:         ws.ID,
 			Name:       ws.Name,
 			FolderPath: folderPath,
@@ -374,7 +372,7 @@ func (s *FileStore) RebindExistingFolder(ws *Workspace, folderPath string) error
 	s.idToPath[ws.ID] = storedPath
 
 	if s.index != nil {
-		s.index.Register(IndexEntry{
+		_ = s.index.Register(IndexEntry{
 			ID:         freshWS.ID,
 			Name:       freshWS.Name,
 			FolderPath: storedPath,
@@ -624,7 +622,7 @@ func (s *FileStore) removeFromCacheRecursive(id string) {
 	delete(s.idToPath, id)
 
 	if s.index != nil {
-		s.index.Unregister(id)
+		_ = s.index.Unregister(id)
 	}
 }
 
@@ -737,7 +735,7 @@ func (s *FileStore) Rename(id, newName string) error {
 
 	// Update global index
 	if s.index != nil {
-		s.index.Register(IndexEntry{
+		_ = s.index.Register(IndexEntry{
 			ID:         id,
 			Name:       newName,
 			FolderPath: newRelPath,
@@ -818,7 +816,7 @@ func (s *FileStore) Import(folderPath string) (*Workspace, string, error) {
 	s.idToPath[ws.ID] = relPath
 
 	if s.index != nil {
-		s.index.Register(IndexEntry{
+		_ = s.index.Register(IndexEntry{
 			ID:         ws.ID,
 			Name:       ws.Name,
 			FolderPath: relPath,
@@ -877,7 +875,7 @@ func (s *FileStore) importSubWorkspace(folderPath, parentID string) {
 	s.idToPath[ws.ID] = relPath
 
 	if s.index != nil {
-		s.index.Register(IndexEntry{
+		_ = s.index.Register(IndexEntry{
 			ID:         ws.ID,
 			Name:       ws.Name,
 			FolderPath: relPath,
@@ -1037,12 +1035,8 @@ func (s *FileStore) getNestingDepth(id string) int {
 
 // migrateIfNeeded checks if the workspace needs migration and returns true if so.
 func (s *FileStore) migrateIfNeeded(ws *Workspace, _ string) bool {
-	needsPersist := false
-
 	// If migration created AgentInstances
-	if len(ws.AgentInstances) > 0 && len(ws.Agents) > 0 {
-		needsPersist = true
-	}
+	needsPersist := len(ws.AgentInstances) > 0 && len(ws.Agents) > 0
 
 	// If scheduled tasks were migrated to task schedules
 	if len(ws.ScheduledTasks) > 0 {
