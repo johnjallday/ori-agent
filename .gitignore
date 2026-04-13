@@ -42,6 +42,11 @@ Thumbs.db
 .env.local
 
 # Runtime/cache directories
+plugin_cache/
+uploaded_plugins/
+test_plugins/
+local_plugin_registry.json
+plugin_registry_cache.json
 marketplace_cache_*.json
 cache/
 tmp/
@@ -129,6 +134,7 @@ mcp_servers.json
 agents/*/agent_settings.json
 agents/*/workspace/
 internal/server/agents/
+internal/pluginhttp/
 
 # Session data
 .claude-sessions/
