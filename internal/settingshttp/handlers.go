@@ -29,6 +29,7 @@ type Handler struct {
 	clientFactory           *client.Factory
 	llmFactory              *llm.Factory
 	utilitySettingsReloader func()
+	vaultRootUpdater        func(string) error
 }
 
 func NewHandler(store store.Store, configManager *config.Manager, clientFactory *client.Factory, llmFactory *llm.Factory) *Handler {
@@ -43,6 +44,11 @@ func NewHandler(store store.Store, configManager *config.Manager, clientFactory 
 // SetUtilitySettingsReloader sets a callback invoked after utility settings are saved.
 func (h *Handler) SetUtilitySettingsReloader(fn func()) {
 	h.utilitySettingsReloader = fn
+}
+
+// SetVaultRootUpdater sets a callback invoked after vault root settings are saved.
+func (h *Handler) SetVaultRootUpdater(fn func(string) error) {
+	h.vaultRootUpdater = fn
 }
 
 func resolveAssistantDefaultAgentName(st store.Store) string {
@@ -167,6 +173,14 @@ type WorkspaceRootResponse struct {
 	Source                 string `json:"source"`
 }
 
+// VaultRootResponse describes the configured and effective vault directory.
+type VaultRootResponse struct {
+	VaultRoot          string `json:"vault_root,omitempty"`
+	EffectiveVaultRoot string `json:"effective_vault_root"`
+	DefaultVaultRoot   string `json:"default_vault_root"`
+	Source             string `json:"source"`
+}
+
 // WorkspaceRootSettingsHandler handles default workspace directory persistence.
 func (h *Handler) WorkspaceRootSettingsHandler(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
@@ -215,6 +229,67 @@ func (h *Handler) WorkspaceRootSettingsHandler(w http.ResponseWriter, r *http.Re
 			"effective_workspace_root": effectiveRoot,
 			"default_workspace_root":   config.DefaultWorkspaceRoot(),
 			"source":                   config.WorkspaceRootSource(configured),
+		})
+
+	default:
+		w.WriteHeader(http.StatusMethodNotAllowed)
+	}
+}
+
+// VaultRootSettingsHandler handles default vault directory persistence.
+func (h *Handler) VaultRootSettingsHandler(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodGet:
+		configured := h.configManager.GetVaultRoot()
+		orihttp.WriteJSON(w, VaultRootResponse{
+			VaultRoot:          configured,
+			EffectiveVaultRoot: config.ResolveVaultRoot(configured),
+			DefaultVaultRoot:   config.DefaultVaultRoot(),
+			Source:             config.VaultRootSource(configured),
+		})
+
+	case http.MethodPost:
+		var req struct {
+			VaultRoot string `json:"vault_root"`
+		}
+		if !orihttp.ParseJSONBody(w, r, &req) {
+			return
+		}
+
+		configured, err := config.NormalizeVaultRoot(req.VaultRoot)
+		if err != nil {
+			orihttp.RespondErrorWithErr(w, http.StatusBadRequest, "Invalid vault directory", err)
+			return
+		}
+
+		effectiveRoot := config.ResolveVaultRoot(configured)
+		if err := os.MkdirAll(effectiveRoot, 0755); err != nil {
+			orihttp.RespondErrorWithErr(w, http.StatusBadRequest, "Unable to use vault directory", err)
+			return
+		}
+
+		if err := h.configManager.SetVaultRoot(configured); err != nil {
+			orihttp.RespondErrorWithErr(w, http.StatusBadRequest, "Invalid vault directory", err)
+			return
+		}
+
+		if err := h.configManager.Save(); err != nil {
+			orihttp.InternalError(w, err.Error())
+			return
+		}
+		if h.vaultRootUpdater != nil {
+			if err := h.vaultRootUpdater(effectiveRoot); err != nil {
+				orihttp.RespondErrorWithErr(w, http.StatusBadRequest, "Unable to apply vault directory", err)
+				return
+			}
+		}
+
+		orihttp.WriteJSON(w, map[string]any{
+			"success":              true,
+			"vault_root":           configured,
+			"effective_vault_root": effectiveRoot,
+			"default_vault_root":   config.DefaultVaultRoot(),
+			"source":               config.VaultRootSource(configured),
 		})
 
 	default:

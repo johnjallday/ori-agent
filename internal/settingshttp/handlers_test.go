@@ -695,6 +695,146 @@ func TestWorkspaceRootSettingsHandler_Post_ClearFallsBackToDefault(t *testing.T)
 	}
 }
 
+func TestVaultRootSettingsHandler_Get_EnvironmentFallback(t *testing.T) {
+	tmpDir := t.TempDir()
+	tmpFile := filepath.Join(tmpDir, "settings.json")
+	configManager := config.NewManager(tmpFile)
+	_ = configManager.Load()
+
+	envRoot := filepath.Join(tmpDir, "env-vaults")
+	t.Setenv("ORI_VAULT_DIR", envRoot)
+
+	handler := NewHandler(nil, configManager, nil, llm.NewFactory())
+
+	req := httptest.NewRequest(http.MethodGet, "/api/settings/vault-root", nil)
+	rec := httptest.NewRecorder()
+	handler.VaultRootSettingsHandler(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("Expected status 200, got %d", rec.Code)
+	}
+
+	var resp VaultRootResponse
+	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+		t.Fatalf("Failed to decode response: %v", err)
+	}
+
+	if resp.VaultRoot != "" {
+		t.Fatalf("Expected no configured vault_root, got %q", resp.VaultRoot)
+	}
+	if resp.Source != "environment" {
+		t.Fatalf("Expected source environment, got %q", resp.Source)
+	}
+	if resp.EffectiveVaultRoot != envRoot {
+		t.Fatalf("Expected effective root %q, got %q", envRoot, resp.EffectiveVaultRoot)
+	}
+}
+
+func TestVaultRootSettingsHandler_Post(t *testing.T) {
+	tmpDir := t.TempDir()
+	tmpFile := filepath.Join(tmpDir, "settings.json")
+	configManager := config.NewManager(tmpFile)
+	_ = configManager.Load()
+
+	handler := NewHandler(nil, configManager, nil, llm.NewFactory())
+
+	customRoot := filepath.Join(tmpDir, "custom-vaults")
+	var appliedRoot string
+	handler.SetVaultRootUpdater(func(root string) error {
+		appliedRoot = root
+		return nil
+	})
+
+	body, _ := json.Marshal(map[string]string{
+		"vault_root": customRoot,
+	})
+
+	req := httptest.NewRequest(http.MethodPost, "/api/settings/vault-root", bytes.NewReader(body))
+	rec := httptest.NewRecorder()
+	handler.VaultRootSettingsHandler(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("Expected status 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	var resp struct {
+		Success            bool   `json:"success"`
+		VaultRoot          string `json:"vault_root"`
+		EffectiveVaultRoot string `json:"effective_vault_root"`
+		Source             string `json:"source"`
+	}
+	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+		t.Fatalf("Failed to decode response: %v", err)
+	}
+
+	if !resp.Success {
+		t.Fatal("Expected success=true")
+	}
+	if resp.VaultRoot != customRoot {
+		t.Fatalf("Expected vault_root %q, got %q", customRoot, resp.VaultRoot)
+	}
+	if resp.EffectiveVaultRoot != customRoot {
+		t.Fatalf("Expected effective root %q, got %q", customRoot, resp.EffectiveVaultRoot)
+	}
+	if resp.Source != "settings" {
+		t.Fatalf("Expected source settings, got %q", resp.Source)
+	}
+	if appliedRoot != customRoot {
+		t.Fatalf("Expected updater root %q, got %q", customRoot, appliedRoot)
+	}
+	if _, err := os.Stat(customRoot); err != nil {
+		t.Fatalf("Expected vault root directory to exist: %v", err)
+	}
+
+	configManager2 := config.NewManager(tmpFile)
+	_ = configManager2.Load()
+	if got := configManager2.GetVaultRoot(); got != customRoot {
+		t.Fatalf("Expected persisted vault root %q, got %q", customRoot, got)
+	}
+}
+
+func TestVaultRootSettingsHandler_Post_ClearFallsBackToDefault(t *testing.T) {
+	tmpDir := t.TempDir()
+	tmpFile := filepath.Join(tmpDir, "settings.json")
+	configManager := config.NewManager(tmpFile)
+	_ = configManager.Load()
+	if err := configManager.SetVaultRoot(filepath.Join(tmpDir, "custom-vaults")); err != nil {
+		t.Fatalf("SetVaultRoot: %v", err)
+	}
+	if err := configManager.Save(); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+
+	handler := NewHandler(nil, configManager, nil, llm.NewFactory())
+
+	req := httptest.NewRequest(http.MethodPost, "/api/settings/vault-root", bytes.NewReader([]byte(`{"vault_root":""}`)))
+	rec := httptest.NewRecorder()
+	handler.VaultRootSettingsHandler(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("Expected status 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	var resp struct {
+		VaultRoot          string `json:"vault_root"`
+		EffectiveVaultRoot string `json:"effective_vault_root"`
+		Source             string `json:"source"`
+	}
+	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+		t.Fatalf("Failed to decode response: %v", err)
+	}
+
+	if resp.VaultRoot != "" {
+		t.Fatalf("Expected cleared vault_root, got %q", resp.VaultRoot)
+	}
+	if resp.Source != "default" {
+		t.Fatalf("Expected source default, got %q", resp.Source)
+	}
+	if resp.EffectiveVaultRoot != config.DefaultVaultRoot() {
+		t.Fatalf("Expected default effective root %q, got %q", config.DefaultVaultRoot(), resp.EffectiveVaultRoot)
+	}
+}
+
 func TestSessionSettingsHandler_Get(t *testing.T) {
 	tmpDir := t.TempDir()
 	tmpFile := filepath.Join(tmpDir, "settings.json")

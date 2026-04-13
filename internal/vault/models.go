@@ -12,6 +12,10 @@ var (
 	ErrVaultNotFound            = errors.New("vault: vault not found")
 	ErrVaultAlreadyExists       = errors.New("vault: vault already exists")
 	ErrVaultNameRequired        = errors.New("vault: vault name is required")
+	ErrVaultStorageModeInvalid  = errors.New("vault: storage mode is invalid")
+	ErrVaultStoragePathRequired = errors.New("vault: storage directory is required")
+	ErrVaultStoragePathInvalid  = errors.New("vault: storage directory is invalid")
+	ErrVaultStoragePathConflict = errors.New("vault: storage path already exists")
 	ErrRecordNotFound           = errors.New("vault: record not found")
 	ErrGrantNotFound            = errors.New("vault: grant not found")
 	ErrPermissionDenied         = errors.New("vault: permission denied")
@@ -38,6 +42,11 @@ var (
 
 const DefaultVaultID = "default"
 const RecordTypeEmailAccount = "email_account"
+
+const (
+	VaultStorageModeManaged   = "managed"
+	VaultStorageModeCustomDir = "custom_dir"
+)
 
 type ActorType string
 
@@ -69,6 +78,9 @@ type Vault struct {
 	Name              string    `json:"name"`
 	Description       string    `json:"description,omitempty"`
 	FilePath          string    `json:"file_path,omitempty"`
+	StorageMode       string    `json:"storage_mode,omitempty"`
+	LocationSummary   string    `json:"location_summary,omitempty"`
+	FileMissing       bool      `json:"file_missing,omitempty"`
 	IsDefault         bool      `json:"is_default"`
 	PasswordProtected bool      `json:"password_protected"`
 	RecordCount       int       `json:"record_count"`
@@ -273,6 +285,9 @@ type AuditEvent struct {
 type VaultStatus struct {
 	VaultID            string      `json:"vault_id,omitempty"`
 	VaultName          string      `json:"vault_name,omitempty"`
+	StorageMode        string      `json:"storage_mode,omitempty"`
+	LocationSummary    string      `json:"location_summary,omitempty"`
+	FileMissing        bool        `json:"file_missing,omitempty"`
 	Available          bool        `json:"available"`
 	Locked             bool        `json:"locked"`
 	Writable           bool        `json:"writable"`
@@ -318,6 +333,19 @@ type ImportResult struct {
 	SourceVaultName string `json:"source_vault_name,omitempty"`
 	RecordCount     int    `json:"record_count"`
 	GrantCount      int    `json:"grant_count"`
+}
+
+type VaultStorage struct {
+	Mode      string `json:"mode,omitempty"`
+	Directory string `json:"directory,omitempty"`
+}
+
+type CreateVaultOptions struct {
+	Storage VaultStorage
+}
+
+type DeleteVaultOptions struct {
+	DeleteFile bool
 }
 
 func (a AccessContext) normalized() AccessContext {

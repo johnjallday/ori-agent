@@ -20,12 +20,14 @@ import (
 
 type StoreOptions struct {
 	VaultFilesBaseDir string
+	ManagedVaultRoot  string
 	Clock             func() time.Time
 }
 
 type Store struct {
 	db                *database.DB
 	vaultFilesBaseDir string
+	managedVaultRoot  string
 	now               func() time.Time
 
 	mu         sync.RWMutex
@@ -84,21 +86,124 @@ func NewStore(db *database.DB, opts StoreOptions) *Store {
 		}
 		vaultFilesBaseDir = defaultVaultFilesBaseDir(dbPath)
 	}
+	managedVaultRoot := strings.TrimSpace(opts.ManagedVaultRoot)
+	if managedVaultRoot == "" {
+		managedVaultRoot = filepath.Join(vaultFilesBaseDir, "vaults")
+	} else {
+		managedVaultRoot = filepath.Clean(managedVaultRoot)
+	}
 
 	return &Store{
 		db:                db,
 		vaultFilesBaseDir: vaultFilesBaseDir,
+		managedVaultRoot:  managedVaultRoot,
 		now:               clock,
 		cachedDEKs:        make(map[string][]byte),
 	}
 }
 
 func (s *Store) defaultVaultFilePath(vaultID string) string {
+	return s.catalogFilePathForAbsolutePath(vaultID, s.managedVaultFileAbsolutePath(vaultID))
+}
+
+func (s *Store) managedVaultRootDir() string {
+	s.mu.RLock()
+	root := strings.TrimSpace(s.managedVaultRoot)
+	s.mu.RUnlock()
+
+	if root == "" {
+		baseDir := strings.TrimSpace(s.vaultFilesBaseDir)
+		if baseDir == "" {
+			baseDir = defaultVaultFilesBaseDir("")
+		}
+		return filepath.Join(baseDir, "vaults")
+	}
+	return root
+}
+
+func (s *Store) managedVaultFileAbsolutePath(vaultID string) string {
 	vaultID = normalizeVaultID(vaultID)
 	if vaultID == "" {
 		vaultID = uuid.New().String()
 	}
-	return filepath.Join("vaults", vaultID+".db")
+	return filepath.Join(s.managedVaultRootDir(), defaultVaultFileName(vaultID))
+}
+
+func (s *Store) SetManagedVaultRoot(root string) error {
+	root = strings.TrimSpace(root)
+	if root == "" {
+		root = filepath.Join(strings.TrimSpace(s.vaultFilesBaseDir), "vaults")
+	}
+
+	normalized, err := normalizeVaultStorageDirectory(root)
+	if err != nil {
+		return err
+	}
+
+	s.mu.Lock()
+	s.managedVaultRoot = normalized
+	s.mu.Unlock()
+	return nil
+}
+
+func (s *Store) vaultFileNameForPath(vaultID string, filePath string) string {
+	filePath = strings.TrimSpace(filePath)
+	if filePath != "" {
+		if fileName := strings.TrimSpace(filepath.Base(filePath)); fileName != "" && fileName != "." {
+			return fileName
+		}
+	}
+	return defaultVaultFileName(vaultID)
+}
+
+func (s *Store) catalogFilePathForAbsolutePath(vaultID string, absolutePath string) string {
+	absolutePath = filepath.Clean(strings.TrimSpace(absolutePath))
+	if absolutePath == "" {
+		return ""
+	}
+
+	defaultAbsolutePath := filepath.Clean(s.managedVaultFileAbsolutePath(vaultID))
+	if absolutePath == defaultAbsolutePath {
+		baseDir := strings.TrimSpace(s.vaultFilesBaseDir)
+		if baseDir != "" {
+			if relPath, err := filepath.Rel(baseDir, absolutePath); err == nil && !strings.HasPrefix(relPath, "..") && relPath != "." {
+				return filepath.Clean(relPath)
+			}
+		}
+		return absolutePath
+	}
+	return absolutePath
+}
+
+func (s *Store) resolveCreateVaultFilePath(vaultID string, currentFilePath string, storage VaultStorage) (string, error) {
+	currentFilePath = strings.TrimSpace(currentFilePath)
+	mode := normalizeVaultStorageMode(storage.Mode)
+
+	if currentFilePath != "" && mode == VaultStorageModeManaged {
+		return currentFilePath, nil
+	}
+
+	switch mode {
+	case VaultStorageModeManaged:
+		return s.defaultVaultFilePath(vaultID), nil
+	case VaultStorageModeCustomDir:
+		directory, err := normalizeVaultStorageDirectory(storage.Directory)
+		if err != nil {
+			return "", err
+		}
+
+		absolutePath := filepath.Join(directory, defaultVaultFileName(vaultID))
+		exists, err := vaultFileExists(absolutePath)
+		if err != nil {
+			return "", fmt.Errorf("inspect vault storage path: %w", err)
+		}
+		if exists {
+			return "", ErrVaultStoragePathConflict
+		}
+		return s.catalogFilePathForAbsolutePath(vaultID, absolutePath), nil
+	default:
+		return "", ErrVaultStorageModeInvalid
+	}
 }
 
 func (s *Store) resolveVaultFileAbsolutePath(filePath string) string {
@@ -114,6 +219,32 @@ func (s *Store) resolveVaultFileAbsolutePath(filePath string) string {
 		baseDir = defaultVaultFilesBaseDir("")
 	}
 	return filepath.Join(baseDir, filePath)
+}
+
+func (s *Store) decorateVault(item *Vault) {
+	if item == nil {
+		return
+	}
+
+	absolutePath := strings.TrimSpace(s.resolveVaultFileAbsolutePath(item.FilePath))
+	defaultAbsolutePath := strings.TrimSpace(s.resolveVaultFileAbsolutePath(s.defaultVaultFilePath(item.ID)))
+
+	item.StorageMode = VaultStorageModeManaged
+	if absolutePath != "" && absolutePath != defaultAbsolutePath && filepath.IsAbs(strings.TrimSpace(item.FilePath)) {
+		item.StorageMode = VaultStorageModeCustomDir
+	}
+	item.LocationSummary = ""
+	item.FileMissing = false
+
+	if absolutePath == "" {
+		return
+	}
+
+	item.LocationSummary = filepath.Dir(absolutePath)
+	exists, err := vaultFileExists(absolutePath)
+	if err == nil && !exists {
+		item.FileMissing = true
+	}
 }
 
 func (s *Store) listVaultCatalog(ctx context.Context) ([]Vault, error) {
@@ -148,6 +279,7 @@ func (s *Store) listVaultCatalog(ctx context.Context) ([]Vault, error) {
 		item.ID = normalizeVaultID(item.ID)
 		item.IsDefault = item.ID == DefaultVaultID
 		item.PasswordProtected = true
+		s.decorateVault(&item)
 		vaults = append(vaults, item)
 	}
 	if err := rows.Err(); err != nil {
@@ -190,6 +322,7 @@ func (s *Store) getVaultCatalog(ctx context.Context, vaultID string) (Vault, err
 	item.ID = normalizeVaultID(item.ID)
 	item.IsDefault = item.ID == DefaultVaultID
 	item.PasswordProtected = true
+	s.decorateVault(&item)
 	return item, nil
 }
 
@@ -224,9 +357,21 @@ func (s *Store) ListVaults(ctx context.Context) ([]Vault, error) {
 	}
 	filtered := make([]Vault, 0, len(vaults))
 	for index := range vaults {
+		if vaults[index].FileMissing {
+			vaults[index].RecordCount = 0
+			filtered = append(filtered, vaults[index])
+			continue
+		}
+
 		count, err := s.recordCount(ctx, vaults[index].ID)
 		if err != nil {
-			if errors.Is(err, ErrVaultFileMissing) || errors.Is(err, ErrVaultFileCorrupt) || errors.Is(err, ErrVaultKeyUnavailable) || errors.Is(err, ErrVaultNotFound) {
+			if errors.Is(err, ErrVaultFileMissing) {
+				vaults[index].FileMissing = true
+				vaults[index].RecordCount = 0
+				filtered = append(filtered, vaults[index])
+				continue
+			}
+			if errors.Is(err, ErrVaultFileCorrupt) || errors.Is(err, ErrVaultKeyUnavailable) || errors.Is(err, ErrVaultNotFound) {
 				logger.Warn("Skipping invalid vault catalog entry", logger.Fields{
 					"vault_id":  vaults[index].ID,
 					"name":      vaults[index].Name,
@@ -244,6 +389,10 @@ func (s *Store) ListVaults(ctx context.Context) ([]Vault, error) {
 }
 
 func (s *Store) CreateVault(ctx context.Context, vault *Vault, password string) error {
+	return s.CreateVaultWithOptions(ctx, vault, password, CreateVaultOptions{})
+}
+
+func (s *Store) CreateVaultWithOptions(ctx context.Context, vault *Vault, password string, opts CreateVaultOptions) error {
 	if s.db == nil {
 		return ErrSecretStoreUnavailable
 	}
@@ -281,8 +430,12 @@ func (s *Store) CreateVault(ctx context.Context, vault *Vault, password string) 
 
 	now := s.now()
 	vault.ID = normalizeVaultID(vault.ID)
-	if vault.FilePath == "" {
-		vault.FilePath = s.defaultVaultFilePath(vault.ID)
+	if vault.FilePath == "" || normalizeVaultStorageMode(opts.Storage.Mode) != VaultStorageModeManaged {
+		resolvedFilePath, err := s.resolveCreateVaultFilePath(vault.ID, vault.FilePath, opts.Storage)
+		if err != nil {
+			return err
+		}
+		vault.FilePath = resolvedFilePath
 	}
 	vault.IsDefault = vault.ID == DefaultVaultID
 	vault.PasswordProtected = true
@@ -338,6 +491,7 @@ func (s *Store) CreateVault(ctx context.Context, vault *Vault, password string) 
 		Details: fmt.Sprintf(`{"name":%q}`, vault.Name),
 	})
 
+	s.decorateVault(vault)
 	return nil
 }
 
@@ -414,13 +568,119 @@ func (s *Store) UpdateVault(ctx context.Context, vaultID string, name string, de
 	return current, nil
 }
 
+func (s *Store) RelinkVault(ctx context.Context, vaultID string, storage VaultStorage) (Vault, error) {
+	if s.db == nil {
+		return Vault{}, ErrSecretStoreUnavailable
+	}
+
+	vaultID = normalizeVaultID(vaultID)
+	current, err := s.getVaultCatalog(ctx, vaultID)
+	if err != nil {
+		return Vault{}, err
+	}
+
+	mode := normalizeVaultStorageMode(storage.Mode)
+	if mode == "" {
+		mode = VaultStorageModeCustomDir
+	}
+	if mode != VaultStorageModeManaged && mode != VaultStorageModeCustomDir {
+		return Vault{}, ErrVaultStorageModeInvalid
+	}
+
+	targetFileName := s.vaultFileNameForPath(vaultID, current.FilePath)
+	targetDirectory := strings.TrimSpace(storage.Directory)
+	var targetAbsolutePath string
+	switch mode {
+	case VaultStorageModeManaged:
+		targetAbsolutePath = s.resolveVaultFileAbsolutePath(s.defaultVaultFilePath(vaultID))
+	case VaultStorageModeCustomDir:
+		normalizedDirectory, err := normalizeVaultStorageDirectory(targetDirectory)
+		if err != nil {
+			return Vault{}, err
+		}
+		targetAbsolutePath = filepath.Join(normalizedDirectory, targetFileName)
+	}
+
+	exists, err := vaultFileExists(targetAbsolutePath)
+	if err != nil {
+		return Vault{}, fmt.Errorf("inspect relink target: %w", err)
+	}
+	if !exists {
+		return Vault{}, fmt.Errorf("%w: selected folder does not contain %s", ErrVaultStoragePathInvalid, targetFileName)
+	}
+
+	targetCatalogPath := s.catalogFilePathForAbsolutePath(vaultID, targetAbsolutePath)
+	var existingID string
+	err = s.db.QueryRowContext(ctx, `
+		SELECT id
+		FROM vaults
+		WHERE id <> ? AND file_path = ?
+		LIMIT 1
+	`, vaultID, targetCatalogPath).Scan(&existingID)
+	switch {
+	case err == nil:
+		return Vault{}, ErrVaultStoragePathConflict
+	case err != nil && !errors.Is(err, sql.ErrNoRows):
+		return Vault{}, fmt.Errorf("query relink path conflict: %w", err)
+	}
+
+	vaultFileDB, err := openExistingVaultFile(ctx, targetAbsolutePath)
+	if err != nil {
+		return Vault{}, fmt.Errorf("open relink target: %w", err)
+	}
+	defer func() { _ = vaultFileDB.Close() }()
+
+	metadata, err := loadVaultFileMetadata(ctx, vaultFileDB, vaultID)
+	if err != nil {
+		return Vault{}, err
+	}
+
+	now := s.now()
+	if _, err := s.db.ExecContext(ctx, `
+		UPDATE vaults
+		SET file_path = ?, updated_at = ?
+		WHERE id = ?
+	`, targetCatalogPath, now, vaultID); err != nil {
+		return Vault{}, fmt.Errorf("update vault relink path: %w", err)
+	}
+
+	metadata.Name = current.Name
+	metadata.Description = current.Description
+	metadata.UpdatedAt = now
+	if err := upsertVaultFileMetadata(ctx, vaultFileDB, metadata); err != nil {
+		return Vault{}, err
+	}
+
+	s.mu.Lock()
+	delete(s.cachedDEKs, vaultID)
+	s.mu.Unlock()
+
+	updatedVault, err := s.getVault(ctx, vaultID)
+	if err != nil {
+		return Vault{}, err
+	}
+
+	s.writeAuditBestEffort(ctx, AuditEvent{
+		VaultID: vaultID,
+		Action:  "vault.relink",
+		Outcome: "allowed",
+		Details: fmt.Sprintf(`{"file_path":%q}`, updatedVault.FilePath),
+	})
+
+	return updatedVault, nil
+}
+
 func (s *Store) DeleteVault(ctx context.Context, vaultID string) error {
+	return s.DeleteVaultWithOptions(ctx, vaultID, DeleteVaultOptions{})
+}
+
+func (s *Store) DeleteVaultWithOptions(ctx context.Context, vaultID string, opts DeleteVaultOptions) error {
 	if s.db == nil {
 		return ErrSecretStoreUnavailable
 	}
 
 	vaultID = normalizeVaultID(vaultID)
-	selectedVault, err := s.getVault(ctx, vaultID)
+	selectedVault, err := s.getVaultCatalog(ctx, vaultID)
 	if err != nil {
 		return err
 	}
@@ -448,7 +708,7 @@ func (s *Store) DeleteVault(ctx context.Context, vaultID string) error {
 	delete(s.cachedDEKs, vaultID)
 	s.mu.Unlock()
 
-	if selectedVault.FilePath != "" {
+	if opts.DeleteFile && selectedVault.FilePath != "" {
 		if err := os.Remove(s.resolveVaultFileAbsolutePath(selectedVault.FilePath)); err != nil && !errors.Is(err, os.ErrNotExist) {
 			logger.Warn("Failed to delete vault file", logger.Fields{
 				"vault_id":   vaultID,
@@ -460,10 +720,10 @@ func (s *Store) DeleteVault(ctx context.Context, vaultID string) error {
 	}
 
 	logger.Info("Deleted vault", logger.Fields{
-		"vault_id":     vaultID,
-		"vault_name":   selectedVault.Name,
-		"record_count": selectedVault.RecordCount,
-		"is_default":   selectedVault.IsDefault,
+		"vault_id":    vaultID,
+		"vault_name":  selectedVault.Name,
+		"delete_file": opts.DeleteFile,
+		"is_default":  selectedVault.IsDefault,
 	})
 	return nil
 }
@@ -515,9 +775,22 @@ func (s *Store) Status(ctx context.Context, vaultID string) (VaultStatus, error)
 		return VaultStatus{}, err
 	}
 
-	recordCount, err := s.recordCount(ctx, vaultID)
-	if err != nil {
-		return VaultStatus{}, fmt.Errorf("count vault records: %w", err)
+	if selectedVault.FileMissing {
+		storeStatus := passwordProtectedStoreStatus(true)
+		return VaultStatus{
+			VaultID:           selectedVault.ID,
+			VaultName:         selectedVault.Name,
+			StorageMode:       selectedVault.StorageMode,
+			LocationSummary:   selectedVault.LocationSummary,
+			FileMissing:       true,
+			Available:         false,
+			Locked:            true,
+			Writable:          false,
+			PasswordProtected: selectedVault.PasswordProtected,
+			Message:           "vault file is missing; relink the vault or restore the file",
+			RecordCount:       0,
+			SecretStore:       storeStatus,
+		}, nil
 	}
 
 	locked := !s.hasCachedDEK(vaultID)
@@ -532,13 +805,16 @@ func (s *Store) Status(ctx context.Context, vaultID string) (VaultStatus, error)
 	status := VaultStatus{
 		VaultID:            selectedVault.ID,
 		VaultName:          selectedVault.Name,
+		StorageMode:        selectedVault.StorageMode,
+		LocationSummary:    selectedVault.LocationSummary,
+		FileMissing:        selectedVault.FileMissing,
 		Available:          true,
 		Locked:             locked,
 		Writable:           writable,
 		PasswordProtected:  selectedVault.PasswordProtected,
 		RequiresPassphrase: requiresPassphrase,
 		Message:            message,
-		RecordCount:        recordCount,
+		RecordCount:        selectedVault.RecordCount,
 		SecretStore:        storeStatus,
 	}
 	return status, nil
@@ -1247,6 +1523,9 @@ func (s *Store) DeleteGrant(ctx context.Context, id string) error {
 	for _, item := range vaults {
 		vaultDB, err = openExistingVaultFile(ctx, s.resolveVaultFileAbsolutePath(item.FilePath))
 		if err != nil {
+			if errors.Is(err, ErrVaultFileMissing) || errors.Is(err, ErrVaultFileCorrupt) {
+				continue
+			}
 			return fmt.Errorf("open vault content database: %w", err)
 		}
 
@@ -1601,6 +1880,10 @@ func (s *Store) getVault(ctx context.Context, vaultID string) (Vault, error) {
 	if err != nil {
 		return Vault{}, err
 	}
+	if item.FileMissing {
+		item.RecordCount = 0
+		return item, nil
+	}
 	recordCount, err := s.recordCount(ctx, item.ID)
 	if err != nil {
 		return Vault{}, err
@@ -1623,6 +1906,9 @@ func (s *Store) getRecordRow(ctx context.Context, id string) (recordRow, error) 
 	for _, item := range vaults {
 		vaultDB, err := openExistingVaultFile(ctx, s.resolveVaultFileAbsolutePath(item.FilePath))
 		if err != nil {
+			if errors.Is(err, ErrVaultFileMissing) || errors.Is(err, ErrVaultFileCorrupt) {
+				continue
+			}
 			return recordRow{}, fmt.Errorf("open vault content database: %w", err)
 		}
 

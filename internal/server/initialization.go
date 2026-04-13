@@ -250,6 +250,18 @@ func resolveWorkspaceRoot(configManager *config.Manager) string {
 	return config.ResolveWorkspaceRoot("")
 }
 
+// resolveVaultRoot determines the root directory for new managed vault files.
+// Priority: 1) settings vault_root, 2) ORI_VAULT_DIR env, 3) current data dir + /vaults
+func resolveVaultRoot(configManager *config.Manager) string {
+	if configManager != nil {
+		if root := configManager.GetVaultRoot(); root != "" {
+			return root
+		}
+	}
+
+	return config.ResolveVaultRoot("")
+}
+
 // createWorkspaceStore creates a new file-based workspace storage system.
 func createWorkspaceStore(workspaceDir string) (workspace.Store, error) {
 	ws, err := workspace.NewFileStore(workspaceDir)

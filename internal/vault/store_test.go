@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -780,11 +781,26 @@ func TestStoreListVaultsSkipsMissingVaultFiles(t *testing.T) {
 	if err != nil {
 		t.Fatalf("list vaults: %v", err)
 	}
-	if len(vaults) != 1 {
-		t.Fatalf("expected only the valid vault to remain in the list, got %#v", vaults)
+	if len(vaults) != 2 {
+		t.Fatalf("expected both vault catalog rows to remain in the list, got %#v", vaults)
 	}
-	if vaults[0].ID != validVault.ID {
-		t.Fatalf("expected valid vault %q, got %#v", validVault.ID, vaults)
+
+	var listedValid Vault
+	var listedMissing Vault
+	for _, item := range vaults {
+		switch item.ID {
+		case validVault.ID:
+			listedValid = item
+		case missingVault.ID:
+			listedMissing = item
+		}
+	}
+
+	if listedValid.ID != validVault.ID || listedValid.FileMissing {
+		t.Fatalf("expected valid vault to remain healthy, got %#v", listedValid)
+	}
+	if listedMissing.ID != missingVault.ID || !listedMissing.FileMissing {
+		t.Fatalf("expected missing vault to remain listed with FileMissing=true, got %#v", listedMissing)
 	}
 }
 
@@ -844,7 +860,7 @@ func TestStoreRenamesAndDeletesVaults(t *testing.T) {
 		t.Fatalf("unexpected updated vault: %+v", updatedVault)
 	}
 
-	if err := store.DeleteVault(ctx, financeVault.ID); err != nil {
+	if err := store.DeleteVaultWithOptions(ctx, financeVault.ID, DeleteVaultOptions{DeleteFile: true}); err != nil {
 		t.Fatalf("delete finance vault: %v", err)
 	}
 
@@ -854,6 +870,189 @@ func TestStoreRenamesAndDeletesVaults(t *testing.T) {
 
 	if _, err := os.Stat(store.resolveVaultFileAbsolutePath(financeVault.FilePath)); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("expected vault file to be removed, got err=%v", err)
+	}
+}
+
+func TestStoreCreateVaultInCustomDirectory(t *testing.T) {
+	ctx := context.Background()
+	store, db := newTestVaultStore(t)
+	defer func() { _ = db.Close() }()
+
+	customDir := t.TempDir()
+	item := Vault{
+		Name:        "Custom Vault",
+		Description: "Stored outside the managed vault directory",
+	}
+	if err := store.CreateVaultWithOptions(ctx, &item, testVaultPassword, CreateVaultOptions{
+		Storage: VaultStorage{
+			Mode:      VaultStorageModeCustomDir,
+			Directory: customDir,
+		},
+	}); err != nil {
+		t.Fatalf("create custom vault: %v", err)
+	}
+
+	if !filepath.IsAbs(item.FilePath) {
+		t.Fatalf("expected absolute custom file path, got %q", item.FilePath)
+	}
+	if filepath.Dir(item.FilePath) != customDir {
+		t.Fatalf("expected custom directory %q, got %q", customDir, filepath.Dir(item.FilePath))
+	}
+	if item.StorageMode != VaultStorageModeCustomDir {
+		t.Fatalf("expected custom storage mode, got %#v", item)
+	}
+	if item.LocationSummary != customDir {
+		t.Fatalf("expected location summary %q, got %#v", customDir, item)
+	}
+	if _, err := os.Stat(item.FilePath); err != nil {
+		t.Fatalf("expected custom vault file to exist: %v", err)
+	}
+}
+
+func TestStoreCreateVaultUsesManagedVaultRoot(t *testing.T) {
+	ctx := context.Background()
+
+	db, err := database.Open(context.Background(), &database.Config{
+		InMemory: true,
+		WALMode:  false,
+	})
+	if err != nil {
+		t.Fatalf("open database: %v", err)
+	}
+	defer func() { _ = db.Close() }()
+
+	vaultFilesBaseDir := t.TempDir()
+	managedRoot := filepath.Join(t.TempDir(), "managed-vaults")
+	store := NewStore(db, StoreOptions{
+		VaultFilesBaseDir: vaultFilesBaseDir,
+		ManagedVaultRoot:  managedRoot,
+	})
+
+	item := Vault{Name: "Managed Root Vault"}
+	if err := store.CreateVault(ctx, &item, testVaultPassword); err != nil {
+		t.Fatalf("create vault: %v", err)
+	}
+
+	expectedPath := filepath.Join(managedRoot, defaultVaultFileName(item.ID))
+	if item.FilePath != expectedPath {
+		t.Fatalf("expected managed vault file path %q, got %q", expectedPath, item.FilePath)
+	}
+	if item.StorageMode != VaultStorageModeManaged {
+		t.Fatalf("expected managed storage mode, got %#v", item)
+	}
+	if item.LocationSummary != managedRoot {
+		t.Fatalf("expected location summary %q, got %#v", managedRoot, item)
+	}
+	if _, err := os.Stat(expectedPath); err != nil {
+		t.Fatalf("expected managed vault file to exist: %v", err)
+	}
+}
+
+func TestStoreSetManagedVaultRootAffectsNewVaults(t *testing.T) {
+	ctx := context.Background()
+
+	db, err := database.Open(context.Background(), &database.Config{
+		InMemory: true,
+		WALMode:  false,
+	})
+	if err != nil {
+		t.Fatalf("open database: %v", err)
+	}
+	defer func() { _ = db.Close() }()
+
+	vaultFilesBaseDir := t.TempDir()
+	initialRoot := filepath.Join(t.TempDir(), "initial-vaults")
+	store := NewStore(db, StoreOptions{
+		VaultFilesBaseDir: vaultFilesBaseDir,
+		ManagedVaultRoot:  initialRoot,
+	})
+
+	firstVault := createTestVault(t, ctx, store, "First Managed Vault")
+	firstPath := filepath.Join(initialRoot, defaultVaultFileName(firstVault.ID))
+	if firstVault.FilePath != firstPath {
+		t.Fatalf("expected first managed vault path %q, got %q", firstPath, firstVault.FilePath)
+	}
+
+	nextRoot := filepath.Join(t.TempDir(), "next-vaults")
+	if err := store.SetManagedVaultRoot(nextRoot); err != nil {
+		t.Fatalf("SetManagedVaultRoot: %v", err)
+	}
+
+	secondVault := createTestVault(t, ctx, store, "Second Managed Vault")
+	secondPath := filepath.Join(nextRoot, defaultVaultFileName(secondVault.ID))
+	if secondVault.FilePath != secondPath {
+		t.Fatalf("expected second managed vault path %q, got %q", secondPath, secondVault.FilePath)
+	}
+	if _, err := os.Stat(secondPath); err != nil {
+		t.Fatalf("expected second managed vault file to exist: %v", err)
+	}
+}
+
+func TestStoreRelinkVaultRestoresMissingVault(t *testing.T) {
+	ctx := context.Background()
+	store, db := newTestVaultStore(t)
+	defer func() { _ = db.Close() }()
+
+	item := createTestVault(t, ctx, store, "Relink Me")
+	originalPath := store.resolveVaultFileAbsolutePath(item.FilePath)
+	relinkedDir := t.TempDir()
+	relinkedPath := filepath.Join(relinkedDir, filepath.Base(originalPath))
+
+	if err := os.Rename(originalPath, relinkedPath); err != nil {
+		t.Fatalf("move vault file: %v", err)
+	}
+
+	vaults, err := store.ListVaults(ctx)
+	if err != nil {
+		t.Fatalf("list vaults after move: %v", err)
+	}
+	if len(vaults) != 1 || !vaults[0].FileMissing {
+		t.Fatalf("expected moved vault to be marked missing, got %#v", vaults)
+	}
+
+	status, err := store.Status(ctx, item.ID)
+	if err != nil {
+		t.Fatalf("status for missing vault: %v", err)
+	}
+	if status.Available || !status.FileMissing {
+		t.Fatalf("expected missing-file status, got %+v", status)
+	}
+
+	relinkedVault, err := store.RelinkVault(ctx, item.ID, VaultStorage{
+		Mode:      VaultStorageModeCustomDir,
+		Directory: relinkedDir,
+	})
+	if err != nil {
+		t.Fatalf("relink vault: %v", err)
+	}
+	if relinkedVault.FileMissing {
+		t.Fatalf("expected relinked vault to be available again, got %#v", relinkedVault)
+	}
+	if relinkedVault.StorageMode != VaultStorageModeCustomDir {
+		t.Fatalf("expected custom storage mode after relink, got %#v", relinkedVault)
+	}
+	if relinkedVault.LocationSummary != relinkedDir {
+		t.Fatalf("expected relinked location summary %q, got %#v", relinkedDir, relinkedVault)
+	}
+	if relinkedVault.FilePath != relinkedPath {
+		t.Fatalf("expected relinked file path %q, got %q", relinkedPath, relinkedVault.FilePath)
+	}
+}
+
+func TestStoreDeleteVaultCanKeepBackingFile(t *testing.T) {
+	ctx := context.Background()
+	store, db := newTestVaultStore(t)
+	defer func() { _ = db.Close() }()
+
+	item := createTestVault(t, ctx, store, "Keep File Vault")
+	absolutePath := store.resolveVaultFileAbsolutePath(item.FilePath)
+
+	if err := store.DeleteVault(ctx, item.ID); err != nil {
+		t.Fatalf("delete vault safely: %v", err)
+	}
+
+	if _, err := os.Stat(absolutePath); err != nil {
+		t.Fatalf("expected safe delete to keep the file on disk: %v", err)
 	}
 }
 

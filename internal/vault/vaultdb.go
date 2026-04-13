@@ -43,6 +43,72 @@ func defaultVaultFilesBaseDir(dbPath string) string {
 	return os.TempDir()
 }
 
+func normalizeVaultStorageMode(mode string) string {
+	switch strings.ToLower(strings.TrimSpace(mode)) {
+	case "", VaultStorageModeManaged:
+		return VaultStorageModeManaged
+	case VaultStorageModeCustomDir:
+		return VaultStorageModeCustomDir
+	default:
+		return strings.ToLower(strings.TrimSpace(mode))
+	}
+}
+
+func defaultVaultFileName(vaultID string) string {
+	vaultID = normalizeVaultID(vaultID)
+	if vaultID == "" {
+		vaultID = "vault"
+	}
+	return vaultID + ".db"
+}
+
+func normalizeVaultStorageDirectory(directory string) (string, error) {
+	directory = strings.TrimSpace(directory)
+	if directory == "" {
+		return "", ErrVaultStoragePathRequired
+	}
+
+	absolutePath, err := filepath.Abs(directory)
+	if err != nil {
+		return "", fmt.Errorf("%w: %v", ErrVaultStoragePathInvalid, err)
+	}
+	absolutePath = filepath.Clean(absolutePath)
+
+	info, err := os.Stat(absolutePath)
+	switch {
+	case errors.Is(err, os.ErrNotExist):
+		if err := os.MkdirAll(absolutePath, 0o755); err != nil {
+			return "", fmt.Errorf("%w: %v", ErrVaultStoragePathInvalid, err)
+		}
+		return absolutePath, nil
+	case err != nil:
+		return "", fmt.Errorf("%w: %v", ErrVaultStoragePathInvalid, err)
+	case !info.IsDir():
+		return "", fmt.Errorf("%w: path is not a directory", ErrVaultStoragePathInvalid)
+	default:
+		return absolutePath, nil
+	}
+}
+
+func vaultFileExists(path string) (bool, error) {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return false, nil
+	}
+
+	info, err := os.Stat(path)
+	switch {
+	case errors.Is(err, os.ErrNotExist):
+		return false, nil
+	case err != nil:
+		return false, err
+	case info.IsDir():
+		return false, fmt.Errorf("%w: path is a directory", ErrVaultStoragePathInvalid)
+	default:
+		return true, nil
+	}
+}
+
 func openVaultFile(ctx context.Context, path string) (*sql.DB, error) {
 	return openVaultFileWithMode(ctx, path, true)
 }

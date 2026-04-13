@@ -250,6 +250,20 @@
   line-height: 1.6;
 }
 
+.vault-page-inline-link {
+  display: inline-flex;
+  align-items: center;
+  margin-top: 0.8rem;
+  color: var(--primary-color);
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.vault-page-inline-link:hover {
+  color: var(--primary-color);
+  text-decoration: underline;
+}
+
 .vault-page-status-note {
   max-width: 32rem;
   padding: 0.95rem 1rem;

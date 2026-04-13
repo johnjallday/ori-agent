@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -180,9 +181,10 @@ func (h *Handler) handleVaults(w http.ResponseWriter, r *http.Request) {
 		})
 	case http.MethodPost:
 		var req struct {
-			Name          string `json:"name"`
-			Description   string `json:"description,omitempty"`
-			VaultPassword string `json:"vault_password"`
+			Name          string             `json:"name"`
+			Description   string             `json:"description,omitempty"`
+			VaultPassword string             `json:"vault_password"`
+			Storage       vault.VaultStorage `json:"storage,omitempty"`
 		}
 		if !orihttp.ParseJSONBody(w, r, &req) {
 			return
@@ -192,7 +194,9 @@ func (h *Handler) handleVaults(w http.ResponseWriter, r *http.Request) {
 			Name:        req.Name,
 			Description: req.Description,
 		}
-		if err := h.store.CreateVault(r.Context(), &item, req.VaultPassword); err != nil {
+		if err := h.store.CreateVaultWithOptions(r.Context(), &item, req.VaultPassword, vault.CreateVaultOptions{
+			Storage: req.Storage,
+		}); err != nil {
 			respondVaultError(w, err)
 			return
 		}
@@ -206,9 +210,19 @@ func (h *Handler) handleVaults(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) handleVault(w http.ResponseWriter, r *http.Request, vaultID string) {
-	vaultID = strings.TrimSpace(vaultID)
-	if vaultID == "" || strings.Contains(vaultID, "/") {
+	vaultID = strings.Trim(vaultID, "/")
+	parts := strings.Split(vaultID, "/")
+	if len(parts) == 0 || strings.TrimSpace(parts[0]) == "" {
 		_ = orihttp.RespondBadRequest(w, "vault id is required")
+		return
+	}
+	vaultID = strings.TrimSpace(parts[0])
+	if len(parts) > 1 {
+		if len(parts) != 2 || strings.TrimSpace(parts[1]) != "relink" {
+			_ = orihttp.RespondNotFound(w, "vault endpoint not found")
+			return
+		}
+		h.handleVaultRelink(w, r, vaultID)
 		return
 	}
 
@@ -232,16 +246,44 @@ func (h *Handler) handleVault(w http.ResponseWriter, r *http.Request, vaultID st
 			"vault":   updatedVault,
 		})
 	case http.MethodDelete:
-		if err := h.store.DeleteVault(r.Context(), vaultID); err != nil {
+		deleteFile, _ := strconv.ParseBool(r.URL.Query().Get("delete_file"))
+		if err := h.store.DeleteVaultWithOptions(r.Context(), vaultID, vault.DeleteVaultOptions{
+			DeleteFile: deleteFile,
+		}); err != nil {
 			respondVaultError(w, err)
 			return
 		}
 		orihttp.Success(w, map[string]any{
-			"success": true,
+			"success":     true,
+			"delete_file": deleteFile,
 		})
 	default:
 		_ = orihttp.RespondMethodNotAllowed(w)
 	}
+}
+
+func (h *Handler) handleVaultRelink(w http.ResponseWriter, r *http.Request, vaultID string) {
+	if !orihttp.RequireMethod(w, r, http.MethodPost) {
+		return
+	}
+
+	var req struct {
+		Storage vault.VaultStorage `json:"storage,omitempty"`
+	}
+	if !orihttp.ParseJSONBody(w, r, &req) {
+		return
+	}
+
+	updatedVault, err := h.store.RelinkVault(r.Context(), vaultID, req.Storage)
+	if err != nil {
+		respondVaultError(w, err)
+		return
+	}
+
+	orihttp.Success(w, map[string]any{
+		"success": true,
+		"vault":   updatedVault,
+	})
 }
 
 func (h *Handler) handleUnlock(w http.ResponseWriter, r *http.Request) {
@@ -572,7 +614,7 @@ func respondVaultError(w http.ResponseWriter, err error) {
 		return
 	case errors.Is(err, vault.ErrVaultNotFound), errors.Is(err, vault.ErrRecordNotFound), errors.Is(err, vault.ErrGrantNotFound), errors.Is(err, vault.ErrRecordAttachmentNotFound):
 		_ = orihttp.RespondError(w, http.StatusNotFound, err.Error())
-	case errors.Is(err, vault.ErrVaultAlreadyExists), errors.Is(err, vault.ErrFolderNotEmpty):
+	case errors.Is(err, vault.ErrVaultAlreadyExists), errors.Is(err, vault.ErrFolderNotEmpty), errors.Is(err, vault.ErrVaultStoragePathConflict):
 		_ = orihttp.RespondError(w, http.StatusConflict, err.Error())
 	case errors.Is(err, vault.ErrPermissionDenied):
 		_ = orihttp.RespondError(w, http.StatusForbidden, err.Error())
@@ -582,7 +624,7 @@ func respondVaultError(w http.ResponseWriter, err error) {
 		_ = orihttp.RespondError(w, http.StatusLocked, err.Error())
 	case errors.Is(err, vault.ErrRecordAttachmentTooLarge):
 		_ = orihttp.RespondError(w, http.StatusRequestEntityTooLarge, err.Error())
-	case errors.Is(err, vault.ErrVaultRequired), errors.Is(err, vault.ErrVaultNameRequired), errors.Is(err, vault.ErrVaultPasswordRequired), errors.Is(err, vault.ErrExportPasswordEmpty), errors.Is(err, vault.ErrImportPasswordRequired), errors.Is(err, vault.ErrImportBundleRequired), errors.Is(err, vault.ErrImportBundleInvalid), errors.Is(err, vault.ErrImportTargetRequired), errors.Is(err, vault.ErrInvalidEmailAccount), errors.Is(err, vault.ErrFolderPathInvalid), errors.Is(err, vault.ErrRecordAttachmentRequired):
+	case errors.Is(err, vault.ErrVaultRequired), errors.Is(err, vault.ErrVaultNameRequired), errors.Is(err, vault.ErrVaultPasswordRequired), errors.Is(err, vault.ErrExportPasswordEmpty), errors.Is(err, vault.ErrImportPasswordRequired), errors.Is(err, vault.ErrImportBundleRequired), errors.Is(err, vault.ErrImportBundleInvalid), errors.Is(err, vault.ErrImportTargetRequired), errors.Is(err, vault.ErrInvalidEmailAccount), errors.Is(err, vault.ErrFolderPathInvalid), errors.Is(err, vault.ErrRecordAttachmentRequired), errors.Is(err, vault.ErrVaultStorageModeInvalid), errors.Is(err, vault.ErrVaultStoragePathRequired), errors.Is(err, vault.ErrVaultStoragePathInvalid):
 		_ = orihttp.RespondError(w, http.StatusBadRequest, err.Error())
 	case errors.Is(err, vault.ErrImportPasswordInvalid):
 		_ = orihttp.RespondError(w, http.StatusUnauthorized, err.Error())
