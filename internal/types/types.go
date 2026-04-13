@@ -181,6 +181,7 @@ const (
 	RoleValidator    AgentRole = "validator"    // Fact-checks and validates results
 	RoleSpecialist   AgentRole = "specialist"   // Domain-specific specialist
 	RoleGeneral      AgentRole = "general"      // General-purpose agent (default)
+	RoleCLIAgent     AgentRole = "cli_agent"    // External CLI agent (Claude CLI, Codex CLI)
 )
 
 // Capability constants for agent capabilities

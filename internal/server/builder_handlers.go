@@ -11,6 +11,8 @@ import (
 
 	agenthttp "github.com/johnjallday/ori-agent/internal/agenthttp"
 	"github.com/johnjallday/ori-agent/internal/chathttp"
+	"github.com/johnjallday/ori-agent/internal/cliagent"
+	"github.com/johnjallday/ori-agent/internal/cliagenthttp"
 	"github.com/johnjallday/ori-agent/internal/config"
 	"github.com/johnjallday/ori-agent/internal/devicehttp"
 	"github.com/johnjallday/ori-agent/internal/evolution"
@@ -196,6 +198,48 @@ func (b *ServerBuilder) initializeHandlers() error {
 	}
 	b.externalAgentsHandler = externalagentshttp.New(b.externalAgentsCache, b.configManager)
 	logger.Info("External agents support initialized", logger.Fields{})
+
+	// Initialize CLI agent adapter (delegatable CLI agents)
+	b.cliAgentRegistry = cliagent.NewRegistry()
+	b.cliAgentRegistry.AutoDetect()
+	b.cliAgentLogger = cliagent.NewEventLogger(b.agentStorePath)
+
+	// Create step planner using system model if available
+	var cliPlanner *cliagent.StepPlanner
+	if b.llmFactory != nil && b.configManager != nil {
+		sysProvider, sysModel := b.configManager.GetSystemModel()
+		if sysProvider != "" && sysModel != "" {
+			if p, err := b.llmFactory.GetProvider(sysProvider); err == nil {
+				cliPlanner = cliagent.NewStepPlanner(p, sysModel)
+			}
+		}
+	}
+	if cliPlanner == nil && b.llmFactory != nil {
+		// Fallback: try any available provider
+		for _, info := range b.llmFactory.ListProviders() {
+			if p, err := b.llmFactory.GetProvider(info.Name); err == nil {
+				models := p.DefaultModels()
+				model := ""
+				if len(models) > 0 {
+					model = models[0]
+				}
+				cliPlanner = cliagent.NewStepPlanner(p, model)
+				break
+			}
+		}
+	}
+
+	b.cliAgentExecutor = cliagent.NewMicroStepExecutor(
+		b.cliAgentRegistry,
+		cliPlanner,
+		b.cliAgentLogger,
+		cliagent.NewDiffDetector(),
+		b.costTracker,
+	)
+	b.cliAgentHandler = cliagenthttp.NewHandler(b.cliAgentExecutor, b.cliAgentRegistry, b.cliAgentLogger)
+	logger.Info("CLI agent adapter initialized", logger.Fields{
+		"backends": len(b.cliAgentRegistry.List()),
+	})
 
 	// Initialize skills manager and handler (local + external)
 	personalSkillsDir := ""

@@ -4,6 +4,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/agent"
 	agenthttp "github.com/johnjallday/ori-agent/internal/agenthttp"
 	"github.com/johnjallday/ori-agent/internal/chathttp"
+	"github.com/johnjallday/ori-agent/internal/cliagenthttp"
 	"github.com/johnjallday/ori-agent/internal/client"
 	"github.com/johnjallday/ori-agent/internal/config"
 	"github.com/johnjallday/ori-agent/internal/devicehttp"
@@ -108,6 +109,7 @@ type HandlerFacade struct {
 	Vault           *vaulthttp.Handler
 	ExternalAgents  *externalagentshttp.Handler
 	Skills          *skillshttp.Handler
+	CLIAgents       *cliagenthttp.Handler
 }
 
 // NewCoreSystemFacade creates a new core system facade

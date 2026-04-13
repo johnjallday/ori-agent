@@ -9,6 +9,8 @@ import (
 
 	agenthttp "github.com/johnjallday/ori-agent/internal/agenthttp"
 	"github.com/johnjallday/ori-agent/internal/chathttp"
+	"github.com/johnjallday/ori-agent/internal/cliagent"
+	"github.com/johnjallday/ori-agent/internal/cliagenthttp"
 	"github.com/johnjallday/ori-agent/internal/client"
 	"github.com/johnjallday/ori-agent/internal/config"
 	"github.com/johnjallday/ori-agent/internal/devicehttp"
@@ -164,6 +166,12 @@ type ServerBuilder struct {
 	// External agents (Claude Code, Codex)
 	externalAgentsCache   *externalagents.Cache
 	externalAgentsHandler *externalagentshttp.Handler
+
+	// CLI agent adapter (delegatable CLI agents)
+	cliAgentRegistry *cliagent.CLIAgentRegistry
+	cliAgentExecutor *cliagent.MicroStepExecutor
+	cliAgentLogger   *cliagent.EventLogger
+	cliAgentHandler  *cliagenthttp.Handler
 
 	// Skills (local + external)
 	skillsManager *skills.Manager
@@ -363,6 +371,7 @@ func (b *ServerBuilder) createDomainFacades() error {
 		b.externalAgentsHandler,
 		b.skillsHandler,
 	)
+	b.server.Handlers.CLIAgents = b.cliAgentHandler
 
 	return nil
 }

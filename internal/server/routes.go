@@ -548,6 +548,15 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 	}
 
 	// =============================================================================
+	// CLI Agent Adapter Endpoints
+	// =============================================================================
+	if s.Handlers.CLIAgents != nil {
+		mux.HandleFunc("/api/cli-agents", s.Handlers.CLIAgents.HandleListAgents)
+		mux.HandleFunc("/api/cli-agents/tasks", s.Handlers.CLIAgents.HandleCreateTask)
+		mux.HandleFunc("/api/cli-agents/tasks/", s.Handlers.CLIAgents.HandleGetTask)
+	}
+
+	// =============================================================================
 	// External Agents (Claude Code, Codex) Endpoints
 	// =============================================================================
 	if s.Handlers.ExternalAgents != nil {
