@@ -222,7 +222,7 @@ func (m *Manager) fetchReleases() ([]GitHubRelease, error) {
 
 	client := m.httpClient
 	if client == nil {
-		client = http.DefaultClient
+		client = &http.Client{Timeout: 30 * time.Second}
 	}
 
 	resp, err := client.Do(req)
@@ -354,8 +354,12 @@ func (m *Manager) downloadFile(url, filename, version string) (string, error) {
 	// Create temp file path with original name
 	tempFilePath := filepath.Join(currentDir, filename+".tmp")
 
-	// Download file
-	resp, err := http.Get(url)
+	// Download file using configured client (with timeout)
+	client := m.httpClient
+	if client == nil {
+		client = &http.Client{Timeout: 10 * time.Minute}
+	}
+	resp, err := client.Get(url)
 	if err != nil {
 		return "", fmt.Errorf("failed to download update: %w", err)
 	}
@@ -365,8 +369,10 @@ func (m *Manager) downloadFile(url, filename, version string) (string, error) {
 		return "", fmt.Errorf("download failed with status %d", resp.StatusCode)
 	}
 
-	// Read file content into memory for checksum verification
-	fileContent, err := io.ReadAll(resp.Body)
+	// Read file content into memory for checksum verification.
+	// Limit to 500 MB to prevent memory exhaustion from malicious releases.
+	const maxDownloadSize = 500 << 20
+	fileContent, err := io.ReadAll(io.LimitReader(resp.Body, maxDownloadSize))
 	if err != nil {
 		return "", fmt.Errorf("failed to read download: %w", err)
 	}
@@ -481,7 +487,7 @@ func (m *Manager) downloadFile(url, filename, version string) (string, error) {
 func (m *Manager) fetchChecksum(url string) (string, error) {
 	client := m.httpClient
 	if client == nil {
-		client = http.DefaultClient
+		client = &http.Client{Timeout: 30 * time.Second}
 	}
 
 	req, err := http.NewRequest(http.MethodGet, url, nil)

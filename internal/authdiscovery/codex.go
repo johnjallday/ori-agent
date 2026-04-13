@@ -300,7 +300,8 @@ func refreshCodexTokens(refreshToken string) (*CodexTokens, error) {
 		"refresh_token": {refreshToken},
 	}
 
-	resp, err := http.PostForm(codexTokenEndpoint, form)
+	httpClient := &http.Client{Timeout: 30 * time.Second}
+	resp, err := httpClient.PostForm(codexTokenEndpoint, form)
 	if err != nil {
 		return nil, fmt.Errorf("codex refresh request: %w", err)
 	}
@@ -344,7 +345,8 @@ func exchangeIDTokenForAPIKey(idToken string) (string, error) {
 		"subject_token_type": {"urn:ietf:params:oauth:token-type:id_token"},
 	}
 
-	resp, err := http.PostForm(codexTokenEndpoint, form)
+	httpClient := &http.Client{Timeout: 30 * time.Second}
+	resp, err := httpClient.PostForm(codexTokenEndpoint, form)
 	if err != nil {
 		return "", fmt.Errorf("codex exchange request: %w", err)
 	}

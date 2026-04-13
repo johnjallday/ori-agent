@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/netip"
 	"net/url"
@@ -310,9 +311,15 @@ type HTTPWebFetchAdapter struct {
 }
 
 // NewHTTPWebFetchAdapter creates a web fetch adapter with safety defaults.
+// When BlockPrivateHosts is enabled and no custom client is provided, the
+// default client uses an SSRF-safe transport that validates resolved IPs at
+// dial time to prevent DNS rebinding attacks.
 func NewHTTPWebFetchAdapter(client *http.Client, cfg WebFetchAdapterConfig) *HTTPWebFetchAdapter {
 	if client == nil {
 		client = &http.Client{Timeout: 10 * time.Second}
+		if cfg.Safety.BlockPrivateHosts {
+			client.Transport = newSSRFSafeTransport()
+		}
 	}
 	if cfg.MaxResponseBytes <= 0 {
 		cfg.MaxResponseBytes = DefaultWebFetchAdapterConfig().MaxResponseBytes
@@ -381,9 +388,14 @@ type SimpleBrowserAutomationAdapter struct {
 }
 
 // NewSimpleBrowserAutomationAdapter creates a browser automation adapter.
+// When BlockPrivateHosts is enabled and no custom client is provided, the
+// default client uses an SSRF-safe transport to prevent DNS rebinding attacks.
 func NewSimpleBrowserAutomationAdapter(client *http.Client, policy BrowserAutomationPolicy) *SimpleBrowserAutomationAdapter {
 	if client == nil {
 		client = &http.Client{Timeout: 10 * time.Second}
+		if policy.BlockPrivateHosts {
+			client.Transport = newSSRFSafeTransport()
+		}
 	}
 	if policy.MaxResponseBytes <= 0 {
 		policy.MaxResponseBytes = DefaultBrowserAutomationPolicy().MaxResponseBytes
@@ -673,7 +685,38 @@ func isPrivateUtilityHost(host string) bool {
 	if err != nil {
 		return false
 	}
+	return isPrivateIP(addr)
+}
+
+func isPrivateIP(addr netip.Addr) bool {
 	return addr.IsLoopback() || addr.IsPrivate() || addr.IsLinkLocalUnicast() || addr.IsLinkLocalMulticast() || addr.IsMulticast() || addr.IsUnspecified()
+}
+
+// newSSRFSafeTransport returns an http.Transport that rejects connections to
+// private/loopback IPs at dial time, preventing DNS rebinding SSRF attacks.
+func newSSRFSafeTransport() *http.Transport {
+	return &http.Transport{
+		DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
+			host, port, err := net.SplitHostPort(addr)
+			if err != nil {
+				return nil, fmt.Errorf("ssrf check: invalid address %q: %w", addr, err)
+			}
+
+			// Resolve the hostname to IPs and reject private addresses.
+			ips, err := net.DefaultResolver.LookupNetIP(ctx, "ip", host)
+			if err != nil {
+				return nil, fmt.Errorf("ssrf check: dns lookup failed for %q: %w", host, err)
+			}
+			for _, ip := range ips {
+				if isPrivateIP(ip) {
+					return nil, fmt.Errorf("ssrf check: resolved to private IP %s", ip)
+				}
+			}
+
+			// All IPs are public — proceed with the connection.
+			return (&net.Dialer{Timeout: 10 * time.Second}).DialContext(ctx, network, net.JoinHostPort(host, port))
+		},
+	}
 }
 
 func matchesAllowedUtilityDomain(host string, allowed []string) bool {
