@@ -430,6 +430,12 @@ func (h *LLMTaskHandler) buildTaskPrompt(ctx context.Context, task Task, ag *age
 		}
 	}
 
+	if outputInstructions := BuildTaskOutputSchemaPrompt(task.OutputSchema); outputInstructions != "" {
+		prompt.WriteString("## Required Output Format\n\n")
+		prompt.WriteString(outputInstructions)
+		prompt.WriteString("\n\n")
+	}
+
 	if task.Timeout > 0 {
 		prompt.WriteString(fmt.Sprintf("**Time Limit**: %v\n\n", task.Timeout))
 	}
@@ -438,7 +444,11 @@ func (h *LLMTaskHandler) buildTaskPrompt(ctx context.Context, task Task, ag *age
 	prompt.WriteString("**Important**: Only use tools when they are explicitly necessary to complete the task. ")
 	prompt.WriteString("For informational requests, meta-commands (like /tools, /help), or simple questions, ")
 	prompt.WriteString("respond directly without calling tools. ")
-	prompt.WriteString("Provide a clear, concise response with your findings or results.")
+	if NormalizeTaskOutputSchema(task.OutputSchema) != nil {
+		prompt.WriteString("When you are done, your final answer must be the JSON object described above and nothing else.")
+	} else {
+		prompt.WriteString("Provide a clear, concise response with your findings or results.")
+	}
 
 	return prompt.String()
 }

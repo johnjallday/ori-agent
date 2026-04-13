@@ -170,6 +170,16 @@ type Task struct {
 	Progress       *TaskProgress          `json:"progress,omitempty"`
 	ExecutionMode  TaskExecutionMode      `json:"execution_mode,omitempty"`
 	ExecutionSteps []TaskExecutionStep    `json:"execution_steps,omitempty"`
+	// OrchestrationMode controls how parent tasks execute their subtasks.
+	OrchestrationMode TaskOrchestrationMode `json:"orchestration_mode,omitempty"`
+	// ResultCombinationMode controls how a parent task combines subtask outputs.
+	ResultCombinationMode TaskResultCombinationMode `json:"result_combination_mode,omitempty"`
+	// CombinationInstruction adds optional guidance for result aggregation.
+	CombinationInstruction string `json:"combination_instruction,omitempty"`
+	// OutputSchema requires the task result to be returned as structured JSON.
+	OutputSchema *TaskOutputSchema `json:"output_schema,omitempty"`
+	// TemplateRef tracks which reusable template and step produced this task.
+	TemplateRef *TaskTemplateRef `json:"template_ref,omitempty"`
 	// InputTaskIDs specifies task IDs whose results should be included as input context
 	InputTaskIDs []string `json:"input_task_ids,omitempty"`
 	// ParentTaskID groups this task under a parent workflow task when set.
@@ -232,6 +242,48 @@ const (
 	TaskExecutionModeAuto        TaskExecutionMode = "auto"
 	TaskExecutionModeStepThrough TaskExecutionMode = "step_through"
 )
+
+// TaskOrchestrationMode controls how a parent task executes its subtasks.
+type TaskOrchestrationMode string
+
+const (
+	TaskOrchestrationModeSequential TaskOrchestrationMode = "sequential"
+	TaskOrchestrationModeGraph      TaskOrchestrationMode = "graph"
+)
+
+// TaskResultCombinationMode controls how parent tasks combine child results.
+type TaskResultCombinationMode string
+
+const (
+	TaskResultCombinationLastResult       TaskResultCombinationMode = "last_result"
+	TaskResultCombinationConcat           TaskResultCombinationMode = "concat"
+	TaskResultCombinationJSONMap          TaskResultCombinationMode = "json_map"
+	TaskResultCombinationStructuredOutput TaskResultCombinationMode = "structured_outputs"
+)
+
+// TaskTemplateRef tracks which reusable template and step produced a task.
+type TaskTemplateRef struct {
+	TemplateID   string `json:"template_id,omitempty"`
+	TemplateName string `json:"template_name,omitempty"`
+	StepID       string `json:"step_id,omitempty"`
+	StepName     string `json:"step_name,omitempty"`
+}
+
+// TaskOutputSchema describes the structured JSON object a task must return.
+type TaskOutputSchema struct {
+	Name        string            `json:"name,omitempty"`
+	Description string            `json:"description,omitempty"`
+	Strict      bool              `json:"strict,omitempty"`
+	Fields      []TaskOutputField `json:"fields,omitempty"`
+}
+
+// TaskOutputField describes one field in a structured task result.
+type TaskOutputField struct {
+	Name        string `json:"name"`
+	Type        string `json:"type,omitempty"` // string, number, integer, boolean, object, array
+	Description string `json:"description,omitempty"`
+	Required    bool   `json:"required,omitempty"`
+}
 
 // TaskExecutionStepStatus tracks a single internal execution step.
 type TaskExecutionStepStatus string

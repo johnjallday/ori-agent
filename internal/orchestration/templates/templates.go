@@ -1,27 +1,36 @@
 package templates
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
+	gotemplate "text/template"
 	"time"
 
 	"github.com/johnjallday/ori-agent/internal/types"
+	"github.com/johnjallday/ori-agent/internal/workspace"
 )
 
 // WorkflowTemplate defines a reusable workflow pattern
 type WorkflowTemplate struct {
-	ID            string                 `json:"id"`
-	Name          string                 `json:"name"`
-	Description   string                 `json:"description"`
-	Category      string                 `json:"category"`
-	RequiredRoles []types.AgentRole      `json:"required_roles"`
-	Parameters    []TemplateParameter    `json:"parameters"`
-	Steps         []WorkflowStep         `json:"steps"`
-	DefaultConfig map[string]interface{} `json:"default_config,omitempty"`
-	CreatedAt     time.Time              `json:"created_at"`
-	UpdatedAt     time.Time              `json:"updated_at"`
+	ID                     string                              `json:"id"`
+	Name                   string                              `json:"name"`
+	Description            string                              `json:"description"`
+	Category               string                              `json:"category"`
+	Source                 string                              `json:"source,omitempty"`
+	RequiredRoles          []types.AgentRole                   `json:"required_roles"`
+	Parameters             []TemplateParameter                 `json:"parameters"`
+	Steps                  []WorkflowStep                      `json:"steps"`
+	DefaultConfig          map[string]interface{}              `json:"default_config,omitempty"`
+	OrchestrationMode      workspace.TaskOrchestrationMode     `json:"orchestration_mode,omitempty"`
+	ResultCombinationMode  workspace.TaskResultCombinationMode `json:"result_combination_mode,omitempty"`
+	CombinationInstruction string                              `json:"combination_instruction,omitempty"`
+	OutputSchema           *workspace.TaskOutputSchema         `json:"output_schema,omitempty"`
+	CreatedAt              time.Time                           `json:"created_at"`
+	UpdatedAt              time.Time                           `json:"updated_at"`
 }
 
 // TemplateParameter defines a parameter that can be set when instantiating a template
@@ -35,13 +44,17 @@ type TemplateParameter struct {
 
 // WorkflowStep defines a single step in a workflow
 type WorkflowStep struct {
-	ID          string                 `json:"id"`
-	Role        types.AgentRole        `json:"role"`
-	Description string                 `json:"description"`
-	DependsOn   []string               `json:"depends_on,omitempty"`
-	Priority    int                    `json:"priority"`
-	Timeout     time.Duration          `json:"timeout"`
-	Context     map[string]interface{} `json:"context,omitempty"`
+	ID           string                      `json:"id"`
+	Name         string                      `json:"name,omitempty"`
+	Role         types.AgentRole             `json:"role"`
+	AgentName    string                      `json:"agent_name,omitempty"`
+	Description  string                      `json:"description"`
+	Details      string                      `json:"details,omitempty"`
+	DependsOn    []string                    `json:"depends_on,omitempty"`
+	Priority     int                         `json:"priority"`
+	Timeout      time.Duration               `json:"timeout"`
+	Context      map[string]interface{}      `json:"context,omitempty"`
+	OutputSchema *workspace.TaskOutputSchema `json:"output_schema,omitempty"`
 }
 
 // TemplateManager manages workflow templates
@@ -89,6 +102,9 @@ func (tm *TemplateManager) LoadTemplates() error {
 		if err := json.Unmarshal(data, &template); err != nil {
 			continue
 		}
+		if strings.TrimSpace(template.Source) == "" {
+			template.Source = "custom"
+		}
 
 		tm.templates[template.ID] = &template
 	}
@@ -104,6 +120,7 @@ func (tm *TemplateManager) loadBuiltInTemplates() {
 		Name:        "Research Pipeline",
 		Description: "Comprehensive research workflow with analysis, synthesis, and validation",
 		Category:    "research",
+		Source:      "builtin",
 		RequiredRoles: []types.AgentRole{
 			types.RoleResearcher,
 			types.RoleAnalyzer,
@@ -167,6 +184,7 @@ func (tm *TemplateManager) loadBuiltInTemplates() {
 		Name:        "Data Analysis Workflow",
 		Description: "Parallel data analysis with synthesis",
 		Category:    "analysis",
+		Source:      "builtin",
 		RequiredRoles: []types.AgentRole{
 			types.RoleAnalyzer,
 			types.RoleSynthesizer,
@@ -214,6 +232,7 @@ func (tm *TemplateManager) loadBuiltInTemplates() {
 		Name:        "Quality Validation Workflow",
 		Description: "Multi-agent quality validation and verification",
 		Category:    "validation",
+		Source:      "builtin",
 		RequiredRoles: []types.AgentRole{
 			types.RoleValidator,
 			types.RoleAnalyzer,
@@ -261,6 +280,7 @@ func (tm *TemplateManager) loadBuiltInTemplates() {
 		Name:        "Parallel Research",
 		Description: "Multiple researchers working in parallel with synthesis",
 		Category:    "research",
+		Source:      "builtin",
 		RequiredRoles: []types.AgentRole{
 			types.RoleResearcher,
 			types.RoleSynthesizer,
@@ -331,6 +351,7 @@ func (tm *TemplateManager) SaveTemplate(template *WorkflowTemplate) error {
 	if template.CreatedAt.IsZero() {
 		template.CreatedAt = time.Now()
 	}
+	template.Source = "custom"
 
 	data, err := json.MarshalIndent(template, "", "  ")
 	if err != nil {
@@ -395,13 +416,31 @@ func (tm *TemplateManager) InstantiateTemplate(templateID string, params map[str
 		}
 	}
 
+	renderedDescription, err := renderTemplateText(template.Description, finalParams)
+	if err != nil {
+		return nil, fmt.Errorf("render template description: %w", err)
+	}
+	renderedCombinationInstruction, err := renderTemplateText(template.CombinationInstruction, finalParams)
+	if err != nil {
+		return nil, fmt.Errorf("render combination instruction: %w", err)
+	}
+	renderedSteps, err := renderWorkflowSteps(template.Steps, finalParams)
+	if err != nil {
+		return nil, fmt.Errorf("render workflow steps: %w", err)
+	}
+
 	instance := &WorkflowInstance{
-		TemplateID:    templateID,
-		TemplateName:  template.Name,
-		Parameters:    finalParams,
-		RequiredRoles: template.RequiredRoles,
-		Steps:         template.Steps,
-		CreatedAt:     time.Now(),
+		TemplateID:             templateID,
+		TemplateName:           template.Name,
+		TemplateDescription:    renderedDescription,
+		Parameters:             finalParams,
+		RequiredRoles:          template.RequiredRoles,
+		Steps:                  renderedSteps,
+		OrchestrationMode:      workspace.NormalizeTaskOrchestrationMode(string(template.OrchestrationMode)),
+		ResultCombinationMode:  workspace.NormalizeTaskResultCombinationMode(string(template.ResultCombinationMode)),
+		CombinationInstruction: strings.TrimSpace(renderedCombinationInstruction),
+		OutputSchema:           workspace.NormalizeTaskOutputSchema(template.OutputSchema),
+		CreatedAt:              time.Now(),
 	}
 
 	return instance, nil
@@ -409,10 +448,110 @@ func (tm *TemplateManager) InstantiateTemplate(templateID string, params map[str
 
 // WorkflowInstance represents an instantiated workflow from a template
 type WorkflowInstance struct {
-	TemplateID    string                 `json:"template_id"`
-	TemplateName  string                 `json:"template_name"`
-	Parameters    map[string]interface{} `json:"parameters"`
-	RequiredRoles []types.AgentRole      `json:"required_roles"`
-	Steps         []WorkflowStep         `json:"steps"`
-	CreatedAt     time.Time              `json:"created_at"`
+	TemplateID             string                              `json:"template_id"`
+	TemplateName           string                              `json:"template_name"`
+	TemplateDescription    string                              `json:"template_description,omitempty"`
+	Parameters             map[string]interface{}              `json:"parameters"`
+	RequiredRoles          []types.AgentRole                   `json:"required_roles"`
+	Steps                  []WorkflowStep                      `json:"steps"`
+	OrchestrationMode      workspace.TaskOrchestrationMode     `json:"orchestration_mode,omitempty"`
+	ResultCombinationMode  workspace.TaskResultCombinationMode `json:"result_combination_mode,omitempty"`
+	CombinationInstruction string                              `json:"combination_instruction,omitempty"`
+	OutputSchema           *workspace.TaskOutputSchema         `json:"output_schema,omitempty"`
+	CreatedAt              time.Time                           `json:"created_at"`
+}
+
+func renderWorkflowSteps(steps []WorkflowStep, params map[string]interface{}) ([]WorkflowStep, error) {
+	rendered := make([]WorkflowStep, 0, len(steps))
+	for _, step := range steps {
+		renderedName, err := renderTemplateText(step.Name, params)
+		if err != nil {
+			return nil, fmt.Errorf("render name for step %s: %w", step.ID, err)
+		}
+		renderedAgentName, err := renderTemplateText(step.AgentName, params)
+		if err != nil {
+			return nil, fmt.Errorf("render agent name for step %s: %w", step.ID, err)
+		}
+		renderedDescription, err := renderTemplateText(step.Description, params)
+		if err != nil {
+			return nil, fmt.Errorf("render description for step %s: %w", step.ID, err)
+		}
+		renderedDetails, err := renderTemplateText(step.Details, params)
+		if err != nil {
+			return nil, fmt.Errorf("render details for step %s: %w", step.ID, err)
+		}
+		renderedContext, err := renderTemplateContext(step.Context, params)
+		if err != nil {
+			return nil, fmt.Errorf("render context for step %s: %w", step.ID, err)
+		}
+
+		step.Name = renderedName
+		step.AgentName = renderedAgentName
+		step.Description = renderedDescription
+		step.Details = renderedDetails
+		step.Context = renderedContext
+		step.OutputSchema = workspace.NormalizeTaskOutputSchema(step.OutputSchema)
+		rendered = append(rendered, step)
+	}
+	return rendered, nil
+}
+
+func renderTemplateContext(src map[string]interface{}, params map[string]interface{}) (map[string]interface{}, error) {
+	if len(src) == 0 {
+		return nil, nil
+	}
+
+	rendered := make(map[string]interface{}, len(src))
+	for key, raw := range src {
+		switch value := raw.(type) {
+		case string:
+			text, err := renderTemplateText(value, params)
+			if err != nil {
+				return nil, fmt.Errorf("render %q: %w", key, err)
+			}
+			rendered[key] = text
+		case map[string]interface{}:
+			nested, err := renderTemplateContext(value, params)
+			if err != nil {
+				return nil, err
+			}
+			rendered[key] = nested
+		case []interface{}:
+			items := make([]interface{}, 0, len(value))
+			for _, item := range value {
+				text, ok := item.(string)
+				if !ok {
+					items = append(items, item)
+					continue
+				}
+				renderedItem, err := renderTemplateText(text, params)
+				if err != nil {
+					return nil, fmt.Errorf("render %q item: %w", key, err)
+				}
+				items = append(items, renderedItem)
+			}
+			rendered[key] = items
+		default:
+			rendered[key] = raw
+		}
+	}
+	return rendered, nil
+}
+
+func renderTemplateText(input string, params map[string]interface{}) (string, error) {
+	trimmed := strings.TrimSpace(input)
+	if trimmed == "" || !strings.Contains(input, "{{") {
+		return input, nil
+	}
+
+	tpl, err := gotemplate.New("workflow_template").Option("missingkey=zero").Parse(input)
+	if err != nil {
+		return "", err
+	}
+
+	var buf bytes.Buffer
+	if err := tpl.Execute(&buf, params); err != nil {
+		return "", err
+	}
+	return buf.String(), nil
 }

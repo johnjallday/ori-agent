@@ -232,7 +232,7 @@ func (s *Server) serveModels(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) serveWorkflows(w http.ResponseWriter, r *http.Request) {
 	data := s.prepareBasePageData("workflows")
-	data.Title = "Workflow Templates - Ori Agent"
+	data.Title = "Behavior Studio - Ori Agent"
 	data.BrandText = "Ori Agent"
 	s.renderAndWritePage(w, "workflows", data)
 }

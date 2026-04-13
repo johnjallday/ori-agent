@@ -14,12 +14,17 @@ import (
 
 // CreateTaskRequest represents the request to create a task
 type CreateTaskRequest struct {
-	Description  string `json:"description"`
-	From         string `json:"from"`
-	To           string `json:"to"`
-	Priority     int    `json:"priority"`
-	ParentTaskID string `json:"parent_task_id"`
-	SubtaskIndex int    `json:"subtask_index"`
+	Description            string            `json:"description"`
+	From                   string            `json:"from"`
+	To                     string            `json:"to"`
+	Priority               int               `json:"priority"`
+	ParentTaskID           string            `json:"parent_task_id"`
+	SubtaskIndex           int               `json:"subtask_index"`
+	OrchestrationMode      string            `json:"orchestration_mode"`
+	ResultCombinationMode  string            `json:"result_combination_mode"`
+	CombinationInstruction string            `json:"combination_instruction"`
+	OutputSchema           *TaskOutputSchema `json:"output_schema"`
+	TemplateRef            *TaskTemplateRef  `json:"template_ref"`
 }
 
 // CreateTask handles POST /api/workspaces/:id/tasks
@@ -63,17 +68,22 @@ func (h *HTTPHandler) CreateTask(w http.ResponseWriter, r *http.Request) {
 
 	// Create task
 	task := Task{
-		ID:           uuid.New().String(),
-		WorkspaceID:  workspaceID,
-		From:         req.From,
-		To:           req.To,
-		Description:  req.Description,
-		Priority:     req.Priority,
-		Context:      make(map[string]interface{}),
-		ParentTaskID: req.ParentTaskID,
-		SubtaskIndex: req.SubtaskIndex,
-		Status:       TaskStatusPending,
-		CreatedAt:    time.Now(),
+		ID:                     uuid.New().String(),
+		WorkspaceID:            workspaceID,
+		From:                   req.From,
+		To:                     req.To,
+		Description:            req.Description,
+		Priority:               req.Priority,
+		Context:                make(map[string]interface{}),
+		ParentTaskID:           req.ParentTaskID,
+		SubtaskIndex:           req.SubtaskIndex,
+		OrchestrationMode:      NormalizeTaskOrchestrationMode(req.OrchestrationMode),
+		ResultCombinationMode:  NormalizeTaskResultCombinationMode(req.ResultCombinationMode),
+		CombinationInstruction: strings.TrimSpace(req.CombinationInstruction),
+		OutputSchema:           NormalizeTaskOutputSchema(req.OutputSchema),
+		TemplateRef:            req.TemplateRef,
+		Status:                 TaskStatusPending,
+		CreatedAt:              time.Now(),
 	}
 
 	// Add task to workspace
@@ -125,13 +135,18 @@ func (h *HTTPHandler) UpdateTask(w http.ResponseWriter, r *http.Request) {
 	// Parse request body
 
 	var req struct {
-		Description    *string   `json:"description,omitempty"`
-		To             *string   `json:"to,omitempty"`
-		From           *string   `json:"from,omitempty"`
-		InputTaskIDs   *[]string `json:"input_task_ids,omitempty"`
-		AssignedNodeID *string   `json:"assigned_node_id,omitempty"`
-		ParentTaskID   *string   `json:"parent_task_id,omitempty"`
-		SubtaskIndex   *int      `json:"subtask_index,omitempty"`
+		Description            *string           `json:"description,omitempty"`
+		To                     *string           `json:"to,omitempty"`
+		From                   *string           `json:"from,omitempty"`
+		InputTaskIDs           *[]string         `json:"input_task_ids,omitempty"`
+		AssignedNodeID         *string           `json:"assigned_node_id,omitempty"`
+		ParentTaskID           *string           `json:"parent_task_id,omitempty"`
+		SubtaskIndex           *int              `json:"subtask_index,omitempty"`
+		OrchestrationMode      *string           `json:"orchestration_mode,omitempty"`
+		ResultCombinationMode  *string           `json:"result_combination_mode,omitempty"`
+		CombinationInstruction *string           `json:"combination_instruction,omitempty"`
+		OutputSchema           *TaskOutputSchema `json:"output_schema,omitempty"`
+		TemplateRef            *TaskTemplateRef  `json:"template_ref,omitempty"`
 	}
 	if !orihttp.ParseJSONBody(w, r, &req) {
 		return
@@ -172,6 +187,21 @@ func (h *HTTPHandler) UpdateTask(w http.ResponseWriter, r *http.Request) {
 			}
 			if req.SubtaskIndex != nil {
 				workspace.Tasks[i].SubtaskIndex = *req.SubtaskIndex
+			}
+			if req.OrchestrationMode != nil {
+				workspace.Tasks[i].OrchestrationMode = NormalizeTaskOrchestrationMode(*req.OrchestrationMode)
+			}
+			if req.ResultCombinationMode != nil {
+				workspace.Tasks[i].ResultCombinationMode = NormalizeTaskResultCombinationMode(*req.ResultCombinationMode)
+			}
+			if req.CombinationInstruction != nil {
+				workspace.Tasks[i].CombinationInstruction = strings.TrimSpace(*req.CombinationInstruction)
+			}
+			if req.OutputSchema != nil {
+				workspace.Tasks[i].OutputSchema = NormalizeTaskOutputSchema(req.OutputSchema)
+			}
+			if req.TemplateRef != nil {
+				workspace.Tasks[i].TemplateRef = req.TemplateRef
 			}
 			found = true
 			break
