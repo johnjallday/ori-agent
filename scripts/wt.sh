@@ -59,6 +59,12 @@ function wt {
     fi
     git worktree add -b "feature/$name" "$WORKTREE_DIR$name" "$BASE_BRANCH"
     echo "Created worktree: $WORKTREE_DIR$name (branch: feature/$name, based on $BASE_BRANCH)"
+    # Build folder picker in the new worktree
+    local picker_script="$WORKTREE_DIR$name/scripts/build-folder-picker.sh"
+    if [[ -f "$picker_script" ]]; then
+      echo "Building folder picker in new worktree..."
+      (cd "$WORKTREE_DIR$name" && bash scripts/build-folder-picker.sh)
+    fi
     ;;
   rm)
     local name="$2"
