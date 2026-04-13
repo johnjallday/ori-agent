@@ -170,3 +170,23 @@ func TestVaultFileExistsReportsMissingAndExistingFiles(t *testing.T) {
 		t.Fatalf("expected missing file to be reported as absent")
 	}
 }
+
+func TestDefaultVaultPackageFilePath(t *testing.T) {
+	got := defaultVaultPackageFilePath("vault-123")
+	want := filepath.Join("vault-123.orivault", "vault.db")
+	if got != want {
+		t.Fatalf("expected package file path %q, got %q", want, got)
+	}
+}
+
+func TestVaultPackageDirectoryForFilePath(t *testing.T) {
+	path := filepath.Join("/tmp", "vault-123.orivault", "vault.db")
+	if got := vaultPackageDirectoryForFilePath(path); got != filepath.Join("/tmp", "vault-123.orivault") {
+		t.Fatalf("expected package directory to resolve, got %q", got)
+	}
+
+	legacyPath := filepath.Join("/tmp", "vault-123.db")
+	if got := vaultPackageDirectoryForFilePath(legacyPath); got != "" {
+		t.Fatalf("expected legacy file path to have no package dir, got %q", got)
+	}
+}

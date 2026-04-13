@@ -370,11 +370,11 @@
 
     if (createStoragePreviewEl) {
       if (mode !== 'custom_dir') {
-        createStoragePreviewEl.textContent = 'Ori will store this vault inside its managed vault directory.';
+        createStoragePreviewEl.textContent = 'Ori will store this vault as a managed vault folder inside the configured Vault Directory.';
       } else if (!customDirectory) {
-        createStoragePreviewEl.textContent = 'Choose a folder. Ori will create a generated vault file such as <new-vault-id>.db inside it.';
+        createStoragePreviewEl.textContent = 'Choose a folder. Ori will create a vault package such as <new-vault-id>.orivault/vault.db inside it.';
       } else {
-        createStoragePreviewEl.textContent = `Ori will create ${customDirectory}/<new-vault-id>.db and keep that filename stable for relink and recovery flows.`;
+        createStoragePreviewEl.textContent = `Ori will create ${customDirectory}/<new-vault-id>.orivault/vault.db and keep that package structure stable for relink and recovery flows.`;
       }
     }
   }
@@ -1318,8 +1318,8 @@
 
     if (createDialogDescription) {
       createDialogDescription.textContent = hasVaults
-        ? 'Create a separately encrypted vault with its own password. New vault files are saved in the configured Vault Directory.'
-        : 'Start with one encrypted vault. Each vault has its own password and protected record set, and new vault files are saved in the configured Vault Directory.';
+        ? 'Create a separately encrypted vault with its own password. New vault folders are saved in the configured Vault Directory.'
+        : 'Start with one encrypted vault. Each vault has its own password and protected record set, and new vault folders are saved in the configured Vault Directory.';
     }
 
     createOverlay.hidden = !canShow;
@@ -1551,7 +1551,7 @@
       if (editVaultNameInput) editVaultNameInput.value = '';
       if (editVaultDescriptionInput) editVaultDescriptionInput.value = '';
       if (storageStatusSummaryEl) storageStatusSummaryEl.textContent = 'Create a vault to review its storage location.';
-      if (storageLocationSummaryEl) storageLocationSummaryEl.textContent = 'Ori-managed or custom-folder vault storage details will appear here.';
+      if (storageLocationSummaryEl) storageLocationSummaryEl.textContent = 'Ori-managed or custom vault-folder details will appear here.';
       if (renameVaultBtn) renameVaultBtn.disabled = true;
       if (relinkVaultBtn) relinkVaultBtn.disabled = true;
       if (deleteVaultBtn) deleteVaultBtn.disabled = true;
@@ -1587,17 +1587,17 @@
     }
     if (storageStatusSummaryEl) {
       storageStatusSummaryEl.textContent = vaultIsMissing(selectedVault)
-        ? `${vaultStorageModeLabel(selectedVault)} • file missing`
+        ? `${vaultStorageModeLabel(selectedVault)} • storage missing`
         : vaultStorageModeLabel(selectedVault);
     }
     if (storageLocationSummaryEl) {
-      storageLocationSummaryEl.textContent = vaultLocationSummary(selectedVault) || 'Ori-managed vault directory';
+      storageLocationSummaryEl.textContent = vaultLocationSummary(selectedVault) || 'Ori-managed vault folder';
     }
     if (relinkVaultBtn) {
       relinkVaultBtn.disabled = !vaultIsMissing(selectedVault);
       relinkVaultBtn.title = vaultIsMissing(selectedVault)
         ? ''
-        : 'Relink is available when the selected vault file is missing.';
+        : 'Relink is available when the selected vault folder is missing.';
     }
     if (deleteVaultBtn) {
       deleteVaultBtn.disabled = false;
@@ -1748,14 +1748,14 @@
     }
     const recordCount = vaultRecordCount(selectedVault);
     const confirmed = window.confirm(
-      `Remove vault "${selectedVault.name}" from Ori?${recordCount > 0 ? ` It currently references ${recordCount} encrypted ${recordCount === 1 ? 'entry' : 'entries'}.` : ''} This default action keeps the backing vault file on disk.`
+      `Remove vault "${selectedVault.name}" from Ori?${recordCount > 0 ? ` It currently references ${recordCount} encrypted ${recordCount === 1 ? 'entry' : 'entries'}.` : ''} This default action keeps the backing vault storage on disk.`
     );
     if (!confirmed) {
       return;
     }
 
     const deleteFile = !vaultIsMissing(selectedVault) && window.confirm(
-      `Also permanently delete the backing vault file from disk? Click OK to remove it permanently, or Cancel to keep the file and only remove it from Ori.`
+      `Also permanently delete the backing vault folder from disk? Click OK to remove it permanently, or Cancel to keep the vault storage and only remove it from Ori.`
     );
 
     try {
@@ -1776,7 +1776,7 @@
       folderComposerOpen = false;
       selectedFolderPath = ROOT_FOLDER_PATH;
       clearRecordForm({ refreshList: false, refreshExplorer: false });
-      notify(deleteFile ? 'Vault and backing file deleted.' : 'Vault removed from Ori. Backing file kept on disk.', 'success');
+      notify(deleteFile ? 'Vault and backing storage deleted.' : 'Vault removed from Ori. Backing storage kept on disk.', 'success');
       await refreshVault();
     } catch (error) {
       console.error('Failed to delete vault:', error);
@@ -1793,12 +1793,12 @@
       return;
     }
     if (!vaultIsMissing(selectedVault)) {
-      showInlineAlert('Relink is only needed when the selected vault file is missing.', 'warning');
+      showInlineAlert('Relink is only needed when the selected vault storage is missing.', 'warning');
       return;
     }
 
     try {
-      const nextDirectory = await browseForFolderPath(`Select Folder for ${vaultDisplayLabel(selectedVault)}`, relinkVaultBtn);
+      const nextDirectory = await browseForFolderPath(`Select Vault Folder for ${vaultDisplayLabel(selectedVault)}`, relinkVaultBtn);
       if (!nextDirectory) {
         return;
       }
@@ -1822,6 +1822,7 @@
     } catch (error) {
       console.error('Failed to relink vault:', error);
       showInlineAlert(error.message || 'Failed to relink vault.', 'error');
+      return;
     }
   }
 
@@ -1886,7 +1887,7 @@
     if (!vaultStatus.available) {
       if (unlockPasswordHelp) {
         unlockPasswordHelp.textContent = vaultStatus.file_missing
-          ? 'The selected vault file is missing. Relink the vault to a folder that contains the generated vault file, then unlock it again.'
+          ? 'The selected vault storage is missing. Relink the vault to its package folder, then unlock it again.'
           : 'Per-vault passwords are required for new vaults. Legacy vaults may still unlock through secure system storage or the older fallback passphrase flow.';
       }
       setInteractiveState(true);
@@ -2805,8 +2806,8 @@
 
     if (!vaultStatus.available) {
       if (vaultStatus.file_missing) {
-        recordsSummaryEl.textContent = 'Vault file missing';
-        explorerPreviewEl.innerHTML = '<div class="vault-modal-empty">The selected vault file is missing. Use the Relink Vault action to point Ori at the folder that contains this vault file.</div>';
+        recordsSummaryEl.textContent = 'Vault storage missing';
+        explorerPreviewEl.innerHTML = '<div class="vault-modal-empty">The selected vault storage is missing. Use the Relink Vault action to point Ori at the vault folder that contains this vault.</div>';
       } else {
         recordsSummaryEl.textContent = 'No vault selected';
         explorerPreviewEl.innerHTML = '<div class="vault-modal-empty">Create a vault to start saving encrypted items in your private library.</div>';
@@ -4232,7 +4233,7 @@
 
   createStorageBrowseBtn?.addEventListener('click', async () => {
     try {
-      const nextPath = await browseForFolderPath('Select Folder for Custom Vault Storage', createStorageBrowseBtn);
+      const nextPath = await browseForFolderPath('Select Folder for Custom Vault Package', createStorageBrowseBtn);
       if (!nextPath) {
         return;
       }

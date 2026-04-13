@@ -14,6 +14,8 @@ import (
 )
 
 const vaultFileSchemaVersion = 1
+const vaultPackageExtension = ".orivault"
+const vaultPackageDatabaseFileName = "vault.db"
 
 type vaultFileMetadata struct {
 	VaultID       string
@@ -54,12 +56,52 @@ func normalizeVaultStorageMode(mode string) string {
 	}
 }
 
+func defaultVaultPackageName(vaultID string) string {
+	vaultID = normalizeVaultID(vaultID)
+	if vaultID == "" {
+		vaultID = "vault"
+	}
+	return vaultID + vaultPackageExtension
+}
+
+func defaultVaultPackageFilePath(vaultID string) string {
+	return filepath.Join(defaultVaultPackageName(vaultID), vaultPackageDatabaseFileName)
+}
+
 func defaultVaultFileName(vaultID string) string {
 	vaultID = normalizeVaultID(vaultID)
 	if vaultID == "" {
 		vaultID = "vault"
 	}
 	return vaultID + ".db"
+}
+
+func vaultPackageDirectoryForFilePath(path string) string {
+	path = filepath.Clean(strings.TrimSpace(path))
+	if path == "" {
+		return ""
+	}
+
+	if filepath.Base(path) != vaultPackageDatabaseFileName {
+		return ""
+	}
+
+	packageDir := filepath.Dir(path)
+	if strings.HasSuffix(strings.ToLower(filepath.Base(packageDir)), vaultPackageExtension) {
+		return packageDir
+	}
+	return ""
+}
+
+func resolveVaultPackageDirectory(directory string, vaultID string) string {
+	directory = filepath.Clean(strings.TrimSpace(directory))
+	if directory == "" {
+		return ""
+	}
+	if strings.HasSuffix(strings.ToLower(filepath.Base(directory)), vaultPackageExtension) {
+		return directory
+	}
+	return filepath.Join(directory, defaultVaultPackageName(vaultID))
 }
 
 func normalizeVaultStorageDirectory(directory string) (string, error) {
@@ -304,9 +346,9 @@ func validateVaultFileSchema(ctx context.Context, db *sql.DB) error {
 	return nil
 }
 
-// ensureVaultFileSchema prepares a per-vault SQLite file for encrypted vault data.
-// Each vault file is self-contained: metadata, wrapped key material, records,
-// folders, attachments, grants, and audit events all live in the same database.
+// ensureVaultFileSchema prepares a per-vault SQLite database for encrypted
+// vault data. Each vault package keeps metadata, wrapped key material, records,
+// folders, attachments, grants, and audit events in its internal `vault.db`.
 func ensureVaultFileSchema(ctx context.Context, db *sql.DB) error {
 	if db == nil {
 		return fmt.Errorf("vault file database is required")

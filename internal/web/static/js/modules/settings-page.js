@@ -738,7 +738,7 @@ document.getElementById('systemDiagnosticsBtn')?.addEventListener('click', async
         </svg>
       `;
       statusText.textContent = 'Custom vault directory active';
-      statusDetails.textContent = effectiveRoot ? `New managed vaults will be created in ${effectiveRoot}.` : '';
+      statusDetails.textContent = effectiveRoot ? `New managed vault folders will be created in ${effectiveRoot}.` : '';
       return;
     }
 

@@ -124,6 +124,14 @@ func absoluteVaultFilePath(vaultFilesBaseDir string, vaultItem vault.Vault) stri
 	return filepath.Join(vaultFilesBaseDir, vaultItem.FilePath)
 }
 
+func vaultPackageNameForTest(vaultID string) string {
+	vaultID = strings.TrimSpace(vaultID)
+	if vaultID == "" {
+		vaultID = "vault"
+	}
+	return vaultID + ".orivault"
+}
+
 func configureTestGoogleOAuth(t *testing.T, tokenURL string) string {
 	t.Helper()
 
@@ -1141,13 +1149,14 @@ func TestHandlerCreatesVaultInCustomDirectory(t *testing.T) {
 	if created.Vault.StorageMode != vault.VaultStorageModeCustomDir {
 		t.Fatalf("expected custom storage mode, got %#v", created.Vault)
 	}
-	if created.Vault.LocationSummary != customDir {
-		t.Fatalf("expected custom location summary %q, got %#v", customDir, created.Vault)
+	expectedPackageDir := filepath.Join(customDir, vaultPackageNameForTest(created.Vault.ID))
+	if created.Vault.LocationSummary != expectedPackageDir {
+		t.Fatalf("expected custom location summary %q, got %#v", expectedPackageDir, created.Vault)
 	}
 
 	absolutePath := absoluteVaultFilePath(vaultFilesBaseDir, created.Vault)
-	if !filepath.IsAbs(absolutePath) || filepath.Dir(absolutePath) != customDir {
-		t.Fatalf("expected custom vault file under %q, got %q", customDir, absolutePath)
+	if !filepath.IsAbs(absolutePath) || filepath.Dir(absolutePath) != expectedPackageDir {
+		t.Fatalf("expected custom vault file under %q, got %q", expectedPackageDir, absolutePath)
 	}
 	if _, err := os.Stat(absolutePath); err != nil {
 		t.Fatalf("expected custom vault file to exist: %v", err)
@@ -1246,10 +1255,12 @@ func TestHandlerRelinksMissingVault(t *testing.T) {
 	decodeJSONBody(t, createVaultRec, &created)
 
 	originalPath := absoluteVaultFilePath(vaultFilesBaseDir, created.Vault)
-	relinkedDir := t.TempDir()
-	relinkedPath := filepath.Join(relinkedDir, filepath.Base(originalPath))
-	if err := os.Rename(originalPath, relinkedPath); err != nil {
-		t.Fatalf("move vault file: %v", err)
+	originalPackageDir := filepath.Dir(originalPath)
+	relinkedRoot := t.TempDir()
+	relinkedPackageDir := filepath.Join(relinkedRoot, filepath.Base(originalPackageDir))
+	relinkedPath := filepath.Join(relinkedPackageDir, filepath.Base(originalPath))
+	if err := os.Rename(originalPackageDir, relinkedPackageDir); err != nil {
+		t.Fatalf("move vault package: %v", err)
 	}
 
 	statusRec := performJSONRequest(t, handler, http.MethodGet, "/api/vault/status?vault_id="+created.Vault.ID, nil)
@@ -1266,7 +1277,7 @@ func TestHandlerRelinksMissingVault(t *testing.T) {
 	relinkRec := performJSONRequest(t, handler, http.MethodPost, "/api/vault/vaults/"+created.Vault.ID+"/relink", map[string]any{
 		"storage": map[string]any{
 			"mode":      "custom_dir",
-			"directory": relinkedDir,
+			"directory": relinkedPackageDir,
 		},
 	})
 	if relinkRec.Code != http.StatusOK {
@@ -1282,6 +1293,9 @@ func TestHandlerRelinksMissingVault(t *testing.T) {
 	}
 	if relinked.Vault.FilePath != relinkedPath {
 		t.Fatalf("expected relinked file path %q, got %q", relinkedPath, relinked.Vault.FilePath)
+	}
+	if relinked.Vault.LocationSummary != relinkedPackageDir {
+		t.Fatalf("expected relinked package dir %q, got %#v", relinkedPackageDir, relinked.Vault)
 	}
 }
 
@@ -1302,13 +1316,14 @@ func TestHandlerDeleteVaultCanRemoveBackingFile(t *testing.T) {
 	}
 	decodeJSONBody(t, createVaultRec, &created)
 	absolutePath := absoluteVaultFilePath(vaultFilesBaseDir, created.Vault)
+	packageDir := filepath.Dir(absolutePath)
 
 	deleteVaultRec := performJSONRequest(t, handler, http.MethodDelete, "/api/vault/vaults/"+created.Vault.ID+"?delete_file=true", nil)
 	if deleteVaultRec.Code != http.StatusOK {
 		t.Fatalf("expected 200 deleting vault with file, got %d: %s", deleteVaultRec.Code, deleteVaultRec.Body.String())
 	}
-	if _, err := os.Stat(absolutePath); !os.IsNotExist(err) {
-		t.Fatalf("expected destructive delete to remove backing file, got err=%v", err)
+	if _, err := os.Stat(packageDir); !os.IsNotExist(err) {
+		t.Fatalf("expected destructive delete to remove backing vault package, got err=%v", err)
 	}
 }
 

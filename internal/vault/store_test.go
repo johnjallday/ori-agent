@@ -895,14 +895,15 @@ func TestStoreCreateVaultInCustomDirectory(t *testing.T) {
 	if !filepath.IsAbs(item.FilePath) {
 		t.Fatalf("expected absolute custom file path, got %q", item.FilePath)
 	}
-	if filepath.Dir(item.FilePath) != customDir {
-		t.Fatalf("expected custom directory %q, got %q", customDir, filepath.Dir(item.FilePath))
+	expectedPackageDir := filepath.Join(customDir, defaultVaultPackageName(item.ID))
+	if filepath.Dir(item.FilePath) != expectedPackageDir {
+		t.Fatalf("expected custom package directory %q, got %q", expectedPackageDir, filepath.Dir(item.FilePath))
 	}
 	if item.StorageMode != VaultStorageModeCustomDir {
 		t.Fatalf("expected custom storage mode, got %#v", item)
 	}
-	if item.LocationSummary != customDir {
-		t.Fatalf("expected location summary %q, got %#v", customDir, item)
+	if item.LocationSummary != expectedPackageDir {
+		t.Fatalf("expected location summary %q, got %#v", expectedPackageDir, item)
 	}
 	if _, err := os.Stat(item.FilePath); err != nil {
 		t.Fatalf("expected custom vault file to exist: %v", err)
@@ -933,15 +934,16 @@ func TestStoreCreateVaultUsesManagedVaultRoot(t *testing.T) {
 		t.Fatalf("create vault: %v", err)
 	}
 
-	expectedPath := filepath.Join(managedRoot, defaultVaultFileName(item.ID))
+	expectedPath := filepath.Join(managedRoot, defaultVaultPackageFilePath(item.ID))
 	if item.FilePath != expectedPath {
 		t.Fatalf("expected managed vault file path %q, got %q", expectedPath, item.FilePath)
 	}
 	if item.StorageMode != VaultStorageModeManaged {
 		t.Fatalf("expected managed storage mode, got %#v", item)
 	}
-	if item.LocationSummary != managedRoot {
-		t.Fatalf("expected location summary %q, got %#v", managedRoot, item)
+	expectedPackageDir := filepath.Join(managedRoot, defaultVaultPackageName(item.ID))
+	if item.LocationSummary != expectedPackageDir {
+		t.Fatalf("expected location summary %q, got %#v", expectedPackageDir, item)
 	}
 	if _, err := os.Stat(expectedPath); err != nil {
 		t.Fatalf("expected managed vault file to exist: %v", err)
@@ -968,7 +970,7 @@ func TestStoreSetManagedVaultRootAffectsNewVaults(t *testing.T) {
 	})
 
 	firstVault := createTestVault(t, ctx, store, "First Managed Vault")
-	firstPath := filepath.Join(initialRoot, defaultVaultFileName(firstVault.ID))
+	firstPath := filepath.Join(initialRoot, defaultVaultPackageFilePath(firstVault.ID))
 	if firstVault.FilePath != firstPath {
 		t.Fatalf("expected first managed vault path %q, got %q", firstPath, firstVault.FilePath)
 	}
@@ -979,7 +981,7 @@ func TestStoreSetManagedVaultRootAffectsNewVaults(t *testing.T) {
 	}
 
 	secondVault := createTestVault(t, ctx, store, "Second Managed Vault")
-	secondPath := filepath.Join(nextRoot, defaultVaultFileName(secondVault.ID))
+	secondPath := filepath.Join(nextRoot, defaultVaultPackageFilePath(secondVault.ID))
 	if secondVault.FilePath != secondPath {
 		t.Fatalf("expected second managed vault path %q, got %q", secondPath, secondVault.FilePath)
 	}
@@ -995,11 +997,16 @@ func TestStoreRelinkVaultRestoresMissingVault(t *testing.T) {
 
 	item := createTestVault(t, ctx, store, "Relink Me")
 	originalPath := store.resolveVaultFileAbsolutePath(item.FilePath)
-	relinkedDir := t.TempDir()
-	relinkedPath := filepath.Join(relinkedDir, filepath.Base(originalPath))
+	originalPackageDir := vaultPackageDirectoryForFilePath(originalPath)
+	if originalPackageDir == "" {
+		t.Fatalf("expected managed vault package directory for %q", originalPath)
+	}
+	relinkedRoot := t.TempDir()
+	relinkedPackageDir := filepath.Join(relinkedRoot, filepath.Base(originalPackageDir))
+	relinkedPath := filepath.Join(relinkedPackageDir, filepath.Base(originalPath))
 
-	if err := os.Rename(originalPath, relinkedPath); err != nil {
-		t.Fatalf("move vault file: %v", err)
+	if err := os.Rename(originalPackageDir, relinkedPackageDir); err != nil {
+		t.Fatalf("move vault package: %v", err)
 	}
 
 	vaults, err := store.ListVaults(ctx)
@@ -1020,7 +1027,7 @@ func TestStoreRelinkVaultRestoresMissingVault(t *testing.T) {
 
 	relinkedVault, err := store.RelinkVault(ctx, item.ID, VaultStorage{
 		Mode:      VaultStorageModeCustomDir,
-		Directory: relinkedDir,
+		Directory: relinkedPackageDir,
 	})
 	if err != nil {
 		t.Fatalf("relink vault: %v", err)
@@ -1031,8 +1038,8 @@ func TestStoreRelinkVaultRestoresMissingVault(t *testing.T) {
 	if relinkedVault.StorageMode != VaultStorageModeCustomDir {
 		t.Fatalf("expected custom storage mode after relink, got %#v", relinkedVault)
 	}
-	if relinkedVault.LocationSummary != relinkedDir {
-		t.Fatalf("expected relinked location summary %q, got %#v", relinkedDir, relinkedVault)
+	if relinkedVault.LocationSummary != relinkedPackageDir {
+		t.Fatalf("expected relinked location summary %q, got %#v", relinkedPackageDir, relinkedVault)
 	}
 	if relinkedVault.FilePath != relinkedPath {
 		t.Fatalf("expected relinked file path %q, got %q", relinkedPath, relinkedVault.FilePath)
@@ -1046,13 +1053,17 @@ func TestStoreDeleteVaultCanKeepBackingFile(t *testing.T) {
 
 	item := createTestVault(t, ctx, store, "Keep File Vault")
 	absolutePath := store.resolveVaultFileAbsolutePath(item.FilePath)
+	packageDir := vaultPackageDirectoryForFilePath(absolutePath)
+	if packageDir == "" {
+		t.Fatalf("expected managed vault package directory for %q", absolutePath)
+	}
 
 	if err := store.DeleteVault(ctx, item.ID); err != nil {
 		t.Fatalf("delete vault safely: %v", err)
 	}
 
-	if _, err := os.Stat(absolutePath); err != nil {
-		t.Fatalf("expected safe delete to keep the file on disk: %v", err)
+	if _, err := os.Stat(packageDir); err != nil {
+		t.Fatalf("expected safe delete to keep the package on disk: %v", err)
 	}
 }
 

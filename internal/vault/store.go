@@ -126,7 +126,7 @@ func (s *Store) managedVaultFileAbsolutePath(vaultID string) string {
 	if vaultID == "" {
 		vaultID = uuid.New().String()
 	}
-	return filepath.Join(s.managedVaultRootDir(), defaultVaultFileName(vaultID))
+	return filepath.Join(s.managedVaultRootDir(), defaultVaultPackageFilePath(vaultID))
 }
 
 func (s *Store) SetManagedVaultRoot(root string) error {
@@ -153,7 +153,53 @@ func (s *Store) vaultFileNameForPath(vaultID string, filePath string) string {
 			return fileName
 		}
 	}
-	return defaultVaultFileName(vaultID)
+	return vaultPackageDatabaseFileName
+}
+
+func (s *Store) resolveRelinkTargetAbsolutePath(vaultID string, currentFilePath string, storage VaultStorage) (string, error) {
+	mode := normalizeVaultStorageMode(storage.Mode)
+	switch mode {
+	case VaultStorageModeManaged:
+		return s.resolveVaultFileAbsolutePath(s.defaultVaultFilePath(vaultID)), nil
+	case VaultStorageModeCustomDir:
+		directory, err := normalizeVaultStorageDirectory(storage.Directory)
+		if err != nil {
+			return "", err
+		}
+
+		candidates := []string{
+			filepath.Join(directory, vaultPackageDatabaseFileName),
+			filepath.Join(directory, defaultVaultPackageFilePath(vaultID)),
+		}
+
+		legacyFileName := s.vaultFileNameForPath(vaultID, currentFilePath)
+		if legacyFileName != "" {
+			legacyCandidate := filepath.Join(directory, legacyFileName)
+			alreadyIncluded := false
+			for _, candidate := range candidates {
+				if candidate == legacyCandidate {
+					alreadyIncluded = true
+					break
+				}
+			}
+			if !alreadyIncluded {
+				candidates = append(candidates, legacyCandidate)
+			}
+		}
+
+		for _, candidate := range candidates {
+			exists, err := vaultFileExists(candidate)
+			if err != nil {
+				return "", fmt.Errorf("inspect relink target: %w", err)
+			}
+			if exists {
+				return candidate, nil
+			}
+		}
+		return "", fmt.Errorf("%w: selected folder does not contain the expected vault package", ErrVaultStoragePathInvalid)
+	default:
+		return "", ErrVaultStorageModeInvalid
+	}
 }
 
 func (s *Store) catalogFilePathForAbsolutePath(vaultID string, absolutePath string) string {
@@ -192,7 +238,7 @@ func (s *Store) resolveCreateVaultFilePath(vaultID string, currentFilePath strin
 			return "", err
 		}
 
-		absolutePath := filepath.Join(directory, defaultVaultFileName(vaultID))
+		absolutePath := filepath.Join(resolveVaultPackageDirectory(directory, vaultID), vaultPackageDatabaseFileName)
 		exists, err := vaultFileExists(absolutePath)
 		if err != nil {
 			return "", fmt.Errorf("inspect vault storage path: %w", err)
@@ -587,26 +633,9 @@ func (s *Store) RelinkVault(ctx context.Context, vaultID string, storage VaultSt
 		return Vault{}, ErrVaultStorageModeInvalid
 	}
 
-	targetFileName := s.vaultFileNameForPath(vaultID, current.FilePath)
-	targetDirectory := strings.TrimSpace(storage.Directory)
-	var targetAbsolutePath string
-	switch mode {
-	case VaultStorageModeManaged:
-		targetAbsolutePath = s.resolveVaultFileAbsolutePath(s.defaultVaultFilePath(vaultID))
-	case VaultStorageModeCustomDir:
-		normalizedDirectory, err := normalizeVaultStorageDirectory(targetDirectory)
-		if err != nil {
-			return Vault{}, err
-		}
-		targetAbsolutePath = filepath.Join(normalizedDirectory, targetFileName)
-	}
-
-	exists, err := vaultFileExists(targetAbsolutePath)
+	targetAbsolutePath, err := s.resolveRelinkTargetAbsolutePath(vaultID, current.FilePath, storage)
 	if err != nil {
-		return Vault{}, fmt.Errorf("inspect relink target: %w", err)
-	}
-	if !exists {
-		return Vault{}, fmt.Errorf("%w: selected folder does not contain %s", ErrVaultStoragePathInvalid, targetFileName)
+		return Vault{}, err
 	}
 
 	targetCatalogPath := s.catalogFilePathForAbsolutePath(vaultID, targetAbsolutePath)
@@ -709,12 +738,19 @@ func (s *Store) DeleteVaultWithOptions(ctx context.Context, vaultID string, opts
 	s.mu.Unlock()
 
 	if opts.DeleteFile && selectedVault.FilePath != "" {
-		if err := os.Remove(s.resolveVaultFileAbsolutePath(selectedVault.FilePath)); err != nil && !errors.Is(err, os.ErrNotExist) {
+		targetPath := s.resolveVaultFileAbsolutePath(selectedVault.FilePath)
+		deleteErr := error(nil)
+		if packageDir := vaultPackageDirectoryForFilePath(targetPath); packageDir != "" {
+			deleteErr = os.RemoveAll(packageDir)
+		} else {
+			deleteErr = os.Remove(targetPath)
+		}
+		if deleteErr != nil && !errors.Is(deleteErr, os.ErrNotExist) {
 			logger.Warn("Failed to delete vault file", logger.Fields{
 				"vault_id":   vaultID,
 				"file_path":  selectedVault.FilePath,
 				"vault_name": selectedVault.Name,
-				"error":      err,
+				"error":      deleteErr,
 			})
 		}
 	}
@@ -787,7 +823,7 @@ func (s *Store) Status(ctx context.Context, vaultID string) (VaultStatus, error)
 			Locked:            true,
 			Writable:          false,
 			PasswordProtected: selectedVault.PasswordProtected,
-			Message:           "vault file is missing; relink the vault or restore the file",
+			Message:           "vault storage is missing; relink the vault or restore its folder",
 			RecordCount:       0,
 			SecretStore:       storeStatus,
 		}, nil
