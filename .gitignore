@@ -42,9 +42,6 @@ Thumbs.db
 .env.local
 
 # Runtime/cache directories
-plugin_cache/
-plugin_registry_cache.json
-local_plugin_registry.json
 marketplace_cache_*.json
 cache/
 tmp/
@@ -59,9 +56,6 @@ agents/*
 !agents/skills/**
 agents.json
 
-# Plugin binaries and uploads
-uploaded_plugins/
-plugins/*/*.so
 
 # Build artifacts
 dist/
@@ -116,10 +110,7 @@ __pycache__/
 *.tempfrontend/dist/
 
 # Runtime data directories
-plugin_cache/
-uploaded_plugins/
 agents.json
-local_plugin_registry.json
 
 workspaces/
 !internal/web/templates/components/workspaces/
@@ -137,7 +128,6 @@ mcp_servers.json
 # Agent-specific runtime files
 agents/*/agent_settings.json
 agents/*/workspace/
-internal/pluginhttp/agents/
 internal/server/agents/
 
 # Session data
@@ -168,8 +158,3 @@ workflow_templates/
 # Misplaced generated protobuf files
 github.com/
 
-# Test plugins (local development only)
-test_plugins/
-
-# Local plugin binaries at root
-elite-grading-tool
