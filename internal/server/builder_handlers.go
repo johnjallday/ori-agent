@@ -175,8 +175,11 @@ func (b *ServerBuilder) initializeHandlers() error {
 		b.reviewHandler = reviewhttp.NewHandler(reviewRunner, reviewStore)
 		logger.Info("Review system initialized", logger.Fields{})
 
-		vaultStore := vault.NewStore(b.sessionStore.DB(), vault.StoreOptions{})
+		vaultStore := vault.NewStore(b.sessionStore.DB(), vault.StoreOptions{
+			ManagedVaultRoot: resolveVaultRoot(b.configManager),
+		})
 		b.vaultHandler = vaulthttp.NewHandler(vaultStore)
+		b.settingsHandler.SetVaultRootUpdater(vaultStore.SetManagedVaultRoot)
 		if b.workspaceHandler != nil {
 			b.workspaceHandler.SetEmailAccountStore(vaultStore)
 		}
