@@ -53,7 +53,8 @@ func (p *OllamaProvider) ValidateConfig(config ProviderConfig) error {
 	}
 
 	// Test connection to Ollama
-	resp, err := http.Get(config.BaseURL)
+	client := &http.Client{Timeout: 10 * time.Second}
+	resp, err := client.Get(config.BaseURL)
 	if err != nil {
 		return fmt.Errorf("failed to connect to Ollama at %s: %w", config.BaseURL, err)
 	}

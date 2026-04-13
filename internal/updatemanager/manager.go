@@ -13,6 +13,7 @@ import (
 	"runtime"
 	"sort"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/johnjallday/ori-agent/internal/logger"
@@ -544,8 +545,13 @@ func (m *Manager) RestartApplication() {
 		return
 	}
 
-	logger.Debug("New process started with PID , shutting down current process...", logger.Fields{"pid": cmd.Process.Pid})
+	logger.Debug("New process started, triggering graceful shutdown...", logger.Fields{"pid": cmd.Process.Pid})
 
-	// Exit current process
-	os.Exit(0)
+	// Signal the current process to shut down gracefully via SIGTERM.
+	// This allows deferred cleanup (DB close, HTTP shutdown) to run,
+	// unlike os.Exit(0) which skips all defers.
+	if err := syscall.Kill(os.Getpid(), syscall.SIGTERM); err != nil {
+		logger.Error("Failed to send SIGTERM, falling back to os.Exit", logger.Fields{"err": err})
+		os.Exit(0)
+	}
 }
