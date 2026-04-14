@@ -36,6 +36,9 @@ func (r *CLIAgentRegistry) AutoDetect() {
 	if _, err := exec.LookPath("codex"); err == nil {
 		r.adapters[BackendCodex] = newCodexAdapterFromPath("codex")
 	}
+	if _, err := exec.LookPath("gemini"); err == nil {
+		r.adapters[BackendGemini] = newGeminiAdapterFromPath("gemini")
+	}
 }
 
 // Register adds or replaces an adapter in the registry.
@@ -102,4 +105,13 @@ func newCodexAdapterFromPath(cliPath string) *CodexCLIAdapter {
 		resolved = cliPath
 	}
 	return &CodexCLIAdapter{cliPath: resolved}
+}
+
+// newGeminiAdapterFromPath creates a minimal GeminiCLIAdapter for auto-detection.
+func newGeminiAdapterFromPath(cliPath string) *GeminiCLIAdapter {
+	resolved, err := exec.LookPath(cliPath)
+	if err != nil {
+		resolved = cliPath
+	}
+	return &GeminiCLIAdapter{cliPath: resolved}
 }

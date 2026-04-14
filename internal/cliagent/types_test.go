@@ -28,7 +28,7 @@ func TestTaskConfig_Validate(t *testing.T) {
 	}{
 		{
 			name:   "invalid backend",
-			modify: func(c *TaskConfig) { c.CLIBackend = "gemini" },
+			modify: func(c *TaskConfig) { c.CLIBackend = "invalid-backend" },
 		},
 		{
 			name:   "empty backend",
@@ -81,7 +81,7 @@ func TestTaskConfig_Validate(t *testing.T) {
 
 func TestTaskConfig_Validate_BothBackends(t *testing.T) {
 	tmpDir := t.TempDir()
-	for _, backend := range []string{BackendClaude, BackendCodex} {
+	for _, backend := range []string{BackendClaude, BackendCodex, BackendGemini} {
 		c := TaskConfig{
 			CLIBackend: backend,
 			Prompt:     "test",

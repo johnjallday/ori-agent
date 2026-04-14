@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/johnjallday/ori-agent/internal/agent"
+	"github.com/johnjallday/ori-agent/internal/cliagent"
 	orihttp "github.com/johnjallday/ori-agent/internal/http"
 	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/store"
@@ -68,8 +69,9 @@ func cloneRoutingProfile(profile *types.AgentRoutingProfile) *types.AgentRouting
 }
 
 type Handler struct {
-	State          store.Store
-	ActivityLogger *ActivityLogger
+	State            store.Store
+	ActivityLogger   *ActivityLogger
+	cliAgentRegistry *cliagent.CLIAgentRegistry
 }
 
 func New(state store.Store) *Handler {
@@ -77,6 +79,12 @@ func New(state store.Store) *Handler {
 		State:          state,
 		ActivityLogger: nil, // Will be set by server initialization
 	}
+}
+
+// SetCLIAgentRegistry wires the CLI agent registry so auto-detected
+// CLI agents appear in the main agent list.
+func (h *Handler) SetCLIAgentRegistry(r *cliagent.CLIAgentRegistry) {
+	h.cliAgentRegistry = r
 }
 
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -89,6 +97,11 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if agentName != "" {
 			agent, ok := h.State.GetAgent(agentName)
 			if !ok || agent == nil {
+				// Check if it's a CLI agent
+				if resp, found := h.getCLIAgentDetail(agentName); found {
+					orihttp.WriteJSON(w, resp)
+					return
+				}
 				orihttp.NotFound(w, "Agent not found")
 				return
 			}
@@ -107,6 +120,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				"allow_web_search":  agent.Settings.IsWebSearchAllowed(),
 				"metadata":          agent.Metadata,
 				"evolution":         cloneAgentEvolution(agent),
+				"source":            "user",
 			})
 			return
 		}
@@ -118,6 +132,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		type AgentInfo struct {
 			Name      string                `json:"name"`
 			Type      string                `json:"type"`
+			Source    string                `json:"source"`
 			Evolution *types.AgentEvolution `json:"evolution,omitempty"`
 		}
 		agentInfos := make([]AgentInfo, 0, len(names))
@@ -127,13 +142,29 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				agentInfos = append(agentInfos, AgentInfo{
 					Name:      name,
 					Type:      agent.Type,
+					Source:    "user",
 					Evolution: cloneAgentEvolution(agent),
 				})
 			} else {
 				// Fallback for agents that couldn't be loaded
 				agentInfos = append(agentInfos, AgentInfo{
-					Name: name,
-					Type: "tool-calling", // default
+					Name:   name,
+					Type:   "tool-calling", // default
+					Source: "user",
+				})
+			}
+		}
+
+		// Append auto-detected CLI agents
+		if h.cliAgentRegistry != nil {
+			for _, info := range h.cliAgentRegistry.List() {
+				if !info.Available {
+					continue
+				}
+				agentInfos = append(agentInfos, AgentInfo{
+					Name:   cliAgentDisplayName(info.Backend),
+					Type:   "research",
+					Source: "cli",
 				})
 			}
 		}
@@ -253,6 +284,12 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		// PATCH /api/agents/:name - Update agent metadata
 		agentName := orihttp.RequirePathParamOrQuery(w, r, "/api/agents/", "name")
 		if agentName == "" {
+			return
+		}
+
+		// CLI agents are read-only
+		if h.isCLIAgent(agentName) {
+			orihttp.BadRequest(w, "CLI agents are built-in and cannot be modified")
 			return
 		}
 
@@ -455,6 +492,10 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			orihttp.BadRequest(w, "system assistant cannot be deleted")
 			return
 		}
+		if h.isCLIAgent(name) {
+			orihttp.BadRequest(w, "CLI agents are built-in and cannot be deleted")
+			return
+		}
 		if err := h.State.DeleteAgent(name); err != nil {
 			orihttp.BadRequest(w, err.Error())
 			return
@@ -497,4 +538,75 @@ func agentSupportsReasoningEffort(providerName, modelName string) bool {
 		return true
 	}
 	return strings.Contains(strings.ToLower(strings.TrimSpace(modelName)), "codex")
+}
+
+// cliAgentDisplayName returns a human-friendly name for a CLI backend.
+func cliAgentDisplayName(backend string) string {
+	switch backend {
+	case cliagent.BackendClaude:
+		return "Claude Code"
+	case cliagent.BackendCodex:
+		return "Codex"
+	case cliagent.BackendGemini:
+		return "Gemini CLI"
+	default:
+		return backend
+	}
+}
+
+// cliAgentBackendFromName resolves a display name or backend name to a backend key.
+func cliAgentBackendFromName(name string) string {
+	lower := strings.ToLower(strings.TrimSpace(name))
+	switch {
+	case lower == "claude code" || lower == cliagent.BackendClaude:
+		return cliagent.BackendClaude
+	case lower == cliagent.BackendCodex:
+		return cliagent.BackendCodex
+	case lower == "gemini cli" || lower == cliagent.BackendGemini:
+		return cliagent.BackendGemini
+	default:
+		return ""
+	}
+}
+
+// isCLIAgent checks whether the given name refers to a built-in CLI agent.
+func (h *Handler) isCLIAgent(name string) bool {
+	if h.cliAgentRegistry == nil {
+		return false
+	}
+	backend := cliAgentBackendFromName(name)
+	return backend != "" && h.cliAgentRegistry.IsAvailable(backend)
+}
+
+// getCLIAgentDetail returns agent detail for a CLI agent, or false if not found.
+func (h *Handler) getCLIAgentDetail(name string) (map[string]any, bool) {
+	if h.cliAgentRegistry == nil {
+		return nil, false
+	}
+	backend := cliAgentBackendFromName(name)
+	if backend == "" {
+		return nil, false
+	}
+	adapter, err := h.cliAgentRegistry.Get(backend)
+	if err != nil || !adapter.IsAvailable() {
+		return nil, false
+	}
+	caps := adapter.Capabilities()
+	models := adapter.AvailableModels()
+	defaultModel := ""
+	if len(models) > 0 {
+		defaultModel = models[0]
+	}
+	return map[string]any{
+		"name":               cliAgentDisplayName(backend),
+		"type":               "research",
+		"role":               types.RoleCLIAgent,
+		"capabilities":       []string{"file_operations", "code_generation", "code_analysis"},
+		"model":              defaultModel,
+		"available_models":   models,
+		"temperature":        0.0,
+		"provider":           backend,
+		"max_context_window": caps.MaxContextWindow,
+		"source":             "cli",
+	}, true
 }

@@ -95,6 +95,69 @@ func TestParseCodexJSONL_Empty(t *testing.T) {
 	}
 }
 
+func TestParseGeminiStreamJSON(t *testing.T) {
+	input := `{"type":"init","timestamp":"2026-04-14T02:05:47.324Z","session_id":"abc123","model":"gemini-3-flash-preview"}
+{"type":"message","timestamp":"2026-04-14T02:05:47.325Z","role":"user","content":"say hello"}
+{"type":"message","timestamp":"2026-04-14T02:05:56.059Z","role":"assistant","content":"Hello!","delta":true}
+{"type":"result","timestamp":"2026-04-14T02:05:56.069Z","status":"success","stats":{"total_tokens":9668,"input_tokens":9634,"output_tokens":34,"cached":0,"duration_ms":8745,"tool_calls":0}}`
+
+	raw, err := parseGeminiStreamJSON([]byte(input), "")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if raw.Output != "Hello!" {
+		t.Errorf("expected output %q, got %q", "Hello!", raw.Output)
+	}
+	if len(raw.Events) != 4 {
+		t.Errorf("expected 4 events, got %d", len(raw.Events))
+	}
+	if raw.Usage.InputTokens != 9634 {
+		t.Errorf("expected 9634 input tokens, got %d", raw.Usage.InputTokens)
+	}
+	if raw.Usage.OutputTokens != 34 {
+		t.Errorf("expected 34 output tokens, got %d", raw.Usage.OutputTokens)
+	}
+}
+
+func TestParseGeminiStreamJSON_WithToolUse(t *testing.T) {
+	input := `{"type":"init","session_id":"s1","model":"gemini-3-flash-preview"}
+{"type":"message","role":"user","content":"create a file"}
+{"type":"message","role":"assistant","content":"I will create the file.","delta":true}
+{"type":"tool_use","tool_name":"write_file","tool_id":"wf_1","parameters":{"file_path":"test.txt","content":"hello"}}
+{"type":"tool_result","tool_id":"wf_1","status":"success"}
+{"type":"message","role":"assistant","content":"Done.","delta":true}
+{"type":"result","status":"success","stats":{"input_tokens":500,"output_tokens":25,"total_tokens":525,"tool_calls":1}}`
+
+	raw, err := parseGeminiStreamJSON([]byte(input), "")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if raw.Output != "Done." {
+		t.Errorf("expected output %q, got %q", "Done.", raw.Output)
+	}
+	if len(raw.Events) != 7 {
+		t.Errorf("expected 7 events, got %d", len(raw.Events))
+	}
+	if raw.Usage.InputTokens != 500 {
+		t.Errorf("expected 500 input tokens, got %d", raw.Usage.InputTokens)
+	}
+}
+
+func TestParseGeminiStreamJSON_Empty(t *testing.T) {
+	raw, err := parseGeminiStreamJSON([]byte(""), "")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if raw.Output != "" {
+		t.Errorf("expected empty output, got %q", raw.Output)
+	}
+	if len(raw.Events) != 0 {
+		t.Errorf("expected 0 events, got %d", len(raw.Events))
+	}
+}
+
 func TestMapRawToStepResult(t *testing.T) {
 	raw := &RawCLIOutput{
 		Output: "done",

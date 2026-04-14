@@ -87,6 +87,7 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 	// =============================================================================
 	agentHandler := agenthttp.New(s.Storage.AgentStore)
 	agentHandler.ActivityLogger = s.Handlers.ActivityLogger
+	agentHandler.SetCLIAgentRegistry(s.Handlers.CLIAgentRegistry)
 	avatarHandler := agenthttp.NewAvatarHandler(s.Storage.AgentStore)
 	mux.Handle("/api/agents", agentHandler)
 	if s.Handlers.Evolution != nil {
@@ -97,6 +98,7 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 	// Dashboard handlers
 	dashboardHandler := agenthttp.NewDashboardHandler(s.Storage.AgentStore)
 	dashboardHandler.ActivityLogger = s.Handlers.ActivityLogger
+	dashboardHandler.SetCLIAgentRegistry(s.Handlers.CLIAgentRegistry)
 	mux.HandleFunc("/api/agents/dashboard/list", dashboardHandler.ListAgentsWithStats)
 	mux.HandleFunc("/api/agents/dashboard/stats", dashboardHandler.GetDashboardStats)
 

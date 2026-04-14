@@ -13,6 +13,7 @@ import (
 const (
 	BackendClaude = "claude"
 	BackendCodex  = "codex"
+	BackendGemini = "gemini"
 )
 
 // StepStatus represents the outcome of a single micro-step execution.
@@ -68,8 +69,8 @@ type TaskConfig struct {
 // Validate checks that the TaskConfig is well-formed.
 func (c TaskConfig) Validate() error {
 	backend := strings.ToLower(strings.TrimSpace(c.CLIBackend))
-	if backend != BackendClaude && backend != BackendCodex {
-		return fmt.Errorf("cli_backend must be %q or %q, got %q", BackendClaude, BackendCodex, c.CLIBackend)
+	if backend != BackendClaude && backend != BackendCodex && backend != BackendGemini {
+		return fmt.Errorf("cli_backend must be %q, %q, or %q, got %q", BackendClaude, BackendCodex, BackendGemini, c.CLIBackend)
 	}
 	if strings.TrimSpace(c.Prompt) == "" {
 		return fmt.Errorf("prompt is required")

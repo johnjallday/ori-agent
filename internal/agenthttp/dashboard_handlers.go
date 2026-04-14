@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/johnjallday/ori-agent/internal/agent"
+	"github.com/johnjallday/ori-agent/internal/cliagent"
 	orihttp "github.com/johnjallday/ori-agent/internal/http"
 	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/store"
@@ -16,8 +17,9 @@ import (
 
 // DashboardHandler handles dashboard-specific API endpoints
 type DashboardHandler struct {
-	State          store.Store
-	ActivityLogger *ActivityLogger
+	State            store.Store
+	ActivityLogger   *ActivityLogger
+	cliAgentRegistry *cliagent.CLIAgentRegistry
 }
 
 // NewDashboardHandler creates a new dashboard handler
@@ -25,11 +27,18 @@ func NewDashboardHandler(state store.Store) *DashboardHandler {
 	return &DashboardHandler{State: state}
 }
 
+// SetCLIAgentRegistry wires the CLI agent registry so auto-detected
+// CLI agents appear in the dashboard agent list.
+func (h *DashboardHandler) SetCLIAgentRegistry(r *cliagent.CLIAgentRegistry) {
+	h.cliAgentRegistry = r
+}
+
 // AgentListItem represents an agent in the dashboard list view
 type AgentListItem struct {
 	Name           string                 `json:"name"`
 	Type           string                 `json:"type"`
 	Role           types.AgentRole        `json:"role"`
+	Source         string                 `json:"source"`
 	Capabilities   []string               `json:"capabilities,omitempty"`
 	Status         types.AgentStatus      `json:"status"`
 	Statistics     *types.AgentStatistics `json:"statistics,omitempty"`
@@ -109,6 +118,7 @@ func (h *DashboardHandler) ListAgentsWithStats(w http.ResponseWriter, r *http.Re
 			Name:           name,
 			Type:           ag.Type,
 			Role:           ag.Role,
+			Source:         "user",
 			Capabilities:   append([]string{}, ag.Capabilities...),
 			Status:         ag.Status,
 			Statistics:     ag.Statistics,
@@ -117,6 +127,28 @@ func (h *DashboardHandler) ListAgentsWithStats(w http.ResponseWriter, r *http.Re
 			AllowWebSearch: ag.Settings.IsWebSearchAllowed(),
 			Model:          ag.Settings.Model,
 		})
+	}
+
+	// Append auto-detected CLI agents
+	if h.cliAgentRegistry != nil {
+		for _, info := range h.cliAgentRegistry.List() {
+			if !info.Available {
+				continue
+			}
+			defaultModel := ""
+			if len(info.Models) > 0 {
+				defaultModel = info.Models[0]
+			}
+			agents = append(agents, AgentListItem{
+				Name:         cliAgentDisplayName(info.Backend),
+				Type:         "research",
+				Role:         types.RoleCLIAgent,
+				Source:       "cli",
+				Capabilities: []string{"file_operations", "code_generation", "code_analysis"},
+				Status:       types.AgentStatusActive,
+				Model:        defaultModel,
+			})
+		}
 	}
 
 	// Sort agents
@@ -158,6 +190,34 @@ func (h *DashboardHandler) GetAgentDetail(w http.ResponseWriter, r *http.Request
 
 	ag, ok := h.State.GetAgent(agentName)
 	if !ok || ag == nil {
+		// Check if it's a CLI agent
+		if h.cliAgentRegistry != nil {
+			backend := cliAgentBackendFromName(agentName)
+			if backend != "" {
+				adapter, err := h.cliAgentRegistry.Get(backend)
+				if err == nil && adapter.IsAvailable() {
+					caps := adapter.Capabilities()
+					models := adapter.AvailableModels()
+					defaultModel := ""
+					if len(models) > 0 {
+						defaultModel = models[0]
+					}
+					response := AgentDetailResponse{
+						Name:         cliAgentDisplayName(backend),
+						Type:         "research",
+						Role:         types.RoleCLIAgent,
+						Capabilities: []string{"file_operations", "code_generation", "code_analysis"},
+						Status:       types.AgentStatusActive,
+						Model:        defaultModel,
+						Provider:     backend,
+					}
+					_ = caps // context window info available via /api/cli-agents
+					w.Header().Set("Content-Type", "application/json")
+					orihttp.WriteJSON(w, response)
+					return
+				}
+			}
+		}
 		orihttp.NotFound(w, "Agent not found")
 		return
 	}

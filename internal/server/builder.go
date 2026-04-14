@@ -372,6 +372,7 @@ func (b *ServerBuilder) createDomainFacades() error {
 		b.skillsHandler,
 	)
 	b.server.Handlers.CLIAgents = b.cliAgentHandler
+	b.server.Handlers.CLIAgentRegistry = b.cliAgentRegistry
 
 	return nil
 }
