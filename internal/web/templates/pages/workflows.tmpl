@@ -8,18 +8,44 @@
 
   <style>
     #behaviorStudioPage {
-      --behavior-paper: #f4efe5;
-      --behavior-paper-strong: #efe3d1;
-      --behavior-surface: rgba(255, 251, 245, 0.82);
-      --behavior-surface-strong: rgba(252, 248, 240, 0.94);
-      --behavior-line: rgba(94, 58, 26, 0.14);
-      --behavior-line-strong: rgba(94, 58, 26, 0.24);
-      --behavior-ink: #1f2933;
-      --behavior-ink-soft: #56616d;
+      --behavior-paper: color-mix(in srgb, var(--bg-primary) 76%, #f1e3cf 24%);
+      --behavior-paper-strong: color-mix(in srgb, var(--bg-secondary) 68%, #ead8bf 32%);
+      --behavior-surface: color-mix(in srgb, var(--bg-primary) 84%, #fffaf4 16%);
+      --behavior-surface-strong: color-mix(in srgb, var(--bg-primary) 74%, #fffdf8 26%);
+      --behavior-card-surface: color-mix(in srgb, var(--bg-primary) 80%, #fffaf4 20%);
+      --behavior-subtle-surface: color-mix(in srgb, var(--bg-secondary) 78%, #fffaf4 22%);
+      --behavior-input-surface: color-mix(in srgb, var(--bg-primary) 88%, white 12%);
+      --behavior-input-highlight: rgba(255, 255, 255, 0.82);
+      --behavior-code-surface: color-mix(in srgb, var(--bg-secondary) 80%, #ffffff 20%);
+      --behavior-panel-sheen: linear-gradient(135deg, rgba(255, 255, 255, 0.72), rgba(250, 244, 236, 0.86));
+      --behavior-panel-sheen-soft: linear-gradient(180deg, rgba(255, 255, 255, 0.65), rgba(250, 245, 238, 0.88));
+      --behavior-section-sheen: linear-gradient(180deg, rgba(255, 255, 255, 0.68), rgba(250, 245, 238, 0.9));
+      --behavior-modal-sheen: linear-gradient(180deg, rgba(255, 255, 255, 0.88), rgba(246, 239, 229, 0.96));
+      --behavior-page-wash: linear-gradient(180deg, rgba(255, 255, 255, 0.42), rgba(255, 255, 255, 0.08));
+      --behavior-line: color-mix(in srgb, var(--border-color) 72%, #8d5c33 28%);
+      --behavior-line-strong: color-mix(in srgb, var(--border-color) 54%, #8d5c33 46%);
+      --behavior-ink: var(--text-primary);
+      --behavior-ink-soft: var(--text-secondary);
+      --behavior-title: color-mix(in srgb, var(--text-primary) 90%, #21170f 10%);
+      --behavior-grid: rgba(15, 23, 42, 0.045);
+      --behavior-grid-strong: rgba(15, 23, 42, 0.032);
       --behavior-accent: #0d9488;
       --behavior-accent-strong: #0f766e;
       --behavior-signal: #d97706;
       --behavior-danger: #be123c;
+      --behavior-badge-surface: color-mix(in srgb, var(--bg-primary) 82%, white 18%);
+      --behavior-builtin-text: #9a3412;
+      --behavior-builtin-bg: rgba(251, 146, 60, 0.12);
+      --behavior-builtin-border: rgba(154, 52, 18, 0.18);
+      --behavior-custom-text: #115e59;
+      --behavior-custom-bg: rgba(45, 212, 191, 0.14);
+      --behavior-custom-border: rgba(13, 148, 136, 0.18);
+      --behavior-warning-text: #9a3412;
+      --behavior-warning-bg: rgba(251, 191, 36, 0.14);
+      --behavior-warning-border: rgba(217, 119, 6, 0.18);
+      --behavior-graph-surface: color-mix(in srgb, var(--bg-primary) 74%, #ffffff 26%);
+      --behavior-empty-surface: color-mix(in srgb, var(--bg-secondary) 82%, #fffaf4 18%);
+      --behavior-json-bg: rgba(15, 23, 42, 0.92);
       --behavior-shadow: 0 28px 80px rgba(48, 33, 20, 0.14);
       position: relative;
       min-height: calc(100vh - 64px);
@@ -29,9 +55,52 @@
       background:
         radial-gradient(circle at 0% 0%, rgba(13, 148, 136, 0.14), transparent 32%),
         radial-gradient(circle at 100% 0%, rgba(217, 119, 6, 0.16), transparent 30%),
-        linear-gradient(180deg, rgba(255, 255, 255, 0.42), rgba(255, 255, 255, 0.08)),
+        var(--behavior-page-wash),
         var(--behavior-paper);
       overflow: hidden;
+    }
+
+    [data-bs-theme="dark"] #behaviorStudioPage {
+      --behavior-paper: color-mix(in srgb, var(--bg-primary) 82%, #18333a 18%);
+      --behavior-paper-strong: color-mix(in srgb, var(--bg-secondary) 86%, #1b2c3c 14%);
+      --behavior-surface: rgba(15, 23, 35, 0.84);
+      --behavior-surface-strong: rgba(19, 31, 45, 0.94);
+      --behavior-card-surface: rgba(15, 25, 36, 0.82);
+      --behavior-subtle-surface: rgba(19, 31, 45, 0.9);
+      --behavior-input-surface: rgba(10, 18, 28, 0.94);
+      --behavior-input-highlight: rgba(148, 163, 184, 0.08);
+      --behavior-code-surface: rgba(6, 12, 21, 0.96);
+      --behavior-panel-sheen: linear-gradient(135deg, rgba(255, 255, 255, 0.05), rgba(20, 30, 43, 0.08));
+      --behavior-panel-sheen-soft: linear-gradient(180deg, rgba(255, 255, 255, 0.04), rgba(17, 27, 39, 0.12));
+      --behavior-section-sheen: linear-gradient(180deg, rgba(255, 255, 255, 0.05), rgba(17, 27, 39, 0.14));
+      --behavior-modal-sheen: linear-gradient(180deg, rgba(255, 255, 255, 0.04), rgba(15, 23, 35, 0.14));
+      --behavior-page-wash: linear-gradient(180deg, rgba(15, 23, 42, 0.24), rgba(15, 23, 42, 0.05));
+      --behavior-line: rgba(103, 128, 153, 0.28);
+      --behavior-line-strong: rgba(137, 163, 191, 0.42);
+      --behavior-ink: var(--text-primary);
+      --behavior-ink-soft: var(--text-secondary);
+      --behavior-title: color-mix(in srgb, var(--text-primary) 94%, #fef3c7 6%);
+      --behavior-grid: rgba(203, 213, 225, 0.08);
+      --behavior-grid-strong: rgba(203, 213, 225, 0.06);
+      --behavior-badge-surface: rgba(15, 23, 35, 0.84);
+      --behavior-builtin-text: #fdba74;
+      --behavior-builtin-bg: rgba(249, 115, 22, 0.16);
+      --behavior-builtin-border: rgba(251, 146, 60, 0.24);
+      --behavior-custom-text: #5eead4;
+      --behavior-custom-bg: rgba(13, 148, 136, 0.18);
+      --behavior-custom-border: rgba(45, 212, 191, 0.24);
+      --behavior-warning-text: #fcd34d;
+      --behavior-warning-bg: rgba(245, 158, 11, 0.16);
+      --behavior-warning-border: rgba(251, 191, 36, 0.26);
+      --behavior-graph-surface: rgba(8, 15, 25, 0.96);
+      --behavior-empty-surface: rgba(16, 26, 39, 0.84);
+      --behavior-json-bg: rgba(2, 6, 23, 0.96);
+      --behavior-shadow: 0 28px 80px rgba(2, 6, 23, 0.48);
+    }
+
+    [data-bs-theme="dark"] #behaviorStudioPage::before {
+      mix-blend-mode: normal;
+      opacity: 0.34;
     }
 
     #behaviorStudioPage::before,
@@ -44,8 +113,8 @@
 
     #behaviorStudioPage::before {
       background-image:
-        linear-gradient(rgba(31, 41, 51, 0.025) 1px, transparent 1px),
-        linear-gradient(90deg, rgba(31, 41, 51, 0.025) 1px, transparent 1px);
+        linear-gradient(var(--behavior-grid) 1px, transparent 1px),
+        linear-gradient(90deg, var(--behavior-grid) 1px, transparent 1px);
       background-size: 28px 28px;
       mix-blend-mode: multiply;
       opacity: 0.45;
@@ -72,9 +141,7 @@
       padding: 26px 28px;
       border: 1px solid var(--behavior-line);
       border-radius: 28px;
-      background:
-        linear-gradient(135deg, rgba(255, 255, 255, 0.72), rgba(250, 244, 236, 0.86)),
-        var(--behavior-surface-strong);
+      background: var(--behavior-panel-sheen), var(--behavior-surface-strong);
       box-shadow: var(--behavior-shadow);
       backdrop-filter: blur(20px);
     }
@@ -102,7 +169,7 @@
       font-family: "Iowan Old Style", "Palatino Linotype", Georgia, serif;
       font-weight: 600;
       letter-spacing: -0.03em;
-      color: #18212b;
+      color: var(--behavior-title);
     }
 
     .behavior-page__title {
@@ -140,7 +207,7 @@
       padding: 14px 16px;
       border-radius: 22px;
       border: 1px solid var(--behavior-line);
-      background: rgba(255, 255, 255, 0.62);
+      background: var(--behavior-card-surface);
       box-shadow: 0 18px 42px rgba(31, 41, 51, 0.08);
     }
 
@@ -148,7 +215,7 @@
       display: block;
       font-family: "Iowan Old Style", "Palatino Linotype", Georgia, serif;
       font-size: 1.65rem;
-      color: #18212b;
+      color: var(--behavior-title);
       line-height: 1.05;
     }
 
@@ -171,9 +238,7 @@
     .behavior-panel {
       border: 1px solid var(--behavior-line);
       border-radius: 28px;
-      background:
-        linear-gradient(180deg, rgba(255, 255, 255, 0.65), rgba(250, 245, 238, 0.88)),
-        var(--behavior-surface);
+      background: var(--behavior-panel-sheen-soft), var(--behavior-surface);
       box-shadow: var(--behavior-shadow);
       backdrop-filter: blur(20px);
     }
@@ -243,8 +308,8 @@
     .behavior-card {
       padding: 16px 16px 14px;
       border-radius: 22px;
-      border: 1px solid rgba(94, 58, 26, 0.12);
-      background: rgba(255, 255, 255, 0.66);
+      border: 1px solid var(--behavior-line);
+      background: var(--behavior-card-surface);
       cursor: pointer;
       transition: transform 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;
     }
@@ -271,7 +336,7 @@
     .behavior-card__title {
       margin-bottom: 6px;
       font-weight: 700;
-      color: #15202b;
+      color: var(--behavior-title);
     }
 
     .behavior-card__meta,
@@ -301,22 +366,22 @@
       font-weight: 700;
       letter-spacing: 0.12em;
       text-transform: uppercase;
-      border: 1px solid rgba(94, 58, 26, 0.14);
-      background: rgba(255, 255, 255, 0.62);
+      border: 1px solid var(--behavior-line);
+      background: var(--behavior-badge-surface);
       color: var(--behavior-ink-soft);
     }
 
     .behavior-badge--builtin {
-      color: #9a3412;
-      border-color: rgba(154, 52, 18, 0.18);
-      background: rgba(251, 146, 60, 0.12);
+      color: var(--behavior-builtin-text);
+      border-color: var(--behavior-builtin-border);
+      background: var(--behavior-builtin-bg);
     }
 
     .behavior-badge--custom,
     .behavior-readonly-pill--active {
-      color: #115e59;
-      border-color: rgba(13, 148, 136, 0.18);
-      background: rgba(45, 212, 191, 0.14);
+      color: var(--behavior-custom-text);
+      border-color: var(--behavior-custom-border);
+      background: var(--behavior-custom-bg);
     }
 
     .behavior-section,
@@ -324,9 +389,7 @@
       padding: 24px;
       border: 1px solid var(--behavior-line);
       border-radius: 28px;
-      background:
-        linear-gradient(180deg, rgba(255, 255, 255, 0.68), rgba(250, 245, 238, 0.9)),
-        var(--behavior-surface-strong);
+      background: var(--behavior-section-sheen), var(--behavior-surface-strong);
       box-shadow: var(--behavior-shadow);
       backdrop-filter: blur(20px);
     }
@@ -361,13 +424,13 @@
       padding: 18px;
       border: 1px solid var(--behavior-line);
       border-radius: 22px;
-      background: rgba(255, 255, 255, 0.5);
+      background: var(--behavior-subtle-surface);
     }
 
     .behavior-subsection__title {
       font-family: "Avenir Next", "Segoe UI", sans-serif;
       font-weight: 700;
-      color: #18212b;
+      color: var(--behavior-title);
     }
 
     .behavior-form-grid {
@@ -410,7 +473,7 @@
     }
 
     .behavior-field__optional {
-      color: rgba(86, 97, 109, 0.72);
+      color: color-mix(in srgb, var(--behavior-ink-soft) 72%, transparent);
       font-weight: 500;
       letter-spacing: 0.06em;
     }
@@ -418,13 +481,13 @@
     .behavior-input,
     .behavior-textarea {
       width: 100%;
-      border: 1px solid rgba(94, 58, 26, 0.16);
+      border: 1px solid var(--behavior-line);
       border-radius: 16px;
       padding: 12px 14px;
-      background: rgba(255, 255, 255, 0.85);
+      background: var(--behavior-input-surface);
       color: var(--behavior-ink);
       font-size: 0.96rem;
-      box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.82);
+      box-shadow: inset 0 1px 0 var(--behavior-input-highlight);
       transition: border-color 0.18s ease, box-shadow 0.18s ease, transform 0.18s ease;
     }
 
@@ -454,9 +517,7 @@
 
     .behavior-textarea--code {
       min-height: 126px;
-      background:
-        linear-gradient(180deg, rgba(248, 250, 252, 0.96), rgba(241, 245, 249, 0.92)),
-        rgba(255, 255, 255, 0.88);
+      background: linear-gradient(180deg, color-mix(in srgb, var(--behavior-code-surface) 88%, white 12%), var(--behavior-code-surface));
     }
 
     .behavior-btn,
@@ -499,8 +560,8 @@
 
     .behavior-btn--secondary {
       color: var(--behavior-ink);
-      background: rgba(255, 255, 255, 0.74);
-      border: 1px solid rgba(94, 58, 26, 0.14);
+      background: var(--behavior-badge-surface);
+      border: 1px solid var(--behavior-line);
       box-shadow: 0 12px 22px rgba(31, 41, 51, 0.08);
     }
 
@@ -516,9 +577,9 @@
       align-items: center;
       justify-content: center;
       border-radius: 12px;
-      background: rgba(255, 255, 255, 0.72);
+      background: var(--behavior-badge-surface);
       color: var(--behavior-ink-soft);
-      border: 1px solid rgba(94, 58, 26, 0.12);
+      border: 1px solid var(--behavior-line);
     }
 
     .behavior-link-btn {
@@ -537,8 +598,8 @@
     .behavior-launch-panel {
       padding: 18px;
       border-radius: 22px;
-      border: 1px solid rgba(94, 58, 26, 0.12);
-      background: rgba(255, 255, 255, 0.54);
+      border: 1px solid var(--behavior-line);
+      background: var(--behavior-subtle-surface);
     }
 
     .behavior-parameter-row__grid {
@@ -570,8 +631,8 @@
       gap: 8px;
       padding: 8px 12px;
       border-radius: 999px;
-      border: 1px solid rgba(94, 58, 26, 0.12);
-      background: rgba(255, 255, 255, 0.72);
+      border: 1px solid var(--behavior-line);
+      background: var(--behavior-badge-surface);
       color: var(--behavior-ink);
       font-size: 0.88rem;
     }
@@ -579,8 +640,8 @@
     .behavior-preview-card__status {
       padding: 8px 12px;
       border-radius: 999px;
-      background: rgba(255, 255, 255, 0.7);
-      border: 1px solid rgba(94, 58, 26, 0.14);
+      background: var(--behavior-badge-surface);
+      border: 1px solid var(--behavior-line);
       font-size: 0.78rem;
       font-weight: 700;
       letter-spacing: 0.1em;
@@ -590,9 +651,9 @@
     }
 
     .behavior-preview-card__status.is-dirty {
-      color: #9a3412;
-      border-color: rgba(217, 119, 6, 0.18);
-      background: rgba(251, 191, 36, 0.14);
+      color: var(--behavior-warning-text);
+      border-color: var(--behavior-warning-border);
+      background: var(--behavior-warning-bg);
     }
 
     .behavior-preview-stats {
@@ -605,15 +666,15 @@
     .behavior-preview-stat {
       padding: 14px;
       border-radius: 18px;
-      background: rgba(255, 255, 255, 0.66);
-      border: 1px solid rgba(94, 58, 26, 0.12);
+      background: var(--behavior-card-surface);
+      border: 1px solid var(--behavior-line);
     }
 
     .behavior-preview-stat strong {
       display: block;
       margin-top: 4px;
       font-size: 1rem;
-      color: #18212b;
+      color: var(--behavior-title);
     }
 
     .behavior-preview-stat__label {
@@ -629,19 +690,19 @@
       margin-top: 18px;
       padding: 18px;
       border-radius: 22px;
-      border: 1px solid rgba(94, 58, 26, 0.12);
-      background: rgba(255, 255, 255, 0.58);
+      border: 1px solid var(--behavior-line);
+      background: var(--behavior-subtle-surface);
     }
 
     .behavior-graph-frame {
       margin-top: 14px;
       overflow: hidden;
       border-radius: 22px;
-      border: 1px solid rgba(94, 58, 26, 0.12);
+      border: 1px solid var(--behavior-line);
       background:
-        linear-gradient(180deg, rgba(255, 255, 255, 0.84), rgba(243, 244, 246, 0.86)),
-        linear-gradient(90deg, rgba(15, 23, 42, 0.03) 1px, transparent 1px),
-        linear-gradient(rgba(15, 23, 42, 0.03) 1px, transparent 1px);
+        linear-gradient(180deg, color-mix(in srgb, var(--behavior-graph-surface) 74%, white 26%), var(--behavior-graph-surface)),
+        linear-gradient(90deg, var(--behavior-grid-strong) 1px, transparent 1px),
+        linear-gradient(var(--behavior-grid-strong) 1px, transparent 1px);
       background-size: auto, 24px 24px, 24px 24px;
     }
 
@@ -658,7 +719,7 @@
 
     .behavior-graph-label,
     .behavior-graph-sublabel {
-      fill: #14202c;
+      fill: var(--behavior-title);
       font-family: "Avenir Next", "Segoe UI", sans-serif;
     }
 
@@ -677,15 +738,15 @@
     .behavior-output-summary--empty {
       padding: 24px;
       border-radius: 22px;
-      border: 1px dashed rgba(94, 58, 26, 0.2);
-      background: rgba(255, 255, 255, 0.52);
+      border: 1px dashed var(--behavior-line-strong);
+      background: var(--behavior-empty-surface);
       text-align: center;
     }
 
     .behavior-graph-empty__title,
     .behavior-empty-state__title {
       font-weight: 700;
-      color: #18212b;
+      color: var(--behavior-title);
     }
 
     .behavior-output-summary {
@@ -701,13 +762,13 @@
       gap: 3px;
       padding: 10px 12px;
       border-radius: 16px;
-      background: rgba(255, 255, 255, 0.76);
-      border: 1px solid rgba(94, 58, 26, 0.12);
+      background: var(--behavior-card-surface);
+      border: 1px solid var(--behavior-line);
     }
 
     .behavior-output-chip__name {
       font-weight: 700;
-      color: #18212b;
+      color: var(--behavior-title);
     }
 
     .behavior-output-chip__meta {
@@ -732,7 +793,7 @@
       padding: 16px;
       overflow: auto;
       border-radius: 18px;
-      background: rgba(15, 23, 42, 0.92);
+      background: var(--behavior-json-bg);
       color: #e2e8f0;
     }
 
@@ -745,23 +806,21 @@
       margin-top: 10px;
       padding: 12px 14px;
       border-radius: 16px;
-      background: rgba(255, 255, 255, 0.62);
-      border: 1px solid rgba(94, 58, 26, 0.12);
+      background: var(--behavior-badge-surface);
+      border: 1px solid var(--behavior-line);
       font-size: 0.92rem;
     }
 
     #behaviorLaunchModal .modal-content {
-      border: 1px solid rgba(94, 58, 26, 0.16);
+      border: 1px solid var(--behavior-line);
       border-radius: 28px;
-      background:
-        linear-gradient(180deg, rgba(255, 255, 255, 0.88), rgba(246, 239, 229, 0.96)),
-        var(--behavior-paper);
+      background: var(--behavior-modal-sheen), var(--behavior-paper);
       box-shadow: var(--behavior-shadow);
     }
 
     #behaviorLaunchModal .modal-header,
     #behaviorLaunchModal .modal-footer {
-      border-color: rgba(94, 58, 26, 0.12);
+      border-color: var(--behavior-line);
       padding: 18px 22px;
     }
 
@@ -944,7 +1003,7 @@
         <div class="modal-header">
           <div>
             <div class="behavior-page__eyebrow mb-1">Instantiate Orchestration Skill</div>
-            <h5 class="modal-title m-0" id="behaviorLaunchModalLabel" style="font-family: 'Iowan Old Style', 'Palatino Linotype', Georgia, serif; font-size: 1.6rem; color: #18212b;">Add orchestration skill to workspace</h5>
+            <h5 class="modal-title m-0" id="behaviorLaunchModalLabel" style="font-family: 'Iowan Old Style', 'Palatino Linotype', Georgia, serif; font-size: 1.6rem; color: var(--behavior-title);">Add orchestration skill to workspace</h5>
           </div>
           <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
         </div>
