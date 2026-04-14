@@ -524,13 +524,39 @@
       };
     }
 
+    getRequestedTemplateId() {
+      const params = new URLSearchParams(window.location.search);
+      return String(params.get('template') || '').trim();
+    }
+
+    syncTemplateQueryParam(templateId = '') {
+      const url = new URL(window.location.href);
+      const safeTemplateId = String(templateId || '').trim();
+      if (safeTemplateId) {
+        url.searchParams.set('template', safeTemplateId);
+      } else {
+        url.searchParams.delete('template');
+      }
+      window.history.replaceState({}, '', `${url.pathname}${url.search}${url.hash}`);
+    }
+
     async init() {
       this.bindEvents();
       await Promise.all([
         this.loadTemplates(),
         this.loadWorkspaces()
       ]);
+      const requestedTemplateId = this.getRequestedTemplateId();
+      if (requestedTemplateId) {
+        const requestedTemplate = this.state.templates.find((template) => template.id === requestedTemplateId);
+        if (requestedTemplate) {
+          this.selectTemplate(requestedTemplate.id, { skipDirtyCheck: true });
+          return;
+        }
+        notify(`Behavior "${requestedTemplateId}" was not found.`, 'warning');
+      }
       this.ensureSelection();
+      this.syncTemplateQueryParam(this.state.selectedTemplateId || '');
       this.render();
     }
 
@@ -675,6 +701,7 @@
       this.state.draft = blank;
       this.state.isDirty = true;
       this.state.launchState = this.buildLaunchState();
+      this.syncTemplateQueryParam('');
       this.render();
     }
 
@@ -691,6 +718,7 @@
       this.state.draft = deepClone(template);
       this.state.isDirty = false;
       this.state.launchState = this.buildLaunchState();
+      this.syncTemplateQueryParam(template.id);
       this.render();
     }
 
@@ -714,6 +742,7 @@
       this.state.draft = normalizeTemplate(clone);
       this.state.isDirty = true;
       this.state.launchState = this.buildLaunchState();
+      this.syncTemplateQueryParam('');
       this.render();
     }
 
@@ -742,6 +771,7 @@
         this.state.selectedTemplateId = '';
         this.state.originalTemplateId = '';
         this.ensureSelection();
+        this.syncTemplateQueryParam(this.state.selectedTemplateId || '');
         this.render();
       } catch (error) {
         console.error('Failed to delete behavior', error);
@@ -774,6 +804,7 @@
         this.state.draft = saved;
         this.state.isDirty = false;
         this.state.launchState = this.buildLaunchState();
+        this.syncTemplateQueryParam(saved.id);
         this.render();
       } catch (error) {
         console.error('Failed to save behavior', error);
@@ -1043,6 +1074,7 @@
         this.state.draft = imported;
         this.state.isDirty = true;
         this.state.launchState = this.buildLaunchState();
+        this.syncTemplateQueryParam('');
         this.render();
         notify('Behavior imported. Save it to persist.', 'success');
       } catch (error) {
