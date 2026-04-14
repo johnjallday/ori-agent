@@ -1931,14 +1931,14 @@ export class WorkspaceDetailPage {
       const workflow = refs[0];
       const label = workflow.templateName || workflow.templateId;
       linkEl.href = this.buildBehaviorStudioHref(workflow.templateId);
-      linkEl.title = `Open ${label} in Behavior Studio`;
-      linkEl.setAttribute('aria-label', `Open ${label} in Behavior Studio`);
+      linkEl.title = `Open ${label} in Orchestration Skills`;
+      linkEl.setAttribute('aria-label', `Open ${label} in Orchestration Skills`);
       return;
     }
 
     linkEl.href = '/workflows';
-    linkEl.title = 'Open Behavior Studio';
-    linkEl.setAttribute('aria-label', 'Open Behavior Studio');
+    linkEl.title = 'Open Orchestration Skills';
+    linkEl.setAttribute('aria-label', 'Open Orchestration Skills');
   }
 
   renderTaskWorkflowMeta(task, { isParent = false } = {}) {
@@ -1952,7 +1952,7 @@ export class WorkspaceDetailPage {
       ? ` · ${this.escapeHtml(templateRef.stepName || templateRef.stepId)}`
       : '';
     const safeHref = this.buildBehaviorStudioHref(templateRef.templateId);
-    const title = `Open ${templateRef.templateName || templateRef.templateId} in Behavior Studio`;
+    const title = `Open ${templateRef.templateName || templateRef.templateId} in Orchestration Skills`;
 
     return `
       <a href="${safeHref}"
@@ -1960,7 +1960,7 @@ export class WorkspaceDetailPage {
          title="${this.escapeHtml(title)}"
          aria-label="${this.escapeHtml(title)}"
          onclick="event.stopPropagation();">
-        <span class="workspace-detail-workflow-link-label">Workflow: ${behaviorLabel}${stepLabel}</span>
+        <span class="workspace-detail-workflow-link-label">Skill: ${behaviorLabel}${stepLabel}</span>
         <svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
           <path d="M14,3H21V10H19V6.41L12.41,13L11,11.59L17.59,5H14V3M5,5H10V7H7V17H17V14H19V19H5V5Z"/>
         </svg>
@@ -2028,7 +2028,7 @@ export class WorkspaceDetailPage {
       const workflowLabel = this.escapeHtml(workflow.templateName || workflow.templateId);
       const taskLabel = `${workflow.taskCount} task${workflow.taskCount === 1 ? '' : 's'}`;
       const instanceLabel = `${workflow.workflowCount} run${workflow.workflowCount === 1 ? '' : 's'}`;
-      const title = `Open ${workflow.templateName || workflow.templateId} in Behavior Studio`;
+      const title = `Open ${workflow.templateName || workflow.templateId} in Orchestration Skills`;
 
       return `
         <a href="${safeHref}"
@@ -7553,7 +7553,7 @@ export class WorkspaceDetailPage {
 
     if (this.elements.settingsSummary) {
       if (effective.summary.length === 0) {
-        this.elements.settingsSummary.textContent = 'No effective behavior summary available.';
+        this.elements.settingsSummary.textContent = 'No effective manager behavior summary available.';
       } else {
         this.elements.settingsSummary.innerHTML = `
           <ul class="workspace-detail-settings-summary-list">

@@ -553,7 +553,7 @@
           this.selectTemplate(requestedTemplate.id, { skipDirtyCheck: true });
           return;
         }
-        notify(`Behavior "${requestedTemplateId}" was not found.`, 'warning');
+        notify(`Orchestration skill "${requestedTemplateId}" was not found.`, 'warning');
       }
       this.ensureSelection();
       this.syncTemplateQueryParam(this.state.selectedTemplateId || '');
@@ -688,7 +688,7 @@
       if (!this.state.isDirty) {
         return true;
       }
-      return window.confirm('Discard unsaved behavior changes?');
+      return window.confirm('Discard unsaved orchestration skill changes?');
     }
 
     startNewBehavior() {
@@ -733,8 +733,8 @@
 
       const clone = deepClone(current);
       clone.source = 'custom';
-      clone.id = this.buildUniqueTemplateId(`${current.id || slugify(current.name) || 'behavior'}-copy`);
-      clone.name = current.name ? `${current.name} Copy` : 'Behavior Copy';
+      clone.id = this.buildUniqueTemplateId(`${current.id || slugify(current.name) || 'skill'}-copy`);
+      clone.name = current.name ? `${current.name} Copy` : 'Skill Copy';
       clone.created_at = '';
       clone.updated_at = '';
       this.state.selectedTemplateId = '';
@@ -749,7 +749,7 @@
     async deleteSelectedBehavior() {
       const current = this.state.draft;
       if (!current || !current.id || current.source !== 'custom') {
-        notify('Only custom behaviors can be deleted from this page.', 'warning');
+        notify('Only custom orchestration skills can be deleted from this page.', 'warning');
         return;
       }
 
@@ -766,7 +766,7 @@
             throw new Error(await response.text());
           }
         });
-        notify('Behavior deleted.', 'success');
+        notify('Orchestration skill deleted.', 'success');
         await this.loadTemplates();
         this.state.selectedTemplateId = '';
         this.state.originalTemplateId = '';
@@ -775,7 +775,7 @@
         this.render();
       } catch (error) {
         console.error('Failed to delete behavior', error);
-        notify(error.message || 'Failed to delete behavior.', 'error');
+        notify(error.message || 'Failed to delete orchestration skill.', 'error');
       }
     }
 
@@ -784,7 +784,7 @@
         const payload = this.buildTemplatePayload();
         const existing = this.state.templates.find((template) => template.id === payload.id);
         if (existing && payload.id !== this.state.originalTemplateId) {
-          throw new Error(`A behavior with id "${payload.id}" already exists. Use a different id.`);
+          throw new Error(`An orchestration skill with id "${payload.id}" already exists. Use a different id.`);
         }
 
         const response = await fetch('/api/orchestration/templates', {
@@ -797,7 +797,7 @@
         }
 
         const saved = normalizeTemplate(await response.json());
-        notify('Behavior saved.', 'success');
+        notify('Orchestration skill saved.', 'success');
         await this.loadTemplates();
         this.state.selectedTemplateId = saved.id;
         this.state.originalTemplateId = saved.id;
@@ -808,12 +808,12 @@
         this.render();
       } catch (error) {
         console.error('Failed to save behavior', error);
-        notify(error.message || 'Failed to save behavior.', 'error');
+        notify(error.message || 'Failed to save orchestration skill.', 'error');
       }
     }
 
     buildUniqueTemplateId(baseValue) {
-      const base = slugify(baseValue) || 'behavior';
+      const base = slugify(baseValue) || 'skill';
       const reserved = new Set(this.state.templates.map((template) => template.id));
       if (!reserved.has(base)) {
         return base;
@@ -844,14 +844,14 @@
     buildTemplatePayload() {
       const draft = this.state.draft;
       const payload = normalizeTemplate(deepClone(draft));
-      payload.id = payload.id || this.buildUniqueTemplateId(payload.name || 'behavior');
+      payload.id = payload.id || this.buildUniqueTemplateId(payload.name || 'skill');
       payload.name = String(payload.name || '').trim();
       payload.description = String(payload.description || '').trim();
       payload.category = String(payload.category || '').trim();
       payload.source = 'custom';
 
       if (!payload.name) {
-        throw new Error('Behavior name is required.');
+        throw new Error('Skill name is required.');
       }
 
       const parameters = [];
@@ -901,7 +901,7 @@
       });
 
       if (steps.length === 0) {
-        throw new Error('Add at least one step to the behavior.');
+        throw new Error('Add at least one step to the orchestration skill.');
       }
 
       steps.forEach((step) => {
@@ -957,11 +957,11 @@
 
     openLaunchModal() {
       if (!this.state.draft || !this.state.draft.name) {
-        notify('Select or create a behavior first.', 'warning');
+        notify('Select or create an orchestration skill first.', 'warning');
         return;
       }
       if (this.state.isDirty) {
-        notify('Save the behavior before instantiating it into a workspace.', 'warning');
+        notify('Save the orchestration skill before instantiating it into a workspace.', 'warning');
         return;
       }
       this.state.launchState = this.buildLaunchState();
@@ -1044,13 +1044,13 @@
         const url = window.URL.createObjectURL(blob);
         const anchor = document.createElement('a');
         anchor.href = url;
-        anchor.download = `${payload.id || slugify(payload.name) || 'behavior'}.json`;
+        anchor.download = `${payload.id || slugify(payload.name) || 'orchestration-skill'}.json`;
         document.body.appendChild(anchor);
         anchor.click();
         document.body.removeChild(anchor);
         window.URL.revokeObjectURL(url);
       } catch (error) {
-        notify(error.message || 'Failed to export behavior.', 'error');
+        notify(error.message || 'Failed to export orchestration skill.', 'error');
       }
     }
 
@@ -1067,7 +1067,7 @@
           return;
         }
         imported.source = 'custom';
-        imported.id = this.buildUniqueTemplateId(imported.id || slugify(imported.name) || 'imported-behavior');
+        imported.id = this.buildUniqueTemplateId(imported.id || slugify(imported.name) || 'imported-skill');
         imported.name = imported.name || file.name.replace(/\.json$/i, '');
         this.state.selectedTemplateId = '';
         this.state.originalTemplateId = '';
@@ -1076,10 +1076,10 @@
         this.state.launchState = this.buildLaunchState();
         this.syncTemplateQueryParam('');
         this.render();
-        notify('Behavior imported. Save it to persist.', 'success');
+        notify('Orchestration skill imported. Save it to persist.', 'success');
       } catch (error) {
         console.error('Failed to import behavior', error);
-        notify(error.message || 'Failed to import behavior JSON.', 'error');
+        notify(error.message || 'Failed to import orchestration skill JSON.', 'error');
       } finally {
         if (this.importInput) {
           this.importInput.value = '';
@@ -1413,8 +1413,8 @@
       if (this.state.filteredTemplates.length === 0) {
         this.listEl.innerHTML = `
           <div class="behavior-empty-state">
-            <div class="behavior-empty-state__title">No behaviors match these filters.</div>
-            <div class="behavior-empty-state__copy">Clear the search or start a new behavior from scratch.</div>
+            <div class="behavior-empty-state__title">No orchestration skills match these filters.</div>
+            <div class="behavior-empty-state__copy">Clear the search or start a new skill from scratch.</div>
           </div>
         `;
       }
@@ -1426,7 +1426,7 @@
         this.customCountEl.textContent = String(this.state.templates.filter((template) => template.source === 'custom').length);
       }
       if (this.selectedLabelEl) {
-        const label = this.state.draft?.name || this.state.draft?.id || 'New behavior';
+        const label = this.state.draft?.name || this.state.draft?.id || 'New orchestration skill';
         this.selectedLabelEl.textContent = this.state.isDirty ? `${label} · Unsaved` : label;
       }
     }
@@ -1442,8 +1442,8 @@
         <section class="behavior-section">
           <div class="behavior-section__head">
             <div>
-              <div class="behavior-section__eyebrow">Behavior Editor</div>
-              <h2 class="behavior-section__title">Template metadata and execution rules</h2>
+              <div class="behavior-section__eyebrow">Orchestration Skill Editor</div>
+              <h2 class="behavior-section__title">Skill metadata and execution rules</h2>
             </div>
             ${isBuiltin ? '<span class="behavior-readonly-pill">Built-in · duplicate to edit</span>' : '<span class="behavior-readonly-pill behavior-readonly-pill--active">Custom</span>'}
           </div>
@@ -1454,7 +1454,7 @@
                 <input class="behavior-input" type="text" data-field="name" value="${escapeAttr(draft.name)}" placeholder="Launch Readiness Review">
               </label>
               <label class="behavior-field">
-                <span class="behavior-field__label">Behavior ID</span>
+                <span class="behavior-field__label">Skill ID</span>
                 <input class="behavior-input behavior-input--mono" type="text" data-field="id" value="${escapeAttr(draft.id)}" placeholder="launch-readiness-review">
               </label>
               <label class="behavior-field">
@@ -1464,7 +1464,7 @@
             </div>
             <label class="behavior-field">
               <span class="behavior-field__label">Description</span>
-              <textarea class="behavior-textarea" rows="3" data-field="description" placeholder="Describe what this reusable behavior orchestrates.">${escapeHtml(draft.description)}</textarea>
+              <textarea class="behavior-textarea" rows="3" data-field="description" placeholder="Describe what this orchestration skill orchestrates.">${escapeHtml(draft.description)}</textarea>
             </label>
 
             <div class="behavior-subsection">
@@ -1498,7 +1498,7 @@
               <div class="behavior-subsection__head">
                 <div>
                   <div class="behavior-subsection__title">Parameters</div>
-                  <div class="behavior-subsection__copy">Expose inputs that users fill before they instantiate this behavior.</div>
+                  <div class="behavior-subsection__copy">Expose inputs that users fill before they instantiate this orchestration skill.</div>
                 </div>
                 <button class="behavior-btn behavior-btn--secondary" type="button" data-action="add-param">Add parameter</button>
               </div>
@@ -1743,9 +1743,9 @@
         <section class="behavior-preview-card">
           <div class="behavior-preview-card__hero">
             <div>
-              <div class="behavior-preview-card__eyebrow">Behavior Summary</div>
-              <h2 class="behavior-preview-card__title">${escapeHtml(draft.name || 'New behavior')}</h2>
-              <p class="behavior-preview-card__copy">${escapeHtml(draft.description || 'Describe the reusable orchestration this behavior should execute.')}</p>
+              <div class="behavior-preview-card__eyebrow">Skill Summary</div>
+              <h2 class="behavior-preview-card__title">${escapeHtml(draft.name || 'New orchestration skill')}</h2>
+              <p class="behavior-preview-card__copy">${escapeHtml(draft.description || 'Describe the reusable orchestration this skill should execute.')}</p>
             </div>
             <div class="behavior-preview-card__status ${this.state.isDirty ? 'is-dirty' : ''}">
               ${this.state.isDirty ? 'Unsaved draft' : (isBuiltin ? 'Built-in' : 'Saved')}
@@ -1805,7 +1805,7 @@
           </div>
 
           <details class="behavior-json-inspector">
-            <summary>Raw behavior JSON</summary>
+            <summary>Raw orchestration skill JSON</summary>
             <pre>${escapeHtml(JSON.stringify(this.safePreviewPayload(), null, 2))}</pre>
           </details>
         </section>
@@ -1890,7 +1890,7 @@
         <label class="behavior-field">
           <span class="behavior-field__label">${escapeHtml(step.name || step.id)}</span>
           <select class="behavior-input" data-launch-field="assignment" data-step-id="${escapeAttr(step.id)}">
-            <option value="">Use behavior default${step.agent_name ? ` (${escapeHtml(step.agent_name)})` : ''}</option>
+            <option value="">Use skill default${step.agent_name ? ` (${escapeHtml(step.agent_name)})` : ''}</option>
             ${this.state.launchAgents.map((agentName) => `
               <option value="${escapeAttr(agentName)}" ${launchState.agentAssignments[step.id] === agentName ? 'selected' : ''}>${escapeHtml(agentName)}</option>
             `).join('')}
@@ -1904,7 +1904,7 @@
             <div class="behavior-subsection__head">
               <div>
                 <div class="behavior-subsection__title">Workspace</div>
-                <div class="behavior-subsection__copy">Instantiate this behavior into an existing workspace.</div>
+                <div class="behavior-subsection__copy">Instantiate this orchestration skill into an existing workspace.</div>
               </div>
             </div>
             <label class="behavior-field">
@@ -1932,20 +1932,20 @@
             <div class="behavior-subsection__head">
               <div>
                 <div class="behavior-subsection__title">Runtime Overrides</div>
-                <div class="behavior-subsection__copy">Leave blank to use the behavior defaults.</div>
+                <div class="behavior-subsection__copy">Leave blank to use the skill defaults.</div>
               </div>
             </div>
             <label class="behavior-field">
               <span class="behavior-field__label">Orchestration Override</span>
               <select class="behavior-input" data-launch-field="orchestrationMode">
-                <option value="">Use behavior default (${escapeHtml(draft.orchestration_mode)})</option>
+                <option value="">Use skill default (${escapeHtml(draft.orchestration_mode)})</option>
                 ${ORCHESTRATION_OPTIONS.map((option) => `<option value="${option.value}" ${launchState.orchestrationMode === option.value ? 'selected' : ''}>${option.label}</option>`).join('')}
               </select>
             </label>
             <label class="behavior-field">
               <span class="behavior-field__label">Combination Override</span>
               <select class="behavior-input" data-launch-field="resultCombinationMode">
-                <option value="">Use behavior default (${escapeHtml(draft.result_combination_mode)})</option>
+                <option value="">Use skill default (${escapeHtml(draft.result_combination_mode)})</option>
                 ${COMBINATION_OPTIONS.map((option) => `<option value="${option.value}" ${launchState.resultCombinationMode === option.value ? 'selected' : ''}>${option.label}</option>`).join('')}
               </select>
             </label>
@@ -1960,10 +1960,10 @@
           <div class="behavior-subsection__head">
             <div>
               <div class="behavior-subsection__title">Parameters</div>
-              <div class="behavior-subsection__copy">These values are rendered into the behavior template before tasks are created.</div>
+              <div class="behavior-subsection__copy">These values are rendered into the orchestration skill before tasks are created.</div>
             </div>
           </div>
-          ${parameterFields || '<div class="behavior-launch-note">This behavior has no parameters.</div>'}
+          ${parameterFields || '<div class="behavior-launch-note">This orchestration skill has no parameters.</div>'}
         </div>
 
         <div class="behavior-launch-panel">
@@ -2122,7 +2122,7 @@
           throw new Error(await response.text());
         }
         const payload = await response.json();
-        notify(`Behavior added to ${this.state.launchWorkspaceName || 'workspace'}.`, 'success');
+        notify(`Orchestration skill added to ${this.state.launchWorkspaceName || 'workspace'}.`, 'success');
         this.launchModal?.hide();
         if (payload.parent_task?.id) {
           window.location.href = `/workspaces/${encodeURIComponent(workspaceId)}`;
@@ -2130,7 +2130,7 @@
         }
       } catch (error) {
         console.error('Failed to instantiate behavior', error);
-        notify(error.message || 'Failed to add behavior to workspace.', 'error');
+        notify(error.message || 'Failed to add orchestration skill to workspace.', 'error');
       } finally {
         this.launchModalSubmitEl.disabled = false;
         this.launchModalSubmitEl.textContent = 'Add to Workspace';
@@ -2145,7 +2145,7 @@
       await studio.init();
     } catch (error) {
       console.error('Failed to initialize behavior studio', error);
-      notify(error.message || 'Failed to load the behavior studio.', 'error');
+      notify(error.message || 'Failed to load orchestration skills.', 'error');
     }
   });
 })();
