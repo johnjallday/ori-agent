@@ -275,9 +275,33 @@ func (w *Workspace) GetInputContext(task *Task) map[string]interface{} {
 		if len(inputResults) > 0 {
 			context["input_task_results"] = inputResults
 		}
+		if structuredOutputs := w.GetTaskStructuredOutputs(task.InputTaskIDs); len(structuredOutputs) > 0 {
+			context["input_task_structured_outputs"] = structuredOutputs
+		}
 	}
 
 	return context
+}
+
+// GetTaskStructuredOutputs returns parsed structured outputs for tasks whose result matches a schema.
+func (w *Workspace) GetTaskStructuredOutputs(taskIDs []string) map[string]interface{} {
+	w.mu.RLock()
+	defer w.mu.RUnlock()
+
+	outputs := make(map[string]interface{})
+	for _, taskID := range taskIDs {
+		for _, task := range w.Tasks {
+			if task.ID != taskID {
+				continue
+			}
+			parsed, err := ValidateTaskStructuredOutput(task.OutputSchema, task.Result)
+			if err == nil && len(parsed) > 0 {
+				outputs[taskID] = parsed
+			}
+			break
+		}
+	}
+	return outputs
 }
 
 // rebuildTaskIndex rebuilds the task index from the current Tasks slice.

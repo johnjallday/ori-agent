@@ -2,6 +2,7 @@ package orchestrationhttp
 
 import (
 	"context"
+	"encoding/json"
 	"strings"
 	"testing"
 
@@ -281,6 +282,23 @@ func (s *stubSequenceTaskExecutor) ExecuteTask(_ context.Context, _ string, task
 	return s.results[index], nil
 }
 
+type stubMappedTaskExecutor struct {
+	results map[string]string
+	errs    map[string]error
+	calls   []string
+}
+
+func (s *stubMappedTaskExecutor) ExecuteTask(_ context.Context, _ string, task workspace.Task) (string, error) {
+	s.calls = append(s.calls, task.ID)
+	if err := s.errs[task.ID]; err != nil {
+		return "", err
+	}
+	if result, ok := s.results[task.ID]; ok {
+		return result, nil
+	}
+	return task.Description, nil
+}
+
 type stubEventingTaskExecutor struct {
 	result     string
 	err        error
@@ -510,6 +528,163 @@ func TestExecuteTaskIteratively_RetriesIncompleteFilesystemListingAnswer(t *test
 	}
 	if got := retryData["final_outcome"]; got != "success" {
 		t.Fatalf("expected final_outcome success, got %v", got)
+	}
+}
+
+func TestExecuteTaskIteratively_RetriesInvalidStructuredOutput(t *testing.T) {
+	stub := &stubSequenceTaskExecutor{
+		results: []string{
+			"not-json",
+			`{"summary":"ready","confidence":0.82}`,
+		},
+	}
+	handler := &TaskHandler{taskHandler: stub}
+	ws := workspace.NewWorkspace(workspace.CreateWorkspaceParams{Name: "amr", Agents: []string{"Ori"}})
+	task := workspace.Task{
+		ID:          "task-structured-retry",
+		WorkspaceID: ws.ID,
+		To:          "Ori",
+		Description: "Return a release summary",
+		Context: map[string]interface{}{
+			"max_attempts": 2,
+		},
+		OutputSchema: &workspace.TaskOutputSchema{
+			Name:   "release_summary",
+			Strict: true,
+			Fields: []workspace.TaskOutputField{
+				{Name: "summary", Type: "string", Required: true},
+				{Name: "confidence", Type: "number", Required: true},
+			},
+		},
+	}
+
+	result, err := handler.executeTaskIteratively(context.Background(), ws, &task, task, true)
+	if err != nil {
+		t.Fatalf("expected structured retry to succeed, got %v", err)
+	}
+	if result != `{"summary":"ready","confidence":0.82}` {
+		t.Fatalf("unexpected final result %q", result)
+	}
+	if stub.calls != 2 {
+		t.Fatalf("expected two attempts, got %d", stub.calls)
+	}
+	structuredOutput, ok := task.Context["structured_output"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected parsed structured output in task context, got %#v", task.Context["structured_output"])
+	}
+	if got := structuredOutput["summary"]; got != "ready" {
+		t.Fatalf("expected summary field to persist, got %v", got)
+	}
+}
+
+func TestExecuteTaskIteratively_BlocksWhenStructuredOutputRemainsInvalid(t *testing.T) {
+	stub := &stubWorkspaceTaskExecutor{result: "still not json"}
+	handler := &TaskHandler{taskHandler: stub}
+	ws := workspace.NewWorkspace(workspace.CreateWorkspaceParams{Name: "amr", Agents: []string{"Ori"}})
+	task := workspace.Task{
+		ID:          "task-structured-blocked",
+		WorkspaceID: ws.ID,
+		To:          "Ori",
+		Description: "Return a release summary",
+		Context: map[string]interface{}{
+			"max_attempts": 1,
+		},
+		OutputSchema: &workspace.TaskOutputSchema{
+			Fields: []workspace.TaskOutputField{
+				{Name: "summary", Type: "string", Required: true},
+			},
+		},
+	}
+
+	_, err := handler.executeTaskIteratively(context.Background(), ws, &task, task, true)
+	blockedErr, ok := workspace.AsTaskBlockedError(err)
+	if !ok {
+		t.Fatalf("expected TaskBlockedError, got %v", err)
+	}
+	if blockedErr.ReasonCode != "structured_output_invalid" {
+		t.Fatalf("expected structured_output_invalid, got %q", blockedErr.ReasonCode)
+	}
+	if stub.calls != 1 {
+		t.Fatalf("expected a single execution attempt, got %d", stub.calls)
+	}
+}
+
+func TestExecuteParentTaskSequence_UsesGraphExecutionAndStructuredAggregation(t *testing.T) {
+	store := workspace.NewInMemoryStore()
+	ws := workspace.NewWorkspace(workspace.CreateWorkspaceParams{Name: "amr", Agents: []string{"Ori"}})
+	parent := workspace.Task{
+		ID:                    "parent-graph",
+		WorkspaceID:           ws.ID,
+		To:                    "Ori",
+		Description:           "Execute template",
+		OrchestrationMode:     workspace.TaskOrchestrationModeGraph,
+		ResultCombinationMode: workspace.TaskResultCombinationStructuredOutput,
+	}
+	stepSchema := &workspace.TaskOutputSchema{
+		Strict: true,
+		Fields: []workspace.TaskOutputField{
+			{Name: "summary", Type: "string", Required: true},
+		},
+	}
+	steps := []workspace.Task{
+		{ID: "step-a", WorkspaceID: ws.ID, To: "Ori", Description: "Collect", ParentTaskID: parent.ID, SubtaskIndex: 1, OutputSchema: stepSchema},
+		{ID: "step-b", WorkspaceID: ws.ID, To: "Ori", Description: "Analyze", ParentTaskID: parent.ID, SubtaskIndex: 2, InputTaskIDs: []string{"step-a"}, OutputSchema: stepSchema},
+		{ID: "step-c", WorkspaceID: ws.ID, To: "Ori", Description: "Validate", ParentTaskID: parent.ID, SubtaskIndex: 3, InputTaskIDs: []string{"step-a"}, OutputSchema: stepSchema},
+		{ID: "step-d", WorkspaceID: ws.ID, To: "Ori", Description: "Decide", ParentTaskID: parent.ID, SubtaskIndex: 4, InputTaskIDs: []string{"step-b", "step-c"}, OutputSchema: stepSchema},
+	}
+
+	if err := ws.AddTask(parent); err != nil {
+		t.Fatalf("failed to add parent task: %v", err)
+	}
+	for _, step := range steps {
+		if err := ws.AddTask(step); err != nil {
+			t.Fatalf("failed to add subtask %s: %v", step.ID, err)
+		}
+	}
+	if err := store.Save(ws); err != nil {
+		t.Fatalf("failed to save workspace: %v", err)
+	}
+
+	executor := &stubMappedTaskExecutor{
+		results: map[string]string{
+			"step-a": `{"summary":"research complete"}`,
+			"step-b": `{"summary":"analysis complete"}`,
+			"step-c": `{"summary":"validation complete"}`,
+			"step-d": `{"summary":"decision complete"}`,
+		},
+	}
+	handler := &TaskHandler{
+		workspaceStore: store,
+		taskHandler:    executor,
+	}
+
+	handler.executeParentTaskSequence(ws.ID, parent.ID)
+
+	updatedWS, err := store.Get(ws.ID)
+	if err != nil {
+		t.Fatalf("failed to reload workspace: %v", err)
+	}
+	updatedParent, err := updatedWS.GetTask(parent.ID)
+	if err != nil {
+		t.Fatalf("failed to reload parent task: %v", err)
+	}
+	if updatedParent.Status != workspace.TaskStatusCompleted {
+		t.Fatalf("expected completed parent task, got %q", updatedParent.Status)
+	}
+	if got, want := strings.Join(executor.calls, ","), "step-a,step-b,step-c,step-d"; got != want {
+		t.Fatalf("unexpected graph execution order %q, want %q", got, want)
+	}
+
+	var payload map[string]interface{}
+	if err := json.Unmarshal([]byte(updatedParent.Result), &payload); err != nil {
+		t.Fatalf("expected structured parent result, got %v", err)
+	}
+	finalOutputs, ok := payload["final_step_outputs"].([]interface{})
+	if !ok {
+		t.Fatalf("expected final_step_outputs array, got %#v", payload["final_step_outputs"])
+	}
+	if len(finalOutputs) != 4 {
+		t.Fatalf("expected 4 final step outputs, got %d", len(finalOutputs))
 	}
 }
 

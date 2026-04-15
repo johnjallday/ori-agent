@@ -212,6 +212,55 @@ func TestApplyBasicFieldUpdates_KanbanMetadata(t *testing.T) {
 	}
 }
 
+func TestApplyBasicFieldUpdates_OrchestrationFields(t *testing.T) {
+	h := &TaskHandler{}
+
+	task := workspace.Task{ID: "task-graph"}
+	orchestrationMode := "graph"
+	combinationMode := "structured_outputs"
+	combinationInstruction := "Combine child outputs into a release decision."
+	outputSchema := &workspace.TaskOutputSchema{
+		Name:        "release_decision",
+		Description: "Final release recommendation",
+		Strict:      true,
+		Fields: []workspace.TaskOutputField{
+			{Name: "decision", Type: "string", Required: true},
+			{Name: "confidence", Type: "number", Required: true},
+		},
+	}
+	templateRef := &workspace.TaskTemplateRef{
+		TemplateID:   "template-1",
+		TemplateName: "Release Review",
+		StepID:       "step-1",
+		StepName:     "Assess",
+	}
+
+	h.applyBasicFieldUpdates(&task, &taskUpdateRequest{
+		TaskID:                 task.ID,
+		OrchestrationMode:      &orchestrationMode,
+		ResultCombinationMode:  &combinationMode,
+		CombinationInstruction: &combinationInstruction,
+		OutputSchema:           outputSchema,
+		TemplateRef:            templateRef,
+	})
+
+	if task.OrchestrationMode != workspace.TaskOrchestrationModeGraph {
+		t.Fatalf("expected graph orchestration mode, got %q", task.OrchestrationMode)
+	}
+	if task.ResultCombinationMode != workspace.TaskResultCombinationStructuredOutput {
+		t.Fatalf("expected structured_outputs combination mode, got %q", task.ResultCombinationMode)
+	}
+	if task.CombinationInstruction != combinationInstruction {
+		t.Fatalf("expected combination instruction to persist, got %q", task.CombinationInstruction)
+	}
+	if task.OutputSchema == nil || len(task.OutputSchema.Fields) != 2 {
+		t.Fatalf("expected normalized output schema to persist, got %#v", task.OutputSchema)
+	}
+	if task.TemplateRef == nil || task.TemplateRef.StepName != "Assess" {
+		t.Fatalf("expected template ref to persist, got %#v", task.TemplateRef)
+	}
+}
+
 func TestExtractTaskIDForDelete(t *testing.T) {
 	t.Run("from query id", func(t *testing.T) {
 		req := httptest.NewRequest("DELETE", "/api/orchestration/tasks?id=task-query-1", nil)

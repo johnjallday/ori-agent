@@ -236,8 +236,11 @@ func (th *TaskHandler) handleCreateTask(w http.ResponseWriter, r *http.Request) 
 		InputTaskIDs           []string                       `json:"input_task_ids"`
 		ParentTaskID           string                         `json:"parent_task_id"`
 		SubtaskIndex           int                            `json:"subtask_index"`
+		OrchestrationMode      string                         `json:"orchestration_mode"`
 		ResultCombinationMode  string                         `json:"result_combination_mode"`
 		CombinationInstruction string                         `json:"combination_instruction"`
+		OutputSchema           *workspace.TaskOutputSchema    `json:"output_schema"`
+		TemplateRef            *workspace.TaskTemplateRef     `json:"template_ref"`
 		Schedule               json.RawMessage                `json:"schedule"`
 		ScheduleEnabled        bool                           `json:"schedule_enabled"`
 		ScheduleName           string                         `json:"schedule_name"`
@@ -274,21 +277,26 @@ func (th *TaskHandler) handleCreateTask(w http.ResponseWriter, r *http.Request) 
 
 	// Create task
 	task := workspace.Task{
-		WorkspaceID:     req.WorkspaceID,
-		From:            req.From,
-		To:              req.To,
-		AssignedNodeID:  req.AssignedNodeID,
-		Description:     req.Description,
-		Details:         req.Details,
-		Priority:        req.Priority,
-		InputTaskIDs:    req.InputTaskIDs,
-		ParentTaskID:    req.ParentTaskID,
-		SubtaskIndex:    req.SubtaskIndex,
-		Status:          workspace.TaskStatusPending,
-		Schedule:        schedule,
-		ScheduleEnabled: req.ScheduleEnabled,
-		ScheduleName:    req.ScheduleName,
-		ResultStorage:   req.ResultStorage,
+		WorkspaceID:            req.WorkspaceID,
+		From:                   req.From,
+		To:                     req.To,
+		AssignedNodeID:         req.AssignedNodeID,
+		Description:            req.Description,
+		Details:                req.Details,
+		Priority:               req.Priority,
+		InputTaskIDs:           req.InputTaskIDs,
+		ParentTaskID:           req.ParentTaskID,
+		SubtaskIndex:           req.SubtaskIndex,
+		OrchestrationMode:      workspace.NormalizeTaskOrchestrationMode(req.OrchestrationMode),
+		ResultCombinationMode:  workspace.NormalizeTaskResultCombinationMode(req.ResultCombinationMode),
+		CombinationInstruction: strings.TrimSpace(req.CombinationInstruction),
+		OutputSchema:           workspace.NormalizeTaskOutputSchema(req.OutputSchema),
+		TemplateRef:            req.TemplateRef,
+		Status:                 workspace.TaskStatusPending,
+		Schedule:               schedule,
+		ScheduleEnabled:        req.ScheduleEnabled,
+		ScheduleName:           req.ScheduleName,
+		ResultStorage:          req.ResultStorage,
 	}
 
 	// Validate: scheduled tasks must be assigned to an agent
@@ -392,8 +400,11 @@ type taskUpdateRequest struct {
 	InputTaskIDs           []string                       `json:"input_task_ids"`
 	ParentTaskID           *string                        `json:"parent_task_id"`
 	SubtaskIndex           *int                           `json:"subtask_index"`
+	OrchestrationMode      *string                        `json:"orchestration_mode"`
 	ResultCombinationMode  *string                        `json:"result_combination_mode"`
 	CombinationInstruction *string                        `json:"combination_instruction"`
+	OutputSchema           *workspace.TaskOutputSchema    `json:"output_schema"`
+	TemplateRef            *workspace.TaskTemplateRef     `json:"template_ref"`
 	Schedule               json.RawMessage                `json:"schedule"`
 	ScheduleEnabled        *bool                          `json:"schedule_enabled"`
 	ScheduleName           *string                        `json:"schedule_name"`
@@ -406,8 +417,9 @@ type taskUpdateRequest struct {
 // hasFieldUpdates returns true if the request contains any field updates
 func (r *taskUpdateRequest) hasFieldUpdates() bool {
 	return r.Description != nil || r.Details != nil || r.Context != nil || r.InputTaskIDs != nil ||
-		r.To != nil || r.ParentTaskID != nil || r.SubtaskIndex != nil ||
-		r.ResultCombinationMode != nil || r.ResultStorage != nil || r.KanbanColumnID != nil ||
+		r.To != nil || r.ParentTaskID != nil || r.SubtaskIndex != nil || r.OrchestrationMode != nil ||
+		r.ResultCombinationMode != nil || r.CombinationInstruction != nil || r.OutputSchema != nil ||
+		r.TemplateRef != nil || r.ResultStorage != nil || r.KanbanColumnID != nil ||
 		r.KanbanLabels != nil || r.KanbanDueDate != nil
 }
 
@@ -453,6 +465,26 @@ func (th *TaskHandler) applyBasicFieldUpdates(task *workspace.Task, req *taskUpd
 	if req.SubtaskIndex != nil {
 		task.SubtaskIndex = *req.SubtaskIndex
 		logger.Debug("Updated task subtask index", logger.Fields{"task_id": req.TaskID, "subtask_index": *req.SubtaskIndex})
+	}
+	if req.OrchestrationMode != nil {
+		task.OrchestrationMode = workspace.NormalizeTaskOrchestrationMode(*req.OrchestrationMode)
+		logger.Debug("Updated task orchestration mode", logger.Fields{"task_id": req.TaskID, "orchestration_mode": task.OrchestrationMode})
+	}
+	if req.ResultCombinationMode != nil {
+		task.ResultCombinationMode = workspace.NormalizeTaskResultCombinationMode(*req.ResultCombinationMode)
+		logger.Debug("Updated task result combination mode", logger.Fields{"task_id": req.TaskID, "result_combination_mode": task.ResultCombinationMode})
+	}
+	if req.CombinationInstruction != nil {
+		task.CombinationInstruction = strings.TrimSpace(*req.CombinationInstruction)
+		logger.Debug("Updated task combination instruction", logger.Fields{"task_id": req.TaskID})
+	}
+	if req.OutputSchema != nil {
+		task.OutputSchema = workspace.NormalizeTaskOutputSchema(req.OutputSchema)
+		logger.Debug("Updated task output schema", logger.Fields{"task_id": req.TaskID, "has_output_schema": task.OutputSchema != nil})
+	}
+	if req.TemplateRef != nil {
+		task.TemplateRef = req.TemplateRef
+		logger.Debug("Updated task template reference", logger.Fields{"task_id": req.TaskID})
 	}
 	if req.ResultStorage != nil {
 		task.ResultStorage = req.ResultStorage
@@ -567,6 +599,21 @@ func (th *TaskHandler) buildTaskUpdateEventData(req *taskUpdateRequest, schedule
 	}
 	if req.AssignedNodeID != nil {
 		eventData["assigned_node_id"] = *req.AssignedNodeID
+	}
+	if req.OrchestrationMode != nil {
+		eventData["orchestration_mode"] = workspace.NormalizeTaskOrchestrationMode(*req.OrchestrationMode)
+	}
+	if req.ResultCombinationMode != nil {
+		eventData["result_combination_mode"] = workspace.NormalizeTaskResultCombinationMode(*req.ResultCombinationMode)
+	}
+	if req.CombinationInstruction != nil {
+		eventData["combination_instruction"] = strings.TrimSpace(*req.CombinationInstruction)
+	}
+	if req.OutputSchema != nil {
+		eventData["output_schema"] = workspace.NormalizeTaskOutputSchema(req.OutputSchema)
+	}
+	if req.TemplateRef != nil {
+		eventData["template_ref"] = req.TemplateRef
 	}
 	if schedule != nil {
 		eventData["schedule"] = schedule
