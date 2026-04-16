@@ -7,7 +7,7 @@
 *   **Architecture:**
     *   **Backend:** Go (v1.25.5+) using standard library HTTP server + Wails for desktop integration.
     *   **Frontend:** Web interface located in `internal/web/static`, served by the Go backend.
-    *   **Plugins:** gRPC-based plugin system allowing agents to extend capabilities (tools). Plugins are standalone executables.
+    *   **Tools:** MCP (Model Context Protocol) servers and Skills provide tool capabilities. MCP servers are external processes; Skills are reusable prompt-based capabilities.
     *   **Database:** SQLite (via `modernc.org/sqlite`) for local storage of agents, sessions, and history.
 
 ## Building and Running
@@ -36,7 +36,8 @@
 ### Code Structure
 *   `cmd/`: Entry points (`server`, `menubar`, `ori-plugin-gen`).
 *   `internal/`: Private application logic (server, core, agents, etc.).
-*   `plugins/`: Plugin system definitions and implementations.
+*   `internal/mcp/`: MCP server integration.
+*   `internal/skills/`: Skills management.
 *   `tests/`: Integration, E2E, and user scenario tests.
 *   `internal/web/static/`: Frontend assets (JS, CSS, HTML).
 
@@ -45,7 +46,7 @@
 *   **Frontend:** Uses ESLint and Prettier.
     *   Lint: `npm run lint`
     *   Format: `npm run format`
-*   **Plugins:** Follow the gRPC plugin architecture. See `example_plugins/` for reference.
+*   **Tools:** Use MCP servers for external tool integration. See `internal/mcp/` for reference.
 
 ### Versioning
 *   Version is managed in the `VERSION` file.

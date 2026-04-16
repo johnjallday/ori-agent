@@ -1,8 +1,13 @@
 # <img src="assets/logo-readme.svg" alt="Ori Agent logo" width="36" height="36" style="vertical-align: text-bottom;" /> Ori Agent
 
-![Version](https://img.shields.io/badge/Version-v0.0.58-blue) ![Go](https://img.shields.io/badge/Go-1.25.9-00add8)
+<!-- AUTO:VERSION -->
+![Version](https://img.shields.io/badge/Version-v0.0.58-blue)
+<!-- AUTO:VERSION_END -->
+<!-- AUTO:GO_VERSION -->
+![Go](https://img.shields.io/badge/Go-1.25.9-00add8)
+<!-- AUTO:GO_VERSION_END -->
 
-**Ori Agent** is a local first AI agent management platform. Spin up multiple named agents, each with its own model, prompt, and tool loadout, and run them through a browser UI or API. Agents call plugins (gRPC tools) to act—everything stays on your machine unless you opt into cloud LLMs.
+**Ori Agent** is a local-first AI agent management platform. Spin up multiple named agents, each with its own model, prompt, and tool loadout, and run them through a browser UI or API. Agents use MCP (Model Context Protocol) servers and Skills for tool capabilities—everything stays on your machine unless you opt into cloud LLMs.
 
 If you want to keep your information local, this is a way to go.
 
@@ -15,8 +20,8 @@ Let me know, how this is.
 Ori Agent core is open-source and can be used commercially. Web3/token and marketplace payment services are not included in this repo and are operated privately.
 
 Open-source core includes:
-- Agent runtime, orchestration, plugin SDK, and local plugin execution
-- UI, settings, and local plugin marketplace management
+- Agent runtime, orchestration, MCP integration, and skills system
+- UI, settings, and workspace management
 - Web3 wallet UI for local metadata only (no on-chain operations)
 
 Private services (not included):
@@ -308,80 +313,6 @@ The session system is optimized for handling many sessions efficiently:
 - **Concurrent Access**: Thread-safe operations support multiple tabs and clients
 - **Efficient Search**: Full-text search returns results in under 500µs for typical workloads
 
-## 🔌 Plugin Development
-
-Ori Agent uses a plugin system that lets you extend functionality with custom tools. Build plugins as standalone executables that communicate via gRPC.
-
-### Plugin Optimization APIs (New!)
-
-We've introduced three powerful APIs that dramatically simplify plugin development:
-
-#### 1. **YAML-Based Tool Definitions** (70% less code!)
-Define parameters in `plugin.yaml` instead of code:
-
-```yaml
-tool_definition:
-  description: "Your tool description"
-  parameters:
-    - name: operation
-      type: string
-      required: true
-      enum: [create, list, delete]
-    - name: count
-      type: integer
-      min: 1
-      max: 100
-```
-
-```go
-func (t *MyTool) Definition() pluginapi.Tool {
-    tool, _ := t.GetToolDefinition()  // Auto-loads from plugin.yaml
-    return tool
-}
-```
-
-
-Checkout Example Plugins
-<!-- AUTO:PLUGINS -->
-| Plugin | Description | Type |
-|--------|-------------|------|
-| math | Perform basic math operations: add, subtract, multiply, divide | Example |
-| minimal | Minimal example tool demonstrating YAML-based configuration. Supports echo and status operations. | Example |
-| result-handler | Handle actions on chat results like opening directories, files, or URLs | Example |
-| weather | Get weather for a given location | Example |
-| webapp | Example tool with web interface. Manages a simple list of items. | Example |
-<!-- AUTO:PLUGINS_END -->
-
-
-#### 2. **Template Rendering API**
-Serve beautiful web pages with Go templates:
-
-```yaml
-# plugin.yaml
-assets:
-  - templates
-```
-
-```go
-html, err := pluginapi.RenderTemplate(assetsFS, "templates/page.html", data)
-```
-
-### Getting Started with Plugins
-
-- **Documentation**: See [PLUGIN_OPTIMIZATION_GUIDE.md](PLUGIN_OPTIMIZATION_GUIDE.md) for complete migration guide
-- **Examples**: Check out `example_plugins/minimal/` and `example_plugins/webapp/`
-- **Reference**: See [CLAUDE.md](CLAUDE.md) for detailed plugin development patterns
-
-### Building a Plugin
-
-```bash
-cd example_plugins/minimal
-go build -o minimal-plugin main.go
-cp minimal-plugin ../../uploaded_plugins/
-```
-
-Restart Ori Agent, and your plugin will be automatically loaded!
-
 ## 📄 License
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
@@ -392,17 +323,9 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 - 💡 **Feature Requests**: Open an issue with the "enhancement" label
 - 💬 **Discussions**: [GitHub Discussions](https://github.com/johnjallday/ori-agent/discussions)
 
-While this app is very functional, there will be a lot of breaking changes. Feel free to give feedbacks.
-MVP = v0.1.0  => I will be releasing at least once a week until v0.0.99
-
-## 🛣️Roadmap
-v0.0.60 Python Support
-v0.0.70 
-
+While this app is very functional, there will be a lot of breaking changes. Feel free to give feedback.
 
 buymeacoffee.com/johnjallday
-
-
 
 ---
 
