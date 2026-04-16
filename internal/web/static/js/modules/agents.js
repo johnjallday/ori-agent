@@ -167,6 +167,14 @@ async function loadAvailableProviders() {
 function populateModelSelect(modelSelect, selectedType = 'tool-calling') {
   if (!modelSelect || availableProviders.length === 0) return;
 
+  // For orchestration agents, the user's configured system model is the right
+  // default even when it wasn't categorized as "orchestration" (e.g. a local
+  // Ollama model that defaults to tool-calling). Surface it in the dropdown so
+  // it remains selectable.
+  const systemPref = cachedSystemModelPreference || {};
+  const systemProviderName = normalizeProviderName(systemPref.provider);
+  const systemModelName = String(systemPref.model || '').trim();
+
   // Clear existing options
   modelSelect.innerHTML = '';
 
@@ -182,8 +190,15 @@ function populateModelSelect(modelSelect, selectedType = 'tool-calling') {
       option.setAttribute('data-type', model.type);
       option.setAttribute('data-provider', model.provider);
 
-      // Only show models matching the selected type
-      if (model.type !== selectedType) {
+      const isSystemModel =
+        selectedType === 'orchestration' &&
+        systemModelName &&
+        model.value === systemModelName &&
+        normalizeProviderName(model.provider) === systemProviderName;
+
+      // Only show models matching the selected type (plus the system model
+      // when building the orchestration view).
+      if (model.type !== selectedType && !isSystemModel) {
         option.style.display = 'none';
         option.disabled = true;
       }
@@ -396,6 +411,14 @@ async function applyPendingAgentCreationFlowToModal() {
     agentNameInput.value = options.seedName;
   }
 
+  // For orchestration agents, ensure the system model preference is cached
+  // before populateModelSelect runs — otherwise the dropdown would drop the
+  // configured model if its category doesn't match 'orchestration'.
+  let systemPref = null;
+  if (options.seedType === 'orchestration') {
+    systemPref = await loadSystemModelPreference();
+  }
+
   if (options.seedType && agentTypeInput) {
     agentTypeInput.value = options.seedType;
     agentTypeInput.dispatchEvent(new Event('change'));
@@ -405,6 +428,20 @@ async function applyPendingAgentCreationFlowToModal() {
     selectModelOption(agentModelInput, options.seedProvider, options.seedModel);
     if (agentReasoningInput && supportsCodexReasoning(options.seedProvider, options.seedModel)) {
       agentReasoningInput.value = options.seedReasoningEffort || 'medium';
+    }
+  } else if (
+    options.seedType === 'orchestration' &&
+    agentModelInput &&
+    systemPref &&
+    systemPref.configured &&
+    systemPref.model
+  ) {
+    // No explicit seed model — the user's configured system model is the
+    // right default for orchestration, matching the backend auto-config
+    // override in validateAndSanitizeConfig.
+    selectModelOption(agentModelInput, systemPref.provider, systemPref.model);
+    if (agentReasoningInput && supportsCodexReasoning(systemPref.provider, systemPref.model)) {
+      agentReasoningInput.value = systemPref.reasoning_effort || 'medium';
     }
   }
 
@@ -1346,8 +1383,16 @@ async function loadAgentsForSidebar() {
   agentsLog.debug('Loading agents from /api/agents...');
   try {
     const data = await API.get('/api/agents');
-    agentsLog.debug('Received agents', { count: data.agents?.length || 0 });
-    displayAgents(data.agents, resolveSidebarCurrentAgent());
+    const all = Array.isArray(data.agents) ? data.agents : [];
+    // Hide workspace-scoped agents (workspace entry agents) from the
+    // global sidebar — they're bound to a specific workspace context.
+    const visible = all.filter((agent) => {
+      if (!agent) return false;
+      const scope = typeof agent === 'object' ? String(agent.scope || '').toLowerCase() : '';
+      return scope !== 'workspace';
+    });
+    agentsLog.debug('Received agents', { count: all.length, visible: visible.length });
+    displayAgents(visible, resolveSidebarCurrentAgent());
 
   } catch (error) {
     agentsLog.error('Error loading agents', error);

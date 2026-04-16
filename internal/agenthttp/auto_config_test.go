@@ -391,6 +391,93 @@ func TestAutoConfigHandler_validateAndSanitizeConfig(t *testing.T) {
 	}
 }
 
+// TestAutoConfigHandler_validateAndSanitizeConfig_OrchestrationPrefersSystemModel
+// verifies that orchestration agents always use the configured system model,
+// overriding whatever the LLM returned. The LLM often echoes the example
+// model (gpt-4.1-nano) from its prompt, which isn't suitable for
+// coordination work.
+func TestAutoConfigHandler_validateAndSanitizeConfig_OrchestrationPrefersSystemModel(t *testing.T) {
+	configManager := createTestConfigManager(t, "ollama", "gemma4:e4b")
+	handler := &AutoConfigHandler{configManager: configManager}
+
+	tests := []struct {
+		name             string
+		input            AutoConfigResponse
+		expectedModel    string
+		expectedProvider string
+	}{
+		{
+			name: "orchestration with LLM-returned gpt-4.1-nano is overridden",
+			input: AutoConfigResponse{
+				AgentType:    "orchestration",
+				Model:        "gpt-4.1-nano",
+				Provider:     "openai",
+				Temperature:  0.5,
+				SystemPrompt: "You coordinate.",
+			},
+			expectedModel:    "gemma4:e4b",
+			expectedProvider: "ollama",
+		},
+		{
+			name: "orchestration with empty model picks up system model",
+			input: AutoConfigResponse{
+				AgentType:    "orchestration",
+				Model:        "",
+				Provider:     "",
+				Temperature:  0.5,
+				SystemPrompt: "You coordinate.",
+			},
+			expectedModel:    "gemma4:e4b",
+			expectedProvider: "ollama",
+		},
+		{
+			name: "non-orchestration is left alone",
+			input: AutoConfigResponse{
+				AgentType:    "tool-calling",
+				Model:        "gpt-4.1-nano",
+				Provider:     "openai",
+				Temperature:  0.5,
+				SystemPrompt: "You are helpful.",
+			},
+			expectedModel:    "gpt-4.1-nano",
+			expectedProvider: "openai",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := handler.validateAndSanitizeConfig(tt.input)
+			if result.Model != tt.expectedModel {
+				t.Errorf("Model: expected %q, got %q", tt.expectedModel, result.Model)
+			}
+			if result.Provider != tt.expectedProvider {
+				t.Errorf("Provider: expected %q, got %q", tt.expectedProvider, result.Provider)
+			}
+		})
+	}
+}
+
+// TestAutoConfigHandler_validateAndSanitizeConfig_OrchestrationWithoutSystemModel
+// verifies that when no system model is configured, orchestration agents
+// fall back to a capable default (gpt-5) rather than gpt-4.1-nano.
+func TestAutoConfigHandler_validateAndSanitizeConfig_OrchestrationWithoutSystemModel(t *testing.T) {
+	configManager := createTestConfigManager(t, "", "")
+	handler := &AutoConfigHandler{configManager: configManager}
+
+	input := AutoConfigResponse{
+		AgentType:    "orchestration",
+		Model:        "",
+		Provider:     "",
+		Temperature:  0.5,
+		SystemPrompt: "You coordinate.",
+	}
+
+	result := handler.validateAndSanitizeConfig(input)
+	if result.Model != "gpt-5" {
+		t.Errorf("expected orchestration fallback model 'gpt-5', got %q", result.Model)
+	}
+}
+
 // TestAutoConfigHandler_getDefaultConfig tests default config generation
 func TestAutoConfigHandler_getDefaultConfig(t *testing.T) {
 	handler := &AutoConfigHandler{}

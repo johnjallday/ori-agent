@@ -625,6 +625,14 @@ func (h *Handler) deleteWorkspace(w http.ResponseWriter, r *http.Request, id str
 
 	deleteSessions := r.URL.Query().Get("delete_sessions") == "true"
 
+	// Capture the entry agent name before deletion so it can be cleaned up.
+	entryAgentName := ""
+	if h.workspaceStore != nil && ws.Kind != session.WorkspaceKindGroup {
+		if folderWS, ferr := h.workspaceStore.Get(id); ferr == nil && folderWS != nil {
+			entryAgentName = strings.TrimSpace(folderWS.EntryAgentName())
+		}
+	}
+
 	// Handle session cleanup
 	if deleteSessions {
 		if err := h.store.DeleteSessionsByWorkspace(ctx, id); err != nil {
@@ -652,6 +660,25 @@ func (h *Handler) deleteWorkspace(w http.ResponseWriter, r *http.Request, id str
 		if err := h.workspaceStore.Delete(id); err != nil {
 			logger.Warn("Failed to delete workspace folder", logger.Fields{"id": id, "error": err})
 			// Non-fatal: SQLite deletion succeeded
+		}
+	}
+
+	// Delete the workspace's entry agent so it no longer lingers in the agent
+	// store after its parent workspace is gone. Non-fatal on failure.
+	if entryAgentName != "" && h.agentStore != nil {
+		if _, exists := h.agentStore.GetAgent(entryAgentName); exists {
+			if err := h.agentStore.DeleteAgent(entryAgentName); err != nil {
+				logger.Warn("Failed to delete workspace entry agent", logger.Fields{
+					"workspace_id": id,
+					"agent":        entryAgentName,
+					"error":        err,
+				})
+			} else {
+				logger.Info("Deleted workspace entry agent", logger.Fields{
+					"workspace_id": id,
+					"agent":        entryAgentName,
+				})
+			}
 		}
 	}
 

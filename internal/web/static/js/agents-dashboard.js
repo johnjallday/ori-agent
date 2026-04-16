@@ -188,6 +188,11 @@ function applyFiltersAndRender() {
   const searchTerm = rawSearchTerm.toLowerCase();
 
   dashboardFilteredAgents = dashboardAgents.filter((agent) => {
+    // Hide workspace-scoped entry agents from the top-level agents list —
+    // they're managed from their workspace detail page.
+    if (String(agent?.scope || '').toLowerCase() === 'workspace') {
+      return false;
+    }
     const name = String(agent?.name || '').toLowerCase();
     const description = String(agent?.metadata?.description || '').toLowerCase();
     return name.includes(searchTerm) || description.includes(searchTerm);

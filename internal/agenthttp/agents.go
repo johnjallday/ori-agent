@@ -13,6 +13,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/store"
 	"github.com/johnjallday/ori-agent/internal/types"
+	"github.com/johnjallday/ori-agent/internal/workspace"
 )
 
 // validAgentNameRegex defines the allowed characters for agent names
@@ -72,6 +73,7 @@ type Handler struct {
 	State            store.Store
 	ActivityLogger   *ActivityLogger
 	cliAgentRegistry *cliagent.CLIAgentRegistry
+	workspaceStore   workspace.Store
 }
 
 func New(state store.Store) *Handler {
@@ -85,6 +87,13 @@ func New(state store.Store) *Handler {
 // CLI agents appear in the main agent list.
 func (h *Handler) SetCLIAgentRegistry(r *cliagent.CLIAgentRegistry) {
 	h.cliAgentRegistry = r
+}
+
+// SetWorkspaceStore wires the workspace store so workspace-scoped entry
+// agents can be annotated in the /api/agents list response. Clients such as
+// the sidebar use the annotation to hide agents that belong to a workspace.
+func (h *Handler) SetWorkspaceStore(s workspace.Store) {
+	h.workspaceStore = s
 }
 
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -128,30 +137,44 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		// Otherwise, return list of all agents
 		names := h.State.ListAgents()
 
+		// Map of lowercase agent name → workspace ID for agents that are
+		// designated entry agents for a workspace. Sidebar / selector UIs use
+		// the resulting scope annotation to hide workspace-scoped agents.
+		entryAgentWorkspaces := collectWorkspaceEntryAgentNames(h.workspaceStore)
+
 		// Build agent details list with name and type
 		type AgentInfo struct {
-			Name      string                `json:"name"`
-			Type      string                `json:"type"`
-			Source    string                `json:"source"`
-			Evolution *types.AgentEvolution `json:"evolution,omitempty"`
+			Name        string                `json:"name"`
+			Type        string                `json:"type"`
+			Source      string                `json:"source"`
+			Scope       string                `json:"scope,omitempty"`
+			WorkspaceID string                `json:"workspace_id,omitempty"`
+			Evolution   *types.AgentEvolution `json:"evolution,omitempty"`
+		}
+		annotate := func(info AgentInfo) AgentInfo {
+			if wsID, ok := entryAgentWorkspaces[strings.ToLower(strings.TrimSpace(info.Name))]; ok {
+				info.Scope = "workspace"
+				info.WorkspaceID = wsID
+			}
+			return info
 		}
 		agentInfos := make([]AgentInfo, 0, len(names))
 		for _, name := range names {
 			agent, ok := h.State.GetAgent(name)
 			if ok && agent != nil {
-				agentInfos = append(agentInfos, AgentInfo{
+				agentInfos = append(agentInfos, annotate(AgentInfo{
 					Name:      name,
 					Type:      agent.Type,
 					Source:    "user",
 					Evolution: cloneAgentEvolution(agent),
-				})
+				}))
 			} else {
 				// Fallback for agents that couldn't be loaded
-				agentInfos = append(agentInfos, AgentInfo{
+				agentInfos = append(agentInfos, annotate(AgentInfo{
 					Name:   name,
 					Type:   "tool-calling", // default
 					Source: "user",
-				})
+				}))
 			}
 		}
 

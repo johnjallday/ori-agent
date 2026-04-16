@@ -252,6 +252,18 @@ func (h *AutoConfigHandler) validateAndSanitizeConfig(config AutoConfigResponse)
 		config.Temperature = 1
 	}
 
+	// For orchestration agents, always prefer the configured system model over
+	// whatever the LLM suggested. The LLM tends to echo the example model
+	// (gpt-4.1-nano) from its prompt, which isn't suitable for coordination —
+	// and the system model represents the user's explicit choice for
+	// orchestration-grade work.
+	if config.AgentType == "orchestration" && systemModel != "" {
+		config.Model = systemModel
+		if systemProvider != "" {
+			config.Provider = systemProvider
+		}
+	}
+
 	// Ensure model is set
 	if config.Model == "" {
 		switch config.AgentType {
@@ -260,15 +272,8 @@ func (h *AutoConfigHandler) validateAndSanitizeConfig(config AutoConfigResponse)
 		case "general":
 			config.Model = "gpt-5"
 		case "orchestration":
-			if systemModel != "" {
-				config.Model = systemModel
-				if config.Provider == "" && systemProvider != "" {
-					config.Provider = systemProvider
-				}
-			}
-			if config.Model == "" {
-				config.Model = "gpt-5"
-			}
+			// systemModel was empty; fall back to a capable default.
+			config.Model = "gpt-5"
 		case "research":
 			config.Model = "gpt-5"
 		}
