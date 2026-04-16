@@ -2726,8 +2726,9 @@ export class WorkspaceDetailPage {
         window.showAddAgentModal({
           workspaceId: this.workspaceId,
           seedName: agentName,
-          seedType: 'general',
-          seedSystemPrompt: systemPrompt
+          seedType: 'orchestration',
+          seedSystemPrompt: systemPrompt,
+          suggestedSkills: ['workspace-planning']
         });
       }
     }, 300);

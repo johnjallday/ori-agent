@@ -515,7 +515,7 @@
         role: 'lead',
         selected: true,
         locked: true,
-        type: 'general',
+        type: 'orchestration',
         autoDescription: buildPrimaryAgentDescription(input)
       });
     }
