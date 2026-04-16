@@ -2,13 +2,17 @@ package chathttp
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/johnjallday/ori-agent/internal/agent"
+	"github.com/johnjallday/ori-agent/internal/database"
+	"github.com/johnjallday/ori-agent/internal/session"
 	"github.com/johnjallday/ori-agent/internal/workspace"
 )
 
@@ -88,7 +92,7 @@ func TestResolveEffectiveAgent_UsesRuntimeResolverWhenBaseAgentIsMissing(t *test
 	}
 }
 
-func TestResolveEffectiveAgent_PromotesWorkspaceEntryAgentToWorkspaceManager(t *testing.T) {
+func TestResolveEffectiveAgent_WorkspaceEntryAgentKeepsOriginalType(t *testing.T) {
 	st := newPreflightStore("Espana Manager", &agent.Agent{Type: "general"})
 	h := NewHandler(st, nil)
 	h.workspaceStore = &preflightWorkspaceStore{
@@ -111,13 +115,32 @@ func TestResolveEffectiveAgent_PromotesWorkspaceEntryAgentToWorkspaceManager(t *
 	if resolved == nil || resolved.Agent == nil {
 		t.Fatal("expected resolved agent")
 	}
-	if resolved.Type != "workspace-manager" {
-		t.Fatalf("expected workspace entry agent to be promoted to workspace-manager, got %q", resolved.Type)
+	if resolved.Type != "general" {
+		t.Fatalf("expected workspace entry agent to keep original type 'general', got %q", resolved.Type)
 	}
 }
 
 func TestChatHandler_WorkspaceEntryGeneralAgent_UsesPlanningForm(t *testing.T) {
+	ctx := context.Background()
+	db, err := database.Open(ctx, &database.Config{InMemory: true})
+	if err != nil {
+		t.Fatalf("failed to open test database: %v", err)
+	}
+	defer func() { _ = db.Close() }()
+
+	sessionStore := session.NewHybridStoreWithDB(db, 10)
+	now := time.Now()
+	if err := sessionStore.CreateWorkspace(ctx, &session.Workspace{
+		ID:        "workspace-spain",
+		Name:      "Spain",
+		CreatedAt: now,
+		UpdatedAt: now,
+	}); err != nil {
+		t.Fatalf("failed to create session workspace: %v", err)
+	}
+
 	h := NewHandler(newPreflightStore("Spain Manager", &agent.Agent{Type: "general"}), nil)
+	h.SetSessionStore(sessionStore)
 	h.workspaceStore = &preflightWorkspaceStore{
 		workspaces: map[string]*workspace.Workspace{
 			"workspace-spain": {

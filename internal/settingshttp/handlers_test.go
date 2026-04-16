@@ -935,8 +935,8 @@ func TestGetModelCategories_Codex(t *testing.T) {
 		expected []string
 	}{
 		{name: "codex nano has tool-calling and general", model: "gpt-5-codex-nano", expected: []string{"tool-calling", "general"}},
-		{name: "codex mini has tool-calling, general, workspace-manager, and orchestration", model: "gpt-5.1-codex-mini", expected: []string{"tool-calling", "general", "workspace-manager", "orchestration"}},
-		{name: "codex standard has research, workspace-manager, and orchestration", model: "gpt-5.3-codex", expected: []string{"research", "workspace-manager", "orchestration"}},
+		{name: "codex mini has tool-calling, general, and orchestration", model: "gpt-5.1-codex-mini", expected: []string{"tool-calling", "general", "orchestration"}},
+		{name: "codex standard has research and orchestration", model: "gpt-5.3-codex", expected: []string{"research", "orchestration"}},
 	}
 
 	for _, tt := range tests {

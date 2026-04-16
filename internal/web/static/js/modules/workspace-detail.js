@@ -2060,7 +2060,7 @@ export class WorkspaceDetailPage {
 
   renderWorkspaceAgentRoleBadge(agentName) {
     if (!this.isWorkspaceEntryAgent(agentName)) return '';
-    return '<span class="workspace-detail-agent-role-badge workspace-manager">Workspace Manager</span>';
+    return '<span class="workspace-detail-agent-role-badge">Entry Agent</span>';
   }
 
   renderAgentGroups() {
@@ -2726,7 +2726,7 @@ export class WorkspaceDetailPage {
         window.showAddAgentModal({
           workspaceId: this.workspaceId,
           seedName: agentName,
-          seedType: 'workspace-manager',
+          seedType: 'general',
           seedSystemPrompt: systemPrompt
         });
       }

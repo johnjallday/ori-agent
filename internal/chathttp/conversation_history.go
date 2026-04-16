@@ -13,10 +13,9 @@ import (
 func (h *Handler) buildChatSystemPrompt(
 	ag *resolvedChatAgent,
 	agentName string,
-	defaultPrompt string,
 	tools []llm.Tool,
 ) string {
-	systemPrompt := h.buildSystemPromptWithSkills(ag, agentName, defaultPrompt)
+	systemPrompt := h.buildSystemPromptWithSkills(ag, agentName, defaultSystemAgentPrompt)
 	if len(tools) == 0 {
 		return systemPrompt
 	}

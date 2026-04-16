@@ -153,8 +153,8 @@ IMPORTANT: All string values must be on a single line. Do not use literal newlin
 Required JSON fields:
 - agent_name: A short, descriptive name for the agent (e.g., "Weather Assistant", "Code Reviewer")
 - description: A short, polished 1-2 sentence description for the agent details field
-- agent_type: One of "tool-calling" (for tool/plugin tasks), "general" (balanced), "workspace-manager" (front-door lead for a workspace), "orchestration" (multi-agent coordination), or "research" (complex reasoning)
-- model: Choose a model that matches the requested role. For workspace-manager or orchestration agents, prefer the currently configured system model when it fits. Valid families include OpenAI, Codex, Claude Code, Claude, Gemini, and Ollama.
+- agent_type: One of "tool-calling" (for tool/plugin tasks), "general" (balanced), "orchestration" (multi-agent coordination), or "research" (complex reasoning)
+- model: Choose a model that matches the requested role. For orchestration agents, prefer the currently configured system model when it fits. Valid families include OpenAI, Codex, Claude Code, Claude, Gemini, and Ollama.
 - provider: One of "openai", "codex", "claude_code", "claude", "gemini", or "ollama" based on model
 - temperature: 0.0-0.3 for precise tasks, 0.4-0.7 for balanced, 0.7-1.0 for creative
 - system_prompt: A concise system prompt for this agent (single line, use \n for breaks)
@@ -164,7 +164,7 @@ Required JSON fields:
 Example:
 {"agent_name":"Weather Assistant","description":"Provides current conditions, forecasts, and weather-related guidance with clear, reliable answers.","agent_type":"tool-calling","model":"gpt-4.1-nano","provider":"openai","temperature":0.2,"system_prompt":"You are a weather assistant that provides accurate weather information.","recommended_plugins":["weather"],"reasoning":"Tool-calling for API-based weather lookups."}
 
-If the request describes the lead or front door for a workspace, return "workspace-manager" as the agent_type.`
+If the request describes multi-agent coordination, return "orchestration" as the agent_type.`
 
 	userMessage := fmt.Sprintf("Configure an agent for the following purpose:\n\n%s", description)
 
@@ -228,7 +228,7 @@ If the request describes the lead or front door for a workspace, return "workspa
 // validateAndSanitizeConfig ensures the config values are valid
 func (h *AutoConfigHandler) validateAndSanitizeConfig(config AutoConfigResponse) AutoConfigResponse {
 	// Validate agent type
-	validTypes := map[string]bool{"tool-calling": true, "general": true, "workspace-manager": true, "orchestration": true, "research": true}
+	validTypes := map[string]bool{"tool-calling": true, "general": true, "orchestration": true, "research": true}
 	if !validTypes[config.AgentType] {
 		config.AgentType = "tool-calling"
 	}
@@ -259,17 +259,6 @@ func (h *AutoConfigHandler) validateAndSanitizeConfig(config AutoConfigResponse)
 			config.Model = "gpt-4.1-nano"
 		case "general":
 			config.Model = "gpt-5"
-		case "workspace-manager":
-			// Default to the system model so the workspace manager matches the user's preferred setup
-			if systemModel != "" {
-				config.Model = systemModel
-				if config.Provider == "" && systemProvider != "" {
-					config.Provider = systemProvider
-				}
-			}
-			if config.Model == "" {
-				config.Model = "gpt-5"
-			}
 		case "orchestration":
 			if systemModel != "" {
 				config.Model = systemModel
@@ -287,7 +276,7 @@ func (h *AutoConfigHandler) validateAndSanitizeConfig(config AutoConfigResponse)
 
 	if config.Provider == "" {
 		switch config.AgentType {
-		case "workspace-manager", "orchestration":
+		case "orchestration":
 			if systemProvider != "" {
 				config.Provider = systemProvider
 			}

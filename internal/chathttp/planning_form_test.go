@@ -19,7 +19,34 @@ import (
 )
 
 func TestChatHandler_WorkspaceManagerTravelRequest_ReturnsPlanningForm(t *testing.T) {
-	h := NewHandler(newPreflightStore("Spain Manager", &agent.Agent{Type: "workspace-manager"}), nil)
+	ctx := context.Background()
+	db, err := database.Open(ctx, &database.Config{InMemory: true})
+	if err != nil {
+		t.Fatalf("failed to open test database: %v", err)
+	}
+	defer func() { _ = db.Close() }()
+
+	sessionStore := session.NewHybridStoreWithDB(db, 10)
+	now := time.Now()
+	if err := sessionStore.CreateWorkspace(ctx, &session.Workspace{
+		ID:        "workspace-spain",
+		Name:      "Spain",
+		CreatedAt: now,
+		UpdatedAt: now,
+	}); err != nil {
+		t.Fatalf("failed to create session workspace: %v", err)
+	}
+
+	h := NewHandler(newPreflightStore("Spain Manager", &agent.Agent{Type: "general"}), nil)
+	h.SetSessionStore(sessionStore)
+	h.workspaceStore = &preflightWorkspaceStore{
+		workspaces: map[string]*workspace.Workspace{
+			"workspace-spain": {
+				ID:   "workspace-spain",
+				Name: "Spain",
+			},
+		},
+	}
 
 	body, _ := json.Marshal(map[string]any{
 		"question":   "let's plan a trip to Spain",
@@ -88,7 +115,7 @@ func TestChatHandler_WorkspaceManagerTravelRequest_ReturnsPlanningForm(t *testin
 
 func TestMaybeBuildWorkspacePlanningFormResponse_SkipsPlanningSubmissionPrompt(t *testing.T) {
 	resp := maybeBuildWorkspacePlanningFormResponse(
-		&resolvedChatAgent{Agent: &agent.Agent{Type: "workspace-manager"}},
+		&resolvedChatAgent{Agent: &agent.Agent{}, WorkspaceTools: &WorkspaceToolProvider{}},
 		"Structured planning form submission:\n{\"form_id\":\"travel_intake\"}",
 		normalizedChatRouteContext{WorkspaceID: "workspace-spain"},
 		nil,
@@ -103,13 +130,13 @@ func TestMaybeBuildWorkspacePlanningFormResponse_SkipsAfterPriorPlanningSubmissi
 	resp := maybeBuildWorkspacePlanningFormResponse(
 		&resolvedChatAgent{
 			Agent: &agent.Agent{
-				Type: "workspace-manager",
 				Messages: []openai.ChatCompletionMessageParamUnion{
 					openai.UserMessage("let's plan a trip to Spain"),
 					openai.AssistantMessage("Complete the planning step below."),
 					openai.UserMessage("Structured planning form submission:\n{\"form_id\":\"travel_intake\"}"),
 				},
 			},
+			WorkspaceTools: &WorkspaceToolProvider{},
 		},
 		"2 people, flights are booked, include Lisbon too",
 		normalizedChatRouteContext{WorkspaceID: "workspace-spain"},
@@ -125,7 +152,6 @@ func TestMaybeBuildWorkspacePlanningFormResponse_AllowsFreshPlanningRequestAfter
 	resp := maybeBuildWorkspacePlanningFormResponse(
 		&resolvedChatAgent{
 			Agent: &agent.Agent{
-				Type: "workspace-manager",
 				Messages: []openai.ChatCompletionMessageParamUnion{
 					openai.UserMessage("let's plan a trip to Spain"),
 					openai.AssistantMessage("Complete the planning step below."),
@@ -133,6 +159,7 @@ func TestMaybeBuildWorkspacePlanningFormResponse_AllowsFreshPlanningRequestAfter
 					openai.AssistantMessage("Thanks. I have enough to continue."),
 				},
 			},
+			WorkspaceTools: &WorkspaceToolProvider{},
 		},
 		"let's plan a trip to Italy instead",
 		normalizedChatRouteContext{WorkspaceID: "workspace-italy"},
@@ -161,7 +188,7 @@ func TestMaybeBuildWorkspacePlanningFormResponse_UsesWorkspaceBootstrapDates(t *
 	}
 
 	resp := maybeBuildWorkspacePlanningFormResponse(
-		&resolvedChatAgent{Agent: &agent.Agent{Type: "workspace-manager"}},
+		&resolvedChatAgent{Agent: &agent.Agent{}, WorkspaceTools: &WorkspaceToolProvider{}},
 		"plan a trip in Lisbon",
 		normalizedChatRouteContext{WorkspaceID: "workspace-portugal"},
 		wsStore,
@@ -232,7 +259,7 @@ func TestMaybeBuildWorkspacePlanningFormResponse_UsesWorkspaceBriefNoteDates(t *
 	}
 
 	resp := maybeBuildWorkspacePlanningFormResponse(
-		&resolvedChatAgent{Agent: &agent.Agent{Type: "workspace-manager"}},
+		&resolvedChatAgent{Agent: &agent.Agent{}, WorkspaceTools: &WorkspaceToolProvider{}},
 		"plan a trip in Lisbon",
 		normalizedChatRouteContext{WorkspaceID: "workspace-portugal"},
 		wsStore,
@@ -301,7 +328,7 @@ Collect trip details before specialist handoff:
 	}
 
 	resp := maybeBuildWorkspacePlanningFormResponse(
-		&resolvedChatAgent{Agent: &agent.Agent{Type: "workspace-manager"}},
+		&resolvedChatAgent{Agent: &agent.Agent{}, WorkspaceTools: &WorkspaceToolProvider{}},
 		"plan my trip",
 		normalizedChatRouteContext{WorkspaceID: "workspace-spain"},
 		wsStore,

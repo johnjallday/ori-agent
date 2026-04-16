@@ -6601,7 +6601,7 @@
       return {
         heading: label + ' Inline API Unavailable',
         title: 'Inline API Unavailable',
-        text: 'This browser view could not send the inline workspace-manager request.',
+        text: 'This browser view could not send the inline workspace request.',
         detail: detail || 'The shared API client was not available in this page context.',
         conversationSummary: 'Open this only if you want the original prompt and client-side availability details.',
         state: 'error'
@@ -6612,7 +6612,7 @@
       return {
         heading: 'Connection Failed',
         title: 'Connection Failed',
-        text: 'Your browser could not reach the server while sending the workspace-manager request.',
+        text: 'Your browser could not reach the server while sending the workspace request.',
         detail: detail || (browserOffline ? 'Browser appears to be offline.' : 'Network request failed before the server replied.'),
         conversationSummary: 'Open this only if you want the original prompt and connection error details.',
         state: 'error'
@@ -6623,7 +6623,7 @@
       return {
         heading: label + ' Server Error',
         title: 'Server Error',
-        text: 'The server returned an error while running the workspace manager inline.',
+        text: 'The server returned an error while running the workspace agent inline.',
         detail: detail || 'The inline /api/chat request failed on the server.',
         conversationSummary: 'Open this only if you want the original prompt and server error details.',
         state: 'error'
@@ -6634,7 +6634,7 @@
       return {
         heading: label + ' Request Rejected',
         title: 'Request Rejected',
-        text: 'The server rejected the inline workspace-manager request.',
+        text: 'The server rejected the inline workspace request.',
         detail: detail || 'The inline /api/chat request returned a client error.',
         conversationSummary: 'Open this only if you want the original prompt and request error details.',
         state: 'error'
@@ -6656,7 +6656,7 @@
       return {
         heading: label + ' Server Error',
         title: 'Server Error',
-        text: 'The server returned an error before the workspace-manager flow completed.',
+        text: 'The server returned an error before the workspace flow completed.',
         detail: detail || 'A server-side error interrupted the request.',
         conversationSummary: 'Open this only if you want the original prompt and server error details.',
         state: 'error'
@@ -6667,7 +6667,7 @@
       return {
         heading: label + ' Request Failed',
         title: 'Request Failed',
-        text: 'The request was rejected before the workspace-manager flow completed.',
+        text: 'The request was rejected before the workspace flow completed.',
         detail: detail || 'A client-side request error interrupted the flow.',
         conversationSummary: 'Open this only if you want the original prompt and request error details.',
         state: 'error'
@@ -6677,7 +6677,7 @@
     return {
       heading: label + ' Request Failed',
       title: 'Request Failed',
-      text: 'The workspace-manager flow did not complete.',
+      text: 'The workspace flow did not complete.',
       detail: detail || 'An unexpected error interrupted the inline handoff.',
       conversationSummary: 'Open this only if you want the original prompt and error details.',
       state: 'error'

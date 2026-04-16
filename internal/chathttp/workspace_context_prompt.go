@@ -131,7 +131,12 @@ func buildWorkspaceSnapshotPromptForToolCapability(
 	}
 
 	lines := []string{
-		"# Workspace Snapshot",
+		"# Workspace Context",
+		"You are operating within a workspace. Stay focused on this workspace scope: its tasks, notes, files, and agents.",
+		"When specialist help might be useful, inspect available workspace agents first and ask the user before delegating.",
+		"Do not behave like a generic global assistant — keep responses relevant to this workspace.",
+		"",
+		"## Workspace Snapshot",
 		"Use this compact snapshot as the current workspace fact set.",
 		"",
 		"Workspace:",

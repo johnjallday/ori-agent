@@ -515,7 +515,7 @@
         role: 'lead',
         selected: true,
         locked: true,
-        type: 'workspace-manager',
+        type: 'general',
         autoDescription: buildPrimaryAgentDescription(input)
       });
     }
@@ -1018,25 +1018,13 @@
 
     const requestConfig = await maybeAutoConfigureAgent(agentPlan.autoDescription || agentPlan.summary || '', agentPlan.type);
     const plannedType = String(agentPlan.type || '').trim();
-    const type = plannedType === 'workspace-manager'
-      ? 'workspace-manager'
-      : (requestConfig?.agent_type || plannedType || 'general');
+    const type = requestConfig?.agent_type || plannedType || 'general';
     const payload = {
       name: agentPlan.name,
       type,
       description: agentPlan.summary || agentPlan.autoDescription || '',
       allow_web_search: true
     };
-
-    if (type === 'workspace-manager') {
-      const systemModel = await getSystemModelPreference();
-      if (systemModel?.configured && systemModel.model) {
-        payload.model = systemModel.model;
-        if (systemModel.provider) {
-          payload.llm_provider = systemModel.provider;
-        }
-      }
-    }
 
     if (!payload.model && requestConfig?.model) {
       payload.model = requestConfig.model;

@@ -72,15 +72,6 @@ func (s *resolverAgentStoreStub) Save() error { return nil }
 
 var _ store.Store = (*resolverAgentStoreStub)(nil)
 
-func containsRuntimeTag(tags []string, target string) bool {
-	for _, tag := range tags {
-		if strings.EqualFold(strings.TrimSpace(tag), strings.TrimSpace(target)) {
-			return true
-		}
-	}
-	return false
-}
-
 func newTestWorkspaceStore(t *testing.T, workspaces ...*Workspace) Store {
 	t.Helper()
 	s := NewInMemoryStore()
@@ -657,7 +648,7 @@ func TestResolveEffectiveSkills_ManualBindingOverridesWorkspaceSettingsManagedSk
 	}
 }
 
-func TestResolveAgentForWorkspace_AutoCreatesMissingEntryAgent(t *testing.T) {
+func TestResolveAgentForWorkspace_MissingEntryAgentReturnsError(t *testing.T) {
 	ws := &Workspace{
 		ID:   "ws-entry-missing",
 		Name: "Spain",
@@ -679,35 +670,12 @@ func TestResolveAgentForWorkspace_AutoCreatesMissingEntryAgent(t *testing.T) {
 
 	resolver := NewAgentRuntimeResolver(agentStore, workspaceStore, registry, templates)
 
-	resolved, err := resolver.ResolveAgentForWorkspace("Workspace Manager", ws.ID, "")
-	if err != nil {
-		t.Fatalf("ResolveAgentForWorkspace() error = %v", err)
+	_, err := resolver.ResolveAgentForWorkspace("Workspace Manager", ws.ID, "")
+	if err == nil {
+		t.Fatal("expected error when entry agent does not exist in agent store")
 	}
-	if resolved == nil || resolved.Agent == nil {
-		t.Fatal("expected resolved agent")
-	}
-
-	cfg := agentStore.createConfigs["Workspace Manager"]
-	if cfg == nil {
-		t.Fatal("expected missing entry agent to be auto-created")
-	}
-	if cfg.Type != "workspace-manager" {
-		t.Fatalf("expected workspace-manager type, got %q", cfg.Type)
-	}
-	if resolved.Agent.Type != "workspace-manager" {
-		t.Fatalf("expected resolved agent type workspace-manager, got %q", resolved.Agent.Type)
-	}
-	if resolved.Agent.Role != "orchestrator" {
-		t.Fatalf("expected orchestrator role, got %q", resolved.Agent.Role)
-	}
-	if resolved.Agent.Metadata == nil {
-		t.Fatal("expected metadata for auto-created workspace manager")
-	}
-	if !containsRuntimeTag(resolved.Agent.Metadata.Tags, "workspace-manager") {
-		t.Fatalf("expected workspace-manager tag, got %#v", resolved.Agent.Metadata.Tags)
-	}
-	if got := resolved.Agent.Settings.SystemPrompt; !strings.Contains(strings.ToLower(got), "workspace manager") {
-		t.Fatalf("expected workspace manager prompt, got %q", got)
+	if !strings.Contains(err.Error(), "not found") {
+		t.Fatalf("expected 'not found' error, got %q", err.Error())
 	}
 }
 

@@ -140,7 +140,7 @@ func (s *fileStore) CreateAgent(name string, config *CreateAgentConfig) error {
 
 func defaultRoleForAgentType(agentType string) types.AgentRole {
 	switch strings.ToLower(strings.TrimSpace(agentType)) {
-	case "workspace-manager", "orchestration":
+	case "orchestration":
 		return types.RoleOrchestrator
 	default:
 		return types.RoleGeneral

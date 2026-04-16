@@ -391,51 +391,6 @@ func TestAutoConfigHandler_validateAndSanitizeConfig(t *testing.T) {
 	}
 }
 
-func TestAutoConfigHandler_validateAndSanitizeConfig_WorkspaceManagerUsesSystemModel(t *testing.T) {
-	handler := &AutoConfigHandler{
-		configManager: createTestConfigManager(t, "ollama", "devstral-small-2:latest"),
-	}
-
-	result := handler.validateAndSanitizeConfig(AutoConfigResponse{
-		AgentType:    "workspace-manager",
-		Model:        "",
-		Provider:     "",
-		Temperature:  0.5,
-		SystemPrompt: "Lead the workspace.",
-	})
-
-	if result.AgentType != "workspace-manager" {
-		t.Fatalf("expected workspace-manager type, got %q", result.AgentType)
-	}
-	if result.Model != "devstral-small-2:latest" {
-		t.Fatalf("expected system model devstral-small-2:latest, got %q", result.Model)
-	}
-	if result.Provider != "ollama" {
-		t.Fatalf("expected system provider ollama, got %q", result.Provider)
-	}
-}
-
-func TestAutoConfigHandler_validateAndSanitizeConfig_WorkspaceManagerInvalidProviderFallsBackToSystemProvider(t *testing.T) {
-	handler := &AutoConfigHandler{
-		configManager: createTestConfigManager(t, "claude_code", "sonnet"),
-	}
-
-	result := handler.validateAndSanitizeConfig(AutoConfigResponse{
-		AgentType:    "workspace-manager",
-		Model:        "sonnet",
-		Provider:     "invalid-provider",
-		Temperature:  0.5,
-		SystemPrompt: "Lead the workspace.",
-	})
-
-	if result.Provider != "claude_code" {
-		t.Fatalf("expected system provider claude_code, got %q", result.Provider)
-	}
-	if result.Model != "sonnet" {
-		t.Fatalf("expected model sonnet to be preserved, got %q", result.Model)
-	}
-}
-
 // TestAutoConfigHandler_getDefaultConfig tests default config generation
 func TestAutoConfigHandler_getDefaultConfig(t *testing.T) {
 	handler := &AutoConfigHandler{}

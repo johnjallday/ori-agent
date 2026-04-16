@@ -44,7 +44,6 @@ func (h *Handler) resolveEffectiveAgent(agentName string, routeCtx normalizedCha
 		}
 		baseAgent = cloneAgentForChat(baseAgent)
 		result := &resolvedChatAgent{Agent: baseAgent}
-		h.promoteWorkspaceEntryAgentRuntime(result, agentName, routeCtx.WorkspaceID)
 		h.attachWorkspaceTools(result, routeCtx.WorkspaceID)
 		return result, nil
 	}
@@ -58,7 +57,6 @@ func (h *Handler) resolveEffectiveAgent(agentName string, routeCtx normalizedCha
 		if len(resolved.EffectiveSkills) > 0 {
 			result.EffectiveSkills = append([]workspace.ResolvedSkill{}, resolved.EffectiveSkills...)
 		}
-		h.promoteWorkspaceEntryAgentRuntime(result, agentName, routeCtx.WorkspaceID)
 		h.attachWorkspaceTools(result, routeCtx.WorkspaceID)
 		return result, nil
 	}
@@ -77,27 +75,8 @@ func (h *Handler) resolveEffectiveAgent(agentName string, routeCtx normalizedCha
 	baseAgent = cloneAgentForChat(baseAgent)
 
 	result := &resolvedChatAgent{Agent: baseAgent}
-	h.promoteWorkspaceEntryAgentRuntime(result, agentName, routeCtx.WorkspaceID)
 	h.attachWorkspaceTools(result, routeCtx.WorkspaceID)
 	return result, nil
-}
-
-func (h *Handler) promoteWorkspaceEntryAgentRuntime(ag *resolvedChatAgent, agentName, workspaceID string) {
-	if h == nil || h.workspaceStore == nil || ag == nil || ag.Agent == nil {
-		return
-	}
-	if strings.TrimSpace(workspaceID) == "" || strings.TrimSpace(agentName) == "" {
-		return
-	}
-	ws, err := h.workspaceStore.Get(strings.TrimSpace(workspaceID))
-	if err != nil || ws == nil {
-		return
-	}
-	entryAgentName := strings.TrimSpace(ws.EntryAgentName())
-	if entryAgentName == "" || !strings.EqualFold(entryAgentName, strings.TrimSpace(agentName)) {
-		return
-	}
-	ag.Type = "workspace-manager"
 }
 
 // attachWorkspaceTools adds workspace-scoped tools to a resolved agent when

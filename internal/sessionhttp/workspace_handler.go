@@ -254,13 +254,15 @@ func (h *Handler) createWorkspace(w http.ResponseWriter, r *http.Request) {
 	// Otherwise the workspace is created without an entry agent;
 	// the UI will prompt the user to create one with their choice of model/provider.
 	if req.EntryAgentName != "" {
-		entryAgentName, _, err := h.ensureWorkspaceEntryAgent(req.Name, req.EntryAgentName)
+		entryAgentName, err := h.validateWorkspaceEntryAgent(req.EntryAgentName)
 		if err != nil {
-			logger.Error("Failed to provision workspace entry agent", logger.Fields{"name": req.Name, "error": err})
+			logger.Error("Failed to validate workspace entry agent", logger.Fields{"name": req.Name, "error": err})
 			_ = orihttp.RespondBadRequest(w, err.Error())
 			return
 		}
-		setWorkspaceEntryAgent(ws, entryAgentName)
+		if entryAgentName != "" {
+			setWorkspaceEntryAgent(ws, entryAgentName)
+		}
 	}
 
 	if err := h.store.CreateWorkspace(r.Context(), ws); err != nil {
@@ -498,13 +500,6 @@ func (h *Handler) getWorkspace(w http.ResponseWriter, r *http.Request, id string
 		return
 	}
 
-	if _, _, err := h.ensureWorkspaceManagerForWorkspace(r.Context(), workspace); err != nil {
-		logger.Warn("Failed to auto-provision workspace manager on workspace load", logger.Fields{
-			"workspace_id": id,
-			"error":        err,
-		})
-	}
-
 	orihttp.WriteJSON(w, h.buildWorkspaceDetailResponse(workspace))
 }
 
@@ -644,9 +639,6 @@ func (h *Handler) deleteWorkspace(w http.ResponseWriter, r *http.Request, id str
 			return
 		}
 	}
-
-	// Clean up auto-created workspace manager agent
-	h.deleteWorkspaceManagerAgent(ws)
 
 	// Delete the workspace
 	if err := h.store.DeleteWorkspace(ctx, id); err != nil {
@@ -991,13 +983,15 @@ func (h *Handler) handleWorkspaceImport(w http.ResponseWriter, r *http.Request) 
 
 	// If an existing entry agent was specified, validate and set it.
 	if req.EntryAgentName != "" {
-		entryAgentName, _, err := h.ensureWorkspaceEntryAgent(workspaceName, req.EntryAgentName)
+		entryAgentName, err := h.validateWorkspaceEntryAgent(req.EntryAgentName)
 		if err != nil {
-			logger.Error("Failed to provision imported workspace entry agent", logger.Fields{"name": workspaceName, "error": err})
+			logger.Error("Failed to validate imported workspace entry agent", logger.Fields{"name": workspaceName, "error": err})
 			_ = orihttp.RespondBadRequest(w, err.Error())
 			return
 		}
-		setWorkspaceEntryAgent(workspace, entryAgentName)
+		if entryAgentName != "" {
+			setWorkspaceEntryAgent(workspace, entryAgentName)
+		}
 	}
 
 	recordWorkspaceImportTelemetry("import_attempt", logger.Fields{
@@ -1125,14 +1119,16 @@ func (h *Handler) restoreImportedWorkspace(ctx context.Context, folderPath strin
 
 	ensuredEntryAgentName := ""
 	if strings.TrimSpace(req.EntryAgentName) != "" {
-		agentName, _, err := h.ensureWorkspaceEntryAgent(rootWorkspace.Name, req.EntryAgentName)
+		agentName, err := h.validateWorkspaceEntryAgent(req.EntryAgentName)
 		if err != nil {
 			return nil, "", err
 		}
-		if err := ensureImportedWorkspaceEntryAgent(rootWorkspace, agentName); err != nil {
-			return nil, "", err
+		if agentName != "" {
+			if err := ensureImportedWorkspaceEntryAgent(rootWorkspace, agentName); err != nil {
+				return nil, "", err
+			}
+			ensuredEntryAgentName = agentName
 		}
-		ensuredEntryAgentName = agentName
 	}
 
 	_, warning, err := h.workspaceStore.Import(folderPath)
