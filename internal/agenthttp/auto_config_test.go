@@ -29,7 +29,7 @@ func createTestConfigManager(t *testing.T, systemProvider, systemModel string) *
 func TestAutoConfigHandler_CheckLLMAvailability(t *testing.T) {
 	tests := []struct {
 		name             string
-		setupFactory     func() *llm.Factory
+		setupFactory     func(t *testing.T) *llm.Factory
 		systemProvider   string
 		systemModel      string
 		expectedAvail    bool
@@ -38,7 +38,7 @@ func TestAutoConfigHandler_CheckLLMAvailability(t *testing.T) {
 	}{
 		{
 			name: "no providers registered, no system model",
-			setupFactory: func() *llm.Factory {
+			setupFactory: func(t *testing.T) *llm.Factory {
 				return llm.NewFactory()
 			},
 			systemProvider:   "",
@@ -49,7 +49,7 @@ func TestAutoConfigHandler_CheckLLMAvailability(t *testing.T) {
 		},
 		{
 			name: "provider registered but no system model",
-			setupFactory: func() *llm.Factory {
+			setupFactory: func(t *testing.T) *llm.Factory {
 				factory := llm.NewFactory()
 				factory.Register("openai", &mockProvider{})
 				return factory
@@ -62,20 +62,20 @@ func TestAutoConfigHandler_CheckLLMAvailability(t *testing.T) {
 		},
 		{
 			name: "provider registered and system model configured",
-			setupFactory: func() *llm.Factory {
+			setupFactory: func(t *testing.T) *llm.Factory {
 				factory := llm.NewFactory()
 				factory.Register("openai", &mockProvider{})
 				return factory
 			},
 			systemProvider:   "openai",
-			systemModel:      "gpt-4o-mini",
+			systemModel:      "mock-model",
 			expectedAvail:    true,
 			expectedSMConfig: true,
 			expectedStatus:   http.StatusOK,
 		},
 		{
 			name: "system model configured but provider not available",
-			setupFactory: func() *llm.Factory {
+			setupFactory: func(t *testing.T) *llm.Factory {
 				return llm.NewFactory() // Empty factory
 			},
 			systemProvider:   "openai",
@@ -84,11 +84,39 @@ func TestAutoConfigHandler_CheckLLMAvailability(t *testing.T) {
 			expectedSMConfig: true,
 			expectedStatus:   http.StatusOK,
 		},
+		{
+			name: "different provider registered but configured system provider unavailable",
+			setupFactory: func(t *testing.T) *llm.Factory {
+				factory := llm.NewFactory()
+				factory.Register("openai", &mockProvider{})
+				return factory
+			},
+			systemProvider:   "ollama",
+			systemModel:      "llama3.2:latest",
+			expectedAvail:    false,
+			expectedSMConfig: true,
+			expectedStatus:   http.StatusOK,
+		},
+		{
+			name: "ollama system model unavailable when server is unreachable",
+			setupFactory: func(t *testing.T) *llm.Factory {
+				factory := llm.NewFactory()
+				factory.Register("ollama", llm.NewOllamaProvider(llm.ProviderConfig{
+					BaseURL: "http://127.0.0.1:1",
+				}))
+				return factory
+			},
+			systemProvider:   "ollama",
+			systemModel:      "llama3.2:latest",
+			expectedAvail:    false,
+			expectedSMConfig: true,
+			expectedStatus:   http.StatusOK,
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			factory := tt.setupFactory()
+			factory := tt.setupFactory(t)
 			configManager := createTestConfigManager(t, tt.systemProvider, tt.systemModel)
 			handler := NewAutoConfigHandler(factory, configManager)
 

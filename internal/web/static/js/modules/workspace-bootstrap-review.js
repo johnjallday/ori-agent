@@ -34,6 +34,7 @@
     initialized: false
   };
   let cachedSystemModel = null;
+  let cachedAutoConfigAvailability = null;
 
   function escapeHtml(value) {
     if (typeof window.escapeHtml === 'function') {
@@ -223,6 +224,8 @@
     state.reviewedFingerprint = '';
     state.reviewedInput = null;
     state.plan = null;
+    cachedSystemModel = null;
+    cachedAutoConfigAvailability = null;
     if (!preserveVisibility) {
       setReviewVisibility(false);
     }
@@ -344,10 +347,16 @@
   }
 
   async function checkAutoConfigAvailability() {
+    if (typeof cachedAutoConfigAvailability === 'boolean') {
+      return cachedAutoConfigAvailability;
+    }
+
     try {
       const data = await apiRequest('/api/agents/auto-config/availability');
-      return Boolean(data?.available);
+      cachedAutoConfigAvailability = Boolean(data?.available);
+      return cachedAutoConfigAvailability;
     } catch (_error) {
+      cachedAutoConfigAvailability = false;
       return false;
     }
   }
@@ -1030,8 +1039,10 @@
 
     // Entry agents always inherit the system model so they match the
     // user's configured orchestration model rather than whatever the
-    // auto-config LLM suggested.
-    if (isEntryAgent) {
+    // auto-config LLM suggested. Skip inheritance when the configured
+    // system model is not currently usable, otherwise workspace setup can
+    // create an agent that immediately fails at runtime.
+    if (isEntryAgent && await checkAutoConfigAvailability()) {
       const systemPref = await getSystemModelPreference();
       const systemModel = String(systemPref?.model || '').trim();
       const systemProvider = String(systemPref?.provider || '').trim();

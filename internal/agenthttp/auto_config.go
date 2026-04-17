@@ -75,10 +75,7 @@ func (h *AutoConfigHandler) CheckLLMAvailabilityHandler(w http.ResponseWriter, r
 	systemModelConfigured := h.configManager.IsSystemModelConfigured()
 	systemProvider, systemModel := h.configManager.GetSystemModel()
 
-	// For auto-config to be available, we need BOTH:
-	// 1. At least one LLM provider configured
-	// 2. System model configured
-	available := len(availableProviders) > 0 && systemModelConfigured
+	available, availabilityMessage := h.checkSystemModelAvailability(systemProvider, systemModel)
 
 	response := LLMAvailabilityResponse{
 		Available:             available,
@@ -93,10 +90,36 @@ func (h *AutoConfigHandler) CheckLLMAvailabilityHandler(w http.ResponseWriter, r
 			response.Message = "No LLM provider configured. Please set up an API key (OpenAI, Anthropic, or Gemini) or install Ollama."
 		} else if !systemModelConfigured {
 			response.Message = "System model not configured. Please configure a system model in Settings to use auto-config."
+		} else {
+			response.Message = availabilityMessage
 		}
 	}
 
 	orihttp.WriteJSON(w, response)
+}
+
+func (h *AutoConfigHandler) checkSystemModelAvailability(systemProvider, systemModel string) (bool, string) {
+	if strings.TrimSpace(systemProvider) == "" || strings.TrimSpace(systemModel) == "" {
+		return false, "System model not configured. Please configure a system model in Settings to use auto-config."
+	}
+
+	result, err := h.llmFactory.GetSystemModelProvider(systemProvider, systemModel)
+	if err != nil {
+		return false, fmt.Sprintf(
+			"Configured system model %q for provider %q is not available. Update Settings or configure that provider before using auto-config.",
+			systemModel,
+			systemProvider,
+		)
+	}
+
+	if strings.EqualFold(systemProvider, "ollama") {
+		ollamaProvider, ok := result.Provider.(*llm.OllamaProvider)
+		if !ok || !ollamaProvider.HasModel(result.Model) {
+			return false, "Configured Ollama system model is unavailable. Make sure the Ollama server is running and the selected model is installed."
+		}
+	}
+
+	return true, ""
 }
 
 // AutoConfigHandler handles the auto-configuration request
@@ -134,7 +157,11 @@ func (h *AutoConfigHandler) AutoConfigHandler(w http.ResponseWriter, r *http.Req
 	// Generate auto-config using the configured system model
 	config, err := h.generateAutoConfig(r.Context(), result.Provider, result.Model, systemReasoningEffort, req.Description)
 	if err != nil {
-		logger.Error("Auto-config generation failed", logger.Fields{"error": err})
+		logger.Warn("Auto-config generation failed; using defaults", logger.Fields{
+			"provider": systemProvider,
+			"model":    systemModel,
+			"error":    err,
+		})
 		// Return defaults on failure
 		config = h.getDefaultConfig()
 		config.Description = resolveAutoConfigDescription("", req.Description, config.AgentName)
