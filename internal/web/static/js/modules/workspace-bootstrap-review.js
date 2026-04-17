@@ -1013,6 +1013,8 @@
 
   async function ensureAgentExists(agentPlan, isEntryAgent) {
     if (!agentPlan || agentPlan.action !== 'create') {
+      // Existing (invited) agents keep their current model configuration;
+      // system model inheritance only applies to newly created entry agents.
       return agentPlan?.name || '';
     }
 
@@ -1379,7 +1381,7 @@
       for (let agentIdx = 0; agentIdx < selectedPlan.agents.length; agentIdx++) {
         const agentPlan = selectedPlan.agents[agentIdx];
         try {
-          const isEntryAgent = agentIdx === 0;
+          const isEntryAgent = agentPlan.role === 'lead';
           const agentName = await ensureAgentExists(agentPlan, isEntryAgent);
           const added = await addAgentToWorkspace(workspaceId, agentName);
           if (added.instanceId) {
