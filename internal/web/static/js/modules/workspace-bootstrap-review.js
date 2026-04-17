@@ -1011,7 +1011,7 @@
     }
   }
 
-  async function ensureAgentExists(agentPlan) {
+  async function ensureAgentExists(agentPlan, isEntryAgent) {
     if (!agentPlan || agentPlan.action !== 'create') {
       return agentPlan?.name || '';
     }
@@ -1025,6 +1025,21 @@
       description: agentPlan.summary || agentPlan.autoDescription || '',
       allow_web_search: true
     };
+
+    // Entry agents always inherit the system model so they match the
+    // user's configured orchestration model rather than whatever the
+    // auto-config LLM suggested.
+    if (isEntryAgent) {
+      const systemPref = await getSystemModelPreference();
+      const systemModel = String(systemPref?.model || '').trim();
+      const systemProvider = String(systemPref?.provider || '').trim();
+      if (systemModel) {
+        payload.model = systemModel;
+      }
+      if (systemProvider) {
+        payload.llm_provider = systemProvider;
+      }
+    }
 
     if (!payload.model && requestConfig?.model) {
       payload.model = requestConfig.model;
@@ -1361,9 +1376,11 @@
     try {
       const agentInstanceIds = [];
 
-      for (const agentPlan of selectedPlan.agents) {
+      for (let agentIdx = 0; agentIdx < selectedPlan.agents.length; agentIdx++) {
+        const agentPlan = selectedPlan.agents[agentIdx];
         try {
-          const agentName = await ensureAgentExists(agentPlan);
+          const isEntryAgent = agentIdx === 0;
+          const agentName = await ensureAgentExists(agentPlan, isEntryAgent);
           const added = await addAgentToWorkspace(workspaceId, agentName);
           if (added.instanceId) {
             agentInstanceIds.push(added.instanceId);
