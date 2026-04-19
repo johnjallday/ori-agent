@@ -499,6 +499,7 @@ func (h *Handler) getWorkspace(w http.ResponseWriter, r *http.Request, id string
 		_ = orihttp.RespondInternalError(w, "Failed to get workspace")
 		return
 	}
+	workspace = h.hydrateWorkspaceMetadataFromFileStore(workspace)
 
 	orihttp.WriteJSON(w, h.buildWorkspaceDetailResponse(workspace))
 }
@@ -702,6 +703,7 @@ func (h *Handler) listWorkspaces(w http.ResponseWriter, r *http.Request) {
 			_ = orihttp.RespondInternalError(w, "Failed to get workspaces")
 			return
 		}
+		workspaces = h.hydrateWorkspaceListFromFileStore(workspaces)
 
 		orihttp.WriteJSON(w, map[string]interface{}{
 			"folders":    workspaces,
@@ -722,11 +724,72 @@ func (h *Handler) listWorkspaces(w http.ResponseWriter, r *http.Request) {
 	}
 
 	workspaces = filterConcreteWorkspaces(workspaces)
+	workspaces = h.hydrateWorkspaceListFromFileStore(workspaces)
 
 	orihttp.WriteJSON(w, map[string]interface{}{
 		"folders":    workspaces,
 		"workspaces": workspaces,
 	})
+}
+
+func (h *Handler) hydrateWorkspaceListFromFileStore(workspaces []session.Workspace) []session.Workspace {
+	if len(workspaces) == 0 {
+		return workspaces
+	}
+
+	hydrated := make([]session.Workspace, len(workspaces))
+	for i := range workspaces {
+		hydrated[i] = workspaces[i]
+		hydrated[i].Children = h.hydrateWorkspaceListFromFileStore(workspaces[i].Children)
+		h.hydrateWorkspaceMetadataInto(&hydrated[i])
+	}
+
+	return hydrated
+}
+
+func (h *Handler) hydrateWorkspaceMetadataFromFileStore(workspace *session.Workspace) *session.Workspace {
+	if workspace == nil {
+		return nil
+	}
+
+	copy := *workspace
+	h.hydrateWorkspaceMetadataInto(&copy)
+	return &copy
+}
+
+func (h *Handler) hydrateWorkspaceMetadataInto(workspace *session.Workspace) {
+	if h == nil || h.workspaceStore == nil || workspace == nil || workspace.IsGroup() {
+		return
+	}
+
+	diskWorkspace, err := h.workspaceStore.Get(workspace.ID)
+	if err != nil || diskWorkspace == nil {
+		return
+	}
+
+	fallback := session.ConvertAgentWorkspace(diskWorkspace)
+	if fallback == nil {
+		return
+	}
+
+	if strings.TrimSpace(workspace.FolderSlug) == "" {
+		workspace.FolderSlug = fallback.FolderSlug
+	}
+	if workspace.SharedData == nil && fallback.SharedData != nil {
+		workspace.SharedData = fallback.SharedData
+	}
+	mergeWorkspaceJSONField(&workspace.DirectoryReferencesJSON, fallback.DirectoryReferencesJSON)
+	mergeWorkspaceJSONField(&workspace.MCPBindingsJSON, fallback.MCPBindingsJSON)
+	mergeWorkspaceJSONField(&workspace.AgentMCPAccessJSON, fallback.AgentMCPAccessJSON)
+	mergeWorkspaceJSONField(&workspace.SkillBindingsJSON, fallback.SkillBindingsJSON)
+	mergeWorkspaceJSONField(&workspace.AgentSkillAccessJSON, fallback.AgentSkillAccessJSON)
+}
+
+func mergeWorkspaceJSONField(target *json.RawMessage, fallback json.RawMessage) {
+	if target == nil || len(*target) > 0 || len(fallback) == 0 {
+		return
+	}
+	*target = append(json.RawMessage(nil), fallback...)
 }
 
 // handleWorkspaceRename handles POST /api/workspaces/{id}/rename.
@@ -2313,12 +2376,10 @@ func (h *Handler) handleWorkspaceSync(w http.ResponseWriter, r *http.Request) {
 				logger.Warn("Sync import: workspace not found on disk", logger.Fields{"id": id, "error": err})
 				continue
 			}
-			sessionWS := &session.Workspace{
-				ID:          diskWS.ID,
-				Name:        diskWS.Name,
-				Description: diskWS.Description,
-				FolderSlug:  diskWS.FolderSlug,
-				ParentID:    diskWS.ParentID,
+			sessionWS := session.ConvertAgentWorkspace(diskWS)
+			if sessionWS == nil {
+				warnings = append(warnings, fmt.Sprintf("Failed to convert %s", diskWS.Name))
+				continue
 			}
 			if err := h.store.CreateWorkspace(ctx, sessionWS); err != nil {
 				logger.Warn("Sync import: failed to create workspace in store",

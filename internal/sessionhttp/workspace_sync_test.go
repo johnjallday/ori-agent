@@ -198,6 +198,182 @@ func TestHandleWorkspaceSyncStatusSkipsImportedWorkspaceFolders(t *testing.T) {
 	}
 }
 
+func TestHandleWorkspaceSyncImportPreservesDiskWorkspaceMetadata(t *testing.T) {
+	handler, cleanup := createTestHandler(t)
+	defer cleanup()
+
+	baseDir := t.TempDir()
+	fileStore, err := agentworkspace.NewFileStore(baseDir)
+	if err != nil {
+		t.Fatalf("NewFileStore: %v", err)
+	}
+	defer func() { _ = fileStore.Close() }()
+	handler.SetWorkspaceStore(fileStore)
+
+	now := time.Now().UTC().Round(time.Second)
+	folderPath := filepath.Join(baseDir, "disk-workspace")
+	diskWorkspace := &agentworkspace.Workspace{
+		ID:          "disk-ws-1",
+		Name:        "Disk Workspace",
+		Kind:        "workspace",
+		Description: "Loaded from workspace.json",
+		FolderSlug:  "disk-workspace",
+		SharedData: map[string]interface{}{
+			"source": "disk",
+		},
+		DirectoryReferences: []agentworkspace.DirectoryReference{
+			{
+				ID:          "dir-1",
+				WorkspaceID: "disk-ws-1",
+				Name:        "disk-workspace",
+				Path:        folderPath,
+				CreatedAt:   now,
+				UpdatedAt:   now,
+			},
+		},
+		MCPBindings: []agentworkspace.WorkspaceMCPBinding{
+			{
+				ID:         "binding-1",
+				ServerName: "filesystem",
+				Alias:      "workspace-files",
+				Enabled:    true,
+				Config: map[string]interface{}{
+					"roots": []string{folderPath},
+				},
+				CreatedAt: now,
+				UpdatedAt: now,
+			},
+		},
+		Status:    agentworkspace.StatusActive,
+		CreatedAt: now,
+		UpdatedAt: now,
+	}
+	if err := fileStore.Save(diskWorkspace); err != nil {
+		t.Fatalf("Save disk workspace: %v", err)
+	}
+
+	payload, err := json.Marshal(map[string]interface{}{
+		"import": []string{"disk-ws-1"},
+	})
+	if err != nil {
+		t.Fatalf("marshal sync request: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/api/workspaces/sync", bytes.NewBuffer(payload))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	handler.HandleWorkspaces(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200 for sync import, got %d: %s", w.Code, w.Body.String())
+	}
+
+	workspace, err := handler.store.GetWorkspace(context.Background(), "disk-ws-1")
+	if err != nil {
+		t.Fatalf("GetWorkspace: %v", err)
+	}
+
+	if workspace.SharedData == nil || workspace.SharedData["source"] != "disk" {
+		t.Fatalf("expected shared_data from disk workspace, got %#v", workspace.SharedData)
+	}
+
+	refs, err := decodeDirectoryReferences(workspace.DirectoryReferencesJSON)
+	if err != nil {
+		t.Fatalf("decode directory references: %v", err)
+	}
+	if len(refs) != 1 || cleanWorkspaceSyncPath(refs[0].Path) != cleanWorkspaceSyncPath(folderPath) {
+		t.Fatalf("expected imported directory reference %q, got %#v", folderPath, refs)
+	}
+
+	bindings, err := decodeWorkspaceMCPBindings(workspace.MCPBindingsJSON)
+	if err != nil {
+		t.Fatalf("decode mcp bindings: %v", err)
+	}
+	if len(bindings) != 1 || !workspaceBindingHasRoot(bindings[0].Config, folderPath) {
+		t.Fatalf("expected imported workspace-files binding for %q, got %#v", folderPath, bindings)
+	}
+}
+
+func TestListWorkspacesHydratesDirectoryReferencesFromDiskWorkspace(t *testing.T) {
+	handler, cleanup := createTestHandler(t)
+	defer cleanup()
+
+	baseDir := t.TempDir()
+	fileStore, err := agentworkspace.NewFileStore(baseDir)
+	if err != nil {
+		t.Fatalf("NewFileStore: %v", err)
+	}
+	defer func() { _ = fileStore.Close() }()
+	handler.SetWorkspaceStore(fileStore)
+
+	now := time.Now().UTC().Round(time.Second)
+	folderPath := filepath.Join(baseDir, "hydrated-workspace")
+	diskWorkspace := &agentworkspace.Workspace{
+		ID:          "hydrated-ws-1",
+		Name:        "Hydrated Workspace",
+		Kind:        "workspace",
+		Description: "Hydrate list response",
+		FolderSlug:  "hydrated-workspace",
+		DirectoryReferences: []agentworkspace.DirectoryReference{
+			{
+				ID:          "dir-1",
+				WorkspaceID: "hydrated-ws-1",
+				Name:        "hydrated-workspace",
+				Path:        folderPath,
+				CreatedAt:   now,
+				UpdatedAt:   now,
+			},
+		},
+		Status:    agentworkspace.StatusActive,
+		CreatedAt: now,
+		UpdatedAt: now,
+	}
+	if err := fileStore.Save(diskWorkspace); err != nil {
+		t.Fatalf("Save disk workspace: %v", err)
+	}
+
+	if err := handler.store.CreateWorkspace(context.Background(), &session.Workspace{
+		ID:          "hydrated-ws-1",
+		Name:        "Hydrated Workspace",
+		FolderSlug:  "hydrated-workspace",
+		Description: "Hydrate list response",
+	}); err != nil {
+		t.Fatalf("CreateWorkspace: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/workspaces?tree=true", nil)
+	w := httptest.NewRecorder()
+	handler.HandleWorkspaces(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200 for workspace tree, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp struct {
+		Workspaces []struct {
+			ID                  string `json:"id"`
+			FolderSlug          string `json:"folder_slug"`
+			DirectoryReferences []struct {
+				Path string `json:"path"`
+			} `json:"directory_references"`
+		} `json:"workspaces"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode workspace tree: %v", err)
+	}
+
+	if len(resp.Workspaces) != 1 {
+		t.Fatalf("expected 1 workspace, got %#v", resp.Workspaces)
+	}
+	if resp.Workspaces[0].FolderSlug != "hydrated-workspace" {
+		t.Fatalf("expected hydrated folder_slug, got %#v", resp.Workspaces[0].FolderSlug)
+	}
+	if len(resp.Workspaces[0].DirectoryReferences) != 1 {
+		t.Fatalf("expected hydrated directory references, got %#v", resp.Workspaces[0].DirectoryReferences)
+	}
+	if cleanWorkspaceSyncPath(resp.Workspaces[0].DirectoryReferences[0].Path) != cleanWorkspaceSyncPath(folderPath) {
+		t.Fatalf("expected hydrated directory path %q, got %#v", folderPath, resp.Workspaces[0].DirectoryReferences)
+	}
+}
+
 func TestHandleWorkspaceSyncRecreateMissingWorkspaceFolder(t *testing.T) {
 	handler, cleanup := createTestHandler(t)
 	defer cleanup()
