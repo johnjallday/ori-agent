@@ -325,6 +325,83 @@ console.log('[workspace-hub.js] FILE LOADED');
     return `<span class="${badgeClass}" title="${escapeHtml(title)}" aria-label="${escapeHtml(title)}">${escapeHtml(String(counts.open))}</span>`;
   }
 
+  function normalizeWorkspaceFolderPath(value) {
+    return String(value || '').trim().replace(/[\\/]+$/, '');
+  }
+
+  function collectWorkspaceLinkedDirectories(workspace) {
+    const linkedDirectories = [];
+    const seenPaths = new Set();
+
+    function addDirectory(pathValue, fallbackName) {
+      const normalizedPath = normalizeWorkspaceFolderPath(pathValue);
+      const normalizedName = String(fallbackName || '').trim();
+      const dedupeKey = normalizedPath
+        ? normalizedPath.toLowerCase()
+        : normalizedName.toLowerCase();
+
+      if (!dedupeKey || seenPaths.has(dedupeKey)) return;
+
+      seenPaths.add(dedupeKey);
+      linkedDirectories.push({
+        path: normalizedPath,
+        name: normalizedName
+      });
+    }
+
+    if (Array.isArray(workspace?.directory_references)) {
+      workspace.directory_references.forEach((ref) => {
+        if (!ref || typeof ref !== 'object') return;
+        addDirectory(ref.path, ref.name);
+      });
+    }
+
+    if (Array.isArray(workspace?.attachments)) {
+      workspace.attachments.forEach((attachment) => {
+        if (!attachment || typeof attachment !== 'object') return;
+        if (String(attachment.type || '').trim().toLowerCase() !== 'directory') return;
+        addDirectory(attachment.path || attachment.body, attachment.title || attachment.name);
+      });
+    }
+
+    const importedFolderPath = workspace?.shared_data?.folder_import?.path;
+    if (typeof importedFolderPath === 'string' && importedFolderPath.trim()) {
+      addDirectory(importedFolderPath, 'Imported folder');
+    }
+
+    return linkedDirectories;
+  }
+
+  function getWorkspaceFolderDisplay(workspace) {
+    const linkedDirectories = collectWorkspaceLinkedDirectories(workspace);
+    if (linkedDirectories.length === 0) {
+      return {
+        linked: false,
+        badgeLabel: 'No folder linked',
+        badgeClass: 'is-unlinked',
+        detail: 'No local folder attached.',
+        detailTitle: 'This workspace is not linked to a local folder.',
+        ariaLabel: 'no linked folder'
+      };
+    }
+
+    const directoryCount = linkedDirectories.length;
+    const primaryPath = linkedDirectories[0].path || linkedDirectories[0].name || 'Linked folder';
+    const extraCount = directoryCount - 1;
+    const allPaths = linkedDirectories
+      .map((directory) => directory.path || directory.name)
+      .filter(Boolean);
+
+    return {
+      linked: true,
+      badgeLabel: directoryCount === 1 ? 'Linked folder' : `${directoryCount} folders linked`,
+      badgeClass: 'is-linked',
+      detail: extraCount > 0 ? `${primaryPath} (+${extraCount} more)` : primaryPath,
+      detailTitle: allPaths.join(' | ') || primaryPath,
+      ariaLabel: directoryCount === 1 ? 'linked folder' : `${directoryCount} linked folders`
+    };
+  }
+
   function setLauncherWorkspaceRootDisplay(data) {
     if (!elements.launcherWorkspaceRootPath || !elements.launcherWorkspaceRootSummary || !elements.launcherWorkspaceRootMeta || !elements.launcherWorkspaceRootBadge) {
       return;
@@ -1148,14 +1225,22 @@ console.log('[workspace-hub.js] FILE LOADED');
       const status = row.status || 'active';
       const statusLabel = escapeHtml(String(status).replace('_', ' '));
       const accentStyle = row.color ? `style="border-color: ${escapeHtml(row.color)}"` : '';
-      const pathText = row.path ? escapeHtml(row.path) : escapeHtml(row.name || row.id);
       const hasChildren = Array.isArray(row.children) && row.children.length > 0;
       const deleteTitle = hasChildren ? 'Delete group' : 'Delete workspace';
       const taskBadge = renderLauncherTaskBadge(row.id);
+      const folderDisplay = getWorkspaceFolderDisplay(row);
       const parentGroup = row.parent_id ? flattenedMap.get(row.parent_id) : null;
       const parentGroupChip = parentGroup && isGroupWorkspace(parentGroup)
         ? `<span class="launcher-card-parent-chip">In ${escapeHtml(parentGroup.name || 'Group')}</span>`
         : '';
+      const folderState = `
+          <div class="launcher-card-folder-state ${folderDisplay.badgeClass}">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+              <path d="M10,4H4A2,2 0 0,0 2,6V18A2,2 0 0,0 4,20H20A2,2 0 0,0 22,18V8A2,2 0 0,0 20,6H12L10,4Z"/>
+            </svg>
+            <span>${escapeHtml(folderDisplay.badgeLabel)}</span>
+          </div>
+      `;
 
       const checked = selectedSet.has(row.id);
       const checkbox = selectionMode ? `
@@ -1174,7 +1259,7 @@ console.log('[workspace-hub.js] FILE LOADED');
       `;
 
       return `
-        <div class="launcher-card-item" role="button" tabindex="0" draggable="true" data-workspace-id="${escapeHtml(row.id)}" data-workspace-kind="workspace" data-select-mode="${selectionMode ? '1' : '0'}" ${accentStyle} aria-label="Open workspace ${escapeHtml(row.name || 'Untitled Workspace')}">
+        <div class="launcher-card-item" role="button" tabindex="0" draggable="true" data-workspace-id="${escapeHtml(row.id)}" data-workspace-kind="workspace" data-select-mode="${selectionMode ? '1' : '0'}" data-folder-linked="${folderDisplay.linked ? '1' : '0'}" ${accentStyle} aria-label="Open workspace ${escapeHtml(row.name || 'Untitled Workspace')} with ${escapeHtml(folderDisplay.ariaLabel)}">
           ${checkbox}
           ${deleteButton}
           <div class="launcher-card-title-row">
@@ -1182,7 +1267,8 @@ console.log('[workspace-hub.js] FILE LOADED');
             ${taskBadge}
           </div>
           ${parentGroupChip}
-          <div class="launcher-card-path">${pathText}</div>
+          ${folderState}
+          <div class="launcher-card-path${folderDisplay.linked ? '' : ' is-empty'}" title="${escapeHtml(folderDisplay.detailTitle)}">${escapeHtml(folderDisplay.detail)}</div>
           <div class="launcher-card-description">${escapeHtml(description)}</div>
           <div class="launcher-card-meta">
             <span class="launcher-card-status status-${escapeHtml(status)}">${statusLabel}</span>
