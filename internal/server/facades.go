@@ -4,6 +4,8 @@ import (
 	"github.com/johnjallday/ori-agent/internal/agent"
 	agenthttp "github.com/johnjallday/ori-agent/internal/agenthttp"
 	"github.com/johnjallday/ori-agent/internal/chathttp"
+	"github.com/johnjallday/ori-agent/internal/cliagent"
+	"github.com/johnjallday/ori-agent/internal/cliagenthttp"
 	"github.com/johnjallday/ori-agent/internal/client"
 	"github.com/johnjallday/ori-agent/internal/config"
 	"github.com/johnjallday/ori-agent/internal/devicehttp"
@@ -80,34 +82,36 @@ type UISystemFacade struct {
 
 // HandlerFacade manages all HTTP handlers (API endpoints)
 type HandlerFacade struct {
-	ActivityLogger  *agenthttp.ActivityLogger
-	Settings        *settingshttp.Handler
-	Chat            *chathttp.Handler
-	Onboarding      *onboardinghttp.Handler
-	Device          *devicehttp.Handler
-	Orchestration   *orchestrationhttp.Handler
-	AutoTask        *orchestrationhttp.AutoTaskHandler
-	Workspace       *workspace.HTTPHandler
-	Usage           *usagehttp.Handler
-	MCP             *mcphttp.Handler
-	Location        *locationhttp.Handler
-	Workflow        *workflowhttp.Handler
-	ModelCategory   *modelcategoryhttp.Handler
-	AutoCategorize  *modelcategoryhttp.AutoCategorizeHandler
-	Reset           *settingshttp.ResetHandler
-	AutoConfig      *agenthttp.AutoConfigHandler
-	SmartOnboarding *onboardinghttp.SmartOnboardingHandler
-	Speech          *speechhttp.Handler
-	Session         *sessionhttp.Handler
-	AutoClassify    *sessionhttp.AutoClassifyHandler
-	SmartInput      *sessionhttp.SmartInputHandler
-	Note            *notehttp.Handler
-	SessionFiles    *fileshttp.Handler
-	Review          *reviewhttp.Handler
-	Evolution       *evolutionhttp.Handler
-	Vault           *vaulthttp.Handler
-	ExternalAgents  *externalagentshttp.Handler
-	Skills          *skillshttp.Handler
+	ActivityLogger   *agenthttp.ActivityLogger
+	Settings         *settingshttp.Handler
+	Chat             *chathttp.Handler
+	Onboarding       *onboardinghttp.Handler
+	Device           *devicehttp.Handler
+	Orchestration    *orchestrationhttp.Handler
+	AutoTask         *orchestrationhttp.AutoTaskHandler
+	Workspace        *workspace.HTTPHandler
+	Usage            *usagehttp.Handler
+	MCP              *mcphttp.Handler
+	Location         *locationhttp.Handler
+	Workflow         *workflowhttp.Handler
+	ModelCategory    *modelcategoryhttp.Handler
+	AutoCategorize   *modelcategoryhttp.AutoCategorizeHandler
+	Reset            *settingshttp.ResetHandler
+	AutoConfig       *agenthttp.AutoConfigHandler
+	SmartOnboarding  *onboardinghttp.SmartOnboardingHandler
+	Speech           *speechhttp.Handler
+	Session          *sessionhttp.Handler
+	AutoClassify     *sessionhttp.AutoClassifyHandler
+	SmartInput       *sessionhttp.SmartInputHandler
+	Note             *notehttp.Handler
+	SessionFiles     *fileshttp.Handler
+	Review           *reviewhttp.Handler
+	Evolution        *evolutionhttp.Handler
+	Vault            *vaulthttp.Handler
+	ExternalAgents   *externalagentshttp.Handler
+	Skills           *skillshttp.Handler
+	CLIAgents        *cliagenthttp.Handler
+	CLIAgentRegistry *cliagent.CLIAgentRegistry
 }
 
 // NewCoreSystemFacade creates a new core system facade

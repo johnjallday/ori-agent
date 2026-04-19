@@ -59,7 +59,6 @@ func (h *Handler) handleOpenAIChat(
 	systemPrompt := h.buildChatSystemPrompt(
 		ag,
 		agentName,
-		"You are a helpful assistant with access to various tools. When a user request can be fulfilled by using an available tool, use the tool instead of providing general information. Be concise and direct in your responses.",
 		tools,
 	)
 	conversation := buildOpenAIConversationMessages(ag.Messages, userMessage, images)

@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/johnjallday/ori-agent/internal/agent"
 	"github.com/johnjallday/ori-agent/internal/featureflags"
 	orihttp "github.com/johnjallday/ori-agent/internal/http"
 	"github.com/johnjallday/ori-agent/internal/logger"
@@ -54,9 +55,58 @@ func (s *Server) Handler() http.Handler {
 
 // Start starts background services (task executor, etc.)
 func (s *Server) Start() {
+	s.cleanupStaleWorkspaceManagerAgents()
+
 	if s.Workflow != nil {
 		s.Workflow.Start()
 	}
+}
+
+// cleanupStaleWorkspaceManagerAgents removes leftover workspace-manager agents
+// that were auto-created by the legacy system. These agents are identified by
+// having the "workspace-manager" metadata tag or type.
+func (s *Server) cleanupStaleWorkspaceManagerAgents() {
+	if s.Storage == nil || s.Storage.AgentStore == nil {
+		return
+	}
+
+	agentStore := s.Storage.AgentStore
+	for _, name := range agentStore.ListAgents() {
+		ag, ok := agentStore.GetAgent(name)
+		if !ok || ag == nil {
+			continue
+		}
+		if !isStaleWorkspaceManagerAgent(ag) {
+			continue
+		}
+		if err := agentStore.DeleteAgent(name); err != nil {
+			logger.Warn("Failed to delete stale workspace-manager agent", logger.Fields{
+				"agent": name,
+				"error": err,
+			})
+		} else {
+			logger.Info("Deleted stale workspace-manager agent", logger.Fields{
+				"agent": name,
+			})
+		}
+	}
+}
+
+func isStaleWorkspaceManagerAgent(ag *agent.Agent) bool {
+	if ag == nil {
+		return false
+	}
+	if ag.Type == "workspace-manager" {
+		return true
+	}
+	if ag.Metadata != nil {
+		for _, tag := range ag.Metadata.Tags {
+			if strings.EqualFold(strings.TrimSpace(tag), "workspace-manager") {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // Shutdown gracefully shuts down background services
@@ -232,7 +282,7 @@ func (s *Server) serveModels(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) serveWorkflows(w http.ResponseWriter, r *http.Request) {
 	data := s.prepareBasePageData("workflows")
-	data.Title = "Workflow Templates - Ori Agent"
+	data.Title = "Orchestration Skills - Ori Agent"
 	data.BrandText = "Ori Agent"
 	s.renderAndWritePage(w, "workflows", data)
 }

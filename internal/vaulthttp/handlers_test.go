@@ -117,6 +117,21 @@ func createHandlerVault(t *testing.T, store *vault.Store, name string) vault.Vau
 	return item
 }
 
+func absoluteVaultFilePath(vaultFilesBaseDir string, vaultItem vault.Vault) string {
+	if filepath.IsAbs(vaultItem.FilePath) {
+		return vaultItem.FilePath
+	}
+	return filepath.Join(vaultFilesBaseDir, vaultItem.FilePath)
+}
+
+func vaultPackageNameForTest(vaultID string) string {
+	vaultID = strings.TrimSpace(vaultID)
+	if vaultID == "" {
+		vaultID = "vault"
+	}
+	return vaultID + ".orivault"
+}
+
 func configureTestGoogleOAuth(t *testing.T, tokenURL string) string {
 	t.Helper()
 
@@ -1109,8 +1124,47 @@ func TestHandlerSupportsNamedVaults(t *testing.T) {
 	}
 }
 
+func TestHandlerCreatesVaultInCustomDirectory(t *testing.T) {
+	handler, _, db, vaultFilesBaseDir := newTestHandlerWithVaultFilesDir(t, vault.NewMemorySecretStore(), "")
+	defer func() { _ = db.Close() }()
+
+	customDir := t.TempDir()
+	createVaultRec := performJSONRequest(t, handler, http.MethodPost, "/api/vault/vaults", map[string]any{
+		"name":           "Custom Vault",
+		"description":    "Stored outside the default managed directory",
+		"vault_password": "custom-vault-pass",
+		"storage": map[string]any{
+			"mode":      "custom_dir",
+			"directory": customDir,
+		},
+	})
+	if createVaultRec.Code != http.StatusCreated {
+		t.Fatalf("expected 201 creating custom-dir vault, got %d: %s", createVaultRec.Code, createVaultRec.Body.String())
+	}
+
+	var created struct {
+		Vault vault.Vault `json:"vault"`
+	}
+	decodeJSONBody(t, createVaultRec, &created)
+	if created.Vault.StorageMode != vault.VaultStorageModeCustomDir {
+		t.Fatalf("expected custom storage mode, got %#v", created.Vault)
+	}
+	expectedPackageDir := filepath.Join(customDir, vaultPackageNameForTest(created.Vault.ID))
+	if created.Vault.LocationSummary != expectedPackageDir {
+		t.Fatalf("expected custom location summary %q, got %#v", expectedPackageDir, created.Vault)
+	}
+
+	absolutePath := absoluteVaultFilePath(vaultFilesBaseDir, created.Vault)
+	if !filepath.IsAbs(absolutePath) || filepath.Dir(absolutePath) != expectedPackageDir {
+		t.Fatalf("expected custom vault file under %q, got %q", expectedPackageDir, absolutePath)
+	}
+	if _, err := os.Stat(absolutePath); err != nil {
+		t.Fatalf("expected custom vault file to exist: %v", err)
+	}
+}
+
 func TestHandlerRenamesAndDeletesNamedVaults(t *testing.T) {
-	handler, _, db := newTestHandler(t, vault.NewMemorySecretStore(), "")
+	handler, _, db, vaultFilesBaseDir := newTestHandlerWithVaultFilesDir(t, vault.NewMemorySecretStore(), "")
 	defer func() { _ = db.Close() }()
 
 	createVaultRec := performJSONRequest(t, handler, http.MethodPost, "/api/vault/vaults", map[string]any{
@@ -1126,6 +1180,7 @@ func TestHandlerRenamesAndDeletesNamedVaults(t *testing.T) {
 		Vault vault.Vault `json:"vault"`
 	}
 	decodeJSONBody(t, createVaultRec, &createdVault)
+	absolutePath := absoluteVaultFilePath(vaultFilesBaseDir, createdVault.Vault)
 
 	updateVaultRec := performJSONRequest(t, handler, http.MethodPatch, "/api/vault/vaults/"+createdVault.Vault.ID, map[string]any{
 		"name":        "Client Archive",
@@ -1159,6 +1214,9 @@ func TestHandlerRenamesAndDeletesNamedVaults(t *testing.T) {
 	if deleteVaultRec.Code != http.StatusOK {
 		t.Fatalf("expected 200 deleting vault, got %d: %s", deleteVaultRec.Code, deleteVaultRec.Body.String())
 	}
+	if _, err := os.Stat(absolutePath); err != nil {
+		t.Fatalf("expected safe delete to keep backing file on disk: %v", err)
+	}
 
 	listVaultsRec := performJSONRequest(t, handler, http.MethodGet, "/api/vault/vaults", nil)
 	if listVaultsRec.Code != http.StatusOK {
@@ -1176,6 +1234,96 @@ func TestHandlerRenamesAndDeletesNamedVaults(t *testing.T) {
 	missingListRec := performJSONRequest(t, handler, http.MethodGet, "/api/vault/records?vault_id="+createdVault.Vault.ID, nil)
 	if missingListRec.Code != http.StatusNotFound {
 		t.Fatalf("expected 404 listing deleted vault, got %d: %s", missingListRec.Code, missingListRec.Body.String())
+	}
+}
+
+func TestHandlerRelinksMissingVault(t *testing.T) {
+	handler, _, db, vaultFilesBaseDir := newTestHandlerWithVaultFilesDir(t, vault.NewMemorySecretStore(), "")
+	defer func() { _ = db.Close() }()
+
+	createVaultRec := performJSONRequest(t, handler, http.MethodPost, "/api/vault/vaults", map[string]any{
+		"name":           "Relink Vault",
+		"vault_password": "relink-vault-pass",
+	})
+	if createVaultRec.Code != http.StatusCreated {
+		t.Fatalf("expected 201 creating relink vault, got %d: %s", createVaultRec.Code, createVaultRec.Body.String())
+	}
+
+	var created struct {
+		Vault vault.Vault `json:"vault"`
+	}
+	decodeJSONBody(t, createVaultRec, &created)
+
+	originalPath := absoluteVaultFilePath(vaultFilesBaseDir, created.Vault)
+	originalPackageDir := filepath.Dir(originalPath)
+	relinkedRoot := t.TempDir()
+	relinkedPackageDir := filepath.Join(relinkedRoot, filepath.Base(originalPackageDir))
+	relinkedPath := filepath.Join(relinkedPackageDir, filepath.Base(originalPath))
+	if err := os.Rename(originalPackageDir, relinkedPackageDir); err != nil {
+		t.Fatalf("move vault package: %v", err)
+	}
+
+	statusRec := performJSONRequest(t, handler, http.MethodGet, "/api/vault/status?vault_id="+created.Vault.ID, nil)
+	if statusRec.Code != http.StatusOK {
+		t.Fatalf("expected 200 for missing-vault status, got %d: %s", statusRec.Code, statusRec.Body.String())
+	}
+
+	var status vault.VaultStatus
+	decodeJSONBody(t, statusRec, &status)
+	if status.Available || !status.FileMissing {
+		t.Fatalf("expected missing vault status, got %+v", status)
+	}
+
+	relinkRec := performJSONRequest(t, handler, http.MethodPost, "/api/vault/vaults/"+created.Vault.ID+"/relink", map[string]any{
+		"storage": map[string]any{
+			"mode":      "custom_dir",
+			"directory": relinkedPackageDir,
+		},
+	})
+	if relinkRec.Code != http.StatusOK {
+		t.Fatalf("expected 200 relinking vault, got %d: %s", relinkRec.Code, relinkRec.Body.String())
+	}
+
+	var relinked struct {
+		Vault vault.Vault `json:"vault"`
+	}
+	decodeJSONBody(t, relinkRec, &relinked)
+	if relinked.Vault.FileMissing {
+		t.Fatalf("expected relinked vault to no longer be missing, got %#v", relinked.Vault)
+	}
+	if relinked.Vault.FilePath != relinkedPath {
+		t.Fatalf("expected relinked file path %q, got %q", relinkedPath, relinked.Vault.FilePath)
+	}
+	if relinked.Vault.LocationSummary != relinkedPackageDir {
+		t.Fatalf("expected relinked package dir %q, got %#v", relinkedPackageDir, relinked.Vault)
+	}
+}
+
+func TestHandlerDeleteVaultCanRemoveBackingFile(t *testing.T) {
+	handler, _, db, vaultFilesBaseDir := newTestHandlerWithVaultFilesDir(t, vault.NewMemorySecretStore(), "")
+	defer func() { _ = db.Close() }()
+
+	createVaultRec := performJSONRequest(t, handler, http.MethodPost, "/api/vault/vaults", map[string]any{
+		"name":           "Delete File Vault",
+		"vault_password": "delete-file-pass",
+	})
+	if createVaultRec.Code != http.StatusCreated {
+		t.Fatalf("expected 201 creating vault, got %d: %s", createVaultRec.Code, createVaultRec.Body.String())
+	}
+
+	var created struct {
+		Vault vault.Vault `json:"vault"`
+	}
+	decodeJSONBody(t, createVaultRec, &created)
+	absolutePath := absoluteVaultFilePath(vaultFilesBaseDir, created.Vault)
+	packageDir := filepath.Dir(absolutePath)
+
+	deleteVaultRec := performJSONRequest(t, handler, http.MethodDelete, "/api/vault/vaults/"+created.Vault.ID+"?delete_file=true", nil)
+	if deleteVaultRec.Code != http.StatusOK {
+		t.Fatalf("expected 200 deleting vault with file, got %d: %s", deleteVaultRec.Code, deleteVaultRec.Body.String())
+	}
+	if _, err := os.Stat(packageDir); !os.IsNotExist(err) {
+		t.Fatalf("expected destructive delete to remove backing vault package, got err=%v", err)
 	}
 }
 

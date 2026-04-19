@@ -62,6 +62,10 @@ type mockCodexProvider struct {
 	mockProvider
 }
 
+type mockLocalProvider struct {
+	mockProvider
+}
+
 func (m *mockCodexProvider) Capabilities() llm.ProviderCapabilities {
 	return llm.ProviderCapabilities{
 		SupportsTools:  false,
@@ -86,6 +90,22 @@ func (m *mockClaudeCodeProvider) Capabilities() llm.ProviderCapabilities {
 
 func (m *mockClaudeCodeProvider) DefaultModels() []string {
 	return []string{"opus", "sonnet", "haiku"}
+}
+
+func (m *mockLocalProvider) Type() llm.ProviderType {
+	return llm.ProviderTypeLocal
+}
+
+func (m *mockLocalProvider) Capabilities() llm.ProviderCapabilities {
+	return llm.ProviderCapabilities{
+		SupportsTools:          true,
+		RequiresAPIKey:         false,
+		SupportsCustomEndpoint: true,
+	}
+}
+
+func (m *mockLocalProvider) DefaultModels() []string {
+	return []string{"openai/gpt-oss-20b"}
 }
 
 func TestSystemModelHandler_Get(t *testing.T) {
@@ -695,6 +715,146 @@ func TestWorkspaceRootSettingsHandler_Post_ClearFallsBackToDefault(t *testing.T)
 	}
 }
 
+func TestVaultRootSettingsHandler_Get_EnvironmentFallback(t *testing.T) {
+	tmpDir := t.TempDir()
+	tmpFile := filepath.Join(tmpDir, "settings.json")
+	configManager := config.NewManager(tmpFile)
+	_ = configManager.Load()
+
+	envRoot := filepath.Join(tmpDir, "env-vaults")
+	t.Setenv("ORI_VAULT_DIR", envRoot)
+
+	handler := NewHandler(nil, configManager, nil, llm.NewFactory())
+
+	req := httptest.NewRequest(http.MethodGet, "/api/settings/vault-root", nil)
+	rec := httptest.NewRecorder()
+	handler.VaultRootSettingsHandler(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("Expected status 200, got %d", rec.Code)
+	}
+
+	var resp VaultRootResponse
+	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+		t.Fatalf("Failed to decode response: %v", err)
+	}
+
+	if resp.VaultRoot != "" {
+		t.Fatalf("Expected no configured vault_root, got %q", resp.VaultRoot)
+	}
+	if resp.Source != "environment" {
+		t.Fatalf("Expected source environment, got %q", resp.Source)
+	}
+	if resp.EffectiveVaultRoot != envRoot {
+		t.Fatalf("Expected effective root %q, got %q", envRoot, resp.EffectiveVaultRoot)
+	}
+}
+
+func TestVaultRootSettingsHandler_Post(t *testing.T) {
+	tmpDir := t.TempDir()
+	tmpFile := filepath.Join(tmpDir, "settings.json")
+	configManager := config.NewManager(tmpFile)
+	_ = configManager.Load()
+
+	handler := NewHandler(nil, configManager, nil, llm.NewFactory())
+
+	customRoot := filepath.Join(tmpDir, "custom-vaults")
+	var appliedRoot string
+	handler.SetVaultRootUpdater(func(root string) error {
+		appliedRoot = root
+		return nil
+	})
+
+	body, _ := json.Marshal(map[string]string{
+		"vault_root": customRoot,
+	})
+
+	req := httptest.NewRequest(http.MethodPost, "/api/settings/vault-root", bytes.NewReader(body))
+	rec := httptest.NewRecorder()
+	handler.VaultRootSettingsHandler(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("Expected status 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	var resp struct {
+		Success            bool   `json:"success"`
+		VaultRoot          string `json:"vault_root"`
+		EffectiveVaultRoot string `json:"effective_vault_root"`
+		Source             string `json:"source"`
+	}
+	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+		t.Fatalf("Failed to decode response: %v", err)
+	}
+
+	if !resp.Success {
+		t.Fatal("Expected success=true")
+	}
+	if resp.VaultRoot != customRoot {
+		t.Fatalf("Expected vault_root %q, got %q", customRoot, resp.VaultRoot)
+	}
+	if resp.EffectiveVaultRoot != customRoot {
+		t.Fatalf("Expected effective root %q, got %q", customRoot, resp.EffectiveVaultRoot)
+	}
+	if resp.Source != "settings" {
+		t.Fatalf("Expected source settings, got %q", resp.Source)
+	}
+	if appliedRoot != customRoot {
+		t.Fatalf("Expected updater root %q, got %q", customRoot, appliedRoot)
+	}
+	if _, err := os.Stat(customRoot); err != nil {
+		t.Fatalf("Expected vault root directory to exist: %v", err)
+	}
+
+	configManager2 := config.NewManager(tmpFile)
+	_ = configManager2.Load()
+	if got := configManager2.GetVaultRoot(); got != customRoot {
+		t.Fatalf("Expected persisted vault root %q, got %q", customRoot, got)
+	}
+}
+
+func TestVaultRootSettingsHandler_Post_ClearFallsBackToDefault(t *testing.T) {
+	tmpDir := t.TempDir()
+	tmpFile := filepath.Join(tmpDir, "settings.json")
+	configManager := config.NewManager(tmpFile)
+	_ = configManager.Load()
+	if err := configManager.SetVaultRoot(filepath.Join(tmpDir, "custom-vaults")); err != nil {
+		t.Fatalf("SetVaultRoot: %v", err)
+	}
+	if err := configManager.Save(); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+
+	handler := NewHandler(nil, configManager, nil, llm.NewFactory())
+
+	req := httptest.NewRequest(http.MethodPost, "/api/settings/vault-root", bytes.NewReader([]byte(`{"vault_root":""}`)))
+	rec := httptest.NewRecorder()
+	handler.VaultRootSettingsHandler(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("Expected status 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	var resp struct {
+		VaultRoot          string `json:"vault_root"`
+		EffectiveVaultRoot string `json:"effective_vault_root"`
+		Source             string `json:"source"`
+	}
+	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+		t.Fatalf("Failed to decode response: %v", err)
+	}
+
+	if resp.VaultRoot != "" {
+		t.Fatalf("Expected cleared vault_root, got %q", resp.VaultRoot)
+	}
+	if resp.Source != "default" {
+		t.Fatalf("Expected source default, got %q", resp.Source)
+	}
+	if resp.EffectiveVaultRoot != config.DefaultVaultRoot() {
+		t.Fatalf("Expected default effective root %q, got %q", config.DefaultVaultRoot(), resp.EffectiveVaultRoot)
+	}
+}
+
 func TestSessionSettingsHandler_Get(t *testing.T) {
 	tmpDir := t.TempDir()
 	tmpFile := filepath.Join(tmpDir, "settings.json")
@@ -795,8 +955,8 @@ func TestGetModelCategories_Codex(t *testing.T) {
 		expected []string
 	}{
 		{name: "codex nano has tool-calling and general", model: "gpt-5-codex-nano", expected: []string{"tool-calling", "general"}},
-		{name: "codex mini has tool-calling, general, workspace-manager, and orchestration", model: "gpt-5.1-codex-mini", expected: []string{"tool-calling", "general", "workspace-manager", "orchestration"}},
-		{name: "codex standard has research, workspace-manager, and orchestration", model: "gpt-5.3-codex", expected: []string{"research", "workspace-manager", "orchestration"}},
+		{name: "codex mini has tool-calling, general, and orchestration", model: "gpt-5.1-codex-mini", expected: []string{"tool-calling", "general", "orchestration"}},
+		{name: "codex standard has research and orchestration", model: "gpt-5.3-codex", expected: []string{"research", "orchestration"}},
 	}
 
 	for _, tt := range tests {
@@ -861,6 +1021,58 @@ func TestProvidersHandler_CodexPricingHidden(t *testing.T) {
 	for _, model := range codex.Models {
 		if model.Pricing != "" {
 			t.Fatalf("Expected empty pricing for codex model %q, got %q", model.Value, model.Pricing)
+		}
+	}
+}
+
+func TestProvidersHandler_LocalProvidersExposed(t *testing.T) {
+	tmpDir := t.TempDir()
+	tmpFile := filepath.Join(tmpDir, "settings.json")
+	configManager := config.NewManager(tmpFile)
+	_ = configManager.Load()
+
+	llmFactory := llm.NewFactory()
+	llmFactory.Register("lmstudio", &mockLocalProvider{})
+	llmFactory.Register("mlx_lm", &mockLocalProvider{})
+
+	handler := NewHandler(nil, configManager, nil, llmFactory)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/providers", nil)
+	rec := httptest.NewRecorder()
+	handler.ProvidersHandler(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("Expected status 200, got %d", rec.Code)
+	}
+
+	var resp struct {
+		Providers []ProviderInfo `json:"providers"`
+	}
+	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+		t.Fatalf("Failed to decode response: %v", err)
+	}
+
+	providersByName := make(map[string]ProviderInfo, len(resp.Providers))
+	for _, provider := range resp.Providers {
+		providersByName[provider.Name] = provider
+	}
+
+	for _, providerName := range []string{"lmstudio", "mlx_lm"} {
+		info, ok := providersByName[providerName]
+		if !ok {
+			t.Fatalf("Expected %s provider in response", providerName)
+		}
+		if !info.Available {
+			t.Fatalf("Expected %s provider to be available", providerName)
+		}
+		if info.Type != "local" {
+			t.Fatalf("Expected %s provider type local, got %q", providerName, info.Type)
+		}
+		if info.RequiresKey {
+			t.Fatalf("Expected %s provider to not require key", providerName)
+		}
+		if len(info.Models) == 0 {
+			t.Fatalf("Expected %s provider models", providerName)
 		}
 	}
 }

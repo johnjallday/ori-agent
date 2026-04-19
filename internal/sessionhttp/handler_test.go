@@ -7,7 +7,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
-	"strings"
 	"testing"
 	"time"
 
@@ -41,16 +40,6 @@ func createTestHandler(t *testing.T) (*Handler, func()) {
 	return handler, func() {
 		_ = store.Close()
 	}
-}
-
-func containsTag(tags []string, target string) bool {
-	normalizedTarget := strings.TrimSpace(strings.ToLower(target))
-	for _, tag := range tags {
-		if strings.TrimSpace(strings.ToLower(tag)) == normalizedTarget {
-			return true
-		}
-	}
-	return false
 }
 
 // TestHandler_CreateSession tests session creation via API.
@@ -175,7 +164,7 @@ func TestHandler_CreateSessionInWorkspaceUsesEntryAgent(t *testing.T) {
 	}
 }
 
-func TestHandler_CreateSessionInWorkspaceAutoCreatesWorkspaceManagerWhenMissing(t *testing.T) {
+func TestHandler_CreateSessionInWorkspaceWithMissingEntryAgent_NoAutoCreation(t *testing.T) {
 	handler, cleanup := createTestHandler(t)
 	defer cleanup()
 
@@ -214,37 +203,20 @@ func TestHandler_CreateSessionInWorkspaceAutoCreatesWorkspaceManagerWhenMissing(
 		t.Fatalf("expected 201, got %d: %s", w.Code, w.Body.String())
 	}
 
-	var resp map[string]interface{}
-	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
-		t.Fatalf("failed to parse response: %v", err)
+	// The entry agent "Workspace Manager" doesn't exist in the agent store,
+	// so no agent should be auto-created. The session should still be created
+	// but without an agent_name.
+	_, ok := handler.agentStore.GetAgent("Workspace Manager")
+	if ok {
+		t.Fatal("expected no auto-creation of workspace-manager agent")
 	}
-
-	sess := resp["session"].(map[string]interface{})
-	if got := sess["agent_name"]; got != "Spain Manager" {
-		t.Fatalf("expected missing workspace manager to be auto-created, got %#v", got)
-	}
-
-	updated, err := handler.store.GetWorkspace(context.Background(), ws.ID)
-	if err != nil {
-		t.Fatalf("failed to reload workspace: %v", err)
-	}
-	if got := currentWorkspaceEntryAgentName(updated); got != "Spain Manager" {
-		t.Fatalf("expected workspace entry agent to be auto-created, got %q", got)
-	}
-	if len(updated.AgentInstances) != 2 {
-		t.Fatalf("expected stale workspace agent plus auto-created manager, got %#v", updated.AgentInstances)
-	}
-
-	ag, ok := handler.agentStore.GetAgent("Spain Manager")
-	if !ok || ag == nil {
-		t.Fatal("expected Spain Manager agent to be created")
-	}
-	if ag.Type != "workspace-manager" {
-		t.Fatalf("expected Spain Manager to be a workspace-manager, got %q", ag.Type)
+	_, ok = handler.agentStore.GetAgent("Spain Manager")
+	if ok {
+		t.Fatal("expected no auto-creation of workspace-manager agent")
 	}
 }
 
-func TestHandler_GetWorkspaceAutoCreatesWorkspaceManagerWhenMissing(t *testing.T) {
+func TestHandler_GetWorkspaceWithNoEntryAgent_NoAutoCreation(t *testing.T) {
 	handler, cleanup := createTestHandler(t)
 	defer cleanup()
 
@@ -272,30 +244,16 @@ func TestHandler_GetWorkspaceAutoCreatesWorkspaceManagerWhenMissing(t *testing.T
 	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
 		t.Fatalf("failed to parse response: %v", err)
 	}
-	if got := resp["entry_agent_name"]; got != "Brooklyn Nerds Manager" {
-		t.Fatalf("expected response entry agent to be auto-created, got %#v", got)
+
+	// No entry agent should be auto-created for a workspace without one
+	if got := resp["entry_agent_name"]; got != nil && got != "" {
+		t.Fatalf("expected no entry agent for workspace without agents, got %#v", got)
 	}
 
-	updated, err := handler.store.GetWorkspace(context.Background(), ws.ID)
-	if err != nil {
-		t.Fatalf("failed to reload workspace: %v", err)
-	}
-	if got := currentWorkspaceEntryAgentName(updated); got != "Brooklyn Nerds Manager" {
-		t.Fatalf("expected workspace entry agent to be auto-created, got %q", got)
-	}
-	if len(updated.Agents) != 1 || updated.Agents[0] != "Brooklyn Nerds Manager" {
-		t.Fatalf("expected workspace agents to include auto-created manager, got %#v", updated.Agents)
-	}
-	if len(updated.AgentInstances) != 1 || !updated.AgentInstances[0].EntryPoint {
-		t.Fatalf("expected a single entry-point manager instance, got %#v", updated.AgentInstances)
-	}
-
-	ag, ok := handler.agentStore.GetAgent("Brooklyn Nerds Manager")
-	if !ok || ag == nil {
-		t.Fatal("expected Brooklyn Nerds Manager agent to be created")
-	}
-	if ag.Type != "workspace-manager" {
-		t.Fatalf("expected Brooklyn Nerds Manager to be a workspace-manager, got %q", ag.Type)
+	// Agent store should have no new agents
+	_, ok := handler.agentStore.GetAgent("Brooklyn Nerds Manager")
+	if ok {
+		t.Fatal("expected no auto-creation of workspace-manager agent")
 	}
 }
 
@@ -1125,51 +1083,46 @@ func TestHandler_CreateWorkspaceUsesExplicitEntryAgent(t *testing.T) {
 	}
 }
 
-func TestEnsureWorkspaceEntryAgent_CreatesWorkspaceManagerAgent(t *testing.T) {
+func TestValidateWorkspaceEntryAgent_ExistingAgent(t *testing.T) {
 	handler, cleanup := createTestHandler(t)
 	defer cleanup()
 
-	agentName, created, err := handler.ensureWorkspaceEntryAgent("Spain", "")
-	if err != nil {
-		t.Fatalf("failed to ensure workspace entry agent: %v", err)
-	}
-	if !created {
-		t.Fatal("expected workspace entry agent to be created")
-	}
-	if agentName != "Spain Manager" {
-		t.Fatalf("expected default agent name %q, got %q", "Spain Manager", agentName)
+	// Create an agent first
+	if err := handler.agentStore.CreateAgent("test-agent", &agentstore.CreateAgentConfig{
+		Type: "general",
+	}); err != nil {
+		t.Fatalf("failed to create test agent: %v", err)
 	}
 
-	ag, ok := handler.agentStore.GetAgent(agentName)
-	if !ok || ag == nil {
-		t.Fatalf("expected created agent %q to exist", agentName)
+	agentName, err := handler.validateWorkspaceEntryAgent("test-agent")
+	if err != nil {
+		t.Fatalf("failed to validate workspace entry agent: %v", err)
 	}
-	if ag.Type != "workspace-manager" {
-		t.Fatalf("expected workspace-manager type, got %q", ag.Type)
+	if agentName != "test-agent" {
+		t.Fatalf("expected agent name %q, got %q", "test-agent", agentName)
 	}
-	if ag.Role != types.RoleOrchestrator {
-		t.Fatalf("expected orchestrator role, got %q", ag.Role)
+}
+
+func TestValidateWorkspaceEntryAgent_NonExistentAgent(t *testing.T) {
+	handler, cleanup := createTestHandler(t)
+	defer cleanup()
+
+	_, err := handler.validateWorkspaceEntryAgent("does-not-exist")
+	if err == nil {
+		t.Fatal("expected error for non-existent agent")
 	}
-	if ag.Metadata == nil {
-		t.Fatal("expected metadata for workspace manager")
+}
+
+func TestValidateWorkspaceEntryAgent_EmptyName(t *testing.T) {
+	handler, cleanup := createTestHandler(t)
+	defer cleanup()
+
+	agentName, err := handler.validateWorkspaceEntryAgent("")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
 	}
-	if !strings.Contains(ag.Metadata.Description, "Coordinate workspace tasks") {
-		t.Fatalf("unexpected metadata description: %q", ag.Metadata.Description)
-	}
-	if !containsTag(ag.Metadata.Tags, "workspace-manager") || !containsTag(ag.Metadata.Tags, "orchestrator") {
-		t.Fatalf("expected workspace-manager/orchestrator tags, got %#v", ag.Metadata.Tags)
-	}
-	if !strings.Contains(ag.Settings.SystemPrompt, "workspace manager") {
-		t.Fatalf("expected workspace-manager prompt, got %q", ag.Settings.SystemPrompt)
-	}
-	if !strings.Contains(ag.Settings.SystemPrompt, "ask the user before adding or switching to a specialist") {
-		t.Fatalf("expected specialist confirmation guidance in prompt, got %q", ag.Settings.SystemPrompt)
-	}
-	if !strings.Contains(ag.Settings.SystemPrompt, "do not generate an itinerary or recommendations on the first reply") {
-		t.Fatalf("expected strict travel intake guidance in prompt, got %q", ag.Settings.SystemPrompt)
-	}
-	if !strings.Contains(ag.Settings.SystemPrompt, "default to orchestration for full travel-planning work") {
-		t.Fatalf("expected specialist-first travel orchestration guidance in prompt, got %q", ag.Settings.SystemPrompt)
+	if agentName != "" {
+		t.Fatalf("expected empty agent name, got %q", agentName)
 	}
 }
 

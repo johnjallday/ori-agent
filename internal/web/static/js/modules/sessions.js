@@ -2561,7 +2561,7 @@ const sessionManager = {
     const model = modelSelect?.value;
     const selectedModelOption = modelSelect?.selectedOptions?.[0] || null;
     const selectedProvider = String(selectedModelOption?.getAttribute('data-provider') || this.editAgentCurrentProvider || '').trim();
-    const validProviders = new Set(['openai', 'codex', 'claude_code', 'claude', 'gemini', 'ollama']);
+    const validProviders = new Set(['openai', 'codex', 'claude_code', 'claude', 'gemini', 'ollama', 'lmstudio', 'mlx_lm']);
     const resolvedProvider = validProviders.has(selectedProvider) ? selectedProvider : String(this.editAgentCurrentProvider || '').trim();
 
     if (!newName) {

@@ -19,6 +19,8 @@ var (
 	ErrInvalidDeviceType = errors.New("invalid device type")
 )
 
+const DefaultAssistantName = "Ori"
+
 // Manager handles onboarding state persistence and logic
 type Manager struct {
 	mu        sync.RWMutex
@@ -39,7 +41,7 @@ func NewManager(statePath string) *Manager {
 				StepsCompleted: []string{},
 			},
 			AssistantProgress: types.NewAssistantProgress(),
-			AssistantName:     "Assistant",
+			AssistantName:     DefaultAssistantName,
 		},
 	}
 
@@ -259,7 +261,7 @@ func (m *Manager) ensureStateDefaultsUnlocked() {
 		m.state.AssistantProgress.EnsureDefaults()
 	}
 	if m.state.AssistantName == "" {
-		m.state.AssistantName = "Assistant"
+		m.state.AssistantName = DefaultAssistantName
 	}
 }
 
@@ -439,7 +441,7 @@ func (m *Manager) SetNames(userName, assistantName string) error {
 	m.state.UserName = userName
 	m.state.AssistantName = strings.TrimSpace(assistantName)
 	if m.state.AssistantName == "" {
-		m.state.AssistantName = "Assistant"
+		m.state.AssistantName = DefaultAssistantName
 	}
 	return m.saveUnlocked()
 }
@@ -447,7 +449,7 @@ func (m *Manager) SetNames(userName, assistantName string) error {
 func (m *Manager) getAssistantNameLocked() string {
 	name := strings.TrimSpace(m.state.AssistantName)
 	if name == "" {
-		return "Assistant"
+		return DefaultAssistantName
 	}
 	return name
 }

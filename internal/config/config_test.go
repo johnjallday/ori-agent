@@ -35,6 +35,18 @@ func TestValidateSystemModel(t *testing.T) {
 			wantErr:  false,
 		},
 		{
+			name:     "valid lmstudio provider",
+			provider: "lmstudio",
+			model:    "openai/gpt-oss-20b",
+			wantErr:  false,
+		},
+		{
+			name:     "valid mlx_lm provider",
+			provider: "mlx_lm",
+			model:    "mlx-community/Llama-3.2-3B-Instruct-4bit",
+			wantErr:  false,
+		},
+		{
 			name:     "valid gemini provider",
 			provider: "gemini",
 			model:    "gemini-2.5-flash",
@@ -115,7 +127,7 @@ func TestValidProviders(t *testing.T) {
 	providers := ValidProviders()
 
 	// Check expected providers exist
-	expected := []string{"openai", "codex", "claude_code", "claude", "gemini", "ollama"}
+	expected := []string{"openai", "codex", "claude_code", "claude", "gemini", "ollama", "lmstudio", "mlx_lm"}
 	if len(providers) != len(expected) {
 		t.Errorf("ValidProviders() returned %d providers, want %d", len(providers), len(expected))
 	}

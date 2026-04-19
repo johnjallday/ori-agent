@@ -252,14 +252,18 @@ func (te *TaskExecutor) executeTask(ws *Workspace, task Task) {
 
 		// Debug: Check what was added to context
 		if inputResults, ok := enrichedContext["input_task_results"]; ok {
-			resultsMap := inputResults.(map[string]string)
-			logger.Debug("Injected input task results into task context", logger.Fields{"result": len(resultsMap), "id": task.ID})
-			for taskID, result := range resultsMap {
-				preview := result
-				if len(preview) > 100 {
-					preview = preview[:100] + "..."
+			resultsMap, ok := inputResults.(map[string]string)
+			if !ok {
+				logger.Warn("Unexpected input_task_results type", logger.Fields{"task_id": task.ID})
+			} else {
+				logger.Debug("Injected input task results into task context", logger.Fields{"result": len(resultsMap), "id": task.ID})
+				for taskID, result := range resultsMap {
+					preview := result
+					if len(preview) > 100 {
+						preview = preview[:100] + "..."
+					}
+					logger.Debug("- Task result", logger.Fields{"task_id": taskID, "preview": preview})
 				}
-				logger.Debug("- Task result", logger.Fields{"task_id": taskID, "preview": preview})
 			}
 		} else {
 			logger.Warn("Warning: No input results found for task despite having InputTaskIDs", logger.Fields{"task_id": task.ID})

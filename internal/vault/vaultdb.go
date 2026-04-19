@@ -14,6 +14,8 @@ import (
 )
 
 const vaultFileSchemaVersion = 1
+const vaultPackageExtension = ".orivault"
+const vaultPackageDatabaseFileName = "vault.db"
 
 type vaultFileMetadata struct {
 	VaultID       string
@@ -41,6 +43,104 @@ func defaultVaultFilesBaseDir(dbPath string) string {
 		return cwd
 	}
 	return os.TempDir()
+}
+
+func normalizeVaultStorageMode(mode string) string {
+	switch strings.ToLower(strings.TrimSpace(mode)) {
+	case "", VaultStorageModeManaged:
+		return VaultStorageModeManaged
+	case VaultStorageModeCustomDir:
+		return VaultStorageModeCustomDir
+	default:
+		return strings.ToLower(strings.TrimSpace(mode))
+	}
+}
+
+func defaultVaultPackageName(vaultID string) string {
+	vaultID = normalizeVaultID(vaultID)
+	if vaultID == "" {
+		vaultID = "vault"
+	}
+	return vaultID + vaultPackageExtension
+}
+
+func defaultVaultPackageFilePath(vaultID string) string {
+	return filepath.Join(defaultVaultPackageName(vaultID), vaultPackageDatabaseFileName)
+}
+
+func vaultPackageDirectoryForFilePath(path string) string {
+	path = filepath.Clean(strings.TrimSpace(path))
+	if path == "" {
+		return ""
+	}
+
+	if filepath.Base(path) != vaultPackageDatabaseFileName {
+		return ""
+	}
+
+	packageDir := filepath.Dir(path)
+	if strings.HasSuffix(strings.ToLower(filepath.Base(packageDir)), vaultPackageExtension) {
+		return packageDir
+	}
+	return ""
+}
+
+func resolveVaultPackageDirectory(directory string, vaultID string) string {
+	directory = filepath.Clean(strings.TrimSpace(directory))
+	if directory == "" {
+		return ""
+	}
+	if strings.HasSuffix(strings.ToLower(filepath.Base(directory)), vaultPackageExtension) {
+		return directory
+	}
+	return filepath.Join(directory, defaultVaultPackageName(vaultID))
+}
+
+func normalizeVaultStorageDirectory(directory string) (string, error) {
+	directory = strings.TrimSpace(directory)
+	if directory == "" {
+		return "", ErrVaultStoragePathRequired
+	}
+
+	absolutePath, err := filepath.Abs(directory)
+	if err != nil {
+		return "", fmt.Errorf("%w: %v", ErrVaultStoragePathInvalid, err)
+	}
+	absolutePath = filepath.Clean(absolutePath)
+
+	info, err := os.Stat(absolutePath)
+	switch {
+	case errors.Is(err, os.ErrNotExist):
+		if err := os.MkdirAll(absolutePath, 0o755); err != nil {
+			return "", fmt.Errorf("%w: %v", ErrVaultStoragePathInvalid, err)
+		}
+		return absolutePath, nil
+	case err != nil:
+		return "", fmt.Errorf("%w: %v", ErrVaultStoragePathInvalid, err)
+	case !info.IsDir():
+		return "", fmt.Errorf("%w: path is not a directory", ErrVaultStoragePathInvalid)
+	default:
+		return absolutePath, nil
+	}
+}
+
+func vaultFileExists(path string) (bool, error) {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return false, nil
+	}
+
+	info, err := os.Stat(path)
+	switch {
+	case errors.Is(err, os.ErrNotExist):
+		return false, nil
+	case err != nil:
+		return false, err
+	case info.IsDir():
+		return false, fmt.Errorf("%w: path is a directory", ErrVaultStoragePathInvalid)
+	default:
+		return true, nil
+	}
 }
 
 func openVaultFile(ctx context.Context, path string) (*sql.DB, error) {
@@ -238,9 +338,9 @@ func validateVaultFileSchema(ctx context.Context, db *sql.DB) error {
 	return nil
 }
 
-// ensureVaultFileSchema prepares a per-vault SQLite file for encrypted vault data.
-// Each vault file is self-contained: metadata, wrapped key material, records,
-// folders, attachments, grants, and audit events all live in the same database.
+// ensureVaultFileSchema prepares a per-vault SQLite database for encrypted
+// vault data. Each vault package keeps metadata, wrapped key material, records,
+// folders, attachments, grants, and audit events in its internal `vault.db`.
 func ensureVaultFileSchema(ctx context.Context, db *sql.DB) error {
 	if db == nil {
 		return fmt.Errorf("vault file database is required")

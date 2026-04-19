@@ -240,14 +240,6 @@ func (h *HomeAssistantRouteHandler) RoutePrompt(prompt string, context *HomeAssi
 		return nil, errHomeAssistantPromptRequired
 	}
 
-	// Keep a reserved orchestrator agent available for generic fallback routing.
-	// NOTE: Automatic creation of "Ori" is now removed to respect user preference for no default agent.
-	// systemProvider, systemModel := "", ""
-	// if h.SystemModelReader != nil {
-	// 	systemProvider, systemModel = h.SystemModelReader.GetSystemModel()
-	// }
-	// _ = ensureSystemAssistantAgentWithSystemModel(h.State, systemProvider, systemModel)
-
 	routeContext := normalizeHomeAssistantRouteContext(context)
 	intent := detectHomeAssistantIntent(prompt)
 	intentVariant := detectHomeAssistantIntentVariant(prompt, intent, routeContext)

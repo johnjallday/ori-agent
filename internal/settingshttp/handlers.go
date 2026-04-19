@@ -29,6 +29,7 @@ type Handler struct {
 	clientFactory           *client.Factory
 	llmFactory              *llm.Factory
 	utilitySettingsReloader func()
+	vaultRootUpdater        func(string) error
 }
 
 func NewHandler(store store.Store, configManager *config.Manager, clientFactory *client.Factory, llmFactory *llm.Factory) *Handler {
@@ -43,6 +44,11 @@ func NewHandler(store store.Store, configManager *config.Manager, clientFactory 
 // SetUtilitySettingsReloader sets a callback invoked after utility settings are saved.
 func (h *Handler) SetUtilitySettingsReloader(fn func()) {
 	h.utilitySettingsReloader = fn
+}
+
+// SetVaultRootUpdater sets a callback invoked after vault root settings are saved.
+func (h *Handler) SetVaultRootUpdater(fn func(string) error) {
+	h.vaultRootUpdater = fn
 }
 
 func resolveAssistantDefaultAgentName(st store.Store) string {
@@ -167,6 +173,14 @@ type WorkspaceRootResponse struct {
 	Source                 string `json:"source"`
 }
 
+// VaultRootResponse describes the configured and effective vault directory.
+type VaultRootResponse struct {
+	VaultRoot          string `json:"vault_root,omitempty"`
+	EffectiveVaultRoot string `json:"effective_vault_root"`
+	DefaultVaultRoot   string `json:"default_vault_root"`
+	Source             string `json:"source"`
+}
+
 // WorkspaceRootSettingsHandler handles default workspace directory persistence.
 func (h *Handler) WorkspaceRootSettingsHandler(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
@@ -215,6 +229,67 @@ func (h *Handler) WorkspaceRootSettingsHandler(w http.ResponseWriter, r *http.Re
 			"effective_workspace_root": effectiveRoot,
 			"default_workspace_root":   config.DefaultWorkspaceRoot(),
 			"source":                   config.WorkspaceRootSource(configured),
+		})
+
+	default:
+		w.WriteHeader(http.StatusMethodNotAllowed)
+	}
+}
+
+// VaultRootSettingsHandler handles default vault directory persistence.
+func (h *Handler) VaultRootSettingsHandler(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodGet:
+		configured := h.configManager.GetVaultRoot()
+		orihttp.WriteJSON(w, VaultRootResponse{
+			VaultRoot:          configured,
+			EffectiveVaultRoot: config.ResolveVaultRoot(configured),
+			DefaultVaultRoot:   config.DefaultVaultRoot(),
+			Source:             config.VaultRootSource(configured),
+		})
+
+	case http.MethodPost:
+		var req struct {
+			VaultRoot string `json:"vault_root"`
+		}
+		if !orihttp.ParseJSONBody(w, r, &req) {
+			return
+		}
+
+		configured, err := config.NormalizeVaultRoot(req.VaultRoot)
+		if err != nil {
+			orihttp.RespondErrorWithErr(w, http.StatusBadRequest, "Invalid vault directory", err)
+			return
+		}
+
+		effectiveRoot := config.ResolveVaultRoot(configured)
+		if err := os.MkdirAll(effectiveRoot, 0755); err != nil {
+			orihttp.RespondErrorWithErr(w, http.StatusBadRequest, "Unable to use vault directory", err)
+			return
+		}
+
+		if err := h.configManager.SetVaultRoot(configured); err != nil {
+			orihttp.RespondErrorWithErr(w, http.StatusBadRequest, "Invalid vault directory", err)
+			return
+		}
+
+		if err := h.configManager.Save(); err != nil {
+			orihttp.InternalError(w, err.Error())
+			return
+		}
+		if h.vaultRootUpdater != nil {
+			if err := h.vaultRootUpdater(effectiveRoot); err != nil {
+				orihttp.RespondErrorWithErr(w, http.StatusBadRequest, "Unable to apply vault directory", err)
+				return
+			}
+		}
+
+		orihttp.WriteJSON(w, map[string]any{
+			"success":              true,
+			"vault_root":           configured,
+			"effective_vault_root": effectiveRoot,
+			"default_vault_root":   config.DefaultVaultRoot(),
+			"source":               config.VaultRootSource(configured),
 		})
 
 	default:
@@ -661,7 +736,7 @@ func (h *Handler) ProvidersHandler(w http.ResponseWriter, r *http.Request) {
 	providers := []ProviderInfo{}
 
 	// Get all registered providers from the factory
-	providerNames := []string{"openai", "codex", "claude_code", "claude", "gemini", "ollama"}
+	providerNames := []string{"openai", "codex", "claude_code", "claude", "gemini", "ollama", "lmstudio", "mlx_lm"}
 
 	for _, name := range providerNames {
 		provider, err := h.llmFactory.GetProvider(name)
@@ -677,7 +752,7 @@ func (h *Handler) ProvidersHandler(w http.ResponseWriter, r *http.Request) {
 			// Mark as unavailable and return empty models list
 			available = false
 			displayName = getProviderDisplayName(name)
-			providerType = "cloud"
+			providerType = defaultProviderType(name)
 			requiresKey = providerRequiresKey(name)
 			providerModels = []ProviderModel{} // Empty list - no models shown without API key
 		} else {
@@ -748,36 +823,36 @@ func getModelCategories(provider, modelName string) []string {
 	case "openai":
 		// Flagship models (gpt-5, gpt-4.1) appear in orchestration and research
 		if modelName == "gpt-5" || modelName == "gpt-4.1" {
-			return []string{"workspace-manager", "orchestration", "research"}
+			return []string{"orchestration", "research"}
 		}
 		// O-series models (reasoning models) are perfect for orchestration
 		if strings.HasPrefix(modelName, "o1") || strings.HasPrefix(modelName, "o3") {
-			return []string{"workspace-manager", "orchestration", "research"}
+			return []string{"orchestration", "research"}
 		}
 		// General tier models can do orchestration too
 		if modelName == "gpt-5-mini" || modelName == "gpt-4.1-mini" {
-			return []string{"general", "workspace-manager", "orchestration"}
+			return []string{"general", "orchestration"}
 		}
 		return []string{categorizeModel(provider, modelName)}
 
 	case "claude", "claude_code":
 		// Sonnet and Opus are great for orchestration
 		if strings.Contains(modelName, "sonnet") || strings.Contains(modelName, "opus") {
-			return []string{categorizeModel(provider, modelName), "workspace-manager", "orchestration"}
+			return []string{categorizeModel(provider, modelName), "orchestration"}
 		}
 		return []string{categorizeModel(provider, modelName)}
 
-	case "ollama":
+	case "ollama", "lmstudio", "mlx_lm":
 		lowerName := strings.ToLower(modelName)
 
 		// llama3 models appear in all categories (they're versatile local models)
 		if strings.Contains(lowerName, "llama3") {
-			return []string{"tool-calling", "general", "workspace-manager", "orchestration", "research"}
+			return []string{"tool-calling", "general", "orchestration", "research"}
 		}
 
 		// Larger models can do orchestration
 		if strings.Contains(lowerName, "70b") || strings.Contains(lowerName, "mixtral") {
-			return []string{"general", "workspace-manager", "orchestration", "research"}
+			return []string{"general", "orchestration", "research"}
 		}
 
 		// Other models get their single category
@@ -785,7 +860,7 @@ func getModelCategories(provider, modelName string) []string {
 	case "gemini":
 		lowerName := strings.ToLower(modelName)
 		if strings.Contains(lowerName, "pro") {
-			return []string{"research", "workspace-manager", "orchestration"}
+			return []string{"research", "orchestration"}
 		}
 		if strings.Contains(lowerName, "flash") {
 			return []string{"tool-calling", "general"}
@@ -799,9 +874,9 @@ func getModelCategories(provider, modelName string) []string {
 		case "general":
 			// Treat Codex mini as both tool-calling and general so it can be used
 			// for lightweight agents while remaining available in general flows.
-			return []string{"tool-calling", "general", "workspace-manager", "orchestration"}
+			return []string{"tool-calling", "general", "orchestration"}
 		default:
-			return []string{"research", "workspace-manager", "orchestration"}
+			return []string{"research", "orchestration"}
 		}
 
 	default:
@@ -856,7 +931,7 @@ func categorizeModel(provider, modelName string) string {
 		}
 		// Opus models are research tier (most capable)
 		return "research"
-	case "ollama":
+	case "ollama", "lmstudio", "mlx_lm":
 		// Categorize Ollama models - use pattern matching for flexibility
 		lowerName := strings.ToLower(modelName)
 
@@ -911,10 +986,23 @@ func getProviderDisplayName(name string) string {
 		return "Anthropic Claude"
 	case "ollama":
 		return "Ollama (Local)"
+	case "lmstudio":
+		return "LM Studio (Local)"
+	case "mlx_lm":
+		return "MLX-LM (Local)"
 	case "gemini":
 		return "Google Gemini"
 	default:
 		return name
+	}
+}
+
+func defaultProviderType(name string) string {
+	switch name {
+	case "ollama", "lmstudio", "mlx_lm":
+		return "local"
+	default:
+		return "cloud"
 	}
 }
 

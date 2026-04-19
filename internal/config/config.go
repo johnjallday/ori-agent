@@ -43,7 +43,7 @@ type Settings struct {
 	AllowedOrigins  []string `json:"allowed_origins,omitempty"` // CORS allowed origins (defaults to localhost)
 
 	// System model settings - used for internal AI tasks (auto-config, suggestions, etc.)
-	SystemProvider        string `json:"system_provider,omitempty"`         // Provider for system tasks (e.g., "openai", "codex", "claude_code", "claude", "gemini", "ollama")
+	SystemProvider        string `json:"system_provider,omitempty"`         // Provider for system tasks (e.g., "openai", "codex", "claude_code", "claude", "gemini", "ollama", "lmstudio", "mlx_lm")
 	SystemModel           string `json:"system_model,omitempty"`            // Model for system tasks (e.g., "gpt-4o-mini", "claude-3-haiku-20240307")
 	SystemReasoningEffort string `json:"system_reasoning_effort,omitempty"` // Optional reasoning effort for system tasks (currently used by Codex: low, medium, high, xhigh)
 
@@ -73,6 +73,7 @@ type Settings struct {
 
 	// Workspace settings
 	WorkspaceRoot string `json:"workspace_root,omitempty"` // Default directory for new workspace folders (e.g., ~/Documents/Ori Workspaces)
+	VaultRoot     string `json:"vault_root,omitempty"`     // Default directory for new managed vault files
 
 	// Native utility settings
 	Utility UtilitySettings `json:"utility,omitempty"`
@@ -176,6 +177,26 @@ func DefaultWorkspaceRoot() string {
 	return filepath.Join(home, "Ori Workspaces")
 }
 
+// DefaultVaultRoot returns the fallback directory used for new managed vault files.
+func DefaultVaultRoot() string {
+	if dir := strings.TrimSpace(os.Getenv("ORI_DATA_DIR")); dir != "" {
+		if abs, err := filepath.Abs(dir); err == nil {
+			return filepath.Join(abs, "vaults")
+		}
+		return filepath.Join(dir, "vaults")
+	}
+
+	cwd, err := os.Getwd()
+	if err == nil {
+		if abs, absErr := filepath.Abs(cwd); absErr == nil {
+			return filepath.Join(abs, "vaults")
+		}
+		return filepath.Join(cwd, "vaults")
+	}
+
+	return filepath.Join(".", "vaults")
+}
+
 // NormalizeWorkspaceRoot expands and normalizes a configured workspace root path.
 func NormalizeWorkspaceRoot(path string) (string, error) {
 	path = strings.TrimSpace(path)
@@ -191,6 +212,26 @@ func NormalizeWorkspaceRoot(path string) (string, error) {
 	abs, err := filepath.Abs(expanded)
 	if err != nil {
 		return "", fmt.Errorf("failed to resolve workspace directory: %w", err)
+	}
+
+	return filepath.Clean(abs), nil
+}
+
+// NormalizeVaultRoot expands and normalizes a configured vault root path.
+func NormalizeVaultRoot(path string) (string, error) {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return "", nil
+	}
+
+	expanded, err := platform.ExpandHome(path)
+	if err != nil {
+		return "", fmt.Errorf("failed to expand vault directory: %w", err)
+	}
+
+	abs, err := filepath.Abs(expanded)
+	if err != nil {
+		return "", fmt.Errorf("failed to resolve vault directory: %w", err)
 	}
 
 	return filepath.Clean(abs), nil
@@ -213,12 +254,40 @@ func ResolveWorkspaceRoot(configured string) string {
 	return DefaultWorkspaceRoot()
 }
 
+// ResolveVaultRoot determines the effective vault root using settings first,
+// then ORI_VAULT_DIR, then the built-in default.
+func ResolveVaultRoot(configured string) string {
+	if normalized, err := NormalizeVaultRoot(configured); err == nil && normalized != "" {
+		return normalized
+	}
+
+	if envPath := strings.TrimSpace(os.Getenv("ORI_VAULT_DIR")); envPath != "" {
+		if normalized, err := NormalizeVaultRoot(envPath); err == nil && normalized != "" {
+			return normalized
+		}
+		return envPath
+	}
+
+	return DefaultVaultRoot()
+}
+
 // WorkspaceRootSource reports where the effective workspace root comes from.
 func WorkspaceRootSource(configured string) string {
 	if strings.TrimSpace(configured) != "" {
 		return "settings"
 	}
 	if strings.TrimSpace(os.Getenv("WORKSPACE_DIR")) != "" {
+		return "environment"
+	}
+	return "default"
+}
+
+// VaultRootSource reports where the effective vault root comes from.
+func VaultRootSource(configured string) string {
+	if strings.TrimSpace(configured) != "" {
+		return "settings"
+	}
+	if strings.TrimSpace(os.Getenv("ORI_VAULT_DIR")) != "" {
 		return "environment"
 	}
 	return "default"
@@ -325,6 +394,23 @@ func (m *Manager) GetWorkspaceRoot() string {
 	return normalized
 }
 
+// GetVaultRoot returns the explicitly configured vault root, if any.
+func (m *Manager) GetVaultRoot() string {
+	m.mu.RLock()
+	raw := strings.TrimSpace(m.settings.VaultRoot)
+	m.mu.RUnlock()
+
+	if raw == "" {
+		return ""
+	}
+
+	normalized, err := NormalizeVaultRoot(raw)
+	if err != nil {
+		return raw
+	}
+	return normalized
+}
+
 // SetWorkspaceRoot updates the configured default workspace directory.
 func (m *Manager) SetWorkspaceRoot(path string) error {
 	normalized, err := NormalizeWorkspaceRoot(path)
@@ -344,6 +430,29 @@ func (m *Manager) SetWorkspaceRoot(path string) error {
 
 	m.mu.Lock()
 	m.settings.WorkspaceRoot = normalized
+	m.mu.Unlock()
+	return nil
+}
+
+// SetVaultRoot updates the configured default vault directory.
+func (m *Manager) SetVaultRoot(path string) error {
+	normalized, err := NormalizeVaultRoot(path)
+	if err != nil {
+		return err
+	}
+
+	if normalized != "" {
+		info, statErr := os.Stat(normalized)
+		if statErr == nil && !info.IsDir() {
+			return fmt.Errorf("vault directory must be a folder")
+		}
+		if statErr != nil && !errors.Is(statErr, os.ErrNotExist) {
+			return fmt.Errorf("failed to inspect vault directory: %w", statErr)
+		}
+	}
+
+	m.mu.Lock()
+	m.settings.VaultRoot = normalized
 	m.mu.Unlock()
 	return nil
 }
@@ -570,6 +679,12 @@ func (m *Manager) validate() error {
 		normalized, err := NormalizeWorkspaceRoot(m.settings.WorkspaceRoot)
 		if err == nil {
 			m.settings.WorkspaceRoot = normalized
+		}
+	}
+	if m.settings.VaultRoot != "" {
+		normalized, err := NormalizeVaultRoot(m.settings.VaultRoot)
+		if err == nil {
+			m.settings.VaultRoot = normalized
 		}
 	}
 
@@ -989,7 +1104,7 @@ func (m *Manager) IsSystemModelConfigured() bool {
 
 // ValidProviders returns the list of valid provider names for system model
 func ValidProviders() []string {
-	return []string{"openai", "codex", "claude_code", "claude", "gemini", "ollama"}
+	return []string{"openai", "codex", "claude_code", "claude", "gemini", "ollama", "lmstudio", "mlx_lm"}
 }
 
 // validateSystemModel validates the system model configuration
@@ -1022,12 +1137,14 @@ func validateSystemModel(provider, model string) error {
 		return fmt.Errorf("system model cannot be empty when provider is set")
 	}
 
-	// Basic model format validation - must contain only alphanumeric, dash, underscore, dot, colon
+	// Basic model format validation - must contain only alphanumeric, dash,
+	// underscore, dot, colon, or slash. Slash is needed for local model IDs
+	// such as "mlx-community/Llama-3.2-3B-Instruct-4bit".
 	for _, char := range model {
 		isLower := char >= 'a' && char <= 'z'
 		isUpper := char >= 'A' && char <= 'Z'
 		isDigit := char >= '0' && char <= '9'
-		isAllowed := char == '-' || char == '_' || char == '.' || char == ':'
+		isAllowed := char == '-' || char == '_' || char == '.' || char == ':' || char == '/'
 		if !isLower && !isUpper && !isDigit && !isAllowed {
 			return fmt.Errorf("invalid system model %q: contains invalid character %q", model, string(char))
 		}

@@ -254,13 +254,15 @@ func (h *Handler) createWorkspace(w http.ResponseWriter, r *http.Request) {
 	// Otherwise the workspace is created without an entry agent;
 	// the UI will prompt the user to create one with their choice of model/provider.
 	if req.EntryAgentName != "" {
-		entryAgentName, _, err := h.ensureWorkspaceEntryAgent(req.Name, req.EntryAgentName)
+		entryAgentName, err := h.validateWorkspaceEntryAgent(req.EntryAgentName)
 		if err != nil {
-			logger.Error("Failed to provision workspace entry agent", logger.Fields{"name": req.Name, "error": err})
+			logger.Error("Failed to validate workspace entry agent", logger.Fields{"name": req.Name, "error": err})
 			_ = orihttp.RespondBadRequest(w, err.Error())
 			return
 		}
-		setWorkspaceEntryAgent(ws, entryAgentName)
+		if entryAgentName != "" {
+			setWorkspaceEntryAgent(ws, entryAgentName)
+		}
 	}
 
 	if err := h.store.CreateWorkspace(r.Context(), ws); err != nil {
@@ -497,13 +499,7 @@ func (h *Handler) getWorkspace(w http.ResponseWriter, r *http.Request, id string
 		_ = orihttp.RespondInternalError(w, "Failed to get workspace")
 		return
 	}
-
-	if _, _, err := h.ensureWorkspaceManagerForWorkspace(r.Context(), workspace); err != nil {
-		logger.Warn("Failed to auto-provision workspace manager on workspace load", logger.Fields{
-			"workspace_id": id,
-			"error":        err,
-		})
-	}
+	workspace = h.hydrateWorkspaceMetadataFromFileStore(workspace)
 
 	orihttp.WriteJSON(w, h.buildWorkspaceDetailResponse(workspace))
 }
@@ -630,6 +626,14 @@ func (h *Handler) deleteWorkspace(w http.ResponseWriter, r *http.Request, id str
 
 	deleteSessions := r.URL.Query().Get("delete_sessions") == "true"
 
+	// Capture the entry agent name before deletion so it can be cleaned up.
+	entryAgentName := ""
+	if h.workspaceStore != nil && ws.Kind != session.WorkspaceKindGroup {
+		if folderWS, ferr := h.workspaceStore.Get(id); ferr == nil && folderWS != nil {
+			entryAgentName = strings.TrimSpace(folderWS.EntryAgentName())
+		}
+	}
+
 	// Handle session cleanup
 	if deleteSessions {
 		if err := h.store.DeleteSessionsByWorkspace(ctx, id); err != nil {
@@ -645,9 +649,6 @@ func (h *Handler) deleteWorkspace(w http.ResponseWriter, r *http.Request, id str
 		}
 	}
 
-	// Clean up auto-created workspace manager agent
-	h.deleteWorkspaceManagerAgent(ws)
-
 	// Delete the workspace
 	if err := h.store.DeleteWorkspace(ctx, id); err != nil {
 		logger.Error("Failed to delete workspace", logger.Fields{"id": id, "error": err})
@@ -660,6 +661,25 @@ func (h *Handler) deleteWorkspace(w http.ResponseWriter, r *http.Request, id str
 		if err := h.workspaceStore.Delete(id); err != nil {
 			logger.Warn("Failed to delete workspace folder", logger.Fields{"id": id, "error": err})
 			// Non-fatal: SQLite deletion succeeded
+		}
+	}
+
+	// Delete the workspace's entry agent so it no longer lingers in the agent
+	// store after its parent workspace is gone. Non-fatal on failure.
+	if entryAgentName != "" && h.agentStore != nil {
+		if _, exists := h.agentStore.GetAgent(entryAgentName); exists {
+			if err := h.agentStore.DeleteAgent(entryAgentName); err != nil {
+				logger.Warn("Failed to delete workspace entry agent", logger.Fields{
+					"workspace_id": id,
+					"agent":        entryAgentName,
+					"error":        err,
+				})
+			} else {
+				logger.Info("Deleted workspace entry agent", logger.Fields{
+					"workspace_id": id,
+					"agent":        entryAgentName,
+				})
+			}
 		}
 	}
 
@@ -683,6 +703,7 @@ func (h *Handler) listWorkspaces(w http.ResponseWriter, r *http.Request) {
 			_ = orihttp.RespondInternalError(w, "Failed to get workspaces")
 			return
 		}
+		workspaces = h.hydrateWorkspaceListFromFileStore(workspaces)
 
 		orihttp.WriteJSON(w, map[string]interface{}{
 			"folders":    workspaces,
@@ -703,11 +724,72 @@ func (h *Handler) listWorkspaces(w http.ResponseWriter, r *http.Request) {
 	}
 
 	workspaces = filterConcreteWorkspaces(workspaces)
+	workspaces = h.hydrateWorkspaceListFromFileStore(workspaces)
 
 	orihttp.WriteJSON(w, map[string]interface{}{
 		"folders":    workspaces,
 		"workspaces": workspaces,
 	})
+}
+
+func (h *Handler) hydrateWorkspaceListFromFileStore(workspaces []session.Workspace) []session.Workspace {
+	if len(workspaces) == 0 {
+		return workspaces
+	}
+
+	hydrated := make([]session.Workspace, len(workspaces))
+	for i := range workspaces {
+		hydrated[i] = workspaces[i]
+		hydrated[i].Children = h.hydrateWorkspaceListFromFileStore(workspaces[i].Children)
+		h.hydrateWorkspaceMetadataInto(&hydrated[i])
+	}
+
+	return hydrated
+}
+
+func (h *Handler) hydrateWorkspaceMetadataFromFileStore(workspace *session.Workspace) *session.Workspace {
+	if workspace == nil {
+		return nil
+	}
+
+	copy := *workspace
+	h.hydrateWorkspaceMetadataInto(&copy)
+	return &copy
+}
+
+func (h *Handler) hydrateWorkspaceMetadataInto(workspace *session.Workspace) {
+	if h == nil || h.workspaceStore == nil || workspace == nil || workspace.IsGroup() {
+		return
+	}
+
+	diskWorkspace, err := h.workspaceStore.Get(workspace.ID)
+	if err != nil || diskWorkspace == nil {
+		return
+	}
+
+	fallback := session.ConvertAgentWorkspace(diskWorkspace)
+	if fallback == nil {
+		return
+	}
+
+	if strings.TrimSpace(workspace.FolderSlug) == "" {
+		workspace.FolderSlug = fallback.FolderSlug
+	}
+	if workspace.SharedData == nil && fallback.SharedData != nil {
+		workspace.SharedData = fallback.SharedData
+	}
+	mergeWorkspaceJSONField(&workspace.DirectoryReferencesJSON, fallback.DirectoryReferencesJSON)
+	mergeWorkspaceJSONField(&workspace.MCPBindingsJSON, fallback.MCPBindingsJSON)
+	mergeWorkspaceJSONField(&workspace.AgentMCPAccessJSON, fallback.AgentMCPAccessJSON)
+	mergeWorkspaceJSONField(&workspace.SkillBindingsJSON, fallback.SkillBindingsJSON)
+	mergeWorkspaceJSONField(&workspace.AgentSkillAccessJSON, fallback.AgentSkillAccessJSON)
+}
+
+func mergeWorkspaceJSONField(target *json.RawMessage, fallback json.RawMessage) {
+	if target == nil || len(*target) > 0 || len(fallback) == 0 {
+		return
+	}
+	*target = append(json.RawMessage(nil), fallback...)
 }
 
 // handleWorkspaceRename handles POST /api/workspaces/{id}/rename.
@@ -991,13 +1073,15 @@ func (h *Handler) handleWorkspaceImport(w http.ResponseWriter, r *http.Request) 
 
 	// If an existing entry agent was specified, validate and set it.
 	if req.EntryAgentName != "" {
-		entryAgentName, _, err := h.ensureWorkspaceEntryAgent(workspaceName, req.EntryAgentName)
+		entryAgentName, err := h.validateWorkspaceEntryAgent(req.EntryAgentName)
 		if err != nil {
-			logger.Error("Failed to provision imported workspace entry agent", logger.Fields{"name": workspaceName, "error": err})
+			logger.Error("Failed to validate imported workspace entry agent", logger.Fields{"name": workspaceName, "error": err})
 			_ = orihttp.RespondBadRequest(w, err.Error())
 			return
 		}
-		setWorkspaceEntryAgent(workspace, entryAgentName)
+		if entryAgentName != "" {
+			setWorkspaceEntryAgent(workspace, entryAgentName)
+		}
 	}
 
 	recordWorkspaceImportTelemetry("import_attempt", logger.Fields{
@@ -1125,14 +1209,16 @@ func (h *Handler) restoreImportedWorkspace(ctx context.Context, folderPath strin
 
 	ensuredEntryAgentName := ""
 	if strings.TrimSpace(req.EntryAgentName) != "" {
-		agentName, _, err := h.ensureWorkspaceEntryAgent(rootWorkspace.Name, req.EntryAgentName)
+		agentName, err := h.validateWorkspaceEntryAgent(req.EntryAgentName)
 		if err != nil {
 			return nil, "", err
 		}
-		if err := ensureImportedWorkspaceEntryAgent(rootWorkspace, agentName); err != nil {
-			return nil, "", err
+		if agentName != "" {
+			if err := ensureImportedWorkspaceEntryAgent(rootWorkspace, agentName); err != nil {
+				return nil, "", err
+			}
+			ensuredEntryAgentName = agentName
 		}
-		ensuredEntryAgentName = agentName
 	}
 
 	_, warning, err := h.workspaceStore.Import(folderPath)
@@ -2290,12 +2376,10 @@ func (h *Handler) handleWorkspaceSync(w http.ResponseWriter, r *http.Request) {
 				logger.Warn("Sync import: workspace not found on disk", logger.Fields{"id": id, "error": err})
 				continue
 			}
-			sessionWS := &session.Workspace{
-				ID:          diskWS.ID,
-				Name:        diskWS.Name,
-				Description: diskWS.Description,
-				FolderSlug:  diskWS.FolderSlug,
-				ParentID:    diskWS.ParentID,
+			sessionWS := session.ConvertAgentWorkspace(diskWS)
+			if sessionWS == nil {
+				warnings = append(warnings, fmt.Sprintf("Failed to convert %s", diskWS.Name))
+				continue
 			}
 			if err := h.store.CreateWorkspace(ctx, sessionWS); err != nil {
 				logger.Warn("Sync import: failed to create workspace in store",

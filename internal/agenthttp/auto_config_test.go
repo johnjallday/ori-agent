@@ -29,7 +29,7 @@ func createTestConfigManager(t *testing.T, systemProvider, systemModel string) *
 func TestAutoConfigHandler_CheckLLMAvailability(t *testing.T) {
 	tests := []struct {
 		name             string
-		setupFactory     func() *llm.Factory
+		setupFactory     func(t *testing.T) *llm.Factory
 		systemProvider   string
 		systemModel      string
 		expectedAvail    bool
@@ -38,7 +38,7 @@ func TestAutoConfigHandler_CheckLLMAvailability(t *testing.T) {
 	}{
 		{
 			name: "no providers registered, no system model",
-			setupFactory: func() *llm.Factory {
+			setupFactory: func(t *testing.T) *llm.Factory {
 				return llm.NewFactory()
 			},
 			systemProvider:   "",
@@ -49,7 +49,7 @@ func TestAutoConfigHandler_CheckLLMAvailability(t *testing.T) {
 		},
 		{
 			name: "provider registered but no system model",
-			setupFactory: func() *llm.Factory {
+			setupFactory: func(t *testing.T) *llm.Factory {
 				factory := llm.NewFactory()
 				factory.Register("openai", &mockProvider{})
 				return factory
@@ -62,20 +62,20 @@ func TestAutoConfigHandler_CheckLLMAvailability(t *testing.T) {
 		},
 		{
 			name: "provider registered and system model configured",
-			setupFactory: func() *llm.Factory {
+			setupFactory: func(t *testing.T) *llm.Factory {
 				factory := llm.NewFactory()
 				factory.Register("openai", &mockProvider{})
 				return factory
 			},
 			systemProvider:   "openai",
-			systemModel:      "gpt-4o-mini",
+			systemModel:      "mock-model",
 			expectedAvail:    true,
 			expectedSMConfig: true,
 			expectedStatus:   http.StatusOK,
 		},
 		{
 			name: "system model configured but provider not available",
-			setupFactory: func() *llm.Factory {
+			setupFactory: func(t *testing.T) *llm.Factory {
 				return llm.NewFactory() // Empty factory
 			},
 			systemProvider:   "openai",
@@ -84,11 +84,39 @@ func TestAutoConfigHandler_CheckLLMAvailability(t *testing.T) {
 			expectedSMConfig: true,
 			expectedStatus:   http.StatusOK,
 		},
+		{
+			name: "different provider registered but configured system provider unavailable",
+			setupFactory: func(t *testing.T) *llm.Factory {
+				factory := llm.NewFactory()
+				factory.Register("openai", &mockProvider{})
+				return factory
+			},
+			systemProvider:   "ollama",
+			systemModel:      "llama3.2:latest",
+			expectedAvail:    false,
+			expectedSMConfig: true,
+			expectedStatus:   http.StatusOK,
+		},
+		{
+			name: "ollama system model unavailable when server is unreachable",
+			setupFactory: func(t *testing.T) *llm.Factory {
+				factory := llm.NewFactory()
+				factory.Register("ollama", llm.NewOllamaProvider(llm.ProviderConfig{
+					BaseURL: "http://127.0.0.1:1",
+				}))
+				return factory
+			},
+			systemProvider:   "ollama",
+			systemModel:      "llama3.2:latest",
+			expectedAvail:    false,
+			expectedSMConfig: true,
+			expectedStatus:   http.StatusOK,
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			factory := tt.setupFactory()
+			factory := tt.setupFactory(t)
 			configManager := createTestConfigManager(t, tt.systemProvider, tt.systemModel)
 			handler := NewAutoConfigHandler(factory, configManager)
 
@@ -391,48 +419,90 @@ func TestAutoConfigHandler_validateAndSanitizeConfig(t *testing.T) {
 	}
 }
 
-func TestAutoConfigHandler_validateAndSanitizeConfig_WorkspaceManagerUsesSystemModel(t *testing.T) {
-	handler := &AutoConfigHandler{
-		configManager: createTestConfigManager(t, "ollama", "devstral-small-2:latest"),
+// TestAutoConfigHandler_validateAndSanitizeConfig_OrchestrationPrefersSystemModel
+// verifies that orchestration agents always use the configured system model,
+// overriding whatever the LLM returned. The LLM often echoes the example
+// model (gpt-4.1-nano) from its prompt, which isn't suitable for
+// coordination work.
+func TestAutoConfigHandler_validateAndSanitizeConfig_OrchestrationPrefersSystemModel(t *testing.T) {
+	configManager := createTestConfigManager(t, "ollama", "gemma4:e4b")
+	handler := &AutoConfigHandler{configManager: configManager}
+
+	tests := []struct {
+		name             string
+		input            AutoConfigResponse
+		expectedModel    string
+		expectedProvider string
+	}{
+		{
+			name: "orchestration with LLM-returned gpt-4.1-nano is overridden",
+			input: AutoConfigResponse{
+				AgentType:    "orchestration",
+				Model:        "gpt-4.1-nano",
+				Provider:     "openai",
+				Temperature:  0.5,
+				SystemPrompt: "You coordinate.",
+			},
+			expectedModel:    "gemma4:e4b",
+			expectedProvider: "ollama",
+		},
+		{
+			name: "orchestration with empty model picks up system model",
+			input: AutoConfigResponse{
+				AgentType:    "orchestration",
+				Model:        "",
+				Provider:     "",
+				Temperature:  0.5,
+				SystemPrompt: "You coordinate.",
+			},
+			expectedModel:    "gemma4:e4b",
+			expectedProvider: "ollama",
+		},
+		{
+			name: "non-orchestration is left alone",
+			input: AutoConfigResponse{
+				AgentType:    "tool-calling",
+				Model:        "gpt-4.1-nano",
+				Provider:     "openai",
+				Temperature:  0.5,
+				SystemPrompt: "You are helpful.",
+			},
+			expectedModel:    "gpt-4.1-nano",
+			expectedProvider: "openai",
+		},
 	}
 
-	result := handler.validateAndSanitizeConfig(AutoConfigResponse{
-		AgentType:    "workspace-manager",
-		Model:        "",
-		Provider:     "",
-		Temperature:  0.5,
-		SystemPrompt: "Lead the workspace.",
-	})
-
-	if result.AgentType != "workspace-manager" {
-		t.Fatalf("expected workspace-manager type, got %q", result.AgentType)
-	}
-	if result.Model != "devstral-small-2:latest" {
-		t.Fatalf("expected system model devstral-small-2:latest, got %q", result.Model)
-	}
-	if result.Provider != "ollama" {
-		t.Fatalf("expected system provider ollama, got %q", result.Provider)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := handler.validateAndSanitizeConfig(tt.input)
+			if result.Model != tt.expectedModel {
+				t.Errorf("Model: expected %q, got %q", tt.expectedModel, result.Model)
+			}
+			if result.Provider != tt.expectedProvider {
+				t.Errorf("Provider: expected %q, got %q", tt.expectedProvider, result.Provider)
+			}
+		})
 	}
 }
 
-func TestAutoConfigHandler_validateAndSanitizeConfig_WorkspaceManagerInvalidProviderFallsBackToSystemProvider(t *testing.T) {
-	handler := &AutoConfigHandler{
-		configManager: createTestConfigManager(t, "claude_code", "sonnet"),
-	}
+// TestAutoConfigHandler_validateAndSanitizeConfig_OrchestrationWithoutSystemModel
+// verifies that when no system model is configured, orchestration agents
+// fall back to a capable default (gpt-5) rather than gpt-4.1-nano.
+func TestAutoConfigHandler_validateAndSanitizeConfig_OrchestrationWithoutSystemModel(t *testing.T) {
+	configManager := createTestConfigManager(t, "", "")
+	handler := &AutoConfigHandler{configManager: configManager}
 
-	result := handler.validateAndSanitizeConfig(AutoConfigResponse{
-		AgentType:    "workspace-manager",
-		Model:        "sonnet",
-		Provider:     "invalid-provider",
+	input := AutoConfigResponse{
+		AgentType:    "orchestration",
+		Model:        "",
+		Provider:     "",
 		Temperature:  0.5,
-		SystemPrompt: "Lead the workspace.",
-	})
-
-	if result.Provider != "claude_code" {
-		t.Fatalf("expected system provider claude_code, got %q", result.Provider)
+		SystemPrompt: "You coordinate.",
 	}
-	if result.Model != "sonnet" {
-		t.Fatalf("expected model sonnet to be preserved, got %q", result.Model)
+
+	result := handler.validateAndSanitizeConfig(input)
+	if result.Model != "gpt-5" {
+		t.Errorf("expected orchestration fallback model 'gpt-5', got %q", result.Model)
 	}
 }
 

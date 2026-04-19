@@ -2,7 +2,6 @@ package main
 
 import (
 	"bufio"
-	"bytes"
 	"context"
 	"flag"
 	"fmt"
@@ -75,9 +74,6 @@ func main() {
 	if err := ensurePortAvailable(*port); err != nil {
 		log.Fatalf("Port %d is unavailable: %v", *port, err)
 	}
-
-	// Kill orphaned plugin processes
-	cleanupOrphanedPlugins()
 
 	// Create server with all dependencies
 	srv, err := server.New()
@@ -342,155 +338,4 @@ func promptToStopProcesses(port int, summary string) (bool, error) {
 	}
 	response = strings.TrimSpace(strings.ToLower(response))
 	return response == "y" || response == "yes", nil
-}
-
-// cleanupOrphanedPlugins kills only truly orphaned plugin processes.
-// A plugin is considered orphaned if its parent process is init/launchd (PID 1),
-// meaning the original ori-agent server that spawned it has died.
-// This prevents killing plugins belonging to other running ori-agent instances.
-func cleanupOrphanedPlugins() {
-	candidatePids := make(map[int]struct{})
-
-	// Get the current working directory to make matching more specific
-	cwd, err := os.Getwd()
-	if err != nil {
-		logger.Debug("Could not get working directory for plugin cleanup", logger.Fields{"error": err.Error()})
-		cwd = ""
-	}
-
-	switch runtime.GOOS {
-	case "darwin", "linux":
-		// Use pgrep for cleaner process matching
-		var pattern string
-		if cwd != "" {
-			pattern = fmt.Sprintf("%s/(uploaded_plugins|example_plugins|plugin_cache)/", cwd)
-		} else {
-			pattern = "(uploaded_plugins|example_plugins|plugin_cache)/"
-		}
-		cmd := exec.Command("pgrep", "-f", pattern)
-		output, err := cmd.Output()
-		if err != nil {
-			logger.Debug("No plugin processes found", nil)
-			return
-		}
-		scanner := bufio.NewScanner(bytes.NewReader(output))
-		for scanner.Scan() {
-			pidStr := strings.TrimSpace(scanner.Text())
-			if pid, err := strconv.Atoi(pidStr); err == nil && pid > 0 {
-				candidatePids[pid] = struct{}{}
-			}
-		}
-
-	case "windows":
-		var pattern string
-		if cwd != "" {
-			escapedCwd := strings.ReplaceAll(cwd, `\`, `\\`)
-			pattern = fmt.Sprintf(`%s\\(uploaded_plugins|example_plugins|plugin_cache)\\`, escapedCwd)
-		} else {
-			pattern = `(uploaded_plugins|example_plugins|plugin_cache)\\`
-		}
-		psCmd := fmt.Sprintf(`Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -match '%s' } | Select-Object -ExpandProperty ProcessId`, pattern)
-		cmd := exec.Command("powershell", "-NoProfile", "-Command", psCmd)
-		output, err := cmd.Output()
-		if err != nil {
-			logger.Debug("No plugin processes found", nil)
-			return
-		}
-		scanner := bufio.NewScanner(bytes.NewReader(output))
-		for scanner.Scan() {
-			pidStr := strings.TrimSpace(scanner.Text())
-			if pid, err := strconv.Atoi(pidStr); err == nil && pid > 0 {
-				candidatePids[pid] = struct{}{}
-			}
-		}
-
-	default:
-		return
-	}
-
-	if len(candidatePids) == 0 {
-		return
-	}
-
-	// Filter to only truly orphaned processes (parent is init/launchd, PID 1)
-	orphanedPids := make([]int, 0)
-	for pid := range candidatePids {
-		if isOrphanedProcess(pid) {
-			orphanedPids = append(orphanedPids, pid)
-		}
-	}
-
-	if len(orphanedPids) == 0 {
-		logger.Debug("Plugin processes found but none are orphaned", logger.Fields{
-			"total": len(candidatePids),
-		})
-		return
-	}
-
-	logger.Info("Found orphaned plugin process(es), killing...", logger.Fields{
-		"count": len(orphanedPids),
-	})
-
-	// Kill only orphaned processes
-	for _, pid := range orphanedPids {
-		pidStr := strconv.Itoa(pid)
-		var killCmd *exec.Cmd
-		switch runtime.GOOS {
-		case "darwin", "linux":
-			killCmd = exec.Command("kill", pidStr)
-		case "windows":
-			killCmd = exec.Command("taskkill", "/F", "/PID", pidStr)
-		}
-		if killCmd != nil {
-			_ = killCmd.Run()
-		}
-	}
-}
-
-// isOrphanedProcess checks if a process is orphaned by checking its parent PID.
-// On Unix, orphaned processes get reparented to init (PID 1) or launchd.
-// On Windows, we check if the parent process no longer exists.
-func isOrphanedProcess(pid int) bool {
-	switch runtime.GOOS {
-	case "darwin", "linux":
-		// Get parent PID using ps
-		cmd := exec.Command("ps", "-o", "ppid=", "-p", strconv.Itoa(pid))
-		output, err := cmd.Output()
-		if err != nil {
-			// Process may have exited, consider it orphaned
-			return true
-		}
-		ppidStr := strings.TrimSpace(string(output))
-		ppid, err := strconv.Atoi(ppidStr)
-		if err != nil {
-			return true
-		}
-		// PID 1 is init/launchd - process was reparented, meaning parent died
-		return ppid == 1
-
-	case "windows":
-		// On Windows, check if parent process exists
-		psCmd := fmt.Sprintf(`(Get-CimInstance Win32_Process -Filter "ProcessId=%d").ParentProcessId`, pid)
-		cmd := exec.Command("powershell", "-NoProfile", "-Command", psCmd)
-		output, err := cmd.Output()
-		if err != nil {
-			return true
-		}
-		ppidStr := strings.TrimSpace(string(output))
-		ppid, err := strconv.Atoi(ppidStr)
-		if err != nil {
-			return true
-		}
-		// Check if parent process still exists
-		checkCmd := exec.Command("powershell", "-NoProfile", "-Command",
-			fmt.Sprintf(`Get-Process -Id %d -ErrorAction SilentlyContinue`, ppid))
-		if err := checkCmd.Run(); err != nil {
-			// Parent doesn't exist, process is orphaned
-			return true
-		}
-		return false
-
-	default:
-		return false
-	}
 }

@@ -28,6 +28,14 @@ func NewWorkspaceStoreAdapter(store HybridStore) *WorkspaceStoreAdapter {
 	return &WorkspaceStoreAdapter{store: store}
 }
 
+// ConvertAgentWorkspace converts a workspace.Workspace into a session.Workspace
+// without requiring a backing store. This is used by HTTP handlers that need to
+// preserve workspace.json metadata when importing from the file store.
+func ConvertAgentWorkspace(ws *workspace.Workspace) *Workspace {
+	adapter := &WorkspaceStoreAdapter{}
+	return adapter.toSessionWorkspace(ws)
+}
+
 // Save persists a workspace to storage by converting from workspace.Workspace to session.Workspace.
 func (a *WorkspaceStoreAdapter) Save(ws *workspace.Workspace) error {
 	ctx := context.Background()
@@ -116,6 +124,7 @@ func (a *WorkspaceStoreAdapter) toSessionWorkspace(ws *workspace.Workspace) *Wor
 		Description: ws.Description,
 		FolderSlug:  ws.FolderSlug,
 		ProjectPath: ws.ProjectPath,
+		ParentID:    ws.ParentID,
 		CreatedAt:   ws.CreatedAt,
 		UpdatedAt:   ws.UpdatedAt,
 		Agents:      ws.Agents,

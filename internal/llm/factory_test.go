@@ -204,6 +204,11 @@ func TestGetSystemModelProvider(t *testing.T) {
 		providerType: ProviderTypeLocal,
 		models:       []string{"llama3.2"},
 	})
+	factory.Register("lmstudio", &MockProvider{
+		name:         "lmstudio",
+		providerType: ProviderTypeLocal,
+		models:       []string{"openai/gpt-oss-20b"},
+	})
 
 	tests := []struct {
 		name         string
@@ -253,7 +258,7 @@ func TestGetSystemModelProvider(t *testing.T) {
 			errContains:  "not available",
 		},
 		{
-			name:         "model not available for non-ollama provider",
+			name:         "model not available for non-local provider",
 			providerName: "openai",
 			modelName:    "unknown-model",
 			wantErr:      true,
@@ -264,6 +269,12 @@ func TestGetSystemModelProvider(t *testing.T) {
 			providerName: "ollama",
 			modelName:    "custom-model:latest",
 			wantErr:      false, // Ollama should allow any model name
+		},
+		{
+			name:         "lmstudio allows any model name",
+			providerName: "lmstudio",
+			modelName:    "custom/local-model",
+			wantErr:      false,
 		},
 	}
 

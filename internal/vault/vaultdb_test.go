@@ -3,6 +3,8 @@ package vault
 import (
 	"context"
 	"database/sql"
+	"os"
+	"path/filepath"
 	"testing"
 
 	_ "modernc.org/sqlite"
@@ -119,5 +121,72 @@ func TestEnsureVaultFileSchemaIsIdempotent(t *testing.T) {
 	}
 	if versionCount != 1 {
 		t.Fatalf("expected one applied vault schema version row, got %d", versionCount)
+	}
+}
+
+func TestNormalizeVaultStorageDirectoryCreatesAndNormalizesDirectory(t *testing.T) {
+	root := t.TempDir()
+	target := filepath.Join(root, "nested", "..", "nested", "vaults")
+
+	normalized, err := normalizeVaultStorageDirectory(target)
+	if err != nil {
+		t.Fatalf("normalize vault storage directory: %v", err)
+	}
+
+	if normalized != filepath.Clean(target) {
+		t.Fatalf("expected normalized path %q, got %q", filepath.Clean(target), normalized)
+	}
+
+	info, err := os.Stat(normalized)
+	if err != nil {
+		t.Fatalf("stat normalized directory: %v", err)
+	}
+	if !info.IsDir() {
+		t.Fatalf("expected %q to be a directory", normalized)
+	}
+}
+
+func TestVaultFileExistsReportsMissingAndExistingFiles(t *testing.T) {
+	root := t.TempDir()
+	existingFile := filepath.Join(root, "vault.db")
+	if err := os.WriteFile(existingFile, []byte("vault"), 0o644); err != nil {
+		t.Fatalf("write existing file: %v", err)
+	}
+
+	exists, err := vaultFileExists(existingFile)
+	if err != nil {
+		t.Fatalf("vaultFileExists existing: %v", err)
+	}
+	if !exists {
+		t.Fatalf("expected existing file to be reported as present")
+	}
+
+	missingFile := filepath.Join(root, "missing.db")
+	exists, err = vaultFileExists(missingFile)
+	if err != nil {
+		t.Fatalf("vaultFileExists missing: %v", err)
+	}
+	if exists {
+		t.Fatalf("expected missing file to be reported as absent")
+	}
+}
+
+func TestDefaultVaultPackageFilePath(t *testing.T) {
+	got := defaultVaultPackageFilePath("vault-123")
+	want := filepath.Join("vault-123.orivault", "vault.db")
+	if got != want {
+		t.Fatalf("expected package file path %q, got %q", want, got)
+	}
+}
+
+func TestVaultPackageDirectoryForFilePath(t *testing.T) {
+	path := filepath.Join("/tmp", "vault-123.orivault", "vault.db")
+	if got := vaultPackageDirectoryForFilePath(path); got != filepath.Join("/tmp", "vault-123.orivault") {
+		t.Fatalf("expected package directory to resolve, got %q", got)
+	}
+
+	legacyPath := filepath.Join("/tmp", "vault-123.db")
+	if got := vaultPackageDirectoryForFilePath(legacyPath); got != "" {
+		t.Fatalf("expected legacy file path to have no package dir, got %q", got)
 	}
 }

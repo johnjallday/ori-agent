@@ -291,6 +291,20 @@ func TestHomeAssistantRoute_UtilityPromptUsesExistingAssistant(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
+	// The system assistant "Ori" is no longer auto-created at startup
+	// (requires a configured system model). Seed it into the test data
+	// directory before starting the server so the route handler can match
+	// against it.
+	oriAgentDir := filepath.Join("ori-data", "agents", "Ori")
+	if err := os.MkdirAll(oriAgentDir, 0o755); err != nil {
+		t.Fatalf("Failed to create Ori agent dir: %v", err)
+	}
+	oriConfig := `{"type":"general","settings":{"model":"gpt-4.1-nano","provider":"openai"}}`
+	if err := os.WriteFile(filepath.Join(oriAgentDir, "config.json"), []byte(oriConfig), 0o644); err != nil {
+		t.Fatalf("Failed to write Ori config: %v", err)
+	}
+	defer func() { _ = os.RemoveAll(oriAgentDir) }()
+
 	cmd := startServer(t, ctx)
 	defer stopServer(cmd)
 

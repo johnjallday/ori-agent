@@ -71,7 +71,6 @@
             <select id="agentType" class="modern-input w-100">
               <option value="tool-calling">Tool Calling (Cheapest - Optimized for tool use)</option>
               <option value="general">General Purpose (Mid-tier - Balanced capability)</option>
-              <option value="workspace-manager">Workspace Manager (Coordinates workspace agents)</option>
               <option value="orchestration">Orchestration (Advanced - Multi-agent coordination)</option>
               <option value="research">Research (Expensive - Complex thinking)</option>
             </select>
@@ -783,7 +782,7 @@
           </div>
           <div class="mb-4 ori-hatch-reveal" id="welcomeAssistantReveal">
             <label for="onboardingAssistantName" class="form-label" style="font-size: 0.85rem; font-weight: 500; color: var(--text-secondary);">Assistant name</label>
-            <input type="text" class="form-control" id="onboardingAssistantName" placeholder="Assistant" value="Assistant" style="font-size: 1rem; padding: 10px 14px;">
+            <input type="text" class="form-control" id="onboardingAssistantName" placeholder="Ori" value="Ori" style="font-size: 1rem; padding: 10px 14px;">
           </div>
 
           <div class="mb-4 ori-hatch-reveal" id="welcomeWorkspaceRootReveal">
@@ -794,6 +793,16 @@
             </div>
             <small class="text-muted d-block mt-2" id="onboardingWorkspaceRootHelp">New workspaces will be created inside this folder by default.</small>
             <div class="alert alert-danger d-none mt-2 mb-0 py-2" id="onboardingWorkspaceRootError"></div>
+          </div>
+
+          <div class="mb-4 ori-hatch-reveal" id="welcomeVaultRootReveal">
+            <label for="onboardingVaultRoot" class="form-label" style="font-size: 0.85rem; font-weight: 500; color: var(--text-secondary);">Vault directory</label>
+            <div class="input-group">
+              <input type="text" class="form-control" id="onboardingVaultRoot" placeholder="Loading vault directory..." style="font-size: 1rem; padding: 10px 14px;">
+              <button type="button" class="btn btn-outline-secondary" id="onboardingVaultRootBrowseBtn">Browse</button>
+            </div>
+            <small class="text-muted d-block mt-2" id="onboardingVaultRootHelp">New managed vault folders will be created inside this folder by default.</small>
+            <div class="alert alert-danger d-none mt-2 mb-0 py-2" id="onboardingVaultRootError"></div>
           </div>
 
           <div class="d-flex justify-content-end ori-hatch-reveal" id="welcomeBtnReveal">

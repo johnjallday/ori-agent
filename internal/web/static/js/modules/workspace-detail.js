@@ -1059,6 +1059,10 @@ export class WorkspaceDetailPage {
       workspaceDescription: document.getElementById('workspace-description'),
       workspaceBreadcrumb: document.getElementById('workspace-breadcrumb-name'),
       openCanvasBtn: document.getElementById('open-canvas-btn'),
+      openWorkflowsBtn: document.getElementById('open-workflows-btn'),
+      workflowLinksPanel: document.getElementById('workspace-detail-workflow-links-panel'),
+      workflowLinksList: document.getElementById('workspace-detail-workflow-links-list'),
+      workflowLinksCount: document.getElementById('workspace-detail-workflow-links-count'),
 
       // Stats
       agentCount: document.getElementById('workspace-agent-count'),
@@ -1720,6 +1724,8 @@ export class WorkspaceDetailPage {
       this.elements.openCanvasBtn.href = `/workspaces/${this.workspaceId}/canvas`;
     }
 
+    this.renderWorkspaceWorkflowLinks();
+
     // Update stats
     const agents = this.workspace.agent_instances || [];
     if (this.elements.agentCount) {
@@ -1850,6 +1856,7 @@ export class WorkspaceDetailPage {
     } finally {
       this.tasksLoading = false;
       this.renderTasks();
+      this.renderWorkspaceWorkflowLinks();
 
       if (this.elements.taskCount) {
         this.elements.taskCount.textContent = this.tasks.length;
@@ -1886,6 +1893,165 @@ export class WorkspaceDetailPage {
     `;
   }
 
+  getTaskTemplateReference(task) {
+    const templateRef = task && typeof task === 'object' ? task.template_ref : null;
+    if (!templateRef || typeof templateRef !== 'object') {
+      return null;
+    }
+
+    const templateId = String(templateRef.template_id || '').trim();
+    if (!templateId) {
+      return null;
+    }
+
+    return {
+      templateId,
+      templateName: String(templateRef.template_name || '').trim(),
+      stepId: String(templateRef.step_id || '').trim(),
+      stepName: String(templateRef.step_name || '').trim()
+    };
+  }
+
+  buildBehaviorStudioHref(templateId) {
+    const safeTemplateId = String(templateId || '').trim();
+    if (!safeTemplateId) {
+      return '/workflows';
+    }
+    return `/workflows?template=${encodeURIComponent(safeTemplateId)}`;
+  }
+
+  updateBehaviorStudioEntryLink(workflows = null) {
+    const linkEl = this.elements.openWorkflowsBtn;
+    if (!linkEl) {
+      return;
+    }
+
+    const refs = Array.isArray(workflows) ? workflows : this.collectWorkspaceWorkflowReferences();
+    if (refs.length === 1) {
+      const workflow = refs[0];
+      const label = workflow.templateName || workflow.templateId;
+      linkEl.href = this.buildBehaviorStudioHref(workflow.templateId);
+      linkEl.title = `Open ${label} in Orchestration Skills`;
+      linkEl.setAttribute('aria-label', `Open ${label} in Orchestration Skills`);
+      return;
+    }
+
+    linkEl.href = '/workflows';
+    linkEl.title = 'Open Orchestration Skills';
+    linkEl.setAttribute('aria-label', 'Open Orchestration Skills');
+  }
+
+  renderTaskWorkflowMeta(task, { isParent = false } = {}) {
+    const templateRef = this.getTaskTemplateReference(task);
+    if (!templateRef) {
+      return '';
+    }
+
+    const behaviorLabel = this.escapeHtml(templateRef.templateName || templateRef.templateId);
+    const stepLabel = !isParent && (templateRef.stepName || templateRef.stepId)
+      ? ` · ${this.escapeHtml(templateRef.stepName || templateRef.stepId)}`
+      : '';
+    const safeHref = this.buildBehaviorStudioHref(templateRef.templateId);
+    const title = `Open ${templateRef.templateName || templateRef.templateId} in Orchestration Skills`;
+
+    return `
+      <a href="${safeHref}"
+         class="workspace-detail-workflow-link workspace-detail-workflow-link--inline"
+         title="${this.escapeHtml(title)}"
+         aria-label="${this.escapeHtml(title)}"
+         onclick="event.stopPropagation();">
+        <span class="workspace-detail-workflow-link-label">Skill: ${behaviorLabel}${stepLabel}</span>
+        <svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+          <path d="M14,3H21V10H19V6.41L12.41,13L11,11.59L17.59,5H14V3M5,5H10V7H7V17H17V14H19V19H5V5Z"/>
+        </svg>
+      </a>
+    `;
+  }
+
+  collectWorkspaceWorkflowReferences() {
+    const workflowRefs = new Map();
+
+    this.tasks.forEach((task) => {
+      const templateRef = this.getTaskTemplateReference(task);
+      if (!templateRef) {
+        return;
+      }
+
+      const key = templateRef.templateId;
+      if (!workflowRefs.has(key)) {
+        workflowRefs.set(key, {
+          templateId: templateRef.templateId,
+          templateName: templateRef.templateName || templateRef.templateId,
+          taskIds: new Set(),
+          workflowInstanceIds: new Set()
+        });
+      }
+
+      const entry = workflowRefs.get(key);
+      if (templateRef.templateName && !entry.templateName) {
+        entry.templateName = templateRef.templateName;
+      }
+      entry.taskIds.add(String(task.id || '').trim());
+      entry.workflowInstanceIds.add(String(task.parent_task_id || task.id || '').trim());
+    });
+
+    return Array.from(workflowRefs.values())
+      .map((entry) => ({
+        templateId: entry.templateId,
+        templateName: entry.templateName || entry.templateId,
+        taskCount: entry.taskIds.size,
+        workflowCount: entry.workflowInstanceIds.size
+      }))
+      .sort((left, right) => left.templateName.localeCompare(right.templateName));
+  }
+
+  renderWorkspaceWorkflowLinks() {
+    const panel = this.elements.workflowLinksPanel;
+    const list = this.elements.workflowLinksList;
+    const count = this.elements.workflowLinksCount;
+    const workflows = this.collectWorkspaceWorkflowReferences();
+    this.updateBehaviorStudioEntryLink(workflows);
+
+    if (!panel || !list || !count) {
+      return;
+    }
+    count.textContent = String(workflows.length);
+
+    if (workflows.length === 0) {
+      panel.style.display = 'none';
+      list.innerHTML = '';
+      return;
+    }
+
+    list.innerHTML = workflows.map((workflow) => {
+      const safeHref = this.buildBehaviorStudioHref(workflow.templateId);
+      const workflowLabel = this.escapeHtml(workflow.templateName || workflow.templateId);
+      const taskLabel = `${workflow.taskCount} task${workflow.taskCount === 1 ? '' : 's'}`;
+      const instanceLabel = `${workflow.workflowCount} run${workflow.workflowCount === 1 ? '' : 's'}`;
+      const title = `Open ${workflow.templateName || workflow.templateId} in Orchestration Skills`;
+
+      return `
+        <a href="${safeHref}"
+           class="workspace-detail-workflow-link workspace-detail-workflow-chip"
+           title="${this.escapeHtml(title)}"
+           aria-label="${this.escapeHtml(title)}">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+            <path d="M7,5A2,2 0 0,0 5,7V10A2,2 0 0,0 7,12H10A2,2 0 0,0 12,10V7A2,2 0 0,0 10,5H7M14,5A2,2 0 0,0 12,7V10A2,2 0 0,0 14,12H17A2,2 0 0,0 19,10V7A2,2 0 0,0 17,5H14M7,12A2,2 0 0,0 5,14V17A2,2 0 0,0 7,19H10A2,2 0 0,0 12,17V14A2,2 0 0,0 10,12H7M13,13H19V15H13V13M13,17H19V19H13V17Z"/>
+          </svg>
+          <span class="workspace-detail-workflow-chip-copy">
+            <span class="workspace-detail-workflow-chip-title">${workflowLabel}</span>
+            <span class="workspace-detail-workflow-chip-meta">${this.escapeHtml(instanceLabel)} · ${this.escapeHtml(taskLabel)}</span>
+          </span>
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+            <path d="M14,3H21V10H19V6.41L12.41,13L11,11.59L17.59,5H14V3M5,5H10V7H7V17H17V14H19V19H5V5Z"/>
+          </svg>
+        </a>
+      `;
+    }).join('');
+
+    panel.style.display = '';
+  }
+
   isWorkspaceEntryAgent(agentName) {
     const entryAgentName = String(this.workspace?.entry_agent_name || '').trim();
     if (!entryAgentName || !agentName) return false;
@@ -1894,7 +2060,7 @@ export class WorkspaceDetailPage {
 
   renderWorkspaceAgentRoleBadge(agentName) {
     if (!this.isWorkspaceEntryAgent(agentName)) return '';
-    return '<span class="workspace-detail-agent-role-badge workspace-manager">Workspace Manager</span>';
+    return '<span class="workspace-detail-agent-role-badge">Entry Agent</span>';
   }
 
   renderAgentGroups() {
@@ -2449,6 +2615,10 @@ export class WorkspaceDetailPage {
     if (scheduleIndicator) {
       taskMetaParts.push(scheduleIndicator);
     }
+    const workflowMeta = this.renderTaskWorkflowMeta(task, { isParent });
+    if (workflowMeta) {
+      taskMetaParts.push(workflowMeta);
+    }
     taskMetaParts.push(formatDate(task.created_at));
 
     return `
@@ -2556,8 +2726,9 @@ export class WorkspaceDetailPage {
         window.showAddAgentModal({
           workspaceId: this.workspaceId,
           seedName: agentName,
-          seedType: 'workspace-manager',
-          seedSystemPrompt: systemPrompt
+          seedType: 'orchestration',
+          seedSystemPrompt: systemPrompt,
+          suggestedSkills: ['workspace-planning']
         });
       }
     }, 300);
@@ -7383,7 +7554,7 @@ export class WorkspaceDetailPage {
 
     if (this.elements.settingsSummary) {
       if (effective.summary.length === 0) {
-        this.elements.settingsSummary.textContent = 'No effective behavior summary available.';
+        this.elements.settingsSummary.textContent = 'No effective manager behavior summary available.';
       } else {
         this.elements.settingsSummary.innerHTML = `
           <ul class="workspace-detail-settings-summary-list">

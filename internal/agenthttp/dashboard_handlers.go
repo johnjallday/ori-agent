@@ -8,16 +8,20 @@ import (
 	"time"
 
 	"github.com/johnjallday/ori-agent/internal/agent"
+	"github.com/johnjallday/ori-agent/internal/cliagent"
 	orihttp "github.com/johnjallday/ori-agent/internal/http"
 	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/store"
 	"github.com/johnjallday/ori-agent/internal/types"
+	"github.com/johnjallday/ori-agent/internal/workspace"
 )
 
 // DashboardHandler handles dashboard-specific API endpoints
 type DashboardHandler struct {
-	State          store.Store
-	ActivityLogger *ActivityLogger
+	State            store.Store
+	ActivityLogger   *ActivityLogger
+	cliAgentRegistry *cliagent.CLIAgentRegistry
+	workspaceStore   workspace.Store
 }
 
 // NewDashboardHandler creates a new dashboard handler
@@ -25,11 +29,26 @@ func NewDashboardHandler(state store.Store) *DashboardHandler {
 	return &DashboardHandler{State: state}
 }
 
+// SetCLIAgentRegistry wires the CLI agent registry so auto-detected
+// CLI agents appear in the dashboard agent list.
+func (h *DashboardHandler) SetCLIAgentRegistry(r *cliagent.CLIAgentRegistry) {
+	h.cliAgentRegistry = r
+}
+
+// SetWorkspaceStore wires the workspace store so dashboard can filter out
+// workspace entry agents from the top-level agents list.
+func (h *DashboardHandler) SetWorkspaceStore(s workspace.Store) {
+	h.workspaceStore = s
+}
+
 // AgentListItem represents an agent in the dashboard list view
 type AgentListItem struct {
 	Name           string                 `json:"name"`
 	Type           string                 `json:"type"`
 	Role           types.AgentRole        `json:"role"`
+	Source         string                 `json:"source"`
+	Scope          string                 `json:"scope,omitempty"`
+	WorkspaceID    string                 `json:"workspace_id,omitempty"`
 	Capabilities   []string               `json:"capabilities,omitempty"`
 	Status         types.AgentStatus      `json:"status"`
 	Statistics     *types.AgentStatistics `json:"statistics,omitempty"`
@@ -68,6 +87,10 @@ func (h *DashboardHandler) ListAgentsWithStats(w http.ResponseWriter, r *http.Re
 	tagFilter := r.URL.Query().Get("tag")
 	favoriteOnly := r.URL.Query().Get("favorite") == "true"
 
+	// Map of workspace entry agent name (lowercase) → workspace ID, so each
+	// agent can be annotated with scope="workspace" and its workspace link.
+	entryAgentWorkspaces := collectWorkspaceEntryAgentNames(h.workspaceStore)
+
 	// Get all agents
 	names := h.State.ListAgents()
 	agents := make([]AgentListItem, 0, len(names))
@@ -105,10 +128,11 @@ func (h *DashboardHandler) ListAgentsWithStats(w http.ResponseWriter, r *http.Re
 			}
 		}
 
-		agents = append(agents, AgentListItem{
+		item := AgentListItem{
 			Name:           name,
 			Type:           ag.Type,
 			Role:           ag.Role,
+			Source:         "user",
 			Capabilities:   append([]string{}, ag.Capabilities...),
 			Status:         ag.Status,
 			Statistics:     ag.Statistics,
@@ -116,7 +140,37 @@ func (h *DashboardHandler) ListAgentsWithStats(w http.ResponseWriter, r *http.Re
 			Evolution:      cloneAgentEvolution(ag),
 			AllowWebSearch: ag.Settings.IsWebSearchAllowed(),
 			Model:          ag.Settings.Model,
-		})
+		}
+
+		// Annotate workspace entry agents so the UI can group / hide them.
+		if wsID, isEntry := entryAgentWorkspaces[strings.ToLower(strings.TrimSpace(name))]; isEntry {
+			item.Scope = "workspace"
+			item.WorkspaceID = wsID
+		}
+
+		agents = append(agents, item)
+	}
+
+	// Append auto-detected CLI agents
+	if h.cliAgentRegistry != nil {
+		for _, info := range h.cliAgentRegistry.List() {
+			if !info.Available {
+				continue
+			}
+			defaultModel := ""
+			if len(info.Models) > 0 {
+				defaultModel = info.Models[0]
+			}
+			agents = append(agents, AgentListItem{
+				Name:         cliAgentDisplayName(info.Backend),
+				Type:         "research",
+				Role:         types.RoleCLIAgent,
+				Source:       "cli",
+				Capabilities: []string{"file_operations", "code_generation", "code_analysis"},
+				Status:       types.AgentStatusActive,
+				Model:        defaultModel,
+			})
+		}
 	}
 
 	// Sort agents
@@ -158,6 +212,34 @@ func (h *DashboardHandler) GetAgentDetail(w http.ResponseWriter, r *http.Request
 
 	ag, ok := h.State.GetAgent(agentName)
 	if !ok || ag == nil {
+		// Check if it's a CLI agent
+		if h.cliAgentRegistry != nil {
+			backend := cliAgentBackendFromName(agentName)
+			if backend != "" {
+				adapter, err := h.cliAgentRegistry.Get(backend)
+				if err == nil && adapter.IsAvailable() {
+					caps := adapter.Capabilities()
+					models := adapter.AvailableModels()
+					defaultModel := ""
+					if len(models) > 0 {
+						defaultModel = models[0]
+					}
+					response := AgentDetailResponse{
+						Name:         cliAgentDisplayName(backend),
+						Type:         "research",
+						Role:         types.RoleCLIAgent,
+						Capabilities: []string{"file_operations", "code_generation", "code_analysis"},
+						Status:       types.AgentStatusActive,
+						Model:        defaultModel,
+						Provider:     backend,
+					}
+					_ = caps // context window info available via /api/cli-agents
+					w.Header().Set("Content-Type", "application/json")
+					orihttp.WriteJSON(w, response)
+					return
+				}
+			}
+		}
 		orihttp.NotFound(w, "Agent not found")
 		return
 	}
@@ -194,6 +276,35 @@ func (h *DashboardHandler) GetAgentDetail(w http.ResponseWriter, r *http.Request
 	// Return JSON response
 	w.Header().Set("Content-Type", "application/json")
 	orihttp.WriteJSON(w, response)
+}
+
+// collectWorkspaceEntryAgentNames returns a map (lowercase agent name →
+// workspace ID) for every workspace that designates an entry agent. Returns
+// an empty map when the workspace store is nil or unreachable. Shared by the
+// dashboard and main agent list handlers so both can annotate workspace-scoped
+// entry agents consistently.
+func collectWorkspaceEntryAgentNames(wsStore workspace.Store) map[string]string {
+	names := make(map[string]string)
+	if wsStore == nil {
+		return names
+	}
+
+	ids, err := wsStore.List()
+	if err != nil {
+		return names
+	}
+
+	for _, id := range ids {
+		ws, err := wsStore.Get(id)
+		if err != nil || ws == nil {
+			continue
+		}
+		name := strings.ToLower(strings.TrimSpace(ws.EntryAgentName()))
+		if name != "" {
+			names[name] = ws.ID
+		}
+	}
+	return names
 }
 
 // Helper functions

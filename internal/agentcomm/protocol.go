@@ -47,6 +47,13 @@ type DelegationRequest struct {
 	Priority    int                    `json:"priority"`
 	Context     map[string]interface{} `json:"context"`
 	Timeout     time.Duration          `json:"timeout"`
+
+	// CLI agent adapter fields (used when delegating to external CLI agents)
+	WorkingDir    string  `json:"working_dir,omitempty"`     // Scoped working directory for CLI agent
+	TokenBudget   int     `json:"token_budget,omitempty"`    // Max tokens for CLI agent task
+	CostBudgetUSD float64 `json:"cost_budget_usd,omitempty"` // Max cost in USD for CLI agent task
+	MaxSteps      int     `json:"max_steps,omitempty"`       // Max micro-steps for CLI agent task
+	CLIBackend    string  `json:"cli_backend,omitempty"`     // CLI backend: "claude" or "codex"
 }
 
 // DelegationResponse represents the response to a delegation request

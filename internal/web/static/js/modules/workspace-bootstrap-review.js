@@ -34,6 +34,7 @@
     initialized: false
   };
   let cachedSystemModel = null;
+  let cachedAutoConfigAvailability = null;
 
   function escapeHtml(value) {
     if (typeof window.escapeHtml === 'function') {
@@ -223,6 +224,8 @@
     state.reviewedFingerprint = '';
     state.reviewedInput = null;
     state.plan = null;
+    cachedSystemModel = null;
+    cachedAutoConfigAvailability = null;
     if (!preserveVisibility) {
       setReviewVisibility(false);
     }
@@ -344,10 +347,16 @@
   }
 
   async function checkAutoConfigAvailability() {
+    if (typeof cachedAutoConfigAvailability === 'boolean') {
+      return cachedAutoConfigAvailability;
+    }
+
     try {
       const data = await apiRequest('/api/agents/auto-config/availability');
-      return Boolean(data?.available);
+      cachedAutoConfigAvailability = Boolean(data?.available);
+      return cachedAutoConfigAvailability;
     } catch (_error) {
+      cachedAutoConfigAvailability = false;
       return false;
     }
   }
@@ -515,7 +524,7 @@
         role: 'lead',
         selected: true,
         locked: true,
-        type: 'workspace-manager',
+        type: 'orchestration',
         autoDescription: buildPrimaryAgentDescription(input)
       });
     }
@@ -1011,16 +1020,16 @@
     }
   }
 
-  async function ensureAgentExists(agentPlan) {
+  async function ensureAgentExists(agentPlan, isEntryAgent) {
     if (!agentPlan || agentPlan.action !== 'create') {
+      // Existing (invited) agents keep their current model configuration;
+      // system model inheritance only applies to newly created entry agents.
       return agentPlan?.name || '';
     }
 
     const requestConfig = await maybeAutoConfigureAgent(agentPlan.autoDescription || agentPlan.summary || '', agentPlan.type);
     const plannedType = String(agentPlan.type || '').trim();
-    const type = plannedType === 'workspace-manager'
-      ? 'workspace-manager'
-      : (requestConfig?.agent_type || plannedType || 'general');
+    const type = requestConfig?.agent_type || plannedType || 'general';
     const payload = {
       name: agentPlan.name,
       type,
@@ -1028,13 +1037,20 @@
       allow_web_search: true
     };
 
-    if (type === 'workspace-manager') {
-      const systemModel = await getSystemModelPreference();
-      if (systemModel?.configured && systemModel.model) {
-        payload.model = systemModel.model;
-        if (systemModel.provider) {
-          payload.llm_provider = systemModel.provider;
-        }
+    // Entry agents always inherit the system model so they match the
+    // user's configured orchestration model rather than whatever the
+    // auto-config LLM suggested. Skip inheritance when the configured
+    // system model is not currently usable, otherwise workspace setup can
+    // create an agent that immediately fails at runtime.
+    if (isEntryAgent && await checkAutoConfigAvailability()) {
+      const systemPref = await getSystemModelPreference();
+      const systemModel = String(systemPref?.model || '').trim();
+      const systemProvider = String(systemPref?.provider || '').trim();
+      if (systemModel) {
+        payload.model = systemModel;
+      }
+      if (systemProvider) {
+        payload.llm_provider = systemProvider;
       }
     }
 
@@ -1373,9 +1389,11 @@
     try {
       const agentInstanceIds = [];
 
-      for (const agentPlan of selectedPlan.agents) {
+      for (let agentIdx = 0; agentIdx < selectedPlan.agents.length; agentIdx++) {
+        const agentPlan = selectedPlan.agents[agentIdx];
         try {
-          const agentName = await ensureAgentExists(agentPlan);
+          const isEntryAgent = agentPlan.role === 'lead';
+          const agentName = await ensureAgentExists(agentPlan, isEntryAgent);
           const added = await addAgentToWorkspace(workspaceId, agentName);
           if (added.instanceId) {
             agentInstanceIds.push(added.instanceId);

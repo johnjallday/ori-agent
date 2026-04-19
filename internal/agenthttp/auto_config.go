@@ -75,10 +75,7 @@ func (h *AutoConfigHandler) CheckLLMAvailabilityHandler(w http.ResponseWriter, r
 	systemModelConfigured := h.configManager.IsSystemModelConfigured()
 	systemProvider, systemModel := h.configManager.GetSystemModel()
 
-	// For auto-config to be available, we need BOTH:
-	// 1. At least one LLM provider configured
-	// 2. System model configured
-	available := len(availableProviders) > 0 && systemModelConfigured
+	available, availabilityMessage := h.checkSystemModelAvailability(systemProvider, systemModel)
 
 	response := LLMAvailabilityResponse{
 		Available:             available,
@@ -93,10 +90,46 @@ func (h *AutoConfigHandler) CheckLLMAvailabilityHandler(w http.ResponseWriter, r
 			response.Message = "No LLM provider configured. Please set up an API key (OpenAI, Anthropic, or Gemini) or install Ollama."
 		} else if !systemModelConfigured {
 			response.Message = "System model not configured. Please configure a system model in Settings to use auto-config."
+		} else {
+			response.Message = availabilityMessage
 		}
 	}
 
 	orihttp.WriteJSON(w, response)
+}
+
+func (h *AutoConfigHandler) checkSystemModelAvailability(systemProvider, systemModel string) (bool, string) {
+	if strings.TrimSpace(systemProvider) == "" || strings.TrimSpace(systemModel) == "" {
+		return false, "System model not configured. Please configure a system model in Settings to use auto-config."
+	}
+
+	result, err := h.llmFactory.GetSystemModelProvider(systemProvider, systemModel)
+	if err != nil {
+		return false, fmt.Sprintf(
+			"Configured system model %q for provider %q is not available. Update Settings or configure that provider before using auto-config.",
+			systemModel,
+			systemProvider,
+		)
+	}
+
+	if checker, ok := result.Provider.(llm.ModelPresenceChecker); ok && !checker.HasModel(result.Model) {
+		return false, unavailableLocalModelMessage(systemProvider)
+	}
+
+	return true, ""
+}
+
+func unavailableLocalModelMessage(providerName string) string {
+	switch strings.ToLower(strings.TrimSpace(providerName)) {
+	case "ollama":
+		return "Configured Ollama system model is unavailable. Make sure the Ollama server is running and the selected model is installed."
+	case "lmstudio":
+		return "Configured LM Studio system model is unavailable. Make sure the LM Studio server is running and the selected model is loaded."
+	case "mlx_lm":
+		return "Configured MLX-LM system model is unavailable. Make sure mlx_lm.server is running and serving the selected model."
+	default:
+		return "Configured local system model is unavailable. Make sure the local model server is running and the selected model is available."
+	}
 }
 
 // AutoConfigHandler handles the auto-configuration request
@@ -134,7 +167,11 @@ func (h *AutoConfigHandler) AutoConfigHandler(w http.ResponseWriter, r *http.Req
 	// Generate auto-config using the configured system model
 	config, err := h.generateAutoConfig(r.Context(), result.Provider, result.Model, systemReasoningEffort, req.Description)
 	if err != nil {
-		logger.Error("Auto-config generation failed", logger.Fields{"error": err})
+		logger.Warn("Auto-config generation failed; using defaults", logger.Fields{
+			"provider": systemProvider,
+			"model":    systemModel,
+			"error":    err,
+		})
 		// Return defaults on failure
 		config = h.getDefaultConfig()
 		config.Description = resolveAutoConfigDescription("", req.Description, config.AgentName)
@@ -153,9 +190,9 @@ IMPORTANT: All string values must be on a single line. Do not use literal newlin
 Required JSON fields:
 - agent_name: A short, descriptive name for the agent (e.g., "Weather Assistant", "Code Reviewer")
 - description: A short, polished 1-2 sentence description for the agent details field
-- agent_type: One of "tool-calling" (for tool/plugin tasks), "general" (balanced), "workspace-manager" (front-door lead for a workspace), "orchestration" (multi-agent coordination), or "research" (complex reasoning)
-- model: Choose a model that matches the requested role. For workspace-manager or orchestration agents, prefer the currently configured system model when it fits. Valid families include OpenAI, Codex, Claude Code, Claude, Gemini, and Ollama.
-- provider: One of "openai", "codex", "claude_code", "claude", "gemini", or "ollama" based on model
+- agent_type: One of "tool-calling" (for tool/plugin tasks), "general" (balanced), "orchestration" (multi-agent coordination), or "research" (complex reasoning)
+- model: Choose a model that matches the requested role. For orchestration agents, prefer the currently configured system model when it fits. Valid families include OpenAI, Codex, Claude Code, Claude, Gemini, Ollama, LM Studio, and MLX-LM.
+- provider: One of "openai", "codex", "claude_code", "claude", "gemini", "ollama", "lmstudio", or "mlx_lm" based on model
 - temperature: 0.0-0.3 for precise tasks, 0.4-0.7 for balanced, 0.7-1.0 for creative
 - system_prompt: A concise system prompt for this agent (single line, use \n for breaks)
 - recommended_plugins: Array of plugin keywords that would be useful (e.g., ["weather", "math", "file", "web", "calendar"])
@@ -164,7 +201,7 @@ Required JSON fields:
 Example:
 {"agent_name":"Weather Assistant","description":"Provides current conditions, forecasts, and weather-related guidance with clear, reliable answers.","agent_type":"tool-calling","model":"gpt-4.1-nano","provider":"openai","temperature":0.2,"system_prompt":"You are a weather assistant that provides accurate weather information.","recommended_plugins":["weather"],"reasoning":"Tool-calling for API-based weather lookups."}
 
-If the request describes the lead or front door for a workspace, return "workspace-manager" as the agent_type.`
+If the request describes multi-agent coordination, return "orchestration" as the agent_type.`
 
 	userMessage := fmt.Sprintf("Configure an agent for the following purpose:\n\n%s", description)
 
@@ -228,7 +265,7 @@ If the request describes the lead or front door for a workspace, return "workspa
 // validateAndSanitizeConfig ensures the config values are valid
 func (h *AutoConfigHandler) validateAndSanitizeConfig(config AutoConfigResponse) AutoConfigResponse {
 	// Validate agent type
-	validTypes := map[string]bool{"tool-calling": true, "general": true, "workspace-manager": true, "orchestration": true, "research": true}
+	validTypes := map[string]bool{"tool-calling": true, "general": true, "orchestration": true, "research": true}
 	if !validTypes[config.AgentType] {
 		config.AgentType = "tool-calling"
 	}
@@ -240,7 +277,7 @@ func (h *AutoConfigHandler) validateAndSanitizeConfig(config AutoConfigResponse)
 	}
 
 	// Validate provider
-	validProviders := map[string]bool{"openai": true, "codex": true, "claude_code": true, "claude": true, "gemini": true, "ollama": true}
+	validProviders := map[string]bool{"openai": true, "codex": true, "claude_code": true, "claude": true, "gemini": true, "ollama": true, "lmstudio": true, "mlx_lm": true}
 	if !validProviders[config.Provider] {
 		config.Provider = ""
 	}
@@ -252,6 +289,18 @@ func (h *AutoConfigHandler) validateAndSanitizeConfig(config AutoConfigResponse)
 		config.Temperature = 1
 	}
 
+	// For orchestration agents, always prefer the configured system model over
+	// whatever the LLM suggested. The LLM tends to echo the example model
+	// (gpt-4.1-nano) from its prompt, which isn't suitable for coordination —
+	// and the system model represents the user's explicit choice for
+	// orchestration-grade work.
+	if config.AgentType == "orchestration" && systemModel != "" {
+		config.Model = systemModel
+		if systemProvider != "" {
+			config.Provider = systemProvider
+		}
+	}
+
 	// Ensure model is set
 	if config.Model == "" {
 		switch config.AgentType {
@@ -259,27 +308,9 @@ func (h *AutoConfigHandler) validateAndSanitizeConfig(config AutoConfigResponse)
 			config.Model = "gpt-4.1-nano"
 		case "general":
 			config.Model = "gpt-5"
-		case "workspace-manager":
-			// Default to the system model so the workspace manager matches the user's preferred setup
-			if systemModel != "" {
-				config.Model = systemModel
-				if config.Provider == "" && systemProvider != "" {
-					config.Provider = systemProvider
-				}
-			}
-			if config.Model == "" {
-				config.Model = "gpt-5"
-			}
 		case "orchestration":
-			if systemModel != "" {
-				config.Model = systemModel
-				if config.Provider == "" && systemProvider != "" {
-					config.Provider = systemProvider
-				}
-			}
-			if config.Model == "" {
-				config.Model = "gpt-5"
-			}
+			// systemModel was empty; fall back to a capable default.
+			config.Model = "gpt-5"
 		case "research":
 			config.Model = "gpt-5"
 		}
@@ -287,7 +318,7 @@ func (h *AutoConfigHandler) validateAndSanitizeConfig(config AutoConfigResponse)
 
 	if config.Provider == "" {
 		switch config.AgentType {
-		case "workspace-manager", "orchestration":
+		case "orchestration":
 			if systemProvider != "" {
 				config.Provider = systemProvider
 			}

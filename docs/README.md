@@ -106,6 +106,6 @@ When adding documentation:
 ## External Resources
 
 - [Go Documentation](https://go.dev/doc/)
-- [gRPC Documentation](https://grpc.io/docs/)
+- [MCP Specification](https://modelcontextprotocol.io/)
 - [OpenAI API Reference](https://platform.openai.com/docs/api-reference)
 - [Anthropic Claude API](https://docs.anthropic.com/)

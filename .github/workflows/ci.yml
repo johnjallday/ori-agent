@@ -31,12 +31,10 @@ jobs:
       - name: Run go vet
         run: go vet ./...
 
-      - name: Install golangci-lint
-        run: |
-          curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $(go env GOPATH)/bin v1.55.2
-
       - name: Run golangci-lint
-        run: golangci-lint run ./...
+        uses: golangci/golangci-lint-action@v6
+        with:
+          version: v1.62.2
         continue-on-error: true  # Don't fail build on linter warnings initially
 
   frontend-lint:
@@ -141,10 +139,6 @@ jobs:
       - name: Build server
         run: make build
 
-      - name: Build plugins
-        run: make plugins
-        continue-on-error: true  # Some plugins might not build in CI
-
       - name: Run E2E tests
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
@@ -184,11 +178,6 @@ jobs:
       - name: Build server (Windows)
         if: runner.os == 'Windows'
         run: go build -o bin/ori-agent.exe ./cmd/server
-
-      - name: Build plugins (Unix)
-        if: runner.os != 'Windows'
-        run: make plugins
-        continue-on-error: true
 
       - name: Upload build artifacts
         uses: actions/upload-artifact@v5

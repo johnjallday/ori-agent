@@ -79,7 +79,7 @@ var travelPlanningDatePattern = regexp.MustCompile(`(?i)\b(?:\d{1,2}/\d{1,2}(?:/
 var travelPlanningContextPrefixPattern = regexp.MustCompile(`^\s*(?:#{1,6}\s+|[-*]\s+|\d+\.\s+)`)
 
 func maybeBuildWorkspacePlanningFormResponse(ag *resolvedChatAgent, query string, routeCtx normalizedChatRouteContext, workspaceStore planningFormWorkspaceStore, sessionStore planningFormSessionStore) *planningFormResponse {
-	if !isWorkspaceManagerAgent(ag) || strings.TrimSpace(routeCtx.WorkspaceID) == "" {
+	if !isWorkspaceAgent(ag) || strings.TrimSpace(routeCtx.WorkspaceID) == "" {
 		return nil
 	}
 
@@ -107,11 +107,13 @@ func maybeBuildWorkspacePlanningFormResponse(ag *resolvedChatAgent, query string
 	}
 }
 
-func isWorkspaceManagerAgent(ag *resolvedChatAgent) bool {
+// isWorkspaceAgent checks if the resolved agent is operating in a workspace context.
+// This replaces the old type-based check for "workspace-manager".
+func isWorkspaceAgent(ag *resolvedChatAgent) bool {
 	if ag == nil || ag.Agent == nil {
 		return false
 	}
-	return strings.EqualFold(strings.TrimSpace(ag.Type), "workspace-manager")
+	return ag.WorkspaceTools != nil
 }
 
 func isPlanningFormSubmissionPrompt(query string) bool {

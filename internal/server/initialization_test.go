@@ -153,6 +153,12 @@ func TestRegisterLLMProviders_NoAPIKeys(t *testing.T) {
 	if err != nil {
 		t.Fatalf("registerLLMProviders should succeed without API keys: %v", err)
 	}
+
+	for _, providerName := range []string{"ollama", "lmstudio", "mlx_lm"} {
+		if !factory.HasProvider(providerName) {
+			t.Fatalf("expected %s provider to be registered without API keys", providerName)
+		}
+	}
 }
 
 func TestResolveAgentStorePath(t *testing.T) {

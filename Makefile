@@ -1,4 +1,4 @@
-.PHONY: help build run test test-unit test-integration test-e2e test-all test-coverage test-watch lint lint-js lint-js-fix fmt fmt-js check-js vet clean plugins plugins-local server menubar run-menubar deps docker-build docker-run check-env merge-dependabot
+.PHONY: help build run test test-unit test-integration test-e2e test-all test-coverage test-watch lint lint-js lint-js-fix fmt fmt-js check-js vet clean server menubar run-menubar deps docker-build docker-run check-env merge-dependabot
 
 # Default target
 .DEFAULT_GOAL := help
@@ -7,7 +7,6 @@
 BINARY_NAME=ori-agent
 MENUBAR_BINARY_NAME=ori-menubar
 BUILD_DIR=bin
-PLUGINS_DIR=plugins
 COVERAGE_DIR=coverage
 GO=go
 GOTEST=$(GO) test
@@ -61,29 +60,6 @@ menubar: ## Build the menu bar app
 	$(GOBUILD) -ldflags "$(LDFLAGS)" -o $(BUILD_DIR)/$(MENUBAR_BINARY_NAME) ./cmd/menubar
 	@echo "$(GREEN)✓ Build complete: $(BUILD_DIR)/$(MENUBAR_BINARY_NAME)$(NC)"
 
-plugin-gen: ## Build the plugin code generator
-	@echo "$(BLUE)Building plugin generator...$(NC)"
-	$(GOBUILD) -o $(BUILD_DIR)/ori-plugin-gen ./cmd/ori-plugin-gen
-	@echo "$(GREEN)✓ Plugin generator built: $(BUILD_DIR)/ori-plugin-gen$(NC)"
-
-generate: plugin-gen ## Generate code for all plugins
-	@echo "$(BLUE)Generating plugin code...$(NC)"
-	@cd example_plugins/weather && ../../$(BUILD_DIR)/ori-plugin-gen -yaml=plugin.yaml -output=weather_generated.go
-	@cd example_plugins/math && ../../$(BUILD_DIR)/ori-plugin-gen -yaml=plugin.yaml -output=math_generated.go
-	@cd example_plugins/result-handler && ../../$(BUILD_DIR)/ori-plugin-gen -yaml=plugin.yaml -output=result_handler_generated.go
-	@cd example_plugins/minimal && ../../$(BUILD_DIR)/ori-plugin-gen -yaml=plugin.yaml -output=minimal_generated.go
-	@cd example_plugins/webapp && ../../$(BUILD_DIR)/ori-plugin-gen -yaml=plugin.yaml -output=webapp_generated.go
-	@echo "$(GREEN)✓ Code generation complete$(NC)"
-
-plugins: ## Build external plugins from the monorepo
-	@echo "$(BLUE)Building external plugins...$(NC)"
-	@MONOREPO_ROOT=$(MONOREPO_ROOT) ./scripts/build-external-plugins.sh || (echo "$(RED)External plugin build failed$(NC)" && exit 1)
-	@echo "$(GREEN)✓ External plugins built$(NC)"
-
-plugins-local: ## Build plugins from this worktree
-	@echo "$(BLUE)Building plugins from worktree...$(NC)"
-	@./scripts/build-plugins.sh || (echo "$(RED)Plugin build failed$(NC)" && exit 1)
-	@echo "$(GREEN)✓ Worktree plugins built$(NC)"
 
 icons: ## Generate menubar and app icons from SVG
 	@echo "$(BLUE)Generating icons...$(NC)"
@@ -91,7 +67,7 @@ icons: ## Generate menubar and app icons from SVG
 	@./scripts/generate-app-icon.sh
 	@echo "$(GREEN)✓ Icons generated$(NC)"
 
-all: deps generate build menubar plugins ## Build everything (server + menubar + plugins with code generation)
+all: deps build menubar ## Build everything (server + menubar)
 	@echo "$(GREEN)✓ Build complete$(NC)"
 
 build-all: all ## Alias for 'all' - Build everything
@@ -101,14 +77,7 @@ clean: ## Clean build artifacts
 	rm -rf $(BUILD_DIR)
 	rm -rf $(COVERAGE_DIR)
 	rm -rf build-dmg
-	rm -rf $(PLUGINS_DIR)/*/$(shell basename $(PLUGINS_DIR))
 	@echo "$(GREEN)✓ Clean complete$(NC)"
-
-clean-generated: ## Clean generated plugin code
-	@echo "$(BLUE)Cleaning generated files...$(NC)"
-	rm -f example_plugins/*/*.generated.go
-	rm -f example_plugins/*/*_generated.go
-	@echo "$(GREEN)✓ Generated files cleaned$(NC)"
 
 clean-state: ## Delete all configuration and state files (fresh start)
 	@echo "$(YELLOW)⚠️  WARNING: This will delete ALL configuration, agents, workspaces, and settings!$(NC)"
@@ -120,11 +89,8 @@ clean-state: ## Delete all configuration and state files (fresh start)
 		rm -rf agents/; \
 		rm -rf workspaces/; \
 		rm -rf sessions/; \
-		rm -rf uploaded_plugins/; \
 		rm -f settings.json; \
 		rm -f agents.json; \
-		rm -f local_plugin_registry.json; \
-		rm -f plugin_registry_cache.json; \
 		rm -f app_state.json; \
 		rm -f mcp_registry.json; \
 		rm -f locations.json; \
@@ -178,7 +144,7 @@ test-integration: ## Run integration tests
 		echo "$(GREEN)✓ Integration tests passed$(NC)"; \
 	fi
 
-test-e2e: build plugins ## Run end-to-end tests
+test-e2e: build ## Run end-to-end tests
 	@echo "$(BLUE)Running E2E tests...$(NC)"
 	@if [ -z "$$OPENAI_API_KEY" ]; then \
 		echo "$(YELLOW)Skipping E2E tests (OPENAI_API_KEY not set)$(NC)"; \
@@ -206,7 +172,7 @@ test-watch: ## Run tests in watch mode (requires entr)
 test-all: test test-e2e ## Run all tests including E2E
 	@echo "$(GREEN)✓ All tests completed$(NC)"
 
-test-user: build plugins ## Run user workflow tests
+test-user: build ## Run user workflow tests
 	@echo "$(BLUE)Running user tests...$(NC)"
 	@if [ -z "$$OPENAI_API_KEY" ] && [ -z "$$ANTHROPIC_API_KEY" ] && [ "$$USE_OLLAMA" != "true" ]; then \
 		echo "$(YELLOW)Skipping user tests (no LLM provider configured)$(NC)"; \
@@ -297,10 +263,6 @@ check-cross-platform: ## Check builds for all platforms (Linux, Windows, macOS)
 	@./scripts/check-cross-platform.sh
 	@echo "$(GREEN)✓ All platforms build successfully$(NC)"
 
-sync-plugin-deps: ## Sync plugin dependencies with main module
-	@echo "$(BLUE)Syncing plugin dependencies...$(NC)"
-	@./scripts/sync-plugin-deps.sh
-	@echo "$(GREEN)✓ Plugin dependencies synced$(NC)"
 
 ## Docker targets
 
@@ -318,7 +280,7 @@ docker-run: ## Run Docker container
 
 ## Development targets
 
-dev-setup: deps build plugins ## Initial development setup
+dev-setup: deps build ## Initial development setup
 	@echo "$(GREEN)✓ Development environment ready$(NC)"
 	@echo ""
 	@echo "$(BLUE)Next steps:$(NC)"

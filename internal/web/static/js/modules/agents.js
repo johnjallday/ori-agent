@@ -40,15 +40,6 @@ function createDefaultAgentCreationFlowState() {
 
 let pendingAgentCreationFlow = createDefaultAgentCreationFlowState();
 
-const WORKSPACE_MANAGER_MODEL_FALLBACKS = [
-  { provider: 'claude_code', models: ['sonnet'] },
-  { provider: 'codex', models: ['gpt-5.3-codex', 'gpt-5.4', 'gpt-5.2-codex', 'gpt-5.2'] },
-  { provider: 'openai', models: ['gpt-5', 'gpt-4.1', 'gpt-5-mini', 'o3', 'o1'] },
-  { provider: 'claude', patterns: ['sonnet', 'opus'] },
-  { provider: 'gemini', models: ['gemini-2.5-pro'], patterns: ['pro'] },
-  { provider: 'ollama', models: ['llama3.1:latest'], patterns: ['llama3.1', 'llama3', 'mixtral'] }
-];
-
 function isWorkspaceGeneratedMCPServer(server) {
   const name = String(server?.name || '').trim();
   return /^ws:[^:]+:mcp:/i.test(name);
@@ -112,49 +103,6 @@ async function loadSystemModelPreference(forceRefresh = false) {
   return systemModelPreferencePromise;
 }
 
-function getWorkspaceManagerModelCandidates() {
-  const candidates = [];
-  availableProviders.forEach((provider) => {
-    const providerName = normalizeProviderName(provider?.name);
-    const providerLabel = String(provider?.display_name || provider?.name || '').trim();
-    (provider?.models || []).forEach((model) => {
-      if (String(model?.type || '').trim() !== 'workspace-manager') {
-        return;
-      }
-      const modelName = String(model?.value || '').trim();
-      if (!providerName || !modelName) return;
-      candidates.push({
-        provider: providerName,
-        providerLabel,
-        model: modelName,
-        label: String(model?.label || modelName).trim() || modelName
-      });
-    });
-  });
-  return candidates;
-}
-
-function findWorkspaceManagerCandidateByExact(providerName, modelName, candidates) {
-  const provider = normalizeProviderName(providerName);
-  const model = String(modelName || '').trim().toLowerCase();
-  return (candidates || []).find((candidate) =>
-    candidate.provider === provider && candidate.model.toLowerCase() === model
-  ) || null;
-}
-
-function findWorkspaceManagerCandidateByPattern(providerName, patterns, candidates) {
-  const provider = normalizeProviderName(providerName);
-  const normalizedPatterns = Array.isArray(patterns)
-    ? patterns.map((pattern) => String(pattern || '').trim().toLowerCase()).filter(Boolean)
-    : [];
-  if (!provider || normalizedPatterns.length === 0) return null;
-
-  return (candidates || []).find((candidate) =>
-    candidate.provider === provider
-      && normalizedPatterns.some((pattern) => candidate.model.toLowerCase().includes(pattern))
-  ) || null;
-}
-
 function selectModelOption(modelSelect, providerName, modelName) {
   if (!modelSelect) return false;
 
@@ -184,102 +132,7 @@ function selectModelOption(modelSelect, providerName, modelName) {
   return false;
 }
 
-async function applyWorkspaceManagerRecommendation(options = {}) {
-  const modelSelect = document.getElementById('agentModel');
-  const typeInput = document.getElementById('agentType');
-  const reasoningInput = document.getElementById('agentReasoning');
-  if (!modelSelect || !typeInput) return null;
 
-  const force = Boolean(options && options.force);
-  const currentType = String(typeInput.value || '').trim().toLowerCase();
-  if (currentType !== 'workspace-manager') {
-    setAgentModelRecommendationMessage('');
-    return null;
-  }
-
-  if (availableProviders.length === 0) {
-    await loadAvailableProviders();
-    populateModelSelect(modelSelect, 'workspace-manager');
-  }
-
-  const systemModel = await loadSystemModelPreference(Boolean(options && options.refreshSystemModel));
-  const candidates = getWorkspaceManagerModelCandidates();
-  if (candidates.length === 0) {
-    setAgentModelRecommendationMessage('');
-    return null;
-  }
-
-  let chosen = null;
-  let recommendationMessage = '';
-  const systemCandidate = systemModel?.configured
-    ? findWorkspaceManagerCandidateByExact(systemModel.provider, systemModel.model, candidates)
-    : null;
-
-  if (systemCandidate) {
-    chosen = {
-      provider: systemCandidate.provider,
-      model: systemCandidate.model,
-      reasoningEffort: systemModel.reasoning_effort || '',
-      reason: 'system'
-    };
-    recommendationMessage = `Recommended: use your current system model ${formatProviderModelLabel(systemCandidate.provider, systemCandidate.model)} for this workspace manager. You can keep it or choose another model.`;
-  } else {
-    for (let index = 0; index < WORKSPACE_MANAGER_MODEL_FALLBACKS.length && !chosen; index += 1) {
-      const fallback = WORKSPACE_MANAGER_MODEL_FALLBACKS[index];
-      const exactModels = Array.isArray(fallback.models) ? fallback.models : [];
-      for (let modelIndex = 0; modelIndex < exactModels.length && !chosen; modelIndex += 1) {
-        const match = findWorkspaceManagerCandidateByExact(fallback.provider, exactModels[modelIndex], candidates);
-        if (match) {
-          chosen = {
-            provider: match.provider,
-            model: match.model,
-            reasoningEffort: '',
-            reason: 'fallback'
-          };
-        }
-      }
-
-      if (!chosen && Array.isArray(fallback.patterns) && fallback.patterns.length > 0) {
-        const patternMatch = findWorkspaceManagerCandidateByPattern(fallback.provider, fallback.patterns, candidates);
-        if (patternMatch) {
-          chosen = {
-            provider: patternMatch.provider,
-            model: patternMatch.model,
-            reasoningEffort: '',
-            reason: 'fallback'
-          };
-        }
-      }
-    }
-
-    if (!chosen) {
-      chosen = {
-        provider: candidates[0].provider,
-        model: candidates[0].model,
-        reasoningEffort: '',
-        reason: 'fallback'
-      };
-    }
-
-    const fallbackLabel = formatProviderModelLabel(chosen.provider, chosen.model);
-    if (systemModel?.configured && systemModel.provider && systemModel.model) {
-      recommendationMessage = `Your current system model ${formatProviderModelLabel(systemModel.provider, systemModel.model)} is not available as a workspace-manager default. Preselected fallback: ${fallbackLabel}. You can keep it or choose another model.`;
-    } else {
-      recommendationMessage = `Preselected workspace-manager default: ${fallbackLabel}. You can keep it or choose another model.`;
-    }
-  }
-
-  if (chosen && (force || !String(modelSelect.value || '').trim())) {
-    selectModelOption(modelSelect, chosen.provider, chosen.model);
-    if (reasoningInput && supportsCodexReasoning(chosen.provider, chosen.model)) {
-      reasoningInput.value = String(chosen.reasoningEffort || 'medium').trim() || 'medium';
-    }
-  }
-
-  setAgentModelRecommendationMessage(recommendationMessage);
-  updateAgentReasoningVisibility();
-  return chosen;
-}
 
 function updateAgentReasoningVisibility() {
   const field = document.getElementById('agentReasoningField');
@@ -314,6 +167,14 @@ async function loadAvailableProviders() {
 function populateModelSelect(modelSelect, selectedType = 'tool-calling') {
   if (!modelSelect || availableProviders.length === 0) return;
 
+  // For orchestration agents, the user's configured system model is the right
+  // default even when it wasn't categorized as "orchestration" (e.g. a local
+  // Ollama model that defaults to tool-calling). Surface it in the dropdown so
+  // it remains selectable.
+  const systemPref = cachedSystemModelPreference || {};
+  const systemProviderName = normalizeProviderName(systemPref.provider);
+  const systemModelName = String(systemPref.model || '').trim();
+
   // Clear existing options
   modelSelect.innerHTML = '';
 
@@ -329,8 +190,15 @@ function populateModelSelect(modelSelect, selectedType = 'tool-calling') {
       option.setAttribute('data-type', model.type);
       option.setAttribute('data-provider', model.provider);
 
-      // Only show models matching the selected type
-      if (model.type !== selectedType) {
+      const isSystemModel =
+        selectedType === 'orchestration' &&
+        systemModelName &&
+        model.value === systemModelName &&
+        normalizeProviderName(model.provider) === systemProviderName;
+
+      // Only show models matching the selected type (plus the system model
+      // when building the orchestration view).
+      if (model.type !== selectedType && !isSystemModel) {
         option.style.display = 'none';
         option.disabled = true;
       }
@@ -543,6 +411,14 @@ async function applyPendingAgentCreationFlowToModal() {
     agentNameInput.value = options.seedName;
   }
 
+  // For orchestration agents, ensure the system model preference is cached
+  // before populateModelSelect runs — otherwise the dropdown would drop the
+  // configured model if its category doesn't match 'orchestration'.
+  let systemPref = null;
+  if (options.seedType === 'orchestration') {
+    systemPref = await loadSystemModelPreference();
+  }
+
   if (options.seedType && agentTypeInput) {
     agentTypeInput.value = options.seedType;
     agentTypeInput.dispatchEvent(new Event('change'));
@@ -553,8 +429,20 @@ async function applyPendingAgentCreationFlowToModal() {
     if (agentReasoningInput && supportsCodexReasoning(options.seedProvider, options.seedModel)) {
       agentReasoningInput.value = options.seedReasoningEffort || 'medium';
     }
-  } else if (String(options.seedType || '').trim().toLowerCase() === 'workspace-manager') {
-    await applyWorkspaceManagerRecommendation({ force: true, refreshSystemModel: true });
+  } else if (
+    options.seedType === 'orchestration' &&
+    agentModelInput &&
+    systemPref &&
+    systemPref.configured &&
+    systemPref.model
+  ) {
+    // No explicit seed model — the user's configured system model is the
+    // right default for orchestration, matching the backend auto-config
+    // override in validateAndSanitizeConfig.
+    selectModelOption(agentModelInput, systemPref.provider, systemPref.model);
+    if (agentReasoningInput && supportsCodexReasoning(systemPref.provider, systemPref.model)) {
+      agentReasoningInput.value = systemPref.reasoning_effort || 'medium';
+    }
   }
 
   if (options.seedSystemPrompt) {
@@ -587,7 +475,7 @@ function normalizeAgentCapabilityName(value) {
 
 function deriveAgentRoleForType(agentType) {
   const normalized = String(agentType || '').trim().toLowerCase();
-  if (normalized === 'workspace-manager' || normalized === 'orchestration') {
+  if (normalized === 'orchestration') {
     return 'orchestrator';
   }
   return '';
@@ -1495,8 +1383,16 @@ async function loadAgentsForSidebar() {
   agentsLog.debug('Loading agents from /api/agents...');
   try {
     const data = await API.get('/api/agents');
-    agentsLog.debug('Received agents', { count: data.agents?.length || 0 });
-    displayAgents(data.agents, resolveSidebarCurrentAgent());
+    const all = Array.isArray(data.agents) ? data.agents : [];
+    // Hide workspace-scoped agents (workspace entry agents) from the
+    // global sidebar — they're bound to a specific workspace context.
+    const visible = all.filter((agent) => {
+      if (!agent) return false;
+      const scope = typeof agent === 'object' ? String(agent.scope || '').toLowerCase() : '';
+      return scope !== 'workspace';
+    });
+    agentsLog.debug('Received agents', { count: all.length, visible: visible.length });
+    displayAgents(visible, resolveSidebarCurrentAgent());
 
   } catch (error) {
     agentsLog.error('Error loading agents', error);
@@ -2047,11 +1943,7 @@ function setupAgentManagement() {
   if (agentTypeInput && agentModelInput) {
     agentTypeInput.addEventListener('change', async (e) => {
       filterModelsByType(e.target.value, agentModelInput);
-      if (String(e?.target?.value || '').trim().toLowerCase() === 'workspace-manager') {
-        await applyWorkspaceManagerRecommendation({ force: true });
-      } else {
-        setAgentModelRecommendationMessage('');
-      }
+      setAgentModelRecommendationMessage('');
       updateAgentReasoningVisibility();
     });
   }

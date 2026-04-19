@@ -445,14 +445,8 @@ func inferSkillPromptProviderName(factory *llm.Factory, model string) string {
 	if strings.HasPrefix(normalizedModel, "codex") {
 		return "codex"
 	}
-	if factory != nil {
-		if ollamaProvider, err := factory.GetProvider("ollama"); err == nil {
-			if ollamaProv, ok := ollamaProvider.(*llm.OllamaProvider); ok {
-				if ollamaProv.HasModel(trimmedModel) || ollamaProv.HasModel(normalizedModel) {
-					return "ollama"
-				}
-			}
-		}
+	if localProvider := llm.FindLocalProviderByModel(factory, trimmedModel); localProvider != "" {
+		return localProvider
 	}
 	return "openai"
 }

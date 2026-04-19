@@ -745,7 +745,7 @@ func writeEmailOAuthPopupResult(w http.ResponseWriter, status int, payload email
 		html.EscapeString(map[bool]string{true: "Connected", false: "Needs Attention"}[payload.Success]),
 		html.EscapeString(headline),
 		html.EscapeString(bodyCopy),
-		data,
+		strings.ReplaceAll(string(data), "</", `<\/`),
 	))
 }
 

@@ -63,8 +63,15 @@
                       <label class="vault-page-label" for="vaultEditVaultDescription">Description</label>
                       <input id="vaultEditVaultDescription" type="text" class="form-control settings-input vault-page-input" placeholder="Description">
                     </div>
+                    <div class="vault-page-field">
+                      <label class="vault-page-label" for="vaultStorageStatusSummary">Storage status</label>
+                      <div id="vaultStorageStatusSummary" class="vault-page-help">Select a vault to review its storage location.</div>
+                      <div id="vaultStorageLocationSummary" class="vault-page-meta mt-2">Ori-managed storage details will appear here.</div>
+                      <a href="/settings#vault-directory" class="vault-page-inline-link">Manage Vault Directory in Settings</a>
+                    </div>
                     <div class="vault-page-button-row">
                       <button id="vaultRenameVaultBtn" class="modern-btn modern-btn-secondary modern-btn-sm" type="button">Save Details</button>
+                      <button id="vaultRelinkVaultBtn" class="modern-btn modern-btn-secondary modern-btn-sm" type="button">Relink Vault</button>
                       <button id="vaultDeleteVaultBtn" class="btn btn-outline-danger btn-sm vault-page-danger-btn" type="button">Delete Vault</button>
                     </div>
                   </div>
@@ -395,6 +402,7 @@
       <div class="vault-modal-section-head">
         <span class="vault-modal-section-kicker">New Vault</span>
         <h6 id="vaultCreateDialogTitle" class="vault-modal-section-title">Create New Vault</h6>
+        <p id="vaultCreateDialogDescription" class="vault-modal-section-description">Create a separately encrypted vault with its own password.</p>
       </div>
 
       <div class="vault-modal-field">

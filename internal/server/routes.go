@@ -87,6 +87,8 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 	// =============================================================================
 	agentHandler := agenthttp.New(s.Storage.AgentStore)
 	agentHandler.ActivityLogger = s.Handlers.ActivityLogger
+	agentHandler.SetCLIAgentRegistry(s.Handlers.CLIAgentRegistry)
+	agentHandler.SetWorkspaceStore(s.Storage.WorkspaceStore)
 	avatarHandler := agenthttp.NewAvatarHandler(s.Storage.AgentStore)
 	mux.Handle("/api/agents", agentHandler)
 	if s.Handlers.Evolution != nil {
@@ -97,6 +99,8 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 	// Dashboard handlers
 	dashboardHandler := agenthttp.NewDashboardHandler(s.Storage.AgentStore)
 	dashboardHandler.ActivityLogger = s.Handlers.ActivityLogger
+	dashboardHandler.SetCLIAgentRegistry(s.Handlers.CLIAgentRegistry)
+	dashboardHandler.SetWorkspaceStore(s.Storage.WorkspaceStore)
 	mux.HandleFunc("/api/agents/dashboard/list", dashboardHandler.ListAgentsWithStats)
 	mux.HandleFunc("/api/agents/dashboard/stats", dashboardHandler.GetDashboardStats)
 
@@ -166,6 +170,7 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 	mux.HandleFunc("/api/settings", s.Handlers.Settings.SettingsHandler)
 	mux.HandleFunc("/api/settings/session", s.Handlers.Settings.SessionSettingsHandler)
 	mux.HandleFunc("/api/settings/workspace-root", s.Handlers.Settings.WorkspaceRootSettingsHandler)
+	mux.HandleFunc("/api/settings/vault-root", s.Handlers.Settings.VaultRootSettingsHandler)
 	mux.HandleFunc("/api/api-key", s.Handlers.Settings.APIKeyHandler)
 	mux.HandleFunc("/api/providers", s.Handlers.Settings.ProvidersHandler)
 	mux.HandleFunc("/api/settings/system-model", s.Handlers.Settings.SystemModelHandler)
@@ -544,6 +549,15 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 		mux.HandleFunc("/api/review/issues", s.Handlers.Review.HandleIssues)
 		mux.HandleFunc("/api/review/export", s.Handlers.Review.HandleExport)
 		mux.HandleFunc("/api/review/runs", s.Handlers.Review.HandleRuns)
+	}
+
+	// =============================================================================
+	// CLI Agent Adapter Endpoints
+	// =============================================================================
+	if s.Handlers.CLIAgents != nil {
+		mux.HandleFunc("/api/cli-agents", s.Handlers.CLIAgents.HandleListAgents)
+		mux.HandleFunc("/api/cli-agents/tasks", s.Handlers.CLIAgents.HandleCreateTask)
+		mux.HandleFunc("/api/cli-agents/tasks/", s.Handlers.CLIAgents.HandleGetTask)
 	}
 
 	// =============================================================================

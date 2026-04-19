@@ -35,6 +35,13 @@
               </div>
 
               <div class="d-flex align-items-center gap-2">
+                <a id="open-workflows-btn" href="/workflows" class="modern-btn modern-btn-secondary">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" class="me-1">
+                    <path d="M7,5A2,2 0 0,0 5,7V10A2,2 0 0,0 7,12H10A2,2 0 0,0 12,10V7A2,2 0 0,0 10,5H7M14,5A2,2 0 0,0 12,7V10A2,2 0 0,0 14,12H17A2,2 0 0,0 19,10V7A2,2 0 0,0 17,5H14M7,12A2,2 0 0,0 5,14V17A2,2 0 0,0 7,19H10A2,2 0 0,0 12,17V14A2,2 0 0,0 10,12H7M13,13H19V15H13V13M13,17H19V19H13V17Z"/>
+                  </svg>
+                  Orchestration Skills
+                </a>
+
                 <!-- Open Canvas Button -->
                 <a id="open-canvas-btn" href="#" class="modern-btn modern-btn-primary">
                   <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" class="me-1">
@@ -136,6 +143,19 @@
                 <!-- Children will be rendered here -->
               </div>
             </div>
+
+            <div id="workspace-detail-workflow-links-panel" style="display: none; margin-top: 1rem; padding-top: 1rem; border-top: 1px solid var(--border-color);">
+              <div class="d-flex align-items-center gap-2 mb-2">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" style="color: var(--text-secondary);">
+                  <path d="M7,5A2,2 0 0,0 5,7V10A2,2 0 0,0 7,12H10A2,2 0 0,0 12,10V7A2,2 0 0,0 10,5H7M14,5A2,2 0 0,0 12,7V10A2,2 0 0,0 14,12H17A2,2 0 0,0 19,10V7A2,2 0 0,0 17,5H14M7,12A2,2 0 0,0 5,14V17A2,2 0 0,0 7,19H10A2,2 0 0,0 12,17V14A2,2 0 0,0 10,12H7M13,13H19V15H13V13M13,17H19V19H13V17Z"/>
+                </svg>
+                <span style="font-size: 0.875rem; font-weight: 500; color: var(--text-secondary);">Orchestration Skills</span>
+                <span id="workspace-detail-workflow-links-count" class="badge bg-secondary" style="font-size: 0.7rem;">0</span>
+              </div>
+              <div id="workspace-detail-workflow-links-list" class="workspace-detail-workflow-chip-row">
+                <!-- Workflow template links will be rendered here -->
+              </div>
+            </div>
           </div>
 
           <!-- Workspace Configuration -->
@@ -143,7 +163,7 @@
             <div class="workspace-detail-config-header">
               <div>
                 <div class="workspace-detail-config-kicker">Workspace Configuration</div>
-                <h2 class="workspace-detail-config-title">Manager behavior, connections, and skill policy</h2>
+                <h2 class="workspace-detail-config-title">Manager settings, connections, and skill policy</h2>
                 <div class="workspace-detail-config-summary" id="workspace-detail-config-summary">
                   <span class="workspace-detail-config-chip" id="workspace-detail-config-preset-chip">Workspace: General · Guided</span>
                   <span class="workspace-detail-config-chip" id="workspace-detail-config-connections-chip">Connections: 0</span>
@@ -282,7 +302,7 @@
                       </div>
                       <div class="col-12">
                         <div class="workspace-detail-settings-summary-card">
-                          <div class="workspace-detail-settings-summary-title">Current Behavior</div>
+                          <div class="workspace-detail-settings-summary-title">Current Manager Behavior</div>
                           <div id="workspace-detail-settings-summary" class="workspace-detail-settings-summary-copy">Loading workspace settings...</div>
                         </div>
                       </div>
@@ -2052,6 +2072,39 @@
       min-width: 0;
     }
 
+    .workspace-detail-workflow-link {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.4rem;
+      color: inherit;
+      text-decoration: none;
+      min-width: 0;
+      transition: color 0.15s ease, border-color 0.15s ease, background-color 0.15s ease;
+    }
+
+    .workspace-detail-workflow-link:hover {
+      color: #fb923c;
+    }
+
+    .workspace-detail-workflow-link:focus-visible {
+      outline: 2px solid rgba(251, 146, 60, 0.9);
+      outline-offset: 2px;
+      border-radius: 999px;
+    }
+
+    .workspace-detail-workflow-link svg {
+      flex-shrink: 0;
+      opacity: 0.8;
+    }
+
+    .workspace-detail-workflow-link-label {
+      min-width: 0;
+    }
+
+    .workspace-detail-workflow-link-step {
+      opacity: 0.78;
+    }
+
     .workspace-detail-agent-card-meta {
       font-size: 0.68rem;
       color: var(--text-secondary);
@@ -2159,12 +2212,6 @@
       white-space: nowrap;
     }
 
-    .workspace-detail-agent-role-badge.workspace-manager {
-      border: 1px solid rgba(251, 191, 36, 0.34);
-      background: rgba(180, 83, 9, 0.18);
-      color: #fcd34d;
-      box-shadow: inset 0 0 0 1px rgba(251, 191, 36, 0.05);
-    }
 
     .workspace-detail-agent-info-tag {
       display: inline-flex;
@@ -3640,6 +3687,73 @@
     .workspace-detail-item-meta {
       font-size: 0.7rem;
       color: var(--text-secondary);
+    }
+
+    .workspace-detail-workflow-link--inline {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.3rem;
+      padding: 0.08rem 0.42rem;
+      margin-top: 0.32rem;
+      border-radius: 999px;
+      background: rgba(249, 115, 22, 0.12);
+      color: #c2410c;
+      border: 1px solid rgba(249, 115, 22, 0.22);
+      font-size: 0.68rem;
+      font-weight: 600;
+      letter-spacing: 0.01em;
+    }
+
+    .workspace-detail-workflow-link--inline:hover {
+      background: rgba(249, 115, 22, 0.18);
+      color: #9a3412;
+    }
+
+    .workspace-detail-workflow-chip-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.65rem;
+    }
+
+    .workspace-detail-workflow-chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.55rem;
+      min-width: 0;
+      padding: 0.55rem 0.8rem;
+      border-radius: 999px;
+      border: 1px solid rgba(249, 115, 22, 0.18);
+      background: linear-gradient(135deg, rgba(249, 115, 22, 0.12), rgba(251, 191, 36, 0.08));
+      color: #9a3412;
+      box-shadow: 0 10px 20px rgba(249, 115, 22, 0.08);
+    }
+
+    .workspace-detail-workflow-chip:hover {
+      background: linear-gradient(135deg, rgba(249, 115, 22, 0.18), rgba(251, 191, 36, 0.14));
+      color: #7c2d12;
+      border-color: rgba(249, 115, 22, 0.28);
+    }
+
+    .workspace-detail-workflow-chip-copy {
+      display: flex;
+      flex-direction: column;
+      min-width: 0;
+    }
+
+    .workspace-detail-workflow-chip-title {
+      font-size: 0.78rem;
+      font-weight: 700;
+      color: inherit;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      max-width: 220px;
+    }
+
+    .workspace-detail-workflow-chip-meta {
+      font-size: 0.68rem;
+      color: rgba(124, 45, 18, 0.84);
+      white-space: nowrap;
     }
 
     .workspace-detail-session-id {

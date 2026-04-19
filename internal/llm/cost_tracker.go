@@ -159,6 +159,30 @@ func (ct *CostTracker) initializePricingModels() {
 		Currency:             "USD",
 	})
 
+	ct.addPricingModel(PricingModel{
+		ModelName:            "default",
+		Provider:             "ollama",
+		InputCostPerMillion:  0.0,
+		OutputCostPerMillion: 0.0,
+		Currency:             "USD",
+	})
+
+	ct.addPricingModel(PricingModel{
+		ModelName:            "default",
+		Provider:             "lmstudio",
+		InputCostPerMillion:  0.0,
+		OutputCostPerMillion: 0.0,
+		Currency:             "USD",
+	})
+
+	ct.addPricingModel(PricingModel{
+		ModelName:            "default",
+		Provider:             "mlx_lm",
+		InputCostPerMillion:  0.0,
+		OutputCostPerMillion: 0.0,
+		Currency:             "USD",
+	})
+
 	// Generic fallback for unknown models
 	ct.addPricingModel(PricingModel{
 		ModelName:            "default",

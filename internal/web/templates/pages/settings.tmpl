@@ -129,6 +129,14 @@
               </span>
               <span class="settings-nav-item-text">Workspace Directory</span>
             </a>
+            <a href="#vault-directory" class="settings-nav-item" data-section="vault-directory">
+              <span class="settings-nav-item-icon">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
+                  <path d="M10,4H4A2,2 0 0,0 2,6V18A2,2 0 0,0 4,20H20A2,2 0 0,0 22,18V8A2,2 0 0,0 20,6H12L10,4Z"/>
+                </svg>
+              </span>
+              <span class="settings-nav-item-text">Vault Directory</span>
+            </a>
             <a href="#session-management" class="settings-nav-item" data-section="session-management">
               <span class="settings-nav-item-icon">
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
@@ -480,7 +488,7 @@
               <select id="systemModelProvider" class="form-select settings-input settings-select" aria-describedby="providerHelp">
                 <option value="">Select a provider...</option>
               </select>
-              <span id="providerHelp" class="settings-help">Choose the AI provider for system tasks. Only providers with configured API keys are available.</span>
+              <span id="providerHelp" class="settings-help">Choose the AI provider for system tasks. Cloud providers need API keys; local providers need their server running.</span>
             </div>
 
             <!-- Model Dropdown -->
@@ -489,7 +497,7 @@
               <select id="systemModelModel" class="form-select settings-input settings-select" disabled aria-describedby="modelHelp">
                 <option value="">Select provider first...</option>
               </select>
-              <span id="modelHelp" class="settings-help">Choose a fast, cost-effective model for system tasks. Claude Haiku or GPT-4o-mini are recommended.</span>
+              <span id="modelHelp" class="settings-help">Choose a fast, cost-effective model for system tasks. Claude Haiku, GPT-4o-mini, or a lightweight local model are good defaults.</span>
             </div>
 
             <!-- Codex Reasoning Effort -->
@@ -930,6 +938,59 @@
                 Save Workspace Directory
               </button>
               <button id="resetWorkspaceRootBtn" class="modern-btn modern-btn-secondary">
+                Clear Custom Directory
+              </button>
+            </div>
+          </section>
+
+          <!-- Vault Directory Section -->
+          <section id="vault-directory" class="settings-section modern-card p-4">
+            <div class="settings-section-header">
+              <span class="settings-section-icon">
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor">
+                  <path d="M10,4H4A2,2 0 0,0 2,6V18A2,2 0 0,0 4,20H20A2,2 0 0,0 22,18V8A2,2 0 0,0 20,6H12L10,4Z"/>
+                </svg>
+              </span>
+              <h2 class="settings-section-title">Vault Directory</h2>
+            </div>
+
+            <p class="settings-section-description">
+              Choose where new managed vault folders are created by default. Existing vault storage stays where it is.
+            </p>
+
+            <div id="vaultRootStatus" class="settings-status mb-4">
+              <div id="vaultRootStatusIndicator">
+                <span class="spinner-border spinner-border-sm" role="status" aria-label="Loading"></span>
+              </div>
+              <div class="settings-status-content">
+                <div id="vaultRootStatusText" class="settings-status-text">Loading vault directory...</div>
+                <div id="vaultRootStatusDetails" class="settings-status-details"></div>
+              </div>
+            </div>
+
+            <div class="settings-field">
+              <label class="settings-label" for="vaultRootInput">Default directory</label>
+              <div class="input-group">
+                <input id="vaultRootInput"
+                       type="text"
+                       class="form-control settings-input"
+                       placeholder="/Users/you/Ori Vaults"
+                       aria-describedby="vaultRootHelp">
+                <button id="browseVaultRootBtn" class="btn btn-outline-secondary" type="button">
+                  Browse
+                </button>
+              </div>
+              <span id="vaultRootHelp" class="settings-help">New managed vault folders are created inside this directory. Each vault folder contains its encrypted `vault.db` plus room for future blobs or sidecar files. Clear the custom directory to fall back to the environment variable or built-in default.</span>
+            </div>
+
+            <div class="settings-actions">
+              <button id="saveVaultRootBtn" class="modern-btn modern-btn-primary">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" class="me-2">
+                  <path d="M15,9H5V5H15M12,19A3,3 0 0,1 9,16A3,3 0 0,1 12,13A3,3 0 0,1 15,16A3,3 0 0,1 12,19M17,3H5C3.89,3 3,3.9 3,5V19A2,2 0 0,0 5,21H19A2,2 0 0,0 21,19V7L17,3Z"/>
+                </svg>
+                Save Vault Directory
+              </button>
+              <button id="resetVaultRootBtn" class="modern-btn modern-btn-secondary">
                 Clear Custom Directory
               </button>
             </div>

@@ -435,6 +435,13 @@ func getResponseText(content string) string {
 	return text
 }
 
+// defaultSystemAgentPrompt is the shared base prompt for the system agent.
+// It establishes the coordinator identity used across all providers when no
+// agent-specific system prompt is configured.
+const defaultSystemAgentPrompt = "You are a helpful assistant that coordinates tasks and delegates to specialists when appropriate. " +
+	"Use available tools when they provide a more accurate answer. " +
+	"Be concise and direct in your responses."
+
 func resolveSystemPromptForAgent(ag *agent.Agent, defaultPrompt string) string {
 	if ag == nil {
 		return defaultPrompt

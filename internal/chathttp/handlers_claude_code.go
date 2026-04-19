@@ -27,7 +27,6 @@ func (h *Handler) handleClaudeCodeChat(w http.ResponseWriter, r *http.Request, a
 	systemPrompt := composeRuntimeSystemPrompt(
 		h.buildChatSystemPrompt(
 			ag, agentName,
-			"You are a helpful assistant. Be concise and direct in your responses.",
 			nil,
 		),
 		runtimeSystemPrompt,

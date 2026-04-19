@@ -523,15 +523,7 @@ func (th *TaskHandler) executeParentTaskSequence(workspaceID, parentTaskID strin
 		return
 	}
 
-	sort.SliceStable(subtasks, func(i, j int) bool {
-		if subtasks[i].SubtaskIndex > 0 && subtasks[j].SubtaskIndex > 0 && subtasks[i].SubtaskIndex != subtasks[j].SubtaskIndex {
-			return subtasks[i].SubtaskIndex < subtasks[j].SubtaskIndex
-		}
-		if !subtasks[i].CreatedAt.Equal(subtasks[j].CreatedAt) {
-			return subtasks[i].CreatedAt.Before(subtasks[j].CreatedAt)
-		}
-		return subtasks[i].ID < subtasks[j].ID
-	})
+	subtasks = sortParentSubtasks(subtasks)
 
 	startedAt := time.Now()
 	parentTask.Status = workspace.TaskStatusInProgress
@@ -566,57 +558,53 @@ func (th *TaskHandler) executeParentTaskSequence(workspaceID, parentTaskID strin
 	var blockedErr *workspace.TaskBlockedError
 	var blockedSubtaskID string
 
-	for _, subtaskInfo := range subtasks {
-		subtask, err := ws.GetTask(subtaskInfo.ID)
-		if err != nil {
-			execErr = fmt.Errorf("subtask %s not found", subtaskInfo.ID)
-			break
+	if shouldUseGraphParentExecution(parentTask, subtasks) {
+		lastResult, blockedSubtaskID, execErr = th.executeParentTaskGraph(ws, parentTask, subtasks)
+		if execErr != nil {
+			errors.As(execErr, &blockedErr)
 		}
-
-		if subtask.Status == workspace.TaskStatusInProgress {
-			execErr = fmt.Errorf("subtask %s already in progress", subtask.Description)
-			break
-		}
-		if subtask.To == "" || subtask.To == "unassigned" {
-			execErr = fmt.Errorf("subtask %s has no assigned agent", subtask.Description)
-			break
-		}
-
-		if subtask.Status == workspace.TaskStatusCompleted ||
-			subtask.Status == workspace.TaskStatusFailed ||
-			subtask.Status == workspace.TaskStatusCancelled ||
-			subtask.Status == workspace.TaskStatusTimeout {
-			subtask.Status = workspace.TaskStatusPending
-			subtask.Result = ""
-			subtask.Error = ""
-			subtask.StartedAt = nil
-			subtask.CompletedAt = nil
-
-			if err := ws.UpdateTask(*subtask); err != nil {
-				execErr = fmt.Errorf("failed to reset subtask %s: %w", subtask.ID, err)
-				break
-			}
-			if err := th.workspaceStore.Save(ws); err != nil {
-				execErr = fmt.Errorf("failed to save workspace before subtask: %w", err)
-				break
-			}
-		}
-
-		result, err := th.executeTaskWithDependencies(ws, subtask, true)
-		if err != nil {
-			if errors.As(err, &blockedErr) {
-				blockedSubtaskID = subtask.ID
-			}
+	} else {
+		if err := th.prepareParentSubtasksForExecution(ws, subtasks); err != nil {
 			execErr = err
-			break
 		}
-		lastResult = result
+
+		for _, subtaskInfo := range subtasks {
+			if execErr != nil {
+				break
+			}
+
+			subtask, err := ws.GetTask(subtaskInfo.ID)
+			if err != nil {
+				execErr = fmt.Errorf("subtask %s not found", subtaskInfo.ID)
+				break
+			}
+
+			result, err := th.executeTaskWithDependencies(ws, subtask, true)
+			if err != nil {
+				if errors.As(err, &blockedErr) {
+					blockedSubtaskID = subtask.ID
+				}
+				execErr = err
+				break
+			}
+			lastResult = result
+		}
 	}
 
 	parentTask, err = ws.GetTask(parentTaskID)
 	if err != nil {
 		logger.Error("Failed to reload parent task after sequence", logger.Fields{"task_id": parentTaskID, "error": err})
 		return
+	}
+
+	if execErr == nil {
+		subtasks = sortParentSubtasks(ws.GetSubtasks(parentTaskID))
+		aggregatedResult, aggErr := aggregateParentTaskResults(parentTask, subtasks, lastResult)
+		if aggErr != nil {
+			execErr = fmt.Errorf("aggregate parent task results: %w", aggErr)
+		} else {
+			lastResult = aggregatedResult
+		}
 	}
 
 	if execErr != nil {
@@ -712,6 +700,11 @@ func (th *TaskHandler) executeTaskWithDependencies(ws *workspace.Workspace, task
 	}
 	task.Result = ""
 	task.Error = ""
+	if task.Context == nil {
+		task.Context = map[string]interface{}{}
+	}
+	delete(task.Context, "human_loop")
+	delete(task.Context, "structured_output")
 
 	if err := ws.UpdateTask(*task); err != nil {
 		return "", fmt.Errorf("failed to update task status: %w", err)
@@ -1131,6 +1124,43 @@ func (th *TaskHandler) executeTaskIteratively(ctx context.Context, ws *workspace
 			return "", blockedErr
 		}
 
+		parsedStructuredOutput, validationErr := workspace.ValidateTaskStructuredOutput(persistedTask.OutputSchema, result)
+		if validationErr != nil {
+			if persistedTask.Context != nil {
+				delete(persistedTask.Context, "structured_output")
+			}
+			attemptHistory = append(attemptHistory, map[string]interface{}{
+				"attempt":    attempt,
+				"outcome":    "invalid_structured_output",
+				"summary":    summarizeExecutionText(validationErr.Error()),
+				"created_at": time.Now().UTC().Format(time.RFC3339),
+			})
+			if attempt < maxAttempts {
+				continue
+			}
+
+			recordIterationHistory(persistedTask, maxAttempts, attemptHistory, "structured_output_invalid")
+			return "", &workspace.TaskBlockedError{
+				ReasonCode: "structured_output_invalid",
+				Reason:     fmt.Sprintf("Task did not return valid structured output after %d attempts", maxAttempts),
+				Question:   "The task result did not match the required JSON schema. Should I retry, revise the schema, or continue with your guidance?",
+				SuggestedActions: []string{
+					"continue_with_instruction",
+					"retry",
+					"mark_failed",
+				},
+				RawResponse: result,
+			}
+		}
+		if parsedStructuredOutput != nil {
+			if persistedTask.Context == nil {
+				persistedTask.Context = map[string]interface{}{}
+			}
+			persistedTask.Context["structured_output"] = parsedStructuredOutput
+		} else if persistedTask.Context != nil {
+			delete(persistedTask.Context, "structured_output")
+		}
+
 		attemptHistory = append(attemptHistory, map[string]interface{}{
 			"attempt":    attempt,
 			"outcome":    "success",
@@ -1283,6 +1313,9 @@ func applyIterationContext(task *workspace.Task, attempt, maxAttempts int, histo
 
 func buildRetryGuidance(task *workspace.Task, previousOutcome string) string {
 	trimmedOutcome := strings.TrimSpace(previousOutcome)
+	if trimmedOutcome == "invalid_structured_output" {
+		return "Previous attempt returned output that did not match the required JSON schema. Return ONLY a valid JSON object matching the required fields and types. Do not include markdown fences, commentary, or extra text before or after the JSON."
+	}
 	if task != nil && (trimmedOutcome == "unverified" || trimmedOutcome == "incomplete") && workspace.IsReadOnlyFilesystemListingIntent(task.Description) {
 		task.Context["execution_require_filesystem_verification"] = true
 		task.Context["execution_required_filesystem_tools"] = []string{

@@ -40,12 +40,15 @@ func NewTestContext(t *testing.T) *TestContext {
 		t.Skip("Skipping user test in short mode")
 	}
 
-	// Check for API key or Ollama
-	useOllama := os.Getenv("USE_OLLAMA") == "true" || os.Getenv("OLLAMA_HOST") != ""
+	// Check for API key or local providers
+	useLocalProvider := os.Getenv("USE_OLLAMA") == "true" ||
+		os.Getenv("OLLAMA_HOST") != "" ||
+		os.Getenv("LM_STUDIO_BASE_URL") != "" ||
+		os.Getenv("MLX_LM_BASE_URL") != ""
 	hasAPIKey := os.Getenv("OPENAI_API_KEY") != "" || os.Getenv("ANTHROPIC_API_KEY") != ""
 
-	if !useOllama && !hasAPIKey {
-		t.Skip("No LLM provider configured - set OPENAI_API_KEY, ANTHROPIC_API_KEY, or USE_OLLAMA=true")
+	if !useLocalProvider && !hasAPIKey {
+		t.Skip("No LLM provider configured - set OPENAI_API_KEY, ANTHROPIC_API_KEY, or a local provider base URL")
 	}
 
 	// Create temp directory for test artifacts
@@ -486,9 +489,15 @@ type ChatResponse struct {
 // Private helpers
 
 func (tc *TestContext) detectProvider() string {
-	// Priority order: Ollama (local) > OpenAI > Claude
+	// Priority order: local providers > OpenAI > Claude
 	if os.Getenv("USE_OLLAMA") == "true" || os.Getenv("OLLAMA_HOST") != "" {
 		return "ollama"
+	}
+	if os.Getenv("LM_STUDIO_BASE_URL") != "" {
+		return "lmstudio"
+	}
+	if os.Getenv("MLX_LM_BASE_URL") != "" {
+		return "mlx_lm"
 	}
 	if os.Getenv("OPENAI_API_KEY") != "" {
 		return "openai"
