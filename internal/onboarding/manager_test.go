@@ -124,7 +124,7 @@ func TestManager_SetNames_DefaultAssistantName(t *testing.T) {
 	}
 
 	_, assistantName := mgr.GetNames()
-	if assistantName != "Assistant" {
-		t.Fatalf("expected default assistant name Assistant, got %q", assistantName)
+	if assistantName != DefaultAssistantName {
+		t.Fatalf("expected default assistant name %s, got %q", DefaultAssistantName, assistantName)
 	}
 }
