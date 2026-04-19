@@ -580,12 +580,12 @@ func cliAgentDisplayName(backend string) string {
 // cliAgentBackendFromName resolves a display name or backend name to a backend key.
 func cliAgentBackendFromName(name string) string {
 	lower := strings.ToLower(strings.TrimSpace(name))
-	switch {
-	case lower == "claude code" || lower == cliagent.BackendClaude:
+	switch lower {
+	case "claude code", cliagent.BackendClaude:
 		return cliagent.BackendClaude
-	case lower == cliagent.BackendCodex:
+	case cliagent.BackendCodex:
 		return cliagent.BackendCodex
-	case lower == "gemini cli" || lower == cliagent.BackendGemini:
+	case "gemini cli", cliagent.BackendGemini:
 		return cliagent.BackendGemini
 	default:
 		return ""

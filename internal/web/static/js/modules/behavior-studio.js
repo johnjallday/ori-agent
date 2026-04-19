@@ -1549,7 +1549,7 @@
           <label class="behavior-field">
             <span class="behavior-field__label">Default Value</span>
             ${usesTextarea ? `
-              <textarea class="behavior-textarea behavior-textarea--compact behavior-input--mono" rows="3" data-param-index="${index}" data-param-field="default_value" placeholder='${parameter.type === 'array' ? '[\"value\"]' : '{"key":"value"}'}'>${escapeHtml(parameter._defaultText)}</textarea>
+              <textarea class="behavior-textarea behavior-textarea--compact behavior-input--mono" rows="3" data-param-index="${index}" data-param-field="default_value" placeholder='${parameter.type === 'array' ? '["value"]' : '{"key":"value"}'}'>${escapeHtml(parameter._defaultText)}</textarea>
             ` : parameter.type === 'boolean' ? `
               <select class="behavior-input" data-param-index="${index}" data-param-field="default_value">
                 <option value="">No default</option>
@@ -1883,7 +1883,7 @@
         .filter((parameter) => String(parameter.name || '').trim() !== '')
         .map((parameter) => this.renderLaunchParameterField(parameter, launchState))
         .join('');
-      const agentOptions = this.state.launchAgents.map((agentName) => `
+      const _agentOptions = this.state.launchAgents.map((agentName) => `
         <option value="${escapeAttr(agentName)}">${escapeHtml(agentName)}</option>
       `).join('');
       const agentAssignments = safeArray(draft.steps).map((step) => `
@@ -2000,7 +2000,7 @@
           return `
             <label class="behavior-field">
               <span class="behavior-field__label">${escapeHtml(parameter.name)}</span>
-              <textarea class="behavior-textarea behavior-textarea--code" rows="4" data-launch-field="parameter" data-parameter-name="${escapeAttr(parameter.name)}" placeholder="${parameter.type === 'array' ? '[\"value\"]' : '{"key":"value"}'}">${escapeHtml(value)}</textarea>
+              <textarea class="behavior-textarea behavior-textarea--code" rows="4" data-launch-field="parameter" data-parameter-name="${escapeAttr(parameter.name)}" placeholder="${parameter.type === 'array' ? '["value"]' : '{"key":"value"}'}">${escapeHtml(value)}</textarea>
               ${parameter.description ? `<span class="behavior-field__hint">${escapeHtml(parameter.description)}</span>` : ''}
             </label>
           `;

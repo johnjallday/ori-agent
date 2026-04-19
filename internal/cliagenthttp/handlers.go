@@ -205,6 +205,6 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 	enc := json.NewEncoder(w)
 	enc.SetIndent("", "  ")
 	if err := enc.Encode(v); err != nil {
-		fmt.Fprintf(w, `{"error":"encode: %s"}`, err.Error())
+		_, _ = fmt.Fprintf(w, `{"error":"encode: %s"}`, err.Error())
 	}
 }

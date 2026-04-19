@@ -92,11 +92,6 @@ func (h *Handler) handleLocalProviderChat(w http.ResponseWriter, r *http.Request
 	}), plannerDecision))
 }
 
-// handleOllamaChat keeps the existing Ollama entry point while delegating to the shared local-provider path.
-func (h *Handler) handleOllamaChat(w http.ResponseWriter, r *http.Request, ag *resolvedChatAgent, userMessage string, tools []llm.Tool, agentName string, baseCtx context.Context, files []toolapi.FileAttachment, images []llm.ImageAttachment, plannerDecision *types.PlannerDecision, runtimeSystemPrompt string) {
-	h.handleLocalProviderChat(w, r, ag, userMessage, tools, agentName, baseCtx, files, images, plannerDecision, runtimeSystemPrompt, "ollama")
-}
-
 // handleLocalProviderToolCalls handles tool execution for local providers.
 func (h *Handler) handleLocalProviderToolCalls(
 	w http.ResponseWriter,

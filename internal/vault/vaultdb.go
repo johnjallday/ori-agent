@@ -68,14 +68,6 @@ func defaultVaultPackageFilePath(vaultID string) string {
 	return filepath.Join(defaultVaultPackageName(vaultID), vaultPackageDatabaseFileName)
 }
 
-func defaultVaultFileName(vaultID string) string {
-	vaultID = normalizeVaultID(vaultID)
-	if vaultID == "" {
-		vaultID = "vault"
-	}
-	return vaultID + ".db"
-}
-
 func vaultPackageDirectoryForFilePath(path string) string {
 	path = filepath.Clean(strings.TrimSpace(path))
 	if path == "" {
