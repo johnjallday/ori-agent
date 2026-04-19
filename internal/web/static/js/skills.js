@@ -59,6 +59,14 @@ function styleSystemModelProviderBadge(providerEl, providerName) {
       providerEl.style.background = 'rgba(59, 130, 246, 0.2)';
       providerEl.style.color = '#3b82f6';
       break;
+    case 'lmstudio':
+      providerEl.style.background = 'rgba(14, 165, 233, 0.2)';
+      providerEl.style.color = '#0ea5e9';
+      break;
+    case 'mlx_lm':
+      providerEl.style.background = 'rgba(249, 115, 22, 0.2)';
+      providerEl.style.color = '#f97316';
+      break;
     default:
       providerEl.style.background = 'var(--bg-tertiary)';
       providerEl.style.color = 'var(--text-muted)';

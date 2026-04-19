@@ -736,7 +736,7 @@ func (h *Handler) ProvidersHandler(w http.ResponseWriter, r *http.Request) {
 	providers := []ProviderInfo{}
 
 	// Get all registered providers from the factory
-	providerNames := []string{"openai", "codex", "claude_code", "claude", "gemini", "ollama"}
+	providerNames := []string{"openai", "codex", "claude_code", "claude", "gemini", "ollama", "lmstudio", "mlx_lm"}
 
 	for _, name := range providerNames {
 		provider, err := h.llmFactory.GetProvider(name)
@@ -752,7 +752,7 @@ func (h *Handler) ProvidersHandler(w http.ResponseWriter, r *http.Request) {
 			// Mark as unavailable and return empty models list
 			available = false
 			displayName = getProviderDisplayName(name)
-			providerType = "cloud"
+			providerType = defaultProviderType(name)
 			requiresKey = providerRequiresKey(name)
 			providerModels = []ProviderModel{} // Empty list - no models shown without API key
 		} else {
@@ -842,7 +842,7 @@ func getModelCategories(provider, modelName string) []string {
 		}
 		return []string{categorizeModel(provider, modelName)}
 
-	case "ollama":
+	case "ollama", "lmstudio", "mlx_lm":
 		lowerName := strings.ToLower(modelName)
 
 		// llama3 models appear in all categories (they're versatile local models)
@@ -931,7 +931,7 @@ func categorizeModel(provider, modelName string) string {
 		}
 		// Opus models are research tier (most capable)
 		return "research"
-	case "ollama":
+	case "ollama", "lmstudio", "mlx_lm":
 		// Categorize Ollama models - use pattern matching for flexibility
 		lowerName := strings.ToLower(modelName)
 
@@ -986,10 +986,23 @@ func getProviderDisplayName(name string) string {
 		return "Anthropic Claude"
 	case "ollama":
 		return "Ollama (Local)"
+	case "lmstudio":
+		return "LM Studio (Local)"
+	case "mlx_lm":
+		return "MLX-LM (Local)"
 	case "gemini":
 		return "Google Gemini"
 	default:
 		return name
+	}
+}
+
+func defaultProviderType(name string) string {
+	switch name {
+	case "ollama", "lmstudio", "mlx_lm":
+		return "local"
+	default:
+		return "cloud"
 	}
 }
 

@@ -43,7 +43,7 @@ func createLLMFactory() *llm.Factory {
 	return llm.NewFactory()
 }
 
-// registerLLMProviders registers all available LLM providers (OpenAI, Claude, Gemini, Ollama).
+// registerLLMProviders registers all available LLM providers.
 func registerLLMProviders(factory *llm.Factory, configMgr *config.Manager) error {
 	verbose := os.Getenv("ORI_VERBOSE") == "true"
 
@@ -148,6 +148,36 @@ func registerLLMProviders(factory *llm.Factory, configMgr *config.Manager) error
 	factory.Register("ollama", ollamaProvider)
 	if verbose {
 		logger.Debug("Ollama provider registered (base URL: )", logger.Fields{"ollamaBaseURL": ollamaBaseURL})
+	}
+
+	// Register LM Studio provider (OpenAI-compatible local server)
+	lmStudioBaseURL := os.Getenv("LM_STUDIO_BASE_URL")
+	lmStudioModel := os.Getenv("LM_STUDIO_MODEL")
+	lmStudioProvider := llm.NewLMStudioProvider(llm.ProviderConfig{
+		BaseURL: lmStudioBaseURL,
+		Model:   lmStudioModel,
+	})
+	factory.Register("lmstudio", lmStudioProvider)
+	if verbose {
+		logger.Debug("LM Studio provider registered", logger.Fields{
+			"lmStudioBaseURL": lmStudioBaseURL,
+			"lmStudioModel":   lmStudioModel,
+		})
+	}
+
+	// Register MLX-LM provider (mlx_lm.server OpenAI-compatible endpoint)
+	mlxLMBaseURL := os.Getenv("MLX_LM_BASE_URL")
+	mlxLMModel := os.Getenv("MLX_LM_MODEL")
+	mlxLMProvider := llm.NewMLXLMProvider(llm.ProviderConfig{
+		BaseURL: mlxLMBaseURL,
+		Model:   mlxLMModel,
+	})
+	factory.Register("mlx_lm", mlxLMProvider)
+	if verbose {
+		logger.Debug("MLX-LM provider registered", logger.Fields{
+			"mlxLMBaseURL": mlxLMBaseURL,
+			"mlxLMModel":   mlxLMModel,
+		})
 	}
 
 	return nil

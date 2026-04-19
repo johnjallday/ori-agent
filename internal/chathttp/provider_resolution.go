@@ -20,7 +20,7 @@ func resolveChatProviderName(agentName string, ag *resolvedChatAgent, factory *l
 		// as OpenAI.
 	case "anthropic":
 		return "claude", nil
-	case "openai", "codex", "claude_code", "claude", "gemini", "ollama":
+	case "openai", "codex", "claude_code", "claude", "gemini", "ollama", "lmstudio", "mlx_lm":
 		return provider, nil
 	default:
 		return "", fmt.Errorf("agent %q has unsupported provider %q", agentName, ag.Settings.Provider)
@@ -41,12 +41,8 @@ func resolveChatProviderName(agentName string, ag *resolvedChatAgent, factory *l
 		return "gemini", nil
 	}
 
-	if factory != nil {
-		if ollamaProvider, err := factory.GetProvider("ollama"); err == nil {
-			if ollamaProv, ok := ollamaProvider.(*llm.OllamaProvider); ok && ollamaProv.HasModel(model) {
-				return "ollama", nil
-			}
-		}
+	if localProvider := llm.FindLocalProviderByModel(factory, model); localProvider != "" {
+		return localProvider, nil
 	}
 
 	return "", fmt.Errorf("agent %q has no provider configured. Update the agent settings to select a provider explicitly", agentName)

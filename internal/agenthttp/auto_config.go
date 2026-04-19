@@ -112,14 +112,24 @@ func (h *AutoConfigHandler) checkSystemModelAvailability(systemProvider, systemM
 		)
 	}
 
-	if strings.EqualFold(systemProvider, "ollama") {
-		ollamaProvider, ok := result.Provider.(*llm.OllamaProvider)
-		if !ok || !ollamaProvider.HasModel(result.Model) {
-			return false, "Configured Ollama system model is unavailable. Make sure the Ollama server is running and the selected model is installed."
-		}
+	if checker, ok := result.Provider.(llm.ModelPresenceChecker); ok && !checker.HasModel(result.Model) {
+		return false, unavailableLocalModelMessage(systemProvider)
 	}
 
 	return true, ""
+}
+
+func unavailableLocalModelMessage(providerName string) string {
+	switch strings.ToLower(strings.TrimSpace(providerName)) {
+	case "ollama":
+		return "Configured Ollama system model is unavailable. Make sure the Ollama server is running and the selected model is installed."
+	case "lmstudio":
+		return "Configured LM Studio system model is unavailable. Make sure the LM Studio server is running and the selected model is loaded."
+	case "mlx_lm":
+		return "Configured MLX-LM system model is unavailable. Make sure mlx_lm.server is running and serving the selected model."
+	default:
+		return "Configured local system model is unavailable. Make sure the local model server is running and the selected model is available."
+	}
 }
 
 // AutoConfigHandler handles the auto-configuration request
@@ -181,8 +191,8 @@ Required JSON fields:
 - agent_name: A short, descriptive name for the agent (e.g., "Weather Assistant", "Code Reviewer")
 - description: A short, polished 1-2 sentence description for the agent details field
 - agent_type: One of "tool-calling" (for tool/plugin tasks), "general" (balanced), "orchestration" (multi-agent coordination), or "research" (complex reasoning)
-- model: Choose a model that matches the requested role. For orchestration agents, prefer the currently configured system model when it fits. Valid families include OpenAI, Codex, Claude Code, Claude, Gemini, and Ollama.
-- provider: One of "openai", "codex", "claude_code", "claude", "gemini", or "ollama" based on model
+- model: Choose a model that matches the requested role. For orchestration agents, prefer the currently configured system model when it fits. Valid families include OpenAI, Codex, Claude Code, Claude, Gemini, Ollama, LM Studio, and MLX-LM.
+- provider: One of "openai", "codex", "claude_code", "claude", "gemini", "ollama", "lmstudio", or "mlx_lm" based on model
 - temperature: 0.0-0.3 for precise tasks, 0.4-0.7 for balanced, 0.7-1.0 for creative
 - system_prompt: A concise system prompt for this agent (single line, use \n for breaks)
 - recommended_plugins: Array of plugin keywords that would be useful (e.g., ["weather", "math", "file", "web", "calendar"])
@@ -267,7 +277,7 @@ func (h *AutoConfigHandler) validateAndSanitizeConfig(config AutoConfigResponse)
 	}
 
 	// Validate provider
-	validProviders := map[string]bool{"openai": true, "codex": true, "claude_code": true, "claude": true, "gemini": true, "ollama": true}
+	validProviders := map[string]bool{"openai": true, "codex": true, "claude_code": true, "claude": true, "gemini": true, "ollama": true, "lmstudio": true, "mlx_lm": true}
 	if !validProviders[config.Provider] {
 		config.Provider = ""
 	}

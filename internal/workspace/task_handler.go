@@ -707,14 +707,12 @@ func (h *LLMTaskHandler) getProviderForModel(model string) string {
 		return "codex"
 	}
 
-	// Check if Ollama has this model (dynamic detection)
-	if ollamaProvider, err := h.llmFactory.GetProvider("ollama"); err == nil {
-		if ollamaProv, ok := ollamaProvider.(*llm.OllamaProvider); ok {
-			if ollamaProv.HasModel(trimmedModel) || ollamaProv.HasModel(normalizedModel) {
-				logger.Info("Model found in Ollama, using Ollama provider", logger.Fields{"model": trimmedModel})
-				return "ollama"
-			}
-		}
+	if localProvider := llm.FindLocalProviderByModel(h.llmFactory, trimmedModel); localProvider != "" {
+		logger.Info("Model found in local provider, using local provider", logger.Fields{
+			"model":    trimmedModel,
+			"provider": localProvider,
+		})
+		return localProvider
 	}
 
 	// Default to OpenAI

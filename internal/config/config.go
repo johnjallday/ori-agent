@@ -43,7 +43,7 @@ type Settings struct {
 	AllowedOrigins  []string `json:"allowed_origins,omitempty"` // CORS allowed origins (defaults to localhost)
 
 	// System model settings - used for internal AI tasks (auto-config, suggestions, etc.)
-	SystemProvider        string `json:"system_provider,omitempty"`         // Provider for system tasks (e.g., "openai", "codex", "claude_code", "claude", "gemini", "ollama")
+	SystemProvider        string `json:"system_provider,omitempty"`         // Provider for system tasks (e.g., "openai", "codex", "claude_code", "claude", "gemini", "ollama", "lmstudio", "mlx_lm")
 	SystemModel           string `json:"system_model,omitempty"`            // Model for system tasks (e.g., "gpt-4o-mini", "claude-3-haiku-20240307")
 	SystemReasoningEffort string `json:"system_reasoning_effort,omitempty"` // Optional reasoning effort for system tasks (currently used by Codex: low, medium, high, xhigh)
 
@@ -1104,7 +1104,7 @@ func (m *Manager) IsSystemModelConfigured() bool {
 
 // ValidProviders returns the list of valid provider names for system model
 func ValidProviders() []string {
-	return []string{"openai", "codex", "claude_code", "claude", "gemini", "ollama"}
+	return []string{"openai", "codex", "claude_code", "claude", "gemini", "ollama", "lmstudio", "mlx_lm"}
 }
 
 // validateSystemModel validates the system model configuration
@@ -1137,12 +1137,14 @@ func validateSystemModel(provider, model string) error {
 		return fmt.Errorf("system model cannot be empty when provider is set")
 	}
 
-	// Basic model format validation - must contain only alphanumeric, dash, underscore, dot, colon
+	// Basic model format validation - must contain only alphanumeric, dash,
+	// underscore, dot, colon, or slash. Slash is needed for local model IDs
+	// such as "mlx-community/Llama-3.2-3B-Instruct-4bit".
 	for _, char := range model {
 		isLower := char >= 'a' && char <= 'z'
 		isUpper := char >= 'A' && char <= 'Z'
 		isDigit := char >= '0' && char <= '9'
-		isAllowed := char == '-' || char == '_' || char == '.' || char == ':'
+		isAllowed := char == '-' || char == '_' || char == '.' || char == ':' || char == '/'
 		if !isLower && !isUpper && !isDigit && !isAllowed {
 			return fmt.Errorf("invalid system model %q: contains invalid character %q", model, string(char))
 		}

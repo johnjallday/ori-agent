@@ -1348,6 +1348,10 @@ document.getElementById('systemDiagnosticsBtn')?.addEventListener('click', async
             unavailableReason = 'Codex CLI required';
           } else if (provider.name === 'claude_code') {
             unavailableReason = 'Claude CLI required';
+          } else if (provider.name === 'lmstudio') {
+            unavailableReason = 'Start LM Studio server';
+          } else if (provider.name === 'mlx_lm') {
+            unavailableReason = 'Start mlx_lm.server';
           }
           option.textContent = `${provider.display_name} (${unavailableReason})`;
           option.disabled = true;

@@ -137,8 +137,9 @@ func (f *Factory) GetSystemModelProvider(providerName, modelName string) (*Syste
 		}
 	}
 
-	// For Ollama, we allow any model name since users can pull custom models
-	if !modelFound && strings.ToLower(providerName) != "ollama" {
+	// Local providers can expose arbitrary user-loaded models that are not part of
+	// any curated catalog, so we allow custom model names for all local providers.
+	if !modelFound && provider.Type() != ProviderTypeLocal {
 		return nil, fmt.Errorf("model %q not available from provider %q", modelName, providerName)
 	}
 

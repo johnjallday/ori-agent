@@ -486,7 +486,7 @@ export class OnboardingManager {
 
       // Populate provider dropdown
       providerSelect.innerHTML = '<option value="">Select a provider...</option>';
-      const ollamaProvider = available.find(p => p.name === 'ollama');
+      const preferredLocalProvider = available.find(p => ['ollama', 'lmstudio', 'mlx_lm'].includes(p.name));
 
       available.forEach(provider => {
         const option = document.createElement('option');
@@ -495,11 +495,11 @@ export class OnboardingManager {
         providerSelect.appendChild(option);
       });
 
-      // Auto-select Ollama if available (free, local)
-      if (ollamaProvider) {
-        providerSelect.value = 'ollama';
-        this.updateReasoningVisibility('ollama');
-        await this.loadModels('ollama');
+      // Auto-select a local provider first when available.
+      if (preferredLocalProvider) {
+        providerSelect.value = preferredLocalProvider.name;
+        this.updateReasoningVisibility(preferredLocalProvider.name);
+        await this.loadModels(preferredLocalProvider.name);
       }
     } catch (error) {
       console.error('Error loading providers:', error);
@@ -515,7 +515,7 @@ export class OnboardingManager {
     if (modelSection) modelSection.classList.add('d-none');
     if (apiKeySection) apiKeySection.classList.remove('d-none');
     if (speechBubble) {
-      speechBubble.textContent = "I need an AI connection to work. Add an API key below, or install Ollama for local AI.";
+      speechBubble.textContent = "I need an AI connection to work. Add an API key below, or run Ollama, LM Studio, or MLX-LM for local AI.";
     }
   }
 

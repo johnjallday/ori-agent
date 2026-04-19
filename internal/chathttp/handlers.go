@@ -1503,8 +1503,8 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if providerName == "ollama" {
-		h.handleOllamaChat(w, r, ag, q, tools, current, base, fileAttachments, llmImages, plannerDecision, toolRuntimeSystemPrompt)
+	if llm.IsLocalProviderName(providerName) {
+		h.handleLocalProviderChat(w, r, ag, q, tools, current, base, fileAttachments, llmImages, plannerDecision, toolRuntimeSystemPrompt, providerName)
 		return
 	}
 

@@ -88,7 +88,7 @@ func (p *OpenAIProvider) Chat(ctx context.Context, req ChatRequest) (*ChatRespon
 	}
 
 	// Convert messages to OpenAI format
-	messages := p.convertMessages(req.Messages, req.SystemPrompt)
+	messages := convertMessagesToOpenAI(req.Messages, req.SystemPrompt)
 
 	// Build OpenAI request parameters
 	params := openai.ChatCompletionNewParams{
@@ -114,7 +114,7 @@ func (p *OpenAIProvider) Chat(ctx context.Context, req ChatRequest) (*ChatRespon
 
 	// Add tools if provided
 	if len(req.Tools) > 0 {
-		tools := p.convertTools(req.Tools)
+		tools := convertToolsToOpenAI(req.Tools)
 		params.Tools = tools
 	}
 
@@ -130,7 +130,7 @@ func (p *OpenAIProvider) Chat(ctx context.Context, req ChatRequest) (*ChatRespon
 	}
 
 	// Convert response
-	return p.convertResponse(completion), nil
+	return convertOpenAIChatCompletion("openai", completion), nil
 }
 
 // StreamChat streams a chat completion response (not yet implemented)
@@ -209,6 +209,10 @@ func (p *OpenAIProvider) ChatWithStructuredOutput(ctx context.Context, req Struc
 
 // convertMessages converts unified messages to OpenAI format
 func (p *OpenAIProvider) convertMessages(messages []Message, systemPrompt string) []openai.ChatCompletionMessageParamUnion {
+	return convertMessagesToOpenAI(messages, systemPrompt)
+}
+
+func convertMessagesToOpenAI(messages []Message, systemPrompt string) []openai.ChatCompletionMessageParamUnion {
 	var openaiMessages []openai.ChatCompletionMessageParamUnion
 	toolCallIDMap := map[string]string{}
 
@@ -286,6 +290,10 @@ func (p *OpenAIProvider) convertMessages(messages []Message, systemPrompt string
 
 // convertTools converts unified tools to OpenAI format
 func (p *OpenAIProvider) convertTools(tools []Tool) []openai.ChatCompletionToolUnionParam {
+	return convertToolsToOpenAI(tools)
+}
+
+func convertToolsToOpenAI(tools []Tool) []openai.ChatCompletionToolUnionParam {
 	var openaiTools []openai.ChatCompletionToolUnionParam
 
 	for _, tool := range tools {
@@ -302,9 +310,13 @@ func (p *OpenAIProvider) convertTools(tools []Tool) []openai.ChatCompletionToolU
 
 // convertResponse converts OpenAI response to unified format
 func (p *OpenAIProvider) convertResponse(completion *openai.ChatCompletion) *ChatResponse {
+	return convertOpenAIChatCompletion("openai", completion)
+}
+
+func convertOpenAIChatCompletion(providerName string, completion *openai.ChatCompletion) *ChatResponse {
 	response := &ChatResponse{
 		Model:    completion.Model,
-		Provider: "openai",
+		Provider: providerName,
 		Usage: Usage{
 			PromptTokens:     int(completion.Usage.PromptTokens),
 			CompletionTokens: int(completion.Usage.CompletionTokens),

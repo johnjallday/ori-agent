@@ -62,6 +62,10 @@ type mockCodexProvider struct {
 	mockProvider
 }
 
+type mockLocalProvider struct {
+	mockProvider
+}
+
 func (m *mockCodexProvider) Capabilities() llm.ProviderCapabilities {
 	return llm.ProviderCapabilities{
 		SupportsTools:  false,
@@ -86,6 +90,22 @@ func (m *mockClaudeCodeProvider) Capabilities() llm.ProviderCapabilities {
 
 func (m *mockClaudeCodeProvider) DefaultModels() []string {
 	return []string{"opus", "sonnet", "haiku"}
+}
+
+func (m *mockLocalProvider) Type() llm.ProviderType {
+	return llm.ProviderTypeLocal
+}
+
+func (m *mockLocalProvider) Capabilities() llm.ProviderCapabilities {
+	return llm.ProviderCapabilities{
+		SupportsTools:          true,
+		RequiresAPIKey:         false,
+		SupportsCustomEndpoint: true,
+	}
+}
+
+func (m *mockLocalProvider) DefaultModels() []string {
+	return []string{"openai/gpt-oss-20b"}
 }
 
 func TestSystemModelHandler_Get(t *testing.T) {
@@ -1001,6 +1021,58 @@ func TestProvidersHandler_CodexPricingHidden(t *testing.T) {
 	for _, model := range codex.Models {
 		if model.Pricing != "" {
 			t.Fatalf("Expected empty pricing for codex model %q, got %q", model.Value, model.Pricing)
+		}
+	}
+}
+
+func TestProvidersHandler_LocalProvidersExposed(t *testing.T) {
+	tmpDir := t.TempDir()
+	tmpFile := filepath.Join(tmpDir, "settings.json")
+	configManager := config.NewManager(tmpFile)
+	_ = configManager.Load()
+
+	llmFactory := llm.NewFactory()
+	llmFactory.Register("lmstudio", &mockLocalProvider{})
+	llmFactory.Register("mlx_lm", &mockLocalProvider{})
+
+	handler := NewHandler(nil, configManager, nil, llmFactory)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/providers", nil)
+	rec := httptest.NewRecorder()
+	handler.ProvidersHandler(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("Expected status 200, got %d", rec.Code)
+	}
+
+	var resp struct {
+		Providers []ProviderInfo `json:"providers"`
+	}
+	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+		t.Fatalf("Failed to decode response: %v", err)
+	}
+
+	providersByName := make(map[string]ProviderInfo, len(resp.Providers))
+	for _, provider := range resp.Providers {
+		providersByName[provider.Name] = provider
+	}
+
+	for _, providerName := range []string{"lmstudio", "mlx_lm"} {
+		info, ok := providersByName[providerName]
+		if !ok {
+			t.Fatalf("Expected %s provider in response", providerName)
+		}
+		if !info.Available {
+			t.Fatalf("Expected %s provider to be available", providerName)
+		}
+		if info.Type != "local" {
+			t.Fatalf("Expected %s provider type local, got %q", providerName, info.Type)
+		}
+		if info.RequiresKey {
+			t.Fatalf("Expected %s provider to not require key", providerName)
+		}
+		if len(info.Models) == 0 {
+			t.Fatalf("Expected %s provider models", providerName)
 		}
 	}
 }

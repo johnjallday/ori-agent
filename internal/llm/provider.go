@@ -10,7 +10,7 @@ type Provider interface {
 	// StreamChat sends a message and streams the response
 	StreamChat(ctx context.Context, req ChatRequest) (StreamReader, error)
 
-	// Name returns the provider name (e.g., "openai", "codex", "claude_code", "claude", "gemini", "ollama")
+	// Name returns the provider name (e.g., "openai", "codex", "claude_code", "claude", "gemini", "ollama", "lmstudio", "mlx_lm")
 	Name() string
 
 	// Type returns the provider type (cloud, local, hybrid)
@@ -24,6 +24,13 @@ type Provider interface {
 
 	// DefaultModels returns a list of available models for this provider
 	DefaultModels() []string
+}
+
+// ModelPresenceChecker allows providers to report whether a model is currently available.
+// Local providers use this to infer provider ownership from a model identifier and to
+// validate configured system models against the running local server.
+type ModelPresenceChecker interface {
+	HasModel(modelName string) bool
 }
 
 // StructuredOutputProvider supports structured output requests with a JSON schema.

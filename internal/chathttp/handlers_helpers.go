@@ -15,8 +15,8 @@ func (h *Handler) trackAgentStatistics(ag *agent.Agent, agentName string, tokenC
 	// Calculate cost estimate (this is a simple estimation, actual costs tracked by cost tracker)
 	var costPerToken float64
 	switch provider {
-	case "ollama":
-		costPerToken = 0.0 // Ollama is free/local
+	case "ollama", "lmstudio", "mlx_lm":
+		costPerToken = 0.0 // Local providers are free/self-hosted
 	default:
 		switch {
 		case strings.Contains(model, "gpt-4"):

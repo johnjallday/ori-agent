@@ -13,16 +13,29 @@ import (
 	"github.com/johnjallday/ori-agent/internal/types"
 )
 
-// handleOllamaChat handles chat requests for Ollama models using the provider system
-func (h *Handler) handleOllamaChat(w http.ResponseWriter, r *http.Request, ag *resolvedChatAgent, userMessage string, tools []llm.Tool, agentName string, baseCtx context.Context, files []toolapi.FileAttachment, images []llm.ImageAttachment, plannerDecision *types.PlannerDecision, runtimeSystemPrompt string) {
+func localProviderDisplayName(providerName string) string {
+	switch providerName {
+	case "ollama":
+		return "Ollama"
+	case "lmstudio":
+		return "LM Studio"
+	case "mlx_lm":
+		return "MLX-LM"
+	default:
+		return providerName
+	}
+}
+
+// handleLocalProviderChat handles chat requests for local providers using the shared Provider interface.
+func (h *Handler) handleLocalProviderChat(w http.ResponseWriter, r *http.Request, ag *resolvedChatAgent, userMessage string, tools []llm.Tool, agentName string, baseCtx context.Context, files []toolapi.FileAttachment, images []llm.ImageAttachment, plannerDecision *types.PlannerDecision, runtimeSystemPrompt string, providerName string) {
 	sessionID := h.getSessionID(r)
 	ctx, cancel := context.WithTimeout(baseCtx, ChatRequestTimeout)
 	defer cancel()
 
-	// Get Ollama provider
-	provider, err := h.llmFactory.GetProvider("ollama")
+	providerLabel := localProviderDisplayName(providerName)
+	provider, err := h.llmFactory.GetProvider(providerName)
 	if err != nil {
-		writeErrorResponse(w, fmt.Sprintf("Ollama provider not available: %v", err))
+		writeErrorResponse(w, fmt.Sprintf("%s provider not available: %v", providerLabel, err))
 		return
 	}
 
@@ -35,10 +48,12 @@ func (h *Handler) handleOllamaChat(w http.ResponseWriter, r *http.Request, ag *r
 	)
 	messages := buildLLMConversationMessages(ag.Messages, userMessage, images)
 	if len(images) > 0 {
-		logger.Info("Ollama chat with images", logger.Fields{"image_count": len(images)})
+		logger.Info("Local provider chat with images", logger.Fields{
+			"image_count": len(images),
+			"provider":    providerName,
+		})
 	}
 
-	// Call Ollama
 	start := time.Now()
 	resp, err := provider.Chat(ctx, llm.ChatRequest{
 		Model:        ag.Settings.Model,
@@ -53,22 +68,21 @@ func (h *Handler) handleOllamaChat(w http.ResponseWriter, r *http.Request, ag *r
 		return
 	}
 
-	logger.Debug("Ollama response received", logger.Fields{"duration": time.Since(start)})
+	logger.Debug("Local provider response received", logger.Fields{
+		"duration": time.Since(start),
+		"provider": providerName,
+	})
 
-	// Track statistics (Ollama is free/local, no cost tracking)
-	h.trackUsageCommon("ollama", ag.Settings.Model, agentName, resp.Usage, ag.Agent, userMessage)
+	h.trackUsageCommon(providerName, ag.Settings.Model, agentName, resp.Usage, ag.Agent, userMessage)
 
-	// Tool-call branch
 	if len(resp.ToolCalls) > 0 {
-		h.handleOllamaToolCalls(w, ctx, ag, agentName, messages, resp, tools, files, provider, baseCtx, sessionID, userMessage, plannerDecision, systemPrompt)
+		h.handleLocalProviderToolCalls(w, ctx, ag, agentName, messages, resp, tools, files, provider, baseCtx, sessionID, userMessage, plannerDecision, systemPrompt, providerName)
 		return
 	}
 
-	// No tool calls - direct response
 	text := getResponseText(resp.Content)
 	_ = h.persistAgent(agentName, ag.Agent)
 
-	// Store assistant response in session
 	h.storeMessageInSession(baseCtx, sessionID, "assistant", text)
 
 	writeJSONResponse(w, attachPlannerDecision(attachRouteMetadata(map[string]any{
@@ -78,8 +92,13 @@ func (h *Handler) handleOllamaChat(w http.ResponseWriter, r *http.Request, ag *r
 	}), plannerDecision))
 }
 
-// handleOllamaToolCalls handles tool execution for Ollama
-func (h *Handler) handleOllamaToolCalls(
+// handleOllamaChat keeps the existing Ollama entry point while delegating to the shared local-provider path.
+func (h *Handler) handleOllamaChat(w http.ResponseWriter, r *http.Request, ag *resolvedChatAgent, userMessage string, tools []llm.Tool, agentName string, baseCtx context.Context, files []toolapi.FileAttachment, images []llm.ImageAttachment, plannerDecision *types.PlannerDecision, runtimeSystemPrompt string) {
+	h.handleLocalProviderChat(w, r, ag, userMessage, tools, agentName, baseCtx, files, images, plannerDecision, runtimeSystemPrompt, "ollama")
+}
+
+// handleLocalProviderToolCalls handles tool execution for local providers.
+func (h *Handler) handleLocalProviderToolCalls(
 	w http.ResponseWriter,
 	ctx context.Context,
 	ag *resolvedChatAgent,
@@ -94,8 +113,12 @@ func (h *Handler) handleOllamaToolCalls(
 	userMessage string,
 	plannerDecision *types.PlannerDecision,
 	systemPrompt string,
+	providerName string,
 ) {
-	logger.Info("Ollama requested tool calls", logger.Fields{"count": len(resp.ToolCalls)})
+	logger.Info("Local provider requested tool calls", logger.Fields{
+		"count":    len(resp.ToolCalls),
+		"provider": providerName,
+	})
 
 	loopResult := h.runBoundedToolLoop(
 		resp.Content,
@@ -119,7 +142,10 @@ func (h *Handler) handleOllamaToolCalls(
 				}
 			},
 			RequestNextResponse: func() (string, []llm.ToolCall, error) {
-				logger.Debug("Sending tool results back to LLM", logger.Fields{"message_count": len(messages)})
+				logger.Debug("Sending tool results back to local provider", logger.Fields{
+					"message_count": len(messages),
+					"provider":      providerName,
+				})
 				finalResp, err := provider.Chat(ctx, llm.ChatRequest{
 					Model:        ag.Settings.Model,
 					Messages:     messages,
@@ -132,9 +158,9 @@ func (h *Handler) handleOllamaToolCalls(
 					return "", nil, err
 				}
 				if finalResp == nil {
-					return "", nil, fmt.Errorf("ollama follow-up returned no response")
+					return "", nil, fmt.Errorf("%s follow-up returned no response", providerName)
 				}
-				h.trackUsageCommon("ollama", ag.Settings.Model, agentName, finalResp.Usage, ag.Agent, userMessage)
+				h.trackUsageCommon(providerName, ag.Settings.Model, agentName, finalResp.Usage, ag.Agent, userMessage)
 				return finalResp.Content, finalResp.ToolCalls, nil
 			},
 			RequestFinalResponse: func() (string, error) {
@@ -149,9 +175,9 @@ func (h *Handler) handleOllamaToolCalls(
 					return "", err
 				}
 				if finalResp == nil {
-					return "", fmt.Errorf("ollama final synthesis returned no response")
+					return "", fmt.Errorf("%s final synthesis returned no response", providerName)
 				}
-				h.trackUsageCommon("ollama", ag.Settings.Model, agentName, finalResp.Usage, ag.Agent, userMessage)
+				h.trackUsageCommon(providerName, ag.Settings.Model, agentName, finalResp.Usage, ag.Agent, userMessage)
 				return finalResp.Content, nil
 			},
 		},
@@ -162,11 +188,12 @@ func (h *Handler) handleOllamaToolCalls(
 		finalText = loopResult.FinalContent
 	}
 
-	logger.Debug("Final response from LLM", logger.Fields{"content": finalText})
+	logger.Debug("Final response from local provider", logger.Fields{
+		"content":  finalText,
+		"provider": providerName,
+	})
 
 	_ = h.persistAgent(agentName, ag.Agent)
-
-	// Store assistant response in session
 	h.storeMessageInSession(baseCtx, sessionID, "assistant", finalText)
 
 	orihttp.WriteJSON(w, attachPlannerDecision(attachActionReceipts(attachRouteMetadata(map[string]any{

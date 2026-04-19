@@ -379,7 +379,7 @@ func (h *SmartOnboardingHandler) getSystemProviderAndModel() (llm.Provider, stri
 	}
 
 	// Fallback: try providers in order
-	providers := []string{"openai", "codex", "claude_code", "claude", "gemini", "ollama"}
+	providers := []string{"openai", "codex", "claude_code", "claude", "gemini", "ollama", "lmstudio", "mlx_lm"}
 	for _, name := range providers {
 		provider, err := h.llmFactory.GetProvider(name)
 		if err == nil {
@@ -442,6 +442,10 @@ func preferredModelsForProvider(providerName string) []string {
 		return []string{"claude-3-haiku-20240307", "claude-3-5-sonnet-20241022", "claude-3-sonnet-20240229"}
 	case "ollama":
 		return []string{"llama3", "llama3:latest", "llama2", "mistral"}
+	case "lmstudio":
+		return []string{"openai/gpt-oss-20b", "mlx-community/Llama-3.2-3B-Instruct-4bit"}
+	case "mlx_lm":
+		return []string{"mlx-community/Llama-3.2-3B-Instruct-4bit", "mlx-community/Qwen2.5-7B-Instruct-4bit"}
 	case "gemini":
 		return []string{"gemini-2.5-flash", "gemini-2.5-pro"}
 	default:
