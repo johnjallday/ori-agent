@@ -63,6 +63,33 @@ function getDisplayStatus(status) {
   return statusMap[status] || status;
 }
 
+function buildWorkspaceSlugConflictMessage(conflict) {
+  const requestedSlug = typeof conflict?.requested_slug === 'string' ? conflict.requested_slug.trim() : '';
+  const suggestedSlug = typeof conflict?.suggested_slug === 'string' ? conflict.suggested_slug.trim() : '';
+  const location = typeof conflict?.location === 'string' ? conflict.location.trim().replace(/[\\/]+$/, '') : '';
+  const suggestedPath = location && suggestedSlug ? `${location}/${suggestedSlug}` : '';
+
+  const parts = [
+    `A workspace folder named "${requestedSlug || 'this workspace'}" already exists on disk.`
+  ];
+  if (suggestedSlug) {
+    parts.push(`Rename this workspace with the folder name "${suggestedSlug}" instead?`);
+  }
+  if (suggestedPath) {
+    parts.push(`Folder: ${suggestedPath}`);
+  }
+  return parts.join('\n\n');
+}
+
+function slugifyWorkspaceName(value) {
+  return String(value || '')
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .replace(/-{2,}/g, '-');
+}
+
 const AGENT_CREATION_SKILL_CATALOG_AGENT = '__ori_agent_create_catalog__';
 
 const TASK_REQUIREMENT_KEYS = Object.freeze({
@@ -157,6 +184,9 @@ export class WorkspaceDetailPage {
     this.activeWorkspaceSkillMode = 'create';
     this.workspaceSettings = null;
     this.workspaceSettingsEffectiveBehavior = null;
+    this.workspaceIntentReviewPlan = null;
+    this.workspaceIntentReviewLoading = false;
+    this.workspaceIntentApplyLoading = false;
     this.workspaceConfigExpanded = false;
     this.workspaceConfigPreferenceLoaded = false;
     this.capabilitySuggestionCatalog = null;
@@ -289,8 +319,8 @@ export class WorkspaceDetailPage {
     if (noteCount === 0) {
       this.setHomeAssistantQuickPrompt(
         homeAssistantQuickNotesBtn,
-        'Create Brief',
-        `/note # ${workspaceName} Brief\n## Goal\n- \n## Constraints\n- \n## Open Questions\n- `
+        'Create Description',
+        `/note # Workspace Description\n## Description\n- \n## Apps and Systems\n- \n## Key Files or Context\n- \n## Special Capabilities or Workflows\n- `
       );
     } else {
       this.setHomeAssistantQuickPrompt(
@@ -1082,6 +1112,20 @@ export class WorkspaceDetailPage {
       mcpList: document.getElementById('workspace-detail-mcp-list'),
       settingsSummary: document.getElementById('workspace-detail-settings-summary'),
       settingsManagedSkills: document.getElementById('workspace-detail-settings-managed-skills'),
+      intentForm: document.getElementById('workspace-detail-intent-form'),
+      intentDescriptionInput: document.getElementById('workspace-detail-intent-description'),
+      intentSystemsInput: document.getElementById('workspace-detail-intent-systems'),
+      intentCapabilitiesInput: document.getElementById('workspace-detail-intent-capabilities'),
+      intentContextInput: document.getElementById('workspace-detail-intent-context'),
+      intentSummary: document.getElementById('workspace-detail-intent-summary'),
+      intentStatus: document.getElementById('workspace-detail-intent-status'),
+      intentSaveBtn: document.getElementById('workspace-detail-intent-save'),
+      intentReviewBtn: document.getElementById('workspace-detail-intent-review'),
+      intentApplyBtn: document.getElementById('workspace-detail-intent-apply'),
+      intentReviewPanel: document.getElementById('workspace-detail-intent-review-panel'),
+      intentReviewSummary: document.getElementById('workspace-detail-intent-review-summary'),
+      intentReviewResults: document.getElementById('workspace-detail-intent-review-results'),
+      intentReviewMeta: document.getElementById('workspace-detail-intent-review-meta'),
       skillsList: document.getElementById('workspace-detail-skills-list'),
       schedulesList: document.getElementById('workspace-detail-schedules-list'),
       childrenList: document.getElementById('workspace-detail-children-list'),
@@ -1338,6 +1382,20 @@ export class WorkspaceDetailPage {
     // Workspace settings
     this.elements.configToggleBtn?.addEventListener('click', () => this.toggleWorkspaceConfigExpanded());
     this.elements.refreshSettingsBtn?.addEventListener('click', () => this.loadWorkspace());
+    this.elements.intentForm?.addEventListener('submit', (event) => {
+      event.preventDefault();
+      this.saveWorkspaceIntent();
+    });
+    this.elements.intentReviewBtn?.addEventListener('click', () => this.reviewWorkspaceIntentSetup());
+    this.elements.intentApplyBtn?.addEventListener('click', () => this.applyWorkspaceIntentReview());
+    [
+      this.elements.intentDescriptionInput,
+      this.elements.intentSystemsInput,
+      this.elements.intentCapabilitiesInput,
+      this.elements.intentContextInput
+    ].forEach((input) => {
+      input?.addEventListener('input', () => this.clearWorkspaceIntentReview());
+    });
     this.elements.settingsForm?.addEventListener('submit', (event) => {
       event.preventDefault();
       this.saveWorkspaceSettings();
@@ -1562,6 +1620,39 @@ export class WorkspaceDetailPage {
     return response.json();
   }
 
+  async renameWorkspace(newName, folderSlug = '') {
+    const payload = { name: newName };
+    if (folderSlug) {
+      payload.folder_slug = folderSlug;
+    }
+
+    const response = await fetch(`/api/workspaces/${encodeURIComponent(this.workspaceId)}/rename`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+
+    const result = await response.json().catch(() => ({}));
+    if (response.status === 409 && result?.conflict?.type === 'folder_slug') {
+      const suggestedSlug = typeof result.conflict.suggested_slug === 'string'
+        ? result.conflict.suggested_slug.trim()
+        : '';
+      if (suggestedSlug && window.confirm(buildWorkspaceSlugConflictMessage(result.conflict))) {
+        return this.renameWorkspace(newName, suggestedSlug);
+      }
+      const cancelled = new Error(result?.error || 'Workspace rename cancelled');
+      cancelled.cancelled = true;
+      throw cancelled;
+    }
+
+    if (!response.ok) {
+      const message = result?.error || result?.message || 'Failed to rename workspace';
+      throw new Error(message);
+    }
+
+    return result;
+  }
+
   /**
    * Create inline editable element
    * @param {HTMLElement} element - The element to make editable
@@ -1615,23 +1706,53 @@ export class WorkspaceDetailPage {
         }
 
         try {
-          await this.updateWorkspace({ [field]: newValue });
-          element.textContent = newValue || (field === 'description' ? 'No description' : 'Workspace');
+          let result;
+          if (field === 'name') {
+            result = await this.renameWorkspace(newValue);
+          } else {
+            result = await this.updateWorkspace({ [field]: newValue });
+          }
 
-          // Update local workspace object
-          if (this.workspace) {
+          const updatedWorkspace = result?.folder || result?.workspace || null;
+          if (updatedWorkspace && typeof updatedWorkspace === 'object') {
+            this.workspace = {
+              ...(this.workspace || {}),
+              ...updatedWorkspace
+            };
+          } else if (this.workspace) {
             this.workspace[field] = newValue;
+            if (field === 'description') {
+              this.workspace.shared_data = this.workspace.shared_data && typeof this.workspace.shared_data === 'object'
+                ? this.workspace.shared_data
+                : {};
+              this.workspace.shared_data.workspace_bootstrap = {
+                ...(this.workspace.shared_data.workspace_bootstrap || {}),
+                goal: newValue
+              };
+            }
           }
 
-          // Update breadcrumb if name changed
-          if (field === 'name' && this.elements.workspaceBreadcrumb) {
-            this.elements.workspaceBreadcrumb.textContent = newValue || 'Workspace';
+          await this.renderWorkspaceInfo();
+          if (field === 'description') {
+            await this.loadNotes();
           }
 
-          if (window.Toast) window.Toast.success(`${field === 'name' ? 'Name' : 'Description'} updated`);
+          if (window.Toast) {
+            if (field === 'name') {
+              const appliedSlug = String(updatedWorkspace?.folder_slug || '').trim();
+              const expectedSlug = slugifyWorkspaceName(newValue);
+              window.Toast.success(
+                appliedSlug && expectedSlug && appliedSlug !== expectedSlug
+                  ? `Workspace renamed. Folder saved as "${appliedSlug}".`
+                  : 'Workspace renamed'
+              );
+            } else {
+              window.Toast.success('Description updated');
+            }
+          }
         } catch (err) {
           console.error(`Failed to update ${field}:`, err);
-          if (window.Toast) window.Toast.error(`Failed to update ${field}`);
+          if (!err?.cancelled && window.Toast) window.Toast.error(err.message || `Failed to update ${field}`);
         }
       };
 
@@ -1725,6 +1846,7 @@ export class WorkspaceDetailPage {
     }
 
     this.renderWorkspaceWorkflowLinks();
+    this.renderWorkspaceIntent();
 
     // Update stats
     const agents = this.workspace.agent_instances || [];
@@ -1734,6 +1856,436 @@ export class WorkspaceDetailPage {
 
     // Load children workspaces from tree API
     await this.loadChildren();
+  }
+
+  getWorkspaceIntentBootstrap() {
+    const raw = this.workspace?.shared_data?.workspace_bootstrap;
+    if (!raw || typeof raw !== 'object') {
+      return {};
+    }
+    return raw;
+  }
+
+  getWorkspaceIntentState() {
+    const bootstrap = this.getWorkspaceIntentBootstrap();
+    const description = String(this.workspace?.description || bootstrap.goal || '').trim();
+    return {
+      description,
+      systems: String(bootstrap.systems || '').trim(),
+      capabilities: String(bootstrap.capabilities || '').trim(),
+      context: String(bootstrap.context || '').trim()
+    };
+  }
+
+  getWorkspaceIntentFromForm() {
+    return {
+      description: String(this.elements.intentDescriptionInput?.value || '').trim(),
+      systems: String(this.elements.intentSystemsInput?.value || '').trim(),
+      capabilities: String(this.elements.intentCapabilitiesInput?.value || '').trim(),
+      context: String(this.elements.intentContextInput?.value || '').trim()
+    };
+  }
+
+  renderWorkspaceIntent() {
+    const intent = this.getWorkspaceIntentState();
+    if (this.elements.intentDescriptionInput) this.elements.intentDescriptionInput.value = intent.description;
+    if (this.elements.intentSystemsInput) this.elements.intentSystemsInput.value = intent.systems;
+    if (this.elements.intentCapabilitiesInput) this.elements.intentCapabilitiesInput.value = intent.capabilities;
+    if (this.elements.intentContextInput) this.elements.intentContextInput.value = intent.context;
+    if (this.elements.intentSummary) {
+      this.elements.intentSummary.textContent = intent.description
+        ? 'Saving this intent keeps the canonical Workspace Description note aligned with the workspace header and setup metadata.'
+        : 'Add a workspace description first so Ori has a stable source of truth for planning and setup review.';
+    }
+  }
+
+  setWorkspaceIntentStatus(message = '', tone = '') {
+    if (!this.elements.intentStatus) return;
+    this.elements.intentStatus.textContent = String(message || '').trim();
+    this.elements.intentStatus.style.color = tone === 'error'
+      ? 'var(--danger-color, #ef4444)'
+      : tone === 'success'
+        ? 'var(--success-color, #22c55e)'
+        : 'var(--text-secondary)';
+  }
+
+  setWorkspaceIntentBusy(isBusy, mode = 'save') {
+    if (mode === 'save' && this.elements.intentSaveBtn) {
+      this.elements.intentSaveBtn.disabled = Boolean(isBusy);
+      this.elements.intentSaveBtn.textContent = isBusy ? 'Saving...' : 'Save Intent';
+    }
+    if (mode === 'review' && this.elements.intentReviewBtn) {
+      this.elements.intentReviewBtn.disabled = Boolean(isBusy);
+      this.elements.intentReviewBtn.innerHTML = isBusy
+        ? '<span class="spinner-border spinner-border-sm me-1"></span> Reviewing...'
+        : '<svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><path d="M17.65,6.35C16.2,4.9 14.21,4 12,4A8,8 0 0,0 4,12A8,8 0 0,0 12,20C15.73,20 18.84,17.45 19.73,14H17.65C16.83,16.33 14.61,18 12,18A6,6 0 0,1 6,12A6,6 0 0,1 12,6C13.66,6 15.14,6.69 16.22,7.78L13,11H20V4L17.65,6.35Z"/></svg> Re-run Setup Review';
+    }
+    if (mode === 'apply' && this.elements.intentApplyBtn) {
+      this.elements.intentApplyBtn.disabled = Boolean(isBusy) || !this.workspaceIntentReviewPlan;
+      this.elements.intentApplyBtn.textContent = isBusy ? 'Applying Setup...' : 'Apply Recommended Setup';
+    }
+  }
+
+  buildWorkspaceIntentPayload() {
+    const intent = this.getWorkspaceIntentFromForm();
+    return {
+      description: intent.description,
+      workspace_bootstrap: {
+        goal: intent.description,
+        systems: intent.systems,
+        capabilities: intent.capabilities,
+        context: intent.context
+      }
+    };
+  }
+
+  clearWorkspaceIntentReview() {
+    this.workspaceIntentReviewPlan = null;
+    if (this.elements.intentReviewPanel) {
+      this.elements.intentReviewPanel.hidden = true;
+    }
+    if (this.elements.intentReviewSummary) {
+      this.elements.intentReviewSummary.textContent = 'Ori can review this workspace description and propose an updated starter setup.';
+    }
+    if (this.elements.intentReviewResults) {
+      this.elements.intentReviewResults.innerHTML = '';
+    }
+    if (this.elements.intentReviewMeta) {
+      this.elements.intentReviewMeta.textContent = '';
+    }
+    this.setWorkspaceIntentBusy(false, 'apply');
+  }
+
+  buildWorkspaceIntentReviewCard(item, kind) {
+    const attribute = kind === 'agent'
+      ? 'data-workspace-intent-review-agent'
+      : kind === 'mcp'
+        ? 'data-workspace-intent-review-mcp'
+        : 'data-workspace-intent-review-skill';
+    const label = kind === 'mcp'
+      ? (item.action && item.action.indexOf('install') >= 0 ? 'Install + Bind' : 'Bind')
+      : kind === 'skill'
+        ? (item.action && item.action.indexOf('install') >= 0 ? 'Install + Attach' : 'Attach')
+        : (item.action === 'create' ? 'Create' : 'Invite');
+    const secondaryChipClass = item.action === 'create' || (item.action && item.action.indexOf('install') >= 0)
+      ? 'source'
+      : 'status';
+
+    return `
+      <label class="workspace-setup-option modern-card p-3 d-flex align-items-start gap-2 mb-2" style="border: 1px solid var(--border-color);">
+        <input type="checkbox"
+               ${attribute}="true"
+               value="${this.escapeHtml(item.id)}"
+               ${item.selected ? 'checked' : ''}>
+        <span style="display: block;">
+          <span style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
+            <span style="font-weight: 600; color: var(--text-primary);">${this.escapeHtml(item.name)}</span>
+            <span class="workspace-detail-mcp-chip ${secondaryChipClass}">${this.escapeHtml(label)}</span>
+          </span>
+          <span style="display: block; margin-top: 4px; font-size: 12px; color: var(--text-secondary);">${this.escapeHtml(item.summary || item.description || '')}</span>
+        </span>
+      </label>
+    `;
+  }
+
+  renderWorkspaceIntentReview(plan) {
+    if (!plan || !this.elements.intentReviewPanel || !this.elements.intentReviewResults) {
+      return;
+    }
+
+    const lead = Array.isArray(plan.agents) ? plan.agents.find((agent) => agent.role === 'lead') : null;
+    const optionalAgents = Array.isArray(plan.agents) ? plan.agents.filter((agent) => agent.role !== 'lead') : [];
+    const mcps = Array.isArray(plan.mcps) ? plan.mcps : [];
+    const skills = Array.isArray(plan.skills) ? plan.skills : [];
+
+    const leadMarkup = lead ? `
+      <div class="modern-card p-3 mb-3" style="border: 1px solid var(--border-color); background: color-mix(in srgb, var(--bg-secondary) 88%, transparent);">
+        <div class="d-flex justify-content-between align-items-start gap-2">
+          <div>
+            <div style="font-size: 12px; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.06em;">Primary Agent</div>
+            <div style="font-weight: 600; color: var(--text-primary);">${this.escapeHtml(lead.name)}</div>
+            <div style="font-size: 12px; color: var(--text-secondary); margin-top: 4px;">${this.escapeHtml(lead.summary || '')}</div>
+          </div>
+          <span class="workspace-detail-mcp-chip status">${lead.action === 'create' ? 'Create' : 'Invite'}</span>
+        </div>
+      </div>
+    ` : '';
+
+    this.elements.intentReviewSummary.textContent = plan.summary || 'Ori reviewed the workspace intent and prepared an updated setup.';
+    this.elements.intentReviewResults.innerHTML = `
+      <div class="row g-3">
+        <div class="col-lg-6">
+          <div class="workspace-setup-section">
+            <div class="workspace-setup-label">Agents</div>
+            ${leadMarkup}
+            ${optionalAgents.length > 0
+              ? optionalAgents.map((agent) => this.buildWorkspaceIntentReviewCard(agent, 'agent')).join('')
+              : '<div class="workspace-detail-empty">No additional agents recommended right now.</div>'}
+          </div>
+        </div>
+        <div class="col-lg-6">
+          <div class="workspace-setup-section">
+            <div class="workspace-setup-label">Workspace Connections</div>
+            ${mcps.length > 0
+              ? mcps.map((item) => this.buildWorkspaceIntentReviewCard(item, 'mcp')).join('')
+              : '<div class="workspace-detail-empty">No MCP recommendations right now.</div>'}
+          </div>
+          <div class="workspace-setup-section mt-3">
+            <div class="workspace-setup-label">Workspace Skills</div>
+            ${skills.length > 0
+              ? skills.map((item) => this.buildWorkspaceIntentReviewCard(item, 'skill')).join('')
+              : '<div class="workspace-detail-empty">No workspace skill recommendations right now.</div>'}
+          </div>
+        </div>
+        <div class="col-12">
+          <div class="workspace-detail-settings-summary-card">
+            <div class="workspace-detail-settings-summary-title">How Ori Will Apply This</div>
+            <ul class="workspace-setup-preview-list mb-0">
+              ${(Array.isArray(plan.notes) ? plan.notes : []).map((note) => `<li>${this.escapeHtml(note)}</li>`).join('')}
+            </ul>
+          </div>
+        </div>
+      </div>
+    `;
+    this.elements.intentReviewPanel.hidden = false;
+    this.elements.intentReviewResults.querySelectorAll(
+      'input[data-workspace-intent-review-agent], input[data-workspace-intent-review-mcp], input[data-workspace-intent-review-skill]'
+    ).forEach((input) => {
+      input.addEventListener('change', () => this.updateWorkspaceIntentReviewSelectionSummary());
+    });
+    this.setWorkspaceIntentBusy(false, 'apply');
+    this.updateWorkspaceIntentReviewSelectionSummary();
+  }
+
+  updateWorkspaceIntentReviewSelectionSummary() {
+    if (!this.workspaceIntentReviewPlan || !this.elements.intentReviewMeta) {
+      return;
+    }
+
+    const optionalAgentCount = Array.from(this.elements.intentReviewResults?.querySelectorAll('input[data-workspace-intent-review-agent]') || [])
+      .filter((input) => input.checked)
+      .length;
+    const mcpCount = Array.from(this.elements.intentReviewResults?.querySelectorAll('input[data-workspace-intent-review-mcp]') || [])
+      .filter((input) => input.checked)
+      .length;
+    const skillCount = Array.from(this.elements.intentReviewResults?.querySelectorAll('input[data-workspace-intent-review-skill]') || [])
+      .filter((input) => input.checked)
+      .length;
+    const totalAgents = (this.workspaceIntentReviewPlan.agents?.some((agent) => agent.role === 'lead') ? 1 : 0) + optionalAgentCount;
+
+    const parts = [`${totalAgents} agent${totalAgents === 1 ? '' : 's'}`];
+    if (mcpCount > 0) parts.push(`${mcpCount} MCP${mcpCount === 1 ? '' : 's'}`);
+    if (skillCount > 0) parts.push(`${skillCount} skill${skillCount === 1 ? '' : 's'}`);
+    this.elements.intentReviewMeta.textContent = `Selected for apply: ${parts.join(', ')}.`;
+    this.setWorkspaceIntentBusy(false, 'apply');
+  }
+
+  collectWorkspaceIntentReviewPlan() {
+    if (!this.workspaceIntentReviewPlan) {
+      return null;
+    }
+
+    const lead = this.workspaceIntentReviewPlan.agents?.find((agent) => agent.role === 'lead');
+    const selectedAgents = lead ? [lead] : [];
+    Array.from(this.elements.intentReviewResults?.querySelectorAll('input[data-workspace-intent-review-agent]') || []).forEach((input) => {
+      if (!input.checked) return;
+      const match = this.workspaceIntentReviewPlan.agents.find((agent) => agent.id === input.value);
+      if (match) selectedAgents.push(match);
+    });
+
+    const selectedMCPs = [];
+    Array.from(this.elements.intentReviewResults?.querySelectorAll('input[data-workspace-intent-review-mcp]') || []).forEach((input) => {
+      if (!input.checked) return;
+      const match = this.workspaceIntentReviewPlan.mcps.find((item) => item.id === input.value);
+      if (match) selectedMCPs.push(match);
+    });
+
+    const selectedSkills = [];
+    Array.from(this.elements.intentReviewResults?.querySelectorAll('input[data-workspace-intent-review-skill]') || []).forEach((input) => {
+      if (!input.checked) return;
+      const match = this.workspaceIntentReviewPlan.skills.find((item) => item.id === input.value);
+      if (match) selectedSkills.push(match);
+    });
+
+    return {
+      agents: selectedAgents,
+      mcps: selectedMCPs,
+      skills: selectedSkills,
+      queries: this.workspaceIntentReviewPlan.queries || []
+    };
+  }
+
+  async saveWorkspaceIntent(options = {}) {
+    const { silent = false, reloadNotes = true } = options;
+    const payload = this.buildWorkspaceIntentPayload();
+    if (!payload.description) {
+      this.setWorkspaceIntentStatus('Workspace description is required.', 'error');
+      this.elements.intentDescriptionInput?.focus();
+      return false;
+    }
+
+    this.setWorkspaceIntentBusy(true, 'save');
+    this.setWorkspaceIntentStatus('Saving workspace intent...');
+
+    try {
+      const response = await fetch(`/api/workspaces/${encodeURIComponent(this.workspaceId)}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      if (!response.ok) {
+        const text = await response.text();
+        throw new Error(text || 'Failed to save workspace intent');
+      }
+
+      const data = await response.json().catch(() => ({}));
+      const updatedWorkspace = data?.folder || data?.workspace || null;
+      if (updatedWorkspace && typeof updatedWorkspace === 'object') {
+        this.workspace = {
+          ...(this.workspace || {}),
+          ...updatedWorkspace
+        };
+      } else if (!this.workspace) {
+        this.workspace = {};
+      }
+
+      if (this.workspace) {
+        this.workspace.description = payload.description;
+        this.workspace.shared_data = this.workspace.shared_data && typeof this.workspace.shared_data === 'object'
+          ? this.workspace.shared_data
+          : {};
+        this.workspace.shared_data.workspace_bootstrap = payload.workspace_bootstrap;
+      }
+
+      await this.renderWorkspaceInfo();
+      if (reloadNotes) {
+        await this.loadNotes();
+      }
+
+      this.setWorkspaceIntentStatus('Workspace intent saved and canonical note synced.', 'success');
+      if (!silent && window.Toast) {
+        window.Toast.success('Workspace intent saved');
+      }
+      return true;
+    } catch (error) {
+      console.error('Failed to save workspace intent:', error);
+      this.setWorkspaceIntentStatus(error.message || 'Failed to save workspace intent', 'error');
+      if (!silent && window.Toast) {
+        window.Toast.error(error.message || 'Failed to save workspace intent');
+      }
+      return false;
+    } finally {
+      this.setWorkspaceIntentBusy(false, 'save');
+    }
+  }
+
+  async reviewWorkspaceIntentSetup() {
+    if (!window.WorkspaceBootstrapReview || typeof window.WorkspaceBootstrapReview.reviewWorkspaceInput !== 'function') {
+      if (window.Toast) window.Toast.error('Workspace setup review is unavailable');
+      return;
+    }
+
+    const intent = this.getWorkspaceIntentFromForm();
+    if (!intent.description) {
+      this.setWorkspaceIntentStatus('Add a workspace description before running setup review.', 'error');
+      this.elements.intentDescriptionInput?.focus();
+      return;
+    }
+
+    this.workspaceIntentReviewLoading = true;
+    this.setWorkspaceIntentBusy(true, 'review');
+    this.setWorkspaceIntentStatus('Reviewing workspace intent...');
+    if (this.elements.intentReviewPanel) {
+      this.elements.intentReviewPanel.hidden = false;
+    }
+    if (this.elements.intentReviewSummary) {
+      this.elements.intentReviewSummary.textContent = 'Ori is reviewing the workspace description and preparing a refreshed setup plan...';
+    }
+    if (this.elements.intentReviewResults) {
+      this.elements.intentReviewResults.innerHTML = '';
+    }
+
+    try {
+      const plan = await window.WorkspaceBootstrapReview.reviewWorkspaceInput({
+        workspaceName: this.workspace?.name || '',
+        description: intent.description,
+        goal: intent.description,
+        systems: intent.systems,
+        capabilities: intent.capabilities,
+        context: intent.context,
+        importEnabled: false,
+        importPath: ''
+      });
+      this.workspaceIntentReviewPlan = plan;
+      this.renderWorkspaceIntentReview(plan);
+      this.setWorkspaceIntentStatus('Setup review refreshed.', 'success');
+    } catch (error) {
+      console.error('Failed to review workspace intent:', error);
+      this.clearWorkspaceIntentReview();
+      this.setWorkspaceIntentStatus(error.message || 'Failed to review workspace intent', 'error');
+      if (window.Toast) {
+        window.Toast.error(error.message || 'Failed to review workspace intent');
+      }
+    } finally {
+      this.workspaceIntentReviewLoading = false;
+      this.setWorkspaceIntentBusy(false, 'review');
+    }
+  }
+
+  async applyWorkspaceIntentReview() {
+    if (!this.workspaceIntentReviewPlan || !window.WorkspaceBootstrapReview || typeof window.WorkspaceBootstrapReview.applySelectedPlan !== 'function') {
+      return;
+    }
+
+    const saved = await this.saveWorkspaceIntent({ silent: true, reloadNotes: false });
+    if (!saved) {
+      return;
+    }
+
+    const selectedPlan = this.collectWorkspaceIntentReviewPlan();
+    this.workspaceIntentApplyLoading = true;
+    this.setWorkspaceIntentBusy(true, 'apply');
+    this.setWorkspaceIntentStatus('Applying recommended setup...');
+
+    try {
+      const result = await window.WorkspaceBootstrapReview.applySelectedPlan(this.workspaceId, selectedPlan);
+      await this.loadWorkspace();
+      await Promise.all([this.loadNotes(), this.loadDirectories()]);
+
+      const summaryParts = [];
+      if (result.invitedAgents > 0) summaryParts.push(`${result.invitedAgents} agent${result.invitedAgents === 1 ? '' : 's'} invited`);
+      if (result.boundMCPs > 0) summaryParts.push(`${result.boundMCPs} MCP${result.boundMCPs === 1 ? '' : 's'} bound`);
+      if (result.attachedSkills > 0) summaryParts.push(`${result.attachedSkills} skill${result.attachedSkills === 1 ? '' : 's'} attached`);
+      if (result.failures.length > 0) {
+        this.setWorkspaceIntentStatus(`Setup applied with partial success. ${result.failures[0]}`, 'error');
+        if (window.Toast) {
+          window.Toast.warning(`Workspace setup applied with partial success${summaryParts.length > 0 ? ` (${summaryParts.join(', ')})` : ''}.`);
+        }
+      } else {
+        this.setWorkspaceIntentStatus(
+          summaryParts.length > 0
+            ? `Setup applied: ${summaryParts.join(', ')}.`
+            : 'Setup review was applied with no new changes needed.',
+          'success'
+        );
+        if (window.Toast) {
+          window.Toast.success(
+            summaryParts.length > 0
+              ? `Workspace setup applied with ${summaryParts.join(', ')}.`
+              : 'Workspace setup is already up to date.'
+          );
+        }
+      }
+    } catch (error) {
+      console.error('Failed to apply workspace setup review:', error);
+      this.setWorkspaceIntentStatus(error.message || 'Failed to apply workspace setup review', 'error');
+      if (window.Toast) {
+        window.Toast.error(error.message || 'Failed to apply workspace setup review');
+      }
+    } finally {
+      this.workspaceIntentApplyLoading = false;
+      this.setWorkspaceIntentBusy(false, 'apply');
+    }
   }
 
   /**

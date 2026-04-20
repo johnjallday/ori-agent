@@ -2903,6 +2903,7 @@ const sessionManager = {
       hasAny: Boolean(description || systems || context),
       description,
       goal: description,
+      capabilities: '',
       systems,
       systemsList,
       context
@@ -2918,12 +2919,12 @@ const sessionManager = {
       ? workspaceBootstrap.systemsList.map((item) => `- ${item}`).join('\n')
       : '_Not specified._';
     const descriptionSection = workspaceBootstrap.description || workspaceBootstrap.goal || '_Not specified._';
+    const capabilitiesSection = workspaceBootstrap.capabilities || '_Not specified._';
     const contextSection = workspaceBootstrap.context || '_Not specified._';
-    const title = String(workspaceName || '').trim() || 'this workspace';
 
     return {
       name: 'Workspace Description',
-      content: `# Workspace Description\n\nCaptured during workspace creation for ${title}.\n\n## Description\n${descriptionSection}\n\n## Apps and Systems\n${systemsSection}\n\n## Key Files or Context\n${contextSection}\n`
+      content: `# Workspace Description\n\n## Description\n${descriptionSection}\n\n## Apps and Systems\n${systemsSection}\n\n## Key Files or Context\n${contextSection}\n\n## Special Capabilities or Workflows\n${capabilitiesSection}\n`
     };
   },
 
@@ -3882,29 +3883,89 @@ const sessionManager = {
     });
   },
 
-  // Rename folder via API
-  async renameFolder(folderId, newName) {
-    try {
-      const response = await fetch(`/api/workspaces/${folderId}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: newName })
-      });
+  slugifyWorkspaceName(value) {
+    return String(value || '')
+      .trim()
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, '')
+      .replace(/-{2,}/g, '-');
+  },
 
-      if (!response.ok) throw new Error('Failed to rename workspace');
+  buildWorkspaceSlugConflictMessage(conflict) {
+    const requestedSlug = typeof conflict?.requested_slug === 'string' ? conflict.requested_slug.trim() : '';
+    const suggestedSlug = typeof conflict?.suggested_slug === 'string' ? conflict.suggested_slug.trim() : '';
+    const location = typeof conflict?.location === 'string' ? conflict.location.trim().replace(/[\\/]+$/, '') : '';
+    const suggestedPath = location && suggestedSlug ? `${location}/${suggestedSlug}` : '';
+
+    const parts = [
+      `A workspace folder named "${requestedSlug || 'this workspace'}" already exists on disk.`
+    ];
+    if (suggestedSlug) {
+      parts.push(`Rename this workspace with the folder name "${suggestedSlug}" instead?`);
+    }
+    if (suggestedPath) {
+      parts.push(`Folder: ${suggestedPath}`);
+    }
+    return parts.join('\n\n');
+  },
+
+  // Rename folder via API
+  async renameFolder(folderId, newName, folderSlug = '') {
+    try {
+      const payload = { name: newName };
+      if (folderSlug) {
+        payload.folder_slug = folderSlug;
+      }
+
+      const response = await fetch(`/api/workspaces/${folderId}/rename`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      const result = await response.json().catch(() => ({}));
+      if (response.status === 409 && result?.conflict?.type === 'folder_slug') {
+        const suggestedSlug = typeof result.conflict.suggested_slug === 'string'
+          ? result.conflict.suggested_slug.trim()
+          : '';
+        if (suggestedSlug && window.confirm(this.buildWorkspaceSlugConflictMessage(result.conflict))) {
+          return this.renameFolder(folderId, newName, suggestedSlug);
+        }
+        const cancelled = new Error(result?.error || 'Workspace rename cancelled');
+        cancelled.cancelled = true;
+        throw cancelled;
+      }
+
+      if (!response.ok) {
+        throw new Error(result?.error || result?.message || 'Failed to rename workspace');
+      }
 
       // Update local data
       const folder = this.findFolderById(folderId, this.folders);
+      const updatedFolder = result?.folder || result?.workspace || null;
       if (folder) {
-        folder.name = newName;
+        if (updatedFolder && typeof updatedFolder === 'object') {
+          Object.assign(folder, updatedFolder);
+        } else {
+          folder.name = newName;
+        }
       }
 
       // Re-render
       this.renderFolderTree();
-      this.showToast('Workspace renamed', 'success');
+      const appliedSlug = String(updatedFolder?.folder_slug || '').trim();
+      const expectedSlug = this.slugifyWorkspaceName(newName);
+      this.showToast(
+        appliedSlug && expectedSlug && appliedSlug !== expectedSlug
+          ? `Workspace renamed. Folder saved as "${appliedSlug}".`
+          : 'Workspace renamed',
+        'success'
+      );
     } catch (error) {
       console.error('Failed to rename folder:', error);
-      this.showToast('Failed to rename workspace', 'error');
+      if (!error?.cancelled) {
+        this.showToast(error.message || 'Failed to rename workspace', 'error');
+      }
       // Reload to restore correct state
       await this.loadFolders();
     }

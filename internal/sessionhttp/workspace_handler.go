@@ -520,13 +520,14 @@ func (h *Handler) updateWorkspace(w http.ResponseWriter, r *http.Request, id str
 	}
 
 	var req struct {
-		Name               *string `json:"name,omitempty"`
-		Description        *string `json:"description,omitempty"`
-		ParentID           *string `json:"parent_id,omitempty"`
-		OrderIndex         *int    `json:"order_index,omitempty"`
-		Color              *string `json:"color,omitempty"`
-		ProjectPath        *string `json:"project_path,omitempty"`
-		PrimaryDirectoryID *string `json:"primary_directory_id,omitempty"`
+		Name               *string                    `json:"name,omitempty"`
+		Description        *string                    `json:"description,omitempty"`
+		ParentID           *string                    `json:"parent_id,omitempty"`
+		OrderIndex         *int                       `json:"order_index,omitempty"`
+		Color              *string                    `json:"color,omitempty"`
+		ProjectPath        *string                    `json:"project_path,omitempty"`
+		PrimaryDirectoryID *string                    `json:"primary_directory_id,omitempty"`
+		WorkspaceBootstrap *workspaceBootstrapRequest `json:"workspace_bootstrap,omitempty"`
 	}
 
 	if !orihttp.ParseJSONBody(w, r, &req) {
@@ -540,6 +541,22 @@ func (h *Handler) updateWorkspace(w http.ResponseWriter, r *http.Request, id str
 	}
 	if req.Description != nil {
 		workspace.Description = *req.Description
+	}
+	if req.Description != nil || req.WorkspaceBootstrap != nil {
+		bootstrapData := mergeWorkspaceBootstrapForUpdate(
+			workspace.SharedData,
+			workspace.Description,
+			req.Description != nil,
+			req.WorkspaceBootstrap,
+		)
+		if bootstrapData != nil {
+			if workspace.SharedData == nil {
+				workspace.SharedData = make(map[string]interface{})
+			}
+			workspace.SharedData["workspace_bootstrap"] = bootstrapData
+		} else if workspace.SharedData != nil {
+			delete(workspace.SharedData, "workspace_bootstrap")
+		}
 	}
 	if req.ProjectPath != nil {
 		if workspace.IsGroup() && strings.TrimSpace(*req.ProjectPath) != "" {
@@ -592,6 +609,11 @@ func (h *Handler) updateWorkspace(w http.ResponseWriter, r *http.Request, id str
 	if req.Name == nil && req.ParentID == nil {
 		if err := h.syncWorkspacePortableStateToFileStore(workspace); err != nil {
 			logger.Warn("Failed to sync workspace.json after workspace update", logger.Fields{"id": id, "error": err})
+		}
+	}
+	if req.Description != nil || req.WorkspaceBootstrap != nil {
+		if err := h.syncWorkspaceDescriptionNote(r.Context(), workspace); err != nil {
+			logger.Warn("Failed to sync canonical workspace description note", logger.Fields{"id": id, "error": err})
 		}
 	}
 
@@ -844,7 +866,8 @@ func (h *Handler) handleWorkspaceRename(w http.ResponseWriter, r *http.Request, 
 	}
 
 	var req struct {
-		Name string `json:"name"`
+		Name       string `json:"name"`
+		FolderSlug string `json:"folder_slug,omitempty"`
 	}
 	if !orihttp.ParseJSONBody(w, r, &req) {
 		return
@@ -868,8 +891,18 @@ func (h *Handler) handleWorkspaceRename(w http.ResponseWriter, r *http.Request, 
 		return
 	}
 
+	oldName := ws.Name
+	oldFolderSlug := ws.FolderSlug
+	targetSlug := ""
+	if requestedSlug := strings.TrimSpace(req.FolderSlug); requestedSlug != "" {
+		targetSlug = agentworkspace.Slugify(requestedSlug)
+	}
+	if targetSlug == "" {
+		targetSlug = agentworkspace.Slugify(req.Name)
+	}
+
 	ws.Name = req.Name
-	ws.FolderSlug = agentworkspace.Slugify(req.Name)
+	ws.FolderSlug = targetSlug
 	ws.UpdatedAt = time.Now()
 
 	if err := h.store.UpdateWorkspace(ctx, ws); err != nil {
@@ -879,9 +912,25 @@ func (h *Handler) handleWorkspaceRename(w http.ResponseWriter, r *http.Request, 
 
 	// Rename the folder if folder-based store is available
 	if h.workspaceStore != nil && ws.Kind != session.WorkspaceKindGroup {
-		if err := h.workspaceStore.Rename(id, req.Name); err != nil {
-			logger.Warn("Failed to rename workspace folder", logger.Fields{"id": id, "error": err})
-			// Non-fatal: SQLite rename succeeded
+		if err := h.workspaceStore.RenameWithSlug(id, req.Name, targetSlug); err != nil {
+			ws.Name = oldName
+			ws.FolderSlug = oldFolderSlug
+			ws.UpdatedAt = time.Now()
+			if rollbackErr := h.store.UpdateWorkspace(ctx, ws); rollbackErr != nil {
+				logger.Error("Failed to rollback workspace rename after folder rename error", logger.Fields{"id": id, "error": rollbackErr})
+				_ = orihttp.RespondInternalError(w, "Failed to rollback workspace rename")
+				return
+			}
+
+			var slugConflict *agentworkspace.FolderSlugConflictError
+			if errors.As(err, &slugConflict) {
+				writeWorkspaceCreateSlugConflict(w, req.Name, slugConflict)
+				return
+			}
+
+			logger.Error("Failed to rename workspace folder", logger.Fields{"id": id, "error": err})
+			_ = orihttp.RespondInternalError(w, "Failed to rename workspace folder")
+			return
 		}
 	}
 

@@ -1,6 +1,7 @@
 package workspace
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -177,8 +178,20 @@ func TestFileStore_RenameConflict(t *testing.T) {
 	_ = store.Save(newTestWorkspace("ws-2", "Beta"))
 
 	// Rename Alpha to Beta should fail
-	if err := store.Rename("ws-1", "Beta"); err == nil {
-		t.Error("Rename to existing name should fail")
+	err = store.Rename("ws-1", "Beta")
+	if err == nil {
+		t.Fatal("Rename to existing name should fail")
+	}
+
+	var conflict *FolderSlugConflictError
+	if !errors.As(err, &conflict) {
+		t.Fatalf("expected FolderSlugConflictError, got %T", err)
+	}
+	if conflict.Slug != "beta" {
+		t.Fatalf("expected conflicting slug %q, got %q", "beta", conflict.Slug)
+	}
+	if conflict.SuggestedSlug == "" || conflict.SuggestedSlug == "beta" {
+		t.Fatalf("expected suggested slug for conflict, got %q", conflict.SuggestedSlug)
 	}
 }
 

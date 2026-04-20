@@ -83,8 +83,8 @@
                 Unblock Tasks
               </button>
               <button id="homeAssistantQuickNotes" type="button" class="modern-btn modern-btn-secondary modern-btn-sm home-assistant-quick-btn"
-                      data-home-prompt="/note # Workspace Brief\n## Goal\n- \n## Constraints\n- \n## Open Questions\n- ">
-                Create Brief
+                      data-home-prompt="/note # Workspace Description\n## Description\n- \n## Apps and Systems\n- \n## Key Files or Context\n- \n## Special Capabilities or Workflows\n- ">
+                Create Description
               </button>
               <button id="homeAssistantQuickReview" type="button" class="modern-btn modern-btn-secondary modern-btn-sm home-assistant-quick-btn"
                       data-home-prompt="Run a risk review for this workspace and recommend mitigation steps.">
@@ -186,13 +186,24 @@
               <div class="nav nav-tabs workspace-detail-config-nav" role="tablist" aria-label="Workspace configuration sections">
                 <button
                   class="nav-link workspace-detail-config-tab active"
+                  id="workspace-detail-config-intent-tab"
+                  data-bs-toggle="tab"
+                  data-bs-target="#workspace-detail-config-intent-pane"
+                  type="button"
+                  role="tab"
+                  aria-controls="workspace-detail-config-intent-pane"
+                  aria-selected="true">
+                  Intent &amp; Setup
+                </button>
+                <button
+                  class="nav-link workspace-detail-config-tab"
                   id="workspace-detail-config-settings-tab"
                   data-bs-toggle="tab"
                   data-bs-target="#workspace-detail-config-settings-pane"
                   type="button"
                   role="tab"
                   aria-controls="workspace-detail-config-settings-pane"
-                  aria-selected="true">
+                  aria-selected="false">
                   Manager Settings
                 </button>
                 <button
@@ -221,6 +232,82 @@
               <div class="tab-content workspace-detail-config-body">
                 <div
                   class="tab-pane fade show active workspace-detail-config-pane"
+                  id="workspace-detail-config-intent-pane"
+                  role="tabpanel"
+                  aria-labelledby="workspace-detail-config-intent-tab"
+                  tabindex="0">
+                  <div class="workspace-detail-config-pane-header">
+                    <div>
+                      <div class="workspace-detail-config-pane-title">Workspace Intent</div>
+                      <div class="workspace-detail-config-pane-copy">
+                        Keep the workspace description, systems, key context, and setup intent aligned so Ori can reuse the same source of truth across notes, planning, and setup review.
+                      </div>
+                    </div>
+                    <div class="workspace-detail-config-pane-actions">
+                      <button id="workspace-detail-intent-review" class="workspace-detail-panel-btn" type="button" title="Re-run setup review">
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
+                          <path d="M17.65,6.35C16.2,4.9 14.21,4 12,4A8,8 0 0,0 4,12A8,8 0 0,0 12,20C15.73,20 18.84,17.45 19.73,14H17.65C16.83,16.33 14.61,18 12,18A6,6 0 0,1 6,12A6,6 0 0,1 12,6C13.66,6 15.14,6.69 16.22,7.78L13,11H20V4L17.65,6.35Z"/>
+                        </svg>
+                        Re-run Setup Review
+                      </button>
+                    </div>
+                  </div>
+                  <form id="workspace-detail-intent-form" class="workspace-detail-settings-form">
+                    <div class="workspace-detail-settings-intro">
+                      Editing this intent keeps the workspace header, canonical note, and setup-review inputs aligned. Use setup review to refresh recommended agents, connectors, and skills for the workspace.
+                    </div>
+                    <div class="row g-3">
+                      <div class="col-12">
+                        <label for="workspace-detail-intent-description" class="form-label">Workspace description</label>
+                        <textarea id="workspace-detail-intent-description" class="form-control" rows="3" placeholder="Describe what this workspace is for and what Ori should help with."></textarea>
+                        <div class="workspace-detail-settings-field-hint">
+                          This is the primary intent Ori uses for planning and setup suggestions.
+                        </div>
+                      </div>
+                      <div class="col-md-6">
+                        <label for="workspace-detail-intent-systems" class="form-label">Apps and systems</label>
+                        <input id="workspace-detail-intent-systems" type="text" class="form-control" placeholder="Finder, Keynote, Google Drive">
+                        <div class="workspace-detail-settings-field-hint">
+                          Comma-separated systems Ori should consider while matching specialists, MCPs, and skills.
+                        </div>
+                      </div>
+                      <div class="col-md-6">
+                        <label for="workspace-detail-intent-capabilities" class="form-label">Special capabilities or workflows</label>
+                        <input id="workspace-detail-intent-capabilities" type="text" class="form-control" placeholder="Travel booking, slide production, repo planning">
+                        <div class="workspace-detail-settings-field-hint">
+                          Optional. Use this for recurring workflow patterns or special abilities the workspace should start with.
+                        </div>
+                      </div>
+                      <div class="col-12">
+                        <label for="workspace-detail-intent-context" class="form-label">Key files or context</label>
+                        <textarea id="workspace-detail-intent-context" class="form-control" rows="3" placeholder="Folder paths, source docs, launch notes, customer context, brand references"></textarea>
+                      </div>
+                      <div class="col-12">
+                        <div class="workspace-detail-settings-summary-card">
+                          <div class="workspace-detail-settings-summary-title">Canonical Workspace Description Note</div>
+                          <div id="workspace-detail-intent-summary" class="workspace-detail-settings-summary-copy">Saving intent keeps the canonical workspace description note in sync.</div>
+                        </div>
+                      </div>
+                    </div>
+                    <div class="workspace-detail-settings-actions">
+                      <div id="workspace-detail-intent-status" class="workspace-detail-settings-field-hint" aria-live="polite"></div>
+                      <button type="submit" class="btn btn-primary" id="workspace-detail-intent-save">Save Intent</button>
+                    </div>
+                  </form>
+                  <div id="workspace-detail-intent-review-panel" class="workspace-detail-settings-advanced" hidden>
+                    <div class="workspace-detail-settings-advanced-title">Recommended Setup</div>
+                    <div id="workspace-detail-intent-review-summary" class="workspace-detail-settings-advanced-copy">
+                      Ori can review this workspace description and propose an updated starter setup.
+                    </div>
+                    <div id="workspace-detail-intent-review-results" class="mt-3"></div>
+                    <div class="workspace-detail-settings-actions">
+                      <div id="workspace-detail-intent-review-meta" class="workspace-detail-settings-field-hint" aria-live="polite"></div>
+                      <button type="button" class="btn btn-primary" id="workspace-detail-intent-apply" disabled>Apply Recommended Setup</button>
+                    </div>
+                  </div>
+                </div>
+                <div
+                  class="tab-pane fade workspace-detail-config-pane"
                   id="workspace-detail-config-settings-pane"
                   role="tabpanel"
                   aria-labelledby="workspace-detail-config-settings-tab"
