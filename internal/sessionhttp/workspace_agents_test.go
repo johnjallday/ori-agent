@@ -1,6 +1,7 @@
 package sessionhttp
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"net/http"
@@ -176,6 +177,108 @@ func TestHandleWorkspaceAgents_DeleteCleansWorkspaceState(t *testing.T) {
 	}
 	if len(updatedAccess) != 1 || updatedAccess[0].AgentInstanceID != reviewer.ID {
 		t.Fatalf("expected only reviewer access entry to remain, got %#v", updatedAccess)
+	}
+}
+
+func TestHandleWorkspaceAgents_AddSyncsWorkspaceJSON(t *testing.T) {
+	handler, cleanup := createTestHandler(t)
+	defer cleanup()
+
+	baseDir := t.TempDir()
+	fileStore, err := agentworkspace.NewFileStore(baseDir)
+	if err != nil {
+		t.Fatalf("NewFileStore: %v", err)
+	}
+	defer func() { _ = fileStore.Close() }()
+	handler.SetWorkspaceStore(fileStore)
+
+	workspaceID := createTestWorkspace(t, handler, "Portable Agents")
+
+	req := httptest.NewRequest(
+		http.MethodPost,
+		"/api/workspaces/"+workspaceID+"/agents",
+		bytes.NewBufferString(`{"agent_name":"Writer"}`),
+	)
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	handler.HandleWorkspaces(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+
+	folderWS, err := fileStore.Get(workspaceID)
+	if err != nil {
+		t.Fatalf("Get workspace from file store: %v", err)
+	}
+	if len(folderWS.AgentInstances) != 1 {
+		t.Fatalf("expected 1 agent instance in workspace.json, got %#v", folderWS.AgentInstances)
+	}
+	if folderWS.AgentInstances[0].Name != "Writer" {
+		t.Fatalf("expected Writer in workspace.json, got %#v", folderWS.AgentInstances[0])
+	}
+	if len(folderWS.Agents) != 1 || folderWS.Agents[0] != "Writer" {
+		t.Fatalf("expected legacy agents to contain Writer in workspace.json, got %#v", folderWS.Agents)
+	}
+	if got := folderWS.EntryAgentName(); got != "Writer" {
+		t.Fatalf("expected entry agent Writer in workspace.json, got %q", got)
+	}
+}
+
+func TestHandleWorkspaceAgents_DeleteSyncsWorkspaceJSON(t *testing.T) {
+	handler, cleanup := createTestHandler(t)
+	defer cleanup()
+
+	baseDir := t.TempDir()
+	fileStore, err := agentworkspace.NewFileStore(baseDir)
+	if err != nil {
+		t.Fatalf("NewFileStore: %v", err)
+	}
+	defer func() { _ = fileStore.Close() }()
+	handler.SetWorkspaceStore(fileStore)
+
+	workspaceID := createTestWorkspace(t, handler, "Portable Cleanup")
+
+	addAgent := func(agentName string) {
+		t.Helper()
+		req := httptest.NewRequest(
+			http.MethodPost,
+			"/api/workspaces/"+workspaceID+"/agents",
+			bytes.NewBufferString(`{"agent_name":"`+agentName+`"}`),
+		)
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+		handler.HandleWorkspaces(w, req)
+		if w.Code != http.StatusCreated {
+			t.Fatalf("expected 201 adding %s, got %d: %s", agentName, w.Code, w.Body.String())
+		}
+	}
+
+	addAgent("Writer")
+	addAgent("Reviewer")
+
+	req := httptest.NewRequest(http.MethodDelete, "/api/workspaces/"+workspaceID+"/agents/Writer", nil)
+	w := httptest.NewRecorder()
+	handler.HandleWorkspaces(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200 deleting Writer, got %d: %s", w.Code, w.Body.String())
+	}
+
+	folderWS, err := fileStore.Get(workspaceID)
+	if err != nil {
+		t.Fatalf("Get workspace from file store: %v", err)
+	}
+	if len(folderWS.AgentInstances) != 1 {
+		t.Fatalf("expected 1 remaining agent instance in workspace.json, got %#v", folderWS.AgentInstances)
+	}
+	if folderWS.AgentInstances[0].Name != "Reviewer" || !folderWS.AgentInstances[0].EntryPoint {
+		t.Fatalf("expected Reviewer to remain as entry point in workspace.json, got %#v", folderWS.AgentInstances[0])
+	}
+	if len(folderWS.Agents) != 1 || folderWS.Agents[0] != "Reviewer" {
+		t.Fatalf("expected legacy agents to contain only Reviewer in workspace.json, got %#v", folderWS.Agents)
+	}
+	if got := folderWS.EntryAgentName(); got != "Reviewer" {
+		t.Fatalf("expected entry agent Reviewer in workspace.json, got %q", got)
 	}
 }
 

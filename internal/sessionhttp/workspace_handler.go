@@ -589,6 +589,11 @@ func (h *Handler) updateWorkspace(w http.ResponseWriter, r *http.Request, id str
 		_ = orihttp.RespondInternalError(w, "Failed to update workspace")
 		return
 	}
+	if req.Name == nil && req.ParentID == nil {
+		if err := h.syncWorkspacePortableStateToFileStore(workspace); err != nil {
+			logger.Warn("Failed to sync workspace.json after workspace update", logger.Fields{"id": id, "error": err})
+		}
+	}
 
 	logger.Info("Workspace updated", logger.Fields{"id": id})
 
@@ -1662,6 +1667,9 @@ func (h *Handler) addWorkspaceAgent(w http.ResponseWriter, r *http.Request, work
 		_ = orihttp.RespondInternalError(w, "Failed to add agent")
 		return
 	}
+	if err := h.syncWorkspacePortableStateToFileStore(workspace); err != nil {
+		logger.Warn("Failed to sync workspace.json after adding workspace agent", logger.Fields{"id": workspaceID, "error": err})
+	}
 
 	logger.Info("Agent added to workspace", logger.Fields{
 		"workspace_id":    workspaceID,
@@ -1790,6 +1798,9 @@ func (h *Handler) removeWorkspaceAgent(w http.ResponseWriter, r *http.Request, w
 		logger.Error("Failed to update workspace", logger.Fields{"id": workspaceID, "error": err})
 		_ = orihttp.RespondInternalError(w, "Failed to remove agent")
 		return
+	}
+	if err := h.syncWorkspacePortableStateToFileStore(workspace); err != nil {
+		logger.Warn("Failed to sync workspace.json after removing workspace agent", logger.Fields{"id": workspaceID, "error": err})
 	}
 
 	logger.Info("Agent removed from workspace", logger.Fields{
@@ -2744,6 +2755,12 @@ func buildFileStoreWorkspace(workspace *session.Workspace) (*agentworkspace.Work
 	}
 	if err := decodeSessionWorkspaceJSONField(workspace.AgentMCPAccessJSON, &folderWS.AgentMCPAccess); err != nil {
 		return nil, fmt.Errorf("failed to decode workspace agent MCP access: %w", err)
+	}
+	if err := decodeSessionWorkspaceJSONField(workspace.SkillBindingsJSON, &folderWS.SkillBindings); err != nil {
+		return nil, fmt.Errorf("failed to decode workspace skill bindings: %w", err)
+	}
+	if err := decodeSessionWorkspaceJSONField(workspace.AgentSkillAccessJSON, &folderWS.AgentSkillAccess); err != nil {
+		return nil, fmt.Errorf("failed to decode workspace agent skill access: %w", err)
 	}
 
 	return folderWS, nil
