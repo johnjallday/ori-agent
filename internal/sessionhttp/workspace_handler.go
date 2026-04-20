@@ -26,6 +26,8 @@ var (
 	errWorkspaceDisallowsDirectUse = errors.New("groups cannot hold sessions, notes, or direct work")
 )
 
+const workspaceSharedDataPrimaryDirectoryIDKey = "primary_directory_id"
+
 // HandleWorkspaces routes requests to /api/workspaces (also supports legacy /api/folders).
 func (h *Handler) HandleWorkspaces(w http.ResponseWriter, r *http.Request) {
 	// Normalize path for both /api/folders and /api/workspaces
@@ -334,6 +336,7 @@ func (h *Handler) createWorkspace(w http.ResponseWriter, r *http.Request) {
 			if data, err := json.Marshal([]workspaceDirectoryReference{dirRef}); err == nil {
 				ws.DirectoryReferencesJSON = data
 			}
+			setWorkspacePrimaryDirectoryID(ws, dirRef.ID)
 
 			// Auto-provision a filesystem MCP binding scoped to the workspace folder
 			mcpBinding := agentworkspace.WorkspaceMCPBinding{
@@ -517,12 +520,13 @@ func (h *Handler) updateWorkspace(w http.ResponseWriter, r *http.Request, id str
 	}
 
 	var req struct {
-		Name        *string `json:"name,omitempty"`
-		Description *string `json:"description,omitempty"`
-		ParentID    *string `json:"parent_id,omitempty"`
-		OrderIndex  *int    `json:"order_index,omitempty"`
-		Color       *string `json:"color,omitempty"`
-		ProjectPath *string `json:"project_path,omitempty"`
+		Name               *string `json:"name,omitempty"`
+		Description        *string `json:"description,omitempty"`
+		ParentID           *string `json:"parent_id,omitempty"`
+		OrderIndex         *int    `json:"order_index,omitempty"`
+		Color              *string `json:"color,omitempty"`
+		ProjectPath        *string `json:"project_path,omitempty"`
+		PrimaryDirectoryID *string `json:"primary_directory_id,omitempty"`
 	}
 
 	if !orihttp.ParseJSONBody(w, r, &req) {
@@ -543,6 +547,9 @@ func (h *Handler) updateWorkspace(w http.ResponseWriter, r *http.Request, id str
 			return
 		}
 		workspace.ProjectPath = *req.ProjectPath
+	}
+	if req.PrimaryDirectoryID != nil {
+		setWorkspacePrimaryDirectoryID(workspace, *req.PrimaryDirectoryID)
 	}
 	if req.ParentID != nil {
 		// Check for circular reference
@@ -790,6 +797,38 @@ func mergeWorkspaceJSONField(target *json.RawMessage, fallback json.RawMessage) 
 		return
 	}
 	*target = append(json.RawMessage(nil), fallback...)
+}
+
+func workspacePrimaryDirectoryID(workspace *session.Workspace) string {
+	if workspace == nil || workspace.SharedData == nil {
+		return ""
+	}
+
+	raw, ok := workspace.SharedData[workspaceSharedDataPrimaryDirectoryIDKey]
+	if !ok {
+		return ""
+	}
+
+	value, _ := raw.(string)
+	return strings.TrimSpace(value)
+}
+
+func setWorkspacePrimaryDirectoryID(workspace *session.Workspace, directoryID string) {
+	if workspace == nil {
+		return
+	}
+
+	trimmed := strings.TrimSpace(directoryID)
+	if workspace.SharedData == nil {
+		workspace.SharedData = make(map[string]interface{})
+	}
+
+	if trimmed == "" {
+		delete(workspace.SharedData, workspaceSharedDataPrimaryDirectoryIDKey)
+		return
+	}
+
+	workspace.SharedData[workspaceSharedDataPrimaryDirectoryIDKey] = trimmed
 }
 
 // handleWorkspaceRename handles POST /api/workspaces/{id}/rename.
@@ -1134,6 +1173,7 @@ func (h *Handler) handleWorkspaceImport(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	workspace.DirectoryReferencesJSON = data
+	setWorkspacePrimaryDirectoryID(workspace, dirRef.ID)
 	workspace.UpdatedAt = time.Now()
 
 	if err := h.store.UpdateWorkspace(r.Context(), workspace); err != nil {
@@ -1780,6 +1820,7 @@ func (h *Handler) buildWorkspaceDetailResponse(workspace *session.Workspace) map
 	analyticsWorkspace := buildWorkspaceAnalyticsView(workspace)
 	settings := workspacesettings.Extract(workspace.SharedData)
 	payload["attachments"] = h.buildWorkspaceResponseAttachments(workspace)
+	payload["primary_directory_id"] = workspacePrimaryDirectoryID(workspace)
 	payload["entry_agent_name"] = availableWorkspaceEntryAgentName(workspace, h.agentStore)
 	payload["agent_stats"] = analyticsWorkspace.GetAgentStats()
 	payload["workspace_progress"] = analyticsWorkspace.GetWorkspaceProgress()

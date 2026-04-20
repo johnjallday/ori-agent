@@ -1306,7 +1306,7 @@ export class WorkspaceDetailPage {
     this.elements.copyNotesBtn?.addEventListener('click', () => this.copyAllNotesToClipboard());
 
     // Directory buttons
-    this.elements.addDirectoryBtn?.addEventListener('click', () => this.showAddDirectoryModal());
+    this.elements.addDirectoryBtn?.addEventListener('click', () => this.showAddDirectoryModal(this.elements.addDirectoryBtn));
     this.elements.addMcpBtn?.addEventListener('click', () => this.openWorkspaceMCPModal());
     this.bindDirectoryExplorerEvents();
     this.elements.refreshMcpBtn?.addEventListener('click', async () => {
@@ -10650,10 +10650,14 @@ export class WorkspaceDetailPage {
 
       const workspace = await response.json();
 
-      if (this.workspace && workspace && typeof workspace === 'object') {
+      if (workspace && typeof workspace === 'object') {
+        if (!this.workspace || typeof this.workspace !== 'object') {
+          this.workspace = {};
+        }
         this.workspace.directory_references = Array.isArray(workspace.directory_references) ? workspace.directory_references : [];
         this.workspace.mcp_bindings = Array.isArray(workspace.mcp_bindings) ? workspace.mcp_bindings : [];
         this.workspace.agent_mcp_access = Array.isArray(workspace.agent_mcp_access) ? workspace.agent_mcp_access : [];
+        this.workspace.primary_directory_id = typeof workspace.primary_directory_id === 'string' ? workspace.primary_directory_id : '';
       }
 
       const refs = Array.isArray(workspace.directory_references)
@@ -10716,17 +10720,26 @@ export class WorkspaceDetailPage {
     if (!this.elements.directoriesList) return;
 
     if (!this.directories || this.directories.length === 0) {
-      this.elements.directoriesList.innerHTML = '<div class="workspace-detail-empty">No directories yet.</div>';
+      this.elements.directoriesList.innerHTML = this.getUnlinkedProjectEmptyStateMarkup();
       return;
     }
 
+    const primaryDirectoryId = this.getPrimaryDirectoryId();
     this.elements.directoriesList.innerHTML = this.directories.map(dir => {
       const name = dir.title || dir.name || dir.path || 'Unnamed Directory';
       const path = dir.path || '';
-      const sourceLabel = dir.source === 'reference' ? 'Reference' : 'Attachment';
+      const sourceLabel = dir.source === 'reference' ? 'Linked folder' : 'Legacy attachment';
       const source = dir.source === 'attachment' ? 'attachment' : 'reference';
+      const isPrimary = dir.id === primaryDirectoryId;
+      const roleLabel = isPrimary ? 'Project Folder' : 'Reference';
+      const roleClass = isPrimary ? 'is-primary' : 'is-reference';
       return `
         <div class="workspace-detail-item" data-directory-id="${dir.id}">
+          <button type="button" class="workspace-detail-item-change" onclick="event.stopPropagation(); window.workspaceDetail?.promptRelinkDirectory('${dir.id}', '${source}', this)" title="Change linked folder" aria-label="Change linked folder for ${this.escapeHtml(name)}">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+              <path d="M4,7H18.17L15.59,4.41L17,3L22,8L17,13L15.59,11.59L18.17,9H4V7M20,17H5.83L8.41,19.59L7,21L2,16L7,11L8.41,12.41L5.83,15H20V17Z"/>
+            </svg>
+          </button>
           <button type="button" class="workspace-detail-item-run" onclick="event.stopPropagation(); window.workspaceDetail?.openDirectoryExplorer('${dir.id}', '${source}')" title="Explore directory" aria-label="Explore directory ${this.escapeHtml(name)}">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
               <path d="M15,12H16.5L15,13.5L16.42,14.92L20.34,11L16.42,7.08L15,8.5L16.5,10H15V12M19,19H5V5H13V3H5C3.89,3 3,3.89 3,5V19A2,2 0 0,0 5,21H19A2,2 0 0,0 21,19V13H19V19Z"/>
@@ -10744,16 +10757,62 @@ export class WorkspaceDetailPage {
                onclick="window.workspaceDetail?.openDirectoryExplorer('${dir.id}', '${source}')"
                onkeydown="if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); window.workspaceDetail?.openDirectoryExplorer('${dir.id}', '${source}'); }">
             <div class="workspace-detail-item-title">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" class="me-2" style="color: var(--text-secondary);">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" class="workspace-detail-item-title-icon">
                 <path d="M10,4H4C2.89,4 2,4.89 2,6V18A2,2 0 0,0 4,20H20A2,2 0 0,0 22,18V8C22,6.89 21.1,6 20,6H12L10,4Z"/>
               </svg>
-              ${this.escapeHtml(name)}
+              <span class="workspace-detail-item-title-text">${this.escapeHtml(name)}</span>
+              <span class="workspace-detail-directory-role ${roleClass}">${roleLabel}</span>
             </div>
-            <div class="workspace-detail-item-meta">${this.escapeHtml(path)}${path ? ' • ' : ''}${this.escapeHtml(sourceLabel)}</div>
+            <div class="workspace-detail-item-meta">${this.escapeHtml(path)}</div>
+            <div class="workspace-detail-item-submeta">
+              <span class="workspace-detail-directory-source">${this.escapeHtml(sourceLabel)}</span>
+              ${!isPrimary ? `
+                <button
+                  type="button"
+                  class="workspace-detail-directory-promote"
+                  onclick="event.stopPropagation(); window.workspaceDetail?.setPrimaryDirectory('${dir.id}')"
+                >
+                  Make Project
+                </button>
+              ` : ''}
+            </div>
           </div>
         </div>
       `;
     }).join('');
+  }
+
+  getStoredPrimaryDirectoryId() {
+    return typeof this.workspace?.primary_directory_id === 'string'
+      ? this.workspace.primary_directory_id.trim()
+      : '';
+  }
+
+  getPrimaryDirectoryId() {
+    const storedPrimaryDirectoryId = this.getStoredPrimaryDirectoryId();
+    if (storedPrimaryDirectoryId && this.directories.some((dir) => dir.id === storedPrimaryDirectoryId)) {
+      return storedPrimaryDirectoryId;
+    }
+
+    return this.directories[0]?.id || '';
+  }
+
+  getUnlinkedProjectEmptyStateMarkup() {
+    return `
+      <div class="workspace-detail-link-empty">
+        <div class="workspace-detail-link-empty-icon" aria-hidden="true">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
+            <path d="M10,4H4C2.89,4 2,4.89 2,6V18A2,2 0 0,0 4,20H12V18H4V8H20V11H22V8C22,6.89 21.1,6 20,6H12L10,4M19,13V16H16V18H19V21H21V18H24V16H21V13H19Z"/>
+          </svg>
+        </div>
+        <div class="workspace-detail-link-empty-eyebrow">Unlinked Workspace</div>
+        <div class="workspace-detail-link-empty-title">No project folder linked yet.</div>
+        <p class="workspace-detail-link-empty-copy">Attach the local project folder so this workspace can browse files in context.</p>
+        <button type="button" class="workspace-detail-empty-action" onclick="window.workspaceDetail?.showAddDirectoryModal(this)">
+          Link Project
+        </button>
+      </div>
+    `;
   }
 
   async deleteDirectory(directoryId, source = 'reference') {
@@ -10768,6 +10827,7 @@ export class WorkspaceDetailPage {
       : `/api/workspaces/${encodeURIComponent(this.workspaceId)}/directories/${encodeURIComponent(directoryId)}`;
 
     try {
+      const deletedWasStoredPrimary = this.getStoredPrimaryDirectoryId() === directoryId;
       const response = await fetch(endpoint, { method: 'DELETE' });
       if (!response.ok) {
         const errorText = await response.text();
@@ -10776,10 +10836,146 @@ export class WorkspaceDetailPage {
 
       if (window.Toast) window.Toast.success('Directory removed');
       await this.loadDirectories();
+      if (deletedWasStoredPrimary) {
+        await this.setPrimaryDirectory(this.directories[0]?.id || '', { silent: true });
+      }
     } catch (error) {
       console.error('Failed to remove directory:', error);
       if (window.Toast) window.Toast.error('Failed to remove directory');
     }
+  }
+
+  async setPrimaryDirectory(directoryId, { silent = false } = {}) {
+    const nextDirectoryId = typeof directoryId === 'string' ? directoryId.trim() : '';
+    if (this.getStoredPrimaryDirectoryId() === nextDirectoryId) {
+      return;
+    }
+
+    try {
+      await this.updateWorkspace({ primary_directory_id: nextDirectoryId });
+      if (!this.workspace || typeof this.workspace !== 'object') {
+        this.workspace = {};
+      }
+      this.workspace.primary_directory_id = nextDirectoryId;
+      this.renderDirectories();
+      if (!silent && window.Toast) {
+        window.Toast.success(nextDirectoryId ? 'Project folder updated' : 'Project folder cleared');
+      }
+    } catch (error) {
+      console.error('Failed to set primary directory:', error);
+      if (window.Toast) {
+        window.Toast.error(error.message || 'Failed to update project folder');
+      }
+    }
+  }
+
+  async promptRelinkDirectory(directoryId, source = 'reference', triggerButton = null) {
+    if (!directoryId) return;
+
+    const directory = this.directories.find((entry) => entry.id === directoryId);
+    if (!directory) {
+      if (window.Toast) window.Toast.error('Directory not found');
+      return;
+    }
+
+    const normalizedSource = source === 'attachment' ? 'attachment' : 'reference';
+    const isPrimaryDirectory = this.getPrimaryDirectoryId() === directoryId;
+    const button = triggerButton instanceof HTMLElement ? triggerButton : null;
+    const originalButtonHTML = button ? button.innerHTML : '';
+    const originalDisabled = button ? button.disabled : false;
+
+    if (button) {
+      button.disabled = true;
+      button.innerHTML = '<span class="spinner-border spinner-border-sm"></span>';
+    }
+
+    try {
+      const pickerResponse = await fetch('/api/folder-picker/select-path', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          workspace_id: this.workspaceId,
+          title: `Select a new folder for ${directory.name || directory.path || 'this workspace'}`
+        })
+      });
+
+      const pickerResult = await pickerResponse.json().catch(() => ({}));
+      if (!pickerResponse.ok || !pickerResult.success) {
+        throw new Error(pickerResult.error || 'Failed to open folder picker');
+      }
+
+      if (!pickerResult.selected || !pickerResult.path) {
+        return;
+      }
+
+      const nextPath = String(pickerResult.path || '').trim();
+      const currentPath = String(directory.path || '').trim();
+      if (nextPath && currentPath && nextPath === currentPath) {
+        if (window.Toast) window.Toast.info('Workspace is already linked to that folder');
+        return;
+      }
+
+      if (normalizedSource === 'attachment') {
+        await this.updateLegacyDirectoryAttachment(directoryId, nextPath);
+      } else {
+        await this.updateDirectoryReference(directoryId, nextPath);
+      }
+
+      if (window.Toast) {
+        window.Toast.success(isPrimaryDirectory ? 'Project folder updated' : 'Linked folder updated');
+      }
+      await this.loadDirectories();
+    } catch (error) {
+      console.error('Failed to relink directory:', error);
+      if (window.Toast) window.Toast.error(error.message || 'Failed to change linked folder');
+    } finally {
+      if (button) {
+        button.disabled = originalDisabled;
+        button.innerHTML = originalButtonHTML;
+      }
+    }
+  }
+
+  async updateDirectoryReference(directoryId, nextPath) {
+    const title = this.getDirectoryDisplayName(nextPath);
+    const response = await fetch(`/api/workspaces/${encodeURIComponent(this.workspaceId)}/directories/${encodeURIComponent(directoryId)}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        name: title,
+        path: nextPath
+      })
+    });
+
+    if (!response.ok) {
+      const payload = await response.json().catch(() => ({}));
+      throw new Error(payload.error || payload.message || 'Failed to update linked folder');
+    }
+  }
+
+  async updateLegacyDirectoryAttachment(directoryId, nextPath) {
+    const title = this.getDirectoryDisplayName(nextPath);
+    const response = await fetch(`/api/workspaces/${encodeURIComponent(this.workspaceId)}/attachments/${encodeURIComponent(directoryId)}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        title,
+        body: nextPath
+      })
+    });
+
+    if (!response.ok) {
+      const payload = await response.json().catch(() => ({}));
+      throw new Error(payload.error || payload.message || 'Failed to update linked folder');
+    }
+  }
+
+  getDirectoryDisplayName(path) {
+    if (!path) return 'Project Folder';
+
+    const normalizedPath = String(path).replace(/[\\/]+$/, '');
+    const parts = normalizedPath.split(/[\\/]/).filter(Boolean);
+    return parts[parts.length - 1] || normalizedPath || 'Project Folder';
   }
 
   async openDirectoryExplorer(directoryId, source = 'reference') {
@@ -11616,14 +11812,30 @@ export class WorkspaceDetailPage {
   /**
    * Show add directory modal - launches the folder picker
    */
-  async showAddDirectoryModal() {
-    const button = this.elements.addDirectoryBtn;
-    if (!button) return;
+  async showAddDirectoryModal(triggerButton = null) {
+    const buttons = [];
+    if (this.elements.addDirectoryBtn) {
+      buttons.push(this.elements.addDirectoryBtn);
+    }
+    if (triggerButton && !buttons.includes(triggerButton)) {
+      buttons.push(triggerButton);
+    }
+    if (buttons.length === 0) return;
 
-    // Show loading state on button
-    const originalHTML = button.innerHTML;
-    button.disabled = true;
-    button.innerHTML = '<span class="spinner-border spinner-border-sm"></span>';
+    const buttonStates = buttons.map((button) => ({
+      button,
+      disabled: button.disabled,
+      innerHTML: button.innerHTML
+    }));
+
+    buttons.forEach((button) => {
+      button.disabled = true;
+      if (button.classList.contains('workspace-detail-empty-action')) {
+        button.textContent = 'Opening...';
+      } else {
+        button.innerHTML = '<span class="spinner-border spinner-border-sm"></span>';
+      }
+    });
 
     try {
       const response = await fetch('/api/launch-folder-picker', {
@@ -11648,8 +11860,10 @@ export class WorkspaceDetailPage {
       console.error('Failed to launch folder picker:', error);
       if (window.Toast) window.Toast.error('Failed to open folder picker');
     } finally {
-      button.disabled = false;
-      button.innerHTML = originalHTML;
+      buttonStates.forEach(({ button, disabled, innerHTML }) => {
+        button.disabled = disabled;
+        button.innerHTML = innerHTML;
+      });
     }
   }
 
