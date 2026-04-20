@@ -93,6 +93,34 @@
     return result;
   }
 
+  function normalizeReviewInput(input = {}) {
+    const workspaceName = String(input.workspaceName || '').trim();
+    const description = String(input.description || '').trim();
+    const goal = String(input.goal || description).trim();
+    const systems = String(input.systems || '').trim();
+    const capabilities = String(input.capabilities || '').trim();
+    const context = String(input.context || '').trim();
+    const importEnabled = Boolean(input.importEnabled);
+    const importPath = String(input.importPath || '').trim();
+    const systemsList = uniqueList(
+      systems
+        ? systems.split(/[\n,;]+/).map((value) => value.trim()).filter(Boolean)
+        : []
+    );
+
+    return {
+      workspaceName,
+      description,
+      goal,
+      systems,
+      capabilities,
+      systemsList,
+      context,
+      importEnabled,
+      importPath
+    };
+  }
+
   function getElement(id) {
     return document.getElementById(id);
   }
@@ -143,29 +171,16 @@
   }
 
   function getModalInput() {
-    const workspaceName = String(getElement('folderNameInput')?.value || '').trim();
-    const description = String(getElement('folderDescriptionInput')?.value || '').trim();
-    const goal = description || String(getElement('folderPrimaryGoalInput')?.value || '').trim();
-    const systems = String(getElement('folderSystemsInput')?.value || '').trim();
-    const context = String(getElement('folderContextInput')?.value || '').trim();
-    const importEnabled = Boolean(getElement('folderImportToggle')?.checked);
-    const importPath = String(getElement('folderImportPathInput')?.value || '').trim();
-    const systemsList = uniqueList(
-      systems
-        ? systems.split(/[\n,;]+/).map((value) => value.trim()).filter(Boolean)
-        : []
-    );
-
-    return {
-      workspaceName,
-      description,
-      goal,
-      systems,
-      systemsList,
-      context,
-      importEnabled,
-      importPath
-    };
+    return normalizeReviewInput({
+      workspaceName: getElement('folderNameInput')?.value || '',
+      description: getElement('folderDescriptionInput')?.value || '',
+      goal: getElement('folderPrimaryGoalInput')?.value || '',
+      systems: getElement('folderSystemsInput')?.value || '',
+      capabilities: getElement('folderCapabilitiesInput')?.value || '',
+      context: getElement('folderContextInput')?.value || '',
+      importEnabled: Boolean(getElement('folderImportToggle')?.checked),
+      importPath: getElement('folderImportPathInput')?.value || ''
+    });
   }
 
   function computeFingerprint(input) {
@@ -174,6 +189,7 @@
       description: input.description || '',
       goal: input.goal || '',
       systems: input.systems || '',
+      capabilities: input.capabilities || '',
       context: input.context || '',
       importEnabled: Boolean(input.importEnabled),
       importPath: input.importPath || ''
@@ -369,7 +385,8 @@
 
     const fallbackChunks = [
       input.description || input.goal,
-      input.goal
+      input.goal,
+      input.capabilities
     ]
       .map((value) => String(value || '').trim())
       .filter(Boolean)
@@ -397,6 +414,7 @@
       input.description,
       input.goal,
       input.systems,
+      input.capabilities,
       input.context
     ].join(' ');
   }
@@ -455,18 +473,22 @@
   function buildPrimaryAgentDescription(input) {
     const systems = input.systemsList.length > 0 ? `Primary systems: ${input.systemsList.join(', ')}.` : '';
     const objective = String(input.description || input.goal || 'Support the workspace goals').trim().replace(/[.]+$/, '');
+    const capabilities = String(input.capabilities || '').trim().replace(/[.]+$/, '');
     return uniqueList([
       `Lead the "${input.workspaceName || 'workspace'}" workspace.`,
       `Primary objective: ${objective}.`,
+      capabilities ? `Recurring workflows: ${capabilities}.` : '',
       systems
     ]).join(' ');
   }
 
   function buildSpecialistDescription(input, system) {
     const objective = String(input.description || input.goal || 'Support the workspace goals').trim().replace(/[.]+$/, '');
+    const capabilities = String(input.capabilities || '').trim().replace(/[.]+$/, '');
     return uniqueList([
       `Handle ${system} work inside the "${input.workspaceName || 'workspace'}" workspace.`,
-      `Primary objective: ${objective}.`
+      `Primary objective: ${objective}.`,
+      capabilities ? `Recurring workflows: ${capabilities}.` : ''
     ]).join(' ');
   }
 
@@ -702,7 +724,8 @@
   }
 
   async function buildPlan(input) {
-    const queries = deriveSearchQueries(input);
+    const normalizedInput = normalizeReviewInput(input);
+    const queries = deriveSearchQueries(normalizedInput);
     const [agents, installedSkills, configuredMCPs] = await Promise.all([
       fetchAgents(),
       fetchInstalledSkills(),
@@ -720,11 +743,12 @@
       registryMCPResults.push(...(Array.isArray(mcpResults) ? mcpResults : []));
     }));
 
-    const planAgents = buildAgentPlan(input, agents);
+    const planAgents = buildAgentPlan(normalizedInput, agents);
     const goalQueries = uniqueList([
       ...queries,
-      input.description || input.goal,
-      input.goal
+      normalizedInput.description || normalizedInput.goal,
+      normalizedInput.goal,
+      normalizedInput.capabilities
     ]).slice(0, 5);
     const planSkills = normalizeSkillCandidates(installedSkills, marketplaceSkillResults, goalQueries);
     const planMCPs = normalizeMCPCandidates(configuredMCPs, registryMCPResults, goalQueries);
@@ -1366,6 +1390,13 @@
 
   async function applyPlan(workspaceId) {
     const selectedPlan = getSelectedPlan();
+    return applySelectedPlan(workspaceId, selectedPlan, {
+      createButton: getCreateButton(),
+      backButton: getBackButton()
+    });
+  }
+
+  async function applySelectedPlan(workspaceId, selectedPlan, controls = {}) {
     if (!selectedPlan) {
       return {
         invitedAgents: 0,
@@ -1376,12 +1407,12 @@
     }
 
     state.applying = true;
-    const createBtn = getCreateButton();
+    const createBtn = controls.createButton || null;
     if (createBtn) {
       createBtn.disabled = true;
       createBtn.textContent = 'Applying Setup...';
     }
-    const backBtn = getBackButton();
+    const backBtn = controls.backButton || null;
     if (backBtn) backBtn.disabled = true;
 
     const summary = {
@@ -1393,28 +1424,39 @@
 
     try {
       const agentInstanceIds = [];
-
-      for (let agentIdx = 0; agentIdx < selectedPlan.agents.length; agentIdx++) {
-        const agentPlan = selectedPlan.agents[agentIdx];
-        try {
-          const isEntryAgent = agentPlan.role === 'lead';
-          const agentName = await ensureAgentExists(agentPlan, isEntryAgent);
-          const added = await addAgentToWorkspace(workspaceId, agentName);
-          if (added.instanceId) {
-            agentInstanceIds.push(added.instanceId);
-          }
-          summary.invitedAgents += 1;
-        } catch (error) {
-          summary.failures.push(`Agent ${agentPlan.name}: ${error.message || 'failed to add to workspace'}`);
-        }
-      }
-
       let workspaceState;
       try {
         workspaceState = await loadWorkspaceState(workspaceId);
       } catch (error) {
         summary.failures.push(`Workspace load: ${error.message || 'failed to load workspace state'}`);
         return summary;
+      }
+      const existingAgentNames = new Set(
+        (Array.isArray(workspaceState?.agent_instances) ? workspaceState.agent_instances : [])
+          .map((agent) => String(agent?.name || '').trim().toLowerCase())
+          .filter(Boolean)
+      );
+
+      for (let agentIdx = 0; agentIdx < selectedPlan.agents.length; agentIdx++) {
+        const agentPlan = selectedPlan.agents[agentIdx];
+        try {
+          const isEntryAgent = agentPlan.role === 'lead';
+          const agentName = await ensureAgentExists(agentPlan, isEntryAgent);
+          const normalizedAgentName = String(agentName || '').trim().toLowerCase();
+          if (normalizedAgentName && existingAgentNames.has(normalizedAgentName)) {
+            continue;
+          }
+          const added = await addAgentToWorkspace(workspaceId, agentName);
+          if (added.instanceId) {
+            agentInstanceIds.push(added.instanceId);
+          }
+          if (normalizedAgentName) {
+            existingAgentNames.add(normalizedAgentName);
+          }
+          summary.invitedAgents += 1;
+        } catch (error) {
+          summary.failures.push(`Agent ${agentPlan.name}: ${error.message || 'failed to add to workspace'}`);
+        }
       }
 
       for (const mcpCandidate of selectedPlan.mcps) {
@@ -1501,6 +1543,8 @@
     ensureReviewed,
     getSelectedPlan,
     applyPlan,
+    applySelectedPlan,
+    reviewWorkspaceInput: async (input) => buildPlan(normalizeReviewInput(input)),
     reset,
     markDirty,
     refreshPrimaryActionLabel

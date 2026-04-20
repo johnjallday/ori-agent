@@ -480,6 +480,8 @@ func travelPlanningNoteScore(name string) int {
 		return 0
 	}
 	switch {
+	case normalized == "workspacedescription":
+		return 425
 	case normalized == "workspacebrief":
 		return 400
 	case strings.Contains(normalized, "tripintake"):

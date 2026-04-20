@@ -43,6 +43,7 @@ function getWorkspaceBootstrapFromModal() {
     hasAny: Boolean(description || systems || context),
     description,
     goal: description,
+    capabilities: '',
     systems,
     systemsList,
     context
@@ -68,12 +69,12 @@ function buildWorkspaceBootstrapSeedNote(workspaceBootstrap, workspaceName) {
     ? workspaceBootstrap.systemsList.map((item) => `- ${item}`).join('\n')
     : '_Not specified._';
   const descriptionSection = workspaceBootstrap.description || workspaceBootstrap.goal || '_Not specified._';
+  const capabilitiesSection = workspaceBootstrap.capabilities || '_Not specified._';
   const contextSection = workspaceBootstrap.context || '_Not specified._';
-  const title = String(workspaceName || '').trim() || 'this workspace';
 
   return {
     name: 'Workspace Description',
-    content: `# Workspace Description\n\nCaptured during workspace creation for ${title}.\n\n## Description\n${descriptionSection}\n\n## Apps and Systems\n${systemsSection}\n\n## Key Files or Context\n${contextSection}\n`
+    content: `# Workspace Description\n\n## Description\n${descriptionSection}\n\n## Apps and Systems\n${systemsSection}\n\n## Key Files or Context\n${contextSection}\n\n## Special Capabilities or Workflows\n${capabilitiesSection}\n`
   };
 }
 
