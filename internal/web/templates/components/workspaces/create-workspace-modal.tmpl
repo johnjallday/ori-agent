@@ -24,13 +24,12 @@
             <div class="workspace-setup-card mb-2">
               <div class="workspace-setup-header" style="align-items: flex-start;">
                 <div>
-                  <label for="folderPrimaryGoalInput" class="workspace-setup-title">Workspace Brief</label>
-                  <p class="workspace-setup-help mb-0">Capture what this workspace is for so Ori can bootstrap it with the right context later.</p>
+                  <label for="folderDescriptionInput" class="workspace-setup-title">Workspace Description</label>
+                  <p class="workspace-setup-help mb-0">Describe what this workspace is for so Ori can review the setup and recommend the right agents, MCPs, and skills.</p>
                 </div>
               </div>
 
-              <label for="folderPrimaryGoalInput" style="font-size: 12px; color: var(--text-secondary);">Primary goal</label>
-              <textarea id="folderPrimaryGoalInput" class="modern-input w-100 mb-2" placeholder="What this workspace is for and what Ori should help with" rows="2" style="resize: vertical;"></textarea>
+              <textarea id="folderDescriptionInput" class="modern-input w-100 mb-2" placeholder="What this workspace is for and what Ori should help with" rows="3" style="resize: vertical;"></textarea>
 
               <label for="folderSystemsInput" style="font-size: 12px; color: var(--text-secondary);">Apps and systems <span style="opacity: 0.8;">(optional)</span></label>
               <input type="text" id="folderSystemsInput" class="modern-input w-100 mb-2" placeholder="Keynote, Finder, Google Drive">
@@ -98,11 +97,11 @@
               <div class="workspace-setup-header" style="align-items: flex-start;">
                 <div>
                   <div class="workspace-setup-title">Ori Setup Review</div>
-                  <p id="folderBootstrapReviewSummary" class="workspace-setup-help mb-0">Ori can review this brief, recommend agents, and propose the MCPs and skills the workspace should start with.</p>
+                  <p id="folderBootstrapReviewSummary" class="workspace-setup-help mb-0">Ori can review this description, recommend agents, and propose the MCPs and skills the workspace should start with.</p>
                 </div>
               </div>
               <div id="folderBootstrapReviewMeta" class="workspace-setup-help mb-2" hidden></div>
-              <div id="folderBootstrapReviewLoading" class="workspace-setup-help" hidden>Reviewing the workspace brief and preparing a setup plan...</div>
+              <div id="folderBootstrapReviewLoading" class="workspace-setup-help" hidden>Reviewing the workspace description and preparing a setup plan...</div>
               <div id="folderBootstrapReviewContent" hidden></div>
             </div>
           </div>

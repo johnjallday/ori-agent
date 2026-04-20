@@ -145,7 +145,7 @@
   function getModalInput() {
     const workspaceName = String(getElement('folderNameInput')?.value || '').trim();
     const description = String(getElement('folderDescriptionInput')?.value || '').trim();
-    const goal = String(getElement('folderPrimaryGoalInput')?.value || '').trim();
+    const goal = description || String(getElement('folderPrimaryGoalInput')?.value || '').trim();
     const systems = String(getElement('folderSystemsInput')?.value || '').trim();
     const context = String(getElement('folderContextInput')?.value || '').trim();
     const importEnabled = Boolean(getElement('folderImportToggle')?.checked);
@@ -233,7 +233,7 @@
     const meta = getReviewMeta();
     const content = getReviewContent();
     if (summary) {
-      summary.textContent = 'Ori can review this brief, recommend agents, and propose the MCPs and skills the workspace should start with.';
+      summary.textContent = 'Ori can review this description, recommend agents, and propose the MCPs and skills the workspace should start with.';
     }
     if (meta) {
       meta.textContent = '';
@@ -368,6 +368,7 @@
     });
 
     const fallbackChunks = [
+      input.description || input.goal,
       input.goal
     ]
       .map((value) => String(value || '').trim())
@@ -453,16 +454,19 @@
 
   function buildPrimaryAgentDescription(input) {
     const systems = input.systemsList.length > 0 ? `Primary systems: ${input.systemsList.join(', ')}.` : '';
+    const objective = String(input.description || input.goal || 'Support the workspace goals').trim().replace(/[.]+$/, '');
     return uniqueList([
-      `Lead the "${input.workspaceName || 'workspace'}" workspace and coordinate the work required to achieve: ${input.goal}.`,
+      `Lead the "${input.workspaceName || 'workspace'}" workspace.`,
+      `Primary objective: ${objective}.`,
       systems
     ]).join(' ');
   }
 
   function buildSpecialistDescription(input, system) {
+    const objective = String(input.description || input.goal || 'Support the workspace goals').trim().replace(/[.]+$/, '');
     return uniqueList([
       `Handle ${system} work inside the "${input.workspaceName || 'workspace'}" workspace.`,
-      `Primary goal: ${input.goal}.`
+      `Primary objective: ${objective}.`
     ]).join(' ');
   }
 
@@ -507,7 +511,7 @@
       planAgents.push({
         id: `agent-primary-${primaryExisting.name.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`,
         name: primaryExisting.name,
-        summary: primaryExisting.description || 'Existing agent matched from the workspace brief.',
+        summary: primaryExisting.description || 'Existing agent matched from the workspace description.',
         action: 'invite',
         role: 'lead',
         selected: true,
@@ -719,6 +723,7 @@
     const planAgents = buildAgentPlan(input, agents);
     const goalQueries = uniqueList([
       ...queries,
+      input.description || input.goal,
       input.goal
     ]).slice(0, 5);
     const planSkills = normalizeSkillCandidates(installedSkills, marketplaceSkillResults, goalQueries);
@@ -746,13 +751,13 @@
     if (selectedSkills.length > 0) {
       parts.push(`${selectedSkills.length} skill${selectedSkills.length === 1 ? '' : 's'}`);
     }
-    return `Ori reviewed the brief and prepared a starter setup with ${parts.join(', ')}.`;
+    return `Ori reviewed the description and prepared a starter setup with ${parts.join(', ')}.`;
   }
 
   function buildPlanNotes(agents, mcps, skills) {
     const notes = [];
     if (agents.some((agent) => agent.action === 'create')) {
-      notes.push('New agents will be auto-configured from this workspace brief after the workspace is created.');
+      notes.push('New agents will be auto-configured from this workspace description after the workspace is created.');
     }
     if (mcps.some((item) => item.action === 'install_bind')) {
       notes.push('Registry MCP suggestions will be installed globally before they are bound to the workspace.');
@@ -1461,6 +1466,7 @@
 
     const dirtyIds = [
       'folderNameInput',
+      'folderDescriptionInput',
       'folderPrimaryGoalInput',
       'folderSystemsInput',
       'folderContextInput',
