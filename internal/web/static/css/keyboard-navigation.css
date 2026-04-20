@@ -1,0 +1,167 @@
+.ori-keyboard-nav-active {
+  cursor: default;
+}
+
+.ori-keyboard-nav-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 20050;
+  pointer-events: none;
+}
+
+.ori-keyboard-nav-status {
+  position: fixed;
+  top: calc(var(--navbar-offset, 76px) + 14px);
+  right: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 0.18rem;
+  min-width: 220px;
+  max-width: min(340px, calc(100vw - 32px));
+  padding: 0.85rem 1rem 0.9rem;
+  border: 1px solid rgba(var(--primary-color-rgb, 255, 138, 86), 0.28);
+  border-radius: 16px;
+  background:
+    linear-gradient(160deg, rgba(var(--primary-color-rgb, 255, 138, 86), 0.16), rgba(18, 22, 31, 0.92)),
+    rgba(12, 16, 24, 0.92);
+  box-shadow:
+    0 18px 46px rgba(0, 0, 0, 0.28),
+    inset 0 1px 0 rgba(255, 255, 255, 0.08);
+  backdrop-filter: blur(18px);
+  color: #f8fafc;
+  transition: transform 0.16s ease, box-shadow 0.16s ease, border-color 0.16s ease;
+}
+
+.ori-keyboard-nav-status.is-invalid {
+  border-color: rgba(255, 94, 94, 0.6);
+  box-shadow:
+    0 18px 46px rgba(0, 0, 0, 0.28),
+    0 0 0 1px rgba(255, 94, 94, 0.26);
+  transform: translateY(1px);
+}
+
+.ori-keyboard-nav-status-title {
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.72);
+}
+
+.ori-keyboard-nav-status-text {
+  font-size: 0.92rem;
+  line-height: 1.35;
+  color: #fffaf5;
+}
+
+.ori-keyboard-nav-status-text strong {
+  display: inline-flex;
+  min-width: 1.9rem;
+  justify-content: center;
+  padding: 0.08rem 0.4rem;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.12);
+  font-size: 0.82rem;
+  letter-spacing: 0.08em;
+}
+
+.ori-keyboard-nav-status-meta {
+  font-size: 0.74rem;
+  color: rgba(255, 255, 255, 0.72);
+}
+
+.ori-keyboard-nav-hints {
+  position: fixed;
+  inset: 0;
+}
+
+.ori-keyboard-nav-hint {
+  position: fixed;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 2rem;
+  height: 1.55rem;
+  padding: 0 0.45rem;
+  border-radius: 999px;
+  border: 1px solid rgba(12, 17, 24, 0.42);
+  background:
+    linear-gradient(180deg, rgba(255, 247, 230, 0.98), rgba(255, 224, 181, 0.98));
+  box-shadow:
+    0 8px 18px rgba(15, 23, 42, 0.22),
+    inset 0 -1px 0 rgba(140, 84, 0, 0.14);
+  color: #2a1600;
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  line-height: 1;
+  text-transform: uppercase;
+  transform-origin: top left;
+  animation: ori-keyboard-nav-pop 0.14s ease-out;
+}
+
+.ori-keyboard-nav-hint[data-state="match"] {
+  background:
+    linear-gradient(180deg, rgba(255, 235, 199, 1), rgba(255, 203, 125, 1));
+}
+
+.ori-keyboard-nav-hint[data-state="exact"] {
+  background:
+    linear-gradient(180deg, rgba(var(--primary-color-rgb, 255, 138, 86), 0.98), rgba(var(--primary-color-rgb, 255, 138, 86), 0.88));
+  color: #fff8f2;
+  border-color: rgba(var(--primary-color-rgb, 255, 138, 86), 0.7);
+  box-shadow:
+    0 10px 22px rgba(var(--primary-color-rgb, 255, 138, 86), 0.28),
+    0 0 0 1px rgba(255, 255, 255, 0.12);
+}
+
+.ori-keyboard-nav-hint[data-zone="navbar"]:not([data-state="exact"]) {
+  background:
+    linear-gradient(180deg, rgba(225, 241, 255, 0.98), rgba(181, 216, 255, 0.98));
+  color: #09213b;
+}
+
+.ori-keyboard-nav-hint[data-zone="sidebar"]:not([data-state="exact"]) {
+  background:
+    linear-gradient(180deg, rgba(230, 250, 239, 0.98), rgba(180, 237, 205, 0.98));
+  color: #0b2f1f;
+}
+
+.ori-keyboard-nav-hint[data-zone="panel"]:not([data-state="exact"]) {
+  background:
+    linear-gradient(180deg, rgba(224, 246, 246, 0.98), rgba(170, 225, 222, 0.98));
+  color: #082a2d;
+}
+
+.ori-keyboard-nav-hint[data-zone="modal"]:not([data-state="exact"]) {
+  background:
+    linear-gradient(180deg, rgba(255, 235, 225, 0.98), rgba(255, 204, 184, 0.98));
+  color: #3a1808;
+}
+
+.ori-keyboard-nav-hint[data-zone="chat"]:not([data-state="exact"]) {
+  background:
+    linear-gradient(180deg, rgba(238, 241, 247, 0.98), rgba(202, 213, 229, 0.98));
+  color: #162235;
+}
+
+@keyframes ori-keyboard-nav-pop {
+  from {
+    opacity: 0;
+    transform: scale(0.92);
+  }
+
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@media (max-width: 720px) {
+  .ori-keyboard-nav-status {
+    left: 12px;
+    right: 12px;
+    top: calc(var(--navbar-offset, 76px) + 10px);
+    max-width: none;
+  }
+}

@@ -540,7 +540,7 @@
           <!-- Bento Grid Panels -->
           <div class="workspace-detail-bento">
             <!-- Agents Panel - Left column (rows 1-4) -->
-            <div class="modern-card workspace-detail-panel workspace-detail-panel-agents is-expandable" id="workspace-detail-agents-panel">
+            <div class="modern-card workspace-detail-panel workspace-detail-panel-agents is-expandable" id="workspace-detail-agents-panel" role="button" tabindex="0" aria-haspopup="dialog" aria-expanded="false" aria-label="Open Agents panel">
               <button class="workspace-detail-panel-close" type="button" title="Close" aria-label="Close expanded panel">
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
                   <path d="M19,6.41L17.59,5L12,10.59L6.41,5L5,6.41L10.59,12L5,17.59L6.41,19L12,13.41L17.59,19L19,17.59L13.41,12L19,6.41Z"/>
@@ -596,7 +596,7 @@
             </div>
 
             <!-- Sessions Panel - Left column (bottom) -->
-            <div class="modern-card workspace-detail-panel workspace-detail-panel-sessions is-expandable" id="workspace-detail-sessions-panel">
+            <div class="modern-card workspace-detail-panel workspace-detail-panel-sessions is-expandable" id="workspace-detail-sessions-panel" role="button" tabindex="0" aria-haspopup="dialog" aria-expanded="false" aria-label="Open Sessions panel">
               <button class="workspace-detail-panel-close" type="button" title="Close" aria-label="Close expanded panel">
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
                   <path d="M19,6.41L17.59,5L12,10.59L6.41,5L5,6.41L10.59,12L5,17.59L6.41,19L12,13.41L17.59,19L19,17.59L13.41,12L19,6.41Z"/>
@@ -630,7 +630,7 @@
             </div>
 
             <!-- Notes Panel - Right column row 1 -->
-            <div class="modern-card workspace-detail-panel workspace-detail-panel-notes is-expandable" id="workspace-detail-notes-panel">
+            <div class="modern-card workspace-detail-panel workspace-detail-panel-notes is-expandable" id="workspace-detail-notes-panel" role="button" tabindex="0" aria-haspopup="dialog" aria-expanded="false" aria-label="Open Notes panel">
               <button class="workspace-detail-panel-close" type="button" title="Close" aria-label="Close expanded panel">
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
                   <path d="M19,6.41L17.59,5L12,10.59L6.41,5L5,6.41L10.59,12L5,17.59L6.41,19L12,13.41L17.59,19L19,17.59L13.41,12L19,6.41Z"/>
@@ -664,7 +664,7 @@
             </div>
 
             <!-- Files Panel - Right column row 2 -->
-            <div class="modern-card workspace-detail-panel workspace-detail-panel-files is-expandable" id="workspace-detail-files-panel">
+            <div class="modern-card workspace-detail-panel workspace-detail-panel-files is-expandable" id="workspace-detail-files-panel" role="button" tabindex="0" aria-haspopup="dialog" aria-expanded="false" aria-label="Open Files panel">
               <button class="workspace-detail-panel-close" type="button" title="Close" aria-label="Close expanded panel">
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
                   <path d="M19,6.41L17.59,5L12,10.59L6.41,5L5,6.41L10.59,12L5,17.59L6.41,19L12,13.41L17.59,19L19,17.59L13.41,12L19,6.41Z"/>
@@ -693,7 +693,7 @@
             </div>
 
             <!-- Directories Panel - Right column row 3 -->
-            <div class="modern-card workspace-detail-panel workspace-detail-panel-directories is-expandable" id="workspace-detail-directories-panel">
+            <div class="modern-card workspace-detail-panel workspace-detail-panel-directories is-expandable" id="workspace-detail-directories-panel" role="button" tabindex="0" aria-haspopup="dialog" aria-expanded="false" aria-label="Open Directories panel">
               <button class="workspace-detail-panel-close" type="button" title="Close" aria-label="Close expanded panel">
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
                   <path d="M19,6.41L17.59,5L12,10.59L6.41,5L5,6.41L10.59,12L5,17.59L6.41,19L12,13.41L17.59,19L19,17.59L13.41,12L19,6.41Z"/>
@@ -734,7 +734,7 @@
             </div>
 
             <!-- Schedules Panel - Right column row 6 -->
-            <div class="modern-card workspace-detail-panel workspace-detail-panel-schedules is-expandable" id="workspace-detail-schedules-panel">
+            <div class="modern-card workspace-detail-panel workspace-detail-panel-schedules is-expandable" id="workspace-detail-schedules-panel" role="button" tabindex="0" aria-haspopup="dialog" aria-expanded="false" aria-label="Open Schedules panel">
               <button class="workspace-detail-panel-close" type="button" title="Close" aria-label="Close expanded panel">
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
                   <path d="M19,6.41L17.59,5L12,10.59L6.41,5L5,6.41L10.59,12L5,17.59L6.41,19L12,13.41L17.59,19L19,17.59L13.41,12L19,6.41Z"/>
@@ -5642,6 +5642,24 @@
           expandPanel(panel);
         });
 
+        panel.addEventListener('keydown', (event) => {
+          if (event.target.closest('button, a, input, select, textarea, .workspace-detail-item, .workspace-detail-agent-card, .workspace-detail-board')) {
+            return;
+          }
+
+          if (event.key !== 'Enter' && event.key !== ' ') {
+            return;
+          }
+
+          event.preventDefault();
+
+          if (panel.classList.contains('is-expanded')) {
+            return;
+          }
+
+          expandPanel(panel);
+        });
+
         // Close button
         const closeBtn = panel.querySelector('.workspace-detail-panel-close');
         if (closeBtn) {
@@ -5687,6 +5705,7 @@
         });
 
         expandedPanel = panel;
+        panel.setAttribute('aria-expanded', 'true');
         backdrop.classList.add('is-active');
         document.body.style.overflow = 'hidden';
 
@@ -5745,6 +5764,7 @@
 
         if (immediate || !originalRect) {
           // Immediate collapse (no animation)
+          panel.setAttribute('aria-expanded', 'false');
           panel.classList.remove('is-expanded', 'is-expanding', 'is-collapsing');
           panel.style.cssText = '';
           document.body.style.overflow = '';
@@ -5752,6 +5772,7 @@
           isAnimating = false;
         } else {
           isAnimating = true;
+          panel.setAttribute('aria-expanded', 'false');
 
           // Get current expanded position
           const currentRect = panel.getBoundingClientRect();
