@@ -26,6 +26,8 @@ var (
 	errWorkspaceDisallowsDirectUse = errors.New("groups cannot hold sessions, notes, or direct work")
 )
 
+const workspaceSharedDataPrimaryDirectoryIDKey = "primary_directory_id"
+
 // HandleWorkspaces routes requests to /api/workspaces (also supports legacy /api/folders).
 func (h *Handler) HandleWorkspaces(w http.ResponseWriter, r *http.Request) {
 	// Normalize path for both /api/folders and /api/workspaces
@@ -334,6 +336,7 @@ func (h *Handler) createWorkspace(w http.ResponseWriter, r *http.Request) {
 			if data, err := json.Marshal([]workspaceDirectoryReference{dirRef}); err == nil {
 				ws.DirectoryReferencesJSON = data
 			}
+			setWorkspacePrimaryDirectoryID(ws, dirRef.ID)
 
 			// Auto-provision a filesystem MCP binding scoped to the workspace folder
 			mcpBinding := agentworkspace.WorkspaceMCPBinding{
@@ -517,12 +520,13 @@ func (h *Handler) updateWorkspace(w http.ResponseWriter, r *http.Request, id str
 	}
 
 	var req struct {
-		Name        *string `json:"name,omitempty"`
-		Description *string `json:"description,omitempty"`
-		ParentID    *string `json:"parent_id,omitempty"`
-		OrderIndex  *int    `json:"order_index,omitempty"`
-		Color       *string `json:"color,omitempty"`
-		ProjectPath *string `json:"project_path,omitempty"`
+		Name               *string `json:"name,omitempty"`
+		Description        *string `json:"description,omitempty"`
+		ParentID           *string `json:"parent_id,omitempty"`
+		OrderIndex         *int    `json:"order_index,omitempty"`
+		Color              *string `json:"color,omitempty"`
+		ProjectPath        *string `json:"project_path,omitempty"`
+		PrimaryDirectoryID *string `json:"primary_directory_id,omitempty"`
 	}
 
 	if !orihttp.ParseJSONBody(w, r, &req) {
@@ -543,6 +547,9 @@ func (h *Handler) updateWorkspace(w http.ResponseWriter, r *http.Request, id str
 			return
 		}
 		workspace.ProjectPath = *req.ProjectPath
+	}
+	if req.PrimaryDirectoryID != nil {
+		setWorkspacePrimaryDirectoryID(workspace, *req.PrimaryDirectoryID)
 	}
 	if req.ParentID != nil {
 		// Check for circular reference
@@ -581,6 +588,11 @@ func (h *Handler) updateWorkspace(w http.ResponseWriter, r *http.Request, id str
 		logger.Error("Failed to update workspace", logger.Fields{"id": id, "error": err})
 		_ = orihttp.RespondInternalError(w, "Failed to update workspace")
 		return
+	}
+	if req.Name == nil && req.ParentID == nil {
+		if err := h.syncWorkspacePortableStateToFileStore(workspace); err != nil {
+			logger.Warn("Failed to sync workspace.json after workspace update", logger.Fields{"id": id, "error": err})
+		}
 	}
 
 	logger.Info("Workspace updated", logger.Fields{"id": id})
@@ -790,6 +802,38 @@ func mergeWorkspaceJSONField(target *json.RawMessage, fallback json.RawMessage) 
 		return
 	}
 	*target = append(json.RawMessage(nil), fallback...)
+}
+
+func workspacePrimaryDirectoryID(workspace *session.Workspace) string {
+	if workspace == nil || workspace.SharedData == nil {
+		return ""
+	}
+
+	raw, ok := workspace.SharedData[workspaceSharedDataPrimaryDirectoryIDKey]
+	if !ok {
+		return ""
+	}
+
+	value, _ := raw.(string)
+	return strings.TrimSpace(value)
+}
+
+func setWorkspacePrimaryDirectoryID(workspace *session.Workspace, directoryID string) {
+	if workspace == nil {
+		return
+	}
+
+	trimmed := strings.TrimSpace(directoryID)
+	if workspace.SharedData == nil {
+		workspace.SharedData = make(map[string]interface{})
+	}
+
+	if trimmed == "" {
+		delete(workspace.SharedData, workspaceSharedDataPrimaryDirectoryIDKey)
+		return
+	}
+
+	workspace.SharedData[workspaceSharedDataPrimaryDirectoryIDKey] = trimmed
 }
 
 // handleWorkspaceRename handles POST /api/workspaces/{id}/rename.
@@ -1134,6 +1178,7 @@ func (h *Handler) handleWorkspaceImport(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	workspace.DirectoryReferencesJSON = data
+	setWorkspacePrimaryDirectoryID(workspace, dirRef.ID)
 	workspace.UpdatedAt = time.Now()
 
 	if err := h.store.UpdateWorkspace(r.Context(), workspace); err != nil {
@@ -1622,6 +1667,9 @@ func (h *Handler) addWorkspaceAgent(w http.ResponseWriter, r *http.Request, work
 		_ = orihttp.RespondInternalError(w, "Failed to add agent")
 		return
 	}
+	if err := h.syncWorkspacePortableStateToFileStore(workspace); err != nil {
+		logger.Warn("Failed to sync workspace.json after adding workspace agent", logger.Fields{"id": workspaceID, "error": err})
+	}
 
 	logger.Info("Agent added to workspace", logger.Fields{
 		"workspace_id":    workspaceID,
@@ -1751,6 +1799,9 @@ func (h *Handler) removeWorkspaceAgent(w http.ResponseWriter, r *http.Request, w
 		_ = orihttp.RespondInternalError(w, "Failed to remove agent")
 		return
 	}
+	if err := h.syncWorkspacePortableStateToFileStore(workspace); err != nil {
+		logger.Warn("Failed to sync workspace.json after removing workspace agent", logger.Fields{"id": workspaceID, "error": err})
+	}
 
 	logger.Info("Agent removed from workspace", logger.Fields{
 		"workspace_id": workspaceID,
@@ -1780,6 +1831,7 @@ func (h *Handler) buildWorkspaceDetailResponse(workspace *session.Workspace) map
 	analyticsWorkspace := buildWorkspaceAnalyticsView(workspace)
 	settings := workspacesettings.Extract(workspace.SharedData)
 	payload["attachments"] = h.buildWorkspaceResponseAttachments(workspace)
+	payload["primary_directory_id"] = workspacePrimaryDirectoryID(workspace)
 	payload["entry_agent_name"] = availableWorkspaceEntryAgentName(workspace, h.agentStore)
 	payload["agent_stats"] = analyticsWorkspace.GetAgentStats()
 	payload["workspace_progress"] = analyticsWorkspace.GetWorkspaceProgress()
@@ -2703,6 +2755,12 @@ func buildFileStoreWorkspace(workspace *session.Workspace) (*agentworkspace.Work
 	}
 	if err := decodeSessionWorkspaceJSONField(workspace.AgentMCPAccessJSON, &folderWS.AgentMCPAccess); err != nil {
 		return nil, fmt.Errorf("failed to decode workspace agent MCP access: %w", err)
+	}
+	if err := decodeSessionWorkspaceJSONField(workspace.SkillBindingsJSON, &folderWS.SkillBindings); err != nil {
+		return nil, fmt.Errorf("failed to decode workspace skill bindings: %w", err)
+	}
+	if err := decodeSessionWorkspaceJSONField(workspace.AgentSkillAccessJSON, &folderWS.AgentSkillAccess); err != nil {
+		return nil, fmt.Errorf("failed to decode workspace agent skill access: %w", err)
 	}
 
 	return folderWS, nil

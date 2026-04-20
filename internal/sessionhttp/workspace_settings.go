@@ -70,6 +70,12 @@ func (h *Handler) updateWorkspaceSettings(w http.ResponseWriter, r *http.Request
 		_ = orihttp.RespondInternalError(w, "Failed to update workspace settings")
 		return
 	}
+	if err := h.syncWorkspacePortableStateToFileStore(workspace); err != nil {
+		logger.Warn("Failed to sync workspace.json after workspace settings update", logger.Fields{
+			"workspace_id": id,
+			"error":        err,
+		})
+	}
 
 	effective := workspacesettings.BuildEffectiveBehavior(settings)
 	w.Header().Set("Content-Type", "application/json")

@@ -9582,7 +9582,13 @@
     }
 
     nameInput.value = String(seedPayload && seedPayload.name || '').trim();
-    if (descriptionInput) descriptionInput.value = String(seedPayload && seedPayload.description || '').trim();
+    if (descriptionInput) {
+      descriptionInput.value = String(
+        seedPayload && seedPayload.workspaceBootstrap && seedPayload.workspaceBootstrap.goal
+          || seedPayload && seedPayload.description
+          || ''
+      ).trim();
+    }
     if (primaryGoalInput) {
       primaryGoalInput.value = String(seedPayload && seedPayload.workspaceBootstrap && seedPayload.workspaceBootstrap.goal || '').trim();
     }
