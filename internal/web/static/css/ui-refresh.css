@@ -333,6 +333,38 @@ body::after {
   white-space: nowrap;
 }
 
+.ori-navbar-actions #keyboardNavigationToggle,
+.ori-navbar-actions #darkModeToggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.5rem;
+  height: 2.5rem;
+  padding: 0;
+}
+
+.ori-navbar-actions #keyboardNavigationToggle[aria-pressed="true"] {
+  border-color: rgba(199, 134, 73, 0.58);
+  background:
+    radial-gradient(circle at top, rgba(250, 205, 132, 0.24), transparent 58%),
+    linear-gradient(180deg, rgba(255, 248, 236, 0.96), rgba(243, 224, 192, 0.92)) !important;
+  box-shadow:
+    0 10px 24px rgba(95, 53, 14, 0.18),
+    inset 0 1px 0 rgba(255, 255, 255, 0.52);
+  color: var(--primary-color);
+}
+
+[data-bs-theme="dark"] .ori-navbar-actions #keyboardNavigationToggle[aria-pressed="true"] {
+  border-color: rgba(225, 139, 98, 0.56);
+  background:
+    radial-gradient(circle at top, rgba(225, 139, 98, 0.22), transparent 58%),
+    linear-gradient(180deg, rgba(54, 37, 25, 0.9), rgba(40, 28, 20, 0.88)) !important;
+  box-shadow:
+    0 12px 28px rgba(0, 0, 0, 0.34),
+    inset 0 1px 0 rgba(255, 255, 255, 0.08);
+  color: #ffd7bf;
+}
+
 .nav-link-item {
   border: 1px solid transparent;
   font-size: 0.78rem;

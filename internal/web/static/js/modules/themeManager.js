@@ -102,10 +102,10 @@ class ThemeManager {
   updateToggleButton(theme) {
     const toggleButton = document.getElementById('darkModeToggle');
     if (toggleButton) {
-      const span = toggleButton.querySelector('span');
-      if (span) {
-        span.textContent = theme === 'dark' ? 'Light' : 'Dark';
-      }
+      const nextThemeLabel = theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode';
+      toggleButton.setAttribute('aria-label', nextThemeLabel);
+      toggleButton.setAttribute('title', nextThemeLabel);
+      toggleButton.setAttribute('aria-pressed', theme === 'dark' ? 'true' : 'false');
 
       // Update SVG icon
       const svg = toggleButton.querySelector('svg');

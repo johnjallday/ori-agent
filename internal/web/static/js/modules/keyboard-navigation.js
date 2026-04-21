@@ -2,6 +2,7 @@
   'use strict';
 
   const ACTIVATION_KEY = 'f';
+  const PERSISTENT_MODE_STORAGE_KEY = 'ori-keyboard-nav-persistent';
   const HINT_ALPHABET = 'ASDFGHJKLQWERTYUIOPZXCVBNM';
   const ACTIONABLE_SELECTOR = [
     'a[href]',
@@ -159,9 +160,13 @@
   class KeyboardNavigation {
     constructor() {
       this.active = false;
+      this.mode = 'transient';
+      this.suspended = false;
       this.buffer = '';
       this.hints = [];
+      this.groups = [];
       this.overlay = null;
+      this.regionLayer = null;
       this.hintLayer = null;
       this.status = null;
       this.refreshFrame = null;
@@ -169,12 +174,22 @@
       this.scopeRoot = null;
       this.zoneLegend = '';
       this.observer = null;
+      this.launcherButton = null;
+      this.suspendedEditable = null;
+      this.resumeSuspendedEditable = null;
       this.onKeydown = this.onKeydown.bind(this);
+      this.onFocusIn = this.onFocusIn.bind(this);
       this.onRefreshRequested = this.onRefreshRequested.bind(this);
     }
 
     init() {
       document.addEventListener('keydown', this.onKeydown, true);
+      this.setupLauncherButton();
+      this.syncLauncherButton();
+
+      if (this.loadPersistentPreference()) {
+        this.activate('persistent');
+      }
     }
 
     onKeydown(event) {
@@ -201,10 +216,23 @@
 
       event.preventDefault();
       event.stopPropagation();
-      this.activate();
+      this.activate('transient');
     }
 
     handleActiveKeydown(event) {
+      if (this.suspended || isEditableTarget(event.target)) {
+        if (this.mode === 'persistent' && isEditableTarget(event.target)) {
+          this.suspendForEditableTarget(event.target);
+        }
+
+        if (event.key === 'Escape') {
+          event.preventDefault();
+          event.stopPropagation();
+          this.deactivate();
+        }
+        return;
+      }
+
       if (event.key === 'Escape') {
         event.preventDefault();
         event.stopPropagation();
@@ -257,17 +285,31 @@
       }
     }
 
-    activate() {
+    activate(mode = 'transient') {
       if (this.active) {
+        this.mode = mode;
+        this.suspended = false;
+        this.buffer = '';
+        this.detachSuspendedEditable();
+        this.persistPreference();
+        this.refreshHints();
+        this.syncLauncherButton();
         return;
       }
 
       this.active = true;
+      this.mode = mode;
+      this.suspended = false;
       this.buffer = '';
       document.body.classList.add('ori-keyboard-nav-active');
       this.ensureOverlay();
       this.startObservers();
+      this.persistPreference();
       this.refreshHints();
+      if (this.mode === 'persistent' && isEditableTarget(document.activeElement)) {
+        this.suspendForEditableTarget(document.activeElement);
+      }
+      this.syncLauncherButton();
     }
 
     deactivate() {
@@ -276,10 +318,101 @@
       }
 
       this.active = false;
+      this.mode = 'transient';
+      this.suspended = false;
       this.buffer = '';
+      this.detachSuspendedEditable();
       this.stopObservers();
       this.teardownOverlay();
       document.body.classList.remove('ori-keyboard-nav-active');
+      this.persistPreference();
+      this.syncLauncherButton();
+    }
+
+    togglePersistentMode() {
+      if (this.active && this.mode === 'persistent') {
+        this.deactivate();
+        return;
+      }
+
+      this.activate('persistent');
+    }
+
+    setupLauncherButton() {
+      this.launcherButton = document.getElementById('keyboardNavigationToggle');
+      if (!this.launcherButton) {
+        return;
+      }
+
+      this.launcherButton.addEventListener('click', (event) => {
+        event.preventDefault();
+        this.togglePersistentMode();
+      });
+    }
+
+    syncLauncherButton() {
+      if (!this.launcherButton) {
+        return;
+      }
+
+      const persistentActive = this.active && this.mode === 'persistent';
+      const label = persistentActive ? 'Disable persistent keyboard navigation' : 'Enable persistent keyboard navigation';
+      this.launcherButton.setAttribute('aria-pressed', persistentActive ? 'true' : 'false');
+      this.launcherButton.setAttribute('aria-label', label);
+      this.launcherButton.setAttribute('title', label);
+    }
+
+    persistPreference() {
+      try {
+        if (this.active && this.mode === 'persistent') {
+          sessionStorage.setItem(PERSISTENT_MODE_STORAGE_KEY, '1');
+        } else {
+          sessionStorage.removeItem(PERSISTENT_MODE_STORAGE_KEY);
+        }
+      } catch (error) {
+        // Ignore storage access failures and keep behavior in-memory only.
+      }
+    }
+
+    loadPersistentPreference() {
+      try {
+        return sessionStorage.getItem(PERSISTENT_MODE_STORAGE_KEY) === '1';
+      } catch (error) {
+        return false;
+      }
+    }
+
+    detachSuspendedEditable() {
+      if (this.suspendedEditable && this.resumeSuspendedEditable) {
+        this.suspendedEditable.removeEventListener('blur', this.resumeSuspendedEditable);
+      }
+
+      this.suspendedEditable = null;
+      this.resumeSuspendedEditable = null;
+    }
+
+    suspendForEditableTarget(target) {
+      if (this.mode !== 'persistent' || !target) {
+        return;
+      }
+
+      if (this.suspendedEditable === target) {
+        return;
+      }
+
+      this.detachSuspendedEditable();
+      this.suspended = true;
+      this.buffer = '';
+      this.suspendedEditable = target;
+      this.resumeSuspendedEditable = () => {
+        this.detachSuspendedEditable();
+        this.suspended = false;
+        this.refreshHints();
+        this.syncLauncherButton();
+      };
+
+      target.addEventListener('blur', this.resumeSuspendedEditable, { once: true });
+      this.updateHintState();
     }
 
     ensureOverlay() {
@@ -294,10 +427,14 @@
       this.status = document.createElement('div');
       this.status.className = 'ori-keyboard-nav-status';
 
+      this.regionLayer = document.createElement('div');
+      this.regionLayer.className = 'ori-keyboard-nav-regions';
+
       this.hintLayer = document.createElement('div');
       this.hintLayer.className = 'ori-keyboard-nav-hints';
 
       this.overlay.appendChild(this.status);
+      this.overlay.appendChild(this.regionLayer);
       this.overlay.appendChild(this.hintLayer);
       document.body.appendChild(this.overlay);
     }
@@ -314,6 +451,7 @@
       }
 
       this.hints = [];
+      this.groups = [];
       this.scopeRoot = null;
       this.zoneLegend = '';
 
@@ -329,6 +467,7 @@
     startObservers() {
       window.addEventListener('resize', this.onRefreshRequested);
       window.addEventListener('scroll', this.onRefreshRequested, true);
+      document.addEventListener('focusin', this.onFocusIn, true);
 
       this.observer = new MutationObserver((mutations) => {
         const hasExternalMutation = mutations.some((mutation) => {
@@ -353,6 +492,7 @@
     stopObservers() {
       window.removeEventListener('resize', this.onRefreshRequested);
       window.removeEventListener('scroll', this.onRefreshRequested, true);
+      document.removeEventListener('focusin', this.onFocusIn, true);
 
       if (this.observer) {
         this.observer.disconnect();
@@ -369,6 +509,16 @@
         this.refreshFrame = null;
         this.refreshHints();
       });
+    }
+
+    onFocusIn(event) {
+      if (!this.active || this.mode !== 'persistent') {
+        return;
+      }
+
+      if (isEditableTarget(event.target)) {
+        this.suspendForEditableTarget(event.target);
+      }
     }
 
     resolveScopeRoot() {
@@ -482,6 +632,7 @@
       this.hintLayer.innerHTML = '';
       this.zoneLegend = groups.map((group) => `${group.zone.prefix}:${group.zone.label}`).join('  ');
       this.hints = [];
+      this.groups = groups;
 
       groups.forEach((group) => {
         const codeLength = computeCodeLength(group.items.length);
@@ -509,6 +660,108 @@
       this.updateHintState();
     }
 
+    getSelectedZoneGroup() {
+      if (!this.buffer) {
+        return null;
+      }
+
+      const zonePrefix = this.buffer.charAt(0);
+      return this.groups.find((group) => group.zone.prefix === zonePrefix) || null;
+    }
+
+    buildZoneHighlightBoxes(group) {
+      if (!group || !Array.isArray(group.items) || group.items.length === 0) {
+        return [];
+      }
+
+      const paddingX = 10;
+      const paddingY = 8;
+      const mergeGapX = 28;
+      const mergeGapY = 18;
+
+      const rects = group.items
+        .filter((element) => element && document.contains(element) && isVisible(element))
+        .map((element) => {
+          const rect = element.getBoundingClientRect();
+          return {
+            top: rect.top - paddingY,
+            right: rect.right + paddingX,
+            bottom: rect.bottom + paddingY,
+            left: rect.left - paddingX
+          };
+        })
+        .sort((leftRect, rightRect) => {
+          if (Math.abs(leftRect.top - rightRect.top) > 10) {
+            return leftRect.top - rightRect.top;
+          }
+
+          return leftRect.left - rightRect.left;
+        });
+
+      const boxes = [];
+
+      rects.forEach((rect) => {
+        const targetBox = boxes.find((box) => {
+          const horizontalGap = Math.max(0, Math.max(box.left - rect.right, rect.left - box.right));
+          const verticalGap = Math.max(0, Math.max(box.top - rect.bottom, rect.top - box.bottom));
+          return horizontalGap <= mergeGapX && verticalGap <= mergeGapY;
+        });
+
+        if (!targetBox) {
+          boxes.push({ ...rect });
+          return;
+        }
+
+        targetBox.top = Math.min(targetBox.top, rect.top);
+        targetBox.right = Math.max(targetBox.right, rect.right);
+        targetBox.bottom = Math.max(targetBox.bottom, rect.bottom);
+        targetBox.left = Math.min(targetBox.left, rect.left);
+      });
+
+      return boxes;
+    }
+
+    renderZoneSelection(group) {
+      if (!this.regionLayer) {
+        return;
+      }
+
+      this.regionLayer.innerHTML = '';
+
+      if (!group) {
+        return;
+      }
+
+      const boxes = this.buildZoneHighlightBoxes(group);
+      boxes.forEach((rect, index) => {
+        const box = document.createElement('div');
+        box.className = 'ori-keyboard-nav-region';
+        box.dataset.zone = group.zone.id;
+        const top = clamp(rect.top, 6, window.innerHeight - 6);
+        const left = clamp(rect.left, 6, window.innerWidth - 6);
+        const width = Math.max(0, Math.min(rect.right, window.innerWidth - 6) - left);
+        const height = Math.max(0, Math.min(rect.bottom, window.innerHeight - 6) - top);
+
+        if (width < 8 || height < 8) {
+          return;
+        }
+
+        box.style.top = `${top}px`;
+        box.style.left = `${left}px`;
+        box.style.width = `${width}px`;
+        box.style.height = `${height}px`;
+
+        if (index === 0) {
+          const label = document.createElement('div');
+          label.className = 'ori-keyboard-nav-region-label';
+          label.textContent = `${group.zone.prefix} ${group.zone.label}`;
+          box.appendChild(label);
+        }
+
+        this.regionLayer.appendChild(box);
+      });
+    }
+
     positionHint(hint) {
       const rect = hint.element.getBoundingClientRect();
       const maxLeft = Math.max(12, window.innerWidth - 64);
@@ -528,37 +781,78 @@
       return this.hints.filter((hint) => hint.code.startsWith(buffer));
     }
 
+    getModeTitle() {
+      return this.mode === 'persistent' ? 'Navigation Mode Toggle On' : 'Navigation Mode Quick';
+    }
+
+    buildStatusPills(items) {
+      return items
+        .filter((item) => item && item.label)
+        .map((item) => {
+          const activeClass = item.active ? ' is-active' : '';
+          return `<span class="ori-keyboard-nav-status-pill${activeClass}">${item.label}</span>`;
+        })
+        .join('');
+    }
+
     updateHintState() {
-      const matches = this.getMatches();
+      const selectedZoneGroup = this.getSelectedZoneGroup();
+      this.renderZoneSelection(selectedZoneGroup);
 
       this.hints.forEach((hint) => {
-        const isMatch = !this.buffer || hint.code.startsWith(this.buffer);
+        const isMatch = !this.suspended && (!this.buffer || hint.code.startsWith(this.buffer));
         const isExact = Boolean(this.buffer) && hint.code === this.buffer;
 
         hint.badge.hidden = !isMatch;
         hint.badge.dataset.state = isExact ? 'exact' : (this.buffer ? 'match' : 'idle');
+        hint.badge.dataset.zoneSelected = selectedZoneGroup && hint.zone.id === selectedZoneGroup.zone.id ? 'true' : 'false';
       });
 
       if (!this.status) {
         return;
       }
 
+      if (this.suspended) {
+        this.regionLayer.innerHTML = '';
+        this.status.innerHTML = [
+          `<span class="ori-keyboard-nav-status-title">${this.getModeTitle()}</span>`,
+          '<span class="ori-keyboard-nav-status-text">Typing is paused while an input is focused.</span>',
+          `<div class="ori-keyboard-nav-status-pills">${this.buildStatusPills([
+            { label: 'Blur resumes', active: true },
+            { label: 'Esc exits' }
+          ])}</div>`
+        ].join('');
+        return;
+      }
+
       if (!this.hints.length) {
         this.status.innerHTML = [
-          '<span class="ori-keyboard-nav-status-title">Navigation Mode</span>',
+          `<span class="ori-keyboard-nav-status-title">${this.getModeTitle()}</span>`,
           '<span class="ori-keyboard-nav-status-text">No visible targets on this surface.</span>',
-          '<span class="ori-keyboard-nav-status-meta">Esc to exit</span>'
+          `<div class="ori-keyboard-nav-status-pills">${this.buildStatusPills([
+            { label: 'Esc exits' }
+          ])}</div>`
         ].join('');
         return;
       }
 
       const bufferLabel = this.buffer || '-';
-      const matchLabel = matches.length === 1 ? '1 match' : `${matches.length} matches`;
-      const zoneLegend = this.zoneLegend ? ` - Zones ${this.zoneLegend}` : '';
+      const detailPills = [
+        { label: 'Backspace removes last key' },
+        { label: 'Esc exits' }
+      ];
+      const zonePills = this.groups.map((group) => ({
+        label: `${group.zone.prefix}: ${group.zone.label}`,
+        active: Boolean(selectedZoneGroup && group.zone.id === selectedZoneGroup.zone.id)
+      }));
+
       this.status.innerHTML = [
-        '<span class="ori-keyboard-nav-status-title">Navigation Mode</span>',
-        `<span class="ori-keyboard-nav-status-text">Type hint: <strong>${bufferLabel}</strong></span>`,
-        `<span class="ori-keyboard-nav-status-meta">${matchLabel}${zoneLegend} - Backspace edits - Esc exits</span>`
+        `<span class="ori-keyboard-nav-status-title">${this.getModeTitle()}</span>`,
+        `<div class="ori-keyboard-nav-status-row"><span class="ori-keyboard-nav-status-label">Type Hint</span><span class="ori-keyboard-nav-status-value">${bufferLabel}</span></div>`,
+        `<div class="ori-keyboard-nav-status-pills">${this.buildStatusPills(detailPills)}</div>`,
+        zonePills.length
+          ? `<div class="ori-keyboard-nav-status-zones"><span class="ori-keyboard-nav-status-label">Zones</span><div class="ori-keyboard-nav-status-pills">${this.buildStatusPills(zonePills)}</div></div>`
+          : ''
       ].join('');
     }
 
@@ -587,7 +881,15 @@
 
     activateHint(hint) {
       const target = hint && hint.element;
-      this.deactivate();
+      const isPersistentMode = this.active && this.mode === 'persistent';
+
+      if (!isPersistentMode) {
+        this.deactivate();
+      } else {
+        this.buffer = '';
+        this.suspended = false;
+        this.detachSuspendedEditable();
+      }
 
       if (!target || !document.contains(target)) {
         return;
@@ -598,34 +900,47 @@
           return;
         }
 
-        if (typeof target.focus === 'function') {
-          try {
-            target.focus({ preventScroll: false });
-          } catch (error) {
-            target.focus();
-          }
-        }
-
-        if (target.matches('input:not([type="checkbox"]):not([type="radio"]):not([type="file"]), textarea')) {
-          if (typeof target.select === 'function') {
-            target.select();
-          }
-          return;
-        }
-
-        if (target.matches('select')) {
-          return;
-        }
-
+        let focusTarget = target;
         if (target.tagName === 'LABEL' && target.control) {
+          focusTarget = target.control;
+        }
+
+        if (typeof focusTarget.focus === 'function') {
           try {
-            target.control.focus({ preventScroll: false });
+            focusTarget.focus({ preventScroll: false });
           } catch (error) {
-            target.control.focus();
+            focusTarget.focus();
           }
+        }
+
+        if (focusTarget.matches('input:not([type="checkbox"]):not([type="radio"]):not([type="file"]), textarea')) {
+          if (typeof focusTarget.select === 'function') {
+            focusTarget.select();
+          }
+          if (isPersistentMode) {
+            this.suspendForEditableTarget(focusTarget);
+          }
+          return;
+        }
+
+        if (focusTarget.matches('select')) {
+          if (isPersistentMode) {
+            this.suspendForEditableTarget(focusTarget);
+          }
+          return;
         }
 
         target.click();
+
+        if (isPersistentMode) {
+          if (isEditableTarget(focusTarget)) {
+            this.suspendForEditableTarget(focusTarget);
+            return;
+          }
+
+          this.onRefreshRequested();
+          this.updateHintState();
+        }
       });
     }
   }

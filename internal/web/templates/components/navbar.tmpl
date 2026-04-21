@@ -131,12 +131,23 @@
             <span data-home-assistant-launcher-label>Task Activity</span>
           </button>
 
+          <button
+            id="keyboardNavigationToggle"
+            class="modern-btn modern-btn-secondary"
+            type="button"
+            aria-label="Open keyboard navigation"
+            aria-pressed="false"
+            title="Keyboard navigation">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+              <path d="M20,5A2,2 0 0,1 22,7V17A2,2 0 0,1 20,19H4A2,2 0 0,1 2,17V7A2,2 0 0,1 4,5H20M4,7V17H20V7H4M6,9H8V11H6V9M9,9H11V11H9V9M12,9H14V11H12V9M15,9H18V11H15V9M6,12H9V14H6V12M10,12H12V14H10V12M13,12H18V14H13V12M6,15H18V17H6V15Z"/>
+            </svg>
+          </button>
+
           <!-- Dark Mode Toggle (always shown) -->
-          <button id="darkModeToggle" class="modern-btn modern-btn-secondary" aria-label="Toggle dark mode" aria-pressed="false">
+          <button id="darkModeToggle" class="modern-btn modern-btn-secondary" type="button" aria-label="Switch to dark mode" aria-pressed="false" title="Switch to dark mode">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
               <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79Z"/>
             </svg>
-            <span id="darkModeText">Dark</span>
           </button>
         </div>
       </div>
