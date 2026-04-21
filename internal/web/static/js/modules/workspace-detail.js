@@ -98,6 +98,7 @@ const TASK_REQUIREMENT_KEYS = Object.freeze({
 });
 
 const TASK_ASSIST_PENDING_SPECIALIST_STORAGE_KEY = 'workspace-detail-task-assist-specialist';
+const ENTRY_AGENT_PROMPT_DISMISSED_STORAGE_PREFIX = 'workspace-detail-entry-agent-prompt-dismissed:';
 
 const TASK_ASSIST_TRAVEL_SPECIALISTS = Object.freeze({
   travel_itinerary: Object.freeze({
@@ -247,7 +248,9 @@ export class WorkspaceDetailPage {
     this.maybeResumePendingAssistSpecialistHandoff();
     this.activateWorkspace();
     this.setupRealtime();
-    this.checkAutoOpenCreateAgent();
+    if (!this.checkAutoOpenCreateAgent()) {
+      await this.maybePromptForMissingEntryAgent();
+    }
   }
 
   ensureScrollablePanelAccessibility() {
@@ -3260,11 +3263,50 @@ export class WorkspaceDetailPage {
    */
   checkAutoOpenCreateAgent() {
     const params = new URLSearchParams(window.location.search);
-    if (params.get('addAgent') !== '1') return;
+    if (params.get('addAgent') !== '1') return false;
 
     // Clean the URL so refresh won't re-trigger
     window.history.replaceState({}, '', window.location.pathname);
 
+    this.openWorkspaceEntryAgentCreateFlow({ defer: true });
+    return true;
+  }
+
+  getEntryAgentPromptDismissalStorageKey() {
+    return `${ENTRY_AGENT_PROMPT_DISMISSED_STORAGE_PREFIX}${this.workspaceId}`;
+  }
+
+  clearEntryAgentPromptDismissal() {
+    try {
+      window.sessionStorage?.removeItem(this.getEntryAgentPromptDismissalStorageKey());
+    } catch (_error) {
+      // Ignore storage errors; the prompt can still function without persistence.
+    }
+  }
+
+  markEntryAgentPromptDismissed() {
+    try {
+      window.sessionStorage?.setItem(this.getEntryAgentPromptDismissalStorageKey(), '1');
+    } catch (_error) {
+      // Ignore storage errors; this only prevents repeated prompts in the same tab.
+    }
+  }
+
+  shouldPromptForMissingEntryAgent() {
+    const entryAgentName = String(this.workspace?.entry_agent_name || '').trim();
+    if (entryAgentName) {
+      this.clearEntryAgentPromptDismissal();
+      return false;
+    }
+
+    try {
+      return window.sessionStorage?.getItem(this.getEntryAgentPromptDismissalStorageKey()) !== '1';
+    } catch (_error) {
+      return true;
+    }
+  }
+
+  buildWorkspaceEntryAgentDefaults() {
     const workspaceName = String(this.workspace?.name || '').trim();
     const agentName = workspaceName
       ? (workspaceName.toLowerCase().endsWith(' manager') ? workspaceName : workspaceName + ' Manager')
@@ -3273,17 +3315,61 @@ export class WorkspaceDetailPage {
       + 'Act as the default front door for the workspace: clarify user intent, answer directly when '
       + 'the request only needs shared context, and break work into tasks for specialists when needed.';
 
-    setTimeout(() => {
-      if (typeof window.showAddAgentModal === 'function') {
-        window.showAddAgentModal({
-          workspaceId: this.workspaceId,
-          seedName: agentName,
-          seedType: 'orchestration',
-          seedSystemPrompt: systemPrompt,
-          suggestedSkills: ['workspace-planning']
-        });
+    return {
+      workspaceId: this.workspaceId,
+      seedName: agentName,
+      seedType: 'orchestration',
+      seedSystemPrompt: systemPrompt,
+      suggestedSkills: ['workspace-planning']
+    };
+  }
+
+  openWorkspaceEntryAgentCreateFlow(options = {}) {
+    const defaults = this.buildWorkspaceEntryAgentDefaults();
+    const defer = options?.defer === true;
+    const open = () => this.openCreateAgentFlow(defaults);
+
+    if (defer) {
+      window.setTimeout(open, 300);
+      return;
+    }
+
+    open();
+  }
+
+  async maybePromptForMissingEntryAgent() {
+    if (!this.shouldPromptForMissingEntryAgent()) return;
+
+    const workspaceName = String(this.workspace?.name || '').trim() || 'this workspace';
+    const entryAgentDefaults = this.buildWorkspaceEntryAgentDefaults();
+    const confirmed = await this.showTaskConfirmDialog({
+      eyebrow: 'Workspace Setup',
+      title: 'Create an entry agent for this workspace?',
+      message: `"${workspaceName}" cannot function until it has an entry agent.`,
+      confirmLabel: 'Create Entry Agent',
+      cancelLabel: 'Not Now',
+      metaItems: [workspaceName, entryAgentDefaults.seedName, 'No entry agent'],
+      details: [
+        'The entry agent is required for this workspace to operate normally.',
+        'Chats, routing, and task orchestration depend on having an entry agent.',
+        'The first agent you add here will become the workspace entry agent automatically.',
+        'You can rename or replace it later.'
+      ]
+    });
+
+    if (!confirmed) {
+      this.markEntryAgentPromptDismissed();
+      if (window.Toast) {
+        window.Toast.warning(
+          `"${workspaceName}" cannot function until you create an entry agent.`,
+          { title: 'Entry Agent Required' }
+        );
       }
-    }, 300);
+      return;
+    }
+
+    this.clearEntryAgentPromptDismissal();
+    this.openWorkspaceEntryAgentCreateFlow();
   }
 
   async openAddAgentModal() {
