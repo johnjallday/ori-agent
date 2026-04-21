@@ -163,6 +163,7 @@
       this.mode = 'transient';
       this.suspended = false;
       this.buffer = '';
+      this.selectedElement = null;
       this.hints = [];
       this.groups = [];
       this.overlay = null;
@@ -220,6 +221,13 @@
     }
 
     handleActiveKeydown(event) {
+      const vimDirectionMap = {
+        h: 'ArrowLeft',
+        j: 'ArrowDown',
+        k: 'ArrowUp',
+        l: 'ArrowRight'
+      };
+
       if (this.suspended || isEditableTarget(event.target)) {
         if (this.mode === 'persistent' && isEditableTarget(event.target)) {
           this.suspendForEditableTarget(event.target);
@@ -248,7 +256,29 @@
         return;
       }
 
+      if (event.key === 'ArrowUp' || event.key === 'ArrowDown' || event.key === 'ArrowLeft' || event.key === 'ArrowRight') {
+        event.preventDefault();
+        event.stopPropagation();
+        this.moveSelection(event.key);
+        return;
+      }
+
+      if (!event.shiftKey && vimDirectionMap[event.key]) {
+        event.preventDefault();
+        event.stopPropagation();
+        this.moveSelection(vimDirectionMap[event.key]);
+        return;
+      }
+
       if (event.key === 'Enter') {
+        const selectedHint = this.getSelectedHint(this.getVisibleMatches());
+        if (selectedHint) {
+          event.preventDefault();
+          event.stopPropagation();
+          this.activateHint(selectedHint);
+          return;
+        }
+
         const matches = this.getMatches();
         if (matches.length === 1) {
           event.preventDefault();
@@ -290,6 +320,7 @@
         this.mode = mode;
         this.suspended = false;
         this.buffer = '';
+        this.selectedElement = null;
         this.detachSuspendedEditable();
         this.persistPreference();
         this.refreshHints();
@@ -301,6 +332,7 @@
       this.mode = mode;
       this.suspended = false;
       this.buffer = '';
+      this.selectedElement = null;
       document.body.classList.add('ori-keyboard-nav-active');
       this.ensureOverlay();
       this.startObservers();
@@ -321,6 +353,7 @@
       this.mode = 'transient';
       this.suspended = false;
       this.buffer = '';
+      this.selectedElement = null;
       this.detachSuspendedEditable();
       this.stopObservers();
       this.teardownOverlay();
@@ -403,6 +436,7 @@
       this.detachSuspendedEditable();
       this.suspended = true;
       this.buffer = '';
+      this.selectedElement = null;
       this.suspendedEditable = target;
       this.resumeSuspendedEditable = () => {
         this.detachSuspendedEditable();
@@ -454,6 +488,7 @@
       this.groups = [];
       this.scopeRoot = null;
       this.zoneLegend = '';
+      this.selectedElement = null;
 
       if (this.overlay && this.overlay.parentNode) {
         this.overlay.parentNode.removeChild(this.overlay);
@@ -657,6 +692,10 @@
         this.positionHint(hint);
       });
 
+      if (this.selectedElement && !this.hints.some((hint) => hint.element === this.selectedElement)) {
+        this.selectedElement = null;
+      }
+
       this.updateHintState();
     }
 
@@ -825,6 +864,151 @@
       return this.hints.filter((hint) => hint.code.startsWith(buffer));
     }
 
+    getVisibleMatches(buffer = this.buffer) {
+      return this.getMatches(buffer).filter((hint) => {
+        return hint.element && document.contains(hint.element) && !hint.badge.hidden;
+      });
+    }
+
+    getSelectedHint(matches = this.hints) {
+      if (!this.selectedElement) {
+        return null;
+      }
+
+      return matches.find((hint) => hint.element === this.selectedElement) || null;
+    }
+
+    getHintRect(hint) {
+      const rect = hint.element.getBoundingClientRect();
+      return {
+        top: rect.top,
+        right: rect.right,
+        bottom: rect.bottom,
+        left: rect.left,
+        width: rect.width,
+        height: rect.height,
+        centerX: rect.left + rect.width / 2,
+        centerY: rect.top + rect.height / 2
+      };
+    }
+
+    findDirectionalHint(currentHint, matches, direction) {
+      const currentRect = this.getHintRect(currentHint);
+      let bestHint = null;
+      let bestScore = Number.POSITIVE_INFINITY;
+
+      matches.forEach((candidate) => {
+        if (candidate === currentHint) {
+          return;
+        }
+
+        const candidateRect = this.getHintRect(candidate);
+        const deltaX = candidateRect.centerX - currentRect.centerX;
+        const deltaY = candidateRect.centerY - currentRect.centerY;
+
+        let primaryDistance = 0;
+        let secondaryDistance = 0;
+
+        if (direction === 'ArrowRight') {
+          if (deltaX <= 4) return;
+          primaryDistance = deltaX;
+          secondaryDistance = Math.abs(deltaY);
+        } else if (direction === 'ArrowLeft') {
+          if (deltaX >= -4) return;
+          primaryDistance = Math.abs(deltaX);
+          secondaryDistance = Math.abs(deltaY);
+        } else if (direction === 'ArrowDown') {
+          if (deltaY <= 4) return;
+          primaryDistance = deltaY;
+          secondaryDistance = Math.abs(deltaX);
+        } else if (direction === 'ArrowUp') {
+          if (deltaY >= -4) return;
+          primaryDistance = Math.abs(deltaY);
+          secondaryDistance = Math.abs(deltaX);
+        } else {
+          return;
+        }
+
+        const score = primaryDistance + secondaryDistance * 2.5;
+        if (score < bestScore) {
+          bestScore = score;
+          bestHint = candidate;
+        }
+      });
+
+      return bestHint;
+    }
+
+    findSequentialHint(currentHint, matches, direction) {
+      if (!matches.length) {
+        return null;
+      }
+
+      const currentIndex = matches.findIndex((hint) => hint.element === currentHint.element);
+      if (currentIndex === -1) {
+        return null;
+      }
+
+      const isReverse = direction === 'ArrowLeft' || direction === 'ArrowUp';
+      if (isReverse) {
+        return matches[currentIndex - 1] || matches[matches.length - 1];
+      }
+
+      return matches[currentIndex + 1] || matches[0];
+    }
+
+    moveSelection(direction) {
+      const matches = this.getVisibleMatches();
+      if (!matches.length) {
+        this.flashInvalid();
+        return;
+      }
+
+      const currentHint = this.getSelectedHint(matches);
+      let nextHint = null;
+
+      if (!currentHint) {
+        nextHint = matches[0];
+      } else {
+        nextHint = this.findDirectionalHint(currentHint, matches, direction) ||
+          this.findSequentialHint(currentHint, matches, direction);
+      }
+
+      if (!nextHint) {
+        this.flashInvalid();
+        return;
+      }
+
+      this.selectedElement = nextHint.element;
+      this.updateHintState();
+    }
+
+    renderSelectedTarget(hint) {
+      if (!this.regionLayer || !hint || !hint.element || !document.contains(hint.element) || !isVisible(hint.element)) {
+        return;
+      }
+
+      const rect = hint.element.getBoundingClientRect();
+      const paddingX = 6;
+      const paddingY = 6;
+      const top = clamp(rect.top - paddingY, 6, window.innerHeight - 6);
+      const left = clamp(rect.left - paddingX, 6, window.innerWidth - 6);
+      const width = Math.max(0, Math.min(rect.right + paddingX, window.innerWidth - 6) - left);
+      const height = Math.max(0, Math.min(rect.bottom + paddingY, window.innerHeight - 6) - top);
+
+      if (width < 8 || height < 8) {
+        return;
+      }
+
+      const box = document.createElement('div');
+      box.className = 'ori-keyboard-nav-target';
+      box.style.top = `${top}px`;
+      box.style.left = `${left}px`;
+      box.style.width = `${width}px`;
+      box.style.height = `${height}px`;
+      this.regionLayer.appendChild(box);
+    }
+
     getModeTitle() {
       return this.mode === 'persistent' ? 'Navigation Mode Toggle On' : 'Navigation Mode Quick';
     }
@@ -840,8 +1024,16 @@
     }
 
     updateHintState() {
+      const matches = this.getMatches();
+      let selectedHint = this.getSelectedHint(matches);
+      if (this.selectedElement && !selectedHint) {
+        this.selectedElement = null;
+      }
+
+      selectedHint = this.getSelectedHint(matches);
       const selectedZoneGroup = this.getSelectedZoneGroup();
       this.renderZoneSelection(selectedZoneGroup);
+      this.renderSelectedTarget(selectedHint);
 
       this.hints.forEach((hint) => {
         const isMatch = !this.suspended && (!this.buffer || hint.code.startsWith(this.buffer));
@@ -850,6 +1042,7 @@
         hint.badge.hidden = !isMatch;
         hint.badge.dataset.state = isExact ? 'exact' : (this.buffer ? 'match' : 'idle');
         hint.badge.dataset.zoneSelected = selectedZoneGroup && hint.zone.id === selectedZoneGroup.zone.id ? 'true' : 'false';
+        hint.badge.dataset.navSelected = selectedHint && hint.element === selectedHint.element ? 'true' : 'false';
       });
 
       if (!this.status) {
@@ -882,6 +1075,8 @@
 
       const bufferLabel = this.buffer || '-';
       const detailPills = [
+        { label: 'Arrows or HJKL move' },
+        { label: 'Enter opens selected' },
         { label: 'Backspace removes last key' },
         { label: 'Esc exits' }
       ];
@@ -932,6 +1127,7 @@
       } else {
         this.buffer = '';
         this.suspended = false;
+        this.selectedElement = null;
         this.detachSuspendedEditable();
       }
 

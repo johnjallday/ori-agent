@@ -140,6 +140,17 @@
   animation: ori-keyboard-nav-region-in 0.16s ease-out;
 }
 
+.ori-keyboard-nav-target {
+  position: fixed;
+  border-radius: 14px;
+  border: 2px solid rgba(var(--primary-color-rgb, 255, 138, 86), 0.78);
+  background: rgba(var(--primary-color-rgb, 255, 138, 86), 0.08);
+  box-shadow:
+    0 0 0 1px rgba(255, 255, 255, 0.08),
+    0 12px 28px rgba(0, 0, 0, 0.18);
+  animation: ori-keyboard-nav-region-in 0.14s ease-out;
+}
+
 .ori-keyboard-nav-region-label {
   position: absolute;
   top: -12px;
@@ -193,6 +204,14 @@
   box-shadow:
     0 10px 24px rgba(var(--primary-color-rgb, 255, 138, 86), 0.18),
     inset 0 -1px 0 rgba(140, 84, 0, 0.14);
+}
+
+.ori-keyboard-nav-hint[data-nav-selected="true"] {
+  border-color: rgba(var(--primary-color-rgb, 255, 138, 86), 0.78);
+  box-shadow:
+    0 12px 28px rgba(var(--primary-color-rgb, 255, 138, 86), 0.26),
+    0 0 0 2px rgba(255, 255, 255, 0.18);
+  transform: scale(1.05);
 }
 
 .ori-keyboard-nav-hint[data-state="match"] {
