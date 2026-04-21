@@ -653,8 +653,8 @@
       });
 
       this.hints.forEach((hint) => {
-        this.positionHint(hint);
         this.hintLayer.appendChild(hint.badge);
+        this.positionHint(hint);
       });
 
       this.updateHintState();
@@ -764,13 +764,57 @@
 
     positionHint(hint) {
       const rect = hint.element.getBoundingClientRect();
-      const maxLeft = Math.max(12, window.innerWidth - 64);
-      const maxTop = Math.max(12, window.innerHeight - 28);
-      const top = clamp(rect.top + 6, 12, maxTop);
-      const left = clamp(rect.left + 6, 12, maxLeft);
+      const badgeWidth = hint.badge.offsetWidth || 40;
+      const badgeHeight = hint.badge.offsetHeight || 24;
+      const viewportPadding = 8;
+      const gap = 6;
+      const maxLeft = Math.max(viewportPadding, window.innerWidth - badgeWidth - viewportPadding);
+      const maxTop = Math.max(viewportPadding, window.innerHeight - badgeHeight - viewportPadding);
+      const candidates = [
+        {
+          placement: 'top-left',
+          top: rect.top - badgeHeight - gap,
+          left: rect.left - badgeWidth * 0.18
+        },
+        {
+          placement: 'top-right',
+          top: rect.top - badgeHeight - gap,
+          left: rect.right - badgeWidth * 0.82
+        },
+        {
+          placement: 'bottom-left',
+          top: rect.bottom + gap,
+          left: rect.left - badgeWidth * 0.18
+        },
+        {
+          placement: 'bottom-right',
+          top: rect.bottom + gap,
+          left: rect.right - badgeWidth * 0.82
+        }
+      ];
 
-      hint.badge.style.top = `${top}px`;
-      hint.badge.style.left = `${left}px`;
+      let bestPlacement = candidates[0];
+      let bestScore = Number.POSITIVE_INFINITY;
+
+      candidates.forEach((candidate, index) => {
+        const clampedTop = clamp(candidate.top, viewportPadding, maxTop);
+        const clampedLeft = clamp(candidate.left, viewportPadding, maxLeft);
+        const overflowPenalty = Math.abs(clampedTop - candidate.top) + Math.abs(clampedLeft - candidate.left);
+        const score = overflowPenalty + index * 0.01;
+
+        if (score < bestScore) {
+          bestPlacement = {
+            placement: candidate.placement,
+            top: clampedTop,
+            left: clampedLeft
+          };
+          bestScore = score;
+        }
+      });
+
+      hint.badge.dataset.placement = bestPlacement.placement;
+      hint.badge.style.top = `${bestPlacement.top}px`;
+      hint.badge.style.left = `${bestPlacement.left}px`;
     }
 
     getMatches(buffer = this.buffer) {
