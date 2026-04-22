@@ -118,10 +118,11 @@ export class WorkspaceTaskPage {
       workspaceName: document.getElementById('workspace-task-workspace-name'),
       title: document.getElementById('workspace-task-title'),
       titleEditBtn: document.getElementById('workspace-task-title-edit'),
+      breadcrumbTitle: document.getElementById('workspace-task-breadcrumb-title'),
+      copyIdBtn: document.getElementById('workspace-task-copy-id'),
+      copyLinkBtn: document.getElementById('workspace-task-copy-link'),
       subtitle: document.getElementById('workspace-task-subtitle'),
       status: document.getElementById('workspace-task-status'),
-      taskId: document.getElementById('workspace-task-id'),
-      agent: document.getElementById('workspace-task-agent'),
       overview: document.getElementById('workspace-task-overview'),
       snapshot: document.getElementById('workspace-task-snapshot'),
       relationshipsCard: document.getElementById('workspace-task-relationships-card'),
@@ -158,6 +159,8 @@ export class WorkspaceTaskPage {
   bindEvents() {
     this.elements.titleEditBtn?.addEventListener('click', () => this.startTitleEdit());
     this.elements.title?.addEventListener('dblclick', () => this.startTitleEdit());
+    this.elements.copyIdBtn?.addEventListener('click', () => this.copyToClipboard(this.taskId, 'Task ID copied'));
+    this.elements.copyLinkBtn?.addEventListener('click', () => this.copyToClipboard(window.location.href, 'Link copied'));
     this.elements.blockedRequestToggle?.addEventListener('click', () => this.toggleAssistResponseExpanded());
     this.elements.assistRetryBtn?.addEventListener('click', () => this.submitTaskAssist('retry'));
     this.elements.assistContinueBtn?.addEventListener('click', () => this.submitTaskAssist('continue_with_instruction'));
@@ -266,7 +269,7 @@ export class WorkspaceTaskPage {
     if (this.titleEditInProgress || !this.elements.title) return;
 
     const titleElement = this.elements.title;
-    const editButton = this.elements.titleEditBtn;
+    const actionsContainer = titleElement.parentElement?.querySelector('.workspace-task-page-title-actions');
     const currentValue = this.getTaskDisplayLabel();
     this.titleEditInProgress = true;
 
@@ -276,15 +279,22 @@ export class WorkspaceTaskPage {
     input.value = currentValue;
     input.setAttribute('aria-label', 'Edit task title');
 
+    const editActions = document.createElement('div');
+    editActions.className = 'workspace-task-page-title-edit-actions';
+    editActions.innerHTML = `
+      <button type="button" class="workspace-task-page-edit-save" aria-label="Save title">Save</button>
+      <button type="button" class="workspace-task-page-edit-cancel" aria-label="Cancel editing">Cancel</button>
+      <span class="workspace-task-page-edit-hint">Enter to save, Esc to cancel</span>
+    `;
+
     const syncHeight = () => {
       input.style.height = 'auto';
       input.style.height = `${Math.max(input.scrollHeight, 70)}px`;
     };
 
     titleElement.style.display = 'none';
-    if (editButton) {
-      editButton.style.display = 'none';
-    }
+    if (actionsContainer) actionsContainer.style.display = 'none';
+    titleElement.insertAdjacentElement('afterend', editActions);
     titleElement.insertAdjacentElement('afterend', input);
     syncHeight();
     input.focus();
@@ -296,10 +306,9 @@ export class WorkspaceTaskPage {
 
       const nextValue = input.value.trim();
       input.remove();
+      editActions.remove();
       titleElement.style.display = '';
-      if (editButton) {
-        editButton.style.display = '';
-      }
+      if (actionsContainer) actionsContainer.style.display = '';
 
       if (!save || nextValue === currentValue) {
         return;
@@ -319,6 +328,15 @@ export class WorkspaceTaskPage {
       }
     };
 
+    editActions.querySelector('.workspace-task-page-edit-save')?.addEventListener('mousedown', (e) => {
+      e.preventDefault();
+      finishEdit(true);
+    });
+    editActions.querySelector('.workspace-task-page-edit-cancel')?.addEventListener('mousedown', (e) => {
+      e.preventDefault();
+      finishEdit(false);
+    });
+
     input.addEventListener('input', syncHeight);
     input.addEventListener('keydown', (event) => {
       if (event.key === 'Escape') {
@@ -332,7 +350,8 @@ export class WorkspaceTaskPage {
         finishEdit(true);
       }
     });
-    input.addEventListener('blur', () => {
+    input.addEventListener('blur', (e) => {
+      if (editActions.contains(e.relatedTarget)) return;
       finishEdit(true);
     });
   }
@@ -549,11 +568,7 @@ export class WorkspaceTaskPage {
 
   renderHero(statusInfo) {
     const taskTitle = this.getTaskDisplayLabel();
-    const detailsSummary = summarizeText(this.task?.details || this.currentBlockedTask?.reason || '', 240);
-    const subtitleParts = [];
-    if (detailsSummary) subtitleParts.push(detailsSummary);
-    subtitleParts.push(statusInfo.label);
-    subtitleParts.push(formatRelativeDate(this.task?.completed_at || this.task?.started_at || this.task?.created_at));
+    const detailsSummary = summarizeText(this.task?.details || this.currentBlockedTask?.reason || '', 280);
 
     if (this.elements.workspaceName) {
       this.elements.workspaceName.textContent = String(this.workspace?.name || 'Workspace').trim() || 'Workspace';
@@ -563,17 +578,14 @@ export class WorkspaceTaskPage {
     }
     document.title = `${taskTitle} - Ori Agent`;
     if (this.elements.subtitle) {
-      this.elements.subtitle.textContent = subtitleParts.join(' • ');
+      this.elements.subtitle.textContent = detailsSummary || 'No additional details provided.';
+    }
+    if (this.elements.breadcrumbTitle) {
+      this.elements.breadcrumbTitle.textContent = summarizeText(taskTitle, 40) || 'Task';
     }
     if (this.elements.status) {
       this.elements.status.textContent = statusInfo.label;
       this.elements.status.dataset.state = statusInfo.className;
-    }
-    if (this.elements.taskId) {
-      this.elements.taskId.textContent = String(this.task?.id || '—').trim() || '—';
-    }
-    if (this.elements.agent) {
-      this.elements.agent.textContent = String(this.task?.to || 'Unassigned').trim() || 'Unassigned';
     }
   }
 
@@ -646,9 +658,11 @@ export class WorkspaceTaskPage {
   renderSnapshot(statusInfo) {
     if (!this.elements.snapshot) return;
 
+    const currentAgent = String(this.task?.to || 'Unassigned').trim() || 'Unassigned';
+    const statusOptions = ['pending', 'assigned', 'in_progress', 'completed', 'failed', 'blocked', 'cancelled'];
+    const agentNames = this.getWorkspaceAgentNames();
+
     const snapshotItems = [
-      ['Status', statusInfo.label],
-      ['Agent', String(this.task?.to || 'Unassigned').trim() || 'Unassigned'],
       ['Created', formatDateTime(this.task?.created_at)],
       ['Started', formatDateTime(this.task?.started_at)],
       ['Completed', formatDateTime(this.task?.completed_at)],
@@ -659,12 +673,54 @@ export class WorkspaceTaskPage {
       snapshotItems.push(['Schedule', String(this.task.schedule_name).trim()]);
     }
 
-    this.elements.snapshot.innerHTML = snapshotItems.map(([label, value]) => `
+    const statusSelectHtml = `
+      <div class="workspace-task-snapshot-item">
+        <span class="workspace-task-snapshot-label">Status</span>
+        <select id="workspace-task-snapshot-status" class="workspace-task-snapshot-select workspace-task-page-status-inline" data-state="${this.escapeHtml(statusInfo.className)}">
+          ${statusOptions.map((s) => `<option value="${this.escapeHtml(s)}" ${s === (this.task?.status || 'pending') ? 'selected' : ''}>${this.escapeHtml(getDisplayStatus(s))}</option>`).join('')}
+        </select>
+      </div>
+    `;
+
+    const agentSelectHtml = `
+      <div class="workspace-task-snapshot-item">
+        <span class="workspace-task-snapshot-label">Agent</span>
+        <select id="workspace-task-snapshot-agent" class="workspace-task-snapshot-select">
+          <option value="" ${!this.task?.to ? 'selected' : ''}>Unassigned</option>
+          ${agentNames.map((name) => `<option value="${this.escapeHtml(name)}" ${name === this.task?.to ? 'selected' : ''}>${this.escapeHtml(name)}</option>`).join('')}
+        </select>
+      </div>
+    `;
+
+    const staticItemsHtml = snapshotItems.map(([label, value]) => `
       <div class="workspace-task-snapshot-item">
         <span class="workspace-task-snapshot-label">${this.escapeHtml(label)}</span>
         <span class="workspace-task-snapshot-value">${this.escapeHtml(value || '—')}</span>
       </div>
     `).join('');
+
+    this.elements.snapshot.innerHTML = statusSelectHtml + agentSelectHtml + staticItemsHtml;
+
+    const statusSelect = document.getElementById('workspace-task-snapshot-status');
+    const agentSelect = document.getElementById('workspace-task-snapshot-agent');
+
+    statusSelect?.addEventListener('change', async () => {
+      try {
+        await this.updateTaskFields({ status: statusSelect.value });
+        this.notify('success', 'Status updated');
+      } catch (error) {
+        this.notify('error', error?.message || 'Failed to update status');
+      }
+    });
+
+    agentSelect?.addEventListener('change', async () => {
+      try {
+        await this.updateTaskFields({ to: agentSelect.value || '' });
+        this.notify('success', 'Agent updated');
+      } catch (error) {
+        this.notify('error', error?.message || 'Failed to update agent');
+      }
+    });
   }
 
   renderRelationships() {
@@ -718,10 +774,29 @@ export class WorkspaceTaskPage {
     `).join('');
   }
 
+  isStructuredData(text) {
+    const trimmed = text.trim();
+    if ((trimmed.startsWith('{') && trimmed.endsWith('}')) ||
+        (trimmed.startsWith('[') && trimmed.endsWith(']'))) {
+      try { JSON.parse(trimmed); return true; } catch (_e) { /* not json */ }
+    }
+    return false;
+  }
+
+  renderMarkdownOrPre(text) {
+    if (this.isStructuredData(text)) {
+      return `<pre class="workspace-task-page-code-block">${this.escapeHtml(text)}</pre>`;
+    }
+    if (typeof marked !== 'undefined' && typeof marked.parse === 'function') {
+      return `<div class="workspace-task-page-prose">${marked.parse(text)}</div>`;
+    }
+    return `<pre class="workspace-task-page-code-block">${this.escapeHtml(text)}</pre>`;
+  }
+
   renderOutput() {
     if (!this.elements.output || !this.elements.outputCard) return;
 
-    const result = String(this.task?.result || '').trim();
+    const result = normalizeResultText(this.task?.result).trim();
     const error = String(this.task?.error || '').trim();
 
     if (!result && !error) {
@@ -734,7 +809,7 @@ export class WorkspaceTaskPage {
     if (result) {
       blocks.push(`
         <div class="workspace-task-page-mini-label">Result</div>
-        <pre class="workspace-task-page-code-block">${this.escapeHtml(result)}</pre>
+        ${this.renderMarkdownOrPre(result)}
       `);
     }
     if (error) {
@@ -759,21 +834,34 @@ export class WorkspaceTaskPage {
     }
 
     this.elements.stepsCard.hidden = false;
-    this.elements.steps.innerHTML = steps.map((step, index) => `
-      <article class="workspace-task-step">
-        <div class="workspace-task-step-index">${index + 1}</div>
-        <div>
-          <div class="workspace-task-step-title-row">
-            <span class="workspace-task-step-title">${this.escapeHtml(String(step?.title || `Step ${index + 1}`).trim())}</span>
-            ${step?.tag ? `<span class="workspace-task-step-tag">${this.escapeHtml(String(step.tag).trim())}</span>` : ''}
-            <span class="workspace-task-step-status" data-state="${this.escapeHtml(getStatusClass(step?.status))}">${this.escapeHtml(getDisplayStatus(step?.status))}</span>
+    this.elements.steps.innerHTML = steps.map((step, index) => {
+      const resultText = String(step?.result || '').trim();
+      const errorText = String(step?.error || '').trim();
+      const isLongResult = resultText.length > 400;
+      const isLongError = errorText.length > 400;
+
+      return `
+        <article class="workspace-task-step">
+          <div class="workspace-task-step-index">${index + 1}</div>
+          <div>
+            <div class="workspace-task-step-title-row">
+              <span class="workspace-task-step-title">${this.escapeHtml(String(step?.title || `Step ${index + 1}`).trim())}</span>
+              ${step?.tag ? `<span class="workspace-task-step-tag">${this.escapeHtml(String(step.tag).trim())}</span>` : ''}
+              <span class="workspace-task-step-status" data-state="${this.escapeHtml(getStatusClass(step?.status))}">${this.escapeHtml(getDisplayStatus(step?.status))}</span>
+            </div>
+            ${step?.detail ? `<div class="workspace-task-step-copy">${this.escapeHtml(String(step.detail).trim())}</div>` : ''}
+            ${resultText ? (isLongResult
+              ? `<details class="workspace-task-collapsible mt-2"><summary class="workspace-task-collapsible-toggle">Show result</summary><pre class="workspace-task-page-code-block">${this.escapeHtml(resultText)}</pre></details>`
+              : `<pre class="workspace-task-page-code-block mt-2">${this.escapeHtml(resultText)}</pre>`)
+            : ''}
+            ${errorText ? (isLongError
+              ? `<details class="workspace-task-collapsible mt-2"><summary class="workspace-task-collapsible-toggle">Show error</summary><pre class="workspace-task-page-code-block">${this.escapeHtml(errorText)}</pre></details>`
+              : `<pre class="workspace-task-page-code-block mt-2">${this.escapeHtml(errorText)}</pre>`)
+            : ''}
           </div>
-          ${step?.detail ? `<div class="workspace-task-step-copy">${this.escapeHtml(String(step.detail).trim())}</div>` : ''}
-          ${step?.result ? `<pre class="workspace-task-page-code-block mt-2">${this.escapeHtml(String(step.result).trim())}</pre>` : ''}
-          ${step?.error ? `<pre class="workspace-task-page-code-block mt-2">${this.escapeHtml(String(step.error).trim())}</pre>` : ''}
-        </div>
-      </article>
-    `).join('');
+        </article>
+      `;
+    }).join('');
   }
 
   renderContext() {
@@ -1119,6 +1207,15 @@ export class WorkspaceTaskPage {
     ].forEach((button) => {
       if (button) button.disabled = disabled;
     });
+  }
+
+  async copyToClipboard(text, successMessage = 'Copied') {
+    try {
+      await navigator.clipboard.writeText(text);
+      this.notify('success', successMessage);
+    } catch (_error) {
+      this.notify('error', 'Failed to copy');
+    }
   }
 
   notify(kind, message) {
