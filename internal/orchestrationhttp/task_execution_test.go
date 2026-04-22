@@ -150,6 +150,80 @@ func TestExtractClarificationWorkflowStep_InlineQuestion(t *testing.T) {
 	}
 }
 
+func TestExtractClarificationWorkflowStep_FormQuestions(t *testing.T) {
+	response := "Is this going in a specific room (bathroom, kitchen, living room)? Freestanding or wall-mounted? Do you have tools already (saw, drill, square)?"
+
+	got := extractClarificationWorkflowStep(response)
+	if got == nil {
+		t.Fatalf("expected workflow step, got nil")
+	}
+	if got.StepType != "ask_form" {
+		t.Fatalf("expected ask_form step, got %q", got.StepType)
+	}
+	if len(got.Fields) != 3 {
+		t.Fatalf("expected 3 fields, got %d", len(got.Fields))
+	}
+	if got.Fields[0].Label != "Room" {
+		t.Fatalf("unexpected first field label %q", got.Fields[0].Label)
+	}
+	if got.Fields[1].Type != "select" {
+		t.Fatalf("expected second field to be select, got %q", got.Fields[1].Type)
+	}
+	if len(got.Fields[1].Options) != 2 {
+		t.Fatalf("expected 2 mounting options, got %d", len(got.Fields[1].Options))
+	}
+	if got.Fields[2].Type != "textarea" {
+		t.Fatalf("expected tools field to use textarea, got %q", got.Fields[2].Type)
+	}
+}
+
+func TestExtractClarificationWorkflowStep_QuestionBlocksWithLetterOptions(t *testing.T) {
+	response := `I can see you have shelf dimension notes in this workspace.
+Let me make sure I understand the full scope before we build a plan.
+
+A few quick questions:
+
+1. **What's the goal of this project?**
+   A. Build shelving units from scratch (cut your own lumber)
+   B. Assemble pre-cut pieces
+   C. Modify/repair existing shelves
+   D. Something else
+
+2. **How many shelf units are you building?**
+   A. 1 unit
+   B. 2 units (matches your "x2 sets" note)
+   C. More than 2`
+
+	got := extractClarificationWorkflowStep(response)
+	if got == nil {
+		t.Fatalf("expected workflow step, got nil")
+	}
+	if got.StepType != "ask_form" {
+		t.Fatalf("expected ask_form step, got %q", got.StepType)
+	}
+	if len(got.Fields) != 2 {
+		t.Fatalf("expected 2 fields, got %d", len(got.Fields))
+	}
+	if got.Fields[0].Description != "What's the goal of this project?" {
+		t.Fatalf("unexpected first field description %q", got.Fields[0].Description)
+	}
+	if got.Fields[0].Type != "select" {
+		t.Fatalf("expected first field to be select, got %q", got.Fields[0].Type)
+	}
+	if len(got.Fields[0].Options) != 4 {
+		t.Fatalf("expected 4 options for first field, got %d", len(got.Fields[0].Options))
+	}
+	if got.Fields[0].Options[1].Label != "Assemble pre-cut pieces" {
+		t.Fatalf("unexpected second option label %q", got.Fields[0].Options[1].Label)
+	}
+	if len(got.Fields[1].Options) != 3 {
+		t.Fatalf("expected 3 options for second field, got %d", len(got.Fields[1].Options))
+	}
+	if got.Fields[1].Options[1].Label != `2 units (matches your "x2 sets" note)` {
+		t.Fatalf("unexpected second field option %q", got.Fields[1].Options[1].Label)
+	}
+}
+
 func TestApplyIterationContext_RequiresFilesystemVerificationAfterUnverifiedListing(t *testing.T) {
 	task := &workspace.Task{
 		Description: "Get list of files in DNM folder",

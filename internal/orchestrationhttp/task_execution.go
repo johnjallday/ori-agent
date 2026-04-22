@@ -23,11 +23,18 @@ const (
 
 var (
 	blockedEnumeratedChoicePattern = regexp.MustCompile(`^\s*(?:[-*]\s*)?(\d+)[.)]\s*(.+)$`)
+	blockedQuestionPromptPattern   = regexp.MustCompile(`^\s*(\d+)[.)]\s*(.+?)\s*$`)
+	blockedLetteredOptionPattern   = regexp.MustCompile(`^\s*(?:[-*]\s*)?([A-Z])[.)]\s*(.+)$`)
 	blockedMarkdownLinkPattern     = regexp.MustCompile(`\[(.*?)\]\((.*?)\)`)
 	blockedInlineChoicePatterns    = []*regexp.Regexp{
 		regexp.MustCompile(`(?i)^(?:want me to|would you like me to|do you want me to|should i)\s+(.+?)(?:,\s*|\s+)or\s+(.+?)\?\s*$`),
 	}
 )
+
+type clarificationQuestionBlock struct {
+	Question string
+	Options  []workspace.TaskBlockedFieldOption
+}
 
 // TaskResultsHandler retrieves results from one or more tasks
 // GET /api/orchestration/task-results?task_ids=id1,id2,id3
@@ -293,13 +300,14 @@ func (th *TaskHandler) handleAssistTask(w http.ResponseWriter, r *http.Request) 
 	taskID := strings.TrimSpace(pathParts[0])
 
 	var req struct {
-		BlockID      string `json:"block_id"`
-		Action       string `json:"action"`
-		Agent        string `json:"agent"`
-		Message      string `json:"message"`
-		ChoiceID     string `json:"choice_id"`
-		ChoiceLabel  string `json:"choice_label"`
-		ChoiceNumber string `json:"choice_number"`
+		BlockID      string                            `json:"block_id"`
+		Action       string                            `json:"action"`
+		Agent        string                            `json:"agent"`
+		Message      string                            `json:"message"`
+		ChoiceID     string                            `json:"choice_id"`
+		ChoiceLabel  string                            `json:"choice_label"`
+		ChoiceNumber string                            `json:"choice_number"`
+		FieldValues  []workspace.TaskBlockedFieldValue `json:"field_values"`
 	}
 	if !orihttp.ParseJSONBody(w, r, &req) {
 		return
@@ -337,6 +345,7 @@ func (th *TaskHandler) handleAssistTask(w http.ResponseWriter, r *http.Request) 
 	}
 
 	selectedChoice := normalizeTaskAssistChoice(req.ChoiceID, req.ChoiceLabel, req.ChoiceNumber)
+	fieldValues := normalizeTaskAssistFieldValues(req.FieldValues)
 	history := make([]interface{}, 0, 4)
 	if existingHistory, ok := humanLoop["history"].([]interface{}); ok {
 		history = append(history, existingHistory...)
@@ -351,6 +360,9 @@ func (th *TaskHandler) handleAssistTask(w http.ResponseWriter, r *http.Request) 
 		historyEntry["choice_id"] = selectedChoice.ID
 		historyEntry["choice_label"] = selectedChoice.Label
 		historyEntry["choice_number"] = selectedChoice.Number
+	}
+	if len(fieldValues) > 0 {
+		historyEntry["field_values"] = fieldValues
 	}
 	history = append(history, historyEntry)
 
@@ -367,7 +379,15 @@ func (th *TaskHandler) handleAssistTask(w http.ResponseWriter, r *http.Request) 
 		delete(task.Context, "user_assist_choice")
 	}
 
-	if msg := buildUserAssistMessage(strings.TrimSpace(req.Message), selectedChoice); msg != "" {
+	if len(fieldValues) > 0 {
+		humanLoop["field_values"] = fieldValues
+		task.Context["user_assist_fields"] = fieldValues
+	} else {
+		delete(humanLoop, "field_values")
+		delete(task.Context, "user_assist_fields")
+	}
+
+	if msg := buildUserAssistMessage(strings.TrimSpace(req.Message), selectedChoice, fieldValues); msg != "" {
 		task.Context["user_assist_message"] = msg
 	} else {
 		delete(task.Context, "user_assist_message")
@@ -948,7 +968,7 @@ func buildTaskBlockedContext(task *workspace.Task, blockedErr *workspace.TaskBlo
 		if raw := strings.TrimSpace(blockedErr.RawResponse); raw != "" {
 			humanLoop["agent_response"] = raw
 		}
-		if blockedErr.WorkflowStep != nil && len(blockedErr.WorkflowStep.Choices) > 0 {
+		if blockedErr.WorkflowStep != nil && (len(blockedErr.WorkflowStep.Choices) > 0 || len(blockedErr.WorkflowStep.Fields) > 0) {
 			humanLoop["workflow_step"] = blockedErr.WorkflowStep
 		}
 	}
@@ -980,20 +1000,88 @@ func normalizeTaskAssistChoice(choiceID, choiceLabel, choiceNumber string) *work
 	}
 }
 
-func buildUserAssistMessage(message string, selectedChoice *workspace.TaskBlockedChoice) string {
-	trimmedMessage := strings.TrimSpace(message)
-	if selectedChoice == nil {
-		return trimmedMessage
+func normalizeTaskAssistFieldValues(values []workspace.TaskBlockedFieldValue) []workspace.TaskBlockedFieldValue {
+	if len(values) == 0 {
+		return nil
 	}
 
-	selectedLabel := cleanBlockedChoiceText(selectedChoice.Label)
-	if selectedLabel == "" {
-		selectedLabel = strings.TrimSpace(selectedChoice.ID)
+	normalized := make([]workspace.TaskBlockedFieldValue, 0, len(values))
+	seen := make(map[string]struct{}, len(values))
+	for _, item := range values {
+		id := strings.TrimSpace(item.ID)
+		label := strings.TrimSpace(item.Label)
+		value := strings.TrimSpace(item.Value)
+		if id == "" && label == "" {
+			continue
+		}
+		if value == "" {
+			continue
+		}
+		if id == "" {
+			id = fmt.Sprintf("field_%d", len(normalized)+1)
+		}
+		key := strings.ToLower(id)
+		if _, exists := seen[key]; exists {
+			continue
+		}
+		seen[key] = struct{}{}
+		if label == "" {
+			label = id
+		}
+		normalized = append(normalized, workspace.TaskBlockedFieldValue{
+			ID:    id,
+			Label: label,
+			Value: value,
+		})
 	}
-	if trimmedMessage == "" {
-		return fmt.Sprintf("Selected next step: %s.", selectedLabel)
+	if len(normalized) == 0 {
+		return nil
 	}
-	return fmt.Sprintf("Selected next step: %s.\nAdditional guidance: %s", selectedLabel, trimmedMessage)
+	return normalized
+}
+
+func buildUserAssistMessage(message string, selectedChoice *workspace.TaskBlockedChoice, fieldValues []workspace.TaskBlockedFieldValue) string {
+	trimmedMessage := strings.TrimSpace(message)
+	parts := make([]string, 0, 3)
+
+	if selectedChoice != nil {
+		selectedLabel := cleanBlockedChoiceText(selectedChoice.Label)
+		if selectedLabel == "" {
+			selectedLabel = strings.TrimSpace(selectedChoice.ID)
+		}
+		if selectedLabel != "" {
+			parts = append(parts, fmt.Sprintf("Selected next step: %s.", selectedLabel))
+		}
+	}
+
+	if len(fieldValues) > 0 {
+		lines := make([]string, 0, len(fieldValues)+1)
+		lines = append(lines, "Provided details:")
+		for _, field := range fieldValues {
+			label := cleanBlockedChoiceText(field.Label)
+			if label == "" {
+				label = strings.TrimSpace(field.ID)
+			}
+			value := strings.TrimSpace(field.Value)
+			if label == "" || value == "" {
+				continue
+			}
+			lines = append(lines, fmt.Sprintf("- %s: %s", label, value))
+		}
+		if len(lines) > 1 {
+			parts = append(parts, strings.Join(lines, "\n"))
+		}
+	}
+
+	if trimmedMessage != "" {
+		prefix := "Additional guidance: "
+		if len(parts) == 0 {
+			prefix = ""
+		}
+		parts = append(parts, fmt.Sprintf("%s%s", prefix, trimmedMessage))
+	}
+
+	return strings.TrimSpace(strings.Join(parts, "\n"))
 }
 
 func (th *TaskHandler) executeTaskIteratively(ctx context.Context, ws *workspace.Workspace, persistedTask *workspace.Task, taskForExecution workspace.Task, manual bool) (string, error) {
@@ -1740,13 +1828,51 @@ func extractClarificationQuestion(result string) string {
 }
 
 func extractClarificationWorkflowStep(result string) *workspace.TaskBlockedWorkflowStep {
+	if step := extractQuestionBlockWorkflowStep(result); step != nil {
+		return step
+	}
 	if step := extractEnumeratedClarificationWorkflowStep(result); step != nil {
 		return step
 	}
 	if step := extractInlineClarificationWorkflowStep(result); step != nil {
 		return step
 	}
+	if step := extractQuestionFormWorkflowStep(result); step != nil {
+		return step
+	}
 	return nil
+}
+
+func extractQuestionBlockWorkflowStep(result string) *workspace.TaskBlockedWorkflowStep {
+	blocks := extractClarificationQuestionBlocks(result)
+	if len(blocks) == 0 {
+		return nil
+	}
+
+	fields := make([]workspace.TaskBlockedField, 0, len(blocks))
+	for index, block := range blocks {
+		field, ok := buildClarificationField(block.Question, index)
+		if !ok {
+			continue
+		}
+
+		field.Type = "select"
+		field.Options = block.Options
+		field.Description = strings.TrimSpace(block.Question)
+		fields = append(fields, field)
+	}
+
+	if len(fields) == 0 {
+		return nil
+	}
+
+	return &workspace.TaskBlockedWorkflowStep{
+		StepType:        "ask_form",
+		Title:           "Provide the missing details",
+		Summary:         "Answer the questions below so the task can continue.",
+		Fields:          fields,
+		FreeTextAllowed: true,
+	}
 }
 
 func extractEnumeratedClarificationWorkflowStep(result string) *workspace.TaskBlockedWorkflowStep {
@@ -1836,6 +1962,244 @@ func extractInlineClarificationWorkflowStep(result string) *workspace.TaskBlocke
 		}
 	}
 	return nil
+}
+
+func extractClarificationQuestionBlocks(result string) []clarificationQuestionBlock {
+	lines := strings.Split(result, "\n")
+	blocks := make([]clarificationQuestionBlock, 0, 4)
+
+	for i := 0; i < len(lines); {
+		match := blockedQuestionPromptPattern.FindStringSubmatch(lines[i])
+		if len(match) != 3 {
+			i++
+			continue
+		}
+
+		question := cleanBlockedChoiceText(match[2])
+		if question == "" {
+			i++
+			continue
+		}
+
+		options := make([]workspace.TaskBlockedFieldOption, 0, 4)
+		j := i + 1
+		for ; j < len(lines); j++ {
+			rawLine := lines[j]
+			if blockedQuestionPromptPattern.MatchString(rawLine) {
+				break
+			}
+
+			optionMatch := blockedLetteredOptionPattern.FindStringSubmatch(rawLine)
+			if len(optionMatch) == 3 {
+				label := cleanBlockedChoiceText(optionMatch[2])
+				if label == "" {
+					continue
+				}
+				options = append(options, workspace.TaskBlockedFieldOption{
+					Value:       label,
+					Label:       label,
+					Description: strings.ToUpper(strings.TrimSpace(optionMatch[1])),
+				})
+				continue
+			}
+
+			trimmed := strings.TrimSpace(rawLine)
+			if trimmed == "" {
+				continue
+			}
+			if len(options) == 0 {
+				break
+			}
+
+			continuation := cleanBlockedChoiceText(trimmed)
+			if continuation == "" {
+				continue
+			}
+			lastIndex := len(options) - 1
+			options[lastIndex].Label = strings.TrimSpace(options[lastIndex].Label + " " + continuation)
+			options[lastIndex].Value = options[lastIndex].Label
+		}
+
+		if len(options) >= 2 {
+			if !strings.HasSuffix(question, "?") {
+				question += "?"
+			}
+			blocks = append(blocks, clarificationQuestionBlock{
+				Question: question,
+				Options:  options,
+			})
+			i = j
+			continue
+		}
+
+		i++
+	}
+
+	return blocks
+}
+
+func extractQuestionFormWorkflowStep(result string) *workspace.TaskBlockedWorkflowStep {
+	questions := extractClarificationQuestions(result)
+	if len(questions) == 0 {
+		return nil
+	}
+
+	fields := make([]workspace.TaskBlockedField, 0, len(questions))
+	for index, question := range questions {
+		field, ok := buildClarificationField(question, index)
+		if !ok {
+			continue
+		}
+		fields = append(fields, field)
+	}
+
+	if len(fields) == 0 {
+		return nil
+	}
+
+	if len(fields) == 1 && !fieldHasExplicitOptions(fields[0]) {
+		lowerQuestion := strings.ToLower(strings.TrimSpace(questions[0]))
+		if lowerQuestion == "" ||
+			strings.Contains(lowerQuestion, "how should i proceed") ||
+			strings.Contains(lowerQuestion, "should i retry") {
+			return nil
+		}
+	}
+
+	return &workspace.TaskBlockedWorkflowStep{
+		StepType:        "ask_form",
+		Title:           "Provide the missing details",
+		Summary:         "Answer the questions below so the task can continue.",
+		Fields:          fields,
+		FreeTextAllowed: true,
+	}
+}
+
+func extractClarificationQuestions(result string) []string {
+	normalized := strings.Join(strings.Fields(strings.TrimSpace(result)), " ")
+	if normalized == "" {
+		return nil
+	}
+
+	rawParts := strings.Split(normalized, "?")
+	if len(rawParts) < 2 {
+		return nil
+	}
+
+	questions := make([]string, 0, len(rawParts)-1)
+	seen := make(map[string]struct{}, len(rawParts)-1)
+	for _, part := range rawParts[:len(rawParts)-1] {
+		question := strings.TrimSpace(strings.Trim(part, " \t\r\n-*"))
+		if len(question) < 5 || len(question) > 220 {
+			continue
+		}
+
+		key := strings.ToLower(question)
+		if _, exists := seen[key]; exists {
+			continue
+		}
+		seen[key] = struct{}{}
+		questions = append(questions, question+"?")
+	}
+
+	return questions
+}
+
+func buildClarificationField(question string, index int) (workspace.TaskBlockedField, bool) {
+	cleanedQuestion := strings.TrimSpace(strings.TrimSuffix(question, "?"))
+	cleanedQuestion = cleanBlockedChoiceText(cleanedQuestion)
+	if cleanedQuestion == "" {
+		return workspace.TaskBlockedField{}, false
+	}
+
+	lower := strings.ToLower(cleanedQuestion)
+	field := workspace.TaskBlockedField{
+		ID:          fmt.Sprintf("field_%d", index+1),
+		Label:       cleanedQuestion,
+		Description: strings.TrimSpace(question),
+		Type:        "text",
+		Required:    true,
+	}
+
+	switch {
+	case strings.Contains(lower, "freestanding") && (strings.Contains(lower, "wall-mounted") || strings.Contains(lower, "wall mounted")):
+		field.ID = "mounting_type"
+		field.Label = "Mounting type"
+		field.Type = "select"
+		field.Options = []workspace.TaskBlockedFieldOption{
+			{Value: "freestanding", Label: "Freestanding"},
+			{Value: "wall-mounted", Label: "Wall-mounted"},
+		}
+	case strings.Contains(lower, "specific room") || strings.Contains(lower, "which room") || strings.Contains(lower, "what room") || strings.Contains(lower, " room"):
+		field.ID = "room"
+		field.Label = "Room"
+		field.Placeholder = extractClarificationPlaceholder(question, "Bathroom, kitchen, living room")
+	case strings.Contains(lower, "tools"):
+		field.ID = "available_tools"
+		field.Label = "Available tools"
+		field.Type = "textarea"
+		field.Placeholder = extractClarificationPlaceholder(question, "Saw, drill, square")
+	case strings.Contains(lower, "how many") && strings.Contains(lower, "shel"):
+		field.ID = "shelf_count"
+		field.Label = "Shelf count"
+		field.Type = "number"
+		field.Placeholder = "3"
+	case strings.Contains(lower, "material"):
+		field.ID = "material"
+		field.Label = "Material"
+		field.Placeholder = extractClarificationPlaceholder(question, "Plywood, pine, MDF")
+	case strings.Contains(lower, "what's it holding") || strings.Contains(lower, "what is it holding") || strings.Contains(lower, "what will it hold"):
+		field.ID = "intended_load"
+		field.Label = "What it will hold"
+		field.Placeholder = "Books, decor, kitchen items"
+	default:
+		if options := extractClarificationSelectOptions(cleanedQuestion); len(options) >= 2 {
+			field.Type = "select"
+			field.Options = options
+			field.Label = "Select an option"
+		}
+	}
+
+	return field, true
+}
+
+func extractClarificationPlaceholder(question, fallback string) string {
+	start := strings.Index(question, "(")
+	end := strings.Index(question, ")")
+	if start >= 0 && end > start+1 {
+		return strings.TrimSpace(question[start+1 : end])
+	}
+	return fallback
+}
+
+func extractClarificationSelectOptions(question string) []workspace.TaskBlockedFieldOption {
+	if strings.Count(strings.ToLower(question), " or ") != 1 {
+		return nil
+	}
+
+	lower := strings.ToLower(question)
+	parts := strings.SplitN(lower, " or ", 2)
+	if len(parts) != 2 {
+		return nil
+	}
+
+	left := cleanBlockedChoiceText(parts[0])
+	right := cleanBlockedChoiceText(parts[1])
+	if left == "" || right == "" {
+		return nil
+	}
+	if strings.Contains(left, "should i") || strings.Contains(left, "want me to") {
+		return nil
+	}
+
+	return []workspace.TaskBlockedFieldOption{
+		{Value: strings.ReplaceAll(left, " ", "_"), Label: left},
+		{Value: strings.ReplaceAll(right, " ", "_"), Label: right},
+	}
+}
+
+func fieldHasExplicitOptions(field workspace.TaskBlockedField) bool {
+	return field.Type == "select" && len(field.Options) > 0
 }
 
 func cleanBlockedChoiceText(value string) string {

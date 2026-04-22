@@ -1213,7 +1213,11 @@ export class WorkspaceDetailPage {
       taskAssistId: document.getElementById('workspace-detail-task-assist-id'),
       taskAssistMeta: document.getElementById('workspace-detail-task-assist-meta'),
       taskAssistReason: document.getElementById('workspace-detail-task-assist-reason'),
+      taskAssistQuestionWrap: document.getElementById('workspace-detail-task-assist-question-wrap'),
       taskAssistQuestion: document.getElementById('workspace-detail-task-assist-question'),
+      taskAssistFormWrap: document.getElementById('workspace-detail-task-assist-form-wrap'),
+      taskAssistFormSummary: document.getElementById('workspace-detail-task-assist-form-summary'),
+      taskAssistFormFields: document.getElementById('workspace-detail-task-assist-form-fields'),
       taskAssistRecommendationWrap: document.getElementById('workspace-detail-task-assist-recommendation-wrap'),
       taskAssistRecommendation: document.getElementById('workspace-detail-task-assist-recommendation'),
       taskAssistChoiceWrap: document.getElementById('workspace-detail-task-assist-choice-wrap'),
@@ -5732,6 +5736,7 @@ export class WorkspaceDetailPage {
   applyAssistWorkflowSpecialistOverrides(workflowStep, specialistAction) {
     const normalizedStep = this.normalizeAssistWorkflowStep(workflowStep);
     if (!normalizedStep || !specialistAction?.agentName) return normalizedStep;
+    if (normalizedStep.stepType !== 'ask_choice' || !Array.isArray(normalizedStep.choices)) return normalizedStep;
 
     const replacementName = String(specialistAction.agentName || '').trim();
     if (!replacementName) return normalizedStep;
@@ -5799,25 +5804,61 @@ export class WorkspaceDetailPage {
     return `assist-choice-${String(number || '').trim() || 'x'}-${base}`;
   }
 
+  buildAssistFieldId(label, index) {
+    const base = this.normalizeTaskResultNextStepToken(label)
+      .replace(/\s+/g, '-')
+      .slice(0, 48) || 'field';
+    return `assist-field-${String(index + 1).trim()}-${base}`;
+  }
+
+  getAssistOptionKey(index) {
+    const safeIndex = Number.isFinite(index) ? Math.max(0, index) : 0;
+    return String.fromCharCode(65 + (safeIndex % 26));
+  }
+
+  normalizeAssistFieldType(value) {
+    const normalized = String(value || '').trim().toLowerCase();
+    if (normalized === 'textarea' || normalized === 'select' || normalized === 'number' || normalized === 'boolean') {
+      return normalized;
+    }
+    return 'text';
+  }
+
+  normalizeAssistFieldOptions(options) {
+    if (!Array.isArray(options)) return [];
+    return options.map((option) => {
+      if (typeof option === 'string') {
+        const label = String(option || '').trim();
+        if (!label) return null;
+        return { value: label, label, description: '' };
+      }
+
+      const label = String(option?.label || option?.value || '').trim();
+      const value = String(option?.value || option?.label || '').trim();
+      if (!label || !value) return null;
+      return {
+        value,
+        label,
+        description: String(option?.description || '').trim()
+      };
+    }).filter(Boolean);
+  }
+
+  normalizeAssistFieldValues(values) {
+    if (!Array.isArray(values)) return {};
+    return values.reduce((accumulator, item) => {
+      const id = String(item?.id || '').trim();
+      const value = String(item?.value || '').trim();
+      if (!id || !value) return accumulator;
+      accumulator[id] = value;
+      return accumulator;
+    }, {});
+  }
+
   normalizeAssistWorkflowStep(value) {
     if (!value || typeof value !== 'object') return null;
 
     const stepType = String(value.step_type || value.stepType || '').trim().toLowerCase();
-    const rawChoices = Array.isArray(value.choices) ? value.choices : [];
-    const choices = rawChoices.map((item, index) => {
-      const label = this.cleanAssistChoiceText(item?.label || '');
-      if (!label) return null;
-      const number = String(item?.number || index + 1).trim();
-      return {
-        id: String(item?.id || this.buildAssistChoiceId(number, label)).trim(),
-        label,
-        number,
-        description: this.cleanAssistChoiceText(item?.description || '')
-      };
-    }).filter(Boolean);
-
-    if (stepType !== 'ask_choice' || choices.length === 0) return null;
-
     let freeTextAllowed = true;
     if (typeof value.free_text_allowed === 'boolean') {
       freeTextAllowed = value.free_text_allowed;
@@ -5825,13 +5866,59 @@ export class WorkspaceDetailPage {
       freeTextAllowed = value.freeTextAllowed;
     }
 
-    return {
-      stepType: 'ask_choice',
-      title: String(value.title || '').trim() || 'Choose the next step',
-      summary: String(value.summary || '').trim(),
-      freeTextAllowed,
-      choices
-    };
+    if (stepType === 'ask_choice') {
+      const rawChoices = Array.isArray(value.choices) ? value.choices : [];
+      const choices = rawChoices.map((item, index) => {
+        const label = this.cleanAssistChoiceText(item?.label || '');
+        if (!label) return null;
+        const number = String(item?.number || index + 1).trim();
+        return {
+          id: String(item?.id || this.buildAssistChoiceId(number, label)).trim(),
+          label,
+          number,
+          description: this.cleanAssistChoiceText(item?.description || '')
+        };
+      }).filter(Boolean);
+
+      if (choices.length === 0) return null;
+
+      return {
+        stepType: 'ask_choice',
+        title: String(value.title || '').trim() || 'Choose the next step',
+        summary: String(value.summary || '').trim(),
+        freeTextAllowed,
+        choices
+      };
+    }
+
+    if (stepType === 'ask_form') {
+      const rawFields = Array.isArray(value.fields) ? value.fields : [];
+      const fields = rawFields.map((item, index) => {
+        const label = String(item?.label || '').trim();
+        if (!label) return null;
+        return {
+          id: String(item?.id || this.buildAssistFieldId(label, index)).trim(),
+          label,
+          description: String(item?.description || '').trim(),
+          type: this.normalizeAssistFieldType(item?.type),
+          placeholder: String(item?.placeholder || '').trim(),
+          required: item?.required !== false,
+          options: this.normalizeAssistFieldOptions(item?.options)
+        };
+      }).filter(Boolean);
+
+      if (fields.length === 0) return null;
+
+      return {
+        stepType: 'ask_form',
+        title: String(value.title || '').trim() || 'Provide the missing details',
+        summary: String(value.summary || '').trim(),
+        freeTextAllowed,
+        fields
+      };
+    }
+
+    return null;
   }
 
   extractAssistEnumeratedChoices(text) {
@@ -5904,8 +5991,212 @@ export class WorkspaceDetailPage {
     return [];
   }
 
+  extractAssistQuestionBlocks(text) {
+    const lines = String(text || '').split(/\r?\n/);
+    const blocks = [];
+
+    for (let index = 0; index < lines.length;) {
+      const questionMatch = String(lines[index] || '').match(/^\s*(\d+)[.)]\s*(.+?)\s*$/);
+      if (!questionMatch) {
+        index += 1;
+        continue;
+      }
+
+      const question = this.cleanAssistChoiceText(questionMatch[2]);
+      if (!question) {
+        index += 1;
+        continue;
+      }
+
+      const options = [];
+      let cursor = index + 1;
+      for (; cursor < lines.length; cursor += 1) {
+        const rawLine = String(lines[cursor] || '');
+        if (/^\s*\d+[.)]\s+/.test(rawLine)) {
+          break;
+        }
+
+        const optionMatch = rawLine.match(/^\s*(?:[-*]\s*)?([A-Z])[.)]\s+(.+)$/);
+        if (optionMatch) {
+          const label = this.cleanAssistChoiceText(optionMatch[2]);
+          if (!label) continue;
+          options.push({
+            key: String(optionMatch[1] || '').trim().toUpperCase(),
+            label,
+            description: ''
+          });
+          continue;
+        }
+
+        if (!rawLine.trim()) {
+          continue;
+        }
+
+        if (options.length === 0) {
+          break;
+        }
+
+        const continuation = this.cleanTaskResultNextStepText(rawLine);
+        if (!continuation) {
+          continue;
+        }
+
+        const lastOption = options[options.length - 1];
+        lastOption.label = `${lastOption.label} ${continuation}`.replace(/\s+/g, ' ').trim();
+      }
+
+      if (options.length >= 2) {
+        blocks.push({
+          number: String(questionMatch[1] || '').trim(),
+          question: question.endsWith('?') ? question : `${question}?`,
+          options
+        });
+        index = cursor;
+        continue;
+      }
+
+      index += 1;
+    }
+
+    return blocks;
+  }
+
+  extractAssistQuestions(text) {
+    const normalized = String(text || '').replace(/\s+/g, ' ').trim();
+    if (!normalized || !normalized.includes('?')) {
+      return [];
+    }
+
+    return normalized
+      .split('?')
+      .slice(0, -1)
+      .map((item) => String(item || '').trim())
+      .filter((item) => item.length >= 5 && item.length <= 220)
+      .map((item) => `${item}?`);
+  }
+
+  extractAssistFieldHint(question, fallback = '') {
+    const match = String(question || '').match(/\(([^)]+)\)/);
+    if (match && match[1]) {
+      return String(match[1] || '').trim();
+    }
+    return fallback;
+  }
+
+  buildAssistFieldFromQuestion(question, index) {
+    const rawQuestion = String(question || '').trim();
+    const cleanedQuestion = this.cleanAssistChoiceText(rawQuestion);
+    if (!cleanedQuestion) return null;
+
+    const lower = cleanedQuestion.toLowerCase();
+    const field = {
+      id: this.buildAssistFieldId(cleanedQuestion, index),
+      label: cleanedQuestion,
+      description: rawQuestion,
+      type: 'text',
+      placeholder: '',
+      required: true,
+      options: []
+    };
+
+    if (lower.includes('freestanding') && (lower.includes('wall-mounted') || lower.includes('wall mounted'))) {
+      field.id = 'mounting_type';
+      field.label = 'Mounting type';
+      field.type = 'select';
+      field.options = [
+        { value: 'freestanding', label: 'Freestanding', description: '' },
+        { value: 'wall-mounted', label: 'Wall-mounted', description: '' }
+      ];
+      return field;
+    }
+
+    if (lower.includes('specific room') || lower.includes('which room') || lower.includes('what room') || lower.includes(' room')) {
+      field.id = 'room';
+      field.label = 'Room';
+      field.placeholder = this.extractAssistFieldHint(rawQuestion, 'Bathroom, kitchen, living room');
+      return field;
+    }
+
+    if (lower.includes('tools')) {
+      field.id = 'available_tools';
+      field.label = 'Available tools';
+      field.type = 'textarea';
+      field.placeholder = this.extractAssistFieldHint(rawQuestion, 'Saw, drill, square');
+      return field;
+    }
+
+    if (lower.includes('how many') && lower.includes('shel')) {
+      field.id = 'shelf_count';
+      field.label = 'Shelf count';
+      field.type = 'number';
+      field.placeholder = '3';
+      return field;
+    }
+
+    if (lower.includes('material')) {
+      field.id = 'material';
+      field.label = 'Material';
+      field.placeholder = this.extractAssistFieldHint(rawQuestion, 'Plywood, pine, MDF');
+      return field;
+    }
+
+    if (lower.includes("what's it holding") || lower.includes('what is it holding') || lower.includes('what will it hold')) {
+      field.id = 'intended_load';
+      field.label = 'What it will hold';
+      field.placeholder = 'Books, decor, kitchen items';
+      return field;
+    }
+
+    return field;
+  }
+
+  buildAssistFieldFromQuestionBlock(block, index) {
+    if (!block || !Array.isArray(block.options) || block.options.length < 2) {
+      return null;
+    }
+
+    const field = this.buildAssistFieldFromQuestion(block.question, index) || {
+      id: this.buildAssistFieldId(block.question, index),
+      label: this.cleanAssistChoiceText(block.question),
+      description: String(block.question || '').trim(),
+      type: 'text',
+      placeholder: '',
+      required: true,
+      options: []
+    };
+
+    field.type = 'select';
+    field.description = String(block.question || '').trim();
+    field.options = block.options.map((option, optionIndex) => {
+      const label = String(option?.label || '').trim();
+      if (!label) return null;
+      return {
+        value: label,
+        label,
+        description: String(option?.description || this.getAssistOptionKey(optionIndex)).trim()
+      };
+    }).filter(Boolean);
+    return field.options.length >= 2 ? field : null;
+  }
+
   buildAssistWorkflowStepFromText(...values) {
     for (const value of values) {
+      const questionBlocks = this.extractAssistQuestionBlocks(value);
+      if (questionBlocks.length > 0) {
+        const fields = questionBlocks
+          .map((block, index) => this.buildAssistFieldFromQuestionBlock(block, index))
+          .filter(Boolean);
+        if (fields.length > 0) {
+          return {
+            stepType: 'ask_form',
+            title: 'Provide the missing details',
+            summary: 'Answer the questions below so the task can continue.',
+            freeTextAllowed: true,
+            fields
+          };
+        }
+      }
+
       const enumeratedChoices = this.extractAssistEnumeratedChoices(value);
       if (enumeratedChoices.length > 0) {
         return {
@@ -5927,22 +6218,56 @@ export class WorkspaceDetailPage {
           choices: inlineChoices
         };
       }
+
+      const questions = this.extractAssistQuestions(value);
+      if (questions.length >= 2) {
+        const fields = questions.map((question, index) => this.buildAssistFieldFromQuestion(question, index)).filter(Boolean);
+        if (fields.length > 0) {
+          return {
+            stepType: 'ask_form',
+            title: 'Provide the missing details',
+            summary: 'Answer the questions below so the task can continue.',
+            freeTextAllowed: true,
+            fields
+          };
+        }
+      }
     }
     return null;
   }
 
-  getAssistResponseDisplayText(response, question) {
+  trimAssistQuestionnaireFromResponse(response, workflowStep = null) {
+    const text = String(response || '').trim();
+    if (!text || workflowStep?.stepType !== 'ask_form') {
+      return text;
+    }
+
+    const questionBlocks = this.extractAssistQuestionBlocks(text);
+    if (questionBlocks.length === 0) {
+      return text;
+    }
+
+    const lines = text.split(/\r?\n/);
+    const startIndex = lines.findIndex((line) => /^\s*\d+[.)]\s+/.test(String(line || '')));
+    if (startIndex < 0) {
+      return text;
+    }
+
+    return lines.slice(0, startIndex).join('\n').trim();
+  }
+
+  getAssistResponseDisplayText(response, question, workflowStep = null) {
     const rawResponse = String(response || '').trim();
     const rawQuestion = String(question || '').trim();
     if (!rawResponse) return '';
-    if (!rawQuestion) return rawResponse;
+    if (!rawQuestion) return this.trimAssistQuestionnaireFromResponse(rawResponse, workflowStep);
 
     const normalize = (value) => this.cleanTaskResultNextStepText(value)
       .replace(/[?!.,;:]+$/g, '')
       .toLowerCase();
 
     const normalizedQuestion = normalize(rawQuestion);
-    if (!normalizedQuestion) return rawResponse;
+    if (!normalizedQuestion) return this.trimAssistQuestionnaireFromResponse(rawResponse, workflowStep);
 
     const paragraphs = rawResponse
       .split(/\n\s*\n/)
@@ -5950,7 +6275,7 @@ export class WorkspaceDetailPage {
       .filter(Boolean);
     if (paragraphs.length > 0 && normalize(paragraphs[paragraphs.length - 1]) === normalizedQuestion) {
       paragraphs.pop();
-      return paragraphs.join('\n\n').trim();
+      return this.trimAssistQuestionnaireFromResponse(paragraphs.join('\n\n').trim(), workflowStep);
     }
 
     const lines = rawResponse.split(/\r?\n/);
@@ -5962,23 +6287,52 @@ export class WorkspaceDetailPage {
       while (lines.length > 0 && !String(lines[lines.length - 1] || '').trim()) {
         lines.pop();
       }
-      return lines.join('\n').trim();
+      return this.trimAssistQuestionnaireFromResponse(lines.join('\n').trim(), workflowStep);
     }
 
-    return rawResponse;
+    return this.trimAssistQuestionnaireFromResponse(rawResponse, workflowStep);
   }
 
   setAssistWorkflowStepUI(workflowStep) {
+    const normalizedStep = this.normalizeAssistWorkflowStep(workflowStep);
+    if (!normalizedStep) {
+      this.clearAssistChoiceStepUI();
+      this.clearAssistFormStepUI();
+      return;
+    }
+
+    if (normalizedStep.stepType === 'ask_choice') {
+      this.setAssistChoiceStepUI(normalizedStep);
+      this.clearAssistFormStepUI();
+      return;
+    }
+
+    if (normalizedStep.stepType === 'ask_form') {
+      this.clearAssistChoiceStepUI();
+      this.setAssistFormStepUI(normalizedStep);
+      return;
+    }
+
+    this.clearAssistChoiceStepUI();
+    this.clearAssistFormStepUI();
+  }
+
+  clearAssistChoiceStepUI() {
     if (!this.elements.taskAssistChoiceWrap || !this.elements.taskAssistChoiceList) return;
 
-    const normalizedStep = this.normalizeAssistWorkflowStep(workflowStep);
-    if (!normalizedStep || normalizedStep.stepType !== 'ask_choice' || normalizedStep.choices.length === 0) {
-      this.elements.taskAssistChoiceList.innerHTML = '';
-      if (this.elements.taskAssistChoiceSummary) {
-        this.elements.taskAssistChoiceSummary.textContent = '';
-        this.elements.taskAssistChoiceSummary.classList.add('d-none');
-      }
-      this.elements.taskAssistChoiceWrap.classList.add('d-none');
+    this.elements.taskAssistChoiceList.innerHTML = '';
+    if (this.elements.taskAssistChoiceSummary) {
+      this.elements.taskAssistChoiceSummary.textContent = '';
+      this.elements.taskAssistChoiceSummary.classList.add('d-none');
+    }
+    this.elements.taskAssistChoiceWrap.classList.add('d-none');
+  }
+
+  setAssistChoiceStepUI(normalizedStep) {
+    if (!this.elements.taskAssistChoiceWrap || !this.elements.taskAssistChoiceList || !Array.isArray(normalizedStep?.choices)) return;
+
+    if (normalizedStep.choices.length === 0) {
+      this.clearAssistChoiceStepUI();
       return;
     }
 
@@ -6005,7 +6359,7 @@ export class WorkspaceDetailPage {
         this.currentBlockedTask.selectedChoiceLabel = selectedChoice.label;
         this.currentBlockedTask.selectedChoiceNumber = selectedChoice.number || '';
         this.currentBlockedTask.workflowStep = normalizedStep;
-        this.setAssistWorkflowStepUI(normalizedStep);
+        this.setAssistChoiceStepUI(normalizedStep);
       });
     });
 
@@ -6016,6 +6370,177 @@ export class WorkspaceDetailPage {
     }
 
     this.elements.taskAssistChoiceWrap.classList.remove('d-none');
+  }
+
+  clearAssistFormStepUI() {
+    if (!this.elements.taskAssistFormWrap || !this.elements.taskAssistFormFields) return;
+
+    this.elements.taskAssistFormFields.innerHTML = '';
+    if (this.elements.taskAssistFormSummary) {
+      this.elements.taskAssistFormSummary.textContent = '';
+      this.elements.taskAssistFormSummary.classList.add('d-none');
+    }
+    this.elements.taskAssistFormWrap.classList.add('d-none');
+  }
+
+  getAssistFormFieldPrompt(field) {
+    const description = String(field?.description || '').trim();
+    if (description) {
+      return description.endsWith('?') ? description : `${description}?`;
+    }
+
+    const label = String(field?.label || '').trim();
+    if (!label) return '';
+    return label.endsWith('?') ? label : `${label}?`;
+  }
+
+  setAssistFormFieldValue(fieldId, value) {
+    if (!this.currentBlockedTask || !fieldId) return;
+
+    if (!this.currentBlockedTask.selectedFieldValues || typeof this.currentBlockedTask.selectedFieldValues !== 'object') {
+      this.currentBlockedTask.selectedFieldValues = {};
+    }
+
+    const normalizedValue = String(value || '').trim();
+    if (!normalizedValue) {
+      delete this.currentBlockedTask.selectedFieldValues[fieldId];
+      return;
+    }
+
+    this.currentBlockedTask.selectedFieldValues[fieldId] = normalizedValue;
+  }
+
+  collectAssistFormFieldValues(step = this.currentBlockedTask?.workflowStep) {
+    const normalizedStep = this.normalizeAssistWorkflowStep(step);
+    if (!normalizedStep || normalizedStep.stepType !== 'ask_form' || !Array.isArray(normalizedStep.fields)) {
+      return [];
+    }
+
+    const selectedValues = this.currentBlockedTask?.selectedFieldValues && typeof this.currentBlockedTask.selectedFieldValues === 'object'
+      ? this.currentBlockedTask.selectedFieldValues
+      : {};
+
+    return normalizedStep.fields.map((field) => {
+      const id = String(field?.id || '').trim();
+      const label = String(field?.label || '').trim();
+      const value = String(selectedValues[id] || '').trim();
+      if (!id || !value) return null;
+      return { id, label, value };
+    }).filter(Boolean);
+  }
+
+  setAssistFormStepUI(normalizedStep) {
+    if (!this.elements.taskAssistFormWrap || !this.elements.taskAssistFormFields || !Array.isArray(normalizedStep?.fields)) return;
+
+    if (normalizedStep.fields.length === 0) {
+      this.clearAssistFormStepUI();
+      return;
+    }
+
+    const selectedValues = this.currentBlockedTask?.selectedFieldValues && typeof this.currentBlockedTask.selectedFieldValues === 'object'
+      ? this.currentBlockedTask.selectedFieldValues
+      : {};
+
+    this.elements.taskAssistFormFields.innerHTML = normalizedStep.fields.map((field, fieldIndex) => {
+      const fieldId = String(field.id || '').trim();
+      const label = String(field.label || '').trim();
+      const description = String(field.description || '').trim();
+      const placeholder = String(field.placeholder || '').trim();
+      const prompt = this.getAssistFormFieldPrompt(field);
+      const requiredMark = field.required ? ' <span aria-hidden="true">*</span>' : '';
+      const currentValue = String(selectedValues[fieldId] || '').trim();
+      const value = this.escapeHtml(currentValue);
+      const hint = description
+        && description !== prompt
+        ? `<div class="workspace-detail-task-assist-form-hint">${this.escapeHtml(description)}</div>`
+        : '';
+      const questionIntro = `
+        <div class="workspace-detail-task-assist-form-question">
+          <span class="workspace-detail-task-assist-form-number">${fieldIndex + 1}</span>
+          <div class="workspace-detail-task-assist-form-question-copy">
+            <div class="workspace-detail-task-assist-form-prompt">${this.escapeHtml(prompt || label)}</div>
+            ${hint}
+          </div>
+        </div>
+      `;
+
+      if (field.type === 'textarea') {
+        return `
+          <div class="workspace-detail-task-assist-form-field">
+            ${questionIntro}
+            <label class="form-label" for="workspace-detail-task-assist-field-${this.escapeHtml(fieldId)}">${this.escapeHtml(label)}${requiredMark}</label>
+            <textarea id="workspace-detail-task-assist-field-${this.escapeHtml(fieldId)}" class="form-control" rows="3" data-assist-field-id="${this.escapeHtml(fieldId)}" placeholder="${this.escapeHtml(placeholder)}">${value}</textarea>
+          </div>
+        `;
+      }
+
+      if (field.type === 'select') {
+        const options = Array.isArray(field.options) ? field.options : [];
+        const optionsMarkup = options.map((option, optionIndex) => {
+          const optionValue = String(option?.value || '').trim();
+          const optionLabel = String(option?.label || option?.value || '').trim();
+          const optionDescription = String(option?.description || '').trim();
+          if (!optionValue || !optionLabel) return '';
+          const checked = currentValue === optionValue ? ' checked' : '';
+          return `
+            <label class="workspace-detail-task-assist-option">
+              <input
+                class="workspace-detail-task-assist-option-input"
+                type="radio"
+                name="workspace-detail-task-assist-field-${this.escapeHtml(fieldId)}"
+                value="${this.escapeHtml(optionValue)}"
+                data-assist-field-id="${this.escapeHtml(fieldId)}"${checked}
+              >
+              <span class="workspace-detail-task-assist-option-card">
+                <span class="workspace-detail-task-assist-option-key">${this.escapeHtml(optionDescription || this.getAssistOptionKey(optionIndex))}</span>
+                <span class="workspace-detail-task-assist-option-copy">
+                  <span class="workspace-detail-task-assist-option-label">${this.escapeHtml(optionLabel)}</span>
+                </span>
+              </span>
+            </label>
+          `;
+        }).join('');
+
+        return `
+          <div class="workspace-detail-task-assist-form-field">
+            ${questionIntro}
+            <div class="workspace-detail-task-assist-option-group" role="radiogroup" aria-label="${this.escapeHtml(prompt || label)}${field.required ? ' (required)' : ''}">
+              ${optionsMarkup}
+            </div>
+          </div>
+        `;
+      }
+
+      const inputType = field.type === 'number' ? 'number' : 'text';
+      return `
+        <div class="workspace-detail-task-assist-form-field">
+          ${questionIntro}
+          <label class="form-label" for="workspace-detail-task-assist-field-${this.escapeHtml(fieldId)}">${this.escapeHtml(label)}${requiredMark}</label>
+          <input id="workspace-detail-task-assist-field-${this.escapeHtml(fieldId)}" class="form-control" type="${inputType}" data-assist-field-id="${this.escapeHtml(fieldId)}" value="${value}" placeholder="${this.escapeHtml(placeholder)}">
+        </div>
+      `;
+    }).join('');
+
+    this.elements.taskAssistFormFields.querySelectorAll('[data-assist-field-id]').forEach((fieldElement) => {
+      const syncValue = () => {
+        const fieldId = String(fieldElement.getAttribute('data-assist-field-id') || '').trim();
+        if (!fieldId) return;
+        if (fieldElement instanceof HTMLInputElement && fieldElement.type === 'radio' && !fieldElement.checked) {
+          return;
+        }
+        this.setAssistFormFieldValue(fieldId, fieldElement.value);
+      };
+      fieldElement.addEventListener('input', syncValue);
+      fieldElement.addEventListener('change', syncValue);
+    });
+
+    if (this.elements.taskAssistFormSummary) {
+      const summary = String(normalizedStep.summary || '').trim();
+      this.elements.taskAssistFormSummary.textContent = summary;
+      this.elements.taskAssistFormSummary.classList.toggle('d-none', !summary);
+    }
+
+    this.elements.taskAssistFormWrap.classList.remove('d-none');
   }
 
   getAssistActionButton(action) {
@@ -6186,6 +6711,14 @@ export class WorkspaceDetailPage {
       };
     }
 
+    if (workflowStep?.stepType === 'ask_form' && Array.isArray(workflowStep.fields) && workflowStep.fields.length > 0 &&
+        allows('continue_with_instruction')) {
+      return {
+        action: 'continue_with_instruction',
+        text: 'Recommended: Answer the questions below and continue.'
+      };
+    }
+
     if (browserRelated && browserAgent && allows('switch_agent_retry')) {
       return {
         action: 'switch_agent_retry',
@@ -6241,9 +6774,11 @@ export class WorkspaceDetailPage {
     const reason = String(payload.reason || payloadHumanLoop.reason || humanLoop.reason || 'The assigned agent needs guidance before it can continue.').trim();
     const question = String(payload.question || payloadHumanLoop.question || humanLoop.question || 'How should I proceed?').trim();
     const response = String(payload.agent_response || payloadHumanLoop.agent_response || humanLoop.agent_response || '').trim();
-    const displayResponse = this.getAssistResponseDisplayText(response, question);
     const statusText = getDisplayStatus(task.status);
     const timestamp = formatDate(task.updated_at || task.created_at);
+    const selectedFieldValues = this.normalizeAssistFieldValues(
+      payload.field_values || payloadHumanLoop.field_values || humanLoop.field_values
+    );
 
     const currentAgent = String(task.to || '').trim();
     const baseWorkflowStep = this.normalizeAssistWorkflowStep(payload.workflow_step)
@@ -6251,6 +6786,7 @@ export class WorkspaceDetailPage {
       || this.normalizeAssistWorkflowStep(humanLoop.workflow_step)
       || this.normalizeAssistWorkflowStep(task?.context?.planning_workflow_step)
       || this.buildAssistWorkflowStepFromText(question, response);
+    const displayResponse = this.getAssistResponseDisplayText(response, question, baseWorkflowStep);
     const recommendation = this.determineAssistRecommendation(
       reasonCode,
       suggestedActions,
@@ -6274,7 +6810,8 @@ export class WorkspaceDetailPage {
       specialistAction: recommendation?.specialistAction || null,
       selectedChoiceId: '',
       selectedChoiceLabel: '',
-      selectedChoiceNumber: ''
+      selectedChoiceNumber: '',
+      selectedFieldValues
     };
 
     this.setTaskModalHeaderId(this.elements.taskAssistId, task.id);
@@ -6293,9 +6830,22 @@ export class WorkspaceDetailPage {
     if (this.elements.taskAssistResponse && this.elements.taskAssistResponseWrap) {
       if (displayResponse) {
         this.elements.taskAssistResponse.textContent = displayResponse;
-        this.elements.taskAssistResponseWrap.classList.remove('d-none');
+        this.elements.taskAssistResponse.classList.remove('d-none');
       } else {
         this.elements.taskAssistResponse.textContent = '';
+        this.elements.taskAssistResponse.classList.add('d-none');
+      }
+    }
+    if (this.elements.taskAssistQuestionWrap) {
+      const shouldShowQuestion = Boolean(question) && workflowStep?.stepType !== 'ask_form';
+      this.elements.taskAssistQuestionWrap.classList.toggle('d-none', !shouldShowQuestion);
+    }
+    if (this.elements.taskAssistResponseWrap) {
+      const shouldShowPrompt = Boolean(displayResponse) || Boolean(question && workflowStep?.stepType !== 'ask_form') ||
+        Boolean(workflowStep?.stepType === 'ask_form');
+      if (shouldShowPrompt) {
+        this.elements.taskAssistResponseWrap.classList.remove('d-none');
+      } else {
         this.elements.taskAssistResponseWrap.classList.add('d-none');
       }
     }
@@ -6320,6 +6870,7 @@ export class WorkspaceDetailPage {
     const selectedChoiceId = String(this.currentBlockedTask?.selectedChoiceId || '').trim();
     const selectedChoiceLabel = String(this.currentBlockedTask?.selectedChoiceLabel || '').trim();
     const selectedChoiceNumber = String(this.currentBlockedTask?.selectedChoiceNumber || '').trim();
+    const fieldValues = this.collectAssistFormFieldValues();
     if (action === 'switch_agent_retry' && !selectedAgent) {
       if (window.Toast) window.Toast.error('Select an agent to switch before retrying.');
       return;
@@ -6336,6 +6887,26 @@ export class WorkspaceDetailPage {
       if (window.Toast) window.Toast.warning('Choose a next step or add guidance before continuing.');
       return;
     }
+    if (action === 'continue_with_instruction' &&
+        this.currentBlockedTask.workflowStep?.stepType === 'ask_form') {
+      const requiredFields = Array.isArray(this.currentBlockedTask.workflowStep?.fields)
+        ? this.currentBlockedTask.workflowStep.fields.filter((field) => field?.required !== false)
+        : [];
+      const missingRequired = requiredFields.filter((field) => {
+        const fieldId = String(field?.id || '').trim();
+        return !fieldValues.some((item) => item.id === fieldId && String(item.value || '').trim());
+      });
+
+      if (missingRequired.length > 0) {
+        if (window.Toast) window.Toast.warning('Answer the required questions before continuing.');
+        return;
+      }
+
+      if (fieldValues.length === 0 && !message) {
+        if (window.Toast) window.Toast.warning('Answer at least one question or add guidance before continuing.');
+        return;
+      }
+    }
 
     const payload = {
       action,
@@ -6344,7 +6915,8 @@ export class WorkspaceDetailPage {
       agent: selectedAgent || undefined,
       choice_id: selectedChoiceId || undefined,
       choice_label: selectedChoiceLabel || undefined,
-      choice_number: selectedChoiceNumber || undefined
+      choice_number: selectedChoiceNumber || undefined,
+      field_values: fieldValues.length > 0 ? fieldValues : undefined
     };
 
     try {

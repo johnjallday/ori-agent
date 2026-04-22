@@ -13,11 +13,34 @@ type TaskBlockedChoice struct {
 	Number      string `json:"number,omitempty"`
 }
 
+type TaskBlockedFieldOption struct {
+	Value       string `json:"value,omitempty"`
+	Label       string `json:"label,omitempty"`
+	Description string `json:"description,omitempty"`
+}
+
+type TaskBlockedField struct {
+	ID          string                   `json:"id,omitempty"`
+	Label       string                   `json:"label,omitempty"`
+	Description string                   `json:"description,omitempty"`
+	Type        string                   `json:"type,omitempty"`
+	Placeholder string                   `json:"placeholder,omitempty"`
+	Required    bool                     `json:"required,omitempty"`
+	Options     []TaskBlockedFieldOption `json:"options,omitempty"`
+}
+
+type TaskBlockedFieldValue struct {
+	ID    string `json:"id,omitempty"`
+	Label string `json:"label,omitempty"`
+	Value string `json:"value,omitempty"`
+}
+
 type TaskBlockedWorkflowStep struct {
 	StepType        string              `json:"step_type,omitempty"`
 	Title           string              `json:"title,omitempty"`
 	Summary         string              `json:"summary,omitempty"`
 	Choices         []TaskBlockedChoice `json:"choices,omitempty"`
+	Fields          []TaskBlockedField  `json:"fields,omitempty"`
 	FreeTextAllowed bool                `json:"free_text_allowed,omitempty"`
 }
 
