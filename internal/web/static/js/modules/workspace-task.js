@@ -97,6 +97,7 @@ export class WorkspaceTaskPage {
     this.taskAssistResponseExpanded = false;
     this.workspaceRealtimeUnsubscribe = null;
     this.pendingRefreshTimer = null;
+    this.titleEditInProgress = false;
     this.elements = {};
   }
 
@@ -116,6 +117,7 @@ export class WorkspaceTaskPage {
       content: document.getElementById('workspace-task-page-content'),
       workspaceName: document.getElementById('workspace-task-workspace-name'),
       title: document.getElementById('workspace-task-title'),
+      titleEditBtn: document.getElementById('workspace-task-title-edit'),
       subtitle: document.getElementById('workspace-task-subtitle'),
       status: document.getElementById('workspace-task-status'),
       taskId: document.getElementById('workspace-task-id'),
@@ -154,6 +156,8 @@ export class WorkspaceTaskPage {
   }
 
   bindEvents() {
+    this.elements.titleEditBtn?.addEventListener('click', () => this.startTitleEdit());
+    this.elements.title?.addEventListener('dblclick', () => this.startTitleEdit());
     this.elements.blockedRequestToggle?.addEventListener('click', () => this.toggleAssistResponseExpanded());
     this.elements.assistRetryBtn?.addEventListener('click', () => this.submitTaskAssist('retry'));
     this.elements.assistContinueBtn?.addEventListener('click', () => this.submitTaskAssist('continue_with_instruction'));
@@ -256,6 +260,106 @@ export class WorkspaceTaskPage {
     const normalized = String(message || '').trim();
     this.elements.alert.textContent = normalized;
     this.elements.alert.classList.toggle('d-none', !normalized);
+  }
+
+  startTitleEdit() {
+    if (this.titleEditInProgress || !this.elements.title) return;
+
+    const titleElement = this.elements.title;
+    const editButton = this.elements.titleEditBtn;
+    const currentValue = this.getTaskDisplayLabel();
+    this.titleEditInProgress = true;
+
+    const input = document.createElement('textarea');
+    input.className = 'workspace-task-page-title-input';
+    input.rows = 1;
+    input.value = currentValue;
+    input.setAttribute('aria-label', 'Edit task title');
+
+    const syncHeight = () => {
+      input.style.height = 'auto';
+      input.style.height = `${Math.max(input.scrollHeight, 70)}px`;
+    };
+
+    titleElement.style.display = 'none';
+    if (editButton) {
+      editButton.style.display = 'none';
+    }
+    titleElement.insertAdjacentElement('afterend', input);
+    syncHeight();
+    input.focus();
+    input.select();
+
+    const finishEdit = async (save) => {
+      if (!this.titleEditInProgress) return;
+      this.titleEditInProgress = false;
+
+      const nextValue = input.value.trim();
+      input.remove();
+      titleElement.style.display = '';
+      if (editButton) {
+        editButton.style.display = '';
+      }
+
+      if (!save || nextValue === currentValue) {
+        return;
+      }
+
+      if (!nextValue) {
+        this.notify('error', 'Task title cannot be empty.');
+        return;
+      }
+
+      try {
+        await this.updateTaskFields({ description: nextValue });
+        this.notify('success', 'Task title updated');
+      } catch (error) {
+        console.error('Failed to update task title:', error);
+        this.notify('error', error?.message || 'Failed to update task title');
+      }
+    };
+
+    input.addEventListener('input', syncHeight);
+    input.addEventListener('keydown', (event) => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        finishEdit(false);
+        return;
+      }
+
+      if (event.key === 'Enter' && !event.shiftKey) {
+        event.preventDefault();
+        finishEdit(true);
+      }
+    });
+    input.addEventListener('blur', () => {
+      finishEdit(true);
+    });
+  }
+
+  async updateTaskFields(patch) {
+    const response = await fetch(`/api/orchestration/tasks/${encodeURIComponent(this.taskId)}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(patch)
+    });
+
+    if (!response.ok) {
+      const text = await response.text();
+      throw new Error(text || 'Failed to update task');
+    }
+
+    const updatedTask = await response.json();
+    this.task = updatedTask || this.task;
+    if (Array.isArray(this.tasks)) {
+      this.tasks = this.tasks.map((task) => (
+        String(task?.id || '') === String(this.taskId)
+          ? { ...task, ...(updatedTask || {}) }
+          : task
+      ));
+    }
+    this.render();
+    return updatedTask;
   }
 
   getTaskDisplayLabel(task = this.task) {
@@ -444,6 +548,7 @@ export class WorkspaceTaskPage {
   }
 
   renderHero(statusInfo) {
+    const taskTitle = this.getTaskDisplayLabel();
     const detailsSummary = summarizeText(this.task?.details || this.currentBlockedTask?.reason || '', 240);
     const subtitleParts = [];
     if (detailsSummary) subtitleParts.push(detailsSummary);
@@ -454,8 +559,9 @@ export class WorkspaceTaskPage {
       this.elements.workspaceName.textContent = String(this.workspace?.name || 'Workspace').trim() || 'Workspace';
     }
     if (this.elements.title) {
-      this.elements.title.textContent = this.getTaskDisplayLabel();
+      this.elements.title.textContent = taskTitle;
     }
+    document.title = `${taskTitle} - Ori Agent`;
     if (this.elements.subtitle) {
       this.elements.subtitle.textContent = subtitleParts.join(' • ');
     }

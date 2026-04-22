@@ -30,7 +30,19 @@
               <span aria-hidden="true">/</span>
               <span>Task Detail</span>
             </div>
-            <h1 id="workspace-task-title" class="workspace-task-page-title">Loading task...</h1>
+            <div class="workspace-task-page-title-row">
+              <h1 id="workspace-task-title" class="workspace-task-page-title">Loading task...</h1>
+              <button
+                type="button"
+                id="workspace-task-title-edit"
+                class="workspace-task-page-title-edit"
+                aria-label="Edit task title"
+                title="Edit task title">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                  <path d="M20.71,7.04C21.1,6.65 21.1,6 20.71,5.63L18.37,3.29C18,2.9 17.35,2.9 16.96,3.29L15.12,5.12L18.87,8.87M3,17.25V21H6.75L17.81,9.93L14.06,6.18L3,17.25Z"/>
+                </svg>
+              </button>
+            </div>
             <p id="workspace-task-subtitle" class="workspace-task-page-subtitle">Pulling task context, agent assignment, and response state.</p>
           </div>
           <div class="workspace-task-page-hero-meta">
@@ -297,6 +309,62 @@
       line-height: 1.02;
       color: var(--text-primary);
       max-width: 14ch;
+    }
+
+    .workspace-task-page-title-row {
+      display: flex;
+      align-items: flex-start;
+      gap: 0.85rem;
+      margin-top: 0.25rem;
+    }
+
+    .workspace-task-page-title-edit {
+      flex: 0 0 auto;
+      width: 2.4rem;
+      height: 2.4rem;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      margin-top: 0.45rem;
+      border: 1px solid color-mix(in srgb, var(--border-color) 90%, transparent);
+      border-radius: 999px;
+      background: color-mix(in srgb, var(--bg-primary) 84%, transparent);
+      color: var(--text-secondary);
+      transition: color 0.16s ease, border-color 0.16s ease, transform 0.16s ease, background 0.16s ease;
+    }
+
+    .workspace-task-page-title-edit:hover {
+      color: var(--primary-color);
+      border-color: color-mix(in srgb, var(--primary-color) 38%, var(--border-color));
+      background: color-mix(in srgb, var(--primary-color) 10%, var(--bg-primary));
+      transform: translateY(-1px);
+    }
+
+    .workspace-task-page-title-edit:focus-visible {
+      outline: 2px solid color-mix(in srgb, var(--primary-color) 54%, transparent);
+      outline-offset: 2px;
+    }
+
+    .workspace-task-page-title-input {
+      width: min(100%, 14ch);
+      min-height: 4.4rem;
+      padding: 0.2rem 0 0.35rem;
+      border: none;
+      border-bottom: 2px solid color-mix(in srgb, var(--primary-color) 58%, transparent);
+      background: transparent;
+      color: var(--text-primary);
+      font-family: "Fraunces", serif;
+      font-size: clamp(2rem, 4vw, 3.1rem);
+      font-weight: 700;
+      line-height: 1.02;
+      resize: none;
+      overflow: hidden;
+      box-shadow: none;
+    }
+
+    .workspace-task-page-title-input:focus {
+      outline: none;
+      border-bottom-color: color-mix(in srgb, var(--primary-color) 88%, transparent);
     }
 
     .workspace-task-page-subtitle {
