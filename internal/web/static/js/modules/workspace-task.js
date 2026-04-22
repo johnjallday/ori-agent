@@ -121,14 +121,19 @@ export class WorkspaceTaskPage {
       breadcrumbTitle: document.getElementById('workspace-task-breadcrumb-title'),
       copyIdBtn: document.getElementById('workspace-task-copy-id'),
       copyLinkBtn: document.getElementById('workspace-task-copy-link'),
+      deleteBtn: document.getElementById('workspace-task-delete'),
       subtitle: document.getElementById('workspace-task-subtitle'),
       status: document.getElementById('workspace-task-status'),
+      heroActions: document.getElementById('workspace-task-hero-actions'),
+      liveBadge: document.getElementById('workspace-task-live-badge'),
       overview: document.getElementById('workspace-task-overview'),
       snapshot: document.getElementById('workspace-task-snapshot'),
       relationshipsCard: document.getElementById('workspace-task-relationships-card'),
       relationships: document.getElementById('workspace-task-relationships'),
       outputCard: document.getElementById('workspace-task-output-card'),
       output: document.getElementById('workspace-task-output'),
+      scheduleCard: document.getElementById('workspace-task-schedule-card'),
+      schedule: document.getElementById('workspace-task-schedule'),
       stepsCard: document.getElementById('workspace-task-steps-card'),
       steps: document.getElementById('workspace-task-steps'),
       contextCard: document.getElementById('workspace-task-context-card'),
@@ -161,6 +166,7 @@ export class WorkspaceTaskPage {
     this.elements.title?.addEventListener('dblclick', () => this.startTitleEdit());
     this.elements.copyIdBtn?.addEventListener('click', () => this.copyToClipboard(this.taskId, 'Task ID copied'));
     this.elements.copyLinkBtn?.addEventListener('click', () => this.copyToClipboard(window.location.href, 'Link copied'));
+    this.elements.deleteBtn?.addEventListener('click', () => this.deleteTask());
     this.elements.blockedRequestToggle?.addEventListener('click', () => this.toggleAssistResponseExpanded());
     this.elements.assistRetryBtn?.addEventListener('click', () => this.submitTaskAssist('retry'));
     this.elements.assistContinueBtn?.addEventListener('click', () => this.submitTaskAssist('continue_with_instruction'));
@@ -240,6 +246,12 @@ export class WorkspaceTaskPage {
     const eventTaskId = String(payload?.task_id || payload?.id || payload?.task?.id || '').trim();
     if (eventTaskId && eventTaskId !== this.taskId) {
       return;
+    }
+
+    if (this.elements.root) {
+      this.elements.root.classList.remove('workspace-task-page-flash');
+      void this.elements.root.offsetWidth;
+      this.elements.root.classList.add('workspace-task-page-flash');
     }
 
     window.clearTimeout(this.pendingRefreshTimer);
@@ -557,10 +569,12 @@ export class WorkspaceTaskPage {
     this.taskAssistResponseExpanded = false;
 
     this.renderHero(statusInfo);
+    this.renderHeroActions(statusInfo);
     this.renderOverview();
     this.renderSnapshot(statusInfo);
     this.renderRelationships();
     this.renderOutput();
+    this.renderSchedule();
     this.renderExecutionSteps();
     this.renderContext();
     this.renderBlockedState(statusInfo);
@@ -587,6 +601,46 @@ export class WorkspaceTaskPage {
       this.elements.status.textContent = statusInfo.label;
       this.elements.status.dataset.state = statusInfo.className;
     }
+    if (this.elements.liveBadge) {
+      const isLive = statusInfo.className === 'in_progress' && this.workspaceRealtimeUnsubscribe;
+      this.elements.liveBadge.hidden = !isLive;
+    }
+  }
+
+  renderHeroActions(statusInfo) {
+    if (!this.elements.heroActions) return;
+
+    const status = String(this.task?.status || '').trim().toLowerCase();
+    const hasAgent = Boolean(this.task?.to);
+    const buttons = [];
+
+    if (status === 'pending' && hasAgent) {
+      buttons.push(`<button type="button" class="workspace-task-page-hero-btn workspace-task-page-hero-btn-primary" data-action="execute">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M8,5.14V19.14L19,12.14L8,5.14Z"/></svg>Run
+      </button>`);
+    }
+
+    if (status === 'failed' || status === 'completed') {
+      buttons.push(`<button type="button" class="workspace-task-page-hero-btn" data-action="execute">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M17.65,6.35C16.2,4.9 14.21,4 12,4A8,8 0 0,0 4,12A8,8 0 0,0 12,20C15.73,20 18.84,17.45 19.73,14H17.65C16.83,16.33 14.61,18 12,18A6,6 0 0,1 6,12A6,6 0 0,1 12,6C13.66,6 15.14,6.69 16.22,7.78L13,11H20V4L17.65,6.35Z"/></svg>Re-run
+      </button>`);
+    }
+
+    if ((status === 'pending' || status === 'assigned' || status === 'in_progress') && !statusInfo.isBlocked) {
+      buttons.push(`<button type="button" class="workspace-task-page-hero-btn" data-action="complete">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M21,7L9,19L3.5,13.5L4.91,12.09L9,16.17L19.59,5.59L21,7Z"/></svg>Mark Complete
+      </button>`);
+    }
+
+    this.elements.heroActions.innerHTML = buttons.join('');
+
+    this.elements.heroActions.querySelectorAll('[data-action]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const action = btn.dataset.action;
+        if (action === 'execute') this.executeTask();
+        if (action === 'complete') this.completeTask();
+      });
+    });
   }
 
   renderOverview() {
@@ -644,15 +698,80 @@ export class WorkspaceTaskPage {
     items.push({
       title: 'Task Details',
       value: detailsValue,
-      full: true
+      full: true,
+      editable: true
     });
 
     this.elements.overview.innerHTML = items.map((item) => `
       <article class="workspace-task-overview-item${item.full ? ' full' : ''}">
-        <div class="workspace-task-overview-title">${this.escapeHtml(item.title)}</div>
+        <div class="workspace-task-overview-title">
+          ${this.escapeHtml(item.title)}
+          ${item.editable ? `<button type="button" class="workspace-task-overview-edit-btn" data-edit-field="details" aria-label="Edit details" title="Edit details">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><path d="M20.71,7.04C21.1,6.65 21.1,6 20.71,5.63L18.37,3.29C18,2.9 17.35,2.9 16.96,3.29L15.12,5.12L18.87,8.87M3,17.25V21H6.75L17.81,9.93L14.06,6.18L3,17.25Z"/></svg>
+          </button>` : ''}
+        </div>
         <div class="workspace-task-overview-value">${this.escapeHtml(item.value)}</div>
       </article>
     `).join('');
+
+    this.elements.overview.querySelectorAll('[data-edit-field="details"]').forEach((btn) => {
+      btn.addEventListener('click', () => this.startDetailsEdit(btn));
+    });
+  }
+
+  startDetailsEdit(triggerBtn) {
+    const article = triggerBtn.closest('.workspace-task-overview-item');
+    if (!article) return;
+
+    const valueEl = article.querySelector('.workspace-task-overview-value');
+    if (!valueEl) return;
+
+    const currentValue = String(this.task?.details || '').trim();
+    const textarea = document.createElement('textarea');
+    textarea.className = 'form-control workspace-task-overview-edit-textarea';
+    textarea.rows = 4;
+    textarea.value = currentValue;
+
+    const actions = document.createElement('div');
+    actions.className = 'workspace-task-page-title-edit-actions';
+    actions.style.marginTop = '0.5rem';
+    actions.innerHTML = `
+      <button type="button" class="workspace-task-page-edit-save" aria-label="Save details">Save</button>
+      <button type="button" class="workspace-task-page-edit-cancel" aria-label="Cancel editing">Cancel</button>
+    `;
+
+    valueEl.style.display = 'none';
+    triggerBtn.style.display = 'none';
+    valueEl.insertAdjacentElement('afterend', actions);
+    valueEl.insertAdjacentElement('afterend', textarea);
+    textarea.focus();
+
+    const finish = async (save) => {
+      const nextValue = textarea.value.trim();
+      textarea.remove();
+      actions.remove();
+      valueEl.style.display = '';
+      triggerBtn.style.display = '';
+
+      if (!save || nextValue === currentValue) return;
+
+      try {
+        await this.updateTaskFields({ details: nextValue });
+        this.notify('success', 'Task details updated');
+      } catch (error) {
+        this.notify('error', error?.message || 'Failed to update details');
+      }
+    };
+
+    actions.querySelector('.workspace-task-page-edit-save')?.addEventListener('mousedown', (e) => { e.preventDefault(); finish(true); });
+    actions.querySelector('.workspace-task-page-edit-cancel')?.addEventListener('mousedown', (e) => { e.preventDefault(); finish(false); });
+    textarea.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') { e.preventDefault(); finish(false); }
+    });
+    textarea.addEventListener('blur', (e) => {
+      if (actions.contains(e.relatedTarget)) return;
+      finish(true);
+    });
   }
 
   renderSnapshot(statusInfo) {
@@ -692,6 +811,17 @@ export class WorkspaceTaskPage {
       </div>
     `;
 
+    const currentPriority = Number(this.task?.priority) || 3;
+    const priorityLabels = { 1: '1 - Highest', 2: '2 - High', 3: '3 - Medium', 4: '4 - Low', 5: '5 - Lowest' };
+    const prioritySelectHtml = `
+      <div class="workspace-task-snapshot-item">
+        <span class="workspace-task-snapshot-label">Priority</span>
+        <select id="workspace-task-snapshot-priority" class="workspace-task-snapshot-select">
+          ${[1, 2, 3, 4, 5].map((p) => `<option value="${p}" ${p === currentPriority ? 'selected' : ''}>${this.escapeHtml(priorityLabels[p])}</option>`).join('')}
+        </select>
+      </div>
+    `;
+
     const staticItemsHtml = snapshotItems.map(([label, value]) => `
       <div class="workspace-task-snapshot-item">
         <span class="workspace-task-snapshot-label">${this.escapeHtml(label)}</span>
@@ -699,7 +829,7 @@ export class WorkspaceTaskPage {
       </div>
     `).join('');
 
-    this.elements.snapshot.innerHTML = statusSelectHtml + agentSelectHtml + staticItemsHtml;
+    this.elements.snapshot.innerHTML = statusSelectHtml + agentSelectHtml + prioritySelectHtml + staticItemsHtml;
 
     const statusSelect = document.getElementById('workspace-task-snapshot-status');
     const agentSelect = document.getElementById('workspace-task-snapshot-agent');
@@ -719,6 +849,16 @@ export class WorkspaceTaskPage {
         this.notify('success', 'Agent updated');
       } catch (error) {
         this.notify('error', error?.message || 'Failed to update agent');
+      }
+    });
+
+    const prioritySelect = document.getElementById('workspace-task-snapshot-priority');
+    prioritySelect?.addEventListener('change', async () => {
+      try {
+        await this.updateTaskFields({ priority: Number(prioritySelect.value) || 3 });
+        this.notify('success', 'Priority updated');
+      } catch (error) {
+        this.notify('error', error?.message || 'Failed to update priority');
       }
     });
   }
@@ -821,6 +961,66 @@ export class WorkspaceTaskPage {
 
     this.elements.outputCard.hidden = false;
     this.elements.output.innerHTML = blocks.join('');
+  }
+
+  renderSchedule() {
+    if (!this.elements.schedule || !this.elements.scheduleCard) return;
+
+    const isScheduled = this.task?.schedule_enabled || this.task?.schedule;
+    const history = Array.isArray(this.task?.execution_history) ? this.task.execution_history : [];
+    const executionCount = Number(this.task?.execution_count) || 0;
+    const failureCount = Number(this.task?.failure_count) || 0;
+
+    if (!isScheduled && history.length === 0 && executionCount === 0) {
+      this.elements.scheduleCard.hidden = true;
+      this.elements.schedule.innerHTML = '';
+      return;
+    }
+
+    this.elements.scheduleCard.hidden = false;
+
+    const stats = [];
+    stats.push({ label: 'Total Runs', value: String(executionCount) });
+    stats.push({ label: 'Failures', value: String(failureCount) });
+    if (this.task?.next_run) {
+      stats.push({ label: 'Next Run', value: formatDateTime(this.task.next_run) });
+    }
+    if (this.task?.last_run) {
+      stats.push({ label: 'Last Run', value: formatDateTime(this.task.last_run) });
+    }
+
+    const statsHtml = `
+      <div class="workspace-task-schedule-stats">
+        ${stats.map((s) => `
+          <div class="workspace-task-schedule-stat">
+            <div class="workspace-task-schedule-stat-label">${this.escapeHtml(s.label)}</div>
+            <div class="workspace-task-schedule-stat-value">${this.escapeHtml(s.value)}</div>
+          </div>
+        `).join('')}
+      </div>
+    `;
+
+    let historyHtml = '';
+    if (history.length > 0) {
+      const recentRuns = history.slice(-10).reverse();
+      historyHtml = `
+        <div class="workspace-task-page-mini-label">Recent runs</div>
+        <div class="workspace-task-schedule-history">
+          ${recentRuns.map((run) => {
+            const runStatus = String(run?.status || 'completed').trim().toLowerCase();
+            const statusClass = getStatusClass(runStatus);
+            return `
+              <div class="workspace-task-schedule-run">
+                <span>${this.escapeHtml(formatDateTime(run?.completed_at || run?.started_at))}</span>
+                <span class="workspace-task-schedule-run-status" data-state="${this.escapeHtml(statusClass)}">${this.escapeHtml(getDisplayStatus(runStatus))}</span>
+              </div>
+            `;
+          }).join('')}
+        </div>
+      `;
+    }
+
+    this.elements.schedule.innerHTML = statsHtml + historyHtml;
   }
 
   renderExecutionSteps() {
@@ -1207,6 +1407,69 @@ export class WorkspaceTaskPage {
     ].forEach((button) => {
       if (button) button.disabled = disabled;
     });
+  }
+
+  async deleteTask() {
+    const taskTitle = this.getTaskDisplayLabel();
+    if (!confirm(`Delete "${taskTitle}"? This cannot be undone.`)) return;
+
+    try {
+      const response = await fetch(
+        `/api/orchestration/tasks/${encodeURIComponent(this.taskId)}?workspace_id=${encodeURIComponent(this.workspaceId)}`,
+        { method: 'DELETE' }
+      );
+      if (!response.ok) {
+        const text = await response.text();
+        throw new Error(text || 'Failed to delete task');
+      }
+      window.location.href = `/workspaces/${encodeURIComponent(this.workspaceId)}`;
+    } catch (error) {
+      console.error('Failed to delete task:', error);
+      this.notify('error', error?.message || 'Failed to delete task');
+    }
+  }
+
+  async executeTask() {
+    const status = String(this.task?.status || '').trim().toLowerCase();
+    const isRerun = status === 'completed' || status === 'failed';
+    const label = isRerun ? 'Re-run' : 'Run';
+
+    if (isRerun && !confirm(`${label} this task? Previous results will be replaced.`)) return;
+
+    try {
+      const response = await fetch('/api/orchestration/tasks/execute', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ task_id: this.taskId })
+      });
+      if (!response.ok) {
+        const text = await response.text();
+        throw new Error(text || 'Failed to execute task');
+      }
+      this.notify('success', `Task ${label.toLowerCase()} started`);
+      await this.loadData();
+    } catch (error) {
+      console.error('Failed to execute task:', error);
+      this.notify('error', error?.message || 'Failed to execute task');
+    }
+  }
+
+  async completeTask() {
+    try {
+      const response = await fetch(
+        `/api/orchestration/tasks/${encodeURIComponent(this.taskId)}/complete`,
+        { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }
+      );
+      if (!response.ok) {
+        const text = await response.text();
+        throw new Error(text || 'Failed to complete task');
+      }
+      this.notify('success', 'Task marked as complete');
+      await this.loadData();
+    } catch (error) {
+      console.error('Failed to complete task:', error);
+      this.notify('error', error?.message || 'Failed to complete task');
+    }
   }
 
   async copyToClipboard(text, successMessage = 'Copied') {
