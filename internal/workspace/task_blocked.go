@@ -23,6 +23,7 @@ type TaskBlockedField struct {
 	ID          string                   `json:"id,omitempty"`
 	Label       string                   `json:"label,omitempty"`
 	Description string                   `json:"description,omitempty"`
+	Evidence    string                   `json:"evidence,omitempty"`
 	Type        string                   `json:"type,omitempty"`
 	Placeholder string                   `json:"placeholder,omitempty"`
 	Required    bool                     `json:"required,omitempty"`

@@ -219,8 +219,14 @@ A few quick questions:
 	if len(got.Fields[1].Options) != 3 {
 		t.Fatalf("expected 3 options for second field, got %d", len(got.Fields[1].Options))
 	}
-	if got.Fields[1].Options[1].Label != `2 units (matches your "x2 sets" note)` {
+	if got.Fields[1].Options[1].Label != "2 units" {
 		t.Fatalf("unexpected second field option %q", got.Fields[1].Options[1].Label)
+	}
+	if got.Fields[1].Options[1].Description != `matches your "x2 sets" note.` {
+		t.Fatalf("unexpected second field option description %q", got.Fields[1].Options[1].Description)
+	}
+	if got.Fields[1].Evidence != `matches your "x2 sets" note.` {
+		t.Fatalf("unexpected question evidence %q", got.Fields[1].Evidence)
 	}
 }
 

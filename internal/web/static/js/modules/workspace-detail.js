@@ -202,6 +202,7 @@ export class WorkspaceDetailPage {
     this.currentBlockedTask = null;
     this.currentAssistRecommendation = null;
     this.currentAssistSpecialistAction = null;
+    this.taskAssistResponseExpanded = false;
     this.currentExecutionTaskId = null;
     this.executionMonitorTimer = null;
     this.executionLogKeys = new Set();
@@ -245,10 +246,17 @@ export class WorkspaceDetailPage {
       this.loadDirectories(),
       this.loadSchedules()
     ]);
-    this.maybeResumePendingAssistSpecialistHandoff();
+    const restoredBlockedTask = this.restoreTaskAssistPageFromRoute();
+    if (!restoredBlockedTask) {
+      this.maybeResumePendingAssistSpecialistHandoff();
+    }
     this.activateWorkspace();
     this.setupRealtime();
-    if (!this.checkAutoOpenCreateAgent()) {
+    if (restoredBlockedTask) {
+      this.scheduleTaskAssistScrollReset(this.elements.taskAssistPage);
+      window.setTimeout(() => this.scheduleTaskAssistScrollReset(this.elements.taskAssistPage), 360);
+    }
+    if (!restoredBlockedTask && !this.checkAutoOpenCreateAgent()) {
       await this.maybePromptForMissingEntryAgent();
     }
   }
@@ -1209,10 +1217,19 @@ export class WorkspaceDetailPage {
       taskConfirmConfirmBtn: document.getElementById('workspace-detail-task-confirm-confirm'),
 
       // Assist modal
-      taskAssistModal: document.getElementById('workspace-detail-task-assist-modal'),
+      workspaceDetailView: document.getElementById('workspace-detail-view'),
+      taskAssistPage: document.getElementById('workspace-detail-task-assist-page'),
+      taskAssistBackBtn: document.getElementById('workspace-detail-task-assist-back'),
       taskAssistId: document.getElementById('workspace-detail-task-assist-id'),
+      taskAssistAgentName: document.getElementById('workspace-detail-task-assist-agent-name'),
       taskAssistMeta: document.getElementById('workspace-detail-task-assist-meta'),
       taskAssistReason: document.getElementById('workspace-detail-task-assist-reason'),
+      taskAssistContextScroll: document.getElementById('workspace-detail-task-assist-context-scroll'),
+      taskAssistAnswerScroll: document.getElementById('workspace-detail-task-assist-answer-scroll'),
+      taskAssistSummaryWrap: document.getElementById('workspace-detail-task-assist-summary-wrap'),
+      taskAssistSummaryKnown: document.getElementById('workspace-detail-task-assist-summary-known'),
+      taskAssistSummaryNeeds: document.getElementById('workspace-detail-task-assist-summary-needs'),
+      taskAssistSummaryNext: document.getElementById('workspace-detail-task-assist-summary-next'),
       taskAssistQuestionWrap: document.getElementById('workspace-detail-task-assist-question-wrap'),
       taskAssistQuestion: document.getElementById('workspace-detail-task-assist-question'),
       taskAssistFormWrap: document.getElementById('workspace-detail-task-assist-form-wrap'),
@@ -1229,6 +1246,8 @@ export class WorkspaceDetailPage {
       taskAssistAgent: document.getElementById('workspace-detail-task-assist-agent'),
       taskAssistMessage: document.getElementById('workspace-detail-task-assist-message'),
       taskAssistResponseWrap: document.getElementById('workspace-detail-task-assist-response-wrap'),
+      taskAssistResponsePreview: document.getElementById('workspace-detail-task-assist-response-preview'),
+      taskAssistResponseToggle: document.getElementById('workspace-detail-task-assist-response-toggle'),
       taskAssistResponse: document.getElementById('workspace-detail-task-assist-response'),
       taskAssistRetryBtn: document.getElementById('workspace-detail-task-assist-retry'),
       taskAssistContinueBtn: document.getElementById('workspace-detail-task-assist-continue'),
@@ -1476,12 +1495,15 @@ export class WorkspaceDetailPage {
     this.elements.taskConfirmCancelBtn?.addEventListener('click', () => this.handleTaskConfirmChoice(false));
     this.elements.taskConfirmConfirmBtn?.addEventListener('click', () => this.handleTaskConfirmChoice(true));
     this.elements.taskConfirmModal?.addEventListener('hidden.bs.modal', () => this.handleTaskConfirmHidden());
+    this.elements.taskAssistBackBtn?.addEventListener('click', () => this.closeTaskAssistPage({ replaceRoute: true }));
     this.elements.taskAssistRetryBtn?.addEventListener('click', () => this.submitTaskAssist('retry'));
     this.elements.taskAssistContinueBtn?.addEventListener('click', () => this.submitTaskAssist('continue_with_instruction'));
     this.elements.taskAssistSwitchBtn?.addEventListener('click', () => this.submitTaskAssist('switch_agent_retry'));
     this.elements.taskAssistFailBtn?.addEventListener('click', () => this.submitTaskAssist('mark_failed'));
     this.elements.taskAssistSpecialistActionBtn?.addEventListener('click', () => this.handleAssistSpecialistAction());
+    this.elements.taskAssistResponseToggle?.addEventListener('click', () => this.toggleAssistResponseExpanded());
     this.elements.taskAssistAgent?.addEventListener('change', () => this.updateAssistSwitchButtonState());
+    window.addEventListener('popstate', () => this.restoreTaskAssistPageFromRoute());
     this.elements.addAgentSubmitBtn?.addEventListener('click', () => this.addSelectedAgentToWorkspace());
     this.elements.createAgentBtn?.addEventListener('click', () => this.openCreateAgentFlow());
     this.elements.addAgentModal?.addEventListener('show.bs.modal', () => { this.populateAddAgentOptions(); });
@@ -2416,6 +2438,7 @@ export class WorkspaceDetailPage {
       this.tasksLoading = false;
       this.renderTasks();
       this.renderWorkspaceWorkflowLinks();
+      this.restoreTaskAssistPageFromRoute();
 
       if (this.elements.taskCount) {
         this.elements.taskCount.textContent = this.tasks.length;
@@ -3185,7 +3208,7 @@ export class WorkspaceDetailPage {
         ${hasAssistData ? `
         <button type="button"
                 class="workspace-detail-item-result"
-                onclick="event.stopPropagation(); window.workspaceDetail?.openTaskAssistModal('${task.id}')"
+                onclick="event.stopPropagation(); window.workspaceDetail?.openTask('${task.id}')"
                 title="${this.escapeHtml(assistTitle)}"
                 aria-label="Help blocked task ${taskLabel}">
           <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor">
@@ -5816,6 +5839,178 @@ export class WorkspaceDetailPage {
     return String.fromCharCode(65 + (safeIndex % 26));
   }
 
+  truncateAssistSummaryText(value, maxLength = 190) {
+    const normalized = String(value || '').replace(/\s+/g, ' ').trim();
+    if (!normalized) return '';
+    if (normalized.length <= maxLength) return normalized;
+
+    const candidate = normalized.slice(0, maxLength - 1);
+    const boundary = candidate.lastIndexOf(' ');
+    const trimmed = boundary >= Math.floor(maxLength * 0.6)
+      ? candidate.slice(0, boundary)
+      : candidate;
+    return `${trimmed.trim()}...`;
+  }
+
+  extractAssistLeadText(value, maxLength = 190) {
+    const raw = String(value || '').trim();
+    if (!raw) return '';
+
+    const paragraphs = raw
+      .split(/\n\s*\n/)
+      .map((part) => String(part || '').trim())
+      .filter(Boolean);
+    const firstChunk = paragraphs[0] || raw;
+    const normalized = firstChunk.replace(/\s+/g, ' ').trim();
+    if (!normalized) return '';
+
+    const sentences = normalized.split(/(?<=[.!?])\s+/).filter(Boolean);
+    const lead = sentences.slice(0, 2).join(' ') || normalized;
+    return this.truncateAssistSummaryText(lead, maxLength);
+  }
+
+  buildAssistKnownSummary(reason, displayResponse) {
+    return this.extractAssistLeadText(displayResponse, 210)
+      || this.truncateAssistSummaryText(reason, 210)
+      || 'The task is paused waiting on your input.';
+  }
+
+  buildAssistNeedsSummary(workflowStep, question) {
+    if (workflowStep?.stepType === 'ask_form' && Array.isArray(workflowStep.fields) && workflowStep.fields.length > 0) {
+      const labels = workflowStep.fields.slice(0, 3)
+        .map((field) => this.getAssistFormFieldPrompt(field).replace(/[?]+$/g, '').trim())
+        .filter(Boolean);
+      const count = workflowStep.fields.length;
+      const suffix = count > labels.length ? `, and ${count - labels.length} more` : '';
+      if (labels.length > 0) {
+        return this.truncateAssistSummaryText(
+          `Answer ${count} question${count === 1 ? '' : 's'} about ${labels.join('; ')}${suffix}.`,
+          210
+        );
+      }
+      return `Answer ${count} question${count === 1 ? '' : 's'} so the task can continue.`;
+    }
+
+    if (workflowStep?.stepType === 'ask_choice' && Array.isArray(workflowStep.choices) && workflowStep.choices.length > 0) {
+      return this.truncateAssistSummaryText(
+        `Choose 1 of ${workflowStep.choices.length} suggested next steps to unblock the task.`,
+        210
+      );
+    }
+
+    if (question) {
+      return this.truncateAssistSummaryText(question, 210);
+    }
+
+    return 'Provide the missing details the agent asked for.';
+  }
+
+  buildAssistNextSummary(recommendation, workflowStep, currentAgent = '') {
+    const recommendedText = String(recommendation?.text || '').trim().replace(/^Recommended:\s*/i, '');
+    if (recommendedText) {
+      return this.truncateAssistSummaryText(recommendedText, 210);
+    }
+
+    if (workflowStep?.stepType === 'ask_form') {
+      return currentAgent
+        ? this.truncateAssistSummaryText(`After you answer, ${currentAgent} continues the task with your details.`, 210)
+        : 'After you answer, the task resumes with your details.';
+    }
+
+    if (workflowStep?.stepType === 'ask_choice') {
+      return 'After you choose an option, the task resumes using that direction.';
+    }
+
+    return 'After you respond, Ori uses that input to continue the task.';
+  }
+
+  setAssistSummaryUI(summary) {
+    const wrap = this.elements.taskAssistSummaryWrap;
+    const known = this.elements.taskAssistSummaryKnown;
+    const needs = this.elements.taskAssistSummaryNeeds;
+    const next = this.elements.taskAssistSummaryNext;
+    if (!wrap || !known || !needs || !next) return;
+
+    const knownText = String(summary?.known || '').trim();
+    const needsText = String(summary?.needs || '').trim();
+    const nextText = String(summary?.next || '').trim();
+    const shouldShow = Boolean(knownText || needsText || nextText);
+
+    known.textContent = knownText || 'No context summary yet.';
+    needs.textContent = needsText || 'No decision summary yet.';
+    next.textContent = nextText || 'No continuation summary yet.';
+    wrap.classList.toggle('d-none', !shouldShow);
+  }
+
+  shouldCollapseAssistResponse(fullResponse) {
+    const text = String(fullResponse || '').trim();
+    if (!text) return false;
+    const lineCount = text.split(/\r?\n/).filter((line) => String(line || '').trim()).length;
+    return text.length > 420 || lineCount > 8;
+  }
+
+  buildAssistResponsePreview(fullResponse, displayResponse = '') {
+    const source = String(displayResponse || fullResponse || '').trim();
+    if (!source) return '';
+    return this.truncateAssistSummaryText(source.replace(/\s+/g, ' '), 280);
+  }
+
+  renderAssistResponseState() {
+    const responseWrap = this.elements.taskAssistResponseWrap;
+    const responsePreview = this.elements.taskAssistResponsePreview;
+    const responseToggle = this.elements.taskAssistResponseToggle;
+    const response = this.elements.taskAssistResponse;
+    if (!responseWrap || !response) return;
+
+    const fullText = String(response.textContent || '').trim();
+    if (!fullText) {
+      responseWrap.classList.add('d-none');
+      response.classList.add('d-none');
+      responsePreview?.classList.add('d-none');
+      responseToggle?.classList.add('d-none');
+      return;
+    }
+
+    const previewText = String(responsePreview?.textContent || '').trim();
+    const collapsible = this.shouldCollapseAssistResponse(fullText) && Boolean(previewText);
+    const expanded = collapsible ? this.taskAssistResponseExpanded : true;
+
+    responseWrap.classList.remove('d-none');
+    response.classList.toggle('d-none', !expanded);
+    responsePreview?.classList.toggle('d-none', expanded || !collapsible);
+
+    if (responseToggle) {
+      responseToggle.classList.toggle('d-none', !collapsible);
+      responseToggle.textContent = expanded ? 'Hide full request' : 'View full request';
+      responseToggle.setAttribute('aria-expanded', expanded ? 'true' : 'false');
+    }
+  }
+
+  setAssistResponseUI(fullResponse, displayResponse = '') {
+    const response = this.elements.taskAssistResponse;
+    const responsePreview = this.elements.taskAssistResponsePreview;
+    if (!response) return;
+
+    const fullText = String(fullResponse || displayResponse || '').trim();
+    const previewText = this.buildAssistResponsePreview(fullText, displayResponse);
+    this.taskAssistResponseExpanded = !this.shouldCollapseAssistResponse(fullText);
+
+    response.textContent = fullText;
+    if (responsePreview) {
+      responsePreview.textContent = previewText;
+    }
+    this.renderAssistResponseState();
+  }
+
+  toggleAssistResponseExpanded(forceValue = null) {
+    const fullText = String(this.elements.taskAssistResponse?.textContent || '').trim();
+    if (!this.shouldCollapseAssistResponse(fullText)) return;
+    this.taskAssistResponseExpanded = typeof forceValue === 'boolean'
+      ? forceValue
+      : !this.taskAssistResponseExpanded;
+    this.renderAssistResponseState();
+  }
+
   normalizeAssistFieldType(value) {
     const normalized = String(value || '').trim().toLowerCase();
     if (normalized === 'textarea' || normalized === 'select' || normalized === 'number' || normalized === 'boolean') {
@@ -5830,7 +6025,7 @@ export class WorkspaceDetailPage {
       if (typeof option === 'string') {
         const label = String(option || '').trim();
         if (!label) return null;
-        return { value: label, label, description: '' };
+        return { value: label, label, description: '', key: '' };
       }
 
       const label = String(option?.label || option?.value || '').trim();
@@ -5839,9 +6034,49 @@ export class WorkspaceDetailPage {
       return {
         value,
         label,
-        description: String(option?.description || '').trim()
+        description: String(option?.description || '').trim(),
+        key: String(option?.key || '').trim()
       };
     }).filter(Boolean);
+  }
+
+  splitAssistOptionEvidence(label) {
+    const cleaned = this.cleanAssistChoiceText(label);
+    if (!cleaned) {
+      return { label: '', description: '' };
+    }
+
+    const start = cleaned.lastIndexOf('(');
+    const end = cleaned.lastIndexOf(')');
+    if (start >= 0 && end > start + 1 && end === cleaned.length - 1) {
+      const optionLabel = this.cleanAssistChoiceText(cleaned.slice(0, start));
+      const description = this.cleanAssistChoiceText(cleaned.slice(start + 1, end));
+      if (optionLabel && description) {
+        return {
+          label: optionLabel,
+          description: /[.!?]$/.test(description) ? description : `${description}.`
+        };
+      }
+    }
+
+    return { label: cleaned, description: '' };
+  }
+
+  deriveAssistFieldEvidence(options) {
+    if (!Array.isArray(options) || options.length === 0) return '';
+
+    const seen = new Set();
+    const evidence = [];
+    options.forEach((option) => {
+      const description = String(option?.description || '').trim();
+      if (!description) return;
+      const key = description.toLowerCase();
+      if (seen.has(key)) return;
+      seen.add(key);
+      evidence.push(description);
+    });
+
+    return evidence.slice(0, 2).join(' ');
   }
 
   normalizeAssistFieldValues(values) {
@@ -5900,6 +6135,7 @@ export class WorkspaceDetailPage {
           id: String(item?.id || this.buildAssistFieldId(label, index)).trim(),
           label,
           description: String(item?.description || '').trim(),
+          evidence: String(item?.evidence || '').trim(),
           type: this.normalizeAssistFieldType(item?.type),
           placeholder: String(item?.placeholder || '').trim(),
           required: item?.required !== false,
@@ -6018,12 +6254,13 @@ export class WorkspaceDetailPage {
 
         const optionMatch = rawLine.match(/^\s*(?:[-*]\s*)?([A-Z])[.)]\s+(.+)$/);
         if (optionMatch) {
-          const label = this.cleanAssistChoiceText(optionMatch[2]);
+          const splitOption = this.splitAssistOptionEvidence(optionMatch[2]);
+          const label = splitOption.label;
           if (!label) continue;
           options.push({
             key: String(optionMatch[1] || '').trim().toUpperCase(),
             label,
-            description: ''
+            description: splitOption.description
           });
           continue;
         }
@@ -6042,7 +6279,9 @@ export class WorkspaceDetailPage {
         }
 
         const lastOption = options[options.length - 1];
-        lastOption.label = `${lastOption.label} ${continuation}`.replace(/\s+/g, ' ').trim();
+        const splitOption = this.splitAssistOptionEvidence(`${lastOption.label} ${continuation}`.replace(/\s+/g, ' ').trim());
+        lastOption.label = splitOption.label;
+        lastOption.description = splitOption.description || lastOption.description;
       }
 
       if (options.length >= 2) {
@@ -6093,6 +6332,7 @@ export class WorkspaceDetailPage {
       id: this.buildAssistFieldId(cleanedQuestion, index),
       label: cleanedQuestion,
       description: rawQuestion,
+      evidence: '',
       type: 'text',
       placeholder: '',
       required: true,
@@ -6159,6 +6399,7 @@ export class WorkspaceDetailPage {
       id: this.buildAssistFieldId(block.question, index),
       label: this.cleanAssistChoiceText(block.question),
       description: String(block.question || '').trim(),
+      evidence: '',
       type: 'text',
       placeholder: '',
       required: true,
@@ -6167,13 +6408,15 @@ export class WorkspaceDetailPage {
 
     field.type = 'select';
     field.description = String(block.question || '').trim();
+    field.evidence = this.deriveAssistFieldEvidence(block.options);
     field.options = block.options.map((option, optionIndex) => {
       const label = String(option?.label || '').trim();
       if (!label) return null;
       return {
         value: label,
         label,
-        description: String(option?.description || this.getAssistOptionKey(optionIndex)).trim()
+        description: String(option?.description || '').trim(),
+        key: String(option?.key || this.getAssistOptionKey(optionIndex)).trim()
       };
     }).filter(Boolean);
     return field.options.length >= 2 ? field : null;
@@ -6445,6 +6688,7 @@ export class WorkspaceDetailPage {
       const fieldId = String(field.id || '').trim();
       const label = String(field.label || '').trim();
       const description = String(field.description || '').trim();
+      const evidence = String(field.evidence || '').trim();
       const placeholder = String(field.placeholder || '').trim();
       const prompt = this.getAssistFormFieldPrompt(field);
       const requiredMark = field.required ? ' <span aria-hidden="true">*</span>' : '';
@@ -6454,12 +6698,16 @@ export class WorkspaceDetailPage {
         && description !== prompt
         ? `<div class="workspace-detail-task-assist-form-hint">${this.escapeHtml(description)}</div>`
         : '';
+      const evidenceMarkup = evidence
+        ? `<div class="workspace-detail-task-assist-form-evidence">${this.escapeHtml(evidence)}</div>`
+        : '';
       const questionIntro = `
         <div class="workspace-detail-task-assist-form-question">
           <span class="workspace-detail-task-assist-form-number">${fieldIndex + 1}</span>
           <div class="workspace-detail-task-assist-form-question-copy">
             <div class="workspace-detail-task-assist-form-prompt">${this.escapeHtml(prompt || label)}</div>
             ${hint}
+            ${evidenceMarkup}
           </div>
         </div>
       `;
@@ -6480,6 +6728,7 @@ export class WorkspaceDetailPage {
           const optionValue = String(option?.value || '').trim();
           const optionLabel = String(option?.label || option?.value || '').trim();
           const optionDescription = String(option?.description || '').trim();
+          const optionKey = String(option?.key || '').trim();
           if (!optionValue || !optionLabel) return '';
           const checked = currentValue === optionValue ? ' checked' : '';
           return `
@@ -6492,9 +6741,10 @@ export class WorkspaceDetailPage {
                 data-assist-field-id="${this.escapeHtml(fieldId)}"${checked}
               >
               <span class="workspace-detail-task-assist-option-card">
-                <span class="workspace-detail-task-assist-option-key">${this.escapeHtml(optionDescription || this.getAssistOptionKey(optionIndex))}</span>
+                <span class="workspace-detail-task-assist-option-key">${this.escapeHtml(optionKey || this.getAssistOptionKey(optionIndex))}</span>
                 <span class="workspace-detail-task-assist-option-copy">
                   <span class="workspace-detail-task-assist-option-label">${this.escapeHtml(optionLabel)}</span>
+                  ${optionDescription ? `<span class="workspace-detail-task-assist-option-description">${this.escapeHtml(optionDescription)}</span>` : ''}
                 </span>
               </span>
             </label>
@@ -6759,7 +7009,142 @@ export class WorkspaceDetailPage {
     return null;
   }
 
-  openTaskAssistModal(taskId, eventData = null) {
+  getBlockedTaskRouteId() {
+    const params = new URLSearchParams(window.location.search);
+    return String(params.get('blocked_task') || '').trim();
+  }
+
+  updateBlockedTaskRoute(taskId = '', { replace = false } = {}) {
+    const nextTaskId = String(taskId || '').trim();
+    const url = new URL(window.location.href);
+
+    if (nextTaskId) {
+      url.searchParams.set('blocked_task', nextTaskId);
+    } else {
+      url.searchParams.delete('blocked_task');
+    }
+
+    const nextHref = `${url.pathname}${url.search}${url.hash}`;
+    const currentHref = `${window.location.pathname}${window.location.search}${window.location.hash}`;
+    if (nextHref === currentHref) {
+      return;
+    }
+
+    const state = {
+      ...(window.history.state && typeof window.history.state === 'object' ? window.history.state : {}),
+      blockedTaskId: nextTaskId || null
+    };
+    if (replace) {
+      window.history.replaceState(state, '', nextHref);
+    } else {
+      window.history.pushState(state, '', nextHref);
+    }
+  }
+
+  isTaskAssistPageVisible() {
+    return Boolean(this.elements.taskAssistPage && !this.elements.taskAssistPage.hidden);
+  }
+
+  scrollTaskAssistSurfaceIntoView(target = null) {
+    const surface = target || this.elements.taskAssistPage || this.elements.workspaceDetailView;
+    if (!surface) {
+      window.scrollTo({ top: 0, left: 0, behavior: 'auto' });
+      return;
+    }
+
+    const top = Math.max(0, window.scrollY + surface.getBoundingClientRect().top - 12);
+    window.scrollTo({ top, left: 0, behavior: 'auto' });
+  }
+
+  scheduleTaskAssistScrollReset(target = null) {
+    const surface = target || this.elements.taskAssistPage;
+    if (!surface) return;
+
+    try {
+      if (window.history && 'scrollRestoration' in window.history) {
+        window.history.scrollRestoration = 'manual';
+      }
+    } catch (_error) {
+      // Ignore browsers that block scroll restoration changes.
+    }
+
+    const reset = () => {
+      this.scrollTaskAssistSurfaceIntoView(surface);
+      document.documentElement.scrollTop = 0;
+      document.body.scrollTop = 0;
+    };
+
+    reset();
+    window.requestAnimationFrame(reset);
+    window.setTimeout(reset, 0);
+    window.setTimeout(reset, 80);
+    window.setTimeout(reset, 220);
+  }
+
+  showTaskAssistPage({ taskId = '', updateRoute = true, replaceRoute = false } = {}) {
+    if (this.elements.workspaceDetailView) {
+      this.elements.workspaceDetailView.hidden = true;
+    }
+    if (this.elements.taskAssistPage) {
+      this.elements.taskAssistPage.hidden = false;
+    }
+    if (updateRoute) {
+      this.updateBlockedTaskRoute(taskId || this.currentBlockedTask?.taskId || '', { replace: replaceRoute });
+    }
+    this.scheduleTaskAssistScrollReset(this.elements.taskAssistPage);
+  }
+
+  closeTaskAssistPage({ updateRoute = true, replaceRoute = true, preserveState = false } = {}) {
+    if (this.elements.workspaceDetailView) {
+      this.elements.workspaceDetailView.hidden = false;
+    }
+    if (this.elements.taskAssistPage) {
+      this.elements.taskAssistPage.hidden = true;
+    }
+    if (updateRoute) {
+      this.updateBlockedTaskRoute('', { replace: replaceRoute });
+    }
+    if (!preserveState) {
+      this.currentBlockedTask = null;
+      this.currentAssistRecommendation = null;
+      this.currentAssistSpecialistAction = null;
+    }
+    try {
+      if (window.history && 'scrollRestoration' in window.history) {
+        window.history.scrollRestoration = 'auto';
+      }
+    } catch (_error) {
+      // Ignore browsers that block scroll restoration changes.
+    }
+    this.scrollTaskAssistSurfaceIntoView(this.elements.workspaceDetailView);
+  }
+
+  restoreTaskAssistPageFromRoute() {
+    const routeTaskId = this.getBlockedTaskRouteId();
+    const activeTaskId = String(this.currentBlockedTask?.taskId || '').trim();
+
+    if (!routeTaskId) {
+      if (this.isTaskAssistPageVisible() || activeTaskId) {
+        this.closeTaskAssistPage({ updateRoute: false, replaceRoute: true });
+      }
+      return false;
+    }
+
+    const task = this.tasks.find((item) => item?.id === routeTaskId);
+    if (!task || !this.getTaskStatusPresentation(task).isBlocked) {
+      this.closeTaskAssistPage({ updateRoute: true, replaceRoute: true });
+      return false;
+    }
+
+    if (this.isTaskAssistPageVisible() && activeTaskId === routeTaskId) {
+      return true;
+    }
+
+    this.openTaskAssistModal(routeTaskId, null, { updateRoute: false, replaceRoute: true });
+    return true;
+  }
+
+  openTaskAssistModal(taskId, eventData = null, options = {}) {
     const task = this.tasks.find((item) => item.id === taskId);
     if (!task) return;
 
@@ -6800,6 +7185,11 @@ export class WorkspaceDetailPage {
       }
     );
     const workflowStep = this.applyAssistWorkflowSpecialistOverrides(baseWorkflowStep, recommendation?.specialistAction);
+    const assistSummary = {
+      known: this.buildAssistKnownSummary(reason, displayResponse),
+      needs: this.buildAssistNeedsSummary(workflowStep, question),
+      next: this.buildAssistNextSummary(recommendation, workflowStep, currentAgent)
+    };
     this.currentBlockedTask = {
       taskId,
       blockId,
@@ -6815,6 +7205,10 @@ export class WorkspaceDetailPage {
     };
 
     this.setTaskModalHeaderId(this.elements.taskAssistId, task.id);
+    if (this.elements.taskAssistAgentName) {
+      this.elements.taskAssistAgentName.textContent = currentAgent || 'Unassigned';
+      this.elements.taskAssistAgentName.title = currentAgent || 'Unassigned';
+    }
     if (this.elements.taskAssistMeta) {
       this.elements.taskAssistMeta.textContent = `${task.description || task.name || task.id} • ${statusText} • ${timestamp}`;
     }
@@ -6827,39 +7221,27 @@ export class WorkspaceDetailPage {
     if (this.elements.taskAssistMessage) {
       this.elements.taskAssistMessage.value = '';
     }
-    if (this.elements.taskAssistResponse && this.elements.taskAssistResponseWrap) {
-      if (displayResponse) {
-        this.elements.taskAssistResponse.textContent = displayResponse;
-        this.elements.taskAssistResponse.classList.remove('d-none');
-      } else {
-        this.elements.taskAssistResponse.textContent = '';
-        this.elements.taskAssistResponse.classList.add('d-none');
-      }
-    }
+    this.setAssistResponseUI(response, displayResponse);
+    this.setAssistSummaryUI(assistSummary);
     if (this.elements.taskAssistQuestionWrap) {
       const shouldShowQuestion = Boolean(question) && workflowStep?.stepType !== 'ask_form';
       this.elements.taskAssistQuestionWrap.classList.toggle('d-none', !shouldShowQuestion);
     }
-    if (this.elements.taskAssistResponseWrap) {
-      const shouldShowPrompt = Boolean(displayResponse) || Boolean(question && workflowStep?.stepType !== 'ask_form') ||
-        Boolean(workflowStep?.stepType === 'ask_form');
-      if (shouldShowPrompt) {
-        this.elements.taskAssistResponseWrap.classList.remove('d-none');
-      } else {
-        this.elements.taskAssistResponseWrap.classList.add('d-none');
-      }
+    if (this.elements.taskAssistContextScroll) {
+      this.elements.taskAssistContextScroll.scrollTop = 0;
+    }
+    if (this.elements.taskAssistAnswerScroll) {
+      this.elements.taskAssistAnswerScroll.scrollTop = 0;
     }
 
     this.populateAssistAgents(currentAgent);
     this.setAssistWorkflowStepUI(workflowStep);
     this.setAssistRecommendationUI(recommendation);
-
-    if (this.elements.taskAssistModal && window.bootstrap) {
-      const modal = typeof bootstrap.Modal.getOrCreateInstance === 'function'
-        ? bootstrap.Modal.getOrCreateInstance(this.elements.taskAssistModal)
-        : (bootstrap.Modal.getInstance(this.elements.taskAssistModal) || new bootstrap.Modal(this.elements.taskAssistModal));
-      modal.show();
-    }
+    this.showTaskAssistPage({
+      taskId,
+      updateRoute: options.updateRoute !== false,
+      replaceRoute: Boolean(options.replaceRoute)
+    });
   }
 
   async submitTaskAssist(action) {
@@ -6931,12 +7313,8 @@ export class WorkspaceDetailPage {
       }
 
       if (window.Toast) window.Toast.success('Task updated');
+      this.closeTaskAssistPage({ replaceRoute: true });
       await this.loadTasks();
-
-      if (action !== 'mark_failed' && this.elements.taskAssistModal && window.bootstrap) {
-        const modal = bootstrap.Modal.getInstance(this.elements.taskAssistModal);
-        modal?.hide();
-      }
     } catch (error) {
       console.error('Failed to assist blocked task:', error);
       if (window.Toast) window.Toast.error(error.message || 'Failed to assist task');
@@ -13242,20 +13620,18 @@ export class WorkspaceDetailPage {
         break;
       case 'task.blocked': {
         this.loadTasks();
+        break;
+      }
+      case 'task.resumed': {
         const payload = event?.data?.data || event?.data || {};
-        const taskId = payload.task_id || event?.data?.task_id;
-        if (taskId) {
-          this.openTaskAssistModal(taskId, payload);
+        const resumedTaskId = String(payload.task_id || event?.data?.task_id || '').trim();
+        const activeTaskId = String(this.currentBlockedTask?.taskId || this.getBlockedTaskRouteId() || '').trim();
+        this.loadTasks();
+        if (activeTaskId && (!resumedTaskId || resumedTaskId === activeTaskId)) {
+          this.closeTaskAssistPage({ replaceRoute: true });
         }
         break;
       }
-      case 'task.resumed':
-        this.loadTasks();
-        if (this.elements.taskAssistModal && window.bootstrap) {
-          const modal = bootstrap.Modal.getInstance(this.elements.taskAssistModal);
-          modal?.hide();
-        }
-        break;
       case 'session_created':
       case 'session_updated':
       case 'session_deleted':
@@ -13435,21 +13811,16 @@ export class WorkspaceDetailPage {
   /**
    * Open a task for editing
    */
-  openTask(taskId) {
-    // Use existing task modal controller
-    const task = this.tasks.find(t => t.id === taskId);
-    if (task) {
-      const statusInfo = this.getTaskStatusPresentation(task);
-      if (statusInfo.isBlocked) {
-        this.openTaskAssistModal(taskId);
-        return;
-      }
-    }
+  buildTaskHref(taskId) {
+    const normalizedTaskId = String(taskId || '').trim();
+    if (!normalizedTaskId || !this.workspaceId) return '';
+    return `/workspaces/${encodeURIComponent(this.workspaceId)}/task/${encodeURIComponent(normalizedTaskId)}`;
+  }
 
-    if (window.taskModalController && typeof window.taskModalController.openForEdit === 'function') {
-      if (task) {
-        window.taskModalController.openForEdit(task, () => this.loadTasks());
-      }
+  openTask(taskId) {
+    const href = this.buildTaskHref(taskId);
+    if (href) {
+      window.location.href = href;
     }
   }
 

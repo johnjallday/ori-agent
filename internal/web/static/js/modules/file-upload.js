@@ -119,14 +119,16 @@ async function openFolderPickerForChat() {
   }
 }
 
-function escapeHtml(value) {
-  return String(value || '')
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#39;');
-}
+const escapeFileUploadHtml = typeof window.escapeHtml === 'function'
+  ? window.escapeHtml.bind(window)
+  : function escapeFileUploadHtmlFallback(value) {
+    return String(value || '')
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+  };
 
 function getActiveWorkspaceIdForChat() {
   return String(window.sessionManager?.getActiveSession?.()?.folder_id || '').trim();
@@ -210,8 +212,8 @@ function updateAttachedNotesList() {
   notesList.innerHTML = attachedNotes.map((note) => `
     <div class="chat-note-chip" style="display: inline-flex; align-items: center; gap: 6px; padding: 4px 8px; background: rgba(255, 122, 68, 0.08); border: 1px solid rgba(255, 122, 68, 0.22); border-radius: 999px; font-size: 12px; color: var(--text-primary);">
       <span aria-hidden="true">📝</span>
-      <span>${escapeHtml(truncateNoteText(note.name, 30))}</span>
-      <button type="button" class="btn-remove-note-chip" data-note-id="${escapeHtml(note.id)}" aria-label="Remove note ${escapeHtml(note.name)}" style="background: none; border: none; color: var(--text-muted); cursor: pointer; padding: 0; margin-left: 2px; font-size: 14px; line-height: 1;">×</button>
+      <span>${escapeFileUploadHtml(truncateNoteText(note.name, 30))}</span>
+      <button type="button" class="btn-remove-note-chip" data-note-id="${escapeFileUploadHtml(note.id)}" aria-label="Remove note ${escapeFileUploadHtml(note.name)}" style="background: none; border: none; color: var(--text-muted); cursor: pointer; padding: 0; margin-left: 2px; font-size: 14px; line-height: 1;">×</button>
     </div>
   `).join('');
 
@@ -327,14 +329,14 @@ function renderChatNotesPickerList() {
       <button
         type="button"
         class="chat-note-picker-item"
-        data-note-id="${escapeHtml(note.id)}"
+        data-note-id="${escapeFileUploadHtml(note.id)}"
         style="display: flex; width: 100%; gap: 12px; align-items: flex-start; text-align: left; padding: 12px 14px; border-radius: 12px; border: 1px solid ${selected ? 'rgba(255, 122, 68, 0.35)' : 'var(--border-color)'}; background: ${selected ? 'rgba(255, 122, 68, 0.08)' : 'var(--bg-secondary)'}; color: var(--text-primary); transition: all 0.18s ease;">
         <div style="display: flex; align-items: center; justify-content: center; width: 24px; height: 24px; border-radius: 999px; background: ${selected ? 'rgba(255, 122, 68, 0.2)' : 'rgba(148, 163, 184, 0.12)'}; color: ${selected ? '#ff9a6a' : 'var(--text-secondary)'}; flex-shrink: 0;">
           ${selected ? '✓' : '📝'}
         </div>
         <div style="min-width: 0; flex: 1;">
-          <div style="font-size: 13px; font-weight: 600; color: var(--text-primary); margin-bottom: 4px;">${escapeHtml(note.name || 'Untitled Note')}</div>
-          <div style="font-size: 12px; line-height: 1.45; color: var(--text-secondary);">${escapeHtml(preview)}</div>
+          <div style="font-size: 13px; font-weight: 600; color: var(--text-primary); margin-bottom: 4px;">${escapeFileUploadHtml(note.name || 'Untitled Note')}</div>
+          <div style="font-size: 12px; line-height: 1.45; color: var(--text-secondary);">${escapeFileUploadHtml(preview)}</div>
         </div>
         <div style="flex-shrink: 0; font-size: 11px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; color: ${selected ? '#ff9a6a' : 'var(--text-secondary)'};">
           ${selected ? 'Attached' : 'Attach'}

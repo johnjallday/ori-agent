@@ -1859,6 +1859,7 @@ func extractQuestionBlockWorkflowStep(result string) *workspace.TaskBlockedWorkf
 		field.Type = "select"
 		field.Options = block.Options
 		field.Description = strings.TrimSpace(block.Question)
+		field.Evidence = deriveClarificationQuestionEvidence(block.Options)
 		fields = append(fields, field)
 	}
 
@@ -1995,10 +1996,11 @@ func extractClarificationQuestionBlocks(result string) []clarificationQuestionBl
 				if label == "" {
 					continue
 				}
+				label, evidence := splitClarificationOptionEvidence(label)
 				options = append(options, workspace.TaskBlockedFieldOption{
 					Value:       label,
 					Label:       label,
-					Description: strings.ToUpper(strings.TrimSpace(optionMatch[1])),
+					Description: evidence,
 				})
 				continue
 			}
@@ -2017,6 +2019,7 @@ func extractClarificationQuestionBlocks(result string) []clarificationQuestionBl
 			}
 			lastIndex := len(options) - 1
 			options[lastIndex].Label = strings.TrimSpace(options[lastIndex].Label + " " + continuation)
+			options[lastIndex].Label, options[lastIndex].Description = splitClarificationOptionEvidence(options[lastIndex].Label)
 			options[lastIndex].Value = options[lastIndex].Label
 		}
 
@@ -2036,6 +2039,62 @@ func extractClarificationQuestionBlocks(result string) []clarificationQuestionBl
 	}
 
 	return blocks
+}
+
+func splitClarificationOptionEvidence(label string) (string, string) {
+	cleaned := cleanBlockedChoiceText(label)
+	if cleaned == "" {
+		return "", ""
+	}
+
+	start := strings.LastIndex(cleaned, "(")
+	end := strings.LastIndex(cleaned, ")")
+	if start >= 0 && end > start+1 && end == len(cleaned)-1 {
+		mainLabel := cleanBlockedChoiceText(cleaned[:start])
+		evidence := cleanBlockedChoiceText(cleaned[start+1 : end])
+		if mainLabel != "" && evidence != "" {
+			return mainLabel, ensureClarificationSentence(evidence)
+		}
+	}
+
+	return cleaned, ""
+}
+
+func deriveClarificationQuestionEvidence(options []workspace.TaskBlockedFieldOption) string {
+	if len(options) == 0 {
+		return ""
+	}
+
+	seen := make(map[string]struct{}, len(options))
+	evidence := make([]string, 0, 2)
+	for _, option := range options {
+		description := strings.TrimSpace(option.Description)
+		if description == "" {
+			continue
+		}
+		key := strings.ToLower(description)
+		if _, exists := seen[key]; exists {
+			continue
+		}
+		seen[key] = struct{}{}
+		evidence = append(evidence, ensureClarificationSentence(description))
+		if len(evidence) >= 2 {
+			break
+		}
+	}
+
+	return strings.TrimSpace(strings.Join(evidence, " "))
+}
+
+func ensureClarificationSentence(value string) string {
+	cleaned := cleanBlockedChoiceText(value)
+	if cleaned == "" {
+		return ""
+	}
+	if strings.HasSuffix(cleaned, ".") || strings.HasSuffix(cleaned, "!") || strings.HasSuffix(cleaned, "?") {
+		return cleaned
+	}
+	return cleaned + "."
 }
 
 func extractQuestionFormWorkflowStep(result string) *workspace.TaskBlockedWorkflowStep {
