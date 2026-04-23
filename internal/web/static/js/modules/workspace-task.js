@@ -86,6 +86,302 @@ function normalizeResultText(value) {
   }
 }
 
+const assistQuestionPromptPattern = /^\s*(?:[-*]\s*)?(?:\d+)[.)]\s*(.+?)\s*$/;
+const assistLetteredOptionPattern = /^\s*(?:[-*]\s*)?([A-Z])[.)]\s*(.+)$/;
+
+function cleanAssistText(value) {
+  return String(value ?? '')
+    .replace(/\[(.*?)\]\((.*?)\)/g, '$1')
+    .replace(/[*_`#>]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function cleanAssistFieldLabel(value) {
+  return cleanAssistText(value).replace(/[,:;.!?]+$/g, '').trim();
+}
+
+function ensureAssistQuestion(value) {
+  const cleaned = cleanAssistText(value).replace(/[.!]+$/g, '').trim();
+  if (!cleaned) return '';
+  return cleaned.endsWith('?') ? cleaned : `${cleaned}?`;
+}
+
+function buildAssistFieldId(value, index) {
+  const token = cleanAssistFieldLabel(value)
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '');
+  return token || `field_${index + 1}`;
+}
+
+function splitAssistOptionEvidence(value) {
+  const cleaned = cleanAssistText(value);
+  if (!cleaned) {
+    return { label: '', description: '' };
+  }
+
+  const match = cleaned.match(/^(.*)\(([^()]+)\)$/);
+  if (!match) {
+    return { label: cleaned, description: '' };
+  }
+
+  const label = cleanAssistText(match[1]);
+  const description = cleanAssistText(match[2]);
+  if (!label || !description) {
+    return { label: cleaned, description: '' };
+  }
+
+  return {
+    label,
+    description: description.endsWith('.') || description.endsWith('!') || description.endsWith('?')
+      ? description
+      : `${description}.`
+  };
+}
+
+function extractAssistInlineOptions(question) {
+  const cleanedQuestion = cleanAssistFieldLabel(question);
+  const matches = cleanedQuestion.match(/\sor\s/gi);
+  if (!matches || matches.length !== 1) return [];
+
+  const parts = cleanedQuestion.split(/\sor\s/i);
+  if (parts.length !== 2) return [];
+
+  const left = cleanAssistFieldLabel(parts[0]);
+  const right = cleanAssistFieldLabel(parts[1]);
+  if (!left || !right) return [];
+  if (left.toLowerCase().includes('should i') || left.toLowerCase().includes('want me to')) return [];
+
+  return [
+    { value: left, label: left, description: '', key: 'A' },
+    { value: right, label: right, description: '', key: 'B' }
+  ];
+}
+
+function buildDerivedAssistField(question, index, options = []) {
+  const prompt = ensureAssistQuestion(question);
+  const label = cleanAssistFieldLabel(question);
+  if (!prompt || !label) return null;
+
+  const lower = label.toLowerCase();
+  const field = {
+    id: buildAssistFieldId(label, index),
+    label,
+    description: prompt,
+    evidence: '',
+    type: 'text',
+    placeholder: '',
+    required: false,
+    options: []
+  };
+
+  if (options.length >= 2) {
+    field.type = 'select';
+    field.options = options.map((option, optionIndex) => ({
+      value: cleanAssistText(option.value || option.label),
+      label: cleanAssistText(option.label || option.value),
+      description: cleanAssistText(option.description),
+      key: String(option.key || String.fromCharCode(65 + (optionIndex % 26))).trim()
+    })).filter((option) => option.value && option.label);
+    return field.options.length >= 2 ? field : null;
+  }
+
+  const inlineOptions = extractAssistInlineOptions(prompt);
+  if (inlineOptions.length >= 2) {
+    field.type = 'select';
+    field.options = inlineOptions;
+    return field;
+  }
+
+  if (lower.includes('how many') && lower.includes('shelf')) {
+    field.type = 'number';
+    field.placeholder = '3';
+    return field;
+  }
+
+  if (lower.includes('goal') || lower.includes('status') || lower.includes('level of detail')) {
+    field.type = 'textarea';
+    field.placeholder = lower.includes('goal')
+      ? 'Describe the build goal and intended outcome'
+      : lower.includes('status')
+        ? 'Describe where you are now and what is already decided'
+        : 'Explain how detailed the plan should be';
+    return field;
+  }
+
+  if (lower.includes('room') || lower.includes('space')) {
+    field.placeholder = 'Garage, office, pantry, living room';
+  }
+
+  return field;
+}
+
+function extractAssistQuestionBlocks(text) {
+  const lines = String(text || '').split(/\r?\n/);
+  const blocks = [];
+
+  for (let index = 0; index < lines.length;) {
+    const promptMatch = lines[index].match(assistQuestionPromptPattern);
+    if (!promptMatch || promptMatch.length < 2) {
+      index += 1;
+      continue;
+    }
+
+    const question = ensureAssistQuestion(promptMatch[1]);
+    if (!question) {
+      index += 1;
+      continue;
+    }
+
+    const options = [];
+    let nextIndex = index + 1;
+
+    for (; nextIndex < lines.length; nextIndex += 1) {
+      const rawLine = lines[nextIndex];
+      if (assistQuestionPromptPattern.test(rawLine)) {
+        break;
+      }
+
+      const optionMatch = rawLine.match(assistLetteredOptionPattern);
+      if (optionMatch && optionMatch.length >= 3) {
+        const parsed = splitAssistOptionEvidence(optionMatch[2]);
+        if (!parsed.label) continue;
+        options.push({
+          value: parsed.label,
+          label: parsed.label,
+          description: parsed.description,
+          key: optionMatch[1]
+        });
+        continue;
+      }
+
+      const continuation = cleanAssistText(rawLine);
+      if (!continuation || options.length === 0) {
+        continue;
+      }
+
+      const lastOption = options[options.length - 1];
+      const merged = splitAssistOptionEvidence(`${lastOption.label} ${continuation}`);
+      lastOption.value = merged.label || lastOption.value;
+      lastOption.label = merged.label || lastOption.label;
+      lastOption.description = merged.description || lastOption.description;
+    }
+
+    if (options.length >= 2) {
+      blocks.push({ question, options });
+      index = nextIndex;
+      continue;
+    }
+
+    index += 1;
+  }
+
+  return blocks;
+}
+
+function extractAssistQuestionsFromText(text) {
+  const questions = [];
+  const seen = new Set();
+  const lines = String(text || '').split(/\r?\n/);
+
+  const addQuestion = (value) => {
+    const normalized = ensureAssistQuestion(value);
+    if (!normalized) return;
+    const key = normalized.toLowerCase();
+    if (seen.has(key)) return;
+    seen.add(key);
+    questions.push(normalized);
+  };
+
+  lines.forEach((rawLine) => {
+    const trimmed = String(rawLine || '').trim();
+    if (!trimmed) return;
+
+    const promptMatch = trimmed.match(assistQuestionPromptPattern);
+    const candidate = promptMatch && promptMatch.length >= 2 ? promptMatch[1] : trimmed;
+    if (!candidate.includes('?')) return;
+
+    candidate.split('?').forEach((part) => {
+      const fragment = cleanAssistText(part);
+      if (fragment.length < 8 || fragment.length > 180) return;
+      addQuestion(fragment);
+    });
+  });
+
+  if (questions.length > 0) {
+    return questions;
+  }
+
+  cleanAssistText(text).split('?').forEach((part) => {
+    const fragment = cleanAssistText(part);
+    if (fragment.length < 8 || fragment.length > 180) return;
+    addQuestion(fragment);
+  });
+
+  return questions;
+}
+
+function deriveAssistWorkflowStepFromText(...texts) {
+  const sources = texts.map((value) => String(value || '').trim()).filter(Boolean);
+  if (sources.length === 0) return null;
+
+  for (const source of sources) {
+    const blocks = extractAssistQuestionBlocks(source);
+    if (blocks.length > 0) {
+      const fields = blocks
+        .map((block, index) => buildDerivedAssistField(block.question, index, block.options))
+        .filter(Boolean);
+      if (fields.length === 0) {
+        continue;
+      }
+
+      return {
+        stepType: 'ask_form',
+        title: 'Answer the questions',
+        summary: 'Work through each question below, then continue the task.',
+        freeTextAllowed: true,
+        fields
+      };
+    }
+  }
+
+  const seen = new Set();
+  const questions = [];
+  sources.forEach((source) => {
+    extractAssistQuestionsFromText(source).forEach((question) => {
+      const key = question.toLowerCase();
+      if (seen.has(key)) return;
+      seen.add(key);
+      questions.push(question);
+    });
+  });
+
+  if (questions.length === 0) {
+    return null;
+  }
+
+  const fields = questions
+    .map((question, index) => buildDerivedAssistField(question, index))
+    .filter(Boolean);
+
+  if (fields.length === 0) {
+    return null;
+  }
+
+  if (fields.length === 1 && fields[0].type === 'text') {
+    return null;
+  }
+
+  return {
+    stepType: 'ask_form',
+    title: 'Answer the questions',
+    summary: 'Work through each question below, then continue the task.',
+    freeTextAllowed: true,
+    fields
+  };
+}
+
 export class WorkspaceTaskPage {
   constructor(workspaceId, taskId) {
     this.workspaceId = workspaceId;
@@ -95,6 +391,7 @@ export class WorkspaceTaskPage {
     this.tasks = [];
     this.currentBlockedTask = null;
     this.taskAssistResponseExpanded = false;
+    this.assistActiveFieldId = '';
     this.workspaceRealtimeUnsubscribe = null;
     this.pendingRefreshTimer = null;
     this.titleEditInProgress = false;
@@ -508,6 +805,12 @@ export class WorkspaceTaskPage {
 
   buildBlockedTaskState(task = this.task) {
     const humanLoop = this.getTaskHumanLoop(task) || {};
+    const workflowStep = this.normalizeAssistWorkflowStep(
+      humanLoop?.workflow_step || task?.context?.planning_workflow_step
+    ) || this.normalizeAssistWorkflowStep(
+      deriveAssistWorkflowStepFromText(humanLoop?.question, humanLoop?.agent_response)
+    );
+
     return {
       taskId: String(task?.id || '').trim(),
       blockId: String(humanLoop?.block_id || '').trim(),
@@ -515,7 +818,7 @@ export class WorkspaceTaskPage {
       reason: String(humanLoop?.reason || 'This task needs your input before it can continue.').trim(),
       question: String(humanLoop?.question || '').trim(),
       response: String(humanLoop?.agent_response || '').trim(),
-      workflowStep: this.normalizeAssistWorkflowStep(humanLoop?.workflow_step || task?.context?.planning_workflow_step),
+      workflowStep,
       selectedChoiceId: '',
       selectedChoiceLabel: '',
       selectedChoiceNumber: '',
@@ -1370,6 +1673,7 @@ export class WorkspaceTaskPage {
     if (!this.elements.assistFormWrap || !this.elements.assistFormFields) return;
 
     if (!workflowStep) {
+      this.assistActiveFieldId = '';
       this.elements.assistFormWrap.classList.add('d-none');
       this.elements.assistFormFields.innerHTML = '';
       return;
@@ -1378,6 +1682,7 @@ export class WorkspaceTaskPage {
     this.elements.assistFormWrap.classList.remove('d-none');
 
     if (workflowStep.stepType === 'ask_choice') {
+      this.assistActiveFieldId = '';
       this.renderChoiceWorkflow(workflowStep);
       return;
     }
@@ -1428,70 +1733,105 @@ export class WorkspaceTaskPage {
 
   renderFormWorkflow(workflowStep) {
     const selectedValues = this.currentBlockedTask?.selectedFieldValues || {};
+    const fields = Array.isArray(workflowStep.fields) ? workflowStep.fields.filter(Boolean) : [];
+    if (fields.length === 0) {
+      this.assistActiveFieldId = '';
+      this.elements.assistFormFields.innerHTML = '';
+      return;
+    }
 
-    this.elements.assistFormFields.innerHTML = workflowStep.fields.map((field, index) => {
-      const value = String(selectedValues[field.id] || '').trim();
-      const requiredMark = field.required ? ' <span aria-hidden="true">*</span>' : '';
-      const questionIntro = `
-        <div class="workspace-task-assist-field-question">
-          <span class="workspace-task-assist-field-number">${index + 1}</span>
-          <div>
-            <div class="workspace-task-assist-field-prompt">${this.escapeHtml(this.getAssistFieldPrompt(field))}</div>
-            ${field.description && this.getAssistFieldPrompt(field) !== field.description
-              ? `<div class="workspace-task-assist-field-hint">${this.escapeHtml(field.description)}</div>`
-              : ''}
-            ${field.evidence ? `<div class="workspace-task-assist-field-evidence">${this.escapeHtml(field.evidence)}</div>` : ''}
+    const currentFieldIndex = fields.findIndex((field) => field.id === this.assistActiveFieldId);
+    const firstUnansweredIndex = fields.findIndex((field) => !String(selectedValues[field.id] || '').trim());
+    const activeIndex = currentFieldIndex >= 0
+      ? currentFieldIndex
+      : (firstUnansweredIndex >= 0 ? firstUnansweredIndex : 0);
+    const activeField = fields[activeIndex];
+    const answeredCount = fields.filter((field) => String(selectedValues[field.id] || '').trim()).length;
+    const progressPercent = fields.length > 0 ? Math.round((answeredCount / fields.length) * 100) : 0;
+
+    this.assistActiveFieldId = activeField?.id || '';
+
+    if (fields.length === 1) {
+      this.elements.assistFormFields.innerHTML = this.renderAssistFieldMarkup(
+        activeField,
+        activeIndex,
+        String(selectedValues[activeField.id] || '').trim()
+      );
+    } else {
+      this.elements.assistFormFields.innerHTML = `
+        <div class="workspace-task-assist-deck">
+          <div class="workspace-task-assist-deck-rail" aria-label="Blocked task questions">
+            ${fields.map((field, index) => {
+              const fieldValue = String(selectedValues[field.id] || '').trim();
+              const isActive = index === activeIndex;
+              const isAnswered = Boolean(fieldValue);
+              const meta = field.type === 'select' && Array.isArray(field.options)
+                ? `${field.options.length} choice${field.options.length === 1 ? '' : 's'}`
+                : field.type === 'number'
+                  ? 'Number'
+                  : field.type === 'textarea'
+                    ? 'Detailed answer'
+                    : 'Short answer';
+
+              return `
+                <button
+                  type="button"
+                  class="workspace-task-assist-deck-tab${isActive ? ' is-active' : ''}${isAnswered ? ' is-answered' : ''}"
+                  data-assist-field-tab="${this.escapeHtml(field.id)}"
+                  aria-pressed="${isActive ? 'true' : 'false'}">
+                  <span class="workspace-task-assist-deck-tab-number">${index + 1}</span>
+                  <span class="workspace-task-assist-deck-tab-copy">
+                    <span class="workspace-task-assist-deck-tab-title">${this.escapeHtml(this.getAssistFieldPrompt(field))}</span>
+                    <span class="workspace-task-assist-deck-tab-meta">${this.escapeHtml(meta)}</span>
+                  </span>
+                  <span class="workspace-task-assist-deck-tab-state">${isAnswered ? 'Answered' : 'Open'}</span>
+                </button>
+              `;
+            }).join('')}
+          </div>
+
+          <div class="workspace-task-assist-deck-panel">
+            <div class="workspace-task-assist-deck-progress-row">
+              <div>
+                <div class="workspace-task-assist-deck-kicker">Question ${activeIndex + 1} of ${fields.length}</div>
+                <div class="workspace-task-assist-deck-progress-copy" data-assist-progress-count>${answeredCount} answered so far</div>
+              </div>
+              <div class="workspace-task-assist-deck-progress-bar" aria-hidden="true">
+                <span data-assist-progress-fill style="width: ${progressPercent}%"></span>
+              </div>
+            </div>
+
+            <div class="workspace-task-assist-deck-stage">
+              ${this.renderAssistFieldMarkup(activeField, activeIndex, String(selectedValues[activeField.id] || '').trim(), { active: true })}
+            </div>
+
+            <div class="workspace-task-assist-deck-nav">
+              <button type="button" class="modern-btn modern-btn-secondary" data-assist-field-nav="prev" ${activeIndex === 0 ? 'disabled' : ''}>Previous</button>
+              <button type="button" class="modern-btn modern-btn-secondary" data-assist-field-nav="next">${activeIndex === fields.length - 1 ? 'Review Answers' : 'Next Question'}</button>
+            </div>
           </div>
         </div>
       `;
+    }
 
-      if (field.type === 'select' && Array.isArray(field.options) && field.options.length > 0) {
-        return `
-          <article class="workspace-task-assist-field">
-            ${questionIntro}
-            <div class="workspace-task-assist-option-group" role="radiogroup" aria-label="${this.escapeHtml(field.label)}">
-              ${field.options.map((option) => `
-                <label class="workspace-task-assist-option">
-                  <input
-                    class="workspace-task-assist-option-input"
-                    type="radio"
-                    name="workspace-task-assist-field-${this.escapeHtml(field.id)}"
-                    value="${this.escapeHtml(option.value)}"
-                    data-assist-field-id="${this.escapeHtml(field.id)}"
-                    ${value === option.value ? 'checked' : ''}>
-                  <span class="workspace-task-assist-option-card">
-                    <span class="workspace-task-assist-option-key">${this.escapeHtml(option.key || option.value)}</span>
-                    <span class="workspace-task-assist-option-copy">
-                      <span class="workspace-task-assist-option-label">${this.escapeHtml(option.label)}</span>
-                      ${option.description ? `<span class="workspace-task-assist-option-description">${this.escapeHtml(option.description)}</span>` : ''}
-                    </span>
-                  </span>
-                </label>
-              `).join('')}
-            </div>
-          </article>
-        `;
-      }
+    this.elements.assistFormFields.querySelectorAll('[data-assist-field-tab]').forEach((button) => {
+      button.addEventListener('click', () => {
+        this.assistActiveFieldId = String(button.getAttribute('data-assist-field-tab') || '').trim();
+        this.renderFormWorkflow(workflowStep);
+        this.focusActiveAssistField();
+      });
+    });
 
-      if (field.type === 'textarea') {
-        return `
-          <article class="workspace-task-assist-field">
-            ${questionIntro}
-            <label class="form-label" for="workspace-task-field-${this.escapeHtml(field.id)}">${this.escapeHtml(field.label)}${requiredMark}</label>
-            <textarea id="workspace-task-field-${this.escapeHtml(field.id)}" class="form-control" rows="3" data-assist-field-id="${this.escapeHtml(field.id)}" placeholder="${this.escapeHtml(field.placeholder || '')}">${this.escapeHtml(value)}</textarea>
-          </article>
-        `;
-      }
-
-      const inputType = field.type === 'number' ? 'number' : 'text';
-      return `
-        <article class="workspace-task-assist-field">
-          ${questionIntro}
-          <label class="form-label" for="workspace-task-field-${this.escapeHtml(field.id)}">${this.escapeHtml(field.label)}${requiredMark}</label>
-          <input id="workspace-task-field-${this.escapeHtml(field.id)}" class="form-control" type="${inputType}" data-assist-field-id="${this.escapeHtml(field.id)}" value="${this.escapeHtml(value)}" placeholder="${this.escapeHtml(field.placeholder || '')}">
-        </article>
-      `;
-    }).join('');
+    this.elements.assistFormFields.querySelectorAll('[data-assist-field-nav]').forEach((button) => {
+      button.addEventListener('click', () => {
+        const direction = String(button.getAttribute('data-assist-field-nav') || '').trim();
+        const step = direction === 'prev' ? -1 : 1;
+        const nextIndex = Math.max(0, Math.min(fields.length - 1, activeIndex + step));
+        this.assistActiveFieldId = fields[nextIndex]?.id || this.assistActiveFieldId;
+        this.renderFormWorkflow(workflowStep);
+        this.focusActiveAssistField();
+      });
+    });
 
     this.elements.assistFormFields.querySelectorAll('[data-assist-field-id]').forEach((fieldElement) => {
       const syncValue = () => {
@@ -1501,11 +1841,121 @@ export class WorkspaceTaskPage {
           return;
         }
         this.setAssistFormFieldValue(fieldId, fieldElement.value);
+        this.syncAssistFormProgress(workflowStep);
       };
 
       fieldElement.addEventListener('input', syncValue);
       fieldElement.addEventListener('change', syncValue);
     });
+  }
+
+  renderAssistFieldMarkup(field, index, value, { active = false } = {}) {
+    if (!field) return '';
+
+    const requiredMark = field.required ? ' <span aria-hidden="true">*</span>' : '';
+    const questionIntro = `
+      <div class="workspace-task-assist-field-question">
+        <span class="workspace-task-assist-field-number">${index + 1}</span>
+        <div>
+          <div class="workspace-task-assist-field-prompt">${this.escapeHtml(this.getAssistFieldPrompt(field))}</div>
+          ${field.description && this.getAssistFieldPrompt(field) !== field.description
+            ? `<div class="workspace-task-assist-field-hint">${this.escapeHtml(field.description)}</div>`
+            : ''}
+          ${field.evidence ? `<div class="workspace-task-assist-field-evidence">${this.escapeHtml(field.evidence)}</div>` : ''}
+        </div>
+      </div>
+    `;
+
+    if (field.type === 'select' && Array.isArray(field.options) && field.options.length > 0) {
+      return `
+        <article class="workspace-task-assist-field${active ? ' is-active' : ''}">
+          ${questionIntro}
+          <div class="workspace-task-assist-option-group" role="radiogroup" aria-label="${this.escapeHtml(field.label)}">
+            ${field.options.map((option) => `
+              <label class="workspace-task-assist-option">
+                <input
+                  class="workspace-task-assist-option-input"
+                  type="radio"
+                  name="workspace-task-assist-field-${this.escapeHtml(field.id)}"
+                  value="${this.escapeHtml(option.value)}"
+                  data-assist-field-id="${this.escapeHtml(field.id)}"
+                  ${value === option.value ? 'checked' : ''}>
+                <span class="workspace-task-assist-option-card">
+                  <span class="workspace-task-assist-option-key">${this.escapeHtml(option.key || option.value)}</span>
+                  <span class="workspace-task-assist-option-copy">
+                    <span class="workspace-task-assist-option-label">${this.escapeHtml(option.label)}</span>
+                    ${option.description ? `<span class="workspace-task-assist-option-description">${this.escapeHtml(option.description)}</span>` : ''}
+                  </span>
+                </span>
+              </label>
+            `).join('')}
+          </div>
+        </article>
+      `;
+    }
+
+    if (field.type === 'textarea') {
+      return `
+        <article class="workspace-task-assist-field${active ? ' is-active' : ''}">
+          ${questionIntro}
+          <label class="form-label" for="workspace-task-field-${this.escapeHtml(field.id)}">${this.escapeHtml(field.label)}${requiredMark}</label>
+          <textarea id="workspace-task-field-${this.escapeHtml(field.id)}" class="form-control" rows="3" data-assist-field-id="${this.escapeHtml(field.id)}" placeholder="${this.escapeHtml(field.placeholder || 'Type your answer...')}">${this.escapeHtml(value)}</textarea>
+        </article>
+      `;
+    }
+
+    const inputType = field.type === 'number' ? 'number' : 'text';
+    return `
+      <article class="workspace-task-assist-field${active ? ' is-active' : ''}">
+        ${questionIntro}
+        <label class="form-label" for="workspace-task-field-${this.escapeHtml(field.id)}">${this.escapeHtml(field.label)}${requiredMark}</label>
+        <input id="workspace-task-field-${this.escapeHtml(field.id)}" class="form-control" type="${inputType}" data-assist-field-id="${this.escapeHtml(field.id)}" value="${this.escapeHtml(value)}" placeholder="${this.escapeHtml(field.placeholder || 'Type your answer...')}">
+      </article>
+    `;
+  }
+
+  syncAssistFormProgress(workflowStep) {
+    if (!workflowStep || workflowStep.stepType !== 'ask_form' || !this.elements.assistFormFields) return;
+
+    const fields = Array.isArray(workflowStep.fields) ? workflowStep.fields : [];
+    if (fields.length <= 1) return;
+
+    const selectedValues = this.currentBlockedTask?.selectedFieldValues || {};
+    const answeredCount = fields.filter((field) => String(selectedValues[field.id] || '').trim()).length;
+    const progressPercent = fields.length > 0 ? Math.round((answeredCount / fields.length) * 100) : 0;
+
+    this.elements.assistFormFields.querySelectorAll('[data-assist-field-tab]').forEach((button) => {
+      const fieldId = String(button.getAttribute('data-assist-field-tab') || '').trim();
+      const isAnswered = Boolean(String(selectedValues[fieldId] || '').trim());
+      button.classList.toggle('is-answered', isAnswered);
+      const state = button.querySelector('.workspace-task-assist-deck-tab-state');
+      if (state) {
+        state.textContent = isAnswered ? 'Answered' : 'Open';
+      }
+    });
+
+    const progressCopy = this.elements.assistFormFields.querySelector('[data-assist-progress-count]');
+    if (progressCopy) {
+      progressCopy.textContent = `${answeredCount} answered so far`;
+    }
+
+    const progressFill = this.elements.assistFormFields.querySelector('[data-assist-progress-fill]');
+    if (progressFill) {
+      progressFill.style.width = `${progressPercent}%`;
+    }
+  }
+
+  focusActiveAssistField() {
+    if (!this.elements.assistFormFields) return;
+
+    const stage = this.elements.assistFormFields.querySelector('.workspace-task-assist-deck-stage') || this.elements.assistFormFields;
+    const target = stage.querySelector(
+      'input[type="radio"]:checked, textarea[data-assist-field-id], input[data-assist-field-id]:not([type="radio"]), input[data-assist-field-id][type="radio"]'
+    );
+
+    if (target && typeof target.focus === 'function') {
+      target.focus({ preventScroll: true });
+    }
   }
 
   getAssistFieldPrompt(field) {
