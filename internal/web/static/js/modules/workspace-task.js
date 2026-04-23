@@ -382,6 +382,62 @@ function deriveAssistWorkflowStepFromText(...texts) {
   };
 }
 
+function normalizeAssistOptionToken(value) {
+  return String(value || '')
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function isAssistOtherOption(option) {
+  const normalized = normalizeAssistOptionToken(option?.label || option?.value || '');
+  if (!normalized) return false;
+  return normalized === 'other' ||
+    normalized === 'something else' ||
+    normalized === 'custom' ||
+    normalized === 'another option' ||
+    normalized === 'not listed' ||
+    normalized.startsWith('other ') ||
+    normalized.endsWith(' other');
+}
+
+function buildAssistSelectState(workflowStep, selectedFieldValues = {}) {
+  const optionValues = {};
+  const customValues = {};
+
+  if (!workflowStep || workflowStep.stepType !== 'ask_form' || !Array.isArray(workflowStep.fields)) {
+    return { optionValues, customValues };
+  }
+
+  workflowStep.fields.forEach((field) => {
+    if (field?.type !== 'select' || !Array.isArray(field.options) || field.options.length === 0) {
+      return;
+    }
+
+    const savedValue = String(selectedFieldValues[field.id] || '').trim();
+    if (!savedValue) return;
+
+    const matchedOption = field.options.find((option) => (
+      String(option?.value || '').trim() === savedValue ||
+      String(option?.label || '').trim() === savedValue
+    ));
+    if (matchedOption) {
+      optionValues[field.id] = String(matchedOption.value || matchedOption.label || '').trim();
+      return;
+    }
+
+    const otherOption = field.options.find((option) => isAssistOtherOption(option));
+    if (!otherOption) return;
+
+    optionValues[field.id] = String(otherOption.value || otherOption.label || '').trim();
+    customValues[field.id] = savedValue;
+  });
+
+  return { optionValues, customValues };
+}
+
 export class WorkspaceTaskPage {
   constructor(workspaceId, taskId) {
     this.workspaceId = workspaceId;
@@ -810,6 +866,8 @@ export class WorkspaceTaskPage {
     ) || this.normalizeAssistWorkflowStep(
       deriveAssistWorkflowStepFromText(humanLoop?.question, humanLoop?.agent_response)
     );
+    const selectedFieldValues = this.normalizeAssistFieldValues(humanLoop?.field_values);
+    const selectState = buildAssistSelectState(workflowStep, selectedFieldValues);
 
     return {
       taskId: String(task?.id || '').trim(),
@@ -822,7 +880,9 @@ export class WorkspaceTaskPage {
       selectedChoiceId: '',
       selectedChoiceLabel: '',
       selectedChoiceNumber: '',
-      selectedFieldValues: this.normalizeAssistFieldValues(humanLoop?.field_values)
+      selectedFieldValues,
+      selectedFieldOptionValues: selectState.optionValues,
+      selectedFieldCustomValues: selectState.customValues
     };
   }
 
@@ -1840,12 +1900,41 @@ export class WorkspaceTaskPage {
         if (fieldElement instanceof HTMLInputElement && fieldElement.type === 'radio' && !fieldElement.checked) {
           return;
         }
+        if (fieldElement instanceof HTMLInputElement && fieldElement.type === 'radio') {
+          const optionValue = String(fieldElement.getAttribute('data-assist-option-value') || fieldElement.value || '').trim();
+          const isCustomOption = String(fieldElement.getAttribute('data-assist-custom-option') || '').trim() === 'true';
+          this.setAssistFormFieldOptionValue(fieldId, optionValue);
+          if (isCustomOption) {
+            const existingCustomValue = String(this.currentBlockedTask?.selectedFieldCustomValues?.[fieldId] || '').trim();
+            this.setAssistFormFieldValue(fieldId, existingCustomValue);
+          } else {
+            this.setAssistFormCustomFieldValue(fieldId, '');
+            this.setAssistFormFieldValue(fieldId, optionValue);
+          }
+          this.renderFormWorkflow(workflowStep);
+          this.syncAssistFormProgress(workflowStep);
+          this.focusActiveAssistField();
+          return;
+        }
         this.setAssistFormFieldValue(fieldId, fieldElement.value);
         this.syncAssistFormProgress(workflowStep);
       };
 
       fieldElement.addEventListener('input', syncValue);
       fieldElement.addEventListener('change', syncValue);
+    });
+
+    this.elements.assistFormFields.querySelectorAll('[data-assist-custom-field-id]').forEach((fieldElement) => {
+      const syncCustomValue = () => {
+        const fieldId = String(fieldElement.getAttribute('data-assist-custom-field-id') || '').trim();
+        if (!fieldId) return;
+        this.setAssistFormCustomFieldValue(fieldId, fieldElement.value);
+        this.setAssistFormFieldValue(fieldId, fieldElement.value);
+        this.syncAssistFormProgress(workflowStep);
+      };
+
+      fieldElement.addEventListener('input', syncCustomValue);
+      fieldElement.addEventListener('change', syncCustomValue);
     });
   }
 
@@ -1867,6 +1956,12 @@ export class WorkspaceTaskPage {
     `;
 
     if (field.type === 'select' && Array.isArray(field.options) && field.options.length > 0) {
+      const selectedOptionValue = String(this.currentBlockedTask?.selectedFieldOptionValues?.[field.id] || '').trim();
+      const customValue = String(this.currentBlockedTask?.selectedFieldCustomValues?.[field.id] || '').trim();
+      const otherOption = field.options.find((option) => isAssistOtherOption(option));
+      const otherOptionValue = String(otherOption?.value || otherOption?.label || '').trim();
+      const showCustomInput = Boolean(otherOptionValue) && selectedOptionValue === otherOptionValue;
+
       return `
         <article class="workspace-task-assist-field${active ? ' is-active' : ''}">
           ${questionIntro}
@@ -1879,7 +1974,9 @@ export class WorkspaceTaskPage {
                   name="workspace-task-assist-field-${this.escapeHtml(field.id)}"
                   value="${this.escapeHtml(option.value)}"
                   data-assist-field-id="${this.escapeHtml(field.id)}"
-                  ${value === option.value ? 'checked' : ''}>
+                  data-assist-option-value="${this.escapeHtml(option.value)}"
+                  data-assist-custom-option="${isAssistOtherOption(option) ? 'true' : 'false'}"
+                  ${selectedOptionValue === option.value ? 'checked' : ''}>
                 <span class="workspace-task-assist-option-card">
                   <span class="workspace-task-assist-option-key">${this.escapeHtml(option.key || option.value)}</span>
                   <span class="workspace-task-assist-option-copy">
@@ -1890,6 +1987,18 @@ export class WorkspaceTaskPage {
               </label>
             `).join('')}
           </div>
+          ${showCustomInput ? `
+            <div class="workspace-task-assist-custom-input">
+              <label class="form-label" for="workspace-task-custom-field-${this.escapeHtml(field.id)}">Tell the agent the right answer</label>
+              <input
+                id="workspace-task-custom-field-${this.escapeHtml(field.id)}"
+                class="form-control"
+                type="text"
+                data-assist-custom-field-id="${this.escapeHtml(field.id)}"
+                value="${this.escapeHtml(customValue)}"
+                placeholder="Type the custom answer here...">
+            </div>
+          ` : ''}
         </article>
       `;
     }
@@ -1950,11 +2059,14 @@ export class WorkspaceTaskPage {
 
     const stage = this.elements.assistFormFields.querySelector('.workspace-task-assist-deck-stage') || this.elements.assistFormFields;
     const target = stage.querySelector(
-      'input[type="radio"]:checked, textarea[data-assist-field-id], input[data-assist-field-id]:not([type="radio"]), input[data-assist-field-id][type="radio"]'
+      '[data-assist-custom-field-id], textarea[data-assist-field-id], input[data-assist-field-id]:not([type="radio"]), input[type="radio"]:checked, input[data-assist-field-id][type="radio"]'
     );
 
     if (target && typeof target.focus === 'function') {
       target.focus({ preventScroll: true });
+      if (target instanceof HTMLInputElement && target.type === 'text') {
+        target.select();
+      }
     }
   }
 
@@ -1981,6 +2093,38 @@ export class WorkspaceTaskPage {
     }
 
     this.currentBlockedTask.selectedFieldValues[fieldId] = normalizedValue;
+  }
+
+  setAssistFormFieldOptionValue(fieldId, value) {
+    if (!this.currentBlockedTask || !fieldId) return;
+
+    const normalizedValue = String(value || '').trim();
+    if (!this.currentBlockedTask.selectedFieldOptionValues || typeof this.currentBlockedTask.selectedFieldOptionValues !== 'object') {
+      this.currentBlockedTask.selectedFieldOptionValues = {};
+    }
+
+    if (!normalizedValue) {
+      delete this.currentBlockedTask.selectedFieldOptionValues[fieldId];
+      return;
+    }
+
+    this.currentBlockedTask.selectedFieldOptionValues[fieldId] = normalizedValue;
+  }
+
+  setAssistFormCustomFieldValue(fieldId, value) {
+    if (!this.currentBlockedTask || !fieldId) return;
+
+    const normalizedValue = String(value || '').trim();
+    if (!this.currentBlockedTask.selectedFieldCustomValues || typeof this.currentBlockedTask.selectedFieldCustomValues !== 'object') {
+      this.currentBlockedTask.selectedFieldCustomValues = {};
+    }
+
+    if (!normalizedValue) {
+      delete this.currentBlockedTask.selectedFieldCustomValues[fieldId];
+      return;
+    }
+
+    this.currentBlockedTask.selectedFieldCustomValues[fieldId] = normalizedValue;
   }
 
   collectAssistFormFieldValues() {
