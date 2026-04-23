@@ -445,6 +445,7 @@ export class WorkspaceTaskPage {
     this.workspace = null;
     this.task = null;
     this.tasks = [];
+    this.availableAgents = [];
     this.currentBlockedTask = null;
     this.taskAssistResponseExpanded = false;
     this.assistActiveFieldId = '';
@@ -511,6 +512,8 @@ export class WorkspaceTaskPage {
       assistFormFields: document.getElementById('workspace-task-assist-form-fields'),
       assistMessage: document.getElementById('workspace-task-assist-message'),
       assistAgent: document.getElementById('workspace-task-assist-agent'),
+      assistMoreActions: document.querySelector('.workspace-task-assist-more-actions'),
+      assistSwitchWrap: document.querySelector('.workspace-task-assist-switch'),
       assistRetryBtn: document.getElementById('workspace-task-assist-retry'),
       assistContinueBtn: document.getElementById('workspace-task-assist-continue'),
       assistSwitchBtn: document.getElementById('workspace-task-assist-switch'),
@@ -537,13 +540,15 @@ export class WorkspaceTaskPage {
     this.setAlert('');
 
     try {
-      const [workspace, taskResponse] = await Promise.all([
+      const [workspace, taskResponse, agents] = await Promise.all([
         this.fetchWorkspace(),
-        this.fetchTask()
+        this.fetchTask(),
+        this.fetchAgents().catch(() => [])
       ]);
 
       this.workspace = workspace || null;
       this.tasks = Array.isArray(workspace?.tasks) ? workspace.tasks : [];
+      this.availableAgents = Array.isArray(agents) ? agents : [];
 
       const workspaceTask = this.tasks.find((item) => String(item?.id || '') === this.taskId) || null;
       this.task = taskResponse || workspaceTask;
@@ -581,6 +586,16 @@ export class WorkspaceTaskPage {
       throw new Error('Failed to load task details.');
     }
     return response.json();
+  }
+
+  async fetchAgents() {
+    const response = await fetch('/api/agents');
+    if (!response.ok) {
+      throw new Error('Failed to load agent list.');
+    }
+
+    const payload = await response.json();
+    return Array.isArray(payload?.agents) ? payload.agents : [];
   }
 
   setupRealtime() {
@@ -874,9 +889,13 @@ export class WorkspaceTaskPage {
       taskId: String(task?.id || '').trim(),
       blockId: String(humanLoop?.block_id || '').trim(),
       currentAgent: String(task?.to || '').trim(),
+      reasonCode: String(humanLoop?.reason_code || '').trim().toLowerCase(),
       reason: String(humanLoop?.reason || 'This task needs your input before it can continue.').trim(),
       question: String(humanLoop?.question || '').trim(),
       response: String(humanLoop?.agent_response || '').trim(),
+      suggestedActions: Array.isArray(humanLoop?.suggested_actions)
+        ? humanLoop.suggested_actions.map((action) => String(action || '').trim()).filter(Boolean)
+        : [],
       workflowStep,
       selectedChoiceId: '',
       selectedChoiceLabel: '',
@@ -885,6 +904,42 @@ export class WorkspaceTaskPage {
       selectedFieldOptionValues: selectState.optionValues,
       selectedFieldCustomValues: selectState.customValues
     };
+  }
+
+  getAvailableAgentNames() {
+    const names = new Set();
+
+    if (Array.isArray(this.availableAgents)) {
+      this.availableAgents.forEach((item) => {
+        const name = typeof item === 'string'
+          ? String(item || '').trim()
+          : String(item?.name || '').trim();
+        if (name) names.add(name);
+      });
+    }
+
+    return Array.from(names).sort((left, right) => left.localeCompare(right));
+  }
+
+  isRunnableAgentName(agentName) {
+    const normalizedTarget = String(agentName || '').trim().toLowerCase();
+    if (!normalizedTarget || normalizedTarget === 'unassigned') return true;
+
+    return this.getAvailableAgentNames().some((name) => String(name || '').trim().toLowerCase() === normalizedTarget);
+  }
+
+  getAssignableAgentNames(currentAgent = '') {
+    const runnable = this.getAvailableAgentNames();
+    if (runnable.length > 0) {
+      return runnable;
+    }
+
+    const fallback = this.getWorkspaceAgentNames();
+    const normalizedCurrent = String(currentAgent || '').trim();
+    if (normalizedCurrent && !fallback.some((name) => String(name || '').trim().toLowerCase() === normalizedCurrent.toLowerCase())) {
+      fallback.unshift(normalizedCurrent);
+    }
+    return fallback;
   }
 
   getWorkspaceAgentNames() {
@@ -909,6 +964,14 @@ export class WorkspaceTaskPage {
     }
 
     return Array.from(names).filter(Boolean);
+  }
+
+  isAssistActionSuggested(action) {
+    const suggestions = Array.isArray(this.currentBlockedTask?.suggestedActions)
+      ? this.currentBlockedTask.suggestedActions
+      : [];
+    if (suggestions.length === 0) return true;
+    return suggestions.includes(action);
   }
 
   getParentTask() {
@@ -1066,6 +1129,11 @@ export class WorkspaceTaskPage {
   }
 
   getBlockedHeroPrimaryActionLabel(workflowStep) {
+    if (this.currentBlockedTask?.reasonCode === 'assigned_agent_missing' &&
+        this.isAssistActionSuggested('switch_agent_retry') &&
+        !this.isAssistActionSuggested('continue_with_instruction')) {
+      return 'Switch Agent';
+    }
     if (workflowStep?.stepType === 'ask_form') {
       return 'Answer Questions';
     }
@@ -1278,8 +1346,9 @@ export class WorkspaceTaskPage {
     if (!this.elements.snapshot) return;
 
     const currentAgent = String(this.task?.to || 'Unassigned').trim() || 'Unassigned';
+    const currentAgentUnavailable = Boolean(this.task?.to) && !this.isRunnableAgentName(currentAgent);
     const statusOptions = ['pending', 'assigned', 'in_progress', 'completed', 'failed', 'blocked', 'cancelled'];
-    const agentNames = this.getWorkspaceAgentNames();
+    const agentNames = this.getAssignableAgentNames(currentAgent);
 
     const snapshotItems = [
       ['Created', formatDateTime(this.task?.created_at)],
@@ -1306,7 +1375,19 @@ export class WorkspaceTaskPage {
         <span class="workspace-task-snapshot-label">Agent</span>
         <select id="workspace-task-snapshot-agent" class="workspace-task-snapshot-select">
           <option value="" ${!this.task?.to ? 'selected' : ''}>Unassigned</option>
-          ${agentNames.map((name) => `<option value="${this.escapeHtml(name)}" ${name === this.task?.to ? 'selected' : ''}>${this.escapeHtml(name)}</option>`).join('')}
+          ${currentAgentUnavailable
+            ? `<option value="${this.escapeHtml(currentAgent)}" selected disabled>${this.escapeHtml(`${currentAgent} (Unavailable)`)}</option>`
+            : ''}
+          ${agentNames
+            .filter((name) => String(name || '').trim() && String(name || '').trim().toLowerCase() !== currentAgent.toLowerCase())
+            .map((name) => `<option value="${this.escapeHtml(name)}">${this.escapeHtml(name)}</option>`)
+            .join('')}
+          ${!currentAgentUnavailable
+            ? agentNames
+              .filter((name) => String(name || '').trim().toLowerCase() === currentAgent.toLowerCase())
+              .map((name) => `<option value="${this.escapeHtml(name)}" selected>${this.escapeHtml(name)}</option>`)
+              .join('')
+            : ''}
         </select>
       </div>
     `;
@@ -1329,16 +1410,18 @@ export class WorkspaceTaskPage {
       </div>
     `).join('');
 
-    const summaryCopy = statusInfo.isBlocked || statusInfo.className === 'in_progress'
+    const summaryCopy = currentAgentUnavailable
+      ? 'This task is assigned to an unavailable agent. Reassign it before retrying execution.'
+      : (statusInfo.isBlocked || statusInfo.className === 'in_progress'
       ? 'The main page already shows the important execution state. Open this only if you need to adjust controls or inspect metadata.'
-      : 'Open this only when you need to change task controls or inspect metadata.';
+      : 'Open this only when you need to change task controls or inspect metadata.');
 
     this.elements.snapshot.innerHTML = `
       <div class="workspace-task-snapshot-summary">
         <div class="workspace-task-snapshot-summary-copy">${this.escapeHtml(summaryCopy)}</div>
         <div class="workspace-task-snapshot-chip-row">
           <span class="workspace-task-snapshot-chip workspace-task-snapshot-chip-status" data-state="${this.escapeHtml(statusInfo.className)}">${this.escapeHtml(statusInfo.label)}</span>
-          <span class="workspace-task-snapshot-chip">${this.escapeHtml(currentAgent)}</span>
+          <span class="workspace-task-snapshot-chip">${this.escapeHtml(currentAgentUnavailable ? `${currentAgent} (Unavailable)` : currentAgent)}</span>
           <span class="workspace-task-snapshot-chip">${this.escapeHtml(priorityLabels[currentPriority] || `Priority ${currentPriority}`)}</span>
         </div>
       </div>
@@ -1683,9 +1766,28 @@ export class WorkspaceTaskPage {
       const primaryLabel = this.getAssistPrimaryActionLabel(workflowStep);
       this.elements.assistContinueBtn.textContent = primaryLabel;
       this.elements.assistContinueBtn.setAttribute('aria-label', primaryLabel);
+      this.elements.assistContinueBtn.hidden = !this.isAssistActionSuggested('continue_with_instruction');
     }
     if (this.elements.assistMessage) {
       this.elements.assistMessage.placeholder = this.getAssistMessagePlaceholder(workflowStep);
+    }
+    if (this.elements.assistRetryBtn) {
+      this.elements.assistRetryBtn.hidden = !this.isAssistActionSuggested('retry');
+    }
+    if (this.elements.assistFailBtn) {
+      this.elements.assistFailBtn.hidden = !this.isAssistActionSuggested('mark_failed');
+    }
+    if (this.elements.assistSwitchWrap) {
+      this.elements.assistSwitchWrap.hidden = !this.isAssistActionSuggested('switch_agent_retry');
+    }
+    if (this.elements.assistMoreActions) {
+      const hasMoreActions = this.isAssistActionSuggested('switch_agent_retry') ||
+        this.isAssistActionSuggested('retry') ||
+        this.isAssistActionSuggested('mark_failed');
+      this.elements.assistMoreActions.hidden = !hasMoreActions;
+      if (!hasMoreActions) {
+        this.elements.assistMoreActions.open = false;
+      }
     }
 
     this.populateAssistAgents(this.currentBlockedTask?.currentAgent || '');
@@ -1694,6 +1796,9 @@ export class WorkspaceTaskPage {
   }
 
   getAssistNeedsSummary(workflowStep) {
+    if (this.currentBlockedTask?.reasonCode === 'assigned_agent_missing') {
+      return 'Pick a runnable agent for this task before you retry execution.';
+    }
     if (workflowStep?.stepType === 'ask_form' && Array.isArray(workflowStep.fields) && workflowStep.fields.length > 0) {
       return `Answer ${workflowStep.fields.length} question${workflowStep.fields.length === 1 ? '' : 's'} so the agent can continue.`;
     }
@@ -1707,6 +1812,9 @@ export class WorkspaceTaskPage {
   }
 
   getAssistNextSummary(workflowStep) {
+    if (this.currentBlockedTask?.reasonCode === 'assigned_agent_missing') {
+      return 'Use the reassignment control to switch this task to an available agent.';
+    }
     if (workflowStep?.stepType === 'ask_form') {
       return 'Continue sends your answers and any extra guidance back to the assigned agent.';
     }
@@ -1730,6 +1838,9 @@ export class WorkspaceTaskPage {
   }
 
   getAssistMessagePlaceholder(workflowStep) {
+    if (this.currentBlockedTask?.reasonCode === 'assigned_agent_missing') {
+      return 'Optional context to send along with the new agent assignment...';
+    }
     if (workflowStep?.stepType === 'ask_form') {
       return 'Add any constraints or context the form does not cover...';
     }
@@ -1742,12 +1853,21 @@ export class WorkspaceTaskPage {
   populateAssistAgents(currentAgent = '') {
     if (!this.elements.assistAgent) return;
 
-    const currentNormalized = String(currentAgent || '').trim().toLowerCase();
-    const options = ['<option value="">Keep current assignment</option>'];
+    const currentNormalized = String(currentAgent || '').trim();
+    const currentUnavailable = Boolean(currentNormalized) && !this.isRunnableAgentName(currentNormalized);
+    const options = [
+      currentUnavailable
+        ? '<option value="" selected>Select an available agent</option>'
+        : '<option value="">Keep current assignment</option>'
+    ];
 
-    this.getWorkspaceAgentNames().forEach((agentName) => {
+    if (currentUnavailable) {
+      options.push(`<option value="${this.escapeHtml(currentNormalized)}" disabled>${this.escapeHtml(`${currentNormalized} (Current assignment unavailable)`)}</option>`);
+    }
+
+    this.getAssignableAgentNames(currentAgent).forEach((agentName) => {
       const normalized = String(agentName || '').trim();
-      if (!normalized || normalized.toLowerCase() === currentNormalized) return;
+      if (!normalized || normalized.toLowerCase() === currentNormalized.toLowerCase()) return;
       options.push(`<option value="${this.escapeHtml(normalized)}">${this.escapeHtml(normalized)}</option>`);
     });
 

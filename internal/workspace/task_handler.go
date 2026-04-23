@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"regexp"
+	"sort"
 	"strings"
 
 	"github.com/johnjallday/ori-agent/internal/agent"
@@ -169,9 +170,14 @@ func (h *LLMTaskHandler) ExecuteTask(ctx context.Context, agentName string, task
 }
 
 func (h *LLMTaskHandler) resolveExecutionAgent(agentName string, task Task) (*resolvedTaskAgent, error) {
+	normalizedAgentName := strings.TrimSpace(agentName)
+
 	if h.runtimeResolver != nil {
-		resolved, err := h.runtimeResolver.ResolveAgentForTask(agentName, task)
+		resolved, err := h.runtimeResolver.ResolveAgentForTask(normalizedAgentName, task)
 		if err != nil {
+			if blockedErr := h.buildMissingAssignedAgentBlockedError(normalizedAgentName, task); blockedErr != nil {
+				return nil, blockedErr
+			}
 			return nil, err
 		}
 		if resolved != nil && resolved.Agent != nil {
@@ -182,11 +188,99 @@ func (h *LLMTaskHandler) resolveExecutionAgent(agentName string, task Task) (*re
 		}
 	}
 
-	ag, ok := h.agentStore.GetAgent(agentName)
+	ag, ok := h.agentStore.GetAgent(normalizedAgentName)
 	if !ok {
-		return nil, fmt.Errorf("agent %s not found", agentName)
+		if blockedErr := h.buildMissingAssignedAgentBlockedError(normalizedAgentName, task); blockedErr != nil {
+			return nil, blockedErr
+		}
+		return nil, fmt.Errorf("agent %s not found", normalizedAgentName)
 	}
 	return &resolvedTaskAgent{Agent: ag}, nil
+}
+
+func (h *LLMTaskHandler) buildMissingAssignedAgentBlockedError(agentName string, task Task) *TaskBlockedError {
+	if h == nil || h.agentStore == nil {
+		return nil
+	}
+
+	normalizedAgentName := strings.TrimSpace(agentName)
+	if normalizedAgentName == "" {
+		return nil
+	}
+
+	if existing, ok := h.agentStore.GetAgent(normalizedAgentName); ok && existing != nil {
+		return nil
+	}
+
+	isWorkspaceAgent := false
+	if strings.TrimSpace(task.WorkspaceID) != "" && h.workspaceStore != nil {
+		if ws, err := h.workspaceStore.Get(task.WorkspaceID); err == nil && ws != nil {
+			isWorkspaceAgent = ws.HasAgent(normalizedAgentName)
+		}
+	}
+
+	reason := fmt.Sprintf("Assigned agent %s is no longer available.", normalizedAgentName)
+	question := fmt.Sprintf(
+		"This task is assigned to %s, but that agent no longer exists. Switch to another agent or recreate it, then retry.",
+		normalizedAgentName,
+	)
+	if isWorkspaceAgent {
+		reason = fmt.Sprintf("Assigned workspace agent %s is no longer available.", normalizedAgentName)
+		question = fmt.Sprintf(
+			"This task still points at workspace agent %s, but that agent no longer exists as a runnable definition. Switch to another agent or recreate it, then retry.",
+			normalizedAgentName,
+		)
+	}
+
+	if availableAgents := h.listAvailableExecutionAgents(normalizedAgentName); len(availableAgents) > 0 {
+		question = fmt.Sprintf(
+			"%s %d other runnable agent%s %s currently available.",
+			question,
+			len(availableAgents),
+			map[bool]string{true: "", false: "s"}[len(availableAgents) == 1],
+			map[bool]string{true: "is", false: "are"}[len(availableAgents) == 1],
+		)
+	}
+
+	return &TaskBlockedError{
+		ReasonCode: "assigned_agent_missing",
+		Reason:     reason,
+		Question:   question,
+		SuggestedActions: []string{
+			"switch_agent_retry",
+			"mark_failed",
+		},
+	}
+}
+
+func (h *LLMTaskHandler) listAvailableExecutionAgents(excludeAgent string) []string {
+	if h == nil || h.agentStore == nil {
+		return nil
+	}
+
+	names := append([]string(nil), h.agentStore.ListAgents()...)
+	sort.Strings(names)
+
+	excludedKey := strings.ToLower(strings.TrimSpace(excludeAgent))
+	seen := make(map[string]struct{}, len(names))
+	available := make([]string, 0, len(names))
+	for _, candidate := range names {
+		trimmed := strings.TrimSpace(candidate)
+		if trimmed == "" {
+			continue
+		}
+		key := strings.ToLower(trimmed)
+		if key == excludedKey {
+			continue
+		}
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		available = append(available, trimmed)
+	}
+
+	return available
 }
 
 func (h *LLMTaskHandler) executeTaskConversation(
