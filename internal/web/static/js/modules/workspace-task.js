@@ -1889,6 +1889,7 @@ export class WorkspaceTaskPage {
 
     this.elements.assistFormFields.querySelectorAll('[data-assist-field-tab]').forEach((button) => {
       button.addEventListener('click', () => {
+        this.assistReviewMode = false;
         this.assistActiveFieldId = String(button.getAttribute('data-assist-field-tab') || '').trim();
         this.renderFormWorkflow(workflowStep);
         this.focusActiveAssistField();
