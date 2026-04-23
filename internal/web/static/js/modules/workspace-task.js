@@ -448,6 +448,7 @@ export class WorkspaceTaskPage {
     this.currentBlockedTask = null;
     this.taskAssistResponseExpanded = false;
     this.assistActiveFieldId = '';
+    this.assistReviewMode = false;
     this.workspaceRealtimeUnsubscribe = null;
     this.pendingRefreshTimer = null;
     this.titleEditInProgress = false;
@@ -933,6 +934,7 @@ export class WorkspaceTaskPage {
     const statusInfo = this.getTaskStatusPresentation();
     this.currentBlockedTask = statusInfo.isBlocked ? this.buildBlockedTaskState() : null;
     this.taskAssistResponseExpanded = false;
+    this.assistReviewMode = false;
 
     this.renderHero(statusInfo);
     this.renderHeroActions(statusInfo);
@@ -1734,6 +1736,7 @@ export class WorkspaceTaskPage {
 
     if (!workflowStep) {
       this.assistActiveFieldId = '';
+      this.assistReviewMode = false;
       this.elements.assistFormWrap.classList.add('d-none');
       this.elements.assistFormFields.innerHTML = '';
       return;
@@ -1743,6 +1746,7 @@ export class WorkspaceTaskPage {
 
     if (workflowStep.stepType === 'ask_choice') {
       this.assistActiveFieldId = '';
+      this.assistReviewMode = false;
       this.renderChoiceWorkflow(workflowStep);
       return;
     }
@@ -1796,6 +1800,7 @@ export class WorkspaceTaskPage {
     const fields = Array.isArray(workflowStep.fields) ? workflowStep.fields.filter(Boolean) : [];
     if (fields.length === 0) {
       this.assistActiveFieldId = '';
+      this.assistReviewMode = false;
       this.elements.assistFormFields.innerHTML = '';
       return;
     }
@@ -1808,10 +1813,12 @@ export class WorkspaceTaskPage {
     const activeField = fields[activeIndex];
     const answeredCount = fields.filter((field) => String(selectedValues[field.id] || '').trim()).length;
     const progressPercent = fields.length > 0 ? Math.round((answeredCount / fields.length) * 100) : 0;
+    const reviewMode = fields.length > 1 && this.assistReviewMode;
 
     this.assistActiveFieldId = activeField?.id || '';
 
     if (fields.length === 1) {
+      this.assistReviewMode = false;
       this.elements.assistFormFields.innerHTML = this.renderAssistFieldMarkup(
         activeField,
         activeIndex,
@@ -1853,21 +1860,27 @@ export class WorkspaceTaskPage {
           <div class="workspace-task-assist-deck-panel">
             <div class="workspace-task-assist-deck-progress-row">
               <div>
-                <div class="workspace-task-assist-deck-kicker">Question ${activeIndex + 1} of ${fields.length}</div>
-                <div class="workspace-task-assist-deck-progress-copy" data-assist-progress-count>${answeredCount} answered so far</div>
+                <div class="workspace-task-assist-deck-kicker">${reviewMode ? 'Final Review' : `Question ${activeIndex + 1} of ${fields.length}`}</div>
+                <div class="workspace-task-assist-deck-progress-copy" data-assist-progress-count>${reviewMode
+                  ? (answeredCount === fields.length ? 'All answers captured' : `${fields.length - answeredCount} answers still missing`)
+                  : `${answeredCount} answered so far`}</div>
               </div>
               <div class="workspace-task-assist-deck-progress-bar" aria-hidden="true">
                 <span data-assist-progress-fill style="width: ${progressPercent}%"></span>
               </div>
             </div>
 
-            <div class="workspace-task-assist-deck-stage">
-              ${this.renderAssistFieldMarkup(activeField, activeIndex, String(selectedValues[activeField.id] || '').trim(), { active: true })}
-            </div>
+            ${reviewMode
+              ? this.renderAssistReviewMarkup(fields)
+              : `<div class="workspace-task-assist-deck-stage">
+                  ${this.renderAssistFieldMarkup(activeField, activeIndex, String(selectedValues[activeField.id] || '').trim(), { active: true })}
+                </div>`}
 
             <div class="workspace-task-assist-deck-nav">
-              <button type="button" class="modern-btn modern-btn-secondary" data-assist-field-nav="prev" ${activeIndex === 0 ? 'disabled' : ''}>Previous</button>
-              <button type="button" class="modern-btn modern-btn-secondary" data-assist-field-nav="next">${activeIndex === fields.length - 1 ? 'Review Answers' : 'Next Question'}</button>
+              <button type="button" class="modern-btn modern-btn-secondary" data-assist-field-nav="${reviewMode ? 'review-back' : 'prev'}" ${reviewMode ? '' : (activeIndex === 0 ? 'disabled' : '')}>${reviewMode ? 'Back To Questions' : 'Previous'}</button>
+              ${reviewMode
+                ? '<div class="workspace-task-assist-deck-nav-note">Use Send Answers below or edit any item in this review.</div>'
+                : `<button type="button" class="modern-btn modern-btn-secondary" data-assist-field-nav="next">${activeIndex === fields.length - 1 ? 'Review Answers' : 'Next Question'}</button>`}
             </div>
           </div>
         </div>
@@ -1885,9 +1898,31 @@ export class WorkspaceTaskPage {
     this.elements.assistFormFields.querySelectorAll('[data-assist-field-nav]').forEach((button) => {
       button.addEventListener('click', () => {
         const direction = String(button.getAttribute('data-assist-field-nav') || '').trim();
+        if (direction === 'review-back') {
+          this.assistReviewMode = false;
+          this.renderFormWorkflow(workflowStep);
+          this.focusActiveAssistField();
+          return;
+        }
+        if (direction === 'next' && activeIndex === fields.length - 1) {
+          this.assistReviewMode = true;
+          this.renderFormWorkflow(workflowStep);
+          this.focusActiveAssistField();
+          return;
+        }
         const step = direction === 'prev' ? -1 : 1;
         const nextIndex = Math.max(0, Math.min(fields.length - 1, activeIndex + step));
+        this.assistReviewMode = false;
         this.assistActiveFieldId = fields[nextIndex]?.id || this.assistActiveFieldId;
+        this.renderFormWorkflow(workflowStep);
+        this.focusActiveAssistField();
+      });
+    });
+
+    this.elements.assistFormFields.querySelectorAll('[data-assist-review-edit-id]').forEach((button) => {
+      button.addEventListener('click', () => {
+        this.assistReviewMode = false;
+        this.assistActiveFieldId = String(button.getAttribute('data-assist-review-edit-id') || '').trim();
         this.renderFormWorkflow(workflowStep);
         this.focusActiveAssistField();
       });
@@ -2023,6 +2058,57 @@ export class WorkspaceTaskPage {
     `;
   }
 
+  renderAssistReviewMarkup(fields) {
+    const answeredCount = fields.filter((field) => Boolean(this.getAssistFieldAnswerValue(field))).length;
+
+    return `
+      <div class="workspace-task-assist-review">
+        <div class="workspace-task-assist-review-banner">
+          <div class="workspace-task-assist-review-title">Review what will be sent back to the agent.</div>
+          <div class="workspace-task-assist-review-copy">${answeredCount === fields.length
+            ? 'Everything requested has an answer. You can send this now or edit any item below.'
+            : `${fields.length - answeredCount} item${fields.length - answeredCount === 1 ? '' : 's'} still need attention before you continue.`}</div>
+        </div>
+        <div class="workspace-task-assist-review-list">
+          ${fields.map((field, index) => {
+            const answerValue = this.getAssistFieldAnswerValue(field);
+            const answered = Boolean(answerValue);
+            return `
+              <article class="workspace-task-assist-review-item${answered ? ' is-answered' : ''}">
+                <div class="workspace-task-assist-review-item-top">
+                  <div class="workspace-task-assist-review-item-title">
+                    <span class="workspace-task-assist-review-item-number">${index + 1}</span>
+                    <span>${this.escapeHtml(this.getAssistFieldPrompt(field))}</span>
+                  </div>
+                  <button type="button" class="workspace-task-assist-review-edit" data-assist-review-edit-id="${this.escapeHtml(field.id)}">Edit</button>
+                </div>
+                <div class="workspace-task-assist-review-answer${answered ? '' : ' is-empty'}">
+                  ${this.escapeHtml(answerValue || 'No answer yet')}
+                </div>
+              </article>
+            `;
+          }).join('')}
+        </div>
+      </div>
+    `;
+  }
+
+  getAssistFieldAnswerValue(field) {
+    if (!field || !this.currentBlockedTask) return '';
+
+    const selectedValue = String(this.currentBlockedTask.selectedFieldValues?.[field.id] || '').trim();
+    if (!selectedValue) return '';
+
+    if (field.type === 'select' && Array.isArray(field.options) && field.options.length > 0) {
+      const option = field.options.find((item) => String(item?.value || '').trim() === selectedValue);
+      if (option) {
+        return String(option.label || option.value || '').trim();
+      }
+    }
+
+    return selectedValue;
+  }
+
   syncAssistFormProgress(workflowStep) {
     if (!workflowStep || workflowStep.stepType !== 'ask_form' || !this.elements.assistFormFields) return;
 
@@ -2045,7 +2131,9 @@ export class WorkspaceTaskPage {
 
     const progressCopy = this.elements.assistFormFields.querySelector('[data-assist-progress-count]');
     if (progressCopy) {
-      progressCopy.textContent = `${answeredCount} answered so far`;
+      progressCopy.textContent = this.assistReviewMode
+        ? (answeredCount === fields.length ? 'All answers captured' : `${fields.length - answeredCount} answers still missing`)
+        : `${answeredCount} answered so far`;
     }
 
     const progressFill = this.elements.assistFormFields.querySelector('[data-assist-progress-fill]');
@@ -2059,7 +2147,7 @@ export class WorkspaceTaskPage {
 
     const stage = this.elements.assistFormFields.querySelector('.workspace-task-assist-deck-stage') || this.elements.assistFormFields;
     const target = stage.querySelector(
-      '[data-assist-custom-field-id], textarea[data-assist-field-id], input[data-assist-field-id]:not([type="radio"]), input[type="radio"]:checked, input[data-assist-field-id][type="radio"]'
+      '[data-assist-review-edit-id], [data-assist-custom-field-id], textarea[data-assist-field-id], input[data-assist-field-id]:not([type="radio"]), input[type="radio"]:checked, input[data-assist-field-id][type="radio"]'
     );
 
     if (target && typeof target.focus === 'function') {

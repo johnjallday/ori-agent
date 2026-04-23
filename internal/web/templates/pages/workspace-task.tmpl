@@ -1326,6 +1326,121 @@
       justify-content: center;
     }
 
+    .workspace-task-assist-deck-nav-note {
+      color: var(--text-secondary);
+      font-size: 0.84rem;
+      line-height: 1.5;
+      margin-left: auto;
+      text-align: right;
+    }
+
+    .workspace-task-assist-review {
+      display: flex;
+      flex-direction: column;
+      gap: 0.8rem;
+      animation: workspace-task-assist-panel-enter 0.2s ease;
+    }
+
+    .workspace-task-assist-review-banner {
+      padding: 0.85rem 0.95rem;
+      border-radius: 18px;
+      border: 1px solid color-mix(in srgb, var(--primary-color) 18%, var(--border-color));
+      background: color-mix(in srgb, var(--primary-color) 7%, var(--bg-primary));
+    }
+
+    .workspace-task-assist-review-title {
+      color: var(--text-primary);
+      font-size: 0.95rem;
+      font-weight: 800;
+      line-height: 1.45;
+    }
+
+    .workspace-task-assist-review-copy {
+      color: var(--text-secondary);
+      font-size: 0.88rem;
+      line-height: 1.55;
+      margin-top: 0.22rem;
+    }
+
+    .workspace-task-assist-review-list {
+      display: flex;
+      flex-direction: column;
+      gap: 0.65rem;
+    }
+
+    .workspace-task-assist-review-item {
+      padding: 0.85rem 0.95rem;
+      border-radius: 18px;
+      border: 1px solid color-mix(in srgb, var(--border-color) 92%, transparent);
+      background: color-mix(in srgb, var(--bg-primary) 96%, transparent);
+    }
+
+    .workspace-task-assist-review-item.is-answered {
+      border-color: color-mix(in srgb, #157347 24%, var(--border-color));
+      background: color-mix(in srgb, #157347 4%, var(--bg-primary));
+    }
+
+    .workspace-task-assist-review-item-top {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 0.75rem;
+    }
+
+    .workspace-task-assist-review-item-title {
+      min-width: 0;
+      display: flex;
+      align-items: center;
+      gap: 0.55rem;
+      color: var(--text-primary);
+      font-size: 0.9rem;
+      font-weight: 700;
+      line-height: 1.45;
+    }
+
+    .workspace-task-assist-review-item-number {
+      width: 1.7rem;
+      height: 1.7rem;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      border-radius: 999px;
+      background: color-mix(in srgb, var(--accent-gold, #d3a94f) 18%, transparent);
+      color: color-mix(in srgb, var(--accent-gold, #d3a94f) 88%, var(--text-primary));
+      font-size: 0.72rem;
+      font-weight: 800;
+      flex-shrink: 0;
+    }
+
+    .workspace-task-assist-review-edit {
+      border: none;
+      background: none;
+      color: var(--primary-color);
+      font-size: 0.82rem;
+      font-weight: 800;
+      padding: 0;
+      white-space: nowrap;
+    }
+
+    .workspace-task-assist-review-edit:hover {
+      text-decoration: underline;
+    }
+
+    .workspace-task-assist-review-answer {
+      margin-top: 0.5rem;
+      color: var(--text-primary);
+      font-size: 0.88rem;
+      line-height: 1.6;
+      padding-left: 2.25rem;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+
+    .workspace-task-assist-review-answer.is-empty {
+      color: var(--text-secondary);
+      font-style: italic;
+    }
+
     .workspace-task-assist-field {
       padding: 0.95rem 1rem;
       border-radius: 20px;
@@ -1788,6 +1903,20 @@
 
       .workspace-task-assist-deck-nav .modern-btn {
         width: 100%;
+      }
+
+      .workspace-task-assist-deck-nav-note {
+        width: 100%;
+        text-align: left;
+        margin-left: 0;
+      }
+
+      .workspace-task-assist-review-item-top {
+        align-items: flex-start;
+      }
+
+      .workspace-task-assist-review-answer {
+        padding-left: 0;
       }
     }
   </style>
