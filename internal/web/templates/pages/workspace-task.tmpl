@@ -260,8 +260,8 @@
             <section class="workspace-task-page-card workspace-task-page-card-compact">
               <div class="workspace-task-page-card-header">
                 <div>
-                  <div class="workspace-task-page-card-kicker">Snapshot</div>
-                  <h2>Task state</h2>
+                  <div class="workspace-task-page-card-kicker">Quick Controls</div>
+                  <h2>On-demand task state</h2>
                 </div>
               </div>
               <div id="workspace-task-snapshot" class="workspace-task-snapshot-list"></div>
@@ -1063,6 +1063,96 @@
       display: flex;
       flex-direction: column;
       gap: 0.7rem;
+    }
+
+    .workspace-task-snapshot-summary {
+      display: flex;
+      flex-direction: column;
+      gap: 0.7rem;
+    }
+
+    .workspace-task-snapshot-summary-copy {
+      color: var(--text-secondary);
+      font-size: 0.88rem;
+      line-height: 1.55;
+    }
+
+    .workspace-task-snapshot-chip-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.45rem;
+    }
+
+    .workspace-task-snapshot-chip {
+      display: inline-flex;
+      align-items: center;
+      border-radius: 999px;
+      padding: 0.3rem 0.7rem;
+      background: color-mix(in srgb, var(--bg-secondary) 88%, transparent);
+      color: var(--text-primary);
+      font-size: 0.76rem;
+      font-weight: 800;
+      letter-spacing: 0.02em;
+    }
+
+    .workspace-task-snapshot-chip-status[data-state="completed"] {
+      color: #157347;
+      background: rgba(21, 115, 71, 0.12);
+    }
+
+    .workspace-task-snapshot-chip-status[data-state="in_progress"] {
+      color: #0c63e7;
+      background: rgba(12, 99, 231, 0.12);
+    }
+
+    .workspace-task-snapshot-chip-status[data-state="blocked"] {
+      color: #b26f00;
+      background: rgba(178, 111, 0, 0.14);
+    }
+
+    .workspace-task-snapshot-chip-status[data-state="failed"] {
+      color: #c23b3b;
+      background: rgba(194, 59, 59, 0.12);
+    }
+
+    .workspace-task-snapshot-disclosure {
+      border-radius: 18px;
+      border: 1px solid color-mix(in srgb, var(--border-color) 92%, transparent);
+      background: color-mix(in srgb, var(--bg-primary) 94%, transparent);
+    }
+
+    .workspace-task-snapshot-disclosure-toggle {
+      padding: 0.75rem 0.9rem;
+      color: var(--text-secondary);
+      font-size: 0.84rem;
+      font-weight: 800;
+      cursor: pointer;
+      list-style: none;
+      user-select: none;
+    }
+
+    .workspace-task-snapshot-disclosure-toggle::-webkit-details-marker {
+      display: none;
+    }
+
+    .workspace-task-snapshot-disclosure-toggle::before {
+      content: "\25B6";
+      display: inline-block;
+      margin-right: 0.45rem;
+      font-size: 0.65rem;
+      transition: transform 0.16s ease;
+    }
+
+    .workspace-task-snapshot-disclosure[open] > .workspace-task-snapshot-disclosure-toggle::before {
+      transform: rotate(90deg);
+    }
+
+    .workspace-task-snapshot-disclosure-body {
+      display: flex;
+      flex-direction: column;
+      gap: 0.7rem;
+      padding: 0 0.9rem 0.9rem;
+      border-top: 1px solid color-mix(in srgb, var(--border-color) 92%, transparent);
     }
 
     .workspace-task-snapshot-item {

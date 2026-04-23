@@ -1329,7 +1329,30 @@ export class WorkspaceTaskPage {
       </div>
     `).join('');
 
-    this.elements.snapshot.innerHTML = statusSelectHtml + agentSelectHtml + prioritySelectHtml + staticItemsHtml;
+    const summaryCopy = statusInfo.isBlocked || statusInfo.className === 'in_progress'
+      ? 'The main page already shows the important execution state. Open this only if you need to adjust controls or inspect metadata.'
+      : 'Open this only when you need to change task controls or inspect metadata.';
+
+    this.elements.snapshot.innerHTML = `
+      <div class="workspace-task-snapshot-summary">
+        <div class="workspace-task-snapshot-summary-copy">${this.escapeHtml(summaryCopy)}</div>
+        <div class="workspace-task-snapshot-chip-row">
+          <span class="workspace-task-snapshot-chip workspace-task-snapshot-chip-status" data-state="${this.escapeHtml(statusInfo.className)}">${this.escapeHtml(statusInfo.label)}</span>
+          <span class="workspace-task-snapshot-chip">${this.escapeHtml(currentAgent)}</span>
+          <span class="workspace-task-snapshot-chip">${this.escapeHtml(priorityLabels[currentPriority] || `Priority ${currentPriority}`)}</span>
+        </div>
+      </div>
+
+      <details class="workspace-task-snapshot-disclosure">
+        <summary class="workspace-task-snapshot-disclosure-toggle">Show full task controls and metadata</summary>
+        <div class="workspace-task-snapshot-disclosure-body">
+          ${statusSelectHtml}
+          ${agentSelectHtml}
+          ${prioritySelectHtml}
+          ${staticItemsHtml}
+        </div>
+      </details>
+    `;
 
     const statusSelect = document.getElementById('workspace-task-snapshot-status');
     const agentSelect = document.getElementById('workspace-task-snapshot-agent');
