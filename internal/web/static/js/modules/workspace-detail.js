@@ -171,6 +171,8 @@ export class WorkspaceDetailPage {
     this.agentOptions = null;
     this.agentCatalog = [];
     this.agentIndex = new Map();
+    this.providerCatalog = [];
+    this.providerCatalogPromise = null;
     this.agentSkillsCache = new Map();
     this.agentSkillsPromises = new Map();
     this.availableMCPServers = [];
@@ -210,6 +212,7 @@ export class WorkspaceDetailPage {
     this.pendingTaskConfirm = null;
     this.pendingTaskConfirmSelection = { stepThrough: false };
     this.pendingAssistSpecialistResumeChecked = false;
+    this.activeAgentModelEdit = null;
 
     // DOM elements
     this.elements = {};
@@ -1260,6 +1263,13 @@ export class WorkspaceDetailPage {
       addAgentEmpty: document.getElementById('workspace-detail-add-agent-empty'),
       addAgentSubmitBtn: document.getElementById('workspace-detail-add-agent-submit'),
       createAgentBtn: document.getElementById('workspace-detail-create-agent-btn'),
+      agentModelModal: document.getElementById('workspace-detail-agent-model-modal'),
+      agentModelTitle: document.getElementById('workspace-detail-agent-model-title'),
+      agentModelAgentName: document.getElementById('workspace-detail-agent-model-agent-name'),
+      agentModelCurrent: document.getElementById('workspace-detail-agent-model-current'),
+      agentModelSelect: document.getElementById('workspace-detail-agent-model-select'),
+      agentModelHelp: document.getElementById('workspace-detail-agent-model-help'),
+      agentModelSubmitBtn: document.getElementById('workspace-detail-agent-model-submit'),
 
       // Workspace MCP modal
       mcpModal: document.getElementById('workspace-detail-mcp-modal'),
@@ -1507,6 +1517,9 @@ export class WorkspaceDetailPage {
     this.elements.addAgentSubmitBtn?.addEventListener('click', () => this.addSelectedAgentToWorkspace());
     this.elements.createAgentBtn?.addEventListener('click', () => this.openCreateAgentFlow());
     this.elements.addAgentModal?.addEventListener('show.bs.modal', () => { this.populateAddAgentOptions(); });
+    this.elements.agentModelSelect?.addEventListener('change', () => this.updateAgentModelSelectionSummary());
+    this.elements.agentModelSubmitBtn?.addEventListener('click', () => this.submitAgentModelChange());
+    this.elements.agentModelModal?.addEventListener('hidden.bs.modal', () => this.resetAgentModelModal());
 
     // Make workspace name and description editable
     this.makeEditable(this.elements.workspaceName, 'name', false);
@@ -2672,10 +2685,8 @@ export class WorkspaceDetailPage {
       const cardMeta = [instanceLabel, taskLabel].filter(Boolean).join(' · ');
       const capabilityBadges = group.isUnassigned ? '' : this.renderAgentCapabilityBadges(group.name);
       const agentProfile = group.isUnassigned ? null : this.getAgentProfile(group.name);
-      const modelLabel = agentProfile?.model
-        ? `<span class="workspace-detail-agent-model-badge">${this.escapeHtml(agentProfile.model)}</span>`
-        : '';
       const encodedAgentName = encodeURIComponent(group.name);
+      const modelLabel = group.isUnassigned ? '' : this.renderAgentModelBadge(group.name, agentProfile, encodedAgentName);
       const canFlip = !group.isUnassigned;
       const isFlipped = canFlip && this.flippedAgentCards.has(group.key);
       const roleBadge = group.isUnassigned ? '' : this.renderWorkspaceAgentRoleBadge(group.name);
@@ -2758,6 +2769,38 @@ export class WorkspaceDetailPage {
       </section>
       `;
     }).join('');
+  }
+
+  renderAgentModelBadge(agentName, profile, encodedAgentName = '') {
+    const model = String(profile?.model || '').trim();
+    const editable = this.agentAllowsModelEditing(profile);
+    const label = model || 'Set model';
+    const badgeClass = `workspace-detail-agent-model-badge${editable ? ' is-editable' : ''}${model ? '' : ' is-empty'}`;
+    const title = model
+      ? `Change model for ${agentName}`
+      : `Set model for ${agentName}`;
+
+    if (!editable) {
+      return model ? `<span class="${badgeClass}">${this.escapeHtml(model)}</span>` : '';
+    }
+
+    return `
+      <button type="button"
+              class="${badgeClass}"
+              title="${this.escapeHtml(title)}"
+              aria-label="${this.escapeHtml(title)}"
+              onclick="event.stopPropagation(); window.workspaceDetail?.openAgentModelModal('${encodedAgentName}')">
+        <span>${this.escapeHtml(label)}</span>
+        <svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+          <path d="M14.06,9.02L14.98,9.94L5.92,19H5V18.08M17.66,3C17.4,3 17.15,3.1 16.95,3.29L15.13,5.11L18.88,8.86L20.7,7.04C21.09,6.65 21.09,6 20.7,5.63L18.37,3.29C18.17,3.1 17.92,3 17.66,3Z"/>
+        </svg>
+      </button>
+    `;
+  }
+
+  agentAllowsModelEditing(profile) {
+    if (!profile) return false;
+    return String(profile.source || 'user').trim().toLowerCase() !== 'cli';
   }
 
   renderAgentBackFace(group, cardMeta, encodedAgentName) {
@@ -7371,6 +7414,232 @@ export class WorkspaceDetailPage {
     return this.agentIndex.get(key) || null;
   }
 
+  async openAgentModelModal(encodedAgentName = '') {
+    let agentName = '';
+    try {
+      agentName = decodeURIComponent(String(encodedAgentName || ''));
+    } catch (_error) {
+      agentName = String(encodedAgentName || '');
+    }
+    agentName = String(agentName || '').trim();
+    if (!agentName) return;
+
+    await Promise.all([
+      this.loadAgentCatalog(true),
+      this.loadProviderCatalog()
+    ]);
+
+    const profile = this.getAgentProfile(agentName);
+    if (!profile) {
+      if (window.Toast) window.Toast.error('Failed to load agent settings.');
+      return;
+    }
+    if (!this.agentAllowsModelEditing(profile)) {
+      if (window.Toast) window.Toast.warning('This agent model cannot be changed from the workspace.');
+      return;
+    }
+
+    this.activeAgentModelEdit = {
+      agentName,
+      agentType: String(profile.type || 'general').trim() || 'general',
+      currentModel: String(profile.model || '').trim(),
+      currentProvider: String(profile.provider || '').trim()
+    };
+
+    if (this.elements.agentModelAgentName) {
+      this.elements.agentModelAgentName.textContent = agentName;
+    }
+    if (this.elements.agentModelTitle) {
+      this.elements.agentModelTitle.textContent = `Change Model for ${agentName}`;
+    }
+    if (this.elements.agentModelCurrent) {
+      const currentModelLabel = this.activeAgentModelEdit.currentModel || 'Not set';
+      const currentProviderLabel = this.activeAgentModelEdit.currentProvider || 'Unknown provider';
+      this.elements.agentModelCurrent.textContent = `${currentModelLabel} via ${currentProviderLabel}`;
+    }
+
+    this.populateAgentModelSelect();
+    this.updateAgentModelSelectionSummary();
+
+    if (this.elements.agentModelModal && window.bootstrap) {
+      const modal = typeof bootstrap.Modal.getOrCreateInstance === 'function'
+        ? bootstrap.Modal.getOrCreateInstance(this.elements.agentModelModal)
+        : (bootstrap.Modal.getInstance(this.elements.agentModelModal) || new bootstrap.Modal(this.elements.agentModelModal));
+      modal.show();
+    }
+  }
+
+  populateAgentModelSelect() {
+    const select = this.elements.agentModelSelect;
+    const editState = this.activeAgentModelEdit;
+    if (!select || !editState) return;
+
+    const normalizedType = String(editState.agentType || 'general').trim().toLowerCase() || 'general';
+    const currentModel = String(editState.currentModel || '').trim();
+    const currentProvider = String(editState.currentProvider || '').trim();
+
+    select.innerHTML = '';
+    let hasOptions = false;
+    let selectedFound = false;
+
+    (Array.isArray(this.providerCatalog) ? this.providerCatalog : []).forEach((provider) => {
+      const group = document.createElement('optgroup');
+      group.label = String(provider?.display_name || provider?.name || '').trim() || 'Provider';
+      let groupHasOptions = false;
+
+      const models = Array.isArray(provider?.models) ? provider.models : [];
+      models.forEach((model) => {
+        const value = String(model?.value || '').trim();
+        if (!value) return;
+
+        const modelType = String(model?.type || '').trim().toLowerCase();
+        const include = modelType === normalizedType || value === currentModel;
+        if (!include) return;
+
+        const option = document.createElement('option');
+        option.value = value;
+        option.textContent = String(model?.label || value).trim();
+        option.setAttribute('data-provider', String(model?.provider || provider?.name || '').trim());
+        option.setAttribute('data-model-type', modelType);
+        if (value === currentModel) {
+          option.selected = true;
+          selectedFound = true;
+        }
+        group.appendChild(option);
+        groupHasOptions = true;
+      });
+
+      if (groupHasOptions) {
+        select.appendChild(group);
+        hasOptions = true;
+      }
+    });
+
+    if (currentModel && !selectedFound) {
+      const currentGroup = document.createElement('optgroup');
+      currentGroup.label = 'Current Model';
+      const option = document.createElement('option');
+      option.value = currentModel;
+      option.textContent = `${currentModel} (Current)`;
+      option.selected = true;
+      option.setAttribute('data-provider', currentProvider);
+      currentGroup.appendChild(option);
+      select.appendChild(currentGroup);
+      hasOptions = true;
+    }
+
+    if (!hasOptions) {
+      select.innerHTML = '<option value="">No compatible models available</option>';
+    }
+
+    if (this.elements.agentModelSubmitBtn) {
+      this.elements.agentModelSubmitBtn.disabled = !hasOptions || !String(select.value || '').trim();
+    }
+  }
+
+  updateAgentModelSelectionSummary() {
+    const select = this.elements.agentModelSelect;
+    const help = this.elements.agentModelHelp;
+    if (!select || !help) return;
+
+    const editState = this.activeAgentModelEdit;
+    const selectedOption = select.selectedOptions?.[0] || null;
+    const selectedModel = String(select.value || '').trim();
+    const selectedProvider = String(selectedOption?.getAttribute('data-provider') || '').trim();
+
+    if (!editState || !selectedModel) {
+      help.textContent = 'No compatible models are currently available for this agent type.';
+      return;
+    }
+
+    const currentModel = String(editState.currentModel || '').trim();
+    const currentProvider = String(editState.currentProvider || '').trim();
+    if (selectedModel === currentModel && selectedProvider === currentProvider) {
+      help.textContent = 'This agent is already using the selected model.';
+      return;
+    }
+
+    const providerLabel = selectedProvider || 'the selected provider';
+    help.textContent = `Save to switch ${editState.agentName} to ${selectedModel} via ${providerLabel}.`;
+  }
+
+  resetAgentModelModal() {
+    this.activeAgentModelEdit = null;
+    if (this.elements.agentModelAgentName) {
+      this.elements.agentModelAgentName.textContent = '--';
+    }
+    if (this.elements.agentModelTitle) {
+      this.elements.agentModelTitle.textContent = 'Change Agent Model';
+    }
+    if (this.elements.agentModelCurrent) {
+      this.elements.agentModelCurrent.textContent = '--';
+    }
+    if (this.elements.agentModelSelect) {
+      this.elements.agentModelSelect.innerHTML = '<option value="">Loading models...</option>';
+    }
+    if (this.elements.agentModelHelp) {
+      this.elements.agentModelHelp.textContent = 'Choose a model to update this workspace agent.';
+    }
+    if (this.elements.agentModelSubmitBtn) {
+      this.elements.agentModelSubmitBtn.disabled = false;
+      this.elements.agentModelSubmitBtn.textContent = 'Save Model';
+    }
+  }
+
+  async submitAgentModelChange() {
+    const editState = this.activeAgentModelEdit;
+    const select = this.elements.agentModelSelect;
+    const submitBtn = this.elements.agentModelSubmitBtn;
+    if (!editState || !select || !submitBtn) return;
+
+    const model = String(select.value || '').trim();
+    const selectedOption = select.selectedOptions?.[0] || null;
+    const provider = String(selectedOption?.getAttribute('data-provider') || '').trim();
+
+    if (!model || !provider) {
+      if (window.Toast) window.Toast.warning('Choose a valid model before saving.');
+      return;
+    }
+
+    submitBtn.disabled = true;
+    submitBtn.textContent = 'Saving...';
+
+    try {
+      const response = await fetch(`/api/agents/${encodeURIComponent(editState.agentName)}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          model,
+          llm_provider: provider
+        })
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(errorText || 'Failed to update agent model');
+      }
+
+      await this.loadAgentCatalog(true);
+      this.renderAgentGroups();
+
+      if (window.Toast) {
+        window.Toast.success(`Updated ${editState.agentName} to ${model}.`);
+      }
+
+      if (this.elements.agentModelModal && window.bootstrap) {
+        const modal = bootstrap.Modal.getInstance(this.elements.agentModelModal);
+        modal?.hide();
+      }
+    } catch (error) {
+      console.error('Failed to update workspace agent model:', error);
+      if (window.Toast) {
+        window.Toast.error(error?.message || 'Failed to update agent model');
+      }
+      submitBtn.disabled = false;
+      submitBtn.textContent = 'Save Model';
+    }
+  }
+
   normalizeWorkspaceMCPBinding(binding, source = 'workspace') {
     const emailAccount = binding?.email_account && typeof binding.email_account === 'object'
       ? { ...binding.email_account }
@@ -10155,7 +10424,10 @@ export class WorkspaceDetailPage {
 
           const profile = {
             name,
+            type: String(agent?.type || '').trim(),
+            source: String(agent?.source || 'user').trim().toLowerCase(),
             model: String(agent?.model || '').trim(),
+            provider: String(agent?.provider || '').trim(),
             status: String(agent?.status || '').trim().toLowerCase(),
             capabilities: Array.isArray(agent?.capabilities) ? agent.capabilities.map((value) => String(value || '').trim()).filter(Boolean) : [],
             allowWebSearch: Boolean(agent?.allow_web_search),
@@ -10182,6 +10454,36 @@ export class WorkspaceDetailPage {
     }
 
     return this.agentCatalog;
+  }
+
+  async loadProviderCatalog(force = false) {
+    if (!force && Array.isArray(this.providerCatalog) && this.providerCatalog.length > 0) {
+      return this.providerCatalog;
+    }
+    if (!force && this.providerCatalogPromise) {
+      return this.providerCatalogPromise;
+    }
+
+    this.providerCatalogPromise = (async () => {
+      try {
+        const response = await fetch('/api/providers');
+        if (!response.ok) {
+          throw new Error('Failed to load provider catalog');
+        }
+
+        const data = await response.json();
+        this.providerCatalog = Array.isArray(data?.providers) ? data.providers : [];
+      } catch (error) {
+        console.error('Failed to load provider catalog:', error);
+        this.providerCatalog = [];
+      } finally {
+        this.providerCatalogPromise = null;
+      }
+
+      return this.providerCatalog;
+    })();
+
+    return this.providerCatalogPromise;
   }
 
   buildAgentOptionsFromCatalog() {

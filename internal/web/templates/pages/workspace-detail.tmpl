@@ -1478,6 +1478,39 @@
     </div>
   </div>
 
+  <div class="modal fade" id="workspace-detail-agent-model-modal" tabindex="-1" aria-labelledby="workspace-detail-agent-model-title" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+      <div class="modal-content">
+        <div class="modal-header">
+          <div>
+            <div class="workspace-detail-agent-model-modal-kicker">Workspace Agent Model</div>
+            <h5 class="modal-title" id="workspace-detail-agent-model-title">Change Agent Model</h5>
+          </div>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+        </div>
+        <div class="modal-body">
+          <div class="workspace-detail-agent-model-modal-summary">
+            <div class="workspace-detail-agent-model-modal-label">Agent</div>
+            <div id="workspace-detail-agent-model-agent-name" class="workspace-detail-agent-model-modal-value">--</div>
+            <div class="workspace-detail-agent-model-modal-label">Current</div>
+            <div id="workspace-detail-agent-model-current" class="workspace-detail-agent-model-modal-current">--</div>
+          </div>
+          <div class="mb-0">
+            <label for="workspace-detail-agent-model-select" class="form-label">Available models</label>
+            <select id="workspace-detail-agent-model-select" class="form-select">
+              <option value="">Loading models...</option>
+            </select>
+            <div id="workspace-detail-agent-model-help" class="form-text">Choose a model to update this workspace agent.</div>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+          <button type="button" class="btn btn-primary" id="workspace-detail-agent-model-submit">Save Model</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <!-- Directory Explorer Modal -->
   <div class="modal fade" id="workspace-directory-explorer-modal" tabindex="-1" aria-labelledby="workspace-directory-explorer-title" aria-hidden="true">
     <div class="modal-dialog modal-xl modal-dialog-centered workspace-directory-explorer-dialog">
@@ -2336,6 +2369,7 @@
     .workspace-detail-agent-model-badge {
       display: inline-flex;
       align-items: center;
+      gap: 0.28rem;
       border-radius: 999px;
       border: 1px solid rgba(148, 163, 184, 0.25);
       background: rgba(148, 163, 184, 0.10);
@@ -2345,6 +2379,33 @@
       letter-spacing: 0.02em;
       padding: 0.08rem 0.36rem;
       line-height: 1.2;
+    }
+
+    .workspace-detail-agent-model-badge.is-editable {
+      cursor: pointer;
+      transition: border-color 0.16s ease, background-color 0.16s ease, color 0.16s ease, transform 0.16s ease;
+    }
+
+    .workspace-detail-agent-model-badge.is-editable:hover {
+      border-color: rgba(251, 146, 60, 0.46);
+      background: rgba(251, 146, 60, 0.15);
+      color: #fdba74;
+      transform: translateY(-1px);
+    }
+
+    .workspace-detail-agent-model-badge.is-editable:focus-visible {
+      outline: 2px solid rgba(251, 146, 60, 0.9);
+      outline-offset: 2px;
+    }
+
+    .workspace-detail-agent-model-badge.is-empty {
+      border-style: dashed;
+      color: #fcd34d;
+    }
+
+    .workspace-detail-agent-model-badge svg {
+      opacity: 0.82;
+      flex-shrink: 0;
     }
 
     .workspace-detail-agent-role-badge {
@@ -2455,6 +2516,43 @@
       color: var(--text-secondary);
       font-size: 0.7rem;
       line-height: 1.35;
+    }
+
+    .workspace-detail-agent-model-modal-kicker {
+      font-size: 0.68rem;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: #93c5fd;
+      margin-bottom: 0.2rem;
+    }
+
+    .workspace-detail-agent-model-modal-summary {
+      display: grid;
+      grid-template-columns: auto 1fr;
+      gap: 0.45rem 0.9rem;
+      padding: 0.8rem 0.95rem;
+      border-radius: 12px;
+      margin-bottom: 1rem;
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      background:
+        radial-gradient(circle at top right, rgba(251, 146, 60, 0.12), transparent 55%),
+        rgba(15, 23, 42, 0.82);
+    }
+
+    .workspace-detail-agent-model-modal-label {
+      font-size: 0.68rem;
+      font-weight: 700;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      color: var(--text-secondary);
+    }
+
+    .workspace-detail-agent-model-modal-value,
+    .workspace-detail-agent-model-modal-current {
+      color: var(--text-primary);
+      font-weight: 600;
+      line-height: 1.4;
     }
 
     .workspace-detail-mcp-list {
