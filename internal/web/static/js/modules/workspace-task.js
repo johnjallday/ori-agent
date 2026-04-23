@@ -125,6 +125,9 @@ export class WorkspaceTaskPage {
       subtitle: document.getElementById('workspace-task-subtitle'),
       status: document.getElementById('workspace-task-status'),
       heroActions: document.getElementById('workspace-task-hero-actions'),
+      heroPriority: document.getElementById('workspace-task-hero-priority'),
+      heroPriorityCopy: document.getElementById('workspace-task-hero-priority-copy'),
+      heroPriorityActions: document.getElementById('workspace-task-hero-priority-actions'),
       liveBadge: document.getElementById('workspace-task-live-badge'),
       overview: document.getElementById('workspace-task-overview'),
       snapshot: document.getElementById('workspace-task-snapshot'),
@@ -570,6 +573,7 @@ export class WorkspaceTaskPage {
 
     this.renderHero(statusInfo);
     this.renderHeroActions(statusInfo);
+    this.renderHeroPriority(statusInfo);
     this.renderOverview();
     this.renderSnapshot(statusInfo);
     this.renderRelationships();
@@ -643,6 +647,90 @@ export class WorkspaceTaskPage {
     });
   }
 
+  renderHeroPriority(statusInfo) {
+    if (!this.elements.heroPriority || !this.elements.heroPriorityCopy || !this.elements.heroPriorityActions) {
+      return;
+    }
+
+    const blocked = statusInfo.isBlocked && this.currentBlockedTask;
+    if (!blocked) {
+      this.elements.heroPriority.hidden = true;
+      this.elements.heroPriorityCopy.textContent = '';
+      this.elements.heroPriorityActions.innerHTML = '';
+      return;
+    }
+
+    const workflowStep = this.currentBlockedTask?.workflowStep || null;
+    const hasAgentResponse = Boolean(String(this.currentBlockedTask?.response || '').trim());
+    const secondaryLabel = hasAgentResponse ? 'View Agent Request' : 'Why Paused?';
+
+    this.elements.heroPriority.hidden = false;
+    this.elements.heroPriorityCopy.textContent = this.getBlockedHeroSummary(workflowStep);
+    this.elements.heroPriorityActions.innerHTML = `
+      <button type="button" class="workspace-task-page-hero-btn workspace-task-page-hero-btn-primary" data-hero-priority-action="assist">
+        ${this.escapeHtml(this.getBlockedHeroPrimaryActionLabel(workflowStep))}
+      </button>
+      <button type="button" class="workspace-task-page-hero-btn" data-hero-priority-action="context">
+        ${this.escapeHtml(secondaryLabel)}
+      </button>
+    `;
+
+    this.elements.heroPriorityActions.querySelectorAll('[data-hero-priority-action]').forEach((button) => {
+      button.addEventListener('click', () => {
+        const action = String(button.getAttribute('data-hero-priority-action') || '').trim();
+        if (action === 'assist') {
+          this.scrollToSection(this.elements.assistCard, { focusTarget: () => this.getAssistFocusTarget() });
+          return;
+        }
+        if (action === 'context') {
+          const focusTarget = this.elements.blockedRequestToggle && !this.elements.blockedRequestToggle.classList.contains('d-none')
+            ? this.elements.blockedRequestToggle
+            : null;
+          this.scrollToSection(this.elements.blockedContextCard, { focusTarget });
+        }
+      });
+    });
+  }
+
+  getBlockedHeroSummary(workflowStep) {
+    const question = String(this.currentBlockedTask?.question || '').trim();
+    if (question) {
+      return question;
+    }
+    return this.getAssistNeedsSummary(workflowStep);
+  }
+
+  getBlockedHeroPrimaryActionLabel(workflowStep) {
+    if (workflowStep?.stepType === 'ask_form') {
+      return 'Answer Questions';
+    }
+    if (workflowStep?.stepType === 'ask_choice') {
+      return 'Choose Next Step';
+    }
+    return 'Review And Continue';
+  }
+
+  scrollToSection(element, { focusTarget = null } = {}) {
+    if (!element) return;
+
+    element.scrollIntoView({ behavior: 'smooth', block: 'start' });
+
+    const target = typeof focusTarget === 'function' ? focusTarget() : focusTarget;
+    if (!target || typeof target.focus !== 'function') return;
+
+    window.setTimeout(() => {
+      target.focus({ preventScroll: true });
+    }, 180);
+  }
+
+  getAssistFocusTarget() {
+    if (!this.elements.assistCard) return this.elements.assistContinueBtn || null;
+
+    return this.elements.assistCard.querySelector(
+      '[data-assist-choice-id]:not([disabled]), [data-assist-field-id]:not([disabled]), textarea:not([disabled]), select:not([disabled]), button:not([disabled])'
+    ) || this.elements.assistContinueBtn || null;
+  }
+
   renderOverview() {
     if (!this.elements.overview) return;
 
@@ -650,6 +738,7 @@ export class WorkspaceTaskPage {
     const templateRef = this.task?.template_ref;
     const executionMode = String(this.task?.execution_mode || 'auto').replace(/_/g, ' ');
     const orchestrationMode = String(this.task?.orchestration_mode || '').replace(/_/g, ' ');
+    const isBlocked = Boolean(this.currentBlockedTask);
 
     const items = [
       {
@@ -694,29 +783,75 @@ export class WorkspaceTaskPage {
       });
     }
 
-    const detailsValue = String(this.task?.details || '').trim() || 'No extra task details were provided.';
-    items.push({
-      title: 'Task Details',
-      value: detailsValue,
-      full: true,
-      editable: true
-    });
+    const detailsValue = String(this.task?.details || '').trim();
+    const blockedDetailsRedundant = this.isBlockedDetailsRedundant(detailsValue);
 
-    this.elements.overview.innerHTML = items.map((item) => `
-      <article class="workspace-task-overview-item${item.full ? ' full' : ''}">
-        <div class="workspace-task-overview-title">
-          ${this.escapeHtml(item.title)}
-          ${item.editable ? `<button type="button" class="workspace-task-overview-edit-btn" data-edit-field="details" aria-label="Edit details" title="Edit details">
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><path d="M20.71,7.04C21.1,6.65 21.1,6 20.71,5.63L18.37,3.29C18,2.9 17.35,2.9 16.96,3.29L15.12,5.12L18.87,8.87M3,17.25V21H6.75L17.81,9.93L14.06,6.18L3,17.25Z"/></svg>
-          </button>` : ''}
-        </div>
-        <div class="workspace-task-overview-value">${this.escapeHtml(item.value)}</div>
-      </article>
-    `).join('');
+    if (!isBlocked || (detailsValue && !blockedDetailsRedundant)) {
+      items.push({
+        title: isBlocked ? 'Original Brief' : 'Task Details',
+        value: detailsValue || 'No extra task details were provided.',
+        full: true,
+        editable: true,
+        disclosure: isBlocked,
+        disclosureHint: 'Hidden while this task is waiting for input.'
+      });
+    }
+
+    this.elements.overview.innerHTML = items.map((item) => {
+      if (item.disclosure) {
+        return `
+          <article class="workspace-task-overview-item${item.full ? ' full' : ''}">
+            <details class="workspace-task-overview-disclosure">
+              <summary class="workspace-task-overview-disclosure-toggle">
+                <span class="workspace-task-overview-disclosure-heading">${this.escapeHtml(item.title)}</span>
+                <span class="workspace-task-overview-disclosure-hint">${this.escapeHtml(item.disclosureHint || '')}</span>
+              </summary>
+              <div class="workspace-task-overview-disclosure-body">
+                <div class="workspace-task-overview-title">
+                  Task Details
+                  ${item.editable ? `<button type="button" class="workspace-task-overview-edit-btn" data-edit-field="details" aria-label="Edit details" title="Edit details">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><path d="M20.71,7.04C21.1,6.65 21.1,6 20.71,5.63L18.37,3.29C18,2.9 17.35,2.9 16.96,3.29L15.12,5.12L18.87,8.87M3,17.25V21H6.75L17.81,9.93L14.06,6.18L3,17.25Z"/></svg>
+                  </button>` : ''}
+                </div>
+                <div class="workspace-task-overview-value">${this.escapeHtml(item.value)}</div>
+              </div>
+            </details>
+          </article>
+        `;
+      }
+
+      return `
+        <article class="workspace-task-overview-item${item.full ? ' full' : ''}">
+          <div class="workspace-task-overview-title">
+            ${this.escapeHtml(item.title)}
+            ${item.editable ? `<button type="button" class="workspace-task-overview-edit-btn" data-edit-field="details" aria-label="Edit details" title="Edit details">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><path d="M20.71,7.04C21.1,6.65 21.1,6 20.71,5.63L18.37,3.29C18,2.9 17.35,2.9 16.96,3.29L15.12,5.12L18.87,8.87M3,17.25V21H6.75L17.81,9.93L14.06,6.18L3,17.25Z"/></svg>
+            </button>` : ''}
+          </div>
+          <div class="workspace-task-overview-value">${this.escapeHtml(item.value)}</div>
+        </article>
+      `;
+    }).join('');
 
     this.elements.overview.querySelectorAll('[data-edit-field="details"]').forEach((btn) => {
       btn.addEventListener('click', () => this.startDetailsEdit(btn));
     });
+  }
+
+  normalizeComparableText(value) {
+    return String(value || '').replace(/\s+/g, ' ').trim().toLowerCase();
+  }
+
+  isBlockedDetailsRedundant(detailsValue) {
+    if (!this.currentBlockedTask) return false;
+
+    const normalizedDetails = this.normalizeComparableText(detailsValue);
+    if (!normalizedDetails) return false;
+
+    return [
+      this.currentBlockedTask.reason,
+      this.currentBlockedTask.question
+    ].some((candidate) => normalizedDetails === this.normalizeComparableText(candidate));
   }
 
   startDetailsEdit(triggerBtn) {
@@ -1156,6 +1291,14 @@ export class WorkspaceTaskPage {
     if (this.elements.assistQuestion) {
       this.elements.assistQuestion.textContent = this.currentBlockedTask?.question || '';
     }
+    if (this.elements.assistContinueBtn) {
+      const primaryLabel = this.getAssistPrimaryActionLabel(workflowStep);
+      this.elements.assistContinueBtn.textContent = primaryLabel;
+      this.elements.assistContinueBtn.setAttribute('aria-label', primaryLabel);
+    }
+    if (this.elements.assistMessage) {
+      this.elements.assistMessage.placeholder = this.getAssistMessagePlaceholder(workflowStep);
+    }
 
     this.populateAssistAgents(this.currentBlockedTask?.currentAgent || '');
     this.renderWorkflowStepUI(workflowStep);
@@ -1183,6 +1326,29 @@ export class WorkspaceTaskPage {
       return 'Pick the best path, optionally add guidance, then continue the task.';
     }
     return 'Retry, continue with guidance, switch agents, or mark the task failed.';
+  }
+
+  getAssistPrimaryActionLabel(workflowStep) {
+    if (workflowStep?.stepType === 'ask_form') {
+      return 'Send Answers';
+    }
+    if (workflowStep?.stepType === 'ask_choice') {
+      return this.currentBlockedTask?.selectedChoiceId ? 'Continue With Selected Path' : 'Send Choice Or Guidance';
+    }
+    if (this.currentBlockedTask?.question) {
+      return 'Send Guidance';
+    }
+    return 'Continue Task';
+  }
+
+  getAssistMessagePlaceholder(workflowStep) {
+    if (workflowStep?.stepType === 'ask_form') {
+      return 'Add any constraints or context the form does not cover...';
+    }
+    if (workflowStep?.stepType === 'ask_choice') {
+      return 'Add preferences, constraints, or context before the agent continues...';
+    }
+    return 'Add clarification, constraints, or context before continuing...';
   }
 
   populateAssistAgents(currentAgent = '') {

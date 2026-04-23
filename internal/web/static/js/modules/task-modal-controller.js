@@ -10,7 +10,10 @@ class TaskModalController {
     this.editingTaskId = null;
     this.workspaceId = null;
     this.onSaveCallback = null;
+    this.initialFormState = null;
     this.initialized = false;
+    this.isSaving = false;
+    this.lastFocusedElement = null;
     this.defaultOutputDir = null;
     this.homeDir = null;
     // Auto mode state
@@ -46,6 +49,7 @@ class TaskModalController {
     document.getElementById('taskModalClose')?.addEventListener('click', () => this.close());
     document.getElementById('taskModalCancel')?.addEventListener('click', () => this.close());
     document.querySelector('.task-modal-backdrop')?.addEventListener('click', () => this.close());
+    document.getElementById('taskModal')?.addEventListener('keydown', (e) => this.handleModalKeydown(e));
 
     // Save button
     document.getElementById('taskModalSave')?.addEventListener('click', () => this.save());
@@ -135,6 +139,228 @@ class TaskModalController {
     this.bindSubtaskEvents();
 
     this.initialized = true;
+  }
+
+  isModalOpen() {
+    const modal = document.getElementById('taskModal');
+    return Boolean(modal && modal.style.display !== 'none' && modal.style.display !== '');
+  }
+
+  getModalStateSnapshot() {
+    const readValue = (id) => document.getElementById(id)?.value || '';
+    const readChecked = (id) => Boolean(document.getElementById(id)?.checked);
+    const taskMode = document.querySelector('input[name="taskConfigMode"]:checked')?.value || 'manual';
+    const normalizePendingItem = (item) => {
+      if (item === null || item === undefined) return '';
+      if (typeof item === 'string' || typeof item === 'number' || typeof item === 'boolean') {
+        return String(item);
+      }
+      if (typeof item === 'object') {
+        return String(item.path || item.name || item.id || '');
+      }
+      return String(item);
+    };
+
+    const subtasks = Array.from(document.querySelectorAll('#taskModalSubtaskList .task-modal-subtask-card')).map((card) => {
+      const inputSelect = card.querySelector('.task-modal-subtask-inputs');
+      let inputRefs = this.getSelectedInputRefs(inputSelect);
+      if (inputRefs.length === 0 && inputSelect?.dataset.selectedInputs) {
+        try {
+          inputRefs = JSON.parse(inputSelect.dataset.selectedInputs) || [];
+        } catch (_error) {
+          inputRefs = [];
+        }
+      }
+
+      return {
+        id: card.dataset.subtaskId || '',
+        description: card.querySelector('.task-modal-subtask-title')?.value || '',
+        details: card.querySelector('.task-modal-subtask-details')?.value || '',
+        assignment: card.querySelector('.task-modal-subtask-assignment')?.value || '',
+        inputTaskIds: inputRefs
+      };
+    });
+
+    const scheduleEnabled = readChecked('taskModalScheduleEnabled');
+    const autoSaveEnabled = readChecked('taskModalAutoSaveEnabled');
+
+    return JSON.stringify({
+      editingTaskId: this.editingTaskId || '',
+      workspaceId: this.workspaceId || '',
+      taskMode,
+      autoMode: this.autoMode,
+      manual: {
+        description: readValue('taskModalDescription'),
+        details: readValue('taskModalDetails'),
+        priority: readValue('taskModalPriority'),
+        assignment: readValue('taskModalAssignment'),
+        inputTaskIds: this.getSelectedInputRefs(document.getElementById('taskModalInputTasks'))
+      },
+      auto: {
+        description: readValue('taskAutoDescription'),
+        editDescription: readValue('taskAutoEditDescription')
+      },
+      schedule: {
+        enabled: scheduleEnabled,
+        name: scheduleEnabled ? readValue('taskModalScheduleName') : '',
+        type: scheduleEnabled ? readValue('taskModalScheduleType') : '',
+        time: scheduleEnabled ? readValue('taskModalScheduleTime') : '',
+        day: scheduleEnabled ? readValue('taskModalScheduleDay') : '',
+        intervalValue: scheduleEnabled ? readValue('taskModalScheduleIntervalValue') : '',
+        intervalUnit: scheduleEnabled ? readValue('taskModalScheduleIntervalUnit') : '',
+        runAt: scheduleEnabled ? readValue('taskModalScheduleDatetime') : ''
+      },
+      autoSave: {
+        enabled: autoSaveEnabled,
+        target: autoSaveEnabled ? readValue('taskModalAutoSaveTarget') : '',
+        storeNode: autoSaveEnabled ? readValue('taskModalAutoSaveStoreNode') : '',
+        path: autoSaveEnabled ? readValue('taskModalAutoSavePath') : '',
+        format: autoSaveEnabled ? readValue('taskModalAutoSaveFormat') : ''
+      },
+      files: this.pendingFiles.map((file) => ({
+        name: file.name,
+        size: file.size,
+        lastModified: file.lastModified
+      })),
+      filePaths: [...this.pendingFilePaths],
+      directories: this.pendingDirectories.map(normalizePendingItem),
+      subtasks
+    });
+  }
+
+  captureInitialFormState() {
+    this.initialFormState = this.getModalStateSnapshot();
+  }
+
+  hasUnsavedChanges() {
+    if (!this.isModalOpen() || !this.initialFormState) {
+      return false;
+    }
+    return this.getModalStateSnapshot() !== this.initialFormState;
+  }
+
+  async finalizeSuccessfulSave(eventName, eventPayload = {}) {
+    const modalContext = {
+      editingTaskId: this.editingTaskId,
+      onSaveCallback: this.onSaveCallback,
+      workspaceId: this.workspaceId
+    };
+
+    this.close({ force: true });
+
+    if (window.EventBus && eventName) {
+      const payload = { ...eventPayload };
+      if (!payload.workspaceId && modalContext.workspaceId) {
+        payload.workspaceId = modalContext.workspaceId;
+      }
+      if (eventName === 'task:updated' && !payload.taskId && modalContext.editingTaskId) {
+        payload.taskId = modalContext.editingTaskId;
+      }
+      EventBus.emit(eventName, payload);
+    }
+
+    if (typeof modalContext.onSaveCallback === 'function') {
+      await modalContext.onSaveCallback();
+    }
+  }
+
+  getModalRoot() {
+    return document.getElementById('taskModal');
+  }
+
+  getModalContent() {
+    return this.getModalRoot()?.querySelector('.task-modal-content') || null;
+  }
+
+  getFocusableModalElements() {
+    const content = this.getModalContent();
+    if (!content) return [];
+
+    return Array.from(content.querySelectorAll(
+      'button:not([disabled]), [href], input:not([disabled]):not([type="hidden"]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+    )).filter((element) => !element.hidden && element.getAttribute('aria-hidden') !== 'true' && element.offsetParent !== null);
+  }
+
+  focusModalElement(preferredElement = null) {
+    const preferredVisible = preferredElement &&
+      typeof preferredElement.focus === 'function' &&
+      !preferredElement.hidden &&
+      preferredElement.offsetParent !== null;
+
+    if (preferredVisible) {
+      preferredElement.focus();
+      if (typeof preferredElement.select === 'function' && preferredElement.tagName === 'INPUT') {
+        preferredElement.select();
+      }
+      return;
+    }
+
+    const [firstFocusable] = this.getFocusableModalElements();
+    if (firstFocusable) {
+      firstFocusable.focus();
+      return;
+    }
+
+    this.getModalContent()?.focus();
+  }
+
+  showModal(preferredFocusElement = null) {
+    const modal = this.getModalRoot();
+    if (!modal) return;
+
+    const activeElement = document.activeElement;
+    this.lastFocusedElement = activeElement instanceof HTMLElement ? activeElement : null;
+
+    modal.style.display = 'flex';
+    modal.setAttribute('aria-hidden', 'false');
+    document.body.classList.add('task-modal-open');
+
+    window.requestAnimationFrame(() => {
+      this.focusModalElement(preferredFocusElement);
+    });
+  }
+
+  restoreFocus() {
+    const previousElement = this.lastFocusedElement;
+    this.lastFocusedElement = null;
+
+    if (!previousElement || !document.contains(previousElement) || typeof previousElement.focus !== 'function') {
+      return;
+    }
+
+    window.requestAnimationFrame(() => {
+      previousElement.focus();
+    });
+  }
+
+  handleModalKeydown(event) {
+    if (!this.isModalOpen() || event.key !== 'Tab') {
+      return;
+    }
+
+    const focusable = this.getFocusableModalElements();
+    if (focusable.length === 0) {
+      event.preventDefault();
+      this.getModalContent()?.focus();
+      return;
+    }
+
+    const first = focusable[0];
+    const last = focusable[focusable.length - 1];
+    const active = document.activeElement;
+
+    if (event.shiftKey) {
+      if (active === first || active === this.getModalContent()) {
+        event.preventDefault();
+        last.focus();
+      }
+      return;
+    }
+
+    if (active === last) {
+      event.preventDefault();
+      first.focus();
+    }
   }
 
   /**
@@ -419,6 +645,7 @@ class TaskModalController {
     this.editingTaskId = null;
     this.workspaceId = workspaceId;
     this.onSaveCallback = onSave;
+    this.initialFormState = null;
     this.currentTask = null;
     this.resetResultSection();
 
@@ -495,12 +722,8 @@ class TaskModalController {
     this.resetFiles();
 
     // Show modal
-    modal.style.display = 'flex';
-
-    // Focus title input
-    setTimeout(() => {
-      descriptionInput?.focus();
-    }, 100);
+    this.showModal(descriptionInput);
+    this.captureInitialFormState();
   }
 
   /**
@@ -513,6 +736,7 @@ class TaskModalController {
     this.editingTaskId = task.id;
     this.workspaceId = task.workspace_id;
     this.onSaveCallback = onSave;
+    this.initialFormState = null;
     this.currentTask = task; // Store for auto edit mode
     this.currentResultFollowUpPending = false;
 
@@ -608,12 +832,8 @@ class TaskModalController {
     this.renderResultSection(task);
 
     // Show modal
-    modal.style.display = 'flex';
-
-    // Focus title input
-    setTimeout(() => {
-      descriptionInput?.focus();
-    }, 100);
+    this.showModal(descriptionInput);
+    this.captureInitialFormState();
   }
 
   /**
@@ -661,17 +881,33 @@ class TaskModalController {
   /**
    * Close the modal
    */
-  close() {
+  close({ force = false } = {}) {
+    if (!force) {
+      if (this.isSaving) {
+        this.showToast('Please wait for the current save to finish.', 'info');
+        return false;
+      }
+      if (this.hasUnsavedChanges() && !window.confirm('Discard unsaved task changes?')) {
+        return false;
+      }
+    }
+
     const modal = document.getElementById('taskModal');
     if (modal) {
       modal.style.display = 'none';
+      modal.setAttribute('aria-hidden', 'true');
     }
+    document.body.classList.remove('task-modal-open');
     this.hideProgress();
+    this.isSaving = false;
     this.editingTaskId = null;
     this.workspaceId = null;
     this.onSaveCallback = null;
+    this.initialFormState = null;
     this.currentTask = null;
     this.resetResultSection();
+    this.restoreFocus();
+    return true;
   }
 
   getResultSectionElements() {
@@ -964,7 +1200,7 @@ class TaskModalController {
 
       await this.createAndRunFollowUpTask(payload);
       this.showToast('Follow-up task created', 'success');
-      this.close();
+      this.close({ force: true });
     } catch (error) {
       console.error('Failed to continue from task modal result:', error);
       this.showToast(error.message || 'Failed to continue task', 'error');
@@ -1087,7 +1323,17 @@ class TaskModalController {
       return;
     }
 
+    const saveButton = document.getElementById('taskModalSave');
+    const saveText = document.getElementById('taskModalSaveText');
+    const originalText = saveText?.textContent;
+    this.isSaving = true;
+    if (saveButton) saveButton.disabled = true;
+    if (saveText) saveText.textContent = this.editingTaskId ? 'Saving...' : 'Creating...';
+
     try {
+      let eventName = this.editingTaskId ? 'task:updated' : 'task:created';
+      let eventPayload = {};
+
       // Get schedule data
       const scheduleData = this.getScheduleData();
 
@@ -1328,27 +1574,22 @@ class TaskModalController {
           await this.saveFilePathsToTask(createdTask.id);
         }
 
+        eventName = 'task:created';
+        eventPayload = { task: createdTask };
         this.showToast('Task created', 'success');
       }
 
       // Clear pending files
       this.pendingFiles = [];
       this.pendingFilePaths = [];
-
-      this.close();
-
-      // Emit event for workspace hub to refresh
-      if (window.EventBus) {
-        EventBus.emit('task:created', { workspaceId: this.workspaceId });
-      }
-
-      // Call the callback if provided
-      if (this.onSaveCallback) {
-        this.onSaveCallback();
-      }
+      await this.finalizeSuccessfulSave(eventName, eventPayload);
     } catch (error) {
       console.error('Failed to save task:', error);
       this.showToast(error.message || 'Failed to save task', 'error');
+    } finally {
+      this.isSaving = false;
+      if (saveButton) saveButton.disabled = false;
+      if (saveText) saveText.textContent = originalText || 'Save Task';
     }
   }
 
@@ -1381,6 +1622,7 @@ class TaskModalController {
     const saveButton = document.getElementById('taskModalSave');
     const saveText = document.getElementById('taskModalSaveText');
     const originalText = saveText?.textContent;
+    this.isSaving = true;
     if (saveButton) saveButton.disabled = true;
     if (saveText) saveText.textContent = 'Parsing...';
 
@@ -1543,16 +1785,7 @@ class TaskModalController {
         this.pendingFilePaths = [];
 
         this.showToast(workflowSteps.length > 1 ? 'Workflow created' : 'Task created', 'success');
-        this.close();
-
-        // Emit event for workspace hub to refresh
-        if (window.EventBus) {
-          EventBus.emit('task:created', { workspaceId: this.workspaceId });
-        }
-
-        if (this.onSaveCallback) {
-          this.onSaveCallback();
-        }
+        await this.finalizeSuccessfulSave('task:created');
         return;
       }
 
@@ -1604,21 +1837,12 @@ class TaskModalController {
       this.pendingFilePaths = [];
 
       this.showToast('Task created', 'success');
-      this.close();
-
-      // Emit event for workspace hub to refresh
-      if (window.EventBus) {
-        EventBus.emit('task:created', { task: createdTask, workspaceId: this.workspaceId });
-      }
-
-      // Call the callback if provided
-      if (this.onSaveCallback) {
-        this.onSaveCallback();
-      }
+      await this.finalizeSuccessfulSave('task:created', { task: createdTask });
     } catch (error) {
       console.error('Failed to save task in auto mode:', error);
       this.showToast(error.message || 'Failed to create task', 'error');
     } finally {
+      this.isSaving = false;
       this.hideProgress();
       // Restore button state
       if (saveButton) saveButton.disabled = false;
@@ -1653,6 +1877,7 @@ class TaskModalController {
     const saveButton = document.getElementById('taskModalSave');
     const saveText = document.getElementById('taskModalSaveText');
     const originalText = saveText?.textContent;
+    this.isSaving = true;
     if (saveButton) saveButton.disabled = true;
     if (saveText) saveText.textContent = 'Updating...';
 
@@ -1765,21 +1990,12 @@ class TaskModalController {
       this.pendingFilePaths = [];
 
       this.showToast('Task updated', 'success');
-      this.close();
-
-      // Emit event for workspace hub to refresh
-      if (window.EventBus) {
-        EventBus.emit('task:updated', { taskId: this.editingTaskId, workspaceId: this.workspaceId });
-      }
-
-      // Call the callback if provided
-      if (this.onSaveCallback) {
-        this.onSaveCallback();
-      }
+      await this.finalizeSuccessfulSave('task:updated');
     } catch (error) {
       console.error('Failed to update task in auto mode:', error);
       this.showToast(error.message || 'Failed to update task', 'error');
     } finally {
+      this.isSaving = false;
       this.hideProgress();
       // Restore button state
       if (saveButton) saveButton.disabled = false;
@@ -1890,12 +2106,10 @@ class TaskModalController {
       }
 
       if (schedule.run_at && scheduleDatetime) {
-        const date = new Date(schedule.run_at);
-        scheduleDatetime.value = date.toISOString().slice(0, 16);
+        scheduleDatetime.value = this.formatLocalDatetimeInput(schedule.run_at);
       }
       if (schedule.execute_at && scheduleDatetime) {
-        const date = new Date(schedule.execute_at);
-        scheduleDatetime.value = date.toISOString().slice(0, 16);
+        scheduleDatetime.value = this.formatLocalDatetimeInput(schedule.execute_at);
       }
 
       this.updateScheduleTypeFields();
@@ -1941,7 +2155,7 @@ class TaskModalController {
       case 'once': {
         const datetime = document.getElementById('taskModalScheduleDatetime')?.value;
         if (datetime) {
-          schedule.run_at = new Date(datetime).toISOString();
+          schedule.run_at = datetime;
         }
         break;
       }
@@ -1981,6 +2195,22 @@ class TaskModalController {
         if (defaultPathDisplay) defaultPathDisplay.style.display = 'block';
         break;
     }
+  }
+
+  formatLocalDatetimeInput(value) {
+    if (!value) return '';
+
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) {
+      return '';
+    }
+
+    const pad = (number) => String(number).padStart(2, '0');
+    return [
+      date.getFullYear(),
+      pad(date.getMonth() + 1),
+      pad(date.getDate())
+    ].join('-') + `T${pad(date.getHours())}:${pad(date.getMinutes())}`;
   }
 
   /**
@@ -2907,6 +3137,11 @@ class TaskModalController {
 
     if (dropZone) {
       dropZone.addEventListener('click', () => {
+        document.getElementById('taskModalFileInput')?.click();
+      });
+      dropZone.addEventListener('keydown', (e) => {
+        if (e.key !== 'Enter' && e.key !== ' ') return;
+        e.preventDefault();
         document.getElementById('taskModalFileInput')?.click();
       });
       dropZone.addEventListener('dragover', (e) => {
