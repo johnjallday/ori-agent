@@ -4407,6 +4407,108 @@
       text-overflow: ellipsis;
     }
 
+    .workspace-detail-workflow-group {
+      display: flex;
+      flex-direction: column;
+      gap: 0.35rem;
+    }
+
+    .workspace-detail-subtask-list {
+      display: flex;
+      flex-direction: column;
+      gap: 0.3rem;
+      margin-left: 1.1rem;
+      padding-left: 0.7rem;
+      border-left: 2px dashed rgba(99, 102, 241, 0.3);
+    }
+
+    .workspace-detail-item.is-workflow-parent {
+      background: linear-gradient(90deg, rgba(99, 102, 241, 0.08), var(--bg-secondary) 70%);
+      border-color: rgba(99, 102, 241, 0.28);
+    }
+
+    .workspace-detail-item.is-workflow-parent:hover {
+      background: linear-gradient(90deg, rgba(99, 102, 241, 0.14), var(--bg-tertiary) 70%);
+      border-color: rgba(99, 102, 241, 0.45);
+    }
+
+    .workspace-detail-item.is-workflow-subtask {
+      background: rgba(30, 41, 59, 0.35);
+      padding-top: 0.4rem;
+      padding-bottom: 0.4rem;
+    }
+
+    .workspace-detail-item.is-workflow-subtask .workspace-detail-item-title {
+      font-size: 0.78rem;
+    }
+
+    .workspace-detail-item.is-workflow-subtask .workspace-detail-item-meta {
+      font-size: 0.68rem;
+    }
+
+    .workspace-detail-item-toggle {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+      width: 18px;
+      height: 18px;
+      padding: 0;
+      background: rgba(99, 102, 241, 0.18);
+      border: 1px solid rgba(99, 102, 241, 0.35);
+      border-radius: 4px;
+      color: #a5b4fc;
+      cursor: pointer;
+      transition: transform 0.18s ease, background-color 0.15s ease, color 0.15s ease;
+    }
+
+    .workspace-detail-item-toggle:hover {
+      background: rgba(99, 102, 241, 0.3);
+      color: #e0e7ff;
+    }
+
+    .workspace-detail-item-toggle:focus-visible {
+      outline: 2px solid var(--primary-color);
+      outline-offset: 2px;
+    }
+
+    .workspace-detail-workflow-group.is-collapsed .workspace-detail-item-toggle {
+      transform: rotate(-90deg);
+    }
+
+    .workspace-detail-workflow-badge,
+    .workspace-detail-step-badge {
+      display: inline-flex;
+      align-items: center;
+      flex-shrink: 0;
+      padding: 0.1rem 0.42rem;
+      border-radius: 999px;
+      font-size: 0.62rem;
+      font-weight: 700;
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+      line-height: 1.25;
+    }
+
+    .workspace-detail-workflow-badge {
+      background: rgba(99, 102, 241, 0.2);
+      color: #a5b4fc;
+      border: 1px solid rgba(99, 102, 241, 0.35);
+    }
+
+    .workspace-detail-step-badge {
+      background: rgba(56, 189, 248, 0.14);
+      color: #7dd3fc;
+      border: 1px solid rgba(56, 189, 248, 0.35);
+    }
+
+    .workspace-detail-workflow-steps {
+      display: inline-flex;
+      align-items: center;
+      font-weight: 600;
+      color: #a5b4fc;
+    }
+
     .workspace-detail-item-meta {
       font-size: 0.7rem;
       color: var(--text-secondary);

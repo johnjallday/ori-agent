@@ -200,6 +200,7 @@ export class WorkspaceDetailPage {
     this.capabilitySuggestionCatalog = null;
     this.capabilitySuggestionCatalogPromise = null;
     this.flippedAgentCards = new Set();
+    this.collapsedWorkflows = new Set();
     this.boardDidDrag = false;
     this.currentTaskResultText = '';
     this.currentTaskResultTaskId = '';
@@ -3489,7 +3490,60 @@ export class WorkspaceDetailPage {
     if (!Array.isArray(tasks) || tasks.length === 0) {
       return '<div class="workspace-detail-empty workspace-detail-empty-inline">No tasks assigned.</div>';
     }
-    return tasks.map((task) => this.renderTaskItem(task)).join('');
+    return tasks.map((task) => this.renderTaskGroup(task)).join('');
+  }
+
+  getSortedSubtasks(parentId) {
+    const normalizedParentId = String(parentId || '').trim();
+    if (!normalizedParentId || !Array.isArray(this.tasks)) return [];
+    return this.tasks
+      .filter((item) => String(item?.parent_task_id || '').trim() === normalizedParentId)
+      .sort((a, b) => {
+        const aIndex = Number.isFinite(a?.subtask_index) && a.subtask_index > 0 ? a.subtask_index : Number.MAX_SAFE_INTEGER;
+        const bIndex = Number.isFinite(b?.subtask_index) && b.subtask_index > 0 ? b.subtask_index : Number.MAX_SAFE_INTEGER;
+        if (aIndex !== bIndex) return aIndex - bIndex;
+        const aTime = a?.created_at ? new Date(a.created_at).getTime() : 0;
+        const bTime = b?.created_at ? new Date(b.created_at).getTime() : 0;
+        if (aTime !== bTime) return aTime - bTime;
+        return String(a?.id || '').localeCompare(String(b?.id || ''));
+      });
+  }
+
+  renderTaskGroup(task) {
+    const subtasks = this.getSortedSubtasks(task.id);
+    if (subtasks.length === 0) {
+      return this.renderTaskItem(task);
+    }
+
+    const isCollapsed = this.collapsedWorkflows.has(task.id);
+    const groupClasses = ['workspace-detail-workflow-group'];
+    if (isCollapsed) groupClasses.push('is-collapsed');
+    const subtaskMarkup = subtasks.map((subtask, index) => {
+      const stepNumber = Number.isFinite(subtask?.subtask_index) && subtask.subtask_index > 0
+        ? subtask.subtask_index
+        : index + 1;
+      return this.renderTaskItem(subtask, { isSubtask: true, stepNumber });
+    }).join('');
+
+    return `
+      <div class="${groupClasses.join(' ')}" data-workflow-id="${this.escapeHtml(task.id)}">
+        ${this.renderTaskItem(task, { isParent: true, subtaskCount: subtasks.length, collapsed: isCollapsed })}
+        <div class="workspace-detail-subtask-list" ${isCollapsed ? 'hidden' : ''}>
+          ${subtaskMarkup}
+        </div>
+      </div>
+    `;
+  }
+
+  toggleWorkflowExpansion(taskId) {
+    const id = String(taskId || '').trim();
+    if (!id) return;
+    if (this.collapsedWorkflows.has(id)) {
+      this.collapsedWorkflows.delete(id);
+    } else {
+      this.collapsedWorkflows.add(id);
+    }
+    this.renderAgentGroups();
   }
 
   renderAgentSessionsContent(sessions) {
@@ -3538,17 +3592,19 @@ export class WorkspaceDetailPage {
     `;
   }
 
-  renderTaskItem(task) {
+  renderTaskItem(task, options = {}) {
+    const { isSubtask = false, stepNumber = null, isParent: isParentHint = false, subtaskCount = 0, collapsed = false } = options;
     const taskLabel = this.escapeHtml(task.description || task.name || 'Untitled Task');
     const assignedAgent = task.to && task.to !== 'unassigned' ? task.to : '';
-    const subtasks = this.tasks.filter((subtask) => subtask.parent_task_id === task.id);
-    const isParent = subtasks.length > 0;
+    const subtasks = isSubtask ? [] : this.tasks.filter((subtask) => subtask.parent_task_id === task.id);
+    const isParent = isParentHint || subtasks.length > 0;
+    const parentSubtaskCount = subtaskCount || subtasks.length;
     const statusInfo = this.getTaskStatusPresentation(task);
     const awaitingNextStep = this.isTaskAwaitingNextStep(task);
     const hasUnassignedSubtasks = isParent && subtasks.some((subtask) => !subtask.to || subtask.to === 'unassigned');
     const hasRunningSubtasks = isParent && subtasks.some((subtask) => subtask.status === 'in_progress');
     const canExecute = isParent
-      ? subtasks.length > 0 && !hasUnassignedSubtasks && !hasRunningSubtasks
+      ? parentSubtaskCount > 0 && !hasUnassignedSubtasks && !hasRunningSubtasks
       : task.status !== 'in_progress' || awaitingNextStep;
     const resultData = this.getDisplayResult(task, subtasks);
     const hasResultData = !!resultData;
@@ -3567,6 +3623,10 @@ export class WorkspaceDetailPage {
     const assistTitle = statusInfo.reason || 'Agent needs your guidance before this task can continue.';
     const scheduleIndicator = this.renderTaskScheduleIndicator(task);
     const taskMetaParts = [];
+    if (isParent) {
+      const stepsLabel = `${parentSubtaskCount} step${parentSubtaskCount === 1 ? '' : 's'}`;
+      taskMetaParts.push(`<span class="workspace-detail-workflow-steps">${stepsLabel}</span>`);
+    }
     if (assignedAgent) {
       taskMetaParts.push(`<span class="workspace-detail-assigned-agent">Assigned to: ${this.escapeHtml(assignedAgent)}${this.renderAgentCapabilityBadges(assignedAgent)}</span>`);
     }
@@ -3579,8 +3639,33 @@ export class WorkspaceDetailPage {
     }
     taskMetaParts.push(formatDate(task.created_at));
 
+    const itemClasses = ['workspace-detail-item'];
+    if (isParent) itemClasses.push('is-workflow-parent');
+    if (isSubtask) itemClasses.push('is-workflow-subtask');
+
+    const toggleButton = isParent
+      ? `<button type="button"
+                 class="workspace-detail-item-toggle"
+                 aria-expanded="${collapsed ? 'false' : 'true'}"
+                 aria-controls="workspace-detail-subtasks-${this.escapeHtml(task.id)}"
+                 title="${collapsed ? 'Show subtasks' : 'Hide subtasks'}"
+                 aria-label="${collapsed ? 'Show subtasks' : 'Hide subtasks'}"
+                 onclick="event.stopPropagation(); window.workspaceDetail?.toggleWorkflowExpansion('${task.id}')">
+           <svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+             <path d="M7,10L12,15L17,10H7Z"/>
+           </svg>
+         </button>`
+      : '';
+
+    const parentBadge = isParent
+      ? '<span class="workspace-detail-workflow-badge" title="Workflow with subtasks">Workflow</span>'
+      : '';
+    const stepBadge = isSubtask && stepNumber !== null
+      ? `<span class="workspace-detail-step-badge" title="Step ${this.escapeHtml(String(stepNumber))}">Step ${this.escapeHtml(String(stepNumber))}</span>`
+      : '';
+
     return `
-      <div class="workspace-detail-item" data-task-id="${task.id}">
+      <div class="${itemClasses.join(' ')}" data-task-id="${task.id}">
         ${hasAssistData ? `
         <button type="button"
                 class="workspace-detail-item-result"
@@ -3624,7 +3709,9 @@ export class WorkspaceDetailPage {
              onclick="window.workspaceDetail?.openTask('${task.id}')"
              onkeydown="if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); window.workspaceDetail?.openTask('${task.id}'); }">
           <div class="d-flex justify-content-between align-items-start">
-            <div class="workspace-detail-item-title">${taskLabel}</div>
+            <div class="workspace-detail-item-title">
+              ${toggleButton}${stepBadge}${parentBadge}<span class="workspace-detail-item-title-text">${taskLabel}</span>
+            </div>
             <span class="workspace-detail-task-status ${statusInfo.className}">${statusInfo.label}</span>
           </div>
           <div class="workspace-detail-item-meta">
