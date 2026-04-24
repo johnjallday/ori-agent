@@ -192,6 +192,11 @@ export class WorkspaceDetailPage {
     this.workspaceIntentApplyLoading = false;
     this.workspaceConfigExpanded = false;
     this.workspaceConfigPreferenceLoaded = false;
+    this.agentCatalogLoaded = false;
+    this.agentCatalogLoadFailed = false;
+    this.filesLoaded = false;
+    this.filesLoadFailed = false;
+    this.workspaceHealthCheckRunning = false;
     this.capabilitySuggestionCatalog = null;
     this.capabilitySuggestionCatalogPromise = null;
     this.flippedAgentCards = new Set();
@@ -1107,6 +1112,13 @@ export class WorkspaceDetailPage {
       workflowLinksPanel: document.getElementById('workspace-detail-workflow-links-panel'),
       workflowLinksList: document.getElementById('workspace-detail-workflow-links-list'),
       workflowLinksCount: document.getElementById('workspace-detail-workflow-links-count'),
+      healthPanel: document.getElementById('workspace-detail-health-panel'),
+      healthSummary: document.getElementById('workspace-detail-health-summary'),
+      healthBadge: document.getElementById('workspace-detail-health-badge'),
+      healthMeta: document.getElementById('workspace-detail-health-meta'),
+      healthList: document.getElementById('workspace-detail-health-list'),
+      healthRefreshBtn: document.getElementById('workspace-detail-health-refresh'),
+      healthRefreshLabel: document.getElementById('workspace-detail-health-refresh-label'),
 
       // Stats
       agentCount: document.getElementById('workspace-agent-count'),
@@ -1418,6 +1430,7 @@ export class WorkspaceDetailPage {
     // Workspace settings
     this.elements.configToggleBtn?.addEventListener('click', () => this.toggleWorkspaceConfigExpanded());
     this.elements.refreshSettingsBtn?.addEventListener('click', () => this.loadWorkspace());
+    this.elements.healthRefreshBtn?.addEventListener('click', () => this.refreshWorkspaceHealth());
     this.elements.intentForm?.addEventListener('submit', (event) => {
       event.preventDefault();
       this.saveWorkspaceIntent();
@@ -1856,9 +1869,11 @@ export class WorkspaceDetailPage {
       this.renderWorkspaceSkillBindings();
       this.renderAgentGroups();
       this.refreshHomeAssistantQuickPrompts();
+      this.renderWorkspaceHealth();
     } catch (error) {
       console.error('Failed to load workspace:', error);
       if (window.Toast) window.Toast.error('Failed to load workspace');
+      this.renderWorkspaceHealth();
     }
   }
 
@@ -1898,6 +1913,324 @@ export class WorkspaceDetailPage {
 
     // Load children workspaces from tree API
     await this.loadChildren();
+    this.renderWorkspaceHealth();
+  }
+
+  getWorkspaceHealthAgentReferences() {
+    if (!this.workspace) return [];
+
+    const seen = new Map();
+    const add = (name, { isEntryAgent = false } = {}) => {
+      const trimmed = String(name || '').trim();
+      if (!trimmed || trimmed.toLowerCase() === 'unassigned') return;
+      const key = this.normalizeAgentName(trimmed);
+      if (!key) return;
+
+      const existing = seen.get(key);
+      if (existing) {
+        if (isEntryAgent) {
+          existing.isEntryAgent = true;
+        }
+        return;
+      }
+
+      seen.set(key, { name: trimmed, isEntryAgent: Boolean(isEntryAgent) });
+    };
+
+    add(this.workspace.entry_agent_name, { isEntryAgent: true });
+    if (Array.isArray(this.workspace.agent_instances)) {
+      this.workspace.agent_instances.forEach((instance) => add(instance?.name, { isEntryAgent: Boolean(instance?.entry_point || instance?.entryPoint) }));
+    }
+    if (Array.isArray(this.workspace.agents)) {
+      this.workspace.agents.forEach((name) => add(name));
+    }
+
+    return Array.from(seen.values());
+  }
+
+  collectWorkspaceHealthIssues() {
+    const issues = [];
+
+    if (this.agentCatalogLoadFailed) {
+      issues.push({
+        category: 'verification',
+        severity: 'warning',
+        title: 'Agent catalog could not be verified',
+        description: 'The workspace health check could not compare workspace agents against the current runnable agent catalog.',
+        meta: ['Agent verification unavailable']
+      });
+    } else {
+      this.getWorkspaceHealthAgentReferences().forEach((reference) => {
+        if (this.getAgentProfile(reference.name)) return;
+        issues.push({
+          category: 'agent',
+          severity: 'error',
+          title: reference.isEntryAgent ? 'Entry agent is missing' : 'Workspace agent is missing',
+          description: reference.isEntryAgent
+            ? `"${reference.name}" is still assigned as the workspace entry agent, but the runnable agent definition no longer exists.`
+            : `"${reference.name}" is still linked to this workspace, but the runnable agent definition no longer exists.`,
+          action: reference.isEntryAgent ? 'entry_agent' : 'agent',
+          actionLabel: reference.isEntryAgent ? 'Create Entry Agent' : 'Recreate Agent',
+          agentName: reference.name,
+          meta: [reference.name, reference.isEntryAgent ? 'Entry agent' : 'Workspace member']
+        });
+      });
+    }
+
+    if (this.filesLoadFailed) {
+      issues.push({
+        category: 'verification',
+        severity: 'warning',
+        title: 'Linked files could not be verified',
+        description: 'The workspace health check could not load the current file attachments, so broken file links could not be confirmed.',
+        meta: ['File verification unavailable']
+      });
+    } else if (Array.isArray(this.files)) {
+      this.files.forEach((file) => {
+        const meta = file?.file_meta && typeof file.file_meta === 'object' ? file.file_meta : null;
+        if (!meta) return;
+
+        const title = String(file?.title || meta?.name || 'Untitled File').trim() || 'Untitled File';
+        const hasLinkTarget = [meta.relative_path, meta.original_path, meta.url]
+          .some((value) => String(value || '').trim());
+        const pathLabel = String(meta.relative_path || meta.original_path || meta.url || '').trim();
+
+        if (String(meta.status || '').trim().toLowerCase() === 'missing') {
+          issues.push({
+            category: 'file',
+            severity: 'warning',
+            title: 'Linked file is missing',
+            description: `"${title}" no longer resolves to a file on disk. Relink it so the workspace can use it again.`,
+            action: 'file',
+            actionLabel: 'Relink File',
+            fileId: String(file?.id || '').trim(),
+            meta: [title, pathLabel || 'Missing file']
+          });
+          return;
+        }
+
+        if (!hasLinkTarget) {
+          issues.push({
+            category: 'file',
+            severity: 'warning',
+            title: 'File link is incomplete',
+            description: `"${title}" has file metadata but no valid link target. Relink it to restore a usable file reference.`,
+            action: 'file',
+            actionLabel: 'Relink File',
+            fileId: String(file?.id || '').trim(),
+            meta: [title, 'No file path stored']
+          });
+        }
+      });
+    }
+
+    return issues;
+  }
+
+  summarizeWorkspaceHealth() {
+    const waitingOnSources = !this.workspace || !this.agentCatalogLoaded || !this.filesLoaded;
+    if (this.workspaceHealthCheckRunning || waitingOnSources) {
+      return {
+        status: 'checking',
+        badge: 'Checking',
+        summary: 'Verifying workspace agent references and linked files...',
+        meta: [
+          !this.agentCatalogLoaded ? 'Agents: checking' : 'Agents: ready',
+          !this.filesLoaded ? 'Files: checking' : 'Files: ready'
+        ],
+        issues: []
+      };
+    }
+
+    const issues = this.collectWorkspaceHealthIssues();
+    const errorCount = issues.filter((issue) => issue.severity === 'error').length;
+    const agentIssueCount = issues.filter((issue) => issue.category === 'agent').length;
+    const fileIssueCount = issues.filter((issue) => issue.category === 'file').length;
+    const verificationIssueCount = issues.filter((issue) => issue.category === 'verification').length;
+
+    if (issues.length === 0) {
+      return {
+        status: 'healthy',
+        badge: 'Healthy',
+        summary: 'No missing agents or broken file links were detected in this workspace.',
+        meta: ['Agents: healthy', 'Files: healthy'],
+        issues: []
+      };
+    }
+
+    const parts = [];
+    if (agentIssueCount > 0) {
+      parts.push(`${agentIssueCount} missing agent${agentIssueCount === 1 ? '' : 's'}`);
+    }
+    if (fileIssueCount > 0) {
+      parts.push(`${fileIssueCount} linked file issue${fileIssueCount === 1 ? '' : 's'}`);
+    }
+    if (verificationIssueCount > 0) {
+      parts.push(`${verificationIssueCount} verification warning${verificationIssueCount === 1 ? '' : 's'}`);
+    }
+
+    return {
+      status: errorCount > 0 ? 'error' : 'warning',
+      badge: errorCount > 0 ? 'Needs Attention' : 'Warnings',
+      summary: `${parts.join(' and ')} need attention before this workspace is fully reliable.`,
+      meta: [
+        agentIssueCount > 0 ? `Agents: ${agentIssueCount} issue${agentIssueCount === 1 ? '' : 's'}` : 'Agents: healthy',
+        fileIssueCount > 0 ? `Files: ${fileIssueCount} issue${fileIssueCount === 1 ? '' : 's'}` : 'Files: healthy',
+        verificationIssueCount > 0 ? `Checks: ${verificationIssueCount} unavailable` : 'Checks: complete'
+      ],
+      issues
+    };
+  }
+
+  renderWorkspaceHealthEmptyState() {
+    return `
+      <div class="workspace-detail-health-empty">
+        <div class="workspace-detail-health-empty-icon">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+            <path d="M9,16.17L4.83,12L3.41,13.41L9,19L21,7L19.59,5.59L9,16.17Z"/>
+          </svg>
+        </div>
+        <div>
+          <div class="workspace-detail-health-empty-title">Workspace looks healthy</div>
+          <p class="workspace-detail-health-empty-copy">All workspace agents resolve to runnable definitions, and every linked file that was checked still points at a usable file target.</p>
+        </div>
+      </div>
+    `;
+  }
+
+  renderWorkspaceHealthIssue(issue) {
+    const severity = issue?.severity === 'error' ? 'error' : 'warning';
+    const iconPath = severity === 'error'
+      ? '<path d="M13,13H11V7H13M13,17H11V15H13M12,2A10,10 0 0,0 2,12A10,10 0 0,0 12,22A10,10 0 0,0 22,12A10,10 0 0,0 12,2Z"/>'
+      : '<path d="M13,14H11V9H13M13,18H11V16H13M1,21H23L12,2"/>'
+      ;
+    const meta = Array.isArray(issue?.meta) ? issue.meta.filter(Boolean) : [];
+    let actionMarkup = '';
+
+    if (issue?.action === 'entry_agent' && issue?.agentName) {
+      actionMarkup = `
+        <button type="button"
+                class="workspace-detail-panel-btn workspace-detail-health-action"
+                onclick="window.workspaceDetail?.openWorkspaceHealthAgentRecovery('${encodeURIComponent(issue.agentName)}', 'entry')">
+          ${this.escapeHtml(issue.actionLabel || 'Create Entry Agent')}
+        </button>
+      `;
+    } else if (issue?.action === 'agent' && issue?.agentName) {
+      actionMarkup = `
+        <button type="button"
+                class="workspace-detail-panel-btn workspace-detail-health-action"
+                onclick="window.workspaceDetail?.openWorkspaceHealthAgentRecovery('${encodeURIComponent(issue.agentName)}', 'agent')">
+          ${this.escapeHtml(issue.actionLabel || 'Recreate Agent')}
+        </button>
+      `;
+    } else if (issue?.action === 'file' && issue?.fileId) {
+      actionMarkup = `
+        <button type="button"
+                class="workspace-detail-panel-btn workspace-detail-health-action"
+                onclick="window.workspaceDetail?.openWorkspaceHealthFileRecovery('${this.escapeHtml(issue.fileId)}')">
+          ${this.escapeHtml(issue.actionLabel || 'Relink File')}
+        </button>
+      `;
+    }
+
+    return `
+      <div class="workspace-detail-health-issue is-${severity}">
+        <div class="workspace-detail-health-issue-icon">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">${iconPath}</svg>
+        </div>
+        <div>
+          <div class="workspace-detail-health-issue-title">${this.escapeHtml(issue?.title || 'Workspace issue')}</div>
+          <p class="workspace-detail-health-issue-copy">${this.escapeHtml(issue?.description || '')}</p>
+          ${meta.length > 0 ? `
+            <div class="workspace-detail-health-issue-meta">
+              ${meta.map((item) => `<span class="workspace-detail-health-issue-pill">${this.escapeHtml(item)}</span>`).join('')}
+            </div>
+          ` : ''}
+        </div>
+        ${actionMarkup}
+      </div>
+    `;
+  }
+
+  renderWorkspaceHealth() {
+    if (!this.elements.healthPanel || !this.elements.healthSummary || !this.elements.healthBadge || !this.elements.healthMeta || !this.elements.healthList) {
+      return;
+    }
+
+    const health = this.summarizeWorkspaceHealth();
+    this.elements.healthSummary.textContent = health.summary;
+    this.elements.healthBadge.textContent = health.badge;
+    this.elements.healthBadge.className = `workspace-detail-health-badge is-${health.status}`;
+    this.elements.healthMeta.innerHTML = Array.isArray(health.meta)
+      ? health.meta.map((item) => `<span class="workspace-detail-health-chip">${this.escapeHtml(item)}</span>`).join('')
+      : '';
+
+    if (!Array.isArray(health.issues) || health.issues.length === 0) {
+      this.elements.healthList.classList.add('is-empty');
+      this.elements.healthList.innerHTML = health.status === 'healthy'
+        ? this.renderWorkspaceHealthEmptyState()
+        : '<div class="workspace-detail-empty">Checking workspace health...</div>';
+    } else {
+      this.elements.healthList.classList.remove('is-empty');
+      this.elements.healthList.innerHTML = health.issues.map((issue) => this.renderWorkspaceHealthIssue(issue)).join('');
+    }
+
+    if (this.elements.healthRefreshBtn) {
+      this.elements.healthRefreshBtn.disabled = this.workspaceHealthCheckRunning;
+    }
+    if (this.elements.healthRefreshLabel) {
+      this.elements.healthRefreshLabel.textContent = this.workspaceHealthCheckRunning ? 'Running...' : 'Run Health Check';
+    }
+  }
+
+  async refreshWorkspaceHealth() {
+    if (this.workspaceHealthCheckRunning) return;
+
+    this.workspaceHealthCheckRunning = true;
+    this.agentCatalogLoaded = false;
+    this.filesLoaded = false;
+    this.agentCatalogLoadFailed = false;
+    this.filesLoadFailed = false;
+    this.renderWorkspaceHealth();
+
+    try {
+      await Promise.all([
+        this.loadWorkspace(),
+        this.loadAgentCatalog(true),
+        this.loadFiles()
+      ]);
+    } finally {
+      this.workspaceHealthCheckRunning = false;
+      this.renderWorkspaceHealth();
+    }
+  }
+
+  openWorkspaceHealthAgentRecovery(encodedAgentName = '', mode = 'agent') {
+    let agentName = '';
+    try {
+      agentName = decodeURIComponent(String(encodedAgentName || ''));
+    } catch (_error) {
+      agentName = String(encodedAgentName || '');
+    }
+
+    const normalizedName = String(agentName || '').trim();
+    if (!normalizedName) return;
+
+    if (mode === 'entry') {
+      this.openWorkspaceEntryAgentCreateFlow({ seedName: normalizedName });
+      return;
+    }
+
+    this.openCreateAgentFlow({
+      seedName: normalizedName,
+      seedType: normalizedName.toLowerCase().includes('manager') ? 'orchestration' : 'tool-calling'
+    });
+  }
+
+  openWorkspaceHealthFileRecovery(fileId = '') {
+    const normalizedFileId = String(fileId || '').trim();
+    if (!normalizedFileId) return;
+    this.promptRelinkWorkspaceFile(normalizedFileId);
   }
 
   getWorkspaceIntentBootstrap() {
@@ -10416,50 +10749,62 @@ export class WorkspaceDetailPage {
 
   async loadAgentCatalog(force = false) {
     if (!force && this.agentIndex instanceof Map && this.agentIndex.size > 0) {
+      this.agentCatalogLoaded = true;
+      this.agentCatalogLoadFailed = false;
+      this.renderWorkspaceHealth();
       return this.agentCatalog;
     }
 
     const nextCatalog = [];
     const nextIndex = new Map();
+    this.agentCatalogLoaded = false;
+    this.agentCatalogLoadFailed = false;
+    this.renderWorkspaceHealth();
     try {
       const response = await fetch('/api/agents/dashboard/list');
-      if (response.ok) {
-        const data = await response.json();
-        const agents = Array.isArray(data?.agents) ? data.agents : [];
-        agents.forEach((agent) => {
-          const name = String(agent?.name || '').trim();
-          if (!name) return;
-
-          const profile = {
-            name,
-            type: String(agent?.type || '').trim(),
-            source: String(agent?.source || 'user').trim().toLowerCase(),
-            model: String(agent?.model || '').trim(),
-            provider: String(agent?.provider || '').trim(),
-            status: String(agent?.status || '').trim().toLowerCase(),
-            capabilities: Array.isArray(agent?.capabilities) ? agent.capabilities.map((value) => String(value || '').trim()).filter(Boolean) : [],
-            allowWebSearch: Boolean(agent?.allow_web_search),
-            enabledPlugins: Array.isArray(agent?.enabled_plugins) ? agent.enabled_plugins.map((value) => String(value || '').trim()).filter(Boolean) : [],
-            mcpServers: Array.isArray(agent?.mcp_servers) ? agent.mcp_servers.map((value) => String(value || '').trim()).filter(Boolean) : [],
-            evolution: agent?.evolution && typeof agent.evolution === 'object' ? agent.evolution : null,
-            level: Number.isFinite(Number(agent?.evolution?.level)) ? Math.max(0, Math.floor(Number(agent.evolution.level))) : 0,
-            stage: String(agent?.evolution?.stage || '').trim()
-          };
-
-          nextCatalog.push(profile);
-          nextIndex.set(this.normalizeAgentName(name), profile);
-        });
+      if (!response.ok) {
+        throw new Error(`Failed to load agent catalog (${response.status})`);
       }
+
+      const data = await response.json();
+      const agents = Array.isArray(data?.agents) ? data.agents : [];
+      agents.forEach((agent) => {
+        const name = String(agent?.name || '').trim();
+        if (!name) return;
+
+        const profile = {
+          name,
+          type: String(agent?.type || '').trim(),
+          source: String(agent?.source || 'user').trim().toLowerCase(),
+          model: String(agent?.model || '').trim(),
+          provider: String(agent?.provider || '').trim(),
+          status: String(agent?.status || '').trim().toLowerCase(),
+          capabilities: Array.isArray(agent?.capabilities) ? agent.capabilities.map((value) => String(value || '').trim()).filter(Boolean) : [],
+          allowWebSearch: Boolean(agent?.allow_web_search),
+          enabledPlugins: Array.isArray(agent?.enabled_plugins) ? agent.enabled_plugins.map((value) => String(value || '').trim()).filter(Boolean) : [],
+          mcpServers: Array.isArray(agent?.mcp_servers) ? agent.mcp_servers.map((value) => String(value || '').trim()).filter(Boolean) : [],
+          evolution: agent?.evolution && typeof agent.evolution === 'object' ? agent.evolution : null,
+          level: Number.isFinite(Number(agent?.evolution?.level)) ? Math.max(0, Math.floor(Number(agent.evolution.level))) : 0,
+          stage: String(agent?.evolution?.stage || '').trim()
+        };
+
+        nextCatalog.push(profile);
+        nextIndex.set(this.normalizeAgentName(name), profile);
+      });
     } catch (error) {
       console.error('Failed to load agent catalog:', error);
+      this.agentCatalogLoadFailed = true;
     }
 
     this.agentCatalog = nextCatalog;
     this.agentIndex = nextIndex;
+    this.agentCatalogLoaded = true;
 
     if (!Array.isArray(this.agentOptions) || this.agentOptions.length === 0) {
       this.agentOptions = this.buildAgentOptionsFromCatalog();
     }
+
+    this.renderWorkspaceHealth();
 
     return this.agentCatalog;
   }
@@ -12339,26 +12684,38 @@ export class WorkspaceDetailPage {
     if (this.elements.filesList) {
       this.elements.filesList.innerHTML = '<div class="workspace-detail-loading">Loading files...</div>';
     }
+    this.filesLoaded = false;
+    this.filesLoadFailed = false;
+    this.renderWorkspaceHealth();
 
     try {
       const response = await fetch(`/api/workspaces/${encodeURIComponent(this.workspaceId)}`);
       if (!response.ok) {
         this.files = [];
+        this.filesLoaded = true;
+        this.filesLoadFailed = true;
         this.renderFiles();
         this.refreshHomeAssistantQuickPrompts();
+        this.renderWorkspaceHealth();
         return;
       }
 
       const workspace = await response.json();
       // Filter attachments to only include files (not text content)
       this.files = (workspace.attachments || []).filter(a => a.file_meta || a.type === 'image' || a.type === 'other');
+      this.filesLoaded = true;
+      this.filesLoadFailed = false;
       this.renderFiles();
       this.refreshHomeAssistantQuickPrompts();
+      this.renderWorkspaceHealth();
     } catch (error) {
       console.error('Failed to load files:', error);
       this.files = [];
+      this.filesLoaded = true;
+      this.filesLoadFailed = true;
       this.renderFiles();
       this.refreshHomeAssistantQuickPrompts();
+      this.renderWorkspaceHealth();
     }
   }
 

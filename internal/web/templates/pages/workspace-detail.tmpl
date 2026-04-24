@@ -158,6 +158,31 @@
             </div>
           </div>
 
+          <div class="modern-card workspace-detail-health-card mb-4" id="workspace-detail-health-panel">
+            <div class="workspace-detail-health-header">
+              <div>
+                <div class="workspace-detail-health-kicker">Workspace Health</div>
+                <h2 class="workspace-detail-health-title">Missing agents and broken file links</h2>
+                <p id="workspace-detail-health-summary" class="workspace-detail-health-summary">
+                  Checking workspace agent references and linked files...
+                </p>
+              </div>
+              <div class="workspace-detail-health-controls">
+                <span id="workspace-detail-health-badge" class="workspace-detail-health-badge is-checking">Checking</span>
+                <button id="workspace-detail-health-refresh" class="workspace-detail-panel-btn" type="button" title="Run workspace health check">
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
+                    <path d="M17.65,6.35C16.2,4.9 14.21,4 12,4A8,8 0 0,0 4,12A8,8 0 0,0 12,20C15.73,20 18.84,17.45 19.73,14H17.65C16.83,16.33 14.61,18 12,18A6,6 0 0,1 6,12A6,6 0 0,1 12,6C13.66,6 15.14,6.69 16.22,7.78L13,11H20V4L17.65,6.35Z"/>
+                  </svg>
+                  <span id="workspace-detail-health-refresh-label">Run Health Check</span>
+                </button>
+              </div>
+            </div>
+            <div id="workspace-detail-health-meta" class="workspace-detail-health-meta"></div>
+            <div id="workspace-detail-health-list" class="workspace-detail-health-list">
+              <div class="workspace-detail-empty">Checking workspace health...</div>
+            </div>
+          </div>
+
           <!-- Workspace Configuration -->
           <div class="modern-card workspace-detail-config-card is-collapsed mb-4" id="workspace-detail-settings-panel">
             <div class="workspace-detail-config-header">
@@ -1786,6 +1811,299 @@
 
       .hub-file-source-btn {
         flex: 1;
+      }
+    }
+
+    .workspace-detail-health-card {
+      position: relative;
+      overflow: hidden;
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      background:
+        radial-gradient(circle at top right, rgba(255, 171, 95, 0.12), transparent 32%),
+        linear-gradient(180deg, rgba(13, 21, 35, 0.96), rgba(11, 18, 30, 0.92));
+    }
+
+    .workspace-detail-health-card::before {
+      content: "";
+      position: absolute;
+      inset: 0;
+      pointer-events: none;
+      background:
+        linear-gradient(115deg, transparent 0%, rgba(255, 255, 255, 0.04) 22%, transparent 44%),
+        linear-gradient(0deg, rgba(255, 255, 255, 0.02), rgba(255, 255, 255, 0));
+      opacity: 0.75;
+    }
+
+    .workspace-detail-health-header,
+    .workspace-detail-health-meta,
+    .workspace-detail-health-list {
+      position: relative;
+      z-index: 1;
+    }
+
+    .workspace-detail-health-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 1rem;
+      padding: 1.3rem 1.35rem 0;
+    }
+
+    .workspace-detail-health-kicker {
+      color: rgba(255, 196, 143, 0.84);
+      font-size: 0.72rem;
+      font-weight: 700;
+      letter-spacing: 0.18em;
+      text-transform: uppercase;
+      margin-bottom: 0.35rem;
+    }
+
+    .workspace-detail-health-title {
+      margin: 0;
+      color: var(--text-primary);
+      font-size: 1.08rem;
+      font-weight: 650;
+    }
+
+    .workspace-detail-health-summary {
+      margin: 0.45rem 0 0;
+      color: var(--text-secondary);
+      font-size: 0.88rem;
+      line-height: 1.55;
+      max-width: 64ch;
+    }
+
+    .workspace-detail-health-controls {
+      display: flex;
+      align-items: center;
+      gap: 0.7rem;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+    }
+
+    .workspace-detail-health-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.35rem;
+      min-height: 34px;
+      padding: 0.42rem 0.82rem;
+      border-radius: 999px;
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      background: rgba(255, 255, 255, 0.05);
+      color: var(--text-primary);
+      font-size: 0.76rem;
+      font-weight: 700;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+    }
+
+    .workspace-detail-health-badge.is-healthy {
+      border-color: rgba(62, 207, 142, 0.3);
+      background: rgba(34, 197, 94, 0.14);
+      color: #81f2b6;
+    }
+
+    .workspace-detail-health-badge.is-warning {
+      border-color: rgba(255, 179, 102, 0.34);
+      background: rgba(245, 158, 11, 0.16);
+      color: #ffd08a;
+    }
+
+    .workspace-detail-health-badge.is-error {
+      border-color: rgba(255, 113, 113, 0.3);
+      background: rgba(239, 68, 68, 0.15);
+      color: #ffaeae;
+    }
+
+    .workspace-detail-health-badge.is-checking {
+      border-color: rgba(125, 176, 255, 0.26);
+      background: rgba(59, 130, 246, 0.12);
+      color: #b5d4ff;
+    }
+
+    .workspace-detail-health-meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.55rem;
+      padding: 0.95rem 1.35rem 0;
+    }
+
+    .workspace-detail-health-chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.4rem;
+      padding: 0.38rem 0.68rem;
+      border-radius: 999px;
+      background: rgba(255, 255, 255, 0.05);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      color: var(--text-secondary);
+      font-size: 0.74rem;
+      font-weight: 600;
+    }
+
+    .workspace-detail-health-list {
+      display: grid;
+      gap: 0.75rem;
+      padding: 1rem 1.35rem 1.35rem;
+    }
+
+    .workspace-detail-health-list.is-empty {
+      grid-template-columns: 1fr;
+    }
+
+    .workspace-detail-health-empty {
+      display: flex;
+      align-items: flex-start;
+      gap: 0.85rem;
+      padding: 1rem 1.05rem;
+      border-radius: 18px;
+      border: 1px solid rgba(62, 207, 142, 0.18);
+      background: rgba(19, 44, 35, 0.42);
+    }
+
+    .workspace-detail-health-empty-icon {
+      width: 2rem;
+      height: 2rem;
+      flex: 0 0 auto;
+      border-radius: 999px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      background: rgba(62, 207, 142, 0.12);
+      color: #8df4be;
+    }
+
+    .workspace-detail-health-empty-title {
+      color: var(--text-primary);
+      font-size: 0.95rem;
+      font-weight: 650;
+      margin-bottom: 0.2rem;
+    }
+
+    .workspace-detail-health-empty-copy {
+      color: var(--text-secondary);
+      font-size: 0.84rem;
+      line-height: 1.55;
+      margin: 0;
+    }
+
+    .workspace-detail-health-issue {
+      display: grid;
+      grid-template-columns: auto minmax(0, 1fr) auto;
+      gap: 0.9rem;
+      align-items: flex-start;
+      padding: 0.95rem 1rem;
+      border-radius: 18px;
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      background: rgba(9, 15, 25, 0.66);
+    }
+
+    .workspace-detail-health-issue.is-error {
+      border-color: rgba(239, 68, 68, 0.24);
+      background: linear-gradient(180deg, rgba(55, 20, 24, 0.42), rgba(24, 12, 15, 0.78));
+    }
+
+    .workspace-detail-health-issue.is-warning {
+      border-color: rgba(245, 158, 11, 0.22);
+      background: linear-gradient(180deg, rgba(60, 38, 15, 0.4), rgba(20, 15, 10, 0.78));
+    }
+
+    .workspace-detail-health-issue-icon {
+      width: 2rem;
+      height: 2rem;
+      border-radius: 12px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      background: rgba(255, 255, 255, 0.06);
+      color: var(--text-primary);
+      flex: 0 0 auto;
+    }
+
+    .workspace-detail-health-issue.is-error .workspace-detail-health-issue-icon {
+      background: rgba(239, 68, 68, 0.12);
+      color: #ffb1b1;
+    }
+
+    .workspace-detail-health-issue.is-warning .workspace-detail-health-issue-icon {
+      background: rgba(245, 158, 11, 0.12);
+      color: #ffd496;
+    }
+
+    .workspace-detail-health-issue-title {
+      color: var(--text-primary);
+      font-size: 0.92rem;
+      font-weight: 650;
+      margin: 0;
+    }
+
+    .workspace-detail-health-issue-copy {
+      margin: 0.2rem 0 0;
+      color: var(--text-secondary);
+      font-size: 0.82rem;
+      line-height: 1.55;
+    }
+
+    .workspace-detail-health-issue-meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.45rem;
+      margin-top: 0.55rem;
+    }
+
+    .workspace-detail-health-issue-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.35rem;
+      padding: 0.28rem 0.55rem;
+      border-radius: 999px;
+      background: rgba(255, 255, 255, 0.05);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      color: var(--text-secondary);
+      font-size: 0.72rem;
+      line-height: 1.3;
+    }
+
+    .workspace-detail-health-action {
+      align-self: center;
+      white-space: nowrap;
+    }
+
+    @media (max-width: 991px) {
+      .workspace-detail-health-header {
+        flex-direction: column;
+      }
+
+      .workspace-detail-health-controls {
+        width: 100%;
+        justify-content: flex-start;
+      }
+
+      .workspace-detail-health-issue {
+        grid-template-columns: auto minmax(0, 1fr);
+      }
+
+      .workspace-detail-health-action {
+        grid-column: 1 / -1;
+        justify-self: start;
+      }
+    }
+
+    @media (max-width: 575px) {
+      .workspace-detail-health-header,
+      .workspace-detail-health-meta,
+      .workspace-detail-health-list {
+        padding-left: 1rem;
+        padding-right: 1rem;
+      }
+
+      .workspace-detail-health-controls {
+        flex-direction: column;
+        align-items: stretch;
+      }
+
+      .workspace-detail-health-controls .workspace-detail-panel-btn {
+        justify-content: center;
       }
     }
 
