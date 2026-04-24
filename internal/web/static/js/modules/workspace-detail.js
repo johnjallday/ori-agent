@@ -3334,11 +3334,18 @@ export class WorkspaceDetailPage {
   checkAutoOpenCreateAgent() {
     const params = new URLSearchParams(window.location.search);
     if (params.get('addAgent') !== '1') return false;
+    const seedAgentName = String(params.get('seedAgentName') || '').trim();
 
-    // Clean the URL so refresh won't re-trigger
-    window.history.replaceState({}, '', window.location.pathname);
+    // Clean the URL so refresh won't re-trigger, but preserve unrelated params.
+    const url = new URL(window.location.href);
+    url.searchParams.delete('addAgent');
+    url.searchParams.delete('seedAgentName');
+    window.history.replaceState({}, '', `${url.pathname}${url.search}${url.hash}`);
 
-    this.openWorkspaceEntryAgentCreateFlow({ defer: true });
+    this.openWorkspaceEntryAgentCreateFlow({
+      defer: true,
+      seedName: seedAgentName
+    });
     return true;
   }
 
@@ -3376,11 +3383,12 @@ export class WorkspaceDetailPage {
     }
   }
 
-  buildWorkspaceEntryAgentDefaults() {
+  buildWorkspaceEntryAgentDefaults(options = {}) {
     const workspaceName = String(this.workspace?.name || '').trim();
-    const agentName = workspaceName
+    const fallbackAgentName = workspaceName
       ? (workspaceName.toLowerCase().endsWith(' manager') ? workspaceName : workspaceName + ' Manager')
       : 'Workspace Manager';
+    const agentName = String(options?.seedName || '').trim() || fallbackAgentName;
     const systemPrompt = `You are the workspace manager for "${workspaceName || 'this workspace'}". `
       + 'Act as the default front door for the workspace: clarify user intent, answer directly when '
       + 'the request only needs shared context, and break work into tasks for specialists when needed.';
@@ -3395,7 +3403,7 @@ export class WorkspaceDetailPage {
   }
 
   openWorkspaceEntryAgentCreateFlow(options = {}) {
-    const defaults = this.buildWorkspaceEntryAgentDefaults();
+    const defaults = this.buildWorkspaceEntryAgentDefaults(options);
     const defer = options?.defer === true;
     const open = () => this.openCreateAgentFlow(defaults);
 

@@ -134,6 +134,253 @@ function getAgentNameFromURL() {
   return params.get('name');
 }
 
+function normalizeAgentLookupToken(value) {
+  return String(value || '').trim().toLowerCase();
+}
+
+function isAgentNotFoundError(error) {
+  return normalizeAgentLookupToken(error?.message || error) === 'agent not found';
+}
+
+function flattenWorkspaceRecords(items, output = []) {
+  const list = Array.isArray(items) ? items : [];
+  list.forEach((item) => {
+    if (!item || typeof item !== 'object') return;
+    output.push(item);
+    if (Array.isArray(item.children) && item.children.length > 0) {
+      flattenWorkspaceRecords(item.children, output);
+    }
+  });
+  return output;
+}
+
+function findMissingAgentWorkspaceMatch(workspace, requestedAgentName) {
+  const target = normalizeAgentLookupToken(requestedAgentName);
+  if (!target || !workspace || typeof workspace !== 'object') {
+    return null;
+  }
+
+  const workspaceId = String(workspace.id || '').trim();
+  if (!workspaceId) {
+    return null;
+  }
+
+  const workspaceName = String(workspace.name || 'Untitled Workspace').trim() || 'Untitled Workspace';
+  const directEntryName = String(workspace.entry_agent_name || '').trim();
+  const sharedEntryName = String(workspace?.shared_data?.entry_agent_name || '').trim();
+  if (normalizeAgentLookupToken(directEntryName) === target) {
+    return {
+      workspaceId,
+      workspaceName,
+      isEntryAgent: true,
+      matchKind: 'entry_agent_name'
+    };
+  }
+  if (normalizeAgentLookupToken(sharedEntryName) === target) {
+    return {
+      workspaceId,
+      workspaceName,
+      isEntryAgent: true,
+      matchKind: 'shared_entry_agent_name'
+    };
+  }
+
+  const instances = Array.isArray(workspace.agent_instances) ? workspace.agent_instances : [];
+  for (const instance of instances) {
+    if (normalizeAgentLookupToken(instance?.name) !== target) {
+      continue;
+    }
+    const isEntryAgent = Boolean(instance?.entry_point || instance?.entryPoint);
+    return {
+      workspaceId,
+      workspaceName,
+      isEntryAgent,
+      matchKind: isEntryAgent ? 'entry_agent_instance' : 'agent_instance'
+    };
+  }
+
+  const agents = Array.isArray(workspace.agents) ? workspace.agents : [];
+  if (agents.some((name) => normalizeAgentLookupToken(name) === target)) {
+    return {
+      workspaceId,
+      workspaceName,
+      isEntryAgent: false,
+      matchKind: 'legacy_agent'
+    };
+  }
+
+  return null;
+}
+
+function scoreMissingAgentWorkspaceMatch(match) {
+  switch (match?.matchKind) {
+    case 'entry_agent_name':
+      return 120;
+    case 'shared_entry_agent_name':
+      return 110;
+    case 'entry_agent_instance':
+      return 100;
+    case 'agent_instance':
+      return 70;
+    case 'legacy_agent':
+      return 60;
+    default:
+      return 0;
+  }
+}
+
+async function loadMissingAgentWorkspaceRecovery(requestedAgentName) {
+  const requestedName = String(requestedAgentName || '').trim();
+  if (!requestedName) {
+    return null;
+  }
+
+  try {
+    const response = await fetch('/api/workspaces');
+    if (!response.ok) {
+      throw new Error('Failed to load workspaces');
+    }
+
+    const payload = await response.json();
+    const workspaces = flattenWorkspaceRecords(payload.workspaces || payload.folders || []);
+    const matches = workspaces
+      .map((workspace) => findMissingAgentWorkspaceMatch(workspace, requestedName))
+      .filter(Boolean)
+      .sort((a, b) => scoreMissingAgentWorkspaceMatch(b) - scoreMissingAgentWorkspaceMatch(a));
+
+    return matches[0] || null;
+  } catch (error) {
+    console.error('Failed to load missing agent workspace recovery context:', error);
+    return null;
+  }
+}
+
+function buildWorkspaceEntryAgentRecoveryURL(workspaceId, requestedAgentName) {
+  const params = new URLSearchParams();
+  params.set('addAgent', '1');
+  if (requestedAgentName) {
+    params.set('seedAgentName', requestedAgentName);
+  }
+  return `/workspaces/${encodeURIComponent(workspaceId)}?${params.toString()}`;
+}
+
+function hideMissingAgentState() {
+  const missingState = document.getElementById('missingAgentState');
+  if (missingState) {
+    missingState.style.display = 'none';
+  }
+}
+
+async function showMissingAgentState(message) {
+  const missingState = document.getElementById('missingAgentState');
+  if (!missingState) {
+    showError(message || 'Agent not found');
+    return;
+  }
+
+  const requestedName = String(agentName || '').trim();
+  const recovery = await loadMissingAgentWorkspaceRecovery(requestedName);
+
+  const titleEl = document.getElementById('missingAgentTitle');
+  const messageEl = document.getElementById('missingAgentMessage');
+  const metaEl = document.getElementById('missingAgentMeta');
+  const detailEl = document.getElementById('missingAgentDetail');
+  const createBtn = document.getElementById('missingAgentCreateEntryBtn');
+  const openWorkspaceBtn = document.getElementById('missingAgentOpenWorkspaceBtn');
+  const backBtn = document.getElementById('missingAgentBackBtn');
+  const content = document.getElementById('content');
+
+  const genericMessage = requestedName
+    ? `We couldn't find a runnable agent named "${requestedName}". It may have been deleted, renamed, or never created in this environment.`
+    : 'We could not identify the requested agent.';
+  const normalizedMessage = String(message || '').trim();
+  const fallbackBody = isAgentNotFoundError(normalizedMessage)
+    ? genericMessage
+    : (normalizedMessage || genericMessage);
+
+  let title = 'Agent not found';
+  let body = fallbackBody;
+  let detail = 'Return to the agents directory or open the relevant workspace to repair the missing reference.';
+
+  if (recovery?.workspaceId && recovery.isEntryAgent) {
+    title = 'Workspace entry agent is missing';
+    body = requestedName
+      ? `"${requestedName}" is still referenced as the entry agent for "${recovery.workspaceName}", but the runnable agent definition no longer exists.`
+      : `The entry agent for "${recovery.workspaceName}" no longer exists.`;
+    detail = 'Create a replacement entry agent to restore workspace routing, chats, and task execution. You can also open the workspace first to inspect the current configuration.';
+  } else if (recovery?.workspaceId) {
+    body = requestedName
+      ? `"${requestedName}" is still referenced inside "${recovery.workspaceName}", but the runnable agent definition no longer exists.`
+      : `This workspace still references an agent that no longer exists.`;
+    detail = 'Open the workspace to repair or replace the stale agent reference before continuing.';
+  }
+
+  if (titleEl) {
+    titleEl.textContent = title;
+  }
+  if (messageEl) {
+    messageEl.textContent = body;
+  }
+  if (detailEl) {
+    detailEl.textContent = detail;
+  }
+  if (metaEl) {
+    const metaItems = [];
+    if (requestedName) {
+      metaItems.push({ label: 'Requested', value: requestedName });
+    }
+    if (recovery?.workspaceName) {
+      metaItems.push({ label: 'Workspace', value: recovery.workspaceName });
+    }
+    if (recovery?.workspaceId) {
+      metaItems.push({
+        label: 'Recovery',
+        value: recovery.isEntryAgent ? 'Create entry agent' : 'Repair workspace link'
+      });
+    }
+
+    if (metaItems.length > 0) {
+      metaEl.style.display = 'flex';
+      metaEl.innerHTML = metaItems.map((item) => `
+        <span class="agent-missing-chip">
+          <span class="agent-missing-chip-label">${escapeHtml(item.label)}</span>
+          <span>${escapeHtml(item.value)}</span>
+        </span>
+      `).join('');
+    } else {
+      metaEl.style.display = 'none';
+      metaEl.innerHTML = '';
+    }
+  }
+
+  if (createBtn) {
+    if (recovery?.workspaceId && recovery.isEntryAgent) {
+      createBtn.href = buildWorkspaceEntryAgentRecoveryURL(recovery.workspaceId, requestedName);
+      createBtn.style.display = 'inline-flex';
+    } else {
+      createBtn.style.display = 'none';
+    }
+  }
+
+  if (openWorkspaceBtn) {
+    if (recovery?.workspaceId) {
+      openWorkspaceBtn.href = `/workspaces/${encodeURIComponent(recovery.workspaceId)}`;
+      openWorkspaceBtn.style.display = 'inline-flex';
+    } else {
+      openWorkspaceBtn.style.display = 'none';
+    }
+  }
+
+  if (backBtn) {
+    backBtn.href = '/agents';
+  }
+
+  if (content) {
+    content.style.display = 'none';
+  }
+  missingState.style.display = 'flex';
+}
+
 // Fetch available providers and models from API
 async function loadAvailableProviders() {
   try {
@@ -292,6 +539,10 @@ document.addEventListener('DOMContentLoaded', async () => {
     loadAgentDetails()
   ]);
 
+  if (!currentAgent) {
+    return;
+  }
+
   document.getElementById('editProviderFilter')?.addEventListener('change', () => {
     window.requestAnimationFrame(updateEditReasoningVisibility);
   });
@@ -333,6 +584,11 @@ async function loadAgentDetails() {
     renderAgentDetails();
   } catch (error) {
     console.error('Error loading agent details:', error);
+    if (isAgentNotFoundError(error)) {
+      currentAgent = null;
+      await showMissingAgentState(error.message || 'Agent not found');
+      return;
+    }
     showError(error.message || 'Failed to load agent details');
     setTimeout(() => {
       window.location.href = '/agents';
@@ -348,6 +604,11 @@ async function refreshAgentDetails() {
     renderAgentDetails();
   } catch (error) {
     console.error('Error refreshing agent details:', error);
+    if (isAgentNotFoundError(error)) {
+      currentAgent = null;
+      await showMissingAgentState(error.message || 'Agent not found');
+      return;
+    }
     setConfigStatus(error.message || 'Failed to refresh agent details', 'error');
   }
 }
@@ -355,6 +616,8 @@ async function refreshAgentDetails() {
 // Render agent details on page
 function renderAgentDetails() {
   if (!currentAgent) return;
+
+  hideMissingAgentState();
 
   // Header
   const avatar = document.getElementById('agentAvatar');
@@ -1689,7 +1952,10 @@ function showLoading(show) {
   const loading = document.getElementById('loadingState');
   const content = document.getElementById('content');
   if (loading) loading.style.display = show ? 'flex' : 'none';
-  if (content) content.style.display = show ? 'none' : 'block';
+  if (content) content.style.display = show ? 'none' : (currentAgent ? 'block' : 'none');
+  if (show) {
+    hideMissingAgentState();
+  }
 }
 
 function showError(message) {
