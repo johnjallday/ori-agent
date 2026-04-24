@@ -438,6 +438,273 @@ function buildAssistSelectState(workflowStep, selectedFieldValues = {}) {
   return { optionValues, customValues };
 }
 
+const resultWorkflowHeadingPattern = /^\s{0,3}(#{1,6})\s+(.+?)\s*#*\s*$/;
+const resultWorkflowPlainSectionPattern = /^\s*((?:phase|part)\s+\d+\b.*)$/i;
+const resultWorkflowStandaloneStepPattern = /^\s*step\s+\d+\s*[:\-–—.]\s*(.+)$/i;
+const resultWorkflowOrderedItemPattern = /^\s{0,3}\d+[.)]\s+(.+)$/;
+const resultWorkflowCheckboxItemPattern = /^\s{0,3}[-*+]\s+\[(?: |x|X)\]\s+(.+)$/;
+const resultWorkflowBulletItemPattern = /^\s{0,3}[-*+•]\s+(.+)$/;
+const resultWorkflowRulePattern = /^\s*(?:[-*_]\s*){3,}$/;
+const RESULT_WORKFLOW_MAX_SUBTASKS = 24;
+
+function cleanResultWorkflowText(value) {
+  return String(value ?? '')
+    .replace(/\[(.*?)\]\((.*?)\)/g, '$1')
+    .replace(/`{1,3}([^`]+)`{1,3}/g, '$1')
+    .replace(/\*\*(.*?)\*\*/g, '$1')
+    .replace(/__(.*?)__/g, '$1')
+    .replace(/\*(.*?)\*/g, '$1')
+    .replace(/_(.*?)_/g, '$1')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function normalizeResultWorkflowToken(value) {
+  return cleanResultWorkflowText(value)
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim();
+}
+
+function appendResultWorkflowText(base, next) {
+  const left = cleanResultWorkflowText(base);
+  const right = cleanResultWorkflowText(next);
+  if (!left) return right;
+  if (!right) return left;
+  return `${left} ${right}`.replace(/\s+/g, ' ').trim();
+}
+
+function trimResultWorkflowLabel(value, maxLength = 180) {
+  const cleaned = cleanResultWorkflowText(value);
+  if (!cleaned || cleaned.length <= maxLength) return cleaned;
+  const candidate = cleaned.slice(0, maxLength - 1);
+  const boundary = candidate.lastIndexOf(' ');
+  const trimmed = boundary >= Math.floor(maxLength * 0.55)
+    ? candidate.slice(0, boundary)
+    : candidate;
+  return `${trimmed.trim()}...`;
+}
+
+function isResultWorkflowReferenceSection(value) {
+  const token = normalizeResultWorkflowToken(value);
+  if (!token) return false;
+  return token.includes('note') ||
+    token.includes('tip') ||
+    token.includes('material') ||
+    token.includes('supply') ||
+    token.includes('cut list') ||
+    token.includes('dimension') ||
+    token.includes('measurement') ||
+    token.includes('reference') ||
+    token.includes('budget') ||
+    token.includes('cost');
+}
+
+function buildResultWorkflowDraftTitle(taskLabel) {
+  const cleaned = trimResultWorkflowLabel(taskLabel, 104) || 'Workflow Draft';
+  if (/\bworkflow\b/i.test(cleaned)) {
+    return cleaned;
+  }
+  return trimResultWorkflowLabel(`${cleaned} - Workflow`, 120) || 'Workflow Draft';
+}
+
+function buildResultWorkflowDraft(taskLabel, resultText, sourceTaskId, defaultAssignmentValue = '') {
+  const lines = String(resultText || '').split(/\r?\n/);
+  if (lines.length === 0) return null;
+
+  const actions = [];
+  const notes = [];
+  const sectionLabels = [];
+  const seenSections = new Set();
+  let currentSection = '';
+  let currentSectionIsReference = false;
+  let lastAction = null;
+  let lastNoteIndex = -1;
+
+  const rememberSection = (section) => {
+    const cleaned = trimResultWorkflowLabel(section, 96);
+    if (!cleaned) return;
+    const key = cleaned.toLowerCase();
+    if (seenSections.has(key)) return;
+    seenSections.add(key);
+    sectionLabels.push(cleaned);
+  };
+
+  const pushNote = (value) => {
+    const cleaned = cleanResultWorkflowText(value);
+    if (!cleaned) return;
+    notes.push(cleaned);
+    lastNoteIndex = notes.length - 1;
+    lastAction = null;
+  };
+
+  const pushAction = (value) => {
+    const cleaned = trimResultWorkflowLabel(value, 220);
+    if (!cleaned) return;
+    const action = {
+      text: cleaned,
+      section: currentSection
+    };
+    actions.push(action);
+    if (currentSection && !currentSectionIsReference) {
+      rememberSection(currentSection);
+    }
+    lastAction = action;
+    lastNoteIndex = -1;
+  };
+
+  lines.forEach((rawLine) => {
+    const line = String(rawLine || '').replace(/\t/g, '  ');
+    const trimmed = line.trim();
+
+    if (!trimmed) {
+      lastAction = null;
+      return;
+    }
+
+    if (resultWorkflowRulePattern.test(trimmed)) {
+      lastAction = null;
+      lastNoteIndex = -1;
+      return;
+    }
+
+    const headingMatch = trimmed.match(resultWorkflowHeadingPattern);
+    if (headingMatch && headingMatch[2]) {
+      currentSection = trimResultWorkflowLabel(headingMatch[2], 120);
+      currentSectionIsReference = isResultWorkflowReferenceSection(currentSection);
+      lastAction = null;
+      lastNoteIndex = -1;
+      return;
+    }
+
+    const orderedMatch = trimmed.match(resultWorkflowOrderedItemPattern);
+    if (orderedMatch && orderedMatch[1]) {
+      if (currentSectionIsReference) {
+        pushNote(orderedMatch[1]);
+      } else {
+        pushAction(orderedMatch[1]);
+      }
+      return;
+    }
+
+    const checkboxMatch = trimmed.match(resultWorkflowCheckboxItemPattern);
+    if (checkboxMatch && checkboxMatch[1]) {
+      if (currentSectionIsReference) {
+        pushNote(checkboxMatch[1]);
+      } else {
+        pushAction(checkboxMatch[1]);
+      }
+      return;
+    }
+
+    const bulletMatch = trimmed.match(resultWorkflowBulletItemPattern);
+    if (bulletMatch && bulletMatch[1]) {
+      if (currentSectionIsReference) {
+        pushNote(bulletMatch[1]);
+      } else {
+        pushAction(bulletMatch[1]);
+      }
+      return;
+    }
+
+    const standaloneStepMatch = trimmed.match(resultWorkflowStandaloneStepPattern);
+    if (standaloneStepMatch && standaloneStepMatch[1]) {
+      if (currentSectionIsReference) {
+        pushNote(standaloneStepMatch[1]);
+      } else {
+        pushAction(standaloneStepMatch[1]);
+      }
+      return;
+    }
+
+    const plainSectionMatch = trimmed.match(resultWorkflowPlainSectionPattern);
+    if (plainSectionMatch && plainSectionMatch[1]) {
+      currentSection = trimResultWorkflowLabel(plainSectionMatch[1], 120);
+      currentSectionIsReference = isResultWorkflowReferenceSection(currentSection);
+      lastAction = null;
+      lastNoteIndex = -1;
+      return;
+    }
+
+    const continuation = cleanResultWorkflowText(trimmed);
+    if (!continuation) return;
+
+    if (!currentSectionIsReference && lastAction) {
+      lastAction.text = trimResultWorkflowLabel(appendResultWorkflowText(lastAction.text, continuation), 220);
+      return;
+    }
+
+    if (currentSectionIsReference && lastNoteIndex >= 0) {
+      notes[lastNoteIndex] = appendResultWorkflowText(notes[lastNoteIndex], continuation);
+      return;
+    }
+
+    pushNote(continuation);
+  });
+
+  if (actions.length === 0) {
+    return null;
+  }
+
+  const truncatedCount = Math.max(actions.length - RESULT_WORKFLOW_MAX_SUBTASKS, 0);
+  const selectedActions = actions.slice(0, RESULT_WORKFLOW_MAX_SUBTASKS);
+  const subtasks = selectedActions.map((action, index) => {
+    const detailParts = [];
+    if (action.section) {
+      detailParts.push(`Section: ${action.section}`);
+    }
+    if (index === 0 && sourceTaskId) {
+      detailParts.push(`Use input task ${sourceTaskId} as the starting context.`);
+    }
+
+    const inputTaskIds = [];
+    if (index === 0 && sourceTaskId) {
+      inputTaskIds.push(`task:${sourceTaskId}`);
+    } else if (index > 0) {
+      inputTaskIds.push(`step:${index}`);
+    }
+
+    return {
+      description: trimResultWorkflowLabel(action.text, 180) || `Step ${index + 1}`,
+      details: detailParts.join('\n'),
+      assignmentValue: defaultAssignmentValue,
+      inputTaskIds
+    };
+  });
+
+  const normalizedTaskLabel = trimResultWorkflowLabel(taskLabel, 120) || 'this task';
+  const detailsParts = [
+    `Draft generated from the latest result for "${normalizedTaskLabel}".`,
+    'Review the generated steps, assignments, and dependencies before saving.'
+  ];
+
+  if (sectionLabels.length > 0) {
+    detailsParts.push(`Sections detected: ${sectionLabels.join(' • ')}`);
+  }
+
+  if (notes.length > 0) {
+    detailsParts.push('Reference notes from the result:');
+    notes.slice(0, 6).forEach((note) => {
+      detailsParts.push(`- ${note}`);
+    });
+    if (notes.length > 6) {
+      detailsParts.push(`- ${notes.length - 6} more note${notes.length - 6 === 1 ? '' : 's'} remain in the original result.`);
+    }
+  }
+
+  if (truncatedCount > 0) {
+    detailsParts.push(`${truncatedCount} additional step${truncatedCount === 1 ? '' : 's'} were omitted from the draft to keep the workflow reviewable.`);
+  }
+
+  return {
+    title: buildResultWorkflowDraftTitle(taskLabel),
+    details: detailsParts.join('\n'),
+    priority: 3,
+    assignmentValue: defaultAssignmentValue,
+    subtasks
+  };
+}
+
 export class WorkspaceTaskPage {
   constructor(workspaceId, taskId) {
     this.workspaceId = workspaceId;
@@ -453,6 +720,7 @@ export class WorkspaceTaskPage {
     this.workspaceRealtimeUnsubscribe = null;
     this.pendingRefreshTimer = null;
     this.titleEditInProgress = false;
+    this.workflowDraftPending = false;
     this.elements = {};
   }
 
@@ -489,6 +757,8 @@ export class WorkspaceTaskPage {
       relationshipsCard: document.getElementById('workspace-task-relationships-card'),
       relationships: document.getElementById('workspace-task-relationships'),
       outputCard: document.getElementById('workspace-task-output-card'),
+      outputActions: document.getElementById('workspace-task-output-actions'),
+      outputWorkflowBtn: document.getElementById('workspace-task-output-create-workflow'),
       output: document.getElementById('workspace-task-output'),
       scheduleCard: document.getElementById('workspace-task-schedule-card'),
       schedule: document.getElementById('workspace-task-schedule'),
@@ -528,6 +798,7 @@ export class WorkspaceTaskPage {
     this.elements.copyLinkBtn?.addEventListener('click', () => this.copyToClipboard(window.location.href, 'Link copied'));
     this.elements.deleteBtn?.addEventListener('click', () => this.deleteTask());
     this.elements.blockedRequestToggle?.addEventListener('click', () => this.toggleAssistResponseExpanded());
+    this.elements.outputWorkflowBtn?.addEventListener('click', () => this.createWorkflowDraftFromResult());
     this.elements.assistRetryBtn?.addEventListener('click', () => this.submitTaskAssist('retry'));
     this.elements.assistContinueBtn?.addEventListener('click', () => this.submitTaskAssist('continue_with_instruction'));
     this.elements.assistSwitchBtn?.addEventListener('click', () => this.submitTaskAssist('switch_agent_retry'));
@@ -1544,9 +1815,13 @@ export class WorkspaceTaskPage {
 
     const result = normalizeResultText(this.task?.result).trim();
     const error = String(this.task?.error || '').trim();
+    const canCreateWorkflowDraft = Boolean(result);
 
     if (!result && !error) {
       this.elements.outputCard.hidden = true;
+      if (this.elements.outputActions) {
+        this.elements.outputActions.hidden = true;
+      }
       this.elements.output.innerHTML = '';
       return;
     }
@@ -1566,7 +1841,194 @@ export class WorkspaceTaskPage {
     }
 
     this.elements.outputCard.hidden = false;
+    if (this.elements.outputActions) {
+      this.elements.outputActions.hidden = !canCreateWorkflowDraft;
+    }
+    if (this.elements.outputWorkflowBtn) {
+      this.elements.outputWorkflowBtn.disabled = !canCreateWorkflowDraft || this.workflowDraftPending;
+      this.elements.outputWorkflowBtn.textContent = this.workflowDraftPending ? 'Preparing Draft...' : 'Create Workflow Draft';
+    }
     this.elements.output.innerHTML = blocks.join('');
+  }
+
+  getCurrentTaskAssignmentValue() {
+    if (this.task?.assigned_node_id) {
+      return `node:${this.task.assigned_node_id}`;
+    }
+    if (this.task?.to) {
+      return `node:${this.task.to}-node-1`;
+    }
+    return '';
+  }
+
+  buildAssignmentValueForAgentName(agentName, fallbackValue = '') {
+    const normalizedName = String(agentName || '').trim();
+    if (!normalizedName) return fallbackValue;
+    return `node:${normalizedName}-node-1`;
+  }
+
+  buildAutoParseWorkflowPrompt(resultText) {
+    const taskLabel = this.getTaskDisplayLabel();
+    return [
+      'Turn this completed task result into a concrete workflow draft.',
+      'Prefer one executable step per numbered step or checklist item.',
+      'Keep notes, tips, materials, and reference sections in the parent task details instead of separate executable steps when possible.',
+      `Original task title: ${taskLabel}`,
+      '',
+      'Task result:',
+      resultText
+    ].join('\n');
+  }
+
+  async buildWorkflowDraftFromAutoParse(resultText, fallbackAssignmentValue = '') {
+    const response = await fetch('/api/orchestration/tasks/auto-parse', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        workspace_id: this.workspaceId,
+        description: this.buildAutoParseWorkflowPrompt(resultText)
+      })
+    });
+
+    if (!response.ok) {
+      const text = await response.text();
+      throw new Error(text || 'Failed to draft workflow from result');
+    }
+
+    const parsed = await response.json();
+    const steps = Array.isArray(parsed?.tasks) ? parsed.tasks.filter(Boolean) : [];
+    if (steps.length === 0) {
+      return null;
+    }
+
+    const limitedSteps = steps.slice(0, RESULT_WORKFLOW_MAX_SUBTASKS);
+    const stepRefById = new Map();
+    limitedSteps.forEach((step, index) => {
+      stepRefById.set(String(step?.id || `step-${index + 1}`), `step:${index + 1}`);
+    });
+
+    const subtasks = limitedSteps.map((step, index) => {
+      const dependsOn = Array.isArray(step?.depends_on) ? step.depends_on.map((value) => String(value || '').trim()).filter(Boolean) : [];
+      const inputTaskIds = [];
+
+      dependsOn.forEach((stepId) => {
+        const ref = stepRefById.get(stepId);
+        if (ref && !inputTaskIds.includes(ref)) {
+          inputTaskIds.push(ref);
+        }
+      });
+
+      if (inputTaskIds.length === 0) {
+        if (index === 0 && this.task?.id) {
+          inputTaskIds.push(`task:${this.task.id}`);
+        } else if (index > 0) {
+          inputTaskIds.push(`step:${index}`);
+        }
+      }
+
+      const detailParts = [];
+      if (step?.details) {
+        detailParts.push(String(step.details).trim());
+      }
+      if (dependsOn.length > 0) {
+        detailParts.push(`Depends on: ${dependsOn.join(', ')}`);
+      }
+
+      return {
+        description: trimResultWorkflowLabel(step?.title || step?.description || `Step ${index + 1}`, 180) || `Step ${index + 1}`,
+        details: detailParts.join('\n'),
+        assignmentValue: this.buildAssignmentValueForAgentName(step?.agent_name, fallbackAssignmentValue),
+        inputTaskIds
+      };
+    });
+
+    const detailParts = [];
+    if (parsed?.details) {
+      detailParts.push(String(parsed.details).trim());
+    }
+    if (parsed?.reasoning) {
+      detailParts.push(`Draft rationale: ${String(parsed.reasoning).trim()}`);
+    }
+    detailParts.push('Review the generated steps, assignments, and dependencies before saving.');
+    if (steps.length > RESULT_WORKFLOW_MAX_SUBTASKS) {
+      detailParts.push(`${steps.length - RESULT_WORKFLOW_MAX_SUBTASKS} additional parsed step${steps.length - RESULT_WORKFLOW_MAX_SUBTASKS === 1 ? '' : 's'} were omitted from the draft.`);
+    }
+
+    return {
+      title: buildResultWorkflowDraftTitle(parsed?.title || this.getTaskDisplayLabel()),
+      details: detailParts.filter(Boolean).join('\n'),
+      priority: Number.isInteger(parsed?.priority) ? parsed.priority : 3,
+      assignmentValue: this.buildAssignmentValueForAgentName(parsed?.agent_name, fallbackAssignmentValue),
+      subtasks
+    };
+  }
+
+  async deriveWorkflowDraftFromResult(resultText) {
+    const fallbackAssignmentValue = this.getCurrentTaskAssignmentValue();
+    const deterministicDraft = buildResultWorkflowDraft(
+      this.getTaskDisplayLabel(),
+      resultText,
+      this.task?.id,
+      fallbackAssignmentValue
+    );
+
+    if (deterministicDraft && deterministicDraft.subtasks.length >= 2) {
+      return deterministicDraft;
+    }
+
+    try {
+      const autoParsedDraft = await this.buildWorkflowDraftFromAutoParse(resultText, fallbackAssignmentValue);
+      if (autoParsedDraft && autoParsedDraft.subtasks.length > 0) {
+        return autoParsedDraft;
+      }
+    } catch (error) {
+      console.debug('Auto-parse workflow draft unavailable:', error);
+    }
+
+    return deterministicDraft;
+  }
+
+  async createWorkflowDraftFromResult() {
+    if (this.workflowDraftPending) return;
+
+    const resultText = normalizeResultText(this.task?.result).trim();
+    if (!resultText) {
+      this.notify('warning', 'No task result is available to turn into a workflow.');
+      return;
+    }
+
+    if (!window.taskModalController || typeof window.taskModalController.openForCreate !== 'function') {
+      this.notify('error', 'Task editor is unavailable right now.');
+      return;
+    }
+
+    this.workflowDraftPending = true;
+    this.renderOutput();
+
+    try {
+      const draft = await this.deriveWorkflowDraftFromResult(resultText);
+      if (!draft || !Array.isArray(draft.subtasks) || draft.subtasks.length === 0) {
+        throw new Error('Could not detect actionable steps in this result yet.');
+      }
+
+      await window.taskModalController.openForCreate(this.workspaceId, draft.title || this.getTaskDisplayLabel(), null, {
+        modalTitle: 'Review Workflow Draft',
+        forceManualMode: true,
+        prefillTitle: draft.title || this.getTaskDisplayLabel(),
+        prefillDetails: draft.details || '',
+        draftPriority: draft.priority || 3,
+        draftAssignmentValue: draft.assignmentValue || '',
+        draftSubtasks: draft.subtasks
+      });
+
+      this.notify('info', 'Review the draft and adjust any subtasks before saving.');
+    } catch (error) {
+      console.error('Failed to create workflow draft from result:', error);
+      this.notify('error', error?.message || 'Failed to create workflow draft');
+    } finally {
+      this.workflowDraftPending = false;
+      this.renderOutput();
+    }
   }
 
   renderSchedule() {

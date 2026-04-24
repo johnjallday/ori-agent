@@ -640,8 +640,24 @@ class TaskModalController {
    * @param {string} prefillTitle - Optional title to prefill
    * @param {function} onSave - Optional callback after successful save
    */
-  async openForCreate(workspaceId = null, prefillTitle = '', onSave = null) {
+  async openForCreate(workspaceId = null, prefillTitle = '', onSave = null, options = {}) {
     this.init();
+    const createOptions = options && typeof options === 'object' ? options : {};
+    const draftSubtasks = Array.isArray(createOptions.draftSubtasks)
+      ? createOptions.draftSubtasks.filter(Boolean)
+      : [];
+    const draftMainInputRefs = Array.isArray(createOptions.draftMainInputRefs)
+      ? createOptions.draftMainInputRefs.filter((value) => String(value || '').trim() !== '')
+      : [];
+    const draftAssignmentValue = String(createOptions.draftAssignmentValue || '').trim();
+    const shouldForceManualMode = Boolean(
+      createOptions.forceManualMode ||
+      draftSubtasks.length > 0 ||
+      draftMainInputRefs.length > 0 ||
+      String(createOptions.prefillDetails || '').trim() ||
+      draftAssignmentValue
+    );
+
     this.editingTaskId = null;
     this.workspaceId = workspaceId;
     this.onSaveCallback = onSave;
@@ -650,12 +666,16 @@ class TaskModalController {
     this.resetResultSection();
 
     const modal = document.getElementById('taskModal');
-    if (!modal) return;
+    if (!modal) {
+      console.error('Task modal markup is missing from the page.');
+      this.showToast('Task editor is unavailable on this page.', 'error');
+      return;
+    }
 
     // Set modal title
     const modalTitle = document.getElementById('taskModalTitle');
     if (modalTitle) {
-      modalTitle.textContent = 'Create Task';
+      modalTitle.textContent = String(createOptions.modalTitle || '').trim() || (draftSubtasks.length > 0 ? 'Review Workflow Draft' : 'Create Task');
     }
 
     // Show workspace badge or selector based on whether workspaceId is provided
@@ -672,7 +692,7 @@ class TaskModalController {
     // Default to Auto mode if System Model is configured, otherwise Manual
     const manualRadio = document.getElementById('taskConfigModeManual');
     const autoRadio = document.getElementById('taskConfigModeAuto');
-    if (this.systemModelConfigured && this.llmAvailable) {
+    if (this.systemModelConfigured && this.llmAvailable && !shouldForceManualMode) {
       this.autoMode = true;
       if (autoRadio) autoRadio.checked = true;
       if (manualRadio) manualRadio.checked = false;
@@ -694,20 +714,34 @@ class TaskModalController {
     const priorityInput = document.getElementById('taskModalPriority');
     const assignmentInput = document.getElementById('taskModalAssignment');
 
-    if (descriptionInput) descriptionInput.value = prefillTitle;
-    if (detailsInput) detailsInput.value = '';
-    if (priorityInput) priorityInput.value = '3';
+    if (descriptionInput) descriptionInput.value = String(createOptions.prefillTitle || prefillTitle || '');
+    if (detailsInput) detailsInput.value = String(createOptions.prefillDetails || '');
+    if (priorityInput) priorityInput.value = String(createOptions.draftPriority || '3');
 
     // Populate agent assignment dropdown
     await this.populateAgentDropdown(workspaceId);
     this.refreshSubtaskAssignmentOptions();
     await this.loadWorkspaceTasks();
     this.populateMainInputTasks();
+    if (draftMainInputRefs.length > 0) {
+      this.setMainInputTaskRefs(draftMainInputRefs);
+    }
     this.refreshSubtaskInputOptions();
-    if (assignmentInput) assignmentInput.value = '';
+    if (assignmentInput) assignmentInput.value = draftAssignmentValue;
 
     // Reset subtasks
     this.resetSubtasks();
+    if (draftSubtasks.length > 0) {
+      draftSubtasks.forEach((subtask) => {
+        this.addSubtaskRow({
+          description: String(subtask.description || '').trim(),
+          details: String(subtask.details || '').trim(),
+          assignmentValue: String(subtask.assignmentValue || draftAssignmentValue || '').trim(),
+          inputTaskIds: Array.isArray(subtask.inputTaskIds) ? subtask.inputTaskIds.filter(Boolean) : [],
+          inputCount: Array.isArray(subtask.inputTaskIds) ? subtask.inputTaskIds.filter(Boolean).length : 0
+        });
+      });
+    }
 
     // Reset schedule fields
     this.resetScheduleFields();
@@ -741,7 +775,11 @@ class TaskModalController {
     this.currentResultFollowUpPending = false;
 
     const modal = document.getElementById('taskModal');
-    if (!modal) return;
+    if (!modal) {
+      console.error('Task modal markup is missing from the page.');
+      this.showToast('Task editor is unavailable on this page.', 'error');
+      return;
+    }
 
     // Set modal title
     const modalTitle = document.getElementById('taskModalTitle');
@@ -2472,6 +2510,27 @@ class TaskModalController {
     const emptyEl = document.getElementById('taskModalInputTasksEmpty');
     if (emptyEl) {
       emptyEl.style.display = options.length > 0 ? 'none' : 'block';
+    }
+  }
+
+  setMainInputTaskRefs(refs = []) {
+    const selectEl = document.getElementById('taskModalInputTasks');
+    if (!selectEl) return;
+
+    const normalizedRefs = Array.isArray(refs)
+      ? refs.map((value) => String(value || '').trim()).filter(Boolean)
+      : [];
+    const appliedRefs = [];
+
+    Array.from(selectEl.options).forEach((option) => {
+      option.selected = normalizedRefs.includes(option.value);
+      if (option.selected) {
+        appliedRefs.push(option.value);
+      }
+    });
+
+    if (appliedRefs.length === 0) {
+      selectEl.selectedIndex = -1;
     }
   }
 
