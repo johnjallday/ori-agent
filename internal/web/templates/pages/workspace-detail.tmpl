@@ -1849,6 +1849,11 @@
       padding: 1.3rem 1.35rem 0;
     }
 
+    .workspace-detail-health-header > :first-child {
+      flex: 1 1 34rem;
+      min-width: 0;
+    }
+
     .workspace-detail-health-kicker {
       color: rgba(255, 196, 143, 0.84);
       font-size: 0.72rem;
@@ -1879,6 +1884,23 @@
       gap: 0.7rem;
       flex-wrap: wrap;
       justify-content: flex-end;
+      flex: 0 0 auto;
+      max-width: 100%;
+    }
+
+    #workspace-detail-health-refresh {
+      width: auto;
+      height: auto;
+      min-height: 34px;
+      padding: 0.52rem 0.88rem;
+      border-radius: 999px;
+      gap: 0.45rem;
+      flex: 0 0 auto;
+      white-space: nowrap;
+    }
+
+    #workspace-detail-health-refresh svg {
+      flex: 0 0 auto;
     }
 
     .workspace-detail-health-badge {
@@ -2030,6 +2052,10 @@
       color: #ffd496;
     }
 
+    .workspace-detail-health-issue > :nth-child(2) {
+      min-width: 0;
+    }
+
     .workspace-detail-health-issue-title {
       color: var(--text-primary);
       font-size: 0.92rem;
@@ -2064,8 +2090,17 @@
       line-height: 1.3;
     }
 
-    .workspace-detail-health-action {
+    .workspace-detail-health-action.workspace-detail-panel-btn {
+      display: inline-flex;
+      width: auto;
+      height: auto;
+      min-width: max-content;
+      min-height: 38px;
+      padding: 0.52rem 0.92rem;
+      border-radius: 999px;
       align-self: center;
+      justify-self: end;
+      flex: 0 0 auto;
       white-space: nowrap;
     }
 
@@ -2083,7 +2118,7 @@
         grid-template-columns: auto minmax(0, 1fr);
       }
 
-      .workspace-detail-health-action {
+      .workspace-detail-health-action.workspace-detail-panel-btn {
         grid-column: 1 / -1;
         justify-self: start;
       }
@@ -2104,6 +2139,17 @@
 
       .workspace-detail-health-controls .workspace-detail-panel-btn {
         justify-content: center;
+        width: auto;
+      }
+
+      #workspace-detail-health-refresh {
+        width: 100%;
+      }
+
+      .workspace-detail-health-action.workspace-detail-panel-btn {
+        max-width: 100%;
+        min-width: 0;
+        white-space: normal;
       }
     }
 
