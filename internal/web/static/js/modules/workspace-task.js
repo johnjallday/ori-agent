@@ -43,6 +43,7 @@ function getStatusClass(status) {
   if (normalized === 'completed') return 'completed';
   if (normalized === 'in_progress') return 'in_progress';
   if (normalized === 'blocked') return 'blocked';
+  if (normalized === 'cancelled') return 'cancelled';
   if (normalized === 'failed' || normalized === 'timeout') return 'failed';
   return 'pending';
 }
@@ -1895,6 +1896,7 @@ export class WorkspaceTaskPage {
     const isRunning = status === 'in_progress';
     const isCompleted = status === 'completed';
     const isFailed = status === 'failed';
+    const isCancelled = status === 'cancelled';
     const stepNumber = Number.isFinite(step?.subtask_index) && step.subtask_index > 0
       ? step.subtask_index
       : fallbackNumber;
@@ -1908,23 +1910,25 @@ export class WorkspaceTaskPage {
     if (isRunning) classes.push('is-running');
     if (isCompleted) classes.push('is-completed');
     if (isFailed) classes.push('is-failed');
+    if (isCancelled) classes.push('is-cancelled');
 
     const actionLabel = isRunning
-      ? 'Running…'
+      ? '■ Stop'
       : isCompleted
         ? (isAssigned ? '↻ Re-run' : 'Done')
         : isFailed
           ? (isAssigned ? '↻ Retry' : 'Mark done')
           : (isAssigned ? '▶ Run' : 'Mark done');
-    const actionName = isAssigned ? 'run-step' : 'complete-step';
-    const actionDisabled = isRunning || (!isAssigned && isCompleted);
+    const actionName = isRunning ? 'cancel-step' : (isAssigned ? 'run-step' : 'complete-step');
+    const actionDisabled = !isRunning && !isAssigned && isCompleted;
     const actionTitle = isRunning
-      ? 'Step is already running'
+      ? 'Stop this running step'
       : isCompleted
         ? (isAssigned ? 'Run this step again' : 'This checklist item is complete')
         : isAssigned
           ? (isFailed ? 'Retry this step' : 'Run this step now')
           : 'Mark this checklist item done';
+    const actionButtonClass = isRunning ? 'modern-btn-danger' : 'modern-btn-secondary';
 
     const checkTitle = isCompleted
       ? 'Step completed'
@@ -1959,7 +1963,7 @@ export class WorkspaceTaskPage {
             <a href="${stepHref}" class="workspace-task-workflow-step-title" title="Open this step">${this.escapeHtml(title)}</a>
             <div class="workspace-task-workflow-step-actions">
               <button type="button"
-                      class="modern-btn modern-btn-secondary workspace-task-workflow-step-action-btn"
+                      class="modern-btn ${actionButtonClass} workspace-task-workflow-step-action-btn"
                       data-action="${this.escapeHtml(actionName)}"
                       ${actionDisabled ? 'disabled' : ''}
                       title="${this.escapeHtml(actionTitle)}">
@@ -1991,6 +1995,10 @@ export class WorkspaceTaskPage {
       row.querySelector('[data-action="run-step"]')?.addEventListener('click', (event) => {
         event.preventDefault();
         this.handleRunStep(stepId);
+      });
+      row.querySelector('[data-action="cancel-step"]')?.addEventListener('click', (event) => {
+        event.preventDefault();
+        this.handleCancelStep(stepId);
       });
       row.querySelectorAll('[data-action="complete-step"]').forEach((button) => {
         button.addEventListener('click', (event) => {
@@ -2024,6 +2032,31 @@ export class WorkspaceTaskPage {
     } catch (error) {
       console.error('Failed to run step:', error);
       this.notify('error', error?.message || 'Failed to run step');
+    }
+  }
+
+  async handleCancelStep(stepId) {
+    const id = String(stepId || '').trim();
+    if (!id) return;
+    try {
+      const response = await fetch(`/api/orchestration/tasks/${encodeURIComponent(id)}/cancel`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: '{}'
+      });
+      if (!response.ok) {
+        const text = await response.text();
+        throw new Error(text || 'Failed to stop step');
+      }
+      if (this.workflowPollTimer) {
+        clearTimeout(this.workflowPollTimer);
+        this.workflowPollTimer = null;
+      }
+      this.notify('success', 'Step stopped');
+      await this.refreshAfterStepChange();
+    } catch (error) {
+      console.error('Failed to stop step:', error);
+      this.notify('error', error?.message || 'Failed to stop step');
     }
   }
 

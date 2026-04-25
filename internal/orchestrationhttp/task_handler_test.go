@@ -1,6 +1,7 @@
 package orchestrationhttp
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -293,6 +294,64 @@ func TestExtractTaskIDForDelete(t *testing.T) {
 			t.Fatalf("expected task-query-3, got %q", got)
 		}
 	})
+}
+
+func TestHandleCancelTask_CancelsRunningTask(t *testing.T) {
+	store := workspace.NewInMemoryStore()
+	ws := workspace.NewWorkspace(workspace.CreateWorkspaceParams{Name: "Workshop"})
+	ws.ID = "workspace-cancel"
+
+	task := workspace.Task{
+		ID:          "task-cancel",
+		Description: "Solder connector",
+		To:          "Ori",
+		Status:      workspace.TaskStatusInProgress,
+	}
+	if err := ws.AddTask(task); err != nil {
+		t.Fatalf("failed to add task: %v", err)
+	}
+	if err := store.Save(ws); err != nil {
+		t.Fatalf("failed to save workspace: %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	handler := &TaskHandler{
+		workspaceStore: store,
+		communicator:   agentcomm.NewCommunicator(store),
+	}
+	handler.registerRunningTask(task.ID, cancel)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/orchestration/tasks/task-cancel/cancel", nil)
+	rec := httptest.NewRecorder()
+
+	handler.handleCancelTask(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d", rec.Code)
+	}
+	select {
+	case <-ctx.Done():
+	default:
+		t.Fatal("expected registered task context to be cancelled")
+	}
+
+	savedWS, err := store.Get(ws.ID)
+	if err != nil {
+		t.Fatalf("failed to reload workspace: %v", err)
+	}
+	savedTask, err := savedWS.GetTask(task.ID)
+	if err != nil {
+		t.Fatalf("failed to reload task: %v", err)
+	}
+	if savedTask.Status != workspace.TaskStatusCancelled {
+		t.Fatalf("expected cancelled status, got %q", savedTask.Status)
+	}
+	if savedTask.Error != "Cancelled by user" {
+		t.Fatalf("expected cancellation error, got %q", savedTask.Error)
+	}
+	if savedTask.CompletedAt == nil {
+		t.Fatal("expected completed timestamp to be set")
+	}
 }
 
 func TestHandleAssistTask_PersistsSelectedChoice(t *testing.T) {

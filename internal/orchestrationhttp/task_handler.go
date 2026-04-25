@@ -1,12 +1,14 @@
 package orchestrationhttp
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/johnjallday/ori-agent/internal/agentcomm"
@@ -147,6 +149,8 @@ type TaskHandler struct {
 	communicator   *agentcomm.Communicator
 	taskHandler    workspace.TaskHandler
 	eventBus       *workspace.EventBus
+	runningMu      sync.Mutex
+	runningCancels map[string]context.CancelFunc
 }
 
 // NewTaskHandler creates a new task handler
@@ -159,7 +163,52 @@ func NewTaskHandler(workspaceStore workspace.Store,
 		communicator:   communicator,
 		taskHandler:    taskHandler,
 		eventBus:       eventBus,
+		runningCancels: make(map[string]context.CancelFunc),
 	}
+}
+
+func (th *TaskHandler) registerRunningTask(taskID string, cancel context.CancelFunc) {
+	taskID = strings.TrimSpace(taskID)
+	if taskID == "" || cancel == nil {
+		return
+	}
+
+	th.runningMu.Lock()
+	defer th.runningMu.Unlock()
+	if th.runningCancels == nil {
+		th.runningCancels = make(map[string]context.CancelFunc)
+	}
+	th.runningCancels[taskID] = cancel
+}
+
+func (th *TaskHandler) unregisterRunningTask(taskID string) {
+	taskID = strings.TrimSpace(taskID)
+	if taskID == "" {
+		return
+	}
+
+	th.runningMu.Lock()
+	defer th.runningMu.Unlock()
+	if th.runningCancels != nil {
+		delete(th.runningCancels, taskID)
+	}
+}
+
+func (th *TaskHandler) cancelRunningTask(taskID string) bool {
+	taskID = strings.TrimSpace(taskID)
+	if taskID == "" {
+		return false
+	}
+
+	th.runningMu.Lock()
+	cancel, ok := th.runningCancels[taskID]
+	th.runningMu.Unlock()
+	if !ok || cancel == nil {
+		return false
+	}
+
+	cancel()
+	return true
 }
 
 // TasksHandler handles task queries
@@ -928,6 +977,7 @@ func extractTaskIDForDelete(r *http.Request) string {
 // - GET /api/orchestration/tasks/{id} -> handleGetTasks (single task)
 // - DELETE /api/orchestration/tasks/{id} -> handleDeleteTask
 // - POST /api/orchestration/tasks/{id}/complete -> CompleteTaskHandler
+// - POST /api/orchestration/tasks/{id}/cancel -> CancelTaskHandler
 // - POST /api/orchestration/tasks/{id}/save-result -> SaveTaskResult (via workspace handler)
 func (th *TaskHandler) TasksPathHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
@@ -938,6 +988,12 @@ func (th *TaskHandler) TasksPathHandler(w http.ResponseWriter, r *http.Request) 
 	// Check if this is a /complete endpoint
 	if strings.HasSuffix(path, "/complete") {
 		th.handleCompleteTask(w, r)
+		return
+	}
+
+	// Check if this is a /cancel endpoint
+	if strings.HasSuffix(path, "/cancel") {
+		th.handleCancelTask(w, r)
 		return
 	}
 
@@ -970,6 +1026,68 @@ func (th *TaskHandler) TasksPathHandler(w http.ResponseWriter, r *http.Request) 
 	default:
 		orihttp.MethodNotAllowed(w)
 	}
+}
+
+// handleCancelTask handles POST /api/orchestration/tasks/{id}/cancel.
+func (th *TaskHandler) handleCancelTask(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	if r.Method != http.MethodPost {
+		orihttp.MethodNotAllowed(w)
+		return
+	}
+
+	pathParts := strings.Split(strings.TrimPrefix(r.URL.Path, "/api/orchestration/tasks/"), "/")
+	if len(pathParts) < 2 || pathParts[0] == "" {
+		orihttp.BadRequest(w, "task_id is required in URL path")
+		return
+	}
+	taskID := pathParts[0]
+
+	task, ws, err := th.getTaskWithWorkspace(taskID)
+	if err != nil {
+		orihttp.RespondErrorWithErr(w, http.StatusNotFound, "Task not found", err)
+		return
+	}
+
+	cancelledRunning := th.cancelRunningTask(taskID)
+	if task.Status != workspace.TaskStatusInProgress && !cancelledRunning {
+		orihttp.BadRequest(w, "Task is not currently running")
+		return
+	}
+
+	now := time.Now()
+	for i := range ws.Tasks {
+		if ws.Tasks[i].ID == taskID {
+			ws.Tasks[i].Status = workspace.TaskStatusCancelled
+			ws.Tasks[i].CompletedAt = &now
+			ws.Tasks[i].Error = "Cancelled by user"
+			ws.Tasks[i].Result = ""
+			break
+		}
+	}
+
+	if err := th.workspaceStore.Save(ws); err != nil {
+		logger.Error("Failed to save cancelled task", logger.Fields{"task_id": taskID, "error": err})
+		orihttp.RespondErrorWithErr(w, http.StatusInternalServerError, "Failed to cancel task", err)
+		return
+	}
+
+	logger.Info("Cancelled task manually", logger.Fields{"task_id": taskID, "workspace_id": task.WorkspaceID})
+
+	if th.eventBus != nil {
+		th.eventBus.Publish(workspace.NewWorkspaceEvent(workspace.EventWorkspaceUpdated, task.WorkspaceID, "task.cancel", map[string]interface{}{
+			"task_id": taskID,
+			"status":  workspace.TaskStatusCancelled,
+		}))
+	}
+
+	updatedTask, _ := ws.GetTask(taskID)
+	w.WriteHeader(http.StatusOK)
+	orihttp.WriteJSON(w, map[string]interface{}{
+		"success": true,
+		"task":    updatedTask,
+	})
 }
 
 // handleCompleteTask handles POST /api/orchestration/tasks/{id}/complete

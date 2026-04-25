@@ -570,6 +570,11 @@
       background: rgba(194, 59, 59, 0.12);
     }
 
+    .workspace-task-page-status[data-state="cancelled"] {
+      color: #64748b;
+      border-color: rgba(100, 116, 139, 0.24);
+      background: rgba(148, 163, 184, 0.12);
+    }
 
     .workspace-task-page-live-badge {
       display: inline-flex;
@@ -1145,6 +1150,11 @@
       background: rgba(194, 59, 59, 0.12);
     }
 
+    .workspace-task-step-status[data-state="cancelled"] {
+      color: #64748b;
+      background: rgba(148, 163, 184, 0.14);
+    }
+
     .workspace-task-step-copy {
       color: var(--text-secondary);
       font-size: 0.92rem;
@@ -1221,6 +1231,11 @@
       background: color-mix(in srgb, var(--bg-secondary) 80%, transparent);
     }
 
+    .workspace-task-workflow-step.is-cancelled {
+      border-color: rgba(148, 163, 184, 0.28);
+      background: color-mix(in srgb, var(--bg-secondary) 68%, transparent);
+    }
+
     .workspace-task-workflow-rail {
       display: flex;
       flex-direction: column;
@@ -1290,6 +1305,12 @@
       background: rgba(239, 68, 68, 0.18);
       border-color: rgba(239, 68, 68, 0.28);
       color: #ef4444;
+    }
+
+    .workspace-task-workflow-step.is-cancelled .workspace-task-workflow-step-check {
+      background: rgba(148, 163, 184, 0.16);
+      border-color: rgba(148, 163, 184, 0.28);
+      color: #94a3b8;
     }
 
     @keyframes workspace-task-workflow-pulse {
@@ -1370,6 +1391,11 @@
     .workspace-task-workflow-step-status[data-state="failed"] {
       color: #b91c1c;
       background: rgba(239, 68, 68, 0.14);
+    }
+
+    .workspace-task-workflow-step-status[data-state="cancelled"] {
+      color: #64748b;
+      background: rgba(148, 163, 184, 0.14);
     }
 
     .workspace-task-workflow-step-agent {
@@ -1500,6 +1526,11 @@
       background: rgba(194, 59, 59, 0.12);
     }
 
+    .workspace-task-snapshot-chip-status[data-state="cancelled"] {
+      color: #64748b;
+      background: rgba(148, 163, 184, 0.14);
+    }
+
     .workspace-task-snapshot-disclosure {
       border-radius: 18px;
       border: 1px solid color-mix(in srgb, var(--border-color) 92%, transparent);
@@ -1606,6 +1637,10 @@
 
     .workspace-task-page-status-inline[data-state="failed"] {
       color: #c23b3b;
+    }
+
+    .workspace-task-page-status-inline[data-state="cancelled"] {
+      color: #64748b;
     }
 
     .workspace-task-assist-card {
