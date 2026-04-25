@@ -721,6 +721,9 @@ export class WorkspaceTaskPage {
     this.pendingRefreshTimer = null;
     this.titleEditInProgress = false;
     this.workflowDraftPending = false;
+    this.resultNoteSaving = false;
+    this.savedResultNote = null;
+    this.savedResultNoteResult = '';
     this.elements = {};
   }
 
@@ -757,6 +760,9 @@ export class WorkspaceTaskPage {
       relationshipsCard: document.getElementById('workspace-task-relationships-card'),
       relationships: document.getElementById('workspace-task-relationships'),
       outputCard: document.getElementById('workspace-task-output-card'),
+      outputCopyBtn: document.getElementById('workspace-task-output-copy'),
+      outputSaveNoteBtn: document.getElementById('workspace-task-output-save-note'),
+      outputNoteStatus: document.getElementById('workspace-task-output-note-status'),
       output: document.getElementById('workspace-task-output'),
       workflowCard: document.getElementById('workspace-task-workflow-card'),
       workflowActions: document.getElementById('workspace-task-workflow-actions'),
@@ -802,6 +808,8 @@ export class WorkspaceTaskPage {
     this.elements.copyIdBtn?.addEventListener('click', () => this.copyToClipboard(this.taskId, 'Task ID copied'));
     this.elements.copyLinkBtn?.addEventListener('click', () => this.copyToClipboard(window.location.href, 'Link copied'));
     this.elements.deleteBtn?.addEventListener('click', () => this.deleteTask());
+    this.elements.outputCopyBtn?.addEventListener('click', () => this.copyCurrentResult());
+    this.elements.outputSaveNoteBtn?.addEventListener('click', () => this.saveCurrentResultAsNote());
     this.elements.blockedRequestToggle?.addEventListener('click', () => this.toggleAssistResponseExpanded());
     this.elements.workflowGenerateBtn?.addEventListener('click', () => this.handleGenerateSteps());
     this.elements.workflowAddStepBtn?.addEventListener('click', () => this.handleAddStep());
@@ -2143,7 +2151,16 @@ export class WorkspaceTaskPage {
     if (!result && !error) {
       this.elements.outputCard.hidden = true;
       this.elements.output.innerHTML = '';
+      this.savedResultNote = null;
+      this.savedResultNoteResult = '';
+      this.updateResultActionButtons('', false);
+      this.renderResultNoteStatus();
       return;
+    }
+
+    if (this.savedResultNote && result && this.savedResultNoteResult && this.savedResultNoteResult !== result) {
+      this.savedResultNote = null;
+      this.savedResultNoteResult = '';
     }
 
     const blocks = [];
@@ -2162,6 +2179,183 @@ export class WorkspaceTaskPage {
 
     this.elements.outputCard.hidden = false;
     this.elements.output.innerHTML = blocks.join('');
+    this.updateResultActionButtons(result || error, Boolean(result));
+    this.renderResultNoteStatus();
+  }
+
+  updateResultActionButtons(outputText, canSaveNote) {
+    const hasOutput = Boolean(String(outputText || '').trim());
+    if (this.elements.outputCopyBtn) {
+      this.elements.outputCopyBtn.disabled = !hasOutput;
+    }
+
+    if (this.elements.outputSaveNoteBtn) {
+      const label = this.elements.outputSaveNoteBtn.querySelector('span');
+      if (label) {
+        label.textContent = this.resultNoteSaving
+          ? 'Saving...'
+          : this.savedResultNote
+            ? 'Saved'
+            : 'Save as Note';
+      }
+      this.elements.outputSaveNoteBtn.disabled = !canSaveNote || this.resultNoteSaving || Boolean(this.savedResultNote);
+      this.elements.outputSaveNoteBtn.classList.toggle('is-saved', Boolean(this.savedResultNote));
+    }
+  }
+
+  renderResultNoteStatus() {
+    if (!this.elements.outputNoteStatus) return;
+
+    if (!this.savedResultNote) {
+      this.elements.outputNoteStatus.hidden = true;
+      this.elements.outputNoteStatus.innerHTML = '';
+      return;
+    }
+
+    const noteId = String(this.savedResultNote?.id || '').trim();
+    const noteName = String(this.savedResultNote?.name || 'Saved note').trim() || 'Saved note';
+    this.elements.outputNoteStatus.hidden = false;
+    this.elements.outputNoteStatus.innerHTML = `
+      <div class="workspace-task-output-note-status-inner">
+        <span class="workspace-task-output-note-status-icon" aria-hidden="true"><i class="bi bi-journal-check"></i></span>
+        <span class="workspace-task-output-note-status-copy">Saved as <strong>${this.escapeHtml(noteName)}</strong></span>
+        ${noteId ? `<button type="button" class="workspace-task-page-text-button workspace-task-output-note-open" data-action="open-result-note" data-note-id="${this.escapeHtml(noteId)}">Open note</button>` : ''}
+      </div>
+    `;
+
+    this.elements.outputNoteStatus
+      .querySelector('[data-action="open-result-note"]')
+      ?.addEventListener('click', () => this.openSavedResultNote(noteId));
+  }
+
+  getCurrentResultText() {
+    return normalizeResultText(this.task?.result).trim();
+  }
+
+  getCurrentOutputText() {
+    return this.getCurrentResultText() || String(this.task?.error || '').trim();
+  }
+
+  async copyCurrentResult() {
+    const outputText = this.getCurrentOutputText();
+    if (!outputText) {
+      this.notify('warning', 'No result is available to copy.');
+      return;
+    }
+
+    await this.copyToClipboard(outputText, 'Result copied');
+  }
+
+  buildResultNoteTitle(resultText) {
+    const heading = String(resultText || '')
+      .split(/\r?\n/)
+      .map((line) => {
+        const match = line.match(/^\s{0,3}#{1,3}\s+(.+?)\s*#*\s*$/);
+        return match ? String(match[1] || '').trim() : '';
+      })
+      .find(Boolean);
+
+    const fallback = this.getTaskDisplayLabel();
+    const cleaned = String(heading || fallback || 'Task Result')
+      .replace(/\[(.*?)\]\((.*?)\)/g, '$1')
+      .replace(/[*_`#>]/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+
+    if (!cleaned) return 'Task Result';
+    return cleaned.length > 96 ? `${cleaned.slice(0, 93).trim()}...` : cleaned;
+  }
+
+  buildResultNoteContent(resultText, title) {
+    const taskTitle = this.getTaskDisplayLabel();
+    const sourceHref = this.getTaskHref(this.taskId);
+    const status = getDisplayStatus(this.task?.status);
+    const savedAt = formatDateTime(new Date().toISOString());
+    const completedAt = formatDateTime(this.task?.completed_at);
+    const agent = String(this.task?.to || '').trim();
+    const originalRequest = String(this.task?.description || '').trim();
+    const assistMessage = String(this.task?.context?.user_assist_message || '').trim();
+
+    const lines = [
+      `# ${title}`,
+      '',
+      `Saved from Ori task result on ${savedAt}.`,
+      '',
+      `- Source task: [${taskTitle}](${sourceHref})`,
+      `- Status: ${status}`
+    ];
+
+    if (agent) lines.push(`- Agent: ${agent}`);
+    if (completedAt !== '—') lines.push(`- Completed: ${completedAt}`);
+
+    if (originalRequest) {
+      lines.push('', '## Original Request', '', originalRequest);
+    }
+
+    if (assistMessage) {
+      lines.push('', '## Clarification', '', assistMessage);
+    }
+
+    lines.push('', '## Result', '', resultText);
+    return lines.join('\n');
+  }
+
+  async saveCurrentResultAsNote() {
+    if (this.resultNoteSaving || this.savedResultNote) return;
+
+    const resultText = this.getCurrentResultText();
+    if (!resultText) {
+      this.notify('warning', 'No result is available to save.');
+      return;
+    }
+
+    const title = this.buildResultNoteTitle(resultText);
+    const content = this.buildResultNoteContent(resultText, title);
+    this.resultNoteSaving = true;
+    this.updateResultActionButtons(resultText, true);
+
+    try {
+      const response = await fetch(`/api/workspaces/${encodeURIComponent(this.workspaceId)}/notes`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: title, content })
+      });
+
+      if (!response.ok) {
+        const text = await response.text();
+        throw new Error(text || 'Failed to create note');
+      }
+
+      const payload = await response.json().catch(() => ({}));
+      this.savedResultNote = payload?.note || { name: title };
+      this.savedResultNoteResult = resultText;
+      this.notify('success', 'Result saved as a note');
+      this.renderResultNoteStatus();
+    } catch (error) {
+      console.error('Failed to save result as note:', error);
+      this.notify('error', error?.message || 'Failed to save result as note');
+    } finally {
+      this.resultNoteSaving = false;
+      this.updateResultActionButtons(resultText, true);
+    }
+  }
+
+  async openSavedResultNote(noteId) {
+    const id = String(noteId || '').trim();
+    if (!id) return;
+
+    const modalEl = document.getElementById('noteEditorModal');
+    if (modalEl && window.sessionManager && typeof window.sessionManager.openNoteEditor === 'function') {
+      try {
+        await window.sessionManager.openNoteEditor(id);
+        return;
+      } catch (error) {
+        console.error('Failed to open saved result note:', error);
+        this.notify('warning', 'The note was saved, but the editor could not be opened.');
+      }
+    }
+
+    window.location.href = `/workspaces/${encodeURIComponent(this.workspaceId)}#notes`;
   }
 
   getCurrentTaskAssignmentValue() {

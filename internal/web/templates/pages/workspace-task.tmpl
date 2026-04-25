@@ -238,7 +238,18 @@
                   <div class="workspace-task-page-card-kicker">Result</div>
                   <h2>Latest output</h2>
                 </div>
+                <div class="workspace-task-output-actions" aria-label="Result actions">
+                  <button type="button" id="workspace-task-output-copy" class="modern-btn modern-btn-secondary workspace-task-output-action-btn">
+                    <i class="bi bi-copy" aria-hidden="true"></i>
+                    <span>Copy</span>
+                  </button>
+                  <button type="button" id="workspace-task-output-save-note" class="modern-btn modern-btn-primary workspace-task-output-action-btn">
+                    <i class="bi bi-journal-plus" aria-hidden="true"></i>
+                    <span>Save as Note</span>
+                  </button>
+                </div>
               </div>
+              <div id="workspace-task-output-note-status" class="workspace-task-output-note-status" hidden></div>
               <div id="workspace-task-output"></div>
             </section>
 
@@ -743,6 +754,70 @@
       font-family: "Fraunces", serif;
       font-size: 1.35rem;
       color: var(--text-primary);
+    }
+
+    .workspace-task-output-actions {
+      display: flex;
+      align-items: center;
+      justify-content: flex-end;
+      gap: 0.5rem;
+      flex-wrap: wrap;
+    }
+
+    .workspace-task-output-action-btn {
+      min-height: 2.35rem;
+      gap: 0.42rem;
+      white-space: nowrap;
+    }
+
+    .workspace-task-output-action-btn.is-saved {
+      border-color: color-mix(in srgb, #16a34a 34%, var(--border-color));
+      background: color-mix(in srgb, #16a34a 12%, var(--bg-primary));
+      color: color-mix(in srgb, #16a34a 82%, var(--text-primary));
+    }
+
+    .workspace-task-output-note-status {
+      margin: -0.15rem 0 0.95rem;
+      padding: 0.72rem 0.85rem;
+      border: 1px solid color-mix(in srgb, #16a34a 26%, var(--border-color));
+      border-radius: 16px;
+      background: color-mix(in srgb, #16a34a 8%, var(--bg-primary));
+      color: var(--text-primary);
+    }
+
+    .workspace-task-output-note-status-inner {
+      display: flex;
+      align-items: center;
+      gap: 0.6rem;
+      flex-wrap: wrap;
+    }
+
+    .workspace-task-output-note-status-icon {
+      width: 1.65rem;
+      height: 1.65rem;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      border-radius: 999px;
+      background: color-mix(in srgb, #16a34a 16%, var(--bg-primary));
+      color: #15803d;
+      flex: 0 0 auto;
+    }
+
+    .workspace-task-output-note-status-copy {
+      color: var(--text-secondary);
+      font-size: 0.92rem;
+      line-height: 1.4;
+    }
+
+    .workspace-task-output-note-status-copy strong {
+      color: var(--text-primary);
+    }
+
+    .workspace-task-output-note-open {
+      margin-top: 0;
+      margin-left: auto;
+      flex: 0 0 auto;
     }
 
     .workspace-task-overview-grid {
@@ -2247,9 +2322,22 @@
         border-radius: 24px;
       }
 
+      #workspace-task-output-card .workspace-task-page-card-header,
+      .workspace-task-output-actions {
+        flex-direction: column;
+        align-items: stretch;
+      }
+
       .workspace-task-output-action-btn {
         width: 100%;
         min-width: 0;
+        justify-content: center;
+      }
+
+      .workspace-task-output-note-open {
+        width: 100%;
+        margin-left: 0;
+        text-align: left;
       }
 
       .workspace-task-overview-grid {
@@ -2293,6 +2381,7 @@
   </style>
 
   {{template "task-modal" .}}
+  {{template "session-modals.tmpl" .}}
 
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
