@@ -1229,32 +1229,66 @@
       padding-top: 0.15rem;
     }
 
-    .workspace-task-workflow-step-pip {
+    .workspace-task-workflow-step-check {
       width: 1.85rem;
       height: 1.85rem;
       display: inline-flex;
       align-items: center;
       justify-content: center;
       border-radius: 999px;
+      border: 1px solid color-mix(in srgb, var(--primary-color) 22%, transparent);
       background: color-mix(in srgb, var(--primary-color) 10%, transparent);
       color: var(--primary-color);
       font-size: 0.8rem;
       font-weight: 800;
+      cursor: pointer;
+      transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease, transform 0.15s ease;
     }
 
-    .workspace-task-workflow-step.is-running .workspace-task-workflow-step-pip {
+    .workspace-task-workflow-step-check:hover:not(:disabled) {
+      border-color: color-mix(in srgb, var(--primary-color) 44%, transparent);
+      background: color-mix(in srgb, var(--primary-color) 16%, transparent);
+      transform: translateY(-1px);
+    }
+
+    .workspace-task-workflow-step-check:focus-visible {
+      outline: 2px solid color-mix(in srgb, var(--primary-color) 54%, transparent);
+      outline-offset: 2px;
+    }
+
+    .workspace-task-workflow-step-check:disabled {
+      cursor: default;
+    }
+
+    .workspace-task-workflow-step-check-icon {
+      display: none;
+      line-height: 1;
+    }
+
+    .workspace-task-workflow-step.is-running .workspace-task-workflow-step-check {
       background: rgba(56, 189, 248, 0.18);
+      border-color: rgba(56, 189, 248, 0.32);
       color: #38bdf8;
       animation: workspace-task-workflow-pulse 1.4s ease-in-out infinite;
     }
 
-    .workspace-task-workflow-step.is-completed .workspace-task-workflow-step-pip {
+    .workspace-task-workflow-step.is-completed .workspace-task-workflow-step-check {
       background: rgba(34, 197, 94, 0.18);
+      border-color: rgba(34, 197, 94, 0.32);
       color: #22c55e;
     }
 
-    .workspace-task-workflow-step.is-failed .workspace-task-workflow-step-pip {
+    .workspace-task-workflow-step.is-completed .workspace-task-workflow-step-check-number {
+      display: none;
+    }
+
+    .workspace-task-workflow-step.is-completed .workspace-task-workflow-step-check-icon {
+      display: inline;
+    }
+
+    .workspace-task-workflow-step.is-failed .workspace-task-workflow-step-check {
       background: rgba(239, 68, 68, 0.18);
+      border-color: rgba(239, 68, 68, 0.28);
       color: #ef4444;
     }
 

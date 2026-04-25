@@ -1839,10 +1839,15 @@ export class WorkspaceTaskPage {
     }
     if (this.elements.workflowRunAllBtn) {
       const anyRunning = steps.some((step) => String(step?.status || '') === 'in_progress');
-      const anyUnassigned = steps.some((step) => !step.to || step.to === 'unassigned');
+      const anyUnassigned = steps.some((step) => {
+        const assignee = String(step?.to || '').trim();
+        const assigned = Boolean(assignee) && assignee !== 'unassigned';
+        const completed = getStatusClass(step?.status) === 'completed';
+        return !assigned && !completed;
+      });
       this.elements.workflowRunAllBtn.disabled = anyRunning || anyUnassigned;
       this.elements.workflowRunAllBtn.title = anyUnassigned
-        ? 'Assign all steps before running the workflow'
+        ? 'Assign unfinished steps or mark manual steps done before running the workflow'
         : anyRunning
           ? 'A step is already running'
           : 'Run all steps in sequence';
@@ -1907,18 +1912,25 @@ export class WorkspaceTaskPage {
     const actionLabel = isRunning
       ? 'Running…'
       : isCompleted
-        ? '↻ Re-run'
+        ? (isAssigned ? '↻ Re-run' : 'Done')
         : isFailed
-          ? '↻ Retry'
-          : '▶ Run';
-    const actionDisabled = isRunning || !isAssigned;
-    const actionTitle = !isAssigned
-      ? 'Assign an agent to this step before running'
+          ? (isAssigned ? '↻ Retry' : 'Mark done')
+          : (isAssigned ? '▶ Run' : 'Mark done');
+    const actionName = isAssigned ? 'run-step' : 'complete-step';
+    const actionDisabled = isRunning || (!isAssigned && isCompleted);
+    const actionTitle = isRunning
+      ? 'Step is already running'
+      : isCompleted
+        ? (isAssigned ? 'Run this step again' : 'This checklist item is complete')
+        : isAssigned
+          ? (isFailed ? 'Retry this step' : 'Run this step now')
+          : 'Mark this checklist item done';
+
+    const checkTitle = isCompleted
+      ? 'Step completed'
       : isRunning
         ? 'Step is already running'
-        : isCompleted
-          ? 'Run this step again'
-          : 'Run this step now';
+        : 'Mark this step done';
 
     const resultBlock = result || error
       ? `<details class="workspace-task-workflow-step-result"${(isRunning || isFailed) ? ' open' : ''}>
@@ -1932,7 +1944,15 @@ export class WorkspaceTaskPage {
     return `
       <article class="${classes.join(' ')}" data-step-id="${this.escapeHtml(stepId)}">
         <div class="workspace-task-workflow-rail">
-          <span class="workspace-task-workflow-step-pip">${stepNumber}</span>
+          <button type="button"
+                  class="workspace-task-workflow-step-check"
+                  data-action="complete-step"
+                  ${isRunning || isCompleted ? 'disabled' : ''}
+                  aria-label="${this.escapeHtml(checkTitle)}"
+                  title="${this.escapeHtml(checkTitle)}">
+            <span class="workspace-task-workflow-step-check-number">${stepNumber}</span>
+            <span class="workspace-task-workflow-step-check-icon" aria-hidden="true">✓</span>
+          </button>
         </div>
         <div class="workspace-task-workflow-step-body">
           <div class="workspace-task-workflow-step-header">
@@ -1940,7 +1960,7 @@ export class WorkspaceTaskPage {
             <div class="workspace-task-workflow-step-actions">
               <button type="button"
                       class="modern-btn modern-btn-secondary workspace-task-workflow-step-action-btn"
-                      data-action="run-step"
+                      data-action="${this.escapeHtml(actionName)}"
                       ${actionDisabled ? 'disabled' : ''}
                       title="${this.escapeHtml(actionTitle)}">
                 ${actionLabel}
@@ -1954,7 +1974,7 @@ export class WorkspaceTaskPage {
           <div class="workspace-task-workflow-step-meta">
             <span class="workspace-task-workflow-step-status" data-state="${this.escapeHtml(status)}">${this.escapeHtml(getDisplayStatus(step?.status))}</span>
             <span class="workspace-task-workflow-step-agent">
-              <span class="workspace-task-workflow-step-agent-name">${this.escapeHtml(isAssigned ? agentName : 'Unassigned')}</span>
+              <span class="workspace-task-workflow-step-agent-name">${this.escapeHtml(isAssigned ? agentName : 'Manual')}</span>
             </span>
           </div>
           ${resultBlock}
@@ -1971,6 +1991,12 @@ export class WorkspaceTaskPage {
       row.querySelector('[data-action="run-step"]')?.addEventListener('click', (event) => {
         event.preventDefault();
         this.handleRunStep(stepId);
+      });
+      row.querySelectorAll('[data-action="complete-step"]').forEach((button) => {
+        button.addEventListener('click', (event) => {
+          event.preventDefault();
+          this.handleCompleteStep(stepId);
+        });
       });
       row.querySelector('[data-action="delete-step"]')?.addEventListener('click', (event) => {
         event.preventDefault();
@@ -1998,6 +2024,27 @@ export class WorkspaceTaskPage {
     } catch (error) {
       console.error('Failed to run step:', error);
       this.notify('error', error?.message || 'Failed to run step');
+    }
+  }
+
+  async handleCompleteStep(stepId) {
+    const id = String(stepId || '').trim();
+    if (!id) return;
+    try {
+      const response = await fetch(`/api/orchestration/tasks/${encodeURIComponent(id)}/complete`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: '{}'
+      });
+      if (!response.ok) {
+        const text = await response.text();
+        throw new Error(text || 'Failed to mark step done');
+      }
+      this.notify('success', 'Step marked done');
+      await this.refreshAfterStepChange();
+    } catch (error) {
+      console.error('Failed to mark step done:', error);
+      this.notify('error', error?.message || 'Failed to mark step done');
     }
   }
 
