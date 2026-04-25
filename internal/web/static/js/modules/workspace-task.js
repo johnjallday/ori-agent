@@ -757,9 +757,14 @@ export class WorkspaceTaskPage {
       relationshipsCard: document.getElementById('workspace-task-relationships-card'),
       relationships: document.getElementById('workspace-task-relationships'),
       outputCard: document.getElementById('workspace-task-output-card'),
-      outputActions: document.getElementById('workspace-task-output-actions'),
-      outputWorkflowBtn: document.getElementById('workspace-task-output-create-workflow'),
       output: document.getElementById('workspace-task-output'),
+      workflowCard: document.getElementById('workspace-task-workflow-card'),
+      workflowActions: document.getElementById('workspace-task-workflow-actions'),
+      workflowAddStepBtn: document.getElementById('workspace-task-workflow-add-step'),
+      workflowRunAllBtn: document.getElementById('workspace-task-workflow-run-all'),
+      workflowEmpty: document.getElementById('workspace-task-workflow-empty'),
+      workflowGenerateBtn: document.getElementById('workspace-task-workflow-generate'),
+      workflowSteps: document.getElementById('workspace-task-workflow-steps'),
       scheduleCard: document.getElementById('workspace-task-schedule-card'),
       schedule: document.getElementById('workspace-task-schedule'),
       stepsCard: document.getElementById('workspace-task-steps-card'),
@@ -798,7 +803,9 @@ export class WorkspaceTaskPage {
     this.elements.copyLinkBtn?.addEventListener('click', () => this.copyToClipboard(window.location.href, 'Link copied'));
     this.elements.deleteBtn?.addEventListener('click', () => this.deleteTask());
     this.elements.blockedRequestToggle?.addEventListener('click', () => this.toggleAssistResponseExpanded());
-    this.elements.outputWorkflowBtn?.addEventListener('click', () => this.createWorkflowDraftFromResult());
+    this.elements.workflowGenerateBtn?.addEventListener('click', () => this.handleGenerateSteps());
+    this.elements.workflowAddStepBtn?.addEventListener('click', () => this.handleAddStep());
+    this.elements.workflowRunAllBtn?.addEventListener('click', () => this.handleRunAllSteps());
     this.elements.assistRetryBtn?.addEventListener('click', () => this.submitTaskAssist('retry'));
     this.elements.assistContinueBtn?.addEventListener('click', () => this.submitTaskAssist('continue_with_instruction'));
     this.elements.assistSwitchBtn?.addEventListener('click', () => this.submitTaskAssist('switch_agent_retry'));
@@ -843,7 +850,7 @@ export class WorkspaceTaskPage {
   }
 
   async fetchWorkspace() {
-    const response = await fetch(`/api/workspaces?id=${encodeURIComponent(this.workspaceId)}`);
+    const response = await fetch(`/api/workspaces/${encodeURIComponent(this.workspaceId)}`);
     if (!response.ok) {
       throw new Error('Failed to load workspace details.');
     }
@@ -1276,6 +1283,7 @@ export class WorkspaceTaskPage {
     this.renderOverview();
     this.renderSnapshot(statusInfo);
     this.renderRelationships();
+    this.renderWorkflow();
     this.renderOutput();
     this.renderSchedule();
     this.renderExecutionSteps();
@@ -1745,7 +1753,6 @@ export class WorkspaceTaskPage {
 
     const parentTask = this.getParentTask();
     const inputTasks = this.getInputTasks();
-    const subtasks = this.getSubtasks();
     const groups = [];
 
     if (parentTask) {
@@ -1759,13 +1766,6 @@ export class WorkspaceTaskPage {
       groups.push({
         title: 'Input Tasks',
         tasks: inputTasks
-      });
-    }
-
-    if (subtasks.length > 0) {
-      groups.push({
-        title: 'Subtasks',
-        tasks: subtasks
       });
     }
 
@@ -1789,6 +1789,330 @@ export class WorkspaceTaskPage {
         </div>
       </section>
     `).join('');
+  }
+
+  getOrderedSteps() {
+    return this.getSubtasks().sort((a, b) => {
+      const aIndex = Number.isFinite(a?.subtask_index) && a.subtask_index > 0 ? a.subtask_index : Number.MAX_SAFE_INTEGER;
+      const bIndex = Number.isFinite(b?.subtask_index) && b.subtask_index > 0 ? b.subtask_index : Number.MAX_SAFE_INTEGER;
+      if (aIndex !== bIndex) return aIndex - bIndex;
+      const aTime = a?.created_at ? new Date(a.created_at).getTime() : 0;
+      const bTime = b?.created_at ? new Date(b.created_at).getTime() : 0;
+      if (aTime !== bTime) return aTime - bTime;
+      return String(a?.id || '').localeCompare(String(b?.id || ''));
+    });
+  }
+
+  hasResultForSteps() {
+    const result = normalizeResultText(this.task?.result).trim();
+    return Boolean(result);
+  }
+
+  renderWorkflow() {
+    if (!this.elements.workflowCard) return;
+
+    const steps = this.getOrderedSteps();
+    const hasSteps = steps.length > 0;
+    const canGenerate = !hasSteps && this.hasResultForSteps();
+    const showCard = hasSteps || canGenerate || this.workflowDraftPending;
+
+    if (!showCard) {
+      this.elements.workflowCard.hidden = true;
+      if (this.elements.workflowSteps) this.elements.workflowSteps.innerHTML = '';
+      if (this.elements.workflowEmpty) this.elements.workflowEmpty.hidden = true;
+      if (this.elements.workflowActions) this.elements.workflowActions.hidden = true;
+      return;
+    }
+
+    this.elements.workflowCard.hidden = false;
+
+    if (this.elements.workflowActions) {
+      this.elements.workflowActions.hidden = !hasSteps;
+    }
+    if (this.elements.workflowRunAllBtn) {
+      const anyRunning = steps.some((step) => String(step?.status || '') === 'in_progress');
+      const anyUnassigned = steps.some((step) => !step.to || step.to === 'unassigned');
+      this.elements.workflowRunAllBtn.disabled = anyRunning || anyUnassigned;
+      this.elements.workflowRunAllBtn.title = anyUnassigned
+        ? 'Assign all steps before running the workflow'
+        : anyRunning
+          ? 'A step is already running'
+          : 'Run all steps in sequence';
+    }
+
+    if (this.elements.workflowEmpty) {
+      if (hasSteps) {
+        this.elements.workflowEmpty.hidden = true;
+      } else if (this.workflowDraftPending) {
+        this.elements.workflowEmpty.hidden = true;
+      } else {
+        this.elements.workflowEmpty.hidden = false;
+      }
+    }
+    if (this.elements.workflowGenerateBtn) {
+      this.elements.workflowGenerateBtn.disabled = this.workflowDraftPending || !canGenerate;
+    }
+
+    if (!this.elements.workflowSteps) return;
+
+    if (this.workflowDraftPending && !hasSteps) {
+      this.elements.workflowSteps.innerHTML = `
+        <div class="workspace-task-workflow-generating">
+          <span class="workspace-task-workflow-spinner" aria-hidden="true"></span>
+          <span>Detecting steps from the result…</span>
+        </div>
+      `;
+      return;
+    }
+
+    if (!hasSteps) {
+      this.elements.workflowSteps.innerHTML = '';
+      return;
+    }
+
+    this.elements.workflowSteps.innerHTML = steps
+      .map((step, index) => this.renderStepRow(step, index + 1))
+      .join('');
+    this.bindStepRowEvents();
+  }
+
+  renderStepRow(step, fallbackNumber) {
+    const stepId = String(step?.id || '');
+    const status = getStatusClass(step?.status);
+    const isRunning = status === 'in_progress';
+    const isCompleted = status === 'completed';
+    const isFailed = status === 'failed';
+    const stepNumber = Number.isFinite(step?.subtask_index) && step.subtask_index > 0
+      ? step.subtask_index
+      : fallbackNumber;
+    const title = String(step?.description || step?.name || `Step ${stepNumber}`).trim() || `Step ${stepNumber}`;
+    const agentName = String(step?.to || '').trim();
+    const isAssigned = agentName && agentName !== 'unassigned';
+    const result = normalizeResultText(step?.result).trim();
+    const error = String(step?.error || '').trim();
+
+    const classes = ['workspace-task-workflow-step'];
+    if (isRunning) classes.push('is-running');
+    if (isCompleted) classes.push('is-completed');
+    if (isFailed) classes.push('is-failed');
+
+    const actionLabel = isRunning
+      ? 'Running…'
+      : isCompleted
+        ? '↻ Re-run'
+        : isFailed
+          ? '↻ Retry'
+          : '▶ Run';
+    const actionDisabled = isRunning || !isAssigned;
+    const actionTitle = !isAssigned
+      ? 'Assign an agent to this step before running'
+      : isRunning
+        ? 'Step is already running'
+        : isCompleted
+          ? 'Run this step again'
+          : 'Run this step now';
+
+    const resultBlock = result || error
+      ? `<details class="workspace-task-workflow-step-result"${(isRunning || isFailed) ? ' open' : ''}>
+           <summary>${error ? 'Show error' : 'Show result'}</summary>
+           <pre class="workspace-task-workflow-step-result-body${error ? ' workspace-task-workflow-step-error' : ''}">${this.escapeHtml(error || result)}</pre>
+         </details>`
+      : '';
+
+    const stepHref = this.getTaskHref(stepId);
+
+    return `
+      <article class="${classes.join(' ')}" data-step-id="${this.escapeHtml(stepId)}">
+        <div class="workspace-task-workflow-rail">
+          <span class="workspace-task-workflow-step-pip">${stepNumber}</span>
+        </div>
+        <div class="workspace-task-workflow-step-body">
+          <div class="workspace-task-workflow-step-header">
+            <a href="${stepHref}" class="workspace-task-workflow-step-title" title="Open this step">${this.escapeHtml(title)}</a>
+            <div class="workspace-task-workflow-step-actions">
+              <button type="button"
+                      class="modern-btn modern-btn-secondary workspace-task-workflow-step-action-btn"
+                      data-action="run-step"
+                      ${actionDisabled ? 'disabled' : ''}
+                      title="${this.escapeHtml(actionTitle)}">
+                ${actionLabel}
+              </button>
+              <button type="button"
+                      class="modern-btn modern-btn-secondary workspace-task-workflow-step-action-btn"
+                      data-action="delete-step"
+                      title="Remove this step">×</button>
+            </div>
+          </div>
+          <div class="workspace-task-workflow-step-meta">
+            <span class="workspace-task-workflow-step-status" data-state="${this.escapeHtml(status)}">${this.escapeHtml(getDisplayStatus(step?.status))}</span>
+            <span class="workspace-task-workflow-step-agent">
+              <span class="workspace-task-workflow-step-agent-name">${this.escapeHtml(isAssigned ? agentName : 'Unassigned')}</span>
+            </span>
+          </div>
+          ${resultBlock}
+        </div>
+      </article>
+    `;
+  }
+
+  bindStepRowEvents() {
+    if (!this.elements.workflowSteps) return;
+    this.elements.workflowSteps.querySelectorAll('[data-step-id]').forEach((row) => {
+      const stepId = row.getAttribute('data-step-id');
+      if (!stepId) return;
+      row.querySelector('[data-action="run-step"]')?.addEventListener('click', (event) => {
+        event.preventDefault();
+        this.handleRunStep(stepId);
+      });
+      row.querySelector('[data-action="delete-step"]')?.addEventListener('click', (event) => {
+        event.preventDefault();
+        this.handleDeleteStep(stepId);
+      });
+    });
+  }
+
+  async handleRunStep(stepId) {
+    const id = String(stepId || '').trim();
+    if (!id) return;
+    try {
+      const response = await fetch('/api/orchestration/tasks/execute', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ task_id: id })
+      });
+      if (!response.ok) {
+        const text = await response.text();
+        throw new Error(text || 'Failed to run step');
+      }
+      this.notify('info', 'Step started');
+      await this.refreshAfterStepChange();
+      this.pollStepCompletion(id);
+    } catch (error) {
+      console.error('Failed to run step:', error);
+      this.notify('error', error?.message || 'Failed to run step');
+    }
+  }
+
+  async handleDeleteStep(stepId) {
+    const id = String(stepId || '').trim();
+    if (!id) return;
+    if (!window.confirm('Delete this step? This cannot be undone.')) return;
+    try {
+      const response = await fetch(`/api/orchestration/tasks?id=${encodeURIComponent(id)}`, {
+        method: 'DELETE'
+      });
+      if (!response.ok) throw new Error('Failed to delete step');
+      this.notify('success', 'Step deleted');
+      await this.refreshAfterStepChange();
+    } catch (error) {
+      console.error('Failed to delete step:', error);
+      this.notify('error', error?.message || 'Failed to delete step');
+    }
+  }
+
+  async handleRunAllSteps() {
+    if (!this.task?.id) return;
+    try {
+      const response = await fetch('/api/orchestration/tasks/execute', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ task_id: this.task.id })
+      });
+      if (!response.ok) {
+        const text = await response.text();
+        throw new Error(text || 'Failed to run workflow');
+      }
+      this.notify('info', 'Workflow started');
+      await this.refreshAfterStepChange();
+      this.pollStepCompletion(this.task.id);
+    } catch (error) {
+      console.error('Failed to run workflow:', error);
+      this.notify('error', error?.message || 'Failed to run workflow');
+    }
+  }
+
+  pollStepCompletion(taskId, maxAttempts = 60, intervalMs = 3000) {
+    const id = String(taskId || '').trim();
+    if (!id) return;
+    if (this.workflowPollTimer) {
+      clearTimeout(this.workflowPollTimer);
+      this.workflowPollTimer = null;
+    }
+    let attempts = 0;
+    const tick = async () => {
+      attempts++;
+      if (attempts > maxAttempts) return;
+      try {
+        await this.refreshAfterStepChange();
+        const target = String(this.task?.id || '') === id
+          ? this.task
+          : this.tasks.find((t) => String(t?.id || '') === id);
+        const status = String(target?.status || '');
+        if (status === 'completed' || status === 'failed' || status === 'cancelled' || status === 'timeout') {
+          this.workflowPollTimer = null;
+          return;
+        }
+      } catch (_error) {
+        // network blip — keep polling
+      }
+      this.workflowPollTimer = setTimeout(tick, intervalMs);
+    };
+    this.workflowPollTimer = setTimeout(tick, intervalMs);
+  }
+
+  async refreshAfterStepChange() {
+    try {
+      const [workspace, taskResponse] = await Promise.all([
+        this.fetchWorkspace(),
+        this.fetchTask().catch(() => null)
+      ]);
+      this.workspace = workspace || this.workspace;
+      this.tasks = Array.isArray(workspace?.tasks) ? workspace.tasks : this.tasks;
+      if (taskResponse) {
+        this.task = taskResponse;
+      }
+      this.render();
+    } catch (error) {
+      console.error('Failed to refresh task data:', error);
+    }
+  }
+
+  async handleAddStep() {
+    const description = window.prompt('Step title');
+    if (!description) return;
+    const trimmed = description.trim();
+    if (!trimmed) return;
+
+    const fallbackAgent = String(this.task?.to || '').trim();
+    const existingSteps = this.getOrderedSteps();
+    const nextIndex = existingSteps.length + 1;
+
+    try {
+      const response = await fetch('/api/orchestration/tasks', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          workspace_id: this.workspaceId,
+          description: trimmed,
+          to: fallbackAgent && fallbackAgent !== 'unassigned' ? fallbackAgent : '',
+          parent_task_id: this.task?.id || '',
+          subtask_index: nextIndex
+        })
+      });
+      if (!response.ok) {
+        const text = await response.text();
+        throw new Error(text || 'Failed to add step');
+      }
+      this.notify('success', 'Step added');
+      await this.refreshAfterStepChange();
+    } catch (error) {
+      console.error('Failed to add step:', error);
+      this.notify('error', error?.message || 'Failed to add step');
+    }
+  }
+
+  async handleGenerateSteps() {
+    await this.createWorkflowDraftFromResult();
   }
 
   isStructuredData(text) {
@@ -1815,13 +2139,9 @@ export class WorkspaceTaskPage {
 
     const result = normalizeResultText(this.task?.result).trim();
     const error = String(this.task?.error || '').trim();
-    const canCreateWorkflowDraft = Boolean(result);
 
     if (!result && !error) {
       this.elements.outputCard.hidden = true;
-      if (this.elements.outputActions) {
-        this.elements.outputActions.hidden = true;
-      }
       this.elements.output.innerHTML = '';
       return;
     }
@@ -1841,13 +2161,6 @@ export class WorkspaceTaskPage {
     }
 
     this.elements.outputCard.hidden = false;
-    if (this.elements.outputActions) {
-      this.elements.outputActions.hidden = !canCreateWorkflowDraft;
-    }
-    if (this.elements.outputWorkflowBtn) {
-      this.elements.outputWorkflowBtn.disabled = !canCreateWorkflowDraft || this.workflowDraftPending;
-      this.elements.outputWorkflowBtn.textContent = this.workflowDraftPending ? 'Preparing Draft...' : 'Create Workflow Draft';
-    }
     this.elements.output.innerHTML = blocks.join('');
   }
 
@@ -1988,22 +2301,32 @@ export class WorkspaceTaskPage {
     return deterministicDraft;
   }
 
+  agentNameFromAssignmentValue(value) {
+    const v = String(value || '').trim();
+    if (!v.startsWith('node:')) return '';
+    return v.slice('node:'.length).replace(/-node-\d+$/, '');
+  }
+
   async createWorkflowDraftFromResult() {
     if (this.workflowDraftPending) return;
-
-    const resultText = normalizeResultText(this.task?.result).trim();
-    if (!resultText) {
-      this.notify('warning', 'No task result is available to turn into a workflow.');
+    if (!this.task?.id) {
+      this.notify('error', 'Task is not loaded yet.');
       return;
     }
 
-    if (!window.taskModalController || typeof window.taskModalController.openForCreate !== 'function') {
-      this.notify('error', 'Task editor is unavailable right now.');
+    const resultText = normalizeResultText(this.task?.result).trim();
+    if (!resultText) {
+      this.notify('warning', 'No task result is available to turn into steps.');
+      return;
+    }
+
+    if (this.getOrderedSteps().length > 0) {
+      this.notify('warning', 'This task already has steps.');
       return;
     }
 
     this.workflowDraftPending = true;
-    this.renderOutput();
+    this.renderWorkflow();
 
     try {
       const draft = await this.deriveWorkflowDraftFromResult(resultText);
@@ -2011,23 +2334,46 @@ export class WorkspaceTaskPage {
         throw new Error('Could not detect actionable steps in this result yet.');
       }
 
-      await window.taskModalController.openForCreate(this.workspaceId, draft.title || this.getTaskDisplayLabel(), null, {
-        modalTitle: 'Review Workflow Draft',
-        forceManualMode: true,
-        prefillTitle: draft.title || this.getTaskDisplayLabel(),
-        prefillDetails: draft.details || '',
-        draftPriority: draft.priority || 3,
-        draftAssignmentValue: draft.assignmentValue || '',
-        draftSubtasks: draft.subtasks
-      });
+      const fallbackAgent = String(this.task?.to || '').trim();
+      const parentTaskId = String(this.task.id);
+      let createdCount = 0;
 
-      this.notify('info', 'Review the draft and adjust any subtasks before saving.');
+      for (let index = 0; index < draft.subtasks.length; index++) {
+        const subtask = draft.subtasks[index];
+        const description = String(subtask?.description || '').trim() || `Step ${index + 1}`;
+        const details = String(subtask?.details || '').trim();
+        const agentFromDraft = this.agentNameFromAssignmentValue(subtask?.assignmentValue);
+        const to = agentFromDraft || (fallbackAgent && fallbackAgent !== 'unassigned' ? fallbackAgent : '');
+
+        const response = await fetch('/api/orchestration/tasks', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            workspace_id: this.workspaceId,
+            description,
+            details,
+            to,
+            parent_task_id: parentTaskId,
+            subtask_index: index + 1,
+            priority: 3
+          })
+        });
+
+        if (!response.ok) {
+          const text = await response.text();
+          throw new Error(text || `Failed to create step ${index + 1}`);
+        }
+        createdCount += 1;
+      }
+
+      this.notify('success', `Added ${createdCount} step${createdCount === 1 ? '' : 's'} to this task.`);
+      await this.refreshAfterStepChange();
     } catch (error) {
-      console.error('Failed to create workflow draft from result:', error);
-      this.notify('error', error?.message || 'Failed to create workflow draft');
+      console.error('Failed to generate steps from result:', error);
+      this.notify('error', error?.message || 'Failed to generate steps');
     } finally {
       this.workflowDraftPending = false;
-      this.renderOutput();
+      this.renderWorkflow();
     }
   }
 
