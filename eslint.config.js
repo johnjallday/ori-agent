@@ -83,7 +83,7 @@ export default defineConfig([
         {
           vars: 'local',
           varsIgnorePattern: '^_',
-          argsIgnorePattern: '^(_|e|err|error|event|index|idx|x|y)$',
+          argsIgnorePattern: '^_|^(e|err|error|event|index|idx|x|y)$',
           caughtErrors: 'none'
         }
       ]
@@ -127,7 +127,8 @@ export default defineConfig([
       'internal/web/static/js/modules/smartOnboarding.js',
       'internal/web/static/js/modules/studio-dashboard.js',
       'internal/web/static/js/modules/studio.js',
-      'internal/web/static/js/modules/workspace-detail.js'
+      'internal/web/static/js/modules/workspace-detail.js',
+      'internal/web/static/js/modules/workspace-task.js'
     ],
     languageOptions: {
       sourceType: 'module'

@@ -9,7 +9,7 @@ const escapeTaskHtml = window.escapeHtml || function fallbackEscapeHtml(value) {
     .replace(/'/g, '&#39;');
 };
 
-function formatRelativeDate(dateString) {
+function _formatRelativeDate(dateString) {
   if (!dateString) return '—';
 
   const date = new Date(dateString);

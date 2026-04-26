@@ -55,7 +55,7 @@ func (s *Server) handleUISmokeTest(w http.ResponseWriter, r *http.Request) {
 
 	var req uiSmokeTestRequest
 	if r.Body != nil {
-		defer r.Body.Close()
+		defer func() { _ = r.Body.Close() }()
 		limitedBody := io.LimitReader(r.Body, uiSmokeTestBodyLimit)
 		if err := json.NewDecoder(limitedBody).Decode(&req); err != nil && err != io.EOF {
 			orihttp.BadRequest(w, "Invalid JSON: "+err.Error())

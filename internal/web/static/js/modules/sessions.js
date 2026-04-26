@@ -2910,7 +2910,7 @@ const sessionManager = {
     };
   },
 
-  buildWorkspaceBootstrapSeedNote(workspaceBootstrap, workspaceName) {
+  buildWorkspaceBootstrapSeedNote(workspaceBootstrap, _workspaceName) {
     if (!workspaceBootstrap || !workspaceBootstrap.hasAny) {
       return null;
     }

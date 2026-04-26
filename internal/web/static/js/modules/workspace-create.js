@@ -60,7 +60,7 @@ function resetWorkspaceBootstrapFields() {
   if (contextInput) contextInput.value = '';
 }
 
-function buildWorkspaceBootstrapSeedNote(workspaceBootstrap, workspaceName) {
+function buildWorkspaceBootstrapSeedNote(workspaceBootstrap, _workspaceName) {
   if (!workspaceBootstrap || !workspaceBootstrap.hasAny) {
     return null;
   }
