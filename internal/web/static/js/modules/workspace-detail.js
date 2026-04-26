@@ -197,6 +197,8 @@ export class WorkspaceDetailPage {
     this.filesLoaded = false;
     this.filesLoadFailed = false;
     this.workspaceHealthCheckRunning = false;
+    this.uiSmokeTestRunning = false;
+    this.uiSmokeTestResult = null;
     this.capabilitySuggestionCatalog = null;
     this.capabilitySuggestionCatalogPromise = null;
     this.flippedAgentCards = new Set();
@@ -1120,6 +1122,9 @@ export class WorkspaceDetailPage {
       healthList: document.getElementById('workspace-detail-health-list'),
       healthRefreshBtn: document.getElementById('workspace-detail-health-refresh'),
       healthRefreshLabel: document.getElementById('workspace-detail-health-refresh-label'),
+      uiSmokeTestBtn: document.getElementById('workspace-detail-ui-smoke-test'),
+      uiSmokeTestLabel: document.getElementById('workspace-detail-ui-smoke-test-label'),
+      uiSmokeTestResult: document.getElementById('workspace-detail-ui-smoke-result'),
 
       // Stats
       agentCount: document.getElementById('workspace-agent-count'),
@@ -1432,6 +1437,7 @@ export class WorkspaceDetailPage {
     this.elements.configToggleBtn?.addEventListener('click', () => this.toggleWorkspaceConfigExpanded());
     this.elements.refreshSettingsBtn?.addEventListener('click', () => this.loadWorkspace());
     this.elements.healthRefreshBtn?.addEventListener('click', () => this.refreshWorkspaceHealth());
+    this.elements.uiSmokeTestBtn?.addEventListener('click', () => this.runUISmokeTest());
     this.elements.intentForm?.addEventListener('submit', (event) => {
       event.preventDefault();
       this.saveWorkspaceIntent();
@@ -2216,6 +2222,117 @@ export class WorkspaceDetailPage {
     }
     if (this.elements.healthRefreshLabel) {
       this.elements.healthRefreshLabel.textContent = this.workspaceHealthCheckRunning ? 'Running...' : 'Run Health Check';
+    }
+    this.renderUISmokeTestResult();
+  }
+
+  renderUISmokeTestResult() {
+    if (this.elements.uiSmokeTestBtn) {
+      this.elements.uiSmokeTestBtn.disabled = this.uiSmokeTestRunning;
+    }
+    if (this.elements.uiSmokeTestLabel) {
+      this.elements.uiSmokeTestLabel.textContent = this.uiSmokeTestRunning ? 'Running...' : 'Run UI Smoke Test';
+    }
+
+    const resultEl = this.elements.uiSmokeTestResult;
+    if (!resultEl) return;
+
+    if (this.uiSmokeTestRunning) {
+      resultEl.className = 'workspace-detail-ui-smoke-result';
+      resultEl.innerHTML = `
+        <div class="workspace-detail-ui-smoke-header">
+          <div>
+            <div class="workspace-detail-ui-smoke-title">UI smoke test running</div>
+            <div class="workspace-detail-ui-smoke-summary">Checking the current server routes, scripts, styles, and this workspace page without opening another port.</div>
+          </div>
+          <span class="workspace-detail-ui-smoke-status">Running</span>
+        </div>
+      `;
+      return;
+    }
+
+    const result = this.uiSmokeTestResult;
+    if (!result) {
+      resultEl.classList.add('d-none');
+      resultEl.innerHTML = '';
+      return;
+    }
+
+    const status = String(result.status || '').toLowerCase() === 'passed' ? 'passed' : 'failed';
+    const checks = Array.isArray(result.checks) ? result.checks : [];
+    resultEl.className = `workspace-detail-ui-smoke-result is-${status}`;
+    resultEl.innerHTML = `
+      <div class="workspace-detail-ui-smoke-header">
+        <div>
+          <div class="workspace-detail-ui-smoke-title">UI smoke test ${status === 'passed' ? 'passed' : 'failed'}</div>
+          <div class="workspace-detail-ui-smoke-summary">${this.escapeHtml(result.summary || '')}</div>
+        </div>
+        <span class="workspace-detail-ui-smoke-status is-${status}">${this.escapeHtml(status)}</span>
+      </div>
+      <div class="workspace-detail-ui-smoke-checks">
+        ${checks.map((check) => this.renderUISmokeTestCheck(check)).join('')}
+      </div>
+    `;
+  }
+
+  renderUISmokeTestCheck(check) {
+    const status = String(check?.status || '').toLowerCase() === 'passed' ? 'passed' : 'failed';
+    const icon = status === 'passed' ? '&#10003;' : '!';
+    const statusCode = Number(check?.status_code) || 0;
+    const duration = Number(check?.duration_ms) || 0;
+    const meta = [
+      statusCode ? `HTTP ${statusCode}` : '',
+      `${duration}ms`
+    ].filter(Boolean).join(' | ');
+
+    return `
+      <div class="workspace-detail-ui-smoke-check is-${status}">
+        <span class="workspace-detail-ui-smoke-check-icon">${icon}</span>
+        <div>
+          <div class="workspace-detail-ui-smoke-check-name">${this.escapeHtml(check?.name || 'Smoke check')}</div>
+          <div class="workspace-detail-ui-smoke-check-detail">${this.escapeHtml(check?.detail || check?.path || '')}</div>
+        </div>
+        <div class="workspace-detail-ui-smoke-check-meta">${this.escapeHtml(meta)}</div>
+      </div>
+    `;
+  }
+
+  async runUISmokeTest() {
+    if (this.uiSmokeTestRunning) return;
+
+    this.uiSmokeTestRunning = true;
+    this.uiSmokeTestResult = null;
+    this.renderUISmokeTestResult();
+
+    try {
+      const response = await fetch('/api/diagnostics/ui-smoke-test', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ workspace_id: this.workspaceId })
+      });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(result?.error || 'UI smoke test failed');
+      }
+
+      this.uiSmokeTestResult = result;
+      if (window.Toast) {
+        if (result?.status === 'passed') {
+          window.Toast.success('UI smoke test passed');
+        } else {
+          window.Toast.warning('UI smoke test found issues');
+        }
+      }
+    } catch (error) {
+      this.uiSmokeTestResult = {
+        status: 'failed',
+        summary: error?.message || 'UI smoke test failed',
+        checks: []
+      };
+      if (window.Toast) window.Toast.error(error?.message || 'UI smoke test failed');
+    } finally {
+      this.uiSmokeTestRunning = false;
+      this.renderUISmokeTestResult();
     }
   }
 

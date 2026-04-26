@@ -180,12 +180,19 @@
                   </svg>
                   <span id="workspace-detail-health-refresh-label">Run Health Check</span>
                 </button>
+                <button id="workspace-detail-ui-smoke-test" class="workspace-detail-panel-btn" type="button" title="Run UI smoke test">
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
+                    <path d="M9,3H15V5H19A2,2 0 0,1 21,7V19A2,2 0 0,1 19,21H5A2,2 0 0,1 3,19V7A2,2 0 0,1 5,5H9V3M11,5H13V3H11V5M5,7V19H19V7H5M8,10.5L10.5,13L16,9L17.2,10.6L10.3,15.7L6.8,12.2L8,10.5Z"/>
+                  </svg>
+                  <span id="workspace-detail-ui-smoke-test-label">Run UI Smoke Test</span>
+                </button>
               </div>
             </div>
             <div id="workspace-detail-health-meta" class="workspace-detail-health-meta"></div>
             <div id="workspace-detail-health-list" class="workspace-detail-health-list">
               <div class="workspace-detail-empty">Checking workspace health...</div>
             </div>
+            <div id="workspace-detail-ui-smoke-result" class="workspace-detail-ui-smoke-result d-none"></div>
           </div>
 
           <!-- Workspace Configuration -->
@@ -2109,6 +2116,123 @@
       white-space: nowrap;
     }
 
+    .workspace-detail-ui-smoke-result {
+      margin: 0 1.35rem 1.35rem;
+      border-radius: 18px;
+      border: 1px solid rgba(125, 176, 255, 0.18);
+      background: rgba(9, 15, 25, 0.58);
+      overflow: hidden;
+    }
+
+    .workspace-detail-ui-smoke-result.is-passed {
+      border-color: rgba(62, 207, 142, 0.22);
+    }
+
+    .workspace-detail-ui-smoke-result.is-failed {
+      border-color: rgba(239, 68, 68, 0.25);
+    }
+
+    .workspace-detail-ui-smoke-header {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 1rem;
+      padding: 0.95rem 1rem;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+    }
+
+    .workspace-detail-ui-smoke-title {
+      color: var(--text-primary);
+      font-size: 0.92rem;
+      font-weight: 650;
+      margin-bottom: 0.2rem;
+    }
+
+    .workspace-detail-ui-smoke-summary {
+      color: var(--text-secondary);
+      font-size: 0.8rem;
+      line-height: 1.45;
+    }
+
+    .workspace-detail-ui-smoke-status {
+      display: inline-flex;
+      align-items: center;
+      min-height: 30px;
+      padding: 0.32rem 0.65rem;
+      border-radius: 999px;
+      font-size: 0.72rem;
+      font-weight: 800;
+      text-transform: uppercase;
+      background: rgba(125, 176, 255, 0.14);
+      color: #b5d4ff;
+      white-space: nowrap;
+    }
+
+    .workspace-detail-ui-smoke-status.is-passed {
+      background: rgba(62, 207, 142, 0.12);
+      color: #8df4be;
+    }
+
+    .workspace-detail-ui-smoke-status.is-failed {
+      background: rgba(239, 68, 68, 0.14);
+      color: #ffb1b1;
+    }
+
+    .workspace-detail-ui-smoke-checks {
+      display: grid;
+      gap: 0.55rem;
+      padding: 0.85rem 1rem 1rem;
+    }
+
+    .workspace-detail-ui-smoke-check {
+      display: grid;
+      grid-template-columns: auto minmax(0, 1fr) auto;
+      gap: 0.7rem;
+      align-items: center;
+      padding: 0.7rem 0.75rem;
+      border-radius: 14px;
+      background: rgba(255, 255, 255, 0.045);
+      border: 1px solid rgba(255, 255, 255, 0.07);
+    }
+
+    .workspace-detail-ui-smoke-check-icon {
+      width: 1.55rem;
+      height: 1.55rem;
+      border-radius: 999px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      background: rgba(62, 207, 142, 0.12);
+      color: #8df4be;
+      font-weight: 800;
+      font-size: 0.85rem;
+    }
+
+    .workspace-detail-ui-smoke-check.is-failed .workspace-detail-ui-smoke-check-icon {
+      background: rgba(239, 68, 68, 0.14);
+      color: #ffb1b1;
+    }
+
+    .workspace-detail-ui-smoke-check-name {
+      color: var(--text-primary);
+      font-size: 0.82rem;
+      font-weight: 650;
+      overflow-wrap: anywhere;
+    }
+
+    .workspace-detail-ui-smoke-check-detail {
+      color: var(--text-secondary);
+      font-size: 0.74rem;
+      line-height: 1.4;
+      overflow-wrap: anywhere;
+    }
+
+    .workspace-detail-ui-smoke-check-meta {
+      color: var(--text-muted);
+      font-size: 0.72rem;
+      white-space: nowrap;
+    }
+
     @media (max-width: 991px) {
       .workspace-detail-health-header {
         flex-direction: column;
@@ -2127,6 +2251,14 @@
         grid-column: 1 / -1;
         justify-self: start;
       }
+
+      .workspace-detail-ui-smoke-check {
+        grid-template-columns: auto minmax(0, 1fr);
+      }
+
+      .workspace-detail-ui-smoke-check-meta {
+        grid-column: 2;
+      }
     }
 
     @media (max-width: 575px) {
@@ -2135,6 +2267,11 @@
       .workspace-detail-health-list {
         padding-left: 1rem;
         padding-right: 1rem;
+      }
+
+      .workspace-detail-ui-smoke-result {
+        margin-left: 1rem;
+        margin-right: 1rem;
       }
 
       .workspace-detail-health-controls {
@@ -2148,6 +2285,10 @@
       }
 
       #workspace-detail-health-refresh {
+        width: 100%;
+      }
+
+      #workspace-detail-ui-smoke-test {
         width: 100%;
       }
 
