@@ -61,16 +61,21 @@
 
           <!-- Workspace Entry Prompt Bar -->
           <div id="homeAssistantCard" class="modern-card p-2 mb-3">
-            <form id="homeAssistantForm" class="d-flex align-items-center gap-2">
+            <form id="homeAssistantForm" class="home-assistant-workspace-form d-flex align-items-center gap-2">
               <div class="d-none d-md-flex align-items-center gap-2 px-2" style="color: var(--text-secondary); font-size: 0.82rem; white-space: nowrap;">
                 <span id="homeAssistantIdentityName" style="font-weight: 600; color: var(--text-primary); display: inline-block; max-width: 180px; overflow: hidden; text-overflow: ellipsis;" title="Workspace Manager">Workspace Manager</span>
                 <span style="opacity: 0.6;">Workspace</span>
               </div>
+              <div id="homeAssistantWorkspaceModeSwitch" class="home-assistant-workspace-mode-switch" role="group" aria-label="Workspace prompt mode">
+                <button type="button" class="home-assistant-workspace-mode-btn is-active" data-home-workspace-mode="task" aria-pressed="true">Task</button>
+                <button type="button" class="home-assistant-workspace-mode-btn" data-home-workspace-mode="ask" aria-pressed="false">Ask</button>
+                <button type="button" class="home-assistant-workspace-mode-btn" data-home-workspace-mode="note" aria-pressed="false">Note</button>
+              </div>
               <input id="homeAssistantInput" type="text" class="modern-input flex-grow-1" maxlength="800"
-                     placeholder="Ask Workspace Manager about this workspace... (or use /task, /note, /directory, /file, /chat)"
+                     placeholder="Create a task for Workspace Manager... (/chat asks, /note saves a note)"
                      aria-label="Workspace manager prompt"
                      style="min-height: 42px;">
-              <button id="homeAssistantSendBtn" type="submit" class="modern-btn modern-btn-primary home-assistant-send-btn">Send</button>
+              <button id="homeAssistantSendBtn" type="submit" class="modern-btn modern-btn-primary home-assistant-send-btn">Create Task</button>
             </form>
             <div id="homeAssistantQuickPrompts" class="d-flex flex-wrap align-items-center gap-2 px-2 pt-2">
               <span class="home-assistant-quick-label mb-0">Quick Actions</span>
