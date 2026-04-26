@@ -69,11 +69,56 @@ function wt {
   rm)
     local name="$2"
     local target_path
+
     if [[ -z "$name" ]]; then
-      echo "Usage: wt rm <name>"
-      return 1
+      # Interactive selection
+      local -a rm_names rm_paths rm_branches
+      local line
+      while IFS= read -r line; do
+        local parts=("${(@s/ /)line}")
+        local wt_path="${parts[1]}"
+        local branch="${parts[3]}"
+        branch="${branch#\[}"
+        branch="${branch%\]}"
+        local wt_name="${wt_path:t}"
+        if wt_is_protected_worktree "$wt_path"; then
+          continue
+        fi
+        rm_names+=("$wt_name")
+        rm_paths+=("$wt_path")
+        rm_branches+=("$branch")
+      done < <(git worktree list)
+
+      if [[ ${#rm_names[@]} -eq 0 ]]; then
+        echo "No removable worktrees found"
+        return 1
+      fi
+
+      echo "Select worktree to remove:"
+      local i
+      for i in {1..${#rm_names[@]}}; do
+        echo "  $i) ${rm_names[$i]} (${rm_branches[$i]})"
+      done
+      echo "  q) Quit"
+      echo
+
+      read "choice?Choice: "
+
+      if [[ "$choice" == "q" || -z "$choice" ]]; then
+        return 0
+      fi
+
+      if ! [[ "$choice" =~ ^[0-9]+$ ]] || (( choice < 1 || choice > ${#rm_names[@]} )); then
+        echo "Invalid choice"
+        return 1
+      fi
+
+      name="${rm_names[$choice]}"
+      target_path="${rm_paths[$choice]}"
+    else
+      target_path="$(wt_resolve_worktree_path "$name")"
     fi
-    target_path="$(wt_resolve_worktree_path "$name")"
+
     if wt_is_protected_worktree "$target_path"; then
       echo "Refusing to remove protected worktree: ${target_path:t}"
       return 1
@@ -152,7 +197,7 @@ function wt {
     echo "Usage: wt [command] [args]"
     echo "  wt              - Interactive mode (select worktree to navigate)"
     echo "  wt new <name>   - Create worktree (always based on dev)"
-    echo "  wt rm <name>    - Remove worktree and branch"
+    echo "  wt rm [name]    - Remove worktree and branch (interactive if no name)"
     echo "  wt ls           - List worktrees"
     echo "  wt cd <name>    - Navigate to worktree"
     ;;

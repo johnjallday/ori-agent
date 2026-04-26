@@ -952,16 +952,8 @@ textarea.form-control:focus {
    DARK MODE TOGGLE
    ============================================================================= */
 
-[data-bs-theme="dark"] #darkModeToggle span {
-  display: none;
-}
-
-[data-bs-theme="dark"] #darkModeToggle:after {
-  content: "Light";
-}
-
 #darkModeToggle span {
-  display: inline;
+  display: none;
 }
 
 /* Override Bootstrap's text-muted in dark mode */

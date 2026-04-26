@@ -259,6 +259,7 @@
     inlineReplyState: null,
     conversationCollapsed: false,
     automationMode: 'semi_auto',
+    workspacePromptMode: 'task',
     workspaceEntryAgentName: '',
     workspaceEntryWorkspaceId: ''
   };
@@ -573,6 +574,22 @@
     };
   }
 
+  function buildWorkspacePromptModeCommand(prompt, routeContext) {
+    var normalizedContext = normalizeHomeRouteContext(routeContext);
+    if (!hasWorkspaceRouteContext(normalizedContext)) return null;
+
+    var raw = String(prompt || '').trim();
+    if (!raw || raw.charAt(0) === '/') return null;
+
+    var promptMode = getWorkspacePromptMode();
+    if (promptMode === 'ask') return null;
+
+    return {
+      command: promptMode === 'note' ? 'note' : 'task',
+      content: raw
+    };
+  }
+
   function sanitizeWorkspaceCommandContent(content) {
     var text = String(content || '').trim();
     if (!text) return '';
@@ -819,6 +836,7 @@
       viewAllBtn: document.getElementById('homeAssistantViewAllBtn'),
       clearRecentBtn: document.getElementById('homeAssistantClearRecentBtn'),
       launcherBtn: document.getElementById('homeAssistantReopenBtn'),
+      workspaceModeButtons: document.querySelectorAll('[data-home-workspace-mode]'),
       quickButtons: document.querySelectorAll('.home-assistant-quick-btn'),
       avatarBtn: document.getElementById('dashboardAssistantAvatarBtn'),
       bubbleBtn: document.getElementById('dashboardAssistantBubbleBtn')
@@ -1160,13 +1178,57 @@
     return String(homeAssistantState.workspaceEntryAgentName || '').trim() || 'Workspace Manager';
   }
 
+  function normalizeWorkspacePromptMode(mode) {
+    var normalized = normalizeToken(mode);
+    if (normalized === 'ask' || normalized === 'note') return normalized;
+    return 'task';
+  }
+
+  function getWorkspacePromptMode() {
+    return normalizeWorkspacePromptMode(homeAssistantState.workspacePromptMode);
+  }
+
+  function getWorkspacePromptModeLabel(mode) {
+    var normalized = normalizeWorkspacePromptMode(mode);
+    if (normalized === 'ask') return 'Ask';
+    if (normalized === 'note') return 'Save Note';
+    return 'Create Task';
+  }
+
+  function syncHomeAssistantWorkspacePromptControls(routeContext) {
+    var normalizedContext = normalizeHomeRouteContext(routeContext);
+    var els = getHomeAssistantElements();
+    var isWorkspaceContext = hasWorkspaceRouteContext(normalizedContext);
+    var promptMode = getWorkspacePromptMode();
+
+    if (els.workspaceModeButtons) {
+      for (var i = 0; i < els.workspaceModeButtons.length; i++) {
+        var button = els.workspaceModeButtons[i];
+        var buttonMode = normalizeWorkspacePromptMode(button.getAttribute('data-home-workspace-mode'));
+        var isActive = isWorkspaceContext && buttonMode === promptMode;
+        button.classList.toggle('is-active', isActive);
+        button.setAttribute('aria-pressed', isActive ? 'true' : 'false');
+      }
+    }
+
+    if (els.sendBtn) {
+      els.sendBtn.textContent = isWorkspaceContext ? getWorkspacePromptModeLabel(promptMode) : 'Ask';
+    }
+  }
+
   function buildHomeAssistantPlaceholder(routeContext) {
     if (!routeContext) return 'Ask Ori to do something...';
+    var displayName = getWorkspaceHomeAssistantDisplayName();
+    var workspaceMode = getWorkspacePromptMode();
     if (routeContext.surface === 'workspace_canvas') {
-      return 'Message ' + getWorkspaceHomeAssistantDisplayName() + ' about this workspace canvas...';
+      if (workspaceMode === 'ask') return 'Ask ' + displayName + ' about this workspace canvas...';
+      if (workspaceMode === 'note') return 'Save a note on this workspace canvas...';
+      return 'Create a task for ' + displayName + ' from this canvas...';
     }
     if (hasWorkspaceRouteContext(routeContext)) {
-      return 'Ask ' + getWorkspaceHomeAssistantDisplayName() + ' about this workspace... (or use /task, /note, /directory, /file, /chat)';
+      if (workspaceMode === 'ask') return 'Ask ' + displayName + ' about this workspace... (/task creates a task)';
+      if (workspaceMode === 'note') return 'Save a workspace note... (/task creates a task, /chat asks)';
+      return 'Create a task for ' + displayName + '... (/chat asks, /note saves a note)';
     }
     return 'Ask Ori to do something...';
   }
@@ -1188,6 +1250,7 @@
       els.input.setAttribute('aria-label', displayName + ' prompt');
     }
 
+    syncHomeAssistantWorkspacePromptControls(normalizedContext);
     syncHomeAssistantModalHeading();
   }
 
@@ -1240,11 +1303,27 @@
     if (els.input) {
       els.input.placeholder = buildHomeAssistantPlaceholder(routeContext);
     }
+    syncHomeAssistantWorkspacePromptControls(routeContext);
     if (hasWorkspaceRouteContext(routeContext)) {
       renderHomeAssistantWorkspaceIdentity(routeContext);
     }
 
     renderHomeAssistantRecentSessions();
+  }
+
+  function setHomeAssistantWorkspacePromptMode(mode) {
+    var nextMode = normalizeWorkspacePromptMode(mode);
+    homeAssistantState.workspacePromptMode = nextMode;
+
+    var routeContext = buildHomeRouteContext();
+    var els = getHomeAssistantElements();
+    if (els.input) {
+      els.input.placeholder = buildHomeAssistantPlaceholder(routeContext);
+    }
+    syncHomeAssistantWorkspacePromptControls(routeContext);
+    if (hasWorkspaceRouteContext(routeContext)) {
+      renderHomeAssistantWorkspaceIdentity(routeContext);
+    }
   }
 
   function isSemiAutoMode() {
@@ -4131,6 +4210,12 @@
     var direct = String(workspaceData.entry_agent_name || '').trim();
     if (direct) return direct;
 
+    var sharedData = workspaceData.shared_data;
+    if (sharedData && typeof sharedData === 'object') {
+      var shared = String(sharedData.entry_agent_name || '').trim();
+      if (shared) return shared;
+    }
+
     return '';
   }
 
@@ -4141,6 +4226,34 @@
     var detailWorkspace = window.workspaceDetail && window.workspaceDetail.workspace;
     if (detailWorkspace && String(detailWorkspace.id || '').trim() === targetWorkspace) {
       return inferWorkspaceEntryAgentNameFromData(detailWorkspace);
+    }
+
+    return '';
+  }
+
+  async function resolveWorkspaceTaskAssignee(workspaceId) {
+    var targetWorkspace = String(workspaceId || '').trim();
+    if (!targetWorkspace) return '';
+
+    var stateAgent = String(homeAssistantState.workspaceEntryAgentName || '').trim();
+    if (stateAgent && homeAssistantState.workspaceEntryWorkspaceId === targetWorkspace) {
+      return stateAgent;
+    }
+
+    var loadedAgent = getLoadedWorkspaceEntryAgentName(targetWorkspace);
+    if (loadedAgent) {
+      homeAssistantState.workspaceEntryWorkspaceId = targetWorkspace;
+      homeAssistantState.workspaceEntryAgentName = loadedAgent;
+      renderHomeAssistantWorkspaceIdentity({ surface: 'workspace_detail', workspace_id: targetWorkspace });
+      return loadedAgent;
+    }
+
+    var fetchedAgent = await fetchWorkspaceEntryAgentName(targetWorkspace);
+    if (fetchedAgent) {
+      homeAssistantState.workspaceEntryWorkspaceId = targetWorkspace;
+      homeAssistantState.workspaceEntryAgentName = fetchedAgent;
+      renderHomeAssistantWorkspaceIdentity({ surface: 'workspace_detail', workspace_id: targetWorkspace });
+      return fetchedAgent;
     }
 
     return '';
@@ -9202,29 +9315,30 @@
     return true;
   }
 
-  async function confirmWorkspaceAssistantTaskCreation(content) {
+  async function confirmWorkspaceAssistantTaskCreation(content, options) {
     var taskText = String(content || '').trim();
     if (!taskText) return false;
+    var assignee = String(options && options.assignee || '').trim();
 
-    var options = {
+    var dialogOptions = {
       eyebrow: 'Assistant Task',
       title: 'Create this task?',
       message: 'Assistant wants to add this task to the workspace.',
       confirmLabel: 'Create Task',
       cancelLabel: 'Cancel',
-      metaItems: ['Assistant', 'Task'],
-      details: [taskText]
+      metaItems: assignee ? ['Assistant', 'Task', assignee] : ['Assistant', 'Task'],
+      details: assignee ? [taskText, 'Assigned to: ' + assignee] : [taskText]
     };
 
     if (window.workspaceDetail && typeof window.workspaceDetail.showTaskConfirmDialog === 'function') {
-      return window.workspaceDetail.showTaskConfirmDialog(options);
+      return window.workspaceDetail.showTaskConfirmDialog(dialogOptions);
     }
 
     if (window.WorkspaceHubModals && typeof window.WorkspaceHubModals.showExecutionConfirm === 'function') {
-      return window.WorkspaceHubModals.showExecutionConfirm(options);
+      return window.WorkspaceHubModals.showExecutionConfirm(dialogOptions);
     }
 
-    return window.confirm([options.title, taskText].join('\n\n'));
+    return window.confirm([dialogOptions.title, taskText].join('\n\n'));
   }
 
   async function handleWorkspaceSlashCommand(commandPayload, routeContext, options) {
@@ -9238,11 +9352,19 @@
     var content = String(commandPayload.content || '').trim();
     var displayCommand = '/' + command;
     var isInferredAction = Boolean(options && options.inferred);
-    var commandSummaryTitle = isInferredAction ? 'Workspace Action' : 'Workspace Command';
+    var commandSummaryTitle = isInferredAction
+      ? (command === 'task' ? 'Task Mode' : command === 'note' ? 'Note Mode' : 'Workspace Action')
+      : 'Workspace Command';
+    var commandSummaryText = 'Executing ' + displayCommand + ' in this workspace.';
+    if (isInferredAction && command === 'task') {
+      commandSummaryText = 'Creating a manager task in this workspace.';
+    } else if (isInferredAction && command === 'note') {
+      commandSummaryText = 'Saving a note in this workspace.';
+    }
 
-    setHomeAssistantBusy(true, 'Running Command...');
+    setHomeAssistantBusy(true, command === 'task' ? 'Creating Task...' : command === 'note' ? 'Saving Note...' : 'Running Command...');
     renderHomeAssistantActions([]);
-    setHomeAssistantRoutingSummary(commandSummaryTitle, 'Executing ' + displayCommand + ' in this workspace.');
+    setHomeAssistantRoutingSummary(commandSummaryTitle, commandSummaryText);
 
     try {
       if (command === 'task') {
@@ -9258,10 +9380,13 @@
           return true;
         }
 
+        var taskAssignee = await resolveWorkspaceTaskAssignee(workspaceId);
+
         if (window.workspaceDetail && typeof window.workspaceDetail.createTask === 'function') {
           var createdTask = await window.workspaceDetail.createTask(content, '', '', {
             requireConfirmation: true,
             source: 'assistant',
+            assignee: taskAssignee,
             successToast: false,
             cancelToast: false
           });
@@ -9281,7 +9406,7 @@
             throw new Error('Failed to create task');
           }
         } else if (typeof API !== 'undefined' && typeof API.post === 'function') {
-          var confirmedByApi = await confirmWorkspaceAssistantTaskCreation(content);
+          var confirmedByApi = await confirmWorkspaceAssistantTaskCreation(content, { assignee: taskAssignee });
           if (!confirmedByApi) {
             appendHomeAssistantMessage('assistant', 'Task creation cancelled.');
             setHomeAssistantRoutingSummary('Task Cancelled', 'Task creation was cancelled before anything was created.');
@@ -9298,10 +9423,11 @@
             workspace_id: workspaceId,
             description: content,
             details: '',
-            status: 'pending'
+            status: 'pending',
+            to: taskAssignee || undefined
           });
         } else {
-          var confirmedByFetch = await confirmWorkspaceAssistantTaskCreation(content);
+          var confirmedByFetch = await confirmWorkspaceAssistantTaskCreation(content, { assignee: taskAssignee });
           if (!confirmedByFetch) {
             appendHomeAssistantMessage('assistant', 'Task creation cancelled.');
             setHomeAssistantRoutingSummary('Task Cancelled', 'Task creation was cancelled before anything was created.');
@@ -9321,14 +9447,15 @@
               workspace_id: workspaceId,
               description: content,
               details: '',
-              status: 'pending'
+              status: 'pending',
+              to: taskAssignee || undefined
             })
           });
           if (!taskResponse.ok) throw new Error('Failed to create task');
         }
 
-        appendHomeAssistantMessage('assistant', 'Created a task in this workspace.');
-        setHomeAssistantRoutingSummary('Task Created', 'Task added to this workspace.');
+        appendHomeAssistantMessage('assistant', taskAssignee ? 'Created a task for "' + taskAssignee + '".' : 'Created a task in this workspace.');
+        setHomeAssistantRoutingSummary('Task Created', taskAssignee ? 'Task assigned to "' + taskAssignee + '".' : 'Task added to this workspace.');
         renderHomeAssistantActions([
           {
             label: 'Ask Another Task',
@@ -9582,7 +9709,13 @@
     }
 
     nameInput.value = String(seedPayload && seedPayload.name || '').trim();
-    if (descriptionInput) descriptionInput.value = String(seedPayload && seedPayload.description || '').trim();
+    if (descriptionInput) {
+      descriptionInput.value = String(
+        seedPayload && seedPayload.workspaceBootstrap && seedPayload.workspaceBootstrap.goal
+          || seedPayload && seedPayload.description
+          || ''
+      ).trim();
+    }
     if (primaryGoalInput) {
       primaryGoalInput.value = String(seedPayload && seedPayload.workspaceBootstrap && seedPayload.workspaceBootstrap.goal || '').trim();
     }
@@ -9879,6 +10012,11 @@
     var inWorkspaceContext = hasWorkspaceRouteContext(routeContext);
     var directWorkspaceCommand = parseCreateWorkspaceCommand(text);
     var workspaceSlashCommand = parseWorkspaceSlashCommand(text);
+    var inferredWorkspaceModeCommand = false;
+    if (!workspaceSlashCommand && inWorkspaceContext) {
+      workspaceSlashCommand = buildWorkspacePromptModeCommand(text, routeContext);
+      inferredWorkspaceModeCommand = Boolean(workspaceSlashCommand);
+    }
 
     if (homeAssistantState.awaitingCreateConfirmation && isAffirmativeConfirmation(text)) {
       appendHomeAssistantMessage('user', text);
@@ -9916,7 +10054,9 @@
     appendHomeAssistantMessage('user', text);
 
     if (workspaceSlashCommand) {
-      var slashHandled = await handleWorkspaceSlashCommand(workspaceSlashCommand, routeContext);
+      var slashHandled = await handleWorkspaceSlashCommand(workspaceSlashCommand, routeContext, {
+        inferred: inferredWorkspaceModeCommand
+      });
       if (slashHandled) return;
     }
 
@@ -10239,6 +10379,7 @@
       hydrateHomeAssistantRecentSessions();
     }
     setHomeAssistantMode(homeAssistantState.mode);
+    setHomeAssistantWorkspacePromptMode(homeAssistantState.workspacePromptMode);
     if (hasWorkspaceRouteContext(routeContext)) {
       refreshHomeAssistantWorkspaceIdentity(routeContext);
     }
@@ -10267,6 +10408,16 @@
         if (homeAssistantState.busy) return;
         setHomeAssistantMode('continue_session');
       });
+    }
+    if (els.workspaceModeButtons) {
+      for (var workspaceModeIndex = 0; workspaceModeIndex < els.workspaceModeButtons.length; workspaceModeIndex++) {
+        els.workspaceModeButtons[workspaceModeIndex].addEventListener('click', function (event) {
+          if (homeAssistantState.busy) return;
+          var mode = event.currentTarget && event.currentTarget.getAttribute('data-home-workspace-mode');
+          setHomeAssistantWorkspacePromptMode(mode);
+          focusHomeAssistantInput();
+        });
+      }
     }
     if (els.autoFullBtn) {
       els.autoFullBtn.addEventListener('click', function () {

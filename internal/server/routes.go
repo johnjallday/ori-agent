@@ -29,6 +29,7 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 			logger.Error("Failed to encode health response", logger.Fields{"error": encErr})
 		}
 	})
+	mux.HandleFunc("/api/diagnostics/ui-smoke-test", s.handleUISmokeTest)
 
 	// =============================================================================
 	// Page Handlers (HTML Pages)

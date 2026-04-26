@@ -2889,7 +2889,7 @@ const sessionManager = {
   },
 
   getWorkspaceBootstrapFromModal() {
-    const goal = String(document.getElementById('folderPrimaryGoalInput')?.value || '').trim();
+    const description = String(document.getElementById('folderDescriptionInput')?.value || '').trim();
     const systems = String(document.getElementById('folderSystemsInput')?.value || '').trim();
     const context = String(document.getElementById('folderContextInput')?.value || '').trim();
     const systemsList = systems
@@ -2900,15 +2900,17 @@ const sessionManager = {
       : [];
 
     return {
-      hasAny: Boolean(goal || systems || context),
-      goal,
+      hasAny: Boolean(description || systems || context),
+      description,
+      goal: description,
+      capabilities: '',
       systems,
       systemsList,
       context
     };
   },
 
-  buildWorkspaceBootstrapSeedNote(workspaceBootstrap, workspaceName) {
+  buildWorkspaceBootstrapSeedNote(workspaceBootstrap, _workspaceName) {
     if (!workspaceBootstrap || !workspaceBootstrap.hasAny) {
       return null;
     }
@@ -2916,13 +2918,13 @@ const sessionManager = {
     const systemsSection = workspaceBootstrap.systemsList.length > 0
       ? workspaceBootstrap.systemsList.map((item) => `- ${item}`).join('\n')
       : '_Not specified._';
-    const goalSection = workspaceBootstrap.goal || '_Not specified._';
+    const descriptionSection = workspaceBootstrap.description || workspaceBootstrap.goal || '_Not specified._';
+    const capabilitiesSection = workspaceBootstrap.capabilities || '_Not specified._';
     const contextSection = workspaceBootstrap.context || '_Not specified._';
-    const title = String(workspaceName || '').trim() || 'this workspace';
 
     return {
-      name: 'Workspace Brief',
-      content: `# Workspace Brief\n\nCaptured during workspace creation for ${title}.\n\n## Primary Goal\n${goalSection}\n\n## Apps and Systems\n${systemsSection}\n\n## Key Files or Context\n${contextSection}\n`
+      name: 'Workspace Description',
+      content: `# Workspace Description\n\n## Description\n${descriptionSection}\n\n## Apps and Systems\n${systemsSection}\n\n## Key Files or Context\n${contextSection}\n\n## Special Capabilities or Workflows\n${capabilitiesSection}\n`
     };
   },
 
@@ -3230,11 +3232,11 @@ const sessionManager = {
     const importToggle = document.getElementById('folderImportToggle');
     const importPathInput = document.getElementById('folderImportPathInput');
     const workspaceBootstrap = this.getWorkspaceBootstrapFromModal();
-    const primaryGoalInput = document.getElementById('folderPrimaryGoalInput');
 
     const importEnabled = Boolean(importToggle?.checked);
     const importPath = importPathInput?.value?.trim() || '';
     const name = nameInput?.value.trim() || '';
+    const description = descriptionInput?.value.trim() || '';
     if (!name && !importEnabled) {
       this.showToast('Workspace name is required', 'warning');
       return;
@@ -3243,9 +3245,9 @@ const sessionManager = {
       this.showToast('Please enter or browse for a folder path to import', 'warning');
       return;
     }
-    if (!workspaceBootstrap.goal) {
-      this.showToast('Primary goal is required', 'warning');
-      primaryGoalInput?.focus();
+    if (!description) {
+      this.showToast('Workspace description is required', 'warning');
+      descriptionInput?.focus();
       return;
     }
 
@@ -3255,8 +3257,6 @@ const sessionManager = {
         return;
       }
     }
-
-    const description = descriptionInput?.value.trim() || '';
     const parentId = parentSelect?.value?.trim() || '';
     const color = colorBtn?.dataset.color || '';
     const originalCreateLabel = createBtn ? createBtn.textContent : '';
@@ -3276,7 +3276,7 @@ const sessionManager = {
       };
       if (workspaceBootstrap.hasAny) {
         payload.workspace_bootstrap = {
-          goal: workspaceBootstrap.goal,
+          goal: workspaceBootstrap.description || workspaceBootstrap.goal,
           systems: workspaceBootstrap.systems,
           context: workspaceBootstrap.context
         };
@@ -3394,7 +3394,7 @@ const sessionManager = {
         tasksCreated: 0,
         errors: []
       };
-      const workspaceBriefResult = {
+      const workspaceDescriptionResult = {
         notesCreated: 0,
         errors: []
       };
@@ -3410,9 +3410,9 @@ const sessionManager = {
       if (createdWorkspaceId && workspaceBriefNote && !askOriSeedNote) {
         try {
           await this.createWorkspaceSeedNote(createdWorkspaceId, workspaceBriefNote);
-          workspaceBriefResult.notesCreated += 1;
+          workspaceDescriptionResult.notesCreated += 1;
         } catch (error) {
-          workspaceBriefResult.errors.push(error);
+          workspaceDescriptionResult.errors.push(error);
         }
       }
       if (createdWorkspaceId && askOriSeedTask) {
@@ -3438,7 +3438,7 @@ const sessionManager = {
         bootstrapApplyResult.attachedSkills > 0 ||
         askOriSeedResult.tasksCreated > 0 ||
         askOriSeedResult.notesCreated > 0 ||
-        workspaceBriefResult.notesCreated > 0
+        workspaceDescriptionResult.notesCreated > 0
       ) {
         const summaryParts = [];
         if (bootstrapApplyResult.invitedAgents > 0) summaryParts.push(`${bootstrapApplyResult.invitedAgents} agent${bootstrapApplyResult.invitedAgents === 1 ? '' : 's'} invited`);
@@ -3446,11 +3446,11 @@ const sessionManager = {
         if (bootstrapApplyResult.attachedSkills > 0) summaryParts.push(`${bootstrapApplyResult.attachedSkills} skill${bootstrapApplyResult.attachedSkills === 1 ? '' : 's'} attached`);
         if (askOriSeedResult.tasksCreated > 0) summaryParts.push(`${askOriSeedResult.tasksCreated} Assistant task`);
         if (askOriSeedResult.notesCreated > 0) summaryParts.push(`${askOriSeedResult.notesCreated} Assistant note`);
-        if (workspaceBriefResult.notesCreated > 0) summaryParts.push('workspace brief');
+        if (workspaceDescriptionResult.notesCreated > 0) summaryParts.push('workspace description');
         const summaryText = summaryParts.join(', ');
         if (
           askOriSeedResult.errors.length > 0 ||
-          workspaceBriefResult.errors.length > 0 ||
+          workspaceDescriptionResult.errors.length > 0 ||
           bootstrapApplyResult.failures.length > 0
         ) {
           const firstFailure = bootstrapApplyResult.failures[0];
@@ -3883,29 +3883,89 @@ const sessionManager = {
     });
   },
 
-  // Rename folder via API
-  async renameFolder(folderId, newName) {
-    try {
-      const response = await fetch(`/api/workspaces/${folderId}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: newName })
-      });
+  slugifyWorkspaceName(value) {
+    return String(value || '')
+      .trim()
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, '')
+      .replace(/-{2,}/g, '-');
+  },
 
-      if (!response.ok) throw new Error('Failed to rename workspace');
+  buildWorkspaceSlugConflictMessage(conflict) {
+    const requestedSlug = typeof conflict?.requested_slug === 'string' ? conflict.requested_slug.trim() : '';
+    const suggestedSlug = typeof conflict?.suggested_slug === 'string' ? conflict.suggested_slug.trim() : '';
+    const location = typeof conflict?.location === 'string' ? conflict.location.trim().replace(/[\\/]+$/, '') : '';
+    const suggestedPath = location && suggestedSlug ? `${location}/${suggestedSlug}` : '';
+
+    const parts = [
+      `A workspace folder named "${requestedSlug || 'this workspace'}" already exists on disk.`
+    ];
+    if (suggestedSlug) {
+      parts.push(`Rename this workspace with the folder name "${suggestedSlug}" instead?`);
+    }
+    if (suggestedPath) {
+      parts.push(`Folder: ${suggestedPath}`);
+    }
+    return parts.join('\n\n');
+  },
+
+  // Rename folder via API
+  async renameFolder(folderId, newName, folderSlug = '') {
+    try {
+      const payload = { name: newName };
+      if (folderSlug) {
+        payload.folder_slug = folderSlug;
+      }
+
+      const response = await fetch(`/api/workspaces/${folderId}/rename`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      const result = await response.json().catch(() => ({}));
+      if (response.status === 409 && result?.conflict?.type === 'folder_slug') {
+        const suggestedSlug = typeof result.conflict.suggested_slug === 'string'
+          ? result.conflict.suggested_slug.trim()
+          : '';
+        if (suggestedSlug && window.confirm(this.buildWorkspaceSlugConflictMessage(result.conflict))) {
+          return this.renameFolder(folderId, newName, suggestedSlug);
+        }
+        const cancelled = new Error(result?.error || 'Workspace rename cancelled');
+        cancelled.cancelled = true;
+        throw cancelled;
+      }
+
+      if (!response.ok) {
+        throw new Error(result?.error || result?.message || 'Failed to rename workspace');
+      }
 
       // Update local data
       const folder = this.findFolderById(folderId, this.folders);
+      const updatedFolder = result?.folder || result?.workspace || null;
       if (folder) {
-        folder.name = newName;
+        if (updatedFolder && typeof updatedFolder === 'object') {
+          Object.assign(folder, updatedFolder);
+        } else {
+          folder.name = newName;
+        }
       }
 
       // Re-render
       this.renderFolderTree();
-      this.showToast('Workspace renamed', 'success');
+      const appliedSlug = String(updatedFolder?.folder_slug || '').trim();
+      const expectedSlug = this.slugifyWorkspaceName(newName);
+      this.showToast(
+        appliedSlug && expectedSlug && appliedSlug !== expectedSlug
+          ? `Workspace renamed. Folder saved as "${appliedSlug}".`
+          : 'Workspace renamed',
+        'success'
+      );
     } catch (error) {
       console.error('Failed to rename folder:', error);
-      this.showToast('Failed to rename workspace', 'error');
+      if (!error?.cancelled) {
+        this.showToast(error.message || 'Failed to rename workspace', 'error');
+      }
       // Reload to restore correct state
       await this.loadFolders();
     }

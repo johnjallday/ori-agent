@@ -1,6 +1,7 @@
 package orchestrationhttp
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -295,6 +296,64 @@ func TestExtractTaskIDForDelete(t *testing.T) {
 	})
 }
 
+func TestHandleCancelTask_CancelsRunningTask(t *testing.T) {
+	store := workspace.NewInMemoryStore()
+	ws := workspace.NewWorkspace(workspace.CreateWorkspaceParams{Name: "Workshop"})
+	ws.ID = "workspace-cancel"
+
+	task := workspace.Task{
+		ID:          "task-cancel",
+		Description: "Solder connector",
+		To:          "Ori",
+		Status:      workspace.TaskStatusInProgress,
+	}
+	if err := ws.AddTask(task); err != nil {
+		t.Fatalf("failed to add task: %v", err)
+	}
+	if err := store.Save(ws); err != nil {
+		t.Fatalf("failed to save workspace: %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	handler := &TaskHandler{
+		workspaceStore: store,
+		communicator:   agentcomm.NewCommunicator(store),
+	}
+	handler.registerRunningTask(task.ID, cancel)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/orchestration/tasks/task-cancel/cancel", nil)
+	rec := httptest.NewRecorder()
+
+	handler.handleCancelTask(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d", rec.Code)
+	}
+	select {
+	case <-ctx.Done():
+	default:
+		t.Fatal("expected registered task context to be cancelled")
+	}
+
+	savedWS, err := store.Get(ws.ID)
+	if err != nil {
+		t.Fatalf("failed to reload workspace: %v", err)
+	}
+	savedTask, err := savedWS.GetTask(task.ID)
+	if err != nil {
+		t.Fatalf("failed to reload task: %v", err)
+	}
+	if savedTask.Status != workspace.TaskStatusCancelled {
+		t.Fatalf("expected cancelled status, got %q", savedTask.Status)
+	}
+	if savedTask.Error != "Cancelled by user" {
+		t.Fatalf("expected cancellation error, got %q", savedTask.Error)
+	}
+	if savedTask.CompletedAt == nil {
+		t.Fatal("expected completed timestamp to be set")
+	}
+}
+
 func TestHandleAssistTask_PersistsSelectedChoice(t *testing.T) {
 	store := workspace.NewInMemoryStore()
 	ws := workspace.NewWorkspace(workspace.CreateWorkspaceParams{Name: "Spain"})
@@ -355,5 +414,84 @@ func TestHandleAssistTask_PersistsSelectedChoice(t *testing.T) {
 	}
 	if userAssistChoice.ID != "save-note" {
 		t.Fatalf("expected saved choice id save-note, got %q", userAssistChoice.ID)
+	}
+}
+
+func TestHandleAssistTask_PersistsFieldValues(t *testing.T) {
+	store := workspace.NewInMemoryStore()
+	ws := workspace.NewWorkspace(workspace.CreateWorkspaceParams{Name: "Workshop"})
+	ws.ID = "workspace-form"
+
+	task := workspace.Task{
+		ID:          "task-form",
+		WorkspaceID: ws.ID,
+		Description: "Plan shelf build",
+		To:          "Ori",
+		Status:      workspace.TaskStatusPending,
+		Context: map[string]interface{}{
+			"human_loop": map[string]interface{}{
+				"state": "blocked",
+				"workflow_step": &workspace.TaskBlockedWorkflowStep{
+					StepType: "ask_form",
+					Fields: []workspace.TaskBlockedField{
+						{ID: "room", Label: "Room", Type: "text", Required: true},
+						{ID: "mounting_type", Label: "Mounting type", Type: "select", Required: true},
+					},
+				},
+			},
+		},
+	}
+	if err := ws.AddTask(task); err != nil {
+		t.Fatalf("failed to add task: %v", err)
+	}
+	if err := store.Save(ws); err != nil {
+		t.Fatalf("failed to save workspace: %v", err)
+	}
+
+	handler := &TaskHandler{
+		workspaceStore: store,
+		communicator:   agentcomm.NewCommunicator(store),
+	}
+
+	body := `{"action":"mark_failed","field_values":[{"id":"room","label":"Room","value":"Living room"},{"id":"mounting_type","label":"Mounting type","value":"Freestanding"}],"message":"Use pine boards."}`
+	req := httptest.NewRequest(http.MethodPost, "/api/orchestration/tasks/task-form/assist", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	handler.handleAssistTask(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d", rec.Code)
+	}
+
+	savedWS, err := store.Get(ws.ID)
+	if err != nil {
+		t.Fatalf("failed to reload workspace: %v", err)
+	}
+	savedTask, err := savedWS.GetTask(task.ID)
+	if err != nil {
+		t.Fatalf("failed to reload task: %v", err)
+	}
+
+	userAssistMessage, _ := savedTask.Context["user_assist_message"].(string)
+	if !strings.Contains(userAssistMessage, "Provided details:") {
+		t.Fatalf("expected user assist message to include provided details, got %q", userAssistMessage)
+	}
+	if !strings.Contains(userAssistMessage, "- Room: Living room") {
+		t.Fatalf("expected room field in user assist message, got %q", userAssistMessage)
+	}
+	if !strings.Contains(userAssistMessage, "- Mounting type: Freestanding") {
+		t.Fatalf("expected mounting field in user assist message, got %q", userAssistMessage)
+	}
+
+	userAssistFields, ok := savedTask.Context["user_assist_fields"].([]workspace.TaskBlockedFieldValue)
+	if !ok {
+		t.Fatalf("expected user_assist_fields to be stored as []workspace.TaskBlockedFieldValue, got %T", savedTask.Context["user_assist_fields"])
+	}
+	if len(userAssistFields) != 2 {
+		t.Fatalf("expected 2 saved field values, got %d", len(userAssistFields))
+	}
+	if userAssistFields[0].ID != "room" || userAssistFields[0].Value != "Living room" {
+		t.Fatalf("unexpected first field value %#v", userAssistFields[0])
 	}
 }

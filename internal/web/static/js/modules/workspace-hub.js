@@ -1974,6 +1974,65 @@ console.log('[workspace-hub.js] FILE LOADED');
     return response.json();
   }
 
+  function buildWorkspaceSlugConflictMessage(conflict) {
+    const requestedSlug = typeof conflict?.requested_slug === 'string' ? conflict.requested_slug.trim() : '';
+    const suggestedSlug = typeof conflict?.suggested_slug === 'string' ? conflict.suggested_slug.trim() : '';
+    const location = typeof conflict?.location === 'string' ? conflict.location.trim().replace(/[\\/]+$/, '') : '';
+    const suggestedPath = location && suggestedSlug ? `${location}/${suggestedSlug}` : '';
+
+    const parts = [
+      `A workspace folder named "${requestedSlug || 'this workspace'}" already exists on disk.`
+    ];
+    if (suggestedSlug) {
+      parts.push(`Rename this workspace with the folder name "${suggestedSlug}" instead?`);
+    }
+    if (suggestedPath) {
+      parts.push(`Folder: ${suggestedPath}`);
+    }
+    return parts.join('\n\n');
+  }
+
+  function slugifyWorkspaceName(value) {
+    return String(value || '')
+      .trim()
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, '')
+      .replace(/-{2,}/g, '-');
+  }
+
+  async function renameWorkspace(workspaceId, newName, folderSlug = '') {
+    const payload = { name: newName };
+    if (folderSlug) {
+      payload.folder_slug = folderSlug;
+    }
+
+    const response = await fetch(`/api/workspaces/${encodeURIComponent(workspaceId)}/rename`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+
+    const result = await response.json().catch(() => ({}));
+    if (response.status === 409 && result?.conflict?.type === 'folder_slug') {
+      const suggestedSlug = typeof result.conflict.suggested_slug === 'string'
+        ? result.conflict.suggested_slug.trim()
+        : '';
+      if (suggestedSlug && window.confirm(buildWorkspaceSlugConflictMessage(result.conflict))) {
+        return renameWorkspace(workspaceId, newName, suggestedSlug);
+      }
+      const cancelled = new Error(result?.error || 'Workspace rename cancelled');
+      cancelled.cancelled = true;
+      throw cancelled;
+    }
+
+    if (!response.ok) {
+      throw new Error(result?.error || result?.message || 'Failed to rename workspace');
+    }
+
+    return result;
+  }
+
   /**
    * Create inline editable element
    * @param {HTMLElement} element - The element to make editable
@@ -2030,31 +2089,41 @@ console.log('[workspace-hub.js] FILE LOADED');
         }
 
         try {
-          await updateWorkspace(state.selectedId, { [field]: newValue });
+          const result = field === 'name'
+            ? await renameWorkspace(state.selectedId, newValue)
+            : await updateWorkspace(state.selectedId, { [field]: newValue });
 
-          // Update state
           const workspace = state.workspaceMap.get(state.selectedId);
+          const updatedWorkspace = result?.folder || result?.workspace || null;
           if (workspace) {
-            workspace[field] = newValue;
-          }
-
-          // Update element text and opacity
-          if (field === 'description' && elements.workspaceDescription) {
-            if (newValue) {
-              element.textContent = newValue;
-              elements.workspaceDescription.style.opacity = '1';
+            if (updatedWorkspace && typeof updatedWorkspace === 'object') {
+              Object.assign(workspace, updatedWorkspace);
             } else {
-              element.textContent = 'No description - double-click to add';
-              elements.workspaceDescription.style.opacity = '0.6';
+              workspace[field] = newValue;
             }
-          } else {
-            element.textContent = newValue || 'Workspace';
           }
 
-          if (window.Toast) window.Toast.success(`${field === 'name' ? 'Name' : 'Description'} updated`);
+          if (workspace) {
+            renderWorkspaceSummary(workspace);
+          }
+          renderLauncher(flattenWorkspaces(state.workspaces || []));
+
+          if (window.Toast) {
+            if (field === 'name') {
+              const appliedSlug = String(updatedWorkspace?.folder_slug || '').trim();
+              const expectedSlug = slugifyWorkspaceName(newValue);
+              window.Toast.success(
+                appliedSlug && expectedSlug && appliedSlug !== expectedSlug
+                  ? `Workspace renamed. Folder saved as "${appliedSlug}".`
+                  : 'Workspace renamed'
+              );
+            } else {
+              window.Toast.success('Description updated');
+            }
+          }
         } catch (err) {
           console.error(`Failed to update ${field}:`, err);
-          if (window.Toast) window.Toast.error(`Failed to update ${field}`);
+          if (!err?.cancelled && window.Toast) window.Toast.error(err.message || `Failed to update ${field}`);
         }
       };
 

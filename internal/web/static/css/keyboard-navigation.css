@@ -1,0 +1,292 @@
+.ori-keyboard-nav-active {
+  cursor: default;
+}
+
+.ori-keyboard-nav-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 20050;
+  pointer-events: none;
+}
+
+.ori-keyboard-nav-status {
+  position: fixed;
+  top: calc(var(--navbar-offset, 76px) + 14px);
+  left: 50%;
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+  min-width: 240px;
+  max-width: min(380px, calc(100vw - 32px));
+  padding: 0.95rem 1rem 1rem;
+  border: 1px solid rgba(var(--primary-color-rgb, 255, 138, 86), 0.2);
+  border-radius: 16px;
+  background:
+    linear-gradient(160deg, rgba(var(--primary-color-rgb, 255, 138, 86), 0.1), rgba(18, 22, 31, 0.72)),
+    rgba(12, 16, 24, 0.68);
+  box-shadow:
+    0 14px 32px rgba(0, 0, 0, 0.18),
+    inset 0 1px 0 rgba(255, 255, 255, 0.05);
+  backdrop-filter: blur(14px);
+  color: #f8fafc;
+  transform: translateX(-50%);
+  transition: transform 0.16s ease, box-shadow 0.16s ease, border-color 0.16s ease;
+}
+
+.ori-keyboard-nav-status.is-invalid {
+  border-color: rgba(255, 94, 94, 0.6);
+  box-shadow:
+    0 18px 46px rgba(0, 0, 0, 0.28),
+    0 0 0 1px rgba(255, 94, 94, 0.26);
+  transform: translate(-50%, 1px);
+}
+
+.ori-keyboard-nav-status-title {
+  font-size: 0.66rem;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.72);
+}
+
+.ori-keyboard-nav-status-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.ori-keyboard-nav-status-label {
+  font-size: 0.66rem;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.58);
+}
+
+.ori-keyboard-nav-status-text {
+  font-size: 0.88rem;
+  line-height: 1.45;
+  color: #fffaf5;
+}
+
+.ori-keyboard-nav-status-value {
+  display: inline-flex;
+  min-width: 2.2rem;
+  justify-content: center;
+  padding: 0.14rem 0.5rem;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.12);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  color: #fffaf5;
+  font-size: 0.8rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+}
+
+.ori-keyboard-nav-status-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.42rem;
+}
+
+.ori-keyboard-nav-status-pill {
+  display: inline-flex;
+  align-items: center;
+  min-height: 1.55rem;
+  padding: 0.18rem 0.55rem;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.08);
+  color: rgba(255, 255, 255, 0.8);
+  font-size: 0.72rem;
+  line-height: 1.2;
+}
+
+.ori-keyboard-nav-status-pill.is-active {
+  border-color: rgba(var(--primary-color-rgb, 255, 138, 86), 0.38);
+  background: rgba(var(--primary-color-rgb, 255, 138, 86), 0.16);
+  color: #fff8f2;
+}
+
+.ori-keyboard-nav-status-zones {
+  display: flex;
+  flex-direction: column;
+  gap: 0.36rem;
+  padding-top: 0.1rem;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.ori-keyboard-nav-hints {
+  position: fixed;
+  inset: 0;
+}
+
+.ori-keyboard-nav-regions {
+  position: fixed;
+  inset: 0;
+}
+
+.ori-keyboard-nav-region {
+  position: fixed;
+  border-radius: 20px;
+  border: 1px solid rgba(var(--primary-color-rgb, 255, 138, 86), 0.58);
+  background:
+    linear-gradient(180deg, rgba(var(--primary-color-rgb, 255, 138, 86), 0.1), rgba(var(--primary-color-rgb, 255, 138, 86), 0.03));
+  box-shadow:
+    0 0 0 1px rgba(255, 255, 255, 0.05),
+    0 18px 40px rgba(0, 0, 0, 0.16),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.04);
+  animation: ori-keyboard-nav-region-in 0.16s ease-out;
+}
+
+.ori-keyboard-nav-target {
+  position: fixed;
+  border-radius: 14px;
+  border: 2px solid rgba(var(--primary-color-rgb, 255, 138, 86), 0.78);
+  background: rgba(var(--primary-color-rgb, 255, 138, 86), 0.08);
+  box-shadow:
+    0 0 0 1px rgba(255, 255, 255, 0.08),
+    0 12px 28px rgba(0, 0, 0, 0.18);
+  animation: ori-keyboard-nav-region-in 0.14s ease-out;
+}
+
+.ori-keyboard-nav-region-label {
+  position: absolute;
+  top: -12px;
+  left: 14px;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.22rem 0.52rem;
+  border-radius: 999px;
+  background: rgba(12, 16, 24, 0.92);
+  border: 1px solid rgba(var(--primary-color-rgb, 255, 138, 86), 0.35);
+  color: #fff7ef;
+  font-size: 0.66rem;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.ori-keyboard-nav-hint {
+  position: fixed;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 2rem;
+  height: 1.55rem;
+  padding: 0 0.45rem;
+  border-radius: 999px;
+  border: 1px solid rgba(12, 17, 24, 0.42);
+  background:
+    linear-gradient(180deg, rgba(255, 247, 230, 0.98), rgba(255, 224, 181, 0.98));
+  box-shadow:
+    0 8px 18px rgba(15, 23, 42, 0.22),
+    inset 0 -1px 0 rgba(140, 84, 0, 0.14);
+  color: #2a1600;
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  line-height: 1;
+  text-transform: uppercase;
+  transform-origin: top left;
+  animation: ori-keyboard-nav-pop 0.14s ease-out;
+}
+
+.ori-keyboard-nav-hint[data-zone-selected="false"][data-state="match"] {
+  opacity: 0.38;
+  filter: saturate(0.7);
+}
+
+.ori-keyboard-nav-hint[data-zone-selected="true"] {
+  box-shadow:
+    0 10px 24px rgba(var(--primary-color-rgb, 255, 138, 86), 0.18),
+    inset 0 -1px 0 rgba(140, 84, 0, 0.14);
+}
+
+.ori-keyboard-nav-hint[data-nav-selected="true"] {
+  border-color: rgba(var(--primary-color-rgb, 255, 138, 86), 0.78);
+  box-shadow:
+    0 12px 28px rgba(var(--primary-color-rgb, 255, 138, 86), 0.26),
+    0 0 0 2px rgba(255, 255, 255, 0.18);
+  transform: scale(1.05);
+}
+
+.ori-keyboard-nav-hint[data-state="match"] {
+  background:
+    linear-gradient(180deg, rgba(255, 235, 199, 1), rgba(255, 203, 125, 1));
+}
+
+.ori-keyboard-nav-hint[data-state="exact"] {
+  background:
+    linear-gradient(180deg, rgba(var(--primary-color-rgb, 255, 138, 86), 0.98), rgba(var(--primary-color-rgb, 255, 138, 86), 0.88));
+  color: #fff8f2;
+  border-color: rgba(var(--primary-color-rgb, 255, 138, 86), 0.7);
+  box-shadow:
+    0 10px 22px rgba(var(--primary-color-rgb, 255, 138, 86), 0.28),
+    0 0 0 1px rgba(255, 255, 255, 0.12);
+}
+
+.ori-keyboard-nav-hint[data-zone="navbar"]:not([data-state="exact"]) {
+  background:
+    linear-gradient(180deg, rgba(225, 241, 255, 0.98), rgba(181, 216, 255, 0.98));
+  color: #09213b;
+}
+
+.ori-keyboard-nav-hint[data-zone="sidebar"]:not([data-state="exact"]) {
+  background:
+    linear-gradient(180deg, rgba(230, 250, 239, 0.98), rgba(180, 237, 205, 0.98));
+  color: #0b2f1f;
+}
+
+.ori-keyboard-nav-hint[data-zone="panel"]:not([data-state="exact"]) {
+  background:
+    linear-gradient(180deg, rgba(224, 246, 246, 0.98), rgba(170, 225, 222, 0.98));
+  color: #082a2d;
+}
+
+.ori-keyboard-nav-hint[data-zone="modal"]:not([data-state="exact"]) {
+  background:
+    linear-gradient(180deg, rgba(255, 235, 225, 0.98), rgba(255, 204, 184, 0.98));
+  color: #3a1808;
+}
+
+.ori-keyboard-nav-hint[data-zone="chat"]:not([data-state="exact"]) {
+  background:
+    linear-gradient(180deg, rgba(238, 241, 247, 0.98), rgba(202, 213, 229, 0.98));
+  color: #162235;
+}
+
+@keyframes ori-keyboard-nav-pop {
+  from {
+    opacity: 0;
+    transform: scale(0.92);
+  }
+
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes ori-keyboard-nav-region-in {
+  from {
+    opacity: 0;
+    transform: scale(0.985);
+  }
+
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@media (max-width: 720px) {
+  .ori-keyboard-nav-status {
+    top: calc(var(--navbar-offset, 76px) + 10px);
+    width: min(380px, calc(100vw - 24px));
+    max-width: none;
+  }
+}

@@ -1,11 +1,12 @@
 {{define "task-modal"}}
 <!-- Shared Task Modal (for creating/editing tasks) -->
-<div id="taskModal" class="task-modal" style="display: none;">
+<div id="taskModal" class="task-modal" style="display: none;" aria-hidden="true">
   <div class="task-modal-backdrop"></div>
-  <div class="task-modal-content">
+  <div class="task-modal-content" role="dialog" aria-modal="true" aria-labelledby="taskModalTitle" aria-describedby="taskModalDescriptionText" tabindex="-1">
     <div class="task-modal-header">
       <div style="display: flex; flex-direction: column; gap: 4px;">
         <h6 class="task-modal-title" id="taskModalTitle">Add Task</h6>
+        <p id="taskModalDescriptionText" class="visually-hidden">Create or update a task, configure workflow steps, scheduling, and attachments.</p>
         <!-- Workspace badge (shown when workspace is pre-selected) -->
         <div id="taskModalWorkspaceBadge" style="display: none; font-size: 0.75rem; color: var(--text-secondary);">
           <span style="display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px; background: var(--bg-tertiary); border-radius: 4px;">
@@ -361,12 +362,12 @@
           <label class="task-modal-label" style="margin: 0;">Attachments <span class="task-modal-optional">(optional)</span></label>
         </div>
         <div style="display: flex; gap: 8px; align-items: stretch;">
-          <div id="taskModalFileDropZone" class="task-file-drop-zone" style="flex: 1;">
+          <div id="taskModalFileDropZone" class="task-file-drop-zone" style="flex: 1;" role="button" tabindex="0" aria-controls="taskModalFileInput" aria-describedby="taskModalFileDropHint" aria-label="Attach files">
             <div class="task-file-drop-content">
               <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" style="color: var(--text-secondary); opacity: 0.6;">
                 <path d="M14,2H6A2,2 0 0,0 4,4V20A2,2 0 0,0 6,22H18A2,2 0 0,0 20,20V8L14,2M13.5,16V19H10.5V16H8L12,12L16,16H13.5M13,9V3.5L18.5,9H13Z"/>
               </svg>
-              <span style="color: var(--text-secondary); font-size: 0.8rem;">Drop files or click to attach (max 100MB)</span>
+              <span id="taskModalFileDropHint" style="color: var(--text-secondary); font-size: 0.8rem;">Drop files or click to attach (max 100MB)</span>
             </div>
             <input type="file" id="taskModalFileInput" multiple style="display: none;">
           </div>

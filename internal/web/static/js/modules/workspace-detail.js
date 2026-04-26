@@ -63,6 +63,33 @@ function getDisplayStatus(status) {
   return statusMap[status] || status;
 }
 
+function buildWorkspaceSlugConflictMessage(conflict) {
+  const requestedSlug = typeof conflict?.requested_slug === 'string' ? conflict.requested_slug.trim() : '';
+  const suggestedSlug = typeof conflict?.suggested_slug === 'string' ? conflict.suggested_slug.trim() : '';
+  const location = typeof conflict?.location === 'string' ? conflict.location.trim().replace(/[\\/]+$/, '') : '';
+  const suggestedPath = location && suggestedSlug ? `${location}/${suggestedSlug}` : '';
+
+  const parts = [
+    `A workspace folder named "${requestedSlug || 'this workspace'}" already exists on disk.`
+  ];
+  if (suggestedSlug) {
+    parts.push(`Rename this workspace with the folder name "${suggestedSlug}" instead?`);
+  }
+  if (suggestedPath) {
+    parts.push(`Folder: ${suggestedPath}`);
+  }
+  return parts.join('\n\n');
+}
+
+function slugifyWorkspaceName(value) {
+  return String(value || '')
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .replace(/-{2,}/g, '-');
+}
+
 const AGENT_CREATION_SKILL_CATALOG_AGENT = '__ori_agent_create_catalog__';
 
 const TASK_REQUIREMENT_KEYS = Object.freeze({
@@ -71,6 +98,7 @@ const TASK_REQUIREMENT_KEYS = Object.freeze({
 });
 
 const TASK_ASSIST_PENDING_SPECIALIST_STORAGE_KEY = 'workspace-detail-task-assist-specialist';
+const ENTRY_AGENT_PROMPT_DISMISSED_STORAGE_PREFIX = 'workspace-detail-entry-agent-prompt-dismissed:';
 
 const TASK_ASSIST_TRAVEL_SPECIALISTS = Object.freeze({
   travel_itinerary: Object.freeze({
@@ -143,6 +171,8 @@ export class WorkspaceDetailPage {
     this.agentOptions = null;
     this.agentCatalog = [];
     this.agentIndex = new Map();
+    this.providerCatalog = [];
+    this.providerCatalogPromise = null;
     this.agentSkillsCache = new Map();
     this.agentSkillsPromises = new Map();
     this.availableMCPServers = [];
@@ -157,11 +187,22 @@ export class WorkspaceDetailPage {
     this.activeWorkspaceSkillMode = 'create';
     this.workspaceSettings = null;
     this.workspaceSettingsEffectiveBehavior = null;
+    this.workspaceIntentReviewPlan = null;
+    this.workspaceIntentReviewLoading = false;
+    this.workspaceIntentApplyLoading = false;
     this.workspaceConfigExpanded = false;
     this.workspaceConfigPreferenceLoaded = false;
+    this.agentCatalogLoaded = false;
+    this.agentCatalogLoadFailed = false;
+    this.filesLoaded = false;
+    this.filesLoadFailed = false;
+    this.workspaceHealthCheckRunning = false;
+    this.uiSmokeTestRunning = false;
+    this.uiSmokeTestResult = null;
     this.capabilitySuggestionCatalog = null;
     this.capabilitySuggestionCatalogPromise = null;
     this.flippedAgentCards = new Set();
+    this.collapsedWorkflows = new Set();
     this.boardDidDrag = false;
     this.currentTaskResultText = '';
     this.currentTaskResultTaskId = '';
@@ -171,6 +212,7 @@ export class WorkspaceDetailPage {
     this.currentBlockedTask = null;
     this.currentAssistRecommendation = null;
     this.currentAssistSpecialistAction = null;
+    this.taskAssistResponseExpanded = false;
     this.currentExecutionTaskId = null;
     this.executionMonitorTimer = null;
     this.executionLogKeys = new Set();
@@ -178,6 +220,7 @@ export class WorkspaceDetailPage {
     this.pendingTaskConfirm = null;
     this.pendingTaskConfirmSelection = { stepThrough: false };
     this.pendingAssistSpecialistResumeChecked = false;
+    this.activeAgentModelEdit = null;
 
     // DOM elements
     this.elements = {};
@@ -214,10 +257,19 @@ export class WorkspaceDetailPage {
       this.loadDirectories(),
       this.loadSchedules()
     ]);
-    this.maybeResumePendingAssistSpecialistHandoff();
+    const restoredBlockedTask = this.restoreTaskAssistPageFromRoute();
+    if (!restoredBlockedTask) {
+      this.maybeResumePendingAssistSpecialistHandoff();
+    }
     this.activateWorkspace();
     this.setupRealtime();
-    this.checkAutoOpenCreateAgent();
+    if (restoredBlockedTask) {
+      this.scheduleTaskAssistScrollReset(this.elements.taskAssistPage);
+      window.setTimeout(() => this.scheduleTaskAssistScrollReset(this.elements.taskAssistPage), 360);
+    }
+    if (!restoredBlockedTask && !this.checkAutoOpenCreateAgent()) {
+      await this.maybePromptForMissingEntryAgent();
+    }
   }
 
   ensureScrollablePanelAccessibility() {
@@ -289,8 +341,8 @@ export class WorkspaceDetailPage {
     if (noteCount === 0) {
       this.setHomeAssistantQuickPrompt(
         homeAssistantQuickNotesBtn,
-        'Create Brief',
-        `/note # ${workspaceName} Brief\n## Goal\n- \n## Constraints\n- \n## Open Questions\n- `
+        'Create Description',
+        `/note # Workspace Description\n## Description\n- \n## Apps and Systems\n- \n## Key Files or Context\n- \n## Special Capabilities or Workflows\n- `
       );
     } else {
       this.setHomeAssistantQuickPrompt(
@@ -1063,6 +1115,16 @@ export class WorkspaceDetailPage {
       workflowLinksPanel: document.getElementById('workspace-detail-workflow-links-panel'),
       workflowLinksList: document.getElementById('workspace-detail-workflow-links-list'),
       workflowLinksCount: document.getElementById('workspace-detail-workflow-links-count'),
+      healthPanel: document.getElementById('workspace-detail-health-panel'),
+      healthSummary: document.getElementById('workspace-detail-health-summary'),
+      healthBadge: document.getElementById('workspace-detail-health-badge'),
+      healthMeta: document.getElementById('workspace-detail-health-meta'),
+      healthList: document.getElementById('workspace-detail-health-list'),
+      healthRefreshBtn: document.getElementById('workspace-detail-health-refresh'),
+      healthRefreshLabel: document.getElementById('workspace-detail-health-refresh-label'),
+      uiSmokeTestBtn: document.getElementById('workspace-detail-ui-smoke-test'),
+      uiSmokeTestLabel: document.getElementById('workspace-detail-ui-smoke-test-label'),
+      uiSmokeTestResult: document.getElementById('workspace-detail-ui-smoke-result'),
 
       // Stats
       agentCount: document.getElementById('workspace-agent-count'),
@@ -1082,6 +1144,20 @@ export class WorkspaceDetailPage {
       mcpList: document.getElementById('workspace-detail-mcp-list'),
       settingsSummary: document.getElementById('workspace-detail-settings-summary'),
       settingsManagedSkills: document.getElementById('workspace-detail-settings-managed-skills'),
+      intentForm: document.getElementById('workspace-detail-intent-form'),
+      intentDescriptionInput: document.getElementById('workspace-detail-intent-description'),
+      intentSystemsInput: document.getElementById('workspace-detail-intent-systems'),
+      intentCapabilitiesInput: document.getElementById('workspace-detail-intent-capabilities'),
+      intentContextInput: document.getElementById('workspace-detail-intent-context'),
+      intentSummary: document.getElementById('workspace-detail-intent-summary'),
+      intentStatus: document.getElementById('workspace-detail-intent-status'),
+      intentSaveBtn: document.getElementById('workspace-detail-intent-save'),
+      intentReviewBtn: document.getElementById('workspace-detail-intent-review'),
+      intentApplyBtn: document.getElementById('workspace-detail-intent-apply'),
+      intentReviewPanel: document.getElementById('workspace-detail-intent-review-panel'),
+      intentReviewSummary: document.getElementById('workspace-detail-intent-review-summary'),
+      intentReviewResults: document.getElementById('workspace-detail-intent-review-results'),
+      intentReviewMeta: document.getElementById('workspace-detail-intent-review-meta'),
       skillsList: document.getElementById('workspace-detail-skills-list'),
       schedulesList: document.getElementById('workspace-detail-schedules-list'),
       childrenList: document.getElementById('workspace-detail-children-list'),
@@ -1162,11 +1238,24 @@ export class WorkspaceDetailPage {
       taskConfirmConfirmBtn: document.getElementById('workspace-detail-task-confirm-confirm'),
 
       // Assist modal
-      taskAssistModal: document.getElementById('workspace-detail-task-assist-modal'),
+      workspaceDetailView: document.getElementById('workspace-detail-view'),
+      taskAssistPage: document.getElementById('workspace-detail-task-assist-page'),
+      taskAssistBackBtn: document.getElementById('workspace-detail-task-assist-back'),
       taskAssistId: document.getElementById('workspace-detail-task-assist-id'),
+      taskAssistAgentName: document.getElementById('workspace-detail-task-assist-agent-name'),
       taskAssistMeta: document.getElementById('workspace-detail-task-assist-meta'),
       taskAssistReason: document.getElementById('workspace-detail-task-assist-reason'),
+      taskAssistContextScroll: document.getElementById('workspace-detail-task-assist-context-scroll'),
+      taskAssistAnswerScroll: document.getElementById('workspace-detail-task-assist-answer-scroll'),
+      taskAssistSummaryWrap: document.getElementById('workspace-detail-task-assist-summary-wrap'),
+      taskAssistSummaryKnown: document.getElementById('workspace-detail-task-assist-summary-known'),
+      taskAssistSummaryNeeds: document.getElementById('workspace-detail-task-assist-summary-needs'),
+      taskAssistSummaryNext: document.getElementById('workspace-detail-task-assist-summary-next'),
+      taskAssistQuestionWrap: document.getElementById('workspace-detail-task-assist-question-wrap'),
       taskAssistQuestion: document.getElementById('workspace-detail-task-assist-question'),
+      taskAssistFormWrap: document.getElementById('workspace-detail-task-assist-form-wrap'),
+      taskAssistFormSummary: document.getElementById('workspace-detail-task-assist-form-summary'),
+      taskAssistFormFields: document.getElementById('workspace-detail-task-assist-form-fields'),
       taskAssistRecommendationWrap: document.getElementById('workspace-detail-task-assist-recommendation-wrap'),
       taskAssistRecommendation: document.getElementById('workspace-detail-task-assist-recommendation'),
       taskAssistChoiceWrap: document.getElementById('workspace-detail-task-assist-choice-wrap'),
@@ -1178,6 +1267,8 @@ export class WorkspaceDetailPage {
       taskAssistAgent: document.getElementById('workspace-detail-task-assist-agent'),
       taskAssistMessage: document.getElementById('workspace-detail-task-assist-message'),
       taskAssistResponseWrap: document.getElementById('workspace-detail-task-assist-response-wrap'),
+      taskAssistResponsePreview: document.getElementById('workspace-detail-task-assist-response-preview'),
+      taskAssistResponseToggle: document.getElementById('workspace-detail-task-assist-response-toggle'),
       taskAssistResponse: document.getElementById('workspace-detail-task-assist-response'),
       taskAssistRetryBtn: document.getElementById('workspace-detail-task-assist-retry'),
       taskAssistContinueBtn: document.getElementById('workspace-detail-task-assist-continue'),
@@ -1190,6 +1281,13 @@ export class WorkspaceDetailPage {
       addAgentEmpty: document.getElementById('workspace-detail-add-agent-empty'),
       addAgentSubmitBtn: document.getElementById('workspace-detail-add-agent-submit'),
       createAgentBtn: document.getElementById('workspace-detail-create-agent-btn'),
+      agentModelModal: document.getElementById('workspace-detail-agent-model-modal'),
+      agentModelTitle: document.getElementById('workspace-detail-agent-model-title'),
+      agentModelAgentName: document.getElementById('workspace-detail-agent-model-agent-name'),
+      agentModelCurrent: document.getElementById('workspace-detail-agent-model-current'),
+      agentModelSelect: document.getElementById('workspace-detail-agent-model-select'),
+      agentModelHelp: document.getElementById('workspace-detail-agent-model-help'),
+      agentModelSubmitBtn: document.getElementById('workspace-detail-agent-model-submit'),
 
       // Workspace MCP modal
       mcpModal: document.getElementById('workspace-detail-mcp-modal'),
@@ -1306,7 +1404,7 @@ export class WorkspaceDetailPage {
     this.elements.copyNotesBtn?.addEventListener('click', () => this.copyAllNotesToClipboard());
 
     // Directory buttons
-    this.elements.addDirectoryBtn?.addEventListener('click', () => this.showAddDirectoryModal());
+    this.elements.addDirectoryBtn?.addEventListener('click', () => this.showAddDirectoryModal(this.elements.addDirectoryBtn));
     this.elements.addMcpBtn?.addEventListener('click', () => this.openWorkspaceMCPModal());
     this.bindDirectoryExplorerEvents();
     this.elements.refreshMcpBtn?.addEventListener('click', async () => {
@@ -1338,6 +1436,22 @@ export class WorkspaceDetailPage {
     // Workspace settings
     this.elements.configToggleBtn?.addEventListener('click', () => this.toggleWorkspaceConfigExpanded());
     this.elements.refreshSettingsBtn?.addEventListener('click', () => this.loadWorkspace());
+    this.elements.healthRefreshBtn?.addEventListener('click', () => this.refreshWorkspaceHealth());
+    this.elements.uiSmokeTestBtn?.addEventListener('click', () => this.runUISmokeTest());
+    this.elements.intentForm?.addEventListener('submit', (event) => {
+      event.preventDefault();
+      this.saveWorkspaceIntent();
+    });
+    this.elements.intentReviewBtn?.addEventListener('click', () => this.reviewWorkspaceIntentSetup());
+    this.elements.intentApplyBtn?.addEventListener('click', () => this.applyWorkspaceIntentReview());
+    [
+      this.elements.intentDescriptionInput,
+      this.elements.intentSystemsInput,
+      this.elements.intentCapabilitiesInput,
+      this.elements.intentContextInput
+    ].forEach((input) => {
+      input?.addEventListener('input', () => this.clearWorkspaceIntentReview());
+    });
     this.elements.settingsForm?.addEventListener('submit', (event) => {
       event.preventDefault();
       this.saveWorkspaceSettings();
@@ -1411,15 +1525,21 @@ export class WorkspaceDetailPage {
     this.elements.taskConfirmCancelBtn?.addEventListener('click', () => this.handleTaskConfirmChoice(false));
     this.elements.taskConfirmConfirmBtn?.addEventListener('click', () => this.handleTaskConfirmChoice(true));
     this.elements.taskConfirmModal?.addEventListener('hidden.bs.modal', () => this.handleTaskConfirmHidden());
+    this.elements.taskAssistBackBtn?.addEventListener('click', () => this.closeTaskAssistPage({ replaceRoute: true }));
     this.elements.taskAssistRetryBtn?.addEventListener('click', () => this.submitTaskAssist('retry'));
     this.elements.taskAssistContinueBtn?.addEventListener('click', () => this.submitTaskAssist('continue_with_instruction'));
     this.elements.taskAssistSwitchBtn?.addEventListener('click', () => this.submitTaskAssist('switch_agent_retry'));
     this.elements.taskAssistFailBtn?.addEventListener('click', () => this.submitTaskAssist('mark_failed'));
     this.elements.taskAssistSpecialistActionBtn?.addEventListener('click', () => this.handleAssistSpecialistAction());
+    this.elements.taskAssistResponseToggle?.addEventListener('click', () => this.toggleAssistResponseExpanded());
     this.elements.taskAssistAgent?.addEventListener('change', () => this.updateAssistSwitchButtonState());
+    window.addEventListener('popstate', () => this.restoreTaskAssistPageFromRoute());
     this.elements.addAgentSubmitBtn?.addEventListener('click', () => this.addSelectedAgentToWorkspace());
     this.elements.createAgentBtn?.addEventListener('click', () => this.openCreateAgentFlow());
     this.elements.addAgentModal?.addEventListener('show.bs.modal', () => { this.populateAddAgentOptions(); });
+    this.elements.agentModelSelect?.addEventListener('change', () => this.updateAgentModelSelectionSummary());
+    this.elements.agentModelSubmitBtn?.addEventListener('click', () => this.submitAgentModelChange());
+    this.elements.agentModelModal?.addEventListener('hidden.bs.modal', () => this.resetAgentModelModal());
 
     // Make workspace name and description editable
     this.makeEditable(this.elements.workspaceName, 'name', false);
@@ -1562,6 +1682,39 @@ export class WorkspaceDetailPage {
     return response.json();
   }
 
+  async renameWorkspace(newName, folderSlug = '') {
+    const payload = { name: newName };
+    if (folderSlug) {
+      payload.folder_slug = folderSlug;
+    }
+
+    const response = await fetch(`/api/workspaces/${encodeURIComponent(this.workspaceId)}/rename`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+
+    const result = await response.json().catch(() => ({}));
+    if (response.status === 409 && result?.conflict?.type === 'folder_slug') {
+      const suggestedSlug = typeof result.conflict.suggested_slug === 'string'
+        ? result.conflict.suggested_slug.trim()
+        : '';
+      if (suggestedSlug && window.confirm(buildWorkspaceSlugConflictMessage(result.conflict))) {
+        return this.renameWorkspace(newName, suggestedSlug);
+      }
+      const cancelled = new Error(result?.error || 'Workspace rename cancelled');
+      cancelled.cancelled = true;
+      throw cancelled;
+    }
+
+    if (!response.ok) {
+      const message = result?.error || result?.message || 'Failed to rename workspace';
+      throw new Error(message);
+    }
+
+    return result;
+  }
+
   /**
    * Create inline editable element
    * @param {HTMLElement} element - The element to make editable
@@ -1615,23 +1768,53 @@ export class WorkspaceDetailPage {
         }
 
         try {
-          await this.updateWorkspace({ [field]: newValue });
-          element.textContent = newValue || (field === 'description' ? 'No description' : 'Workspace');
+          let result;
+          if (field === 'name') {
+            result = await this.renameWorkspace(newValue);
+          } else {
+            result = await this.updateWorkspace({ [field]: newValue });
+          }
 
-          // Update local workspace object
-          if (this.workspace) {
+          const updatedWorkspace = result?.folder || result?.workspace || null;
+          if (updatedWorkspace && typeof updatedWorkspace === 'object') {
+            this.workspace = {
+              ...(this.workspace || {}),
+              ...updatedWorkspace
+            };
+          } else if (this.workspace) {
             this.workspace[field] = newValue;
+            if (field === 'description') {
+              this.workspace.shared_data = this.workspace.shared_data && typeof this.workspace.shared_data === 'object'
+                ? this.workspace.shared_data
+                : {};
+              this.workspace.shared_data.workspace_bootstrap = {
+                ...(this.workspace.shared_data.workspace_bootstrap || {}),
+                goal: newValue
+              };
+            }
           }
 
-          // Update breadcrumb if name changed
-          if (field === 'name' && this.elements.workspaceBreadcrumb) {
-            this.elements.workspaceBreadcrumb.textContent = newValue || 'Workspace';
+          await this.renderWorkspaceInfo();
+          if (field === 'description') {
+            await this.loadNotes();
           }
 
-          if (window.Toast) window.Toast.success(`${field === 'name' ? 'Name' : 'Description'} updated`);
+          if (window.Toast) {
+            if (field === 'name') {
+              const appliedSlug = String(updatedWorkspace?.folder_slug || '').trim();
+              const expectedSlug = slugifyWorkspaceName(newValue);
+              window.Toast.success(
+                appliedSlug && expectedSlug && appliedSlug !== expectedSlug
+                  ? `Workspace renamed. Folder saved as "${appliedSlug}".`
+                  : 'Workspace renamed'
+              );
+            } else {
+              window.Toast.success('Description updated');
+            }
+          }
         } catch (err) {
           console.error(`Failed to update ${field}:`, err);
-          if (window.Toast) window.Toast.error(`Failed to update ${field}`);
+          if (!err?.cancelled && window.Toast) window.Toast.error(err.message || `Failed to update ${field}`);
         }
       };
 
@@ -1693,9 +1876,11 @@ export class WorkspaceDetailPage {
       this.renderWorkspaceSkillBindings();
       this.renderAgentGroups();
       this.refreshHomeAssistantQuickPrompts();
+      this.renderWorkspaceHealth();
     } catch (error) {
       console.error('Failed to load workspace:', error);
       if (window.Toast) window.Toast.error('Failed to load workspace');
+      this.renderWorkspaceHealth();
     }
   }
 
@@ -1725,6 +1910,7 @@ export class WorkspaceDetailPage {
     }
 
     this.renderWorkspaceWorkflowLinks();
+    this.renderWorkspaceIntent();
 
     // Update stats
     const agents = this.workspace.agent_instances || [];
@@ -1734,6 +1920,900 @@ export class WorkspaceDetailPage {
 
     // Load children workspaces from tree API
     await this.loadChildren();
+    this.renderWorkspaceHealth();
+  }
+
+  getWorkspaceHealthAgentReferences() {
+    if (!this.workspace) return [];
+
+    const seen = new Map();
+    const add = (name, { isEntryAgent = false } = {}) => {
+      const trimmed = String(name || '').trim();
+      if (!trimmed || trimmed.toLowerCase() === 'unassigned') return;
+      const key = this.normalizeAgentName(trimmed);
+      if (!key) return;
+
+      const existing = seen.get(key);
+      if (existing) {
+        if (isEntryAgent) {
+          existing.isEntryAgent = true;
+        }
+        return;
+      }
+
+      seen.set(key, { name: trimmed, isEntryAgent: Boolean(isEntryAgent) });
+    };
+
+    const sharedEntryAgentName = String(this.workspace.shared_data?.entry_agent_name || '').trim();
+    add(sharedEntryAgentName, { isEntryAgent: true });
+    add(this.workspace.entry_agent_name, { isEntryAgent: true });
+    if (Array.isArray(this.workspace.agent_instances)) {
+      this.workspace.agent_instances.forEach((instance) => add(instance?.name, { isEntryAgent: Boolean(instance?.entry_point || instance?.entryPoint) }));
+    }
+    if (Array.isArray(this.workspace.agents)) {
+      this.workspace.agents.forEach((name) => add(name));
+    }
+
+    return Array.from(seen.values());
+  }
+
+  hasWorkspaceEntryAgentReference() {
+    if (!this.workspace) return false;
+
+    if (String(this.workspace.entry_agent_name || '').trim()) return true;
+    if (String(this.workspace.shared_data?.entry_agent_name || '').trim()) return true;
+
+    if (Array.isArray(this.workspace.agent_instances)) {
+      return this.workspace.agent_instances.some((instance) => (
+        Boolean(instance?.entry_point || instance?.entryPoint)
+        && String(instance?.name || '').trim()
+      ));
+    }
+
+    return false;
+  }
+
+  collectWorkspaceHealthIssues() {
+    const issues = [];
+    const references = this.getWorkspaceHealthAgentReferences();
+
+    if (!this.hasWorkspaceEntryAgentReference()) {
+      const defaults = this.buildWorkspaceEntryAgentDefaults();
+      const workspaceName = String(this.workspace?.name || '').trim() || 'This workspace';
+      issues.push({
+        category: 'agent',
+        severity: 'error',
+        title: 'Entry agent is missing',
+        description: 'This workspace has no entry agent assigned. Create one so chats, routing, and task orchestration have a default manager.',
+        action: 'entry_agent',
+        actionLabel: 'Create Entry Agent',
+        agentName: defaults.seedName || 'Workspace Manager',
+        meta: [workspaceName, 'No entry agent']
+      });
+    }
+
+    if (this.agentCatalogLoadFailed) {
+      issues.push({
+        category: 'verification',
+        severity: 'warning',
+        title: 'Agent catalog could not be verified',
+        description: 'The workspace health check could not compare workspace agents against the current runnable agent catalog.',
+        meta: ['Agent verification unavailable']
+      });
+    } else {
+      references.forEach((reference) => {
+        if (this.getAgentProfile(reference.name)) return;
+        issues.push({
+          category: 'agent',
+          severity: 'error',
+          title: reference.isEntryAgent ? 'Entry agent is missing' : 'Workspace agent is missing',
+          description: reference.isEntryAgent
+            ? `"${reference.name}" is still assigned as the workspace entry agent, but the runnable agent definition no longer exists.`
+            : `"${reference.name}" is still linked to this workspace, but the runnable agent definition no longer exists.`,
+          action: reference.isEntryAgent ? 'entry_agent' : 'agent',
+          actionLabel: reference.isEntryAgent ? 'Create Entry Agent' : 'Recreate Agent',
+          agentName: reference.name,
+          meta: [reference.name, reference.isEntryAgent ? 'Entry agent' : 'Workspace member']
+        });
+      });
+    }
+
+    if (this.filesLoadFailed) {
+      issues.push({
+        category: 'verification',
+        severity: 'warning',
+        title: 'Linked files could not be verified',
+        description: 'The workspace health check could not load the current file attachments, so broken file links could not be confirmed.',
+        meta: ['File verification unavailable']
+      });
+    } else if (Array.isArray(this.files)) {
+      this.files.forEach((file) => {
+        const meta = file?.file_meta && typeof file.file_meta === 'object' ? file.file_meta : null;
+        if (!meta) return;
+
+        const title = String(file?.title || meta?.name || 'Untitled File').trim() || 'Untitled File';
+        const hasLinkTarget = [meta.relative_path, meta.original_path, meta.url]
+          .some((value) => String(value || '').trim());
+        const pathLabel = String(meta.relative_path || meta.original_path || meta.url || '').trim();
+
+        if (String(meta.status || '').trim().toLowerCase() === 'missing') {
+          issues.push({
+            category: 'file',
+            severity: 'warning',
+            title: 'Linked file is missing',
+            description: `"${title}" no longer resolves to a file on disk. Relink it so the workspace can use it again.`,
+            action: 'file',
+            actionLabel: 'Relink File',
+            fileId: String(file?.id || '').trim(),
+            meta: [title, pathLabel || 'Missing file']
+          });
+          return;
+        }
+
+        if (!hasLinkTarget) {
+          issues.push({
+            category: 'file',
+            severity: 'warning',
+            title: 'File link is incomplete',
+            description: `"${title}" has file metadata but no valid link target. Relink it to restore a usable file reference.`,
+            action: 'file',
+            actionLabel: 'Relink File',
+            fileId: String(file?.id || '').trim(),
+            meta: [title, 'No file path stored']
+          });
+        }
+      });
+    }
+
+    return issues;
+  }
+
+  summarizeWorkspaceHealth() {
+    const waitingOnSources = !this.workspace || !this.agentCatalogLoaded || !this.filesLoaded;
+    if (this.workspaceHealthCheckRunning || waitingOnSources) {
+      return {
+        status: 'checking',
+        badge: 'Checking',
+        summary: 'Verifying workspace agent references and linked files...',
+        meta: [
+          !this.agentCatalogLoaded ? 'Agents: checking' : 'Agents: ready',
+          !this.filesLoaded ? 'Files: checking' : 'Files: ready'
+        ],
+        issues: []
+      };
+    }
+
+    const issues = this.collectWorkspaceHealthIssues();
+    const errorCount = issues.filter((issue) => issue.severity === 'error').length;
+    const agentIssueCount = issues.filter((issue) => issue.category === 'agent').length;
+    const fileIssueCount = issues.filter((issue) => issue.category === 'file').length;
+    const verificationIssueCount = issues.filter((issue) => issue.category === 'verification').length;
+
+    if (issues.length === 0) {
+      return {
+        status: 'healthy',
+        badge: 'Healthy',
+        summary: 'No missing agents or broken file links were detected in this workspace.',
+        meta: ['Agents: healthy', 'Files: healthy'],
+        issues: []
+      };
+    }
+
+    const parts = [];
+    if (agentIssueCount > 0) {
+      parts.push(`${agentIssueCount} missing agent${agentIssueCount === 1 ? '' : 's'}`);
+    }
+    if (fileIssueCount > 0) {
+      parts.push(`${fileIssueCount} linked file issue${fileIssueCount === 1 ? '' : 's'}`);
+    }
+    if (verificationIssueCount > 0) {
+      parts.push(`${verificationIssueCount} verification warning${verificationIssueCount === 1 ? '' : 's'}`);
+    }
+    const attentionVerb = issues.length === 1 ? 'needs' : 'need';
+
+    return {
+      status: errorCount > 0 ? 'error' : 'warning',
+      badge: errorCount > 0 ? 'Needs Attention' : 'Warnings',
+      summary: `${parts.join(' and ')} ${attentionVerb} attention before this workspace is fully reliable.`,
+      meta: [
+        agentIssueCount > 0 ? `Agents: ${agentIssueCount} issue${agentIssueCount === 1 ? '' : 's'}` : 'Agents: healthy',
+        fileIssueCount > 0 ? `Files: ${fileIssueCount} issue${fileIssueCount === 1 ? '' : 's'}` : 'Files: healthy',
+        verificationIssueCount > 0 ? `Checks: ${verificationIssueCount} unavailable` : 'Checks: complete'
+      ],
+      issues
+    };
+  }
+
+  renderWorkspaceHealthEmptyState() {
+    return `
+      <div class="workspace-detail-health-empty">
+        <div class="workspace-detail-health-empty-icon">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+            <path d="M9,16.17L4.83,12L3.41,13.41L9,19L21,7L19.59,5.59L9,16.17Z"/>
+          </svg>
+        </div>
+        <div>
+          <div class="workspace-detail-health-empty-title">Workspace looks healthy</div>
+          <p class="workspace-detail-health-empty-copy">All workspace agents resolve to runnable definitions, and every linked file that was checked still points at a usable file target.</p>
+        </div>
+      </div>
+    `;
+  }
+
+  renderWorkspaceHealthIssue(issue) {
+    const severity = issue?.severity === 'error' ? 'error' : 'warning';
+    const iconPath = severity === 'error'
+      ? '<path d="M13,13H11V7H13M13,17H11V15H13M12,2A10,10 0 0,0 2,12A10,10 0 0,0 12,22A10,10 0 0,0 22,12A10,10 0 0,0 12,2Z"/>'
+      : '<path d="M13,14H11V9H13M13,18H11V16H13M1,21H23L12,2"/>'
+      ;
+    const meta = Array.isArray(issue?.meta) ? issue.meta.filter(Boolean) : [];
+    let actionMarkup = '';
+
+    if (issue?.action === 'entry_agent' && issue?.agentName) {
+      actionMarkup = `
+        <button type="button"
+                class="workspace-detail-panel-btn workspace-detail-health-action"
+                onclick="window.workspaceDetail?.openWorkspaceHealthAgentRecovery('${encodeURIComponent(issue.agentName)}', 'entry')">
+          ${this.escapeHtml(issue.actionLabel || 'Create Entry Agent')}
+        </button>
+      `;
+    } else if (issue?.action === 'agent' && issue?.agentName) {
+      actionMarkup = `
+        <button type="button"
+                class="workspace-detail-panel-btn workspace-detail-health-action"
+                onclick="window.workspaceDetail?.openWorkspaceHealthAgentRecovery('${encodeURIComponent(issue.agentName)}', 'agent')">
+          ${this.escapeHtml(issue.actionLabel || 'Recreate Agent')}
+        </button>
+      `;
+    } else if (issue?.action === 'file' && issue?.fileId) {
+      actionMarkup = `
+        <button type="button"
+                class="workspace-detail-panel-btn workspace-detail-health-action"
+                onclick="window.workspaceDetail?.openWorkspaceHealthFileRecovery('${this.escapeHtml(issue.fileId)}')">
+          ${this.escapeHtml(issue.actionLabel || 'Relink File')}
+        </button>
+      `;
+    }
+
+    return `
+      <div class="workspace-detail-health-issue is-${severity}">
+        <div class="workspace-detail-health-issue-icon">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">${iconPath}</svg>
+        </div>
+        <div>
+          <div class="workspace-detail-health-issue-title">${this.escapeHtml(issue?.title || 'Workspace issue')}</div>
+          <p class="workspace-detail-health-issue-copy">${this.escapeHtml(issue?.description || '')}</p>
+          ${meta.length > 0 ? `
+            <div class="workspace-detail-health-issue-meta">
+              ${meta.map((item) => `<span class="workspace-detail-health-issue-pill">${this.escapeHtml(item)}</span>`).join('')}
+            </div>
+          ` : ''}
+        </div>
+        ${actionMarkup}
+      </div>
+    `;
+  }
+
+  renderWorkspaceHealth() {
+    if (!this.elements.healthPanel || !this.elements.healthSummary || !this.elements.healthBadge || !this.elements.healthMeta || !this.elements.healthList) {
+      return;
+    }
+
+    const health = this.summarizeWorkspaceHealth();
+    this.elements.healthSummary.textContent = health.summary;
+    this.elements.healthBadge.textContent = health.badge;
+    this.elements.healthBadge.className = `workspace-detail-health-badge is-${health.status}`;
+    this.elements.healthMeta.innerHTML = Array.isArray(health.meta)
+      ? health.meta.map((item) => `<span class="workspace-detail-health-chip">${this.escapeHtml(item)}</span>`).join('')
+      : '';
+
+    if (!Array.isArray(health.issues) || health.issues.length === 0) {
+      this.elements.healthList.classList.add('is-empty');
+      this.elements.healthList.innerHTML = health.status === 'healthy'
+        ? this.renderWorkspaceHealthEmptyState()
+        : '<div class="workspace-detail-empty">Checking workspace health...</div>';
+    } else {
+      this.elements.healthList.classList.remove('is-empty');
+      this.elements.healthList.innerHTML = health.issues.map((issue) => this.renderWorkspaceHealthIssue(issue)).join('');
+    }
+
+    if (this.elements.healthRefreshBtn) {
+      this.elements.healthRefreshBtn.disabled = this.workspaceHealthCheckRunning;
+    }
+    if (this.elements.healthRefreshLabel) {
+      this.elements.healthRefreshLabel.textContent = this.workspaceHealthCheckRunning ? 'Running...' : 'Run Health Check';
+    }
+    this.renderUISmokeTestResult();
+  }
+
+  renderUISmokeTestResult() {
+    if (this.elements.uiSmokeTestBtn) {
+      this.elements.uiSmokeTestBtn.disabled = this.uiSmokeTestRunning;
+    }
+    if (this.elements.uiSmokeTestLabel) {
+      this.elements.uiSmokeTestLabel.textContent = this.uiSmokeTestRunning ? 'Running...' : 'Run UI Smoke Test';
+    }
+
+    const resultEl = this.elements.uiSmokeTestResult;
+    if (!resultEl) return;
+
+    if (this.uiSmokeTestRunning) {
+      resultEl.className = 'workspace-detail-ui-smoke-result';
+      resultEl.innerHTML = `
+        <div class="workspace-detail-ui-smoke-header">
+          <div>
+            <div class="workspace-detail-ui-smoke-title">UI smoke test running</div>
+            <div class="workspace-detail-ui-smoke-summary">Checking the current server routes, scripts, styles, and this workspace page without opening another port.</div>
+          </div>
+          <span class="workspace-detail-ui-smoke-status">Running</span>
+        </div>
+      `;
+      return;
+    }
+
+    const result = this.uiSmokeTestResult;
+    if (!result) {
+      resultEl.classList.add('d-none');
+      resultEl.innerHTML = '';
+      return;
+    }
+
+    const status = String(result.status || '').toLowerCase() === 'passed' ? 'passed' : 'failed';
+    const checks = Array.isArray(result.checks) ? result.checks : [];
+    resultEl.className = `workspace-detail-ui-smoke-result is-${status}`;
+    resultEl.innerHTML = `
+      <div class="workspace-detail-ui-smoke-header">
+        <div>
+          <div class="workspace-detail-ui-smoke-title">UI smoke test ${status === 'passed' ? 'passed' : 'failed'}</div>
+          <div class="workspace-detail-ui-smoke-summary">${this.escapeHtml(result.summary || '')}</div>
+        </div>
+        <span class="workspace-detail-ui-smoke-status is-${status}">${this.escapeHtml(status)}</span>
+      </div>
+      <div class="workspace-detail-ui-smoke-checks">
+        ${checks.map((check) => this.renderUISmokeTestCheck(check)).join('')}
+      </div>
+    `;
+  }
+
+  renderUISmokeTestCheck(check) {
+    const status = String(check?.status || '').toLowerCase() === 'passed' ? 'passed' : 'failed';
+    const icon = status === 'passed' ? '&#10003;' : '!';
+    const statusCode = Number(check?.status_code) || 0;
+    const duration = Number(check?.duration_ms) || 0;
+    const meta = [
+      statusCode ? `HTTP ${statusCode}` : '',
+      `${duration}ms`
+    ].filter(Boolean).join(' | ');
+
+    return `
+      <div class="workspace-detail-ui-smoke-check is-${status}">
+        <span class="workspace-detail-ui-smoke-check-icon">${icon}</span>
+        <div>
+          <div class="workspace-detail-ui-smoke-check-name">${this.escapeHtml(check?.name || 'Smoke check')}</div>
+          <div class="workspace-detail-ui-smoke-check-detail">${this.escapeHtml(check?.detail || check?.path || '')}</div>
+        </div>
+        <div class="workspace-detail-ui-smoke-check-meta">${this.escapeHtml(meta)}</div>
+      </div>
+    `;
+  }
+
+  async runUISmokeTest() {
+    if (this.uiSmokeTestRunning) return;
+
+    this.uiSmokeTestRunning = true;
+    this.uiSmokeTestResult = null;
+    this.renderUISmokeTestResult();
+
+    try {
+      const response = await fetch('/api/diagnostics/ui-smoke-test', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ workspace_id: this.workspaceId })
+      });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(result?.error || 'UI smoke test failed');
+      }
+
+      this.uiSmokeTestResult = result;
+      if (window.Toast) {
+        if (result?.status === 'passed') {
+          window.Toast.success('UI smoke test passed');
+        } else {
+          window.Toast.warning('UI smoke test found issues');
+        }
+      }
+    } catch (error) {
+      this.uiSmokeTestResult = {
+        status: 'failed',
+        summary: error?.message || 'UI smoke test failed',
+        checks: []
+      };
+      if (window.Toast) window.Toast.error(error?.message || 'UI smoke test failed');
+    } finally {
+      this.uiSmokeTestRunning = false;
+      this.renderUISmokeTestResult();
+    }
+  }
+
+  async refreshWorkspaceHealth() {
+    if (this.workspaceHealthCheckRunning) return;
+
+    this.workspaceHealthCheckRunning = true;
+    this.agentCatalogLoaded = false;
+    this.filesLoaded = false;
+    this.agentCatalogLoadFailed = false;
+    this.filesLoadFailed = false;
+    this.renderWorkspaceHealth();
+
+    try {
+      await Promise.all([
+        this.loadWorkspace(),
+        this.loadAgentCatalog(true),
+        this.loadFiles()
+      ]);
+    } finally {
+      this.workspaceHealthCheckRunning = false;
+      this.renderWorkspaceHealth();
+    }
+  }
+
+  openWorkspaceHealthAgentRecovery(encodedAgentName = '', mode = 'agent') {
+    let agentName = '';
+    try {
+      agentName = decodeURIComponent(String(encodedAgentName || ''));
+    } catch (_error) {
+      agentName = String(encodedAgentName || '');
+    }
+
+    const normalizedName = String(agentName || '').trim();
+    if (!normalizedName) return;
+
+    if (mode === 'entry') {
+      this.openWorkspaceEntryAgentCreateFlow({ seedName: normalizedName });
+      return;
+    }
+
+    this.openCreateAgentFlow({
+      seedName: normalizedName,
+      seedType: normalizedName.toLowerCase().includes('manager') ? 'orchestration' : 'tool-calling'
+    });
+  }
+
+  openWorkspaceHealthFileRecovery(fileId = '') {
+    const normalizedFileId = String(fileId || '').trim();
+    if (!normalizedFileId) return;
+    this.promptRelinkWorkspaceFile(normalizedFileId);
+  }
+
+  getWorkspaceIntentBootstrap() {
+    const raw = this.workspace?.shared_data?.workspace_bootstrap;
+    if (!raw || typeof raw !== 'object') {
+      return {};
+    }
+    return raw;
+  }
+
+  getWorkspaceIntentState() {
+    const bootstrap = this.getWorkspaceIntentBootstrap();
+    const description = String(this.workspace?.description || bootstrap.goal || '').trim();
+    return {
+      description,
+      systems: String(bootstrap.systems || '').trim(),
+      capabilities: String(bootstrap.capabilities || '').trim(),
+      context: String(bootstrap.context || '').trim()
+    };
+  }
+
+  getWorkspaceIntentFromForm() {
+    return {
+      description: String(this.elements.intentDescriptionInput?.value || '').trim(),
+      systems: String(this.elements.intentSystemsInput?.value || '').trim(),
+      capabilities: String(this.elements.intentCapabilitiesInput?.value || '').trim(),
+      context: String(this.elements.intentContextInput?.value || '').trim()
+    };
+  }
+
+  renderWorkspaceIntent() {
+    const intent = this.getWorkspaceIntentState();
+    if (this.elements.intentDescriptionInput) this.elements.intentDescriptionInput.value = intent.description;
+    if (this.elements.intentSystemsInput) this.elements.intentSystemsInput.value = intent.systems;
+    if (this.elements.intentCapabilitiesInput) this.elements.intentCapabilitiesInput.value = intent.capabilities;
+    if (this.elements.intentContextInput) this.elements.intentContextInput.value = intent.context;
+    if (this.elements.intentSummary) {
+      this.elements.intentSummary.textContent = intent.description
+        ? 'Saving this intent keeps the canonical Workspace Description note aligned with the workspace header and setup metadata.'
+        : 'Add a workspace description first so Ori has a stable source of truth for planning and setup review.';
+    }
+  }
+
+  setWorkspaceIntentStatus(message = '', tone = '') {
+    if (!this.elements.intentStatus) return;
+    this.elements.intentStatus.textContent = String(message || '').trim();
+    this.elements.intentStatus.style.color = tone === 'error'
+      ? 'var(--danger-color, #ef4444)'
+      : tone === 'success'
+        ? 'var(--success-color, #22c55e)'
+        : 'var(--text-secondary)';
+  }
+
+  setWorkspaceIntentBusy(isBusy, mode = 'save') {
+    if (mode === 'save' && this.elements.intentSaveBtn) {
+      this.elements.intentSaveBtn.disabled = Boolean(isBusy);
+      this.elements.intentSaveBtn.textContent = isBusy ? 'Saving...' : 'Save Intent';
+    }
+    if (mode === 'review' && this.elements.intentReviewBtn) {
+      this.elements.intentReviewBtn.disabled = Boolean(isBusy);
+      this.elements.intentReviewBtn.innerHTML = isBusy
+        ? '<span class="spinner-border spinner-border-sm me-1"></span> Reviewing...'
+        : '<svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><path d="M17.65,6.35C16.2,4.9 14.21,4 12,4A8,8 0 0,0 4,12A8,8 0 0,0 12,20C15.73,20 18.84,17.45 19.73,14H17.65C16.83,16.33 14.61,18 12,18A6,6 0 0,1 6,12A6,6 0 0,1 12,6C13.66,6 15.14,6.69 16.22,7.78L13,11H20V4L17.65,6.35Z"/></svg> Re-run Setup Review';
+    }
+    if (mode === 'apply' && this.elements.intentApplyBtn) {
+      this.elements.intentApplyBtn.disabled = Boolean(isBusy) || !this.workspaceIntentReviewPlan;
+      this.elements.intentApplyBtn.textContent = isBusy ? 'Applying Setup...' : 'Apply Recommended Setup';
+    }
+  }
+
+  buildWorkspaceIntentPayload() {
+    const intent = this.getWorkspaceIntentFromForm();
+    return {
+      description: intent.description,
+      workspace_bootstrap: {
+        goal: intent.description,
+        systems: intent.systems,
+        capabilities: intent.capabilities,
+        context: intent.context
+      }
+    };
+  }
+
+  clearWorkspaceIntentReview() {
+    this.workspaceIntentReviewPlan = null;
+    if (this.elements.intentReviewPanel) {
+      this.elements.intentReviewPanel.hidden = true;
+    }
+    if (this.elements.intentReviewSummary) {
+      this.elements.intentReviewSummary.textContent = 'Ori can review this workspace description and propose an updated starter setup.';
+    }
+    if (this.elements.intentReviewResults) {
+      this.elements.intentReviewResults.innerHTML = '';
+    }
+    if (this.elements.intentReviewMeta) {
+      this.elements.intentReviewMeta.textContent = '';
+    }
+    this.setWorkspaceIntentBusy(false, 'apply');
+  }
+
+  buildWorkspaceIntentReviewCard(item, kind) {
+    const attribute = kind === 'agent'
+      ? 'data-workspace-intent-review-agent'
+      : kind === 'mcp'
+        ? 'data-workspace-intent-review-mcp'
+        : 'data-workspace-intent-review-skill';
+    const label = kind === 'mcp'
+      ? (item.action && item.action.indexOf('install') >= 0 ? 'Install + Bind' : 'Bind')
+      : kind === 'skill'
+        ? (item.action && item.action.indexOf('install') >= 0 ? 'Install + Attach' : 'Attach')
+        : (item.action === 'create' ? 'Create' : 'Invite');
+    const secondaryChipClass = item.action === 'create' || (item.action && item.action.indexOf('install') >= 0)
+      ? 'source'
+      : 'status';
+
+    return `
+      <label class="workspace-setup-option modern-card p-3 d-flex align-items-start gap-2 mb-2" style="border: 1px solid var(--border-color);">
+        <input type="checkbox"
+               ${attribute}="true"
+               value="${this.escapeHtml(item.id)}"
+               ${item.selected ? 'checked' : ''}>
+        <span style="display: block;">
+          <span style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
+            <span style="font-weight: 600; color: var(--text-primary);">${this.escapeHtml(item.name)}</span>
+            <span class="workspace-detail-mcp-chip ${secondaryChipClass}">${this.escapeHtml(label)}</span>
+          </span>
+          <span style="display: block; margin-top: 4px; font-size: 12px; color: var(--text-secondary);">${this.escapeHtml(item.summary || item.description || '')}</span>
+        </span>
+      </label>
+    `;
+  }
+
+  renderWorkspaceIntentReview(plan) {
+    if (!plan || !this.elements.intentReviewPanel || !this.elements.intentReviewResults) {
+      return;
+    }
+
+    const lead = Array.isArray(plan.agents) ? plan.agents.find((agent) => agent.role === 'lead') : null;
+    const optionalAgents = Array.isArray(plan.agents) ? plan.agents.filter((agent) => agent.role !== 'lead') : [];
+    const mcps = Array.isArray(plan.mcps) ? plan.mcps : [];
+    const skills = Array.isArray(plan.skills) ? plan.skills : [];
+
+    const leadMarkup = lead ? `
+      <div class="modern-card p-3 mb-3" style="border: 1px solid var(--border-color); background: color-mix(in srgb, var(--bg-secondary) 88%, transparent);">
+        <div class="d-flex justify-content-between align-items-start gap-2">
+          <div>
+            <div style="font-size: 12px; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.06em;">Primary Agent</div>
+            <div style="font-weight: 600; color: var(--text-primary);">${this.escapeHtml(lead.name)}</div>
+            <div style="font-size: 12px; color: var(--text-secondary); margin-top: 4px;">${this.escapeHtml(lead.summary || '')}</div>
+          </div>
+          <span class="workspace-detail-mcp-chip status">${lead.action === 'create' ? 'Create' : 'Invite'}</span>
+        </div>
+      </div>
+    ` : '';
+
+    this.elements.intentReviewSummary.textContent = plan.summary || 'Ori reviewed the workspace intent and prepared an updated setup.';
+    this.elements.intentReviewResults.innerHTML = `
+      <div class="row g-3">
+        <div class="col-lg-6">
+          <div class="workspace-setup-section">
+            <div class="workspace-setup-label">Agents</div>
+            ${leadMarkup}
+            ${optionalAgents.length > 0
+              ? optionalAgents.map((agent) => this.buildWorkspaceIntentReviewCard(agent, 'agent')).join('')
+              : '<div class="workspace-detail-empty">No additional agents recommended right now.</div>'}
+          </div>
+        </div>
+        <div class="col-lg-6">
+          <div class="workspace-setup-section">
+            <div class="workspace-setup-label">Workspace Connections</div>
+            ${mcps.length > 0
+              ? mcps.map((item) => this.buildWorkspaceIntentReviewCard(item, 'mcp')).join('')
+              : '<div class="workspace-detail-empty">No MCP recommendations right now.</div>'}
+          </div>
+          <div class="workspace-setup-section mt-3">
+            <div class="workspace-setup-label">Workspace Skills</div>
+            ${skills.length > 0
+              ? skills.map((item) => this.buildWorkspaceIntentReviewCard(item, 'skill')).join('')
+              : '<div class="workspace-detail-empty">No workspace skill recommendations right now.</div>'}
+          </div>
+        </div>
+        <div class="col-12">
+          <div class="workspace-detail-settings-summary-card">
+            <div class="workspace-detail-settings-summary-title">How Ori Will Apply This</div>
+            <ul class="workspace-setup-preview-list mb-0">
+              ${(Array.isArray(plan.notes) ? plan.notes : []).map((note) => `<li>${this.escapeHtml(note)}</li>`).join('')}
+            </ul>
+          </div>
+        </div>
+      </div>
+    `;
+    this.elements.intentReviewPanel.hidden = false;
+    this.elements.intentReviewResults.querySelectorAll(
+      'input[data-workspace-intent-review-agent], input[data-workspace-intent-review-mcp], input[data-workspace-intent-review-skill]'
+    ).forEach((input) => {
+      input.addEventListener('change', () => this.updateWorkspaceIntentReviewSelectionSummary());
+    });
+    this.setWorkspaceIntentBusy(false, 'apply');
+    this.updateWorkspaceIntentReviewSelectionSummary();
+  }
+
+  updateWorkspaceIntentReviewSelectionSummary() {
+    if (!this.workspaceIntentReviewPlan || !this.elements.intentReviewMeta) {
+      return;
+    }
+
+    const optionalAgentCount = Array.from(this.elements.intentReviewResults?.querySelectorAll('input[data-workspace-intent-review-agent]') || [])
+      .filter((input) => input.checked)
+      .length;
+    const mcpCount = Array.from(this.elements.intentReviewResults?.querySelectorAll('input[data-workspace-intent-review-mcp]') || [])
+      .filter((input) => input.checked)
+      .length;
+    const skillCount = Array.from(this.elements.intentReviewResults?.querySelectorAll('input[data-workspace-intent-review-skill]') || [])
+      .filter((input) => input.checked)
+      .length;
+    const totalAgents = (this.workspaceIntentReviewPlan.agents?.some((agent) => agent.role === 'lead') ? 1 : 0) + optionalAgentCount;
+
+    const parts = [`${totalAgents} agent${totalAgents === 1 ? '' : 's'}`];
+    if (mcpCount > 0) parts.push(`${mcpCount} MCP${mcpCount === 1 ? '' : 's'}`);
+    if (skillCount > 0) parts.push(`${skillCount} skill${skillCount === 1 ? '' : 's'}`);
+    this.elements.intentReviewMeta.textContent = `Selected for apply: ${parts.join(', ')}.`;
+    this.setWorkspaceIntentBusy(false, 'apply');
+  }
+
+  collectWorkspaceIntentReviewPlan() {
+    if (!this.workspaceIntentReviewPlan) {
+      return null;
+    }
+
+    const lead = this.workspaceIntentReviewPlan.agents?.find((agent) => agent.role === 'lead');
+    const selectedAgents = lead ? [lead] : [];
+    Array.from(this.elements.intentReviewResults?.querySelectorAll('input[data-workspace-intent-review-agent]') || []).forEach((input) => {
+      if (!input.checked) return;
+      const match = this.workspaceIntentReviewPlan.agents.find((agent) => agent.id === input.value);
+      if (match) selectedAgents.push(match);
+    });
+
+    const selectedMCPs = [];
+    Array.from(this.elements.intentReviewResults?.querySelectorAll('input[data-workspace-intent-review-mcp]') || []).forEach((input) => {
+      if (!input.checked) return;
+      const match = this.workspaceIntentReviewPlan.mcps.find((item) => item.id === input.value);
+      if (match) selectedMCPs.push(match);
+    });
+
+    const selectedSkills = [];
+    Array.from(this.elements.intentReviewResults?.querySelectorAll('input[data-workspace-intent-review-skill]') || []).forEach((input) => {
+      if (!input.checked) return;
+      const match = this.workspaceIntentReviewPlan.skills.find((item) => item.id === input.value);
+      if (match) selectedSkills.push(match);
+    });
+
+    return {
+      agents: selectedAgents,
+      mcps: selectedMCPs,
+      skills: selectedSkills,
+      queries: this.workspaceIntentReviewPlan.queries || []
+    };
+  }
+
+  async saveWorkspaceIntent(options = {}) {
+    const { silent = false, reloadNotes = true } = options;
+    const payload = this.buildWorkspaceIntentPayload();
+    if (!payload.description) {
+      this.setWorkspaceIntentStatus('Workspace description is required.', 'error');
+      this.elements.intentDescriptionInput?.focus();
+      return false;
+    }
+
+    this.setWorkspaceIntentBusy(true, 'save');
+    this.setWorkspaceIntentStatus('Saving workspace intent...');
+
+    try {
+      const response = await fetch(`/api/workspaces/${encodeURIComponent(this.workspaceId)}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      if (!response.ok) {
+        const text = await response.text();
+        throw new Error(text || 'Failed to save workspace intent');
+      }
+
+      const data = await response.json().catch(() => ({}));
+      const updatedWorkspace = data?.folder || data?.workspace || null;
+      if (updatedWorkspace && typeof updatedWorkspace === 'object') {
+        this.workspace = {
+          ...(this.workspace || {}),
+          ...updatedWorkspace
+        };
+      } else if (!this.workspace) {
+        this.workspace = {};
+      }
+
+      if (this.workspace) {
+        this.workspace.description = payload.description;
+        this.workspace.shared_data = this.workspace.shared_data && typeof this.workspace.shared_data === 'object'
+          ? this.workspace.shared_data
+          : {};
+        this.workspace.shared_data.workspace_bootstrap = payload.workspace_bootstrap;
+      }
+
+      await this.renderWorkspaceInfo();
+      if (reloadNotes) {
+        await this.loadNotes();
+      }
+
+      this.setWorkspaceIntentStatus('Workspace intent saved and canonical note synced.', 'success');
+      if (!silent && window.Toast) {
+        window.Toast.success('Workspace intent saved');
+      }
+      return true;
+    } catch (error) {
+      console.error('Failed to save workspace intent:', error);
+      this.setWorkspaceIntentStatus(error.message || 'Failed to save workspace intent', 'error');
+      if (!silent && window.Toast) {
+        window.Toast.error(error.message || 'Failed to save workspace intent');
+      }
+      return false;
+    } finally {
+      this.setWorkspaceIntentBusy(false, 'save');
+    }
+  }
+
+  async reviewWorkspaceIntentSetup() {
+    if (!window.WorkspaceBootstrapReview || typeof window.WorkspaceBootstrapReview.reviewWorkspaceInput !== 'function') {
+      if (window.Toast) window.Toast.error('Workspace setup review is unavailable');
+      return;
+    }
+
+    const intent = this.getWorkspaceIntentFromForm();
+    if (!intent.description) {
+      this.setWorkspaceIntentStatus('Add a workspace description before running setup review.', 'error');
+      this.elements.intentDescriptionInput?.focus();
+      return;
+    }
+
+    this.workspaceIntentReviewLoading = true;
+    this.setWorkspaceIntentBusy(true, 'review');
+    this.setWorkspaceIntentStatus('Reviewing workspace intent...');
+    if (this.elements.intentReviewPanel) {
+      this.elements.intentReviewPanel.hidden = false;
+    }
+    if (this.elements.intentReviewSummary) {
+      this.elements.intentReviewSummary.textContent = 'Ori is reviewing the workspace description and preparing a refreshed setup plan...';
+    }
+    if (this.elements.intentReviewResults) {
+      this.elements.intentReviewResults.innerHTML = '';
+    }
+
+    try {
+      const plan = await window.WorkspaceBootstrapReview.reviewWorkspaceInput({
+        workspaceName: this.workspace?.name || '',
+        description: intent.description,
+        goal: intent.description,
+        systems: intent.systems,
+        capabilities: intent.capabilities,
+        context: intent.context,
+        importEnabled: false,
+        importPath: ''
+      });
+      this.workspaceIntentReviewPlan = plan;
+      this.renderWorkspaceIntentReview(plan);
+      this.setWorkspaceIntentStatus('Setup review refreshed.', 'success');
+    } catch (error) {
+      console.error('Failed to review workspace intent:', error);
+      this.clearWorkspaceIntentReview();
+      this.setWorkspaceIntentStatus(error.message || 'Failed to review workspace intent', 'error');
+      if (window.Toast) {
+        window.Toast.error(error.message || 'Failed to review workspace intent');
+      }
+    } finally {
+      this.workspaceIntentReviewLoading = false;
+      this.setWorkspaceIntentBusy(false, 'review');
+    }
+  }
+
+  async applyWorkspaceIntentReview() {
+    if (!this.workspaceIntentReviewPlan || !window.WorkspaceBootstrapReview || typeof window.WorkspaceBootstrapReview.applySelectedPlan !== 'function') {
+      return;
+    }
+
+    const saved = await this.saveWorkspaceIntent({ silent: true, reloadNotes: false });
+    if (!saved) {
+      return;
+    }
+
+    const selectedPlan = this.collectWorkspaceIntentReviewPlan();
+    this.workspaceIntentApplyLoading = true;
+    this.setWorkspaceIntentBusy(true, 'apply');
+    this.setWorkspaceIntentStatus('Applying recommended setup...');
+
+    try {
+      const result = await window.WorkspaceBootstrapReview.applySelectedPlan(this.workspaceId, selectedPlan);
+      await this.loadWorkspace();
+      await Promise.all([this.loadNotes(), this.loadDirectories()]);
+
+      const summaryParts = [];
+      if (result.invitedAgents > 0) summaryParts.push(`${result.invitedAgents} agent${result.invitedAgents === 1 ? '' : 's'} invited`);
+      if (result.boundMCPs > 0) summaryParts.push(`${result.boundMCPs} MCP${result.boundMCPs === 1 ? '' : 's'} bound`);
+      if (result.attachedSkills > 0) summaryParts.push(`${result.attachedSkills} skill${result.attachedSkills === 1 ? '' : 's'} attached`);
+      if (result.failures.length > 0) {
+        this.setWorkspaceIntentStatus(`Setup applied with partial success. ${result.failures[0]}`, 'error');
+        if (window.Toast) {
+          window.Toast.warning(`Workspace setup applied with partial success${summaryParts.length > 0 ? ` (${summaryParts.join(', ')})` : ''}.`);
+        }
+      } else {
+        this.setWorkspaceIntentStatus(
+          summaryParts.length > 0
+            ? `Setup applied: ${summaryParts.join(', ')}.`
+            : 'Setup review was applied with no new changes needed.',
+          'success'
+        );
+        if (window.Toast) {
+          window.Toast.success(
+            summaryParts.length > 0
+              ? `Workspace setup applied with ${summaryParts.join(', ')}.`
+              : 'Workspace setup is already up to date.'
+          );
+        }
+      }
+    } catch (error) {
+      console.error('Failed to apply workspace setup review:', error);
+      this.setWorkspaceIntentStatus(error.message || 'Failed to apply workspace setup review', 'error');
+      if (window.Toast) {
+        window.Toast.error(error.message || 'Failed to apply workspace setup review');
+      }
+    } finally {
+      this.workspaceIntentApplyLoading = false;
+      this.setWorkspaceIntentBusy(false, 'apply');
+    }
   }
 
   /**
@@ -1857,6 +2937,7 @@ export class WorkspaceDetailPage {
       this.tasksLoading = false;
       this.renderTasks();
       this.renderWorkspaceWorkflowLinks();
+      this.restoreTaskAssistPageFromRoute();
 
       if (this.elements.taskCount) {
         this.elements.taskCount.textContent = this.tasks.length;
@@ -2090,10 +3171,8 @@ export class WorkspaceDetailPage {
       const cardMeta = [instanceLabel, taskLabel].filter(Boolean).join(' · ');
       const capabilityBadges = group.isUnassigned ? '' : this.renderAgentCapabilityBadges(group.name);
       const agentProfile = group.isUnassigned ? null : this.getAgentProfile(group.name);
-      const modelLabel = agentProfile?.model
-        ? `<span class="workspace-detail-agent-model-badge">${this.escapeHtml(agentProfile.model)}</span>`
-        : '';
       const encodedAgentName = encodeURIComponent(group.name);
+      const modelLabel = group.isUnassigned ? '' : this.renderAgentModelBadge(group.name, agentProfile, encodedAgentName);
       const canFlip = !group.isUnassigned;
       const isFlipped = canFlip && this.flippedAgentCards.has(group.key);
       const roleBadge = group.isUnassigned ? '' : this.renderWorkspaceAgentRoleBadge(group.name);
@@ -2176,6 +3255,38 @@ export class WorkspaceDetailPage {
       </section>
       `;
     }).join('');
+  }
+
+  renderAgentModelBadge(agentName, profile, encodedAgentName = '') {
+    const model = String(profile?.model || '').trim();
+    const editable = this.agentAllowsModelEditing(profile);
+    const label = model || 'Set model';
+    const badgeClass = `workspace-detail-agent-model-badge${editable ? ' is-editable' : ''}${model ? '' : ' is-empty'}`;
+    const title = model
+      ? `Change model for ${agentName}`
+      : `Set model for ${agentName}`;
+
+    if (!editable) {
+      return model ? `<span class="${badgeClass}">${this.escapeHtml(model)}</span>` : '';
+    }
+
+    return `
+      <button type="button"
+              class="${badgeClass}"
+              title="${this.escapeHtml(title)}"
+              aria-label="${this.escapeHtml(title)}"
+              onclick="event.stopPropagation(); window.workspaceDetail?.openAgentModelModal('${encodedAgentName}')">
+        <span>${this.escapeHtml(label)}</span>
+        <svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+          <path d="M14.06,9.02L14.98,9.94L5.92,19H5V18.08M17.66,3C17.4,3 17.15,3.1 16.95,3.29L15.13,5.11L18.88,8.86L20.7,7.04C21.09,6.65 21.09,6 20.7,5.63L18.37,3.29C18.17,3.1 17.92,3 17.66,3Z"/>
+        </svg>
+      </button>
+    `;
+  }
+
+  agentAllowsModelEditing(profile) {
+    if (!profile) return false;
+    return String(profile.source || 'user').trim().toLowerCase() !== 'cli';
   }
 
   renderAgentBackFace(group, cardMeta, encodedAgentName) {
@@ -2531,7 +3642,60 @@ export class WorkspaceDetailPage {
     if (!Array.isArray(tasks) || tasks.length === 0) {
       return '<div class="workspace-detail-empty workspace-detail-empty-inline">No tasks assigned.</div>';
     }
-    return tasks.map((task) => this.renderTaskItem(task)).join('');
+    return tasks.map((task) => this.renderTaskGroup(task)).join('');
+  }
+
+  getSortedSubtasks(parentId) {
+    const normalizedParentId = String(parentId || '').trim();
+    if (!normalizedParentId || !Array.isArray(this.tasks)) return [];
+    return this.tasks
+      .filter((item) => String(item?.parent_task_id || '').trim() === normalizedParentId)
+      .sort((a, b) => {
+        const aIndex = Number.isFinite(a?.subtask_index) && a.subtask_index > 0 ? a.subtask_index : Number.MAX_SAFE_INTEGER;
+        const bIndex = Number.isFinite(b?.subtask_index) && b.subtask_index > 0 ? b.subtask_index : Number.MAX_SAFE_INTEGER;
+        if (aIndex !== bIndex) return aIndex - bIndex;
+        const aTime = a?.created_at ? new Date(a.created_at).getTime() : 0;
+        const bTime = b?.created_at ? new Date(b.created_at).getTime() : 0;
+        if (aTime !== bTime) return aTime - bTime;
+        return String(a?.id || '').localeCompare(String(b?.id || ''));
+      });
+  }
+
+  renderTaskGroup(task) {
+    const subtasks = this.getSortedSubtasks(task.id);
+    if (subtasks.length === 0) {
+      return this.renderTaskItem(task);
+    }
+
+    const isCollapsed = this.collapsedWorkflows.has(task.id);
+    const groupClasses = ['workspace-detail-workflow-group'];
+    if (isCollapsed) groupClasses.push('is-collapsed');
+    const subtaskMarkup = subtasks.map((subtask, index) => {
+      const stepNumber = Number.isFinite(subtask?.subtask_index) && subtask.subtask_index > 0
+        ? subtask.subtask_index
+        : index + 1;
+      return this.renderTaskItem(subtask, { isSubtask: true, stepNumber });
+    }).join('');
+
+    return `
+      <div class="${groupClasses.join(' ')}" data-workflow-id="${this.escapeHtml(task.id)}">
+        ${this.renderTaskItem(task, { isParent: true, subtaskCount: subtasks.length, collapsed: isCollapsed })}
+        <div class="workspace-detail-subtask-list" ${isCollapsed ? 'hidden' : ''}>
+          ${subtaskMarkup}
+        </div>
+      </div>
+    `;
+  }
+
+  toggleWorkflowExpansion(taskId) {
+    const id = String(taskId || '').trim();
+    if (!id) return;
+    if (this.collapsedWorkflows.has(id)) {
+      this.collapsedWorkflows.delete(id);
+    } else {
+      this.collapsedWorkflows.add(id);
+    }
+    this.renderAgentGroups();
   }
 
   renderAgentSessionsContent(sessions) {
@@ -2580,17 +3744,19 @@ export class WorkspaceDetailPage {
     `;
   }
 
-  renderTaskItem(task) {
+  renderTaskItem(task, options = {}) {
+    const { isSubtask = false, stepNumber = null, isParent: isParentHint = false, subtaskCount = 0, collapsed = false } = options;
     const taskLabel = this.escapeHtml(task.description || task.name || 'Untitled Task');
     const assignedAgent = task.to && task.to !== 'unassigned' ? task.to : '';
-    const subtasks = this.tasks.filter((subtask) => subtask.parent_task_id === task.id);
-    const isParent = subtasks.length > 0;
+    const subtasks = isSubtask ? [] : this.tasks.filter((subtask) => subtask.parent_task_id === task.id);
+    const isParent = isParentHint || subtasks.length > 0;
+    const parentSubtaskCount = subtaskCount || subtasks.length;
     const statusInfo = this.getTaskStatusPresentation(task);
     const awaitingNextStep = this.isTaskAwaitingNextStep(task);
     const hasUnassignedSubtasks = isParent && subtasks.some((subtask) => !subtask.to || subtask.to === 'unassigned');
     const hasRunningSubtasks = isParent && subtasks.some((subtask) => subtask.status === 'in_progress');
     const canExecute = isParent
-      ? subtasks.length > 0 && !hasUnassignedSubtasks && !hasRunningSubtasks
+      ? parentSubtaskCount > 0 && !hasUnassignedSubtasks && !hasRunningSubtasks
       : task.status !== 'in_progress' || awaitingNextStep;
     const resultData = this.getDisplayResult(task, subtasks);
     const hasResultData = !!resultData;
@@ -2609,6 +3775,10 @@ export class WorkspaceDetailPage {
     const assistTitle = statusInfo.reason || 'Agent needs your guidance before this task can continue.';
     const scheduleIndicator = this.renderTaskScheduleIndicator(task);
     const taskMetaParts = [];
+    if (isParent) {
+      const stepsLabel = `${parentSubtaskCount} step${parentSubtaskCount === 1 ? '' : 's'}`;
+      taskMetaParts.push(`<span class="workspace-detail-workflow-steps">${stepsLabel}</span>`);
+    }
     if (assignedAgent) {
       taskMetaParts.push(`<span class="workspace-detail-assigned-agent">Assigned to: ${this.escapeHtml(assignedAgent)}${this.renderAgentCapabilityBadges(assignedAgent)}</span>`);
     }
@@ -2621,12 +3791,37 @@ export class WorkspaceDetailPage {
     }
     taskMetaParts.push(formatDate(task.created_at));
 
+    const itemClasses = ['workspace-detail-item'];
+    if (isParent) itemClasses.push('is-workflow-parent');
+    if (isSubtask) itemClasses.push('is-workflow-subtask');
+
+    const toggleButton = isParent
+      ? `<button type="button"
+                 class="workspace-detail-item-toggle"
+                 aria-expanded="${collapsed ? 'false' : 'true'}"
+                 aria-controls="workspace-detail-subtasks-${this.escapeHtml(task.id)}"
+                 title="${collapsed ? 'Show subtasks' : 'Hide subtasks'}"
+                 aria-label="${collapsed ? 'Show subtasks' : 'Hide subtasks'}"
+                 onclick="event.stopPropagation(); window.workspaceDetail?.toggleWorkflowExpansion('${task.id}')">
+           <svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+             <path d="M7,10L12,15L17,10H7Z"/>
+           </svg>
+         </button>`
+      : '';
+
+    const parentBadge = isParent
+      ? '<span class="workspace-detail-workflow-badge" title="Workflow with subtasks">Workflow</span>'
+      : '';
+    const stepBadge = isSubtask && stepNumber !== null
+      ? `<span class="workspace-detail-step-badge" title="Step ${this.escapeHtml(String(stepNumber))}">Step ${this.escapeHtml(String(stepNumber))}</span>`
+      : '';
+
     return `
-      <div class="workspace-detail-item" data-task-id="${task.id}">
+      <div class="${itemClasses.join(' ')}" data-task-id="${task.id}">
         ${hasAssistData ? `
         <button type="button"
                 class="workspace-detail-item-result"
-                onclick="event.stopPropagation(); window.workspaceDetail?.openTaskAssistModal('${task.id}')"
+                onclick="event.stopPropagation(); window.workspaceDetail?.openTask('${task.id}')"
                 title="${this.escapeHtml(assistTitle)}"
                 aria-label="Help blocked task ${taskLabel}">
           <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor">
@@ -2666,7 +3861,9 @@ export class WorkspaceDetailPage {
              onclick="window.workspaceDetail?.openTask('${task.id}')"
              onkeydown="if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); window.workspaceDetail?.openTask('${task.id}'); }">
           <div class="d-flex justify-content-between align-items-start">
-            <div class="workspace-detail-item-title">${taskLabel}</div>
+            <div class="workspace-detail-item-title">
+              ${toggleButton}${stepBadge}${parentBadge}<span class="workspace-detail-item-title-text">${taskLabel}</span>
+            </div>
             <span class="workspace-detail-task-status ${statusInfo.className}">${statusInfo.label}</span>
           </div>
           <div class="workspace-detail-item-meta">
@@ -2708,30 +3905,121 @@ export class WorkspaceDetailPage {
    */
   checkAutoOpenCreateAgent() {
     const params = new URLSearchParams(window.location.search);
-    if (params.get('addAgent') !== '1') return;
+    if (params.get('addAgent') !== '1') return false;
+    const seedAgentName = String(params.get('seedAgentName') || '').trim();
 
-    // Clean the URL so refresh won't re-trigger
-    window.history.replaceState({}, '', window.location.pathname);
+    // Clean the URL so refresh won't re-trigger, but preserve unrelated params.
+    const url = new URL(window.location.href);
+    url.searchParams.delete('addAgent');
+    url.searchParams.delete('seedAgentName');
+    window.history.replaceState({}, '', `${url.pathname}${url.search}${url.hash}`);
 
+    this.openWorkspaceEntryAgentCreateFlow({
+      defer: true,
+      seedName: seedAgentName
+    });
+    return true;
+  }
+
+  getEntryAgentPromptDismissalStorageKey() {
+    return `${ENTRY_AGENT_PROMPT_DISMISSED_STORAGE_PREFIX}${this.workspaceId}`;
+  }
+
+  clearEntryAgentPromptDismissal() {
+    try {
+      window.sessionStorage?.removeItem(this.getEntryAgentPromptDismissalStorageKey());
+    } catch (_error) {
+      // Ignore storage errors; the prompt can still function without persistence.
+    }
+  }
+
+  markEntryAgentPromptDismissed() {
+    try {
+      window.sessionStorage?.setItem(this.getEntryAgentPromptDismissalStorageKey(), '1');
+    } catch (_error) {
+      // Ignore storage errors; this only prevents repeated prompts in the same tab.
+    }
+  }
+
+  shouldPromptForMissingEntryAgent() {
+    const entryAgentName = String(this.workspace?.entry_agent_name || '').trim();
+    if (entryAgentName) {
+      this.clearEntryAgentPromptDismissal();
+      return false;
+    }
+
+    try {
+      return window.sessionStorage?.getItem(this.getEntryAgentPromptDismissalStorageKey()) !== '1';
+    } catch (_error) {
+      return true;
+    }
+  }
+
+  buildWorkspaceEntryAgentDefaults(options = {}) {
     const workspaceName = String(this.workspace?.name || '').trim();
-    const agentName = workspaceName
+    const fallbackAgentName = workspaceName
       ? (workspaceName.toLowerCase().endsWith(' manager') ? workspaceName : workspaceName + ' Manager')
       : 'Workspace Manager';
+    const agentName = String(options?.seedName || '').trim() || fallbackAgentName;
     const systemPrompt = `You are the workspace manager for "${workspaceName || 'this workspace'}". `
       + 'Act as the default front door for the workspace: clarify user intent, answer directly when '
       + 'the request only needs shared context, and break work into tasks for specialists when needed.';
 
-    setTimeout(() => {
-      if (typeof window.showAddAgentModal === 'function') {
-        window.showAddAgentModal({
-          workspaceId: this.workspaceId,
-          seedName: agentName,
-          seedType: 'orchestration',
-          seedSystemPrompt: systemPrompt,
-          suggestedSkills: ['workspace-planning']
-        });
+    return {
+      workspaceId: this.workspaceId,
+      seedName: agentName,
+      seedType: 'orchestration',
+      seedSystemPrompt: systemPrompt,
+      suggestedSkills: ['workspace-planning']
+    };
+  }
+
+  openWorkspaceEntryAgentCreateFlow(options = {}) {
+    const defaults = this.buildWorkspaceEntryAgentDefaults(options);
+    const defer = options?.defer === true;
+    const open = () => this.openCreateAgentFlow(defaults);
+
+    if (defer) {
+      window.setTimeout(open, 300);
+      return;
+    }
+
+    open();
+  }
+
+  async maybePromptForMissingEntryAgent() {
+    if (!this.shouldPromptForMissingEntryAgent()) return;
+
+    const workspaceName = String(this.workspace?.name || '').trim() || 'this workspace';
+    const entryAgentDefaults = this.buildWorkspaceEntryAgentDefaults();
+    const confirmed = await this.showTaskConfirmDialog({
+      eyebrow: 'Workspace Setup',
+      title: 'Create an entry agent for this workspace?',
+      message: `"${workspaceName}" cannot function until it has an entry agent.`,
+      confirmLabel: 'Create Entry Agent',
+      cancelLabel: 'Not Now',
+      metaItems: [workspaceName, entryAgentDefaults.seedName, 'No entry agent'],
+      details: [
+        'The entry agent is required for this workspace to operate normally.',
+        'Chats, routing, and task orchestration depend on having an entry agent.',
+        'The first agent you add here will become the workspace entry agent automatically.',
+        'You can rename or replace it later.'
+      ]
+    });
+
+    if (!confirmed) {
+      this.markEntryAgentPromptDismissed();
+      if (window.Toast) {
+        window.Toast.warning(
+          `"${workspaceName}" cannot function until you create an entry agent.`,
+          { title: 'Entry Agent Required' }
+        );
       }
-    }, 300);
+      return;
+    }
+
+    this.clearEntryAgentPromptDismissal();
+    this.openWorkspaceEntryAgentCreateFlow();
   }
 
   async openAddAgentModal() {
@@ -5094,6 +6382,7 @@ export class WorkspaceDetailPage {
   applyAssistWorkflowSpecialistOverrides(workflowStep, specialistAction) {
     const normalizedStep = this.normalizeAssistWorkflowStep(workflowStep);
     if (!normalizedStep || !specialistAction?.agentName) return normalizedStep;
+    if (normalizedStep.stepType !== 'ask_choice' || !Array.isArray(normalizedStep.choices)) return normalizedStep;
 
     const replacementName = String(specialistAction.agentName || '').trim();
     if (!replacementName) return normalizedStep;
@@ -5161,25 +6450,273 @@ export class WorkspaceDetailPage {
     return `assist-choice-${String(number || '').trim() || 'x'}-${base}`;
   }
 
+  buildAssistFieldId(label, index) {
+    const base = this.normalizeTaskResultNextStepToken(label)
+      .replace(/\s+/g, '-')
+      .slice(0, 48) || 'field';
+    return `assist-field-${String(index + 1).trim()}-${base}`;
+  }
+
+  getAssistOptionKey(index) {
+    const safeIndex = Number.isFinite(index) ? Math.max(0, index) : 0;
+    return String.fromCharCode(65 + (safeIndex % 26));
+  }
+
+  truncateAssistSummaryText(value, maxLength = 190) {
+    const normalized = String(value || '').replace(/\s+/g, ' ').trim();
+    if (!normalized) return '';
+    if (normalized.length <= maxLength) return normalized;
+
+    const candidate = normalized.slice(0, maxLength - 1);
+    const boundary = candidate.lastIndexOf(' ');
+    const trimmed = boundary >= Math.floor(maxLength * 0.6)
+      ? candidate.slice(0, boundary)
+      : candidate;
+    return `${trimmed.trim()}...`;
+  }
+
+  extractAssistLeadText(value, maxLength = 190) {
+    const raw = String(value || '').trim();
+    if (!raw) return '';
+
+    const paragraphs = raw
+      .split(/\n\s*\n/)
+      .map((part) => String(part || '').trim())
+      .filter(Boolean);
+    const firstChunk = paragraphs[0] || raw;
+    const normalized = firstChunk.replace(/\s+/g, ' ').trim();
+    if (!normalized) return '';
+
+    const sentences = normalized.split(/(?<=[.!?])\s+/).filter(Boolean);
+    const lead = sentences.slice(0, 2).join(' ') || normalized;
+    return this.truncateAssistSummaryText(lead, maxLength);
+  }
+
+  buildAssistKnownSummary(reason, displayResponse) {
+    return this.extractAssistLeadText(displayResponse, 210)
+      || this.truncateAssistSummaryText(reason, 210)
+      || 'The task is paused waiting on your input.';
+  }
+
+  buildAssistNeedsSummary(workflowStep, question) {
+    if (workflowStep?.stepType === 'ask_form' && Array.isArray(workflowStep.fields) && workflowStep.fields.length > 0) {
+      const labels = workflowStep.fields.slice(0, 3)
+        .map((field) => this.getAssistFormFieldPrompt(field).replace(/[?]+$/g, '').trim())
+        .filter(Boolean);
+      const count = workflowStep.fields.length;
+      const suffix = count > labels.length ? `, and ${count - labels.length} more` : '';
+      if (labels.length > 0) {
+        return this.truncateAssistSummaryText(
+          `Answer ${count} question${count === 1 ? '' : 's'} about ${labels.join('; ')}${suffix}.`,
+          210
+        );
+      }
+      return `Answer ${count} question${count === 1 ? '' : 's'} so the task can continue.`;
+    }
+
+    if (workflowStep?.stepType === 'ask_choice' && Array.isArray(workflowStep.choices) && workflowStep.choices.length > 0) {
+      return this.truncateAssistSummaryText(
+        `Choose 1 of ${workflowStep.choices.length} suggested next steps to unblock the task.`,
+        210
+      );
+    }
+
+    if (question) {
+      return this.truncateAssistSummaryText(question, 210);
+    }
+
+    return 'Provide the missing details the agent asked for.';
+  }
+
+  buildAssistNextSummary(recommendation, workflowStep, currentAgent = '') {
+    const recommendedText = String(recommendation?.text || '').trim().replace(/^Recommended:\s*/i, '');
+    if (recommendedText) {
+      return this.truncateAssistSummaryText(recommendedText, 210);
+    }
+
+    if (workflowStep?.stepType === 'ask_form') {
+      return currentAgent
+        ? this.truncateAssistSummaryText(`After you answer, ${currentAgent} continues the task with your details.`, 210)
+        : 'After you answer, the task resumes with your details.';
+    }
+
+    if (workflowStep?.stepType === 'ask_choice') {
+      return 'After you choose an option, the task resumes using that direction.';
+    }
+
+    return 'After you respond, Ori uses that input to continue the task.';
+  }
+
+  setAssistSummaryUI(summary) {
+    const wrap = this.elements.taskAssistSummaryWrap;
+    const known = this.elements.taskAssistSummaryKnown;
+    const needs = this.elements.taskAssistSummaryNeeds;
+    const next = this.elements.taskAssistSummaryNext;
+    if (!wrap || !known || !needs || !next) return;
+
+    const knownText = String(summary?.known || '').trim();
+    const needsText = String(summary?.needs || '').trim();
+    const nextText = String(summary?.next || '').trim();
+    const shouldShow = Boolean(knownText || needsText || nextText);
+
+    known.textContent = knownText || 'No context summary yet.';
+    needs.textContent = needsText || 'No decision summary yet.';
+    next.textContent = nextText || 'No continuation summary yet.';
+    wrap.classList.toggle('d-none', !shouldShow);
+  }
+
+  shouldCollapseAssistResponse(fullResponse) {
+    const text = String(fullResponse || '').trim();
+    if (!text) return false;
+    const lineCount = text.split(/\r?\n/).filter((line) => String(line || '').trim()).length;
+    return text.length > 420 || lineCount > 8;
+  }
+
+  buildAssistResponsePreview(fullResponse, displayResponse = '') {
+    const source = String(displayResponse || fullResponse || '').trim();
+    if (!source) return '';
+    return this.truncateAssistSummaryText(source.replace(/\s+/g, ' '), 280);
+  }
+
+  renderAssistResponseState() {
+    const responseWrap = this.elements.taskAssistResponseWrap;
+    const responsePreview = this.elements.taskAssistResponsePreview;
+    const responseToggle = this.elements.taskAssistResponseToggle;
+    const response = this.elements.taskAssistResponse;
+    if (!responseWrap || !response) return;
+
+    const fullText = String(response.textContent || '').trim();
+    if (!fullText) {
+      responseWrap.classList.add('d-none');
+      response.classList.add('d-none');
+      responsePreview?.classList.add('d-none');
+      responseToggle?.classList.add('d-none');
+      return;
+    }
+
+    const previewText = String(responsePreview?.textContent || '').trim();
+    const collapsible = this.shouldCollapseAssistResponse(fullText) && Boolean(previewText);
+    const expanded = collapsible ? this.taskAssistResponseExpanded : true;
+
+    responseWrap.classList.remove('d-none');
+    response.classList.toggle('d-none', !expanded);
+    responsePreview?.classList.toggle('d-none', expanded || !collapsible);
+
+    if (responseToggle) {
+      responseToggle.classList.toggle('d-none', !collapsible);
+      responseToggle.textContent = expanded ? 'Hide full request' : 'View full request';
+      responseToggle.setAttribute('aria-expanded', expanded ? 'true' : 'false');
+    }
+  }
+
+  setAssistResponseUI(fullResponse, displayResponse = '') {
+    const response = this.elements.taskAssistResponse;
+    const responsePreview = this.elements.taskAssistResponsePreview;
+    if (!response) return;
+
+    const fullText = String(fullResponse || displayResponse || '').trim();
+    const previewText = this.buildAssistResponsePreview(fullText, displayResponse);
+    this.taskAssistResponseExpanded = !this.shouldCollapseAssistResponse(fullText);
+
+    response.textContent = fullText;
+    if (responsePreview) {
+      responsePreview.textContent = previewText;
+    }
+    this.renderAssistResponseState();
+  }
+
+  toggleAssistResponseExpanded(forceValue = null) {
+    const fullText = String(this.elements.taskAssistResponse?.textContent || '').trim();
+    if (!this.shouldCollapseAssistResponse(fullText)) return;
+    this.taskAssistResponseExpanded = typeof forceValue === 'boolean'
+      ? forceValue
+      : !this.taskAssistResponseExpanded;
+    this.renderAssistResponseState();
+  }
+
+  normalizeAssistFieldType(value) {
+    const normalized = String(value || '').trim().toLowerCase();
+    if (normalized === 'textarea' || normalized === 'select' || normalized === 'number' || normalized === 'boolean') {
+      return normalized;
+    }
+    return 'text';
+  }
+
+  normalizeAssistFieldOptions(options) {
+    if (!Array.isArray(options)) return [];
+    return options.map((option) => {
+      if (typeof option === 'string') {
+        const label = String(option || '').trim();
+        if (!label) return null;
+        return { value: label, label, description: '', key: '' };
+      }
+
+      const label = String(option?.label || option?.value || '').trim();
+      const value = String(option?.value || option?.label || '').trim();
+      if (!label || !value) return null;
+      return {
+        value,
+        label,
+        description: String(option?.description || '').trim(),
+        key: String(option?.key || '').trim()
+      };
+    }).filter(Boolean);
+  }
+
+  splitAssistOptionEvidence(label) {
+    const cleaned = this.cleanAssistChoiceText(label);
+    if (!cleaned) {
+      return { label: '', description: '' };
+    }
+
+    const start = cleaned.lastIndexOf('(');
+    const end = cleaned.lastIndexOf(')');
+    if (start >= 0 && end > start + 1 && end === cleaned.length - 1) {
+      const optionLabel = this.cleanAssistChoiceText(cleaned.slice(0, start));
+      const description = this.cleanAssistChoiceText(cleaned.slice(start + 1, end));
+      if (optionLabel && description) {
+        return {
+          label: optionLabel,
+          description: /[.!?]$/.test(description) ? description : `${description}.`
+        };
+      }
+    }
+
+    return { label: cleaned, description: '' };
+  }
+
+  deriveAssistFieldEvidence(options) {
+    if (!Array.isArray(options) || options.length === 0) return '';
+
+    const seen = new Set();
+    const evidence = [];
+    options.forEach((option) => {
+      const description = String(option?.description || '').trim();
+      if (!description) return;
+      const key = description.toLowerCase();
+      if (seen.has(key)) return;
+      seen.add(key);
+      evidence.push(description);
+    });
+
+    return evidence.slice(0, 2).join(' ');
+  }
+
+  normalizeAssistFieldValues(values) {
+    if (!Array.isArray(values)) return {};
+    return values.reduce((accumulator, item) => {
+      const id = String(item?.id || '').trim();
+      const value = String(item?.value || '').trim();
+      if (!id || !value) return accumulator;
+      accumulator[id] = value;
+      return accumulator;
+    }, {});
+  }
+
   normalizeAssistWorkflowStep(value) {
     if (!value || typeof value !== 'object') return null;
 
     const stepType = String(value.step_type || value.stepType || '').trim().toLowerCase();
-    const rawChoices = Array.isArray(value.choices) ? value.choices : [];
-    const choices = rawChoices.map((item, index) => {
-      const label = this.cleanAssistChoiceText(item?.label || '');
-      if (!label) return null;
-      const number = String(item?.number || index + 1).trim();
-      return {
-        id: String(item?.id || this.buildAssistChoiceId(number, label)).trim(),
-        label,
-        number,
-        description: this.cleanAssistChoiceText(item?.description || '')
-      };
-    }).filter(Boolean);
-
-    if (stepType !== 'ask_choice' || choices.length === 0) return null;
-
     let freeTextAllowed = true;
     if (typeof value.free_text_allowed === 'boolean') {
       freeTextAllowed = value.free_text_allowed;
@@ -5187,13 +6724,60 @@ export class WorkspaceDetailPage {
       freeTextAllowed = value.freeTextAllowed;
     }
 
-    return {
-      stepType: 'ask_choice',
-      title: String(value.title || '').trim() || 'Choose the next step',
-      summary: String(value.summary || '').trim(),
-      freeTextAllowed,
-      choices
-    };
+    if (stepType === 'ask_choice') {
+      const rawChoices = Array.isArray(value.choices) ? value.choices : [];
+      const choices = rawChoices.map((item, index) => {
+        const label = this.cleanAssistChoiceText(item?.label || '');
+        if (!label) return null;
+        const number = String(item?.number || index + 1).trim();
+        return {
+          id: String(item?.id || this.buildAssistChoiceId(number, label)).trim(),
+          label,
+          number,
+          description: this.cleanAssistChoiceText(item?.description || '')
+        };
+      }).filter(Boolean);
+
+      if (choices.length === 0) return null;
+
+      return {
+        stepType: 'ask_choice',
+        title: String(value.title || '').trim() || 'Choose the next step',
+        summary: String(value.summary || '').trim(),
+        freeTextAllowed,
+        choices
+      };
+    }
+
+    if (stepType === 'ask_form') {
+      const rawFields = Array.isArray(value.fields) ? value.fields : [];
+      const fields = rawFields.map((item, index) => {
+        const label = String(item?.label || '').trim();
+        if (!label) return null;
+        return {
+          id: String(item?.id || this.buildAssistFieldId(label, index)).trim(),
+          label,
+          description: String(item?.description || '').trim(),
+          evidence: String(item?.evidence || '').trim(),
+          type: this.normalizeAssistFieldType(item?.type),
+          placeholder: String(item?.placeholder || '').trim(),
+          required: item?.required !== false,
+          options: this.normalizeAssistFieldOptions(item?.options)
+        };
+      }).filter(Boolean);
+
+      if (fields.length === 0) return null;
+
+      return {
+        stepType: 'ask_form',
+        title: String(value.title || '').trim() || 'Provide the missing details',
+        summary: String(value.summary || '').trim(),
+        freeTextAllowed,
+        fields
+      };
+    }
+
+    return null;
   }
 
   extractAssistEnumeratedChoices(text) {
@@ -5266,8 +6850,219 @@ export class WorkspaceDetailPage {
     return [];
   }
 
+  extractAssistQuestionBlocks(text) {
+    const lines = String(text || '').split(/\r?\n/);
+    const blocks = [];
+
+    for (let index = 0; index < lines.length;) {
+      const questionMatch = String(lines[index] || '').match(/^\s*(\d+)[.)]\s*(.+?)\s*$/);
+      if (!questionMatch) {
+        index += 1;
+        continue;
+      }
+
+      const question = this.cleanAssistChoiceText(questionMatch[2]);
+      if (!question) {
+        index += 1;
+        continue;
+      }
+
+      const options = [];
+      let cursor = index + 1;
+      for (; cursor < lines.length; cursor += 1) {
+        const rawLine = String(lines[cursor] || '');
+        if (/^\s*\d+[.)]\s+/.test(rawLine)) {
+          break;
+        }
+
+        const optionMatch = rawLine.match(/^\s*(?:[-*]\s*)?([A-Z])[.)]\s+(.+)$/);
+        if (optionMatch) {
+          const splitOption = this.splitAssistOptionEvidence(optionMatch[2]);
+          const label = splitOption.label;
+          if (!label) continue;
+          options.push({
+            key: String(optionMatch[1] || '').trim().toUpperCase(),
+            label,
+            description: splitOption.description
+          });
+          continue;
+        }
+
+        if (!rawLine.trim()) {
+          continue;
+        }
+
+        if (options.length === 0) {
+          break;
+        }
+
+        const continuation = this.cleanTaskResultNextStepText(rawLine);
+        if (!continuation) {
+          continue;
+        }
+
+        const lastOption = options[options.length - 1];
+        const splitOption = this.splitAssistOptionEvidence(`${lastOption.label} ${continuation}`.replace(/\s+/g, ' ').trim());
+        lastOption.label = splitOption.label;
+        lastOption.description = splitOption.description || lastOption.description;
+      }
+
+      if (options.length >= 2) {
+        blocks.push({
+          number: String(questionMatch[1] || '').trim(),
+          question: question.endsWith('?') ? question : `${question}?`,
+          options
+        });
+        index = cursor;
+        continue;
+      }
+
+      index += 1;
+    }
+
+    return blocks;
+  }
+
+  extractAssistQuestions(text) {
+    const normalized = String(text || '').replace(/\s+/g, ' ').trim();
+    if (!normalized || !normalized.includes('?')) {
+      return [];
+    }
+
+    return normalized
+      .split('?')
+      .slice(0, -1)
+      .map((item) => String(item || '').trim())
+      .filter((item) => item.length >= 5 && item.length <= 220)
+      .map((item) => `${item}?`);
+  }
+
+  extractAssistFieldHint(question, fallback = '') {
+    const match = String(question || '').match(/\(([^)]+)\)/);
+    if (match && match[1]) {
+      return String(match[1] || '').trim();
+    }
+    return fallback;
+  }
+
+  buildAssistFieldFromQuestion(question, index) {
+    const rawQuestion = String(question || '').trim();
+    const cleanedQuestion = this.cleanAssistChoiceText(rawQuestion);
+    if (!cleanedQuestion) return null;
+
+    const lower = cleanedQuestion.toLowerCase();
+    const field = {
+      id: this.buildAssistFieldId(cleanedQuestion, index),
+      label: cleanedQuestion,
+      description: rawQuestion,
+      evidence: '',
+      type: 'text',
+      placeholder: '',
+      required: true,
+      options: []
+    };
+
+    if (lower.includes('freestanding') && (lower.includes('wall-mounted') || lower.includes('wall mounted'))) {
+      field.id = 'mounting_type';
+      field.label = 'Mounting type';
+      field.type = 'select';
+      field.options = [
+        { value: 'freestanding', label: 'Freestanding', description: '' },
+        { value: 'wall-mounted', label: 'Wall-mounted', description: '' }
+      ];
+      return field;
+    }
+
+    if (lower.includes('specific room') || lower.includes('which room') || lower.includes('what room') || lower.includes(' room')) {
+      field.id = 'room';
+      field.label = 'Room';
+      field.placeholder = this.extractAssistFieldHint(rawQuestion, 'Bathroom, kitchen, living room');
+      return field;
+    }
+
+    if (lower.includes('tools')) {
+      field.id = 'available_tools';
+      field.label = 'Available tools';
+      field.type = 'textarea';
+      field.placeholder = this.extractAssistFieldHint(rawQuestion, 'Saw, drill, square');
+      return field;
+    }
+
+    if (lower.includes('how many') && lower.includes('shel')) {
+      field.id = 'shelf_count';
+      field.label = 'Shelf count';
+      field.type = 'number';
+      field.placeholder = '3';
+      return field;
+    }
+
+    if (lower.includes('material')) {
+      field.id = 'material';
+      field.label = 'Material';
+      field.placeholder = this.extractAssistFieldHint(rawQuestion, 'Plywood, pine, MDF');
+      return field;
+    }
+
+    if (lower.includes("what's it holding") || lower.includes('what is it holding') || lower.includes('what will it hold')) {
+      field.id = 'intended_load';
+      field.label = 'What it will hold';
+      field.placeholder = 'Books, decor, kitchen items';
+      return field;
+    }
+
+    return field;
+  }
+
+  buildAssistFieldFromQuestionBlock(block, index) {
+    if (!block || !Array.isArray(block.options) || block.options.length < 2) {
+      return null;
+    }
+
+    const field = this.buildAssistFieldFromQuestion(block.question, index) || {
+      id: this.buildAssistFieldId(block.question, index),
+      label: this.cleanAssistChoiceText(block.question),
+      description: String(block.question || '').trim(),
+      evidence: '',
+      type: 'text',
+      placeholder: '',
+      required: true,
+      options: []
+    };
+
+    field.type = 'select';
+    field.description = String(block.question || '').trim();
+    field.evidence = this.deriveAssistFieldEvidence(block.options);
+    field.options = block.options.map((option, optionIndex) => {
+      const label = String(option?.label || '').trim();
+      if (!label) return null;
+      return {
+        value: label,
+        label,
+        description: String(option?.description || '').trim(),
+        key: String(option?.key || this.getAssistOptionKey(optionIndex)).trim()
+      };
+    }).filter(Boolean);
+    return field.options.length >= 2 ? field : null;
+  }
+
   buildAssistWorkflowStepFromText(...values) {
     for (const value of values) {
+      const questionBlocks = this.extractAssistQuestionBlocks(value);
+      if (questionBlocks.length > 0) {
+        const fields = questionBlocks
+          .map((block, index) => this.buildAssistFieldFromQuestionBlock(block, index))
+          .filter(Boolean);
+        if (fields.length > 0) {
+          return {
+            stepType: 'ask_form',
+            title: 'Provide the missing details',
+            summary: 'Answer the questions below so the task can continue.',
+            freeTextAllowed: true,
+            fields
+          };
+        }
+      }
+
       const enumeratedChoices = this.extractAssistEnumeratedChoices(value);
       if (enumeratedChoices.length > 0) {
         return {
@@ -5289,22 +7084,56 @@ export class WorkspaceDetailPage {
           choices: inlineChoices
         };
       }
+
+      const questions = this.extractAssistQuestions(value);
+      if (questions.length >= 2) {
+        const fields = questions.map((question, index) => this.buildAssistFieldFromQuestion(question, index)).filter(Boolean);
+        if (fields.length > 0) {
+          return {
+            stepType: 'ask_form',
+            title: 'Provide the missing details',
+            summary: 'Answer the questions below so the task can continue.',
+            freeTextAllowed: true,
+            fields
+          };
+        }
+      }
     }
     return null;
   }
 
-  getAssistResponseDisplayText(response, question) {
+  trimAssistQuestionnaireFromResponse(response, workflowStep = null) {
+    const text = String(response || '').trim();
+    if (!text || workflowStep?.stepType !== 'ask_form') {
+      return text;
+    }
+
+    const questionBlocks = this.extractAssistQuestionBlocks(text);
+    if (questionBlocks.length === 0) {
+      return text;
+    }
+
+    const lines = text.split(/\r?\n/);
+    const startIndex = lines.findIndex((line) => /^\s*\d+[.)]\s+/.test(String(line || '')));
+    if (startIndex < 0) {
+      return text;
+    }
+
+    return lines.slice(0, startIndex).join('\n').trim();
+  }
+
+  getAssistResponseDisplayText(response, question, workflowStep = null) {
     const rawResponse = String(response || '').trim();
     const rawQuestion = String(question || '').trim();
     if (!rawResponse) return '';
-    if (!rawQuestion) return rawResponse;
+    if (!rawQuestion) return this.trimAssistQuestionnaireFromResponse(rawResponse, workflowStep);
 
     const normalize = (value) => this.cleanTaskResultNextStepText(value)
       .replace(/[?!.,;:]+$/g, '')
       .toLowerCase();
 
     const normalizedQuestion = normalize(rawQuestion);
-    if (!normalizedQuestion) return rawResponse;
+    if (!normalizedQuestion) return this.trimAssistQuestionnaireFromResponse(rawResponse, workflowStep);
 
     const paragraphs = rawResponse
       .split(/\n\s*\n/)
@@ -5312,7 +7141,7 @@ export class WorkspaceDetailPage {
       .filter(Boolean);
     if (paragraphs.length > 0 && normalize(paragraphs[paragraphs.length - 1]) === normalizedQuestion) {
       paragraphs.pop();
-      return paragraphs.join('\n\n').trim();
+      return this.trimAssistQuestionnaireFromResponse(paragraphs.join('\n\n').trim(), workflowStep);
     }
 
     const lines = rawResponse.split(/\r?\n/);
@@ -5324,23 +7153,52 @@ export class WorkspaceDetailPage {
       while (lines.length > 0 && !String(lines[lines.length - 1] || '').trim()) {
         lines.pop();
       }
-      return lines.join('\n').trim();
+      return this.trimAssistQuestionnaireFromResponse(lines.join('\n').trim(), workflowStep);
     }
 
-    return rawResponse;
+    return this.trimAssistQuestionnaireFromResponse(rawResponse, workflowStep);
   }
 
   setAssistWorkflowStepUI(workflowStep) {
+    const normalizedStep = this.normalizeAssistWorkflowStep(workflowStep);
+    if (!normalizedStep) {
+      this.clearAssistChoiceStepUI();
+      this.clearAssistFormStepUI();
+      return;
+    }
+
+    if (normalizedStep.stepType === 'ask_choice') {
+      this.setAssistChoiceStepUI(normalizedStep);
+      this.clearAssistFormStepUI();
+      return;
+    }
+
+    if (normalizedStep.stepType === 'ask_form') {
+      this.clearAssistChoiceStepUI();
+      this.setAssistFormStepUI(normalizedStep);
+      return;
+    }
+
+    this.clearAssistChoiceStepUI();
+    this.clearAssistFormStepUI();
+  }
+
+  clearAssistChoiceStepUI() {
     if (!this.elements.taskAssistChoiceWrap || !this.elements.taskAssistChoiceList) return;
 
-    const normalizedStep = this.normalizeAssistWorkflowStep(workflowStep);
-    if (!normalizedStep || normalizedStep.stepType !== 'ask_choice' || normalizedStep.choices.length === 0) {
-      this.elements.taskAssistChoiceList.innerHTML = '';
-      if (this.elements.taskAssistChoiceSummary) {
-        this.elements.taskAssistChoiceSummary.textContent = '';
-        this.elements.taskAssistChoiceSummary.classList.add('d-none');
-      }
-      this.elements.taskAssistChoiceWrap.classList.add('d-none');
+    this.elements.taskAssistChoiceList.innerHTML = '';
+    if (this.elements.taskAssistChoiceSummary) {
+      this.elements.taskAssistChoiceSummary.textContent = '';
+      this.elements.taskAssistChoiceSummary.classList.add('d-none');
+    }
+    this.elements.taskAssistChoiceWrap.classList.add('d-none');
+  }
+
+  setAssistChoiceStepUI(normalizedStep) {
+    if (!this.elements.taskAssistChoiceWrap || !this.elements.taskAssistChoiceList || !Array.isArray(normalizedStep?.choices)) return;
+
+    if (normalizedStep.choices.length === 0) {
+      this.clearAssistChoiceStepUI();
       return;
     }
 
@@ -5367,7 +7225,7 @@ export class WorkspaceDetailPage {
         this.currentBlockedTask.selectedChoiceLabel = selectedChoice.label;
         this.currentBlockedTask.selectedChoiceNumber = selectedChoice.number || '';
         this.currentBlockedTask.workflowStep = normalizedStep;
-        this.setAssistWorkflowStepUI(normalizedStep);
+        this.setAssistChoiceStepUI(normalizedStep);
       });
     });
 
@@ -5378,6 +7236,184 @@ export class WorkspaceDetailPage {
     }
 
     this.elements.taskAssistChoiceWrap.classList.remove('d-none');
+  }
+
+  clearAssistFormStepUI() {
+    if (!this.elements.taskAssistFormWrap || !this.elements.taskAssistFormFields) return;
+
+    this.elements.taskAssistFormFields.innerHTML = '';
+    if (this.elements.taskAssistFormSummary) {
+      this.elements.taskAssistFormSummary.textContent = '';
+      this.elements.taskAssistFormSummary.classList.add('d-none');
+    }
+    this.elements.taskAssistFormWrap.classList.add('d-none');
+  }
+
+  getAssistFormFieldPrompt(field) {
+    const description = String(field?.description || '').trim();
+    if (description) {
+      return description.endsWith('?') ? description : `${description}?`;
+    }
+
+    const label = String(field?.label || '').trim();
+    if (!label) return '';
+    return label.endsWith('?') ? label : `${label}?`;
+  }
+
+  setAssistFormFieldValue(fieldId, value) {
+    if (!this.currentBlockedTask || !fieldId) return;
+
+    if (!this.currentBlockedTask.selectedFieldValues || typeof this.currentBlockedTask.selectedFieldValues !== 'object') {
+      this.currentBlockedTask.selectedFieldValues = {};
+    }
+
+    const normalizedValue = String(value || '').trim();
+    if (!normalizedValue) {
+      delete this.currentBlockedTask.selectedFieldValues[fieldId];
+      return;
+    }
+
+    this.currentBlockedTask.selectedFieldValues[fieldId] = normalizedValue;
+  }
+
+  collectAssistFormFieldValues(step = this.currentBlockedTask?.workflowStep) {
+    const normalizedStep = this.normalizeAssistWorkflowStep(step);
+    if (!normalizedStep || normalizedStep.stepType !== 'ask_form' || !Array.isArray(normalizedStep.fields)) {
+      return [];
+    }
+
+    const selectedValues = this.currentBlockedTask?.selectedFieldValues && typeof this.currentBlockedTask.selectedFieldValues === 'object'
+      ? this.currentBlockedTask.selectedFieldValues
+      : {};
+
+    return normalizedStep.fields.map((field) => {
+      const id = String(field?.id || '').trim();
+      const label = String(field?.label || '').trim();
+      const value = String(selectedValues[id] || '').trim();
+      if (!id || !value) return null;
+      return { id, label, value };
+    }).filter(Boolean);
+  }
+
+  setAssistFormStepUI(normalizedStep) {
+    if (!this.elements.taskAssistFormWrap || !this.elements.taskAssistFormFields || !Array.isArray(normalizedStep?.fields)) return;
+
+    if (normalizedStep.fields.length === 0) {
+      this.clearAssistFormStepUI();
+      return;
+    }
+
+    const selectedValues = this.currentBlockedTask?.selectedFieldValues && typeof this.currentBlockedTask.selectedFieldValues === 'object'
+      ? this.currentBlockedTask.selectedFieldValues
+      : {};
+
+    this.elements.taskAssistFormFields.innerHTML = normalizedStep.fields.map((field, fieldIndex) => {
+      const fieldId = String(field.id || '').trim();
+      const label = String(field.label || '').trim();
+      const description = String(field.description || '').trim();
+      const evidence = String(field.evidence || '').trim();
+      const placeholder = String(field.placeholder || '').trim();
+      const prompt = this.getAssistFormFieldPrompt(field);
+      const requiredMark = field.required ? ' <span aria-hidden="true">*</span>' : '';
+      const currentValue = String(selectedValues[fieldId] || '').trim();
+      const value = this.escapeHtml(currentValue);
+      const hint = description
+        && description !== prompt
+        ? `<div class="workspace-detail-task-assist-form-hint">${this.escapeHtml(description)}</div>`
+        : '';
+      const evidenceMarkup = evidence
+        ? `<div class="workspace-detail-task-assist-form-evidence">${this.escapeHtml(evidence)}</div>`
+        : '';
+      const questionIntro = `
+        <div class="workspace-detail-task-assist-form-question">
+          <span class="workspace-detail-task-assist-form-number">${fieldIndex + 1}</span>
+          <div class="workspace-detail-task-assist-form-question-copy">
+            <div class="workspace-detail-task-assist-form-prompt">${this.escapeHtml(prompt || label)}</div>
+            ${hint}
+            ${evidenceMarkup}
+          </div>
+        </div>
+      `;
+
+      if (field.type === 'textarea') {
+        return `
+          <div class="workspace-detail-task-assist-form-field">
+            ${questionIntro}
+            <label class="form-label" for="workspace-detail-task-assist-field-${this.escapeHtml(fieldId)}">${this.escapeHtml(label)}${requiredMark}</label>
+            <textarea id="workspace-detail-task-assist-field-${this.escapeHtml(fieldId)}" class="form-control" rows="3" data-assist-field-id="${this.escapeHtml(fieldId)}" placeholder="${this.escapeHtml(placeholder)}">${value}</textarea>
+          </div>
+        `;
+      }
+
+      if (field.type === 'select') {
+        const options = Array.isArray(field.options) ? field.options : [];
+        const optionsMarkup = options.map((option, optionIndex) => {
+          const optionValue = String(option?.value || '').trim();
+          const optionLabel = String(option?.label || option?.value || '').trim();
+          const optionDescription = String(option?.description || '').trim();
+          const optionKey = String(option?.key || '').trim();
+          if (!optionValue || !optionLabel) return '';
+          const checked = currentValue === optionValue ? ' checked' : '';
+          return `
+            <label class="workspace-detail-task-assist-option">
+              <input
+                class="workspace-detail-task-assist-option-input"
+                type="radio"
+                name="workspace-detail-task-assist-field-${this.escapeHtml(fieldId)}"
+                value="${this.escapeHtml(optionValue)}"
+                data-assist-field-id="${this.escapeHtml(fieldId)}"${checked}
+              >
+              <span class="workspace-detail-task-assist-option-card">
+                <span class="workspace-detail-task-assist-option-key">${this.escapeHtml(optionKey || this.getAssistOptionKey(optionIndex))}</span>
+                <span class="workspace-detail-task-assist-option-copy">
+                  <span class="workspace-detail-task-assist-option-label">${this.escapeHtml(optionLabel)}</span>
+                  ${optionDescription ? `<span class="workspace-detail-task-assist-option-description">${this.escapeHtml(optionDescription)}</span>` : ''}
+                </span>
+              </span>
+            </label>
+          `;
+        }).join('');
+
+        return `
+          <div class="workspace-detail-task-assist-form-field">
+            ${questionIntro}
+            <div class="workspace-detail-task-assist-option-group" role="radiogroup" aria-label="${this.escapeHtml(prompt || label)}${field.required ? ' (required)' : ''}">
+              ${optionsMarkup}
+            </div>
+          </div>
+        `;
+      }
+
+      const inputType = field.type === 'number' ? 'number' : 'text';
+      return `
+        <div class="workspace-detail-task-assist-form-field">
+          ${questionIntro}
+          <label class="form-label" for="workspace-detail-task-assist-field-${this.escapeHtml(fieldId)}">${this.escapeHtml(label)}${requiredMark}</label>
+          <input id="workspace-detail-task-assist-field-${this.escapeHtml(fieldId)}" class="form-control" type="${inputType}" data-assist-field-id="${this.escapeHtml(fieldId)}" value="${value}" placeholder="${this.escapeHtml(placeholder)}">
+        </div>
+      `;
+    }).join('');
+
+    this.elements.taskAssistFormFields.querySelectorAll('[data-assist-field-id]').forEach((fieldElement) => {
+      const syncValue = () => {
+        const fieldId = String(fieldElement.getAttribute('data-assist-field-id') || '').trim();
+        if (!fieldId) return;
+        if (fieldElement instanceof HTMLInputElement && fieldElement.type === 'radio' && !fieldElement.checked) {
+          return;
+        }
+        this.setAssistFormFieldValue(fieldId, fieldElement.value);
+      };
+      fieldElement.addEventListener('input', syncValue);
+      fieldElement.addEventListener('change', syncValue);
+    });
+
+    if (this.elements.taskAssistFormSummary) {
+      const summary = String(normalizedStep.summary || '').trim();
+      this.elements.taskAssistFormSummary.textContent = summary;
+      this.elements.taskAssistFormSummary.classList.toggle('d-none', !summary);
+    }
+
+    this.elements.taskAssistFormWrap.classList.remove('d-none');
   }
 
   getAssistActionButton(action) {
@@ -5548,6 +7584,14 @@ export class WorkspaceDetailPage {
       };
     }
 
+    if (workflowStep?.stepType === 'ask_form' && Array.isArray(workflowStep.fields) && workflowStep.fields.length > 0 &&
+        allows('continue_with_instruction')) {
+      return {
+        action: 'continue_with_instruction',
+        text: 'Recommended: Answer the questions below and continue.'
+      };
+    }
+
     if (browserRelated && browserAgent && allows('switch_agent_retry')) {
       return {
         action: 'switch_agent_retry',
@@ -5588,7 +7632,142 @@ export class WorkspaceDetailPage {
     return null;
   }
 
-  openTaskAssistModal(taskId, eventData = null) {
+  getBlockedTaskRouteId() {
+    const params = new URLSearchParams(window.location.search);
+    return String(params.get('blocked_task') || '').trim();
+  }
+
+  updateBlockedTaskRoute(taskId = '', { replace = false } = {}) {
+    const nextTaskId = String(taskId || '').trim();
+    const url = new URL(window.location.href);
+
+    if (nextTaskId) {
+      url.searchParams.set('blocked_task', nextTaskId);
+    } else {
+      url.searchParams.delete('blocked_task');
+    }
+
+    const nextHref = `${url.pathname}${url.search}${url.hash}`;
+    const currentHref = `${window.location.pathname}${window.location.search}${window.location.hash}`;
+    if (nextHref === currentHref) {
+      return;
+    }
+
+    const state = {
+      ...(window.history.state && typeof window.history.state === 'object' ? window.history.state : {}),
+      blockedTaskId: nextTaskId || null
+    };
+    if (replace) {
+      window.history.replaceState(state, '', nextHref);
+    } else {
+      window.history.pushState(state, '', nextHref);
+    }
+  }
+
+  isTaskAssistPageVisible() {
+    return Boolean(this.elements.taskAssistPage && !this.elements.taskAssistPage.hidden);
+  }
+
+  scrollTaskAssistSurfaceIntoView(target = null) {
+    const surface = target || this.elements.taskAssistPage || this.elements.workspaceDetailView;
+    if (!surface) {
+      window.scrollTo({ top: 0, left: 0, behavior: 'auto' });
+      return;
+    }
+
+    const top = Math.max(0, window.scrollY + surface.getBoundingClientRect().top - 12);
+    window.scrollTo({ top, left: 0, behavior: 'auto' });
+  }
+
+  scheduleTaskAssistScrollReset(target = null) {
+    const surface = target || this.elements.taskAssistPage;
+    if (!surface) return;
+
+    try {
+      if (window.history && 'scrollRestoration' in window.history) {
+        window.history.scrollRestoration = 'manual';
+      }
+    } catch (_error) {
+      // Ignore browsers that block scroll restoration changes.
+    }
+
+    const reset = () => {
+      this.scrollTaskAssistSurfaceIntoView(surface);
+      document.documentElement.scrollTop = 0;
+      document.body.scrollTop = 0;
+    };
+
+    reset();
+    window.requestAnimationFrame(reset);
+    window.setTimeout(reset, 0);
+    window.setTimeout(reset, 80);
+    window.setTimeout(reset, 220);
+  }
+
+  showTaskAssistPage({ taskId = '', updateRoute = true, replaceRoute = false } = {}) {
+    if (this.elements.workspaceDetailView) {
+      this.elements.workspaceDetailView.hidden = true;
+    }
+    if (this.elements.taskAssistPage) {
+      this.elements.taskAssistPage.hidden = false;
+    }
+    if (updateRoute) {
+      this.updateBlockedTaskRoute(taskId || this.currentBlockedTask?.taskId || '', { replace: replaceRoute });
+    }
+    this.scheduleTaskAssistScrollReset(this.elements.taskAssistPage);
+  }
+
+  closeTaskAssistPage({ updateRoute = true, replaceRoute = true, preserveState = false } = {}) {
+    if (this.elements.workspaceDetailView) {
+      this.elements.workspaceDetailView.hidden = false;
+    }
+    if (this.elements.taskAssistPage) {
+      this.elements.taskAssistPage.hidden = true;
+    }
+    if (updateRoute) {
+      this.updateBlockedTaskRoute('', { replace: replaceRoute });
+    }
+    if (!preserveState) {
+      this.currentBlockedTask = null;
+      this.currentAssistRecommendation = null;
+      this.currentAssistSpecialistAction = null;
+    }
+    try {
+      if (window.history && 'scrollRestoration' in window.history) {
+        window.history.scrollRestoration = 'auto';
+      }
+    } catch (_error) {
+      // Ignore browsers that block scroll restoration changes.
+    }
+    this.scrollTaskAssistSurfaceIntoView(this.elements.workspaceDetailView);
+  }
+
+  restoreTaskAssistPageFromRoute() {
+    const routeTaskId = this.getBlockedTaskRouteId();
+    const activeTaskId = String(this.currentBlockedTask?.taskId || '').trim();
+
+    if (!routeTaskId) {
+      if (this.isTaskAssistPageVisible() || activeTaskId) {
+        this.closeTaskAssistPage({ updateRoute: false, replaceRoute: true });
+      }
+      return false;
+    }
+
+    const task = this.tasks.find((item) => item?.id === routeTaskId);
+    if (!task || !this.getTaskStatusPresentation(task).isBlocked) {
+      this.closeTaskAssistPage({ updateRoute: true, replaceRoute: true });
+      return false;
+    }
+
+    if (this.isTaskAssistPageVisible() && activeTaskId === routeTaskId) {
+      return true;
+    }
+
+    this.openTaskAssistModal(routeTaskId, null, { updateRoute: false, replaceRoute: true });
+    return true;
+  }
+
+  openTaskAssistModal(taskId, eventData = null, options = {}) {
     const task = this.tasks.find((item) => item.id === taskId);
     if (!task) return;
 
@@ -5603,9 +7782,11 @@ export class WorkspaceDetailPage {
     const reason = String(payload.reason || payloadHumanLoop.reason || humanLoop.reason || 'The assigned agent needs guidance before it can continue.').trim();
     const question = String(payload.question || payloadHumanLoop.question || humanLoop.question || 'How should I proceed?').trim();
     const response = String(payload.agent_response || payloadHumanLoop.agent_response || humanLoop.agent_response || '').trim();
-    const displayResponse = this.getAssistResponseDisplayText(response, question);
     const statusText = getDisplayStatus(task.status);
     const timestamp = formatDate(task.updated_at || task.created_at);
+    const selectedFieldValues = this.normalizeAssistFieldValues(
+      payload.field_values || payloadHumanLoop.field_values || humanLoop.field_values
+    );
 
     const currentAgent = String(task.to || '').trim();
     const baseWorkflowStep = this.normalizeAssistWorkflowStep(payload.workflow_step)
@@ -5613,6 +7794,7 @@ export class WorkspaceDetailPage {
       || this.normalizeAssistWorkflowStep(humanLoop.workflow_step)
       || this.normalizeAssistWorkflowStep(task?.context?.planning_workflow_step)
       || this.buildAssistWorkflowStepFromText(question, response);
+    const displayResponse = this.getAssistResponseDisplayText(response, question, baseWorkflowStep);
     const recommendation = this.determineAssistRecommendation(
       reasonCode,
       suggestedActions,
@@ -5626,6 +7808,11 @@ export class WorkspaceDetailPage {
       }
     );
     const workflowStep = this.applyAssistWorkflowSpecialistOverrides(baseWorkflowStep, recommendation?.specialistAction);
+    const assistSummary = {
+      known: this.buildAssistKnownSummary(reason, displayResponse),
+      needs: this.buildAssistNeedsSummary(workflowStep, question),
+      next: this.buildAssistNextSummary(recommendation, workflowStep, currentAgent)
+    };
     this.currentBlockedTask = {
       taskId,
       blockId,
@@ -5636,10 +7823,15 @@ export class WorkspaceDetailPage {
       specialistAction: recommendation?.specialistAction || null,
       selectedChoiceId: '',
       selectedChoiceLabel: '',
-      selectedChoiceNumber: ''
+      selectedChoiceNumber: '',
+      selectedFieldValues
     };
 
     this.setTaskModalHeaderId(this.elements.taskAssistId, task.id);
+    if (this.elements.taskAssistAgentName) {
+      this.elements.taskAssistAgentName.textContent = currentAgent || 'Unassigned';
+      this.elements.taskAssistAgentName.title = currentAgent || 'Unassigned';
+    }
     if (this.elements.taskAssistMeta) {
       this.elements.taskAssistMeta.textContent = `${task.description || task.name || task.id} • ${statusText} • ${timestamp}`;
     }
@@ -5652,26 +7844,27 @@ export class WorkspaceDetailPage {
     if (this.elements.taskAssistMessage) {
       this.elements.taskAssistMessage.value = '';
     }
-    if (this.elements.taskAssistResponse && this.elements.taskAssistResponseWrap) {
-      if (displayResponse) {
-        this.elements.taskAssistResponse.textContent = displayResponse;
-        this.elements.taskAssistResponseWrap.classList.remove('d-none');
-      } else {
-        this.elements.taskAssistResponse.textContent = '';
-        this.elements.taskAssistResponseWrap.classList.add('d-none');
-      }
+    this.setAssistResponseUI(response, displayResponse);
+    this.setAssistSummaryUI(assistSummary);
+    if (this.elements.taskAssistQuestionWrap) {
+      const shouldShowQuestion = Boolean(question) && workflowStep?.stepType !== 'ask_form';
+      this.elements.taskAssistQuestionWrap.classList.toggle('d-none', !shouldShowQuestion);
+    }
+    if (this.elements.taskAssistContextScroll) {
+      this.elements.taskAssistContextScroll.scrollTop = 0;
+    }
+    if (this.elements.taskAssistAnswerScroll) {
+      this.elements.taskAssistAnswerScroll.scrollTop = 0;
     }
 
     this.populateAssistAgents(currentAgent);
     this.setAssistWorkflowStepUI(workflowStep);
     this.setAssistRecommendationUI(recommendation);
-
-    if (this.elements.taskAssistModal && window.bootstrap) {
-      const modal = typeof bootstrap.Modal.getOrCreateInstance === 'function'
-        ? bootstrap.Modal.getOrCreateInstance(this.elements.taskAssistModal)
-        : (bootstrap.Modal.getInstance(this.elements.taskAssistModal) || new bootstrap.Modal(this.elements.taskAssistModal));
-      modal.show();
-    }
+    this.showTaskAssistPage({
+      taskId,
+      updateRoute: options.updateRoute !== false,
+      replaceRoute: Boolean(options.replaceRoute)
+    });
   }
 
   async submitTaskAssist(action) {
@@ -5682,6 +7875,7 @@ export class WorkspaceDetailPage {
     const selectedChoiceId = String(this.currentBlockedTask?.selectedChoiceId || '').trim();
     const selectedChoiceLabel = String(this.currentBlockedTask?.selectedChoiceLabel || '').trim();
     const selectedChoiceNumber = String(this.currentBlockedTask?.selectedChoiceNumber || '').trim();
+    const fieldValues = this.collectAssistFormFieldValues();
     if (action === 'switch_agent_retry' && !selectedAgent) {
       if (window.Toast) window.Toast.error('Select an agent to switch before retrying.');
       return;
@@ -5698,6 +7892,26 @@ export class WorkspaceDetailPage {
       if (window.Toast) window.Toast.warning('Choose a next step or add guidance before continuing.');
       return;
     }
+    if (action === 'continue_with_instruction' &&
+        this.currentBlockedTask.workflowStep?.stepType === 'ask_form') {
+      const requiredFields = Array.isArray(this.currentBlockedTask.workflowStep?.fields)
+        ? this.currentBlockedTask.workflowStep.fields.filter((field) => field?.required !== false)
+        : [];
+      const missingRequired = requiredFields.filter((field) => {
+        const fieldId = String(field?.id || '').trim();
+        return !fieldValues.some((item) => item.id === fieldId && String(item.value || '').trim());
+      });
+
+      if (missingRequired.length > 0) {
+        if (window.Toast) window.Toast.warning('Answer the required questions before continuing.');
+        return;
+      }
+
+      if (fieldValues.length === 0 && !message) {
+        if (window.Toast) window.Toast.warning('Answer at least one question or add guidance before continuing.');
+        return;
+      }
+    }
 
     const payload = {
       action,
@@ -5706,7 +7920,8 @@ export class WorkspaceDetailPage {
       agent: selectedAgent || undefined,
       choice_id: selectedChoiceId || undefined,
       choice_label: selectedChoiceLabel || undefined,
-      choice_number: selectedChoiceNumber || undefined
+      choice_number: selectedChoiceNumber || undefined,
+      field_values: fieldValues.length > 0 ? fieldValues : undefined
     };
 
     try {
@@ -5721,12 +7936,8 @@ export class WorkspaceDetailPage {
       }
 
       if (window.Toast) window.Toast.success('Task updated');
+      this.closeTaskAssistPage({ replaceRoute: true });
       await this.loadTasks();
-
-      if (action !== 'mark_failed' && this.elements.taskAssistModal && window.bootstrap) {
-        const modal = bootstrap.Modal.getInstance(this.elements.taskAssistModal);
-        modal?.hide();
-      }
     } catch (error) {
       console.error('Failed to assist blocked task:', error);
       if (window.Toast) window.Toast.error(error.message || 'Failed to assist task');
@@ -5781,6 +7992,232 @@ export class WorkspaceDetailPage {
     const key = this.normalizeAgentName(agentName);
     if (!key || !this.agentIndex) return null;
     return this.agentIndex.get(key) || null;
+  }
+
+  async openAgentModelModal(encodedAgentName = '') {
+    let agentName = '';
+    try {
+      agentName = decodeURIComponent(String(encodedAgentName || ''));
+    } catch (_error) {
+      agentName = String(encodedAgentName || '');
+    }
+    agentName = String(agentName || '').trim();
+    if (!agentName) return;
+
+    await Promise.all([
+      this.loadAgentCatalog(true),
+      this.loadProviderCatalog()
+    ]);
+
+    const profile = this.getAgentProfile(agentName);
+    if (!profile) {
+      if (window.Toast) window.Toast.error('Failed to load agent settings.');
+      return;
+    }
+    if (!this.agentAllowsModelEditing(profile)) {
+      if (window.Toast) window.Toast.warning('This agent model cannot be changed from the workspace.');
+      return;
+    }
+
+    this.activeAgentModelEdit = {
+      agentName,
+      agentType: String(profile.type || 'general').trim() || 'general',
+      currentModel: String(profile.model || '').trim(),
+      currentProvider: String(profile.provider || '').trim()
+    };
+
+    if (this.elements.agentModelAgentName) {
+      this.elements.agentModelAgentName.textContent = agentName;
+    }
+    if (this.elements.agentModelTitle) {
+      this.elements.agentModelTitle.textContent = `Change Model for ${agentName}`;
+    }
+    if (this.elements.agentModelCurrent) {
+      const currentModelLabel = this.activeAgentModelEdit.currentModel || 'Not set';
+      const currentProviderLabel = this.activeAgentModelEdit.currentProvider || 'Unknown provider';
+      this.elements.agentModelCurrent.textContent = `${currentModelLabel} via ${currentProviderLabel}`;
+    }
+
+    this.populateAgentModelSelect();
+    this.updateAgentModelSelectionSummary();
+
+    if (this.elements.agentModelModal && window.bootstrap) {
+      const modal = typeof bootstrap.Modal.getOrCreateInstance === 'function'
+        ? bootstrap.Modal.getOrCreateInstance(this.elements.agentModelModal)
+        : (bootstrap.Modal.getInstance(this.elements.agentModelModal) || new bootstrap.Modal(this.elements.agentModelModal));
+      modal.show();
+    }
+  }
+
+  populateAgentModelSelect() {
+    const select = this.elements.agentModelSelect;
+    const editState = this.activeAgentModelEdit;
+    if (!select || !editState) return;
+
+    const normalizedType = String(editState.agentType || 'general').trim().toLowerCase() || 'general';
+    const currentModel = String(editState.currentModel || '').trim();
+    const currentProvider = String(editState.currentProvider || '').trim();
+
+    select.innerHTML = '';
+    let hasOptions = false;
+    let selectedFound = false;
+
+    (Array.isArray(this.providerCatalog) ? this.providerCatalog : []).forEach((provider) => {
+      const group = document.createElement('optgroup');
+      group.label = String(provider?.display_name || provider?.name || '').trim() || 'Provider';
+      let groupHasOptions = false;
+
+      const models = Array.isArray(provider?.models) ? provider.models : [];
+      models.forEach((model) => {
+        const value = String(model?.value || '').trim();
+        if (!value) return;
+
+        const modelType = String(model?.type || '').trim().toLowerCase();
+        const include = modelType === normalizedType || value === currentModel;
+        if (!include) return;
+
+        const option = document.createElement('option');
+        option.value = value;
+        option.textContent = String(model?.label || value).trim();
+        option.setAttribute('data-provider', String(model?.provider || provider?.name || '').trim());
+        option.setAttribute('data-model-type', modelType);
+        if (value === currentModel) {
+          option.selected = true;
+          selectedFound = true;
+        }
+        group.appendChild(option);
+        groupHasOptions = true;
+      });
+
+      if (groupHasOptions) {
+        select.appendChild(group);
+        hasOptions = true;
+      }
+    });
+
+    if (currentModel && !selectedFound) {
+      const currentGroup = document.createElement('optgroup');
+      currentGroup.label = 'Current Model';
+      const option = document.createElement('option');
+      option.value = currentModel;
+      option.textContent = `${currentModel} (Current)`;
+      option.selected = true;
+      option.setAttribute('data-provider', currentProvider);
+      currentGroup.appendChild(option);
+      select.appendChild(currentGroup);
+      hasOptions = true;
+    }
+
+    if (!hasOptions) {
+      select.innerHTML = '<option value="">No compatible models available</option>';
+    }
+
+    if (this.elements.agentModelSubmitBtn) {
+      this.elements.agentModelSubmitBtn.disabled = !hasOptions || !String(select.value || '').trim();
+    }
+  }
+
+  updateAgentModelSelectionSummary() {
+    const select = this.elements.agentModelSelect;
+    const help = this.elements.agentModelHelp;
+    if (!select || !help) return;
+
+    const editState = this.activeAgentModelEdit;
+    const selectedOption = select.selectedOptions?.[0] || null;
+    const selectedModel = String(select.value || '').trim();
+    const selectedProvider = String(selectedOption?.getAttribute('data-provider') || '').trim();
+
+    if (!editState || !selectedModel) {
+      help.textContent = 'No compatible models are currently available for this agent type.';
+      return;
+    }
+
+    const currentModel = String(editState.currentModel || '').trim();
+    const currentProvider = String(editState.currentProvider || '').trim();
+    if (selectedModel === currentModel && selectedProvider === currentProvider) {
+      help.textContent = 'This agent is already using the selected model.';
+      return;
+    }
+
+    const providerLabel = selectedProvider || 'the selected provider';
+    help.textContent = `Save to switch ${editState.agentName} to ${selectedModel} via ${providerLabel}.`;
+  }
+
+  resetAgentModelModal() {
+    this.activeAgentModelEdit = null;
+    if (this.elements.agentModelAgentName) {
+      this.elements.agentModelAgentName.textContent = '--';
+    }
+    if (this.elements.agentModelTitle) {
+      this.elements.agentModelTitle.textContent = 'Change Agent Model';
+    }
+    if (this.elements.agentModelCurrent) {
+      this.elements.agentModelCurrent.textContent = '--';
+    }
+    if (this.elements.agentModelSelect) {
+      this.elements.agentModelSelect.innerHTML = '<option value="">Loading models...</option>';
+    }
+    if (this.elements.agentModelHelp) {
+      this.elements.agentModelHelp.textContent = 'Choose a model to update this workspace agent.';
+    }
+    if (this.elements.agentModelSubmitBtn) {
+      this.elements.agentModelSubmitBtn.disabled = false;
+      this.elements.agentModelSubmitBtn.textContent = 'Save Model';
+    }
+  }
+
+  async submitAgentModelChange() {
+    const editState = this.activeAgentModelEdit;
+    const select = this.elements.agentModelSelect;
+    const submitBtn = this.elements.agentModelSubmitBtn;
+    if (!editState || !select || !submitBtn) return;
+
+    const model = String(select.value || '').trim();
+    const selectedOption = select.selectedOptions?.[0] || null;
+    const provider = String(selectedOption?.getAttribute('data-provider') || '').trim();
+
+    if (!model || !provider) {
+      if (window.Toast) window.Toast.warning('Choose a valid model before saving.');
+      return;
+    }
+
+    submitBtn.disabled = true;
+    submitBtn.textContent = 'Saving...';
+
+    try {
+      const response = await fetch(`/api/agents/${encodeURIComponent(editState.agentName)}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          model,
+          llm_provider: provider
+        })
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(errorText || 'Failed to update agent model');
+      }
+
+      await this.loadAgentCatalog(true);
+      this.renderAgentGroups();
+
+      if (window.Toast) {
+        window.Toast.success(`Updated ${editState.agentName} to ${model}.`);
+      }
+
+      if (this.elements.agentModelModal && window.bootstrap) {
+        const modal = bootstrap.Modal.getInstance(this.elements.agentModelModal);
+        modal?.hide();
+      }
+    } catch (error) {
+      console.error('Failed to update workspace agent model:', error);
+      if (window.Toast) {
+        window.Toast.error(error?.message || 'Failed to update agent model');
+      }
+      submitBtn.disabled = false;
+      submitBtn.textContent = 'Save Model';
+    }
   }
 
   normalizeWorkspaceMCPBinding(binding, source = 'workspace') {
@@ -8551,49 +10988,94 @@ export class WorkspaceDetailPage {
 
   async loadAgentCatalog(force = false) {
     if (!force && this.agentIndex instanceof Map && this.agentIndex.size > 0) {
+      this.agentCatalogLoaded = true;
+      this.agentCatalogLoadFailed = false;
+      this.renderWorkspaceHealth();
       return this.agentCatalog;
     }
 
     const nextCatalog = [];
     const nextIndex = new Map();
+    this.agentCatalogLoaded = false;
+    this.agentCatalogLoadFailed = false;
+    this.renderWorkspaceHealth();
     try {
       const response = await fetch('/api/agents/dashboard/list');
-      if (response.ok) {
-        const data = await response.json();
-        const agents = Array.isArray(data?.agents) ? data.agents : [];
-        agents.forEach((agent) => {
-          const name = String(agent?.name || '').trim();
-          if (!name) return;
-
-          const profile = {
-            name,
-            model: String(agent?.model || '').trim(),
-            status: String(agent?.status || '').trim().toLowerCase(),
-            capabilities: Array.isArray(agent?.capabilities) ? agent.capabilities.map((value) => String(value || '').trim()).filter(Boolean) : [],
-            allowWebSearch: Boolean(agent?.allow_web_search),
-            enabledPlugins: Array.isArray(agent?.enabled_plugins) ? agent.enabled_plugins.map((value) => String(value || '').trim()).filter(Boolean) : [],
-            mcpServers: Array.isArray(agent?.mcp_servers) ? agent.mcp_servers.map((value) => String(value || '').trim()).filter(Boolean) : [],
-            evolution: agent?.evolution && typeof agent.evolution === 'object' ? agent.evolution : null,
-            level: Number.isFinite(Number(agent?.evolution?.level)) ? Math.max(0, Math.floor(Number(agent.evolution.level))) : 0,
-            stage: String(agent?.evolution?.stage || '').trim()
-          };
-
-          nextCatalog.push(profile);
-          nextIndex.set(this.normalizeAgentName(name), profile);
-        });
+      if (!response.ok) {
+        throw new Error(`Failed to load agent catalog (${response.status})`);
       }
+
+      const data = await response.json();
+      const agents = Array.isArray(data?.agents) ? data.agents : [];
+      agents.forEach((agent) => {
+        const name = String(agent?.name || '').trim();
+        if (!name) return;
+
+        const profile = {
+          name,
+          type: String(agent?.type || '').trim(),
+          source: String(agent?.source || 'user').trim().toLowerCase(),
+          model: String(agent?.model || '').trim(),
+          provider: String(agent?.provider || '').trim(),
+          status: String(agent?.status || '').trim().toLowerCase(),
+          capabilities: Array.isArray(agent?.capabilities) ? agent.capabilities.map((value) => String(value || '').trim()).filter(Boolean) : [],
+          allowWebSearch: Boolean(agent?.allow_web_search),
+          enabledPlugins: Array.isArray(agent?.enabled_plugins) ? agent.enabled_plugins.map((value) => String(value || '').trim()).filter(Boolean) : [],
+          mcpServers: Array.isArray(agent?.mcp_servers) ? agent.mcp_servers.map((value) => String(value || '').trim()).filter(Boolean) : [],
+          evolution: agent?.evolution && typeof agent.evolution === 'object' ? agent.evolution : null,
+          level: Number.isFinite(Number(agent?.evolution?.level)) ? Math.max(0, Math.floor(Number(agent.evolution.level))) : 0,
+          stage: String(agent?.evolution?.stage || '').trim()
+        };
+
+        nextCatalog.push(profile);
+        nextIndex.set(this.normalizeAgentName(name), profile);
+      });
     } catch (error) {
       console.error('Failed to load agent catalog:', error);
+      this.agentCatalogLoadFailed = true;
     }
 
     this.agentCatalog = nextCatalog;
     this.agentIndex = nextIndex;
+    this.agentCatalogLoaded = true;
 
     if (!Array.isArray(this.agentOptions) || this.agentOptions.length === 0) {
       this.agentOptions = this.buildAgentOptionsFromCatalog();
     }
 
+    this.renderWorkspaceHealth();
+
     return this.agentCatalog;
+  }
+
+  async loadProviderCatalog(force = false) {
+    if (!force && Array.isArray(this.providerCatalog) && this.providerCatalog.length > 0) {
+      return this.providerCatalog;
+    }
+    if (!force && this.providerCatalogPromise) {
+      return this.providerCatalogPromise;
+    }
+
+    this.providerCatalogPromise = (async () => {
+      try {
+        const response = await fetch('/api/providers');
+        if (!response.ok) {
+          throw new Error('Failed to load provider catalog');
+        }
+
+        const data = await response.json();
+        this.providerCatalog = Array.isArray(data?.providers) ? data.providers : [];
+      } catch (error) {
+        console.error('Failed to load provider catalog:', error);
+        this.providerCatalog = [];
+      } finally {
+        this.providerCatalogPromise = null;
+      }
+
+      return this.providerCatalog;
+    })();
+
+    return this.providerCatalogPromise;
   }
 
   buildAgentOptionsFromCatalog() {
@@ -10441,26 +12923,38 @@ export class WorkspaceDetailPage {
     if (this.elements.filesList) {
       this.elements.filesList.innerHTML = '<div class="workspace-detail-loading">Loading files...</div>';
     }
+    this.filesLoaded = false;
+    this.filesLoadFailed = false;
+    this.renderWorkspaceHealth();
 
     try {
       const response = await fetch(`/api/workspaces/${encodeURIComponent(this.workspaceId)}`);
       if (!response.ok) {
         this.files = [];
+        this.filesLoaded = true;
+        this.filesLoadFailed = true;
         this.renderFiles();
         this.refreshHomeAssistantQuickPrompts();
+        this.renderWorkspaceHealth();
         return;
       }
 
       const workspace = await response.json();
       // Filter attachments to only include files (not text content)
       this.files = (workspace.attachments || []).filter(a => a.file_meta || a.type === 'image' || a.type === 'other');
+      this.filesLoaded = true;
+      this.filesLoadFailed = false;
       this.renderFiles();
       this.refreshHomeAssistantQuickPrompts();
+      this.renderWorkspaceHealth();
     } catch (error) {
       console.error('Failed to load files:', error);
       this.files = [];
+      this.filesLoaded = true;
+      this.filesLoadFailed = true;
       this.renderFiles();
       this.refreshHomeAssistantQuickPrompts();
+      this.renderWorkspaceHealth();
     }
   }
 
@@ -10650,10 +13144,14 @@ export class WorkspaceDetailPage {
 
       const workspace = await response.json();
 
-      if (this.workspace && workspace && typeof workspace === 'object') {
+      if (workspace && typeof workspace === 'object') {
+        if (!this.workspace || typeof this.workspace !== 'object') {
+          this.workspace = {};
+        }
         this.workspace.directory_references = Array.isArray(workspace.directory_references) ? workspace.directory_references : [];
         this.workspace.mcp_bindings = Array.isArray(workspace.mcp_bindings) ? workspace.mcp_bindings : [];
         this.workspace.agent_mcp_access = Array.isArray(workspace.agent_mcp_access) ? workspace.agent_mcp_access : [];
+        this.workspace.primary_directory_id = typeof workspace.primary_directory_id === 'string' ? workspace.primary_directory_id : '';
       }
 
       const refs = Array.isArray(workspace.directory_references)
@@ -10716,17 +13214,26 @@ export class WorkspaceDetailPage {
     if (!this.elements.directoriesList) return;
 
     if (!this.directories || this.directories.length === 0) {
-      this.elements.directoriesList.innerHTML = '<div class="workspace-detail-empty">No directories yet.</div>';
+      this.elements.directoriesList.innerHTML = this.getUnlinkedProjectEmptyStateMarkup();
       return;
     }
 
+    const primaryDirectoryId = this.getPrimaryDirectoryId();
     this.elements.directoriesList.innerHTML = this.directories.map(dir => {
       const name = dir.title || dir.name || dir.path || 'Unnamed Directory';
       const path = dir.path || '';
-      const sourceLabel = dir.source === 'reference' ? 'Reference' : 'Attachment';
+      const sourceLabel = dir.source === 'reference' ? 'Linked folder' : 'Legacy attachment';
       const source = dir.source === 'attachment' ? 'attachment' : 'reference';
+      const isPrimary = dir.id === primaryDirectoryId;
+      const roleLabel = isPrimary ? 'Project Folder' : 'Reference';
+      const roleClass = isPrimary ? 'is-primary' : 'is-reference';
       return `
         <div class="workspace-detail-item" data-directory-id="${dir.id}">
+          <button type="button" class="workspace-detail-item-change" onclick="event.stopPropagation(); window.workspaceDetail?.promptRelinkDirectory('${dir.id}', '${source}', this)" title="Change linked folder" aria-label="Change linked folder for ${this.escapeHtml(name)}">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+              <path d="M4,7H18.17L15.59,4.41L17,3L22,8L17,13L15.59,11.59L18.17,9H4V7M20,17H5.83L8.41,19.59L7,21L2,16L7,11L8.41,12.41L5.83,15H20V17Z"/>
+            </svg>
+          </button>
           <button type="button" class="workspace-detail-item-run" onclick="event.stopPropagation(); window.workspaceDetail?.openDirectoryExplorer('${dir.id}', '${source}')" title="Explore directory" aria-label="Explore directory ${this.escapeHtml(name)}">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
               <path d="M15,12H16.5L15,13.5L16.42,14.92L20.34,11L16.42,7.08L15,8.5L16.5,10H15V12M19,19H5V5H13V3H5C3.89,3 3,3.89 3,5V19A2,2 0 0,0 5,21H19A2,2 0 0,0 21,19V13H19V19Z"/>
@@ -10744,16 +13251,62 @@ export class WorkspaceDetailPage {
                onclick="window.workspaceDetail?.openDirectoryExplorer('${dir.id}', '${source}')"
                onkeydown="if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); window.workspaceDetail?.openDirectoryExplorer('${dir.id}', '${source}'); }">
             <div class="workspace-detail-item-title">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" class="me-2" style="color: var(--text-secondary);">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" class="workspace-detail-item-title-icon">
                 <path d="M10,4H4C2.89,4 2,4.89 2,6V18A2,2 0 0,0 4,20H20A2,2 0 0,0 22,18V8C22,6.89 21.1,6 20,6H12L10,4Z"/>
               </svg>
-              ${this.escapeHtml(name)}
+              <span class="workspace-detail-item-title-text">${this.escapeHtml(name)}</span>
+              <span class="workspace-detail-directory-role ${roleClass}">${roleLabel}</span>
             </div>
-            <div class="workspace-detail-item-meta">${this.escapeHtml(path)}${path ? ' • ' : ''}${this.escapeHtml(sourceLabel)}</div>
+            <div class="workspace-detail-item-meta">${this.escapeHtml(path)}</div>
+            <div class="workspace-detail-item-submeta">
+              <span class="workspace-detail-directory-source">${this.escapeHtml(sourceLabel)}</span>
+              ${!isPrimary ? `
+                <button
+                  type="button"
+                  class="workspace-detail-directory-promote"
+                  onclick="event.stopPropagation(); window.workspaceDetail?.setPrimaryDirectory('${dir.id}')"
+                >
+                  Make Project
+                </button>
+              ` : ''}
+            </div>
           </div>
         </div>
       `;
     }).join('');
+  }
+
+  getStoredPrimaryDirectoryId() {
+    return typeof this.workspace?.primary_directory_id === 'string'
+      ? this.workspace.primary_directory_id.trim()
+      : '';
+  }
+
+  getPrimaryDirectoryId() {
+    const storedPrimaryDirectoryId = this.getStoredPrimaryDirectoryId();
+    if (storedPrimaryDirectoryId && this.directories.some((dir) => dir.id === storedPrimaryDirectoryId)) {
+      return storedPrimaryDirectoryId;
+    }
+
+    return this.directories[0]?.id || '';
+  }
+
+  getUnlinkedProjectEmptyStateMarkup() {
+    return `
+      <div class="workspace-detail-link-empty">
+        <div class="workspace-detail-link-empty-icon" aria-hidden="true">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
+            <path d="M10,4H4C2.89,4 2,4.89 2,6V18A2,2 0 0,0 4,20H12V18H4V8H20V11H22V8C22,6.89 21.1,6 20,6H12L10,4M19,13V16H16V18H19V21H21V18H24V16H21V13H19Z"/>
+          </svg>
+        </div>
+        <div class="workspace-detail-link-empty-eyebrow">Unlinked Workspace</div>
+        <div class="workspace-detail-link-empty-title">No project folder linked yet.</div>
+        <p class="workspace-detail-link-empty-copy">Attach the local project folder so this workspace can browse files in context.</p>
+        <button type="button" class="workspace-detail-empty-action" onclick="window.workspaceDetail?.showAddDirectoryModal(this)">
+          Link Project
+        </button>
+      </div>
+    `;
   }
 
   async deleteDirectory(directoryId, source = 'reference') {
@@ -10768,6 +13321,7 @@ export class WorkspaceDetailPage {
       : `/api/workspaces/${encodeURIComponent(this.workspaceId)}/directories/${encodeURIComponent(directoryId)}`;
 
     try {
+      const deletedWasStoredPrimary = this.getStoredPrimaryDirectoryId() === directoryId;
       const response = await fetch(endpoint, { method: 'DELETE' });
       if (!response.ok) {
         const errorText = await response.text();
@@ -10776,10 +13330,146 @@ export class WorkspaceDetailPage {
 
       if (window.Toast) window.Toast.success('Directory removed');
       await this.loadDirectories();
+      if (deletedWasStoredPrimary) {
+        await this.setPrimaryDirectory(this.directories[0]?.id || '', { silent: true });
+      }
     } catch (error) {
       console.error('Failed to remove directory:', error);
       if (window.Toast) window.Toast.error('Failed to remove directory');
     }
+  }
+
+  async setPrimaryDirectory(directoryId, { silent = false } = {}) {
+    const nextDirectoryId = typeof directoryId === 'string' ? directoryId.trim() : '';
+    if (this.getStoredPrimaryDirectoryId() === nextDirectoryId) {
+      return;
+    }
+
+    try {
+      await this.updateWorkspace({ primary_directory_id: nextDirectoryId });
+      if (!this.workspace || typeof this.workspace !== 'object') {
+        this.workspace = {};
+      }
+      this.workspace.primary_directory_id = nextDirectoryId;
+      this.renderDirectories();
+      if (!silent && window.Toast) {
+        window.Toast.success(nextDirectoryId ? 'Project folder updated' : 'Project folder cleared');
+      }
+    } catch (error) {
+      console.error('Failed to set primary directory:', error);
+      if (window.Toast) {
+        window.Toast.error(error.message || 'Failed to update project folder');
+      }
+    }
+  }
+
+  async promptRelinkDirectory(directoryId, source = 'reference', triggerButton = null) {
+    if (!directoryId) return;
+
+    const directory = this.directories.find((entry) => entry.id === directoryId);
+    if (!directory) {
+      if (window.Toast) window.Toast.error('Directory not found');
+      return;
+    }
+
+    const normalizedSource = source === 'attachment' ? 'attachment' : 'reference';
+    const isPrimaryDirectory = this.getPrimaryDirectoryId() === directoryId;
+    const button = triggerButton instanceof HTMLElement ? triggerButton : null;
+    const originalButtonHTML = button ? button.innerHTML : '';
+    const originalDisabled = button ? button.disabled : false;
+
+    if (button) {
+      button.disabled = true;
+      button.innerHTML = '<span class="spinner-border spinner-border-sm"></span>';
+    }
+
+    try {
+      const pickerResponse = await fetch('/api/folder-picker/select-path', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          workspace_id: this.workspaceId,
+          title: `Select a new folder for ${directory.name || directory.path || 'this workspace'}`
+        })
+      });
+
+      const pickerResult = await pickerResponse.json().catch(() => ({}));
+      if (!pickerResponse.ok || !pickerResult.success) {
+        throw new Error(pickerResult.error || 'Failed to open folder picker');
+      }
+
+      if (!pickerResult.selected || !pickerResult.path) {
+        return;
+      }
+
+      const nextPath = String(pickerResult.path || '').trim();
+      const currentPath = String(directory.path || '').trim();
+      if (nextPath && currentPath && nextPath === currentPath) {
+        if (window.Toast) window.Toast.info('Workspace is already linked to that folder');
+        return;
+      }
+
+      if (normalizedSource === 'attachment') {
+        await this.updateLegacyDirectoryAttachment(directoryId, nextPath);
+      } else {
+        await this.updateDirectoryReference(directoryId, nextPath);
+      }
+
+      if (window.Toast) {
+        window.Toast.success(isPrimaryDirectory ? 'Project folder updated' : 'Linked folder updated');
+      }
+      await this.loadDirectories();
+    } catch (error) {
+      console.error('Failed to relink directory:', error);
+      if (window.Toast) window.Toast.error(error.message || 'Failed to change linked folder');
+    } finally {
+      if (button) {
+        button.disabled = originalDisabled;
+        button.innerHTML = originalButtonHTML;
+      }
+    }
+  }
+
+  async updateDirectoryReference(directoryId, nextPath) {
+    const title = this.getDirectoryDisplayName(nextPath);
+    const response = await fetch(`/api/workspaces/${encodeURIComponent(this.workspaceId)}/directories/${encodeURIComponent(directoryId)}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        name: title,
+        path: nextPath
+      })
+    });
+
+    if (!response.ok) {
+      const payload = await response.json().catch(() => ({}));
+      throw new Error(payload.error || payload.message || 'Failed to update linked folder');
+    }
+  }
+
+  async updateLegacyDirectoryAttachment(directoryId, nextPath) {
+    const title = this.getDirectoryDisplayName(nextPath);
+    const response = await fetch(`/api/workspaces/${encodeURIComponent(this.workspaceId)}/attachments/${encodeURIComponent(directoryId)}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        title,
+        body: nextPath
+      })
+    });
+
+    if (!response.ok) {
+      const payload = await response.json().catch(() => ({}));
+      throw new Error(payload.error || payload.message || 'Failed to update linked folder');
+    }
+  }
+
+  getDirectoryDisplayName(path) {
+    if (!path) return 'Project Folder';
+
+    const normalizedPath = String(path).replace(/[\\/]+$/, '');
+    const parts = normalizedPath.split(/[\\/]/).filter(Boolean);
+    return parts[parts.length - 1] || normalizedPath || 'Project Folder';
   }
 
   async openDirectoryExplorer(directoryId, source = 'reference') {
@@ -11616,14 +14306,30 @@ export class WorkspaceDetailPage {
   /**
    * Show add directory modal - launches the folder picker
    */
-  async showAddDirectoryModal() {
-    const button = this.elements.addDirectoryBtn;
-    if (!button) return;
+  async showAddDirectoryModal(triggerButton = null) {
+    const buttons = [];
+    if (this.elements.addDirectoryBtn) {
+      buttons.push(this.elements.addDirectoryBtn);
+    }
+    if (triggerButton && !buttons.includes(triggerButton)) {
+      buttons.push(triggerButton);
+    }
+    if (buttons.length === 0) return;
 
-    // Show loading state on button
-    const originalHTML = button.innerHTML;
-    button.disabled = true;
-    button.innerHTML = '<span class="spinner-border spinner-border-sm"></span>';
+    const buttonStates = buttons.map((button) => ({
+      button,
+      disabled: button.disabled,
+      innerHTML: button.innerHTML
+    }));
+
+    buttons.forEach((button) => {
+      button.disabled = true;
+      if (button.classList.contains('workspace-detail-empty-action')) {
+        button.textContent = 'Opening...';
+      } else {
+        button.innerHTML = '<span class="spinner-border spinner-border-sm"></span>';
+      }
+    });
 
     try {
       const response = await fetch('/api/launch-folder-picker', {
@@ -11648,8 +14354,10 @@ export class WorkspaceDetailPage {
       console.error('Failed to launch folder picker:', error);
       if (window.Toast) window.Toast.error('Failed to open folder picker');
     } finally {
-      button.disabled = false;
-      button.innerHTML = originalHTML;
+      buttonStates.forEach(({ button, disabled, innerHTML }) => {
+        button.disabled = disabled;
+        button.innerHTML = innerHTML;
+      });
     }
   }
 
@@ -11818,20 +14526,18 @@ export class WorkspaceDetailPage {
         break;
       case 'task.blocked': {
         this.loadTasks();
+        break;
+      }
+      case 'task.resumed': {
         const payload = event?.data?.data || event?.data || {};
-        const taskId = payload.task_id || event?.data?.task_id;
-        if (taskId) {
-          this.openTaskAssistModal(taskId, payload);
+        const resumedTaskId = String(payload.task_id || event?.data?.task_id || '').trim();
+        const activeTaskId = String(this.currentBlockedTask?.taskId || this.getBlockedTaskRouteId() || '').trim();
+        this.loadTasks();
+        if (activeTaskId && (!resumedTaskId || resumedTaskId === activeTaskId)) {
+          this.closeTaskAssistPage({ replaceRoute: true });
         }
         break;
       }
-      case 'task.resumed':
-        this.loadTasks();
-        if (this.elements.taskAssistModal && window.bootstrap) {
-          const modal = bootstrap.Modal.getInstance(this.elements.taskAssistModal);
-          modal?.hide();
-        }
-        break;
       case 'session_created':
       case 'session_updated':
       case 'session_deleted':
@@ -12011,21 +14717,16 @@ export class WorkspaceDetailPage {
   /**
    * Open a task for editing
    */
-  openTask(taskId) {
-    // Use existing task modal controller
-    const task = this.tasks.find(t => t.id === taskId);
-    if (task) {
-      const statusInfo = this.getTaskStatusPresentation(task);
-      if (statusInfo.isBlocked) {
-        this.openTaskAssistModal(taskId);
-        return;
-      }
-    }
+  buildTaskHref(taskId) {
+    const normalizedTaskId = String(taskId || '').trim();
+    if (!normalizedTaskId || !this.workspaceId) return '';
+    return `/workspaces/${encodeURIComponent(this.workspaceId)}/task/${encodeURIComponent(normalizedTaskId)}`;
+  }
 
-    if (window.taskModalController && typeof window.taskModalController.openForEdit === 'function') {
-      if (task) {
-        window.taskModalController.openForEdit(task, () => this.loadTasks());
-      }
+  openTask(taskId) {
+    const href = this.buildTaskHref(taskId);
+    if (href) {
+      window.location.href = href;
     }
   }
 

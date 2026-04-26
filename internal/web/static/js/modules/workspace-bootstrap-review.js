@@ -93,6 +93,34 @@
     return result;
   }
 
+  function normalizeReviewInput(input = {}) {
+    const workspaceName = String(input.workspaceName || '').trim();
+    const description = String(input.description || '').trim();
+    const goal = String(input.goal || description).trim();
+    const systems = String(input.systems || '').trim();
+    const capabilities = String(input.capabilities || '').trim();
+    const context = String(input.context || '').trim();
+    const importEnabled = Boolean(input.importEnabled);
+    const importPath = String(input.importPath || '').trim();
+    const systemsList = uniqueList(
+      systems
+        ? systems.split(/[\n,;]+/).map((value) => value.trim()).filter(Boolean)
+        : []
+    );
+
+    return {
+      workspaceName,
+      description,
+      goal,
+      systems,
+      capabilities,
+      systemsList,
+      context,
+      importEnabled,
+      importPath
+    };
+  }
+
   function getElement(id) {
     return document.getElementById(id);
   }
@@ -143,29 +171,16 @@
   }
 
   function getModalInput() {
-    const workspaceName = String(getElement('folderNameInput')?.value || '').trim();
-    const description = String(getElement('folderDescriptionInput')?.value || '').trim();
-    const goal = String(getElement('folderPrimaryGoalInput')?.value || '').trim();
-    const systems = String(getElement('folderSystemsInput')?.value || '').trim();
-    const context = String(getElement('folderContextInput')?.value || '').trim();
-    const importEnabled = Boolean(getElement('folderImportToggle')?.checked);
-    const importPath = String(getElement('folderImportPathInput')?.value || '').trim();
-    const systemsList = uniqueList(
-      systems
-        ? systems.split(/[\n,;]+/).map((value) => value.trim()).filter(Boolean)
-        : []
-    );
-
-    return {
-      workspaceName,
-      description,
-      goal,
-      systems,
-      systemsList,
-      context,
-      importEnabled,
-      importPath
-    };
+    return normalizeReviewInput({
+      workspaceName: getElement('folderNameInput')?.value || '',
+      description: getElement('folderDescriptionInput')?.value || '',
+      goal: getElement('folderPrimaryGoalInput')?.value || '',
+      systems: getElement('folderSystemsInput')?.value || '',
+      capabilities: getElement('folderCapabilitiesInput')?.value || '',
+      context: getElement('folderContextInput')?.value || '',
+      importEnabled: Boolean(getElement('folderImportToggle')?.checked),
+      importPath: getElement('folderImportPathInput')?.value || ''
+    });
   }
 
   function computeFingerprint(input) {
@@ -174,6 +189,7 @@
       description: input.description || '',
       goal: input.goal || '',
       systems: input.systems || '',
+      capabilities: input.capabilities || '',
       context: input.context || '',
       importEnabled: Boolean(input.importEnabled),
       importPath: input.importPath || ''
@@ -233,7 +249,7 @@
     const meta = getReviewMeta();
     const content = getReviewContent();
     if (summary) {
-      summary.textContent = 'Ori can review this brief, recommend agents, and propose the MCPs and skills the workspace should start with.';
+      summary.textContent = 'Ori can review this description, recommend agents, and propose the MCPs and skills the workspace should start with.';
     }
     if (meta) {
       meta.textContent = '';
@@ -368,7 +384,9 @@
     });
 
     const fallbackChunks = [
-      input.goal
+      input.description || input.goal,
+      input.goal,
+      input.capabilities
     ]
       .map((value) => String(value || '').trim())
       .filter(Boolean)
@@ -396,6 +414,7 @@
       input.description,
       input.goal,
       input.systems,
+      input.capabilities,
       input.context
     ].join(' ');
   }
@@ -453,16 +472,23 @@
 
   function buildPrimaryAgentDescription(input) {
     const systems = input.systemsList.length > 0 ? `Primary systems: ${input.systemsList.join(', ')}.` : '';
+    const objective = String(input.description || input.goal || 'Support the workspace goals').trim().replace(/[.]+$/, '');
+    const capabilities = String(input.capabilities || '').trim().replace(/[.]+$/, '');
     return uniqueList([
-      `Lead the "${input.workspaceName || 'workspace'}" workspace and coordinate the work required to achieve: ${input.goal}.`,
+      `Lead the "${input.workspaceName || 'workspace'}" workspace.`,
+      `Primary objective: ${objective}.`,
+      capabilities ? `Recurring workflows: ${capabilities}.` : '',
       systems
     ]).join(' ');
   }
 
   function buildSpecialistDescription(input, system) {
+    const objective = String(input.description || input.goal || 'Support the workspace goals').trim().replace(/[.]+$/, '');
+    const capabilities = String(input.capabilities || '').trim().replace(/[.]+$/, '');
     return uniqueList([
       `Handle ${system} work inside the "${input.workspaceName || 'workspace'}" workspace.`,
-      `Primary goal: ${input.goal}.`
+      `Primary objective: ${objective}.`,
+      capabilities ? `Recurring workflows: ${capabilities}.` : ''
     ]).join(' ');
   }
 
@@ -507,7 +533,7 @@
       planAgents.push({
         id: `agent-primary-${primaryExisting.name.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`,
         name: primaryExisting.name,
-        summary: primaryExisting.description || 'Existing agent matched from the workspace brief.',
+        summary: primaryExisting.description || 'Existing agent matched from the workspace description.',
         action: 'invite',
         role: 'lead',
         selected: true,
@@ -604,7 +630,7 @@
         description,
         source: String(skill?.source || 'installed').trim() || 'installed',
         action: 'attach',
-        selected: true,
+        selected: false,
         trusted: true,
         score
       });
@@ -631,7 +657,7 @@
         description: description || 'Suggested from the skills marketplace.',
         source: 'marketplace',
         action: 'install_attach',
-        selected: candidates.length === 0,
+        selected: false,
         trusted: true,
         packageName,
         url,
@@ -698,7 +724,8 @@
   }
 
   async function buildPlan(input) {
-    const queries = deriveSearchQueries(input);
+    const normalizedInput = normalizeReviewInput(input);
+    const queries = deriveSearchQueries(normalizedInput);
     const [agents, installedSkills, configuredMCPs] = await Promise.all([
       fetchAgents(),
       fetchInstalledSkills(),
@@ -716,10 +743,12 @@
       registryMCPResults.push(...(Array.isArray(mcpResults) ? mcpResults : []));
     }));
 
-    const planAgents = buildAgentPlan(input, agents);
+    const planAgents = buildAgentPlan(normalizedInput, agents);
     const goalQueries = uniqueList([
       ...queries,
-      input.goal
+      normalizedInput.description || normalizedInput.goal,
+      normalizedInput.goal,
+      normalizedInput.capabilities
     ]).slice(0, 5);
     const planSkills = normalizeSkillCandidates(installedSkills, marketplaceSkillResults, goalQueries);
     const planMCPs = normalizeMCPCandidates(configuredMCPs, registryMCPResults, goalQueries);
@@ -746,19 +775,27 @@
     if (selectedSkills.length > 0) {
       parts.push(`${selectedSkills.length} skill${selectedSkills.length === 1 ? '' : 's'}`);
     }
-    return `Ori reviewed the brief and prepared a starter setup with ${parts.join(', ')}.`;
+    const suggestionParts = [];
+    const unselectedSkills = skills.length - selectedSkills.length;
+    if (unselectedSkills > 0) {
+      suggestionParts.push(`${unselectedSkills} optional skill suggestion${unselectedSkills === 1 ? '' : 's'}`);
+    }
+    return `Ori reviewed the description and prepared a starter setup with ${parts.join(', ')}${suggestionParts.length > 0 ? `. ${suggestionParts.join(', ')} available below` : ''}.`;
   }
 
   function buildPlanNotes(agents, mcps, skills) {
     const notes = [];
     if (agents.some((agent) => agent.action === 'create')) {
-      notes.push('New agents will be auto-configured from this workspace brief after the workspace is created.');
+      notes.push('New agents will be auto-configured from this workspace description after the workspace is created.');
     }
     if (mcps.some((item) => item.action === 'install_bind')) {
       notes.push('Registry MCP suggestions will be installed globally before they are bound to the workspace.');
     }
     if (skills.some((item) => item.action === 'install_attach')) {
-      notes.push('Marketplace skills will be installed globally before they are attached to the workspace.');
+      notes.push('Marketplace skill suggestions require a global install before workspace attachment.');
+    }
+    if (skills.length > 0) {
+      notes.push('Skill suggestions are optional and will only be attached if selected.');
     }
     notes.push('Selected MCPs and skills will be shared with every agent Ori adds through this setup.');
     return notes;
@@ -784,7 +821,11 @@
     const parts = [`${agentTotal} agent${agentTotal === 1 ? '' : 's'}`];
     if (mcpCount > 0) parts.push(`${mcpCount} MCP${mcpCount === 1 ? '' : 's'}`);
     if (skillCount > 0) parts.push(`${skillCount} skill${skillCount === 1 ? '' : 's'}`);
-    summary.textContent = `Ori will create this workspace with ${parts.join(', ')}.`;
+    const unselectedSkillCount = Array.isArray(state.plan.skills)
+      ? Math.max(0, state.plan.skills.length - skillCount)
+      : 0;
+    summary.textContent = `Ori will create this workspace with ${parts.join(', ')}.`
+      + (unselectedSkillCount > 0 ? ` ${unselectedSkillCount} optional skill suggestion${unselectedSkillCount === 1 ? '' : 's'} available below.` : '');
     meta.textContent = 'You can adjust the optional invites and capability suggestions below before creating the workspace.';
     meta.hidden = false;
   }
@@ -1361,6 +1402,13 @@
 
   async function applyPlan(workspaceId) {
     const selectedPlan = getSelectedPlan();
+    return applySelectedPlan(workspaceId, selectedPlan, {
+      createButton: getCreateButton(),
+      backButton: getBackButton()
+    });
+  }
+
+  async function applySelectedPlan(workspaceId, selectedPlan, controls = {}) {
     if (!selectedPlan) {
       return {
         invitedAgents: 0,
@@ -1371,12 +1419,12 @@
     }
 
     state.applying = true;
-    const createBtn = getCreateButton();
+    const createBtn = controls.createButton || null;
     if (createBtn) {
       createBtn.disabled = true;
       createBtn.textContent = 'Applying Setup...';
     }
-    const backBtn = getBackButton();
+    const backBtn = controls.backButton || null;
     if (backBtn) backBtn.disabled = true;
 
     const summary = {
@@ -1388,28 +1436,39 @@
 
     try {
       const agentInstanceIds = [];
-
-      for (let agentIdx = 0; agentIdx < selectedPlan.agents.length; agentIdx++) {
-        const agentPlan = selectedPlan.agents[agentIdx];
-        try {
-          const isEntryAgent = agentPlan.role === 'lead';
-          const agentName = await ensureAgentExists(agentPlan, isEntryAgent);
-          const added = await addAgentToWorkspace(workspaceId, agentName);
-          if (added.instanceId) {
-            agentInstanceIds.push(added.instanceId);
-          }
-          summary.invitedAgents += 1;
-        } catch (error) {
-          summary.failures.push(`Agent ${agentPlan.name}: ${error.message || 'failed to add to workspace'}`);
-        }
-      }
-
       let workspaceState;
       try {
         workspaceState = await loadWorkspaceState(workspaceId);
       } catch (error) {
         summary.failures.push(`Workspace load: ${error.message || 'failed to load workspace state'}`);
         return summary;
+      }
+      const existingAgentNames = new Set(
+        (Array.isArray(workspaceState?.agent_instances) ? workspaceState.agent_instances : [])
+          .map((agent) => String(agent?.name || '').trim().toLowerCase())
+          .filter(Boolean)
+      );
+
+      for (let agentIdx = 0; agentIdx < selectedPlan.agents.length; agentIdx++) {
+        const agentPlan = selectedPlan.agents[agentIdx];
+        try {
+          const isEntryAgent = agentPlan.role === 'lead';
+          const agentName = await ensureAgentExists(agentPlan, isEntryAgent);
+          const normalizedAgentName = String(agentName || '').trim().toLowerCase();
+          if (normalizedAgentName && existingAgentNames.has(normalizedAgentName)) {
+            continue;
+          }
+          const added = await addAgentToWorkspace(workspaceId, agentName);
+          if (added.instanceId) {
+            agentInstanceIds.push(added.instanceId);
+          }
+          if (normalizedAgentName) {
+            existingAgentNames.add(normalizedAgentName);
+          }
+          summary.invitedAgents += 1;
+        } catch (error) {
+          summary.failures.push(`Agent ${agentPlan.name}: ${error.message || 'failed to add to workspace'}`);
+        }
       }
 
       for (const mcpCandidate of selectedPlan.mcps) {
@@ -1461,6 +1520,7 @@
 
     const dirtyIds = [
       'folderNameInput',
+      'folderDescriptionInput',
       'folderPrimaryGoalInput',
       'folderSystemsInput',
       'folderContextInput',
@@ -1495,6 +1555,8 @@
     ensureReviewed,
     getSelectedPlan,
     applyPlan,
+    applySelectedPlan,
+    reviewWorkspaceInput: async (input) => buildPlan(normalizeReviewInput(input)),
     reset,
     markDirty,
     refreshPrimaryActionLabel

@@ -61,16 +61,21 @@
 
           <!-- Workspace Entry Prompt Bar -->
           <div id="homeAssistantCard" class="modern-card p-2 mb-3">
-            <form id="homeAssistantForm" class="d-flex align-items-center gap-2">
+            <form id="homeAssistantForm" class="home-assistant-workspace-form d-flex align-items-center gap-2">
               <div class="d-none d-md-flex align-items-center gap-2 px-2" style="color: var(--text-secondary); font-size: 0.82rem; white-space: nowrap;">
                 <span id="homeAssistantIdentityName" style="font-weight: 600; color: var(--text-primary); display: inline-block; max-width: 180px; overflow: hidden; text-overflow: ellipsis;" title="Workspace Manager">Workspace Manager</span>
                 <span style="opacity: 0.6;">Workspace</span>
               </div>
+              <div id="homeAssistantWorkspaceModeSwitch" class="home-assistant-workspace-mode-switch" role="group" aria-label="Workspace prompt mode">
+                <button type="button" class="home-assistant-workspace-mode-btn is-active" data-home-workspace-mode="task" aria-pressed="true">Task</button>
+                <button type="button" class="home-assistant-workspace-mode-btn" data-home-workspace-mode="ask" aria-pressed="false">Ask</button>
+                <button type="button" class="home-assistant-workspace-mode-btn" data-home-workspace-mode="note" aria-pressed="false">Note</button>
+              </div>
               <input id="homeAssistantInput" type="text" class="modern-input flex-grow-1" maxlength="800"
-                     placeholder="Ask Workspace Manager about this workspace... (or use /task, /note, /directory, /file, /chat)"
+                     placeholder="Create a task for Workspace Manager... (/chat asks, /note saves a note)"
                      aria-label="Workspace manager prompt"
                      style="min-height: 42px;">
-              <button id="homeAssistantSendBtn" type="submit" class="modern-btn modern-btn-primary home-assistant-send-btn">Send</button>
+              <button id="homeAssistantSendBtn" type="submit" class="modern-btn modern-btn-primary home-assistant-send-btn">Create Task</button>
             </form>
             <div id="homeAssistantQuickPrompts" class="d-flex flex-wrap align-items-center gap-2 px-2 pt-2">
               <span class="home-assistant-quick-label mb-0">Quick Actions</span>
@@ -83,8 +88,8 @@
                 Unblock Tasks
               </button>
               <button id="homeAssistantQuickNotes" type="button" class="modern-btn modern-btn-secondary modern-btn-sm home-assistant-quick-btn"
-                      data-home-prompt="/note # Workspace Brief\n## Goal\n- \n## Constraints\n- \n## Open Questions\n- ">
-                Create Brief
+                      data-home-prompt="/note # Workspace Description\n## Description\n- \n## Apps and Systems\n- \n## Key Files or Context\n- \n## Special Capabilities or Workflows\n- ">
+                Create Description
               </button>
               <button id="homeAssistantQuickReview" type="button" class="modern-btn modern-btn-secondary modern-btn-sm home-assistant-quick-btn"
                       data-home-prompt="Run a risk review for this workspace and recommend mitigation steps.">
@@ -158,6 +163,38 @@
             </div>
           </div>
 
+          <div class="modern-card workspace-detail-health-card mb-4" id="workspace-detail-health-panel">
+            <div class="workspace-detail-health-header">
+              <div>
+                <div class="workspace-detail-health-kicker">Workspace Health</div>
+                <h2 class="workspace-detail-health-title">Missing agents and broken file links</h2>
+                <p id="workspace-detail-health-summary" class="workspace-detail-health-summary">
+                  Checking workspace agent references and linked files...
+                </p>
+              </div>
+              <div class="workspace-detail-health-controls">
+                <span id="workspace-detail-health-badge" class="workspace-detail-health-badge is-checking">Checking</span>
+                <button id="workspace-detail-health-refresh" class="workspace-detail-panel-btn" type="button" title="Run workspace health check">
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
+                    <path d="M17.65,6.35C16.2,4.9 14.21,4 12,4A8,8 0 0,0 4,12A8,8 0 0,0 12,20C15.73,20 18.84,17.45 19.73,14H17.65C16.83,16.33 14.61,18 12,18A6,6 0 0,1 6,12A6,6 0 0,1 12,6C13.66,6 15.14,6.69 16.22,7.78L13,11H20V4L17.65,6.35Z"/>
+                  </svg>
+                  <span id="workspace-detail-health-refresh-label">Run Health Check</span>
+                </button>
+                <button id="workspace-detail-ui-smoke-test" class="workspace-detail-panel-btn" type="button" title="Run UI smoke test">
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
+                    <path d="M9,3H15V5H19A2,2 0 0,1 21,7V19A2,2 0 0,1 19,21H5A2,2 0 0,1 3,19V7A2,2 0 0,1 5,5H9V3M11,5H13V3H11V5M5,7V19H19V7H5M8,10.5L10.5,13L16,9L17.2,10.6L10.3,15.7L6.8,12.2L8,10.5Z"/>
+                  </svg>
+                  <span id="workspace-detail-ui-smoke-test-label">Run UI Smoke Test</span>
+                </button>
+              </div>
+            </div>
+            <div id="workspace-detail-health-meta" class="workspace-detail-health-meta"></div>
+            <div id="workspace-detail-health-list" class="workspace-detail-health-list">
+              <div class="workspace-detail-empty">Checking workspace health...</div>
+            </div>
+            <div id="workspace-detail-ui-smoke-result" class="workspace-detail-ui-smoke-result d-none"></div>
+          </div>
+
           <!-- Workspace Configuration -->
           <div class="modern-card workspace-detail-config-card is-collapsed mb-4" id="workspace-detail-settings-panel">
             <div class="workspace-detail-config-header">
@@ -186,13 +223,24 @@
               <div class="nav nav-tabs workspace-detail-config-nav" role="tablist" aria-label="Workspace configuration sections">
                 <button
                   class="nav-link workspace-detail-config-tab active"
+                  id="workspace-detail-config-intent-tab"
+                  data-bs-toggle="tab"
+                  data-bs-target="#workspace-detail-config-intent-pane"
+                  type="button"
+                  role="tab"
+                  aria-controls="workspace-detail-config-intent-pane"
+                  aria-selected="true">
+                  Intent &amp; Setup
+                </button>
+                <button
+                  class="nav-link workspace-detail-config-tab"
                   id="workspace-detail-config-settings-tab"
                   data-bs-toggle="tab"
                   data-bs-target="#workspace-detail-config-settings-pane"
                   type="button"
                   role="tab"
                   aria-controls="workspace-detail-config-settings-pane"
-                  aria-selected="true">
+                  aria-selected="false">
                   Manager Settings
                 </button>
                 <button
@@ -221,6 +269,82 @@
               <div class="tab-content workspace-detail-config-body">
                 <div
                   class="tab-pane fade show active workspace-detail-config-pane"
+                  id="workspace-detail-config-intent-pane"
+                  role="tabpanel"
+                  aria-labelledby="workspace-detail-config-intent-tab"
+                  tabindex="0">
+                  <div class="workspace-detail-config-pane-header">
+                    <div>
+                      <div class="workspace-detail-config-pane-title">Workspace Intent</div>
+                      <div class="workspace-detail-config-pane-copy">
+                        Keep the workspace description, systems, key context, and setup intent aligned so Ori can reuse the same source of truth across notes, planning, and setup review.
+                      </div>
+                    </div>
+                    <div class="workspace-detail-config-pane-actions">
+                      <button id="workspace-detail-intent-review" class="workspace-detail-panel-btn" type="button" title="Re-run setup review">
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
+                          <path d="M17.65,6.35C16.2,4.9 14.21,4 12,4A8,8 0 0,0 4,12A8,8 0 0,0 12,20C15.73,20 18.84,17.45 19.73,14H17.65C16.83,16.33 14.61,18 12,18A6,6 0 0,1 6,12A6,6 0 0,1 12,6C13.66,6 15.14,6.69 16.22,7.78L13,11H20V4L17.65,6.35Z"/>
+                        </svg>
+                        Re-run Setup Review
+                      </button>
+                    </div>
+                  </div>
+                  <form id="workspace-detail-intent-form" class="workspace-detail-settings-form">
+                    <div class="workspace-detail-settings-intro">
+                      Editing this intent keeps the workspace header, canonical note, and setup-review inputs aligned. Use setup review to refresh recommended agents, connectors, and skills for the workspace.
+                    </div>
+                    <div class="row g-3">
+                      <div class="col-12">
+                        <label for="workspace-detail-intent-description" class="form-label">Workspace description</label>
+                        <textarea id="workspace-detail-intent-description" class="form-control" rows="3" placeholder="Describe what this workspace is for and what Ori should help with."></textarea>
+                        <div class="workspace-detail-settings-field-hint">
+                          This is the primary intent Ori uses for planning and setup suggestions.
+                        </div>
+                      </div>
+                      <div class="col-md-6">
+                        <label for="workspace-detail-intent-systems" class="form-label">Apps and systems</label>
+                        <input id="workspace-detail-intent-systems" type="text" class="form-control" placeholder="Finder, Keynote, Google Drive">
+                        <div class="workspace-detail-settings-field-hint">
+                          Comma-separated systems Ori should consider while matching specialists, MCPs, and skills.
+                        </div>
+                      </div>
+                      <div class="col-md-6">
+                        <label for="workspace-detail-intent-capabilities" class="form-label">Special capabilities or workflows</label>
+                        <input id="workspace-detail-intent-capabilities" type="text" class="form-control" placeholder="Travel booking, slide production, repo planning">
+                        <div class="workspace-detail-settings-field-hint">
+                          Optional. Use this for recurring workflow patterns or special abilities the workspace should start with.
+                        </div>
+                      </div>
+                      <div class="col-12">
+                        <label for="workspace-detail-intent-context" class="form-label">Key files or context</label>
+                        <textarea id="workspace-detail-intent-context" class="form-control" rows="3" placeholder="Folder paths, source docs, launch notes, customer context, brand references"></textarea>
+                      </div>
+                      <div class="col-12">
+                        <div class="workspace-detail-settings-summary-card">
+                          <div class="workspace-detail-settings-summary-title">Canonical Workspace Description Note</div>
+                          <div id="workspace-detail-intent-summary" class="workspace-detail-settings-summary-copy">Saving intent keeps the canonical workspace description note in sync.</div>
+                        </div>
+                      </div>
+                    </div>
+                    <div class="workspace-detail-settings-actions">
+                      <div id="workspace-detail-intent-status" class="workspace-detail-settings-field-hint" aria-live="polite"></div>
+                      <button type="submit" class="btn btn-primary" id="workspace-detail-intent-save">Save Intent</button>
+                    </div>
+                  </form>
+                  <div id="workspace-detail-intent-review-panel" class="workspace-detail-settings-advanced" hidden>
+                    <div class="workspace-detail-settings-advanced-title">Recommended Setup</div>
+                    <div id="workspace-detail-intent-review-summary" class="workspace-detail-settings-advanced-copy">
+                      Ori can review this workspace description and propose an updated starter setup.
+                    </div>
+                    <div id="workspace-detail-intent-review-results" class="mt-3"></div>
+                    <div class="workspace-detail-settings-actions">
+                      <div id="workspace-detail-intent-review-meta" class="workspace-detail-settings-field-hint" aria-live="polite"></div>
+                      <button type="button" class="btn btn-primary" id="workspace-detail-intent-apply" disabled>Apply Recommended Setup</button>
+                    </div>
+                  </div>
+                </div>
+                <div
+                  class="tab-pane fade workspace-detail-config-pane"
                   id="workspace-detail-config-settings-pane"
                   role="tabpanel"
                   aria-labelledby="workspace-detail-config-settings-tab"
@@ -453,7 +577,7 @@
           <!-- Bento Grid Panels -->
           <div class="workspace-detail-bento">
             <!-- Agents Panel - Left column (rows 1-4) -->
-            <div class="modern-card workspace-detail-panel workspace-detail-panel-agents is-expandable" id="workspace-detail-agents-panel">
+            <div class="modern-card workspace-detail-panel workspace-detail-panel-agents is-expandable" id="workspace-detail-agents-panel" role="button" tabindex="0" aria-haspopup="dialog" aria-expanded="false" aria-label="Open Agents panel">
               <button class="workspace-detail-panel-close" type="button" title="Close" aria-label="Close expanded panel">
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
                   <path d="M19,6.41L17.59,5L12,10.59L6.41,5L5,6.41L10.59,12L5,17.59L6.41,19L12,13.41L17.59,19L19,17.59L13.41,12L19,6.41Z"/>
@@ -509,7 +633,7 @@
             </div>
 
             <!-- Sessions Panel - Left column (bottom) -->
-            <div class="modern-card workspace-detail-panel workspace-detail-panel-sessions is-expandable" id="workspace-detail-sessions-panel">
+            <div class="modern-card workspace-detail-panel workspace-detail-panel-sessions is-expandable" id="workspace-detail-sessions-panel" role="button" tabindex="0" aria-haspopup="dialog" aria-expanded="false" aria-label="Open Sessions panel">
               <button class="workspace-detail-panel-close" type="button" title="Close" aria-label="Close expanded panel">
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
                   <path d="M19,6.41L17.59,5L12,10.59L6.41,5L5,6.41L10.59,12L5,17.59L6.41,19L12,13.41L17.59,19L19,17.59L13.41,12L19,6.41Z"/>
@@ -543,7 +667,7 @@
             </div>
 
             <!-- Notes Panel - Right column row 1 -->
-            <div class="modern-card workspace-detail-panel workspace-detail-panel-notes is-expandable" id="workspace-detail-notes-panel">
+            <div class="modern-card workspace-detail-panel workspace-detail-panel-notes is-expandable" id="workspace-detail-notes-panel" role="button" tabindex="0" aria-haspopup="dialog" aria-expanded="false" aria-label="Open Notes panel">
               <button class="workspace-detail-panel-close" type="button" title="Close" aria-label="Close expanded panel">
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
                   <path d="M19,6.41L17.59,5L12,10.59L6.41,5L5,6.41L10.59,12L5,17.59L6.41,19L12,13.41L17.59,19L19,17.59L13.41,12L19,6.41Z"/>
@@ -577,7 +701,7 @@
             </div>
 
             <!-- Files Panel - Right column row 2 -->
-            <div class="modern-card workspace-detail-panel workspace-detail-panel-files is-expandable" id="workspace-detail-files-panel">
+            <div class="modern-card workspace-detail-panel workspace-detail-panel-files is-expandable" id="workspace-detail-files-panel" role="button" tabindex="0" aria-haspopup="dialog" aria-expanded="false" aria-label="Open Files panel">
               <button class="workspace-detail-panel-close" type="button" title="Close" aria-label="Close expanded panel">
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
                   <path d="M19,6.41L17.59,5L12,10.59L6.41,5L5,6.41L10.59,12L5,17.59L6.41,19L12,13.41L17.59,19L19,17.59L13.41,12L19,6.41Z"/>
@@ -606,7 +730,7 @@
             </div>
 
             <!-- Directories Panel - Right column row 3 -->
-            <div class="modern-card workspace-detail-panel workspace-detail-panel-directories is-expandable" id="workspace-detail-directories-panel">
+            <div class="modern-card workspace-detail-panel workspace-detail-panel-directories is-expandable" id="workspace-detail-directories-panel" role="button" tabindex="0" aria-haspopup="dialog" aria-expanded="false" aria-label="Open Directories panel">
               <button class="workspace-detail-panel-close" type="button" title="Close" aria-label="Close expanded panel">
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
                   <path d="M19,6.41L17.59,5L12,10.59L6.41,5L5,6.41L10.59,12L5,17.59L6.41,19L12,13.41L17.59,19L19,17.59L13.41,12L19,6.41Z"/>
@@ -620,7 +744,7 @@
                   Directories
                 </h2>
                 <div class="workspace-detail-panel-actions">
-                  <button id="workspace-detail-add-directory" class="workspace-detail-panel-btn workspace-detail-panel-btn-primary" type="button" title="Add directory">
+                  <button id="workspace-detail-add-directory" class="workspace-detail-panel-btn workspace-detail-panel-btn-primary" type="button" title="Add linked folder" aria-label="Add linked folder">
                     <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
                       <path d="M19,13H13V19H11V13H5V11H11V5H13V11H19V13Z"/>
                     </svg>
@@ -629,13 +753,25 @@
               </div>
               <div class="workspace-detail-panel-body" role="region" tabindex="0" aria-label="Directories panel content">
                 <div id="workspace-detail-directories-list" class="workspace-detail-list">
-                  <div class="workspace-detail-empty">No directories yet.</div>
+                  <div class="workspace-detail-link-empty">
+                    <div class="workspace-detail-link-empty-icon" aria-hidden="true">
+                      <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
+                        <path d="M10,4H4C2.89,4 2,4.89 2,6V18A2,2 0 0,0 4,20H12V18H4V8H20V11H22V8C22,6.89 21.1,6 20,6H12L10,4M19,13V16H16V18H19V21H21V18H24V16H21V13H19Z"/>
+                      </svg>
+                    </div>
+                    <div class="workspace-detail-link-empty-eyebrow">Unlinked Workspace</div>
+                    <div class="workspace-detail-link-empty-title">No project folder linked yet.</div>
+                    <p class="workspace-detail-link-empty-copy">Attach the local project folder so this workspace can browse files in context.</p>
+                    <button type="button" class="workspace-detail-empty-action" onclick="window.workspaceDetail?.showAddDirectoryModal(this)">
+                      Link Project
+                    </button>
+                  </div>
                 </div>
               </div>
             </div>
 
             <!-- Schedules Panel - Right column row 6 -->
-            <div class="modern-card workspace-detail-panel workspace-detail-panel-schedules is-expandable" id="workspace-detail-schedules-panel">
+            <div class="modern-card workspace-detail-panel workspace-detail-panel-schedules is-expandable" id="workspace-detail-schedules-panel" role="button" tabindex="0" aria-haspopup="dialog" aria-expanded="false" aria-label="Open Schedules panel">
               <button class="workspace-detail-panel-close" type="button" title="Close" aria-label="Close expanded panel">
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
                   <path d="M19,6.41L17.59,5L12,10.59L6.41,5L5,6.41L10.59,12L5,17.59L6.41,19L12,13.41L17.59,19L19,17.59L13.41,12L19,6.41Z"/>
@@ -1233,74 +1369,123 @@
     </div>
   </div>
 
-  <!-- Task Assist Modal -->
-  <div class="modal fade" id="workspace-detail-task-assist-modal" tabindex="-1" aria-labelledby="workspace-detail-task-assist-title" aria-hidden="true">
-    <div class="modal-dialog modal-lg modal-dialog-centered modal-dialog-scrollable">
-      <div class="modal-content">
-        <div class="modal-header">
-          <div class="workspace-detail-task-modal-heading">
-            <h5 class="modal-title" id="workspace-detail-task-assist-title">Task Needs Input</h5>
-            <div class="workspace-detail-task-modal-id-row">
-              <span class="workspace-detail-task-modal-id-label">Task ID</span>
-              <code id="workspace-detail-task-assist-id" class="workspace-detail-task-modal-id-value">--</code>
-            </div>
-            <div id="workspace-detail-task-assist-meta" class="workspace-detail-task-result-meta"></div>
-          </div>
-          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+  <!-- Task Assist Page -->
+  <section id="workspace-detail-task-assist-page" class="workspace-detail-task-assist-page" hidden>
+    <div class="workspace-detail-task-assist-page-header">
+      <button type="button" id="workspace-detail-task-assist-back" class="modern-btn modern-btn-secondary workspace-detail-task-assist-back">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor" class="me-1" aria-hidden="true">
+          <path d="M20,11V13H8L13.5,18.5L12.08,19.92L4.16,12L12.08,4.08L13.5,5.5L8,11H20Z"/>
+        </svg>
+        Back To Workspace
+      </button>
+      <div class="workspace-detail-task-assist-page-copy">
+        <div class="workspace-detail-task-assist-page-kicker">Blocked Task Workspace</div>
+        <h1 id="workspace-detail-task-assist-title" class="workspace-detail-task-assist-page-title">Task Needs Input</h1>
+        <div class="workspace-detail-task-modal-id-row">
+          <span class="workspace-detail-task-modal-id-label">Task ID</span>
+          <code id="workspace-detail-task-assist-id" class="workspace-detail-task-modal-id-value">--</code>
         </div>
-        <div class="modal-body">
-          <div class="workspace-detail-task-assist-reason">
-            <div class="workspace-detail-task-assist-label">Why it paused</div>
-            <div id="workspace-detail-task-assist-reason">The assigned agent needs guidance before it can continue.</div>
-          </div>
-          <div id="workspace-detail-task-assist-response-wrap" class="mt-3 d-none">
-            <div class="workspace-detail-task-assist-label">Last agent response</div>
-            <pre id="workspace-detail-task-assist-response" class="workspace-detail-task-result-body"></pre>
-          </div>
-          <div class="workspace-detail-task-assist-question mt-3">
-            <div class="workspace-detail-task-assist-label">Agent question</div>
-            <div id="workspace-detail-task-assist-question">How should I proceed?</div>
-          </div>
-          <div id="workspace-detail-task-assist-recommendation-wrap" class="workspace-detail-task-assist-recommendation mt-3 d-none">
-            <div class="workspace-detail-task-assist-label">Recommended next step</div>
-            <div id="workspace-detail-task-assist-recommendation"></div>
-          </div>
-          <div id="workspace-detail-task-assist-choice-wrap" class="mt-3 d-none">
-            <div class="workspace-detail-task-assist-label">Suggested next steps</div>
-            <div id="workspace-detail-task-assist-choice-summary" class="workspace-detail-task-assist-choice-summary d-none"></div>
-            <div id="workspace-detail-task-assist-choice-list" class="home-assistant-planning-choice-group"></div>
-          </div>
-          <div id="workspace-detail-task-assist-specialist-wrap" class="mt-3 d-none">
-            <div class="workspace-detail-task-assist-label">Suggested handoff</div>
-            <div id="workspace-detail-task-assist-specialist-copy" class="workspace-detail-task-assist-choice-summary d-none"></div>
-            <div class="mt-2 d-flex gap-2 flex-wrap">
-              <button type="button" id="workspace-detail-task-assist-specialist-action" class="modern-btn modern-btn-secondary"></button>
-            </div>
-          </div>
-          <div class="mt-3">
-            <label class="form-label" for="workspace-detail-task-assist-agent">Switch to agent (optional)</label>
-            <select id="workspace-detail-task-assist-agent" class="form-select">
-              <option value="">Keep current assignment</option>
-            </select>
-          </div>
-          <div class="mt-3">
-            <label class="form-label" for="workspace-detail-task-assist-message">Guidance for the agent (optional)</label>
-            <textarea id="workspace-detail-task-assist-message" class="form-control" rows="4" placeholder="Example: Use the browser tool to open instagram.com and confirm the page title."></textarea>
-          </div>
+        <div class="workspace-detail-task-modal-id-row">
+          <span class="workspace-detail-task-modal-id-label">Agent</span>
+          <code id="workspace-detail-task-assist-agent-name" class="workspace-detail-task-modal-id-value">--</code>
         </div>
-        <div class="modal-footer d-flex justify-content-between">
-          <div class="d-flex gap-2">
-            <button type="button" class="btn btn-outline-danger" id="workspace-detail-task-assist-fail">Mark Failed</button>
-          </div>
-          <div class="d-flex gap-2">
-            <button type="button" class="btn btn-secondary workspace-detail-task-assist-action" id="workspace-detail-task-assist-retry">Retry</button>
-            <button type="button" class="btn btn-primary workspace-detail-task-assist-action" id="workspace-detail-task-assist-continue">Continue</button>
-            <button type="button" class="btn btn-warning workspace-detail-task-assist-action" id="workspace-detail-task-assist-switch">Switch Agent + Retry</button>
-          </div>
+        <div id="workspace-detail-task-assist-meta" class="workspace-detail-task-result-meta"></div>
+      </div>
+    </div>
+    <div class="workspace-detail-task-assist-content">
+      <div class="workspace-detail-task-assist-body">
+        <div class="workspace-detail-task-assist-layout">
+          <section class="workspace-detail-task-assist-pane workspace-detail-task-assist-context-pane">
+            <div class="workspace-detail-task-assist-pane-header">
+              <div class="workspace-detail-task-assist-pane-kicker">Context</div>
+              <div class="workspace-detail-task-assist-pane-title">Review the task context without losing the answer controls.</div>
+            </div>
+            <div id="workspace-detail-task-assist-context-scroll" class="workspace-detail-task-assist-pane-scroll">
+              <div class="workspace-detail-task-assist-reason">
+                <div class="workspace-detail-task-assist-label">Why it paused</div>
+                <div id="workspace-detail-task-assist-reason">The assigned agent needs guidance before it can continue.</div>
+              </div>
+              <div id="workspace-detail-task-assist-response-wrap" class="mt-3 d-none">
+                <div class="workspace-detail-task-assist-label">Agent request</div>
+                <div id="workspace-detail-task-assist-response-preview" class="workspace-detail-task-assist-response-preview d-none"></div>
+                <button type="button" id="workspace-detail-task-assist-response-toggle" class="workspace-detail-task-assist-response-toggle d-none" aria-expanded="false">View full request</button>
+                <pre id="workspace-detail-task-assist-response" class="workspace-detail-task-result-body d-none"></pre>
+              </div>
+            </div>
+          </section>
+          <section class="workspace-detail-task-assist-pane workspace-detail-task-assist-answer-pane">
+            <div class="workspace-detail-task-assist-pane-header workspace-detail-task-assist-answer-header">
+              <div class="workspace-detail-task-assist-pane-kicker">Answer to Continue</div>
+              <div class="workspace-detail-task-assist-pane-title">Keep the decisions and next actions visible while you work through the task.</div>
+              <div id="workspace-detail-task-assist-recommendation-wrap" class="workspace-detail-task-assist-recommendation mt-3 d-none">
+                <div class="workspace-detail-task-assist-label">Recommended next step</div>
+                <div id="workspace-detail-task-assist-recommendation"></div>
+              </div>
+              <div id="workspace-detail-task-assist-specialist-wrap" class="mt-3 d-none">
+                <div class="workspace-detail-task-assist-label">Suggested handoff</div>
+                <div id="workspace-detail-task-assist-specialist-copy" class="workspace-detail-task-assist-choice-summary d-none"></div>
+                <div class="mt-2 d-flex gap-2 flex-wrap">
+                  <button type="button" id="workspace-detail-task-assist-specialist-action" class="modern-btn modern-btn-secondary"></button>
+                </div>
+              </div>
+            </div>
+            <div id="workspace-detail-task-assist-answer-scroll" class="workspace-detail-task-assist-pane-scroll workspace-detail-task-assist-answer-scroll">
+              <div id="workspace-detail-task-assist-summary-wrap" class="workspace-detail-task-assist-summary d-none">
+                <div class="workspace-detail-task-assist-label">Fast summary</div>
+                <div class="workspace-detail-task-assist-summary-grid">
+                  <article class="workspace-detail-task-assist-summary-card">
+                    <div class="workspace-detail-task-assist-summary-title">What It Knows</div>
+                    <div id="workspace-detail-task-assist-summary-known" class="workspace-detail-task-assist-summary-copy"></div>
+                  </article>
+                  <article class="workspace-detail-task-assist-summary-card">
+                    <div class="workspace-detail-task-assist-summary-title">What It Needs</div>
+                    <div id="workspace-detail-task-assist-summary-needs" class="workspace-detail-task-assist-summary-copy"></div>
+                  </article>
+                  <article class="workspace-detail-task-assist-summary-card">
+                    <div class="workspace-detail-task-assist-summary-title">What Happens Next</div>
+                    <div id="workspace-detail-task-assist-summary-next" class="workspace-detail-task-assist-summary-copy"></div>
+                  </article>
+                </div>
+              </div>
+              <div id="workspace-detail-task-assist-question-wrap" class="workspace-detail-task-assist-question d-none">
+                <div class="workspace-detail-task-assist-label">Agent question</div>
+                <div id="workspace-detail-task-assist-question">How should I proceed?</div>
+              </div>
+              <div id="workspace-detail-task-assist-form-wrap" class="workspace-detail-task-assist-form-wrap mt-3 d-none">
+                <div id="workspace-detail-task-assist-form-summary" class="workspace-detail-task-assist-choice-summary d-none"></div>
+                <div id="workspace-detail-task-assist-form-fields" class="workspace-detail-task-assist-form-fields"></div>
+              </div>
+              <div id="workspace-detail-task-assist-choice-wrap" class="mt-3 d-none">
+                <div class="workspace-detail-task-assist-label">Suggested next steps</div>
+                <div id="workspace-detail-task-assist-choice-summary" class="workspace-detail-task-assist-choice-summary d-none"></div>
+                <div id="workspace-detail-task-assist-choice-list" class="home-assistant-planning-choice-group"></div>
+              </div>
+              <div class="mt-3">
+                <label class="form-label" for="workspace-detail-task-assist-agent">Switch to agent (optional)</label>
+                <select id="workspace-detail-task-assist-agent" class="form-select">
+                  <option value="">Keep current assignment</option>
+                </select>
+              </div>
+              <div class="mt-3">
+                <label class="form-label" for="workspace-detail-task-assist-message">Guidance for the agent (optional)</label>
+                <textarea id="workspace-detail-task-assist-message" class="form-control" rows="4" placeholder="Example: Use the browser tool to open instagram.com and confirm the page title."></textarea>
+              </div>
+            </div>
+            <div class="workspace-detail-task-assist-action-dock">
+              <div class="workspace-detail-task-assist-fail-row">
+                <button type="button" class="btn btn-outline-danger" id="workspace-detail-task-assist-fail">Mark Failed</button>
+              </div>
+              <div class="workspace-detail-task-assist-primary-actions">
+                <button type="button" class="btn btn-secondary workspace-detail-task-assist-action" id="workspace-detail-task-assist-retry">Retry</button>
+                <button type="button" class="btn btn-primary workspace-detail-task-assist-action" id="workspace-detail-task-assist-continue">Continue</button>
+                <button type="button" class="btn btn-warning workspace-detail-task-assist-action" id="workspace-detail-task-assist-switch">Switch Agent + Retry</button>
+              </div>
+            </div>
+          </section>
         </div>
       </div>
     </div>
-  </div>
+  </section>
 
   <!-- Add Agent To Workspace Modal -->
   <div class="modal fade" id="workspace-detail-add-agent-modal" tabindex="-1" aria-labelledby="workspace-detail-add-agent-title" aria-hidden="true">
@@ -1325,6 +1510,39 @@
           <button type="button" id="workspace-detail-create-agent-btn" class="btn btn-outline-secondary">Create Agent</button>
           <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
           <button type="button" class="btn btn-primary" id="workspace-detail-add-agent-submit">Add to Workspace</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal fade" id="workspace-detail-agent-model-modal" tabindex="-1" aria-labelledby="workspace-detail-agent-model-title" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+      <div class="modal-content">
+        <div class="modal-header">
+          <div>
+            <div class="workspace-detail-agent-model-modal-kicker">Workspace Agent Model</div>
+            <h5 class="modal-title" id="workspace-detail-agent-model-title">Change Agent Model</h5>
+          </div>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+        </div>
+        <div class="modal-body">
+          <div class="workspace-detail-agent-model-modal-summary">
+            <div class="workspace-detail-agent-model-modal-label">Agent</div>
+            <div id="workspace-detail-agent-model-agent-name" class="workspace-detail-agent-model-modal-value">--</div>
+            <div class="workspace-detail-agent-model-modal-label">Current</div>
+            <div id="workspace-detail-agent-model-current" class="workspace-detail-agent-model-modal-current">--</div>
+          </div>
+          <div class="mb-0">
+            <label for="workspace-detail-agent-model-select" class="form-label">Available models</label>
+            <select id="workspace-detail-agent-model-select" class="form-select">
+              <option value="">Loading models...</option>
+            </select>
+            <div id="workspace-detail-agent-model-help" class="form-text">Choose a model to update this workspace agent.</div>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+          <button type="button" class="btn btn-primary" id="workspace-detail-agent-model-submit">Save Model</button>
         </div>
       </div>
     </div>
@@ -1605,6 +1823,479 @@
 
       .hub-file-source-btn {
         flex: 1;
+      }
+    }
+
+    .workspace-detail-health-card {
+      position: relative;
+      overflow: hidden;
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      background:
+        radial-gradient(circle at top right, rgba(255, 171, 95, 0.12), transparent 32%),
+        linear-gradient(180deg, rgba(13, 21, 35, 0.96), rgba(11, 18, 30, 0.92));
+    }
+
+    .workspace-detail-health-card::before {
+      content: "";
+      position: absolute;
+      inset: 0;
+      pointer-events: none;
+      background:
+        linear-gradient(115deg, transparent 0%, rgba(255, 255, 255, 0.04) 22%, transparent 44%),
+        linear-gradient(0deg, rgba(255, 255, 255, 0.02), rgba(255, 255, 255, 0));
+      opacity: 0.75;
+    }
+
+    .workspace-detail-health-header,
+    .workspace-detail-health-meta,
+    .workspace-detail-health-list {
+      position: relative;
+      z-index: 1;
+    }
+
+    .workspace-detail-health-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 1rem;
+      padding: 1.3rem 1.35rem 0;
+    }
+
+    .workspace-detail-health-header > :first-child {
+      flex: 1 1 34rem;
+      min-width: 0;
+    }
+
+    .workspace-detail-health-kicker {
+      color: rgba(255, 196, 143, 0.84);
+      font-size: 0.72rem;
+      font-weight: 700;
+      letter-spacing: 0.18em;
+      text-transform: uppercase;
+      margin-bottom: 0.35rem;
+    }
+
+    .workspace-detail-health-title {
+      margin: 0;
+      color: var(--text-primary);
+      font-size: 1.08rem;
+      font-weight: 650;
+    }
+
+    .workspace-detail-health-summary {
+      margin: 0.45rem 0 0;
+      color: var(--text-secondary);
+      font-size: 0.88rem;
+      line-height: 1.55;
+      max-width: 64ch;
+    }
+
+    .workspace-detail-health-controls {
+      display: flex;
+      align-items: center;
+      gap: 0.7rem;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+      flex: 0 0 auto;
+      max-width: 100%;
+    }
+
+    #workspace-detail-health-refresh {
+      width: auto;
+      height: auto;
+      min-height: 34px;
+      padding: 0.52rem 0.88rem;
+      border-radius: 999px;
+      gap: 0.45rem;
+      flex: 0 0 auto;
+      white-space: nowrap;
+    }
+
+    #workspace-detail-health-refresh svg {
+      flex: 0 0 auto;
+    }
+
+    .workspace-detail-health-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.35rem;
+      min-height: 34px;
+      padding: 0.42rem 0.82rem;
+      border-radius: 999px;
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      background: rgba(255, 255, 255, 0.05);
+      color: var(--text-primary);
+      font-size: 0.76rem;
+      font-weight: 700;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+    }
+
+    .workspace-detail-health-badge.is-healthy {
+      border-color: rgba(62, 207, 142, 0.3);
+      background: rgba(34, 197, 94, 0.14);
+      color: #81f2b6;
+    }
+
+    .workspace-detail-health-badge.is-warning {
+      border-color: rgba(255, 179, 102, 0.34);
+      background: rgba(245, 158, 11, 0.16);
+      color: #ffd08a;
+    }
+
+    .workspace-detail-health-badge.is-error {
+      border-color: rgba(255, 113, 113, 0.3);
+      background: rgba(239, 68, 68, 0.15);
+      color: #ffaeae;
+    }
+
+    .workspace-detail-health-badge.is-checking {
+      border-color: rgba(125, 176, 255, 0.26);
+      background: rgba(59, 130, 246, 0.12);
+      color: #b5d4ff;
+    }
+
+    .workspace-detail-health-meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.55rem;
+      padding: 0.95rem 1.35rem 0;
+    }
+
+    .workspace-detail-health-chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.4rem;
+      padding: 0.38rem 0.68rem;
+      border-radius: 999px;
+      background: rgba(255, 255, 255, 0.05);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      color: var(--text-secondary);
+      font-size: 0.74rem;
+      font-weight: 600;
+    }
+
+    .workspace-detail-health-list {
+      display: grid;
+      gap: 0.75rem;
+      padding: 1rem 1.35rem 1.35rem;
+    }
+
+    .workspace-detail-health-list.is-empty {
+      grid-template-columns: 1fr;
+    }
+
+    .workspace-detail-health-empty {
+      display: flex;
+      align-items: flex-start;
+      gap: 0.85rem;
+      padding: 1rem 1.05rem;
+      border-radius: 18px;
+      border: 1px solid rgba(62, 207, 142, 0.18);
+      background: rgba(19, 44, 35, 0.42);
+    }
+
+    .workspace-detail-health-empty-icon {
+      width: 2rem;
+      height: 2rem;
+      flex: 0 0 auto;
+      border-radius: 999px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      background: rgba(62, 207, 142, 0.12);
+      color: #8df4be;
+    }
+
+    .workspace-detail-health-empty-title {
+      color: var(--text-primary);
+      font-size: 0.95rem;
+      font-weight: 650;
+      margin-bottom: 0.2rem;
+    }
+
+    .workspace-detail-health-empty-copy {
+      color: var(--text-secondary);
+      font-size: 0.84rem;
+      line-height: 1.55;
+      margin: 0;
+    }
+
+    .workspace-detail-health-issue {
+      display: grid;
+      grid-template-columns: auto minmax(0, 1fr) auto;
+      gap: 0.9rem;
+      align-items: flex-start;
+      padding: 0.95rem 1rem;
+      border-radius: 18px;
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      background: rgba(9, 15, 25, 0.66);
+    }
+
+    .workspace-detail-health-issue.is-error {
+      border-color: rgba(239, 68, 68, 0.24);
+      background: linear-gradient(180deg, rgba(55, 20, 24, 0.42), rgba(24, 12, 15, 0.78));
+    }
+
+    .workspace-detail-health-issue.is-warning {
+      border-color: rgba(245, 158, 11, 0.22);
+      background: linear-gradient(180deg, rgba(60, 38, 15, 0.4), rgba(20, 15, 10, 0.78));
+    }
+
+    .workspace-detail-health-issue-icon {
+      width: 2rem;
+      height: 2rem;
+      border-radius: 12px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      background: rgba(255, 255, 255, 0.06);
+      color: var(--text-primary);
+      flex: 0 0 auto;
+    }
+
+    .workspace-detail-health-issue.is-error .workspace-detail-health-issue-icon {
+      background: rgba(239, 68, 68, 0.12);
+      color: #ffb1b1;
+    }
+
+    .workspace-detail-health-issue.is-warning .workspace-detail-health-issue-icon {
+      background: rgba(245, 158, 11, 0.12);
+      color: #ffd496;
+    }
+
+    .workspace-detail-health-issue > :nth-child(2) {
+      min-width: 0;
+    }
+
+    .workspace-detail-health-issue-title {
+      color: var(--text-primary);
+      font-size: 0.92rem;
+      font-weight: 650;
+      margin: 0;
+    }
+
+    .workspace-detail-health-issue-copy {
+      margin: 0.2rem 0 0;
+      color: var(--text-secondary);
+      font-size: 0.82rem;
+      line-height: 1.55;
+    }
+
+    .workspace-detail-health-issue-meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.45rem;
+      margin-top: 0.55rem;
+    }
+
+    .workspace-detail-health-issue-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.35rem;
+      padding: 0.28rem 0.55rem;
+      border-radius: 999px;
+      background: rgba(255, 255, 255, 0.05);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      color: var(--text-secondary);
+      font-size: 0.72rem;
+      line-height: 1.3;
+    }
+
+    .workspace-detail-health-action.workspace-detail-panel-btn {
+      display: inline-flex;
+      width: auto;
+      height: auto;
+      min-width: max-content;
+      min-height: 38px;
+      padding: 0.52rem 0.92rem;
+      border-radius: 999px;
+      align-self: center;
+      justify-self: end;
+      flex: 0 0 auto;
+      white-space: nowrap;
+    }
+
+    .workspace-detail-ui-smoke-result {
+      margin: 0 1.35rem 1.35rem;
+      border-radius: 18px;
+      border: 1px solid rgba(125, 176, 255, 0.18);
+      background: rgba(9, 15, 25, 0.58);
+      overflow: hidden;
+    }
+
+    .workspace-detail-ui-smoke-result.is-passed {
+      border-color: rgba(62, 207, 142, 0.22);
+    }
+
+    .workspace-detail-ui-smoke-result.is-failed {
+      border-color: rgba(239, 68, 68, 0.25);
+    }
+
+    .workspace-detail-ui-smoke-header {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 1rem;
+      padding: 0.95rem 1rem;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+    }
+
+    .workspace-detail-ui-smoke-title {
+      color: var(--text-primary);
+      font-size: 0.92rem;
+      font-weight: 650;
+      margin-bottom: 0.2rem;
+    }
+
+    .workspace-detail-ui-smoke-summary {
+      color: var(--text-secondary);
+      font-size: 0.8rem;
+      line-height: 1.45;
+    }
+
+    .workspace-detail-ui-smoke-status {
+      display: inline-flex;
+      align-items: center;
+      min-height: 30px;
+      padding: 0.32rem 0.65rem;
+      border-radius: 999px;
+      font-size: 0.72rem;
+      font-weight: 800;
+      text-transform: uppercase;
+      background: rgba(125, 176, 255, 0.14);
+      color: #b5d4ff;
+      white-space: nowrap;
+    }
+
+    .workspace-detail-ui-smoke-status.is-passed {
+      background: rgba(62, 207, 142, 0.12);
+      color: #8df4be;
+    }
+
+    .workspace-detail-ui-smoke-status.is-failed {
+      background: rgba(239, 68, 68, 0.14);
+      color: #ffb1b1;
+    }
+
+    .workspace-detail-ui-smoke-checks {
+      display: grid;
+      gap: 0.55rem;
+      padding: 0.85rem 1rem 1rem;
+    }
+
+    .workspace-detail-ui-smoke-check {
+      display: grid;
+      grid-template-columns: auto minmax(0, 1fr) auto;
+      gap: 0.7rem;
+      align-items: center;
+      padding: 0.7rem 0.75rem;
+      border-radius: 14px;
+      background: rgba(255, 255, 255, 0.045);
+      border: 1px solid rgba(255, 255, 255, 0.07);
+    }
+
+    .workspace-detail-ui-smoke-check-icon {
+      width: 1.55rem;
+      height: 1.55rem;
+      border-radius: 999px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      background: rgba(62, 207, 142, 0.12);
+      color: #8df4be;
+      font-weight: 800;
+      font-size: 0.85rem;
+    }
+
+    .workspace-detail-ui-smoke-check.is-failed .workspace-detail-ui-smoke-check-icon {
+      background: rgba(239, 68, 68, 0.14);
+      color: #ffb1b1;
+    }
+
+    .workspace-detail-ui-smoke-check-name {
+      color: var(--text-primary);
+      font-size: 0.82rem;
+      font-weight: 650;
+      overflow-wrap: anywhere;
+    }
+
+    .workspace-detail-ui-smoke-check-detail {
+      color: var(--text-secondary);
+      font-size: 0.74rem;
+      line-height: 1.4;
+      overflow-wrap: anywhere;
+    }
+
+    .workspace-detail-ui-smoke-check-meta {
+      color: var(--text-muted);
+      font-size: 0.72rem;
+      white-space: nowrap;
+    }
+
+    @media (max-width: 991px) {
+      .workspace-detail-health-header {
+        flex-direction: column;
+      }
+
+      .workspace-detail-health-controls {
+        width: 100%;
+        justify-content: flex-start;
+      }
+
+      .workspace-detail-health-issue {
+        grid-template-columns: auto minmax(0, 1fr);
+      }
+
+      .workspace-detail-health-action.workspace-detail-panel-btn {
+        grid-column: 1 / -1;
+        justify-self: start;
+      }
+
+      .workspace-detail-ui-smoke-check {
+        grid-template-columns: auto minmax(0, 1fr);
+      }
+
+      .workspace-detail-ui-smoke-check-meta {
+        grid-column: 2;
+      }
+    }
+
+    @media (max-width: 575px) {
+      .workspace-detail-health-header,
+      .workspace-detail-health-meta,
+      .workspace-detail-health-list {
+        padding-left: 1rem;
+        padding-right: 1rem;
+      }
+
+      .workspace-detail-ui-smoke-result {
+        margin-left: 1rem;
+        margin-right: 1rem;
+      }
+
+      .workspace-detail-health-controls {
+        flex-direction: column;
+        align-items: stretch;
+      }
+
+      .workspace-detail-health-controls .workspace-detail-panel-btn {
+        justify-content: center;
+        width: auto;
+      }
+
+      #workspace-detail-health-refresh {
+        width: 100%;
+      }
+
+      #workspace-detail-ui-smoke-test {
+        width: 100%;
+      }
+
+      .workspace-detail-health-action.workspace-detail-panel-btn {
+        max-width: 100%;
+        min-width: 0;
+        white-space: normal;
       }
     }
 
@@ -2188,6 +2879,7 @@
     .workspace-detail-agent-model-badge {
       display: inline-flex;
       align-items: center;
+      gap: 0.28rem;
       border-radius: 999px;
       border: 1px solid rgba(148, 163, 184, 0.25);
       background: rgba(148, 163, 184, 0.10);
@@ -2197,6 +2889,33 @@
       letter-spacing: 0.02em;
       padding: 0.08rem 0.36rem;
       line-height: 1.2;
+    }
+
+    .workspace-detail-agent-model-badge.is-editable {
+      cursor: pointer;
+      transition: border-color 0.16s ease, background-color 0.16s ease, color 0.16s ease, transform 0.16s ease;
+    }
+
+    .workspace-detail-agent-model-badge.is-editable:hover {
+      border-color: rgba(251, 146, 60, 0.46);
+      background: rgba(251, 146, 60, 0.15);
+      color: #fdba74;
+      transform: translateY(-1px);
+    }
+
+    .workspace-detail-agent-model-badge.is-editable:focus-visible {
+      outline: 2px solid rgba(251, 146, 60, 0.9);
+      outline-offset: 2px;
+    }
+
+    .workspace-detail-agent-model-badge.is-empty {
+      border-style: dashed;
+      color: #fcd34d;
+    }
+
+    .workspace-detail-agent-model-badge svg {
+      opacity: 0.82;
+      flex-shrink: 0;
     }
 
     .workspace-detail-agent-role-badge {
@@ -2307,6 +3026,43 @@
       color: var(--text-secondary);
       font-size: 0.7rem;
       line-height: 1.35;
+    }
+
+    .workspace-detail-agent-model-modal-kicker {
+      font-size: 0.68rem;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: #93c5fd;
+      margin-bottom: 0.2rem;
+    }
+
+    .workspace-detail-agent-model-modal-summary {
+      display: grid;
+      grid-template-columns: auto 1fr;
+      gap: 0.45rem 0.9rem;
+      padding: 0.8rem 0.95rem;
+      border-radius: 12px;
+      margin-bottom: 1rem;
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      background:
+        radial-gradient(circle at top right, rgba(251, 146, 60, 0.12), transparent 55%),
+        rgba(15, 23, 42, 0.82);
+    }
+
+    .workspace-detail-agent-model-modal-label {
+      font-size: 0.68rem;
+      font-weight: 700;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      color: var(--text-secondary);
+    }
+
+    .workspace-detail-agent-model-modal-value,
+    .workspace-detail-agent-model-modal-current {
+      color: var(--text-primary);
+      font-weight: 600;
+      line-height: 1.4;
     }
 
     .workspace-detail-mcp-list {
@@ -2926,9 +3682,89 @@
       font-size: 0.75rem;
     }
 
+    .workspace-detail-link-empty {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 0.45rem;
+      min-height: 180px;
+      padding: 1.2rem 1rem 1.35rem;
+      border: 1px dashed rgba(var(--primary-color-rgb, 255, 138, 86), 0.28);
+      border-radius: 14px;
+      background:
+        radial-gradient(circle at top, rgba(var(--primary-color-rgb, 255, 138, 86), 0.14), transparent 60%),
+        linear-gradient(180deg, rgba(255, 255, 255, 0.015), rgba(255, 255, 255, 0));
+      text-align: center;
+    }
+
+    .workspace-detail-link-empty-icon {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 40px;
+      height: 40px;
+      border-radius: 12px;
+      color: var(--primary-color);
+      background: rgba(var(--primary-color-rgb, 255, 138, 86), 0.16);
+      box-shadow: inset 0 0 0 1px rgba(var(--primary-color-rgb, 255, 138, 86), 0.12);
+    }
+
+    .workspace-detail-link-empty-eyebrow {
+      font-size: 0.68rem;
+      font-weight: 700;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: var(--text-muted);
+    }
+
+    .workspace-detail-link-empty-title {
+      font-size: 0.95rem;
+      font-weight: 700;
+      color: var(--text-primary);
+    }
+
+    .workspace-detail-link-empty-copy {
+      margin: 0;
+      max-width: 260px;
+      font-size: 0.76rem;
+      line-height: 1.5;
+      color: var(--text-secondary);
+    }
+
+    .workspace-detail-empty-action {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-width: 130px;
+      padding: 0.62rem 1rem;
+      border: none;
+      border-radius: 999px;
+      background: linear-gradient(135deg, rgba(var(--primary-color-rgb, 255, 138, 86), 0.96), rgba(var(--primary-color-rgb, 255, 138, 86), 0.82));
+      color: #fff;
+      font-size: 0.8rem;
+      font-weight: 700;
+      letter-spacing: 0.02em;
+      cursor: pointer;
+      transition: transform 0.16s ease, box-shadow 0.16s ease, opacity 0.16s ease;
+      box-shadow: 0 10px 24px rgba(var(--primary-color-rgb, 255, 138, 86), 0.22);
+    }
+
+    .workspace-detail-empty-action:hover:not(:disabled) {
+      transform: translateY(-1px);
+      box-shadow: 0 14px 28px rgba(var(--primary-color-rgb, 255, 138, 86), 0.28);
+    }
+
+    .workspace-detail-empty-action:disabled {
+      cursor: wait;
+      opacity: 0.75;
+      transform: none;
+      box-shadow: none;
+    }
+
     .workspace-detail-item {
       padding: 0.5rem 0.65rem;
-      padding-right: 5.8rem;
+      padding-right: 8rem;
       border-radius: 6px;
       background: var(--bg-secondary);
       border: 1px solid transparent;
@@ -2980,6 +3816,7 @@
     }
 
     .workspace-detail-item-result,
+    .workspace-detail-item-change,
     .workspace-detail-item-run,
     .workspace-detail-item-delete {
       position: absolute;
@@ -3002,6 +3839,24 @@
       right: 3.6rem;
       color: var(--text-secondary);
       opacity: 0.75;
+    }
+
+    .workspace-detail-item-change {
+      right: 3.9rem;
+      color: var(--text-secondary);
+      opacity: 0.82;
+    }
+
+    .workspace-detail-item-change:hover {
+      background: rgba(59, 130, 246, 0.16);
+      color: #60a5fa;
+      opacity: 1;
+    }
+
+    .workspace-detail-item-change:disabled {
+      opacity: 0.45;
+      cursor: wait;
+      pointer-events: none;
     }
 
     .workspace-detail-item-result:hover {
@@ -3675,18 +4530,204 @@
     }
 
     .workspace-detail-item-title {
+      display: flex;
+      align-items: center;
+      gap: 0.4rem;
       font-weight: 500;
       font-size: 0.8rem;
       color: var(--text-primary);
       margin-bottom: 0.15rem;
+      min-width: 0;
+    }
+
+    .workspace-detail-item-title-icon {
+      color: var(--text-secondary);
+      flex-shrink: 0;
+    }
+
+    .workspace-detail-item-title-text {
+      min-width: 0;
+      flex: 1;
       white-space: nowrap;
       overflow: hidden;
       text-overflow: ellipsis;
     }
 
+    .workspace-detail-workflow-group {
+      display: flex;
+      flex-direction: column;
+      gap: 0.35rem;
+    }
+
+    .workspace-detail-subtask-list {
+      display: flex;
+      flex-direction: column;
+      gap: 0.3rem;
+      margin-left: 1.1rem;
+      padding-left: 0.7rem;
+      border-left: 2px dashed rgba(99, 102, 241, 0.3);
+    }
+
+    .workspace-detail-item.is-workflow-parent {
+      background: linear-gradient(90deg, rgba(99, 102, 241, 0.08), var(--bg-secondary) 70%);
+      border-color: rgba(99, 102, 241, 0.28);
+    }
+
+    .workspace-detail-item.is-workflow-parent:hover {
+      background: linear-gradient(90deg, rgba(99, 102, 241, 0.14), var(--bg-tertiary) 70%);
+      border-color: rgba(99, 102, 241, 0.45);
+    }
+
+    .workspace-detail-item.is-workflow-subtask {
+      background: rgba(30, 41, 59, 0.35);
+      padding-top: 0.4rem;
+      padding-bottom: 0.4rem;
+    }
+
+    .workspace-detail-item.is-workflow-subtask .workspace-detail-item-title {
+      font-size: 0.78rem;
+    }
+
+    .workspace-detail-item.is-workflow-subtask .workspace-detail-item-meta {
+      font-size: 0.68rem;
+    }
+
+    .workspace-detail-item-toggle {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+      width: 18px;
+      height: 18px;
+      padding: 0;
+      background: rgba(99, 102, 241, 0.18);
+      border: 1px solid rgba(99, 102, 241, 0.35);
+      border-radius: 4px;
+      color: #a5b4fc;
+      cursor: pointer;
+      transition: transform 0.18s ease, background-color 0.15s ease, color 0.15s ease;
+    }
+
+    .workspace-detail-item-toggle:hover {
+      background: rgba(99, 102, 241, 0.3);
+      color: #e0e7ff;
+    }
+
+    .workspace-detail-item-toggle:focus-visible {
+      outline: 2px solid var(--primary-color);
+      outline-offset: 2px;
+    }
+
+    .workspace-detail-workflow-group.is-collapsed .workspace-detail-item-toggle {
+      transform: rotate(-90deg);
+    }
+
+    .workspace-detail-workflow-badge,
+    .workspace-detail-step-badge {
+      display: inline-flex;
+      align-items: center;
+      flex-shrink: 0;
+      padding: 0.1rem 0.42rem;
+      border-radius: 999px;
+      font-size: 0.62rem;
+      font-weight: 700;
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+      line-height: 1.25;
+    }
+
+    .workspace-detail-workflow-badge {
+      background: rgba(99, 102, 241, 0.2);
+      color: #a5b4fc;
+      border: 1px solid rgba(99, 102, 241, 0.35);
+    }
+
+    .workspace-detail-step-badge {
+      background: rgba(56, 189, 248, 0.14);
+      color: #7dd3fc;
+      border: 1px solid rgba(56, 189, 248, 0.35);
+    }
+
+    .workspace-detail-workflow-steps {
+      display: inline-flex;
+      align-items: center;
+      font-weight: 600;
+      color: #a5b4fc;
+    }
+
     .workspace-detail-item-meta {
       font-size: 0.7rem;
       color: var(--text-secondary);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .workspace-detail-item-submeta {
+      display: flex;
+      align-items: center;
+      gap: 0.4rem;
+      flex-wrap: wrap;
+      margin-top: 0.32rem;
+    }
+
+    .workspace-detail-directory-role {
+      display: inline-flex;
+      align-items: center;
+      flex-shrink: 0;
+      padding: 0.14rem 0.48rem;
+      border-radius: 999px;
+      font-size: 0.64rem;
+      font-weight: 700;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      line-height: 1.2;
+    }
+
+    .workspace-detail-directory-role.is-primary {
+      background: rgba(var(--primary-color-rgb, 255, 138, 86), 0.16);
+      color: var(--primary-color);
+      border: 1px solid rgba(var(--primary-color-rgb, 255, 138, 86), 0.26);
+    }
+
+    .workspace-detail-directory-role.is-reference {
+      background: rgba(148, 163, 184, 0.14);
+      color: #cbd5f5;
+      border: 1px solid rgba(148, 163, 184, 0.18);
+    }
+
+    .workspace-detail-directory-source {
+      display: inline-flex;
+      align-items: center;
+      padding: 0.12rem 0.44rem;
+      border-radius: 999px;
+      background: rgba(255, 255, 255, 0.05);
+      color: var(--text-secondary);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      font-size: 0.66rem;
+      line-height: 1.2;
+    }
+
+    .workspace-detail-directory-promote {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      padding: 0.14rem 0.5rem;
+      border-radius: 999px;
+      border: 1px solid rgba(59, 130, 246, 0.24);
+      background: rgba(59, 130, 246, 0.12);
+      color: #93c5fd;
+      font-size: 0.66rem;
+      font-weight: 700;
+      line-height: 1.2;
+      cursor: pointer;
+      transition: background-color 0.16s ease, color 0.16s ease, border-color 0.16s ease;
+    }
+
+    .workspace-detail-directory-promote:hover {
+      background: rgba(59, 130, 246, 0.18);
+      color: #dbeafe;
+      border-color: rgba(147, 197, 253, 0.34);
     }
 
     .workspace-detail-workflow-link--inline {
@@ -3885,21 +4926,199 @@
       color: #f59e0b;
     }
 
+    #workspace-detail-view[hidden],
+    #workspace-detail-task-assist-page[hidden] {
+      display: none !important;
+    }
+
+    .workspace-detail-task-assist-page {
+      display: grid;
+      gap: 1rem;
+      min-height: calc(100vh - 11rem);
+      align-content: start;
+    }
+
+    .workspace-detail-task-assist-page-header {
+      display: grid;
+      gap: 0.8rem;
+      padding: 1.1rem 1.2rem;
+      border-radius: 22px;
+      border: 1px solid rgba(148, 163, 184, 0.16);
+      background:
+        radial-gradient(circle at top left, rgba(251, 191, 36, 0.08), transparent 34%),
+        linear-gradient(180deg, rgba(15, 23, 42, 0.92), rgba(15, 23, 42, 0.72));
+      box-shadow:
+        0 24px 50px rgba(2, 6, 23, 0.18),
+        inset 0 1px 0 rgba(255, 255, 255, 0.04);
+    }
+
+    .workspace-detail-task-assist-back {
+      width: fit-content;
+    }
+
+    .workspace-detail-task-assist-page-copy {
+      display: grid;
+      gap: 0.45rem;
+    }
+
+    .workspace-detail-task-assist-page-kicker {
+      font-size: 0.74rem;
+      font-weight: 700;
+      letter-spacing: 0.18em;
+      text-transform: uppercase;
+      color: rgba(251, 191, 36, 0.92);
+    }
+
+    .workspace-detail-task-assist-page-title {
+      margin: 0;
+      color: var(--text-primary);
+      font-size: clamp(1.65rem, 2.6vw, 2.25rem);
+      line-height: 1.08;
+      letter-spacing: -0.03em;
+    }
+
+    .workspace-detail-task-assist-content {
+      display: flex;
+      flex-direction: column;
+      min-height: calc(100vh - 17rem);
+      max-height: calc(100vh - 17rem);
+      overflow: hidden;
+      border-radius: 24px;
+      border: 1px solid rgba(148, 163, 184, 0.16);
+      box-shadow:
+        0 28px 60px rgba(2, 6, 23, 0.22),
+        inset 0 1px 0 rgba(255, 255, 255, 0.04);
+      background:
+        radial-gradient(circle at top left, rgba(251, 191, 36, 0.08), transparent 34%),
+        linear-gradient(180deg, rgba(15, 23, 42, 0.98), rgba(11, 18, 32, 0.985));
+    }
+
+    .workspace-detail-task-assist-body {
+      display: flex;
+      flex: 1 1 auto;
+      padding: 1rem;
+      overflow: hidden;
+      min-height: 0;
+    }
+
+    .workspace-detail-task-assist-layout {
+      flex: 1 1 auto;
+      display: grid;
+      grid-template-columns: minmax(0, 1.08fr) minmax(21rem, 0.92fr);
+      gap: 1rem;
+      height: 100%;
+      min-height: 0;
+    }
+
+    .workspace-detail-task-assist-pane {
+      display: grid;
+      grid-template-rows: auto minmax(0, 1fr);
+      min-height: 0;
+      overflow: hidden;
+      border-radius: 18px;
+      border: 1px solid rgba(148, 163, 184, 0.16);
+      background:
+        linear-gradient(180deg, rgba(15, 23, 42, 0.74), rgba(15, 23, 42, 0.52)),
+        rgba(15, 23, 42, 0.42);
+      box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.03);
+    }
+
+    .workspace-detail-task-assist-answer-pane {
+      grid-template-rows: auto minmax(0, 1fr) auto;
+      background:
+        radial-gradient(circle at top right, rgba(59, 130, 246, 0.09), transparent 30%),
+        linear-gradient(180deg, rgba(15, 23, 42, 0.78), rgba(15, 23, 42, 0.58));
+    }
+
+    .workspace-detail-task-assist-pane-header {
+      padding: 1rem 1rem 0.9rem;
+      border-bottom: 1px solid rgba(148, 163, 184, 0.12);
+      background: linear-gradient(180deg, rgba(15, 23, 42, 0.52), rgba(15, 23, 42, 0.12));
+    }
+
+    .workspace-detail-task-assist-pane-kicker {
+      font-size: 0.72rem;
+      font-weight: 700;
+      letter-spacing: 0.16em;
+      text-transform: uppercase;
+      color: rgba(148, 163, 184, 0.92);
+      margin-bottom: 0.4rem;
+    }
+
+    .workspace-detail-task-assist-pane-title {
+      color: var(--text-primary);
+      font-size: 1rem;
+      line-height: 1.45;
+      max-width: 34rem;
+    }
+
+    .workspace-detail-task-assist-pane-scroll {
+      min-height: 0;
+      overflow: auto;
+      padding: 1rem;
+      scrollbar-gutter: stable both-edges;
+    }
+
+    .workspace-detail-task-assist-answer-scroll {
+      display: grid;
+      align-content: start;
+      gap: 0;
+    }
+
     .workspace-detail-task-assist-reason,
     .workspace-detail-task-assist-question {
-      background: var(--bg-secondary);
-      border: 1px solid var(--border-color);
-      border-radius: 8px;
-      padding: 0.75rem;
+      background: rgba(15, 23, 42, 0.58);
+      border: 1px solid rgba(148, 163, 184, 0.18);
+      border-radius: 14px;
+      padding: 0.9rem 0.95rem;
       color: var(--text-primary);
-      font-size: 0.9rem;
+      font-size: 0.92rem;
+      box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.03);
+    }
+
+    .workspace-detail-task-assist-summary {
+      display: grid;
+      gap: 0.8rem;
+      margin-bottom: 1rem;
+    }
+
+    .workspace-detail-task-assist-summary-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 0.75rem;
+    }
+
+    .workspace-detail-task-assist-summary-card {
+      display: grid;
+      gap: 0.45rem;
+      padding: 0.9rem 0.95rem;
+      border-radius: 14px;
+      border: 1px solid rgba(148, 163, 184, 0.16);
+      background:
+        linear-gradient(180deg, rgba(30, 41, 59, 0.46), rgba(15, 23, 42, 0.3)),
+        rgba(15, 23, 42, 0.28);
+      box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.03);
+    }
+
+    .workspace-detail-task-assist-summary-title {
+      color: rgba(191, 219, 254, 0.96);
+      font-size: 0.76rem;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+
+    .workspace-detail-task-assist-summary-copy {
+      color: var(--text-primary);
+      font-size: 0.92rem;
+      line-height: 1.5;
     }
 
     .workspace-detail-task-assist-recommendation {
-      background: rgba(59, 130, 246, 0.1);
-      border: 1px solid rgba(59, 130, 246, 0.35);
-      border-radius: 8px;
-      padding: 0.75rem;
+      background: rgba(59, 130, 246, 0.11);
+      border: 1px solid rgba(96, 165, 250, 0.3);
+      border-radius: 14px;
+      padding: 0.85rem 0.95rem;
       color: #bfdbfe;
       font-size: 0.88rem;
     }
@@ -3919,9 +5138,285 @@
       margin-bottom: 0.65rem;
     }
 
+    .workspace-detail-task-assist-response-preview {
+      white-space: pre-wrap;
+      color: var(--text-primary);
+      font-size: 0.92rem;
+      line-height: 1.6;
+      padding: 0.95rem 1rem;
+      border-radius: 14px;
+      border: 1px solid rgba(148, 163, 184, 0.16);
+      background:
+        linear-gradient(180deg, rgba(30, 41, 59, 0.38), rgba(15, 23, 42, 0.24)),
+        rgba(15, 23, 42, 0.28);
+    }
+
+    .workspace-detail-task-assist-response-toggle {
+      appearance: none;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      margin-top: 0.7rem;
+      padding: 0.55rem 0.8rem;
+      border-radius: 999px;
+      border: 1px solid rgba(148, 163, 184, 0.18);
+      background: rgba(15, 23, 42, 0.28);
+      color: rgba(191, 219, 254, 0.96);
+      font-size: 0.82rem;
+      font-weight: 700;
+      letter-spacing: 0.02em;
+      transition: border-color 0.18s ease, background 0.18s ease, transform 0.18s ease;
+    }
+
+    .workspace-detail-task-assist-response-toggle:hover {
+      border-color: rgba(251, 191, 36, 0.32);
+      background: rgba(30, 41, 59, 0.46);
+      transform: translateY(-1px);
+    }
+
+    .workspace-detail-task-assist-form-fields {
+      display: grid;
+      gap: 0.85rem;
+    }
+
+    .workspace-detail-task-assist-form-field {
+      display: grid;
+      gap: 0.55rem;
+      padding: 0.95rem 1rem;
+      background: rgba(15, 23, 42, 0.32);
+      border: 1px solid rgba(148, 163, 184, 0.16);
+      border-radius: 12px;
+    }
+
+    .workspace-detail-task-assist-form-wrap {
+      display: grid;
+      gap: 0.85rem;
+    }
+
+    .workspace-detail-task-assist-form-question {
+      display: flex;
+      gap: 0.75rem;
+      align-items: flex-start;
+    }
+
+    .workspace-detail-task-assist-form-number {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-width: 1.75rem;
+      height: 1.75rem;
+      padding: 0 0.45rem;
+      border-radius: 999px;
+      background: rgba(191, 219, 254, 0.12);
+      border: 1px solid rgba(191, 219, 254, 0.2);
+      color: #dbeafe;
+      font-size: 0.82rem;
+      font-weight: 700;
+      line-height: 1;
+      flex-shrink: 0;
+    }
+
+    .workspace-detail-task-assist-form-question-copy {
+      display: grid;
+      gap: 0.3rem;
+      min-width: 0;
+    }
+
+    .workspace-detail-task-assist-form-prompt {
+      font-size: 1rem;
+      font-weight: 600;
+      line-height: 1.45;
+      color: var(--text-primary);
+    }
+
+    .workspace-detail-task-assist-form-field .form-label {
+      margin-bottom: 0;
+      font-size: 0.9rem;
+      font-weight: 600;
+    }
+
+    .workspace-detail-task-assist-form-hint {
+      color: var(--text-secondary);
+      font-size: 0.84rem;
+    }
+
+    .workspace-detail-task-assist-form-evidence {
+      display: inline-flex;
+      align-items: flex-start;
+      gap: 0.45rem;
+      width: fit-content;
+      max-width: 100%;
+      padding: 0.45rem 0.65rem;
+      border-radius: 999px;
+      border: 1px solid rgba(251, 191, 36, 0.22);
+      background: rgba(251, 191, 36, 0.09);
+      color: #fde68a;
+      font-size: 0.8rem;
+      line-height: 1.45;
+    }
+
+    .workspace-detail-task-assist-form-evidence::before {
+      content: "Evidence";
+      flex-shrink: 0;
+      font-size: 0.66rem;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: rgba(254, 243, 199, 0.92);
+    }
+
+    .workspace-detail-task-assist-option-group {
+      display: grid;
+      gap: 0.55rem;
+    }
+
+    .workspace-detail-task-assist-option {
+      display: block;
+      cursor: pointer;
+    }
+
+    .workspace-detail-task-assist-option-input {
+      position: absolute;
+      opacity: 0;
+      pointer-events: none;
+    }
+
+    .workspace-detail-task-assist-option-card {
+      display: flex;
+      align-items: flex-start;
+      gap: 0.75rem;
+      padding: 0.8rem 0.9rem;
+      border-radius: 12px;
+      background: rgba(30, 41, 59, 0.36);
+      border: 1px solid rgba(148, 163, 184, 0.18);
+      transition: border-color 0.18s ease, background 0.18s ease, box-shadow 0.18s ease, transform 0.18s ease;
+    }
+
+    .workspace-detail-task-assist-option:hover .workspace-detail-task-assist-option-card {
+      border-color: rgba(251, 191, 36, 0.34);
+      background: rgba(30, 41, 59, 0.5);
+      transform: translateY(-1px);
+    }
+
+    .workspace-detail-task-assist-option-input:focus-visible + .workspace-detail-task-assist-option-card {
+      outline: 2px solid rgba(59, 130, 246, 0.7);
+      outline-offset: 2px;
+    }
+
+    .workspace-detail-task-assist-option-input:checked + .workspace-detail-task-assist-option-card {
+      border-color: rgba(59, 130, 246, 0.6);
+      background: rgba(37, 99, 235, 0.18);
+      box-shadow: 0 0 0 1px rgba(59, 130, 246, 0.22);
+    }
+
+    .workspace-detail-task-assist-option-key {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 1.85rem;
+      height: 1.85rem;
+      border-radius: 999px;
+      background: rgba(248, 250, 252, 0.08);
+      border: 1px solid rgba(248, 250, 252, 0.14);
+      color: var(--text-primary);
+      font-size: 0.82rem;
+      font-weight: 700;
+      line-height: 1;
+      flex-shrink: 0;
+    }
+
+    .workspace-detail-task-assist-option-input:checked + .workspace-detail-task-assist-option-card .workspace-detail-task-assist-option-key {
+      background: rgba(248, 250, 252, 0.16);
+      border-color: rgba(248, 250, 252, 0.22);
+    }
+
+    .workspace-detail-task-assist-option-copy {
+      display: grid;
+      gap: 0.2rem;
+      min-width: 0;
+    }
+
+    .workspace-detail-task-assist-option-label {
+      color: var(--text-primary);
+      font-size: 0.95rem;
+      line-height: 1.45;
+    }
+
+    .workspace-detail-task-assist-option-description {
+      color: var(--text-secondary);
+      font-size: 0.82rem;
+      line-height: 1.4;
+    }
+
     .workspace-detail-task-assist-action.is-recommended {
       box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.55);
       filter: saturate(1.15);
+    }
+
+    .workspace-detail-task-assist-action-dock {
+      display: grid;
+      gap: 0.85rem;
+      padding: 0.95rem 1rem 1rem;
+      border-top: 1px solid rgba(148, 163, 184, 0.12);
+      background:
+        linear-gradient(180deg, rgba(15, 23, 42, 0.2), rgba(15, 23, 42, 0.86) 28%);
+      box-shadow: 0 -18px 30px rgba(2, 6, 23, 0.22);
+    }
+
+    .workspace-detail-task-assist-fail-row {
+      display: flex;
+      justify-content: flex-start;
+    }
+
+    .workspace-detail-task-assist-primary-actions {
+      display: flex;
+      gap: 0.75rem;
+      flex-wrap: wrap;
+    }
+
+    .workspace-detail-task-assist-primary-actions .btn,
+    .workspace-detail-task-assist-fail-row .btn {
+      min-height: 2.75rem;
+      border-radius: 12px;
+      padding-inline: 1rem;
+    }
+
+    @media (max-width: 991.98px) {
+      .workspace-detail-task-assist-page {
+        min-height: auto;
+      }
+
+      .workspace-detail-task-assist-page-header {
+        padding: 1rem;
+      }
+
+      .workspace-detail-task-assist-content {
+        min-height: auto;
+        max-height: calc(100vh - 1.5rem);
+      }
+
+      .workspace-detail-task-assist-body {
+        display: block;
+        overflow: auto;
+      }
+
+      .workspace-detail-task-assist-layout {
+        grid-template-columns: minmax(0, 1fr);
+        height: auto;
+      }
+
+      .workspace-detail-task-assist-summary-grid {
+        grid-template-columns: minmax(0, 1fr);
+      }
+
+      .workspace-detail-task-assist-pane {
+        min-height: 0;
+      }
+
+      .workspace-detail-task-assist-pane-scroll {
+        max-height: none;
+        overflow: visible;
+      }
     }
 
     /* View Toggle */
@@ -5360,6 +6855,24 @@
           expandPanel(panel);
         });
 
+        panel.addEventListener('keydown', (event) => {
+          if (event.target.closest('button, a, input, select, textarea, .workspace-detail-item, .workspace-detail-agent-card, .workspace-detail-board')) {
+            return;
+          }
+
+          if (event.key !== 'Enter' && event.key !== ' ') {
+            return;
+          }
+
+          event.preventDefault();
+
+          if (panel.classList.contains('is-expanded')) {
+            return;
+          }
+
+          expandPanel(panel);
+        });
+
         // Close button
         const closeBtn = panel.querySelector('.workspace-detail-panel-close');
         if (closeBtn) {
@@ -5405,6 +6918,7 @@
         });
 
         expandedPanel = panel;
+        panel.setAttribute('aria-expanded', 'true');
         backdrop.classList.add('is-active');
         document.body.style.overflow = 'hidden';
 
@@ -5463,6 +6977,7 @@
 
         if (immediate || !originalRect) {
           // Immediate collapse (no animation)
+          panel.setAttribute('aria-expanded', 'false');
           panel.classList.remove('is-expanded', 'is-expanding', 'is-collapsing');
           panel.style.cssText = '';
           document.body.style.overflow = '';
@@ -5470,6 +6985,7 @@
           isAnimating = false;
         } else {
           isAnimating = true;
+          panel.setAttribute('aria-expanded', 'false');
 
           // Get current expanded position
           const currentRect = panel.getBoundingClientRect();

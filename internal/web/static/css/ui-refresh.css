@@ -230,7 +230,7 @@ body::after {
 
 .ori-navbar-shell {
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
   align-items: center;
   gap: 0.85rem 1rem;
   width: 100%;
@@ -246,6 +246,7 @@ body::after {
   display: flex;
   align-items: center;
   gap: 0.75rem;
+  justify-self: start;
   min-width: 0;
 }
 
@@ -260,6 +261,7 @@ body::after {
   display: flex;
   align-items: center;
   justify-content: center;
+  justify-self: center;
   flex-wrap: wrap;
   gap: 0.35rem;
   min-width: 0;
@@ -331,6 +333,38 @@ body::after {
 .ori-navbar-actions #locationIndicator {
   flex: 0 0 auto;
   white-space: nowrap;
+}
+
+.ori-navbar-actions #keyboardNavigationToggle,
+.ori-navbar-actions #darkModeToggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.5rem;
+  height: 2.5rem;
+  padding: 0;
+}
+
+.ori-navbar-actions #keyboardNavigationToggle[aria-pressed="true"] {
+  border-color: rgba(199, 134, 73, 0.58);
+  background:
+    radial-gradient(circle at top, rgba(250, 205, 132, 0.24), transparent 58%),
+    linear-gradient(180deg, rgba(255, 248, 236, 0.96), rgba(243, 224, 192, 0.92)) !important;
+  box-shadow:
+    0 10px 24px rgba(95, 53, 14, 0.18),
+    inset 0 1px 0 rgba(255, 255, 255, 0.52);
+  color: var(--primary-color);
+}
+
+[data-bs-theme="dark"] .ori-navbar-actions #keyboardNavigationToggle[aria-pressed="true"] {
+  border-color: rgba(225, 139, 98, 0.56);
+  background:
+    radial-gradient(circle at top, rgba(225, 139, 98, 0.22), transparent 58%),
+    linear-gradient(180deg, rgba(54, 37, 25, 0.9), rgba(40, 28, 20, 0.88)) !important;
+  box-shadow:
+    0 12px 28px rgba(0, 0, 0, 0.34),
+    inset 0 1px 0 rgba(255, 255, 255, 0.08);
+  color: #ffd7bf;
 }
 
 .nav-link-item {
@@ -2727,6 +2761,21 @@ textarea.form-control:focus {
 .home-assistant-auto-btn.is-active {
   background: linear-gradient(120deg, #c75a34 0%, #de7a52 100%);
   border-color: rgba(143, 63, 37, 0.46);
+}
+
+.home-assistant-workspace-mode-switch {
+  background: rgba(255, 251, 243, 0.82);
+  border-color: rgba(149, 114, 77, 0.22);
+}
+
+[data-bs-theme="dark"] .home-assistant-workspace-mode-switch {
+  background: rgba(32, 41, 57, 0.8);
+  border-color: rgba(210, 169, 127, 0.16);
+}
+
+.home-assistant-workspace-mode-btn.is-active {
+  background: linear-gradient(120deg, #c75a34 0%, #de7a52 100%);
+  box-shadow: 0 5px 12px rgba(145, 61, 36, 0.2);
 }
 
 .home-assistant-form {

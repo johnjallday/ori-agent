@@ -3,8 +3,10 @@ package orchestrationhttp
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/johnjallday/ori-agent/internal/workspace"
 )
@@ -147,6 +149,86 @@ func TestExtractClarificationWorkflowStep_InlineQuestion(t *testing.T) {
 	}
 	if got.Choices[1].Label != "drill into any specific day/activity" {
 		t.Fatalf("unexpected second choice label %q", got.Choices[1].Label)
+	}
+}
+
+func TestExtractClarificationWorkflowStep_FormQuestions(t *testing.T) {
+	response := "Is this going in a specific room (bathroom, kitchen, living room)? Freestanding or wall-mounted? Do you have tools already (saw, drill, square)?"
+
+	got := extractClarificationWorkflowStep(response)
+	if got == nil {
+		t.Fatalf("expected workflow step, got nil")
+	}
+	if got.StepType != "ask_form" {
+		t.Fatalf("expected ask_form step, got %q", got.StepType)
+	}
+	if len(got.Fields) != 3 {
+		t.Fatalf("expected 3 fields, got %d", len(got.Fields))
+	}
+	if got.Fields[0].Label != "Room" {
+		t.Fatalf("unexpected first field label %q", got.Fields[0].Label)
+	}
+	if got.Fields[1].Type != "select" {
+		t.Fatalf("expected second field to be select, got %q", got.Fields[1].Type)
+	}
+	if len(got.Fields[1].Options) != 2 {
+		t.Fatalf("expected 2 mounting options, got %d", len(got.Fields[1].Options))
+	}
+	if got.Fields[2].Type != "textarea" {
+		t.Fatalf("expected tools field to use textarea, got %q", got.Fields[2].Type)
+	}
+}
+
+func TestExtractClarificationWorkflowStep_QuestionBlocksWithLetterOptions(t *testing.T) {
+	response := `I can see you have shelf dimension notes in this workspace.
+Let me make sure I understand the full scope before we build a plan.
+
+A few quick questions:
+
+1. **What's the goal of this project?**
+   A. Build shelving units from scratch (cut your own lumber)
+   B. Assemble pre-cut pieces
+   C. Modify/repair existing shelves
+   D. Something else
+
+2. **How many shelf units are you building?**
+   A. 1 unit
+   B. 2 units (matches your "x2 sets" note)
+   C. More than 2`
+
+	got := extractClarificationWorkflowStep(response)
+	if got == nil {
+		t.Fatalf("expected workflow step, got nil")
+	}
+	if got.StepType != "ask_form" {
+		t.Fatalf("expected ask_form step, got %q", got.StepType)
+	}
+	if len(got.Fields) != 2 {
+		t.Fatalf("expected 2 fields, got %d", len(got.Fields))
+	}
+	if got.Fields[0].Description != "What's the goal of this project?" {
+		t.Fatalf("unexpected first field description %q", got.Fields[0].Description)
+	}
+	if got.Fields[0].Type != "select" {
+		t.Fatalf("expected first field to be select, got %q", got.Fields[0].Type)
+	}
+	if len(got.Fields[0].Options) != 4 {
+		t.Fatalf("expected 4 options for first field, got %d", len(got.Fields[0].Options))
+	}
+	if got.Fields[0].Options[1].Label != "Assemble pre-cut pieces" {
+		t.Fatalf("unexpected second option label %q", got.Fields[0].Options[1].Label)
+	}
+	if len(got.Fields[1].Options) != 3 {
+		t.Fatalf("expected 3 options for second field, got %d", len(got.Fields[1].Options))
+	}
+	if got.Fields[1].Options[1].Label != "2 units" {
+		t.Fatalf("unexpected second field option %q", got.Fields[1].Options[1].Label)
+	}
+	if got.Fields[1].Options[1].Description != `matches your "x2 sets" note.` {
+		t.Fatalf("unexpected second field option description %q", got.Fields[1].Options[1].Description)
+	}
+	if got.Fields[1].Evidence != `matches your "x2 sets" note.` {
+		t.Fatalf("unexpected question evidence %q", got.Fields[1].Evidence)
 	}
 }
 
@@ -297,6 +379,19 @@ func (s *stubMappedTaskExecutor) ExecuteTask(_ context.Context, _ string, task w
 		return result, nil
 	}
 	return task.Description, nil
+}
+
+type stubCancellableTaskExecutor struct {
+	started chan struct{}
+}
+
+func (s *stubCancellableTaskExecutor) ExecuteTask(ctx context.Context, _ string, _ workspace.Task) (string, error) {
+	select {
+	case s.started <- struct{}{}:
+	default:
+	}
+	<-ctx.Done()
+	return "", ctx.Err()
 }
 
 type stubEventingTaskExecutor struct {
@@ -734,6 +829,78 @@ func TestExecuteTaskWithDependencies_RecordsSuccessfulRunHistory(t *testing.T) {
 	}
 	if updatedTask.ExecutionHistory[0].Summary == "" {
 		t.Fatalf("expected summary to be recorded")
+	}
+}
+
+func TestExecuteTaskWithDependencies_CancelledRunStaysCancelled(t *testing.T) {
+	store := workspace.NewInMemoryStore()
+	ws := workspace.NewWorkspace(workspace.CreateWorkspaceParams{Name: "amr", Agents: []string{"Ori"}})
+	task := workspace.Task{
+		ID:          "task-cancel",
+		To:          "Ori",
+		Description: "run a long step",
+	}
+	if err := ws.AddTask(task); err != nil {
+		t.Fatalf("failed to add task: %v", err)
+	}
+	if err := store.Save(ws); err != nil {
+		t.Fatalf("failed to save workspace: %v", err)
+	}
+
+	persistedTask, err := ws.GetTask(task.ID)
+	if err != nil {
+		t.Fatalf("failed to fetch task: %v", err)
+	}
+
+	executor := &stubCancellableTaskExecutor{started: make(chan struct{}, 1)}
+	handler := &TaskHandler{
+		workspaceStore: store,
+		taskHandler:    executor,
+	}
+
+	errCh := make(chan error, 1)
+	go func() {
+		_, err := handler.executeTaskWithDependencies(ws, persistedTask, true)
+		errCh <- err
+	}()
+
+	select {
+	case <-executor.started:
+	case <-time.After(3 * time.Second):
+		t.Fatal("timed out waiting for task execution to start")
+	}
+
+	if !handler.cancelRunningTask(task.ID) {
+		t.Fatal("expected running task cancellation to be registered")
+	}
+
+	select {
+	case err := <-errCh:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("expected context.Canceled, got %v", err)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("timed out waiting for cancelled task to finish")
+	}
+
+	updatedTask, err := ws.GetTask(task.ID)
+	if err != nil {
+		t.Fatalf("failed to fetch updated task: %v", err)
+	}
+	if updatedTask.Status != workspace.TaskStatusCancelled {
+		t.Fatalf("expected cancelled task status, got %q", updatedTask.Status)
+	}
+	if updatedTask.Error != "Cancelled by user" {
+		t.Fatalf("expected cancellation error, got %q", updatedTask.Error)
+	}
+	if updatedTask.ExecutionCount != 1 {
+		t.Fatalf("expected execution count 1, got %d", updatedTask.ExecutionCount)
+	}
+	if len(updatedTask.ExecutionHistory) != 1 {
+		t.Fatalf("expected 1 execution history entry, got %d", len(updatedTask.ExecutionHistory))
+	}
+	if updatedTask.ExecutionHistory[0].Status != "cancelled" {
+		t.Fatalf("expected cancelled history status, got %q", updatedTask.ExecutionHistory[0].Status)
 	}
 }
 

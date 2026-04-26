@@ -314,6 +314,12 @@ func (s *Server) handleWorkspacesRoutes(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
+	// Check if this is a task route: /workspaces/{id}/task/{taskId}
+	if len(parts) == 3 && parts[1] == "task" && strings.TrimSpace(parts[2]) != "" {
+		s.serveWorkspaceTask(w, r, workspaceID, parts[2])
+		return
+	}
+
 	// If just /workspaces/{id}, serve the workspace detail page
 	if len(parts) == 1 {
 		s.serveWorkspaceDetail(w, r, workspaceID)
@@ -340,6 +346,16 @@ func (s *Server) serveWorkspaceCanvas(w http.ResponseWriter, r *http.Request, wo
 	data.ShowSidebarToggle = true
 	data.Extra["WorkspaceID"] = workspaceID
 	s.renderAndWritePage(w, "workspace-canvas", data)
+}
+
+func (s *Server) serveWorkspaceTask(w http.ResponseWriter, r *http.Request, workspaceID, taskID string) {
+	data := s.prepareBasePageData("workspaces")
+	data.Title = "Task - Ori Agent"
+	data.BrandText = "Ori Agent"
+	data.ShowSidebarToggle = true
+	data.Extra["WorkspaceID"] = workspaceID
+	data.Extra["TaskID"] = taskID
+	s.renderAndWritePage(w, "workspace-task", data)
 }
 
 func (s *Server) servePersonalize(w http.ResponseWriter, r *http.Request) {

@@ -29,7 +29,7 @@ function extractFolderNameFromPath(pathValue) {
 }
 
 function getWorkspaceBootstrapFromModal() {
-  const goal = String(document.getElementById('folderPrimaryGoalInput')?.value || '').trim();
+  const description = String(document.getElementById('folderDescriptionInput')?.value || '').trim();
   const systems = String(document.getElementById('folderSystemsInput')?.value || '').trim();
   const context = String(document.getElementById('folderContextInput')?.value || '').trim();
   const systemsList = systems
@@ -40,8 +40,10 @@ function getWorkspaceBootstrapFromModal() {
     : [];
 
   return {
-    hasAny: Boolean(goal || systems || context),
-    goal,
+    hasAny: Boolean(description || systems || context),
+    description,
+    goal: description,
+    capabilities: '',
     systems,
     systemsList,
     context
@@ -58,7 +60,7 @@ function resetWorkspaceBootstrapFields() {
   if (contextInput) contextInput.value = '';
 }
 
-function buildWorkspaceBootstrapSeedNote(workspaceBootstrap, workspaceName) {
+function buildWorkspaceBootstrapSeedNote(workspaceBootstrap, _workspaceName) {
   if (!workspaceBootstrap || !workspaceBootstrap.hasAny) {
     return null;
   }
@@ -66,13 +68,13 @@ function buildWorkspaceBootstrapSeedNote(workspaceBootstrap, workspaceName) {
   const systemsSection = workspaceBootstrap.systemsList.length > 0
     ? workspaceBootstrap.systemsList.map((item) => `- ${item}`).join('\n')
     : '_Not specified._';
-  const goalSection = workspaceBootstrap.goal || '_Not specified._';
+  const descriptionSection = workspaceBootstrap.description || workspaceBootstrap.goal || '_Not specified._';
+  const capabilitiesSection = workspaceBootstrap.capabilities || '_Not specified._';
   const contextSection = workspaceBootstrap.context || '_Not specified._';
-  const title = String(workspaceName || '').trim() || 'this workspace';
 
   return {
-    name: 'Workspace Brief',
-    content: `# Workspace Brief\n\nCaptured during workspace creation for ${title}.\n\n## Primary Goal\n${goalSection}\n\n## Apps and Systems\n${systemsSection}\n\n## Key Files or Context\n${contextSection}\n`
+    name: 'Workspace Description',
+    content: `# Workspace Description\n\n## Description\n${descriptionSection}\n\n## Apps and Systems\n${systemsSection}\n\n## Key Files or Context\n${contextSection}\n\n## Special Capabilities or Workflows\n${capabilitiesSection}\n`
   };
 }
 
@@ -81,14 +83,14 @@ async function createWorkspaceBootstrapNote(workspaceId, noteConfig) {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      name: noteConfig.name || 'Workspace Brief',
+      name: noteConfig.name || 'Workspace Description',
       content: noteConfig.content || ''
     })
   });
 
   if (!response.ok) {
     const text = await response.text();
-    throw new Error(text || 'Failed to create workspace brief note');
+    throw new Error(text || 'Failed to create workspace description note');
   }
 }
 
@@ -434,7 +436,6 @@ async function createWorkspace() {
   const colorBtn = document.querySelector('#addFolderModal .folder-color-btn.active');
   const importToggle = document.getElementById('folderImportToggle');
   const importPathInput = document.getElementById('folderImportPathInput');
-  const primaryGoalInput = document.getElementById('folderPrimaryGoalInput');
   const workspaceBootstrap = getWorkspaceBootstrapFromModal();
 
   const name = nameInput?.value.trim() || '';
@@ -453,9 +454,9 @@ async function createWorkspace() {
     showError('Please enter a folder path to import');
     return;
   }
-  if (!workspaceBootstrap.goal) {
-    showError('Primary goal is required');
-    primaryGoalInput?.focus();
+  if (!description) {
+    showError('Workspace description is required');
+    descriptionInput?.focus();
     return;
   }
 
@@ -477,7 +478,7 @@ async function createWorkspace() {
     };
     if (workspaceBootstrap.hasAny) {
       payload.workspace_bootstrap = {
-        goal: workspaceBootstrap.goal,
+        goal: workspaceBootstrap.description || workspaceBootstrap.goal,
         systems: workspaceBootstrap.systems,
         context: workspaceBootstrap.context
       };
@@ -557,7 +558,7 @@ async function createWorkspace() {
       try {
         await createWorkspaceBootstrapNote(workspaceId, workspaceBriefNote);
       } catch (error) {
-        console.warn('Failed to create workspace brief note:', error);
+        console.warn('Failed to create workspace description note:', error);
       }
     }
 

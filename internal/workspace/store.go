@@ -662,6 +662,10 @@ func (s *FileStore) GetFilesPath(workspaceID string) string {
 
 // Rename changes a workspace's folder name. The workspace ID is preserved.
 func (s *FileStore) Rename(id, newName string) error {
+	return s.RenameWithSlug(id, newName, "")
+}
+
+func (s *FileStore) RenameWithSlug(id, newName, requestedSlug string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -670,14 +674,21 @@ func (s *FileStore) Rename(id, newName string) error {
 		return fmt.Errorf("workspace %s not found", id)
 	}
 
-	newSlug := Slugify(newName)
+	newSlug := ""
+	if trimmedRequestedSlug := strings.TrimSpace(requestedSlug); trimmedRequestedSlug != "" {
+		newSlug = Slugify(trimmedRequestedSlug)
+	}
+	if newSlug == "" {
+		newSlug = Slugify(newName)
+	}
 	oldFolderPath := s.resolveFolder(oldRelPath)
 	parentDir := filepath.Dir(oldFolderPath)
 
 	// If the slug hasn't changed, just update the display name
-	if newSlug == filepath.Base(oldRelPath) {
+	if newSlug == filepath.Base(oldFolderPath) {
 		if ws, ok := s.cache[id]; ok {
 			ws.Name = newName
+			ws.FolderSlug = newSlug
 			return s.persistWorkspaceLocked(ws)
 		}
 		return nil
@@ -686,7 +697,11 @@ func (s *FileStore) Rename(id, newName string) error {
 	// Check if new folder name already exists
 	newFolderPath := filepath.Join(parentDir, newSlug)
 	if _, err := os.Stat(newFolderPath); err == nil {
-		return fmt.Errorf("a workspace folder named %q already exists, choose a different name", newSlug)
+		return &FolderSlugConflictError{
+			Slug:          newSlug,
+			SuggestedSlug: nextAvailableWorkspaceSlug(parentDir, newSlug),
+			ParentDir:     parentDir,
+		}
 	}
 
 	// Rename the folder on disk
