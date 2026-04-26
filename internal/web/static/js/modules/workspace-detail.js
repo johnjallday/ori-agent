@@ -1938,6 +1938,8 @@ export class WorkspaceDetailPage {
       seen.set(key, { name: trimmed, isEntryAgent: Boolean(isEntryAgent) });
     };
 
+    const sharedEntryAgentName = String(this.workspace.shared_data?.entry_agent_name || '').trim();
+    add(sharedEntryAgentName, { isEntryAgent: true });
     add(this.workspace.entry_agent_name, { isEntryAgent: true });
     if (Array.isArray(this.workspace.agent_instances)) {
       this.workspace.agent_instances.forEach((instance) => add(instance?.name, { isEntryAgent: Boolean(instance?.entry_point || instance?.entryPoint) }));
@@ -1949,8 +1951,40 @@ export class WorkspaceDetailPage {
     return Array.from(seen.values());
   }
 
+  hasWorkspaceEntryAgentReference() {
+    if (!this.workspace) return false;
+
+    if (String(this.workspace.entry_agent_name || '').trim()) return true;
+    if (String(this.workspace.shared_data?.entry_agent_name || '').trim()) return true;
+
+    if (Array.isArray(this.workspace.agent_instances)) {
+      return this.workspace.agent_instances.some((instance) => (
+        Boolean(instance?.entry_point || instance?.entryPoint)
+        && String(instance?.name || '').trim()
+      ));
+    }
+
+    return false;
+  }
+
   collectWorkspaceHealthIssues() {
     const issues = [];
+    const references = this.getWorkspaceHealthAgentReferences();
+
+    if (!this.hasWorkspaceEntryAgentReference()) {
+      const defaults = this.buildWorkspaceEntryAgentDefaults();
+      const workspaceName = String(this.workspace?.name || '').trim() || 'This workspace';
+      issues.push({
+        category: 'agent',
+        severity: 'error',
+        title: 'Entry agent is missing',
+        description: 'This workspace has no entry agent assigned. Create one so chats, routing, and task orchestration have a default manager.',
+        action: 'entry_agent',
+        actionLabel: 'Create Entry Agent',
+        agentName: defaults.seedName || 'Workspace Manager',
+        meta: [workspaceName, 'No entry agent']
+      });
+    }
 
     if (this.agentCatalogLoadFailed) {
       issues.push({
@@ -1961,7 +1995,7 @@ export class WorkspaceDetailPage {
         meta: ['Agent verification unavailable']
       });
     } else {
-      this.getWorkspaceHealthAgentReferences().forEach((reference) => {
+      references.forEach((reference) => {
         if (this.getAgentProfile(reference.name)) return;
         issues.push({
           category: 'agent',
@@ -2069,11 +2103,12 @@ export class WorkspaceDetailPage {
     if (verificationIssueCount > 0) {
       parts.push(`${verificationIssueCount} verification warning${verificationIssueCount === 1 ? '' : 's'}`);
     }
+    const attentionVerb = issues.length === 1 ? 'needs' : 'need';
 
     return {
       status: errorCount > 0 ? 'error' : 'warning',
       badge: errorCount > 0 ? 'Needs Attention' : 'Warnings',
-      summary: `${parts.join(' and ')} need attention before this workspace is fully reliable.`,
+      summary: `${parts.join(' and ')} ${attentionVerb} attention before this workspace is fully reliable.`,
       meta: [
         agentIssueCount > 0 ? `Agents: ${agentIssueCount} issue${agentIssueCount === 1 ? '' : 's'}` : 'Agents: healthy',
         fileIssueCount > 0 ? `Files: ${fileIssueCount} issue${fileIssueCount === 1 ? '' : 's'}` : 'Files: healthy',
