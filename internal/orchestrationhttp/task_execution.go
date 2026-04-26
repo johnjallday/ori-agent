@@ -641,18 +641,31 @@ func (th *TaskHandler) executeParentTaskSequence(workspaceID, parentTaskID strin
 
 		completedAt := time.Now()
 		parentTask.CompletedAt = &completedAt
-		logger.Error("Task sequence failed", logger.Fields{"task_id": parentTaskID, "error": execErr})
-		parentTask.Status = workspace.TaskStatusFailed
-		parentTask.Error = execErr.Error()
-		parentTask.Result = ""
+		if errors.Is(execErr, context.Canceled) {
+			logger.Info("Task sequence cancelled", logger.Fields{"task_id": parentTaskID})
+			parentTask.Status = workspace.TaskStatusCancelled
+			parentTask.Error = "Cancelled by user"
+			parentTask.Result = ""
+			if th.eventBus != nil {
+				th.eventBus.Publish(workspace.NewWorkspaceEvent(workspace.EventWorkspaceUpdated, ws.ID, "manual-sequence-cancelled", map[string]interface{}{
+					"task_id": parentTask.ID,
+					"status":  parentTask.Status,
+				}))
+			}
+		} else {
+			logger.Error("Task sequence failed", logger.Fields{"task_id": parentTaskID, "error": execErr})
+			parentTask.Status = workspace.TaskStatusFailed
+			parentTask.Error = execErr.Error()
+			parentTask.Result = ""
 
-		if th.eventBus != nil {
-			event := workspace.NewTaskEvent(workspace.EventTaskFailed, ws.ID, parentTask.ID, parentTask.To, map[string]interface{}{
-				"description": parentTask.Description,
-				"error":       execErr.Error(),
-				"manual":      true,
-			})
-			th.eventBus.Publish(event)
+			if th.eventBus != nil {
+				event := workspace.NewTaskEvent(workspace.EventTaskFailed, ws.ID, parentTask.ID, parentTask.To, map[string]interface{}{
+					"description": parentTask.Description,
+					"error":       execErr.Error(),
+					"manual":      true,
+				})
+				th.eventBus.Publish(event)
+			}
 		}
 	} else {
 		completedAt := time.Now()
@@ -708,6 +721,8 @@ func (th *TaskHandler) executeTaskWithDependencies(ws *workspace.Workspace, task
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
+	th.registerRunningTask(task.ID, cancel)
+	defer th.unregisterRunningTask(task.ID)
 
 	if task.Status != workspace.TaskStatusInProgress {
 		workspace.PrepareTaskExecutionStepsForResume(task)
@@ -796,7 +811,18 @@ func (th *TaskHandler) executeTaskWithDependencies(ws *workspace.Workspace, task
 	}
 
 	var awaitingErr *taskExecutionAwaitingStepError
-	if errors.As(execErr, &awaitingErr) {
+	if errors.Is(ctx.Err(), context.Canceled) {
+		completedAt := time.Now()
+		task.CompletedAt = &completedAt
+		task.Status = workspace.TaskStatusCancelled
+		task.Error = "Cancelled by user"
+		startedAt := completedAt
+		if task.StartedAt != nil && !task.StartedAt.IsZero() {
+			startedAt = *task.StartedAt
+		}
+		workspace.RecordTaskExecution(task, "cancelled", task.Error, startedAt, completedAt.Sub(startedAt))
+		execErr = context.Canceled
+	} else if errors.As(execErr, &awaitingErr) {
 		if err := ws.UpdateTask(*task); err != nil {
 			return awaitingErr.Result, fmt.Errorf("failed to update waiting task: %w", err)
 		}
@@ -806,39 +832,41 @@ func (th *TaskHandler) executeTaskWithDependencies(ws *workspace.Workspace, task
 		return awaitingErr.Result, nil
 	}
 
-	if execErr != nil {
-		var blockedErr *workspace.TaskBlockedError
-		if errors.As(execErr, &blockedErr) {
-			if err := th.markTaskBlocked(ws, task, blockedErr, manual, buildStructuredExecutionExtra(task)); err != nil {
-				return "", fmt.Errorf("failed to persist blocked task state: %w", err)
+	if task.Status != workspace.TaskStatusCancelled {
+		if execErr != nil {
+			var blockedErr *workspace.TaskBlockedError
+			if errors.As(execErr, &blockedErr) {
+				if err := th.markTaskBlocked(ws, task, blockedErr, manual, buildStructuredExecutionExtra(task)); err != nil {
+					return "", fmt.Errorf("failed to persist blocked task state: %w", err)
+				}
+				return "", blockedErr
 			}
-			return "", blockedErr
-		}
 
-		completedAt := time.Now()
-		task.CompletedAt = &completedAt
-		logger.Error("Task failed", logger.Fields{"task_id": task.ID, "execErr": execErr})
-		task.Status = workspace.TaskStatusFailed
-		task.Error = execErr.Error()
-		startedAt := completedAt
-		if task.StartedAt != nil && !task.StartedAt.IsZero() {
-			startedAt = *task.StartedAt
-		}
-		workspace.RecordTaskExecution(task, "failed", execErr.Error(), startedAt, completedAt.Sub(startedAt))
-	} else {
-		completedAt := time.Now()
-		task.CompletedAt = &completedAt
-		logger.Info("Task completed successfully", logger.Fields{"task_id": task.ID})
-		task.Status = workspace.TaskStatusCompleted
-		task.Result = result
-		task.Error = ""
-		startedAt := completedAt
-		if task.StartedAt != nil && !task.StartedAt.IsZero() {
-			startedAt = *task.StartedAt
-		}
-		workspace.RecordTaskExecution(task, "success", result, startedAt, completedAt.Sub(startedAt))
+			completedAt := time.Now()
+			task.CompletedAt = &completedAt
+			logger.Error("Task failed", logger.Fields{"task_id": task.ID, "execErr": execErr})
+			task.Status = workspace.TaskStatusFailed
+			task.Error = execErr.Error()
+			startedAt := completedAt
+			if task.StartedAt != nil && !task.StartedAt.IsZero() {
+				startedAt = *task.StartedAt
+			}
+			workspace.RecordTaskExecution(task, "failed", execErr.Error(), startedAt, completedAt.Sub(startedAt))
+		} else {
+			completedAt := time.Now()
+			task.CompletedAt = &completedAt
+			logger.Info("Task completed successfully", logger.Fields{"task_id": task.ID})
+			task.Status = workspace.TaskStatusCompleted
+			task.Result = result
+			task.Error = ""
+			startedAt := completedAt
+			if task.StartedAt != nil && !task.StartedAt.IsZero() {
+				startedAt = *task.StartedAt
+			}
+			workspace.RecordTaskExecution(task, "success", result, startedAt, completedAt.Sub(startedAt))
 
-		workspace.AutoStoreResult(ws, task, result, th.workspaceStore)
+			workspace.AutoStoreResult(ws, task, result, th.workspaceStore)
+		}
 	}
 
 	if err := ws.UpdateTask(*task); err != nil {
@@ -849,7 +877,12 @@ func (th *TaskHandler) executeTaskWithDependencies(ws *workspace.Workspace, task
 	}
 
 	if th.eventBus != nil {
-		if execErr != nil {
+		if task.Status == workspace.TaskStatusCancelled {
+			th.eventBus.Publish(workspace.NewWorkspaceEvent(workspace.EventWorkspaceUpdated, ws.ID, "manual-execution-cancelled", map[string]interface{}{
+				"task_id": task.ID,
+				"status":  task.Status,
+			}))
+		} else if execErr != nil {
 			event := workspace.NewTaskEvent(workspace.EventTaskFailed, ws.ID, task.ID, task.To, map[string]interface{}{
 				"description": task.Description,
 				"error":       execErr.Error(),
@@ -1090,6 +1123,10 @@ func (th *TaskHandler) executeTaskIteratively(ctx context.Context, ws *workspace
 	attemptHistory := make([]map[string]interface{}, 0, maxAttempts)
 
 	for attempt := 1; attempt <= maxAttempts; attempt++ {
+		if errors.Is(ctx.Err(), context.Canceled) {
+			return "", context.Canceled
+		}
+
 		currentTask := taskForExecution
 		currentTask.Context = cloneTaskContext(baseContext)
 		applyIterationContext(&currentTask, attempt, maxAttempts, attemptHistory)
@@ -1106,6 +1143,9 @@ func (th *TaskHandler) executeTaskIteratively(ctx context.Context, ws *workspace
 		attemptStartedAt := time.Now().UTC()
 		result, execErr := th.taskHandler.ExecuteTask(ctx, currentTask.To, currentTask)
 		attemptCompletedAt := time.Now().UTC()
+		if errors.Is(ctx.Err(), context.Canceled) {
+			return "", context.Canceled
+		}
 		if execErr != nil {
 			var blockedErr *workspace.TaskBlockedError
 			if errors.As(execErr, &blockedErr) {

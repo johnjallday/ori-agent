@@ -61,16 +61,21 @@
 
           <!-- Workspace Entry Prompt Bar -->
           <div id="homeAssistantCard" class="modern-card p-2 mb-3">
-            <form id="homeAssistantForm" class="d-flex align-items-center gap-2">
+            <form id="homeAssistantForm" class="home-assistant-workspace-form d-flex align-items-center gap-2">
               <div class="d-none d-md-flex align-items-center gap-2 px-2" style="color: var(--text-secondary); font-size: 0.82rem; white-space: nowrap;">
                 <span id="homeAssistantIdentityName" style="font-weight: 600; color: var(--text-primary); display: inline-block; max-width: 180px; overflow: hidden; text-overflow: ellipsis;" title="Workspace Manager">Workspace Manager</span>
                 <span style="opacity: 0.6;">Workspace</span>
               </div>
+              <div id="homeAssistantWorkspaceModeSwitch" class="home-assistant-workspace-mode-switch" role="group" aria-label="Workspace prompt mode">
+                <button type="button" class="home-assistant-workspace-mode-btn is-active" data-home-workspace-mode="task" aria-pressed="true">Task</button>
+                <button type="button" class="home-assistant-workspace-mode-btn" data-home-workspace-mode="ask" aria-pressed="false">Ask</button>
+                <button type="button" class="home-assistant-workspace-mode-btn" data-home-workspace-mode="note" aria-pressed="false">Note</button>
+              </div>
               <input id="homeAssistantInput" type="text" class="modern-input flex-grow-1" maxlength="800"
-                     placeholder="Ask Workspace Manager about this workspace... (or use /task, /note, /directory, /file, /chat)"
+                     placeholder="Create a task for Workspace Manager... (/chat asks, /note saves a note)"
                      aria-label="Workspace manager prompt"
                      style="min-height: 42px;">
-              <button id="homeAssistantSendBtn" type="submit" class="modern-btn modern-btn-primary home-assistant-send-btn">Send</button>
+              <button id="homeAssistantSendBtn" type="submit" class="modern-btn modern-btn-primary home-assistant-send-btn">Create Task</button>
             </form>
             <div id="homeAssistantQuickPrompts" class="d-flex flex-wrap align-items-center gap-2 px-2 pt-2">
               <span class="home-assistant-quick-label mb-0">Quick Actions</span>
@@ -156,6 +161,38 @@
                 <!-- Workflow template links will be rendered here -->
               </div>
             </div>
+          </div>
+
+          <div class="modern-card workspace-detail-health-card mb-4" id="workspace-detail-health-panel">
+            <div class="workspace-detail-health-header">
+              <div>
+                <div class="workspace-detail-health-kicker">Workspace Health</div>
+                <h2 class="workspace-detail-health-title">Missing agents and broken file links</h2>
+                <p id="workspace-detail-health-summary" class="workspace-detail-health-summary">
+                  Checking workspace agent references and linked files...
+                </p>
+              </div>
+              <div class="workspace-detail-health-controls">
+                <span id="workspace-detail-health-badge" class="workspace-detail-health-badge is-checking">Checking</span>
+                <button id="workspace-detail-health-refresh" class="workspace-detail-panel-btn" type="button" title="Run workspace health check">
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
+                    <path d="M17.65,6.35C16.2,4.9 14.21,4 12,4A8,8 0 0,0 4,12A8,8 0 0,0 12,20C15.73,20 18.84,17.45 19.73,14H17.65C16.83,16.33 14.61,18 12,18A6,6 0 0,1 6,12A6,6 0 0,1 12,6C13.66,6 15.14,6.69 16.22,7.78L13,11H20V4L17.65,6.35Z"/>
+                  </svg>
+                  <span id="workspace-detail-health-refresh-label">Run Health Check</span>
+                </button>
+                <button id="workspace-detail-ui-smoke-test" class="workspace-detail-panel-btn" type="button" title="Run UI smoke test">
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
+                    <path d="M9,3H15V5H19A2,2 0 0,1 21,7V19A2,2 0 0,1 19,21H5A2,2 0 0,1 3,19V7A2,2 0 0,1 5,5H9V3M11,5H13V3H11V5M5,7V19H19V7H5M8,10.5L10.5,13L16,9L17.2,10.6L10.3,15.7L6.8,12.2L8,10.5Z"/>
+                  </svg>
+                  <span id="workspace-detail-ui-smoke-test-label">Run UI Smoke Test</span>
+                </button>
+              </div>
+            </div>
+            <div id="workspace-detail-health-meta" class="workspace-detail-health-meta"></div>
+            <div id="workspace-detail-health-list" class="workspace-detail-health-list">
+              <div class="workspace-detail-empty">Checking workspace health...</div>
+            </div>
+            <div id="workspace-detail-ui-smoke-result" class="workspace-detail-ui-smoke-result d-none"></div>
           </div>
 
           <!-- Workspace Configuration -->
@@ -1478,6 +1515,39 @@
     </div>
   </div>
 
+  <div class="modal fade" id="workspace-detail-agent-model-modal" tabindex="-1" aria-labelledby="workspace-detail-agent-model-title" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+      <div class="modal-content">
+        <div class="modal-header">
+          <div>
+            <div class="workspace-detail-agent-model-modal-kicker">Workspace Agent Model</div>
+            <h5 class="modal-title" id="workspace-detail-agent-model-title">Change Agent Model</h5>
+          </div>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+        </div>
+        <div class="modal-body">
+          <div class="workspace-detail-agent-model-modal-summary">
+            <div class="workspace-detail-agent-model-modal-label">Agent</div>
+            <div id="workspace-detail-agent-model-agent-name" class="workspace-detail-agent-model-modal-value">--</div>
+            <div class="workspace-detail-agent-model-modal-label">Current</div>
+            <div id="workspace-detail-agent-model-current" class="workspace-detail-agent-model-modal-current">--</div>
+          </div>
+          <div class="mb-0">
+            <label for="workspace-detail-agent-model-select" class="form-label">Available models</label>
+            <select id="workspace-detail-agent-model-select" class="form-select">
+              <option value="">Loading models...</option>
+            </select>
+            <div id="workspace-detail-agent-model-help" class="form-text">Choose a model to update this workspace agent.</div>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+          <button type="button" class="btn btn-primary" id="workspace-detail-agent-model-submit">Save Model</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <!-- Directory Explorer Modal -->
   <div class="modal fade" id="workspace-directory-explorer-modal" tabindex="-1" aria-labelledby="workspace-directory-explorer-title" aria-hidden="true">
     <div class="modal-dialog modal-xl modal-dialog-centered workspace-directory-explorer-dialog">
@@ -1753,6 +1823,479 @@
 
       .hub-file-source-btn {
         flex: 1;
+      }
+    }
+
+    .workspace-detail-health-card {
+      position: relative;
+      overflow: hidden;
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      background:
+        radial-gradient(circle at top right, rgba(255, 171, 95, 0.12), transparent 32%),
+        linear-gradient(180deg, rgba(13, 21, 35, 0.96), rgba(11, 18, 30, 0.92));
+    }
+
+    .workspace-detail-health-card::before {
+      content: "";
+      position: absolute;
+      inset: 0;
+      pointer-events: none;
+      background:
+        linear-gradient(115deg, transparent 0%, rgba(255, 255, 255, 0.04) 22%, transparent 44%),
+        linear-gradient(0deg, rgba(255, 255, 255, 0.02), rgba(255, 255, 255, 0));
+      opacity: 0.75;
+    }
+
+    .workspace-detail-health-header,
+    .workspace-detail-health-meta,
+    .workspace-detail-health-list {
+      position: relative;
+      z-index: 1;
+    }
+
+    .workspace-detail-health-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 1rem;
+      padding: 1.3rem 1.35rem 0;
+    }
+
+    .workspace-detail-health-header > :first-child {
+      flex: 1 1 34rem;
+      min-width: 0;
+    }
+
+    .workspace-detail-health-kicker {
+      color: rgba(255, 196, 143, 0.84);
+      font-size: 0.72rem;
+      font-weight: 700;
+      letter-spacing: 0.18em;
+      text-transform: uppercase;
+      margin-bottom: 0.35rem;
+    }
+
+    .workspace-detail-health-title {
+      margin: 0;
+      color: var(--text-primary);
+      font-size: 1.08rem;
+      font-weight: 650;
+    }
+
+    .workspace-detail-health-summary {
+      margin: 0.45rem 0 0;
+      color: var(--text-secondary);
+      font-size: 0.88rem;
+      line-height: 1.55;
+      max-width: 64ch;
+    }
+
+    .workspace-detail-health-controls {
+      display: flex;
+      align-items: center;
+      gap: 0.7rem;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+      flex: 0 0 auto;
+      max-width: 100%;
+    }
+
+    #workspace-detail-health-refresh {
+      width: auto;
+      height: auto;
+      min-height: 34px;
+      padding: 0.52rem 0.88rem;
+      border-radius: 999px;
+      gap: 0.45rem;
+      flex: 0 0 auto;
+      white-space: nowrap;
+    }
+
+    #workspace-detail-health-refresh svg {
+      flex: 0 0 auto;
+    }
+
+    .workspace-detail-health-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.35rem;
+      min-height: 34px;
+      padding: 0.42rem 0.82rem;
+      border-radius: 999px;
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      background: rgba(255, 255, 255, 0.05);
+      color: var(--text-primary);
+      font-size: 0.76rem;
+      font-weight: 700;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+    }
+
+    .workspace-detail-health-badge.is-healthy {
+      border-color: rgba(62, 207, 142, 0.3);
+      background: rgba(34, 197, 94, 0.14);
+      color: #81f2b6;
+    }
+
+    .workspace-detail-health-badge.is-warning {
+      border-color: rgba(255, 179, 102, 0.34);
+      background: rgba(245, 158, 11, 0.16);
+      color: #ffd08a;
+    }
+
+    .workspace-detail-health-badge.is-error {
+      border-color: rgba(255, 113, 113, 0.3);
+      background: rgba(239, 68, 68, 0.15);
+      color: #ffaeae;
+    }
+
+    .workspace-detail-health-badge.is-checking {
+      border-color: rgba(125, 176, 255, 0.26);
+      background: rgba(59, 130, 246, 0.12);
+      color: #b5d4ff;
+    }
+
+    .workspace-detail-health-meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.55rem;
+      padding: 0.95rem 1.35rem 0;
+    }
+
+    .workspace-detail-health-chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.4rem;
+      padding: 0.38rem 0.68rem;
+      border-radius: 999px;
+      background: rgba(255, 255, 255, 0.05);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      color: var(--text-secondary);
+      font-size: 0.74rem;
+      font-weight: 600;
+    }
+
+    .workspace-detail-health-list {
+      display: grid;
+      gap: 0.75rem;
+      padding: 1rem 1.35rem 1.35rem;
+    }
+
+    .workspace-detail-health-list.is-empty {
+      grid-template-columns: 1fr;
+    }
+
+    .workspace-detail-health-empty {
+      display: flex;
+      align-items: flex-start;
+      gap: 0.85rem;
+      padding: 1rem 1.05rem;
+      border-radius: 18px;
+      border: 1px solid rgba(62, 207, 142, 0.18);
+      background: rgba(19, 44, 35, 0.42);
+    }
+
+    .workspace-detail-health-empty-icon {
+      width: 2rem;
+      height: 2rem;
+      flex: 0 0 auto;
+      border-radius: 999px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      background: rgba(62, 207, 142, 0.12);
+      color: #8df4be;
+    }
+
+    .workspace-detail-health-empty-title {
+      color: var(--text-primary);
+      font-size: 0.95rem;
+      font-weight: 650;
+      margin-bottom: 0.2rem;
+    }
+
+    .workspace-detail-health-empty-copy {
+      color: var(--text-secondary);
+      font-size: 0.84rem;
+      line-height: 1.55;
+      margin: 0;
+    }
+
+    .workspace-detail-health-issue {
+      display: grid;
+      grid-template-columns: auto minmax(0, 1fr) auto;
+      gap: 0.9rem;
+      align-items: flex-start;
+      padding: 0.95rem 1rem;
+      border-radius: 18px;
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      background: rgba(9, 15, 25, 0.66);
+    }
+
+    .workspace-detail-health-issue.is-error {
+      border-color: rgba(239, 68, 68, 0.24);
+      background: linear-gradient(180deg, rgba(55, 20, 24, 0.42), rgba(24, 12, 15, 0.78));
+    }
+
+    .workspace-detail-health-issue.is-warning {
+      border-color: rgba(245, 158, 11, 0.22);
+      background: linear-gradient(180deg, rgba(60, 38, 15, 0.4), rgba(20, 15, 10, 0.78));
+    }
+
+    .workspace-detail-health-issue-icon {
+      width: 2rem;
+      height: 2rem;
+      border-radius: 12px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      background: rgba(255, 255, 255, 0.06);
+      color: var(--text-primary);
+      flex: 0 0 auto;
+    }
+
+    .workspace-detail-health-issue.is-error .workspace-detail-health-issue-icon {
+      background: rgba(239, 68, 68, 0.12);
+      color: #ffb1b1;
+    }
+
+    .workspace-detail-health-issue.is-warning .workspace-detail-health-issue-icon {
+      background: rgba(245, 158, 11, 0.12);
+      color: #ffd496;
+    }
+
+    .workspace-detail-health-issue > :nth-child(2) {
+      min-width: 0;
+    }
+
+    .workspace-detail-health-issue-title {
+      color: var(--text-primary);
+      font-size: 0.92rem;
+      font-weight: 650;
+      margin: 0;
+    }
+
+    .workspace-detail-health-issue-copy {
+      margin: 0.2rem 0 0;
+      color: var(--text-secondary);
+      font-size: 0.82rem;
+      line-height: 1.55;
+    }
+
+    .workspace-detail-health-issue-meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.45rem;
+      margin-top: 0.55rem;
+    }
+
+    .workspace-detail-health-issue-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.35rem;
+      padding: 0.28rem 0.55rem;
+      border-radius: 999px;
+      background: rgba(255, 255, 255, 0.05);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      color: var(--text-secondary);
+      font-size: 0.72rem;
+      line-height: 1.3;
+    }
+
+    .workspace-detail-health-action.workspace-detail-panel-btn {
+      display: inline-flex;
+      width: auto;
+      height: auto;
+      min-width: max-content;
+      min-height: 38px;
+      padding: 0.52rem 0.92rem;
+      border-radius: 999px;
+      align-self: center;
+      justify-self: end;
+      flex: 0 0 auto;
+      white-space: nowrap;
+    }
+
+    .workspace-detail-ui-smoke-result {
+      margin: 0 1.35rem 1.35rem;
+      border-radius: 18px;
+      border: 1px solid rgba(125, 176, 255, 0.18);
+      background: rgba(9, 15, 25, 0.58);
+      overflow: hidden;
+    }
+
+    .workspace-detail-ui-smoke-result.is-passed {
+      border-color: rgba(62, 207, 142, 0.22);
+    }
+
+    .workspace-detail-ui-smoke-result.is-failed {
+      border-color: rgba(239, 68, 68, 0.25);
+    }
+
+    .workspace-detail-ui-smoke-header {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 1rem;
+      padding: 0.95rem 1rem;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+    }
+
+    .workspace-detail-ui-smoke-title {
+      color: var(--text-primary);
+      font-size: 0.92rem;
+      font-weight: 650;
+      margin-bottom: 0.2rem;
+    }
+
+    .workspace-detail-ui-smoke-summary {
+      color: var(--text-secondary);
+      font-size: 0.8rem;
+      line-height: 1.45;
+    }
+
+    .workspace-detail-ui-smoke-status {
+      display: inline-flex;
+      align-items: center;
+      min-height: 30px;
+      padding: 0.32rem 0.65rem;
+      border-radius: 999px;
+      font-size: 0.72rem;
+      font-weight: 800;
+      text-transform: uppercase;
+      background: rgba(125, 176, 255, 0.14);
+      color: #b5d4ff;
+      white-space: nowrap;
+    }
+
+    .workspace-detail-ui-smoke-status.is-passed {
+      background: rgba(62, 207, 142, 0.12);
+      color: #8df4be;
+    }
+
+    .workspace-detail-ui-smoke-status.is-failed {
+      background: rgba(239, 68, 68, 0.14);
+      color: #ffb1b1;
+    }
+
+    .workspace-detail-ui-smoke-checks {
+      display: grid;
+      gap: 0.55rem;
+      padding: 0.85rem 1rem 1rem;
+    }
+
+    .workspace-detail-ui-smoke-check {
+      display: grid;
+      grid-template-columns: auto minmax(0, 1fr) auto;
+      gap: 0.7rem;
+      align-items: center;
+      padding: 0.7rem 0.75rem;
+      border-radius: 14px;
+      background: rgba(255, 255, 255, 0.045);
+      border: 1px solid rgba(255, 255, 255, 0.07);
+    }
+
+    .workspace-detail-ui-smoke-check-icon {
+      width: 1.55rem;
+      height: 1.55rem;
+      border-radius: 999px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      background: rgba(62, 207, 142, 0.12);
+      color: #8df4be;
+      font-weight: 800;
+      font-size: 0.85rem;
+    }
+
+    .workspace-detail-ui-smoke-check.is-failed .workspace-detail-ui-smoke-check-icon {
+      background: rgba(239, 68, 68, 0.14);
+      color: #ffb1b1;
+    }
+
+    .workspace-detail-ui-smoke-check-name {
+      color: var(--text-primary);
+      font-size: 0.82rem;
+      font-weight: 650;
+      overflow-wrap: anywhere;
+    }
+
+    .workspace-detail-ui-smoke-check-detail {
+      color: var(--text-secondary);
+      font-size: 0.74rem;
+      line-height: 1.4;
+      overflow-wrap: anywhere;
+    }
+
+    .workspace-detail-ui-smoke-check-meta {
+      color: var(--text-muted);
+      font-size: 0.72rem;
+      white-space: nowrap;
+    }
+
+    @media (max-width: 991px) {
+      .workspace-detail-health-header {
+        flex-direction: column;
+      }
+
+      .workspace-detail-health-controls {
+        width: 100%;
+        justify-content: flex-start;
+      }
+
+      .workspace-detail-health-issue {
+        grid-template-columns: auto minmax(0, 1fr);
+      }
+
+      .workspace-detail-health-action.workspace-detail-panel-btn {
+        grid-column: 1 / -1;
+        justify-self: start;
+      }
+
+      .workspace-detail-ui-smoke-check {
+        grid-template-columns: auto minmax(0, 1fr);
+      }
+
+      .workspace-detail-ui-smoke-check-meta {
+        grid-column: 2;
+      }
+    }
+
+    @media (max-width: 575px) {
+      .workspace-detail-health-header,
+      .workspace-detail-health-meta,
+      .workspace-detail-health-list {
+        padding-left: 1rem;
+        padding-right: 1rem;
+      }
+
+      .workspace-detail-ui-smoke-result {
+        margin-left: 1rem;
+        margin-right: 1rem;
+      }
+
+      .workspace-detail-health-controls {
+        flex-direction: column;
+        align-items: stretch;
+      }
+
+      .workspace-detail-health-controls .workspace-detail-panel-btn {
+        justify-content: center;
+        width: auto;
+      }
+
+      #workspace-detail-health-refresh {
+        width: 100%;
+      }
+
+      #workspace-detail-ui-smoke-test {
+        width: 100%;
+      }
+
+      .workspace-detail-health-action.workspace-detail-panel-btn {
+        max-width: 100%;
+        min-width: 0;
+        white-space: normal;
       }
     }
 
@@ -2336,6 +2879,7 @@
     .workspace-detail-agent-model-badge {
       display: inline-flex;
       align-items: center;
+      gap: 0.28rem;
       border-radius: 999px;
       border: 1px solid rgba(148, 163, 184, 0.25);
       background: rgba(148, 163, 184, 0.10);
@@ -2345,6 +2889,33 @@
       letter-spacing: 0.02em;
       padding: 0.08rem 0.36rem;
       line-height: 1.2;
+    }
+
+    .workspace-detail-agent-model-badge.is-editable {
+      cursor: pointer;
+      transition: border-color 0.16s ease, background-color 0.16s ease, color 0.16s ease, transform 0.16s ease;
+    }
+
+    .workspace-detail-agent-model-badge.is-editable:hover {
+      border-color: rgba(251, 146, 60, 0.46);
+      background: rgba(251, 146, 60, 0.15);
+      color: #fdba74;
+      transform: translateY(-1px);
+    }
+
+    .workspace-detail-agent-model-badge.is-editable:focus-visible {
+      outline: 2px solid rgba(251, 146, 60, 0.9);
+      outline-offset: 2px;
+    }
+
+    .workspace-detail-agent-model-badge.is-empty {
+      border-style: dashed;
+      color: #fcd34d;
+    }
+
+    .workspace-detail-agent-model-badge svg {
+      opacity: 0.82;
+      flex-shrink: 0;
     }
 
     .workspace-detail-agent-role-badge {
@@ -2455,6 +3026,43 @@
       color: var(--text-secondary);
       font-size: 0.7rem;
       line-height: 1.35;
+    }
+
+    .workspace-detail-agent-model-modal-kicker {
+      font-size: 0.68rem;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: #93c5fd;
+      margin-bottom: 0.2rem;
+    }
+
+    .workspace-detail-agent-model-modal-summary {
+      display: grid;
+      grid-template-columns: auto 1fr;
+      gap: 0.45rem 0.9rem;
+      padding: 0.8rem 0.95rem;
+      border-radius: 12px;
+      margin-bottom: 1rem;
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      background:
+        radial-gradient(circle at top right, rgba(251, 146, 60, 0.12), transparent 55%),
+        rgba(15, 23, 42, 0.82);
+    }
+
+    .workspace-detail-agent-model-modal-label {
+      font-size: 0.68rem;
+      font-weight: 700;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      color: var(--text-secondary);
+    }
+
+    .workspace-detail-agent-model-modal-value,
+    .workspace-detail-agent-model-modal-current {
+      color: var(--text-primary);
+      font-weight: 600;
+      line-height: 1.4;
     }
 
     .workspace-detail-mcp-list {
@@ -3943,6 +4551,108 @@
       white-space: nowrap;
       overflow: hidden;
       text-overflow: ellipsis;
+    }
+
+    .workspace-detail-workflow-group {
+      display: flex;
+      flex-direction: column;
+      gap: 0.35rem;
+    }
+
+    .workspace-detail-subtask-list {
+      display: flex;
+      flex-direction: column;
+      gap: 0.3rem;
+      margin-left: 1.1rem;
+      padding-left: 0.7rem;
+      border-left: 2px dashed rgba(99, 102, 241, 0.3);
+    }
+
+    .workspace-detail-item.is-workflow-parent {
+      background: linear-gradient(90deg, rgba(99, 102, 241, 0.08), var(--bg-secondary) 70%);
+      border-color: rgba(99, 102, 241, 0.28);
+    }
+
+    .workspace-detail-item.is-workflow-parent:hover {
+      background: linear-gradient(90deg, rgba(99, 102, 241, 0.14), var(--bg-tertiary) 70%);
+      border-color: rgba(99, 102, 241, 0.45);
+    }
+
+    .workspace-detail-item.is-workflow-subtask {
+      background: rgba(30, 41, 59, 0.35);
+      padding-top: 0.4rem;
+      padding-bottom: 0.4rem;
+    }
+
+    .workspace-detail-item.is-workflow-subtask .workspace-detail-item-title {
+      font-size: 0.78rem;
+    }
+
+    .workspace-detail-item.is-workflow-subtask .workspace-detail-item-meta {
+      font-size: 0.68rem;
+    }
+
+    .workspace-detail-item-toggle {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+      width: 18px;
+      height: 18px;
+      padding: 0;
+      background: rgba(99, 102, 241, 0.18);
+      border: 1px solid rgba(99, 102, 241, 0.35);
+      border-radius: 4px;
+      color: #a5b4fc;
+      cursor: pointer;
+      transition: transform 0.18s ease, background-color 0.15s ease, color 0.15s ease;
+    }
+
+    .workspace-detail-item-toggle:hover {
+      background: rgba(99, 102, 241, 0.3);
+      color: #e0e7ff;
+    }
+
+    .workspace-detail-item-toggle:focus-visible {
+      outline: 2px solid var(--primary-color);
+      outline-offset: 2px;
+    }
+
+    .workspace-detail-workflow-group.is-collapsed .workspace-detail-item-toggle {
+      transform: rotate(-90deg);
+    }
+
+    .workspace-detail-workflow-badge,
+    .workspace-detail-step-badge {
+      display: inline-flex;
+      align-items: center;
+      flex-shrink: 0;
+      padding: 0.1rem 0.42rem;
+      border-radius: 999px;
+      font-size: 0.62rem;
+      font-weight: 700;
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+      line-height: 1.25;
+    }
+
+    .workspace-detail-workflow-badge {
+      background: rgba(99, 102, 241, 0.2);
+      color: #a5b4fc;
+      border: 1px solid rgba(99, 102, 241, 0.35);
+    }
+
+    .workspace-detail-step-badge {
+      background: rgba(56, 189, 248, 0.14);
+      color: #7dd3fc;
+      border: 1px solid rgba(56, 189, 248, 0.35);
+    }
+
+    .workspace-detail-workflow-steps {
+      display: inline-flex;
+      align-items: center;
+      font-weight: 600;
+      color: #a5b4fc;
     }
 
     .workspace-detail-item-meta {

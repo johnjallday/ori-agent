@@ -630,7 +630,7 @@
         description,
         source: String(skill?.source || 'installed').trim() || 'installed',
         action: 'attach',
-        selected: true,
+        selected: false,
         trusted: true,
         score
       });
@@ -657,7 +657,7 @@
         description: description || 'Suggested from the skills marketplace.',
         source: 'marketplace',
         action: 'install_attach',
-        selected: candidates.length === 0,
+        selected: false,
         trusted: true,
         packageName,
         url,
@@ -775,7 +775,12 @@
     if (selectedSkills.length > 0) {
       parts.push(`${selectedSkills.length} skill${selectedSkills.length === 1 ? '' : 's'}`);
     }
-    return `Ori reviewed the description and prepared a starter setup with ${parts.join(', ')}.`;
+    const suggestionParts = [];
+    const unselectedSkills = skills.length - selectedSkills.length;
+    if (unselectedSkills > 0) {
+      suggestionParts.push(`${unselectedSkills} optional skill suggestion${unselectedSkills === 1 ? '' : 's'}`);
+    }
+    return `Ori reviewed the description and prepared a starter setup with ${parts.join(', ')}${suggestionParts.length > 0 ? `. ${suggestionParts.join(', ')} available below` : ''}.`;
   }
 
   function buildPlanNotes(agents, mcps, skills) {
@@ -787,7 +792,10 @@
       notes.push('Registry MCP suggestions will be installed globally before they are bound to the workspace.');
     }
     if (skills.some((item) => item.action === 'install_attach')) {
-      notes.push('Marketplace skills will be installed globally before they are attached to the workspace.');
+      notes.push('Marketplace skill suggestions require a global install before workspace attachment.');
+    }
+    if (skills.length > 0) {
+      notes.push('Skill suggestions are optional and will only be attached if selected.');
     }
     notes.push('Selected MCPs and skills will be shared with every agent Ori adds through this setup.');
     return notes;
@@ -813,7 +821,11 @@
     const parts = [`${agentTotal} agent${agentTotal === 1 ? '' : 's'}`];
     if (mcpCount > 0) parts.push(`${mcpCount} MCP${mcpCount === 1 ? '' : 's'}`);
     if (skillCount > 0) parts.push(`${skillCount} skill${skillCount === 1 ? '' : 's'}`);
-    summary.textContent = `Ori will create this workspace with ${parts.join(', ')}.`;
+    const unselectedSkillCount = Array.isArray(state.plan.skills)
+      ? Math.max(0, state.plan.skills.length - skillCount)
+      : 0;
+    summary.textContent = `Ori will create this workspace with ${parts.join(', ')}.`
+      + (unselectedSkillCount > 0 ? ` ${unselectedSkillCount} optional skill suggestion${unselectedSkillCount === 1 ? '' : 's'} available below.` : '');
     meta.textContent = 'You can adjust the optional invites and capability suggestions below before creating the workspace.';
     meta.hidden = false;
   }

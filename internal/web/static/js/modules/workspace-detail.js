@@ -171,6 +171,8 @@ export class WorkspaceDetailPage {
     this.agentOptions = null;
     this.agentCatalog = [];
     this.agentIndex = new Map();
+    this.providerCatalog = [];
+    this.providerCatalogPromise = null;
     this.agentSkillsCache = new Map();
     this.agentSkillsPromises = new Map();
     this.availableMCPServers = [];
@@ -190,9 +192,17 @@ export class WorkspaceDetailPage {
     this.workspaceIntentApplyLoading = false;
     this.workspaceConfigExpanded = false;
     this.workspaceConfigPreferenceLoaded = false;
+    this.agentCatalogLoaded = false;
+    this.agentCatalogLoadFailed = false;
+    this.filesLoaded = false;
+    this.filesLoadFailed = false;
+    this.workspaceHealthCheckRunning = false;
+    this.uiSmokeTestRunning = false;
+    this.uiSmokeTestResult = null;
     this.capabilitySuggestionCatalog = null;
     this.capabilitySuggestionCatalogPromise = null;
     this.flippedAgentCards = new Set();
+    this.collapsedWorkflows = new Set();
     this.boardDidDrag = false;
     this.currentTaskResultText = '';
     this.currentTaskResultTaskId = '';
@@ -210,6 +220,7 @@ export class WorkspaceDetailPage {
     this.pendingTaskConfirm = null;
     this.pendingTaskConfirmSelection = { stepThrough: false };
     this.pendingAssistSpecialistResumeChecked = false;
+    this.activeAgentModelEdit = null;
 
     // DOM elements
     this.elements = {};
@@ -1104,6 +1115,16 @@ export class WorkspaceDetailPage {
       workflowLinksPanel: document.getElementById('workspace-detail-workflow-links-panel'),
       workflowLinksList: document.getElementById('workspace-detail-workflow-links-list'),
       workflowLinksCount: document.getElementById('workspace-detail-workflow-links-count'),
+      healthPanel: document.getElementById('workspace-detail-health-panel'),
+      healthSummary: document.getElementById('workspace-detail-health-summary'),
+      healthBadge: document.getElementById('workspace-detail-health-badge'),
+      healthMeta: document.getElementById('workspace-detail-health-meta'),
+      healthList: document.getElementById('workspace-detail-health-list'),
+      healthRefreshBtn: document.getElementById('workspace-detail-health-refresh'),
+      healthRefreshLabel: document.getElementById('workspace-detail-health-refresh-label'),
+      uiSmokeTestBtn: document.getElementById('workspace-detail-ui-smoke-test'),
+      uiSmokeTestLabel: document.getElementById('workspace-detail-ui-smoke-test-label'),
+      uiSmokeTestResult: document.getElementById('workspace-detail-ui-smoke-result'),
 
       // Stats
       agentCount: document.getElementById('workspace-agent-count'),
@@ -1260,6 +1281,13 @@ export class WorkspaceDetailPage {
       addAgentEmpty: document.getElementById('workspace-detail-add-agent-empty'),
       addAgentSubmitBtn: document.getElementById('workspace-detail-add-agent-submit'),
       createAgentBtn: document.getElementById('workspace-detail-create-agent-btn'),
+      agentModelModal: document.getElementById('workspace-detail-agent-model-modal'),
+      agentModelTitle: document.getElementById('workspace-detail-agent-model-title'),
+      agentModelAgentName: document.getElementById('workspace-detail-agent-model-agent-name'),
+      agentModelCurrent: document.getElementById('workspace-detail-agent-model-current'),
+      agentModelSelect: document.getElementById('workspace-detail-agent-model-select'),
+      agentModelHelp: document.getElementById('workspace-detail-agent-model-help'),
+      agentModelSubmitBtn: document.getElementById('workspace-detail-agent-model-submit'),
 
       // Workspace MCP modal
       mcpModal: document.getElementById('workspace-detail-mcp-modal'),
@@ -1408,6 +1436,8 @@ export class WorkspaceDetailPage {
     // Workspace settings
     this.elements.configToggleBtn?.addEventListener('click', () => this.toggleWorkspaceConfigExpanded());
     this.elements.refreshSettingsBtn?.addEventListener('click', () => this.loadWorkspace());
+    this.elements.healthRefreshBtn?.addEventListener('click', () => this.refreshWorkspaceHealth());
+    this.elements.uiSmokeTestBtn?.addEventListener('click', () => this.runUISmokeTest());
     this.elements.intentForm?.addEventListener('submit', (event) => {
       event.preventDefault();
       this.saveWorkspaceIntent();
@@ -1507,6 +1537,9 @@ export class WorkspaceDetailPage {
     this.elements.addAgentSubmitBtn?.addEventListener('click', () => this.addSelectedAgentToWorkspace());
     this.elements.createAgentBtn?.addEventListener('click', () => this.openCreateAgentFlow());
     this.elements.addAgentModal?.addEventListener('show.bs.modal', () => { this.populateAddAgentOptions(); });
+    this.elements.agentModelSelect?.addEventListener('change', () => this.updateAgentModelSelectionSummary());
+    this.elements.agentModelSubmitBtn?.addEventListener('click', () => this.submitAgentModelChange());
+    this.elements.agentModelModal?.addEventListener('hidden.bs.modal', () => this.resetAgentModelModal());
 
     // Make workspace name and description editable
     this.makeEditable(this.elements.workspaceName, 'name', false);
@@ -1843,9 +1876,11 @@ export class WorkspaceDetailPage {
       this.renderWorkspaceSkillBindings();
       this.renderAgentGroups();
       this.refreshHomeAssistantQuickPrompts();
+      this.renderWorkspaceHealth();
     } catch (error) {
       console.error('Failed to load workspace:', error);
       if (window.Toast) window.Toast.error('Failed to load workspace');
+      this.renderWorkspaceHealth();
     }
   }
 
@@ -1885,6 +1920,470 @@ export class WorkspaceDetailPage {
 
     // Load children workspaces from tree API
     await this.loadChildren();
+    this.renderWorkspaceHealth();
+  }
+
+  getWorkspaceHealthAgentReferences() {
+    if (!this.workspace) return [];
+
+    const seen = new Map();
+    const add = (name, { isEntryAgent = false } = {}) => {
+      const trimmed = String(name || '').trim();
+      if (!trimmed || trimmed.toLowerCase() === 'unassigned') return;
+      const key = this.normalizeAgentName(trimmed);
+      if (!key) return;
+
+      const existing = seen.get(key);
+      if (existing) {
+        if (isEntryAgent) {
+          existing.isEntryAgent = true;
+        }
+        return;
+      }
+
+      seen.set(key, { name: trimmed, isEntryAgent: Boolean(isEntryAgent) });
+    };
+
+    const sharedEntryAgentName = String(this.workspace.shared_data?.entry_agent_name || '').trim();
+    add(sharedEntryAgentName, { isEntryAgent: true });
+    add(this.workspace.entry_agent_name, { isEntryAgent: true });
+    if (Array.isArray(this.workspace.agent_instances)) {
+      this.workspace.agent_instances.forEach((instance) => add(instance?.name, { isEntryAgent: Boolean(instance?.entry_point || instance?.entryPoint) }));
+    }
+    if (Array.isArray(this.workspace.agents)) {
+      this.workspace.agents.forEach((name) => add(name));
+    }
+
+    return Array.from(seen.values());
+  }
+
+  hasWorkspaceEntryAgentReference() {
+    if (!this.workspace) return false;
+
+    if (String(this.workspace.entry_agent_name || '').trim()) return true;
+    if (String(this.workspace.shared_data?.entry_agent_name || '').trim()) return true;
+
+    if (Array.isArray(this.workspace.agent_instances)) {
+      return this.workspace.agent_instances.some((instance) => (
+        Boolean(instance?.entry_point || instance?.entryPoint)
+        && String(instance?.name || '').trim()
+      ));
+    }
+
+    return false;
+  }
+
+  collectWorkspaceHealthIssues() {
+    const issues = [];
+    const references = this.getWorkspaceHealthAgentReferences();
+
+    if (!this.hasWorkspaceEntryAgentReference()) {
+      const defaults = this.buildWorkspaceEntryAgentDefaults();
+      const workspaceName = String(this.workspace?.name || '').trim() || 'This workspace';
+      issues.push({
+        category: 'agent',
+        severity: 'error',
+        title: 'Entry agent is missing',
+        description: 'This workspace has no entry agent assigned. Create one so chats, routing, and task orchestration have a default manager.',
+        action: 'entry_agent',
+        actionLabel: 'Create Entry Agent',
+        agentName: defaults.seedName || 'Workspace Manager',
+        meta: [workspaceName, 'No entry agent']
+      });
+    }
+
+    if (this.agentCatalogLoadFailed) {
+      issues.push({
+        category: 'verification',
+        severity: 'warning',
+        title: 'Agent catalog could not be verified',
+        description: 'The workspace health check could not compare workspace agents against the current runnable agent catalog.',
+        meta: ['Agent verification unavailable']
+      });
+    } else {
+      references.forEach((reference) => {
+        if (this.getAgentProfile(reference.name)) return;
+        issues.push({
+          category: 'agent',
+          severity: 'error',
+          title: reference.isEntryAgent ? 'Entry agent is missing' : 'Workspace agent is missing',
+          description: reference.isEntryAgent
+            ? `"${reference.name}" is still assigned as the workspace entry agent, but the runnable agent definition no longer exists.`
+            : `"${reference.name}" is still linked to this workspace, but the runnable agent definition no longer exists.`,
+          action: reference.isEntryAgent ? 'entry_agent' : 'agent',
+          actionLabel: reference.isEntryAgent ? 'Create Entry Agent' : 'Recreate Agent',
+          agentName: reference.name,
+          meta: [reference.name, reference.isEntryAgent ? 'Entry agent' : 'Workspace member']
+        });
+      });
+    }
+
+    if (this.filesLoadFailed) {
+      issues.push({
+        category: 'verification',
+        severity: 'warning',
+        title: 'Linked files could not be verified',
+        description: 'The workspace health check could not load the current file attachments, so broken file links could not be confirmed.',
+        meta: ['File verification unavailable']
+      });
+    } else if (Array.isArray(this.files)) {
+      this.files.forEach((file) => {
+        const meta = file?.file_meta && typeof file.file_meta === 'object' ? file.file_meta : null;
+        if (!meta) return;
+
+        const title = String(file?.title || meta?.name || 'Untitled File').trim() || 'Untitled File';
+        const hasLinkTarget = [meta.relative_path, meta.original_path, meta.url]
+          .some((value) => String(value || '').trim());
+        const pathLabel = String(meta.relative_path || meta.original_path || meta.url || '').trim();
+
+        if (String(meta.status || '').trim().toLowerCase() === 'missing') {
+          issues.push({
+            category: 'file',
+            severity: 'warning',
+            title: 'Linked file is missing',
+            description: `"${title}" no longer resolves to a file on disk. Relink it so the workspace can use it again.`,
+            action: 'file',
+            actionLabel: 'Relink File',
+            fileId: String(file?.id || '').trim(),
+            meta: [title, pathLabel || 'Missing file']
+          });
+          return;
+        }
+
+        if (!hasLinkTarget) {
+          issues.push({
+            category: 'file',
+            severity: 'warning',
+            title: 'File link is incomplete',
+            description: `"${title}" has file metadata but no valid link target. Relink it to restore a usable file reference.`,
+            action: 'file',
+            actionLabel: 'Relink File',
+            fileId: String(file?.id || '').trim(),
+            meta: [title, 'No file path stored']
+          });
+        }
+      });
+    }
+
+    return issues;
+  }
+
+  summarizeWorkspaceHealth() {
+    const waitingOnSources = !this.workspace || !this.agentCatalogLoaded || !this.filesLoaded;
+    if (this.workspaceHealthCheckRunning || waitingOnSources) {
+      return {
+        status: 'checking',
+        badge: 'Checking',
+        summary: 'Verifying workspace agent references and linked files...',
+        meta: [
+          !this.agentCatalogLoaded ? 'Agents: checking' : 'Agents: ready',
+          !this.filesLoaded ? 'Files: checking' : 'Files: ready'
+        ],
+        issues: []
+      };
+    }
+
+    const issues = this.collectWorkspaceHealthIssues();
+    const errorCount = issues.filter((issue) => issue.severity === 'error').length;
+    const agentIssueCount = issues.filter((issue) => issue.category === 'agent').length;
+    const fileIssueCount = issues.filter((issue) => issue.category === 'file').length;
+    const verificationIssueCount = issues.filter((issue) => issue.category === 'verification').length;
+
+    if (issues.length === 0) {
+      return {
+        status: 'healthy',
+        badge: 'Healthy',
+        summary: 'No missing agents or broken file links were detected in this workspace.',
+        meta: ['Agents: healthy', 'Files: healthy'],
+        issues: []
+      };
+    }
+
+    const parts = [];
+    if (agentIssueCount > 0) {
+      parts.push(`${agentIssueCount} missing agent${agentIssueCount === 1 ? '' : 's'}`);
+    }
+    if (fileIssueCount > 0) {
+      parts.push(`${fileIssueCount} linked file issue${fileIssueCount === 1 ? '' : 's'}`);
+    }
+    if (verificationIssueCount > 0) {
+      parts.push(`${verificationIssueCount} verification warning${verificationIssueCount === 1 ? '' : 's'}`);
+    }
+    const attentionVerb = issues.length === 1 ? 'needs' : 'need';
+
+    return {
+      status: errorCount > 0 ? 'error' : 'warning',
+      badge: errorCount > 0 ? 'Needs Attention' : 'Warnings',
+      summary: `${parts.join(' and ')} ${attentionVerb} attention before this workspace is fully reliable.`,
+      meta: [
+        agentIssueCount > 0 ? `Agents: ${agentIssueCount} issue${agentIssueCount === 1 ? '' : 's'}` : 'Agents: healthy',
+        fileIssueCount > 0 ? `Files: ${fileIssueCount} issue${fileIssueCount === 1 ? '' : 's'}` : 'Files: healthy',
+        verificationIssueCount > 0 ? `Checks: ${verificationIssueCount} unavailable` : 'Checks: complete'
+      ],
+      issues
+    };
+  }
+
+  renderWorkspaceHealthEmptyState() {
+    return `
+      <div class="workspace-detail-health-empty">
+        <div class="workspace-detail-health-empty-icon">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+            <path d="M9,16.17L4.83,12L3.41,13.41L9,19L21,7L19.59,5.59L9,16.17Z"/>
+          </svg>
+        </div>
+        <div>
+          <div class="workspace-detail-health-empty-title">Workspace looks healthy</div>
+          <p class="workspace-detail-health-empty-copy">All workspace agents resolve to runnable definitions, and every linked file that was checked still points at a usable file target.</p>
+        </div>
+      </div>
+    `;
+  }
+
+  renderWorkspaceHealthIssue(issue) {
+    const severity = issue?.severity === 'error' ? 'error' : 'warning';
+    const iconPath = severity === 'error'
+      ? '<path d="M13,13H11V7H13M13,17H11V15H13M12,2A10,10 0 0,0 2,12A10,10 0 0,0 12,22A10,10 0 0,0 22,12A10,10 0 0,0 12,2Z"/>'
+      : '<path d="M13,14H11V9H13M13,18H11V16H13M1,21H23L12,2"/>'
+      ;
+    const meta = Array.isArray(issue?.meta) ? issue.meta.filter(Boolean) : [];
+    let actionMarkup = '';
+
+    if (issue?.action === 'entry_agent' && issue?.agentName) {
+      actionMarkup = `
+        <button type="button"
+                class="workspace-detail-panel-btn workspace-detail-health-action"
+                onclick="window.workspaceDetail?.openWorkspaceHealthAgentRecovery('${encodeURIComponent(issue.agentName)}', 'entry')">
+          ${this.escapeHtml(issue.actionLabel || 'Create Entry Agent')}
+        </button>
+      `;
+    } else if (issue?.action === 'agent' && issue?.agentName) {
+      actionMarkup = `
+        <button type="button"
+                class="workspace-detail-panel-btn workspace-detail-health-action"
+                onclick="window.workspaceDetail?.openWorkspaceHealthAgentRecovery('${encodeURIComponent(issue.agentName)}', 'agent')">
+          ${this.escapeHtml(issue.actionLabel || 'Recreate Agent')}
+        </button>
+      `;
+    } else if (issue?.action === 'file' && issue?.fileId) {
+      actionMarkup = `
+        <button type="button"
+                class="workspace-detail-panel-btn workspace-detail-health-action"
+                onclick="window.workspaceDetail?.openWorkspaceHealthFileRecovery('${this.escapeHtml(issue.fileId)}')">
+          ${this.escapeHtml(issue.actionLabel || 'Relink File')}
+        </button>
+      `;
+    }
+
+    return `
+      <div class="workspace-detail-health-issue is-${severity}">
+        <div class="workspace-detail-health-issue-icon">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">${iconPath}</svg>
+        </div>
+        <div>
+          <div class="workspace-detail-health-issue-title">${this.escapeHtml(issue?.title || 'Workspace issue')}</div>
+          <p class="workspace-detail-health-issue-copy">${this.escapeHtml(issue?.description || '')}</p>
+          ${meta.length > 0 ? `
+            <div class="workspace-detail-health-issue-meta">
+              ${meta.map((item) => `<span class="workspace-detail-health-issue-pill">${this.escapeHtml(item)}</span>`).join('')}
+            </div>
+          ` : ''}
+        </div>
+        ${actionMarkup}
+      </div>
+    `;
+  }
+
+  renderWorkspaceHealth() {
+    if (!this.elements.healthPanel || !this.elements.healthSummary || !this.elements.healthBadge || !this.elements.healthMeta || !this.elements.healthList) {
+      return;
+    }
+
+    const health = this.summarizeWorkspaceHealth();
+    this.elements.healthSummary.textContent = health.summary;
+    this.elements.healthBadge.textContent = health.badge;
+    this.elements.healthBadge.className = `workspace-detail-health-badge is-${health.status}`;
+    this.elements.healthMeta.innerHTML = Array.isArray(health.meta)
+      ? health.meta.map((item) => `<span class="workspace-detail-health-chip">${this.escapeHtml(item)}</span>`).join('')
+      : '';
+
+    if (!Array.isArray(health.issues) || health.issues.length === 0) {
+      this.elements.healthList.classList.add('is-empty');
+      this.elements.healthList.innerHTML = health.status === 'healthy'
+        ? this.renderWorkspaceHealthEmptyState()
+        : '<div class="workspace-detail-empty">Checking workspace health...</div>';
+    } else {
+      this.elements.healthList.classList.remove('is-empty');
+      this.elements.healthList.innerHTML = health.issues.map((issue) => this.renderWorkspaceHealthIssue(issue)).join('');
+    }
+
+    if (this.elements.healthRefreshBtn) {
+      this.elements.healthRefreshBtn.disabled = this.workspaceHealthCheckRunning;
+    }
+    if (this.elements.healthRefreshLabel) {
+      this.elements.healthRefreshLabel.textContent = this.workspaceHealthCheckRunning ? 'Running...' : 'Run Health Check';
+    }
+    this.renderUISmokeTestResult();
+  }
+
+  renderUISmokeTestResult() {
+    if (this.elements.uiSmokeTestBtn) {
+      this.elements.uiSmokeTestBtn.disabled = this.uiSmokeTestRunning;
+    }
+    if (this.elements.uiSmokeTestLabel) {
+      this.elements.uiSmokeTestLabel.textContent = this.uiSmokeTestRunning ? 'Running...' : 'Run UI Smoke Test';
+    }
+
+    const resultEl = this.elements.uiSmokeTestResult;
+    if (!resultEl) return;
+
+    if (this.uiSmokeTestRunning) {
+      resultEl.className = 'workspace-detail-ui-smoke-result';
+      resultEl.innerHTML = `
+        <div class="workspace-detail-ui-smoke-header">
+          <div>
+            <div class="workspace-detail-ui-smoke-title">UI smoke test running</div>
+            <div class="workspace-detail-ui-smoke-summary">Checking the current server routes, scripts, styles, and this workspace page without opening another port.</div>
+          </div>
+          <span class="workspace-detail-ui-smoke-status">Running</span>
+        </div>
+      `;
+      return;
+    }
+
+    const result = this.uiSmokeTestResult;
+    if (!result) {
+      resultEl.classList.add('d-none');
+      resultEl.innerHTML = '';
+      return;
+    }
+
+    const status = String(result.status || '').toLowerCase() === 'passed' ? 'passed' : 'failed';
+    const checks = Array.isArray(result.checks) ? result.checks : [];
+    resultEl.className = `workspace-detail-ui-smoke-result is-${status}`;
+    resultEl.innerHTML = `
+      <div class="workspace-detail-ui-smoke-header">
+        <div>
+          <div class="workspace-detail-ui-smoke-title">UI smoke test ${status === 'passed' ? 'passed' : 'failed'}</div>
+          <div class="workspace-detail-ui-smoke-summary">${this.escapeHtml(result.summary || '')}</div>
+        </div>
+        <span class="workspace-detail-ui-smoke-status is-${status}">${this.escapeHtml(status)}</span>
+      </div>
+      <div class="workspace-detail-ui-smoke-checks">
+        ${checks.map((check) => this.renderUISmokeTestCheck(check)).join('')}
+      </div>
+    `;
+  }
+
+  renderUISmokeTestCheck(check) {
+    const status = String(check?.status || '').toLowerCase() === 'passed' ? 'passed' : 'failed';
+    const icon = status === 'passed' ? '&#10003;' : '!';
+    const statusCode = Number(check?.status_code) || 0;
+    const duration = Number(check?.duration_ms) || 0;
+    const meta = [
+      statusCode ? `HTTP ${statusCode}` : '',
+      `${duration}ms`
+    ].filter(Boolean).join(' | ');
+
+    return `
+      <div class="workspace-detail-ui-smoke-check is-${status}">
+        <span class="workspace-detail-ui-smoke-check-icon">${icon}</span>
+        <div>
+          <div class="workspace-detail-ui-smoke-check-name">${this.escapeHtml(check?.name || 'Smoke check')}</div>
+          <div class="workspace-detail-ui-smoke-check-detail">${this.escapeHtml(check?.detail || check?.path || '')}</div>
+        </div>
+        <div class="workspace-detail-ui-smoke-check-meta">${this.escapeHtml(meta)}</div>
+      </div>
+    `;
+  }
+
+  async runUISmokeTest() {
+    if (this.uiSmokeTestRunning) return;
+
+    this.uiSmokeTestRunning = true;
+    this.uiSmokeTestResult = null;
+    this.renderUISmokeTestResult();
+
+    try {
+      const response = await fetch('/api/diagnostics/ui-smoke-test', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ workspace_id: this.workspaceId })
+      });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(result?.error || 'UI smoke test failed');
+      }
+
+      this.uiSmokeTestResult = result;
+      if (window.Toast) {
+        if (result?.status === 'passed') {
+          window.Toast.success('UI smoke test passed');
+        } else {
+          window.Toast.warning('UI smoke test found issues');
+        }
+      }
+    } catch (error) {
+      this.uiSmokeTestResult = {
+        status: 'failed',
+        summary: error?.message || 'UI smoke test failed',
+        checks: []
+      };
+      if (window.Toast) window.Toast.error(error?.message || 'UI smoke test failed');
+    } finally {
+      this.uiSmokeTestRunning = false;
+      this.renderUISmokeTestResult();
+    }
+  }
+
+  async refreshWorkspaceHealth() {
+    if (this.workspaceHealthCheckRunning) return;
+
+    this.workspaceHealthCheckRunning = true;
+    this.agentCatalogLoaded = false;
+    this.filesLoaded = false;
+    this.agentCatalogLoadFailed = false;
+    this.filesLoadFailed = false;
+    this.renderWorkspaceHealth();
+
+    try {
+      await Promise.all([
+        this.loadWorkspace(),
+        this.loadAgentCatalog(true),
+        this.loadFiles()
+      ]);
+    } finally {
+      this.workspaceHealthCheckRunning = false;
+      this.renderWorkspaceHealth();
+    }
+  }
+
+  openWorkspaceHealthAgentRecovery(encodedAgentName = '', mode = 'agent') {
+    let agentName = '';
+    try {
+      agentName = decodeURIComponent(String(encodedAgentName || ''));
+    } catch (_error) {
+      agentName = String(encodedAgentName || '');
+    }
+
+    const normalizedName = String(agentName || '').trim();
+    if (!normalizedName) return;
+
+    if (mode === 'entry') {
+      this.openWorkspaceEntryAgentCreateFlow({ seedName: normalizedName });
+      return;
+    }
+
+    this.openCreateAgentFlow({
+      seedName: normalizedName,
+      seedType: normalizedName.toLowerCase().includes('manager') ? 'orchestration' : 'tool-calling'
+    });
+  }
+
+  openWorkspaceHealthFileRecovery(fileId = '') {
+    const normalizedFileId = String(fileId || '').trim();
+    if (!normalizedFileId) return;
+    this.promptRelinkWorkspaceFile(normalizedFileId);
   }
 
   getWorkspaceIntentBootstrap() {
@@ -2672,10 +3171,8 @@ export class WorkspaceDetailPage {
       const cardMeta = [instanceLabel, taskLabel].filter(Boolean).join(' · ');
       const capabilityBadges = group.isUnassigned ? '' : this.renderAgentCapabilityBadges(group.name);
       const agentProfile = group.isUnassigned ? null : this.getAgentProfile(group.name);
-      const modelLabel = agentProfile?.model
-        ? `<span class="workspace-detail-agent-model-badge">${this.escapeHtml(agentProfile.model)}</span>`
-        : '';
       const encodedAgentName = encodeURIComponent(group.name);
+      const modelLabel = group.isUnassigned ? '' : this.renderAgentModelBadge(group.name, agentProfile, encodedAgentName);
       const canFlip = !group.isUnassigned;
       const isFlipped = canFlip && this.flippedAgentCards.has(group.key);
       const roleBadge = group.isUnassigned ? '' : this.renderWorkspaceAgentRoleBadge(group.name);
@@ -2758,6 +3255,38 @@ export class WorkspaceDetailPage {
       </section>
       `;
     }).join('');
+  }
+
+  renderAgentModelBadge(agentName, profile, encodedAgentName = '') {
+    const model = String(profile?.model || '').trim();
+    const editable = this.agentAllowsModelEditing(profile);
+    const label = model || 'Set model';
+    const badgeClass = `workspace-detail-agent-model-badge${editable ? ' is-editable' : ''}${model ? '' : ' is-empty'}`;
+    const title = model
+      ? `Change model for ${agentName}`
+      : `Set model for ${agentName}`;
+
+    if (!editable) {
+      return model ? `<span class="${badgeClass}">${this.escapeHtml(model)}</span>` : '';
+    }
+
+    return `
+      <button type="button"
+              class="${badgeClass}"
+              title="${this.escapeHtml(title)}"
+              aria-label="${this.escapeHtml(title)}"
+              onclick="event.stopPropagation(); window.workspaceDetail?.openAgentModelModal('${encodedAgentName}')">
+        <span>${this.escapeHtml(label)}</span>
+        <svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+          <path d="M14.06,9.02L14.98,9.94L5.92,19H5V18.08M17.66,3C17.4,3 17.15,3.1 16.95,3.29L15.13,5.11L18.88,8.86L20.7,7.04C21.09,6.65 21.09,6 20.7,5.63L18.37,3.29C18.17,3.1 17.92,3 17.66,3Z"/>
+        </svg>
+      </button>
+    `;
+  }
+
+  agentAllowsModelEditing(profile) {
+    if (!profile) return false;
+    return String(profile.source || 'user').trim().toLowerCase() !== 'cli';
   }
 
   renderAgentBackFace(group, cardMeta, encodedAgentName) {
@@ -3113,7 +3642,60 @@ export class WorkspaceDetailPage {
     if (!Array.isArray(tasks) || tasks.length === 0) {
       return '<div class="workspace-detail-empty workspace-detail-empty-inline">No tasks assigned.</div>';
     }
-    return tasks.map((task) => this.renderTaskItem(task)).join('');
+    return tasks.map((task) => this.renderTaskGroup(task)).join('');
+  }
+
+  getSortedSubtasks(parentId) {
+    const normalizedParentId = String(parentId || '').trim();
+    if (!normalizedParentId || !Array.isArray(this.tasks)) return [];
+    return this.tasks
+      .filter((item) => String(item?.parent_task_id || '').trim() === normalizedParentId)
+      .sort((a, b) => {
+        const aIndex = Number.isFinite(a?.subtask_index) && a.subtask_index > 0 ? a.subtask_index : Number.MAX_SAFE_INTEGER;
+        const bIndex = Number.isFinite(b?.subtask_index) && b.subtask_index > 0 ? b.subtask_index : Number.MAX_SAFE_INTEGER;
+        if (aIndex !== bIndex) return aIndex - bIndex;
+        const aTime = a?.created_at ? new Date(a.created_at).getTime() : 0;
+        const bTime = b?.created_at ? new Date(b.created_at).getTime() : 0;
+        if (aTime !== bTime) return aTime - bTime;
+        return String(a?.id || '').localeCompare(String(b?.id || ''));
+      });
+  }
+
+  renderTaskGroup(task) {
+    const subtasks = this.getSortedSubtasks(task.id);
+    if (subtasks.length === 0) {
+      return this.renderTaskItem(task);
+    }
+
+    const isCollapsed = this.collapsedWorkflows.has(task.id);
+    const groupClasses = ['workspace-detail-workflow-group'];
+    if (isCollapsed) groupClasses.push('is-collapsed');
+    const subtaskMarkup = subtasks.map((subtask, index) => {
+      const stepNumber = Number.isFinite(subtask?.subtask_index) && subtask.subtask_index > 0
+        ? subtask.subtask_index
+        : index + 1;
+      return this.renderTaskItem(subtask, { isSubtask: true, stepNumber });
+    }).join('');
+
+    return `
+      <div class="${groupClasses.join(' ')}" data-workflow-id="${this.escapeHtml(task.id)}">
+        ${this.renderTaskItem(task, { isParent: true, subtaskCount: subtasks.length, collapsed: isCollapsed })}
+        <div class="workspace-detail-subtask-list" ${isCollapsed ? 'hidden' : ''}>
+          ${subtaskMarkup}
+        </div>
+      </div>
+    `;
+  }
+
+  toggleWorkflowExpansion(taskId) {
+    const id = String(taskId || '').trim();
+    if (!id) return;
+    if (this.collapsedWorkflows.has(id)) {
+      this.collapsedWorkflows.delete(id);
+    } else {
+      this.collapsedWorkflows.add(id);
+    }
+    this.renderAgentGroups();
   }
 
   renderAgentSessionsContent(sessions) {
@@ -3162,17 +3744,19 @@ export class WorkspaceDetailPage {
     `;
   }
 
-  renderTaskItem(task) {
+  renderTaskItem(task, options = {}) {
+    const { isSubtask = false, stepNumber = null, isParent: isParentHint = false, subtaskCount = 0, collapsed = false } = options;
     const taskLabel = this.escapeHtml(task.description || task.name || 'Untitled Task');
     const assignedAgent = task.to && task.to !== 'unassigned' ? task.to : '';
-    const subtasks = this.tasks.filter((subtask) => subtask.parent_task_id === task.id);
-    const isParent = subtasks.length > 0;
+    const subtasks = isSubtask ? [] : this.tasks.filter((subtask) => subtask.parent_task_id === task.id);
+    const isParent = isParentHint || subtasks.length > 0;
+    const parentSubtaskCount = subtaskCount || subtasks.length;
     const statusInfo = this.getTaskStatusPresentation(task);
     const awaitingNextStep = this.isTaskAwaitingNextStep(task);
     const hasUnassignedSubtasks = isParent && subtasks.some((subtask) => !subtask.to || subtask.to === 'unassigned');
     const hasRunningSubtasks = isParent && subtasks.some((subtask) => subtask.status === 'in_progress');
     const canExecute = isParent
-      ? subtasks.length > 0 && !hasUnassignedSubtasks && !hasRunningSubtasks
+      ? parentSubtaskCount > 0 && !hasUnassignedSubtasks && !hasRunningSubtasks
       : task.status !== 'in_progress' || awaitingNextStep;
     const resultData = this.getDisplayResult(task, subtasks);
     const hasResultData = !!resultData;
@@ -3191,6 +3775,10 @@ export class WorkspaceDetailPage {
     const assistTitle = statusInfo.reason || 'Agent needs your guidance before this task can continue.';
     const scheduleIndicator = this.renderTaskScheduleIndicator(task);
     const taskMetaParts = [];
+    if (isParent) {
+      const stepsLabel = `${parentSubtaskCount} step${parentSubtaskCount === 1 ? '' : 's'}`;
+      taskMetaParts.push(`<span class="workspace-detail-workflow-steps">${stepsLabel}</span>`);
+    }
     if (assignedAgent) {
       taskMetaParts.push(`<span class="workspace-detail-assigned-agent">Assigned to: ${this.escapeHtml(assignedAgent)}${this.renderAgentCapabilityBadges(assignedAgent)}</span>`);
     }
@@ -3203,8 +3791,33 @@ export class WorkspaceDetailPage {
     }
     taskMetaParts.push(formatDate(task.created_at));
 
+    const itemClasses = ['workspace-detail-item'];
+    if (isParent) itemClasses.push('is-workflow-parent');
+    if (isSubtask) itemClasses.push('is-workflow-subtask');
+
+    const toggleButton = isParent
+      ? `<button type="button"
+                 class="workspace-detail-item-toggle"
+                 aria-expanded="${collapsed ? 'false' : 'true'}"
+                 aria-controls="workspace-detail-subtasks-${this.escapeHtml(task.id)}"
+                 title="${collapsed ? 'Show subtasks' : 'Hide subtasks'}"
+                 aria-label="${collapsed ? 'Show subtasks' : 'Hide subtasks'}"
+                 onclick="event.stopPropagation(); window.workspaceDetail?.toggleWorkflowExpansion('${task.id}')">
+           <svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+             <path d="M7,10L12,15L17,10H7Z"/>
+           </svg>
+         </button>`
+      : '';
+
+    const parentBadge = isParent
+      ? '<span class="workspace-detail-workflow-badge" title="Workflow with subtasks">Workflow</span>'
+      : '';
+    const stepBadge = isSubtask && stepNumber !== null
+      ? `<span class="workspace-detail-step-badge" title="Step ${this.escapeHtml(String(stepNumber))}">Step ${this.escapeHtml(String(stepNumber))}</span>`
+      : '';
+
     return `
-      <div class="workspace-detail-item" data-task-id="${task.id}">
+      <div class="${itemClasses.join(' ')}" data-task-id="${task.id}">
         ${hasAssistData ? `
         <button type="button"
                 class="workspace-detail-item-result"
@@ -3248,7 +3861,9 @@ export class WorkspaceDetailPage {
              onclick="window.workspaceDetail?.openTask('${task.id}')"
              onkeydown="if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); window.workspaceDetail?.openTask('${task.id}'); }">
           <div class="d-flex justify-content-between align-items-start">
-            <div class="workspace-detail-item-title">${taskLabel}</div>
+            <div class="workspace-detail-item-title">
+              ${toggleButton}${stepBadge}${parentBadge}<span class="workspace-detail-item-title-text">${taskLabel}</span>
+            </div>
             <span class="workspace-detail-task-status ${statusInfo.className}">${statusInfo.label}</span>
           </div>
           <div class="workspace-detail-item-meta">
@@ -3291,11 +3906,18 @@ export class WorkspaceDetailPage {
   checkAutoOpenCreateAgent() {
     const params = new URLSearchParams(window.location.search);
     if (params.get('addAgent') !== '1') return false;
+    const seedAgentName = String(params.get('seedAgentName') || '').trim();
 
-    // Clean the URL so refresh won't re-trigger
-    window.history.replaceState({}, '', window.location.pathname);
+    // Clean the URL so refresh won't re-trigger, but preserve unrelated params.
+    const url = new URL(window.location.href);
+    url.searchParams.delete('addAgent');
+    url.searchParams.delete('seedAgentName');
+    window.history.replaceState({}, '', `${url.pathname}${url.search}${url.hash}`);
 
-    this.openWorkspaceEntryAgentCreateFlow({ defer: true });
+    this.openWorkspaceEntryAgentCreateFlow({
+      defer: true,
+      seedName: seedAgentName
+    });
     return true;
   }
 
@@ -3333,11 +3955,12 @@ export class WorkspaceDetailPage {
     }
   }
 
-  buildWorkspaceEntryAgentDefaults() {
+  buildWorkspaceEntryAgentDefaults(options = {}) {
     const workspaceName = String(this.workspace?.name || '').trim();
-    const agentName = workspaceName
+    const fallbackAgentName = workspaceName
       ? (workspaceName.toLowerCase().endsWith(' manager') ? workspaceName : workspaceName + ' Manager')
       : 'Workspace Manager';
+    const agentName = String(options?.seedName || '').trim() || fallbackAgentName;
     const systemPrompt = `You are the workspace manager for "${workspaceName || 'this workspace'}". `
       + 'Act as the default front door for the workspace: clarify user intent, answer directly when '
       + 'the request only needs shared context, and break work into tasks for specialists when needed.';
@@ -3352,7 +3975,7 @@ export class WorkspaceDetailPage {
   }
 
   openWorkspaceEntryAgentCreateFlow(options = {}) {
-    const defaults = this.buildWorkspaceEntryAgentDefaults();
+    const defaults = this.buildWorkspaceEntryAgentDefaults(options);
     const defer = options?.defer === true;
     const open = () => this.openCreateAgentFlow(defaults);
 
@@ -7371,6 +7994,232 @@ export class WorkspaceDetailPage {
     return this.agentIndex.get(key) || null;
   }
 
+  async openAgentModelModal(encodedAgentName = '') {
+    let agentName = '';
+    try {
+      agentName = decodeURIComponent(String(encodedAgentName || ''));
+    } catch (_error) {
+      agentName = String(encodedAgentName || '');
+    }
+    agentName = String(agentName || '').trim();
+    if (!agentName) return;
+
+    await Promise.all([
+      this.loadAgentCatalog(true),
+      this.loadProviderCatalog()
+    ]);
+
+    const profile = this.getAgentProfile(agentName);
+    if (!profile) {
+      if (window.Toast) window.Toast.error('Failed to load agent settings.');
+      return;
+    }
+    if (!this.agentAllowsModelEditing(profile)) {
+      if (window.Toast) window.Toast.warning('This agent model cannot be changed from the workspace.');
+      return;
+    }
+
+    this.activeAgentModelEdit = {
+      agentName,
+      agentType: String(profile.type || 'general').trim() || 'general',
+      currentModel: String(profile.model || '').trim(),
+      currentProvider: String(profile.provider || '').trim()
+    };
+
+    if (this.elements.agentModelAgentName) {
+      this.elements.agentModelAgentName.textContent = agentName;
+    }
+    if (this.elements.agentModelTitle) {
+      this.elements.agentModelTitle.textContent = `Change Model for ${agentName}`;
+    }
+    if (this.elements.agentModelCurrent) {
+      const currentModelLabel = this.activeAgentModelEdit.currentModel || 'Not set';
+      const currentProviderLabel = this.activeAgentModelEdit.currentProvider || 'Unknown provider';
+      this.elements.agentModelCurrent.textContent = `${currentModelLabel} via ${currentProviderLabel}`;
+    }
+
+    this.populateAgentModelSelect();
+    this.updateAgentModelSelectionSummary();
+
+    if (this.elements.agentModelModal && window.bootstrap) {
+      const modal = typeof bootstrap.Modal.getOrCreateInstance === 'function'
+        ? bootstrap.Modal.getOrCreateInstance(this.elements.agentModelModal)
+        : (bootstrap.Modal.getInstance(this.elements.agentModelModal) || new bootstrap.Modal(this.elements.agentModelModal));
+      modal.show();
+    }
+  }
+
+  populateAgentModelSelect() {
+    const select = this.elements.agentModelSelect;
+    const editState = this.activeAgentModelEdit;
+    if (!select || !editState) return;
+
+    const normalizedType = String(editState.agentType || 'general').trim().toLowerCase() || 'general';
+    const currentModel = String(editState.currentModel || '').trim();
+    const currentProvider = String(editState.currentProvider || '').trim();
+
+    select.innerHTML = '';
+    let hasOptions = false;
+    let selectedFound = false;
+
+    (Array.isArray(this.providerCatalog) ? this.providerCatalog : []).forEach((provider) => {
+      const group = document.createElement('optgroup');
+      group.label = String(provider?.display_name || provider?.name || '').trim() || 'Provider';
+      let groupHasOptions = false;
+
+      const models = Array.isArray(provider?.models) ? provider.models : [];
+      models.forEach((model) => {
+        const value = String(model?.value || '').trim();
+        if (!value) return;
+
+        const modelType = String(model?.type || '').trim().toLowerCase();
+        const include = modelType === normalizedType || value === currentModel;
+        if (!include) return;
+
+        const option = document.createElement('option');
+        option.value = value;
+        option.textContent = String(model?.label || value).trim();
+        option.setAttribute('data-provider', String(model?.provider || provider?.name || '').trim());
+        option.setAttribute('data-model-type', modelType);
+        if (value === currentModel) {
+          option.selected = true;
+          selectedFound = true;
+        }
+        group.appendChild(option);
+        groupHasOptions = true;
+      });
+
+      if (groupHasOptions) {
+        select.appendChild(group);
+        hasOptions = true;
+      }
+    });
+
+    if (currentModel && !selectedFound) {
+      const currentGroup = document.createElement('optgroup');
+      currentGroup.label = 'Current Model';
+      const option = document.createElement('option');
+      option.value = currentModel;
+      option.textContent = `${currentModel} (Current)`;
+      option.selected = true;
+      option.setAttribute('data-provider', currentProvider);
+      currentGroup.appendChild(option);
+      select.appendChild(currentGroup);
+      hasOptions = true;
+    }
+
+    if (!hasOptions) {
+      select.innerHTML = '<option value="">No compatible models available</option>';
+    }
+
+    if (this.elements.agentModelSubmitBtn) {
+      this.elements.agentModelSubmitBtn.disabled = !hasOptions || !String(select.value || '').trim();
+    }
+  }
+
+  updateAgentModelSelectionSummary() {
+    const select = this.elements.agentModelSelect;
+    const help = this.elements.agentModelHelp;
+    if (!select || !help) return;
+
+    const editState = this.activeAgentModelEdit;
+    const selectedOption = select.selectedOptions?.[0] || null;
+    const selectedModel = String(select.value || '').trim();
+    const selectedProvider = String(selectedOption?.getAttribute('data-provider') || '').trim();
+
+    if (!editState || !selectedModel) {
+      help.textContent = 'No compatible models are currently available for this agent type.';
+      return;
+    }
+
+    const currentModel = String(editState.currentModel || '').trim();
+    const currentProvider = String(editState.currentProvider || '').trim();
+    if (selectedModel === currentModel && selectedProvider === currentProvider) {
+      help.textContent = 'This agent is already using the selected model.';
+      return;
+    }
+
+    const providerLabel = selectedProvider || 'the selected provider';
+    help.textContent = `Save to switch ${editState.agentName} to ${selectedModel} via ${providerLabel}.`;
+  }
+
+  resetAgentModelModal() {
+    this.activeAgentModelEdit = null;
+    if (this.elements.agentModelAgentName) {
+      this.elements.agentModelAgentName.textContent = '--';
+    }
+    if (this.elements.agentModelTitle) {
+      this.elements.agentModelTitle.textContent = 'Change Agent Model';
+    }
+    if (this.elements.agentModelCurrent) {
+      this.elements.agentModelCurrent.textContent = '--';
+    }
+    if (this.elements.agentModelSelect) {
+      this.elements.agentModelSelect.innerHTML = '<option value="">Loading models...</option>';
+    }
+    if (this.elements.agentModelHelp) {
+      this.elements.agentModelHelp.textContent = 'Choose a model to update this workspace agent.';
+    }
+    if (this.elements.agentModelSubmitBtn) {
+      this.elements.agentModelSubmitBtn.disabled = false;
+      this.elements.agentModelSubmitBtn.textContent = 'Save Model';
+    }
+  }
+
+  async submitAgentModelChange() {
+    const editState = this.activeAgentModelEdit;
+    const select = this.elements.agentModelSelect;
+    const submitBtn = this.elements.agentModelSubmitBtn;
+    if (!editState || !select || !submitBtn) return;
+
+    const model = String(select.value || '').trim();
+    const selectedOption = select.selectedOptions?.[0] || null;
+    const provider = String(selectedOption?.getAttribute('data-provider') || '').trim();
+
+    if (!model || !provider) {
+      if (window.Toast) window.Toast.warning('Choose a valid model before saving.');
+      return;
+    }
+
+    submitBtn.disabled = true;
+    submitBtn.textContent = 'Saving...';
+
+    try {
+      const response = await fetch(`/api/agents/${encodeURIComponent(editState.agentName)}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          model,
+          llm_provider: provider
+        })
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(errorText || 'Failed to update agent model');
+      }
+
+      await this.loadAgentCatalog(true);
+      this.renderAgentGroups();
+
+      if (window.Toast) {
+        window.Toast.success(`Updated ${editState.agentName} to ${model}.`);
+      }
+
+      if (this.elements.agentModelModal && window.bootstrap) {
+        const modal = bootstrap.Modal.getInstance(this.elements.agentModelModal);
+        modal?.hide();
+      }
+    } catch (error) {
+      console.error('Failed to update workspace agent model:', error);
+      if (window.Toast) {
+        window.Toast.error(error?.message || 'Failed to update agent model');
+      }
+      submitBtn.disabled = false;
+      submitBtn.textContent = 'Save Model';
+    }
+  }
+
   normalizeWorkspaceMCPBinding(binding, source = 'workspace') {
     const emailAccount = binding?.email_account && typeof binding.email_account === 'object'
       ? { ...binding.email_account }
@@ -10139,49 +10988,94 @@ export class WorkspaceDetailPage {
 
   async loadAgentCatalog(force = false) {
     if (!force && this.agentIndex instanceof Map && this.agentIndex.size > 0) {
+      this.agentCatalogLoaded = true;
+      this.agentCatalogLoadFailed = false;
+      this.renderWorkspaceHealth();
       return this.agentCatalog;
     }
 
     const nextCatalog = [];
     const nextIndex = new Map();
+    this.agentCatalogLoaded = false;
+    this.agentCatalogLoadFailed = false;
+    this.renderWorkspaceHealth();
     try {
       const response = await fetch('/api/agents/dashboard/list');
-      if (response.ok) {
-        const data = await response.json();
-        const agents = Array.isArray(data?.agents) ? data.agents : [];
-        agents.forEach((agent) => {
-          const name = String(agent?.name || '').trim();
-          if (!name) return;
-
-          const profile = {
-            name,
-            model: String(agent?.model || '').trim(),
-            status: String(agent?.status || '').trim().toLowerCase(),
-            capabilities: Array.isArray(agent?.capabilities) ? agent.capabilities.map((value) => String(value || '').trim()).filter(Boolean) : [],
-            allowWebSearch: Boolean(agent?.allow_web_search),
-            enabledPlugins: Array.isArray(agent?.enabled_plugins) ? agent.enabled_plugins.map((value) => String(value || '').trim()).filter(Boolean) : [],
-            mcpServers: Array.isArray(agent?.mcp_servers) ? agent.mcp_servers.map((value) => String(value || '').trim()).filter(Boolean) : [],
-            evolution: agent?.evolution && typeof agent.evolution === 'object' ? agent.evolution : null,
-            level: Number.isFinite(Number(agent?.evolution?.level)) ? Math.max(0, Math.floor(Number(agent.evolution.level))) : 0,
-            stage: String(agent?.evolution?.stage || '').trim()
-          };
-
-          nextCatalog.push(profile);
-          nextIndex.set(this.normalizeAgentName(name), profile);
-        });
+      if (!response.ok) {
+        throw new Error(`Failed to load agent catalog (${response.status})`);
       }
+
+      const data = await response.json();
+      const agents = Array.isArray(data?.agents) ? data.agents : [];
+      agents.forEach((agent) => {
+        const name = String(agent?.name || '').trim();
+        if (!name) return;
+
+        const profile = {
+          name,
+          type: String(agent?.type || '').trim(),
+          source: String(agent?.source || 'user').trim().toLowerCase(),
+          model: String(agent?.model || '').trim(),
+          provider: String(agent?.provider || '').trim(),
+          status: String(agent?.status || '').trim().toLowerCase(),
+          capabilities: Array.isArray(agent?.capabilities) ? agent.capabilities.map((value) => String(value || '').trim()).filter(Boolean) : [],
+          allowWebSearch: Boolean(agent?.allow_web_search),
+          enabledPlugins: Array.isArray(agent?.enabled_plugins) ? agent.enabled_plugins.map((value) => String(value || '').trim()).filter(Boolean) : [],
+          mcpServers: Array.isArray(agent?.mcp_servers) ? agent.mcp_servers.map((value) => String(value || '').trim()).filter(Boolean) : [],
+          evolution: agent?.evolution && typeof agent.evolution === 'object' ? agent.evolution : null,
+          level: Number.isFinite(Number(agent?.evolution?.level)) ? Math.max(0, Math.floor(Number(agent.evolution.level))) : 0,
+          stage: String(agent?.evolution?.stage || '').trim()
+        };
+
+        nextCatalog.push(profile);
+        nextIndex.set(this.normalizeAgentName(name), profile);
+      });
     } catch (error) {
       console.error('Failed to load agent catalog:', error);
+      this.agentCatalogLoadFailed = true;
     }
 
     this.agentCatalog = nextCatalog;
     this.agentIndex = nextIndex;
+    this.agentCatalogLoaded = true;
 
     if (!Array.isArray(this.agentOptions) || this.agentOptions.length === 0) {
       this.agentOptions = this.buildAgentOptionsFromCatalog();
     }
 
+    this.renderWorkspaceHealth();
+
     return this.agentCatalog;
+  }
+
+  async loadProviderCatalog(force = false) {
+    if (!force && Array.isArray(this.providerCatalog) && this.providerCatalog.length > 0) {
+      return this.providerCatalog;
+    }
+    if (!force && this.providerCatalogPromise) {
+      return this.providerCatalogPromise;
+    }
+
+    this.providerCatalogPromise = (async () => {
+      try {
+        const response = await fetch('/api/providers');
+        if (!response.ok) {
+          throw new Error('Failed to load provider catalog');
+        }
+
+        const data = await response.json();
+        this.providerCatalog = Array.isArray(data?.providers) ? data.providers : [];
+      } catch (error) {
+        console.error('Failed to load provider catalog:', error);
+        this.providerCatalog = [];
+      } finally {
+        this.providerCatalogPromise = null;
+      }
+
+      return this.providerCatalog;
+    })();
+
+    return this.providerCatalogPromise;
   }
 
   buildAgentOptionsFromCatalog() {
@@ -12029,26 +12923,38 @@ export class WorkspaceDetailPage {
     if (this.elements.filesList) {
       this.elements.filesList.innerHTML = '<div class="workspace-detail-loading">Loading files...</div>';
     }
+    this.filesLoaded = false;
+    this.filesLoadFailed = false;
+    this.renderWorkspaceHealth();
 
     try {
       const response = await fetch(`/api/workspaces/${encodeURIComponent(this.workspaceId)}`);
       if (!response.ok) {
         this.files = [];
+        this.filesLoaded = true;
+        this.filesLoadFailed = true;
         this.renderFiles();
         this.refreshHomeAssistantQuickPrompts();
+        this.renderWorkspaceHealth();
         return;
       }
 
       const workspace = await response.json();
       // Filter attachments to only include files (not text content)
       this.files = (workspace.attachments || []).filter(a => a.file_meta || a.type === 'image' || a.type === 'other');
+      this.filesLoaded = true;
+      this.filesLoadFailed = false;
       this.renderFiles();
       this.refreshHomeAssistantQuickPrompts();
+      this.renderWorkspaceHealth();
     } catch (error) {
       console.error('Failed to load files:', error);
       this.files = [];
+      this.filesLoaded = true;
+      this.filesLoadFailed = true;
       this.renderFiles();
       this.refreshHomeAssistantQuickPrompts();
+      this.renderWorkspaceHealth();
     }
   }
 

@@ -3134,6 +3134,10 @@ body:has(.chat-info-bar) #currentAgentDisplay {
   padding: 20px;
 }
 
+body.task-modal-open {
+  overflow: hidden;
+}
+
 .task-modal-backdrop {
   position: absolute;
   top: 0;
@@ -3155,6 +3159,10 @@ body:has(.chat-info-bar) #currentAgentDisplay {
   border-radius: 12px;
   box-shadow: 0 20px 40px rgba(0, 0, 0, 0.2);
   animation: taskModalSlideIn 0.2s ease-out;
+}
+
+.task-modal-content:focus {
+  outline: none;
 }
 
 @keyframes taskModalSlideIn {
@@ -3772,6 +3780,13 @@ body:has(.chat-info-bar) #currentAgentDisplay {
 .task-file-drop-zone:hover {
   border-color: var(--accent-primary, #3b82f6);
   background: rgba(59, 130, 246, 0.05);
+}
+
+.task-file-drop-zone:focus-visible {
+  border-color: var(--accent-primary, #3b82f6);
+  background: rgba(59, 130, 246, 0.08);
+  outline: 3px solid rgba(59, 130, 246, 0.18);
+  outline-offset: 2px;
 }
 
 .task-file-drop-zone.drag-active {

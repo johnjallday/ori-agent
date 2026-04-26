@@ -82,6 +82,11 @@
               <span class="workspace-task-page-live-dot"></span>Live
             </span>
             <div id="workspace-task-hero-actions" class="workspace-task-page-hero-actions"></div>
+            <div id="workspace-task-hero-priority" class="workspace-task-hero-priority" hidden>
+              <div class="workspace-task-hero-priority-kicker">Action Required</div>
+              <div id="workspace-task-hero-priority-copy" class="workspace-task-hero-priority-copy"></div>
+              <div id="workspace-task-hero-priority-actions" class="workspace-task-hero-priority-actions"></div>
+            </div>
           </div>
         </section>
 
@@ -141,10 +146,28 @@
               <div class="workspace-task-page-card-header">
                 <div>
                   <div class="workspace-task-page-card-kicker">Task Graph</div>
-                  <h2>Dependencies and children</h2>
+                  <h2>Dependencies and parents</h2>
                 </div>
               </div>
               <div id="workspace-task-relationships" class="workspace-task-relationship-groups"></div>
+            </section>
+
+            <section id="workspace-task-workflow-card" class="workspace-task-page-card" hidden>
+              <div class="workspace-task-page-card-header">
+                <div>
+                  <div class="workspace-task-page-card-kicker">Workflow</div>
+                  <h2>Steps</h2>
+                </div>
+                <div id="workspace-task-workflow-actions" class="workspace-task-workflow-actions" hidden>
+                  <button type="button" id="workspace-task-workflow-add-step" class="modern-btn modern-btn-secondary workspace-task-workflow-header-btn" title="Add a new step">+ Add step</button>
+                  <button type="button" id="workspace-task-workflow-run-all" class="modern-btn modern-btn-primary workspace-task-workflow-header-btn" title="Run all steps in sequence">▶ Run all</button>
+                </div>
+              </div>
+              <div id="workspace-task-workflow-empty" class="workspace-task-workflow-empty" hidden>
+                <div class="workspace-task-workflow-empty-copy">No steps yet. Break this task's result into a runnable list of steps.</div>
+                <button type="button" id="workspace-task-workflow-generate" class="modern-btn modern-btn-primary workspace-task-workflow-empty-btn">Break this into steps</button>
+              </div>
+              <div id="workspace-task-workflow-steps" class="workspace-task-workflow-list"></div>
             </section>
 
             <section id="workspace-task-output-card" class="workspace-task-page-card" hidden>
@@ -153,7 +176,18 @@
                   <div class="workspace-task-page-card-kicker">Result</div>
                   <h2>Latest output</h2>
                 </div>
+                <div class="workspace-task-output-actions" aria-label="Result actions">
+                  <button type="button" id="workspace-task-output-copy" class="modern-btn modern-btn-secondary workspace-task-output-action-btn">
+                    <i class="bi bi-copy" aria-hidden="true"></i>
+                    <span>Copy</span>
+                  </button>
+                  <button type="button" id="workspace-task-output-save-note" class="modern-btn modern-btn-primary workspace-task-output-action-btn">
+                    <i class="bi bi-journal-plus" aria-hidden="true"></i>
+                    <span>Save as Note</span>
+                  </button>
+                </div>
               </div>
+              <div id="workspace-task-output-note-status" class="workspace-task-output-note-status" hidden></div>
               <div id="workspace-task-output"></div>
             </section>
 
@@ -193,8 +227,8 @@
             <section class="workspace-task-page-card workspace-task-page-card-compact">
               <div class="workspace-task-page-card-header">
                 <div>
-                  <div class="workspace-task-page-card-kicker">Snapshot</div>
-                  <h2>Task state</h2>
+                  <div class="workspace-task-page-card-kicker">Quick Controls</div>
+                  <h2>On-demand task state</h2>
                 </div>
               </div>
               <div id="workspace-task-snapshot" class="workspace-task-snapshot-list"></div>
@@ -553,6 +587,11 @@
       background: rgba(194, 59, 59, 0.12);
     }
 
+    .workspace-task-page-status[data-state="cancelled"] {
+      color: #64748b;
+      border-color: rgba(100, 116, 139, 0.24);
+      background: rgba(148, 163, 184, 0.12);
+    }
 
     .workspace-task-page-live-badge {
       display: inline-flex;
@@ -596,6 +635,38 @@
       gap: 0.5rem;
       width: 100%;
       justify-content: flex-end;
+    }
+
+    .workspace-task-hero-priority {
+      width: min(100%, 24rem);
+      display: grid;
+      gap: 0.7rem;
+      padding: 1rem 1.05rem;
+      border-radius: 22px;
+      border: 1px solid rgba(194, 132, 11, 0.26);
+      background: linear-gradient(180deg, rgba(245, 158, 11, 0.12), rgba(245, 158, 11, 0.05));
+      box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.35);
+    }
+
+    .workspace-task-hero-priority-kicker {
+      color: #9a6700;
+      font-size: 0.72rem;
+      font-weight: 800;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+    }
+
+    .workspace-task-hero-priority-copy {
+      color: var(--text-primary);
+      font-size: 0.94rem;
+      line-height: 1.55;
+    }
+
+    .workspace-task-hero-priority-actions {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+      gap: 0.55rem;
     }
 
     .workspace-task-page-hero-btn {
@@ -707,6 +778,70 @@
       color: var(--text-primary);
     }
 
+    .workspace-task-output-actions {
+      display: flex;
+      align-items: center;
+      justify-content: flex-end;
+      gap: 0.5rem;
+      flex-wrap: wrap;
+    }
+
+    .workspace-task-output-action-btn {
+      min-height: 2.35rem;
+      gap: 0.42rem;
+      white-space: nowrap;
+    }
+
+    .workspace-task-output-action-btn.is-saved {
+      border-color: color-mix(in srgb, #16a34a 34%, var(--border-color));
+      background: color-mix(in srgb, #16a34a 12%, var(--bg-primary));
+      color: color-mix(in srgb, #16a34a 82%, var(--text-primary));
+    }
+
+    .workspace-task-output-note-status {
+      margin: -0.15rem 0 0.95rem;
+      padding: 0.72rem 0.85rem;
+      border: 1px solid color-mix(in srgb, #16a34a 26%, var(--border-color));
+      border-radius: 16px;
+      background: color-mix(in srgb, #16a34a 8%, var(--bg-primary));
+      color: var(--text-primary);
+    }
+
+    .workspace-task-output-note-status-inner {
+      display: flex;
+      align-items: center;
+      gap: 0.6rem;
+      flex-wrap: wrap;
+    }
+
+    .workspace-task-output-note-status-icon {
+      width: 1.65rem;
+      height: 1.65rem;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      border-radius: 999px;
+      background: color-mix(in srgb, #16a34a 16%, var(--bg-primary));
+      color: #15803d;
+      flex: 0 0 auto;
+    }
+
+    .workspace-task-output-note-status-copy {
+      color: var(--text-secondary);
+      font-size: 0.92rem;
+      line-height: 1.4;
+    }
+
+    .workspace-task-output-note-status-copy strong {
+      color: var(--text-primary);
+    }
+
+    .workspace-task-output-note-open {
+      margin-top: 0;
+      margin-left: auto;
+      flex: 0 0 auto;
+    }
+
     .workspace-task-overview-grid {
       display: grid;
       grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -722,6 +857,42 @@
 
     .workspace-task-overview-item.full {
       grid-column: 1 / -1;
+    }
+
+    .workspace-task-overview-disclosure {
+      display: grid;
+      gap: 0.75rem;
+    }
+
+    .workspace-task-overview-disclosure-toggle {
+      list-style: none;
+      cursor: pointer;
+      display: grid;
+      gap: 0.22rem;
+    }
+
+    .workspace-task-overview-disclosure-toggle::-webkit-details-marker {
+      display: none;
+    }
+
+    .workspace-task-overview-disclosure-heading {
+      color: var(--text-secondary);
+      font-size: 0.8rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+    }
+
+    .workspace-task-overview-disclosure-hint {
+      color: var(--text-secondary);
+      font-size: 0.88rem;
+      line-height: 1.5;
+    }
+
+    .workspace-task-overview-disclosure-body {
+      margin-top: 0.8rem;
+      padding-top: 0.8rem;
+      border-top: 1px solid color-mix(in srgb, var(--border-color) 92%, transparent);
     }
 
     .workspace-task-overview-title {
@@ -996,6 +1167,11 @@
       background: rgba(194, 59, 59, 0.12);
     }
 
+    .workspace-task-step-status[data-state="cancelled"] {
+      color: #64748b;
+      background: rgba(148, 163, 184, 0.14);
+    }
+
     .workspace-task-step-copy {
       color: var(--text-secondary);
       font-size: 0.92rem;
@@ -1003,10 +1179,413 @@
       white-space: pre-wrap;
     }
 
+    .workspace-task-workflow-actions {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.5rem;
+      flex-shrink: 0;
+    }
+
+    .workspace-task-workflow-header-btn {
+      min-height: 2rem;
+      padding: 0.4rem 0.85rem;
+      font-size: 0.82rem;
+      white-space: nowrap;
+    }
+
+    .workspace-task-workflow-empty {
+      display: flex;
+      flex-direction: column;
+      align-items: flex-start;
+      gap: 0.7rem;
+      padding: 1.1rem 1.15rem;
+      border-radius: 18px;
+      border: 1px dashed color-mix(in srgb, var(--border-color) 90%, transparent);
+      background: color-mix(in srgb, var(--bg-secondary) 80%, transparent);
+    }
+
+    .workspace-task-workflow-empty-copy {
+      color: var(--text-secondary);
+      font-size: 0.9rem;
+      line-height: 1.55;
+    }
+
+    .workspace-task-workflow-empty-btn {
+      align-self: flex-start;
+    }
+
+    .workspace-task-workflow-list {
+      display: flex;
+      flex-direction: column;
+      gap: 0.6rem;
+    }
+
+    .workspace-task-workflow-list:empty {
+      display: none;
+    }
+
+    .workspace-task-workflow-step {
+      display: grid;
+      grid-template-columns: auto 1fr;
+      gap: 0.85rem;
+      padding: 0.75rem 0.95rem;
+      border-radius: 16px;
+      border: 1px solid color-mix(in srgb, var(--border-color) 92%, transparent);
+      background: color-mix(in srgb, var(--bg-primary) 92%, transparent);
+      transition: border-color 0.15s ease, box-shadow 0.15s ease;
+    }
+
+    .workspace-task-workflow-step.is-running {
+      border-color: color-mix(in srgb, #38bdf8 60%, transparent);
+      box-shadow: 0 0 0 1px color-mix(in srgb, #38bdf8 35%, transparent);
+    }
+
+    .workspace-task-workflow-step.is-failed {
+      border-color: color-mix(in srgb, #ef4444 60%, transparent);
+    }
+
+    .workspace-task-workflow-step.is-completed {
+      background: color-mix(in srgb, var(--bg-secondary) 80%, transparent);
+    }
+
+    .workspace-task-workflow-step.is-cancelled {
+      border-color: rgba(148, 163, 184, 0.28);
+      background: color-mix(in srgb, var(--bg-secondary) 68%, transparent);
+    }
+
+    .workspace-task-workflow-rail {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 0.35rem;
+      padding-top: 0.15rem;
+    }
+
+    .workspace-task-workflow-step-check {
+      width: 1.85rem;
+      height: 1.85rem;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      border-radius: 999px;
+      border: 1px solid color-mix(in srgb, var(--primary-color) 22%, transparent);
+      background: color-mix(in srgb, var(--primary-color) 10%, transparent);
+      color: var(--primary-color);
+      font-size: 0.8rem;
+      font-weight: 800;
+      cursor: pointer;
+      transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease, transform 0.15s ease;
+    }
+
+    .workspace-task-workflow-step-check:hover:not(:disabled) {
+      border-color: color-mix(in srgb, var(--primary-color) 44%, transparent);
+      background: color-mix(in srgb, var(--primary-color) 16%, transparent);
+      transform: translateY(-1px);
+    }
+
+    .workspace-task-workflow-step-check:focus-visible {
+      outline: 2px solid color-mix(in srgb, var(--primary-color) 54%, transparent);
+      outline-offset: 2px;
+    }
+
+    .workspace-task-workflow-step-check:disabled {
+      cursor: default;
+    }
+
+    .workspace-task-workflow-step-check-icon {
+      display: none;
+      line-height: 1;
+    }
+
+    .workspace-task-workflow-step.is-running .workspace-task-workflow-step-check {
+      background: rgba(56, 189, 248, 0.18);
+      border-color: rgba(56, 189, 248, 0.32);
+      color: #38bdf8;
+      animation: workspace-task-workflow-pulse 1.4s ease-in-out infinite;
+    }
+
+    .workspace-task-workflow-step.is-completed .workspace-task-workflow-step-check {
+      background: rgba(34, 197, 94, 0.18);
+      border-color: rgba(34, 197, 94, 0.32);
+      color: #22c55e;
+    }
+
+    .workspace-task-workflow-step.is-completed .workspace-task-workflow-step-check-number {
+      display: none;
+    }
+
+    .workspace-task-workflow-step.is-completed .workspace-task-workflow-step-check-icon {
+      display: inline;
+    }
+
+    .workspace-task-workflow-step.is-failed .workspace-task-workflow-step-check {
+      background: rgba(239, 68, 68, 0.18);
+      border-color: rgba(239, 68, 68, 0.28);
+      color: #ef4444;
+    }
+
+    .workspace-task-workflow-step.is-cancelled .workspace-task-workflow-step-check {
+      background: rgba(148, 163, 184, 0.16);
+      border-color: rgba(148, 163, 184, 0.28);
+      color: #94a3b8;
+    }
+
+    @keyframes workspace-task-workflow-pulse {
+      0%, 100% { transform: scale(1); }
+      50% { transform: scale(1.08); }
+    }
+
+    .workspace-task-workflow-step-body {
+      min-width: 0;
+      display: flex;
+      flex-direction: column;
+      gap: 0.35rem;
+    }
+
+    .workspace-task-workflow-step-header {
+      display: flex;
+      align-items: center;
+      gap: 0.6rem;
+      flex-wrap: wrap;
+      justify-content: space-between;
+    }
+
+    .workspace-task-workflow-step-title {
+      flex: 1;
+      min-width: 0;
+      color: var(--text-primary);
+      font-weight: 700;
+      font-size: 0.95rem;
+      line-height: 1.4;
+    }
+
+    .workspace-task-workflow-step-actions {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.35rem;
+      flex-shrink: 0;
+    }
+
+    .workspace-task-workflow-step-action-btn {
+      min-height: 1.85rem;
+      padding: 0.3rem 0.65rem;
+      font-size: 0.78rem;
+      white-space: nowrap;
+    }
+
+    .workspace-task-workflow-step-meta {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 0.55rem;
+      color: var(--text-secondary);
+      font-size: 0.8rem;
+    }
+
+    .workspace-task-workflow-step-status {
+      display: inline-flex;
+      align-items: center;
+      border-radius: 999px;
+      padding: 0.18rem 0.55rem;
+      font-size: 0.7rem;
+      font-weight: 700;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      background: color-mix(in srgb, var(--bg-secondary) 88%, transparent);
+      color: var(--text-secondary);
+    }
+
+    .workspace-task-workflow-step-status[data-state="completed"] {
+      color: #15803d;
+      background: rgba(34, 197, 94, 0.14);
+    }
+
+    .workspace-task-workflow-step-status[data-state="in_progress"] {
+      color: #0369a1;
+      background: rgba(56, 189, 248, 0.16);
+    }
+
+    .workspace-task-workflow-step-status[data-state="failed"] {
+      color: #b91c1c;
+      background: rgba(239, 68, 68, 0.14);
+    }
+
+    .workspace-task-workflow-step-status[data-state="cancelled"] {
+      color: #64748b;
+      background: rgba(148, 163, 184, 0.14);
+    }
+
+    .workspace-task-workflow-step-agent {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.3rem;
+    }
+
+    .workspace-task-workflow-step-agent-name {
+      font-weight: 700;
+      color: var(--text-primary);
+    }
+
+    .workspace-task-workflow-step-result {
+      margin-top: 0.4rem;
+    }
+
+    .workspace-task-workflow-step-result summary {
+      list-style: none;
+      cursor: pointer;
+      color: var(--primary-color);
+      font-weight: 600;
+      font-size: 0.82rem;
+      padding: 0.2rem 0;
+    }
+
+    .workspace-task-workflow-step-result summary::-webkit-details-marker {
+      display: none;
+    }
+
+    .workspace-task-workflow-step-result-body {
+      margin-top: 0.45rem;
+      padding: 0.6rem 0.8rem;
+      border-radius: 12px;
+      background: color-mix(in srgb, var(--bg-secondary) 88%, transparent);
+      color: var(--text-primary);
+      font-family: var(--font-mono, ui-monospace, SFMono-Regular, "SF Mono", Menlo, Monaco, monospace);
+      font-size: 0.82rem;
+      line-height: 1.5;
+      white-space: pre-wrap;
+      word-break: break-word;
+      max-height: 18rem;
+      overflow: auto;
+    }
+
+    .workspace-task-workflow-step-error {
+      color: #b91c1c;
+      background: rgba(239, 68, 68, 0.08);
+    }
+
+    .workspace-task-workflow-generating {
+      display: flex;
+      align-items: center;
+      gap: 0.55rem;
+      padding: 0.85rem 1rem;
+      border-radius: 14px;
+      background: color-mix(in srgb, var(--bg-secondary) 80%, transparent);
+      color: var(--text-secondary);
+      font-size: 0.85rem;
+    }
+
+    .workspace-task-workflow-spinner {
+      width: 14px;
+      height: 14px;
+      border-radius: 50%;
+      border: 2px solid color-mix(in srgb, var(--primary-color) 40%, transparent);
+      border-top-color: var(--primary-color);
+      animation: workspace-task-workflow-spin 0.8s linear infinite;
+    }
+
+    @keyframes workspace-task-workflow-spin {
+      to { transform: rotate(360deg); }
+    }
+
     .workspace-task-snapshot-list {
       display: flex;
       flex-direction: column;
       gap: 0.7rem;
+    }
+
+    .workspace-task-snapshot-summary {
+      display: flex;
+      flex-direction: column;
+      gap: 0.7rem;
+    }
+
+    .workspace-task-snapshot-summary-copy {
+      color: var(--text-secondary);
+      font-size: 0.88rem;
+      line-height: 1.55;
+    }
+
+    .workspace-task-snapshot-chip-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.45rem;
+    }
+
+    .workspace-task-snapshot-chip {
+      display: inline-flex;
+      align-items: center;
+      border-radius: 999px;
+      padding: 0.3rem 0.7rem;
+      background: color-mix(in srgb, var(--bg-secondary) 88%, transparent);
+      color: var(--text-primary);
+      font-size: 0.76rem;
+      font-weight: 800;
+      letter-spacing: 0.02em;
+    }
+
+    .workspace-task-snapshot-chip-status[data-state="completed"] {
+      color: #157347;
+      background: rgba(21, 115, 71, 0.12);
+    }
+
+    .workspace-task-snapshot-chip-status[data-state="in_progress"] {
+      color: #0c63e7;
+      background: rgba(12, 99, 231, 0.12);
+    }
+
+    .workspace-task-snapshot-chip-status[data-state="blocked"] {
+      color: #b26f00;
+      background: rgba(178, 111, 0, 0.14);
+    }
+
+    .workspace-task-snapshot-chip-status[data-state="failed"] {
+      color: #c23b3b;
+      background: rgba(194, 59, 59, 0.12);
+    }
+
+    .workspace-task-snapshot-chip-status[data-state="cancelled"] {
+      color: #64748b;
+      background: rgba(148, 163, 184, 0.14);
+    }
+
+    .workspace-task-snapshot-disclosure {
+      border-radius: 18px;
+      border: 1px solid color-mix(in srgb, var(--border-color) 92%, transparent);
+      background: color-mix(in srgb, var(--bg-primary) 94%, transparent);
+    }
+
+    .workspace-task-snapshot-disclosure-toggle {
+      padding: 0.75rem 0.9rem;
+      color: var(--text-secondary);
+      font-size: 0.84rem;
+      font-weight: 800;
+      cursor: pointer;
+      list-style: none;
+      user-select: none;
+    }
+
+    .workspace-task-snapshot-disclosure-toggle::-webkit-details-marker {
+      display: none;
+    }
+
+    .workspace-task-snapshot-disclosure-toggle::before {
+      content: "\25B6";
+      display: inline-block;
+      margin-right: 0.45rem;
+      font-size: 0.65rem;
+      transition: transform 0.16s ease;
+    }
+
+    .workspace-task-snapshot-disclosure[open] > .workspace-task-snapshot-disclosure-toggle::before {
+      transform: rotate(90deg);
+    }
+
+    .workspace-task-snapshot-disclosure-body {
+      display: flex;
+      flex-direction: column;
+      gap: 0.7rem;
+      padding: 0 0.9rem 0.9rem;
+      border-top: 1px solid color-mix(in srgb, var(--border-color) 92%, transparent);
     }
 
     .workspace-task-snapshot-item {
@@ -1077,6 +1656,14 @@
       color: #c23b3b;
     }
 
+    .workspace-task-page-status-inline[data-state="cancelled"] {
+      color: #64748b;
+    }
+
+    .workspace-task-assist-card {
+      gap: 1rem;
+    }
+
     .workspace-task-assist-summary-grid {
       display: grid;
       gap: 0.7rem;
@@ -1110,11 +1697,287 @@
       gap: 0.85rem;
     }
 
+    .workspace-task-assist-deck {
+      display: grid;
+      grid-template-columns: minmax(240px, 0.82fr) minmax(0, 1.18fr);
+      gap: 0.85rem;
+      align-items: start;
+    }
+
+    .workspace-task-assist-deck-rail {
+      display: flex;
+      flex-direction: column;
+      gap: 0.55rem;
+    }
+
+    .workspace-task-assist-deck-tab {
+      width: 100%;
+      display: grid;
+      grid-template-columns: auto minmax(0, 1fr) auto;
+      align-items: start;
+      gap: 0.7rem;
+      padding: 0.8rem 0.9rem;
+      border-radius: 18px;
+      border: 1px solid color-mix(in srgb, var(--border-color) 92%, transparent);
+      background: color-mix(in srgb, var(--bg-primary) 94%, transparent);
+      color: inherit;
+      text-align: left;
+      cursor: pointer;
+      transition: transform 0.16s ease, border-color 0.16s ease, box-shadow 0.16s ease, background 0.16s ease;
+    }
+
+    .workspace-task-assist-deck-tab:hover {
+      transform: translateY(-1px);
+      border-color: color-mix(in srgb, var(--primary-color) 34%, var(--border-color));
+    }
+
+    .workspace-task-assist-deck-tab.is-active {
+      border-color: color-mix(in srgb, var(--primary-color) 46%, var(--border-color));
+      background: color-mix(in srgb, var(--primary-color) 8%, var(--bg-primary));
+      box-shadow: 0 12px 22px rgba(15, 23, 42, 0.08);
+    }
+
+    .workspace-task-assist-deck-tab.is-answered:not(.is-active) {
+      border-color: color-mix(in srgb, #157347 24%, var(--border-color));
+      background: color-mix(in srgb, #157347 5%, var(--bg-primary));
+    }
+
+    .workspace-task-assist-deck-tab-number {
+      width: 1.9rem;
+      height: 1.9rem;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      border-radius: 999px;
+      background: color-mix(in srgb, var(--accent-gold, #d3a94f) 18%, transparent);
+      color: color-mix(in srgb, var(--accent-gold, #d3a94f) 88%, var(--text-primary));
+      font-size: 0.76rem;
+      font-weight: 800;
+      flex-shrink: 0;
+    }
+
+    .workspace-task-assist-deck-tab-copy {
+      min-width: 0;
+      display: flex;
+      flex-direction: column;
+      gap: 0.22rem;
+    }
+
+    .workspace-task-assist-deck-tab-title {
+      color: var(--text-primary);
+      font-size: 0.92rem;
+      font-weight: 700;
+      line-height: 1.45;
+    }
+
+    .workspace-task-assist-deck-tab-meta {
+      color: var(--text-secondary);
+      font-size: 0.78rem;
+      line-height: 1.4;
+    }
+
+    .workspace-task-assist-deck-tab-state {
+      color: var(--text-secondary);
+      font-size: 0.72rem;
+      font-weight: 800;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      white-space: nowrap;
+    }
+
+    .workspace-task-assist-deck-tab.is-answered .workspace-task-assist-deck-tab-state {
+      color: #157347;
+    }
+
+    .workspace-task-assist-deck-panel {
+      padding: 0.95rem 1rem 1rem;
+      border-radius: 22px;
+      border: 1px solid color-mix(in srgb, var(--border-color) 92%, transparent);
+      background:
+        radial-gradient(circle at top right, color-mix(in srgb, var(--primary-color) 10%, transparent), transparent 42%),
+        color-mix(in srgb, var(--bg-primary) 96%, transparent);
+      box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06);
+    }
+
+    .workspace-task-assist-deck-progress-row {
+      display: grid;
+      gap: 0.7rem;
+      margin-bottom: 0.9rem;
+    }
+
+    .workspace-task-assist-deck-kicker {
+      color: var(--text-secondary);
+      font-size: 0.76rem;
+      font-weight: 800;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+
+    .workspace-task-assist-deck-progress-copy {
+      color: var(--text-primary);
+      font-size: 0.94rem;
+      font-weight: 700;
+      margin-top: 0.12rem;
+    }
+
+    .workspace-task-assist-deck-progress-bar {
+      position: relative;
+      height: 0.5rem;
+      border-radius: 999px;
+      overflow: hidden;
+      background: color-mix(in srgb, var(--bg-secondary) 86%, transparent);
+    }
+
+    .workspace-task-assist-deck-progress-bar span {
+      display: block;
+      height: 100%;
+      border-radius: inherit;
+      background: linear-gradient(90deg, color-mix(in srgb, var(--accent-gold, #d3a94f) 90%, transparent), color-mix(in srgb, var(--primary-color) 74%, transparent));
+      transition: width 0.18s ease;
+    }
+
+    .workspace-task-assist-deck-stage .workspace-task-assist-field {
+      min-height: 100%;
+      animation: workspace-task-assist-panel-enter 0.2s ease;
+    }
+
+    .workspace-task-assist-deck-nav {
+      display: flex;
+      justify-content: space-between;
+      gap: 0.65rem;
+      margin-top: 0.85rem;
+    }
+
+    .workspace-task-assist-deck-nav .modern-btn {
+      min-width: 140px;
+      justify-content: center;
+    }
+
+    .workspace-task-assist-deck-nav-note {
+      color: var(--text-secondary);
+      font-size: 0.84rem;
+      line-height: 1.5;
+      margin-left: auto;
+      text-align: right;
+    }
+
+    .workspace-task-assist-review {
+      display: flex;
+      flex-direction: column;
+      gap: 0.8rem;
+      animation: workspace-task-assist-panel-enter 0.2s ease;
+    }
+
+    .workspace-task-assist-review-banner {
+      padding: 0.85rem 0.95rem;
+      border-radius: 18px;
+      border: 1px solid color-mix(in srgb, var(--primary-color) 18%, var(--border-color));
+      background: color-mix(in srgb, var(--primary-color) 7%, var(--bg-primary));
+    }
+
+    .workspace-task-assist-review-title {
+      color: var(--text-primary);
+      font-size: 0.95rem;
+      font-weight: 800;
+      line-height: 1.45;
+    }
+
+    .workspace-task-assist-review-copy {
+      color: var(--text-secondary);
+      font-size: 0.88rem;
+      line-height: 1.55;
+      margin-top: 0.22rem;
+    }
+
+    .workspace-task-assist-review-list {
+      display: flex;
+      flex-direction: column;
+      gap: 0.65rem;
+    }
+
+    .workspace-task-assist-review-item {
+      padding: 0.85rem 0.95rem;
+      border-radius: 18px;
+      border: 1px solid color-mix(in srgb, var(--border-color) 92%, transparent);
+      background: color-mix(in srgb, var(--bg-primary) 96%, transparent);
+    }
+
+    .workspace-task-assist-review-item.is-answered {
+      border-color: color-mix(in srgb, #157347 24%, var(--border-color));
+      background: color-mix(in srgb, #157347 4%, var(--bg-primary));
+    }
+
+    .workspace-task-assist-review-item-top {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 0.75rem;
+    }
+
+    .workspace-task-assist-review-item-title {
+      min-width: 0;
+      display: flex;
+      align-items: center;
+      gap: 0.55rem;
+      color: var(--text-primary);
+      font-size: 0.9rem;
+      font-weight: 700;
+      line-height: 1.45;
+    }
+
+    .workspace-task-assist-review-item-number {
+      width: 1.7rem;
+      height: 1.7rem;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      border-radius: 999px;
+      background: color-mix(in srgb, var(--accent-gold, #d3a94f) 18%, transparent);
+      color: color-mix(in srgb, var(--accent-gold, #d3a94f) 88%, var(--text-primary));
+      font-size: 0.72rem;
+      font-weight: 800;
+      flex-shrink: 0;
+    }
+
+    .workspace-task-assist-review-edit {
+      border: none;
+      background: none;
+      color: var(--primary-color);
+      font-size: 0.82rem;
+      font-weight: 800;
+      padding: 0;
+      white-space: nowrap;
+    }
+
+    .workspace-task-assist-review-edit:hover {
+      text-decoration: underline;
+    }
+
+    .workspace-task-assist-review-answer {
+      margin-top: 0.5rem;
+      color: var(--text-primary);
+      font-size: 0.88rem;
+      line-height: 1.6;
+      padding-left: 2.25rem;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+
+    .workspace-task-assist-review-answer.is-empty {
+      color: var(--text-secondary);
+      font-style: italic;
+    }
+
     .workspace-task-assist-field {
       padding: 0.95rem 1rem;
       border-radius: 20px;
       border: 1px solid color-mix(in srgb, var(--border-color) 92%, transparent);
       background: color-mix(in srgb, var(--bg-primary) 92%, transparent);
+    }
+
+    .workspace-task-assist-field.is-active {
+      border-color: color-mix(in srgb, var(--primary-color) 36%, var(--border-color));
+      box-shadow: 0 14px 30px rgba(15, 23, 42, 0.07);
     }
 
     .workspace-task-assist-field-question {
@@ -1228,6 +2091,12 @@
       color: var(--text-secondary);
       font-size: 0.88rem;
       line-height: 1.55;
+    }
+
+    .workspace-task-assist-custom-input {
+      margin-top: 0.8rem;
+      padding-top: 0.85rem;
+      border-top: 1px solid color-mix(in srgb, var(--border-color) 88%, transparent);
     }
 
     .workspace-task-assist-actions-primary {
@@ -1599,6 +2468,17 @@
       100% { background-position: 200% 0; }
     }
 
+    @keyframes workspace-task-assist-panel-enter {
+      0% {
+        opacity: 0;
+        transform: translateX(10px);
+      }
+      100% {
+        opacity: 1;
+        transform: translateX(0);
+      }
+    }
+
     @media (max-width: 1100px) {
       .workspace-task-page-hero,
       .workspace-task-page-layout,
@@ -1613,6 +2493,20 @@
       .workspace-task-page-sidebar {
         position: static;
       }
+
+      .workspace-task-assist-deck {
+        grid-template-columns: 1fr;
+      }
+
+      .workspace-task-assist-deck-rail {
+        flex-direction: row;
+        overflow-x: auto;
+        padding-bottom: 0.2rem;
+      }
+
+      .workspace-task-assist-deck-tab {
+        min-width: 240px;
+      }
     }
 
     @media (max-width: 720px) {
@@ -1624,6 +2518,24 @@
       .workspace-task-page-card {
         padding: 1.05rem;
         border-radius: 24px;
+      }
+
+      #workspace-task-output-card .workspace-task-page-card-header,
+      .workspace-task-output-actions {
+        flex-direction: column;
+        align-items: stretch;
+      }
+
+      .workspace-task-output-action-btn {
+        width: 100%;
+        min-width: 0;
+        justify-content: center;
+      }
+
+      .workspace-task-output-note-open {
+        width: 100%;
+        margin-left: 0;
+        text-align: left;
       }
 
       .workspace-task-overview-grid {
@@ -1640,8 +2552,41 @@
         padding: 0.65rem 1rem;
         font-size: 0.85rem;
       }
+
+      .workspace-task-assist-deck-tab {
+        min-width: 220px;
+      }
+
+      .workspace-task-assist-deck-panel {
+        padding: 0.9rem;
+      }
+
+      .workspace-task-assist-deck-nav {
+        flex-direction: column;
+      }
+
+      .workspace-task-assist-deck-nav .modern-btn {
+        width: 100%;
+      }
+
+      .workspace-task-assist-deck-nav-note {
+        width: 100%;
+        text-align: left;
+        margin-left: 0;
+      }
+
+      .workspace-task-assist-review-item-top {
+        align-items: flex-start;
+      }
+
+      .workspace-task-assist-review-answer {
+        padding-left: 0;
+      }
     }
   </style>
+
+  {{template "task-modal" .}}
+  {{template "session-modals.tmpl" .}}
 
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
