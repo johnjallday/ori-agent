@@ -157,7 +157,11 @@ export class WorkspaceTaskPage {
       assistRetryBtn: document.getElementById('workspace-task-assist-retry'),
       assistContinueBtn: document.getElementById('workspace-task-assist-continue'),
       assistSwitchBtn: document.getElementById('workspace-task-assist-switch'),
-      assistFailBtn: document.getElementById('workspace-task-assist-fail')
+      assistFailBtn: document.getElementById('workspace-task-assist-fail'),
+      respondTrigger: document.getElementById('workspace-task-respond-trigger'),
+      assistPanel: document.getElementById('workspace-task-assist-panel'),
+      assistBackdrop: document.getElementById('workspace-task-assist-backdrop'),
+      assistCloseBtn: document.getElementById('workspace-task-assist-close')
     };
   }
 
@@ -173,6 +177,14 @@ export class WorkspaceTaskPage {
     this.elements.assistSwitchBtn?.addEventListener('click', () => this.submitTaskAssist('switch_agent_retry'));
     this.elements.assistFailBtn?.addEventListener('click', () => this.submitTaskAssist('mark_failed'));
     this.elements.assistAgent?.addEventListener('change', () => this.updateAssistSwitchButtonState());
+    this.elements.respondTrigger?.addEventListener('click', () => this.toggleAssistPanel(true));
+    this.elements.assistCloseBtn?.addEventListener('click', () => this.toggleAssistPanel(false));
+    this.elements.assistBackdrop?.addEventListener('click', () => this.toggleAssistPanel(false));
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && this.elements.assistPanel && !this.elements.assistPanel.hidden) {
+        this.toggleAssistPanel(false);
+      }
+    });
   }
 
   async loadData() {
@@ -1092,11 +1104,13 @@ export class WorkspaceTaskPage {
     const blocked = statusInfo.isBlocked && this.currentBlockedTask;
 
     if (!blocked) {
-      if (this.elements.assistCard) this.elements.assistCard.hidden = true;
+      if (this.elements.respondTrigger) this.elements.respondTrigger.hidden = true;
+      this.toggleAssistPanel(false);
       if (this.elements.blockedContextCard) this.elements.blockedContextCard.hidden = true;
       return;
     }
 
+    if (this.elements.respondTrigger) this.elements.respondTrigger.hidden = false;
     this.renderBlockedContext();
     this.renderAssistCard();
   }
@@ -1135,7 +1149,6 @@ export class WorkspaceTaskPage {
     if (!this.elements.assistCard) return;
 
     const workflowStep = this.currentBlockedTask?.workflowStep || null;
-    this.elements.assistCard.hidden = false;
 
     if (this.elements.assistKnown) {
       this.elements.assistKnown.textContent = summarizeText(
@@ -1398,6 +1411,28 @@ export class WorkspaceTaskPage {
     this.renderBlockedContext();
   }
 
+  toggleAssistPanel(open) {
+    const panel = this.elements.assistPanel;
+    if (!panel) return;
+
+    clearTimeout(this._assistPanelCloseTimer);
+
+    if (open) {
+      panel.hidden = false;
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          panel.classList.add('is-open');
+        });
+      });
+      document.body.style.overflow = 'hidden';
+    } else {
+      if (panel.hidden) return;
+      panel.classList.remove('is-open');
+      this._assistPanelCloseTimer = setTimeout(() => { panel.hidden = true; }, 340);
+      document.body.style.overflow = '';
+    }
+  }
+
   setAssistButtonsDisabled(disabled) {
     [
       this.elements.assistRetryBtn,
@@ -1562,6 +1597,7 @@ export class WorkspaceTaskPage {
       }
 
       this.notify('success', 'Task updated');
+      this.toggleAssistPanel(false);
       if (this.elements.assistMessage) {
         this.elements.assistMessage.value = '';
       }
