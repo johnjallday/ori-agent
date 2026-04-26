@@ -115,6 +115,20 @@ func (s *FileStore) Save(ws *Workspace) error {
 		ws.FolderSlug = Slugify(ws.Name)
 	}
 
+	// Stale-write detection: if the in-memory cache holds a newer version
+	// than the workspace being saved, a concurrent writer beat us to it and
+	// our update is overwriting their change. Log a warning so the issue is
+	// observable; full CAS rejection requires caller-side retry logic.
+	if cached, ok := s.cache[ws.ID]; ok && cached.Version > ws.Version {
+		logger.Warn("possible lost write: saving workspace over a newer cached version",
+			logger.Fields{
+				"workspace_id":     ws.ID,
+				"incoming_version": ws.Version,
+				"cached_version":   cached.Version,
+			})
+	}
+	ws.Version++
+
 	// Determine the parent directory for this workspace
 	parentDir := s.basePath
 	if ws.ParentID != "" {
@@ -188,7 +202,7 @@ func (s *FileStore) Save(ws *Workspace) error {
 
 	// Write workspace.json inside the folder
 	configPath := filepath.Join(folderPath, WorkspaceConfigFile)
-	if err := os.WriteFile(configPath, data, 0644); err != nil {
+	if err := atomicWriteFile(configPath, data, 0644); err != nil {
 		return fmt.Errorf("failed to write workspace file: %w", err)
 	}
 
@@ -260,7 +274,7 @@ func (s *FileStore) SaveAt(ws *Workspace, location string) error {
 		return fmt.Errorf("failed to serialize workspace: %w", err)
 	}
 	configPath := filepath.Join(folderPath, WorkspaceConfigFile)
-	if err := os.WriteFile(configPath, data, 0644); err != nil {
+	if err := atomicWriteFile(configPath, data, 0644); err != nil {
 		return fmt.Errorf("failed to write workspace file: %w", err)
 	}
 
@@ -349,7 +363,7 @@ func (s *FileStore) RebindExistingFolder(ws *Workspace, folderPath string) error
 	if err != nil {
 		return fmt.Errorf("failed to serialize workspace: %w", err)
 	}
-	if err := os.WriteFile(configPath, data, 0644); err != nil {
+	if err := atomicWriteFile(configPath, data, 0644); err != nil {
 		return fmt.Errorf("failed to write workspace file: %w", err)
 	}
 
@@ -381,6 +395,36 @@ func (s *FileStore) RebindExistingFolder(ws *Workspace, folderPath string) error
 		})
 	}
 
+	return nil
+}
+
+// atomicWriteFile writes data to path via a temp file + rename so a crash
+// mid-write cannot leave a truncated/corrupt file behind.
+func atomicWriteFile(path string, data []byte, perm os.FileMode) error {
+	dir := filepath.Dir(path)
+	tmp, err := os.CreateTemp(dir, ".tmp-"+filepath.Base(path)+"-*")
+	if err != nil {
+		return err
+	}
+	tmpPath := tmp.Name()
+	if _, err := tmp.Write(data); err != nil {
+		tmp.Close()
+		os.Remove(tmpPath)
+		return err
+	}
+	if err := tmp.Chmod(perm); err != nil {
+		tmp.Close()
+		os.Remove(tmpPath)
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		os.Remove(tmpPath)
+		return err
+	}
+	if err := os.Rename(tmpPath, path); err != nil {
+		os.Remove(tmpPath)
+		return err
+	}
 	return nil
 }
 
@@ -485,14 +529,15 @@ func (s *FileStore) BasePath() string {
 	return s.basePath
 }
 
-// Get retrieves a workspace by ID
+// Get retrieves a workspace by ID. Returns a deep clone so callers may safely
+// mutate the result without affecting the cache or other concurrent callers.
 func (s *FileStore) Get(id string) (*Workspace, error) {
 	s.mu.RLock()
 
 	// Check cache first
 	if ws, ok := s.cache[id]; ok {
 		s.mu.RUnlock()
-		return ws, nil
+		return cloneWorkspaceForRebind(ws)
 	}
 
 	// Check if we know the slug for this ID
@@ -509,7 +554,7 @@ func (s *FileStore) Get(id string) (*Workspace, error) {
 
 	// Double-check cache after acquiring write lock
 	if ws, ok := s.cache[id]; ok {
-		return ws, nil
+		return cloneWorkspaceForRebind(ws)
 	}
 
 	folderPath := s.resolveFolder(slug)
@@ -543,7 +588,7 @@ func (s *FileStore) Get(id string) (*Workspace, error) {
 	// Update cache
 	s.cache[id] = ws
 
-	return ws, nil
+	return cloneWorkspaceForRebind(ws)
 }
 
 // List returns all workspace IDs from the in-memory cache.
@@ -1026,7 +1071,7 @@ func (s *FileStore) persistWorkspaceLocked(ws *Workspace) error {
 		return fmt.Errorf("failed to serialize workspace: %w", err)
 	}
 	configPath := filepath.Join(s.resolveFolder(relPath), WorkspaceConfigFile)
-	if err := os.WriteFile(configPath, data, 0644); err != nil {
+	if err := atomicWriteFile(configPath, data, 0644); err != nil {
 		return fmt.Errorf("failed to write workspace file: %w", err)
 	}
 	return nil
@@ -1069,7 +1114,7 @@ func (s *FileStore) persistMigration(ws *Workspace, configPath string) {
 		logger.Error("failed to serialize migrated workspace", logger.Fields{"err": err, "workspace_id": ws.ID})
 		return
 	}
-	if err := os.WriteFile(configPath, data, 0644); err != nil {
+	if err := atomicWriteFile(configPath, data, 0644); err != nil {
 		logger.Error("failed to persist migrated workspace", logger.Fields{"workspace_id": ws.ID, "err": err})
 		return
 	}

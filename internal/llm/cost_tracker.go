@@ -87,6 +87,13 @@ type CostTracker struct {
 	mu            sync.RWMutex
 	dataFile      string
 	maxRecords    int // Maximum records to keep in memory
+
+	// saveCh signals the writer goroutine that records have changed.
+	// Buffered (size 1) so concurrent TrackUsage calls coalesce into a
+	// single subsequent write, eliminating interleaved/torn writes.
+	saveCh   chan struct{}
+	stopCh   chan struct{}
+	saveDone chan struct{}
 }
 
 // NewCostTracker creates a new cost tracker
@@ -96,6 +103,9 @@ func NewCostTracker(dataDir string) *CostTracker {
 		records:       make([]UsageRecord, 0),
 		dataFile:      filepath.Join(dataDir, "usage_records.json"),
 		maxRecords:    10000, // Keep last 10k records in memory
+		saveCh:        make(chan struct{}, 1),
+		stopCh:        make(chan struct{}),
+		saveDone:      make(chan struct{}),
 	}
 
 	// Initialize default pricing models
@@ -104,7 +114,53 @@ func NewCostTracker(dataDir string) *CostTracker {
 	// Load existing records
 	_ = ct.loadRecords() // Ignore error on init, will retry later
 
+	go ct.saveLoop()
+
 	return ct
+}
+
+// Close stops the background writer goroutine after flushing any pending save.
+func (ct *CostTracker) Close() {
+	select {
+	case <-ct.stopCh:
+		return
+	default:
+	}
+	close(ct.stopCh)
+	<-ct.saveDone
+}
+
+// saveLoop is the single writer goroutine. It coalesces save signals so that
+// bursts of TrackUsage calls produce one subsequent write rather than N
+// racing writes.
+func (ct *CostTracker) saveLoop() {
+	defer close(ct.saveDone)
+	for {
+		select {
+		case <-ct.stopCh:
+			// Flush one final time if a save is pending
+			select {
+			case <-ct.saveCh:
+				ct.persistSnapshot()
+			default:
+			}
+			return
+		case <-ct.saveCh:
+			ct.persistSnapshot()
+		}
+	}
+}
+
+// persistSnapshot snapshots records under read lock and writes to disk.
+func (ct *CostTracker) persistSnapshot() {
+	ct.mu.RLock()
+	snapshot := make([]UsageRecord, len(ct.records))
+	copy(snapshot, ct.records)
+	ct.mu.RUnlock()
+
+	if err := ct.saveRecordsCopy(snapshot); err != nil {
+		logger.Warn("Failed to save cost tracking records", logger.Fields{"error": err})
+	}
 }
 
 // initializePricingModels sets up default pricing for supported models
@@ -229,16 +285,12 @@ func (ct *CostTracker) TrackUsage(provider, model, agentName string, usage Usage
 		ct.records = ct.records[len(ct.records)-ct.maxRecords:]
 	}
 
-	// Make a copy of records for async save to avoid race condition
-	recordsCopy := make([]UsageRecord, len(ct.records))
-	copy(recordsCopy, ct.records)
-
-	// Save asynchronously with copied data
-	go func() {
-		if err := ct.saveRecordsCopy(recordsCopy); err != nil {
-			logger.Warn("Failed to save cost tracking records", logger.Fields{"error": err})
-		}
-	}()
+	// Signal the writer goroutine. Non-blocking: if a save is already
+	// queued, this call coalesces into it.
+	select {
+	case ct.saveCh <- struct{}{}:
+	default:
+	}
 
 	return nil
 }
@@ -393,9 +445,25 @@ func (ct *CostTracker) saveRecordsCopy(records []UsageRecord) error {
 		return fmt.Errorf("failed to marshal records: %w", err)
 	}
 
-	// Write to file
-	if err := os.WriteFile(ct.dataFile, data, 0644); err != nil {
+	// Atomic write: temp file + rename. Avoids leaving a truncated/corrupt
+	// file on crash mid-write.
+	tmp, err := os.CreateTemp(dir, "usage_records-*.json.tmp")
+	if err != nil {
+		return fmt.Errorf("failed to create temp file: %w", err)
+	}
+	tmpPath := tmp.Name()
+	if _, err := tmp.Write(data); err != nil {
+		tmp.Close()
+		os.Remove(tmpPath)
 		return fmt.Errorf("failed to write records: %w", err)
+	}
+	if err := tmp.Close(); err != nil {
+		os.Remove(tmpPath)
+		return fmt.Errorf("failed to close temp file: %w", err)
+	}
+	if err := os.Rename(tmpPath, ct.dataFile); err != nil {
+		os.Remove(tmpPath)
+		return fmt.Errorf("failed to rename temp file: %w", err)
 	}
 
 	return nil

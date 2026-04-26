@@ -179,7 +179,7 @@ func (h *HTTPHandler) ServeFile(w http.ResponseWriter, r *http.Request) {
 	// Security: Ensure the resolved path is within the files directory
 	absFilesPath, _ := filepath.Abs(filesPath)
 	absFilePath, _ := filepath.Abs(filePath)
-	if !strings.HasPrefix(absFilePath, absFilesPath) {
+	if !isPathWithin(absFilePath, absFilesPath) {
 		orihttp.BadRequest(w, "Invalid file path")
 		return
 	}

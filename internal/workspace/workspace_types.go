@@ -67,6 +67,7 @@ type Workspace struct {
 	Workflows            map[string]Workflow         `json:"workflows,omitempty"`
 	Layout               *CanvasLayout               `json:"layout,omitempty"` // Canvas layout (positions of tasks and agents)
 	Status               WorkspaceStatus             `json:"status"`
+	Version              int64                       `json:"version,omitempty"` // monotonic, bumped on every Save; used to detect lost writes
 	CreatedAt            time.Time                   `json:"created_at"`
 	UpdatedAt            time.Time                   `json:"updated_at"`
 	mu                   sync.RWMutex                `json:"-"`

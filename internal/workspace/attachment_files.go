@@ -12,6 +12,26 @@ import (
 	"github.com/google/uuid"
 )
 
+// isPathWithin reports whether absChild is the same as or contained within absParent.
+// Both arguments must be cleaned absolute paths. Uses filepath.Rel to avoid the
+// "/foo/bar" prefix-matching "/foo/bar-evil" pitfall.
+func isPathWithin(absChild, absParent string) bool {
+	if absChild == "" || absParent == "" {
+		return false
+	}
+	rel, err := filepath.Rel(absParent, absChild)
+	if err != nil {
+		return false
+	}
+	if rel == "." {
+		return true
+	}
+	if strings.HasPrefix(rel, "..") {
+		return false
+	}
+	return !filepath.IsAbs(rel)
+}
+
 type AttachmentFileStatus string
 
 const (
@@ -210,7 +230,7 @@ func workspaceOwnedAttachmentPath(resolver AttachmentFilePathResolver, workspace
 	if err != nil {
 		return ""
 	}
-	if !strings.HasPrefix(absJoined, absFilesPath+string(os.PathSeparator)) && absJoined != absFilesPath {
+	if !isPathWithin(absJoined, absFilesPath) {
 		return ""
 	}
 
