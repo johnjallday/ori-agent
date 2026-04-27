@@ -502,11 +502,24 @@ body::after {
   cursor: pointer;
 }
 
+.vault-modal-dialog {
+  resize: both;
+  overflow: auto;
+  min-width: 520px;
+  min-height: 400px;
+  max-width: min(96vw, 1600px);
+  max-height: 95vh;
+}
+
 .vault-modal-dialog.is-floating {
   margin: 0 !important;
   position: absolute;
   top: 0;
   left: 0;
+}
+
+.vault-modal-content {
+  height: 100%;
 }
 
 /* Allow drag/drop events to pass through the vault modal so attachments

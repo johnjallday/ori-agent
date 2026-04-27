@@ -3905,11 +3905,13 @@
     header.addEventListener('pointerup', onPointerUp);
     header.addEventListener('pointercancel', onPointerUp);
 
-    // Reset position when the modal is reopened.
+    // Reset position and size when the modal is reopened.
     modalEl.addEventListener('hidden.bs.modal', function() {
       dialog.classList.remove('is-floating');
       dialog.style.left = '';
       dialog.style.top = '';
+      dialog.style.width = '';
+      dialog.style.height = '';
     });
   }
 
