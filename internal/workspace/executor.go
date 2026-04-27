@@ -75,7 +75,7 @@ func (te *TaskExecutor) SetEventBus(eventBus *EventBus) {
 
 // Start begins the task executor polling loop
 func (te *TaskExecutor) Start() {
-	logger.Debug("🚀 Task executor started (poll interval: , max concurrent: )", logger.Fields{"maxconcurrent": te.maxConcurrent, "task_id": te.pollInterval})
+	logger.Debug("Task executor started", logger.Fields{"max_concurrent": te.maxConcurrent, "poll_interval": te.pollInterval})
 
 	// Clean up orphaned tasks before starting
 	te.cleanupOrphanedTasks()
@@ -202,7 +202,7 @@ func (te *TaskExecutor) checkAndExecuteTasks() {
 			// Check if we have capacity
 			if len(te.runningTasks) >= te.maxConcurrent {
 				te.mu.Unlock()
-				logger.Warn("Max concurrent tasks reached (), deferring task", logger.Fields{"error": te.maxConcurrent, "id": task.ID})
+				logger.Warn("Max concurrent tasks reached, deferring task", logger.Fields{"max_concurrent": te.maxConcurrent, "task_id": task.ID})
 				continue
 			}
 
@@ -278,7 +278,7 @@ func (te *TaskExecutor) executeTask(ws *Workspace, task Task) {
 	task.StartedAt = &now
 
 	if err := ws.UpdateTask(task); err != nil {
-		logger.Error("Failed to update task status", logger.Fields{"status": err})
+		logger.Error("Failed to update task status", logger.Fields{"task_id": task.ID, "error": err})
 	}
 	if err := te.workspaceStore.Save(ws); err != nil {
 		logger.Error("Failed to save workspace", logger.Fields{"error": err})
@@ -380,7 +380,7 @@ func (te *TaskExecutor) executeTask(ws *Workspace, task Task) {
 
 		// Save updated task
 		if err := ws.UpdateTask(*updatedTask); err != nil {
-			logger.Error("Failed to update task", logger.Fields{"task_id": err})
+			logger.Error("Failed to update task", logger.Fields{"task_id": updatedTask.ID, "error": err})
 			return
 		}
 		if err := te.workspaceStore.Save(ws); err != nil {

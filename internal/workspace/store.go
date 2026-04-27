@@ -450,9 +450,12 @@ func nextAvailableWorkspaceSlug(parentDir, baseSlug string) string {
 		candidate := appendWorkspaceSlugSuffix(baseSlug, suffix)
 		existsOnDisk, err := pathExists(filepath.Join(parentDir, candidate))
 		if err != nil {
-			// Fall back to the candidate even if stat fails; the create path will
-			// validate it again before writing to disk.
-			return candidate
+			// Stat failed for a reason other than NotExist (permissions, I/O).
+			// Returning the candidate would risk a collision the caller cannot
+			// detect — skip and try the next suffix instead.
+			logger.Warn("slug suffix stat failed, trying next",
+				logger.Fields{"parent": parentDir, "candidate": candidate, "error": err})
+			continue
 		}
 		if !existsOnDisk {
 			return candidate
@@ -1156,10 +1159,23 @@ func (s *FileStore) loadWorkspacesFromDir(dir string, depth int) error {
 
 		ws, err := FromJSON(data)
 		if err != nil {
-			logger.Warn("Failed to deserialize workspace file, skipping", logger.Fields{
-				"file":  configPath,
-				"error": err.Error(),
-			})
+			// Quarantine the corrupt file so it isn't silently skipped on
+			// every subsequent boot. The renamed file remains for forensic
+			// recovery; the workspace will surface as unregistered.
+			quarantinePath := fmt.Sprintf("%s.corrupt-%d", configPath, time.Now().UnixNano())
+			if renameErr := os.Rename(configPath, quarantinePath); renameErr != nil {
+				logger.Error("Failed to quarantine corrupt workspace file", logger.Fields{
+					"file":         configPath,
+					"parse_error":  err.Error(),
+					"rename_error": renameErr.Error(),
+				})
+			} else {
+				logger.Error("Quarantined corrupt workspace file", logger.Fields{
+					"file":           configPath,
+					"quarantined_to": quarantinePath,
+					"parse_error":    err.Error(),
+				})
+			}
 			continue
 		}
 

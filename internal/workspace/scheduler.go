@@ -44,7 +44,7 @@ func (ts *TaskScheduler) SetEventBus(eventBus *EventBus) {
 
 // Start begins the scheduler polling loop
 func (ts *TaskScheduler) Start() {
-	logger.Debug("📅 Task scheduler started (poll interval: )", logger.Fields{"task_id": ts.pollInterval})
+	logger.Debug("Task scheduler started", logger.Fields{"poll_interval": ts.pollInterval})
 
 	ts.wg.Add(1)
 	go ts.pollLoop()
@@ -319,7 +319,7 @@ func (ts *TaskScheduler) recordTaskScheduleFailure(ws *Workspace, task *Task, er
 
 	// Auto-disable after 5 consecutive failures
 	if task.FailureCount >= 5 {
-		logger.Warn("Task schedule disabled after consecutive failures", logger.Fields{"task_id": task.ID, "failurecount": task.FailureCount})
+		logger.Warn("Task schedule disabled after consecutive failures", logger.Fields{"task_id": task.ID, "failure_count": task.FailureCount})
 		task.ScheduleEnabled = false
 	}
 
@@ -365,7 +365,7 @@ func (ts *TaskScheduler) executeScheduledTask(ws *Workspace, st *ScheduledTask) 
 		st.NextRun = nextRun
 		st.LastRun = &now
 		if err := ws.UpdateScheduledTask(*st); err != nil {
-			logger.Error("Failed to update scheduled task", logger.Fields{"task_id": err})
+			logger.Error("Failed to update scheduled task", logger.Fields{"error": err})
 		}
 		if err := ts.workspaceStore.Save(ws); err != nil {
 			logger.Error("Failed to save workspace", logger.Fields{"error": err})
@@ -429,11 +429,11 @@ func (ts *TaskScheduler) rerunTargetTask(ws *Workspace, st *ScheduledTask, now t
 
 	if nextRun == nil {
 		st.Enabled = false
-		logger.Info("📅 Scheduled task completed (one-time execution), disabling", logger.Fields{"duration": st.ID})
+		logger.Info("Scheduled task completed (one-time execution), disabling", logger.Fields{"scheduler_id": st.ID})
 	}
 
 	if err := ws.UpdateScheduledTask(*st); err != nil {
-		logger.Error("Failed to update scheduled task", logger.Fields{"task_id": err})
+		logger.Error("Failed to update scheduled task", logger.Fields{"error": err})
 		return
 	}
 
@@ -484,12 +484,12 @@ func (ts *TaskScheduler) recordScheduleFailure(ws *Workspace, st *ScheduledTask,
 	}
 
 	if st.FailureCount >= 5 {
-		logger.Warn("Scheduled task disabled after consecutive failures", logger.Fields{"task_id": st.ID, "failurecount": st.FailureCount})
+		logger.Warn("Scheduled task disabled after consecutive failures", logger.Fields{"task_id": st.ID, "failure_count": st.FailureCount})
 		st.Enabled = false
 	}
 
 	if err := ws.UpdateScheduledTask(*st); err != nil {
-		logger.Error("Failed to update scheduled task", logger.Fields{"task_id": err})
+		logger.Error("Failed to update scheduled task", logger.Fields{"error": err})
 	}
 	if err := ts.workspaceStore.Save(ws); err != nil {
 		logger.Error("Failed to save workspace", logger.Fields{"error": err})
@@ -523,8 +523,28 @@ func (ts *TaskScheduler) calculateNextRun(config ScheduleConfig, lastRun time.Ti
 	return CalculateNextRun(config, lastRun)
 }
 
+// skipPastIntervals advances next by step until it is strictly after now.
+// Used by interval/daily/weekly/cron paths so that a long downtime does not
+// produce a burst of catch-up firings on the next poll. Caps iterations to
+// avoid runaway loops on malformed configs.
+func skipPastIntervals(next, now time.Time, step time.Duration) time.Time {
+	if step <= 0 {
+		return next
+	}
+	const maxSkips = 100000
+	for i := 0; i < maxSkips && !next.After(now); i++ {
+		next = next.Add(step)
+	}
+	return next
+}
+
+// nowFunc is overridable in tests so deterministic times can drive
+// catch-up behavior. Production callers always observe time.Now.
+var nowFunc = time.Now
+
 // CalculateNextRun calculates the next execution time based on the schedule configuration.
 func CalculateNextRun(config ScheduleConfig, lastRun time.Time) *time.Time {
+	now := nowFunc()
 	switch config.Type {
 	case ScheduleOnce:
 		// One-time execution: return ExecuteAt if task hasn't run yet, nil otherwise
@@ -544,8 +564,10 @@ func CalculateNextRun(config ScheduleConfig, lastRun time.Time) *time.Time {
 			logger.Warn("Invalid interval schedule: interval is 0", logger.Fields{})
 			return nil
 		}
-		// Simple arithmetic: lastRun + interval duration
-		next := lastRun.Add(config.Interval)
+		// Simple arithmetic: lastRun + interval duration; if downtime caused
+		// the computed tick to fall in the past, skip ahead to the first
+		// future tick rather than catch-up firing.
+		next := skipPastIntervals(lastRun.Add(config.Interval), now, config.Interval)
 
 		// Check if next run exceeds end date
 		if config.EndDate != nil && next.After(*config.EndDate) {
@@ -564,13 +586,15 @@ func CalculateNextRun(config ScheduleConfig, lastRun time.Time) *time.Time {
 		// Parse time of day (format: "HH:MM")
 		var hour, minute int
 		if _, err := fmt.Sscanf(config.TimeOfDay, "%d:%d", &hour, &minute); err != nil {
-			logger.Warn("Invalid time_of_day format", logger.Fields{"err": err, "duration": config.TimeOfDay})
+			logger.Warn("Invalid time_of_day format", logger.Fields{"error": err, "time_of_day": config.TimeOfDay})
 			return nil
 		}
 
-		// Schedule for same time tomorrow (day + 1)
-		// We use time.Date to handle month/year transitions automatically
+		// Schedule for same time tomorrow (day + 1).
+		// We use time.Date to handle month/year transitions automatically.
+		// On long downtime, advance day-by-day until the tick is in the future.
 		next := time.Date(lastRun.Year(), lastRun.Month(), lastRun.Day()+1, hour, minute, 0, 0, lastRun.Location())
+		next = skipPastIntervals(next, now, 24*time.Hour)
 
 		// Check if next run exceeds end date
 		if config.EndDate != nil && next.After(*config.EndDate) {
@@ -589,7 +613,7 @@ func CalculateNextRun(config ScheduleConfig, lastRun time.Time) *time.Time {
 		// Parse time of day
 		var hour, minute int
 		if _, err := fmt.Sscanf(config.TimeOfDay, "%d:%d", &hour, &minute); err != nil {
-			logger.Warn("Invalid time_of_day format", logger.Fields{"duration": config.TimeOfDay, "err": err})
+			logger.Warn("Invalid time_of_day format", logger.Fields{"time_of_day": config.TimeOfDay, "error": err})
 			return nil
 		}
 
@@ -615,6 +639,8 @@ func CalculateNextRun(config ScheduleConfig, lastRun time.Time) *time.Time {
 			0,
 			lastRun.Location(),
 		)
+		// On long downtime, advance week-by-week until the tick is in the future.
+		next = skipPastIntervals(next, now, 7*24*time.Hour)
 
 		// Check if next run exceeds end date
 		if config.EndDate != nil && next.After(*config.EndDate) {
@@ -640,9 +666,19 @@ func CalculateNextRun(config ScheduleConfig, lastRun time.Time) *time.Time {
 			return nil
 		}
 
-		// Calculate next execution time from lastRun
-		// The cron library handles all complex cases (month transitions, leap years, etc.)
+		// Calculate next execution time from lastRun.
+		// On long downtime, schedule.Next(lastRun) can still be in the past;
+		// iterate forward until we land on the first tick after now.
 		next := schedule.Next(lastRun)
+		const maxSkips = 100000
+		for i := 0; i < maxSkips && !next.After(now); i++ {
+			advanced := schedule.Next(next)
+			if !advanced.After(next) {
+				// Defensive: cron returned a non-monotonic value; bail out.
+				break
+			}
+			next = advanced
+		}
 
 		// Check if next run exceeds end date
 		if config.EndDate != nil && next.After(*config.EndDate) {

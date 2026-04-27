@@ -53,7 +53,7 @@ func NewStepExecutor(store Store, handler TaskHandler, config StepExecutorConfig
 
 // Start begins the step executor polling loop
 func (se *StepExecutor) Start() {
-	logger.Debug("🎬 Step executor started (poll interval: )", logger.Fields{"pollinterval": se.pollInterval})
+	logger.Debug("Step executor started", logger.Fields{"poll_interval": se.pollInterval})
 
 	se.wg.Add(1)
 	go se.pollLoop()
@@ -191,7 +191,7 @@ func (se *StepExecutor) updateStepStatuses(ws *Workspace, workflow *Workflow) {
 		if shouldSkip {
 			step.Status = StepStatusSkipped
 			changed = true
-			logger.Debug("⏭️ Step () skipped due to condition", logger.Fields{"name": step.Name, "id": step.ID})
+			logger.Debug("Step skipped due to condition", logger.Fields{"name": step.Name, "id": step.ID})
 		} else if dependenciesMet {
 			// Check condition if present
 			shouldExecute, err := se.evaluateCondition(workflow, step)
@@ -203,11 +203,11 @@ func (se *StepExecutor) updateStepStatuses(ws *Workspace, workflow *Workflow) {
 			if shouldExecute {
 				step.Status = StepStatusReady
 				changed = true
-				logger.Info("Step () is ready to execute", logger.Fields{"id": step.ID, "name": step.Name})
+				logger.Info("Step is ready to execute", logger.Fields{"id": step.ID, "name": step.Name})
 			} else {
 				step.Status = StepStatusSkipped
 				changed = true
-				logger.Debug("⏭️ Step () skipped due to condition", logger.Fields{"name": step.Name, "id": step.ID})
+				logger.Debug("Step skipped due to condition", logger.Fields{"name": step.Name, "id": step.ID})
 			}
 		} else {
 			if step.Status != StepStatusWaiting {
@@ -350,7 +350,7 @@ func (se *StepExecutor) executeStep(ws *Workspace, workflow *Workflow, step *Wor
 	}
 	se.mu.Unlock()
 
-	logger.Debug("▶️ Executing step () in workflow", logger.Fields{"id": step.ID, "name": workflow.Name})
+	logger.Debug("Executing step in workflow", logger.Fields{"step_id": step.ID, "workflow_name": workflow.Name})
 
 	// Update step status to in_progress
 	step.Status = StepStatusInProgress
@@ -425,11 +425,11 @@ func (se *StepExecutor) executeStep(ws *Workspace, workflow *Workflow, step *Wor
 		updatedStep.CompletedAt = &completedAt
 
 		if execErr != nil {
-			logger.Error("Step () failed", logger.Fields{"id": step.ID, "name": step.Name, "execErr": execErr})
+			logger.Error("Step failed", logger.Fields{"id": step.ID, "name": step.Name, "execErr": execErr})
 			updatedStep.Status = StepStatusFailed
 			updatedStep.Error = execErr.Error()
 		} else {
-			logger.Info("Step () completed successfully", logger.Fields{"id": step.ID, "name": step.Name})
+			logger.Info("Step completed successfully", logger.Fields{"id": step.ID, "name": step.Name})
 			updatedStep.Status = StepStatusCompleted
 			updatedStep.Result = result
 		}
@@ -531,10 +531,10 @@ func (se *StepExecutor) checkWorkflowCompletion(ws *Workspace, workflow *Workflo
 
 		if anyFailed {
 			workflow.Status = WorkflowStatusFailed
-			logger.Error("Workflow () completed with failures", logger.Fields{"id": workflow.ID, "name": workflow.Name})
+			logger.Error("Workflow completed with failures", logger.Fields{"id": workflow.ID, "name": workflow.Name})
 		} else {
 			workflow.Status = WorkflowStatusCompleted
-			logger.Info("Workflow () completed successfully", logger.Fields{"id": workflow.ID, "name": workflow.Name})
+			logger.Info("Workflow completed successfully", logger.Fields{"id": workflow.ID, "name": workflow.Name})
 		}
 
 		_ = ws.UpdateWorkflow(*workflow) // Best effort update
