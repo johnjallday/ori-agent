@@ -6760,6 +6760,20 @@
       resize: vertical;
       min-height: 2.5em;
     }
+
+    /* Vault attachment drop target on the Files panel */
+    #workspace-detail-files-panel.is-vault-drop-target {
+      outline: 2px dashed var(--bs-primary, #f59e0b);
+      outline-offset: -4px;
+      box-shadow: 0 0 0 4px rgba(245, 158, 11, 0.18);
+      transition: outline-color 120ms ease, box-shadow 120ms ease;
+    }
+    .vault-modal-attachment-card[draggable="true"] {
+      cursor: grab;
+    }
+    .vault-modal-attachment-card.is-dragging {
+      opacity: 0.55;
+    }
   </style>
 
   <!-- Core Libraries -->

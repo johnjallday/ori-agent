@@ -248,6 +248,7 @@ export class WorkspaceDetailPage {
     this.refreshHomeAssistantQuickPrompts();
     this.bindEvents();
     this.setupFileModal();
+    this.setupFilesPanelVaultDrop();
     await this.loadWorkspace();
     await this.loadAgentCatalog();
     await this.loadWorkspaceAgentSnapshots();
@@ -1019,6 +1020,95 @@ export class WorkspaceDetailPage {
       if (vaultUnlockBtn) {
         vaultUnlockBtn.disabled = false;
         vaultUnlockBtn.textContent = 'Unlock';
+      }
+    }
+  }
+
+  setupFilesPanelVaultDrop() {
+    const panel = document.getElementById('workspace-detail-files-panel');
+    if (!panel || panel.dataset.vaultDropBound === 'true') {
+      return;
+    }
+    panel.dataset.vaultDropBound = 'true';
+
+    const hasVaultDrag = (event) => {
+      if (window.__oriVaultDragAttachment) {
+        return true;
+      }
+      const types = event.dataTransfer?.types;
+      if (!types) return false;
+      return Array.from(types).includes('application/x-ori-vault-attachment');
+    };
+
+    panel.addEventListener('dragenter', (event) => {
+      if (!hasVaultDrag(event)) return;
+      event.preventDefault();
+      panel.classList.add('is-vault-drop-target');
+    });
+
+    panel.addEventListener('dragover', (event) => {
+      if (!hasVaultDrag(event)) return;
+      event.preventDefault();
+      if (event.dataTransfer) {
+        event.dataTransfer.dropEffect = 'copy';
+      }
+      panel.classList.add('is-vault-drop-target');
+    });
+
+    panel.addEventListener('dragleave', (event) => {
+      if (event.target !== panel && panel.contains(event.relatedTarget)) {
+        return;
+      }
+      panel.classList.remove('is-vault-drop-target');
+    });
+
+    panel.addEventListener('drop', async (event) => {
+      const payload = window.__oriVaultDragAttachment;
+      if (!payload) {
+        return;
+      }
+      event.preventDefault();
+      event.stopPropagation();
+      panel.classList.remove('is-vault-drop-target');
+      window.__oriVaultDragAttachment = null;
+      await this.attachVaultAttachmentToFiles(payload);
+    });
+  }
+
+  async attachVaultAttachmentToFiles(item) {
+    if (!item || !item.contentBase64) {
+      if (window.Toast) {
+        window.Toast.error('Reveal the vault payload before dragging an attachment.');
+      }
+      return;
+    }
+
+    try {
+      const file = this.buildWorkspaceFileFromVaultAttachment(item);
+      const formData = new FormData();
+      formData.append('file', file);
+      formData.append('workspace_id', this.workspaceId);
+      if (item.recordLabel) {
+        formData.append('notes', `From vault entry: ${item.recordLabel}`);
+      }
+
+      const response = await fetch(`/api/workspaces/${encodeURIComponent(this.workspaceId)}/files`, {
+        method: 'POST',
+        body: formData
+      });
+
+      if (!response.ok) {
+        throw new Error(`Failed to add ${item.name || 'vault file'} to the workspace`);
+      }
+
+      if (window.Toast) {
+        window.Toast.success(`Added ${item.name || 'vault file'} to workspace`);
+      }
+      await this.loadFiles();
+    } catch (error) {
+      console.error('Failed to attach vault file via drag-and-drop:', error);
+      if (window.Toast) {
+        window.Toast.error(error.message || 'Failed to attach vault file to workspace');
       }
     }
   }

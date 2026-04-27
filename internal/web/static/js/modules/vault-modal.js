@@ -2411,7 +2411,7 @@
       : '<div class="vault-modal-attachment-thumb is-generic">' + attachmentIcon(normalized.kind) + '</div>';
 
     return (
-      '<div class="vault-modal-attachment-card">' +
+      '<div class="vault-modal-attachment-card" draggable="true" data-drag-attachment="true" data-attachment-id="' + escapeHTML(normalized.id) + '" title="Drag into a workspace Files panel to attach as a reference file">' +
         thumbnail +
         '<div class="vault-modal-attachment-card-body">' +
           '<div class="vault-modal-attachment-name">' + escapeHTML(normalized.name) + '</div>' +
@@ -3713,6 +3713,14 @@
     });
 
     elements.preview?.addEventListener('dragstart', function(event) {
+      const attachmentCard = event.target instanceof HTMLElement
+        ? event.target.closest('[data-drag-attachment="true"][data-attachment-id]')
+        : null;
+      if (attachmentCard) {
+        beginAttachmentDrag(attachmentCard, event);
+        return;
+      }
+
       const button = dragRecordButtonFromTarget(event.target);
       if (!button) {
         return;
@@ -3722,8 +3730,61 @@
     });
 
     elements.preview?.addEventListener('dragend', function() {
+      clearAttachmentDrag();
       clearRecordDrag();
     });
+  }
+
+  function beginAttachmentDrag(card, event) {
+    const attachmentID = String(card.getAttribute('data-attachment-id') || '').trim();
+    if (!attachmentID) {
+      return;
+    }
+
+    const record = state.selectedRecord;
+    const attachment = entryAttachmentsFromPayload(record?.payload).find(function(item) {
+      return item.id === attachmentID;
+    });
+    if (!attachment || !String(attachment.content_base64 || '').trim()) {
+      return;
+    }
+
+    const payload = {
+      source: 'vault',
+      id: String(record.id || '') + ':' + String(attachment.id || '') + ':' + String(attachment.name || 'attachment'),
+      name: String(attachment.name || 'vault-attachment'),
+      size: Number(attachment.size_bytes || 0),
+      mimeType: String(attachment.mime_type || 'application/octet-stream'),
+      kind: String(attachment.kind || ''),
+      contentBase64: String(attachment.content_base64 || ''),
+      recordId: String(record.id || ''),
+      recordLabel: String(record.label || ''),
+      vaultId: String(record.vault_id || activeVaultID() || ''),
+      updatedAt: record.updated_at || record.created_at || ''
+    };
+
+    window.__oriVaultDragAttachment = payload;
+    card.classList.add('is-dragging');
+
+    if (event.dataTransfer) {
+      event.dataTransfer.effectAllowed = 'copy';
+      try {
+        event.dataTransfer.setData('application/x-ori-vault-attachment', payload.id);
+      } catch (err) {
+        // Some browsers restrict custom mime types in older versions; the window-scoped payload still works.
+      }
+      event.dataTransfer.setData('text/plain', payload.name);
+    }
+  }
+
+  function clearAttachmentDrag() {
+    if (elements?.preview) {
+      const dragging = elements.preview.querySelector('[data-drag-attachment="true"].is-dragging');
+      if (dragging) {
+        dragging.classList.remove('is-dragging');
+      }
+    }
+    window.__oriVaultDragAttachment = null;
   }
 
   function bindBreadcrumbEvents() {
