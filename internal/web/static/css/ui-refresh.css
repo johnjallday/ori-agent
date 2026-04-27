@@ -489,6 +489,34 @@ body::after {
   background:
     radial-gradient(circle at left top, rgba(255, 214, 153, 0.18), transparent 35%),
     linear-gradient(180deg, rgba(255, 250, 243, 0.98), rgba(247, 237, 218, 0.95));
+  cursor: grab;
+  user-select: none;
+}
+
+.vault-modal-header.is-dragging-modal {
+  cursor: grabbing;
+}
+
+.vault-modal-header .vault-modal-close,
+.vault-modal-header button {
+  cursor: pointer;
+}
+
+.vault-modal-dialog.is-floating {
+  margin: 0 !important;
+  position: absolute;
+  top: 0;
+  left: 0;
+}
+
+/* Allow drag/drop events to pass through the vault modal so attachments
+   can be dropped onto workspace panels rendered behind it. */
+body[data-vault-attachment-dragging="true"] #vaultModal,
+body[data-vault-attachment-dragging="true"] .modal-backdrop {
+  pointer-events: none;
+}
+body[data-vault-attachment-dragging="true"] #vaultModal .vault-modal-attachment-card[data-drag-attachment="true"] {
+  pointer-events: auto;
 }
 
 .vault-modal-title-group {

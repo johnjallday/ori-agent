@@ -249,6 +249,7 @@ export class WorkspaceDetailPage {
     this.bindEvents();
     this.setupFileModal();
     this.setupFilesPanelVaultDrop();
+    this.setupNotesPanelVaultDrop();
     await this.loadWorkspace();
     await this.loadAgentCatalog();
     await this.loadWorkspaceAgentSnapshots();
@@ -1032,12 +1033,14 @@ export class WorkspaceDetailPage {
     panel.dataset.vaultDropBound = 'true';
 
     const hasVaultDrag = (event) => {
-      if (window.__oriVaultDragAttachment) {
+      if (window.__oriVaultDragAttachment || window.__oriVaultDragRecord) {
         return true;
       }
       const types = event.dataTransfer?.types;
       if (!types) return false;
-      return Array.from(types).includes('application/x-ori-vault-attachment');
+      const list = Array.from(types);
+      return list.includes('application/x-ori-vault-attachment') ||
+        list.includes('application/x-ori-vault-record');
     };
 
     panel.addEventListener('dragenter', (event) => {
@@ -1063,22 +1066,172 @@ export class WorkspaceDetailPage {
     });
 
     panel.addEventListener('drop', async (event) => {
-      const payload = window.__oriVaultDragAttachment;
-      if (!payload) {
+      const attachmentPayload = window.__oriVaultDragAttachment;
+      const recordPayload = window.__oriVaultDragRecord;
+      if (!attachmentPayload && !recordPayload) {
         return;
       }
       event.preventDefault();
       event.stopPropagation();
       panel.classList.remove('is-vault-drop-target');
       window.__oriVaultDragAttachment = null;
-      await this.attachVaultAttachmentToFiles(payload);
+      window.__oriVaultDragRecord = null;
+      delete document.body.dataset.vaultAttachmentDragging;
+
+      if (attachmentPayload) {
+        await this.attachVaultAttachmentToFiles(attachmentPayload);
+        return;
+      }
+
+      await this.attachVaultRecordToFiles(recordPayload);
     });
   }
 
-  async attachVaultAttachmentToFiles(item) {
-    if (!item || !item.contentBase64) {
+  setupNotesPanelVaultDrop() {
+    const panel = document.getElementById('workspace-detail-notes-panel');
+    if (!panel || panel.dataset.vaultDropBound === 'true') {
+      return;
+    }
+    panel.dataset.vaultDropBound = 'true';
+
+    const hasVaultRecordDrag = (event) => {
+      if (window.__oriVaultDragRecord) {
+        return true;
+      }
+      const types = event.dataTransfer?.types;
+      if (!types) return false;
+      return Array.from(types).includes('application/x-ori-vault-record');
+    };
+
+    panel.addEventListener('dragenter', (event) => {
+      if (!hasVaultRecordDrag(event)) return;
+      event.preventDefault();
+      panel.classList.add('is-vault-drop-target');
+    });
+
+    panel.addEventListener('dragover', (event) => {
+      if (!hasVaultRecordDrag(event)) return;
+      event.preventDefault();
+      if (event.dataTransfer) {
+        event.dataTransfer.dropEffect = 'copy';
+      }
+      panel.classList.add('is-vault-drop-target');
+    });
+
+    panel.addEventListener('dragleave', (event) => {
+      if (event.target !== panel && panel.contains(event.relatedTarget)) {
+        return;
+      }
+      panel.classList.remove('is-vault-drop-target');
+    });
+
+    panel.addEventListener('drop', async (event) => {
+      const recordPayload = window.__oriVaultDragRecord;
+      if (!recordPayload) {
+        return;
+      }
+      event.preventDefault();
+      event.stopPropagation();
+      panel.classList.remove('is-vault-drop-target');
+      window.__oriVaultDragRecord = null;
+      window.__oriVaultDragAttachment = null;
+      delete document.body.dataset.vaultAttachmentDragging;
+      await this.attachVaultRecordToNotes(recordPayload);
+    });
+  }
+
+  extractNoteContentFromVaultRecord(record) {
+    if (!record || !record.payload || typeof record.payload !== 'object') {
+      return '';
+    }
+    const payload = record.payload;
+    if (typeof payload.note === 'string' && payload.note.trim()) {
+      return payload.note;
+    }
+    if (typeof payload.content === 'string' && payload.content.trim()) {
+      return payload.content;
+    }
+    if (typeof payload.text === 'string' && payload.text.trim()) {
+      return payload.text;
+    }
+    try {
+      return '```json\n' + JSON.stringify(payload, null, 2) + '\n```';
+    } catch (_) {
+      return '';
+    }
+  }
+
+  async attachVaultRecordToNotes(record) {
+    if (!record) return;
+
+    if (!record.payloadRevealed) {
       if (window.Toast) {
+        window.Toast.warning(`Reveal "${record.recordLabel || 'this entry'}" first so its note content can be copied.`);
+      }
+      return;
+    }
+
+    const content = this.extractNoteContentFromVaultRecord(record);
+    if (!content) {
+      if (window.Toast) {
+        window.Toast.warning(`"${record.recordLabel || 'This entry'}" has no readable note content to copy.`);
+      }
+      return;
+    }
+
+    const title = record.recordLabel || 'Vault note';
+    const ok = await this.createNote(title, content);
+    if (!ok) {
+      return;
+    }
+  }
+
+  async attachVaultRecordToFiles(record) {
+    if (!record) return;
+
+    if (!record.attachments || record.attachments.length === 0) {
+      const message = record.payloadRevealed
+        ? `"${record.recordLabel || 'This entry'}" has no file attachments. Drop it on the Notes panel to copy its text content instead.`
+        : `Reveal "${record.recordLabel || 'this entry'}" first. Drop on Files for attached files, or on Notes for note text.`;
+      if (window.Toast) {
+        window.Toast.warning(message);
+      }
+      return;
+    }
+
+    let succeeded = 0;
+    for (const attachment of record.attachments) {
+      try {
+        await this.attachVaultAttachmentToFiles({
+          ...attachment,
+          recordLabel: record.recordLabel,
+          recordId: record.recordId,
+          vaultId: record.vaultId
+        }, { silent: true });
+        succeeded += 1;
+      } catch (error) {
+        console.error('Failed to attach vault record attachment:', error);
+      }
+    }
+
+    if (succeeded > 0 && window.Toast) {
+      window.Toast.success(succeeded === 1
+        ? `Added 1 file from "${record.recordLabel}"`
+        : `Added ${succeeded} files from "${record.recordLabel}"`);
+    } else if (succeeded === 0 && window.Toast) {
+      window.Toast.error('Failed to attach files from the vault entry');
+    }
+  }
+
+  async attachVaultAttachmentToFiles(item, options = {}) {
+    const silent = Boolean(options.silent);
+
+    if (!item || !item.contentBase64) {
+      if (!silent && window.Toast) {
         window.Toast.error('Reveal the vault payload before dragging an attachment.');
+      }
+      if (silent) {
+        throw new Error('Missing decoded vault attachment content');
       }
       return;
     }
@@ -1101,12 +1254,15 @@ export class WorkspaceDetailPage {
         throw new Error(`Failed to add ${item.name || 'vault file'} to the workspace`);
       }
 
-      if (window.Toast) {
+      if (!silent && window.Toast) {
         window.Toast.success(`Added ${item.name || 'vault file'} to workspace`);
       }
       await this.loadFiles();
     } catch (error) {
       console.error('Failed to attach vault file via drag-and-drop:', error);
+      if (silent) {
+        throw error;
+      }
       if (window.Toast) {
         window.Toast.error(error.message || 'Failed to attach vault file to workspace');
       }

@@ -2492,8 +2492,40 @@
     draggedRecordElement.classList.add('is-dragging');
 
     if (event.dataTransfer) {
-      event.dataTransfer.effectAllowed = 'move';
+      event.dataTransfer.effectAllowed = 'copyMove';
       event.dataTransfer.setData('text/plain', recordID);
+      try {
+        event.dataTransfer.setData('application/x-ori-vault-record', recordID);
+      } catch (_) {}
+    }
+
+    const record = recordByID(recordID);
+    if (record) {
+      const attachments = entryAttachmentsFromPayload(record.payload).filter(function(item) {
+        return item && String(item.content_base64 || '').trim();
+      });
+      const decodedPayload = state.payloadRevealed && state.selectedRecord && state.selectedRecord.id === record.id
+        ? payloadWithoutAttachments(state.selectedRecord.payload)
+        : null;
+      window.__oriVaultDragRecord = {
+        recordId: String(record.id || ''),
+        recordLabel: String(record.label || ''),
+        recordType: String(record.type || ''),
+        vaultId: String(record.vault_id || activeVaultID() || ''),
+        payloadRevealed: Boolean(state.payloadRevealed),
+        payload: decodedPayload,
+        attachments: attachments.map(function(item) {
+          return {
+            id: String(item.id || ''),
+            name: String(item.name || 'attachment'),
+            mimeType: String(item.mime_type || 'application/octet-stream'),
+            kind: String(item.kind || ''),
+            size: Number(item.size_bytes || 0),
+            contentBase64: String(item.content_base64 || '')
+          };
+        })
+      };
+      document.body.dataset.vaultAttachmentDragging = 'true';
     }
   }
 
@@ -2504,6 +2536,8 @@
 
     draggedRecordID = '';
     draggedRecordElement = null;
+    window.__oriVaultDragRecord = null;
+    delete document.body.dataset.vaultAttachmentDragging;
     clearFolderDropTarget();
   }
 
@@ -3765,6 +3799,7 @@
 
     window.__oriVaultDragAttachment = payload;
     card.classList.add('is-dragging');
+    document.body.dataset.vaultAttachmentDragging = 'true';
 
     if (event.dataTransfer) {
       event.dataTransfer.effectAllowed = 'copy';
@@ -3785,6 +3820,97 @@
       }
     }
     window.__oriVaultDragAttachment = null;
+    delete document.body.dataset.vaultAttachmentDragging;
+  }
+
+  // Drop on the modal/window itself: clean up flags even if the page-level
+  // drop target never fired (e.g., dropped back on the modal).
+  document.addEventListener('drop', function() {
+    if (document.body.dataset.vaultAttachmentDragging === 'true') {
+      clearAttachmentDrag();
+    }
+  }, true);
+  document.addEventListener('dragend', function() {
+    if (document.body.dataset.vaultAttachmentDragging === 'true') {
+      clearAttachmentDrag();
+    }
+  }, true);
+
+  function setupMovableModal() {
+    const modalEl = document.getElementById('vaultModal');
+    if (!modalEl || modalEl.dataset.movableBound === 'true') {
+      return;
+    }
+    modalEl.dataset.movableBound = 'true';
+
+    const dialog = modalEl.querySelector('.vault-modal-dialog');
+    const header = modalEl.querySelector('.vault-modal-header');
+    if (!dialog || !header) {
+      return;
+    }
+
+    let dragState = null;
+
+    function onPointerDown(event) {
+      if (event.button !== 0) {
+        return;
+      }
+      // Ignore drags initiated on interactive controls (close button, etc).
+      if (event.target.closest('button, a, input, textarea, select, [role="button"]')) {
+        return;
+      }
+
+      const rect = dialog.getBoundingClientRect();
+      if (!dialog.classList.contains('is-floating')) {
+        dialog.classList.add('is-floating');
+        dialog.style.left = rect.left + 'px';
+        dialog.style.top = rect.top + 'px';
+      }
+
+      dragState = {
+        offsetX: event.clientX - rect.left,
+        offsetY: event.clientY - rect.top,
+        pointerId: event.pointerId
+      };
+      header.classList.add('is-dragging-modal');
+      header.setPointerCapture(event.pointerId);
+      event.preventDefault();
+    }
+
+    function onPointerMove(event) {
+      if (!dragState || event.pointerId !== dragState.pointerId) {
+        return;
+      }
+
+      const dialogRect = dialog.getBoundingClientRect();
+      const maxX = Math.max(0, window.innerWidth - dialogRect.width);
+      const maxY = Math.max(0, window.innerHeight - dialogRect.height);
+      const nextX = Math.min(maxX, Math.max(0, event.clientX - dragState.offsetX));
+      const nextY = Math.min(maxY, Math.max(0, event.clientY - dragState.offsetY));
+      dialog.style.left = nextX + 'px';
+      dialog.style.top = nextY + 'px';
+    }
+
+    function onPointerUp(event) {
+      if (!dragState || event.pointerId !== dragState.pointerId) {
+        return;
+      }
+      try { header.releasePointerCapture(dragState.pointerId); } catch (_) {}
+      dragState = null;
+      header.classList.remove('is-dragging-modal');
+    }
+
+    header.addEventListener('pointerdown', onPointerDown);
+    header.addEventListener('pointermove', onPointerMove);
+    header.addEventListener('pointerup', onPointerUp);
+    header.addEventListener('pointercancel', onPointerUp);
+
+    // Reset position when the modal is reopened.
+    modalEl.addEventListener('hidden.bs.modal', function() {
+      dialog.classList.remove('is-floating');
+      dialog.style.left = '';
+      dialog.style.top = '';
+    });
   }
 
   function bindBreadcrumbEvents() {
@@ -4185,6 +4311,7 @@
     applyModalMode();
     renderExplorer();
     bindEvents();
+    setupMovableModal();
     updateLauncherCount(null);
   }
 
