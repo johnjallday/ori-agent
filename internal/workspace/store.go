@@ -1224,7 +1224,13 @@ func NewInMemoryStore() *InMemoryStore {
 	}
 }
 
-// Save stores a workspace in memory
+// Save stores a workspace in memory.
+//
+// Note: unlike FileStore, InMemoryStore stores the caller's *Workspace pointer
+// directly rather than a clone. Several existing tests rely on inserting
+// workspaces with Go-typed map values (e.g. []string in Scope) that would
+// otherwise be flattened to []interface{} by the JSON-based clone helper.
+// Tests that need clone semantics should use FileStore.
 func (s *InMemoryStore) Save(ws *Workspace) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -1233,7 +1239,7 @@ func (s *InMemoryStore) Save(ws *Workspace) error {
 	return nil
 }
 
-// Get retrieves a workspace by ID
+// Get retrieves a workspace by ID.
 func (s *InMemoryStore) Get(id string) (*Workspace, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
