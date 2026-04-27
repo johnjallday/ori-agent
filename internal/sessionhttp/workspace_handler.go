@@ -1320,6 +1320,25 @@ func (h *Handler) restoreImportedWorkspace(ctx context.Context, folderPath strin
 		return nil, "", err
 	}
 
+	// Restore any workspace-local agent snapshots into the global agent store
+	// so the imported workspace's entry agent (and any other referenced agents)
+	// resolve cleanly even if the importing instance had never seen them before.
+	if h.agentStore != nil {
+		for _, item := range importTree {
+			if registered, restoreErr := agentworkspace.RestoreWorkspaceAgents(h.workspaceStore, item, h.agentStore); restoreErr != nil {
+				logger.Warn("Restore workspace agents during import failed", logger.Fields{
+					"workspace_id": item.ID,
+					"error":        restoreErr.Error(),
+				})
+			} else if len(registered) > 0 {
+				logger.Info("Imported workspace registered agents into global store", logger.Fields{
+					"workspace_id": item.ID,
+					"agents":       registered,
+				})
+			}
+		}
+	}
+
 	adapter := session.NewWorkspaceStoreAdapter(h.store)
 	for _, item := range importTree {
 		if item.Status == "" {

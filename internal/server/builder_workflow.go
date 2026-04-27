@@ -83,6 +83,17 @@ func (b *ServerBuilder) initializeWorkspaceStore() error {
 		}
 	}
 
+	// Wrap with AgentSnapshotStore so that every workspace Save() also writes
+	// workspace-local snapshots of any referenced agent that exists in the
+	// global agent registry. The snapshots make a workspace folder
+	// self-contained for export/import.
+	if b.st != nil {
+		ws = workspace.NewAgentSnapshotStore(ws, b.st)
+		// One-shot migration: snapshot referenced agents for every workspace
+		// already on disk so existing workspaces self-heal on next startup.
+		workspace.SnapshotAllWorkspaces(ws, b.st)
+	}
+
 	b.workspaceStore = ws
 
 	// Set workspace store on chat handler (uses SyncStore when available)
