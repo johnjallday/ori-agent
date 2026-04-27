@@ -679,6 +679,78 @@ func TestResolveAgentForWorkspace_MissingEntryAgentReturnsError(t *testing.T) {
 	}
 }
 
+func TestResolveAgentForWorkspace_UsesWorkspaceLocalSnapshotWhenGlobalMissing(t *testing.T) {
+	ws := &Workspace{
+		ID:   "ws-local-agent",
+		Name: "Imported",
+		SharedData: map[string]interface{}{
+			"entry_agent_name": "Woodworking Manager",
+		},
+		Agents: []string{"Woodworking Manager"},
+		AgentInstances: []AgentInstance{
+			{ID: "inst-1", Name: "Woodworking Manager", NodeID: "woodworking-manager-1", EntryPoint: true},
+		},
+	}
+
+	localAgent := &agent.Agent{Type: agent.TypeToolCalling}
+	localAgent.Settings.Model = "gpt-5-nano"
+
+	agentStore := &resolverAgentStoreStub{agents: map[string]*agent.Agent{}}
+	workspaceStore := newTestWorkspaceStore(t, ws)
+	if err := workspaceStore.SaveWorkspaceAgent(ws.ID, "Woodworking Manager", localAgent); err != nil {
+		t.Fatalf("seed workspace-local agent: %v", err)
+	}
+
+	registry := &runtimeRegistryStub{}
+	templates := &templateLookupStub{servers: map[string]mcp.ServerConfig{}}
+	resolver := NewAgentRuntimeResolver(agentStore, workspaceStore, registry, templates)
+
+	resolved, err := resolver.ResolveAgentForWorkspace("Woodworking Manager", ws.ID, "")
+	if err != nil {
+		t.Fatalf("expected workspace-local snapshot to satisfy resolver, got error: %v", err)
+	}
+	if resolved == nil || resolved.Agent == nil {
+		t.Fatal("expected resolved agent, got nil")
+	}
+	if resolved.Agent.Settings.Model != "gpt-5-nano" {
+		t.Fatalf("expected model from local snapshot, got %q", resolved.Agent.Settings.Model)
+	}
+}
+
+func TestResolveAgentForWorkspace_LocalSnapshotPreferredOverGlobal(t *testing.T) {
+	ws := &Workspace{
+		ID:     "ws-precedence",
+		Name:   "Precedence",
+		Agents: []string{"Manager"},
+		SharedData: map[string]interface{}{
+			"entry_agent_name": "Manager",
+		},
+		AgentInstances: []AgentInstance{
+			{ID: "inst-1", Name: "Manager", NodeID: "manager-1", EntryPoint: true},
+		},
+	}
+
+	globalAgent := &agent.Agent{Type: agent.TypeGeneral}
+	globalAgent.Settings.Model = "global-model"
+	localAgent := &agent.Agent{Type: agent.TypeToolCalling}
+	localAgent.Settings.Model = "local-model"
+
+	agentStore := &resolverAgentStoreStub{agents: map[string]*agent.Agent{"Manager": globalAgent}}
+	workspaceStore := newTestWorkspaceStore(t, ws)
+	if err := workspaceStore.SaveWorkspaceAgent(ws.ID, "Manager", localAgent); err != nil {
+		t.Fatalf("seed local snapshot: %v", err)
+	}
+
+	resolver := NewAgentRuntimeResolver(agentStore, workspaceStore, &runtimeRegistryStub{}, &templateLookupStub{servers: map[string]mcp.ServerConfig{}})
+	resolved, err := resolver.ResolveAgentForWorkspace("Manager", ws.ID, "")
+	if err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+	if resolved.Agent.Settings.Model != "local-model" {
+		t.Fatalf("expected local snapshot to win, got %q", resolved.Agent.Settings.Model)
+	}
+}
+
 func TestResolveEffectiveSkills_AgentOverridesWorkspace(t *testing.T) {
 	ws := &Workspace{
 		ID: "ws-skill-2",

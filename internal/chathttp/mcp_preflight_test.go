@@ -192,6 +192,14 @@ func (s *preflightWorkspaceStore) GetFilesPath(workspaceID string) string {
 	return "/tmp/" + workspaceID
 }
 
+func (s *preflightWorkspaceStore) GetWorkspaceAgent(workspaceID, agentName string) (*agent.Agent, bool, error) {
+	return nil, false, nil
+}
+
+func (s *preflightWorkspaceStore) SaveWorkspaceAgent(workspaceID, agentName string, ag *agent.Agent) error {
+	return nil
+}
+
 func TestMaybeAutoEnableMCPForPrompt_ReturnsWorkspaceResolutionForWebSearch(t *testing.T) {
 	st := newPreflightStore("Ori", &agent.Agent{})
 	ag, _ := st.GetAgent("Ori")

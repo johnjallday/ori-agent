@@ -1,6 +1,7 @@
 package workspace
 
 import (
+	"github.com/johnjallday/ori-agent/internal/agent"
 	"github.com/johnjallday/ori-agent/internal/logger"
 )
 
@@ -76,4 +77,39 @@ func (s *SyncStore) GetFilesPath(workspaceID string) string {
 		return s.fileSync.GetFilesPath(workspaceID)
 	}
 	return s.primary.GetFilesPath(workspaceID)
+}
+
+// GetWorkspaceAgent reads a workspace-local agent snapshot. Reads prefer the
+// FileStore (which holds the on-disk snapshot) so an imported workspace folder
+// can resolve its entry agent before the primary store is hydrated.
+func (s *SyncStore) GetWorkspaceAgent(workspaceID, agentName string) (*agent.Agent, bool, error) {
+	if s.fileSync != nil {
+		if ag, ok, err := s.fileSync.GetWorkspaceAgent(workspaceID, agentName); err == nil && ok {
+			return ag, true, nil
+		} else if err != nil {
+			logger.Debug("FileStore GetWorkspaceAgent failed, falling back to primary", logger.Fields{
+				"workspace_id": workspaceID,
+				"agent":        agentName,
+				"error":        err,
+			})
+		}
+	}
+	return s.primary.GetWorkspaceAgent(workspaceID, agentName)
+}
+
+// SaveWorkspaceAgent writes the snapshot to the primary store and to disk.
+func (s *SyncStore) SaveWorkspaceAgent(workspaceID, agentName string, ag *agent.Agent) error {
+	if err := s.primary.SaveWorkspaceAgent(workspaceID, agentName, ag); err != nil {
+		return err
+	}
+	if s.fileSync != nil {
+		if err := s.fileSync.SaveWorkspaceAgent(workspaceID, agentName, ag); err != nil {
+			logger.Warn("Failed to sync workspace agent to disk", logger.Fields{
+				"workspace_id": workspaceID,
+				"agent":        agentName,
+				"error":        err,
+			})
+		}
+	}
+	return nil
 }

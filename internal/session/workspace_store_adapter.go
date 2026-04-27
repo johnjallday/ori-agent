@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/johnjallday/ori-agent/internal/agent"
 	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/workspace"
 )
@@ -543,6 +544,34 @@ func (a *WorkspaceStoreAdapter) GetFilesPath(workspaceID string) string {
 		baseDir = p
 	}
 	return filepath.Join(baseDir, workspaceID, "files")
+}
+
+// GetWorkspaceAgent returns a workspace-local agent snapshot from disk.
+// The session-backed adapter does not store snapshots itself; it reads from
+// the workspace folder when one is available via WORKSPACE_DIR.
+func (a *WorkspaceStoreAdapter) GetWorkspaceAgent(workspaceID, agentName string) (*agent.Agent, bool, error) {
+	folder := workspaceFolderForAdapter(workspaceID)
+	if folder == "" {
+		return nil, false, nil
+	}
+	return workspace.ReadWorkspaceAgentFromFolder(folder, agentName)
+}
+
+// SaveWorkspaceAgent writes a workspace-local agent snapshot to disk.
+func (a *WorkspaceStoreAdapter) SaveWorkspaceAgent(workspaceID, agentName string, ag *agent.Agent) error {
+	folder := workspaceFolderForAdapter(workspaceID)
+	if folder == "" {
+		return fmt.Errorf("workspace folder for %s not found", workspaceID)
+	}
+	return workspace.WriteWorkspaceAgentToFolder(folder, agentName, ag)
+}
+
+func workspaceFolderForAdapter(workspaceID string) string {
+	baseDir := "workspaces"
+	if p := os.Getenv("WORKSPACE_DIR"); p != "" {
+		baseDir = p
+	}
+	return filepath.Join(baseDir, workspaceID)
 }
 
 // generateID creates a new UUID for workspaces.

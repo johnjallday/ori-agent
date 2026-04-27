@@ -7,7 +7,48 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/johnjallday/ori-agent/internal/agent"
 )
+
+func TestFileStore_SaveAndGetWorkspaceAgent(t *testing.T) {
+	dir := t.TempDir()
+	st, err := NewFileStore(dir)
+	if err != nil {
+		t.Fatalf("NewFileStore: %v", err)
+	}
+	ws := newTestWorkspace("ws-snap-1", "Snap")
+	if err := st.Save(ws); err != nil {
+		t.Fatalf("Save workspace: %v", err)
+	}
+
+	if _, ok, err := st.GetWorkspaceAgent(ws.ID, "Manager"); err != nil || ok {
+		t.Fatalf("expected no snapshot yet, got ok=%v err=%v", ok, err)
+	}
+
+	ag := &agent.Agent{Type: agent.TypeToolCalling}
+	ag.Settings.Model = "gpt-5-nano"
+	if err := st.SaveWorkspaceAgent(ws.ID, "Manager", ag); err != nil {
+		t.Fatalf("SaveWorkspaceAgent: %v", err)
+	}
+
+	folder, err := st.GetFolderPath(ws.ID)
+	if err != nil {
+		t.Fatalf("GetFolderPath: %v", err)
+	}
+	snapshotPath := filepath.Join(folder, WorkspaceAgentsDir, "manager", WorkspaceAgentConfigFile)
+	if _, err := os.Stat(snapshotPath); err != nil {
+		t.Fatalf("expected snapshot at %s, got %v", snapshotPath, err)
+	}
+
+	got, ok, err := st.GetWorkspaceAgent(ws.ID, "Manager")
+	if err != nil || !ok {
+		t.Fatalf("read back: ok=%v err=%v", ok, err)
+	}
+	if got.Settings.Model != "gpt-5-nano" {
+		t.Fatalf("expected model gpt-5-nano, got %q", got.Settings.Model)
+	}
+}
 
 func newTestWorkspace(id, name string) *Workspace {
 	return &Workspace{

@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/johnjallday/ori-agent/internal/agent"
 	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/types"
 )
@@ -32,6 +33,15 @@ type Store interface {
 
 	// GetFilesPath returns the path for storing files for a workspace
 	GetFilesPath(workspaceID string) string
+
+	// GetWorkspaceAgent returns a workspace-local agent snapshot if one exists
+	// at <workspace>/agents/<slug>/config.json. The bool is false when the
+	// workspace has no snapshot for the named agent.
+	GetWorkspaceAgent(workspaceID, agentName string) (*agent.Agent, bool, error)
+
+	// SaveWorkspaceAgent writes an agent snapshot into the workspace folder so
+	// the workspace becomes self-contained for export/import.
+	SaveWorkspaceAgent(workspaceID, agentName string, ag *agent.Agent) error
 }
 
 // FileStore implements Store using folder-based persistence.
@@ -1037,6 +1047,25 @@ func (s *FileStore) Close() error {
 	return nil
 }
 
+// GetWorkspaceAgent returns a workspace-local agent snapshot, or (nil, false, nil)
+// when the workspace has no snapshot for the named agent.
+func (s *FileStore) GetWorkspaceAgent(workspaceID, agentName string) (*agent.Agent, bool, error) {
+	folder, err := s.GetFolderPath(workspaceID)
+	if err != nil {
+		return nil, false, err
+	}
+	return readWorkspaceAgent(folder, agentName)
+}
+
+// SaveWorkspaceAgent writes an agent snapshot inside the workspace folder.
+func (s *FileStore) SaveWorkspaceAgent(workspaceID, agentName string, ag *agent.Agent) error {
+	folder, err := s.GetFolderPath(workspaceID)
+	if err != nil {
+		return err
+	}
+	return writeWorkspaceAgent(folder, agentName, ag)
+}
+
 // GetIndex returns the global workspace index (may be nil).
 func (s *FileStore) GetIndex() *Index {
 	return s.index
@@ -1214,6 +1243,7 @@ func (s *FileStore) loadWorkspacesFromDir(dir string, depth int) error {
 // InMemoryStore implements Store using in-memory storage (for testing)
 type InMemoryStore struct {
 	workspaces map[string]*Workspace
+	agents     map[string]map[string]*agent.Agent // workspaceID → agentName → snapshot
 	mu         sync.RWMutex
 }
 
@@ -1221,7 +1251,43 @@ type InMemoryStore struct {
 func NewInMemoryStore() *InMemoryStore {
 	return &InMemoryStore{
 		workspaces: make(map[string]*Workspace),
+		agents:     make(map[string]map[string]*agent.Agent),
 	}
+}
+
+// GetWorkspaceAgent returns an in-memory snapshot of a workspace-local agent.
+func (s *InMemoryStore) GetWorkspaceAgent(workspaceID, agentName string) (*agent.Agent, bool, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	byName, ok := s.agents[workspaceID]
+	if !ok {
+		return nil, false, nil
+	}
+	ag, ok := byName[strings.ToLower(strings.TrimSpace(agentName))]
+	if !ok {
+		return nil, false, nil
+	}
+	return ag, true, nil
+}
+
+// SaveWorkspaceAgent stores an in-memory snapshot of a workspace-local agent.
+func (s *InMemoryStore) SaveWorkspaceAgent(workspaceID, agentName string, ag *agent.Agent) error {
+	if ag == nil {
+		return errors.New("nil agent")
+	}
+	key := strings.ToLower(strings.TrimSpace(agentName))
+	if key == "" {
+		return errors.New("agent name is empty")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	byName, ok := s.agents[workspaceID]
+	if !ok {
+		byName = make(map[string]*agent.Agent)
+		s.agents[workspaceID] = byName
+	}
+	byName[key] = ag
+	return nil
 }
 
 // Save stores a workspace in memory.
