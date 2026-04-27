@@ -194,6 +194,7 @@ export class WorkspaceDetailPage {
     this.workspaceConfigPreferenceLoaded = false;
     this.agentCatalogLoaded = false;
     this.agentCatalogLoadFailed = false;
+    this.workspaceAgentSnapshots = new Set();
     this.filesLoaded = false;
     this.filesLoadFailed = false;
     this.workspaceHealthCheckRunning = false;
@@ -249,6 +250,7 @@ export class WorkspaceDetailPage {
     this.setupFileModal();
     await this.loadWorkspace();
     await this.loadAgentCatalog();
+    await this.loadWorkspaceAgentSnapshots();
     await Promise.all([
       this.loadTasks(),
       this.loadSessions(),
@@ -2003,17 +2005,26 @@ export class WorkspaceDetailPage {
     } else {
       references.forEach((reference) => {
         if (this.getAgentProfile(reference.name)) return;
+        const hasSnapshot = this.hasWorkspaceAgentSnapshot(reference.name);
         issues.push({
           category: 'agent',
-          severity: 'error',
-          title: reference.isEntryAgent ? 'Entry agent is missing' : 'Workspace agent is missing',
-          description: reference.isEntryAgent
-            ? `"${reference.name}" is still assigned as the workspace entry agent, but the runnable agent definition no longer exists.`
-            : `"${reference.name}" is still linked to this workspace, but the runnable agent definition no longer exists.`,
+          severity: hasSnapshot ? 'warning' : 'error',
+          title: hasSnapshot
+            ? (reference.isEntryAgent ? 'Entry agent can be restored' : 'Workspace agent can be restored')
+            : (reference.isEntryAgent ? 'Entry agent is missing' : 'Workspace agent is missing'),
+          description: hasSnapshot
+            ? `"${reference.name}" has a workspace snapshot on disk and will be restored automatically the next time the workspace runs. You can also recreate the agent definition manually.`
+            : (reference.isEntryAgent
+              ? `"${reference.name}" is still assigned as the workspace entry agent, but the runnable agent definition no longer exists.`
+              : `"${reference.name}" is still linked to this workspace, but the runnable agent definition no longer exists.`),
           action: reference.isEntryAgent ? 'entry_agent' : 'agent',
           actionLabel: reference.isEntryAgent ? 'Create Entry Agent' : 'Recreate Agent',
           agentName: reference.name,
-          meta: [reference.name, reference.isEntryAgent ? 'Entry agent' : 'Workspace member']
+          meta: [
+            reference.name,
+            reference.isEntryAgent ? 'Entry agent' : 'Workspace member',
+            ...(hasSnapshot ? ['Snapshot available'] : [])
+          ]
         });
       });
     }
@@ -10984,6 +10995,31 @@ export class WorkspaceDetailPage {
     }
 
     return names;
+  }
+
+  async loadWorkspaceAgentSnapshots() {
+    this.workspaceAgentSnapshots = new Set();
+    const id = this.workspace?.id;
+    if (!id) return;
+    try {
+      const response = await fetch(`/api/workspaces/${encodeURIComponent(id)}/agent-snapshots`);
+      if (!response.ok) return;
+      const data = await response.json();
+      const names = Array.isArray(data?.agents) ? data.agents : [];
+      names.forEach((name) => {
+        const trimmed = String(name || '').trim();
+        if (trimmed) this.workspaceAgentSnapshots.add(trimmed.toLowerCase());
+      });
+    } catch (_err) {
+      // Snapshot info is advisory; failure just hides the recovery hint.
+    }
+  }
+
+  hasWorkspaceAgentSnapshot(agentName) {
+    if (!this.workspaceAgentSnapshots || !this.workspaceAgentSnapshots.size) return false;
+    const key = String(agentName || '').trim().toLowerCase();
+    if (!key) return false;
+    return this.workspaceAgentSnapshots.has(key);
   }
 
   async loadAgentCatalog(force = false) {

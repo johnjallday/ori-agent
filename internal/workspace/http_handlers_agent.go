@@ -191,3 +191,43 @@ func (h *HTTPHandler) RemoveAgent(w http.ResponseWriter, r *http.Request) {
 		logger.Error("Failed to encode response", logger.Fields{"error": encErr})
 	}
 }
+
+// ListAgentSnapshots handles GET /api/workspaces/:id/agent-snapshots and
+// returns the names of agents the workspace has on-disk (or in-store)
+// snapshots for. Used by the workspace health UI to distinguish a
+// recoverable "snapshot present" entry agent from a truly missing one.
+func (h *HTTPHandler) ListAgentSnapshots(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		orihttp.MethodNotAllowed(w)
+		return
+	}
+
+	path := strings.TrimPrefix(r.URL.Path, "/api/workspaces/")
+	parts := strings.Split(path, "/")
+	if len(parts) < 2 || parts[0] == "" {
+		orihttp.BadRequest(w, "Invalid URL format")
+		return
+	}
+	workspaceID := parts[0]
+
+	ws, err := h.store.Get(workspaceID)
+	if err != nil {
+		orihttp.NotFound(w, fmt.Sprintf("Workspace %s not found", workspaceID))
+		return
+	}
+
+	available := make([]string, 0)
+	for _, name := range referencedAgentNames(ws) {
+		if _, ok, err := h.store.GetWorkspaceAgent(workspaceID, name); err == nil && ok {
+			available = append(available, name)
+		}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	if encErr := json.NewEncoder(w).Encode(map[string]interface{}{
+		"workspace_id": workspaceID,
+		"agents":       available,
+	}); encErr != nil {
+		logger.Error("Failed to encode response", logger.Fields{"error": encErr})
+	}
+}
