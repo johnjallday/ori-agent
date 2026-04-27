@@ -71,9 +71,13 @@ func (p *OpenAIProvider) Type() ProviderType {
 	return ProviderTypeCloud
 }
 
-// Capabilities returns OpenAI's capabilities
+// Capabilities returns OpenAI's capabilities. Streaming is currently
+// unimplemented, so the cloud-default `true` is overridden here to keep
+// the advertised surface honest.
 func (p *OpenAIProvider) Capabilities() ProviderCapabilities {
-	return CloudProviderCapabilities(128000) // GPT-4o context window
+	caps := CloudProviderCapabilities(128000) // GPT-4o context window
+	caps.SupportsStreaming = false
+	return caps
 }
 
 // ValidateConfig validates the OpenAI configuration

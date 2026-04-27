@@ -9,7 +9,18 @@ import (
 	"time"
 
 	"github.com/johnjallday/ori-agent/internal/logger"
+	"github.com/johnjallday/ori-agent/internal/modelinfo"
 )
+
+// isLocalProvider reports whether the provider runs locally and should not
+// be billed via the curated pricing fallback.
+func isLocalProvider(provider string) bool {
+	switch provider {
+	case "ollama", "lmstudio", "mlx_lm":
+		return true
+	}
+	return false
+}
 
 // PricingModel defines the cost structure for a model
 type PricingModel struct {
@@ -301,6 +312,17 @@ func (ct *CostTracker) calculateCost(provider, model string, usage Usage) (float
 	key := fmt.Sprintf("%s:%s", provider, model)
 	pm, found := ct.pricingModels[key]
 
+	// Fall back to the curated modelinfo pricing data (covers OpenAI, Gemini,
+	// and many Claude variants the static seed doesn't list). Skip this for
+	// known-free local providers so we don't accidentally bill ollama runs.
+	if !found && !isLocalProvider(provider) {
+		if mp := modelinfo.GetPricing(model); mp != nil {
+			return float64(usage.PromptTokens)*mp.InputPer1M/1_000_000.0 +
+					float64(usage.CompletionTokens)*mp.OutputPer1M/1_000_000.0,
+				"USD"
+		}
+	}
+
 	if !found {
 		// Try provider-level default
 		key = fmt.Sprintf("%s:default", provider)
@@ -381,15 +403,19 @@ func (ct *CostTracker) GetStats(start, end time.Time) UsageStats {
 		}
 	}
 
-	// Get recent records (last 50)
-	recentStart := len(ct.records) - 50
-	if recentStart < 0 {
-		recentStart = 0
-	}
-	for i := recentStart; i < len(ct.records); i++ {
-		if ct.records[i].Timestamp.After(start) && ct.records[i].Timestamp.Before(end) {
-			stats.RecentRecords = append(stats.RecentRecords, ct.records[i])
+	// Recent records: take the last 50 records that fall within the range.
+	// Walk the records list in reverse so we can stop once we have 50 hits;
+	// then reverse the slice to restore chronological order.
+	const maxRecent = 50
+	for i := len(ct.records) - 1; i >= 0 && len(stats.RecentRecords) < maxRecent; i-- {
+		r := ct.records[i]
+		if r.Timestamp.Before(start) || r.Timestamp.After(end) {
+			continue
 		}
+		stats.RecentRecords = append(stats.RecentRecords, r)
+	}
+	for i, j := 0, len(stats.RecentRecords)-1; i < j; i, j = i+1, j-1 {
+		stats.RecentRecords[i], stats.RecentRecords[j] = stats.RecentRecords[j], stats.RecentRecords[i]
 	}
 
 	return stats
@@ -485,8 +511,24 @@ func (ct *CostTracker) loadRecords() error {
 		return fmt.Errorf("failed to read records: %w", err)
 	}
 
-	// Unmarshal records
+	// Unmarshal records. On parse failure, quarantine the corrupt file so
+	// the next save does not silently overwrite the only copy of history.
 	if err := json.Unmarshal(data, &ct.records); err != nil {
+		ct.records = nil
+		quarantinePath := fmt.Sprintf("%s.corrupt-%d", ct.dataFile, time.Now().UnixNano())
+		if renameErr := os.Rename(ct.dataFile, quarantinePath); renameErr != nil {
+			logger.Error("Failed to quarantine corrupt usage records", logger.Fields{
+				"file":         ct.dataFile,
+				"parse_error":  err.Error(),
+				"rename_error": renameErr.Error(),
+			})
+		} else {
+			logger.Error("Quarantined corrupt usage records", logger.Fields{
+				"file":           ct.dataFile,
+				"quarantined_to": quarantinePath,
+				"parse_error":    err.Error(),
+			})
+		}
 		return fmt.Errorf("failed to unmarshal records: %w", err)
 	}
 

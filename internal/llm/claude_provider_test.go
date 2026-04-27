@@ -28,8 +28,8 @@ func TestClaudeProviderMetadata(t *testing.T) {
 	if !caps.SupportsTools {
 		t.Error("Expected Claude to support tools")
 	}
-	if !caps.SupportsStreaming {
-		t.Error("Expected Claude to support streaming")
+	if caps.SupportsStreaming {
+		t.Error("Claude streaming is unimplemented; capability should be false")
 	}
 	if !caps.SupportsSystemPrompt {
 		t.Error("Expected Claude to support system prompts")

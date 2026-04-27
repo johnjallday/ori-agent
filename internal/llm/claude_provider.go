@@ -69,9 +69,13 @@ func (p *ClaudeProvider) Type() ProviderType {
 	return ProviderTypeCloud
 }
 
-// Capabilities returns Claude's capabilities
+// Capabilities returns Claude's capabilities. Streaming is currently
+// unimplemented, so the cloud-default `true` is overridden here to keep
+// the advertised surface honest.
 func (p *ClaudeProvider) Capabilities() ProviderCapabilities {
-	return CloudProviderCapabilities(200000) // Claude 3.5 Sonnet context window
+	caps := CloudProviderCapabilities(200000) // Claude 3.5 Sonnet context window
+	caps.SupportsStreaming = false
+	return caps
 }
 
 // ValidateConfig validates the Claude configuration
