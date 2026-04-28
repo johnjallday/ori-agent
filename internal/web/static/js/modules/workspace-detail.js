@@ -1578,6 +1578,7 @@ export class WorkspaceDetailPage {
       workspaceDescription: document.getElementById('workspace-description'),
       workspaceBreadcrumb: document.getElementById('workspace-breadcrumb-name'),
       openCanvasBtn: document.getElementById('open-canvas-btn'),
+      openDiagnosticsBtn: document.getElementById('open-diagnostics-btn'),
       openWorkflowsBtn: document.getElementById('open-workflows-btn'),
       workflowLinksPanel: document.getElementById('workspace-detail-workflow-links-panel'),
       workflowLinksList: document.getElementById('workspace-detail-workflow-links-list'),
@@ -2538,6 +2539,9 @@ export class WorkspaceDetailPage {
     }
     if (this.elements.openCanvasBtn) {
       this.elements.openCanvasBtn.href = `/workspaces/${this.workspaceId}/canvas`;
+    }
+    if (this.elements.openDiagnosticsBtn) {
+      this.elements.openDiagnosticsBtn.href = `/workspaces/${this.workspaceId}/diagnostics`;
     }
 
     this.renderWorkspaceWorkflowLinks();

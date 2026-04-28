@@ -92,12 +92,20 @@ func (s *Server) runUISmokeTest(workspaceID string) uiSmokeTestResponse {
 	}
 
 	if workspaceID != "" {
-		specs = append(specs, uiSmokeCheckSpec{
-			name:             "Workspace detail page",
-			path:             "/workspaces/" + workspaceID,
-			expectedStatuses: []int{http.StatusOK},
-			requiredSnippets: []string{"homeAssistantForm", "workspace-detail-health-panel", "homeAssistantWorkspaceModeSwitch", "workspace-detail-ui-smoke-test"},
-		})
+		specs = append(specs,
+			uiSmokeCheckSpec{
+				name:             "Workspace detail page",
+				path:             "/workspaces/" + workspaceID,
+				expectedStatuses: []int{http.StatusOK},
+				requiredSnippets: []string{"homeAssistantForm", "homeAssistantWorkspaceModeSwitch", "open-diagnostics-btn"},
+			},
+			uiSmokeCheckSpec{
+				name:             "Workspace diagnostics page",
+				path:             "/workspaces/" + workspaceID + "/diagnostics",
+				expectedStatuses: []int{http.StatusOK},
+				requiredSnippets: []string{"workspace-detail-health-panel", "workspace-detail-ui-smoke-test"},
+			},
+		)
 	}
 
 	checks := make([]uiSmokeTestCheck, 0, len(specs))

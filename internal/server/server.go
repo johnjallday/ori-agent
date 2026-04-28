@@ -314,6 +314,12 @@ func (s *Server) handleWorkspacesRoutes(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
+	// Check if this is a diagnostics route: /workspaces/{id}/diagnostics
+	if len(parts) == 2 && parts[1] == "diagnostics" {
+		s.serveWorkspaceDiagnostics(w, r, workspaceID)
+		return
+	}
+
 	// Check if this is a task route: /workspaces/{id}/task/{taskId}
 	if len(parts) == 3 && parts[1] == "task" && strings.TrimSpace(parts[2]) != "" {
 		s.serveWorkspaceTask(w, r, workspaceID, parts[2])
@@ -337,6 +343,15 @@ func (s *Server) serveWorkspaceDetail(w http.ResponseWriter, r *http.Request, wo
 	data.ShowSidebarToggle = true
 	data.Extra["WorkspaceID"] = workspaceID
 	s.renderAndWritePage(w, "workspace-detail", data)
+}
+
+func (s *Server) serveWorkspaceDiagnostics(w http.ResponseWriter, r *http.Request, workspaceID string) {
+	data := s.prepareBasePageData("workspaces")
+	data.Title = "Workspace Diagnostics - Ori Agent"
+	data.BrandText = "Ori Agent"
+	data.ShowSidebarToggle = true
+	data.Extra["WorkspaceID"] = workspaceID
+	s.renderAndWritePage(w, "workspace-diagnostics", data)
 }
 
 func (s *Server) serveWorkspaceCanvas(w http.ResponseWriter, r *http.Request, workspaceID string) {
