@@ -503,6 +503,7 @@ body::after {
 }
 
 .vault-modal-dialog {
+  pointer-events: auto;
   resize: both;
   overflow: auto;
   min-width: 520px;
